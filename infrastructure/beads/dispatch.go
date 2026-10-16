@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -51,6 +52,24 @@ func (g *Gateway) ReadyWithLabel(ctx context.Context, label string) ([]applicati
 	beads, err := decodeBeads(out)
 	if err != nil {
 		return nil, fmt.Errorf("reading what is ready under the label %s: %w", label, err)
+	}
+	return g.overlaid(ctx, beads)
+}
+
+// ClosedWithLabel implements application.ClosedTodoCards: `bd list` of the
+// closed beads carrying label, closed at since or later, epics left out.
+func (g *Gateway) ClosedWithLabel(ctx context.Context, label string, since time.Time) ([]application.StoryDetail, error) {
+	if strings.TrimSpace(label) == "" {
+		return nil, fmt.Errorf("which label are the closed beads carrying?")
+	}
+	out, err := g.call(ctx, "list", "--status", StatusClosed, "--label", label, "--closed-after", since.UTC().Format(time.RFC3339),
+		"--exclude-type", "epic", "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	beads, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading what was closed under the label %s: %w", label, err)
 	}
 	return g.overlaid(ctx, beads)
 }

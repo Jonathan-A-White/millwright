@@ -492,6 +492,15 @@ Feature: mw postern view
     And the view's bead "mw-todo.2" carries no todo_size
     And the view's bead "mw-todo.2" carries no todo_then
 
+  Scenario: A hitl:todo card's todo_row and todo_row_why are published
+    Given the view's epic "mw-todo" is live
+    And the view's hitl bead "mw-todo.1" under "mw-todo" was filed 3 days ago with the labels "hitl, hitl:todo" and the body "Buy a hose"
+    And the view's hitl bead "mw-todo.2" under "mw-todo" was filed 2 days ago with the labels "hitl, hitl:todo" and the body "Check the router"
+    And the view's bead "mw-todo.1" has the todo_row "now" because "Due tomorrow"
+    When the live view is built
+    Then the view's bead "mw-todo.1" carries the todo_row "now" because "Due tomorrow"
+    And the view's bead "mw-todo.2" carries no todo_row
+
   Scenario: The same bead without hitl:todo still gives a hands need
     Given the view's epic "mw-todo" is live
     And the view's hitl bead "mw-todo.1" under "mw-todo" was filed 2 days ago with the labels "hitl" and the body "Buy a hose"

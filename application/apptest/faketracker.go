@@ -1326,6 +1326,27 @@ func (f *FakeTracker) ReadyWithLabel(_ context.Context, label string) ([]applica
 	return ready, nil
 }
 
+// ClosedWithLabel implements application.ClosedTodoCards: every story the
+// fake holds that carries label and was closed at since or later (by the time
+// SetClosedAt gave it), in the order filed. An epic is not listed.
+func (f *FakeTracker) ClosedWithLabel(_ context.Context, label string, since time.Time) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, "ClosedWithLabel")
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	var closed []application.StoryDetail
+	for _, id := range f.order {
+		s := f.stories[id]
+		if s.detail.IsEpic || s.detail.Status != StatusClosed || !carries(s.detail.Labels, label) || s.detail.ClosedAt.Before(since) {
+			continue
+		}
+		closed = append(closed, s.detail)
+	}
+	return closed, nil
+}
+
 // carries reports whether a story's labels include the one asked for.
 func carries(labels []string, label string) bool {
 	for _, have := range labels {
@@ -1570,6 +1591,15 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			}
 			if k == application.TodoThenField {
 				s.detail.TodoThen = v
+			}
+			if k == application.TodoRowField {
+				s.detail.TodoRow = v
+			}
+			if k == application.TodoRowWhyField {
+				s.detail.TodoRowWhy = v
+			}
+			if k == application.TodoSlippedField {
+				s.detail.TodoSlipped = v
 			}
 			if k == application.TodoRemindedField {
 				s.detail.TodoReminded = v

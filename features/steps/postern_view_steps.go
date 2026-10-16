@@ -118,6 +118,9 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the view's bead "([^"]*)" carries no todo_size$`, func(id string) error { return c.theViewsBeadCarriesTheTodoSize(id, "") })
 	ctx.Then(`^the view's bead "([^"]*)" carries the todo_then "([^"]*)"$`, c.theViewsBeadCarriesTheTodoThen)
 	ctx.Then(`^the view's bead "([^"]*)" carries no todo_then$`, func(id string) error { return c.theViewsBeadCarriesTheTodoThen(id, "") })
+	ctx.Given(`^the view's bead "([^"]*)" has the todo_row "([^"]*)" because "([^"]*)"$`, c.theViewsBeadHasTheTodoRow)
+	ctx.Then(`^the view's bead "([^"]*)" carries the todo_row "([^"]*)" because "([^"]*)"$`, c.theViewsBeadCarriesTheTodoRow)
+	ctx.Then(`^the view's bead "([^"]*)" carries no todo_row$`, func(id string) error { return c.theViewsBeadCarriesTheTodoRow(id, "", "") })
 	ctx.Then(`^the view's bead "([^"]*)" carries todo_important true$`, func(id string) error { return c.theViewsBeadCarriesTodoImportant(id, true) })
 	ctx.Then(`^the view's bead "([^"]*)" carries no todo_important$`, func(id string) error { return c.theViewsBeadCarriesTodoImportant(id, false) })
 	ctx.Then(`^the view's bead "([^"]*)" carries no todo_rank$`, func(id string) error { return c.theViewsBeadCarriesTheTodoRank(id, "") })
@@ -972,6 +975,21 @@ func (c *posternViewContext) theViewsBeadCarriesTheTodoThen(id, then string) err
 	}
 	if b.TodoThen != then {
 		return fmt.Errorf("expected %s to carry the todo_then %q, got %q", id, then, b.TodoThen)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsBeadHasTheTodoRow(id, row, why string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.TodoRowField: row, application.TodoRowWhyField: why})
+}
+
+func (c *posternViewContext) theViewsBeadCarriesTheTodoRow(id, row, why string) error {
+	b, ok := c.bead(id)
+	if !ok {
+		return fmt.Errorf("the view has no bead %s", id)
+	}
+	if b.TodoRow != row || b.TodoRowWhy != why {
+		return fmt.Errorf("expected %s to carry the todo_row %q because %q, got %q because %q", id, row, why, b.TodoRow, b.TodoRowWhy)
 	}
 	return nil
 }

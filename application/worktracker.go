@@ -223,6 +223,13 @@ type StoryDetail struct {
 	// this one is closed (TodoThenField); empty when none.
 	TodoSize string
 	TodoThen string
+	// TodoRow is the row mw todo rank last put a hitl:todo card in, as the
+	// TodoRowField metadata says (one of TodoRows), and TodoRowWhy its one line
+	// on why (TodoRowWhyField); TodoSlipped is the due time it last found the
+	// starred card slipped past (TodoSlippedField). Each is empty when none.
+	TodoRow     string
+	TodoRowWhy  string
+	TodoSlipped string
 }
 
 // WorkInHand is what the tracker has in hand across every host: the stories

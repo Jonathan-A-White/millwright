@@ -52,8 +52,11 @@ type Gateway struct {
 	reads   chan struct{}
 }
 
-// Gateway satisfies the port.
-var _ application.WorkTracker = (*Gateway)(nil)
+// Gateway satisfies the ports.
+var (
+	_ application.WorkTracker     = (*Gateway)(nil)
+	_ application.ClosedTodoCards = (*Gateway)(nil)
+)
 
 // Option is a setting of a Gateway, given to New.
 type Option func(*Gateway)

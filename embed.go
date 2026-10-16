@@ -1,5 +1,6 @@
 // Package millwright holds what is built into the mw binary: the template a
-// fresh vault is born from, so that an installed mw needs no checkout beside it.
+// fresh vault is born from, so that an installed mw needs no checkout beside it,
+// and the instructions of the model passes mw runs itself.
 package millwright
 
 import (
@@ -19,3 +20,9 @@ func Template() fs.FS {
 	}
 	return files
 }
+
+// TodoRankInstructions is grinds/todo-rank.md: the rule mw todo rank's model
+// pass is given, after its own preamble, as its system prompt.
+//
+//go:embed grinds/todo-rank.md
+var TodoRankInstructions string

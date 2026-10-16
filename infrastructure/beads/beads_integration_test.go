@@ -1649,3 +1649,43 @@ func TestGatewayReadsAndClearsACardsDueTime(t *testing.T) {
 		t.Errorf("expected %s not starred, got %v, %+v", card, err, shown)
 	}
 }
+
+// The ranking pass (mw-ht6gsw.2) reads the cards closed since a time, and a
+// card's row and why read back as metadata.
+func TestGatewayListsTheCardsClosedSinceATimeAndReadsTheirRow(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	errands := bdRun(t, vault, beads.Program, "create", "Errands", "-t", "epic", "--silent")
+	done := bdRun(t, vault, beads.Program, "create", "Mow the lawn", "--parent", errands,
+		"--labels", "hitl,hitl:todo", "--no-inherit-labels", "--silent")
+	open := bdRun(t, vault, beads.Program, "create", "Buy a hose", "--parent", errands,
+		"--labels", "hitl,hitl:todo", "--no-inherit-labels", "--silent")
+	plain := bdRun(t, vault, beads.Program, "create", "Not a card", "--silent")
+	bdRun(t, vault, beads.Program, "close", done, "--reason", "done")
+	bdRun(t, vault, beads.Program, "close", plain, "--reason", "done")
+	gateway := beads.New(vault)
+
+	closed, err := gateway.ClosedWithLabel(ctx, application.LabelHitlTodo, time.Now().Add(-time.Hour))
+	if err != nil || len(closed) != 1 || closed[0].Story.ID != done || closed[0].ClosedAt.IsZero() || closed[0].EpicID != errands {
+		t.Fatalf("expected only %s, closed under %s, got %v: %+v", done, errands, err, closed)
+	}
+	if closed, err = gateway.ClosedWithLabel(ctx, application.LabelHitlTodo, time.Now().Add(time.Hour)); err != nil || len(closed) != 0 {
+		t.Fatalf("expected none closed in the hour to come, got %v: %+v", err, closed)
+	}
+
+	if err := gateway.SetStoryMetadata(ctx, open, map[string]string{
+		application.TodoRowField: "now", application.TodoRowWhyField: "Due tomorrow", application.TodoSlippedField: "2026-10-15T17:00:00Z",
+	}); err != nil {
+		t.Fatalf("ranking %s: %v", open, err)
+	}
+	shown, err := gateway.ShowBeads(ctx, []string{open})
+	if err != nil || len(shown) != 1 {
+		t.Fatalf("showing %s: %v, %d beads", open, err, len(shown))
+	}
+	if got := shown[0]; got.TodoRow != "now" || got.TodoRowWhy != "Due tomorrow" || got.TodoSlipped != "2026-10-15T17:00:00Z" {
+		t.Errorf("expected %s ranked now because Due tomorrow and slipped, got %q, %q, %q", open, got.TodoRow, got.TodoRowWhy, got.TodoSlipped)
+	}
+}
