@@ -83,9 +83,17 @@ postern = "npm ci --no-audit --no-fund && TZ=UTC npm test && ... && npm run gate
 lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"
 ```
 
-When a rig's line changes in the home's `config.toml`, change it here too, or the next Boost
-gets the old one. millwright needs no line (its tests are `make test`). Only the rigs in
+It is written by `mw config export-boost`, run on the home: it rewrites the file from the
+home's `[tests]` and `[changed_specs]` (nothing else of the config), names each line it
+brings level, and commits the file in the vault (mw-gq6.456). When a rig's line changes in
+the home's `config.toml`, run it again, or the next Boost gets the old line; `mw doctor
+boost-config`, on the home, says when the two differ, naming each rig. Only the rigs in
 `BOOST_RIGS` are copied, in the order of `[rigs]`.
+
+The home's other per-rig tables are not copied, on purpose: `[after_landing]` and
+`[after_landing_limit]` run on the host whose checkout a landing moved (a deploy from the
+home), `[heavy_net]` only matters on a metered network, which a Boost is not, and `[tester]`
+springs the Tester's stories from the home's dispatch.
 
 ## Where the secrets go
 

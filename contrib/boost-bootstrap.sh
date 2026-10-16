@@ -644,8 +644,9 @@ s_rigs() {
 # What a rig's tests are is not the Boost's to know: the home's config.toml holds
 # a [tests] line per rig, and a Boost without them gates every rig with `make test`
 # (mw-gq6.453). The factory keeps those tables in the vault, in hosts/boost-config.toml
-# (a [tests] and a [changed_specs] table of one-line `rig = "command"` entries, copied
-# from the home's config.toml), and this step copies the lines of the rigs it cloned.
+# (a [tests] and a [changed_specs] table of one-line `rig = "command"` entries, written
+# from the home's config.toml by `mw config export-boost`, mw-gq6.456), and this step
+# copies the lines of the rigs it cloned.
 TABLES_FILE=$BOOST_VAULT/hosts/boost-config.toml
 rig_list() { # millwright first, then BOOST_RIGS in order, one per line
 	echo millwright
@@ -710,7 +711,7 @@ s_config() {
 			note "the vault has no hosts/boost-config.toml: no [tests] or [changed_specs] line was written, so mw next gates every rig with make test"
 		else
 			for rn in $(rig_list); do
-				[ "$rn" = millwright ] || [ -n "$(table_line tests "$rn")" ] || note "no [tests] line for $rn in hosts/boost-config.toml: mw next gates it with make test (add the home's line for it to that file)"
+				[ "$rn" = millwright ] || [ -n "$(table_line tests "$rn")" ] || note "no [tests] line for $rn in hosts/boost-config.toml: mw next gates it with make test (on the home, mw config export-boost writes its line there)"
 			done
 		fi
 	fi
