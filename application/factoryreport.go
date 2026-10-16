@@ -84,6 +84,9 @@ type FactoryReport struct {
 	// Investments, when set, is the investments ledger the INVESTMENTS part
 	// reads; left nil the report has no such part. A landing has none either.
 	Investments InvestmentBook
+	// InvestShare is the share of landings meant to be investments, a fraction
+	// ([factory] invest_share); 0 is DefaultInvestShare.
+	InvestShare float64
 	// JSON prints the result as one object instead of text.
 	JSON bool
 	// Notes, Mailbox and Snapshots, when all set, are what mw report send
@@ -153,9 +156,11 @@ type Quality struct {
 	Causes             map[string]int `json:"causes"`
 	// Uncaused are the ids of the refused stories counted under CauseUnset, once
 	// each and sorted; cheap win R1 names them. They are not in the JSON.
-	Uncaused       []string `json:"-"`
-	BugsFiled      int      `json:"bugs_filed"`
-	BugsPerLanding float64  `json:"bugs_per_landing"`
+	Uncaused []string `json:"-"`
+	// Invested are the landings whose story carries LabelInvestment.
+	Invested       int     `json:"invested"`
+	BugsFiled      int     `json:"bugs_filed"`
+	BugsPerLanding float64 `json:"bugs_per_landing"`
 	// EscapedBugs are the bugs filed in the window that a landing let through
 	// (escapedBugs), counted under the rig, host and model of that landing.
 	EscapedBugs        int     `json:"escaped_bugs"`
@@ -208,6 +213,10 @@ type FactoryReportResult struct {
 	// recorded and how many are due for review; nil when the report was not
 	// given the ledger.
 	Investments *InvestmentsSection `json:"investments,omitempty"`
+	// InvestShare is the share of the window's landings that were investments,
+	// against the window before and the target, the line that ends QUALITY;
+	// nil for a landing.
+	InvestShare *InvestShare `json:"invest_share,omitempty"`
 }
 
 // reportEntry is one thing the window saw: a landing, a refusal, a bug filed
@@ -222,6 +231,7 @@ type reportEntry struct {
 	inWindow         bool
 	rig, host, model string
 	landed, refused  bool
+	investment       bool
 	bug              bool
 	// escaped is a bug a landing let through, under that landing's rig, host
 	// and model, its id the bug's.
@@ -349,6 +359,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			e.model = orElse(string(path.Model), e.model)
 			e.cause = d.Cause
 			e.exhausted = d.Exhausted
+			e.investment = hasLabel(d.Labels, LabelInvestment)
 			if d.Attempts > 1 {
 				e.attempts = d.Attempts
 			}
@@ -427,6 +438,10 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	if whole := r.blocks(entries, nil, func(reportEntry) string { return "factory" }, nil); len(whole) == 1 {
 		result.Whole = &whole[0]
 	}
+	if result.Landing == nil {
+		share := readInvestShare(result.Whole, r.InvestShare)
+		result.InvestShare = &share
+	}
 	if r.Investments != nil && result.Landing == nil {
 		records, err := r.Investments.Investments(ctx)
 		if err != nil {
@@ -435,7 +450,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		section := ReadInvestmentsSection(GroupInvestments(records), result.Window, now)
 		result.Investments = &section
 	}
-	result.CheapWins = CheapWins(WinInputs{Rigs: result.Rigs, Gates: gates, Kinds: Calibrate(recent, BenchmarkSettings{}), Heavy: r.heavyStories(entries)})
+	result.CheapWins = CheapWins(WinInputs{Rigs: result.Rigs, Gates: gates, Kinds: Calibrate(recent, BenchmarkSettings{}), Heavy: r.heavyStories(entries), Share: result.InvestShare})
 
 	if r.Out != nil {
 		if r.JSON {
@@ -578,6 +593,9 @@ func sumQuality(entries []reportEntry) Quality {
 			q.BugsFiled++
 		case e.landed:
 			q.Landed++
+			if e.investment {
+				q.Invested++
+			}
 			q.Attempts += e.attempts
 			q.Findings += e.findings
 		case e.refused:
@@ -604,18 +622,29 @@ func sumQuality(entries []reportEntry) Quality {
 		}
 		return q.Reasons[i].Reason < q.Reasons[j].Reason
 	})
-	if rows := q.Landed + q.Refused; rows > 0 {
-		q.RefusalRate = math.Round(float64(q.Refused)*1000/float64(rows)) / 10
-	}
-	if q.Landed > 0 {
-		q.AttemptsPerLanding = twoPlaces(float64(q.Attempts) / float64(q.Landed))
-		q.BugsPerLanding = twoPlaces(float64(q.BugsFiled) / float64(q.Landed))
-		q.FindingsPerLanding = twoPlaces(float64(q.Findings) / float64(q.Landed))
-	}
+	q.RefusalRate = percentOf(q.Refused, q.Landed+q.Refused)
+	landed := float64(q.Landed)
+	q.AttemptsPerLanding = twoPlaces(fraction(float64(q.Attempts), landed))
+	q.BugsPerLanding = twoPlaces(fraction(float64(q.BugsFiled), landed))
+	q.FindingsPerLanding = twoPlaces(fraction(float64(q.Findings), landed))
 	return q
 }
 
 func twoPlaces(x float64) float64 { return math.Round(x*100) / 100 }
+
+// fraction is part over whole, 0 when whole is 0: every ratio mw report
+// prints is divided here.
+func fraction(part, whole float64) float64 {
+	if whole == 0 {
+		return 0
+	}
+	return part / whole
+}
+
+// percentOf is part of whole in percent, to one place; 0 when whole is 0.
+func percentOf(part, whole int) float64 {
+	return math.Round(fraction(float64(part), float64(whole))*1000) / 10
+}
 
 // String is the report as mw report prints it: the window, then QUALITY, SPEED
 // and FUEL in that order, each with a block per rig, per model and per host,
@@ -660,8 +689,10 @@ func (r FactoryReportResult) writeParts(b *strings.Builder) {
 				part.write(block, b)
 			}
 		}
+		if i == 0 {
+			writeInvestShare(b, r.InvestShare)
+		}
 	}
-	return
 }
 
 // arrow is the trend of a measure, as it follows the number in a line.

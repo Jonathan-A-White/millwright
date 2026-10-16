@@ -6,7 +6,11 @@ Feature: mw report
   per rig, then per model, then per host, in 60 columns, or all of it as JSON.
   After QUALITY come SPEED (the landings' time against par, and each host's
   gate) and FUEL (tokens and dollars per landing), and every number carries an
-  arrow against the window of the same length before it. The report ends with
+  arrow against the window of the same length before it. QUALITY ends with
+  INVESTMENTS: the share of the landings labelled investment, against the
+  window before and the target ([factory] invest_share, one in three unless
+  set), with words and a cheap win when it is under half or over double the
+  target. The report ends with
   CHEAP WINS: at most three one-line suggestions chosen by fixed rules over its
   numbers, quality rules first, or "CHEAP WINS: none seen". Before CHEAP WINS
   comes FACTORY CHANGES: each millwright landing of the last 30 days with the
@@ -341,6 +345,7 @@ Feature: mw report
   Scenario: A reason under three refusals is not a cheap win
     Given "lampas" landed 5 stories and refused 2 for "tests-fail" in the window
     And every refused story of "lampas" has the cause "code"
+    And the report stories "lampas-l1,lampas-l2" carry the label "investment"
     When mw report runs with "--since 7d"
     Then the report prints the line "CHEAP WINS: none seen"
 
@@ -398,7 +403,8 @@ Feature: mw report
     Then the report prints the line "1. laptop gate on lampas 9m02s, usual 5m10s: check its load"
 
   Scenario: A gate under one and a half times its usual is not a cheap win
-    Given "lampas" landed 1 stories and refused 0 for "tests-fail" in the window
+    Given "lampas" landed 3 stories and refused 0 for "tests-fail" in the window
+    And the report stories "lampas-l1" carry the label "investment"
     And the report benchmarks:
       | story | rig    | host   | day        | gate |
       | g-1   | lampas | laptop | 2026-10-05 | 310  |
@@ -410,6 +416,7 @@ Feature: mw report
 
   Scenario: No rule holding prints that none were seen
     Given "lampas" landed 8 stories and refused 0 for "tests-fail" in the window
+    And the report stories "lampas-l1,lampas-l2,lampas-l3" carry the label "investment"
     When mw report runs with "--since 7d"
     Then the report prints the line "CHEAP WINS: none seen"
 
@@ -650,3 +657,28 @@ Feature: mw report
     And the report JSON has landing.rows.0.measure as "landed"
     And the report JSON has landing.rows.0.before as "2"
     And the report JSON has landing.rows.0.after as "4"
+
+  Scenario: QUALITY ends with the share of landings that were investments, against the target
+    Given "lampas" landed 6 stories and refused 1 for "tests-fail" in the window
+    And the report stories "lampas-l1,lampas-l2,lampas-r1" carry the label "investment"
+    And "lampas" landed 2 stories and refused 0 for "tests-fail" in the window before
+    And the report stories "lampas-before-l1" carry the label "investment"
+    When mw report runs with "--since 7d"
+    Then the report prints the line "INVESTMENTS 2/6 (33%) ↓, before 1/2 (50%), target 33%"
+    And the report prints no line starting "under half"
+
+  Scenario: A week under half the investment target says so, and CHEAP WINS carries it
+    Given "lampas" landed 9 stories and refused 0 for "tests-fail" in the window
+    And the report stories "lampas-l1" carry the label "investment"
+    When mw report runs with "--since 7d"
+    Then the report prints the line "under half the 33% target"
+    And the report prints the line "1. investments 11%, under half the 33% target: file more"
+
+  Scenario: The investment target is the config's factory.invest_share
+    Given "lampas" landed 9 stories and refused 0 for "tests-fail" in the window
+    And the report stories "lampas-l1,lampas-l2,lampas-l3,lampas-l4,lampas-l5" carry the label "investment"
+    And the report's investment target is 0.2
+    When mw report runs with "--since 7d --json"
+    Then the report JSON has invest_share.share as "55.6"
+    And the report JSON has invest_share.target as "20"
+    And the report JSON has invest_share.off as "over"

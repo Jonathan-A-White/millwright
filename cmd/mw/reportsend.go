@@ -20,8 +20,9 @@ func newReportSendCmd() *cobra.Command {
 		Use:   "send [--force] [--dry-run]",
 		Short: "Post the phone-sized summary of the week to the Factory channel, once a day, from the home",
 		Long: "send builds the week's summary from the same numbers as mw report, in at most 14 lines of\n" +
-			"60 columns (QUALITY, SPEED, FUEL and CHEAP WINS, each number with its arrow against the\n" +
-			"week before), and posts it as a plain message to the Factory channel, printing its txid.\n" +
+			"60 columns (QUALITY with the investment share against its target, SPEED, FUEL and CHEAP\n" +
+			"WINS, each number with its arrow against the week before), and posts it as a plain message\n" +
+			"to the Factory channel, printing its txid.\n" +
 			"It goes out from the home alone: on any other host it says which is home and sends\n" +
 			"nothing. It sends at most once a UTC day, remembering the day in\n" +
 			"~/.local/state/mw/report/sent.jsonl; a second run says when it sent. --force sends again;\n" +
@@ -68,16 +69,21 @@ func newReportSendCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			share, err := config.FactoryInvestShare()
+			if err != nil {
+				return err
+			}
 			gateway := mwGateway(dir, here)
 			_, err = application.FactoryReportSend{
 				Report: application.FactoryReport{
-					Tracker:    gateway,
-					Files:      files,
-					Benchmarks: vault.Benchmarks{Vault: files},
-					Seat:       BuilderSeat,
-					Notes:      gateway,
-					Mailbox:    gateway,
-					Snapshots:  files,
+					Tracker:     gateway,
+					Files:       files,
+					Benchmarks:  vault.Benchmarks{Vault: files},
+					Seat:        BuilderSeat,
+					Notes:       gateway,
+					Mailbox:     gateway,
+					Snapshots:   files,
+					InvestShare: share,
 				},
 				Home: files,
 				Host: here,

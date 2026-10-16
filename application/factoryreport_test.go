@@ -91,3 +91,18 @@ func TestPercentileIsTheNearestRank(t *testing.T) {
 		t.Errorf("median is %v, want 1.1", got)
 	}
 }
+
+func TestEveryRatioOfTheReportIsZeroOverNothing(t *testing.T) {
+	if got := percentOf(1, 3); got != 33.3 {
+		t.Errorf("1 of 3 is %v%%, want 33.3", got)
+	}
+	if got := percentOf(2, 0); got != 0 {
+		t.Errorf("2 of nothing is %v%%, want 0", got)
+	}
+	if got := fraction(3, 0); got != 0 {
+		t.Errorf("3 over nothing is %v, want 0", got)
+	}
+	if q := sumQuality(nil); q.RefusalRate != 0 || q.AttemptsPerLanding != 0 {
+		t.Errorf("an empty window has %+v", q)
+	}
+}

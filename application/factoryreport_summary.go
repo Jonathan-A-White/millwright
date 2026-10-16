@@ -9,9 +9,10 @@ import (
 const SummaryLines = 14
 
 // Summary is the report as a phone reads it: the window, then QUALITY (escaped
-// bugs among it), SPEED, FUEL and CHEAP WINS for the whole factory, each number
-// with its arrow against the window before, and a CHANGES line when a factory
-// change went WORSE, in at most SummaryLines lines of ReportWidth columns.
+// bugs and the investment share against its target among it), SPEED, FUEL and
+// CHEAP WINS for the whole factory, each number with its arrow against the
+// window before, and a CHANGES line when a factory change went WORSE, in at
+// most SummaryLines lines of ReportWidth columns.
 func (r FactoryReportResult) Summary() string {
 	days := int(reportDay(r.Window.Until).Sub(r.Window.Since).Hours() / 24)
 	var b strings.Builder
@@ -29,6 +30,9 @@ func (r FactoryReportResult) Summary() string {
 			q.AttemptsPerLanding, whole.arrow("attempts_per_landing"), q.BugsPerLanding, whole.arrow("bugs_per_landing")))
 	}
 	summaryLine(&b, "  ", "", fmt.Sprintf("escaped bugs %d%s", q.EscapedBugs, whole.arrow("escaped_bugs")))
+	if r.InvestShare != nil {
+		summaryLine(&b, "  ", "", r.InvestShare.summaryText())
+	}
 
 	if s.WithPar == 0 {
 		summaryLine(&b, "", "SPEED ", "no par yet")

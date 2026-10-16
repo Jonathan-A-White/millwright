@@ -146,13 +146,9 @@ func sumFuel(entries []reportEntry) FuelUse {
 			f.WithCost++
 		}
 	}
-	if f.WithTokens > 0 {
-		f.TokensPerLanding = math.Round(float64(f.Tokens) / float64(f.WithTokens))
-	}
-	if f.WithCost > 0 {
-		f.CostUSD = twoPlaces(f.CostUSD)
-		f.USDPerLanding = twoPlaces(f.CostUSD / float64(f.WithCost))
-	}
+	f.TokensPerLanding = math.Round(fraction(float64(f.Tokens), float64(f.WithTokens)))
+	f.CostUSD = twoPlaces(f.CostUSD)
+	f.USDPerLanding = twoPlaces(fraction(f.CostUSD, float64(f.WithCost)))
 	return f
 }
 

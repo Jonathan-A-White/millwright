@@ -32,6 +32,8 @@ type reportContext struct {
 	mailbox    *apptest.FakeMailbox
 	commits    *reportCommits
 	now        time.Time
+	// investTarget is the [factory] invest_share the report is given; 0 is the default.
+	investTarget float64
 
 	// refused are the ids of the refused stories rigLanded filed, by rig.
 	refused map[string][]string
@@ -64,6 +66,8 @@ func InitializeReportScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the report story "([^"]*)" has the cause "([^"]*)"$`, c.theStoryHasTheCause)
 	ctx.Given(`^every refused story of "([^"]*)" has the cause "([^"]*)"$`, c.everyRefusedStoryHasTheCause)
 	ctx.Given(`^the report story "([^"]*)" carries the comment "([^"]*)"$`, c.theStoryCarriesTheComment)
+	ctx.Given(`^the report stories "([^"]*)" carry the label "([^"]*)"$`, c.theStoriesCarryTheLabel)
+	ctx.Given(`^the report's investment target is ([0-9.]+)$`, c.theInvestmentTarget)
 	ctx.Given(`^the report ledger also holds a landed row for "([^"]*)" on "([^"]*)"$`, c.aLandedRowOn)
 	ctx.Given(`^"([^"]*)" landed (\d+) and refused (\d+) on "([^"]*)"$`, c.aRigLandedAndRefusedOn)
 	ctx.Given(`^the factory change "([^"]*)" titled "([^"]*)" landed on "([^"]*)" with the acceptance "([^"]*)"$`, c.aFactoryChangeLanded)
@@ -231,6 +235,22 @@ func (c *reportContext) everyRefusedStoryHasTheCause(rig, class string) error {
 	return nil
 }
 
+// theStoriesCarryTheLabel labels each of a comma-separated list of stories.
+func (c *reportContext) theStoriesCarryTheLabel(ids, label string) error {
+	for _, id := range strings.Split(ids, ",") {
+		if err := c.tracker.AddLabel(context.Background(), strings.TrimSpace(id), label); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *reportContext) theInvestmentTarget(share string) error {
+	target, err := strconv.ParseFloat(share, 64)
+	c.investTarget = target
+	return err
+}
+
 func (c *reportContext) theStoryCarriesTheComment(id, text string) error {
 	return c.tracker.CommentOnStory(context.Background(), id, unescape(text))
 }
@@ -344,6 +364,7 @@ func (c *reportContext) reportRuns(flags string) error {
 	report.Tracker, report.Files, report.Seat = c.tracker, c.files, reportSeat
 	report.Benchmarks = c.benchmarks
 	report.Commits, report.FactoryDir = c.commits, reportFactoryDir
+	report.InvestShare = c.investTarget
 	report.Now = func() time.Time { return c.now }
 	report.Out = &c.printed
 	before := c.footprint()
