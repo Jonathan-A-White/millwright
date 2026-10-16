@@ -1,4 +1,6 @@
 bin/
+# a stray `go build ./cmd/mw` at the repo root (mw-gq6.517); the binary is built into bin/
+/mw
 __pycache__/
 *.pyc
 
