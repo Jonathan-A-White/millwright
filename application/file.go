@@ -31,7 +31,9 @@ type File struct {
 	// Rigs are the rigs checked out on this host, by name, and RigFiles says
 	// whether a path is in one: a story whose files are in none of its rig is
 	// warned of, as filed into the wrong rig (mw-gq6.428). A nil RigFiles, or a
-	// rig not in Rigs, warns of nothing.
+	// rig not in Rigs, warns of nothing. RigFiles also counts the files of a
+	// directory a story's files key names, to refuse a crowded one as mw path
+	// set does (mw-gq6.442).
 	Rigs     map[string]string
 	RigFiles RigFiles
 
@@ -200,6 +202,9 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	if err := f.validateFormulas(ctx, plan, order); err != nil {
 		return FiledPlan{}, err
 	}
+	if err := f.validateFiles(plan, order); err != nil {
+		return FiledPlan{}, err
+	}
 	guests, err := f.guestRigsOf(ctx, plan)
 	if err != nil {
 		return FiledPlan{}, err
@@ -362,6 +367,22 @@ func (f File) validateFormulas(ctx context.Context, plan domain.Plan, order []do
 		}
 		if err := f.validateStepTitles(ctx, story, path.Formula, overheads); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// validateFiles refuses the whole plan, naming the story key, when a story's
+// files key names a crowded directory, as mw path set refuses it (mw-gq6.442):
+// before anything is written.
+func (f File) validateFiles(plan domain.Plan, order []domain.PlanStory) error {
+	for _, story := range order {
+		path, err := story.PathFrom(plan.Epic.Defaults)
+		if err != nil {
+			continue
+		}
+		if err := crowdedFiles(f.Rigs, f.RigFiles, path); err != nil {
+			return fmt.Errorf("filing story %s: %w", story.Key, err)
 		}
 	}
 	return nil

@@ -706,6 +706,9 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	// would, without writing anything.
 	var formulas map[string]bool
 	smokeHolds := map[string]GristSmokeHold{}
+	// What the shared-files gate holds is kept in the host's note, so that mw
+	// status can say how long a story has waited on it (mw-gq6.442).
+	var held filesHeldPass
 	for _, detail := range ready {
 		id := detail.Story.ID
 		// gate: hitl
@@ -875,8 +878,10 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// place (mw-gq6.349).
 		if share, sharing := shares.shared(ctx, detail); sharing {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: share.String()})
+			held.hold(id)
 			continue
 		}
+		held.pass(id)
 
 		// gate: cap
 		// A story that was claimed and could not be started counts against the
@@ -923,6 +928,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 	}
 
+	d.keepFilesHeld(ctx, ready, held, &report)
 	report.Notes = append(report.Notes, shares.notes...)
 	d.print(report.String())
 	d.answerWaitingGrist(ctx, &report)

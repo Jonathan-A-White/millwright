@@ -600,6 +600,12 @@ names one of its files, or has changed one on its branch so far (from the merge
 base with its target): it passes it over, unclaimed, saying `waiting: shares
 <path> with <id>`, starts the next ready story instead, and `mw status` shows
 the same line under READY. A story with no `files` dispatches as it always did.
+Dispatch keeps when it first held each such story in the host's note
+`host.<host>.files_held`, and once one has waited over 6 hours `mw status` adds
+`held by files for <duration>` under it. `mw path set` and `mw file` refuse a
+`files` key naming a directory of more than 20 files in the rig's checkout here,
+or a whole directory (`src/`, `src/**`) where the rig is not checked out to count
+it: name the files instead.
 See the files scenarios of `features/dispatch.feature`.
 
 ## Booting a session into a seat

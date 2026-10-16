@@ -45,3 +45,18 @@ func TestSharedFile(t *testing.T) {
 		})
 	}
 }
+
+func TestDirectoriesReadsEachNameThatMayBeADirectory(t *testing.T) {
+	got := domain.Directories(" src/, src/Talk.tsx, src/chat/*.tsx, src/ipa/**, ./tests/e2e/*, features/ask.feature, **, ")
+	want := []domain.NamedDirectory{
+		{Written: "src/", Dir: "src", Whole: true},
+		{Written: "src/Talk.tsx", Dir: "src/Talk.tsx"},
+		{Written: "src/ipa/**", Dir: "src/ipa", Whole: true},
+		{Written: "./tests/e2e/*", Dir: "tests/e2e", Whole: true},
+		{Written: "features/ask.feature", Dir: "features/ask.feature"},
+		{Written: "**", Dir: "", Whole: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("expected\n%+v\ngot\n%+v", want, got)
+	}
+}

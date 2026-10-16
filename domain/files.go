@@ -75,3 +75,40 @@ func globMatch(pat, parts []string) bool {
 	matched, err := path.Match(pat[0], parts[0])
 	return err == nil && matched && globMatch(pat[1:], parts[1:])
 }
+
+// NamedDirectory is one name of a files key that may name a directory: as it
+// was written, the directory it would cover (Dir, "" for the whole rig), and
+// whether its words alone say it covers all of that directory (Whole): "src/",
+// "src/*" and "src/**" do, and so do "*" and "**" of the whole rig. A plain
+// name with no glob in it, "src" or "src/Talk.tsx", may be a file or a
+// directory: only the rig's checkout can say which.
+type NamedDirectory struct {
+	Written string
+	Dir     string
+	Whole   bool
+}
+
+// Directories is each name of a files key that may name a directory, in
+// order: the ones written as a whole directory, and the plain ones. A glob
+// narrower than a whole directory, "src/*.tsx", is left out.
+func Directories(files string) []NamedDirectory {
+	var found []NamedDirectory
+	for _, written := range strings.Split(files, ",") {
+		written = strings.TrimSpace(written)
+		name := strings.TrimPrefix(written, "./")
+		if name == "" {
+			continue
+		}
+		whole := strings.HasSuffix(name, "/") || name == "."
+		parts := strings.Split(strings.Trim(name, "/"), "/")
+		for len(parts) > 0 && (parts[len(parts)-1] == "*" || parts[len(parts)-1] == "**" || parts[len(parts)-1] == ".") {
+			parts, whole = parts[:len(parts)-1], true
+		}
+		dir := strings.Join(parts, "/")
+		if strings.ContainsAny(dir, "*?[") {
+			continue
+		}
+		found = append(found, NamedDirectory{Written: written, Dir: dir, Whole: whole})
+	}
+	return found
+}
