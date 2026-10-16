@@ -31,6 +31,9 @@
 //	max_turns = 120                    # most turns a Builder's session takes; 0 is no cap (mw-1ljpo9.6)
 //	retry_from_branch = true           # a refused or capped attempt's branch is the next attempt's start (mw-1ljpo9.7)
 //
+//	[sync]
+//	beads_squash = false               # true lets the home's daily collection squash its beads history (default false: it erases the only copy while the backup is down; mw-gq6.504)
+//
 //	[dispatch]                         # the room a host needs to start a story (mw-t0z3fu.1)
 //	room_load_per_core = 1.0           # none while the 1-minute load is this many a core
 //	room_min_free_mb   = 2048          # none while less memory than this is available
@@ -1050,6 +1053,37 @@ func NextRetryFromBranch() (bool, error) {
 	on, err := strconv.ParseBool(said)
 	if err != nil {
 		return false, fmt.Errorf("the [%s] table of %s says retry_from_branch = %q: it must be true or false", NextTable, path, said)
+	}
+	return on, nil
+}
+
+// SyncTable is the table of the config file that says how `mw sync` treats
+// the beads database beyond the beads_sync mode (mw-gq6.504).
+const SyncTable = "sync"
+
+// SyncBeadsSquash reports `beads_squash` of the `[sync]` table of
+// ~/.config/mw/config.toml: whether the home's daily collection may squash the
+// beads history into one commit (mw-gq6.455). False when the table says
+// nothing: with the backup down the squash erases the only copy of the history
+// and cannot be undone, so only the Governor's word, `beads_squash = true`,
+// turns it on.
+func SyncBeadsSquash() (bool, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, SyncTable)
+	if err != nil {
+		return false, err
+	}
+	said := strings.TrimSpace(table["beads_squash"])
+	if said == "" {
+		return false, nil
+	}
+	on, err := strconv.ParseBool(said)
+	if err != nil {
+		return false, fmt.Errorf("the [%s] table of %s says beads_squash = %q: it must be true or false", SyncTable, path, said)
 	}
 	return on, nil
 }

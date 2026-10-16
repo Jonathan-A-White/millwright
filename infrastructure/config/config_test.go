@@ -2387,6 +2387,27 @@ func TestNextRetryFromBranchIsOnUntilTheNextTableTurnsItOff(t *testing.T) {
 	}
 }
 
+// sync.beads_squash (mw-gq6.504) is off until the [sync] table turns it on: a
+// squash cannot be undone, so nothing but an explicit true switches it on.
+func TestSyncBeadsSquashIsOffUntilTheSyncTableTurnsItOn(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\n")
+	if on, err := config.SyncBeadsSquash(); err != nil || on {
+		t.Fatalf("expected the default off, got %v: %v", on, err)
+	}
+	writeConfig(t, "vault = \"/v\"\nbeads_squash = true\n")
+	if on, err := config.SyncBeadsSquash(); err != nil || on {
+		t.Fatalf("expected a root-table key to leave it off, got %v: %v", on, err)
+	}
+	writeConfig(t, "[sync]\nbeads_squash = true\n")
+	if on, err := config.SyncBeadsSquash(); err != nil || !on {
+		t.Fatalf("expected the [sync] table's true, got %v: %v", on, err)
+	}
+	writeConfig(t, "[sync]\nbeads_squash = \"sometimes\"\n")
+	if _, err := config.SyncBeadsSquash(); err == nil {
+		t.Fatalf("expected beads_squash = \"sometimes\" to be refused")
+	}
+}
+
 func TestNextMaxTurnsRefusesWhatIsNotAWholeNumber(t *testing.T) {
 	for _, bad := range []string{"-1", "\"lots\""} {
 		writeConfig(t, "[next]\nmax_turns = "+bad+"\n")
