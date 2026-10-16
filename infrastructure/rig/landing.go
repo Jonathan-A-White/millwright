@@ -538,7 +538,8 @@ func transientWhy(err error) (string, bool) {
 	return "", false
 }
 
-// Advance implements application.Landing. The checkout is left alone unless it
+// Advance implements application.Landing. A checkout that already holds the
+// commit is Level, not Moved. The checkout is left alone unless it
 // is on branch and clean, and it is only ever fast-forwarded: `merge --ff-only`
 // onto a commit the checkout is an ancestor of cannot lose anybody's work, and
 // what is not an ancestor is said, not merged. Untracked files count as work
@@ -551,11 +552,32 @@ func (w *Worktrees) Advance(ctx context.Context, rigDir, branch, commit string) 
 		return application.Advanced{}, fmt.Errorf("advancing the checkout of %s: to which commit?", rigDir)
 	}
 
-	// Already there, on any branch: nothing to move and nothing to say.
-	if level, err := w.contains(ctx, rigDir, "HEAD", commit); err != nil {
+	// Already there: nothing to move. It is Level, and a place to build from only
+	// on the target branch and clean; on any other branch it is level with the
+	// commit but no place to build the target from, and Held says so.
+	level, err := w.contains(ctx, rigDir, "HEAD", commit)
+	if err != nil {
 		return application.Advanced{}, err
-	} else if level {
-		return application.Advanced{}, nil
+	}
+	if level {
+		on, err := w.git(ctx, rigDir, "rev-parse", "--abbrev-ref", "HEAD")
+		if err != nil {
+			return application.Advanced{}, err
+		}
+		switch on = strings.TrimSpace(on); {
+		case on == "HEAD":
+			return application.Advanced{Level: true, Held: fmt.Sprintf("it is on no branch, not %s", branch)}, nil
+		case on != branch:
+			return application.Advanced{Level: true, Held: fmt.Sprintf("it is on %s, not %s", on, branch)}, nil
+		}
+		dirty, err := w.Uncommitted(ctx, rigDir)
+		if err != nil {
+			return application.Advanced{}, err
+		}
+		if len(dirty) > 0 {
+			return application.Advanced{Level: true, Held: describeUncommitted(dirty)}, nil
+		}
+		return application.Advanced{Level: true}, nil
 	}
 
 	// "HEAD" is what git says when no branch is checked out.

@@ -559,6 +559,13 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 		together[i] = s.ID
 	}
 	var smokeApps []string
+	// A story's mail is sent once the after-landing command has run or been
+	// skipped, so that it can say first that the deploy did not happen.
+	type mail struct {
+		c    *closeOut
+		sent *NextReport
+	}
+	var mails []mail
 	for _, s := range report.Merged {
 		c := b.storyCloseOut(s, rigDir)
 		apps, notes := n.Smoke.Wants(ctx, report.Rig, rigDir, report.Base, s.Branch)
@@ -611,8 +618,7 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 			Notes: append([]string{fmt.Sprintf("landed by mw land in %s (%s), whose commit %s is on %s", report.Label(), strings.Join(together, ", "),
 				shortCommit(report.Commit), report.Target)}, report.fixerNotes(s.ID)...),
 		}
-		n.mailTheMayor(ctx, c, &mailed, MailLanded, n.closingProposals(ctx, c))
-		report.Mailed = append(report.Mailed, MailLanded+": "+s.ID)
+		mails = append(mails, mail{c: c, sent: &mailed})
 	}
 
 	// Once for the batch: the rig's checkout, the after-landing command and the
@@ -625,6 +631,12 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 	n.afterLanding(ctx, last, &once)
 	n.smoke(ctx, last, &once)
 	nr.Notes = append(nr.Notes, once.Notes...)
+
+	for _, m := range mails {
+		m.sent.AfterLandingSkipped = once.AfterLandingSkipped
+		n.mailTheMayor(ctx, m.c, m.sent, MailLanded, n.closingProposals(ctx, m.c))
+		report.Mailed = append(report.Mailed, MailLanded+": "+m.c.id)
+	}
 }
 
 // appendNew adds to list what it does not hold yet.
@@ -934,6 +946,10 @@ func (r BatchReport) String() string {
 		fmt.Fprintf(&b, "  rig     %s fast-forwarded to %s on %s\n", r.RigDir, shortCommit(r.Commit), r.Target)
 	case r.Checkout.Left != "":
 		fmt.Fprintf(&b, "  rig     %s left as it was, not brought up to %s: %s\n", r.RigDir, r.Target, r.Checkout.Left)
+	case r.Checkout.Level && r.Checkout.Held == "":
+		fmt.Fprintf(&b, "  rig     %s was already at %s on %s\n", r.RigDir, shortCommit(r.Commit), r.Target)
+	case r.Checkout.Held != "":
+		fmt.Fprintf(&b, "  rig     %s is not a place to build %s from: %s\n", r.RigDir, r.Target, r.Checkout.Held)
 	}
 	for _, kept := range r.Records {
 		fmt.Fprintf(&b, "  record  %s\n", kept)

@@ -27,6 +27,11 @@ const AfterLandingStoppedLine = "after landing STOPPED at the limit: the site ma
 // holds the baton while it waits, is not held up.
 const AfterLandingRetryWait = 30 * time.Second
 
+// AfterLandingNotRunLine opens the first line of the mail to the Mayor when the
+// rig's after-landing command was named but not run: a Landed mail that says
+// nothing of it reads as a deploy that happened (mw-gq6.484).
+const AfterLandingNotRunLine = "after landing NOT RUN"
+
 // UnitRestartFailedLine is the first line of the mail to the Mayor when a
 // long-running mw user unit could not be restarted on the new build: the
 // follower keeps publishing the Governor's view with the old binary until
@@ -236,8 +241,10 @@ func tailLine(output string) string {
 // note, and on the story a comment, so that the Mayor knows the host's binary may
 // be old.
 //
-// Nothing runs for a rig the host names no command for, or for a checkout the
-// landing did not move: what a command built there would be the old commit.
+// Nothing runs for a rig the host names no command for, or for a checkout that
+// does not hold the landed commit (or is no place to build from): what a command
+// built there would be the old commit. A skipped command is said in a note with
+// its real reason, and in the report's AfterLandingSkipped for the mail's head.
 // A rig the host names no command for still gets a line in the report, so
 // that a Mayor reading it can tell "this host names no command for this rig"
 // from "the command was not configured when mw next started".
@@ -250,12 +257,10 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 		report.Notes = append(report.Notes, afterLandingLine("none", "this host names no command for "+c.path.Rig))
 		return
 	}
-	if !report.Rig.Moved {
-		why := "the rig checkout was not brought up to " + c.target
-		if report.Rig.Left != "" {
-			why = "the rig checkout was left as it was: " + report.Rig.Left
-		}
-		report.Notes = append(report.Notes, afterLandingLine(command, "not run, "+why))
+	if !report.Rig.Current() {
+		why := report.Rig.NotCurrent(c.target)
+		report.AfterLandingSkipped = afterLandingLine(command, "not run, "+why)
+		report.Notes = append(report.Notes, report.AfterLandingSkipped)
 		return
 	}
 
@@ -292,8 +297,8 @@ func (n Next) smoke(ctx context.Context, c *closeOut, report *NextReport) {
 	if len(c.smokeApps) == 0 {
 		return
 	}
-	if !report.Rig.Moved {
-		report.Notes = append(report.Notes, fmt.Sprintf("grist smoke: not run for %s, the rig checkout was not brought up to %s", strings.Join(c.smokeApps, ", "), c.target))
+	if !report.Rig.Current() {
+		report.Notes = append(report.Notes, fmt.Sprintf("grist smoke: not run for %s, %s", strings.Join(c.smokeApps, ", "), report.Rig.NotCurrent(c.target)))
 		return
 	}
 	lines, failed := n.Smoke.Run(ctx, c.path.Rig, c.smokeApps)

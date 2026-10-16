@@ -1083,6 +1083,17 @@ Feature: Closing out a finished story and carrying on
     And the report says: after landing: <the command>: ok
     And the story "mw-gq6.1" is closed
 
+  Scenario: An after-landing command runs when the rig checkout was already level with the landed commit (mw-gq6.484)
+    Given the rig names a command to run after a landing
+    And something else brings the rig checkout level with the origin the moment a push reaches it
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the rig checkout is at the commit that landed on "main"
+    And the rig's after-landing command ran once, in the rig checkout, at the commit that landed on "main"
+    And the report says: after landing: <the command>: ok
+    And the report does not say: not brought up
+
   Scenario: An after-landing command that fails is said, and the story is landed and closed all the same
     Given the rig names a command to run after a landing, which prints "make: *** No rule to make target 'build'" and exits 2
     And the session of "mw-gq6.1" reported a plain success
@@ -1220,6 +1231,8 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" is closed
     And the rig's after-landing command did not run
     And the report says: after landing: <the command>: not run, the rig checkout was left as it was: it is on wip, not main
+    And exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's first line is: after landing NOT RUN: <the command>: not run, the rig checkout was left as it was: it is on wip, not main
 
   Scenario: An after-landing command does not run when the rig checkout has uncommitted work
     Given the rig checkout has an uncommitted file "notes-to-self.md"

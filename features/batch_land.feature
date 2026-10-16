@@ -35,6 +35,18 @@ Feature: mw land lands a batch rig's queue under one gate run
     And metrics/factory.jsonl holds a line for batch 1 of the rig: 3 stories, 1 gate run, no fixer, outcome "green"
     And the Mayor was sent no mail saying the batch was held
 
+  Scenario: The after-landing command runs once for a batch whose rig checkout was already level with the batch commit (mw-gq6.484)
+    Given the rig names a command to run after a landing
+    And something else brings the rig checkout level with the origin the moment a push reaches it
+    And these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And the rig's after-landing command ran once, in the rig checkout, at the commit that landed on "main"
+    And the batch report says: after landing: <the command>: ok
+    And the batch report does not say: not brought up
+
   Scenario: A story claimed on another host is closed by this host once its batch lands, and the takeover is noted on it
     Given the tracker acts as "mw@laptop", this host's mw
     And these stories are queued for batch landing:
