@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -64,6 +65,10 @@ func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^metrics/factory.jsonl holds no line for the rig$`, c.theMetricsHoldNoBatch)
 	ctx.Then(`^no batch record was kept$`, c.noBatchRecordWasKept)
 	ctx.Then(`^the newest entry of "([^"]*)" at the rig's origin is for "([^"]*)", the next for "([^"]*)"$`, c.theNewestEntriesAreFor)
+	ctx.Given(`^another mw land of the rig lands the queue while this one waits for the merge slot$`, c.anotherLandHoldsTheSlot)
+	ctx.Given(`^the rig's main holds a changelog that lists "([^"]*)" and "([^"]*)" twice under "([^"]*)", each line under a heading of its own$`, c.theRigsMainHoldsAChangelogTwice)
+	ctx.Then(`^mw land says "([^"]*)"$`, c.mwLandSays)
+	ctx.Then(`^"([^"]*)" on "([^"]*)" at the rig's origin has one "([^"]*)" heading and one date line under it$`, c.theMarkdownHasOneHeading)
 	registerBatchFixSteps(ctx, c)
 }
 
@@ -582,6 +587,100 @@ func (c *nextContext) theMayorsMailNamesTheSignedCommit(id, line string) error {
 func (c *nextContext) isNotOnTheTarget(file, branch string) error {
 	if _, err := gitSay(c.origin(), "show", branch+":"+file); err == nil {
 		return fmt.Errorf("expected %s not to be on %s at the origin", file, branch)
+	}
+	return nil
+}
+
+// landsFirstSlot is the rig's merge slot with another mw land of the rig ahead
+// of the first Take: it lands the queue to the end, holding the real slot as it
+// does, and only then is the slot taken, as a batch that read its queue while
+// the batch before it held the slot finds it (mw-gq6.514).
+type landsFirstSlot struct {
+	real  application.MergeSlot
+	first func()
+	once  sync.Once
+}
+
+func (s *landsFirstSlot) Take(ctx context.Context, rigDir, holder string) (application.Holding, error) {
+	s.once.Do(s.first)
+	return s.real.Take(ctx, rigDir, holder)
+}
+
+func (c *nextContext) anotherLandHoldsTheSlot() error {
+	real := c.mergeSlot()
+	slot := &landsFirstSlot{real: real}
+	slot.first = func() {
+		next := c.nextUseCase()
+		next.Slot = real
+		report, err := application.BatchLand{Next: next, Records: vault.New(c.vault), Metrics: vault.New(c.vault)}.Run(context.Background(), c.rigKey())
+		if err != nil || !report.Landed {
+			c.otherLand = fmt.Errorf("the other mw land did not land the queue: %v\n%s", err, report.String())
+		}
+	}
+	c.slot = slot
+	return nil
+}
+
+func (c *nextContext) theMarkdownHasOneHeading(file, branch, heading string) error {
+	if c.otherLand != nil {
+		return c.otherLand
+	}
+	text, err := gitShow(c.origin(), branch, file)
+	if err != nil {
+		return err
+	}
+	if got := strings.Count(text, "\n"+heading+"\n"); got != 1 {
+		return fmt.Errorf("expected %s on %s to have one %q heading, found %d:\n%s", file, branch, heading, got, text)
+	}
+	block := text[strings.Index(text, "\n"+heading+"\n")+len(heading)+2:]
+	if next := strings.Index(block, "\n## "); next >= 0 {
+		block = block[:next]
+	}
+	dates, lines := 0, 0
+	for _, line := range strings.Split(block, "\n") {
+		switch {
+		case strings.HasPrefix(line, "_"):
+			dates++
+		case strings.HasPrefix(line, "- "):
+			lines++
+		}
+	}
+	if dates != 1 || lines < 2 {
+		return fmt.Errorf("expected the %s block of %s to hold one date line and every line of the batch, got %d dates and %d lines:\n%s", heading, file, dates, lines, text)
+	}
+	return nil
+}
+
+// theRigsMainHoldsAChangelogTwice writes the changelog files as lampas's were
+// after batches 27 and 28 (mw-gq6.514): two stories' lines, newest first, then
+// the same two again, under one version, each line a block of its own.
+func (c *nextContext) theRigsMainHoldsAChangelogTwice(first, second, version string) error {
+	if err := os.MkdirAll(filepath.Join(c.seed, "public"), 0o755); err != nil {
+		return err
+	}
+	entry := func(story, text string) string {
+		return fmt.Sprintf("  {\"version\": %q, \"date\": \"2026-09-01\", \"story\": %q, \"kind\": \"new\", \"text\": %q}", version, story, text)
+	}
+	block := func(text string) string { return fmt.Sprintf("## %s\n_2026-09-01_\n- New: %s\n", version, text) }
+	twice := []string{entry(second, "Old two"), entry(first, "Old one"), entry(second, "Old two"), entry(first, "Old one")}
+	files := map[string]string{
+		"public/changelog.json": "[\n" + strings.Join(twice, ",\n") + "\n]\n",
+		"CHANGELOG.md":          "# What's new\n\n" + strings.Join([]string{block("Old two"), block("Old one"), block("Old two"), block("Old one")}, "\n"),
+	}
+	for file, body := range files {
+		if err := os.WriteFile(filepath.Join(c.seed, filepath.FromSlash(file)), []byte(body), 0o644); err != nil {
+			return err
+		}
+	}
+	if err := commitIn(c.seed, "The rig's changelog lists a version's lines twice"); err != nil {
+		return err
+	}
+	return gitRun(c.seed, "git", "push", "-q", "origin", "main")
+}
+
+func (c *nextContext) mwLandSays(words string) error {
+	if !strings.Contains(c.printed.String()[c.batch.printedFrom:], words) {
+		return fmt.Errorf("expected mw land to say %q\n%s", words, c.said())
 	}
 	return nil
 }

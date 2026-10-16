@@ -123,6 +123,10 @@ type BatchStory struct {
 	// merged: a story queued on the other host has no branch here of its own.
 	Branch  string
 	Commits int
+	// OnTarget says the branch held nothing beyond the target when the batch
+	// merged it: another landing had put its work there already, and wrote its
+	// What's new line, so the batch writes none for it (mw-gq6.514).
+	OnTarget bool
 
 	// Merge is the commit the batch was at once this story was merged into it,
 	// FastForward that the merge simply moved onto its branch, and Unioned the
@@ -240,34 +244,20 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 	}
 	report.Mode = rules.LandingSettings().Mode
 
-	queue, err := b.queued(ctx, rig, &report)
-	if err != nil {
-		return report, err
-	}
-	report.Queue = queue
-	if len(queue) == 0 {
-		n.print(report.String())
-		return report, nil
-	}
-	report.Target = queue[0].path.Branch
-
 	// What the close-out's helpers note on the way, gathered into the report.
 	var nr NextReport
 	gather := func() {
 		report.Notes = append(report.Notes, nr.Notes...)
 		nr.Notes = nil
 	}
-	if err := n.fetchRetrying(ctx, &nr, rigDir); err != nil {
+	noted := len(report.Notes)
+	if err := b.readQueue(ctx, rig, rigDir, &report, &nr); err != nil {
 		gather()
-		return report, fmt.Errorf("landing %s: the rig could not be brought up to date with %s: %w", rig, n.remote(), err)
+		return report, err
 	}
-	base := StartPoint(n.remote(), report.Target)
-	if report.Base, err = n.Landing.RefHead(ctx, rigDir, base); err != nil {
-		return report, fmt.Errorf("landing %s: %s could not be read: %w", rig, base, err)
-	}
-	for i := range report.Queue {
-		s := &report.Queue[i]
-		s.Branch = StartPoint(n.remote(), StoryBranch(s.ID))
+	if len(report.Queue) == 0 {
+		n.print(report.String())
+		return report, nil
 	}
 
 	if b.DryRun {
@@ -289,15 +279,37 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 			report.Notes = append(report.Notes, fmt.Sprintf("the merge slot of %s could not be given back: %v", rig, err))
 		}
 	}
+	// The queue and the target are read again now that the slot is ours. A
+	// batch that waited for it while the batch before it was made, tested and
+	// pushed read a queue that batch has since landed and a target it has since
+	// moved: landing those stories again wrote their What's new lines a second
+	// time, under the version the batch before had raised (mw-gq6.514).
+	report.Notes = report.Notes[:noted]
+	if err := b.readQueue(ctx, rig, rigDir, &report, &nr); err != nil {
+		release()
+		gather()
+		return report, err
+	}
+	if len(report.Queue) == 0 {
+		release()
+		report.Notes = append(report.Notes, "the batch before this one landed the whole queue while this one waited for the merge slot")
+		gather()
+		n.print(report.String())
+		return report, nil
+	}
 	if report.Number, err = b.Records.NewBatch(ctx, rig); err != nil {
 		release()
 		gather()
 		return report, fmt.Errorf("landing %s: the batch's records could not be begun: %w", rig, err)
 	}
 
-	dir, err := n.Landing.OpenLanding(ctx, rigDir, base)
+	// The landing is cut at the very commit read as the base, never at the
+	// branch's name: the version is raised from what the base holds, and a
+	// landing cut later than its base would take the version the batch before
+	// raised for one the batch raised itself.
+	dir, err := n.Landing.OpenLanding(ctx, rigDir, report.Base)
 	if err != nil {
-		report.Held = fmt.Sprintf("a landing of %s at %s could not be opened: %v", rig, base, err)
+		report.Held = fmt.Sprintf("a landing of %s at %s could not be opened: %v", rig, shortCommit(report.Base), err)
 	} else {
 		b.landIn(ctx, dir, rigDir, rules, &report, &nr)
 		if err := n.Landing.CloseLanding(ctx, rigDir, dir); err != nil {
@@ -319,6 +331,34 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 		return report, fmt.Errorf("%s was held: %s", report.Label(), firstLine(report.Held))
 	}
 	return report, nil
+}
+
+// readQueue reads the batch as it stands: the stories queued for it, then, when
+// there are any, the rig brought up to date with the remote, the target's head
+// as Base and each story's branch at the remote.
+func (b BatchLand) readQueue(ctx context.Context, rig, rigDir string, report *BatchReport, nr *NextReport) error {
+	n := b.Next
+	queue, err := b.queued(ctx, rig, report)
+	if err != nil {
+		return err
+	}
+	report.Queue = queue
+	if len(queue) == 0 {
+		return nil
+	}
+	report.Target = queue[0].path.Branch
+	if err := n.fetchRetrying(ctx, nr, rigDir); err != nil {
+		return fmt.Errorf("landing %s: the rig could not be brought up to date with %s: %w", rig, n.remote(), err)
+	}
+	base := StartPoint(n.remote(), report.Target)
+	if report.Base, err = n.Landing.RefHead(ctx, rigDir, base); err != nil {
+		return fmt.Errorf("landing %s: %s could not be read: %w", rig, base, err)
+	}
+	for i := range report.Queue {
+		s := &report.Queue[i]
+		s.Branch = StartPoint(n.remote(), StoryBranch(s.ID))
+	}
+	return nil
 }
 
 // queued are the stories queued for batch landing on rig, on any host,
@@ -420,11 +460,17 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 		return
 	}
 
-	if len(rules.VersionFiles) > 0 {
+	// A batch every branch of which was on the target already brings nothing
+	// new: no version is raised for it and no What's new line written.
+	if len(rules.VersionFiles) > 0 && !report.allOnTarget() {
 		bump := VersionBump{Files: rules.VersionFiles, Before: report.Base, Branch: "HEAD", StoryID: report.Label()}
 		if len(rules.ChangelogFiles) > 0 {
 			bump.Changelog = rules.ChangelogFiles
 			for _, s := range report.Merged {
+				if s.OnTarget {
+					report.Notes = append(report.Notes, fmt.Sprintf("%s was on %s already, so its What's new line is not written again", s.ID, report.Target))
+					continue
+				}
 				entry, err := n.changelogEntry(ctx, b.storyCloseOut(s, rigDir), nr)
 				if err != nil {
 					report.Held = fmt.Sprintf("the changelog entry of %s could not be read: %v", s.ID, err)
@@ -441,6 +487,7 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 			return
 		}
 		report.Version = bumped.Version
+		report.Notes = append(report.Notes, bumped.Tidied...)
 	}
 
 	gate := b.runGate(ctx, dir, rigDir, report, nr)
@@ -487,6 +534,16 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 	report.Commit, report.Landed = commit, true
 }
 
+// allOnTarget says every story the batch merged was on the target already.
+func (r BatchReport) allOnTarget() bool {
+	for _, s := range r.Merged {
+		if !s.OnTarget {
+			return false
+		}
+	}
+	return true
+}
+
 // runGate is one run of the rig's tests on the batch, under the gate lock and
 // the calm rule, counted with the others the batch made.
 func (b BatchLand) runGate(ctx context.Context, dir, rigDir string, report *BatchReport, nr *NextReport) gated {
@@ -515,7 +572,7 @@ func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union []str
 			continue
 		}
 		if ahead, err := n.Landing.Ahead(ctx, rigDir, s.Branch, report.Base); err == nil {
-			s.Commits = ahead
+			s.Commits, s.OnTarget = ahead, ahead == 0
 		}
 		// A branch whose commits sign the work as a machine's is refused here as
 		// mw next refuses it: it is never merged, whatever else is in the batch.

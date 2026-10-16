@@ -49,6 +49,9 @@ type nextContext struct {
 	// slot, when set, is the merge slot in place of the real one
 	// (features/next_slot_cap.feature).
 	slot application.MergeSlot
+	// otherLand is what went wrong with the other mw land a scenario ran ahead
+	// of its own while it waited for the slot (mw-gq6.514), nil when it landed.
+	otherLand error
 	// leftovers is the user's process table, for features/tester.feature's sweep
 	// of what a Tester's session left running (mw-gq6.409).
 	leftovers *apptest.FakeUserProcesses

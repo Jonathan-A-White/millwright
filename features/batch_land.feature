@@ -131,6 +131,47 @@ Feature: mw land lands a batch rig's queue under one gate run
     And "main" at the rig's origin has exactly 1 commits saying "Version 1.4.3 (batch 1 of millwright)"
     And "public/changelog.json" at the rig's origin lists the versions "1.4.3" then "1.4.3"
     And the newest entry of "public/changelog.json" at the rig's origin is for "mw-gq6.2", the next for "mw-gq6.1"
+    And "CHANGELOG.md" on "main" at the rig's origin has one "## 1.4.3" heading and one date line under it
+
+  Scenario: A batch that waited for the merge slot while the batch before it landed the same stories writes no What's new line again (mw-gq6.514)
+    Given the rig's main holds a package.json and a package-lock.json at version "1.4.2"
+    And the rig's file in the vault also holds the line "version_files = ['package.json', 'package-lock.json']"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And another mw land of the rig lands the queue while this one waits for the merge slot
+    When mw lands the batch of the rig
+    Then "main" at the rig's origin has exactly 1 commits saying "Version 1.4.3 (batch 1 of millwright)"
+    And "main" at the rig's origin has exactly 0 commits saying "What's new 1.4.3 (batch 2 of millwright)"
+    And "public/changelog.json" at the rig's origin lists the versions "1.4.3" then "1.4.3"
+    And "CHANGELOG.md" on "main" at the rig's origin has one "## 1.4.3" heading and one date line under it
+
+  Scenario: A batch landing on a changelog that lists a version's lines twice, each under a heading of its own, tidies it and says so (mw-gq6.514)
+    Given the rig's main holds a package.json and a package-lock.json at version "1.4.2"
+    And the rig's file in the vault also holds the line "version_files = ['package.json', 'package-lock.json']"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the rig's main holds a changelog that lists "mw-old.1" and "mw-old.2" twice under "1.4.2", each line under a heading of its own
+    And these stories are queued for batch landing:
+      | mw-gq6.1 |
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And "public/changelog.json" at the rig's origin lists exactly 3 entry
+    And "CHANGELOG.md" on "main" at the rig's origin reads:
+      """
+      # What's new
+
+      ## 1.4.3
+      _2026-09-18_
+      - New: The story mw-gq6.1
+
+      ## 1.4.2
+      _2026-09-01_
+      - New: Old two
+      - New: Old one
+      """
+    And mw land says "public/changelog.json held a second entry for 1.4.2 mw-old.2: it is taken out"
+    And mw land says "CHANGELOG.md had 1.4.2 under more than one heading: its blocks are folded into one"
 
   # Land Rush 5: a batch that was set aside or red is given one fixer, a Builder
   # session in the batch's landing worktree, and mw runs the rig's tests on the
