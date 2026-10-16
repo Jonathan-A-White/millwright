@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain/events"
 )
@@ -239,5 +240,42 @@ func TestDoctorTableHasTheMayorStuckCheck(t *testing.T) {
 	}
 	if report := out.String(); !strings.HasPrefix(report, "mayor-stuck: ok") {
 		t.Fatalf("expected the mayor-stuck check to run and read ok, got:\n%s", report)
+	}
+}
+
+func runDoctorLicencesOn(t *testing.T, env string) (string, error) {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "env")
+	if err := os.WriteFile(file, []byte(env), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"doctor", "licences", "--env-file", file})
+	err := root.Execute()
+	return out.String(), err
+}
+
+func TestDoctorLicencesPrintsALinePerCollectionAndLeavesCleanOnAGoodMap(t *testing.T) {
+	report, err := runDoctorLicencesOn(t, "POSTERN_COLLECTIONS=postern\nPOSTERN_APPS=cairn=cairn\n")
+	if err != nil {
+		t.Fatalf("expected a clean map to leave ok, got %v\n%s", err, report)
+	}
+	for _, want := range []string{"postern -> cockpit:", "cairn -> app cairn:"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("expected %q in the report, got:\n%s", want, report)
+		}
+	}
+}
+
+func TestDoctorLicencesLeavesFaultyOnTheIncident(t *testing.T) {
+	report, err := runDoctorLicencesOn(t, "POSTERN_COLLECTIONS=postern,spell\nPOSTERN_APPS=spell=spellforge\n")
+	if _, fault := application.DoctorFaults(err); !fault {
+		t.Fatalf("expected a doctor fault, got %v\n%s", err, report)
+	}
+	if !strings.Contains(report, "WARNING: spell is a cockpit collection") {
+		t.Errorf("expected the warning, got:\n%s", report)
 	}
 }
