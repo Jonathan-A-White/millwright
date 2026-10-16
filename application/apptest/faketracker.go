@@ -792,13 +792,17 @@ func (f *FakeTracker) ShowBeadPage(ctx context.Context, id string) (application.
 	if page.Comments, err = f.StoryComments(ctx, id); err != nil {
 		return application.BeadPage{}, false, err
 	}
-	if page.Bead.IsEpic {
-		epic, err := f.ShowEpic(ctx, id)
-		if err != nil {
-			return application.BeadPage{}, false, err
+	f.mu.Lock()
+	for _, storyID := range f.order {
+		if f.stories[storyID].detail.EpicID != id {
+			continue
 		}
-		page.Children = epic.Stories
+		child := f.stories[storyID].detail
+		child.Needs = append([]string(nil), f.stories[storyID].needs...)
+		child.CommentCount = len(f.stories[storyID].comments)
+		page.Children = append(page.Children, child)
 	}
+	f.mu.Unlock()
 	if page.Bead.EpicID != "" {
 		if parent, err := f.ShowEpic(ctx, page.Bead.EpicID); err == nil {
 			page.Parent = &parent

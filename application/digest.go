@@ -32,8 +32,11 @@ const DigestHoldOption = "B: Hold, I'll name which"
 const DigestVerifiedClip = 120
 
 // DigestLooksGoodOption is the digest card's first, recommended option for n
-// demos.
+// demos; with none it only closes the digest.
 func DigestLooksGoodOption(n int) string {
+	if n == 0 {
+		return "A: Looks good"
+	}
 	return fmt.Sprintf("A: Looks good on all %d", n)
 }
 
@@ -278,18 +281,23 @@ func (d Digest) loopSection(ctx context.Context) digestLoop {
 // previousShare is the investment target the newest weekly digest bead under
 // the parent recorded in its description, and whether it recorded one.
 func (d Digest) previousShare(ctx context.Context) (float64, bool) {
-	epic, err := d.Tracker.ShowEpic(ctx, d.parent())
-	if err != nil {
+	// The parent is read as a bead and not as an epic: the default parent is a
+	// task, which ShowEpic refuses.
+	page, found, err := d.Tracker.ShowBeadPage(ctx, d.parent())
+	if err != nil || !found {
+		if err == nil {
+			err = fmt.Errorf("no bead %s", d.parent())
+		}
 		d.say("the share the previous digest saw is not known: %v\n", err)
 		return 0, false
 	}
 	var newest *StoryDetail
-	for i, bead := range epic.Stories {
+	for i, bead := range page.Children {
 		if bead.IsEpic || !isDigest(bead) {
 			continue
 		}
 		if newest == nil || !bead.Created.Before(newest.Created) {
-			newest = &epic.Stories[i]
+			newest = &page.Children[i]
 		}
 	}
 	if newest == nil {

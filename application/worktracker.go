@@ -513,8 +513,9 @@ type BeadPage struct {
 	Bead StoryDetail
 	// Comments are the bead's, oldest first, as StoryComments lists them.
 	Comments []Comment
-	// Children are the direct children of a bead that is an epic, in the order
-	// they were filed, as ShowEpic lists its Stories; nil for anything else.
+	// Children are the direct children of the bead, whatever its type (a task
+	// can be a parent too), in the order they were filed, as ShowEpic lists its
+	// Stories; nil when it has none.
 	Children []StoryDetail
 	// Parent is the bead's parent read as an epic, only its Defaults and
 	// Stories filled in; nil when the bead has none, or its parent cannot be
@@ -573,8 +574,7 @@ type WorkTracker interface {
 	ShowBeads(ctx context.Context, ids []string) ([]StoryDetail, error)
 
 	// ShowBeadPage reads one bead with everything a page of its own shows, in as
-	// few calls as the tracker allows — two for a story with a parent, three
-	// for an epic with one: the bead as ShowBeads reads it, its comments as
+	// few calls as the tracker allows — three for a bead with a parent: the bead as ShowBeads reads it, its comments as
 	// StoryComments does, its children when it is an epic, and its parent's
 	// (see BeadPage). False, with nothing else, when the tracker does not know
 	// the bead. It reads and writes nothing.

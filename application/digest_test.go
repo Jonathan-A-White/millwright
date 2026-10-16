@@ -450,3 +450,43 @@ func TestDigestGoesOutWithTheDemosWhenTheLoopCannotBeRead(t *testing.T) {
 		t.Fatalf("the output does not say why the loop section is missing:\n%s", f.out.String())
 	}
 }
+
+func TestDigestSaysTheShareMovedWhenTheParentIsATaskBead(t *testing.T) {
+	f := newDigestFixture()
+	f.threeDemos(t)
+	// The default parent mw-6ww.119 is a task, not an epic.
+	f.tracker.AddStory("mw-e", domain.Story{ID: "mw-task", Title: "Weekly digests"})
+	f.tracker.AddStory("mw-task", domain.Story{ID: "mw-task.1", Title: "Weekly digest 2026-10-12: 2 factory demos"})
+	description := "- mw-x.1: Demo\n  VERIFIED\ninvest_share: 20%\n"
+	mustDo(t, f.tracker.EditStory(context.Background(), "mw-task.1", application.StoryEdit{Description: &description}))
+	mustDo(t, f.tracker.SetCreated("mw-task.1", time.Date(2026, 10, 12, 11, 0, 0, 0, time.UTC)))
+
+	if _, err := (application.Digest{
+		Tracker: f.tracker, Sender: f.sender, Parent: "mw-task", Loop: &fakeLoop{in: loopWeek()},
+		Now: func() time.Time { return time.Date(2026, 10, 19, 11, 0, 0, 0, time.UTC) },
+		Out: &f.out,
+	}.Run(context.Background())); err != nil {
+		t.Fatalf("mw digest send: %v", err)
+	}
+
+	if text := f.sender.Sent()[0].Text; !strings.Contains(text, "moved to 33% on 2026-10-19") {
+		t.Fatalf("the SHARE line does not say the share moved to 33%%:\n%s", text)
+	}
+	if strings.Contains(f.out.String(), "not known") {
+		t.Fatalf("the output says the previous share is not known:\n%s", f.out.String())
+	}
+}
+
+func TestDigestOptionWithNoDemosDoesNotCountThemAndWithSomeStillDoes(t *testing.T) {
+	if got := application.DigestLooksGoodOption(0); strings.Contains(got, "all 0") || got != "A: Looks good" {
+		t.Fatalf("the option for no demos is %q, want \"A: Looks good\"", got)
+	}
+	if got := application.DigestLooksGoodOption(2); got != "A: Looks good on all 2" {
+		t.Fatalf("the option for two demos is %q", got)
+	}
+	f := newDigestFixture()
+	f.runLoop(t, false, &fakeLoop{in: loopWeek()})
+	if got := f.sender.Sent()[0].Options[0]; strings.Contains(got, "all 0") {
+		t.Fatalf("the card with no demos offers %q", got)
+	}
+}

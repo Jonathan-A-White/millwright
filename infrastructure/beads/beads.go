@@ -317,7 +317,7 @@ func (g *Gateway) childrenOf(ctx context.Context, id string, defaults domain.Pat
 // ShowBeadPage implements application.WorkTracker: one bd show
 // --include-comments reads the bead, its comments, and the copy of its parent
 // bd embeds (the parent's type and default Path), and one bd list --parent
-// reads the children of the bead if it is an epic, and of its parent. A parent
+// reads the children of the bead, whatever its type, and of its parent. A parent
 // bd did not embed is read the way ShowEpic reads it. A parent that cannot be
 // read as an epic is left out of the page rather than failing it.
 func (g *Gateway) ShowBeadPage(ctx context.Context, id string) (application.BeadPage, bool, error) {
@@ -350,11 +350,9 @@ func (g *Gateway) ShowBeadPage(ctx context.Context, id string) (application.Bead
 
 	parentKind, parentDefaults, embedded := b.parentLink()
 	page := application.BeadPage{Bead: b.detail(parentDefaults), Comments: said[id]}
-	if b.Type == TypeEpic {
-		page.Children, err = g.childrenOf(ctx, id, domain.PathFromMetadata(b.pathMetadata()))
-		if err != nil {
-			return application.BeadPage{}, false, fmt.Errorf("reading the children of %s: %w", id, err)
-		}
+	page.Children, err = g.childrenOf(ctx, id, domain.PathFromMetadata(b.pathMetadata()))
+	if err != nil {
+		return application.BeadPage{}, false, fmt.Errorf("reading the children of %s: %w", id, err)
 	}
 	if b.Parent == "" {
 		return page, true, nil

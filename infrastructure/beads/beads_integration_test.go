@@ -1239,6 +1239,12 @@ func TestGatewayReadsABeadPageAsTheSeparateReadsDo(t *testing.T) {
 		t.Errorf("expected a page with no parent for a story under a task, got %+v found %v: %v", under.Parent, found, err)
 	}
 
+	// A task is a parent too: its page lists its children.
+	taskPage, found, err := gateway.ShowBeadPage(ctx, story)
+	if err != nil || !found || len(taskPage.Children) != 1 || taskPage.Children[0].Story.ID != orphaned {
+		t.Errorf("expected %s's page to list its one child %s, got %+v found %v: %v", story, orphaned, taskPage.Children, found, err)
+	}
+
 	if _, found, err := gateway.ShowBeadPage(ctx, "t-nope"); err != nil || found {
 		t.Errorf("expected a bead nobody filed to be not found without failing, got %v: %v", found, err)
 	}
