@@ -1364,6 +1364,25 @@ A story labelled `hitl` is still retried and its claim still given back, but
 dispatch passes a `hitl` story over, so the report adds a line naming the label
 and the cure: `bd update <id> --remove-label hitl`. See `features/retry.feature`.
 
+### The next attempt continues the branch (mw-1ljpo9.7)
+
+An attempt `mw next` refused at the gate or the merge (`tests-fail`,
+`merged-tests-fail`, `merge-conflict`), or stopped at its turn cap or with steps
+open, is most of its story already. `mw next` records it (the bd kv note
+`continue.<story>`, the attempt as its value), `mw retry` then keeps the branch
+and takes only the worktree away (the bundle is still made), and the dispatch that
+takes the story again keeps the branch as `mw/<story>-attempt<N>`, cuts the new
+worktree from it and rebases it onto the target, so the fix is a delta, not a
+rebuild. The boot tells the Builder `You continue attempt N's branch: read git log
+first`. A branch that does not rebase cleanly is put back and the worktree cut
+from the target after all, and the boot says so, naming the kept branch. A branch
+refused for what is in its commits (a signed commit) is not continued.
+
+`mw retry --from-main` deletes the branch and clears the note, so the next
+attempt starts from the target, as before; `retry_from_branch = false` under
+`[next]` in the config file is the rollback for every story. See
+`features/retry_from_branch.feature`.
+
 ## Running a rig's whole suite
 
 A story's gate runs the rig's `[tests]` command and only the e2e specs the
