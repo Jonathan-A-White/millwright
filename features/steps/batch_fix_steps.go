@@ -71,6 +71,8 @@ func registerBatchFixSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig's tests fail on the batch, saying "([^"]*)", until "([^"]*)" is committed$`, c.theTestsFailUntilCommitted)
 	ctx.Given(`^mw land may start a fixer, which commits "([^"]*)" and says it touched "([^"]*)"$`, c.aFixerThatCommits)
 	ctx.Given(`^mw land may start a fixer, which merges "([^"]*)" keeping both sides and says it touched "([^"]*)"$`, c.aFixerThatMerges)
+	ctx.Given(`^mw land may start a fixer, which merges "([^"]*)" and "([^"]*)" keeping both sides and says it touched "([^"]*)"$`, c.aFixerThatMergesBoth)
+	ctx.Then(`^no fixer was started$`, c.noFixerWasStarted)
 	ctx.Then(`^exactly one fixer was started, for batch (\d+), in a landing worktree holding the work of every story in it$`, c.exactlyOneFixerWasStarted)
 	ctx.Then(`^the fixer was started on the model "([^"]*)" with at most (\d+) turns$`, c.theFixerWasStartedOn)
 	ctx.Then(`^the fixer's prompt names the branch of every story in the batch and the tests' last words "([^"]*)"$`, c.theFixersPromptNamesTheBranches)
@@ -107,35 +109,54 @@ func (c *nextContext) aFixerThatCommits(file, touched string) error {
 // aFixerThatMerges merges the story's branch as the origin has it and settles
 // every conflicting file by keeping both sides, the batch's first.
 func (c *nextContext) aFixerThatMerges(id, touched string) error {
-	branch := application.StartPoint("origin", application.StoryBranch(id))
+	return c.aFixerThatMergesAll([]string{id}, touched)
+}
+
+// aFixerThatMergesBoth does the same for two stories, one after the other.
+func (c *nextContext) aFixerThatMergesBoth(first, second, touched string) error {
+	return c.aFixerThatMergesAll([]string{first, second}, touched)
+}
+
+func (c *nextContext) aFixerThatMergesAll(ids []string, touched string) error {
 	c.newFixer(touched, func(dir string) error {
-		if err := gitRun(dir, "git", "merge", "--no-edit", branch); err == nil {
-			return nil
-		}
-		conflicted, err := gitSay(dir, "diff", "--name-only", "--diff-filter=U")
-		if err != nil {
-			return err
-		}
-		for _, file := range strings.Fields(conflicted) {
-			ours, err := gitSay(dir, "show", "HEAD:"+file)
-			if err != nil {
-				return err
-			}
-			theirs, err := gitSay(dir, "show", branch+":"+file)
-			if err != nil {
-				return err
-			}
-			if err := os.WriteFile(filepath.Join(dir, file), []byte(ours+"\n"+theirs+"\n"), 0o644); err != nil {
-				return err
-			}
-		}
-		for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "--no-edit"}} {
-			if err := gitRun(dir, "git", args...); err != nil {
+		for _, id := range ids {
+			if err := mergeKeepingBothSides(dir, application.StartPoint("origin", application.StoryBranch(id))); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+	return nil
+}
+
+// mergeKeepingBothSides merges branch into the worktree dir and settles every
+// conflicting file by keeping both sides, the batch's first.
+func mergeKeepingBothSides(dir, branch string) error {
+	if err := gitRun(dir, "git", "merge", "--no-edit", branch); err == nil {
+		return nil
+	}
+	conflicted, err := gitSay(dir, "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return err
+	}
+	for _, file := range strings.Fields(conflicted) {
+		ours, err := gitSay(dir, "show", "HEAD:"+file)
+		if err != nil {
+			return err
+		}
+		theirs, err := gitSay(dir, "show", branch+":"+file)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dir, file), []byte(ours+"\n"+theirs+"\n"), 0o644); err != nil {
+			return err
+		}
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "--no-edit"}} {
+		if err := gitRun(dir, "git", args...); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -151,6 +172,20 @@ func (c *nextContext) theFixer() (*fakeFixer, error) {
 		return nil, fmt.Errorf("expected mw land to start a fixer, it started none\n%s", c.said())
 	}
 	return f, nil
+}
+
+func (c *nextContext) noFixerWasStarted() error {
+	f := c.batch.fixer
+	if f == nil {
+		return fmt.Errorf("the scenario gave mw land no fixer, so it proves nothing")
+	}
+	if f.err != nil {
+		return f.err
+	}
+	if len(f.started) != 0 {
+		return fmt.Errorf("expected no fixer, got %d: %+v", len(f.started), f.started)
+	}
+	return nil
 }
 
 func (c *nextContext) exactlyOneFixerWasStarted(number int) error {

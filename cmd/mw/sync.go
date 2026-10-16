@@ -179,7 +179,8 @@ func sessionHarness(vaultDir, host string, opts ...claude.Option) *claude.Harnes
 // dispatch, next and the Millhand's tick — treats the beads database alike.
 // A beads_backup_minutes that is not said is the mode's own default: 30, and
 // 5 for auto, which the sync applies once it knows it is on the home. It also
-// gives the sync the host's network, so that a backup waits out a metered one.
+// gives the sync the host's network, so that a backup waits out a metered one,
+// and the tracker's history, so that the home can squash it (mw-gq6.455).
 func hostSync(sync application.Sync) (application.Sync, error) {
 	files, _ := sync.Vault.(application.HomeFile)
 	setting, err := hostBeads(context.Background(), files, sync.Host)
@@ -192,6 +193,11 @@ func hostSync(sync application.Sync) (application.Sync, error) {
 	}
 	sync.Mode = setting.Configured
 	sync.Home = files
+	if sync.History == nil {
+		// The beads gateway is the history's adapter too; a tracker that
+		// keeps none squashes nothing.
+		sync.History, _ = sync.Tracker.(application.TrackerHistory)
+	}
 	if sync.Network == nil {
 		if sync.Network, err = hostNetwork(false); err != nil {
 			return sync, err

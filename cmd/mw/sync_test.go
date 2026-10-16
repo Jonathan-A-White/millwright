@@ -104,6 +104,21 @@ func TestHostSyncTakesTheModeAndBackupIntervalFromConfig(t *testing.T) {
 	}
 }
 
+func TestHostSyncGivesTheSyncTheTrackersHistory(t *testing.T) {
+	t.Setenv("MW_BEADS_SYNC", "")
+	t.Setenv("MW_BEADS_BACKUP_MINUTES", "")
+	mwConfig(t, "vault = \"/v\"\nhost = \"laptop\"\nbeads_sync = \"backup\"\n")
+	tracker := apptest.NewFakeTracker()
+
+	sync, err := hostSync(application.Sync{Host: "laptop", Tracker: tracker})
+	if err != nil {
+		t.Fatalf("reading the sync settings: %v", err)
+	}
+	if sync.History != tracker {
+		t.Fatalf("expected the tracker to be the sync's history too, got %v", sync.History)
+	}
+}
+
 func TestSyncCommandRefusesABeadsSyncModeNamingTheThree(t *testing.T) {
 	t.Setenv("MW_BEADS_SYNC", "")
 	mwConfig(t, "vault = \""+t.TempDir()+"\"\nhost = \"desktop\"\nbeads_sync = \"server\"\n")

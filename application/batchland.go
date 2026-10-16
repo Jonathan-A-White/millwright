@@ -83,7 +83,9 @@ type BatchMetrics interface {
 //
 // A red gate, a batch of which nothing merged, and a push that fails push
 // nothing: the batch is held, every story in it stays queued, and the Mayor is
-// mailed each story and why. The fixer that mends a held batch is Land Rush 5's.
+// mailed each story and why. The fixer that mends a held batch is Land Rush 5's;
+// a batch of which nothing merged only because every branch conflicts is given
+// it too.
 //
 // What the batch did is kept under runs/batch/<rig>/<n>/ either way. A dry run
 // reads the queue and prints the batch it would make, and does nothing else.
@@ -397,20 +399,24 @@ func (b BatchLand) dryRun(ctx context.Context, rigDir string, report *BatchRepor
 func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.EpicRequirements, report *BatchReport, nr *NextReport) {
 	n := b.Next
 	b.mergeAll(ctx, dir, rigDir, rules.UnionMergeFiles, report)
-	if len(report.Merged) == 0 {
-		report.Held = "no branch of the batch merged onto " + report.Target
-		return
-	}
-
 	// A branch set aside for its conflicts is the fixer's to merge, before the
 	// version is raised and the tests are run: what it merges then gets its
-	// changelog entry, and the batch is tested once, after it.
+	// changelog entry, and the batch is tested once, after it. A batch of which
+	// every branch was set aside for its conflicts is given it too: only when
+	// nothing is left for the fixer to merge, or none can start, is it held.
 	settings := rules.LandingSettings()
 	if b.mayFix() && report.conflicted() {
 		why := fmt.Sprintf("%s set aside for conflicts", strings.Join(storyIDs(report.SetAside), ", "))
 		if !b.fix(ctx, dir, rigDir, settings, report, why) {
 			return
 		}
+	}
+	if len(report.Merged) == 0 {
+		report.Held = "no branch of the batch merged onto " + report.Target
+		if report.Fixer != nil && report.Fixer.Started {
+			report.Held += ", even after its fixer " + report.Fixer.Name + " had ended"
+		}
+		return
 	}
 
 	if len(rules.VersionFiles) > 0 {

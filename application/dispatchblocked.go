@@ -54,9 +54,7 @@ func (d Dispatch) tellVaultBlocked(ctx context.Context, err error, report *Dispa
 		From:    SeatIdentity(MwSeat, d.Host),
 		To:      MayorMailbox,
 		Subject: fmt.Sprintf("%s: dispatch on %s is refused, the vault holds uncommitted changes", MailBlocked, d.Host),
-		Body: fmt.Sprintf("mw dispatch on %s claimed nothing: the vault holds uncommitted changes to %s, "+
-			"so the hosts could not be brought level. Every tick refuses the same way until they are committed "+
-			"(mw commits nobody's work for them); this is mailed once an hour for the same files.\n", d.Host, reason),
+		Body:    vaultBlockedBody(d.Host, d.VaultDir, blocked.Files),
 	}); serr != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the mail to %s about the dirty vault could not be sent: %v", MayorMailbox, serr))
 		return
@@ -64,6 +62,49 @@ func (d Dispatch) tellVaultBlocked(ctx context.Context, err error, report *Dispa
 	if nerr := d.Memory.SetNote(ctx, key, d.now().UTC().Format(time.RFC3339)+"|"+reason); nerr != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the dirty-vault mail was sent, but that could not be remembered: %v", nerr))
 	}
+}
+
+// vaultFileWriters says, for a vault file mw writes and commits itself, who
+// writes it and why a dirty copy is safe to commit as found: a run of that
+// command cut short between the write and its commit.
+var vaultFileWriters = map[string]string{
+	"hosts/vultr/cloud.json": "the cloud's book, written and committed by mw cloud check; " +
+		"a run cut short between the two leaves it so, and it is right as found",
+}
+
+// vaultBlockedBody is the dirty-vault mail: the host, each file, who writes
+// it when mw knows, and the command that clears the refusal (mw-gq6.462).
+func vaultBlockedBody(host, dir string, files []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "mw dispatch on %s claimed nothing: the vault holds uncommitted changes to %s, "+
+		"so the hosts could not be brought level. Every tick refuses the same way until they are committed "+
+		"(mw commits nobody's work for them); this is mailed once an hour for the same files.\n",
+		host, strings.Join(files, ", "))
+	for _, file := range files {
+		if writer, ok := vaultFileWriters[file]; ok {
+			fmt.Fprintf(&b, "\n%s is %s.\n", file, writer)
+		}
+	}
+	fmt.Fprintf(&b, "\nThe fix, once you have read the change: commit them as found,\n  %s\n"+
+		"or, for a change nobody wants, put them back with git checkout -- <file> in the vault. "+
+		"The next tick dispatches.\n", VaultBlockedFix(dir, host, files))
+	return b.String()
+}
+
+// VaultBlockedFix is the one command that commits the files a dispatch on
+// host was refused on, as found, in the vault at dir: a pathspec commit, so
+// nothing else the vault holds goes with them. An empty dir is the vault the
+// command is run in.
+func VaultBlockedFix(dir, host string, files []string) string {
+	words := []string{"git"}
+	if dir != "" {
+		words = append(words, "-C", shellWord(dir))
+	}
+	words = append(words, "commit", "-m", shellQuoted("commit as found what dispatch on "+host+" was refused on"), "--")
+	for _, file := range files {
+		words = append(words, shellWord(file))
+	}
+	return strings.Join(words, " ")
 }
 
 // clearVaultBlocked forgets the sighting once a sync finds the vault clean, so

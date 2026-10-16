@@ -308,7 +308,11 @@ func (r BatchReport) fixerMail() string {
 	if f.Trouble != "" {
 		fmt.Fprintf(&b, " (%s)", f.Trouble)
 	}
-	b.WriteString(". mw looked at the batch it left and ran the rig's tests on it again itself, and the batch is held: no second fixer is started.\n")
+	if !r.Tested && len(r.Merged) == 0 {
+		b.WriteString(". mw looked at the batch it left: none of the branches set aside was in it, so the rig's tests were not run, and the batch is held: no second fixer is started.\n")
+	} else {
+		b.WriteString(". mw looked at the batch it left and ran the rig's tests on it again itself, and the batch is held: no second fixer is started.\n")
+	}
 	if f.Commit != "" {
 		fmt.Fprintf(&b, "Its work is at commit %s in the rig, on no branch.\n", f.Commit)
 	}

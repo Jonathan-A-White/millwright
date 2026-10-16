@@ -185,6 +185,11 @@ type Dispatch struct {
 	// Mailbox tells nobody: the story is still marked and commented on.
 	Mailbox Mailbox
 
+	// VaultDir is the vault's directory, named in the mail that says the vault
+	// holds uncommitted changes, so its fix is a command to paste. Empty names
+	// no directory: the fix is run in the vault.
+	VaultDir string
+
 	// Remote is the remote a story's branch is cut from. Empty is DefaultRemote,
 	// and whatever it says must be the remote the Worktrees adapter fetches.
 	Remote string

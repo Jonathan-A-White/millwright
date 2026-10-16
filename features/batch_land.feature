@@ -177,6 +177,55 @@ Feature: mw land lands a batch rig's queue under one gate run
       | mw-gq6.2 |
     And the Mayor was sent no mail saying the batch was held
 
+  Scenario: A batch of which every branch was set aside for its conflicts is given the one fixer too, and lands once it has merged them (mw-gq6.503)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the other host landed a change to the same file as "mw-gq6.1" on "main"
+    And the other host landed a change to the same file as "mw-gq6.2" on "main"
+    And mw land may start a fixer, which merges "mw-gq6.1" and "mw-gq6.2" keeping both sides and says it touched "mw-gq6.1"
+    When mw lands the batch of the rig
+    Then exactly one fixer was started, for batch 1, in a landing worktree holding the work of every story in it
+    And the fixer's prompt names "mw-gq6.1.md" in the conflict of "mw-gq6.1"
+    And the fixer's prompt names "mw-gq6.2.md" in the conflict of "mw-gq6.2"
+    And the batch landed on "main" in one push, forcing nothing
+    And the rig's tests were run once on the batch
+    And "mw-gq6.1" is closed and recorded as landed, and "mw-gq6.1.md" at the rig's origin holds the words of both "mw-gq6.1" and "other host"
+    And the Mayor was sent no mail saying the batch was held
+
+  Scenario: A batch of which every branch was set aside, when the fixer merges none of them, is held and mailed, and no second fixer is started (mw-gq6.503)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the other host landed a change to the same file as "mw-gq6.1" on "main"
+    And the other host landed a change to the same file as "mw-gq6.2" on "main"
+    And mw land may start a fixer, which commits "TRIED" and says it touched "mw-gq6.1"
+    When mw lands the batch of the rig
+    Then exactly one fixer was started, for batch 1, in a landing worktree holding the work of every story in it
+    And the rig's tests were not run on the batch
+    And these stories are still queued for batch landing, none of them closed:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the batch is held, and the Mayor's mail names every story in it and says "no branch of the batch merged onto main, even after its fixer"
+
+  Scenario: A push the origin refuses holds the batch without a fixer, though one may be started (mw-gq6.503)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the origin refuses every push, saying:
+      """
+      push refused by the scenario
+      """
+    And mw land may start a fixer, which commits "TRIED" and says it touched "mw-gq6.1"
+    When mw lands the batch of the rig
+    Then no fixer was started
+    And the batch is held, and the Mayor's mail names every story in it and says "the push to main failed"
+
+  Scenario: A rig with nothing queued is given no fixer (mw-gq6.503)
+    Given mw land may start a fixer, which commits "TRIED" and says it touched "mw-gq6.1"
+    When mw lands the batch of the rig
+    Then no fixer was started
+
   Scenario: When mw's own run after the fixer is red, the batch is held and mailed, and no second fixer is started
     Given these stories are queued for batch landing:
       | mw-gq6.1 |
