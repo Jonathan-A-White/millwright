@@ -368,21 +368,21 @@ type LandedAlready struct {
 }
 
 // smokeHold is the reason a failed grist smoke holds the stories of rig, empty
-// when it does not. Each rig is asked once a pass; a record that cannot be read
-// holds nothing back.
-func (d Dispatch) smokeHold(ctx context.Context, rig string, asked map[string]GristSmokeHold) GristSmokeHold {
+// when it does not. The holds of every rig are read once a pass, on the first
+// story that asks, into holds: each read is a listing of the notes, two seconds
+// on a Boost (mw-gq6.452). Records that cannot be read hold nothing back.
+func (d Dispatch) smokeHold(ctx context.Context, rig string, holds *map[string]GristSmokeHold) GristSmokeHold {
 	if d.SmokeHolds == nil {
 		return GristSmokeHold{}
 	}
-	if hold, done := asked[rig]; done {
-		return hold
+	if *holds == nil {
+		read, err := d.SmokeHolds.Holds(ctx)
+		if err != nil || read == nil {
+			read = map[string]GristSmokeHold{}
+		}
+		*holds = read
 	}
-	hold, err := d.SmokeHolds.Hold(ctx, rig)
-	if err != nil {
-		hold = GristSmokeHold{}
-	}
-	asked[rig] = hold
-	return hold
+	return (*holds)[rig]
 }
 
 // HeldRefused is one story this dispatch found claimed here with a dead pane
@@ -716,12 +716,13 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		return report, fmt.Errorf("dispatching on %s: reading what is ready here: %w", d.Host, err)
 	}
 	ready = inStartOrder(ready)
+	reads := newCandidateReads(d.Tracker, d.Host, ready)
 
 	// The formulas installed are read once, and only if a story names one. A
 	// dry run reads them too, so that it reports the same refusal a real run
 	// would, without writing anything.
 	var formulas map[string]bool
-	smokeHolds := map[string]GristSmokeHold{}
+	var smokeHolds map[string]GristSmokeHold
 	// What the shared-files gate holds is kept in the host's note, so that mw
 	// status can say how long a story has waited on it (mw-gq6.442).
 	var held filesHeldPass
@@ -790,7 +791,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// filed on a story moments after bd decided it was ready is not always
 		// caught by it (mw-gq6.93), so what the candidate still waits on is read
 		// back fresh here rather than taken on the ready listing's word.
-		if blocker, status, blocked, err := d.blockedBy(ctx, detail); err != nil {
+		if blocker, status, blocked, err := blockedBy(ctx, reads, detail); err != nil {
 			return report, fmt.Errorf("dispatching on %s: %w", d.Host, err)
 		} else if blocked {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
@@ -810,7 +811,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// A rig whose last grist smoke failed holds its open stories, so that no
 		// more work lands on a mill that does not answer as its examples say. A story
 		// that names a failing example as its cause is the fix, and runs (mw-gq6.412).
-		if held := d.smokeHold(ctx, path.Rig, smokeHolds); held.Reason != "" && !held.Names(detail.SmokeExamples) {
+		if held := d.smokeHold(ctx, path.Rig, &smokeHolds); held.Reason != "" && !held.Names(detail.SmokeExamples) {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: held.Reason})
 			continue
 		}
@@ -875,7 +876,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// A story its Builder handed back, with no word since of what changed, is
 		// not run again: the same Builder would hand it back the same way. Before
 		// the cap, so it takes none of the sessions (mw-gq6.418).
-		if at, handedBack, err := handedBackOf(ctx, d.Tracker, detail); err != nil {
+		if at, handedBack, err := reads.handedBack(ctx, detail); err != nil {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
 				"whether its Builder handed it back could not be read, so it is not claimed: %v", oneLine(err.Error()))})
 			continue
@@ -2061,12 +2062,12 @@ func (d Dispatch) release(ctx context.Context, id string, why error) (bool, erro
 // its status as the tracker says it now — not as the ready listing said it a
 // moment ago. A need already closed is not a wait, the same as everywhere else
 // a story's Needs are read (see bead.needs and Brief.waitsOn).
-func (d Dispatch) blockedBy(ctx context.Context, detail StoryDetail) (blocker, status string, blocked bool, err error) {
-	// All of its needs are read together, since over a slow link each read is
-	// seconds; the first unfinished, in the order the story names them, is the
-	// one reported (mw-gq6.358).
-	read := map[string]StoryDetail{}
-	if err := readNeeded(ctx, d.Tracker, []StoryDetail{detail}, read); err != nil {
+func blockedBy(ctx context.Context, reads *candidateReads, detail StoryDetail) (blocker, status string, blocked bool, err error) {
+	// The needs of every candidate are read together, since over a slow link
+	// each read is seconds; the first unfinished, in the order the story names
+	// them, is the one reported (mw-gq6.358, mw-gq6.452).
+	read, err := reads.needed(ctx, detail)
+	if err != nil {
 		return "", "", false, err
 	}
 	for _, need := range detail.Needs {
