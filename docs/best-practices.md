@@ -363,10 +363,11 @@ any rig. The escape for a true one-off is `Sweep: none, because <reason>`; a bar
 **A change to the factory names the metric it should move.** A millwright story's
 acceptance criteria carry a line `Expect: <metric> <up|down>`, the metric one of
 `refusals`, `attempts/landing`, `bugs/landing`, `escaped bugs`, `dispatch-to-landing`,
-`tokens/landing` or `$/landing`, or `Expect: none, because <reason>`. `mw report`
-then compares that metric for the whole factory in the 7 days before and the 7
-days after the landing, under FACTORY CHANGES, and calls the change WORSE when it
-moved the wrong way by more than a 10% band. See
+`tokens/landing` or `$/landing`, or `Expect: none, because <reason>`; `mw file`
+refuses one without. `mw report` then compares that metric for the whole factory
+in the 14 days before and the 14 days after the landing, under FACTORY CHANGES,
+and once those are over calls the change KEPT, or WORSE when it moved the wrong
+way by more than a 10% band. See
 [*Filing a millwright story*](wayfinding-on-beads.md#filing-a-millwright-story).
 
 **A class of error seen once is checked everywhere it can occur.** A bug fixed in

@@ -196,7 +196,7 @@ func TestTitlesOverTheTrackersLimitAreRefused(t *testing.T) {
 	plan := func(epicTitle, storyTitle string) domain.Plan {
 		return domain.Plan{
 			Epic:    domain.PlanEpic{Title: epicTitle, Defaults: defaults},
-			Stories: []domain.PlanStory{{Key: "a", Title: storyTitle, Acceptance: "it passes"}},
+			Stories: []domain.PlanStory{{Key: "a", Title: storyTitle, Acceptance: "it passes\nExpect: none, because a test"}},
 		}
 	}
 	long := strings.Repeat("t", domain.MaxTitleLength+1)

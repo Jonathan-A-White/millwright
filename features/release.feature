@@ -35,7 +35,7 @@ Feature: Releasing a plan filed earlier
             "priority": 1,
             "estimate": 60,
             "description": "Create the module and the Path value type.",
-            "acceptance": "make test passes.",
+            "acceptance": "make test passes.\nExpect: none, because a test plan",
             "needs": []
           },
           {
@@ -44,7 +44,7 @@ Feature: Releasing a plan filed earlier
             "priority": 1,
             "estimate": 90,
             "description": "Read and write stories through bd.",
-            "acceptance": "make test passes.",
+            "acceptance": "make test passes.\nExpect: none, because a test plan",
             "needs": ["module"]
           },
           {
@@ -53,7 +53,7 @@ Feature: Releasing a plan filed earlier
             "priority": 2,
             "estimate": 30,
             "description": "Author the tdd-feature and chore formulas.",
-            "acceptance": "Both formulas cook.",
+            "acceptance": "Both formulas cook.\nExpect: none, because a test plan",
             "path": { "model": "sonnet", "formula": "chore" },
             "needs": []
           }

@@ -34,7 +34,7 @@ Feature: Filing the Mayor's plan
             "priority": 1,
             "estimate": 60,
             "description": "Create the module and the Path value type.",
-            "acceptance": "make test passes.",
+            "acceptance": "make test passes.\nExpect: none, because a test plan",
             "needs": []
           },
           {
@@ -43,7 +43,7 @@ Feature: Filing the Mayor's plan
             "priority": 1,
             "estimate": 90,
             "description": "Read and write stories through bd.",
-            "acceptance": "make test passes.",
+            "acceptance": "make test passes.\nExpect: none, because a test plan",
             "needs": ["module"]
           },
           {
@@ -52,7 +52,7 @@ Feature: Filing the Mayor's plan
             "priority": 2,
             "estimate": 30,
             "description": "Author the tdd-feature and chore formulas.",
-            "acceptance": "Both formulas cook.",
+            "acceptance": "Both formulas cook.\nExpect: none, because a test plan",
             "path": { "model": "sonnet", "formula": "chore" },
             "needs": []
           }
@@ -87,7 +87,7 @@ Feature: Filing the Mayor's plan
           "defaults": { "rig": "millwright", "harness": "claude", "model": "opus", "effort": "high", "host": "vps" }
         },
         "stories": [
-          { "key": "module", "title": "Go module", "acceptance": "make test passes.", "needs": [] }
+          { "key": "module", "title": "Go module", "acceptance": "make test passes.\nExpect: none, because a test plan", "needs": [] }
         ]
       }
       """
@@ -105,8 +105,8 @@ Feature: Filing the Mayor's plan
           "defaults": { "rig": "millwright", "branch": "main", "harness": "claude", "model": "opus", "effort": "high", "host": "vps" }
         },
         "stories": [
-          { "key": "module", "title": "Go module", "acceptance": "make test passes.", "needs": ["gateway"] },
-          { "key": "gateway", "title": "Beads gateway", "acceptance": "make test passes.", "needs": ["module"] }
+          { "key": "module", "title": "Go module", "acceptance": "make test passes.\nExpect: none, because a test plan", "needs": ["gateway"] },
+          { "key": "gateway", "title": "Beads gateway", "acceptance": "make test passes.\nExpect: none, because a test plan", "needs": ["module"] }
         ]
       }
       """
@@ -124,7 +124,7 @@ Feature: Filing the Mayor's plan
           "defaults": { "rig": "millwright", "branch": "main", "harness": "claude", "model": "opus", "effort": "high", "host": "vps" }
         },
         "stories": [
-          { "key": "module", "title": "Go module", "acceptance": "make test passes.", "needs": ["runner"] }
+          { "key": "module", "title": "Go module", "acceptance": "make test passes.\nExpect: none, because a test plan", "needs": ["runner"] }
         ]
       }
       """
@@ -142,7 +142,7 @@ Feature: Filing the Mayor's plan
           "defaults": { "rig": "millwright", "branch": "main", "harness": "claude", "model": "opus", "effort": "high", "host": "vps" }
         },
         "stories": [
-          { "key": "module", "title": "Go module", "acceptance": "make test passes.", "path": { "formula": "story" }, "needs": [] }
+          { "key": "module", "title": "Go module", "acceptance": "make test passes.\nExpect: none, because a test plan", "path": { "formula": "story" }, "needs": [] }
         ]
       }
       """
@@ -260,9 +260,9 @@ Feature: Filing the Mayor's plan
           "defaults": { "rig": "millwright", "branch": "main", "harness": "claude", "model": "opus", "effort": "high", "host": "vps" }
         },
         "stories": [
-          { "key": "crash", "title": "[bug] The reader crashes on an empty book", "acceptance": "1. An empty book opens.\n2. Sweep listed in the closing comment.", "needs": [] },
-          { "key": "page", "title": "The page is lost after rotate", "labels": ["bug"], "acceptance": "Rotating keeps the page.", "needs": [] },
-          { "key": "lazy", "title": "[bug] The title wraps", "acceptance": "1. It fits.\n2. Sweep: none", "needs": [] }
+          { "key": "crash", "title": "[bug] The reader crashes on an empty book", "acceptance": "1. An empty book opens.\n2. Sweep listed in the closing comment.\nExpect: none, because a test plan", "needs": [] },
+          { "key": "page", "title": "The page is lost after rotate", "labels": ["bug"], "acceptance": "Rotating keeps the page.\nExpect: none, because a test plan", "needs": [] },
+          { "key": "lazy", "title": "[bug] The title wraps", "acceptance": "1. It fits.\n2. Sweep: none\nExpect: none, because a test plan", "needs": [] }
         ]
       }
       """
@@ -284,14 +284,56 @@ Feature: Filing the Mayor's plan
           "defaults": { "rig": "millwright", "branch": "main", "harness": "claude", "model": "opus", "effort": "high", "host": "vps" }
         },
         "stories": [
-          { "key": "crash", "title": "[bug] The reader crashes on an empty book", "acceptance": "1. An empty book opens.\nSweep: none, because only the reader opens books.", "needs": [] },
-          { "key": "page", "title": "The page is lost after rotate", "labels": ["bug"], "acceptance": "1. Rotating keeps the page.\n7. Sweep: every viewport effect is grepped for state it drops.", "needs": [] },
-          { "key": "theme", "title": "A dark theme", "acceptance": "The reader can be dark.", "needs": [] },
-          { "key": "silent", "title": "[bug] A failed run is silent", "acceptance": "1. A failed run sends one email. 4. A held lock exits non-zero. 5. Sweep: every error return path goes through the one notifier. 6. Gate green.", "needs": [] },
-          { "key": "dash", "title": "[bug] The margin drifts", "acceptance": "- It stays put.\n- Sweep: every margin setter is grepped.", "needs": [] }
+          { "key": "crash", "title": "[bug] The reader crashes on an empty book", "acceptance": "1. An empty book opens.\nSweep: none, because only the reader opens books.\nExpect: none, because a test plan", "needs": [] },
+          { "key": "page", "title": "The page is lost after rotate", "labels": ["bug"], "acceptance": "1. Rotating keeps the page.\n7. Sweep: every viewport effect is grepped for state it drops.\nExpect: none, because a test plan", "needs": [] },
+          { "key": "theme", "title": "A dark theme", "acceptance": "The reader can be dark.\nExpect: none, because a test plan", "needs": [] },
+          { "key": "silent", "title": "[bug] A failed run is silent", "acceptance": "1. A failed run sends one email. 4. A held lock exits non-zero. 5. Sweep: every error return path goes through the one notifier. 6. Gate green.\nExpect: none, because a test plan", "needs": [] },
+          { "key": "dash", "title": "[bug] The margin drifts", "acceptance": "- It stays put.\n- Sweep: every margin setter is grepped.\nExpect: none, because a test plan", "needs": [] }
         ]
       }
       """
     When the plan is filed
     Then filing succeeds
     And the stories are filed in the order crash, page, theme, silent, dash
+
+  Scenario: A millwright story with no Expect line it can read is refused and nothing is written
+    Given the plan:
+      """
+      {
+        "epic": {
+          "key": "factory",
+          "title": "Factory work",
+          "defaults": { "rig": "millwright", "branch": "main", "harness": "claude", "model": "opus", "effort": "high", "host": "vps" }
+        },
+        "stories": [
+          { "key": "judge", "title": "Judge the changes", "acceptance": "1. It works.", "needs": [] },
+          { "key": "speed", "title": "Go faster", "acceptance": "1. It works.\n2. Expect: speed up", "needs": [] },
+          { "key": "doc", "title": "A doc", "acceptance": "1. It reads.\nExpect: none", "needs": [] }
+        ]
+      }
+      """
+    When the plan is filed
+    Then filing is refused, saying: story judge: it is a millwright story and no line begins with 'Expect:': it needs a line 'Expect: <metric> up' or 'Expect: <metric> down', or 'Expect: none, because <why>'
+    And filing is refused, saying: story speed: it is a millwright story and 'Expect: speed up' is not
+    And filing is refused, saying: story doc: it is a millwright story and 'Expect: none' gives no reason
+    And nothing is written
+
+  Scenario: A millwright story with an Expect line is filed, and a story of another rig needs none
+    Given the plan:
+      """
+      {
+        "epic": {
+          "key": "factory",
+          "title": "Factory work",
+          "defaults": { "rig": "millwright", "branch": "main", "harness": "claude", "model": "opus", "effort": "high", "host": "vps" }
+        },
+        "stories": [
+          { "key": "judge", "title": "Judge the changes", "acceptance": "1. It works.\n2. Expect: refusals down", "needs": [] },
+          { "key": "doc", "title": "A doc", "acceptance": "1. It reads.\n- Expect: none, because it is a doc", "needs": [] },
+          { "key": "board", "title": "A todo board", "acceptance": "1. It shows todos.", "path": { "rig": "lampas" }, "needs": [] }
+        ]
+      }
+      """
+    When the plan is filed
+    Then filing succeeds
+    And the stories are filed in the order judge, doc, board

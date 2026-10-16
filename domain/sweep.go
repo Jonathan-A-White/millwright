@@ -2,7 +2,6 @@ package domain
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -45,19 +44,6 @@ func (v SweepVerdict) String() string {
 	return "has a Sweep line"
 }
 
-// A line's own number or bullet may come before the word: "3. Sweep: ...". The
-// bullet is trimmed first (TrimListMarker); a number may go without its stop.
-var sweepLine = regexp.MustCompile(`(?i)^(?:\d+\s*[.)]?\s*)?sweep:(.*)$`)
-
-// sweepItem is a numbered Sweep item run on in a line after other items, as
-// "... 4. It exits non-zero. 5. Sweep: ..." (mw-6drexa.1, mw-gq6.469). Without
-// its number the word mid-line is prose, not an item.
-var sweepItem = regexp.MustCompile(`(?i)\s\d+[.)]\s+sweep:(.*)$`)
-
-// nextItem is where the next numbered item of a run-on line begins: the end of
-// the Sweep item before it.
-var nextItem = regexp.MustCompile(`\s\d+[.)]\s`)
-
 // SweepRuleName is the name of the rule, as mw dispatch gives it for a bug it
 // does not claim for want of a sweep.
 const SweepRuleName = "no-sweep"
@@ -76,23 +62,12 @@ func (v SweepVerdict) FilingRefusal() string {
 }
 
 // SweepOf reads the acceptance criteria for a sweep line, or a numbered Sweep
-// item run on in a line after others. The best line wins: one that passes beats
-// one that does not.
+// item run on in a line after others, by LinesBeginning.
+// The best line wins: one that passes beats one that does not.
 func SweepOf(acceptance string) SweepVerdict {
 	verdict := SweepMissing
-	for _, line := range strings.Split(acceptance, "\n") {
-		found := sweepLine.FindStringSubmatch(TrimListMarker(line))
-		if found == nil {
-			found = sweepItem.FindStringSubmatch(line)
-		}
-		if found == nil {
-			continue
-		}
-		text := found[1]
-		if next := nextItem.FindStringIndex(text); next != nil {
-			text = text[:next[0]]
-		}
-		got := sweepVerdict(strings.TrimSpace(text))
+	for _, text := range LinesBeginning(acceptance, "Sweep") {
+		got := sweepVerdict(text)
 		if got == SweepGiven {
 			return SweepGiven
 		}

@@ -27,8 +27,8 @@ func twoStoryPlan() domain.Plan {
 			},
 		},
 		Stories: []domain.PlanStory{
-			{Key: "module", Title: "Go module", Acceptance: "make test passes", Estimate: 60},
-			{Key: "gateway", Title: "Beads gateway", Acceptance: "make test passes", Needs: []string{"module"}},
+			{Key: "module", Title: "Go module", Acceptance: "make test passes\nExpect: none, because a test plan", Estimate: 60},
+			{Key: "gateway", Title: "Beads gateway", Acceptance: "make test passes\nExpect: none, because a test plan", Needs: []string{"module"}},
 		},
 	}
 }
@@ -264,7 +264,7 @@ func sizedPlan(sizes ...domain.Size) domain.Plan {
 	plan.Stories = nil
 	for i, size := range sizes {
 		plan.Stories = append(plan.Stories, domain.PlanStory{
-			Key: fmt.Sprintf("s%d", i), Title: fmt.Sprintf("Story %d", i), Acceptance: "make test passes",
+			Key: fmt.Sprintf("s%d", i), Title: fmt.Sprintf("Story %d", i), Acceptance: "make test passes\nExpect: none, because a test plan",
 			Overrides: domain.Path{Size: size},
 		})
 	}

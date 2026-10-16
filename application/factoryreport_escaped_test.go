@@ -145,8 +145,8 @@ func TestQualityCountsEscapedBugsPerRigAndPerModelOfTheLandingWithTheArrow(t *te
 	}
 }
 
-func TestEscapedBugsIsAnExpectMetricJudgedTheWeekBeforeAgainstTheWeekAfter(t *testing.T) {
-	got, err := application.ParseExpect("1. It works.\n2. Expect: escaped bugs down, because the Tester looks harder")
+func TestEscapedBugsIsAnExpectMetricJudgedTheDaysBeforeAgainstTheDaysAfter(t *testing.T) {
+	got, err := domain.ParseExpect("1. It works.\n2. Expect: escaped bugs down, because the Tester looks harder")
 	if err != nil || got.Metric != "escaped bugs" || got.Direction != "down" {
 		t.Fatalf("got %+v, %v; want escaped bugs down", got, err)
 	}
@@ -160,10 +160,10 @@ func TestEscapedBugsIsAnExpectMetricJudgedTheWeekBeforeAgainstTheWeekAfter(t *te
 
 	result, printed := f.report(false)
 	c := changeOf(t, result, "mw-e.4")
-	if c.Verdict != application.ChangeBetter || c.Before == nil || *c.Before != 2 || c.After == nil || *c.After != 0 {
-		t.Errorf("change %+v; want 2 → 0, better", c)
+	if c.Verdict != application.ChangeKept || c.Before == nil || *c.Before != 2 || c.After == nil || *c.After != 0 {
+		t.Errorf("change %+v; want 2 → 0, KEPT", c)
 	}
-	if !strings.Contains(printed, "2 → 0 (-100%): better") {
+	if !strings.Contains(printed, "2 → 0 (-100%): KEPT") {
 		t.Errorf("FACTORY CHANGES does not show the move:\n%s", printed)
 	}
 }

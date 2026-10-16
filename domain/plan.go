@@ -61,6 +61,15 @@ func (s PlanStory) PathOverrides() Path {
 	return overrides
 }
 
+// rig is the rig this planned story would be worked in: its own, else the
+// epic's default, whether or not the rest of its Path is whole.
+func (s PlanStory) rig(defaults Path) string {
+	if rig := strings.TrimSpace(s.Overrides.Rig); rig != "" {
+		return rig
+	}
+	return strings.TrimSpace(defaults.Rig)
+}
+
 // PathFrom is the Path this planned story would be worked by: the epic's
 // defaults with the story's own overrides on top, or the reason it is no Path.
 func (s PlanStory) PathFrom(defaults Path) (Path, error) {
@@ -165,6 +174,7 @@ func FitTitleToSteps(title, storyID string, stepTitles []string) string {
 // Validate reports every reason this plan cannot be filed: an epic with no
 // title, a story with no key, no title, a title over MaxTitleLength, no acceptance criteria or no Path, a
 // bug (a [bug] title or the bug label) whose acceptance has no Sweep line SweepOf passes, a
+// story of the FactoryRig whose acceptance has no Expect line ParseExpect reads, a
 // story waiting on a key no story in the plan has, and stories waiting on each
 // other. It comes back as a *PlanRefused, or nil when the plan is filable.
 func (p Plan) Validate() error {
@@ -206,6 +216,11 @@ func (p Plan) Validate() error {
 		// A plan is filed now, after SweepRuleFrom, so every bug in it owes a sweep.
 		if verdict := SweepOf(story.Acceptance); IsBug("", story.Title, story.Labels) && !verdict.Passes() {
 			reasons = append(reasons, name+": "+verdict.FilingRefusal())
+		}
+		if OwesAnExpect(story.rig(p.Epic.Defaults)) {
+			if _, err := ParseExpect(story.Acceptance); err != nil {
+				reasons = append(reasons, name+": "+ExpectRefusal(err))
+			}
 		}
 	}
 

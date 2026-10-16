@@ -47,7 +47,7 @@ func (c *fileContext) theRequiringPlan(rig, description string, table *godog.Tab
 		story := domain.PlanStory{
 			Key:        row.Cells[columns["key"]].Value,
 			Title:      row.Cells[columns["key"]].Value,
-			Acceptance: "it works",
+			Acceptance: "it works\nExpect: none, because a test plan",
 			Labels:     splitList(row.Cells[columns["labels"]].Value),
 			Needs:      splitList(row.Cells[columns["needs"]].Value),
 		}

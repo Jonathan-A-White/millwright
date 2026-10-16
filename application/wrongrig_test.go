@@ -25,7 +25,7 @@ func wrongRigHost() (map[string]string, *apptest.FakeRigFiles) {
 func wrongRigPlan(files string) domain.Plan {
 	plan := twoStoryPlan()
 	plan.Epic.Defaults.Host = "desktop"
-	plan.Stories = []domain.PlanStory{{Key: "board", Title: "Todo board", Acceptance: "make test passes", Files: files}}
+	plan.Stories = []domain.PlanStory{{Key: "board", Title: "Todo board", Acceptance: "make test passes\nExpect: none, because a test plan", Files: files}}
 	return plan
 }
 

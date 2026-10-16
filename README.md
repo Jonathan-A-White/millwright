@@ -276,7 +276,9 @@ the whole plan before it writes any of it — every story must resolve to a Path
 carry acceptance criteria, and wait only on stories the plan has, never on
 itself or in a circle; a bug (a `[bug]` title or the `bug` label) must carry a
 line beginning `Sweep:`, as `mw dispatch` would otherwise refuse it as `no-sweep`
-(mw-gq6.447) — and reports every reason it will not file a plan, not
+(mw-gq6.447); a story of the `millwright` rig must carry a line `Expect: <metric> up`
+or `down`, or `Expect: none, because <why>`, so that FACTORY CHANGES can judge it
+(mw-2zh33g.14) — and reports every reason it will not file a plan, not
 just the first. A plan that cannot be filed leaves the tracker untouched: half
 a plan in the tracker looks like work somebody meant.
 
@@ -546,8 +548,11 @@ cause, naming their stories (the first 5, then `+N more`; `--json` has all under
 at least 3 of them; R3 a story that used up its attempts or needed 3; R4 a rig's
 refusal rate up 5 points or more on the window before; R5 a kind whose par is flagged
 by the calibration (its FLAG line); R6 a host's latest gate at least 1.5
-times its usual; R7 the investment share under half the target or over double it. When none holds it says `CHEAP WINS: none seen`. `--json` has
-`cheap_wins`, every rule that held with its `rule` id (`R1` to `R7`), its `text` and
+times its usual; R7 the investment share under half the target or over double it.
+Before them all comes R8, one line for each factory change judged WORSE that no
+story names as its fix by a line `Fixes: <id>` in its description or acceptance.
+When none holds it says `CHEAP WINS: none seen`. `--json` has
+`cheap_wins`, every rule that held with its `rule` id (`R1` to `R8`), its `text` and
 whether it was `shown`. The thresholds are PROVISIONAL. The section only suggests: it
 files nothing, and the bigger call stays the Mayor's.
 

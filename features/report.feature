@@ -14,13 +14,15 @@ Feature: mw report
   CHEAP WINS: at most three one-line suggestions chosen by fixed rules over its
   numbers, quality rules first, or "CHEAP WINS: none seen". Before CHEAP WINS
   comes FACTORY CHANGES: each millwright landing of the last 30 days with the
-  "Expect: <metric> <up|down>" line of its acceptance, the metric in the 7 days
-  before and after the landing, and WORSE when it went the wrong way past a 10%
-  band. The writes of mw report send tell the Mayor of a WORSE change once and
-  keep one snapshot of the key metrics a day. Beside the bugs filed, QUALITY
-  counts the escaped bugs: a [bug] story of a landing's rig filed on its day or
-  in the 14 days after, naming its story id; FACTORY CHANGES shows each
-  landing's own.
+  "Expect: <metric> <up|down>" line of its acceptance, the metric in the 14 days
+  before and after the landing, and once those 14 days are over a verdict: KEPT
+  when it moved the right way or held, WORSE when it went the wrong way past a
+  10% band, NONE for "Expect: none". A WORSE change no story names as its fix
+  (a line "Fixes: <id>") is a cheap win. The writes of mw report send tell the
+  Mayor of a WORSE change once and keep one snapshot of the key metrics a day.
+  Beside the bugs filed, QUALITY counts the escaped bugs: a [bug] story of a
+  landing's rig filed on its day or in the 14 days after, naming its story id;
+  FACTORY CHANGES shows each landing's own.
 
   Background:
     Given a report factory whose clock reads "2026-10-11T12:00:00Z"
@@ -473,34 +475,35 @@ Feature: mw report
     Then no line of the report is wider than 60 columns
     And the report wrote nothing to the tracker or the vault
 
-  Scenario: FACTORY CHANGES compares a millwright landing's metric the week before and the week after
+  Scenario: FACTORY CHANGES compares a millwright landing's metric the 14 days before and the 14 days after
     Given "lampas" landed 4 and refused 1 on "2026-09-15"
     And "lampas" landed 2 and refused 2 on "2026-09-23"
     And the factory change "mw-c1" titled "Make refusals rarer" landed on "2026-09-20" with the acceptance "1. It works.\n2. Expect: refusals down"
     When mw report runs with "--since 7d"
     Then the report prints the line "FACTORY CHANGES (millwright landings, 30 days)"
-    And the report prints the line "7 days before vs 7 after; WORSE past a 10% band"
+    And the report prints the line "14 days before vs 14 after; WORSE past a 10% band"
     And the report prints "landed 2026-09-20, Expect: refusals down" under "Make refusals rarer (mw-c1)"
     And the report prints "20% → 50% (+150%): WORSE" under "Make refusals rarer (mw-c1)"
     And no line of the report is wider than 60 columns
     And the report wrote nothing to the tracker or the vault
 
-  Scenario: A change that moved its metric the right way is better, not WORSE
+  Scenario: A change that moved its metric the right way is KEPT, not WORSE
     Given "lampas" landed 2 and refused 2 on "2026-09-15"
     And "lampas" landed 5 and refused 0 on "2026-09-23"
     And the factory change "mw-c2" titled "Fewer refusals" landed on "2026-09-20" with the acceptance "Expect: refusals down"
     When mw report runs with "--since 7d"
-    Then the report prints "50% → 0% (-100%): better" under "Fewer refusals (mw-c2)"
+    Then the report prints "50% → 0% (-100%): KEPT" under "Fewer refusals (mw-c2)"
     And the report prints no line starting "50% → 0% (-100%): WORSE"
 
-  Scenario: A change less than a week old is too soon, one with no metric to move says so
+  Scenario: A change less than 14 days old is too soon, one with no metric to move is NONE
     Given "lampas" landed 4 and refused 1 on "2026-10-05"
     And the factory change "mw-c3" titled "Brand new" landed on "2026-10-08" with the acceptance "Expect: refusals down"
     And the factory change "mw-c4" titled "A doc" landed on "2026-09-25" with the acceptance "Expect: none, because it is a doc"
     And the factory change "mw-c5" titled "Unmeasured" landed on "2026-09-26" with the acceptance "1. It works."
     When mw report runs with "--since 7d"
-    Then the report prints "too soon: the week after ends 2026-10-15" under "Brand new (mw-c3)"
+    Then the report prints "too soon: the 14 days after end 2026-10-22" under "Brand new (mw-c3)"
     And the report prints "landed 2026-09-25, Expect: none" under "A doc (mw-c4)"
+    And the report prints "NONE: no metric to judge" under "A doc (mw-c4)"
     And the report prints the line "1 landed with no Expect named (--json lists them)"
     And the report prints no line starting "Unmeasured"
 

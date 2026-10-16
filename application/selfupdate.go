@@ -3,12 +3,14 @@ package application
 import (
 	"context"
 	"fmt"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // FactoryRig is the rig the factory itself is built from, and FactoryBranch the
 // branch of it every host runs its mw from.
 const (
-	FactoryRig    = "millwright"
+	FactoryRig    = domain.FactoryRig
 	FactoryBranch = "main"
 )
 
