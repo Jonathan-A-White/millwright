@@ -302,6 +302,12 @@ func TOMLLiteral(value string) (string, error) {
 			return trimmed, nil
 		}
 	}
+	return tomlBasicString(value), nil
+}
+
+// tomlBasicString is value as a one-line TOML basic string, quoted, with every
+// quote, backslash and control character escaped.
+func tomlBasicString(value string) string {
 	var quoted strings.Builder
 	quoted.WriteByte('"')
 	for _, r := range value {
@@ -318,7 +324,7 @@ func TOMLLiteral(value string) (string, error) {
 		}
 	}
 	quoted.WriteByte('"')
-	return quoted.String(), nil
+	return quoted.String()
 }
 
 // TOMLString is the string a single-line TOML string literal holds, and true;
