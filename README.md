@@ -548,6 +548,28 @@ remembers nothing.
 only the home sends. `mw doctor` restarts the timer if it is found stopped
 (`mw-report.service` is among its default units). See `features/report_send.feature`.
 
+## The factory's investments
+
+```sh
+bin/mw invest add mw-1ljpo9.9 --aim "cut the Builder's tokens" --predict "20% fewer tokens per landing" --measure "tokens/landing in mw report" --review 14
+bin/mw invest outcome mw-1ljpo9.9 --result win --actual "tokens/landing fell 22%" --lesson "the trim mattered" [--next "<better approach or bead>"]
+bin/mw invest due      # review date passed, no outcome yet
+bin/mw invest list     # every investment, its outcomes in order, the lessons
+```
+
+`mw invest` keeps an append-only ledger, `plans/investments/ledger.jsonl` in the vault,
+one JSON line each, stamped with the UTC time and the actor. `add` records what an
+investment aims at, the gain predicted (tokens, speed or quality), how it is measured and
+the days until it is looked at again; a second `add` for the same bead is refused.
+`outcome` records `win`, `loss` or `mixed`, what actually happened with numbers, the
+lesson and, if there is one, the better approach. A line is never edited: a later
+outcome is a new line, and the newest is the one `list` and `mw report` show. `due`
+lists the investments whose review date has passed with no outcome.
+
+`mw report` gains an INVESTMENTS part after FACTORY CHANGES: the wins its window
+recorded, named with their measured gain; the losses with their lesson and the better
+approach; and the count still due. See `features/invest.feature`.
+
 ## Changing one key of the config file
 
 ```sh
