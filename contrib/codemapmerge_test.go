@@ -373,6 +373,43 @@ func TestRealCodemapPassesItsCheck(t *testing.T) {
 	}
 }
 
+func TestCheckCodemapWarnsPast9500BytesAndStillPasses(t *testing.T) {
+	// The squeeze shows before a merge fails (mw-gq6.496): past 9500 bytes the
+	// check passes but names the bytes left under the cap; past 10240 it fails.
+	sized := func(n int) string {
+		head := "# Map\n"
+		return head + strings.Repeat("a", n-len(head)-1) + "\n"
+	}
+	code, out := checkCodemapIn(t, sized(9501))
+	if code != 0 {
+		t.Fatalf("check-codemap refused a 9501-byte map (exit %d):\n%s", code, out)
+	}
+	for _, want := range []string{"warning", "9501", "739 bytes left"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output does not mention %q:\n%s", want, out)
+		}
+	}
+	if code, out = checkCodemapIn(t, sized(10240)); code != 0 || !strings.Contains(out, "warning") {
+		t.Fatalf("a 10240-byte map should pass with a warning (exit %d):\n%s", code, out)
+	}
+	if code, out = checkCodemapIn(t, sized(9500)); code != 0 || strings.Contains(out, "warning") {
+		t.Fatalf("a 9500-byte map should pass without a warning (exit %d):\n%s", code, out)
+	}
+	if code, _ = checkCodemapIn(t, sized(10241)); code == 0 {
+		t.Fatalf("a 10241-byte map should fail")
+	}
+}
+
+func TestRealCodemapKeepsHeadroomUnder8700Bytes(t *testing.T) {
+	body, err := os.ReadFile("../docs/codemap.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) > 8700 {
+		t.Fatalf("docs/codemap.md is %d bytes, over the 8700 the trim of mw-gq6.496 left room for", len(body))
+	}
+}
+
 // checkCodemapIn runs a copy of scripts/check-codemap.sh over a codemap of the
 // given text in a throwaway repository, and returns its exit status and output.
 func checkCodemapIn(t *testing.T, codemap string) (int, string) {
