@@ -44,7 +44,8 @@ type CheapWin struct {
 }
 
 // HeavyStory is a story of the window that used up its attempts or needed
-// DefaultMaxAttempts of them.
+// DefaultMaxAttempts of them. Attempts is the story's own count (OwnAttempts):
+// the attempts mw cause named test, tooling or process are not its size's doing.
 type HeavyStory struct {
 	ID       string
 	Attempts int

@@ -190,3 +190,17 @@ func TestAWrappedRuleOneFitsTheReportWidthAndKeepsItsPlusMore(t *testing.T) {
 		t.Errorf("the +2 more was lost: %q", b.String())
 	}
 }
+
+// TestAttemptsUsedWinNamesOnlyTheOwnAttempts is mw-gq6.486: the R3 line is fed
+// by the report's own attempt count, so a story started five times with one
+// own attempt says nothing, and one with four of its own says four.
+func TestAttemptsUsedWinNamesOnlyTheOwnAttempts(t *testing.T) {
+	heavy := FactoryReport{}.heavyStories([]reportEntry{{id: "mw-a", attempts: 5, own: 1}})
+	if got := winAttemptsUsed(heavy); got != "" {
+		t.Errorf("a story with one own attempt in five got the win %q", got)
+	}
+	heavy = FactoryReport{}.heavyStories([]reportEntry{{id: "mw-b", attempts: 5, own: 4}})
+	if got, want := winAttemptsUsed(heavy), "mw-b used 4 attempts: split it smaller"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

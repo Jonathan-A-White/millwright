@@ -106,3 +106,25 @@ func TestEveryRatioOfTheReportIsZeroOverNothing(t *testing.T) {
 		t.Errorf("an empty window has %+v", q)
 	}
 }
+
+// TestHeavyStoriesCountOnlyOwnAttempts is mw-gq6.486: a story started three
+// times whose other attempts mw cause named test, tooling or process is not
+// heavy, and one with three attempts of its own is, at that count.
+func TestHeavyStoriesCountOnlyOwnAttempts(t *testing.T) {
+	entries := []reportEntry{
+		{id: "mw-a", attempts: 3, own: 1},
+		{id: "mw-b", attempts: 5, own: 3},
+		{id: "mw-c", attempts: 1, own: 1},
+		{id: "mw-d", attempts: 3, own: 2, exhausted: true},
+	}
+	got := FactoryReport{}.heavyStories(entries)
+	want := []HeavyStory{{ID: "mw-b", Attempts: 3}, {ID: "mw-d", Attempts: 3}}
+	if len(got) != len(want) {
+		t.Fatalf("heavy stories %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("heavy story %d is %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}

@@ -884,6 +884,30 @@ Feature: Dispatching the stories this host is ready to work
     And the mail to the Mayor says "(open-steps)"
     And the mail to the Mayor says "attempts=0"
 
+  Scenario: A story whose attempts mw cause named test or process is not at the cap on those
+    Given a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" has been tried 3 times, its attempt causes being "1:process,2:test"
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+    And the story "mw-gq6.1" records 4 attempts
+    And the story "mw-gq6.1" is recorded as running
+
+  Scenario: A story with three own attempts is at the cap, and the mail says which attempts counted
+    Given a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" has been tried 4 times, its attempt causes being "1:code,2:tooling,4:code"
+    When dispatch runs on "vps" with a cap of 1
+    Then no session was started
+    And the story "mw-gq6.1" is recorded as blocked for the reason "attempts-exhausted"
+    And the story "mw-gq6.1" is recorded as blocked saying "started 4 times and 3 count"
+    And the mail to the Mayor says "started 4 times and 3 count"
+    And the mail to the Mayor says "not counted: attempt 2 (tooling)"
+
+  Scenario: A story with three attempts, one named tooling and the rest unnamed, is still started
+    Given a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" has been tried 3 times, its attempt causes being "2:tooling"
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+
   Scenario: A story at the cap does not use up the cap on sessions
     Given a ready story "mw-gq6.1" of that epic
     And the story "mw-gq6.1" has been tried 3 times

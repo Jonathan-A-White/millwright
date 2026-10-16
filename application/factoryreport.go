@@ -238,9 +238,12 @@ type reportEntry struct {
 	bug              bool
 	// escaped is a bug a landing let through, under that landing's rig, host
 	// and model, its id the bug's.
-	escaped   bool
-	reason    string
-	attempts  int
+	escaped  bool
+	reason   string
+	attempts int
+	// own is how many of attempts count toward max_attempts (OwnAttempts):
+	// what judges a story, where attempts numbers run files and measures cost.
+	own       int
 	cause     string
 	exhausted bool
 	findings  int
@@ -353,7 +356,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			continue
 		}
 		e := reportEntry{previous: previous, inWindow: inside, at: day, id: row.StoryID, rig: ReportUnknown, host: ReportUnknown, model: ReportUnknown,
-			landed: row.Landed(), refused: refused, reason: reason, attempts: 1}
+			landed: row.Landed(), refused: refused, reason: reason, attempts: 1, own: 1}
 		if row.Model != "" {
 			e.model = row.Model
 		}
@@ -370,6 +373,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			e.bugStory = domain.IsBugStory(d.Type, d.Story.Title)
 			if d.Attempts > 1 {
 				e.attempts = d.Attempts
+				e.own, _ = OwnAttempts(d)
 			}
 			if e.landed && inside && !landedSeen[row.StoryID] {
 				landedSeen[row.StoryID] = true
@@ -478,7 +482,9 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 }
 
 // heavyStories are the stories of the window that used up their attempts or
-// needed as many as a story may have, each once, narrowed like the blocks.
+// needed as many of their own as a story may have, each once, narrowed like the
+// blocks. An attempt mw cause named test, tooling or process is not the story's
+// own, so it does not make a story heavy (mw-gq6.486).
 func (r FactoryReport) heavyStories(entries []reportEntry) []HeavyStory {
 	var heavy []HeavyStory
 	seen := map[string]bool{}
@@ -486,9 +492,9 @@ func (r FactoryReport) heavyStories(entries []reportEntry) []HeavyStory {
 		if e.previous || e.bug || e.escaped || e.id == "" || seen[e.id] || (r.Rig != "" && e.rig != r.Rig) || (r.Host != "" && e.host != r.Host) {
 			continue
 		}
-		if e.exhausted || e.attempts >= DefaultMaxAttempts {
+		if e.exhausted || e.own >= DefaultMaxAttempts {
 			seen[e.id] = true
-			heavy = append(heavy, HeavyStory{ID: e.id, Attempts: max(e.attempts, DefaultMaxAttempts)})
+			heavy = append(heavy, HeavyStory{ID: e.id, Attempts: max(e.own, DefaultMaxAttempts)})
 		}
 	}
 	return heavy

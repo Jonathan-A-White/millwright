@@ -96,6 +96,7 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the view's hitl bead "([^"]*)" under "([^"]*)" waits on "([^"]*)"$`, c.theViewsHitlBeadWaitsOn)
 	ctx.Given(`^the view's host "([^"]*)" last synced (\d+) minutes ago with work pathed to it$`, c.theViewsHostLastSynced)
 	ctx.Given(`^the view's story "([^"]*)" under "([^"]*)" has used all (\d+) attempts$`, c.theViewsStoryUsedAllAttempts)
+	ctx.Given(`^the view's story "([^"]*)" under "([^"]*)" has used all (\d+) attempts, (\d+) started with attempt (\d+) named (\w+)$`, c.theViewsStoryUsedAllItsOwnAttempts)
 	ctx.Then(`^the view's hands need on "([^"]*)" waits for "([^"]*)"$`, c.theViewsHandsNeedWaitsFor)
 	ctx.Then(`^the view's need "([^"]*)" on "([^"]*)" waits for "([^"]*)"$`, c.theViewsNeedWaitsFor)
 	ctx.Then(`^the view's alarm for "([^"]*)" waits for "([^"]*)"$`, c.theViewsAlarmWaitsFor)
@@ -806,6 +807,13 @@ func (c *posternViewContext) theViewsStoryUsedAllAttempts(id, epic string, attem
 	n := fmt.Sprint(attempts)
 	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{
 		application.AttemptsField: n, application.AttemptsExhaustedField: n})
+}
+
+func (c *posternViewContext) theViewsStoryUsedAllItsOwnAttempts(id, epic string, own, started, attempt int, class string) error {
+	c.tracker.AddStory(epic, domain.Story{ID: id, Title: "Story " + id})
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{
+		application.AttemptsField: fmt.Sprint(started), application.AttemptsExhaustedField: fmt.Sprint(started),
+		application.AttemptCausesField: fmt.Sprintf("%d:%s", attempt, class)})
 }
 
 func (c *posternViewContext) needOf(kind, bead string) (application.PosternViewNeed, error) {

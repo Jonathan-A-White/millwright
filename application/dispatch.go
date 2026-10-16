@@ -883,9 +883,10 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// Before the cap, because a story that is not started takes none of the
 		// sessions the cap counts, and the Mayor is to be told of it now rather
 		// than once whatever is running has finished.
-		if tried := detail.Attempts; tried >= d.maxAttempts() {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
-				"it has been started %d times, the most a story may be (max_attempts): it is not started again until its counter is reset by hand", tried)})
+		// Only the story's own attempts count, as for mw retry (mw-gq6.486).
+		if own, uncounted := OwnAttempts(detail); own >= d.maxAttempts() {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: exhaustedWhy(detail.Attempts, own, d.maxAttempts(), uncounted) +
+				": it is not started again until its counter is reset by hand"})
 			if !d.DryRun {
 				d.exhausted(ctx, detail, &report)
 			}

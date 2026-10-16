@@ -292,6 +292,11 @@ Feature: mw postern view
     When the live view is built
     Then the view's need "alarm" on "mw-v.6" waits for "mayor"
 
+  Scenario: The out-of-attempts alarm counts the story's own attempts
+    Given the view's story "mw-v.6" under "mw-v" has used all 3 attempts, 4 started with attempt 2 named tooling
+    When the live view is built
+    Then the view's need "alarm" on "mw-v.6" says "used all 3 attempts"
+
   # A story with no parent epic (the Mayor's friction and bug stories) is no
   # less work for being filed alone: the Map counts it Working or Landed.
   Scenario: A running story with no parent epic is in the view, in progress
