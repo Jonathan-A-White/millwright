@@ -39,8 +39,14 @@ type EventWait struct {
 	Subscription Subscription
 	// Since, when set, is the seq after which events count, so events already
 	// in the log end the wait at once; unset, only events after the log's
-	// head when the wait began do.
+	// head when the wait began do, besides the mail Box holds unread.
 	Since *uint64
+	// Box, when set, is the seat's mailbox. A wait with mail among its kinds and
+	// no Since reads it once before the loop: mail already unread in the seat's
+	// box ends the wait at once, since it is behind the head the wait would
+	// start at (mw-gq6.512). The loop calls it never. Nil, or a box that cannot
+	// be read, leaves the wait as it was.
+	Box Mailbox
 	// Self is the name of the window the wait runs in, empty when it is not
 	// known. It tells a handover of the seat to this window (the wait of the
 	// successor, woken to take the seat) from a handover to another (the old
@@ -82,6 +88,13 @@ func (w EventWait) Run(ctx context.Context) ([]events.Event, error) {
 	started := now()
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
+
+	if w.Since == nil && w.Box != nil && w.waitsForMail() {
+		if unread, err := w.Box.Inbox(ctx, w.Subscription.Seat); err == nil && len(unread) > 0 {
+			fmt.Fprintln(w.Out, UnreadMailLine(w.Subscription.Seat, len(unread)))
+			return nil, nil
+		}
+	}
 
 	var cursor uint64
 	if w.Since != nil {
@@ -148,6 +161,22 @@ func (w EventWait) Run(ctx context.Context) ([]events.Event, error) {
 			return nil, nil
 		}
 	}
+}
+
+// waitsForMail reports whether mail is among the kinds the wait ends on.
+func (w EventWait) waitsForMail() bool {
+	for _, kind := range w.Subscription.Kinds {
+		if kind == events.KindMail {
+			return true
+		}
+	}
+	return false
+}
+
+// UnreadMailLine is what a wait prints when it finds mail already unread in
+// the seat's box as it begins.
+func UnreadMailLine(seat string, n int) string {
+	return fmt.Sprintf("New events for %s: unread mail in its box (%d). Run bd mail inbox.", seat, n)
 }
 
 // handedOver ends the old session's wait: the events it subscribed to up to
