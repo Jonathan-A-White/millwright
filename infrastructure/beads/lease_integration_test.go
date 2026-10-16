@@ -227,3 +227,49 @@ func TestAClosedBeadNamesNoSmokeExamplesInARealBd(t *testing.T) {
 		t.Fatalf("expected %v, got %v", want, found)
 	}
 }
+
+// A real bd refuses a close by any actor but the claim's holder; the gateway
+// reports that refusal as a *CloseHeldError naming both, writing nothing, and
+// once TakeOverClaim has made this actor the holder the close goes through
+// under this actor's own name (mw-gq6.475). A take-over naming a holder that no
+// longer holds the claim is refused and leaves the claim as it is.
+func TestAStoryAnotherHostClaimedIsTakenOverAndClosedInARealBd(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	storyID := bdRun(t, vault, beads.Program, "create", "A story claimed on a cloud host", "--silent")
+	cloud := beads.New(vault, beads.WithActor("mw@cloud1"))
+	laptop := beads.New(vault, beads.WithActor("mw@laptop"))
+	if err := cloud.ClaimStory(ctx, storyID); err != nil {
+		t.Fatalf("claiming %s: %v", storyID, err)
+	}
+
+	err := laptop.CloseStory(ctx, storyID, "landed")
+	var held *application.CloseHeldError
+	if !errors.As(err, &held) || held.Holder != "mw@cloud1" || held.Actor != "mw@laptop" || held.ID != storyID {
+		t.Fatalf("expected the close to be refused as held by mw@cloud1, got %v", err)
+	}
+
+	if err := laptop.TakeOverClaim(ctx, storyID, "mw@cloud2"); err == nil {
+		t.Fatalf("expected a take-over naming a holder that is not the holder to be refused")
+	}
+	if detail, err := laptop.ShowStory(ctx, storyID); err != nil || detail.Assignee != "mw@cloud1" {
+		t.Fatalf("expected the refused take-over to leave mw@cloud1 holding %s, got %+v: %v", storyID, detail, err)
+	}
+
+	if err := laptop.TakeOverClaim(ctx, storyID, "mw@cloud1"); err != nil {
+		t.Fatalf("taking over the claim on %s: %v", storyID, err)
+	}
+	if err := laptop.CloseStory(ctx, storyID, "landed"); err != nil {
+		t.Fatalf("closing %s after taking its claim over: %v", storyID, err)
+	}
+	detail, err := laptop.ShowStory(ctx, storyID)
+	if err != nil {
+		t.Fatalf("showing %s: %v", storyID, err)
+	}
+	if !detail.Closed() || detail.Assignee != "mw@laptop" {
+		t.Fatalf("expected %s closed and held by mw@laptop, got %q held by %q", storyID, detail.Status, detail.Assignee)
+	}
+}

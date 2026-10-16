@@ -595,7 +595,9 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 			nr.Notes = append(nr.Notes, fmt.Sprintf("the worktree %s could not be taken away: %v", c.worktree, err))
 		}
 		closed := false
-		if err := n.closeStory(ctx, s.ID, outcome); err != nil {
+		notes, err := n.closeStory(ctx, s.ID, outcome)
+		nr.Notes = append(nr.Notes, notes...)
+		if err != nil {
 			nr.Notes = append(nr.Notes, fmt.Sprintf("%s is landed but could not be closed: %v", s.ID, err))
 		} else {
 			closed = true
