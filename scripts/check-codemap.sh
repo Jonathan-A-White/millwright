@@ -6,7 +6,9 @@
 # predict what will trip it:
 #
 # 1. SIZE. docs/codemap.md must be at most 10240 bytes. It is one page read at
-#    boot: if it no longer fits, merge rows or shorten them to make room.
+#    boot: if it no longer fits, merge rows or shorten them to make room. Past
+#    9500 bytes it still passes but warns on stderr, naming the bytes left, so
+#    the squeeze shows before a merge fails (mw-gq6.496).
 #
 # 2. PATHS. "A path named in the map" (in the map or in docs/adding-a-command.md,
 #    its companion page) is any span between single backticks
@@ -48,6 +50,7 @@ REPO_ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null) || R
 MAP=docs/codemap.md
 ADDING=docs/adding-a-command.md
 LIMIT=10240
+WARN=9500
 
 cd "$REPO_ROOT"
 
@@ -63,6 +66,10 @@ fail() {
 size=$(wc -c <"$MAP" | tr -d ' ')
 if [ "$size" -gt "$LIMIT" ]; then
 	fail "$MAP is $size bytes, over the $LIMIT-byte limit; make room by merging rows or shortening them"
+fi
+
+if [ "$size" -gt "$WARN" ]; then
+	echo "check-codemap: warning: $MAP is $size bytes, $((LIMIT - size)) bytes left of the $LIMIT-byte limit; merge or shorten rows soon" >&2
 fi
 
 # --- 2. every path named in the map exists -------------------------------
