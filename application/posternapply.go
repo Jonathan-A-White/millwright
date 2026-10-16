@@ -927,9 +927,11 @@ func (i PosternInbox) letGoOnTap(ctx context.Context, m PosternInboxMessage, epi
 }
 
 // isDigestLooksGoodTap reports whether answer's word begins "looks good on
-// all": the first option of the weekly digest card (DigestLooksGoodOption).
+// all", or is "looks good": the first option of the weekly digest card
+// (DigestLooksGoodOption), which with no demos is the bare words.
 func isDigestLooksGoodTap(answer string) bool {
-	return strings.HasPrefix(posternAnswerWord(answer), "looks good on all ")
+	word := posternAnswerWord(answer)
+	return word == "looks good" || strings.HasPrefix(word, "looks good on all ")
 }
 
 // digestOnTap closes the batch on the Governor's "A: Looks good on all N" to

@@ -613,6 +613,21 @@ func TestDigestLooksGoodTapClosesEachListedDemoThenTheDigest(t *testing.T) {
 	}
 }
 
+// The card with no demos offers 'A: Looks good' (DigestLooksGoodOption(0)):
+// that tap closes the digest bead too.
+func TestDigestLooksGoodTapWithNoDemosClosesTheDigest(t *testing.T) {
+	f := digestTapFixture(t, application.DigestLooksGoodOption(0), application.DigestHoldOption)
+	mustDo(t, f.tracker.SetDescription("mw-d.1", "invest_share: 33%\n"))
+	f.answer(t, "tx-tap", "mw-d.1", application.DigestLooksGoodOption(0))
+
+	f.apply(t)
+
+	if reason := f.tracker.CloseReason("mw-d.1"); reason == "" || !strings.Contains(reason, "tx-tap") {
+		t.Fatalf("expected the digest closed on his tap, got %q", reason)
+	}
+	f.assertOpen(t, "mw-e.5", "mw-e.6")
+}
+
 // A listed demo already closed is skipped, said in the mail, and the others
 // are still closed.
 func TestDigestLooksGoodTapSkipsAClosedDemoAndNamesIt(t *testing.T) {
