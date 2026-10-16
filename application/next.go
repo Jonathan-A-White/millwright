@@ -424,6 +424,10 @@ type NextReport struct {
 	// close-out waits, and the story was handed back for its close-out alone
 	// (RunCloseOutAgain), its claim, worktree and branch kept (mw-gq6.467).
 	HandedBack bool
+	// Interrupted says the close-out's own context ended before it settled
+	// anything — a signal, the caller's session gone — so that nothing was
+	// recorded as the story's outcome (mw-gq6.441).
+	Interrupted bool
 	// Commits is how many commits the session left on the story's branch.
 	Commits int
 	// Uncommitted is the paths the session left changed and not committed in
@@ -932,6 +936,11 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		report.Notes = append(report.Notes, fmt.Sprintf("the merge slot of %s could not be given back: %v", c.path.Rig, err))
 	}
 	if landErr != nil {
+		// A landing cut off by its caller failed for the caller, not the
+		// story: it is neither sent back nor stopped (mw-gq6.441).
+		if ctx.Err() != nil {
+			return n.interrupted(ctx, c, report)
+		}
 		kept := n.keepLandingError(ctx, c, report, landErr)
 		switch {
 		case Conflicted(landErr):
@@ -2262,6 +2271,9 @@ func (n Next) carryOn(ctx context.Context, c *closeOut, report *NextReport) (Nex
 // branch are left exactly as the session left them, because they are the
 // evidence.
 func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason Reason, why, said string) (NextReport, error) {
+	if ctx.Err() != nil {
+		return n.interrupted(ctx, c, report)
+	}
 	// Tests that timed out on a host at or above its core count did not fail on
 	// the story: the refusal says so, in the mail and on the story.
 	if (reason == ReasonTestsFail || reason == ReasonMergedTestsFail) && c.gate.timeout {
@@ -2377,6 +2389,38 @@ func (n Next) handOn(ctx context.Context, c *closeOut, report *NextReport, reaso
 		return false
 	}
 	return true
+}
+
+// InterruptedRecordLimit is how long a close-out whose context has ended
+// still gives itself to write its one ledger line and commit it.
+const InterruptedRecordLimit = 30 * time.Second
+
+// CloseOutInterrupted is the one line an interrupted close-out says, on stderr
+// and in the ledger: what to run to judge the story after all.
+func CloseOutInterrupted(id string) string {
+	return fmt.Sprintf("close-out interrupted, not judged: re-run mw next %s --no-dispatch", id)
+}
+
+// interrupted is a close-out whose own context ended — SIGINT or SIGTERM, the
+// session that ran it gone — before it settled what became of the story
+// (mw-gq6.441). Whatever failed after that failed because the caller went away,
+// not because of the story's work: a test run killed, bd and git cancelled. So
+// nothing is recorded as the story's outcome — no refusal, no run=blocked, no
+// mail, no record for mw dispatch to replay, no formula closed and no claim
+// given back — and a re-run of the close-out finds the story as it was. Only
+// the ledger line is written, if it can be, saying so; it does not read as
+// landed or as not landed.
+func (n Next) interrupted(ctx context.Context, c *closeOut, report *NextReport) (NextReport, error) {
+	line := CloseOutInterrupted(c.id)
+	report.Why, report.Reason, report.Refused, report.Interrupted = line, "", false, true
+	record, cancel := context.WithTimeout(context.WithoutCancel(ctx), InterruptedRecordLimit)
+	defer cancel()
+	if err := n.ledger(record, c, report, line); err != nil {
+		report.Notes = append(report.Notes, err.Error())
+	} else {
+		n.commit(record, c, report)
+	}
+	return *report, fmt.Errorf("closing out %s: %s (%v)", c.id, line, context.Cause(ctx))
 }
 
 // MaxTurnsSubtype is how Claude Code's result names a session it stopped at its
@@ -2896,6 +2940,9 @@ func (r NextReport) String() string {
 		fmt.Fprintf(&b, "  tested  %s by an earlier run of mw next: nothing was read or written again\n", r.Tested)
 	case r.Tested != "":
 		fmt.Fprintf(&b, "  tested  %s: %s; a Tester story, so nothing was merged, raised or pushed\n", r.Tested, r.Findings.Split())
+	case r.Interrupted:
+		fmt.Fprintf(&b, "  INTERRUPTED %s\n", r.Why)
+		b.WriteString("          nothing was recorded as its outcome: its claim, worktree and branch are as they were\n")
 	case r.HandedBack:
 		fmt.Fprintf(&b, "  HANDED BACK (%s) %s\n", r.Reason, r.Why)
 		b.WriteString("          its claim, worktree and branch are kept: the next dispatch tick runs its close-out alone again, not a new session\n")

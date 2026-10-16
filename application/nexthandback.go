@@ -25,6 +25,9 @@ func CloseOutAgain(detail StoryDetail) bool {
 // the committed branch, never a fresh Builder session. Nothing is merged,
 // pushed, mailed or dispatched.
 func (n Next) handBack(ctx context.Context, c *closeOut, report *NextReport, why string) (NextReport, error) {
+	if ctx.Err() != nil {
+		return n.interrupted(ctx, c, report)
+	}
 	report.Why, report.Reason, report.HandedBack = why, ReasonMergeSlot, true
 
 	note := fmt.Sprintf("mw next on %s handed %s back (%s): %s\n\n"+
