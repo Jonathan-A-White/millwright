@@ -317,7 +317,8 @@ func (w *Worktrees) MergeUnion(ctx context.Context, landingDir, branch string, u
 
 	var unioned []string
 	// --no-edit so that no editor is ever opened: nobody is at the keyboard.
-	if _, err := w.git(ctx, landingDir, "merge", "--no-edit", branch); err != nil {
+	merge := append(mergeDrivers(landingDir), "merge", "--no-edit", branch)
+	if _, err := w.git(ctx, landingDir, merge...); err != nil {
 		unioned, err = w.unionConflicts(ctx, landingDir, branch, union, err)
 		if err != nil {
 			if _, abort := w.git(ctx, landingDir, "merge", "--abort"); abort != nil {
@@ -343,6 +344,28 @@ func (w *Worktrees) MergeUnion(ctx context.Context, landingDir, branch string, u
 	}, nil
 }
 
+// codemapDriver is the merge driver a rig's .gitattributes names for a file
+// merged by codemapScript, the rig's own script: millwright's docs/codemap.md
+// (mw-gq6.495). Union brings back every row a trim shortened whenever the
+// other side added one; the script keeps the trim and the added rows.
+const (
+	codemapDriver = "codemap"
+	codemapScript = "scripts/codemap-merge.sh"
+)
+
+// mergeDrivers is the -c that defines the codemap driver for one merge in dir,
+// when dir holds the script: every host that lands gets it with no git config
+// edited. A file named merge=codemap where the script is missing gets git's
+// text merge, whose conflict unionConflicts refuses to settle by union.
+func mergeDrivers(dir string) []string {
+	script := filepath.Join(dir, filepath.FromSlash(codemapScript))
+	if _, err := os.Stat(script); err != nil {
+		return nil
+	}
+	quoted := "'" + strings.ReplaceAll(script, "'", `'\''`) + "'"
+	return []string{"-c", "merge." + codemapDriver + ".driver=sh " + quoted + " %O %A %B"}
+}
+
 // unionConflicts settles a merge that has stopped on conflicts, if all of them
 // are in files union lists, and commits it; it reports the files it settled. When
 // it cannot, it returns an error saying why, with the merge left as it stopped
@@ -365,6 +388,11 @@ func (w *Worktrees) unionConflicts(ctx context.Context, dir, branch string, unio
 	for _, file := range files {
 		if !listed(union, file) {
 			return nil, fmt.Errorf("%w (%s is in conflict and the rig does not list it to be merged by union)", stopped, file)
+		}
+		// Union is what the driver is there to keep away from the file.
+		if attr, err := w.git(ctx, dir, "check-attr", "merge", "--", file); err == nil && strings.HasSuffix(strings.TrimSpace(attr), ": "+codemapDriver) {
+			return nil, fmt.Errorf("%w (%s is merged by its %s driver, %s, which could not settle it; union would bring back every row a trim took out)",
+				stopped, file, codemapDriver, codemapScript)
 		}
 	}
 	scratch, err := os.MkdirTemp("", "mw-union-")

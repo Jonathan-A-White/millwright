@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -868,5 +869,100 @@ func TestAMergeConflictingInAListedAndAnUnlistedFileIsNotPartlyMerged(t *testing
 	}
 	if left != "" {
 		t.Errorf("expected the landing left as it was found, got:\n%s", left)
+	}
+}
+
+// aCodemapRig is a rig whose .gitattributes names docs/codemap.md merge=codemap
+// and which carries driver as its scripts/codemap-merge.sh, with codemap
+// committed and pushed. No git config anywhere names the driver.
+func aCodemapRig(t *testing.T, driver, codemap string) string {
+	t.Helper()
+	here, _ := aRig(t)
+	write(t, here, ".gitattributes", "docs/codemap.md merge=codemap\n")
+	write(t, here, "scripts/codemap-merge.sh", driver)
+	write(t, here, "docs/codemap.md", codemap)
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "A code map and its merge driver")
+	run(t, here, "git", "push", "-q", "origin", "main")
+	return here
+}
+
+// aCodemapBranch cuts branch from main with docs/codemap.md as codemap.
+func aCodemapBranch(t *testing.T, here, branch, codemap string) {
+	t.Helper()
+	run(t, here, "git", "checkout", "-q", "-b", branch, "main")
+	write(t, here, "docs/codemap.md", codemap)
+	run(t, here, "git", "commit", "-qam", "Code map: "+branch)
+	run(t, here, "git", "checkout", "-q", "main")
+}
+
+const (
+	codemapBase = "# Code map\n\n## Ports\n\n| Port | Declared in |\n|-|-|\n" +
+		"| `A` | application/a.go, a long cell |\n| `B` | application/b.go, a long cell |\n" +
+		"| `C` | application/c.go, a long cell |\n| `D` | application/d.go, a long cell |\n"
+	codemapAdded = "# Code map\n\n## Ports\n\n| Port | Declared in |\n|-|-|\n" +
+		"| `A` | application/a.go, a long cell |\n| `B` | application/b.go, a long cell |\n" +
+		"| `N` | application/n.go |\n" +
+		"| `C` | application/c.go, a long cell |\n| `D` | application/d.go, a long cell |\n"
+	codemapTrimmed = "# Code map\n\n## Ports\n\n| Port | Declared in |\n|-|-|\n" +
+		"| `A` | a.go |\n| `B` | b.go |\n| `D` | d.go |\n"
+)
+
+// TestALandingMergesTheCodemapByItsDriverWithNoGitConfig drives real git as
+// mw next does: main gained a row while a story trimmed the map. The landing
+// passes merge.codemap.driver itself, so the trim lands with main's row and
+// without the rows it shortened or took out: no union, no conflict, and the
+// rig's git config never names the driver (mw-gq6.495).
+func TestALandingMergesTheCodemapByItsDriverWithNoGitConfig(t *testing.T) {
+	driver, err := os.ReadFile("../../scripts/codemap-merge.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	here := aCodemapRig(t, string(driver), codemapBase)
+	aCodemapBranch(t, here, "mw/add", codemapAdded)
+	aCodemapBranch(t, here, "mw/trim", codemapTrimmed)
+	if err := landBranch(t, here, "mw/add"); err != nil {
+		t.Fatalf("landing the added row: %v", err)
+	}
+
+	// The rig lists the map to be merged by union, as millwright's does: the
+	// driver settles it first, so union never sees it.
+	landed, left, err := landUnion(t, here, "mw/trim", []string{"docs/codemap.md"})
+	if err != nil {
+		t.Fatalf("landing the trim: %v (left %q)", err, left)
+	}
+	if len(landed.Unioned) != 0 {
+		t.Errorf("expected the map merged by its driver, not union, got Unioned %q", landed.Unioned)
+	}
+	run(t, here, "git", "fetch", "-q", "origin")
+	got := run(t, here, "git", "show", "origin/main:docs/codemap.md") + "\n"
+	want := strings.Replace(codemapTrimmed, "| `B` | b.go |\n", "| `B` | b.go |\n| `N` | application/n.go |\n", 1)
+	if got != want {
+		t.Errorf("expected the trim with main's row, got:\n%s", got)
+	}
+	if said, err := exec.Command("git", "-C", here, "config", "--get-regexp", `^merge\.`).CombinedOutput(); err == nil {
+		t.Errorf("expected no merge driver in the rig's git config, got %s", said)
+	}
+}
+
+// TestACodemapItsDriverCannotSettleIsNotMergedByUnion: when the driver fails,
+// the landing is a conflict sent back, never union's both sides of every hunk,
+// even with the map listed to be merged by union.
+func TestACodemapItsDriverCannotSettleIsNotMergedByUnion(t *testing.T) {
+	here := aCodemapRig(t, "#!/bin/sh\nexit 1\n", codemapBase)
+	aCodemapBranch(t, here, "mw/add", codemapAdded)
+	aCodemapBranch(t, here, "mw/trim", codemapTrimmed)
+	if err := landBranch(t, here, "mw/add"); err != nil {
+		t.Fatalf("landing the added row: %v", err)
+	}
+	landed, left, err := landUnion(t, here, "mw/trim", []string{"docs/codemap.md"})
+	if !application.Conflicted(err) {
+		t.Fatalf("expected a conflict, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "codemap") {
+		t.Errorf("expected the refusal to name the codemap driver, got %v", err)
+	}
+	if len(landed.Unioned) != 0 || left != "" {
+		t.Errorf("expected nothing union-merged and the landing left clean, got %q and %q", landed.Unioned, left)
 	}
 }
