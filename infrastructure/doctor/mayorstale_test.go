@@ -510,3 +510,27 @@ func TestACureLineSaysWhatTheCureDid(t *testing.T) {
 		}
 	})
 }
+
+// limitMenuPane is a Mayor parked on the harness's usage-limit menu, its
+// selection arrow at the start of the line as an input line's is.
+const limitMenuPane = "● Reading the newest handoff first.\n\n" +
+	"  ⎿  You've hit your weekly limit · resets Oct 16, 7am (UTC)\n\n" +
+	"What do you want to do?\n\n" +
+	"❯ 1. Stop and wait for limit to reset\n" +
+	"  2. Switch to usage credits\n"
+
+// A Mayor stopped at the usage limit is mayor-stuck's to page about: a respawn
+// would meet the same limit, so mayor-stale leaves the window be (mw-gq6.433).
+func TestAMayorParkedOnTheUsageLimitIsLeftToMayorStuck(t *testing.T) {
+	r := newStaleRig(t)
+	r.write(r.pane, limitMenuPane)
+	r.run(0)
+	for _, minutes := range []int{16, 30, 60} {
+		if got := r.run(minutes); got.Verdict != "ok" {
+			t.Fatalf("expected ok for a pane on the usage limit after %d more minutes, got %+v", minutes, got)
+		}
+	}
+	if r.lines(r.kills) != 0 || r.lines(r.upRuns) != 0 || len(r.alarms) != 0 {
+		t.Errorf("a Mayor at the usage limit raises nothing here: kills %d, mayor-up %d, alarms %d", r.lines(r.kills), r.lines(r.upRuns), len(r.alarms))
+	}
+}

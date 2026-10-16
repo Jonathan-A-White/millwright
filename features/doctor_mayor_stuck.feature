@@ -8,6 +8,13 @@ Feature: mw doctor's mayor-stuck check
   environment and from the tmux server's. A proxy that answers is kept. The
   Governor is told once per episode, on the emergency lane.
 
+  A Mayor parked on the harness's usage-limit menu ("Stop and wait" / "Switch
+  to usage credits") writes no API Error at all, so the transcript cannot see
+  it: the check reads the pane too (mw-gq6.433, @138 sat there 2h12m on
+  2026-10-15). A pane on the limit for 10 minutes is the factory stopped. A
+  successor would meet the same limit, so the window is left alone and the
+  Governor is paged once.
+
   Background:
     Given a vault whose .mayor-acting names the window "mayor-2026-10-06-210"
     And a stand-in tmux listing that Mayor window with a live claude process
@@ -84,3 +91,31 @@ Feature: mw doctor's mayor-stuck check
     When mw doctor's mayor-stuck check runs
     Then the doctor log holds "mayor-stuck ok"
     And mayor-up was not run
+
+  Scenario: A Mayor parked on the weekly-limit menu for 10 minutes is reported, left alone, and the Governor paged once
+    Given a transcript whose only replies were API Errors 20 minutes ago
+    And the Mayor's pane shows the weekly-limit menu
+    When mw doctor's mayor-stuck check runs
+    Then the doctor log holds "mayor-stuck ok"
+    When 10 minutes go by
+    And mw doctor's mayor-stuck check runs
+    And 5 minutes go by
+    And mw doctor's mayor-stuck check runs
+    And 40 minutes go by
+    And mw doctor's mayor-stuck check runs
+    Then the doctor log holds "stopped at the usage limit"
+    And exactly 1 alarm was sent
+    And the alarm says "the factory is stopped"
+    And the alarm says "Switch to usage credits"
+    And the Mayor's window was not closed
+    And mayor-up was not run
+
+  Scenario: --dry-run names a Mayor parked on the weekly-limit menu and pages nobody
+    Given a transcript with no replies
+    And the Mayor's pane shows the weekly-limit menu
+    When mw doctor's mayor-stuck check runs
+    And 10 minutes go by
+    And mw doctor runs dry
+    Then mw doctor printed "stopped at the usage limit"
+    And the Mayor's window was not closed
+    And no alarm was sent

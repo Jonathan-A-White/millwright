@@ -212,6 +212,24 @@ Feature: mw status
     Then reading status succeeds
     And the report shows "mw-gq6.9" as refused, waiting on the Mayor
 
+  Scenario: A story whose session stopped at the usage limit says so (mw-gq6.433)
+    Given a status story "mw-gq6.10" filed under it
+    And the status story "mw-gq6.10" is claimed with its session running
+    And the status story "mw-gq6.10" is marked run=blocked
+    And the session of "mw-gq6.10" left a result saying "You've hit your weekly limit · resets Oct 16, 7am (UTC)"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report shows "mw-gq6.10" as stopped at the usage limit
+
+  Scenario: A story whose session failed for another reason is not shown at the usage limit
+    Given a status story "mw-gq6.10" filed under it
+    And the status story "mw-gq6.10" is claimed with its session running
+    And the status story "mw-gq6.10" is marked run=blocked
+    And the session of "mw-gq6.10" left a result saying "API Error: Connection lost mid-response"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report does not show "mw-gq6.10" as stopped at the usage limit
+
   Scenario: A story that is running is not shown as refused
     Given a status story "mw-gq6.9" filed under it
     And the status story "mw-gq6.9" is claimed with its session running
