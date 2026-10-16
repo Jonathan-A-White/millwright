@@ -97,9 +97,14 @@ func (b VersionBump) Notes() []domain.ChangelogEntry {
 // commit that raised it. Version is empty when the story's branch had changed
 // the version itself; then Commit is empty too, unless the story's note was
 // committed under that version ("What's new X.Y.Z (<story>)").
+//
+// Tidied says, a sentence each, what the changelog files held twice that the
+// bump took out or folded on its way (mw-gq6.514): a landing notes each, for a
+// file that holds one was written wrong before.
 type Bumped struct {
 	Version string
 	Commit  string
+	Tidied  []string
 }
 
 // Landing is the port a story's work is put on its target branch through. One

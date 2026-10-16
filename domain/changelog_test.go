@@ -198,3 +198,93 @@ func TestAnEntryTheNewestOneAlreadySaysReplacesItInBothChangelogs(t *testing.T) 
 		t.Errorf("AddToChangelogMarkdown kept or lost the wrong blocks: %q", md)
 	}
 }
+
+func TestTwoLinesOfOneVersionGoUnderOneHeadingWithOneDate(t *testing.T) {
+	first := ChangelogEntry{Version: "0.1.3", Date: "2026-09-18", Story: "mw-a.1", Kind: ChangelogNew, Text: "Verses repeat"}
+	second := ChangelogEntry{Version: "0.1.3", Date: "2026-09-18", Story: "mw-a.2", Kind: ChangelogFixed, Text: "Listen stops"}
+	older := "# What's new\n\n## 0.1.2\n_2026-09-01_\n- New: Older\n"
+	got := string(AddToChangelogMarkdown(AddToChangelogMarkdown([]byte(older), first), second))
+	want := "# What's new\n\n## 0.1.3\n_2026-09-18_\n- Fixed: Listen stops\n- New: Verses repeat\n\n## 0.1.2\n_2026-09-01_\n- New: Older\n"
+	if got != want {
+		t.Errorf("changelog = %q, want %q", got, want)
+	}
+	if again := string(AddToChangelogMarkdown([]byte(got), first)); again != want {
+		t.Errorf("a line the version's block holds already was written again: %q", again)
+	}
+}
+
+func TestAnEntryWhoseVersionAndStoryTheJSONHoldsIsNotWrittenTwice(t *testing.T) {
+	a := ChangelogEntry{Version: "0.1.3", Date: "2026-09-18", Story: "mw-a.1", Kind: ChangelogNew, Text: "Verses repeat"}
+	b := ChangelogEntry{Version: "0.1.3", Date: "2026-09-18", Story: "mw-a.2", Kind: ChangelogNew, Text: "Listen stops"}
+	file, err := AddToChangelogJSON(nil, a)
+	if err == nil {
+		file, err = AddToChangelogJSON(file, b)
+	}
+	if err == nil {
+		file, err = AddToChangelogJSON(file, a)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(file), `"mw-a.1"`); got != 1 {
+		t.Errorf("0.1.3 mw-a.1 is in the changelog %d times: %s", got, file)
+	}
+}
+
+// lampas0274 is lampas's changelog as batches 27 and 28 left it (mw-gq6.514),
+// cut down: batch 28 wrote batch 27's two lines again under 0.1.274, and each
+// line has a block of its own.
+const lampas0274 = "# What's new\n\n" +
+	"## 0.1.274\n_2026-10-16_\n- Fixed: B\n\n" +
+	"## 0.1.274\n_2026-10-16_\n- New: A\n\n" +
+	"## 0.1.274\n_2026-10-16_\n- Fixed: B\n\n" +
+	"## 0.1.274\n_2026-10-16_\n- New: A\n\n" +
+	"## 0.1.273\n_2026-10-16_\n- New: C\n\n" +
+	"## 0.1.273\n_2026-10-15_\n- New: D\n\n" +
+	"## 0.1.272\n_2026-10-15_\n- Fixed: E\n"
+
+func TestTidyingTheMarkdownFoldsAVersionsBlocksIntoOne(t *testing.T) {
+	got, folded := TidyChangelogMarkdown([]byte(lampas0274))
+	want := "# What's new\n\n" +
+		"## 0.1.274\n_2026-10-16_\n- Fixed: B\n- New: A\n\n" +
+		"## 0.1.273\n_2026-10-16_\n- New: C\n- New: D\n\n" +
+		"## 0.1.272\n_2026-10-15_\n- Fixed: E\n"
+	if string(got) != want {
+		t.Errorf("tidied = %q, want %q", got, want)
+	}
+	if strings.Join(folded, ",") != "0.1.274,0.1.273" {
+		t.Errorf("folded = %v, want 0.1.274 and 0.1.273", folded)
+	}
+	if again, folded := TidyChangelogMarkdown(got); string(again) != want || len(folded) != 0 {
+		t.Errorf("a tidy changelog was changed: %q, %v", again, folded)
+	}
+	if kept, folded := TidyChangelogMarkdown([]byte(postern0511)); string(kept) != postern0511 || len(folded) != 0 {
+		t.Errorf("a changelog with nothing to fold was changed: %q, %v", kept, folded)
+	}
+}
+
+func TestTidyingTheJSONTakesOutASecondEntryForOneVersionAndStory(t *testing.T) {
+	file := []byte(`[
+  {"version": "0.1.274", "date": "2026-10-16", "story": "mw-b", "kind": "fixed", "text": "B"},
+  {"version": "0.1.274", "date": "2026-10-16", "story": "mw-a", "kind": "new", "text": "A"},
+  {"version": "0.1.274", "date": "2026-10-16", "story": "mw-b", "kind": "fixed", "text": "B"},
+  {"version": "0.1.274", "date": "2026-10-16", "story": "mw-a", "kind": "new", "text": "A"},
+  {"version": "0.1.273", "date": "2026-10-16", "story": "mw-a", "kind": "new", "text": "A before"}
+]`)
+	got, removed, err := TidyChangelogJSON(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(got), `"version"`) != 3 || !strings.Contains(string(got), "A before") {
+		t.Errorf("tidied = %s, want one 0.1.274 entry each for mw-b and mw-a, and 0.1.273 kept", got)
+	}
+	if strings.Join(removed, ",") != "0.1.274 mw-b,0.1.274 mw-a" {
+		t.Errorf("removed = %v", removed)
+	}
+	if _, removed, err := TidyChangelogJSON(got); err != nil || len(removed) != 0 {
+		t.Errorf("a tidy changelog had %v taken out (%v)", removed, err)
+	}
+	if _, _, err := TidyChangelogJSON([]byte("{not json")); err == nil {
+		t.Errorf("expected a refusal of a changelog that is not an array")
+	}
+}

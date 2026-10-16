@@ -2022,6 +2022,7 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 		if err != nil {
 			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("the version of %s could not be raised: %w", c.path.Rig, err))
 		}
+		report.Notes = appendNew(report.Notes, bumped.Tidied...)
 		if bumped.Commit != "" {
 			// The version commit is what is pushed, and so what has landed. It
 			// changes only the version fields and the changelog's notes, so a
