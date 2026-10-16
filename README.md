@@ -1766,6 +1766,32 @@ missing or not 600 on the home, or present on any other host.
 revoked at its source, and how the home gets its key. See
 `features/secrets.feature`.
 
+## Linking his Google account (mw google)
+
+`mw google` links his Google account to the home's mw once, for one scope,
+`https://www.googleapis.com/auth/contacts.readonly` (read his contacts, nothing
+else), so a name-only `Text:` line can find its number. It runs on the home,
+never the VPS or the phone.
+
+    mw google link     # sign in through a browser on the home; keeps the token (home only)
+    mw google status   # 'linked (contacts.readonly)' or 'not linked', never the token
+    mw google unlink   # Google revokes the token, then the token file is deleted
+
+The sign-in uses a Desktop app OAuth client he makes in the Google Cloud
+console (People API on, consent screen published In production for personal
+use, else Google kills the token after 7 days); its JSON goes at
+`~/.config/mw/google-client.json`, or wherever the config key
+`google_client_file` (or `MW_GOOGLE_CLIENT_FILE`) says. `link` uses PKCE and a
+loopback redirect on a free port, opens the browser when it can and prints the
+address either way, and keeps the refresh token in
+`~/.config/mw/google-token.json`, mode 0600, replacing any earlier link; a
+grant of anything but contacts.readonly is revoked and nothing is kept.
+`unlink` keeps the file and fails while Google cannot be reached, so a live
+token is never forgotten here; with nothing linked it says so and exits 0. No
+token is printed, logged, or put in the vault, a bead or a mail. He can also
+revoke mw at myaccount.google.com/permissions. The tests are
+`infrastructure/google/oauth_test.go` and `cmd/mw/google_test.go`.
+
 ## Cloud boxes made by demand
 
 With a `[cloud]` table in the home's config (provider, `max_boxes`,
