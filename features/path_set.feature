@@ -110,6 +110,29 @@ Feature: Setting and showing a story's path
       | rig  | lampas |
       | host | laptop |
 
+  # bump (mw-gq6.527): the story's own, like files; the only value is minor.
+
+  Scenario: The bump key is set to minor, shown, and never copied from a sibling
+    When the path of "B" is set with rig=lampas bump=minor
+    Then setting the path succeeds
+    And the story "B" has the path key "bump" as "minor"
+    When the path of "B" is shown
+    Then the path shown has the line: bump=minor
+
+  Scenario: Copying a sibling's path never copies its bump
+    Given the path-set story "G" is open with the metadata:
+      | rig  | lampas |
+      | bump | minor  |
+    When the path of "B" is set from "G"
+    Then setting the path succeeds
+    And the story "B" has exactly the metadata:
+      | rig | lampas |
+
+  Scenario: A bump other than minor is refused and nothing is written
+    When the path of "B" is set with bump=major
+    Then setting the path is refused, saying: not a bump
+    And nothing was written
+
   Scenario: A path with no files shows the key unset
     When the path of "A" is shown
     Then the path shown has the line: files=(unset)
