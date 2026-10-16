@@ -338,3 +338,30 @@ func TestOnlyLAndXLAreBigStories(t *testing.T) {
 		}
 	}
 }
+
+func TestBumpIsEmptyOrMinor(t *testing.T) {
+	p := completePath()
+	p.Bump = domain.BumpMinor
+	if err := p.Validate(); err != nil {
+		t.Fatalf("expected bump=minor to be valid, got %v", err)
+	}
+	if got, err := p.Field("bump"); err != nil || got != "minor" {
+		t.Fatalf("Field(bump) = %q, %v; want minor", got, err)
+	}
+	if got := p.Metadata()["bump"]; got != "minor" {
+		t.Fatalf("expected the metadata to hold bump=minor, got %q", got)
+	}
+	var read domain.Path
+	if err := read.Set("bump", "minor"); err != nil || read.Bump != domain.BumpMinor {
+		t.Fatalf("Set(bump, minor) = %v, %q", err, read.Bump)
+	}
+	p.Bump = "major"
+	var unknown domain.UnknownValueError
+	if err := p.Validate(); !errors.As(err, &unknown) || unknown.Field != "bump" {
+		t.Fatalf("expected an UnknownValueError for bump=major, got %v", err)
+	}
+	p.Bump = ""
+	if err := p.Validate(); err != nil {
+		t.Fatalf("expected no bump to be valid, got %v", err)
+	}
+}

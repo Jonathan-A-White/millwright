@@ -100,7 +100,14 @@ type Path struct {
 	// Size is how big the story is judged to be: XS, S, M, L or XL, or empty
 	// when nobody has (mw-1ljpo9.3). A story's own, like Files.
 	Size Size `json:"size,omitempty"`
+	// Bump, when it is BumpMinor, has the landing raise the rig's minor version
+	// instead of its patch: the epic's last story says so here, and never edits
+	// the version itself (mw-gq6.527). A story's own, like Files.
+	Bump string `json:"bump,omitempty"`
 }
+
+// BumpMinor is the one value a path's bump may hold.
+const BumpMinor = "minor"
 
 // Story is a bead sized to be worked start to finish by one session in one
 // rig. Its Overrides are the fields of the epic's default path this story
@@ -154,7 +161,7 @@ func (e FormulaNotInstalledError) Error() string {
 
 // Fields are the names of a path's fields, in the order a path is written out.
 // They are also the metadata keys a path is stored under.
-var Fields = []string{"rig", "branch", "harness", "model", "effort", "formula", "host", "files", "max_turns", "size"}
+var Fields = []string{"rig", "branch", "harness", "model", "effort", "formula", "host", "files", "max_turns", "size", "bump"}
 
 // Set sets the field of p named by one of Fields. It is how a path is read out
 // of stored metadata: one key, one value, at a time.
@@ -180,6 +187,8 @@ func (p *Path) Set(field, value string) error {
 		p.MaxTurns = value
 	case "size":
 		p.Size = Size(value)
+	case "bump":
+		p.Bump = value
 	default:
 		return UnknownFieldError{Field: field}
 	}
@@ -209,6 +218,8 @@ func (p Path) Field(field string) (string, error) {
 		return p.MaxTurns, nil
 	case "size":
 		return string(p.Size), nil
+	case "bump":
+		return p.Bump, nil
 	default:
 		return "", UnknownFieldError{Field: field}
 	}
@@ -305,6 +316,9 @@ func (p Path) Overlay(override Path) Path {
 	if override.Size != "" {
 		p.Size = override.Size
 	}
+	if override.Bump != "" {
+		p.Bump = override.Bump
+	}
 	return p
 }
 
@@ -365,6 +379,9 @@ func (p Path) Validate() error {
 	}
 	if p.Size != "" && !KnownSize(p.Size) {
 		return UnknownValueError{Field: "size", Value: string(p.Size)}
+	}
+	if p.Bump != "" && p.Bump != BumpMinor {
+		return UnknownValueError{Field: "bump", Value: p.Bump}
 	}
 	return nil
 }

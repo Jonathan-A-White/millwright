@@ -79,3 +79,17 @@ func TestAFileWithNoVersionOrNoJSONIsAnError(t *testing.T) {
 		}
 	}
 }
+
+func TestTheNextMinorRaisesTheMiddleNumberAndResetsThePatch(t *testing.T) {
+	for from, want := range map[string]string{"0.1.0": "0.2.0", "0.5.9": "0.6.0", "1.2.3": "1.3.0", "10.9.99": "10.10.0"} {
+		got, err := NextMinor(from)
+		if err != nil || got != want {
+			t.Errorf("NextMinor(%q) = %q, %v; want %q", from, got, err, want)
+		}
+	}
+	for _, bad := range []string{"", "1.2", "v1.2.3", "1.2.3-beta"} {
+		if got, err := NextMinor(bad); err == nil {
+			t.Errorf("NextMinor(%q) = %q; want an error", bad, got)
+		}
+	}
+}
