@@ -15,6 +15,7 @@ import (
 
 // Gateway satisfies the port.
 var _ application.TrackerSnapshot = (*Gateway)(nil)
+var _ application.RunningEverywhere = (*Gateway)(nil)
 
 // Snapshot implements application.TrackerSnapshot: one bd list reads every bead,
 // closed ones included, and the snapshot answers LiveEpics, ShowEpics and
@@ -359,6 +360,61 @@ func (s *snapshot) ShowBeads(ctx context.Context, ids []string) ([]application.S
 		}
 	}
 	return out, nil
+}
+
+// blockingKinds are the kinds of edge `bd blocked` holds a bead back for; a
+// related or discovered-from bead is no wait, and a parent-child link is the
+// bead's epic.
+var blockingKinds = []string{"blocks", "conditional-blocks", "waits-for"}
+
+// BlockedForHost is Gateway.BlockedForHost read from the listing: the open,
+// unclaimed beads that are no epic and no step of a poured formula, with a
+// blocking edge to a bead not closed, on host, where the gateway reads `bd
+// blocked` and then `bd show` for each of them (168 shows took 25 s on a Boost,
+// mw-gq6.492). They come in the order `bd blocked` prints them: the most urgent
+// first, and the newest first among those as urgent.
+func (s *snapshot) BlockedForHost(_ context.Context, host string) ([]application.StoryDetail, error) {
+	if host == "" {
+		return nil, fmt.Errorf("which host are the blocked stories for?")
+	}
+	var waiting []bead
+	for _, b := range s.beads {
+		if b.Type == TypeEpic || b.Status != StatusOpen || b.Assignee != "" || isPouredStep(b.ID) || !s.blockedByOpen(b) {
+			continue
+		}
+		waiting = append(waiting, b)
+	}
+	sort.SliceStable(waiting, func(i, j int) bool {
+		if waiting[i].priority() != waiting[j].priority() {
+			return waiting[i].priority() < waiting[j].priority()
+		}
+		return waiting[i].created().After(waiting[j].created())
+	})
+	var blocked []application.StoryDetail
+	for _, b := range waiting {
+		var defaults domain.Path
+		if parent, held := s.byID[b.Parent]; held {
+			defaults = domain.PathFromMetadata(parent.pathMetadata())
+		}
+		if detail := s.shown(b, defaults); detail.Merged().Host == host {
+			blocked = append(blocked, detail)
+		}
+	}
+	return blocked, nil
+}
+
+// blockedByOpen says whether b has a blocking edge to a bead that is not closed,
+// or to one the listing does not hold.
+func (s *snapshot) blockedByOpen(b bead) bool {
+	for _, e := range b.edges() {
+		if e.Issue != b.ID || !slices.Contains(blockingKinds, e.Kind) {
+			continue
+		}
+		if blocker, held := s.byID[e.DependsOn]; !held || blocker.Status != StatusClosed {
+			return true
+		}
+	}
+	return false
 }
 
 // shown is the bead as bd show prints it: what it waits on narrowed to the

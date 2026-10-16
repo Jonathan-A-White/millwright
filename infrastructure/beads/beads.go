@@ -1063,6 +1063,11 @@ func (g *Gateway) sideBySide(args []string) bool {
 		return true
 	case "kv":
 		return len(args) > 1 && (args[1] == "get" || args[1] == "list")
+	case "sql":
+		// A select only reads; a CALL of the squash writes and takes the
+		// Gateway whole. Taken whole, a select waited for every read under way
+		// and held back each one after it (mw-gq6.492).
+		return len(args) > 1 && strings.HasPrefix(strings.ToLower(strings.TrimSpace(args[len(args)-1])), "select")
 	}
 	return false
 }

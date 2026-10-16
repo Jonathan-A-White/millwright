@@ -238,6 +238,15 @@ type StoryDetail struct {
 	TodoSlippedTold string
 }
 
+// RunningEverywhere is a tracker that reads what is in flight on this host and
+// on the others in one read of its in-progress list, where RunningStories and
+// RunningElsewhere each read it: a dispatch tick asks for it, when the tracker
+// offers it, instead of both (mw-gq6.492). here is what RunningStories lists
+// for host and away what RunningElsewhere lists.
+type RunningEverywhere interface {
+	RunningEverywhere(ctx context.Context, host string) (here, away []StoryDetail, err error)
+}
+
 // WorkInHand is what the tracker has in hand across every host: the stories
 // ready to be taken and the stories already claimed, before either is narrowed
 // to a host. The tracker reads it once; each section of a report narrows it

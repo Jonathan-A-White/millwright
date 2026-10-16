@@ -134,6 +134,37 @@ func (g *Gateway) RunningElsewhere(ctx context.Context, host string) ([]applicat
 	return elsewhere, nil
 }
 
+// RunningEverywhere implements application.RunningEverywhere: the in-progress
+// list read once and narrowed twice, to what is running on host, as
+// RunningStories lists it, and to what the other hosts hold, as RunningElsewhere
+// does. Each read of the list is seconds against a server (mw-gq6.492).
+func (g *Gateway) RunningEverywhere(ctx context.Context, host string) (here, away []application.StoryDetail, err error) {
+	if host == "" {
+		return nil, nil, fmt.Errorf("which host's running stories?")
+	}
+	out, err := g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
+	if err != nil {
+		return nil, nil, err
+	}
+	stories, err := decodeBeads(out)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading what is running on %s and beside it: %w", host, err)
+	}
+	details, err := g.overlaid(ctx, stories)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, detail := range details {
+		switch merged := detail.Merged().Host; {
+		case merged == host:
+			here = append(here, detail)
+		case merged != "" && merged != domain.HostAuto:
+			away = append(away, detail)
+		}
+	}
+	return here, away, nil
+}
+
 // WorkInHand implements application.WorkTracker: everything ready and
 // unclaimed, and everything claimed and unfinished, on every host. It is the
 // two listings a dispatcher makes, read once each with every distinct epic's
