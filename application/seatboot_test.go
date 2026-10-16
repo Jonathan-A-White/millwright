@@ -504,3 +504,70 @@ func TestTheTailWaitReturnsWhenTheCommandEndsAndAtItsLimit(t *testing.T) {
 		t.Errorf("a 600-second command should be left after the limit (2 s here), took %v", elapsed)
 	}
 }
+
+// A Builder's session is capped (mw-1ljpo9.6): at the host's next.max_turns, or
+// the story's own max_turns, and it is told at 80% of them to commit what passes
+// and write its closing comment. 0 is no cap and says nothing of one.
+func TestBootCapsTheSessionAndToldItToWrapUpAt80Percent(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		host     int
+		path     string
+		turns    int
+		wrapUpAt string
+	}{
+		{"the host's cap", 120, "", 120, "by turn 96 "},
+		{"the story's own cap", 120, "60", 60, "by turn 48 "},
+		{"a story's own 0 is no cap", 120, "0", 0, ""},
+		{"a host's 0 is no cap", 0, "", 0, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, h := newFakeVault(), &fakeHarness{}
+			boot := aSeatBoot(v, h)
+			boot.MaxTurns = tc.host
+			story := aStory(func(d *application.StoryDetail) { d.Story.Overrides.MaxTurns = tc.path })
+			if _, err := boot.Boot(context.Background(), story, "/root/.mw-worktrees/mw-gq6.6"); err != nil {
+				t.Fatalf("booting the story: %v", err)
+			}
+			if h.launch.MaxTurns != tc.turns {
+				t.Fatalf("expected the session capped at %d turns, got %d", tc.turns, h.launch.MaxTurns)
+			}
+			kickoff := h.launch.Kickoff
+			if tc.turns == 0 {
+				if kickoff != application.KickoffPrompt("builder", "mw-gq6.6", "/vault") || strings.Contains(kickoff, "capped") {
+					t.Fatalf("expected an uncapped session's kickoff to say nothing of a cap, got %q", kickoff)
+				}
+				return
+			}
+			for _, want := range []string{
+				fmt.Sprintf("capped at %d turns", tc.turns), tc.wrapUpAt,
+				"commit what passes", "closing comment", "given back",
+			} {
+				if !strings.Contains(kickoff, want) {
+					t.Errorf("expected the kickoff to say %q, got %q", want, kickoff)
+				}
+			}
+		})
+	}
+}
+
+// A Tester commits nothing, so its cap tells it to write its FINDINGS instead.
+func TestBootTellsACappedTesterToWriteItsFindingsNotToCommit(t *testing.T) {
+	v, h := newFakeVault(), &fakeHarness{}
+	boot := aSeatBoot(v, h)
+	boot.MaxTurns = 120
+	tester := aStory(func(d *application.StoryDetail) {
+		d.Story.Overrides.Formula = application.TesterFormula
+		d.Labels = []string{application.LabelTester}
+	})
+	if _, err := boot.Boot(context.Background(), tester, "/root/.mw-worktrees/mw-gq6.6"); err != nil {
+		t.Fatalf("booting the Tester story: %v", err)
+	}
+	kickoff := h.launch.Kickoff
+	if !strings.Contains(kickoff, "capped at 120 turns: by turn 96 close the steps you finished and write your FINDINGS") {
+		t.Errorf("expected the Tester to be told to write its FINDINGS by turn 96, got %q", kickoff)
+	}
+	if strings.Contains(kickoff, "commit what passes") {
+		t.Errorf("expected a Tester never to be told to commit, got %q", kickoff)
+	}
+}

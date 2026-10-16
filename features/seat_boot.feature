@@ -56,6 +56,35 @@ Feature: Booting a session into a seat
     Then the command line carries "--model opus"
     And the command line carries "--effort high"
 
+  # mw-1ljpo9.6: a Builder's session is capped at next.max_turns, or its story's
+  # own max_turns, and told to wrap up at 80% of them; 0 sets no cap.
+  Scenario: The session is capped at the host's turns and told to wrap up at 80% of them
+    Given this host caps a Builder's session at 120 turns
+    When the session that works the story is assembled for the "builder" seat
+    Then the command line carries "--max-turns 120"
+    And the command line carries "by turn 96 commit what passes"
+    And the kickoff prompt holds:
+      | capped at 120 turns                                           |
+      | by turn 96 commit what passes                                 |
+      | write your closing comment                                    |
+      | the story is given back                                       |
+
+  Scenario: A story's own max_turns wins over the host's
+    Given this host caps a Builder's session at 120 turns
+    And the story's own path sets max_turns to "60"
+    When the session that works the story is assembled for the "builder" seat
+    Then the command line carries "--max-turns 60"
+    And the kickoff prompt holds:
+      | capped at 60 turns |
+      | by turn 48         |
+
+  Scenario: A cap of 0 sets no cap and says nothing of one
+    Given this host caps a Builder's session at 0 turns
+    When the session that works the story is assembled for the "builder" seat
+    Then the command line does not carry "--max-turns"
+    And the kickoff prompt holds none of:
+      | capped at |
+
   Scenario: The command line primes the session and keeps its result
     When the session that works the story is assembled for the "builder" seat
     Then the command line primes the session from the vault's "runs/mw-gq6.6/boot.md"

@@ -118,6 +118,10 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			turns, err := config.NextMaxTurns()
+			if err != nil {
+				return err
+			}
 			changedSpecs, err := config.ChangedSpecs()
 			if err != nil {
 				return err
@@ -185,7 +189,7 @@ func newNextCmd() *cobra.Command {
 					Worktrees:   worktrees,
 					Landing:     worktrees,
 					Runner:      runner,
-					Boot:        builderBoot(files, host, tests, nice, jobs),
+					Boot:        builderBoot(files, host, tests, nice, jobs, turns),
 					Memory:      gateway,
 					Host:        host,
 					Cap:         atOnce,
@@ -239,7 +243,7 @@ func newNextCmd() *cobra.Command {
 				Sync:        sync,
 				Dispatch:    dispatcher,
 				Events:      homeEventLog(),
-				Boot:        builderBoot(files, host, tests, nice, jobs),
+				Boot:        builderBoot(files, host, tests, nice, jobs, turns),
 				Seat:        BuilderSeat,
 				Host:        host,
 				Rigs:        rigs,
@@ -292,7 +296,8 @@ func beadsEnvFile() string {
 // without being asked, exactly as `mw next` would run them (see
 // claude.WithTests). nice is builder_nice: the session runs that much nicer
 // than the mill (see claude.WithNice), and jobs is builder_jobs: the most test workers
-// it may start (see claude.WithJobs).
+// it may start (see claude.WithJobs), and turns is next.max_turns: the most
+// turns a session takes unless its story's path says otherwise (mw-1ljpo9.6).
 // withHostDispatchLocks gives a dispatch the lock the timer's dispatch takes:
 // this host's dispatch lock, so that the dispatch that ends a landing and a
 // timer tick never claim, pour and start the same story at once (mw-gq6.193).
@@ -303,7 +308,7 @@ func withHostDispatchLocks(d application.Dispatch, vault string) application.Dis
 	return d
 }
 
-func builderBoot(files *vault.Vault, host string, tests map[string]string, nice, jobs int) application.SeatBoot {
+func builderBoot(files *vault.Vault, host string, tests map[string]string, nice, jobs, turns int) application.SeatBoot {
 	return application.SeatBoot{
 		Vault:     files,
 		Harness:   sessionHarness(files.Dir(), host, claude.WithTests(tests), claude.WithNice(nice), claude.WithJobs(jobs)),
@@ -312,6 +317,7 @@ func builderBoot(files *vault.Vault, host string, tests map[string]string, nice,
 		After:     afterSession(),
 		Heartbeat: heartbeatSession(),
 		BdRetry:   bdRetrySession(),
+		MaxTurns:  turns,
 	}
 }
 

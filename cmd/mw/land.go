@@ -74,6 +74,10 @@ func newLandCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			turns, err := config.NextMaxTurns()
+			if err != nil {
+				return err
+			}
 			afterLanding, err := config.AfterLanding()
 			if err != nil {
 				return err
@@ -119,7 +123,7 @@ func newLandCmd() *cobra.Command {
 					Files:     files,
 					Mailbox:   gateway,
 					Runner:    tmux.New(),
-					Boot:      builderBoot(files, host, tests, nice, jobs),
+					Boot:      builderBoot(files, host, tests, nice, jobs, turns),
 					Events:    homeEventLog(),
 					Seat:      BuilderSeat,
 					Host:      host,

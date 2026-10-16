@@ -264,6 +264,42 @@ type SeatBoot struct {
 	// server (`mw bd`, mw-gq6.393). An empty BdRetry leaves the session the
 	// real bd.
 	BdRetry []string
+
+	// MaxTurns is the most turns a story's session may take, the host's
+	// next.max_turns, unless the story's own path sets max_turns (mw-1ljpo9.6).
+	// The session is told to wrap up at TurnCapWrapUp of them, and at the cap
+	// its harness stops it and mw next gives the story back. 0 sets no cap.
+	MaxTurns int
+}
+
+// DefaultMaxTurns is the most turns a Builder's session takes when the host's
+// config says nothing (mw-1ljpo9.6): the runaway sessions of 2026-10 ran 138 to
+// 279 turns, at four to ten times the median cost.
+const DefaultMaxTurns = 120
+
+// TurnCapWrapUp is the turn, of a cap of turns, by which a session is told to
+// commit what passes and write its closing comment: 80% of the cap.
+func TurnCapWrapUp(turns int) int { return turns * 4 / 5 }
+
+// TurnCapAdvice is what a session capped at turns is told of its cap, after
+// its kickoff; nothing for a session with no cap.
+func TurnCapAdvice(turns int) string {
+	return turnCapAdvice(turns, "commit what passes, close the steps you finished "+
+		"and write your closing comment, saying plainly what is left undone")
+}
+
+// TesterTurnCapAdvice is TurnCapAdvice for a Tester, who commits nothing: it
+// writes its FINDINGS instead.
+func TesterTurnCapAdvice(turns int) string {
+	return turnCapAdvice(turns, "close the steps you finished and write your FINDINGS with what you tried so far")
+}
+
+func turnCapAdvice(turns int, wrapUp string) string {
+	if turns <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" This session is capped at %d turns: by turn %d %s. At %d turns the harness stops the session, "+
+		"and the story is given back to be taken again, its branch kept.", turns, TurnCapWrapUp(turns), wrapUp, turns)
 }
 
 // Boot assembles the session that works detail in the worktree dir. What comes
@@ -452,6 +488,11 @@ func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kick
 	// refusing every dispatch and sync until somebody committed the empty file
 	// by hand.
 	attempt := detail.Attempts + 1
+	turns := path.TurnCap(b.MaxTurns)
+	advice := TurnCapAdvice(turns)
+	if IsTesterStory(detail) {
+		advice = TesterTurnCapAdvice(turns)
+	}
 	bootFile, err := b.Vault.PutRunFile(ctx, id, BootFileNameForAttempt(attempt), BootPrompt(seat, detail))
 	if err != nil {
 		return SessionSpec{}, fmt.Errorf("booting %s: %w", id, err)
@@ -468,10 +509,11 @@ func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kick
 		// into it.
 		BootFile:   bootFile,
 		ResultFile: b.Vault.RunFile(id, ResultFileNameForAttempt(attempt)),
-		Kickoff:    kickoff(b.Vault.Dir()),
+		Kickoff:    kickoff(b.Vault.Dir()) + advice,
 		After:      b.after(id),
 		Heartbeat:  b.heartbeat(id),
 		BdRetry:    b.BdRetry,
+		MaxTurns:   turns,
 	})
 	if err != nil {
 		return SessionSpec{}, fmt.Errorf("booting %s: %w", id, err)

@@ -26,6 +26,9 @@ type seatBootContext struct {
 	seat     string
 	spec     application.SessionSpec
 	err      error
+	// maxTurns is the host's next.max_turns the session is assembled with
+	// (mw-1ljpo9.6).
+	maxTurns int
 }
 
 // InitializeSeatBootScenario registers the steps of features/seat_boot.feature.
@@ -61,6 +64,9 @@ func InitializeSeatBootScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the boot file holds, in this order:$`, c.theBootFileHoldsInThisOrder)
 	ctx.Then(`^the boot file holds none of:$`, c.theBootFileHoldsNoneOf)
 	ctx.Then(`^the command line carries "([^"]*)"$`, c.theCommandLineCarries)
+	ctx.Then(`^the command line does not carry "([^"]*)"$`, c.theCommandLineDoesNotCarry)
+	ctx.Given(`^this host caps a Builder's session at (\d+) turns$`, c.thisHostCapsASessionAt)
+	ctx.Given(`^the story's own path sets max_turns to "([^"]*)"$`, c.theStorysOwnPathSetsMaxTurns)
 	ctx.Then(`^the settings on the command line are one JSON document that signs nothing and allows bd$`, c.theSettingsAreOneJSONDocument)
 	ctx.Then(`^the command line primes the session from the vault's "([^"]*)"$`, c.theCommandLinePrimesFrom)
 	ctx.Then(`^the command line writes the result to the vault's "([^"]*)"$`, c.theCommandLineWritesTheResultTo)
@@ -194,6 +200,8 @@ func (c *seatBootContext) theSessionIsAssembled(seat string) error {
 		Harness: claude.New(),
 		Seat:    seat,
 		Host:    "vps",
+		// MaxTurns: mw-1ljpo9.6.
+		MaxTurns: c.maxTurns,
 	}
 	c.spec, c.err = boot.Boot(context.Background(), c.detail, c.worktree)
 	return nil
@@ -272,6 +280,26 @@ func (c *seatBootContext) theCommandLineCarries(want string) error {
 		return fmt.Errorf("expected the command line to carry %q, got %q", want, line)
 	}
 	return nil
+}
+
+func (c *seatBootContext) theCommandLineDoesNotCarry(never string) error {
+	line, err := c.line()
+	if err != nil {
+		return err
+	}
+	if strings.Contains(line, never) {
+		return fmt.Errorf("expected the command line not to carry %q, got %q", never, line)
+	}
+	return nil
+}
+
+func (c *seatBootContext) thisHostCapsASessionAt(turns int) error {
+	c.maxTurns = turns
+	return nil
+}
+
+func (c *seatBootContext) theStorysOwnPathSetsMaxTurns(turns string) error {
+	return c.detail.Story.Overrides.Set("max_turns", turns)
 }
 
 // theSettingsAreOneJSONDocument reads the word after --settings back off the
@@ -366,7 +394,7 @@ func (c *seatBootContext) theKickoffPromptHolds(table *godog.Table) error {
 	if err != nil {
 		return err
 	}
-	prompt := application.KickoffPrompt(c.seat, c.detail.Story.ID, c.dir)
+	prompt := c.kickoff()
 	for _, row := range table.Rows {
 		if want := row.Cells[0].Value; !strings.Contains(prompt, want) {
 			return fmt.Errorf("expected the kickoff prompt to hold %q, got %q", want, prompt)
@@ -382,11 +410,18 @@ func (c *seatBootContext) theKickoffPromptHolds(table *godog.Table) error {
 	return nil
 }
 
+// kickoff is the kickoff prompt the session is told, with what it is told of
+// its turn cap, when it has one (mw-1ljpo9.6).
+func (c *seatBootContext) kickoff() string {
+	path, _ := c.detail.Path()
+	return application.KickoffPrompt(c.seat, c.detail.Story.ID, c.dir) + application.TurnCapAdvice(path.TurnCap(c.maxTurns))
+}
+
 func (c *seatBootContext) theKickoffPromptHoldsNoneOf(table *godog.Table) error {
 	if _, err := c.assembled(); err != nil {
 		return err
 	}
-	prompt := application.KickoffPrompt(c.seat, c.detail.Story.ID, c.dir)
+	prompt := c.kickoff()
 	for _, row := range table.Rows {
 		if unwanted := row.Cells[0].Value; strings.Contains(prompt, unwanted) {
 			return fmt.Errorf("the kickoff prompt holds %q, which does not belong in it: %q", unwanted, prompt)
