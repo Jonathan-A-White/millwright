@@ -58,7 +58,7 @@ func (w *Worktrees) BumpVersion(ctx context.Context, landingDir string, bump app
 			return application.Bumped{}, fmt.Errorf("%s: %w", file, err)
 		}
 	}
-	noted, err := changelogsWith(landingDir, bump, next)
+	noted, tidied, err := changelogsWith(landingDir, bump, next)
 	if err != nil {
 		return application.Bumped{}, err
 	}
@@ -75,14 +75,14 @@ func (w *Worktrees) BumpVersion(ctx context.Context, landingDir string, bump app
 	if err != nil {
 		return application.Bumped{}, err
 	}
-	return application.Bumped{Version: next, Commit: commit}, nil
+	return application.Bumped{Version: next, Commit: commit, Tidied: tidied}, nil
 }
 
 // noteUnderOwnVersion is what a landing does for a story that raised the version
 // itself: nothing to the version, but the story's note, when the rig keeps one,
 // goes under that version in a commit of its own.
 func (w *Worktrees) noteUnderOwnVersion(ctx context.Context, landingDir string, bump application.VersionBump, version string) (application.Bumped, error) {
-	noted, err := changelogsWith(landingDir, bump, version)
+	noted, tidied, err := changelogsWith(landingDir, bump, version)
 	if err != nil || len(noted) == 0 {
 		return application.Bumped{}, err
 	}
@@ -93,7 +93,7 @@ func (w *Worktrees) noteUnderOwnVersion(ctx context.Context, landingDir string, 
 	if err != nil {
 		return application.Bumped{}, err
 	}
-	return application.Bumped{Commit: commit}, nil
+	return application.Bumped{Commit: commit, Tidied: tidied}, nil
 }
 
 // commitFiles stages the files and commits them under message, returning the
@@ -125,22 +125,40 @@ type changelogFile struct {
 // one), under version, at the top, the last on top. A bump with no changelog
 // files, or whose entries are empty, returns none. Nothing is written, so that
 // a file that cannot take an entry leaves the landing worktree as it was.
-func changelogsWith(landingDir string, bump application.VersionBump, version string) ([]changelogFile, error) {
+//
+// Each file is tidied before the entries go in (mw-gq6.514): a second entry
+// for one version and story is taken out of the .json, and the blocks of one
+// version in the .md folded into one. tidied says, a sentence each, what was.
+func changelogsWith(landingDir string, bump application.VersionBump, version string) (files []changelogFile, tidied []string, err error) {
 	notes := bump.Notes()
 	if len(bump.Changelog) == 0 || len(notes) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
-	var files []changelogFile
 	for _, name := range bump.Changelog {
 		content, err := os.ReadFile(filepath.Join(landingDir, filepath.FromSlash(name)))
 		if err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("reading the changelog %s: %w", name, err)
+			return nil, nil, fmt.Errorf("reading the changelog %s: %w", name, err)
+		}
+		if strings.HasSuffix(name, ".json") {
+			var removed []string
+			if content, removed, err = domain.TidyChangelogJSON(content); err != nil {
+				return nil, nil, fmt.Errorf("the changelog %s: %w", name, err)
+			}
+			for _, key := range removed {
+				tidied = append(tidied, fmt.Sprintf("%s held a second entry for %s: it is taken out", name, key))
+			}
+		} else {
+			var folded []string
+			content, folded = domain.TidyChangelogMarkdown(content)
+			for _, twice := range folded {
+				tidied = append(tidied, fmt.Sprintf("%s had %s under more than one heading: its blocks are folded into one", name, twice))
+			}
 		}
 		for _, entry := range notes {
 			entry.Version = version
 			if strings.HasSuffix(name, ".json") {
 				if content, err = domain.AddToChangelogJSON(content, entry); err != nil {
-					return nil, fmt.Errorf("the changelog %s: %w", name, err)
+					return nil, nil, fmt.Errorf("the changelog %s: %w", name, err)
 				}
 			} else {
 				content = domain.AddToChangelogMarkdown(content, entry)
@@ -148,7 +166,7 @@ func changelogsWith(landingDir string, bump application.VersionBump, version str
 		}
 		files = append(files, changelogFile{name: name, content: content})
 	}
-	return files, nil
+	return files, tidied, nil
 }
 
 func writeAll(landingDir string, files []changelogFile) error {
