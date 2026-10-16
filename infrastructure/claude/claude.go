@@ -318,7 +318,7 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	// A close-out alone runs After in the environment it runs in after a
 	// harness, and nothing else (mw-gq6.467).
 	if l.CloseOutOnly {
-		return h.spec(l, shellLine(l.After)), nil
+		return h.spec(l, afterLine(l)), nil
 	}
 	if !knownPermissionMode(h.permissionMode) {
 		return application.SessionSpec{}, fmt.Errorf("launching %s: %q is not a permission mode Claude Code takes", l.StoryID, h.permissionMode)
@@ -386,18 +386,35 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	// nothing is left to renew it for. Heartbeat's own stop condition — the
 	// session no longer running — would settle it eventually even without the
 	// kill, but not until its next tick, and not at all if After never runs
-	// (mw-gq6.124).
+	// (mw-gq6.124). The kill is waited for: mw ends on TERM by cancelling what
+	// it was doing rather than at once, and the close-out chained on after it
+	// refuses a story whose heartbeat is still in the process table
+	// (mw-gq6.394), so After must not start until the heartbeat is gone
+	// (mw-gq6.487).
 	if len(l.Heartbeat) > 0 {
-		line = shellLine(l.Heartbeat) + " & HB=$!; " + line + "; kill $HB 2>/dev/null"
+		line = shellLine(l.Heartbeat) + " & HB=$!; " + line + "; kill $HB 2>/dev/null; wait $HB 2>/dev/null"
 	}
 
 	// Whatever comes after the session is chained with `;`, not `&&`: a session
 	// that failed, ran out of fuel or died is exactly the one whose closing out
 	// must still happen, and `&&` would skip it.
 	if len(l.After) > 0 {
-		line += "; " + shellLine(l.After)
+		line += "; " + afterLine(l)
 	}
 	return h.spec(l, line), nil
+}
+
+// afterLine is After as the shell runs it: alone, or with its stdout and stderr
+// kept in AfterLog as well as shown in the pane (mw-gq6.487). A close-out that
+// dies says why in its pane and nowhere else, and mw dispatch closes that pane
+// when it reclaims the story: the log is what is left to read. tee appends, so
+// a close-out run again for the same attempt (RunCloseOutAgain) adds to it.
+func afterLine(l application.Launch) string {
+	after := shellLine(l.After)
+	if l.AfterLog == "" {
+		return after
+	}
+	return "{ " + after + "; } 2>&1 | tee -a " + shellQuote(l.AfterLog)
 }
 
 // spec is the session that runs line for the launch: the host's beads

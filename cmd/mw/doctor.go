@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain/events"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/configfile"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	vaultpkg "github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -137,6 +139,13 @@ func newDoctorCmd() *cobra.Command {
 			rigTests.Home, rigTests.Host = mwVault(vault, host), host
 
 			posternChannel := doctor.NewPosternChannel(mwVault(vault, host), host)
+
+			// The home's config against the vault's hosts/boost-config.toml: a
+			// config this host cannot find is boost-config's to say.
+			configPath, configPathErr := config.FilePath()
+			boostConfig := doctor.NewBoostConfig(mwVault(vault, host), host,
+				configfile.New(configPath), configfile.New(filepath.Join(vault, application.BoostConfigFile)))
+			boostConfig.ConfigErr = configPathErr
 
 			staleMinutes, err := config.DoctorMayorStaleMinutes()
 			if err != nil {
@@ -295,6 +304,7 @@ func newDoctorCmd() *cobra.Command {
 					posternTranscribe,
 					dispatchWindows,
 					rigTests,
+					boostConfig,
 					beadsServerCheck,
 					posternChannel,
 					battery,

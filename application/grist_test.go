@@ -543,3 +543,44 @@ func TestGristGrindRecordsHowManyPhotosEachGristCarried(t *testing.T) {
 		}
 	}
 }
+
+// A grind's line names the model id the harness's result names beside the
+// alias it was run with, and so does the timing of the run kept: after the
+// alias moves, the record still says which model answered (mw-2zh33g.11). A
+// result that names none writes no model_id at all.
+func TestGristGrindRecordsTheModelIDTheResultNames(t *testing.T) {
+	mill, _, grinder := aSmallMill(t)
+	runs := &apptest.FakeGristRuns{}
+	mill.Runs = runs
+	grinder.Result = realResult(t, "result-haiku-grind.json")
+	if _, err := mill.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lines, _ := mill.State.Lines(context.Background())
+	if len(lines) != 1 || lines[0].Status != application.GristAnswered {
+		t.Fatalf("expected one answered line, got %+v", lines)
+	}
+	line, _ := json.Marshal(lines[0])
+	for _, want := range []string{`"model":"sonnet"`, `"model_id":"claude-haiku-5-5"`} {
+		if !strings.Contains(string(line), want) {
+			t.Errorf("expected %s in the line, got %s", want, line)
+		}
+	}
+	if len(runs.Kept) != 1 || runs.Kept[0].ModelID != "claude-haiku-5-5" || runs.Kept[0].Model != "sonnet" {
+		t.Errorf("expected the kept run's timing to name sonnet and claude-haiku-5-5, got %+v", runs.Kept)
+	}
+	timing, _ := json.Marshal(runs.Kept[0])
+	if !strings.Contains(string(timing), `"model_id":"claude-haiku-5-5"`) {
+		t.Errorf("expected model_id in the kept timing, got %s", timing)
+	}
+
+	bare, _, bareGrinder := aSmallMill(t)
+	bareGrinder.Result = application.SessionResult{Subtype: "success", Answer: json.RawMessage(`{"items":[],"placeName":"x"}`)}
+	if _, err := bare.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	bareLines, _ := bare.State.Lines(context.Background())
+	if raw, _ := json.Marshal(bareLines); len(bareLines) != 1 || strings.Contains(string(raw), "model_id") {
+		t.Errorf("expected one line with no model_id, got %s", raw)
+	}
+}

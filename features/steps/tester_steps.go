@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,7 @@ func registerTesterSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the Tester of "([^"]*)" committed a script to its branch$`, c.theTesterCommittedAScript)
 	ctx.Given(`^the trial saw these landings on "([^"]*)": (.+)$`, c.theTrialSawLandings)
 	ctx.Given(`^the Tester story "([^"]*)" tested "([^"]*)" and found "([^"]*)"$`, c.aTesterStoryTested)
+	ctx.Given(`^the Tester story "([^"]*)" tested "([^"]*)" on its second attempt and found "([^"]*)"$`, c.aTesterStoryTestedOnItsSecondAttempt)
 	ctx.Given(`^a bug story "([^"]*)" was filed naming "([^"]*)"$`, c.aBugStoryNamingAFinding)
 
 	ctx.When(`^mw tester report runs since "([^"]*)"$`, c.mwTesterReportRuns)
@@ -55,6 +57,9 @@ func registerTesterSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the tester report says for "([^"]*)":$`, c.theTesterReportSays)
 	ctx.Then(`^the tester report gives "([^"]*)" its fuel "([^"]*)"$`, c.theTesterReportGivesFuel)
 	ctx.Then(`^the check printed: (.+)$`, c.theCheckPrinted)
+	ctx.Then(`^that Tester story asks for no fuel line$`, c.thatTesterStoryAsksForNoFuelLine)
+	ctx.Then(`^the printed report says nothing of "([^"]*)"$`, c.thePrintedReportSaysNothingOf)
+	ctx.Then(`^the last ledger line holds nothing of "([^"]*)"$`, c.theLastLedgerLineHoldsNothingOf)
 
 	ctx.Given(`^process (\d+) is running "([^"]*)" from "([^"]*)"$`, c.aProcessIsRunning)
 	ctx.Then(`^process (\d+) is still running$`, c.processIsStillRunning)
@@ -205,16 +210,85 @@ func (c *nextContext) theTrialSawLandings(_ string, ids string) error {
 }
 
 func (c *nextContext) aTesterStoryTested(id, landed, findings string) error {
+	return c.aTesterStoryTestedIn(id, landed, findings, 1)
+}
+
+// aTesterStoryTestedOnItsSecondAttempt is a Tester story whose first attempt
+// was refused, each attempt with its own result and its own ledger line.
+func (c *nextContext) aTesterStoryTestedOnItsSecondAttempt(id, landed, findings string) error {
+	return c.aTesterStoryTestedIn(id, landed, findings, 2)
+}
+
+// aTesterStoryTestedIn closes a Tester story as mw next leaves one after the
+// given number of attempts: each attempt's result in the run directory and its
+// line in the ledger, with the fuel that result says, the last one tested.
+func (c *nextContext) aTesterStoryTestedIn(id, landed, findings string, attempts int) error {
+	ctx := context.Background()
 	if err := c.addTester(id, landed); err != nil {
 		return err
 	}
 	if err := c.closeForTheReport(id); err != nil {
 		return err
 	}
-	if err := c.theSessionSucceeded(id); err != nil {
+	if err := c.tracker.SetStoryMetadata(ctx, id, map[string]string{application.AttemptsField: strconv.Itoa(attempts)}); err != nil {
 		return err
 	}
-	return c.tracker.CommentOnStory(context.Background(), landed, unescape(findings))
+	result, err := application.ReadSessionResult(plainSuccess)
+	if err != nil {
+		return err
+	}
+	files := vault.New(c.vault)
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := c.putResultNamed(id, application.ResultFileNameForAttempt(attempt), plainSuccess); err != nil {
+			return err
+		}
+		outcome := fmt.Sprintf("tested %s: nothing merged", landed)
+		if attempt < attempts {
+			outcome = "not landed (tester-committed): a Tester commits nothing"
+		}
+		line := application.LedgerLine{When: testerClosed, StoryID: id, Title: application.TesterTitlePrefix + "The story " + landed,
+			Outcome: outcome, Result: result}.String()
+		if err := files.AppendToLedger(ctx, nextSeat, line); err != nil {
+			return err
+		}
+	}
+	return c.tracker.CommentOnStory(ctx, landed, unescape(findings))
+}
+
+// thatTesterStoryAsksForNoFuelLine is the Tester story filed asking nothing of
+// its session's fuel: mw next reads that from the result (mw-2zh33g.12).
+func (c *nextContext) thatTesterStoryAsksForNoFuelLine() error {
+	tester, err := c.theTester()
+	if err != nil {
+		return err
+	}
+	for _, text := range []string{tester.Description, tester.Acceptance} {
+		if strings.Contains(text, application.TesterFuelHeading) {
+			return fmt.Errorf("expected the Tester story to ask for no %q line, got:\n%s", application.TesterFuelHeading, text)
+		}
+	}
+	return nil
+}
+
+func (c *nextContext) thePrintedReportSaysNothingOf(words string) error {
+	if said := c.printed.String(); strings.Contains(said, words) {
+		return fmt.Errorf("expected the report to say nothing of %q, it printed:\n%s", words, said)
+	}
+	return nil
+}
+
+func (c *nextContext) theLastLedgerLineHoldsNothingOf(words string) error {
+	lines, err := c.ledgerLines()
+	if err != nil {
+		return err
+	}
+	if len(lines) == 0 {
+		return fmt.Errorf("the ledger is empty")
+	}
+	if last := lines[len(lines)-1]; strings.Contains(last, words) {
+		return fmt.Errorf("expected the last ledger line to hold nothing of %q, got:\n%s", words, last)
+	}
+	return nil
 }
 
 func (c *nextContext) aBugStoryNamingAFinding(id, description string) error {

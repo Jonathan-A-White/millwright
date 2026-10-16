@@ -124,6 +124,12 @@ the same is a `job` event, running to failed, actor `close-out@<host>`, the stor
 not be written as detail; for a stopped story the outcome it meant to record is also kept in the
 run as `close-out-unrecorded.json`, and `mw dispatch` writes it down when it finds the pane dead.
 
+A close-out that dies before any of that — its first tracker read failing every retry, say — leaves
+only its pane, and the session's line keeps that pane's words in the run as `next-<attempt>.log`
+(mw-gq6.487). Finding such a pane dead, with the attempt's result in the run and no ledger line
+charging its session, `mw dispatch` names the attempt tooling (`mw cause`) instead of refunding it,
+comments the log's last 20 lines on the story and mails the Mayor "Close-out died: <story>".
+
 ## Springing the jobs
 
 The follower runs the factory's jobs (mw-jrx0s.14): `dispatch` (a bead_changed to open, or to

@@ -108,3 +108,21 @@ func TestClientTimingsAreAppendedBesideTheRecordAndReadBack(t *testing.T) {
 		t.Fatalf("expected the file 0600, got %v", info.Mode())
 	}
 }
+
+// A line written before lines carried model_id still reads, with every field
+// it had and no model id (mw-2zh33g.11).
+func TestALineWithNoModelIDStillReads(t *testing.T) {
+	dir := t.TempDir()
+	old := `{"time":"2026-10-01T09:00:00Z","txid":"direct:old","app":"lampas","kind":"tips","v":"1","sender":"1848 4c0e 494b bb6e","model":"haiku","effort":"low","status":"answered","photos":0,"total_cost_usd":0.02,"seconds":3.4,"delivered":true}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, grist.RecordFile), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := grist.New(dir).Lines(context.Background())
+	if err != nil || len(lines) != 1 {
+		t.Fatalf("expected the old line read, got %+v %v", lines, err)
+	}
+	got := lines[0]
+	if got.Txid != "direct:old" || got.Model != "haiku" || got.ModelID != "" || got.Status != application.GristAnswered || got.Seconds != 3.4 || !got.Delivered {
+		t.Errorf("expected the old line as it was, with no model id, got %+v", got)
+	}
+}

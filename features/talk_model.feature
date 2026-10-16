@@ -30,7 +30,7 @@ Feature: mw talk model
       | chip   | name   | id                        |
       | opus   | Opus   | claude-opus-5-5           |
       | fable  | Fable  | claude-fable-5-1          |
-      | haiku  | Haiku  | claude-haiku-4-5-20251001 |
+      | haiku  | Haiku  | claude-haiku-5-5          |
 
   Scenario: An unknown chip name is refused and nothing is said, logged or typed
     When mw talk model "gpt" is run for talk "talk-7" turn 3

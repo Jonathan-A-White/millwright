@@ -73,3 +73,13 @@ Feature: A session mw starts reads the host's beads environment first
     And the vault holds .beads/dolt
     When a seat window is started and its command runs, with a stand-in for the harness
     Then the harness saw the server host "desktop.mw"
+
+  # mw-gq6.487: a close-out that dies prints why to its pane and nowhere else,
+  # and mw dispatch closes that pane when it reclaims the story. Its words are
+  # kept in the run as well, where the dispatch can read them to the Mayor.
+
+  Scenario: The close-out's words are kept in the run as well as shown in the pane
+    Given a home directory with no beads.env
+    When the story session's line runs, with a close-out that says "read of the story failed (i/o timeout), retried in 20s" and then "Error: closing out mw-gq6.1: bd show: i/o timeout" on stderr
+    Then the run's close-out log ends with "read of the story failed (i/o timeout), retried in 20s" and "Error: closing out mw-gq6.1: bd show: i/o timeout"
+    And the pane showed "Error: closing out mw-gq6.1: bd show: i/o timeout" too

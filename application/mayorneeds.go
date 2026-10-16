@@ -157,7 +157,7 @@ func (r MayorReader) HeldHands(ctx context.Context) ([]StoryDetail, error) {
 	}
 	var held []StoryDetail
 	for _, d := range found {
-		if d.Held() {
+		if d.Held() && !d.Iced() {
 			held = append(held, d)
 		}
 	}

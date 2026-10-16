@@ -621,6 +621,12 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 		mails = append(mails, mail{c: c, sent: &mailed})
 	}
 
+	// The ledger lines are in the vault now: committed before the checkout, the
+	// after-landing command and the smoke, which may run for many minutes, so
+	// that the vault is not left dirty and every sync refused meanwhile
+	// (mw-gq6.493). The batch's records are written and committed after.
+	b.commitLedger(ctx, report)
+
 	// Once for the batch: the rig's checkout, the after-landing command and the
 	// smoke, as the newest story's.
 	last := b.storyCloseOut(report.Merged[len(report.Merged)-1], rigDir)
@@ -840,19 +846,30 @@ func countStories(count int) string {
 	return strconv.Itoa(count) + " stories"
 }
 
+// commitLedger commits the seat's ledger, which holds the lines of the stories
+// just landed, on its own: it is the one tracked file the batch has written by
+// the time its long steps begin. A commit that cannot be made is a note, as it
+// is for the commit that ends the batch.
+func (b BatchLand) commitLedger(ctx context.Context, report *BatchReport) {
+	b.commitPaths(ctx, report, []string{path.Join(SeatsDir, b.Next.Seat, LedgerFileName)})
+}
+
 // commit records in the vault exactly what the batch wrote there: the seat's
 // ledger and the batch's records, by path. A commit that cannot be made is a
-// note, as it is for a close-out.
+// note, as it is for a close-out. The ledger was committed already when the
+// batch landed; naming it again is no more than a safeguard, for a path that
+// has not changed is left out.
 func (b BatchLand) commit(ctx context.Context, report *BatchReport) {
-	n := b.Next
-	if n.Files == nil {
-		return
-	}
 	paths := append([]string(nil), report.Records...)
 	if report.Landed {
-		paths = append(paths, path.Join(SeatsDir, n.Seat, LedgerFileName))
+		paths = append(paths, path.Join(SeatsDir, b.Next.Seat, LedgerFileName))
 	}
-	if len(paths) == 0 {
+	b.commitPaths(ctx, report, paths)
+}
+
+func (b BatchLand) commitPaths(ctx context.Context, report *BatchReport, paths []string) {
+	n := b.Next
+	if n.Files == nil || len(paths) == 0 {
 		return
 	}
 	verb := "Land"

@@ -372,6 +372,9 @@ const GristSmokePrefix = "grist.smoke."
 // checkout alone, while it is so.
 const GristLevelPrefix = "grist.level."
 
+// gristNotesPrefix begins both GristSmokePrefix and GristLevelPrefix.
+const gristNotesPrefix = "grist."
+
 // GristSmokeJob is the actor of the job event a failed smoke writes.
 const GristSmokeJob = "grist-smoke"
 
@@ -467,9 +470,10 @@ type GristSmokeRecords interface {
 }
 
 // GristSmokeHolds is what dispatch asks before it starts a story: whether a
-// failed smoke holds the stories of its rig, and the reason when it does.
+// failed smoke holds the stories of its rig, and the reason when it does. It
+// says it for every rig at once, by rig; a rig held by none is not there.
 type GristSmokeHolds interface {
-	Hold(ctx context.Context, rig string) (GristSmokeHold, error)
+	Holds(ctx context.Context) (map[string]GristSmokeHold, error)
 }
 
 // GristSmokeHold is the hold a failed smoke puts on a rig: why, and the examples
@@ -689,24 +693,22 @@ func (b GristSmokeBook) Records(ctx context.Context) ([]GristSmokeRecord, error)
 	if b.Notes == nil {
 		return nil, nil
 	}
-	notes, err := b.Notes.NotesWithPrefix(ctx, GristSmokePrefix)
+	// One listing holds both kinds of note: each listing is a bd kv list,
+	// two seconds on a Boost (mw-gq6.452).
+	notes, err := b.Notes.NotesWithPrefix(ctx, gristNotesPrefix)
 	if err != nil {
 		return nil, err
 	}
 	var records []GristSmokeRecord
-	for _, text := range notes {
+	for key, text := range notes {
 		var record GristSmokeRecord
-		if json.Unmarshal([]byte(text), &record) == nil && record.App != "" {
+		if strings.HasPrefix(key, GristSmokePrefix) && json.Unmarshal([]byte(text), &record) == nil && record.App != "" {
 			records = append(records, record)
 		}
 	}
-	behind, err := b.Notes.NotesWithPrefix(ctx, GristLevelPrefix)
-	if err != nil {
-		return nil, err
-	}
-	for key, why := range behind {
-		app := strings.TrimPrefix(key, GristLevelPrefix)
-		if app == "" || why == "" {
+	for key, why := range notes {
+		app, behind := strings.CutPrefix(key, GristLevelPrefix)
+		if !behind || app == "" || why == "" {
 			continue
 		}
 		i := slices.IndexFunc(records, func(r GristSmokeRecord) bool { return r.App == app })
@@ -720,21 +722,30 @@ func (b GristSmokeBook) Records(ctx context.Context) ([]GristSmokeRecord, error)
 	return records, nil
 }
 
-// Hold implements GristSmokeHolds.
-func (b GristSmokeBook) Hold(ctx context.Context, rig string) (GristSmokeHold, error) {
+// Holds implements GristSmokeHolds: a rig is held by the first of its failed
+// records, by app.
+func (b GristSmokeBook) Holds(ctx context.Context) (map[string]GristSmokeHold, error) {
 	records, err := b.Records(ctx)
 	if err != nil {
-		return GristSmokeHold{}, err
+		return nil, err
 	}
+	holds := map[string]GristSmokeHold{}
 	for _, r := range records {
-		if r.Held() && r.Rig == rig {
-			return GristSmokeHold{
-				Reason:   fmt.Sprintf("the grist smoke of %s failed after a landing in %s and holds its open stories: %s", r.App, rig, strings.Join(r.Failures, "; ")),
-				Examples: r.FailingExamples(),
-			}, nil
+		if _, held := holds[r.Rig]; held || !r.Held() {
+			continue
+		}
+		holds[r.Rig] = GristSmokeHold{
+			Reason:   fmt.Sprintf("the grist smoke of %s failed after a landing in %s and holds its open stories: %s", r.App, r.Rig, strings.Join(r.Failures, "; ")),
+			Examples: r.FailingExamples(),
 		}
 	}
-	return GristSmokeHold{}, nil
+	return holds, nil
+}
+
+// Hold is the hold on rig alone: the zero value when none holds it.
+func (b GristSmokeBook) Hold(ctx context.Context, rig string) (GristSmokeHold, error) {
+	holds, err := b.Holds(ctx)
+	return holds[rig], err
 }
 
 // HeldBy is why a failed smoke holds the stories of rig, empty when none does.

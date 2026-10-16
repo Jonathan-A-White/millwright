@@ -105,6 +105,28 @@ func TestValidateAcceptsEveryKnownModelAndEffort(t *testing.T) {
 	}
 }
 
+// The full ids are the current family's: Fable 5.1, Opus 5.5, Sonnet 5.5,
+// Haiku 5.5 (mw-2zh33g.10: haiku was still claude-haiku-4-5-20251001).
+func TestFullModelIDIsTheCurrentFamilysIdForEveryAlias(t *testing.T) {
+	want := map[domain.Model]string{
+		domain.ModelFable:  "claude-fable-5-1",
+		domain.ModelOpus:   "claude-opus-5-5",
+		domain.ModelSonnet: "claude-sonnet-5-5",
+		domain.ModelHaiku:  "claude-haiku-5-5",
+	}
+	for _, m := range []domain.Model{domain.ModelFable, domain.ModelOpus, domain.ModelSonnet, domain.ModelHaiku} {
+		if !domain.KnownModel(m) {
+			t.Fatalf("expected %q to be a known model", m)
+		}
+		if got := domain.FullModelID(m); got != want[m] {
+			t.Errorf("FullModelID(%q) = %q, want %q", m, got, want[m])
+		}
+	}
+	if got := domain.FullModelID("gpt"); got != "" {
+		t.Errorf("FullModelID(gpt) = %q, want empty", got)
+	}
+}
+
 func TestSetAndFieldRoundTripEveryPathField(t *testing.T) {
 	want := completePath()
 	var got domain.Path

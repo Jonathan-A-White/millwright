@@ -419,6 +419,23 @@ so releasing an epic twice does no more than releasing it once. An epic the
 tracker does not have is a plain refusal, and nothing is written. See
 `features/release.feature`.
 
+## The icebox
+
+```sh
+bin/mw ice mw-gq6.9 --reason "waits on the new rig"  # label icebox, P4, held, one comment
+bin/mw thaw mw-gq6.9 --priority 2                    # label off, P2 (default 3), still held
+```
+
+The icebox is work not yet decided against. `mw ice` sets the label `icebox`,
+priority 4 and the held status, and writes the comment `Iced: <reason>`; an
+epic, a finished bead and a claimed one are refused. `mw thaw` takes the label
+off, sets the priority (3 unless told) and writes `Thawed`; the bead stays held,
+and `mw release` is the yes. `mw status` prints an `ICEBOX:` line (the count, the
+oldest, how many were thawed in 7 days) and keeps iced beads out of its held
+lists; `mw release <epic>` leaves an iced child held and names it. Postern's
+`{action:'thaw'}` from the Governor's key does what `mw thaw` does. See
+`application/ice_test.go`.
+
 ## Naming why a story failed
 
 ```sh
@@ -909,7 +926,11 @@ what Builders propose in their closing comments (a session never edits it, but a
 stray edit is committed all the same), so a close-out that left them uncommitted
 would stop its own sync and every later one. The run record is committed so that the evidence behind a ledger
 line's fuel travels to the other host with the line; `runs/<story>/boot.md` beside
-it is never committed. A run record that is not there is said so in the report,
+it is never committed. Neither are the run's other leftovers — its result's
+`.tmp`, `next-<n>.log`, `check-<n>.log` — nor `metrics/` and the seats' dot
+files beside the vault: the `.gitignore` `mw init` lays names each of them, so
+git status of the vault is quiet after a run (features/vault_leftovers.feature).
+A run record that is not there is said so in the report,
 and the other two are committed all the same. Anything else
 uncommitted in the vault is still somebody else's to commit, and the sync's
 vault half still refuses because of it, naming the file — the story is landed and closed all the
@@ -1484,10 +1505,12 @@ worktree, serves it (`npm run preview` for Lampas), and with a Playwright script
 under `/tmp` drives it at 390x844: HOW TO CHECK IT step by step, then at least
 five adversarial moves, a shot of each. It commits nothing. Its closing comment
 goes on the landed story: `FINDINGS`, each finding `- [bug]` or `- [taste]` with
-what he would see, the steps and the shot path, or `FINDINGS: none`; then
-`Tester fuel: <tokens>`. Its kickoff is a Tester's own, which never says to
-commit, and `mw check` on a Tester story asks what `mw next` will: no commits,
-every step closed, FINDINGS written.
+what he would see, the steps and the shot path, or `FINDINGS: none`. Its fuel
+is not its to say: `mw next` records it in the ledger from the session's result,
+as for a Builder, and `mw tester report` sums it, tokens and cost, from there.
+Its kickoff is a Tester's own, which never says to commit, and `mw check` on a
+Tester story asks what `mw next` will: no commits, every step closed, FINDINGS
+written.
 
 A finding that still happens on main is filed by the Tester itself, so the Mayor
 only reads and releases it (mw-gq6.397):
@@ -1906,11 +1929,11 @@ spring = true   # deputy and millhand only: bring the seat up when its window is
 `landing` is a `bead_changed` that ends in `landed`; a `mail` event is the seat's only when its
 box is the seat's. Each pass the follower reads these files and, for a seat with new matching
 events: when the seat's window (`<seat>-*`, of several the one its acting file names) is up
-and its pane idle at an empty input line, types `New events for <seat>: N. Run mw events tail
---since <seq>.` and, when mail is among them, `New mail for <seat>: N message(s). Run bd mail
-inbox.`; leaves a busy pane alone and tells it on a later pass; and when the window is down
-and the seat is marked `spring = true`, runs its up command (`mw deputy`, `mw millhand`) with
-the same line as its reason. A seat whose window is down and not marked is told nothing: it
+and its pane idle at an empty input line, types one line: `New events for <seat>: N. Run mw
+events tail --since <seq>.`, or `New mail for <seat>: N message(s). Run bd mail inbox.` when
+every event is mail (one mail is one notice, mw-gq6.457); leaves a busy pane alone and tells
+it on a later pass; and when the window is down and the seat is marked `spring = true`, runs
+its up command (`mw deputy`, `mw millhand`) with the events line as its reason. A seat whose window is down and not marked is told nothing: it
 reads the log from its handoff. A seat starts at the log's head the first time it is seen
 (history is not told); the cursors are `nudge.json` beside the log. A bad file is logged and
 that seat left out. `mw events wait --for <seat> [--kinds k1,k2] [--since N] [--limit 50m]` is the
@@ -1921,7 +1944,9 @@ no event by `--limit` it says so and exits 0 (arm it again). `--kinds` defaults 
 file, or `mail`; hyphens may stand for underscores; a bad kind is refused, with the kinds
 listed. `contrib/mail-wait` is retired: it prints `retired: mw events wait` and runs it with
 `--for $MW_MAIL_MAILBOX` and `--limit $MW_MAIL_WAIT_LIMIT`s. While the follower is active
-the mail-notify tick no longer types the mail line for a seat whose file names mail.
+the mail-notify tick no longer types the mail line for a seat whose file names mail; while it
+is not, the tick leaves out the mail the follower's cursor for the seat (`nudge.json`) has
+passed, which the follower has told already, and types the line for the rest.
 
 A Mayor handover is a cursor on this log (mw-jrx0s.11): the successor boots, with
 `bin/respawn-mayor`, while the old Mayor still answers; the old Mayor then runs `mw seat
@@ -2124,7 +2149,8 @@ grind as one of its sessions, so Builders at the cap do not stop a grind and a
 grind never takes a Builder's place. After answering, the grist's photos are
 deleted from the backend. Each grist handled adds one line to
 `grinds.jsonl` in `grist_state_dir` (default `~/.local/state/mw/grist`): time,
-txid, app, kind, sender fingerprint, model, effort, where each came from, status,
+txid, app, kind, sender fingerprint, model, the model id the harness's result
+named (`model_id`), effort, where each came from, status,
 reason, Fuel, seconds and commit, never the grist's content. A grist's `grist`
 header may carry `model` and `effort`: they replace the grind file's for that
 grist, and must be within `[grist]` `models` and `efforts`, else the grist is
@@ -3613,7 +3639,7 @@ Claude Code window failed and froze the seat on a dialog, so the switch is a
 fresh Mayor on the chosen model. The command types into no window and starts
 nothing. It maps the chip name to the full model id (`sonnet` is
 `claude-sonnet-5-5`, `opus` `claude-opus-5-5`, `fable` `claude-fable-5-1`,
-`haiku` `claude-haiku-4-5-20251001`), speaks on the talk "Switching to Sonnet:
+`haiku` `claude-haiku-5-5`), speaks on the talk "Switching to Sonnet:
 a fresh Mayor takes the line in about a minute", appends a dated line to
 `.mayor-talk.log` in the vault, and prints the one line the Mayor runs next:
 
@@ -4600,6 +4626,15 @@ that is not listed, or a listed file one side deleted, is the whole merge undone
 story sent back to rebase as before. A rig without the key lands as it always did. Set
 the key only once no older `mw next` runs on any host: an older one only notes that it
 does not know the key, and sends the story back.
+
+Union keeps both sides of every hunk both changed, so a story that trims rows gets the
+old rows back whenever the other side added one. millwright's own `docs/codemap.md` is
+therefore named `merge=codemap` in `.gitattributes`, and every merge `mw` makes passes
+`-c merge.codemap.driver=sh <worktree>/scripts/codemap-merge.sh %O %A %B` itself, so no
+host's git config is edited: the result keeps each side's trims and removals, adds the
+rows the other side added, and a row both edited takes ours. A merge made by hand, with
+no such config, gets git's text merge, which stops on a conflict; a landing never settles
+a `merge=codemap` file by union, even when the rig lists it (mw-gq6.495).
 
 ### The changelog a landing writes
 

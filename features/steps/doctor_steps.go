@@ -52,6 +52,10 @@ type doctorContext struct {
 	// After hook; empty in any other.
 	ageKeyDir string
 
+	// boostConfigDir is the temp dir a boost-config scenario made, removed by
+	// the After hook; empty in any other.
+	boostConfigDir string
+
 	tmpLeftoversTmp       string
 	tmpLeftoversProc      string
 	tmpLeftoversFDCounter int
@@ -93,6 +97,9 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 		if c.ageKeyDir != "" {
 			os.RemoveAll(c.ageKeyDir)
 		}
+		if c.boostConfigDir != "" {
+			os.RemoveAll(c.boostConfigDir)
+		}
 		return ctx, nil
 	})
 
@@ -101,6 +108,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	c.registerMayorStuckSteps(ctx)
 	c.registerMayorStaleSteps(ctx)
 	c.registerAgeKeySteps(ctx)
+	c.registerBoostConfigSteps(ctx)
 
 	ctx.Given(`^a doctor check "([^"]*)" whose probe says ok$`, c.aCheckWhoseProbeSaysOK)
 	ctx.Given(`^a doctor check "([^"]*)" whose probe says faulty "([^"]*)"$`, c.aCheckWhoseProbeSaysFaulty)

@@ -798,13 +798,19 @@ func (g *Gateway) StoryComments(ctx context.Context, id string) ([]application.C
 // StoriesComments implements application.WorkTracker: StoryComments for
 // several stories at once, keyed by id. bd show --include-comments streams
 // every comment inline for as many ids as it is given in one process, rather
-// than one bd comments process per story (mw-tfne4.17); against a server it is
-// a bd show apiece, together (see showEach). An id bd does not
-// recognise is left out of the result rather than failing the whole call, the
-// way bd show itself skips it.
+// than one bd comments process per story (mw-tfne4.17). Against a server that
+// bd show reads its ids one round trip after another, so the comments are one
+// bd sql instead (commentsOf), and a bd show apiece, together (see showEach),
+// only if that fails. Either way an id bd does not recognise is left out of the
+// result rather than failing the whole call, the way bd show itself skips it.
 func (g *Gateway) StoriesComments(ctx context.Context, ids []string) (map[string][]application.Comment, error) {
 	if len(ids) == 0 {
 		return map[string][]application.Comment{}, nil
+	}
+	if len(ids) > 1 && g.sideBySide([]string{"show"}) {
+		if said, err := g.commentsOf(ctx, ids); err == nil {
+			return said, nil
+		}
 	}
 	printed, err := g.showEach(ctx, ids, "--include-comments")
 	if err != nil {

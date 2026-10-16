@@ -90,10 +90,13 @@ type GristRunAnswer struct {
 // seconds each engine took, summed over the recordings, and both are left out
 // when not known.
 type GristRunTiming struct {
-	Txid           string             `json:"txid"`
-	App            string             `json:"app"`
-	Kind           string             `json:"kind"`
-	Model          string             `json:"model"`
+	Txid  string `json:"txid"`
+	App   string `json:"app"`
+	Kind  string `json:"kind"`
+	Model string `json:"model"`
+	// ModelID is the model id the harness's result named, as on the grind's
+	// line; left out when it named none, and by runs kept before it was.
+	ModelID        string             `json:"model_id,omitempty"`
 	Effort         string             `json:"effort"`
 	Sent           *time.Time         `json:"sent,omitempty"`
 	Received       time.Time          `json:"received"`

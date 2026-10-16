@@ -22,8 +22,8 @@ type TesterStories interface {
 }
 
 // TesterRunFiles is the vault narrowed to what mw tester report reads: the
-// seat's ledger, which says what landed, and a Tester run's result, which says
-// what it burned.
+// seat's ledger, which says what landed and what each Tester run burned, as its
+// close-out recorded it from the run's result, and a run's result itself.
 type TesterRunFiles interface {
 	ReadLedger(ctx context.Context, seat string) ([]string, error)
 	ReadRunFile(ctx context.Context, storyID, name string) (string, error)
@@ -31,7 +31,8 @@ type TesterRunFiles interface {
 
 // TesterReport sums a Tester trial per rig: the landings in it, the Tester
 // runs, what they found, the [bug] stories filed from a finding, and each run's
-// fuel from its result. It reads and writes nothing else.
+// fuel as its close-outs recorded it in the ledger. It reads and writes nothing
+// else.
 type TesterReport struct {
 	Tracker TesterStories
 	Files   TesterRunFiles
@@ -48,15 +49,18 @@ type TesterReport struct {
 }
 
 // TesterRun is one Tester story closed in the trial: what it tested, what it
-// found, and what it burned, as its result says.
+// found, and what it burned, as the ledger says.
 type TesterRun struct {
 	ID       string
 	Landed   string
 	Findings TesterFindings
-	// Found says the landed story carries FINDINGS; FuelKnown that the run's
-	// result could be read.
+	// Found says the landed story carries FINDINGS. Tokens and CostUSD are
+	// every attempt's fuel, summed off the ledger lines mw next wrote from the
+	// session's result (mw-2zh33g.12), never what the session said it spent;
+	// FuelKnown says the ledger holds a line for the run.
 	Found     bool
-	Fuel      Fuel
+	Tokens    int
+	CostUSD   float64
 	FuelKnown bool
 }
 
@@ -126,7 +130,7 @@ func (r TesterReport) Run(ctx context.Context) (TesterReportResult, error) {
 				continue
 			}
 			run := TesterRun{ID: d.Story.ID, Landed: TesterLanded(d)}
-			run.Fuel, run.FuelKnown = r.fuel(ctx, d)
+			run.Tokens, run.CostUSD, run.FuelKnown = ledgerFuel(ledger, d.Story.ID)
 			report := rigOf(rig)
 			report.Runs = append(report.Runs, run)
 			if run.Landed != "" {
@@ -177,21 +181,26 @@ func ledgerLands(ledger []string, id string) bool {
 	return false
 }
 
-// fuel reads what a Tester run burned off its result.
-func (r TesterReport) fuel(ctx context.Context, d StoryDetail) (Fuel, bool) {
-	attempt := d.Attempts
-	if attempt < 1 {
-		attempt = 1
+// ledgerFuel sums the fuel the ledger's lines for id record: one line per
+// close-out, each with what its session's result said it burned, so a run
+// refused once counts both attempts. known is false when no line names id.
+func ledgerFuel(ledger []string, id string) (tokens int, costUSD float64, known bool) {
+	for _, line := range ledger {
+		entry, ok := ParseLedgerLine(line)
+		if !ok || entry.StoryID != id {
+			continue
+		}
+		tokens, costUSD, known = tokens+entry.Tokens, costUSD+entry.CostUSD, true
 	}
-	printed, err := r.Files.ReadRunFile(ctx, d.Story.ID, ResultFileNameForAttempt(attempt))
-	if err != nil || strings.TrimSpace(printed) == "" {
-		return Fuel{}, false
+	return tokens, costUSD, known
+}
+
+// fuelSpent is tokens and, when there is one, the cost, as the report says it.
+func fuelSpent(tokens int, costUSD float64) string {
+	if costUSD > 0 {
+		return fmt.Sprintf("%s tokens, $%.2f", Thousands(tokens), costUSD)
 	}
-	result, err := ReadSessionResult(printed)
-	if err != nil {
-		return Fuel{}, false
-	}
-	return result.Fuel, true
+	return Thousands(tokens) + " tokens"
 }
 
 // since is where the report starts.
@@ -235,20 +244,20 @@ func (r TesterReportResult) String() string {
 			continue
 		}
 		b.WriteString("  fuel per Tester run\n")
-		total := 0
+		total, cost := 0, 0.0
 		for _, run := range rig.Runs {
 			found := "no FINDINGS"
 			if run.Found {
 				found = run.Findings.Counted()
 			}
-			fuel := "fuel unknown: no result"
+			fuel := "fuel unknown: no ledger line"
 			if run.FuelKnown {
-				fuel = Thousands(run.Fuel.Total()) + " tokens"
-				total += run.Fuel.Total()
+				fuel = fuelSpent(run.Tokens, run.CostUSD)
+				total, cost = total+run.Tokens, cost+run.CostUSD
 			}
 			fmt.Fprintf(&b, "    %s  tested %s  %s  %s\n", run.ID, orNone(run.Landed), found, fuel)
 		}
-		fmt.Fprintf(&b, "  %-22s %s tokens\n", "Tester fuel in all", Thousands(total))
+		fmt.Fprintf(&b, "  %-22s %s\n", "Tester fuel in all", fuelSpent(total, cost))
 	}
 	return b.String()
 }

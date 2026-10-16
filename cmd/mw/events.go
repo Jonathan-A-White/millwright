@@ -61,9 +61,9 @@ func newEventsFollowCmd() *cobra.Command {
 			"fallback lane, and is put on chain later, oldest first. A failure is logged and the loop goes\n" +
 			"on; SIGTERM or SIGINT stops it. Each pass also tells the seats of the events they subscribed to\n" +
 			"(seats/<seat>/subscribe.toml, see `mw events wait --help`): a seat whose window is up and idle at an empty\n" +
-			"input line is typed \"New events for <seat>: N. Run mw events tail --since <seq>.\" (and the mail line when mail\n" +
-			"is among them), a busy pane is left alone and told on a later pass, and a seat whose window is down and\n" +
-			"marked spring = true is brought up (mw deputy, mw millhand). It also runs the jobs the events call for,\n" +
+			"input line is typed one line, \"New events for <seat>: N. Run mw events tail --since <seq>.\" (the mail line\n" +
+			"instead when every event is mail), a busy pane is left alone and told on a later pass, and a seat\n" +
+			"whose window is down and marked spring = true is brought up (mw deputy, mw millhand). It also runs the jobs the events call for,\n" +
 			"each as the unit its timer starts, at most one in flight: a bead opened or landed runs\n" +
 			"mw-dispatch.service, an alarm (an emergency-lane event), mail for the Millhand or a failed doctor\n" +
 			"mw-millhand-tick.service; each with an [events] heartbeat (default 1h) as fallback; and mw-mail-notify.service\n" +

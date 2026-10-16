@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -92,7 +93,7 @@ func (g *Gateway) readNotesAndComments(ctx context.Context, all []bead, now time
 		}
 		held[b.ID] = true
 		if b.CommentCount > 0 {
-			quoted = append(quoted, "'"+strings.NewReplacer(`\`, `\\`, `'`, `''`).Replace(b.ID)+"'")
+			quoted = append(quoted, sqlQuoted(b.ID))
 		}
 	}
 	if len(quoted) == 0 {
@@ -125,6 +126,70 @@ func (g *Gateway) readNotesAndComments(ctx context.Context, all []bead, now time
 		sort.SliceStable(said, func(i, j int) bool { return said[i].Created.Before(said[j].Created) })
 	}
 	return notes, comments, held, nil
+}
+
+// sqlQuoted is id as a string literal of bd sql.
+func sqlQuoted(id string) string {
+	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `''`).Replace(id) + "'"
+}
+
+// beadCommentsQuery reads the comments of {ids}, a wisp's as well as a bead's,
+// in the order bd show prints a bead's comments, as one table: kind b for each
+// of {ids} bd has a record of (a its id), c for a comment (a its bead, b its
+// author, t its text).
+const beadCommentsQuery = "select 'b' as k, i.id as id, i.id as a, '' as b, '' as t, null as at from issues i where i.id in ({ids})" +
+	" union all select 'b', w.id, w.id, '', '', null from wisps w where w.id in ({ids})" +
+	" union all select 'c', c.id, c.issue_id, c.author, c.text, c.created_at from comments c where c.issue_id in ({ids})" +
+	" union all select 'c', w.id, w.issue_id, w.author, w.text, w.created_at from wisp_comments w where w.issue_id in ({ids})" +
+	" order by at, id"
+
+// commentsChunk is how many ids one beadCommentsQuery names at most: the query
+// names each four times, and Linux takes no single argument over 128 KiB.
+const commentsChunk = 400
+
+// commentsOf is StoriesComments as bd sql, one for each commentsChunk of ids:
+// against a server bd show reads its ids one round trip after another (20 of
+// them took 31 s on a Boost), where one query reads hundreds (mw-gq6.452). An
+// id bd has no record of is left out, as bd show leaves it out; one with no
+// comments is there with none.
+func (g *Gateway) commentsOf(ctx context.Context, ids []string) (map[string][]application.Comment, error) {
+	var rows []noteRow
+	for chunk := range slices.Chunk(ids, commentsChunk) {
+		quoted := make([]string, 0, len(chunk))
+		for _, id := range chunk {
+			quoted = append(quoted, sqlQuoted(id))
+		}
+		out, err := g.call(ctx, "sql", "--json", strings.ReplaceAll(beadCommentsQuery, "{ids}", strings.Join(quoted, ", ")))
+		if err != nil {
+			return nil, err
+		}
+		var some []noteRow
+		if err := json.Unmarshal(out, &some); err != nil {
+			return nil, fmt.Errorf("parsing bd sql --json: %w", err)
+		}
+		rows = append(rows, some...)
+	}
+	said := make(map[string][]application.Comment, len(ids))
+	var err error
+	for _, r := range rows {
+		if r.Kind == "b" {
+			if said[r.A] == nil {
+				said[r.A] = []application.Comment{}
+			}
+			continue
+		}
+		var created time.Time
+		if r.At != nil {
+			if created, err = sqlTime(*r.At); err != nil {
+				return nil, err
+			}
+		}
+		said[r.A] = append(said[r.A], application.Comment{Author: r.B, Created: created, Text: r.Text})
+	}
+	for _, comments := range said {
+		sort.SliceStable(comments, func(i, j int) bool { return comments[i].Created.Before(comments[j].Created) })
+	}
+	return said, nil
 }
 
 // snapshot is every bead as one listing printed them.

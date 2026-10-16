@@ -268,3 +268,40 @@ func TestHandsAddReplaceOfAnApprovedStepPushesChangedStep(t *testing.T) {
 		t.Fatalf("expected %q, got %q", want, sent[1].Text)
 	}
 }
+
+// A user step for this host that names mw, where a user step here would not
+// find mw, is kept with a warning saying so; one that finds it, one for
+// another host, a root step and a step that names no mw warn of nothing
+// (mw-gq6.458).
+func TestHandsAddWarnsWhenAUserStepNamesMwThatItWouldNotFind(t *testing.T) {
+	for _, c := range []struct {
+		name, host, as, run string
+		finds, warns        bool
+	}{
+		{"not found here", "desktop", "user", "grep -q x f || cat a >> f; } && mw cloud check", false, true},
+		{"found here", "desktop", "user", "mw cloud check", true, false},
+		{"another host", "laptop", "user", "mw cloud check", false, false},
+		{"root", "desktop", "root", "mw cloud check", false, false},
+		{"no mw", "desktop", "user", "echo mwx; cat mw.toml", false, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tracker := handsTracker()
+			var errs bytes.Buffer
+			var asked []string
+			_, err := application.HandsAdd{Tracker: tracker, Notes: tracker, Now: func() time.Time { return handsNow }, Err: &errs,
+				Here: "desktop", Finds: func(program string) bool { asked = append(asked, program); return c.finds },
+			}.Run(context.Background(), application.HandsAddRequest{Bead: "mw-f758y.8",
+				Step: domain.HandsStep{ID: "s", Host: c.host, As: c.as, Run: c.run}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			warned := strings.Contains(errs.String(), "warning: step s names mw, which a user step on desktop would not find")
+			if warned != c.warns {
+				t.Fatalf("expected warned=%v, got %q (asked %v)", c.warns, errs.String(), asked)
+			}
+			if len(handsSteps(t, tracker, "mw-f758y.8")) != 1 {
+				t.Fatal("expected the step kept either way")
+			}
+		})
+	}
+}

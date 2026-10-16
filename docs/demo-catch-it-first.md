@@ -48,9 +48,8 @@ Tester trial*). Do not run this demo before `until` has passed.
 4. Read that `FINDINGS` comment and open the shots it names.
    Right looks like: each item is marked `[bug]` or `[taste]`, says what he would
    see, gives the steps to get there, and ends with a screenshot path (a phone
-   screen, 390 by 844). The comment closes with `Tester fuel: <tokens>`. The
-   shots show the screen the item describes. If the run found nothing the
-   comment reads `FINDINGS: none`, which is also right.
+   screen, 390 by 844). The shots show the screen the item describes. If the run
+   found nothing the comment reads `FINDINGS: none`, which is also right.
 
 5. Open the [bug] story the Mayor named (a story whose title starts `[bug]`,
    landed after mw-it6qk5.1) and read its closing comment.

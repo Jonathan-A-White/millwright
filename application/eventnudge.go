@@ -11,8 +11,8 @@ import (
 	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
-// MailNudgeFormat is the second line typed into a seat's pane when mail is
-// among the events: the words the mail notifier types for the Mayor's box.
+// MailNudgeFormat is the line typed into a seat's pane when every event it is
+// told of is mail: the words the mail notifier types for the Mayor's box.
 const MailNudgeFormat = "New mail for %s: %d message(s). Run bd mail inbox."
 
 // NudgeCursors keeps, for each seat, the last seq the follower has told it
@@ -32,9 +32,10 @@ type EventNudger interface {
 // for it (mw-6ww.55, Q7 rule 2). Each Nudge reads every seat's subscribe file
 // and, for each seat with events since the last it was told of that match:
 //
-//   - a window that is up and idle at an empty input line is typed
-//     EventsNudgeLine, then, when mail is among the events, MailNudgeFormat,
-//     the second only if the pane is idle still.
+//   - a window that is up and idle at an empty input line is typed one line:
+//     MailNudgeFormat when every event is mail, else EventsNudgeLine, which
+//     the mail among other events is told by. One mail is one notice: never
+//     the events line and then the mail line for the same mail (mw-gq6.457).
 //     After a line is typed the input line is read once Settle has passed: if
 //     the line is still on it, Enter is pressed once more, and the log says so
 //     (and says if the line is on it still). The pane is then not typed into
@@ -147,7 +148,11 @@ func (n *EventNudge) Nudge(ctx context.Context) error {
 		window, found := n.windowOf(ctx, windows, seat)
 		switch {
 		case found:
-			told, err := n.tell(ctx, window, seat, line, mail)
+			typed := line
+			if mail == len(matched) {
+				typed = fmt.Sprintf(MailNudgeFormat, seat, mail)
+			}
+			told, err := n.tell(ctx, window, typed)
 			if err != nil {
 				n.say("tell:"+seat, err)
 			} else {
@@ -176,7 +181,7 @@ func (n *EventNudge) Nudge(ctx context.Context) error {
 // tell types the nudge into the window when its pane is idle, and reports
 // whether it did. A pane at work, or with text on its input line, is left
 // alone and is not a failure.
-func (n *EventNudge) tell(ctx context.Context, window ReapWindow, seat, line string, mail int) (bool, error) {
+func (n *EventNudge) tell(ctx context.Context, window ReapWindow, line string) (bool, error) {
 	state, err := n.Terminal.PaneState(ctx, window.ID)
 	if err != nil {
 		return false, fmt.Errorf("reading the pane of %s: %w", window.Name, err)
@@ -186,17 +191,6 @@ func (n *EventNudge) tell(ctx context.Context, window ReapWindow, seat, line str
 	}
 	if err := n.typeAndConfirm(ctx, window, line); err != nil {
 		return false, fmt.Errorf("typing the nudge into %s: %w", window.Name, err)
-	}
-	if mail == 0 {
-		return true, nil
-	}
-	// Typing the first line may have woken the seat: the second goes in only
-	// if the pane is idle again.
-	if state, err := n.Terminal.PaneState(ctx, window.ID); err != nil || state != PaneIdle {
-		return true, nil
-	}
-	if err := n.typeAndConfirm(ctx, window, fmt.Sprintf(MailNudgeFormat, seat, mail)); err != nil {
-		return true, fmt.Errorf("typing the mail nudge into %s: %w", window.Name, err)
 	}
 	return true, nil
 }

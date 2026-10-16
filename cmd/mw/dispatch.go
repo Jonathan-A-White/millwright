@@ -291,6 +291,7 @@ func newDispatchCmd() *cobra.Command {
 				Cap:         atOnce,
 				MaxAttempts: maxAttempts,
 				Mailbox:     gateway,
+				VaultDir:    dir,
 				Load:        hostload.Proc{},
 				Room:        application.RoomLimits{LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB},
 				Grist:       hostGristRoom(room),

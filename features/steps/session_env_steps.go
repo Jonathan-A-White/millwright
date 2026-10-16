@@ -41,6 +41,9 @@ type sessionEnvContext struct {
 	thisHost string                // this host's name
 	vaultDir string                // the vault the scenario made, where .beads/ may be
 	hostOut  string                // where the stand-ins write the host they were started with
+
+	afterLog string // the run file the close-out's words are kept in (mw-gq6.487)
+	pane     string // what the story session's line printed, as its pane would show it
 }
 
 // InitializeSessionEnvScenario registers the steps of features/session_env.feature.
@@ -70,6 +73,7 @@ func InitializeSessionEnvScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^a Builder session is started and its line runs, with a stand-in for the harness$`, c.aBuilderSessionRuns)
 	ctx.When(`^a seat window is started and its command runs, with a stand-in for the harness$`, c.aSeatWindowRuns)
 	ctx.When(`^the story session's line runs, with stand-ins for the harness, the heartbeat and the close-out$`, c.theStoryLineRuns)
+	ctx.When(`^the story session's line runs, with a close-out that says "([^"]*)" and then "([^"]*)" on stderr$`, c.theStoryLineRunsWithACloseOutSaying)
 	ctx.When(`^the seat window's command runs, with a stand-in for the harness and a kickoff full of quotes$`, c.theSeatCommandRuns)
 	ctx.When(`^the story session and the seat window are assembled$`, c.bothAreAssembled)
 
@@ -81,6 +85,8 @@ func InitializeSessionEnvScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story line holds the path of beads\.env and no value from it$`, c.theStoryLineHoldsPathOnly)
 	ctx.Then(`^the seat window's command holds the path of beads\.env and no value from it$`, c.theSeatCommandHoldsPathOnly)
 	ctx.Then(`^the stand-ins all ran$`, c.theStandInsRan)
+	ctx.Then(`^the run's close-out log ends with "([^"]*)" and "([^"]*)"$`, c.theCloseOutLogEndsWith)
+	ctx.Then(`^the pane showed "([^"]*)" too$`, c.thePaneShowed)
 	ctx.Then(`^no name starting BEADS_DOLT_ was recorded$`, c.noBeadsNameRecorded)
 }
 
@@ -131,6 +137,13 @@ func (c *sessionEnvContext) standIn(name, body string) (string, error) {
 // minute at most, never after a fixed time a loaded host may not give the
 // heartbeat (mw-gq6.440).
 func (c *sessionEnvContext) storySession() (application.SessionSpec, error) {
+	return c.storySessionWith("", "")
+}
+
+// storySessionWith is storySession with the close-out stand-in saying what
+// closeOutBody says, and the close-out's words kept at afterLog when it is not
+// empty (mw-gq6.487).
+func (c *sessionEnvContext) storySessionWith(closeOutBody, afterLog string) (application.SessionSpec, error) {
 	harness, err := c.standIn("harness", "i=0\nwhile ! grep -q '^heartbeat ' "+c.log+" && [ $i -lt 1200 ]; do sleep 0.05; i=$((i + 1)); done\nprintf '{\"ok\":true}'\n")
 	if err != nil {
 		return application.SessionSpec{}, err
@@ -139,12 +152,13 @@ func (c *sessionEnvContext) storySession() (application.SessionSpec, error) {
 	if err != nil {
 		return application.SessionSpec{}, err
 	}
-	closeOut, err := c.standIn("closeout", "")
+	closeOut, err := c.standIn("closeout", closeOutBody)
 	if err != nil {
 		return application.SessionSpec{}, err
 	}
 	return claude.New(claude.WithProgram(harness), claude.WithEnvFile(c.envFile)).Session(application.Launch{
-		StoryID: "mw-gq6.1",
+		AfterLog: afterLog,
+		StoryID:  "mw-gq6.1",
 		Path: domain.Path{
 			Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude,
 			Model: domain.ModelSonnet, Effort: domain.EffortHigh,
@@ -185,6 +199,48 @@ func (c *sessionEnvContext) theStoryLineRuns() error {
 	c.line = spec.Command[len(spec.Command)-1]
 	if err := exec.Command(spec.Command[0], spec.Command[1:]...).Run(); err != nil {
 		return fmt.Errorf("running the assembled shell line: %w", err)
+	}
+	return nil
+}
+
+// theStoryLineRunsWithACloseOutSaying runs the story's line with a close-out
+// that says one line on stdout and one on stderr, as mw next does when it
+// fails, and keeps what the line printed as the pane would have shown it.
+func (c *sessionEnvContext) theStoryLineRunsWithACloseOutSaying(out, errLine string) error {
+	c.afterLog = filepath.Join(c.dir, "next-1.log")
+	body := "echo " + shellWord(out) + "\necho " + shellWord(errLine) + " >&2\nexit 1\n"
+	spec, err := c.storySessionWith(body, c.afterLog)
+	if err != nil {
+		return fmt.Errorf("assembling the session: %w", err)
+	}
+	c.line = spec.Command[len(spec.Command)-1]
+	// The close-out fails, as a dying mw next does, so the line's own status
+	// is no verdict here: what the pane showed and what was kept are.
+	printed, _ := exec.Command(spec.Command[0], spec.Command[1:]...).CombinedOutput()
+	c.pane = string(printed)
+	return nil
+}
+
+// shellWord is word single-quoted for sh.
+func shellWord(word string) string {
+	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
+}
+
+func (c *sessionEnvContext) theCloseOutLogEndsWith(first, last string) error {
+	held, err := os.ReadFile(c.afterLog)
+	if err != nil {
+		return fmt.Errorf("reading the close-out's log: %w (the line was %q)", err, c.line)
+	}
+	lines := strings.Split(strings.TrimRight(string(held), "\n"), "\n")
+	if len(lines) < 2 || lines[len(lines)-2] != first || lines[len(lines)-1] != last {
+		return fmt.Errorf("expected the close-out's log to end with %q and %q, got:\n%s", first, last, held)
+	}
+	return nil
+}
+
+func (c *sessionEnvContext) thePaneShowed(words string) error {
+	if !strings.Contains(c.pane, words) {
+		return fmt.Errorf("expected the pane to show %q too, got:\n%s", words, c.pane)
 	}
 	return nil
 }

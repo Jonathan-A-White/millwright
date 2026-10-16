@@ -25,6 +25,7 @@ const (
 	PosternActionRelease  = "release"
 	PosternActionHold     = "hold"
 	PosternActionPriority = "priority"
+	PosternActionThaw     = "thaw"
 	PosternActionVerified = "verified"
 	PosternActionKeep     = "keep"
 	PosternActionClose    = "close"
@@ -107,7 +108,7 @@ func decodePosternAction(text string) (PosternAction, bool) {
 // it does not is left for the Mayor to read as text.
 func knownPosternAction(action string) bool {
 	switch action {
-	case PosternActionRelease, PosternActionHold, PosternActionPriority, PosternActionVerified, PosternActionRun,
+	case PosternActionRelease, PosternActionHold, PosternActionPriority, PosternActionThaw, PosternActionVerified, PosternActionRun,
 		PosternActionKeep, PosternActionClose, PosternActionChase, PosternActionAskDone, PosternActionKeepWaiting,
 		PosternActionTodoAdd, PosternActionTodoEdit, PosternActionTodoMove:
 		return true
@@ -509,6 +510,9 @@ func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, ac
 			return done(fmt.Sprintf("Released: %s", action.Bead),
 				fmt.Sprintf("RELEASED by the Governor via postern, txid %s: %d held stories, ready: %s", m.Txid, len(held), joinOrNone(plan.ready())))
 		}
+		if bead.Iced() {
+			return refuse("it is iced; thaw it first")
+		}
 		if !bead.Held() {
 			return refuse(fmt.Sprintf("it is %s, not held", bead.Status))
 		}
@@ -555,6 +559,16 @@ func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, ac
 		}
 		return done(fmt.Sprintf("Priority %d: %s", *action.Priority, action.Bead),
 			fmt.Sprintf("PRIORITY %d set by the Governor via postern, txid %s", *action.Priority, m.Txid))
+
+	case PosternActionThaw:
+		if bead.IsEpic {
+			return refuse("it is an epic; thaw its stories one by one")
+		}
+		comment := fmt.Sprintf("Thawed by the Governor via postern, txid %s", m.Txid)
+		if err := (Thaw{Tracker: i.Tracker, Notes: i.Memory, Now: i.now, Comment: comment}).Run(ctx, action.Bead, action.Priority); err != nil {
+			return refuse(err.Error())
+		}
+		return result, i.mail(ctx, fmt.Sprintf("Thawed: %s", action.Bead), comment)
 
 	case PosternActionKeep:
 		days := PosternKeepDays

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"path/filepath"
+
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/configfile"
@@ -9,13 +11,55 @@ import (
 )
 
 // newConfigCmd builds `mw config`: reading and changing one key of
-// ~/.config/mw/config.toml.
+// ~/.config/mw/config.toml, and exporting the tables a Boost copies.
 func newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Read or change one key of ~/.config/mw/config.toml",
 	}
-	cmd.AddCommand(newConfigSetCmd(), newConfigGetCmd())
+	cmd.AddCommand(newConfigSetCmd(), newConfigGetCmd(), newConfigExportBoostCmd())
+	return cmd
+}
+
+func newConfigExportBoostCmd() *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "export-boost",
+		Short: "Rewrite the vault's hosts/boost-config.toml from this home's [tests] and [changed_specs]",
+		Long: "export-boost rewrites the vault's " + application.BoostConfigFile + " from the [tests] and\n" +
+			"[changed_specs] tables of ~/.config/mw/config.toml, and nothing else of it, then commits that\n" +
+			"one file in the vault; the next mw sync carries it. contrib/boost-bootstrap.sh gives a new\n" +
+			"Boost the lines of the rigs it clones from that file, so a rig's line added or changed here\n" +
+			"and not exported gates that rig wrong on the next Boost. mw doctor's boost-config check says\n" +
+			"when the two differ.\n\n" +
+			"It prints each line it brings level ([tests] argus: missing, differs, or not on the home)\n" +
+			"and writes nothing when the file is already as it would write it. It runs on the home only:\n" +
+			"a Boost's tables are a part of the home's. --dry-run prints the same and writes nothing.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path, err := config.FilePath()
+			if err != nil {
+				return err
+			}
+			vault, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			host, err := config.Host()
+			if err != nil {
+				return err
+			}
+			return application.ConfigExportBoost{
+				Config: configfile.New(path),
+				Target: configfile.New(filepath.Join(vault, application.BoostConfigFile)),
+				Vault:  mwVault(vault, host),
+				Home:   mwVault(vault, host),
+				Host:   host,
+				Out:    cmd.OutOrStdout(),
+			}.Run(cmd.Context(), dryRun)
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would change and write nothing")
 	return cmd
 }
 

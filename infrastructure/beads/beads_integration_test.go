@@ -1475,7 +1475,7 @@ func TestPouringTddFeatureForABugAsksForTheRegressionTestAndTheSweep(t *testing.
 // The Tester formula (mw-it6qk5.5), poured by a real bd: its steps follow the
 // landed story's HOW TO CHECK IT at a phone's 390x844, try at least five
 // adversarial moves, re-run each finding on main's head, file the ones still
-// there as held stories, commit nothing, and write FINDINGS and the Tester fuel.
+// there as held stories, commit nothing, and write FINDINGS; the fuel is mw next's to read.
 func TestPouringTheTesterFormulaDrivesTheLandedAppAndCommitsNothing(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
@@ -1498,12 +1498,15 @@ func TestPouringTheTesterFormulaDrivesTheLandedAppAndCommitsNothing(t *testing.T
 	text := strings.Join(all, "\n---\n")
 	for _, phrase := range []string{
 		"HOW TO CHECK IT", "390x844", "at least five adversarial moves", "commits nothing",
-		"'FINDINGS'", "'FINDINGS: none'", "'Tester fuel: <tokens>'", "[bug]", "[taste]", "/tmp/tester-mw-l.9/", "/tmp/tester-mw-l.9/main",
+		"'FINDINGS'", "'FINDINGS: none'", "[bug]", "[taste]", "/tmp/tester-mw-l.9/", "/tmp/tester-mw-l.9/main",
 		"still on main: yes", "still on main: no (<version>)", "mw tester file mw-l.9", "held: <id>",
 	} {
 		if !strings.Contains(text, phrase) {
 			t.Errorf("expected the poured tester steps to name %q, got:\n%s", phrase, text)
 		}
+	}
+	if strings.Contains(text, "Tester fuel") {
+		t.Errorf("expected the poured tester steps to ask for no fuel line: mw next reads it from the result, got:\n%s", text)
 	}
 	moves := 0
 	for _, move := range []string{"leave the app and come back", "hold and let go at once", "tap twice fast", "slow 3G", "rotate", "Back at each screen"} {

@@ -15,6 +15,19 @@ import (
 	"github.com/Jonathan-A-White/millwright/domain"
 )
 
+// A session cannot count its own fuel, and a Haiku Tester guessed it: mw next
+// records it from the result file, so the tester formula asks for none
+// (mw-2zh33g.12).
+func TestTheTesterFormulaAsksTheSessionForNoFuelLine(t *testing.T) {
+	raw, err := os.ReadFile("../formulas/tester.formula.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), application.TesterFuelHeading) {
+		t.Errorf("expected the tester formula to ask for no %q line, got:\n%s", application.TesterFuelHeading, raw)
+	}
+}
+
 func TestReadTesterFindingsCountsBugAndTasteUpToTheFuelLine(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
