@@ -32,6 +32,13 @@ func (f *FakeHeartbeats) Start(storyID string, pid int) {
 	f.alive[storyID] = append(f.alive[storyID], pid)
 }
 
+// Stop ends every heartbeat of storyID.
+func (f *FakeHeartbeats) Stop(storyID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.alive, storyID)
+}
+
 // Beating implements application.LiveHeartbeats.
 func (f *FakeHeartbeats) Beating(_ context.Context, storyID string) ([]int, error) {
 	f.mu.Lock()
