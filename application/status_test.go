@@ -737,3 +737,42 @@ func attemptsLineOf(printed, id string) string {
 	}
 	return ""
 }
+
+func TestStatusNamesEveryOpenStoryWhoseFormulaIsNotInstalled(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	tracker.AddFormula("tdd-feature")
+	storyOn(t, tracker, "mw-gq6.50", "parked by a typo", "vps")
+	storyOn(t, tracker, "mw-gq6.51", "worked", "vps")
+	storyOn(t, tracker, "mw-gq6.52", "parked on another host", "laptop")
+	for id, formula := range map[string]string{"mw-gq6.50": "bug", "mw-gq6.52": "nope"} {
+		if err := tracker.SetStoryMetadata(context.Background(), id, map[string]string{"formula": formula}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	report := otherHostStatus(t, tracker)
+	text := report.String()
+	if !strings.Contains(text, application.FormulaNotInstalledHeading+" (2)") {
+		t.Errorf("expected the heading with two stories, got:\n%s", text)
+	}
+	for _, want := range []string{"mw-gq6.50", "formula bug", "mw-gq6.52", "formula nope"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("expected %q in the report, got:\n%s", want, text)
+		}
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "mw-gq6.51") && strings.Contains(line, "formula") {
+			t.Errorf("a story with an installed formula should not be named: %q", line)
+		}
+	}
+}
+
+func TestStatusShowsNothingOfFormulasWhenEveryOneIsInstalled(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	tracker.AddFormula("tdd-feature")
+	storyOn(t, tracker, "mw-gq6.51", "worked", "vps")
+
+	if text := otherHostStatus(t, tracker).String(); strings.Contains(text, application.FormulaNotInstalledHeading) {
+		t.Errorf("zero should show nothing, got:\n%s", text)
+	}
+}

@@ -235,3 +235,23 @@ func TestAnUnreadableFlightRefusesNothing(t *testing.T) {
 		t.Errorf("expected both stories filed and a note that flight could not be read, got %d and:\n%s", len(filed.Stories), out)
 	}
 }
+
+func TestFileRefusesAPlanWhoseStoryNamesAFormulaNotInstalledBeforeCreatingAnything(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
+	plan := twoStoryPlan()
+	plan.Stories[1].Overrides.Formula = "bug"
+
+	_, err := application.File{Tracker: tracker}.Run(context.Background(), plan)
+	if err == nil {
+		t.Fatal("expected a plan naming formula bug to be refused")
+	}
+	for _, said := range []string{"gateway", "bug", "not installed", "tdd-feature"} {
+		if !strings.Contains(err.Error(), said) {
+			t.Errorf("expected the refusal to say %q, got %q", said, err)
+		}
+	}
+	if tracker.Writes() != 0 {
+		t.Errorf("expected nothing created, the tracker took %d writes", tracker.Writes())
+	}
+}
