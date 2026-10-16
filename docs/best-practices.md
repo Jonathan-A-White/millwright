@@ -362,7 +362,7 @@ any rig. The escape for a true one-off is `Sweep: none, because <reason>`; a bar
 
 **A change to the factory names the metric it should move.** A millwright story's
 acceptance criteria carry a line `Expect: <metric> <up|down>`, the metric one of
-`refusals`, `attempts/landing`, `bugs/landing`, `dispatch-to-landing`,
+`refusals`, `attempts/landing`, `bugs/landing`, `escaped bugs`, `dispatch-to-landing`,
 `tokens/landing` or `$/landing`, or `Expect: none, because <reason>`. `mw report`
 then compares that metric for the whole factory in the 7 days before and the 7
 days after the landing, under FACTORY CHANGES, and calls the change WORSE when it
