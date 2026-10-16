@@ -27,6 +27,14 @@ const PathUnset = "(unset)"
 type PathSet struct {
 	Tracker WorkTracker
 
+	// Rigs are the rigs checked out on this host, by name, and RigFiles counts
+	// the files of a directory in one: a files key that names a directory of
+	// more than MostFilesInADirectory files is refused (mw-gq6.442). A rig not
+	// checked out here cannot be counted in, so a whole directory named for it
+	// ("src/") is refused there too.
+	Rigs     map[string]string
+	RigFiles RigFiles
+
 	// Out is where the path that was set is printed. A nil Out prints nothing.
 	Out io.Writer
 }
@@ -74,6 +82,13 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		}
 	}
 	path = path.Overlay(named)
+	// Only a files key being written is judged: one the story already holds is
+	// not this command's to refuse a model= or rig= over.
+	if named.Files != "" {
+		if err := crowdedFiles(s.Rigs, s.RigFiles, story.Merged().Overlay(path)); err != nil {
+			return domain.Path{}, fmt.Errorf("%w: nothing was written", err)
+		}
+	}
 
 	fields := path.Metadata()
 	if err := s.Tracker.SetStoryMetadata(ctx, id, fields); err != nil {
@@ -87,6 +102,53 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		fmt.Fprintf(s.Out, "Set the path of %s:\n%s", id, pathLines(now))
 	}
 	return path, nil
+}
+
+// MostFilesInADirectory is the most files a directory a files key names may
+// hold (mw-gq6.442). Dispatch holds a story behind every running story on its
+// rig that touches anything under a directory it names, so a key naming src/
+// kept a lampas bug unstarted for three days; twenty is a module's worth, a few
+// stories' files, and well short of a whole source tree.
+const MostFilesInADirectory = 20
+
+// crowdedFiles refuses a path whose files key names a directory of more than
+// MostFilesInADirectory files in its rig's checkout here, or one written as a
+// whole directory ("src/", "src/**") when the rig is not checked out here to
+// count it in. A directory the checkout does not have yet is a new one, and is
+// taken: nothing running touches it. A nil RigFiles counts nothing, so a whole
+// directory is refused and a plain name is taken, as for a rig not here.
+func crowdedFiles(rigs map[string]string, files RigFiles, path domain.Path) error {
+	rig := strings.TrimSpace(path.Rig)
+	rigDir, here := rigs[rig]
+	here = here && rigDir != "" && files != nil
+	for _, named := range domain.Directories(path.Files) {
+		if !here {
+			if named.Whole {
+				return crowded(named, fmt.Sprintf("a whole directory, and %s is not checked out here to count what it holds", orRig(rig)))
+			}
+			continue
+		}
+		if n, isDir := files.FilesIn(rigDir, named.Dir, MostFilesInADirectory); isDir && n > MostFilesInADirectory {
+			return crowded(named, fmt.Sprintf("a directory of more than %d files in %s", MostFilesInADirectory, rig))
+		}
+	}
+	return nil
+}
+
+// crowded is the refusal of a files key naming a directory, and how to name
+// files instead.
+func crowded(named domain.NamedDirectory, what string) error {
+	return fmt.Errorf("the files key names %s, %s, and dispatch holds a story behind every running story "+
+		"that touches anything in it: name the files the story will change, comma-separated, "+
+		"as files=src/Talk.tsx,src/chat/*.tsx, or a directory of at most %d files", named.Written, what, MostFilesInADirectory)
+}
+
+// orRig is the rig as a refusal names it, "its rig" when the path has none.
+func orRig(rig string) string {
+	if rig == "" {
+		return "its rig"
+	}
+	return rig
 }
 
 // parsePathPairs reads key=value settings into a path, refusing a key that is

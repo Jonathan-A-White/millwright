@@ -1,8 +1,12 @@
 package main
 
 import (
+	"strconv"
+
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 
 	"github.com/spf13/cobra"
 )
@@ -32,14 +36,19 @@ func newPathSetCmd() *cobra.Command {
 			"  mw path set B files=src/Reader.tsx,src/data/*.ts\n\n" +
 			"Only the seven keys are copied from the sibling, never its files nor its other\n" +
 			"metadata. An unknown key, a sibling with no rig, and a story that is in progress or\n" +
-			"closed are refused, and nothing is written: a path is adjusted only before a story starts.",
+			"closed are refused, and nothing is written: a path is adjusted only before a story starts.\n" +
+			"So is a files key naming a directory of more than " + strconv.Itoa(application.MostFilesInADirectory) + " files in the rig's checkout here, or\n" +
+			"a whole directory (src/, src/**) where the rig is not checked out to count it.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, err := beads.FromConfig()
 			if err != nil {
 				return err
 			}
-			_, err = application.PathSet{Tracker: gateway, Out: cmd.OutOrStdout()}.
+			// A rig table that cannot be read leaves no checkout to count a
+			// directory in: a whole directory is refused, a plain name taken.
+			rigs, _ := config.Rigs()
+			_, err = application.PathSet{Tracker: gateway, Rigs: rigs, RigFiles: rig.Files{}, Out: cmd.OutOrStdout()}.
 				Run(cmd.Context(), args[0], from, args[1:])
 			return err
 		},

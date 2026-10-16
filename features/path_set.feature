@@ -127,3 +127,12 @@ Feature: Setting and showing a story's path
     And the path-set printed the line: files=a.go
     And the path-set printed the line: rig=millwright
     And the path-set echoed what showing the path of "G" prints
+
+  # mw-gq6.442: a files key naming a whole directory held a lampas story behind
+  # every running story under src/ for three days. It is refused where it is
+  # written, with how to name files instead.
+
+  Scenario: A files key naming a bare directory is refused, saying how to name files
+    When the path of "B" is set with rig=lampas files=src/Talk.tsx,src/,features/ask-composer.feature
+    Then setting the path is refused, saying: name the files the story will change
+    And nothing was written
