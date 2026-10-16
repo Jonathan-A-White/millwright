@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -30,8 +31,10 @@ func New(timeout time.Duration) Runner {
 }
 
 // Run implements application.BootCommands: the command line under sh -c in dir,
-// its stdout and stderr together as printed. A command that fails, or runs out
-// of time, comes back with what it printed so far and an error saying which.
+// its stdout and stderr together as printed. The shell runs in a process group
+// of its own, so that a command stopped at its timeout takes with it what it
+// started underneath. A command that fails, or runs out of time, comes back with
+// what it printed so far and an error saying which.
 func (r Runner) Run(ctx context.Context, dir, command string) (string, error) {
 	timeout := r.Timeout
 	if timeout <= 0 {
@@ -41,6 +44,8 @@ func (r Runner) Run(ctx context.Context, dir, command string) (string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = dir
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = time.Second
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
