@@ -27,6 +27,7 @@ type fakeFixer struct {
 	// touched is the story the fixer says it touched.
 	touched string
 
+	signed  string // the hash of the signed commit the fixer made, when it made one
 	started []application.SessionSpec
 	boot    []string          // the boot file each fixer was primed with, read as it started
 	present []map[string]bool // the files each fixer's worktree held as it started
@@ -70,6 +71,8 @@ func (f *fakeFixer) Start(ctx context.Context, spec application.SessionSpec) err
 func registerBatchFixSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig's tests fail on the batch, saying "([^"]*)", until "([^"]*)" is committed$`, c.theTestsFailUntilCommitted)
 	ctx.Given(`^mw land may start a fixer, which commits "([^"]*)" and says it touched "([^"]*)"$`, c.aFixerThatCommits)
+	ctx.Given(`^mw land may start a fixer, which commits "([^"]*)" under a message saying "([^"]*)" and says it touched "([^"]*)"$`, c.aFixerThatCommitsSigned)
+	ctx.Then(`^the batch's hold names the fixer's signed commit$`, c.theHoldNamesTheFixersSignedCommit)
 	ctx.Given(`^mw land may start a fixer, which merges "([^"]*)" keeping both sides and says it touched "([^"]*)"$`, c.aFixerThatMerges)
 	ctx.Given(`^mw land may start a fixer, which merges "([^"]*)" and "([^"]*)" keeping both sides and says it touched "([^"]*)"$`, c.aFixerThatMergesBoth)
 	ctx.Then(`^no fixer was started$`, c.noFixerWasStarted)
@@ -103,6 +106,36 @@ func (c *nextContext) aFixerThatCommits(file, touched string) error {
 		}
 		return commitIn(dir, "Mend the batch: "+file)
 	})
+	return nil
+}
+
+// aFixerThatCommitsSigned commits file under a message carrying line, and
+// remembers the commit's hash.
+func (c *nextContext) aFixerThatCommitsSigned(file, line, touched string) error {
+	c.newFixer(touched, nil)
+	f := c.batch.fixer
+	f.fix = func(dir string) error {
+		if err := os.WriteFile(filepath.Join(dir, file), []byte("the fixer's mend\n"), 0o644); err != nil {
+			return err
+		}
+		if err := commitIn(dir, "Mend the batch: "+file+"\n\n"+line); err != nil {
+			return err
+		}
+		hash, err := gitSay(dir, "rev-parse", "--short", "HEAD")
+		f.signed = hash
+		return err
+	}
+	return nil
+}
+
+func (c *nextContext) theHoldNamesTheFixersSignedCommit() error {
+	f, err := c.theFixer()
+	if err != nil {
+		return err
+	}
+	if f.signed == "" || !strings.Contains(c.batch.report.Held, f.signed) {
+		return fmt.Errorf("expected the hold to name the fixer's commit %q, got %q", f.signed, c.batch.report.Held)
+	}
 	return nil
 }
 

@@ -38,6 +38,10 @@ type batchFixture struct {
 func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^these stories are queued for batch landing:$`, c.theseStoriesAreQueued)
 	ctx.Given(`^"([^"]*)" is queued for batch landing, writing "([^"]*)" with words of its own$`, c.aStoryIsQueuedWriting)
+	ctx.Given(`^"([^"]*)" is queued for batch landing, its branch then carrying a commit whose message says "([^"]*)"$`, c.aStoryIsQueuedThenSigned)
+	ctx.Then(`^the batch set "([^"]*)" aside, naming its signed commit and the line "([^"]*)"$`, c.theBatchSetAsideSigned)
+	ctx.Then(`^the Mayor's mail names "([^"]*)", its signed commit and the line "([^"]*)"$`, c.theMayorsMailNamesTheSignedCommit)
+	ctx.Then(`^"([^"]*)" is not on "([^"]*)" at the rig's origin$`, c.isNotOnTheTarget)
 	ctx.Given(`^the tracker acts as "([^"]*)", this host's mw$`, c.theTrackerActsAs)
 	ctx.Given(`^"([^"]*)" is claimed by "([^"]*)", on another host$`, c.claimedOnAnotherHost)
 	ctx.When(`^mw lands the batch of the rig$`, c.mwLandsTheBatch)
@@ -500,6 +504,84 @@ func (c *nextContext) theMetricsHoldNoBatch() error {
 	}
 	if len(lines) > 0 {
 		return fmt.Errorf("expected no batch line, got %+v", lines)
+	}
+	return nil
+}
+
+// aStoryIsQueuedThenSigned queues a story by the real close-out, which refuses
+// a signed commit, and then lets its branch at the origin take one more commit
+// whose message says line: how a branch signed after its close-out, or by a
+// Clerk's merge resolution, reaches the queue (mw-gq6.506).
+func (c *nextContext) aStoryIsQueuedThenSigned(id, line string) error {
+	if err := c.theStoryHasBeenWorked(id); err != nil {
+		return err
+	}
+	if err := c.queueByCloseOut(id); err != nil {
+		return err
+	}
+	clone, err := os.MkdirTemp(c.root, "signer-")
+	if err != nil {
+		return err
+	}
+	branch := application.StoryBranch(id)
+	if err := gitRun(clone, "git", "clone", "-q", "--branch", branch, c.origin(), clone); err != nil {
+		return err
+	}
+	if err := gitIdentify(clone); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(clone, "signed.md"), []byte("signed\n"), 0o644); err != nil {
+		return err
+	}
+	if err := commitIn(clone, "A later commit\n\n"+line); err != nil {
+		return err
+	}
+	return gitRun(clone, "git", "push", "-q", "origin", branch)
+}
+
+// signedCommitOf is the short hash of the newest commit on id's branch at the
+// origin.
+func (c *nextContext) signedCommitOf(id string) (string, error) {
+	return gitSay(c.origin(), "rev-parse", "--short", application.StoryBranch(id))
+}
+
+func (c *nextContext) theBatchSetAsideSigned(id, line string) error {
+	hash, err := c.signedCommitOf(id)
+	if err != nil {
+		return err
+	}
+	for _, story := range c.batch.report.SetAside {
+		if story.ID != id {
+			continue
+		}
+		if !strings.Contains(story.Why, hash) || !strings.Contains(story.Why, line) {
+			return fmt.Errorf("expected %s to be set aside naming commit %s and %q, got %q", id, hash, line, story.Why)
+		}
+		return nil
+	}
+	return fmt.Errorf("expected %s to be set aside, got %+v\n%s", id, c.batch.report.SetAside, c.said())
+}
+
+func (c *nextContext) theMayorsMailNamesTheSignedCommit(id, line string) error {
+	hash, err := c.signedCommitOf(id)
+	if err != nil {
+		return err
+	}
+	mail, err := c.batchMail()
+	if err != nil {
+		return err
+	}
+	for _, m := range mail {
+		if m.To == "mayor" && strings.Contains(m.Body, id) && strings.Contains(m.Body, hash) && strings.Contains(m.Body, line) {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected a mail to the Mayor naming %s, commit %s and %q, got %+v", id, hash, line, mail)
+}
+
+func (c *nextContext) isNotOnTheTarget(file, branch string) error {
+	if _, err := gitSay(c.origin(), "show", branch+":"+file); err == nil {
+		return fmt.Errorf("expected %s not to be on %s at the origin", file, branch)
 	}
 	return nil
 }

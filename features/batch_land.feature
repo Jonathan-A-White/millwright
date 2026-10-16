@@ -242,3 +242,37 @@ Feature: mw land lands a batch rig's queue under one gate run
     And the batch is held, and the Mayor's mail names every story in it and says "the batch is still red"
     And the Mayor's mail about the batch says the fixer was given it and no second fixer was started
     And metrics/factory.jsonl holds a line for batch 1 of the rig: 2 stories, 2 gate runs, a fixer, outcome "held"
+
+  # mw next refuses a branch whose commits sign the work as a machine's
+  # (AIAttribution); mw land holds a batch's branches to the same rule
+  # (mw-gq6.506).
+
+  Scenario: A branch with a signed commit is set aside naming the commit and the line, and a clean branch beside it still lands (mw-gq6.506)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.3 |
+    And "mw-gq6.2" is queued for batch landing, its branch then carrying a commit whose message says "Co-Authored-By: A Model <noreply@example.com>"
+    When mw lands the batch of the rig
+    Then the batch set "mw-gq6.2" aside, naming its signed commit and the line "Co-Authored-By: A Model <noreply@example.com>"
+    And the story "mw-gq6.2" is still queued for batch landing
+    And the Mayor's mail names "mw-gq6.2", its signed commit and the line "Co-Authored-By: A Model <noreply@example.com>"
+    And the batch landed on "main" in one push, forcing nothing
+    And these stories are on "main" at the rig's origin, closed and recorded as landed, each with a ledger line naming batch 1:
+      | mw-gq6.1 |
+      | mw-gq6.3 |
+    And "mw-gq6.2.md" is not on "main" at the rig's origin
+
+  Scenario: A fixer commit that signs the work as a machine's stops the batch before any push, naming the commit (mw-gq6.506)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the rig's tests fail on the batch, saying "the batch is red", until "FIXED" is committed
+    And mw land may start a fixer, which commits "FIXED" under a message saying "Generated with Claude Code" and says it touched "mw-gq6.1"
+    When mw lands the batch of the rig
+    Then exactly one fixer was started, for batch 1, in a landing worktree holding the work of every story in it
+    And "main" at the rig's origin is where it was before the batch
+    And these stories are still queued for batch landing, none of them closed:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the batch is held, and the Mayor's mail names every story in it and says "Generated with Claude Code"
+    And the batch's hold names the fixer's signed commit
