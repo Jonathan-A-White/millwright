@@ -44,3 +44,41 @@ func TestTheGateStepOfEachFormulaNamesTheForegroundWay(t *testing.T) {
 		}
 	}
 }
+
+// A Builder that met an 'under load' acceptance criterion started sixteen busy
+// loops on the home host and held dispatch, close-outs and a batch for calm
+// (mw-gq6.483): each formula that has a Builder or Tester check things names
+// the one bounded way, contrib/mw-under-load, and forbids the hand-rolled one.
+func TestEachFormulaNamesTheBoundedWayToCheckUnderLoad(t *testing.T) {
+	for _, tc := range []struct{ file, step string }{
+		{"tdd-feature.formula.json", "verify"},
+		{"chore.formula.json", "verify"},
+		{"tester.formula.json", "adversarial"},
+	} {
+		raw, err := os.ReadFile(filepath.Join("..", "formulas", tc.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var formula struct {
+			Steps []formulaStep `json:"steps"`
+		}
+		if err := json.Unmarshal(raw, &formula); err != nil {
+			t.Fatalf("%s: %v", tc.file, err)
+		}
+		found := false
+		for _, s := range formula.Steps {
+			if s.ID != tc.step {
+				continue
+			}
+			found = true
+			for _, want := range []string{"'under load'", "contrib/mw-under-load", "never hand-rolled busy loops, stress or yes"} {
+				if !strings.Contains(s.Description, want) {
+					t.Errorf("%s step %q: expected the description to contain %q, got: %s", tc.file, tc.step, want, s.Description)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s: no step %q", tc.file, tc.step)
+		}
+	}
+}

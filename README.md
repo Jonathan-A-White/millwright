@@ -4622,6 +4622,20 @@ appended to (`~/.local/state/mw-closeout/<unit>.out`, or `MW_CLOSEOUT_DIR`),
 and returns at once; `systemctl --user status <unit>` follows it. A long
 close-out started by hand goes through it, never a bare `systemd-run`.
 
+`contrib/mw-under-load <command>` runs a command beside busy loops when a check
+must hold *under load*: at most `min(4, cores - 1-min load)` of them, none when
+the host's load is already at or over its cores (it says so on stderr and runs
+the command plain). Every loop ends when the command ends, when `mw-under-load`
+is killed (TERM or INT; a KILL leaves the loops watching its pid), and within 30
+minutes whatever happens (each loop runs under its own `timeout`). Its exit status is
+the command's. `MW_UNDER_LOAD_MAX`, `MW_UNDER_LOAD_SECONDS` (never above 1800),
+`MW_UNDER_LOAD_CORES` and `MW_UNDER_LOAD_LOADAVG` set the loop cap, the deadline,
+the core count and where the load is read from. A Builder never starts busy
+loops, `stress` or `yes` by hand on a host (the formulas say so): sixteen of
+them put the Laptop at load 44 of 20 cores and held dispatch, two close-outs and a
+batch for calm (mw-gq6.483). `contrib/underload_test.go` proves the cap, the
+zero-loop case on a busy host, and each way the loops end.
+
 `OOMScoreAdjust=500` and `MemoryMax=384M` are also set directly on
 `mw-mail-notify.service`, `mw-health.service` and `mw-doctor.service`, so a
 memory squeeze on the host picks one of these ticks over the seat or the

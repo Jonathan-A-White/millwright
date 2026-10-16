@@ -1,0 +1,116 @@
+#!/bin/sh
+# Run one command beside a few busy loops, so a check that must hold "under
+# load" is made under load without a Builder hand-rolling its own. Usage:
+#
+#   mw-under-load <command> [args...]
+#
+# It starts at most min(4, cores - current 1-min load) busy loops (whole
+# loops, rounded down): none when the host's load is already at or over its
+# cores, or when less than one core is free. It says so on stderr and runs the
+# command plain. Its exit status is the command's.
+#
+# Every loop is bounded three ways: it ends when the command ends, when
+# mw-under-load ends (a TERM or INT is trapped and stops the loops and the
+# command; a KILL cannot be trapped, but each loop watches mw-under-load's pid
+# and stops when it is gone), and within 30 minutes whatever happens (each loop
+# runs under its own `timeout`). A loop never outlives the check it was made for.
+#
+# Never start busy loops, stress or yes by hand on a host to make load: on
+# 2026-10-16 sixteen of them on the Laptop put its load at 44 of 20 cores, and
+# dispatch, two close-outs and a batch waited for calm (mw-gq6.483).
+#
+# Settings:
+#   MW_UNDER_LOAD_MAX      the most loops                       (4)
+#   MW_UNDER_LOAD_SECONDS  each loop's own deadline, never above 1800  (1800)
+#   MW_UNDER_LOAD_CORES    the host's cores                     (nproc)
+#   MW_UNDER_LOAD_LOADAVG  where the 1-min load is read from    (/proc/loadavg)
+#
+# Each loop's command line carries "mw-under-load-loop <pid of mw-under-load>",
+# so pgrep -f can find a given run's loops.
+
+set -u
+
+die() {
+	echo "mw-under-load: $*" >&2
+	exit 1
+}
+
+[ "$#" -ge 1 ] || die "usage: mw-under-load <command> [args...]"
+
+cores=${MW_UNDER_LOAD_CORES:-$(nproc 2>/dev/null || echo 1)}
+max=${MW_UNDER_LOAD_MAX:-4}
+seconds=${MW_UNDER_LOAD_SECONDS:-1800}
+for v in "$cores" "$max" "$seconds"; do
+	case $v in "" | *[!0-9]*) die "MW_UNDER_LOAD_CORES, _MAX and _SECONDS must be whole numbers, got '$v'" ;; esac
+done
+[ "$seconds" -le 1800 ] || seconds=1800
+[ "$seconds" -ge 1 ] || seconds=1
+
+load=""
+if [ -r "${MW_UNDER_LOAD_LOADAVG:-/proc/loadavg}" ]; then
+	read -r load _ <"${MW_UNDER_LOAD_LOADAVG:-/proc/loadavg}"
+fi
+case $load in
+"" | *[!0-9.]*) die "cannot read the 1-min load from ${MW_UNDER_LOAD_LOADAVG:-/proc/loadavg}" ;;
+esac
+
+# Whole free cores, rounded down; 0 at or over the cores.
+free=$(awk -v c="$cores" -v l="$load" 'BEGIN { f = c - l; if (f < 1) f = 0; print int(f) }')
+loops=$free
+[ "$loops" -le "$max" ] || loops=$max
+
+me=$$
+pids=""
+cmd=""
+
+stop_loops() {
+	for p in $pids; do
+		kill -TERM "$p" 2>/dev/null
+	done
+	for p in $pids; do
+		wait "$p" 2>/dev/null
+	done
+	pids=""
+}
+
+cleanup() {
+	trap '' TERM INT
+	stop_loops
+	if [ -n "$cmd" ]; then
+		kill -TERM "$cmd" 2>/dev/null
+		wait "$cmd" 2>/dev/null
+		cmd=""
+	fi
+}
+
+if [ "$loops" -lt 1 ]; then
+	if [ "$free" -lt 1 ] && awk -v c="$cores" -v l="$load" 'BEGIN { exit !(l >= c) }'; then
+		echo "mw-under-load: load $load is already at or over its $cores cores; running the command plain, with no busy loops" >&2
+	else
+		echo "mw-under-load: load $load of $cores cores leaves no whole core free; running the command plain, with no busy loops" >&2
+	fi
+	exec "$@"
+fi
+
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap cleanup EXIT
+
+echo "mw-under-load: load $load of $cores cores; running the command beside $loops busy loop(s), each ending within $seconds s" >&2
+
+i=0
+while [ "$i" -lt "$loops" ]; do
+	timeout "$seconds" sh -c 'while kill -0 "$1" 2>/dev/null; do :; done' mw-under-load-loop "$me" &
+	pids="$pids $!"
+	i=$((i + 1))
+done
+
+# The command keeps this script's stdin (a background job would get /dev/null).
+exec 3<&0
+"$@" <&3 3<&- &
+cmd=$!
+exec 3<&-
+wait "$cmd"
+rc=$?
+cmd=""
+exit "$rc"
