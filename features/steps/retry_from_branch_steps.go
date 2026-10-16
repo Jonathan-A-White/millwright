@@ -30,6 +30,7 @@ func registerRetryFromBranchSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.When(`^mw retry --from-main runs for "([^"]*)"$`, func(id string) error { return c.mwRetryRuns(id, true) })
 
 	ctx.Then(`^the worktree of "([^"]*)" holds its first attempt's work, rebased onto "([^"]*)"$`, c.theWorktreeHoldsTheFirstAttemptRebased)
+	ctx.Then(`^the worktree of "([^"]*)" holds the committed leftover "([^"]*)", rebased onto "([^"]*)"$`, c.theWorktreeHoldsTheCommittedLeftover)
 	ctx.Then(`^the worktree of "([^"]*)" starts clean from "([^"]*)"$`, c.theWorktreeStartsCleanFrom)
 	ctx.Then(`^the boot of attempt (\d+) of "([^"]*)" says "([^"]*)"$`, c.theBootOfAttemptSays)
 	ctx.Then(`^the boot of attempt (\d+) of "([^"]*)" does not say "([^"]*)"$`, c.theBootOfAttemptDoesNotSay)
@@ -120,6 +121,25 @@ func (c *nextContext) theWorktreeHoldsTheFirstAttemptRebased(id, branch string) 
 	}
 	if ahead != "1" {
 		return fmt.Errorf("expected the first attempt's 1 commit ahead of %s, got %s", onto, ahead)
+	}
+	return nil
+}
+
+// theWorktreeHoldsTheCommittedLeftover checks that a file the first attempt left
+// uncommitted is in the next attempt's worktree as a commit ahead of the target
+// (mw-gq6.537).
+func (c *nextContext) theWorktreeHoldsTheCommittedLeftover(id, file, branch string) error {
+	dir := application.WorktreeDir(c.rig, id)
+	if _, err := os.Stat(filepath.Join(dir, file)); err != nil {
+		return fmt.Errorf("expected the worktree of %s to hold %s (dispatch said: %v): %w", id, file, c.err, err)
+	}
+	onto := application.StartPoint(application.DefaultRemote, branch)
+	tracked, err := gitSay(dir, "diff", "--name-only", onto+"..HEAD")
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(tracked, file) {
+		return fmt.Errorf("expected %s committed ahead of %s, got:\n%s", file, onto, tracked)
 	}
 	return nil
 }

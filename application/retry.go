@@ -72,6 +72,8 @@ type salvagedBranch struct {
 	// NothingAhead says the branch had no commits ahead of base, so bundling,
 	// committing and pushing were all skipped.
 	NothingAhead bool
+	// Kept says the branch was left for the next attempt to continue.
+	Kept bool
 	// Bundled says the branch's commits were captured into a bundle that
 	// verified, and BranchCommit and BundlePath are meaningful.
 	Bundled      bool
@@ -86,7 +88,9 @@ type salvagedBranch struct {
 // salvageBranch bundles branch's commits ahead of base into the vault — first
 // committing whatever dir holds uncommitted, if anything — and then removes
 // the worktree at dir and, unless keepBranch says the next attempt continues
-// it, the branch itself, exactly as mw retry does. rigDir
+// it, the branch itself, exactly as mw retry does. keepWork keeps the branch
+// too when the attempt left work on it, committed or found in the worktree
+// (mw-gq6.537), and deletes it when there was none. rigDir
 // must already be fetched. attempt numbers the bundle file, so that a branch
 // kept more than once keeps every earlier attempt's evidence rather than
 // writing over it.
@@ -96,7 +100,7 @@ type salvagedBranch struct {
 // (mw-gq6.107), so that the two never drift apart. What it returns is always
 // what actually happened, even when it stops on an error partway through —
 // never what was only planned.
-func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, files VaultFiles, vlt Vault, rigDir, storyID, dir, branch, base string, attempt int, keepBranch bool) (salvagedBranch, error) {
+func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, files VaultFiles, vlt Vault, rigDir, storyID, dir, branch, base string, attempt int, keepBranch, keepWork bool) (salvagedBranch, error) {
 	var s salvagedBranch
 
 	left, err := landing.Uncommitted(ctx, dir)
@@ -151,7 +155,8 @@ func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, fi
 	}
 	// A branch the next attempt continues (mw-1ljpo9.7) is the one thing kept
 	// here: the dispatch that takes the story again cuts its worktree from it.
-	if keepBranch {
+	if keepBranch || (keepWork && !s.NothingAhead) {
+		s.Kept = true
 		return s, nil
 	}
 	if err := worktrees.DeleteBranch(ctx, rigDir, branch); err != nil {
@@ -363,6 +368,12 @@ type RetryReport struct {
 
 	// molecule is the root of the formula the retried attempt worked.
 	molecule string
+
+	// handOn says the branch was kept although mw next left no note that the
+	// next attempt continues it, so the retry leaves the note itself; NoteLeft
+	// says why it could not (mw-gq6.537).
+	handOn   bool
+	NoteLeft string
 }
 
 // maxAttempts is how many times a story may be started.
@@ -496,6 +507,17 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	if err != nil {
 		return report, fmt.Errorf("retrying %s: %w", storyID, err)
 	}
+	// An attempt that left no note, its close-out killed or its session dead,
+	// still hands its work on, unless mw next refused it for what its commits
+	// themselves hold (mw-gq6.537).
+	keepWork := false
+	if !keepBranch && !r.FromMain && r.Notes != nil {
+		refused, err := r.refusedForItsCommits(ctx, detail)
+		if err != nil {
+			return report, fmt.Errorf("retrying %s: reading why mw next refused its last attempt: %w", storyID, err)
+		}
+		keepWork = !refused
+	}
 	if elsewhere := r.workedOn(path, detail.Assignee); elsewhere != "" && elsewhere != r.Host {
 		return r.handBack(ctx, report, elsewhere)
 	}
@@ -533,7 +555,7 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	}
 
 	base := StartPoint(r.remote(), path.Branch)
-	salvaged, err := salvageBranch(ctx, r.Worktrees, r.Landing, r.Files, r.Vault, rigDir, storyID, report.Worktree, report.Branch, base, attempt, keepBranch)
+	salvaged, err := salvageBranch(ctx, r.Worktrees, r.Landing, r.Files, r.Vault, rigDir, storyID, report.Worktree, report.Branch, base, attempt, keepBranch, keepWork)
 	report.CommittedLeftovers = salvaged.CommittedLeftovers
 	report.NothingAhead = salvaged.NothingAhead
 	report.Bundled = salvaged.Bundled
@@ -545,7 +567,8 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 		return report, fmt.Errorf("retrying %s: %w", storyID, err)
 	}
 	report.WorktreeGone = true
-	report.BranchGone, report.BranchKept = !keepBranch, keepBranch
+	report.BranchGone, report.BranchKept = !salvaged.Kept, salvaged.Kept
+	report.handOn = salvaged.Kept && !keepBranch
 
 	return r.giveBack(ctx, report, "")
 }
@@ -601,6 +624,49 @@ func (r Retry) continued(ctx context.Context, storyID string) (bool, error) {
 	return strings.TrimSpace(said) != "", nil
 }
 
+// refusedForItsCommits reports whether the story's last attempt was refused by
+// mw next for what is in its commits themselves (ContinuesFrom's exception: a
+// signed commit, a tracked binary), which the next attempt must not carry on.
+// A story whose run state is not blocked was not refused at all (mw-gq6.537).
+func (r Retry) refusedForItsCommits(ctx context.Context, detail StoryDetail) (bool, error) {
+	state, err := r.Tracker.StoryState(ctx, detail.Story.ID, RunState)
+	if err != nil {
+		return false, err
+	}
+	if state != RunBlocked || detail.CommentCount == 0 {
+		return false, nil
+	}
+	comments, err := r.Tracker.StoryComments(ctx, detail.Story.ID)
+	if err != nil {
+		return false, err
+	}
+	for i := len(comments) - 1; i >= 0; i-- {
+		refusal, ok := refusalIn(comments[i].Text)
+		if !ok {
+			continue
+		}
+		for _, reason := range []Reason{ReasonSignedCommit, ReasonTrackedBinary} {
+			if strings.HasPrefix(refusal, "("+string(reason)+")") {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	return false, nil
+}
+
+// leaveNote leaves the note that the next attempt continues the branch this
+// retry kept without one (mw-gq6.537). One that cannot be written is said, not
+// fatal: the branch is kept, and the dispatch keeps it under another name.
+func (r Retry) leaveNote(ctx context.Context, report *RetryReport) {
+	if !report.handOn {
+		return
+	}
+	if err := r.Notes.SetNote(ctx, ContinueKey(report.StoryID), strconv.Itoa(report.Attempt)); err != nil {
+		report.NoteLeft = oneLine(err.Error())
+	}
+}
+
 // fromMain clears, for FromMain, the note that the next attempt continues the
 // branch, wherever the branch is, so that no dispatch on any host continues
 // it. It runs once the retry is past its refusals, before the claim is given
@@ -626,6 +692,7 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 	if err := r.fromMain(ctx, storyID); err != nil {
 		return report, err
 	}
+	r.leaveNote(ctx, &report)
 	r.closeFormula(ctx, &report)
 	if err := r.release(ctx, report); err != nil {
 		if report.NoWorktree {
@@ -645,6 +712,14 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 			"mw retry on %s gave back the claim on attempt %d of %s without reading a worktree: %s. "+
 				"The story is open again and the next dispatch tick takes it as %s.",
 			r.Host, attempt, storyID, nothing, report.nextSaid(true))
+	} else if report.Bundled && report.BranchKept && report.NoteLeft != "" {
+		comment = fmt.Sprintf(
+			"mw retry on %s bundled attempt %d of %s (branch %s at %s) into %s, pushed to the vault as %s. "+
+				"The worktree is gone and the branch is kept, but the note that the next attempt continues it could not be written (%s), "+
+				"so the next dispatch keeps it under another name and cuts the next attempt from %s. "+
+				"The claim was given back and the story is open again. The next dispatch tick takes it as %s.",
+			r.Host, attempt, storyID, report.Branch, shortCommit(report.BranchCommit), report.BundlePath, shortVaultCommit(report.VaultCommit),
+			report.NoteLeft, report.Target, report.nextSaid(true))
 	} else if report.Bundled && report.BranchKept {
 		comment = fmt.Sprintf(
 			"mw retry on %s bundled attempt %d of %s (branch %s at %s) into %s, pushed to the vault as %s. "+
@@ -868,7 +943,12 @@ func (r RetryReport) String() string {
 	}
 	if r.WorktreeGone && r.BranchKept {
 		fmt.Fprintf(&b, "  gone    the worktree %s\n", r.Worktree)
-		fmt.Fprintf(&b, "  kept    the branch %s: the next attempt continues it, rebased onto %s (mw retry --from-main starts clean)\n", r.Branch, r.Target)
+		if r.NoteLeft != "" {
+			fmt.Fprintf(&b, "  kept    the branch %s, but the note that the next attempt continues it could not be written (%s): it starts from %s\n",
+				r.Branch, r.NoteLeft, r.Target)
+		} else {
+			fmt.Fprintf(&b, "  kept    the branch %s: the next attempt continues it, rebased onto %s (mw retry --from-main starts clean)\n", r.Branch, r.Target)
+		}
 	}
 	r.writeFormula(&b)
 	if r.ClaimReleased {

@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -560,22 +561,133 @@ func TestRetryKeepsTheBranchTheNextAttemptContinuesUnlessFromMain(t *testing.T) 
 	}
 }
 
-// Without the note — an attempt refused for what is in its commits, or none —
-// the branch is deleted as before, --from-main or not.
-func TestRetryWithoutTheNoteDeletesTheBranch(t *testing.T) {
+// Without the note, an attempt refused for what is in its commits themselves (a
+// signed commit, a tracked binary) has its branch deleted as before: the next
+// attempt must not carry that on.
+func TestRetryOfAnAttemptRefusedForItsCommitsDeletesTheBranch(t *testing.T) {
+	for _, reason := range []application.Reason{application.ReasonSignedCommit, application.ReasonTrackedBinary} {
+		tracker := apptest.NewFakeTracker()
+		aRetryStory(t, tracker, "mw-gq6.1")
+		ctx := context.Background()
+		aRefusalOf(t, tracker, "mw-gq6.1", reason)
+		landing := &fakeRetryLanding{AheadCount: 2, BundleSHA: "abc123"}
+		var out strings.Builder
+		retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out)
+		retry.Notes = tracker
+		report, err := retry.Run(ctx, "mw-gq6.1")
+		if err != nil {
+			t.Fatalf("%s: expected the retry to succeed, got: %v\n%s", reason, err, out.String())
+		}
+		if !landing.branchDeleted || report.BranchKept {
+			t.Errorf("%s: expected the branch deleted, got deleted=%v kept=%v", reason, landing.branchDeleted, report.BranchKept)
+		}
+		if note, _ := tracker.Note(ctx, application.ContinueKey("mw-gq6.1")); note != "" {
+			t.Errorf("%s: expected no note that the next attempt continues, got %q", reason, note)
+		}
+	}
+}
+
+// aRefusalOf records on the story what mw next records when it refuses a
+// landing for reason: the blocked run state and the comment naming the reason.
+func aRefusalOf(t *testing.T, tracker *apptest.FakeTracker, id string, reason application.Reason) {
+	t.Helper()
+	ctx := context.Background()
+	if err := tracker.CommentOnStory(ctx, id, "mw next on vps "+application.RefusedPhrase+string(reason)+"): a commit is signed\n\nNothing was merged."); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetStoryState(ctx, id, application.RunState, application.RunBlocked, "("+string(reason)+") a commit is signed"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// mw-gq6.537: an attempt that ended with work left, its close-out killed or its
+// session dead, wrote no note, but its work is most of the story: mw retry
+// commits what the worktree holds, bundles it, keeps the branch and leaves the
+// note the dispatch that takes the story again reads, as for a refused one.
+func TestRetryKeepsTheBranchOfAnAttemptThatDiedWithWorkLeft(t *testing.T) {
+	cases := []struct {
+		name      string
+		uncommit  []string
+		ahead     int
+		fromMain  bool
+		notes     bool
+		refusedAs application.Reason
+		wantKept  bool
+	}{
+		{name: "uncommitted work, committed by the retry", uncommit: []string{"a.go"}, ahead: 1, notes: true, wantKept: true},
+		{name: "commits ahead of the target", ahead: 3, notes: true, wantKept: true},
+		{name: "refused as no-result with commits", ahead: 2, notes: true, refusedAs: application.ReasonNoResult, wantKept: true},
+		{name: "nothing ahead", ahead: 0, notes: true, wantKept: false},
+		{name: "--from-main", ahead: 3, notes: true, fromMain: true, wantKept: false},
+		{name: "no notes to leave the hand-on in", ahead: 3, notes: false, wantKept: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tracker := apptest.NewFakeTracker()
+			aRetryStory(t, tracker, "mw-gq6.1")
+			ctx := context.Background()
+			if tc.refusedAs != "" {
+				aRefusalOf(t, tracker, "mw-gq6.1", tc.refusedAs)
+			}
+			landing := &fakeRetryLanding{AheadCount: tc.ahead, BundleSHA: "abc123", UncommittedPaths: tc.uncommit, LeftoversSHA: "def456"}
+			var out strings.Builder
+			retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out)
+			retry.FromMain = tc.fromMain
+			if tc.notes {
+				retry.Notes = tracker
+			}
+			report, err := retry.Run(ctx, "mw-gq6.1")
+			if err != nil {
+				t.Fatalf("expected the retry to succeed, got: %v\n%s", err, out.String())
+			}
+			if report.CommittedLeftovers != (len(tc.uncommit) > 0) {
+				t.Errorf("CommittedLeftovers = %v with %v uncommitted", report.CommittedLeftovers, tc.uncommit)
+			}
+			if report.Bundled != (tc.ahead > 0) {
+				t.Errorf("Bundled = %v with %d ahead", report.Bundled, tc.ahead)
+			}
+			if report.BranchKept != tc.wantKept || landing.branchDeleted == tc.wantKept || report.BranchGone == tc.wantKept {
+				t.Errorf("want kept=%v, got kept=%v gone=%v deleted=%v", tc.wantKept, report.BranchKept, report.BranchGone, landing.branchDeleted)
+			}
+			note, _ := tracker.Note(ctx, application.ContinueKey("mw-gq6.1"))
+			if tc.wantKept && note != "1" {
+				t.Errorf("expected the note that the next attempt continues attempt 1, got %q", note)
+			}
+			if !tc.wantKept && note != "" {
+				t.Errorf("expected no note, got %q", note)
+			}
+			if tc.wantKept && !strings.Contains(out.String(), "the next attempt continues it") {
+				t.Errorf("expected the report to say the branch is kept for the next attempt, got:\n%s", out.String())
+			}
+		})
+	}
+}
+
+// A note that cannot be left does not stop the retry or hide it: the branch is
+// kept, and the report says the next attempt starts from the target.
+func TestRetryKeepingABranchSaysSoWhenItCannotLeaveTheNote(t *testing.T) {
 	tracker := apptest.NewFakeTracker()
 	aRetryStory(t, tracker, "mw-gq6.1")
 	landing := &fakeRetryLanding{AheadCount: 2, BundleSHA: "abc123"}
 	var out strings.Builder
 	retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out)
-	retry.Notes = tracker
-	if _, err := retry.Run(context.Background(), "mw-gq6.1"); err != nil {
+	retry.Notes = failingSetNote{tracker}
+	report, err := retry.Run(context.Background(), "mw-gq6.1")
+	if err != nil {
 		t.Fatalf("expected the retry to succeed, got: %v\n%s", err, out.String())
 	}
-	if !landing.branchDeleted {
-		t.Errorf("expected the branch deleted with no note to keep it")
+	if landing.branchDeleted || !report.ClaimReleased || report.NoteLeft == "" {
+		t.Errorf("expected the branch kept, the claim given back and the note failure said, got %+v", report)
+	}
+	if !strings.Contains(out.String(), "could not be written") {
+		t.Errorf("expected the report to say the note was not written, got:\n%s", out.String())
 	}
 }
+
+// failingSetNote is a tracker whose SetNote always fails.
+type failingSetNote struct{ *apptest.FakeTracker }
+
+func (failingSetNote) SetNote(context.Context, string, string) error { return errors.New("the store is down") }
 
 func TestOnlyTheGateTheMergeAndTheTurnCapHandABranchOn(t *testing.T) {
 	for reason, want := range map[application.Reason]bool{
