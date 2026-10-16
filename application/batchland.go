@@ -1055,7 +1055,9 @@ type BatchQueues interface {
 //
 // A rig whose landing failed (a held batch, which the Mayor is mailed, or a
 // story landed that left the queue as it was) is not tried again until
-// BatchEvery has passed, so a red batch is not run again every pass.
+// BatchEvery has passed, so a red batch is not run again every pass, nor while
+// the harness holds this host for a limit of the factory's: a batch held for
+// its fixer's harness stop waits for the stop's time (mw-gq6.472).
 type BatchLandings struct {
 	// Rigs are the rigs checked out on this host, by name.
 	Rigs map[string]string
@@ -1072,6 +1074,10 @@ type BatchLandings struct {
 	// each pass waits for those first, due or not, so that a landing a
 	// follower before this one began is told once.
 	Pending func(ctx context.Context) ([]string, error)
+	// Notes and Host are where this host's hold after a harness stop is read
+	// (HarnessHoldKey); nil Notes reads none.
+	Notes SweepNotes
+	Host  string
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 
@@ -1173,6 +1179,8 @@ func (b *BatchLandings) due(ctx context.Context) ([]batchDue, error) {
 	sort.Strings(names)
 
 	now := b.now()
+	hold, held := readHarnessHold(ctx, b.Notes, b.Host)
+	held = held && hold.Until.After(now)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	var due []batchDue
@@ -1184,7 +1192,7 @@ func (b *BatchLandings) due(ctx context.Context) ([]batchDue, error) {
 			continue
 		}
 		settings := rules.LandingSettings()
-		if failed, was := b.failed[name]; was && now.Sub(failed) < settings.BatchEvery {
+		if failed, was := b.failed[name]; was && (held || now.Sub(failed) < settings.BatchEvery) {
 			continue
 		}
 		q := queues[name]

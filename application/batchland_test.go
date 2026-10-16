@@ -257,6 +257,8 @@ func newLandingJob(t *testing.T) *aLandingJob {
 		Tracker: j.tracker,
 		Home:    func(context.Context) (bool, error) { return j.home, nil },
 		Land:    j.land,
+		Notes:   j.tracker,
+		Host:    "desktop",
 		Now:     func() time.Time { return j.now },
 	}
 	j.job = landings.Job()
@@ -394,6 +396,31 @@ func TestTheBatchLandJobLeavesAHeldBatchAloneUntilBatchEveryHasPassed(t *testing
 	j.now = j.now.Add(domain.DefaultBatchEvery)
 	if _, ok := j.probe(); !ok {
 		t.Fatal("the held batch was not tried again after batch_every")
+	}
+}
+
+// A batch held for its fixer's harness stop waits for the stop's time, kept in
+// the host's note, even once batch_every has passed (mw-gq6.472): a landing
+// before then would start no fixer and be held again.
+func TestTheBatchLandJobLeavesABatchHeldForTheHarnessAloneUntilTheResetHasCome(t *testing.T) {
+	j := newLandingJob(t)
+	j.rule("lampas", domain.LandingBatch)
+	j.queued("lampas", "lp-1", 600)
+	j.queued("lampas", "lp-2", 600)
+	j.failing["lampas"] = errors.New("batch 1 of lampas was held: the harness stopped its fixer")
+	reset := j.now.Add(2 * time.Hour)
+	mustDo(t, j.tracker.SetNote(context.Background(), application.HarnessHoldKey("desktop"),
+		reset.Format(time.RFC3339)+" usage-limit You've hit your weekly limit"))
+	if err := j.job.Run(context.Background()); err == nil {
+		t.Fatal("expected the held landing named")
+	}
+	j.now = j.now.Add(domain.DefaultBatchEvery)
+	if reason, ok := j.probe(); ok {
+		t.Fatalf("a batch held for the harness was tried again before the reset at %s: %q", reset, reason)
+	}
+	j.now = reset
+	if _, ok := j.probe(); !ok {
+		t.Fatal("the batch held for the harness was not tried again once the reset had come")
 	}
 }
 
