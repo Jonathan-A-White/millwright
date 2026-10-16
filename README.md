@@ -1921,7 +1921,9 @@ no event by `--limit` it says so and exits 0 (arm it again). `--kinds` defaults 
 file, or `mail`; hyphens may stand for underscores; a bad kind is refused, with the kinds
 listed. `contrib/mail-wait` is retired: it prints `retired: mw events wait` and runs it with
 `--for $MW_MAIL_MAILBOX` and `--limit $MW_MAIL_WAIT_LIMIT`s. While the follower is active
-the mail-notify tick no longer types the mail line for a seat whose file names mail.
+the mail-notify tick no longer types the mail line for a seat whose file names mail; while it
+is not, the tick leaves out the mail the follower's cursor for the seat (`nudge.json`) has
+passed, which the follower has told already, and types the line for the rest.
 
 A Mayor handover is a cursor on this log (mw-jrx0s.11): the successor boots, with
 `bin/respawn-mayor`, while the old Mayor still answers; the old Mayor then runs `mw seat

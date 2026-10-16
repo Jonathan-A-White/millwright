@@ -1652,3 +1652,100 @@ func TestALineThatNeverGoesIsSaidStuckThoughThePaneDrawsItLate(t *testing.T) {
 		t.Fatalf("recorded %q for mail that never went", got)
 	}
 }
+
+// subscribesToMail writes the Mayor's subscribe file naming mail, as the vault
+// holds it.
+func (f *factory) subscribesToMail() {
+	f.write("vault/seats/mayor/subscribe.toml", "kinds = [\"mail\"]\n", 0o644)
+}
+
+// eventLog writes the follower's event log, one mail event to the Mayor for
+// each bead, with seqs 1, 2, ... in order, and the Mayor's nudge cursor at
+// told: the follower has told the Mayor of every event up to that seq.
+func (f *factory) eventLog(told int, beads ...string) {
+	var log strings.Builder
+	for i, bead := range beads {
+		fmt.Fprintf(&log, `{"seq":%d,"ts":"2026-10-15T16:02:00Z","kind":"mail","bead":"%s","actor":"mw@laptop","from":"","to":"","detail":"mayor","lane":"normal"}`+"\n", i+1, bead)
+	}
+	f.write(".local/state/mw/events/log.jsonl", log.String(), 0o600)
+	f.write(".local/state/mw/events/nudge.json", fmt.Sprintf(`{"control":%d,"mayor":%d}`, told, told), 0o600)
+}
+
+// A mail the event nudge has told the Mayor of is not counted again here, even
+// once the follower has stopped: one mail is one notice (mw-gq6.457).
+func TestMailTheEventNudgeHasToldIsNotCountedAgain(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.subscribesToMail()
+	f.eventLog(1, "mw-aaa")
+	f.inbox("mw-aaa")
+
+	f.tick()
+
+	f.nothingMoreTyped("")
+}
+
+// Of the inbox, only the mail the follower has not told of yet is counted.
+func TestOnlyMailPastTheEventNudgesCursorIsCounted(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.subscribesToMail()
+	f.eventLog(1, "mw-aaa", "mw-bbb")
+	f.inbox("mw-aaa", "mw-bbb", "mw-ccc")
+
+	f.tick()
+
+	f.typed(fmt.Sprintf(announcement, 2))
+}
+
+// The log the follower keeps is found where mw's config says it is.
+func TestTheEventLogIsReadWhereTheConfigPutsIt(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.subscribesToMail()
+	f.eventLog(1, "mw-aaa")
+	for _, name := range []string{"log.jsonl", "nudge.json"} {
+		if err := os.MkdirAll(f.path("elsewhere"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(f.path(".local/state/mw/events/"+name), f.path("elsewhere/"+name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.write(".config/mw/config.toml", "events_log_path = \""+f.path("elsewhere/log.jsonl")+"\"\n", 0o644)
+	f.inbox("mw-aaa")
+
+	f.tick()
+
+	f.nothingMoreTyped("")
+}
+
+// With no event nudge for a mail — the follower stopped before it told the
+// Mayor — the mail line is typed as it always was.
+func TestMailNoEventNudgeToldIsTypedAsEver(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.subscribesToMail()
+	f.eventLog(0, "mw-aaa")
+	f.inbox("mw-aaa")
+
+	f.tick()
+
+	f.typed(fmt.Sprintf(announcement, 1))
+	if got := f.announced(); got != "mw-aaa\n" {
+		t.Fatalf("recorded ids %q", got)
+	}
+}
+
+// A seat whose subscribe file does not name mail was never told of it by the
+// follower, whatever its cursor says: its mail is typed here.
+func TestACursorPastMailTheSeatDoesNotSubscribeToStillTypes(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.eventLog(1, "mw-aaa")
+	f.inbox("mw-aaa")
+
+	f.tick()
+
+	f.typed(fmt.Sprintf(announcement, 1))
+}

@@ -21,7 +21,10 @@
 #      dispatch (mw-gq6.260). Steps 2, 3 and 5 each log their name as they
 #      start, so a tick that systemd kills leaves a trace of where;
 #   3. lists `bd mail inbox` for the mailbox and compares its ids with the ids
-#      it has already announced;
+#      it has already announced, leaving out, for a seat whose
+#      seats/<seat>/subscribe.toml names mail, each mail mw events follow has
+#      told it of already: one whose mail event in the follower's log is at or
+#      before the seat's cursor in nudge.json beside it (mw-gq6.457);
 #   4. when this host has a postern key file, runs `mw postern inbox
 #      --unread-count` and compares it with the count last noted: above zero
 #      and higher than that is something to type, same count or fewer is not,
@@ -75,7 +78,8 @@
 #      and are neither typed nor recorded; the quiet alarm is typed as ever.
 #      The mail line is likewise left to mw events follow, and neither typed
 #      nor recorded, while mw-view-follow.service is active and the seat's
-#      seats/<seat>/subscribe.toml names mail (mw-jrx0s.6).
+#      seats/<seat>/subscribe.toml names mail (mw-jrx0s.6); while it is not,
+#      the mail it told before it stopped is still left out (step 3).
 # Otherwise it does nothing and the next tick tries again.
 #
 # It never types mail content, never clears an input line, and never starts a
@@ -139,6 +143,9 @@
 #                        arrives")                                      (60)
 #   MW_MAIL_WAIT_STALE   seconds a wait's stamp counts as armed          (180)
 #   MW_TMUX_SOCKET       a tmux server other than the default, as `tmux -L`
+#   MW_EVENTS_LOG_PATH   the follower's event log (else the `events_log_path` key
+#                        of ~/.config/mw/config.toml, else
+#                        ~/.local/state/mw/events/log.jsonl)
 
 set -u
 
@@ -190,16 +197,22 @@ say() { echo "mail-notify: $*"; }
 die() { echo "mail-notify: $*" >&2; exit 1; }
 tmx() { tmux ${MW_TMUX_SOCKET:+-L "$MW_TMUX_SOCKET"} "$@"; }
 
+# config_key KEY prints the root-table KEY of mw's config file, unquoted, or
+# nothing when the file or the key is not there.
+config_key() {
+	[ -r "$HOME/.config/mw/config.toml" ] || return 0
+	value=$(sed -n "/^[[:space:]]*\\[/q; s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$HOME/.config/mw/config.toml" | head -n 1)
+	case $value in
+	\"*) value=${value#\"}; value=${value%%\"*} ;;
+	\'*) value=${value#\'}; value=${value%%\'*} ;;
+	*) value=${value%%#*}; value=${value%"${value##*[![:space:]]}"} ;;
+	esac
+	echo "$value"
+}
+
 # The vault: $MW_VAULT, else the root-table `vault` key of mw's config file.
 vault=${MW_VAULT:-}
-if [ -z "$vault" ] && [ -r "$HOME/.config/mw/config.toml" ]; then
-	vault=$(sed -n '/^[[:space:]]*\[/q; s/^[[:space:]]*vault[[:space:]]*=[[:space:]]*//p' "$HOME/.config/mw/config.toml" | head -n 1)
-	case $vault in
-	\"*) vault=${vault#\"}; vault=${vault%%\"*} ;;
-	\'*) vault=${vault#\'}; vault=${vault%%\'*} ;;
-	*) vault=${vault%%#*}; vault=${vault%"${vault##*[![:space:]]}"} ;;
-	esac
-fi
+[ -n "$vault" ] || vault=$(config_key vault)
 [ -n "$vault" ] || die "no vault: set MW_VAULT, or \`vault = \"...\"\` in ~/.config/mw/config.toml"
 [ -d "$vault" ] || die "the vault $vault is not a directory"
 
@@ -208,15 +221,16 @@ fi
 # directory (infrastructure/config's PosternKeyFile). Never fatal when it is
 # not there: that host simply has no postern side.
 keyfile=${MW_POSTERN_KEY_FILE:-}
-if [ -z "$keyfile" ] && [ -r "$HOME/.config/mw/config.toml" ]; then
-	keyfile=$(sed -n '/^[[:space:]]*\[/q; s/^[[:space:]]*postern_key_file[[:space:]]*=[[:space:]]*//p' "$HOME/.config/mw/config.toml" | head -n 1)
-	case $keyfile in
-	\"*) keyfile=${keyfile#\"}; keyfile=${keyfile%%\"*} ;;
-	\'*) keyfile=${keyfile#\'}; keyfile=${keyfile%%\'*} ;;
-	*) keyfile=${keyfile%%#*}; keyfile=${keyfile%"${keyfile##*[![:space:]]}"} ;;
-	esac
-fi
+[ -n "$keyfile" ] || keyfile=$(config_key postern_key_file)
 [ -n "$keyfile" ] || keyfile="$HOME/.config/mw/postern.key"
+
+# The follower's event log: $MW_EVENTS_LOG_PATH, else the root-table
+# `events_log_path` key of mw's config file, else the default under the home
+# directory (infrastructure/config's EventsLogPath). Its cursors, nudge.json,
+# sit beside it; neither need be there.
+events_log=${MW_EVENTS_LOG_PATH:-}
+[ -n "$events_log" ] || events_log=$(config_key events_log_path)
+[ -n "$events_log" ] || events_log="$HOME/.local/state/mw/events/log.jsonl"
 
 command -v flock >/dev/null 2>&1 || die "flock is not installed"
 command -v tmux >/dev/null 2>&1 || die "tmux is not installed"
@@ -350,6 +364,25 @@ if [ $((now - last)) -ge "$SYNC_EVERY" ]; then
 	(cd "$vault" && nice -n 19 $slow mw sync --no-backup >/dev/null 2>&1) || say "mw sync did not finish cleanly; carrying on with what the vault holds"
 fi
 
+# subscribes_to_mail succeeds when the seat's seats/<seat>/subscribe.toml names
+# mail among its kinds: mw events follow tells it of its mail itself.
+subscribes_to_mail() {
+	grep -Eq '^[[:space:]]*kinds[[:space:]]*=.*mail' "$vault/seats/$MAILBOX/subscribe.toml" 2>/dev/null
+}
+
+# told_mail prints the ids of the mail mw events follow has told the seat of: a
+# mail event for it in the log, or in the log's archive, at or before the
+# seat's cursor in nudge.json. No cursor is nothing told.
+told_mail() {
+	events_dir=$(dirname "$events_log")
+	cursor=$(sed -n "s/.*\"$MAILBOX\":\([0-9][0-9]*\).*/\1/p" "$events_dir/nudge.json" 2>/dev/null | head -n 1)
+	[ -n "$cursor" ] || return 0
+	cat "$events_log" "$events_dir"/archive/*.jsonl 2>/dev/null |
+		grep -F '"kind":"mail"' | grep -F "\"detail\":\"$MAILBOX\"" |
+		sed -n 's/^{"seq":\([0-9][0-9]*\),.*"bead":"\([^"]*\)".*/\1 \2/p' |
+		awk -v c="$cursor" '$1 + 0 <= c + 0 { print $2 }'
+}
+
 # 3. The inbox. Only lines that start with a bead id count: an empty inbox
 # prints a sentence, not an id. A bd that fails leaves this part with nothing,
 # rather than stopping the tick: the quiet alarm below still gets its turn.
@@ -362,6 +395,12 @@ if listing=$(cd "$vault" && bd mail inbox "$MAILBOX" 2>/dev/null); then
 		new=$(echo "$current" | grep -vxFf "$STATE/announced" 2>/dev/null || true)
 		if [ ! -f "$STATE/announced" ]; then new=$current; fi
 	fi
+fi
+# The mail mw events follow has told the seat of already is not told twice
+# (mw-gq6.457), even when the follower has since stopped.
+if [ -n "$new" ] && subscribes_to_mail; then
+	told=$(told_mail)
+	[ -n "$told" ] && new=$(echo "$new" | grep -vxF "$told" || true)
 fi
 [ -n "$new" ] && count=$(echo "$new" | wc -l | tr -d ' ')
 
@@ -502,7 +541,7 @@ fi
 # seats/<seat>/subscribe.toml names mail among its kinds: while it is active the
 # mail line is its to type, and is neither typed nor recorded here. The postern
 # line and the quiet alarm are not the follower's, and are typed as ever.
-if [ -n "$new" ] && grep -Eq '^[[:space:]]*kinds[[:space:]]*=.*mail' "$vault/seats/$MAILBOX/subscribe.toml" 2>/dev/null &&
+if [ -n "$new" ] && subscribes_to_mail &&
 	systemctl --user is-active --quiet mw-view-follow.service >/dev/null 2>&1; then
 	if [ ! -f "$STATE/mail-deferred" ]; then
 		say "the mail line is retired, mw events follow tells $MAILBOX of its mail (mw-view-follow.service is active)"
