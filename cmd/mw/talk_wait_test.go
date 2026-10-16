@@ -42,3 +42,17 @@ func TestTalkWaitLimitIsSecondsFromTheEnvironmentElseTheDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestTalkShowHelpRunsAndNamesItsArgument(t *testing.T) {
+	buf := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetArgs([]string{"talk", "show", "--help"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("mw talk show --help: %v", err)
+	}
+	if !strings.Contains(buf.String(), "show <talk-id>") {
+		t.Errorf("expected the help to name <talk-id>, got:\n%s", buf.String())
+	}
+}

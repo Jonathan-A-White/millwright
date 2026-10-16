@@ -2,7 +2,7 @@
 
 ## Ports
 
-| Port | Declared in (application/) | Real adapter (infra/) |
+| Port | In application/ | Adapter (infra/) |
 |-|-|-|
 | `WorkTracker` | application/worktracker.go | beads |
 | TrackerNotes, SweepNotes, BeadGraph, IceNotes, IcedBeads | application/{status,sweep,ice}.go | same |
@@ -47,7 +47,7 @@ Fakes: application/apptest/fake*.go, Fake<Port>; seatboot ports: seatboot*_test.
 | Config* | application/configset.go | cmd/mw/config.go | config_* |
 | IdeasOnly* | application/ideasonly.go, application/ideasonlyrelease.go | cmd/mw/ideasonly.go | ideas_only, postern_inbox_apply, talk_wait |
 | Seat* | application/seat{context,up,reap,handover}.go | cmd/mw/seat.go | seat_* |
-| Talk* | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | cmd/mw/talk.go | talk_* |
+| Talk*, TalkShow | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | cmd/mw/talk.go | talk_* |
 | Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go | cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | {millhand*,deputy} |
 | Secrets*, Hands*, Ask, Watch, Doctor | application/secrets.go, application/hands.go, application/ask.go, application/watch.go, application/doctor.go | cmd/mw/secrets.go, cmd/mw/hands.go, cmd/mw/ask.go, cmd/mw/watch.go, cmd/mw/doctor.go | {secrets,hands,ask,watch,doctor} |
 | SeatBoot{,Set}, SeatRead, Memory[Log], Errors, Init | application/seatboot.go, application/memory.go, application/memorymigrate.go, application/errors.go, application/init.go | cmd/mw/init.go, cmd/mw/memory.go, cmd/mw/errors.go, infra/memoryqueries | {seat_boot,init,memory,errors} |

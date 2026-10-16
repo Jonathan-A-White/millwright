@@ -44,8 +44,15 @@ Feature: mw talk wait
     Given mw talk wait is armed
     When the Governor's turn 1 of talk "talk-12" saying "Look at this" is indexed, with the picture "Screenshot.jpg"
     Then mw talk wait ends within 1 second
-    And the wait printed "image: <inbox dir>/direct-1.jpg (Screenshot.jpg)" on the line after "text: Look at this"
+    And the wait printed "image: <inbox dir>/direct-1.jpg (Screenshot.jpg)" on the line after "saved: <inbox dir>/direct-1.txt"
     And the inbox dir holds "direct-1.jpg" with the picture's bytes
+
+  Scenario: a turn's whole text is saved beside its picture and its path printed under the text
+    Given mw talk wait is armed
+    When the Governor's turn 1 of talk "talk-12" saying "Look at this" is indexed, with the picture "Screenshot.jpg"
+    Then mw talk wait ends within 1 second
+    And the wait printed "saved: <inbox dir>/direct-1.txt" on the line after "text: Look at this"
+    And the inbox dir holds "direct-1.txt" with the text "Look at this"
 
   Scenario: a turn with no picture prints no image line
     Given mw talk wait is armed
@@ -58,19 +65,19 @@ Feature: mw talk wait
     And the Governor's turn 1 of talk "talk-12" saying "Look at this" has been indexed, with the picture "Screenshot.jpg"
     When mw talk wait is armed
     Then mw talk wait ends within 1 second
-    And the wait printed "image: <inbox dir>/direct-1.jpg (Screenshot.jpg)" on the line after "text: Look at this"
+    And the wait printed "image: <inbox dir>/direct-1.jpg (Screenshot.jpg)" on the line after "saved: <inbox dir>/direct-1.txt"
     And the backend was asked for the picture 1 time
     When mw talk wait's cursor is put back to the start of the index
     And mw talk wait is armed again
     Then mw talk wait ends within 1 second
-    And the wait printed "image: <inbox dir>/direct-1.jpg (Screenshot.jpg)" on the line after "text: Look at this"
+    And the wait printed "image: <inbox dir>/direct-1.jpg (Screenshot.jpg)" on the line after "saved: <inbox dir>/direct-1.txt"
     And the backend was asked for the picture 1 time
 
   Scenario: a picture the backend will not serve is said so, and the turn is printed as ever
     Given mw talk wait is armed
     When the Governor's turn 1 of talk "talk-14" saying "Look at this" is indexed, with the picture "Screenshot.jpg" the backend will not serve
     Then mw talk wait ends within 1 second
-    And the wait printed "image: could not be fetched (" on the line after "text: Look at this"
+    And the wait printed "image: could not be fetched (" on the line after "saved: <inbox dir>/direct-1.txt"
     And the wait printed "talk talk-14 turn 1"
     And the wait printed "model unchanged"
     And the wait printed "cut no"

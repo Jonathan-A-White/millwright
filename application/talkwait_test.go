@@ -244,7 +244,7 @@ func TestTalkWaitWritesATurnsPictureAndPrintsItsPath(t *testing.T) {
 	printed := f.runInto(seq, dir)
 
 	path := filepath.Join(dir, "direct-pic1.jpg")
-	line := "text: Look at this\nimage: " + path + " (Screenshot.jpg)\n"
+	line := "text: Look at this\nsaved: " + filepath.Join(dir, "direct-pic1.txt") + "\nimage: " + path + " (Screenshot.jpg)\n"
 	if !strings.Contains(printed, line) {
 		t.Errorf("expected %q under the text, got:\n%s", line, printed)
 	}
@@ -275,7 +275,7 @@ func TestTalkWaitSaysAPictureCouldNotBeFetched(t *testing.T) {
 
 	printed := f.runInto(seq, t.TempDir())
 
-	for _, want := range []string{"talk talk-12 turn 1", "cut no", "text: Look at this\nimage: could not be fetched (", "index-to-print "} {
+	for _, want := range []string{"talk talk-12 turn 1", "cut no", "text: Look at this\nsaved: ", "index-to-print "} {
 		if !strings.Contains(printed, want) {
 			t.Errorf("expected %q, got:\n%s", want, printed)
 		}
@@ -291,5 +291,119 @@ func TestTalkWaitPrintsNoImageLineForATurnWithoutAPicture(t *testing.T) {
 
 	if !strings.Contains(printed, "text: Plain question") || strings.Contains(printed, "image:") {
 		t.Errorf("expected the turn and no image line, got:\n%s", printed)
+	}
+}
+
+// The turn's full text is written to <dir>/<txid>.txt before it is printed,
+// and 'saved: <path>' is printed under the text line (mw-gq6.515).
+func TestTalkWaitSavesATurnsWholeTextAndPrintsThePath(t *testing.T) {
+	f := newTalkPosternFixture(t)
+	dir := t.TempDir()
+	long := strings.Repeat("a long, long word of the Governor's é ", 60) + "\nand the end of it"
+	seq := f.addTurn(long)
+
+	printed := f.runInto(seq, dir)
+
+	path := filepath.Join(dir, "direct-turn.txt")
+	if got, err := os.ReadFile(path); err != nil || string(got) != long {
+		t.Errorf("expected exactly the turn's text at %s, got %q (%v)", path, got, err)
+	}
+	if want := "text: " + long + "\nsaved: " + path + "\n"; !strings.Contains(printed, want) {
+		t.Errorf("expected the saved line under the text, got:\n%s", printed)
+	}
+}
+
+// With no dir to save in the turn is printed as ever, with no saved line.
+func TestTalkWaitPrintsNoSavedLineWithoutADir(t *testing.T) {
+	f := newTalkPosternFixture(t)
+	seq := f.addTurn("Plain question")
+
+	_, printed := f.run(seq)
+
+	if !strings.Contains(printed, "text: Plain question") || strings.Contains(printed, "saved:") {
+		t.Errorf("expected the turn and no saved line, got:\n%s", printed)
+	}
+}
+
+// addTurnOf indexes a talk turn of the talk id, number turn, from the Governor.
+func (f *talkPosternFixture) addTurnOf(txid, id string, turn int, text string) int64 {
+	f.t.Helper()
+	plain, _ := json.Marshal(map[string]any{
+		"talk": map[string]any{"id": id, "turn": turn}, "text": text, "role": application.TalkRoleTurn,
+	})
+	ct, err := f.cipher.Encrypt(talkWaitMayorKey, string(plain))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return f.postern.AddRecord(application.PosternRecord{
+		Txid: txid, Class: "talk", To: talkWaitMayorKey, From: talkWaitGovernorKey, Ciphertext: ct,
+		Ts: time.Date(2026, 10, 16, 13, 9, int(turn), 0, time.UTC),
+	}).Seq
+}
+
+func (f *talkPosternFixture) show(id, dir string) (string, error) {
+	f.t.Helper()
+	var out strings.Builder
+	err := application.TalkShow{
+		Postern:       f.postern,
+		Cipher:        apptest.NewFakeCipher(),
+		Keys:          stubPosternKeys{pubKey: talkWaitMayorKey},
+		GovernorKey:   talkWaitGovernorKey,
+		AttachmentDir: dir,
+		Out:           &out,
+	}.Run(context.Background(), id)
+	return out.String(), err
+}
+
+// mw talk show prints every turn of the talk, whole, with its role, turn,
+// time, text and picture path, and none of another talk's.
+func TestTalkShowPrintsEveryTurnOfTheTalkWhole(t *testing.T) {
+	f := newTalkPosternFixture(t)
+	dir := t.TempDir()
+	long := strings.Repeat("never cut ", 200)
+	f.addTurnOf("direct:t1", "talk-9", 1, "first")
+	f.addTurnOf("direct:other", "talk-8", 1, "somebody else's")
+	f.addTurnOf("direct:t2", "talk-9", 2, long)
+	f.addPictureTurn("direct:pic9", "see", "Shot.jpg", []byte("jpeg"))
+
+	printed, err := f.show("talk-9", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"talk talk-9 turn 1 (role turn) at 2026-10-16T13:09:01Z\ntext: first\n",
+		"talk talk-9 turn 2 (role turn) at 2026-10-16T13:09:02Z\ntext: " + long + "\n",
+	} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("expected %q, got:\n%s", want, printed)
+		}
+	}
+	if strings.Contains(printed, "somebody else's") || strings.Contains(printed, "see") {
+		t.Errorf("expected only talk-9's turns, got:\n%s", printed)
+	}
+}
+
+// A turn's picture path is printed under its text, as the wait prints it.
+func TestTalkShowPrintsATurnsPicturePath(t *testing.T) {
+	f := newTalkPosternFixture(t)
+	dir := t.TempDir()
+	f.addPictureTurn("direct:pic9", "see this", "Shot.jpg", []byte("jpeg"))
+
+	printed, err := f.show("talk-12", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "text: see this\nimage: " + filepath.Join(dir, "direct-pic9.jpg") + " (Shot.jpg)\n"; !strings.Contains(printed, want) {
+		t.Errorf("expected %q, got:\n%s", want, printed)
+	}
+}
+
+// A talk with no turn the Mayor can read is said so, as an error.
+func TestTalkShowRefusesATalkWithNoTurns(t *testing.T) {
+	f := newTalkPosternFixture(t)
+	f.addTurnOf("direct:t1", "talk-9", 1, "first")
+
+	if _, err := f.show("talk-404", t.TempDir()); err == nil || !strings.Contains(err.Error(), "talk-404") {
+		t.Errorf("expected an error naming talk-404, got %v", err)
 	}
 }
