@@ -464,6 +464,12 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 	// new: no version is raised for it and no What's new line written.
 	if len(rules.VersionFiles) > 0 && !report.allOnTarget() {
 		bump := VersionBump{Files: rules.VersionFiles, Before: report.Base, Branch: "HEAD", StoryID: report.Label()}
+		for _, s := range report.Merged {
+			// One story of the batch asking for the minor raises it for all.
+			if s.path.Bump == domain.BumpMinor && !s.OnTarget {
+				bump.Minor = true
+			}
+		}
 		if len(rules.ChangelogFiles) > 0 {
 			bump.Changelog = rules.ChangelogFiles
 			for _, s := range report.Merged {

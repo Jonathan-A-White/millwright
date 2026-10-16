@@ -1959,6 +1959,7 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 				c.path.Rig, c.target, c.id))
 		}
 		version.Files = rules.VersionFiles
+		version.Minor = c.path.Bump == domain.BumpMinor
 		union = rules.UnionMergeFiles
 		if len(rules.VersionFiles) > 0 && len(rules.ChangelogFiles) > 0 {
 			if version.Entry, err = n.changelogEntry(ctx, c, report); err != nil {

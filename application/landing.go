@@ -72,6 +72,7 @@ type VersionBump struct {
 	Before    string
 	Branch    string
 	StoryID   string
+	Minor     bool
 	Changelog []string
 	Entry     domain.ChangelogEntry
 	Entries   []domain.ChangelogEntry

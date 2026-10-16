@@ -1440,6 +1440,19 @@ Feature: Closing out a finished story and carrying on
     And no commit on "main" at the rig's origin says "Version" except the story's own
     And that mail's body does not say "version 0.2.1"
 
+  Scenario: A story whose path says bump=minor has the minor raised at landing, after main moved by two patch bumps
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.0"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the story "mw-gq6.1" says bump=minor in its path
+    And the other host landed patch bumps to "0.1.1" and then "0.1.2" on "main" while "mw-gq6.1" was worked
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And "main" at the rig's origin holds version "0.2.0" in "package.json" and "package-lock.json"
+    And the tip of "main" at the rig's origin is the commit "Version 0.2.0 (mw-gq6.1)"
+    And that mail's body holds:
+      | version 0.2.0 |
+
   Scenario: A rig without version_files lands exactly as before
     Given the rig's main holds a package.json and a package-lock.json at version "0.1.0"
     And the work of "mw-gq6.1" is rebased onto that main
