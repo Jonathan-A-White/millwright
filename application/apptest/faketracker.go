@@ -139,6 +139,10 @@ type FakeTracker struct {
 	showEpicsCalls       int
 	storiesCommentsCalls int
 
+	// inProgressReads counts each read of the in-progress list: RunningStories,
+	// RunningElsewhere and RunningEverywhere each cost the real tracker one.
+	inProgressReads int
+
 	// failing is the methods FailOn makes fail, by the error each gives.
 	failing map[string]error
 
@@ -958,6 +962,15 @@ func (f *FakeTracker) ShowEpicsCalls() int {
 	return f.showEpicsCalls
 }
 
+// InProgressReads reports how many times the in-progress list was read, by
+// whichever of RunningStories, RunningElsewhere and RunningEverywhere, so that
+// a test can say a dispatch tick read it once.
+func (f *FakeTracker) InProgressReads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inProgressReads
+}
+
 // StoriesCommentsCalls reports how many times StoriesComments was called, so
 // that a test can say several stories' comments were read in one batch
 // rather than one call each.
@@ -1243,6 +1256,7 @@ func (f *FakeTracker) RunningStories(_ context.Context, host string) ([]applicat
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.asked = append(f.asked, "RunningStories")
+	f.inProgressReads++
 	if f.Err != nil {
 		return nil, f.Err
 	}
@@ -1261,6 +1275,7 @@ func (f *FakeTracker) RunningElsewhere(_ context.Context, host string) ([]applic
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.asked = append(f.asked, "RunningElsewhere")
+	f.inProgressReads++
 	if f.Err != nil {
 		return nil, f.Err
 	}
@@ -1272,6 +1287,32 @@ func (f *FakeTracker) RunningElsewhere(_ context.Context, host string) ([]applic
 		}
 	}
 	return running, nil
+}
+
+// RunningEverywhere implements application.RunningEverywhere: RunningStories and
+// RunningElsewhere in one read of the in-progress list, which is how the call is
+// recorded.
+func (f *FakeTracker) RunningEverywhere(_ context.Context, host string) (here, away []application.StoryDetail, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, "RunningStories")
+	f.inProgressReads++
+	if f.Err != nil {
+		return nil, nil, f.Err
+	}
+	for _, id := range f.order {
+		s := f.stories[id]
+		if s.detail.Status != StatusInProgress {
+			continue
+		}
+		switch merged := s.detail.Merged().Host; {
+		case merged == host:
+			here = append(here, s.detail)
+		case merged != "" && merged != domain.HostAuto:
+			away = append(away, s.detail)
+		}
+	}
+	return here, away, nil
 }
 
 // BlockedForHost implements application.WorkTracker.
