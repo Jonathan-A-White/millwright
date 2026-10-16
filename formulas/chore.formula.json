@@ -24,7 +24,7 @@
     {
       "id": "verify",
       "title": "Verify",
-      "description": "Run whatever {{story}}'s acceptance criteria say to check, and confirm it passes.",
+      "description": "Run whatever {{story}}'s acceptance criteria say to check, and confirm it passes. Run the gate in the foreground, under the Bash tool's own timeout: `timeout 590 make test`, then `make lint`; or `mw check {{story}}`, which makes the checks mw next makes. Never nohup or background it and wait with tail --pid, a sleep loop or polling: the auto-mode classifier refuses that wait and the story stops with its steps open. If the foreground run times out, say so on the bead and hand back.",
       "type": "task",
       "depends_on": ["do"]
     },
