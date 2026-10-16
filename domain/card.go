@@ -127,6 +127,35 @@ func ValidExpectState(state string) bool {
 	return false
 }
 
+// fieldLead is the start of a field after a '|': a bead id's prefix, its
+// hyphen and the hash's first character, or the ':' of an expectation that
+// left out its bead.
+var fieldLead = regexp.MustCompile(`^([a-z][a-z0-9]*-[a-z0-9]|:)`)
+
+// fieldAfterPipe reports whether what follows a '|' is a field of an item or
+// an option rather than more of its text: empty, or beginning with a bead id
+// (or the ':' after a bead left out, so that is refused, not sent).
+func fieldAfterPipe(s string) bool {
+	s = strings.TrimSpace(s)
+	return s == "" || fieldLead.MatchString(s)
+}
+
+// trailingFields cuts spec at its last '|'s, up to most of them, while what
+// follows each is a field (fieldAfterPipe): the text, then the fields in
+// order. A '|' followed by anything else is part of the text.
+func trailingFields(spec string, most int) []string {
+	text, fields := spec, []string(nil)
+	for len(fields) < most {
+		i := strings.LastIndex(text, "|")
+		if i < 0 || !fieldAfterPipe(text[i+1:]) {
+			break
+		}
+		fields = append([]string{text[i+1:]}, fields...)
+		text = text[:i]
+	}
+	return append([]string{text}, fields...)
+}
+
 func validBeadID(id string) bool {
 	return id != "" && !strings.ContainsAny(id, " \t\n|,")
 }
@@ -198,13 +227,12 @@ func (e Expectation) validate() error {
 // `[<n>. ]<text>|<links csv>|<bead>:<state>`: the links and the expectation
 // may be left empty or out, and an item that gives no expectation has one
 // derived from its ask (DeriveExpectation). N is 0 when the text does not
-// begin with its number.
+// begin with its number. The text may hold a '|': only the trailing fields,
+// each empty or beginning with a bead id (fieldAfterPipe), are read as the
+// links and the expectation.
 func ParseCardItem(spec string) (CardItem, error) {
 	var item CardItem
-	parts := strings.Split(spec, "|")
-	if len(parts) > 3 {
-		return item, fmt.Errorf("%q is not an item: give <text>|<links>|<bead>:<state>, the text holding no |", spec)
-	}
+	parts := trailingFields(spec, 2)
 	text := strings.TrimSpace(parts[0])
 	if m := cardItemNumber.FindStringSubmatch(text); m != nil {
 		n, err := strconv.Atoi(m[1])
@@ -373,14 +401,17 @@ func containsString(list []string, s string) bool {
 // SplitOption reads an option as mw postern send --option gives it,
 // `<text>[|<bead>:<state>[,<bead>:<state>...]]`: the text the card shows, and
 // what the option expects of beads for the Governor's own acts to have
-// answered it. An option with no '|' expects nothing. A bead that is not
+// answered it. Only a last '|' followed by nothing or a bead id
+// (fieldAfterPipe) is read as the expectations: an option with no such '|'
+// expects nothing, its text kept whole, '|'s and all. A bead that is not
 // one, or a state that is not among OptionExpectStates, is refused.
 func SplitOption(option string) (text string, expect []Expectation, err error) {
-	text, specs, found := strings.Cut(option, "|")
-	text = strings.TrimSpace(text)
-	if !found {
+	parts := trailingFields(option, 1)
+	text = strings.TrimSpace(parts[0])
+	if len(parts) == 1 {
 		return text, nil, nil
 	}
+	specs := parts[1]
 	if text == "" {
 		return "", nil, fmt.Errorf("%q: the option has no text before the |", option)
 	}

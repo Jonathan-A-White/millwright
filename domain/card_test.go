@@ -63,18 +63,40 @@ func TestParseCardItemReadsTextLinksAndExpectation(t *testing.T) {
 
 func TestParseCardItemRefusesABadExpectation(t *testing.T) {
 	for spec, want := range map[string]string{
-		"Check it|mw-x|mw-x:done":  "open, landed, verified, closed, answered or held",
-		"Check it|mw-x|mw-x":       "<bead>:<state>",
-		"Check it|mw-x|:landed":    "<bead>:<state>",
-		"   |mw-x|mw-x:landed":     "no text",
-		"a|b|c|d":                  "<text>|<links>|<bead>:<state>",
-		"Check it|mw x|mw-x:open":  "not a bead id",
-		"Check it||mw x:verified":  "not a bead id",
-		"0. Check it||mw-x:closed": "from 1",
+		"Check it|mw-x|mw-x:done":   "open, landed, verified, closed, answered or held",
+		"Check it|mw-x|mw-x":        "<bead>:<state>",
+		"Check it|mw-x|:landed":     "<bead>:<state>",
+		"   |mw-x|mw-x:landed":      "no text",
+		"Check it|mw-x y|mw-x:open": "not a bead id",
+		"Check it||mw-x y:verified": "not a bead id",
+		"0. Check it||mw-x:closed":  "from 1",
 	} {
 		_, err := ParseCardItem(spec)
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("ParseCardItem(%q): expected a refusal saying %q, got %v", spec, want, err)
+		}
+	}
+}
+
+// TestParseCardItemKeepsAPipeInItsText pins mw-gq6.468: a '|' not followed
+// by a bead id is the item's text, and only the trailing links and
+// expectation are read as fields.
+func TestParseCardItemKeepsAPipeInItsText(t *testing.T) {
+	for spec, want := range map[string]CardItem{
+		"Expect: <metric> up|down":                 {Text: "Expect: <metric> up|down"},
+		"Expect: up|down' or 'Expect|mw-a|":        {Text: "Expect: up|down' or 'Expect", Links: []string{"mw-a"}},
+		"a|b|c|d":                                  {Text: "a|b|c|d"},
+		"Check up|down|mw-a.1, mw-b|mw-a.1:landed": {Text: "Check up|down", Links: []string{"mw-a.1", "mw-b"}, Expect: &Expectation{Bead: "mw-a.1", State: ExpectLanded}},
+		"up|mw-x:open|down":                        {Text: "up|mw-x:open|down"},
+	} {
+		item, err := ParseCardItem(spec)
+		if err != nil {
+			t.Errorf("ParseCardItem(%q): %v", spec, err)
+			continue
+		}
+		if item.Text != want.Text || strings.Join(item.Links, " ") != strings.Join(want.Links, " ") ||
+			(item.Expect == nil) != (want.Expect == nil) || (want.Expect != nil && *item.Expect != *want.Expect) {
+			t.Errorf("ParseCardItem(%q) = %+v (expect %+v), want %+v (expect %+v)", spec, item, item.Expect, want, want.Expect)
 		}
 	}
 }
@@ -213,14 +235,35 @@ func TestSplitOptionReadsTheTextAndWhatItExpects(t *testing.T) {
 	}
 }
 
+// TestSplitOptionKeepsAPipeInItsText pins mw-gq6.468: an option whose text
+// holds a '|' not followed by a bead id is sent whole, and only a trailing
+// '|<bead>:<state>,...' is read as what it expects.
+func TestSplitOptionKeepsAPipeInItsText(t *testing.T) {
+	option := "A: Required on every factory (millwright) story: 'Expect: <metric> up|down' or 'Expect: none'"
+	text, expect, err := SplitOption(option)
+	if err != nil || text != option || expect != nil {
+		t.Fatalf("expected the option sent whole, got %q, %v, %v", text, expect, err)
+	}
+	text, expect, err = SplitOption("B: up|down|mw-x.1:open")
+	if err != nil || text != "B: up|down" || len(expect) != 1 || expect[0] != (Expectation{Bead: "mw-x.1", State: ExpectOpen}) {
+		t.Fatalf("expected the trailing bead read, got %q, %v, %v", text, expect, err)
+	}
+	text, expect, err = SplitOption("C: up|mw-x.1:open|down")
+	if err != nil || text != "C: up|mw-x.1:open|down" || expect != nil {
+		t.Fatalf("expected a bead not at the end kept as text, got %q, %v, %v", text, expect, err)
+	}
+}
+
 func TestSplitOptionRefusesWhatItCannotRead(t *testing.T) {
 	for option, want := range map[string]string{
-		"A|mw-x.1:bogus":    "open, landed, verified, closed or held",
-		"A|mw-x.1:answered": "open, landed, verified, closed or held",
-		"A|mw-x.1":          "give <bead>:<state>",
-		"A|":                "give <bead>:<state>",
-		"|mw-x.1:open":      "no text",
-		"A|not a bead:open": "not a bead id",
+		"A|mw-x.1:bogus":                 "open, landed, verified, closed or held",
+		"A|mw-x.1:answered":              "open, landed, verified, closed or held",
+		"A|mw-x.1":                       "give <bead>:<state>",
+		"A|":                             "give <bead>:<state>",
+		"|mw-x.1:open":                   "no text",
+		"A|mw-x y:open":                  `option "A": "mw-x y" is not a bead id`,
+		"A|mw-x.1:open, not a bead:open": `option "A": "not a bead" is not a bead id`,
+		"A: up|down|mw-x.1:done":         `option "A: up|down"`,
 	} {
 		if _, _, err := SplitOption(option); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: expected a refusal saying %q, got %v", option, want, err)
