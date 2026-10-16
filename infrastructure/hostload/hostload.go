@@ -28,6 +28,8 @@ type Proc struct {
 	// unknown, so that only a close-out pays for it.
 	SwapFile   string
 	SwapSample time.Duration
+	// Sleep is how the swap sample waits out SwapSample; nil is time.Sleep.
+	Sleep func(time.Duration)
 }
 
 var _ application.HostLoad = Proc{}
@@ -77,7 +79,11 @@ func (p Proc) swapRate() (in, out float64, known bool) {
 		return 0, 0, false
 	}
 	started := time.Now()
-	time.Sleep(p.SwapSample)
+	sleep := p.Sleep
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+	sleep(p.SwapSample)
 	inAfter, outAfter, ok := swapCounters(file)
 	elapsed := time.Since(started).Seconds()
 	if !ok || elapsed <= 0 || inAfter < inBefore || outAfter < outBefore {

@@ -22,8 +22,21 @@ func standIn(t *testing.T, delay string, code int) string {
 	return prog
 }
 
+// heldStandIn is a standIn that runs until the test releases it by making
+// $0.go, a minute at most: so it is still running whatever the host's load
+// makes of the test's own steps (mw-gq6.440).
+func heldStandIn(t *testing.T) string {
+	t.Helper()
+	prog := filepath.Join(t.TempDir(), "mw")
+	body := "#!/bin/sh\necho \"$@\" >> \"$0.args\"\ni=0\nwhile [ ! -e \"$0.go\" ] && [ $i -lt 3000 ]; do sleep 0.02; i=$((i + 1)); done\nexit 0\n"
+	if err := os.WriteFile(prog, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return prog
+}
+
 func TestASuiteOutlivesTheContextItWasBegunUnderAndIsWaitedForAnew(t *testing.T) {
-	prog := standIn(t, "0.5", 0)
+	prog := heldStandIn(t)
 	p := &suiteproc.Processes{Dir: t.TempDir(), Program: prog, Scope: noScope(t), Poll: 20 * time.Millisecond}
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := p.Begin(ctx, "lampas"); err != nil {
@@ -38,6 +51,9 @@ func TestASuiteOutlivesTheContextItWasBegunUnderAndIsWaitedForAnew(t *testing.T)
 
 	// A follower that comes back begins the suite again: it finds this one.
 	if err := p.Begin(context.Background(), "lampas"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prog+".go", nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.Wait(context.Background(), "lampas"); err != nil {

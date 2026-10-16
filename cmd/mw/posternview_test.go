@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,25 +104,54 @@ func TestPosternViewFollowRefusesJSONAndAnEveryWithoutFollowBeforeCallingBd(t *t
 
 // --follow publishes on its first pass and then stops cleanly when told to:
 // the stand-in bd prints nothing, so the head read fails, which is said and
-// does not end the loop.
+// does not end the loop. It is told to stop once it has said so, not after a
+// fixed time a loaded host may not give it (mw-gq6.440).
 func TestPosternViewFollowSaysAFailedReadAndStopsCleanlyWhenToldTo(t *testing.T) {
 	posternHome(t, "http://unused", "", "governor-pubkey-hex")
 	callLog := noBdCalls(t)
 
-	ctx, stop := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	out := &bytes.Buffer{}
+	out := &lockedBuffer{}
 	root := newRootCmd()
 	root.SetOut(out)
 	root.SetErr(out)
 	root.SetArgs([]string{"postern", "view", "--follow", "--every", "100ms"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	ended := make(chan error, 1)
+	go func() { ended <- root.ExecuteContext(ctx) }()
+	readTheHead := func() bool {
+		data, _ := os.ReadFile(callLog)
+		return strings.Contains(string(data), "sql --json")
+	}
+	for deadline := time.Now().Add(10 * time.Second); !strings.Contains(out.String(), "mw events follow:") || !readTheHead(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			stop()
+			<-ended
+			data, _ := os.ReadFile(callLog)
+			t.Fatalf("expected the loop to read the head with bd sql and say the failure within 10 s; it said %q, bd was asked:\n%s", out, data)
+		}
+	}
+	stop()
+	if err := <-ended; err != nil {
 		t.Fatalf("expected --follow to stop cleanly when its context ended, got %v\n%s", err, out)
 	}
-	if !strings.Contains(out.String(), "mw events follow:") {
-		t.Fatalf("expected the failure to be said, got %q", out)
-	}
-	if data, _ := os.ReadFile(callLog); !strings.Contains(string(data), "sql --json") {
-		t.Fatalf("expected the loop to read the head with bd sql, bd was asked:\n%s", data)
-	}
+}
+
+// lockedBuffer is a bytes.Buffer a command writes from its own goroutine while
+// the test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

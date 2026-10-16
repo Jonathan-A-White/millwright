@@ -118,7 +118,11 @@ func TestABegunMakeOutlivesTheCancelledCaller(t *testing.T) {
 	dir := t.TempDir()
 	done := filepath.Join(dir, "done")
 	self := filepath.Join(dir, "mw")
-	script := "#!/bin/sh\necho \"$*\" >" + filepath.Join(dir, "args") + "\nsleep 1\ntouch " + done + "\n"
+	// The make runs until the test lets it go, a minute at most, so it is
+	// still going when the test looks however slow the host (mw-gq6.440).
+	release := filepath.Join(dir, "go")
+	script := "#!/bin/sh\necho \"$*\" >" + filepath.Join(dir, "args") +
+		"\ni=0\nwhile [ ! -e " + release + " ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i + 1)); done\ntouch " + done + "\n"
 	if err := os.WriteFile(self, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -130,6 +134,9 @@ func TestABegunMakeOutlivesTheCancelledCaller(t *testing.T) {
 	cancel() // the caller is stopped while the make is going
 	if _, err := os.Stat(done); err == nil {
 		t.Fatalf("expected begin to return before the make ended")
+	}
+	if err := os.WriteFile(release, nil, 0o644); err != nil {
+		t.Fatal(err)
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {

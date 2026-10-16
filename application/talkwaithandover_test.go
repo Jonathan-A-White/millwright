@@ -44,13 +44,12 @@ func (f *talkPosternFixture) handoverWait(stream application.PosternStream, log 
 func TestTalkWaitInTheOldWindowExitsAtOnceOnAHandoverSayingHandedOverAtN(t *testing.T) {
 	f := newTalkPosternFixture(t)
 	log := logWith(t, jobEvent, mailEvent)
-	go func() {
-		time.Sleep(30 * time.Millisecond)
-		handoverAt(t, log, 2)
-	}()
+	// The handover lands once the wait has read where the log stands, never
+	// before it however slow the host (mw-gq6.440).
+	stream := beforeStream{inner: quietStream{}, before: func() { handoverAt(t, log, 2) }}
 
 	started := time.Now()
-	report, printed := f.handoverWait(quietStream{}, log, oldMayorWindow, 5*time.Second, 5*time.Millisecond)
+	report, printed := f.handoverWait(stream, log, oldMayorWindow, 5*time.Second, 5*time.Millisecond)
 
 	if time.Since(started) > 2*time.Second {
 		t.Errorf("the wait took %s: it should end on the handover, not its limit", time.Since(started))

@@ -1,6 +1,7 @@
 package postern
 
-import "time"
+import "net/http"
 
-// SetTimeout shortens the client's timeout for a test that waits it out.
-func (h *HTTP) SetTimeout(d time.Duration) { h.client.Timeout = d }
+// SetTransport sends the client's calls through rt, for a test that stands in
+// for the network.
+func (h *HTTP) SetTransport(rt http.RoundTripper) { h.client.Transport = rt }
