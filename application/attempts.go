@@ -84,7 +84,9 @@ func (d Dispatch) maxAttempts() int {
 // started: the count, when a dispatch made the claim it runs under (at, the
 // zero time for a session that is not a new claim), and, when a tick had said
 // the story used up its attempts, that mark cleared, because it is being tried
-// again.
+// again. A cause mw cause named for this attempt or a later one belongs to an
+// earlier session numbered the same, before the count was lowered or reset by
+// hand, so it is cleared too: a new attempt has no cause yet (mw-gq6.450).
 func attemptFields(detail StoryDetail, attempt int, at time.Time) map[string]string {
 	fields := map[string]string{AttemptsField: strconv.Itoa(attempt)}
 	if !at.IsZero() {
@@ -92,6 +94,17 @@ func attemptFields(detail StoryDetail, attempt int, at time.Time) map[string]str
 	}
 	if detail.Exhausted {
 		fields[AttemptsExhaustedField] = ""
+	}
+	kept, stale := map[int]string{}, false
+	for named, class := range detail.AttemptCauses {
+		if named >= attempt {
+			stale = true
+			continue
+		}
+		kept[named] = class
+	}
+	if stale {
+		fields[AttemptCausesField] = attemptCausesText(kept)
 	}
 	return fields
 }

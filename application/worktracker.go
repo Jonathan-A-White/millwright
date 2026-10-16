@@ -187,6 +187,9 @@ type StoryDetail struct {
 	Cause    string
 	CauseWhy string
 	CauseFix string
+	// AttemptCauses is the class mw cause named for each attempt, by attempt,
+	// as the AttemptCausesField metadata says; nil when none was named.
+	AttemptCauses map[int]string
 	// Molecule is the formula poured for this story, empty until it has been
 	// poured. It is filled in by whoever pours it, not by reading the story.
 	Molecule Molecule

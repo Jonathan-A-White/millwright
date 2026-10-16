@@ -210,3 +210,38 @@ Feature: mw retry
     When mw retries "mw-gq6.1"
     Then the retry refuses, saying: still running
     And the retried story's formula "mw-gq6.1" is as its session left it, 2 steps still open
+
+  # mw-gq6.450: under A40 an attempt that failed for what is not the story's own
+  # code (a host down, a flaky step) is retried by the Mayor and is not the
+  # story's: only the attempts mw cause named code, or named nothing, count
+  # toward max_attempts.
+
+  Scenario: Attempts whose cause was not the story's own code do not count toward max_attempts
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the session of "mw-gq6.1" has ended
+    And the story "mw-gq6.1" has been tried 3 times, mw cause naming its attempts process, test, code
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And the story "mw-gq6.1" is open and unassigned
+    And the story "mw-gq6.1" still records 3 attempts
+    And the printed retry report says "takes it as attempt 4, its own attempt 2 of 3 (not counted: attempt 1 (process), attempt 2 (test))"
+    And the retry comment on "mw-gq6.1" says "takes it as attempt 4, its own attempt 2 of 3 (not counted: attempt 1 (process), attempt 2 (test))"
+
+  Scenario: An attempt with no cause named counts as the story's own
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the session of "mw-gq6.1" has ended
+    And the story "mw-gq6.1" has been tried 3 times, mw cause naming its attempts code, -, code
+    When mw retries "mw-gq6.1"
+    Then the retry refuses, saying: attempts exhausted
+    And the worktree of "mw-gq6.1" was left untouched
+
+  Scenario: An exhausted story's refusal says how many attempts counted and which did not, with their causes
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the session of "mw-gq6.1" has ended
+    And the story "mw-gq6.1" has been tried 5 times, mw cause naming its attempts tooling, code, process, code, code
+    When mw retries "mw-gq6.1"
+    Then the retry refuses, saying: attempts exhausted
+    And the retry refuses, saying: started 5 times and 3 count
+    And the retry refuses, saying: not counted: attempt 1 (tooling), attempt 3 (process)
+    And the worktree of "mw-gq6.1" was left untouched
+    And the story "mw-gq6.1" still records 5 attempts

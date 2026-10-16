@@ -1996,9 +1996,15 @@ func writeStoryIn(b *strings.Builder, pad string, d StoryDetail, note string) {
 		clip(b, pad+"  "+note)
 	}
 	// A story started once is the usual story; one started more than once is one
-	// that was refused or given back, and is running out of tries.
+	// that was refused or given back, and is running out of tries: only its own
+	// attempts count toward max_attempts, so it says how many those were when
+	// mw cause named some test, tooling or process (mw-gq6.450).
 	if d.Attempts > 1 {
-		clip(b, fmt.Sprintf("%s  attempts %d", pad, d.Attempts))
+		line := fmt.Sprintf("%s  attempts %d", pad, d.Attempts)
+		if own, _ := OwnAttempts(d); own != d.Attempts {
+			line += fmt.Sprintf(" (%d own)", own)
+		}
+		clip(b, line)
 	}
 }
 

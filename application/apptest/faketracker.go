@@ -1577,6 +1577,9 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			if k == application.CauseFixField {
 				s.detail.CauseFix = v
 			}
+			if k == application.AttemptCausesField {
+				s.detail.AttemptCauses = application.ParseAttemptCauses(v)
+			}
 			if k == application.TodoRankField {
 				s.detail.TodoRank = v
 			}

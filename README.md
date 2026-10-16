@@ -1358,9 +1358,15 @@ never offered to a dispatcher). One comment is left on the story naming the
 branch commit the bundle captured, where the bundle is, and the commit the
 vault pushed it as.
 
-It never resets a story's attempts count, and a story already started
-`max_attempts` times is refused with "attempts exhausted" rather than retried
-— resetting the counter by hand is what allows another attempt.
+It never resets a story's attempts count, and a story whose own attempts reach
+`max_attempts` is refused with "attempts exhausted" rather than retried
+— resetting the counter by hand is what allows another attempt. Its own are
+the attempts `mw cause` named `code`, or named nothing: `mw cause` keeps each
+class against the attempt it was named on (`attempt_causes`), and an attempt
+named `test`, `tooling` or `process` failed for what is not the story's code
+and does not count (mw-gq6.450). The refusal says how many counted and names
+the ones that did not, with their causes; `mw status` shows `attempts N (M own)`
+when the two differ. `mw dispatch`'s own gate still counts every attempt.
 
 A story labelled `hitl` is still retried and its claim still given back, but
 dispatch passes a `hitl` story over, so the report adds a line naming the label

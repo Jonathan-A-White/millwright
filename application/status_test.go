@@ -676,3 +676,64 @@ func TestStatusLeavesOutOpenStoriesClaimedByAnotherActorThanAHost(t *testing.T) 
 		t.Errorf("a bead the Mayor holds is not a host's claim, got %+v\n%s", report.OpenButClaimed, report.String())
 	}
 }
+
+// TestStatusShowsHowManyAttemptsWereTheStorysOwn is mw-gq6.450: an attempt mw
+// cause named test, tooling or process is not the story's own code and does not
+// count toward max_attempts, so a RUNNING or READY line that says attempts says
+// how many of them were its own when that is fewer.
+func TestStatusShowsHowManyAttemptsWereTheStorysOwn(t *testing.T) {
+	ctx := context.Background()
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.40", "A story ready after a host went down", "vps")
+	storyOn(t, tracker, "mw-gq6.41", "A story running after a flaky step", "vps")
+	storyOn(t, tracker, "mw-gq6.42", "A story whose attempts were all its own", "vps")
+	claim(t, tracker, "mw-gq6.41", time.Hour)
+	for id, fields := range map[string]map[string]string{
+		"mw-gq6.40": {application.AttemptsField: "3", application.AttemptCausesField: "1:process,2:test,3:code"},
+		"mw-gq6.41": {application.AttemptsField: "2", application.AttemptCausesField: "1:tooling"},
+		"mw-gq6.42": {application.AttemptsField: "2", application.AttemptCausesField: "1:code"},
+	} {
+		if err := tracker.SetStoryMetadata(ctx, id, fields); err != nil {
+			t.Fatalf("recording the attempts of %s: %v", id, err)
+		}
+	}
+
+	report, err := application.Status{
+		Tracker: tracker, Host: "vps", Seat: "builder", Cap: 2,
+		Now: func() time.Time { return statusNow },
+	}.Run(ctx)
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	printed := report.String()
+	t.Logf("\n%s", printed)
+	for id, want := range map[string]string{
+		"mw-gq6.40": "attempts 3 (1 own)",
+		"mw-gq6.41": "attempts 2 (1 own)",
+		"mw-gq6.42": "attempts 2",
+	} {
+		if got := attemptsLineOf(printed, id); got != want {
+			t.Errorf("expected the block of %s to say %q, got %q", id, want, got)
+		}
+	}
+}
+
+// attemptsLineOf is the attempts line in the block of story id, trimmed, or
+// empty when the block has none.
+func attemptsLineOf(printed, id string) string {
+	lines := strings.Split(printed, "\n")
+	for i, line := range lines {
+		if !strings.HasPrefix(strings.TrimSpace(line), id+" ") {
+			continue
+		}
+		for _, under := range lines[i+1:] {
+			if strings.HasPrefix(strings.TrimSpace(under), "mw-") || strings.TrimSpace(under) == "" {
+				return ""
+			}
+			if strings.HasPrefix(strings.TrimSpace(under), "attempts ") {
+				return strings.TrimSpace(under)
+			}
+		}
+	}
+	return ""
+}
