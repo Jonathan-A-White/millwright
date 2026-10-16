@@ -117,6 +117,7 @@ func (v handsView) Run(ctx context.Context) (application.PosternViewDoc, error) 
 	view, err := sealedPosternView(application.PosternView{
 		Tracker:    v.gateway,
 		Notes:      v.gateway,
+		Signs:      posternSigns(),
 		Host:       v.host,
 		Now:        posternViewClock,
 		VerifyDays: verifyDays,

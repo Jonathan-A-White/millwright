@@ -138,6 +138,23 @@ func posternGateway() (gateway *beads.Gateway, host string, err error) {
 	return mwGateway(dir, host), host, nil
 }
 
+// posternSigns is where the Postern view reads a host's other signs of life, so
+// that a Boost that landed and pushed minutes ago raises no 'has not synced'
+// alarm on the Governor's phone (mw-gq6.523): the vault's own log. Without a
+// vault or a host it is nil, and the view judges a host by its sync and its
+// claims alone.
+func posternSigns() application.HostSigns {
+	dir, err := config.Vault()
+	if err != nil {
+		return nil
+	}
+	host, err := config.Host()
+	if err != nil {
+		return nil
+	}
+	return mwVault(dir, host)
+}
+
 // newPosternInboxCmd builds `mw postern inbox`, reading from the postern
 // backend at postern_backend and decrypting with the postern key.
 func newPosternInboxCmd() *cobra.Command {

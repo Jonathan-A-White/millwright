@@ -309,6 +309,13 @@ type PosternView struct {
 	// Host is this host's own name, the view's "host".
 	Host string
 
+	// Signs is where a host's other signs of life are read, so that a host
+	// whose last sync is old but which has committed to the vault, or whose
+	// claimed story's lease was renewed, within PosternViewHostStale raises no
+	// alarm on the Governor's phone (mw-gq6.523). A nil Signs, or signs that
+	// cannot be read, judge a host by its sync and its claims alone.
+	Signs HostSigns
+
 	// Now is the clock written_at is stamped with and every window is
 	// measured against. The zero value reads the real one.
 	Now func() time.Time
@@ -550,7 +557,7 @@ func (v PosternView) Build(ctx context.Context) (PosternViewDoc, error) {
 		sayVerifyFoldedFailed(v.Err, err)
 	}
 
-	hosts, hostNeeds := v.hosts(b, notes)
+	hosts, hostNeeds := v.hosts(ctx, b, notes)
 	v.upNext(b, hosts)
 	needs = append(needs, hostNeeds...)
 	sortPosternNeeds(needs)
@@ -1609,7 +1616,7 @@ func (b *viewBuild) markNotReady(need *PosternViewNeed, e *viewEntry, noSteps bo
 // and waiting on nothing. A host with nothing pathed to it strands nothing,
 // and a host asleep with no work is not an alarm; the same rule the quiet
 // alarm keeps (Nudge).
-func (v PosternView) hosts(b *viewBuild, notes map[string]string) ([]PosternViewHost, []PosternViewNeed) {
+func (v PosternView) hosts(ctx context.Context, b *viewBuild, notes map[string]string) ([]PosternViewHost, []PosternViewNeed) {
 	lastSync := map[string]string{}
 	if v.Host != "" {
 		lastSync[v.Host] = ""
@@ -1630,6 +1637,7 @@ func (v PosternView) hosts(b *viewBuild, notes map[string]string) ([]PosternView
 	sort.Strings(names)
 
 	working := map[string]bool{}
+	held := map[string][]StoryDetail{}
 	for _, id := range b.order {
 		e := b.entries[id]
 		d := e.detail
@@ -1640,6 +1648,7 @@ func (v PosternView) hosts(b *viewBuild, notes map[string]string) ([]PosternView
 		frontier := strings.EqualFold(strings.TrimSpace(d.Status), StatusOpen) && len(e.waits) == 0
 		if host := d.Merged().Host; host != "" && (inProgress || frontier) {
 			working[host] = true
+			held[host] = append(held[host], d)
 		}
 	}
 
@@ -1656,9 +1665,19 @@ func (v PosternView) hosts(b *viewBuild, notes map[string]string) ([]PosternView
 		if silent <= PosternViewHostStale || !working[name] {
 			continue
 		}
+		// Not named while anything else of the host is newer than the limit
+		// either (mw-gq6.523); named, the alarm says the newest sign seen.
+		text := fmt.Sprintf("%s last synced %s, with work pathed to it", name, formatOrEmpty(at))
+		if sign := NewestSign(ctx, v.Signs, name, held[name]); sign.At.After(at) {
+			quiet := b.now.Sub(sign.At)
+			if quiet <= PosternViewHostStale {
+				continue
+			}
+			text += fmt.Sprintf(", newest sign of life %s %d min ago", withArticle(sign.What), minutes(quiet))
+		}
 		alarms = append(alarms, PosternViewNeed{
 			Kind: PosternNeedAlarm, Title: fmt.Sprintf("%s has not synced for %d min", name, minutes(silent)),
-			Since: formatOrEmpty(at), Text: fmt.Sprintf("%s last synced %s, with work pathed to it", name, formatOrEmpty(at)),
+			Since: formatOrEmpty(at), Text: text,
 			Options: []string{}, WaitsFor: PosternWaitsFactory,
 		})
 	}

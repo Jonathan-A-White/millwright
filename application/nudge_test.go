@@ -39,6 +39,10 @@ func claim(t *testing.T, tracker *apptest.FakeTracker, id string, ago time.Durat
 	if err := tracker.SetStarted(id, statusNow.Add(-ago)); err != nil {
 		t.Fatalf("backdating the claim of %s: %v", id, err)
 	}
+	// The claim's lease starts with it and is not renewed since (mw-gq6.523).
+	if err := tracker.SetLeaseExpires(id, statusNow.Add(-ago).Add(application.ClaimLease)); err != nil {
+		t.Fatalf("backdating the lease of %s: %v", id, err)
+	}
 }
 
 func TestNudgeNamesAStoryClaimedPastTheLimitWithNoMailSince(t *testing.T) {
@@ -120,7 +124,7 @@ func TestNudgeRespectsItsOwnConfiguredLimit(t *testing.T) {
 func TestNudgeNamesAHostWhoseLastSyncIsStale(t *testing.T) {
 	tracker := aTrackerPathedToVPS(t)
 	storyOn(t, tracker, "mw-gq6.30", "Something pathed to the laptop", "laptop")
-	claim(t, tracker, "mw-gq6.30", 5*time.Minute)
+	claim(t, tracker, "mw-gq6.30", 3*time.Hour)
 	syncedAt(t, tracker, "laptop", 31*time.Minute)
 
 	clauses := nudgeReport(t, tracker, application.Nudge{})
@@ -164,7 +168,7 @@ func TestNudgeCombinesAStaleStoryAndAStaleHostInOneReport(t *testing.T) {
 	storyOn(t, tracker, "mw-gq6.30", "A story that hangs here", "vps")
 	claim(t, tracker, "mw-gq6.30", 73*time.Minute)
 	storyOn(t, tracker, "mw-gq6.31", "Something pathed to the laptop", "laptop")
-	claim(t, tracker, "mw-gq6.31", 5*time.Minute)
+	claim(t, tracker, "mw-gq6.31", 3*time.Hour)
 	syncedAt(t, tracker, "laptop", 31*time.Minute)
 
 	clauses := nudgeReport(t, tracker, application.Nudge{})
@@ -217,7 +221,7 @@ func TestNudgeNamesThisHostsOwnSyncHaltInPlaceOfOtherHostsAges(t *testing.T) {
 func TestNudgeSaysNothingSpecialWhenTheMarkerHoldsNoHalt(t *testing.T) {
 	tracker := aTrackerPathedToVPS(t)
 	storyOn(t, tracker, "mw-gq6.31", "Something pathed to the laptop", "laptop")
-	claim(t, tracker, "mw-gq6.31", 5*time.Minute)
+	claim(t, tracker, "mw-gq6.31", 3*time.Hour)
 	syncedAt(t, tracker, "laptop", 29*time.Minute)
 
 	clauses := nudgeReport(t, tracker, application.Nudge{SyncHalt: apptest.NewFakeSyncHaltMarker()})
@@ -296,7 +300,7 @@ func TestNudgeSaysNothingOfABoostThatHoldsNoClaim(t *testing.T) {
 func TestNudgeNamesABoostThatHoldsAClaimAndHasGoneQuiet(t *testing.T) {
 	tracker := aTrackerPathedToVPS(t)
 	storyOn(t, tracker, "mw-gq6.30", "Claimed on the desktop", "desktop")
-	claim(t, tracker, "mw-gq6.30", 10*time.Minute)
+	claim(t, tracker, "mw-gq6.30", 3*time.Hour)
 	syncedAt(t, tracker, "desktop", 90*time.Minute)
 	home := &apptest.FakeHomeFile{Text: "laptop 2026-09-29T00:10:00Z mw@laptop"}
 
@@ -451,7 +455,7 @@ func TestNudgeLeavesTheLandedMemoryAloneWhenItReadsMayorNeeds(t *testing.T) {
 func TestNudgeStillNamesAStaleHostWhenTheMayorNeedsCannotBeRead(t *testing.T) {
 	tracker := aTrackerPathedToVPS(t)
 	storyOn(t, tracker, "mw-gq6.60", "Held by a host gone quiet", "laptop")
-	claim(t, tracker, "mw-gq6.60", 10*time.Minute)
+	claim(t, tracker, "mw-gq6.60", 3*time.Hour)
 	syncedAt(t, tracker, "laptop", 45*time.Minute)
 
 	clauses := nudgeReport(t, tracker, application.Nudge{Mayor: brokenMayor{}})

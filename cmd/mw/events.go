@@ -100,6 +100,7 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 	view := application.PosternView{
 		Tracker:    gateway,
 		Notes:      gateway,
+		Signs:      posternSigns(),
 		Host:       host,
 		Now:        posternViewClock,
 		Err:        cmd.ErrOrStderr(),

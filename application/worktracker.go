@@ -293,6 +293,11 @@ func (w WorkInHand) Elsewhere(host string) []StoryDetail {
 	return away
 }
 
+// PathedTo is every story, ready and then claimed, whose Path names this host.
+func (w WorkInHand) PathedTo(host string) []StoryDetail {
+	return append(pathedTo(w.Ready, host), pathedTo(w.Running, host)...)
+}
+
 // pathedTo narrows stories to the ones whose Path names the host.
 func pathedTo(stories []StoryDetail, host string) []StoryDetail {
 	var on []StoryDetail

@@ -253,6 +253,12 @@ type Status struct {
 	// HostSilence is how long another host's recorded sync may be behind
 	// before its work is called stranded. Zero reads DefaultHostSilence.
 	HostSilence time.Duration
+	// Signs is where another host's other signs of life are read, so that a
+	// host whose last sync is old but which has committed to the vault, or
+	// whose claimed story's lease was renewed, within HostSilence is not called
+	// asleep (mw-gq6.523). A nil Signs, or signs that cannot be read, judge a
+	// host by its sync and its claims alone.
+	Signs HostSigns
 	// RigMemoryBytes is how large the Seat's memory of one rig may be before the
 	// report says it is due to be pruned. Zero reads DefaultRigMemoryBytes.
 	RigMemoryBytes int
@@ -481,6 +487,12 @@ type HostWork struct {
 	// Silent is how long it is since LastSync, and zero when there is no
 	// LastSync to measure from.
 	Silent time.Duration
+	// Sign is the newest sign of life seen of the host besides its sync note,
+	// when it is newer than LastSync, and SignAge how long it is since: a vault
+	// commit it made, a claim, a renewed lease. Zero when there is none newer
+	// (NewestSign).
+	Sign    HostSign
+	SignAge time.Duration
 	// Halt is what that host's own sync-halted note says, read like every
 	// other note of it — which, since the note rides the very sync that is
 	// stuck, may say nothing of a halt that has not cleared yet. Nil when it
@@ -1399,7 +1411,14 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 				held.Silent = now.Sub(at)
 			}
 		}
-		held.Asleep = held.LastSync.IsZero() || held.Silent > s.hostSilence()
+		// A host is asleep on its sync age only when nothing else of it is newer
+		// than the threshold either (mw-gq6.523): a Boost syncs on its dispatch
+		// ticks, and may land and push between them.
+		if sign := NewestSign(ctx, s.Signs, host, byHost[host]); sign.At.After(held.LastSync) {
+			held.Sign, held.SignAge = sign, max(now.Sub(sign.At), 0)
+		}
+		held.Asleep = held.LastSync.IsZero() ||
+			held.Silent > s.hostSilence() && (held.Sign.At.IsZero() || held.SignAge > s.hostSilence())
 
 		haltSaid, err := notes[i].halted()
 		if err != nil {
@@ -1988,6 +2007,9 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 		clip(b, fmt.Sprintf("    last sync %s", w.LastSync.UTC().Format(LastSyncFormat)))
 	case !w.LastSync.IsZero():
 		clip(b, fmt.Sprintf("    last sync %s (a cycle behind)", w.LastSync.UTC().Format(LastSyncFormat)))
+	}
+	if !w.Sign.At.IsZero() {
+		clip(b, fmt.Sprintf("    newest sign of life %s %s ago", withArticle(w.Sign.What), Clock(w.SignAge)))
 	}
 	if w.Asleep {
 		clip(b, "    re-path: "+RepathHint+here)

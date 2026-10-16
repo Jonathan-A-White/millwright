@@ -239,6 +239,8 @@ func newDoctorCmd() *cobra.Command {
 			// The threshold is mw status's own, read here but judged by the check:
 			// a host_silent_hours this host cannot read is its to say.
 			boostAsleep := doctor.NewBoostAsleep(mwVault(vault, host), host, mwGateway(vault, host))
+			boostAsleep.Work = mwGateway(vault, host)
+			boostAsleep.Signs = mwVault(vault, host)
 			if hours, hoursErr := config.HostSilentHours(); hoursErr != nil {
 				boostAsleep.LimitErr = hoursErr
 			} else {

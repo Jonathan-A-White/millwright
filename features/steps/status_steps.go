@@ -105,6 +105,8 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 			rigMemorySet:   memorySet,
 			elsewhereWas:   map[string]string{},
 		}
+		// The tracker's leases run on the scenario's clock, not the real one.
+		c.tracker.Clock = func() time.Time { return c.now }
 		// Every status scenario reads its threshold out of the configuration,
 		// and pins it in the environment so that no scenario ever reads this
 		// machine's own config file. The value is the default the config
@@ -170,6 +172,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the builder's ledger holds a line from (today|\d{4}-\d{2}-\d{2}) burning (\d+) tokens$`,
 		c.theBuildersLedgerHoldsALineBurning)
 	ctx.Given(`^the host "([^"]*)" last synced (\d+) hours? ago$`, c.theHostLastSyncedHoursAgo)
+	ctx.Given(`^the claim on "([^"]*)" was last renewed (\d+) hours? ago$`, c.theClaimWasLastRenewedHoursAgo)
 	ctx.Given(`^the host "([^"]*)" has never synced$`, c.theHostHasNeverSynced)
 	ctx.Given(`^the host "([^"]*)" left a last sync note that is not a time$`, c.theHostLeftANoteThatIsNotATime)
 	ctx.Given(`^the configuration says a host is asleep after (\d+) hours$`, c.theConfigurationSaysAHostIsAsleepAfter)
@@ -291,6 +294,17 @@ func (c *statusContext) aStatusStoryTitledPathedToTheHost(id, title, host string
 	}
 	c.tracker.AddStory(c.lastEpic, story)
 	return nil
+}
+
+// theClaimWasLastRenewedHoursAgo is the lease of a claim last renewed that long
+// before this scenario's clock: the lease runs ClaimLease from a heartbeat, and
+// a story claimed on a host that has gone quiet has had none since.
+func (c *statusContext) theClaimWasLastRenewedHoursAgo(id, hoursText string) error {
+	hours, err := strconv.Atoi(hoursText)
+	if err != nil {
+		return fmt.Errorf("the hours %q are not a number: %w", hoursText, err)
+	}
+	return c.tracker.SetLeaseExpires(id, c.now.Add(-time.Duration(hours)*time.Hour).Add(application.ClaimLease))
 }
 
 // theHostLastSyncedHoursAgo leaves the note a host writes for itself when a
