@@ -56,8 +56,7 @@ Fakes: application/apptest/fake*.go, Fake<Port>; seatboot ports: seatboot*_test.
 | Postern{Serve,Mirror} | application/posternhand.go, application/posternmirror.go | cmd/mw/postern.go, cmd/mw/posternmirror.go | postern_serve |
 | Prompt*, Cards, Todo* | application/prompt.go, application/tododue.go, application/todosize.go, application/todorank.go | cmd/mw/prompt.go, cmd/mw/card.go, cmd/mw/todo.go | {prompt,card,todo*} |
 | Grist* | application/grist.go, application/gristtiming.go, application/gristlevel.go, application/gristgrind.go, application/gristsend.go, application/gristrequest.go, application/griststatus.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go | cmd/mw/grist.go, cmd/mw/gristsmoke.go | {grist*,scorer} |
-| Triage{Dump,Diff,Orphans} | application/triage.go | infra/beads/triage.go, cmd/mw/triage.go | - |
-| Queue | application/queue.go | cmd/mw/queue.go | - |
+| Triage*, Queue, Sleep | application/triage.go, application/queue.go, application/sleep.go, application/sleepgather.go, application/fuelkinds.go | infra/beads/triage.go, cmd/mw/triage.go, cmd/mw/queue.go, cmd/mw/sleep.go | - |
 
 cmd/mw/root.go, cmd/mw/version.go
 
