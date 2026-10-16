@@ -9,7 +9,6 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/memoryqueries"
-	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
 // newMemoryCmd builds `mw memory`: the Mayor places, replaces and retires the
@@ -20,9 +19,9 @@ func newMemoryCmd() *cobra.Command {
 		Short: "Place, replace, retire, list, query, count queries of, eval, demote and promote the facts the Builder's seat keeps of a rig",
 		Long: "A rig kept as facts has a folder in the Builder's seat, seats/builder/rigs/<rig>/, with an\n" +
 			"about.md and facts/<slug>.md, one typed fact a file. These verbs are how the Mayor changes\n" +
-			"them: each writes files, prints each file it wrote, and runs no git command (the Mayor\n" +
-			"commits). None deletes a fact: one that is replaced or retired keeps its sentence, and\n" +
-			"why. migrate turns a rig's one memory file into facts, once.",
+			"them: each writes files, prints each file it wrote, commits those files alone and pushes\n" +
+			"them (a push that does not go is said on stderr, the commit kept). None deletes a fact:\n" +
+			"one that is replaced or retired keeps its sentence, and why. migrate turns a rig's one memory file into facts, once.",
 		Args: cobra.NoArgs,
 	}
 	root.AddCommand(newMemoryAddCmd(), newMemorySupersedeCmd(), newMemoryRetireCmd(),
@@ -41,9 +40,9 @@ func memoryFor(cmd *cobra.Command) (application.Memory, error) {
 	if err != nil {
 		return application.Memory{}, err
 	}
-	files := vault.New(dir)
+	files := recordingVault(dir)
 	return application.Memory{
-		Files: files, Legacy: files, Head: files.Head, Seat: BuilderSeat, Budget: budget, Out: cmd.OutOrStdout(),
+		Files: files, Vault: files, Legacy: files, Head: files.Head, Seat: BuilderSeat, Budget: budget, Out: cmd.OutOrStdout(),
 		Queries: memoryQueryLog(), Story: os.Getenv("MW_STORY"), Warn: cmd.ErrOrStderr(),
 	}, nil
 }

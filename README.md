@@ -2455,8 +2455,10 @@ each phase (queue, scoring and each engine, harness, total) and how many runs ha
 ## Keeping a rig's facts (mw memory)
 
 The Mayor changes a rig kept as facts with these verbs, each writing files under
-`seats/builder/rigs/<rig>/facts/` and printing each file it wrote. None runs git
-(the Mayor commits and pushes) and none deletes a fact; `query`, only reads, for a
+`seats/builder/rigs/<rig>/facts/` and printing each file it wrote. Each then commits
+those files alone (not someone else's uncommitted change) as `mw memory <verb> <rig> <slug>`
+and pushes; a push that does not go is said on stderr, exit 0, the commit kept, so the
+home's dispatch never finds the vault dirty (mw-gq6.501). None deletes a fact; `query`, only reads, for a
 Builder:
 
 ```sh
@@ -2497,8 +2499,7 @@ its subject the first path-like token (a `<placeholder>` kept whole) or one-word
 token of at most 40 characters, else `general`; its since a
 date in the line, else today. A line it cannot place is printed as `not placed`
 with its line number and left out. `--dry-run` prints every fact and writes
-nothing; a real run writes `about.md` and `facts/`, removes the two files (no
-`git rm`: the Mayor commits) and prints the counts. It refuses a rig that already
+nothing; a real run writes `about.md` and `facts/`, removes the two files, commits all of it and prints the counts. It refuses a rig that already
 has a facts folder and one with no memory file. See `features/memory.feature`.
 
 `query` finds what boot does not carry, which is every fact that is not
@@ -3428,8 +3429,9 @@ Mayor weighs it) and `since`; then under `## Checked` one dated line a rig
 checked, `- <date> <rig> ok|found:<bead>`. Beside them `kinds.toml` says what
 kinds each rig is, `<rig> = ["pwa", "grind"]`. A Builder reads the register by
 need (`mw errors list`, `mw errors show <slug>`), never at boot. The Mayor keeps
-it, one writer, as he keeps rig memory; each verb writes files and prints each
-file it wrote, spends no fuel, runs no git command and files nothing:
+it, one writer, as he keeps rig memory; each verb writes files, prints each
+file it wrote, commits those files alone as `mw errors <verb> <subject>` and pushes (a push that
+does not go is said on stderr, exit 0, the commit kept), spends no fuel and files nothing:
 
 ```sh
 mw errors add <slug> --symptom "<line>" --kinds <k1,k2> [--cause "<line>"] [--sweep "<line>"] [--shared <verdict>] [--found <rig>:<bead>]
