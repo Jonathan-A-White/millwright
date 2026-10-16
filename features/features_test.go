@@ -110,6 +110,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeDispatchWindowsScenario(ctx)
 	steps.InitializeDoctorScenario(ctx)
 	steps.InitializeErrorsScenario(ctx)
+	steps.InitializeEventClockRestartScenario(ctx)
 	steps.InitializeEventFollowScenario(ctx)
 	steps.InitializeEventGristSpringScenario(ctx)
 	steps.InitializeFilePlanScenario(ctx)

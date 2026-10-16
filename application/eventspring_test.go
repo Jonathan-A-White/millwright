@@ -301,6 +301,7 @@ func TestSpringAClockJobRunsOnItsOwnClockAndOnNoEvent(t *testing.T) {
 	r := newSpringRig(t)
 	runs := 0
 	r.spring.Jobs = []application.SpringJob{application.ClockJob("mail-notify", 5*time.Minute, func(context.Context) error { runs++; return nil })}
+	r.passEnded(t, "mail-notify@laptop", events.JobDone, time.Minute)
 	r.spin(t)
 	r.append(t, beadMoved("mw-a", events.Start, events.BeadOpen))
 	r.spin(t)
@@ -508,5 +509,103 @@ func TestSpringTheBatchLandJobSaysWhichRigAndHowManyAreQueued(t *testing.T) {
 	}
 	if len(scheduled) != 1 || !strings.Contains(scheduled[0].Detail, "lampas") || !strings.Contains(scheduled[0].Detail, "2 queued") {
 		t.Fatalf("expected one scheduled event naming lampas and 2 queued, got %+v", scheduled)
+	}
+}
+
+// passEnded writes the end of a pass of actor into the log as it was ago before
+// now: the history a follower that is restarted finds.
+func (r *springRig) passEnded(t *testing.T, actor, state string, ago time.Duration) {
+	t.Helper()
+	e := events.Event{Kind: events.KindJob, Actor: actor, From: events.JobRunning, To: state, Ts: r.now.Add(-ago), Lane: events.LaneNormal}
+	if _, err := r.log.Append(context.Background(), []events.Event{e}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// clockRig is a rig whose one job is a clock job of 15 minutes, counted.
+func clockRig(t *testing.T) (*springRig, *int) {
+	t.Helper()
+	r := newSpringRig(t)
+	runs := new(int)
+	r.spring.Jobs = []application.SpringJob{application.ClockJob("beads-flush", 15*time.Minute, func(context.Context) error { *runs++; return nil })}
+	return r, runs
+}
+
+// A follower restarted after every landing must not start each clock over
+// (mw-gq6.539): the clock runs from the job's own last pass in the log.
+func TestSpringAClockJobWhoseLastPassIsOlderThanItsPeriodRunsOnTheFirstSpring(t *testing.T) {
+	r, runs := clockRig(t)
+	r.passEnded(t, "beads-flush@laptop", events.JobDone, 20*time.Minute)
+	r.spin(t)
+	r.spring.Wait()
+	if *runs != 1 {
+		t.Fatalf("the clock job ran %d times on the first Spring, want 1", *runs)
+	}
+}
+
+func TestSpringAClockJobWhoseLastPassIsRecentRunsWhenItsPeriodIsUpFromThatPass(t *testing.T) {
+	r, runs := clockRig(t)
+	r.passEnded(t, "beads-flush@laptop", events.JobDone, 5*time.Minute)
+	r.spin(t)
+	r.spring.Wait()
+	if *runs != 0 {
+		t.Fatalf("the clock job ran %d times on the first Spring, want 0", *runs)
+	}
+	r.advance(9 * time.Minute)
+	r.spin(t)
+	r.spring.Wait()
+	if *runs != 0 {
+		t.Fatalf("the clock job ran %d times 9 minutes in, want 0", *runs)
+	}
+	r.advance(time.Minute)
+	r.spin(t)
+	r.spring.Wait()
+	if *runs != 1 {
+		t.Fatalf("the clock job ran %d times 10 minutes in (15 from its pass), want 1", *runs)
+	}
+}
+
+func TestSpringAClockJobWithNoPassInTheLogRunsOnTheFirstSpring(t *testing.T) {
+	r, runs := clockRig(t)
+	r.spin(t)
+	r.spring.Wait()
+	if *runs != 1 {
+		t.Fatalf("the clock job ran %d times on the first Spring, want 1", *runs)
+	}
+}
+
+func TestSpringAClockJobTakesNoBearingsFromAnotherHostOrAnotherJob(t *testing.T) {
+	r, runs := clockRig(t)
+	r.passEnded(t, "beads-flush@desktop", events.JobDone, time.Minute)
+	r.passEnded(t, "mail-notify@laptop", events.JobDone, time.Minute)
+	r.spin(t)
+	r.spring.Wait()
+	if *runs != 1 {
+		t.Fatalf("the clock job ran %d times on the first Spring, want 1", *runs)
+	}
+}
+
+func TestSpringAClockJobWhosePassIsBeyondTheStartUpReadCountsAsDue(t *testing.T) {
+	r, runs := clockRig(t)
+	r.passEnded(t, "beads-flush@laptop", events.JobDone, time.Minute)
+	for i := 0; i < application.SpringClockLookback; i++ {
+		r.append(t, beadMoved("mw-a", events.BeadOpen, events.BeadOpen))
+	}
+	r.spin(t)
+	r.spring.Wait()
+	if *runs != 1 {
+		t.Fatalf("the clock job ran %d times on the first Spring, want 1", *runs)
+	}
+}
+
+// History springs no event-driven pass: a dispatch whose last pass is old is
+// not run at the first Spring, only at its heartbeat from then.
+func TestSpringAJobOnAnEventAndAHeartbeatKeepsItsClockFromTheStart(t *testing.T) {
+	r := newSpringRig(t)
+	r.passEnded(t, "dispatch@laptop", events.JobDone, 3*time.Hour)
+	r.spin(t)
+	r.spring.Wait()
+	if n := r.count("dispatch"); n != 0 {
+		t.Fatalf("dispatch ran %d times on the first Spring, want 0", n)
 	}
 }
