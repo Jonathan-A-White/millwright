@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 )
@@ -370,13 +371,84 @@ func TestShowBeadsLeavesOutAnIdBdHasNoRecordOfAgainstAServer(t *testing.T) {
 	}
 }
 
-func TestStoriesCommentsReadsABatchAsABdApieceTogetherAgainstAServer(t *testing.T) {
+// mw-gq6.452: against a server bd show reads its ids one round trip after
+// another inside one process (20 ids took 31 s on cloud1), and a bd show apiece
+// cost mw status 865 processes and two minutes; one bd sql reads the comments of
+// any number of beads, oldest first: a bead with none is there with none, and
+// an id bd has no record of is left out, as bd show leaves it out.
+func TestStoriesCommentsReadsABatchInOneSqlAgainstAServer(t *testing.T) {
 	t.Setenv("BEADS_DOLT_SERVER_HOST", "10.88.0.2")
-	db, ids := manyBeads(4)
+	table := `[
+	 {"k":"b","id":"mw-a.1","a":"mw-a.1","b":"","t":"","at":null},
+	 {"k":"b","id":"mw-c.3","a":"mw-c.3","b":"","t":"","at":null},
+	 {"k":"b","id":"mw-o'b.2","a":"mw-o'b.2","b":"","t":"","at":null},
+	 {"k":"c","id":"c2","a":"mw-a.1","b":"mayor","t":"second","at":"2026-10-10 21:00:00"},
+	 {"k":"c","id":"c1","a":"mw-a.1","b":"builder","t":"first","at":"2026-10-10 20:00:00"},
+	 {"k":"c","id":"c3","a":"mw-o'b.2","b":"mayor","t":"quoted","at":"2026-10-11T08:00:00Z"}
+	]`
+	gateway, log := standInSnapshot(t, "[]", table)
+
+	ids := []string{"mw-a.1", "mw-o'b.2", "mw-c.3", "mw-nobody"}
+	said, err := gateway.StoriesComments(context.Background(), ids)
+	if err != nil {
+		t.Fatalf("reading the comments: %v", err)
+	}
+	if len(said["mw-a.1"]) != 2 || said["mw-a.1"][0].Text != "first" || said["mw-a.1"][1].Text != "second" || said["mw-a.1"][0].Author != "builder" {
+		t.Errorf("expected the two comments of mw-a.1 oldest first, got %+v", said["mw-a.1"])
+	}
+	if got := said["mw-a.1"][0].Created; !got.Equal(time.Date(2026, 10, 10, 20, 0, 0, 0, time.UTC)) {
+		t.Errorf("expected the time bd sql gave, got %v", got)
+	}
+	if len(said["mw-o'b.2"]) != 1 || said["mw-o'b.2"][0].Text != "quoted" {
+		t.Errorf("expected the comment of mw-o'b.2, got %+v", said["mw-o'b.2"])
+	}
+	if none, there := said["mw-c.3"]; !there || len(none) != 0 {
+		t.Errorf("expected mw-c.3 there with no comments, got %+v (there: %v)", none, there)
+	}
+	if _, there := said["mw-nobody"]; there {
+		t.Errorf("expected mw-nobody, which bd has no record of, left out, got %+v", said)
+	}
+	calls := asked(t, log)
+	if len(calls) != 1 || !strings.Contains(calls[0], " sql ") {
+		t.Fatalf("expected one bd sql for the batch, got %v", calls)
+	}
+	for _, want := range []string{"'mw-a.1'", "'mw-o''b.2'", "'mw-c.3'", "wisp_comments"} {
+		if !strings.Contains(calls[0], want) {
+			t.Errorf("expected the query to name %s, got %s", want, calls[0])
+		}
+	}
+}
+
+// The query names each id four times and Linux takes no argument over 128 KiB,
+// so a long batch is read in queries of 400 ids at most.
+func TestStoriesCommentsReadsALongBatchInQueriesOf400(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "10.88.0.2")
+	gateway, log := standInSnapshot(t, "[]", "[]")
+	var ids []string
+	for i := range 401 {
+		ids = append(ids, fmt.Sprintf("mw-long.%d", i))
+	}
+
+	if _, err := gateway.StoriesComments(context.Background(), ids); err != nil {
+		t.Fatalf("reading the comments: %v", err)
+	}
+	calls := asked(t, log)
+	if len(calls) != 2 {
+		t.Fatalf("expected two bd sql for 401 ids, got %d", len(calls))
+	}
+	if !strings.Contains(calls[0], "'mw-long.399'") || strings.Contains(calls[0], "'mw-long.400'") || !strings.Contains(calls[1], "'mw-long.400'") {
+		t.Errorf("expected the first 400 ids in the first query and the last in the second")
+	}
+}
+
+// A server whose bd cannot answer the query is read as before, a bd show apiece.
+func TestStoriesCommentsReadsABdShowApieceWhenTheSqlFails(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "10.88.0.2")
+	db, ids := manyBeads(3)
 	for _, id := range ids {
 		db.shown[id] = fmt.Sprintf(`{"id":"%s","title":"t","status":"open","issue_type":"task","comments":[{"author":"a","text":"hello from %s","created_at":"2026-10-10T20:00:00Z"}]}`, id, id)
 	}
-	gateway, log, overlap := roundsStandIn(t, db)
+	gateway, log, _ := roundsStandIn(t, db)
 
 	said, err := gateway.StoriesComments(context.Background(), ids)
 	if err != nil {
@@ -388,10 +460,7 @@ func TestStoriesCommentsReadsABatchAsABdApieceTogetherAgainstAServer(t *testing.
 		}
 	}
 	if got := len(showsAsked(t, log)); got != len(ids) {
-		t.Errorf("expected a bd show for each of the %d beads, got %d: %v", len(ids), got, asked(t, log))
-	}
-	if _, err := os.Stat(overlap + ".show"); err != nil {
-		t.Error("expected two of the bd show to be under way at once against a server")
+		t.Errorf("expected a bd show for each of the %d beads after the sql, got %d: %v", len(ids), got, asked(t, log))
 	}
 }
 
