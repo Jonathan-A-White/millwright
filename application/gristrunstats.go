@@ -61,8 +61,8 @@ func (g GristStats) Run(ctx context.Context, kind string, last int) ([]GristStat
 	var queue, scoring, harness, total []float64
 	engines := map[string][]float64{}
 	for _, t := range timings {
-		if t.Sent != nil {
-			queue = append(queue, t.Received.Sub(*t.Sent).Seconds())
+		if queued := t.queueSeconds(); queued != nil {
+			queue = append(queue, *queued)
 		}
 		if t.ScoredAt != nil {
 			scoring = append(scoring, t.ScoringSeconds)

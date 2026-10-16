@@ -1240,7 +1240,7 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	if fuel := w.result.Fuel; fuel.Total() > 0 {
 		line.Fuel = &GrindFuel{Input: fuel.Input, Output: fuel.Output, CacheRead: fuel.CacheRead, CacheWrite: fuel.CacheWrite}
 	}
-	line.WakeSeconds = phase(w.record.Ts, w.noticed)
+	line.WakeSeconds = crossClockPhase(w.record.Ts, w.noticed)
 	line.PickupSeconds = phase(w.noticed, w.received)
 	if w.slotted {
 		line.SlotSeconds = phase(w.slotAsked, w.started)
@@ -1248,7 +1248,7 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	line.StartupSeconds, line.ModelSeconds = w.harnessPhases()
 	if delivered {
 		line.DeliverSeconds = phase(ready, deliveredAt)
-		line.TotalSeconds = phase(w.record.Ts, deliveredAt)
+		line.TotalSeconds = crossClockPhase(w.record.Ts, deliveredAt)
 	}
 	g.keepClientTiming(ctx, w, report)
 	if err := g.State.Append(ctx, line); err != nil {
