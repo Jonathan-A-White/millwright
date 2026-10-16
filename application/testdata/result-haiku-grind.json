@@ -1,0 +1,51 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 3,
+  "duration_ms": 3412,
+  "duration_api_ms": 2980,
+  "result_index": 0,
+  "stop_reason": "end_turn",
+  "terminal_reason": "completed",
+  "session_id": "0b7e2d4a-6c1f-4e8a-9d3b-2f5a7c9e1b40",
+  "total_cost_usd": 0.0181,
+  "permission_denials": [],
+  "result": "",
+  "structured_output": {"items": [], "placeName": "Top drawer"},
+  "usage": {
+    "input_tokens": 9,
+    "output_tokens": 412,
+    "cache_read_input_tokens": 12044,
+    "cache_creation_input_tokens": 2210,
+    "service_tier": "standard"
+  },
+  "modelUsage": {
+    "claude-haiku-5-5": {
+      "inputTokens": 9,
+      "outputTokens": 412,
+      "cacheReadInputTokens": 12044,
+      "cacheCreationInputTokens": 2210,
+      "webSearchRequests": 0,
+      "costUSD": 0.0172,
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "canonicalModel": "claude-haiku-5-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 31000,
+      "outputTokens": 38,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.0009,
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  }
+}
