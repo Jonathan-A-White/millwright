@@ -82,6 +82,8 @@ func InitializeReportSendScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the posted text holds QUALITY, SPEED, FUEL and CHEAP WINS in that order$`, c.postedHoldsPartsInOrder)
 	ctx.Then(`^the posted text has the line "([^"]*)"$`, c.postedHasTheLine)
 	ctx.Then(`^the posted text is at most (\d+) lines of (\d+) columns$`, c.postedIsAtMost)
+	ctx.Then(`^the posted MODELS line "([^"]*)" reads "([^"]*)"$`, c.postedModelsLineReads)
+	ctx.Then(`^the posted text has no MODELS line "([^"]*)"$`, c.postedHasNoModelsLine)
 	ctx.Then(`^the summary prints the txid "([^"]*)"$`, c.printsTheTxid)
 	ctx.Then(`^the summary says "([^"]*)"$`, c.says)
 	ctx.Then(`^the summary remembers no day$`, c.remembersNoDay)
@@ -322,4 +324,47 @@ func (c *reportSendContext) remembersNoDay() error {
 		return fmt.Errorf("expected no day remembered, got %v", got)
 	}
 	return nil
+}
+
+// postedModelsLine is the line of the posted MODELS part that names model, its
+// cells after the name with spaces between them made one.
+func (c *reportSendContext) postedModelsLine(model string) (string, bool, string, error) {
+	text, _, err := c.posted()
+	if err != nil {
+		return "", false, "", err
+	}
+	in := false
+	for _, line := range strings.Split(text, "\n") {
+		fields := strings.Fields(line)
+		switch {
+		case len(fields) > 0 && fields[0] == "MODELS":
+			in = true
+		case in && (len(fields) == 0 || !strings.HasPrefix(line, " ")):
+			in = false
+		case in && fields[0] == model:
+			return strings.Join(fields[1:], " "), true, text, nil
+		}
+	}
+	return "", false, text, nil
+}
+
+func (c *reportSendContext) postedModelsLineReads(model, want string) error {
+	got, found, text, err := c.postedModelsLine(model)
+	switch {
+	case err != nil:
+		return err
+	case !found:
+		return fmt.Errorf("expected a MODELS line for %s in the posted text:\n%s", model, text)
+	case got != want:
+		return fmt.Errorf("expected the MODELS line for %s to read %q, got %q in:\n%s", model, want, got, text)
+	}
+	return nil
+}
+
+func (c *reportSendContext) postedHasNoModelsLine(model string) error {
+	_, found, text, err := c.postedModelsLine(model)
+	if err == nil && found {
+		return fmt.Errorf("expected no MODELS line for %s in the posted text:\n%s", model, text)
+	}
+	return err
 }

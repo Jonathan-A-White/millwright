@@ -1,10 +1,13 @@
 Feature: mw report send
   mw report send builds a summary of the week from the same numbers as mw
-  report, in at most 14 lines of 60 columns, and posts it as a plain message to
+  report, in at most 19 lines of 60 columns, and posts it as a plain message to
   the Governor's Factory channel: QUALITY, SPEED, FUEL and CHEAP WINS in that
   order, each number with its arrow against the week before. It goes out from
   the home alone, at most once a UTC day, the day remembered on this host;
   --force sends again, and --dry-run prints the summary and sends nothing.
+  Before CHEAP WINS, MODELS gives a line a model, opus and sonnet always and
+  haiku and fable when they had a session: landed, first try, refused,
+  retried, $ and escaped bugs per landed story, "-" where there is nothing.
 
   Background:
     Given a summary factory whose clock reads "2026-10-11T12:00:05Z"
@@ -35,8 +38,14 @@ Feature: mw report send
     And the posted text has the line "QUALITY landed 4 ↑ better, refused 1 (20% ↑ worse)"
     And the posted text has the line "escaped bugs 0"
     And the posted text has the line "FUEL tokens/landing 1,000 ↓ better"
-    And the posted text is at most 14 lines of 60 columns
+    And the posted text is at most 19 lines of 60 columns
     And the summary prints the txid "txid-one"
+
+  Scenario: The summary carries MODELS, one line a model
+    When mw report send runs
+    Then the posted MODELS line "opus" reads "- - - - - -"
+    And the posted MODELS line "sonnet" reads "4 100% 1 0 - 0.00"
+    And the posted text has no MODELS line "haiku"
 
   Scenario: A second run on the same UTC day sends nothing and says when it sent
     Given mw report send has run

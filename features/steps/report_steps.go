@@ -88,6 +88,8 @@ func InitializeReportScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report puts QUALITY before SPEED before FUEL$`, c.partsAreInOrder)
 	ctx.Then(`^no line of the report is wider than (\d+) columns$`, c.noLineIsWiderThan)
 	ctx.Then(`^the report JSON has (\S+) as "([^"]*)"$`, c.jsonHas)
+	ctx.Then(`^the MODELS columns are "([^"]*)"$`, c.modelsColumnsAre)
+	ctx.Then(`^the MODELS line "([^"]*)" reads "([^"]*)"$`, c.modelsLineReads)
 	ctx.Then(`^the "([^"]*)" row of the landing reads "([^"]*)" before, "([^"]*)" after, change "([^"]*)"$`, c.theLandingRowReads)
 	ctx.Then(`^mw report with "([^"]*)" is refused, saying "([^"]*)"$`, c.reportIsRefused)
 }
@@ -575,7 +577,7 @@ func (c *reportContext) parts() map[string][]string {
 	found := map[string][]string{}
 	current := ""
 	for _, line := range c.lines() {
-		for _, part := range []string{"QUALITY", "SPEED", "FUEL"} {
+		for _, part := range []string{"QUALITY", "SPEED", "FUEL", "MODELS"} {
 			if line == part || strings.HasPrefix(line, part+" ") {
 				current = part
 			}
@@ -722,4 +724,50 @@ func (c *reportContext) reportIsRefused(flags, saying string) error {
 		return fmt.Errorf("mw report %s was refused saying %q, want it to say %q", flags, err, saying)
 	}
 	return nil
+}
+
+// models is the MODELS part: its heading line, then its lines up to the next
+// part, each trimmed.
+func (c *reportContext) models() ([]string, error) {
+	lines, ok := c.parts()["MODELS"]
+	if !ok {
+		return nil, fmt.Errorf("expected the report to have a MODELS part, got:\n%s", c.printed.String())
+	}
+	var found []string
+	for i, line := range lines {
+		if i > 0 && line != "" && line == strings.ToUpper(line) && !strings.HasPrefix(line, " ") && strings.ContainsAny(line, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+			break
+		}
+		found = append(found, strings.TrimSpace(line))
+	}
+	return found, nil
+}
+
+func (c *reportContext) modelsColumnsAre(want string) error {
+	lines, err := c.models()
+	if err != nil {
+		return err
+	}
+	if got := strings.Join(strings.Fields(lines[0])[1:], " "); got != want {
+		return fmt.Errorf("expected the MODELS columns %q, got %q in:\n%s", want, got, c.printed.String())
+	}
+	return nil
+}
+
+// modelsLineReads finds the MODELS line that begins with label and compares
+// the cells after it, spaces between them made one.
+func (c *reportContext) modelsLineReads(label, want string) error {
+	lines, err := c.models()
+	if err != nil {
+		return err
+	}
+	for _, line := range lines {
+		if rest, ok := strings.CutPrefix(line, label+" "); ok {
+			if got := strings.Join(strings.Fields(rest), " "); got != want {
+				return fmt.Errorf("expected the MODELS line %q to read %q, got %q in:\n%s", label, want, got, c.printed.String())
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("expected a MODELS line %q, got:\n%s", label, c.printed.String())
 }
