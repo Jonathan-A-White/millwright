@@ -579,6 +579,11 @@ type closeOut struct {
 	// a failed test run, empty when none was kept; the close-out commits it.
 	gateLog string
 
+	// harnessStop is the name of the file in the run that keeps a harness stop
+	// read from words that are not a result (HarnessStopFileName), empty when
+	// none was kept; the close-out commits it.
+	harnessStop string
+
 	// began is when the close-out began, as its mark says.
 	began time.Time
 
@@ -855,20 +860,26 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	resultName := ResultFileNameForAttempt(c.attempt())
 	resultPath := n.Vault.RunFile(c.id, resultName)
 	printed, err := n.Vault.ReadRunFile(ctx, c.id, resultName)
-	if errors.Is(err, fs.ErrNotExist) {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", err), "")
+	}
+	result, readErr := ReadSessionResult(printed)
+	if readErr != nil {
+		// A usage limit can stop the harness before it writes its JSON: what it
+		// printed instead, or its pane, still names the limit (mw-gq6.471).
+		if stop, stopped := n.harnessStopWithoutResult(ctx, c, report, printed); stopped {
+			return n.stop(ctx, c, report, stop.Reason, n.harnessStopWhy(stop), "")
+		}
+	}
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
 		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session left no result at %s, so it never started or it died before it could write one",
 			resultPath), "")
-	}
-	if err != nil {
-		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", err), "")
-	}
-	if strings.TrimSpace(printed) == "" {
+	case strings.TrimSpace(printed) == "":
 		why, said := n.emptyResult(ctx, c, resultName, resultPath)
 		return n.stop(ctx, c, report, ReasonNoResult, why, said)
-	}
-	result, err := ReadSessionResult(printed)
-	if err != nil {
-		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", err), "")
+	case readErr != nil:
+		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", readErr), "")
 	}
 	c.result, report.Result = result, result
 	if CappedAtTurns(result) {
@@ -882,9 +893,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		// claim is kept as for any stop, and mw dispatch gives it back itself
 		// once the stop's time has come, the attempt not counted (mw-gq6.434).
 		if stop, stopped := HarnessStopOf(result, sessionEnded(c.detail, result, n.now())); stopped {
-			return n.stop(ctx, c, report, stop.Reason, fmt.Sprintf(
-				"the harness stopped the session, not its work: %s. The attempt is not counted: mw dispatch on %s claims nothing new until %s, "+
-					"then gives this story back itself", stop.Said, n.Host, stop.Until.UTC().Format(time.RFC3339)), "")
+			return n.stop(ctx, c, report, stop.Reason, n.harnessStopWhy(stop), "")
 		}
 		return n.stop(ctx, c, report, ReasonSessionFailed, "the session did not finish: "+result.Trouble(), "")
 	}
@@ -1065,6 +1074,32 @@ func (n Next) emptyResult(ctx context.Context, c *closeOut, resultName, resultPa
 		said += "\n\nThe last lines of the session's pane:\n\n```\n" + tail + "\n```"
 	}
 	return why, said
+}
+
+// harnessStopWhy is why a close-out stopped for a harness stop.
+func (n Next) harnessStopWhy(stop HarnessStop) string {
+	return fmt.Sprintf("the harness stopped the session, not its work: %s. The attempt is not counted: mw dispatch on %s claims nothing new until %s, "+
+		"then gives this story back itself", stop.Said, n.Host, stop.Until.UTC().Format(time.RFC3339))
+}
+
+// harnessStopWithoutResult reads whether the harness stopped a session that
+// left no JSON at the usage limit (mw-gq6.471): from what it printed where its
+// JSON belonged, and the tail of its pane. A stop found is kept in the run
+// (HarnessStopFileName) for mw dispatch, retry and status to read once the
+// pane is gone; one that cannot be kept is a note, and the stop stands.
+func (n Next) harnessStopWithoutResult(ctx context.Context, c *closeOut, report *NextReport, printed string) (HarnessStop, bool) {
+	ended := n.now()
+	stop, stopped := HarnessStopOfWords(printed+"\n"+n.paneTail(ctx, c), ended)
+	if !stopped {
+		return HarnessStop{}, false
+	}
+	name := HarnessStopFileNameForAttempt(c.attempt())
+	if _, err := n.Vault.PutRunFile(ctx, c.id, name, HarnessStopKept(ended, stop.Said)); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the harness's stop could not be kept in the run of %s, so mw dispatch may not read it: %v", c.id, err))
+	} else {
+		c.harnessStop = name
+	}
+	return stop, true
 }
 
 // paneTail is the tail of what a story's session last printed, empty when
@@ -2661,6 +2696,12 @@ func (n Next) commit(ctx context.Context, c *closeOut, report *NextReport) {
 
 	if c.gateLog != "" {
 		if record := runFilePath(c.id, c.gateLog); record != "" {
+			paths = append(paths, record)
+		}
+	}
+
+	if c.harnessStop != "" {
+		if record := runFilePath(c.id, c.harnessStop); record != "" {
 			paths = append(paths, record)
 		}
 	}

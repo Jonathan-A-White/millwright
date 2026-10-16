@@ -175,6 +175,16 @@ Feature: mw retry
     And the stopped attempt of "mw-gq6.1" is not counted: it records 2 attempts
     And the retry holds new claims on "vps" until "2026-10-16T19:00:00Z"
 
+  Scenario: A usage-limit stop that left no result JSON is retried without counting its attempt (mw-gq6.471)
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the session of "mw-gq6.1" was stopped by the harness before it wrote a result, printing: Claude AI usage limit reached|1792155600
+    And the session of "mw-gq6.1" has ended
+    When mw retries "mw-gq6.1" at "2026-10-15T10:00:00Z"
+    Then the retry succeeds
+    And the story "mw-gq6.1" is open and unassigned
+    And the stopped attempt of "mw-gq6.1" is not counted: it records 0 attempts
+    And the retry holds new claims on "vps" until "2026-10-16T13:00:00Z"
+
   Scenario: A session the work itself failed is retried as before, its attempt counted
     Given the story "mw-gq6.1" was dispatched and worked in its own worktree
     And the session of "mw-gq6.1" ended in error, its result saying: the session ran out of fuel

@@ -63,3 +63,10 @@ claims nothing new; once it has come, a dispatch gives the stopped story back
 itself, its stopped attempt not counted, and it is started again. `mw retry` of
 such a story does not count the attempt either, and keeps the hold. The hold is
 kept in the host's note `host.<host>.harness_hold`.
+
+A usage limit can stop the harness before it writes its JSON: the close-out
+then reads the limit from what the harness printed in its place, or from the
+session's pane, and keeps the stop it read in the run (`harness-stop.txt`,
+numbered by attempt as the result is) for dispatch, `mw retry` and `mw status`.
+All of them read the limit's notice with the one reader, `HarnessStopOf` and
+`HarnessStopOfWords` (mw-gq6.471).
