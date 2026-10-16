@@ -2124,7 +2124,8 @@ grind as one of its sessions, so Builders at the cap do not stop a grind and a
 grind never takes a Builder's place. After answering, the grist's photos are
 deleted from the backend. Each grist handled adds one line to
 `grinds.jsonl` in `grist_state_dir` (default `~/.local/state/mw/grist`): time,
-txid, app, kind, sender fingerprint, model, effort, where each came from, status,
+txid, app, kind, sender fingerprint, model, the model id the harness's result
+named (`model_id`), effort, where each came from, status,
 reason, Fuel, seconds and commit, never the grist's content. A grist's `grist`
 header may carry `model` and `effort`: they replace the grind file's for that
 grist, and must be within `[grist]` `models` and `efforts`, else the grist is
