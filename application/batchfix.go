@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -39,6 +40,11 @@ type BatchFixing struct {
 	// Trouble is why it could not be started or did not end well, empty when
 	// it ran and ended.
 	Trouble string
+	// Stopped is the harness's stop for a limit of the factory's
+	// (HarnessStopOf) that ended it, or that this host was held for when it
+	// was to be started (mw-gq6.472): nil when none. It says nothing of the
+	// batch, so the batch is held until the stop's time, not judged after it.
+	Stopped *HarnessStop
 }
 
 // FixerWord is one line of a fixer's word about one story.
@@ -127,6 +133,13 @@ func (b BatchLand) fix(ctx context.Context, dir, rigDir string, settings domain.
 		return true
 	}
 
+	// A fixer started while the harness holds this host for a limit of the
+	// factory's would be stopped by it at once: none is spent on the limit.
+	if hold, held := readHarnessHold(ctx, n.Memory, n.Host); held && hold.Until.After(n.now()) {
+		f.Stopped = &hold
+		return notStarted(fmt.Sprintf("was not started: the harness holds %s for a limit of the factory's, %s, and no fixer is spent on it before then", n.Host, hold))
+	}
+
 	spec, err := n.Boot.BatchFix(ctx, BatchFixBrief{
 		Rig: report.Rig, Target: report.Target, Number: report.Number, Base: report.Base,
 		Stories: report.storiesInOrder(), Tested: report.Tested, Gate: report.Gate, Settings: settings,
@@ -150,12 +163,26 @@ func (b BatchLand) fix(ctx context.Context, dir, rigDir string, settings domain.
 		report.Notes = append(report.Notes, fmt.Sprintf("the fixer's session %s could not be closed: %v", spec.Name, err))
 	}
 	b.readFixer(ctx, f, report)
+	if stop := f.Stopped; stop != nil {
+		// Stopped by the harness, not by its work: what it left is neither
+		// tested nor judged, and the batch waits for the stop's time, when it
+		// is given a fixer afresh (mw-gq6.472).
+		if err := keepHarnessHold(ctx, n.Memory, n.Host, *stop); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf(
+				"the hold on new claims until %s could not be kept in the host's note: %v", stop.Until.UTC().Format(time.RFC3339), err))
+		}
+		report.Held = fmt.Sprintf("the harness stopped its fixer %s, not its work: %s. No fixer was spent on the batch: "+
+			"mw dispatch on %s claims nothing new until then, and the batch is tried again, given a fixer afresh, once that time has come",
+			f.Name, stop, n.Host)
+		return false
+	}
 	return b.afterFixer(ctx, dir, rigDir, report)
 }
 
 // readFixer reads the result the fixer's harness left, and its word in it. A
 // result that is missing or unreadable is trouble, not a hold: the tests on the
-// batch are the judge.
+// batch are the judge. One the harness ended for a limit of the factory's is
+// its Stopped.
 func (b BatchLand) readFixer(ctx context.Context, f *BatchFixing, report *BatchReport) {
 	printed, err := b.Next.Vault.ReadRunFile(ctx, f.Name, ResultFileName)
 	if err != nil {
@@ -171,6 +198,10 @@ func (b BatchLand) readFixer(ctx context.Context, f *BatchFixing, report *BatchR
 	f.Touched, f.Causes = ReadFixerWord(result.Said)
 	if !result.Finished() {
 		f.Trouble = result.Trouble()
+		if stop, stopped := HarnessStopOf(result, b.Next.now()); stopped {
+			f.Stopped = &stop
+			f.Trouble = "the harness stopped it, not its work: " + stop.String()
+		}
 	}
 	if record := RunRecord(f.Name); record != "" {
 		report.Records = append(report.Records, record)
@@ -313,6 +344,12 @@ func (r BatchReport) fixerMail() string {
 	fmt.Fprintf(&b, "The batch was given one fixer, %s, for %s; it ended %s", f.Name, f.Why, f.Ended.State)
 	if f.Trouble != "" {
 		fmt.Fprintf(&b, " (%s)", f.Trouble)
+	}
+	if f.Stopped != nil {
+		fmt.Fprintf(&b, ". mw did not look at the batch it left nor test it again, and it is not the batch's one fixer: the batch is held until %s, then tried again and given a fixer afresh.\n",
+			f.Stopped.Until.UTC().Format(time.RFC3339))
+		fmt.Fprintf(&b, "Its run: %s/%s/\n", RunsDir, f.Name)
+		return b.String()
 	}
 	if !r.Tested && len(r.Merged) == 0 {
 		b.WriteString(". mw looked at the batch it left: none of the branches set aside was in it, so the rig's tests were not run, and the batch is held: no second fixer is started.\n")

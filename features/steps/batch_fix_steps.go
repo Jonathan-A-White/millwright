@@ -26,6 +26,9 @@ type fakeFixer struct {
 	fix func(dir string) error
 	// touched is the story the fixer says it touched.
 	touched string
+	// stopped, when set, is the harness's word on a fixer it stopped for a
+	// limit of the factory's: the fixer does nothing, and its result says so.
+	stopped string
 
 	signed  string // the hash of the signed commit the fixer made, when it made one
 	started []application.SessionSpec
@@ -53,12 +56,15 @@ func (f *fakeFixer) Start(ctx context.Context, spec application.SessionSpec) err
 	}
 	f.present = append(f.present, present)
 
-	if err := f.fix(spec.Dir); err != nil && f.err == nil {
-		f.err = fmt.Errorf("the fake fixer: %w", err)
+	result := fmt.Sprintf(`{"type":"result","subtype":"success","is_error":true,"num_turns":1,"result":%q}`, f.stopped)
+	if f.stopped == "" {
+		if err := f.fix(spec.Dir); err != nil && f.err == nil {
+			f.err = fmt.Errorf("the fake fixer: %w", err)
+		}
+		result = fmt.Sprintf(`{"type":"result","subtype":"success","is_error":false,"num_turns":7,`+
+			`"result":"Mended the batch.\nTOUCHED %[1]s: the files it named\nCAUSE %[1]s: its change and another's did not agree",`+
+			`"modelUsage":{"claude-haiku":{"inputTokens":1200,"outputTokens":300}}}`, f.touched)
 	}
-	result := fmt.Sprintf(`{"type":"result","subtype":"success","is_error":false,"num_turns":7,`+
-		`"result":"Mended the batch.\nTOUCHED %[1]s: the files it named\nCAUSE %[1]s: its change and another's did not agree",`+
-		`"modelUsage":{"claude-haiku":{"inputTokens":1200,"outputTokens":300}}}`, f.touched)
 	if err := os.WriteFile(filepath.Join(f.vault, application.RunsDir, name, application.ResultFileName), []byte(result), 0o644); err != nil && f.err == nil {
 		f.err = fmt.Errorf("writing the fixer's result: %w", err)
 	}
@@ -86,6 +92,10 @@ func registerBatchFixSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the ledger line of "([^"]*)" says "([^"]*)", and those of the others do not:$`, c.theLedgerLineSays)
 	ctx.Then(`^metrics/factory.jsonl holds a line for batch (\d+) of the rig: (\d+) stories, (\d+) gate runs?, a fixer, outcome "([^"]*)"$`, c.theMetricsHoldAFixedBatch)
 	ctx.Then(`^the Mayor's mail about the batch says the fixer was given it and no second fixer was started$`, c.theMailSaysTheFixerWasGivenIt)
+	ctx.Given(`^mw land may start a fixer, which the harness stops saying "([^"]*)"$`, c.aFixerTheHarnessStops)
+	ctx.Then(`^the batch is held for the harness's stop of its fixer, not its work, until "([^"]*)"$`, c.theBatchIsHeldForTheHarness)
+	ctx.Then(`^this host claims nothing new until "([^"]*)"$`, c.thisHostClaimsNothingNewUntil)
+	ctx.Then(`^the fixer was started only once$`, c.theFixerWasStartedOnlyOnce)
 }
 
 // theTestsFailUntilCommitted has the rig's tests fail, saying saying, in any
@@ -413,6 +423,50 @@ func (c *nextContext) theMailSaysTheFixerWasGivenIt() error {
 		if !strings.Contains(mail[0].Body, want) {
 			return fmt.Errorf("expected the mail to say %q, got:\n%s", want, mail[0].Body)
 		}
+	}
+	return nil
+}
+
+// aFixerTheHarnessStops is a fixer the harness stops at once for a limit of the
+// factory's, saying said, before it has done anything (mw-gq6.472).
+func (c *nextContext) aFixerTheHarnessStops(said string) error {
+	c.newFixer("", func(string) error { return nil })
+	c.batch.fixer.stopped = said
+	return nil
+}
+
+// theBatchIsHeldForTheHarness reads the batch's hold: the harness's stop and
+// the time it lasts until, never the rig's tests judged on what a stopped
+// fixer left.
+func (c *nextContext) theBatchIsHeldForTheHarness(until string) error {
+	held := c.batch.report.Held
+	if held == "" || !strings.Contains(held, "harness") || !strings.Contains(held, until) {
+		return fmt.Errorf("expected the batch held for the harness's stop until %s, got %q\n%s", until, held, c.said())
+	}
+	if strings.Contains(held, "no second fixer") {
+		return fmt.Errorf("expected a hold for the harness, not a batch judged red after its fixer, got %q", held)
+	}
+	return nil
+}
+
+func (c *nextContext) thisHostClaimsNothingNewUntil(until string) error {
+	note, err := c.tracker.Note(context.Background(), application.HarnessHoldKey(nextHost))
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(note, until+" ") {
+		return fmt.Errorf("expected %s held until %s, the note says %q", nextHost, until, note)
+	}
+	return nil
+}
+
+func (c *nextContext) theFixerWasStartedOnlyOnce() error {
+	f, err := c.theFixer()
+	if err != nil {
+		return err
+	}
+	if len(f.started) != 1 {
+		return fmt.Errorf("expected the fixer started once, before the limit, got %d: %+v\n%s", len(f.started), f.started, c.said())
 	}
 	return nil
 }
