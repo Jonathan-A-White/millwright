@@ -29,8 +29,9 @@ import (
 // the alarms to the Governor, mayor-stale's, mayor-stuck's and boost-reach's, sent from their cures.
 func newDoctorCmd() *cobra.Command {
 	var dryRun bool
+	var envFile string
 	cmd := &cobra.Command{
-		Use:   "doctor [check]",
+		Use:   "doctor [check | licences]",
 		Short: "Cure this host's known faults offline, on a table of checks",
 		Long: "doctor works a table of checks, each with a probe (never changes anything), a cure (run\n" +
 			"only when the probe says faulty and the damper allows it), a damper (a minimum wait\n" +
@@ -42,12 +43,20 @@ func newDoctorCmd() *cobra.Command {
 			"It leaves with 0 when every check is ok or cured, and " + fmt.Sprint(application.DoctorFaultExit) +
 			" when any check is left faulty and uncured (damped, or its cure failed), so a timer's\n" +
 			"journal shows it. A check that says so (tmp-leftovers) is not left faulty by a damped tick\n" +
-			"held only by the wait after a cure that worked.",
+			"held only by the wait after a cure that worked.\n\n" +
+			"mw doctor licences is not a check but a read of the postern backend's environment file\n" +
+			"(--env-file, default ~/.config/postern/env): one line per licence collection, naming the\n" +
+			"app it maps to or the cockpit and the routes a key holding it opens, and a warning for a\n" +
+			"cockpit collection mapped to an app (it makes the cockpit key an app key) or one collection\n" +
+			"mapped to two apps. It spends nothing, changes nothing, and leaves with " + fmt.Sprint(application.DoctorFaultExit) + " on a warning.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := ""
 			if len(args) == 1 {
 				name = args[0]
+			}
+			if name == licencesArg {
+				return runDoctorLicences(cmd, envFile)
 			}
 
 			units, err := config.DoctorUnits()
@@ -326,7 +335,39 @@ func newDoctorCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what each faulty check would do; change nothing")
+	cmd.Flags().StringVar(&envFile, "env-file", "", "for licences: the postern backend's environment file (default ~/.config/postern/env)")
 	return cmd
+}
+
+// licencesArg is the word that makes mw doctor read the backend's licences
+// instead of working the table.
+const licencesArg = "licences"
+
+// runDoctorLicences prints the licence map of the backend's environment file
+// and leaves faulty, as a doctor does, when it warns of anything.
+func runDoctorLicences(cmd *cobra.Command, envFile string) error {
+	if envFile == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("there is no home directory to find the backend's environment file in: %w", err)
+		}
+		envFile = filepath.Join(home, ".config", "postern", "env")
+	}
+	text, err := os.ReadFile(envFile)
+	if err != nil {
+		return fmt.Errorf("reading the postern backend's environment file: %w", err)
+	}
+	licences, err := application.ParseLicenceMap(string(text))
+	if err != nil {
+		return fmt.Errorf("%s: %w", envFile, err)
+	}
+	report := licences.Report()
+	fmt.Fprint(cmd.OutOrStdout(), report)
+	if report.Faulty() {
+		cmd.SilenceErrors = true
+		return &application.DoctorFault{Line: licencesArg}
+	}
+	return nil
 }
 
 // runDoctor runs the doctor. A check left faulty and uncured is an outcome
