@@ -320,6 +320,22 @@ func TestTheBackendsOwnErrorIsWhatIsReported(t *testing.T) {
 	}
 }
 
+// mw-gq6.540: the status of the backend's refusal can be read from the error,
+// so that a use case can tell the backend's own trouble from a bad request.
+func TestTheStatusOfTheBackendsRefusalIsReadableFromTheError(t *testing.T) {
+	_, backend := serve(t, map[string]answer{
+		"POST /api/broadcast": {502, `{"error":"WhatsOnChain said 429"}`},
+	})
+
+	_, err := backend.Broadcast(context.Background(), "0100beef")
+	if status, ok := application.PosternStatusOf(fmt.Errorf("wrapped: %w", err)); !ok || status != 502 {
+		t.Fatalf("expected the status 502 read from the error, got %d, %v (%v)", status, ok, err)
+	}
+	if _, ok := application.PosternStatusOf(errors.New("plain")); ok {
+		t.Fatal("expected an error that is no refusal to have no status")
+	}
+}
+
 func TestAnUnreachableBackendIsAnError(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	url := srv.URL

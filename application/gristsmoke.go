@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -27,6 +28,10 @@ const (
 // GristSmokeWait is how long one example waits for its answer when it is not
 // told another.
 const GristSmokeWait = 5 * time.Minute
+
+// GristSmokeBackendWait is how long the smoke waits before it sends once more
+// an example the backend refused with its own trouble (gristBackendsFault).
+const GristSmokeBackendWait = 20 * time.Second
 
 // GristSmokeSender sends one grist as the smoke's test key and waits for its
 // answer. GristSend is the real one.
@@ -52,6 +57,9 @@ type GristSmoke struct {
 	// TempDir is where an example's request and photos are put to be sent;
 	// empty is the system's.
 	TempDir string
+	// Sleep is the wait before an example the backend refused is sent once
+	// more; nil waits for real.
+	Sleep func(ctx context.Context, d time.Duration) error
 	// Out is where progress is printed; nil prints nothing.
 	Out io.Writer
 }
@@ -291,6 +299,14 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 		s.say("  the mill could not grind it; sending it once more ...")
 		retried = true
 		sent, err = s.Send.Run(ctx, send)
+	} else if _, ok := gristBackendsFault(err); ok {
+		// The backend (or the chain service behind it) was in trouble when the
+		// send reached it, which says nothing of the example: sent once more
+		// after a wait, and not run if it is refused again (mw-gq6.540).
+		s.say("  the postern backend refused it; sending it once more ...")
+		if s.sleep(ctx, GristSmokeBackendWait) == nil {
+			sent, err = s.Send.Run(ctx, send)
+		}
 	}
 	if unanswered, ok := GristUnansweredIn(err); ok {
 		if unanswered.Answer == nil {
@@ -313,6 +329,9 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 	}
 	if errors.Is(err, ErrPosternUnreachable) {
 		return "", ErrPosternUnreachable.Error() + ": " + firstLine(err.Error())
+	}
+	if status, ok := gristBackendsFault(err); ok {
+		return "", fmt.Sprintf("the postern backend refused it with %d, and again when it was retried: %s", status, firstLine(err.Error()))
 	}
 	if err != nil {
 		return "it could not be sent: " + firstLine(err.Error()), ""
@@ -378,6 +397,38 @@ func gristMillsFault(err error) bool {
 		return true
 	}
 	return false
+}
+
+// gristBackendsFault says the postern backend refused a send for its own
+// trouble, and not for anything in the request: it said 429, 502, 503 or 504,
+// or another 5xx whose body names an upstream 429 (a chain service throttling
+// the backend's licence check). A refusal about the request (400, 401, 403,
+// 404) is not, and fails the example. status is the backend's.
+func gristBackendsFault(err error) (status int, ok bool) {
+	status, ok = PosternStatusOf(err)
+	if !ok {
+		return 0, false
+	}
+	switch status {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return status, true
+	}
+	return status, status >= 500 && strings.Contains(err.Error(), " 429")
+}
+
+// sleep waits d, or until ctx ends.
+func (s GristSmoke) sleep(ctx context.Context, d time.Duration) error {
+	if s.Sleep != nil {
+		return s.Sleep(ctx, d)
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s GristSmoke) say(format string, args ...any) {

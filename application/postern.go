@@ -25,6 +25,24 @@ import (
 // errors.Is, with its own words.
 var ErrPosternUnreachable = errors.New("the postern backend could not be reached")
 
+// PosternRefusal is an error of a postern backend that answered outside 2xx:
+// it carries the HTTP status, so that a use case can tell the backend's own
+// trouble (429, 502, 503, 504) from a refusal of the request.
+type PosternRefusal interface {
+	error
+	PosternStatus() int
+}
+
+// PosternStatusOf reports the HTTP status of the backend's refusal err is, or
+// wraps; ok is false when err is not one.
+func PosternStatusOf(err error) (status int, ok bool) {
+	var refusal PosternRefusal
+	if errors.As(err, &refusal) {
+		return refusal.PosternStatus(), true
+	}
+	return 0, false
+}
+
 // PosternKeyFile is where the Mayor's postern key lives on this host: a
 // generated testnet secp256k1 key, kept host-local outside the vault and its
 // backups, like .mayor-acting. Path, Exists, Generate and PublicKey are for a

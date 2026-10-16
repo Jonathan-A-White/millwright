@@ -509,6 +509,9 @@ type statusError struct {
 
 func (e *statusError) Error() string { return e.said }
 
+// PosternStatus implements application.PosternRefusal.
+func (e *statusError) PosternStatus() int { return e.code }
+
 // authHeader asks the backend for a fresh challenge nonce and signs the
 // request about to be sent with keys, reporting the caller's own public key
 // alongside the Authorization header value it built, postern's docs/api.md

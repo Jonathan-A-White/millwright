@@ -11,7 +11,9 @@ Feature: mw grist smoke tests an app's grist end to end
   its licence, the backend out of reach, the factory's usage limit) is "not
   run": it holds nothing. An example whose mill session did not finish, or
   whose grind ran out of time, is the mill's fault too: it is sent once more
-  before it fails.
+  before it fails. A send the postern backend refuses with 429, 502, 503 or 504
+  (a chain service throttling its licence check) is the backend's fault: it is
+  sent once more after a wait, and counted "not run" if refused again.
 
   Background:
     Given the app "trade-tracker" has the grind "price-check" whose answer must carry a price and a confidence
