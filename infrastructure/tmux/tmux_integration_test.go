@@ -112,10 +112,12 @@ func TestRunnerRunsACommandToItsEndInTmux(t *testing.T) {
 		t.Fatalf("expected the story id to become a tmux-legal name, got %q", name)
 	}
 
+	// It runs until the test lets it go, a minute at most, so it is still
+	// running when the test looks however slow the host (mw-gq6.440).
 	spec := application.SessionSpec{
 		Name:    name,
 		Dir:     dir,
-		Command: []string{"sh", "-c", "echo hello; sleep 1"},
+		Command: []string{"sh", "-c", `echo hello; i=0; while [ ! -e "$1" ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i + 1)); done`, "sh", filepath.Join(dir, "go")},
 	}
 	if err := runner.Start(ctx, spec); err != nil {
 		t.Fatalf("starting %s: %v", name, err)
@@ -130,6 +132,9 @@ func TestRunnerRunsACommandToItsEndInTmux(t *testing.T) {
 		t.Fatalf("expected %s to be running, got %+v", name, status)
 	}
 	waitForOutput(ctx, t, runner, name, "hello")
+	if err := os.WriteFile(filepath.Join(dir, "go"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// Waiting reports the exit, and the output survives it.
 	status, err = runner.Wait(ctx, name)

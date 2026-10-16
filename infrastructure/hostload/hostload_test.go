@@ -107,12 +107,14 @@ func TestProcSamplesTheSwapRateOverItsSampleTime(t *testing.T) {
 	if err := os.WriteFile(vmstat, []byte("nr_free_pages 1\npswpin 100\npswpout 200\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// The counters move while the sample is taken.
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		_ = os.WriteFile(vmstat, []byte("nr_free_pages 1\npswpin 1100\npswpout 200\n"), 0o600)
-	}()
-	got, err := hostload.Proc{File: load, SwapFile: vmstat, SwapSample: 200 * time.Millisecond, Cores: 4}.Load(context.Background())
+	// The counters move while the sample is taken: inside its wait, so never
+	// before or after it however slow the host (mw-gq6.440).
+	moving := func(time.Duration) {
+		if err := os.WriteFile(vmstat, []byte("nr_free_pages 1\npswpin 1100\npswpout 200\n"), 0o600); err != nil {
+			t.Error(err)
+		}
+	}
+	got, err := hostload.Proc{File: load, SwapFile: vmstat, SwapSample: 200 * time.Millisecond, Sleep: moving, Cores: 4}.Load(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

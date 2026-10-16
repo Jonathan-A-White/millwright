@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,6 +15,37 @@ import (
 )
 
 type watchKey struct{}
+
+// saidBuffer is what a watch says, written by its own goroutines while the
+// test reads it.
+type saidBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *saidBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *saidBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+// waitFor waits, ten seconds at most, until the watch has said text: what its
+// goroutines say comes when the host lets them run, so a test never sleeps a
+// fixed time for it (mw-gq6.440).
+func (s *saidBuffer) waitFor(t *testing.T, text string) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); !strings.Contains(s.String(), text); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the watch had not said %q in 10 s; it said %q", text, s.String())
+		}
+	}
+}
 
 func (watchKey) PublicKey() (string, string, error) { return "02aa", "", nil }
 
@@ -152,13 +184,14 @@ func TestGristWatchWithTheStreamOpenReadsOnlyAsABackstopInAnIdleHour(t *testing.
 func TestGristWatchPollsEverySecondWhileTheStreamIsRefusedAndSaysSoOnce(t *testing.T) {
 	postern := apptest.NewFakePostern()
 	postern.StreamErr = errors.New("403 forbidden")
-	var said bytes.Buffer
+	var said saidBuffer
 	now := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	watch := &application.GristWatch{Postern: postern, Stream: postern, Keys: watchKey{}, Now: func() time.Time { return now }, Retry: time.Millisecond, Err: &said}
 	watch.Waiting(ctx)
-	time.Sleep(50 * time.Millisecond) // several refused attempts
+	said.waitFor(t, "403 forbidden")
+	time.Sleep(50 * time.Millisecond) // several more refused attempts, to be said no more
 	for range 3 {
 		now = now.Add(time.Second)
 		watch.Waiting(ctx)
@@ -339,14 +372,18 @@ func TestGristWatchLoopReadsAtOnceWhenTheStreamSaysARecordCameWithTheBackstopAMi
 
 func TestGristWatchLoopWaitsASecondAfterAFailedReadAndSaysItOnce(t *testing.T) {
 	r := newGristSpringRig(t)
-	var said bytes.Buffer
+	var said saidBuffer
 	r.watch.Err = &said
 	r.postern.Err = errors.New("backend down")
 	r.job.Watch = r.watch.Watch
+	started := time.Now()
 	r.start(t)
+	said.waitFor(t, "backend down")
 	time.Sleep(300 * time.Millisecond)
-	if reads := r.postern.Reads(); reads > 2 {
-		t.Fatalf("a backend that is down was read %d times in 0.3 s, want a second between reads", reads)
+	// Two reads, and one more for each whole second a loaded host made of it.
+	elapsed := time.Since(started)
+	if reads, most := r.postern.Reads(), 2+int(elapsed/time.Second); reads > most {
+		t.Fatalf("a backend that is down was read %d times in %.1f s, want a second between reads", reads, elapsed.Seconds())
 	}
 	if strings.Count(said.String(), "backend down") != 1 {
 		t.Fatalf("said %q, want the failure once", said.String())
