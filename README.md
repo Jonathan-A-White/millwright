@@ -863,7 +863,8 @@ report and the mail. A command stopped at its limit is also said first in the ma
 to the Mayor, `after landing STOPPED at the limit: the site may be half-deployed`,
 because a site copied by a command cut off midway is half-deployed; a rig that ships
 a site uses `contrib/site-deploy`, which cannot leave it so (`docs/site-deploy.md`).
-A rig the table does not name runs nothing.
+A rig the table does not name runs nothing, except `millwright` on a host whose
+`[rigs]` table checks it out (see *How each host's mw is rebuilt*).
 
 A command that fails on a network fault that may pass — ssh's exit status 255, or
 a name that did not resolve, a connection refused or timed out in the tail of its
@@ -1321,7 +1322,7 @@ merged result when merging made a merge commit. No such file, no run; a failing
 run refuses the landing as `tests-fail` (`merged-tests-fail` on the merged
 result), naming the specs. A rig the table does not name lands as it always did.
 A rig `[after_landing]` does not name has nothing run after a
-landing; the table is for a host whose timers run a binary built in a rig's
+landing (but for `millwright`, below); the table is for a host whose timers run a binary built in a rig's
 checkout, which a landing leaves one commit stale until the command rebuilds it.
 The command is one line, read by `/bin/sh` in the rig's checkout like a `[tests]`
 line, and is stopped after five minutes, or after the time the rig has in
@@ -1352,6 +1353,28 @@ lock and before it syncs, so a host that dispatches and runs no Millhand tick
 keeps its `mw` level too; it prints the same `self-update:` line. A host that runs
 both ticks builds a commit once, because both keep the one built marker. The
 dispatch unit's `TimeoutStartSec` is ten minutes for the same reason.
+
+**How each host's mw is rebuilt** (mw-gq6.521). A host's `mw` is `bin/mw` of its
+own checkout of the millwright rig, linked into `~/.local/bin` by
+`scripts/install.sh`; nothing rebuilds it but the `[after_landing]` command, run by
+a landing of a millwright story on that host and by the self-update above (every
+`mw dispatch` and `mw millhand tick`). A Boost's config copies no
+`[after_landing]` table (`hosts/boost-config.toml` has none), so for a while a Boost
+kept the `mw` it was bootstrapped with: cloud1 worked a story to 145 turns,
+twenty-five past the cap that had landed the night before. The rule is now: **a
+host whose `[rigs]` table has `millwright` and whose `[after_landing]` table has no
+`millwright` key runs `make build` for it**, with the host's own Go, on a landing
+and on the self-update, so every host's `mw` follows origin's `main` within one
+dispatch tick. A host that wants none says so with `millwright = ""` (an explicit
+empty entry runs nothing); one that wants more writes its own command, as before.
+A host with no millwright checkout runs nothing.
+
+`mw sync` leaves the short commit its `mw` was built from under
+`host.<name>.mw_commit`, beside `last_sync`, and `mw status` prints it under each
+host in OTHER HOSTS, beside the sync line: `mw 243b096`, or `mw 74016ca · behind main
+(b3273a6)` when main (this host's `origin/main` of the millwright checkout, as last
+fetched) is not that commit. A host that left no commit is called behind main too:
+its `mw` is older than the note. Main unknown says nothing of any host.
 
 ## Landing a rig's stories in batches
 

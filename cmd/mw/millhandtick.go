@@ -80,7 +80,7 @@ func newMillhandTickCmd() *cobra.Command {
 			"With no [watch] table it does not consult mw watch.\n\n" +
 			"First of all, before any of that and whether or not a Millhand is up, it keeps this host's mw level\n" +
 			"with the factory rig's main, on a host whose [after_landing] table names a command for the millwright\n" +
-			"rig (README, [after_landing]): a clean checkout behind origin's main is fast-forwarded and the command\n" +
+			"rig (make build when it names none and the host checks the rig out; README, [after_landing]): a clean checkout behind origin's main is fast-forwarded and the command\n" +
 			"run in it, and the line says \"self-update: millwright <old> → <new>, built\". A dirty checkout, one on\n" +
 			"another branch or one with commits of its own is left alone, and the line says why. A build that\n" +
 			"fails keeps the old bin/mw, is said in the line, and is tried again by the next tick. A dry run\n" +
