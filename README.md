@@ -541,7 +541,17 @@ all the landings, beside the window before, with its arrow, and the target,
 invest_share` of the config, a fraction (`mw config set factory.invest_share 0.2`),
 0.33 when unset. A share under half the target or over double it adds a line
 saying so (`under half the 33% target`) and is cheap win R7. `--json` has it under
-`invest_share`, in percent like the refusal rate. Every ratio the report prints
+`invest_share`, in percent like the refusal rate. The target has bounds, also in the
+`[factory]` table of the config, as fractions with min below max:
+`invest_share_min` (0.10) and `invest_share_max` (0.33).
+`mw config set factory.invest_share` refuses a number outside them, naming both. Under
+the INVESTMENTS line the report says which bound the week calls for and why, or nothing:
+`bound: up to 33% allowed (quality falling: escaped bugs 0 -> 1)` when escaped bugs or the
+refusal rate are up on the window before (quality wins when both hold), and
+`bound: down to 10% asked (an app starving: lampas has a ready P1 untouched 24 h)` when a
+rig has a ready P1 story unclaimed and filed over 24 hours ago, or `(an app starving:
+lampas landings 9 -> 6)` when a rig's landings fell by a third or more. `--json` has them
+as `min`, `max` (percent), `bound` (`max` or `min`) and `reason`. Every ratio the report prints
 reads 0 over nothing rather than failing.
 
 SPEED is read from the close-outs' benchmarks: `par x1.1 median, x2.5 p90` is the

@@ -69,7 +69,7 @@ func newReportSendCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			share, err := config.FactoryInvestShare()
+			share, shareMin, shareMax, err := investShareSettings()
 			if err != nil {
 				return err
 			}
@@ -83,7 +83,7 @@ func newReportSendCmd() *cobra.Command {
 					Notes:       gateway,
 					Mailbox:     gateway,
 					Snapshots:   files,
-					InvestShare: share,
+					InvestShare: share, InvestShareMin: shareMin, InvestShareMax: shareMax,
 				},
 				Home: files,
 				Host: here,

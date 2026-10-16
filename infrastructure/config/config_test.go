@@ -2552,6 +2552,57 @@ func TestFactoryInvestShareIsOneInThreeUntilConfigSetChangesIt(t *testing.T) {
 	}
 }
 
+// [factory] invest_share_min and invest_share_max (mw-gordcw.3) bound the
+// investment share: a tenth and a third until the table says otherwise, min
+// below max, and mw config set refuses a share outside them.
+func TestFactoryInvestShareBoundsAreTenAndThirtyThreePercentUntilTheTableSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\n")
+	if min, max, err := config.FactoryInvestShareBounds(); err != nil || min != 0.10 || max != 0.33 {
+		t.Fatalf("expected the defaults 0.10 and 0.33, got %v and %v: %v", min, max, err)
+	}
+	writeConfig(t, "[factory]\ninvest_share_min = 0.05\ninvest_share_max = 0.5\n")
+	if min, max, err := config.FactoryInvestShareBounds(); err != nil || min != 0.05 || max != 0.5 {
+		t.Fatalf("expected the table's 0.05 and 0.5, got %v and %v: %v", min, max, err)
+	}
+	writeConfig(t, "[factory]\ninvest_share_min = 0.4\ninvest_share_max = 0.3\n")
+	_, _, err := config.FactoryInvestShareBounds()
+	if err == nil || !strings.Contains(err.Error(), "invest_share_min") || !strings.Contains(err.Error(), "invest_share_max") {
+		t.Fatalf("expected min 0.4 over max 0.3 refused naming both keys, got %v", err)
+	}
+}
+
+func TestConfigSetRefusesAnInvestShareOutsideTheBoundsNamingThem(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\n")
+	path, err := config.FilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	set := application.ConfigSet{File: configfile.New(path), Out: &out, Now: func() time.Time { return time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC) }}
+	err = set.Run(context.Background(), "factory.invest_share", "0.5", false)
+	if err == nil || !strings.Contains(err.Error(), "invest_share_min 0.1") || !strings.Contains(err.Error(), "invest_share_max 0.33") {
+		t.Fatalf("expected 0.5 refused naming both bounds, got %v", err)
+	}
+	if _, _, err := config.FactoryInvestShareBounds(); err != nil {
+		t.Fatal(err)
+	}
+	if share, _ := config.FactoryInvestShare(); share != 0.33 {
+		t.Fatalf("a refused set changed the share to %v", share)
+	}
+	if err := set.Run(context.Background(), "factory.invest_share", "0.2", false); err != nil {
+		t.Fatalf("mw config set factory.invest_share 0.2: %v", err)
+	}
+	if share, err := config.FactoryInvestShare(); err != nil || share != 0.2 {
+		t.Fatalf("expected 0.2, got %v: %v", share, err)
+	}
+	if err := set.Run(context.Background(), "factory.invest_share_max", "0.15", false); err != nil {
+		t.Fatalf("a ceiling under the share is the bounds' business, not a refusal: %v", err)
+	}
+	if err := set.Run(context.Background(), "factory.invest_share_min", "0.2", false); err == nil || !strings.Contains(err.Error(), "invest_share_max") {
+		t.Fatalf("expected min 0.2 over max 0.15 refused naming both keys, got %v", err)
+	}
+}
+
 func TestDampersAreReadFromTheTableAndLeaveTheRestZero(t *testing.T) {
 	writeConfig(t, "host = \"desktop\"\n")
 	if got, err := config.Dampers(); err != nil || got != (config.DampersSettings{}) {

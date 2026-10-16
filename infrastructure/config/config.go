@@ -132,6 +132,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // The environment variables that answer for each setting, ahead of the file.
@@ -1132,6 +1134,26 @@ func FactoryInvestShare() (float64, error) {
 		return 0, fmt.Errorf("the [%s] table of %s says invest_share = %q: it must be a fraction above 0 and at most 1, such as 0.33", FactoryTable, path, said)
 	}
 	return share, nil
+}
+
+// FactoryInvestShareBounds reports the bounds on the investment share, the
+// `invest_share_min` and `invest_share_max` keys of the [factory] table, as
+// fractions: 0.10 and 0.33 when unset. Each must be above 0 and at most 1, and
+// min below max.
+func FactoryInvestShareBounds() (min, max float64, err error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0, 0, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, FactoryTable)
+	if err != nil {
+		return 0, 0, err
+	}
+	if min, max, err = domain.InvestShareBounds(table); err != nil {
+		return 0, 0, fmt.Errorf("the [%s] table of %s says %w", FactoryTable, path, err)
+	}
+	return min, max, nil
 }
 
 // DispatchTable is the table of the config file that says how much room a host

@@ -87,6 +87,9 @@ type FactoryReport struct {
 	// InvestShare is the share of landings meant to be investments, a fraction
 	// ([factory] invest_share); 0 is DefaultInvestShare.
 	InvestShare float64
+	// InvestShareMin and InvestShareMax are the bounds on that share, fractions
+	// ([factory] invest_share_min and invest_share_max); 0 is the domain's default.
+	InvestShareMin, InvestShareMax float64
 	// JSON prints the result as one object instead of text.
 	JSON bool
 	// Notes, Mailbox and Snapshots, when all set, are what mw report send
@@ -452,7 +455,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		result.Whole = &whole[0]
 	}
 	if result.Landing == nil {
-		share := readInvestShare(result.Whole, r.InvestShare)
+		share := readInvestShare(result.Whole, result.Rigs, starvedP1Rig(stories, now, r.Rig, r.Host), r.InvestShare, r.InvestShareMin, r.InvestShareMax)
 		result.InvestShare = &share
 		result.ModelCompare = r.modelCompare(entries, escapedOfLanding(escapes))
 	}

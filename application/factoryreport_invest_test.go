@@ -22,12 +22,14 @@ type shareFactory struct {
 	files   *vault.Vault
 	now     time.Time
 	n       int
+	// rig is the rig the rows are landed in; lampas unless a test sets it.
+	rig string
 }
 
 func newShareFactory(t *testing.T) *shareFactory {
 	t.Helper()
 	return &shareFactory{t: t, tracker: apptest.NewFakeTracker(), files: vault.New(t.TempDir()),
-		now: time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)}
+		now: time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC), rig: "lampas"}
 }
 
 // rows puts landings on a day, the first invested of them labelled investment,
@@ -42,7 +44,7 @@ func (f *shareFactory) rows(day string, landed, invested, refused int) {
 	for i := 0; i < landed+refused; i++ {
 		f.n++
 		id := fmt.Sprintf("share-%d", f.n)
-		f.tracker.AddStory("", domain.Story{ID: id, Title: "Story " + id, Overrides: domain.Path{Rig: "lampas", Host: "laptop", Model: "sonnet"}})
+		f.tracker.AddStory("", domain.Story{ID: id, Title: "Story " + id, Overrides: domain.Path{Rig: f.rig, Host: "laptop", Model: "sonnet"}})
 		if err := f.tracker.SetUpdated(id, f.now); err != nil {
 			f.t.Fatal(err)
 		}
@@ -78,7 +80,7 @@ func (f *shareFactory) run(target float64, asJSON bool) (application.FactoryRepo
 func TestTheInvestmentShareIsInvestedLandingsOverAllLandingsAgainstTheTarget(t *testing.T) {
 	f := newShareFactory(t)
 	f.rows("2026-10-08", 9, 3, 2)
-	f.rows("2026-09-30", 4, 1, 0)
+	f.rows("2026-09-30", 4, 1, 1) // refusals not up on the week before, so no bound
 	result, printed := f.run(0, false)
 	share := result.InvestShare
 	if share == nil {
@@ -211,6 +213,150 @@ func TestTheReportJSONCarriesTheShareAndTheTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Share["share"] != 33.3 || got.Share["target"] != 33.0 || got.Share["invested"] != 3.0 || got.Share["landed"] != 9.0 {
+		t.Errorf("the JSON's invest_share is %v", got.Share)
+	}
+}
+
+// escapedBug files a bug of the rig on a day that names the landing share-1.
+func (f *shareFactory) escapedBug(day string) {
+	f.t.Helper()
+	at, err := time.Parse(application.LedgerDate, day)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.tracker.AddStory("", domain.Story{ID: "share-bug", Title: "[bug] it breaks after share-1 landed", Overrides: domain.Path{Rig: f.rig, Host: "laptop", Model: "sonnet"}})
+	for _, err := range []error{f.tracker.SetType("share-bug", "bug"), f.tracker.SetCreated("share-bug", at), f.tracker.SetUpdated("share-bug", f.now)} {
+		if err != nil {
+			f.t.Fatal(err)
+		}
+	}
+}
+
+// readyP1 files an open P1 story of the rig, created ago before now, claimed
+// claimedAgo before now unless that is zero.
+func (f *shareFactory) readyP1(id string, ago, claimedAgo time.Duration) {
+	f.t.Helper()
+	f.tracker.AddStory("", domain.Story{ID: id, Title: "Ready " + id, Overrides: domain.Path{Rig: f.rig, Host: "laptop", Model: "sonnet"}})
+	for _, err := range []error{f.tracker.SetPriority(id, 1), f.tracker.SetCreated(id, f.now.Add(-ago)), f.tracker.SetUpdated(id, f.now.Add(-ago))} {
+		if err != nil {
+			f.t.Fatal(err)
+		}
+	}
+	if claimedAgo > 0 {
+		at := f.now.Add(-claimedAgo).Format(time.RFC3339)
+		if err := f.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.ClaimedAtField: at}); err != nil {
+			f.t.Fatal(err)
+		}
+	}
+}
+
+func TestTheShareHasABoundAndAReasonWhenQualityIsFallingOrAnAppStarves(t *testing.T) {
+	const day = 24 * time.Hour
+	for _, c := range []struct {
+		name, bound, reason string
+		setup               func(f *shareFactory)
+	}{
+		{"nothing", "", "", func(f *shareFactory) {
+			f.rows("2026-09-30", 9, 3, 1)
+			f.rows("2026-10-08", 9, 3, 1)
+		}},
+		{"escaped bugs up", application.BoundMax, "quality falling: escaped bugs 0 -> 1", func(f *shareFactory) {
+			f.rows("2026-09-30", 9, 3, 0)
+			f.rows("2026-10-08", 9, 3, 0)
+			f.escapedBug("2026-10-08")
+		}},
+		{"refusals up", application.BoundMax, "quality falling: refusals 0% -> 20%", func(f *shareFactory) {
+			f.rows("2026-09-30", 10, 3, 0)
+			f.rows("2026-10-08", 8, 3, 2)
+		}},
+		{"landings down a third", application.BoundMin, "an app starving: lampas landings 9 -> 6", func(f *shareFactory) {
+			f.rows("2026-09-30", 9, 3, 0)
+			f.rows("2026-10-08", 6, 2, 0)
+		}},
+		{"landings down less than a third", "", "", func(f *shareFactory) {
+			f.rows("2026-09-30", 9, 3, 0)
+			f.rows("2026-10-08", 7, 2, 0)
+		}},
+		{"a ready P1 untouched", application.BoundMin, "an app starving: lampas has a ready P1 untouched 24 h", func(f *shareFactory) {
+			f.rows("2026-09-30", 9, 3, 0)
+			f.rows("2026-10-08", 9, 3, 0)
+			f.readyP1("share-p1", 3*day, 0)
+		}},
+		{"a ready P1 claimed since", "", "", func(f *shareFactory) {
+			f.rows("2026-09-30", 9, 3, 0)
+			f.rows("2026-10-08", 9, 3, 0)
+			f.readyP1("share-p1", 3*day, 2*time.Hour)
+		}},
+		{"a ready P1 filed today", "", "", func(f *shareFactory) {
+			f.rows("2026-09-30", 9, 3, 0)
+			f.rows("2026-10-08", 9, 3, 0)
+			f.readyP1("share-p1", 2*time.Hour, 0)
+		}},
+		{"quality wins over starving", application.BoundMax, "quality falling: escaped bugs 0 -> 1", func(f *shareFactory) {
+			f.rows("2026-09-30", 9, 3, 0)
+			f.rows("2026-10-08", 6, 2, 0)
+			f.escapedBug("2026-10-08")
+			f.readyP1("share-p1", 3*day, 0)
+		}},
+		{"a ready P1 before landings down", application.BoundMin, "an app starving: lampas has a ready P1 untouched 24 h", func(f *shareFactory) {
+			f.rows("2026-09-30", 9, 3, 0)
+			f.rows("2026-10-08", 6, 2, 0)
+			f.readyP1("share-p1", 3*day, 0)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newShareFactory(t)
+			c.setup(f)
+			result, printed := f.run(0, false)
+			got := result.InvestShare
+			if got.Bound != c.bound || got.Reason != c.reason {
+				t.Fatalf("the bound is %q for %q, want %q for %q", got.Bound, got.Reason, c.bound, c.reason)
+			}
+			var words string
+			switch c.bound {
+			case application.BoundMax:
+				words = "bound: up to 33% allowed (" + c.reason + ")"
+			case application.BoundMin:
+				words = "bound: down to 10% asked (" + c.reason + ")"
+			}
+			// The words wrap at the report's width; they are one sentence.
+			flat := func(text string) string { return strings.Join(strings.Fields(text), " ") }
+			if words != "" && !strings.Contains(flat(printed), "target 33% "+words+" ") {
+				t.Errorf("the INVESTMENTS line is not followed by %q:\n%s", words, printed)
+			}
+			if words != "" && !strings.Contains(flat(result.Summary()), words) {
+				t.Errorf("the phone summary lacks %q:\n%s", words, result.Summary())
+			}
+			if words == "" && (strings.Contains(printed, "bound:") || strings.Contains(result.Summary(), "bound:")) {
+				t.Errorf("a share with no bound prints one:\n%s", printed)
+			}
+			for _, line := range strings.Split(printed, "\n") {
+				if len([]rune(line)) > application.ReportWidth {
+					t.Errorf("the line %q is wider than %d columns", line, application.ReportWidth)
+				}
+			}
+		})
+	}
+}
+
+func TestTheShareBoundsAreTheConfigsAndShowInTheJSON(t *testing.T) {
+	f := newShareFactory(t)
+	f.rows("2026-09-30", 9, 3, 0)
+	f.rows("2026-10-08", 9, 3, 0)
+	f.escapedBug("2026-10-08")
+	var out strings.Builder
+	_, err := application.FactoryReport{Tracker: f.tracker, Files: f.files, Seat: "builder", InvestShareMax: 0.5, JSON: true,
+		Now: func() time.Time { return f.now }, Out: &out}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Share map[string]any `json:"invest_share"`
+	}
+	if err := json.Unmarshal([]byte(out.String()), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Share["bound"] != "max" || got.Share["max"] != 50.0 || got.Share["min"] != 10.0 || got.Share["reason"] != "quality falling: escaped bugs 0 -> 1" {
 		t.Errorf("the JSON's invest_share is %v", got.Share)
 	}
 }

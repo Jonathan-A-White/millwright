@@ -27,6 +27,8 @@ func newReportCmd() *cobra.Command {
 			"QUALITY ends with INVESTMENTS: the landings labelled investment over all the landings, the\n" +
 			"window before, the arrow and the target ([factory] invest_share, 0.33 unless set; mw config\n" +
 			"set factory.invest_share 0.2), and a line when the share is under half or over double it.\n" +
+			"Under it, a bound line when the week calls for one: up to invest_share_max (0.33) allowed while\n" +
+			"quality is falling, down to invest_share_min (0.10) asked while an app starves.\n" +
 			"The window is --since (7d by default; a number of days, a day such as 2026-10-09, or a UTC\n" +
 			"time) to now; the window of the same length before it is computed too and is in --json.\n" +
 			"After QUALITY come SPEED (the median and p90 of actual over par, the wall time from dispatch\n" +
@@ -79,7 +81,7 @@ func newReportCmd() *cobra.Command {
 					factoryDir = rigs[application.FactoryRig]
 				}
 			}
-			share, err := config.FactoryInvestShare()
+			share, shareMin, shareMax, err := investShareSettings()
 			if err != nil {
 				return err
 			}
@@ -94,11 +96,11 @@ func newReportCmd() *cobra.Command {
 				Commits:     rig.New(),
 				FactoryDir:  factoryDir,
 				Investments: files,
-				InvestShare: share,
-				Rig:         rigName,
-				Host:        host,
-				JSON:        asJSON,
-				Out:         cmd.OutOrStdout(),
+				InvestShare: share, InvestShareMin: shareMin, InvestShareMax: shareMax,
+				Rig:  rigName,
+				Host: host,
+				JSON: asJSON,
+				Out:  cmd.OutOrStdout(),
 			}.Run(cmd.Context())
 			return err
 		},
@@ -109,4 +111,16 @@ func newReportCmd() *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "", "narrow every block to this host")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the whole structure as JSON")
 	return cmd
+}
+
+// investShareSettings reads the [factory] table's investment target and the
+// bounds on it, as fractions, for mw report and mw report send.
+func investShareSettings() (share, shareMin, shareMax float64, err error) {
+	if share, err = config.FactoryInvestShare(); err != nil {
+		return 0, 0, 0, err
+	}
+	if shareMin, shareMax, err = config.FactoryInvestShareBounds(); err != nil {
+		return 0, 0, 0, err
+	}
+	return share, shareMin, shareMax, nil
 }

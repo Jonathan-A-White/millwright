@@ -39,7 +39,8 @@ type ConfigSet struct {
 // dryRun says what it would do and writes nothing. It refuses, writing nothing
 // and making no backup, a key with no table that is not a known root key, a
 // value on more than one line, a file that does not parse before or after the
-// change, and a value the key already holds.
+// change, a value the key already holds, and a [factory] value outside the
+// bounds on the investment share.
 func (c ConfigSet) Run(ctx context.Context, dotted, value string, dryRun bool) error {
 	table, key, err := domain.SplitConfigKey(dotted)
 	if err != nil {
@@ -71,6 +72,10 @@ func (c ConfigSet) Run(ctx context.Context, dotted, value string, dryRun bool) e
 	}
 	if got, ok := after.Lookup(table, key); !ok || got != literal {
 		return fmt.Errorf("setting %s to %s would not read back as that value, so nothing was changed", dotted, literal)
+	}
+
+	if err := domain.CheckFactoryChange(after, table, key); err != nil {
+		return fmt.Errorf("%w, so nothing was changed", err)
 	}
 
 	now := time.Now

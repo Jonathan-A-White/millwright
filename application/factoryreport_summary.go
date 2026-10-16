@@ -33,6 +33,9 @@ func (r FactoryReportResult) Summary() string {
 	summaryLine(&b, "  ", "", fmt.Sprintf("escaped bugs %d%s", q.EscapedBugs, whole.arrow("escaped_bugs")))
 	if r.InvestShare != nil {
 		summaryLine(&b, "  ", "", r.InvestShare.summaryText())
+		if words := r.InvestShare.boundWords(); words != "" {
+			wrapInto(&b, "    ", words)
+		}
 	}
 
 	if s.WithPar == 0 {
