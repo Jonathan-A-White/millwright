@@ -35,3 +35,33 @@ func TestARigsFilesAreFoundAsFilesDirectoriesAndGlobs(t *testing.T) {
 		}
 	}
 }
+
+func TestADirectorysFilesAreCountedUpToOnePastTheMost(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"src/a.ts", "src/b.ts", "src/c/d.ts", "src/node_modules/x.js", "src/.cache/y", ".git/HEAD", "top.md"} {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := rig.Files{}
+	for _, c := range []struct {
+		dir   string
+		most  int
+		n     int
+		isDir bool
+	}{
+		{"src", 20, 3, true},
+		{"src", 1, 2, true},
+		{"", 20, 4, true},
+		{"src/a.ts", 20, 0, false},
+		{"gone", 20, 0, false},
+	} {
+		if n, isDir := files.FilesIn(dir, c.dir, c.most); n != c.n || isDir != c.isDir {
+			t.Errorf("FilesIn(%q, %d) = %d, %v; want %d, %v", c.dir, c.most, n, isDir, c.n, c.isDir)
+		}
+	}
+}

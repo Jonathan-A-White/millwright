@@ -2,6 +2,7 @@ package apptest
 
 import (
 	"path"
+	"strings"
 	"sync"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -44,4 +45,19 @@ func (f *FakeRigFiles) Exists(rigDir, pattern string) bool {
 		}
 	}
 	return false
+}
+
+// FilesIn implements application.RigFiles: the files the checkout holds under
+// dir, counted no further than one past most; dir is a directory when it holds
+// any.
+func (f *FakeRigFiles) FilesIn(rigDir, dir string, most int) (int, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var n int
+	for name := range f.files[rigDir] {
+		if dir == "" || strings.HasPrefix(name, dir+"/") {
+			n++
+		}
+	}
+	return min(n, most+1), n > 0
 }

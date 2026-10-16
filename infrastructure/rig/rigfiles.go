@@ -1,6 +1,7 @@
 package rig
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,4 +35,32 @@ func (Files) Exists(rigDir, pattern string) bool {
 	}
 	found, err := filepath.Glob(filepath.Join(rigDir, filepath.FromSlash(pattern)))
 	return err == nil && len(found) > 0
+}
+
+// FilesIn implements application.RigFiles: the files under dir in the checkout
+// at rigDir, counted no further than one past most. What git and a package
+// manager keep there (.git and the other dot directories, node_modules) is not
+// counted: a story does not change it.
+func (Files) FilesIn(rigDir, dir string, most int) (int, bool) {
+	root := filepath.Join(rigDir, filepath.FromSlash(dir))
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		return 0, false
+	}
+	var n int
+	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			if path != root && (strings.HasPrefix(entry.Name(), ".") || entry.Name() == "node_modules") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if n++; n > most {
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return n, true
 }

@@ -11,9 +11,14 @@ import (
 
 // RigFiles is the port by which a rig's checkout on this host says whether a
 // path of its files key is there: a file, a directory, or a glob that matches
-// something. Asking changes nothing.
+// something; and how many files a directory holds. Asking changes nothing.
 type RigFiles interface {
 	Exists(rigDir, pattern string) bool
+
+	// FilesIn is how many files are under dir in the checkout at rigDir, all of
+	// it when dir is "", counted no further than one past most, and whether dir
+	// is a directory there at all (mw-gq6.442).
+	FilesIn(rigDir, dir string, most int) (int, bool)
 }
 
 // WrongRig is a story whose files key names paths that exist in none of its
