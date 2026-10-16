@@ -32,11 +32,11 @@
 | Suite{Trees,Runner,Records,History,Processes} | application/suite.go, application/suitenightly.go | {rig/{worktree,checks}.go,vault/vault.go,apartproc} |
 | Scorer, SecretStore | application/scorer.go, secrets.go | {scorer,sops} |
 
-Fakes: application/apptest/fake*.go, Fake<Port>; seatboot ports: seatboot*_test.go; gate lock, self-update, backend swap: features of those names.
+Fakes: application/apptest/fake*.go (Fake<Port>); see also seatboot*_test.go.
 
 ## Use cases
 
-| Use case | File | Command | Feature (features/*.feature) |
+| Use case | File | Command | features/*.feature |
 |-|-|-|-|
 | File, Release, Ice, Thaw, Retry, Cause, Note, Path* | application/file.go, application/release.go, application/ice.go, application/retry.go, application/cause.go, application/note.go, application/pathset.go | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/ice.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/note.go, cmd/mw/path.go | {file*,release,retry*,cause,note,path_set} |
 | Show, Peek, Prove, StampHead, Tester[File], FactoryReport[Send], Invest[Book] | application/show.go, application/stamphead.go, application/testerreport.go, application/testerfile.go, application/factoryreport.go, application/reportsend.go, application/invest.go | cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go, cmd/mw/invest.go | {show,peek,prove,stamp,tester,report*,invest} |
@@ -53,7 +53,7 @@ Fakes: application/apptest/fake*.go, Fake<Port>; seatboot ports: seatboot*_test.
 | SeatBoot{,Set}, SeatRead, Memory[Log], Errors, Init | application/seatboot.go, application/memory.go, application/memorymigrate.go, application/errors.go, application/init.go | cmd/mw/init.go, cmd/mw/memory.go, cmd/mw/errors.go, infra/memoryqueries | {seat_boot,init,memory,errors} |
 | Postern{Inbox,View,Bead,Serve,Mirror}, Digest | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go, application/posternhand.go, application/posternmirror.go, application/digest.go | cmd/mw/postern.go, cmd/mw/posternview.go, cmd/mw/posternbead.go, cmd/mw/posternmirror.go, cmd/mw/digest.go | postern_* |
 | Event* | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go | cmd/mw/events.go | event_follow |
-| Prompt*, Cards, Todo* | application/prompt.go, application/tododue.go, application/todosize.go, application/todorank.go | cmd/mw/prompt.go, cmd/mw/card.go, cmd/mw/todo.go | {prompt,card,todo*} |
+| Prompt*, Cards, Todo* | application/prompt.go, application/tododue.go, application/todosize.go, application/todorank.go, application/todosearch.go | cmd/mw/prompt.go, cmd/mw/card.go, cmd/mw/todo.go, cmd/mw/todo_search.go, infra/todoindex/index.go | {prompt,card,todo*} |
 | Grist* | application/grist.go, application/gristtiming.go, application/gristlevel.go, application/gristgrind.go, application/gristsend.go, application/gristrequest.go, application/griststatus.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go | cmd/mw/grist.go, cmd/mw/gristsmoke.go | {grist*,scorer} |
 | Triage*, Queue, Sleep | application/triage.go, application/queue.go, application/sleep.go, application/sleepgather.go, application/fuelkinds.go | infra/beads/triage.go, cmd/mw/triage.go, cmd/mw/queue.go, cmd/mw/sleep.go | - |
 

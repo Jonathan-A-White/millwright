@@ -2734,6 +2734,18 @@ week_start  = "monday"            # the weekday, in tz, the weekly Let go card i
 
 See `features/todo-rank.feature` and `features/todo-nightly.feature`.
 
+### Searching the To do board, closed cards too
+
+`mw todo search <words>` finds the cards of his To do board (beads labelled `hitl:todo`), open or closed, that
+hold every one of the words in their title, their notes (the description) or a comment, best match first, at most
+20. It prints each card's id, status and title, then the line that matched (the field it came from, then the
+words around the match). A word matches whole, whatever its case or accents; when no card holds the words it
+prints `nothing found` and exits 0. Each run first rebuilds the index from beads, as an SQLite FTS5 file
+(`~/.local/state/mw/todo-search.db`, or the file `$MW_TODO_INDEX` names) that is only a cache: delete it and the
+next search makes it again. The rebuild reads the open cards, the closed ones and their comments, and writes
+nothing to beads. An open card that is held, claimed or waiting on another is not read; the phone's own search
+record is a later slice. The design and its numbers are in `docs/research/todo-search.md`.
+
 ## The sleep pass
 
 `mw sleep pass` is the factory's night shift (mw-1ljpo9.10): one fresh agent that reads what the factory did
@@ -4785,6 +4797,8 @@ on a bundled font or data file that no credit names.
   licence, [LICENSE](https://github.com/bsv-blockchain/go-sdk/blob/HEAD/LICENSE)):
   keys, scripts and transactions for the chain stamps and the Postern key.
   Unmodified.
+- [sqlite](https://modernc.org/sqlite) (BSD 3-Clause licence, [LICENSE](https://gitlab.com/cznic/sqlite/-/blob/HEAD/LICENSE)):
+  the pure-Go SQLite driver (`modernc.org/sqlite`, no cgo) under the FTS5 index of `mw todo search`. Unmodified.
 
 ### Outside services and networks
 
