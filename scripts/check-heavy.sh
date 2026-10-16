@@ -72,6 +72,11 @@ meminfo() {
 MW_HEAVY_MEMINFO=$(meminfo 4194304)
 export MW_HEAVY_MEMINFO
 
+# Nor may this host's own beads.env: contrib/closeout_test.go holds the reading
+# of it (mw-gq6.446).
+MW_BEADS_ENV=$T/no-beads.env
+export MW_BEADS_ENV
+
 FAKE_CALLS=$T/calls
 export FAKE_CALLS
 : >"$FAKE_CALLS"

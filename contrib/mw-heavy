@@ -16,6 +16,13 @@
 # otherwise). Without systemd-run it runs the command plainly, under the same
 # lock, and says so in one line on stderr. Its exit status is the command's.
 #
+# When BEADS_DOLT_SERVER_HOST is not set and $MW_BEADS_ENV (else
+# ~/.config/mw/beads.env) is readable, the command runs with that file's
+# assignments exported, so a bd or mw it starts reaches the served database
+# even from a unit or nohup that never read the file: bd without them makes a
+# second, empty database in .beads/embeddeddolt and finds nothing
+# (mw-gq6.446). A server host already set is kept, and the file is not read.
+#
 # Settings:
 #   MW_HEAVY_LOCK          the lock file (else the mail-notify one, above)
 #   MW_HEAVY_MEMORY_MAX    systemd-run's MemoryMax    (512M, the VPS's; half of
@@ -23,6 +30,7 @@
 #   MW_HEAVY_MEMINFO       where MemTotal is read from       (/proc/meminfo)
 #   MW_HEAVY_SWAP_MAX      systemd-run's MemorySwapMax            (1G)
 #   MW_HEAVY_DRY            1: print the systemd-run line and run nothing
+#   MW_BEADS_ENV           the beads environment file (~/.config/mw/beads.env)
 
 set -u
 
@@ -75,6 +83,14 @@ if [ -z "$lock" ]; then
 	lock=$state/lock
 fi
 mkdir -p "$(dirname "$lock")" || die "cannot make $(dirname "$lock")"
+
+beads_env=${MW_BEADS_ENV:-$HOME/.config/mw/beads.env}
+if [ -z "${BEADS_DOLT_SERVER_HOST:-}" ] && [ -r "$beads_env" ]; then
+	set -a
+	# shellcheck disable=SC1090
+	. "$beads_env"
+	set +a
+fi
 
 exec 9>"$lock" || die "cannot open the lock at $lock"
 flock 9 || die "cannot take the lock at $lock"

@@ -4360,7 +4360,20 @@ command's. `MW_HEAVY_MEMORY_MAX` (default `512M`, the VPS's; half of `MemTotal` 
 (default `1G`) are the two caps; `MW_HEAVY_LOCK` overrides the lock file
 (else the same one `contrib/mail-notify` locks, above); `MW_HEAVY_DRY=1`
 prints the `systemd-run` line it would run and runs nothing. A Mayor's
-verification of a landed branch runs the rig's tests through it.
+verification of a landed branch runs the rig's tests through it. When
+`BEADS_DOLT_SERVER_HOST` is not set, it reads `~/.config/mw/beads.env` (or
+`MW_BEADS_ENV`) before the command, so a `bd` or `mw` it runs from a unit or a
+`nohup` that never read the file still reaches the served beads: `bd` without
+them makes a second, empty database in `.beads/embeddeddolt` and finds nothing.
+
+`contrib/mw-closeout <story>` starts `mw-heavy mw next <story> --no-dispatch`
+as a transient user unit (`mw-closeout-<story>`, its dots made dashes) that
+outlives the session that started it, with `EnvironmentFile=` naming
+`beads.env` and the caller's `PATH`, `MW_VAULT`, `MW_HOST`, `MW_SEAT` and
+`MW_BD_REAL` passed on. It prints the unit's name and the file its output is
+appended to (`~/.local/state/mw-closeout/<unit>.out`, or `MW_CLOSEOUT_DIR`),
+and returns at once; `systemctl --user status <unit>` follows it. A long
+close-out started by hand goes through it, never a bare `systemd-run`.
 
 `OOMScoreAdjust=500` and `MemoryMax=384M` are also set directly on
 `mw-mail-notify.service`, `mw-health.service` and `mw-doctor.service`, so a

@@ -1,0 +1,81 @@
+#!/bin/sh
+# Start a story's close-out apart from the caller, so that it outlives the
+# session or shell that started it, and carries the host's beads environment.
+# Usage:
+#
+#   mw-closeout <story>
+#
+# It starts `contrib/mw-heavy mw next <story> --no-dispatch` as a transient
+# systemd service (--user unless root), in the directory it was started from,
+# prints the unit's name and the file its output goes to, and returns at once.
+# The unit is
+#   systemd-run --quiet --collect --unit=mw-closeout-<story> --same-dir
+#     -p EnvironmentFile=-<beads.env> -p StandardOutput=append:<out>
+#     -p StandardError=inherit --setenv=PATH=<PATH> [--setenv=MW_*=...]
+#     -- <this directory>/mw-heavy mw next <story> --no-dispatch
+# A service starts with the user manager's environment, not the caller's: a
+# unit made by hand without the EnvironmentFile ran bd with no BEADS_DOLT_*,
+# so bd made a second, empty database in .beads/embeddeddolt and mw next said
+# 'no issues found matching <story>' (mw-gq6.446). The file's contents never
+# reach the command line, only its path; a missing file is skipped. PATH and
+# MW_VAULT, MW_HOST, MW_SEAT and MW_BD_REAL, when set, are passed on: a seat
+# session's PATH starts with a bd that runs `mw bd`, which finds the real bd
+# by MW_BD_REAL, and without it calls itself until no process can be forked.
+#
+# The unit's name is mw-closeout- and the story with every character but
+# letters, digits, - and _ made a -. Follow it with
+#   systemctl --user status <unit>     tail -f <out>
+# Without systemd-run it starts nothing and names the foreground command.
+#
+# Settings:
+#   MW_BEADS_ENV       the beads environment file (~/.config/mw/beads.env)
+#   MW_CLOSEOUT_DIR    where the output goes
+#                      (${XDG_STATE_HOME:-~/.local/state}/mw-closeout)
+
+set -u
+
+die() {
+	echo "mw-closeout: $*" >&2
+	exit 1
+}
+
+usage="usage: mw-closeout <story>"
+[ "$#" = 1 ] || die "$usage"
+story=$1
+case $story in
+"" | -*) die "$usage" ;;
+esac
+
+here=$(cd "$(dirname "$0")" && pwd) || die "cannot find the directory mw-closeout is in"
+heavy=$here/mw-heavy
+
+command -v systemd-run >/dev/null 2>&1 ||
+	die "systemd-run is not installed, so no unit can be started: run $heavy mw next $story --no-dispatch in the foreground instead"
+
+beads_env=${MW_BEADS_ENV:-$HOME/.config/mw/beads.env}
+out_dir=${MW_CLOSEOUT_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mw-closeout}
+unit=mw-closeout-$(printf '%s' "$story" | tr -c 'A-Za-z0-9_-' '-')
+out=$out_dir/$unit.out
+mkdir -p "$out_dir" || die "cannot make $out_dir"
+
+user_flag=""
+[ "$(id -u)" = 0 ] || user_flag="--user"
+
+# mw's own settings, when the caller has them, so the unit's mw finds the same
+# vault, host, seat and real bd as the caller's would.
+set -- --setenv=PATH="$PATH"
+for v in MW_VAULT MW_HOST MW_SEAT MW_BD_REAL; do
+	eval "val=\${$v:-}"
+	# shellcheck disable=SC2154 # val is set by the eval above
+	[ -z "$val" ] || set -- "$@" --setenv="$v=$val"
+done
+
+# shellcheck disable=SC2086 # user_flag is empty or one word
+systemd-run $user_flag --quiet --collect --unit="$unit" --same-dir \
+	-p EnvironmentFile=-"$beads_env" \
+	-p StandardOutput=append:"$out" -p StandardError=inherit \
+	"$@" -- "$heavy" mw next "$story" --no-dispatch ||
+	die "systemd-run could not start $unit, as it says above (a unit of that name may still be running: systemctl ${user_flag:+$user_flag }status $unit)"
+
+echo "unit: $unit"
+echo "output: $out"
