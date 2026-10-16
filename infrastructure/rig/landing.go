@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/gitcmd"
 )
 
 // Worktrees lands a story's work as well as cutting the worktree it was done
@@ -251,10 +252,11 @@ func (w *Worktrees) RefHead(ctx context.Context, rigDir, ref string) (string, er
 //
 // The rule goes in info/attributes, which git keeps once for a repository and
 // all of its worktrees, so it is never a tracked file of the rig's. It is
-// written only when no line of the file already says it.
+// written only when no line of the file already says it, and takes the place of
+// the union rule an older mw wrote (mw-gq6.499).
 func (w *Worktrees) UnionNotes(ctx context.Context, dir string) error {
 	if dir == "" {
-		return fmt.Errorf("setting up the union merge of CLAUDE.md: in which worktree?")
+		return fmt.Errorf("setting up the trim-safe merge of CLAUDE.md: in which worktree?")
 	}
 	said, err := w.git(ctx, dir, "rev-parse", "--git-path", "info/attributes")
 	if err != nil {
@@ -268,27 +270,47 @@ func (w *Worktrees) UnionNotes(ctx context.Context, dir string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("reading %s: %w", path, err)
 	}
-	for _, line := range strings.Split(string(kept), "\n") {
-		if strings.TrimSpace(line) == unionRule {
-			return nil
+	text := string(kept)
+	var lines []string
+	if text != "" {
+		lines = strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	}
+	var rewritten []string
+	ruled := false
+	for _, line := range lines {
+		if said := strings.Join(strings.Fields(line), " "); said == notesRule || said == unionRule {
+			if !ruled {
+				rewritten = append(rewritten, notesRule)
+				ruled = true
+			}
+			continue
 		}
+		rewritten = append(rewritten, line)
+	}
+	if !ruled {
+		rewritten = append(rewritten, notesRule)
+	}
+	next := strings.Join(rewritten, "\n") + "\n"
+	if next == text {
+		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("making the directory of %s: %w", path, err)
 	}
-	text := string(kept)
-	if text != "" && !strings.HasSuffix(text, "\n") {
-		text += "\n"
-	}
-	if err := os.WriteFile(path, []byte(text+unionRule+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil
 }
 
-// unionRule is the line UnionNotes keeps in info/attributes: two stories that
-// each append a note to the rig's CLAUDE.md both keep their lines.
-const unionRule = "CLAUDE.md merge=union"
+// notesRule is the line UnionNotes keeps in info/attributes: two stories that
+// each append a note to the rig's CLAUDE.md both keep their lines, and one that
+// trims it keeps its trim. unionRule is the line it takes the place of: union
+// brought back every line a trim took out whenever the other side appended.
+const (
+	notesRule = "CLAUDE.md merge=" + gitcmd.TrimMergeDriver
+	unionRule = "CLAUDE.md merge=union"
+)
 
 // Merge implements application.Landing. A merge that conflicts is undone before
 // the error comes back: mw resolves nothing for anybody, and a landing worktree
@@ -299,9 +321,11 @@ func (w *Worktrees) Merge(ctx context.Context, landingDir, branch string) (appli
 
 // MergeUnion implements application.Landing. Only when every file the merge
 // conflicts in is one union lists (a path relative to the rig, or a path.Match
-// glob) is any of them resolved: each by git merge-file --union, so that the
-// attributes of the rig, which are shared by all its worktrees, are never
-// touched. A conflict in one file more is the whole merge undone, as in Merge.
+// glob) is any of them resolved: each by mw's trim-safe driver run on its three
+// versions, so that the attributes of the rig, which are shared by all its
+// worktrees, are never touched. A conflict in one file more is the whole merge
+// undone, as in Merge. Never by git merge-file --union: it kept both sides of
+// every hunk, so a trim got back what it took out (mw-gq6.499).
 func (w *Worktrees) MergeUnion(ctx context.Context, landingDir, branch string, union []string) (application.Landed, error) {
 	if branch == "" {
 		return application.Landed{}, fmt.Errorf("merging into %s: which branch?", landingDir)
@@ -315,11 +339,17 @@ func (w *Worktrees) MergeUnion(ctx context.Context, landingDir, branch string, u
 		return application.Landed{}, err
 	}
 
+	driver, err := gitcmd.WriteMergeDriver(w.mergeScript)
+	if err != nil {
+		return application.Landed{}, err
+	}
+	defer driver.Remove()
+
 	var unioned []string
 	// --no-edit so that no editor is ever opened: nobody is at the keyboard.
-	merge := append(mergeDrivers(landingDir), "merge", "--no-edit", branch)
+	merge := append(driver.Config(), "merge", "--no-edit", branch)
 	if _, err := w.git(ctx, landingDir, merge...); err != nil {
-		unioned, err = w.unionConflicts(ctx, landingDir, branch, union, err)
+		unioned, err = w.unionConflicts(ctx, landingDir, driver, union, err)
 		if err != nil {
 			if _, abort := w.git(ctx, landingDir, "merge", "--abort"); abort != nil {
 				return application.Landed{}, fmt.Errorf("%w: %v (and the half-made merge in %s could not be undone: %v)",
@@ -344,34 +374,13 @@ func (w *Worktrees) MergeUnion(ctx context.Context, landingDir, branch string, u
 	}, nil
 }
 
-// codemapDriver is the merge driver a rig's .gitattributes names for a file
-// merged by codemapScript, the rig's own script: millwright's docs/codemap.md
-// (mw-gq6.495). Union brings back every row a trim shortened whenever the
-// other side added one; the script keeps the trim and the added rows.
-const (
-	codemapDriver = "codemap"
-	codemapScript = "scripts/codemap-merge.sh"
-)
-
-// mergeDrivers is the -c that defines the codemap driver for one merge in dir,
-// when dir holds the script: every host that lands gets it with no git config
-// edited. A file named merge=codemap where the script is missing gets git's
-// text merge, whose conflict unionConflicts refuses to settle by union.
-func mergeDrivers(dir string) []string {
-	script := filepath.Join(dir, filepath.FromSlash(codemapScript))
-	if _, err := os.Stat(script); err != nil {
-		return nil
-	}
-	quoted := "'" + strings.ReplaceAll(script, "'", `'\''`) + "'"
-	return []string{"-c", "merge." + codemapDriver + ".driver=sh " + quoted + " %O %A %B"}
-}
-
 // unionConflicts settles a merge that has stopped on conflicts, if all of them
-// are in files union lists, and commits it; it reports the files it settled. When
-// it cannot, it returns an error saying why, with the merge left as it stopped
-// for the caller to undo; stopped is git's own refusal, which it returns when no
-// file is conflicted at all (a merge that failed for another reason).
-func (w *Worktrees) unionConflicts(ctx context.Context, dir, branch string, union []string, stopped error) ([]string, error) {
+// are in files union lists, by driver, and commits it; it reports the files it
+// settled. When it cannot, it returns an error saying why, with the merge left
+// as it stopped for the caller to undo; stopped is git's own refusal, which it
+// returns when no file is conflicted at all (a merge that failed for another
+// reason).
+func (w *Worktrees) unionConflicts(ctx context.Context, dir string, driver *gitcmd.MergeDriver, union []string, stopped error) ([]string, error) {
 	said, err := w.git(ctx, dir, "diff", "--name-only", "--diff-filter=U", "-z")
 	if err != nil || len(union) == 0 {
 		return nil, stopped
@@ -386,25 +395,28 @@ func (w *Worktrees) unionConflicts(ctx context.Context, dir, branch string, unio
 		return nil, stopped
 	}
 	for _, file := range files {
+		// git's merge already ran the driver on a file named with it, and the
+		// driver could not settle it: running it again would say the same.
+		if attr, err := w.git(ctx, dir, "check-attr", "merge", "--", file); err == nil {
+			if _, value, _ := strings.Cut(strings.TrimSpace(attr), ": merge: "); gitcmd.IsTrimMerge(value) {
+				return nil, fmt.Errorf("%w (%s is merged by mw's trim-safe driver, merge=%s, which could not settle it; union would bring back every line a trim took out)",
+					stopped, file, value)
+			}
+		}
 		if !listed(union, file) {
 			return nil, fmt.Errorf("%w (%s is in conflict and the rig does not list it to be merged by union)", stopped, file)
-		}
-		// Union is what the driver is there to keep away from the file.
-		if attr, err := w.git(ctx, dir, "check-attr", "merge", "--", file); err == nil && strings.HasSuffix(strings.TrimSpace(attr), ": "+codemapDriver) {
-			return nil, fmt.Errorf("%w (%s is merged by its %s driver, %s, which could not settle it; union would bring back every row a trim took out)",
-				stopped, file, codemapDriver, codemapScript)
 		}
 	}
 	scratch, err := os.MkdirTemp("", "mw-union-")
 	if err != nil {
-		return nil, fmt.Errorf("%w (and a place to merge %s by union could not be made: %v)", stopped, strings.Join(files, ", "), err)
+		return nil, fmt.Errorf("%w (and a place to merge %s could not be made: %v)", stopped, strings.Join(files, ", "), err)
 	}
 	defer os.RemoveAll(scratch)
 	merged := make(map[string]string, len(files))
 	for _, file := range files {
-		text, err := w.unionOf(ctx, dir, scratch, file)
+		text, err := w.trimMergeOf(ctx, dir, scratch, driver, file)
 		if err != nil {
-			return nil, fmt.Errorf("%w (%s is listed to be merged by union, but could not be: %v)", stopped, file, err)
+			return nil, fmt.Errorf("%w (%s is listed in union_merge_files, but could not be merged: %v)", stopped, file, err)
 		}
 		merged[file] = text
 	}
@@ -422,12 +434,12 @@ func (w *Worktrees) unionConflicts(ctx context.Context, dir, branch string, unio
 	return files, nil
 }
 
-// unionOf is the file as git merge-file --union makes it of the two sides of a
-// conflict and their common ancestor, which is empty when both sides added the
-// file. A side that deleted it is no union.
-func (w *Worktrees) unionOf(ctx context.Context, dir, scratch, file string) (string, error) {
+// trimMergeOf is the file as driver merges it of the two sides of a conflict
+// and their common ancestor, which is empty when both sides added the file. A
+// side that deleted it is no merge.
+func (w *Worktrees) trimMergeOf(ctx context.Context, dir, scratch string, driver *gitcmd.MergeDriver, file string) (string, error) {
 	var sides [3]string
-	for i, stage := range []string{"2", "1", "3"} { // ours, the base, theirs
+	for i, stage := range []string{"1", "2", "3"} { // the base, ours, theirs
 		text, err := w.git(ctx, dir, "show", ":"+stage+":"+file)
 		if err != nil && stage != "1" {
 			return "", fmt.Errorf("one side deleted it")
@@ -437,7 +449,12 @@ func (w *Worktrees) unionOf(ctx context.Context, dir, scratch, file string) (str
 			return "", err
 		}
 	}
-	return w.git(ctx, dir, "merge-file", "--union", "-p", sides[0], sides[1], sides[2])
+	if err := driver.Merge(ctx, dir, sides[0], sides[1], sides[2]); err != nil {
+		return "", fmt.Errorf("mw's trim-safe driver, merge=%s, could not settle it (%v); union would bring back every line a trim took out",
+			gitcmd.TrimMergeDriver, err)
+	}
+	merged, err := os.ReadFile(sides[1])
+	return string(merged), err
 }
 
 // listed reports whether file is one of the paths or globs union lists.

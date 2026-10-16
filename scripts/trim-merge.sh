@@ -1,7 +1,11 @@
 #!/bin/sh
-# codemap-merge.sh BASE OURS THEIRS: git's merge driver for docs/codemap.md
-# (.gitattributes names it merge=codemap; mw passes merge.codemap.driver on
-# every merge it makes, so no host's git config is edited; mw-gq6.495).
+# trim-merge.sh BASE OURS THEIRS: mw's trim-safe merge driver, built into mw
+# (millwright.TrimMergeScript) and written to a temporary file for each merge
+# mw makes, which passes it as -c merge.trimsafe.driver (and merge.codemap,
+# the name millwright's docs/codemap.md has had since mw-gq6.495), so no host's
+# git config is edited. It merges every file mw once merged by union: a rig's
+# CLAUDE.md, the files a rig lists in union_merge_files, and whatever a
+# .gitattributes names merge=trimsafe, as the vault's rig memories (mw-gq6.499).
 #
 # The result, written over OURS as git asks, is git's own three-way merge where
 # the two sides changed different lines. Where both changed the same lines,
@@ -29,7 +33,7 @@ if [ "$status" -eq 0 ]; then
 	exit 0
 fi
 if [ "$status" -gt 127 ]; then
-	echo "codemap-merge: git merge-file failed (exit $status)" >&2
+	echo "trim-merge: git merge-file failed (exit $status)" >&2
 	exit 1
 fi
 
@@ -108,7 +112,7 @@ part == "t" { T[++nt] = $0; next }
 { print }
 END { if (part != "") exit 2 }
 ' "$marked" >"$merged" || {
-	echo "codemap-merge: could not settle the conflicts git found" >&2
+	echo "trim-merge: could not settle the conflicts git found" >&2
 	exit 1
 }
 cat "$merged" >"$ours"

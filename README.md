@@ -4628,22 +4628,28 @@ A rig's file may list files that every story appends a line to and no story care
 order (a `CLAUDE.md` of notes, `ATTRIBUTION.md`, `docs/module-map.md`):
 `union_merge_files = ["ATTRIBUTION.md", "docs/*.md"]` (paths inside the rig, or
 `path.Match` globs). When the landing's merge conflicts *only* in listed files,
-`mw next` keeps both sides' lines of each (`git merge-file --union`, nothing written to
-the rig's attributes), commits the merge, and runs the gate on the merged result as for
-any merge commit; the Landed mail says `union-merged: <files>`. A conflict in one file
-that is not listed, or a listed file one side deleted, is the whole merge undone and the
-story sent back to rebase as before. A rig without the key lands as it always did. Set
-the key only once no older `mw next` runs on any host: an older one only notes that it
-does not know the key, and sends the story back.
+`mw next` settles each by its trim-safe merge driver (nothing written to the rig's
+attributes), commits the merge, and runs the gate on the merged result as for any merge
+commit; the Landed mail says `trim-merged: <files>`. A conflict in one file that is not
+listed, a listed file one side deleted, or one the driver cannot settle, is the whole
+merge undone and the story sent back to rebase as before. A rig without the key lands as
+it always did. Set the key only once no older `mw next` runs on any host: an older one
+only notes that it does not know the key, and sends the story back.
 
-Union keeps both sides of every hunk both changed, so a story that trims rows gets the
-old rows back whenever the other side added one. millwright's own `docs/codemap.md` is
-therefore named `merge=codemap` in `.gitattributes`, and every merge `mw` makes passes
-`-c merge.codemap.driver=sh <worktree>/scripts/codemap-merge.sh %O %A %B` itself, so no
-host's git config is edited: the result keeps each side's trims and removals, adds the
-rows the other side added, and a row both edited takes ours. A merge made by hand, with
-no such config, gets git's text merge, which stops on a conflict; a landing never settles
-a `merge=codemap` file by union, even when the rig lists it (mw-gq6.495).
+The driver is `scripts/trim-merge.sh`, built into `mw`: where the two sides changed
+different lines it is git's own three-way merge; in a hunk both changed, a line the other
+side removed since the base stays removed, the lines either side added are kept, and a
+table row both edited takes ours. `git merge-file --union`, which keeps both sides of
+every hunk, brought back every line a trim took out whenever the other side had appended
+(mw-gq6.495, mw-gq6.499). Every merge and rebase `mw` makes, in a rig or in the vault,
+writes the driver to a temporary file and passes `-c merge.trimsafe.driver=sh <file> %O %A
+%B` (and the same as `merge.codemap.driver`), so no host's git config is edited. A file
+is named with it by `merge=trimsafe` in a `.gitattributes` (the vault's rig memories),
+by the `CLAUDE.md merge=trimsafe` line `mw` keeps in a rig's `.git/info/attributes`
+(rewriting the `CLAUDE.md merge=union` an older `mw` wrote there), or, for millwright's
+own `docs/codemap.md`, `merge=codemap`. A merge made by hand, with no such config, gets
+git's text merge, which stops on a conflict; a landing never settles a file named with
+the driver by union, even when the rig lists it.
 
 ### The changelog a landing writes
 

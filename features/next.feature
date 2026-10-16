@@ -515,7 +515,7 @@ Feature: Closing out a finished story and carrying on
     And the run of "mw-gq6.1" holds a landing error with every line the origin said
     And the landing error of "mw-gq6.1" says it was tried 4 times
 
-  Scenario: A branch that conflicts only in a file the rig lists is merged by union, tested together, and lands
+  Scenario: A branch that conflicts only in a file the rig lists is merged by the trim-safe driver, tested together, and lands
     Given the rig's file in the vault lists "ATTRIBUTION.md" to be merged by union
     And the other host landed the file "ATTRIBUTION.md" holding "the other host credits this" on "main"
     And "mw-gq6.1" wrote the file "ATTRIBUTION.md" holding "the story credits that"
@@ -527,7 +527,7 @@ Feature: Closing out a finished story and carrying on
     And the rig's tests were run 2 times
     And the story "mw-gq6.1" is closed
     And that mail's body holds:
-      | union-merged: ATTRIBUTION.md |
+      | trim-merged: ATTRIBUTION.md |
 
   Scenario: A branch that conflicts in a file the rig does not list is sent back as before
     Given the rig's file in the vault lists "CLAUDE.md" to be merged by union

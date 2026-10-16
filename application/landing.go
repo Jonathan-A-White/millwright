@@ -45,9 +45,10 @@ type Landed struct {
 	FastForward bool
 	Before      string
 	Version     string
-	// Unioned are the files the merge conflicted in and kept both sides' lines
-	// of, because the rig lists them (union_merge_files): empty for a merge that
-	// had no conflict.
+	// Unioned are the files the merge conflicted in that the rig lists
+	// (union_merge_files) and mw's trim-safe driver settled: each side's added
+	// lines kept, and each side's removed ones left out (mw-gq6.499). Empty for
+	// a merge that had no conflict.
 	Unioned []string
 }
 
@@ -154,9 +155,11 @@ type Landing interface {
 	RefHead(ctx context.Context, rigDir, ref string) (string, error)
 
 	// UnionNotes makes the repository the worktree at dir belongs to merge
-	// CLAUDE.md as a union (`CLAUDE.md merge=union` in its info/attributes),
-	// so that two stories appending lines to it merge, and rebase, without a
-	// conflict. Nothing tracked changes, and doing it again changes nothing.
+	// CLAUDE.md by mw's trim-safe driver (`CLAUDE.md merge=trimsafe` in its
+	// info/attributes, in place of the `CLAUDE.md merge=union` an older mw
+	// wrote), so that two stories appending lines to it merge, and rebase,
+	// without a conflict, and one that trims it keeps its trim (mw-gq6.499).
+	// Nothing tracked changes, and doing it again changes nothing.
 	// OpenLanding does the same for every landing it opens.
 	UnionNotes(ctx context.Context, dir string) error
 
@@ -166,9 +169,10 @@ type Landing interface {
 	Merge(ctx context.Context, landingDir, branch string) (Landed, error)
 
 	// MergeUnion is Merge for a rig that lists files whose conflicts are settled
-	// by union (mw-gq6.424): when the merge conflicts in files that all match
-	// one of union's paths or globs, each is resolved by keeping both sides'
-	// lines, the merge is committed, and Unioned names them. A conflict in any
+	// (mw-gq6.424): when the merge conflicts in files that all match one of
+	// union's paths or globs, each is resolved by mw's trim-safe driver, never
+	// git's union (mw-gq6.499), the merge is committed, and Unioned names them.
+	// A file the driver cannot settle is a conflict as well. A conflict in any
 	// other file as well is undone exactly as Merge undoes it, none of the
 	// listed files merged. Nothing is written to the rig's attributes.
 	MergeUnion(ctx context.Context, landingDir, branch string, union []string) (Landed, error)
