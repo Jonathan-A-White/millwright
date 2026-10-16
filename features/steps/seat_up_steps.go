@@ -100,6 +100,7 @@ func InitializeSeatUpScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the window "([^"]*)" was opened at "([^"]*)"$`, c.theWindowWasOpenedAt)
 	ctx.Given(`^the "([^"]*)" seat's acting file names that window$`, c.theActingFileNamesThatWindow)
 	ctx.Given(`^the "([^"]*)" seat's acting file names the window "([^"]*)"$`, c.theActingFileNamesTheWindow)
+	ctx.Given(`^the "([^"]*)" seat's acting file says "([^"]*)"$`, c.theSeatsActingFileSays)
 	ctx.Given(`^the newest handoff was written at "([^"]*)"$`, c.theNewestHandoffWasWrittenAt)
 	ctx.Given(`^the "([^"]*)" seat's newest handoff was written at "([^"]*)"$`, c.theSeatsNewestHandoffWasWrittenAt)
 
@@ -130,6 +131,7 @@ func InitializeSeatUpScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the seat's session was started all the same$`, c.theSessionWasStartedAllTheSame)
 	ctx.Then(`^seat up says the window will close itself once its successor has the seat$`, c.seatUpSays("will close itself once the successor has the seat"))
 	ctx.Then(`^seat up says the new window will close itself once it is idle after a handoff$`, c.seatUpSays("will close itself once it is idle after a handoff"))
+	ctx.Then(`^seat up says "([^"]*)"$`, func(words string) error { return c.seatUpSays(words)() })
 	ctx.Then(`^seat up fails saying the reaper could not be armed$`, c.seatUpFailsForTheReaper)
 	ctx.Then(`^seat up is refused saying the seat has no charter$`, c.refusedForNoCharter)
 	ctx.Then(`^seat up is refused saying the seat has no handoff$`, c.refusedForNoHandoff)
@@ -245,6 +247,10 @@ func (c *seatUpContext) theActingFileNamesThatWindow(seat string) error {
 func (c *seatUpContext) theActingFileNamesTheWindow(seat, window string) error {
 	acting := fmt.Sprintf("%s after handoff 02 (tmux window 3 '%s'), since 2026-09-19T08:00:00Z\n", seat, window)
 	return c.writeSeatFile(acting, application.ActingFileName(seat))
+}
+
+func (c *seatUpContext) theSeatsActingFileSays(seat, acting string) error {
+	return c.writeSeatFile(acting+"\n", application.ActingFileName(seat))
 }
 
 func (c *seatUpContext) theNewestHandoffWasWrittenAt(when string) error {

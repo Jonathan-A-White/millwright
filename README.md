@@ -3402,12 +3402,13 @@ was opened. The acting file (`.<seat>-acting` in the vault, host-local and
 untracked) is never written by `mw`: the new session writes it at boot, and
 that is the hand-over signal.
 
-Run from a tmux window the acting file names, it also arms the reaper below on
-that window, so the outgoing session's window closes itself once the
+Run from a tmux window of the seat's (named `<seat>-…`) that the acting file
+names, it also arms the reaper below on that window, so the outgoing session's window closes itself once the
 successor has the seat. `--reap-when-idle` arms one in idle mode on the window
 it opens, for a session that will hand over to nobody — the Millhand's wake.
 Neither is armed when `mw` runs outside tmux or from a window the acting file
-does not name. `$MW_TMUX_SOCKET` names another tmux server than the default
+does not name; from another seat's window, or any not named for the seat, it
+says `not a <Seat> window, nothing armed`. `$MW_TMUX_SOCKET` names another tmux server than the default
 one, as tmux's `-L`; it is for tests.
 
 See `features/seat_up.feature`, and `infrastructure/tmux/window.go` for the

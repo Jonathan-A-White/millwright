@@ -155,6 +155,18 @@ Feature: mw seat up
     Then seat up succeeds
     And no reaper was armed
 
+  Scenario: Run from a window not of the seat, even one whose name the acting file's words hold, seat up arms nothing
+    # mw-gq6.432: the Millhand ran a Mayor's start from its own window, and the
+    # reaper was armed there. tmux names a window for its program, "sh", and
+    # "finished" holds "sh": only a window named for the seat is the seat's.
+    Given the window "sh" was opened at "2026-09-19T05:30:00Z"
+    And the "mayor" seat's acting file says "Mayor mayor-2026-09-19-02, finished at handoff 02"
+    And the seat up was run from the window "sh"
+    When mw seat up starts the "mayor" seat
+    Then seat up succeeds
+    And no reaper was armed
+    And seat up says "not a Mayor window, nothing armed"
+
   Scenario: Run outside any window, seat up arms nothing
     When mw seat up starts the "mayor" seat
     Then seat up succeeds

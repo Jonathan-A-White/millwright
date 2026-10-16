@@ -67,9 +67,11 @@ func newSeatUpCmd() *cobra.Command {
 			"already acting in a window that is still open and has written no handoff since it opened.\n" +
 			"mw never writes the acting file: the new session writes it at boot, and that is how the\n" +
 			"seat is handed over.\n\n" +
-			"Run from a tmux window the seat's acting file names, it also arms `mw seat reap` on that window, so\n" +
-			"that the outgoing session's window closes itself once its successor has the seat. --reap-when-idle\n" +
-			"arms one in idle mode on the window it opens, for a session that hands over to nobody.\n\n" +
+			"Run from a tmux window of the seat's (named <seat>-...) that its acting file names, it also arms\n" +
+			"`mw seat reap` on that window, so that the outgoing session's window closes itself once its\n" +
+			"successor has the seat; from any other window it says it is not the seat's and arms nothing.\n" +
+			"--reap-when-idle arms one in idle mode on the window it opens, for a session that hands over to\n" +
+			"nobody.\n\n" +
 			"Nobody is assumed to be watching: the session is given a PermissionRequest hook that denies a\n" +
 			"permission it would otherwise ask for, so it never hangs on a prompt (the denial is in its\n" +
 			"transcript). --attended, for a seat brought up by hand to talk to, leaves the hook out and the\n" +
