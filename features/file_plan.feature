@@ -246,3 +246,48 @@ Feature: Filing the Mayor's plan
     When the plan is filed
     Then the tree shows under the story "module": in flight: mw-run1 Rework the plan (same rig, no files named)
     And the tree does not name "mw-run2"
+
+  # A bug filed without a Sweep: line is refused by mw dispatch as no-sweep; mw
+  # file refuses it first, with the same words, before anything is written
+  # (mw-gq6.447).
+  Scenario: A bug story with no line beginning 'Sweep:' is refused and nothing is written
+    Given the plan:
+      """
+      {
+        "epic": {
+          "key": "fixes",
+          "title": "Reader fixes",
+          "defaults": { "rig": "millwright", "branch": "main", "harness": "claude", "model": "opus", "effort": "high", "host": "vps" }
+        },
+        "stories": [
+          { "key": "crash", "title": "[bug] The reader crashes on an empty book", "acceptance": "1. An empty book opens.\n2. Sweep listed in the closing comment.", "needs": [] },
+          { "key": "page", "title": "The page is lost after rotate", "labels": ["bug"], "acceptance": "Rotating keeps the page.", "needs": [] },
+          { "key": "lazy", "title": "[bug] The title wraps", "acceptance": "1. It fits.\n2. Sweep: none", "needs": [] }
+        ]
+      }
+      """
+    When the plan is filed
+    Then filing is refused, saying: story crash: it is a bug and no line begins with 'Sweep:' (a check over the whole class of the fault, or 'Sweep: none, because <reason>'): mw dispatch would refuse it as no-sweep
+    And filing is refused, saying: story page: it is a bug and no line begins with 'Sweep:'
+    And filing is refused, saying: story lazy: it is a bug and its 'Sweep: none' gives no reason
+    And nothing is written
+
+  Scenario: A bug story with 'Sweep: none, because <reason>' or a numbered Sweep line is filed, and a story that is no bug needs none
+    Given the plan:
+      """
+      {
+        "epic": {
+          "key": "fixes",
+          "title": "Reader fixes",
+          "defaults": { "rig": "millwright", "branch": "main", "harness": "claude", "model": "opus", "effort": "high", "host": "vps" }
+        },
+        "stories": [
+          { "key": "crash", "title": "[bug] The reader crashes on an empty book", "acceptance": "1. An empty book opens.\nSweep: none, because only the reader opens books.", "needs": [] },
+          { "key": "page", "title": "The page is lost after rotate", "labels": ["bug"], "acceptance": "1. Rotating keeps the page.\n7. Sweep: every viewport effect is grepped for state it drops.", "needs": [] },
+          { "key": "theme", "title": "A dark theme", "acceptance": "The reader can be dark.", "needs": [] }
+        ]
+      }
+      """
+    When the plan is filed
+    Then filing succeeds
+    And the stories are filed in the order crash, page, theme

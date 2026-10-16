@@ -164,6 +164,7 @@ func FitTitleToSteps(title, storyID string, stepTitles []string) string {
 
 // Validate reports every reason this plan cannot be filed: an epic with no
 // title, a story with no key, no title, a title over MaxTitleLength, no acceptance criteria or no Path, a
+// bug (a [bug] title or the bug label) whose acceptance has no Sweep line SweepOf passes, a
 // story waiting on a key no story in the plan has, and stories waiting on each
 // other. It comes back as a *PlanRefused, or nil when the plan is filable.
 func (p Plan) Validate() error {
@@ -201,6 +202,10 @@ func (p Plan) Validate() error {
 		}
 		if _, err := story.PathFrom(p.Epic.Defaults); err != nil {
 			reasons = append(reasons, fmt.Sprintf("%s has no path: %s", name, err))
+		}
+		// A plan is filed now, after SweepRuleFrom, so every bug in it owes a sweep.
+		if verdict := SweepOf(story.Acceptance); IsBug("", story.Title, story.Labels) && !verdict.Passes() {
+			reasons = append(reasons, name+": "+verdict.FilingRefusal())
 		}
 	}
 

@@ -835,8 +835,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// fault is to be looked for, not only the case seen (mw-gq6.419).
 		if verdict := domain.SweepOf(detail.Acceptance); !verdict.Passes() &&
 			domain.OwesASweep(detail.Type, detail.Story.Title, detail.Labels, detail.Created) {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
-				"it is a bug and %s (a check over the whole class of the fault, or 'Sweep: none, because <reason>'): it is not claimed", verdict)})
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: verdict.Refusal() + ": it is not claimed"})
 			if !d.DryRun {
 				d.refuseSweepless(ctx, detail, verdict, &report)
 			}
@@ -2021,7 +2020,7 @@ func (d Dispatch) refuseUninstalledFormula(ctx context.Context, id, formula stri
 // ReasonNoSweep is the code a comment carries when mw dispatch would not claim a
 // bug because its acceptance has no Sweep: line (mw-gq6.419): the marker that a
 // second dispatch finding the comment already there says and mails nothing again.
-const ReasonNoSweep = "no-sweep"
+const ReasonNoSweep = domain.SweepRuleName
 
 // refuseSweepless tells the story, and the Mayor, once, that a bug was not
 // claimed for want of a Sweep: line. The comment is written first and is the
