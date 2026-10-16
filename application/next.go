@@ -584,6 +584,11 @@ type closeOut struct {
 	// none was kept; the close-out commits it.
 	harnessStop string
 
+	// afterLog is the name of the file in the run that holds the whole output of
+	// the after-landing command (AfterLandingLogFileName), empty when none was
+	// kept; the close-out commits it.
+	afterLog string
+
 	// began is when the close-out began, as its mark says.
 	began time.Time
 
@@ -2702,6 +2707,12 @@ func (n Next) commit(ctx context.Context, c *closeOut, report *NextReport) {
 
 	if c.harnessStop != "" {
 		if record := runFilePath(c.id, c.harnessStop); record != "" {
+			paths = append(paths, record)
+		}
+	}
+
+	if c.afterLog != "" {
+		if record := runFilePath(c.id, c.afterLog); record != "" {
 			paths = append(paths, record)
 		}
 	}

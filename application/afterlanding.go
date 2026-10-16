@@ -3,8 +3,11 @@ package application
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // AfterLandingLimit is how long a rig's after-landing command may run before it
@@ -106,19 +109,80 @@ type AfterLanding interface {
 // it exited with, and what it printed. TimedOut is the limit it outlived and
 // was stopped at, zero when it did not; Status is then -1, because it never
 // exited of itself.
+//
+// Steps is the command read as the steps its &&s join, and Step the one of them,
+// counted from 1, that was running when it ended: on a failure, the step that
+// failed. A command that is not a plain chain of &&s is one step. Before each
+// step of a longer chain the output holds its AfterLandingStepMark line. Both
+// are empty for a run whose steps were not read.
+//
+// Earlier is what the run before this one printed, when the command was run
+// once more after a passing network fault, and empty when it ran once.
 type Ran struct {
 	Command  string
 	Status   int
 	Output   string
 	TimedOut time.Duration
+	Steps    []string
+	Step     int
+	Earlier  string
+}
+
+// afterLandingStepWords open the line an after-landing command of several steps
+// prints before each of them, so that what it printed says where each step
+// began and the step it ended in can be read off it.
+const afterLandingStepWords = "mw after landing, step "
+
+// AfterLandingStepMark is the line printed before the step-th of a command's
+// steps.
+func AfterLandingStepMark(step, steps int, text string) string {
+	return fmt.Sprintf("%s%d of %d: %s", afterLandingStepWords, step, steps, text)
 }
 
 // Succeeded says the command ran to the end and exited with status zero.
 func (r Ran) Succeeded() bool { return r.Status == 0 && r.TimedOut == 0 }
 
+// Deployed says a step that ships the rig — one that names rsync or scp, or a
+// deploy — ran to its end before the step the run ended in, or in a run that
+// succeeded at all: what the host serves is the landed commit, whatever came
+// after.
+func (r Ran) Deployed() bool {
+	done := r.Step - 1
+	if r.Succeeded() {
+		done = len(r.Steps)
+	}
+	for i := 0; i < done && i < len(r.Steps); i++ {
+		if shipsTheRig(r.Steps[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+// ShotsNotPublished says the step that failed, after the deploy went out, is the
+// one that takes or publishes the rig's shots.
+func (r Ran) ShotsNotPublished() bool {
+	return !r.Succeeded() && r.Deployed() && r.Step > 0 && r.Step <= len(r.Steps) &&
+		strings.Contains(strings.ToLower(r.Steps[r.Step-1]), "shots")
+}
+
+// shipsTheRig says a step copies the rig to where it is served.
+func shipsTheRig(step string) bool {
+	for _, word := range strings.Fields(strings.ToLower(step)) {
+		word = strings.Trim(word, `'"()`)
+		if word == "rsync" || word == "scp" || strings.Contains(word, "deploy") {
+			return true
+		}
+	}
+	return false
+}
+
 // Line is what the report, the story's comment and the mail to the Mayor say
 // about the run, in one line: the command, and either that it went well or how it
-// did not, with the tail of its output.
+// did not, with the tail of its output. A run of several steps says which step
+// failed and quotes that step's own output; a failure after the deploy went out
+// says first that it did, and shots that failed after it say why they were not
+// published.
 func (r Ran) Line() string {
 	if r.Succeeded() {
 		return afterLandingLine(r.Command, "ok")
@@ -134,10 +198,57 @@ func (r Ran) Line() string {
 	default:
 		how = fmt.Sprintf("exit status %d", r.Status)
 	}
-	if tail := tailLine(r.Output); tail != "" {
-		how += ": " + tail
+	output := r.stepOutput()
+	withTail := how
+	if tail := tailLine(output); tail != "" {
+		withTail += ": " + tail
 	}
-	return afterLandingLine(r.Command, how)
+	switch {
+	case r.ShotsNotPublished():
+		return afterLandingLine(r.Command, "deployed; shots not published: "+shotsReason(how, withTail, output))
+	case len(r.Steps) > 1 && r.Step > 0 && r.Step <= len(r.Steps):
+		said := fmt.Sprintf("step %d of %d, %s: %s", r.Step, len(r.Steps), r.Steps[r.Step-1], withTail)
+		if r.Deployed() {
+			said = "deployed; then " + said
+		}
+		return afterLandingLine(r.Command, said)
+	}
+	return afterLandingLine(r.Command, withTail)
+}
+
+// portUsed is what Playwright says when its webServer's port is taken.
+var portUsed = regexp.MustCompile(`\S+ is already used`)
+
+// shotsReason is why shots were not published, as plainly as their output
+// says it: the port their server wanted was taken, or the shots that failed by
+// name, else how the step ended with its last lines.
+func shotsReason(how, withTail, output string) string {
+	if used := portUsed.FindString(domain.StripANSI(output)); used != "" {
+		return how + ", the shots' server found its port already used: " + used
+	}
+	if failing := FailingTestsShort(output); failing != "" {
+		if runes := []rune(failing); len(runes) > afterTailRunes {
+			failing = string(runes[:afterTailRunes]) + "…"
+		}
+		return how + ", " + failing
+	}
+	return withTail
+}
+
+// stepOutput is what the step the run ended in printed: the output after the
+// last step mark, or all of it for a run of one step.
+func (r Ran) stepOutput() string {
+	// Only a mark that opens a line counts: the output is read with a newline
+	// before it, so that an index in it is the mark's index in the output.
+	at := strings.LastIndex("\n"+r.Output, "\n"+afterLandingStepWords)
+	if at < 0 {
+		return r.Output
+	}
+	rest := r.Output[at:]
+	if end := strings.IndexByte(rest, '\n'); end >= 0 {
+		return rest[end+1:]
+	}
+	return ""
 }
 
 // networkFaultMarks are what a command's output says when the network, not the
@@ -183,8 +294,8 @@ func (r Ran) NetworkFault() bool {
 // failed on a fault of the network that may pass, once more after pause (zero is
 // AfterLandingRetryWait), using wait to pause. It says in retried, as a line,
 // that it ran the command again, and why; retried is empty when it did not. The
-// Ran is the last run's. An error is a command that could not be started, or a
-// pause cut short by ctx.
+// Ran is the last run's, with what the first printed as its Earlier. An error is
+// a command that could not be started, or a pause cut short by ctx.
 func runAfterLanding(ctx context.Context, port AfterLanding, rig, dir string, pause time.Duration, wait func(context.Context, time.Duration) error) (ran Ran, retried string, err error) {
 	ran, err = port.Run(ctx, rig, dir)
 	if err != nil || !ran.NetworkFault() {
@@ -198,7 +309,9 @@ func runAfterLanding(ctx context.Context, port AfterLanding, rig, dir string, pa
 	if err := wait(ctx, pause); err != nil {
 		return ran, retried, err
 	}
+	earlier := ran.Output
 	ran, err = port.Run(ctx, rig, dir)
+	ran.Earlier = earlier
 	return ran, retried, err
 }
 
@@ -269,24 +382,71 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 	if err != nil {
 		line = afterLandingLine(command, "could not be run: "+firstLine(err.Error()))
 	}
+	kept := n.keepAfterLandingLog(ctx, c, report, command, ran, retried, line)
 	if retried != "" {
 		report.Notes = append(report.Notes, retried)
 	}
-	report.Notes = append(report.Notes, line)
 	if err == nil && ran.Succeeded() {
+		report.Notes = append(report.Notes, line)
 		n.restartUnits(ctx, c, report)
 		return
 	}
+	if kept != "" {
+		line += "; the whole output is in " + kept
+	}
+	report.Notes = append(report.Notes, line)
 	if err == nil && ran.TimedOut > 0 {
 		report.AfterLandingStopped = ran.TimedOut
 		line = AfterLandingStoppedLine + "\n" + line
 	}
 
+	what := "so the binary built there may be old"
+	switch {
+	case err == nil && ran.ShotsNotPublished():
+		what = "after it: the deploy went out, but the shots were not published"
+	case err == nil && ran.Deployed():
+		what = "after it: the deploy went out, but a step after it failed"
+	}
 	comment := fmt.Sprintf("mw next on %s landed this story, and the command this host runs in the rig's checkout %s after a landing did not go well, "+
-		"so the binary built there may be old. The landing is not undone.\n\n%s", n.Host, c.rigDir, line)
+		"%s. The landing is not undone.\n\n%s", n.Host, c.rigDir, what, line)
 	if err := n.Tracker.CommentOnStory(ctx, c.id, comment); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the after-landing command's failure could not be written on the story: %v", err))
 	}
+}
+
+// AfterLandingLogFileName is the file in a story's run that keeps the whole
+// output of the after-landing command its landing ran, committed with the run:
+// the line in the report, the ledger and the mail holds only its last words.
+const AfterLandingLogFileName = "after-landing.log"
+
+// keepAfterLandingLog writes the whole of what the after-landing command
+// printed, both runs of it when it was run again, beside the story's run, and
+// returns the file's path from the vault's root, empty when there is no vault
+// or it could not be written (which is a note). The close-out commits it.
+func (n Next) keepAfterLandingLog(ctx context.Context, c *closeOut, report *NextReport, command string, ran Ran, retried, line string) string {
+	if n.Vault == nil {
+		return ""
+	}
+	var log strings.Builder
+	fmt.Fprintf(&log, "$ %s\n", command)
+	if retried != "" {
+		fmt.Fprintf(&log, "%s\n# %s\n$ %s\n", strings.TrimRight(ran.Earlier, "\n"), retried, command)
+	}
+	if ran.Output != "" {
+		log.WriteString(strings.TrimRight(ran.Output, "\n") + "\n")
+	}
+	log.WriteString(line + "\n")
+	name := attemptRunFileName(AfterLandingLogFileName, c.attempt())
+	record := runFilePath(c.id, name)
+	if record == "" {
+		return ""
+	}
+	if _, err := n.Vault.PutRunFile(ctx, c.id, name, capRunLog(name, log.String())); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the whole output of the after-landing command could not be kept in the run of %s: %v", c.id, err))
+		return ""
+	}
+	c.afterLog = name
+	return record
 }
 
 // smoke runs the grist smoke of the apps the landing changed the grist of, and
