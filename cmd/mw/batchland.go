@@ -49,6 +49,8 @@ func batchLandSpringJob(host string, out io.Writer) (application.SpringJob, erro
 		},
 		Land:    detached.Land,
 		Pending: detached.Pending,
+		Notes:   mwGateway(dir, host),
+		Host:    host,
 	}
 	return landings.Job(), nil
 }

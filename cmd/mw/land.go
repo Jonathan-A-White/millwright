@@ -124,6 +124,7 @@ func newLandCmd() *cobra.Command {
 					Rules:     files,
 					Files:     files,
 					Mailbox:   gateway,
+					Memory:    gateway,
 					Runner:    tmux.New(),
 					Boot:      builderBoot(files, host, tests, nice, jobs, turns),
 					Events:    homeEventLog(),

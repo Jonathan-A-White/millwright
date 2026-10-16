@@ -319,3 +319,29 @@ Feature: mw land lands a batch rig's queue under one gate run
       | mw-gq6.2 |
     And the batch is held, and the Mayor's mail names every story in it and says "Generated with Claude Code"
     And the batch's hold names the fixer's signed commit
+
+  # mw-gq6.472: a fixer the harness stopped for a limit of the factory's (its
+  # usage limit, a rate limit, an overloaded API: HarnessStopOf) did no work to
+  # judge, so the batch is not tested again and judged red after it. It is held
+  # as a harness stop: the host claims nothing new until the reset, and a
+  # landing before then starts no fixer, so none is spent on the limit.
+
+  Scenario: A fixer the harness stops at its usage limit holds the batch until the reset, and no fixer is spent on it before then (mw-gq6.472)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the rig's tests fail on the batch, saying "the batch is red", until "FIXED" is committed
+    And mw land may start a fixer, which the harness stops saying "You've hit your weekly limit · resets Sep 18, 3pm (UTC)"
+    When mw lands the batch of the rig
+    Then exactly one fixer was started, for batch 1, in a landing worktree holding the work of every story in it
+    And the rig's tests were run once on the batch
+    And "main" at the rig's origin is where it was before the batch
+    And these stories are still queued for batch landing, none of them closed:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the batch is held for the harness's stop of its fixer, not its work, until "2026-09-18T15:00:00Z"
+    And the batch is held, and the Mayor's mail names every story in it and says "the harness stopped it, not its work"
+    And this host claims nothing new until "2026-09-18T15:00:00Z"
+    When mw lands the batch of the rig
+    Then the fixer was started only once
+    And the batch is held for the harness's stop of its fixer, not its work, until "2026-09-18T15:00:00Z"
