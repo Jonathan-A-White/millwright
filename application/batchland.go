@@ -724,6 +724,9 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 	n.advanceRig(ctx, last, &once)
 	report.Checkout = once.Rig
 	n.afterLanding(ctx, last, &once)
+	if record := runFilePath(last.id, last.afterLog); last.afterLog != "" && record != "" {
+		report.Records = append(report.Records, record)
+	}
 	n.smoke(ctx, last, &once)
 	nr.Notes = append(nr.Notes, once.Notes...)
 

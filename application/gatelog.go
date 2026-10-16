@@ -96,7 +96,11 @@ func moreWords(more int) string {
 
 // CapGateLog is output cut to GateLogCap bytes: the head and the tail kept,
 // the middle replaced by a line that says how many bytes it was.
-func CapGateLog(output string) string {
+func CapGateLog(output string) string { return capRunLog(GateLogFileName, output) }
+
+// capRunLog is output cut as CapGateLog cuts it, for the run file name, which
+// the line between head and tail names.
+func capRunLog(name, output string) string {
 	output = domain.StripANSI(output)
 	if len(output) <= GateLogCap {
 		return output
@@ -104,7 +108,7 @@ func CapGateLog(output string) string {
 	tail := GateLogCap - GateLogHead
 	left := len(output) - GateLogHead - tail
 	return strings.ToValidUTF8(output[:GateLogHead], "") +
-		fmt.Sprintf("\n[... %d bytes left out by mw: gate.log keeps the first %d and the last %d ...]\n", left, GateLogHead, tail) +
+		fmt.Sprintf("\n[... %d bytes left out by mw: %s keeps the first %d and the last %d ...]\n", left, name, GateLogHead, tail) +
 		strings.ToValidUTF8(output[len(output)-tail:], "")
 }
 

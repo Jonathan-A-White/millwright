@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -108,11 +109,16 @@ func (a *AfterLanding) Run(ctx context.Context, rig, dir string) (application.Ra
 		return application.Ran{}, fmt.Errorf("running `%s`: %w", command, err)
 	}
 
+	steps := commandSteps(command)
+	line := command
+	if len(steps) > 1 {
+		line = markSteps(steps)
+	}
 	limit := a.Limit(rig)
 	limited, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
-	output, err := runLine(limited, a.shell, command, dir, 0, nil)
-	ran := application.Ran{Command: command, Output: output}
+	output, err := runLine(limited, a.shell, line, dir, 0, freePortEnv())
+	ran := application.Ran{Command: command, Output: output, Steps: steps, Step: stepEndedIn(output, steps)}
 	if err == nil {
 		return ran, nil
 	}
@@ -130,4 +136,122 @@ func (a *AfterLanding) Run(ctx context.Context, rig, dir string) (application.Ra
 		return ran, nil
 	}
 	return application.Ran{}, fmt.Errorf("running `%s` in %s: %w: %s", command, dir, err, application.RecentLines(output, 10))
+}
+
+// PreviewPortEnv is the variable a rig's after-landing command finds a free
+// port of its own in, picked afresh for every run: postern's shots start their
+// preview server on it (tests/support/preview-port.ts), and two runs on one
+// host never ask for the same port, as two took 5370 when it was named by the
+// checkout's path (mw-gq6.479). The kernel picks it from its ephemeral range,
+// clear of the 4400-5399 postern's gate runs derive from their worktrees.
+const PreviewPortEnv = "PREVIEW_PORT"
+
+// freePortEnv names a port nothing listens on now, as the one variable of the
+// command's environment; nil when none could be had, and then the command
+// picks its own as it always did.
+func freePortEnv() []string {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil
+	}
+	defer listener.Close()
+	return []string{fmt.Sprintf("%s=%d", PreviewPortEnv, listener.Addr().(*net.TCPAddr).Port)}
+}
+
+// markSteps is the command line that runs steps as the &&s between them do,
+// in the one shell, with each step's mark printed before it.
+func markSteps(steps []string) string {
+	marked := make([]string, 0, 2*len(steps))
+	for i, step := range steps {
+		marked = append(marked, "printf '%s\\n' "+shellQuote(application.AfterLandingStepMark(i+1, len(steps), step)), step)
+	}
+	return strings.Join(marked, " && ")
+}
+
+// stepEndedIn is the step, counted from 1, whose mark the output holds last:
+// the one that was running when the command ended. A command of one step
+// ended in it.
+func stepEndedIn(output string, steps []string) int {
+	if len(steps) == 1 {
+		return 1
+	}
+	for i := len(steps); i >= 1; i-- {
+		if strings.Contains(output, application.AfterLandingStepMark(i, len(steps), steps[i-1])+"\n") {
+			return i
+		}
+	}
+	return 0
+}
+
+// shellQuote is s as one word of the shell, in single quotes.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// commandSteps is a command line read as the steps its top-level &&s join,
+// each trimmed: the &&s inside quotes, backquotes, parentheses, braces or $( )
+// are a step's own. A line that is anything but a plain chain of &&s — one that
+// holds a ;, a ||, a lone &, a newline, a comment, an empty step, or a quote or
+// bracket left open — is one step, the line as it is.
+func commandSteps(command string) []string {
+	whole := []string{command}
+	var steps []string
+	depth, start := 0, 0
+	var quote rune
+	runes := []rune(command)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		switch {
+		case quote == '\'':
+			if r == '\'' {
+				quote = 0
+			}
+			continue
+		case r == '\\':
+			i++
+			continue
+		case quote == '"' || quote == '`':
+			if r == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch r {
+		case '\'', '"', '`':
+			quote = r
+		case '(', '{':
+			depth++
+		case ')', '}':
+			depth--
+			if depth < 0 {
+				return whole
+			}
+		}
+		if depth > 0 {
+			continue
+		}
+		switch {
+		case r == ';' || r == '\n' || r == '#' && (i == 0 || runes[i-1] == ' ' || runes[i-1] == '\t'):
+			return whole
+		case r == '|' && i+1 < len(runes) && runes[i+1] == '|':
+			return whole
+		case r == '&' && i+1 < len(runes) && runes[i+1] == '&':
+			step := strings.TrimSpace(string(runes[start:i]))
+			if step == "" {
+				return whole
+			}
+			steps = append(steps, step)
+			start = i + 2
+			i++
+		case r == '&' && (i > 0 && (runes[i-1] == '>' || runes[i-1] == '<') || i+1 < len(runes) && runes[i+1] == '>'):
+			// A redirection: 2>&1, >&2, &>file.
+		case r == '&':
+			return whole
+		}
+	}
+	last := strings.TrimSpace(string(runes[start:]))
+	if quote != 0 || depth != 0 || last == "" {
+		return whole
+	}
+	return append(steps, last)
 }

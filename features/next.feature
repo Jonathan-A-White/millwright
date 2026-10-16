@@ -1138,6 +1138,47 @@ Feature: Closing out a finished story and carrying on
     And that mail's body says: after landing: <the command>: exit status 2: make: *** No rule to make target 'build'
     And the close-out returned no error
 
+  Scenario: An after-landing command that fails keeps its whole output in the run, and the report, the ledger and the mail name the file (mw-gq6.479)
+    Given the rig names a command to run after a landing, which prints 400 numbered lines and exits 1
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed exactly as it is without an after-landing command
+    And the run of "mw-gq6.1" keeps the whole output of the after-landing command in after-landing.log, from "line 1 of 400" to "line 400 of 400"
+    And the report says: after landing: <the command>: exit status 1: line 398 of 400 / line 399 of 400 / line 400 of 400; the whole output is in runs/mw-gq6.1/after-landing.log
+    And the last ledger line holds:
+      | the whole output is in runs/mw-gq6.1/after-landing.log |
+    And that mail's body says: the whole output is in runs/mw-gq6.1/after-landing.log
+    And the comment on "mw-gq6.1" says: the whole output is in runs/mw-gq6.1/after-landing.log
+    And mw committed to the vault exactly:
+      | seats/builder/ledger.md          |
+      | seats/builder/rigs/millwright.md |
+      | runs/mw-gq6.1/result.json        |
+      | runs/mw-gq6.1/after-landing.log  |
+
+  Scenario: An after-landing command that went well keeps its output in the run too, and the report does not point at it (mw-gq6.479)
+    Given the rig names a command to run after a landing
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the report says: after landing: <the command>: ok
+    And the report does not say: the whole output is in
+    And the run of "mw-gq6.1" keeps the whole output of the after-landing command in after-landing.log, from "$ " to "after landing: "
+    And mw committed to the vault exactly:
+      | seats/builder/ledger.md          |
+      | seats/builder/rigs/millwright.md |
+      | runs/mw-gq6.1/result.json        |
+      | runs/mw-gq6.1/after-landing.log  |
+
+  Scenario: Shots that fail after a good deploy read as deployed, with the shots not published and why (mw-gq6.479)
+    Given the rig names a command to run after a landing, which deploys and then fails a shot, saying "✘ 12 [shots] › tests/e2e/banner.spec.ts:13:1 › the banner sits on the channel"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed exactly as it is without an after-landing command
+    And the report says: after landing: <the command>: deployed; shots not published: exit status 1, failing: ✘ 12 [shots] › tests/e2e/banner.spec.ts:13:1 › the banner sits on the channel
+    And the last ledger line holds:
+      | deployed; shots not published: exit status 1, failing: ✘ 12 [shots] |
+    And that mail's body says: deployed; shots not published: exit status 1
+    And the comment on "mw-gq6.1" says: the deploy went out, but the shots were not published
+
   Scenario: An after-landing command that outlives its time limit is stopped, and said, and the story is landed all the same
     Given the rig names a command to run after a landing, which runs far too long
     And after-landing commands are stopped after 300 milliseconds
