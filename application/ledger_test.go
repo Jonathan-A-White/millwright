@@ -84,6 +84,21 @@ func TestParseLedgerRowReadsBackWhatALedgerLineWrote(t *testing.T) {
 	}
 }
 
+// A Tester's fuel is read off the line its close-out wrote from the result,
+// cost and all, never off what the session said it spent (mw-2zh33g.12).
+func TestParseLedgerLineReadsBackTheTokensAndTheCostALedgerLineWrote(t *testing.T) {
+	entry, ok := application.ParseLedgerLine(aLedgerLine(nil).String())
+	if !ok || entry.Tokens != 311200 || entry.CostUSD != 4.21 {
+		t.Errorf("expected 311,200 tokens and $4.21 read back, got %+v", entry)
+	}
+
+	free, _ := application.ParseLedgerLine(aLedgerLine(func(l *application.LedgerLine) { l.Result.CostUSD = 0 }).String())
+	charged, _ := application.ParseLedgerLine(aLedgerLine(func(l *application.LedgerLine) { l.FuelCharged = true }).String())
+	if free.CostUSD != 0 || charged.CostUSD != 0 || charged.Tokens != 0 {
+		t.Errorf("expected no cost off a line that names none, got %+v and %+v", free, charged)
+	}
+}
+
 func TestParseLedgerRowIsFalseForALineThatIsNotOneOfData(t *testing.T) {
 	for _, line := range []string{
 		"",
