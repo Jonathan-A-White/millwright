@@ -274,7 +274,9 @@ stories, each with its acceptance criteria, its estimate, whatever it overrides
 of that Path, optionally labels, and the keys of the stories it needs done first. `mw file` reads
 the whole plan before it writes any of it — every story must resolve to a Path,
 carry acceptance criteria, and wait only on stories the plan has, never on
-itself or in a circle — and reports every reason it will not file a plan, not
+itself or in a circle; a bug (a `[bug]` title or the `bug` label) must carry a
+line beginning `Sweep:`, as `mw dispatch` would otherwise refuse it as `no-sweep`
+(mw-gq6.447) — and reports every reason it will not file a plan, not
 just the first. A plan that cannot be filed leaves the tracker untouched: half
 a plan in the tracker looks like work somebody meant.
 
@@ -1467,7 +1469,7 @@ only reads and releases it (mw-gq6.397):
 
 ```sh
 bin/mw tester file <tester-story> --kind bug --title "<one line>" --finding @finding.txt \
-  --how @how.txt --accept "<something to run>" --files src/Reader.tsx --shot /tmp/tester-x/06.png --fix "<one line>"
+  --how @how.txt --accept @accept.txt --files src/Reader.tsx --shot /tmp/tester-x/06.png --fix "<one line>"
 ```
 
 It files `[bug] <app>: <title>` (or `[taste]`) held under the landed story's epic: the
@@ -1476,6 +1478,8 @@ marked `PROVISIONAL (Tester's suggestion; Mayor to confirm)`, HOW TO CHECK IT, t
 landed story's path with `--files` as its files key, a wait on every running or open story of the
 rig that names the same file, and the epic's open demo (the rig's `epic_last_story_labels`) waiting
 on it. A finding whose title an open bead of the rig already has files nothing and names that bead.
+A bug whose acceptance has no line beginning `Sweep:` is refused, as `mw dispatch` would refuse it
+(mw-gq6.447), and so is a plan given to `mw file` with such a bug in it.
 It never releases; a finding that crosses an app's VISION.md is flagged and not filed. The Tester
 writes `held: <id>` or `duplicate of: <id>` under each finding of its FINDINGS, and the
 `Tested:` mail lists them (`held` and `twin` lines) for the Mayor to release or drop.
