@@ -55,6 +55,14 @@ type scannedLine struct {
 	Heading, Dated, DatedOn string
 }
 
+// openItem is a '- ' line being read: its first line, that line's number, and
+// its text so far, the continuation lines joined on.
+type openItem struct {
+	first string
+	n     int
+	text  string
+}
+
 // scannedMemory is a memory file, read: its head, its '- ' lines, and the
 // lines it could not place.
 type scannedMemory struct {
@@ -153,16 +161,40 @@ func kindUnder(heading string) FactKind {
 
 // scanMemory reads a memory file or its archive. The head is what comes before
 // the first heading (past a title on the first line) or '- ' line. A line that
-// is not a '- ' line, a heading or blank, and is not the head, is not placed.
+// is not a '- ' line, a continuation, a heading or blank, and is not the head, is
+// not placed. A continuation is a line indented under a '- ' line with no blank
+// or heading between: it is joined to its bullet, one space between, indent dropped.
 func scanMemory(text string) scannedMemory {
 	var out scannedMemory
 	var head []string
 	var heading, dated, datedOn string
 	inHead, titled := true, false
+	// open is the '- ' line being read: later indented lines join its text.
+	var open *openItem
+	flush := func() {
+		if open == nil {
+			return
+		}
+		item := open
+		open = nil
+		scanned, ok := scanItem(item.text)
+		if !ok {
+			out.NotPlaced = append(out.NotPlaced, fmt.Sprintf("line %d: %s", item.n, item.first))
+			return
+		}
+		scanned.Kind, scanned.Heading, scanned.Dated, scanned.DatedOn = kindUnder(heading), heading, dated, datedOn
+		out.Lines = append(out.Lines, scanned)
+	}
 	for i, raw := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
 		line := strings.TrimRight(raw, " \t")
 		isHeading := strings.HasPrefix(line, "#")
 		isItem := strings.HasPrefix(line, "- ")
+		isIndented := strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")
+		if open != nil && isIndented && strings.TrimSpace(line) != "" {
+			open.text += " " + strings.TrimSpace(line)
+			continue
+		}
+		flush()
 		if inHead {
 			if !titled && strings.TrimSpace(line) == "" {
 				continue
@@ -186,17 +218,12 @@ func scanMemory(text string) scannedMemory {
 				dated, datedOn = heading, d
 			}
 		case isItem:
-			scanned, ok := scanItem(strings.TrimPrefix(line, "- "))
-			if !ok {
-				out.NotPlaced = append(out.NotPlaced, fmt.Sprintf("line %d: %s", i+1, line))
-				continue
-			}
-			scanned.Kind, scanned.Heading, scanned.Dated, scanned.DatedOn = kindUnder(heading), heading, dated, datedOn
-			out.Lines = append(out.Lines, scanned)
+			open = &openItem{first: line, n: i + 1, text: strings.TrimPrefix(line, "- ")}
 		default:
 			out.NotPlaced = append(out.NotPlaced, fmt.Sprintf("line %d: %s", i+1, line))
 		}
 	}
+	flush()
 	out.Head = strings.TrimSpace(strings.Join(head, "\n"))
 	return out
 }

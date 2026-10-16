@@ -498,6 +498,33 @@ Feature: mw memory
     And the rig "demo" keeps its archive file
     And the rig "demo" has no facts folder
 
+  Scenario: a bullet wrapped over several lines migrates as one fact with its whole text
+    Given the rig "demo" keeps its memory in one file:
+      """
+      # Rig memory: demo
+
+      ## Where things are
+      - The parser lives in app/parse.go and reads once;
+        a second read would double every count,
+        so the build calls it from one place (mw-ww.1).
+      - A plain one.
+      """
+    When the Mayor migrates the rig "demo"
+    Then the memory command succeeded
+    And the memory command printed "migrated the rig demo: 2 facts (2 current, 0 retired); 0 lines not placed"
+    And the fact file "the-parser-lives-in-appparsego" of the rig "demo" holds:
+      """
+      ---
+      subject: app/parse.go
+      kind: gotcha
+      status: current
+      source: mw-ww.1
+      since: 2026-10-10
+      ---
+
+      The parser lives in app/parse.go and reads once; a second read would double every count, so the build calls it from one place.
+      """
+
   Scenario: a slug that is taken gets a numeric suffix
     Given the rig "demo" keeps its memory in one file:
       """

@@ -77,7 +77,50 @@ func TestScanMemoryReadsHeadHeadingsAndStrayLines(t *testing.T) {
 	if got.Lines[0].Source != "mw-1" || got.Lines[0].Subject != "a.go" || got.Lines[1].Since != "2026-01-02" {
 		t.Errorf("lines = %+v", got.Lines)
 	}
-	if len(got.NotPlaced) != 2 || !strings.HasPrefix(got.NotPlaced[0], "line 11: ") || !strings.HasPrefix(got.NotPlaced[1], "line 12: ") {
+	if got.Lines[1].Sentence != "Plain thing 2026-01-02. continued" {
+		t.Errorf("a continuation was not joined: %q", got.Lines[1].Sentence)
+	}
+	if len(got.NotPlaced) != 1 || !strings.HasPrefix(got.NotPlaced[0], "line 12: ") {
+		t.Errorf("not placed = %q", got.NotPlaced)
+	}
+}
+
+func TestScanMemoryJoinsEveryContinuationLineToItsBullet(t *testing.T) {
+	text := "# Title\n\n## bd facts\n" +
+		"- From inside a worktree `bd` finds no database: point every\n" +
+		"  `bd` call at the vault with `-C`, as its OWN Bash call,\n" +
+		"  never chained (a chained call is\n" +
+		"  refused): `bd -C <vault> close <step> ...`; the vault\n" +
+		"  has the one `.beads` (mw-gq6.52).\n" +
+		"- Next bullet.\n"
+	got := scanMemory(text)
+	want := "From inside a worktree `bd` finds no database: point every `bd` call at the vault with `-C`, as its OWN Bash call, never chained (a chained call is refused): `bd -C <vault> close <step> ...`; the vault has the one `.beads`."
+	if len(got.Lines) != 2 || got.Lines[0].Sentence != want {
+		t.Fatalf("lines = %+v, want the first to read %q", got.Lines, want)
+	}
+	if got.Lines[0].Source != "mw-gq6.52" {
+		t.Errorf("source = %q, want the bead id from the last continuation line", got.Lines[0].Source)
+	}
+	if len(got.NotPlaced) != 0 {
+		t.Errorf("not placed = %q", got.NotPlaced)
+	}
+}
+
+func TestScanMemoryTakesSubjectAndSinceFromTheJoinedText(t *testing.T) {
+	got := scanMemory("# T\n\n- Wrapped so the path\n  is on line two: app/parse.go since 2026-03-04.\n")
+	if len(got.Lines) != 1 || got.Lines[0].Subject != "app/parse.go" || got.Lines[0].Since != "2026-03-04" {
+		t.Errorf("lines = %+v", got.Lines)
+	}
+}
+
+func TestScanMemoryLeavesAnIndentedLineWithNoBulletAboveNotPlaced(t *testing.T) {
+	// After a blank line or a heading, an indented line continues nothing.
+	text := "# T\n\n- A bullet.\n\n  Indented after a blank.\n## H\n  Indented after a heading.\n"
+	got := scanMemory(text)
+	if len(got.Lines) != 1 || got.Lines[0].Sentence != "A bullet." {
+		t.Errorf("lines = %+v", got.Lines)
+	}
+	if len(got.NotPlaced) != 2 {
 		t.Errorf("not placed = %q", got.NotPlaced)
 	}
 }

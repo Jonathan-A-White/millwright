@@ -189,7 +189,7 @@ func newMemoryMigrateCmd() *cobra.Command {
 		Long: "migrate reads seats/builder/rigs/<rig>.md and <rig>-archive.md and writes about.md and one\n" +
 			"fact file each under seats/builder/rigs/<rig>/. The head of the memory file (the whole of it\n" +
 			"under 600 bytes, else the first 600 cut at a sentence end, with a warning) is the about\n" +
-			"text; each '- ' line is a current fact, and each of the archive's a retired one, with the\n" +
+			"text; each '- ' line, with the lines indented under it joined to it, is a current fact, and each of the archive's a retired one, with the\n" +
 			"date and name of the heading it sat under. A fact's source is the last bead id in brackets\n" +
 			"on its line, else mayor:<file>@<vault HEAD>; its kind decision under a heading with 'Before\n" +
 			"you start' or 'Decided' in it, else gotcha; its subject the first path-like token (a <placeholder> kept\n" +
