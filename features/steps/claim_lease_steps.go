@@ -377,7 +377,10 @@ func (c *readyContext) aDispatchedSessionsShellLineRunsHeartbeatingAlongsideIt()
 	log := filepath.Join(dir, "heartbeat.log")
 	c.lease.heartbeatLog = log
 
-	harnessScript := "#!/bin/sh\nsleep 0.3\nprintf '{\"ok\":true}'\n"
+	// The harness runs until the heartbeat beside it has ticked twice, a
+	// minute at most, not for a fixed time a loaded host may not give the
+	// heartbeat (mw-gq6.440).
+	harnessScript := "#!/bin/sh\ni=0\nuntil [ \"$(cat " + log + " 2>/dev/null | grep -c '^tick$')\" -ge 2 ] || [ $i -ge 1200 ]; do sleep 0.05; i=$((i + 1)); done\nprintf '{\"ok\":true}'\n"
 	if err := os.WriteFile(harness, []byte(harnessScript), 0o755); err != nil {
 		return fmt.Errorf("writing the stand-in harness: %w", err)
 	}

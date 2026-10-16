@@ -127,8 +127,11 @@ func (c *sessionEnvContext) standIn(name, body string) (string, error) {
 
 // storySession assembles the story's session with the real Harness and the
 // stand-ins. The heartbeat is left sleeping, for the line's own kill to end.
+// The harness ends only once the heartbeat has written what it was given, a
+// minute at most, never after a fixed time a loaded host may not give the
+// heartbeat (mw-gq6.440).
 func (c *sessionEnvContext) storySession() (application.SessionSpec, error) {
-	harness, err := c.standIn("harness", "sleep 0.5\nprintf '{\"ok\":true}'\n")
+	harness, err := c.standIn("harness", "i=0\nwhile ! grep -q '^heartbeat ' "+c.log+" && [ $i -lt 1200 ]; do sleep 0.05; i=$((i + 1)); done\nprintf '{\"ok\":true}'\n")
 	if err != nil {
 		return application.SessionSpec{}, err
 	}

@@ -134,7 +134,9 @@ func (c *eventGristSpringContext) cycle() error {
 	if err := follow.Run(c.ctx); err != nil {
 		return fmt.Errorf("the follower ended with %w", err)
 	}
-	// A pass the cycle began runs in a goroutine: give it a moment to show.
+	// A pass the cycle began runs in a goroutine: give it a moment to show, so
+	// that a pass too many is seen. One that comes later is waited for by
+	// wantStarted.
 	c.drain(150 * time.Millisecond)
 	return nil
 }
@@ -152,7 +154,19 @@ func (c *eventGristSpringContext) drain(wait time.Duration) {
 	}
 }
 
+// wantStarted waits up to ten seconds for the passes still to begin, as a
+// loaded host may start a pass's goroutine late (mw-gq6.440); a pass too many
+// is caught by the cycle's own drain.
 func (c *eventGristSpringContext) wantStarted(n int) error {
+	timer := time.After(10 * time.Second)
+	for c.started < n {
+		select {
+		case <-c.began:
+			c.started++
+		case <-timer:
+			return fmt.Errorf("the mill made %d passes in 10 s, want %d", c.started, n)
+		}
+	}
 	if c.started != n {
 		return fmt.Errorf("the mill made %d passes, want %d", c.started, n)
 	}

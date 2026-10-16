@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -170,12 +171,30 @@ func (c *nextContext) aSessionChecksWhileTheSlotIsHeld(id string, millis int) er
 	if c.otherHolding == nil {
 		return fmt.Errorf("no other close-out holds the merge slot in this scenario")
 	}
-	timer := time.AfterFunc(time.Duration(millis)*time.Millisecond, c.releaseTheOtherCloseOut)
-	defer timer.Stop()
+	// The other close-out finishes millis after the check says it is waiting
+	// for the slot, not millis after the check began: the check's own work
+	// before the slot may take longer than that on a loaded host (mw-gq6.440).
+	var finishing sync.Once
+	var timerMu sync.Mutex
+	var timer *time.Timer
+	defer func() {
+		timerMu.Lock()
+		defer timerMu.Unlock()
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 	started := time.Now()
 	err := c.checkWith(id, rig.NewSlots(
 		rig.WithSlotPoll(20*time.Millisecond),
-		rig.WithSlotNotice(func(said string) { c.stderr.WriteString(said) }),
+		rig.WithSlotNotice(func(said string) {
+			c.stderr.WriteString(said)
+			finishing.Do(func() {
+				timerMu.Lock()
+				defer timerMu.Unlock()
+				timer = time.AfterFunc(time.Duration(millis)*time.Millisecond, c.releaseTheOtherCloseOut)
+			})
+		}),
 	))
 	c.checkWaited = time.Since(started)
 	return err
