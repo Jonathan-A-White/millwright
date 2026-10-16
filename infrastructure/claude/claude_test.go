@@ -552,10 +552,10 @@ func TestTheHeartbeatRunsBesideTheHarnessAndIsKilledBeforeTheCloseOut(t *testing
 		" --name mw-gq6.6 'You are booted into the builder seat.'" +
 		" > /root/millwright-vault/runs/mw-gq6.6/result.json.tmp" +
 		"; mv /root/millwright-vault/runs/mw-gq6.6/result.json.tmp /root/millwright-vault/runs/mw-gq6.6/result.json" +
-		"; kill $HB 2>/dev/null" +
+		"; kill $HB 2>/dev/null; wait $HB 2>/dev/null" +
 		"; /root/millwright/bin/mw next mw-gq6.6"
 	if line != want {
-		t.Errorf("expected the heartbeat backgrounded, killed after the harness and before the close-out, and chained onward, got:\nwant %q\ngot  %q", want, line)
+		t.Errorf("expected the heartbeat backgrounded, killed and waited for after the harness and before the close-out, and chained onward, got:\nwant %q\ngot  %q", want, line)
 	}
 }
 
@@ -1101,5 +1101,79 @@ func TestACloseOutAloneRunsOnlyItsCloseOutInTheSessionsEnvironment(t *testing.T)
 
 	if _, err := New().Session(application.Launch{StoryID: "mw-gq6.6", Path: launch(nil).Path, Seat: "builder", CloseOutOnly: true}); err == nil {
 		t.Error("expected a close-out alone with nothing to run to be refused")
+	}
+}
+
+// mw-gq6.487: a close-out that dies says why in its pane and nowhere else, and
+// the pane is closed when the story is reclaimed. Given a log path, its words
+// are kept there as well, stdout and stderr both, and still shown in the pane.
+func TestTheCloseOutsWordsAreKeptInTheRunAsWellAsThePane(t *testing.T) {
+	dir := t.TempDir()
+	closeOut := filepath.Join(dir, "closeout")
+	if err := os.WriteFile(closeOut, []byte("#!/bin/sh\necho landed\necho 'Error: closing out mw-gq6.6: i/o timeout' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness := filepath.Join(dir, "harness")
+	if err := os.WriteFile(harness, []byte("#!/bin/sh\nprintf '{\"ok\":true}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(dir, "next-2.log")
+	spec, err := New(WithProgram(harness)).Session(launch(func(l *application.Launch) {
+		l.ResultFile = filepath.Join(dir, "result-2.json")
+		l.After = []string{closeOut}
+		l.AfterLog = log
+	}))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	line := spec.Command[2]
+	want := "; { " + closeOut + "; } 2>&1 | tee -a " + log
+	if !strings.HasSuffix(line, want) {
+		t.Errorf("expected the close-out's words teed to the log, got %q", line)
+	}
+
+	printed, err := exec.Command(spec.Command[0], spec.Command[1:]...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("running the line: %v\n%s", err, printed)
+	}
+	kept, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("reading the log: %v", err)
+	}
+	if got, want := string(kept), "landed\nError: closing out mw-gq6.6: i/o timeout\n"; got != want {
+		t.Errorf("expected the log to hold the close-out's words, got %q", got)
+	}
+	if !strings.Contains(string(printed), "Error: closing out mw-gq6.6: i/o timeout") {
+		t.Errorf("expected the pane to show the close-out's words too, got %q", printed)
+	}
+}
+
+// A close-out alone (RunCloseOutAgain) keeps its words the same way.
+func TestACloseOutAloneKeepsItsWordsToo(t *testing.T) {
+	spec, err := New().Session(launch(func(l *application.Launch) {
+		l.CloseOutOnly = true
+		l.After = []string{"/root/millwright/bin/mw", "next", "mw-gq6.6"}
+		l.AfterLog = "/root/millwright-vault/runs/mw-gq6.6/next-2.log"
+	}))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	line := spec.Command[2]
+	want := "{ /root/millwright/bin/mw next mw-gq6.6; } 2>&1 | tee -a /root/millwright-vault/runs/mw-gq6.6/next-2.log"
+	if !strings.HasSuffix(line, want) {
+		t.Errorf("expected the close-out alone teed to its log, got %q", line)
+	}
+}
+
+// Without a log path the close-out runs as it always did.
+func TestACloseOutWithNoLogPathIsNotTeed(t *testing.T) {
+	spec, err := New().Session(launch(func(l *application.Launch) {
+		l.After = []string{"/root/millwright/bin/mw", "next", "mw-gq6.6"}
+	}))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	if line := spec.Command[2]; strings.Contains(line, "tee") {
+		t.Errorf("expected no tee without a log path, got %q", line)
 	}
 }

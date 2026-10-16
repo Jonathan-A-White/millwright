@@ -31,6 +31,12 @@ type Launch struct {
 	// 0004). An empty After runs nothing afterwards.
 	After []string
 
+	// AfterLog is the file After's stdout and stderr are kept in as well as
+	// shown in the pane (mw-gq6.487): a close-out that dies says why in its
+	// pane and nowhere else, and the pane is closed when the story is
+	// reclaimed. Empty keeps nothing.
+	AfterLog string
+
 	// Heartbeat is the command that renews this story's claim's lease for as
 	// long as the harness is running: started in the background before the
 	// harness and killed the moment the harness exits, before After runs. It
