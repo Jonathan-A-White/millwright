@@ -449,6 +449,10 @@ type NextReport struct {
 	// run says nothing about it.
 	Rig    Advanced
 	RigDir string
+	// AfterLandingSkipped is the line saying the rig's after-landing command was
+	// named for this host but not run, and why; empty when it ran or none is
+	// named. The mail to the Mayor says it first.
+	AfterLandingSkipped string
 	// Why is the reason nothing landed, empty when something did, and Reason is
 	// the code it is filed under. Refused says it is the branch itself the
 	// checks turned away — no commits, a signed commit, open formula steps,
@@ -1335,6 +1339,7 @@ func (n Next) advanceRig(ctx context.Context, c *closeOut, report *NextReport) {
 	advanced, err := n.Landing.Advance(ctx, c.rigDir, c.target, report.How.Commit)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the rig checkout %s could not be brought up to %s: %v", c.rigDir, c.target, err))
+		report.Rig, report.RigDir = Advanced{Held: "git said: " + firstLine(err.Error())}, c.rigDir
 		return
 	}
 	report.Rig, report.RigDir = advanced, c.rigDir
@@ -2488,6 +2493,9 @@ func (n Next) mayorMail(c *closeOut, report *NextReport, verdict, said string) N
 	if report.AfterLandingStopped > 0 {
 		body = AfterLandingStoppedLine + "\n" + body
 	}
+	if report.Landed && report.AfterLandingSkipped != "" {
+		body = AfterLandingNotRunLine + ": " + strings.TrimPrefix(report.AfterLandingSkipped, "after landing: ") + "\n" + body
+	}
 	if len(report.UnitRestartFailed) > 0 {
 		body = UnitRestartFailedLine + "\n" + body
 	}
@@ -2965,6 +2973,10 @@ func (r NextReport) String() string {
 		fmt.Fprintf(&b, "  rig     %s fast-forwarded to %s on %s\n", r.RigDir, shortCommit(r.How.Commit), r.Target)
 	case r.Rig.Left != "":
 		fmt.Fprintf(&b, "  rig     %s left as it was, not brought up to %s: %s\n", r.RigDir, r.Target, r.Rig.Left)
+	case r.Rig.Level && r.Rig.Held == "":
+		fmt.Fprintf(&b, "  rig     %s was already at %s on %s\n", r.RigDir, shortCommit(r.How.Commit), r.Target)
+	case r.Rig.Held != "":
+		fmt.Fprintf(&b, "  rig     %s is not a place to build %s from: %s\n", r.RigDir, r.Target, r.Rig.Held)
 	}
 	if r.TesterFiled != "" {
 		fmt.Fprintf(&b, "  tester  %s filed to drive this landing on a phone-sized screen\n", r.TesterFiled)

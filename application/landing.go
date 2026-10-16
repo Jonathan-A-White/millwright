@@ -215,10 +215,38 @@ type Landing interface {
 
 // Advanced is what became of the rig's own checkout after a landing: Moved when
 // it was fast-forwarded onto the landed commit, Left as the plain reason when it
-// was left alone. Neither means it was already there.
+// was left alone. Level is a checkout that already held the landed commit, on
+// the target branch, so there was nothing to move (something else brought it up
+// before mw looked); Held is then the reason it is still no place to build from
+// (it is on another branch, or has uncommitted work), empty when it is. Held is
+// also what a git that failed leaves, with Level false.
 type Advanced struct {
 	Moved bool
+	Level bool
 	Left  string
+	Held  string
+}
+
+// Current says the checkout holds the landed commit and may be built from: it
+// was moved onto it, or was level with it and clean. It is what the rig's
+// after-landing command and grist smoke wait for.
+func (a Advanced) Current() bool { return a.Moved || (a.Level && a.Held == "") }
+
+// NotCurrent is the plain reason the checkout is not one to build from, for the
+// note that says the after-landing command was not run; empty when it is
+// Current. target is the branch the landing was made on.
+func (a Advanced) NotCurrent(target string) string {
+	switch {
+	case a.Current():
+		return ""
+	case a.Left != "":
+		return "the rig checkout was left as it was: " + a.Left
+	case a.Held != "" && a.Level:
+		return "the rig checkout is at the landed commit but is no place to build from: " + a.Held
+	case a.Held != "":
+		return "the rig checkout could not be brought up to " + target + ": " + a.Held
+	}
+	return "the rig checkout was not brought up to " + target + " and git gave no reason"
 }
 
 // Commit is one commit a landing would put on the target branch: the short hash
