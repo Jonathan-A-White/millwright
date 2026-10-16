@@ -199,7 +199,7 @@ func (s Status) epicShortfalls(ctx context.Context) ([]EpicShortfall, error) {
 				if story.IsEpic {
 					continue
 				}
-				shape.Stories = append(shape.Stories, domain.StoryShape{Key: story.Story.ID, Labels: story.Labels, Needs: story.Needs})
+				shape.Stories = append(shape.Stories, domain.StoryShape{Key: story.Story.ID, Labels: story.Labels, Needs: story.Needs, Closed: story.Status == StatusClosed})
 			}
 		}
 

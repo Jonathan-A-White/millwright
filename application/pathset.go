@@ -35,6 +35,11 @@ type PathSet struct {
 	Rigs     map[string]string
 	RigFiles RigFiles
 
+	// Rules is where the story's rig's file is read from, to keep the epic's
+	// last story last when the story is filed into it (KeepDemoLast). A nil
+	// Rules keeps nothing.
+	Rules EpicRules
+
 	// Out is where the path that was set is printed. A nil Out prints nothing.
 	Out io.Writer
 }
@@ -113,6 +118,17 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		// set (mw-gq6.371).
 		now := story.Merged().Overlay(path)
 		fmt.Fprintf(s.Out, "Set the path of %s:\n%s", id, pathLines(now))
+	}
+	// A story filed by hand into an epic is made a need of the epic's last
+	// story, as the Tester's is (mw-gq6.498).
+	line, notes := KeepDemoLast(ctx, s.Tracker, s.Rules, story.Merged().Overlay(path).Rig, story.EpicID, id)
+	if s.Out != nil {
+		if line != "" {
+			fmt.Fprintln(s.Out, line)
+		}
+		for _, note := range notes {
+			fmt.Fprintln(s.Out, note)
+		}
 	}
 	return path, nil
 }
