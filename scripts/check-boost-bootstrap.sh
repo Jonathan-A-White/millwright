@@ -34,6 +34,9 @@
 #      a timer drop-in that keeps the five-minute pace (OnCalendar= then
 #      OnCalendar=*:0/5) and starts mw-dispatch.service once, so a fresh box
 #      dispatches within a minute and not at the next hour (mw-5gr3k0.7)
+#   j. the vault's .beads is mode 700 after the clone, and one already there at
+#      0775 is set to 700 and said; bd warns on every call at any other mode,
+#      and a second run skips it (mw-gq6.451)
 # The shell linter is run over the script when it is installed, and skipped when not.
 
 set -eu
@@ -234,7 +237,8 @@ EOF
 
 # The vault a clone produces, with the file that says what a Boost's tables hold.
 VAULT_TEMPLATE=$T/vault-template
-mkdir -p "$VAULT_TEMPLATE/hosts"
+mkdir -p "$VAULT_TEMPLATE/hosts" "$VAULT_TEMPLATE/.beads"
+echo 'issue-prefix: "mw"' >"$VAULT_TEMPLATE/.beads/config.yaml"
 cat >"$VAULT_TEMPLATE/hosts/boost-config.toml" <<'EOF2'
 # the tables a Boost copies from the home's config.toml
 [tests]
@@ -405,6 +409,8 @@ done
 [ -d "$HOME_DIR/argus/.git" ] || fail "$NAME: argus was not cloned"
 [ -d "$HOME_DIR/postern/.git" ] || fail "$NAME: postern was not cloned"
 [ -d "$HOME_DIR/millwright-vault/.git" ] || fail "$NAME: the vault was not cloned"
+# j. the clone's .beads, made at the umask's mode, is 700: bd warns on every call otherwise
+[ "$(stat -c %a "$HOME_DIR/millwright-vault/.beads")" = 700 ] || fail "$NAME: the vault's .beads is mode $(stat -c %a "$HOME_DIR/millwright-vault/.beads"), not 700"
 CONF=$HOME_DIR/.config/mw/config.toml
 grep -Fxq 'host = "cloud1"' "$CONF" || fail "$NAME: config.toml has no host: $(cat "$CONF")"
 grep -Fq 'beads_server_host = "10.88.0.2"' "$CONF" || fail "$NAME: config.toml does not name the beads host: $(cat "$CONF")"
@@ -665,5 +671,25 @@ OUT2=$(boost --env-file "$T/cloud2.env" 2>&1) || RC=$?
 [ "$(snapshot)" = "$before" ] || fail "$NAME: the machine changed"
 [ -z "$(changing "$CALLS")" ] || fail "$NAME: a changing command ran: $(changing "$CALLS")"
 echo "ok: a box made from cloud1's snapshot is cloud2, keeps the rest of its config, and mends its checkouts"
+
+# --- j. a vault already there whose .beads is 0775 is set to 700 ----------------------------
+NAME="a vault already cloned whose .beads is mode 775 is set to 700, and a second run skips it"
+BEADS_DIR=$HOME_DIR/millwright-vault/.beads
+chmod 775 "$BEADS_DIR"
+RC=0
+OUT=$(boost --env-file "$T/cloud2.env" 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
+[ "$(stat -c %a "$BEADS_DIR")" = 700 ] || fail "$NAME: .beads is mode $(stat -c %a "$BEADS_DIR"), not 700: $OUT"
+vault_out=$(printf '%s\n' "$OUT" | awk '/^==> \[/ { on = ($0 ~ /\] vault:/) } on')
+printf '%s\n' "$vault_out" | grep -Fq "    run: chmod 700 $BEADS_DIR" || fail "$NAME: the vault step does not say it set .beads to 700: $vault_out"
+chmod 775 "$BEADS_DIR"
+OUT=$(boost --dry-run --env-file "$T/cloud2.env" 2>&1) || fail "$NAME: the dry run failed: $OUT"
+[ "$(stat -c %a "$BEADS_DIR")" = 775 ] || fail "$NAME: a dry run changed the mode of .beads"
+printf '%s\n' "$OUT" | grep -Fq "    would: chmod 700 $BEADS_DIR" || fail "$NAME: a dry run does not plan the chmod: $OUT"
+chmod 700 "$BEADS_DIR"
+OUT2=$(boost --env-file "$T/cloud2.env" 2>&1) || fail "$NAME: a second run failed: $OUT2"
+vault_out=$(printf '%s\n' "$OUT2" | awk '/^==> \[/ { on = ($0 ~ /\] vault:/) } on')
+printf '%s\n' "$vault_out" | grep -Fq "skip: $BEADS_DIR is mode 700" || fail "$NAME: a second run does not skip .beads: $vault_out"
+echo "ok: $NAME"
 
 echo "OK: contrib/boost-bootstrap.sh prints and runs every step in order, checks before it acts so a second run changes nothing, writes tokens only to mode 600 files, and refuses bad input"
