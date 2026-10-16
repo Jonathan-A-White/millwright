@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 )
 
@@ -179,7 +181,7 @@ func TestTmpLeftoversGoBuildCacheIsClearedOnlyPastItsOwnBudget(t *testing.T) {
 
 	var cleaned int
 	check := &doctor.TmpLeftovers{
-		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, Budget: 100,
+		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, GoBuildBudget: 100,
 		GoClean: func(context.Context) error { cleaned++; return nil },
 	}
 
@@ -213,7 +215,7 @@ func TestTmpLeftoversGoBuildCacheLiveWithAnOpenFileIsLeftAlone(t *testing.T) {
 
 	var cleaned int
 	check := &doctor.TmpLeftovers{
-		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, Budget: 100,
+		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, GoBuildBudget: 100,
 		GoClean: func(context.Context) error { cleaned++; return nil },
 	}
 
@@ -255,7 +257,7 @@ func TestTmpLeftoversGoBuildCacheLiveWithARunningGoProcessIsLeftAlone(t *testing
 
 	var cleaned int
 	check := &doctor.TmpLeftovers{
-		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, Budget: 100,
+		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, GoBuildBudget: 100,
 		GoClean: func(context.Context) error { cleaned++; return nil },
 	}
 
@@ -283,7 +285,7 @@ func TestTmpLeftoversGoBuildCacheUnderBudgetIsNeverCleaned(t *testing.T) {
 
 	var cleaned int
 	check := &doctor.TmpLeftovers{
-		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, Budget: 1000,
+		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, GoBuildBudget: 1000,
 		GoClean: func(context.Context) error { cleaned++; return nil },
 	}
 	if err := check.Cure(context.Background()); err != nil {
@@ -294,7 +296,7 @@ func TestTmpLeftoversGoBuildCacheUnderBudgetIsNeverCleaned(t *testing.T) {
 	}
 }
 
-// tlGoBuildPastBudget is a go-build dir holding 200 bytes, past a budget of
+// tlGoBuildPastBudget is a go-build dir holding 200 bytes, past a go-build budget of
 // 100, with nothing running.
 func tlGoBuildPastBudget(t *testing.T) string {
 	t.Helper()
@@ -329,7 +331,7 @@ func TestTmpLeftoversGoCleanFailingWhileAGoProcessIsLiveIsSkippedNotFailed(t *te
 
 	var cleaned int
 	check := &doctor.TmpLeftovers{
-		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, Budget: 100,
+		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, GoBuildBudget: 100,
 		GoClean: func(context.Context) error {
 			cleaned++
 			tlStartGoProcess(t, proc)
@@ -353,7 +355,7 @@ func TestTmpLeftoversGoCleanFailingWithNoGoProcessLiveStillFails(t *testing.T) {
 	goBuildDir := tlGoBuildPastBudget(t)
 
 	check := &doctor.TmpLeftovers{
-		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, Budget: 100,
+		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, GoBuildBudget: 100,
 		GoClean: func(context.Context) error { return errors.New("exit status 1") },
 	}
 
@@ -368,5 +370,193 @@ func TestTheTmpLeftoversCheckIsQuietWhileItsGoodCureCools(t *testing.T) {
 	quiet, ok := check.(application.DoctorCoolingQuiet)
 	if !ok || !quiet.QuietWhileCooling() {
 		t.Errorf("expected the tmp-leftovers check to be quiet while its good cure cools")
+	}
+}
+
+// tlGoBuildOf is a go-build dir holding one sparse file of size bytes:
+// sized the way the check sizes it, without the disk to hold it.
+func tlGoBuildOf(t *testing.T, dir string, size int64) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	blob := filepath.Join(dir, "blob")
+	f, err := os.Create(blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(size); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// go-build has its own budget, 2 GB unless a host says otherwise, apart from
+// the 200 MB the dead leftovers are held to: a cache 3-5 Builders keep at
+// 600 MB is normal, not a fault (mw-gq6.478).
+func TestTmpLeftoversGoBuildHasItsOwnTwoGigabyteBudget(t *testing.T) {
+	if application.DefaultGoBuildBudgetBytes != 2_000_000_000 {
+		t.Fatalf("expected go-build's default budget to be 2 GB, got %d", application.DefaultGoBuildBudgetBytes)
+	}
+	for _, tc := range []struct {
+		name    string
+		size    int64
+		verdict application.Verdict
+		cleans  int
+	}{
+		{"600 MB", 600_000_000, application.DoctorOK, 0},
+		{"2.5 GB", 2_500_000_000, application.DoctorFaulty, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp, proc := tlHost(t)
+			goBuildDir := filepath.Join(t.TempDir(), "go-build")
+			tlGoBuildOf(t, goBuildDir, tc.size)
+
+			var cleaned int
+			check := &doctor.TmpLeftovers{
+				TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir,
+				GoClean: func(context.Context) error { cleaned++; return nil },
+			}
+			if verdict, reason := check.Probe(context.Background()); verdict != tc.verdict {
+				t.Fatalf("expected %s, got %s (%s)", tc.verdict, verdict, reason)
+			}
+			if err := check.Cure(context.Background()); err != nil {
+				t.Fatalf("curing: %v", err)
+			}
+			if cleaned != tc.cleans {
+				t.Errorf("expected go clean -cache to run %d times, ran %d", tc.cleans, cleaned)
+			}
+		})
+	}
+}
+
+// GoBuildBudget, when set, is go-build's budget, and Budget the dead
+// leftovers' only.
+func TestTmpLeftoversGoBuildBudgetIsApartFromTheLeftoversBudget(t *testing.T) {
+	tmp, proc := tlHost(t)
+	goBuildDir := tlGoBuildPastBudget(t)
+	check := &doctor.TmpLeftovers{TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, Budget: 100, GoBuildBudget: 1000}
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected a 200 byte go-build under its own 1000 byte budget ok, got %s (%s)", verdict, reason)
+	}
+	check.GoBuildBudget = 150
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorFaulty || !strings.Contains(reason, "150") {
+		t.Fatalf("expected faulty past go-build's own 150 byte budget, got %s (%s)", verdict, reason)
+	}
+}
+
+// tlDoctor runs the real check through application.Doctor, on a clock the
+// test moves.
+func tlDoctor(check application.DoctorCheck, now *time.Time) (application.Doctor, *apptest.FakeDoctorNotes) {
+	notes := apptest.NewFakeDoctorNotes()
+	return application.Doctor{
+		Checks: application.DoctorChecks{check},
+		State:  apptest.NewFakeDoctorState(),
+		Log:    &apptest.FakeDoctorLog{},
+		Notes:  notes,
+		Host:   "laptop",
+		Now:    func() time.Time { return *now },
+	}, notes
+}
+
+// Three good cures of a go-build regrown by normal builds in one hour, then
+// a fourth growth: cured, not damped, and nobody woken (mw-gq6.478).
+func TestTmpLeftoversGoBuildRegrownByNormalBuildsIsNeverLeftDamped(t *testing.T) {
+	tmp, proc := tlHost(t)
+	goBuildDir := filepath.Join(t.TempDir(), "go-build")
+	check := &doctor.TmpLeftovers{
+		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir,
+		GoClean: func(context.Context) error { return os.RemoveAll(goBuildDir) },
+	}
+	now := time.Date(2026, 10, 16, 3, 0, 0, 0, time.UTC)
+	doc, notes := tlDoctor(check, &now)
+
+	for i := 0; i < 4; i++ {
+		tlGoBuildOf(t, goBuildDir, 2_500_000_000)
+		report, err := doc.Run(context.Background(), "", false)
+		if err != nil {
+			t.Fatalf("growth %d: %v", i+1, err)
+		}
+		if got := report.Results[0].Verdict; got != "cured" {
+			t.Fatalf("growth %d: expected cured, got %s (%s)", i+1, got, report.Results[0].Reason)
+		}
+		now = now.Add(15 * time.Minute)
+	}
+	if notes.Sets() != 0 {
+		t.Errorf("expected no note to wake anyone, got %d", notes.Sets())
+	}
+}
+
+// A real fault still damps: a go clean that fails, or one that frees nothing
+// because it keeps losing the race to a live go process, three times, leaves
+// the fourth fault damped and the run faulty.
+func TestTmpLeftoversGoBuildCureThatFailsOrFreesNothingIsStillDamped(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		goClean func(proc string) func(context.Context) error
+	}{
+		{"fails", func(string) func(context.Context) error {
+			return func(context.Context) error { return errors.New("exit status 1") }
+		}},
+		{"frees nothing", func(proc string) func(context.Context) error {
+			return func(context.Context) error {
+				pidDir := filepath.Join(proc, "200")
+				if err := os.MkdirAll(pidDir, 0o755); err != nil {
+					return err
+				}
+				if err := os.WriteFile(filepath.Join(pidDir, "comm"), []byte("go\n"), 0o644); err != nil {
+					return err
+				}
+				return errors.New("exit status 1")
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp, proc := tlHost(t)
+			goBuildDir := filepath.Join(t.TempDir(), "go-build")
+			tlGoBuildOf(t, goBuildDir, 2_500_000_000)
+			check := &doctor.TmpLeftovers{
+				TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, GoClean: tc.goClean(proc),
+			}
+			now := time.Date(2026, 10, 16, 3, 0, 0, 0, time.UTC)
+			doc, _ := tlDoctor(check, &now)
+
+			for i := 0; i < 3; i++ {
+				// The go process that won the last race is gone by this tick.
+				_ = os.RemoveAll(filepath.Join(proc, "200"))
+				report, _ := doc.Run(context.Background(), "", false)
+				if got := report.Results[0].Verdict; got != "cured" && got != "cure-failed" {
+					t.Fatalf("try %d: expected a cure tried, got %s (%s)", i+1, got, report.Results[0].Reason)
+				}
+				now = now.Add(15 * time.Minute)
+			}
+			_ = os.RemoveAll(filepath.Join(proc, "200"))
+			report, err := doc.Run(context.Background(), "", false)
+			if got := report.Results[0].Verdict; got != "damped" {
+				t.Errorf("expected the fourth fault damped, got %s (%s)", got, report.Results[0].Reason)
+			}
+			if application.ExitStatus(err) != application.DoctorFaultExit {
+				t.Errorf("expected exit %d, got %d", application.DoctorFaultExit, application.ExitStatus(err))
+			}
+		})
+	}
+}
+
+func TestTheTmpLeftoversCheckEndsItsEpisodeOnlyWithACureThatFreedSomething(t *testing.T) {
+	tmp, proc := tlHost(t)
+	goBuildDir := tlGoBuildPastBudget(t)
+	check := &doctor.TmpLeftovers{TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, GoBuildBudget: 100,
+		GoClean: func(context.Context) error { return nil }}
+	var ends application.DoctorCureEndsEpisode = check
+	if ends.CureEndedEpisode() {
+		t.Errorf("expected no episode ended before any cure ran")
+	}
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("curing: %v", err)
+	}
+	if !ends.CureEndedEpisode() {
+		t.Errorf("expected a cure that cleaned go-build to end its episode")
 	}
 }

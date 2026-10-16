@@ -4309,7 +4309,8 @@ tunnel_host    = "vps"                            # default: the [watch] table's
 tunnel_probe   = "ss -ltn sport = :2222"          # default; run over ssh on tunnel_host
 doctor_wg_hub  = "10.88.0.1:22"                   # default; the hub's ssh host:port, dialed over wg0
 doctor_wg_unit = "wg-quick@wg0"                   # default; the unit wg restarts
-tmp_leftovers_budget_bytes = 200000000            # default (200 MB); tmp-leftovers' and go-build's own budget
+tmp_leftovers_budget_bytes = 200000000            # default (200 MB); tmp-leftovers' budget for dead leftovers
+go_build_budget_bytes      = 2000000000           # default (2 GB); tmp-leftovers' own budget for ~/.cache/go-build
 root_disk_budget_bytes     = 0                    # default 0 = root-disk-budget is inert; else the Windows drive's free bytes when the WSL vhdx was put there
 root_disk_margin_bytes     = 10000000000          # default (10 GB); headroom kept under that budget
 battery_low_percent        = 25                   # default; battery alarms on a fall to this, discharging
@@ -4433,17 +4434,22 @@ this check does not know about, and never one that is live. Faulty once
 their total is past `tmp_leftovers_budget_bytes`, its cure is a plain
 `os.RemoveAll` on exactly the dead ones found; its damper is 5 minutes with a
 cap of 3, and its way back is "none: nothing to restore" — everything it
-removes had no live owner. `~/.cache/go-build` is checked against the same
-budget on its own and cleared with `go clean -cache`, a rebuildable cache,
-rather than deleted by hand; it is never folded into the leftovers' own
-total. A go-build cache past budget with a file open under it, or a `go`,
+removes had no live owner. `~/.cache/go-build` is checked against its own
+budget, `go_build_budget_bytes` (2 GB: several Builders keep it at several
+hundred MB in normal work), and cleared with `go clean -cache`, a
+rebuildable cache, rather than deleted by hand; it is never folded into the
+leftovers' own total. A go-build cache past budget with a file open under it, or a `go`,
 `gotestsum`, `compile`, `link` or `vet` process running, is a live build or
 test rather than a leftover: Probe reports it ok instead of faulty, and Cure
 leaves it for a later tick rather than clearing it out from underneath.
 Faulty again inside the 5-minute wait after a cure that worked (the cache
 regrows fast under several Builders' `go test`) is logged as `damped` but
-leaves with 0 and wakes nobody; the cap of 3 being spent, or a cure that
-failed, still leaves with the fault status.
+leaves with 0 and wakes nobody. A cure that freed something ends the fault's
+episode, so a cache regrown by normal builds is cured again once the wait
+has passed, however often, and never spends the cap; a cure that failed, or
+freed nothing (go clean losing every race to a live build), is counted, and
+the cap of 3 being spent, or a failed cure, still leaves with the fault
+status.
 
 **root-disk-budget** watches the desktop's WSL root against the Windows
 drive that holds its `ext4.vhdx`. The vhdx is sparse: it grows as ext4
