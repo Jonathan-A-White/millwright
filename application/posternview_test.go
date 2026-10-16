@@ -958,10 +958,14 @@ type snapshotting struct {
 	*apptest.FakeTracker
 	snap  application.WorkTracker
 	taken int
+	err   error // what taking a snapshot fails with, when set
 }
 
 func (s *snapshotting) Snapshot(context.Context) (application.WorkTracker, error) {
 	s.taken++
+	if s.err != nil {
+		return nil, s.err
+	}
 	return s.snap, nil
 }
 

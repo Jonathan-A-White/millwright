@@ -718,23 +718,22 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		return report, fmt.Errorf("reading status: whose ledger is today's fuel summed from?")
 	}
 
-	work, err := s.Tracker.WorkInHand(ctx)
-	if err != nil {
-		return report, fmt.Errorf("reading what is in hand: %w", err)
+	// A tracker that can read every bead at once is read through that one read
+	// where it answers: on a Boost each bd call is two seconds, and the blocked
+	// stories, the live epics and their children cost one apiece (431 calls,
+	// 131 s, mw-gq6.492). The read is started now and waited for only by the
+	// reads it answers, so that none of the rest waits on it; a snapshot that
+	// cannot be taken leaves those reads to the tracker itself, slower.
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	if snapshotter, ok := s.Tracker.(TrackerSnapshot); ok {
+		s.Tracker = snapshotRead{WorkTracker: s.Tracker, taken: later(func() (WorkTracker, error) { return snapshotter.Snapshot(ctx) })}
 	}
-
 	// Over a link with a long round trip every read of the tracker is seconds,
 	// and the reads below do not depend on one another, so they are started
 	// together and joined where the report needs each (mw-gq6.356). A tracker
-	// that takes reads side by side makes them cost one wait and not a row.
-	ctx, stop := context.WithCancel(ctx)
-	defer stop()
-	runningRead := map[string]func() (RunningStory, error){}
-	for _, detail := range work.RunningOn(s.Host) {
-		if !detail.Hitl() {
-			runningRead[detail.Story.ID] = later(func() (RunningStory, error) { return s.running(ctx, detail) })
-		}
-	}
+	// that takes reads side by side makes them cost one wait and not a row. The
+	// ones that need no word of what is in hand are started before it is read.
 	var ideasRead func() (string, error)
 	if s.Ideas != nil {
 		ideasRead = later(func() (string, error) { return s.Ideas.Line(ctx), nil })
@@ -742,8 +741,18 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	governorsRead := later(func() ([]StoryDetail, error) { return s.Tracker.ReadyWithLabel(ctx, LabelHitl) })
 	othersWaitRead := later(func() ([]OtherWait, error) { return s.waitingOnOthers(ctx) })
 	blockedRead := later(func() ([]StoryDetail, error) { return s.Tracker.BlockedForHost(ctx, s.Host) })
-	elsewhereRead := later(func() ([]HostWork, error) { return s.elsewhere(ctx, work) })
 	shortfallsRead := later(func() ([]EpicShortfall, error) { return s.epicShortfalls(ctx) })
+	// The reads that stand apart from the rest of the report, each seconds of
+	// its own, are started with the others (mw-gq6.492).
+	var causesRead func() ([]StoryDetail, error)
+	if s.Causes != nil {
+		causesRead = later(func() ([]StoryDetail, error) { return causesMissing(ctx, s.Causes, s.Tracker, s.now()) })
+	}
+	var iceboxRead func() (IceboxSummary, error)
+	if s.Icebox != nil {
+		iceboxRead = later(func() (IceboxSummary, error) { return s.Icebox.Icebox(ctx) })
+	}
+	suitesRead := later(func() ([]SuiteStatus, error) { return s.suiteStatuses(ctx), nil })
 	var graphRead func() ([]domain.GraphBead, error)
 	if s.Graph != nil {
 		graphRead = later(func() ([]domain.GraphBead, error) { return s.Graph.BeadGraph(ctx) })
@@ -761,6 +770,22 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	var gcRead func() (string, error)
 	if s.Notes != nil && report.SyncMode != BeadsSyncShared {
 		gcRead = later(func() (string, error) { return s.Notes.Note(ctx, LastGCKey(s.Host)) })
+	}
+
+	work, err := s.Tracker.WorkInHand(ctx)
+	if err != nil {
+		return report, fmt.Errorf("reading what is in hand: %w", err)
+	}
+	runningRead := map[string]func() (RunningStory, error){}
+	for _, detail := range work.RunningOn(s.Host) {
+		if !detail.Hitl() {
+			runningRead[detail.Story.ID] = later(func() (RunningStory, error) { return s.running(ctx, detail) })
+		}
+	}
+	elsewhereRead := later(func() ([]HostWork, error) { return s.elsewhere(ctx, work) })
+	var dampersRead func() (DampersReport, error)
+	if s.Dampers != nil {
+		dampersRead = later(func() (DampersReport, error) { return s.Dampers.Dampers(ctx, work, s.now()) })
 	}
 
 	closing := closingOut(ctx, s.CloseOuts)
@@ -919,7 +944,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 	report.UncheckedErrors, report.UncheckedErrorsUnread = s.uncheckedErrors(ctx)
 
-	report.Suites = s.suiteStatuses(ctx)
+	report.Suites, _ = suitesRead()
 	report.LandRush = s.landRushStatuses(ctx, work)
 
 	if graphRead != nil {
@@ -970,8 +995,8 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			report.Benchmarks = ReadBenchmarks(past, s.Bench)
 		}
 	}
-	if s.Causes != nil {
-		if missing, err := causesMissing(ctx, s.Causes, s.Tracker, s.now()); err != nil {
+	if causesRead != nil {
+		if missing, err := causesRead(); err != nil {
 			s.print(fmt.Sprintf("mw status: the refused stories without a cause could not be read: %v\n", err))
 		} else {
 			report.CausesMissing = missing
@@ -1082,9 +1107,9 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		report.HeldHands = read.held
 	}
 
-	if s.Icebox != nil {
+	if iceboxRead != nil {
 		// A line the report can do without costs it only the line.
-		if summary, err := s.Icebox.Icebox(ctx); err != nil {
+		if summary, err := iceboxRead(); err != nil {
 			s.print("mw status: " + err.Error() + "\n")
 		} else {
 			report.Icebox = summary
@@ -1093,9 +1118,9 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 
 	report.OpenButClaimed = work.OpenClaimed
 
-	if s.Dampers != nil {
+	if dampersRead != nil {
 		// An alarm that cannot be judged costs the report only its section.
-		if dampers, err := s.Dampers.Dampers(ctx, work, s.now()); err != nil {
+		if dampers, err := dampersRead(); err != nil {
 			s.print("mw status: the dampers could not be read: " + err.Error() + "\n")
 		} else {
 			report.Dampers = dampers
@@ -1179,6 +1204,44 @@ func (r *StatusReport) markGuests(ctx context.Context, rules EpicRules) error {
 type heldHandsRead struct {
 	held []StoryDetail
 	err  error
+}
+
+// snapshotRead is a tracker whose reads of every bead are answered by a
+// snapshot of it taken beside the status's other reads, and waited for only here:
+// the reads a snapshot answers (LiveEpics, ShowEpics, ShowBeads, BlockedForHost
+// and StoriesComments) wait for it and every other read goes straight to the
+// tracker. A snapshot that cannot be taken leaves all of them to the tracker.
+type snapshotRead struct {
+	WorkTracker
+	taken func() (WorkTracker, error)
+}
+
+// reader is the snapshot when it was taken, else the tracker itself.
+func (r snapshotRead) reader() WorkTracker {
+	if snapshot, err := r.taken(); err == nil {
+		return snapshot
+	}
+	return r.WorkTracker
+}
+
+func (r snapshotRead) LiveEpics(ctx context.Context) ([]string, error) {
+	return r.reader().LiveEpics(ctx)
+}
+
+func (r snapshotRead) ShowEpics(ctx context.Context, ids []string) ([]EpicDetail, error) {
+	return r.reader().ShowEpics(ctx, ids)
+}
+
+func (r snapshotRead) ShowBeads(ctx context.Context, ids []string) ([]StoryDetail, error) {
+	return r.reader().ShowBeads(ctx, ids)
+}
+
+func (r snapshotRead) BlockedForHost(ctx context.Context, host string) ([]StoryDetail, error) {
+	return r.reader().BlockedForHost(ctx, host)
+}
+
+func (r snapshotRead) StoriesComments(ctx context.Context, ids []string) (map[string][]Comment, error) {
+	return r.reader().StoriesComments(ctx, ids)
 }
 
 // later starts f in a goroutine of its own and returns the function that waits
