@@ -2667,3 +2667,30 @@ func TestSleepNamesTheNightlyAndTheSundayModelAndEffort(t *testing.T) {
 		t.Fatalf("read = %+v (%v), want %+v", got, err, want)
 	}
 }
+
+// The Google OAuth client's JSON lives under the home directory unless config
+// or the environment says otherwise, and a path said is a full one; the token
+// is always ~/.config/mw/google-token.json, never a setting that could point
+// it into the vault.
+func TestGoogleClientFileDefaultsUnderTheHomeAndIsRead(t *testing.T) {
+	t.Setenv(config.GoogleClientFileEnv, "")
+	home := writeConfig(t, "")
+	if path, err := config.GoogleClientFile(); err != nil || path != filepath.Join(home, ".config", "mw", "google-client.json") {
+		t.Fatalf("expected ~/.config/mw/google-client.json, got %q %v", path, err)
+	}
+	if path, err := config.GoogleTokenFile(); err != nil || path != filepath.Join(home, ".config", "mw", "google-token.json") {
+		t.Fatalf("expected ~/.config/mw/google-token.json, got %q %v", path, err)
+	}
+	writeConfig(t, "google_client_file = \"/keys/client.json\"\n")
+	if path, err := config.GoogleClientFile(); err != nil || path != "/keys/client.json" {
+		t.Fatalf("expected the config's client file, got %q %v", path, err)
+	}
+	t.Setenv(config.GoogleClientFileEnv, "/env/client.json")
+	if path, _ := config.GoogleClientFile(); path != "/env/client.json" {
+		t.Fatalf("expected the environment ahead of the file, got %q", path)
+	}
+	t.Setenv(config.GoogleClientFileEnv, "relative/client.json")
+	if _, err := config.GoogleClientFile(); err == nil || !strings.Contains(err.Error(), "full path") {
+		t.Fatalf("expected a relative path refused, got %v", err)
+	}
+}

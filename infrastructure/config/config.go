@@ -19,6 +19,7 @@
 //	millhand_review_model = "opus"
 //	deputy_model = "sonnet"
 //	grist_test_key_file = "/home/jwhite/.config/mw/grist-test.key"   # what mw grist smoke sends as
+//	google_client_file = "/home/jwhite/.config/mw/google-client.json" # the Desktop OAuth client mw google link signs in with
 //	beads_sync = "remote"
 //	beads_backup_minutes = 30
 //	beads_server_host = "laptop.mw"    # only for beads_sync = "auto" on a boost
@@ -186,6 +187,9 @@ const (
 	// sends its examples as.
 	GristTestKeyFileEnv = "MW_GRIST_TEST_KEY_FILE"
 	AgeKeyFileEnv       = "MW_AGE_KEY_FILE"
+	// GoogleClientFileEnv replaces google_client_file, the Desktop OAuth
+	// client's JSON mw google link signs in with.
+	GoogleClientFileEnv = "MW_GOOGLE_CLIENT_FILE"
 	GristStateDirEnv    = "MW_GRIST_STATE_DIR"
 
 	BeadsSyncEnv          = "MW_BEADS_SYNC"
@@ -779,6 +783,34 @@ func GristTestKeyFile() (string, error) {
 			path, File, GristTestKeyFileEnv)
 	}
 	return path, nil
+}
+
+// DefaultGoogleClientFile is where the Desktop OAuth client's JSON, as the
+// Google Cloud console downloads it, is kept under the home directory when
+// nothing says otherwise. He makes it; mw only reads it.
+var DefaultGoogleClientFile = filepath.Join(".config", "mw", "google-client.json")
+
+// DefaultGoogleTokenFile is where mw google link keeps the refresh token, mode
+// 0600, under the home directory. It is not a setting: the token is never
+// pointed into the vault or anywhere else it could be synced.
+var DefaultGoogleTokenFile = filepath.Join(".config", "mw", "google-token.json")
+
+// GoogleClientFile reports where the Desktop OAuth client's JSON is:
+// $MW_GOOGLE_CLIENT_FILE if it is set, otherwise the root-table
+// `google_client_file` key of ~/.config/mw/config.toml, a full path either way,
+// and DefaultGoogleClientFile under the home directory when neither says.
+func GoogleClientFile() (string, error) {
+	return fullPathSetting("google_client_file", GoogleClientFileEnv, DefaultGoogleClientFile, "the Google OAuth client file")
+}
+
+// GoogleTokenFile reports where mw google link keeps the refresh token:
+// DefaultGoogleTokenFile under the home directory, always.
+func GoogleTokenFile() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("there is no home directory to keep the Google token in: %w", err)
+	}
+	return filepath.Join(home, DefaultGoogleTokenFile), nil
 }
 
 // GristSmokePaths reports, for each rig, the paths of its grist client whose
