@@ -110,7 +110,7 @@ func TestFileRefusesAStoryWhoseFilesKeyNamesACrowdedDirectory(t *testing.T) {
 	tracker.AddFormula("tdd-feature")
 	plan := twoStoryPlan()
 	plan.Epic.Defaults.Rig = "lampas"
-	plan.Stories = []domain.PlanStory{{Key: "talk", Title: "Talk sends twice", Acceptance: "make test passes",
+	plan.Stories = []domain.PlanStory{{Key: "talk", Title: "Talk sends twice", Acceptance: "make test passes\nExpect: none, because a test plan",
 		Files: "src/Talk.tsx,src/,features/ask-composer.feature"}}
 
 	_, err := application.File{Tracker: tracker, Rigs: rigs, RigFiles: files}.Run(context.Background(), plan)
@@ -131,7 +131,7 @@ func TestFileRefusesABareDirectoryWithNoCheckoutToCountIt(t *testing.T) {
 	tracker := apptest.NewFakeTracker()
 	tracker.AddFormula("tdd-feature")
 	plan := twoStoryPlan()
-	plan.Stories = []domain.PlanStory{{Key: "talk", Title: "Talk sends twice", Acceptance: "make test passes", Files: "src/"}}
+	plan.Stories = []domain.PlanStory{{Key: "talk", Title: "Talk sends twice", Acceptance: "make test passes\nExpect: none, because a test plan", Files: "src/"}}
 
 	if _, err := (application.File{Tracker: tracker}).Run(context.Background(), plan); err == nil ||
 		!strings.Contains(err.Error(), "a whole directory") {
