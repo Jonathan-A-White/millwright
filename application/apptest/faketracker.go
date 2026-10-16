@@ -1347,6 +1347,26 @@ func (f *FakeTracker) ClosedWithLabel(_ context.Context, label string, since tim
 	return closed, nil
 }
 
+// IcedBeads implements application.IcedBeads: every held story the fake holds
+// that carries the icebox label, in the order filed. An epic is not listed.
+func (f *FakeTracker) IcedBeads(_ context.Context) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, "IcedBeads")
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	var iced []application.StoryDetail
+	for _, id := range f.order {
+		s := f.stories[id]
+		if s.detail.IsEpic || s.detail.Status != StatusDeferred || !carries(s.detail.Labels, application.LabelIcebox) {
+			continue
+		}
+		iced = append(iced, s.detail)
+	}
+	return iced, nil
+}
+
 // carries reports whether a story's labels include the one asked for.
 func carries(labels []string, label string) bool {
 	for _, have := range labels {

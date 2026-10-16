@@ -200,6 +200,11 @@ type Status struct {
 	// for the HELD, WITH A HANDS STEP section. A nil HeldHands leaves it out.
 	HeldHands HeldHandsReader
 
+	// Icebox is where the ICEBOX line is read from. A nil Icebox leaves it out.
+	Icebox interface {
+		Icebox(ctx context.Context) (IceboxSummary, error)
+	}
+
 	// Rules is where each rig's requirements of its epics are read from, for
 	// the EPICS MISSING REQUIREMENTS and EPICS WAIVED sections. A nil Rules
 	// leaves both out.
@@ -517,7 +522,9 @@ type StatusReport struct {
 	WaitingOnMayor []PosternViewNeed
 	// HeldHands are the held beads that keep a hands step, in id order.
 	HeldHands []StoryDetail
-	NeedsAt   time.Time
+	// Icebox is the ICEBOX line's facts; its Known is false when not read.
+	Icebox  IceboxSummary
+	NeedsAt time.Time
 	// OpenButClaimed are the open stories whose assignee is still a host
 	// (mw@<host>): no session runs them and dispatch will not take them, in
 	// the order the tracker listed them.
@@ -1037,6 +1044,15 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		report.HeldHands = read.held
 	}
 
+	if s.Icebox != nil {
+		// A line the report can do without costs it only the line.
+		if summary, err := s.Icebox.Icebox(ctx); err != nil {
+			s.print("mw status: " + err.Error() + "\n")
+		} else {
+			report.Icebox = summary
+		}
+	}
+
 	report.OpenButClaimed = work.OpenClaimed
 
 	if err := report.markGuests(ctx, s.Rules); err != nil {
@@ -1549,6 +1565,11 @@ func (r StatusReport) String() string {
 		for _, d := range r.HeldHands {
 			writeStory(&b, d, "no Run until it is open")
 		}
+		b.WriteString("\n")
+	}
+
+	if r.Icebox.Known {
+		clip(&b, r.Icebox.Line())
 		b.WriteString("\n")
 	}
 
