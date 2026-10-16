@@ -594,6 +594,18 @@ Feature: Dispatching the stories this host is ready to work
     Then no session was started
     And dispatch passed over "mw-gq6.1", saying: the Governor must be present for it
 
+  Scenario: The Governor's own demo, labelled demo with no files key, is passed over
+    Given a ready story "mw-gq6.1" of that epic labelled "demo"
+    When dispatch runs on "vps" with a cap of 1
+    Then no session was started
+    And the story "mw-gq6.1" is not claimed
+    And dispatch passed over "mw-gq6.1", saying: the Governor must be present for it (labelled demo
+
+  Scenario: A demo a Builder builds, labelled demo with a files key, is dispatched as before
+    Given a ready story "mw-gq6.1" of that epic labelled "demo" expecting to change "docs/demo-x.md"
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+
   Scenario: A story the Governor must be present for does not use up the cap
     Given a ready story "mw-gq6.1" of that epic
     And a story "mw-gq6.9" of that epic labelled "hitl" is already running here

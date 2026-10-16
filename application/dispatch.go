@@ -752,8 +752,12 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// First, so that a story that is not a session's to take is never passed
 		// over for the cap instead: the cap is not what stops it.
 		if detail.Hitl() {
+			label := LabelHitl
+			if !hasHitlLabel(detail.Labels) {
+				label = LabelDemo + ", no files key"
+			}
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
-				"the Governor must be present for it (labelled %s): it is worked with the Mayor, never by a dispatched session", LabelHitl)})
+				"the Governor must be present for it (labelled %s): it is worked with the Mayor, never by a dispatched session", label)})
 			continue
 		}
 		// gate: no-path

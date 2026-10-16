@@ -90,6 +90,11 @@ func TestReclaimDeadPaneHoldsADemoWhoseBranchAlreadyLanded(t *testing.T) {
 			if err := tracker.SetLabels("mw-gq6.9", application.LabelDemo); err != nil {
 				t.Fatalf("labelling the story: %v", err)
 			}
+			// A demo a Builder builds names its files; one with none is the
+			// Governor's own, which no session claims (mw-gq6.535).
+			if err := tracker.SetStoryMetadata(context.Background(), "mw-gq6.9", map[string]string{"files": "docs/demo-x.md"}); err != nil {
+				t.Fatalf("giving the demo files: %v", err)
+			}
 		},
 		"titled": func(t *testing.T, tracker *apptest.FakeTracker) {
 			if err := tracker.SetTitle("mw-gq6.9", "DEMO the catch-it-first doc"); err != nil {

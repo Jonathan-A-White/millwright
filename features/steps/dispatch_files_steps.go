@@ -21,6 +21,7 @@ import (
 // stories whose branches have changed some, and mw status reading the same.
 func (c *dispatchContext) registerFileSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a ready story "([^"]*)" of that epic expecting to change "([^"]*)"$`, c.aReadyStoryExpectingToChange)
+	ctx.Given(`^a ready story "([^"]*)" of that epic labelled "([^"]*)" expecting to change "([^"]*)"$`, c.aReadyStoryLabelledExpectingToChange)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here, expecting to change "([^"]*)"$`, c.aStoryRunningExpectingToChange)
 	ctx.Given(`^a story "([^"]*)" of that epic is running on "([^"]*)", expecting to change "([^"]*)"$`, c.aStoryRunningOnAnotherHostExpectingToChange)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here, its branch changing "([^"]*)"$`, c.aStoryRunningWithItsBranchChanging)
@@ -45,6 +46,15 @@ func (c *dispatchContext) theRigExpectsAFilesKey(rigName string) error {
 
 func (c *dispatchContext) aReadyStoryExpectingToChange(id, files string) error {
 	return c.aReadyStoryThatOverrides(id, "files", files)
+}
+
+// aReadyStoryLabelledExpectingToChange is a ready story carrying a label and
+// naming the files it expects to change (mw-gq6.535).
+func (c *dispatchContext) aReadyStoryLabelledExpectingToChange(id, label, files string) error {
+	if err := c.aReadyStoryExpectingToChange(id, files); err != nil {
+		return err
+	}
+	return c.tracker.SetLabels(id, label)
 }
 
 // aStoryRunningUnderTheFormula is a story pathed to a formula and claimed here

@@ -106,7 +106,11 @@ func (q Queue) Run(ctx context.Context) (QueueReport, error) {
 	for _, detail := range inStartOrder(unblocked) {
 		row := q.row(detail)
 		if detail.Hitl() {
-			row.Held = "the Governor must be present for it (hitl)"
+			why := LabelHitl
+			if !hasHitlLabel(detail.Labels) {
+				why = LabelDemo
+			}
+			row.Held = "the Governor must be present for it (" + why + ")"
 		} else if share, sharing := shares.shared(ctx, detail); sharing {
 			row.Held = share.String()
 		}

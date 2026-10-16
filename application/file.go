@@ -238,6 +238,7 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	// The stories go in the order nothing comes before what it waits on, so
 	// that a story can name what it waits on by the id it already has.
 	ids := make(map[string]string, len(order))
+	var ownDemos []string
 	for _, story := range order {
 		path, err := story.PathFrom(plan.Epic.Defaults)
 		if err != nil {
@@ -268,6 +269,9 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 			inFlight = inFlightFor(work, path)
 		}
 		ids[story.Key] = id
+		if governorsDemo(story.Labels, story.PathOverrides().Files) && !hasHitlLabel(story.Labels) {
+			ownDemos = append(ownDemos, id)
+		}
 		filed.Stories = append(filed.Stories, FiledStory{
 			ID:              id,
 			Key:             story.Key,
@@ -297,6 +301,9 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	}
 	// Warnings only: the stories are filed, and released, all the same.
 	f.print(sizeWarnings(filed.Stories, true, false))
+	for _, id := range ownDemos {
+		f.print(demoNoHitlLine(id) + "\n")
+	}
 	if workErr != nil {
 		f.print(fmt.Sprintf("\nWhat is in flight on the rig could not be read, so no story above says what it overlaps: %v\n", workErr))
 	}

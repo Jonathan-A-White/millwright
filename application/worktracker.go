@@ -376,8 +376,29 @@ func (d StoryDetail) Closed() bool {
 
 // Hitl reports whether this story is worked with the Governor present, which
 // no dispatcher may take and which is not a session for a host's cap to count.
+// The Governor's own demo is one (GovernorsDemo), labelled hitl or not.
 func (d StoryDetail) Hitl() bool {
-	return hasHitlLabel(d.Labels)
+	return hasHitlLabel(d.Labels) || d.GovernorsDemo()
+}
+
+// GovernorsDemo reports whether this story is labelled demo and names no files
+// of its own: his own demo, which closes on his word and which no Builder
+// works. A demo a Builder builds writes a file and so has a files key
+// (mw-gq6.535).
+func (d StoryDetail) GovernorsDemo() bool {
+	return governorsDemo(d.Labels, d.Story.Overrides.Files)
+}
+
+// governorsDemo is GovernorsDemo for a story's labels and its own files key.
+func governorsDemo(labels []string, files string) bool {
+	return hasLabel(labels, LabelDemo) && strings.TrimSpace(files) == ""
+}
+
+// demoNoHitlLine is the warning for a story labelled demo that has neither hitl nor
+// a files key, which mw file and mw path set print: it reads as the Governor's
+// own demo, and is held from every dispatcher.
+func demoNoHitlLine(id string) string {
+	return fmt.Sprintf("%s is labelled demo with no files key and no hitl label: it is held as the Governor's own demo, so no Builder works it (a Builder-built demo names its files: mw path set %s files=...)", id, id)
 }
 
 // Todo reports whether this bead is an item on one of the Governor's own
