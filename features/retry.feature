@@ -149,3 +149,37 @@ Feature: mw retry
     Then the retry succeeds
     And the retry printed no cause reminder
     And the story "mw-gq6.1" is open and unassigned
+
+  # mw-gq6.434: a session the harness stopped (a usage limit, a rate limit, an
+  # overloaded or failing API) spent nothing of the story's own, so its attempt
+  # is not counted, and the host claims nothing new until the time it named.
+
+  Scenario: A usage-limit stop is retried without counting its attempt, and the host is held until the reset
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the session of "mw-gq6.1" was stopped by the harness, saying: You've hit your weekly limit · resets Oct 16, 9am (America/New_York)
+    And the session of "mw-gq6.1" has ended
+    When mw retries "mw-gq6.1" at "2026-10-15T10:00:00Z"
+    Then the retry succeeds
+    And the story "mw-gq6.1" is open and unassigned
+    And the stopped attempt of "mw-gq6.1" is not counted: it records 0 attempts
+    And the retry says the next dispatch tick takes "mw-gq6.1" as attempt 1
+    And the retry holds new claims on "vps" until "2026-10-16T13:00:00Z"
+
+  Scenario: A story whose last allowed attempt hit the usage limit is retried, not refused as exhausted
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the story "mw-gq6.1" has been tried 3 times in all
+    And the session of "mw-gq6.1" was stopped by the harness, saying: You've hit your weekly limit · resets Oct 16, 3pm (America/New_York)
+    And the session of "mw-gq6.1" has ended
+    When mw retries "mw-gq6.1" at "2026-10-15T20:00:00Z"
+    Then the retry succeeds
+    And the stopped attempt of "mw-gq6.1" is not counted: it records 2 attempts
+    And the retry holds new claims on "vps" until "2026-10-16T19:00:00Z"
+
+  Scenario: A session the work itself failed is retried as before, its attempt counted
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the session of "mw-gq6.1" ended in error, its result saying: the session ran out of fuel
+    And the session of "mw-gq6.1" has ended
+    When mw retries "mw-gq6.1" at "2026-10-15T10:00:00Z"
+    Then the retry succeeds
+    And the story "mw-gq6.1" still records 1 attempt
+    And the retry holds no claims on "vps"

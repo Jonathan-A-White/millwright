@@ -18,6 +18,7 @@ var DispatchGates = []DispatchGate{
 	{"no-path", "the story's path cannot be read"},
 	{"no-host", "the path names no host"},
 	{"other-host", "the path names another host"},
+	{"harness-hold", "the harness stopped a session here (usage limit, rate limit, overloaded or failing API) and the time it named has not come"},
 	{"no-room", "the host has no room: load, or a grist tutor in use"},
 	{"landed", "its last run landed it and only the close was lost"},
 	{"blocked", "it waits on a story that is not closed"},
