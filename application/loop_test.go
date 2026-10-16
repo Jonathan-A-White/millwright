@@ -139,3 +139,14 @@ func TestLoopBriefJSONHasTheSixKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestLoopBriefPrintsTheBoundTheResultCarries(t *testing.T) {
+	in := loopFixture()
+	in.Result.InvestShare.Bound = application.BoundMax
+	in.Result.InvestShare.Max = 33
+	in.Result.InvestShare.Reason = "quality falling: refusals up"
+	text := application.ReadLoopBrief(in).String()
+	if !strings.Contains(text, "bound: up to 33% allowed (quality falling: refusals up)") {
+		t.Errorf("the brief lacks the bound line:\n%s", text)
+	}
+}

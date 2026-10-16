@@ -191,6 +191,9 @@ func ReadLoopBrief(in LoopInputs) LoopBrief {
 	if brief.Share.Lines == nil {
 		brief.Share.Lines = []string{}
 	}
+	if r.InvestShare != nil {
+		brief.Share.Bound = r.InvestShare.boundWords()
+	}
 	return brief
 }
 

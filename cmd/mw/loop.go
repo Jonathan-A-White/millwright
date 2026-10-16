@@ -56,7 +56,7 @@ func newLoopBriefCmd() *cobra.Command {
 			if around != "" {
 				return fmt.Errorf("--since %q names a landing; the brief reads a window: 7d, a day or a UTC time", since)
 			}
-			share, err := config.FactoryInvestShare()
+			share, shareMin, shareMax, err := investShareSettings()
 			if err != nil {
 				return err
 			}
@@ -69,7 +69,7 @@ func newLoopBriefCmd() *cobra.Command {
 					Seat:        BuilderSeat,
 					Since:       from,
 					Investments: files,
-					InvestShare: share,
+					InvestShare: share, InvestShareMin: shareMin, InvestShareMax: shareMax,
 				},
 				Errors:       files,
 				Seat:         BuilderSeat,
