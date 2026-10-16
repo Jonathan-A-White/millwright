@@ -485,6 +485,11 @@ type StatusReport struct {
 	// Sharing are the ready stories mw dispatch passes over for a file a
 	// running story here shares with them, by story id (mw-gq6.349).
 	Sharing map[string]FileShare
+	// HeldByFiles is the line for each ready story mw dispatch has held for a
+	// shared file longer than FilesHeldTooLong, by story id, as the host's note
+	// has it (mw-gq6.442): a story starved by a files key wider than it needs
+	// shows itself.
+	HeldByFiles map[string]string
 	// Waiting are the beads labelled hitl that are open and not blocked, on any
 	// host or none, and the stories labelled hitl this host has claimed: worked
 	// with the Governor present, so neither a dispatcher's to take nor a session
@@ -756,6 +761,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		report.Ready = append(report.Ready, detail)
 	}
 	report.Sharing = s.sharing(ctx, report.Running, report.Ready)
+	report.HeldByFiles = s.heldByFiles(ctx, report.Ready)
 
 	// A bead for the Governor may have no Path at all, so no listing keyed by
 	// host finds it: ask for the label itself. A hitl story ready on this host
@@ -1057,6 +1063,26 @@ func (s Status) sharing(ctx context.Context, running []RunningStory, ready []Sto
 		s.print("mw status: " + note + "\n")
 	}
 	return sharing
+}
+
+// heldByFiles is the line for each ready story the host's dispatch has held for
+// a shared file past FilesHeldTooLong, by id; nil when none has been, or there
+// are no notes to read.
+func (s Status) heldByFiles(ctx context.Context, ready []StoryDetail) map[string]string {
+	if s.Notes == nil {
+		return nil
+	}
+	since := readFilesHeld(ctx, s.Notes, s.Host)
+	var lines map[string]string
+	for _, detail := range ready {
+		if line := heldByFiles(since[detail.Story.ID], s.now()); line != "" {
+			if lines == nil {
+				lines = map[string]string{}
+			}
+			lines[detail.Story.ID] = line
+		}
+	}
+	return lines
 }
 
 // markGuests sets Guest on every story of the report whose rig is a guest repo.
@@ -1434,6 +1460,9 @@ func (r StatusReport) String() string {
 		// Wrapped, not clipped: a long path must not cut off whom it waits for.
 		if share, sharing := r.Sharing[d.Story.ID]; sharing {
 			wrapInto(&b, "    ", share.String())
+		}
+		if held := r.HeldByFiles[d.Story.ID]; held != "" {
+			wrapInto(&b, "    ", held)
 		}
 	}
 	b.WriteString("\n")
