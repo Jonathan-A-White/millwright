@@ -26,3 +26,10 @@ func Template() fs.FS {
 //
 //go:embed grinds/todo-rank.md
 var TodoRankInstructions string
+
+// TrimMergeScript is scripts/trim-merge.sh: the trim-safe merge driver mw
+// passes on every merge it makes (infrastructure/gitcmd.WriteMergeDriver), so
+// that any rig and the vault have it with no checkout of millwright beside them.
+//
+//go:embed scripts/trim-merge.sh
+var TrimMergeScript string

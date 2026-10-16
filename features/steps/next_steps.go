@@ -1428,8 +1428,9 @@ func (c *nextContext) theLedgerHoldsOneLineFor(id string) error {
 // mergedOncePushedOnce reads what git was really asked to do, across every run
 // of the close-out in this scenario: a story landed once is merged once and
 // pushed once, however many times mw next is run afterwards. The landing's own
-// merge is the one counted (`merge --no-edit`, made in the landing worktree):
-// the `merge --ff-only` that brings the rig checkout level is not a landing.
+// merge is the one counted (`merge --no-edit`, made in the landing worktree,
+// after the -c that defines mw's merge driver): the `merge --ff-only` that
+// brings the rig checkout level is not a landing.
 func (c *nextContext) mergedOncePushedOnce() error {
 	asked, err := os.ReadFile(c.gitLog)
 	if err != nil {
@@ -1438,7 +1439,7 @@ func (c *nextContext) mergedOncePushedOnce() error {
 	merges, pushes := 0, 0
 	for _, line := range strings.Split(string(asked), "\n") {
 		switch {
-		case strings.HasPrefix(line, "merge --no-edit "):
+		case strings.Contains(" "+line, " merge --no-edit "):
 			merges++
 		case strings.HasPrefix(line, "push "):
 			pushes++

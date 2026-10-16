@@ -1,6 +1,6 @@
 package contrib_test
 
-// docs/codemap.md is merged by scripts/codemap-merge.sh, named merge=codemap in
+// docs/codemap.md is merged by scripts/trim-merge.sh, named merge=codemap in
 // .gitattributes (mw-gq6.495). Two stories that each add a row near each other
 // both keep it, as union gave (mw-gq6.408); unlike union, a story that trims
 // rows does not get the old rows back when main added one meanwhile
@@ -49,10 +49,10 @@ func TestCodemapIsMergedByTheCodemapDriver(t *testing.T) {
 }
 
 // codemapDriver is the merge.codemap.driver mw passes on its merges: the
-// rig's own scripts/codemap-merge.sh, with nothing in any git config.
+// rig's own scripts/trim-merge.sh, with nothing in any git config.
 func codemapDriver(t *testing.T) string {
 	t.Helper()
-	script, err := filepath.Abs("../scripts/codemap-merge.sh")
+	script, err := filepath.Abs("../scripts/trim-merge.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,11 +220,11 @@ func TestWithoutTheDriverAMergeStopsOnAConflictAndTheCheckRefusesIt(t *testing.T
 	}
 }
 
-// runDriver runs scripts/codemap-merge.sh on the three versions as git would,
+// runDriver runs scripts/trim-merge.sh on the three versions as git would,
 // and returns what it left in ours.
 func runDriver(t *testing.T, base, ours, theirs string) string {
 	t.Helper()
-	script, err := filepath.Abs("../scripts/codemap-merge.sh")
+	script, err := filepath.Abs("../scripts/trim-merge.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func runDriver(t *testing.T, base, ours, theirs string) string {
 	cmd := exec.Command("sh", script, "base", "ours", "theirs")
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("codemap-merge.sh: %v\n%s", err, out)
+		t.Fatalf("trim-merge.sh: %v\n%s", err, out)
 	}
 	merged, err := os.ReadFile(filepath.Join(dir, "ours"))
 	if err != nil {

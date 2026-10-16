@@ -1128,7 +1128,7 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 		return fmt.Sprintf("the session to rebase it could not be assembled: %v", err)
 	}
 	if err := n.Landing.UnionNotes(ctx, c.worktree); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("CLAUDE.md could not be set to merge as a union in %s: %v", c.worktree, err))
+		report.Notes = append(report.Notes, fmt.Sprintf("CLAUDE.md could not be set to merge by mw's trim-safe driver in %s: %v", c.worktree, err))
 	}
 	sendFields := map[string]string{
 		RebaseSendsField: strconv.Itoa(sends + 1), RebaseBaseField: head,
@@ -2942,7 +2942,7 @@ func (r NextReport) String() string {
 	case r.Landed:
 		fmt.Fprintf(&b, "  landed  %s on %s (%d commits, %d push(es))\n", r.How.LandedAs(r.Target), r.Target, r.Commits, r.Pushes)
 		if len(r.How.Unioned) > 0 {
-			fmt.Fprintf(&b, "  union-merged: %s (conflicts the rig lists as append-mostly, both sides' lines kept, tested together)\n", strings.Join(r.How.Unioned, ", "))
+			fmt.Fprintf(&b, "  trim-merged: %s (conflicts in files the rig lists, settled by mw's trim-safe driver: both sides' added lines kept, removed ones left out, tested together)\n", strings.Join(r.How.Unioned, ", "))
 		}
 	case r.Tested != "" && r.Findings.Text == "":
 		fmt.Fprintf(&b, "  tested  %s by an earlier run of mw next: nothing was read or written again\n", r.Tested)

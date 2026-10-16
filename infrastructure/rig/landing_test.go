@@ -540,8 +540,8 @@ func TestAConflictInAnotherFileStillStopsTheLanding(t *testing.T) {
 }
 
 // TestUnionNotesMakesARebaseKeepBothAppendedLines drives real git in a story
-// worktree: after UnionNotes, a rebase onto a main that also appended to CLAUDE.md
-// goes through with no stop.
+// worktree: after UnionNotes, mw's rebase onto a main that also appended to
+// CLAUDE.md goes through with no stop, by the trim-safe driver it passes.
 func TestUnionNotesMakesARebaseKeepBothAppendedLines(t *testing.T) {
 	here, _ := aRig(t)
 	ctx := context.Background()
@@ -567,7 +567,9 @@ func TestUnionNotesMakesARebaseKeepBothAppendedLines(t *testing.T) {
 	if err := worktrees.UnionNotes(ctx, work); err != nil {
 		t.Fatalf("setting up the union a second time: %v", err)
 	}
-	run(t, work, "git", "rebase", "origin/main")
+	if rebased, err := worktrees.Rebase(ctx, work, "origin/main"); err != nil || !rebased {
+		t.Fatalf("rebasing onto main: %v, %v", rebased, err)
+	}
 	got := run(t, work, "git", "show", "HEAD:CLAUDE.md")
 	for _, want := range []string{"one learned this", "two learned that"} {
 		if !strings.Contains(got, want) {
@@ -582,7 +584,7 @@ func TestUnionNotesMakesARebaseKeepBothAppendedLines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading info/attributes: %v", err)
 	}
-	if n := strings.Count(string(body), "CLAUDE.md merge=union"); n != 1 {
+	if n := strings.Count(string(body), "CLAUDE.md merge=trimsafe"); n != 1 {
 		t.Errorf("expected the rule exactly once, found %d in:\n%s", n, body)
 	}
 }
@@ -872,17 +874,16 @@ func TestAMergeConflictingInAListedAndAnUnlistedFileIsNotPartlyMerged(t *testing
 	}
 }
 
-// aCodemapRig is a rig whose .gitattributes names docs/codemap.md merge=codemap
-// and which carries driver as its scripts/codemap-merge.sh, with codemap
-// committed and pushed. No git config anywhere names the driver.
-func aCodemapRig(t *testing.T, driver, codemap string) string {
+// aCodemapRig is a rig whose .gitattributes names docs/codemap.md merge=codemap,
+// with codemap committed and pushed. It has no driver script of its own: mw
+// carries it (mw-gq6.499). No git config anywhere names the driver.
+func aCodemapRig(t *testing.T, codemap string) string {
 	t.Helper()
 	here, _ := aRig(t)
 	write(t, here, ".gitattributes", "docs/codemap.md merge=codemap\n")
-	write(t, here, "scripts/codemap-merge.sh", driver)
 	write(t, here, "docs/codemap.md", codemap)
 	run(t, here, "git", "add", "-A")
-	run(t, here, "git", "commit", "-qm", "A code map and its merge driver")
+	run(t, here, "git", "commit", "-qm", "A code map named with its merge driver")
 	run(t, here, "git", "push", "-q", "origin", "main")
 	return here
 }
@@ -914,11 +915,7 @@ const (
 // without the rows it shortened or took out: no union, no conflict, and the
 // rig's git config never names the driver (mw-gq6.495).
 func TestALandingMergesTheCodemapByItsDriverWithNoGitConfig(t *testing.T) {
-	driver, err := os.ReadFile("../../scripts/codemap-merge.sh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	here := aCodemapRig(t, string(driver), codemapBase)
+	here := aCodemapRig(t, codemapBase)
 	aCodemapBranch(t, here, "mw/add", codemapAdded)
 	aCodemapBranch(t, here, "mw/trim", codemapTrimmed)
 	if err := landBranch(t, here, "mw/add"); err != nil {
@@ -949,13 +946,14 @@ func TestALandingMergesTheCodemapByItsDriverWithNoGitConfig(t *testing.T) {
 // the landing is a conflict sent back, never union's both sides of every hunk,
 // even with the map listed to be merged by union.
 func TestACodemapItsDriverCannotSettleIsNotMergedByUnion(t *testing.T) {
-	here := aCodemapRig(t, "#!/bin/sh\nexit 1\n", codemapBase)
+	here := aCodemapRig(t, codemapBase)
 	aCodemapBranch(t, here, "mw/add", codemapAdded)
 	aCodemapBranch(t, here, "mw/trim", codemapTrimmed)
 	if err := landBranch(t, here, "mw/add"); err != nil {
 		t.Fatalf("landing the added row: %v", err)
 	}
-	landed, left, err := landUnion(t, here, "mw/trim", []string{"docs/codemap.md"})
+	failing := rig.New(rig.WithMergeScript("#!/bin/sh\nexit 1\n"))
+	landed, left, err := landUnionWith(t, failing, here, "mw/trim", []string{"docs/codemap.md"})
 	if !application.Conflicted(err) {
 		t.Fatalf("expected a conflict, got %v", err)
 	}

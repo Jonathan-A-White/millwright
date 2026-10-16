@@ -787,7 +787,7 @@ func (r BatchReport) mergeOrder() string {
 			}
 			fmt.Fprintf(&b, " %s %s", how, merged.Merge)
 			if len(merged.Unioned) > 0 {
-				fmt.Fprintf(&b, " (union-merged %s)", strings.Join(merged.Unioned, ", "))
+				fmt.Fprintf(&b, " (trim-merged %s)", strings.Join(merged.Unioned, ", "))
 			}
 			b.WriteString("\n")
 			continue

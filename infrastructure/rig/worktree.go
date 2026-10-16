@@ -33,9 +33,10 @@ const (
 // Worktrees makes and removes the worktrees of the rigs this host has checked
 // out. It holds no state: every call names the rig it works in.
 type Worktrees struct {
-	program  string
-	remote   string
-	raceWait time.Duration
+	program     string
+	remote      string
+	raceWait    time.Duration
+	mergeScript string
 }
 
 // Worktrees satisfies the port.
@@ -64,6 +65,13 @@ func WithRemote(remote string) Option {
 // test gives zero so as never to sleep.
 func WithRaceWait(d time.Duration) Option {
 	return func(w *Worktrees) { w.raceWait = d }
+}
+
+// WithMergeScript replaces the trim-safe merge driver mw carries
+// (millwright.TrimMergeScript) on every merge and rebase: for a test that needs
+// a driver that fails.
+func WithMergeScript(script string) Option {
+	return func(w *Worktrees) { w.mergeScript = script }
 }
 
 // New returns a Worktrees that runs git as this host has it.
@@ -264,7 +272,12 @@ func (w *Worktrees) Rebase(ctx context.Context, dir, onto string) (bool, error) 
 	if onto == "" {
 		return false, fmt.Errorf("rebasing %s: onto what?", dir)
 	}
-	if _, err := w.git(ctx, dir, "rebase", onto); err != nil {
+	driver, err := gitcmd.WriteMergeDriver(w.mergeScript)
+	if err != nil {
+		return false, err
+	}
+	defer driver.Remove()
+	if _, err := w.git(ctx, dir, append(driver.Config(), "rebase", onto)...); err != nil {
 		if _, abort := w.git(ctx, dir, "rebase", "--abort"); abort != nil {
 			return false, fmt.Errorf("%w (and the half-made rebase in %s could not be undone: %v)", err, dir, abort)
 		}
