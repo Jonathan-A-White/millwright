@@ -1013,8 +1013,11 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 			needs = append(needs, need)
 		}
 		if !d.IsEpic && d.Exhausted {
+			// The mark is left when the story's own attempts ran out
+			// (mw-gq6.486), so the alarm counts those.
+			own, _ := OwnAttempts(d)
 			alarm := b.need(PosternNeedAlarm, e, firstKnown(d.Updated, d.Created),
-				fmt.Sprintf("used all %d attempts", d.Attempts))
+				fmt.Sprintf("used all %d attempts", own))
 			alarm.WaitsFor = PosternWaitsMayor
 			needs = append(needs, alarm)
 		}
