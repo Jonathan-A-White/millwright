@@ -14,6 +14,7 @@ Feature: mw retry
 
   Scenario: A refused landing is retried: bundled, cleaned up, handed back open
     Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And mw next refused the landing of "mw-gq6.1" for a signed commit
     And the session of "mw-gq6.1" has ended
     When mw retries "mw-gq6.1"
     Then the retry succeeds
@@ -23,6 +24,18 @@ Feature: mw retry
     And the story "mw-gq6.1" is open and unassigned
     And the story "mw-gq6.1" still records 1 attempt
     And the story "mw-gq6.1" carries a comment naming the branch commit, the bundle path and the vault commit
+
+  # mw-gq6.537: an attempt that left work and was not refused for its commits
+  # keeps its branch, so the next attempt continues it.
+
+  Scenario: An attempt that left commits and was not refused keeps its branch
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the session of "mw-gq6.1" has ended
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And the branch of "mw-gq6.1" was bundled into "runs/mw-gq6.1/attempt-1.bundle" in the vault, and it verifies
+    And the worktree of "mw-gq6.1" is gone but its branch is kept
+    And the story "mw-gq6.1" is open and unassigned
 
   # mw-gq6.344: a retried story has its dead-pane refunds again.
 
@@ -113,6 +126,7 @@ Feature: mw retry
 
   Scenario: A retry on the claiming host bundles its worktree even when the host key now names another host
     Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And mw next refused the landing of "mw-gq6.1" for a signed commit
     And the story "mw-gq6.1" is claimed by "mw@vps"
     And the host key of the story "mw-gq6.1" is changed to "laptop"
     And the session of "mw-gq6.1" has ended

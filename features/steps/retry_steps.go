@@ -130,6 +130,8 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the branch of "([^"]*)" was bundled into "([^"]*)" in the vault, and it verifies$`, c.theBranchWasBundledIntoAndVerifies)
 	ctx.Then(`^the vault committed and pushed the bundle of "([^"]*)"$`, c.theVaultCommittedAndPushedTheBundle)
 	ctx.Then(`^the worktree and branch of "([^"]*)" are both gone$`, c.retryNothingIsLeftOfTheWorktree)
+	ctx.Given(`^mw next refused the landing of "([^"]*)" for a signed commit$`, c.mwNextRefusedForASignedCommit)
+	ctx.Then(`^the worktree of "([^"]*)" is gone but its branch is kept$`, c.retryTheBranchIsKept)
 	ctx.Then(`^the worktree of "([^"]*)" was left untouched$`, c.retryTheWorktreeIsStillThere)
 	ctx.Then(`^no worktree of "([^"]*)" was read or made here$`, c.noWorktreeWasReadOrMadeHere)
 	ctx.Then(`^the story "([^"]*)" carries a comment saying "([^"]*)" is where its worktree is left for the next dispatch there$`, c.theStoryCarriesTheOtherHostComment)
@@ -691,6 +693,34 @@ func (c *retryContext) retryNothingIsLeftOfTheWorktree(id string) error {
 	}
 	if _, err := gitSay(c.rig, "rev-parse", "--verify", "--quiet", "refs/heads/"+application.StoryBranch(id)); err == nil {
 		return fmt.Errorf("expected the branch %s to have been taken away too", application.StoryBranch(id))
+	}
+	return nil
+}
+
+// mwNextRefusedForASignedCommit records on the story what mw next records when
+// it refuses a landing for a signed commit: a branch the next attempt must not
+// continue.
+func (c *retryContext) mwNextRefusedForASignedCommit(id string) error {
+	ctx := context.Background()
+	reason := string(application.ReasonSignedCommit)
+	if err := c.tracker.CommentOnStory(ctx, id, "mw next on vps "+application.RefusedPhrase+reason+"): a commit is signed"); err != nil {
+		return err
+	}
+	return c.tracker.SetStoryState(ctx, id, application.RunState, application.RunBlocked, "("+reason+") a commit is signed")
+}
+
+// retryTheBranchIsKept is the worktree taken away and the branch left, with the
+// note the dispatch that takes the story again reads.
+func (c *retryContext) retryTheBranchIsKept(id string) error {
+	dir := application.WorktreeDir(c.rig, id)
+	if _, err := os.Stat(dir); err == nil {
+		return fmt.Errorf("expected the worktree %s to have been taken away, but it is still there", dir)
+	}
+	if _, err := gitSay(c.rig, "rev-parse", "--verify", "--quiet", "refs/heads/"+application.StoryBranch(id)); err != nil {
+		return fmt.Errorf("expected the branch %s to be kept: %w", application.StoryBranch(id), err)
+	}
+	if note, _ := c.tracker.Note(context.Background(), application.ContinueKey(id)); note != "1" {
+		return fmt.Errorf("expected the note that the next attempt continues attempt 1, got %q", note)
 	}
 	return nil
 }
