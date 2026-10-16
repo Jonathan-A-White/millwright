@@ -1701,7 +1701,9 @@ An `--option` may end `|<bead>:<state>[,<bead>:<state>...]` (state: `open`,
 the card shows the text alone, and once `mw postern inbox --apply` applies one of the
 Governor's acts and one option's expectations all hold, the card is answered with that
 option, `ANSWER (by his acts)`, its note cleared, the Mayor mailed and a reply posted
-under the card; nothing is released or held on it.
+under the card; nothing is released or held on it. Only a last `|` followed by a bead id is read
+this way: any other `|` is the option's text, so `--option "A: 'Expect: <metric> up|down'"`
+is sent whole. A card `--item` reads its trailing `|<links csv>|<bead>:<state>` by the same rule.
 
 If the answer is a Release tap — its text, trimmed and case-folded, is
 "release", with or without a card's "A: " letter prefix — and the bead is an epic, `mw postern inbox` releases its held

@@ -41,6 +41,23 @@ func handsSteps(t *testing.T, tracker *apptest.FakeTracker, bead string) []appli
 	return steps
 }
 
+// A step's run and way back are shell, read for no '|'-separated bead: a pipe,
+// even one followed by a bead id, is kept whole (mw-gq6.468).
+func TestHandsAddKeepsAPipeInTheStepWhole(t *testing.T) {
+	tracker := handsTracker()
+	step := domain.HandsStep{ID: "pipe", Host: "desktop", As: "user", Run: "bd show mw-f758y.8 | grep up|mw-a:open", WayBack: "echo up|down"}
+	record, err := addHands(tracker, &bytes.Buffer{}, application.HandsAddRequest{Bead: "mw-f758y.8", Step: step})
+	if err != nil {
+		t.Fatalf("adding: %v", err)
+	}
+	if record.HandsStep != step {
+		t.Fatalf("expected the step kept whole, got %+v", record.HandsStep)
+	}
+	if steps := handsSteps(t, tracker, "mw-f758y.8"); len(steps) != 1 || steps[0].Run != step.Run || steps[0].WayBack != step.WayBack {
+		t.Fatalf("expected the step kept whole in the note, got %+v", steps)
+	}
+}
+
 // Adding a step keeps it in the bead's hands note, comments it on the bead
 // exactly as it will run, and makes sure the bead is one for his hands.
 func TestHandsAddKeepsTheStepCommentsItAndLabelsTheBead(t *testing.T) {

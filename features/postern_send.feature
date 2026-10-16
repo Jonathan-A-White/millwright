@@ -89,6 +89,18 @@ Feature: mw postern send
     And bead "mw-x"'s question note expects "mw-x.1:held,mw-x.2:held" of the option "C: Hold"
     And bead "mw-x"'s question note expects nothing of the option "B: Wait"
 
+  Scenario: an --option whose text holds a '|' not followed by a bead id is sent whole
+    Given the postern key's balance is 1000 satoshis
+    And the postern key holds a spendable utxo of 5000 satoshis
+    And the postern backend will report the txid "question-txid"
+    And the clock reads 1758700000 for sending
+    And the bead "mw-x" exists
+    When mw postern send "decision-needed" "Which form?" for bead "mw-x" recommending "A: 'Expect: <metric> up|down'" with options "A: 'Expect: <metric> up|down', B: up|down|mw-x.1:open" is run
+    Then sending succeeds
+    And the broadcast record is postern's question for bead "mw-x", "Which form?" recommending "A: 'Expect: <metric> up|down'" with options "A: 'Expect: <metric> up|down', B: up|down"
+    And bead "mw-x"'s question note expects nothing of the option "A: 'Expect: <metric> up|down'"
+    And bead "mw-x"'s question note expects "mw-x.1:open" of the option "B: up|down"
+
   Scenario: an --option naming a state there is none of is refused, naming the states, and nothing is sent
     Given the postern key's balance is 1000 satoshis
     And the bead "mw-x" exists
