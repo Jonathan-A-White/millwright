@@ -490,3 +490,116 @@ Feature: mw report
     And the report factory clock moves on a day
     And the writes of mw report send run 1 time
     Then the vault holds the metric snapshots of the days "2026-10-11,2026-10-12"
+
+  Scenario: --since a story sets the 7 days before its landing beside the 7 days after
+    Given the factory change "mw-gq6.425" titled "The gate runs in parallel" landed on "2026-09-20" with the acceptance "Expect: dispatch-to-landing down"
+    And the report stories:
+      | id    | title            | rig    | host   | model  | attempts | filed      |
+      | x-0   | Too early        | lampas | laptop | sonnet |          |            |
+      | b-1   | Before one       | lampas | laptop | sonnet | 2        |            |
+      | b-2   | Before two       | lampas | laptop | sonnet |          |            |
+      | b-3   | Before refused   | lampas | laptop | sonnet |          |            |
+      | b-bug | [bug] it broke   | lampas | laptop | sonnet |          | 2026-09-17 |
+      | a-1   | After one        | lampas | laptop | sonnet |          |            |
+      | a-2   | After two        | lampas | laptop | sonnet |          |            |
+      | a-3   | After three      | lampas | laptop | sonnet |          |            |
+      | x-2   | Too late         | lampas | laptop | sonnet |          |            |
+    And the report ledger holds the rows:
+      | day        | id  | outcome                      | worker      | tokens |
+      | 2026-09-12 | x-0 | landed on main               | sonnet/high | 9000   |
+      | 2026-09-14 | b-1 | landed on main               | sonnet/high | 3000   |
+      | 2026-09-15 | b-2 | landed on main               | sonnet/high | 1000   |
+      | 2026-09-16 | b-3 | not landed (tests-fail): red | sonnet/high | 500    |
+      | 2026-09-22 | a-1 | landed on main               | sonnet/high | 1000   |
+      | 2026-09-23 | a-2 | landed on main               | sonnet/high | 1000   |
+      | 2026-09-24 | a-3 | landed on main               | sonnet/high | 1000   |
+      | 2026-09-28 | x-2 | landed on main               | sonnet/high | 9000   |
+    And the report benchmarks:
+      | story | rig    | host   | day        | actual | ratio |
+      | b-1   | lampas | laptop | 2026-09-14 | 1200   | 2.0   |
+      | b-2   | lampas | laptop | 2026-09-15 | 1800   | 3.0   |
+      | a-1   | lampas | laptop | 2026-09-22 | 600    | 1.0   |
+      | a-2   | lampas | laptop | 2026-09-23 | 600    | 1.0   |
+      | a-3   | lampas | laptop | 2026-09-24 | 900    | 1.5   |
+    And the report result files:
+      | story | attempt | cost |
+      | b-1   | 1       | 2.00 |
+      | b-1   | 2       | 2.00 |
+      | b-2   | 1       | 2.00 |
+      | a-1   | 1       | 1.00 |
+      | a-2   | 1       | 1.00 |
+      | a-3   | 1       | 1.00 |
+    When mw report runs with "--since mw-gq6.425"
+    Then the report prints the line "mw-gq6.425 landed 2026-09-20"
+    And the report prints the line "The gate runs in parallel"
+    And the report prints the line "before: 7 days, 2026-09-13 to 2026-09-19"
+    And the report prints the line "after: 7 days, 2026-09-21 to 2026-09-27"
+    And the report puts QUALITY before SPEED before FUEL
+    And the "landed" row of the landing reads "2" before, "3" after, change "+50% better"
+    And the "refused" row of the landing reads "1" before, "0" after, change "-100% better"
+    And the "refusal rate" row of the landing reads "33%" before, "0%" after, change "-100% better"
+    And the "attempts/landing" row of the landing reads "1.50" before, "1.00" after, change "-33% better"
+    And the "bugs/landing" row of the landing reads "0.50" before, "0.00" after, change "-100% better"
+    And the "findings/landing" row of the landing reads "0.00" before, "0.00" after, change "level"
+    And the "par median" row of the landing reads "x2.5" before, "x1.0" after, change "-60% better"
+    And the "par p90" row of the landing reads "x3.0" before, "x1.5" after, change "-50% better"
+    And the "dispatch to landing" row of the landing reads "25m00s" before, "10m00s" after, change "-60% better"
+    And the "tokens/landing" row of the landing reads "2,000" before, "1,000" after, change "-50% better"
+    And the "$/landing" row of the landing reads "$3.00" before, "$1.00" after, change "-67% better"
+    And no line of the report is wider than 60 columns
+    And the report wrote nothing to the tracker or the vault
+
+  Scenario: --since a recent story takes the days after its landing that are over, and compares counts per day
+    Given "lampas" landed 7 and refused 0 on "2026-10-03"
+    And "lampas" landed 2 and refused 0 on "2026-10-10"
+    And "lampas" landed 5 and refused 0 on "2026-10-11"
+    And the factory change "mw-gq6.426" titled "Recent" landed on "2026-10-08" with the acceptance "Expect: refusals down"
+    When mw report runs with "--since mw-gq6.426"
+    Then the report prints the line "before: 7 days, 2026-10-01 to 2026-10-07"
+    And the report prints the line "after: 2 days, 2026-10-09 to 2026-10-10"
+    And the report prints the line "today counts once it is over"
+    And the report prints the line "landed and refused are compared per day"
+    And the "landed" row of the landing reads "7" before, "2" after, change "level"
+
+  Scenario: --since a story that landed yesterday has no day after it over yet
+    Given "lampas" landed 7 and refused 0 on "2026-10-03"
+    And the factory change "mw-gq6.427" titled "Yesterday" landed on "2026-10-10" with the acceptance "Expect: refusals down"
+    When mw report runs with "--since mw-gq6.427"
+    Then the report prints the line "after: no day over yet"
+    And the "landed" row of the landing reads "7" before, "-" after, change "-"
+
+  Scenario: --since a millwright commit finds the story it landed
+    Given "lampas" landed 2 and refused 0 on "2026-09-15"
+    And "lampas" landed 4 and refused 0 on "2026-09-22"
+    And the factory change "mw-gq6.425" titled "The gate runs in parallel" landed on "2026-09-20" with the acceptance "Expect: dispatch-to-landing down"
+    And the millwright commit "9e7d278" is "Merge branch 'mw/mw-gq6.425' into HEAD", made "2026-09-20T15:04:00Z"
+    When mw report runs with "--since 9e7d278"
+    Then the report prints the line "mw-gq6.425 landed 2026-09-20 (commit 9e7d278)"
+    And the report prints the line "The gate runs in parallel"
+    And the "landed" row of the landing reads "2" before, "4" after, change "+100% better"
+
+  Scenario: --since a millwright commit that names no story is measured from the day it was made
+    Given "lampas" landed 2 and refused 0 on "2026-09-15"
+    And "lampas" landed 4 and refused 0 on "2026-09-22"
+    And the millwright commit "abc1234" is "Tidy the docs", made "2026-09-20T15:04:00Z"
+    When mw report runs with "--since abc1234"
+    Then the report prints the line "commit abc1234 made 2026-09-20"
+    And the report prints the line "Tidy the docs"
+    And the "landed" row of the landing reads "2" before, "4" after, change "+100% better"
+
+  Scenario: --since a story that never landed is refused
+    Given "lampas" landed 2 and refused 0 on "2026-09-15"
+    Then mw report with "--since mw-nope" is refused, saying "mw-nope has no landing in the builder ledger"
+
+  Scenario: --since a story with --json carries the rows side by side
+    Given "lampas" landed 2 and refused 0 on "2026-09-15"
+    And "lampas" landed 4 and refused 0 on "2026-09-22"
+    And the factory change "mw-gq6.425" titled "The gate runs in parallel" landed on "2026-09-20" with the acceptance "Expect: dispatch-to-landing down"
+    When mw report runs with "--since mw-gq6.425 --json"
+    Then the report JSON has landing.story as "mw-gq6.425"
+    And the report JSON has landing.landed as "2026-09-20"
+    And the report JSON has previous_window.since as "2026-09-13"
+    And the report JSON has window.since as "2026-09-21"
+    And the report JSON has landing.rows.0.measure as "landed"
+    And the report JSON has landing.rows.0.before as "2"
+    And the report JSON has landing.rows.0.after as "4"

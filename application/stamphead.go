@@ -18,6 +18,8 @@ type RigCommit struct {
 	Branch  string
 	Commit  string
 	Subject string
+	// At is when the commit was committed; zero where the reader did not say.
+	At time.Time
 }
 
 // RigHeads reads commits of the rigs this host has checked out. The adapter is

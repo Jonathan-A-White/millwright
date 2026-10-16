@@ -30,6 +30,7 @@ type reportContext struct {
 	files      *vault.Vault
 	benchmarks *apptest.FakeBenchmarks
 	mailbox    *apptest.FakeMailbox
+	commits    *reportCommits
 	now        time.Time
 
 	// refused are the ids of the refused stories rigLanded filed, by rig.
@@ -48,7 +49,8 @@ func InitializeReportScenario(ctx *godog.ScenarioContext) {
 	c := &reportContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		*c = reportContext{tracker: apptest.NewFakeTracker(), benchmarks: &apptest.FakeBenchmarks{}, mailbox: apptest.NewFakeMailbox(), refused: map[string][]string{}}
+		*c = reportContext{tracker: apptest.NewFakeTracker(), benchmarks: &apptest.FakeBenchmarks{}, mailbox: apptest.NewFakeMailbox(),
+			commits: &reportCommits{}, refused: map[string][]string{}}
 		return ctx, nil
 	})
 
@@ -65,6 +67,7 @@ func InitializeReportScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the report ledger also holds a landed row for "([^"]*)" on "([^"]*)"$`, c.aLandedRowOn)
 	ctx.Given(`^"([^"]*)" landed (\d+) and refused (\d+) on "([^"]*)"$`, c.aRigLandedAndRefusedOn)
 	ctx.Given(`^the factory change "([^"]*)" titled "([^"]*)" landed on "([^"]*)" with the acceptance "([^"]*)"$`, c.aFactoryChangeLanded)
+	ctx.Given(`^the millwright commit "([^"]*)" is "([^"]*)", made "([^"]*)"$`, c.aMillwrightCommit)
 	ctx.When(`^the report factory clock moves on a day$`, c.theClockMovesOn)
 	ctx.When(`^mw report runs with "([^"]*)"$`, c.reportRuns)
 	ctx.When(`^the writes of mw report send run (\d+) times?$`, c.sendWritesRun)
@@ -81,6 +84,8 @@ func InitializeReportScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report puts QUALITY before SPEED before FUEL$`, c.partsAreInOrder)
 	ctx.Then(`^no line of the report is wider than (\d+) columns$`, c.noLineIsWiderThan)
 	ctx.Then(`^the report JSON has (\S+) as "([^"]*)"$`, c.jsonHas)
+	ctx.Then(`^the "([^"]*)" row of the landing reads "([^"]*)" before, "([^"]*)" after, change "([^"]*)"$`, c.theLandingRowReads)
+	ctx.Then(`^mw report with "([^"]*)" is refused, saying "([^"]*)"$`, c.reportIsRefused)
 }
 
 func (c *reportContext) aFactory(now string) error {
@@ -247,8 +252,8 @@ func reportFlags(text string, now time.Time) (application.FactoryReport, error) 
 			return report, fmt.Errorf("the scenario names a flag mw report does not take: %q", fields[i])
 		}
 	}
-	from, err := application.ParseReportSince(since, now)
-	report.Since = from
+	from, around, err := application.ReadReportSince(since, now)
+	report.Since, report.Around = from, around
 	return report, err
 }
 
@@ -333,6 +338,7 @@ func (c *reportContext) reportRuns(flags string) error {
 	}
 	report.Tracker, report.Files, report.Seat = c.tracker, c.files, reportSeat
 	report.Benchmarks = c.benchmarks
+	report.Commits, report.FactoryDir = c.commits, reportFactoryDir
 	report.Now = func() time.Time { return c.now }
 	report.Out = &c.printed
 	before := c.footprint()
@@ -623,6 +629,71 @@ func (c *reportContext) partsAreInOrder() error {
 			return fmt.Errorf("expected QUALITY, then SPEED, then FUEL, got:\n%s", text)
 		}
 		last = at
+	}
+	return nil
+}
+
+// reportFactoryDir is where the report scenarios say the factory's rig is
+// checked out; the fake commits answer only for it.
+const reportFactoryDir = "/rigs/millwright"
+
+// reportCommits are the commits of the factory's rig a scenario made, by the
+// name it gave them.
+type reportCommits struct {
+	commits map[string]application.RigCommit
+}
+
+// CommitOf implements application.FactoryCommits.
+func (f *reportCommits) CommitOf(_ context.Context, rigDir, rev string) (application.RigCommit, error) {
+	if rigDir != reportFactoryDir {
+		return application.RigCommit{}, fmt.Errorf("no rig is checked out at %s", rigDir)
+	}
+	commit, ok := f.commits[rev]
+	if !ok {
+		return application.RigCommit{}, fmt.Errorf("%s is not a commit", rev)
+	}
+	return commit, nil
+}
+
+func (c *reportContext) aMillwrightCommit(name, subject, made string) error {
+	at, err := time.Parse(time.RFC3339, made)
+	if err != nil {
+		return err
+	}
+	if c.commits.commits == nil {
+		c.commits.commits = map[string]application.RigCommit{}
+	}
+	c.commits.commits[name] = application.RigCommit{Branch: "main", Commit: name, Subject: subject, At: at}
+	return nil
+}
+
+// theLandingRowReads finds the row of mw report --since <landing> whose first
+// 22 columns hold the measure, and reads its before, after and change.
+func (c *reportContext) theLandingRowReads(measure, before, after, change string) error {
+	for _, line := range c.lines() {
+		if !strings.HasPrefix(line, "  ") || len(line) < 22 || strings.TrimSpace(line[:22]) != measure {
+			continue
+		}
+		fields := strings.Fields(line[22:])
+		if len(fields) < 3 {
+			return fmt.Errorf("the %q row has no before, after and change: %q", measure, line)
+		}
+		got := fmt.Sprintf("%s|%s|%s", fields[0], fields[1], strings.Join(fields[2:], " "))
+		if want := fmt.Sprintf("%s|%s|%s", before, after, change); got != want {
+			return fmt.Errorf("the %q row reads %q, want %q:\n%s", measure, got, want, c.printed.String())
+		}
+		return nil
+	}
+	return fmt.Errorf("the report has no %q row:\n%s", measure, c.printed.String())
+}
+
+func (c *reportContext) reportIsRefused(flags, saying string) error {
+	err := c.reportRuns(flags)
+	if err == nil {
+		return fmt.Errorf("mw report %s was not refused; it printed:\n%s", flags, c.printed.String())
+	}
+	if !strings.Contains(err.Error(), saying) {
+		return fmt.Errorf("mw report %s was refused saying %q, want it to say %q", flags, err, saying)
 	}
 	return nil
 }
