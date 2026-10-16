@@ -645,6 +645,23 @@ remembers nothing.
 only the home sends. `mw doctor` restarts the timer if it is found stopped
 (`mw-report.service` is among its default units). See `features/report_send.feature`.
 
+## The weekly loop's brief
+
+```sh
+bin/mw loop brief [--since 7d|2026-10-09] [--json]
+```
+One read for the weekly improvement sitting, built from one `mw report` result and
+spending no fuel. Six parts in order: QUALITY, SPEED, FUEL (the summary lines of
+`mw report` against the days before, then MODELS, or `models: not yet`); CAUSES
+(refusals by cause class per rig, the uncaused count last); ERRORS (each class of
+the common-errors register with an occurrence dated in the window, the rigs and its
+shared-component verdict); VERDICTS (each FACTORY CHANGES entry whose 14th day falls
+in the window, then what `mw invest due` lists); IDEAS (entries of
+`plans/improvements/ledger.jsonl` with no `bead`, each with its Expect line, or
+`ideas: no ledger yet`); SHARE (the investment line of `mw report`). `--json` prints
+the parts as one object under `quality_speed_fuel`, `causes`, `errors`, `verdicts`,
+`ideas`, `share`.
+
 ## The factory's investments
 
 ```sh
