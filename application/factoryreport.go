@@ -81,6 +81,9 @@ type FactoryReport struct {
 	Around     string
 	Commits    FactoryCommits
 	FactoryDir string
+	// Investments, when set, is the investments ledger the INVESTMENTS part
+	// reads; left nil the report has no such part. A landing has none either.
+	Investments InvestmentBook
 	// JSON prints the result as one object instead of text.
 	JSON bool
 	// Notes, Mailbox and Snapshots, when all set, are what mw report send
@@ -196,6 +199,10 @@ type FactoryReportResult struct {
 	// days before it beside the days after, the PreviousWindow and the Window;
 	// nil for a report of a window.
 	Landing *ReportLanding `json:"landing,omitempty"`
+	// Investments are the outcomes of the factory's investments the window
+	// recorded and how many are due for review; nil when the report was not
+	// given the ledger.
+	Investments *InvestmentsSection `json:"investments,omitempty"`
 }
 
 // reportEntry is one thing the window saw: a landing, a refusal or a bug filed.
@@ -407,6 +414,14 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	if whole := r.blocks(entries, nil, func(reportEntry) string { return "factory" }, nil); len(whole) == 1 {
 		result.Whole = &whole[0]
 	}
+	if r.Investments != nil && result.Landing == nil {
+		records, err := r.Investments.Investments(ctx)
+		if err != nil {
+			return result, fmt.Errorf("reporting investments: %w", err)
+		}
+		section := ReadInvestmentsSection(GroupInvestments(records), result.Window, now)
+		result.Investments = &section
+	}
 	result.CheapWins = CheapWins(WinInputs{Rigs: result.Rigs, Gates: gates, Kinds: Calibrate(recent, BenchmarkSettings{}), Heavy: r.heavyStories(entries)})
 
 	if r.Out != nil {
@@ -597,6 +612,7 @@ func (r FactoryReportResult) String() string {
 	var b strings.Builder
 	r.writeParts(&b)
 	writeChanges(&b, r.Changes)
+	writeInvestments(&b, r.Investments)
 	writeCheapWins(&b, r.CheapWins)
 	return b.String()
 }
