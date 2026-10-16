@@ -289,6 +289,15 @@ type RetryReport struct {
 	// Hitl says the story carries the hitl label, so dispatch will pass it over
 	// and the retry will not run until the label is taken off (mw-gq6.261).
 	Hitl bool
+
+	// FormulaClosed is what the retry closed of the formula the retried attempt
+	// worked, so that the next attempt is poured a fresh one (mw-gq6.438), and
+	// FormulaLeft says why what was left of it could not be closed.
+	FormulaClosed FormulaClosed
+	FormulaLeft   string
+
+	// molecule is the root of the formula the retried attempt worked.
+	molecule string
 }
 
 // maxAttempts is how many times a story may be started.
@@ -369,6 +378,7 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	report.NoCause = detail.Cause == ""
 	report.refunded = detail.AttemptsRefunded
 	report.unclaimed = detail.Assignee == "" && detail.Status == StatusOpen
+	report.molecule = detail.Molecule.RootID
 
 	// An attempt the harness stopped is not counted (mw-gq6.434). A story open
 	// with no claim was given back already, by whoever gave it back.
@@ -467,6 +477,7 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 	if err := r.rePathed(ctx, &report); err != nil {
 		return report, err
 	}
+	r.closeFormula(ctx, &report)
 	if err := r.release(ctx, report); err != nil {
 		if report.NoWorktree {
 			return report, fmt.Errorf("retrying %s: the claim could not be given back: %w", storyID, err)
@@ -499,12 +510,26 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 				"The next dispatch tick takes it as attempt %d of %d.",
 			r.Host, attempt, storyID, report.Branch, report.Target, report.NextAttempt, r.maxAttempts())
 	}
-	comment += report.stopSaid()
+	comment += report.stopSaid() + report.formulaSaid()
 	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
 		return report, fmt.Errorf("retrying %s: it was retried, but the comment naming what happened could not be written: %w", storyID, err)
 	}
 
 	return report, nil
+}
+
+// closeFormula closes what the retried attempt left open of its formula, before
+// the claim is given back, so that the dispatch that takes the story again pours
+// it a fresh one rather than working what this attempt left (mw-gq6.438). What
+// cannot be closed is said, and the retry goes on: mw tidy closes it once the
+// story is closed.
+func (r Retry) closeFormula(ctx context.Context, report *RetryReport) {
+	why := FormulaClosedWhy("mw retry", r.Host, report.StoryID, "was retried, and its next attempt pours its formula afresh")
+	closed, err := closeFormula(ctx, r.Tracker, report.molecule, why)
+	report.FormulaClosed = closed
+	if err != nil {
+		report.FormulaLeft = oneLine(err.Error())
+	}
 }
 
 // release gives the claim back, guarded on whoever held it when the retry read
@@ -587,6 +612,7 @@ func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere strin
 	if err := r.rePathed(ctx, &report); err != nil {
 		return report, err
 	}
+	r.closeFormula(ctx, &report)
 	if err := r.release(ctx, report); err != nil {
 		return report, fmt.Errorf("retrying %s: the claim could not be given back: %w", storyID, err)
 	}
@@ -600,7 +626,7 @@ func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere strin
 			"so its worktree and branch are left there, and the next dispatch on %s bundles whatever they hold before it cuts a fresh one. "+
 			"The story is open again and the next dispatch tick takes it as attempt %d of %d.",
 		r.Host, report.Attempt, storyID, elsewhere, elsewhere, report.NextAttempt, r.maxAttempts())
-	comment += report.stopSaid()
+	comment += report.stopSaid() + report.formulaSaid()
 	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
 		return report, fmt.Errorf("retrying %s: the claim was given back, but the comment naming what happened could not be written: %w", storyID, err)
 	}
@@ -655,6 +681,7 @@ func (r RetryReport) String() string {
 	}
 	if r.Elsewhere != "" {
 		fmt.Fprintf(&b, "  there   the story was worked on %s; its worktree and branch are left there, not read from here\n", r.Elsewhere)
+		r.writeFormula(&b)
 		if r.ClaimReleased {
 			fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as attempt %d\n", r.NextAttempt)
 			r.writeHitl(&b)
@@ -679,11 +706,24 @@ func (r RetryReport) String() string {
 	if r.WorktreeGone && r.BranchGone {
 		fmt.Fprintf(&b, "  gone    the worktree %s and the branch %s\n", r.Worktree, r.Branch)
 	}
+	r.writeFormula(&b)
 	if r.ClaimReleased {
 		fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as attempt %d\n", r.NextAttempt)
 		r.writeHitl(&b)
 	}
 	return b.String()
+}
+
+// formulaSaid is what a retry's comment adds of the formula it closed.
+func (r RetryReport) formulaSaid() string {
+	said := ""
+	if r.FormulaClosed.Any() {
+		said = fmt.Sprintf(" The formula it worked was closed (%s), so the next attempt is poured a fresh one.", r.FormulaClosed)
+	}
+	if r.FormulaLeft != "" {
+		said += fmt.Sprintf(" What was left open of the formula %s could not all be closed: %s.", r.molecule, r.FormulaLeft)
+	}
+	return said
 }
 
 // stopSaid is what a retry's comment adds when the attempt it retried was a
@@ -698,6 +738,16 @@ func (r RetryReport) stopSaid() string {
 		said += fmt.Sprintf(" No new story is claimed on the host it was worked on until %s.", r.HeldUntil.UTC().Format(time.RFC3339))
 	}
 	return said
+}
+
+// writeFormula says what the retry closed of the attempt's formula.
+func (r RetryReport) writeFormula(b *strings.Builder) {
+	if r.FormulaClosed.Any() {
+		fmt.Fprintf(b, "  formula closed %s: the next attempt is poured a fresh one\n", r.FormulaClosed)
+	}
+	if r.FormulaLeft != "" {
+		fmt.Fprintf(b, "  formula %s could not all be closed: %s\n", r.molecule, r.FormulaLeft)
+	}
 }
 
 // writeHitl says, for a story that carries hitl, why the next dispatch tick will

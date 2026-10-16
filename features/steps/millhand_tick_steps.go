@@ -410,7 +410,7 @@ func (c *seatUpContext) runTheTick(dryRun bool) error {
 			Host:    seatUpHost,
 			Now:     now,
 		},
-		Tidy: application.Tidy{Mail: world.mailbox, Notes: world.tracker, Beads: world.tracker},
+		Tidy: application.Tidy{Mail: world.mailbox, Notes: world.tracker, Beads: world.tracker, Formulas: world.tracker},
 		Watch: application.Watch{
 			Probes: world.watch, Settings: world.watching, Notes: world.tracker, Now: now,
 		},

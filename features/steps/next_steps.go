@@ -173,6 +173,12 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the ledger already holds a line from an earlier story$`, c.theLedgerAlreadyHoldsALine)
 	ctx.Given(`^a formula was poured for "([^"]*)" and one of its steps is still open$`, c.aFormulaWithAnOpenStep)
 	ctx.Given(`^a formula was poured for "([^"]*)" and only the closing-comment step is still open$`, c.aFormulaWithOnlyTheClosingStepOpen)
+	ctx.Given(`^a formula was poured for "([^"]*)" and its session closed (\d+) of its 3 steps$`, func(id string, closed int) error {
+		_, err := pourFormula(c.tracker, id, closed)
+		return err
+	})
+	ctx.Then(`^nothing of the formula poured for "([^"]*)" is left open, its root and (\d+) steps? closed saying "([^"]*)"$`,
+		func(id string, steps int, text string) error { return formulaClosedSaying(c.tracker, id, steps, text) })
 	ctx.Given(`^a closing comment with "([^"]*)" and "([^"]*)" was written on "([^"]*)" (after|before) its newest commit$`, c.aClosingCommentWasWritten)
 	ctx.Given(`^the story "([^"]*)" is claimed here with no session behind it$`, c.aStoryClaimedWithNoSession)
 	ctx.Given(`^the story "([^"]*)" is claimed here, its landing was refused and its session has ended$`, c.aStoryWhoseLandingWasRefused)

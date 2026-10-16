@@ -4,7 +4,8 @@ Feature: mw tidy
 
     1. close an "Answer: ..." mail bead over 1 day old;
     2. close a mail bead the mailbox holds read, over 7 days old;
-    3. clear a postern question note whose bead is closed.
+    3. clear a postern question note whose bead is closed;
+    4. close the beads left open of a formula poured for a story that is closed.
 
   Each act writes one line on what it touched, "Tidied by mw tidy: <why>", and
   one line to the tick log. It never closes a story, an epic, a map or a hitl
@@ -76,3 +77,44 @@ Feature: mw tidy
     And the question note for "mw-q.1" is kept
     And nothing was written to the tidy tracker
     And the tick log has 0 tidy lines
+
+  # mw-gq6.438: a formula's steps left open by an ended session padded every
+  # open count. A formula's story is the one its first step names, "Understand
+  # <story>: <title>".
+  Scenario: The formula of a closed story is closed, one line each, and the formulas of an open and a running story are not
+    Given a tidy story "mw-f.1" that is closed, with a formula poured whose session closed 1 of its 3 steps
+    And a tidy story "mw-f.2" that is open, with a formula poured whose session closed 1 of its 3 steps
+    And a tidy story "mw-f.3" that is running, with a formula poured whose session closed 1 of its 3 steps
+    When mw tidy runs
+    Then tidying succeeds
+    And nothing of the tidy formula of "mw-f.1" is left open, its root and 2 steps closed saying "Tidied by mw tidy: its story mw-f.1 is closed"
+    And the tidy report says "closed formula step f-mol-1.2"
+    And the tidy report says "closed formula step f-mol-1.3"
+    And the tidy report says "closed formula f-mol-1"
+    And the tick log has 3 tidy lines
+    And a tidy line says "formula step f-mol-1.2: Tidied by mw tidy: its story mw-f.1 is closed"
+    And a tidy line says "formula step f-mol-1.3: Tidied by mw tidy: its story mw-f.1 is closed"
+    And a tidy line says "formula f-mol-1: Tidied by mw tidy: its story mw-f.1 is closed"
+    And the tidy formula of "mw-f.2" is as its session left it, 2 steps still open
+    And the tidy formula of "mw-f.3" is as its session left it, 2 steps still open
+    And the tidy story "mw-f.1" is still closed
+    And the tidy story "mw-f.2" is still open
+
+  Scenario: The steps left open under a root closed already are closed too
+    Given a tidy story "mw-f.1" that is closed, with a formula poured whose session closed 1 of its 3 steps
+    And the root of the tidy formula of "mw-f.1" was closed already
+    When mw tidy runs
+    Then tidying succeeds
+    And the tidy report says "closed formula step f-mol-1.2"
+    And the tidy report says "closed formula step f-mol-1.3"
+    And the tick log has 2 tidy lines
+
+  Scenario: A dry run lists the formula beads it would close and closes none
+    Given a tidy story "mw-f.1" that is closed, with a formula poured whose session closed 1 of its 3 steps
+    When mw tidy runs with --dry-run
+    Then tidying succeeds
+    And the tidy report says "would close formula step f-mol-1.2"
+    And the tidy report says "would close formula step f-mol-1.3"
+    And the tidy report says "would close formula f-mol-1"
+    And the tidy formula of "mw-f.1" is as its session left it, 2 steps still open
+    And nothing was written to the tidy tracker

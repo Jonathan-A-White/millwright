@@ -409,6 +409,33 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" carries a comment quoting: the claim was not given back
     And the printed report says "dolt server unreachable"
 
+  # mw-gq6.438: the formula a story's session worked is closed when the
+  # close-out settles what became of the story, so no step of an ended session
+  # is left open to pad every open count.
+  Scenario: A landed story's formula is closed with it
+    Given the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and its session closed 3 of its 3 steps
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And nothing of the formula poured for "mw-gq6.1" is left open, its root and 0 steps closed saying "mw-gq6.1 landed"
+    And the printed report says "formula closed f-mol-1"
+
+  Scenario: A refused story's formula is closed, the steps its session left open with it
+    Given the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and its session closed 1 of its 3 steps
+    When mw closes out "mw-gq6.1"
+    Then the report says it stopped for "open-steps"
+    And the story "mw-gq6.1" is not closed
+    And nothing of the formula poured for "mw-gq6.1" is left open, its root and 2 steps closed saying "mw-gq6.1 was not landed (open-steps)"
+
+  Scenario: A story refused for failing tests has its formula closed too
+    Given the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and its session closed 3 of its 3 steps
+    And the rig's tests fail, saying "undefined: Ledger"
+    When mw closes out "mw-gq6.1"
+    Then the report says it stopped for "tests-fail"
+    And nothing of the formula poured for "mw-gq6.1" is left open, its root and 0 steps closed saying "mw-gq6.1 was not landed (tests-fail)"
+
   Scenario: The target branch moved on the origin while the story was worked
     Given the other host landed its own work on "main" while "mw-gq6.1" was worked
     And the session of "mw-gq6.1" reported a plain success

@@ -183,3 +183,30 @@ Feature: mw retry
     Then the retry succeeds
     And the story "mw-gq6.1" still records 1 attempt
     And the retry holds no claims on "vps"
+
+  # mw-gq6.438: the next attempt starts on a fresh branch, so it works a fresh
+  # formula: the retry closes what the last attempt left open of its own.
+  Scenario: A retried story's formula is closed, the steps its session left open with it
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the retried story "mw-gq6.1" worked a formula and closed 1 of its 3 steps
+    And the session of "mw-gq6.1" has ended
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And the story "mw-gq6.1" is open and unassigned
+    And nothing of the retried story's formula "mw-gq6.1" is left open, its root and 2 steps closed saying "mw-gq6.1 was retried"
+    And the printed retry report says "formula closed"
+
+  Scenario: A story that ran on another host has its formula closed by the retry from here
+    Given the story "mw-gq6.1" ran on the host "desktop" and its worktree is there, not here
+    And the retried story "mw-gq6.1" worked a formula and closed 3 of its 3 steps
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And nothing of the retried story's formula "mw-gq6.1" is left open, its root and 0 steps closed saying "mw-gq6.1 was retried"
+
+  Scenario: A retry refused for a live session leaves its formula as the session has it
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the retried story "mw-gq6.1" worked a formula and closed 1 of its 3 steps
+    And the session of "mw-gq6.1" is still running
+    When mw retries "mw-gq6.1"
+    Then the retry refuses, saying: still running
+    And the retried story's formula "mw-gq6.1" is as its session left it, 2 steps still open

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// The bounds of mw tidy: everything it will ever do is one of the three rows
+// The bounds of mw tidy: everything it will ever do is one of the four rows
 // of docs/tidy.md, at these ages. Widening one is a change to this file and to
 // that table together.
 const (
@@ -75,17 +75,51 @@ type TidyBeads interface {
 	CommentOnStory(ctx context.Context, id, text string) error
 }
 
-// The kinds of act mw tidy makes: the three rows of docs/tidy.md.
+// PouredFormula is one formula poured for a story that still has a bead open,
+// as mw tidy reads it.
+type PouredFormula struct {
+	// Root is the bead the steps hang from.
+	Root string
+	// RootOpen says the root itself is still open.
+	RootOpen bool
+	// Steps are its steps still open, in the order they are closed.
+	Steps []string
+	// Story is the story it was poured for, as the title of its first step
+	// names it (FormulaStoryOf); empty when no step names one.
+	Story string
+	// LiveStory is a story not closed whose metadata records Root as its
+	// molecule; empty when none does.
+	LiveStory string
+}
+
+// TidyFormulas is the part of the work tracker mw tidy closes what a poured
+// formula left open through. It closes the beads of formulas and nothing else.
+type TidyFormulas interface {
+	// OpenFormulas lists every poured formula with a bead still open. It reads
+	// and writes nothing else.
+	OpenFormulas(ctx context.Context) ([]PouredFormula, error)
+
+	// CloseFormulaBead closes one bead of a poured formula, a step or a root,
+	// with a reason. An id that names a bead that is not a formula's — a
+	// story, an epic, a mail — is an error and nothing is changed.
+	CloseFormulaBead(ctx context.Context, id, reason string) error
+}
+
+// The kinds of act mw tidy makes: the four rows of docs/tidy.md, the fourth
+// closing a formula's steps and then its root.
 const (
 	TidyAnswerMail   = "answer mail"
 	TidyReadMail     = "read mail"
 	TidyQuestionNote = "question note"
+	TidyFormulaStep  = "formula step"
+	TidyFormulaRoot  = "formula"
 )
 
 // Tidy closes what is plainly finished, within fixed bounds, and nothing else:
 // an Answer mail bead over TidyAnswerAge old, a mail bead read and over
-// TidyReadAge old, and a postern question note whose bead is closed. It never
-// closes a story, an epic, a map or a hitl bead, and never deletes anything;
+// TidyReadAge old, a postern question note whose bead is closed, and the beads
+// left open of a formula whose story is closed. It never closes a story, an
+// epic, a map or a hitl bead, and never deletes anything;
 // the mail it closes stays in the tracker, closed. Each act writes one line on
 // what it touched and one to the tick log. A dry run says what it would do
 // and changes nothing.
@@ -93,6 +127,9 @@ type Tidy struct {
 	Mail  TidyMailbox
 	Notes TidyNotes
 	Beads TidyBeads
+	// Formulas is what the formula beads of closed stories are closed
+	// through; nil leaves formulas alone.
+	Formulas TidyFormulas
 
 	// Log is the tick log each act adds a line to; nil writes none.
 	Log TickLog
@@ -144,6 +181,9 @@ func (t Tidy) Run(ctx context.Context) (TidyReport, error) {
 		fault(err)
 	}
 	if err := t.questions(ctx, &report); err != nil {
+		fault(err)
+	}
+	if err := t.formulas(ctx, &report); err != nil {
 		fault(err)
 	}
 
@@ -234,6 +274,74 @@ func (t Tidy) questions(ctx context.Context, report *TidyReport) error {
 			t.log(ctx, act, report)
 		}
 		report.Acts = append(report.Acts, act)
+	}
+	return errors.Join(faults...)
+}
+
+// formulas closes what the fourth row of docs/tidy.md names: the steps left
+// open, and then the root, of a formula poured for a story that is closed. A
+// formula whose story no step names, or that a story not closed records as its
+// own, or whose story the tracker does not return closed, is left as it is: a
+// step of an open or running story is never closed.
+func (t Tidy) formulas(ctx context.Context, report *TidyReport) error {
+	if t.Formulas == nil {
+		return nil
+	}
+	open, err := t.Formulas.OpenFormulas(ctx)
+	if err != nil {
+		return fmt.Errorf("reading the open formulas: %w", err)
+	}
+	var candidates []PouredFormula
+	seen := map[string]bool{}
+	var stories []string
+	for _, formula := range open {
+		if formula.Story == "" || formula.LiveStory != "" {
+			continue
+		}
+		candidates = append(candidates, formula)
+		if !seen[formula.Story] {
+			seen[formula.Story] = true
+			stories = append(stories, formula.Story)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.Strings(stories)
+	beads, err := t.Beads.ShowBeads(ctx, stories)
+	if err != nil {
+		return fmt.Errorf("reading the stories formulas were poured for: %w", err)
+	}
+	closed := map[string]bool{}
+	for _, bead := range beads {
+		closed[bead.Story.ID] = bead.Closed()
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Root < candidates[j].Root })
+
+	var faults []error
+	for _, formula := range candidates {
+		if !closed[formula.Story] {
+			continue
+		}
+		why := TidyWhy + "its story " + formula.Story + " is closed"
+		acts := make([]TidyAct, 0, len(formula.Steps)+1)
+		for _, step := range formula.Steps {
+			acts = append(acts, TidyAct{Kind: TidyFormulaStep, ID: step, Why: why})
+		}
+		if formula.RootOpen {
+			acts = append(acts, TidyAct{Kind: TidyFormulaRoot, ID: formula.Root, Why: why})
+		}
+		for _, act := range acts {
+			if !t.DryRun {
+				// A root is never closed over a step that would not close.
+				if err := t.Formulas.CloseFormulaBead(ctx, act.ID, act.Why); err != nil {
+					faults = append(faults, fmt.Errorf("closing the %s %s: %w", act.Kind, act.ID, err))
+					break
+				}
+				t.log(ctx, act, report)
+			}
+			report.Acts = append(report.Acts, act)
+		}
 	}
 	return errors.Join(faults...)
 }
