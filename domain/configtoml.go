@@ -137,6 +137,44 @@ func (c *ConfigTOML) Lookup(table, key string) (string, bool) {
 	return "", false
 }
 
+// Table is every `key = value` of one table as the file spells the values (a
+// string keeps its quotes; TOMLString reads one), by key, or nil when the file
+// has no key in that table. The root table is "". A [[table]] array is read
+// with ArrayTables instead.
+func (c *ConfigTOML) Table(name string) map[string]string {
+	var values map[string]string
+	for _, st := range c.stmts {
+		if st.header || st.table != name {
+			continue
+		}
+		if values == nil {
+			values = map[string]string{}
+		}
+		values[st.key] = c.valueText(st)
+	}
+	return values
+}
+
+// ArrayTables is every [[name]] entry of the file in order, each its keys to
+// the values as the file spells them, or nil when the file has none.
+func (c *ConfigTOML) ArrayTables(name string) []map[string]string {
+	table := "[[" + name + "]]"
+	var entries []map[string]string
+	for _, st := range c.stmts {
+		if st.table != table {
+			continue
+		}
+		if st.header {
+			entries = append(entries, map[string]string{})
+			continue
+		}
+		if len(entries) > 0 {
+			entries[len(entries)-1][st.key] = c.valueText(st)
+		}
+	}
+	return entries
+}
+
 func (c *ConfigTOML) valueText(st tomlStatement) string {
 	if st.first == st.last {
 		return strings.TrimSpace(c.lines[st.first][st.valueCol:st.endCol])
