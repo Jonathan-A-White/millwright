@@ -1,0 +1,5 @@
+#!/bin/sh
+# bakeoff — which speech model hears his English with Koine Greek words in it best, on this host's CPU.
+# README.md says how to install the candidates and read the table.
+here=$(cd "$(dirname "$0")" && pwd)
+PYTHONPATH=$here PYTHONDONTWRITEBYTECODE=1 exec python3 -m sttbakeoff "$@"
