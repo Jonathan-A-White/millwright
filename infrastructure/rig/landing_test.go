@@ -202,8 +202,38 @@ func TestAdvanceBringsTheRigCheckoutToTheLandedCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("advancing a checkout already level: %v", err)
 	}
-	if again.Moved || again.Left != "" {
-		t.Errorf("expected a level checkout to be neither moved nor left, got %+v", again)
+	if again.Moved || again.Left != "" || !again.Level || again.Held != "" || !again.Current() {
+		t.Errorf("expected a level checkout to be Level and Current, neither moved nor left, got %+v", again)
+	}
+}
+
+// TestAdvanceCallsALevelCheckoutOnAnotherBranchOrDirtyNoPlaceToBuildFrom: a
+// checkout that already holds the landed commit is Level, but it is Current
+// only on the target branch and clean; the reason is Held, not Left, so the
+// factory checkouts that treat a held-commit checkout as level are unchanged
+// (mw-gq6.484).
+func TestAdvanceCallsALevelCheckoutOnAnotherBranchOrDirtyNoPlaceToBuildFrom(t *testing.T) {
+	here, _ := aRig(t)
+	merged := landed(t, here)
+	run(t, here, "git", "merge", "--ff-only", "-q", merged.Commit)
+	write(t, here, "scratch.md", "a note to self\n")
+
+	dirty, err := rig.New().Advance(context.Background(), here, "main", merged.Commit)
+	if err != nil {
+		t.Fatalf("advancing: %v", err)
+	}
+	if !dirty.Level || dirty.Current() || dirty.Left != "" || !strings.Contains(dirty.Held, "scratch.md") {
+		t.Errorf("expected a level but dirty checkout to be Held for its uncommitted file, got %+v", dirty)
+	}
+
+	os.Remove(filepath.Join(here, "scratch.md"))
+	run(t, here, "git", "checkout", "-q", "-b", "wip")
+	other, err := rig.New().Advance(context.Background(), here, "main", merged.Commit)
+	if err != nil {
+		t.Fatalf("advancing: %v", err)
+	}
+	if !other.Level || other.Current() || other.Left != "" || !strings.Contains(other.Held, "wip") {
+		t.Errorf("expected a level checkout on wip to be Held for its branch, got %+v", other)
 	}
 }
 

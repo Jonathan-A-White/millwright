@@ -17,6 +17,7 @@ import (
 func registerNextRigSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig checkout has an uncommitted file "([^"]*)"$`, c.theRigCheckoutHasAnUncommittedFile)
 	ctx.Given(`^the rig checkout is on a branch of its own, "([^"]*)"$`, c.theRigCheckoutIsOnABranch)
+	ctx.Given(`^something else brings the rig checkout level with the origin the moment a push reaches it$`, c.somethingLevelsTheRigCheckout)
 
 	ctx.Then(`^the rig checkout is at the commit that landed on "([^"]*)"$`, c.theRigCheckoutIsAtTheLandedCommit)
 	ctx.Then(`^the report says the rig checkout was fast-forwarded$`, c.theReportSaysTheRigWasFastForwarded)
@@ -51,6 +52,16 @@ func (c *nextContext) theRigCheckoutIsOnABranch(branch string) error {
 	}
 	c.rigBefore = head
 	return nil
+}
+
+// somethingLevelsTheRigCheckout is the origin's post-receive hook pulling the
+// rig checkout onto main, as another job of the host does between a landing's
+// push and the moment mw looks at the checkout: mw then finds it already at the
+// landed commit (mw-gq6.484).
+func (c *nextContext) somethingLevelsTheRigCheckout() error {
+	hook := filepath.Join(c.origin(), "hooks", "post-receive")
+	script := "#!/bin/sh\nunset GIT_DIR\ngit -C '" + c.rig + "' pull -q --ff-only origin main >/dev/null 2>&1\n"
+	return os.WriteFile(hook, []byte(script), 0o755)
 }
 
 func (c *nextContext) theRigCheckoutIsAtTheLandedCommit(branch string) error {

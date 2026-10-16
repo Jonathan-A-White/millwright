@@ -42,6 +42,9 @@ func registerNextAfterLandingSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^no user unit was try-restarted$`, c.noUnitWasRestarted)
 	ctx.Then(`^the rig's after-landing command did not run$`, c.theCommandDidNotRun)
 	ctx.Then(`^the report says: (.+)$`, c.theReportSays)
+	ctx.Then(`^the report does not say: (.+)$`, c.theReportDoesNotSay)
+	ctx.Then(`^the batch report says: (.+)$`, c.theBatchReportSays)
+	ctx.Then(`^the batch report does not say: (.+)$`, c.theBatchReportDoesNotSay)
 	ctx.Then(`^the comment on "([^"]*)" says: (.+)$`, c.theCommentSays)
 	ctx.Then(`^that mail's body says: (.+)$`, c.thatMailsBodySays)
 	ctx.Then(`^that mail's first line is: (.+)$`, c.thatMailsFirstLineIs)
@@ -193,6 +196,28 @@ func (c *nextContext) theReportSays(line string) error {
 	want := c.spoken(line)
 	if said := c.printed.String(); !strings.Contains(said, want) {
 		return fmt.Errorf("expected the report to say %q, got:\n%s", want, said)
+	}
+	return nil
+}
+
+func (c *nextContext) theReportDoesNotSay(line string) error {
+	if said := c.printed.String(); strings.Contains(said, line) {
+		return fmt.Errorf("expected the report not to say %q, got:\n%s", line, said)
+	}
+	return nil
+}
+
+func (c *nextContext) theBatchReportSays(line string) error {
+	want, said := c.spoken(line), c.batch.report.String()
+	if !strings.Contains(said, want) {
+		return fmt.Errorf("expected the batch report to say %q, got:\n%s", want, said)
+	}
+	return nil
+}
+
+func (c *nextContext) theBatchReportDoesNotSay(line string) error {
+	if said := c.batch.report.String(); strings.Contains(said, line) {
+		return fmt.Errorf("expected the batch report not to say %q, got:\n%s", line, said)
 	}
 	return nil
 }
