@@ -68,6 +68,9 @@ func newEventsFollowCmd() *cobra.Command {
 			"mw-dispatch.service, an alarm (an emergency-lane event), mail for the Millhand or a failed doctor\n" +
 			"mw-millhand-tick.service; each with an [events] heartbeat (default 1h) as fallback; and mw-mail-notify.service\n" +
 			"on its own [events] clock (default 5m). Every pass writes job events: scheduled, running, done or failed.\n" +
+			"At most every 5 s it also applies the Governor's one-tap actions (Done, release, hold, priority,\n" +
+			"keep, verified, thaw, chase answers, To do edits) that came in, as mw postern inbox --apply would, once per\n" +
+			"txid and at zero tokens; his typed words, answers and voice notes are left unread for the seat.\n" +
 			"It is what\n" +
 			"contrib/systemd/mw-view-follow.service runs; `mw postern view --follow` is the same loop.",
 		Args: cobra.NoArgs,
@@ -117,6 +120,7 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		return err
 	}
 	var shipper application.EventShipper
+	var tapper application.EventTapper
 	if keys, err := posternKeys(); err != nil {
 		return err
 	} else if exists, err := keys.Exists(); err != nil {
@@ -134,6 +138,14 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		ship.Postern, ship.Cipher, ship.Keys, ship.Err = backend, posternCipher(keys), keys, cmd.ErrOrStderr()
 		ship.ChainRoad = newChain(backend, keys, cmd.ErrOrStderr())
 		shipper = ship
+		// His one-tap actions are applied here, as they come, so none waits for a
+		// seat to run mw postern inbox. Wiring that fails leaves the follower
+		// without taps, said once, rather than stopping it.
+		if taps, err := posternTaps(cmd.ErrOrStderr()); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "mw events follow: his one-tap actions are left for mw postern inbox: %v\n", err)
+		} else {
+			tapper = taps
+		}
 	}
 	vaultDir, err := config.Vault()
 	if err != nil {
@@ -186,6 +198,7 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Nudger:     nudger,
 		Springer:   spring,
 		Watcher:    watcher,
+		Tapper:     tapper,
 		Controller: controller,
 		Trimmer:    eventTrim(path),
 		Head:       gateway,
