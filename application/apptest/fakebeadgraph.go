@@ -3,6 +3,7 @@ package apptest
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -22,6 +23,13 @@ func (g *FakeBeadGraph) Add(id, title, status, kind string, labels []string, edg
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.beads = append(g.beads, domain.GraphBead{ID: id, Title: title, Status: status, Type: kind, Labels: labels, Edges: edges})
+}
+
+// AddFiled puts a bead in the graph as Add does, filed at the time given.
+func (g *FakeBeadGraph) AddFiled(id, title, status, kind string, labels []string, created time.Time) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.beads = append(g.beads, domain.GraphBead{ID: id, Title: title, Status: status, Type: kind, Labels: labels, Created: created})
 }
 
 // Reads is how many times the graph was read.

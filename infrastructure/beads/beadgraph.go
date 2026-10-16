@@ -22,7 +22,7 @@ func (g *Gateway) BeadGraph(ctx context.Context) ([]domain.GraphBead, error) {
 	}
 	graph := make([]domain.GraphBead, 0, len(beads))
 	for _, b := range beads {
-		one := domain.GraphBead{ID: b.ID, Title: b.Title, Status: b.Status, Type: b.Type, Labels: b.Labels}
+		one := domain.GraphBead{ID: b.ID, Title: b.Title, Status: b.Status, Type: b.Type, Labels: b.Labels, Created: b.created()}
 		for _, e := range b.edges() {
 			if e.Issue == b.ID {
 				one.Edges = append(one.Edges, domain.BeadEdge{To: e.DependsOn, Kind: e.Kind})
