@@ -17,6 +17,10 @@ const SeatEnv = "MW_SEAT"
 // description it is kept in is never empty.
 const NoBody = "(no body)"
 
+// InboxShown is how many unread messages mw mail inbox prints, the newest,
+// unless it is asked for all of them.
+const InboxShown = 50
+
 // NewMessage is a message about to be sent: who from, who to, and what it says.
 // From is the seat's own name, seat or seat@host, and To is a mailbox: mayor,
 // builder, governor, or any seat. ReplyTo is the id of the message this one
@@ -146,7 +150,12 @@ func (m Mail) Reply(ctx context.Context, id, body string) (string, error) {
 // id, who it is from, when it was sent and its subject. as names another
 // seat's mailbox; empty means this seat's own. An inbox with nothing in it says
 // whose it is.
-func (m Mail) Inbox(ctx context.Context, as string) ([]Message, error) {
+//
+// Unless all is set it prints only the newest InboxShown, under a line that
+// says how many older ones it left out: a box of a thousand printed whole puts
+// the newest mail at the foot of a screen nobody reads to the end of
+// (mw-gq6.443). What it reports is every unread message, printed or not.
+func (m Mail) Inbox(ctx context.Context, as string, all bool) ([]Message, error) {
 	who, err := m.actingAs(as, "whose inbox to list")
 	if err != nil {
 		return nil, err
@@ -159,7 +168,12 @@ func (m Mail) Inbox(ctx context.Context, as string) ([]Message, error) {
 		m.printf("no unread mail for %s\n", who)
 		return unread, nil
 	}
-	for _, message := range unread {
+	shown := unread
+	if older := len(unread) - InboxShown; !all && older > 0 {
+		m.printf("%d older unread not shown; --all to list them\n", older)
+		shown = unread[older:]
+	}
+	for _, message := range shown {
 		m.printf("%s  from %s  %s  %s\n", message.ID, orUnknown(message.From), sentMinute(message.Sent), message.Subject)
 	}
 	return unread, nil

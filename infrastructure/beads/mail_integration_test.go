@@ -5,6 +5,9 @@ package beads_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -243,5 +246,54 @@ func TestGatewayClosesMailForTidyAndNothingElse(t *testing.T) {
 	bdRun(t, vault, beads.Program, "close", story, "--reason", "done")
 	if err := gateway.CommentOnStory(ctx, story, "Tidied by mw tidy: test"); err != nil {
 		t.Errorf("expected a closed bead to take a comment: %v", err)
+	}
+}
+
+// A box of more than a thousand unread is read whole: bd's --limit 0 lifts its
+// default of fifty and puts no cap of its own in its place (mw-gq6.443, where a
+// box of about a thousand was suspected of being cut at a thousand). The mail
+// is imported in one bd call, since a thousand creates would take minutes.
+func TestGatewayReadsAnInboxOfMoreThanAThousandWhole(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	bdRun(t, vault, beads.Program, "config", "set", "types.custom", "mail")
+	const many = 1001
+	first := time.Date(2026, time.October, 1, 0, 0, 0, 0, time.UTC)
+	var mail strings.Builder
+	for i := 1; i <= many; i++ {
+		line, err := json.Marshal(map[string]any{
+			"id": fmt.Sprintf("t-m%04d", i), "title": fmt.Sprintf("mail %d", i), "issue_type": "mail",
+			"status": "open", "priority": 2, "assignee": "mayor", "labels": []string{"mail"},
+			"metadata":   map[string]string{"from": "deputy", "to": "mayor"},
+			"created_at": first.Add(time.Duration(i) * time.Second).Format(time.RFC3339),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mail.Write(line)
+		mail.WriteByte('\n')
+	}
+	jsonl := filepath.Join(t.TempDir(), "mail.jsonl")
+	if err := os.WriteFile(jsonl, []byte(mail.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bdRun(t, vault, beads.Program, "import", jsonl)
+	gateway := beads.New(vault)
+
+	unread, err := gateway.Inbox(ctx, "mayor")
+	if err != nil {
+		t.Fatalf("listing the inbox of mayor: %v", err)
+	}
+	if len(unread) != many {
+		t.Fatalf("expected all %d unread in the inbox of mayor, got %d", many, len(unread))
+	}
+	if unread[0].Subject != "mail 1" || unread[many-1].Subject != fmt.Sprintf("mail %d", many) {
+		t.Errorf("expected the inbox oldest first, mail 1 to mail %d, got %q to %q", many, unread[0].Subject, unread[many-1].Subject)
+	}
+	if open, err := gateway.OpenMail(ctx); err != nil || len(open) != many {
+		t.Errorf("expected all %d open mail for mw tidy, got %d: %v", many, len(open), err)
 	}
 }
