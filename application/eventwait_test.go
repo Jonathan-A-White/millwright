@@ -127,3 +127,101 @@ func TestWaitEndsOnItsLimitSayingSo(t *testing.T) {
 		t.Fatalf("printed %q", out.String())
 	}
 }
+
+// countingBox counts the calls to Inbox, to say the wait asks the box once.
+type countingBox struct {
+	*apptest.FakeMailbox
+	inboxCalls int
+}
+
+func (b *countingBox) Inbox(ctx context.Context, mailbox string) ([]application.Message, error) {
+	b.inboxCalls++
+	return b.FakeMailbox.Inbox(ctx, mailbox)
+}
+
+func boxWithMail(t *testing.T, to string) *countingBox {
+	t.Helper()
+	box := &countingBox{FakeMailbox: apptest.NewFakeMailbox()}
+	if _, err := box.Send(context.Background(), application.NewMessage{From: "mayor", To: to, Subject: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	return box
+}
+
+func TestWaitWithMailKindAndNoSinceEndsAtOnceOnUnreadMailInTheBox(t *testing.T) {
+	box := boxWithMail(t, "deputy")
+	var out bytes.Buffer
+	got, err := application.EventWait{
+		Log:          logWith(t, jobEvent),
+		Subscription: application.Subscription{Seat: "deputy", Kinds: []string{"mail", "message"}},
+		Box:          box,
+		Sleep:        func(context.Context, time.Duration) error { t.Fatal("it slept"); return nil },
+		Out:          &out,
+	}.Run(context.Background())
+	if err != nil || len(got) != 0 {
+		t.Fatalf("got %+v, %v; want it to end at once with no log events", got, err)
+	}
+	if want := "New events for deputy: unread mail in its box (1). Run bd mail inbox.\n"; out.String() != want {
+		t.Fatalf("printed %q, want %q", out.String(), want)
+	}
+}
+
+func TestWaitWithMailKindAndAnEmptyBoxStillBlocksUntilANewMail(t *testing.T) {
+	box := boxWithMail(t, "mayor") // mail for another box does not count
+	log := logWith(t, jobEvent)
+	polls := 0
+	var out bytes.Buffer
+	got, err := application.EventWait{
+		Log:          log,
+		Subscription: application.Subscription{Seat: "deputy", Kinds: []string{"mail"}},
+		Box:          box,
+		Sleep: func(context.Context, time.Duration) error {
+			polls++
+			if polls == 2 {
+				appendAll(t, log, events.Event{Kind: events.KindMail, Bead: "mw-m2", Detail: "deputy"})
+			}
+			return nil
+		},
+		Out: &out,
+	}.Run(context.Background())
+	if err != nil || len(got) != 1 || got[0].Bead != "mw-m2" || polls != 2 {
+		t.Fatalf("got %+v, %v after %d polls; want the new mail after two", got, err, polls)
+	}
+	if box.inboxCalls != 1 {
+		t.Fatalf("the box was read %d times, want once at the start and never in the loop", box.inboxCalls)
+	}
+}
+
+func TestWaitGivenSinceDoesNotConsultTheBox(t *testing.T) {
+	box := boxWithMail(t, "deputy")
+	since := uint64(0)
+	got, err := application.EventWait{
+		Log:          logWith(t, mailEvent),
+		Subscription: application.Subscription{Seat: "mayor", Kinds: []string{"mail"}},
+		Since:        &since,
+		Box:          box,
+		Sleep:        func(context.Context, time.Duration) error { t.Fatal("it slept"); return nil },
+		Out:          &bytes.Buffer{},
+	}.Run(context.Background())
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	if box.inboxCalls != 0 {
+		t.Fatalf("the box was read %d times, want none with --since", box.inboxCalls)
+	}
+}
+
+func TestWaitWithoutMailKindDoesNotConsultTheBox(t *testing.T) {
+	box := boxWithMail(t, "deputy")
+	_, err := application.EventWait{
+		Log:          logWith(t, jobEvent),
+		Subscription: application.Subscription{Seat: "deputy", Kinds: []string{"message"}},
+		Box:          box,
+		Limit:        20 * time.Millisecond,
+		Every:        time.Millisecond,
+		Out:          &bytes.Buffer{},
+	}.Run(context.Background())
+	if err != nil || box.inboxCalls != 0 {
+		t.Fatalf("err %v, box read %d times; want none", err, box.inboxCalls)
+	}
+}

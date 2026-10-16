@@ -396,7 +396,9 @@ func newEventsWaitCmd() *cobra.Command {
 			"lines mw events tail prints) and exits 0, so a seat's harness, running it in the background, wakes\n" +
 			"on its exit. While it waits it looks at the log's head once a second and calls no bd. Only events\n" +
 			"after the log's head when it began count unless --since names a seq, after which they do; a mail\n" +
-			"event is the seat's only when its box is the seat. With no event by --limit (default 50m) it says\n" +
+			"event is the seat's only when its box is the seat. With mail among the kinds and no --since,\n" +
+			"it reads the seat's box once first and, if mail is unread there, prints \"New events for <seat>:\n" +
+			"unread mail in its box (N). Run bd mail inbox.\" and exits 0 at once. With no event by --limit (default 50m) it says\n" +
 			"so and exits 0: arm it again.\n\n" +
 			"--kinds is a list of " + strings.Join(application.SubscribableKinds(), ", ") + " (hyphens may stand for underscores;\n" +
 			"landing is a bead_changed to landed). Without it, the kinds are those of seats/<seat>/subscribe.toml\n" +
@@ -439,6 +441,14 @@ func newEventsWaitCmd() *cobra.Command {
 				return err
 			}
 			wait := application.EventWait{Log: eventlog.New(path), Subscription: sub, Self: window, Limit: limit, Out: cmd.OutOrStdout()}
+			if !cmd.Flags().Changed("since") {
+				// A vault or host that cannot be named leaves the box unread: the wait is as it was.
+				if dir, err := config.Vault(); err == nil {
+					if host, err := config.Host(); err == nil {
+						wait.Box = mwGateway(dir, host)
+					}
+				}
+			}
 			if window == "" {
 				wait.Self = thisWindowName(cmd.Context())
 			}
