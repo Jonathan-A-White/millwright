@@ -15,7 +15,8 @@ import (
 // holds everything it files, so this is the other half of filing — and the only
 // way to approve a plan without filing a second copy of it.
 func newReleaseCmd() *cobra.Command {
-	return &cobra.Command{
+	var overHold string
+	cmd := &cobra.Command{
 		Use:   "release <epic-id|story-id>",
 		Short: "Release the held stories of a plan filed earlier, or one held story",
 		Long: "release reads an epic that is already in the tracker and prints the same tree mw file\n" +
@@ -32,7 +33,12 @@ func newReleaseCmd() *cobra.Command {
 			"On a rig whose file in the vault says files_expected = true, a story with no files key is\n" +
 			"named under the tree, one line each: a warning, and the release goes ahead. So is a story\n" +
 			"none of whose files exist in its rig's checkout on this host: '<id>: none of its files\n" +
-			"exist in <rig>: wrong rig?'.",
+			"exist in <rig>: wrong rig?'.\n\n" +
+			"A held story whose own comments, or its parent's, say it was held or parked on the Governor's\n" +
+			"word (a comment with 'held' or 'parked' and 'Governor' or 'his word', not older than the story's\n" +
+			"last release over a hold) is not released: the release is refused, printing that comment, and\n" +
+			"nothing in the epic is released. --over-hold \"<why>\" releases it anyway and writes the why\n" +
+			"on the story.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, err := beads.FromConfig()
@@ -46,11 +52,14 @@ func newReleaseCmd() *cobra.Command {
 				Rules:    rigRulesIfKnown(),
 				Rigs:     rigs,
 				RigFiles: rig.Files{},
+				OverHold: overHold,
 				Out:      cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args[0])
 			return err
 		},
 	}
+	cmd.Flags().StringVar(&overHold, "over-hold", "", "release a story held on the Governor's word anyway, for this reason (written on the story)")
+	return cmd
 }
 
 // rigRulesIfKnown is the rig files of the vault, or nil when the vault cannot

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -48,6 +49,13 @@ func InitializeReleaseScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^the epic is released$`, c.theEpicIsReleased)
 	ctx.When(`^the epic is released again$`, c.theEpicIsReleased)
 	ctx.When(`^the epic "([^"]*)" is released$`, c.theNamedEpicIsReleased)
+	ctx.When(`^the held story "([^"]*)" is released$`, c.theHeldStoryIsReleased)
+	ctx.When(`^the held story "([^"]*)" is released over the hold "([^"]*)"$`, c.theStoryIsReleasedOverTheHold)
+	ctx.Given(`^the epic of the filed plan carries the comment "([^"]*)"$`, c.theEpicCarriesTheComment)
+	ctx.Given(`^the epic of the filed plan carries the comment "([^"]*)" dated (\S+)$`, c.theEpicCarriesTheCommentDated)
+	ctx.Given(`^the story "([^"]*)" of the filed plan carries the comment "([^"]*)"$`, c.theStoryCarriesTheComment)
+	ctx.Given(`^the story "([^"]*)" of the filed plan carries the comment "([^"]*)" dated (\S+)$`, c.theStoryCarriesTheCommentDated)
+	ctx.Then(`^the story "([^"]*)" of the filed plan carries the comment "([^"]*)"$`, c.theStoryHasTheComment)
 	ctx.Then(`^releasing succeeds$`, c.releasingSucceeds)
 	ctx.Then(`^releasing is refused, saying: (.+)$`, c.releasingIsRefusedSaying)
 	ctx.Then(`^the release tree names the epic (.+)$`, c.theReleaseTreeNamesTheEpic)
@@ -124,6 +132,69 @@ func (c *releaseContext) theEpicIsReleased() error {
 
 func (c *releaseContext) theNamedEpicIsReleased(epicID string) error {
 	return c.release(epicID)
+}
+
+func (c *releaseContext) theHeldStoryIsReleased(key string) error {
+	return c.theStoryIsReleasedOverTheHold(key, "")
+}
+
+func (c *releaseContext) theStoryIsReleasedOverTheHold(key, why string) error {
+	id, err := c.idOf(key)
+	if err != nil {
+		return err
+	}
+	c.printed.Reset()
+	_, c.err = application.Release{Tracker: c.tracker, OverHold: why, Out: &c.printed}.Run(context.Background(), id)
+	return nil
+}
+
+func (c *releaseContext) theEpicCarriesTheComment(text string) error {
+	return c.tracker.CommentOnStory(context.Background(), c.filed.EpicID, text)
+}
+
+func (c *releaseContext) theEpicCarriesTheCommentDated(text, at string) error {
+	when, err := time.Parse(time.RFC3339, at)
+	if err != nil {
+		return err
+	}
+	return c.tracker.CommentOnStoryAt(c.filed.EpicID, text, when)
+}
+
+func (c *releaseContext) theStoryCarriesTheComment(key, text string) error {
+	id, err := c.idOf(key)
+	if err != nil {
+		return err
+	}
+	return c.tracker.CommentOnStory(context.Background(), id, text)
+}
+
+func (c *releaseContext) theStoryCarriesTheCommentDated(key, text, at string) error {
+	id, err := c.idOf(key)
+	if err != nil {
+		return err
+	}
+	when, err := time.Parse(time.RFC3339, at)
+	if err != nil {
+		return err
+	}
+	return c.tracker.CommentOnStoryAt(id, text, when)
+}
+
+func (c *releaseContext) theStoryHasTheComment(key, text string) error {
+	id, err := c.idOf(key)
+	if err != nil {
+		return err
+	}
+	comments, err := c.tracker.StoryComments(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	for _, comment := range comments {
+		if comment.Text == text {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected the story %s to carry the comment %q, it carries %v", id, text, comments)
 }
 
 // release runs the use case, keeping only what this run printed: a second
