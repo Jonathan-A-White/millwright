@@ -37,7 +37,7 @@ const (
 // dispatch pass, the Millhand's tick and the sync job of mail-notify, each
 // only when its unit is installed here (a host with none is told on out, and
 // left to its timers), the grist job where the config has a [grist] table, the
-// chain-stamp job, the To do reminder job and the To do rank job, which run in
+// chain-stamp job, the To do reminder job, the To do rank job and the weekly digest job, which run in
 // the follower itself and so are always there, and the cloud job where the config has a [cloud] table.
 func homeSpring(path, host string, out io.Writer) (*application.EventSpring, error) {
 	knobs, err := config.Events()
@@ -86,6 +86,11 @@ func homeSpring(path, host string, out io.Writer) (*application.EventSpring, err
 	}
 	if job, err := nightlySuiteSpringJob(host, knobs.SuiteHour, out); err != nil {
 		fmt.Fprintf(out, "mw events follow: no suite job: %v\n", err)
+	} else {
+		jobs = append(jobs, job)
+	}
+	if job, err := digestSpringJob(host, out); err != nil {
+		fmt.Fprintf(out, "mw events follow: no digest job: %v\n", err)
 	} else {
 		jobs = append(jobs, job)
 	}

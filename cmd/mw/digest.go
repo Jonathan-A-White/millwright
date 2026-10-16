@@ -1,6 +1,10 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"io"
+
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -65,4 +69,30 @@ func newDigestSendCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the card; file and send nothing")
 	cmd.Flags().StringVar(&parent, "parent", application.DigestDefaultParent, "the bead the digest is filed under")
 	return cmd
+}
+
+// digestSpringJob is the job that sends the weekly digest (mw digest send) by
+// itself: on Mondays from 11:00 UTC, once, on the home only. Its events' actor
+// is digest@<host>.
+func digestSpringJob(host string, out io.Writer) (application.SpringJob, error) {
+	dir, err := config.Vault()
+	if err != nil {
+		return application.SpringJob{}, err
+	}
+	gateway := mwGateway(dir, host)
+	weekly := &application.DigestWeekly{
+		Notes: gateway,
+		Home: func(ctx context.Context) (bool, error) {
+			return application.IsHome(ctx, mwVault(dir, host), host)
+		},
+		Send: func(ctx context.Context) error {
+			_, err := application.Digest{Tracker: gateway, Sender: newDigestSender(gateway), Out: out}.Run(ctx)
+			if err != nil {
+				return fmt.Errorf("mw digest send: %w", err)
+			}
+			return nil
+		},
+		Err: out,
+	}
+	return weekly.Job(), nil
 }

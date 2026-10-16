@@ -184,6 +184,13 @@ story. A stamp the backend would not take stays in `pending.jsonl` with its fail
 (`attempts`, no limit) and is tried again on the next pass; the pass is `done` all the same, its
 failures said on the follower's stderr. A pass over an empty queue reads nothing but the queue.
 
+The `digest` job (events' actor `digest@<host>`) runs in the follower itself, on the home only, reason `clock`:
+on Mondays from 11:00 UTC (provisional), once for each day, it runs `mw digest send`. The UTC day is kept in the
+note `digest.weekly.last` and marked before the send, so a restart the same Monday sends nothing twice. His tap
+on the card's `A: Looks good on all N` (applied by `mw postern inbox --apply`) comments his answer and txid on
+each listed demo that is still open and unclaimed, closes it, then closes the digest bead, and mails the Mayor
+what was closed and skipped; any other answer changes no demo.
+
 The `todo-remind` job runs in the follower itself, every minute, reason `clock`. A To do card (an open
 bead labelled `hitl:todo`) can carry a due time, the metadata `todo_due` in RFC 3339: the Mayor's
 `mw todo due <bead> <time>` (`--clear` takes it off) or a todo_edit tap's `due` sets it, and the view

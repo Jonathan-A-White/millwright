@@ -542,3 +542,153 @@ func TestApplyMarksAnAnswerAppliedEvenWhenItsMailFails(t *testing.T) {
 		t.Fatalf("expected the answer recorded once, got %v", got)
 	}
 }
+
+// digestTapFixture is an applyFixture holding a weekly digest bead mw-d.1
+// that lists the open demos mw-e.5 and mw-e.6, its question open and offering
+// both of the digest card's options.
+func digestTapFixture(t *testing.T, offered ...string) *applyFixture {
+	t.Helper()
+	f := newApplyFixture(t)
+	ctx := context.Background()
+	f.tracker.AddEpic("mw-d", domain.Path{})
+	for _, id := range []string{"mw-e.5", "mw-e.6"} {
+		f.tracker.AddStory("mw-e", domain.Story{ID: id, Title: "Demo: " + id})
+		mustDo(t, f.tracker.SetLabels(id, application.LabelDemo, application.LabelDigest))
+	}
+	f.tracker.AddStory("mw-d", domain.Story{ID: "mw-d.1", Title: "Weekly digest 2026-10-19: 2 factory demos"})
+	mustDo(t, f.tracker.SetDescription("mw-d.1", "- mw-e.5: Demo: mw-e.5\n  VERIFIED by the Mayor: one\n- mw-e.6: Demo: mw-e.6\n  VERIFIED by the Mayor: two\n"))
+	if len(offered) == 0 {
+		offered = []string{application.DigestLooksGoodOption(2), application.DigestHoldOption}
+	}
+	question, _ := json.Marshal(map[string]any{"txid": "tx-digest", "options": offered})
+	mustDo(t, f.tracker.SetNote(ctx, application.PosternQuestionKey("mw-d.1"), string(question)))
+	return f
+}
+
+func (f *applyFixture) assertOpen(t *testing.T, ids ...string) {
+	t.Helper()
+	for _, id := range ids {
+		if reason := f.tracker.CloseReason(id); reason != "" {
+			t.Fatalf("expected %s left open, it was closed: %s", id, reason)
+		}
+	}
+}
+
+// 'A: Looks good on all 2' on the weekly digest comments on each listed demo
+// with his answer and txid, closes it, then closes the digest bead.
+func TestDigestLooksGoodTapClosesEachListedDemoThenTheDigest(t *testing.T) {
+	f := digestTapFixture(t)
+	f.answer(t, "tx-tap", "mw-d.1", application.DigestLooksGoodOption(2))
+
+	f.apply(t)
+
+	for _, id := range []string{"mw-e.5", "mw-e.6"} {
+		comments := f.tracker.Comments(id)
+		if len(comments) != 1 {
+			t.Fatalf("expected one comment on %s, got %v", id, comments)
+		}
+		for _, want := range []string{
+			"The Governor by postern", "on the weekly digest mw-d.1", `"A: Looks good on all 2"`, "(txid tx-tap)",
+			"Demo accepted on the Governor's Looks good via the weekly digest.",
+		} {
+			if !strings.Contains(comments[0], want) {
+				t.Fatalf("the comment on %s lacks %q: %s", id, want, comments[0])
+			}
+		}
+		if reason := f.tracker.CloseReason(id); reason == "" {
+			t.Fatalf("expected %s closed", id)
+		}
+	}
+	if reason := f.tracker.CloseReason("mw-d.1"); reason == "" || !strings.Contains(reason, "tx-tap") {
+		t.Fatalf("expected the digest closed on his tap, got %q", reason)
+	}
+	f.assertOpen(t, "mw-e.3")
+	subjects := f.subjects(t)
+	if len(subjects) != 2 || subjects[1] != "Closed: the weekly digest mw-d.1 on his Looks good" {
+		t.Fatalf("expected the answer's mail and a closed mail, got %v", subjects)
+	}
+}
+
+// A listed demo already closed is skipped, said in the mail, and the others
+// are still closed.
+func TestDigestLooksGoodTapSkipsAClosedDemoAndNamesIt(t *testing.T) {
+	f := digestTapFixture(t)
+	mustDo(t, f.tracker.CloseStory(context.Background(), "mw-e.5", "done by hand"))
+	f.answer(t, "tx-tap", "mw-d.1", application.DigestLooksGoodOption(2))
+
+	f.apply(t)
+
+	if got := f.tracker.Comments("mw-e.5"); len(got) != 0 {
+		t.Fatalf("expected no comment on the closed mw-e.5, got %v", got)
+	}
+	if reason := f.tracker.CloseReason("mw-e.5"); reason != "done by hand" {
+		t.Fatalf("expected mw-e.5 left as it was, got %q", reason)
+	}
+	if reason := f.tracker.CloseReason("mw-e.6"); reason == "" {
+		t.Fatalf("expected mw-e.6 closed")
+	}
+	if reason := f.tracker.CloseReason("mw-d.1"); reason == "" {
+		t.Fatalf("expected the digest closed")
+	}
+	mail, err := f.mailbox.Inbox(context.Background(), application.MayorMailbox)
+	mustDo(t, err)
+	if len(mail) != 2 || !strings.Contains(mail[1].Body, "Skipped: mw-e.5 (already closed)") || !strings.Contains(mail[1].Body, "mw-e.5") {
+		t.Fatalf("expected the mail to name mw-e.5 as skipped, got %+v", mail)
+	}
+}
+
+// A close that fails is mailed as not applied, and the digest is left open.
+func TestDigestLooksGoodTapLeavesTheDigestOpenWhenACloseFails(t *testing.T) {
+	f := digestTapFixture(t)
+	f.tracker.RefuseToClose("mw-e.6", "bd is down")
+	f.answer(t, "tx-tap", "mw-d.1", application.DigestLooksGoodOption(2))
+
+	f.apply(t)
+
+	if reason := f.tracker.CloseReason("mw-d.1"); reason != "" {
+		t.Fatalf("expected the digest left open, it was closed: %s", reason)
+	}
+	subjects := f.subjects(t)
+	if len(subjects) != 2 || subjects[1] != "Not applied: the weekly digest mw-d.1" {
+		t.Fatalf("expected the answer's mail and a not-applied mail, got %v", subjects)
+	}
+}
+
+// The B answer changes no demo and no digest, and the Mayor is mailed.
+func TestDigestHoldTapChangesNoBeadAndMailsTheMayor(t *testing.T) {
+	f := digestTapFixture(t)
+	f.answer(t, "tx-tap", "mw-d.1", application.DigestHoldOption)
+
+	f.apply(t)
+
+	f.assertOpen(t, "mw-e.5", "mw-e.6", "mw-d.1")
+	for _, id := range []string{"mw-e.5", "mw-e.6"} {
+		if got := f.tracker.Comments(id); len(got) != 0 {
+			t.Fatalf("expected no comment on %s, got %v", id, got)
+		}
+	}
+	if subjects := f.subjects(t); len(subjects) != 1 || !strings.HasPrefix(subjects[0], "Answer: mw-d.1") {
+		t.Fatalf("expected the answer's mail to the Mayor, got %v", subjects)
+	}
+}
+
+// The words of the digest's A on a card that never offered them, or on a
+// bead that is no weekly digest, close nothing.
+func TestDigestLooksGoodTapIsRefusedWhenNotOfferedOrNotADigest(t *testing.T) {
+	f := digestTapFixture(t, application.DigestHoldOption)
+	f.answer(t, "tx-tap", "mw-d.1", application.DigestLooksGoodOption(2))
+	f.apply(t)
+	f.assertOpen(t, "mw-e.5", "mw-e.6", "mw-d.1")
+	if subjects := f.subjects(t); len(subjects) != 2 || subjects[1] != "Not applied: the weekly digest mw-d.1" {
+		t.Fatalf("expected a not-applied mail, got %v", subjects)
+	}
+
+	g := digestTapFixture(t)
+	mustDo(t, g.tracker.SetTitle("mw-d.1", "Something else"))
+	g.answer(t, "tx-tap", "mw-d.1", application.DigestLooksGoodOption(2))
+	g.apply(t)
+	g.assertOpen(t, "mw-e.5", "mw-e.6", "mw-d.1")
+	if subjects := g.subjects(t); len(subjects) != 1 {
+		t.Fatalf("expected only the answer's mail, got %v", subjects)
+	}
+}

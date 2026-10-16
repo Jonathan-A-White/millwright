@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -194,4 +195,134 @@ func verifiedLine(comments []Comment) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// DigestTitlePrefix begins the title of every weekly digest bead.
+const DigestTitlePrefix = "Weekly digest"
+
+// isDigest reports whether bead is a weekly digest bead, as Digest files it.
+func isDigest(bead StoryDetail) bool {
+	return strings.HasPrefix(strings.TrimSpace(bead.Story.Title), DigestTitlePrefix)
+}
+
+// digestListed is the ids of the demos a digest bead's description lists, in
+// order: the first word after the "- " that begins a line, as digestDescription
+// writes it.
+func digestListed(description string) []string {
+	var ids []string
+	for _, line := range strings.Split(description, "\n") {
+		rest, ok := strings.CutPrefix(line, "- ")
+		if !ok {
+			continue
+		}
+		if id, _, found := strings.Cut(rest, ":"); found && strings.TrimSpace(id) != "" && !strings.ContainsAny(id, " \t") {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// DigestJobName is the follower job that sends the weekly digest: its events'
+// actor is digest@<host>, and only the home sends.
+const DigestJobName = "digest"
+
+// DigestWeekday and DigestHour are when, in UTC, the weekly digest is due:
+// Monday from 11:00. PROVISIONAL, until the Governor names the hour.
+const (
+	DigestWeekday = time.Monday
+	DigestHour    = 11
+)
+
+// DigestLastKey is the note the follower keeps the UTC day it last sent the
+// digest on, so a restart on the same Monday does not send it twice.
+const DigestLastKey = "digest.weekly.last"
+
+// DigestWeekly is the follower's digest job: on DigestWeekday, from
+// DigestHour UTC, once for each day, on the home only, it runs Send (mw digest
+// send). The day is marked before Send runs, so a pass that dies half-way
+// never files two digests.
+type DigestWeekly struct {
+	// Notes keeps the day of the last send.
+	Notes TodoNightlyNotes
+	// Home says whether this host is the home: only the home sends.
+	Home func(ctx context.Context) (bool, error)
+	// Send is mw digest send.
+	Send func(ctx context.Context) error
+	// Now is the clock; nil is time.Now.
+	Now func() time.Time
+	// Err is where a pass passed over is said. A nil Err says nothing.
+	Err io.Writer
+
+	mu    sync.Mutex
+	tried string // the UTC day the digest was last begun
+}
+
+func (w *DigestWeekly) now() time.Time {
+	if w.Now != nil {
+		return w.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+// Job is the follower's job: no event springs it; every pass asks whether the
+// digest is due.
+func (w *DigestWeekly) Job() SpringJob {
+	return SpringJob{
+		Name: DigestJobName,
+		Probe: func(ctx context.Context) (string, bool) {
+			if w.due(ctx) {
+				return ClockReason, true
+			}
+			return "", false
+		},
+		Run: w.run,
+	}
+}
+
+// due reports whether the digest is to be sent now: it is DigestWeekday from
+// DigestHour, none has been sent today, and this is the home. The home is
+// asked last, for it reads a file in the vault.
+func (w *DigestWeekly) due(ctx context.Context) bool {
+	now := w.now()
+	if now.Weekday() != DigestWeekday || now.Hour() < DigestHour {
+		return false
+	}
+	day := now.Format(time.DateOnly)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.tried == day {
+		return false
+	}
+	last, err := w.Notes.Note(ctx, DigestLastKey)
+	if err != nil {
+		w.say("mw events follow: reading the day of the last weekly digest: %v\n", err)
+		return false
+	}
+	if strings.TrimSpace(last) == day {
+		w.tried = day
+		return false
+	}
+	at, err := w.Home(ctx)
+	return err == nil && at
+}
+
+// run sends the digest if it is due, marking the day first.
+func (w *DigestWeekly) run(ctx context.Context) error {
+	if !w.due(ctx) {
+		return nil
+	}
+	day := w.now().Format(time.DateOnly)
+	w.mu.Lock()
+	w.tried = day
+	w.mu.Unlock()
+	if err := w.Notes.SetNote(ctx, DigestLastKey, day); err != nil {
+		return fmt.Errorf("marking the day of the weekly digest: %w", err)
+	}
+	return w.Send(ctx)
+}
+
+func (w *DigestWeekly) say(format string, args ...any) {
+	if w.Err != nil {
+		fmt.Fprintf(w.Err, format, args...)
+	}
 }

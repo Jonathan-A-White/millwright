@@ -152,3 +152,76 @@ func TestDigestSendDryRunCreatesAndSendsNothing(t *testing.T) {
 		}
 	}
 }
+
+// weeklyDigest is the digest job over a fake tracker's notes, at the given
+// time, counting the sends it makes.
+func weeklyDigest(notes *apptest.FakeTracker, now *time.Time, home bool, sends *int) *application.DigestWeekly {
+	return &application.DigestWeekly{
+		Notes: notes,
+		Home:  func(context.Context) (bool, error) { return home, nil },
+		Send:  func(context.Context) error { *sends++; return nil },
+		Now:   func() time.Time { return *now },
+	}
+}
+
+func TestDigestJobIsDueMondayAtElevenUTCAndNotBefore(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		name string
+		at   time.Time
+		due  bool
+	}{
+		{"Monday 10:59Z", time.Date(2026, 10, 19, 10, 59, 0, 0, time.UTC), false},
+		{"Monday 11:00Z", time.Date(2026, 10, 19, 11, 0, 0, 0, time.UTC), true},
+		{"Monday 23:00Z", time.Date(2026, 10, 19, 23, 0, 0, 0, time.UTC), true},
+		{"Tuesday 11:00Z", time.Date(2026, 10, 20, 11, 0, 0, 0, time.UTC), false},
+		{"Sunday 11:00Z", time.Date(2026, 10, 18, 11, 0, 0, 0, time.UTC), false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			sends, at := 0, c.at
+			job := weeklyDigest(apptest.NewFakeTracker(), &at, true, &sends).Job()
+			if _, due := job.Probe(ctx); due != c.due {
+				t.Fatalf("at %s the digest job is due = %v, want %v", c.name, due, c.due)
+			}
+			if err := job.Run(ctx); err != nil {
+				t.Fatalf("running the job: %v", err)
+			}
+			if (sends == 1) != c.due {
+				t.Fatalf("at %s the job sent %d times, want sent = %v", c.name, sends, c.due)
+			}
+		})
+	}
+}
+
+func TestDigestJobSendsOncePerMondayAndOnlyOnTheHome(t *testing.T) {
+	ctx := context.Background()
+	notes := apptest.NewFakeTracker()
+	at := time.Date(2026, 10, 19, 11, 0, 0, 0, time.UTC)
+
+	away := 0
+	if _, due := weeklyDigest(notes, &at, false, &away).Job().Probe(ctx); due {
+		t.Fatal("expected the digest job not due away from the home")
+	}
+
+	sends := 0
+	job := weeklyDigest(notes, &at, true, &sends).Job()
+	if err := job.Run(ctx); err != nil {
+		t.Fatalf("running the job: %v", err)
+	}
+	at = at.Add(3 * time.Hour)
+	if _, due := job.Probe(ctx); due {
+		t.Fatal("expected the job not due again the same Monday")
+	}
+	// A follower that restarted the same Monday reads the day from the notes.
+	again := 0
+	if _, due := weeklyDigest(notes, &at, true, &again).Job().Probe(ctx); due {
+		t.Fatal("expected a restarted follower not to send the same Monday again")
+	}
+	at = at.AddDate(0, 0, 7)
+	if _, due := weeklyDigest(notes, &at, true, &again).Job().Probe(ctx); !due {
+		t.Fatal("expected the job due the next Monday")
+	}
+	if sends != 1 {
+		t.Fatalf("sent %d times, want 1", sends)
+	}
+}
