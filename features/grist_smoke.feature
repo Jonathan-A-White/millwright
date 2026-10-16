@@ -9,8 +9,9 @@ Feature: mw grist smoke tests an app's grist end to end
   a line of mw status and a hold on the rig's open stories. A smoke the mill
   would not take for a reason that is not the examples' (the key's daily limit,
   its licence, the backend out of reach, the factory's usage limit) is "not
-  run": it holds nothing. An example whose mill session did not finish is the
-  mill's fault too: it is sent once more before it fails.
+  run": it holds nothing. An example whose mill session did not finish, or
+  whose grind ran out of time, is the mill's fault too: it is sent once more
+  before it fails.
 
   Background:
     Given the app "trade-tracker" has the grind "price-check" whose answer must carry a price and a confidence
@@ -262,6 +263,40 @@ Feature: mw grist smoke tests an app's grist end to end
     When mw grist smoke is run for "trade-tracker"
     Then the smoke failed, saying "price-check/blank-paper: the mill failed it, and again when it was retried: The grind's session did not finish; send it again."
     And the smoke sent 2 grist
+
+  Scenario: an example whose grind ran out of time is sent once more, and passes when it is answered
+    Given the mill fails the next grist because "The grind ran out of time; send it again."
+    And the mill answers the next grist with:
+      """
+      {"price": null, "confidence": "low"}
+      """
+    When mw grist smoke is run for "trade-tracker"
+    Then the smoke sent 2 grist as "trade-tracker/price-check" with the photo "blank.jpg"
+    And the smoke passed, saying "trade-tracker: ok, 1 examples"
+    And no alarm was posted
+
+  Scenario: an example whose grind ran out of time twice fails, saying it was retried
+    Given the mill fails the next grist because "The grind ran out of time; send it again."
+    And the mill fails the next grist because "The grind ran out of time; send it again."
+    When mw grist smoke is run for "trade-tracker"
+    Then the smoke failed, saying "price-check/blank-paper: the mill failed it, and again when it was retried: The grind ran out of time; send it again."
+    And the smoke sent 2 grist
+
+  Scenario Outline: an example the mill could not take for its own reason is sent once more
+    Given the mill fails the next grist because "<reason>"
+    And the mill answers the next grist with:
+      """
+      {"price": null, "confidence": "low"}
+      """
+    When mw grist smoke is run for "trade-tracker"
+    Then the smoke sent 2 grist as "trade-tracker/price-check" with the photo "blank.jpg"
+    And the smoke passed, saying "trade-tracker: ok, 1 examples"
+
+    Examples:
+      | reason                                                    |
+      | The factory could not read the app's grind; send it again. |
+      | A photo in this grist could not be fetched; send it again. |
+      | The factory could not pass this on; send it again.         |
 
   Scenario: mw grist smoke says it was not run, and did not fail
     Given the mill refuses the next grist because "This key has sent its 50 grist for today; send it again tomorrow."
