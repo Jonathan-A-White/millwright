@@ -3,12 +3,51 @@ package application
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
+
+// The bundle's files, by name.
+const (
+	SleepTriageFile = "triage.jsonl"
+	SleepDiffFile   = "triage-diff.txt"
+	SleepQueueFile  = "queue.json"
+	SleepGitFile    = "git-log.txt"
+	SleepRunsFile   = "runs.txt"
+	SleepReportFile = "report.txt"
+)
+
+// sleepBudgets is the most bytes of each part of the bundle the agent is given:
+// the one place they are named (mw-gq6.522). A part over its budget is cut by
+// mw, and the cut is said. Together they come to SleepTotalBudget, about 35,000
+// tokens, which the agent reads in a few turns.
+var sleepBudgets = map[string]int{
+	SleepTriageFile: 50_000,
+	SleepDiffFile:   10_000,
+	SleepQueueFile:  24_000,
+	SleepGitFile:    20_000,
+	SleepRunsFile:   4_000,
+	SleepReportFile: 24_000,
+}
+
+// SleepTotalBudget is the most bytes of the whole bundle: the sum of the parts'
+// budgets.
+const SleepTotalBudget = 132_000
+
+// SleepBudgetOf is the most bytes of the part held in file.
+func SleepBudgetOf(file string) int { return sleepBudgets[file] }
+
+// SleepPartCount is how many parts the bundle holds.
+func SleepPartCount() int { return len(sleepBudgets) }
+
+// sleepDescriptionRunes are the lengths of a bead's description the dump is
+// compacted to, one after another, until it fits its budget.
+var sleepDescriptionRunes = []int{160, 80, 0}
 
 // SleepSession is one session's result in the vault's runs, and when it was
 // written.
@@ -64,13 +103,154 @@ func (g SleepGather) Gather(ctx context.Context, window SleepWindow) (SleepBundl
 	if err := g.Dump(ctx, &dump); err != nil {
 		return nil, fmt.Errorf("the triage dump: %w", err)
 	}
-	bundle := SleepBundle{{Name: "triage dump", File: "triage.jsonl", Text: dump.String(), Keep: true}}
-	bundle = append(bundle, SleepPart{Name: "triage diff", File: "triage-diff.txt", Text: g.diff(ctx, window, dump.String())})
-	bundle = append(bundle, SleepPart{Name: "queue", File: "queue.json", Text: g.said(g.Mw(ctx, "queue", "--json"))})
-	bundle = append(bundle, SleepPart{Name: "git log", File: "git-log.txt", Text: g.gitLogs(ctx, window)})
-	bundle = append(bundle, SleepPart{Name: "runs", File: "runs.txt", Text: g.runs(ctx, window, now)})
-	bundle = append(bundle, SleepPart{Name: "report", File: "report.json", Text: g.said(g.Mw(ctx, "report", "--since", window.ReportSince(), "--json"))})
+	triage := cutTriage(dump.String(), sleepBudgets[SleepTriageFile])
+	triage.Name, triage.File, triage.Keep = "triage dump", SleepTriageFile, true
+	bundle := SleepBundle{triage}
+	bundle = append(bundle, cutPart("triage diff", SleepDiffFile, g.diff(ctx, window, dump.String())))
+	bundle = append(bundle, cutPart("queue", SleepQueueFile, g.said(g.Mw(ctx, "queue", "--json"))))
+	bundle = append(bundle, g.gitPart(ctx, window))
+	bundle = append(bundle, cutPart("runs", SleepRunsFile, g.runs(ctx, window, now)))
+	// The report's text form, which carries what the rule reads; its JSON is
+	// ten times the size (413 KB against 17 KB on 2026-10-16).
+	bundle = append(bundle, cutPart("report", SleepReportFile, g.said(g.Mw(ctx, "report", "--since", window.ReportSince()))))
 	return bundle, nil
+}
+
+// cutPart is the part held in file, cut to its budget by lines.
+func cutPart(name, file, text string) SleepPart {
+	budget := sleepBudgets[file]
+	cut, note := cutLines(text, budget)
+	return SleepPart{Name: name, File: file, Text: cut, Budget: budget, Cut: note}
+}
+
+// cutLines is text cut to at most budget bytes, whole lines from its start,
+// ending in a line that says what was cut; note says it too, and is "" when
+// nothing was cut.
+func cutLines(text string, budget int) (cut, note string) {
+	if len(text) <= budget {
+		return text, ""
+	}
+	// room is left for the line that says it.
+	const room = 160
+	keep := budget - room
+	if keep < 0 {
+		keep = 0
+	}
+	head := text[:keep]
+	if i := strings.LastIndex(head, "\n"); i >= 0 {
+		head = head[:i+1]
+	} else {
+		for !utf8.ValidString(head) {
+			head = head[:len(head)-1]
+		}
+	}
+	note = fmt.Sprintf("was %s bytes, cut to its first %s bytes (%d of %d lines)",
+		Thousands(len(text)), Thousands(len(head)), strings.Count(head, "\n"), strings.Count(text, "\n"))
+	return head + "(mw cut this part: it " + note + ")\n", note
+}
+
+// sleepLine is one bead of the dump as the agent reads it: the fields the rule
+// weighs, with what is empty left out.
+type sleepLine struct {
+	ID              string   `json:"id"`
+	Type            string   `json:"type"`
+	Status          string   `json:"status"`
+	Priority        int      `json:"priority"`
+	Labels          []string `json:"labels,omitempty"`
+	Rig             string   `json:"rig,omitempty"`
+	Size            string   `json:"size,omitempty"`
+	Parent          string   `json:"parent,omitempty"`
+	DaysSinceUpdate int      `json:"days_since_update"`
+	Ready           bool     `json:"ready,omitempty"`
+	DaysReady       int      `json:"days_ready,omitempty"`
+	Deps            []string `json:"deps,omitempty"`
+	Dependents      []string `json:"dependents,omitempty"`
+	Description     string   `json:"description,omitempty"`
+	HisPriority     bool     `json:"his_priority,omitempty"`
+}
+
+// cutTriage is the dump compacted for the agent: the dates are left out (the
+// days since are in), then the descriptions shortened until the dump fits its
+// budget, and, if it still does not, the beads that matter least left out: his
+// own priorities first, then the ready ones, the most urgent first. The part
+// keeps the whole dump (Whole), which tomorrow's diff starts from.
+func cutTriage(dump string, budget int) SleepPart {
+	part := SleepPart{Text: dump, Budget: budget}
+	lines, err := ReadTriageLines(strings.NewReader(dump))
+	if err != nil || len(dump) <= budget {
+		cut, note := cutLines(dump, budget)
+		part.Text, part.Cut = cut, note
+		if note != "" {
+			part.Whole = dump
+		}
+		return part
+	}
+	part.Whole = dump
+	for _, runes := range sleepDescriptionRunes {
+		text := encodeSleepLines(lines, runes)
+		if len(text) <= budget {
+			part.Text = text
+			part.Cut = fmt.Sprintf("was %s bytes, compacted to %s: descriptions cut to %d characters, dates left out",
+				Thousands(len(dump)), Thousands(len(text)), runes)
+			return part
+		}
+	}
+	// Whole beads, in rank order, until the budget is spent; shown in id order.
+	ranked := append([]TriageLine(nil), lines...)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		a, b := ranked[i], ranked[j]
+		if a.HisPriority != b.HisPriority {
+			return a.HisPriority
+		}
+		if a.Ready != b.Ready {
+			return a.Ready
+		}
+		return a.Priority < b.Priority
+	})
+	const room = 200
+	used, kept := 0, 0
+	for _, line := range ranked {
+		n := len(encodeSleepLines([]TriageLine{line}, 0))
+		if used+n > budget-room {
+			break
+		}
+		used += n
+		kept++
+	}
+	chosen := map[string]bool{}
+	for _, line := range ranked[:kept] {
+		chosen[line.ID] = true
+	}
+	var shown []TriageLine
+	for _, line := range lines {
+		if chosen[line.ID] {
+			shown = append(shown, line)
+		}
+	}
+	text := encodeSleepLines(shown, 0)
+	part.Cut = fmt.Sprintf("was %s bytes (%d beads), compacted to the %d most urgent beads, without descriptions or dates; the rest are in the diff when they moved",
+		Thousands(len(dump)), len(lines), kept)
+	part.Text = text + "(mw cut this part: it " + part.Cut + ")\n"
+	return part
+}
+
+// encodeSleepLines is the dump lines as the agent reads them, descriptions cut
+// to runes characters.
+func encodeSleepLines(lines []TriageLine, runes int) string {
+	var out strings.Builder
+	enc := json.NewEncoder(&out)
+	for _, l := range lines {
+		description := []rune(strings.Join(strings.Fields(l.Description), " "))
+		if len(description) > runes {
+			description = description[:runes]
+		}
+		_ = enc.Encode(sleepLine{
+			ID: l.ID, Type: l.Type, Status: l.Status, Priority: l.Priority, Labels: l.Labels, Rig: l.Rig,
+			Size: l.Size, Parent: l.Parent, DaysSinceUpdate: l.DaysSinceUpdate, Ready: l.Ready, DaysReady: l.DaysReady,
+			Deps: l.Deps, Dependents: l.Dependents, Description: string(description), HisPriority: l.HisPriority,
+		})
+	}
+	return out.String()
 }
 
 // said is a part's text, or the plain sentence that it could not be read.
@@ -101,8 +281,33 @@ func (g SleepGather) diff(ctx context.Context, window SleepWindow, dump string) 
 	return "Since " + name + ":\n" + DiffTriage(old, fresh).String()
 }
 
-// gitLogs is each rig's log of the last GitDays days, in the rigs' name order.
-func (g SleepGather) gitLogs(ctx context.Context, window SleepWindow) string {
+// gitPart is the git log part: each rig's share of the budget is its own, so
+// one busy rig cannot push the others out.
+func (g SleepGather) gitPart(ctx context.Context, window SleepWindow) SleepPart {
+	budget := sleepBudgets[SleepGitFile]
+	share := budget
+	if len(g.Rigs) > 0 {
+		// each rig's heading and "no commit" lines come out of the budget first.
+		share = (budget - 200*len(g.Rigs)) / len(g.Rigs)
+	}
+	var notes []string
+	text := g.gitLogs(ctx, window, func(rig, log string) string {
+		cut, note := cutLines(log, share)
+		if note != "" {
+			notes = append(notes, rig+" "+note)
+		}
+		return cut
+	})
+	part := SleepPart{Name: "git log", File: SleepGitFile, Text: text, Budget: budget}
+	if len(notes) > 0 {
+		part.Cut = strings.Join(notes, "; ")
+	}
+	return part
+}
+
+// gitLogs is each rig's log of the last GitDays days, in the rigs' name order,
+// each log passed through fit.
+func (g SleepGather) gitLogs(ctx context.Context, window SleepWindow, fit func(rig, log string) string) string {
 	names := make([]string, 0, len(g.Rigs))
 	for name := range g.Rigs {
 		names = append(names, name)
@@ -118,7 +323,7 @@ func (g SleepGather) gitLogs(ctx context.Context, window SleepWindow) string {
 		case strings.TrimSpace(log) == "":
 			fmt.Fprintf(&logs, "(no commit in %d days)\n", window.GitDays())
 		default:
-			logs.WriteString(withNewline(log))
+			logs.WriteString(fit(name, withNewline(log)))
 		}
 	}
 	if len(names) == 0 {

@@ -38,7 +38,9 @@ const (
 
 // The pass's session: it reads a handful of files and answers once.
 const (
-	sleepMaxTurns = 12
+	// SleepMaxTurns lets the agent read each of the bundle's parts once, page
+	// the larger ones, and answer (mw-gq6.522).
+	SleepMaxTurns = 12
 	sleepTimeout  = 40 * time.Minute
 	// sleepSummaryWords is the most words of the summary mailed to the Mayor.
 	sleepSummaryWords = 150
@@ -110,6 +112,12 @@ type SleepPart struct {
 	// File is the part's file name in the agent's directory.
 	File string
 	Text string
+	// Budget is the most bytes of Text the agent is given (SleepBudgetOf).
+	Budget int
+	// Cut says how mw cut the part to its budget, "" for a part that fit.
+	Cut string
+	// Whole is what Keep keeps when Text was cut; empty keeps Text.
+	Whole string
 	// Keep also keeps the part in the pass's plans directory under File: the
 	// triage dump is, for tomorrow's diff to start from.
 	Keep bool
@@ -119,15 +127,20 @@ type SleepPart struct {
 // ready-story queue, each rig's git log, the runs' aggregates and mw report.
 type SleepBundle []SleepPart
 
-// Sizes is one line a part: its name, file and size in bytes.
+// Sizes is one line a part: its name, file, size in bytes against its budget,
+// and, for a part mw cut, how. The last line is the total against its budget.
 func (b SleepBundle) Sizes() string {
 	var sizes strings.Builder
 	total := 0
 	for _, part := range b {
-		fmt.Fprintf(&sizes, "  %-14s %-20s %s bytes\n", part.Name, part.File, Thousands(len(part.Text)))
+		fmt.Fprintf(&sizes, "  %-14s %-20s %s bytes of %s", part.Name, part.File, Thousands(len(part.Text)), Thousands(part.Budget))
+		if part.Cut != "" {
+			fmt.Fprintf(&sizes, " (CUT by mw: %s)", part.Cut)
+		}
+		sizes.WriteString("\n")
 		total += len(part.Text)
 	}
-	fmt.Fprintf(&sizes, "  %-14s %-20s %s bytes\n", "total", "", Thousands(total))
+	fmt.Fprintf(&sizes, "  %-14s %-20s %s bytes of %s\n", "total", "", Thousands(total), Thousands(SleepTotalBudget))
 	return sizes.String()
 }
 
@@ -204,7 +217,9 @@ type SleepRunLog struct {
 	Outcome string      `json:"outcome"`
 	// Bundle is the size of each part, in bytes.
 	Bundle map[string]int `json:"bundle"`
-	Files  []string       `json:"files,omitempty"`
+	// Cut says, for each part mw cut to its budget, how.
+	Cut   map[string]string `json:"cut,omitempty"`
+	Files []string          `json:"files,omitempty"`
 }
 
 // SleepSchema is the schema the agent answers in: the four files and the
@@ -313,7 +328,7 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 	}
 	grind, err := p.Grinder.Grind(ctx, GrindCall{
 		Dir: dir, Model: model, Effort: effort, System: system, Schema: SleepSchema,
-		Prompt: prompt, Timeout: sleepTimeout, MaxTurns: sleepMaxTurns,
+		Prompt: prompt, Timeout: sleepTimeout, MaxTurns: SleepMaxTurns,
 	})
 	if err != nil {
 		return result, fmt.Errorf("mw sleep pass: the agent could not run, nothing was written: %w", err)
@@ -331,6 +346,12 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 	}
 	for _, part := range bundle {
 		log.Bundle[part.Name] = len(part.Text)
+		if part.Cut != "" {
+			if log.Cut == nil {
+				log.Cut = map[string]string{}
+			}
+			log.Cut[part.Name] = part.Cut
+		}
 	}
 
 	answer, refused := judgeSleepAnswer(grind)
@@ -493,7 +514,11 @@ func sleepPrompt(window SleepWindow, now time.Time, bundle SleepBundle) string {
 	}
 	prompt.WriteString("Read these files, each one named by what it holds:\n")
 	for _, part := range bundle {
-		fmt.Fprintf(&prompt, "- %s: %s (%s bytes)\n", part.File, part.Name, Thousands(len(part.Text)))
+		fmt.Fprintf(&prompt, "- %s: %s (%s bytes)", part.File, part.Name, Thousands(len(part.Text)))
+		if part.Cut != "" {
+			fmt.Fprintf(&prompt, ", cut by mw to fit: %s", part.Cut)
+		}
+		prompt.WriteString("\n")
 	}
 	return prompt.String()
 }

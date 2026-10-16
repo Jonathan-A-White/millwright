@@ -230,6 +230,20 @@ func TestADryRunPrintsThePromptAndTheBundleSizesAndWritesNothing(t *testing.T) {
 	}
 }
 
+func TestADryRunSaysEachPartAgainstItsBudgetAndWhichWereCut(t *testing.T) {
+	f := newSleepFixture()
+	f.pass.Gatherer = liveSizedGather()
+	if _, err := f.pass.Run(context.Background(), application.SleepOptions{DryRun: true}); err != nil {
+		t.Fatal(err)
+	}
+	said := f.out.String()
+	for _, want := range []string{"bytes of 50,000", "bytes of 24,000", "bytes of 132,000", "CUT by mw", "cut by mw to fit"} {
+		if !strings.Contains(said, want) {
+			t.Errorf("the dry run did not say %q:\n%s", want, said[strings.Index(said, "--- bundle"):])
+		}
+	}
+}
+
 func TestARunOnAFixtureBundleWritesTheFilesAndMailsTheSummary(t *testing.T) {
 	f := newSleepFixture()
 	result, err := f.pass.Run(context.Background(), application.SleepOptions{})
