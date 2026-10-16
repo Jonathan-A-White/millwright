@@ -120,6 +120,9 @@ func (c *nextContext) theNextTickKeepsTheLeftovers() error {
 		Host:      nextHost,
 		Cap:       1,
 		Rigs:      map[string]string{"millwright": c.rig},
+
+		RetryFromBranch: !c.fromMain,
+		Rebases:         worktrees,
 	}.Run(context.Background())
 	c.dispatchReport, c.err = report, err
 	return nil
