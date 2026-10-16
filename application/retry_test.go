@@ -581,7 +581,7 @@ func TestOnlyTheGateTheMergeAndTheTurnCapHandABranchOn(t *testing.T) {
 	for reason, want := range map[application.Reason]bool{
 		application.ReasonTestsFail: true, application.ReasonMergedTestsFail: true, application.ReasonMergeConflict: true,
 		application.ReasonTurnCap: true, application.ReasonOpenSteps: true,
-		application.ReasonSignedCommit: false, application.ReasonNoCommits: false, application.ReasonUncommittedWork: false,
+		application.ReasonSignedCommit: false, application.ReasonTrackedBinary: false, application.ReasonNoCommits: false, application.ReasonUncommittedWork: false,
 	} {
 		if got := application.ContinuesFrom(reason); got != want {
 			t.Errorf("ContinuesFrom(%s) = %v, want %v", reason, got, want)

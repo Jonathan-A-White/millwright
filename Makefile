@@ -54,7 +54,9 @@ test:
 # nothing. Then contrib/vultr-boost, against stand-in mw, terraform, ssh, age and
 # curl and a throwaway vault (terraform fmt, validate and tflint where installed).
 # Then the
-# gate's parallelism: GOFLAGS and GOMAXPROCS must follow JOBS. Every
+# gate's parallelism: GOFLAGS and GOMAXPROCS must follow JOBS. Then that no
+# tracked file is an ELF or Mach-O executable or over 2 MB outside testdata/
+# (scripts/check-tracked-binaries.sh). Every
 # other check here reads only this repository (and a temporary directory)
 # and starts nothing.
 lint:
@@ -75,6 +77,7 @@ lint:
 	scripts/check-gate-jobs.sh
 	scripts/check-chain-stamps-doc.sh
 	scripts/check-shellcheck-directives.sh
+	scripts/check-tracked-binaries.sh
 
 clean:
 	rm -rf bin

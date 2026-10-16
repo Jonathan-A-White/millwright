@@ -347,6 +347,39 @@ Feature: Closing out a finished story and carrying on
     And the comment on "mw-gq6.1" and the report name that commit
     And the worktree of "mw-gq6.1" is still there
 
+  # mw-gq6.517: a stray `go build` output, mw, rode to main in a commit. A branch
+  # that adds an executable at the repo root, or a file over 2 MB, is turned away
+  # before the merge, for the session to amend.
+  Scenario: A branch that adds a build binary at the repo root is not landed
+    Given the session of "mw-gq6.1" reported a plain success
+    And a commit on the branch of "mw-gq6.1" adds an executable "mw" at the repo root
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" is held blocked
+    And the story "mw-gq6.1" carries a comment quoting: mw is an executable at the repo root
+    And the report says it stopped for "tracked-binary"
+    And the last ledger line holds:
+      | not landed (tracked-binary): |
+    And the rig's tests were run 0 times
+    And no fresh session was started
+
+  Scenario: A branch that adds a file over 2 MB is not landed
+    Given the session of "mw-gq6.1" reported a plain success
+    And a commit on the branch of "mw-gq6.1" adds the file "assets/footage.dat" of 3 MB
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is held blocked
+    And the story "mw-gq6.1" carries a comment quoting: assets/footage.dat is 3145728 bytes
+    And the report says it stopped for "tracked-binary"
+    And the rig's tests were run 0 times
+
+  Scenario: A branch that adds a large fixture under testdata lands
+    Given the session of "mw-gq6.1" reported a plain success
+    And a commit on the branch of "mw-gq6.1" adds the file "parser/testdata/big.json" of 3 MB
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+
   Scenario: A formula step the session never closed stops the close-out
     Given the session of "mw-gq6.1" reported a plain success
     And a formula was poured for "mw-gq6.1" and one of its steps is still open
