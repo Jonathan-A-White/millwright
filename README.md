@@ -4634,7 +4634,10 @@ found and what a person does; `docs/secrets.md` says how.
 ... past the hour — off the dispatch timer's own minutes, so the two never
 start together. Unlike the rig's other units the service does not rely on
 `PATH`: `ExecStart` names `~/.local/bin/mw` directly, since doctoring a host
-whose own environment may be at fault is the point. `scripts/check-timer-units.sh`
+whose own environment may be at fault is the point. The service lists 6, the status
+`mw doctor` leaves with for a check left faulty and uncured, in `SuccessExitStatus=`: that is
+a finding already in the journal, not a failure, so `OnFailure=` does not mail the Mayor on it
+every five minutes. `scripts/check-timer-units.sh`
 (in `make lint`) verifies the pair with `systemd-analyze` and starts nothing.
 See `features/doctor.feature`.
 
