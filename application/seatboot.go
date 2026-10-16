@@ -149,6 +149,13 @@ func ResultFileNameForAttempt(attempt int) string {
 	return attemptRunFileName(ResultFileName, attempt)
 }
 
+// NextLogNameForAttempt is the run file the close-out's words are kept in for
+// attempt (Launch.AfterLog): next-<attempt>.log, the first attempt included, so
+// that what is read back (CloseOutLogTail) is named the same way for every one.
+func NextLogNameForAttempt(attempt int) string {
+	return fmt.Sprintf("next-%d.log", max(1, attempt))
+}
+
 // attemptRunFileName is the run file name base is written under for attempt.
 // The first attempt of a story is not numbered at all, so that nothing about
 // the common case — a story worked once — changes, and so that a run record or
@@ -381,7 +388,7 @@ func (b SeatBoot) CloseOut(ctx context.Context, detail StoryDetail, dir string) 
 	}
 	spec, err := b.Harness.Session(Launch{
 		StoryID: id, Path: path, Seat: b.Seat, Host: b.Host, Dir: dir,
-		After: b.after(id), CloseOutOnly: true,
+		After: b.after(id), AfterLog: b.afterLog(id, detail.Attempts), CloseOutOnly: true,
 	})
 	if err != nil {
 		return SessionSpec{}, fmt.Errorf("running the close-out of %s again: %w", id, err)
@@ -540,6 +547,7 @@ func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kick
 		ResultFile: b.Vault.RunFile(id, ResultFileNameForAttempt(attempt)),
 		Kickoff:    kickoff(b.Vault.Dir()) + advice,
 		After:      b.after(id),
+		AfterLog:   b.afterLog(id, attempt),
 		Heartbeat:  b.heartbeat(id),
 		BdRetry:    b.BdRetry,
 		MaxTurns:   turns,
@@ -560,6 +568,16 @@ func (b SeatBoot) after(storyID string) []string {
 		return nil
 	}
 	return append(append([]string(nil), b.After...), storyID)
+}
+
+// afterLog is the run file the close-out's words are kept in for attempt
+// (mw-gq6.487), beside the result it closes out; none when nothing runs after
+// the session, or the vault has nowhere to keep it.
+func (b SeatBoot) afterLog(storyID string, attempt int) string {
+	if len(b.After) == 0 || b.Vault == nil {
+		return ""
+	}
+	return b.Vault.RunFile(storyID, NextLogNameForAttempt(attempt))
 }
 
 // heartbeat is the command that runs beside this story's session, from the

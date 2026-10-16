@@ -125,6 +125,8 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the worktree of "([^"]*)" holds uncommitted work$`, c.theWorktreeHoldsUncommittedWork)
 	ctx.Given(`^the close-out of "([^"]*)" refused it$`, c.theCloseOutRefusedIt)
 	ctx.Given(`^the session of "([^"]*)" has a dead pane and its lease has expired$`, c.theSessionHasADeadPaneAndLeaseExpired)
+	ctx.Given(`^the session of "([^"]*)" finished, leaving its result for attempt (\d+) and no ledger line$`, c.theSessionFinishedLeavingItsResult)
+	ctx.Given(`^the close-out log of "([^"]*)" for attempt (\d+) holds (\d+) earlier lines and ends with:$`, c.theCloseOutLogEndsWith)
 	ctx.Given(`^the session of "([^"]*)" has a dead pane but its lease has not expired$`, c.theSessionHasADeadPaneButLeaseNotExpired)
 	ctx.When(`^the session of "([^"]*)" dies again with its lease expired$`, c.theSessionDiesAgainWithLeaseExpired)
 	ctx.Given(`^a story "([^"]*)" of that epic labelled "([^"]*)" is already running here$`, c.aLabelledStoryAlreadyRunningHere)
@@ -223,11 +225,13 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the branch of "([^"]*)" still has its (\d+) commits?$`, c.theBranchStillHasItsCommits)
 	ctx.Then(`^dispatch said once that "([^"]*)" is refused and waits for the Mayor$`, c.dispatchSaidOnceItIsRefused)
 	ctx.Given(`^the close-out of "([^"]*)" handed it back at the merge slot's overall most$`, c.theCloseOutHandedItBack)
-	ctx.Then(`^the session for "([^"]*)" runs only its close-out, "([^"]*)", in the worktree of "([^"]*)"$`, c.theSessionRunsOnlyItsCloseOut)
+	ctx.Then(`^the session for "([^"]*)" runs only its close-out, "([^"]*)", in the worktree of "([^"]*)", keeping its words in the run$`, c.theSessionRunsOnlyItsCloseOut)
 	ctx.Then(`^dispatch said that "([^"]*)" has its close-out run again$`, c.dispatchSaidItsCloseOutRunsAgain)
 	ctx.Then(`^dispatch reclaimed "([^"]*)" for a dead pane with an expired lease$`, c.dispatchReclaimedForADeadPane)
 	ctx.Then(`^the reclaim comment on "([^"]*)" says the attempt was refunded$`, c.theReclaimCommentSaysRefunded)
 	ctx.Then(`^the latest reclaim comment on "([^"]*)" says it was not refunded: (.+)$`, c.theLatestReclaimCommentSaysNotRefunded)
+	ctx.Then(`^the latest reclaim comment on "([^"]*)" says its close-out died$`, c.theLatestReclaimCommentSaysCloseOutDied)
+	ctx.Then(`^the story "([^"]*)" names the cause of attempt (\d+) as (\w+)$`, c.theStoryNamesTheCauseOfAttempt)
 	ctx.Then(`^the story "([^"]*)" records (\d+) dead-pane refunds?$`, c.theStoryRecordsRefunds)
 	ctx.Then(`^the earlier branch of "([^"]*)" was kept as "([^"]*)" with its (\d+) commits?$`, c.theEarlierBranchWasKept)
 	ctx.Then(`^the dispatch line for "([^"]*)" names the kept branch and the attempt$`, c.theDispatchLineNamesTheKeptBranchAndTheAttempt)
@@ -244,6 +248,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story "([^"]*)" carries exactly one comment saying its formula is not installed$`, c.theStoryCarriesOneFormulaNotInstalledComment)
 	ctx.Then(`^the Mayor has (\d+) mails?$`, c.theMayorHasMails)
 	ctx.Then(`^the mail to the Mayor says "([^"]*)"$`, c.theMailSays)
+	ctx.Then(`^the mail to the Mayor does not say "([^"]*)"$`, c.theMailDoesNotSay)
 	ctx.Then(`^the subject of the mail to the Mayor is "([^"]*)"$`, c.theMailSubjectIs)
 	c.registerFileSteps(ctx)
 }
@@ -462,6 +467,36 @@ func (c *dispatchContext) deadPaneWithLease(id string, leaseExpires time.Time) e
 	}
 	c.runner.Exit(name, 1)
 	return c.tracker.SetLeaseExpires(id, leaseExpires)
+}
+
+// theSessionFinishedLeavingItsResult is mw-gq6.487's shape: the session ran to
+// its end and wrote its result for the attempt, and the close-out chained after
+// it recorded nothing anywhere — no ledger line names the session.
+func (c *dispatchContext) theSessionFinishedLeavingItsResult(id string, attempt int) error {
+	result := fmt.Sprintf(`{"type":"result","subtype":"success","is_error":false,"num_turns":45,"duration_ms":900000,`+
+		`"session_id":"s-finished-%d","total_cost_usd":1.27,`+
+		`"usage":{"input_tokens":80,"output_tokens":26074,"cache_read_input_tokens":2916383,"cache_creation_input_tokens":84693}}`, attempt)
+	return c.putRunFile(id, application.ResultFileNameForAttempt(attempt), result)
+}
+
+// theCloseOutLogEndsWith writes what the close-out's pane showed, as the
+// session's line keeps it in the run (mw-gq6.487): a few earlier lines and then
+// the given ones.
+func (c *dispatchContext) theCloseOutLogEndsWith(id string, attempt, earlier int, tail *godog.DocString) error {
+	var lines []string
+	for i := 1; i <= earlier; i++ {
+		lines = append(lines, fmt.Sprintf("earlier line %d", i))
+	}
+	lines = append(lines, strings.Split(strings.TrimRight(tail.Content, "\n"), "\n")...)
+	return c.putRunFile(id, application.NextLogNameForAttempt(attempt), strings.Join(lines, "\n")+"\n")
+}
+
+func (c *dispatchContext) putRunFile(id, name, contents string) error {
+	dir := filepath.Join(c.vault, vault.RunsDir, id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o644)
 }
 
 func (c *dispatchContext) theSessionHasADeadPaneAndLeaseExpired(id string) error {
@@ -1470,6 +1505,49 @@ func (c *dispatchContext) theReclaimCommentSaysRefunded(id string) error {
 	return fmt.Errorf("expected a reclaim comment on %s saying the attempt was refunded, got %q", id, c.tracker.Comments(id))
 }
 
+// theLatestReclaimCommentSaysCloseOutDied checks that the newest dead-pane
+// reclaim comment on the story says its close-out died, not that its session
+// did (mw-gq6.487).
+func (c *dispatchContext) theLatestReclaimCommentSaysCloseOutDied(id string) error {
+	latest := ""
+	for _, comment := range c.tracker.Comments(id) {
+		if strings.Contains(comment, "dead pane") {
+			latest = comment
+		}
+	}
+	if !strings.Contains(latest, "its close-out died") {
+		return fmt.Errorf("expected the latest reclaim comment on %s to say its close-out died, got %q", id, latest)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theStoryNamesTheCauseOfAttempt(id string, attempt int, class string) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if detail.Cause != class || detail.AttemptCauses[attempt] != class {
+		return fmt.Errorf("expected %s to name the cause of attempt %d as %s, got cause %q and attempt causes %v (dispatch said: %v)",
+			id, attempt, class, detail.Cause, detail.AttemptCauses, c.err)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theMailDoesNotSay(words string) error {
+	mails, err := c.mailsToTheMayor()
+	if err != nil {
+		return err
+	}
+	if len(mails) == 0 {
+		return fmt.Errorf("expected a mail to the Mayor, but there is none")
+	}
+	last := mails[len(mails)-1]
+	if strings.Contains(last.Subject+"\n"+last.Body, words) {
+		return fmt.Errorf("expected the mail to the Mayor not to say %q, got subject %q and body:\n%s", words, last.Subject, last.Body)
+	}
+	return nil
+}
+
 // theLatestReclaimCommentSaysNotRefunded checks that the newest dead-pane
 // reclaim comment on the story says the attempt was left as it was, and why.
 func (c *dispatchContext) theLatestReclaimCommentSaysNotRefunded(id, why string) error {
@@ -1880,8 +1958,13 @@ func (c *dispatchContext) theSessionRunsOnlyItsCloseOut(id, closeOut, worktreeOf
 		return fmt.Errorf("expected the close-out of %s to run in %q, got %q", id, want, spec.Dir)
 	}
 	line := strings.Join(spec.Command, " ")
-	if !strings.HasSuffix(line, closeOut) {
+	if !strings.Contains(line, closeOut) {
 		return fmt.Errorf("expected the session of %s to run %q, got %q", id, closeOut, line)
+	}
+	// The close-out's words are kept in the run as they are after a session
+	// (mw-gq6.487), under the attempt it closes out.
+	if log := application.NextLogNameForAttempt(1); !strings.HasSuffix(line, "| tee -a "+filepath.Join(c.vault, vault.RunsDir, id, log)) {
+		return fmt.Errorf("expected the close-out of %s to keep its words in the run's %s, got %q", id, log, line)
 	}
 	if strings.Contains(line, "claude") || strings.Contains(line, "--heartbeat") {
 		return fmt.Errorf("expected the session of %s to run its close-out alone, with no harness and no heartbeat, got %q", id, line)

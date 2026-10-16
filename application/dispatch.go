@@ -346,6 +346,10 @@ type Reclaimed struct {
 	// sign alongside the dead pane that made this dispatch act rather than
 	// leave the claim counted as running.
 	LeaseExpired time.Time
+	// CloseOutDied says the session finished and its close-out died before it
+	// recorded anything (mw-gq6.487): the attempt was named tooling, not
+	// refunded, and the Mayor was mailed the close-out's last words.
+	CloseOutDied bool
 }
 
 // LandedAlready is one story this dispatch found claimed here with a dead pane
@@ -1810,6 +1814,14 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 		return false, false, nil
 	}
 
+	// A session that finished and left its result, whose close-out then died
+	// before it recorded anything, is not a session that died (mw-gq6.487): the
+	// attempt is named tooling and not refunded, and the Mayor is told, with the
+	// close-out's last words from the run.
+	if sessionID, died := d.closeOutDied(ctx, detail); died {
+		return d.reclaimDiedCloseOut(ctx, detail, name, status, sessionID, report), false, nil
+	}
+
 	// The session ended and no close-out ever ran, so the attempt it used is
 	// given back: a story is not spent by sessions that never got to say
 	// whether it worked (mw-y0dkzp). A refusal (run=blocked) returned above and
@@ -2228,8 +2240,12 @@ func (r DispatchReport) String() string {
 			id, SessionName(id))
 	}
 	for _, reclaim := range r.Reclaimed {
-		fmt.Fprintf(&b, "  reclaimed %s · %s · dead pane, lease expired %s\n", reclaim.StoryID, reclaim.Session,
+		fmt.Fprintf(&b, "  reclaimed %s · %s · dead pane, lease expired %s", reclaim.StoryID, reclaim.Session,
 			reclaim.LeaseExpired.UTC().Format(time.RFC3339))
+		if reclaim.CloseOutDied {
+			fmt.Fprintf(&b, "; its session finished and its close-out died: the attempt is named %s, not refunded, and %s was mailed its last words", CauseTooling, MayorMailbox)
+		}
+		b.WriteString("\n")
 	}
 	for _, id := range r.HarnessRetried {
 		fmt.Fprintf(&b, "  retried %s · stopped by the harness and its time has come: given back, the stopped attempt not counted\n", id)

@@ -189,6 +189,33 @@ Feature: Dispatching the stories this host is ready to work
     And the story "mw-gq6.9" records 2 dead-pane refunds
     And the latest reclaim comment on "mw-gq6.9" says it was not refunded: 2 dead-pane refunds already
 
+  # mw-gq6.487: a session that finished — its result is in the run — and whose
+  # close-out then died before it recorded anything (no ledger line, no comment,
+  # no mail, no close) is not a session that died. The Mayor is told, with the
+  # close-out's last words from the run, and the attempt is named tooling, so it
+  # is not the story's own and is not refunded: the result stays as evidence.
+
+  Scenario: A finished session whose close-out died before recording anything is mailed to the Mayor, named tooling and not refunded
+    Given a story "mw-gq6.9" of that epic is already running here
+    And the story "mw-gq6.9" has been tried 2 times
+    And the session of "mw-gq6.9" finished, leaving its result for attempt 2 and no ledger line
+    And the close-out log of "mw-gq6.9" for attempt 2 holds 25 earlier lines and ends with:
+      """
+      read of the story failed (i/o timeout), retried in 20s
+      Error: closing out mw-gq6.9: bd show mw-gq6.9 --json: exit status 1: i/o timeout
+      """
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.9"
+    And the story "mw-gq6.9" records 3 attempts
+    And the story "mw-gq6.9" records 0 dead-pane refunds
+    And the story "mw-gq6.9" names the cause of attempt 2 as tooling
+    And the latest reclaim comment on "mw-gq6.9" says its close-out died
+    And the subject of the mail to the Mayor is "Close-out died: mw-gq6.9"
+    And the mail to the Mayor says "Error: closing out mw-gq6.9: bd show mw-gq6.9 --json: exit status 1: i/o timeout"
+    And the mail to the Mayor says "earlier line 8"
+    And the mail to the Mayor does not say "earlier line 7"
+
   # mw-gq6.182: a story its close-out refused is evidence, not a dead session.
   # The claim, the worktree and the branch stay as the session left them until
   # a person acts (mw retry, a hold, a give-back by hand).
@@ -215,7 +242,7 @@ Feature: Dispatching the stories this host is ready to work
     And the session of "mw-gq6.9" has a dead pane and its lease has expired
     When dispatch runs on "vps" with a cap of 1
     Then the dead session for "mw-gq6.9" was closed
-    And the session for "mw-gq6.9" runs only its close-out, "mw next mw-gq6.9", in the worktree of "mw-gq6.9"
+    And the session for "mw-gq6.9" runs only its close-out, "mw next mw-gq6.9", in the worktree of "mw-gq6.9", keeping its words in the run
     And the story "mw-gq6.9" is claimed by this host
     And the story "mw-gq6.9" records 1 attempt
     And the branch of "mw-gq6.9" still has its 2 commits
