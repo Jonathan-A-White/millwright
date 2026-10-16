@@ -111,6 +111,12 @@ type FakeTracker struct {
 	// HistoryErr and SquashErr, when set, are what HistoryCommits and
 	// SquashHistory report instead.
 	HistoryErr, SquashErr error
+	// FlushErr, when set, is what Flush fails with; FlushClean makes it find
+	// a clean working set. AutoCommitIs is what AutoCommit answers ("on" when
+	// empty).
+	FlushErr     error
+	FlushClean   bool
+	AutoCommitIs string
 	// size is what Size reports.
 	size int64
 	// asked is the dispatch-facing calls in the order they were made, so that a
@@ -2456,4 +2462,54 @@ func priorityOr(priority int) int {
 		return application.DefaultPriority
 	}
 	return priority
+}
+
+// Flush implements application.TrackerFlush: the call is recorded as "Flush",
+// and a FlushErr is what it fails with. A flush made while FlushClean is set
+// finds nothing to commit and says so, as bd does.
+func (f *FakeTracker) Flush(_ context.Context, _ time.Time) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, "Flush")
+	if f.FlushErr != nil {
+		return false, f.FlushErr
+	}
+	return !f.FlushClean, nil
+}
+
+// AutoCommit implements application.TrackerFlush: "on" unless AutoCommitIs
+// says otherwise.
+func (f *FakeTracker) AutoCommit(_ context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.AutoCommitIs == "" {
+		return application.AutoCommitOn, nil
+	}
+	return f.AutoCommitIs, nil
+}
+
+// FakeFlushLog is an in-memory application.BeadsFlushLog.
+type FakeFlushLog struct {
+	mu     sync.Mutex
+	record application.BeadsFlushRecord
+	// Err, when set, is what Last and Record fail with.
+	Err error
+}
+
+// Last implements application.BeadsFlushLog.
+func (l *FakeFlushLog) Last(context.Context) (application.BeadsFlushRecord, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.record, l.Err
+}
+
+// Record implements application.BeadsFlushLog.
+func (l *FakeFlushLog) Record(_ context.Context, record application.BeadsFlushRecord) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.Err != nil {
+		return l.Err
+	}
+	l.record = record
+	return nil
 }

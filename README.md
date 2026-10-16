@@ -162,6 +162,28 @@ out of the one database; `mw nudge` keeps the other hosts' ages beside this
 host's own halt rather than dropping them. Any other `beads_sync` is refused,
 naming the three.
 
+**bd's batch auto-commit (mw-gq6.508, provisional).** bd commits the beads database
+after every write by default (`dolt.auto-commit: on`), about 35 KB of history a write.
+In `batch` mode a write waits in the Dolt working set and `bd dolt commit` commits
+everything pending in one go, which cuts the growth to about a tenth. The rule once it
+is on: every host's `bd` must be in batch, because one client left on `on` commits
+everyone's pending writes at its next write; and the home flushes. `mw events follow`
+runs the **beads-flush** job on the home every 15 minutes (`bd dolt commit`, message
+`mw flush <time>`; a clean working set is a pass), and `mw sync`'s `bd sync`, its
+squash and the home move's final `bd dolt push` each flush first. The last flush is
+a line in `~/.local/state/mw/beads-flush` (setting `beads_flush_file`,
+`$MW_BEADS_FLUSH_FILE`). `mw doctor` watches both ends, and only once the vault's
+`.beads/config.yaml` says batch: **beads-batch** is faulty on a host whose `bd`
+answers anything but batch, and **beads-flush** is faulty on the home when the last
+flush failed, is over 30 minutes old, or there is none on record. Neither has a cure.
+Turning it on and off is the Mayor's step, in the vault, and reaches every host with
+the next pull:
+
+```sh
+bd config set dolt.auto-commit batch   # on
+bd config set dolt.auto-commit on      # off again
+```
+
 **The desktop**, once the Mayor has moved there (above):
 
 1. The beads database in Dolt's server mode, listening on the desktop's
@@ -4456,6 +4478,15 @@ stray path; there is no cure — a person checks it is empty, removes it, and
 sources `~/.config/mw/beads.env` — so the second faulty run writes the note.
 mw's own `bd` runner now refuses a vault holding `.beads/dolt` while
 `BEADS_DOLT_SERVER_HOST` is empty.
+
+**beads-batch** and **beads-flush** are for bd's batch auto-commit (the section
+on the desktop, above) and read ok while the vault's `.beads/config.yaml` does not say
+`dolt.auto-commit: batch`. With it on, **beads-batch** is faulty on a host whose
+`bd config get dolt.auto-commit` says anything else (a vault not yet pulled, a
+`BD_DOLT_AUTO_COMMIT` in its environment), and **beads-flush** is faulty, on the home
+only, when the follower's last flush failed, is over 30 minutes old, or was never
+made. Neither has a cure, so the second faulty run writes the note that wakes the
+Millhand; the flush job tries again every 15 minutes by itself.
 
 **postern-transcribe** watches, on the home host only, that a voice note the
 Governor sends can be heard: it is faulty when `postern_transcribe_cmd` is unset,

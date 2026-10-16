@@ -314,14 +314,15 @@ func TestOldPushRunsBDDoltPushInTheOldHomesVaultWithBeadsEnvSourced(t *testing.T
 		t.Fatalf("push: %v", err)
 	}
 
-	if got := strings.TrimSpace(logOf(t, dir, "bd")); got != "dolt push" {
-		t.Errorf("bd was run as %q", got)
+	calls := strings.Split(strings.TrimSpace(logOf(t, dir, "bd")), "\n")
+	if len(calls) != 2 || !strings.HasPrefix(calls[0], "dolt commit -m mw flush ") || calls[1] != "dolt push" {
+		t.Errorf("bd was run as %q, want a flush and then the push", calls)
 	}
-	if got, _ := os.ReadFile(filepath.Join(dir, "bd.env")); strings.TrimSpace(string(got)) != "fsck=10m" {
+	if got, _ := os.ReadFile(filepath.Join(dir, "bd.env")); strings.TrimSpace(string(got)) != "fsck=10m\nfsck=10m" {
 		t.Errorf("bd ran without beads.env sourced: %q", got)
 	}
-	if got, _ := os.ReadFile(filepath.Join(dir, "bd.pwd")); strings.TrimSpace(string(got)) != vault {
-		t.Errorf("bd ran in %q, want the vault %s", got, vault)
+	if got, _ := os.ReadFile(filepath.Join(dir, "bd.pwd")); strings.TrimSpace(string(got)) != vault+"\n"+vault {
+		t.Errorf("bd ran in %q, want the vault %s both times", got, vault)
 	}
 }
 
@@ -330,5 +331,28 @@ func TestOldPushThatFailsSaysWhatBDSaid(t *testing.T) {
 
 	if err := (Host{}).OldPush(context.Background(), oldHome); err == nil || !strings.Contains(err.Error(), "fsck timed out") {
 		t.Fatalf("expected the failure with what bd said, got %v", err)
+	}
+}
+
+func TestOldPushPushesAfterAFlushThatFoundNothingToCommit(t *testing.T) {
+	_, dir := ranOnOld(t, map[string]string{"bd": `echo "$*" >> "$(dirname "$0")/bd.calls"; [ "$1 $2" = "dolt commit" ] && { echo 'nothing to commit' >&2; exit 1; }; exit 0`})
+
+	if err := (Host{}).OldPush(context.Background(), oldHome); err != nil {
+		t.Fatalf("a clean working set is not a failure: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "bd.calls")); !strings.Contains(string(got), "dolt push") {
+		t.Errorf("the push was not run: %q", got)
+	}
+}
+
+func TestOldPushThatCannotFlushStopsBeforePushing(t *testing.T) {
+	_, dir := ranOnOld(t, map[string]string{"bd": `echo "$*" >> "$(dirname "$0")/bd.calls"; [ "$1 $2" = "dolt commit" ] && { echo 'server gone' >&2; exit 1; }; exit 0`})
+
+	err := (Host{}).OldPush(context.Background(), oldHome)
+	if err == nil || !strings.Contains(err.Error(), "server gone") {
+		t.Fatalf("expected the flush's failure with what bd said, got %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "bd.calls")); strings.Contains(string(got), "dolt push") {
+		t.Errorf("pushed with the working set unflushed: %q", got)
 	}
 }

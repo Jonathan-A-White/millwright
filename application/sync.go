@@ -337,6 +337,34 @@ type TrackerHistory interface {
 	SquashHistory(ctx context.Context) error
 }
 
+// TrackerFlush is the port mw commits the beads database's pending writes
+// through, and reads how this host's bd commits them. The beads gateway is the
+// adapter; apptest.FakeTracker stands in for it in tests.
+type TrackerFlush interface {
+	// Flush commits the working set: committed is false when it was clean,
+	// which is a pass and not a failure. at is named in the commit message.
+	Flush(ctx context.Context, at time.Time) (committed bool, err error)
+
+	// AutoCommit is what this host's bd answers for dolt.auto-commit: on,
+	// batch or off.
+	AutoCommit(ctx context.Context) (string, error)
+}
+
+// BeadsFlushEvery is how often the home flushes the beads database's working
+// set into a commit when bd's dolt.auto-commit is batch: also the longest the
+// backup can be behind, and the most a lost disk can take (mw-gq6.508).
+const BeadsFlushEvery = 15 * time.Minute
+
+// BeadsFlushLate is how old the last good flush may be, with batch on, before
+// mw doctor calls it a fault: two flushes missed.
+const BeadsFlushLate = 30 * time.Minute
+
+// The values of bd's dolt.auto-commit.
+const (
+	AutoCommitOn    = "on"
+	AutoCommitBatch = "batch"
+)
+
 // DefaultSquashAt is how many commits the home's history may hold before its
 // collection squashes it: about 1.7 GB of history at the Laptop's 35 KB a
 // commit, some ten days of the factory's writes, kept under a 4 GB budget with

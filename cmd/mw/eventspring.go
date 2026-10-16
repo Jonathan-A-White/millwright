@@ -74,6 +74,11 @@ func homeSpring(path, host string, out io.Writer) (*application.EventSpring, err
 		jobs = append(jobs, job)
 	}
 	jobs = append(jobs, application.ChainStampJob(chainStampEvery, chainStampRun(out)))
+	if job, err := beadsFlushSpringJob(host, out); err != nil {
+		fmt.Fprintf(out, "mw events follow: no beads-flush job: %v\n", err)
+	} else {
+		jobs = append(jobs, job)
+	}
 	if job, err := todoReminderSpringJob(host, out); err != nil {
 		fmt.Fprintf(out, "mw events follow: no To do reminder job: %v\n", err)
 	} else {

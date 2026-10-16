@@ -152,6 +152,47 @@ func MillhandTickJob(heartbeat time.Duration, run func(context.Context) error) S
 	}
 }
 
+// BeadsFlushRecord is what the home leaves of its last flush: when, and why it
+// failed, empty when it got through.
+type BeadsFlushRecord struct {
+	At     time.Time
+	Failed string
+}
+
+// BeadsFlushLog is where the last flush is kept, for mw doctor's beads-flush
+// check to read. Last is the zero record when there has been none.
+type BeadsFlushLog interface {
+	Last(ctx context.Context) (BeadsFlushRecord, error)
+	Record(ctx context.Context, record BeadsFlushRecord) error
+}
+
+// BeadsFlush is one pass of the home's flush job: flush, and leave the record
+// of it. A working set that was clean is a pass.
+type BeadsFlush struct {
+	Tracker TrackerFlush
+	Log     BeadsFlushLog
+	// Now is the clock; nil is time.Now.
+	Now func() time.Time
+}
+
+// Run flushes once. A failed flush is recorded and returned.
+func (f BeadsFlush) Run(ctx context.Context) error {
+	now := time.Now
+	if f.Now != nil {
+		now = f.Now
+	}
+	at := now()
+	_, err := f.Tracker.Flush(ctx, at)
+	record := BeadsFlushRecord{At: at}
+	if err != nil {
+		record.Failed = firstLine(err.Error())
+	}
+	if logErr := f.Log.Record(ctx, record); logErr != nil && err == nil {
+		return fmt.Errorf("recording the beads flush: %w", logErr)
+	}
+	return err
+}
+
 // ClockJob is a job no event springs: it runs every d, on the follower's own
 // clock.
 func ClockJob(name string, every time.Duration, run func(context.Context) error) SpringJob {
