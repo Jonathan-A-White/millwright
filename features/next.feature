@@ -384,6 +384,38 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" records attempt 2
     And the first attempt's branch of "mw-gq6.1" is kept
 
+  # mw-1ljpo9.6: a session that never finishes is stopped by its harness at the
+  # turn cap (--max-turns). It is not waiting for a person: the claim is given
+  # back with the note, and the next attempt keeps its branch.
+  Scenario: A session stopped at its turn cap is given back, and its branch kept for the next attempt
+    Given the story "mw-gq6.1" was started once
+    And the session of "mw-gq6.1" reported this result:
+      """
+      {
+        "type": "result",
+        "subtype": "error_max_turns",
+        "is_error": true,
+        "num_turns": 121,
+        "duration_ms": 5400000,
+        "session_id": "s-cap",
+        "total_cost_usd": 14.20,
+        "usage": {"input_tokens": 10, "output_tokens": 20, "cache_read_input_tokens": 23000}
+      }
+      """
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the report says it stopped for "turn-cap"
+    And the story "mw-gq6.1" carries a comment quoting: capped at 121 turns
+    And the story "mw-gq6.1" carries a comment quoting: takes it as attempt 2
+    And the last ledger line holds:
+      | not landed (turn-cap): |
+    And the worktree of "mw-gq6.1" is still there
+    When the next dispatch tick runs with the leftovers kept
+    Then one session was started again, for "mw-gq6.1"
+    And the story "mw-gq6.1" records attempt 2
+    And the first attempt's branch of "mw-gq6.1" is kept
+
   # mw-gq6.393: the give-back that follows an open-steps stop met a passing fault
   # of the beads server on the desktop and the story kept its claim. A give-back
   # that fails that way is tried again, as the reads and the other writes are.

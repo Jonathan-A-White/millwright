@@ -105,6 +105,9 @@ const (
 	// The factory.
 	ReasonNoResult      Reason = "no-result"
 	ReasonSessionFailed Reason = "session-failed"
+	// ReasonTurnCap is a session its harness stopped at its turn cap
+	// (mw-1ljpo9.6): the claim is given back, as for open steps.
+	ReasonTurnCap       Reason = "turn-cap"
 	ReasonTestsNotRun   Reason = "tests-not-run"
 	ReasonGitFailed     Reason = "git-failed"
 	ReasonTrackerFailed Reason = "tracker-failed"
@@ -854,6 +857,12 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", err), "")
 	}
 	c.result, report.Result = result, result
+	if CappedAtTurns(result) {
+		// The session ran to its turn cap and its harness stopped it
+		// (mw-1ljpo9.6): it is not waiting for a person, so stop gives the
+		// claim back and the next attempt keeps this one's branch.
+		return n.stop(ctx, c, report, ReasonTurnCap, TurnCapWhy(result.Turns), "")
+	}
 	if !result.Finished() {
 		// Stopped by the harness for something that is not the work's: the
 		// claim is kept as for any stop, and mw dispatch gives it back itself
@@ -2225,12 +2234,13 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 
 	var trouble []string
 	// A story whose work is committed and whose formula was left unfinished is
-	// not waiting for a person (mw-gq6.341): the claim is given back so that the
+	// not waiting for a person (mw-gq6.341), nor is one whose session ran to its
+	// turn cap (mw-1ljpo9.6): the claim is given back so that the
 	// next dispatch tick takes it as another attempt, keeping this branch under
 	// another name as it keeps any leftover of an earlier attempt. Every other
 	// stop keeps the claim, because the claim is the evidence.
 	given := false
-	if reason == ReasonOpenSteps {
+	if reason == ReasonOpenSteps || reason == ReasonTurnCap {
 		if err := n.releaseOnStop(ctx, c.id, report); err != nil {
 			trouble = append(trouble, fmt.Sprintf("the claim on %s could not be given back: %v", c.id, err))
 		} else {
@@ -2295,6 +2305,25 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 		err = fmt.Errorf("%w (and %s)", err, strings.Join(trouble, "; "))
 	}
 	return *report, err
+}
+
+// MaxTurnsSubtype is how Claude Code's result names a session it stopped at its
+// --max-turns.
+const MaxTurnsSubtype = "error_max_turns"
+
+// CappedAtTurns reports whether the harness stopped the session at its turn cap
+// (mw-1ljpo9.6).
+func CappedAtTurns(result SessionResult) bool { return result.Subtype == MaxTurnsSubtype }
+
+// TurnCapWhy is the reason a story whose session was stopped at its turn cap is
+// given back, with the turns the harness counted when it says.
+func TurnCapWhy(turns int) string {
+	capped := "capped at its turn cap"
+	if turns > 0 {
+		capped = fmt.Sprintf("capped at %d turns", turns)
+	}
+	return "the session was " + capped + " and its harness stopped it before it finished; " +
+		"what it committed is kept on its branch for the next attempt"
 }
 
 // closeFormula closes what is left open of the story's formula once the
