@@ -2023,13 +2023,16 @@ func writeStory(b *strings.Builder, d StoryDetail, note string) {
 // writeStoryIn is writeStory indented under something else — a story listed
 // under the host it is pathed to, rather than under a heading.
 func writeStoryIn(b *strings.Builder, pad string, d StoryDetail, note string) {
+	head := pad + d.Story.ID
 	if rig := d.Merged().Rig; rig != "" && d.Guest != "" {
-		clip(b, fmt.Sprintf("%s%s · %s · guest: %s", pad, d.Story.ID, rig, d.Guest))
+		head += fmt.Sprintf(" · %s · guest: %s", rig, d.Guest)
 	} else if rig != "" {
-		clip(b, fmt.Sprintf("%s%s · %s", pad, d.Story.ID, rig))
-	} else {
-		clip(b, pad+d.Story.ID)
+		head += " · " + rig
 	}
+	if size := d.Merged().Size; size != "" {
+		head += " · size " + string(size)
+	}
+	clip(b, head)
 	clip(b, pad+"  "+d.Story.Title)
 	if note != "" {
 		clip(b, pad+"  "+note)

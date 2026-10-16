@@ -19,6 +19,8 @@ func completePath() domain.Path {
 		Files:   "src/Reader.tsx,src/data/*.ts",
 		// MaxTurns: mw-1ljpo9.6.
 		MaxTurns: "160",
+		// Size: mw-1ljpo9.3.
+		Size: domain.SizeM,
 	}
 }
 
@@ -161,6 +163,7 @@ func TestMetadataLeavesOutEmptyFields(t *testing.T) {
 	p.Host = ""
 	p.Files = ""
 	p.MaxTurns = ""
+	p.Size = ""
 
 	got := p.Metadata()
 	if len(got) != 5 {
@@ -281,5 +284,57 @@ func TestTurnCapIsThePathsOwnOrTheHostsWhenThePathSaysNothing(t *testing.T) {
 	p.MaxTurns = "0"
 	if got := p.TurnCap(120); got != 0 {
 		t.Fatalf("expected a path's 0 to set no cap, got %d", got)
+	}
+}
+
+// size (mw-1ljpo9.3) is how big the Mayor judged a story: XS, S, M, L or XL, or
+// empty when nobody has.
+func TestSizeIsOneOfTheFiveOrEmpty(t *testing.T) {
+	for _, ok := range []domain.Size{"", domain.SizeXS, domain.SizeS, domain.SizeM, domain.SizeL, domain.SizeXL} {
+		p := completePath()
+		p.Size = ok
+		if err := p.Validate(); err != nil {
+			t.Errorf("expected size %q to be valid, got %v", ok, err)
+		}
+	}
+	for _, bad := range []domain.Size{"s", "XXL", "big", "2"} {
+		p := completePath()
+		p.Size = bad
+		var unknown domain.UnknownValueError
+		if err := p.Validate(); !errors.As(err, &unknown) || unknown.Field != "size" {
+			t.Errorf("expected size %q to be refused, got %v", bad, err)
+		}
+	}
+}
+
+func TestSizeIsStoredAndOverlaidLikeAnyPathKey(t *testing.T) {
+	var p domain.Path
+	if err := p.Set("size", "S"); err != nil {
+		t.Fatalf("setting size: %v", err)
+	}
+	if got, _ := p.Field("size"); got != "S" {
+		t.Fatalf("expected size S, got %q", got)
+	}
+	if got := p.Metadata()["size"]; got != "S" {
+		t.Fatalf("expected the metadata key size=S, got %q", got)
+	}
+	if got := domain.PathFromMetadata(map[string]string{"size": "L"}).Size; got != domain.SizeL {
+		t.Fatalf("expected size L read back, got %q", got)
+	}
+	if got := completePath().Overlay(domain.Path{Size: domain.SizeXL}).Size; got != domain.SizeXL {
+		t.Fatalf("expected the override's XL, got %q", got)
+	}
+	if got := completePath().Overlay(domain.Path{}).Size; got != domain.SizeM {
+		t.Fatalf("expected an empty override to keep M, got %q", got)
+	}
+}
+
+func TestOnlyLAndXLAreBigStories(t *testing.T) {
+	for size, big := range map[domain.Size]bool{
+		"": false, domain.SizeXS: false, domain.SizeS: false, domain.SizeM: false, domain.SizeL: true, domain.SizeXL: true,
+	} {
+		if got := size.Big(); got != big {
+			t.Errorf("Size(%q).Big() = %v, want %v", size, got, big)
+		}
 	}
 }

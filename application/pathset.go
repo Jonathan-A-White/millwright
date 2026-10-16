@@ -77,6 +77,8 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		// The files a story expects to change are its own: a sibling's are
 		// never copied (mw-gq6.349).
 		path.Files = ""
+		// And so is its size (mw-1ljpo9.3).
+		path.Size = ""
 		if path.Rig == "" {
 			return domain.Path{}, fmt.Errorf("the story %s has no rig, so there is no path to copy from it: nothing was written", from)
 		}
@@ -163,7 +165,7 @@ func orRig(rig string) string {
 }
 
 // parsePathPairs reads key=value settings into a path, refusing a key that is
-// not one of the nine and a value left empty.
+// not one of the ten and a value left empty.
 func parsePathPairs(pairs []string) (domain.Path, error) {
 	var path domain.Path
 	for _, pair := range pairs {
@@ -176,10 +178,13 @@ func parsePathPairs(pairs []string) (domain.Path, error) {
 			return domain.Path{}, fmt.Errorf("%q is not a path key: the keys are %s", key, strings.Join(domain.Fields, ", "))
 		}
 	}
+	if path.Size != "" && !domain.KnownSize(path.Size) {
+		return domain.Path{}, fmt.Errorf("%q is not a size: the sizes are XS, S, M, L, XL: nothing was written", path.Size)
+	}
 	return path, nil
 }
 
-// pathLines is a path as a key=value line for each of the nine keys, a key it
+// pathLines is a path as a key=value line for each of the ten keys, a key it
 // does not set shown as PathUnset.
 func pathLines(path domain.Path) string {
 	var b strings.Builder
@@ -193,7 +198,7 @@ func pathLines(path domain.Path) string {
 	return b.String()
 }
 
-// PathShow prints the nine path keys of a story, as the story is worked by
+// PathShow prints the ten path keys of a story, as the story is worked by
 // them: its own settings over its epic's defaults.
 type PathShow struct {
 	Tracker WorkTracker

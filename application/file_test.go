@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -253,5 +254,78 @@ func TestFileRefusesAPlanWhoseStoryNamesAFormulaNotInstalledBeforeCreatingAnythi
 	}
 	if tracker.Writes() != 0 {
 		t.Errorf("expected nothing created, the tracker took %d writes", tracker.Writes())
+	}
+}
+
+// size (mw-1ljpo9.3): mw file warns of a story with none, and of an L or XL
+// that is released; it never refuses either.
+func sizedPlan(sizes ...domain.Size) domain.Plan {
+	plan := twoStoryPlan()
+	plan.Stories = nil
+	for i, size := range sizes {
+		plan.Stories = append(plan.Stories, domain.PlanStory{
+			Key: fmt.Sprintf("s%d", i), Title: fmt.Sprintf("Story %d", i), Acceptance: "make test passes",
+			Overrides: domain.Path{Size: size},
+		})
+	}
+	return plan
+}
+
+func TestFilingAStoryWithNoSizeWarnsAndFilesItAnyway(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
+	out := &strings.Builder{}
+
+	filed, err := application.File{Tracker: tracker, Out: out}.Run(context.Background(), sizedPlan("", domain.SizeS))
+	if err != nil {
+		t.Fatalf("filing: %v", err)
+	}
+	want := filed.Stories[0].ID + ": no size (mw path set " + filed.Stories[0].ID + " size=XS|S|M|L|XL)"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("expected %q, got:\n%s", want, out.String())
+	}
+	if strings.Contains(out.String(), filed.Stories[1].ID+": no size") {
+		t.Errorf("expected no warning for the story that has a size, got:\n%s", out.String())
+	}
+	if len(tracker.Stories()) != 2 {
+		t.Errorf("expected both stories filed, got %v", tracker.Stories())
+	}
+}
+
+func TestFilingALargeStoryWarnsOnlyWhenTheyAreReleased(t *testing.T) {
+	for _, approved := range []bool{false, true} {
+		tracker := apptest.NewFakeTracker()
+		tracker.AddFormula("tdd-feature")
+		out := &strings.Builder{}
+		file := application.File{Tracker: tracker, Out: out}
+		if approved {
+			file.Approve = func(context.Context, application.FiledPlan) (bool, error) { return true, nil }
+		}
+
+		filed, err := file.Run(context.Background(), sizedPlan(domain.SizeL, domain.SizeXL, domain.SizeM))
+		if err != nil {
+			t.Fatalf("filing: %v", err)
+		}
+		for i, size := range []string{"L", "XL"} {
+			want := filed.Stories[i].ID + ": size " + size + " is released"
+			if got := strings.Contains(out.String(), want); got != approved {
+				t.Errorf("approved=%v: expected warning %q present=%v, got:\n%s", approved, want, approved, out.String())
+			}
+		}
+		if strings.Contains(out.String(), filed.Stories[2].ID+": size M") || strings.Contains(out.String(), "no size") {
+			t.Errorf("approved=%v: expected no warning for an M story, got:\n%s", approved, out.String())
+		}
+	}
+}
+
+func TestFilingAStoryWithABadSizeIsRefused(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
+	_, err := application.File{Tracker: tracker}.Run(context.Background(), sizedPlan("huge"))
+	if err == nil || !strings.Contains(err.Error(), "size") {
+		t.Fatalf("expected a refusal naming size, got %v", err)
+	}
+	if len(tracker.Epics()) != 0 {
+		t.Errorf("expected nothing written, got %v", tracker.Epics())
 	}
 }

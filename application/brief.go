@@ -287,6 +287,9 @@ func (l BriefLine) String() string {
 	if path.Model != "" {
 		parts = append(parts, string(path.Model))
 	}
+	if path.Size != "" {
+		parts = append(parts, "size "+string(path.Size))
+	}
 	if l.Story.Guest != "" {
 		parts = append(parts, "guest: "+l.Story.Guest)
 	}
