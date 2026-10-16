@@ -114,6 +114,9 @@ type FakeDoctorCheck struct {
 	Way string
 	// QuietCooling is what QuietWhileCooling returns.
 	QuietCooling bool
+	// EndsEpisode is what CureEndedEpisode returns: whether a cure that
+	// returned no error put the fault right.
+	EndsEpisode bool
 
 	probes int
 	cures  int
@@ -143,6 +146,9 @@ func (f *FakeDoctorCheck) Damper() (time.Duration, int) { return f.Wait, f.Cap }
 
 // QuietWhileCooling implements application.DoctorCoolingQuiet.
 func (f *FakeDoctorCheck) QuietWhileCooling() bool { return f.QuietCooling }
+
+// CureEndedEpisode implements application.DoctorCureEndsEpisode.
+func (f *FakeDoctorCheck) CureEndedEpisode() bool { return f.EndsEpisode }
 
 // WayBack implements application.DoctorCheck.
 func (f *FakeDoctorCheck) WayBack() string { return f.Way }

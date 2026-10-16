@@ -14,7 +14,11 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-var _ application.DoctorCheck = (*TmpLeftovers)(nil)
+var (
+	_ application.DoctorCheck           = (*TmpLeftovers)(nil)
+	_ application.DoctorCoolingQuiet    = (*TmpLeftovers)(nil)
+	_ application.DoctorCureEndsEpisode = (*TmpLeftovers)(nil)
+)
 
 // TmpLeftoversName is what the check is called: in the log, and on the
 // command line as `mw doctor tmp-leftovers`.
@@ -67,9 +71,12 @@ type tmpLeftoversItem struct {
 // no process on this host has the path open, checked by hand over ProcDir so
 // no external program has to be on PATH or exist on every host this runs on.
 // It never removes a path this check does not know about, and never removes
-// one that is live. ~/.cache/go-build is checked against the same budget on
-// its own and cleared with `go clean -cache` — a rebuildable cache, never
+// one that is live. ~/.cache/go-build is checked against its own, larger
+// budget and cleared with `go clean -cache` — a rebuildable cache, never
 // deleted by hand — rather than folded into the leftovers it deletes itself.
+// Several Builders regrow it under normal load, so a cure that freed
+// something ends the fault's episode (application.DoctorCureEndsEpisode):
+// a regrowth is cured again when the wait allows, never left damped.
 type TmpLeftovers struct {
 	// TmpDir is where this host's dolt spool files, bd's own marker and
 	// Claude Code's session directories are kept. Empty reads "/tmp".
@@ -77,14 +84,18 @@ type TmpLeftovers struct {
 	// ProcDir is where this host's running processes are read from, to tell
 	// a dead leftover from a live one. Empty reads "/proc".
 	ProcDir string
-	// GoBuildDir is go's build cache, cleared on its own past Budget. Empty
-	// (as it is on a host with no home directory to compute it from) skips
-	// this half of the check entirely.
+	// GoBuildDir is go's build cache, cleared on its own past GoBuildBudget.
+	// Empty (as it is on a host with no home directory to compute it from)
+	// skips this half of the check entirely.
 	GoBuildDir string
-	// Budget is how many bytes of dead leftovers, and separately how many
-	// bytes of GoBuildDir, this check allows before it is faulty. The zero
-	// value reads application.DefaultTmpLeftoversBudgetBytes.
+	// Budget is how many bytes of dead leftovers this check allows before it
+	// is faulty. The zero value reads
+	// application.DefaultTmpLeftoversBudgetBytes.
 	Budget int64
+	// GoBuildBudget is how many bytes of GoBuildDir this check allows before
+	// it is faulty. The zero value reads
+	// application.DefaultGoBuildBudgetBytes.
+	GoBuildBudget int64
 	// GoClean runs when GoBuildDir is past its budget. Nil runs the real `go
 	// clean -cache`.
 	GoClean func(ctx context.Context) error
@@ -112,7 +123,7 @@ func (t *TmpLeftovers) Name() string { return TmpLeftoversName }
 // Probe implements application.DoctorCheck: cannot-tell when this host's own
 // leftovers cannot be read at all (ProcDir missing, TmpDir's claude-0
 // unreadable); faulty, naming whichever of the dead leftovers' total and
-// GoBuildDir's size is past its own share of the budget and not live; ok,
+// GoBuildDir's size is past its own budget and not live; ok,
 // naming the dead bytes found and any live-but-over-budget GoBuildDir left
 // alone, when there are some but nothing is faulty; a plain ok otherwise.
 func (t *TmpLeftovers) Probe(context.Context) (application.Verdict, string) {
@@ -130,15 +141,16 @@ func (t *TmpLeftovers) Probe(context.Context) (application.Verdict, string) {
 		oks = append(oks, fmt.Sprintf("%d bytes of dead leftovers found, under the %d byte budget", total, budget))
 	}
 
-	if goBuildBytes, err := t.dirSize(t.GoBuildDir); err == nil && goBuildBytes > budget {
+	goBuildBudget := t.goBuildBudget()
+	if goBuildBytes, err := t.dirSize(t.GoBuildDir); err == nil && goBuildBytes > goBuildBudget {
 		live, err := t.goBuildLive()
 		if err != nil {
 			return application.DoctorCannotTell, err.Error()
 		}
 		if live {
-			oks = append(oks, fmt.Sprintf("go-build is %d bytes, past the %d byte budget, but a go process is live: left alone", goBuildBytes, budget))
+			oks = append(oks, fmt.Sprintf("go-build is %d bytes, past the %d byte budget, but a go process is live: left alone", goBuildBytes, goBuildBudget))
 		} else {
-			faults = append(faults, fmt.Sprintf("go-build cache is %d bytes, past its own %d byte budget", goBuildBytes, budget))
+			faults = append(faults, fmt.Sprintf("go-build cache is %d bytes, past its own %d byte budget", goBuildBytes, goBuildBudget))
 		}
 	}
 
@@ -150,8 +162,8 @@ func (t *TmpLeftovers) Probe(context.Context) (application.Verdict, string) {
 
 // Cure implements application.DoctorCheck: os.RemoveAll on exactly the dead
 // leftovers Probe would find, only when their total is past budget, and
-// separately `go clean -cache` on GoBuildDir, only when it is past budget on
-// its own and not live. Neither runs when its own half is not faulty: a check
+// separately `go clean -cache` on GoBuildDir, only when it is past its own
+// budget and not live. Neither runs when its own half is not faulty: a check
 // faulty only on GoBuildDir never touches a dead leftover still under
 // budget, and the reverse; a live GoBuildDir is left for a later tick rather
 // than cleaned out from under a running go build, test or vet, and so is a
@@ -175,7 +187,7 @@ func (t *TmpLeftovers) Cure(ctx context.Context) error {
 		}
 	}
 
-	if goBuildBytes, err := t.dirSize(t.GoBuildDir); err == nil && goBuildBytes > budget {
+	if goBuildBytes, err := t.dirSize(t.GoBuildDir); err == nil && goBuildBytes > t.goBuildBudget() {
 		live, err := t.goBuildLive()
 		if err != nil {
 			return err
@@ -211,6 +223,12 @@ func (t *TmpLeftovers) Damper() (time.Duration, int) {
 // go test, so the fault returning inside the minimum wait after a good cure
 // is not news.
 func (t *TmpLeftovers) QuietWhileCooling() bool { return true }
+
+// CureEndedEpisode implements application.DoctorCureEndsEpisode: the last
+// Cure freed something, so the fault's episode is over and a regrowth starts
+// a new one. A cure that freed nothing — go clean losing every race to a live
+// go build — is counted against the cap, so it is still damped in the end.
+func (t *TmpLeftovers) CureEndedEpisode() bool { return len(t.cured) > 0 }
 
 // WayBack implements application.DoctorCheck: there is nothing to restore —
 // every path this check ever removes was already found dead, with no live
@@ -381,13 +399,20 @@ func (t *TmpLeftovers) procDir() string {
 	return "/proc"
 }
 
-// budget is the byte count Probe faults past, for the dead leftovers' total
-// and, on its own, GoBuildDir's size.
+// budget is the byte count Probe faults past for the dead leftovers' total.
 func (t *TmpLeftovers) budget() int64 {
 	if t.Budget > 0 {
 		return t.Budget
 	}
 	return application.DefaultTmpLeftoversBudgetBytes
+}
+
+// goBuildBudget is the byte count Probe faults past for GoBuildDir's size.
+func (t *TmpLeftovers) goBuildBudget() int64 {
+	if t.GoBuildBudget > 0 {
+		return t.GoBuildBudget
+	}
+	return application.DefaultGoBuildBudgetBytes
 }
 
 // sumBytes is every item's size, added up.

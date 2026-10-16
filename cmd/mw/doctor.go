@@ -43,7 +43,8 @@ func newDoctorCmd() *cobra.Command {
 			"It leaves with 0 when every check is ok or cured, and " + fmt.Sprint(application.DoctorFaultExit) +
 			" when any check is left faulty and uncured (damped, or its cure failed), so a timer's\n" +
 			"journal shows it. A check that says so (tmp-leftovers) is not left faulty by a damped tick\n" +
-			"held only by the wait after a cure that worked.\n\n" +
+			"held only by the wait after a cure that worked, and its cure that freed something ends the\n" +
+			"fault's episode, so a cache regrown by normal work is cured again rather than damped.\n\n" +
 			"mw doctor licences is not a check but a read of the postern backend's environment file\n" +
 			"(--env-file, default ~/.config/postern/env): one line per licence collection, naming the\n" +
 			"app it maps to or the cockpit and the routes a key holding it opens, and a warning for a\n" +
@@ -96,6 +97,10 @@ func newDoctorCmd() *cobra.Command {
 				return err
 			}
 			tmpLeftoversBudget, err := config.DoctorTmpLeftoversBudgetBytes()
+			if err != nil {
+				return err
+			}
+			goBuildBudget, err := config.DoctorGoBuildBudgetBytes()
 			if err != nil {
 				return err
 			}
@@ -287,7 +292,7 @@ func newDoctorCmd() *cobra.Command {
 				}).Readings)
 			}
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
-			tmpLeftovers.Budget = tmpLeftoversBudget
+			tmpLeftovers.Budget, tmpLeftovers.GoBuildBudget = tmpLeftoversBudget, goBuildBudget
 			rootDisk := doctor.NewRootDiskBudget()
 			rootDisk.Budget, rootDisk.Margin = rootDiskBudget, rootDiskMargin
 			rootDisk.Note = func(ctx context.Context, text string) error {

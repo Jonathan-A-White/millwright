@@ -138,6 +138,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a fake host with a live claude session dir "([^"]*)" of (\d+) bytes$`, c.aFakeHostWithALiveClaudeSessionDir)
 	ctx.Given(`^a fake host with an unrelated file "([^"]*)" of (\d+) bytes$`, c.aFakeHostWithAnUnrelatedFile)
 	ctx.Given(`^the tmp-leftovers check's budget is (\d+) bytes$`, c.theTmpLeftoversChecksBudgetIsBytes)
+	ctx.Given(`^the tmp-leftovers check's go-build budget is (\d+) bytes$`, c.theTmpLeftoversChecksGoBuildBudgetIsBytes)
 	ctx.Given(`^a fake host whose go-build cache of (\d+) bytes is cleaned by a go clean that exits 1 while a go process (starts|does not start)$`, c.aFakeHostWhoseGoCleanFails)
 	ctx.Given(`^the fake host's /proc does not exist$`, c.theFakeHostsProcDoesNotExist)
 	ctx.Given(`^the home host's config has no postern_channel$`, c.theHomeHostsConfigHasNoPosternChannel)
@@ -1037,6 +1038,19 @@ func (c *doctorContext) theTmpLeftoversChecksBudgetIsBytes(budgetText string) er
 		return err
 	}
 	check.Budget = int64(budget)
+	return nil
+}
+
+func (c *doctorContext) theTmpLeftoversChecksGoBuildBudgetIsBytes(budgetText string) error {
+	budget, err := strconv.Atoi(budgetText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a byte count: %w", budgetText, err)
+	}
+	check, err := c.tmpLeftoversCheck()
+	if err != nil {
+		return err
+	}
+	check.GoBuildBudget = int64(budget)
 	return nil
 }
 

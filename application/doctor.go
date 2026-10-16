@@ -12,10 +12,17 @@ import (
 // DefaultTmpLeftoversBudgetBytes is how many bytes of this factory's own dead
 // temp leftovers — a killed bd's dolt spool files, /tmp/bd, a stale
 // /tmp/claude-0/<session> dir — mw doctor's tmp-leftovers check holds a host
-// to, and separately holds ~/.cache/go-build to, before it clears them, when
-// nothing says otherwise. It is the same 200_000_000
-// infrastructure/config.DefaultDoctorTmpLeftoversBudgetBytes reads as.
+// to before it clears them, when nothing says otherwise. It is the same
+// 200_000_000 infrastructure/config.DefaultDoctorTmpLeftoversBudgetBytes reads
+// as.
 const DefaultTmpLeftoversBudgetBytes = 200_000_000
+
+// DefaultGoBuildBudgetBytes is how many bytes the tmp-leftovers check lets
+// ~/.cache/go-build grow to before `go clean -cache`, when nothing says
+// otherwise: 3-5 Builders' go test keep it at several hundred MB in normal
+// work, which is not a fault (mw-gq6.478). It is the same 2_000_000_000
+// infrastructure/config.DefaultDoctorGoBuildBudgetBytes reads as.
+const DefaultGoBuildBudgetBytes = 2_000_000_000
 
 // DoctorFaultExit is the status mw doctor leaves with when this run ends with
 // a check faulty and uncured — damped, or its cure failed. It is
@@ -64,7 +71,8 @@ type DoctorCheck interface {
 	Cure(ctx context.Context) error
 	// Damper is the minimum wait between two cures and the most cures one fault
 	// episode may spend before mw doctor stops trying and calls it damped. An
-	// episode ends when Probe next says ok.
+	// episode ends when Probe next says ok, or, for a DoctorCureEndsEpisode, with
+	// a cure that put the fault right.
 	Damper() (wait time.Duration, capPerEpisode int)
 	// WayBack is printed by --dry-run and written to the log beside every cure:
 	// what a person does if the cure turns out to be wrong.
@@ -80,6 +88,20 @@ type DoctorCheck interface {
 // ending an episode, and a cure that failed, are still left faulty.
 type DoctorCoolingQuiet interface {
 	QuietWhileCooling() bool
+}
+
+// DoctorCureEndsEpisode is an optional addition to a DoctorCheck, for a check
+// whose fault's cause regrows under normal load (a cache several Builders
+// keep growing): a cure that returned no error and, by the check's own
+// account, put the fault right ends the episode, so the next growth starts a
+// new one with its whole cap rather than spending this one's. The damper's
+// wait still holds between two cures. A cure that fails, or one the check
+// says put nothing right, is counted against the cap as for any check, so a
+// real fault is still damped (mw-gq6.478).
+type DoctorCureEndsEpisode interface {
+	// CureEndedEpisode is read only after Cure returned no error: whether
+	// that cure put the fault right.
+	CureEndedEpisode() bool
 }
 
 // DoctorChecks is the table mw doctor works down, in order.
@@ -575,6 +597,11 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 	episode.LastCureFailed = cureErr != nil
 	if episode.FirstFaulty.IsZero() {
 		episode.FirstFaulty = d.now()
+	}
+	if ends, ok := check.(DoctorCureEndsEpisode); ok && cureErr == nil && ends.CureEndedEpisode() {
+		// The fault is put right: its episode ends here, keeping only when
+		// this cure ran, for the wait before the next.
+		episode.Cures, episode.FirstFaulty, episode.DampedNoted = 0, time.Time{}, false
 	}
 	if err := d.State.Save(ctx, name, episode); err != nil {
 		return DoctorResult{}, fmt.Errorf("saving %s's doctor state: %w", name, err)

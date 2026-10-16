@@ -910,6 +910,24 @@ func TestDoctorTmpLeftoversBudgetRefusesANonNumberOrLessThanOne(t *testing.T) {
 	}
 }
 
+func TestDoctorGoBuildBudgetIsTwoGigabytesUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "[doctor]\ntmp_leftovers_budget_bytes = 500000000\n")
+	budget, err := config.DoctorGoBuildBudgetBytes()
+	if err != nil || budget != 2_000_000_000 {
+		t.Fatalf("expected go-build's own 2 GB default, apart from tmp_leftovers_budget_bytes, got %d: %v", budget, err)
+	}
+
+	writeConfig(t, "[doctor]\ngo_build_budget_bytes = 5000000000\n")
+	if budget, err = config.DoctorGoBuildBudgetBytes(); err != nil || budget != 5_000_000_000 {
+		t.Fatalf("expected the file's go_build_budget_bytes, got %d: %v", budget, err)
+	}
+
+	writeConfig(t, "[doctor]\ngo_build_budget_bytes = 0\n")
+	if _, err := config.DoctorGoBuildBudgetBytes(); err == nil || !strings.Contains(err.Error(), "go_build_budget_bytes") {
+		t.Fatalf("expected zero to be refused, got %v", err)
+	}
+}
+
 func TestDoctorRootDiskBudgetIsZeroUntilAHostSaysOtherwise(t *testing.T) {
 	writeConfig(t, "")
 

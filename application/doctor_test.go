@@ -264,6 +264,105 @@ func TestACapPerEpisodeDampsOnceSpentAndResetsWhenTheProbeSaysOK(t *testing.T) {
 	}
 }
 
+// A cache several Builders regrow past budget every few minutes is cured
+// each time it is due: three good cures in one hour do not spend a cap, so
+// the fourth growth is cured too, not damped (mw-gq6.478).
+func TestACureThatPutTheFaultRightEndsItsEpisodeSoARegrowthIsCuredNotDamped(t *testing.T) {
+	state := apptest.NewFakeDoctorState()
+	log := &apptest.FakeDoctorLog{}
+	notes := apptest.NewFakeDoctorNotes()
+	now := doctorNow
+	check := &apptest.FakeDoctorCheck{
+		CheckName: "widget", Verdict: application.DoctorFaulty, Reason: "regrown",
+		Wait: 5 * time.Minute, Cap: 3, EndsEpisode: true,
+	}
+	doctor := aDoctor(state, log, &now, check)
+	doctor.Notes = notes
+
+	for i := 0; i < 4; i++ {
+		report, err := doctor.Run(context.Background(), "", false)
+		if err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+		if got := report.Results[0].Verdict; got != "cured" {
+			t.Fatalf("run %d: expected cured, got %s", i, got)
+		}
+		now = now.Add(15 * time.Minute)
+	}
+	if check.Cures() != 4 {
+		t.Errorf("expected four cures inside the hour, got %d", check.Cures())
+	}
+	if got := state.Episode("widget"); got.Cures != 0 || got.LastCure.IsZero() {
+		t.Errorf("expected each good cure to end the episode but keep its time for the wait, got %+v", got)
+	}
+	if notes.Sets() != 0 {
+		t.Errorf("expected no note, got %d sets", notes.Sets())
+	}
+}
+
+// The wait between two cures still holds for a check whose good cure ends
+// its episode.
+func TestACureThatEndsItsEpisodeStillWaitsBeforeTheNext(t *testing.T) {
+	state := apptest.NewFakeDoctorState()
+	log := &apptest.FakeDoctorLog{}
+	now := doctorNow
+	check := &apptest.FakeDoctorCheck{
+		CheckName: "widget", Verdict: application.DoctorFaulty, Reason: "regrown",
+		Wait: 5 * time.Minute, Cap: 3, EndsEpisode: true, QuietCooling: true,
+	}
+	doctor := aDoctor(state, log, &now, check)
+
+	if _, err := doctor.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	now = now.Add(time.Minute)
+	report, err := doctor.Run(context.Background(), "", false)
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if got := report.Results[0].Verdict; got != "damped" || check.Cures() != 1 {
+		t.Errorf("expected the second run inside the wait damped with one cure spent, got %s and %d cures", got, check.Cures())
+	}
+}
+
+// A real fault still damps: a check whose cure says it put nothing right, or
+// fails, spends its cap and is left faulty, the way it always was.
+func TestACheckWhoseCureFixesNothingOrFailsIsStillDampedAtItsCap(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		cureErr error
+	}{
+		{"freed nothing", nil},
+		{"failed", errors.New("no wrench found")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := apptest.NewFakeDoctorState()
+			log := &apptest.FakeDoctorLog{}
+			now := doctorNow
+			check := &apptest.FakeDoctorCheck{
+				CheckName: "widget", Verdict: application.DoctorFaulty, Reason: "regrown",
+				Wait: 5 * time.Minute, Cap: 3, QuietCooling: true, CureErr: tc.cureErr,
+			}
+			doctor := aDoctor(state, log, &now, check)
+			for i := 0; i < 3; i++ {
+				_, _ = doctor.Run(context.Background(), "", false)
+				now = now.Add(15 * time.Minute)
+			}
+
+			report, err := doctor.Run(context.Background(), "", false)
+			if got := report.Results[0].Verdict; got != "damped" {
+				t.Errorf("expected the fourth fault damped, got %s", got)
+			}
+			if check.Cures() != 3 {
+				t.Errorf("expected three cures spent, got %d", check.Cures())
+			}
+			if application.ExitStatus(err) != application.DoctorFaultExit {
+				t.Errorf("expected exit %d, got %d", application.DoctorFaultExit, application.ExitStatus(err))
+			}
+		})
+	}
+}
+
 func TestDryRunNamesTheCureAndTheWayBackAndChangesNothing(t *testing.T) {
 	state := apptest.NewFakeDoctorState()
 	log := &apptest.FakeDoctorLog{}

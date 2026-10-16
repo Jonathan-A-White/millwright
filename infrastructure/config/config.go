@@ -97,6 +97,7 @@
 //	doctor_wg_hub  = "10.88.0.1:22"
 //	doctor_wg_unit = "wg-quick@wg0"
 //	tmp_leftovers_budget_bytes = 200000000
+//	go_build_budget_bytes = 2000000000
 //	root_disk_budget_bytes = 280000000000
 //	root_disk_margin_bytes = 10000000000
 //	vps_ssh        = "root@allmymind.org"
@@ -2973,17 +2974,37 @@ func DoctorWgUnit() (string, error) {
 // DefaultDoctorTmpLeftoversBudgetBytes is how many bytes of this factory's own
 // dead temp leftovers — a killed bd's dolt spool files, /tmp/bd, a stale
 // /tmp/claude-0/<session> dir — mw doctor's tmp-leftovers check holds a host
-// to, and separately holds ~/.cache/go-build to, when the [doctor] table says
-// nothing. It is the same 200_000_000 application.DefaultTmpLeftoversBudgetBytes
-// reads as.
+// to when the [doctor] table says nothing. It is the same 200_000_000
+// application.DefaultTmpLeftoversBudgetBytes reads as.
 const DefaultDoctorTmpLeftoversBudgetBytes int64 = 200_000_000
 
 // DoctorTmpLeftoversBudgetBytes reports the byte budget mw doctor's
-// tmp-leftovers check holds this host's own dead temp leftovers to, and
-// separately holds ~/.cache/go-build to: the `[doctor]` table's
-// `tmp_leftovers_budget_bytes` key of ~/.config/mw/config.toml, and
-// DefaultDoctorTmpLeftoversBudgetBytes when the table says nothing.
+// tmp-leftovers check holds this host's own dead temp leftovers to: the
+// `[doctor]` table's `tmp_leftovers_budget_bytes` key of
+// ~/.config/mw/config.toml, and DefaultDoctorTmpLeftoversBudgetBytes when the
+// table says nothing.
 func DoctorTmpLeftoversBudgetBytes() (int64, error) {
+	return doctorByteBudget("tmp_leftovers_budget_bytes", DefaultDoctorTmpLeftoversBudgetBytes)
+}
+
+// DefaultDoctorGoBuildBudgetBytes is how many bytes mw doctor's tmp-leftovers
+// check lets ~/.cache/go-build grow to before it runs `go clean -cache`, when
+// the [doctor] table says nothing: the cache several Builders keep in normal
+// work is several hundred MB (mw-gq6.478). It is the same 2_000_000_000
+// application.DefaultGoBuildBudgetBytes reads as.
+const DefaultDoctorGoBuildBudgetBytes int64 = 2_000_000_000
+
+// DoctorGoBuildBudgetBytes reports the byte budget mw doctor's tmp-leftovers
+// check holds ~/.cache/go-build to, apart from the dead leftovers' own: the
+// `[doctor]` table's `go_build_budget_bytes` key of ~/.config/mw/config.toml,
+// and DefaultDoctorGoBuildBudgetBytes when the table says nothing.
+func DoctorGoBuildBudgetBytes() (int64, error) {
+	return doctorByteBudget("go_build_budget_bytes", DefaultDoctorGoBuildBudgetBytes)
+}
+
+// doctorByteBudget reads one byte budget from the `[doctor]` table: key's
+// whole number of bytes, at least 1, or fallback when the table says nothing.
+func doctorByteBudget(key string, fallback int64) (int64, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return 0, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
@@ -2992,16 +3013,16 @@ func DoctorTmpLeftoversBudgetBytes() (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	said := strings.TrimSpace(table["tmp_leftovers_budget_bytes"])
+	said := strings.TrimSpace(table[key])
 	if said == "" {
-		return DefaultDoctorTmpLeftoversBudgetBytes, nil
+		return fallback, nil
 	}
 	bytes, err := strconv.ParseInt(said, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("the doctor's tmp_leftovers_budget_bytes is %q, which is not a whole number of bytes: set `tmp_leftovers_budget_bytes = <n>` in %s", said, File)
+		return 0, fmt.Errorf("the doctor's %s is %q, which is not a whole number of bytes: set `%s = <n>` in %s", key, said, key, File)
 	}
 	if bytes < 1 {
-		return 0, fmt.Errorf("the doctor's tmp_leftovers_budget_bytes is %d, so every host would be over budget: set it to 1 or more", bytes)
+		return 0, fmt.Errorf("the doctor's %s is %d, so every host would be over budget: set it to 1 or more", key, bytes)
 	}
 	return bytes, nil
 }
