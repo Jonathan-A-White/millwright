@@ -459,6 +459,7 @@ empty note are refused with nothing written. See `features/note.feature`.
 
 ```sh
 bin/mw report [--since 7d|2026-10-09] [--rig lampas] [--host laptop] [--json]
+bin/mw report --since mw-gq6.425|9e7d278 [--rig lampas] [--host laptop] [--json]
 ```
 
 `mw report` is the factory's quality, then its speed, then its fuel, in that order
@@ -507,6 +508,17 @@ A story's rig, host and model come from its merged path; a ledger row whose stor
 gone counts under rig `unknown`. The window is `--since` (`7d`, a day, or a UTC time;
 7d by default) to now; `--rig` and `--host` narrow every block. It reads and writes
 nothing. See `features/report.feature`.
+
+`--since` a story id or a commit of the millwright rig asks about one landing
+instead: the same quality, speed and fuel numbers, for the whole factory or what
+`--rig` and `--host` narrow it to, in the 7 days before the landing's day beside the
+days after it, up to 7 (as many as there have been so far), with the change of each
+(`-40% better`, `level` within the 5% band). The landing's own day is in neither, as
+in FACTORY CHANGES. A story's day is its first landing in the ledger; a commit's is
+that of the story its subject names (`Merge branch 'mw/<story>'` or `... (<story>)`),
+or else the day it was made, read in this host's checkout of the rig with no fetch.
+Landed and refused are compared per day while the days after are fewer than 7. A
+story with no landing is refused. `--json` has the rows under `landing.rows`.
 
 ### mw report send
 
