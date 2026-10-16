@@ -21,7 +21,9 @@ func newReportCmd() *cobra.Command {
 		Long: "report sums the factory's quality over a window, from the builder ledger, the stories and\n" +
 			"the Tester's FINDINGS: per rig, then per model, then per host, what landed, what was refused\n" +
 			"and under which reason, the refusal rate, the attempts a landing took, the refusals' causes\n" +
-			"(mw cause), the [bug] stories filed and the Tester's findings, the last two per landing.\n" +
+			"(mw cause), the [bug] stories filed and the Tester's findings, those two per landing, and\n" +
+			"the escaped bugs: [bug] stories of a landing's rig filed on its day or in the 14 days after,\n" +
+			"naming its story id, counted under the rig, host and model of that landing.\n" +
 			"The window is --since (7d by default; a number of days, a day such as 2026-10-09, or a UTC\n" +
 			"time) to now; the window of the same length before it is computed too and is in --json.\n" +
 			"After QUALITY come SPEED (the median and p90 of actual over par, the wall time from dispatch\n" +
@@ -36,7 +38,8 @@ func newReportCmd() *cobra.Command {
 			"millwright landing of the last 30 days with the 'Expect: <metric> <up|down>' line of its\n" +
 			"acceptance, that metric for the whole factory in the 7 days before and the 7 days after the\n" +
 			"landing day ('too soon' until the 7 days are over), and WORSE when it went the wrong way by\n" +
-			"more than a 10% band. It reads and writes nothing, and prints in 60 columns.\n" +
+			"more than a 10% band, and the bugs that escaped it ('too soon' until its 14 days are over).\n" +
+			"It reads and writes nothing, and prints in 60 columns.\n" +
 			"The INVESTMENTS part follows FACTORY CHANGES: of the factory's investments (mw invest) the wins\n" +
 			"the window recorded, named with their measured gain, the losses with their lesson and the\n" +
 			"better approach, and how many are still due for review.\n" +

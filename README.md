@@ -490,7 +490,11 @@ QUALITY says, per block, what landed and what was refused (the refusal rate, and
 the refusals by the reason in `not landed (<reason>)`), the attempts a landing took,
 the refusals' causes by class (`mw cause`; `unset` is a refusal nobody named), the
 `[bug]` stories filed in the window and the Tester's findings on the landed stories,
-those last two per landing.
+those two per landing, and the escaped bugs. An escaped bug is a `[bug]` story filed
+on a landing's day or in the 14 days after it, on the landing's rig, whose title or
+description names the landing's story id (`after mw-x landed`, `since mw-x`; `mw-x.1`
+does not name `mw-x`). It is counted in the window it was filed in, once, under the
+rig, host and model of the newest landing it names.
 
 SPEED is read from the close-outs' benchmarks: `par x1.1 median, x2.5 p90` is the
 median and p90 (nearest rank) of actual over par across the block's landings, 1 at
@@ -536,7 +540,7 @@ days after it, up to 7 (as many as there have been so far), with the change of e
 in FACTORY CHANGES. A story's day is its first landing in the ledger; a commit's is
 that of the story its subject names (`Merge branch 'mw/<story>'` or `... (<story>)`),
 or else the day it was made, read in this host's checkout of the rig with no fetch.
-Landed and refused are compared per day while the days after are fewer than 7. A
+Landed, refused and escaped bugs are compared per day while the days after are fewer than 7. A
 story with no landing is refused. `--json` has the rows under `landing.rows`.
 
 ### mw report send
@@ -548,7 +552,7 @@ bin/mw report send [--force] [--dry-run]
 A report nobody reads measures nothing, so `mw report send` posts the same numbers to
 the Governor's phone. It builds a summary of the last 7 days from the same report, in
 at most 14 lines of 60 columns: `Factory, 7 days to 2026-10-11`, then QUALITY (landed,
-refused and its rate, attempts and bugs per landing), SPEED (par median and p90, the
+refused and its rate, attempts and bugs per landing, escaped bugs), SPEED (par median and p90, the
 wall time from dispatch to landing), FUEL (tokens and dollars per landing) and CHEAP
 WINS, in that order, each number with its arrow against the week before. It is sent
 as a plain message, with no bead and no class, to the Factory channel, and its txid is

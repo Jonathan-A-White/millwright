@@ -153,15 +153,20 @@ type Quality struct {
 	Causes             map[string]int `json:"causes"`
 	// Uncaused are the ids of the refused stories counted under CauseUnset, once
 	// each and sorted; cheap win R1 names them. They are not in the JSON.
-	Uncaused           []string `json:"-"`
-	BugsFiled          int      `json:"bugs_filed"`
-	BugsPerLanding     float64  `json:"bugs_per_landing"`
-	Findings           int      `json:"tester_findings"`
-	FindingsPerLanding float64  `json:"findings_per_landing"`
+	Uncaused       []string `json:"-"`
+	BugsFiled      int      `json:"bugs_filed"`
+	BugsPerLanding float64  `json:"bugs_per_landing"`
+	// EscapedBugs are the bugs filed in the window that a landing let through
+	// (escapedBugs), counted under the rig, host and model of that landing.
+	EscapedBugs        int     `json:"escaped_bugs"`
+	Findings           int     `json:"tester_findings"`
+	FindingsPerLanding float64 `json:"findings_per_landing"`
 }
 
-// Empty says nothing landed, was refused or was filed as a bug.
-func (q Quality) Empty() bool { return q.Landed == 0 && q.Refused == 0 && q.BugsFiled == 0 }
+// Empty says nothing landed, was refused, was filed as a bug or escaped.
+func (q Quality) Empty() bool {
+	return q.Landed == 0 && q.Refused == 0 && q.BugsFiled == 0 && q.EscapedBugs == 0
+}
 
 // ReportBlock is one rig, model or host: its quality, speed and fuel in the
 // window and in the one before it, and how each number moved. Arrows holds a
@@ -205,7 +210,8 @@ type FactoryReportResult struct {
 	Investments *InvestmentsSection `json:"investments,omitempty"`
 }
 
-// reportEntry is one thing the window saw: a landing, a refusal or a bug filed.
+// reportEntry is one thing the window saw: a landing, a refusal, a bug filed
+// or a bug escaped.
 type reportEntry struct {
 	id       string
 	previous bool
@@ -217,11 +223,14 @@ type reportEntry struct {
 	rig, host, model string
 	landed, refused  bool
 	bug              bool
-	reason           string
-	attempts         int
-	cause            string
-	exhausted        bool
-	findings         int
+	// escaped is a bug a landing let through, under that landing's rig, host
+	// and model, its id the bug's.
+	escaped   bool
+	reason    string
+	attempts  int
+	cause     string
+	exhausted bool
+	findings  int
 	// measured says a benchmark gave the landing a wall time, actualS, and
 	// ratio is that over its par, 0 when it had none.
 	measured bool
@@ -271,9 +280,10 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		result.PreviousWindow = ReportWindow{Since: since.AddDate(0, 0, -days), Until: since}
 	}
 
-	// Entries are read back as far as a factory change needs them: a landing
-	// of the last ChangeDays days and the week before it.
-	earliest := result.PreviousWindow.Since
+	// Entries are read back as far as a factory change needs them, a landing
+	// of the last ChangeDays days and the week before it, and as far as a bug
+	// of the window before may have escaped from.
+	earliest := result.PreviousWindow.Since.AddDate(0, 0, -EscapeDays)
 	if wide := reportDay(now).AddDate(0, 0, -(ChangeDays + ChangeWindowDays)); wide.Before(earliest) {
 		earliest = wide
 	}
@@ -393,13 +403,16 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			rig: orElse(path.Rig, ReportUnknown), host: orElse(path.Host, ReportUnknown), model: orElse(string(path.Model), ReportUnknown)})
 	}
 
+	escapes := escapedBugs(stories, firstLandings(all))
+	all = append(all, result.escapedEntries(escapes)...)
+
 	var entries []reportEntry
 	for _, e := range all {
 		if e.inWindow {
 			entries = append(entries, e)
 		}
 	}
-	result.Changes = factoryChanges(all, byID, now)
+	result.Changes = factoryChanges(all, byID, escapedBy(escapes), now)
 	if result.Landing != nil {
 		if d, known := byID[result.Landing.Story]; known && strings.TrimSpace(d.Story.Title) != "" {
 			result.Landing.Title = d.Story.Title
@@ -444,7 +457,7 @@ func (r FactoryReport) heavyStories(entries []reportEntry) []HeavyStory {
 	var heavy []HeavyStory
 	seen := map[string]bool{}
 	for _, e := range entries {
-		if e.previous || e.bug || e.id == "" || seen[e.id] || (r.Rig != "" && e.rig != r.Rig) || (r.Host != "" && e.host != r.Host) {
+		if e.previous || e.bug || e.escaped || e.id == "" || seen[e.id] || (r.Rig != "" && e.rig != r.Rig) || (r.Host != "" && e.host != r.Host) {
 			continue
 		}
 		if e.exhausted || e.attempts >= DefaultMaxAttempts {
@@ -559,6 +572,8 @@ func sumQuality(entries []reportEntry) Quality {
 	uncaused := map[string]bool{}
 	for _, e := range entries {
 		switch {
+		case e.escaped:
+			q.EscapedBugs++
 		case e.bug:
 			q.BugsFiled++
 		case e.landed:
@@ -673,6 +688,7 @@ func (k ReportBlock) writeQuality(b *strings.Builder) {
 		fmt.Fprintf(b, "  causes %s\n", strings.Join(causes, " · "))
 	}
 	fmt.Fprintf(b, "  bugs filed %d%s\n", q.BugsFiled, perLanding(q, q.BugsPerLanding, k.arrow("bugs_per_landing")))
+	fmt.Fprintf(b, "  escaped bugs %d%s\n", q.EscapedBugs, k.arrow("escaped_bugs"))
 	if q.Landed > 0 {
 		fmt.Fprintf(b, "  Tester findings %d%s\n", q.Findings, perLanding(q, q.FindingsPerLanding, k.arrow("findings_per_landing")))
 	}

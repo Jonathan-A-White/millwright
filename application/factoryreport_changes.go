@@ -78,6 +78,12 @@ func ParseExpect(acceptance string) (Expect, error) {
 		if len(words) > 0 && trim(words[0]) == ExpectNone {
 			return Expect{Metric: ExpectNone}, nil
 		}
+		// A metric of two words, escaped bugs, is read as one.
+		if len(words) >= 3 {
+			if _, known := changeMetrics[words[0]+" "+words[1]]; known {
+				words = append([]string{words[0] + " " + words[1]}, words[2:]...)
+			}
+		}
 		if len(words) >= 2 {
 			metric, direction := trim(words[0]), trim(words[1])
 			if _, known := changeMetrics[metric]; known && (direction == "up" || direction == "down") {
@@ -91,7 +97,7 @@ func ParseExpect(acceptance string) (Expect, error) {
 
 // ExpectMetrics are the metrics a story may name, in the order the report shows them.
 func ExpectMetrics() []string {
-	return []string{"refusals", "attempts/landing", "bugs/landing", "dispatch-to-landing", "tokens/landing", "$/landing"}
+	return []string{"refusals", "attempts/landing", "bugs/landing", "escaped bugs", "dispatch-to-landing", "tokens/landing", "$/landing"}
 }
 
 // changeMetric reads one metric of the health report from the entries of a
@@ -115,6 +121,12 @@ var changeMetrics = map[string]changeMetric{
 		q := sumQuality(es)
 		return q.BugsPerLanding, q.Landed > 0
 	}, func(v float64) string { return fmt.Sprintf("%.2f", v) }},
+	// escaped bugs counts the bugs filed in the days that a landing let through,
+	// over days in which anything landed, was refused or was filed.
+	"escaped bugs": {func(es []reportEntry) (float64, bool) {
+		q := sumQuality(es)
+		return float64(q.EscapedBugs), !q.Empty()
+	}, func(v float64) string { return fmt.Sprintf("%.0f", v) }},
 	"dispatch-to-landing": {func(es []reportEntry) (float64, bool) {
 		s := sumSpeed(es)
 		return s.DispatchToLandingS, s.Measured > 0
@@ -145,6 +157,13 @@ type FactoryChange struct {
 	Verdict string   `json:"verdict"`
 	// AfterEnds is the last day the week after takes in.
 	AfterEnds string `json:"after_ends"`
+	// EscapedBugs are the bugs that escaped the landing so far, EscapedIDs
+	// their stories; EscapedTooSoon says the EscapeDays after it, which end
+	// EscapedEnds, are not over yet.
+	EscapedBugs    int      `json:"escaped_bugs"`
+	EscapedIDs     []string `json:"escaped_ids,omitempty"`
+	EscapedTooSoon bool     `json:"escaped_too_soon,omitempty"`
+	EscapedEnds    string   `json:"escaped_ends"`
 }
 
 // judgeChange says whether a metric moved the way a story expected, inside the
@@ -159,8 +178,9 @@ func judgeChange(e Expect, before, after float64) string {
 	return ChangeWorse
 }
 
-// factoryChanges finds the millwright landings among entries, and measures each.
-func factoryChanges(all []reportEntry, stories map[string]StoryDetail, now time.Time) []FactoryChange {
+// factoryChanges finds the millwright landings among entries, and measures
+// each, with the bugs that escaped it by escaped.
+func factoryChanges(all []reportEntry, stories map[string]StoryDetail, escaped map[string][]string, now time.Time) []FactoryChange {
 	today := reportDay(now)
 	first := map[string]reportEntry{}
 	for _, e := range all {
@@ -175,7 +195,9 @@ func factoryChanges(all []reportEntry, stories map[string]StoryDetail, now time.
 	for id, landing := range first {
 		d, known := stories[id]
 		change := FactoryChange{Story: id, Title: id, Landed: landing.at.Format(LedgerDate),
-			AfterEnds: landing.at.AddDate(0, 0, ChangeWindowDays).Format(LedgerDate)}
+			AfterEnds:   landing.at.AddDate(0, 0, ChangeWindowDays).Format(LedgerDate),
+			EscapedBugs: len(escaped[id]), EscapedIDs: escaped[id],
+			EscapedTooSoon: !escapeOver(landing.at, today), EscapedEnds: landing.at.AddDate(0, 0, EscapeDays).Format(LedgerDate)}
 		if known && strings.TrimSpace(d.Story.Title) != "" {
 			change.Title = strings.Join(strings.Fields(d.Story.Title), " ")
 		}
@@ -240,10 +262,11 @@ func writeChanges(b *strings.Builder, changes []FactoryChange) {
 		b.WriteString("  none landed\n")
 		return
 	}
-	unnamed := 0
+	unnamed, unnamedEscaped := 0, 0
 	for _, c := range changes {
 		if c.Verdict == ChangeNoExpect {
 			unnamed++
+			unnamedEscaped += c.EscapedBugs
 			continue
 		}
 		fmt.Fprintf(b, "%s\n", fitLine(fmt.Sprintf("%s (%s)", c.Title, c.Story), ReportWidth))
@@ -265,9 +288,15 @@ func writeChanges(b *strings.Builder, changes []FactoryChange) {
 			}
 			fmt.Fprintf(b, "  %s\n", fitLine(fmt.Sprintf("%s → %s%s: %s", format(*c.Before), format(*c.After), moved, c.Verdict), ReportWidth-2))
 		}
+		if c.EscapedTooSoon {
+			fmt.Fprintf(b, "  escaped bugs %d so far, too soon: %d days end %s\n", c.EscapedBugs, EscapeDays, c.EscapedEnds)
+		} else {
+			fmt.Fprintf(b, "  escaped bugs %d in the %d days after\n", c.EscapedBugs, EscapeDays)
+		}
 	}
 	if unnamed > 0 {
 		fmt.Fprintf(b, "  %d landed with no Expect named (--json lists them)\n", unnamed)
+		fmt.Fprintf(b, "  escaped bugs of those %d\n", unnamedEscaped)
 	}
 }
 
@@ -297,6 +326,7 @@ type MetricSnapshot struct {
 	RefusalRate        float64  `json:"refusals"`
 	AttemptsPerLanding *float64 `json:"attempts_per_landing,omitempty"`
 	BugsPerLanding     *float64 `json:"bugs_per_landing,omitempty"`
+	EscapedBugs        *float64 `json:"escaped_bugs,omitempty"`
 	DispatchToLandingS *float64 `json:"dispatch_to_landing_s,omitempty"`
 	TokensPerLanding   *float64 `json:"tokens_per_landing,omitempty"`
 	USDPerLanding      *float64 `json:"usd_per_landing,omitempty"`
@@ -315,6 +345,7 @@ func takeSnapshot(all []reportEntry, now time.Time) MetricSnapshot {
 	}
 	set(&s.AttemptsPerLanding, "attempts/landing")
 	set(&s.BugsPerLanding, "bugs/landing")
+	set(&s.EscapedBugs, "escaped bugs")
 	set(&s.DispatchToLandingS, "dispatch-to-landing")
 	set(&s.TokensPerLanding, "tokens/landing")
 	set(&s.USDPerLanding, "$/landing")

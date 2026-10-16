@@ -13,7 +13,10 @@ Feature: mw report
   "Expect: <metric> <up|down>" line of its acceptance, the metric in the 7 days
   before and after the landing, and WORSE when it went the wrong way past a 10%
   band. The writes of mw report send tell the Mayor of a WORSE change once and
-  keep one snapshot of the key metrics a day.
+  keep one snapshot of the key metrics a day. Beside the bugs filed, QUALITY
+  counts the escaped bugs: a [bug] story of a landing's rig filed on its day or
+  in the 14 days after, naming its story id; FACTORY CHANGES shows each
+  landing's own.
 
   Background:
     Given a report factory whose clock reads "2026-10-11T12:00:00Z"
@@ -53,6 +56,37 @@ Feature: mw report
       | f-1   | a feature        | lampas | laptop | sonnet |          | 2026-10-09 |
     When mw report runs with "--since 7d"
     Then the report prints "bugs filed 2 (0.25/landing)" under "lampas: landed 8, refused 0 (0%)"
+
+  Scenario: Escaped bugs are the bugs of the landing's rig filed within 14 days after it that name it
+    Given the report stories:
+      | id    | title              | rig    | host   | model  | attempts | filed      | description            |
+      | l-1   | One                | lampas | laptop | opus   |          |            |                        |
+      | e-0   | [bug] it broke     | lampas | laptop | sonnet |          | 2026-10-01 | after l-1 landed       |
+      | e-1   | [bug] it broke too | lampas | laptop | sonnet |          | 2026-10-09 | since l-1, it is slow  |
+      | e-2   | [bug] elsewhere    | orrery | laptop | sonnet |          | 2026-10-09 | after l-1 landed       |
+      | e-3   | [bug] another      | lampas | laptop | sonnet |          | 2026-10-09 | after l-12 landed      |
+      | e-4   | [bug] too late     | lampas | laptop | sonnet |          | 2026-10-10 | after l-1 landed       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker    |
+      | 2026-09-25 | l-1 | landed on main | opus/high |
+    When mw report runs with "--since 7d"
+    Then the report prints "escaped bugs 1 ↔" under "opus: landed 0 ↔, refused 0 (0%)"
+    And the report prints "escaped bugs 1 ↔" under "lampas: landed 0 ↔, refused 0 (0%)"
+    And the report prints "escaped bugs 0" under "orrery: landed 0, refused 0 (0%)"
+
+  Scenario: --json carries the escaped bugs of every block and the window before
+    Given the report stories:
+      | id    | title          | rig    | host   | model  | attempts | filed      | description      |
+      | l-1   | One            | lampas | laptop | opus   |          |            |                  |
+      | e-1   | [bug] it broke | lampas | laptop | sonnet |          | 2026-10-09 | after l-1 landed |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker    |
+      | 2026-10-02 | l-1 | landed on main | opus/high |
+    When mw report runs with "--since 7d --json"
+    Then the report JSON has rigs.0.quality.escaped_bugs as "1"
+    And the report JSON has rigs.0.previous.escaped_bugs as "0"
+    And the report JSON has models.0.name as "opus"
+    And the report JSON has models.0.quality.escaped_bugs as "1"
 
   Scenario: Tester findings are counted per landing from the landed story's comments
     Given "lampas" landed 8 stories and refused 0 for "tests-fail" in the window
@@ -463,6 +497,19 @@ Feature: mw report
     And the report prints the line "1 landed with no Expect named (--json lists them)"
     And the report prints no line starting "Unmeasured"
 
+  Scenario: A factory change shows the bugs that escaped it, too soon until 14 days are over
+    Given the factory change "mw-c7" titled "Older" landed on "2026-09-20" with the acceptance "Expect: none, because it is a test"
+    And the factory change "mw-c8" titled "Newer" landed on "2026-10-05" with the acceptance "Expect: escaped bugs down"
+    And the report stories:
+      | id  | title          | rig        | host   | model  | attempts | filed      | description          |
+      | e-1 | [bug] it broke | millwright | laptop | sonnet |          | 2026-09-22 | after mw-c7 landed   |
+      | e-2 | [bug] it broke | millwright | laptop | sonnet |          | 2026-10-06 | since mw-c8          |
+    When mw report runs with "--since 7d"
+    Then the report prints "escaped bugs 1 in the 14 days after" under "Older (mw-c7)"
+    And the report prints "landed 2026-10-05, Expect: escaped bugs down" under "Newer (mw-c8)"
+    And the report prints "escaped bugs 1 so far, too soon: 14 days end 2026-10-19" under "Newer (mw-c8)"
+    And no line of the report is wider than 60 columns
+
   Scenario: A landing older than 30 days or on another rig is not a factory change
     Given the factory change "mw-c6" titled "Long ago" landed on "2026-08-01" with the acceptance "Expect: refusals down"
     And "lampas" landed 1 and refused 0 on "2026-10-01"
@@ -558,7 +605,7 @@ Feature: mw report
     Then the report prints the line "before: 7 days, 2026-10-01 to 2026-10-07"
     And the report prints the line "after: 2 days, 2026-10-09 to 2026-10-10"
     And the report prints the line "today counts once it is over"
-    And the report prints the line "landed and refused are compared per day"
+    And the report prints the line "landed, refused and escaped bugs are compared per day"
     And the "landed" row of the landing reads "7" before, "2" after, change "level"
 
   Scenario: --since a story that landed yesterday has no day after it over yet

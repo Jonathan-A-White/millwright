@@ -33,6 +33,7 @@ Feature: mw report send
     And the posted text starts with "Factory, 7 days to 2026-10-11"
     And the posted text holds QUALITY, SPEED, FUEL and CHEAP WINS in that order
     And the posted text has the line "QUALITY landed 4 ↑ better, refused 1 (20% ↑ worse)"
+    And the posted text has the line "escaped bugs 0"
     And the posted text has the line "FUEL tokens/landing 1,000 ↓ better"
     And the posted text is at most 14 lines of 60 columns
     And the summary prints the txid "txid-one"
