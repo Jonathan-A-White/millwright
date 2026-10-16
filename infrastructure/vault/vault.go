@@ -49,9 +49,10 @@ const (
 
 // Vault is one vault directory.
 type Vault struct {
-	dir    string
-	author string
-	wait   func(context.Context, time.Duration) error
+	dir         string
+	author      string
+	wait        func(context.Context, time.Duration) error
+	mergeScript string
 }
 
 // Option shapes a Vault.
@@ -70,6 +71,13 @@ func WithAuthor(author string) Option {
 // files got in its way; the default is a real wait. It is for tests.
 func WithWait(wait func(context.Context, time.Duration) error) Option {
 	return func(v *Vault) { v.wait = wait }
+}
+
+// WithMergeScript replaces the trim-safe merge driver mw carries
+// (millwright.TrimMergeScript) on every pull: for a test that needs a driver
+// that fails.
+func WithMergeScript(script string) Option {
+	return func(v *Vault) { v.mergeScript = script }
 }
 
 // New returns the vault held in a directory.

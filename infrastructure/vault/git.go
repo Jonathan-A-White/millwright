@@ -193,6 +193,10 @@ func insideTheVault(path string) error {
 // the other host's commits that came in. A rebase that stops on a conflict is
 // aborted, so that the vault is left exactly as it was found and a person can
 // look at it without first undoing a half-finished merge.
+//
+// Every pull defines mw's trim-safe merge driver, for the files the vault's
+// .gitattributes names merge=trimsafe (its rig memories): a prune synced while
+// the other host appended keeps the prune and the appended line (mw-gq6.499).
 func (v *Vault) Pull(ctx context.Context) (int, error) {
 	before, err := v.git(ctx, "rev-parse", "HEAD")
 	if err != nil {
@@ -201,8 +205,14 @@ func (v *Vault) Pull(ctx context.Context) (int, error) {
 	if _, err := v.upstream(ctx); err != nil {
 		return 0, err
 	}
+	driver, err := gitcmd.WriteMergeDriver(v.mergeScript)
+	if err != nil {
+		return 0, err
+	}
+	defer driver.Remove()
+	pull := append(driver.Config(), "pull", "--rebase")
 
-	_, err = v.git(ctx, "pull", "--rebase")
+	_, err = v.git(ctx, pull...)
 	if err != nil && closeOutIsWriting(err) {
 		// mw next's close-out writes a run's files into this checkout and
 		// commits them a moment later; a pull that lands between the two finds
@@ -212,15 +222,45 @@ func (v *Vault) Pull(ctx context.Context) (int, error) {
 		if waited := v.waitForCloseOut(ctx); waited != nil {
 			return 0, waited
 		}
-		_, err = v.git(ctx, "pull", "--rebase")
+		_, err = v.git(ctx, pull...)
 	}
 	if err != nil {
+		err = v.namingTheDriver(ctx, err)
 		if _, aborted := v.git(ctx, "rebase", "--abort"); aborted == nil {
 			return 0, fmt.Errorf("%w (the rebase was undone: the vault is as it was)", err)
 		}
 		return 0, err
 	}
 	return v.commitsBetween(ctx, strings.TrimSpace(before), "@{upstream}")
+}
+
+// namingTheDriver is a stopped pull's err, saying so when a file it stopped in
+// is one mw's trim-safe driver merges: the driver could not settle it, and
+// nothing settles it by union instead.
+func (v *Vault) namingTheDriver(ctx context.Context, err error) error {
+	said, listed := v.git(ctx, "diff", "--name-only", "--diff-filter=U", "-z")
+	if listed != nil {
+		return err
+	}
+	var driven []string
+	value := ""
+	for _, file := range strings.Split(said, "\x00") {
+		if file == "" {
+			continue
+		}
+		attr, checked := v.git(ctx, "check-attr", "merge", "--", file)
+		if checked != nil {
+			continue
+		}
+		if _, merge, _ := strings.Cut(strings.TrimSpace(attr), ": merge: "); gitcmd.IsTrimMerge(merge) {
+			driven, value = append(driven, file), merge
+		}
+	}
+	if len(driven) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w (%s merged by mw's trim-safe driver, merge=%s, which could not settle it; union would bring back every line a trim took out)",
+		err, strings.Join(driven, ", "), value)
 }
 
 // closeOutWait is how long a pull waits for a close-out's commit before its one
