@@ -92,6 +92,11 @@ const WrongRigHeading = "WRONG RIG?"
 // rule, whose acceptance has no usable Sweep: line (mw-gq6.419).
 const NoSweepHeading = "BUGS WITHOUT A SWEEP"
 
+// FormulaNotInstalledHeading heads the section naming the open stories whose
+// formula this vault has not installed, which mw dispatch passes over for it
+// (mw-gq6.497).
+const FormulaNotInstalledHeading = "FORMULA NOT INSTALLED"
+
 // UncheckedErrorsHeading heads the section naming the classes of the
 // common-errors register not yet checked in every rig of their kinds: the
 // register's standing sweep (mw-gq6.420).
@@ -549,6 +554,10 @@ type StatusReport struct {
 	// NoSweep are the open bugs filed after the sweep rule whose acceptance has
 	// no Sweep: line that passes, which mw dispatch will not claim.
 	NoSweep []StoryDetail
+	// NoFormula are the open stories whose path names a formula the vault has not
+	// installed: mw dispatch passes them over (formula-not-installed) with one
+	// comment on the bead, so the story sits unclaimed unseen (mw-gq6.497).
+	NoFormula []StoryDetail
 	// UncheckedErrors are the classes of the common-errors register not yet
 	// checked in every rig of their kinds, by slug; UncheckedErrorsUnread is
 	// why the register could not be read, when it could not.
@@ -876,6 +885,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report.WrongRig = wrongRigStories(s.Rigs, s.RigFiles, append(inRigs, held...)...)
 
 	report.NoSweep = bugsWithoutASweep(known)
+	report.NoFormula = s.uninstalledFormulas(ctx, known)
 	if report.HandedBack, err = s.handedBack(ctx, known, report.OpenButClaimed); err != nil {
 		return report, err
 	}
@@ -1674,6 +1684,14 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	}
 
+	if len(r.NoFormula) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", FormulaNotInstalledHeading, len(r.NoFormula)))
+		for _, d := range r.NoFormula {
+			clip(&b, fmt.Sprintf("  %s: formula %s", d.Story.ID, d.Merged().Formula))
+		}
+		b.WriteString("\n")
+	}
+
 	if len(r.UncheckedErrors) > 0 || r.UncheckedErrorsUnread != "" {
 		clip(&b, fmt.Sprintf("%s (%d)", UncheckedErrorsHeading, len(r.UncheckedErrors)))
 		if r.UncheckedErrorsUnread != "" {
@@ -2240,6 +2258,36 @@ func bugsWithoutASweep(known []StoryDetail) []StoryDetail {
 		}
 		seen[d.Story.ID] = true
 		if domain.OwesASweep(d.Type, d.Story.Title, d.Labels, d.Created) && !domain.SweepOf(d.Acceptance).Passes() {
+			found = append(found, d)
+		}
+	}
+	return found
+}
+
+// uninstalledFormulas picks, from the open stories this status has read, those
+// whose formula the tracker has not installed, once each. A tracker that cannot
+// say what is installed names none: that is not a story's fault.
+func (s Status) uninstalledFormulas(ctx context.Context, known []StoryDetail) []StoryDetail {
+	var found []StoryDetail
+	var installed map[string]bool
+	seen := map[string]bool{}
+	for _, d := range known {
+		formula := d.Merged().Formula
+		if d.IsEpic || d.Status == StatusClosed || formula == "" || seen[d.Story.ID] {
+			continue
+		}
+		seen[d.Story.ID] = true
+		if installed == nil {
+			names, err := s.Tracker.Formulas(ctx)
+			if err != nil {
+				return nil
+			}
+			installed = make(map[string]bool, len(names))
+			for _, name := range names {
+				installed[name] = true
+			}
+		}
+		if !installed[formula] {
 			found = append(found, d)
 		}
 	}
