@@ -74,6 +74,21 @@ func (g *Gateway) ClosedWithLabel(ctx context.Context, label string, since time.
 	return g.overlaid(ctx, beads)
 }
 
+// IcedBeads implements application.IcedBeads: `bd list` of the held beads
+// carrying the icebox label, epics left out.
+func (g *Gateway) IcedBeads(ctx context.Context) ([]application.StoryDetail, error) {
+	out, err := g.call(ctx, "list", "--status", StatusDeferred, "--label", application.LabelIcebox,
+		"--exclude-type", "epic", "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	beads, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading the iced beads: %w", err)
+	}
+	return g.overlaid(ctx, beads)
+}
+
 // RunningStories implements application.WorkTracker: what this host has in
 // flight, which is what a concurrency cap counts.
 func (g *Gateway) RunningStories(ctx context.Context, host string) ([]application.StoryDetail, error) {

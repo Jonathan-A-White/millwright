@@ -70,6 +70,7 @@ func (r Release) Run(ctx context.Context, epicID string) (FiledPlan, error) {
 	warnWrongRig(r.Out, r.Rigs, r.RigFiles, epic.Stories...)
 
 	held := found.held()
+	iced := found.iced()
 	for _, story := range held {
 		if err := r.Tracker.ReleaseStory(ctx, story.ID); err != nil {
 			return found, fmt.Errorf("releasing story %s of %s: %w", story.ID, epic.ID, err)
@@ -86,6 +87,9 @@ func (r Release) Run(ctx context.Context, epicID string) (FiledPlan, error) {
 	}
 	found.Released = true
 	r.print(found.released(len(held)))
+	if len(iced) > 0 {
+		r.print(fmt.Sprintf("Left iced: %s. Thaw them with mw thaw first.\n", strings.Join(iced, ", ")))
+	}
 	if opened {
 		r.print(fmt.Sprintf("Opened the epic %s too: it was held.\n", epic.ID))
 	}
@@ -101,6 +105,10 @@ func (r Release) story(ctx context.Context, id string) (FiledPlan, error) {
 	if err != nil {
 		return FiledPlan{}, fmt.Errorf("reading the story %s: %w", id, err)
 	}
+	if detail.Iced() {
+		r.print(fmt.Sprintf("%s is iced: nothing released. Thaw it with mw thaw %s first.\n", id, id))
+		return FiledPlan{EpicID: detail.EpicID, Defaults: detail.Defaults}, nil
+	}
 	path := detail.Merged()
 	if strings.TrimSpace(path.Rig) == "" || strings.TrimSpace(path.Branch) == "" {
 		return FiledPlan{}, fmt.Errorf("releasing the story %s: it has no path (no rig or no target branch)", id)
@@ -112,6 +120,7 @@ func (r Release) story(ctx context.Context, id string) (FiledPlan, error) {
 		EstimateMinutes: detail.EstimateMinutes,
 		Needs:           detail.Needs,
 		State:           StateOf(detail.Status),
+		Iced:            detail.Iced(),
 	}}}
 	if !detail.Held() {
 		r.print(fmt.Sprintf("%s is %s, not held: nothing released\n", id, found.Stories[0].state()))
@@ -174,6 +183,7 @@ func filedFrom(epic EpicDetail) FiledPlan {
 			EstimateMinutes: story.EstimateMinutes,
 			Needs:           waits,
 			State:           StateOf(story.Status),
+			Iced:            story.Iced(),
 		})
 	}
 	return filed
@@ -183,11 +193,23 @@ func filedFrom(epic EpicDetail) FiledPlan {
 func (p FiledPlan) held() []FiledStory {
 	var holding []FiledStory
 	for _, story := range p.Stories {
-		if story.state() == StateHeld {
+		if story.state() == StateHeld && !story.Iced {
 			holding = append(holding, story)
 		}
 	}
 	return holding
+}
+
+// iced is the ids of the held stories of this plan that are in the icebox,
+// which a release leaves held.
+func (p FiledPlan) iced() []string {
+	var ids []string
+	for _, story := range p.Stories {
+		if story.state() == StateHeld && story.Iced {
+			ids = append(ids, story.ID)
+		}
+	}
+	return ids
 }
 
 // ready is the ids of the stories a dispatcher can take once the held ones have
@@ -199,7 +221,7 @@ func (p FiledPlan) ready() []string {
 	for _, story := range p.Stories {
 		switch story.state() {
 		case StateHeld, StateOpen:
-			if len(story.Needs) == 0 {
+			if len(story.Needs) == 0 && !story.Iced {
 				takeable = append(takeable, story.ID)
 			}
 		}

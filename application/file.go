@@ -94,6 +94,8 @@ type FiledStory struct {
 	// held, open, in progress or closed. An empty State reads as held, which is
 	// what a story that has only just been filed is.
 	State string
+	// Iced says the bead is in the icebox: a release leaves it held.
+	Iced bool
 	// InFlight are the stories already open or running on this story's rig whose
 	// files its own overlap (or, a story that names no files, the running ones),
 	// as they were when it was filed. They are told, never acted on: the

@@ -9,7 +9,7 @@ domain/ stdlib · application/ use cases, ports · infra/ adapters · cmd/mw/ co
 | Port | Declared in | Real adapter | Fake |
 |-|-|-|-|
 | `WorkTracker` | application/worktracker.go | infra/beads | FakeTracker |
-| TrackerNotes, SweepNotes, BeadGraph | application/{status,sweep}.go | same | same |
+| TrackerNotes, SweepNotes, BeadGraph, IceNotes, IcedBeads | application/{status,sweep,ice}.go | same | same |
 | VaultFiles, TrackerSync, SyncHaltMarker | application/sync.go | infra/{vault/git,beads/sync}.go, infra/synchalt | Fake{VaultFiles,Tracker,SyncHaltMarker} |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | infra/beads/mail.go | FakeMailbox |
 | EpicRules (+LandingRules) | application/epicrules.go | infra/vault/epicrules.go | FakeEpicRules |
@@ -40,7 +40,7 @@ domain/ stdlib · application/ use cases, ports · infra/ adapters · cmd/mw/ co
 
 | Use case | File | Command | Feature |
 |-|-|-|-|
-| File, Release, Retry, Cause, Note, Path{Set,Show} | application/file.go, application/release.go, application/retry.go, application/cause.go, application/note.go, application/pathset.go | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/note.go, cmd/mw/path.go | features/{file*,release,retry*,cause,note,path_set}.feature |
+| File, Release, Ice, Thaw, Retry, Cause, Note, Path{Set,Show} | application/file.go, application/release.go, application/ice.go, application/retry.go, application/cause.go, application/note.go, application/pathset.go | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/ice.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/note.go, cmd/mw/path.go | features/{file*,release,retry*,cause,note,path_set}.feature |
 | Show, Peek, Prove, StampHead, Tester[File], FactoryReport[Send], Invest[Book] | application/show.go, application/stamphead.go, application/testerreport.go, application/testerfile.go, application/factoryreport.go, application/reportsend.go, application/invest.go | cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go, cmd/mw/invest.go | features/{show,peek,prove,stamp,tester,report*,invest}.feature |
 | Dispatch, Next, BatchLand, AfterLandingRun, BdRetry | application/dispatch.go, application/next.go, application/afterlandingrun.go | cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/land.go, cmd/mw/afterlanding.go, cmd/mw/bd.go | features/{dispatch,next,batch_land,after_*,bd_*}.feature |
 | Check{,Background,Logs,Starter}, Status, CloudCheck, CloudMake, Brief | application/check.go, application/status.go, application/cloud.go, application/cloudmake.go, application/brief.go | cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | features/{check,status,cloud,brief}.feature |
@@ -57,7 +57,7 @@ domain/ stdlib · application/ use cases, ports · infra/ adapters · cmd/mw/ co
 | Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control,Trim} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go | mw events <sub> - cmd/mw/events.go | features/event_follow.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern <sub> - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt*, Cards, Todo* | application/prompt.go, application/tododue.go, application/todosize.go, application/todorank.go | cmd/mw/prompt.go, cmd/mw/card.go, cmd/mw/todo.go | features/{prompt,card,todo*}.feature |
-| Grist{Key,Grind,Send,Request,Status,Eval,Score,Runs,Stats,Timing,Smoke,Level} | application/grist.go, application/gristtiming.go, application/gristlevel.go, application/gristgrind.go, application/gristsend.go, application/gristrequest.go, application/griststatus.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go | mw grist <sub> - cmd/mw/grist.go, cmd/mw/gristsmoke.go | features/{grist*,scorer}.feature |
+| Grist* | application/grist.go, application/gristtiming.go, application/gristlevel.go, application/gristgrind.go, application/gristsend.go, application/gristrequest.go, application/griststatus.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go | mw grist <sub> - cmd/mw/grist.go, cmd/mw/gristsmoke.go | features/{grist*,scorer}.feature |
 | Triage{Dump,Diff,Orphans} | application/triage.go | infra/beads/triage.go, cmd/mw/triage.go | - |
 
 cmd/mw/root.go, cmd/mw/version.go

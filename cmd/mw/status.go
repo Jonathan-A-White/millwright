@@ -201,6 +201,7 @@ func newStatusCmd() *cobra.Command {
 				CloseOuts:        hostCloseOuts(),
 				Mayor:            mayor,
 				HeldHands:        mayor,
+				Icebox:           application.IceboxReader{Beads: tracker, Notes: tracker},
 				Host:             host,
 				Seat:             BuilderSeat,
 				Ticks:            hostTickLogs(),
