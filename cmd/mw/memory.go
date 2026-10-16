@@ -1,10 +1,14 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+
 	"github.com/spf13/cobra"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/memoryqueries"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
@@ -13,7 +17,7 @@ import (
 func newMemoryCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "memory",
-		Short: "Place, replace, retire, list, query, eval, demote and promote the facts the Builder's seat keeps of a rig",
+		Short: "Place, replace, retire, list, query, count queries of, eval, demote and promote the facts the Builder's seat keeps of a rig",
 		Long: "A rig kept as facts has a folder in the Builder's seat, seats/builder/rigs/<rig>/, with an\n" +
 			"about.md and facts/<slug>.md, one typed fact a file. These verbs are how the Mayor changes\n" +
 			"them: each writes files, prints each file it wrote, and runs no git command (the Mayor\n" +
@@ -23,7 +27,7 @@ func newMemoryCmd() *cobra.Command {
 	}
 	root.AddCommand(newMemoryAddCmd(), newMemorySupersedeCmd(), newMemoryRetireCmd(),
 		newMemoryRecheckCmd(), newMemoryListCmd(), newMemoryMigrateCmd(), newMemoryQueryCmd(), newMemoryEvalCmd(),
-		newMemoryDemoteCmd(), newMemoryPromoteCmd())
+		newMemoryDemoteCmd(), newMemoryPromoteCmd(), newMemoryStatsCmd())
 	return root
 }
 
@@ -40,7 +44,19 @@ func memoryFor(cmd *cobra.Command) (application.Memory, error) {
 	files := vault.New(dir)
 	return application.Memory{
 		Files: files, Legacy: files, Head: files.Head, Seat: BuilderSeat, Budget: budget, Out: cmd.OutOrStdout(),
+		Queries: memoryQueryLog(), Story: os.Getenv("MW_STORY"), Warn: cmd.ErrOrStderr(),
 	}, nil
+}
+
+// memoryQueryLog is this host's log of memory queries, ~/.local/state/mw/
+// memory-queries.jsonl: host state, never the vault. nil when there is no home
+// directory to keep it in, which leaves queries unlogged.
+func memoryQueryLog() application.MemoryQueryLog {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return memoryqueries.New(filepath.Join(home, ".local", "state", "mw", memoryqueries.File))
 }
 
 func newMemoryAddCmd() *cobra.Command {
@@ -204,8 +220,9 @@ func newMemoryQueryCmd() *cobra.Command {
 			"sentence (source)', a superseded fact adding 'superseded by <slug>' and a retired one\n" +
 			"'retired <date>: <reason>'. Current facts come first. After the hits come the facts with a\n" +
 			"hit's subject and those along a hit's supersedes chain, each marked 'related'. It is how a\n" +
-			"Builder finds what boot does not show. It reads files and runs no git command, so it may be\n" +
-			"run from a worktree. Exit 1, saying 'no fact matches', when nothing hits.",
+			"Builder finds what boot does not show. Each run is logged (rig, terms, hits, the story from\n" +
+			"$MW_STORY) to ~/.local/state/mw/memory-queries.jsonl, host state and not the vault: see\n" +
+			"stats. It reads files and runs no git command, so it may be run from a worktree. Exit 1, saying 'no fact matches', when nothing hits.",
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			memory, err := memoryFor(cmd)
@@ -274,4 +291,26 @@ func newMemoryPromoteCmd() *cobra.Command {
 			return memory.Promote(cmd.Context(), args[0], args[1])
 		},
 	}
+}
+
+func newMemoryStatsCmd() *cobra.Command {
+	var since string
+	cmd := &cobra.Command{
+		Use:   "stats <rig> [--since 7d]",
+		Short: "Count how often a rig's memory was queried, and which subjects",
+		Long: "stats reads this host's log of mw memory query (~/.local/state/mw/memory-queries.jsonl) and\n" +
+			"prints, for the rig since --since (a number of days such as 7d, the default, or a day), how\n" +
+			"many queries there were and how many found nothing, then the subjects of the facts they hit,\n" +
+			"the most queried first. A Builder's boot names the ten most queried subjects.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			memory, err := memoryFor(cmd)
+			if err != nil {
+				return err
+			}
+			return memory.Stats(cmd.Context(), application.MemoryStats{Rig: args[0], Since: since})
+		},
+	}
+	cmd.Flags().StringVar(&since, "since", "7d", "a number of days (7d), a day (2026-10-09) or a UTC time")
+	return cmd
 }
