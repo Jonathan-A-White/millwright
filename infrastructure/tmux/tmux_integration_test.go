@@ -14,12 +14,17 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 )
+
+// socketCount numbers the private servers of one test run: a clock can repeat
+// (WSL2's does), a counter cannot.
+var socketCount atomic.Int64
 
 // privateRunner returns a Runner onto a tmux server of this test's own, and
 // kills that server when the test ends.
@@ -29,7 +34,7 @@ func privateRunner(t *testing.T, extra ...tmux.Option) *tmux.Runner {
 		t.Skipf("%s is not on PATH", tmux.Program)
 	}
 
-	socket := fmt.Sprintf("mw-test-%d-%d", os.Getpid(), time.Now().UnixNano())
+	socket := fmt.Sprintf("mw-test-%d-%d", os.Getpid(), socketCount.Add(1))
 	t.Cleanup(func() {
 		// kill-server fails when the server has already stopped, which is the
 		// happy ending: tmux stops on its own once its last session is closed.
@@ -178,10 +183,14 @@ func TestRunnerCarriesTheDirectoryTheEnvironmentAndWhatIsTypedIn(t *testing.T) {
 
 	name := application.SessionName("mw-gq6.4.1")
 	spec := application.SessionSpec{
-		Name:    name,
-		Dir:     dir,
-		Env:     map[string]string{"MW_STORY": "mw-gq6.4"},
-		Command: []string{"sh", "-c", `cat marker; echo "story=$MW_STORY"; read line; echo "typed=$line"; exit 3`},
+		Name: name,
+		Dir:  dir,
+		Env:  map[string]string{"MW_STORY": "mw-gq6.4"},
+		// It holds its last words on screen until the test has read them, then
+		// exits 3: tmux can lose what a command prints in the instant before it
+		// exits, and under load it did (mw-gq6.491). A minute at most, so it ends
+		// however the test does.
+		Command: []string{"sh", "-c", `cat marker; echo "story=$MW_STORY"; read line; echo "typed=$line"; i=0; while [ ! -e "$1" ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i + 1)); done; exit 3`, "sh", filepath.Join(dir, "go")},
 	}
 	if err := runner.Start(ctx, spec); err != nil {
 		t.Fatalf("starting %s: %v", name, err)
@@ -202,6 +211,9 @@ func TestRunnerCarriesTheDirectoryTheEnvironmentAndWhatIsTypedIn(t *testing.T) {
 		t.Fatalf("sending to %s: %v", name, err)
 	}
 	waitForOutput(ctx, t, runner, name, "typed=carry on")
+	if err := os.WriteFile(filepath.Join(dir, "go"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// And its exit status is there to be read afterwards.
 	status, err := runner.Wait(ctx, name)
