@@ -145,7 +145,7 @@ timer. Since 2026-09-30 the home host serves the vault's beads through a Dolt SQ
 | `beads_sync` | The host | What `mw sync` does with beads |
 | --- | --- | --- |
 | `remote` (default) | keeps a copy of its own | one `bd sync` every sync, carrying the notes: *Keeping two hosts level* |
-| `backup` | holds the one database: the desktop | writes the notes straight into it every sync; one `bd sync` as a backup only once the last got through `beads_backup_minutes` ago (30), recorded as `host.<name>.last_backup`; GC on its usual daily cadence, whether or not the backup got through; that GC first squashes the beads history into one commit once it holds 50,000 commits and no backup has got through for a day |
+| `backup` | holds the one database: the desktop | writes the notes straight into it every sync; one `bd sync` as a backup only once the last got through `beads_backup_minutes` ago (30), recorded as `host.<name>.last_backup`; GC on its usual daily cadence, whether or not the backup got through; with `[sync] beads_squash = true` only, that GC first squashes the beads history into one commit once it holds 50,000 commits and no backup has got through for a day (off by default: it erases the only copy while the backup is down) |
 | `shared` | reaches the desktop's database: the Laptop on a boost | writes the notes straight into it every sync; never a `bd sync` and never a GC, which are the desktop's |
 
 In every mode the vault half runs exactly as before, and every sync that gets
@@ -1211,6 +1211,9 @@ beads_backup_minutes = 30          # on a backup host, how long between two back
 builder_nice = 10                #  a Builder session and mw next's gate run under nice -n this, so a grist's scorer and model keep the CPU; 0 is off (default 10)
 builder_jobs = 8                # the most test workers a Builder's tests and mw next's gate start at once (JOBS, GOMAXPROCS, VITEST_MAX_WORKERS), for a host that is also someone's PC; docs/research/desktop-shared-pc.md (default: no limit)
 hands_root_helper = "/usr/local/sbin/mw-hands-root"  # what a root hands step is handed to, through sudo -n, on every host (default shown)
+
+[sync]
+beads_squash = false               # true lets the home's daily collection squash its beads history once it holds 50,000 commits and no backup got through for a day; it cannot be undone and erases the only copy while the backup is down, so only the Governor's word turns it on (default false)
 
 [[dispatch.windows]]               # from 23:00 to 06:00 on New York's clock these stand in for the root keys (a window wraps midnight; mw config set cannot write it, paste it)
 name = "night"                     # optional: mw status shows "cap 4: night window to 06:00 America/New_York"

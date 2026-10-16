@@ -36,7 +36,9 @@ func newSyncCmd() *cobra.Command {
 			"how many runs since have failed.\n\n" +
 			"Once level, it also asks the tracker to reclaim the disk space its own auto-commit history\n" +
 			"piles up — never more than once a day per host, since a full collection can take real time.\n" +
-			"Nothing is ever deleted by it: that stays a person's call.\n\n" +
+			"Nothing is ever deleted by it: that stays a person's call. Only config\n" +
+			"`[sync] beads_squash = true` lets the home fold its history into one commit, once it holds\n" +
+			"50,000 and no backup has got through for a day; it is off by default and cannot be undone.\n\n" +
 			"All of that is config `beads_sync = \"remote\"`, the default. On the host that keeps the one\n" +
 			"database (`backup`) the beads cycle is only a backup, run once the last one is\n" +
 			"`beads_backup_minutes` old (default 30); one that halts is said and marked but stops nothing.\n" +
@@ -180,7 +182,8 @@ func sessionHarness(vaultDir, host string, opts ...claude.Option) *claude.Harnes
 // A beads_backup_minutes that is not said is the mode's own default: 30, and
 // 5 for auto, which the sync applies once it knows it is on the home. It also
 // gives the sync the host's network, so that a backup waits out a metered one,
-// and the tracker's history, so that the home can squash it (mw-gq6.455).
+// and the tracker's history, so that the home can squash it (mw-gq6.455) when
+// sync.beads_squash says it may (mw-gq6.504).
 func hostSync(sync application.Sync) (application.Sync, error) {
 	files, _ := sync.Vault.(application.HomeFile)
 	setting, err := hostBeads(context.Background(), files, sync.Host)
@@ -191,8 +194,13 @@ func hostSync(sync application.Sync) (application.Sync, error) {
 	if err != nil {
 		return sync, err
 	}
+	squash, err := config.SyncBeadsSquash()
+	if err != nil {
+		return sync, err
+	}
 	sync.Mode = setting.Configured
 	sync.Home = files
+	sync.Squash = squash
 	if sync.History == nil {
 		// The beads gateway is the history's adapter too; a tracker that
 		// keeps none squashes nothing.
