@@ -214,6 +214,14 @@ func (c *talkWaitContext) registerIdeasOnlySteps(ctx *godog.ScenarioContext) {
 			return err == nil && len(held) == n
 		})
 	})
+	// The wait answers a kept idea after it writes it to the held file, so a
+	// step that is to find the wait idle again waits for the answer too.
+	ctx.Then(`^the wait has answered the Governor (\d+) times?$`, func(n int) error {
+		return c.waitFor(fmt.Sprintf("the wait to answer the Governor %d times", n), func() bool {
+			texts, _, err := c.delivered()
+			return err == nil && len(texts) == n
+		})
+	})
 	ctx.Then(`^one card titled "([^"]*)" was sent to the Governor by the wait$`, func(title string) error {
 		cards, err := c.cardsSent()
 		if err != nil {
