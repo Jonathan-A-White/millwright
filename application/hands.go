@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
@@ -168,6 +169,12 @@ type HandsAdd struct {
 	// Err is where a failed push or view is reported. A nil Err reports a push on the
 	// bead only.
 	Err io.Writer
+
+	// Here is this host's name and Finds whether a user step here would find
+	// a program on its PATH: a user step for Here that names mw, when Finds
+	// says no, is kept with a warning on Err. A nil Finds checks nothing.
+	Here  string
+	Finds func(program string) bool
 }
 
 // Run adds req's step, refusing an invalid one, a bead the tracker does not
@@ -251,6 +258,9 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 	if h.Out != nil {
 		fmt.Fprintf(h.Out, "added step %s to %s, on %s as %s: sha256 %s\n", req.Step.ID, req.Bead, req.Step.Host, req.Step.As, domain.HandsSHA256(req.Bead, req.Step))
 	}
+	if req.Step.As == domain.HandsAsUser && req.Step.Host == h.Here && h.Finds != nil && namesMw.MatchString(req.Step.Run) && !h.Finds("mw") {
+		h.report("warning: step %s names mw, which a user step on %s would not find on its PATH (the step is kept): install mw into ~/.local/bin", req.Step.ID, h.Here)
+	}
 	if found[0].Held() {
 		h.report("warning: %s is held: the Governor sees no Run until it is open (the step is kept)", req.Bead)
 	}
@@ -260,6 +270,10 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 	}
 	return record, nil
 }
+
+// namesMw matches a step's text that names mw: mw as a word of
+// its own, as a command or an argument (a cheap check, not a shell parse).
+var namesMw = regexp.MustCompile("(^|[\\s;&|(`{!])mw(\\s|$|[;&|)`])")
 
 // handsBlockers checks the beads req.After names against what the tracker
 // found of them — every one there, none the bead itself — and reports the
