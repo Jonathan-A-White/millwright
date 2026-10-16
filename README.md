@@ -1484,10 +1484,12 @@ worktree, serves it (`npm run preview` for Lampas), and with a Playwright script
 under `/tmp` drives it at 390x844: HOW TO CHECK IT step by step, then at least
 five adversarial moves, a shot of each. It commits nothing. Its closing comment
 goes on the landed story: `FINDINGS`, each finding `- [bug]` or `- [taste]` with
-what he would see, the steps and the shot path, or `FINDINGS: none`; then
-`Tester fuel: <tokens>`. Its kickoff is a Tester's own, which never says to
-commit, and `mw check` on a Tester story asks what `mw next` will: no commits,
-every step closed, FINDINGS written.
+what he would see, the steps and the shot path, or `FINDINGS: none`. Its fuel
+is not its to say: `mw next` records it in the ledger from the session's result,
+as for a Builder, and `mw tester report` sums it, tokens and cost, from there.
+Its kickoff is a Tester's own, which never says to commit, and `mw check` on a
+Tester story asks what `mw next` will: no commits, every step closed, FINDINGS
+written.
 
 A finding that still happens on main is filed by the Tester itself, so the Mayor
 only reads and releases it (mw-gq6.397):

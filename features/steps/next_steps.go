@@ -617,10 +617,13 @@ func (c *nextContext) theSessionReportedThis(id string, result *godog.DocString)
 	return c.putResult(id, result.Content)
 }
 
+// plainSuccess is the result of a session that finished: 55,100 tokens, $1.50.
+const plainSuccess = `{"type":"result","subtype":"success","is_error":false,"num_turns":9,` +
+	`"duration_ms":600000,"session_id":"s-plain","total_cost_usd":1.5,` +
+	`"usage":{"input_tokens":100,"output_tokens":2000,"cache_read_input_tokens":50000,"cache_creation_input_tokens":3000}}`
+
 func (c *nextContext) theSessionSucceeded(id string) error {
-	return c.putResult(id, `{"type":"result","subtype":"success","is_error":false,"num_turns":9,`+
-		`"duration_ms":600000,"session_id":"s-plain","total_cost_usd":1.5,`+
-		`"usage":{"input_tokens":100,"output_tokens":2000,"cache_read_input_tokens":50000,"cache_creation_input_tokens":3000}}`)
+	return c.putResult(id, plainSuccess)
 }
 
 func (c *nextContext) theSessionLeftNothing(id string) error {

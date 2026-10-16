@@ -226,6 +226,9 @@ type LedgerEntry struct {
 	Model   string
 	Effort  string
 	Tokens  int
+	// CostUSD is the list-price figure the fuel column gives, to the cent; 0
+	// when it gives none.
+	CostUSD float64
 }
 
 // Landed reports whether the line says the story landed.
@@ -279,8 +282,23 @@ func ParseLedgerLine(line string) (LedgerEntry, bool) {
 	}
 	if len(cells) > 4 {
 		entry.Tokens, _ = leadingTokens(cells[4])
+		entry.CostUSD = spentCost(cells[4])
 	}
 	return entry, true
+}
+
+// fuelCost is the "$1.50" item SessionResult.Spent writes among the fuel
+// column's comma-separated items.
+var fuelCost = regexp.MustCompile(`(?:^|, )\$([0-9]+(?:\.[0-9]+)?)(?:,|$)`)
+
+// spentCost is the cost a fuel column gives, 0 when it gives none.
+func spentCost(cell string) float64 {
+	m := fuelCost.FindStringSubmatch(strings.TrimSpace(cell))
+	if m == nil {
+		return 0
+	}
+	cost, _ := strconv.ParseFloat(m[1], 64)
+	return cost
 }
 
 // ledgerStoryID is the id in a ledger's story column: the one in brackets after
