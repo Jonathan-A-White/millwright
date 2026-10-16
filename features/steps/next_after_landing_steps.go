@@ -35,6 +35,8 @@ func registerNextAfterLandingSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig names a command to run after a landing, which fails the first time on a name-resolution fault, exit 255, and then succeeds$`, c.theRigNamesAFlakyCommand)
 	ctx.Given(`^after-landing commands are run again after (\d+) milliseconds$`, c.afterLandingCommandsAreRetriedAfter)
 	ctx.Given(`^another deploy of the rig holds its after-landing lock for (\d+) milliseconds$`, c.anotherDeployHoldsTheLock)
+	ctx.Given(`^the rig names a command to run after a landing, which prints (\d+) numbered lines and exits (\d+)$`, c.theRigNamesACommandPrintingLines)
+	ctx.Given(`^the rig names a command to run after a landing, which deploys and then fails a shot, saying "([^"]*)"$`, c.theRigNamesACommandFailingAShot)
 
 	ctx.Then(`^the rig's after-landing command ran once, in the rig checkout, at the commit that landed on "([^"]*)"$`, c.theCommandRanOnce)
 	ctx.Then(`^the rig's after-landing command ran twice, in the rig checkout, at the commit that landed on "([^"]*)"$`, c.theCommandRanTwice)
@@ -51,6 +53,45 @@ func registerNextAfterLandingSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^that mail's body says: (.+)$`, c.thatMailsBodySays)
 	ctx.Then(`^that mail's first line is: (.+)$`, c.thatMailsFirstLineIs)
 	ctx.Then(`^the story "([^"]*)" is closed exactly as it is without an after-landing command$`, c.theStoryIsClosedAsWithout)
+	ctx.Then(`^the run of "([^"]*)" keeps the whole output of the after-landing command in after-landing.log, from "([^"]*)" to "([^"]*)"$`, c.theRunKeepsTheAfterLandingLog)
+	ctx.Then(`^the vault's git history holds "([^"]*)", unmodified$`, c.theVaultsHistoryHolds)
+}
+
+func (c *nextContext) theRigNamesACommandPrintingLines(lines, status int) error {
+	return c.afterScript(fmt.Sprintf("i=1\nwhile [ $i -le %d ]; do echo \"line $i of %d\"; i=$((i+1)); done\nexit %d", lines, lines, status))
+}
+
+// theRigNamesACommandFailingAShot is a command of three steps, as postern's
+// is: the logging script, a deploy that goes well, and shots that print the
+// failing shot as Playwright does and exit 1.
+func (c *nextContext) theRigNamesACommandFailingAShot(saying string) error {
+	if err := c.afterScript("exit 0"); err != nil {
+		return err
+	}
+	deploy, shots := filepath.Join(c.root, "deploy.sh"), filepath.Join(c.root, "run-shots.sh")
+	if err := os.WriteFile(deploy, []byte("echo 'sent dist/ to the site'\n"), 0o755); err != nil {
+		return err
+	}
+	text := fmt.Sprintf("echo '== shots at 390x844 =='\necho %q\necho '  1 failed'\necho '== shots at 1280x800 =='\necho '  67 passed (2.0m)'\nexit 1\n", "  "+saying+" (20.1s)")
+	if err := os.WriteFile(shots, []byte(text), 0o755); err != nil {
+		return err
+	}
+	c.afterCommands["millwright"] += " && sh " + deploy + " && sh " + shots
+	return nil
+}
+
+// theRunKeepsTheAfterLandingLog finds the after-landing command's whole output
+// in the vault, beside the story's run, from its first line to its last.
+func (c *nextContext) theRunKeepsTheAfterLandingLog(id, first, last string) error {
+	kept, err := os.ReadFile(filepath.Join(c.vault, "runs", id, "after-landing.log"))
+	if err != nil {
+		return fmt.Errorf("expected the after-landing command's output kept in the run: %w", err)
+	}
+	from, to := strings.Index(string(kept), first), strings.LastIndex(string(kept), last)
+	if from < 0 || to < 0 || to < from {
+		return fmt.Errorf("expected after-landing.log to hold %q and then %q, got:\n%s", first, last, kept)
+	}
+	return nil
 }
 
 // afterCommandToken stands in a step's text for the command line, which holds
@@ -330,4 +371,16 @@ func (c *nextContext) unitRestarter() application.UnitRestarter {
 		c.units = &apptest.FakeUnitRestarter{}
 	}
 	return c.units
+}
+
+// theVaultsHistoryHolds finds a file committed in a vault that is a real git
+// clone, as it stands on disk.
+func (c *nextContext) theVaultsHistoryHolds(file string) error {
+	if _, err := gitSay(c.vault, "ls-files", "--error-unmatch", file); err != nil {
+		return fmt.Errorf("expected %s to be committed in the vault: %w", file, err)
+	}
+	if changed, err := gitSay(c.vault, "status", "--porcelain", "--", file); err != nil || changed != "" {
+		return fmt.Errorf("expected %s to be committed as it stands, git status says %q (%v)", file, changed, err)
+	}
+	return nil
 }

@@ -62,6 +62,7 @@ Feature: A run leaves nothing stray in the vault
       | runs/mw-gq6.1/landing-error.txt                 |
       | runs/mw-gq6.1/gate.log                          |
       | runs/mw-gq6.1/gate-2.log                        |
+      | runs/mw-gq6.1/after-landing.log                 |
       | runs/mw-gq6.1/close-out-unrecorded.json         |
       | runs/mw-gq6.1/attempt-1.bundle                  |
       | runs/batch/millwright/1/merge-order.txt         |

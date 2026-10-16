@@ -867,6 +867,20 @@ not run again. The command runs under the rig's after-landing lock (a file besid
 the rig's worktrees, `<rig>.after-landing-slot`; not the merge slot, which a
 landing has given back by then), so two runs of it never go side by side.
 
+The whole of what the command printed, both runs when it was retried, is kept
+beside the story's run at `runs/<story>/after-landing.log` in the vault and
+committed with it; a failure's line ends `; the whole output is in
+runs/<story>/after-landing.log`. A command that is a plain chain of `&&`s is run
+as its steps, in one shell, each preceded by a line `mw after landing, step 5 of
+6: npm run shots`, so a failure names the step that failed and quotes its own
+output: `step 2 of 6, npm run build: exit status 2: …`. A step that fails after a
+step that ships the rig (one naming `rsync`, `scp` or a deploy) went well opens
+with `deployed;`, and when it is the shots, `deployed; shots not published:
+<why>`, the why being the port their server found used, the shots that failed by
+name, or the step's last lines. Every run is given a free port of its own in
+`PREVIEW_PORT`, which postern's shots start their preview server on, so two
+runs on one host never ask for the same port.
+
 `mw after-landing <rig>` runs that same command now, for a landing whose deploy
 did not happen or failed: in the rig's checkout as it is, under the same lock
 (it waits, saying who holds it, for a deploy that is running), the same limit
