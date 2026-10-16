@@ -149,7 +149,7 @@ func newPromptRunCmd() *cobra.Command {
 				return err
 			}
 			return application.PromptRun{
-				Prompts: backend, Tracker: gateway, Notes: gateway, Host: host,
+				Prompts: backend, Tracker: gateway, Notes: gateway, Signs: posternSigns(), Host: host,
 				Now: promptClock, Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
 			}.Run(cmd.Context(), args[0], args[1:])
 		},

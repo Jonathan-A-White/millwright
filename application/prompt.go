@@ -158,6 +158,8 @@ type PromptRun struct {
 	Prompts Prompts
 	Tracker WorkTracker
 	Notes   PosternNotes
+	// Signs is where a host's other signs of life are read, as PosternView.Signs.
+	Signs HostSigns
 	// Host is this host's own name; Now the clock the facts are measured by.
 	Host string
 	Now  func() time.Time
@@ -242,7 +244,7 @@ func (r PromptRun) facts(ctx context.Context) ([]promptSection, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading the notes: %w", err)
 	}
-	doc, err := PosternView{Tracker: r.Tracker, Notes: r.Notes, Host: r.Host, Now: r.Now, Err: r.Err}.Build(ctx)
+	doc, err := PosternView{Tracker: r.Tracker, Notes: r.Notes, Signs: r.Signs, Host: r.Host, Now: r.Now, Err: r.Err}.Build(ctx)
 	if err != nil {
 		return nil, err
 	}

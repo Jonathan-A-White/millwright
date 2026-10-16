@@ -68,6 +68,7 @@ func newPosternViewCmd() *cobra.Command {
 			view := application.PosternView{
 				Tracker:    gateway,
 				Notes:      gateway,
+				Signs:      posternSigns(),
 				Host:       host,
 				Now:        posternViewClock,
 				Err:        cmd.ErrOrStderr(),

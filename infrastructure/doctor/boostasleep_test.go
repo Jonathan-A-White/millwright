@@ -9,6 +9,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 )
 
@@ -172,5 +173,59 @@ func TestTheBoostAsleepCureChangesNothing(t *testing.T) {
 	}
 	if got, _ := notes.Note(context.Background(), application.LastSyncKey("desktop")); got != "2026-10-05T13:40:24Z" {
 		t.Fatalf("the cure changed the desktop's note: %q", got)
+	}
+}
+
+// mw-gq6.523: the Boost's last sync alone is not a sign it is asleep; a vault
+// commit or a renewed lease on a story it claimed within the limit is one of
+// life.
+func baWithSigns(t *testing.T, syncAgo time.Duration, sign application.HostSign, heartbeatAgo time.Duration) *doctor.BoostAsleep {
+	t.Helper()
+	check, _ := baCheck(t, baStamp(syncAgo), "")
+	signs := apptest.NewFakeHostSigns()
+	signs.Set("desktop", sign)
+	check.Signs = signs
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-ba", domain.Path{})
+	story := domain.Story{ID: "mw-ba.1", Title: "Claimed on the desktop"}
+	_ = story.Overrides.Set("host", "desktop")
+	tracker.AddStory("mw-ba", story)
+	if err := tracker.ClaimStory(context.Background(), "mw-ba.1"); err != nil {
+		t.Fatalf("claiming: %v", err)
+	}
+	if heartbeatAgo > 0 {
+		if err := tracker.SetLeaseExpires("mw-ba.1", baNow.Add(-heartbeatAgo).Add(application.ClaimLease)); err != nil {
+			t.Fatalf("renewing the lease: %v", err)
+		}
+	}
+	check.Work = tracker
+	return check
+}
+
+func TestTheBoostAsleepProbeIsOkWhenTheBoostCommittedToTheVaultWithinTheThreshold(t *testing.T) {
+	check := baWithSigns(t, 5*time.Hour, application.HostSign{At: baNow.Add(-10 * time.Minute), What: "vault commit"}, 5*time.Hour)
+
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected ok for a Boost that committed 10 minutes ago, got %s (%s)", verdict, reason)
+	}
+}
+
+func TestTheBoostAsleepProbeIsOkWhenAStoryTheBoostClaimedWasHeartbeatedWithinTheThreshold(t *testing.T) {
+	check := baWithSigns(t, 5*time.Hour, application.HostSign{}, 3*time.Minute)
+
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected ok for a Boost whose claimed story beat 3 minutes ago, got %s (%s)", verdict, reason)
+	}
+}
+
+func TestTheBoostAsleepProbeIsFaultyWithNoSignWithinTheThresholdAndSaysTheNewestSeen(t *testing.T) {
+	check := baWithSigns(t, 5*time.Hour, application.HostSign{At: baNow.Add(-3 * time.Hour), What: "vault commit"}, 4*time.Hour)
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty, got %s (%s)", verdict, reason)
+	}
+	if want := "desktop silent 5h00m (threshold 2h), newest sign of life a vault commit 3h00m ago"; !strings.Contains(reason, want) {
+		t.Fatalf("expected the reason to say %q, got %q", want, reason)
 	}
 }

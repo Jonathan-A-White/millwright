@@ -55,6 +55,12 @@ type HostSigns interface {
 	LastSign(ctx context.Context, host string) (HostSign, error)
 }
 
+// ClaimLease is how long the tracker's lease on a claim runs from the claim or
+// from its last heartbeat: bd's fixed five minutes (HeartbeatInterval). A
+// story's lease expiry less this is when its session was last known to be
+// alive.
+const ClaimLease = 5 * time.Minute
+
 // NudgeClause is one reason the quiet alarm has to speak: a story that has run
 // long with nothing mailed about it, or another host whose last sync has gone
 // stale.
@@ -318,22 +324,41 @@ func (n Nudge) lastWrite(ctx context.Context, detail StoryDetail) (written time.
 	return written, true
 }
 
-// newestSign is the newest sign of life of a host besides its sync note: the
-// claims its stories were last made or sent back under, and what the vault
-// holds of it. Signs that cannot be read are left out, and the host is judged
-// by the rest.
+// newestSign is the newest sign of life of a host besides its sync note
+// (NewestSign).
 func (n Nudge) newestSign(ctx context.Context, w HostWork) HostSign {
+	return NewestSign(ctx, n.Signs, w.Host, w.Stories)
+}
+
+// SignHeartbeat is what a renewed lease on a story a host claimed is called in
+// a line that names the host's newest sign of life.
+const SignHeartbeat = "story heartbeat"
+
+// NewestSign is the newest sign of life of a host besides its sync note: the
+// claims its stories were last made or sent back under, the last renewal of
+// the lease on any story it holds (a Boost whose sessions all run long makes
+// no vault commit and no claim for a while, but its heartbeats go on,
+// mw-gq6.523), and what the vault holds of it. stories are the ones pathed to
+// the host. Signs that cannot be read are left out, and the host is judged by
+// the rest. It is the one reading mw status, the Postern view, the doctor and
+// the quiet alarm all judge a host quiet by.
+func NewestSign(ctx context.Context, signs HostSigns, host string, stories []StoryDetail) HostSign {
 	var newest HostSign
-	for _, d := range w.Stories {
+	for _, d := range stories {
 		if d.ClaimedAt.After(newest.At) {
 			newest = HostSign{At: d.ClaimedAt, What: "claim"}
 		}
 		if d.SentBackAt.After(newest.At) {
 			newest = HostSign{At: d.SentBackAt, What: "send-back"}
 		}
+		if strings.EqualFold(strings.TrimSpace(d.Status), StatusInProgress) && !d.LeaseExpires.IsZero() {
+			if beat := d.LeaseExpires.Add(-ClaimLease); beat.After(newest.At) {
+				newest = HostSign{At: beat, What: SignHeartbeat}
+			}
+		}
 	}
-	if n.Signs != nil {
-		if sign, err := n.Signs.LastSign(ctx, w.Host); err == nil && sign.At.After(newest.At) {
+	if signs != nil {
+		if sign, err := signs.LastSign(ctx, host); err == nil && sign.At.After(newest.At) {
 			newest = sign
 		}
 	}

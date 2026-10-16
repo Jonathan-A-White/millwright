@@ -342,6 +342,7 @@ Feature: mw status
   Scenario: A story claimed on a sleeping host is stranded, like a ready one
     Given a status story "mw-gq6.15" filed under it, overriding "host" with "laptop"
     And the status story "mw-gq6.15" is claimed with its session running
+    And the claim on "mw-gq6.15" was last renewed 28 hours ago
     And the host "laptop" last synced 28 hours ago
     When mw status reads the host
     Then reading status succeeds

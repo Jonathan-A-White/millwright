@@ -48,6 +48,14 @@ type BoostAsleep struct {
 	Notes interface {
 		Note(ctx context.Context, key string) (string, error)
 	}
+	// Work and Signs are where the Boost's other signs of life are read: its
+	// claimed stories' claims and lease renewals, and what the vault holds of it
+	// (mw-gq6.523). A Boost with a sign within Limit is not called asleep. Nil
+	// ones, or ones that cannot be read, judge it by its last sync alone.
+	Work interface {
+		WorkInHand(ctx context.Context) (application.WorkInHand, error)
+	}
+	Signs application.HostSigns
 	// Limit is how long the Boost may go without a sync. Zero reads
 	// application.DefaultHostSilence.
 	Limit time.Duration
@@ -116,10 +124,43 @@ func (b *BoostAsleep) Probe(ctx context.Context) (application.Verdict, string) {
 	silent := b.now().Sub(at)
 	reason := fmt.Sprintf("%s silent %s (threshold %s)", boost, application.Clock(silent), thresholdFor(limit))
 	if silent > limit {
+		// A Boost syncs on its dispatch ticks, so its sync age alone is not a sign
+		// it is asleep: it is called so only when nothing else of it is newer than
+		// the threshold either (mw-gq6.523).
+		if sign := b.newestSign(ctx, boost); sign.At.After(at) {
+			quiet := b.now().Sub(sign.At)
+			if quiet <= limit {
+				return application.DoctorOK, fmt.Sprintf("%s synced %s ago, but %s %s ago (threshold %s)",
+					boost, application.Clock(silent), withArticle(sign.What), application.Clock(quiet), thresholdFor(limit))
+			}
+			reason += fmt.Sprintf(", newest sign of life %s %s ago", withArticle(sign.What), application.Clock(quiet))
+		}
 		b.faulty = reason
 		return application.DoctorFaulty, reason
 	}
 	return application.DoctorOK, reason
+}
+
+// newestSign is the newest sign of life of the Boost besides its sync note
+// (application.NewestSign). Work that cannot be read leaves out the claims and
+// leases, and signs that cannot be read the vault's: the Boost is judged by the
+// rest.
+func (b *BoostAsleep) newestSign(ctx context.Context, boost string) application.HostSign {
+	var stories []application.StoryDetail
+	if b.Work != nil {
+		if work, err := b.Work.WorkInHand(ctx); err == nil {
+			stories = work.PathedTo(boost)
+		}
+	}
+	return application.NewestSign(ctx, b.Signs, boost, stories)
+}
+
+// withArticle puts "a" or "an" before a noun phrase.
+func withArticle(what string) string {
+	if what != "" && strings.ContainsRune("aeiou", rune(what[0])) {
+		return "an " + what
+	}
+	return "a " + what
 }
 
 // Cure implements application.DoctorCheck: there is none. It fails, saying why

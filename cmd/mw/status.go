@@ -33,7 +33,9 @@ func newStatusCmd() *cobra.Command {
 			"step says so, and a story recorded run=stopped or run=stuck is shown as that, not running.\n\n" +
 			"It then shows every other host a story is pathed to: when that host last recorded itself\n" +
 			"level, and what it holds. A host silent for longer than the threshold (config\n" +
-			"`host_silent_hours`, default 2), or that never synced at all, is marked asleep and its work\n" +
+			"`host_silent_hours`, default 2) and has shown no other sign of life in that time (a vault\n" +
+			"commit, a claim, a renewed lease on a story it holds; the newest is shown), or that never\n" +
+			"synced at all, is marked asleep and its work\n" +
 			"is listed as stranded, with the one line that re-paths a story here. Re-pathing is a\n" +
 			"person's act: status only says which stories are waiting for one.\n\n" +
 			"A WAITING ON THE MAYOR section lists each hands bead (hitl) with no step filed yet, which\n" +
@@ -205,6 +207,7 @@ func newStatusCmd() *cobra.Command {
 				RigFiles:         rig.Files{},
 				Notes:            tracker,
 				MainCommit:       mainCommit,
+				Signs:            mwVault(dir, host),
 				Vault:            mwVault(dir, host),
 				RigFacts:         mwVault(dir, host),
 				Errors:           files,

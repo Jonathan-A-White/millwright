@@ -60,6 +60,9 @@ func syncedAt(t *testing.T, tracker *apptest.FakeTracker, host string, ago time.
 func aTrackerPathedToVPS(t *testing.T) *apptest.FakeTracker {
 	t.Helper()
 	tracker := apptest.NewFakeTracker()
+	// Leases are the tracker's clock's: one on the real clock would be a heartbeat
+	// from after the day these tests are set on.
+	tracker.Clock = func() time.Time { return statusNow }
 	defaults := domain.Path{}
 	for field, value := range map[string]string{
 		"rig": "millwright", "branch": "main", "harness": "claude",
@@ -117,6 +120,7 @@ func TestOtherHostsSection(t *testing.T) {
 		if err := tracker.ClaimStory(context.Background(), "mw-gq6.32"); err != nil {
 			t.Fatalf("claiming mw-gq6.32: %v", err)
 		}
+		heartbeatAt(t, tracker, "mw-gq6.32", 28*time.Hour)
 		syncedAt(t, tracker, "laptop", 28*time.Hour)
 
 		block := section(otherHostStatus(t, tracker))
