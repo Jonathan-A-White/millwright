@@ -466,3 +466,87 @@ type brokenMayor struct{}
 func (brokenMayor) MayorNeeds(context.Context, []application.StoryDetail) ([]application.PosternViewNeed, error) {
 	return nil, context.DeadlineExceeded
 }
+
+// nudgeRigs is where the millwright rig is checked out in the transcript
+// tests: the story's worktree, whose transcript is read, is beside it.
+var nudgeRigs = map[string]string{"millwright": "/rigs/millwright"}
+
+// transcriptWritten says the harness last wrote its record of the story's
+// session ago before statusNow.
+func transcriptWritten(transcripts *apptest.FakeTranscriptTail, id string, ago time.Duration) {
+	transcripts.Written(application.WorktreeDir(nudgeRigs["millwright"], id), statusNow.Add(-ago))
+}
+
+// 2026-10-16: mw-5r3p30.245 alarmed 'in progress 147 min, no mail' while its
+// transcript had moved within the minute (a long speech bake-off). A session
+// whose transcript was written in the last 15 minutes is working, not quiet.
+func TestNudgeSaysNothingOfALongStoryWhoseTranscriptIsLive(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "A long bake-off, still talking", "vps")
+	claim(t, tracker, "mw-gq6.30", 147*time.Minute)
+	transcripts := apptest.NewFakeTranscriptTail()
+	transcriptWritten(transcripts, "mw-gq6.30", time.Minute)
+
+	clauses := nudgeReport(t, tracker, application.Nudge{Transcripts: transcripts, Rigs: nudgeRigs})
+
+	if len(clauses) != 0 {
+		t.Fatalf("expected no clause for a story whose transcript moved a minute ago, got %+v", clauses)
+	}
+}
+
+func TestNudgeNamesALongStoryWhoseTranscriptHasGoneQuietAndSaysHowLong(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "A long story, gone quiet", "vps")
+	claim(t, tracker, "mw-gq6.30", 147*time.Minute)
+	transcripts := apptest.NewFakeTranscriptTail()
+	transcriptWritten(transcripts, "mw-gq6.30", 30*time.Minute)
+
+	clauses := nudgeReport(t, tracker, application.Nudge{Transcripts: transcripts, Rigs: nudgeRigs})
+
+	if len(clauses) != 1 || clauses[0].Key != "mw-gq6.30" {
+		t.Fatalf("expected one clause keyed by the story, got %+v", clauses)
+	}
+	if want := "mw-gq6.30 in progress 147 min, no mail, transcript quiet 30 min"; clauses[0].Text != want {
+		t.Fatalf("expected the clause to read %q, got %q", want, clauses[0].Text)
+	}
+}
+
+func TestNudgeNamesATranscriptJustPastFifteenMinutes(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "Quiet sixteen minutes", "vps")
+	claim(t, tracker, "mw-gq6.30", 90*time.Minute)
+	transcripts := apptest.NewFakeTranscriptTail()
+	transcriptWritten(transcripts, "mw-gq6.30", 16*time.Minute)
+
+	clauses := nudgeReport(t, tracker, application.Nudge{Transcripts: transcripts, Rigs: nudgeRigs})
+
+	if len(clauses) != 1 || clauses[0].Text != "mw-gq6.30 in progress 90 min, no mail, transcript quiet 16 min" {
+		t.Fatalf("expected the story named once its transcript is past 15 minutes quiet, got %+v", clauses)
+	}
+}
+
+func TestNudgeSaysWhenALongStoryHasNoTranscriptAtAll(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "A session the harness never recorded", "vps")
+	claim(t, tracker, "mw-gq6.30", 73*time.Minute)
+
+	clauses := nudgeReport(t, tracker, application.Nudge{Transcripts: apptest.NewFakeTranscriptTail(), Rigs: nudgeRigs})
+
+	if len(clauses) != 1 || clauses[0].Text != "mw-gq6.30 in progress 73 min, no mail, no transcript" {
+		t.Fatalf("expected the story named with no transcript, got %+v", clauses)
+	}
+}
+
+func TestNudgeJudgesByMailAloneWhereTheRigIsNotCheckedOutHere(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "A rig this host has no checkout of", "vps")
+	claim(t, tracker, "mw-gq6.30", 73*time.Minute)
+	transcripts := apptest.NewFakeTranscriptTail()
+	transcriptWritten(transcripts, "mw-gq6.30", time.Minute)
+
+	clauses := nudgeReport(t, tracker, application.Nudge{Transcripts: transcripts})
+
+	if len(clauses) != 1 || clauses[0].Text != "mw-gq6.30 in progress 73 min, no mail" {
+		t.Fatalf("expected the old clause where no transcript can be found, got %+v", clauses)
+	}
+}

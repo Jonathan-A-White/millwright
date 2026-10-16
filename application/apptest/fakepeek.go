@@ -4,23 +4,43 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-// FakeTranscriptTail is an in-memory application.TranscriptTail: a test says
-// what the harness has recorded in a directory with Record.
+// FakeTranscriptTail is an in-memory application.TranscriptTail and
+// application.TranscriptWrites: a test says what the harness has recorded in a
+// directory with Record, and when it last wrote there with Written.
 type FakeTranscriptTail struct {
 	mu       sync.Mutex
 	recorded map[string]string
+	written  map[string]time.Time
 }
 
 // NewFakeTranscriptTail returns a harness that has recorded nothing anywhere.
 func NewFakeTranscriptTail() *FakeTranscriptTail {
-	return &FakeTranscriptTail{recorded: map[string]string{}}
+	return &FakeTranscriptTail{recorded: map[string]string{}, written: map[string]time.Time{}}
 }
 
-var _ application.TranscriptTail = (*FakeTranscriptTail)(nil)
+var (
+	_ application.TranscriptTail   = (*FakeTranscriptTail)(nil)
+	_ application.TranscriptWrites = (*FakeTranscriptTail)(nil)
+)
+
+// Written sets when the harness last wrote its record of the session run in dir.
+func (f *FakeTranscriptTail) Written(dir string, at time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.written[dir] = at
+}
+
+// LastWrite implements application.TranscriptWrites.
+func (f *FakeTranscriptTail) LastWrite(_ context.Context, dir string) (time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.written[dir], nil
+}
 
 // Record sets what the harness has recorded of the session run in dir.
 func (f *FakeTranscriptTail) Record(dir, transcript string) {
