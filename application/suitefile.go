@@ -28,6 +28,8 @@ type SuiteFiled struct {
 	ID   string
 	File string
 	New  bool
+	// Notes are what could not be done after the bead was filed.
+	Notes []string
 }
 
 // SuiteFiler is what mw suite --file does after a run: one held bug under the
@@ -113,7 +115,10 @@ func (f SuiteFiler) fileOne(ctx context.Context, epic EpicDetail, report SuiteRe
 	if err != nil {
 		return SuiteFiled{}, fmt.Errorf("filing the bug: %w", err)
 	}
-	return SuiteFiled{ID: id, File: file.File, New: true}, nil
+	// The epic's last story waits on the new bug, as it does on a Tester's
+	// (mw-gq6.498); a failure of that is no failure of the filing.
+	_, notes := KeepDemoLast(ctx, f.Tracker, f.Rules, report.Result.Rig, epic.ID, id)
+	return SuiteFiled{ID: id, File: file.File, New: true, Notes: notes}, nil
 }
 
 // openSuiteBug is the open bead under the suite epic, labelled suite, whose
@@ -206,6 +211,9 @@ func suiteMail(host string, report SuiteReport, filed []SuiteFiled, failures []s
 			how = "new, held"
 		}
 		fmt.Fprintf(&b, "%s  %s  %s\n", one.ID, one.File, how)
+		for _, note := range one.Notes {
+			fmt.Fprintf(&b, "  %s\n", note)
+		}
 	}
 	for _, said := range result.Unnamed {
 		fmt.Fprintf(&b, "no file  %s\n", said)

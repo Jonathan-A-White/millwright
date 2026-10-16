@@ -157,6 +157,10 @@ type StoryShape struct {
 	Key    string
 	Labels []string
 	Needs  []string
+	// Closed says the story is finished. A finished story cannot come after
+	// an unfinished last story, so the last story of an epic that is not yet
+	// closed need not wait on it (mw-gq6.498).
+	Closed bool
 }
 
 // Shortfall is one requirement an epic does not meet: the name the rig
@@ -244,7 +248,7 @@ func lastStoryProblem(stories []StoryShape, label string) string {
 		waits := waitsOn(stories, keys, carrier.Key)
 		var missing []string
 		for _, story := range stories {
-			if story.Key != carrier.Key && !waits[story.Key] {
+			if story.Key != carrier.Key && !waits[story.Key] && (carrier.Closed || !story.Closed) {
 				missing = append(missing, story.Key)
 			}
 		}

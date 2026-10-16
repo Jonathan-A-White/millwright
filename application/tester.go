@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -340,42 +341,101 @@ func (n Next) springTester(ctx context.Context, c *closeOut, report *NextReport,
 	report.Notes = append(report.Notes, HoldDemosForTester(ctx, n.Tracker, n.Rules, c.path.Rig, c.detail.EpicID, id)...)
 }
 
-// HoldDemosForTester makes every open story of the epic that carries one of the
-// rig's last-story labels (epic_last_story_labels) wait on the Tester story just
+// HoldDemosForTester makes the epic's last story wait on the Tester story just
 // filed under the epic, so the demo stays the epic's last story and is shown to
-// the Governor after the Tester has driven the landing. A labelled story that
-// is in progress or closed is left alone. It returns what the report should
-// say: a note for each story left alone and for each failure; an epic with no
-// such story, or a rig that names no such label, gives none.
+// the Governor after the Tester has driven the landing. It is KeepDemoLast, and
+// returns what the report should say: a note for a last story left alone and
+// for each failure; an epic with no such story, or a rig that names no such
+// label, gives none.
 func HoldDemosForTester(ctx context.Context, tracker WorkTracker, rules EpicRules, rig, epicID, testerID string) []string {
+	_, notes := KeepDemoLast(ctx, tracker, rules, rig, epicID, testerID)
+	return notes
+}
+
+// KeepDemoLast keeps the epic's last story last when story newID has been
+// filed under it (mw-gq6.498): when the rig asks for a last-story label
+// (epic_last_story_labels) and exactly one open or held story of the epic
+// carries it, that story is made to wait on newID. Neither a story that is the
+// last story itself nor one that already waits on it, directly or through
+// others, is waited on, as that would be a cycle; a last story that is already
+// waiting is left as it is.
+//
+// The line says what was done, or why it was not when a person might look for
+// it (a cycle); it is empty when nothing was to be done. The notes are what
+// could not be done, and a last story in progress or closed that was left alone.
+// An epic with no such story, or with two, a rig that names no such label and
+// a nil rules all give nothing.
+func KeepDemoLast(ctx context.Context, tracker WorkTracker, rules EpicRules, rig, epicID, newID string) (line string, notes []string) {
 	if rules == nil || epicID == "" {
-		return nil
+		return "", nil
 	}
 	requirements, err := rules.EpicRequirements(ctx, rig)
 	if err != nil {
-		return []string{fmt.Sprintf("the Tester story %s was not made a need of the epic's last story: what %s requires of its epics could not be read: %v", testerID, rig, err)}
+		return "", []string{fmt.Sprintf("%s was not made a need of the epic's last story: what %s requires of its epics could not be read: %v", newID, rig, err)}
 	}
 	if len(requirements.LastStoryLabels) == 0 {
-		return nil
+		return "", nil
 	}
 	epic, err := tracker.ShowEpic(ctx, epicID)
 	if err != nil {
-		return []string{fmt.Sprintf("the Tester story %s was not made a need of the epic's last story: %s could not be read: %v", testerID, epicID, err)}
+		return "", []string{fmt.Sprintf("%s was not made a need of the epic's last story: %s could not be read: %v", newID, epicID, err)}
 	}
-	var notes []string
+	var live, left []StoryDetail
 	for _, story := range epic.Stories {
-		if story.Story.ID == testerID || !carriesAny(story.Labels, requirements.LastStoryLabels) {
+		if story.Story.ID == newID || !carriesAny(story.Labels, requirements.LastStoryLabels) {
 			continue
 		}
-		if story.Status != StatusOpen {
-			notes = append(notes, fmt.Sprintf("the last story %s is %s, so it does not wait on the Tester story %s", story.Story.ID, story.Status, testerID))
-			continue
-		}
-		if err := tracker.AddBlocker(ctx, story.Story.ID, testerID); err != nil {
-			notes = append(notes, fmt.Sprintf("the last story %s could not be made to wait on the Tester story %s: %v", story.Story.ID, testerID, err))
+		if status := strings.ToLower(strings.TrimSpace(story.Status)); status == StatusOpen || status == StatusHeld {
+			live = append(live, story)
+		} else {
+			left = append(left, story)
 		}
 	}
-	return notes
+	if len(live) == 0 {
+		for _, story := range left {
+			notes = append(notes, fmt.Sprintf("the last story %s is %s, so it does not wait on %s", story.Story.ID, story.Status, newID))
+		}
+		return "", notes
+	}
+	if len(live) > 1 {
+		return "", nil
+	}
+	last := live[0].Story.ID
+	if slices.Contains(live[0].Needs, newID) {
+		return "", nil
+	}
+	if waitsThrough(epic.Stories, newID, last) {
+		return fmt.Sprintf("%s waits on the epic's last story %s, so %s was not made to wait on it (that would be a cycle)", newID, last, last), nil
+	}
+	if err := tracker.AddBlocker(ctx, last, newID); err != nil {
+		return "", []string{fmt.Sprintf("the last story %s could not be made to wait on %s: %v", last, newID, err)}
+	}
+	return fmt.Sprintf("The epic's last story %s now waits on %s, so it stays the epic's last story.", last, newID), nil
+}
+
+// waitsThrough reports whether the story from waits on the story target,
+// directly or through the stories it waits on, as far as the epic's stories say.
+func waitsThrough(stories []StoryDetail, from, target string) bool {
+	needs := make(map[string][]string, len(stories))
+	for _, story := range stories {
+		needs[story.Story.ID] = story.Needs
+	}
+	seen := map[string]bool{from: true}
+	queue := []string{from}
+	for len(queue) > 0 {
+		next := queue[0]
+		queue = queue[1:]
+		for _, need := range needs[next] {
+			if need == target {
+				return true
+			}
+			if !seen[need] {
+				seen[need] = true
+				queue = append(queue, need)
+			}
+		}
+	}
+	return false
 }
 
 // carriesAny reports whether labels holds any of want.

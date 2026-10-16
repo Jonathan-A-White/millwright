@@ -101,3 +101,27 @@ func TestMatchIsExactSoAWaiverNamesOneRequirement(t *testing.T) {
 		t.Errorf("DEMO = %v, %v", s, l)
 	}
 }
+
+func TestCheckLastStoryIgnoresAClosedSiblingWhenTheDemoIsNotClosed(t *testing.T) {
+	rules := EpicRequirements{LastStoryLabels: []string{"demo"}}
+	stories := []StoryShape{
+		{Key: "done", Closed: true},
+		{Key: "open"},
+		{Key: "d", Labels: []string{"demo"}, Needs: []string{"open"}},
+	}
+	if short := rules.Check(EpicShape{Stories: stories}); len(short) != 0 {
+		t.Errorf("an open demo need not wait on a closed sibling: got %v", short)
+	}
+
+	stories[2].Closed = true
+	short := rules.Check(EpicShape{Stories: stories})
+	if len(short) != 1 || !strings.Contains(short[0].Why, "does not wait on done") {
+		t.Errorf("a closed demo is judged on every sibling: got %v", short)
+	}
+
+	stories[2].Closed, stories[2].Needs = false, nil
+	short = rules.Check(EpicShape{Stories: stories})
+	if len(short) != 1 || !strings.Contains(short[0].Why, "does not wait on open") || strings.Contains(short[0].Why, "done") {
+		t.Errorf("an open sibling the demo skips still counts, a closed one does not: got %v", short)
+	}
+}
