@@ -268,10 +268,12 @@ need "$SYS_DOCTOR_TIMER" "Persistent=false"
 # home's Dolt server only through BEADS_DOLT_* in beads.env: without it bd exits
 # on an empty BEADS_DOLT_SERVER_HOST (mw-gq6.370, mw-report.service's first run).
 # So each --user service with an ExecStart running mw, mw-health or mw-mail-notify
-# carries the beads.env line, unless it is one of the two that touch no tracker.
+# carries the beads.env line, unless it is the one that touches no tracker.
 # A new unit has to be named here to be let off, rather than be forgotten.
+# mw-doctor.service was let off until mw-gq6.446, though mw doctor writes beads
+# notes: a host gave it the line by a drop-in.
 BEADS_ENV_LINE="EnvironmentFile=-%h/.config/mw/beads.env"
-NO_TRACKER="mw-doctor.service mw-postern-mirror.service"
+NO_TRACKER="mw-postern-mirror.service"
 # beads_env_missing prints and returns 0 when the unit file $1 runs mw/bd and has
 # no beads.env EnvironmentFile line, optional or not.
 beads_env_missing() {
