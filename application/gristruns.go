@@ -108,7 +108,8 @@ type GristRunTiming struct {
 	HarnessSeconds float64            `json:"harness_seconds"`
 	Seconds        float64            `json:"seconds"`
 	// QueuedSeconds is how long the grist waited for the mill (sent to
-	// received), when Sent is known, and RunSeconds how long the mill took
+	// received), when Sent is known and the two clocks agree well enough
+	// (crossClockSeconds), and RunSeconds how long the mill took
 	// (received to answered), the same as Seconds: the pair the room check
 	// judges a tutor's wait by (mw-t0z3fu.4). Runs kept before they were
 	// written leave both out; EndToEnd reads them from the times.
@@ -119,8 +120,7 @@ type GristRunTiming struct {
 // withWaits fills QueuedSeconds and RunSeconds from the times already in t.
 func (t GristRunTiming) withWaits() GristRunTiming {
 	if t.Sent != nil {
-		queued := t.Received.Sub(*t.Sent).Seconds()
-		t.QueuedSeconds = &queued
+		t.QueuedSeconds = crossClockSeconds(*t.Sent, t.Received)
 	}
 	t.RunSeconds = t.Seconds
 	return t
@@ -128,20 +128,35 @@ func (t GristRunTiming) withWaits() GristRunTiming {
 
 // EndToEnd is how long the one who sent the grist waited for its answer:
 // queued_s plus run_s. A run kept before those were written is read from its
-// times, and one with no send time counts no wait before the mill took it.
+// times, and one with no send time, or whose clocks disagree (queueSeconds),
+// counts no wait before the mill took it.
 func (t GristRunTiming) EndToEnd() float64 {
 	queued := 0.0
-	switch {
-	case t.QueuedSeconds != nil:
-		queued = *t.QueuedSeconds
-	case t.Sent != nil:
-		queued = t.Received.Sub(*t.Sent).Seconds()
+	if known := t.queueSeconds(); known != nil {
+		queued = *known
 	}
 	run := t.RunSeconds
 	if run == 0 {
 		run = t.Seconds
 	}
 	return queued + run
+}
+
+// queueSeconds is the wait before the mill took the grist, or nil when it is
+// not known: Sent is on the backend's clock and Received on this host's, so a
+// kept queued_s, and one read from the times, count only inside
+// GristCrossClockMax and not negative.
+func (t GristRunTiming) queueSeconds() *float64 {
+	if t.QueuedSeconds != nil {
+		if *t.QueuedSeconds < 0 || *t.QueuedSeconds > GristCrossClockMax.Seconds() {
+			return nil
+		}
+		return t.QueuedSeconds
+	}
+	if t.Sent == nil {
+		return nil
+	}
+	return crossClockSeconds(*t.Sent, t.Received)
 }
 
 // GristRunLine is one run as mw grist runs lists it.

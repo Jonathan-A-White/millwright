@@ -76,6 +76,34 @@ func phase(from, to time.Time) *float64 {
 	return tenths(to.Sub(from).Seconds())
 }
 
+// GristCrossClockMax is the longest span between two moments on different
+// clocks that is taken as measured: no sender waits longer than a grist's own
+// timeout for its answer, so a longer span is a clock that is off, not a wait
+// (PROVISIONAL, mw-gq6.510).
+const GristCrossClockMax = DefaultGristTimeout
+
+// crossClockSeconds is the seconds from one moment to a later one when the two
+// were read on different clocks (the backend's or the phone's, and this
+// host's): nil, not known, when either moment is not known, they come the wrong
+// way round, or the span is over GristCrossClockMax. It is not clamped: a
+// clamped number would read as measured.
+func crossClockSeconds(from, to time.Time) *float64 {
+	if from.IsZero() || to.IsZero() || to.Before(from) || to.Sub(from) > GristCrossClockMax {
+		return nil
+	}
+	seconds := to.Sub(from).Seconds()
+	return &seconds
+}
+
+// crossClockPhase is crossClockSeconds in tenths, as a grind line keeps it.
+func crossClockPhase(from, to time.Time) *float64 {
+	seconds := crossClockSeconds(from, to)
+	if seconds == nil {
+		return nil
+	}
+	return tenths(*seconds)
+}
+
 // GristTiming is `mw grist timing`: where the seconds of the mill's answers
 // went, from the phases each grind line carries. Only the record's own
 // numbers are read: no tokens, no network.
