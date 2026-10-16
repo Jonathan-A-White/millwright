@@ -93,6 +93,7 @@ const (
 	ReasonNoCommits       Reason = "no-commits"
 	ReasonUncommittedWork Reason = "uncommitted-work"
 	ReasonSignedCommit    Reason = "signed-commit"
+	ReasonTrackedBinary   Reason = "tracked-binary"
 	ReasonOpenSteps       Reason = "open-steps"
 	ReasonTestsFail       Reason = "tests-fail"
 	ReasonMergeConflict   Reason = "merge-conflict"
@@ -1469,6 +1470,13 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 	// undo it, and mw forces nothing. Refused here, the branch is still the
 	// session's to amend.
 	if stopped, reason, why, said := n.signedByAMachine(ctx, c); stopped && refuse(reason, why, said) {
+		return found
+	}
+
+	// What the commits add: build output or a very large file stays in every
+	// clone for good once landed, so it is turned away before the formula, the
+	// tests and the merge (mw-gq6.517).
+	if refusal, refused := n.trackedBinaryRefusal(ctx, c, report); refused && refuse(refusal.Reason, refusal.Why, refusal.Said) {
 		return found
 	}
 

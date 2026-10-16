@@ -190,6 +190,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the story "([^"]*)" is claimed here, its landing was refused and its session has ended$`, c.aStoryWhoseLandingWasRefused)
 	ctx.Given(`^the session of "([^"]*)" left these uncommitted in its worktree:$`, c.theSessionLeftUncommittedWork)
 	ctx.Given(`^a commit on the branch of "([^"]*)" carries "([^"]*)"$`, c.aCommitCarrying)
+	ctx.Given(`^a commit on the branch of "([^"]*)" adds an executable "([^"]*)" at the repo root$`, c.aCommitAddingAnExecutable)
+	ctx.Given(`^a commit on the branch of "([^"]*)" adds the file "([^"]*)" of (\d+) MB$`, c.aCommitAddingABigFile)
 	ctx.Given(`^the other host landed its own work on "([^"]*)" while "([^"]*)" was worked$`, c.theOtherHostLandedFirst)
 	ctx.Given(`^the other host lands its own work the moment mw first tries to push$`, c.theOtherHostRacesThePush)
 	ctx.Given(`^the origin refuses every push, saying:$`, c.theOriginRefusesEveryPush)
@@ -562,6 +564,33 @@ func (c *nextContext) aCommitCarrying(id, line string) error {
 	}
 	c.signed = hash
 	return nil
+}
+
+// aCommitAddingAnExecutable puts one more commit on a story's branch that adds
+// name, at the repo root, starting as a built Linux executable does.
+func (c *nextContext) aCommitAddingAnExecutable(id, name string) error {
+	return c.aCommitAdding(id, name, append([]byte("\x7fELF"), make([]byte, 128)...), 0o755)
+}
+
+// aCommitAddingABigFile puts one more commit on a story's branch that adds name,
+// megabytes of zeros long.
+func (c *nextContext) aCommitAddingABigFile(id, name string, megabytes int) error {
+	return c.aCommitAdding(id, name, make([]byte, megabytes<<20), 0o644)
+}
+
+func (c *nextContext) aCommitAdding(id, name string, content []byte, mode os.FileMode) error {
+	dir := application.WorktreeDir(c.rig, id)
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, content, mode); err != nil {
+		return err
+	}
+	if err := gitRun(dir, "git", "add", "-A"); err != nil {
+		return err
+	}
+	return gitRun(dir, "git", "commit", "-qm", "Adds "+name+" for "+id)
 }
 
 // theCommentAndReportNameTheCommit is the whole point of refusing: a person

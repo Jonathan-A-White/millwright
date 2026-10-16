@@ -292,3 +292,39 @@ func TestABranchWithNoCommitsYetHasChangedNothing(t *testing.T) {
 		t.Errorf("expected nothing changed and no error, got %q, %v", got, err)
 	}
 }
+
+func TestAddedFilesAreTheNewFilesOfTheBranchWithTheirSizeAndWhetherTheyAreExecutables(t *testing.T) {
+	here := aRigWithAServer(t)
+	run(t, here, "git", "checkout", "-q", "-b", "mw/story")
+	write(t, here, "src/app.txt", "a newer app, which is not added\n")
+	write(t, here, "notes/new.md", "new notes\n")
+	write(t, here, "mw", "\x7fELF"+strings.Repeat("\x00", 60))
+	write(t, here, "tools/mw", "\x7fELF"+strings.Repeat("\x00", 60))
+	write(t, here, "build.sh", "#!/bin/sh\necho hello\n")
+	write(t, here, "dump.bin", strings.Repeat("\x00", 3000))
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "The story's change")
+
+	got, err := rig.New().AddedFiles(context.Background(), here, "main", "mw/story")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []application.AddedFile{
+		{Path: "build.sh", Size: 21},
+		{Path: "dump.bin", Size: 3000},
+		{Path: "mw", Size: 64, Executable: true},
+		{Path: "notes/new.md", Size: 10},
+		{Path: "tools/mw", Size: 64},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("expected %+v, got %+v", want, got)
+	}
+}
+
+func TestABranchThatIsNotThereHasAddedNothing(t *testing.T) {
+	here := aRigWithAServer(t)
+	got, err := rig.New().AddedFiles(context.Background(), here, "main", "mw/worked-elsewhere")
+	if err != nil || len(got) != 0 {
+		t.Errorf("expected nothing added and no error, got %+v, %v", got, err)
+	}
+}

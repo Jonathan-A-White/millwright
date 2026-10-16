@@ -91,4 +91,18 @@ type BranchChanges interface {
 	// meanwhile. A branch that is not there, as for a story worked on another
 	// host, has changed nothing.
 	ChangedFiles(ctx context.Context, rigDir, base, branch string) ([]string, error)
+
+	// AddedFiles is the files the same diff adds (not changes), by path, each
+	// with its size in bytes. A branch that is not there has added nothing
+	// (mw-gq6.517).
+	AddedFiles(ctx context.Context, rigDir, base, branch string) ([]AddedFile, error)
+}
+
+// AddedFile is one file a branch adds: its path, its size and, for a file at
+// the root of the repository only, whether it begins as an ELF or Mach-O
+// executable does. Executable is not read below the root.
+type AddedFile struct {
+	Path       string
+	Size       int64
+	Executable bool
 }

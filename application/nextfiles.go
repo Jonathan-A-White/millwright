@@ -76,3 +76,43 @@ func (n Next) sayFilesOutsideTheKey(ctx context.Context, c *closeOut, report *Ne
 	n.writeOrSay(ctx, c, report, "the files outside the key", fmt.Sprintf("the files %s changed outside its files key could not be commented", c.id),
 		func() error { return n.Tracker.CommentOnStory(ctx, c.id, text) })
 }
+
+// MaxTrackedBytes is the size past which a file a branch adds is turned away
+// (mw-gq6.517); scripts/check-tracked-binaries.sh holds the repository to the
+// same figure.
+const MaxTrackedBytes = 2 << 20
+
+// trackedBinaryRefusal is the refusal of a branch that adds an executable at the
+// repo root or a file over MaxTrackedBytes outside testdata/: build output left
+// by a session, which a landing would put on the target branch for good. A rig
+// with no Changes, or a branch that cannot be read, is not refused: the check
+// is a net and the rig's own gate runs after it.
+func (n Next) trackedBinaryRefusal(ctx context.Context, c *closeOut, report *NextReport) (Refusal, bool) {
+	if n.Changes == nil {
+		return Refusal{}, false
+	}
+	added, err := n.Changes.AddedFiles(ctx, c.rigDir, StartPoint(n.remote(), c.target), c.branch)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the files %s added could not be read to look for build output: %v", c.id, err))
+		return Refusal{}, false
+	}
+	var found []string
+	for _, file := range added {
+		switch {
+		case file.Executable:
+			found = append(found, fmt.Sprintf("- %s is an executable at the repo root", file.Path))
+		case file.Size > MaxTrackedBytes && !strings.HasPrefix(file.Path, "testdata/") && !strings.Contains(file.Path, "/testdata/"):
+			found = append(found, fmt.Sprintf("- %s is %d bytes, over the %d a landing takes outside testdata/", file.Path, file.Size, MaxTrackedBytes))
+		}
+	}
+	if len(found) == 0 {
+		return Refusal{}, false
+	}
+	why := fmt.Sprintf("%s adds build output or a very large file: %s", c.branch, strings.TrimPrefix(found[0], "- "))
+	said := fmt.Sprintf("The file(s) the branch adds:\n\n%s\n\nA binary or a big file on the target branch stays in every clone for good. "+
+		"Nothing was merged: the branch is still the session's to amend. Take it out of the index "+
+		"(`git rm --cached <path>`), ignore it in .gitignore if it is build output, amend the commit(s) that added it "+
+		"(`git rebase -i %s`), and run `mw next %s` again.",
+		strings.Join(found, "\n"), StartPoint(n.remote(), c.target), c.id)
+	return Refusal{ReasonTrackedBinary, why, said}, true
+}

@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -403,4 +404,60 @@ func (w *Worktrees) ChangedFiles(ctx context.Context, rigDir, base, branch strin
 		}
 	}
 	return files, nil
+}
+
+// AddedFiles implements application.BranchChanges: the files `git diff
+// --diff-filter=A` finds from the merge base of base and branch to branch, with
+// the size of each blob, and for those at the repository root whether the blob
+// begins as an ELF or Mach-O executable. A branch the rig does not have has
+// added nothing.
+func (w *Worktrees) AddedFiles(ctx context.Context, rigDir, base, branch string) ([]application.AddedFile, error) {
+	if _, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+		return nil, nil
+	}
+	out, err := w.git(ctx, rigDir, "diff", "--raw", "--no-abbrev", "--diff-filter=A", "-z", base+"..."+branch, "--")
+	if err != nil {
+		return nil, err
+	}
+	// Each file is two NUL-ended fields: ":<mode> <mode> <sha> <sha> A", then the path.
+	fields := strings.Split(out, "\x00")
+	var added []application.AddedFile
+	for i := 0; i+1 < len(fields); i += 2 {
+		meta := strings.Fields(fields[i])
+		if len(meta) < 5 {
+			return nil, fmt.Errorf("git diff --raw in %s: cannot read %q", rigDir, fields[i])
+		}
+		sha, path := meta[3], fields[i+1]
+		sizeText, err := w.git(ctx, rigDir, "cat-file", "-s", sha)
+		if err != nil {
+			return nil, err
+		}
+		size, err := strconv.ParseInt(strings.TrimSpace(sizeText), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("git cat-file -s %s in %s: %w", sha, rigDir, err)
+		}
+		file := application.AddedFile{Path: path, Size: size}
+		if !strings.Contains(path, "/") {
+			blob, err := w.git(ctx, rigDir, "cat-file", "blob", sha)
+			if err != nil {
+				return nil, err
+			}
+			file.Executable = isExecutableImage(blob)
+		}
+		added = append(added, file)
+	}
+	return added, nil
+}
+
+// isExecutableImage reports whether content begins as an ELF or a Mach-O
+// executable does.
+func isExecutableImage(content string) bool {
+	if len(content) < 4 {
+		return false
+	}
+	switch content[:4] {
+	case "\x7fELF", "\xfe\xed\xfa\xce", "\xfe\xed\xfa\xcf", "\xce\xfa\xed\xfe", "\xcf\xfa\xed\xfe":
+		return true
+	}
+	return false
 }
