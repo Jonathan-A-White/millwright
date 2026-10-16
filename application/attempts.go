@@ -134,6 +134,7 @@ func (d Dispatch) exhausted(ctx context.Context, detail StoryDetail, report *Dis
 		return
 	}
 	id, tried, most := detail.Story.ID, detail.Attempts, d.maxAttempts()
+	own, uncounted := OwnAttempts(detail)
 	unsaid := func(what string, err error) {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: %s: %v", id, what, err))
 	}
@@ -154,7 +155,7 @@ func (d Dispatch) exhausted(ctx context.Context, detail StoryDetail, report *Dis
 		}
 	}
 
-	why := fmt.Sprintf("it has been started %d times, the most a story may be (max_attempts is %d)", tried, most)
+	why := exhaustedWhy(tried, own, most, uncounted)
 	comment := fmt.Sprintf("mw dispatch on %s did not start this story (%s): %s. It is left unclaimed and blocked, "+
 		"and the Mayor has been told. It is started again only once its counter is reset by hand: "+
 		"bd update %s --set-metadata %s=0", d.Host, ReasonAttemptsExhausted, why, id, AttemptsField)
@@ -172,9 +173,9 @@ func (d Dispatch) exhausted(ctx context.Context, detail StoryDetail, report *Dis
 	if title == "" {
 		title = id
 	}
-	body := fmt.Sprintf("%s (%s) has been started %d times, the most a story may be (max_attempts is %d on %s). "+
-		"mw dispatch did not start it again: it is unclaimed and marked %s=%s (%s).\n\n",
-		id, title, tried, most, d.Host, RunState, RunBlocked, ReasonAttemptsExhausted)
+	body := fmt.Sprintf("%s (%s): %s. "+
+		"mw dispatch on %s did not start it again: it is unclaimed and marked %s=%s (%s).\n\n",
+		id, title, why, d.Host, RunState, RunBlocked, ReasonAttemptsExhausted)
 	if len(refusals) == 0 {
 		body += "No refusal is recorded on the story.\n"
 	} else {

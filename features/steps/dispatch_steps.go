@@ -140,6 +140,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the config file says dispatch_sync_tries is (\d+) and dispatch_sync_wait is "([^"]*)"$`, c.theConfigSaysTheSyncKnobs)
 	ctx.Given(`^the config file says max_attempts is (\d+)$`, c.theConfigSaysMaxAttempts)
 	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times?$`, c.theStoryHasBeenTried)
+	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times, its attempt causes being "([^"]*)"$`, c.theStoryHasBeenTriedWithCauses)
 	ctx.Given(`^the story "([^"]*)" carries the comment "([^"]*)"$`, c.theStoryCarriesTheComment)
 	ctx.Given(`^the runner refuses to start anything$`, c.theRunnerRefuses)
 	ctx.Given(`^the runner refuses to start anything, saying "([^"]*)"$`, c.theRunnerRefusesSaying)
@@ -241,6 +242,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^dispatch reports (\d+) of (\d+) sessions were already running$`, c.theReportSaysHowManyWereRunning)
 	ctx.Then(`^the story "([^"]*)" records (\d+) attempts?$`, c.theStoryRecordsAttempts)
 	ctx.Then(`^the story "([^"]*)" is recorded as blocked for the reason "([^"]*)"$`, c.theStoryIsRecordedAsBlockedFor)
+	ctx.Then(`^the story "([^"]*)" is recorded as blocked saying "([^"]*)"$`, c.theStoryIsRecordedAsBlockedSaying)
 	ctx.Then(`^the story "([^"]*)" is not marked blocked$`, c.theStoryIsNotRecordedAsBlocked)
 	ctx.Then(`^the story "([^"]*)" carries exactly one comment saying it used up its attempts$`, c.theStoryCarriesOneExhaustedComment)
 	ctx.Then(`^the story "([^"]*)" carries (\d+) comments saying it used up its attempts$`, c.theStoryCarriesExhaustedComments)
@@ -1794,6 +1796,13 @@ func (c *dispatchContext) theStoryHasBeenTried(id string, times int) error {
 	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.AttemptsField: fmt.Sprint(times)})
 }
 
+// theStoryHasBeenTriedWithCauses counts the attempts and records the causes mw
+// cause named for them, as the attempt_causes metadata keeps them.
+func (c *dispatchContext) theStoryHasBeenTriedWithCauses(id string, times int, causes string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{
+		application.AttemptsField: fmt.Sprint(times), application.AttemptCausesField: causes})
+}
+
 func (c *dispatchContext) theStoryCarriesTheComment(id, text string) error {
 	return c.tracker.CommentOnStory(context.Background(), id, text)
 }
@@ -1835,6 +1844,13 @@ func (c *dispatchContext) theStoryIsRecordedAsBlockedFor(id, reason string) erro
 	}
 	if said := c.tracker.StateReason(id, application.RunState); !strings.HasPrefix(said, "("+reason+")") {
 		return fmt.Errorf("expected the reason to begin with the code (%s), got %q", reason, said)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theStoryIsRecordedAsBlockedSaying(id, saying string) error {
+	if said := c.tracker.StateReason(id, application.RunState); !strings.Contains(said, saying) {
+		return fmt.Errorf("expected the reason of %s to say %q, got %q", id, saying, said)
 	}
 	return nil
 }
