@@ -9,7 +9,8 @@ Feature: mw grist smoke tests an app's grist end to end
   a line of mw status and a hold on the rig's open stories. A smoke the mill
   would not take for a reason that is not the examples' (the key's daily limit,
   its licence, the backend out of reach, the factory's usage limit) is "not
-  run": it holds nothing.
+  run": it holds nothing. An example whose mill session did not finish is the
+  mill's fault too: it is sent once more before it fails.
 
   Background:
     Given the app "trade-tracker" has the grind "price-check" whose answer must carry a price and a confidence
@@ -237,9 +238,30 @@ Feature: mw grist smoke tests an app's grist end to end
     Then the smoke was not run, saying "trade-tracker: not run: The factory cannot grind just now: it has reached its usage limit; send it again after 2026-10-16 13:00Z."
 
   Scenario: a grind that fails for itself still fails the smoke
-    Given the mill fails the next grist because "The grind's session did not finish; send it again."
+    Given the mill fails the next grist because "The grind's answer did not match its schema; send it again."
     When mw grist smoke is run for "trade-tracker"
-    Then the smoke failed, saying "the mill failed it: The grind's session did not finish; send it again."
+    Then the smoke failed, saying "the mill failed it: The grind's answer did not match its schema; send it again."
+    And the smoke sent 1 grist
+
+  Scenario: an example whose mill session did not finish is sent once more, and passes when it is answered
+    Given a rig "trade-tracker" checked out where the app "trade-tracker" is
+    And the mill fails the next grist because "The grind's session did not finish; send it again."
+    And the mill answers the next grist with:
+      """
+      {"price": null, "confidence": "low"}
+      """
+    When a landing in "trade-tracker" changes "grinds/price-check.json"
+    Then the smoke sent 2 grist as "trade-tracker/price-check" with the photo "blank.jpg"
+    And the landing's smoke line says "trade-tracker: ok, 1 examples"
+    And the open stories of "trade-tracker" are not held
+    And no alarm was posted
+
+  Scenario: an example whose mill session did not finish twice fails, saying it was retried
+    Given the mill fails the next grist because "The grind's session did not finish; send it again."
+    And the mill fails the next grist because "The grind's session did not finish; send it again."
+    When mw grist smoke is run for "trade-tracker"
+    Then the smoke failed, saying "price-check/blank-paper: the mill failed it, and again when it was retried: The grind's session did not finish; send it again."
+    And the smoke sent 2 grist
 
   Scenario: mw grist smoke says it was not run, and did not fail
     Given the mill refuses the next grist because "This key has sent its 50 grist for today; send it again tomorrow."

@@ -242,7 +242,8 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 // example sends one example and reports why it failed, empty when the answer
 // came, fits the schema and shows everything expected. notRun, when it is not
 // empty, says instead that the mill could not be asked, for a reason that is
-// not the example's (see GristSmokeReport.NotRun).
+// not the example's (see GristSmokeReport.NotRun). An example whose mill
+// session did not finish is sent once more before it fails.
 func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, file, schema string) (why, notRun string) {
 	data, _, err := s.Grinds.ReadAt(ctx, checkout, commit, file)
 	if err != nil {
@@ -280,16 +281,34 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 	if wait <= 0 {
 		wait = GristSmokeWait
 	}
-	sent, err := s.Send.Run(ctx, GristSendRequest{App: app, Kind: kind, Version: example.SchemaVersion, RequestFile: request, Photos: photos, Wait: wait})
+	send := GristSendRequest{App: app, Kind: kind, Version: example.SchemaVersion, RequestFile: request, Photos: photos, Wait: wait}
+	sent, err := s.Send.Run(ctx, send)
+	retried := false
+	if gristSessionDidNotFinish(err) {
+		// The mill's own session ended before its answer, which says nothing of
+		// the example: it is sent once more before it counts (mw-gq6.454).
+		s.say("  the mill's session did not finish; sending it once more ...")
+		retried = true
+		sent, err = s.Send.Run(ctx, send)
+	}
 	if unanswered, ok := GristUnansweredIn(err); ok {
 		if unanswered.Answer == nil {
+			if retried {
+				return fmt.Sprintf("no answer in %s when it was retried", wait), ""
+			}
 			return fmt.Sprintf("no answer in %s", wait), ""
 		}
-		reason := strings.TrimSpace(unanswered.Answer.Reason)
-		if gristAnswerIsNotTheExamples(unanswered.Answer.Status, reason) {
+		status, reason := unanswered.Answer.Status, strings.TrimSpace(unanswered.Answer.Reason)
+		if gristAnswerIsNotTheExamples(status, reason) {
 			return "", reason
 		}
-		return fmt.Sprintf("the mill %s it: %s", unanswered.Answer.Status, reason), ""
+		switch {
+		case retried && status == GristFailed:
+			return "the mill failed it, and again when it was retried: " + reason, ""
+		case retried:
+			return fmt.Sprintf("the mill failed it, then %s it when it was retried: %s", status, reason), ""
+		}
+		return fmt.Sprintf("the mill %s it: %s", status, reason), ""
 	}
 	if errors.Is(err, ErrPosternUnreachable) {
 		return "", ErrPosternUnreachable.Error() + ": " + firstLine(err.Error())
@@ -326,6 +345,15 @@ func gristAnswerIsNotTheExamples(status, reason string) bool {
 		return IsGristReasonLimited(reason)
 	}
 	return false
+}
+
+// gristSessionDidNotFinish says the mill failed a grist because its grind's
+// session ended before an answer (GristReasonSessionEnd): the mill's fault, on
+// a busy host, and not the grist's.
+func gristSessionDidNotFinish(err error) bool {
+	unanswered, ok := GristUnansweredIn(err)
+	return ok && unanswered.Answer != nil && unanswered.Answer.Status == GristFailed &&
+		strings.TrimSpace(unanswered.Answer.Reason) == GristReasonSessionEnd
 }
 
 func (s GristSmoke) say(format string, args ...any) {
