@@ -177,6 +177,15 @@ func TestGristGrindSaysWhyAGrindDidNotAnswer(t *testing.T) {
 		{"timed out", application.SessionResult{}, errors.Join(application.ErrGrindTimedOut), application.GristFailed, application.GristReasonTimedOut},
 		{"declined", application.SessionResult{Subtype: "success", StopReason: "refusal"}, nil, application.GristRefused, application.GristReasonDeclined},
 		{"answer missing a required field", application.SessionResult{Subtype: "success", Answer: json.RawMessage(`{"items":[]}`)}, nil, application.GristFailed, application.GristReasonNoAnswer},
+		// A session the harness stopped at the account's usage limit is no fault
+		// of the grist's: failed, so its sender may send it again, saying when
+		// (mw-gq6.436).
+		{"usage limit", application.SessionResult{Subtype: "success", IsError: true, Turns: 1, Said: "You've hit your weekly limit · resets Oct 16, 9am (America/New_York)"}, nil,
+			application.GristFailed, "The factory cannot grind just now: it has reached its usage limit; send it again after 2026-10-16 13:00Z."},
+		{"usage limit in the harness's last words", application.SessionResult{}, errors.New("claude: exit status 1: You've hit your session limit · resets 3pm (UTC)"),
+			application.GristFailed, "The factory cannot grind just now: it has reached its usage limit; send it again after 2026-09-29 15:00Z."},
+		{"overloaded", application.SessionResult{IsError: true, Said: `API Error: 529 {"type":"error","error":{"type":"overloaded_error"}}`}, nil,
+			application.GristFailed, "The factory cannot grind just now: its model is overloaded; send it again after 2026-09-29 10:15Z."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mill, backend, grinder := aSmallMill(t)

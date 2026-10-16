@@ -24,6 +24,11 @@ const (
 	GristFailed   = "failed"
 )
 
+// GristLimited is how the mill's own report shows a grist answered failed for a
+// limit of the factory's (GristReasonLimited): the answer's status is still
+// GristFailed, the protocol's word for one its sender may send again.
+const GristLimited = "limited"
+
 // GristName names the grind a grist asks for: the app, the kind of grist,
 // and the version of the app's own request schema. Model and Effort are what
 // the sender asks the grind to run on; empty, the grind file's own are used.

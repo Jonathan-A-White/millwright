@@ -319,7 +319,7 @@ func (e GristEval) grindPhoto(ctx context.Context, plain GristPlaintext, photo e
 	result, err := e.Grinder.Grind(ctx, gristGrindCall(dir, plain, []string{copied}, model, effort, instructions, schema, timeout))
 	row.Seconds = e.now().Sub(started).Seconds()
 	row.CostUSD, row.Fuel = result.CostUSD, result.Fuel
-	if status, reason := gristOutcome(result, err, schema); status != GristAnswered {
+	if status, reason := gristOutcome(result, err, schema, e.now()); status != GristAnswered {
 		why := reason
 		switch {
 		case err != nil:

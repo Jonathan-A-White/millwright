@@ -146,6 +146,7 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the Governor's key sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", with (\d+) photos?$`, c.theGovernorSends)
 	ctx.Given(`^the grind answers with a sweep result$`, c.theGrindAnswers)
 	ctx.Given(`^the grind's session ends in an error$`, c.theGrindEndsInAnError)
+	ctx.Given(`^the grind's session is stopped by the harness saying "([^"]*)"$`, c.theHarnessStopsTheGrind)
 	ctx.Given(`^the grind finishes without a structured answer$`, c.theGrindGivesNoAnswer)
 	ctx.Given(`^the factory allows at most (\d+) photos a grist$`, c.theFactoryAllowsPhotos)
 	ctx.Given(`^the factory allows only the models "([^"]*)"$`, c.theFactoryAllowsModels)
@@ -172,6 +173,7 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw dispatch runs on "([^"]*)" with a cap of (\d+)$`, c.mwDispatchRuns)
 
 	ctx.Then(`^the mill answered (\d+), refused (\d+), failed (\d+), and left (\d+) waiting$`, c.theMillCounted)
+	ctx.Then(`^the mill counted (\d+) grist limited$`, c.theMillCountedLimited)
 	ctx.Then(`^the answer is a grist record from the mill key, sealed to the phone, re the grist$`, c.theAnswerIsSealedToThePhone)
 	ctx.Then(`^the answer says "([^"]*)" with the grind's answer and the commit "([^"]*)"$`, c.theAnswerSaysAnswered)
 	ctx.Then(`^the answer was ground at the commit "([^"]*)"$`, c.theAnswerWasGroundAt)
@@ -382,6 +384,14 @@ func (c *gristContext) theGrindEndsInAnError() error {
 		Subtype: "error_during_execution", IsError: true, CostUSD: 0.004,
 		Fuel: application.Fuel{Input: 10, Output: 5},
 	}
+	return nil
+}
+
+// theHarnessStopsTheGrind is the result claude prints when the account's usage
+// limit stops a session before its first answer: is_error on a "success", the
+// harness's words, one turn and no answer.
+func (c *gristContext) theHarnessStopsTheGrind(said string) error {
+	c.grinder.Result = application.SessionResult{Subtype: "success", IsError: true, Said: said, Turns: 1}
 	return nil
 }
 
@@ -681,6 +691,13 @@ func (c *gristContext) theMillCounted(answered, refused, failed, waiting int) er
 	r := c.report
 	if r.Answered != answered || r.Refused != refused || r.Failed != failed || r.Waiting != waiting {
 		return fmt.Errorf("expected %d answered, %d refused, %d failed, %d waiting; the mill said:\n%s", answered, refused, failed, waiting, c.out.String())
+	}
+	return nil
+}
+
+func (c *gristContext) theMillCountedLimited(limited int) error {
+	if c.report.Limited != limited {
+		return fmt.Errorf("expected %d limited; the mill said:\n%s", limited, c.out.String())
 	}
 	return nil
 }

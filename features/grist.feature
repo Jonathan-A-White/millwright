@@ -162,6 +162,14 @@ Feature: mw grist grind, the mill
     And the mill's record holds one line for the grist, "failed", with its Fuel and nothing of its content
     And the grind's private directory is gone
 
+  Scenario: A grind the harness stops at its usage limit is counted limited, and its sender may send it again
+    Given the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    And the grind's session is stopped by the harness saying "You've hit your weekly limit · resets Oct 16, 9am (America/New_York)"
+    When the mill grinds
+    Then the mill answered 0, refused 0, failed 0, and left 0 waiting
+    And the mill counted 1 grist limited
+    And the answer says "failed" because "The factory cannot grind just now: it has reached its usage limit; send it again after 2026-10-16 13:00Z."
+
   Scenario: A grind that gives no answer in its schema is answered failed
     Given the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
     And the grind finishes without a structured answer

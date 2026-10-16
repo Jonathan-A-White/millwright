@@ -51,6 +51,9 @@ const (
 	GristReasonSessionEnd = "The grind's session did not finish; send it again."
 	GristReasonNoAnswer   = "The grind's answer did not match its schema; send it again."
 	GristReasonNotSent    = "The factory could not pass this on; send it again."
+
+	// gristReasonLimitedStart is the start of GristReasonLimited's reason.
+	gristReasonLimitedStart = "The factory cannot grind just now: "
 )
 
 // gristEnvelopeOverhead is what BRC-78 adds to a photo's bytes: section 8
@@ -145,11 +148,15 @@ type GristReport struct {
 	// Busy is a pass that found another pass running, and left it to it.
 	Busy                      bool
 	Answered, Refused, Failed int
-	Waiting                   int
-	WaitingWhy                string
-	Grist                     []GristHandled
-	Redelivered               int
-	Notes                     []string
+	// Limited are the grists the harness would not grind for a limit of the
+	// factory's (HarnessStopOf): answered failed, so their senders send them
+	// again, but no failure of the grist's or its grind's (mw-gq6.436).
+	Limited     int
+	Waiting     int
+	WaitingWhy  string
+	Grist       []GristHandled
+	Redelivered int
+	Notes       []string
 }
 
 // GristHandled is one grist a pass answered.
@@ -171,8 +178,12 @@ func (r GristReport) String() string {
 		fmt.Fprintf(&b, "grist on %s: another mw grist grind is running here, and takes what is waiting\n", r.Host)
 		return b.String()
 	}
-	fmt.Fprintf(&b, "grist on %s: %d answered, %d refused, %d failed, %d waiting\n",
-		r.Host, r.Answered, r.Refused, r.Failed, r.Waiting)
+	limited := ""
+	if r.Limited > 0 {
+		limited = fmt.Sprintf(", %d limited", r.Limited)
+	}
+	fmt.Fprintf(&b, "grist on %s: %d answered, %d refused, %d failed%s, %d waiting\n",
+		r.Host, r.Answered, r.Refused, r.Failed, limited, r.Waiting)
 	if r.Redelivered > 0 {
 		fmt.Fprintf(&b, "  delivered %d answer(s) an earlier pass could not\n", r.Redelivered)
 	}
@@ -965,7 +976,7 @@ func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) 
 	w.answered = g.now()
 	w.result = result
 	w.harnessOK = err == nil
-	status, reason := gristOutcome(result, err, w.schema)
+	status, reason := gristOutcome(result, err, w.schema, w.answered)
 	if status == GristAnswered {
 		w.answer = result.Answer
 	}
@@ -1001,11 +1012,16 @@ func (g GristGrind) harness(ctx context.Context, w *gristWork, warm *gristWarm, 
 }
 
 // gristOutcome is how a grind ended: answered, refused or failed, and the
-// reason when it was not answered.
-func gristOutcome(result SessionResult, err error, schema string) (status, reason string) {
+// reason when it was not answered. ended is when the session ended: a session
+// the harness stopped for a limit of the factory's is failed until the time
+// the stop names (GristReasonLimited).
+func gristOutcome(result SessionResult, err error, schema string, ended time.Time) (status, reason string) {
+	stop, limited := gristHarnessStop(result, err, ended)
 	switch {
 	case errors.Is(err, ErrGrindTimedOut):
 		return GristFailed, GristReasonTimedOut
+	case limited:
+		return GristFailed, GristReasonLimited(stop)
 	case err != nil:
 		return GristFailed, GristReasonSessionEnd
 	case result.StopReason == "refusal" || strings.Contains(strings.ToLower(result.Subtype), "refus"):
@@ -1018,6 +1034,48 @@ func gristOutcome(result SessionResult, err error, schema string) (status, reaso
 		return GristFailed, GristReasonNoAnswer
 	}
 	return GristAnswered, ""
+}
+
+// gristHarnessStop reads whether the harness stopped a grind for a limit of the
+// factory's (HarnessStopOf): from the session's result, or, when no result could
+// be read, from the harness's last words the error carries.
+func gristHarnessStop(result SessionResult, err error, ended time.Time) (HarnessStop, bool) {
+	if err != nil {
+		if errors.Is(err, ErrGrindTimedOut) {
+			return HarnessStop{}, false
+		}
+		result = SessionResult{IsError: true, Said: err.Error()}
+	}
+	stop, ok := HarnessStopOf(result, ended)
+	if ok && err != nil && stop.Reason != ReasonUsageLimit {
+		// An error's words are mw's as well as the harness's: only the usage
+		// limit's own line is read in them.
+		return HarnessStop{}, false
+	}
+	return stop, ok
+}
+
+// GristReasonLimited is the reason a grind the harness stopped for a limit of
+// the factory's is answered failed: which limit, and when it is worth sending
+// the grist again. It is no fault of the grist's, nor of its grind's.
+func GristReasonLimited(stop HarnessStop) string {
+	var what string
+	switch stop.Reason {
+	case ReasonUsageLimit:
+		what = "it has reached its usage limit"
+	case ReasonRateLimit:
+		what = "its model's rate limit is reached"
+	case ReasonOverloaded:
+		what = "its model is overloaded"
+	default:
+		what = "its model's service is failing"
+	}
+	return fmt.Sprintf("%s%s; send it again after %s.", gristReasonLimitedStart, what, stop.Until.UTC().Format("2006-01-02 15:04Z"))
+}
+
+// IsGristReasonLimited says reason is GristReasonLimited's, for any limit.
+func IsGristReasonLimited(reason string) bool {
+	return strings.HasPrefix(reason, gristReasonLimitedStart)
 }
 
 // openPhotos downloads each attachment, checks it is the blob announced and
@@ -1200,15 +1258,19 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	if err := g.State.Append(ctx, line); err != nil {
 		return line, fmt.Errorf("mw grist grind: %s was answered %s, but the record could not be written, so it may be answered again: %w", w.record.Txid, w.status, err)
 	}
-	switch w.status {
-	case GristAnswered:
+	shown := w.status
+	switch {
+	case w.status == GristAnswered:
 		report.Answered++
-	case GristRefused:
+	case w.status == GristRefused:
 		report.Refused++
+	case IsGristReasonLimited(w.reason):
+		report.Limited++
+		shown = GristLimited
 	default:
 		report.Failed++
 	}
-	handled := GristHandled{Txid: w.record.Txid, Name: name, Status: w.status, Reason: w.reason, Delivered: delivered}
+	handled := GristHandled{Txid: w.record.Txid, Name: name, Status: shown, Reason: w.reason, Delivered: delivered}
 	if w.ran {
 		handled.Ran = fmt.Sprintf("%s (%s) at %s (%s)", w.model, w.modelFrom, w.effort, w.effortFrom)
 	}
