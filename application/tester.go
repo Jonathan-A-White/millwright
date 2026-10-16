@@ -31,7 +31,10 @@ const (
 
 	// TesterFindingsHeading starts the section of the Tester's closing comment
 	// that lists what it found, each finding tagged [bug] or [taste]; written
-	// "FINDINGS: none" when it found nothing. TesterFuelHeading ends it.
+	// "FINDINGS: none" when it found nothing. TesterFuelHeading ends it where
+	// a Tester wrote its own fuel, as the tester formula asked before
+	// mw-2zh33g.12: a session cannot count its fuel, so mw next records it from
+	// the result and the formula asks for none.
 	TesterFindingsHeading = "FINDINGS"
 	TesterFuelHeading     = "Tester fuel:"
 
@@ -128,8 +131,9 @@ var (
 )
 
 // ReadTesterFindings reads the FINDINGS section of a comment: from the heading
-// to the Tester fuel line, or the end. A finding is a line that starts with its
-// tag, after a list marker or number if it has one; "No [bug] found." is not.
+// to the end, or to the Tester fuel line an older Tester wrote. A finding is a
+// line that starts with its tag, after a list marker or number if it has one;
+// "No [bug] found." is not.
 // ok is false when the comment has no FINDINGS heading at the start of a line.
 func ReadTesterFindings(text string) (TesterFindings, bool) {
 	at := testerFindingsLine.FindStringIndex(text)
@@ -233,8 +237,8 @@ func (n Next) testerRefusals(ctx context.Context, c *closeOut, report *NextRepor
 		refuse(ReasonTrackerFailed, err.Error(), "")
 	case from == "":
 		refuse(ReasonNoFindings, fmt.Sprintf("the Tester left no %s on %s, nor on %s", TesterFindingsHeading, landed, c.id),
-			fmt.Sprintf("Its closing comment on %s starts %q, each finding tagged [bug] or [taste], or says %q; then %q.",
-				landed, TesterFindingsHeading, TesterFindingsHeading+": none", TesterFuelHeading+" <tokens>"))
+			fmt.Sprintf("Its closing comment on %s starts %q, each finding tagged [bug] or [taste], or says %q.",
+				landed, TesterFindingsHeading, TesterFindingsHeading+": none"))
 	default:
 		c.tested, c.findings, c.findingsFrom = landed, findings, from
 	}
@@ -321,7 +325,7 @@ func (n Next) springTester(ctx context.Context, c *closeOut, report *NextReport,
 			TesterLandedLine, c.id, c.target, path.Rig, shortSHA(landed.Commit),
 			c.id, path.Rig, c.id, c.id, howTo),
 		Acceptance: fmt.Sprintf("A comment on %s starting %q (each finding tagged [bug] or [taste], with the steps and the shot path) "+
-			"or %q, then %q. Nothing committed.", c.id, TesterFindingsHeading, TesterFindingsHeading+": none", TesterFuelHeading+" <tokens>"),
+			"or %q. Nothing committed.", c.id, TesterFindingsHeading, TesterFindingsHeading+": none"),
 		Overrides: path,
 		Labels:    []string{LabelTester},
 	})

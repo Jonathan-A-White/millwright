@@ -24,6 +24,7 @@ Feature: A one-week Tester trial
     And that Tester story is labelled "tester" and pathed to "lampas", "main", "vps", "sonnet", "high", formula "tester"
     And that Tester story's description names "mw-l.1" and quotes "2. Tap Needs you: the list opens."
     And the close-out report names that Tester story
+    And that Tester story asks for no fuel line
 
   Scenario: The Tester story is a need of the epic's open demo, so the demo stays last
     Given a Tester trial on "lampas" until "2026-09-25T12:00:00Z", on "sonnet" at "high"
@@ -70,7 +71,7 @@ Feature: A one-week Tester trial
     And the story "mw-l.1" is planned and ready to be worked here
     And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
     And the session of "mw-l.2" reported a plain success
-    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS\n- [bug] The mic button stays red after Back.\n  Steps: hold the mic, tap Back. Shot: /tmp/tester-mw-l.2/04-back.png\n- [taste] The list jumps on rotate.\n  Steps: rotate. Shot: /tmp/tester-mw-l.2/06-rotate.png\nTester fuel: 55,100 tokens"
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS\n- [bug] The mic button stays red after Back.\n  Steps: hold the mic, tap Back. Shot: /tmp/tester-mw-l.2/04-back.png\n- [taste] The list jumps on rotate.\n  Steps: rotate. Shot: /tmp/tester-mw-l.2/06-rotate.png"
     And the Tester of "mw-l.2" commented on "mw-l.2": "Done.\nHOW TO CHECK IT, for the Governor:\n1. Open the app."
     When mw closes out "mw-l.2"
     Then nothing was landed on "main"
@@ -89,7 +90,7 @@ Feature: A one-week Tester trial
     Given the story "mw-l.1" is planned and ready to be worked here
     And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
     And the session of "mw-l.2" reported a plain success
-    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS\n- [bug] The page number is lost after rotate. still on main: yes\n  held: mw-l.9\n- [bug] The mic stays red after Back. still on main: yes\n  duplicate of: mw-l.7\nTester fuel: 55,100 tokens"
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS\n- [bug] The page number is lost after rotate. still on main: yes\n  held: mw-l.9\n- [bug] The mic stays red after Back. still on main: yes\n  duplicate of: mw-l.7"
     When mw closes out "mw-l.2"
     Then the story "mw-l.2" is closed
     And that mail's subject is "Tested: mw-l.1: 2 findings"
@@ -101,7 +102,7 @@ Feature: A one-week Tester trial
     Given the story "mw-l.1" is planned and ready to be worked here
     And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
     And the session of "mw-l.2" reported a plain success
-    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS\nNo [bug] found.\n- [taste] The list jumps on rotate.\nTester fuel: 55,100 tokens"
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS\nNo [bug] found.\n- [taste] The list jumps on rotate."
     When mw closes out "mw-l.2"
     Then the story "mw-l.2" is closed
     And that mail's subject is "Tested: mw-l.1: 1 finding"
@@ -112,7 +113,7 @@ Feature: A one-week Tester trial
     Given the story "mw-l.1" is planned and ready to be worked here
     And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
     And the session of "mw-l.2" reported a plain success
-    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS\n1. [bug] The mic button stays red after Back.\nNo [bug] found in the list.\nTester fuel: 55,100 tokens"
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS\n1. [bug] The mic button stays red after Back.\nNo [bug] found in the list."
     When mw closes out "mw-l.2"
     Then the story "mw-l.2" is closed
     And that mail's subject is "Tested: mw-l.1: 1 finding"
@@ -123,7 +124,7 @@ Feature: A one-week Tester trial
     Given the story "mw-l.1" is planned and ready to be worked here
     And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
     And the session of "mw-l.2" reported a plain success
-    And the Tester of "mw-l.2" commented on "mw-l.2": "FINDINGS: none\nTester fuel: 55,100 tokens"
+    And the Tester of "mw-l.2" commented on "mw-l.2": "FINDINGS: none"
     When mw closes out "mw-l.2"
     Then the story "mw-l.2" is closed
     And the story "mw-l.1" carries a comment quoting: FINDINGS: none
@@ -133,7 +134,7 @@ Feature: A one-week Tester trial
     Given the story "mw-l.1" is planned and ready to be worked here
     And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
     And the session of "mw-l.2" reported a plain success
-    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS: none\nTester fuel: 55,100 tokens"
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS: none"
     And the tracker refuses to close "mw-l.2", saying: database is locked
     When mw closes out "mw-l.2"
     Then the story "mw-l.2" is not closed
@@ -152,7 +153,7 @@ Feature: A one-week Tester trial
     And process 4103 is running "node /tmp/tester-mw-l.20/app/node_modules/.bin/vite preview --port 4798" from "/tmp/tester-mw-l.20/app"
     And process 4104 is running "node /home/jwhite/lampas/node_modules/.bin/vite preview --port 4797" from "/home/jwhite/lampas"
     And the session of "mw-l.2" reported a plain success
-    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS: none\nTester fuel: 55,100 tokens"
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS: none"
     When mw closes out "mw-l.2"
     Then process 4101 has been stopped
     And process 4102 has been stopped
@@ -166,7 +167,7 @@ Feature: A one-week Tester trial
     And the Tester of "mw-l.2" committed a script to its branch
     And process 4101 is running "node /tmp/tester-mw-l.2/app/node_modules/.bin/vite preview --port 4799" from "/tmp/tester-mw-l.2/app"
     And the session of "mw-l.2" reported a plain success
-    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS: none\nTester fuel: 55,100 tokens"
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS: none"
     When mw closes out "mw-l.2"
     Then the story "mw-l.2" is not closed
     And process 4101 has been stopped
@@ -177,7 +178,7 @@ Feature: A one-week Tester trial
     And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
     And the Tester of "mw-l.2" committed a script to its branch
     And the session of "mw-l.2" reported a plain success
-    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS: none\nTester fuel: 55,100 tokens"
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS: none"
     When mw closes out "mw-l.2"
     Then nothing was landed on "main"
     And the story "mw-l.2" is not closed
@@ -191,11 +192,28 @@ Feature: A one-week Tester trial
     Then the story "mw-l.2" is not closed
     And the report says it stopped for "no-findings"
 
+  # A session cannot read its own fuel: a Haiku Tester wrote "~210000
+  # (estimate)" (mw-2zh33g.12). The close-out records it from the result file,
+  # as for a Builder, and a fuel line an older Tester wrote is not read.
+  Scenario: A Tester's close-out records its fuel from the session's result, not from its comment
+    Given the story "mw-l.1" is planned and ready to be worked here
+    And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
+    And the session of "mw-l.2" reported a plain success
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS: none\nTester fuel: ~210000 (estimate)"
+    When mw closes out "mw-l.2"
+    Then the story "mw-l.2" is closed
+    And the last ledger line holds:
+      | mw-l.2                    |
+      | tested mw-l.1: 0 findings |
+      | 55,100 tokens             |
+      | $1.50                     |
+    And the last ledger line holds nothing of "estimate"
+
   Scenario: mw tester report sums the trial per rig
     Given a Tester trial on "lampas" until "2026-09-25T12:00:00Z", on "sonnet" at "high"
     And the trial saw these landings on "lampas": "mw-l.1", "mw-l.2", "mw-l.3"
-    And the Tester story "mw-l.4" tested "mw-l.1" and found "FINDINGS\n- [bug] The mic stays red.\n- [taste] The list jumps.\nTester fuel: 55,100 tokens"
-    And the Tester story "mw-l.5" tested "mw-l.2" and found "FINDINGS: none\nTester fuel: 55,100 tokens"
+    And the Tester story "mw-l.4" tested "mw-l.1" and found "FINDINGS\n- [bug] The mic stays red.\n- [taste] The list jumps."
+    And the Tester story "mw-l.5" tested "mw-l.2" on its second attempt and found "FINDINGS: none"
     And a bug story "mw-l.6" was filed naming "Tester finding on mw-l.1: the mic stays red"
     When mw tester report runs since "2026-09-17"
     Then the tester report says for "lampas":
@@ -203,8 +221,10 @@ Feature: A one-week Tester trial
       | Tester runs           | 2                    |
       | findings              | 2 (1 bug, 1 taste)   |
       | [bug] from a finding  | 1                    |
-    And the tester report gives "mw-l.4" its fuel "55,100 tokens"
-    And the tester report gives "mw-l.5" its fuel "55,100 tokens"
+    And the tester report gives "mw-l.4" its fuel "55,100 tokens, $1.50"
+    And the tester report gives "mw-l.5" its fuel "110,200 tokens, $3.00"
+    And the tester report says for "lampas":
+      | Tester fuel in all    | 165,300 tokens, $4.50 |
 
   Scenario: mw check passes a Tester story with no commits and its FINDINGS written, and fails one without
     Given the story "mw-l.1" is planned and ready to be worked here
@@ -212,7 +232,9 @@ Feature: A one-week Tester trial
     When a session checks "mw-l.2"
     Then the check fails
     And the check printed: the Tester left no FINDINGS on mw-l.1, nor on mw-l.2
-    Given the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS: none\nTester fuel: unknown"
+    And the check printed: Its closing comment on mw-l.1 starts "FINDINGS"
+    And the printed report says nothing of "Tester fuel"
+    Given the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS: none"
     When a session checks "mw-l.2"
     Then the check passes
 
