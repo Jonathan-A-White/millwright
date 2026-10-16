@@ -136,6 +136,7 @@ var answerCases = map[string]struct {
 	"a General reply to a root mw never saw": {governorPost{txid: "direct:reply1", re: "direct:root1"}, "direct:root1", application.PosternThread{}},
 	"a post in a named channel":              {governorPost{txid: "direct:topic1", thread: application.PosternThread{Topic: "road map"}}, "direct:topic1", application.PosternThread{Topic: "road map"}},
 	"a reply in a named channel":             {governorPost{txid: "direct:topic2", thread: application.PosternThread{Topic: "roadmap"}, re: "direct:root2"}, "direct:root2", application.PosternThread{Topic: "roadmap"}},
+	"a named channel sh would expand":        {governorPost{txid: "direct:topic3", thread: application.PosternThread{Topic: `it's $HOME's "plan" \ !`}}, "direct:topic3", application.PosternThread{Topic: `it's $HOME's "plan" \ !`}},
 	"a reply in a bead's channel":            {governorPost{txid: "direct:bead1", thread: application.PosternThread{Bead: "mw-a.1"}, re: "direct:root3"}, "direct:root3", application.PosternThread{Bead: "mw-a.1"}},
 }
 

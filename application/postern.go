@@ -895,9 +895,18 @@ func (m PosternInboxMessage) answerLine() string {
 	case m.ThreadIsBead:
 		channel = " --bead-channel " + m.Thread
 	case m.Thread != PosternGeneralThread:
-		channel = fmt.Sprintf(" --channel %q", m.Thread)
+		channel = " --channel " + shWord(m.Thread)
 	}
 	return fmt.Sprintf("answer in its thread: mw postern send%s --re %s \"...\"", channel, post)
+}
+
+// shWord is word as sh reads it back: in double quotes, as it has always
+// been printed, when nothing in it means anything there; else shellQuoted.
+func shWord(word string) string {
+	if strings.ContainsAny(word, "\"\\$`!'") {
+		return shellQuoted(word)
+	}
+	return `"` + word + `"`
 }
 
 // appliedTxid reports whether txid is one a pass has applied.
