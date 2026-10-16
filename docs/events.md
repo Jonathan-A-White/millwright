@@ -206,6 +206,22 @@ metadata `todo_row` (`now`, `make-time`, `later` or `let-go`) and `todo_row_why`
 characters), and `todo_slipped` (the card's `todo_due`) on a starred card past its due time. The view
 publishes `todo_row` and `todo_row_why`, each absent when empty; the reminder reads none of them.
 
+The `todo-rank` job (mw-ht6gsw.3) runs in the follower itself, on the home only, reason `clock`: one
+ranking pass over the To do board (`mw todo rank`) a UTC day, from `rank_hour` of the config's `[todo]`
+table (0 to 23, default 7). A kv note holds the day of the last pass, set before the pass begins, so a pass
+that fails is logged as a failed job and tried the next night, never twice in one; a host that is not
+home does nothing. After a pass that worked, for each open card the pass marked `todo_slipped` whose
+`todo_slipped_told` is not that due time, the job posts once in the card's thread (`mw postern send
+--bead-channel`) that it is past due, and sets `todo_slipped_told` to the due time before the post goes
+(a post that fails takes the mark off again and fails the job, so the next night tries it once more).
+On the first pass of a week, the day `week_start` names (default `monday`) in his `tz`, it sends one
+decision card on the card's To do list epic listing the `let-go` cards, with the options `A: Keep them
+all` and `B: Drop them all` and the note that a tap on a card's own Keep or Drop is finer, and keeps
+the cards it listed in the kv note `todo.letgo.<epic>`; no card is sent when none is let go. The inbox's
+apply answers it: `A` sets `todo_row` to `later` on each listed card still open and in let-go, and
+comments it `KEPT`; `B` closes each with the reason `let-go`. Either needs the Governor's verified tap
+and a question that offered the option, as a Release tap does.
+
 The `cloud` job runs the cloud check (`mw cloud check`, docs/vultr-boost.md, "Elastic") in the
 follower itself, every minute, reason `clock`, on a host whose config has a `[cloud]` table and
 only while it is home. A pass that makes or destroys a box writes a `cloud` event, actor
