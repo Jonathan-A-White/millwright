@@ -62,6 +62,12 @@ const (
 	// It is never idle and never restarted: a fresh session would show the very
 	// same screen, so only a person can get it past it.
 	PaneFirstRun PaneState = "first-run"
+	// PaneLimited is a pane stopped at the harness's usage limit: its menu
+	// ("Stop and wait for limit to reset") is up, or its notice ("You've hit
+	// your weekly limit · resets …") stands just above the input line. It is
+	// never idle: nothing typed into it is worked before the limit resets, and a
+	// fresh session would meet the same limit (mw-gq6.473).
+	PaneLimited PaneState = "limited"
 )
 
 // ReapTerminal is the port a reaper looks at windows through, and closes one
@@ -82,6 +88,10 @@ type ReapTerminal interface {
 
 	// PaneState reports what the window's pane is doing.
 	PaneState(ctx context.Context, window string) (PaneState, error)
+
+	// UsageLimit reports what PaneUsageLimit reads on the window's pane: the
+	// harness's usage-limit notice and its menu, "" when it shows none.
+	UsageLimit(ctx context.Context, window string) (string, error)
 
 	// Type sends text into the window's pane, literally, followed by the Enter
 	// key — the same way a person's line would reach it. It is how a tick tells
@@ -166,11 +176,14 @@ const (
 // to hand over to, it closes the window once a handoff has been written after
 // the window was opened and the pane is idle. Idle is asked on two looks in a
 // row, and a pane with anything on its input line is never closed, in either
-// mode: a person may be typing.
+// mode: a person may be typing. A pane stopped at the harness's usage limit
+// counts as idle here, and is closed saying so: it holds no draft and is idle
+// again only after the reset (mw-gq6.473).
 //
 // A seat with a mailbox (Mail) is not closed over unread mail in idle mode: the
 // reaper types the mail nudge into the idle pane and goes on waiting, and closes
-// only for a handoff written after the nudge, with the box empty.
+// only for a handoff written after the nudge, with the box empty. Into a pane
+// at the usage limit it types nothing: the window is closed over the mail.
 //
 // A window with a running `mw next` in its pane tree is not closed, in either
 // mode: a close-out killed mid-test is a run lost. The reaper says so once,
@@ -311,7 +324,8 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 			idle = 0
 			continue
 		}
-		if !s.paneIdle(ctx, s.Window) {
+		limit, closable := s.paneClosable(ctx, window, armed)
+		if !closable {
 			idle = 0
 			continue
 		}
@@ -343,7 +357,10 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 			}
 		}
 
-		if s.WhenIdle && s.Mail != nil {
+		// A pane stopped at the usage limit works nothing typed into it
+		// before the reset: it is closed over the mail, which waits for the
+		// seat's next session.
+		if s.WhenIdle && s.Mail != nil && limit == nil {
 			waiting, err := s.Mail.Inbox(ctx, s.Mailbox)
 			if err != nil {
 				idle = 0
@@ -386,7 +403,7 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 			}
 			return report, fmt.Errorf("closing the window %s: %w", s.Window, err)
 		}
-		return s.end(ctx, ReapClosed, s.closedLine())
+		return s.end(ctx, ReapClosed, s.closedLine(limit))
 	}
 
 	report, err := s.end(ctx, ReapGaveUp, fmt.Sprintf("gave up after %s without closing anything", limit))
@@ -479,6 +496,27 @@ func newestHandoffSince(handoffs []Handoff, opened time.Time) (time.Time, bool) 
 	return newest, !newest.IsZero()
 }
 
+// paneClosable reports whether the window's pane may be closed under a seat
+// whose session is done: it is idle, or it is stopped at the usage limit, which
+// holds no draft and will not be idle again before the reset (mw-gq6.473); the
+// limit is given when it is. A pane that cannot be read is not closable.
+func (s SeatReap) paneClosable(ctx context.Context, window ReapWindow, armed time.Time) (*PaneLimit, bool) {
+	state, err := s.Terminal.PaneState(ctx, window.ID)
+	switch {
+	case err != nil:
+		return nil, false
+	case state == PaneIdle:
+		return nil, true
+	case state != PaneLimited:
+		return nil, false
+	}
+	limit, on := paneLimitOf(ctx, s.Terminal, window, armed)
+	if !on {
+		return nil, false
+	}
+	return &limit, true
+}
+
 // paneIdle reports whether the window's pane is idle: a pane that cannot be read
 // is not.
 func (s SeatReap) paneIdle(ctx context.Context, window string) bool {
@@ -542,11 +580,15 @@ func (s SeatReap) armedLine() string {
 	return fmt.Sprintf("armed; waiting for %s to name a successor whose window is open, and an idle pane", ActingFileName(s.Seat))
 }
 
-func (s SeatReap) closedLine() string {
-	if s.WhenIdle {
-		return "closed: the seat has written a handoff since this window opened, and the pane was idle"
+func (s SeatReap) closedLine(limit *PaneLimit) string {
+	pane := "the pane was idle"
+	if limit != nil {
+		pane = "the pane was " + limit.String()
 	}
-	return "closed: the seat is held by someone else, and the pane was idle"
+	if s.WhenIdle {
+		return "closed: the seat has written a handoff since this window opened, and " + pane
+	}
+	return "closed: the seat is held by someone else, and " + pane
 }
 
 // nudge is the line typed to tell an idle session n messages wait for it.

@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -39,6 +40,57 @@ func TestClassifyPane(t *testing.T) {
 				t.Errorf("classifyPane(%q) = %q, want %q", tc.screen, got, tc.want)
 			}
 		})
+	}
+}
+
+// A seat stopped at the usage limit is neither idle nor a person's draft
+// (mw-gq6.473): on 2026-10-15 the Mayor's window @138 sat 2h12m on the limit
+// menu, read as text on its input line, and a pane that chose "Stop and wait"
+// sits at an empty input line under the notice, read as idle, so the reapers
+// and wakers nudged it, restarted it into the same limit or never closed it.
+func TestClassifyPaneReadsTheUsageLimit(t *testing.T) {
+	const rule = "────────────────────────────────────────\n"
+	cases := []struct {
+		name   string
+		screen string
+		want   application.PaneState
+	}{
+		{"the limit menu is the limit",
+			"● Reading the newest handoff first.\n\n" +
+				"  ⎿  You've hit your weekly limit · resets Oct 16, 7am (UTC)\n\n" +
+				" │ What do you want to do?\n" +
+				" │ ❯ 1. Stop and wait for limit to reset\n" +
+				" │   2. Switch to usage credits\n" +
+				" │   3. Upgrade your plan\n", application.PaneLimited},
+		{"the notice above an empty input line is the limit",
+			"● Reading the newest handoff first.\n\n  ⎿  You’ve hit your session limit · resets 3pm\n\n" + rule + "❯\u00a0\n" + rule + "  ? for shortcuts\n",
+			application.PaneLimited},
+		{"a notice in escapes is the limit",
+			"  \x1b[2m⎿\x1b[0m  \x1b[31mYou've hit your weekly limit · resets Oct 16, 7am (UTC)\x1b[0m\n" + rule + "❯\u00a0\n" + rule,
+			application.PaneLimited},
+		{"a session at work under the notice is working",
+			"  ⎿  You've hit your weekly limit · resets Oct 16, 7am (UTC)\n● Trying again.\n✻ Thinking… (3s · esc to interrupt)\n❯\u00a0\n",
+			application.PaneWorking},
+		{"a notice the session worked past is idle",
+			"  ⎿  You've hit your weekly limit · resets Oct 16, 7am (UTC)\n" + strings.Repeat("● Filed it.\n", application.PaneLimitTail) + "❯\u00a0\n",
+			application.PaneIdle},
+		{"the limit's words quoted in a reply are not the limit",
+			"● The Builders said they hit your weekly limit, so I held dispatch.\n❯\u00a0\n", application.PaneIdle},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyPane(tc.screen); got != tc.want {
+				t.Errorf("classifyPane(%q) = %q, want %q", tc.screen, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTheLimitIsReadOffTheScreenWithoutItsEscapes(t *testing.T) {
+	screen := "  \x1b[2m⎿\x1b[0m  \x1b[31mYou've hit your weekly limit · resets Oct 16, 7am (UTC)\x1b[0m\n❯\u00a0\n"
+	shown, on := application.PaneUsageLimit(stripEscapes(screen))
+	if !on || shown != "⎿  You've hit your weekly limit · resets Oct 16, 7am (UTC)" {
+		t.Errorf("expected the notice without its escapes, got %q (%v)", shown, on)
 	}
 }
 

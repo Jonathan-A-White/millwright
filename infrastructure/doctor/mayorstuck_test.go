@@ -3,6 +3,8 @@ package doctor
 import (
 	"strings"
 	"testing"
+
+	"github.com/Jonathan-A-White/millwright/application"
 )
 
 func TestProxyAddressReadsTheHostAndPortAProxySettingPointsAt(t *testing.T) {
@@ -81,7 +83,7 @@ func TestTheLimitWordsQuotedInProseAreNotTheLimit(t *testing.T) {
 }
 
 func TestALimitNoticeTheMayorWorkedPastIsNotTheLimit(t *testing.T) {
-	pane := "  ⎿  You've hit your weekly limit · resets Oct 16, 7am (UTC)\n" + strings.Repeat("● Filed it.\n", mayorStuckLimitTail) + "❯ \n"
+	pane := "  ⎿  You've hit your weekly limit · resets Oct 16, 7am (UTC)\n" + strings.Repeat("● Filed it.\n", application.PaneLimitTail) + "❯ \n"
 	if limit, ok := limitOf(pane); ok {
 		t.Errorf("a notice scrolled up the pane with no menu under it is not the limit, got %q", limit)
 	}

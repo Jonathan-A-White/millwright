@@ -291,6 +291,11 @@ type Status struct {
 	// leaves its timer out; with neither there is no section.
 	Ticks TickLogs
 
+	// Panes is this host's terminal, whose windows are read for a seat stopped
+	// at the usage limit (AtTheUsageLimitHeading). A nil Panes leaves the
+	// section out.
+	Panes ReapTerminal
+
 	// Events, when set, is where the event follower's sending is read from,
 	// for the EVENTS line. Nil leaves the line out.
 	Events EventsShipping
@@ -596,6 +601,9 @@ type StatusReport struct {
 	FinishedKnown bool
 	// Ticks are how this host's own timers are doing, counted from their logs.
 	Ticks HostTicks
+	// AtLimit is every window on this host's terminal whose pane is stopped at
+	// the harness's usage limit, in the terminal's order.
+	AtLimit []WindowAtLimit
 	// Events is where the event follower stands; nil when it was not asked
 	// or could not be read.
 	Events *ShipStatus
@@ -881,6 +889,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 	report.Others = others
 	report.Ticks = ReadHostTicks(ctx, s.Ticks)
+	report.AtLimit = WindowsAtLimit(ctx, s.Panes, s.now())
 	report.MillhandResume = MillhandResumeLine(ctx, s.Ticks.Millhand, s.now())
 
 	if report.EpicShortfalls, err = shortfallsRead(); err != nil {
@@ -1659,6 +1668,14 @@ func (r StatusReport) String() string {
 	if len(r.NoVision) > 0 {
 		for _, app := range r.NoVision {
 			clip(&b, "VISION: "+app+" has no "+VisionFile)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(r.AtLimit) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", AtTheUsageLimitHeading, len(r.AtLimit)))
+		for _, w := range r.AtLimit {
+			w.write(&b)
 		}
 		b.WriteString("\n")
 	}

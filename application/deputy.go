@@ -34,14 +34,19 @@ const DeputyNudgeFormat = "New mail for " + DeputyMailbox + ": %d message(s). Ru
 // DeputyAlreadyUp is a Deputy bring-up that started nothing because a window of
 // the Deputy's is already open. It is not a fault: it carries DeputyUpExit and
 // says so in one line. Busy says the pane was at work and unread mail was left
-// waiting for it.
+// waiting for it; Limit, when set, that the pane is stopped at the harness's
+// usage limit, which has not reset yet (mw-gq6.473).
 type DeputyAlreadyUp struct {
 	Window string
 	Busy   bool
+	Limit  *PaneLimit
 }
 
 // Error is the one line that says nothing was started and why.
 func (u *DeputyAlreadyUp) Error() string {
+	if u.Limit != nil {
+		return fmt.Sprintf("the Deputy in window %s is %s; the mail waits for the reset", u.Window, u.Limit)
+	}
 	if u.Busy {
 		return fmt.Sprintf("the Deputy is busy in window %s; the mail waits", u.Window)
 	}
@@ -67,7 +72,10 @@ func DeputyIsUp(err error) (*DeputyAlreadyUp, bool) {
 // idle at an empty input line while its box holds unread mail is typed the
 // mail nudge instead, and Run says it nudged; a pane at work is left alone and
 // the refusal says the mail waits. An open window whose session has handed off
-// and whose pane is idle is closed instead, and a fresh Deputy is started.
+// and whose pane is idle is closed instead, and a fresh Deputy is started. A
+// pane stopped at the harness's usage limit is typed nothing: before the limit
+// resets the refusal says so, and until when, and that the mail waits for the
+// reset; after it, the window is closed and a fresh Deputy started.
 type Deputy struct {
 	Seats    SeatFiles
 	Windows  Windows
@@ -116,9 +124,15 @@ func (d Deputy) Run(ctx context.Context) (SeatUpReport, error) {
 		return SeatUpReport{}, err
 	}
 	if up != "" {
-		closed, err := d.closeHandedOff(ctx, up)
+		closed, err := d.closeAtLimit(ctx, up)
 		if err != nil {
 			return SeatUpReport{}, err
+		}
+		if !closed {
+			closed, err = d.closeHandedOff(ctx, up)
+			if err != nil {
+				return SeatUpReport{}, err
+			}
 		}
 		if !closed {
 			return d.wakeIdle(ctx, up)
@@ -145,6 +159,58 @@ func (d Deputy) Run(ctx context.Context) (SeatUpReport, error) {
 		Armer:        d.Armer,
 		ReapWhenIdle: true,
 	}.Run(ctx)
+}
+
+// closeAtLimit is what Run does with a Deputy whose pane is stopped at the
+// harness's usage limit. Before the limit resets it refuses, with
+// DeputyAlreadyUp naming the limit: nothing typed is worked there, and a fresh
+// Deputy would meet the same limit. Once the reset has passed it closes the
+// window, says so, and reports that it did, so that Run starts a fresh Deputy.
+// A pane that is not at the limit, or a terminal that cannot be read, is left
+// to the rules after it.
+func (d Deputy) closeAtLimit(ctx context.Context, name string) (bool, error) {
+	if d.Terminal == nil {
+		return false, nil
+	}
+	window, there := d.openWindow(ctx, name)
+	if !there {
+		return false, nil
+	}
+	limit, on := paneLimitOf(ctx, d.Terminal, window, d.now())
+	if !on {
+		return false, nil
+	}
+	if !limit.Over(d.now()) {
+		return false, &DeputyAlreadyUp{Window: name, Limit: &limit}
+	}
+	if err := d.Terminal.Close(ctx, window.ID); err != nil {
+		return false, fmt.Errorf("closing the window %s of the Deputy stopped at the usage limit: %w", name, err)
+	}
+	if d.Out != nil {
+		fmt.Fprintf(d.Out, "closed the window %s: its Deputy was %s\n", name, limit.resetLine())
+	}
+	return true, nil
+}
+
+// openWindow is the open window of that name, as the terminal reports it.
+func (d Deputy) openWindow(ctx context.Context, name string) (ReapWindow, bool) {
+	open, err := d.Terminal.OpenWindows(ctx)
+	if err != nil {
+		return ReapWindow{}, false
+	}
+	for _, window := range open {
+		if window.Name == name {
+			return window, true
+		}
+	}
+	return ReapWindow{}, false
+}
+
+func (d Deputy) now() time.Time {
+	if d.Now == nil {
+		return time.Now()
+	}
+	return d.Now()
 }
 
 // closeHandedOff closes the Deputy's window when its session has already handed

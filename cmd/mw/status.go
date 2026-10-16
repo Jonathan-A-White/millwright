@@ -211,6 +211,7 @@ func newStatusCmd() *cobra.Command {
 				Host:             host,
 				Seat:             BuilderSeat,
 				Ticks:            hostTickLogs(),
+				Panes:            seatWindows(),
 				Events:           events,
 				Log:              idleLog,
 				IdleAfter:        idleAfter,

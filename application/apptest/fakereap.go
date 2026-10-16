@@ -52,7 +52,48 @@ func (f *FakeWindows) Pane(id string, state application.PaneState) error {
 		return fmt.Errorf("no window %s is open", id)
 	}
 	f.panes[i] = state
+	delete(f.screens, id)
 	return nil
+}
+
+// Shows puts a screen on the pane of an open window, read as the terminal
+// reads one: a screen the harness's usage limit is on (PaneUsageLimit) is
+// PaneLimited, and UsageLimit reads its notice; any other screen leaves the
+// pane idle.
+func (f *FakeWindows) Shows(id, screen string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	i := f.index(id)
+	if i < 0 {
+		return fmt.Errorf("no window %s is open", id)
+	}
+	if f.screens == nil {
+		f.screens = map[string]string{}
+	}
+	f.screens[id] = screen
+	f.panes[i] = application.PaneIdle
+	if _, on := application.PaneUsageLimit(screen); on {
+		f.panes[i] = application.PaneLimited
+	}
+	return nil
+}
+
+// UsageLimit implements application.ReapTerminal: the limit on the screen
+// Shows put on the pane, "" for a pane given none.
+func (f *FakeWindows) UsageLimit(_ context.Context, id string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", f.Err
+	}
+	if f.PaneErr != nil {
+		return "", f.PaneErr
+	}
+	if f.index(id) < 0 {
+		return "", fmt.Errorf("no window %s is open", id)
+	}
+	shown, _ := application.PaneUsageLimit(f.screens[id])
+	return shown, nil
 }
 
 // RunsIn says which window the process under test is running in.
@@ -109,6 +150,7 @@ func (f *FakeWindows) remove(id string) {
 	f.open = append(f.open[:i:i], f.open[i+1:]...)
 	f.ids = append(f.ids[:i:i], f.ids[i+1:]...)
 	f.panes = append(f.panes[:i:i], f.panes[i+1:]...)
+	delete(f.screens, id)
 }
 
 // IDOf is the id of the open window of that name, and whether there is one.

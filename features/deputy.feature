@@ -22,6 +22,12 @@ Feature: mw deputy
   Deputy, which reads the mail from its handoff. A handed-off Deputy that is
   still busy is left alone, as any busy Deputy is.
 
+  A Deputy stopped at the harness's usage limit is neither idle nor busy: mw
+  types nothing into it and closes nothing before the limit resets, since a
+  fresh Deputy would meet the same limit, and says so: until when, in the
+  harness's own words, and that the mail waits for the reset (status 8). Once
+  the reset has passed, mw closes its window and starts a fresh Deputy.
+
   Background:
     Given a vault holding the "deputy" seat
     And the "deputy" seat's charter
@@ -102,6 +108,29 @@ Feature: mw deputy
     And the Deputy's box holds 2 unread messages
     When mw deputy is run
     Then mw deputy succeeds
+    And the window "deputy-2026-09-29-02" was closed
+    And exactly one window was opened
+    And seat up says it started the seat in the window "deputy-2026-09-30-02"
+    And a reaper was armed on the window "deputy-2026-09-30-02" in when-idle mode for the "deputy" seat
+
+  Scenario: A Deputy stopped at the usage limit is typed nothing and told the mail waits for the reset
+    Given the window "deputy-2026-09-30-02" was opened at "2026-09-30T08:00:00Z"
+    And the pane of the window "deputy-2026-09-30-02" shows the usage limit "You've hit your session limit · resets 3pm (UTC)"
+    And the Deputy's box holds 1 unread messages
+    When mw deputy is run
+    Then mw deputy is refused saying the Deputy in "deputy-2026-09-30-02" is stopped at the usage limit until "2026-09-30 15:00Z" and the mail waits for the reset
+    And mw deputy leaves with the status 8
+    And nothing was typed into the window "deputy-2026-09-30-02"
+    And the window "deputy-2026-09-30-02" was not closed
+    And no window was opened
+
+  Scenario: A Deputy stopped at the usage limit is closed and a fresh Deputy started once the limit has reset
+    Given the window "deputy-2026-09-29-02" was opened at "2026-09-29T08:00:00Z"
+    And the pane of the window "deputy-2026-09-29-02" shows the usage limit "You've hit your session limit · resets 11am (UTC)"
+    And the Deputy's box holds 2 unread messages
+    When mw deputy is run
+    Then mw deputy succeeds
+    And mw deputy says "closed the window deputy-2026-09-29-02: its Deputy was stopped at the usage limit, which reset at 2026-09-29 11:00Z"
     And the window "deputy-2026-09-29-02" was closed
     And exactly one window was opened
     And seat up says it started the seat in the window "deputy-2026-09-30-02"

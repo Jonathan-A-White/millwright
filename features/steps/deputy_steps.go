@@ -25,6 +25,7 @@ import (
 func registerDeputySteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Given(`^the Deputy's box holds (\d+) unread messages$`, c.theDeputysBoxHolds)
 	ctx.Given(`^the pane of the window "([^"]*)" is busy$`, c.thePaneIsBusy)
+	ctx.Given(`^the pane of the window "([^"]*)" shows the usage limit "([^"]*)"$`, c.thePaneShowsTheUsageLimit)
 	ctx.Given(`^the window "([^"]*)" loses the first Enter key it is sent$`, c.theWindowLosesTheFirstEnter)
 	ctx.Given(`^the window "([^"]*)" loses every Enter key it is sent$`, c.theWindowLosesEveryEnter)
 
@@ -35,6 +36,8 @@ func registerDeputySteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Then(`^mw deputy is refused saying the Deputy is already up in "([^"]*)"$`, c.deputyRefusedForBeingUp)
 	ctx.Then(`^mw deputy is refused saying there is no charter$`, c.refusedForNoCharter)
 	ctx.Then(`^mw deputy is refused saying the Deputy is busy in "([^"]*)" and the mail waits$`, c.deputyRefusedForBeingBusy)
+	ctx.Then(`^mw deputy is refused saying the Deputy in "([^"]*)" is stopped at the usage limit until "([^"]*)" and the mail waits for the reset$`, c.deputyRefusedForTheLimit)
+	ctx.Then(`^mw deputy says "([^"]*)"$`, c.deputySays)
 	ctx.Then(`^mw deputy says it pressed Enter again$`, c.deputySaysEnterAgain)
 	ctx.Then(`^mw deputy says the nudge is on its input line still$`, c.deputySaysStuck)
 	ctx.Then(`^mw deputy says it nudged the Deputy in the window "([^"]*)"$`, c.deputySaysItNudged)
@@ -116,6 +119,47 @@ func (c *seatUpContext) thePaneIsBusy(window string) error {
 		return fmt.Errorf("the window %s is not open", window)
 	}
 	return c.windows.Pane(id, application.PaneWorking)
+}
+
+// usageLimitScreen is a Claude Code screen that chose "Stop and wait" at the
+// usage limit: the harness's notice stands above an empty input line.
+func usageLimitScreen(notice string) string {
+	const rule = "────────────────────────────────────────\n"
+	return "● Working the mail.\n\n  ⎿  " + notice + "\n\n" + rule + "❯\u00a0\n" + rule + "  ? for shortcuts\n"
+}
+
+func (c *seatUpContext) thePaneShowsTheUsageLimit(window, notice string) error {
+	id, open := c.windows.IDOf(window)
+	if !open {
+		return fmt.Errorf("the window %s is not open", window)
+	}
+	return c.windows.Shows(id, usageLimitScreen(notice))
+}
+
+func (c *seatUpContext) deputyRefusedForTheLimit(window, until string) error {
+	said, err := c.refused("the Deputy being stopped at the usage limit")
+	if err != nil {
+		return err
+	}
+	for _, want := range []string{
+		"the Deputy in window " + window + " is stopped at the usage limit until " + until,
+		"the mail waits for the reset",
+	} {
+		if !strings.Contains(said, want) {
+			return fmt.Errorf("expected the refusal to say %q, got %q", want, said)
+		}
+	}
+	if up, ok := application.DeputyIsUp(c.err); !ok || up.Busy {
+		return fmt.Errorf("expected a Deputy that is up and not busy, got %v", c.err)
+	}
+	return nil
+}
+
+func (c *seatUpContext) deputySays(want string) error {
+	if !strings.Contains(c.said.String(), want) {
+		return fmt.Errorf("expected mw deputy to say %q, it said %q", want, c.said.String())
+	}
+	return nil
 }
 
 func (c *seatUpContext) theWindowLosesTheFirstEnter(window string) error {

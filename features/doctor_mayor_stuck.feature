@@ -13,7 +13,11 @@ Feature: mw doctor's mayor-stuck check
   it: the check reads the pane too (mw-gq6.433, @138 sat there 2h12m on
   2026-10-15). A pane on the limit for 10 minutes is the factory stopped. A
   successor would meet the same limit, so the window is left alone and the
-  Governor is paged once.
+  Governor is paged once. Paged, the check is ok until the limit resets; a
+  Mayor still on the limit after its reset (read off the harness's notice, a
+  reset named without a date being the first such time after the limit was
+  first seen) is restarted: its window is closed and a successor takes the
+  seat, and the Governor is told so (mw-gq6.473).
 
   Background:
     Given a vault whose .mayor-acting names the window "mayor-2026-10-06-210"
@@ -119,3 +123,22 @@ Feature: mw doctor's mayor-stuck check
     Then mw doctor printed "stopped at the usage limit"
     And the Mayor's window was not closed
     And no alarm was sent
+
+  Scenario: A Mayor still parked on the usage-limit menu after its reset is restarted
+    Given a transcript whose only replies were API Errors 20 minutes ago
+    And the Mayor's pane shows the usage-limit menu under the notice "You've hit your session limit · resets 1pm (UTC)"
+    When mw doctor's mayor-stuck check runs
+    And 10 minutes go by
+    And mw doctor's mayor-stuck check runs
+    And 30 minutes go by
+    And mw doctor's mayor-stuck check runs
+    Then the Mayor's window was not closed
+    And mayor-up was not run
+    And exactly 1 alarm was sent
+    When 25 minutes go by
+    And mw doctor's mayor-stuck check runs
+    Then the doctor log holds "mayor-stuck cured"
+    And the Mayor's window was closed
+    And mayor-up was run 1 time
+    And exactly 2 alarms were sent
+    And the alarm says "which reset at 2026-09-23 13:00Z"

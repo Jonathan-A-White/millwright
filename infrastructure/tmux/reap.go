@@ -126,11 +126,28 @@ func (w *Windows) PaneState(ctx context.Context, window string) (application.Pan
 	return classifyPane(string(printed)), nil
 }
 
+// UsageLimit implements application.ReapTerminal: the harness's usage-limit
+// notice and menu on the window's screen, read by application.PaneUsageLimit.
+func (w *Windows) UsageLimit(ctx context.Context, window string) (string, error) {
+	if err := windowID(window); err != nil {
+		return "", err
+	}
+	printed, err := w.call(ctx, "capture-pane", "-p", "-e", "-t", window)
+	if err != nil {
+		return "", err
+	}
+	shown, _ := application.PaneUsageLimit(stripEscapes(string(printed)))
+	return shown, nil
+}
+
 // classifyPane says what a screen of Claude Code is doing. A session that says
 // how to interrupt it is working. One with a prompt mark on a line of its own
 // is at an empty input line, and idle; so is one whose input line holds only
 // dim text, which is Claude Code's suggested next prompt and not a draft
-// (inputLineHoldsDraft). The screen is read with its escapes, capture-pane -e. One that shows a firstRunMarkers line
+// (inputLineHoldsDraft). The screen is read with its escapes, capture-pane -e.
+// One stopped at the harness's usage limit — its menu up, or its notice just
+// above the input line (application.PaneUsageLimit) — is limited, not idle,
+// whatever its input line holds. One that shows a firstRunMarkers line
 // is at Claude Code's own first-run screen, not yet a prompt at all. Anything
 // else is not to be closed over: the mark has text after it, or there is no
 // prompt on the screen at all — a question being asked, a menu, a session
@@ -141,6 +158,9 @@ func classifyPane(screen string) application.PaneState {
 	text := stripEscapes(screen)
 	if strings.Contains(text, workingMarker) {
 		return application.PaneWorking
+	}
+	if _, limited := application.PaneUsageLimit(text); limited {
+		return application.PaneLimited
 	}
 	for _, line := range strings.Split(screen, "\n") {
 		if isPrompt, holdsDraft := inputLineHoldsDraft(line); isPrompt && !holdsDraft {
