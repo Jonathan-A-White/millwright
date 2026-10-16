@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -145,7 +147,12 @@ func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, fi
 //
 // It never resets a story's attempts count, and a story already started
 // MaxAttempts times is refused rather than retried — that is the Mayor's
-// decision to make, not a retry's to take for them.
+// decision to make, not a retry's to take for them. The one attempt it does not
+// count is one the harness stopped for something that is not the work's (a
+// usage limit, a rate limit, an overloaded or failing API: HarnessStopOf): the
+// count is lowered by it as the claim is given back, and, when the time the stop
+// names has not come, the host's hold on new claims is kept until then
+// (mw-gq6.434).
 type Retry struct {
 	Tracker   WorkTracker
 	Worktrees Worktrees
@@ -167,6 +174,14 @@ type Retry struct {
 	// already tried that many times is refused, not retried. Fewer than one is
 	// DefaultMaxAttempts.
 	MaxAttempts int
+
+	// Notes is where the host's hold on new claims is kept when the attempt
+	// retried was a harness stop whose time has not come (mw-gq6.434). A nil
+	// Notes keeps none.
+	Notes SweepNotes
+
+	// Now is the clock a harness stop's time is read against; nil is time.Now.
+	Now func() time.Time
 
 	// Out is where the report is printed. A nil Out prints nothing.
 	Out io.Writer
@@ -260,6 +275,13 @@ type RetryReport struct {
 	BranchGone    bool
 	ClaimReleased bool
 
+	// Stopped is the harness stop the retried attempt ended in, nil when it
+	// ended any other way: that attempt is not counted. HeldUntil is when the
+	// host the story was worked on claims something new again, zero when the
+	// stop's time had already come.
+	Stopped   *HarnessStop
+	HeldUntil time.Time
+
 	// NoCause says no cause is recorded on the story (mw cause), which the report
 	// reminds of; the retry goes ahead all the same.
 	NoCause bool
@@ -275,6 +297,14 @@ func (r Retry) maxAttempts() int {
 		return DefaultMaxAttempts
 	}
 	return r.MaxAttempts
+}
+
+// now is the clock a harness stop's time is read against.
+func (r Retry) now() time.Time {
+	if r.Now == nil {
+		return time.Now()
+	}
+	return r.Now()
 }
 
 // remote is the remote the target branch is read from.
@@ -338,8 +368,20 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	report.Hitl = detail.Hitl()
 	report.NoCause = detail.Cause == ""
 	report.refunded = detail.AttemptsRefunded
+	report.unclaimed = detail.Assignee == "" && detail.Status == StatusOpen
 
-	if tried, most := detail.Attempts, r.maxAttempts(); tried >= most {
+	// An attempt the harness stopped is not counted (mw-gq6.434). A story open
+	// with no claim was given back already, by whoever gave it back.
+	tried := detail.Attempts
+	if !report.unclaimed {
+		if stop, stopped := harnessStopOfAttempt(ctx, r.Vault, detail, r.now()); stopped {
+			report.Stopped = &stop
+			report.NextAttempt = detail.Attempts
+			tried--
+		}
+	}
+
+	if most := r.maxAttempts(); tried >= most {
 		return r.refuse(report, fmt.Sprintf(
 			"it has been started %d times, the most a story may be (max_attempts is %d): attempts exhausted", tried, most))
 	}
@@ -355,7 +397,6 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 			"its Builder handed it back on %s and nothing says what changed since, so the next Builder would hand it back the same way: "+
 				"say what changed with %s", handedBackDay(at), repathedWith(storyID)))
 	}
-	report.unclaimed = detail.Assignee == "" && detail.Status == StatusOpen
 
 	// A story worked on another host has its worktree and branch there, not
 	// here: reading them would fail before anything was done. The claim is given
@@ -434,7 +475,7 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 			storyID, err)
 	}
 	report.ClaimReleased = true
-	if err := r.clearRefunds(ctx, report); err != nil {
+	if err := r.settleAttempts(ctx, &report, r.Host); err != nil {
 		return report, err
 	}
 
@@ -458,6 +499,7 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 				"The next dispatch tick takes it as attempt %d of %d.",
 			r.Host, attempt, storyID, report.Branch, report.Target, report.NextAttempt, r.maxAttempts())
 	}
+	comment += report.stopSaid()
 	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
 		return report, fmt.Errorf("retrying %s: it was retried, but the comment naming what happened could not be written: %w", storyID, err)
 	}
@@ -490,17 +532,47 @@ func (r Retry) rePathed(ctx context.Context, report *RetryReport) error {
 	return nil
 }
 
-// clearRefunds sets the story's dead-pane refund count back to 0, so a retried
-// story has its refunds again (mw-gq6.344). Nothing is written when none were
-// given.
-func (r Retry) clearRefunds(ctx context.Context, report RetryReport) error {
-	if report.refunded < 1 {
+// settleAttempts sets the story's dead-pane refund count back to 0, so a retried
+// story has its refunds again (mw-gq6.344), and takes an attempt the harness
+// stopped off its count (mw-gq6.434). Nothing is written when there is neither.
+// A stop whose time has not come holds new claims on host, the host the story
+// was worked on, until then.
+func (r Retry) settleAttempts(ctx context.Context, report *RetryReport, host string) error {
+	fields := map[string]string{}
+	if report.refunded > 0 {
+		fields[AttemptsRefundedField] = "0"
+	}
+	if report.Stopped != nil {
+		fields[AttemptsField] = strconv.Itoa(report.NextAttempt - 1)
+	}
+	if len(fields) > 0 {
+		if err := r.Tracker.SetStoryMetadata(ctx, report.StoryID, fields); err != nil {
+			return fmt.Errorf("retrying %s: the claim was given back, but its attempts could not be set right (%s): %w",
+				report.StoryID, metadataSaid(fields), err)
+		}
+	}
+	if report.Stopped == nil || !report.Stopped.Until.After(r.now()) {
 		return nil
 	}
-	if err := r.Tracker.SetStoryMetadata(ctx, report.StoryID, map[string]string{AttemptsRefundedField: "0"}); err != nil {
-		return fmt.Errorf("retrying %s: the claim was given back, but its dead-pane refund count could not be set back to 0: %w", report.StoryID, err)
+	if err := keepHarnessHold(ctx, r.Notes, host, *report.Stopped); err != nil {
+		return fmt.Errorf("retrying %s: the claim was given back, but the hold on new claims on %s until %s could not be kept: %w",
+			report.StoryID, host, report.Stopped.Until.UTC().Format(time.RFC3339), err)
+	}
+	if r.Notes != nil {
+		report.HeldUntil = report.Stopped.Until
 	}
 	return nil
+}
+
+// metadataSaid is metadata fields as a person reads them, in a fixed order.
+func metadataSaid(fields map[string]string) string {
+	var said []string
+	for _, key := range []string{AttemptsField, AttemptsRefundedField} {
+		if value, ok := fields[key]; ok {
+			said = append(said, key+"="+value)
+		}
+	}
+	return strings.Join(said, ", ")
 }
 
 // handBack is a retry of a story another host worked: the claim is given back
@@ -519,7 +591,7 @@ func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere strin
 		return report, fmt.Errorf("retrying %s: the claim could not be given back: %w", storyID, err)
 	}
 	report.ClaimReleased = true
-	if err := r.clearRefunds(ctx, report); err != nil {
+	if err := r.settleAttempts(ctx, &report, elsewhere); err != nil {
 		return report, err
 	}
 
@@ -528,6 +600,7 @@ func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere strin
 			"so its worktree and branch are left there, and the next dispatch on %s bundles whatever they hold before it cuts a fresh one. "+
 			"The story is open again and the next dispatch tick takes it as attempt %d of %d.",
 		r.Host, report.Attempt, storyID, elsewhere, elsewhere, report.NextAttempt, r.maxAttempts())
+	comment += report.stopSaid()
 	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
 		return report, fmt.Errorf("retrying %s: the claim was given back, but the comment naming what happened could not be written: %w", storyID, err)
 	}
@@ -573,6 +646,13 @@ func (r RetryReport) String() string {
 	if r.RePathed {
 		fmt.Fprintf(&b, "  re-path the story was told what changed (%s comment)\n", RePathedMark)
 	}
+	if r.Stopped != nil {
+		fmt.Fprintf(&b, "  stop    attempt %d was stopped by the harness (%s: %s), not by its work: it is not counted\n",
+			r.Attempt, r.Stopped.Reason, r.Stopped.Said)
+		if !r.HeldUntil.IsZero() {
+			fmt.Fprintf(&b, "  hold    no new claims until %s\n", r.HeldUntil.UTC().Format(time.RFC3339))
+		}
+	}
 	if r.Elsewhere != "" {
 		fmt.Fprintf(&b, "  there   the story was worked on %s; its worktree and branch are left there, not read from here\n", r.Elsewhere)
 		if r.ClaimReleased {
@@ -604,6 +684,20 @@ func (r RetryReport) String() string {
 		r.writeHitl(&b)
 	}
 	return b.String()
+}
+
+// stopSaid is what a retry's comment adds when the attempt it retried was a
+// harness stop: that it is not counted, and how long the host is held.
+func (r RetryReport) stopSaid() string {
+	if r.Stopped == nil {
+		return ""
+	}
+	said := fmt.Sprintf(" Attempt %d was stopped by the harness (%s: %s), not by its work, so it is not counted.",
+		r.Attempt, r.Stopped.Reason, r.Stopped.Said)
+	if !r.HeldUntil.IsZero() {
+		said += fmt.Sprintf(" No new story is claimed on the host it was worked on until %s.", r.HeldUntil.UTC().Format(time.RFC3339))
+	}
+	return said
 }
 
 // writeHitl says, for a story that carries hitl, why the next dispatch tick will

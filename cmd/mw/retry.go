@@ -86,6 +86,7 @@ func newRetryCmd() *cobra.Command {
 				Host:        host,
 				Rigs:        rigs,
 				MaxAttempts: maxAttempts,
+				Notes:       gateway,
 				Out:         cmd.OutOrStdout(),
 				RePathed:    repathed,
 			}.Run(cmd.Context(), args[0])

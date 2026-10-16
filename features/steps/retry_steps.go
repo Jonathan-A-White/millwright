@@ -32,6 +32,7 @@ type retryContext struct {
 
 	tracker *apptest.FakeTracker
 	runner  *apptest.FakeRunner
+	now     time.Time
 
 	lastEpic       string
 	commentsBefore map[string]int
@@ -84,6 +85,13 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the vault cannot reach its origin$`, c.theVaultCannotReachItsOrigin)
 
 	ctx.When(`^mw retries "([^"]*)"$`, c.mwRetries)
+	ctx.Given(`^the session of "([^"]*)" was stopped by the harness, saying: (.+)$`, c.theSessionsResultSaid)
+	ctx.Given(`^the session of "([^"]*)" ended in error, its result saying: (.+)$`, c.theSessionsResultSaid)
+	ctx.When(`^mw retries "([^"]*)" at "([^"]*)"$`, c.mwRetriesAt)
+	ctx.Then(`^the stopped attempt of "([^"]*)" is not counted: it records (\d+) attempts?$`, c.theStoryStillRecordsAttempts)
+	ctx.Then(`^the retry says the next dispatch tick takes "([^"]*)" as attempt (\d+)$`, c.theRetrySaysTheNextAttempt)
+	ctx.Then(`^the retry holds new claims on "([^"]*)" until "([^"]*)"$`, c.theRetryHoldsNewClaimsUntil)
+	ctx.Then(`^the retry holds no claims on "([^"]*)"$`, c.theRetryHoldsNoClaims)
 
 	ctx.Given(`^the cause of the story "([^"]*)" is recorded as "([^"]*)"$`, c.theCauseIsRecorded)
 	ctx.Then(`^the retry printed the reminder: (.+)$`, c.theRetryPrintedTheReminder)
@@ -433,8 +441,84 @@ func (c *retryContext) mwRetries(id string) error {
 		Vault:     files,
 		Host:      retryHost,
 		Rigs:      map[string]string{retryRig: c.rig},
+		Notes:     c.tracker,
+		Now:       c.clock(),
 		Out:       &c.printed,
 	}.Run(context.Background(), id)
+	return nil
+}
+
+// clock is the time the scenario set for the retry, nil when it set none.
+func (c *retryContext) clock() func() time.Time {
+	if c.now.IsZero() {
+		return nil
+	}
+	now := c.now
+	return func() time.Time { return now }
+}
+
+// theSessionsResultSaid writes the result the story's last session left in the
+// vault: an error, in the harness's own words.
+func (c *retryContext) theSessionsResultSaid(id, said string) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(c.vault, application.RunsDir, id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	result := fmt.Sprintf(`{"type":"result","subtype":"success","is_error":true,"num_turns":1,"duration_ms":4000,"result":%q}`, said)
+	return os.WriteFile(filepath.Join(dir, application.ResultFileNameForAttempt(detail.Attempts)), []byte(result), 0o644)
+}
+
+func (c *retryContext) mwRetriesAt(id, at string) error {
+	now, err := time.Parse(time.RFC3339, at)
+	if err != nil {
+		return err
+	}
+	c.now = now
+	return c.mwRetries(id)
+}
+
+func (c *retryContext) theRetrySaysTheNextAttempt(id string, attempt int) error {
+	if c.report.NextAttempt != attempt {
+		return fmt.Errorf("expected the next dispatch to take %s as attempt %d, the report says %d", id, attempt, c.report.NextAttempt)
+	}
+	want := fmt.Sprintf("takes it as attempt %d", attempt)
+	if !strings.Contains(c.printed.String(), want) {
+		return fmt.Errorf("expected the retry to print %q, got:\n%s", want, c.printed.String())
+	}
+	for _, comment := range c.tracker.Comments(id) {
+		if strings.Contains(comment, want) && strings.Contains(comment, "not counted") {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected a comment on %s saying the attempt is not counted and %q, got %q", id, want, c.tracker.Comments(id))
+}
+
+func (c *retryContext) theRetryHoldsNewClaimsUntil(host, until string) error {
+	note, err := c.tracker.Note(context.Background(), application.HarnessHoldKey(host))
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(note, until+" ") {
+		return fmt.Errorf("expected %s held until %s, the note says %q", host, until, note)
+	}
+	if !strings.Contains(c.printed.String(), until) {
+		return fmt.Errorf("expected the retry to print the hold until %s, got:\n%s", until, c.printed.String())
+	}
+	return nil
+}
+
+func (c *retryContext) theRetryHoldsNoClaims(host string) error {
+	note, err := c.tracker.Note(context.Background(), application.HarnessHoldKey(host))
+	if err != nil {
+		return err
+	}
+	if note != "" {
+		return fmt.Errorf("expected no hold on %s, the note says %q", host, note)
+	}
 	return nil
 }
 
