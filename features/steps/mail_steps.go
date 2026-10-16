@@ -188,7 +188,7 @@ func (c *mailContext) theInboxIsListed() error {
 
 func (c *mailContext) theInboxIsListedAs(as string) error {
 	var out strings.Builder
-	_, c.err = c.mail(&out).Inbox(context.Background(), as)
+	_, c.err = c.mail(&out).Inbox(context.Background(), as, false)
 	c.printed = out.String()
 	return nil
 }
@@ -227,7 +227,7 @@ func (c *mailContext) mailSaysItWentTo(to string) error {
 // inboxOf lists a mailbox without disturbing what the last step printed.
 func (c *mailContext) inboxOf(mailbox string) ([]application.Message, error) {
 	var out strings.Builder
-	return c.mail(&out).Inbox(context.Background(), mailbox)
+	return c.mail(&out).Inbox(context.Background(), mailbox, false)
 }
 
 func (c *mailContext) theInboxOfIsEmpty(mailbox string) error {

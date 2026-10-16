@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strconv"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -98,24 +99,28 @@ func newMailReplyCmd() *cobra.Command {
 // newMailInboxCmd builds `mw mail inbox`.
 func newMailInboxCmd() *cobra.Command {
 	var as string
+	var all bool
 
 	cmd := &cobra.Command{
-		Use:   "inbox",
+		Use:   "inbox [--all]",
 		Short: "List the unread mail of a seat",
 		Long: "inbox lists the unread mail of the seat in $MW_SEAT, or of the seat --as names, oldest\n" +
 			"first: one line each with its id, who it is from, when it was sent and its subject.\n" +
-			"It reads and writes nothing. With neither $MW_SEAT nor --as it refuses.",
+			"It lists the newest " + strconv.Itoa(application.InboxShown) + ", newest last, under a line saying how many older\n" +
+			"ones it left out; --all lists every one. It reads and writes nothing. With neither\n" +
+			"$MW_SEAT nor --as it refuses.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			mail, err := mailUseCase(cmd)
 			if err != nil {
 				return err
 			}
-			_, err = mail.Inbox(cmd.Context(), as)
+			_, err = mail.Inbox(cmd.Context(), as, all)
 			return err
 		},
 	}
 	cmd.Flags().StringVar(&as, "as", "", "list this seat's mailbox instead of the one $MW_SEAT names")
+	cmd.Flags().BoolVar(&all, "all", false, "list every unread message, not only the newest "+strconv.Itoa(application.InboxShown))
 	return cmd
 }
 

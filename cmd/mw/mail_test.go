@@ -69,3 +69,14 @@ func TestMailInboxAndReadRefuseWithNoSeatAndNoAs(t *testing.T) {
 		}
 	}
 }
+
+func TestMailInboxHasAnAllFlag(t *testing.T) {
+	inbox, _, err := newRootCmd().Find([]string{"mail", "inbox"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := inbox.Flags().Lookup("all")
+	if all == nil || all.DefValue != "false" {
+		t.Fatalf("expected mw mail inbox to have --all, off unless given, got %+v", all)
+	}
+}
