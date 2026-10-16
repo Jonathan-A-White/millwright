@@ -110,7 +110,11 @@ func (r MillhandTickReport) String() string { return r.Line + "\n" }
 //     do no more than the last, since the fault that stopped this one is the
 //     same fault that would keep Claude Code from reaching the API. The tick
 //     says so in its line and closes nothing; the next tick that still finds it
-//     stalled once the fault clears restarts it as usual.
+//     stalled once the fault clears restarts it as usual. A Millhand stopped at
+//     the harness's usage limit is neither idle nor stalled: before the limit
+//     resets the tick says so, and until when, and touches nothing, since a
+//     fresh Millhand would meet the same limit; once it has reset the tick
+//     restarts it as it restarts a stalled one (mw-gq6.473).
 //  2. On a host with a [watch] table, mw watch's rule is applied to the host it
 //     watches. This comes before the sync, because a fault of this host's own
 //     network is one the sync would only time out on: local-fault is said in the
@@ -268,12 +272,22 @@ func (t MillhandTick) lookAround(ctx context.Context) (line string, woke bool, e
 		if err == nil && !gone && t.firstRunStuck(ctx, up) {
 			return firstRunStuckLine(up, t.noteFirstRunStuck(ctx, up)), false, nil
 		}
-		if err == nil && !gone && t.stalledCandidate(ctx, up) {
+		limited := false
+		if err == nil && !gone {
+			var limit PaneLimit
+			if limit, limited = t.atLimit(ctx, up); limited && !limit.Over(t.now()) {
+				return joinNotes(alreadyUp(up), []string{"the Millhand is " + limit.String()}), false, nil
+			}
+		}
+		if err == nil && !gone && (limited || t.stalledCandidate(ctx, up)) {
 			health = t.health(ctx)
 			healthLooked = true
-			if health.local {
+			switch {
+			case health.local:
 				note = leftAloneNote(up)
-			} else {
+			case limited:
+				gone, note, restarted, err = t.restartAfterLimit(ctx, up)
+			default:
 				gone, note, restarted, err = t.restart(ctx, up)
 			}
 		}
@@ -511,6 +525,55 @@ func (t MillhandTick) restart(ctx context.Context, name string) (gone bool, note
 	if t.ReapLog != nil {
 		said := fmt.Sprintf("%s reap %s: closed by the tick: up but idle since %s, no handoff",
 			t.now().UTC().Format(time.RFC3339), window.ID, opened)
+		if err := t.ReapLog.Note(ctx, MillhandSeat, said); err != nil {
+			note += "; the reaper log could not be written: " + oneLine(err.Error())
+		}
+	}
+	return true, note, told, nil
+}
+
+// atLimit is one look at whether the Millhand's pane is stopped at the
+// harness's usage limit, and the limit when it is. A look that cannot be made
+// is a look at a pane that is not.
+func (t MillhandTick) atLimit(ctx context.Context, name string) (PaneLimit, bool) {
+	if t.Millhand.Terminal == nil {
+		return PaneLimit{}, false
+	}
+	window, there := t.reapWindow(ctx, name)
+	if !there {
+		return PaneLimit{}, false
+	}
+	return paneLimitOf(ctx, t.Millhand.Terminal, window, t.now())
+}
+
+// restartAfterLimit closes the window of a Millhand still stopped at the usage
+// limit after the limit has reset, by the reaper's own path, as restart closes
+// a stalled one: on two looks, Recheck apart, and never on a doubt. It says
+// what restart says of it, and what the fresh Millhand is to be told.
+func (t MillhandTick) restartAfterLimit(ctx context.Context, name string) (gone bool, note, told string, err error) {
+	window, there := t.reapWindow(ctx, name)
+	if !there || t.Millhand.Terminal == nil {
+		return false, "", "", nil
+	}
+	if err := t.reapRule().wait(ctx, t.Recheck); err != nil {
+		return false, "", "", nil
+	}
+	limit, on := t.atLimit(ctx, name)
+	if !on || !limit.Over(t.now()) {
+		return false, "", "", nil
+	}
+
+	why := limit.resetLine()
+	told = fmt.Sprintf("the Millhand woken before this one was %s, and the tick closed its window %s", why, name)
+	if t.DryRun {
+		return true, fmt.Sprintf("dry run: would be restarted: %s (window %s left open)", why, name), told, nil
+	}
+	if err := t.Millhand.Terminal.Close(ctx, window.ID); err != nil {
+		return false, "could not close the Millhand's window at the usage limit: " + oneLine(err.Error()), "", fmt.Errorf("closing the window %s: %w", name, err)
+	}
+	note = fmt.Sprintf("restarted: %s (closed the window %s)", why, name)
+	if t.ReapLog != nil {
+		said := fmt.Sprintf("%s reap %s: closed by the tick: %s", t.now().UTC().Format(time.RFC3339), window.ID, why)
 		if err := t.ReapLog.Note(ctx, MillhandSeat, said); err != nil {
 			note += "; the reaper log could not be written: " + oneLine(err.Error())
 		}

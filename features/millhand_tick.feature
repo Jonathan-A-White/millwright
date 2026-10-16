@@ -24,6 +24,13 @@ Feature: mw millhand tick
        over: the tick says "idle with text on its input line" and leaves one
        doctor note for the Mayor, so a person decides. Either way "already up"
        is still true: nothing is closed and no fresh Millhand is woken.
+
+       A Millhand stopped at the harness's usage limit is neither idle nor
+       stalled: before the limit resets the tick types nothing, closes
+       nothing and says "the Millhand is stopped at the usage limit until
+       <reset>: <the harness's notice>", since a fresh Millhand would meet the
+       same limit. Once the reset has passed it is restarted as a stalled one
+       is, with "restarted: stopped at the usage limit, which reset at <reset>".
     2. It runs one mw sync, so that this host sees the other one's mail and claims.
     3. It looks for mail in every mailbox this host's Millhand reads —
        millhand@<host>, plain millhand, and the host's own box <host>, which the
@@ -280,6 +287,34 @@ Feature: mw millhand tick
     And mw millhand tick is run
     Then mw millhand tick prints one dated line saying "the Millhand is stuck at claude's first-run screen"
     And the tick's tracker took exactly 1 note write
+
+  Scenario: A Millhand stopped at the usage limit is left alone until the reset, and the tick says so
+    Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    And the pane of the window "millhand-test" shows the usage limit "You've hit your session limit · resets 3pm (UTC)"
+    And unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "already up (millhand-test)"
+    And mw millhand tick prints one dated line saying "the Millhand is stopped at the usage limit until 2026-09-19 15:00Z: You've hit your session limit · resets 3pm (UTC)"
+    And the window "millhand-test" was not closed
+    And nothing was typed into the window "millhand-test"
+    And no window was opened
+    And the reaper log holds no line
+    And the tick log holds that line
+
+  Scenario: A Millhand stopped at the usage limit is restarted once the limit has reset
+    Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    And the pane of the window "millhand-test" shows the usage limit "You've hit your session limit · resets 10am (UTC)"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "woke the Millhand"
+    And mw millhand tick prints one dated line saying "restarted: stopped at the usage limit, which reset at 2026-09-19 10:00Z (closed the window millhand-test)"
+    And the window "millhand-test" was closed
+    And exactly one window was opened
+    And the kickoff prompt of the window holds:
+      | a routine wake                                          |
+      | stopped at the usage limit, which reset at 2026-09-19 10:00Z |
+    And the reaper log holds one line saying "closed by the tick: stopped at the usage limit, which reset at 2026-09-19 10:00Z"
 
   Scenario: A dry run says it would restart an idle Millhand with no handoff, and closes nothing
     Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
