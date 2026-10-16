@@ -72,6 +72,16 @@ type Worktrees interface {
 	RenameBranch(ctx context.Context, rigDir, from, to string) error
 }
 
+// Rebases is the port the worktree of an attempt cut from the branch an earlier
+// attempt left is rebased onto its target through (mw-1ljpo9.7), so that the
+// next attempt continues that work on what the target holds now.
+type Rebases interface {
+	// Rebase rebases the branch checked out in dir onto onto. A rebase that
+	// stops on a conflict is undone before it returns false, so that dir is
+	// left as it was before; true is a rebase that went through.
+	Rebase(ctx context.Context, dir, onto string) (bool, error)
+}
+
 // BranchChanges is the port the files a running story's branch has changed so
 // far are read through: git, in the rig's own checkout, where every story
 // worktree's branch is a branch of the rig (mw-gq6.349).

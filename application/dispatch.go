@@ -81,6 +81,16 @@ type Dispatch struct {
 	// next.
 	Landing Landing
 
+	// RetryFromBranch is next.retry_from_branch (mw-1ljpo9.7): when it is on, a
+	// story whose last attempt was refused at close-out or capped (ContinueKey,
+	// in Memory) has its next attempt cut from the branch that attempt left,
+	// kept as mw/<id>-attempt<N>, rebased through Rebases onto the target. A
+	// rebase that conflicts falls back to the target, and the boot says so.
+	// Off, or without Landing, Memory or Rebases, every attempt is cut from the
+	// target, as before.
+	RetryFromBranch bool
+	Rebases         Rebases
+
 	// Memory is where mw sweep remembers what it saw of a story's last session,
 	// so that a fresh attempt can clear it (mw-gq6.86): a session's pane starts
 	// blank whichever attempt it is, and a note an earlier attempt left behind
@@ -295,6 +305,12 @@ type Started struct {
 	// KeptBranch is the name an earlier attempt's branch was kept under before
 	// this attempt's fresh cut (mw-gq6.326). Empty when no branch was left.
 	KeptBranch string
+	// Handed is the earlier attempt whose kept branch was handed to this one,
+	// to be continued rebased onto Start (mw-1ljpo9.7); zero when none was.
+	// NotContinued says why this attempt was cut from Start after all, its
+	// branch not rebasing cleanly; empty when it continues the branch.
+	Handed       int
+	NotContinued string
 	// Recheck says what the re-run of a nightly-suite bug's spec on main came to
 	// when the story was dispatched all the same: that the spec still fails, or
 	// why it could not be re-run. Empty for any other story.
@@ -1320,8 +1336,26 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		started.KeptBranch = kept
 	}
 
-	if err := d.Worktrees.Add(ctx, rigDir, started.Worktree, started.Branch, started.Start); err != nil {
+	continuing, err := d.continuing(ctx, rigDir, id, started.KeptBranch, started.Start)
+	if err != nil {
+		return undo("reading whether "+id+" continues an earlier attempt's branch", err, false)
+	}
+	cut := started.Start
+	if continuing > 0 {
+		cut = started.KeptBranch
+	}
+	if err := d.Worktrees.Add(ctx, rigDir, started.Worktree, started.Branch, cut); err != nil {
 		return undo("cutting the worktree", err, false)
+	}
+	if continuing > 0 {
+		if err := d.rebaseOrStartAfresh(ctx, rigDir, &started, continuing); err != nil {
+			return undo("cutting the worktree afresh", err, true)
+		}
+		if started.NotContinued == "" {
+			detail.Continues = ContinuingLine(continuing, started.KeptBranch, started.Start)
+		} else {
+			detail.Continues = NotContinuingLine(continuing, started.KeptBranch, started.Start, started.NotContinued)
+		}
 	}
 
 	// A molecule an earlier dispatch poured for this story, and that is still open,
@@ -1391,6 +1425,14 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 			unrecorded = append(unrecorded, fmt.Errorf("what mw sweep remembered of the last attempt could not be cleared: %w", err))
 		}
 	}
+	// The note that handed this attempt its branch has been read: whatever this
+	// attempt becomes, a later one is handed a branch only if it is refused or
+	// capped in turn.
+	if d.Memory != nil && d.RetryFromBranch {
+		if err := d.Memory.ClearNote(ctx, ContinueKey(id)); err != nil {
+			unrecorded = append(unrecorded, fmt.Errorf("the note that the next attempt continues the branch could not be cleared: %w", err))
+		}
+	}
 	if err := d.Tracker.SetStoryMetadata(ctx, id, attemptFields(detail, started.Attempt, d.now())); err != nil {
 		unrecorded = append(unrecorded, fmt.Errorf("the attempt could not be recorded as %s=%d: %w", AttemptsField, started.Attempt, err))
 	}
@@ -1400,6 +1442,9 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	}
 	if started.KeptBranch != "" {
 		where += fmt.Sprintf(", after keeping what an earlier attempt left as %s", started.KeptBranch)
+	}
+	if said := started.handedSaid(); said != "" {
+		where += ", " + said
 	}
 	if molecule := started.Molecule; molecule.Poured() {
 		if started.Reused {
@@ -1442,6 +1487,68 @@ func (d Dispatch) leftoverAt(ctx context.Context, rigDir string, started Started
 		return false, nil
 	}
 	return true, nil
+}
+
+// continuing is the earlier attempt whose kept branch the next attempt of id is
+// cut from (mw-1ljpo9.7): the attempt ContinueKey names, when RetryFromBranch is
+// on, an earlier attempt's branch was kept here as kept, and it holds commits
+// that start does not. Zero is a cut from start, as for any first attempt.
+func (d Dispatch) continuing(ctx context.Context, rigDir, id, kept, start string) (int, error) {
+	if !d.RetryFromBranch || kept == "" || d.Memory == nil || d.Rebases == nil || d.Landing == nil {
+		return 0, nil
+	}
+	said, err := d.Memory.Note(ctx, ContinueKey(id))
+	if err != nil {
+		return 0, err
+	}
+	attempt, err := strconv.Atoi(strings.TrimSpace(said))
+	if err != nil || attempt < 1 {
+		return 0, nil
+	}
+	ahead, err := d.Landing.Ahead(ctx, rigDir, kept, start)
+	if err != nil {
+		return 0, err
+	}
+	if ahead == 0 {
+		return 0, nil
+	}
+	return attempt, nil
+}
+
+// rebaseOrStartAfresh rebases the worktree just cut from an earlier attempt's
+// kept branch onto the target (mw-1ljpo9.7). One that does not rebase cleanly
+// is taken away again, worktree and the story's branch, and cut afresh from the
+// target; the kept branch is never touched, so nothing of the earlier attempt
+// is lost either way. It records which on started.
+func (d Dispatch) rebaseOrStartAfresh(ctx context.Context, rigDir string, started *Started, attempt int) error {
+	started.Handed = attempt
+	clean, err := d.Rebases.Rebase(ctx, started.Worktree, started.Start)
+	if err == nil && clean {
+		return nil
+	}
+	started.NotContinued = "the rebase stopped on a conflict and was undone"
+	if err != nil {
+		started.NotContinued = "the rebase failed: " + firstLine(err.Error())
+	}
+	if err := d.Worktrees.Remove(ctx, rigDir, started.Worktree, started.Branch); err != nil {
+		return fmt.Errorf("%s, and the worktree cut from it could not be taken away: %w", started.handedSaid(), err)
+	}
+	if err := d.Worktrees.Add(ctx, rigDir, started.Worktree, started.Branch, started.Start); err != nil {
+		return fmt.Errorf("%s, and the worktree could not be cut from %s: %w", started.handedSaid(), started.Start, err)
+	}
+	return nil
+}
+
+// handedSaid is what the dispatch line and the run state say of the branch an
+// earlier attempt handed this one; empty when none was.
+func (s Started) handedSaid() string {
+	switch {
+	case s.Handed == 0:
+		return ""
+	case s.NotContinued == "":
+		return fmt.Sprintf("continuing attempt %d's branch rebased onto %s", s.Handed, s.Start)
+	}
+	return fmt.Sprintf("cut from %s after all: attempt %d's branch %s did not rebase onto it (%s)", s.Start, s.Handed, s.KeptBranch, s.NotContinued)
 }
 
 // keepLeftover clears an earlier attempt's worktree and branch out of the way of
@@ -2148,6 +2255,9 @@ func (r DispatchReport) String() string {
 		}
 		if started.KeptBranch != "" {
 			fmt.Fprintf(&b, " · a leftover from an earlier attempt was kept as %s", started.KeptBranch)
+		}
+		if said := started.handedSaid(); said != "" {
+			fmt.Fprintf(&b, " · %s", said)
 		}
 		if started.Recheck != "" {
 			fmt.Fprintf(&b, " · %s", started.Recheck)

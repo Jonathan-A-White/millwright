@@ -190,6 +190,12 @@ type StoryDetail struct {
 	// Molecule is the formula poured for this story, empty until it has been
 	// poured. It is filled in by whoever pours it, not by reading the story.
 	Molecule Molecule
+	// Continues is what the boot tells the session of the branch it starts on
+	// when an earlier attempt's branch was handed to it (mw-1ljpo9.7): that it
+	// continues that branch, or why it starts from the target after all. It is
+	// filled in by the dispatch that cuts the worktree, not by reading the
+	// story; empty when the attempt starts from the target as any first does.
+	Continues string
 	// LeaseExpires is when the tracker's own lease on this story's claim runs
 	// out unless a heartbeat renews it first; zero when the story is not
 	// claimed or the tracker does not say. A claim found past this with its

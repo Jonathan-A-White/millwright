@@ -850,6 +850,14 @@ func BootPrompt(seat Seat, detail StoryDetail) string {
 		section(&b, "(none recorded on the story)")
 	}
 
+	// An attempt handed an earlier attempt's branch is told so before its
+	// steps, so that it reads what is there before it builds anything
+	// (mw-1ljpo9.7).
+	if continues := strings.TrimSpace(detail.Continues); continues != "" {
+		b.WriteString("## Your branch\n\n")
+		section(&b, continues)
+	}
+
 	formulaSteps(&b, detail)
 	return b.String()
 }

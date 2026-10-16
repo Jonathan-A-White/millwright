@@ -268,6 +268,12 @@ type Next struct {
 	// since the old session's clock. A nil Memory clears nothing.
 	Memory SweepNotes
 
+	// RetryFromBranch is next.retry_from_branch (mw-1ljpo9.7): when it is on, a
+	// close-out that stops a story for a reason ContinuesFrom names writes
+	// ContinueKey in Memory, so that mw retry keeps its branch and the next
+	// attempt is cut from it, rebased onto the target. Off, nothing is written.
+	RetryFromBranch bool
+
 	// Sync brings the hosts level after the story is closed and before anything
 	// new is dispatched, so that the other host sees the closed story before it
 	// picks its own next work. A nil Sync skips it.
@@ -2269,6 +2275,10 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	// working what this attempt left of its own.
 	n.closeFormula(ctx, c, report, fmt.Sprintf("was not landed (%s), and its next attempt pours its formula afresh", reason))
 
+	// Written before the claim can be given back, so that the dispatch that
+	// takes the story again finds it (mw-1ljpo9.7).
+	continues := n.handOn(ctx, c, report, reason)
+
 	var trouble []string
 	// A story whose work is committed and whose formula was left unfinished is
 	// not waiting for a person (mw-gq6.341), nor is one whose session ran to its
@@ -2286,7 +2296,10 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	}
 
 	claim := "the claim was not given back"
-	if given {
+	if given && continues {
+		claim = fmt.Sprintf("the claim was given back and it is open again: the next dispatch tick takes it as attempt %d "+
+			"and keeps the branch under another name to cut its own from", c.detail.Attempts+1)
+	} else if given {
 		claim = fmt.Sprintf("the claim was given back and it is open again: the next dispatch tick takes it as attempt %d "+
 			"and keeps the branch under another name before it cuts a fresh one", c.detail.Attempts+1)
 	}
@@ -2294,6 +2307,10 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 		"Nothing was merged and nothing was pushed. The story is not closed and %s. "+
 		"The worktree %s and the branch %s are left as the session left them.",
 		n.Host, reason, why, claim, c.worktree, c.branch)
+	if continues {
+		note += fmt.Sprintf(" Its next attempt continues this branch, rebased onto %s: mw retry keeps it, "+
+			"and mw retry --from-main starts the next attempt from %s instead.", StartPoint(n.remote(), c.target), c.target)
+	}
 	if said != "" {
 		note += "\n\n" + said
 	}
@@ -2342,6 +2359,24 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 		err = fmt.Errorf("%w (and %s)", err, strings.Join(trouble, "; "))
 	}
 	return *report, err
+}
+
+// handOn writes the note that the story's next attempt continues the branch
+// this one left (mw-1ljpo9.7), when RetryFromBranch is on and reason is one
+// ContinuesFrom names, and reports whether it was written. One that cannot be
+// written is a note: the next attempt starts from the target, as before.
+func (n Next) handOn(ctx context.Context, c *closeOut, report *NextReport, reason Reason) bool {
+	if !n.RetryFromBranch || n.Memory == nil || !ContinuesFrom(reason) {
+		return false
+	}
+	if err := writeRetrying(ctx, n, report, "the note that its next attempt continues its branch", func() error {
+		return n.Memory.SetNote(ctx, ContinueKey(c.id), strconv.Itoa(c.attempt()))
+	}); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the note that the next attempt of %s continues its branch could not be written, "+
+			"so it starts from %s: %v", c.id, c.target, err))
+		return false
+	}
+	return true
 }
 
 // MaxTurnsSubtype is how Claude Code's result names a session it stopped at its
