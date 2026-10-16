@@ -252,7 +252,7 @@ func (g *Gateway) SquashHistory(ctx context.Context) error {
 	if len(first) != 1 || strings.TrimSpace(first[0].Hash) == "" {
 		return fmt.Errorf("squashing the beads history: bd sql named no first commit")
 	}
-	if _, err := g.call(ctx, "sql", fmt.Sprintf("CALL DOLT_RESET('--soft', '%s')", sqlQuoted(first[0].Hash))); err != nil {
+	if _, err := g.call(ctx, "sql", fmt.Sprintf("CALL DOLT_RESET('--soft', %s)", sqlQuoted(first[0].Hash))); err != nil {
 		return err
 	}
 	if _, err := g.call(ctx, "sql", fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", squashMessage)); err != nil &&
@@ -266,7 +266,7 @@ func (g *Gateway) SquashHistory(ctx context.Context) error {
 		return err
 	}
 	for _, remote := range remotes {
-		if _, err := g.call(ctx, "sql", fmt.Sprintf("CALL DOLT_BRANCH('-D', '-r', '%s')", sqlQuoted(remote.Name))); err != nil {
+		if _, err := g.call(ctx, "sql", fmt.Sprintf("CALL DOLT_BRANCH('-D', '-r', %s)", sqlQuoted(remote.Name))); err != nil {
 			return err
 		}
 	}
@@ -285,6 +285,3 @@ func (g *Gateway) query(ctx context.Context, query string, rows any) error {
 	}
 	return nil
 }
-
-// sqlQuoted is text made safe inside a single-quoted SQL string.
-func sqlQuoted(text string) string { return strings.ReplaceAll(text, "'", "''") }
