@@ -27,6 +27,10 @@ import (
 // allowed, so it is never a constant here.
 const downLimit = 20 * time.Minute
 
+// setCapLimit is how long setting a box's cap may take: two ssh calls, the hub's
+// and the box's, each with a connect timeout of 15 seconds.
+const setCapLimit = 2 * time.Minute
+
 // errRanPast is a run stopped at its limit.
 var errRanPast = errors.New("ran past its limit")
 
@@ -201,6 +205,14 @@ func (v Vultr) Reap(ctx context.Context, instance application.CloudInstance) err
 // that down finds it.
 func (v Vultr) Adopt(ctx context.Context, name string, instance application.CloudInstance) error {
 	_, err := v.run(ctx, downLimit, "adopt", "--yes", "--name", name, "--instance", instance.ID)
+	return err
+}
+
+// SetCap implements application.CloudProvider: `set-cap --name <box> --cap
+// <n>`, which reads the box's WireGuard address off the hub and writes the cap
+// into the config of the box over ssh.
+func (v Vultr) SetCap(ctx context.Context, name string, cap int) error {
+	_, err := v.run(ctx, setCapLimit, "set-cap", "--name", name, "--cap", strconv.Itoa(cap))
 	return err
 }
 
