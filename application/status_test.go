@@ -398,6 +398,96 @@ func TestOtherHostsSectionShowsAHostsHaltedSync(t *testing.T) {
 	}
 }
 
+// otherHostStatusAtMain is otherHostStatus with main's commit named.
+func otherHostStatusAtMain(t *testing.T, tracker *apptest.FakeTracker, main string) application.StatusReport {
+	t.Helper()
+	report, err := application.Status{
+		Tracker:     tracker,
+		Notes:       tracker,
+		Host:        "vps",
+		Seat:        "builder",
+		HostSilence: 2 * time.Hour,
+		MainCommit:  main,
+		Now:         func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	return report
+}
+
+func hostMwCommit(t *testing.T, tracker *apptest.FakeTracker, host, commit string) {
+	t.Helper()
+	if err := tracker.SetNote(context.Background(), application.MwCommitKey(host), commit); err != nil {
+		t.Fatalf("recording the mw commit of %s: %v", host, err)
+	}
+}
+
+// TestOtherHostsSectionSaysEachHostsMwCommitAndWhenItIsBehindMain is the
+// reading of mw-gq6.521: a Boost on an mw older than main worked a story
+// without the newest fixes and nothing said so.
+func TestOtherHostsSectionSaysEachHostsMwCommitAndWhenItIsBehindMain(t *testing.T) {
+	t.Run("a host on main's commit is level", func(t *testing.T) {
+		tracker := aTrackerPathedToVPS(t)
+		storyOn(t, tracker, "mw-gq6.30", "Something on the cloud", "cloud1")
+		syncedAt(t, tracker, "cloud1", 3*time.Minute)
+		hostMwCommit(t, tracker, "cloud1", "b3273a6")
+
+		block := section(otherHostStatusAtMain(t, tracker, "b3273a6c0ffee"))
+		if !strings.Contains(block, "mw b3273a6") {
+			t.Errorf("expected the host's mw commit, got:\n%s", block)
+		}
+		if strings.Contains(block, "behind main") {
+			t.Errorf("expected a host on main's commit not to be behind, got:\n%s", block)
+		}
+	})
+
+	t.Run("a host on an older commit is behind main", func(t *testing.T) {
+		tracker := aTrackerPathedToVPS(t)
+		storyOn(t, tracker, "mw-gq6.30", "Something on the cloud", "cloud1")
+		syncedAt(t, tracker, "cloud1", 3*time.Minute)
+		hostMwCommit(t, tracker, "cloud1", "74016ca")
+
+		report := otherHostStatusAtMain(t, tracker, "b3273a6")
+		block := section(report)
+		t.Logf("\n%s", block)
+		if !strings.Contains(block, "mw 74016ca") || !strings.Contains(block, "behind main") {
+			t.Errorf("expected the host's mw commit and that it is behind main, got:\n%s", block)
+		}
+		if len(report.Others) != 1 || report.Others[0].MwCommit != "74016ca" || !report.Others[0].BehindMain {
+			t.Errorf("expected the report to carry the commit and BehindMain, got %+v", report.Others)
+		}
+		for _, line := range strings.Split(report.String(), "\n") {
+			if n := len([]rune(line)); n > 60 {
+				t.Errorf("a line of %d columns: %q", n, line)
+			}
+		}
+	})
+
+	t.Run("a host that left no commit is behind main", func(t *testing.T) {
+		tracker := aTrackerPathedToVPS(t)
+		storyOn(t, tracker, "mw-gq6.30", "Something on the cloud", "cloud1")
+		syncedAt(t, tracker, "cloud1", 3*time.Minute)
+
+		block := section(otherHostStatusAtMain(t, tracker, "b3273a6"))
+		if !strings.Contains(block, "behind main") {
+			t.Errorf("expected a host that noted no commit to be called behind main, got:\n%s", block)
+		}
+	})
+
+	t.Run("with main unknown nothing is said to be behind", func(t *testing.T) {
+		tracker := aTrackerPathedToVPS(t)
+		storyOn(t, tracker, "mw-gq6.30", "Something on the cloud", "cloud1")
+		syncedAt(t, tracker, "cloud1", 3*time.Minute)
+		hostMwCommit(t, tracker, "cloud1", "74016ca")
+
+		block := section(otherHostStatusAtMain(t, tracker, ""))
+		if !strings.Contains(block, "mw 74016ca") || strings.Contains(block, "behind main") {
+			t.Errorf("expected the commit and no claim about main, got:\n%s", block)
+		}
+	})
+}
+
 // TestStatusReadsReadyAndRunningStoriesOnce says how often mw status asks the
 // tracker for the two listings every section is drawn from — what is ready and
 // what is claimed. Each costs a bd call, so it asks once per run, however many

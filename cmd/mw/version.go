@@ -52,6 +52,25 @@ func versionLine(version string, info *debug.BuildInfo) string {
 	return line + " (" + revision + ")"
 }
 
+// builtCommit is the short commit this binary was built from, "" when the
+// toolchain embedded none: what a sync leaves for the other hosts to read
+// (mw-gq6.521).
+func builtCommit() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" {
+			if len(setting.Value) > shortRevisionLen {
+				return setting.Value[:shortRevisionLen]
+			}
+			return setting.Value
+		}
+	}
+	return ""
+}
+
 // harnessVersionTimeout is how long mw waits for the harness to say its version.
 const harnessVersionTimeout = 10 * time.Second
 

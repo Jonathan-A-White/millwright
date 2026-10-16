@@ -200,6 +200,9 @@ func hostSync(sync application.Sync) (application.Sync, error) {
 	}
 	sync.Mode = setting.Configured
 	sync.Home = files
+	if sync.MwCommit == "" {
+		sync.MwCommit = builtCommit()
+	}
 	sync.Squash = squash
 	if sync.History == nil {
 		// The beads gateway is the history's adapter too; a tracker that
