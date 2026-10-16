@@ -49,6 +49,9 @@ func TestAWhatsNewMarkerCountsOnlyAtTheStartOfALine(t *testing.T) {
 		{"- What's new: New: Bulleted", WhatsNew{Kind: ChangelogNew, Text: "Bulleted"}},
 		{"* **What's new:** Fixed: Bulleted and bold", WhatsNew{Kind: ChangelogFixed, Text: "Bulleted and bold"}},
 		{"_What's new:_ New: Emphasised", WhatsNew{Kind: ChangelogNew, Text: "Emphasised"}},
+		{"5. What's new: New: Numbered", WhatsNew{Kind: ChangelogNew, Text: "Numbered"}},
+		{"5) **What's new:** Fixed: Numbered and bold", WhatsNew{Kind: ChangelogFixed, Text: "Numbered and bold"}},
+		{"• What's new: New: A round bullet", WhatsNew{Kind: ChangelogNew, Text: "A round bullet"}},
 	} {
 		got, found := ParseWhatsNew(tc.comment)
 		if !found || got != tc.want {

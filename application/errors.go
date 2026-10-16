@@ -804,7 +804,7 @@ func ParseCommonErrors(comment string) CommonErrorProposals {
 		if strings.Contains(strings.ToLower(raw), strings.ToLower(RigMemoryMarker)) {
 			break
 		}
-		text := strings.TrimSpace(proposalListMarker.ReplaceAllString(strings.TrimSpace(raw), ""))
+		text := strings.TrimSpace(domain.TrimListMarker(raw))
 		switch m := commonErrorForm.FindStringSubmatch(text); {
 		case text == "":
 		case strings.EqualFold(strings.Trim(text, " .*_`"), "nothing"):

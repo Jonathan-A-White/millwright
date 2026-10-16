@@ -1220,10 +1220,10 @@ func howToCheck(comments []Comment) string {
 
 // isHeadingLine reports whether line opens a new section of a comment: a
 // Markdown heading, the "For the rig memory:" line a closing comment ends
-// with, or a line of capital letters alone.
+// with (after any bullet or item number), or a line of capital letters alone.
 func isHeadingLine(line string) bool {
 	line = strings.TrimSpace(line)
-	if strings.HasPrefix(line, "#") || strings.HasPrefix(line, "For the rig memory") {
+	if strings.HasPrefix(line, "#") || strings.HasPrefix(domain.TrimListMarker(line), "For the rig memory") {
 		return true
 	}
 	letters := 0

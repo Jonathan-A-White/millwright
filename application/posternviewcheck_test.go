@@ -40,6 +40,8 @@ func TestHowToCheckIsTheSectionAfterTheMarker(t *testing.T) {
 		{"the marker alone says nothing", []string{"HOW TO CHECK IT"}, ""},
 		{"for the Governor is part of the heading", []string{"Done.\nHOW TO CHECK IT, for the Governor:\n1. Open it.\n2. See it."}, "1. Open it.\n2. See it."},
 		{"the rig memory line ends it", []string{"HOW TO CHECK IT: 1. Open it.\nFor the rig memory: nothing"}, "1. Open it."},
+		{"a bulleted rig memory line ends it", []string{"HOW TO CHECK IT: 1. Open it.\n- For the rig memory: nothing"}, "1. Open it."},
+		{"a numbered rig memory line ends it", []string{"HOW TO CHECK IT: 1. Open it.\n2. See it.\n\n3. For the rig memory: nothing"}, "1. Open it.\n2. See it."},
 		{"a Markdown heading ends it", []string{"HOW TO CHECK IT\n1. Open it.\n\n## Left undone\nnothing"}, "1. Open it."},
 		{"a line of capitals ends it", []string{"HOW TO CHECK IT\n1. Open it.\nWHAT IS LEFT\nnothing"}, "1. Open it."},
 		{"an image link stays", []string{"HOW TO CHECK IT\n1. Look: ![the card](https://example.test/card.png)"}, "1. Look: ![the card](https://example.test/card.png)"},
