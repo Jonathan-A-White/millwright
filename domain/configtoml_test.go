@@ -190,3 +190,50 @@ func TestSetARootKeyThatIsNotThereYet(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigTOMLReadsATableAndAnArrayOfTables(t *testing.T) {
+	text := `cap = 4000
+
+[topics]
+levels = 2
+
+[[boot]]
+file = "seats/mayor/vision.md"
+cap = 3000 # a comment
+
+[[boot]]
+newest = "seats/mayor/handoffs"
+
+[[topic]]
+file = "seats/mayor/procedures.md"
+`
+	file, err := ParseConfigTOML(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := file.Table(""); len(got) != 1 || got["cap"] != "4000" {
+		t.Errorf("the root table reads %v", got)
+	}
+	if got := file.Table("topics"); len(got) != 1 || got["levels"] != "2" {
+		t.Errorf("[topics] reads %v", got)
+	}
+	if got := file.Table("nowhere"); got != nil {
+		t.Errorf("a table the file lacks reads %v, want nil", got)
+	}
+	boots := file.ArrayTables("boot")
+	if len(boots) != 2 {
+		t.Fatalf("[[boot]] has %d entries, want 2: %v", len(boots), boots)
+	}
+	if boots[0]["file"] != `"seats/mayor/vision.md"` || boots[0]["cap"] != "3000" {
+		t.Errorf("the first [[boot]] reads %v", boots[0])
+	}
+	if boots[1]["newest"] != `"seats/mayor/handoffs"` || len(boots[1]) != 1 {
+		t.Errorf("the second [[boot]] reads %v", boots[1])
+	}
+	if topics := file.ArrayTables("topic"); len(topics) != 1 || topics[0]["file"] != `"seats/mayor/procedures.md"` {
+		t.Errorf("[[topic]] reads %v", topics)
+	}
+	if none := file.ArrayTables("nowhere"); none != nil {
+		t.Errorf("an array the file lacks reads %v, want nil", none)
+	}
+}

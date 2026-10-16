@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -13,6 +14,8 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/reaper"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
+	"github.com/Jonathan-A-White/millwright/infrastructure/shellcmd"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
@@ -32,6 +35,8 @@ func newSeatCmd() *cobra.Command {
 	seat.AddCommand(newSeatUpCmd())
 	seat.AddCommand(newSeatReapCmd())
 	seat.AddCommand(newSeatHandoverCmd())
+	seat.AddCommand(newSeatBootCmd())
+	seat.AddCommand(newSeatReadCmd())
 	return seat
 }
 
@@ -296,4 +301,93 @@ func newSeatContextCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&dir, "dir", "", "the working directory of the session to read (default: the vault)")
 	return cmd
+}
+
+// newSeatBootCmd builds `mw seat boot`: what a seat reads at boot, from its
+// manifest, in one output (mw-gq6.445).
+func newSeatBootCmd() *cobra.Command {
+	var timeout time.Duration
+	cmd := &cobra.Command{
+		Use:   "boot <seat>",
+		Short: "Print what a seat reads at boot, from seats/<seat>/boot.toml, in one output",
+		Long: "boot prints a seat's boot set: every part its manifest, seats/<seat>/boot.toml, names, in order,\n" +
+			"each under a `==> <part> <==` line and within its byte cap, then an index of the headings the seat can read\n" +
+			"by need with `mw seat read <seat> <topic>`. It is one tool call in place of a run of reads, and\n" +
+			"nothing the manifest does not name is read.\n\n" +
+			"A [[boot]] entry is one of `file` (a path from the vault's root, or from a rig's with `rig`),\n" +
+			"`newest` (a directory of the vault: its newest .md by name, a seat's handoffs) or `command` (a shell\n" +
+			"line run in the vault, what it prints being the part), with `section` (one heading of the file, by\n" +
+			"text or slug) and `cap` (bytes; 0 none; default the manifest's own `cap`, else " + strconv.Itoa(application.DefaultBootCap) + "). A path\n" +
+			"may hold {host} and {seat}. A [[topic]] entry names a file (and maybe a rig) whose headings are\n" +
+			"the topics. A part past its cap is cut at a line end and says `[cut at <cap> of <size> bytes]`.\n\n" +
+			"A part that cannot be read is said in its place and the rest is printed; the command then exits\n" +
+			"non-zero counting them. A seat with no manifest is refused. See docs/seat-boot.md.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			files, rigs, host, err := seatBootPorts()
+			if err != nil {
+				return err
+			}
+			return application.SeatBootSet{
+				Files:    files,
+				Rigs:     rigs,
+				Commands: shellcmd.New(timeout),
+				Seat:     args[0],
+				Host:     host,
+				Out:      cmd.OutOrStdout(),
+			}.Run(cmd.Context())
+		},
+	}
+	cmd.Flags().DurationVar(&timeout, "timeout", shellcmd.DefaultTimeout, "how long one of the manifest's commands may run")
+	return cmd
+}
+
+// newSeatReadCmd builds `mw seat read`: one of a seat's by-need topics, whole.
+func newSeatReadCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "read <seat> [topic]",
+		Short: "Print one heading's section of a seat's by-need files, or the index of them",
+		Long: "read prints the section under one heading of the files a seat's manifest (seats/<seat>/boot.toml)\n" +
+			"names as [[topic]] entries: the heading line through the line before the next heading of its\n" +
+			"level or higher. The topic is the heading's slug — its first five words before any aside in\n" +
+			"parentheses or after a colon, lower-case and hyphenated, as `mw seat boot` lists them — or a\n" +
+			"prefix no other slug shares. An unknown or ambiguous topic is refused, naming what there is.\n" +
+			"With no topic it prints the index alone. It reads files only.",
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			files, rigs, host, err := seatBootPorts()
+			if err != nil {
+				return err
+			}
+			topic := ""
+			if len(args) > 1 {
+				topic = args[1]
+			}
+			return application.SeatRead{
+				Files: files,
+				Rigs:  rigs,
+				Seat:  args[0],
+				Host:  host,
+				Out:   cmd.OutOrStdout(),
+			}.Run(cmd.Context(), topic)
+		},
+	}
+}
+
+// seatBootPorts reads the config the seat boot commands need: the vault, the
+// rigs checked out here and this host's name.
+func seatBootPorts() (*vault.Vault, rig.Docs, string, error) {
+	dir, err := config.Vault()
+	if err != nil {
+		return nil, rig.Docs{}, "", err
+	}
+	host, err := config.Host()
+	if err != nil {
+		return nil, rig.Docs{}, "", err
+	}
+	rigs, err := config.Rigs()
+	if err != nil {
+		return nil, rig.Docs{}, "", err
+	}
+	return vault.New(dir), rig.Docs{Rigs: rigs}, host, nil
 }
