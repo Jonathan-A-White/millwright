@@ -1469,34 +1469,59 @@ func (i PosternInbox) fetchSince(ctx context.Context, cursor int64) (mine []Post
 		}
 		from, verified, signerChecked := posternVerifySender(envelopeFrom, r.From, r.Signer)
 		thread, display, threadIsBead, attachment, attachments := posternThreadAndText(r.Class, text)
-		mine = append(mine, PosternInboxMessage{
+		m := PosternInboxMessage{
 			Seq: r.Seq, Txid: r.Txid, Class: r.Class,
 			From: from, Verified: verified, SignerChecked: signerChecked,
 			Ts: r.Ts, Text: display, Thread: thread, ThreadIsBead: threadIsBead,
 			Attachment: attachment, Attachments: attachments, Re: posternReOf(text),
-		})
-		i.rememberThread(r.Txid, thread, threadIsBead)
+		}
+		mine = append(mine, m)
+		if err := rememberChannelOf(i.Threads, m); err != nil {
+			i.printf("%v\n", err)
+		}
 	}
 	return mine, newest, nil
 }
 
-// rememberThread tells Threads which channel the post txid is in: thread is
-// the label posternThreadAndText reports, a bead's id, a named channel, or
-// PosternGeneralThread.
-func (i PosternInbox) rememberThread(txid, thread string, isBead bool) {
-	if i.Threads == nil || strings.TrimSpace(txid) == "" {
-		return
-	}
-	remembered := PosternThread{}
+// channel is the PosternThread m is in: its bead's, a named one, or the zero
+// PosternThread for General.
+func (m PosternInboxMessage) channel() PosternThread {
 	switch {
-	case isBead:
-		remembered.Bead = thread
-	case thread != PosternGeneralThread:
-		remembered.Topic = thread
+	case m.ThreadIsBead:
+		return PosternThread{Bead: m.Thread}
+	case m.Thread != PosternGeneralThread:
+		return PosternThread{Topic: m.Thread}
 	}
-	if err := i.Threads.Remember(txid, remembered); err != nil {
-		i.printf("could not remember the channel of %s: %v\n", txid, err)
+	return PosternThread{}
+}
+
+// rememberChannelOf tells threads which channel m is in, and — when m is a
+// verified reply — that the post it answers is in the same one, unless
+// threads already knows that post: a reply hangs in its root's thread, so
+// the answer line printed under m, mw postern send --re <root>, finds the
+// root's channel even when this host never saw the root (mw-gq6.435). Nil
+// threads remembers nothing.
+func rememberChannelOf(threads PosternThreadIndex, m PosternInboxMessage) error {
+	if threads == nil {
+		return nil
 	}
+	if txid := strings.TrimSpace(m.Txid); txid != "" {
+		if err := threads.Remember(txid, m.channel()); err != nil {
+			return fmt.Errorf("could not remember the channel of %s: %w", txid, err)
+		}
+	}
+	root := strings.TrimSpace(m.Re)
+	if root == "" || !m.Verified {
+		return nil
+	}
+	_, known, err := threads.Lookup(root)
+	if err == nil && !known {
+		err = threads.Remember(root, m.channel())
+	}
+	if err != nil {
+		return fmt.Errorf("could not remember the channel of %s: %w", root, err)
+	}
+	return nil
 }
 
 // posternVerifySender is the sender mw trusts for a record whose ciphertext
@@ -1561,9 +1586,9 @@ func reversePosternInbox(mine []PosternInboxMessage) []PosternInboxMessage {
 }
 
 // PosternThreadIndex is where mw remembers which channel each post it has
-// seen or sent is in, by txid: what mw postern inbox read, and what mw postern
-// send sent. It is how --re <root> with no channel flag finds the root's
-// channel. A txid is the key bare or as "direct:<sha256>", the same post
+// seen or sent is in, by txid: what mw postern inbox and mw talk wait read,
+// the root a verified reply they read answers, and what mw postern send
+// sent. It is how --re <root> with no channel flag finds the root's channel. A txid is the key bare or as "direct:<sha256>", the same post
 // either way. The real adapter, infrastructure/postern's ThreadFile, is a
 // file under the state directory; apptest.FakePosternThreadIndex is the
 // fake.

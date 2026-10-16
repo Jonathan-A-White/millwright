@@ -190,7 +190,12 @@ func newTalkWaitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			threads, err := posternThreads()
+			if err != nil {
+				return err
+			}
 			_, err = application.TalkWait{
+				Threads:     threads,
 				Ideas:       &ideas,
 				Release:     ideasOnlyReleaser(cmd.ErrOrStderr()),
 				Lock:        posternInboxLock(attachmentDir),
