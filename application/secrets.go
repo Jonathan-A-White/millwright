@@ -105,7 +105,7 @@ func (p SecretsPut) Run(ctx context.Context, name string) error {
 		return err
 	}
 	if p.Vault != nil {
-		if _, err := p.Vault.Commit(ctx, "mw secrets put "+name, []string{SecretsFile}); err != nil {
+		if _, err := commitWritten(ctx, p.Vault, "mw secrets put "+name, []string{SecretsFile}); err != nil {
 			return fmt.Errorf("%s was put but %s is not committed: %w", name, SecretsFile, err)
 		}
 	}

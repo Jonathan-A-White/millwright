@@ -462,6 +462,29 @@ type RecordVault interface {
 	Push(ctx context.Context) (int, error)
 }
 
+// VaultCommitBound bounds a commit that is made once its files are written: long
+// enough for a local git commit on a loaded box, short enough that a git stuck on
+// a lock does not hold a stopped mw for ever.
+const VaultCommitBound = 2 * time.Minute
+
+// vaultCommitter is what commitWritten commits through; VaultFiles' Commit, narrowed.
+type vaultCommitter interface {
+	Commit(ctx context.Context, message string, paths []string) ([]string, error)
+}
+
+// commitWritten commits paths of the vault that were just written, and the
+// commit runs to its end even when ctx has ended (mw told to stop, a caller's
+// timeout): a file written and not committed is a tracked change every host's
+// dispatch refuses on until someone commits it, and killing git part-way
+// through leaves the index locked (mw-gq6.462, mw-gq6.502). Every write to the
+// vault is followed by this, in the same step, rather than by a Commit on the
+// caller's ctx.
+func commitWritten(ctx context.Context, vault vaultCommitter, message string, paths []string) ([]string, error) {
+	commit, cancel := context.WithTimeout(context.WithoutCancel(ctx), VaultCommitBound)
+	defer cancel()
+	return vault.Commit(commit, message, paths)
+}
+
 // recordInVault commits exactly the files a verb wrote, under a message that
 // names the command and its subject, and pushes. A vault that holds someone
 // else's uncommitted change is not swept into the commit: only the paths are.
@@ -472,7 +495,7 @@ func recordInVault(ctx context.Context, vault RecordVault, warn io.Writer, messa
 	if vault == nil {
 		return nil
 	}
-	recorded, err := vault.Commit(ctx, message, paths)
+	recorded, err := commitWritten(ctx, vault, message, paths)
 	if err != nil {
 		return fmt.Errorf("%s: the files are written but not committed in the vault: %w", message, err)
 	}

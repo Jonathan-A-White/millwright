@@ -66,6 +66,9 @@ type moveWorld struct {
 	failAt string
 	// written is the last home file written.
 	written domain.HomeRecord
+	// afterWrite runs just after the home file is written, as a stand-in for
+	// the move being told to stop at that moment.
+	afterWrite func()
 }
 
 func newMoveWorld() *moveWorld {
@@ -199,7 +202,11 @@ func (w *moveWorld) MayorUp(context.Context) (bool, string, error) {
 
 func (w *moveWorld) WriteHome(_ context.Context, record domain.HomeRecord) error {
 	w.written = record
-	return w.did("write home")
+	err := w.did("write home")
+	if w.afterWrite != nil {
+		w.afterWrite()
+	}
+	return err
 }
 
 func (w *moveWorld) Pull(context.Context) (int, error) { return 3, w.did("git pull") }
@@ -207,7 +214,10 @@ func (w *moveWorld) Push(context.Context) (int, error) { return 1, w.did("git pu
 func (w *moveWorld) Head(context.Context) (string, error) {
 	return "abc1234", w.did("git rev-parse HEAD")
 }
-func (w *moveWorld) Commit(_ context.Context, message string, paths []string) ([]string, error) {
+func (w *moveWorld) Commit(ctx context.Context, message string, paths []string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := w.did("git commit " + strings.Join(paths, " ")); err != nil {
 		return nil, err
 	}

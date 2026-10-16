@@ -98,7 +98,11 @@ func (f *Formulas) Install(ctx context.Context, factoryDir, message string) ([]s
 		}
 		paths = append(paths, application.FormulasDir+"/"+name)
 	}
-	committed, err := f.vault.Commit(ctx, message, paths)
+	// The files are written: the commit runs to its end even when ctx has
+	// ended, as the cloud book's does (mw-gq6.502).
+	commit, cancel := context.WithTimeout(context.WithoutCancel(ctx), cloudBookCommitWait)
+	defer cancel()
+	committed, err := f.vault.Commit(commit, message, paths)
 	if err != nil {
 		return nil, "", err
 	}

@@ -134,7 +134,7 @@ func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, fi
 		s.BundlePath = relPath
 		kept = fmt.Sprintf("the bundle %s is safe in the vault", relPath)
 		commitMessage := fmt.Sprintf("%s: bundle of attempt %d branch %s, kept before it was cleared away", storyID, attempt, branch)
-		if _, err := files.Commit(ctx, commitMessage, []string{relPath}); err != nil {
+		if _, err := commitWritten(ctx, files, commitMessage, []string{relPath}); err != nil {
 			return s, fmt.Errorf("committing the bundle %s in the vault: %w", relPath, err)
 		}
 		if _, err := files.Push(ctx); err != nil {
