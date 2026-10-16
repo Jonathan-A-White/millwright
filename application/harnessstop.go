@@ -2,7 +2,9 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"regexp"
 	"strconv"
 	"strings"
@@ -47,10 +49,12 @@ func (s HarnessStop) String() string {
 }
 
 var (
-	// usageLimited is the harness's word that the account's usage limit is
-	// reached: "You've hit your weekly limit", "Claude AI usage limit reached",
-	// "5-hour limit reached".
-	usageLimited = regexp.MustCompile(`(?i)(you've hit your\b.*\blimit|usage limit reached|\d+-hour limit reached)`)
+	// usageLimitNotice is the harness's notice that the account's usage limit
+	// stopped it: "You've hit your weekly limit · resets …", or the session,
+	// 5-hour or monthly limit, with either apostrophe; "Claude AI usage limit
+	// reached"; "5-hour limit reached". It is the one reader of that notice, for
+	// mw next, status, dispatch, retry and the mill alike (mw-gq6.471).
+	usageLimitNotice = regexp.MustCompile(`(?i)(\b(?:you(?:'|’)ve|you have) hit your\b[^\n]{0,40}?\blimit\b|usage limit reached|\d+-hour limit reached)`)
 	// usageEpoch is the older form, which ends in the reset as Unix seconds.
 	usageEpoch = regexp.MustCompile(`limit reached\|(\d{9,})`)
 	// usageResets is the reset time the newer form names: "resets Oct 16, 9am
@@ -60,6 +64,35 @@ var (
 	// {...overloaded_error...}".
 	apiError = regexp.MustCompile(`(?i)^api error:?\s*(\d{3})?`)
 )
+
+// AtUsageLimit reports whether text holds the harness's notice that the usage
+// limit stopped it (mw-gq6.433).
+func AtUsageLimit(text string) bool { return usageLimitNotice.MatchString(text) }
+
+// usageLimitLine is the line of text that holds the usage limit's notice, the
+// first that names its reset when more than one holds it, and empty when none
+// does. A line that speaks of a rate limit is the API's, not the account's.
+func usageLimitLine(text string) string {
+	found := ""
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if !usageLimitNotice.MatchString(line) || strings.Contains(strings.ToLower(line), "rate limit") {
+			continue
+		}
+		if usageEpoch.MatchString(line) || usageResets.MatchString(line) {
+			return line
+		}
+		if found == "" {
+			found = line
+		}
+	}
+	return found
+}
+
+// usageLimitStop is the stop a usage limit's line names.
+func usageLimitStop(line string, ended time.Time) HarnessStop {
+	return HarnessStop{Reason: ReasonUsageLimit, Said: line, Until: usageReset(line, ended)}
+}
 
 // HarnessStopOf reads whether a session the harness ended without finishing was
 // stopped for something that is not the work's, and when to try again. ended is
@@ -71,14 +104,13 @@ func HarnessStopOf(result SessionResult, ended time.Time) (HarnessStop, bool) {
 	if result.Finished() {
 		return HarnessStop{}, false
 	}
+	if line := usageLimitLine(result.Said); line != "" {
+		return usageLimitStop(line, ended), true
+	}
 	said := firstLine(result.Said)
 	stop := HarnessStop{Said: said}
 	lower := strings.ToLower(said)
 	switch {
-	case usageLimited.MatchString(said) && !strings.Contains(lower, "rate limit"):
-		stop.Reason = ReasonUsageLimit
-		stop.Until = usageReset(said, ended)
-		return stop, true
 	case strings.Contains(lower, "rate_limit_error"), strings.Contains(lower, "overloaded_error"), apiError.MatchString(said):
 	default:
 		return HarnessStop{}, false
@@ -101,6 +133,20 @@ func HarnessStopOf(result SessionResult, ended time.Time) (HarnessStop, bool) {
 	}
 	stop.Until = ended.Add(HarnessStopWait)
 	return stop, true
+}
+
+// HarnessStopOfWords reads whether words the harness printed that are not a
+// result — what it wrote where its JSON belonged, the tail of its pane, an
+// error that carries its last words — say it stopped at the usage limit
+// (mw-gq6.471). Only the usage limit's own line is read in them: the rest of
+// such words may be mw's or the work's, and an API's error among them may be
+// one the harness went on past.
+func HarnessStopOfWords(words string, ended time.Time) (HarnessStop, bool) {
+	line := usageLimitLine(words)
+	if line == "" {
+		return HarnessStop{}, false
+	}
+	return usageLimitStop(line, ended), true
 }
 
 // usageReset is the time a usage limit resets, as the harness named it, or
@@ -152,16 +198,22 @@ func usageReset(said string, ended time.Time) time.Time {
 	return at
 }
 
+// sessionStarted is when a story's last session started: its claim, or a
+// send-back after it. Zero when neither time is written.
+func sessionStarted(detail StoryDetail) time.Time {
+	if detail.SentBackAt.After(detail.ClaimedAt) {
+		return detail.SentBackAt
+	}
+	return detail.ClaimedAt
+}
+
 // sessionEnded is when a story's last session ended, as near as can be read
 // without the harness saying: when it started (the claim, or a send-back after
 // it) and the time it ran. A story with neither time written reads as having
 // ended a day before now, so that a stop with no date of its own is not held on
 // a guess.
 func sessionEnded(detail StoryDetail, result SessionResult, now time.Time) time.Time {
-	started := detail.ClaimedAt
-	if detail.SentBackAt.After(started) {
-		started = detail.SentBackAt
-	}
+	started := sessionStarted(detail)
 	if started.IsZero() {
 		return now.Add(-24 * time.Hour)
 	}
@@ -172,22 +224,72 @@ func sessionEnded(detail StoryDetail, result SessionResult, now time.Time) time.
 	return started.Add(ran)
 }
 
-// harnessStopOfAttempt reads the result of a story's last attempt from the vault
-// and whether the harness stopped it for something that is not the work's. A
-// result that is missing or cannot be read is no harness stop.
+// HarnessStopFileName is the run file mw next keeps a harness stop in when it
+// read it from words that are not a result (mw-gq6.471): the session left no
+// JSON, and what it printed instead, or its pane, named the usage limit. It
+// holds when the session ended and the harness's line, so that mw dispatch,
+// retry and status read the same stop from the run once the pane is gone.
+const HarnessStopFileName = "harness-stop.txt"
+
+// HarnessStopFileNameForAttempt is HarnessStopFileName for one attempt, named
+// as the result it stands beside.
+func HarnessStopFileNameForAttempt(attempt int) string {
+	return attemptRunFileName(HarnessStopFileName, attempt)
+}
+
+// HarnessStopKept is what HarnessStopFileName holds: when the session ended, on
+// a line of its own, then the harness's words.
+func HarnessStopKept(ended time.Time, said string) string {
+	return ended.UTC().Format(time.RFC3339) + "\n" + said + "\n"
+}
+
+// harnessStopOfRun is the one reader of how attempt of a story's session
+// ended, from what its run holds: its result, when that is the JSON a harness
+// writes; else the stop mw next kept beside it from the pane or the words the
+// harness printed (HarnessStopFileName); else those words themselves. A
+// result that cannot be read is no harness stop.
+func harnessStopOfRun(ctx context.Context, vault Vault, detail StoryDetail, attempt int, now time.Time) (HarnessStop, bool) {
+	if vault == nil {
+		return HarnessStop{}, false
+	}
+	printed, err := vault.ReadRunFile(ctx, detail.Story.ID, ResultFileNameForAttempt(attempt))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return HarnessStop{}, false
+	}
+	if result, err := ReadSessionResult(printed); err == nil {
+		return HarnessStopOf(result, sessionEnded(detail, result, now))
+	}
+	if stop, ok := keptHarnessStop(ctx, vault, detail, attempt); ok {
+		return stop, true
+	}
+	return HarnessStopOfWords(printed, sessionEnded(detail, SessionResult{}, now))
+}
+
+// keptHarnessStop reads the stop mw next kept for attempt. One kept before the
+// story's last session started is an earlier session's, of an attempt given
+// back uncounted and started again under the same number: it says nothing of
+// this one.
+func keptHarnessStop(ctx context.Context, vault Vault, detail StoryDetail, attempt int) (HarnessStop, bool) {
+	kept, err := vault.ReadRunFile(ctx, detail.Story.ID, HarnessStopFileNameForAttempt(attempt))
+	if err != nil {
+		return HarnessStop{}, false
+	}
+	at, words, _ := strings.Cut(strings.TrimSpace(kept), "\n")
+	ended, err := time.Parse(time.RFC3339, strings.TrimSpace(at))
+	if err != nil || ended.Before(sessionStarted(detail)) {
+		return HarnessStop{}, false
+	}
+	return HarnessStopOfWords(words, ended)
+}
+
+// harnessStopOfAttempt reads whether the harness stopped a story's last
+// attempt for something that is not the work's (harnessStopOfRun). A story
+// never attempted has no stop to read.
 func harnessStopOfAttempt(ctx context.Context, vault Vault, detail StoryDetail, now time.Time) (HarnessStop, bool) {
-	if vault == nil || detail.Attempts < 1 {
+	if detail.Attempts < 1 {
 		return HarnessStop{}, false
 	}
-	printed, err := vault.ReadRunFile(ctx, detail.Story.ID, ResultFileNameForAttempt(detail.Attempts))
-	if err != nil {
-		return HarnessStop{}, false
-	}
-	result, err := ReadSessionResult(printed)
-	if err != nil {
-		return HarnessStop{}, false
-	}
-	return HarnessStopOf(result, sessionEnded(detail, result, now))
+	return harnessStopOfRun(ctx, vault, detail, detail.Attempts, now)
 }
 
 // HarnessHoldKey is the note a host's hold on new claims is kept under: the time
