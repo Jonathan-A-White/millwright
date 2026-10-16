@@ -25,6 +25,7 @@ func newTodoCmd() *cobra.Command {
 	todo.AddCommand(newTodoSizeCmd())
 	todo.AddCommand(newTodoThenCmd())
 	todo.AddCommand(newTodoRankCmd())
+	todo.AddCommand(newTodoSearchCmd())
 	return todo
 }
 
