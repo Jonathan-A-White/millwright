@@ -1133,6 +1133,11 @@ func (i PosternInbox) recordAnswer(ctx context.Context, m PosternInboxMessage, r
 			return false, err
 		}
 	}
+	if isDigestLooksGoodTap(reply.Answer) {
+		if err := i.digestOnTap(ctx, m, reply.Bead, reply.Answer, noteValue); err != nil {
+			return false, err
+		}
+	}
 	return true, nil
 }
 

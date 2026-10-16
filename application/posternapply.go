@@ -879,3 +879,87 @@ func (i PosternInbox) letGoOnTap(ctx context.Context, m PosternInboxMessage, epi
 	return i.mail(ctx, fmt.Sprintf("%s: the Let go card of %s", verb, epic),
 		fmt.Sprintf("%s by the Governor's tap (txid %s): %d cards: %s", verb, m.Txid, len(done), joinOrNone(done)))
 }
+
+// isDigestLooksGoodTap reports whether answer's word begins "looks good on
+// all": the first option of the weekly digest card (DigestLooksGoodOption).
+func isDigestLooksGoodTap(answer string) bool {
+	return strings.HasPrefix(posternAnswerWord(answer), "looks good on all ")
+}
+
+// digestOnTap closes the batch on the Governor's "A: Looks good on all N" to
+// the weekly digest bead: each demo the digest lists that is still open and
+// unclaimed gets his tap quoted on it, as applyLooksGood writes it, and is
+// closed; then the digest itself. It acts only on an open bead titled "Weekly
+// digest", and only when m's verified sender is this host's GovernorKey and
+// noteValue shows the question offered the answer; any other bead is not its
+// and nothing is said. A listed demo already closed, claimed or gone is
+// skipped and named in the mail. A comment or close that fails stops the
+// batch, leaves the digest open and mails the Mayor "Not applied".
+func (i PosternInbox) digestOnTap(ctx context.Context, m PosternInboxMessage, bead, answer, noteValue string) error {
+	found, err := i.Tracker.ShowBeads(ctx, []string{bead})
+	if err != nil {
+		return fmt.Errorf("reading %s for the Governor's tap on the weekly digest: %w", bead, err)
+	}
+	if len(found) == 0 || found[0].IsEpic || found[0].Closed() || !isDigest(found[0]) {
+		return nil
+	}
+	digest := found[0]
+	notApplied := func(why string) error {
+		return i.mail(ctx, fmt.Sprintf("Not applied: the weekly digest %s", bead),
+			fmt.Sprintf("The Governor said %q by postern (txid %s) to the weekly digest %s; not applied: %s.", answer, m.Txid, bead, why))
+	}
+	if !i.isGovernor(m) {
+		return notApplied("the tap's signer unchecked")
+	}
+	if !posternQuestionOffered(noteValue, posternAnswerWord(answer)) {
+		return notApplied("its question never offered it")
+	}
+	listed := digestListed(digest.Description)
+	demos := map[string]StoryDetail{}
+	if len(listed) > 0 {
+		shown, err := i.Tracker.ShowBeads(ctx, listed)
+		if err != nil {
+			return fmt.Errorf("reading the demos of the weekly digest %s: %w", bead, err)
+		}
+		for _, d := range shown {
+			demos[d.Story.ID] = d
+		}
+	}
+	var closed, skipped []string
+	for _, id := range listed {
+		demo, ok := demos[id]
+		switch {
+		case !ok:
+			skipped = append(skipped, id+" (not found)")
+			continue
+		case demo.IsEpic || !isDemo(demo):
+			skipped = append(skipped, id+" (not a demo)")
+			continue
+		case demo.Closed():
+			skipped = append(skipped, id+" (already closed)")
+			continue
+		case isClaimed(demo):
+			skipped = append(skipped, id+" (claimed)")
+			continue
+		}
+		reason := fmt.Sprintf("Demo accepted on the Governor's Looks good via the weekly digest (txid %s)", m.Txid)
+		comment := fmt.Sprintf("The Governor by postern %s, on the weekly digest %s: %q (txid %s). Demo accepted on the Governor's Looks good via the weekly digest.",
+			sentInFull(m.Ts), bead, strings.TrimSpace(answer), m.Txid)
+		// The comment first, as applyLooksGood writes it: a close that fails
+		// leaves no bead the Governor's word is not on.
+		if err := i.Tracker.CommentOnStory(ctx, id, comment); err != nil {
+			return notApplied(fmt.Sprintf("commenting on %s failed: %v (closed: %s)", id, err, joinOrNone(closed)))
+		}
+		if err := i.Tracker.CloseStory(ctx, id, reason); err != nil {
+			return notApplied(fmt.Sprintf("closing %s failed: %v (closed: %s)", id, err, joinOrNone(closed)))
+		}
+		closed = append(closed, id)
+	}
+	reason := fmt.Sprintf("Weekly digest taken on the Governor's Looks good (txid %s)", m.Txid)
+	if err := i.Tracker.CloseStory(ctx, bead, reason); err != nil {
+		return notApplied(fmt.Sprintf("closed %s, then closing the digest failed: %v", joinOrNone(closed), err))
+	}
+	return i.mail(ctx, fmt.Sprintf("Closed: the weekly digest %s on his Looks good", bead),
+		fmt.Sprintf("The Governor said %q by postern (txid %s) to the weekly digest %s.\nClosed %d demos: %s.\nSkipped: %s.",
+			strings.TrimSpace(answer), m.Txid, bead, len(closed), joinOrNone(closed), joinOrNone(skipped)))
+}
