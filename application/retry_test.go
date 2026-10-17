@@ -22,6 +22,11 @@ type fakeRetryLanding struct {
 	AheadCount int
 	AheadErr   error
 
+	// BehindCount is what Ahead says when it is asked the other way round, how
+	// many commits the target branch has that a story's branch (base) lacks:
+	// zero, a target that has not moved since the branch was cut (mw-gq6.552).
+	BehindCount int
+
 	// MergedTip is the tip MergedInto reports the story's branch has, contained
 	// in the base; empty means the branch is absent or not merged.
 	MergedTip string
@@ -81,11 +86,14 @@ func (f *fakeRetryLanding) DeleteBranch(context.Context, string, string) error {
 	return nil
 }
 
-func (f *fakeRetryLanding) Ahead(context.Context, string, string, string) (int, error) {
+func (f *fakeRetryLanding) Ahead(_ context.Context, _, _, base string) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.AheadErr != nil {
 		return 0, f.AheadErr
+	}
+	if strings.HasPrefix(base, application.BranchPrefix) {
+		return f.BehindCount, nil
 	}
 	return f.AheadCount, nil
 }

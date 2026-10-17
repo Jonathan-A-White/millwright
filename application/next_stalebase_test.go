@@ -14,17 +14,7 @@ import (
 // aMovedTargetLanding is a landing whose target branch holds Behind commits the
 // story's branch lacks (it was cut before them), and whose merge of the branch
 // makes a merge commit, so that the merged result is tested.
-type aMovedTargetLanding struct {
-	fakeRetryLanding
-	Behind int
-}
-
-func (l *aMovedTargetLanding) Ahead(_ context.Context, _, branch, _ string) (int, error) {
-	if branch == application.StartPoint("origin", "main") {
-		return l.Behind, nil
-	}
-	return l.AheadCount, nil
-}
+type aMovedTargetLanding struct{ fakeRetryLanding }
 
 func (*aMovedTargetLanding) Merge(context.Context, string, string) (application.Landed, error) {
 	return application.Landed{Commit: "0123456789abcdef", Before: "fedcba9876543210"}, nil
@@ -40,7 +30,7 @@ func aCloseOutOnAMovedTarget(t *testing.T, behind int, passes []bool) (applicati
 	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
 	vault := newFakeVault()
 	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
-	lands := &aMovedTargetLanding{fakeRetryLanding: fakeRetryLanding{AheadCount: 1}, Behind: behind}
+	lands := &aMovedTargetLanding{fakeRetryLanding{AheadCount: 1, BehindCount: behind}}
 	checks := &scriptedChecks{passes: passes}
 	report, err := application.Next{
 		Tracker: tracker, Vault: vault, Worktrees: lands, Landing: lands,
@@ -105,7 +95,7 @@ func TestCheckOfAStoryCutBeforeCommitsOfItsTargetSaysSoWhenItsTestsFail(t *testi
 	tracker := apptest.NewFakeTracker()
 	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
 	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
-	lands := &aMovedTargetLanding{fakeRetryLanding: fakeRetryLanding{AheadCount: 1}, Behind: 3}
+	lands := &aMovedTargetLanding{fakeRetryLanding{AheadCount: 1, BehindCount: 3}}
 	checks := &scriptedChecks{passes: []bool{false}}
 	report, err := application.Check{
 		Tracker: tracker, Landing: lands, Checks: checks,
