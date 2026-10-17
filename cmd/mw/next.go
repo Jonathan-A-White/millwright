@@ -142,6 +142,10 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			testers, err := testersPerRig()
+			if err != nil {
+				return err
+			}
 			pushTries, err := config.PushTries()
 			if err != nil {
 				return err
@@ -189,22 +193,23 @@ func newNextCmd() *cobra.Command {
 			var dispatcher application.Dispatcher
 			if !noDispatch {
 				dispatcher = withHostDispatchLocks(application.Dispatch{
-					Tracker:     gateway,
-					Worktrees:   worktrees,
-					Landing:     worktrees,
-					Runner:      runner,
-					Boot:        builderBoot(files, host, tests, nice, jobs, turns),
-					Memory:      gateway,
-					Host:        host,
-					Cap:         atOnce,
-					MaxAttempts: maxAttempts,
-					Mailbox:     gateway,
-					Load:        hostload.Proc{},
-					Rigs:        rigs,
-					Changes:     worktrees,
-					Events:      homeEventLog(),
-					SmokeHolds:  gristSmokeBook(gateway, host),
-					Out:         cmd.OutOrStdout(),
+					Tracker:       gateway,
+					Worktrees:     worktrees,
+					Landing:       worktrees,
+					Runner:        runner,
+					Boot:          builderBoot(files, host, tests, nice, jobs, turns),
+					Memory:        gateway,
+					Host:          host,
+					Cap:           atOnce,
+					MaxAttempts:   maxAttempts,
+					TestersPerRig: testers,
+					Mailbox:       gateway,
+					Load:          hostload.Proc{},
+					Rigs:          rigs,
+					Changes:       worktrees,
+					Events:        homeEventLog(),
+					SmokeHolds:    gristSmokeBook(gateway, host),
+					Out:           cmd.OutOrStdout(),
 
 					RetryFromBranch: fromBranch,
 					Rebases:         worktrees,

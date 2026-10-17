@@ -270,6 +270,11 @@ func newDispatchCmd() *cobra.Command {
 				return err
 			}
 
+			testers, err := testersPerRig()
+			if err != nil {
+				return err
+			}
+
 			heavy, err := config.HeavyNet()
 			if err != nil {
 				return err
@@ -289,34 +294,35 @@ func newDispatchCmd() *cobra.Command {
 				return err
 			}
 			dispatch := application.Dispatch{
-				Tracker:     gateway,
-				Worktrees:   worktrees,
-				Landing:     worktrees,
-				Runner:      tmux.New(),
-				Boot:        builderBoot(files, host, tests, nice, jobs, turns),
-				Memory:      gateway,
-				Sync:        sync,
-				SyncTries:   tries,
-				SyncWait:    wait,
-				SyncHalts:   hostSyncHalt(),
-				Host:        host,
-				Cap:         atOnce,
-				MaxAttempts: maxAttempts,
-				Mailbox:     gateway,
-				VaultDir:    dir,
-				Load:        hostload.Proc{},
-				Room:        application.RoomLimits{LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB},
-				Grist:       hostGristRoom(room),
-				Rigs:        rigs,
-				Changes:     worktrees,
-				Rules:       files,
-				Network:     net,
-				HeavyNet:    heavy,
-				Exclusive:   hostDispatchLock(dir),
-				Events:      homeEventLog(),
-				SmokeHolds:  gristSmokeBook(gateway, host),
-				Home:        files,
-				GateLock:    hostGateLock(),
+				Tracker:       gateway,
+				Worktrees:     worktrees,
+				Landing:       worktrees,
+				Runner:        tmux.New(),
+				Boot:          builderBoot(files, host, tests, nice, jobs, turns),
+				Memory:        gateway,
+				Sync:          sync,
+				SyncTries:     tries,
+				SyncWait:      wait,
+				SyncHalts:     hostSyncHalt(),
+				Host:          host,
+				Cap:           atOnce,
+				MaxAttempts:   maxAttempts,
+				TestersPerRig: testers,
+				Mailbox:       gateway,
+				VaultDir:      dir,
+				Load:          hostload.Proc{},
+				Room:          application.RoomLimits{LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB},
+				Grist:         hostGristRoom(room),
+				Rigs:          rigs,
+				Changes:       worktrees,
+				Rules:         files,
+				Network:       net,
+				HeavyNet:      heavy,
+				Exclusive:     hostDispatchLock(dir),
+				Events:        homeEventLog(),
+				SmokeHolds:    gristSmokeBook(gateway, host),
+				Home:          files,
+				GateLock:      hostGateLock(),
 				Rechecks: application.Suite{
 					Trees: worktrees, Heads: worktrees, Runner: rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs)),
 					Rigs: rigs, Tests: tests, ChangedSpecs: changedSpecs,

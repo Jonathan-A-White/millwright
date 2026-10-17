@@ -367,7 +367,9 @@ config file's `[benchmark]` table: `usual_gates`, `par_window`, `par_min`,
 
 `mw status` prints a DAMPERS section when an alarm trips, one line each naming up to five
 beads (then `+N`) and its principle in a word: WIP (more than 10 ready P1 stories, more
-than one Tester story running on a rig), ageing (a P1 untouched 5 days, a demo waiting
+than one Tester story running on a rig; `mw dispatch` also enforces this one, holding a
+ready Tester with `waiting: <rig> already runs N Tester stories (testers_per_rig N)` while
+its rig runs that many on any host, and `mw status` shows the same line under it in READY), ageing (a P1 untouched 5 days, a demo waiting
 over 7 days, a grilling open over 7 days with no card), review (his open cards, open
 demos and unrun hands steps over 8). The limits are the config file's `[dampers]` table:
 `ready_p1`, `p1_untouched_days`, `demo_waiting_days`, `grilling_days`, `testers_per_rig`,

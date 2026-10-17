@@ -200,6 +200,7 @@ func newStatusCmd() *cobra.Command {
 			_, err = application.Status{
 				Tracker:          tracker,
 				Dampers:          dampers,
+				TestersPerRig:    dampers.Limits.TestersPerRig,
 				Turns:            turns,
 				Ideas:            bootIdeasOnly(),
 				Rigs:             rigs,
@@ -301,6 +302,16 @@ func damperSurvey(tracker *beads.Gateway) (application.DamperSurvey, error) {
 			GrillingDays: limits.GrillingDays, TestersPerRig: limits.TestersPerRig, ReviewQueue: limits.ReviewQueue,
 		},
 	}, nil
+}
+
+// testersPerRig is the [dampers] testers_per_rig key, 0 when the table leaves it
+// out: mw dispatch holds a ready Tester while its rig runs that many (mw-gq6.546).
+func testersPerRig() (int, error) {
+	limits, err := config.Dampers()
+	if err != nil {
+		return 0, err
+	}
+	return limits.TestersPerRig, nil
 }
 
 func benchmarkLimits(s config.BenchmarkSettings) application.BenchmarkSettings {
