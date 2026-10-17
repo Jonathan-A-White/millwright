@@ -37,6 +37,9 @@ const (
 const (
 	MailHeld     = "Held"
 	MailSetAside = "Set aside"
+	// MailNotCommitted is the subject when a batch landed whole but its records
+	// could not be committed in the vault (mw-gq6.554).
+	MailNotCommitted = "Not committed"
 )
 
 // BatchRecords is the port a batch's records are kept through, in the vault
@@ -885,12 +888,19 @@ func (r BatchReport) merged(id string) (BatchStory, bool) {
 // cannot be sent is a note.
 func (b BatchLand) mailTheMayor(ctx context.Context, report *BatchReport, nr *NextReport) {
 	n := b.Next
-	if n.Mailbox == nil || (report.Landed && len(report.SetAside) == 0) {
+	notCommitted := report.notCommitted()
+	if n.Mailbox == nil || (report.Landed && len(report.SetAside) == 0 && len(notCommitted) == 0) {
 		return
 	}
 	var body strings.Builder
+	for _, line := range notCommitted {
+		body.WriteString(line + "\n")
+	}
 	verdict := MailHeld
-	if report.Landed {
+	if report.Landed && len(report.SetAside) == 0 {
+		verdict = MailNotCommitted
+		fmt.Fprintf(&body, "mw land on %s landed %s on %s at %s, but could not commit its records in the vault.\n\n", n.Host, report.Label(), report.Target, shortCommit(report.Commit))
+	} else if report.Landed {
 		verdict = MailSetAside
 		fmt.Fprintf(&body, "mw land on %s landed %s on %s at %s, but set these aside; each stays queued (run=queued, open and claimed) for a later batch:\n\n",
 			n.Host, report.Label(), report.Target, shortCommit(report.Commit))
@@ -919,6 +929,9 @@ func (b BatchLand) mailTheMayor(ctx context.Context, report *BatchReport, nr *Ne
 	}
 	fmt.Fprintf(&body, "\nThe batch's records: %s/%s/%d/\n", BatchDir, report.Rig, report.Number)
 	subject := fmt.Sprintf("%s: %s, %s", verdict, report.Label(), countStories(len(listed)))
+	if verdict == MailNotCommitted {
+		subject = fmt.Sprintf("%s: %s", verdict, report.Label())
+	}
 	mail := NewMessage{From: SeatIdentity(MwSeat, n.Host), To: MayorMailbox, Subject: subject, Body: body.String()}
 	err := writeRetrying(ctx, n, nr, "the mail to the Mayor", func() error {
 		_, err := n.Mailbox.Send(ctx, mail)
@@ -979,10 +992,22 @@ func (b BatchLand) commitPaths(ctx context.Context, report *BatchReport, paths [
 	}
 	committed, err := commitWritten(ctx, n.Files, fmt.Sprintf("%s %s: %s", verb, report.Label(), strings.Join(storyIDs(report.Queue), ", ")), paths)
 	if err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be committed in the vault, so the next sync will refuse until somebody does: %v", strings.Join(paths, " and "), err))
+		report.Notes = append(report.Notes, NotCommittedLine(paths, err))
 		return
 	}
 	report.Committed = append(report.Committed, committed...)
+}
+
+// notCommitted is the lines of the batch's notes that say files were written in
+// the vault and not committed (NotCommittedLine).
+func (r BatchReport) notCommitted() []string {
+	var lines []string
+	for _, note := range r.Notes {
+		if strings.HasPrefix(note, notCommittedPrefix) {
+			lines = append(lines, note)
+		}
+	}
+	return lines
 }
 
 // String is the batch as a person reads it.

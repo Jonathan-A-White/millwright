@@ -663,3 +663,63 @@ func TestSyncCommitsTheLedgerMarkItWritesIntoAFreshClone(t *testing.T) {
 		})
 	}
 }
+
+// A commit that meets another git's index.lock (a batch landing at the same
+// moment) waits for it and commits; it does not give up at once and leave its
+// files staged (mw-gq6.554).
+func TestCommitWaitsOutAnotherGitsIndexLockAndCommitsThePaths(t *testing.T) {
+	here, _ := twoHosts(t)
+	lock := filepath.Join(here, ".git", "index.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatalf("taking the lock: %v", err)
+	}
+	released := time.AfterFunc(2*time.Second, func() { os.Remove(lock) })
+	defer released.Stop()
+
+	write(t, here, "runs/mw-gq6.554/result.json", "{}\n")
+	paths := []string{"runs/mw-gq6.554/result.json"}
+	recorded, err := vault.New(here).Commit(context.Background(), "Close out mw-gq6.554", paths)
+	if err != nil {
+		t.Fatalf("expected the commit to wait for the lock and finish, got %v", err)
+	}
+	if strings.Join(recorded, "\n") != strings.Join(paths, "\n") {
+		t.Fatalf("expected %q to be committed, got %q", paths, recorded)
+	}
+	if held := committed(t, here, "HEAD"); strings.Join(held, "\n") != strings.Join(paths, "\n") {
+		t.Fatalf("expected the commit to hold %q, got %q", paths, held)
+	}
+	if left := run(t, here, "git", "status", "--porcelain"); strings.TrimSpace(left) != "" {
+		t.Fatalf("expected nothing left staged, got %q", left)
+	}
+}
+
+// A lock held past the bound is a failure, and it says what git said.
+func TestCommitFailsOnceAnIndexLockOutlastsTheBound(t *testing.T) {
+	here, _ := twoHosts(t)
+	if err := os.WriteFile(filepath.Join(here, ".git", "index.lock"), nil, 0o644); err != nil {
+		t.Fatalf("taking the lock: %v", err)
+	}
+	write(t, here, "runs/mw-gq6.554/result.json", "{}\n")
+
+	files := vault.New(here, vault.WithLockWait(500*time.Millisecond, 50*time.Millisecond))
+	start := time.Now()
+	_, err := files.Commit(context.Background(), "Close out mw-gq6.554", []string{"runs/mw-gq6.554/result.json"})
+	if err == nil || !strings.Contains(err.Error(), "index.lock") {
+		t.Fatalf("expected the commit to fail naming the lock, got %v", err)
+	}
+	if took := time.Since(start); took < 400*time.Millisecond {
+		t.Fatalf("expected the commit to wait out its bound before failing, it took %s", took)
+	}
+}
+
+// Any other git failure is not waited for.
+func TestCommitDoesNotWaitOutAnyOtherFailure(t *testing.T) {
+	here, _ := twoHosts(t)
+	write(t, here, "runs/mw-gq6.554/result.json", "{}\n")
+	files := vault.New(here, vault.WithLockWait(time.Minute, time.Minute))
+	start := time.Now()
+	_, err := files.Commit(context.Background(), " ", []string{"runs/mw-gq6.554/result.json"})
+	if err == nil || time.Since(start) > 5*time.Second {
+		t.Fatalf("expected an immediate failure, got %v after %s", err, time.Since(start))
+	}
+}

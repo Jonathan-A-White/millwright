@@ -124,6 +124,9 @@ func changedPaths(out string) []string {
 // Commit implements application.VaultFiles: it records exactly the paths it is
 // given, and nothing else the vault holds.
 //
+// A git that meets another git's index.lock (a batch landing at the same
+// moment) waits for it to go, up to a minute, before it fails (mw-gq6.554).
+//
 // Three git commands, in this order: `status --porcelain --untracked-files=all
 // -- <paths>` to see which of them there is anything to commit in, `add --
 // <those>` so that a file git has never seen is committable, and `commit -m
@@ -156,14 +159,14 @@ func (v *Vault) Commit(ctx context.Context, message string, paths []string) ([]s
 		return nil, nil
 	}
 
-	if _, err := v.git(ctx, append([]string{"add", "--"}, changed...)...); err != nil {
+	if _, err := v.gitWaitingForLock(ctx, append([]string{"add", "--"}, changed...)...); err != nil {
 		return nil, err
 	}
 	commit := append([]string{"commit", "-m", message, "--"}, changed...)
 	if v.author != "" {
 		commit = append([]string{"-c", "user.name=" + v.author, "-c", "user.email=" + v.author}, commit...)
 	}
-	if _, err := v.git(ctx, commit...); err != nil {
+	if _, err := v.gitWaitingForLock(ctx, commit...); err != nil {
 		return nil, err
 	}
 	return changed, nil
@@ -404,6 +407,47 @@ func (v *Vault) commitsBetween(ctx context.Context, from, to string) (int, error
 		return 0, fmt.Errorf("counting the commits in %s..%s: %w", from, to, err)
 	}
 	return count, nil
+}
+
+// Defaults for how long a commit waits for another git's index.lock to go, and
+// how often it looks.
+const (
+	lockBound = time.Minute
+	lockPoll  = 250 * time.Millisecond
+)
+
+// lockHeld reports whether git refused for another git process holding the
+// index: a lock that will be gone in moments, not a fault.
+func lockHeld(err error) bool {
+	said := err.Error()
+	return strings.Contains(said, ".lock': File exists") || strings.Contains(said, "Another git process seems to be running")
+}
+
+// gitWaitingForLock is git, run again while it is refused for an index.lock,
+// until the lock goes, the bound passes or ctx ends. The last refusal is the
+// error. Any other failure comes back at once.
+func (v *Vault) gitWaitingForLock(ctx context.Context, args ...string) (string, error) {
+	bound, poll := v.lockBound, v.lockPoll
+	if bound <= 0 {
+		bound = lockBound
+	}
+	if poll <= 0 {
+		poll = lockPoll
+	}
+	deadline := time.Now().Add(bound)
+	for {
+		out, err := v.git(ctx, args...)
+		if err == nil || !lockHeld(err) || !time.Now().Add(poll).Before(deadline) {
+			return out, err
+		}
+		timer := time.NewTimer(poll)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", err
+		case <-timer.C:
+		}
+	}
 }
 
 // git runs one git command in the vault and returns its standard output. It

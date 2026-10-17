@@ -1575,7 +1575,7 @@ func (c *nextContext) theHostsCouldNotBeBroughtLevel(path string) error {
 
 func (c *nextContext) theVaultCommitFailureIsNoted() error {
 	said := c.printed.String()
-	if !strings.Contains(said, "could not be committed") {
+	if !strings.Contains(said, "NOT committed: ") {
 		return fmt.Errorf("expected the report to note that the vault could not be committed, got:\n%s", said)
 	}
 	return nil

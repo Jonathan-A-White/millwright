@@ -53,6 +53,8 @@ type Vault struct {
 	author      string
 	wait        func(context.Context, time.Duration) error
 	mergeScript string
+	lockBound   time.Duration
+	lockPoll    time.Duration
 }
 
 // Option shapes a Vault.
@@ -71,6 +73,13 @@ func WithAuthor(author string) Option {
 // files got in its way; the default is a real wait. It is for tests.
 func WithWait(wait func(context.Context, time.Duration) error) Option {
 	return func(v *Vault) { v.wait = wait }
+}
+
+// WithLockWait replaces how long a commit waits for another git's index.lock
+// to go, and how often it looks again; the defaults are a minute and a quarter
+// of a second. It is for tests.
+func WithLockWait(bound, poll time.Duration) Option {
+	return func(v *Vault) { v.lockBound, v.lockPoll = bound, poll }
 }
 
 // WithMergeScript replaces the trim-safe merge driver mw carries
