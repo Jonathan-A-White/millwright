@@ -1792,6 +1792,33 @@ token is printed, logged, or put in the vault, a bead or a mail. He can also
 revoke mw at myaccount.google.com/permissions. The tests are
 `infrastructure/google/oauth_test.go` and `cmd/mw/google_test.go`.
 
+### Finding a number in his contacts (mw contacts find)
+
+    mw contacts find "Matthew"   # each match: its name, two spaces, its mobile number(s)
+
+`mw contacts find <name>` searches his Google contacts through the link above
+(`people.searchContacts`, reading names and phone numbers only) and prints a
+line for each match, `Matthew Steele  +15551230001`, or `(no mobile number)`
+for a match without one. With no match it says `no contact named Matthew` and
+exits 0; not linked, it says `not linked: mw google link` and fails.
+
+A To do card with a name-only `Text: <name> | <draft>` line is given its number
+by the same search, when the card is written and never when it is read:
+`mw postern inbox` and the follower on his `todo_add` and `todo_edit` notes,
+and `mw file` for a story labelled `hitl:todo`. Exactly one contact with exactly
+one mobile number makes the line `Text: Matthew Steele <+15551230001> | <draft>`,
+so the phone opens Google Voice to that person with the draft ready. Anything
+else is no guess: the line stays and one line below it says why (`Contacts: two
+contacts match Matthew`, `Contacts: no contact named Matthew`, `Contacts: one
+contact matches Matthew but has no mobile number`), and a card already carrying
+that line is not searched again. Not linked, or a lookup that fails, leaves the
+line as it is and is said on the command's output (`not linked: mw google link`).
+Only the contact's name and that one number reach a card; nothing else of the
+address book is kept anywhere. `mw hands add`, `mw todo then` and the Then card
+a Done card files write no `Text:` line, so they make no lookup. The tests are
+`application/contacts_test.go`, `infrastructure/google/people_test.go` and
+`cmd/mw/contacts_test.go`.
+
 ## Cloud boxes made by demand
 
 With a `[cloud]` table in the home's config (provider, `max_boxes`,
