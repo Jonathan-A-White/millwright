@@ -715,16 +715,19 @@ is written as typed; any other is quoted as a string. See
 bin/mw path set mw-gq6.9 --from mw-gq6.8              # copy the seven path keys of a sibling
 bin/mw path set mw-gq6.9 --from mw-gq6.8 model=opus   # ...with model overridden
 bin/mw path set mw-gq6.9 rig=lampas                   # set only the rig
+bin/mw path set mw-gq6.9 size=M                       # its size: XS, S, M, L or XL
 bin/mw path set mw-gq6.9 files=src/Reader.tsx,src/data/*.ts  # the files it expects to change
-bin/mw path show mw-gq6.9                             # print the eight keys
+bin/mw path show mw-gq6.9                             # print the eleven keys
 ```
 
 A story filed under an epic that does not give it a Path needs its rig, branch,
-harness, model, effort, formula and host set one by one, which was seven
+harness, model, effort, formula and host set one by one (and a size, XS, S, M, L or XL, if the
+Mayor has judged one), which was seven
 `bd update --set-metadata` calls. `mw path set <id>` sets them as one write, so
 the tracker's single-writer rule holds by construction and a Path is never half
 set. `--from` copies only the sibling's seven path keys (its Path, with its
-epic's defaults overlaid), none of its other metadata; key=value arguments lay
+epic's defaults overlaid), none of its other metadata (and not its files, size or
+bump, which are the story's own); key=value arguments lay
 over them. An unknown key, a sibling with no rig, and a story that is in
 progress or closed are refused with nothing written: a Path is adjusted only
 before a story starts. `mw path show` prints `(unset)` for a key the story has

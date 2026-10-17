@@ -27,18 +27,21 @@ func newPathSetCmd() *cobra.Command {
 		Use:   "set <story-id> [--from <sibling-id>] [key=value ...]",
 		Short: "Set a story's path keys in one write",
 		Long: "set gives a story its path keys (rig, branch, harness, model, effort, formula, host,\n" +
-			"files) in one write, in place of one bd update --set-metadata call for each. files is\n" +
-			"the comma-separated repo paths or globs the story expects to change: dispatch does not\n" +
-			"start it while a running story on its rig shares one. bump=minor has the landing raise\n" +
+			"files, size) in one write, in place of one bd update --set-metadata call for each.\n" +
+			"size=XS|S|M|L|XL is how big the Mayor judges the story: a key of the path, never a line in\n" +
+			"the body. files is the comma-separated repo paths or globs the story expects to change:\n" +
+			"dispatch does not start it while a running story on its rig shares one. bump=minor has the landing raise\n" +
 			"the rig's minor version, patch reset to 0, in place of its patch: the epic's last story\n" +
 			"says it here, and a Builder never edits the version itself.\n\n" +
 			"  mw path set B --from A               copy the seven keys from the story A\n" +
 			"  mw path set B --from A model=opus    copy them, with model overridden\n" +
 			"  mw path set B rig=lampas             set only the rig\n" +
+			"  mw path set B size=M                 set only the size (XS, S, M, L or XL)\n" +
 			"  mw path set B files=src/Reader.tsx,src/data/*.ts\n\n" +
 			"Only the seven keys are copied from the sibling, never its files nor its other\n" +
-			"metadata. An unknown key, a sibling with no rig, and a story that is in progress or\n" +
-			"closed are refused, and nothing is written: a path is adjusted only before a story starts.\n" +
+			"metadata. --from does not copy size (nor bump): a size is the story's own, so give it\n" +
+			"as size=S after --from. An unknown key, a sibling with no rig, and a story that is in\n" +
+			"progress or closed are refused, and nothing is written: a path is adjusted only before a story starts.\n" +
 			"So is a files key naming a directory of more than " + strconv.Itoa(application.MostFilesInADirectory) + " files in the rig's checkout here, or\n" +
 			"a whole directory (src/, src/**) where the rig is not checked out to count it.\n\n" +
 			"A story in an epic whose rig asks for a last story (epic_last_story_labels) with exactly one\n" +
