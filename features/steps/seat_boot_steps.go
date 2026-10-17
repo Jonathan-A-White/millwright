@@ -410,11 +410,21 @@ func (c *seatBootContext) theKickoffPromptHolds(table *godog.Table) error {
 	return nil
 }
 
+// memoryAccess is what the vault says of the story's rig, as the boot read it.
+func (c *seatBootContext) memoryAccess() *application.RigMemoryAccess {
+	path, _ := c.detail.Path()
+	seat, err := vault.New(c.dir).Seat(context.Background(), c.seat, path.Rig)
+	if err != nil {
+		return nil
+	}
+	return seat.MemoryAccess()
+}
+
 // kickoff is the kickoff prompt the session is told, with what it is told of
 // its turn cap, when it has one (mw-1ljpo9.6).
 func (c *seatBootContext) kickoff() string {
 	path, _ := c.detail.Path()
-	return application.KickoffPrompt(c.seat, c.detail.Story.ID, c.dir) + application.TurnCapAdvice(path.TurnCap(c.maxTurns))
+	return application.KickoffPrompt(c.seat, c.detail.Story.ID, c.dir, c.memoryAccess()) + application.TurnCapAdvice(path.TurnCap(c.maxTurns))
 }
 
 func (c *seatBootContext) theKickoffPromptHoldsNoneOf(table *godog.Table) error {
@@ -440,7 +450,7 @@ func (c *seatBootContext) theKickoffPromptPointsBdAtTheVault(flag string) error 
 		return err
 	}
 	want := flag + c.dir + " "
-	prompt := application.KickoffPrompt(c.seat, c.detail.Story.ID, c.dir)
+	prompt := application.KickoffPrompt(c.seat, c.detail.Story.ID, c.dir, c.memoryAccess())
 	if !strings.Contains(prompt, want) {
 		return fmt.Errorf("expected the kickoff prompt to hold %q, got %q", want, prompt)
 	}

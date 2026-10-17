@@ -114,7 +114,7 @@ Feature: Booting a session into a seat
       | Follow the story's formula steps    |
       | no AI attribution of any kind       |
       | read-only to you: propose typed facts under "For the rig memory:": gotcha [subject]: ..., decision [subject]: ..., supersede <slug>: ..., retire <slug>: <reason>, recheck <slug>: <why>, at most two, or nothing |
-      | Boot shows the facts every story needs; before touching a subject you do not know, run mw memory query <rig> <term> |
+      | The whole rig memory is in the boot file; there is no mw memory command to query it |
       | bd runs without asking              |
       | as its own Bash call, never chained |
       | run `mw check mw-gq6.6`             |
@@ -170,6 +170,22 @@ Feature: Booting a session into a seat
       | status:                 |
       | ---                     |
       | bd-dash-c               |
+
+  Scenario: A rig kept as one memory file is not told to run mw memory query
+    When the session that works the story is assembled for the "builder" seat
+    Then the kickoff prompt holds none of:
+      | mw memory query |
+
+  Scenario: A rig kept as facts is told to run mw memory query with its own name
+    Given the vault holds the "builder" seat's about text for the rig "millwright"
+    And the rig "millwright" holds these facts:
+      | slug      | subject | kind   | status  | sentence               | source   |
+      | bd-dash-c | bd      | gotcha | current | Point bd at the vault. | mw-gq6.1 |
+    When the session that works the story is assembled for the "builder" seat
+    Then the kickoff prompt holds:
+      | Boot shows the facts every story needs; before touching a subject you do not know, run mw memory query millwright <term> |
+    And the kickoff prompt holds none of:
+      | <rig> |
 
   Scenario: A current fact with boot: no is left out of the boot file
     Given the vault holds the "builder" seat's about text for the rig "millwright"

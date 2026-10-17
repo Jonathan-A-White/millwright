@@ -59,6 +59,38 @@ func (s Seat) QueriedSubjects() string {
 		strings.Join(subjects, ", "), s.Rig)
 }
 
+// RigMemoryAccess is what a kickoff is told of how a session reaches its rig's
+// memory: the rig's own name and whether the rig is kept as facts, the one
+// kind of rig mw memory query answers (HasFactsFolder; a flat-file rig's whole
+// memory is in the boot file and the verb refuses it).
+type RigMemoryAccess struct {
+	Rig      string
+	HasFacts bool
+}
+
+// MemoryAccess is the seat's answer for the rig it was read for. A seat read
+// for no rig answers nil, which leaves a kickoff its generic line.
+func (s Seat) MemoryAccess() *RigMemoryAccess {
+	if s.Rig == "" {
+		return nil
+	}
+	return &RigMemoryAccess{Rig: s.Rig, HasFacts: s.HasFacts}
+}
+
+// kickoffMemoryLine is the sentence of a kickoff about querying the rig's
+// memory. Only a facts rig is told to run mw memory query, with its own name;
+// a flat-file rig is told its whole memory is in the boot file; without an
+// answer the generic line stays.
+func kickoffMemoryLine(m *RigMemoryAccess) string {
+	switch {
+	case m == nil || m.Rig == "":
+		return "Boot shows the facts every story needs; before touching a subject you do not know, run mw memory query <rig> <term>. "
+	case m.HasFacts:
+		return fmt.Sprintf("Boot shows the facts every story needs; before touching a subject you do not know, run mw memory query %s <term>. ", m.Rig)
+	}
+	return "The whole rig memory is in the boot file; there is no mw memory command to query it. "
+}
+
 // RigMemory is what a session reads of the seat's memory of its rig: the render
 // of the about text and facts when the rig is kept as facts, else the memory
 // file as it is.
@@ -340,14 +372,14 @@ func turnCapAdvice(turns int, wrapUp string) string {
 // Boot assembles the session that works detail in the worktree dir. What comes
 // back is ready for a Runner to start.
 func (b SeatBoot) Boot(ctx context.Context, detail StoryDetail, dir string) (SessionSpec, error) {
-	return b.boot(ctx, detail, dir, func(vaultDir string) string {
+	return b.boot(ctx, detail, dir, func(vaultDir string, memory *RigMemoryAccess) string {
 		if IsTesterStory(detail) {
 			return TesterKickoffPrompt(b.Seat, detail.Story.ID, vaultDir)
 		}
 		if isBugStory(detail) {
-			return KickoffPrompt(b.Seat, detail.Story.ID, vaultDir) + CommonErrorsAsk
+			return KickoffPrompt(b.Seat, detail.Story.ID, vaultDir, memory) + CommonErrorsAsk
 		}
-		return KickoffPrompt(b.Seat, detail.Story.ID, vaultDir)
+		return KickoffPrompt(b.Seat, detail.Story.ID, vaultDir, memory)
 	})
 }
 
@@ -356,7 +388,7 @@ func (b SeatBoot) Boot(ctx context.Context, detail StoryDetail, dir string) (Ses
 // same worktree, with the same story, and told to rebase the branch onto onto —
 // the target branch as the remote has it — rather than to work the story again.
 func (b SeatBoot) Rebase(ctx context.Context, detail StoryDetail, dir, onto string) (SessionSpec, error) {
-	return b.boot(ctx, detail, dir, func(vaultDir string) string {
+	return b.boot(ctx, detail, dir, func(vaultDir string, _ *RigMemoryAccess) string {
 		return RebaseKickoffPrompt(b.Seat, detail.Story.ID, vaultDir, onto)
 	})
 }
@@ -367,7 +399,7 @@ func (b SeatBoot) Rebase(ctx context.Context, detail StoryDetail, dir, onto stri
 // onto merged into it — and told to fix the failing tests rather than to work
 // the story again.
 func (b SeatBoot) MergeFix(ctx context.Context, detail StoryDetail, dir, onto string) (SessionSpec, error) {
-	return b.boot(ctx, detail, dir, func(vaultDir string) string {
+	return b.boot(ctx, detail, dir, func(vaultDir string, _ *RigMemoryAccess) string {
 		return MergeFixKickoffPrompt(b.Seat, detail.Story.ID, vaultDir, onto)
 	})
 }
@@ -486,7 +518,7 @@ func (b SeatBoot) BatchFix(ctx context.Context, brief BatchFixBrief, dir string)
 
 // boot is Boot with the first thing the session is told left to the caller,
 // given the vault's directory on this host.
-func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kickoff func(vaultDir string) string) (SessionSpec, error) {
+func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kickoff func(vaultDir string, memory *RigMemoryAccess) string) (SessionSpec, error) {
 	id := detail.Story.ID
 	switch {
 	case b.Vault == nil || b.Harness == nil:
@@ -551,7 +583,7 @@ func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kick
 		// into it.
 		BootFile:     bootFile,
 		ResultFile:   b.Vault.RunFile(id, ResultFileNameForAttempt(attempt)),
-		Kickoff:      kickoff(b.Vault.Dir()) + advice,
+		Kickoff:      kickoff(b.Vault.Dir(), seat.MemoryAccess()) + advice,
 		After:        b.after(id),
 		AfterLog:     b.afterLog(id, attempt),
 		Heartbeat:    b.heartbeat(id),
@@ -641,7 +673,7 @@ func ClaimHost(assignee string) string {
 // KickoffPrompt is the first thing a session is told. It is short on purpose:
 // who it is and what it is working are in the boot file it was primed with,
 // and everything else it needs is in the story's own formula steps.
-func KickoffPrompt(seat, storyID, vaultDir string) string {
+func KickoffPrompt(seat, storyID, vaultDir string, memory *RigMemoryAccess) string {
 	return fmt.Sprintf("You are booted into the %s seat of millwright, and your story is %s. "+
 		"Your charter, your memory of this rig and the story itself are in the system prompt you were given. "+
 		"Your worktree is the directory you are in: work only there. "+
@@ -650,7 +682,7 @@ func KickoffPrompt(seat, storyID, vaultDir string) string {
 		// The Mayor places what he keeps of the notes; the session only proposes.
 		"Your memory of this rig is read-only to you: propose typed facts under \"For the rig memory:\": gotcha [subject]: ..., decision [subject]: ..., supersede <slug>: ..., retire <slug>: <reason>, recheck <slug>: <why>, at most two, or nothing. "+
 		// Boot carries only the current facts; the rest is one command away.
-		"Boot shows the facts every story needs; before touching a subject you do not know, run mw memory query <rig> <term>. "+
+		"%s"+
 		"Do not push, do not merge, do not close the story. "+
 		// The harness is told the same thing by its settings (the claude
 		// adapter's SessionSettings), and mw next refuses a branch that carries
@@ -675,7 +707,7 @@ func KickoffPrompt(seat, storyID, vaultDir string) string {
 		"refusal, writes nothing anywhere and exits non-zero when any check fails. "+
 		"A formula step you have not closed yet is one it will name. "+
 		"This session is headless and ends when your turn ends. %s"+
-		"Commit before you stop.", seat, storyID, bdVault(vaultDir), storyID, longCommandAdvice)
+		"Commit before you stop.", seat, storyID, kickoffMemoryLine(memory), bdVault(vaultDir), storyID, longCommandAdvice)
 }
 
 // TesterKickoffPrompt is the first thing a Tester story's session is told
