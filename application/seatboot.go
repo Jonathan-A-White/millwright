@@ -156,6 +156,12 @@ func NextLogNameForAttempt(attempt int) string {
 	return fmt.Sprintf("next-%d.log", max(1, attempt))
 }
 
+// HeartbeatLogNameForAttempt is the run file the heartbeat's words are kept in
+// for attempt (Launch.HeartbeatLog), numbered as NextLogNameForAttempt is.
+func HeartbeatLogNameForAttempt(attempt int) string {
+	return fmt.Sprintf("heartbeat-%d.log", max(1, attempt))
+}
+
 // attemptRunFileName is the run file name base is written under for attempt.
 // The first attempt of a story is not numbered at all, so that nothing about
 // the common case — a story worked once — changes, and so that a run record or
@@ -543,14 +549,15 @@ func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kick
 		// The result lands beside the boot file, in a directory writing the
 		// boot file has already made: the session's own shell only redirects
 		// into it.
-		BootFile:   bootFile,
-		ResultFile: b.Vault.RunFile(id, ResultFileNameForAttempt(attempt)),
-		Kickoff:    kickoff(b.Vault.Dir()) + advice,
-		After:      b.after(id),
-		AfterLog:   b.afterLog(id, attempt),
-		Heartbeat:  b.heartbeat(id),
-		BdRetry:    b.BdRetry,
-		MaxTurns:   turns,
+		BootFile:     bootFile,
+		ResultFile:   b.Vault.RunFile(id, ResultFileNameForAttempt(attempt)),
+		Kickoff:      kickoff(b.Vault.Dir()) + advice,
+		After:        b.after(id),
+		AfterLog:     b.afterLog(id, attempt),
+		Heartbeat:    b.heartbeat(id),
+		HeartbeatLog: b.heartbeatLog(id, attempt),
+		BdRetry:      b.BdRetry,
+		MaxTurns:     turns,
 	})
 	if err != nil {
 		return SessionSpec{}, fmt.Errorf("booting %s: %w", id, err)
@@ -578,6 +585,15 @@ func (b SeatBoot) afterLog(storyID string, attempt int) string {
 		return ""
 	}
 	return b.Vault.RunFile(storyID, NextLogNameForAttempt(attempt))
+}
+
+// heartbeatLog is the run file the heartbeat's words are kept in for attempt
+// (mw-gq6.494); none when no heartbeat runs, or the vault has nowhere to keep it.
+func (b SeatBoot) heartbeatLog(storyID string, attempt int) string {
+	if len(b.Heartbeat) == 0 || b.Vault == nil {
+		return ""
+	}
+	return b.Vault.RunFile(storyID, HeartbeatLogNameForAttempt(attempt))
 }
 
 // heartbeat is the command that runs beside this story's session, from the

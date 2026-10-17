@@ -559,6 +559,63 @@ func TestTheHeartbeatRunsBesideTheHarnessAndIsKilledBeforeTheCloseOut(t *testing
 	}
 }
 
+// mw-gq6.494: the heartbeat's words (why a lease lapsed) went to the pane alone
+// and died with it. Given a log path, they are kept there as well, and still
+// shown in the pane; the heartbeat is still the process that is killed.
+func TestTheHeartbeatsWordsAreKeptInTheRunAsWellAsThePane(t *testing.T) {
+	dir := t.TempDir()
+	said := filepath.Join(dir, "said")
+	heartbeat := filepath.Join(dir, "heartbeat")
+	script := "#!/bin/sh\necho 'the claim on mw-gq6.6 could not be heartbeated: i/o timeout' >&2\ntouch " + said + "\nexec sleep 60\n"
+	if err := os.WriteFile(heartbeat, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The harness lets go only once the heartbeat has spoken, so the test never
+	// waits a fixed time for it.
+	harness := filepath.Join(dir, "harness")
+	wait := "#!/bin/sh\ni=0\nwhile [ ! -e " + said + " ] && [ $i -lt 500 ]; do i=$((i+1)); sleep 0.02; done\nprintf '{\"ok\":true}'\n"
+	if err := os.WriteFile(harness, []byte(wait), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(dir, "heartbeat-1.log")
+	spec, err := New(WithProgram(harness)).Session(launch(func(l *application.Launch) {
+		l.ResultFile = filepath.Join(dir, "result.json")
+		l.Heartbeat = []string{heartbeat}
+		l.HeartbeatLog = log
+	}))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	printed, err := exec.Command(spec.Command[0], spec.Command[1:]...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("running the line: %v\n%s", err, printed)
+	}
+	const words = "the claim on mw-gq6.6 could not be heartbeated: i/o timeout"
+	kept, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("reading the log: %v", err)
+	}
+	if got, want := string(kept), words+"\n"; got != want {
+		t.Errorf("expected the log to hold the heartbeat's words, got %q", got)
+	}
+	if !strings.Contains(string(printed), words) {
+		t.Errorf("expected the pane to show the heartbeat's words too, got %q", printed)
+	}
+}
+
+// Without a log path the heartbeat runs as it always did.
+func TestAHeartbeatWithNoLogPathIsNotTeed(t *testing.T) {
+	spec, err := New().Session(launch(func(l *application.Launch) {
+		l.Heartbeat = []string{"mw", "next", "--heartbeat", "mw-gq6.6"}
+	}))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	if line := spec.Command[2]; strings.Contains(line, "tee") || strings.Contains(line, "mkfifo") {
+		t.Errorf("expected the heartbeat not to be teed, got %q", line)
+	}
+}
+
 func TestASessionWithNoHeartbeatStartsNothingBesideTheHarness(t *testing.T) {
 	spec, err := New().Session(launch(func(l *application.Launch) {
 		l.After = []string{"/root/millwright/bin/mw", "next", "mw-gq6.6"}

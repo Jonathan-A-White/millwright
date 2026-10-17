@@ -126,6 +126,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the close-out of "([^"]*)" refused it$`, c.theCloseOutRefusedIt)
 	ctx.Given(`^the session of "([^"]*)" has a dead pane and its lease has expired$`, c.theSessionHasADeadPaneAndLeaseExpired)
 	ctx.Given(`^the session of "([^"]*)" finished, leaving its result for attempt (\d+) and no ledger line$`, c.theSessionFinishedLeavingItsResult)
+	ctx.Given(`^the heartbeat log of "([^"]*)" for attempt (\d+) holds (\d+) earlier lines and ends with:$`, c.theHeartbeatLogEndsWith)
 	ctx.Given(`^the close-out log of "([^"]*)" for attempt (\d+) holds (\d+) earlier lines and ends with:$`, c.theCloseOutLogEndsWith)
 	ctx.Given(`^the session of "([^"]*)" has a dead pane but its lease has not expired$`, c.theSessionHasADeadPaneButLeaseNotExpired)
 	ctx.When(`^the session of "([^"]*)" dies again with its lease expired$`, c.theSessionDiesAgainWithLeaseExpired)
@@ -479,6 +480,18 @@ func (c *dispatchContext) theSessionFinishedLeavingItsResult(id string, attempt 
 		`"session_id":"s-finished-%d","total_cost_usd":1.27,`+
 		`"usage":{"input_tokens":80,"output_tokens":26074,"cache_read_input_tokens":2916383,"cache_creation_input_tokens":84693}}`, attempt)
 	return c.putRunFile(id, application.ResultFileNameForAttempt(attempt), result)
+}
+
+// theHeartbeatLogEndsWith writes what the heartbeat's pane showed, as the
+// session's line keeps it in the run (mw-gq6.494): a few earlier lines and then
+// the given ones.
+func (c *dispatchContext) theHeartbeatLogEndsWith(id string, attempt, earlier int, tail *godog.DocString) error {
+	var lines []string
+	for i := 1; i <= earlier; i++ {
+		lines = append(lines, fmt.Sprintf("older heartbeat line %d", i))
+	}
+	lines = append(lines, strings.Split(strings.TrimRight(tail.Content, "\n"), "\n")...)
+	return c.putRunFile(id, application.HeartbeatLogNameForAttempt(attempt), strings.Join(lines, "\n")+"\n")
 }
 
 // theCloseOutLogEndsWith writes what the close-out's pane showed, as the
