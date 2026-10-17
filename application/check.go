@@ -16,7 +16,10 @@ import (
 // cheap to fix, and worded as mw next would word it.
 //
 // It is read-only, and that is the point of it. It writes nothing to the
-// tracker, the ledger, the vault or git: no comment, no run state, no fetch. The
+// tracker, the ledger, the vault or git: no comment, no run state, no fetch. (When
+// the tests fail in the worktree and the target has commits the branch was cut
+// before, it merges the target in a throwaway landing worktree, taken away
+// again, and runs them there once more, as mw next would: mw-gq6.553.) The
 // one thing it takes is the rig's merge slot, around the rig's tests only, so
 // that a close-out's gate and a check's gate on one rig never run at once and
 // starve each other; it waits for the slot, and the slot is given back when the

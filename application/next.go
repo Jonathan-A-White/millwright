@@ -1524,6 +1524,16 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 
 	// What the rig itself says about the work, in the worktree the session left.
 	gate := n.gate(ctx, c, report, c.worktree, "the rig's tests")
+	where, mergedRun := c.worktree, false
+	if gate.Err == nil && !gate.Checked.NotRun && !gate.Checked.Passed && (all || c.batch) {
+		// A rig that lands in batches has no merge of its own here, and a check
+		// only reads, so the target is merged in a throwaway landing worktree
+		// and the tests run there once more, before anything is refused
+		// (mw-gq6.553).
+		if merged, dir, ok := n.batchRunOnTheMerge(ctx, c, report, gate.Checked, base); ok {
+			gate, where, mergedRun = merged, dir, true
+		}
+	}
 	checked, err := gate.Checked, gate.Err
 	switch {
 	case err != nil:
@@ -1535,6 +1545,9 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 		// Not a refusal: the merged result is what lands, and it is tested next.
 	case !checked.Passed:
 		reason, why := ReasonTestsFail, fmt.Sprintf("the rig's tests fail in the worktree: `%s` did not pass", checked.Command)
+		if mergedRun {
+			why = fmt.Sprintf("the rig's tests fail on %s merged into the branch: `%s` did not pass", c.target, checked.Command)
+		}
 		// A worktree that already carries the target merged in, because it was
 		// sent back once to fix the merged tests, is the merged result: a
 		// failure here is the same failure again, not a fresh one.
@@ -1549,12 +1562,12 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 		if failing := FailingTestsShort(checked.Output); failing != "" {
 			why += " [" + failing + "]"
 		}
-		if all {
+		if all && !mergedRun {
 			if behind := n.commitsBehind(ctx, c, base); behind > 0 {
 				why += fmt.Sprintf("; %s has %d commits this branch was cut before, which may fix it: mw next goes on to the merged result with them", c.target, behind)
 			}
 		}
-		refuse(reason, why, n.failedTestsDetail(ctx, c, report, checked, c.worktree))
+		refuse(reason, why, n.failedTestsDetail(ctx, c, report, checked, where))
 	}
 
 	// The specs the story added or changed, which the rig's gate does not run
@@ -1585,7 +1598,8 @@ func (n Next) commitsBehind(ctx context.Context, c *closeOut, base string) int {
 // merged result is tested (push), and only a failure there refuses; the
 // worktree's run alone guards a branch whose target has not moved, as before.
 // A rig that lands in batches is excepted: its queue makes no merge of its own,
-// and the batch's one gate would carry a story's failure.
+// so batchRunOnTheMerge tests the merge in a landing worktree instead, as a
+// check does, which only reads.
 func (n Next) failureGoesOnToTheMerge(ctx context.Context, c *closeOut, report *NextReport, checked Checked, base string) bool {
 	behind := n.commitsBehind(ctx, c, base)
 	if behind == 0 {
@@ -1600,6 +1614,44 @@ func (n Next) failureGoesOnToTheMerge(ctx context.Context, c *closeOut, report *
 	report.Notes = append(report.Notes, note)
 	n.print("  note    " + note + "\n")
 	return true
+}
+
+// batchRunOnTheMerge is failureGoesOnToTheMerge for a rig that lands in
+// batches (mw-gq6.553): its queue merges nothing, so when the rig's tests failed
+// in the worktree and the target has commits the branch was cut before, one of
+// which may fix the failing test, the target is merged into a throwaway landing
+// worktree, which is taken away again, and the tests are run there once. It
+// reports that run and where it was made; ok is false, and the worktree's own
+// failure stands, when the target has not moved or the merge could not be made.
+// A story that really breaks a test fails there too, so it never reaches a
+// batch untested on the merged code.
+func (n Next) batchRunOnTheMerge(ctx context.Context, c *closeOut, report *NextReport, failed Checked, base string) (merged gated, dir string, ok bool) {
+	behind := n.commitsBehind(ctx, c, base)
+	if behind == 0 {
+		return gated{}, "", false
+	}
+	dir, err := n.Landing.OpenLanding(ctx, c.rigDir, base)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("a landing of %s at %s could not be opened to test the merged code: %v", c.path.Rig, base, err))
+		return gated{}, "", false
+	}
+	defer func() {
+		if closeErr := n.Landing.CloseLanding(ctx, c.rigDir, dir); closeErr != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("the landing worktree %s could not be taken away: %v", dir, closeErr))
+		}
+	}()
+	if _, err := n.Landing.Merge(ctx, dir, c.branch); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be merged into %s to test the merged code: %v", c.branch, c.target, err))
+		return gated{}, "", false
+	}
+	note := fmt.Sprintf("the rig's tests failed in the worktree (`%s`", failed.Command)
+	if failing := FailingTestsShort(failed.Output); failing != "" {
+		note += ": " + failing
+	}
+	note += fmt.Sprintf("), but %s has %d commits this branch was cut before, so they are run once more with %s merged in", c.target, behind, c.target)
+	report.Notes = append(report.Notes, note)
+	n.print("  note    " + note + "\n")
+	return n.gate(ctx, c, report, dir, "the rig's tests with the target merged in"), dir, true
 }
 
 // ExpectedPermissionMode is the permission mode a story's session is launched
