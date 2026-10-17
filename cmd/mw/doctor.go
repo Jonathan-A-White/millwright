@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -30,7 +33,7 @@ import (
 // the alarms to the Governor, mayor-stale's, mayor-stuck's and boost-reach's, sent from their cures.
 func newDoctorCmd() *cobra.Command {
 	var dryRun bool
-	var envFile string
+	var envFile, posternBin string
 	cmd := &cobra.Command{
 		Use:   "doctor [check | licences]",
 		Short: "Cure this host's known faults offline, on a table of checks",
@@ -46,11 +49,14 @@ func newDoctorCmd() *cobra.Command {
 			"journal shows it. A check that says so (tmp-leftovers) is not left faulty by a damped tick\n" +
 			"held only by the wait after a cure that worked, and its cure that freed something ends the\n" +
 			"fault's episode, so a cache regrown by normal work is cured again rather than damped.\n\n" +
-			"mw doctor licences is not a check but a read of the postern backend's environment file\n" +
+			"mw doctor licences is not a check but a read of the licence map the postern binary prints\n" +
+			"(--postern, default postern on the PATH) for `rights --json` on the backend's environment file\n" +
 			"(--env-file, default ~/.config/postern/env): one line per licence collection, naming the\n" +
 			"app it maps to or the cockpit and the routes a key holding it opens, and a warning for a\n" +
 			"cockpit collection mapped to an app (it makes the cockpit key an app key) or one collection\n" +
-			"mapped to two apps. It spends nothing, changes nothing, and leaves with " + fmt.Sprint(application.DoctorFaultExit) + " on a warning.",
+			"mapped to two apps. The rules are postern's, none is kept here: with postern missing or too\n" +
+			"old to know `rights`, it says so in one line and fails. It spends nothing, changes nothing,\n" +
+			"and leaves with " + fmt.Sprint(application.DoctorFaultExit) + " on a warning.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := ""
@@ -58,7 +64,7 @@ func newDoctorCmd() *cobra.Command {
 				name = args[0]
 			}
 			if name == licencesArg {
-				return runDoctorLicences(cmd, envFile)
+				return runDoctorLicences(cmd, posternBin, envFile)
 			}
 
 			units, err := config.DoctorUnits()
@@ -356,6 +362,7 @@ func newDoctorCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what each faulty check would do; change nothing")
 	cmd.Flags().StringVar(&envFile, "env-file", "", "for licences: the postern backend's environment file (default ~/.config/postern/env)")
+	cmd.Flags().StringVar(&posternBin, "postern", "postern", "for licences: the postern binary the backend runs, asked for `rights --json`")
 	return cmd
 }
 
@@ -363,9 +370,15 @@ func newDoctorCmd() *cobra.Command {
 // instead of working the table.
 const licencesArg = "licences"
 
-// runDoctorLicences prints the licence map of the backend's environment file
-// and leaves faulty, as a doctor does, when it warns of anything.
-func runDoctorLicences(cmd *cobra.Command, envFile string) error {
+// posternRightsWait bounds `postern rights --json`: an older postern has no
+// such subcommand and starts its server instead, which would never answer.
+const posternRightsWait = 20 * time.Second
+
+// runDoctorLicences prints the licence map the postern binary gives for its
+// environment file and leaves faulty, as a doctor does, when it warns of
+// anything. The rules are postern's: when postern cannot give the map, this
+// says so in one line and fails; no rule of mw's stands in for it.
+func runDoctorLicences(cmd *cobra.Command, posternBin, envFile string) error {
 	if envFile == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -373,15 +386,11 @@ func runDoctorLicences(cmd *cobra.Command, envFile string) error {
 		}
 		envFile = filepath.Join(home, ".config", "postern", "env")
 	}
-	text, err := os.ReadFile(envFile)
+	entries, err := readPosternRights(cmd.Context(), posternBin, envFile)
 	if err != nil {
-		return fmt.Errorf("reading the postern backend's environment file: %w", err)
+		return err
 	}
-	licences, err := application.ParseLicenceMap(string(text))
-	if err != nil {
-		return fmt.Errorf("%s: %w", envFile, err)
-	}
-	report := licences.Report()
+	report := application.ReportLicences(entries)
 	fmt.Fprint(cmd.OutOrStdout(), report)
 	if report.Faulty() {
 		cmd.SilenceErrors = true
@@ -389,6 +398,38 @@ func runDoctorLicences(cmd *cobra.Command, envFile string) error {
 	}
 	return nil
 }
+
+// readPosternRights runs `<postern> rights --json --env-file <envFile>` and
+// reads its map. Every failure is one line that names the command.
+func readPosternRights(ctx context.Context, posternBin, envFile string) ([]application.LicenceEntry, error) {
+	const command = "postern rights --json"
+	path, err := exec.LookPath(posternBin)
+	if err != nil {
+		return nil, fmt.Errorf("mw doctor licences needs the postern binary the backend runs, to ask it for `%s`, and cannot find %q on this host", command, posternBin)
+	}
+	ctx, cancel := context.WithTimeout(ctx, posternRightsWait)
+	defer cancel()
+	var stdout, stderr bytes.Buffer
+	run := exec.CommandContext(ctx, path, "rights", "--json", "--env-file", envFile)
+	run.Stdout, run.Stderr = &stdout, &stderr
+	if err := run.Run(); err != nil {
+		reason := oneLine(stderr.String())
+		if ctx.Err() != nil {
+			reason = fmt.Sprintf("no answer in %s; this postern is probably older and has no rights subcommand", posternRightsWait)
+		} else if reason == "" {
+			reason = oneLine(err.Error())
+		}
+		return nil, fmt.Errorf("%s: `%s` failed: %s", path, command, reason)
+	}
+	entries, err := application.ParseRightsJSON(stdout.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("%s: `%s` gave no licence map (is this postern older, without the rights subcommand?): %s", path, command, oneLine(err.Error()))
+	}
+	return entries, nil
+}
+
+// oneLine folds text onto a single line.
+func oneLine(text string) string { return strings.Join(strings.Fields(text), " ") }
 
 // runDoctor runs the doctor. A check left faulty and uncured is an outcome
 // and not a failure: the report naming it has already been printed, so cobra

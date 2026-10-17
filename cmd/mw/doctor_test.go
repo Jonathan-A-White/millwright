@@ -243,39 +243,120 @@ func TestDoctorTableHasTheMayorStuckCheck(t *testing.T) {
 	}
 }
 
-func runDoctorLicencesOn(t *testing.T, env string) (string, error) {
+// fakePostern writes a stand-in postern that records its arguments beside
+// itself, then prints stdout and stderr and leaves with code.
+func fakePostern(t *testing.T, stdout, stderr string, code int) (bin, argsFile string) {
 	t.Helper()
-	file := filepath.Join(t.TempDir(), "env")
-	if err := os.WriteFile(file, []byte(env), 0o600); err != nil {
+	dir := t.TempDir()
+	argsFile = filepath.Join(dir, "args")
+	outFile := filepath.Join(dir, "stdout")
+	errFile := filepath.Join(dir, "stderr")
+	for file, text := range map[string]string{outFile: stdout, errFile: stderr} {
+		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bin = filepath.Join(dir, "postern")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > '" + argsFile + "'\ncat '" + outFile + "'\ncat '" + errFile + "' >&2\nexit " + fmt.Sprint(code) + "\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	return bin, argsFile
+}
+
+func runDoctorLicencesWith(t *testing.T, posternBin string, extra ...string) (string, error) {
+	t.Helper()
 	out := &bytes.Buffer{}
 	root := newRootCmd()
 	root.SetOut(out)
 	root.SetErr(out)
-	root.SetArgs([]string{"doctor", "licences", "--env-file", file})
+	root.SetArgs(append([]string{"doctor", "licences", "--postern", posternBin}, extra...))
 	err := root.Execute()
 	return out.String(), err
 }
 
-func TestDoctorLicencesPrintsALinePerCollectionAndLeavesCleanOnAGoodMap(t *testing.T) {
-	report, err := runDoctorLicencesOn(t, "POSTERN_COLLECTIONS=postern\nPOSTERN_APPS=cairn=cairn\n")
+const cleanRightsJSON = `{"collections":[
+ {"collection":"postern","kind":"cockpit","routes":["GET /api/view"]},
+ {"collection":"cairn","kind":"app","app":"cairn","routes":["POST /api/blobs"]}
+]}`
+
+func TestDoctorLicencesReadsPosternRightsAndLeavesCleanOnAGoodMap(t *testing.T) {
+	bin, argsFile := fakePostern(t, cleanRightsJSON, "", 0)
+	envFile := filepath.Join(t.TempDir(), "env")
+	report, err := runDoctorLicencesWith(t, bin, "--env-file", envFile)
 	if err != nil {
 		t.Fatalf("expected a clean map to leave ok, got %v\n%s", err, report)
 	}
-	for _, want := range []string{"postern -> cockpit:", "cairn -> app cairn:"} {
+	for _, want := range []string{"postern -> cockpit: a key holding it opens GET /api/view", "cairn -> app cairn:", "ok: every licence collection opens what it should"} {
 		if !strings.Contains(report, want) {
 			t.Errorf("expected %q in the report, got:\n%s", want, report)
 		}
 	}
+	args, _ := os.ReadFile(argsFile)
+	if got := strings.TrimSpace(string(args)); got != "rights --json --env-file "+envFile {
+		t.Errorf("expected postern to be asked for its rights as JSON from the env file, got %q", got)
+	}
 }
 
-func TestDoctorLicencesLeavesFaultyOnTheIncident(t *testing.T) {
-	report, err := runDoctorLicencesOn(t, "POSTERN_COLLECTIONS=postern,spell\nPOSTERN_APPS=spell=spellforge\n")
+func TestDoctorLicencesLeavesFaultyOnAWarning(t *testing.T) {
+	bin, _ := fakePostern(t, `{"collections":[
+ {"collection":"postern","kind":"cockpit","routes":["GET /api/view"]},
+ {"collection":"spell","kind":"app","app":"spellforge","routes":["GET /api/me"]},
+ {"collection":"spell","kind":"app","app":"spellforge","routes":["GET /api/me"]}
+]}`, "", 0)
+	report, err := runDoctorLicencesWith(t, bin)
 	if _, fault := application.DoctorFaults(err); !fault {
 		t.Fatalf("expected a doctor fault, got %v\n%s", err, report)
 	}
 	if !strings.Contains(report, "WARNING: spell is a cockpit collection") {
 		t.Errorf("expected the warning, got:\n%s", report)
+	}
+}
+
+func TestDoctorLicencesSaysPlainlyWhenPosternIsMissing(t *testing.T) {
+	report, err := runDoctorLicencesWith(t, filepath.Join(t.TempDir(), "no-such-postern"))
+	if err == nil {
+		t.Fatalf("expected a failure, got none\n%s", report)
+	}
+	if _, fault := application.DoctorFaults(err); fault {
+		t.Errorf("a missing postern is a failure, not a warning: %v", err)
+	}
+	if !strings.Contains(err.Error(), "postern") || strings.Contains(err.Error(), "\n") || strings.Contains(report, "->") {
+		t.Errorf("expected one plain line and no report, got %q and %q", err, report)
+	}
+}
+
+func TestDoctorLicencesSaysPlainlyWhenPosternHasNoRightsSubcommand(t *testing.T) {
+	// An older postern does not know rights; it prints something that is not
+	// the map. Nothing else stands in for it.
+	for name, run := range map[string]struct {
+		stdout, stderr string
+		code           int
+	}{
+		"output that is not the map": {stdout: "postern server listening on 127.0.0.1:8787\n", code: 0},
+		"a refusal":                  {stderr: "loading config: POSTERN_ANCHOR is required\n", code: 1},
+	} {
+		bin, _ := fakePostern(t, run.stdout, run.stderr, run.code)
+		report, err := runDoctorLicencesWith(t, bin)
+		if err == nil {
+			t.Fatalf("%s: expected a failure\n%s", name, report)
+		}
+		if _, fault := application.DoctorFaults(err); fault {
+			t.Errorf("%s: expected a failure, not a warning: %v", name, err)
+		}
+		if !strings.Contains(err.Error(), "postern rights --json") || strings.Contains(err.Error(), "\n") {
+			t.Errorf("%s: expected one line naming the command, got %q", name, err)
+		}
+		if strings.Contains(report, "->") || strings.Contains(report, "ok:") {
+			t.Errorf("%s: expected no report from a failed read, got %q", name, report)
+		}
+	}
+}
+
+func TestDoctorLicencesKeepsPosternsRefusalInItsLine(t *testing.T) {
+	bin, _ := fakePostern(t, "", "postern rights: loading config: POSTERN_APPS: \"spell\" is one of POSTERN_COLLECTIONS\n", 1)
+	_, err := runDoctorLicencesWith(t, bin)
+	if err == nil || !strings.Contains(err.Error(), `"spell" is one of POSTERN_COLLECTIONS`) {
+		t.Fatalf("expected postern's own words in the failure, got %v", err)
 	}
 }

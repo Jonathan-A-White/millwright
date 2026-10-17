@@ -7,17 +7,23 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-func licenceReport(t *testing.T, env string) application.LicenceReport {
+func licenceReport(t *testing.T, rightsJSON string) application.LicenceReport {
 	t.Helper()
-	m, err := application.ParseLicenceMap(env)
+	entries, err := application.ParseRightsJSON([]byte(rightsJSON))
 	if err != nil {
-		t.Fatalf("reading the backend's environment: %v", err)
+		t.Fatalf("reading the backend's licence map: %v", err)
 	}
-	return m.Report()
+	return application.ReportLicences(entries)
 }
 
+const cleanRights = `{"collections":[
+ {"collection":"postern","kind":"cockpit","routes":["GET /api/view","PUT /api/prompts/{name}"]},
+ {"collection":"cairn","kind":"app","app":"cairn","routes":["GET /api/me","POST /api/blobs"]},
+ {"collection":"spellforge-leaderboard-testnet","kind":"app","app":"spellforge","routes":["GET /api/me"]}
+]}`
+
 func TestACleanLicenceMapPrintsOneLinePerCollectionAndWarnsOfNothing(t *testing.T) {
-	report := licenceReport(t, "POSTERN_COLLECTIONS=postern\nPOSTERN_APPS=cairn=cairn,spellforge-leaderboard-testnet=spellforge\n")
+	report := licenceReport(t, cleanRights)
 
 	if report.Faulty() {
 		t.Errorf("expected no warning, got %v", report.Warnings)
@@ -27,67 +33,60 @@ func TestACleanLicenceMapPrintsOneLinePerCollectionAndWarnsOfNothing(t *testing.
 	}
 	postern, cairn := report.Lines[0], report.Lines[1]
 	if !strings.HasPrefix(postern, "postern -> cockpit:") || !strings.Contains(postern, "PUT /api/prompts/{name}") {
-		t.Errorf("expected the cockpit line to open every route, got %q", postern)
+		t.Errorf("expected the cockpit line to name the routes the backend gave, got %q", postern)
 	}
 	if !strings.HasPrefix(cairn, "cairn -> app cairn:") || !strings.Contains(cairn, "POST /api/blobs") {
 		t.Errorf("expected the app line to name its app and what it opens, got %q", cairn)
 	}
-	if strings.Contains(cairn, "GET /api/view") || strings.Contains(cairn, "POST /api/broadcast") {
-		t.Errorf("an app key must not open the cockpit's routes, got %q", cairn)
+	if strings.Contains(cairn, "GET /api/view") {
+		t.Errorf("a line names only the routes the backend gave, got %q", cairn)
+	}
+	if !strings.HasSuffix(report.String(), "ok: every licence collection opens what it should\n") {
+		t.Errorf("expected the ok line, got %q", report.String())
 	}
 }
 
-func TestACollectionOfTheCockpitMappedToAnAppIsWarned(t *testing.T) {
-	report := licenceReport(t, "POSTERN_COLLECTIONS=postern,spellforge-leaderboard-testnet\nPOSTERN_APPS=spellforge-leaderboard-testnet=spellforge\n")
+func TestACollectionListedAsCockpitAndAppIsWarned(t *testing.T) {
+	// The backend lists the cockpit collections, then the app collections: a
+	// collection in both shows twice, and as an app's both times.
+	report := licenceReport(t, `{"collections":[
+ {"collection":"postern","kind":"cockpit","routes":["GET /api/view"]},
+ {"collection":"spell","kind":"app","app":"spellforge","routes":["GET /api/me"]},
+ {"collection":"spell","kind":"app","app":"spellforge","routes":["GET /api/me"]}
+]}`)
 
 	if !report.Faulty() || len(report.Warnings) != 1 {
 		t.Fatalf("expected one warning, got %v", report.Warnings)
 	}
 	warning := report.Warnings[0]
-	if !strings.Contains(warning, "spellforge-leaderboard-testnet") || !strings.Contains(warning, "cockpit key") || !strings.Contains(warning, "spellforge") {
+	if !strings.Contains(warning, "spell is a cockpit collection") || !strings.Contains(warning, "cockpit key") || !strings.Contains(warning, "spellforge") {
 		t.Errorf("expected the warning to name the collection, the cockpit key and the app, got %q", warning)
 	}
-}
-
-func TestTheDefaultCockpitCollectionsApplyWhenTheEnvironmentNamesNone(t *testing.T) {
-	// The backend's own default is postern,spellforge-leaderboard-testnet.
-	report := licenceReport(t, "POSTERN_APPS=spellforge-leaderboard-testnet=spellforge\n")
-
-	if !report.Faulty() {
-		t.Errorf("expected the default cockpit collection to be warned of, got lines %v", report.Lines)
+	if len(report.Lines) != 2 {
+		t.Errorf("expected a line per collection, once each, got %v", report.Lines)
 	}
 }
 
-func TestTwoAppsMappedToOneCollectionAreWarned(t *testing.T) {
-	report := licenceReport(t, "POSTERN_COLLECTIONS=postern\nPOSTERN_APPS=cairn=cairn,cairn=spellforge\n")
+func TestOneCollectionForTwoAppsIsWarned(t *testing.T) {
+	report := licenceReport(t, `{"collections":[
+ {"collection":"cairn","kind":"app","app":"cairn,spellforge","routes":["GET /api/me"]}
+]}`)
 
-	if len(report.Warnings) != 1 || !strings.Contains(report.Warnings[0], "cairn") || !strings.Contains(report.Warnings[0], "spellforge") {
+	if len(report.Warnings) != 1 || !strings.Contains(report.Warnings[0], "cairn is mapped to two apps (cairn and spellforge)") {
 		t.Fatalf("expected one warning naming both apps, got %v", report.Warnings)
 	}
 }
 
-func TestTheEnvironmentIsReadAsASystemdFileIs(t *testing.T) {
-	m, err := application.ParseLicenceMap("# a comment\nPOSTERN_ADDR=127.0.0.1:1\nPOSTERN_COLLECTIONS=\"postern\"\nexport POSTERN_APPS='cairn=cairn'\n")
-	if err != nil {
-		t.Fatalf("reading: %v", err)
-	}
-	if got := m.Report().Lines; len(got) != 2 {
-		t.Errorf("expected postern and cairn, got %v", got)
+func TestAMapOfNoCollectionsIsRefused(t *testing.T) {
+	for _, text := range []string{`{"collections":[]}`, `{}`, `not json`, ``, `[1]`} {
+		if _, err := application.ParseRightsJSON([]byte(text)); err == nil {
+			t.Errorf("expected %q to be refused", text)
+		}
 	}
 }
 
-func TestAnAppPairThatIsNotCollectionEqualsAppIsRefused(t *testing.T) {
-	if _, err := application.ParseLicenceMap("POSTERN_APPS=cairn\n"); err == nil {
-		t.Error("expected POSTERN_APPS=cairn to be refused")
-	}
-}
-
-func TestRightsFromCollectionsFollowTheBackendsRule(t *testing.T) {
-	apps := map[string]string{"cairn": "cairn"}
-	if r := application.RightsFromCollections([]string{"cairn"}, apps); r.Cockpit || len(r.Apps) != 1 {
-		t.Errorf("a key holding only an app's collection is an app key, got %+v", r)
-	}
-	if r := application.RightsFromCollections([]string{"cairn", "postern"}, apps); !r.Cockpit {
-		t.Errorf("a key holding a cockpit collection too is a cockpit key, got %+v", r)
+func TestAKindThatIsNeitherCockpitNorAppIsRefused(t *testing.T) {
+	if _, err := application.ParseRightsJSON([]byte(`{"collections":[{"collection":"x","kind":"mill","routes":[]}]}`)); err == nil {
+		t.Error("expected an unknown kind to be refused, not guessed at")
 	}
 }

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -698,148 +699,37 @@ func (d Doctor) now() time.Time {
 	return d.Now()
 }
 
-// DefaultBackendCollections is POSTERN_COLLECTIONS when the backend's
-// environment names none: the backend's own default
-// (server/internal/config defaultCollections).
-const DefaultBackendCollections = "postern,spellforge-leaderboard-testnet"
-
-// LicenceApp is one POSTERN_APPS pair: a licence collection and the app it
-// opens the grist door to.
-type LicenceApp struct{ Collection, App string }
-
-// LicenceMap is what the postern backend's environment says about licences:
-// its cockpit collections (POSTERN_COLLECTIONS) and its app map
-// (POSTERN_APPS, in the order listed, a repeated collection kept).
-type LicenceMap struct {
-	Cockpit []string
-	Apps    []LicenceApp
+// LicenceEntry is one collection of the licence map the postern backend
+// prints for `postern rights --json`: whether a licence in it is the cockpit's
+// or an app's (App names it; a comma joins more than one) and the routes a key
+// holding it opens. Postern decides all of it; mw only reads it.
+type LicenceEntry struct {
+	Collection string   `json:"collection"`
+	Kind       string   `json:"kind"`
+	App        string   `json:"app"`
+	Routes     []string `json:"routes"`
 }
 
-// KeyRights is what holding licences in some collections gives a key. It
-// repeats rightsFromCollections of the postern rig's
-// server/internal/api/rights.go, the only place rights are decided: another
-// module, whose package is internal, so mw cannot call it. Change one, change
-// the other.
-type KeyRights struct {
-	Cockpit bool
-	Apps    []string
-}
-
-// RightsFromCollections is rights.go's rightsFromCollections: a collection
-// in apps is that app's, any other held collection is the cockpit's, and a
-// key holding a cockpit collection too is a cockpit key.
-func RightsFromCollections(collections []string, apps map[string]string) KeyRights {
-	var r KeyRights
-	for _, collection := range collections {
-		app, isApp := apps[collection]
-		switch {
-		case !isApp:
-			r.Cockpit = true
-		case !licenceContains(r.Apps, app):
-			r.Apps = append(r.Apps, app)
+// ParseRightsJSON reads the output of `postern rights --json`:
+// {"collections":[{"collection","kind","app","routes"}]}. Text that is not
+// that map, or names no collection, or a kind other than cockpit and app, is
+// refused: it is an older postern, or not postern, and nothing is guessed.
+func ParseRightsJSON(data []byte) ([]LicenceEntry, error) {
+	var doc struct {
+		Collections []LicenceEntry `json:"collections"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("its output is not a licence map: %w", err)
+	}
+	if len(doc.Collections) == 0 {
+		return nil, fmt.Errorf("its output names no collection")
+	}
+	for _, entry := range doc.Collections {
+		if entry.Collection == "" || (entry.Kind != "cockpit" && entry.Kind != "app") {
+			return nil, fmt.Errorf("its output has the collection %q of kind %q, which is neither cockpit nor app", entry.Collection, entry.Kind)
 		}
 	}
-	return r
-}
-
-func licenceContains(list []string, value string) bool {
-	for _, item := range list {
-		if item == value {
-			return true
-		}
-	}
-	return false
-}
-
-// licenceRoute is one route of the backend and the kinds of licensed key it
-// admits: the gate(...) lines of server/internal/api/handlers.go, less the
-// mill and Mayor keys, which hold no licence to read here.
-type licenceRoute struct {
-	route         string
-	cockpit, apps bool
-}
-
-var licenceRoutes = []licenceRoute{
-	{"GET /api/messages", true, true},
-	{"POST /api/messages", true, true},
-	{"GET /api/me", true, true},
-	{"GET /api/view", true, false},
-	{"GET /api/events", true, true},
-	{"GET /api/presence", true, false},
-	{"GET /api/prompts", true, true},
-	{"GET /api/prompts/{name}", true, true},
-	{"PUT /api/prompts/{name}", true, false},
-	{"DELETE /api/prompts/{name}", true, false},
-	{"GET /api/ideas-only/{pubkey}", true, false},
-	{"PUT /api/ideas-only/{pubkey}", true, false},
-	{"GET /api/beads/{id}", true, false},
-	{"POST /api/broadcast", true, false},
-	{"GET /api/utxos/{address}", true, false},
-	{"GET /api/balance/{address}", true, false},
-	{"GET /api/push/vapid-public-key", true, true},
-	{"POST /api/push/subscribe", true, true},
-	{"POST /api/blobs", true, true},
-	{"GET /api/blobs/{hash}", true, false},
-	{"DELETE /api/blobs/{hash}", true, false},
-}
-
-// Routes names what a key with these rights opens, as access.admits does: a
-// cockpit key the cockpit's routes, a key of apps only the routes that name
-// app keys.
-func (r KeyRights) Routes() []string {
-	var routes []string
-	for _, route := range licenceRoutes {
-		if (r.Cockpit && route.cockpit) || (len(r.Apps) > 0 && !r.Cockpit && route.apps) {
-			routes = append(routes, route.route)
-		}
-	}
-	return routes
-}
-
-// ParseLicenceMap reads the backend's environment file text (NAME=value
-// lines, as a systemd EnvironmentFile): POSTERN_COLLECTIONS and POSTERN_APPS.
-func ParseLicenceMap(env string) (LicenceMap, error) {
-	values := map[string]string{}
-	for _, line := range strings.Split(env, "\n") {
-		line = strings.TrimSpace(line)
-		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
-			continue
-		}
-		name, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		if n := len(value); n >= 2 && (value[0] == '"' || value[0] == '\'') && value[n-1] == value[0] {
-			value = value[1 : n-1]
-		}
-		values[strings.TrimSpace(name)] = value
-	}
-	collections := values["POSTERN_COLLECTIONS"]
-	if strings.TrimSpace(collections) == "" {
-		collections = DefaultBackendCollections
-	}
-	m := LicenceMap{Cockpit: licenceList(collections)}
-	for _, pair := range licenceList(values["POSTERN_APPS"]) {
-		collection, app, ok := strings.Cut(pair, "=")
-		collection, app = strings.TrimSpace(collection), strings.TrimSpace(app)
-		if !ok || collection == "" || app == "" {
-			return LicenceMap{}, fmt.Errorf("POSTERN_APPS: %q is not collection=app", pair)
-		}
-		m.Apps = append(m.Apps, LicenceApp{Collection: collection, App: app})
-	}
-	return m, nil
-}
-
-func licenceList(value string) []string {
-	var out []string
-	for _, item := range strings.Split(value, ",") {
-		if item = strings.TrimSpace(item); item != "" {
-			out = append(out, item)
-		}
-	}
-	return out
+	return doc.Collections, nil
 }
 
 // LicenceReport is what mw doctor licences prints: a line per collection,
@@ -867,51 +757,53 @@ func (r LicenceReport) String() string {
 	return b.String()
 }
 
-// Report judges the map. It reads rights through RightsFromCollections and
-// Routes, and changes nothing.
-func (m LicenceMap) Report() LicenceReport {
+// ReportLicences judges the backend's licence map and changes nothing. It
+// warns of what the map can show: a collection listed more than once (the
+// backend lists its cockpit collections, then its app collections, so one in
+// both is listed twice, as an app's) and a collection with more than one app.
+func ReportLicences(entries []LicenceEntry) LicenceReport {
 	var report LicenceReport
-	apps := map[string]string{}
-	appsOf := map[string][]string{}
-	var appOrder []string
-	for _, pair := range m.Apps {
-		if _, seen := apps[pair.Collection]; !seen {
-			appOrder = append(appOrder, pair.Collection)
-		}
-		apps[pair.Collection] = pair.App
-		if !licenceContains(appsOf[pair.Collection], pair.App) {
-			appsOf[pair.Collection] = append(appsOf[pair.Collection], pair.App)
-		}
-	}
-	cockpit := map[string]bool{}
 	var order []string
-	for _, collection := range append(append([]string{}, m.Cockpit...), appOrder...) {
-		if !licenceContains(order, collection) {
-			order = append(order, collection)
+	first := map[string]LicenceEntry{}
+	count := map[string]int{}
+	for _, entry := range entries {
+		if count[entry.Collection] == 0 {
+			order = append(order, entry.Collection)
+			first[entry.Collection] = entry
 		}
-	}
-	for _, collection := range m.Cockpit {
-		cockpit[collection] = true
+		count[entry.Collection]++
 	}
 	for _, collection := range order {
-		rights := RightsFromCollections([]string{collection}, apps)
+		entry := first[collection]
 		where := "cockpit"
-		if app, isApp := apps[collection]; isApp {
-			where = "app " + app
+		if entry.Kind == "app" {
+			where = "app " + entry.App
 		}
-		report.Lines = append(report.Lines, fmt.Sprintf("%s -> %s: a key holding it opens %s", collection, where, strings.Join(rights.Routes(), ", ")))
+		report.Lines = append(report.Lines, fmt.Sprintf("%s -> %s: a key holding it opens %s", collection, where, strings.Join(entry.Routes, ", ")))
 	}
 	for _, collection := range order {
-		if cockpit[collection] && len(appsOf[collection]) > 0 {
+		entry := first[collection]
+		apps := licenceList(entry.App)
+		if count[collection] > 1 {
 			report.Warnings = append(report.Warnings, fmt.Sprintf(
 				"%s is a cockpit collection (POSTERN_COLLECTIONS) and is mapped to app %s (POSTERN_APPS): a key holding a licence in it, the Governor's cockpit key if he holds one there, is an app key only and loses the cockpit; drop the mapping or the collection",
-				collection, strings.Join(appsOf[collection], ", ")))
+				collection, strings.Join(apps, ", ")))
 		}
-		if len(appsOf[collection]) > 1 {
+		if len(apps) > 1 {
 			report.Warnings = append(report.Warnings, fmt.Sprintf(
-				"%s is mapped to two apps (%s) in POSTERN_APPS: the backend keeps the last, %s; one collection is one app's",
-				collection, strings.Join(appsOf[collection], " and "), apps[collection]))
+				"%s is mapped to two apps (%s) in POSTERN_APPS; one collection is one app's",
+				collection, strings.Join(apps, " and ")))
 		}
 	}
 	return report
+}
+
+func licenceList(value string) []string {
+	var out []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
