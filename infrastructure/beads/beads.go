@@ -49,8 +49,11 @@ type Gateway struct {
 	program string
 	actor   string
 	sleep   func(ctx context.Context, d time.Duration) error
-	mu      sync.RWMutex
-	reads   chan struct{}
+	// createBound is how long a bd create may run before it is stopped; zero
+	// is DefaultCreateBound.
+	createBound time.Duration
+	mu          sync.RWMutex
+	reads       chan struct{}
 }
 
 // Gateway satisfies the ports.
@@ -84,6 +87,18 @@ func WithActor(actor string) Option {
 // is a fake one.
 func WithSleep(sleep func(ctx context.Context, d time.Duration) error) Option {
 	return func(g *Gateway) { g.sleep = sleep }
+}
+
+// DefaultCreateBound is how long a bd create may run before it is stopped. A
+// create is one small write; one that has not finished in this long is waiting
+// on the database's single-writer lock or on a Dolt server under load, and the
+// caller's own, longer bound would only end it with no word of why (mw-gq6.563).
+const DefaultCreateBound = 90 * time.Second
+
+// WithCreateBound sets how long a bd create may run before it is stopped, in
+// place of DefaultCreateBound: for a test that cannot wait that long.
+func WithCreateBound(d time.Duration) Option {
+	return func(g *Gateway) { g.createBound = d }
 }
 
 // New returns a Gateway onto the beads database in a vault directory.
@@ -219,8 +234,18 @@ func (g *Gateway) ReleaseStory(ctx context.Context, id string) error {
 
 // created runs one `bd create` and reads back the id it gave what it created.
 func (g *Gateway) created(ctx context.Context, what string, args []string) (string, error) {
-	out, err := g.call(ctx, append(args, "--silent")...)
+	bound := g.createBound
+	if bound <= 0 {
+		bound = DefaultCreateBound
+	}
+	bounded, stop := context.WithTimeout(ctx, bound)
+	defer stop()
+	out, err := g.call(bounded, append(args, "--silent")...)
 	if err != nil {
+		if ctx.Err() == nil && errors.Is(bounded.Err(), context.DeadlineExceeded) {
+			return "", fmt.Errorf("%s create for %s did not finish in %s and was stopped; no bead was made (check bd list before filing it again): "+
+				"bd is waiting on the database's single-writer lock (another bd or mw running) or on a Dolt server under load", g.program, what, bound)
+		}
 		return "", err
 	}
 	id := strings.TrimSpace(string(out))
@@ -1093,6 +1118,10 @@ func (g *Gateway) runOnce(ctx context.Context, args ...string) ([]byte, []byte, 
 	}
 	full = append(full, args...)
 	cmd := exec.CommandContext(ctx, g.program, full...)
+	// bd is given no standard input (the null device, which reads as empty), never
+	// mw's own: every text it is given goes as an argument, so a bd that waited
+	// on stdin would wait on whatever holds the other end open (mw-gq6.563).
+	cmd.Stdin = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = killGrace
