@@ -1121,3 +1121,23 @@ func TestAVaultHeadThatCannotBeReadIsNotedAndNothingIsQueued(t *testing.T) {
 		t.Fatalf("expected nothing queued, got %v", pending)
 	}
 }
+
+func TestSyncCommitsTheMarkItWroteBeforeItPulls(t *testing.T) {
+	sync, files, _ := syncing(t)
+	files.Marked = true
+
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	commits := files.Commits()
+	if len(commits) != 1 || len(commits[0].Paths) != 1 || commits[0].Paths[0] != application.LedgerAttributesFile {
+		t.Fatalf("expected the mark committed alone, got %+v", commits)
+	}
+
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing again: %v", err)
+	}
+	if got := len(files.Commits()); got != 1 {
+		t.Fatalf("expected a marked vault to be committed nothing, got %d commits", got)
+	}
+}

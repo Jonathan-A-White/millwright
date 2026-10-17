@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
@@ -608,5 +609,57 @@ func TestLastSignIsTheNewestCommitAuthoredAsThatHostAndNoOtherHosts(t *testing.T
 	// mw@cloud is a prefix of both of them, and has committed nothing.
 	if sign, err := vault.New(here).LastSign(ctx, "cloud"); err != nil || !sign.At.IsZero() {
 		t.Fatalf("expected no sign of cloud, got %+v, %v", sign, err)
+	}
+}
+
+// syncOnce runs one real sync of a clone with no work tracker beyond the fake.
+func syncOnce(t *testing.T, dir string) application.SyncReport {
+	t.Helper()
+	report, err := application.Sync{
+		Vault:   vault.New(dir),
+		Tracker: apptest.NewFakeTracker(),
+		Host:    "cloud3",
+		Now:     func() time.Time { return time.Date(2026, 10, 17, 9, 0, 0, 0, time.UTC) },
+		Sleep:   func(context.Context, time.Duration) error { return nil },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("syncing %s: %v", dir, err)
+	}
+	return report
+}
+
+func TestSyncCommitsTheLedgerMarkItWritesIntoAFreshClone(t *testing.T) {
+	for name, before := range map[string]string{
+		"a clone with no attributes yet":         "",
+		"a clone whose attributes carry no mark": "*.md text\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			here, there := twoHosts(t)
+			if before != "" {
+				write(t, there, vault.AttributesFile, before)
+				run(t, there, "git", "add", "-A")
+				run(t, there, "git", "commit", "-qm", "Attributes without the mark")
+				run(t, there, "git", "push", "-q")
+				run(t, here, "git", "pull", "-q", "--rebase")
+			}
+
+			if report := syncOnce(t, here); !report.Marked {
+				t.Fatalf("expected the first sync to write the mark, got %+v", report)
+			}
+			if status := run(t, here, "git", "status", "--porcelain", "--untracked-files=no"); strings.TrimSpace(status) != "" {
+				t.Fatalf("expected a clean vault after one sync, got %q", status)
+			}
+			if committed := run(t, here, "git", "show", "HEAD:"+vault.AttributesFile); !strings.Contains(committed, application.LedgerMark) {
+				t.Fatalf("expected the mark to be committed, HEAD has %q", committed)
+			}
+			head := run(t, here, "git", "rev-parse", "HEAD")
+
+			if report := syncOnce(t, here); report.Marked || report.Blocked != nil {
+				t.Fatalf("expected the second sync to write nothing and not be blocked, got %+v", report)
+			}
+			if again := run(t, here, "git", "rev-parse", "HEAD"); again != head {
+				t.Fatalf("expected the second sync to commit nothing, HEAD moved from %s to %s", head, again)
+			}
+		})
 	}
 }
