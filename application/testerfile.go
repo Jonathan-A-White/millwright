@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -48,6 +49,9 @@ type TesterFinding struct {
 	Acceptance string
 	// Files is the story's files key: the repo paths it expects to change.
 	Files string
+	// Host is the host the fix is to run on; empty files it for any (auto),
+	// whatever host the landed story ran on.
+	Host string
 }
 
 // TesterFiled is what filing one finding did.
@@ -61,16 +65,21 @@ type TesterFiled struct {
 	// Waits are the open or running stories of the rig that name a file this
 	// one does, which it waits on.
 	Waits []string
+	// Chained are the findings still held, filed for the same landed story, that
+	// name a file this one does, which it waits on in filing order.
+	Chained []string
 	// Notes are what could not be done, one line each; they never undo the filing.
 	Notes []string
 }
 
 // TesterFiler files a Tester's finding: a story held under the landed story's
 // epic, so that the Mayor only reads it and releases it, or drops it. It does
-// the mechanical part of triage: the path copied from the landed story, the
-// files key, a wait on every open story of the rig that names the same file, a
-// wait of the epic's open demo on the new story, and no story at all for a
-// finding an open bead already holds. Releasing stays the Mayor's.
+// the mechanical part of triage: the path copied from the landed story but for
+// the host (auto, unless the Tester names one), a bug at P2 and a taste finding
+// at P3, the files key, a wait on every open story of the rig that names the same
+// file and on every earlier held finding of the same landing that does, a wait
+// of the epic's open demo on the new story, and no story at all for a finding an
+// open bead already holds. Releasing stays the Mayor's.
 type TesterFiler struct {
 	Tracker TesterFileTracker
 	// Rules says which label marks the epic's last story; nil leaves the demo be.
@@ -142,11 +151,16 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 	}
 
 	path.Files = ""
+	path.Host = domain.HostAuto
+	if host := strings.TrimSpace(finding.Host); host != "" {
+		path.Host = host
+	}
 	if files := domain.FileList(finding.Files); len(files) > 0 {
 		path.Files = strings.Join(files, ",")
 	}
 	shared := sameFileStories(stories, path)
 	filed.Waits = shared
+	filed.Chained = heldFindingsNamingSameFile(stories, path, landedID)
 
 	story := NewStory{
 		EpicID:      landed.EpicID,
@@ -154,8 +168,9 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 		Title:       title,
 		Description: testerFindingDescription(landedID, testerID, finding),
 		Acceptance:  strings.TrimSpace(finding.Acceptance),
+		Priority:    testerFindingPriority(finding.Kind),
 		Overrides:   path,
-		Needs:       shared,
+		Needs:       append(slices.Clone(shared), filed.Chained...),
 	}
 	if finding.Kind == TesterKindBug {
 		story.Labels = []string{LabelBug}
@@ -168,6 +183,9 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 	f.say("filed %s, held, under %s: %s\n", id, orStandalone(landed.EpicID), title)
 	if len(shared) > 0 {
 		f.say("  waits on %s: they name the same file as it\n", strings.Join(shared, ", "))
+	}
+	if len(filed.Chained) > 0 {
+		f.say("  waits on %s: held findings of the same landing that name the same file\n", strings.Join(filed.Chained, ", "))
 	}
 	if path.Files == "" {
 		filed.Notes = append(filed.Notes, fmt.Sprintf("%s has no files key: no wait on stories that name the same file was made", id))
@@ -259,6 +277,38 @@ func sameFileStories(stories []StoryDetail, path domain.Path) []string {
 		theirs := d.Merged()
 		status := strings.ToLower(strings.TrimSpace(d.Status))
 		if d.IsEpic || theirs.Rig != path.Rig || IsTesterStory(d) || (status != StatusOpen && status != StatusInProgress) {
+			continue
+		}
+		if _, shared := domain.SharedFile(ours, domain.FileList(theirs.Files)); shared {
+			ids = append(ids, d.Story.ID)
+		}
+	}
+	return ids
+}
+
+// testerFindingPriority is the priority a finding is filed at: a bug is P2,
+// as any story is by default, and a taste finding P3 (mw-gq6.542).
+func testerFindingPriority(kind string) int {
+	if kind == TesterKindTaste {
+		return 3
+	}
+	return DefaultPriority
+}
+
+// heldFindingsNamingSameFile are the ids of the findings still held that a
+// Tester filed for the landed story, in filing order, and that name a file
+// path's files key does.
+func heldFindingsNamingSameFile(stories []StoryDetail, path domain.Path, landedID string) []string {
+	ours := domain.FileList(path.Files)
+	if len(ours) == 0 {
+		return nil
+	}
+	source := "Tester on " + landedID + " ("
+	var ids []string
+	for _, d := range stories {
+		theirs := d.Merged()
+		if d.IsEpic || theirs.Rig != path.Rig || strings.ToLower(strings.TrimSpace(d.Status)) != StatusHeld ||
+			!strings.Contains(d.Description, TesterFindingMarker) || !strings.Contains(d.Description, source) {
 			continue
 		}
 		if _, shared := domain.SharedFile(ours, domain.FileList(theirs.Files)); shared {

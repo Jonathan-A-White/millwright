@@ -103,14 +103,15 @@ func testerTrial() (application.TesterTrial, error) {
 func newTesterFileCmd() *cobra.Command {
 	var finding application.TesterFinding
 	cmd := &cobra.Command{
-		Use:   "file <tester-story-id> --kind bug|taste --title <one line> --finding <text> --how <text> --accept <text> [--files a,b] [--shot <path>] [--fix <one line>]",
+		Use:   "file <tester-story-id> --kind bug|taste --title <one line> --finding <text> --how <text> --accept <text> [--files a,b] [--host <host>] [--shot <path>] [--fix <one line>]",
 		Short: "File a Tester's finding as a held story under the landed story's epic",
 		Long: "file is what a Tester runs for each finding that still happens on main, in place of the Mayor's triage.\n" +
 			"It reads the landed story from the Tester story's 'Landed story:' line and files, held, under the landed\n" +
 			"story's epic: '[bug] <app>: <title>' (or [taste]), the finding verbatim with its source, shot and the fix\n" +
-			"marked PROVISIONAL, HOW TO CHECK IT, the acceptance, the landed story's path with --files as its files\n" +
-			"key, a wait on every running or open story of the rig that names the same file, and the epic's open\n" +
-			"demo waiting on it. A finding whose title an open bead of the rig already has is not filed: the bead\n" +
+			"marked PROVISIONAL, HOW TO CHECK IT, the acceptance, the landed story's path with host auto (or --host)\n" +
+			"and --files as its files key, priority 2 for a bug and 3 for a taste finding, a wait on every running\n" +
+			"or open story of the rig, and on every earlier held finding of the same landing, that names the same\n" +
+			"file, and the epic's open demo waiting on it. A finding whose title an open bead of the rig already has is not filed: the bead\n" +
 			"is named. A bug whose --accept has no line beginning 'Sweep:' is refused, as mw dispatch would refuse it.\n" +
 			"It prints the id; put 'held: <id>' (or 'duplicate of: <id>') under the finding in FINDINGS.\n" +
 			"It releases nothing: that stays the Mayor's. A text flag whose value starts with @ reads that file.",
@@ -151,5 +152,6 @@ func newTesterFileCmd() *cobra.Command {
 	flags.StringVar(&finding.HowToCheck, "how", "", "HOW TO CHECK IT, for the Governor (@file reads a file)")
 	flags.StringVar(&finding.Acceptance, "accept", "", "acceptance checkable by running something; a bug's needs a line beginning 'Sweep:' too (@file reads a file)")
 	flags.StringVar(&finding.Files, "files", "", "the files key: the repo paths or globs the fix expects to change, comma-separated")
+	flags.StringVar(&finding.Host, "host", "", "the host the fix must run on; auto (any host) by default, not the landed story's host")
 	return cmd
 }

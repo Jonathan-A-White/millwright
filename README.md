@@ -1671,14 +1671,16 @@ only reads and releases it (mw-gq6.397):
 
 ```sh
 bin/mw tester file <tester-story> --kind bug --title "<one line>" --finding @finding.txt \
-  --how @how.txt --accept @accept.txt --files src/Reader.tsx --shot /tmp/tester-x/06.png --fix "<one line>"
+  --how @how.txt --accept @accept.txt --files src/Reader.tsx [--host <host>] --shot /tmp/tester-x/06.png --fix "<one line>"
 ```
 
 It files `[bug] <app>: <title>` (or `[taste]`) held under the landed story's epic: the
 finding verbatim, `Tester finding. Source: Tester on <landed> (<tester story>)`, the shot, the fix
 marked `PROVISIONAL (Tester's suggestion; Mayor to confirm)`, HOW TO CHECK IT, the acceptance, the
-landed story's path with `--files` as its files key, a wait on every running or open story of the
-rig that names the same file, and the epic's open demo (the rig's `epic_last_story_labels`) waiting
+landed story's path with host `auto` (any host; `--host <host>` names one) and `--files` as its files
+key, priority 2 for a `[bug]` and 3 for a `[taste]`, a wait on every running or open story of the
+rig, and on every earlier still-held finding filed for the same landed story, that names the same
+file (so findings that touch one file go in series), and the epic's open demo (the rig's `epic_last_story_labels`) waiting
 on it. A finding whose title an open bead of the rig already has files nothing and names that bead.
 A bug whose acceptance has no line beginning `Sweep:` is refused, as `mw dispatch` would refuse it
 (mw-gq6.447), and so is a plan given to `mw file` with such a bug in it.
