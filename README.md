@@ -2717,8 +2717,10 @@ puts `boot:no` after its status. It is refused, saying `no eval question finds
 expects the slug and passes, so a Builder can still find what boot no longer
 carries; it also refuses an unknown slug, one not current and one already
 demoted. `promote` removes `boot: no` (it refuses a fact not demoted). The
-kickoff prompt tells a session that boot shows the facts every story needs and to
-run `mw memory query <rig> <term>` before touching a subject it does not know.
+kickoff prompt of a rig kept as facts tells a session that boot shows the facts
+every story needs and to run `mw memory query <that rig> <term>` before touching
+a subject it does not know; a flat-file rig's kickoff says instead that its
+whole rig memory is in the boot file, with no command.
 The budget (`rig_memory_bytes`) is unchanged. See `features/memory.feature`.
 
 ## Steps for his hands

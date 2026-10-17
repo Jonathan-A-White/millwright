@@ -190,7 +190,7 @@ func TestBootWritesTheBootFileAndHandsTheHarnessEverything(t *testing.T) {
 		t.Errorf("expected the boot file that was written, got %q", l.BootFile)
 	case l.ResultFile != "/vault/runs/mw-gq6.6/"+application.ResultFileName:
 		t.Errorf("expected the result beside it, got %q", l.ResultFile)
-	case l.Kickoff != application.KickoffPrompt("builder", "mw-gq6.6", "/vault"):
+	case l.Kickoff != application.KickoffPrompt("builder", "mw-gq6.6", "/vault", &application.RigMemoryAccess{Rig: "millwright"}):
 		t.Errorf("expected the kickoff prompt, got %q", l.Kickoff)
 	case l.Path.Model != domain.ModelOpus:
 		t.Errorf("expected the story's model, got %q", l.Path.Model)
@@ -379,7 +379,7 @@ func TestBootChainsTheHeartbeatOntoTheSessionWithTheStoryAfterIt(t *testing.T) {
 }
 
 func TestKickoffPromptGivesTheLiteralBdCommandForTheVault(t *testing.T) {
-	prompt := application.KickoffPrompt("builder", "mw-gq6.6", "/home/jwhite/100%-vault")
+	prompt := application.KickoffPrompt("builder", "mw-gq6.6", "/home/jwhite/100%-vault", nil)
 
 	for _, want := range []string{
 		"bd -C /home/jwhite/100%-vault close <step>",
@@ -398,7 +398,7 @@ func TestKickoffPromptGivesTheLiteralBdCommandForTheVault(t *testing.T) {
 }
 
 func TestKickoffPromptWithNoVaultPathSaysNothingOfBdC(t *testing.T) {
-	if prompt := application.KickoffPrompt("builder", "mw-gq6.6", ""); strings.Contains(prompt, "bd -C") {
+	if prompt := application.KickoffPrompt("builder", "mw-gq6.6", "", nil); strings.Contains(prompt, "bd -C") {
 		t.Errorf("expected no bd -C without a vault path, got %q", prompt)
 	}
 }
@@ -449,7 +449,7 @@ func TestBootAsksABugsBuilderForItsCommonError(t *testing.T) {
 // says never to sleep-poll.
 func TestEveryBuilderKickoffTeachesTheBackgroundAndTailWait(t *testing.T) {
 	kickoffs := map[string]string{
-		"story":    application.KickoffPrompt("builder", "mw-gq6.6", "/home/jwhite/vault"),
+		"story":    application.KickoffPrompt("builder", "mw-gq6.6", "/home/jwhite/vault", nil),
 		"rebase":   application.RebaseKickoffPrompt("builder", "mw-gq6.6", "/home/jwhite/vault", "origin/main"),
 		"mergefix": application.MergeFixKickoffPrompt("builder", "mw-gq6.6", "/home/jwhite/vault", "origin/main"),
 	}
@@ -534,7 +534,7 @@ func TestBootCapsTheSessionAndToldItToWrapUpAt80Percent(t *testing.T) {
 			}
 			kickoff := h.launch.Kickoff
 			if tc.turns == 0 {
-				if kickoff != application.KickoffPrompt("builder", "mw-gq6.6", "/vault") || strings.Contains(kickoff, "capped") {
+				if kickoff != application.KickoffPrompt("builder", "mw-gq6.6", "/vault", &application.RigMemoryAccess{Rig: "millwright"}) || strings.Contains(kickoff, "capped") {
 					t.Fatalf("expected an uncapped session's kickoff to say nothing of a cap, got %q", kickoff)
 				}
 				return
@@ -569,5 +569,59 @@ func TestBootTellsACappedTesterToWriteItsFindingsNotToCommit(t *testing.T) {
 	}
 	if strings.Contains(kickoff, "commit what passes") {
 		t.Errorf("expected a Tester never to be told to commit, got %q", kickoff)
+	}
+}
+
+func TestKickoffPromptNamesMemoryQueryOnlyOnAFactsRigAndWithTheRigsOwnName(t *testing.T) {
+	facts := application.KickoffPrompt("builder", "mw-gq6.6", "/vault", &application.RigMemoryAccess{Rig: "lampas", HasFacts: true})
+	if !strings.Contains(facts, "mw memory query lampas <term>") {
+		t.Errorf("expected a facts rig's kickoff to name mw memory query with the rig's own name, got %q", facts)
+	}
+	if strings.Contains(facts, "<rig>") {
+		t.Errorf("expected no placeholder rig in a facts rig's kickoff, got %q", facts)
+	}
+
+	flat := application.KickoffPrompt("builder", "mw-gq6.6", "/vault", &application.RigMemoryAccess{Rig: "postern"})
+	if strings.Contains(flat, "mw memory query") {
+		t.Errorf("expected a flat-file rig's kickoff to name no mw memory query, got %q", flat)
+	}
+	if !strings.Contains(flat, "whole rig memory is in the boot file") {
+		t.Errorf("expected a flat-file rig's kickoff to say the whole rig memory is in the boot file, got %q", flat)
+	}
+}
+
+func TestKickoffPromptWithNoAnswerAboutTheRigKeepsTheGenericQueryLine(t *testing.T) {
+	prompt := application.KickoffPrompt("builder", "mw-gq6.6", "/vault", nil)
+	if !strings.Contains(prompt, "run mw memory query <rig> <term>") {
+		t.Errorf("expected the generic line when the rig is not known, got %q", prompt)
+	}
+}
+
+func TestSeatBootNamesMemoryQueryOnlyForTheFactsRigItBootsInto(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		hasFacts bool
+		want     string
+		notWant  string
+	}{
+		{"facts rig", true, "mw memory query millwright <term>", ""},
+		{"flat-file rig", false, "", "mw memory query"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, h := newFakeVault(), &fakeHarness{}
+			seat := v.seats["builder/millwright"]
+			seat.HasFacts = tc.hasFacts
+			v.seats["builder/millwright"] = seat
+			if _, err := aSeatBoot(v, h).Boot(context.Background(), aStory(nil), "/wt"); err != nil {
+				t.Fatal(err)
+			}
+			kickoff := h.launch.Kickoff
+			if tc.want != "" && !strings.Contains(kickoff, tc.want) {
+				t.Errorf("expected %q in %q", tc.want, kickoff)
+			}
+			if tc.notWant != "" && strings.Contains(kickoff, tc.notWant) {
+				t.Errorf("expected no %q in %q", tc.notWant, kickoff)
+			}
+		})
 	}
 }
