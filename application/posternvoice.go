@@ -66,6 +66,7 @@ func (i PosternInbox) applyVoice(ctx context.Context, m PosternInboxMessage, out
 	if transcript == "" {
 		transcript = "(nothing was heard)"
 	}
+	i.keepTranscript(m.Txid, transcript)
 	caption := strings.TrimSpace(m.Text)
 
 	var problems []string

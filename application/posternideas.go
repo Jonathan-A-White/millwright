@@ -90,6 +90,7 @@ func (i PosternInbox) ideaWords(ctx context.Context, m PosternInboxMessage, file
 	if i.isVoiceNote(m) {
 		if file != "" {
 			if heard, err := i.Transcriber.Transcribe(ctx, file); err == nil && strings.TrimSpace(heard) != "" {
+				i.keepTranscript(m.Txid, strings.TrimSpace(heard))
 				return heldWords(heard)
 			}
 		}
