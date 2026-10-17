@@ -87,6 +87,10 @@ type Deputy struct {
 	// Deputy with. Without it a Deputy that is up is only said to be.
 	Mail Mailbox
 
+	// Events, when set, is the event log a Deputy found stopped at the usage
+	// limit is told in, once for the limit (TellSeatLimited).
+	Events EventLog
+
 	// Host is the host the Deputy is brought up on.
 	Host string
 
@@ -179,6 +183,11 @@ func (d Deputy) closeAtLimit(ctx context.Context, name string) (bool, error) {
 	limit, on := paneLimitOf(ctx, d.Terminal, window, d.now())
 	if !on {
 		return false, nil
+	}
+	// The event is a note for whoever waits on the log: a log that cannot be
+	// written leaves the Deputy's rule as it was.
+	if err := TellSeatLimited(ctx, d.Events, d.now, DeputySeat, d.Host, window, limit); err != nil && d.Out != nil {
+		fmt.Fprintf(d.Out, "could not write the seat_limited event: %s\n", oneLine(err.Error()))
 	}
 	if !limit.Over(d.now()) {
 		return false, &DeputyAlreadyUp{Window: name, Limit: &limit}

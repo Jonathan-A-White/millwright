@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // paneLimitChoice is a choice of the menu the harness puts up at the usage
@@ -164,4 +166,42 @@ func (w WindowAtLimit) write(b *strings.Builder) {
 	if w.Limit.Notice != "" {
 		clip(b, "    "+w.Limit.Notice)
 	}
+}
+
+// TellSeatLimited writes one seat_limited event for a seat whose pane was found
+// stopped at the usage limit, so that mw events wait and the digest can see the
+// stop. An episode is told once: the log is read for a seat_limited event of
+// the same seat and the same reset time, and none is written when it holds one
+// (mw-gq6.520). It is the one writer every finder of a limited pane calls: the
+// seats' reaper, the Deputy's refusal, the Millhand tick and mw doctor's
+// mayor-stuck. A nil log tells no one.
+func TellSeatLimited(ctx context.Context, log EventLog, now func() time.Time, seat, host string, window ReapWindow, limit PaneLimit) error {
+	if log == nil {
+		return nil
+	}
+	limited := events.SeatLimited{Seat: seat, Window: window.Name, Resets: limit.Resets.UTC().Truncate(time.Second), Notice: limit.Notice}
+	if limited.Window == "" {
+		limited.Window = window.ID
+	}
+	told, err := log.Since(ctx, 0)
+	if err != nil {
+		return fmt.Errorf("reading the event log for %s's usage limit: %w", seat, err)
+	}
+	for _, ev := range told {
+		if was, ok := events.SeatLimitedOf(ev); ok && was.Seat == seat && was.Resets.Equal(limited.Resets) {
+			return nil
+		}
+	}
+	actor := seat
+	if host != "" {
+		actor += "@" + host
+	}
+	_, err = EventEmit{
+		Log: log, Now: now,
+		Event: events.Event{Kind: events.KindSeatLimited, Actor: actor, Detail: limited.Detail()},
+	}.Run(ctx)
+	if err != nil {
+		return fmt.Errorf("telling the event log %s is at the usage limit: %w", seat, err)
+	}
+	return nil
 }

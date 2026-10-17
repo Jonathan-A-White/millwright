@@ -197,6 +197,10 @@ type SeatReap struct {
 	Terminal ReapTerminal
 	Log      ReapLog
 
+	// Events, when set, is the event log a pane found stopped at the usage limit
+	// is told in, once for the limit (TellSeatLimited).
+	Events EventLog
+
 	// Seat is the seat whose window is being watched, Host the host whose
 	// handoffs count, and Window the window to close, by the id the terminal
 	// gives it.
@@ -301,6 +305,7 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 	// and whether the wait has run out.
 	var waitingSince time.Time
 	waitedOut := false
+	toldLimit := false
 	nextWait := s.NextWait
 	if nextWait <= 0 {
 		nextWait = DefaultReapNextWait
@@ -328,6 +333,12 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 		if !closable {
 			idle = 0
 			continue
+		}
+		if limit != nil && !toldLimit {
+			toldLimit = true
+			if err := TellSeatLimited(ctx, s.Events, s.now, s.Seat, s.Host, window, *limit); err != nil {
+				s.say(ctx, "could not write the seat_limited event: "+oneLine(err.Error()))
+			}
 		}
 		if idle++; idle < 2 {
 			continue

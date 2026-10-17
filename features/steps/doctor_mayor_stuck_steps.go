@@ -11,6 +11,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 
@@ -38,6 +39,7 @@ type mayorStuckFixture struct {
 	listener   net.Listener
 	proxyValue string
 	check      *doctor.MayorStuck
+	events     *apptest.FakeEventLog
 }
 
 // registerMayorStuckSteps registers the steps of the mayor-stuck scenarios.
@@ -64,6 +66,8 @@ func (c *doctorContext) registerMayorStuckSteps(ctx *godog.ScenarioContext) {
 
 	ctx.When(`^mw doctor's mayor-stuck check runs$`, func() error { return c.run(false) })
 
+	ctx.Then(`^the Mayor was told to the event log as stopped at the usage limit (\d+) times?$`, c.theMayorWasToldAsLimited)
+	ctx.Then(`^the Mayor was told to the event log as stopped at the usage limit until "([^"]*)"$`, c.theMayorWasToldAsLimitedUntil)
 	ctx.Then(`^the Mayor's window was closed$`, c.theMayorsWindowWasClosed)
 	ctx.Then(`^the Mayor's window was not closed$`, c.theMayorsWindowWasNotClosed)
 	ctx.Then(`^no handover was written$`, c.noHandoverWasWritten)
@@ -101,6 +105,8 @@ func (c *doctorContext) stuckFixture() (*mayorStuckFixture, error) {
 		environ:  []string{"PATH=" + os.Getenv("PATH"), "HOME=/nonexistent"},
 	}
 	f.check = doctor.NewMayorStuck(vault, c.state)
+	f.events = &apptest.FakeEventLog{}
+	f.check.Events = f.events
 	f.check.Replies = claude.NewTranscripts(f.projects)
 	f.check.Host = seatUpHost
 	f.check.Now = func() time.Time { return c.now }
@@ -383,4 +389,47 @@ func (c *doctorContext) tmuxWasNotToldToUnset() error {
 		return fmt.Errorf("expected tmux told to unset nothing, its calls were:\n%s", calls)
 	}
 	return nil
+}
+
+// mayorLimitedEvents is the seat_limited events the check wrote.
+func (c *doctorContext) mayorLimitedEvents() ([]events.SeatLimited, error) {
+	f, err := c.stuckFixture()
+	if err != nil {
+		return nil, err
+	}
+	all, err := f.events.Since(context.Background(), 0)
+	if err != nil {
+		return nil, err
+	}
+	var out []events.SeatLimited
+	for _, ev := range all {
+		if limited, ok := events.SeatLimitedOf(ev); ok {
+			out = append(out, limited)
+		}
+	}
+	return out, nil
+}
+
+func (c *doctorContext) theMayorWasToldAsLimited(n int) error {
+	got, err := c.mayorLimitedEvents()
+	if err != nil {
+		return err
+	}
+	if len(got) != n {
+		return fmt.Errorf("expected %d seat_limited events, the check wrote %d: %+v", n, len(got), got)
+	}
+	return nil
+}
+
+func (c *doctorContext) theMayorWasToldAsLimitedUntil(until string) error {
+	got, err := c.mayorLimitedEvents()
+	if err != nil {
+		return err
+	}
+	for _, l := range got {
+		if l.Seat == application.MayorSeat && l.Resets.UTC().Format(application.TicksTimeFormat) == until {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected a seat_limited event for the mayor until %s, the check wrote %+v", until, got)
 }

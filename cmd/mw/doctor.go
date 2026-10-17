@@ -203,6 +203,7 @@ func newDoctorCmd() *cobra.Command {
 				mayorStuck.Replies = claude.NewTranscripts(projects)
 			}
 			mayorStuck.Alarm, mayorStuck.Clear = alarm, clear
+			mayorStuck.Events = homeEventLog()
 			batteryLow, batteryCritical, err := config.DoctorBatteryThresholds()
 			if err != nil {
 				return err

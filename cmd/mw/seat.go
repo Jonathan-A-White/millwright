@@ -166,6 +166,7 @@ func newSeatReapCmd() *cobra.Command {
 				Seats:    files,
 				Terminal: seatWindows(),
 				Log:      files,
+				Events:   homeEventLog(),
 				Seat:     args[0],
 				Host:     host,
 				Window:   window,

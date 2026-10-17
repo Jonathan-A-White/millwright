@@ -168,6 +168,7 @@ func newMillhandTickCmd() *cobra.Command {
 				Tidy:       application.Tidy{Mail: gateway, Notes: gateway, Beads: gateway, Formulas: gateway},
 				Reach:      doctor.NetReach{Hosts: reach},
 				ReapLog:    files,
+				Events:     homeEventLog(),
 				Recheck:    time.Duration(recheck) * time.Second,
 				SyncHalts:  hostSyncHalt(),
 				Notify:     notify.New(),

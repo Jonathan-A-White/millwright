@@ -154,6 +154,11 @@ type MillhandTick struct {
 	Sweep    Sweep
 	Log      TickLog
 
+	// Events, when set, is the event log a Millhand found stopped at the usage
+	// limit is told in, once for the limit (TellSeatLimited); a dry run writes
+	// nothing.
+	Events EventLog
+
 	// Tidy is what runs after the sweep: it closes what is plainly finished,
 	// within its fixed bounds. Its Log, DryRun and Now are the tick's own,
 	// and it prints nothing of its own; a tick with none wired (no Mail) does
@@ -275,8 +280,11 @@ func (t MillhandTick) lookAround(ctx context.Context) (line string, woke bool, e
 		limited := false
 		if err == nil && !gone {
 			var limit PaneLimit
-			if limit, limited = t.atLimit(ctx, up); limited && !limit.Over(t.now()) {
-				return joinNotes(alreadyUp(up), []string{"the Millhand is " + limit.String()}), false, nil
+			if limit, limited = t.atLimit(ctx, up); limited {
+				told := t.tellLimited(ctx, up, limit)
+				if !limit.Over(t.now()) {
+					return joinNotes(alreadyUp(up), append([]string{"the Millhand is " + limit.String()}, told...)), false, nil
+				}
 			}
 		}
 		if err == nil && !gone && (limited || t.stalledCandidate(ctx, up)) {
@@ -544,6 +552,23 @@ func (t MillhandTick) atLimit(ctx context.Context, name string) (PaneLimit, bool
 		return PaneLimit{}, false
 	}
 	return paneLimitOf(ctx, t.Millhand.Terminal, window, t.now())
+}
+
+// tellLimited writes the seat_limited event for a Millhand found at the limit,
+// once for the limit, and gives the note to carry when it could not. A dry run
+// writes nothing.
+func (t MillhandTick) tellLimited(ctx context.Context, name string, limit PaneLimit) []string {
+	if t.DryRun || t.Events == nil {
+		return nil
+	}
+	window, there := t.reapWindow(ctx, name)
+	if !there {
+		return nil
+	}
+	if err := TellSeatLimited(ctx, t.Events, t.now, MillhandSeat, t.Host, window, limit); err != nil {
+		return []string{"could not write the seat_limited event: " + oneLine(err.Error())}
+	}
+	return nil
 }
 
 // restartAfterLimit closes the window of a Millhand still stopped at the usage

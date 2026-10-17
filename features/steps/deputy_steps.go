@@ -73,6 +73,7 @@ func (c *seatUpContext) bringUpTheDeputy(reason string) error {
 		Terminal: c.windows,
 		Armer:    c.armer,
 		Mail:     c.deputyMail(),
+		Events:   c.eventLog(),
 		Host:     seatUpHost,
 		Reason:   reason,
 		Model:    domain.Model(model),
