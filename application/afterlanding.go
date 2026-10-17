@@ -367,7 +367,7 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 	}
 	command := n.AfterLanding.Command(c.path.Rig)
 	if command == "" {
-		report.Notes = append(report.Notes, afterLandingLine("none", "this host names no command for "+c.path.Rig))
+		report.Notes = append(report.Notes, n.noCommandLine(ctx, c.path.Rig))
 		return
 	}
 	if !report.Rig.Current() {
@@ -412,6 +412,20 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 	if err := n.Tracker.CommentOnStory(ctx, c.id, comment); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the after-landing command's failure could not be written on the story: %v", err))
 	}
+}
+
+// noCommandLine is the line for a rig this host names no command for: when
+// another host is home it says the home deploys the rig (its millhand tick
+// fast-forwards the rig's checkout and runs the home's command; SelfUpdate),
+// else it says none (mw-gq6.562).
+func (n Next) noCommandLine(ctx context.Context, rig string) string {
+	said := "this host names no command for " + rig
+	if n.Home != nil {
+		if record, err := WhereIsHome(ctx, n.Home); err == nil && record.Host != n.Host {
+			return afterLandingLine("handed to the home ("+record.Host+")", said)
+		}
+	}
+	return afterLandingLine("none", said)
 }
 
 // AfterLandingLogFileName is the file in a story's run that keeps the whole

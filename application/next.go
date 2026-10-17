@@ -215,6 +215,11 @@ type Next struct {
 	// from the rig by itself. A nil AfterLanding runs nothing.
 	AfterLanding AfterLanding
 
+	// Home is the vault's home file, read to say, when this host names no
+	// command for a rig, which host deploys it instead (mw-gq6.562). A nil Home
+	// says nothing of the home.
+	Home HomeFile
+
 	// DeploySlot is the rig's after-landing lock, taken around its command so that
 	// a landing's deploy and `mw after-landing` never run side by side
 	// (mw-gq6.309). A nil DeploySlot takes none. AfterRetryWait is how long the
