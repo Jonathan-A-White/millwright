@@ -139,7 +139,7 @@ func (r TesterReport) Run(ctx context.Context) (TesterReportResult, error) {
 		case closedInTrial && !isDemo(d) && ledgerLands(ledger, d.Story.ID):
 			rigOf(rig).Landings = append(rigOf(rig).Landings, d.Story.ID)
 		}
-		if domain.IsBugStory(d.Type, d.Story.Title) && strings.Contains(strings.ToLower(d.Description), strings.ToLower(TesterFindingMarker)) {
+		if domain.IsBugStory(d.Type, d.Story.Title) && IsTesterFinding(d.Description) {
 			rigOf(rig).Bugs = append(rigOf(rig).Bugs, d.Story.ID)
 		}
 	}

@@ -37,7 +37,7 @@ func newTesterReportCmd() *cobra.Command {
 		Short: "Sum the Tester trial per rig: landings, Tester runs, findings, [bug] stories and fuel",
 		Long: "report prints, per rig of the [tester] table (or every rig a Tester ran on, once the table is gone):\n" +
 			"the landings in the trial, the Tester runs, their findings (bug and taste), the [bug] stories whose\n" +
-			"description names a \"" + application.TesterFindingMarker + "\", and each Tester run's fuel from its result.json.\n" +
+			"description names a \"" + application.TesterFindingMarker + "\" or opens \"Found by the Tester\" / \"from the Tester's finding\", and each Tester run's fuel from its result.json.\n" +
 			"It starts --since a day (2026-10-09) or a UTC time, else a week before [tester] until, else a week ago.\n" +
 			"It reads and writes nothing else.",
 		Args: cobra.NoArgs,
