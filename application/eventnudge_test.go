@@ -254,3 +254,55 @@ func TestNudgeAnEnterThatTookIsNotPressedAgain(t *testing.T) {
 		t.Fatalf("nothing to say, got %q", w.err.String())
 	}
 }
+
+// A nudge held while the pane was busy is not typed for mail the seat read in
+// the meantime (mw-gq6.572): only the mail still unread is counted, and mail
+// all read is not told at all.
+func TestNudgeTellsOnlyMailStillUnreadWhenAHeldNudgeIsTyped(t *testing.T) {
+	w := newNudgeWorld(t)
+	mailbox := apptest.NewFakeMailbox()
+	w.nudge.Inbox = mailbox.Inbox
+	w.subs.Set("mayor", `kinds = ["mail"]`)
+	w.windows.HoldsWithID("@1", "mayor-2026-10-01-02", time.Time{})
+	w.pass(t)
+	var ids []string
+	for _, subject := range []string{"one", "two", "three"} {
+		id, err := mailbox.Send(context.Background(), application.NewMessage{From: "builder", To: "mayor", Subject: subject, Body: "b"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+		appendAll(t, w.log, events.Event{Kind: events.KindMail, Bead: id, Detail: "mayor"})
+	}
+	_ = w.windows.Pane("@1", application.PaneWorking)
+	w.pass(t)
+	if _, err := mailbox.Read(context.Background(), ids[0], "mayor"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mailbox.Read(context.Background(), ids[1], "mayor"); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.windows.Pane("@1", application.PaneIdle)
+	w.pass(t)
+	if got := w.windows.Typed("@1"); len(got) != 1 || got[0] != "New mail for mayor: 1 message(s). Run bd mail inbox.\n" {
+		t.Fatalf("typed %q, want the one mail still unread", got)
+	}
+
+	// All read before the pane is idle: nothing is typed, now or later.
+	id, err := mailbox.Send(context.Background(), application.NewMessage{From: "builder", To: "mayor", Subject: "four", Body: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendAll(t, w.log, events.Event{Kind: events.KindMail, Bead: id, Detail: "mayor"})
+	_ = w.windows.Pane("@1", application.PaneWorking)
+	w.pass(t)
+	if _, err := mailbox.Read(context.Background(), id, "mayor"); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.windows.Pane("@1", application.PaneIdle)
+	w.pass(t)
+	w.pass(t)
+	if got := w.windows.Typed("@1"); len(got) != 1 {
+		t.Fatalf("typed %q for mail already read", got)
+	}
+}

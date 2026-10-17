@@ -66,6 +66,11 @@ type EventNudge struct {
 	// Settle is how long after typing a nudge the input line is read, to see
 	// that Enter took it. Zero reads it at once.
 	Settle time.Duration
+	// Inbox lists a mailbox's unread mail (Mailbox.Inbox). Mail the seat has
+	// read since its event is not told of, so a nudge held while the pane was
+	// busy does not count mail already read (mw-gq6.572). Nil tells every mail
+	// event.
+	Inbox func(ctx context.Context, mailbox string) ([]Message, error)
 
 	mu   sync.Mutex
 	said map[string]string
@@ -144,6 +149,11 @@ func (n *EventNudge) Nudge(ctx context.Context) error {
 			}
 			haveWindows = true
 		}
+		matched, mail = n.stillUnread(ctx, seat, matched, mail)
+		if len(matched) == 0 {
+			set(seat, last)
+			continue
+		}
 		line := EventsNudgeLine(seat, len(matched), matched[0].Seq-1)
 		window, found := n.windowOf(ctx, windows, seat)
 		switch {
@@ -176,6 +186,55 @@ func (n *EventNudge) Nudge(ctx context.Context) error {
 		return n.Cursors.Save(ctx, cursors)
 	}
 	return nil
+}
+
+// stillUnread drops from matched the mail events whose message is no longer
+// unread in the mailbox the event names (the seat's own when it names none),
+// and says how many mail events are left. A mailbox that cannot be listed is
+// said on Err and its mail kept: a nudge too many is better than mail missed.
+func (n *EventNudge) stillUnread(ctx context.Context, seat string, matched []events.Event, mail int) ([]events.Event, int) {
+	if n.Inbox == nil || mail == 0 {
+		return matched, mail
+	}
+	unread := map[string]map[string]bool{}
+	var kept []events.Event
+	mail = 0
+	for _, ev := range matched {
+		if ev.Kind != events.KindMail {
+			kept = append(kept, ev)
+			continue
+		}
+		box := ev.Detail
+		if box == "" {
+			box = seat
+		}
+		ids, ok := unread[box]
+		if !ok {
+			inbox, err := n.Inbox(ctx, box)
+			if err != nil {
+				n.say("inbox:"+box, err)
+				unread[box] = nil // listing failed: this box's mail is kept
+				kept = append(kept, ev)
+				mail++
+				continue
+			}
+			n.quiet("inbox:" + box)
+			ids = map[string]bool{}
+			for _, m := range inbox {
+				ids[m.ID] = true
+			}
+			unread[box] = ids
+		} else if ids == nil {
+			kept = append(kept, ev)
+			mail++
+			continue
+		}
+		if ids[ev.Bead] {
+			kept = append(kept, ev)
+			mail++
+		}
+	}
+	return kept, mail
 }
 
 // tell types the nudge into the window when its pane is idle, and reports

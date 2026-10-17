@@ -163,6 +163,7 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Host:     host,
 		Err:      cmd.ErrOrStderr(),
 		Settle:   application.TypeSettle,
+		Inbox:    gateway.Inbox,
 	}
 	projects, err := claude.DefaultProjectsRoot()
 	if err != nil {
