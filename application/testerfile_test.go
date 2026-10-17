@@ -94,8 +94,8 @@ func TestATesterFilesANewFindingHeldUnderTheLandedStorysEpic(t *testing.T) {
 	}
 	path := story.Merged()
 	if path.Rig != "lampas" || path.Branch != "main" || path.Model != domain.ModelSonnet || path.Effort != domain.EffortHigh ||
-		path.Host != "laptop" || path.Formula != "tdd-feature" || path.Harness != domain.HarnessClaude {
-		t.Errorf("expected the landed story's path, got %+v", path)
+		path.Host != domain.HostAuto || path.Formula != "tdd-feature" || path.Harness != domain.HarnessClaude {
+		t.Errorf("expected the landed story's path with host auto, got %+v", path)
 	}
 	if path.Files != "src/Reader.tsx" {
 		t.Errorf("expected the files key src/Reader.tsx, got %q", path.Files)
@@ -202,6 +202,116 @@ func TestATasteFindingIsFiledTastedAndNeedsNoFilesKey(t *testing.T) {
 	}
 	if story.Merged().Files != "" || len(filed.Waits) != 0 {
 		t.Errorf("expected no files key and no same-file wait, got %q and %q", story.Merged().Files, filed.Waits)
+	}
+}
+
+func TestTesterFilingUsesHostAutoUnlessTheTesterNamesOne(t *testing.T) {
+	for name, tc := range map[string]struct{ host, want string }{
+		"no host named": {"", domain.HostAuto},
+		"a host named":  {"cloud2", "cloud2"},
+	} {
+		tracker, rules := testerFileEpic(t)
+		finding := testerFinding()
+		finding.Host = tc.host
+		filed, err := application.TesterFiler{Tracker: tracker, Rules: rules}.File(context.Background(), "mw-e.2", finding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		story, err := tracker.ShowStory(context.Background(), filed.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := story.Merged().Host; got != tc.want {
+			t.Errorf("%s: the landed story ran on laptop; expected host %q, got %q", name, tc.want, got)
+		}
+		if story.Merged().Rig != "lampas" || story.Merged().Formula != "tdd-feature" {
+			t.Errorf("%s: expected the rest of the landed story's path kept, got %+v", name, story.Merged())
+		}
+	}
+}
+
+func TestTesterFilingPutsABugAtP2AndATasteFindingAtP3(t *testing.T) {
+	for kind, want := range map[string]int{application.TesterKindBug: 2, application.TesterKindTaste: 3} {
+		tracker, rules := testerFileEpic(t)
+		finding := testerFinding()
+		finding.Kind = kind
+		filed, err := application.TesterFiler{Tracker: tracker, Rules: rules}.File(context.Background(), "mw-e.2", finding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		story, err := tracker.ShowStory(context.Background(), filed.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if story.Priority != want {
+			t.Errorf("%s: expected priority %d, got %d", kind, want, story.Priority)
+		}
+	}
+}
+
+func TestTesterFilingChainsFindingsThatNameTheSameFileInFilingOrder(t *testing.T) {
+	tracker, rules := testerFileEpic(t)
+	var out bytes.Buffer
+	filer := application.TesterFiler{Tracker: tracker, Rules: rules, Out: &out}
+
+	first := testerFinding()
+	first.Files = "src/Rotate.tsx"
+	firstFiled, err := filer.File(context.Background(), "mw-e.2", first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := testerFinding()
+	second.Title = "The page number jumps after a swipe"
+	second.Files = "src/Rotate.tsx,src/swipe.ts"
+	secondFiled, err := filer.File(context.Background(), "mw-e.2", second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third := testerFinding()
+	third.Title = "The settings title is cut off"
+	third.Files = "src/Settings.tsx"
+	thirdFiled, err := filer.File(context.Background(), "mw-e.2", third)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Held, so the earlier finding is neither open nor running; the later one
+	// waits on it all the same.
+	if needs := needsOf(t, tracker, firstFiled.ID); slices.Contains(needs, secondFiled.ID) {
+		t.Errorf("the earlier finding must not wait on the later: %q", needs)
+	}
+	if needs := needsOf(t, tracker, secondFiled.ID); !slices.Equal(needs, []string{firstFiled.ID}) {
+		t.Errorf("expected the later finding to wait on %s, got %q", firstFiled.ID, needs)
+	}
+	if !slices.Equal(secondFiled.Chained, []string{firstFiled.ID}) {
+		t.Errorf("expected the result to name %s as chained, got %q", firstFiled.ID, secondFiled.Chained)
+	}
+	// mw-e.4 is running and names no file the second finding does; the third
+	// names Settings.tsx, which only the open mw-e.6 names.
+	if needs := needsOf(t, tracker, thirdFiled.ID); !slices.Equal(needs, []string{"mw-e.6"}) || len(thirdFiled.Chained) != 0 {
+		t.Errorf("expected the third to wait on mw-e.6 only, got %q and chained %q", needs, thirdFiled.Chained)
+	}
+	if !strings.Contains(out.String(), "waits on "+firstFiled.ID) {
+		t.Errorf("expected the output to say the chain, got %q", out.String())
+	}
+}
+
+func TestTesterFilingDoesNotChainToAFindingOfAnotherLanding(t *testing.T) {
+	tracker, rules := testerFileEpic(t)
+	tracker.AddStory("mw-e", domain.Story{ID: "mw-e.20", Title: "[bug] lampas: Old finding", Overrides: domain.Path{Files: "src/Rotate.tsx"}})
+	if err := tracker.SetDescription("mw-e.20", "x\n\nTester finding. Source: Tester on mw-e.19 (mw-e.18).\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetStatus("mw-e.20", apptest.StatusDeferred); err != nil {
+		t.Fatal(err)
+	}
+	finding := testerFinding()
+	finding.Files = "src/Rotate.tsx"
+	filed, err := application.TesterFiler{Tracker: tracker, Rules: rules}.File(context.Background(), "mw-e.2", finding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filed.Chained) != 0 {
+		t.Errorf("expected no chain to a finding of another landing, got %q", filed.Chained)
 	}
 }
 
