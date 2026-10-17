@@ -23,7 +23,9 @@ func newReportCmd() *cobra.Command {
 			"and under which reason, the refusal rate, the attempts a landing took, the refusals' causes\n" +
 			"(mw cause), the [bug] stories filed and the Tester's findings, those two per landing, and\n" +
 			"the escaped bugs: [bug] stories of a landing's rig filed on its day or in the 14 days after,\n" +
-			"naming its story id, counted under the rig, host and model of that landing.\n" +
+			"naming its story id, counted under the rig, host and model of that landing, as 'escaped bugs N\n" +
+			"(Tester M)': the Tester's findings (a description carrying 'Tester finding') are the factory\n" +
+			"catching a bug, so the quality bound and MODELS leave them out.\n" +
 			"QUALITY ends with INVESTMENTS: the landings labelled investment over all the landings, the\n" +
 			"window before, the arrow and the target ([factory] invest_share, 0.33 unless set; mw config\n" +
 			"set factory.invest_share 0.2), and a line when the share is under half or over double it.\n" +

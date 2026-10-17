@@ -528,7 +528,9 @@ QUALITY says, per block, what landed and what was refused (the refusal rate, and
 the refusals by the reason in `not landed (<reason>)`), the attempts a landing took,
 the refusals' causes by class (`mw cause`; `unset` is a refusal nobody named), the
 `[bug]` stories filed in the window and the Tester's findings on the landed stories,
-those two per landing, and the escaped bugs. An escaped bug is a `[bug]` story filed
+those two per landing, and the escaped bugs, printed `escaped bugs N (Tester M)`: a
+bug whose description carries `Tester finding` is the Tester catching a bug on purpose, so
+M of the N are the Tester's, and the bound below and MODELS count the rest. An escaped bug is a `[bug]` story filed
 on a landing's day or in the 14 days after it, on the landing's rig, whose title or
 description names the landing's story id (`after mw-x landed`, `since mw-x`; `mw-x.1`
 does not name `mw-x`). It is counted in the window it was filed in, once, under the
@@ -546,7 +548,7 @@ saying so (`under half the 33% target`) and is cheap win R7. `--json` has it und
 `invest_share_min` (0.10) and `invest_share_max` (0.33).
 `mw config set factory.invest_share` refuses a number outside them, naming both. Under
 the INVESTMENTS line the report says which bound the week calls for and why, or nothing:
-`bound: up to 33% allowed (quality falling: escaped bugs 0 -> 1)` when escaped bugs or the
+`bound: up to 33% allowed (quality falling: escaped bugs, not counting the Tester's, 0 -> 1)` when escaped bugs or the
 refusal rate are up on the window before (quality wins when both hold), and
 `bound: down to 10% asked (an app starving: lampas has a ready P1 untouched 24 h)` when a
 rig has a ready P1 story unclaimed and filed over 24 hours ago, or `(an app starving:
@@ -577,8 +579,8 @@ After FUEL comes MODELS, the models side by side, a column each: opus and sonnet
 always, haiku and fable once a story was landed or refused on them in the window. Each
 column counts the stories the model landed (a story once), the share of them landed on
 the first attempt, the refusals, the landed stories that were retried, the tokens and
-dollars per landed story (every attempt summed) and the escaped bugs per landed story,
-each bug against the model that landed the story it names. A row counts under the
+dollars per landed story (every attempt summed) and the escaped bugs per landed story
+(`escaped/landing (not Tester)`, the Tester's findings left out), each bug against the model that landed the story it names. A row counts under the
 model its ledger row says ran it, so a story moved from sonnet to opus keeps its
 sonnet refusals under sonnet. Then `by kind` gives each rig and bug or feature what
 each model landed and its first-try share. A model with nothing to measure a number by
