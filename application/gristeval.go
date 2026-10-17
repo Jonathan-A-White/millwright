@@ -54,7 +54,9 @@ type GristEvalRequest struct {
 const GristEvalNoNames = "no names to score"
 
 // GristEvalRow is one photo on one model. A grind that failed has Error set
-// and every count zero.
+// and every count zero. A grind the harness would not run for a limit of the
+// factory's (GristReasonLimited) has NotRun set instead: it says nothing of the
+// model, so it is no failure of the model's (mw-gq6.474).
 type GristEvalRow struct {
 	Photo    string          `json:"photo"`
 	Model    string          `json:"model"`
@@ -69,14 +71,17 @@ type GristEvalRow struct {
 	Fuel     Fuel            `json:"fuel"`
 	Note     string          `json:"note,omitempty"`
 	Error    string          `json:"error,omitempty"`
+	NotRun   string          `json:"notRun,omitempty"`
 	Answer   json.RawMessage `json:"answer,omitempty"`
 }
 
-// GristEvalModel is what one model did over every photo.
+// GristEvalModel is what one model did over every photo. Photos counts every
+// row; NotRun those the harness would not run for a limit, which are not Failed.
 type GristEvalModel struct {
 	Model    string
 	Photos   int
 	Failed   int
+	NotRun   int
 	Expected int
 	Hits     int
 	Misses   int
@@ -87,12 +92,13 @@ type GristEvalModel struct {
 	Fuel     Fuel
 }
 
-// MeanCost is the model's cost per photo, in USD.
+// MeanCost is the model's cost per photo it ran, in USD.
 func (m GristEvalModel) MeanCost() float64 {
-	if m.Photos == 0 {
+	ran := m.Photos - m.NotRun
+	if ran <= 0 {
 		return 0
 	}
-	return m.CostUSD / float64(m.Photos)
+	return m.CostUSD / float64(ran)
 }
 
 // GristEvalReport is what an eval found, and where it wrote it.
@@ -140,7 +146,10 @@ func (r GristEvalReport) tables(bar string, aligned bool) string {
 	rows := [][]string{{"photo", "model", "hits/expected", "misses", "extras", "unsure", "seconds", "cost USD", "tokens in", "tokens out"}}
 	for _, row := range r.Rows {
 		score := fmt.Sprintf("%d/%d", row.Hits, row.Expected)
-		if row.Note != "" {
+		switch {
+		case row.NotRun != "":
+			score = "not run"
+		case row.Note != "":
 			score = row.Note
 		}
 		rows = append(rows, []string{
@@ -151,10 +160,10 @@ func (r GristEvalReport) tables(bar string, aligned bool) string {
 	}
 	writeGrid(&b, rows, bar, aligned)
 	b.WriteString("\n")
-	sums := [][]string{{"model", "photos", "failed", "hits/expected", "misses", "extras", "unsure", "seconds", "cost USD", "mean cost USD a photo", "tokens in", "tokens out"}}
+	sums := [][]string{{"model", "photos", "failed", "not run", "hits/expected", "misses", "extras", "unsure", "seconds", "cost USD", "mean cost USD a photo", "tokens in", "tokens out"}}
 	for _, m := range r.Models {
 		sums = append(sums, []string{
-			m.Model, fmt.Sprint(m.Photos), fmt.Sprint(m.Failed), fmt.Sprintf("%d/%d", m.Hits, m.Expected),
+			m.Model, fmt.Sprint(m.Photos), fmt.Sprint(m.Failed), fmt.Sprint(m.NotRun), fmt.Sprintf("%d/%d", m.Hits, m.Expected),
 			fmt.Sprint(m.Misses), fmt.Sprint(m.Extras), fmt.Sprint(m.Unsure), fmt.Sprintf("%.1f", m.Seconds),
 			fmt.Sprintf("%.4f", m.CostUSD), fmt.Sprintf("%.4f", m.MeanCost()), Thousands(m.Fuel.Input), Thousands(m.Fuel.Output),
 		})
@@ -163,6 +172,8 @@ func (r GristEvalReport) tables(bar string, aligned bool) string {
 	var names strings.Builder
 	for _, row := range r.Rows {
 		switch {
+		case row.NotRun != "":
+			fmt.Fprintf(&names, "- %s on %s not run: %s\n", row.Photo, row.Model, row.NotRun)
 		case row.Error != "":
 			fmt.Fprintf(&names, "- %s on %s failed: %s\n", row.Photo, row.Model, row.Error)
 		case row.Note != "":
@@ -273,7 +284,10 @@ func (e GristEval) Run(ctx context.Context, req GristEvalRequest) (GristEvalRepo
 			sum.Fuel.Output += row.Fuel.Output
 			sum.Fuel.CacheRead += row.Fuel.CacheRead
 			sum.Fuel.CacheWrite += row.Fuel.CacheWrite
-			if row.Error != "" {
+			switch {
+			case row.NotRun != "":
+				sum.NotRun++
+			case row.Error != "":
 				sum.Failed++
 			}
 		}
@@ -320,6 +334,10 @@ func (e GristEval) grindPhoto(ctx context.Context, plain GristPlaintext, photo e
 	row.Seconds = e.now().Sub(started).Seconds()
 	row.CostUSD, row.Fuel = result.CostUSD, result.Fuel
 	if status, reason := gristOutcome(result, err, schema, e.now()); status != GristAnswered {
+		if IsGristReasonLimited(reason) {
+			row.NotRun = reason
+			return row
+		}
 		why := reason
 		switch {
 		case err != nil:

@@ -348,7 +348,9 @@ func newGristEvalCmd() *cobra.Command {
 			"and with the same prompt the mill gives one photo. Each answer is scored against its .txt:\n" +
 			"hits, misses (expected, not answered), extras (answered, not expected), items it was unsure\n" +
 			"of (still answered), seconds, cost and tokens, per photo and model, then per model. A grind\n" +
-			"that fails is a row with its error and counts of zero. A photo with no .txt is skipped.\n\n" +
+			"that fails is a row with its error and counts of zero; one the harness stopped for a usage or\n" +
+			"rate limit, or its model's service failing, is \"not run\", with its reason, and is no failure\n" +
+			"of the model's. A photo with no .txt is skipped.\n\n" +
 			"It writes eval-<UTC timestamp>.jsonl (every row, with the full answer) and .md (the tables)\n" +
 			"under --out. It never touches the postern backend, the mill's state or the dispatch cap, and\n" +
 			"the photos and answers never enter a bead or the vault.",

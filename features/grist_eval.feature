@@ -107,6 +107,17 @@ Feature: mw grist eval, trying a grind on photos with known answers
     And the row for "shelf.png" on "haiku" failed with an error and counts of zero
     And the summary for "haiku" has 1 failed
 
+  Scenario: A grind the harness stops at its usage limit is not run, and is no failure of the model's
+    Given the model "haiku" answers for "drawer.jpg" with the items "scissors, tape, glue" at a cost of 0.010 USD
+    And the harness stops "haiku" on "shelf.png" saying "You've hit your weekly limit · resets Oct 16, 9am (America/New_York)"
+    When mw grist eval runs on the models "haiku"
+    Then the eval has 2 rows
+    And the row for "shelf.png" on "haiku" was not run because "The factory cannot grind just now: it has reached its usage limit"
+    And the summary for "haiku" has 0 failed
+    And the summary for "haiku" has 1 not run
+    And the summary for "haiku" has 2 photos, 3 hits of 3 and a mean cost of 0.010 USD
+    And the printed table names "shelf.png", "haiku", "not run" and "usage limit"
+
   Scenario: Every grind runs in a private directory that is gone afterwards
     Given the model "haiku" answers for "drawer.jpg" with the items "scissors" at a cost of 0.010 USD
     And the model "haiku" answers for "shelf.png" with the items "matches" at a cost of 0.010 USD

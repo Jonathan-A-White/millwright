@@ -57,6 +57,7 @@ func InitializeGristEvalScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the model "([^"]*)" answers for "([^"]*)" with the items "([^"]*)" at a cost of ([0-9.]+) USD$`, c.modelAnswersWithItems)
 	ctx.Given(`^the model "([^"]*)" answers for "([^"]*)" with this answer:$`, c.modelAnswersWith)
 	ctx.Given(`^the model "([^"]*)" gives no answer for "([^"]*)"$`, c.modelGivesNoAnswer)
+	ctx.Given(`^the harness stops "([^"]*)" on "([^"]*)" saying "([^"]*)"$`, c.theHarnessStops)
 
 	ctx.When(`^mw grist eval runs on the models "([^"]*)"$`, c.evalRuns)
 	ctx.When(`^mw grist eval runs on the grind file's own model$`, c.evalRunsOnTheGrindsModel)
@@ -69,6 +70,8 @@ func InitializeGristEvalScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the row for "([^"]*)" on "([^"]*)" failed with an error and counts of zero$`, c.theRowFailed)
 	ctx.Then(`^the summary for "([^"]*)" has (\d+) photos, (\d+) hits of (\d+) and a mean cost of ([0-9.]+) USD$`, c.theSummaryHas)
 	ctx.Then(`^the summary for "([^"]*)" has (\d+) failed$`, c.theSummaryFailed)
+	ctx.Then(`^the summary for "([^"]*)" has (\d+) not run$`, c.theSummaryNotRun)
+	ctx.Then(`^the row for "([^"]*)" on "([^"]*)" was not run because "([^"]*)"$`, c.theRowWasNotRun)
 	ctx.Then(`^the printed table names "([^"]*)", "([^"]*)", "([^"]*)" and "([^"]*)"$`, c.thePrintedTableNames)
 	ctx.Then(`^the eval's notes say "([^"]*)"$`, c.theNotesSay)
 	ctx.Then(`^no grind was given "([^"]*)"$`, c.noGrindWasGiven)
@@ -191,6 +194,18 @@ func (c *gristEvalContext) modelAnswersWith(model, photo string, doc *godog.DocS
 // modelGivesNoAnswer leaves the stand-in with nothing canned, so it exits 1.
 func (c *gristEvalContext) modelGivesNoAnswer(model, photo string) error { return nil }
 
+// theHarnessStops cans the result the harness gives when it will not run a
+// session for a limit of the factory's: an error result, its words the limit's.
+func (c *gristEvalContext) theHarnessStops(model, photo, said string) error {
+	result, err := json.Marshal(map[string]any{
+		"type": "result", "subtype": "success", "is_error": true, "num_turns": 1, "result": said,
+	})
+	if err != nil {
+		return err
+	}
+	return c.canAnswer(model, photo, string(result))
+}
+
 func (c *gristEvalContext) eval() application.GristEval {
 	return application.GristEval{
 		Grinder:  claude.NewGrinder(claude.WithGrindProgram(c.program)),
@@ -297,6 +312,17 @@ func (c *gristEvalContext) theRowFailed(photo, model string) error {
 	return nil
 }
 
+func (c *gristEvalContext) theRowWasNotRun(photo, model, why string) error {
+	r, err := c.row(photo, model)
+	if err != nil {
+		return err
+	}
+	if r.Error != "" || !strings.Contains(r.NotRun, why) || r.Expected != 0 || r.Hits != 0 || len(r.Missed) != 0 {
+		return fmt.Errorf("expected a row not run because %q, with no error and counts of zero, got %+v", why, r)
+	}
+	return nil
+}
+
 func (c *gristEvalContext) summary(model string) (application.GristEvalModel, error) {
 	if err := c.ok(); err != nil {
 		return application.GristEvalModel{}, err
@@ -327,6 +353,17 @@ func (c *gristEvalContext) theSummaryFailed(model string, failed int) error {
 	}
 	if m.Failed != failed {
 		return fmt.Errorf("expected %d failed, got %d", failed, m.Failed)
+	}
+	return nil
+}
+
+func (c *gristEvalContext) theSummaryNotRun(model string, notRun int) error {
+	m, err := c.summary(model)
+	if err != nil {
+		return err
+	}
+	if m.NotRun != notRun {
+		return fmt.Errorf("expected %d not run, got %d", notRun, m.NotRun)
 	}
 	return nil
 }
