@@ -276,3 +276,49 @@ func TestReadTesterFindingsListsTheHeldStoriesAndTheDuplicatesNamed(t *testing.T
 		t.Errorf("expected 2 bug and 1 taste, got %+v", found)
 	}
 }
+
+// The Tested mail for mw-8m9dyu.6 listed 'B-hidden, tester-mw, re-runs' as held
+// stories beside the four real ones (mw-gq6.541).
+func TestReadTesterFindingsHeldNamesOnlyRealBeadIdsOfTheRigPrefix(t *testing.T) {
+	found, ok := application.ReadTesterFindings("FINDINGS\n" +
+		"- [bug] Page lost after rotate. still on main: yes\n" +
+		"  held: mw-8m9dyu.10, mw-8m9dyu.11, mw-8m9dyu.12, mw-8m9dyu.13 B-hidden, tester-mw, re-runs\n")
+	if !ok {
+		t.Fatal("expected the FINDINGS to be read")
+	}
+	want := []string{"mw-8m9dyu.10", "mw-8m9dyu.11", "mw-8m9dyu.12", "mw-8m9dyu.13"}
+	if !slices.Equal(found.Held, want) {
+		t.Errorf("expected the held ids %q, got %q", want, found.Held)
+	}
+}
+
+func TestReadTesterFindingsNeverTakesAHyphenatedWordForAnId(t *testing.T) {
+	for _, tc := range []struct {
+		name, line string
+		held, dups []string
+	}{
+		{"held words alone", "held: B-hidden, tester-mw, re-runs", nil, nil},
+		{"held id of another rig's prefix", "held: lp-12", nil, nil},
+		{"held id then an id of another rig's prefix", "held: mw-e.4, lp-12", []string{"mw-e.4"}, nil},
+		{"held word ending in the prefix", "held: tester-mw", nil, nil},
+		{"held word with the prefix inside it", "held: re-mw-9", nil, nil},
+		{"held ids then a parenthesis naming words and ids", "held: mw-e.4 (B-hidden, tester-mw, also mw-e.9)", []string{"mw-e.4"}, nil},
+		{"held ids then prose naming another id", "held: mw-e.4, mw-e.5 because mw-e.1 was in the way", []string{"mw-e.4", "mw-e.5"}, nil},
+		{"duplicate of a word", "duplicate of: re-runs", nil, nil},
+		{"duplicate of a word then an id in prose", "duplicate of: B-hidden, see mw-e.7", nil, []string{"mw-e.7"}},
+		{"duplicate of an id then words", "duplicate of: mw-e.7 tester-mw", nil, []string{"mw-e.7"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			found, ok := application.ReadTesterFindings("FINDINGS\n- [bug] A thing. still on main: yes\n  " + tc.line + "\n")
+			if !ok {
+				t.Fatal("expected the FINDINGS to be read")
+			}
+			if !slices.Equal(found.Held, tc.held) {
+				t.Errorf("expected the held ids %q, got %q", tc.held, found.Held)
+			}
+			if !slices.Equal(found.Duplicates, tc.dups) {
+				t.Errorf("expected the duplicates %q, got %q", tc.dups, found.Duplicates)
+			}
+		})
+	}
+}

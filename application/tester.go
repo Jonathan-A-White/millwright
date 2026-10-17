@@ -128,8 +128,40 @@ var (
 	testerTag          = regexp.MustCompile(`(?i)^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?(?:[*_]{1,2})?\[(bug|taste)\]`)
 	testerHeld         = regexp.MustCompile(`(?i)\bheld:[ \t]*([^\n]*)`)
 	testerDuplicate    = regexp.MustCompile(`(?i)\bduplicate of:?[ \t]*([^\n]*)`)
-	testerBeadID       = regexp.MustCompile(`[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*`)
+	// testerBeadID is a bead id of the rig's prefix pattern, as beadRe reads one
+	// (mw-[a-z0-9]+ and dotted numbers), alone: no word, hyphen or dot runs into it
+	// on either side, so tester-mw and re-mw-9 are not ids. Group 1 is the id.
+	testerBeadID    = regexp.MustCompile(`(?:^|[^A-Za-z0-9_.-])(mw-[a-z0-9]+(?:\.[0-9]+)*)(?:$|[^A-Za-z0-9_-])`)
+	testerIDAtStart = regexp.MustCompile(`^(mw-[a-z0-9]+(?:\.[0-9]+)*)(?:$|[^A-Za-z0-9_-])`)
+	testerParens    = regexp.MustCompile(`\([^()]*\)`)
+	testerIDJoin    = regexp.MustCompile(`^(?:[ \t,;&]|and\b)+`)
 )
+
+// testerHeldIDs is the ids a "held:" line starts with, a list of them joined by
+// commas, "and" or spaces: the first word that is not an id ends the list, so
+// prose after the ids, and anything in parentheses, names none.
+func testerHeldIDs(said string) []string {
+	said = testerParens.ReplaceAllString(said, " ")
+	var ids []string
+	for {
+		said = testerIDJoin.ReplaceAllString(said, "")
+		m := testerIDAtStart.FindStringSubmatch(said)
+		if m == nil {
+			return ids
+		}
+		ids = append(ids, m[1])
+		said = said[len(m[1]):]
+	}
+}
+
+// testerDuplicateID is the first bead id a "duplicate of" line names outside
+// parentheses, or "".
+func testerDuplicateID(said string) string {
+	if m := testerBeadID.FindStringSubmatch(testerParens.ReplaceAllString(said, " ")); m != nil {
+		return m[1]
+	}
+	return ""
+}
 
 // ReadTesterFindings reads the FINDINGS section of a comment: from the heading
 // to the end, or to the Tester fuel line an older Tester wrote. A finding is a
@@ -147,10 +179,10 @@ func ReadTesterFindings(text string) (TesterFindings, bool) {
 	}
 	found := TesterFindings{Text: strings.TrimSpace(section)}
 	for _, said := range testerHeld.FindAllStringSubmatch(section, -1) {
-		found.Held = append(found.Held, testerBeadID.FindAllString(said[1], -1)...)
+		found.Held = append(found.Held, testerHeldIDs(said[1])...)
 	}
 	for _, said := range testerDuplicate.FindAllStringSubmatch(section, -1) {
-		if id := testerBeadID.FindString(said[1]); id != "" {
+		if id := testerDuplicateID(said[1]); id != "" {
 			found.Duplicates = append(found.Duplicates, id)
 		}
 	}
