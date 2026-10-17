@@ -85,6 +85,10 @@ type MayorStuck struct {
 	Host string
 	// State is where the check keeps its alarm's seq.
 	State application.DoctorState
+	// Events, when set, is the event log a Mayor found parked on the usage
+	// limit is told in, once for the limit (application.TellSeatLimited); a dry
+	// run writes nothing.
+	Events application.EventLog
 	// Replies is the Mayor's transcript.
 	Replies application.TranscriptReplies
 	// Window is how far back the replies are read. Zero reads
@@ -159,6 +163,12 @@ func (m *MayorStuck) Probe(ctx context.Context) (application.Verdict, string) {
 		return application.DoctorCannotTell, err.Error()
 	}
 	if on {
+		// The event is a note for whoever waits on the log: a log that cannot
+		// be written does not change what the check says of the Mayor.
+		if !application.DoctorDryRun(ctx) {
+			_ = application.TellSeatLimited(ctx, m.Events, m.now, application.MayorSeat, m.Host,
+				application.ReapWindow{ID: id, Name: name}, application.ReadPaneLimit(limit, since))
+		}
 		// Parked on the limit, the Mayor writes nothing: its replies say
 		// nothing of it, and a respawn would meet the same limit — until the
 		// limit resets, when a successor is the cure.
