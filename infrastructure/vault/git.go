@@ -19,7 +19,7 @@ import (
 // AttributesFile is where git is told how to merge a ledger.
 const (
 	Git            = "git"
-	AttributesFile = ".gitattributes"
+	AttributesFile = application.LedgerAttributesFile
 )
 
 // marking is the comment written above the ledger mark when the vault has no
@@ -39,9 +39,9 @@ var _ application.VaultFiles = (*Vault)(nil)
 // write it.
 //
 // The mark matters before a pull, not after: git reads it out of the working
-// tree while it merges, so a vault marked here is safe to rebase immediately —
-// even though the mark is not committed yet. Committing it is a seat's job, and
-// until someone does, the other host is still unmarked.
+// tree while it merges. This adapter only writes it; application.Sync commits it
+// in the same step (commitWritten), so that the clone is not left with a tracked
+// change its next sync refuses on (mw-gq6.530).
 func (v *Vault) MarkLedgers(_ context.Context) (bool, error) {
 	path := filepath.Join(v.dir, AttributesFile)
 	attributes, err := os.ReadFile(path)
@@ -210,7 +210,24 @@ func (v *Vault) Pull(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	defer driver.Remove()
-	pull := append(driver.Config(), "pull", "--rebase")
+
+	// The ledger mark is committed before the pull (mw-gq6.530), so a commit this
+	// host made earlier is replayed onto a tree that may not carry it yet: the
+	// mark is also given to git as its global attributes, which a mark in the
+	// tree's own .gitattributes overrides.
+	attributes, err := os.CreateTemp("", "mw-ledger-attributes-*")
+	if err != nil {
+		return 0, fmt.Errorf("writing the ledger mark for the pull: %w", err)
+	}
+	defer os.Remove(attributes.Name())
+	_, err = attributes.WriteString(application.LedgerMark + "\n")
+	if closed := attributes.Close(); err == nil {
+		err = closed
+	}
+	if err != nil {
+		return 0, fmt.Errorf("writing the ledger mark for the pull: %w", err)
+	}
+	pull := append(driver.Config(), "-c", "core.attributesFile="+attributes.Name(), "pull", "--rebase")
 
 	_, err = v.git(ctx, pull...)
 	if err != nil && closeOutIsWriting(err) {

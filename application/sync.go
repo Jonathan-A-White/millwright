@@ -18,6 +18,9 @@ const (
 	LedgerPattern = "seats/*/ledger.md"
 	MergeUnion    = "merge=union"
 	LedgerMark    = LedgerPattern + " " + MergeUnion
+
+	// LedgerAttributesFile is the vault file that carries LedgerMark.
+	LedgerAttributesFile = ".gitattributes"
 )
 
 // LastSyncKey is where a host records when it was last level with the other
@@ -244,8 +247,8 @@ type HostLock interface {
 type VaultFiles interface {
 	// MarkLedgers makes sure the vault tells git that ledgers are appended to
 	// by both hosts and merged by keeping every line — LedgerMark in the
-	// vault's .gitattributes. It reports whether it had to write it. A vault
-	// already marked is left alone.
+	// vault's .gitattributes. It reports whether it had to write it; the sync
+	// commits what was written. A vault already marked is left alone.
 	MarkLedgers(ctx context.Context) (bool, error)
 
 	// Uncommitted lists the tracked files changed but not committed. A vault
@@ -828,6 +831,14 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 	if len(report.Blocked) == 0 {
 		if report.Marked, err = s.Vault.MarkLedgers(ctx); err != nil {
 			return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
+		}
+		if report.Marked {
+			// The mark is a write to a tracked vault file: committed in the same
+			// step, or this clone's next sync and dispatch refuse on it
+			// (mw-gq6.530).
+			if _, err = commitWritten(ctx, s.Vault, "mw sync: mark the ledgers as merged by union", []string{LedgerAttributesFile}); err != nil {
+				return report, fmt.Errorf("syncing the vault on %s: the ledger mark is written but not committed: %w", s.Host, err)
+			}
 		}
 		if report.Pulled, err = s.Vault.Pull(ctx); err != nil {
 			return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
