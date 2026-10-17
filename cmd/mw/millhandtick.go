@@ -42,6 +42,7 @@ func hostSelfUpdate(rigs, afterLanding map[string]string, afterLimits map[string
 		After:    rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
 		Built:    rig.NewBuiltMarks(filepath.Join(home, SyncHaltStateDir)),
 		Units:    userunits.Systemctl{},
+		Slot:     rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 	}
 }
 
@@ -83,8 +84,17 @@ func newMillhandTickCmd() *cobra.Command {
 			"rig (make build when it names none and the host checks the rig out; README, [after_landing]): a clean checkout behind origin's main is fast-forwarded and the command\n" +
 			"run in it, and the line says \"self-update: millwright <old> → <new>, built\". A dirty checkout, one on\n" +
 			"another branch or one with commits of its own is left alone, and the line says why. A build that\n" +
-			"fails keeps the old bin/mw, is said in the line, and is tried again by the next tick. A dry run\n" +
-			"does none of it.",
+			"fails keeps the old bin/mw, is said in the line, and is tried again by the next tick.\n\n" +
+			"On the home it does the same for every other rig the host's [after_landing] table names: a rig\n" +
+			"story landed on a cloud box moves only that box's checkout, so the home fast-forwards a clean\n" +
+			"checkout on main that is behind origin and runs the rig's command in it, as mw after-landing\n" +
+			"does (the rig's lock, the [after_landing_limit]), and the line says \"self-update: <rig> <old> →\n" +
+			"<new>, deployed by the home\". A dirty checkout, one on another branch or one with commits of its\n" +
+			"own is left alone and said once. A deploy that fails is said, with the mw after-landing to run by\n" +
+			"hand. A host that is not home does this for no rig but millwright.\n\n" +
+			"A dry run moves, fetches and builds nothing, and says for each rig the host names an\n" +
+			"[after_landing] command for whether its checkout is level with origin's main, as the last fetch\n" +
+			"saw it.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()

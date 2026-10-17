@@ -252,6 +252,10 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 	var updated []string
 	if !t.DryRun {
 		updated = append(t.SelfUpdate.Run(ctx), t.Backend.Pending(ctx)...)
+	} else {
+		// A rehearsal moves nothing, but says which [after_landing] rigs are
+		// level with origin (mw-gq6.562).
+		updated = t.SelfUpdate.Look(ctx)
 	}
 	line, woke, err = t.lookAround(ctx)
 	if len(updated) > 0 {

@@ -117,3 +117,31 @@ Feature: a host keeps the mw it runs level with the factory rig's main
     When the host's tick looks at its mw
     Then the vault has no new commit
     And the tick's line says nothing of formulas
+
+  # mw-gq6.562: an app story landed on a cloud box moves only that box's checkout and
+  # the box names no command for the rig, so the home deploys it.
+  Scenario: The home fast-forwards another rig behind origin and deploys it
+    Given the host's build command makes bin/mw
+    And the host names that command for a second rig, "postern", checked out at the same old commit, and not for millwright
+    And the host is home
+    When the host's tick looks at its mw
+    Then the second rig is at origin's main
+    And the build ran once, in the second rig, at origin's main
+    And the tick's line says: self-update: postern <old> → <new>, deployed by the home
+
+  Scenario: A second tick finds the other rig level and deploys nothing more
+    Given the host's build command makes bin/mw
+    And the host names that command for a second rig, "postern", checked out at the same old commit, and not for millwright
+    And the host is home
+    And the host's tick has looked at its mw
+    When the host's tick looks at its mw
+    Then the build ran once, in the second rig, at origin's main
+    And the tick's line says nothing
+
+  Scenario: A host that is not home leaves the other rig alone
+    Given the host's build command makes bin/mw
+    And the host names that command for a second rig, "postern", checked out at the same old commit, and not for millwright
+    And the host is not home
+    When the host's tick looks at its mw
+    Then the second rig is still at its old commit
+    And the build did not run

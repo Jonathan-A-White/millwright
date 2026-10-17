@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -79,6 +81,10 @@ type SelfUpdate struct {
 	Formulas FormulaInstaller
 	Home     HomeFile
 	Host     string
+
+	// Slot is the rig's after-landing lock, taken around the command the home
+	// runs for a rig other than the factory rig (mw-gq6.562). A nil Slot takes none.
+	Slot MergeSlot
 }
 
 // selfUpdateWords is how every note about an update begins.
@@ -96,8 +102,14 @@ func updatedRevision(commit string) string {
 }
 
 // Run does one look and says what it did, as notes for a tick's line: none for
-// a host that has nothing to do, so that the line says it once.
+// a host that has nothing to do, so that the line says it once. It keeps the
+// factory rig level and built, and on the home it deploys the other rigs too
+// (deployOthers).
 func (s SelfUpdate) Run(ctx context.Context) []string {
+	return append(s.runFactory(ctx), s.deployOthers(ctx)...)
+}
+
+func (s SelfUpdate) runFactory(ctx context.Context) []string {
 	dir := s.Rigs[FactoryRig]
 	if dir == "" || s.Checkout == nil || s.After == nil || s.Built == nil || s.After.Command(FactoryRig) == "" {
 		return nil
@@ -165,4 +177,152 @@ func (s SelfUpdate) Run(ctx context.Context) []string {
 	}
 	said, _ := RestartFactoryUnits(ctx, s.Units, FactoryRig)
 	return with(append(notes, said...))
+}
+
+// leftMark is the key, in Built, under which a rig's checkout that was left
+// alone is remembered with the reason it was left, so that a tick says it once
+// and not every fifteen minutes.
+func leftMark(rig string) string { return rig + ".left" }
+
+// afterLandingRigs are the rigs other than the factory rig that this host names
+// an [after_landing] command for and has checked out, by name.
+func (s SelfUpdate) afterLandingRigs() []string {
+	var names []string
+	for name, dir := range s.Rigs {
+		if name != FactoryRig && dir != "" && s.After.Command(name) != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// deployOthers is the home's share (mw-gq6.562). An app story that landed on a
+// cloud box moved only that box's checkout, and the box names no command for the
+// rig, so nothing deployed it: the live site stayed on the old version until a
+// later landing of the same rig happened on a host that does. So, on the home,
+// for each rig its [after_landing] table names (the factory rig has its own
+// pass), a clean checkout on main that is behind origin is fast-forwarded and
+// the rig's command run in it exactly as `mw after-landing <rig>` runs it: under
+// the rig's after-landing lock and limit, and once more after a passing network
+// fault. A checkout that is dirty, on another branch or diverged is left alone
+// and said once.
+//
+// A host that is not home, or whose home cannot be told, does none of it. A
+// deploy that fails is said with how to run it by hand; the checkout is level
+// then, so the next tick does not run it again.
+func (s SelfUpdate) deployOthers(ctx context.Context) []string {
+	if s.Home == nil || s.Checkout == nil || s.After == nil || s.Built == nil {
+		return nil
+	}
+	rigs := s.afterLandingRigs()
+	if len(rigs) == 0 {
+		return nil
+	}
+	if home, err := IsHome(ctx, s.Home, s.Host); err != nil || !home {
+		return nil
+	}
+	var notes []string
+	for _, rig := range rigs {
+		notes = append(notes, s.deployRig(ctx, rig, s.Rigs[rig])...)
+	}
+	return notes
+}
+
+func (s SelfUpdate) deployRig(ctx context.Context, rig, dir string) []string {
+	words := "self-update: " + rig
+	failed := func(doing string, err error) []string {
+		return []string{fmt.Sprintf("%s could not be brought level: %s: %s", words, doing, firstLine(err.Error()))}
+	}
+	if err := s.Checkout.Fetch(ctx, dir); err != nil {
+		return failed("fetching", err)
+	}
+	tip, err := s.Checkout.Tip(ctx, dir, DefaultRemote, FactoryBranch)
+	if err != nil || tip == "" {
+		if err == nil {
+			err = fmt.Errorf("origin has no %s", FactoryBranch)
+		}
+		return failed("reading origin's "+FactoryBranch, err)
+	}
+	before, err := s.Checkout.Head(ctx, dir)
+	if err != nil {
+		return failed("reading the checkout's commit", err)
+	}
+	advanced, err := s.Checkout.Advance(ctx, dir, FactoryBranch, tip)
+	if err != nil {
+		return failed("fast-forwarding", err)
+	}
+	remembered, _ := s.Built.Built(ctx, leftMark(rig))
+	if advanced.Left != "" {
+		if remembered == advanced.Left {
+			return nil
+		}
+		note := words + " checkout left alone: " + advanced.Left
+		if err := s.Built.MarkBuilt(ctx, leftMark(rig), advanced.Left); err != nil {
+			note += " (it could not be remembered, so it will be said again: " + firstLine(err.Error()) + ")"
+		}
+		return []string{note}
+	}
+	if remembered != "" {
+		_ = s.Built.MarkBuilt(ctx, leftMark(rig), "")
+	}
+	if !advanced.Moved {
+		return nil
+	}
+	head, err := s.Checkout.Head(ctx, dir)
+	if err != nil {
+		return failed("reading the checkout's commit", err)
+	}
+
+	var out strings.Builder
+	run := AfterLandingRun{AfterLanding: s.After, Slot: s.Slot, Rigs: s.Rigs, Host: s.Host, Out: &out}
+	runErr := run.Run(ctx, rig)
+	moved := fmt.Sprintf("%s %s → %s", words, updatedRevision(before), updatedRevision(head))
+	said := strings.TrimSpace(out.String())
+	if runErr != nil {
+		return []string{fmt.Sprintf("%s, the home's deploy failed: %s; run mw after-landing %s by hand", moved, firstLine(runErr.Error()), rig)}
+	}
+	return []string{fmt.Sprintf("%s, deployed by the home: %s", moved, strings.ReplaceAll(said, "\n", " / "))}
+}
+
+// Look is the dry form of a tick's update: it moves, fetches and runs nothing,
+// and says for each rig this host names an [after_landing] command for — the
+// factory rig included — whether its checkout is level with origin's main, as the
+// last fetch saw it. A rig other than the factory rig on a host that is not home
+// is said to be the home's to deploy.
+func (s SelfUpdate) Look(ctx context.Context) []string {
+	if s.Checkout == nil || s.After == nil {
+		return nil
+	}
+	names := s.afterLandingRigs()
+	if s.Rigs[FactoryRig] != "" && s.After.Command(FactoryRig) != "" {
+		names = append([]string{FactoryRig}, names...)
+	}
+	home := true
+	if s.Home != nil {
+		if is, err := IsHome(ctx, s.Home, s.Host); err == nil {
+			home = is
+		}
+	}
+	var notes []string
+	for _, rig := range names {
+		dir := s.Rigs[rig]
+		head, herr := s.Checkout.Head(ctx, dir)
+		tip, terr := s.Checkout.Tip(ctx, dir, DefaultRemote, FactoryBranch)
+		var note string
+		switch {
+		case herr != nil || terr != nil || tip == "":
+			note = "could not be compared with origin's " + FactoryBranch
+		case head == tip:
+			note = fmt.Sprintf("is level with origin's %s at %s", FactoryBranch, updatedRevision(head))
+		default:
+			note = fmt.Sprintf("is behind origin's %s (or has commits of its own): %s → %s", FactoryBranch, updatedRevision(head), updatedRevision(tip))
+		}
+		note = fmt.Sprintf("self-update: %s %s (as last fetched)", rig, note)
+		if rig != FactoryRig && !home {
+			note += "; this host is not home, so the home deploys it"
+		}
+		notes = append(notes, note)
+	}
+	return notes
 }

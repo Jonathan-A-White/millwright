@@ -1414,7 +1414,7 @@ another branch or one with commits of its own is left exactly as it is, and the
 line says why. A build that fails leaves the old `bin/mw`, is said in the line
 and is tried again by the next tick (the commit last built is kept in
 `~/.local/state/mw/built-millwright`). After a build that succeeds it restarts the
-running `mw-view-follow.service` and says so in the line. A dry run does none of it. The command
+running `mw-view-follow.service` and says so in the line. A dry run builds nothing. The command
 is stopped after five minutes, so the tick's unit allows ten.
 
 On the home the same look also keeps the formulas live (mw-gq6.314): bd pours
@@ -1424,6 +1424,28 @@ committed in the vault as `Install formulas from millwright <short sha>`, then
 pushed (a push that fails is left for the next `mw sync`). Copies already equal
 make no commit, and a vault with uncommitted changes under `.beads/formulas` is
 left alone, the line saying so. The way back is `git revert` of that vault commit.
+
+**The home deploys the other rigs too** (mw-gq6.562). A story of an app rig that
+lands on a cloud box moves only that box's checkout, and the box names no
+`[after_landing]` command for the rig, so nothing deployed it: the live site stayed
+on the old version until a later landing of the same rig happened on a host that
+has one (postern 0.8.11 landed on cloud1 and was not live). So on the home, the
+same look also goes through every other rig its `[after_landing]` table names: a
+clean checkout on `main` that is behind origin is fast-forwarded and the rig's command
+run in it exactly as `mw after-landing <rig>` runs it (the rig's after-landing
+lock, its `[after_landing_limit]`, one more try after a passing network fault),
+and the line says `self-update: postern 027f977 → bfd385c, deployed by the home:
+after landing: <command>: ok`. A checkout that is dirty, on another branch or has
+commits of its own is left alone and said once (the reason is kept in
+`~/.local/state/mw/built-<rig>.left`; it is said again if it changes). A deploy
+that fails is said with the `mw after-landing <rig>` to run by hand; the checkout
+is level by then, so the next tick does not run it again. A host that is not home
+does this for no rig but `millwright`. The tick unit stops at ten minutes, so a
+deploy that needs longer than that is better run by hand. A landing on a host that
+names no command for the rig says `after landing: handed to the home (<home host>)`
+in its report and mail instead of `none`. `mw millhand tick --dry-run` moves nothing
+and says for each rig the host names a command for (`millwright` too) whether its
+checkout is level with origin's `main`, as the last fetch saw it.
 
 `mw dispatch` does the same look first (mw-gq6.184), once it holds the dispatch
 lock and before it syncs, so a host that dispatches and runs no Millhand tick

@@ -38,7 +38,12 @@ type selfUpdateContext struct {
 	vaultOrigin string
 	vaultHead   string
 	isHome      bool
-	formulas    bool
+
+	// A second rig the home names the build command for, checked out at the same
+	// old commit as the factory rig (mw-gq6.562); homeIs says which host is home.
+	second   string
+	homeIs   string
+	formulas bool
 }
 
 // homeFile is a vault's home file, read for a fixed answer.
@@ -84,6 +89,12 @@ func InitializeSelfUpdateScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the vault's origin has that commit$`, c.theOriginHasIt)
 	ctx.Then(`^the vault's uncommitted change is still there$`, c.theDirtIsStillThere)
 	ctx.Then(`^the tick's line says nothing of formulas$`, c.theLineSaysNothingOfFormulas)
+	ctx.Given(`^the host names that command for a second rig, "([^"]*)", checked out at the same old commit, and not for millwright$`, c.aSecondRig)
+	ctx.Given(`^the host is home$`, func() error { c.homeIs = "laptop"; return nil })
+	ctx.Given(`^the host is not home$`, func() error { c.homeIs = "desktop"; return nil })
+	ctx.Then(`^the second rig is at origin's main$`, func() error { return c.rigIs(c.second, c.newHead) })
+	ctx.Then(`^the second rig is still at its old commit$`, func() error { return c.rigIs(c.second, c.oldHead) })
+	ctx.Then(`^the build ran once, in the second rig, at origin's main$`, func() error { return c.theBuildRanOnceIn(c.second) })
 	ctx.Given(`^the host's build command makes bin/mw$`, c.theBuildMakesBinMw)
 	ctx.When(`^the host's build command makes bin/mw$`, c.theBuildMakesBinMw)
 	ctx.Given(`^the host's build command prints "([^"]*)" and fails$`, c.theBuildFails)
@@ -313,7 +324,9 @@ func (c *selfUpdateContext) buildLog() ([]string, error) {
 	return strings.Split(strings.TrimSpace(string(held)), "\n"), nil
 }
 
-func (c *selfUpdateContext) theBuildRanOnce() error {
+func (c *selfUpdateContext) theBuildRanOnce() error { return c.theBuildRanOnceIn(c.rig) }
+
+func (c *selfUpdateContext) theBuildRanOnceIn(dir string) error {
 	runs, err := c.buildLog()
 	if err != nil {
 		return err
@@ -321,7 +334,7 @@ func (c *selfUpdateContext) theBuildRanOnce() error {
 	if len(runs) != 1 {
 		return fmt.Errorf("expected the build to run once, got %d runs: %q", len(runs), runs)
 	}
-	wantDir, err := filepath.EvalSymlinks(c.rig)
+	wantDir, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		return err
 	}
@@ -508,6 +521,38 @@ func (c *selfUpdateContext) formulaInstall() (application.FormulaInstaller, appl
 	return vault.NewFormulas(vault.New(c.vault)), home, "laptop"
 }
 
+// aSecondRig checks the factory rig's origin out again under name, at the old
+// commit, and moves the build command to it: the host names a command for that
+// rig and none for millwright.
+func (c *selfUpdateContext) aSecondRig(name string) error {
+	c.second = filepath.Join(c.root, "rigs", name)
+	if err := c.git(c.root, "clone", "-q", c.origin, c.second); err != nil {
+		return err
+	}
+	if err := gitIdentify(c.second); err != nil {
+		return err
+	}
+	if err := c.git(c.second, "reset", "-q", "--hard", c.oldHead); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(c.second, "bin"), 0o755); err != nil {
+		return err
+	}
+	c.commands = map[string]string{name: c.commands[application.FactoryRig]}
+	return nil
+}
+
+func (c *selfUpdateContext) rigIs(dir, want string) error {
+	got, err := gitSay(dir, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	if got != want {
+		return fmt.Errorf("expected %s at %s, it is at %s", dir, want, got)
+	}
+	return nil
+}
+
 func (c *selfUpdateContext) selfUpdate(worktrees *rig.Worktrees, host string) application.SelfUpdate {
 	update := application.SelfUpdate{
 		Rigs:     map[string]string{application.FactoryRig: c.rig},
@@ -516,5 +561,9 @@ func (c *selfUpdateContext) selfUpdate(worktrees *rig.Worktrees, host string) ap
 		Built:    rig.NewBuiltMarks(filepath.Join(c.root, "state")),
 	}
 	update.Formulas, update.Home, update.Host = c.formulaInstall()
+	if c.second != "" {
+		update.Rigs[filepath.Base(c.second)] = c.second
+		update.Home, update.Host = homeFile(c.homeIs+" 2026-10-01T00:00:00Z mayor\n"), "laptop"
+	}
 	return update
 }
