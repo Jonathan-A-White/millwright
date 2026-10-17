@@ -40,7 +40,7 @@ func firstLandings(all []reportEntry) map[string]reportEntry {
 // landing's day or in the EscapeDays after it, on the landing's rig, whose
 // title or description names the landing's story id. Each bug comes once, with
 // every landing it names, oldest first; byTester says the bug's description
-// carries TesterFindingMarker, a finding of the Tester's.
+// is a finding of the Tester's (IsTesterFinding).
 func escapedBugs(stories []StoryDetail, first map[string]reportEntry) []escape {
 	var escapes []escape
 	for _, d := range stories {
@@ -66,7 +66,7 @@ func escapedBugs(stories []StoryDetail, first map[string]reportEntry) []escape {
 			return named[i].id < named[j].id
 		})
 		escapes = append(escapes, escape{bug: d.Story.ID, created: d.Created, landings: named,
-			byTester: strings.Contains(strings.ToLower(d.Description), strings.ToLower(TesterFindingMarker))})
+			byTester: IsTesterFinding(d.Description)})
 	}
 	return escapes
 }

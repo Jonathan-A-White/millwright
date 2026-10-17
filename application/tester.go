@@ -447,3 +447,23 @@ func carriesAny(labels, want []string) bool {
 	}
 	return false
 }
+
+// IsTesterFinding says a [bug] story's description is a Tester's finding: it
+// carries TesterFindingMarker anywhere, or its first line says the bug came
+// from the Tester ("Found by the Tester ...", "... from the Tester's finding
+// on ...", "FINDING (Tester's ..."), the words findings were filed with before
+// the marker went into every filing. mw report and mw tester report both ask
+// this one function.
+func IsTesterFinding(description string) bool {
+	lower := strings.ToLower(description)
+	if strings.Contains(lower, strings.ToLower(TesterFindingMarker)) {
+		return true
+	}
+	first := strings.TrimSpace(lower)
+	if i := strings.IndexByte(first, '\n'); i >= 0 {
+		first = first[:i]
+	}
+	return strings.HasPrefix(first, "found by the tester") ||
+		strings.HasPrefix(first, "finding (tester's") ||
+		strings.Contains(first, "from the tester")
+}

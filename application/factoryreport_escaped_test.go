@@ -214,3 +214,52 @@ func TestQualitySplitsEscapedBugsByFinderAndMODELSAndTheBoundReadOnlyTheOthers(t
 		t.Errorf("MODELS' landed model is %+v, want 1 escaped bug and 1.00 a landing", landed)
 	}
 }
+
+func TestQualityCountsAFindingFiledBeforeTheMarkerAsTheTestersByItsFirstLine(t *testing.T) {
+	f := newChangeFactory(t)
+	f.landing("mw-x.1", "lampas", "opus", "Expect: none, because it is a test", "2026-10-13")
+	tail := " on mw-x.1 (landed 2026-10-13).\n\nSteps: open it."
+	for i, first := range []string{
+		"Found by the Tester on mw-x.1",
+		"Filed by the Mayor, 2026-10-10, from the Tester's finding on mw-x.1",
+		"From the Tester's FINDINGS on mw-x.1",
+		"Seen by the Governor on mw-x.1",
+		"Seen by the Mayor on mw-x.1",
+	} {
+		f.filed("b-"+string(rune('a'+i)), "bug", "It broke", "lampas", "2026-10-14T09:00:00Z", first+tail)
+	}
+
+	result, printed := f.report(false)
+	for _, block := range result.Rigs {
+		if block.Name != "lampas" {
+			continue
+		}
+		if block.Quality.EscapedBugs != 5 || block.Quality.EscapedTester != 3 {
+			t.Errorf("lampas: escaped %d (Tester %d), want 5 (Tester 3)", block.Quality.EscapedBugs, block.Quality.EscapedTester)
+		}
+	}
+	if !strings.Contains(printed, "  escaped bugs 5 (Tester 3)") {
+		t.Errorf("QUALITY does not count the unmarked findings as the Tester's:\n%s", printed)
+	}
+}
+
+func TestIsTesterFindingReadsTheMarkerAnywhereAndTheFirstLineForTheOlderPhrasings(t *testing.T) {
+	for desc, want := range map[string]bool{
+		"Found by the Tester on mw-x.1 ...":                                  true,
+		"\nFound by the Tester mw-a.2 on mw-x.1, 2026-10-10":                 true,
+		"Filed by the Mayor, 2026-10-10, from the Tester's finding on x":     true,
+		"From the Tester's FINDINGS on mw-x.1":                               true,
+		"Bug (A34), from the Tester of mw-x.1, filed by the Mayor":           true,
+		"FINDING (Tester's, quoted verbatim):\n[bug] it leaks":               true,
+		"Seen by the Mayor.\n\nTester finding. Source: Tester on x (haiku).": true,
+		"Seen by the Governor on mw-x.1":                                     false,
+		"Seen by the Mayor on mw-x.1":                                        false,
+		"The Tester's FINDINGS comment on mw-x.1 ends 'No [bug] found.'":     false,
+		"Seen by the Mayor.\n\nFound by the Tester later, the Governor says": false,
+		"": false,
+	} {
+		if got := application.IsTesterFinding(desc); got != want {
+			t.Errorf("IsTesterFinding(%q) = %v, want %v", desc, got, want)
+		}
+	}
+}
