@@ -10,7 +10,8 @@
 #    9500 bytes it still passes but warns on stderr, naming the bytes left, so
 #    the squeeze shows before a merge fails (mw-gq6.496).
 #
-# 2. PATHS. "A path named in the map" (in the map or in docs/adding-a-command.md,
+# 2. PATHS. "A path named in the map" (in the map, in docs/codemap-detail.md,
+#    its read-by-need page of per-use-case files, or in docs/adding-a-command.md,
 #    its companion page) is any span between single backticks
 #    that contains no whitespace, is made only of the characters
 #    A-Z a-z 0-9 . _ - /, and either contains a "/" or ends in .go .feature
@@ -22,8 +23,8 @@
 #    is ignored. To name something path-shaped that is not a file in this repo
 #    — a git ref, a Go module path — leave the backticks off.
 #
-# 3. COVERAGE. These files must each appear somewhere in the map, as a literal
-#    repo-relative path (they need not be in backticks):
+# 3. COVERAGE. These files must each appear somewhere in the map or in
+#    docs/codemap-detail.md, as a literal repo-relative path (they need not be in backticks):
 #      - a non-test .go file under application/ that "declares a port": it has
 #        a line matching  ^type <Name> interface {
 #      - a non-test .go file under application/ that "declares a use case": it
@@ -48,6 +49,7 @@ set -eu
 
 REPO_ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null) || REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 MAP=docs/codemap.md
+DETAIL=docs/codemap-detail.md
 ADDING=docs/adding-a-command.md
 LIMIT=10240
 WARN=9500
@@ -62,6 +64,14 @@ fail() {
 [ -f "$MAP" ] || fail "$MAP does not exist"
 [ -f "$ADDING" ] || fail "$ADDING does not exist"
 
+# The detail page is optional: a rig whose map has no such page checks as before.
+PAGES="$MAP $ADDING"
+NAMED="$MAP"
+if [ -f "$DETAIL" ]; then
+	PAGES="$MAP $DETAIL $ADDING"
+	NAMED="$MAP $DETAIL"
+fi
+
 # --- 1. size -------------------------------------------------------------
 size=$(wc -c <"$MAP" | tr -d ' ')
 if [ "$size" -gt "$LIMIT" ]; then
@@ -75,7 +85,7 @@ fi
 # --- 2. every path named in the map exists -------------------------------
 missing=0
 for token in $(
-	awk 'FNR == 1 { fenced = 0 } /^```/ { fenced = !fenced; next } !fenced' "$MAP" "$ADDING" |
+	awk 'FNR == 1 { fenced = 0 } /^```/ { fenced = !fenced; next } !fenced' $PAGES |
 		grep -o '`[^`]*`' |
 		tr -d '`' |
 		grep -E '^[A-Za-z0-9._/-]+$' |
@@ -83,7 +93,7 @@ for token in $(
 		sort -u
 ); do
 	if [ ! -e "$token" ]; then
-		echo "check-codemap: $MAP or $ADDING names \`$token\`, which does not exist" >&2
+		echo "check-codemap: $MAP, $DETAIL or $ADDING names \`$token\`, which does not exist" >&2
 		missing=1
 	fi
 done
@@ -93,8 +103,9 @@ done
 uncovered=0
 require() {
 	# $1 is a repo-relative path, $2 says why it has to be in the map.
-	if ! grep -qF -- "$1" "$MAP"; then
-		echo "check-codemap: $1 $2 but is not named in $MAP" >&2
+	# shellcheck disable=SC2086
+	if ! grep -qF -- "$1" $NAMED; then
+		echo "check-codemap: $1 $2 but is not named in $MAP or $DETAIL" >&2
 		uncovered=1
 	fi
 }

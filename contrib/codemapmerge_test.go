@@ -410,6 +410,21 @@ func TestRealCodemapKeepsHeadroomUnder8700Bytes(t *testing.T) {
 	}
 }
 
+func TestRealCodemapLeavesRoomForNewRowsUnder7700Bytes(t *testing.T) {
+	// mw-gq6.536: the 8700 limit sat so close that Builders bent code to fit
+	// it. The per-file detail lives in docs/codemap-detail.md, read by need.
+	body, err := os.ReadFile("../docs/codemap.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) > 7700 {
+		t.Fatalf("docs/codemap.md is %d bytes, over the 7700 that leaves room for new rows", len(body))
+	}
+	if !strings.Contains(string(body), "codemap-detail.md") {
+		t.Errorf("docs/codemap.md does not link docs/codemap-detail.md")
+	}
+}
+
 // checkCodemapIn runs a copy of scripts/check-codemap.sh over a codemap of the
 // given text in a throwaway repository, and returns its exit status and output.
 func checkCodemapIn(t *testing.T, codemap string) (int, string) {

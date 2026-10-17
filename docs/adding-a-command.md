@@ -1,6 +1,8 @@
 # Adding a command
 
-Read `docs/codemap.md` first for the layers, ports and use cases.
+Read `docs/codemap.md` first for the layers, ports and use cases. A new use case
+is a row there (command, feature) and a row in `docs/codemap-detail.md` (its
+application/ files).
 
 Copy `mw sweep`.
 

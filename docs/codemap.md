@@ -36,26 +36,28 @@ Fakes: application/apptest/fake*.go.
 
 ## Use cases
 
-| Use case | File | Command | features/*.feature |
-|-|-|-|-|
-| File, Release, Ice, Thaw, Retry, Cause, Note, Path* | application/file.go, application/release.go, application/ice.go, application/retry.go, application/cause.go, application/note.go, application/pathset.go | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/ice.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/note.go, cmd/mw/path.go | {file*,release,retry*,cause,note,path_set} |
-| Show, Peek, Prove, StampHead, Tester[File], FactoryReport[Send], Invest[Book], Loop | application/show.go, application/stamphead.go, application/testerreport.go, application/testerfile.go, application/factoryreport.go, application/reportsend.go, application/invest.go, application/loop.go | cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go, cmd/mw/invest.go, cmd/mw/loop.go | {show,peek,prove,stamp,tester,report*,invest} |
-| Dispatch, Next, BatchLand, AfterLandingRun, BdRetry | application/dispatch.go, application/next.go, application/afterlandingrun.go | cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/land.go, cmd/mw/afterlanding.go, cmd/mw/bd.go | {dispatch,next,batch_land,after_*,bd_*} |
-| Check*, Status, CloudCheck, CloudMake, Brief | application/check.go, application/status.go, application/cloud.go, application/cloudmake.go, application/brief.go | cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | {check,status,cloud,brief} |
-| Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | application/sweep.go, application/tidy.go, application/nudge.go, application/mail.go, application/home.go, application/homemove.go | cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | {sweep,tidy,sync,mail,home} |
-| Suite, SuiteFiler, NightlySuite, ContributeBack | application/suite{file,status}.go, application/contributeback.go | cmd/mw/suite.go, cmd/mw/suitenightly.go | {suite*,contribute_back} |
-| Config* | application/configset.go | cmd/mw/config.go | config_* |
-| IdeasOnly* | application/ideasonly.go, application/ideasonlyrelease.go | cmd/mw/ideasonly.go | ideas_only, postern_inbox_apply, talk_wait |
-| Seat* | application/seat{context,up,reap,handover}.go | cmd/mw/seat.go | seat_* |
-| Talk*, TalkShow | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | cmd/mw/talk.go | talk_* |
-| Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go | cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | {millhand*,deputy} |
-| Secrets*, Google*, Contacts (mw contacts find), Hands*, Ask, Watch, Doctor | application/secrets.go, application/hands.go, application/ask.go, application/watch.go, application/doctor.go | cmd/mw/secrets.go, cmd/mw/google.go, cmd/mw/contacts.go, cmd/mw/hands.go, cmd/mw/ask.go, cmd/mw/watch.go, cmd/mw/doctor.go | {secrets,hands,ask,watch,doctor} |
-| SeatBoot{,Set}, SeatRead, Memory[Log], Errors, Init | application/seatboot.go, application/memory.go, application/memorymigrate.go, application/errors.go, application/init.go | cmd/mw/init.go, cmd/mw/memory.go, cmd/mw/errors.go, infra/memoryqueries | {seat_boot,init,memory,errors} |
-| Postern*, Digest + Factory loop section (LoopSource) | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go, application/posternhand.go, application/posternmirror.go, application/digest.go | cmd/mw/postern.go, cmd/mw/posternview.go, cmd/mw/posternbead.go, cmd/mw/posternmirror.go, cmd/mw/digest.go | postern_* |
-| Event* | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go | cmd/mw/events.go | event_follow |
-| Prompt*, Cards, Todo* | application/prompt.go, application/tododue.go, application/todosize.go, application/todorank.go, application/todosearch.go | cmd/mw/prompt.go, cmd/mw/card.go, cmd/mw/todo.go, cmd/mw/todo_search.go, infra/todoindex/index.go | {prompt,card,todo*} |
-| Grist* | application/grist.go, application/gristtiming.go, application/gristlevel.go, application/gristgrind.go, application/gristsend.go, application/gristrequest.go, application/griststatus.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go | cmd/mw/grist.go, cmd/mw/gristsmoke.go | {grist*,scorer} |
-| Triage*, Queue, Sleep | application/triage.go, application/queue.go, application/sleep.go, application/sleepgather.go, application/fuelkinds.go | infra/beads/triage.go, cmd/mw/triage.go, cmd/mw/queue.go, cmd/mw/sleep.go | - |
+Each use case's application/ files are in [docs/codemap-detail.md](codemap-detail.md); read it by need.
+
+| Use case | Command | features/*.feature |
+|-|-|-|
+| File, Release, Ice, Thaw, Retry, Cause, Note, Path* | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/ice.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/note.go, cmd/mw/path.go | {file*,release,retry*,cause,note,path_set} |
+| Show, Peek, Prove, StampHead, Tester[File], FactoryReport[Send], Invest[Book], Loop | cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go, cmd/mw/invest.go, cmd/mw/loop.go | {show,peek,prove,stamp,tester,report*,invest} |
+| Dispatch, Next, BatchLand, AfterLandingRun, BdRetry | cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/land.go, cmd/mw/afterlanding.go, cmd/mw/bd.go | {dispatch,next,batch_land,after_*,bd_*} |
+| Check*, Status, CloudCheck, CloudMake, Brief | cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | {check,status,cloud,brief} |
+| Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | {sweep,tidy,sync,mail,home} |
+| Suite, SuiteFiler, NightlySuite, ContributeBack | cmd/mw/suite.go, cmd/mw/suitenightly.go | {suite*,contribute_back} |
+| Config* | cmd/mw/config.go | config_* |
+| IdeasOnly* | cmd/mw/ideasonly.go | ideas_only, postern_inbox_apply, talk_wait |
+| Seat* | cmd/mw/seat.go | seat_* |
+| Talk*, TalkShow | cmd/mw/talk.go | talk_* |
+| Millhand, Deputy, MillhandTick | cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | {millhand*,deputy} |
+| Secrets*, Google*, Contacts (mw contacts find), Hands*, Ask, Watch, Doctor | cmd/mw/secrets.go, cmd/mw/google.go, cmd/mw/contacts.go, cmd/mw/hands.go, cmd/mw/ask.go, cmd/mw/watch.go, cmd/mw/doctor.go | {secrets,hands,ask,watch,doctor} |
+| SeatBoot{,Set}, SeatRead, Memory[Log], Errors, Init | cmd/mw/init.go, cmd/mw/memory.go, cmd/mw/errors.go, infra/memoryqueries | {seat_boot,init,memory,errors} |
+| Postern*, Digest + Factory loop section (LoopSource) | cmd/mw/postern.go, cmd/mw/posternview.go, cmd/mw/posternbead.go, cmd/mw/posternmirror.go, cmd/mw/digest.go | postern_* |
+| Event* | cmd/mw/events.go | event_follow |
+| Prompt*, Cards, Todo* | cmd/mw/prompt.go, cmd/mw/card.go, cmd/mw/todo.go, cmd/mw/todo_search.go, infra/todoindex/index.go | {prompt,card,todo*} |
+| Grist* | cmd/mw/grist.go, cmd/mw/gristsmoke.go | {grist*,scorer} |
+| Triage*, Queue, Sleep | infra/beads/triage.go, cmd/mw/triage.go, cmd/mw/queue.go, cmd/mw/sleep.go | - |
 
 cmd/mw/root.go, cmd/mw/version.go
 
