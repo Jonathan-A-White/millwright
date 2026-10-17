@@ -7,6 +7,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
+	"github.com/Jonathan-A-White/millwright/infrastructure/benchflag"
 	"github.com/Jonathan-A-White/millwright/infrastructure/closeout"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
@@ -60,6 +61,16 @@ func hostCloseOuts() application.CloseOutMarks {
 		return nil
 	}
 	return closeout.New(filepath.Join(home, SyncHaltStateDir, closeout.Dir))
+}
+
+// hostBenchFlags is the calibration flags printed on this host, kept under
+// SyncHaltStateDir. A host with no home directory keeps none.
+func hostBenchFlags() application.BenchFlagMemory {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	return benchflag.New(filepath.Join(home, SyncHaltStateDir, benchflag.Dir))
 }
 
 // hostGateLock is this host's gate lock, kept under SyncHaltStateDir: one rig

@@ -123,14 +123,14 @@ func (n Next) recordBenchmark(ctx context.Context, c *closeOut, report *NextRepo
 		return
 	}
 	if n.Benchmarks != nil {
-		report.Bench = benchmarkSummary(b, append(history, b), n.Bench)
+		report.Bench = benchmarkSummary(b, append(history, b), n.Bench, n.flagToPrint(ctx))
 	}
 }
 
 // benchmarkSummary is the lines the report prints of a benchmark: the gate, the
 // host as it began, the story against its par, and the calibration of its kind
-// beside every kind that is flagged.
-func benchmarkSummary(b Benchmark, history []Benchmark, s BenchmarkSettings) []string {
+// beside every kind that is flagged, each flag only when due says it is due.
+func benchmarkSummary(b Benchmark, history []Benchmark, s BenchmarkSettings, due func(KindCalibration) bool) []string {
 	line := fmt.Sprintf("gate %s", gateClock(seconds(b.GateSeconds)))
 	if b.Cores > 0 {
 		line += fmt.Sprintf(" at load %.1f of %d cores", b.LoadAtGate, b.Cores)
@@ -149,7 +149,9 @@ func benchmarkSummary(b Benchmark, history []Benchmark, s BenchmarkSettings) []s
 	for _, cal := range Calibrate(history, s) {
 		switch {
 		case cal.Flag != "":
-			lines = append(lines, cal.FlagLine()+" ("+cal.ErrorLine()+")")
+			if due(cal) {
+				lines = append(lines, cal.FlagLine()+" ("+cal.ErrorLine()+")")
+			}
 		case cal.Kind == b.Kind:
 			lines = append(lines, cal.String())
 		}
@@ -158,3 +160,22 @@ func benchmarkSummary(b Benchmark, history []Benchmark, s BenchmarkSettings) []s
 }
 
 func clockOf(s float64) string { return gateClock(time.Duration(s * float64(time.Second))) }
+
+// flagToPrint says whether a kind's flag is due in the report: when this host
+// printed none of that text for the kind in the last FlagDamper, which it then
+// records as printed. mw status prints every flag whatever this says. A host
+// with no memory, or one that cannot be read or written, prints the flag.
+func (n Next) flagToPrint(ctx context.Context) func(KindCalibration) bool {
+	return func(cal KindCalibration) bool {
+		if n.BenchFlags == nil {
+			return true
+		}
+		now := n.now()
+		text, at, ok, err := n.BenchFlags.Said(ctx, cal.Kind)
+		if err == nil && ok && text == cal.FlagLine() && now.Sub(at) < FlagDamper {
+			return false
+		}
+		_ = n.BenchFlags.Say(ctx, cal.Kind, cal.FlagLine(), now)
+		return true
+	}
+}
