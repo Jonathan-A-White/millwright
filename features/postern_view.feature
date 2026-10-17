@@ -539,3 +539,18 @@ Feature: mw postern view
     When the live view is built
     Then the view's needs on "mw-todo" are "hands:mw-todo"
     And the view's needs on "mw-todo.2" are "hands:mw-todo.2"
+
+  # mw-gq6.476: what he sees on the phone is the view the home's follower
+  # writes, and it writes it again on its first pass after the beads move (one
+  # read of their head a second), so a card filed while it runs is in the
+  # written view after one build: 25-27 s on the live beads on 2026-10-17.
+  Scenario: A To do filed and given a due time while the follower runs is in the published view within a minute
+    Given the view's epic "mw-todo" is live
+    And the follower is publishing the live view
+    When the To do "mw-todo.9" under "mw-todo" is filed with bd create, labelled "hitl, hitl:todo", and given the due time "2026-10-16T07:30:00-04:00" by mw todo due
+    Then within 60 seconds of its filing the published view holds "mw-todo.9" under "mw-todo" with the todo_due "2026-10-16T07:30:00-04:00"
+
+  Scenario: A card filed while the follower runs is in the published view's needs within a minute
+    Given the follower is publishing the live view
+    When the hitl bead "mw-v.9" under "mw-v" is filed with bd create, labelled "hitl, hitl:decision", with the body "Which hose?"
+    Then within 60 seconds of its filing the published view's needs on "mw-v.9" are "decision:mw-v.9"

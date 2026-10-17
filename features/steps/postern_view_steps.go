@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -34,6 +36,9 @@ type posternViewContext struct {
 	// tells the Mayor in.
 	verifyDays int
 	log        *apptest.FakeEventLog
+	// follow is the follower a scenario started to publish the view, nil
+	// when it started none.
+	follow *posternFollow
 }
 
 // InitializePosternViewScenario registers the steps of
@@ -46,6 +51,13 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 			tracker: apptest.NewFakeTracker(),
 			cipher:  apptest.NewFakeCipher(),
 			file:    apptest.NewFakeSnapshotFile("/state/postern/view.b64"),
+		}
+		return ctx, nil
+	})
+	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
+		if f := c.follow; f != nil {
+			f.stop()
+			<-f.done
 		}
 		return ctx, nil
 	})
@@ -149,6 +161,144 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the view's molecule step "([^"]*)" hangs from the molecule "([^"]*)"$`, c.theViewsMoleculeStepHangsFrom)
 	ctx.Then(`^the view's bead "([^"]*)" has the status "([^"]*)" and no parent$`, c.theViewsBeadHasStatusAndNoParent)
 	ctx.Then(`^the view's bead "([^"]*)" has the status "([^"]*)" and was closed at "([^"]*)"$`, c.theViewsBeadHasStatusClosedAt)
+	ctx.Given(`^the follower is publishing the live view$`, c.theFollowerIsPublishingTheLiveView)
+	ctx.When(`^the To do "([^"]*)" under "([^"]*)" is filed with bd create, labelled "([^"]*)", and given the due time "([^"]*)" by mw todo due$`, c.theToDoIsFiledAndGivenADueTime)
+	ctx.When(`^the hitl bead "([^"]*)" under "([^"]*)" is filed with bd create, labelled "([^"]*)", with the body "([^"]*)"$`, c.theHitlBeadIsFiledWhileFollowed)
+	ctx.Then(`^within (\d+) seconds of its filing the published view holds "([^"]*)" under "([^"]*)" with the todo_due "([^"]*)"$`, c.withinSecondsThePublishedViewHoldsTheToDo)
+	ctx.Then(`^within (\d+) seconds of its filing the published view's needs on "([^"]*)" are "([^"]*)"$`, c.withinSecondsThePublishedViewsNeedsOnAre)
+}
+
+// posternFollow is the home's follower as `mw events follow` runs it,
+// publishing the scenario's view aside with a memo, over a beads head that
+// each write a scenario makes moves, as a bd write moves dolt_hashof_db.
+type posternFollow struct {
+	stop context.CancelFunc
+	done chan struct{}
+	head atomic.Int64
+	// published is told after every publish, written or left as it was.
+	published chan struct{}
+	// filedAt is when the scenario began filing its bead, by the wall clock.
+	filedAt time.Time
+}
+
+// posternFollowHead is the beads' head as the follower reads it.
+type posternFollowHead struct{ f *posternFollow }
+
+func (h posternFollowHead) Head(context.Context) (string, error) {
+	return strconv.FormatInt(h.f.head.Load(), 10), nil
+}
+
+// theFollowerIsPublishingTheLiveView starts the follower and waits for the
+// first view it writes, before anything is filed.
+func (c *posternViewContext) theFollowerIsPublishingTheLiveView() error {
+	ctx, stop := context.WithCancel(context.Background())
+	f := &posternFollow{stop: stop, done: make(chan struct{}), published: make(chan struct{}, 1)}
+	c.follow = f
+	view := c.view()
+	view.Memo = &application.PosternViewMemo{}
+	go func() {
+		defer close(f.done)
+		_ = application.EventFollow{
+			Head: posternFollowHead{f},
+			Publish: func(ctx context.Context) error {
+				_, err := view.Run(ctx)
+				select {
+				case f.published <- struct{}{}:
+				default:
+				}
+				return err
+			},
+			Aside: true,
+		}.Run(ctx)
+	}()
+	return c.awaitPublished(time.Minute, "the first view", func() error { return nil })
+}
+
+// fileWhileFollowed files the bead as bd create does, open and labelled at
+// once, and moves the beads' head.
+func (c *posternViewContext) fileWhileFollowed(id, parent, labels, body string) error {
+	if c.follow == nil {
+		return fmt.Errorf("no follower is publishing the view")
+	}
+	c.follow.filedAt = time.Now()
+	c.tracker.AddStory(parent, domain.Story{ID: id, Title: "Story " + id})
+	if err := c.tracker.SetLabels(id, splitLabels(labels)...); err != nil {
+		return err
+	}
+	if err := c.tracker.SetDescription(id, body); err != nil {
+		return err
+	}
+	if err := c.tracker.SetCreated(id, posternViewFeatureNow); err != nil {
+		return err
+	}
+	c.follow.head.Add(1)
+	return nil
+}
+
+func (c *posternViewContext) theToDoIsFiledAndGivenADueTime(id, list, labels, due string) error {
+	if err := c.fileWhileFollowed(id, list, labels, ""); err != nil {
+		return err
+	}
+	if _, err := (application.TodoDue{Tracker: c.tracker}).Run(context.Background(), id, due); err != nil {
+		return err
+	}
+	c.follow.head.Add(1)
+	return nil
+}
+
+func (c *posternViewContext) theHitlBeadIsFiledWhileFollowed(id, parent, labels, body string) error {
+	return c.fileWhileFollowed(id, parent, labels, body)
+}
+
+// awaitPublished opens the written view after each publish, as the
+// scenario's doc, until holds finds in it what was asked for, or within has
+// passed: a bound on the wait, not a pause.
+func (c *posternViewContext) awaitPublished(within time.Duration, what string, holds func() error) error {
+	deadline := time.NewTimer(within)
+	defer deadline.Stop()
+	missing := fmt.Errorf("nothing was written")
+	for {
+		if sealed := c.file.Written(); len(sealed) > 0 {
+			c.doc = application.PosternViewDoc{}
+			if err := application.OpenPosternDoc(c.cipher, "any", string(sealed), &c.doc); err != nil {
+				return err
+			}
+			if missing = holds(); missing == nil {
+				return nil
+			}
+		}
+		select {
+		case <-c.follow.published:
+		case <-c.follow.done:
+			return fmt.Errorf("the follower stopped before the published view held %s: %w", what, missing)
+		case <-deadline.C:
+			return fmt.Errorf("the published view did not hold %s within %s: %w", what, within, missing)
+		}
+	}
+}
+
+// sinceFiling is what is left of n seconds after the scenario's filing.
+func (c *posternViewContext) sinceFiling(n int) time.Duration {
+	return time.Duration(n)*time.Second - time.Since(c.follow.filedAt)
+}
+
+func (c *posternViewContext) withinSecondsThePublishedViewHoldsTheToDo(n int, id, parent, due string) error {
+	return c.awaitPublished(c.sinceFiling(n), id, func() error {
+		b, ok := c.bead(id)
+		switch {
+		case !ok:
+			return fmt.Errorf("the view has no bead %s", id)
+		case b.Parent != parent || b.TodoDue != due:
+			return fmt.Errorf("%s is under %q with the todo_due %q", id, b.Parent, b.TodoDue)
+		}
+		return nil
+	})
+}
+
+func (c *posternViewContext) withinSecondsThePublishedViewsNeedsOnAre(n int, id, want string) error {
+	return c.awaitPublished(c.sinceFiling(n), "the needs "+want, func() error {
+		return c.theViewsNeedsOnAre(id, want)
+	})
 }
 
 // loneStory files a story pathed to a rig and hung from no epic, as the
