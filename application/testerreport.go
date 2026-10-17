@@ -79,6 +79,7 @@ func (r TesterRigReport) Findings() TesterFindings {
 	for _, run := range r.Runs {
 		all.Bug += run.Findings.Bug
 		all.Taste += run.Findings.Taste
+		all.Untagged += run.Findings.Untagged
 	}
 	return all
 }
@@ -234,7 +235,11 @@ func (r TesterReportResult) String() string {
 		fmt.Fprintf(&b, "  %-22s %d\n", "landings in the trial", len(rig.Landings))
 		fmt.Fprintf(&b, "  %-22s %d\n", "Tester runs", len(rig.Runs))
 		found := rig.Findings()
-		fmt.Fprintf(&b, "  %-22s %d (%d bug, %d taste)\n", "findings", found.Count(), found.Bug, found.Taste)
+		split := fmt.Sprintf("%d bug, %d taste", found.Bug, found.Taste)
+		if found.Untagged > 0 {
+			split += fmt.Sprintf(", %d not tagged", found.Untagged)
+		}
+		fmt.Fprintf(&b, "  %-22s %d (%s)\n", "findings", found.Count(), split)
 		bugs := fmt.Sprintf("%d", len(rig.Bugs))
 		if len(rig.Bugs) > 0 {
 			bugs += ": " + strings.Join(rig.Bugs, ", ")

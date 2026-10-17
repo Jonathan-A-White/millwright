@@ -48,6 +48,30 @@ func TestReadTesterFindingsCountsBugAndTasteUpToTheFuelLine(t *testing.T) {
 	}
 }
 
+// The Tested mail mw-f7xsy4 said "0 findings (0 bug, 0 taste)" over a held line
+// naming mw-5r3p30.566: the newest FINDINGS was a correction with no tag, and the
+// count never looked at the stories held (mw-gq6.555).
+func TestTesterFindingsCountTheStoriesHeldThatNoTagCounted(t *testing.T) {
+	for _, tc := range []struct {
+		name, text, split string
+	}{
+		{"a correction holding a story", "FINDINGS correction: re-run on origin/main, still on main: yes\n  held: mw-e.10", "1 finding (0 bug, 0 taste, 1 not tagged)"},
+		{"the same story named twice", "FINDINGS correction: re-run.\n  held: mw-e.10\n  held: mw-e.10", "1 finding (0 bug, 0 taste, 1 not tagged)"},
+		{"two held, one tagged", "FINDINGS\n- [bug] One.\n  held: mw-e.10, mw-e.11", "2 findings (1 bug, 0 taste, 1 not tagged)"},
+		{"each held story tagged", "FINDINGS\n- [bug] One.\n  held: mw-e.10\n- [taste] Two.\n  held: mw-e.11", "2 findings (1 bug, 1 taste)"},
+		{"a bullet dot", "FINDINGS\n\u2022 [bug] One.\n  held: mw-e.10", "1 finding (1 bug, 0 taste)"},
+		{"none held", "FINDINGS: none", "0 findings (0 bug, 0 taste)"},
+	} {
+		found, ok := application.ReadTesterFindings(tc.text)
+		if !ok {
+			t.Fatalf("%s: expected the FINDINGS to be read", tc.name)
+		}
+		if got := found.Split(); got != tc.split {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.split)
+		}
+	}
+}
+
 func TestATesterTrialIsOnForItsRigsUntilItsUntil(t *testing.T) {
 	until := time.Date(2026, 10, 16, 20, 0, 0, 0, time.UTC)
 	trial := application.TesterTrial{Rigs: []string{"lampas"}, Until: until, Model: domain.ModelSonnet, Effort: domain.EffortHigh}

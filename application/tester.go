@@ -102,10 +102,16 @@ type TesterFindings struct {
 	// on a "held: <id>" line of its FINDINGS, and Duplicates the open beads it
 	// named as already holding one ("duplicate of: <id>"), in the order written.
 	Held, Duplicates []string
+	// Untagged are the held stories beyond the findings tagged [bug] or [taste]:
+	// a Tester that files a story and then writes its FINDINGS without the tag
+	// (a correction, a bullet the reader does not know) still filed a finding
+	// (mw-gq6.555).
+	Untagged int
 }
 
-// Count is how many findings there were.
-func (f TesterFindings) Count() int { return f.Bug + f.Taste }
+// Count is how many findings there were: the tagged ones, and any held story
+// no tag accounts for.
+func (f TesterFindings) Count() int { return f.Bug + f.Taste + f.Untagged }
 
 // Counted is the count as a mail subject says it: "2 findings", "1 finding".
 func (f TesterFindings) Counted() string {
@@ -117,6 +123,9 @@ func (f TesterFindings) Counted() string {
 
 // Split is the count with how it divides: "2 findings (1 bug, 1 taste)".
 func (f TesterFindings) Split() string {
+	if f.Untagged > 0 {
+		return fmt.Sprintf("%s (%d bug, %d taste, %d not tagged)", f.Counted(), f.Bug, f.Taste, f.Untagged)
+	}
 	return fmt.Sprintf("%s (%d bug, %d taste)", f.Counted(), f.Bug, f.Taste)
 }
 
@@ -125,7 +134,7 @@ func (f TesterFindings) Split() string {
 var (
 	testerFindingsLine = regexp.MustCompile(`(?m)^[ \t#*]*` + TesterFindingsHeading + `\b`)
 	testerNoneLine     = regexp.MustCompile(`(?i)^[ \t#*]*` + TesterFindingsHeading + `[ \t*]*:[ \t]*none\b`)
-	testerTag          = regexp.MustCompile(`(?i)^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?(?:[*_]{1,2})?\[(bug|taste)\]`)
+	testerTag          = regexp.MustCompile(`(?i)^[ \t]*(?:(?:[-*+•]|\d+[.)])[ \t]+)?(?:[*_]{1,2})?\[(bug|taste)\]`)
 	testerHeld         = regexp.MustCompile(`(?i)\bheld:[ \t]*([^\n]*)`)
 	testerDuplicate    = regexp.MustCompile(`(?i)\bduplicate of:?[ \t]*([^\n]*)`)
 	// testerBeadID is a bead id of the rig's prefix pattern, as beadRe reads one
@@ -179,7 +188,11 @@ func ReadTesterFindings(text string) (TesterFindings, bool) {
 	}
 	found := TesterFindings{Text: strings.TrimSpace(section)}
 	for _, said := range testerHeld.FindAllStringSubmatch(section, -1) {
-		found.Held = append(found.Held, testerHeldIDs(said[1])...)
+		for _, id := range testerHeldIDs(said[1]) {
+			if !slices.Contains(found.Held, id) {
+				found.Held = append(found.Held, id)
+			}
+		}
 	}
 	for _, said := range testerDuplicate.FindAllStringSubmatch(section, -1) {
 		if id := testerDuplicateID(said[1]); id != "" {
@@ -187,6 +200,7 @@ func ReadTesterFindings(text string) (TesterFindings, bool) {
 		}
 	}
 	if testerNoneLine.MatchString(section) {
+		found.Untagged = len(found.Held)
 		return found, true
 	}
 	for _, line := range strings.Split(section, "\n") {
@@ -198,6 +212,7 @@ func ReadTesterFindings(text string) (TesterFindings, bool) {
 			}
 		}
 	}
+	found.Untagged = max(0, len(found.Held)-found.Bug-found.Taste)
 	return found, true
 }
 
