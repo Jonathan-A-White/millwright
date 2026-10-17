@@ -90,3 +90,57 @@ func TestReportShortCountFitsACell(t *testing.T) {
 		}
 	}
 }
+
+func TestReportModelsGapToQualityIsOneLineSayingWhatItIs(t *testing.T) {
+	entries := []reportEntry{
+		{id: "a", rig: "lampas", ran: "sonnet", landed: true},
+		// A second landing row of a story, and a landing on a model with no column.
+		{id: "a", rig: "lampas", ran: "sonnet", landed: true},
+		{id: "b", rig: "lampas", ran: "unknown", landed: true},
+		// A Tester's sessions: tested is a landing, not landed a refusal.
+		{id: "t1", rig: "lampas", ran: "haiku", landed: true, tester: true, attempts: 1, tokens: 20000, costUSD: 2},
+		{id: "t2", rig: "lampas", ran: "haiku", landed: true, tester: true, attempts: 1},
+		{id: "t3", rig: "lampas", ran: "haiku", refused: true, tester: true},
+	}
+	c := FactoryReport{}.modelCompare(entries, nil)
+	var haiku, columns int
+	for _, m := range c.Models {
+		columns += m.Landed
+		if m.Model == "haiku" {
+			haiku = m.Landed
+			if m.Refused != 1 || m.Fuel.TokensPerLanding != 20000 {
+				t.Errorf("haiku is %+v", m)
+			}
+		}
+	}
+	if haiku != 2 {
+		t.Errorf("haiku landed %d, want its 2 tested rows", haiku)
+	}
+	// QUALITY would say 3 landed (a, a, b); the columns say 3 (a, t1, t2).
+	if columns != 3 {
+		t.Errorf("the columns land %d", columns)
+	}
+	// The long words do not fit in 60 columns with all three, so the short ones.
+	want := "landed vs QUALITY's: +2 Tester, -1 repeat, -1 other"
+	if got := c.gapLine(); got != want {
+		t.Errorf("the gap line is %q, want %q", got, want)
+	}
+	if got := c.gapLine(); utf8.RuneCountInString(got) > ReportWidth {
+		t.Errorf("the gap line is %d columns: %q", utf8.RuneCountInString(got), got)
+	}
+	var b strings.Builder
+	writeModels(&b, c)
+	if strings.Count(b.String(), "QUALITY's") != 1 || !strings.Contains(b.String(), "lampas/test") {
+		t.Errorf("MODELS prints:\n%s", b.String())
+	}
+	if (FactoryReport{}).modelCompare([]reportEntry{{id: "a", ran: "opus", landed: true}}, nil).gapLine() != "" {
+		t.Error("a gap is said where the totals agree")
+	}
+}
+
+func TestReportModelsGapLineUsesLongWordsWhenTheyFit(t *testing.T) {
+	c := &ModelCompare{Testers: 18, Repeats: 5}
+	if got, want := c.gapLine(), "landed vs QUALITY's: +18 Tester sessions, -5 repeat landings"; got != want {
+		t.Errorf("the gap line is %q, want %q", got, want)
+	}
+}

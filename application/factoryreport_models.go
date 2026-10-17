@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -46,15 +47,29 @@ type ModelUse struct {
 type ModelCompare struct {
 	Models []ModelUse `json:"models"`
 	Kinds  []ModelUse `json:"kinds"`
+	// Testers, Repeats and Others say how the landed over Models differs from
+	// QUALITY's: Testers are Tester sessions (a "tested" row counts as a landing
+	// here, QUALITY leaves it out), Repeats the landing rows of a story that
+	// MODELS counts once but QUALITY counts each, Others the landings of a model
+	// that has no column.
+	Testers int `json:"testers,omitempty"`
+	Repeats int `json:"repeats,omitempty"`
+	Others  int `json:"others,omitempty"`
 }
 
 // modelCompare sums the window's landings and refusals by the model that ran
 // them, narrowed like the blocks; escapedOf is the bugs traced to each landed
-// story.
+// story. A Tester's session is one of them: its "tested" row a landing, its
+// "not landed" row a refusal, under the kind rig/test.
 func (r FactoryReport) modelCompare(entries []reportEntry, escapedOf map[string]int) *ModelCompare {
 	byModel := map[string][]reportEntry{}
 	byKind := map[string]map[string][]reportEntry{}
 	landed := map[string]bool{}
+	c := &ModelCompare{Models: []ModelUse{}, Kinds: []ModelUse{}}
+	shown := map[string]bool{}
+	for _, model := range ModelColumns {
+		shown[string(model)] = true
+	}
 	for _, e := range entries {
 		if e.previous || e.bug || e.escaped || (!e.landed && !e.refused) || (r.Rig != "" && e.rig != r.Rig) || (r.Host != "" && e.host != r.Host) {
 			continue
@@ -62,13 +77,23 @@ func (r FactoryReport) modelCompare(entries []reportEntry, escapedOf map[string]
 		if e.landed {
 			// A story counts once, on its first landing row, the one with its fuel.
 			if landed[e.id] {
+				c.Repeats++
 				continue
 			}
 			landed[e.id] = true
+			switch {
+			case e.tester:
+				c.Testers++
+			case !shown[e.ran]:
+				c.Others++
+			}
 		}
 		byModel[e.ran] = append(byModel[e.ran], e)
 		kind := e.rig + "/feature"
-		if e.bugStory {
+		switch {
+		case e.tester:
+			kind = e.rig + "/test"
+		case e.bugStory:
 			kind = e.rig + "/bug"
 		}
 		if byKind[kind] == nil {
@@ -76,7 +101,6 @@ func (r FactoryReport) modelCompare(entries []reportEntry, escapedOf map[string]
 		}
 		byKind[kind][e.ran] = append(byKind[kind][e.ran], e)
 	}
-	c := &ModelCompare{Models: []ModelUse{}, Kinds: []ModelUse{}}
 	for i, model := range ModelColumns {
 		if mine := byModel[string(model)]; len(mine) > 0 || i < ModelsAlwaysShown {
 			c.Models = append(c.Models, sumModelUse(string(model), "", mine, escapedOf))
@@ -129,6 +153,31 @@ func escapedOfLanding(escapes []escape) map[string]int {
 		of[x.landings[len(x.landings)-1].id]++
 	}
 	return of
+}
+
+// gapLine says on one line how MODELS' landed total differs from QUALITY's, ""
+// when it does not: the signed counts behind it, the long words when they fit.
+func (c *ModelCompare) gapLine() string {
+	if c == nil || c.Testers+c.Repeats+c.Others == 0 {
+		return ""
+	}
+	build := func(tester, repeat, other string) string {
+		var parts []string
+		for _, p := range []struct {
+			sign string
+			n    int
+			name string
+		}{{"+", c.Testers, tester}, {"-", c.Repeats, repeat}, {"-", c.Others, other}} {
+			if p.n > 0 {
+				parts = append(parts, fmt.Sprintf("%s%d %s", p.sign, p.n, p.name))
+			}
+		}
+		return "landed vs QUALITY's: " + strings.Join(parts, ", ")
+	}
+	if line := build("Tester sessions", "repeat landings", "on other models"); utf8.RuneCountInString(line) <= ReportWidth {
+		return line
+	}
+	return build("Tester", "repeat", "other")
 }
 
 // hadSessions says some model shown landed or was refused a story.
@@ -196,6 +245,9 @@ func writeModels(b *strings.Builder, c *ModelCompare) {
 			cells = append(cells, measure.cell(m))
 		}
 		line(measure.name, cells)
+	}
+	if gap := c.gapLine(); gap != "" {
+		b.WriteString(gap + "\n")
 	}
 	if len(c.Kinds) == 0 {
 		return

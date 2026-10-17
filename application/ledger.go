@@ -234,6 +234,9 @@ type LedgerEntry struct {
 // Landed reports whether the line says the story landed.
 func (e LedgerEntry) Landed() bool { return strings.HasPrefix(e.Outcome, "landed") }
 
+// Tested reports whether the line is a Tester's: "tested <story>: N findings".
+func (e LedgerEntry) Tested() bool { return strings.HasPrefix(e.Outcome, "tested") }
+
 // notLandedReason reads the code out of "not landed (<reason>): why".
 var notLandedReason = regexp.MustCompile(`^not landed \(([^)]*)\)`)
 

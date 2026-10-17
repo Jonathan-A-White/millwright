@@ -237,8 +237,12 @@ type reportEntry struct {
 	inWindow         bool
 	rig, host, model string
 	landed, refused  bool
-	investment       bool
-	bug              bool
+	// tester says a Tester's session: its "tested" row stands for a landing and
+	// its "not landed" row for a refusal, in MODELS alone (modelCompare); every
+	// other section leaves a Tester's rows out.
+	tester     bool
+	investment bool
+	bug        bool
 	// escaped is a bug a landing let through, under that landing's rig, host
 	// and model, its id the bug's.
 	escaped  bool
@@ -341,7 +345,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		}
 	}
 
-	var all []reportEntry
+	var all, testers []reportEntry
 	var landedIDs []string
 	landedSeen := map[string]bool{}
 	for _, line := range ledger {
@@ -355,18 +359,17 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			continue
 		}
 		reason, refused := row.Refusal()
-		if !row.Landed() && !refused {
+		tested := row.Tested()
+		if !row.Landed() && !refused && !tested {
 			continue
 		}
 		e := reportEntry{previous: previous, inWindow: inside, at: day, id: row.StoryID, rig: ReportUnknown, host: ReportUnknown, model: ReportUnknown,
-			landed: row.Landed(), refused: refused, reason: reason, attempts: 1, own: 1}
+			landed: row.Landed() || tested, refused: refused, reason: reason, attempts: 1, own: 1, tester: tested}
 		if row.Model != "" {
 			e.model = row.Model
 		}
 		if d, known := byID[row.StoryID]; known {
-			if IsTesterStory(d) {
-				continue
-			}
+			e.tester = e.tester || IsTesterStory(d)
 			path := d.Merged()
 			e.rig, e.host = orElse(path.Rig, e.rig), orElse(path.Host, e.host)
 			e.model = orElse(string(path.Model), e.model)
@@ -378,7 +381,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 				e.attempts = d.Attempts
 				e.own, _ = OwnAttempts(d)
 			}
-			if e.landed && inside && !landedSeen[row.StoryID] {
+			if e.landed && !e.tester && inside && !landedSeen[row.StoryID] {
 				landedSeen[row.StoryID] = true
 				landedIDs = append(landedIDs, row.StoryID)
 			}
@@ -386,6 +389,15 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			e.rig, e.host = orElse(b.Rig, e.rig), orElse(b.Host, e.host)
 		}
 		e.ran = orElse(row.Model, e.model)
+		if e.tester {
+			// A Tester's session is no landing of QUALITY, SPEED or FUEL: MODELS
+			// alone counts it, with the fuel its own row gives.
+			if inside {
+				e.tokens, e.costUSD = row.Tokens, row.CostUSD
+				testers = append(testers, e)
+			}
+			continue
+		}
 		all = append(all, e)
 	}
 
@@ -457,7 +469,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	if result.Landing == nil {
 		share := readInvestShare(result.Whole, result.Rigs, starvedP1Rig(stories, now, r.Rig, r.Host), r.InvestShare, r.InvestShareMin, r.InvestShareMax)
 		result.InvestShare = &share
-		result.ModelCompare = r.modelCompare(entries, escapedOfLanding(escapes))
+		result.ModelCompare = r.modelCompare(append(entries[:len(entries):len(entries)], testers...), escapedOfLanding(escapes))
 	}
 	if r.Investments != nil && result.Landing == nil {
 		records, err := r.Investments.Investments(ctx)
