@@ -154,6 +154,7 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the grist asks for the model "([^"]*)" and the effort "([^"]*)"$`, c.theGristAsksFor)
 	ctx.Given(`^the factory allows (\d+) grist a day from one key$`, c.theFactoryAllowsADay)
 	ctx.Given(`^the phone has already sent (\d+) grist today$`, c.thePhoneHasSent)
+	ctx.Given(`^the phone has already sent (\d+) grist today that the harness stopped at its usage limit$`, c.thePhoneHasSentLimited)
 	ctx.Given(`^the phone is the key of the grist smoke$`, c.thePhoneIsTheSmokeKey)
 	ctx.Given(`^a message to the mill key$`, c.aMessageToTheMill)
 	ctx.Given(`^a grist from the phone to another key$`, c.aGristToAnotherKey)
@@ -456,6 +457,22 @@ func (c *gristContext) thePhoneHasSent(n int) error {
 		if err := c.state.Append(context.Background(), application.GrindLine{
 			Time: gristNow.Add(-time.Duration(i+1) * time.Minute), Txid: fmt.Sprintf("direct:earlier-%d", i),
 			Sender: application.KeyFingerprint(c.phoneKey), Status: application.GristAnswered,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// thePhoneHasSentLimited records n grist from the phone today that the
+// harness would not grind for its usage limit: answered failed, limited.
+func (c *gristContext) thePhoneHasSentLimited(n int) error {
+	stop := application.HarnessStop{Reason: application.ReasonUsageLimit, Until: gristNow.Add(time.Hour)}
+	for i := 0; i < n; i++ {
+		if err := c.state.Append(context.Background(), application.GrindLine{
+			Time: gristNow.Add(-time.Duration(i+1) * time.Minute), Txid: fmt.Sprintf("direct:limited-%d", i),
+			Sender: application.KeyFingerprint(c.phoneKey), Status: application.GristFailed,
+			Reason: application.GristReasonLimited(stop),
 		}); err != nil {
 			return err
 		}

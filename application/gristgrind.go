@@ -898,12 +898,18 @@ func isGristReasonDaily(reason string) bool {
 	return strings.HasPrefix(reason, gristReasonDailyStart) && strings.HasSuffix(reason, gristReasonDailyEnd)
 }
 
-// sentToday counts the grist sender has sent today, by the record.
+// sentToday counts the grist sender has sent today, by the record. A grist the
+// harness would not grind for a limit of the factory's is not counted: its
+// sender is told to send it again, and the factory's limit is no use of the
+// key's day (mw-gq6.474).
 func sentToday(lines []GrindLine, sender string, now time.Time) int {
 	y, m, d := now.UTC().Date()
 	sent := 0
 	for _, line := range lines {
-		if ly, lm, ld := line.Time.UTC().Date(); line.Sender == sender && ly == y && lm == m && ld == d {
+		if line.Sender != sender || IsGristReasonLimited(line.Reason) {
+			continue
+		}
+		if ly, lm, ld := line.Time.UTC().Date(); ly == y && lm == m && ld == d {
 			sent++
 		}
 	}
