@@ -46,6 +46,12 @@ type File struct {
 	// it is written on the epic with it.
 	GuestAsk string
 
+	// Contacts, when set, is his address book: a story filed with the
+	// hitl:todo label is a To do card, and a name-only 'Text: <name> | <draft>'
+	// line in its description is given the name's one mobile number
+	// (TextNumbers). Nil files every description as written.
+	Contacts ContactBook
+
 	// Out is where the tree is printed. A nil Out prints nothing.
 	Out io.Writer
 
@@ -249,10 +255,14 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 			needs = append(needs, ids[need])
 		}
 
+		description := story.Description
+		if hasLabel(story.Labels, LabelHitlTodo) {
+			description = TextNumbers{Book: f.Contacts, Say: f.Out}.Fill(ctx, description)
+		}
 		id, err := f.Tracker.CreateStory(ctx, NewStory{
 			EpicID:          epicID,
 			Title:           story.Title,
-			Description:     story.Description,
+			Description:     description,
 			Acceptance:      story.Acceptance,
 			Priority:        story.Priority,
 			EstimateMinutes: story.Estimate,

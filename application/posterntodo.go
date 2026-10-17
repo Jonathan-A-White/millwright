@@ -34,6 +34,12 @@ func refuseNotACard(bead StoryDetail) string {
 	return ""
 }
 
+// textNumbers is the lookup that gives a name-only Text: line of a card's
+// notes its number, said on the inbox's Out.
+func (i PosternInbox) textNumbers() TextNumbers {
+	return TextNumbers{Book: i.Contacts, Say: i.Out}
+}
+
 // applyTodoAdd files a new open card, labelled hitl and hitl:todo, at the end
 // of list: the bead the action names, which must be a to-do list. The comment
 // saying so goes on the new card, and the Mayor is mailed its title.
@@ -51,7 +57,7 @@ func (i PosternInbox) applyTodoAdd(ctx context.Context, m PosternInboxMessage, a
 	}
 	story := NewStory{EpicID: list.Story.ID, Title: title, Priority: DefaultPriority, Labels: todoLabels}
 	if action.Notes != nil {
-		story.Description = strings.TrimSpace(*action.Notes)
+		story.Description = i.textNumbers().Fill(ctx, strings.TrimSpace(*action.Notes))
 	}
 	id, err := i.Tracker.CreateStory(ctx, story)
 	if err != nil {
@@ -112,7 +118,7 @@ func (i PosternInbox) applyTodoEdit(ctx context.Context, action PosternAction, c
 		changed = append(changed, "title")
 	}
 	if action.Notes != nil {
-		notes := strings.TrimSpace(*action.Notes)
+		notes := i.textNumbers().Fill(ctx, strings.TrimSpace(*action.Notes))
 		edit.Description = &notes
 		changed = append(changed, "notes")
 	}

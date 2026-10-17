@@ -656,6 +656,10 @@ type PosternInbox struct {
 	// reply recorded, so the notifier wakes the seat. A nil Mailbox records
 	// the reply but sends nothing.
 	Mailbox Mailbox
+	// Contacts, when set, is his address book: a name-only 'Text: <name> |
+	// <draft>' line in the notes of a To do card he adds or edits is given the
+	// name's one mobile number (TextNumbers). Nil leaves every line as typed.
+	Contacts ContactBook
 	// Host names this host, for the mail a recorded reply sends: it is signed
 	// SeatIdentity(MwSeat, Host).
 	Host string
