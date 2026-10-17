@@ -200,6 +200,7 @@ func (o OAuth) SignIn(ctx context.Context, scope string, show func(authURL strin
 // tokenAnswer is the token endpoint's answer, success or refusal.
 type tokenAnswer struct {
 	Refresh     string `json:"refresh_token"`
+	Access      string `json:"access_token"`
 	Scope       string `json:"scope"`
 	Error       string `json:"error"`
 	Description string `json:"error_description"`
