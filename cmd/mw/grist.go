@@ -503,7 +503,9 @@ func newGristTimingCmd() *cobra.Command {
 		Long: "timing reads grinds.jsonl in grist_state_dir and prints, for each app and kind, how many grinds\n" +
 			"it holds and, for each phase, how many had it and the median and p90 of its seconds. A phase\n" +
 			"a grind's line does not carry (an old line, a refusal that ran no harness, an answer not\n" +
-			"delivered) is not counted, and a phase no grind had is left out. It reads no tokens and calls\n" +
+			"delivered) is not counted, and a phase no grind had is left out. A grist the mill would not\n" +
+			"grind for a limit of the factory's (usage, rate, overload) is no grind's work: it is left out\n" +
+			"of every count and median, and a last line says 'left out N limited'. It reads no tokens and calls\n" +
 			"nothing. The phases, in the order an answer's seconds pass:\n\n" +
 			gristTimingHelp() + "\n" +
 			"The phases run from the grist's own sent time, so wake and total lean on the backend's clock.\n" +
@@ -514,7 +516,8 @@ func newGristTimingCmd() *cobra.Command {
 			"to read; nothing else runs and nothing is sent. The trace id is the first 16 bytes of the\n" +
 			"grist's txid; the root span is \"grist <kind>\", with a child for each of phone and network\n" +
 			"(service.name the app) and wake, pickup, slot, startup, model and deliver (service.name\n" +
-			"mw-mill) that the record knows. A phase nobody timed is left out; an old line with only its\n" +
+			"mw-mill) that the record knows. The root span's mw.status is the line's status, or 'limited'\n" +
+			"for a grist the factory's own limit stopped. A phase nobody timed is left out; an old line with only its\n" +
 			"seconds is the root span alone.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

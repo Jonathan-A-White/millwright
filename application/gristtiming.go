@@ -150,7 +150,10 @@ type GristTimingGroup struct {
 // Run reads the record and reports, for each app and kind (by name),
 // the count, median and p90 of every phase some grind had. since keeps only
 // lines at or after since (the zero time keeps every line); app and kind, when
-// not empty, keep those alone.
+// not empty, keep those alone. A grist the harness would not grind for a limit
+// of the factory's ends in about a second and is no grind's work: it is left
+// out of every count and median, and the table ends in a line saying how many
+// (mw-gq6.549).
 func (g GristTiming) Run(ctx context.Context, since time.Time, app, kind string) ([]GristTimingGroup, error) {
 	if g.State == nil {
 		return nil, fmt.Errorf("mw grist timing: nowhere the mill keeps its record")
@@ -163,6 +166,7 @@ func (g GristTiming) Run(ctx context.Context, since time.Time, app, kind string)
 	if err != nil {
 		return nil, err
 	}
+	leftOut := 0
 	clients := map[string]GristClientTiming{}
 	for _, c := range reported {
 		if _, ok := clients[c.Txid]; !ok {
@@ -176,6 +180,10 @@ func (g GristTiming) Run(ctx context.Context, since time.Time, app, kind string)
 			continue
 		}
 		if (app != "" && line.App != app) || (kind != "" && line.Kind != kind) {
+			continue
+		}
+		if IsGristReasonLimited(line.Reason) {
+			leftOut++
 			continue
 		}
 		grouped[key{line.App, line.Kind}] = append(grouped[key{line.App, line.Kind}], line)
@@ -207,7 +215,7 @@ func (g GristTiming) Run(ctx context.Context, since time.Time, app, kind string)
 		return groups[i].Kind < groups[j].Kind
 	})
 	if g.Out != nil {
-		g.print(groups, app, kind)
+		g.print(groups, leftOut)
 	}
 	return groups, nil
 }
@@ -236,7 +244,10 @@ func (l GrindLine) phaseSeconds(name string) *float64 {
 	return nil
 }
 
-func (g GristTiming) print(groups []GristTimingGroup, app, kind string) {
+func (g GristTiming) print(groups []GristTimingGroup, leftOut int) {
+	if leftOut > 0 {
+		defer fmt.Fprintf(g.Out, "left out %d limited\n", leftOut)
+	}
 	if len(groups) == 0 {
 		fmt.Fprintln(g.Out, "the mill's record holds no grinds that fit")
 		return

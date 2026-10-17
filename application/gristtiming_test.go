@@ -204,3 +204,81 @@ func TestStatsLeaveASkewedRunOutOfTheQueueColumn(t *testing.T) {
 	}
 	t.Errorf("no queue row in %+v", rows)
 }
+
+// A grist the harness would not grind for a limit of the factory's ends in
+// about a second and is no grind's work: timing leaves it out and says so
+// (mw-gq6.549).
+func TestGristTimingLeavesOutALimitedGristAndSaysHowManyItLeftOut(t *testing.T) {
+	state := &apptest.FakeGristState{}
+	limited := application.GristReasonLimited(application.HarnessStop{Reason: application.ReasonUsageLimit, Until: time.Date(2026, 10, 7, 14, 0, 0, 0, time.UTC)})
+	for i, line := range []application.GrindLine{
+		{Seconds: 10, Status: application.GristAnswered},
+		{Seconds: 1, Status: application.GristFailed, Reason: limited},
+		{Seconds: 20, Status: application.GristAnswered},
+	} {
+		line.Time = time.Date(2026, 10, 7, 9, i, 0, 0, time.UTC)
+		line.App, line.Kind = "lampas", "verse-read"
+		_ = state.Append(context.Background(), line)
+	}
+	var out bytes.Buffer
+	groups, err := application.GristTiming{State: state, Out: &out}.Run(context.Background(), time.Time{}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || groups[0].Grinds != 2 || len(groups[0].Rows) != 1 {
+		t.Fatalf("expected one group of two grinds, got %+v", groups)
+	}
+	if row := groups[0].Rows[0]; row.Count != 2 || row.Median != 15 {
+		t.Errorf("expected the median of the two answered, 15, got %+v", row)
+	}
+	if !strings.Contains(out.String(), "left out 1 limited\n") {
+		t.Errorf("expected the line 'left out 1 limited' in %q", out.String())
+	}
+}
+
+func TestGristTimingSaysNothingOfLimitedWhenNoneWasLeftOut(t *testing.T) {
+	state := &apptest.FakeGristState{}
+	_ = state.Append(context.Background(), application.GrindLine{Time: time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC), App: "lampas", Kind: "verse-read", Seconds: 3})
+	var out bytes.Buffer
+	if _, err := (application.GristTiming{State: state, Out: &out}).Run(context.Background(), time.Time{}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "left out") {
+		t.Errorf("nothing was left out but the output says so: %q", out.String())
+	}
+}
+
+func TestGristTimingOtlpMarksALimitedGristLimitedNotFailed(t *testing.T) {
+	state := &apptest.FakeGristState{}
+	limited := application.GristReasonLimited(application.HarnessStop{Reason: application.ReasonUsageLimit, Until: time.Date(2026, 10, 7, 14, 0, 0, 0, time.UTC)})
+	at := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	_ = state.Append(context.Background(), application.GrindLine{Time: at, Txid: "direct:a", App: "lampas", Kind: "verse-read", Seconds: 1, Status: application.GristFailed, Reason: limited})
+	_ = state.Append(context.Background(), application.GrindLine{Time: at.Add(time.Minute), Txid: "direct:b", App: "lampas", Kind: "verse-read", Seconds: 1, Status: application.GristFailed, Reason: "the grind ended with an error"})
+	doc, err := application.GristTiming{State: state}.Otlp(context.Background(), time.Time{}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := map[string]string{}
+	for _, rs := range doc.ResourceSpans {
+		for _, ss := range rs.ScopeSpans {
+			for _, span := range ss.Spans {
+				if span.ParentSpanID != "" {
+					continue
+				}
+				var txid, st string
+				for _, a := range span.Attributes {
+					switch a.Key {
+					case "mw.txid":
+						txid = *a.Value.StringValue
+					case "mw.status":
+						st = *a.Value.StringValue
+					}
+				}
+				status[txid] = st
+			}
+		}
+	}
+	if status["direct:a"] != "limited" || status["direct:b"] != "failed" {
+		t.Errorf("expected limited and failed, got %v", status)
+	}
+}
