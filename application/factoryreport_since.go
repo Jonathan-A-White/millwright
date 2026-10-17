@@ -9,10 +9,11 @@ import (
 )
 
 // reportCommitRef is a commit named by its first characters or in full, and
-// reportStoryRef a story id: a prefix, a hyphen, then the rest of the id.
+// reportStoryRef a story id of the factory's rig: mw-, then the id as beadRe
+// reads one (a hyphenated word such as fix-up is not one).
 var (
 	reportCommitRef = regexp.MustCompile(`^[0-9a-fA-F]{4,40}$`)
-	reportStoryRef  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*-[A-Za-z0-9._-]+$`)
+	reportStoryRef  = regexp.MustCompile(`^mw-[a-z0-9]+(?:\.[0-9]+)*$`)
 )
 
 // subjectStory finds the story a commit of the factory's rig was made for: the
@@ -20,7 +21,7 @@ var (
 // commit subject ends with in brackets ("... (<story>)").
 var (
 	mergeSubject = regexp.MustCompile(`^Merge branch '(?:[^'/]+/)?([^'/]+)'`)
-	storySuffix  = regexp.MustCompile(`\(([A-Za-z][A-Za-z0-9_]*-[A-Za-z0-9._-]+)\)\s*$`)
+	storySuffix  = regexp.MustCompile(`\((mw-[a-z0-9]+(?:\.[0-9]+)*)\)\s*$`)
 )
 
 // ReadReportSince reads --since: a window's start as ParseReportSince reads

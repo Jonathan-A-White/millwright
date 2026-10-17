@@ -23,7 +23,7 @@ func TestReadReportSinceTellsAWindowFromALanding(t *testing.T) {
 			t.Errorf("--since %q: got %q, %v; want %q", text, got, err, want)
 		}
 	}
-	for _, text := range []string{"yesterday", "7 days", "zz"} {
+	for _, text := range []string{"yesterday", "7 days", "zz", "re-runs", "tester-mw"} {
 		if _, _, err := ReadReportSince(text, now); err == nil {
 			t.Errorf("--since %q was read", text)
 		}
@@ -36,6 +36,7 @@ func TestSubjectStoryIsTheStoryAMillwrightCommitWasMadeFor(t *testing.T) {
 		"The answer line quotes a named channel for sh (mw-gq6.435)":   "mw-gq6.435",
 		"Version 0.1.86 (mw-2zh33g.9)":                                 "mw-2zh33g.9",
 		"Merge branch 'main' into mw/mw-x.1":                           "",
+		"Rework the re-runs (fix-up)":                                  "",
 		"Tidy the docs":                                                "",
 		"Merge remote-tracking branch 'origin/main' (and more) into x": "",
 	} {
