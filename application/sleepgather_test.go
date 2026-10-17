@@ -245,6 +245,40 @@ func TestAMoreBusyRigDoesNotPushTheOthersOutOfTheGitLog(t *testing.T) {
 	}
 }
 
+func TestAQuietRigsUnusedShareGoesToTheRigsWithMoreToSay(t *testing.T) {
+	g := liveSizedGather()
+	g.Rigs = map[string]string{}
+	sizes := map[string]int{"bsv-kit": 9000, "cairn": 1615, "fellowship": 30000, "tiny": 100, "zed": 0}
+	for name := range sizes {
+		g.Rigs[name] = "/rigs/" + name
+	}
+	g.Git = func(_ context.Context, dir string, _ int) (string, error) {
+		line := "abc1234 2026-10-15 a commit subject that is quite long indeed\n"
+		return strings.Repeat(line, sizes[strings.TrimPrefix(dir, "/rigs/")]/len(line)+1)[:sizes[strings.TrimPrefix(dir, "/rigs/")]/len(line)*len(line)], nil
+	}
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := partsByFile(bundle)["git-log.txt"]
+	if len(part.Text) > part.Budget {
+		t.Errorf("the git log is %d bytes, over its budget of %d", len(part.Text), part.Budget)
+	}
+	// the budget is 20,000: bsv-kit and cairn want less than an equal share of
+	// what is left, so they are whole, and the big rig is given the rest.
+	if strings.Contains(part.Cut, "bsv-kit") || strings.Contains(part.Cut, "cairn") {
+		t.Errorf("a rig under its share was cut: %q", part.Cut)
+	}
+	for _, rig := range []string{"fellowship"} {
+		if !strings.Contains(part.Cut, rig+" was") {
+			t.Errorf("the cut %q does not say %s was cut", part.Cut, rig)
+		}
+	}
+	if len(part.Text) < part.Budget-1000 {
+		t.Errorf("the git log is %d bytes of %d: the room was left unspent", len(part.Text), part.Budget)
+	}
+}
+
 func TestEveryPartTheBundleHoldsFitsInATurnEachAndTheAnswerHasTwoMore(t *testing.T) {
 	if application.SleepMaxTurns < application.SleepPartCount()+2 {
 		t.Errorf("the turn cap is %d, a read of each of %d parts and the answer needs %d",
