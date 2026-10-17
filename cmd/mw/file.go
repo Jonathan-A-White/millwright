@@ -84,6 +84,7 @@ func newFileCmd() *cobra.Command {
 				RigFiles: rig.Files{},
 				Waive:    application.EpicWaiver{Names: waive, Because: because},
 				GuestAsk: guestAsk,
+				Contacts: contactBook(),
 				Out:      cmd.OutOrStdout(),
 				Approve:  approval(cmd, approved),
 			}.Run(cmd.Context(), plan)
