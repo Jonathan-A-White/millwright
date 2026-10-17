@@ -139,6 +139,7 @@ func newLandCmd() *cobra.Command {
 
 					AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
 					DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
+					Deployed:     hostDeployedMarks(),
 					Home:         files,
 					Smoke:        hostGristSmoke(gateway, host, rigs, worktrees),
 					Units:        userunits.Systemctl{},

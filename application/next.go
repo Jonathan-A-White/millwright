@@ -228,6 +228,11 @@ type Next struct {
 	DeploySlot     MergeSlot
 	AfterRetryWait time.Duration
 
+	// Deployed is where this host remembers the commit a passing after-landing
+	// run last deployed, per rig, so that the home's tick does not deploy it
+	// again (mw-gq6.564). A nil Deployed remembers nothing.
+	Deployed BuiltMarks
+
 	// Units restarts this host's long-running mw user units once a landing's
 	// build of the factory rig has succeeded, so that they run the new binary
 	// (mw-gq6.232). A nil Units restarts nothing.

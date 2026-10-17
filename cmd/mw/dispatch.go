@@ -63,6 +63,17 @@ func hostCloseOuts() application.CloseOutMarks {
 	return closeout.New(filepath.Join(home, SyncHaltStateDir, closeout.Dir))
 }
 
+// hostDeployedMarks is where this host remembers, per rig, the commit its last
+// passing after-landing run ran at (mw-gq6.564), in the same directory as the
+// built marks the tick's self-update keeps. A host with no home directory keeps none.
+func hostDeployedMarks() application.BuiltMarks {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	return rig.NewBuiltMarks(filepath.Join(home, SyncHaltStateDir))
+}
+
 // hostBenchFlags is the calibration flags printed on this host, kept under
 // SyncHaltStateDir. A host with no home directory keeps none.
 func hostBenchFlags() application.BenchFlagMemory {
