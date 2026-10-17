@@ -148,8 +148,17 @@ func (c *releaseContext) theStoryIsReleasedOverTheHold(key, why string) error {
 	return nil
 }
 
+// namingStories puts the id of each filed story where the text has <key>, so a
+// comment on the epic can name a story whose id the plan chose.
+func (c *releaseContext) namingStories(text string) string {
+	for _, story := range c.filed.Stories {
+		text = strings.ReplaceAll(text, "<"+story.Key+">", story.ID)
+	}
+	return text
+}
+
 func (c *releaseContext) theEpicCarriesTheComment(text string) error {
-	return c.tracker.CommentOnStory(context.Background(), c.filed.EpicID, text)
+	return c.tracker.CommentOnStory(context.Background(), c.filed.EpicID, c.namingStories(text))
 }
 
 func (c *releaseContext) theEpicCarriesTheCommentDated(text, at string) error {
@@ -157,7 +166,7 @@ func (c *releaseContext) theEpicCarriesTheCommentDated(text, at string) error {
 	if err != nil {
 		return err
 	}
-	return c.tracker.CommentOnStoryAt(c.filed.EpicID, text, when)
+	return c.tracker.CommentOnStoryAt(c.filed.EpicID, c.namingStories(text), when)
 }
 
 func (c *releaseContext) theStoryCarriesTheComment(key, text string) error {

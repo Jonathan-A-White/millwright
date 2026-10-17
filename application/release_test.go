@@ -267,3 +267,70 @@ func TestReleaseStoryIdWarnsOfAMissingFilesKeyAndReleasesAllTheSame(t *testing.T
 		t.Errorf("expected the story to be released all the same, got:\n%s", out)
 	}
 }
+
+// The 2026-10-08 comment on the epic of mw-5r3p30 held its stories .1, .4 and .9
+// on the Governor's word; on 2026-10-17 it refused the release of the new .573
+// (mw-gq6.566).
+const lampasHold = "CHANGED on his words (mw-fnvjof.1 ...) Stories .1, .4, .9 and this description edited before release (all held) on the Governor's word"
+
+func TestAHoldOnTheEpicNamingOtherStoriesDoesNotHoldANewSibling(t *testing.T) {
+	tracker, filed := filedAndHeld(t)
+	module, gateway := filed.Stories[0].ID, filed.Stories[1].ID
+	if err := tracker.CommentOnStory(context.Background(), filed.EpicID, lampasHold+" ("+gateway+")"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := (application.Release{Tracker: tracker}).Run(context.Background(), module); err != nil {
+		t.Fatalf("expected %s to release, the epic's comment names %s: %v", module, gateway, err)
+	}
+	released, err := tracker.ShowStory(context.Background(), module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if released.Held() {
+		t.Errorf("expected %s to be released, it is %s", module, released.Status)
+	}
+}
+
+func TestAHoldOnTheEpicNamingTheStoryStillHoldsItAndSaysWhereTheCommentSits(t *testing.T) {
+	tracker, filed := filedAndHeld(t)
+	module := filed.Stories[0].ID
+	if err := tracker.CommentOnStory(context.Background(), filed.EpicID, "Parked on the Governor's word: "+module+" waits for him"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := application.Release{Tracker: tracker}.Run(context.Background(), module)
+	if err == nil {
+		t.Fatal("expected the release to be refused: the epic's comment names the story")
+	}
+	for _, want := range []string{"held on the Governor's word", "on " + filed.EpicID, "waits for him"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the refusal to say %q, got: %v", want, err)
+		}
+	}
+}
+
+func TestAHoldOnTheStoryItselfNeedsNoIdAndNamesItsBead(t *testing.T) {
+	tracker, filed := filedAndHeld(t)
+	module := filed.Stories[0].ID
+	if err := tracker.CommentOnStory(context.Background(), module, "HELD: his word, do not release yet"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := application.Release{Tracker: tracker}.Run(context.Background(), module)
+	if err == nil || !strings.Contains(err.Error(), "on "+module) {
+		t.Fatalf("expected a refusal naming the bead %s, got: %v", module, err)
+	}
+}
+
+func TestAStoryIdInACommentIsNotTakenFromALongerId(t *testing.T) {
+	tracker, filed := filedAndHeld(t)
+	module := filed.Stories[0].ID
+	if err := tracker.CommentOnStory(context.Background(), filed.EpicID, "Parked on the Governor's word: "+module+"7 waits for him"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := (application.Release{Tracker: tracker}).Run(context.Background(), module); err != nil {
+		t.Fatalf("expected %s to release, the comment names %s7: %v", module, module, err)
+	}
+}

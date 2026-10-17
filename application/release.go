@@ -171,9 +171,12 @@ var (
 
 // wordHold is the newest comment on a story, or on its parent, that holds it on
 // the Governor's word: one that says held or parked together with Governor or
-// his word, and that no OverHoldMarker comment on the story is newer than.
-// ok is false when there is none.
-func wordHold(own, parent []Comment) (Comment, bool) {
+// his word, and that no OverHoldMarker comment on the story is newer than. A
+// comment of the story's own holds it; a comment on the parent holds it only
+// when it names the story's id, for an epic's comment about other stories is
+// not a hold on this one (mw-gq6.566). ok is false when there is none; on is
+// the id of the bead the comment sits on.
+func wordHold(id string, own, parent []Comment, parentID string) (hold Comment, on string, ok bool) {
 	var marked Comment
 	hasMark := false
 	for _, c := range own {
@@ -181,12 +184,13 @@ func wordHold(own, parent []Comment) (Comment, bool) {
 			marked, hasMark = c, true
 		}
 	}
-	var found Comment
-	ok := false
-	scan := func(comments []Comment, sameList bool) {
+	scan := func(comments []Comment, bead string, sameList bool) {
 		for i, c := range comments {
 			if !holdWord.MatchString(c.Text) || !governorsWord.MatchString(c.Text) ||
 				strings.HasPrefix(strings.TrimSpace(c.Text), OverHoldMarker) {
+				continue
+			}
+			if !sameList && !namesID(c.Text, id) {
 				continue
 			}
 			if hasMark {
@@ -198,14 +202,47 @@ func wordHold(own, parent []Comment) (Comment, bool) {
 					continue
 				}
 			}
-			if !ok || c.Created.After(found.Created) || c.Created.Equal(found.Created) {
-				found, ok = c, true
+			if !ok || c.Created.After(hold.Created) || c.Created.Equal(hold.Created) {
+				hold, on, ok = c, bead, true
 			}
 		}
 	}
-	scan(own, true)
-	scan(parent, false)
-	return found, ok
+	scan(own, id, true)
+	scan(parent, parentID, false)
+	return hold, on, ok
+}
+
+// namesID reports whether text names the bead id as a whole: no letter, digit,
+// hyphen, underscore or dot runs into it before, and nothing runs on after it,
+// so f-1.1 is not found in f-1.17 or in f-1.1.2, but is in "f-1.1." ending a
+// sentence.
+func namesID(text, id string) bool {
+	if id == "" {
+		return false
+	}
+	idChar := func(b byte) bool {
+		return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '-' || b == '_'
+	}
+	for from := 0; ; {
+		i := strings.Index(text[from:], id)
+		if i < 0 {
+			return false
+		}
+		start, end := from+i, from+i+len(id)
+		from = start + 1
+		if start > 0 && (idChar(text[start-1]) || text[start-1] == '.') {
+			continue
+		}
+		if end < len(text) {
+			if idChar(text[end]) {
+				continue
+			}
+			if text[end] == '.' && end+1 < len(text) && idChar(text[end+1]) {
+				continue
+			}
+		}
+		return true
+	}
 }
 
 func indexOfComment(comments []Comment, want Comment) int {
@@ -218,7 +255,8 @@ func indexOfComment(comments []Comment, want Comment) int {
 }
 
 // checkWordHolds refuses the release of any of these held stories that a comment
-// of its own or of its parent holds on the Governor's word, naming the comment,
+// of its own, or one of its parent's that names it, holds on the Governor's word,
+// naming the bead the comment sits on and the comment,
 // unless OverHold says why not; nothing has been released when it refuses. With
 // OverHold it writes the reason on each such story.
 func (r Release) checkWordHolds(ctx context.Context, refs []heldRef) error {
@@ -243,13 +281,13 @@ func (r Release) checkWordHolds(ctx context.Context, refs []heldRef) error {
 	var refusals []string
 	var flagged []string
 	for _, ref := range refs {
-		hold, ok := wordHold(comments[ref.ID], comments[ref.Parent])
+		hold, on, ok := wordHold(ref.ID, comments[ref.ID], comments[ref.Parent], ref.Parent)
 		if !ok {
 			continue
 		}
 		flagged = append(flagged, ref.ID)
-		refusals = append(refusals, fmt.Sprintf("%s is held on the Governor's word, by this comment by %s%s: %q",
-			ref.ID, hold.Author, holdTime(hold), strings.TrimSpace(hold.Text)))
+		refusals = append(refusals, fmt.Sprintf("%s is held on the Governor's word, by this comment on %s by %s%s: %q",
+			ref.ID, on, hold.Author, holdTime(hold), strings.TrimSpace(hold.Text)))
 	}
 	if len(flagged) == 0 {
 		return nil

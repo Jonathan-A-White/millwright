@@ -34,7 +34,7 @@ func newReleaseCmd() *cobra.Command {
 			"named under the tree, one line each: a warning, and the release goes ahead. So is a story\n" +
 			"none of whose files exist in its rig's checkout on this host: '<id>: none of its files\n" +
 			"exist in <rig>: wrong rig?'.\n\n" +
-			"A held story whose own comments, or its parent's, say it was held or parked on the Governor's\n" +
+			"A held story whose own comments, or its parent's naming that story's id, say it was held or parked on the Governor's\n" +
 			"word (a comment with 'held' or 'parked' and 'Governor' or 'his word', not older than the story's\n" +
 			"last release over a hold) is not released: the release is refused, printing that comment, and\n" +
 			"nothing in the epic is released. --over-hold \"<why>\" releases it anyway and writes the why\n" +
