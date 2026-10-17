@@ -45,6 +45,10 @@ func readNamed(t *testing.T, f *manyFiles, bead string, files ...named) (printed
 		t.Fatalf("reading %s: %v", f.dir, err)
 	}
 	for _, e := range dirEntries {
+		// The text of the message is kept beside its files (posternkeep.go).
+		if strings.HasSuffix(e.Name(), ".message.json") {
+			continue
+		}
 		written = append(written, e.Name())
 	}
 	return out.String(), written

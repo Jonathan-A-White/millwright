@@ -325,3 +325,17 @@ Feature: mw postern inbox
     Then reading succeeds
     And it printed "voice note, not transcribed: postern_transcribe_cmd is not set"
     And bead "mw-thread.5"'s last comment contains "voice note, not transcribed: postern_transcribe_cmd is not set"
+
+  Scenario: a long message is kept whole and shown again by txid, moving nothing
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And a postern message from "governor-pubkey-hex" with text "The beginning of a long word to the Mayor, which goes on and on well past eighty characters of it, and then ends with his words about links to settings and the tutor." and txid "long-txid"
+    When mw postern inbox is run
+    And mw postern inbox --show "long-txid" is run
+    Then reading succeeds
+    And it printed "message  from the Governor (signer unchecked)  txid long-txid  channel general"
+    And it printed "ends with his words about links to settings and the tutor."
+    And the postern inbox cursor is unchanged by the show
+
+  Scenario: a txid with nothing kept is said so and refused
+    When mw postern inbox --show "never-read" is run
+    Then showing is refused saying "nothing is kept for never-read"

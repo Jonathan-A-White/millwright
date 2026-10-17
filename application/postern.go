@@ -803,6 +803,7 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 			}
 		}
 	}
+	i.keepMessages(mine)
 	var ideas ideasPass
 	for _, m := range newestFirst[:len(newestFirst)-settled] {
 		// A message a pass already applied (Apply, the on-message hook's)
@@ -855,11 +856,7 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 				}
 			}
 		}
-		answers := ""
-		if m.Re != "" {
-			answers = "  " + m.reLabel()
-		}
-		i.printf("%s  from %s  txid %s  %s  %s%s\n%s\n", m.Class, i.fromLabel(m), orUnknown(m.Txid), m.channelLabel(), sentInFull(m.Ts), answers, m.Text)
+		i.printf("%s\n%s\n", i.messageHeader(m), m.Text)
 		if line != "" {
 			i.printf("%s\n", line)
 		}

@@ -200,8 +200,13 @@ func TestInboxRefusesAnAttachmentWhoseHashDisagrees(t *testing.T) {
 	if !bytes.Contains(out.Bytes(), []byte("a mismatched screenshot")) {
 		t.Errorf("expected the caption to still be printed, got:\n%s", out.String())
 	}
-	if entries, err := os.ReadDir(f.dir); err == nil && len(entries) != 0 {
-		t.Errorf("expected nothing written under %s, found %v", f.dir, entries)
+	if entries, err := os.ReadDir(f.dir); err == nil {
+		for _, e := range entries {
+			// The text of the message is kept beside its files (posternkeep.go).
+			if e.Name() != "img-txid-3.message.json" {
+				t.Errorf("expected no file written under %s, found %v", f.dir, e.Name())
+			}
+		}
 	}
 
 	comments, err := f.tracker.StoryComments(context.Background(), "mw-shot.2")

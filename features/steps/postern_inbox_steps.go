@@ -41,9 +41,11 @@ type posternInboxContext struct {
 	out         *bytes.Buffer
 	governorKey string
 	attachDir   string
-	transcriber *apptest.FakeTranscriber
-	runner      *apptest.FakeHandsRunner
-	handsSteps  map[string]domain.HandsStep
+	// cursorBeforeShow is the inbox cursor as the last --show found it.
+	cursorBeforeShow string
+	transcriber      *apptest.FakeTranscriber
+	runner           *apptest.FakeHandsRunner
+	handsSteps       map[string]domain.HandsStep
 	// ideas, when a scenario sets the Governor's Ideas only, wires the inbox
 	// to it (postern_inbox_ideas_steps.go).
 	ideas bool
@@ -172,6 +174,9 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^bead "([^"]*)" is claimed by "([^"]*)"$`, c.beadIsClaimedBy)
 	ctx.Given(`^epic "([^"]*)" has the open bead "([^"]*)" labelled "([^"]*)"$`, c.epicHasTheOpenBeadLabelled)
 	ctx.When(`^mw postern inbox --apply is run$`, c.mwPosternInboxApplyIsRun)
+	ctx.When(`^mw postern inbox --show "([^"]*)" is run$`, c.mwPosternInboxShowIsRun)
+	ctx.Then(`^the postern inbox cursor is unchanged by the show$`, c.theCursorIsUnchangedByTheShow)
+	ctx.Then(`^showing is refused saying "([^"]*)"$`, c.showingIsRefusedSaying)
 	ctx.Given(`^the postern inbox hears voice notes as "([^"]*)"$`, c.thePosternInboxHearsVoiceNotesAs)
 	ctx.Given(`^bead "([^"]*)" has the hands step "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.beadHasTheHandsStep)
 	ctx.Given(`^the Governor approves the hands step "([^"]*)" on "([^"]*)" with txid "([^"]*)"$`, c.theGovernorApprovesTheHandsStep)
@@ -1524,6 +1529,36 @@ func (c *posternInboxContext) theGovernorWasToldUnderTheCard(text, bead string) 
 func (c *posternInboxContext) nothingWasToldToTheGovernor() error {
 	if n := len(c.backend.Delivered()); n != 1 {
 		return fmt.Errorf("expected only the card delivered, got %d messages", n)
+	}
+	return nil
+}
+
+// mwPosternInboxShowIsRun shows a kept message again: the output is the show's
+// alone, and the cursor as it stood before it is remembered.
+func (c *posternInboxContext) mwPosternInboxShowIsRun(txid string) error {
+	c.cursorBeforeShow, c.err = c.memory.Note(context.Background(), application.PosternCursorKey)
+	if c.err != nil {
+		return nil
+	}
+	c.out.Reset()
+	c.err = application.PosternInboxShow{Dir: c.attachDir, GovernorKey: c.governorKey, Out: c.out}.Run(context.Background(), txid)
+	return nil
+}
+
+func (c *posternInboxContext) theCursorIsUnchangedByTheShow() error {
+	now, err := c.memory.Note(context.Background(), application.PosternCursorKey)
+	if err != nil {
+		return err
+	}
+	if now != c.cursorBeforeShow {
+		return fmt.Errorf("the show moved the cursor from %q to %q", c.cursorBeforeShow, now)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) showingIsRefusedSaying(want string) error {
+	if c.err == nil || !strings.Contains(c.err.Error(), want) {
+		return fmt.Errorf("expected showing to be refused saying %q, got %v", want, c.err)
 	}
 	return nil
 }

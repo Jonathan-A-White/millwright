@@ -159,6 +159,7 @@ func posternSigns() application.HostSigns {
 // backend at postern_backend and decrypting with the postern key.
 func newPosternInboxCmd() *cobra.Command {
 	var unreadCount, apply bool
+	var show string
 
 	cmd := &cobra.Command{
 		Use:   "inbox",
@@ -232,9 +233,27 @@ func newPosternInboxCmd() *cobra.Command {
 			"included: it appends each verified record of his to ~/.local/state/mw/postern/ideas-only/\n" +
 			"held.jsonl, marks it under the note postern.held.<txid>, and answers it in its thread from the\n" +
 			"Mayor's key with 'Recorded for after 21:00 UTC', at zero tokens. A plain read then shows 'held\n" +
-			"for after 21:00 UTC: <txid>' in its place, never its text, and --unread-count leaves it out.",
+			"for after 21:00 UTC: <txid>' in its place, never its text, and --unread-count leaves it out.\n\n" +
+			"Every message a read or --apply sees is kept whole, so that none of his words is lost to the\n" +
+			"cursor or to the 80 characters Ideas only holds: <txid>.message.json (class, from, channel, when\n" +
+			"and the full text), 0600, beside the attachments in ~/.local/state/mw/postern/inbox/, written\n" +
+			"once and never overwritten; a voice note's transcript is kept the same way as\n" +
+			"<txid>.transcript.txt. --show <txid> prints one kept message again, whole, from that file: it\n" +
+			"reads no backend, moves no cursor, sends nothing and writes nothing, and for a txid with\n" +
+			"nothing kept it says so and exits non-zero.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if cmd.Flags().Changed("show") {
+				dir, err := config.PosternInboxDir()
+				if err != nil {
+					return err
+				}
+				governorKey, err := config.PosternGovernorKey()
+				if err != nil {
+					return err
+				}
+				return application.PosternInboxShow{Dir: dir, GovernorKey: governorKey, Out: cmd.OutOrStdout()}.Run(cmd.Context(), show)
+			}
 			if apply {
 				markHandedOff()
 				if self, err := os.Executable(); err == nil {
@@ -267,7 +286,8 @@ func newPosternInboxCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&unreadCount, "unread-count", false, "print only how many messages are unread")
 	cmd.Flags().BoolVar(&apply, "apply", false, "apply the Governor's replies, bead comments and actions at once, moving no cursor")
-	cmd.MarkFlagsMutuallyExclusive("unread-count", "apply")
+	cmd.Flags().StringVar(&show, "show", "", "print the kept message with this txid again, whole, moving and writing nothing")
+	cmd.MarkFlagsMutuallyExclusive("unread-count", "apply", "show")
 	return cmd
 }
 

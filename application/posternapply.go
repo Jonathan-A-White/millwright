@@ -229,6 +229,7 @@ func (i PosternInbox) apply(ctx context.Context, tapsOnly bool, after int64) (li
 		return nil, resume, err
 	}
 	pass.applied = applied
+	i.keepMessages(mine)
 	stuck := int64(0)
 	var ideas ideasPass
 	for _, m := range mine {
