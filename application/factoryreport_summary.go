@@ -51,7 +51,7 @@ func (r FactoryReportResult) summaryQualitySpeedFuel(b *strings.Builder) {
 		summaryLine(b, "  ", "", fmt.Sprintf("attempts %.2f/landing%s, bugs %.2f/landing%s",
 			q.AttemptsPerLanding, whole.arrow("attempts_per_landing"), q.BugsPerLanding, whole.arrow("bugs_per_landing")))
 	}
-	summaryLine(b, "  ", "", fmt.Sprintf("escaped bugs %d%s", q.EscapedBugs, whole.arrow("escaped_bugs")))
+	summaryLine(b, "  ", "", q.escapedText()+whole.arrow("escaped_bugs"))
 	if r.InvestShare != nil {
 		summaryLine(b, "  ", "", r.InvestShare.summaryText())
 		if words := r.InvestShare.boundWords(); words != "" {

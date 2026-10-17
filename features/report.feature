@@ -84,9 +84,9 @@ Feature: mw report
       | day        | id  | outcome        | worker    |
       | 2026-09-25 | l-1 | landed on main | opus/high |
     When mw report runs with "--since 7d"
-    Then the report prints "escaped bugs 1 ↔" under "opus: landed 0 ↔, refused 0 (0%)"
-    And the report prints "escaped bugs 1 ↔" under "lampas: landed 0 ↔, refused 0 (0%)"
-    And the report prints "escaped bugs 0" under "orrery: landed 0, refused 0 (0%)"
+    Then the report prints "escaped bugs 1 (Tester 0) ↔" under "opus: landed 0 ↔, refused 0 (0%)"
+    And the report prints "escaped bugs 1 (Tester 0) ↔" under "lampas: landed 0 ↔, refused 0 (0%)"
+    And the report prints "escaped bugs 0 (Tester 0)" under "orrery: landed 0, refused 0 (0%)"
 
   Scenario: --json carries the escaped bugs of every block and the window before
     Given the report stories:
@@ -762,7 +762,7 @@ Feature: mw report
     And the MODELS line "first try" reads "- - -"
     And the MODELS line "refused" reads "- - 1"
     And the MODELS line "tokens/landing" reads "- - -"
-    And the MODELS line "escaped bugs/landing" reads "- - -"
+    And the MODELS line "escaped/landing (not Tester)" reads "- - -"
 
   Scenario: An escaped bug counts against the model that landed the story it names
     Given the report stories:
@@ -775,4 +775,4 @@ Feature: mw report
       | 2026-10-08 | l-1 | landed on main | opus/high   |
       | 2026-10-08 | l-2 | landed on main | sonnet/high |
     When mw report runs with "--since 7d"
-    Then the MODELS line "escaped bugs/landing" reads "1.00 0.00"
+    Then the MODELS line "escaped/landing (not Tester)" reads "1.00 0.00"

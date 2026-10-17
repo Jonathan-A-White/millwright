@@ -128,10 +128,10 @@ func TestQualityCountsEscapedBugsPerRigAndPerModelOfTheLandingWithTheArrow(t *te
 				found.Quality.EscapedBugs, found.Previous.EscapedBugs, found.Arrows["escaped_bugs"])
 		}
 	}
-	if !strings.Contains(printed, "  escaped bugs 2 ↑ worse\n") {
+	if !strings.Contains(printed, "  escaped bugs 2 (Tester 0) ↑ worse\n") {
 		t.Errorf("QUALITY does not show the escaped bugs:\n%s", printed)
 	}
-	if summary := result.Summary(); !strings.Contains(summary, "  escaped bugs 2 ↑ worse\n") {
+	if summary := result.Summary(); !strings.Contains(summary, "  escaped bugs 2 (Tester 0) ↑ worse\n") {
 		t.Errorf("the summary does not show the escaped bugs:\n%s", summary)
 	}
 	raw, err := json.Marshal(result)
@@ -165,5 +165,52 @@ func TestEscapedBugsIsAnExpectMetricJudgedTheDaysBeforeAgainstTheDaysAfter(t *te
 	}
 	if !strings.Contains(printed, "2 → 0 (-100%): KEPT") {
 		t.Errorf("FACTORY CHANGES does not show the move:\n%s", printed)
+	}
+}
+
+func TestQualitySplitsEscapedBugsByFinderAndMODELSAndTheBoundReadOnlyTheOthers(t *testing.T) {
+	f := newChangeFactory(t)
+	f.landing("mw-e.4", "millwright", "opus", "Expect: none, because it is a test", "2026-10-13")
+	f.filed("e-tester", "bug", "Tester says it broke", "millwright", "2026-10-14T09:00:00Z",
+		"after mw-e.4 landed.\n\n"+application.TesterFindingMarker+". Source: Tester on mw-e.4 (haiku).")
+	f.filed("e-other", "bug", "He says it broke", "millwright", "2026-10-15T09:00:00Z", "after mw-e.4 landed")
+
+	result, printed := f.report(false)
+	for _, block := range append(append([]application.ReportBlock{}, result.Rigs...), result.Models...) {
+		if block.Name != "millwright" && block.Name != "opus" {
+			continue
+		}
+		if block.Quality.EscapedBugs != 2 || block.Quality.EscapedTester != 1 {
+			t.Errorf("%s: escaped %d (Tester %d), want 2 (Tester 1)", block.Name, block.Quality.EscapedBugs, block.Quality.EscapedTester)
+		}
+	}
+	if !strings.Contains(printed, "  escaped bugs 2 (Tester 1)") {
+		t.Errorf("QUALITY does not split the escaped bugs:\n%s", printed)
+	}
+	if summary := result.Summary(); !strings.Contains(summary, "escaped bugs 2 (Tester 1)") {
+		t.Errorf("the summary does not split the escaped bugs:\n%s", summary)
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"escaped_bugs":2,"escaped_bugs_tester":1`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("the JSON does not carry %s:\n%s", want, raw)
+		}
+	}
+	if !strings.Contains(printed, "escaped/landing (not Tester)") {
+		t.Errorf("MODELS does not say its escapes leave the Tester's out:\n%s", printed)
+	}
+	// The one landing ran on sonnet (no worker on its ledger row); one escape
+	// of the two is not the Tester's.
+	var landed application.ModelUse
+	for _, m := range result.ModelCompare.Models {
+		if m.Landed == 1 {
+			landed = m
+		}
+	}
+	if landed.EscapedBugs != 1 || landed.EscapedPerLanding != 1 {
+		t.Errorf("MODELS' landed model is %+v, want 1 escaped bug and 1.00 a landing", landed)
 	}
 }

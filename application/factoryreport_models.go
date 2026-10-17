@@ -37,7 +37,8 @@ type ModelUse struct {
 	// Fuel is the tokens and dollars per landed story, every attempt summed.
 	Fuel FuelUse `json:"fuel"`
 	// EscapedBugs are the bugs traced to its landings (escapedBugs) so far, each
-	// against the newest landing it names, as ESCAPED BUGS counts them.
+	// against the newest landing it names, as QUALITY counts them but leaving
+	// out the Tester's findings.
 	EscapedBugs       int     `json:"escaped_bugs"`
 	EscapedPerLanding float64 `json:"escaped_per_landing"`
 }
@@ -146,10 +147,14 @@ func sumModelUse(model, kind string, entries []reportEntry, escapedOf map[string
 }
 
 // escapedOfLanding is the bugs traced to each landed story, each bug against
-// the newest landing it names, the one ESCAPED BUGS counts it under.
+// the newest landing it names, the one QUALITY counts it under; a Tester's
+// finding is left out.
 func escapedOfLanding(escapes []escape) map[string]int {
 	of := map[string]int{}
 	for _, x := range escapes {
+		if x.byTester {
+			continue
+		}
 		of[x.landings[len(x.landings)-1].id]++
 	}
 	return of
@@ -196,8 +201,8 @@ func (c *ModelCompare) hadSessions() bool {
 // modelsLabel and modelsCell are the widths of a MODELS line's label and of
 // each model's cell: four models fit in ReportWidth.
 const (
-	modelsLabel = 22
-	modelsCell  = 9
+	modelsLabel = 29
+	modelsCell  = 7
 )
 
 // modelMeasures are the lines of MODELS, a cell each model: "-" where the
@@ -214,7 +219,7 @@ var modelMeasures = []struct {
 		return orDash(u.Fuel.WithTokens > 0, shortCount(u.Fuel.TokensPerLanding))
 	}},
 	{"$/landing", func(u ModelUse) string { return orDash(u.Fuel.WithCost > 0, fmt.Sprintf("%.2f", u.Fuel.USDPerLanding)) }},
-	{"escaped bugs/landing", func(u ModelUse) string {
+	{"escaped/landing (not Tester)", func(u ModelUse) string {
 		return orDash(u.Landed > 0, fmt.Sprintf("%.2f", u.EscapedPerLanding))
 	}},
 }

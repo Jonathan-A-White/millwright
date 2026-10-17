@@ -175,8 +175,8 @@ var landingMeasures = []landingMeasure{
 	{"QUALITY", "bugs/landing", true, false, func(q Quality, _ Speed, _ FuelUse, _ int) (float64, bool) {
 		return q.BugsPerLanding, q.Landed > 0
 	}, func(v float64) string { return fmt.Sprintf("%.2f", v) }},
-	{"QUALITY", "escaped bugs", true, true, func(q Quality, _ Speed, _ FuelUse, days int) (float64, bool) {
-		return float64(q.EscapedBugs), days > 0
+	{"QUALITY", "escaped bugs (not Tester)", true, true, func(q Quality, _ Speed, _ FuelUse, days int) (float64, bool) {
+		return float64(q.EscapedOthers()), days > 0
 	}, func(v float64) string { return fmt.Sprintf("%.0f", v) }},
 	{"QUALITY", "findings/landing", true, false, func(q Quality, _ Speed, _ FuelUse, _ int) (float64, bool) {
 		return q.FindingsPerLanding, q.Landed > 0

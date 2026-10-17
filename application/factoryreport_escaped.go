@@ -18,6 +18,7 @@ const EscapeDays = 14
 type escape struct {
 	bug      string
 	created  time.Time
+	byTester bool
 	landings []reportEntry
 }
 
@@ -38,7 +39,8 @@ func firstLandings(all []reportEntry) map[string]reportEntry {
 // escapedBugs finds the escaped bugs among stories: a bug story created on a
 // landing's day or in the EscapeDays after it, on the landing's rig, whose
 // title or description names the landing's story id. Each bug comes once, with
-// every landing it names, oldest first.
+// every landing it names, oldest first; byTester says the bug's description
+// carries TesterFindingMarker, a finding of the Tester's.
 func escapedBugs(stories []StoryDetail, first map[string]reportEntry) []escape {
 	var escapes []escape
 	for _, d := range stories {
@@ -63,7 +65,8 @@ func escapedBugs(stories []StoryDetail, first map[string]reportEntry) []escape {
 			}
 			return named[i].id < named[j].id
 		})
-		escapes = append(escapes, escape{bug: d.Story.ID, created: d.Created, landings: named})
+		escapes = append(escapes, escape{bug: d.Story.ID, created: d.Created, landings: named,
+			byTester: strings.Contains(strings.ToLower(d.Description), strings.ToLower(TesterFindingMarker))})
 	}
 	return escapes
 }
@@ -103,7 +106,7 @@ func (r FactoryReportResult) escapedEntries(escapes []escape) []reportEntry {
 	for _, x := range escapes {
 		landing := x.landings[len(x.landings)-1]
 		previous, inside := r.windowOfTime(x.created)
-		entries = append(entries, reportEntry{id: x.bug, escaped: true, previous: previous, inWindow: inside,
+		entries = append(entries, reportEntry{id: x.bug, escaped: true, byTester: x.byTester, previous: previous, inWindow: inside,
 			at: reportDay(x.created), rig: landing.rig, host: landing.host, model: landing.model})
 	}
 	return entries

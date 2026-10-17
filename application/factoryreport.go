@@ -165,10 +165,21 @@ type Quality struct {
 	BugsFiled      int     `json:"bugs_filed"`
 	BugsPerLanding float64 `json:"bugs_per_landing"`
 	// EscapedBugs are the bugs filed in the window that a landing let through
-	// (escapedBugs), counted under the rig, host and model of that landing.
+	// (escapedBugs), counted under the rig, host and model of that landing;
+	// EscapedTester are those the Tester found, the factory catching a bug on
+	// purpose, so EscapedBugs less EscapedTester is the bugs that reached him.
 	EscapedBugs        int     `json:"escaped_bugs"`
+	EscapedTester      int     `json:"escaped_bugs_tester"`
 	Findings           int     `json:"tester_findings"`
 	FindingsPerLanding float64 `json:"findings_per_landing"`
+}
+
+// EscapedOthers are the escaped bugs the Tester did not find.
+func (q Quality) EscapedOthers() int { return q.EscapedBugs - q.EscapedTester }
+
+// escapedText is "escaped bugs N (Tester M)": all finders, then the Tester's.
+func (q Quality) escapedText() string {
+	return fmt.Sprintf("escaped bugs %d (Tester %d)", q.EscapedBugs, q.EscapedTester)
 }
 
 // Empty says nothing landed, was refused, was filed as a bug or escaped.
@@ -245,7 +256,9 @@ type reportEntry struct {
 	bug        bool
 	// escaped is a bug a landing let through, under that landing's rig, host
 	// and model, its id the bug's.
-	escaped  bool
+	escaped bool
+	// byTester says an escaped bug was the Tester's finding.
+	byTester bool
 	reason   string
 	attempts int
 	// own is how many of attempts count toward max_attempts (OwnAttempts):
@@ -621,6 +634,9 @@ func sumQuality(entries []reportEntry) Quality {
 		switch {
 		case e.escaped:
 			q.EscapedBugs++
+			if e.byTester {
+				q.EscapedTester++
+			}
 		case e.bug:
 			q.BugsFiled++
 		case e.landed:
@@ -746,7 +762,7 @@ func (k ReportBlock) writeQuality(b *strings.Builder) {
 		fmt.Fprintf(b, "  causes %s\n", q.causesText())
 	}
 	fmt.Fprintf(b, "  bugs filed %d%s\n", q.BugsFiled, perLanding(q, q.BugsPerLanding, k.arrow("bugs_per_landing")))
-	fmt.Fprintf(b, "  escaped bugs %d%s\n", q.EscapedBugs, k.arrow("escaped_bugs"))
+	fmt.Fprintf(b, "  %s%s\n", q.escapedText(), k.arrow("escaped_bugs"))
 	if q.Landed > 0 {
 		fmt.Fprintf(b, "  Tester findings %d%s\n", q.Findings, perLanding(q, q.FindingsPerLanding, k.arrow("findings_per_landing")))
 	}

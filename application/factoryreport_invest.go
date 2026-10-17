@@ -110,13 +110,14 @@ func readInvestShare(whole *ReportBlock, rigs []ReportBlock, starvedP1 string, t
 }
 
 // investBound says which bound the week calls for and why. Quality falling
-// wins over an app starving: escaped bugs up week over week, then the refusal
+// wins over an app starving: escaped bugs up week over week, not counting the Tester's (it
+// finds bugs on purpose), then the refusal
 // rate up; then a ready P1 untouched, then the first rig (by name) whose
 // landings fell by a third or more.
 func investBound(now, before Quality, rigs []ReportBlock, starvedP1 string) (bound, reason string) {
 	switch {
-	case now.EscapedBugs > before.EscapedBugs:
-		return BoundMax, fmt.Sprintf("quality falling: escaped bugs %d -> %d", before.EscapedBugs, now.EscapedBugs)
+	case now.EscapedOthers() > before.EscapedOthers():
+		return BoundMax, fmt.Sprintf("quality falling: escaped bugs, not counting the Tester's, %d -> %d", before.EscapedOthers(), now.EscapedOthers())
 	case before.Landed+before.Refused > 0 && now.RefusalRate > before.RefusalRate:
 		return BoundMax, fmt.Sprintf("quality falling: refusals %s -> %s", percentText(before.RefusalRate), percentText(now.RefusalRate))
 	case starvedP1 != "":

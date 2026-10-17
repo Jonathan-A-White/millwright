@@ -218,14 +218,21 @@ func TestTheReportJSONCarriesTheShareAndTheTarget(t *testing.T) {
 }
 
 // escapedBug files a bug of the rig on a day that names the landing share-1.
-func (f *shareFactory) escapedBug(day string) {
+func (f *shareFactory) escapedBug(day string) { f.escapedBugBy(day, "") }
+
+// testerBug is escapedBug filed by the Tester: its description carries the marker.
+func (f *shareFactory) testerBug(day string) {
+	f.escapedBugBy(day, application.TesterFindingMarker+". Source: Tester on share-1 (haiku).")
+}
+
+func (f *shareFactory) escapedBugBy(day, description string) {
 	f.t.Helper()
 	at, err := time.Parse(application.LedgerDate, day)
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	f.tracker.AddStory("", domain.Story{ID: "share-bug", Title: "[bug] it breaks after share-1 landed", Overrides: domain.Path{Rig: f.rig, Host: "laptop", Model: "sonnet"}})
-	for _, err := range []error{f.tracker.SetType("share-bug", "bug"), f.tracker.SetCreated("share-bug", at), f.tracker.SetUpdated("share-bug", f.now)} {
+	for _, err := range []error{f.tracker.SetType("share-bug", "bug"), f.tracker.SetDescription("share-bug", description), f.tracker.SetCreated("share-bug", at), f.tracker.SetUpdated("share-bug", f.now)} {
 		if err != nil {
 			f.t.Fatal(err)
 		}
@@ -260,10 +267,15 @@ func TestTheShareHasABoundAndAReasonWhenQualityIsFallingOrAnAppStarves(t *testin
 			f.rows("2026-09-30", 9, 3, 1)
 			f.rows("2026-10-08", 9, 3, 1)
 		}},
-		{"escaped bugs up", application.BoundMax, "quality falling: escaped bugs 0 -> 1", func(f *shareFactory) {
+		{"escaped bugs up", application.BoundMax, "quality falling: escaped bugs, not counting the Tester's, 0 -> 1", func(f *shareFactory) {
 			f.rows("2026-09-30", 9, 3, 0)
 			f.rows("2026-10-08", 9, 3, 0)
 			f.escapedBug("2026-10-08")
+		}},
+		{"escaped bugs up only by the Tester", "", "", func(f *shareFactory) {
+			f.rows("2026-09-30", 9, 3, 0)
+			f.rows("2026-10-08", 9, 3, 0)
+			f.testerBug("2026-10-08")
 		}},
 		{"refusals up", application.BoundMax, "quality falling: refusals 0% -> 20%", func(f *shareFactory) {
 			f.rows("2026-09-30", 10, 3, 0)
@@ -292,7 +304,7 @@ func TestTheShareHasABoundAndAReasonWhenQualityIsFallingOrAnAppStarves(t *testin
 			f.rows("2026-10-08", 9, 3, 0)
 			f.readyP1("share-p1", 2*time.Hour, 0)
 		}},
-		{"quality wins over starving", application.BoundMax, "quality falling: escaped bugs 0 -> 1", func(f *shareFactory) {
+		{"quality wins over starving", application.BoundMax, "quality falling: escaped bugs, not counting the Tester's, 0 -> 1", func(f *shareFactory) {
 			f.rows("2026-09-30", 9, 3, 0)
 			f.rows("2026-10-08", 6, 2, 0)
 			f.escapedBug("2026-10-08")
@@ -356,7 +368,7 @@ func TestTheShareBoundsAreTheConfigsAndShowInTheJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out.String()), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Share["bound"] != "max" || got.Share["max"] != 50.0 || got.Share["min"] != 10.0 || got.Share["reason"] != "quality falling: escaped bugs 0 -> 1" {
+	if got.Share["bound"] != "max" || got.Share["max"] != 50.0 || got.Share["min"] != 10.0 || got.Share["reason"] != "quality falling: escaped bugs, not counting the Tester's, 0 -> 1" {
 		t.Errorf("the JSON's invest_share is %v", got.Share)
 	}
 }
