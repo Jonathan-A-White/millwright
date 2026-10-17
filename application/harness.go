@@ -45,6 +45,12 @@ type Launch struct {
 	// other way. An empty Heartbeat starts nothing beside the harness.
 	Heartbeat []string
 
+	// HeartbeatLog is the file Heartbeat's stdout and stderr are kept in as
+	// well as shown in the pane (mw-gq6.494): "the claim on X could not be
+	// heartbeated: ..." is the one trace of why a lease lapsed, and the pane
+	// is closed when the story is reclaimed. Empty keeps nothing.
+	HeartbeatLog string
+
 	// BdRetry is the command a bd run by the session becomes: this same mw,
 	// `mw bd`, which runs the real bd again when it meets a passing fault of the
 	// beads server (mw-gq6.393). The harness puts a bd that runs it ahead of the

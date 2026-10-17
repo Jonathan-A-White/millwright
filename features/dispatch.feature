@@ -204,6 +204,11 @@ Feature: Dispatching the stories this host is ready to work
       read of the story failed (i/o timeout), retried in 20s
       Error: closing out mw-gq6.9: bd show mw-gq6.9 --json: exit status 1: i/o timeout
       """
+    And the heartbeat log of "mw-gq6.9" for attempt 2 holds 4 earlier lines and ends with:
+      """
+      the claim on mw-gq6.9 could not be heartbeated: i/o timeout
+      the claim on mw-gq6.9 could not be heartbeated: connection refused
+      """
     And the session of "mw-gq6.9" has a dead pane and its lease has expired
     When dispatch runs on "vps" with a cap of 1
     Then one session was started, for "mw-gq6.9"
@@ -215,6 +220,9 @@ Feature: Dispatching the stories this host is ready to work
     And the mail to the Mayor says "Error: closing out mw-gq6.9: bd show mw-gq6.9 --json: exit status 1: i/o timeout"
     And the mail to the Mayor says "earlier line 8"
     And the mail to the Mayor does not say "earlier line 7"
+    And the mail to the Mayor says "the claim on mw-gq6.9 could not be heartbeated: connection refused"
+    And the mail to the Mayor says "older heartbeat line 2"
+    And the mail to the Mayor does not say "older heartbeat line 1"
 
   # mw-gq6.182: a story its close-out refused is evidence, not a dead session.
   # The claim, the worktree and the branch stay as the session left them until

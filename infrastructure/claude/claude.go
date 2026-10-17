@@ -392,7 +392,7 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	// (mw-gq6.394), so After must not start until the heartbeat is gone
 	// (mw-gq6.487).
 	if len(l.Heartbeat) > 0 {
-		line = shellLine(l.Heartbeat) + " & HB=$!; " + line + "; kill $HB 2>/dev/null; wait $HB 2>/dev/null"
+		line = heartbeatLine(l) + line + "; kill $HB 2>/dev/null; wait $HB 2>/dev/null" + heartbeatEnd(l)
 	}
 
 	// Whatever comes after the session is chained with `;`, not `&&`: a session
@@ -402,6 +402,31 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 		line += "; " + afterLine(l)
 	}
 	return h.spec(l, line), nil
+}
+
+// heartbeatLine starts the heartbeat in the background and leaves its pid in
+// $HB: bare, or with its stdout and stderr kept in HeartbeatLog as well as shown
+// in the pane (mw-gq6.494). The words are the one trace of why a lease lapsed,
+// and mw dispatch closes the pane when it reclaims the story. A pipe into tee
+// would make $! tee's pid and the kill would miss the heartbeat, so the
+// heartbeat writes to a fifo that a backgrounded tee reads: $HB stays the
+// heartbeat itself. tee appends, so a later attempt's heartbeat adds to it.
+func heartbeatLine(l application.Launch) string {
+	if l.HeartbeatLog == "" {
+		return shellLine(l.Heartbeat) + " & HB=$!; "
+	}
+	return `HBD=$(mktemp -d); mkfifo "$HBD/w"; tee -a ` + shellQuote(l.HeartbeatLog) + ` < "$HBD/w" & HBT=$!; ` +
+		shellLine(l.Heartbeat) + ` > "$HBD/w" 2>&1 & HB=$!; `
+}
+
+// heartbeatEnd is what settles the fifo heartbeatLine made, once the heartbeat
+// is gone: tee ends on its own as the fifo's last writer closes, so it is
+// waited for, and the fifo's directory removed.
+func heartbeatEnd(l application.Launch) string {
+	if l.HeartbeatLog == "" {
+		return ""
+	}
+	return `; wait $HBT 2>/dev/null; rm -rf "$HBD"`
 }
 
 // afterLine is After as the shell runs it: alone, or with its stdout and stderr

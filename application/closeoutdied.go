@@ -17,6 +17,10 @@ func CloseOutDiedSubject(id string) string { return "Close-out died: " + id }
 // the comment on the story carry.
 const CloseOutLogTail = 20
 
+// HeartbeatLogTail is how many of the heartbeat log's last lines the same
+// mail and comment carry, when the log exists (mw-gq6.494).
+const HeartbeatLogTail = 5
+
 // CauseTooling is the class mw cause names an attempt that was not the story's
 // own but the factory's: here, a close-out that died with the work finished.
 const CauseTooling = "tooling"
@@ -85,6 +89,7 @@ func (d Dispatch) reclaimDiedCloseOut(ctx context.Context, detail StoryDetail, s
 	}
 
 	lastWords := fmt.Sprintf("The close-out's last words (runs/%s/%s):\n%s", id, logName, tail)
+	lastWords += d.heartbeatLogTail(ctx, id, HeartbeatLogNameForAttempt(attempt))
 	comment := fmt.Sprintf("mw dispatch on %s found %s claimed here with a dead pane (%s is %s) and its lease had run out, and its close-out died: %s. "+
 		"The window was closed and the claim given back so it is dispatched again, its worktree and branch left for the next attempt; %s.\n\n%s",
 		d.Host, id, session, status.State, why, named, lastWords)
@@ -141,4 +146,20 @@ func (d Dispatch) closeOutLogTail(ctx context.Context, id, logName string) strin
 		lines = lines[len(lines)-CloseOutLogTail:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// heartbeatLogTail is the last HeartbeatLogTail lines of the heartbeat's log in
+// the story's run, set under a heading of their own, or nothing when no log was
+// kept or it holds nothing: a lease that lapsed is the reason to read it, and a
+// session whose heartbeat never failed has no words to quote (mw-gq6.494).
+func (d Dispatch) heartbeatLogTail(ctx context.Context, id, logName string) string {
+	kept, err := d.Boot.Vault.ReadRunFile(ctx, id, logName)
+	if err != nil || strings.TrimSpace(kept) == "" {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(kept, "\n"), "\n")
+	if len(lines) > HeartbeatLogTail {
+		lines = lines[len(lines)-HeartbeatLogTail:]
+	}
+	return fmt.Sprintf("\n\nThe heartbeat's last words (runs/%s/%s):\n%s", id, logName, strings.Join(lines, "\n"))
 }
