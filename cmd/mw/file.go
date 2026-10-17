@@ -37,7 +37,8 @@ func newFileCmd() *cobra.Command {
 			"story must resolve to a path, carry acceptance criteria, and wait only on stories the\n" +
 			"plan has and not on itself, directly or in a circle.\n\n" +
 			"A story may name the repo paths it expects to change as \"files\", which is filed as its\n" +
-			"files key. Under each story filed, mw prints the open or running stories on its rig whose\n" +
+			"files key. A story's overrides may also name its \"size\", one of XS|S|M|L|XL, filed as its\n" +
+			"size key. Under each story filed, mw prints the open or running stories on its rig whose\n" +
 			"files overlap (the running ones on its rig, if it names none) as 'in flight: <id> <title>\n" +
 			"(shares <path>)', with the bd dep add that would make it wait. It adds nothing itself.\n" +
 			"A story whose files exist in none of its rig's checkout on this host is named, as a warning,\n" +
