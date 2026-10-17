@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -31,7 +32,13 @@ func (c *timedChecks) Run(context.Context, string, string) (application.Checked,
 // left in the vault.
 func aBenchmarkedCloseOut(t *testing.T, passed bool, output string, load application.LoadReading, past []application.Benchmark) (*gateRun, *fakeVault) {
 	t.Helper()
-	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	return aBenchmarkedCloseOutAt(t, time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC), nil, passed, output, load, past)
+}
+
+// aBenchmarkedCloseOutAt is aBenchmarkedCloseOut on the clock now, with flags
+// as the memory of the calibration flags it has printed.
+func aBenchmarkedCloseOutAt(t *testing.T, now time.Time, flags application.BenchFlagMemory, passed bool, output string, load application.LoadReading, past []application.Benchmark) (*gateRun, *fakeVault) {
+	t.Helper()
 	tracker := apptest.NewFakeTracker()
 	tracker.AddEpic("mw-x", domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
 	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
@@ -53,9 +60,9 @@ func aBenchmarkedCloseOut(t *testing.T, passed bool, output string, load applica
 		Checks: &timedChecks{passed: passed, output: output, took: 310 * time.Second, clock: &now}, Slot: aSlot{}, Mailbox: run.mailbox,
 		Load:       &apptest.FakeHostLoad{Reading: load},
 		LoadWait:   func(context.Context, time.Duration) error { return nil },
-		Benchmarks: &apptest.FakeBenchmarks{Records: past},
-		Now:        func() time.Time { return now },
-		Seat:       "builder", Host: "laptop",
+		Benchmarks: &apptest.FakeBenchmarks{Records: past}, BenchFlags: flags,
+		Now:  func() time.Time { return now },
+		Seat: "builder", Host: "laptop",
 		Rigs: map[string]string{"lampas": "/rigs/lampas"},
 		Out:  run.out, Err: io.Discard,
 	}.Run(context.Background(), "mw-x.1")
@@ -142,5 +149,74 @@ func TestATimeoutOnACalmHostIsNotNamedUnderLoad(t *testing.T) {
 	run, _ := aBenchmarkedCloseOut(t, false, "Test timed out after 30s\n", application.LoadReading{Load: 2, Cores: 20}, nil)
 	if run.err == nil || strings.Contains(run.report.Why, "timeout under load") {
 		t.Errorf("expected a plain refusal, got err %v and %q", run.err, run.report.Why)
+	}
+}
+
+// aMisparredKind is six landings of a kind other than the closing-out story's
+// whose par was a third of what they took, so that the kind is flagged.
+func aMisparredKind(kind string) []application.Benchmark {
+	var past []application.Benchmark
+	for i := 0; i < 6; i++ {
+		past = append(past, application.Benchmark{
+			Story: "old", Rig: "lampas", Host: "laptop", Kind: kind, Landed: true, ActualS: 3000, ParS: 1000,
+			At: time.Date(2026, 10, 8, 0, i, 0, 0, time.UTC), GateSeconds: 60,
+		})
+	}
+	return past
+}
+
+func flagLines(report application.NextReport) []string {
+	var out []string
+	for _, line := range report.Bench {
+		if strings.HasPrefix(line, "FLAG ") {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func TestACalibrationFlagIsPrintedOnceADayAndThenOnlyWhenItChanges(t *testing.T) {
+	load := application.LoadReading{Load: 1, Cores: 20}
+	flags := apptest.NewFakeBenchFlags()
+	noon := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	past := aMisparredKind("lampas/bug/haiku")
+
+	first, _ := aBenchmarkedCloseOutAt(t, noon, flags, true, "ok\n", load, past)
+	if got := flagLines(first.report); len(got) != 1 || !strings.HasPrefix(got[0], "FLAG lampas/bug/haiku: try ") {
+		t.Fatalf("expected the flag printed the first time, got %q", got)
+	}
+
+	again, _ := aBenchmarkedCloseOutAt(t, noon.Add(23*time.Hour), flags, true, "ok\n", load, past)
+	if got := flagLines(again.report); len(got) != 0 {
+		t.Errorf("expected the same flag kept off the next landing within the day, got %q", got)
+	}
+
+	nextDay, _ := aBenchmarkedCloseOutAt(t, noon.Add(25*time.Hour), flags, true, "ok\n", load, past)
+	if got := flagLines(nextDay.report); len(got) != 1 {
+		t.Errorf("expected the flag printed again after a day, got %q", got)
+	}
+
+	// A flag whose text changed is printed at once: the kind now has the
+	// landings of a par window, so its advice is rig-only grouping.
+	wide := append(aMisparredKind("lampas/bug/haiku"), aMisparredKind("lampas/bug/haiku")...)
+	wide = append(wide, wide...)
+	changed, _ := aBenchmarkedCloseOutAt(t, noon.Add(26*time.Hour), flags, true, "ok\n", load, wide)
+	if got := flagLines(changed.report); len(got) != 1 || !strings.Contains(got[0], "try rig-only grouping") {
+		t.Errorf("expected the changed flag printed at once, got %q", got)
+	}
+}
+
+func TestACalibrationFlagIsPrintedWhenTheMemoryCannotBeUsedOrThereIsNone(t *testing.T) {
+	load := application.LoadReading{Load: 1, Cores: 20}
+	past := aMisparredKind("lampas/bug/haiku")
+	broken := apptest.NewFakeBenchFlags()
+	broken.Err = errors.New("disk full")
+	for name, flags := range map[string]application.BenchFlagMemory{"none": nil, "broken": broken} {
+		for i := 0; i < 2; i++ {
+			run, _ := aBenchmarkedCloseOutAt(t, time.Date(2026, 10, 9, 12, i, 0, 0, time.UTC), flags, true, "ok\n", load, past)
+			if got := flagLines(run.report); len(got) != 1 {
+				t.Errorf("%s memory, landing %d: expected the flag printed, got %q", name, i, got)
+			}
+		}
 	}
 }

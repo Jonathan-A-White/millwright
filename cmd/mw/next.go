@@ -271,6 +271,7 @@ func newNextCmd() *cobra.Command {
 				Tester:       tester,
 				Benchmarks:   vault.Benchmarks{Vault: files},
 				Bench:        benchmarkLimits(bench),
+				BenchFlags:   hostBenchFlags(),
 
 				RetryFromBranch: fromBranch,
 			}.Run(cmd.Context(), args[0])

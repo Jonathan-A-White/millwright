@@ -147,6 +147,24 @@ type BenchmarkBook interface {
 	Recent(ctx context.Context) ([]Benchmark, error)
 }
 
+// FlagDamper is how long a calibration flag, once printed on a landing mail, is
+// kept off the mails after it unless its text changes (mw-gq6.518).
+const FlagDamper = 24 * time.Hour
+
+// BenchFlagMemory is what this host last printed of each kind's calibration flag
+// in a landing mail, so that a flag is said once and then only when it changes:
+// the adapter is a small file per kind in this host's state directory. A nil
+// memory damps nothing, and one that cannot be read or written prints the flag.
+type BenchFlagMemory interface {
+	// Said is the text last printed for the kind and when; ok is false when
+	// none was.
+	Said(ctx context.Context, kind string) (text string, at time.Time, ok bool, err error)
+
+	// Say records that text was printed for the kind at the time, replacing
+	// what was there.
+	Say(ctx context.Context, kind, text string, at time.Time) error
+}
+
 // KindOf is the kind a story is held to a par of: its rig, whether it is a bug
 // or a feature, and the model it was worked on.
 func KindOf(rig string, bug bool, model string) string {

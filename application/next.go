@@ -318,6 +318,11 @@ type Next struct {
 	Benchmarks BenchmarkBook
 	Bench      BenchmarkSettings
 
+	// BenchFlags is what this host last printed of each kind's calibration
+	// flag, so that the report says a flag once a day and then only when it
+	// changes (mw-gq6.518). A nil BenchFlags prints every flag every time.
+	BenchFlags BenchFlagMemory
+
 	// CloseOuts is where this close-out says it is running, so that mw status
 	// and the quiet alarm do not take the story for quiet while it waits its
 	// turn or for the host to calm. A nil CloseOuts leaves no mark.
