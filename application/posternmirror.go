@@ -61,6 +61,42 @@ type PosternMirror struct {
 	// WatchdogTarget is where the watchdog's two files go, an rsync destination
 	// (`root@vps:/var/lib/postern-watchdog/`). Empty copies nothing there.
 	WatchdogTarget string
+	// Sleep waits d or until ctx ends, between a step that timed out reaching a
+	// host and its retry; nil really waits.
+	Sleep func(ctx context.Context, d time.Duration) error
+}
+
+// PosternMirrorRetryWait is how long a step waits before its one retry after ssh
+// timed out reaching a host.
+const PosternMirrorRetryWait = 15 * time.Second
+
+// SSHConnectTimedOut reports whether err is ssh failing with exit 255 because
+// the connection, or its banner exchange, timed out: a host busy or briefly out
+// of reach, not a refusal, which is not worth a failed run on its own.
+func SSHConnectTimedOut(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "exit status 255") && strings.Contains(text, "timed out")
+}
+
+// retried runs step, and when it fails by ssh timing out, says so, waits, and
+// runs it once more. what names the step in the line.
+func (m PosternMirror) retried(ctx context.Context, what string, step func() error) error {
+	err := step()
+	if !SSHConnectTimedOut(err) {
+		return err
+	}
+	fmt.Fprintf(m.Out, "retried %s after %s: ssh timed out\n", what, PosternMirrorRetryWait)
+	sleep := m.Sleep
+	if sleep == nil {
+		sleep = sleepFor
+	}
+	if serr := sleep(ctx, PosternMirrorRetryWait); serr != nil {
+		return err
+	}
+	return step()
 }
 
 // MirrorRefused is the finding that a copy to a host was left alone because that
@@ -123,7 +159,12 @@ func (m PosternMirror) toBoost(ctx context.Context) error {
 	}
 	host, rsh := prefix[len(prefix)-1], prefix[:len(prefix)-1]
 
-	theirs, there, err := m.Mirrorer.LastIndexTime(ctx, prefix, m.DataDir)
+	var theirs time.Time
+	var there bool
+	err := m.retried(ctx, "asking "+boost+" for its index", func() (err error) {
+		theirs, there, err = m.Mirrorer.LastIndexTime(ctx, prefix, m.DataDir)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("asking %s for its index: %w", boost, err)
 	}
@@ -139,7 +180,10 @@ func (m PosternMirror) toBoost(ctx context.Context) error {
 	// One rsync, so the order is rsync's: a blob can arrive after the record that
 	// names it, and the next run makes it whole.
 	names := []string{PosternIndexFile, PosternVapidFile, PosternSubscriptionsFile, PosternBlobsDir}
-	if err := m.Mirrorer.Copy(ctx, m.DataDir, names, rsh, host+":"+m.DataDir+"/"); err != nil {
+	copyErr := m.retried(ctx, "copying to "+boost, func() error {
+		return m.Mirrorer.Copy(ctx, m.DataDir, names, rsh, host+":"+m.DataDir+"/")
+	})
+	if err := copyErr; err != nil {
 		return fmt.Errorf("copying to %s: %w", boost, err)
 	}
 	fmt.Fprintf(m.Out, "copied %s to %s\n", m.DataDir, boost)
@@ -168,7 +212,12 @@ func (m PosternMirror) millToBoost(ctx context.Context) error {
 	}
 	host, rsh := prefix[len(prefix)-1], prefix[:len(prefix)-1]
 
-	theirs, there, err := m.Mirrorer.LastGrindTime(ctx, prefix, m.MillStateDir)
+	var theirs time.Time
+	var there bool
+	err = m.retried(ctx, "asking "+boost+" for the mill's record", func() (err error) {
+		theirs, there, err = m.Mirrorer.LastGrindTime(ctx, prefix, m.MillStateDir)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("asking %s for the mill's record: %w", boost, err)
 	}
@@ -181,7 +230,10 @@ func (m PosternMirror) millToBoost(ctx context.Context) error {
 			return &MirrorRefused{Host: boost, What: "mill record (" + GristRecordFile + ")", Theirs: theirs, Ours: ours, HasOurs: has}
 		}
 	}
-	if err := m.Mirrorer.Copy(ctx, m.MillStateDir, []string{"."}, rsh, host+":"+m.MillStateDir+"/"); err != nil {
+	copyErr := m.retried(ctx, "copying the mill's state to "+boost, func() error {
+		return m.Mirrorer.Copy(ctx, m.MillStateDir, []string{"."}, rsh, host+":"+m.MillStateDir+"/")
+	})
+	if err := copyErr; err != nil {
 		return fmt.Errorf("copying the mill's state to %s: %w", boost, err)
 	}
 	fmt.Fprintf(m.Out, "copied the mill's state %s to %s\n", m.MillStateDir, boost)
@@ -193,7 +245,10 @@ func (m PosternMirror) toWatchdog(ctx context.Context) error {
 		return nil
 	}
 	names := []string{PosternVapidFile, PosternSubscriptionsFile}
-	if err := m.Mirrorer.Copy(ctx, m.DataDir, names, nil, m.WatchdogTarget); err != nil {
+	copyErr := m.retried(ctx, "copying to the watchdog", func() error {
+		return m.Mirrorer.Copy(ctx, m.DataDir, names, nil, m.WatchdogTarget)
+	})
+	if err := copyErr; err != nil {
 		return fmt.Errorf("copying to the watchdog at %s: %w", m.WatchdogTarget, err)
 	}
 	fmt.Fprintf(m.Out, "copied the vapid keys and push subscriptions to %s\n", m.WatchdogTarget)
