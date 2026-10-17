@@ -69,7 +69,10 @@
 #      Enter, then "New postern message for mayor (<n> unread)" and Enter,
 #      then "Quiet alarm for mayor: <clause>[; <clause> ...]. Run mw status."
 #      and Enter (checking the window is idle again first before each line
-#      after the first, since typing one may have woken it);
+#      after the first, since typing one may have woken it). The inbox is
+#      listed again once the window is known idle, just before the mail line:
+#      mail the Mayor read during the tick (the steps above can take a minute)
+#      is not announced, and a line with none left is not typed (mw-gq6.572);
 #   9. records the mail ids as announced, the postern count as last noted,
 #      and each clause's condition as fired, only after each is typed.
 #      While a wait is armed (contrib/mail-wait's stamp in the state directory
@@ -390,21 +393,34 @@ told_mail() {
 # rather than stopping the tick: the quiet alarm below still gets its turn.
 new=""
 count=0
-say "step 3: the mail inbox"
-if listing=$(cd "$vault" && bd mail inbox "$MAILBOX" 2>/dev/null); then
-	current=$(echo "$listing" | awk 'NF { print $1 }' | grep -E '^[[:alnum:]]+(-[[:alnum:].]+)+$' | sort -u)
-	if [ -n "$current" ]; then
-		new=$(echo "$current" | grep -vxFf "$STATE/announced" 2>/dev/null || true)
-		if [ ! -f "$STATE/announced" ]; then new=$current; fi
+current=""
+# list_new_mail sets current (the ids the inbox lists now), new (those not
+# announced yet and not told by the follower) and count. Step 8 calls it again
+# just before it types: the quiet alarm, the view and the snapshot between can
+# take a minute, and mail the Mayor read in that time is not announced
+# (mw-gq6.572).
+list_new_mail() {
+	new=""
+	count=0
+	current=""
+	if listing=$(cd "$vault" && bd mail inbox "$MAILBOX" 2>/dev/null); then
+		current=$(echo "$listing" | awk 'NF { print $1 }' | grep -E '^[[:alnum:]]+(-[[:alnum:].]+)+$' | sort -u)
+		if [ -n "$current" ]; then
+			new=$(echo "$current" | grep -vxFf "$STATE/announced" 2>/dev/null || true)
+			if [ ! -f "$STATE/announced" ]; then new=$current; fi
+		fi
 	fi
-fi
-# The mail mw events follow has told the seat of already is not told twice
-# (mw-gq6.457), even when the follower has since stopped.
-if [ -n "$new" ] && subscribes_to_mail; then
-	told=$(told_mail)
-	[ -n "$told" ] && new=$(echo "$new" | grep -vxF "$told" || true)
-fi
-[ -n "$new" ] && count=$(echo "$new" | wc -l | tr -d ' ')
+	# The mail mw events follow has told the seat of already is not told twice
+	# (mw-gq6.457), even when the follower has since stopped.
+	if [ -n "$new" ] && subscribes_to_mail; then
+		told=$(told_mail)
+		[ -n "$told" ] && new=$(echo "$new" | grep -vxF "$told" || true)
+	fi
+	[ -n "$new" ] && count=$(echo "$new" | wc -l | tr -d ' ')
+	return 0
+}
+say "step 3: the mail inbox"
+list_new_mail
 
 # 4. The postern inbox: skipped silently, with no call to mw, on a host with
 # no postern key file. A count above zero and higher than what was last
@@ -701,6 +717,14 @@ elif [ "$status" -ne 0 ]; then
 fi
 
 typed_mail=0
+if [ -n "$new" ]; then
+	# The inbox is read again, now that the window is known to be idle: what the
+	# Mayor read since step 3 is no longer new.
+	list_new_mail
+	if [ -z "$new" ]; then
+		say "the new mail for $MAILBOX was read before it was typed; nothing to type"
+	fi
+fi
 if [ -n "$new" ]; then
 	line="New mail for $MAILBOX: $count message(s). Run bd mail inbox."
 	if type_line "$line"; then

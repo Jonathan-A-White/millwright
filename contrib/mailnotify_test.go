@@ -200,7 +200,7 @@ func newFactory(t *testing.T) *factory {
 	f.write("bin/mw", "#!/bin/sh\ncase \"$1\" in\n"+
 		"sync) echo \"$*\" >> \"$MW_TEST_DIR/mw.log\" ;;\n"+
 		"events) echo \"$*\" >> \"$MW_TEST_DIR/events.log\" ;;\n"+
-		"nudge) echo \"$*\" >> \"$MW_TEST_DIR/nudge.log\"; [ -f \"$MW_TEST_DIR/nudge-output\" ] && cat \"$MW_TEST_DIR/nudge-output\" ;;\n"+
+		"nudge) echo \"$*\" >> \"$MW_TEST_DIR/nudge.log\"; [ -f \"$MW_TEST_DIR/during-tick\" ] && sh \"$MW_TEST_DIR/during-tick\"; [ -f \"$MW_TEST_DIR/nudge-output\" ] && cat \"$MW_TEST_DIR/nudge-output\" ;;\n"+
 		"postern) echo \"$*\" >> \"$MW_TEST_DIR/postern.log\"\n"+
 		"\tcase \"$2 ${3:-}\" in\n"+
 		"\t\"view --help\") if [ -f \"$MW_TEST_DIR/no-view\" ]; then printf 'Usage:\\n  mw postern [command]\\n'; else printf 'Usage:\\n  mw postern view [flags]\\n'; fi ;;\n"+
@@ -426,8 +426,10 @@ func TestNewMailAndAnIdlePromptTypesOneLineAndRecordsTheIds(t *testing.T) {
 	if got := f.read("mw.log"); got != "sync --no-backup\n" {
 		t.Fatalf("mw was run as %q, want one `mw sync --no-backup`: a tick must not push the backup", got)
 	}
-	if got := f.read("bd.log"); got != "mail inbox mayor\n" {
-		t.Fatalf("bd was run as %q, want one `bd mail inbox mayor`", got)
+	// The inbox is listed at step 3 and again just before the line is typed
+	// (mw-gq6.572); nothing else of bd is run.
+	if got := f.read("bd.log"); got != "mail inbox mayor\nmail inbox mayor\n" {
+		t.Fatalf("bd was run as %q, want `bd mail inbox mayor` twice", got)
 	}
 }
 
@@ -1687,6 +1689,68 @@ func (f *factory) eventLog(told int, beads ...string) {
 	}
 	f.write(".local/state/mw/events/log.jsonl", log.String(), 0o600)
 	f.write(".local/state/mw/events/nudge.json", fmt.Sprintf(`{"control":%d,"mayor":%d}`, told, told), 0o600)
+}
+
+// readDuringTheTick makes the stand-in mw nudge, which the script runs after it
+// has listed the inbox and before it types, run script as the Mayor would
+// meanwhile: bd mail read, which leaves the message out of the inbox.
+func (f *factory) readDuringTheTick(script string) {
+	f.write("during-tick", script, 0o644)
+}
+
+// Mail announced once and then read with bd mail read is never announced
+// again, and a new mail after it is announced once (mw-gq6.572).
+func TestMailReadAfterItWasAnnouncedIsNeverAnnouncedAgain(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.inbox("mw-aaa")
+
+	f.tick()
+	f.typed(fmt.Sprintf(announcement, 1))
+
+	f.inbox() // bd mail read mw-aaa
+	f.tick()
+	f.tick()
+	f.nothingMoreTyped(fmt.Sprintf(announcement, 1))
+
+	f.inbox("mw-bbb")
+	f.tick()
+	f.typed(fmt.Sprintf(announcement, 1) + fmt.Sprintf(announcement, 1))
+	f.tick()
+	f.nothingMoreTyped(fmt.Sprintf(announcement, 1) + fmt.Sprintf(announcement, 1))
+}
+
+// The inbox is listed at step 3 and typed from at step 8, with the quiet alarm,
+// the view and the snapshot between, which can take a minute. Mail the Mayor
+// read in that time is not announced: the inbox is read again just before the
+// line is typed (mw-gq6.572).
+func TestMailReadWhileTheTickWasRunningIsNotAnnounced(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.inbox("mw-aaa", "mw-bbb")
+	f.readDuringTheTick("printf 'mw-bbb  a subject\\n' > \"$MW_TEST_DIR/inbox\"\n")
+
+	f.tick()
+
+	f.typed(fmt.Sprintf(announcement, 1))
+	if got := f.announced(); got != "mw-bbb\n" {
+		t.Fatalf("recorded ids %q, want only the mail still unread", got)
+	}
+}
+
+// Mail all read by the time the line would be typed leaves nothing to type.
+func TestMailAllReadWhileTheTickWasRunningTypesNothing(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.inbox("mw-aaa")
+	f.readDuringTheTick(": > \"$MW_TEST_DIR/inbox\"\n")
+
+	out := f.tick()
+
+	f.nothingMoreTyped("")
+	if !strings.Contains(out, "read before it was typed") {
+		t.Fatalf("the tick did not say the mail was read first:\n%s", out)
+	}
 }
 
 // A mail the event nudge has told the Mayor of is not counted again here, even
