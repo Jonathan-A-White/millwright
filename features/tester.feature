@@ -98,6 +98,32 @@ Feature: A one-week Tester trial
       | held    mw-l.9 filed by the Tester for its findings: release or drop them |
       | twin    mw-l.7 already open                                                |
 
+  Scenario: A correction comment that holds a story but no tag still counts the finding it holds (mw-f7xsy4)
+    Given the story "mw-l.1" is planned and ready to be worked here
+    And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
+    And the session of "mw-l.2" reported a plain success
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS\n• [bug] A word sheet opens under a letter sheet. still on main: yes\n  held: mw-l.9"
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS correction: re-run on origin/main, still on main: yes.\n  held: mw-l.9"
+    When mw closes out "mw-l.2"
+    Then the story "mw-l.2" is closed
+    And that mail's subject is "Tested: mw-l.1: 1 finding"
+    And that mail's body holds:
+      | tested  mw-l.1: 1 finding (0 bug, 0 taste, 1 not tagged) |
+      | held    mw-l.9 filed by the Tester for its findings       |
+    And the last ledger line holds:
+      | tested mw-l.1: 1 finding (0 bug, 0 taste, 1 not tagged) |
+
+  Scenario: A finding that starts with a bullet dot counts as a bug
+    Given the story "mw-l.1" is planned and ready to be worked here
+    And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
+    And the session of "mw-l.2" reported a plain success
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS\n• [bug] A word sheet opens under a letter sheet. still on main: yes\n  held: mw-l.9"
+    When mw closes out "mw-l.2"
+    Then the story "mw-l.2" is closed
+    And that mail's subject is "Tested: mw-l.1: 1 finding"
+    And the last ledger line holds:
+      | tested mw-l.1: 1 finding (1 bug, 0 taste) |
+
   Scenario: A FINDINGS comment whose only [bug] is inside "No [bug] found." counts no bug
     Given the story "mw-l.1" is planned and ready to be worked here
     And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
