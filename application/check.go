@@ -66,6 +66,10 @@ type Check struct {
 	// keeps none.
 	Logs CheckLogs
 
+	// Modes is the harness's record of the permission mode the story's session
+	// ran in (mw-gq6.545); Next's own. Nil reads none.
+	Modes TranscriptModes
+
 	// Out is where the report is printed. A nil Out prints nothing.
 	Out io.Writer
 }
@@ -274,6 +278,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		SpecChecks: specs,
 		Remote:     k.Remote,
 		Load:       k.Load,
+		Modes:      k.Modes,
 		LoadPoll:   k.LoadPoll,
 		LoadBound:  k.LoadBound,
 		LoadWait:   k.LoadWait,

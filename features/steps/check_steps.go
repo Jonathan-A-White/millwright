@@ -32,6 +32,7 @@ func registerCheckSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the story "([^"]*)" has already been closed$`, c.theStoryWasAlreadyClosed)
 	ctx.Given(`^another close-out is holding the merge slot of the rig$`, c.anotherCloseOutHoldsTheSlot)
 
+	ctx.Given(`^the session of "([^"]*)" ran in permission mode "([^"]*)"$`, c.theSessionRanInPermissionMode)
 	ctx.Given(`^the host's load reads in turn: (.+)$`, c.theHostsLoadReads)
 	ctx.Given(`^the rig's tests fail the first time and pass the second, saying "([^"]*)"$`, c.theRigsTestsFailOncePassNext)
 
@@ -277,7 +278,19 @@ func (c *nextContext) newCheck(worktrees *rig.Worktrees, slot application.MergeS
 		Out:        out,
 		Load:       load,
 		LoadWait:   func(context.Context, time.Duration) error { return nil },
+		Modes:      c.sessionModes,
 	}
+}
+
+// sessionMode is the permission mode a scenario's session is said to have run
+// in, which is what the harness's transcript of it would show.
+type sessionMode string
+
+func (m sessionMode) PermissionMode(context.Context, string) (string, error) { return string(m), nil }
+
+func (c *nextContext) theSessionRanInPermissionMode(_, mode string) error {
+	c.sessionModes = sessionMode(mode)
+	return nil
 }
 
 func (c *nextContext) theCheckPasses() error {

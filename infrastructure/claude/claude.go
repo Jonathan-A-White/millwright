@@ -332,7 +332,7 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 		h.program,
 		"--print",
 		"--output-format", "json",
-		"--model", string(l.Path.Model),
+		"--model", sessionModel(l.Path.Model),
 		"--effort", string(l.Path.Effort),
 		"--permission-mode", h.permissionMode,
 		// Nobody is at the keyboard: anything that would still ask is denied
@@ -468,6 +468,19 @@ func seatSettings(attended bool) string {
 		return SessionSettings
 	}
 	return UnattendedSeatSettings
+}
+
+// sessionModel is what a story's session is started on: the model's full id
+// when the factory knows it, else the name. The alias is resolved by the Claude
+// Code on the host, and the desktop's resolved haiku to claude-haiku-4-5, which
+// does not run in auto mode: a Haiku Tester there ran in permission mode default
+// and every command outside its allow rules was denied (mw-gq6.545). The id
+// leaves nothing to the host's version.
+func sessionModel(m domain.Model) string {
+	if id := domain.FullModelID(m); id != "" {
+		return id
+	}
+	return string(m)
 }
 
 // knownPermissionMode reports whether Claude Code takes this mode.

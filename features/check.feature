@@ -72,6 +72,26 @@ Feature: Checking a branch before its session ends
     And the check prints: Implement until green
     And the check wrote nothing to the tracker, the ledger, the vault or git
 
+  # mw-gq6.545: a session launched in auto whose transcript shows another permission
+  # mode had every command outside its allow rules denied, so its steps stayed open;
+  # the refusal says that, not only that the steps are open.
+  Scenario: A session that ran in a permission mode other than auto is told so beside its open steps
+    Given a formula was poured for "mw-gq6.1" and one of its steps is still open
+    And the session of "mw-gq6.1" ran in permission mode "default"
+    When a session checks "mw-gq6.1"
+    Then the check fails
+    And the check prints: formula step(s)
+    And the check prints: ran in permission mode default, not auto
+    And the check wrote nothing to the tracker, the ledger, the vault or git
+
+  Scenario: A session that ran in auto is not told of a permission mode
+    Given a formula was poured for "mw-gq6.1" and one of its steps is still open
+    And the session of "mw-gq6.1" ran in permission mode "auto"
+    When a session checks "mw-gq6.1"
+    Then the check fails
+    And the check prints: formula step(s)
+    And the check does not print: permission mode
+
   # mw-gq6.398: a check writes nothing, so it does not close the step; it says the
   # close-out would, and does not fail for it.
   Scenario: A lone closing-comment step with its comment on the story passes the check, and is not closed by it
