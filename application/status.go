@@ -191,6 +191,10 @@ type Status struct {
 	// passes it over (mw-gq6.349). A nil Changes compares the files keys alone.
 	Rigs    map[string]string
 	Changes BranchChanges
+	// TestersPerRig is the [dampers] testers_per_rig key, which mw dispatch
+	// enforces: a ready Tester story is shown waiting while its rig runs that
+	// many, on any host (mw-gq6.546). Zero reads the default.
+	TestersPerRig int
 	// RigFiles says whether a path of a story's files key is in its rig's
 	// checkout on this host, to name the stories filed into the wrong rig under
 	// WrongRigHeading (mw-gq6.428). Nil leaves the section out.
@@ -549,6 +553,9 @@ type StatusReport struct {
 	// Sharing are the ready stories mw dispatch passes over for a file a
 	// running story here shares with them, by story id (mw-gq6.349).
 	Sharing map[string]FileShare
+	// TesterHolds are the ready Tester stories mw dispatch passes over because
+	// their rig already runs testers_per_rig of them, by story id (mw-gq6.546).
+	TesterHolds map[string]TesterHold
 	// HeldByFiles is the line for each ready story mw dispatch has held for a
 	// shared file longer than FilesHeldTooLong, by story id, as the host's note
 	// has it (mw-gq6.442): a story starved by a files key wider than it needs
@@ -862,6 +869,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		report.Ready = append(report.Ready, detail)
 	}
 	report.Sharing = s.sharing(ctx, report.Running, report.Ready)
+	report.TesterHolds = s.testerHolds(work, report.Ready)
 	report.HeldByFiles = s.heldByFiles(ctx, report.Ready)
 
 	// A bead for the Governor may have no Path at all, so no listing keyed by
@@ -1184,6 +1192,27 @@ func (s Status) sharing(ctx context.Context, running []RunningStory, ready []Sto
 		s.print("mw status: " + note + "\n")
 	}
 	return sharing
+}
+
+// testerHolds is each ready Tester story whose rig runs testers_per_rig Tester
+// stories already, on any host, by id; nil when none is.
+func (s Status) testerHolds(work WorkInHand, ready []StoryDetail) map[string]TesterHold {
+	var running []StoryDetail
+	for _, detail := range work.Running {
+		if !detail.Hitl() {
+			running = append(running, detail)
+		}
+	}
+	var holds map[string]TesterHold
+	for _, detail := range ready {
+		if hold, ok := testerHold(running, detail, s.TestersPerRig); ok {
+			if holds == nil {
+				holds = map[string]TesterHold{}
+			}
+			holds[detail.Story.ID] = hold
+		}
+	}
+	return holds
 }
 
 // heldByFiles is the line for each ready story the host's dispatch has held for
@@ -1670,6 +1699,9 @@ func (r StatusReport) String() string {
 		// Wrapped, not clipped: a long path must not cut off whom it waits for.
 		if share, sharing := r.Sharing[d.Story.ID]; sharing {
 			wrapInto(&b, "    ", share.String())
+		}
+		if hold, holding := r.TesterHolds[d.Story.ID]; holding {
+			wrapInto(&b, "    ", hold.String())
 		}
 		if held := r.HeldByFiles[d.Story.ID]; held != "" {
 			wrapInto(&b, "    ", held)

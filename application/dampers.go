@@ -238,6 +238,36 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 	return report
 }
 
+// TesterHold is why a ready Tester story is held: its rig already runs as many
+// Tester stories as testers_per_rig allows (mw-gq6.546).
+type TesterHold struct {
+	Rig     string
+	Running int
+	Limit   int
+}
+
+// String is the hold as mw dispatch and mw status say it.
+func (h TesterHold) String() string {
+	return fmt.Sprintf("waiting: %s already runs %d Tester stories (testers_per_rig %d)", h.Rig, h.Running, h.Limit)
+}
+
+// testerHold says whether the ready story is a Tester story whose rig has limit
+// Tester stories (zero reads the default) in running already, on any host.
+func testerHold(running []StoryDetail, ready StoryDetail, limit int) (TesterHold, bool) {
+	if !IsTesterStory(ready) {
+		return TesterHold{}, false
+	}
+	limit = DamperLimits{TestersPerRig: limit}.orDefaults().TestersPerRig
+	rig := ready.Merged().Rig
+	count := 0
+	for _, d := range running {
+		if d.Story.ID != ready.Story.ID && IsTesterStory(d) && d.Merged().Rig == rig {
+			count++
+		}
+	}
+	return TesterHold{Rig: rig, Running: count, Limit: limit}, count >= limit
+}
+
 // hasHitlCardLinked reports whether an open bead for the Governor is linked to
 // b, in either direction: the card a grilling's question was put on.
 func hasHitlCardLinked(b domain.GraphBead, all []domain.GraphBead, byID map[string]domain.GraphBead) bool {

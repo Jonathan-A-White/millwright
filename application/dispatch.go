@@ -180,6 +180,11 @@ type Dispatch struct {
 	// that many times is not started again, and the Mayor is told. Fewer than one
 	// is DefaultMaxAttempts.
 	MaxAttempts int
+	// TestersPerRig is how many Tester stories may run on one rig at once, on
+	// every host together, the [dampers] testers_per_rig key: a ready Tester
+	// waits while its rig runs that many (mw-gq6.546). Zero is the default,
+	// DefaultDamperTestersPerRig.
+	TestersPerRig int
 
 	// Mailbox is how the Mayor is told a story used up its attempts. A nil
 	// Mailbox tells nobody: the story is still marked and commented on.
@@ -923,6 +928,15 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 		held.pass(id)
+
+		// gate: testers-per-rig
+		// A Tester story waits, unclaimed, while its rig already runs as many
+		// Tester stories as the [dampers] testers_per_rig key allows, on any host:
+		// the damper is a limit and not only an alarm (mw-gq6.546).
+		if hold, holding := testerHold(shares.running, detail, d.TestersPerRig); holding {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: hold.String()})
+			continue
+		}
 
 		// gate: cap
 		// A story that was claimed and could not be started counts against the

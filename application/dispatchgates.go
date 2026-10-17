@@ -30,5 +30,6 @@ var DispatchGates = []DispatchGate{
 	{"attempts-exhausted", "it was started max_attempts times already"},
 	{"handed-back", "its Builder handed it back and no RE-PATHED: comment says what changed since"},
 	{"shared-files", "it names a file a running story of the rig names or has changed"},
+	{"testers-per-rig", "it is a Tester story and its rig runs testers_per_rig Tester stories already, on any host"},
 	{"cap", "the host runs as many sessions as it may"},
 }
