@@ -214,12 +214,12 @@ func (p Plan) Validate() error {
 			reasons = append(reasons, fmt.Sprintf("%s has no path: %s", name, err))
 		}
 		// A plan is filed now, after SweepRuleFrom, so every bug in it owes a sweep.
-		if verdict := SweepOf(story.Acceptance); IsBug("", story.Title, story.Labels) && !verdict.Passes() {
+		if verdict := SweepOfStory(story.Acceptance, story.Description); IsBug("", story.Title, story.Labels) && !verdict.Passes() {
 			reasons = append(reasons, name+": "+verdict.FilingRefusal())
 		}
 		if OwesAnExpect(story.rig(p.Epic.Defaults)) {
 			if _, err := ParseExpect(story.Acceptance); err != nil {
-				reasons = append(reasons, name+": "+ExpectRefusal(err))
+				reasons = append(reasons, name+": "+ExpectRefusalIn(err, story.Description))
 			}
 		}
 	}

@@ -134,3 +134,75 @@ func TestADryRunDispatchPassesOverASweeplessBugAndWritesNothing(t *testing.T) {
 		t.Errorf("a dry run says the pass and writes nothing: %+v, %d mails, %q", report.Passed, mailbox.Writes(), tracker.Comments("mw-gq6.1"))
 	}
 }
+
+// A Sweep line in the description is not one in the acceptance field, which is
+// all dispatch and mw next read: the refusal says where the line is and how to
+// move it, rather than 'no line begins with Sweep:' (mw-gq6.548).
+func TestADispatchRefusalSaysAMisplacedSweepIsInTheDescription(t *testing.T) {
+	dispatch, tracker, _, _, _ := aFactory(t)
+	mailbox := apptest.NewFakeMailbox()
+	dispatch.Mailbox = mailbox
+	aBugFiledAt(t, tracker, "mw-gq6.1", afterTheRule, "")
+	if err := tracker.SetDescription("mw-gq6.1", "The header is missing.\n\nAcceptance criteria\n1. It is there.\nSweep: every X is checked"); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if len(report.Started) != 0 {
+		t.Fatalf("started %v, want nothing", startedIDs(report))
+	}
+	comments := tracker.Comments("mw-gq6.1")
+	if len(comments) != 1 {
+		t.Fatalf("want one comment, got %q", comments)
+	}
+	for _, want := range []string{application.ReasonNoSweep, "its Sweep line is in the description, not the acceptance field", "bd update mw-gq6.1 --acceptance"} {
+		if !strings.Contains(comments[0], want) {
+			t.Errorf("the comment should hold %q, got %q", want, comments[0])
+		}
+	}
+	if strings.Contains(comments[0], "no line begins") {
+		t.Errorf("the comment should not claim no line begins with Sweep:, got %q", comments[0])
+	}
+	if len(report.Passed) != 1 || !strings.Contains(report.Passed[0].Why, "in the description") {
+		t.Errorf("the pass should say it too, got %+v", report.Passed)
+	}
+	inbox, _ := mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if len(inbox) != 1 || !strings.Contains(inbox[0].Body, "bd update mw-gq6.1 --acceptance") {
+		t.Errorf("the mail should name the command, got %+v", inbox)
+	}
+}
+
+func TestADispatchRefusalKeepsItsTextWhenNoSweepIsAnywhere(t *testing.T) {
+	dispatch, tracker, _, _, _ := aFactory(t)
+	aBugFiledAt(t, tracker, "mw-gq6.1", afterTheRule, "1. The header is on the route.")
+	if err := tracker.SetDescription("mw-gq6.1", "The header is missing. We should sweep for it."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dispatch.Run(context.Background()); err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	comments := tracker.Comments("mw-gq6.1")
+	if len(comments) != 1 || !strings.Contains(comments[0], "no line begins with 'Sweep:'") ||
+		!strings.Contains(comments[0], "Add a line beginning 'Sweep:' to its acceptance criteria that checks the whole class of the fault") ||
+		strings.Contains(comments[0], "in the description") {
+		t.Errorf("today's text should be unchanged, got %q", comments)
+	}
+}
+
+func TestADispatchStartsABugWhoseSweepIsInTheAcceptanceFieldEvenWithOneInTheDescription(t *testing.T) {
+	dispatch, tracker, _, _, _ := aFactory(t)
+	aBugFiledAt(t, tracker, "mw-gq6.1", afterTheRule, "1. It passes.\n2. Sweep: grep every route for the header.")
+	if err := tracker.SetDescription("mw-gq6.1", "Sweep: every X is checked"); err != nil {
+		t.Fatal(err)
+	}
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if ids := startedIDs(report); len(ids) != 1 {
+		t.Errorf("started %v, want the bug", ids)
+	}
+}

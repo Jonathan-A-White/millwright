@@ -26,6 +26,10 @@ const (
 	SweepEmpty
 	// SweepNoneWithoutReason: "Sweep: none" with no reason after it.
 	SweepNoneWithoutReason
+	// SweepInDescription: the acceptance has no Sweep: line, but the description
+	// has one. Dispatch and mw next read only the acceptance field, so the line
+	// there counts for nothing (mw-gq6.548).
+	SweepInDescription
 )
 
 // Passes says whether the acceptance meets the rule.
@@ -40,8 +44,19 @@ func (v SweepVerdict) String() string {
 		return "its 'Sweep:' line says nothing after the colon"
 	case SweepNoneWithoutReason:
 		return "its 'Sweep: none' gives no reason: it must read 'Sweep: none, because <reason>'"
+	case SweepInDescription:
+		return "its Sweep line is in the description, not the acceptance field"
 	}
 	return "has a Sweep line"
+}
+
+// MoveWords is how to mend a SweepInDescription: the Sweep line is to be in the
+// acceptance field. id is the story's, or empty for a story not yet filed.
+func (v SweepVerdict) MoveWords(id string) string {
+	if id == "" {
+		return "put the criteria in the acceptance field"
+	}
+	return "copy the criteria with bd update " + id + " --acceptance"
 }
 
 // SweepRuleName is the name of the rule, as mw dispatch gives it for a bug it
@@ -51,6 +66,9 @@ const SweepRuleName = "no-sweep"
 // Refusal is what is wrong with a bug whose acceptance this verdict is of,
 // and what would be right, as mw dispatch says it.
 func (v SweepVerdict) Refusal() string {
+	if v == SweepInDescription {
+		return "it is a bug and " + v.String()
+	}
 	return fmt.Sprintf("it is a bug and %s (a check over the whole class of the fault, or 'Sweep: none, because <reason>')", v)
 }
 
@@ -72,6 +90,17 @@ func SweepOf(acceptance string) SweepVerdict {
 			return SweepGiven
 		}
 		verdict = got
+	}
+	return verdict
+}
+
+// SweepOfStory is SweepOf for a story whose description is also known: an
+// acceptance with no Sweep line, beside a description that has one, is
+// SweepInDescription, not SweepMissing (mw-gq6.548).
+func SweepOfStory(acceptance, description string) SweepVerdict {
+	verdict := SweepOf(acceptance)
+	if verdict == SweepMissing && len(LinesBeginning(description, "Sweep")) > 0 {
+		return SweepInDescription
 	}
 	return verdict
 }

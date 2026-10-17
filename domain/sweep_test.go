@@ -72,3 +72,24 @@ func TestOnlyABugFiledAfterTheRuleOwesASweep(t *testing.T) {
 		t.Error("a bug the tracker did not date owes none")
 	}
 }
+
+func TestSweepInTheDescriptionOnlyIsTold(t *testing.T) {
+	cases := []struct {
+		name                    string
+		acceptance, description string
+		want                    bool
+	}{
+		{"in the description only", "1. It passes.", "Acceptance criteria\nSweep: every X is checked", true},
+		{"a numbered line in the description", "", "4. Sweep: every X is checked", true},
+		{"nowhere", "1. It passes.", "We should sweep.", false},
+		{"in the acceptance field", "Sweep: every X", "Sweep: every X is checked", false},
+		{"an empty one in the acceptance field", "Sweep:", "Sweep: every X is checked", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := domain.SweepOfStory(c.acceptance, c.description) == domain.SweepInDescription; got != c.want {
+				t.Errorf("SweepOfStory(%q, %q) is SweepInDescription: %v, want %v", c.acceptance, c.description, got, c.want)
+			}
+		})
+	}
+}

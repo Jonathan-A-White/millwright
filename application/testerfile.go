@@ -109,7 +109,11 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 		return TesterFiled{}, fmt.Errorf("filing a Tester finding: it needs a HOW TO CHECK IT")
 	}
 	// A bug finding owes a sweep as a bug the Mayor files does (mw-gq6.447).
-	if verdict := domain.SweepOf(finding.Acceptance); finding.Kind == TesterKindBug && !verdict.Passes() {
+	if verdict := domain.SweepOfStory(finding.Acceptance, finding.Finding); finding.Kind == TesterKindBug && !verdict.Passes() {
+		if verdict == domain.SweepInDescription {
+			return TesterFiled{}, fmt.Errorf("filing a Tester finding: its Sweep line is in the finding, which becomes the description, not in --accept: "+
+				"move it to --accept, or mw dispatch would refuse it as %s", domain.SweepRuleName)
+		}
 		return TesterFiled{}, fmt.Errorf("filing a Tester finding: %s: add that line to --accept", verdict.FilingRefusal())
 	}
 
