@@ -268,7 +268,7 @@ var _ application.Rebases = (*Worktrees)(nil)
 
 // Rebase implements application.Rebases: `git rebase onto` in dir. A rebase
 // that stops on a conflict is aborted, leaving dir on the commit it was on, and
-// reported as false; one that cannot even be undone is an error.
+// reported as false, with a MergeConflict naming the files when git said them; one that cannot even be undone is an error.
 func (w *Worktrees) Rebase(ctx context.Context, dir, onto string) (bool, error) {
 	if onto == "" {
 		return false, fmt.Errorf("rebasing %s: onto what?", dir)
@@ -279,8 +279,12 @@ func (w *Worktrees) Rebase(ctx context.Context, dir, onto string) (bool, error) 
 	}
 	defer driver.Remove()
 	if _, err := w.git(ctx, dir, append(driver.Config(), "rebase", onto)...); err != nil {
+		conflicted := w.unmergedPaths(ctx, dir)
 		if _, abort := w.git(ctx, dir, "rebase", "--abort"); abort != nil {
 			return false, fmt.Errorf("%w (and the half-made rebase in %s could not be undone: %v)", err, dir, abort)
+		}
+		if len(conflicted) > 0 {
+			return false, &application.MergeConflict{Files: conflicted, Said: fmt.Sprintf("%v: %v", application.ErrMergeConflict, err)}
 		}
 		return false, nil
 	}

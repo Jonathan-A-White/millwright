@@ -142,6 +142,9 @@ type BatchStory struct {
 	// when it was because the branch conflicts with the batch.
 	Why       string
 	Conflicts []string
+	// ConflictFiles are the paths the merge conflicted in, as the landing read
+	// them, also kept on the story (ConflictFilesField).
+	ConflictFiles []string
 	// ByFixer says the story was set aside and the batch's fixer merged it.
 	ByFixer bool
 
@@ -601,6 +604,13 @@ func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union []str
 			if Conflicted(err) {
 				s.Conflicts = ConflictLines(err.Error())
 				s.Why = "it conflicts with the batch: " + strings.Join(s.Conflicts, "; ")
+				if s.ConflictFiles = ConflictFiles(err); len(s.ConflictFiles) > 0 {
+					s.Why += ". " + ConflictedFilesLine(s.ConflictFiles)
+					fields := map[string]string{ConflictFilesField: strings.Join(s.ConflictFiles, ",")}
+					if werr := writeRetrying(ctx, n, nil, "the conflicted files", func() error { return n.Tracker.SetStoryMetadata(ctx, s.ID, fields) }); werr != nil {
+						report.Notes = append(report.Notes, fmt.Sprintf("the files %s conflicted in could not be recorded on it: %v", s.ID, werr))
+					}
+				}
 			} else {
 				s.Why = "it could not be merged: " + firstLine(err.Error())
 			}

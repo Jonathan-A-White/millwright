@@ -349,13 +349,17 @@ func (w *Worktrees) MergeUnion(ctx context.Context, landingDir, branch string, u
 	// --no-edit so that no editor is ever opened: nobody is at the keyboard.
 	merge := append(driver.Config(), "merge", "--no-edit", branch)
 	if _, err := w.git(ctx, landingDir, merge...); err != nil {
+		// Read before the union rules touch the index and before the merge is
+		// undone: afterwards the paths are gone (mw-gq6.559).
+		conflicted := w.unmergedPaths(ctx, landingDir)
 		unioned, err = w.unionConflicts(ctx, landingDir, driver, union, err)
 		if err != nil {
+			said := fmt.Sprintf("%v: %v", application.ErrMergeConflict, err)
 			if _, abort := w.git(ctx, landingDir, "merge", "--abort"); abort != nil {
-				return application.Landed{}, fmt.Errorf("%w: %v (and the half-made merge in %s could not be undone: %v)",
+				said = fmt.Sprintf("%v: %v (and the half-made merge in %s could not be undone: %v)",
 					application.ErrMergeConflict, err, landingDir, abort)
 			}
-			return application.Landed{}, fmt.Errorf("%w: %v", application.ErrMergeConflict, err)
+			return application.Landed{}, &application.MergeConflict{Files: conflicted, Said: said}
 		}
 	}
 
@@ -372,6 +376,22 @@ func (w *Worktrees) MergeUnion(ctx context.Context, landingDir, branch string, u
 		FastForward: commit == strings.TrimSpace(tip) && commit != strings.TrimSpace(before),
 		Unioned:     unioned,
 	}, nil
+}
+
+// unmergedPaths are the paths a merge in progress in dir left unmerged, git's
+// order; none when git cannot say.
+func (w *Worktrees) unmergedPaths(ctx context.Context, dir string) []string {
+	said, err := w.git(ctx, dir, "diff", "--name-only", "--diff-filter=U", "-z")
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, file := range strings.Split(said, "\x00") {
+		if file != "" {
+			files = append(files, file)
+		}
+	}
+	return files
 }
 
 // unionConflicts settles a merge that has stopped on conflicts, if all of them

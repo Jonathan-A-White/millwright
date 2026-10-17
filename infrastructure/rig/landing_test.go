@@ -534,8 +534,12 @@ func TestAConflictInAnotherFileStillStopsTheLanding(t *testing.T) {
 	if err := landBranch(t, here, "mw/one"); err != nil {
 		t.Fatalf("landing the first branch: %v", err)
 	}
-	if err := landBranch(t, here, "mw/two"); !application.Conflicted(err) {
+	err := landBranch(t, here, "mw/two")
+	if !application.Conflicted(err) {
 		t.Errorf("expected the second README edit to conflict, got %v", err)
+	}
+	if got := strings.Join(application.ConflictFiles(err), ","); got != "README.md" {
+		t.Errorf("expected the conflict to name README.md, got %q", got)
 	}
 }
 
@@ -866,6 +870,9 @@ func TestAMergeConflictingInAListedAndAnUnlistedFileIsNotPartlyMerged(t *testing
 	if !application.Conflicted(err) {
 		t.Fatalf("expected the conflict in README.md to send the branch back, got %v", err)
 	}
+	if got := strings.Join(application.ConflictFiles(err), ","); got != "ATTRIBUTION.md,README.md" {
+		t.Errorf("expected both conflicted files named, union-listed one too, got %q", got)
+	}
 	if len(landed.Unioned) != 0 {
 		t.Errorf("expected nothing named union-merged, got %q", landed.Unioned)
 	}
@@ -962,5 +969,27 @@ func TestACodemapItsDriverCannotSettleIsNotMergedByUnion(t *testing.T) {
 	}
 	if len(landed.Unioned) != 0 || left != "" {
 		t.Errorf("expected nothing union-merged and the landing left clean, got %q and %q", landed.Unioned, left)
+	}
+}
+
+func TestARebaseThatConflictsIsUndoneAndNamesItsFiles(t *testing.T) {
+	here, _ := aRig(t)
+	run(t, here, "git", "checkout", "-q", "-b", "mw/one", "main")
+	write(t, here, "README.md", "one's README\n")
+	run(t, here, "git", "commit", "-qam", "README one")
+	run(t, here, "git", "checkout", "-q", "main")
+	write(t, here, "README.md", "main's README\n")
+	run(t, here, "git", "commit", "-qam", "README main")
+	run(t, here, "git", "checkout", "-q", "mw/one")
+
+	rebased, err := rig.New().Rebase(context.Background(), here, "main")
+	if rebased || !application.Conflicted(err) {
+		t.Fatalf("expected a conflict that was not rebased, got %v, %v", rebased, err)
+	}
+	if got := strings.Join(application.ConflictFiles(err), ","); got != "README.md" {
+		t.Errorf("expected README.md named, got %q", got)
+	}
+	if status := run(t, here, "git", "status", "--porcelain"); strings.TrimSpace(status) != "" {
+		t.Errorf("expected the rebase undone, git status says:\n%s", status)
 	}
 }

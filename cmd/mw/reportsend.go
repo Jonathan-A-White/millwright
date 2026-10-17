@@ -79,6 +79,7 @@ func newReportSendCmd() *cobra.Command {
 					Tracker:     gateway,
 					Files:       files,
 					Benchmarks:  vault.Benchmarks{Vault: files},
+					Rules:       files,
 					Seat:        BuilderSeat,
 					Notes:       gateway,
 					Mailbox:     gateway,

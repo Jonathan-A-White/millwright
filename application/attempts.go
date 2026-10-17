@@ -59,6 +59,12 @@ const QueuedAtField = "queued_at"
 // it from starting beside this one (mw-gq6.406).
 const FilesChangedField = "files_changed"
 
+// ConflictFilesField is the metadata a story carries to say which files its
+// branch last conflicted in when a landing merged it, comma-separated, as the
+// landing read them before undoing the merge (mw-gq6.559). mw report names the
+// commonest of them under a rig's merge-conflict refusals.
+const ConflictFilesField = "conflict_files"
+
 // DefaultMaxAttempts is how many times a story is tried when the config file
 // says nothing: infrastructure/config.DefaultMaxAttempts is the same number.
 const DefaultMaxAttempts = 3
