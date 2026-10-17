@@ -367,6 +367,10 @@ func (c *nextContext) theBatchSetAside(id, file string) error {
 		if !strings.Contains(strings.Join(story.Conflicts, "\n"), file) {
 			return fmt.Errorf("expected %s set aside naming %s in its conflict, got %+v", id, file, story)
 		}
+		// The paths git left unmerged are kept on the story for mw report (mw-gq6.559).
+		if kept := c.tracker.Metadata(id)[application.ConflictFilesField]; kept != strings.Join(story.ConflictFiles, ",") || !strings.Contains(kept, file) {
+			return fmt.Errorf("expected %s to carry %s in its %s, got %q (the batch read %q)", id, file, application.ConflictFilesField, kept, story.ConflictFiles)
+		}
 		return nil
 	}
 	return fmt.Errorf("expected %s to be set aside, got %+v\n%s", id, c.batch.report.SetAside, c.said())

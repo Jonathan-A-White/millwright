@@ -84,6 +84,7 @@ func newLoopBriefRun(dir, here string, since time.Time) (application.LoopBriefRu
 			Tracker:     mwGateway(dir, here),
 			Files:       files,
 			Benchmarks:  vault.Benchmarks{Vault: files},
+			Rules:       files,
 			Seat:        BuilderSeat,
 			Since:       since,
 			Investments: files,

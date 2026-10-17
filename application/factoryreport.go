@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,6 +67,10 @@ func reportDay(t time.Time) time.Time {
 type FactoryReport struct {
 	Tracker TesterStories
 	Files   TesterRunFiles
+	// Rules, when set, is where a rig's union_merge_files, version_files and
+	// changelog_files are read from, to mark a conflicted file the rig merges
+	// by a rule; left nil no file is marked.
+	Rules EpicRules
 	// Benchmarks, when set, names the rig and host of a ledger row whose story
 	// is gone, from the close-out that measured it, and is where speed is read.
 	Benchmarks BenchmarkBook
@@ -145,6 +150,23 @@ type ReasonCount struct {
 	Count  int    `json:"count"`
 }
 
+// ConflictFile is a file the merge-conflict refusals of a block conflicted in,
+// and how many refusals it was in. Mark says the rig merges that file by a rule
+// that should have kept it from conflicting (ConflictMarkUnion, ...Version,
+// ...Changelog), so a hit there is a machinery bug; empty for any other file.
+type ConflictFile struct {
+	Path  string `json:"path"`
+	Count int    `json:"count"`
+	Mark  string `json:"mark,omitempty"`
+}
+
+// The marks of a ConflictFile, as the cheap win prints them in brackets.
+const (
+	ConflictMarkUnion     = "union"
+	ConflictMarkVersion   = "version"
+	ConflictMarkChangelog = "changelog"
+)
+
 // Quality is the measures of one window of one block.
 type Quality struct {
 	Landed  int `json:"landed"`
@@ -152,6 +174,10 @@ type Quality struct {
 	// RefusalRate is the share of the ledger's rows that were refusals, in percent.
 	RefusalRate float64       `json:"refusal_rate"`
 	Reasons     []ReasonCount `json:"refused_by_reason"`
+	// ConflictFiles are the files the merge-conflict refusals conflicted in,
+	// commonest first, from the stories' conflict_files (ConflictFilesField);
+	// none when no such refusal carries any.
+	ConflictFiles []ConflictFile `json:"conflict_files,omitempty"`
 	// Attempts are the attempts the landings took in all, a landing counted at
 	// least one; AttemptsPerLanding is their mean.
 	Attempts           int            `json:"attempts"`
@@ -260,7 +286,10 @@ type reportEntry struct {
 	// byTester says an escaped bug was the Tester's finding.
 	byTester bool
 	reason   string
-	attempts int
+	// conflictFiles are the files a merge-conflict refusal's story last
+	// conflicted in.
+	conflictFiles []string
+	attempts      int
 	// own is how many of attempts count toward max_attempts (OwnAttempts):
 	// what judges a story, where attempts numbers run files and measures cost.
 	own       int
@@ -387,6 +416,9 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			e.rig, e.host = orElse(path.Rig, e.rig), orElse(path.Host, e.host)
 			e.model = orElse(string(path.Model), e.model)
 			e.cause = d.Cause
+			if refused && reason == string(ReasonMergeConflict) {
+				e.conflictFiles = d.ConflictFiles
+			}
 			e.exhausted = d.Exhausted
 			e.investment = hasLabel(d.Labels, LabelInvestment)
 			e.bugStory = domain.IsBugStory(d.Type, d.Story.Title)
@@ -475,6 +507,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	gates := gateTrends(recent, result.Window.Since, r.Rig, r.Host)
 	result.Rigs = r.blocks(entries, gates, func(e reportEntry) string { return e.rig }, func(g GateTrend) string { return g.Rig })
 	result.Models = r.blocks(entries, nil, func(e reportEntry) string { return e.model }, nil)
+	r.markConflictFiles(ctx, result.Rigs)
 	result.Hosts = r.blocks(entries, gates, func(e reportEntry) string { return e.host }, func(g GateTrend) string { return g.Host })
 	if whole := r.blocks(entries, nil, func(reportEntry) string { return "factory" }, nil); len(whole) == 1 {
 		result.Whole = &whole[0]
@@ -622,6 +655,50 @@ func (r FactoryReport) blocks(entries []reportEntry, gates []GateTrend, keyOf fu
 	return blocks
 }
 
+// markConflictFiles marks, in each rig block, the conflicted files the rig
+// merges by a rule: a file in union_merge_files, version_files or
+// changelog_files should never conflict, so its being here is a bug in the
+// machinery (mw-gq6.559). A rig whose rules cannot be read is left unmarked.
+func (r FactoryReport) markConflictFiles(ctx context.Context, blocks []ReportBlock) {
+	if r.Rules == nil {
+		return
+	}
+	for i := range blocks {
+		files := blocks[i].Quality.ConflictFiles
+		if len(files) == 0 {
+			continue
+		}
+		rules, err := r.Rules.EpicRequirements(ctx, blocks[i].Name)
+		if err != nil {
+			continue
+		}
+		for j := range files {
+			switch {
+			case conflictListed(rules.ChangelogFiles, files[j].Path):
+				files[j].Mark = ConflictMarkChangelog
+			case conflictListed(rules.VersionFiles, files[j].Path):
+				files[j].Mark = ConflictMarkVersion
+			case conflictListed(rules.UnionMergeFiles, files[j].Path):
+				files[j].Mark = ConflictMarkUnion
+			}
+		}
+	}
+}
+
+// conflictListed says file is one of names: named in full or matched by a
+// path.Match glob, as the rig's file lists them.
+func conflictListed(names []string, file string) bool {
+	for _, name := range names {
+		if name == file {
+			return true
+		}
+		if ok, err := path.Match(name, file); err == nil && ok {
+			return true
+		}
+	}
+	return false
+}
+
 // sumQuality sums the entries of one block and window.
 func sumQuality(entries []reportEntry) Quality {
 	q := Quality{Reasons: []ReasonCount{}, Causes: map[string]int{CauseUnset: 0}}
@@ -630,6 +707,7 @@ func sumQuality(entries []reportEntry) Quality {
 	}
 	reasons := map[string]int{}
 	uncaused := map[string]bool{}
+	conflicts := map[string]int{}
 	for _, e := range entries {
 		switch {
 		case e.escaped:
@@ -649,6 +727,9 @@ func sumQuality(entries []reportEntry) Quality {
 		case e.refused:
 			q.Refused++
 			reasons[e.reason]++
+			for _, file := range e.conflictFiles {
+				conflicts[file]++
+			}
 			if class, ok := validCauseClass(e.cause); ok {
 				q.Causes[class]++
 			} else {
@@ -669,6 +750,15 @@ func sumQuality(entries []reportEntry) Quality {
 			return q.Reasons[i].Count > q.Reasons[j].Count
 		}
 		return q.Reasons[i].Reason < q.Reasons[j].Reason
+	})
+	for file, n := range conflicts {
+		q.ConflictFiles = append(q.ConflictFiles, ConflictFile{Path: file, Count: n})
+	}
+	sort.Slice(q.ConflictFiles, func(i, j int) bool {
+		if q.ConflictFiles[i].Count != q.ConflictFiles[j].Count {
+			return q.ConflictFiles[i].Count > q.ConflictFiles[j].Count
+		}
+		return q.ConflictFiles[i].Path < q.ConflictFiles[j].Path
 	})
 	q.RefusalRate = percentOf(q.Refused, q.Landed+q.Refused)
 	landed := float64(q.Landed)

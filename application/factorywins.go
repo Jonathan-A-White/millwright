@@ -133,6 +133,7 @@ func winCausesUnset(rigs []ReportBlock) (string, []string) {
 // at least.
 func winDominantReason(rigs []ReportBlock) string {
 	var rig, reason string
+	var rigFiles []ConflictFile
 	var count int
 	var share float64
 	for _, block := range rigs {
@@ -147,6 +148,7 @@ func winDominantReason(rigs []ReportBlock) string {
 		}
 		if topShare > share || (topShare == share && top.Count > count) {
 			rig, reason, count, share = block.Name, top.Reason, top.Count, topShare
+			rigFiles = q.ConflictFiles
 		}
 	}
 	if rig == "" {
@@ -156,7 +158,27 @@ func winDominantReason(rigs []ReportBlock) string {
 	if reason == "tests-fail" {
 		fix = "gate check first"
 	}
+	if named := conflictFilesText(rigFiles); reason == string(ReasonMergeConflict) && named != "" {
+		fix = named
+	}
 	return fmt.Sprintf("%s is %.0f%% of %s refusals: %s", reason, share, rig, fix)
+}
+
+// MaxNamedConflictFiles is how many conflicted files the merge-conflict win names.
+const MaxNamedConflictFiles = 3
+
+// conflictFilesText names the commonest conflicted files with their counts,
+// "CHANGELOG.md (changelog) 9, package.json 7"; empty when there are none.
+func conflictFilesText(files []ConflictFile) string {
+	var named []string
+	for _, f := range files[:min(len(files), MaxNamedConflictFiles)] {
+		text := f.Path
+		if f.Mark != "" {
+			text += " (" + f.Mark + ")"
+		}
+		named = append(named, fmt.Sprintf("%s %d", text, f.Count))
+	}
+	return strings.Join(named, ", ")
 }
 
 // winAttemptsUsed is R3: stories that used up their attempts or needed as many
@@ -267,8 +289,9 @@ func writeCheapWins(b *strings.Builder, wins []CheapWin) {
 		}
 		n++
 		prefix := fmt.Sprintf("%d. ", n)
-		if w.Rule == WinCausesUnset {
-			// R1 wraps rather than is cut: its "+N more" is at the end.
+		if w.Rule == WinCausesUnset || w.Rule == WinDominantReason {
+			// R1 wraps rather than is cut: its "+N more" is at the end. So does
+			// R2, which may name the files a merge conflicted in.
 			for i, line := range wrapWords(w.Text, ReportWidth-len(prefix)) {
 				if i > 0 {
 					prefix = strings.Repeat(" ", len(prefix))

@@ -1570,7 +1570,10 @@ func (d Dispatch) rebaseOrStartAfresh(ctx context.Context, rigDir string, starte
 		return nil
 	}
 	started.NotContinued = "the rebase stopped on a conflict and was undone"
-	if err != nil {
+	if Conflicted(err) {
+		// The adapter undid it and read the files first (mw-gq6.559).
+		started.NotContinued += conflictedSuffix(err)
+	} else if err != nil {
 		started.NotContinued = "the rebase failed: " + firstLine(err.Error())
 	}
 	if err := d.Worktrees.Remove(ctx, rigDir, started.Worktree, started.Branch); err != nil {

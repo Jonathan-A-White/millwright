@@ -92,6 +92,7 @@ func newReportCmd() *cobra.Command {
 				Tracker:     mwGateway(dir, here),
 				Files:       files,
 				Benchmarks:  vault.Benchmarks{Vault: files},
+				Rules:       files,
 				Seat:        BuilderSeat,
 				Since:       from,
 				Around:      around,
