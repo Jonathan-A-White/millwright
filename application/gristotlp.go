@@ -247,11 +247,15 @@ func (g GristTiming) Otlp(ctx context.Context, since time.Time, app, kind string
 				rootEnd = p.end
 			}
 		}
+		status := line.Status
+		if IsGristReasonLimited(line.Reason) {
+			status = "limited"
+		}
 		rootName := "grist " + line.Kind
 		rootID := otlpSpanID(traceID, "root")
 		rootAttrs := []OtlpAttribute{
 			otlpString("mw.txid", line.Txid), otlpString("mw.app", line.App), otlpString("mw.kind", line.Kind),
-			otlpString("mw.status", line.Status), otlpDouble("mw.seconds", line.Seconds),
+			otlpString("mw.status", status), otlpDouble("mw.seconds", line.Seconds),
 		}
 		if client != nil {
 			for _, a := range []struct {
