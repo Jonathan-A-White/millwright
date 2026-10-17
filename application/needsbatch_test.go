@@ -104,8 +104,11 @@ func TestPosternSnapshotReadsWhatChildrenWaitOnInOneBatch(t *testing.T) {
 	if len(waits) != 3 {
 		t.Errorf("expected mw-a.1 to wait on the three unfinished blockers, got %v", waits)
 	}
-	if tracker.singles != 0 || tracker.batches != 1 {
-		t.Errorf("expected the blockers read in one batch and none singly, got %d batches and %d single reads", tracker.batches, tracker.singles)
+	// The blockers are the children of the live epic mw-x, which the snapshot
+	// has listed already, so it reads none at all (mw-gq6.561); one it had to
+	// read would be in one batch, never singly.
+	if tracker.singles != 0 || tracker.batches > 1 {
+		t.Errorf("expected the blockers read in at most one batch and none singly, got %d batches and %d single reads", tracker.batches, tracker.singles)
 	}
 }
 

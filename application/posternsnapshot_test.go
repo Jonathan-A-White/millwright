@@ -862,3 +862,60 @@ func TestPosternSnapshotLandedGroupLeavesOutAStoryClosedAsDropped(t *testing.T) 
 		t.Fatalf("expected the landed group to hold only mw-a.1, got %+v", e.Landed)
 	}
 }
+
+// TestPosternSnapshotReadsQuestionNotesAndBlockersInOneCallEachAcrossEpics
+// covers mw-gq6.561: on the busy Laptop a snapshot of 66 live epics read a
+// question note per unfinished child (358 bd kv get, one after another) and
+// what each epic's children wait on epic by epic (230 bd show), and was killed
+// at mail-notify's 60 s limit after 173 s. Every question note is now one
+// NotesWithPrefix read, and what the live epics' children wait on is one
+// ShowBeads for those that no live epic holds, with the ones a live epic does
+// hold read from that epic's own listing.
+func TestPosternSnapshotReadsQuestionNotesAndBlockersInOneCallEachAcrossEpics(t *testing.T) {
+	tracker := aSnapshotTracker()
+
+	// mw-gone is not live, so its child is read by ShowBeads, and once.
+	tracker.AddEpic("mw-gone", domain.Path{})
+	tracker.DescribeEpic("mw-gone", "Finished epic", apptest.StatusClosed, 1)
+	addChild(tracker, "mw-gone", "mw-gone.1", "Outside every live epic")
+
+	tracker.AddEpic("mw-a", domain.Path{})
+	addChild(tracker, "mw-a", "mw-a.1", "Asks and waits across epics")
+	addChild(tracker, "mw-a", "mw-a.2", "Waits outside")
+	askQuestion(t, tracker, "mw-a.1", "2026-09-24T12:00:00Z", "Ship now?", "ship", "ship, wait")
+	tracker.AddEpic("mw-b", domain.Path{})
+	addChild(tracker, "mw-b", "mw-b.1", "Blocker held by another live epic")
+	addChild(tracker, "mw-b", "mw-b.2", "Waits outside too")
+	tracker.Needs("mw-a.1", "mw-b.1")
+	tracker.Needs("mw-a.2", "mw-gone.1")
+	tracker.Needs("mw-b.2", "mw-gone.1")
+
+	doc := snapshotDoc(t, tracker)
+
+	shown := 0
+	for _, call := range tracker.Asked() {
+		if call == "ShowBeads" {
+			shown++
+		}
+	}
+	if shown != 1 {
+		t.Errorf("expected what the children wait on to be read in one ShowBeads call, got %d", shown)
+	}
+	for _, id := range []string{"mw-a.1", "mw-a.2", "mw-b.1", "mw-b.2"} {
+		if got := tracker.NoteReads(application.PosternQuestionKey(id)); got != 0 {
+			t.Errorf("expected no read of %s's question note on its own, got %d", id, got)
+		}
+	}
+	a := epicOf(t, doc, "mw-a")
+	if len(a.NeedsYou) != 1 || a.NeedsYou[0].ID != "mw-a.1" {
+		t.Fatalf("expected mw-a.1 still to be needs_you, got %+v", a.NeedsYou)
+	}
+	for _, w := range a.Working {
+		if w.ID == "mw-a.1" && !equalStrings(w.Waits, []string{"mw-b.1"}) {
+			t.Errorf("expected mw-a.1 to wait on mw-b.1, got %v", w.Waits)
+		}
+		if w.ID == "mw-a.2" && !equalStrings(w.Waits, []string{"mw-gone.1"}) {
+			t.Errorf("expected mw-a.2 to wait on mw-gone.1, got %v", w.Waits)
+		}
+	}
+}

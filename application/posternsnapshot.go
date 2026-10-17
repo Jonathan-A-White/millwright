@@ -348,6 +348,19 @@ func (s PosternSnapshot) Build(ctx context.Context) (PosternSnapshotDoc, error) 
 		return PosternSnapshotDoc{}, fmt.Errorf("reading the live epics: %w", err)
 	}
 
+	// Every question note is read in one call, and what every epic's children
+	// wait on in one more, rather than a bd kv get apiece and a bd show per
+	// epic: a snapshot of 66 live epics on the busy Laptop took 173 s that way,
+	// past mail-notify's 60 s limit (mw-gq6.561).
+	asked, err := s.Notes.NotesWithPrefix(ctx, PosternQuestionKey(""))
+	if err != nil {
+		return PosternSnapshotDoc{}, fmt.Errorf("reading the open questions: %w", err)
+	}
+	lookup, err := s.readWaitedOn(ctx, epics)
+	if err != nil {
+		return PosternSnapshotDoc{}, err
+	}
+
 	builds := make([]*epicBuild, len(epics))
 	var needComments []string
 	needed := map[string]bool{}
@@ -358,7 +371,7 @@ func (s PosternSnapshot) Build(ctx context.Context) (PosternSnapshotDoc, error) 
 		}
 	}
 	for i, detail := range epics {
-		b, err := s.startEpic(ctx, detail)
+		b, err := s.startEpic(detail, asked, lookup)
 		if err != nil {
 			return PosternSnapshotDoc{}, err
 		}
@@ -587,10 +600,37 @@ type epicBuild struct {
 	total        int
 }
 
+// readWaitedOn is every child of every epic by id, plus what the children
+// still to be worked wait on that no epic lists, read together in the one
+// ShowBeads call readNeeded makes (mw-gq6.561).
+func (s PosternSnapshot) readWaitedOn(ctx context.Context, epics []EpicDetail) (map[string]StoryDetail, error) {
+	lookup := map[string]StoryDetail{}
+	for _, detail := range epics {
+		for _, child := range detail.Stories {
+			lookup[child.Story.ID] = child
+		}
+	}
+	// What the children that will be asked what they wait on wait on is read
+	// together, before the first is asked (mw-gq6.358).
+	var waiting []StoryDetail
+	for _, detail := range epics {
+		for _, child := range detail.Stories {
+			if !child.IsEpic && !child.Closed() &&
+				(strings.EqualFold(strings.TrimSpace(child.Status), StatusInProgress) || !child.Held()) {
+				waiting = append(waiting, child)
+			}
+		}
+	}
+	if err := readNeeded(ctx, s.Tracker, waiting, lookup); err != nil {
+		return nil, err
+	}
+	return lookup, nil
+}
+
 // startEpic builds an epic's header and sorts its children into needs_you,
 // landed and working candidates for finishEpic to read the comments of —
 // without reading a single comment itself.
-func (s PosternSnapshot) startEpic(ctx context.Context, detail EpicDetail) (*epicBuild, error) {
+func (s PosternSnapshot) startEpic(detail EpicDetail, asked map[string]string, lookup map[string]StoryDetail) (*epicBuild, error) {
 	b := &epicBuild{
 		out: PosternSnapshotEpic{
 			ID:       detail.ID,
@@ -600,24 +640,6 @@ func (s PosternSnapshot) startEpic(ctx context.Context, detail EpicDetail) (*epi
 			NeedsYou: []PosternSnapshotQuestion{},
 			Landed:   []PosternSnapshotLanded{},
 		},
-	}
-
-	lookup := map[string]StoryDetail{}
-	for _, child := range detail.Stories {
-		lookup[child.Story.ID] = child
-	}
-
-	// What the children that will be asked what they wait on wait on is read
-	// together, before the first is asked (mw-gq6.358).
-	var waiting []StoryDetail
-	for _, child := range detail.Stories {
-		if !child.IsEpic && !child.Closed() &&
-			(strings.EqualFold(strings.TrimSpace(child.Status), StatusInProgress) || !child.Held()) {
-			waiting = append(waiting, child)
-		}
-	}
-	if err := readNeeded(ctx, s.Tracker, waiting, lookup); err != nil {
-		return nil, err
 	}
 
 	now := s.now()
@@ -642,11 +664,7 @@ func (s PosternSnapshot) startEpic(ctx context.Context, detail EpicDetail) (*epi
 			continue
 		}
 
-		asked, err := s.Notes.Note(ctx, PosternQuestionKey(child.Story.ID))
-		if err != nil {
-			return nil, fmt.Errorf("reading %s's question note: %w", child.Story.ID, err)
-		}
-		if strings.TrimSpace(asked) != "" {
+		if strings.TrimSpace(asked[PosternQuestionKey(child.Story.ID)]) != "" {
 			b.needsYou = append(b.needsYou, child)
 		}
 
