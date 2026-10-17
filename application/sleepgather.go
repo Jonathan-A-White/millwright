@@ -281,55 +281,103 @@ func (g SleepGather) diff(ctx context.Context, window SleepWindow, dump string) 
 	return "Since " + name + ":\n" + DiffTriage(old, fresh).String()
 }
 
-// gitPart is the git log part: each rig's share of the budget is its own, so
-// one busy rig cannot push the others out.
+// gitPart is the git log part: the room goes to the rigs by water-filling, so
+// one busy rig cannot push the others out and a quiet rig's unused share is
+// passed on to the rigs that have more to say (mw-gq6.526). Each cut is said
+// per rig.
 func (g SleepGather) gitPart(ctx context.Context, window SleepWindow) SleepPart {
 	budget := sleepBudgets[SleepGitFile]
-	share := budget
-	if len(g.Rigs) > 0 {
-		// each rig's heading and "no commit" lines come out of the budget first.
-		share = (budget - 200*len(g.Rigs)) / len(g.Rigs)
-	}
-	var notes []string
-	text := g.gitLogs(ctx, window, func(rig, log string) string {
-		cut, note := cutLines(log, share)
-		if note != "" {
-			notes = append(notes, rig+" "+note)
+	logs := g.gitLogs(ctx, window)
+	// The headings and the "no commit" lines are not cut: they come out of the
+	// budget first, and the rest is shared out among the logs.
+	pool := budget
+	var sizes []int
+	for _, l := range logs {
+		pool -= len(l.fixed)
+		if l.log != "" {
+			sizes = append(sizes, len(l.log))
 		}
-		return cut
-	})
-	part := SleepPart{Name: "git log", File: SleepGitFile, Text: text, Budget: budget}
+	}
+	shares := waterFill(pool, sizes)
+	var text strings.Builder
+	var notes []string
+	next := 0
+	for _, l := range logs {
+		text.WriteString(l.fixed)
+		if l.log == "" {
+			continue
+		}
+		cut, note := cutLines(l.log, shares[next])
+		next++
+		if note != "" {
+			notes = append(notes, l.rig+" "+note)
+		}
+		text.WriteString(cut)
+	}
+	if len(logs) == 0 {
+		text.WriteString("(no rig is checked out on this host)\n")
+	}
+	part := SleepPart{Name: "git log", File: SleepGitFile, Text: text.String(), Budget: budget}
 	if len(notes) > 0 {
 		part.Cut = strings.Join(notes, "; ")
 	}
 	return part
 }
 
-// gitLogs is each rig's log of the last GitDays days, in the rigs' name order,
-// each log passed through fit.
-func (g SleepGather) gitLogs(ctx context.Context, window SleepWindow, fit func(rig, log string) string) string {
+// waterFill is the share of pool each of the wants may use, in their order:
+// one that wants less than an equal share of what is left gets what it wants,
+// and what it leaves unused is passed on to the others, so the ones that want
+// more are all cut to the same share, never below an equal share of pool.
+func waterFill(pool int, wants []int) []int {
+	order := make([]int, len(wants))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return wants[order[a]] < wants[order[b]] })
+	if pool < 0 {
+		pool = 0
+	}
+	shares := make([]int, len(wants))
+	for k, i := range order {
+		equal := pool / (len(order) - k)
+		if wants[i] < equal {
+			equal = wants[i]
+		}
+		shares[i] = equal
+		pool -= equal
+	}
+	return shares
+}
+
+// gitLog is one rig's part of the git log: fixed is what mw writes (its
+// heading, or its heading and the line that says there is no log), log the
+// commits, which are "" when there are none to show.
+type gitLog struct {
+	rig, fixed, log string
+}
+
+// gitLogs is each rig's log of the last GitDays days, in the rigs' name order.
+func (g SleepGather) gitLogs(ctx context.Context, window SleepWindow) []gitLog {
 	names := make([]string, 0, len(g.Rigs))
 	for name := range g.Rigs {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	var logs strings.Builder
+	logs := make([]gitLog, 0, len(names))
 	for _, name := range names {
-		fmt.Fprintf(&logs, "## %s\n", name)
+		entry := gitLog{rig: name, fixed: fmt.Sprintf("## %s\n", name)}
 		log, err := g.Git(ctx, g.Rigs[name], window.GitDays())
 		switch {
 		case err != nil:
-			fmt.Fprintf(&logs, "(the log could not be read: %v)\n", err)
+			entry.fixed += fmt.Sprintf("(the log could not be read: %v)\n", err)
 		case strings.TrimSpace(log) == "":
-			fmt.Fprintf(&logs, "(no commit in %d days)\n", window.GitDays())
+			entry.fixed += fmt.Sprintf("(no commit in %d days)\n", window.GitDays())
 		default:
-			logs.WriteString(fit(name, withNewline(log)))
+			entry.log = withNewline(log)
 		}
+		logs = append(logs, entry)
 	}
-	if len(names) == 0 {
-		return "(no rig is checked out on this host)\n"
-	}
-	return logs.String()
+	return logs
 }
 
 // runs is the aggregate of the sessions' results of the window, for each model
