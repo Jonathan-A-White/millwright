@@ -258,6 +258,11 @@ type Next struct {
 	// claim is left alone.
 	Transcripts ClaimTranscripts
 
+	// Modes is the harness's record of the permission mode a story's session ran
+	// in (mw-gq6.545): a refusal of a session that was launched in auto and ran in
+	// another says so. A nil Modes reads none.
+	Modes TranscriptModes
+
 	// HeartbeatWait is how Heartbeat waits between ticks: the real clock,
 	// unless a test replaces it to move time without truly waiting for it.
 	// A nil HeartbeatWait waits for real.
@@ -1442,7 +1447,7 @@ type Refusal struct {
 	Why, Said string
 }
 
-// refusals reads the branch a session left against everything mw next asks of
+// refusalsRead reads the branch a session left against everything mw next asks of
 // it before landing, in the order it asks: commits, whom they are signed by,
 // the formula's steps and the rig's own tests in the worktree. A branch with no
 // commits is refused there and then, because there is nothing to sign, close or
@@ -1451,7 +1456,7 @@ type Refusal struct {
 // all true it goes on to the rest, which is what a session checking its own
 // branch wants to be told at once. It reads and never writes: all it changes
 // is the report it fills in.
-func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all bool) []Refusal {
+func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport, all bool) []Refusal {
 	if IsTesterStory(c.detail) {
 		return n.testerRefusals(ctx, c, report, all)
 	}
@@ -1548,6 +1553,52 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 		}
 	}
 	return found
+}
+
+// ExpectedPermissionMode is the permission mode a story's session is launched
+// in, which a transcript showing another has not run in.
+const ExpectedPermissionMode = "auto"
+
+// refusals is refusalsRead with the permission mode the session ran in told
+// beside each refusal, when it was not the mode it was launched in
+// (mw-gq6.545): such a session had every command outside its allow rules
+// denied, so its formula steps stayed open or its work was never tested, and a
+// refusal that says only that sends the Mayor to look for a fault in the work.
+func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all bool) []Refusal {
+	found := n.refusalsRead(ctx, c, report, all)
+	if len(found) == 0 {
+		return found
+	}
+	mode := ranInAnotherPermissionMode(ctx, n.Modes, c)
+	if mode == "" {
+		return found
+	}
+	for i := range found {
+		found[i].Why += "; " + PermissionModeWhy(mode)
+	}
+	return found
+}
+
+// ranInAnotherPermissionMode is the mode a story's session ran in when its
+// transcript shows one that is not ExpectedPermissionMode; empty for a session
+// that ran in auto, or whose mode cannot be told (no transcript, no harness
+// record, another harness).
+func ranInAnotherPermissionMode(ctx context.Context, modes TranscriptModes, c *closeOut) string {
+	if modes == nil || c.path.Harness != domain.HarnessClaude {
+		return ""
+	}
+	mode, err := modes.PermissionMode(ctx, c.worktree)
+	if err != nil || mode == "" || mode == ExpectedPermissionMode {
+		return ""
+	}
+	return mode
+}
+
+// PermissionModeWhy is the words of a refusal for a session that was launched in
+// auto and ran in mode.
+func PermissionModeWhy(mode string) string {
+	return fmt.Sprintf("the session ran in permission mode %s, not %s, so what it needed outside its allow rules was denied (a model its host's Claude Code cannot run in auto does this)",
+		mode, ExpectedPermissionMode)
 }
 
 // closingStepMode is what openStepsRefusal does about a lone open

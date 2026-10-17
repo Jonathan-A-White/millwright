@@ -9,6 +9,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 
 	"github.com/cucumber/godog"
 )
@@ -265,7 +266,8 @@ func (c *nextContext) theFixerWasStartedOn(model string, turns int) error {
 		return err
 	}
 	line := strings.Join(f.started[0].Command, " ")
-	for _, want := range []string{"--model " + model, fmt.Sprintf("--max-turns %d", turns)} {
+	// A story's session is started on its model's full id, not the alias (mw-gq6.545).
+	for _, want := range []string{"--model " + domain.FullModelID(domain.Model(model)), fmt.Sprintf("--max-turns %d", turns)} {
 		if !strings.Contains(line, want) {
 			return fmt.Errorf("expected the fixer's command to hold %q, got:\n%s", want, line)
 		}

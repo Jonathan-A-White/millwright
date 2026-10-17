@@ -71,7 +71,7 @@ func TestSessionIsAShellLineThatKeepsTheResult(t *testing.T) {
 	for _, want := range []string{
 		"claude --print",
 		"--output-format json",
-		"--model opus",
+		"--model claude-opus-5-5",
 		"--effort high",
 		"--permission-mode auto",
 		"--permission-prompts none",
@@ -464,7 +464,7 @@ func TestTheShellReadsBackTheArgumentsItWasGiven(t *testing.T) {
 		t.Fatalf("the line did not write its output where it was told: %v", err)
 	}
 	for _, want := range []string{
-		"[--model]\n[opus]\n",
+		"[--model]\n[claude-opus-5-5]\n",
 		"[--append-system-prompt-file]\n[" + filepath.Join(dir, "boot.md") + "]\n",
 		// The settings JSON must reach Claude Code as one argument, braces,
 		// quotes and all.
@@ -546,7 +546,7 @@ func TestTheHeartbeatRunsBesideTheHarnessAndIsKilledBeforeTheCloseOut(t *testing
 
 	line := spec.Command[2]
 	want := "/root/millwright/bin/mw next --heartbeat mw-gq6.6 & HB=$!; claude --print" +
-		" --output-format json --model opus --effort high --permission-mode auto" +
+		" --output-format json --model claude-opus-5-5 --effort high --permission-mode auto" +
 		" --permission-prompts none --append-system-prompt-file /root/millwright-vault/runs/mw-gq6.6/boot.md" +
 		" --settings " + shellQuote(SessionSettings) +
 		" --name mw-gq6.6 'You are booted into the builder seat.'" +

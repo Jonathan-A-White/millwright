@@ -53,7 +53,7 @@ Feature: Booting a session into a seat
 
   Scenario: The command line carries the story's model and effort
     When the session that works the story is assembled for the "builder" seat
-    Then the command line carries "--model opus"
+    Then the command line carries "--model claude-opus-5-5"
     And the command line carries "--effort high"
 
   # mw-1ljpo9.6: a Builder's session is capped at next.max_turns, or its story's

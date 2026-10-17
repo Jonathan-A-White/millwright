@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
@@ -102,6 +103,10 @@ func newCheckCmd() *cobra.Command {
 					rig.WithSlotNotice(func(said string) { fmt.Fprint(cmd.ErrOrStderr(), said) }))
 			}
 			worktrees := rig.New()
+			var modes application.TranscriptModes
+			if projects, err := claude.DefaultProjectsRoot(); err == nil {
+				modes = claude.NewTranscripts(projects)
+			}
 			checks := rig.NewChecks(rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNice(nice), rig.WithJobs(jobs))
 			k := application.Check{
 				Tracker:    mwGateway(dir, host),
@@ -110,6 +115,7 @@ func newCheckCmd() *cobra.Command {
 				SpecChecks: checks,
 				Slot:       slot,
 				Load:       hostload.Proc{},
+				Modes:      modes,
 				Host:       host,
 				Rigs:       rigs,
 				Out:        cmd.OutOrStdout(),

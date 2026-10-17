@@ -33,6 +33,15 @@ type TranscriptTurns interface {
 	Turns(ctx context.Context, dir string) (int, error)
 }
 
+// TranscriptModes is the same record read for the permission mode the newest
+// session run in dir ran in (mw-gq6.545). A session launched in auto whose
+// transcript shows another mode had what it asked for outside its allow rules
+// denied, whatever else its refusal says. A directory with no transcript, or
+// one that records no mode, has the empty mode, which is not an error.
+type TranscriptModes interface {
+	PermissionMode(ctx context.Context, dir string) (string, error)
+}
+
 // TranscriptReplies is the same record read for what the harness answered: the
 // Mayor's session is stuck when every reply it got lately was an API error.
 // It is read-only and costs no fuel.
