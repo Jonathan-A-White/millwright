@@ -504,6 +504,9 @@ type NextReport struct {
 	// Committed is what was committed in the vault, empty when there was
 	// nothing to commit.
 	Committed []string
+	// NotCommitted is the line saying what a close-out could not commit in the
+	// vault, and why (NotCommittedLine); empty when it all was.
+	NotCommitted string
 	// FormulaClosed is what this close-out closed of the story's formula
 	// (mw-gq6.438).
 	FormulaClosed FormulaClosed
@@ -2871,11 +2874,21 @@ func (n Next) commit(ctx context.Context, c *closeOut, report *NextReport) {
 
 	committed, err := commitWritten(ctx, n.Files, VaultCommitMessage(c.id, c.detail.Story.Title), paths)
 	if err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be committed in the vault, so the next sync will refuse until somebody does: %v",
-			strings.Join(paths, " and "), err))
+		report.NotCommitted = NotCommittedLine(paths, err)
 		return
 	}
 	report.Committed = append(report.Committed, committed...)
+}
+
+const notCommittedPrefix = "NOT committed: "
+
+// NotCommittedLine is the one line a close-out or a batch landing says when
+// files it wrote in the vault could not be committed: which, and why, so that a
+// person reading the mail knows the vault is left holding them and the next sync
+// will refuse until somebody commits them (mw-gq6.554).
+func NotCommittedLine(paths []string, err error) string {
+	why := strings.Join(strings.Fields(err.Error()), " ")
+	return fmt.Sprintf(notCommittedPrefix+"%s: %s (the next sync will refuse until somebody commits them)", strings.Join(paths, ", "), why)
 }
 
 // VaultCommitMessage is the message a close-out commits the vault under: which
@@ -3217,6 +3230,9 @@ func (r NextReport) String() string {
 	}
 	if len(r.Committed) > 0 {
 		fmt.Fprintf(&b, "  commit  %s committed in the vault\n", strings.Join(r.Committed, ", "))
+	}
+	if r.NotCommitted != "" {
+		fmt.Fprintf(&b, "  %s\n", r.NotCommitted)
 	}
 	if r.Closed {
 		b.WriteString("  closed  the story is closed\n")

@@ -62,3 +62,38 @@ func TestARefusalWhoseContinueNoteIsLostMailsTheMayorALostWriteNamingTheStoryAnd
 		}
 	}
 }
+
+func TestACloseOutWhoseVaultCommitFailsSaysNOTCommittedInItsMailNamingThePathsAndWhy(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
+	vault := newFakeVault()
+	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
+	lands := &aLandingLanding{fakeRetryLanding{AheadCount: 1}}
+	mailbox := apptest.NewFakeMailbox()
+	files := &apptest.FakeVaultFiles{CommitErr: errors.New("git commit in /vault: fatal: Unable to create '/vault/.git/index.lock': File exists.")}
+
+	_, err := application.Next{
+		Tracker: tracker, Vault: vault, Files: files, Worktrees: lands, Landing: lands,
+		Checks: &scriptedChecks{passes: []bool{false}}, Slot: aSlot{}, Mailbox: mailbox,
+		RetryWait: func(context.Context, time.Duration) error { return nil },
+		Seat:      "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	if err == nil {
+		t.Fatalf("expected a refusal")
+	}
+
+	mail, _ := mailbox.Inbox(ctx, application.MayorMailbox)
+	if len(mail) == 0 {
+		t.Fatalf("expected a mail to the Mayor")
+	}
+	body := mail[0].Body
+	for _, want := range []string{"NOT committed: ", "seats/builder/ledger.md", "index.lock"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected the mail to hold %q, got:\n%s", want, body)
+		}
+	}
+}
