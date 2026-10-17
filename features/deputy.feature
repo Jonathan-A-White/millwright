@@ -123,6 +123,16 @@ Feature: mw deputy
     And nothing was typed into the window "deputy-2026-09-30-02"
     And the window "deputy-2026-09-30-02" was not closed
     And no window was opened
+    And the event log holds a seat_limited event for the "deputy" seat in the window "deputy-2026-09-30-02" until "2026-09-30 15:00Z"
+
+  Scenario: A Deputy found at the usage limit twice is told to the event log once
+    Given the window "deputy-2026-09-30-02" was opened at "2026-09-30T08:00:00Z"
+    And the pane of the window "deputy-2026-09-30-02" shows the usage limit "You've hit your session limit · resets 3pm (UTC)"
+    And the Deputy's box holds 1 unread messages
+    When mw deputy is run
+    And mw deputy is run
+    Then mw deputy leaves with the status 8
+    And the event log holds 1 seat_limited event
 
   Scenario: A Deputy stopped at the usage limit is closed and a fresh Deputy started once the limit has reset
     Given the window "deputy-2026-09-29-02" was opened at "2026-09-29T08:00:00Z"

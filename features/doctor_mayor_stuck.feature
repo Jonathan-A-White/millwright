@@ -113,6 +113,13 @@ Feature: mw doctor's mayor-stuck check
     And the alarm says "Switch to usage credits"
     And the Mayor's window was not closed
     And mayor-up was not run
+    And the Mayor was told to the event log as stopped at the usage limit 1 time
+
+  Scenario: A Mayor parked on the usage-limit menu is told to the event log with its reset time, and a dry run tells nothing
+    Given a transcript with no replies
+    And the Mayor's pane shows the usage-limit menu under the notice "You've hit your session limit · resets 1pm (UTC)"
+    When mw doctor runs dry
+    Then the Mayor was told to the event log as stopped at the usage limit 0 times
 
   Scenario: --dry-run names a Mayor parked on the weekly-limit menu and pages nobody
     Given a transcript with no replies
@@ -142,3 +149,5 @@ Feature: mw doctor's mayor-stuck check
     And mayor-up was run 1 time
     And exactly 2 alarms were sent
     And the alarm says "which reset at 2026-09-23 13:00Z"
+    And the Mayor was told to the event log as stopped at the usage limit until "2026-09-23 13:00Z"
+    And the Mayor was told to the event log as stopped at the usage limit 1 time

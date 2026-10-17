@@ -394,6 +394,7 @@ func (c *seatUpContext) runTheTick(dryRun bool) error {
 			Now:          now,
 		},
 		ReapLog: vault.New(c.dir),
+		Events:  c.eventLog(),
 		// No wait between the two checks of a pane, but for what a scenario
 		// makes happen in it.
 		Sleep: func(context.Context, time.Duration) error {

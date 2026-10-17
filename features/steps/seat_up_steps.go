@@ -15,6 +15,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
@@ -46,8 +47,11 @@ type seatUpContext struct {
 	armer   *apptest.FakeReapArmer
 	// mail is the Deputy's box, made when a scenario first needs it: see
 	// deputyMail.
-	mail  *apptest.FakeMailbox
-	today time.Time
+	mail *apptest.FakeMailbox
+	// events is the event log the seats tell a pane at the usage limit in, made
+	// when a scenario first needs it: see eventLog.
+	events *apptest.FakeEventLog
+	today  time.Time
 	// written is how many handoffs have been written, so that each is newer
 	// than the one before it.
 	written int
@@ -112,6 +116,8 @@ func InitializeSeatUpScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw seat up starts the "([^"]*)" seat and reaps its window when idle$`, c.mwSeatUpStartsTheSeatAndReaps)
 	ctx.When(`^mw seat up starts the "([^"]*)" seat on "([^"]*)" at "([^"]*)" for the reason "([^"]*)"$`, c.mwSeatUpStartsTheSeatAt)
 
+	ctx.Then(`^the event log holds (\d+) seat_limited events?$`, c.theEventLogHoldsSeatLimited)
+	ctx.Then(`^the event log holds a seat_limited event for the "([^"]*)" seat in the window "([^"]*)" until "([^"]*)"$`, c.theEventLogHoldsASeatLimitedFor)
 	ctx.Then(`^seat up succeeds$`, c.seatUpSucceeds)
 	ctx.Then(`^exactly one window was opened$`, c.exactlyOneWindowWasOpened)
 	ctx.Then(`^no window was opened$`, c.noWindowWasOpened)
@@ -635,4 +641,56 @@ func (c *seatUpContext) theSessionWasStartedAllTheSame() error {
 		return fmt.Errorf("expected one window to have been opened, %d were", len(c.windows.Opened))
 	}
 	return nil
+}
+
+// eventLog is the scenario's event log, made on first use.
+func (c *seatUpContext) eventLog() *apptest.FakeEventLog {
+	if c.events == nil {
+		c.events = &apptest.FakeEventLog{}
+	}
+	return c.events
+}
+
+// seatLimitedEvents is the seat_limited events the scenario's log holds.
+func (c *seatUpContext) seatLimitedEvents() ([]events.SeatLimited, error) {
+	all, err := c.eventLog().Since(context.Background(), 0)
+	if err != nil {
+		return nil, err
+	}
+	var out []events.SeatLimited
+	for _, ev := range all {
+		if ev.Kind != events.KindSeatLimited {
+			continue
+		}
+		limited, ok := events.SeatLimitedOf(ev)
+		if !ok {
+			return nil, fmt.Errorf("a seat_limited event whose detail %q cannot be read", ev.Detail)
+		}
+		out = append(out, limited)
+	}
+	return out, nil
+}
+
+func (c *seatUpContext) theEventLogHoldsSeatLimited(n int) error {
+	got, err := c.seatLimitedEvents()
+	if err != nil {
+		return err
+	}
+	if len(got) != n {
+		return fmt.Errorf("expected %d seat_limited events, the log holds %d: %+v", n, len(got), got)
+	}
+	return nil
+}
+
+func (c *seatUpContext) theEventLogHoldsASeatLimitedFor(seat, window, until string) error {
+	got, err := c.seatLimitedEvents()
+	if err != nil {
+		return err
+	}
+	for _, l := range got {
+		if l.Seat == seat && l.Window == window && l.Resets.UTC().Format(application.TicksTimeFormat) == until {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected a seat_limited event for %s in %s until %s, the log holds %+v", seat, window, until, got)
 }

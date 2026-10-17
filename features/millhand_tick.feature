@@ -301,6 +301,20 @@ Feature: mw millhand tick
     And no window was opened
     And the reaper log holds no line
     And the tick log holds that line
+    And the event log holds a seat_limited event for the "millhand" seat in the window "millhand-test" until "2026-09-19 15:00Z"
+
+  Scenario: A Millhand found at the usage limit by two ticks is told to the event log once
+    Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    And the pane of the window "millhand-test" shows the usage limit "You've hit your session limit · resets 3pm (UTC)"
+    When mw millhand tick is run
+    And mw millhand tick is run
+    Then the event log holds 1 seat_limited event
+
+  Scenario: A dry run finds a Millhand at the usage limit and writes no event
+    Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    And the pane of the window "millhand-test" shows the usage limit "You've hit your session limit · resets 3pm (UTC)"
+    When mw millhand tick is run as a dry run
+    Then the event log holds 0 seat_limited events
 
   Scenario: A Millhand stopped at the usage limit is restarted once the limit has reset
     Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
