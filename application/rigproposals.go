@@ -133,10 +133,25 @@ func (p FactProposal) MemoryCommand(rig, story string) string {
 	return string(ProposeNothing)
 }
 
+// FlatFileLine is what the Mayor does by hand for a rig whose memory is one
+// flat file, which mw memory refuses (mw-gq6.558): the file, then the fact as
+// the file holds it, then the story that proposed it.
+func (p FactProposal) FlatFileLine(flatFile, story string) string {
+	switch p.Verb {
+	case ProposeGotcha, ProposeDecision:
+		return fmt.Sprintf("place by hand in %s: %s [%s]: %s (%s)", flatFile, p.Verb, p.Subject, p.Sentence, story)
+	case ProposeSupersede, ProposeRetire, ProposeRecheck:
+		return fmt.Sprintf("edit by hand in %s: %s %s: %s (%s)", flatFile, p.Verb, p.Slug, p.Sentence, story)
+	}
+	return string(ProposeNothing)
+}
+
 // RigMemoryBlock is what a Landed mail says of the closing comment's proposals:
 // 'For the rig memory (<rig>):' and a line each, an mw memory command to paste,
-// 'nothing', or 'MALFORMED: <line>'. It is empty when the comment has no section.
-func (f FactProposals) RigMemoryBlock(rig, story string) string {
+// 'nothing', or 'MALFORMED: <line>'. For a flat-file rig, whose flatFile is
+// named, the line says to place the fact by hand in that file instead, as mw
+// memory has no folder to put it in. It is empty when the comment has no section.
+func (f FactProposals) RigMemoryBlock(rig, story, flatFile string) string {
 	if !f.Found {
 		return ""
 	}
@@ -144,6 +159,10 @@ func (f FactProposals) RigMemoryBlock(rig, story string) string {
 	for _, line := range f.Lines {
 		if line.Malformed != "" {
 			out = append(out, "MALFORMED: "+line.Malformed)
+			continue
+		}
+		if flatFile != "" {
+			out = append(out, line.Proposal.FlatFileLine(flatFile, story))
 			continue
 		}
 		out = append(out, line.Proposal.MemoryCommand(rig, story))

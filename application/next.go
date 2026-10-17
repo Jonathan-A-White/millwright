@@ -348,6 +348,11 @@ type Next struct {
 	// (mw-gq6.420). A nil Errors reads every class as new.
 	Errors ErrorFiles
 
+	// RigFacts is the seat's rig memory a landing reads to tell a facts rig from
+	// a flat-file rig, so that its rig-memory block proposes what mw memory
+	// takes (mw-gq6.558). A nil RigFacts reads every rig as a facts rig.
+	RigFacts RigFactFiles
+
 	// Seat is whose ledger the line is written in, Host is which host this is,
 	// and Rigs is where each rig is checked out.
 	Seat string
@@ -2297,18 +2302,30 @@ func (n Next) closingProposals(ctx context.Context, c *closeOut) string {
 	if err != nil {
 		return ""
 	}
-	return joinBlocks(n.commonErrors(ctx, c, comments), rigMemoryProposals(c, comments))
+	return joinBlocks(n.commonErrors(ctx, c, comments), n.rigMemoryProposals(ctx, c, comments))
 }
 
 // rigMemoryProposals is the block from the story's newest closing comment that
 // has a 'For the rig memory:' section: the proposals as mw memory lines to
-// paste. It is empty when no comment has the section; a line that does not
-// parse is flagged in the block.
-func rigMemoryProposals(c *closeOut, comments []Comment) string {
+// paste, or for a flat-file rig the lines to place by hand. It is empty when no
+// comment has the section; a line that does not parse is flagged in the block.
+func (n Next) rigMemoryProposals(ctx context.Context, c *closeOut, comments []Comment) string {
 	for i := len(comments) - 1; i >= 0; i-- {
 		if proposals := ParseFactProposals(comments[i].Text); proposals.Found {
-			return proposals.RigMemoryBlock(c.path.Rig, c.id)
+			return proposals.RigMemoryBlock(c.path.Rig, c.id, n.flatRigFile(ctx, c.path.Rig))
 		}
+	}
+	return ""
+}
+
+// flatRigFile is the rig's flat memory file when the seat keeps no facts folder
+// for it, else empty; a rig whose folder cannot be read is read as a facts rig.
+func (n Next) flatRigFile(ctx context.Context, rig string) string {
+	if n.RigFacts == nil {
+		return ""
+	}
+	if has, err := HasFactsFolder(ctx, n.RigFacts, n.Seat, rig); err == nil && !has {
+		return FlatRigFile(n.Seat, rig)
 	}
 	return ""
 }

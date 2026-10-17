@@ -123,6 +123,7 @@ func newLandCmd() *cobra.Command {
 					Vault:     files,
 					Rules:     files,
 					Files:     files,
+					RigFacts:  files,
 					Mailbox:   gateway,
 					Memory:    gateway,
 					Runner:    tmux.New(),

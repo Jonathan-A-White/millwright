@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	pathpkg "path"
@@ -120,16 +121,51 @@ func (m Memory) today() string {
 	return m.clock().UTC().Format(FactDateLayout)
 }
 
+// NoFactsFolder is the refusal for a rig the seat keeps no facts folder for:
+// a flat-file rig (seats/<seat>/rigs/<rig>.md) or none at all.
+type NoFactsFolder struct{ Seat, Rig string }
+
+func (e NoFactsFolder) Error() string {
+	return fmt.Sprintf("no rig %q in the %s seat's memory: make seats/%s/rigs/%s/ first", e.Rig, e.Seat, e.Seat, e.Rig)
+}
+
+// readFactsFolder is the one test of whether a rig has a facts folder: it reads
+// the rig's facts, and returns NoFactsFolder when the seat has no folder for
+// it. Memory's verbs refuse through it and HasFactsFolder answers through it.
+func readFactsFolder(ctx context.Context, files RigFactFiles, seat, rig string) (about string, text map[string]string, err error) {
+	about, text, known, err := files.ReadRigFacts(ctx, seat, rig)
+	if err != nil {
+		return "", nil, err
+	}
+	if !known {
+		return "", nil, NoFactsFolder{Seat: seat, Rig: rig}
+	}
+	return about, text, nil
+}
+
+// HasFactsFolder reports whether the seat keeps a facts folder for the rig,
+// the same test mw memory's refusal makes. A flat-file rig has none.
+func HasFactsFolder(ctx context.Context, files RigFactFiles, seat, rig string) (bool, error) {
+	_, _, err := readFactsFolder(ctx, files, seat, rig)
+	var none NoFactsFolder
+	if errors.As(err, &none) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// FlatRigFile is where a flat-file rig's memory lives in the vault.
+func FlatRigFile(seat, rig string) string {
+	return fmt.Sprintf("seats/%s/rigs/%s.md", seat, rig)
+}
+
 // load reads a rig's facts, refusing a rig the seat has no folder for. The
 // facts that are not whole are not in the map; a slug that names one is
 // refused with why.
 func (m Memory) load(ctx context.Context, rig string) (about string, files map[string]string, facts map[string]RigFact, err error) {
-	about, files, known, err := m.Files.ReadRigFacts(ctx, m.Seat, rig)
+	about, files, err = readFactsFolder(ctx, m.Files, m.Seat, rig)
 	if err != nil {
 		return "", nil, nil, err
-	}
-	if !known {
-		return "", nil, nil, fmt.Errorf("no rig %q in the %s seat's memory: make seats/%s/rigs/%s/ first", rig, m.Seat, m.Seat, rig)
 	}
 	facts = map[string]RigFact{}
 	list, _ := LoadRigFacts(files)

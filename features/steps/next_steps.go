@@ -161,6 +161,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Given(`^a factory whose vault holds a builder charter and a ledger$`, c.aFactoryVault)
 	ctx.Given(`^a rig "([^"]*)" checked out from a bare origin of its own$`, c.aRigFromABareOrigin)
+	ctx.Given(`^the builder seat keeps a facts folder for the rig "([^"]*)"$`, c.theSeatKeepsAFactsFolder)
 	ctx.Given(`^a plan "([^"]*)" whose stories are worked on "([^"]*)" and target "([^"]*)"$`, c.aPlanWorkedHere)
 	ctx.Given(`^the story "([^"]*)" has been worked in its own worktree$`, c.theStoryHasBeenWorked)
 	ctx.Given(`^the story "([^"]*)" has been worked in its own worktree, committing nothing$`, c.theStoryCommittedNothing)
@@ -331,6 +332,12 @@ func (c *nextContext) aFactoryVault() error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(seat, application.LedgerFileName), []byte(nextLedger), 0o644)
+}
+
+// theSeatKeepsAFactsFolder makes seats/builder/rigs/<rig>/, which is what makes
+// a rig a facts rig to mw memory; a rig without it is a flat-file rig.
+func (c *nextContext) theSeatKeepsAFactsFolder(rigName string) error {
+	return os.MkdirAll(filepath.Join(c.vault, vault.SeatsDir, nextSeat, vault.RigsDir, rigName), 0o755)
 }
 
 // aRigFromABareOrigin makes the bare repository standing in for the rig's
@@ -1025,6 +1032,7 @@ func (c *nextContext) nextUseCase() application.Next {
 		Landing:       worktrees,
 		Changes:       worktrees,
 		Errors:        files,
+		RigFacts:      files,
 		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
 		SpecChecks:    rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
 		Slot:          c.mergeSlot(),

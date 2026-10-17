@@ -991,7 +991,8 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" carries a comment quoting: A demo: left open and held for the Governor's 'Looks good'.
 
   Scenario: A Landed mail carries the closing comment's rig-memory proposals as mw memory lines to paste
-    Given the session of "mw-gq6.1" reported a plain success
+    Given the builder seat keeps a facts folder for the rig "millwright"
+    And the session of "mw-gq6.1" reported a plain success
     And the story "mw-gq6.1" carries the closing comment "Done.\nFor the rig memory:\ngotcha [bd]: Point every bd call at the vault with -C.\nretire old-note: The script it described is gone."
     When mw closes out "mw-gq6.1"
     Then exactly one mail was sent, to "mayor" from "mw@vps"
@@ -1000,6 +1001,16 @@ Feature: Closing out a finished story and carrying on
       | For the rig memory (millwright):                                                                           |
       | mw memory add millwright --kind gotcha --subject 'bd' --source mw-gq6.1 'Point every bd call at the vault with -C.' |
       | mw memory retire millwright old-note --reason 'The script it described is gone.'                           |
+
+  Scenario: A Landed mail for a flat-file rig says to place the proposals by hand, not as mw memory lines
+    Given the session of "mw-gq6.1" reported a plain success
+    And the story "mw-gq6.1" carries the closing comment "Done.\nFor the rig memory:\ngotcha [bd]: Point every bd call at the vault with -C.\nretire old-note: The script it described is gone."
+    When mw closes out "mw-gq6.1"
+    Then exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's body holds:
+      | For the rig memory (millwright):                                                                                          |
+      | place by hand in seats/builder/rigs/millwright.md: gotcha [bd]: Point every bd call at the vault with -C. (mw-gq6.1) |
+      | edit by hand in seats/builder/rigs/millwright.md: retire old-note: The script it described is gone. (mw-gq6.1)       |
 
   Scenario: A proposal mw cannot parse is flagged in the Landed mail and the story still lands
     Given the session of "mw-gq6.1" reported a plain success

@@ -239,6 +239,7 @@ func newNextCmd() *cobra.Command {
 				Landing:     worktrees,
 				Changes:     worktrees,
 				Errors:      files,
+				RigFacts:    files,
 				Checks:      checks,
 				SpecChecks:  checks,
 				Load:        hostload.Proc{SwapSample: benchmarkSwapSample},
