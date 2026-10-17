@@ -2292,6 +2292,10 @@ path, the same on both hosts) to the boost by a second rsync, so that a home mov
 keeps the daily counts and the answers not yet delivered. When that directory is not
 there it copies nothing and says nothing; there is no new timer and no new setting.
 
+A step whose ssh fails with exit 255 and a connect or banner timeout is tried once more
+after 15 s, and the run prints `retried <step> after 15s: ssh timed out`; a second timeout, or any
+other failure (a refused key, a missing path, another exit status), fails the run at once.
+
 ```toml
 postern_data = "/home/me/postern-data"
 postern_watchdog_target = "root@allmymind.org:/var/lib/postern-watchdog/"
