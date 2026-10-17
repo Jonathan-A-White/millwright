@@ -879,9 +879,13 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// A bug filed after the sweep rule whose acceptance has no Sweep: line
 		// waits, open and unclaimed, for the Mayor to add it: the whole class of the
 		// fault is to be looked for, not only the case seen (mw-gq6.419).
-		if verdict := domain.SweepOf(detail.Acceptance); !verdict.Passes() &&
+		if verdict := domain.SweepOfStory(detail.Acceptance, detail.Description); !verdict.Passes() &&
 			domain.OwesASweep(detail.Type, detail.Story.Title, detail.Labels, detail.Created) {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: verdict.Refusal() + ": it is not claimed"})
+			why := verdict.Refusal()
+			if verdict == domain.SweepInDescription {
+				why += ": " + verdict.MoveWords(id)
+			}
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: why + ": it is not claimed"})
 			if !d.DryRun {
 				d.refuseSweepless(ctx, detail, verdict, &report)
 			}
@@ -2197,6 +2201,10 @@ func (d Dispatch) refuseSweepless(ctx context.Context, detail StoryDetail, verdi
 
 	fix := "Add a line beginning 'Sweep:' to its acceptance criteria that checks the whole class of the fault, " +
 		"not only the case seen, or 'Sweep: none, because <reason>' for a true one-off."
+	if verdict == domain.SweepInDescription {
+		fix = "Copy the criteria, with that line, into the acceptance field with bd update " + id + " --acceptance: " +
+			"dispatch and mw next read only that field."
+	}
 	said := fmt.Sprintf("mw dispatch on %s did not claim this bug (%s): %s. %s It is left open and is dispatched once it has one.",
 		d.Host, ReasonNoSweep, verdict, fix)
 	if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {

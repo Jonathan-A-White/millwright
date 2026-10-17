@@ -286,3 +286,37 @@ func TestAPlanStorysFilesAreItsFilesKey(t *testing.T) {
 		}
 	}
 }
+
+// A Sweep: or Expect: line written in the description is not read by dispatch or
+// mw next, which read the acceptance field: the filing refusal says where the
+// line is (mw-gq6.548).
+func TestPlanRefusalSaysAWantedLineIsInTheDescriptionNotTheAcceptance(t *testing.T) {
+	defaults := domain.Path{Rig: domain.FactoryRig, Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelOpus, Effort: domain.EffortHigh}
+	plan := func(title, description, acceptance string) error {
+		return domain.Plan{
+			Epic:    domain.PlanEpic{Title: "Loop", Defaults: defaults},
+			Stories: []domain.PlanStory{{Key: "a", Title: title, Description: description, Acceptance: acceptance}},
+		}.Validate()
+	}
+	err := plan("[bug] a fault", "Sweep: every X is checked\nExpect: refusals down", "it passes")
+	if err == nil {
+		t.Fatal("expected a refusal")
+	}
+	for _, want := range []string{
+		"its Sweep line is in the description, not the acceptance field",
+		"its Expect line is in the description, not the acceptance field",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal should say %q, got %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "no line begins with 'Sweep:'") || strings.Contains(err.Error(), "no line begins with 'Expect:'") {
+		t.Errorf("the refusal should not say no line begins, got %v", err)
+	}
+
+	err = plan("[bug] a fault", "Nothing here.", "it passes")
+	if err == nil || !strings.Contains(err.Error(), "no line begins with 'Sweep:'") || !strings.Contains(err.Error(), "no line begins with 'Expect:'") ||
+		strings.Contains(err.Error(), "in the description") {
+		t.Errorf("a plan with neither line anywhere keeps today's text, got %v", err)
+	}
+}

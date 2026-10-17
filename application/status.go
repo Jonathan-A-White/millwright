@@ -1873,7 +1873,14 @@ func (r StatusReport) String() string {
 	if len(r.NoSweep) > 0 {
 		clip(&b, fmt.Sprintf("%s (%d)", NoSweepHeading, len(r.NoSweep)))
 		for _, d := range r.NoSweep {
-			writeStory(&b, d, domain.SweepOf(d.Acceptance).String())
+			verdict := domain.SweepOfStory(d.Acceptance, d.Description)
+			if verdict == domain.SweepInDescription {
+				writeStory(&b, d, "")
+				// Not clipped: the line is the command that mends it.
+				b.WriteString("    " + verdict.String() + ": " + verdict.MoveWords(d.Story.ID) + "\n")
+				continue
+			}
+			writeStory(&b, d, verdict.String())
 		}
 		b.WriteString("\n")
 	}
@@ -2471,7 +2478,7 @@ func bugsWithoutASweep(known []StoryDetail) []StoryDetail {
 			continue
 		}
 		seen[d.Story.ID] = true
-		if domain.OwesASweep(d.Type, d.Story.Title, d.Labels, d.Created) && !domain.SweepOf(d.Acceptance).Passes() {
+		if domain.OwesASweep(d.Type, d.Story.Title, d.Labels, d.Created) && !domain.SweepOfStory(d.Acceptance, d.Description).Passes() {
 			found = append(found, d)
 		}
 	}

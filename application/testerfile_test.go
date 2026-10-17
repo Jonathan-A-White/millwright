@@ -432,3 +432,23 @@ func TestReadTesterFindingsNeverTakesAHyphenatedWordForAnId(t *testing.T) {
 		})
 	}
 }
+
+// A Sweep line written in the finding lands in the story's description, which
+// dispatch does not read: the refusal says to put it in --accept (mw-gq6.548).
+func TestATesterBugWithItsSweepInTheFindingIsToldItBelongsInAccept(t *testing.T) {
+	tracker, rules := testerFileEpic(t)
+	finding := testerFinding()
+	finding.Finding += "\nSweep: every viewport effect in src/ is grepped for state it drops"
+	finding.Acceptance = "npx vitest run src/Reader.test.tsx passes"
+	_, err := (application.TesterFiler{Tracker: tracker, Rules: rules}).File(context.Background(), "mw-e.2", finding)
+	if err == nil || !strings.Contains(err.Error(), "its Sweep line is in the finding, which becomes the description, not in --accept") ||
+		strings.Contains(err.Error(), "no line begins") {
+		t.Errorf("got %v", err)
+	}
+
+	finding.Finding = testerFinding().Finding
+	_, err = (application.TesterFiler{Tracker: tracker, Rules: rules}).File(context.Background(), "mw-e.2", finding)
+	if err == nil || !strings.Contains(err.Error(), "no line begins with 'Sweep:'") || strings.Contains(err.Error(), "in the finding") {
+		t.Errorf("a finding with no Sweep line anywhere keeps today's text, got %v", err)
+	}
+}

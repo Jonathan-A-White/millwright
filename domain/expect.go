@@ -89,3 +89,13 @@ func OwesAnExpect(rig string) bool { return rig == FactoryRig }
 func ExpectRefusal(err error) string {
 	return fmt.Sprintf("it is a %s story and %s: it needs a line %s", FactoryRig, err, ExpectForms)
 }
+
+// ExpectRefusalIn is ExpectRefusal for a story whose description is known: an
+// acceptance with no Expect line, beside a description that has one, is told so,
+// since the line is read from the acceptance field only (mw-gq6.548).
+func ExpectRefusalIn(err error, description string) string {
+	if errors.Is(err, ErrNoExpect) && len(LinesBeginning(description, "Expect")) > 0 {
+		return fmt.Sprintf("it is a %s story and its Expect line is in the description, not the acceptance field: put it in the acceptance as %s", FactoryRig, ExpectForms)
+	}
+	return ExpectRefusal(err)
+}

@@ -660,6 +660,34 @@ func TestStatusListsOpenBugsWithoutASweepUnderOneHeading(t *testing.T) {
 	}
 }
 
+func TestStatusSaysAMisplacedSweepIsInTheDescriptionInOneLine(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	after := domain.SweepRuleFrom.Add(time.Hour)
+	for id, description := range map[string]string{
+		"mw-gq6.40": "Acceptance criteria\nSweep: every X is checked",
+		"mw-gq6.41": "Nothing about a check here.",
+	} {
+		storyOn(t, tracker, id, "[bug] "+id, "vps")
+		if err := tracker.SetCreated(id, after); err != nil {
+			t.Fatal(err)
+		}
+		if err := tracker.SetDescription(id, description); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	text := otherHostStatus(t, tracker).String()
+	if want := "its Sweep line is in the description, not the acceptance field: copy the criteria with bd update mw-gq6.40 --acceptance"; !strings.Contains(text, want) {
+		t.Errorf("status should say %q, got:\n%s", want, text)
+	}
+	if strings.Count(text, "in the description") != 1 {
+		t.Errorf("only the bug with the line in its description is told so, got:\n%s", text)
+	}
+	if !strings.Contains(text, "no line begins with 'Sweep:'") {
+		t.Errorf("the bug with no Sweep line anywhere keeps today's text, got:\n%s", text)
+	}
+}
+
 func TestStatusShowsNothingOfSweepsWhenEveryBugHasOne(t *testing.T) {
 	tracker := aTrackerPathedToVPS(t)
 	storyOn(t, tracker, "mw-gq6.40", "[bug] has a sweep", "vps")
