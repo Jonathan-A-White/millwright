@@ -28,5 +28,9 @@ KillMode=process
 # Type=oneshot has no start timeout by default, and a hung git or bd would
 # then block every later tick. The tick may rebuild this host's mw first
 # (mw-gq6.183), a command stopped at five minutes, and then runs a sync, so this
-# is longer than the dispatch unit's two minutes.
-TimeoutStartSec=10min
+# is longer than the dispatch unit's two minutes. On the home the tick also
+# deploys the other rigs (mw-gq6.562), each under its own [after_landing_limit],
+# which is 20 minutes for postern (npm ci, build, rsync, shots): the stop is
+# above the largest limit plus that build, or the deploy would be killed part
+# way (mw-gq6.564; contrib/deploytimeout_test.go holds the sum).
+TimeoutStartSec=45min

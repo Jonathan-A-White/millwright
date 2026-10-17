@@ -201,8 +201,9 @@ need() {
 need "$SERVICE" "Type=oneshot"
 need "$SERVICE" "SuccessExitStatus=5 7"
 need "$SERVICE" "KillMode=process"
-# The tick's self-update builds mw inside the unit, so the limit must hold a build.
-need "$SERVICE" "TimeoutStartSec=10min"
+# The tick's self-update builds mw inside the unit, and on the home deploys the
+# other rigs under their after-landing limits (20m), so the limit must hold both.
+need "$SERVICE" "TimeoutStartSec=45min"
 need "$SERVICE" "ExecStart=/usr/bin/env mw dispatch"
 need "$TIMER" "Persistent=false"
 need "$TIMER" "OnCalendar=hourly"
@@ -222,7 +223,7 @@ need "$HEALTH_TIMER" "OnCalendar=*:0/15"
 need "$TICK_SERVICE" "Type=oneshot"
 need "$TICK_SERVICE" "ExecStart=/usr/bin/env mw millhand tick"
 need "$TICK_SERVICE" "KillMode=process"
-need "$TICK_SERVICE" "TimeoutStartSec=10min"
+need "$TICK_SERVICE" "TimeoutStartSec=45min"
 need "$TICK_TIMER" "OnCalendar=*:07"
 need "$TICK_TIMER" "Persistent=false"
 # The Millhand's review pair. KillMode=process is here too: the wake it starts

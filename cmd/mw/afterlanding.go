@@ -48,10 +48,12 @@ func newAfterLandingCmd() *cobra.Command {
 					rig.WithSlotSuffix(rig.AfterLandingSlotSuffix),
 					rig.WithSlotNotice(func(said string) { cmd.ErrOrStderr().Write([]byte(said)) }),
 				),
-				Units: userunits.Systemctl{},
-				Rigs:  rigs,
-				Host:  host,
-				Out:   cmd.OutOrStdout(),
+				Units:    userunits.Systemctl{},
+				Built:    hostDeployedMarks(),
+				Checkout: rig.New(),
+				Rigs:     rigs,
+				Host:     host,
+				Out:      cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args[0])
 		},
 	}

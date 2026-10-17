@@ -43,6 +43,12 @@ type AfterLandingRun struct {
 	RetryWait time.Duration
 	Wait      func(ctx context.Context, d time.Duration) error
 
+	// Built and Checkout are where a passing run is remembered: the commit the
+	// rig's checkout is at becomes its deployed mark (mw-gq6.564). Either nil
+	// remembers nothing.
+	Built    BuiltMarks
+	Checkout FactoryCheckout
+
 	// Out is where the lines are printed. A nil Out prints nothing.
 	Out io.Writer
 }
@@ -92,6 +98,9 @@ func (a AfterLandingRun) Run(ctx context.Context, rigName string) error {
 		return errors.New(ran.Line())
 	}
 	a.say("%s", ran.Line())
+	if note := markDeployed(ctx, a.Built, a.Checkout, rigName, dir); note != "" {
+		a.say("%s", note)
+	}
 	notes, failed := RestartFactoryUnits(ctx, a.Units, rigName)
 	for _, note := range notes {
 		a.say("%s", note)

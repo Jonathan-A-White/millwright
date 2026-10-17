@@ -388,6 +388,9 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 	}
 	if err == nil && ran.Succeeded() {
 		report.Notes = append(report.Notes, line)
+		if note := markDeployedAt(ctx, n.Deployed, c.path.Rig, report.How.Commit); note != "" {
+			report.Notes = append(report.Notes, note)
+		}
 		n.restartUnits(ctx, c, report)
 		return
 	}

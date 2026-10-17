@@ -90,8 +90,11 @@ func newMillhandTickCmd() *cobra.Command {
 			"checkout on main that is behind origin and runs the rig's command in it, as mw after-landing\n" +
 			"does (the rig's lock, the [after_landing_limit]), and the line says \"self-update: <rig> <old> →\n" +
 			"<new>, deployed by the home\". A dirty checkout, one on another branch or one with commits of its\n" +
-			"own is left alone and said once. A deploy that fails is said, with the mw after-landing to run by\n" +
-			"hand. A host that is not home does this for no rig but millwright.\n\n" +
+			"own is left alone and said once. A rig is deployed when its checkout HEAD differs from its deployed\n" +
+			"mark (the commit its last passing after-landing run ran at), moved this tick or not; a rig with no\n" +
+			"mark is only marked, not deployed, and the line says so once. A deploy that fails is said, with the\n" +
+			"mw after-landing to run by hand, tried once more by the next tick and then left until HEAD moves.\n" +
+			"A host that is not home does this for no rig but millwright.\n\n" +
 			"A dry run moves, fetches and builds nothing, and says for each rig the host names an\n" +
 			"[after_landing] command for whether its checkout is level with origin's main, as the last fetch\n" +
 			"saw it.",

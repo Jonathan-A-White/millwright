@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -93,6 +94,10 @@ const selfUpdateWords = "self-update: " + FactoryRig
 // updatedRevisionLen is how much of a commit the notes name, the same short
 // revision mw version prints.
 const updatedRevisionLen = 7
+
+// deployTriesAtACommit is how many times the home runs a rig's deploy at one
+// commit when it fails: the tick's own try and one more on the next tick.
+const deployTriesAtACommit = 2
 
 func updatedRevision(commit string) string {
 	if len(commit) > updatedRevisionLen {
@@ -184,6 +189,51 @@ func (s SelfUpdate) runFactory(ctx context.Context) []string {
 // and not every fifteen minutes.
 func leftMark(rig string) string { return rig + ".left" }
 
+// deployedMark is the key, in Built, under which a host remembers the commit a
+// rig's last passing after-landing run ran at (mw-gq6.564), and deployFailedMark
+// the one under which the home counts the failed tries at a commit ("<commit> <n>").
+func deployedMark(rig string) string     { return rig + ".deployed" }
+func deployFailedMark(rig string) string { return rig + ".deploy-failed" }
+
+// markDeployed records that the rig's after-landing command passed at the commit
+// its checkout is at, and forgets any failed tries. It returns a note when the
+// mark could not be kept, empty otherwise. A nil marks or checkout keeps nothing.
+func markDeployed(ctx context.Context, marks BuiltMarks, checkout FactoryCheckout, rig, dir string) string {
+	if marks == nil || checkout == nil {
+		return ""
+	}
+	head, err := checkout.Head(ctx, dir)
+	if err != nil || head == "" {
+		return fmt.Sprintf("the deployed mark of %s could not be set: the checkout's commit could not be read", rig)
+	}
+	return markDeployedAt(ctx, marks, rig, head)
+}
+
+func markDeployedAt(ctx context.Context, marks BuiltMarks, rig, commit string) string {
+	if marks == nil || commit == "" {
+		return ""
+	}
+	if err := marks.MarkBuilt(ctx, deployedMark(rig), commit); err != nil {
+		return fmt.Sprintf("the deployed mark of %s could not be set: %s", rig, firstLine(err.Error()))
+	}
+	if held, _ := marks.Built(ctx, deployFailedMark(rig)); held != "" {
+		_ = marks.MarkBuilt(ctx, deployFailedMark(rig), "")
+	}
+	return ""
+}
+
+// deployTries is how many times a deploy of rig at commit has already failed on
+// the home's ticks.
+func (s SelfUpdate) deployTries(ctx context.Context, rig, commit string) int {
+	held, _ := s.Built.Built(ctx, deployFailedMark(rig))
+	at, count, ok := strings.Cut(held, " ")
+	if !ok || at != commit {
+		return 0
+	}
+	n, _ := strconv.Atoi(count)
+	return n
+}
+
 // afterLandingRigs are the rigs other than the factory rig that this host names
 // an [after_landing] command for and has checked out, by name.
 func (s SelfUpdate) afterLandingRigs() []string {
@@ -208,9 +258,15 @@ func (s SelfUpdate) afterLandingRigs() []string {
 // fault. A checkout that is dirty, on another branch or diverged is left alone
 // and said once.
 //
-// A host that is not home, or whose home cannot be told, does none of it. A
-// deploy that fails is said with how to run it by hand; the checkout is level
-// then, so the next tick does not run it again.
+// A host that is not home, or whose home cannot be told, does none of it.
+//
+// What is deployed is decided by a per-rig deployed mark (mw-gq6.564): the
+// commit the last passing after-landing run on this host ran at. A checkout whose
+// HEAD differs from it is deployed even when it did not move this tick — a hand
+// fast-forward, a deploy that failed or was cut off. A rig with no mark whose
+// checkout is level gets the mark set to HEAD without a deploy, and the line says
+// so once. A deploy that fails is said with how to run it by hand, is tried once
+// more by the next tick and then left, said, until HEAD moves.
 func (s SelfUpdate) deployOthers(ctx context.Context) []string {
 	if s.Home == nil || s.Checkout == nil || s.After == nil || s.Built == nil {
 		return nil
@@ -266,21 +322,49 @@ func (s SelfUpdate) deployRig(ctx context.Context, rig, dir string) []string {
 	if remembered != "" {
 		_ = s.Built.MarkBuilt(ctx, leftMark(rig), "")
 	}
-	if !advanced.Moved {
-		return nil
-	}
 	head, err := s.Checkout.Head(ctx, dir)
 	if err != nil {
 		return failed("reading the checkout's commit", err)
 	}
+	deployed, _ := s.Built.Built(ctx, deployedMark(rig))
+	if deployed == head {
+		return nil
+	}
+	tries := s.deployTries(ctx, rig, head)
+	if deployed == "" && !advanced.Moved && tries == 0 {
+		// First look at a rig that is level: whether its live site is behind is
+		// not known, and a deploy held or run by hand is his, so the mark is set
+		// to what is here and nothing is run.
+		note := fmt.Sprintf("%s is level at %s with no deployed mark: the mark is set to it without deploying; run mw after-landing %s if the live site is behind", words, updatedRevision(head), rig)
+		if err := s.Built.MarkBuilt(ctx, deployedMark(rig), head); err != nil {
+			note += " (it could not be remembered, so this will be said again: " + firstLine(err.Error()) + ")"
+		}
+		return []string{note}
+	}
+	if tries >= deployTriesAtACommit {
+		return nil
+	}
 
 	var out strings.Builder
-	run := AfterLandingRun{AfterLanding: s.After, Slot: s.Slot, Rigs: s.Rigs, Host: s.Host, Out: &out}
+	run := AfterLandingRun{AfterLanding: s.After, Slot: s.Slot, Rigs: s.Rigs, Host: s.Host, Out: &out, Built: s.Built, Checkout: s.Checkout}
 	runErr := run.Run(ctx, rig)
 	moved := fmt.Sprintf("%s %s → %s", words, updatedRevision(before), updatedRevision(head))
+	if !advanced.Moved {
+		moved = fmt.Sprintf("%s at %s, not yet deployed", words, updatedRevision(head))
+	}
 	said := strings.TrimSpace(out.String())
 	if runErr != nil {
-		return []string{fmt.Sprintf("%s, the home's deploy failed: %s; run mw after-landing %s by hand", moved, firstLine(runErr.Error()), rig)}
+		tries++
+		kept := ""
+		if err := s.Built.MarkBuilt(ctx, deployFailedMark(rig), fmt.Sprintf("%s %d", head, tries)); err != nil {
+			kept = " (the try could not be remembered, so it may be tried again: " + firstLine(err.Error()) + ")"
+		}
+		failedWords, next := "failed", "the next tick tries once more"
+		if tries >= deployTriesAtACommit {
+			failedWords, next = "failed again", "it is not tried again until the checkout moves"
+		}
+		return []string{fmt.Sprintf("%s, the home's deploy %s: %s; %s; run mw after-landing %s by hand%s",
+			moved, failedWords, firstLine(runErr.Error()), next, rig, kept)}
 	}
 	return []string{fmt.Sprintf("%s, deployed by the home: %s", moved, strings.ReplaceAll(said, "\n", " / "))}
 }

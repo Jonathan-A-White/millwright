@@ -1437,11 +1437,19 @@ lock, its `[after_landing_limit]`, one more try after a passing network fault),
 and the line says `self-update: postern 027f977 → bfd385c, deployed by the home:
 after landing: <command>: ok`. A checkout that is dirty, on another branch or has
 commits of its own is left alone and said once (the reason is kept in
-`~/.local/state/mw/built-<rig>.left`; it is said again if it changes). A deploy
-that fails is said with the `mw after-landing <rig>` to run by hand; the checkout
-is level by then, so the next tick does not run it again. A host that is not home
-does this for no rig but `millwright`. The tick unit stops at ten minutes, so a
-deploy that needs longer than that is better run by hand. A landing on a host that
+`~/.local/state/mw/built-<rig>.left`; it is said again if it changes). What is
+deployed is decided by a per-rig **deployed mark** (mw-gq6.564), the commit the
+last passing after-landing run on this host ran at (`~/.local/state/mw/built-<rig>.deployed`;
+`mw after-landing <rig>` and a landing's own deploy set it too): a rig whose checkout
+HEAD differs from its mark is deployed even when the checkout did not move this tick
+(a hand fast-forward, a deploy that failed or was cut off). A rig with no mark whose
+checkout is level has the mark set to HEAD **without** deploying, and the line says
+so once: a deploy the Governor holds or runs by hand is his. A deploy that fails is
+said with the `mw after-landing <rig>` to run by hand, is tried once more by the next
+tick (`the home's deploy failed again`), and is then left, said, until HEAD moves.
+A host that is not home does this for no rig but `millwright`. The tick unit and the
+dispatch unit stop at 45 minutes, above the largest `[after_landing_limit]` (postern's
+20) plus the build before it, so a deploy is not cut part way. A landing on a host that
 names no command for the rig says `after landing: handed to the home (<home host>)`
 in its report and mail instead of `none`. `mw millhand tick --dry-run` moves nothing
 and says for each rig the host names a command for (`millwright` too) whether its
@@ -1451,7 +1459,7 @@ checkout is level with origin's `main`, as the last fetch saw it.
 lock and before it syncs, so a host that dispatches and runs no Millhand tick
 keeps its `mw` level too; it prints the same `self-update:` line. A host that runs
 both ticks builds a commit once, because both keep the one built marker. The
-dispatch unit's `TimeoutStartSec` is ten minutes for the same reason.
+dispatch unit's `TimeoutStartSec` is 45 minutes for the same reason.
 
 **How each host's mw is rebuilt** (mw-gq6.521). A host's `mw` is `bin/mw` of its
 own checkout of the millwright rig, linked into `~/.local/bin` by
@@ -3095,7 +3103,7 @@ network fault: <what git said>; nothing dispatched`, and leaves with 7, which th
 unit lists in `SuccessExitStatus=5 7`, so a sleeping network does not show as a
 failed unit and the next tick simply tries again. The tries and the waits together
 may not run past 90 seconds (`mw dispatch` refuses a config that would), because
-the unit is stopped at ten minutes. Every other sync failure is not retried and
+the unit is stopped at 45 minutes. Every other sync failure is not retried and
 fails as before, and `mw sync` by hand never waits. After changing the unit file,
 copy it again and `systemctl --user daemon-reload`.
 
@@ -3103,10 +3111,11 @@ copy it again and `systemctl --user daemon-reload`.
 is never started while it is already running, so ticks do not overlap; the tick
 is dropped. The real damper on spending is not the timer but mw's cap: however
 often `mw dispatch` runs, it never has more sessions in flight than `cap`
-allows. The unit stops a run that takes longer than ten minutes
+allows. The unit stops a run that takes longer than 45 minutes
 (`TimeoutStartSec`), because a oneshot otherwise waits for ever on a hung `git`
-or `bd`. Ten, not two: on the Boost every `bd` call crosses the tunnel, so a
-tick that launches a story can run past two minutes.
+or `bd`. Not two: on the Boost every `bd` call crosses the tunnel, so a
+tick that launches a story can run past two minutes, and on the home the tick
+may deploy a rig under a 20-minute `[after_landing_limit]`.
 
 `Persistent=false`: a host that was asleep or off does not catch up on the ticks
 it missed, and is not woken for them. The next tick on the clock is the next
