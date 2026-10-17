@@ -31,6 +31,31 @@ var (
 	ErrPushTransient = errors.New("the push failed: a fault at the remote, not a stated refusal")
 )
 
+// MergeConflict is a merge that could not be made, with the paths git left
+// unmerged, read before the merge was undone (mw-gq6.559). It is an
+// ErrMergeConflict whatever wraps it; ConflictFiles reads the paths back.
+type MergeConflict struct {
+	// Files are the conflicting paths, relative to the rig.
+	Files []string
+	// Said is the error as it reads, git's lines included.
+	Said string
+}
+
+func (c *MergeConflict) Error() string { return c.Said }
+
+// Is makes a MergeConflict an ErrMergeConflict for errors.Is.
+func (c *MergeConflict) Is(target error) bool { return target == ErrMergeConflict }
+
+// ConflictFiles are the paths err says a merge conflicted in; none when it
+// does not say, as with a bare ErrMergeConflict.
+func ConflictFiles(err error) []string {
+	var c *MergeConflict
+	if errors.As(err, &c) {
+		return c.Files
+	}
+	return nil
+}
+
 // Landed is one merge of a story's branch into its target branch: the commit
 // the target branch now points at, and whether the branch simply moved forward
 // onto the story's work or a merge commit had to be made. A merge commit means

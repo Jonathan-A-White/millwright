@@ -995,6 +995,11 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		kept := n.keepLandingError(ctx, c, report, landErr)
 		switch {
 		case Conflicted(landErr):
+			// Named in the send-back and in the refusal alike, and kept on the
+			// story for mw report (mw-gq6.559).
+			if line := n.recordConflictFiles(ctx, c, report, ConflictFiles(landErr)); line != "" {
+				kept = line + "\n\n" + kept
+			}
 			whyNot := n.sendBack(ctx, c, report, landErr, kept)
 			if whyNot == "" {
 				return *report, nil
@@ -1266,6 +1271,39 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 	return ""
 }
 
+// ConflictedFilesLine is the one line a story's comment names the files a
+// merge conflicted in by; empty when none are known.
+func ConflictedFilesLine(files []string) string {
+	if len(files) == 0 {
+		return ""
+	}
+	return "Conflicted files: " + strings.Join(files, ", ")
+}
+
+// conflictedSuffix is ". Conflicted files: a, b" for a merge that conflicted
+// and said where, to end a sentence that quotes its error; empty otherwise.
+func conflictedSuffix(err error) string {
+	if line := ConflictedFilesLine(ConflictFiles(err)); line != "" {
+		return ". " + line
+	}
+	return ""
+}
+
+// recordConflictFiles writes the files a merge conflicted in onto the story
+// (ConflictFilesField) and returns the line that names them for its comment;
+// both are empty when the landing did not say which files. A record that
+// cannot be written is a note, not a reason to stop.
+func (n Next) recordConflictFiles(ctx context.Context, c *closeOut, report *NextReport, files []string) string {
+	if len(files) == 0 {
+		return ""
+	}
+	n.writeOrSay(ctx, c, report, "the conflicted files", "the files the merge conflicted in could not be recorded on the story",
+		func() error {
+			return n.Tracker.SetStoryMetadata(ctx, c.id, map[string]string{ConflictFilesField: strings.Join(files, ",")})
+		})
+	return ConflictedFilesLine(files)
+}
+
 // times says a count of send-backs in words: "once", "2 times".
 func times(count int) string {
 	if count == 1 {
@@ -1335,7 +1373,7 @@ func (n Next) sendBackForFailingTests(ctx context.Context, c *closeOut, report *
 
 	onto := StartPoint(n.remote(), c.target)
 	if _, err := n.Landing.Merge(ctx, c.worktree, onto); err != nil {
-		return fmt.Sprintf("%s could not be merged into the worktree to send it back: %v", onto, err)
+		return fmt.Sprintf("%s could not be merged into the worktree to send it back: %v%s", onto, err, conflictedSuffix(err))
 	}
 	spec, err := n.Boot.MergeFix(ctx, c.detail, c.worktree, onto)
 	if err != nil {
@@ -1649,7 +1687,7 @@ func (n Next) batchRunOnTheMerge(ctx context.Context, c *closeOut, report *NextR
 		}
 	}()
 	if _, err := n.Landing.Merge(ctx, dir, c.branch); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be merged into %s to test the merged code: %v", c.branch, c.target, err))
+		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be merged into %s to test the merged code: %v%s", c.branch, c.target, err, conflictedSuffix(err)))
 		return gated{}, "", false
 	}
 	note := fmt.Sprintf("the rig's tests failed in the worktree (`%s`", failed.Command)
