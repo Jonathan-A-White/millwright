@@ -567,6 +567,11 @@ type closeOut struct {
 	target   string
 	result   SessionResult
 
+	// worktreeFailed says the rig's tests failed in the worktree and the
+	// close-out went on to the merged result (mw-gq6.552): a merge that is a
+	// fast-forward then still has its tests run, since no run has passed.
+	worktreeFailed bool
+
 	// backendChanged says the story's own commits changed what the rig's backend
 	// is built from, so that the landing is followed by staging it.
 	backendChanged bool
@@ -1526,6 +1531,8 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 	case checked.NotRun:
 		refuse(ReasonTestsNotRun, fmt.Sprintf("the rig's tests could not be run in the worktree: `%s` did not start, so this host is missing something the command needs (a toolchain not on its PATH?)", checked.Command),
 			"The last lines of `"+checked.Command+"` in "+c.worktree+":\n\n```\n"+checked.Tail(CheckLines)+"\n```")
+	case !checked.Passed && !all && !c.batch && n.failureGoesOnToTheMerge(ctx, c, report, checked, base):
+		// Not a refusal: the merged result is what lands, and it is tested next.
 	case !checked.Passed:
 		reason, why := ReasonTestsFail, fmt.Sprintf("the rig's tests fail in the worktree: `%s` did not pass", checked.Command)
 		// A worktree that already carries the target merged in, because it was
@@ -1542,6 +1549,11 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 		if failing := FailingTestsShort(checked.Output); failing != "" {
 			why += " [" + failing + "]"
 		}
+		if all {
+			if behind := n.commitsBehind(ctx, c, base); behind > 0 {
+				why += fmt.Sprintf("; %s has %d commits this branch was cut before, which may fix it: mw next goes on to the merged result with them", c.target, behind)
+			}
+		}
 		refuse(reason, why, n.failedTestsDetail(ctx, c, report, checked, c.worktree))
 	}
 
@@ -1553,6 +1565,41 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 		}
 	}
 	return found
+}
+
+// commitsBehind is how many commits the target branch, as this rig last saw the
+// remote's, has that the story's branch was cut before; zero when it cannot be
+// told.
+func (n Next) commitsBehind(ctx context.Context, c *closeOut, base string) int {
+	behind, err := n.Landing.Ahead(ctx, c.rigDir, base, c.branch)
+	if err != nil {
+		return 0
+	}
+	return behind
+}
+
+// failureGoesOnToTheMerge says a failed run of the rig's tests in the worktree
+// is not yet a refusal (mw-gq6.552): the target branch has commits the branch
+// was cut before, one of which may fix the very test that failed, and it is the
+// merged result that lands. The failure is noted, the merge is made and the
+// merged result is tested (push), and only a failure there refuses; the
+// worktree's run alone guards a branch whose target has not moved, as before.
+// A rig that lands in batches is excepted: its queue makes no merge of its own,
+// and the batch's one gate would carry a story's failure.
+func (n Next) failureGoesOnToTheMerge(ctx context.Context, c *closeOut, report *NextReport, checked Checked, base string) bool {
+	behind := n.commitsBehind(ctx, c, base)
+	if behind == 0 {
+		return false
+	}
+	c.worktreeFailed = true
+	note := fmt.Sprintf("the rig's tests failed in the worktree (`%s`", checked.Command)
+	if failing := FailingTestsShort(checked.Output); failing != "" {
+		note += ": " + failing
+	}
+	note += fmt.Sprintf("), but %s has %d commits this branch was cut before, so they are run on the merged result instead", c.target, behind)
+	report.Notes = append(report.Notes, note)
+	n.print("  note    " + note + "\n")
+	return true
 }
 
 // ExpectedPermissionMode is the permission mode a story's session is launched
@@ -2116,7 +2163,7 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 	// A merge commit is a combination of two branches that nothing has ever been
 	// tested on: the story's tests passed on the story's branch, and the other
 	// host's passed on its own. Only this result matters now.
-	if !landed.FastForward {
+	if !landed.FastForward || c.worktreeFailed {
 		gate, waits := n.mergedResultGate(ctx, c, report, dir)
 		if waits != "" {
 			return Landed{}, offTheSlot{waits}
