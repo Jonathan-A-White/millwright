@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -77,9 +78,10 @@ func (b bead) edges() []edge {
 
 // needs is the ids of the beads this one waits on, read from whichever of the
 // two shapes bd printed its dependencies in: whole linked beads, as `bd show`
-// prints them, or edges, as `bd list` and `bd ready` do. The link to the parent
-// epic is not a wait, and neither shape carries what waits on this bead, so
-// what comes back is what this bead is blocked by. The two shapes share no
+// prints them, or edges, as `bd list` and `bd ready` do. Only a blocking link
+// (blockingKinds) is a wait: the link to the parent epic, a relates-to and a
+// discovered-from are not (mw-gq6.578). Neither shape carries what waits on
+// this bead, so what comes back is what this bead is blocked by. The two shapes share no
 // field names, so one of them decoding to nothing is how they are told apart.
 //
 // A wait on a bead that is already closed is not a wait: the whole linked bead
@@ -101,13 +103,13 @@ func (b bead) needs() []string {
 	for _, raw := range b.Dependencies {
 		var e edge
 		if json.Unmarshal(raw, &e) == nil && e.Issue == b.ID && e.DependsOn != "" {
-			if e.Kind != "parent-child" {
+			if slices.Contains(blockingKinds, e.Kind) {
 				add(e.DependsOn)
 			}
 			continue
 		}
 		var link linked
-		if json.Unmarshal(raw, &link) == nil && link.ID != "" && link.Kind != "" && link.Kind != "parent-child" &&
+		if json.Unmarshal(raw, &link) == nil && link.ID != "" && slices.Contains(blockingKinds, link.Kind) &&
 			link.Status != StatusClosed {
 			add(link.ID)
 		}

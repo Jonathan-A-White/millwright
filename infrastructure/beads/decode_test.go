@@ -13,10 +13,13 @@ package beads
 // story's parent epic is read from.
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
 )
 
@@ -490,5 +493,91 @@ func TestAStoryCarriesHowManyCommentsItHas(t *testing.T) {
 	}
 	if got := got[1].detail(domain.Path{}).CommentCount; got != 0 {
 		t.Errorf("expected a bead with no comment_count field to read as 0, got %d", got)
+	}
+}
+
+// A relates-to, discovered-from or other soft link is no wait: mw brief read a
+// released story's relates-to link to a parked bead as "waits on" (mw-gq6.578).
+// Only a blocking link is a wait, in either of the shapes bd prints.
+func TestOnlyABlockingLinkIsWhatAStoryWaitsOn(t *testing.T) {
+	const shown = `[{
+  "id": "t-r.1", "title": "Story", "status": "open", "issue_type": "task", "parent": "t-r",
+  "dependencies": [
+    {"id": "t-r", "issue_type": "epic", "status": "open", "dependency_type": "parent-child"},
+    {"id": "t-r.2", "status": "open", "issue_type": "task", "dependency_type": "relates-to"},
+    {"id": "t-r.3", "status": "open", "issue_type": "task", "dependency_type": "discovered-from"},
+    {"id": "t-r.4", "status": "open", "issue_type": "task", "dependency_type": "blocks"},
+    {"id": "t-r.5", "status": "open", "issue_type": "task", "dependency_type": "waits-for"}
+  ]
+}]`
+	const listed = `[{
+  "id": "t-r.1", "title": "Story", "status": "open", "issue_type": "task", "parent": "t-r",
+  "dependencies": [
+    {"issue_id": "t-r.1", "depends_on_id": "t-r", "type": "parent-child"},
+    {"issue_id": "t-r.1", "depends_on_id": "t-r.2", "type": "relates-to"},
+    {"issue_id": "t-r.1", "depends_on_id": "t-r.3", "type": "discovered-from"},
+    {"issue_id": "t-r.1", "depends_on_id": "t-r.4", "type": "blocks"},
+    {"issue_id": "t-r.1", "depends_on_id": "t-r.5", "type": "conditional-blocks"}
+  ]
+}]`
+	for name, text := range map[string]string{"shown": shown, "listed": listed} {
+		beads, err := decodeBeads([]byte(text))
+		if err != nil {
+			t.Fatalf("decoding the %s story: %v", name, err)
+		}
+		got := beads[0].needs()
+		if len(got) != 2 || got[0] != "t-r.4" || got[1] != "t-r.5" {
+			t.Errorf("the %s story: expected it to wait on t-r.4 and t-r.5 only, got %v", name, got)
+		}
+	}
+}
+
+// The Mayor's report: mw-gq6.570 linked relates-to to a parked bead, and mw
+// brief printed "waits on" for it. The decoded story goes to the brief as the
+// tracker would hand it; a blocks link still prints the wait.
+func TestBriefPrintsNoWaitOnARelatesToLink(t *testing.T) {
+	const shown = `[{
+  "id": "t-b.1", "title": "Released story", "status": "open", "issue_type": "task", "parent": "t-b",
+  "dependencies": [
+    {"id": "t-b", "issue_type": "epic", "status": "open", "dependency_type": "parent-child"},
+    {"id": "t-x.1", "title": "Parked talk", "status": "open", "issue_type": "task", "dependency_type": "relates-to"}
+  ]
+}, {
+  "id": "t-b.2", "title": "Held back story", "status": "open", "issue_type": "task", "parent": "t-b",
+  "dependencies": [
+    {"id": "t-b", "issue_type": "epic", "status": "open", "dependency_type": "parent-child"},
+    {"id": "t-x.2", "title": "Real blocker", "status": "open", "issue_type": "task", "dependency_type": "blocks"}
+  ]
+}]`
+	beads, err := decodeBeads([]byte(shown))
+	if err != nil {
+		t.Fatalf("decoding the stories: %v", err)
+	}
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("t-b", domain.Path{})
+	tracker.AddEpic("t-x", domain.Path{})
+	tracker.AddStory("t-x", domain.Story{ID: "t-x.1", Title: "Parked talk"})
+	tracker.AddStory("t-x", domain.Story{ID: "t-x.2", Title: "Real blocker"})
+	for _, b := range beads {
+		tracker.AddStory("t-b", domain.Story{ID: b.ID, Title: b.Title})
+		tracker.Needs(b.ID, b.detail(domain.Path{}).Needs...)
+	}
+
+	report, err := application.Brief{Tracker: tracker}.Run(context.Background(), "t-b")
+	if err != nil {
+		t.Fatalf("briefing: %v", err)
+	}
+	waits := map[string][]string{}
+	for _, line := range report.Beads[0].Open {
+		waits[line.Story.Story.ID] = line.Waits
+	}
+	if got := waits["t-b.1"]; len(got) != 0 {
+		t.Errorf("expected the relates-to story to wait on nothing, got %v", got)
+	}
+	if got := waits["t-b.2"]; len(got) != 1 || got[0] != "Real blocker" {
+		t.Errorf("expected the blocked story to wait on Real blocker, got %v", got)
+	}
+	if text := report.String(); strings.Count(text, "waits on") != 1 {
+		t.Errorf("expected one \"waits on\" in the brief, got:\n%s", text)
 	}
 }
