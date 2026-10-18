@@ -85,6 +85,12 @@
 #      the mail it told before it stopped is still left out (step 3).
 # Otherwise it does nothing and the next tick tries again.
 #
+# bd starts, on a tick with nothing changed: `bd mail inbox` (step 3) and, once
+# a view or a snapshot is due, `bd vc status` (the level): two at most. `mw
+# nudge`, `mw postern inbox --unread-count` and `mw postern snapshot` read the
+# beads over one connection to the beads server kept open for their run, and
+# start none (mw-gq6.613); each bd is several new connections to the server.
+#
 # It never types mail content, never clears an input line, and never starts a
 # tmux server, a window or a session. A second tick while one is running does
 # nothing (flock). It exits 0 whenever it chose not to act; non-zero is a fault.

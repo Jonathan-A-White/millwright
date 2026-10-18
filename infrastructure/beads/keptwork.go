@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -118,9 +119,23 @@ func (l *liveListing) shown(b bead) application.StoryDetail {
 // beads nobody holds, no epic, no molecule, nothing blocked, the most urgent
 // first and the oldest first among those.
 func (l *liveListing) ready() []application.StoryDetail {
+	return l.readyWhere(func(b bead) bool { return b.Assignee == "" })
+}
+
+// readyWithLabel is what `bd ready --label label --exclude-type epic` lists:
+// ready does not ask for the unassigned, so a bead somebody holds that is still
+// open is there too.
+func (l *liveListing) readyWithLabel(label string) []application.StoryDetail {
+	return l.readyWhere(func(b bead) bool { return slices.Contains(b.Labels, label) })
+}
+
+// readyWhere is the open beads that are no epic and no molecule, nothing
+// blocked, that keep accepts, the most urgent first and the oldest first among
+// those.
+func (l *liveListing) readyWhere(keep func(bead) bool) []application.StoryDetail {
 	var found []bead
 	for _, b := range l.beads {
-		if b.Status != StatusOpen || b.Assignee != "" || b.Type == TypeEpic || b.Type == "molecule" || l.blocked(b) {
+		if b.Status != StatusOpen || b.Type == TypeEpic || b.Type == "molecule" || !keep(b) || l.blocked(b) {
 			continue
 		}
 		found = append(found, b)
@@ -186,6 +201,43 @@ func elsewhere(details []application.StoryDetail, host string) []application.Sto
 		}
 	}
 	return away
+}
+
+// stateOverConnection is the value of the label id carries under dimension
+// ("running" for run:running), as `bd state id dimension` prints it, read over
+// the kept connection; ok is false when there is no connection or it failed, and
+// the caller starts a bd. A bead with no such label reads as "" and ok.
+func (g *Gateway) stateOverConnection(ctx context.Context, id, dimension string) (value string, ok bool) {
+	db := g.keptDB()
+	if db == nil {
+		return "", false
+	}
+	prefix := dimension + ":"
+	query := "select label from labels where issue_id = " + sqlQuoted(id) +
+		" and label like " + sqlQuoted(strings.NewReplacer("%", `\%`, "_", `\_`).Replace(prefix)+"%") + " order by label"
+	bounded, cancel := context.WithTimeout(ctx, keptQueryBound)
+	defer cancel()
+	rows, err := db.QueryContext(bounded, query)
+	if err != nil {
+		g.keptFailed(ctx, "a story's state", err)
+		return "", false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var label string
+		if err := rows.Scan(&label); err != nil {
+			g.keptFailed(ctx, "a story's state", err)
+			return "", false
+		}
+		if value, found := strings.CutPrefix(label, prefix); found {
+			return value, true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		g.keptFailed(ctx, "a story's state", err)
+		return "", false
+	}
+	return "", true
 }
 
 // graphWhere is the beads BeadGraph reads, as its bd list leaves out mail,

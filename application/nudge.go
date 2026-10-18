@@ -198,10 +198,15 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 		if _, running := closing[detail.Story.ID]; running {
 			continue
 		}
-		rs, err := s.running(ctx, detail)
+		// Only the run state is judged here: the formula's open steps, the
+		// harness's stop and the session's turns that Status reads beside it
+		// are no part of the alarm, and each is a bd for a story every minute
+		// (mw-gq6.613).
+		run, err := n.Tracker.StoryState(ctx, detail.Story.ID, RunState)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("reading the run state of %s: %w", detail.Story.ID, err)
 		}
+		rs := RunningStory{Detail: detail, Run: run}
 		// A run recorded as anything but running (or, before it is ever
 		// recorded, empty) has already been mailed to the Mayor: RunBlocked is
 		// set only where mw next also sends the Refused or Blocked mail.
