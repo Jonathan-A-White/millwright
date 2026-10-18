@@ -27,6 +27,7 @@ func newHandsCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 	}
 	root.AddCommand(newHandsAddCmd())
+	root.AddCommand(newHandsRetireCmd())
 	root.AddCommand(newHandsListCmd())
 	return root
 }
@@ -224,6 +225,44 @@ func newHandsAddCmd() *cobra.Command {
 	return cmd
 }
 
+// newHandsRetireCmd builds `mw hands retire`.
+func newHandsRetireCmd() *cobra.Command {
+	var id, reason string
+	var noView bool
+	cmd := &cobra.Command{
+		Use:   "retire <bead> --id <id> --reason '<why>'",
+		Short: "Retire a step the Governor no longer needs to take (done by hand, or moot)",
+		Long: "retire marks the step <id> of <bead> retired: it leaves Needs you, its hash can no longer\n" +
+			"be approved or run, mw hands list shows it as retired with the reason, and the bead gets\n" +
+			"a comment saying why. The step itself stays kept; mw hands add --replace brings an id back.\n\n" +
+			"Then the live view is published, as mw hands add does, so his phone drops the step at\n" +
+			"once. --no-view publishes none.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			gateway, viewHost, err := posternGateway()
+			if err != nil {
+				return err
+			}
+			return application.HandsRetire{
+				Tracker:  gateway,
+				Notes:    gateway,
+				Out:      cmd.OutOrStdout(),
+				View:     newHandsView(gateway, viewHost),
+				ViewLock: newHandsViewLock(),
+				NoView:   noView,
+				Err:      cmd.ErrOrStderr(),
+			}.Run(cmd.Context(), application.HandsRetireRequest{Bead: args[0], ID: id, Reason: reason})
+		},
+	}
+	cmd.Flags().StringVar(&id, "id", "", "the step's id on the bead (required)")
+	cmd.Flags().StringVar(&reason, "reason", "", "why the step is no longer needed (required)")
+	cmd.Flags().BoolVar(&noView, "no-view", false, "do not publish the live view once the step is retired")
+	for _, name := range []string{"id", "reason"} {
+		_ = cmd.MarkFlagRequired(name)
+	}
+	return cmd
+}
+
 // newHandsListCmd builds `mw hands list`.
 func newHandsListCmd() *cobra.Command {
 	return &cobra.Command{
@@ -232,7 +271,7 @@ func newHandsListCmd() *cobra.Command {
 		Long: "list prints every hands step of <bead>: its id, host and who it runs as, its §17\n" +
 			"sha256 (what the Governor's approval binds), whether it has run and how, its commands\n" +
 			"and its way back. It reads and writes nothing else.\n\n" +
-			"With no bead, list prints every open hands step (not yet run, not superseded) on every\n" +
+			"With no bead, list prints every open hands step (not yet run, not superseded, not retired) on every\n" +
 			"open bead, one line each: bead, step, host/user, age (d, h or m) and the step's text\n" +
 			"cut to one line.",
 		Args: cobra.MaximumNArgs(1),

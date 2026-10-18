@@ -136,3 +136,20 @@ Feature: mw hands
     When the Mayor adds the step "linger" to "mw-h.1" on "desktop" as "root" running "loginctl enable-linger jwhite"
     Then adding the step succeeds
     And stderr carries no warning about a Run
+
+  Scenario: A retired step leaves Needs you at once, shows as retired, and the bead says why
+    Given the Mayor added the step "linger" to "mw-h.1" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    And a view the add publishes
+    When the Mayor retires the step "linger" of "mw-h.1" because "done by hand at the Laptop"
+    Then retiring the step succeeds
+    And the published view has no hands need on "mw-h.1"
+    And bead "mw-h.1"'s last comment says the step "linger" is retired because "done by hand at the Laptop"
+    When the Mayor lists the hands steps of "mw-h.1"
+    Then the list shows "linger" with its sha256 and "retired: done by hand at the Laptop"
+
+  Scenario: A step is not retired without a reason or when the bead has no such step
+    Given the Mayor added the step "linger" to "mw-h.1" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    When the Mayor retires the step "linger" of "mw-h.1" because ""
+    Then adding the step is refused
+    When the Mayor retires the step "nope" of "mw-h.1" because "moot"
+    Then adding the step is refused
