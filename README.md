@@ -1105,7 +1105,11 @@ tests on a loaded host can take an hour), up to two hours in all; only a holder
 whose process is gone is given up on after the per-holder wait. At the two hours
 the story is not stopped: it keeps its claim, worktree and branch, is recorded
 `run=close-out-again`, and the next dispatch tick runs `mw next <story>` alone in
-its worktree, never a fresh Builder session (mw-gq6.467).
+its worktree, never a fresh Builder session (mw-gq6.467). Close-outs of one rig
+take the slot first come, first served: each waiter keeps a ticket in
+`<rig>.merge-slot.queue`, named by when its wait began, and only the oldest live
+ticket tries the lock; a ticket whose process is gone, or older than the cap, is
+skipped (mw-gq6.586). The queue is the same one the gate lock keeps.
 
 The rig's tests are one more lock: this host's **gate lock**, an advisory
 `flock` on `gate.lock` in `~/.local/state/mw`, one for the whole host whatever the

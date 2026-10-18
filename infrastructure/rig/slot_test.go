@@ -3,11 +3,13 @@ package rig_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -437,5 +439,145 @@ func TestALiveHolderThatNeverLetsGoStopsTheWaiterAtTheCap(t *testing.T) {
 	}
 	if waited := clock.at.Sub(anEpoch); waited != 2*time.Hour {
 		t.Errorf("expected the waiter to stop at exactly the cap, waited %s", waited)
+	}
+}
+
+// takeSlotInTheBackground starts a Take for holder, polling every poll, and
+// returns once it has found the slot held, so that waiters started one after
+// another begin waiting in that order (mw-gq6.586). Each winner is noted in
+// order, and gives the slot back at once.
+func takeSlotInTheBackground(t *testing.T, dir, holder string, poll time.Duration, order *[]string, mu *sync.Mutex, done chan<- error) {
+	t.Helper()
+	waiting := make(chan struct{})
+	var once sync.Once
+	slots := rig.NewSlots(rig.WithSlotPoll(poll),
+		rig.WithSlotNotice(func(string) { once.Do(func() { close(waiting) }) }))
+	go func() {
+		held, err := slots.Take(context.Background(), dir, holder)
+		if err == nil {
+			mu.Lock()
+			*order = append(*order, holder)
+			mu.Unlock()
+			err = held.Release(context.Background())
+		}
+		done <- err
+	}()
+	select {
+	case <-waiting:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s never found the merge slot held", holder)
+	}
+}
+
+// A rig's merge slot is first come, first served: close-outs take it in the order
+// they began waiting, however their polls fall. The earliest polls slowest here,
+// so a slot that went to whoever polled first would give it to the last (mw-gq6.586).
+func TestWaitersTakeARigsMergeSlotInTheOrderTheyBeganWaiting(t *testing.T) {
+	for round := 0; round < 3; round++ {
+		dir := aRigDir(t)
+		first, err := rig.NewSlots().Take(context.Background(), dir, "closing out mw-0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var order []string
+		var mu sync.Mutex
+		done := make(chan error, 3)
+		takeSlotInTheBackground(t, dir, "closing out mw-a", 60*time.Millisecond, &order, &mu, done)
+		takeSlotInTheBackground(t, dir, "closing out mw-b", 25*time.Millisecond, &order, &mu, done)
+		takeSlotInTheBackground(t, dir, "closing out mw-c", 2*time.Millisecond, &order, &mu, done)
+		if err := first.Release(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 3; i++ {
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(20 * time.Second):
+				t.Fatal("a waiter never took the merge slot")
+			}
+		}
+		mu.Lock()
+		got := strings.Join(order, ",")
+		mu.Unlock()
+		if want := "closing out mw-a,closing out mw-b,closing out mw-c"; got != want {
+			t.Fatalf("round %d: expected the waiters to take the slot in the order a, b, c, got %s", round, got)
+		}
+	}
+}
+
+// slotTicket leaves a ticket in a rig's merge slot queue, as a waiter that began
+// its wait at began would.
+func slotTicket(t *testing.T, dir string, began time.Time, holder string) string {
+	t.Helper()
+	queue := rig.SlotPath(dir) + rig.SlotQueueSuffix
+	if err := os.MkdirAll(queue, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(queue, fmt.Sprintf("%020d-%010d-0", began.UnixNano(), 1))
+	if err := os.WriteFile(path, []byte(holder+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A waiter whose process is gone leaves a ticket nobody holds; it is skipped and
+// cleared, so that it never blocks the queue (mw-gq6.586).
+func TestADeadWaitersTicketDoesNotBlockTheMergeSlot(t *testing.T) {
+	dir := aRigDir(t)
+	ticket := slotTicket(t, dir, time.Now().Add(-time.Minute), "closing out mw-dead")
+	held, err := rig.NewSlots(rig.WithSlotPoll(2*time.Millisecond), rig.WithSlotCap(5*time.Second)).Take(context.Background(), dir, "closing out mw-b")
+	if err != nil {
+		t.Fatalf("expected a dead waiter not to block the queue, got %v", err)
+	}
+	defer held.Release(context.Background())
+	if _, err := os.Stat(ticket); !os.IsNotExist(err) {
+		t.Errorf("expected the dead waiter's ticket cleared, stat gave %v", err)
+	}
+}
+
+// A ticket older than the cap is skipped even while its owner is alive: its
+// owner has given up by then.
+func TestATicketOlderThanTheCapDoesNotBlockTheMergeSlot(t *testing.T) {
+	dir := aRigDir(t)
+	ticket := slotTicket(t, dir, time.Now().Add(-time.Hour), "closing out mw-old")
+	file, err := os.Open(ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	held, err := rig.NewSlots(rig.WithSlotPoll(2*time.Millisecond), rig.WithSlotCap(time.Minute)).Take(context.Background(), dir, "closing out mw-b")
+	if err != nil {
+		t.Fatalf("expected an over-age ticket not to block the queue, got %v", err)
+	}
+	held.Release(context.Background())
+}
+
+// A waiter behind a live waiter is told who it waits for, though the slot itself
+// is free for a moment: the head of the queue has not taken it yet.
+func TestAWaiterBehindALiveWaiterForTheMergeSlotNamesTheHeadOfTheQueue(t *testing.T) {
+	dir := aRigDir(t)
+	ticket := slotTicket(t, dir, time.Now(), "closing out mw-head")
+	file, err := os.Open(ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var said []string
+	_, err = rig.NewSlots(rig.WithSlotPoll(time.Minute), rig.WithSlotNotice(func(s string) { said = append(said, s); cancel() })).Take(ctx, dir, "closing out mw-b")
+	if err == nil || len(said) != 1 || !strings.Contains(said[0], "held by closing out mw-head") {
+		t.Fatalf("expected the wait to name the head of the queue, got %v and %q", err, said)
+	}
+	if entries, _ := os.ReadDir(rig.SlotPath(dir) + rig.SlotQueueSuffix); len(entries) != 1 {
+		t.Errorf("expected only the head's ticket left, got %d entries", len(entries))
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/ticketq"
 )
 
 // SlotSuffix names a rig's merge slot, which lives beside the rig's story
@@ -25,6 +26,10 @@ const (
 	SlotCap    = 2 * time.Hour
 	SlotPoll   = 2 * time.Second
 )
+
+// SlotQueueSuffix is added to a slot's path for the directory where its waiters
+// keep their tickets (mw-gq6.586).
+const SlotQueueSuffix = ".queue"
 
 // AfterLandingSlotSuffix names the rig's after-landing lock, a slot of the same
 // kind as the merge slot but its own: it is held by whoever runs the rig's
@@ -159,7 +164,7 @@ func (s *Slots) Take(ctx context.Context, rigDir, holder string) (application.Ho
 		return nil, fmt.Errorf("opening the merge slot of %s: %w", rigDir, err)
 	}
 
-	if err := s.flock(ctx, file, rigDir, path); err != nil {
+	if err := s.flock(ctx, file, rigDir, holder, path); err != nil {
 		file.Close()
 		return nil, err
 	}
@@ -180,18 +185,28 @@ func (s *Slots) Take(ctx context.Context, rigDir, holder string) (application.Ho
 // or its merge, however slow a loaded host makes them, and giving up on it
 // costs a finished story a fresh attempt (mw-gq6.467). A live holder is waited
 // on up to the cap.
-func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, path string) error {
+func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path string) error {
 	started := s.now()
+	tickets := &ticketq.Queue{Dir: path + SlotQueueSuffix, Cap: s.cap, Now: s.now}
+	ticket, err := tickets.Join(holder, started)
+	if err != nil {
+		return fmt.Errorf("queueing for the merge slot of %s: %w", rigDir, err)
+	}
+	// Whatever way the wait ends, the ticket goes: the slot is taken, or the wait is over.
+	defer ticket.Drop()
 	since, said := started, readSlot(path)
 	told := ""
 	wait, scaled := s.wait, false
 	for {
-		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) {
-			return fmt.Errorf("taking the merge slot %s: %w", path, err)
+		head, headHolder := tickets.Head(ticket.Name())
+		if head {
+			err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+			if err == nil {
+				return nil
+			}
+			if !errors.Is(err, syscall.EWOULDBLOCK) {
+				return fmt.Errorf("taking the merge slot %s: %w", path, err)
+			}
 		}
 
 		if !scaled {
@@ -207,9 +222,16 @@ func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, path string) e
 		if again := readSlot(path); again != said {
 			since, said = now, again
 		}
-		if s.notice != nil && told != held(path) {
-			told = held(path)
-			s.notice(fmt.Sprintf("waiting for the merge slot: held by %s\n", told))
+		if s.notice != nil {
+			// A waiter behind another waiter names that one while the slot is free.
+			by := held(path)
+			if by == "somebody" && !head {
+				by = headHolder
+			}
+			if told != by {
+				told = by
+				s.notice(fmt.Sprintf("waiting for the merge slot: held by %s\n", told))
+			}
 		}
 		if waited := now.Sub(started); waited >= s.cap {
 			return fmt.Errorf("the merge slot %s was still held by %q after %s, the overall most a close-out waits: its holder is still at its close-out, or close-outs are landing work on this rig one after another: %w",
