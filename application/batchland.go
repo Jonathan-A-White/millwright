@@ -194,7 +194,10 @@ type BatchReport struct {
 
 	// Closed are the stories closed once landed; Checkout what became of the
 	// rig's own checkout.
-	Closed   []string
+	Closed []string
+	// DemoHeld are the landed demos left open, waiting for the Governor's
+	// "Looks good" and not closed.
+	DemoHeld []string
 	Checkout Advanced
 	RigDir   string
 
@@ -719,20 +722,31 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 		if err := n.Worktrees.Remove(ctx, rigDir, c.worktree, c.branch); err != nil {
 			nr.Notes = append(nr.Notes, fmt.Sprintf("the worktree %s could not be taken away: %v", c.worktree, err))
 		}
-		closed := false
-		notes, err := n.closeStory(ctx, s.ID, outcome)
-		nr.Notes = append(nr.Notes, notes...)
-		if err != nil {
-			nr.Notes = append(nr.Notes, fmt.Sprintf("%s is landed but could not be closed: %v", s.ID, err))
+		closed, heldDemo := false, false
+		if isDemo(s.detail) {
+			// A demo closes on the Governor's "Looks good" alone: it is left
+			// open for him, not closed (mw-gq6.616).
+			if err := n.holdDemo(ctx, c, nr, outcome); err != nil {
+				nr.Notes = append(nr.Notes, fmt.Sprintf("%s is landed but the demo could not be left waiting for the Governor: %v", s.ID, err))
+			} else {
+				heldDemo = true
+				report.DemoHeld = append(report.DemoHeld, s.ID)
+			}
 		} else {
-			closed = true
-			report.Closed = append(report.Closed, s.ID)
+			notes, err := n.closeStory(ctx, s.ID, outcome)
+			nr.Notes = append(nr.Notes, notes...)
+			if err != nil {
+				nr.Notes = append(nr.Notes, fmt.Sprintf("%s is landed but could not be closed: %v", s.ID, err))
+			} else {
+				closed = true
+				report.Closed = append(report.Closed, s.ID)
+			}
 		}
 
 		mailed := NextReport{
 			StoryID: s.ID, Host: n.Host, Title: s.Title, Target: report.Target, Commits: s.Commits, Pushes: 1,
 			Landed: true, How: Landed{Commit: s.Merge, FastForward: s.FastForward, Version: report.Version, Unioned: s.Unioned},
-			Ledger: line, Closed: closed, NotClosed: "see the batch's report",
+			Ledger: line, Closed: closed, DemoHeld: heldDemo, NotClosed: "see the batch's report",
 			Notes: append([]string{fmt.Sprintf("landed by mw land in %s (%s), whose commit %s is on %s", report.Label(), strings.Join(together, ", "),
 				shortCommit(report.Commit), report.Target)}, report.fixerNotes(s.ID)...),
 		}
@@ -1096,6 +1110,9 @@ func (r BatchReport) String() string {
 		fmt.Fprintf(&b, "  landed  %s at %s, one push, a fast-forward: %s\n", r.Target, shortCommit(r.Commit), strings.Join(storyIDs(r.Merged), ", "))
 		if len(r.Closed) > 0 {
 			fmt.Fprintf(&b, "  closed  %s\n", strings.Join(r.Closed, ", "))
+		}
+		if len(r.DemoHeld) > 0 {
+			fmt.Fprintf(&b, "  open    %s: %s\n", strings.Join(r.DemoHeld, ", "), DemoLeftOpen)
 		}
 	} else {
 		fmt.Fprintf(&b, "  HELD    %s\n", firstLine(r.Held))

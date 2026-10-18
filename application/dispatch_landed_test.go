@@ -83,7 +83,7 @@ func TestReclaimDeadPaneClosesAStoryWhoseBranchAlreadyLanded(t *testing.T) {
 }
 
 // A demo is closed only on the Governor's "Looks good", so a demo found landed
-// is left open and held, its claim given back, instead of closed (mw-gq6.345).
+// is left open and waiting for him, its claim given back, instead of closed (mw-gq6.345).
 func TestReclaimDeadPaneHoldsADemoWhoseBranchAlreadyLanded(t *testing.T) {
 	for name, mark := range map[string]func(*testing.T, *apptest.FakeTracker){
 		"labelled": func(t *testing.T, tracker *apptest.FakeTracker) {
@@ -118,14 +118,14 @@ func TestReclaimDeadPaneHoldsADemoWhoseBranchAlreadyLanded(t *testing.T) {
 			if err != nil {
 				t.Fatalf("showing the story: %v", err)
 			}
-			if detail.Status != apptest.StatusDeferred || detail.Assignee != "" {
-				t.Fatalf("expected the demo left held and unclaimed, got %q held by %q", detail.Status, detail.Assignee)
+			if detail.Status != apptest.StatusOpen || detail.Assignee != "" || !detail.Hitl() {
+				t.Fatalf("expected the demo left open, labelled hitl and unclaimed, got %q held by %q, labels %v", detail.Status, detail.Assignee, detail.Labels)
 			}
 			if state, _ := tracker.StoryState(ctx, "mw-gq6.9", application.RunState); state != application.RunLanded {
 				t.Fatalf("expected the story recorded %s=%s, got %q", application.RunState, application.RunLanded, state)
 			}
 			comments := strings.Join(tracker.Comments("mw-gq6.9"), "\n")
-			for _, want := range []string{landedTip[:12], "A demo: left open and held for the Governor's 'Looks good'."} {
+			for _, want := range []string{landedTip[:12], "A demo: left open for the Governor's 'Looks good'."} {
 				if !strings.Contains(comments, want) {
 					t.Fatalf("expected a comment naming %q, got %q", want, comments)
 				}

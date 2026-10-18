@@ -35,6 +35,18 @@ Feature: mw land lands a batch rig's queue under one gate run
     And metrics/factory.jsonl holds a line for batch 1 of the rig: 3 stories, 1 gate run, no fixer, outcome "green"
     And the Mayor was sent no mail saying the batch was held
 
+  Scenario: A demo that a batch lands waits for the Governor's Looks good and is not closed (mw-gq6.616)
+    Given the demo "mw-gq6.1", naming the files key "docs/demo-phone-steps.md", is queued for batch landing
+    And these stories are queued for batch landing:
+      | mw-gq6.2 |
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And the demo "mw-gq6.1" waits for the Governor, though it landed
+    And the story "mw-gq6.1" carries a comment quoting: A demo: left open for the Governor's 'Looks good'.
+    And the batch's ledger holds a line landing "mw-gq6.1"
+    And these stories are on "main" at the rig's origin, closed and recorded as landed, each with a ledger line naming batch 1:
+      | mw-gq6.2 |
+
   Scenario: A story of the batch whose closing comment says an AC is not met lands marked and files a held bug (mw-gq6.602)
     Given these stories are queued for batch landing:
       | mw-gq6.1 |

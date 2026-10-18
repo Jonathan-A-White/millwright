@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -250,7 +251,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the rig's tests were run (\d+) times$`, c.theRigsTestsWereRun)
 	ctx.Then(`^the story "([^"]*)" is closed$`, c.theStoryIsClosed)
 	ctx.Then(`^the story "([^"]*)" is not closed$`, c.theStoryIsNotClosed)
-	ctx.Then(`^the story "([^"]*)" is left open and held, though it landed$`, c.theStoryIsLeftOpenAndHeld)
+	ctx.Then(`^the demo "([^"]*)" waits for the Governor, though it landed$`, c.theDemoWaitsForTheGovernor)
 	ctx.Then(`^the session of "([^"]*)" is closed$`, c.theSessionIsClosed)
 	ctx.Then(`^the story "([^"]*)" is held blocked$`, c.theStoryIsHeldBlocked)
 	ctx.Then(`^the story "([^"]*)" carries a comment quoting: (.+)$`, c.theStoryCarriesACommentQuoting)
@@ -1207,22 +1208,22 @@ func (c *nextContext) theStoryIsNotClosed(id string) error {
 	return nil
 }
 
-// theStoryIsLeftOpenAndHeld is a landed demo: not closed, held (deferred) so no
-// dispatcher takes it, unclaimed so the Governor's "Looks good" can close it,
-// and recorded landed.
-func (c *nextContext) theStoryIsLeftOpenAndHeld(id string) error {
+// theDemoWaitsForTheGovernor is a landed demo: not closed, open and labelled
+// hitl so no dispatcher takes it and the Governor's review queue lists it,
+// unclaimed so his "Looks good" can close it, and recorded landed.
+func (c *nextContext) theDemoWaitsForTheGovernor(id string) error {
 	detail, err := c.tracker.ShowStory(context.Background(), id)
 	if err != nil {
 		return err
 	}
-	if detail.Status != apptest.StatusDeferred {
-		return fmt.Errorf("expected %s to be left held (%s), got %q (the close-out said: %v)", id, apptest.StatusDeferred, detail.Status, c.err)
+	if detail.Status != apptest.StatusOpen {
+		return fmt.Errorf("expected %s to be left open (%s), got %q (the close-out said: %v)", id, apptest.StatusOpen, detail.Status, c.err)
+	}
+	if !detail.Hitl() || !slices.Contains(detail.Labels, application.LabelHitl) {
+		return fmt.Errorf("expected %s to be labelled %s, got %v", id, application.LabelHitl, detail.Labels)
 	}
 	if detail.Assignee != "" {
 		return fmt.Errorf("expected the claim on %s to be given back, got %q", id, detail.Assignee)
-	}
-	if c.report.Closed || !c.report.Landed || !c.report.DemoHeld {
-		return fmt.Errorf("expected the report to say %s landed and was held as a demo, not closed, got %+v", id, c.report)
 	}
 	if got := c.tracker.State(id, application.RunState); got != application.RunLanded {
 		return fmt.Errorf("expected %s to be recorded %s=%s, got %q", id, application.RunState, application.RunLanded, got)

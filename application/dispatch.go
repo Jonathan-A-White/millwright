@@ -2071,7 +2071,7 @@ func (d Dispatch) target(detail StoryDetail) string {
 
 // closeLanded closes a story found already landed, the way a finished close-out
 // would have, and reports it; found says how it was known. A demo is not closed
-// but left open and held, its claim given back, for the Governor's "Looks good"
+// but left open and waiting, its claim given back, for the Governor's "Looks good"
 // (mw-gq6.345). Otherwise the claim is never given back. A close that fails leaves the claim exactly as it was, counted
 // running, for the next tick to try again; nothing else is written until it
 // has gone through, so a server that stays unreachable is not written to over

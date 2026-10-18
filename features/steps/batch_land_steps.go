@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/cucumber/godog"
@@ -43,6 +44,7 @@ type batchFixture struct {
 // registerBatchLandSteps registers the steps of features/batch_land.feature.
 func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^these stories are queued for batch landing:$`, c.theseStoriesAreQueued)
+	ctx.Given(`^the demo "([^"]*)", naming the files key "([^"]*)", is queued for batch landing$`, c.aDemoIsQueued)
 	ctx.Given(`^"([^"]*)" is queued for batch landing, writing "([^"]*)" with words of its own$`, c.aStoryIsQueuedWriting)
 	ctx.Given(`^"([^"]*)" is queued for batch landing, its branch then carrying a commit whose message says "([^"]*)"$`, c.aStoryIsQueuedThenSigned)
 	ctx.Then(`^the batch set "([^"]*)" aside, naming its signed commit and the line "([^"]*)"$`, c.theBatchSetAsideSigned)
@@ -58,6 +60,7 @@ func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the rig's tests were run once on the batch$`, c.theTestsRanOnceOnTheBatch)
 	ctx.Then(`^the rig's tests were not run on the batch$`, c.theTestsDidNotRunOnTheBatch)
 	ctx.Then(`^these stories are on "([^"]*)" at the rig's origin, closed and recorded as landed, each with a ledger line naming batch (\d+):$`, c.theseStoriesLandedInTheBatch)
+	ctx.Then(`^the batch's ledger holds a line landing "([^"]*)"$`, c.theLedgerHoldsALandingLine)
 	ctx.Then(`^the batch records of batch (\d+) hold the merge order, the gate log and the outcome "([^"]*)"$`, c.theBatchRecordsHold)
 	ctx.Then(`^the Mayor was sent no mail saying the batch was held$`, c.noMailSaysTheBatchWasHeld)
 	ctx.Then(`^the batch set "([^"]*)" aside, naming "([^"]*)" in its conflict$`, c.theBatchSetAside)
@@ -701,4 +704,51 @@ func (c *nextContext) mwLandSays(words string) error {
 		return fmt.Errorf("expected mw land to say %q\n%s", words, c.said())
 	}
 	return nil
+}
+
+// theLedgerHoldsALandingLine is a story's landing line in the seat's ledger,
+// whether or not the landing closed the story.
+func (c *nextContext) theLedgerHoldsALandingLine(id string) error {
+	lines, err := c.ledgerLines()
+	if err != nil {
+		return err
+	}
+	for _, line := range lines {
+		if application.LedgerLandsStory(line, id) {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected a ledger line landing %s, got:\n%s", id, strings.Join(lines, "\n"))
+}
+
+// aDemoIsQueued is a demo a Builder built, so it names the files key of its
+// phone-steps doc, worked and queued like any story of the batch.
+func (c *nextContext) aDemoIsQueued(id, files string) error {
+	story := domain.Story{ID: id, Title: "Demo " + id}
+	if err := story.Overrides.Set("files", files); err != nil {
+		return err
+	}
+	c.tracker.AddStory(c.lastEpic, story)
+	if err := c.tracker.SetLabels(id, application.LabelDemo); err != nil {
+		return err
+	}
+	if err := c.claimAndCut(id); err != nil {
+		return err
+	}
+	dir := application.WorktreeDir(c.rig, id)
+	for name, words := range map[string]string{id + ".md": "the work of " + id + "\n", files: "the phone steps of " + id + "\n"} {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, []byte(words), 0o644); err != nil {
+			return err
+		}
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "The work of " + id}} {
+		if err := gitRun(dir, "git", args...); err != nil {
+			return err
+		}
+	}
+	return c.queueByCloseOut(id)
 }
