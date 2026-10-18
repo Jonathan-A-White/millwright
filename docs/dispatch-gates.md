@@ -122,3 +122,4 @@ is mapped there too, and a test says so.
 | `testers-per-rig` | damper |
 | `cap` | cap |
 | `pour-refused` | pour refused |
+| `claim-lost` | claim lost |
