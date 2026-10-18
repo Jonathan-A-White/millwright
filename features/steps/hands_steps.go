@@ -78,6 +78,10 @@ func InitializeHandsScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^bead "([^"]*)"'s last comment is the HANDS STEP "([^"]*)" on "([^"]*)" as "([^"]*)"$`, c.lastCommentIsTheHandsStep)
 	ctx.Then(`^bead "([^"]*)" carries the label "([^"]*)"$`, c.beadCarriesTheLabel)
 	ctx.Then(`^the list shows "([^"]*)" with its sha256 and "([^"]*)"$`, c.theListShows)
+	ctx.When(`^the Mayor retires the step "([^"]*)" of "([^"]*)" because "([^"]*)"$`, c.theMayorRetiresTheStep)
+	ctx.Then(`^retiring the step succeeds$`, c.addingTheStepSucceeds)
+	ctx.Then(`^the published view has no hands need on "([^"]*)"$`, c.publishedViewHasNoNeed)
+	ctx.Then(`^bead "([^"]*)"'s last comment says the step "([^"]*)" is retired because "([^"]*)"$`, c.lastCommentSaysRetired)
 }
 
 func (c *handsContext) aBeadForTheGovernorsHands(bead string) error {
@@ -447,4 +451,37 @@ func (c *handsContext) theListShows(id, state string) error {
 
 func (c *handsContext) theStepIsSupersededBy(id, bead, newer string) error {
 	return c.tracker.SetNote(context.Background(), application.HandsSupersededKey(bead, id), newer)
+}
+
+func (c *handsContext) theMayorRetiresTheStep(id, bead, reason string) error {
+	c.out.Reset()
+	c.errOut.Reset()
+	retirer := application.HandsRetire{Tracker: c.tracker, Notes: c.tracker, Out: &c.out, Err: &c.errOut}
+	if c.file != nil {
+		retirer.View = c.view()
+		retirer.ViewLock = c.lock
+	}
+	c.err = retirer.Run(context.Background(), application.HandsRetireRequest{Bead: bead, ID: id, Reason: reason})
+	return nil
+}
+
+func (c *handsContext) publishedViewHasNoNeed(bead string) error {
+	if need, err := c.publishedNeed(bead); err == nil {
+		return fmt.Errorf("expected no hands need on %s in the published view, got %+v", bead, need)
+	} else if c.file == nil || c.file.Writes() == 0 {
+		return err
+	}
+	return nil
+}
+
+func (c *handsContext) lastCommentSaysRetired(bead, id, reason string) error {
+	comments := c.tracker.Comments(bead)
+	if len(comments) == 0 {
+		return fmt.Errorf("%s has no comments", bead)
+	}
+	last := comments[len(comments)-1]
+	if !strings.Contains(last, "HANDS STEP "+id+" RETIRED") || !strings.Contains(last, reason) {
+		return fmt.Errorf("expected the last comment to retire %s because %q, got %q", id, reason, last)
+	}
+	return nil
 }

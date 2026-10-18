@@ -473,7 +473,7 @@ func (b BackendStage) swapSteps(ctx context.Context, cfg BackendRig) ([]heldSwap
 	var held []heldSwap
 	for _, key := range keys {
 		holder := strings.TrimPrefix(key, "hands.")
-		if strings.HasPrefix(holder, "ran.") || strings.HasPrefix(holder, "approval.") || strings.HasPrefix(holder, "superseded.") {
+		if strings.HasPrefix(holder, "ran.") || strings.HasPrefix(holder, "approval.") || strings.HasPrefix(holder, "superseded.") || strings.HasPrefix(holder, "retired.") {
 			continue
 		}
 		steps, err := parseHandsSteps(notes[key])
@@ -485,6 +485,9 @@ func (b BackendStage) swapSteps(ctx context.Context, cfg BackendRig) ([]heldSwap
 				continue
 			}
 			if ran, ok := parseHandsRan(notes[HandsRanKey(holder, step.ID)]); ok && ran.Exit == 0 {
+				continue
+			}
+			if strings.TrimSpace(notes[HandsRetiredKey(holder, step.ID)]) != "" {
 				continue
 			}
 			held = append(held, heldSwap{Bead: holder, ID: step.ID})

@@ -253,3 +253,21 @@ func TestHandsAddHelpSaysTheUserStepPath(t *testing.T) {
 		t.Errorf("expected mw hands add --help to say a user step's PATH, %s:$PATH, got:\n%s", hands.UserStepPath, out)
 	}
 }
+
+// mw hands retire needs its reason, and a step the bead does not have is
+// refused before anything is written.
+func TestHandsRetireNeedsAReasonAndAStepTheBeadHas(t *testing.T) {
+	posternHome(t, "http://unused", "", "")
+	log := bdRecording(t, handsAddBead)
+
+	if out, err := runMw(t, "hands", "retire", "mw-f758y.8", "--id", "linger"); err == nil || !strings.Contains(out, "reason") {
+		t.Fatalf("expected --reason required, got %v\n%s", err, out)
+	}
+	if out, err := runMw(t, "hands", "retire", "mw-f758y.8", "--id", "linger", "--reason", "done by hand", "--no-view"); err == nil || !strings.Contains(out, "no step linger") {
+		t.Fatalf("expected a step the bead lacks refused, got %v\n%s", err, out)
+	}
+	calls, _ := os.ReadFile(log)
+	if strings.Contains(string(calls), "kv set") || strings.Contains(string(calls), "comment") {
+		t.Fatalf("expected nothing written, got:\n%s", calls)
+	}
+}

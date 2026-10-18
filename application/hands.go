@@ -25,6 +25,11 @@ func HandsRanKey(bead, id string) string { return "hands.ran." + bead + "." + id
 // run (mw-gq6.190).
 func HandsSupersededKey(bead, id string) string { return "hands.superseded." + bead + "." + id }
 
+// HandsRetiredKey is the note that retires a step, holding why: a step he no
+// longer needs (he did it by hand, or it is moot) leaves Needs you and cannot be
+// approved or run (mw-gq6.571).
+func HandsRetiredKey(bead, id string) string { return "hands.retired." + bead + "." + id }
+
 // HandsApprovalKey is the note an approval is marked run under once mw has
 // started its step, holding the txid that carried it: an approval runs once.
 func HandsApprovalKey(approvalID string) string { return "hands.approval." + approvalID }
@@ -260,6 +265,9 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 		if err := h.Notes.ClearNote(ctx, HandsSupersededKey(req.Bead, req.Step.ID)); err != nil {
 			return HandsStepRecord{}, fmt.Errorf("mw hands add: forgetting that the old step was superseded: %w", err)
 		}
+		if err := h.Notes.ClearNote(ctx, HandsRetiredKey(req.Bead, req.Step.ID)); err != nil {
+			return HandsStepRecord{}, fmt.Errorf("mw hands add: forgetting that the old step was retired: %w", err)
+		}
 	}
 	if err := h.Tracker.CommentOnStory(ctx, req.Bead, handsStepComment(req.Step, replaced)); err != nil {
 		return HandsStepRecord{}, fmt.Errorf("mw hands add: commenting the step on %s: %w", req.Bead, err)
@@ -327,23 +335,30 @@ func handsBlockers(req HandsAddRequest, found []StoryDetail) ([]string, error) {
 // it — and a failure is said; the step is kept either way, so neither is
 // returned.
 func (h HandsAdd) publish(ctx context.Context) {
-	if h.View == nil || h.NoView {
+	publishHandsView(ctx, h.View, h.ViewLock, h.NoView, h.report, "the step is kept")
+}
+
+// publishHandsView refreshes the live view for a verb that has already kept
+// its change: under lock when there is one, said through report and never
+// returned. kept names what stays when the view does not publish.
+func publishHandsView(ctx context.Context, view PosternViewPublisher, lock ViewLock, skip bool, report func(format string, args ...any), kept string) {
+	if view == nil || skip {
 		return
 	}
-	if h.ViewLock != nil {
-		release, taken, err := h.ViewLock.TryTake(ctx)
+	if lock != nil {
+		release, taken, err := lock.TryTake(ctx)
 		if err != nil {
-			h.report("the view was not published: taking the notifier's lock: %v (the step is kept)", err)
+			report("the view was not published: taking the notifier's lock: %v (%s)", err, kept)
 			return
 		}
 		if !taken {
-			h.report("the view was skipped: the notifier is publishing it, and its next tick shows the step")
+			report("the view was skipped: the notifier is publishing it, and its next tick shows the change")
 			return
 		}
 		defer release()
 	}
-	if _, err := h.View.Run(ctx); err != nil {
-		h.report("the view was not published: %v (the step is kept; mw postern view publishes it)", err)
+	if _, err := view.Run(ctx); err != nil {
+		report("the view was not published: %v (%s; mw postern view publishes it)", err, kept)
 	}
 }
 
@@ -423,6 +438,85 @@ func (h HandsAdd) now() time.Time {
 	return h.Now()
 }
 
+// HandsRetireRequest is a step the Mayor retires: one the Governor no longer
+// needs to take, because he did it by hand or it is moot.
+type HandsRetireRequest struct {
+	Bead, ID string
+	// Reason is why, in words the bead and the list repeat; it is required.
+	Reason string
+}
+
+// HandsRetire marks a step retired: it leaves Needs you, its hash can no longer
+// be approved or run, and the bead says why. The step stays kept, so the record
+// of what it was does not go; mw hands add --replace brings an id back. Once it
+// is marked the live view is published, so his phone drops the step at once.
+type HandsRetire struct {
+	Tracker WorkTracker
+	Notes   PosternNotes
+	// Out is where what was done is printed. A nil Out prints nothing.
+	Out io.Writer
+	// View, ViewLock and NoView are HandsAdd's: the view is published under the
+	// notifier's lock unless NoView, and a view that is busy or fails is said
+	// on Err and undoes nothing.
+	View     PosternViewPublisher
+	ViewLock ViewLock
+	NoView   bool
+	Err      io.Writer
+}
+
+// Run retires req's step, refusing a missing reason, a bead the tracker does not
+// hold and a step the bead does not have.
+func (h HandsRetire) Run(ctx context.Context, req HandsRetireRequest) error {
+	if h.Tracker == nil || h.Notes == nil {
+		return fmt.Errorf("mw hands retire: no work tracker is configured")
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		return fmt.Errorf("mw hands retire: --reason is required: say why the step is no longer needed")
+	}
+	found, err := h.Tracker.ShowBeads(ctx, []string{req.Bead})
+	if err != nil {
+		return fmt.Errorf("mw hands retire: reading %s: %w", req.Bead, err)
+	}
+	if len(found) == 0 || found[0].Story.ID != req.Bead {
+		return fmt.Errorf("mw hands retire: there is no bead %s", req.Bead)
+	}
+	raw, err := h.Notes.Note(ctx, HandsStepsKey(req.Bead))
+	if err != nil {
+		return err
+	}
+	steps, err := parseHandsSteps(raw)
+	if err != nil {
+		return fmt.Errorf("mw hands retire: %s: %w", HandsStepsKey(req.Bead), err)
+	}
+	var step *HandsStepRecord
+	for i := range steps {
+		if steps[i].ID == req.ID {
+			step = &steps[i]
+		}
+	}
+	if step == nil {
+		return fmt.Errorf("mw hands retire: %s has no step %s", req.Bead, req.ID)
+	}
+	if err := h.Notes.SetNote(ctx, HandsRetiredKey(req.Bead, req.ID), reason); err != nil {
+		return fmt.Errorf("mw hands retire: keeping that the step is retired: %w", err)
+	}
+	comment := fmt.Sprintf("HANDS STEP %s RETIRED (sha256 %s): %s\nIt is no longer for the Governor's hands and can no longer be approved or run.",
+		req.ID, domain.HandsSHA256(req.Bead, step.HandsStep), reason)
+	if err := h.Tracker.CommentOnStory(ctx, req.Bead, comment); err != nil {
+		return fmt.Errorf("mw hands retire: commenting on %s: %w", req.Bead, err)
+	}
+	if h.Out != nil {
+		fmt.Fprintf(h.Out, "retired step %s of %s: %s\n", req.ID, req.Bead, reason)
+	}
+	publishHandsView(ctx, h.View, h.ViewLock, h.NoView, func(format string, args ...any) {
+		if h.Err != nil {
+			fmt.Fprintf(h.Err, "mw hands retire: "+format+"\n", args...)
+		}
+	}, "the step is retired")
+	return nil
+}
+
 // HandsList prints every hands step of a bead: where and as whom it runs,
 // its §17 sha256, whether it has run, its text and its way back. With no
 // bead it prints one line for each step not yet run on every open bead. It
@@ -462,6 +556,10 @@ func (l HandsList) Run(ctx context.Context, bead string) ([]HandsStepRecord, err
 	if err != nil {
 		return nil, err
 	}
+	retired, err := l.Notes.NotesWithPrefix(ctx, "hands.retired."+bead+".")
+	if err != nil {
+		return nil, err
+	}
 	if l.Out == nil {
 		return steps, nil
 	}
@@ -475,6 +573,8 @@ func (l HandsList) Run(ctx context.Context, bead string) ([]HandsStepRecord, err
 			if r.Why == HandsStartedWhy {
 				state = fmt.Sprintf("started %s on %s, %s", r.At, r.Host, strings.TrimPrefix(r.Why, "started; "))
 			}
+		} else if why := strings.TrimSpace(retired[HandsRetiredKey(bead, step.ID)]); why != "" {
+			state = "retired: " + why + " (cannot be approved)"
 		} else if by := strings.TrimSpace(superseded[HandsSupersededKey(bead, step.ID)]); by != "" {
 			state = "superseded by " + by + " (cannot be approved)"
 		}
@@ -489,8 +589,8 @@ func (l HandsList) Run(ctx context.Context, bead string) ([]HandsStepRecord, err
 	return steps, nil
 }
 
-// runAll prints one line for each hands step no run was recorded for and no
-// newer step superseded, on each bead not closed: bead, step, host/user, age
+// runAll prints one line for each hands step no run was recorded for, no
+// newer step superseded and none retired, on each bead not closed: bead, step, host/user, age
 // and the step's text cut to one line. It returns those steps.
 func (l HandsList) runAll(ctx context.Context) ([]HandsStepRecord, error) {
 	notes, err := l.Notes.NotesWithPrefix(ctx, HandsStepsKey(""))
@@ -500,7 +600,7 @@ func (l HandsList) runAll(ctx context.Context) ([]HandsStepRecord, error) {
 	var beads []string
 	for _, key := range sortedKeys(notes) {
 		bead := strings.TrimPrefix(key, HandsStepsKey(""))
-		// hands.ran.*, hands.superseded.* and hands.approval.* are not step
+		// hands.ran.*, hands.superseded.*, hands.retired.* and hands.approval.* are not step
 		// lists: a step list is a JSON array, which they are not.
 		if records, err := parseHandsSteps(notes[key]); err == nil && len(records) > 0 {
 			beads = append(beads, bead)
@@ -527,7 +627,7 @@ func (l HandsList) runAll(ctx context.Context) ([]HandsStepRecord, error) {
 		}
 		records, _ := parseHandsSteps(notes[HandsStepsKey(bead)])
 		for _, record := range records {
-			if _, ran := parseHandsRan(notes[HandsRanKey(bead, record.ID)]); ran || strings.TrimSpace(notes[HandsSupersededKey(bead, record.ID)]) != "" {
+			if _, ran := parseHandsRan(notes[HandsRanKey(bead, record.ID)]); ran || strings.TrimSpace(notes[HandsSupersededKey(bead, record.ID)]) != "" || strings.TrimSpace(notes[HandsRetiredKey(bead, record.ID)]) != "" {
 				continue
 			}
 			waiting = append(waiting, record)

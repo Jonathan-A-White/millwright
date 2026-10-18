@@ -323,7 +323,7 @@ func damperHands(notes map[string]string) []string {
 			continue
 		}
 		for _, step := range viewHandsSteps(bead, notes) {
-			if step.Ran == nil && step.SupersededBy == "" {
+			if step.Ran == nil && step.SupersededBy == "" && step.Retired == "" {
 				beads = append(beads, bead)
 			}
 		}

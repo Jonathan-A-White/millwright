@@ -153,6 +153,16 @@ func (b BackendStage) swapStep(ctx context.Context, swap stagedSwap) (domain.Han
 	if by = strings.TrimSpace(by); by != "" {
 		return domain.HandsStep{}, "it is superseded by " + by + ", a newer swap", nil
 	}
+	retired, err := b.Notes.Note(ctx, HandsRetiredKey(swap.Bead, step.ID))
+	if err != nil {
+		return domain.HandsStep{}, "", err
+	}
+	if why := strings.TrimSpace(retired); why != "" {
+		return domain.HandsStep{}, "it was retired: " + why, nil
+	}
+	if detail, err := b.Tracker.ShowStory(ctx, swap.Bead); err == nil && detail.Closed() {
+		return domain.HandsStep{}, swap.Bead + " is closed", nil
+	}
 	ran, err := b.Notes.Note(ctx, HandsRanKey(swap.Bead, step.ID))
 	if err != nil {
 		return domain.HandsStep{}, "", err

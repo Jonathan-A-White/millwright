@@ -2806,6 +2806,7 @@ typed as a `!` line for him to copy (postern's docs/protocol.md §17):
 
 ```sh
 mw hands add <bead> --id <id> --host <host> --as user|root [--way-back '<commands>'] [--replace] -- '<commands>'
+mw hands retire <bead> --id <id> --reason '<why>'
 mw hands list [bead]
 ```
 
@@ -2844,6 +2845,14 @@ thread, and mailed to the Mayor. The record is first written as started (exit -1
 `mw hands list` says "started … has not reported back") before the step runs, and
 the finished one replaces it, so a pass cut off mid-step never leaves "not run". A refusal goes out the same three ways, says
 why, and is never tried again.
+
+A step he no longer needs — he ran it by hand, or it is moot — is retired with
+`mw hands retire <bead> --id <id> --reason '<why>'`: the reason is kept in
+`hands.retired.<bead>.<id>` and commented on the bead, the live view is published
+at once (`--no-view` skips it), the step leaves Needs you (a bead whose every
+step ran clean or is retired shows no hands card), and a tap on its hash is
+refused as retired. `mw hands list` shows it as `retired: <why>`; `mw hands add
+--replace` brings the id back. A tap on a step of a closed bead is refused too.
 
 The postern backend starts `mw postern inbox --apply` as its on-message hook, so
 a step that restarts the backend (`systemctl --user restart postern-backend`)

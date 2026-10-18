@@ -139,7 +139,7 @@ func (r MayorReader) HeldHands(ctx context.Context) ([]StoryDetail, error) {
 	var ids []string
 	for key := range notes {
 		id := strings.TrimPrefix(key, "hands.")
-		if id == key || strings.HasPrefix(id, "ran.") || strings.HasPrefix(id, "superseded.") || strings.HasPrefix(id, "approval.") {
+		if id == key || strings.HasPrefix(id, "ran.") || strings.HasPrefix(id, "superseded.") || strings.HasPrefix(id, "retired.") || strings.HasPrefix(id, "approval.") {
 			continue
 		}
 		if !waitingHandsStep(viewHandsSteps(id, notes)) {
@@ -168,7 +168,7 @@ func (r MayorReader) HeldHands(ctx context.Context) ([]StoryDetail, error) {
 // hands: not run clean, not superseded.
 func waitingHandsStep(steps []PosternViewHandsStep) bool {
 	for _, step := range steps {
-		if step.SupersededBy == "" && (step.Ran == nil || step.Ran.Exit != 0) {
+		if step.SupersededBy == "" && step.Retired == "" && (step.Ran == nil || step.Ran.Exit != 0) {
 			return true
 		}
 	}
