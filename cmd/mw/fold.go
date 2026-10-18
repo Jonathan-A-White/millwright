@@ -32,5 +32,33 @@ func newFoldCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&min, "min", application.DefaultFoldMin, "the smallest group listed")
+	cmd.AddCommand(newFoldSupersedeCmd())
+	return cmd
+}
+
+// newFoldSupersedeCmd builds `mw fold supersede <fold-id> [--dry-run]`: the
+// closing of a fold's bugs as superseded by it (mw-gq6.606).
+func newFoldSupersedeCmd() *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "supersede <fold-id> [--dry-run]",
+		Short: "Close each bug a fold carries as superseded by it, after moving what waited on the bug to wait on the fold",
+		Long: "supersede reads the ids under 'Folded bugs' in the fold's description. A bug a session is working, one\n" +
+			"already closed, and one whose id is not in the fold's acceptance criteria are left alone and said. For\n" +
+			"each other bug, every open story that waits on it now waits on the fold (a bug of the same fold: nothing;\n" +
+			"a bug of another fold: that fold waits on this one; an edge the tracker refuses as a cycle is left out and\n" +
+			"said), an open story held while it is moved; then the bug is closed as superseded by the fold. One line\n" +
+			"per bug. --dry-run writes nothing and prints the same plan.\n\n" + application.FoldRule,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			gateway, err := beads.FromConfig()
+			if err != nil {
+				return err
+			}
+			_, err = application.FoldSupersede{Tracker: gateway, Fold: args[0], DryRun: dryRun, Out: cmd.OutOrStdout()}.Run(cmd.Context())
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "write nothing and print the plan")
 	return cmd
 }

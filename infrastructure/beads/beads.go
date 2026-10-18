@@ -598,6 +598,23 @@ func (g *Gateway) AddBlocker(ctx context.Context, blocked, blocker string) error
 	return err
 }
 
+// Gateway satisfies the narrowed port mw fold supersede writes through.
+var _ application.FoldWriter = (*Gateway)(nil)
+
+// RemoveBlocker implements application.FoldWriter: one bd dep remove, which
+// takes the blocked bead first.
+func (g *Gateway) RemoveBlocker(ctx context.Context, blocked, blocker string) error {
+	_, err := g.call(ctx, "dep", "remove", blocked, blocker)
+	return err
+}
+
+// SupersedeStory implements application.FoldWriter: one bd supersede, which
+// closes the bead with a reference to its replacement.
+func (g *Gateway) SupersedeStory(ctx context.Context, id, with string) error {
+	_, err := g.call(ctx, "supersede", id, "--with", with)
+	return err
+}
+
 // HoldStory implements application.WorkTracker: the story goes back to
 // deferred, beads' own way of holding work, the status CreateStory files it
 // in.

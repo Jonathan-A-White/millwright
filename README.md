@@ -325,8 +325,16 @@ carries the first three per host. It only reads.
 their `class:<slug>` label (`mw tester file --class`), else under the screen their title names (the words before
 the first `:` after the app name, as in `Lampas Review:`), the largest group first, only groups of `--min`
 (default 3) or more, each bug with its id and title. A bug a session is working is shown and marked `in progress:
-do not fold`; iced bugs and a story that is itself a fold (its title says `<screen> fold:` after the app) are left out. It runs no model and writes nothing. The fold rule: a folded bug keeps its
-own check in the shared fix's test and closes only when it passes (mw-gq6.588).
+do not fold`; iced bugs and a story that is itself a fold (its title says `<screen> fold:` after the app) are left out. It runs no model and writes nothing. The fold rule: a folded bug's check
+is copied into the fold's acceptance criteria and the bug is closed as superseded by the fold (mw-gq6.588).
+
+`mw fold supersede <fold-id> [--dry-run]` does that closing for a fold's bugs: it reads the ids under `Folded bugs`
+in the fold's description and, for each, leaves it alone and says so when a session works it (`in progress`), when
+it is already closed, or when its id is not in the fold's acceptance criteria; for the rest, each open story that
+waits on the bug now waits on the fold (a bug of the same fold: nothing; a bug of another fold: that fold waits on this
+one; an edge the tracker would refuse as a cycle is left out and said), an open one held while it is moved, and the
+bug is closed as superseded by the fold (its wait on the fold, if any, removed first). One line per bug.
+`--dry-run` writes nothing and prints the same plan (mw-gq6.606).
 
 A host has **room** for a story of any host, `auto` or named, only while its
 1-minute load average is under `room_load_per_core` of a core each (default 1.0,

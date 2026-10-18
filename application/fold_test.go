@@ -142,7 +142,7 @@ func TestFoldNamesTheRuleAndAnEmptyResult(t *testing.T) {
 	if !strings.Contains(out, "no group of 9 or more") {
 		t.Errorf("expected a plain empty answer, got:\n%s", out)
 	}
-	if !strings.Contains(application.FoldRule, "keeps its own check") {
+	if !strings.Contains(application.FoldRule, "copied into the fold's acceptance criteria") {
 		t.Errorf("the fold rule is not stated: %q", application.FoldRule)
 	}
 }
