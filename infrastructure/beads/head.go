@@ -19,8 +19,16 @@ var _ application.BeadsHead = (*Gateway)(nil)
 const headQuery = "select dolt_hashof_db() as head"
 
 // Head implements application.BeadsHead: the hash of the beads' database as it
-// stands, unchanged while nothing is written to it.
+// stands, unchanged while nothing is written to it. Over the connection the
+// Gateway keeps open when it has one (WithHeadDB), by bd when it has none or
+// the connection failed.
 func (g *Gateway) Head(ctx context.Context) (string, error) {
+	if head, ok := g.headOverConnection(ctx); ok {
+		return head, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	out, err := g.call(ctx, "sql", "--json", headQuery)
 	if err != nil {
 		return "", err

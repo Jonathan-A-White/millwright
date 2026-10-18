@@ -33,8 +33,13 @@ const BuilderSeat = "builder"
 // the same act by the same program, and bd lets only the actor that claimed a
 // story close it.
 func mwGateway(dir, host string) *beads.Gateway {
-	return beads.New(dir, beads.WithActor(application.SeatIdentity(application.MwSeat, host)))
+	return beads.New(dir, append([]beads.Option{beads.WithActor(application.SeatIdentity(application.MwSeat, host))}, followerGatewayOptions...)...)
 }
+
+// followerGatewayOptions are what every Gateway made while the follower runs
+// is given besides its actor, and nothing otherwise: runEventsFollow sets them
+// before it builds anything and clears them when it returns.
+var followerGatewayOptions []beads.Option
 
 // mwVault is the vault's files as every command uses them: the clone in the
 // configured directory, committing under the same name mwGateway writes to the

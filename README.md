@@ -4681,6 +4681,16 @@ says otherwise; past it there is no cure — repacking would delete packs
 — so it only ever writes the check's own `doctor.beads-size` note for the
 Millhand to look at.
 
+**beads-churn** is for the host that runs the beads server (its `BEADS_DOLT_SERVER_HOST`
+is a loopback address): each run reads the server's own count of connections it has
+answered (`bd sql "show global status like 'Connections'"`) and judges the rate since
+the run before, faulty past 120 a minute. A quiet factory answers well under 60; the
+follower, when it started a `bd` for every read of the beads' head, brought the home
+to 514 a minute and Dolt to 1.6 cores all day (mw-gq6.596). The first run, one after
+a restart of the server and one more than an hour after the last only take a sample.
+There is no cure — a client that opens a connection per call is found with `ss -tnp`
+on the server's port and changed — so the second faulty run writes the note.
+
 **beads-stores** looks only at the vault's files: faulty when `.beads/dolt` and
 `.beads/embeddeddolt` both exist, which is what a `bd` run without
 `BEADS_DOLT_*` leaves beside a server-mode database. The reason names the
@@ -5023,6 +5033,8 @@ on a bundled font or data file that no credit names.
   Unmodified.
 - [sqlite](https://modernc.org/sqlite) (BSD 3-Clause licence, [LICENSE](https://gitlab.com/cznic/sqlite/-/blob/HEAD/LICENSE)):
   the pure-Go SQLite driver (`modernc.org/sqlite`, no cgo) under the FTS5 index of `mw todo search`. Unmodified.
+- [Go-MySQL-Driver](https://github.com/go-sql-driver/mysql) (Mozilla Public License 2.0, [LICENSE](https://github.com/go-sql-driver/mysql/blob/HEAD/LICENSE)):
+  the one connection `mw events follow` keeps open to the beads server to read the beads' head, in place of a `bd` started every second. Unmodified.
 
 ### Outside services and networks
 

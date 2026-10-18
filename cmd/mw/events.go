@@ -82,12 +82,35 @@ func newEventsFollowCmd() *cobra.Command {
 	return cmd
 }
 
+// followerNoteWait is how long the follower keeps a note it read from bd before
+// it reads it again: the notes it reads every pass (the month's review filed,
+// the harness hold, the inbox cursor) change rarely, and a change another
+// process makes is seen within this wait.
+const followerNoteWait = time.Minute
+
+// followerPublishEvery is the least time between the views of two heads: the
+// Governor's phone is not held up by ten seconds, and the beads' server is
+// spared the reads of a view for every write.
+const followerPublishEvery = 10 * time.Second
+
 // runEventsFollow runs the follower until SIGTERM or SIGINT: what `mw events
 // follow` and `mw postern view --follow` both are.
 func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 	if every <= 0 {
 		return fmt.Errorf("--every must be a positive duration, like 1s")
 	}
+	// The follower reads the beads' head every second and a few notes on every
+	// pass; started as a bd each, those were 8.5 new connections a second to the
+	// beads server (mw-gq6.596). The head is read over one connection kept open,
+	// and a note is read from bd once in followerNoteWait.
+	followerGatewayOptions = []beads.Option{beads.WithNoteCache(followerNoteWait)}
+	if dir, err := config.Vault(); err == nil {
+		if db := beads.ServerHeadDB(dir); db != nil {
+			defer db.Close()
+			followerGatewayOptions = append(followerGatewayOptions, beads.WithHeadDB(db))
+		}
+	}
+	defer func() { followerGatewayOptions = nil }()
 	gateway, host, err := posternGateway()
 	if err != nil {
 		return err
@@ -220,8 +243,11 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 			return err
 		},
 		Aside: true,
-		Every: every,
-		Err:   cmd.ErrOrStderr(),
+		// Each head's view is read from the beads by a handful of bd calls; a
+		// busy beads moves its head every few seconds (mw-gq6.596).
+		PublishEvery: followerPublishEvery,
+		Every:        every,
+		Err:          cmd.ErrOrStderr(),
 	}.Run(ctx)
 }
 

@@ -90,17 +90,32 @@ func (g *Gateway) Note(ctx context.Context, key string) (string, error) {
 	if key == "" {
 		return "", fmt.Errorf("a note needs a key")
 	}
+	if g.notes != nil {
+		if kept, ok := g.notes.get(key, g.clock()); ok {
+			return kept, nil
+		}
+	}
 	out, err := g.call(ctx, "kv", "get", key)
 	if err != nil {
 		said := strings.ToLower(err.Error())
 		for _, missing := range NoteMissing {
 			if strings.Contains(said, missing) {
+				g.keepNote(key, "")
 				return "", nil
 			}
 		}
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	value := strings.TrimSpace(string(out))
+	g.keepNote(key, value)
+	return value, nil
+}
+
+// keepNote remembers key's value, when this Gateway keeps notes.
+func (g *Gateway) keepNote(key, value string) {
+	if g.notes != nil {
+		g.notes.put(key, value, g.clock())
+	}
 }
 
 // NotesWithPrefix implements application.DoctorNotes. bd's own `kv list` has
@@ -187,7 +202,14 @@ func (g *Gateway) SetNote(ctx context.Context, key, value string) error {
 		return fmt.Errorf("a note needs a key")
 	}
 	_, err := g.call(ctx, "kv", "set", key, value)
-	return err
+	if err != nil {
+		if g.notes != nil {
+			g.notes.forget(key)
+		}
+		return err
+	}
+	g.keepNote(key, strings.TrimSpace(value))
+	return nil
 }
 
 // firstLine is the first thing bd said, which is the sentence worth repeating;
@@ -207,11 +229,16 @@ func (g *Gateway) ClearNote(ctx context.Context, key string) error {
 		said := strings.ToLower(err.Error())
 		for _, missing := range NoteMissing {
 			if strings.Contains(said, missing) {
+				g.keepNote(key, "")
 				return nil
 			}
 		}
+		if g.notes != nil {
+			g.notes.forget(key)
+		}
 		return err
 	}
+	g.keepNote(key, "")
 	return nil
 }
 

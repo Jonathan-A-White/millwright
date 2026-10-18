@@ -936,3 +936,41 @@ func TestPosternTapsReadsTheBackendNoOftenerThanEvery(t *testing.T) {
 		t.Fatalf("expected the tap applied once Every had passed, but mw-e.1 is %s", got)
 	}
 }
+
+// countingNotes counts the reads of every applied note, which the tap pass
+// needs only to tell which of the records it reads it applied already.
+type countingNotes struct {
+	application.PosternNotes
+	listed int
+}
+
+func (c *countingNotes) NotesWithPrefix(ctx context.Context, prefix string) (map[string]string, error) {
+	c.listed++
+	return c.PosternNotes.NotesWithPrefix(ctx, prefix)
+}
+
+// A tap pass that finds no record newer than its cursor has nothing to tell
+// applied from not, so it does not read the applied notes: every read of the
+// beads is a connection to their server (mw-gq6.596).
+func TestPosternTapsReadsNoAppliedNotesWhenNothingIsNew(t *testing.T) {
+	f := newApplyFixture(t)
+	notes := &countingNotes{PosternNotes: f.tracker}
+	inbox := f.inbox()
+	inbox.Memory = notes
+	taps := &application.PosternTaps{Inbox: inbox}
+
+	mustDo(t, taps.Tap(context.Background()))
+	mustDo(t, taps.Tap(context.Background()))
+	if notes.listed != 0 {
+		t.Fatalf("expected no read of the applied notes on a pass with no record, got %d", notes.listed)
+	}
+
+	f.action(t, "tx-new", map[string]any{"action": "release", "bead": "mw-e.1"})
+	mustDo(t, taps.Tap(context.Background()))
+	if got := f.status(t, "mw-e.1"); got != apptest.StatusOpen {
+		t.Fatalf("expected the tap applied, but mw-e.1 is %s", got)
+	}
+	if notes.listed == 0 {
+		t.Fatal("expected the applied notes read once there was a record to apply")
+	}
+}
