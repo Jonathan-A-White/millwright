@@ -2040,13 +2040,11 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 		report.Closed = true
 	}
 	// Told once: the run that landed the story says so, and a later run that
-	// only closes it has nothing new for the Mayor.
+	// only closes it has nothing new for the Mayor (it files only the bug an
+	// earlier one could not).
+	verdict, said := n.closingMail(ctx, c, report, again)
 	if !again {
-		verdict := MailLanded
-		if c.tested != "" {
-			verdict = MailTested
-		}
-		n.mailTheMayor(ctx, c, report, verdict, n.closingProposals(ctx, c))
+		n.mailTheMayor(ctx, c, report, verdict, said)
 	}
 	if closeErr != nil {
 		return *report, fmt.Errorf("closing out %s: it %s, but the story could not be closed, so it is landed and still open: %w",
@@ -2518,16 +2516,27 @@ func (n Next) changelogEntry(ctx context.Context, c *closeOut, report *NextRepor
 	return domain.ChangelogEntry{Date: n.now().UTC().Format("2006-01-02"), Story: c.id, Kind: kind, Text: note.Text}, nil
 }
 
-// closingProposals is what a landing's mail carries from the story's closing
-// comments: its common errors (mw-gq6.420), then its rig-memory proposals, a
-// blank line apart. The comments are read once; when they cannot be, it is
-// empty, and a landing is never refused for it.
-func (n Next) closingProposals(ctx context.Context, c *closeOut) string {
+// closingMail is the verdict a landing's mail goes under and the block it
+// carries, from the story's closing comments, read once: for a landing whose
+// comment says an acceptance criterion is not met, the criteria marked in the
+// verdict and the bug filed for them, then its common errors (mw-gq6.420) and
+// its rig-memory proposals, a blank line apart. When the comments cannot be
+// read the block is empty, and a landing is never refused for it. A close-out run again (again) files the bug an earlier one could not,
+// and sends nothing.
+func (n Next) closingMail(ctx context.Context, c *closeOut, report *NextReport, again bool) (verdict, said string) {
+	verdict = MailLanded
+	if c.tested != "" {
+		verdict = MailTested
+	}
 	comments, err := n.Tracker.StoryComments(ctx, c.id)
 	if err != nil {
-		return ""
+		return verdict, ""
 	}
-	return joinBlocks(n.commonErrors(ctx, c, comments), n.rigMemoryProposals(ctx, c, comments))
+	var unmet string
+	if c.tested == "" {
+		verdict, unmet = n.landedWithoutACs(ctx, c, report, again, comments)
+	}
+	return verdict, joinBlocks(unmet, n.commonErrors(ctx, c, comments), n.rigMemoryProposals(ctx, c, comments))
 }
 
 // rigMemoryProposals is the block from the story's newest closing comment that

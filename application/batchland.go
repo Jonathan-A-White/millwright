@@ -754,7 +754,8 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 
 	for _, m := range mails {
 		m.sent.AfterLandingSkipped = once.AfterLandingSkipped
-		n.mailTheMayor(ctx, m.c, m.sent, MailLanded, n.closingProposals(ctx, m.c))
+		verdict, said := n.closingMail(ctx, m.c, m.sent, false)
+		n.mailTheMayor(ctx, m.c, m.sent, verdict, said)
 		report.Mailed = append(report.Mailed, MailLanded+": "+m.c.id)
 	}
 }

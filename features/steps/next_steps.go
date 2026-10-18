@@ -225,6 +225,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextVersionSteps(ctx, c)
 	registerNextChangelogSteps(ctx, c)
 	registerNextCommonErrorsSteps(ctx, c)
+	registerAcNotMetSteps(ctx, c)
 	registerTesterSteps(ctx, c)
 	registerNextCrossSlotSteps(ctx, c)
 	registerNextGateSteps(ctx, c)
