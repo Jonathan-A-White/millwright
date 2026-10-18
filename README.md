@@ -2327,6 +2327,10 @@ there it copies nothing and says nothing; there is no new timer and no new setti
 A step whose ssh fails with exit 255 and a connect or banner timeout is tried once more
 after 15 s, and the run prints `retried <step> after 15s: ssh timed out`; a second timeout, or any
 other failure (a refused key, a missing path, another exit status), fails the run at once.
+The exception among the exit statuses is rsync's 24, files that vanished from the source
+before they could be copied (postern removing a blob mid-copy): the next run copies what is
+there then, so the run succeeds and prints `copied <dir> to <host> (N files vanished
+mid-copy, the next run catches up)`. Exit 23 still fails.
 
 ```toml
 postern_data = "/home/me/postern-data"

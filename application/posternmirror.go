@@ -38,8 +38,32 @@ type PosternMirrorer interface {
 	// Copy copies names, paths under dir here, with their directories, to dest, an
 	// rsync destination (`host:/path/`). rsh is the remote shell rsync reaches dest
 	// by; empty leaves that to rsync's own default. A name that is not there is
-	// skipped.
+	// skipped. A copy that lost only files that vanished from dir while it ran
+	// (rsync's exit 24) returns a *CopyVanished: the files are there next run.
 	Copy(ctx context.Context, dir string, names []string, rsh []string, dest string) error
+}
+
+// CopyVanished is what PosternMirrorer.Copy returns when the copy finished but
+// Files of the files it listed were gone from the source before it could read
+// them: a blob postern removed mid-copy. It is no failure, because the next run
+// lists what is there then.
+type CopyVanished struct{ Files int }
+
+func (v *CopyVanished) Error() string {
+	return fmt.Sprintf("%d %s vanished mid-copy", v.Files, plural(v.Files, "file", "files"))
+}
+
+// copiedLine is the line a copy of what to where is told by: err is nil or a
+// *CopyVanished, and the second result is false for any other error.
+func copiedLine(what, where string, err error) (string, bool) {
+	var vanished *CopyVanished
+	switch {
+	case err == nil:
+		return fmt.Sprintf("copied %s to %s", what, where), true
+	case errors.As(err, &vanished):
+		return fmt.Sprintf("copied %s to %s (%s, the next run catches up)", what, where, vanished), true
+	}
+	return "", false
 }
 
 // PosternMirror is mw postern mirror: on the home, copy the backend's data and the
@@ -183,10 +207,11 @@ func (m PosternMirror) toBoost(ctx context.Context) error {
 	copyErr := m.retried(ctx, "copying to "+boost, func() error {
 		return m.Mirrorer.Copy(ctx, m.DataDir, names, rsh, host+":"+m.DataDir+"/")
 	})
-	if err := copyErr; err != nil {
-		return fmt.Errorf("copying to %s: %w", boost, err)
+	line, ok := copiedLine(m.DataDir, boost, copyErr)
+	if !ok {
+		return fmt.Errorf("copying to %s: %w", boost, copyErr)
 	}
-	fmt.Fprintf(m.Out, "copied %s to %s\n", m.DataDir, boost)
+	fmt.Fprintln(m.Out, line)
 	return nil
 }
 
@@ -233,10 +258,11 @@ func (m PosternMirror) millToBoost(ctx context.Context) error {
 	copyErr := m.retried(ctx, "copying the mill's state to "+boost, func() error {
 		return m.Mirrorer.Copy(ctx, m.MillStateDir, []string{"."}, rsh, host+":"+m.MillStateDir+"/")
 	})
-	if err := copyErr; err != nil {
-		return fmt.Errorf("copying the mill's state to %s: %w", boost, err)
+	line, ok := copiedLine("the mill's state "+m.MillStateDir, boost, copyErr)
+	if !ok {
+		return fmt.Errorf("copying the mill's state to %s: %w", boost, copyErr)
 	}
-	fmt.Fprintf(m.Out, "copied the mill's state %s to %s\n", m.MillStateDir, boost)
+	fmt.Fprintln(m.Out, line)
 	return nil
 }
 
@@ -248,9 +274,10 @@ func (m PosternMirror) toWatchdog(ctx context.Context) error {
 	copyErr := m.retried(ctx, "copying to the watchdog", func() error {
 		return m.Mirrorer.Copy(ctx, m.DataDir, names, nil, m.WatchdogTarget)
 	})
-	if err := copyErr; err != nil {
-		return fmt.Errorf("copying to the watchdog at %s: %w", m.WatchdogTarget, err)
+	line, ok := copiedLine("the vapid keys and push subscriptions", m.WatchdogTarget, copyErr)
+	if !ok {
+		return fmt.Errorf("copying to the watchdog at %s: %w", m.WatchdogTarget, copyErr)
 	}
-	fmt.Fprintf(m.Out, "copied the vapid keys and push subscriptions to %s\n", m.WatchdogTarget)
+	fmt.Fprintln(m.Out, line)
 	return nil
 }

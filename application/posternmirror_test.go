@@ -127,3 +127,34 @@ func TestPosternMirrorFailsAtOnceOnAnyOtherSSHFailure(t *testing.T) {
 		}
 	}
 }
+
+func TestPosternMirrorTakesFilesVanishedMidCopyForASuccessAndSaysSo(t *testing.T) {
+	m := &retryMirrorer{copyErrs: []error{&application.CopyVanished{Files: 2}}}
+	out, waits, err := runRetryMirror(t, m)
+	if err != nil {
+		t.Fatalf("a copy that lost files to a vanishing blob failed the run: %v", err)
+	}
+	if m.copies != 1 || len(waits) != 0 {
+		t.Fatalf("copied %d times with waits %v; want 1 and none", m.copies, waits)
+	}
+	want := "copied /data to desktop (2 files vanished mid-copy, the next run catches up)\n"
+	if out != want {
+		t.Fatalf("out = %q, want %q", out, want)
+	}
+}
+
+func TestPosternMirrorSaysOneFileVanishedInTheSingular(t *testing.T) {
+	m := &retryMirrorer{copyErrs: []error{&application.CopyVanished{Files: 1}}}
+	out, _, err := runRetryMirror(t, m)
+	if err != nil || !strings.Contains(out, "(1 file vanished mid-copy, the next run catches up)") {
+		t.Fatalf("err = %v, out = %q", err, out)
+	}
+}
+
+func TestPosternMirrorStillFailsOnARsyncPartialTransfer(t *testing.T) {
+	m := &retryMirrorer{copyErrs: []error{errors.New("rsync to desktop:/data/: exit status 23: some files could not be transferred")}}
+	out, _, err := runRetryMirror(t, m)
+	if err == nil || strings.Contains(out, "copied") {
+		t.Fatalf("err = %v, out = %q; want a failure and no copied line", err, out)
+	}
+}

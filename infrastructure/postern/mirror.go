@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -110,8 +111,13 @@ func lastLine(path string) (string, error) {
 	return last, lines.Err()
 }
 
+// rsyncVanished is rsync's exit status for "some source files vanished before
+// they could be transferred": postern removing a blob mid-copy.
+const rsyncVanished = 24
+
 // Copy implements application.PosternMirrorer: one `rsync -rpR`, run in dir so
-// that names stay relative and keep their directories.
+// that names stay relative and keep their directories. Exit 24 is a
+// *application.CopyVanished, not a failure; exit 23 and every other code fail.
 func (Mirrorer) Copy(ctx context.Context, dir string, names []string, rsh []string, dest string) error {
 	if len(rsh) == 0 {
 		rsh = unattendedSSH
@@ -120,6 +126,10 @@ func (Mirrorer) Copy(ctx context.Context, dir string, names []string, rsh []stri
 	cmd := exec.CommandContext(ctx, "rsync", append(args, dest)...)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == rsyncVanished {
+			return &application.CopyVanished{Files: max(1, strings.Count(string(out), "file has vanished:"))}
+		}
 		return fmt.Errorf("rsync to %s: %w: %s", dest, err, strings.TrimSpace(string(out)))
 	}
 	return nil
