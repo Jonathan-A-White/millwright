@@ -353,10 +353,22 @@ func (g *Gateway) ReleaseClaim(ctx context.Context, id string) error {
 // claim made on another host is that host's and not this Gateway's. An empty
 // holder is this Gateway's own actor.
 func (g *Gateway) ReleaseClaimHeldBy(ctx context.Context, id, holder string) error {
+	return g.giveClaimBack(ctx, id, holder, StatusOpen)
+}
+
+// HoldClaimHeldBy implements application.WorkTracker: ReleaseClaimHeldBy that
+// leaves the story deferred (held) instead of open, in the one bd update, so no
+// dispatcher sees it open in between (mw-gq6.597).
+func (g *Gateway) HoldClaimHeldBy(ctx context.Context, id, holder string) error {
+	return g.giveClaimBack(ctx, id, holder, StatusDeferred)
+}
+
+// giveClaimBack clears the assignee and sets status, guarded on holder.
+func (g *Gateway) giveClaimBack(ctx context.Context, id, holder, status string) error {
 	if holder == "" {
 		holder = g.actor
 	}
-	args := []string{"update", id, "--status", StatusOpen, "--assignee", ""}
+	args := []string{"update", id, "--status", status, "--assignee", ""}
 	if holder != "" {
 		args = append(args, "--if-assignee", holder)
 	}
