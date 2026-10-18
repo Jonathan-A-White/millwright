@@ -64,7 +64,48 @@ func newCloudCmd() *cobra.Command {
 	})
 	cmd.AddCommand(newCloudMakeCmd())
 	cmd.AddCommand(newCloudCapCmd())
+	cmd.AddCommand(newCloudDownCmd())
 	return cmd
+}
+
+// newCloudDownCmd builds `mw cloud down <box>`: a box destroyed by hand, and
+// its stories taken off it.
+func newCloudDownCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "down <box>",
+		Short: "Destroy a cloud box and re-path its open and deferred stories to host=auto",
+		Long: "down destroys the box (cloud1, cloud2, ...) as the cloud check does an idle one, and takes it\n" +
+			"out of the book. Every open or deferred story whose path names the box is set to host=auto,\n" +
+			"so that it is not left waiting for a host that is gone; a story on another host is left alone,\n" +
+			"and so is a claimed one. It says which stories it moved. The cloud check does the same for a\n" +
+			"box it destroys itself. It runs on the home only.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			check, ok, err := cloudCheck(cmd.Context(), cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("no [cloud] table in the config, or this host is not home: no box is destroyed")
+			}
+			report, err := downCloudBox(cmd.Context(), check, args[0])
+			if report != "" {
+				fmt.Fprintln(cmd.OutOrStdout(), report)
+			}
+			return err
+		},
+	}
+}
+
+// downCloudBox destroys one box under the cloud lock, so that it does not run
+// beside a check.
+func downCloudBox(ctx context.Context, check application.CloudCheck, name string) (string, error) {
+	release, err := waitForCloudLock(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	return check.Down(ctx, name)
 }
 
 // newCloudCapCmd builds `mw cloud cap <n>`: box_cap, changed where the cloud
@@ -203,8 +244,9 @@ func cloudCheck(ctx context.Context, out io.Writer) (application.CloudCheck, boo
 	}
 	gateway := mwGateway(dir, host)
 	return application.CloudCheck{
-		Work:  gateway,
-		Notes: gateway,
+		Work:    gateway,
+		Stories: gateway,
+		Notes:   gateway,
 		Provider: cloud.Vultr{
 			Command: settings.Command, Snapshot: settings.Snapshot, Out: out,
 			UpLimit: time.Duration(settings.UpMinutes) * time.Minute,
