@@ -100,10 +100,13 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 	if err != nil {
 		return err
 	}
+	cloudBook, cloudPlan := posternCloud()
 	view := application.PosternView{
 		Tracker:    gateway,
 		Notes:      gateway,
 		Signs:      posternSigns(),
+		Cloud:      cloudBook,
+		CloudPlan:  cloudPlan,
 		Host:       host,
 		Now:        posternViewClock,
 		Err:        cmd.ErrOrStderr(),

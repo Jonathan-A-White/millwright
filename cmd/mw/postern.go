@@ -155,6 +155,22 @@ func posternSigns() application.HostSigns {
 	return mwVault(dir, host)
 }
 
+// posternCloud is the cloud's book and plan the Postern view reads, so that a
+// box the factory destroyed is not a host down on the Map (mw-ev7oyy.45). On a
+// host with no [cloud] table, or no vault or host, the book is nil and every
+// host the view finds stays in.
+func posternCloud() (application.CloudBook, application.CloudPlan) {
+	dir, err := config.Vault()
+	if err != nil {
+		return nil, application.CloudPlan{}
+	}
+	host, err := config.Host()
+	if err != nil {
+		return nil, application.CloudPlan{}
+	}
+	return cloudStatus(dir, host)
+}
+
 // newPosternInboxCmd builds `mw postern inbox`, reading from the postern
 // backend at postern_backend and decrypting with the postern key.
 func newPosternInboxCmd() *cobra.Command {

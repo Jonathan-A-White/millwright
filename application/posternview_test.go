@@ -1088,3 +1088,57 @@ func TestPosternViewRunRetriesAWriteThatFailedEvenWhenTheViewIsUnchanged(t *test
 		t.Fatalf("expected the retry to write, got %d writes", file.Writes())
 	}
 }
+
+// A cloud box the factory destroyed leaves its last_sync note behind; the
+// view leaves it out of its hosts, so that Postern shows no red chip for a
+// teardown that was planned (mw-ev7oyy.45). A box up but silent is still
+// listed, and so is one made again under the same name.
+func TestPosternViewHostsLeaveOutADestroyedCloudBox(t *testing.T) {
+	ctx := context.Background()
+	stale := viewNow.Add(-4 * time.Hour).Format(time.RFC3339)
+	fresh := viewNow.Add(-time.Minute).Format(time.RFC3339)
+	cases := []struct {
+		name  string
+		book  *apptest.FakeCloudBook
+		notes map[string]string
+		want  []string
+	}{
+		{"destroyed box is left out", &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud2", Up: viewNow}}}},
+			map[string]string{"cloud1": stale, "cloud2": stale, "laptop": stale},
+			[]string{"cloud2@2026-09-28T08:00:00Z", "desktop@", "laptop@2026-09-28T08:00:00Z"}},
+		{"box up but silent still shows", &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud1", Up: viewNow}}}},
+			map[string]string{"cloud1": stale},
+			[]string{"cloud1@2026-09-28T08:00:00Z", "desktop@"}},
+		{"box made again under the same name shows", &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud1", Up: viewNow, Making: true}}}},
+			map[string]string{"cloud1": fresh},
+			[]string{"cloud1@2026-09-28T11:59:00Z", "desktop@"}},
+		{"a live box shows", &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud3", Up: viewNow}}}},
+			map[string]string{"cloud3": fresh},
+			[]string{"cloud3@2026-09-28T11:59:00Z", "desktop@"}},
+		{"a host that is no cloud box is never left out", &apptest.FakeCloudBook{},
+			map[string]string{"cloudy": stale, "vps": stale},
+			[]string{"cloudy@2026-09-28T08:00:00Z", "desktop@", "vps@2026-09-28T08:00:00Z"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tracker := apptest.NewFakeTracker()
+			for host, at := range c.notes {
+				mustDo(t, tracker.SetNote(ctx, application.LastSyncKey(host), at))
+			}
+			doc, err := application.PosternView{
+				Tracker: tracker, Notes: tracker, Host: "desktop", Cloud: c.book,
+				Now: func() time.Time { return viewNow },
+			}.Build(ctx)
+			if err != nil {
+				t.Fatalf("building the view: %v", err)
+			}
+			var hosts []string
+			for _, h := range doc.Hosts {
+				hosts = append(hosts, h.Name+"@"+h.LastSync)
+			}
+			if !equalStrings(hosts, c.want) {
+				t.Fatalf("expected hosts %v, got %v", c.want, hosts)
+			}
+		})
+	}
+}
