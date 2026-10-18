@@ -515,3 +515,24 @@ func TestRigMemoryFilesAreReadAndRemovedAndNothingElse(t *testing.T) {
 		t.Error("a rig name that reaches outside the vault was read")
 	}
 }
+
+func TestRigMemorySizesCountTheNewestFactsLeftOutOfTheRender(t *testing.T) {
+	dir := aFactsVault(t)
+	facts := filepath.Join(dir, "seats", "builder", "rigs", "kiln", "facts")
+	newer := "---\nsubject: oven\nkind: gotcha\nstatus: current\nsource: mw-2\nsince: 2026-10-17\nboot: no\n---\n\nIt cools slowly.\n"
+	if err := os.WriteFile(filepath.Join(facts, "slow.md"), []byte(newer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sizes, err := vault.New(dir).RigMemorySizes(context.Background(), "builder")
+	if err != nil {
+		t.Fatalf("sizing the memories: %v", err)
+	}
+	for _, size := range sizes {
+		if size.Rig == "kiln" && size.SearchOnlyNewest != 1 {
+			t.Errorf("expected the one newer search-only fact counted, got %+v", size)
+		}
+		if size.Rig != "kiln" && size.SearchOnlyNewest != 0 {
+			t.Errorf("expected none for %s, got %+v", size.Rig, size)
+		}
+	}
+}

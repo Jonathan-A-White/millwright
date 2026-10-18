@@ -154,3 +154,24 @@ func TestSeatBootCountsTheQueriesOfTheRigsSubjects(t *testing.T) {
 		t.Errorf("counts: %v", counts)
 	}
 }
+
+func TestListSaysWhenANearFullRenderLeavesTheNewestFactsSearchOnly(t *testing.T) {
+	demoted := strings.Replace(queryFact("git", "Never push."), "since: 2026-09-01", "since: 2026-10-01\nboot: no", 1)
+	list := func(budget int) string {
+		var out bytes.Buffer
+		m := application.Memory{
+			Files: queryFiles{files: map[string]string{"a.md": queryFact("bd", "Use -C with bd."), "c.md": demoted}},
+			Seat:  "builder", Out: &out, Budget: budget,
+		}
+		if err := m.List(context.Background(), application.MemoryList{Rig: "kiln"}); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	if got := list(50); !strings.Contains(got, "1 of the newest facts are search-only: prune") {
+		t.Errorf("expected the search-only line:\n%s", got)
+	}
+	if got := list(8000); strings.Contains(got, "search-only") {
+		t.Errorf("expected no line with room in the render:\n%s", got)
+	}
+}

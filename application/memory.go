@@ -469,6 +469,32 @@ func (m Memory) Promote(ctx context.Context, rig, slug string) error {
 	return m.putAndRecord(ctx, rig, fact, "promote "+rig+" "+slug)
 }
 
+// NearFullPercent is how full, of its budget, a rig's boot render is called
+// near full: the point past which a new fact may well be sent to search only.
+const NearFullPercent = 95
+
+// NewestSearchOnly is how many of a rig's newest facts sit outside the boot
+// render: the current facts demoted (boot: no) that are newer, by their since
+// date, than every current fact in the render. A fact of the same day as the
+// newest one in the render is not counted, and 0 means the newest fact is read
+// at boot. A demoted old fact, older than something in the render, is no new
+// fact and is not counted.
+func NewestSearchOnly(facts []RigFact) int {
+	newestBooted := ""
+	for _, fact := range facts {
+		if fact.Status == FactCurrent && !fact.Unbooted && fact.Since > newestBooted {
+			newestBooted = fact.Since
+		}
+	}
+	count := 0
+	for _, fact := range facts {
+		if fact.Status == FactCurrent && fact.Unbooted && fact.Since > newestBooted {
+			count++
+		}
+	}
+	return count
+}
+
 // statusRank puts the facts a Builder reads first.
 func statusRank(s FactStatus) int {
 	switch s {
@@ -528,7 +554,11 @@ func (m Memory) List(ctx context.Context, req MemoryList) error {
 	for _, why := range skipped {
 		fmt.Fprintf(m.Out, "skipped: %s\n", why)
 	}
-	fmt.Fprintf(m.Out, "render %d/%d bytes\n", len(RenderRigMemory(about, all)), m.Budget)
+	size := len(RenderRigMemory(about, all))
+	fmt.Fprintf(m.Out, "render %d/%d bytes\n", size, m.Budget)
+	if unseen := NewestSearchOnly(all); unseen > 0 && m.Budget > 0 && size*100 >= m.Budget*NearFullPercent {
+		fmt.Fprintf(m.Out, "%d of the newest facts are search-only: prune (seats/mayor/pruning.md)\n", unseen)
+	}
 	return nil
 }
 

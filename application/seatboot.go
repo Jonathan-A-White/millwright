@@ -126,6 +126,9 @@ type RigMemorySize struct {
 	// Facts is whether the rig is kept as facts, in which case Bytes is the size
 	// of the render a Builder reads, not of any one file.
 	Facts bool
+	// SearchOnlyNewest is how many of the rig's newest current facts a Builder
+	// never reads at boot (NewestSearchOnly); zero for a rig not kept as facts.
+	SearchOnlyNewest int
 }
 
 // SeatWork is everything one story is allowed to have changed in the vault,

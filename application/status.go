@@ -684,6 +684,9 @@ type StatusReport struct {
 	RigMemory []RigMemorySize
 	// RigMemoryBudget is the size a rig's memory was held to.
 	RigMemoryBudget int
+	// RigMemoryUnseen are the rigs kept as facts whose boot render is near full
+	// and whose newest facts are search-only, in rig order.
+	RigMemoryUnseen []RigMemorySize
 	// RigEvals are the rigs whose eval.md does not pass, in rig order.
 	RigEvals []RigEvalFailure
 	// Halt is what this host's own sync-halted mark says, read straight from
@@ -1077,6 +1080,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report.RigMemory = s.overBudget(sizes)
 	report.RigEvals = s.rigEvalFailures(ctx, sizes)
 	report.RigMemoryBudget = s.rigMemoryBudget()
+	report.RigMemoryUnseen = s.nearFullSearchOnly(sizes)
 
 	if s.SyncHalt != nil {
 		if info, there, err := s.SyncHalt.Read(ctx); err != nil {
@@ -1553,6 +1557,19 @@ func (s Status) overBudget(sizes []RigMemorySize) []RigMemorySize {
 	return over
 }
 
+// nearFullSearchOnly is the rigs kept as facts whose render is within
+// NearFullPercent of the budget (or past it) while their newest facts are
+// search-only: a Builder never read those facts at boot, and nothing else says so.
+func (s Status) nearFullSearchOnly(sizes []RigMemorySize) []RigMemorySize {
+	var unseen []RigMemorySize
+	for _, size := range sizes {
+		if size.Facts && size.SearchOnlyNewest > 0 && size.Bytes*100 >= s.rigMemoryBudget()*NearFullPercent {
+			unseen = append(unseen, size)
+		}
+	}
+	return unseen
+}
+
 // rigEvalFailures are the rigs kept as facts whose eval.md does not pass, in
 // rig order. A rig with no eval.md, and a report with no RigFacts to run one
 // against, have none. An eval.md that cannot be read is a failure with its
@@ -1921,7 +1938,7 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	}
 
-	if len(r.RigMemory) > 0 || len(r.RigEvals) > 0 {
+	if len(r.RigMemory) > 0 || len(r.RigMemoryUnseen) > 0 || len(r.RigEvals) > 0 {
 		clip(&b, RigMemoryHeading)
 		for _, size := range r.RigMemory {
 			fix := "prune"
@@ -1929,6 +1946,14 @@ func (r StatusReport) String() string {
 				fix = "retire or supersede"
 			}
 			clip(&b, fmt.Sprintf("  %s %d/%d bytes: %s (Mayor)", size.Rig, size.Bytes, r.RigMemoryBudget, fix))
+		}
+		for _, size := range r.RigMemoryUnseen {
+			facts := "facts are"
+			if size.SearchOnlyNewest == 1 {
+				facts = "fact is"
+			}
+			wrapInto(&b, "  ", fmt.Sprintf("%s memory: boot render %d/%d; the last %d new %s search-only: prune (seats/mayor/pruning.md)",
+				size.Rig, size.Bytes, r.RigMemoryBudget, size.SearchOnlyNewest, facts))
 		}
 		for _, failure := range r.RigEvals {
 			clip(&b, "  "+failure.Line())
