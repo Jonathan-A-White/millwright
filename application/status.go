@@ -443,6 +443,11 @@ type RunningStory struct {
 	// none is. Now is when it was read, to say how long it has run.
 	CloseOut *CloseOutMark
 	Now      time.Time
+	// Stranded is when the claim's lease ran out with no heartbeat since, zero
+	// while it holds or when the story is not one a session is meant to be
+	// renewing (refused, queued, handed back): a claim whose session never
+	// started or is gone looks exactly so (mw-gq6.576).
+	Stranded time.Time
 }
 
 // Stopped reports whether this story's session is not to be trusted as
@@ -502,6 +507,8 @@ type HostWork struct {
 	// stuck, may say nothing of a halt that has not cleared yet. Nil when it
 	// has recorded none.
 	Halt *SyncHaltInfo
+	// Now is when the report was read, to judge the lease of a claimed story.
+	Now time.Time
 	// Asleep says this host has been silent for longer than the threshold — or
 	// has never synced, or left a note that is not a time. Its stories are
 	// stranded: nothing here will move them, and no other host will take them
@@ -1349,7 +1356,26 @@ func (s Status) running(ctx context.Context, detail StoryDetail) (RunningStory, 
 	}
 	rs.UsageLimit = s.usageLimit(ctx, detail)
 	rs.Turns = s.turns(ctx, rs)
+	if !rs.Refused() && !rs.Queued() && !rs.HandedBack() {
+		rs.Stranded = lapsedLease(detail, s.now())
+	}
 	return rs, nil
+}
+
+// lapsedLease is when a claimed story's lease ran out, when it had by now with
+// no heartbeat since, and the zero time otherwise: a live session renews its
+// lease, so a lapsed one is a claim nothing is working (StaleClaims's own
+// definition, mw-gq6.576).
+func lapsedLease(detail StoryDetail, now time.Time) time.Time {
+	if strings.EqualFold(strings.TrimSpace(detail.Status), StatusInProgress) && !detail.LeaseExpires.IsZero() && now.After(detail.LeaseExpires) {
+		return detail.LeaseExpires
+	}
+	return time.Time{}
+}
+
+// strandedLine is what the report says of a claim whose lease has lapsed.
+func strandedLine(since time.Time) string {
+	return fmt.Sprintf("STRANDED: lease ran out %s with no heartbeat since, so no session is working it; the host that holds it gives the claim back on its next dispatch tick", since.UTC().Format(LastSyncFormat))
 }
 
 // TurnsNamedPast is how many turns a running session may take before mw status
@@ -1437,7 +1463,7 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 			return nil, fmt.Errorf("reading when %s last synced: %w", host, err)
 		}
 
-		held := HostWork{Host: host, Said: strings.TrimSpace(said), Stories: byHost[host]}
+		held := HostWork{Host: host, Said: strings.TrimSpace(said), Stories: byHost[host], Now: now}
 		if held.Said != "" {
 			if at, err := time.Parse(LastSyncFormat, held.Said); err == nil {
 				held.LastSync = at
@@ -2087,6 +2113,9 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 	}
 	for _, d := range w.Stories {
 		writeStoryIn(b, "    ", d, strings.TrimPrefix(note+" · "+readyOrClaimed(d), " · "))
+		if since := lapsedLease(d, w.Now); !d.Hitl() && !since.IsZero() {
+			wrapInto(b, "      ", strandedLine(since))
+		}
 	}
 }
 
@@ -2234,6 +2263,9 @@ func (r RunningStory) write(b *strings.Builder) {
 	}
 	if r.Stopped() {
 		clip(b, fmt.Sprintf("    NOT RUNNING: run=%s", r.Run))
+	}
+	if !r.Stranded.IsZero() {
+		wrapInto(b, "    ", strandedLine(r.Stranded))
 	}
 	if r.UsageLimit != "" {
 		clip(b, "    stopped at the usage limit: "+r.UsageLimit)

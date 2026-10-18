@@ -1754,14 +1754,14 @@ func (d Dispatch) refusePour(ctx context.Context, id string, started Started, ri
 }
 
 // reclaimDeadPane looks at one story this host already has claimed, and gives
-// the claim back when its tmux window is still there but its pane has died
-// and ReclaimStory says the tracker's own lease on the claim has run out:
+// the claim back when its tmux window is still there but its pane has died,
+// or the window is gone outright (the session never started, mw-gq6.576), and
+// ReclaimStory says the tracker's own lease on the claim has run out:
 // together the strongest sign that the session ended without mw next ever
 // hearing about it (the Laptop's DNS outage of 2026-09-24, mw-gq6.106). A
-// live session, a window gone outright, or a lease ReclaimStory says still
-// holds are all left exactly as they were — counted running, the same as
-// before this existed — because either sign alone is not enough to act on
-// without a person's word.
+// live session, or a lease ReclaimStory says still holds, is left exactly as
+// it was — counted running, the same as before this existed — because either
+// sign alone is not enough to act on without a person's word.
 //
 // A story its close-out refused (mw next recorded run=blocked) is left exactly
 // as it is however dead its pane: its claim, worktree and branch are the
@@ -1794,12 +1794,20 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 		return false, false, nil
 	}
 	dead := status.State == StateExited || status.State == StateExitUnknown
+	// A window gone outright is a session that is over as surely as a dead
+	// pane: it never started (the claim was taken and the start failed, or the
+	// process died between the two), or it was closed. Left counted running
+	// whatever its lease said, such a claim stood for 34 hours (mw-gq6.576). It
+	// goes through every check a dead pane does, and only the lease, which
+	// ReclaimStory reads, decides whether it is given back; it differs only in
+	// having no window to close.
+	ended := dead || status.State == StateGone
 
 	// A close-out that stopped the story and could not write all of it down left
 	// the outcome in the run (mw-gq6.375): the pane is dead because the close-out
 	// ended, not because the session did, so what it meant to record is written
 	// now and the story is held as any refused story is, never refunded.
-	if dead && d.replayUnrecorded(ctx, detail, report) {
+	if ended && d.replayUnrecorded(ctx, detail, report) {
 		report.HeldRefused = append(report.HeldRefused, HeldRefused{StoryID: id, Session: name})
 		return false, true, nil
 	}
@@ -1810,7 +1818,7 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 	// the story a second time on top of its own landed commits. Whether the
 	// lease ran out is read here from the story, not from ReclaimStory, because
 	// that one gives the claim back as it answers.
-	lapsed := dead && !detail.LeaseExpires.IsZero() && d.now().After(detail.LeaseExpires)
+	lapsed := ended && !detail.LeaseExpires.IsZero() && d.now().After(detail.LeaseExpires)
 	if lapsed {
 		if tip, target, landed := d.landedBranch(ctx, detail); landed {
 			by := fmt.Sprintf("its branch %s (tip %s) is already contained in %s", StoryBranch(id), shortCommit(tip), target)
@@ -1822,9 +1830,9 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 	// state that cannot be read is no licence to give the claim back.
 	run, err := d.Tracker.StoryState(ctx, id, RunState)
 	if err != nil {
-		if dead {
+		if ended {
 			report.Notes = append(report.Notes, fmt.Sprintf(
-				"%s: its session %s has a dead pane, but whether its close-out refused it could not be read, so its claim was kept: %v", id, name, err))
+				"%s: its session %s has a dead pane or none, but whether its close-out refused it could not be read, so its claim was kept: %v", id, name, err))
 		}
 		return false, false, nil
 	}
@@ -1837,7 +1845,7 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 		report.HeldRefused = append(report.HeldRefused, HeldRefused{StoryID: id, Session: name})
 		return false, true, nil
 	}
-	if !dead {
+	if !ended {
 		return false, false, nil
 	}
 	if run == RunLanded {
@@ -1858,7 +1866,7 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 	reclaimed, err = d.Tracker.ReclaimStory(ctx, id)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
-			"%s: its session %s has a dead pane, but whether its lease had run out could not be read: %v", id, name, err))
+			"%s: its session %s has a dead pane or none, but whether its lease had run out could not be read: %v", id, name, err))
 		return false, false, nil
 	}
 	if !reclaimed {
@@ -1903,11 +1911,19 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 		"mw dispatch on %s found %s claimed here with a dead pane (%s is %s) and its lease had run out with no heartbeat since: "+
 			"the window was closed and the claim given back so it is dispatched again as a fresh attempt; %s.",
 		d.Host, id, name, status.State, refund)
+	if !dead {
+		why = fmt.Sprintf(
+			"mw dispatch on %s found %s claimed here with no session (%s is %s) and its lease had run out with no heartbeat since: "+
+				"the claim was given back so it is dispatched again as a fresh attempt; %s.",
+			d.Host, id, name, status.State, refund)
+	}
 
-	if err := d.Runner.Close(ctx, name); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf(
-			"%s: its session %s had a dead pane and its lease had run out, and the claim was given back, but the window could not be closed: %v",
-			id, name, err))
+	if dead {
+		if err := d.Runner.Close(ctx, name); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf(
+				"%s: its session %s had a dead pane and its lease had run out, and the claim was given back, but the window could not be closed: %v",
+				id, name, err))
+		}
 	}
 	if err := d.Tracker.CommentOnStory(ctx, id, why); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: the dead-pane reclaim could not be commented on: %v", id, err))
