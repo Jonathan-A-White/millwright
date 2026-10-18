@@ -116,6 +116,11 @@ type GristGrind struct {
 	// [grist-apps]); Ceilings are the factory's limits above every grind.
 	Apps     map[string]string
 	Ceilings GristCeilings
+	// Persons, when set, is asked before the daily limit is counted whether
+	// the sender is a self-registered person, whose device keys then share
+	// one day at the person's own cap (config [grist] person_cap). Nil counts
+	// every key alone.
+	Persons *PersonCap
 	// Refreshes keeps each rig's checkout from being fetched more than once a
 	// minute; nil fetches before every grist.
 	Refreshes *GrindRefreshes
@@ -597,9 +602,17 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 	// The daily limit guards fuel against an app's keys; the smoke's own key is
 	// the factory's, sent by every smoke of every app (mw-gq6.340).
 	factoryKey := g.TestKey != "" && envelopeFrom == g.TestKey
-	if sent := sentToday(lines, w.sender, g.now()); sent >= ceilings.DailyLimit && !factoryKey {
-		w.settle(GristRefused, GristReasonDaily(ceilings.DailyLimit))
-		return
+	if !factoryKey {
+		// A self-registered person's device keys share one day at the person's
+		// own cap; the Governor's keys keep the home's setting (mw-cvwm1u.6).
+		limit, senders := ceilings.DailyLimit, []string{w.sender}
+		if g.Persons != nil && !(g.GovernorKey != "" && envelopeFrom == g.GovernorKey) {
+			limit, senders = g.dailyCap(ctx, envelopeFrom, w.sender, limit)
+		}
+		if sentToday(lines, senders, g.now()) >= limit {
+			w.settle(GristRefused, GristReasonDaily(limit))
+			return
+		}
 	}
 	checkout, ok := g.Apps[name.App]
 	if !ok || strings.TrimSpace(checkout) == "" {
@@ -898,15 +911,16 @@ func isGristReasonDaily(reason string) bool {
 	return strings.HasPrefix(reason, gristReasonDailyStart) && strings.HasSuffix(reason, gristReasonDailyEnd)
 }
 
-// sentToday counts the grist sender has sent today, by the record. A grist the
+// sentToday counts the grist its senders (a key's fingerprints, one for a
+// key on its own, a person's together) have sent today, by the record. A grist the
 // harness would not grind for a limit of the factory's is not counted: its
 // sender is told to send it again, and the factory's limit is no use of the
 // key's day (mw-gq6.474).
-func sentToday(lines []GrindLine, sender string, now time.Time) int {
+func sentToday(lines []GrindLine, senders []string, now time.Time) int {
 	y, m, d := now.UTC().Date()
 	sent := 0
 	for _, line := range lines {
-		if line.Sender != sender || IsGristReasonLimited(line.Reason) {
+		if !slices.Contains(senders, line.Sender) || IsGristReasonLimited(line.Reason) {
 			continue
 		}
 		if ly, lm, ld := line.Time.UTC().Date(); ly == y && lm == m && ld == d {
