@@ -18,7 +18,8 @@ const FoldRule = "Fold rule: a folded bug keeps its own check in the shared fix'
 
 // Fold is `mw fold <rig>`: a rig's open and held bugs grouped by the error class
 // they carry (the class:<slug> label) or, with none, by the screen their title
-// names, the groups of Min or more first. It runs no model and writes nothing;
+// names, the groups of Min or more first. A bug that already waits on a fold
+// story is folded and left out. It runs no model and writes nothing;
 // it is the list the Mayor's weekly fold pass starts from (mw-gq6.588).
 type Fold struct {
 	Tracker TesterStories
@@ -67,6 +68,12 @@ func (f Fold) Run(ctx context.Context) (FoldReport, error) {
 	if err != nil {
 		return report, fmt.Errorf("reading the bugs of %s: %w", f.Rig, err)
 	}
+	openFolds := map[string]bool{}
+	for _, d := range stories {
+		if isFoldTitle(d.Story.Title, f.Rig) && strings.ToLower(strings.TrimSpace(d.Status)) != StatusClosed {
+			openFolds[d.Story.ID] = true
+		}
+	}
 	byKey := map[string]*FoldGroup{}
 	var order []string
 	for _, d := range stories {
@@ -77,7 +84,7 @@ func (f Fold) Run(ctx context.Context) (FoldReport, error) {
 		if !hasLabel(d.Labels, LabelBug) && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(d.Story.Title)), "[bug]") {
 			continue
 		}
-		if isFoldTitle(d.Story.Title, f.Rig) {
+		if isFoldTitle(d.Story.Title, f.Rig) || waitsOnFold(d, openFolds) {
 			continue
 		}
 		report.Bugs++
@@ -132,6 +139,18 @@ func (f Fold) print(report FoldReport) {
 		}
 	}
 	fmt.Fprintf(f.Out, "\n%s\n", FoldRule)
+}
+
+// waitsOnFold is true for a bug with a blocker that is a fold still open: the
+// fold rule makes each folded bug wait on its fold story, so it is already
+// folded and is not listed as a bug to fold (mw-gq6.591).
+func waitsOnFold(d StoryDetail, openFolds map[string]bool) bool {
+	for _, need := range d.Needs {
+		if openFolds[need] {
+			return true
+		}
+	}
+	return false
 }
 
 // isFoldTitle is true for a story that is itself a fold: the words after the
