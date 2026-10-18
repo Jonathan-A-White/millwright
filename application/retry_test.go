@@ -348,6 +348,99 @@ func TestRetryHoldLeavesAHeldStoryWithNoClaimHeld(t *testing.T) {
 	}
 }
 
+// aHeldUnclaimedRetryStory is a story an open-steps stop gave its claim back
+// on, which the Mayor then held to amend it: deferred, no assignee (mw-gq6.611).
+func aHeldUnclaimedRetryStory(t *testing.T, tracker *apptest.FakeTracker, id string) {
+	t.Helper()
+	aRetryStory(t, tracker, id)
+	if err := tracker.HoldClaimHeldBy(context.Background(), id, ""); err != nil {
+		t.Fatalf("holding %s: %v", id, err)
+	}
+}
+
+// TestRetryOfAHeldStoryWithNoClaimOpensItAndSaysTheClaimWasAlreadyGivenBack pins
+// mw-gq6.611: the claim was given back already (assignee empty), so the
+// give-back guarded on mw@host mismatched on "" and the retry failed after it
+// had written the RE-PATHED: comment, leaving the story held.
+func TestRetryOfAHeldStoryWithNoClaimOpensItAndSaysTheClaimWasAlreadyGivenBack(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	aHeldUnclaimedRetryStory(t, tracker, "mw-gq6.1")
+	landing := &fakeRetryLanding{NoWorktree: true}
+	var out strings.Builder
+
+	retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out)
+	retry.RePathed = "the acceptance criteria were amended"
+	report, err := retry.Run(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatalf("expected the retry to succeed, got: %v\n%s", err, out.String())
+	}
+	if !report.ClaimReleased || report.Held {
+		t.Errorf("expected the retry to go on and leave the story open, got %+v", report)
+	}
+	detail, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Status != application.StatusOpen || detail.Assignee != "" {
+		t.Errorf("expected the story open and unassigned, got status %q assignee %q", detail.Status, detail.Assignee)
+	}
+	if !strings.Contains(out.String(), "the claim was already given back") {
+		t.Errorf("expected the report to say the claim was already given back, got %q", out.String())
+	}
+	rePathed := 0
+	for _, comment := range tracker.Comments("mw-gq6.1") {
+		if strings.HasPrefix(comment, application.RePathedMark) {
+			rePathed++
+		}
+	}
+	if rePathed != 1 {
+		t.Errorf("expected the RE-PATHED: comment once, got %d: %v", rePathed, tracker.Comments("mw-gq6.1"))
+	}
+}
+
+// TestRetryHoldOfAHeldStoryWithNoClaimKeepsItHeldAndSaysSo is the --hold half.
+func TestRetryHoldOfAHeldStoryWithNoClaimKeepsItHeldAndSaysSo(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	aHeldUnclaimedRetryStory(t, tracker, "mw-gq6.1")
+	landing := &fakeRetryLanding{NoWorktree: true}
+	var out strings.Builder
+
+	retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out)
+	retry.Hold = true
+	if _, err := retry.Run(context.Background(), "mw-gq6.1"); err != nil {
+		t.Fatalf("expected the retry to succeed, got: %v\n%s", err, out.String())
+	}
+	detail, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !detail.Held() || detail.Assignee != "" {
+		t.Errorf("expected the story held and unassigned, got status %q assignee %q", detail.Status, detail.Assignee)
+	}
+	if !strings.Contains(out.String(), "the claim was already given back") {
+		t.Errorf("expected the report to say the claim was already given back, got %q", out.String())
+	}
+}
+
+// TestRetryOfAStoryAnotherAssigneeHoldsStillRefusesWhenTheGiveBackDoes: only an
+// empty assignee is taken as given back; a story another assignee holds goes
+// through the guarded give-back as before, and its refusal is the retry's.
+func TestRetryOfAStoryAnotherAssigneeHoldsStillRefusesWhenTheGiveBackDoes(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	aClaimedRetryStory(t, tracker, "mw-gq6.1", "mw@desktop", "vps")
+	tracker.FailReleases(apptest.ReleaseFault{Err: errors.New(`assignee mismatch: held by "mw@other", expected "mw@desktop"`)})
+	landing := &fakeRetryLanding{NoWorktree: true}
+	var out strings.Builder
+
+	_, err := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out).Run(context.Background(), "mw-gq6.1")
+	if err == nil || !strings.Contains(err.Error(), "the claim could not be given back") {
+		t.Fatalf("expected the give-back's refusal, got: %v", err)
+	}
+	if strings.Contains(out.String(), "already given back") {
+		t.Errorf("a claimed story must not be taken as given back, got %q", out.String())
+	}
+}
+
 func TestRetryThatFailsPartwayReportsOnlyWhatItDid(t *testing.T) {
 	tracker := apptest.NewFakeTracker()
 	aRetryStory(t, tracker, "mw-gq6.1")
@@ -757,7 +850,9 @@ func TestRetryKeepingABranchSaysSoWhenItCannotLeaveTheNote(t *testing.T) {
 // failingSetNote is a tracker whose SetNote always fails.
 type failingSetNote struct{ *apptest.FakeTracker }
 
-func (failingSetNote) SetNote(context.Context, string, string) error { return errors.New("the store is down") }
+func (failingSetNote) SetNote(context.Context, string, string) error {
+	return errors.New("the store is down")
+}
 
 func TestOnlyTheGateTheMergeAndTheTurnCapHandABranchOn(t *testing.T) {
 	for reason, want := range map[application.Reason]bool{
