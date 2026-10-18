@@ -1353,6 +1353,10 @@ millwright = "make test"           # how a close-out asks this rig if it is gree
 [changed_specs]
 lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"  # run after the rig's tests on the tests/e2e/*.spec.ts files a story added or changed (default: nothing)
 
+[test_parts.lampas]                # optional: the rig's gate as parts, one table for a rig; see "A gate in parts" below (default: none)
+"lint"       = "npm run lint"      # each key is a part's name, each value its command line, run in the worktree, in the order written
+"vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"
+
 [after_landing]
 millwright = "make build"          # run in this rig's checkout once a landing has moved it (default: nothing)
 
@@ -1398,6 +1402,21 @@ says `{specs}`, and run it with `/bin/sh` in the worktree — and again on the
 merged result when merging made a merge commit. No such file, no run; a failing
 run refuses the landing as `tests-fail` (`merged-tests-fail` on the merged
 result), naming the specs. A rig the table does not name lands as it always did.
+
+A gate in parts (mw-gq6.567). A Builder's tool call is cut off after 590 seconds, and
+`mw check`'s whole-gate run, or a gate waited on in the background, can outrun that
+on a loaded host. A host names such a rig's gate as parts in `[test_parts.<rig>]`
+(each key a part's name, each value its command line, in the order written; the
+`[tests]` line stays the whole gate that `mw next` runs at close-out). The Builder then
+runs `mw check <story> --part N` once for each part, each as a call of its own: it runs
+part N alone in the worktree, takes the rig's merge slot around it, waits for no calm
+host and runs nothing twice, and keeps what the part said, and the commit it ran at, in
+`runs/<story>/check-<attempt>-part-<N>.log`. A last `mw check <story>` with no `--part`
+runs none of the gate: it reads those records, passes when every part passed at the
+branch's tip, and otherwise names each part that failed or has not been run at this
+commit, with the `--part` call that runs it. A new commit makes the earlier records
+stale. A rig with no `[test_parts.<rig>]` table, or a host that cannot keep the records,
+checks as it always did.
 A rig `[after_landing]` does not name has nothing run after a
 landing (but for `millwright`, below); the table is for a host whose timers run a binary built in a rig's
 checkout, which a landing leaves one commit stale until the command rebuilds it.

@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"encoding/json"
+	"github.com/Jonathan-A-White/millwright/application"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +34,7 @@ func TestTheGateStepOfEachFormulaNamesTheForegroundWay(t *testing.T) {
 				continue
 			}
 			found = true
-			for _, want := range []string{"timeout 590 make test", "mw check {{story}}", "Never nohup", "tail --pid", "sleep"} {
+			for _, want := range []string{"timeout 590 make test", "mw check {{story}}", "mw check {{story}} --part N", "Never nohup", "tail --pid", "sleep"} {
 				if !strings.Contains(s.Description, want) {
 					t.Errorf("%s step %q: expected the description to contain %q, got: %s", tc.file, tc.step, want, s.Description)
 				}
@@ -79,6 +80,18 @@ func TestEachFormulaNamesTheBoundedWayToCheckUnderLoad(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s: no step %q", tc.file, tc.step)
+		}
+	}
+}
+
+// A rig whose whole gate outruns a foreground tool call is checked one part per
+// call (mw-gq6.567): the Builder's kickoff says how, in the foreground, in place
+// of a background wait.
+func TestTheBuilderKickoffNamesTheGateInPartsForASplitRig(t *testing.T) {
+	kickoff := application.KickoffPrompt("builder", "mw-gq6.6", "/vault", nil)
+	for _, want := range []string{"is split into parts", "`mw check mw-gq6.6 --part N`", "own foreground call", "`mw check mw-gq6.6` again for the verdict"} {
+		if !strings.Contains(kickoff, want) {
+			t.Errorf("expected the builder kickoff to contain %q, got: %s", want, kickoff)
 		}
 	}
 }

@@ -709,8 +709,14 @@ func KickoffPrompt(seat, storyID, vaultDir string, memory *RigMemoryAccess) stri
 		"every formula step closed, the rig's tests passing), prints what mw next would print for each "+
 		"refusal, writes nothing anywhere and exits non-zero when any check fails. "+
 		"A formula step you have not closed yet is one it will name. "+
+		// A host names a rig's gate as parts when the whole of it outruns a tool call
+		// (mw-gq6.567); mw check then names each part not yet run, and the parts are
+		// run one to a call, in the foreground.
+		"On a rig whose gate is split into parts, mw check names each part not yet run: run "+
+		"`mw check %s --part N` for each, as its own foreground call, then `mw check %s` again for the verdict, "+
+		"rather than nohup and a wait. "+
 		"This session is headless and ends when your turn ends. %s"+
-		"Commit before you stop.", seat, storyID, kickoffMemoryLine(memory), bdVault(vaultDir), storyID, longCommandAdvice)
+		"Commit before you stop.", seat, storyID, kickoffMemoryLine(memory), bdVault(vaultDir), storyID, storyID, storyID, longCommandAdvice)
 }
 
 // TesterKickoffPrompt is the first thing a Tester story's session is told
