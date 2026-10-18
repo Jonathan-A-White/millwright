@@ -40,6 +40,7 @@ func registerCheckSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.When(`^a session checks "([^"]*)" while the other close-out finishes after (\d+) milliseconds$`, c.aSessionChecksWhileTheSlotIsHeld)
 	ctx.When(`^a session checks "([^"]*)" without the merge slot$`, c.aSessionChecksWithoutTheSlot)
 	registerBackgroundCheckSteps(ctx, c)
+	registerCheckPartsSteps(ctx, c)
 
 	ctx.Then(`^the check passes$`, c.theCheckPasses)
 	ctx.Then(`^the check waited at least (\d+) milliseconds for the merge slot$`, c.theCheckWaited)
@@ -261,6 +262,7 @@ func (c *nextContext) checkWith(id string, slots *rig.Slots) error {
 	}
 	k := c.newCheck(worktrees, slot, load, &c.printed)
 	k.Logs = vault.New(c.vault)
+	k.Records = vault.New(c.vault)
 	c.checked, c.err = k.Run(context.Background(), id)
 	return nil
 }
@@ -273,6 +275,8 @@ func (c *nextContext) newCheck(worktrees *rig.Worktrees, slot application.MergeS
 		Landing:    worktrees,
 		Checks:     rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
 		SpecChecks: rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
+		Parts:      rig.NewChecks(rig.WithParts(map[string][]application.GatePart{c.rigKey(): c.gateParts})),
+		Part:       c.partToCheck,
 		Host:       nextHost,
 		Rigs:       map[string]string{c.rigKey(): c.rig},
 		Out:        out,

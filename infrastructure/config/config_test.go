@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -2692,5 +2693,46 @@ func TestGoogleClientFileDefaultsUnderTheHomeAndIsRead(t *testing.T) {
 	t.Setenv(config.GoogleClientFileEnv, "relative/client.json")
 	if _, err := config.GoogleClientFile(); err == nil || !strings.Contains(err.Error(), "full path") {
 		t.Fatalf("expected a relative path refused, got %v", err)
+	}
+}
+
+func TestTestPartsNamesEachRigsGateInTheOrderTheFileHasIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".config", "mw")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "[tests]\nlampas = \"npm test\"\n\n" +
+		"[test_parts.lampas]\n" +
+		"\"vitest 1/2\" = \"TZ=UTC npx vitest run --shard 1/2\" # the first half\n" +
+		"lint = 'npm run lint'\n" +
+		"# a comment\n\n" +
+		"[test_parts.postern]\n" +
+		"go = \"cd server && go test ./...\"\n" +
+		"[after_landing]\n" +
+		"lampas = \"make build\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	parts, err := config.TestParts()
+	if err != nil {
+		t.Fatalf("TestParts: %v", err)
+	}
+	want := map[string][]config.TestPart{
+		"lampas":  {{Name: "vitest 1/2", Command: "TZ=UTC npx vitest run --shard 1/2"}, {Name: "lint", Command: "npm run lint"}},
+		"postern": {{Name: "go", Command: "cd server && go test ./..."}},
+	}
+	if !reflect.DeepEqual(parts, want) {
+		t.Fatalf("TestParts = %+v, want %+v", parts, want)
+	}
+}
+
+func TestTestPartsOfAHostWithNoConfigFileIsEmpty(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	parts, err := config.TestParts()
+	if err != nil || len(parts) != 0 {
+		t.Fatalf("TestParts = %+v, %v; want none", parts, err)
 	}
 }

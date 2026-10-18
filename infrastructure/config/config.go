@@ -2318,6 +2318,78 @@ func Tests() (map[string]string, error) {
 	return tableIn(filepath.Join(home, File), TestsTable)
 }
 
+// TestPartsTablePrefix begins the name of the tables of the config file that say
+// how a rig's gate is split into parts: `[test_parts.lampas]`, one table for a
+// rig.
+const TestPartsTablePrefix = "test_parts."
+
+// TestPart is one part of a rig's gate: a name and the command line that runs it.
+type TestPart struct{ Name, Command string }
+
+// TestParts reports the parts each rig's gate is split into on this machine, by
+// rig name, read from the `[test_parts.<rig>]` tables of ~/.config/mw/config.toml
+// (mw-gq6.567). In a table each key is a part's name and its value the command
+// line that runs it, in the order they are written:
+//
+//	[test_parts.lampas]
+//	"vitest 1/6" = "TZ=UTC npx vitest run --shard 1/6"
+//
+// A host names a rig's gate as parts when the whole of it outruns the 590
+// seconds of a Builder's foreground tool call. A rig with no such table has its
+// tests run whole, and a machine with none is not an error. The parts are what
+// `mw check <story> --part N` runs; the rig's [tests] command stays the whole
+// gate that mw next runs at close-out.
+func TestParts() (map[string][]TestPart, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	return partsIn(filepath.Join(home, File))
+}
+
+// partsIn reads the [test_parts.<rig>] tables of the config file at path.
+func partsIn(path string) (map[string][]TestPart, error) {
+	file, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return map[string][]TestPart{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	defer file.Close()
+
+	parts := map[string][]TestPart{}
+	rig := ""
+	lines := bufio.NewScanner(file)
+	lines.Buffer(nil, 1<<20)
+	for lines.Scan() {
+		line := strings.TrimSpace(lines.Text())
+		if strings.HasPrefix(line, "[") {
+			table := strings.TrimSpace(strings.Trim(line, "[]"))
+			rig = ""
+			if name, ok := strings.CutPrefix(table, TestPartsTablePrefix); ok {
+				rig = strings.Trim(strings.TrimSpace(name), `"'`)
+			}
+			continue
+		}
+		if rig == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		name, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		name = strings.Trim(strings.TrimSpace(name), `"'`)
+		if command := unquote(value); name != "" && command != "" {
+			parts[rig] = append(parts[rig], TestPart{Name: name, Command: command})
+		}
+	}
+	if err := lines.Err(); err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	return parts, nil
+}
+
 // ChangedSpecs reports the command each rig runs on the end-to-end specs a
 // story added or changed, after the rig's tests, by rig name, read from the
 // `[changed_specs]` table of ~/.config/mw/config.toml (mw-gq6.366):
