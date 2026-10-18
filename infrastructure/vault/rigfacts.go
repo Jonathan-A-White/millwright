@@ -63,6 +63,22 @@ func (v *Vault) ReadRigEval(_ context.Context, seat, rig string) (string, bool, 
 	return string(text), true, nil
 }
 
+// WriteRigEval implements application.RigFactFiles.
+func (v *Vault) WriteRigEval(_ context.Context, seat, rig, text string) (string, error) {
+	if err := checkRigNames(seat, rig); err != nil {
+		return "", err
+	}
+	dir := filepath.Join(v.dir, SeatsDir, seat, RigsDir, rig)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("making the folder of the rig %s: %w", rig, err)
+	}
+	path := filepath.Join(dir, application.EvalFile)
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		return "", fmt.Errorf("writing %s: %w", path, err)
+	}
+	return path, nil
+}
+
 // WriteRigFact implements application.RigFactFiles.
 func (v *Vault) WriteRigFact(_ context.Context, seat, rig, slug, text string) (string, error) {
 	for _, name := range [][2]string{{"seat", seat}, {"rig", rig}, {"fact", slug}} {

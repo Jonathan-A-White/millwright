@@ -65,7 +65,8 @@ func newMemoryAddCmd() *cobra.Command {
 		Short: "Write a new current fact for a rig",
 		Long: "add writes facts/<slug>.md with status current and since today (UTC). The slug defaults to the\n" +
 			"sentence's first five words, lower-case and hyphenated. The source is a bead, rig@sha or\n" +
-			"mayor:<date>. It refuses a rig the seat has no folder for, a slug that already has a file\n" +
+			"mayor:<date>. After writing it prints 'near: <slug> <first words>' for each current fact of the\n" +
+			"same subject, or sharing four long words with the sentence, so a repeated rule is seen. It refuses a rig the seat has no folder for, a slug that already has a file\n" +
 			"(one flagged recheck is to be superseded or retired), a sentence with a newline and a kind\n" +
 			"that is not gotcha or decision.",
 		Args: cobra.ExactArgs(2),
@@ -256,23 +257,28 @@ func newMemoryEvalCmd() *cobra.Command {
 }
 
 func newMemoryDemoteCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "demote <rig> <slug>",
+	var question string
+	cmd := &cobra.Command{
+		Use:   "demote <rig> <slug> [--question \"<terms>\"]",
 		Short: "Keep a current fact out of the boot render, as long as the rig's eval still finds it",
 		Long: "demote sets boot: no on a current fact, so that boot does not show it. The fact stays\n" +
 			"current, and query shows it and list marks it 'boot:no'. It is refused, saying 'no eval\n" +
 			"question finds <slug>; add one to eval.md first', unless some question in the rig's eval.md\n" +
 			"has the slug in its expect and that question passes (see eval). It also refuses a slug that\n" +
-			"is unknown, not current or already demoted.",
+			"is unknown, not current or already demoted. --question appends 'Q: <terms>' and\n" +
+			"'expect: <slug>' to eval.md first, checks that the question passes (else nothing is\n" +
+			"written), demotes the fact, and commits eval.md and the fact in one commit.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			memory, err := memoryFor(cmd)
 			if err != nil {
 				return err
 			}
-			return memory.Demote(cmd.Context(), args[0], args[1])
+			return memory.Demote(cmd.Context(), args[0], args[1], question)
 		},
 	}
+	cmd.Flags().StringVar(&question, "question", "", "a question that should find the fact; appended to eval.md with the fact as its expect")
+	return cmd
 }
 
 func newMemoryPromoteCmd() *cobra.Command {

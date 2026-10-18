@@ -2672,12 +2672,15 @@ mw memory list <rig> [--status current|recheck|superseded|retired] [--oldest]
 mw memory migrate <rig> [--dry-run]
 mw memory query <rig> <term>...
 mw memory eval <rig>
-mw memory demote <rig> <slug>
+mw memory demote <rig> <slug> [--question "<terms>"]
 mw memory promote <rig> <slug>
 ```
 
 `add` writes a current fact dated today (UTC); the slug defaults to the
-sentence's first five words, lower-case and hyphenated. It refuses a rig with no
+sentence's first five words, lower-case and hyphenated. After writing it prints
+`near: <slug> <first words>` for each current fact of the same subject, or of
+another subject sharing four long words with the sentence, so a repeated rule is
+seen (the fact is still written). It refuses a rig with no
 folder in the seat, a slug that already has a file, a sentence with a newline
 and a kind other than gotcha or decision. `supersede` writes the new fact with
 `supersedes:` and marks the old one `superseded` with `superseded-by:`; it
@@ -2750,7 +2753,9 @@ puts `boot:no` after its status. It is refused, saying `no eval question finds
 <slug>; add one to eval.md first`, unless some question of the rig's `eval.md`
 expects the slug and passes, so a Builder can still find what boot no longer
 carries; it also refuses an unknown slug, one not current and one already
-demoted. `promote` removes `boot: no` (it refuses a fact not demoted). The
+demoted. `--question "<terms>"` appends `Q: <terms>` and `expect: <slug>` to
+`eval.md` first, checks the question finds the slug (else nothing is written),
+demotes the fact and commits `eval.md` and the fact in one commit. `promote` removes `boot: no` (it refuses a fact not demoted). The
 kickoff prompt of a rig kept as facts tells a session that boot shows the facts
 every story needs and to run `mw memory query <that rig> <term>` before touching
 a subject it does not know; a flat-file rig's kickoff says instead that its

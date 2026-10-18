@@ -138,9 +138,15 @@ func (m Memory) runEval(ctx context.Context, rig string) (report EvalReport, fou
 	if err != nil || !found {
 		return EvalReport{}, false, err
 	}
+	report, err = evalText(text, bySlug)
+	return report, true, err
+}
+
+// evalText runs the questions of an eval.md text against facts.
+func evalText(text string, bySlug map[string]RigFact) (report EvalReport, err error) {
 	questions, err := ParseEval(text)
 	if err != nil {
-		return EvalReport{}, true, err
+		return EvalReport{}, err
 	}
 	all := orderedFacts(bySlug)
 	for _, q := range questions {
@@ -172,7 +178,7 @@ func (m Memory) runEval(ctx context.Context, rig string) (report EvalReport, fou
 			report.Failed++
 		}
 	}
-	return report, true, nil
+	return report, nil
 }
 
 // Eval prints the PASS or FAIL line of each fact each question of the rig's

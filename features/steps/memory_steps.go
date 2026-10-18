@@ -75,7 +75,7 @@ func InitializeMemoryScenario(ctx *godog.ScenarioContext) {
 		return nil
 	})
 	ctx.When(`^the Mayor demotes the fact "([^"]*)" of the rig "([^"]*)"$`, func(slug, rig string) error {
-		c.err = c.memory().Demote(context.Background(), rig, slug)
+		c.err = c.memory().Demote(context.Background(), rig, slug, "")
 		return nil
 	})
 	ctx.When(`^the Mayor promotes the fact "([^"]*)" of the rig "([^"]*)"$`, func(slug, rig string) error {

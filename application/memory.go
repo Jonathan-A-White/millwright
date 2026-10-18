@@ -31,6 +31,10 @@ type RigFactFiles interface {
 	// ReadRigEval reads the rig's eval.md, found false when it has none, which
 	// is not an error.
 	ReadRigEval(ctx context.Context, seat, rig string) (text string, found bool, err error)
+
+	// WriteRigEval writes the rig's eval.md, replacing it if there is one, and
+	// reports where it landed.
+	WriteRigEval(ctx context.Context, seat, rig, text string) (string, error)
 }
 
 // MemoryQueryRecord is one `mw memory query` run, as the host's log keeps it:
@@ -295,10 +299,79 @@ func (m Memory) Add(ctx context.Context, req MemoryAdd) error {
 	if err := m.free(req.Rig, slug, files, facts); err != nil {
 		return err
 	}
-	return m.putAndRecord(ctx, req.Rig, RigFact{
+	fact := RigFact{
 		Slug: slug, Subject: req.Subject, Kind: req.Kind, Status: FactCurrent,
 		Source: req.Source, Since: m.today(), Sentence: strings.TrimSpace(req.Sentence),
-	}, "add "+req.Rig+" "+slug)
+	}
+	near := nearFacts(fact, facts)
+	if err := m.putAndRecord(ctx, req.Rig, fact, "add "+req.Rig+" "+slug); err != nil {
+		return err
+	}
+	for _, other := range near {
+		fmt.Fprintf(m.Out, "near: %s %s\n", other.Slug, firstWords(other.Sentence, nearWords))
+	}
+	return nil
+}
+
+// nearWords is how many words of a near fact's sentence add prints after its slug.
+const nearWords = 8
+
+// nearSharedWords is how many long words a current fact of another subject must
+// share with a new sentence to be called near it.
+const nearSharedWords = 4
+
+// nearMinWord is the shortest word that counts toward nearSharedWords.
+const nearMinWord = 5
+
+// nearFacts are the current facts a new fact repeats or comes close to: those of
+// its subject, case aside, and those of another subject that share at least
+// nearSharedWords words of nearMinWord letters or more with its sentence. They
+// are in the order query reads them.
+func nearFacts(fact RigFact, facts map[string]RigFact) []RigFact {
+	words := longWords(fact.Slug + " " + fact.Sentence)
+	var near []RigFact
+	for _, other := range orderedFacts(facts) {
+		if other.Status != FactCurrent || other.Slug == fact.Slug {
+			continue
+		}
+		if strings.EqualFold(other.Subject, fact.Subject) {
+			near = append(near, other)
+			continue
+		}
+		shared := 0
+		for word := range longWords(other.Slug + " " + other.Sentence) {
+			if words[word] {
+				shared++
+			}
+		}
+		if shared >= nearSharedWords {
+			near = append(near, other)
+		}
+	}
+	return near
+}
+
+// longWords are the distinct lower-case words of text of nearMinWord letters or
+// digits or more.
+func longWords(text string) map[string]bool {
+	words := map[string]bool{}
+	for _, word := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if utf8.RuneCountInString(word) >= nearMinWord {
+			words[word] = true
+		}
+	}
+	return words
+}
+
+// firstWords is the first n words of text, joined by single spaces.
+func firstWords(text string, n int) string {
+	words := strings.Fields(text)
+	if len(words) > n {
+		words = words[:n]
+	}
+	return strings.Join(words, " ")
 }
 
 // free refuses a slug that already has a file, saying so plainly for a fact
@@ -417,8 +490,10 @@ func (m Memory) Recheck(ctx context.Context, rig, slug, why string) error {
 // Demote keeps a current fact out of the boot render (boot: no). The fact stays
 // current, and query and list still show it. It is refused unless some question
 // of the rig's eval.md expects the fact and passes, so that a Builder who needs
-// the fact can still find it.
-func (m Memory) Demote(ctx context.Context, rig, slug string) error {
+// the fact can still find it. A question given appends that question, expecting
+// the fact, to eval.md first; it is checked before anything is written, and
+// eval.md and the fact are committed together.
+func (m Memory) Demote(ctx context.Context, rig, slug, question string) error {
 	_, files, facts, err := m.load(ctx, rig)
 	if err != nil {
 		return err
@@ -433,7 +508,18 @@ func (m Memory) Demote(ctx context.Context, rig, slug string) error {
 	if fact.Unbooted {
 		return fmt.Errorf("the fact %q of the rig %s is already demoted", slug, rig)
 	}
-	report, _, err := m.runEval(ctx, rig)
+	text, _, err := m.Files.ReadRigEval(ctx, m.Seat, rig)
+	if err != nil {
+		return err
+	}
+	asked := strings.TrimSpace(question) != ""
+	if asked {
+		if err := factLine("the question", question); err != nil {
+			return err
+		}
+		text = appendEvalQuestion(text, strings.TrimSpace(question), slug)
+	}
+	report, err := evalText(text, facts)
 	if err != nil {
 		return err
 	}
@@ -446,10 +532,36 @@ func (m Memory) Demote(ctx context.Context, rig, slug string) error {
 		}
 	}
 	if !found {
-		return fmt.Errorf("no eval question finds %s; add one to eval.md first", slug)
+		if asked {
+			return fmt.Errorf("no eval question finds %s: the question %q does not put it in the top %d; nothing was changed", slug, strings.TrimSpace(question), EvalTop)
+		}
+		return fmt.Errorf("no eval question finds %s; add one to eval.md first (or give --question)", slug)
 	}
 	fact.Unbooted = true
-	return m.putAndRecord(ctx, rig, fact, "demote "+rig+" "+slug)
+	var written []string
+	if asked {
+		if _, err := m.Files.WriteRigEval(ctx, m.Seat, rig, text); err != nil {
+			return err
+		}
+		written = append(written, pathpkg.Join(SeatsDir, m.Seat, RigsDir, rig, EvalFile))
+	}
+	path, err := m.put(ctx, rig, fact)
+	if err != nil {
+		return err
+	}
+	return m.record(ctx, "demote "+rig+" "+slug, append(written, path)...)
+}
+
+// appendEvalQuestion adds a Q and its expect to an eval.md text, a blank line
+// after what is there.
+func appendEvalQuestion(text, question, slug string) string {
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	if text != "" && !strings.HasSuffix(text, "\n\n") {
+		text += "\n"
+	}
+	return text + "Q: " + question + "\nexpect: " + slug + "\n"
 }
 
 // Promote puts a demoted fact back into the boot render.
