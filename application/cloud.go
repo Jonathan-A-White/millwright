@@ -100,6 +100,14 @@ type CloudWork interface {
 	WorkInHand(ctx context.Context) (WorkInHand, error)
 }
 
+// CloudStories is what the cloud reads and writes of the tracker's stories to
+// re-path the ones a destroyed box leaves pathed to it. It is satisfied by the
+// beads Gateway and the fake tracker.
+type CloudStories interface {
+	StoriesSince(ctx context.Context, since time.Time) ([]StoryDetail, error)
+	SetStoryMetadata(ctx context.Context, id string, fields map[string]string) error
+}
+
 // CloudNotes is what the cloud check reads of the tracker's notes: a box's
 // LastSyncKey, which its sync writes into the one database every host reads
 // once the box is level, the first thing its dispatch does. A box named by
@@ -257,6 +265,20 @@ func (p CloudPlan) MakeStale() time.Duration { return p.UpLimit() + CloudMakeSta
 // DefaultCloudPrefix is what a box's name begins with.
 const DefaultCloudPrefix = "cloud"
 
+// isBox says name is a box's name: the prefix and a number.
+func (p CloudPlan) isBox(name string) bool {
+	number, found := strings.CutPrefix(name, p.prefix())
+	if !found || number == "" {
+		return false
+	}
+	for _, r := range number {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func (p CloudPlan) prefix() string {
 	if p.Prefix == "" {
 		return DefaultCloudPrefix
@@ -327,7 +349,10 @@ type CloudCheck struct {
 	Work CloudWork
 	// Notes is where a box's first dispatch is seen to reach the beads server.
 	// Nil sees none, and no box is said up.
-	Notes    CloudNotes
+	Notes CloudNotes
+	// Stories is where the stories pathed to a box are found and re-pathed
+	// when the box is destroyed. Nil re-paths none.
+	Stories  CloudStories
 	Provider CloudProvider
 	Book     CloudBook
 	Log      EventLog
@@ -416,6 +441,37 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 	}
 	p.report.Boxes, p.report.SpentUSD = len(p.state.Boxes), p.spent()
 	return p.report, p.err
+}
+
+// Down destroys one box by hand, `mw cloud down <box>`, and says what it did.
+// name must be a box's name (the plan's prefix and a number): a host that is
+// not a cloud box is refused, so that no desktop's stories are re-pathed. A
+// box the book does not hold is not an error, its stories are still re-pathed.
+func (c CloudCheck) Down(ctx context.Context, name string) (string, error) {
+	if c.Provider == nil || c.Book == nil {
+		return "", fmt.Errorf("mw cloud down needs a provider and the book")
+	}
+	if !c.Plan.isBox(name) {
+		return "", fmt.Errorf("%q is not a cloud box: a box is named %s and a number", name, c.Plan.prefix())
+	}
+	state, err := c.Book.Read(ctx)
+	if err != nil {
+		return "", fmt.Errorf("reading the cloud's book: %w", err)
+	}
+	p := cloudPass{check: c, now: c.now(), state: state}
+	p.roll()
+	ok := p.down(ctx, name, "mw cloud down")
+	if p.dirty != "" {
+		p.keep(ctx, p.dirty)
+	}
+	lines := append([]string(nil), p.report.Moves...)
+	if !ok {
+		return strings.Join(lines, "\n"), p.err
+	}
+	if len(lines) == 0 {
+		lines = append(lines, fmt.Sprintf("%s is not in the book: nothing to destroy", name))
+	}
+	return strings.Join(lines, "\n"), p.err
 }
 
 func (c CloudCheck) now() time.Time {
@@ -868,6 +924,7 @@ func (p *cloudPass) down(ctx context.Context, name, why string) bool {
 		}
 	}
 	if at < 0 {
+		p.repath(ctx, name)
 		return true
 	}
 	box := p.state.Boxes[at]
@@ -897,7 +954,42 @@ func (p *cloudPass) down(ctx context.Context, name, why string) bool {
 		p.move(ctx, fmt.Sprintf("down %s: %s", name, why))
 	}
 	p.keep(ctx, "down "+name)
+	p.repath(ctx, name)
 	return true
+}
+
+// repath sets host=auto on every open and deferred story whose path names the
+// box, a box that is gone: a story pathed to a host that is not there is never
+// dispatched, so it would wait for ever. A claimed story is left to its
+// claim. It says each story moved, as a cloud event; a story that cannot be
+// moved fails the check with its id, for the Mayor to re-path by hand.
+func (p *cloudPass) repath(ctx context.Context, name string) {
+	if p.check.Stories == nil {
+		return
+	}
+	stories, err := p.check.Stories.StoriesSince(ctx, time.Time{})
+	if err != nil {
+		p.fail(fmt.Errorf("reading the stories pathed to %s to re-path them: %w", name, err))
+		return
+	}
+	var moved, stuck []string
+	for _, story := range stories {
+		status := strings.ToLower(strings.TrimSpace(story.Status))
+		if story.IsEpic || story.Merged().Host != name || (status != StatusOpen && status != StatusHeld) {
+			continue
+		}
+		if err := p.check.Stories.SetStoryMetadata(ctx, story.Story.ID, map[string]string{"host": domain.HostAuto}); err != nil {
+			stuck = append(stuck, story.Story.ID)
+			continue
+		}
+		moved = append(moved, story.Story.ID)
+	}
+	if len(moved) > 0 {
+		p.move(ctx, fmt.Sprintf("re-pathed %s from %s to host=auto", strings.Join(moved, ", "), name))
+	}
+	if len(stuck) > 0 {
+		p.fail(fmt.Errorf("could not re-path %s from %s to host=auto: set it with %sauto", strings.Join(stuck, ", "), name, RepathHint))
+	}
 }
 
 // capReached says the month's cap is reached, once a month.

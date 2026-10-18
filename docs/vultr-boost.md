@@ -279,6 +279,16 @@ keeps the three places level.
 To undo: `mw cloud cap <old>`; the next check sets the old cap on each box again. A box that is
 being made takes the tfvars `cap`, which the command keeps level with `box_cap`.
 
+### Stories pathed to a box that goes down
+
+A story pathed to a host that is gone is never dispatched. Whenever a box is destroyed (idle, the
+month's cap, a make that did not come up, or `mw cloud down <box>`, the home only), the cloud sets
+`host=auto` on every open or deferred story whose path names it, and says so as a `cloud` event
+(`re-pathed mw-x.1, mw-x.2 from cloud2 to host=auto`). A story on another host is left alone, and
+so is a claimed one. `mw cloud down <box>` takes only a box's name (`cloud` and a number) and
+runs under the cloud lock. `contrib/vultr-boost down`, run by hand, is a shell wrapper that
+re-paths nothing: use `mw cloud down`.
+
 ### What Vultr can refuse
 
 `vultr-boost up` can fail because Vultr says no, and no retry mends it. The adapter
