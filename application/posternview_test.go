@@ -1142,3 +1142,48 @@ func TestPosternViewHostsLeaveOutADestroyedCloudBox(t *testing.T) {
 		})
 	}
 }
+
+// A hands need with a step for a host the factory has no [hands_hosts] route to
+// says why it offers no Approve, in words he can read, and waits on the Mayor;
+// a step for a reachable host, or a view told nothing of routes, is as it was
+// (mw-gq6.584).
+func TestPosternViewHandsNeedWithNoRouteSaysWhyThereIsNoApprove(t *testing.T) {
+	ctx := context.Background()
+	build := func(t *testing.T, host string, reaches func(string) bool) application.PosternViewNeed {
+		tracker := apptest.NewFakeTracker()
+		liveEpic(tracker, "mw-a", domain.Path{})
+		tracker.AddStory("mw-a", domain.Story{ID: "mw-a.1", Title: "Rebuild the boxes"})
+		mustDo(t, tracker.SetLabels("mw-a.1", "hitl"))
+		raw, _ := json.Marshal([]application.HandsStepRecord{{HandsStep: domain.HandsStep{ID: "rebuild", Host: host, As: "user", Run: "true"}}})
+		mustDo(t, tracker.SetNote(ctx, application.HandsStepsKey("mw-a.1"), string(raw)))
+		doc, err := application.PosternView{Tracker: tracker, Notes: tracker, Host: "laptop", Reaches: reaches,
+			Now: func() time.Time { return viewNow }}.Build(ctx)
+		mustDo(t, err)
+		return viewNeed(t, doc, "hands", "mw-a.1")
+	}
+	reaches := application.HandsReaches("laptop", map[string]string{"desktop": "ssh desktop"})
+
+	t.Run("a host with no route is not ready and says why", func(t *testing.T) {
+		n := build(t, "cloud1", reaches)
+		want := "no Approve: the factory cannot reach cloud1 (no [hands_hosts] entry for it); the Mayor adds the route, or run it by hand"
+		if !n.NotReady || n.WaitsFor != application.PosternWaitsMayor || !equalStrings(n.WaitingOn, []string{want}) ||
+			n.Text != "Not ready yet: waiting on "+want || len(n.Options) != 0 {
+			t.Fatalf("expected a not-ready need waiting on the Mayor with the reason, got %+v", n)
+		}
+	})
+	t.Run("a host with a route offers Approve as before", func(t *testing.T) {
+		if n := build(t, "desktop", reaches); n.NotReady || n.WaitingOn != nil {
+			t.Fatalf("expected a ready need, got %+v", n)
+		}
+	})
+	t.Run("this host needs no route", func(t *testing.T) {
+		if n := build(t, "laptop", reaches); n.NotReady {
+			t.Fatalf("expected a ready need, got %+v", n)
+		}
+	})
+	t.Run("a view told nothing of routes judges none", func(t *testing.T) {
+		if n := build(t, "cloud1", nil); n.NotReady {
+			t.Fatalf("expected a ready need, got %+v", n)
+		}
+	})
+}

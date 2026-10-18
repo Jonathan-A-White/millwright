@@ -108,6 +108,7 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Cloud:      cloudBook,
 		CloudPlan:  cloudPlan,
 		Host:       host,
+		Reaches:    handsReaches(host),
 		Now:        posternViewClock,
 		Err:        cmd.ErrOrStderr(),
 		VerifyDays: verifyDays,

@@ -73,6 +73,7 @@ func newPosternViewCmd() *cobra.Command {
 				Cloud:      cloudBook,
 				CloudPlan:  cloudPlan,
 				Host:       host,
+				Reaches:    handsReaches(host),
 				Now:        posternViewClock,
 				Err:        cmd.ErrOrStderr(),
 				Events:     homeEventLog(),

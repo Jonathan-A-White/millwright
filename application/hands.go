@@ -175,6 +175,20 @@ type HandsAdd struct {
 	// says no, is kept with a warning on Err. A nil Finds checks nothing.
 	Here  string
 	Finds func(program string) bool
+
+	// Reaches says whether the factory can run a step on a host: HandsReaches.
+	// A step whose host it says no to is kept with a warning on Err naming the
+	// missing [hands_hosts] entry (mw-gq6.584). A nil Reaches checks nothing.
+	Reaches func(host string) bool
+}
+
+// HandsReaches is the Reaches of a host called here whose config says hosts
+// ([hands_hosts]): a step is for here, which runs it itself, or for a host
+// with an ssh prefix.
+func HandsReaches(here string, hosts map[string]string) func(host string) bool {
+	return func(host string) bool {
+		return host == here || len(strings.Fields(hosts[host])) > 0
+	}
 }
 
 // Run adds req's step, refusing an invalid one, a bead the tracker does not
@@ -260,6 +274,9 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 	}
 	if req.Step.As == domain.HandsAsUser && req.Step.Host == h.Here && h.Finds != nil && namesMw.MatchString(req.Step.Run) && !h.Finds("mw") {
 		h.report("warning: step %s names mw, which a user step on %s would not find on its PATH (the step is kept): install mw into ~/.local/bin", req.Step.ID, h.Here)
+	}
+	if h.Reaches != nil && !h.Reaches(req.Step.Host) {
+		h.report("warning: step %s is for %s, but there is no [hands_hosts] entry for %s in this host's config, so the factory cannot run it and the Governor sees no Approve (the step is kept): add %s = \"ssh <how to reach it>\" to [hands_hosts], or he runs it by hand", req.Step.ID, req.Step.Host, req.Step.Host, req.Step.Host)
 	}
 	if found[0].Held() {
 		h.report("warning: %s is held: the Governor sees no Run until it is open (the step is kept)", req.Bead)

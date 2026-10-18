@@ -324,6 +324,11 @@ type PosternView struct {
 	Cloud     CloudBook
 	CloudPlan CloudPlan
 
+	// Reaches, when set, says whether the factory can run a hands step on a
+	// host: HandsReaches. A hands need with a step it says no to offers no
+	// Approve and says why. Nil judges no host.
+	Reaches func(host string) bool
+
 	// Now is the clock written_at is stamped with and every window is
 	// measured against. The zero value reads the real one.
 	Now func() time.Time
@@ -1003,6 +1008,7 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 			}
 			b.markNotReady(&w.need, w.entry, len(steps) == 0 && byHand == "")
 			markSuperseded(&w.need, steps)
+			markUnreachable(&w.need, steps, v.Reaches)
 			if byHand != "" && !w.need.NotReady {
 				w.need.Text = byHand
 			}
@@ -1843,6 +1849,35 @@ func markSuperseded(need *PosternViewNeed, steps []PosternViewHandsStep) {
 	need.WaitsFor = PosternWaitsMayor
 	need.WaitingOn = []string{waiting}
 	need.Text = "Not ready yet: " + waiting
+}
+
+// markUnreachable marks the hands need not ready, for the Mayor, when a step
+// that has yet to run is for a host the factory has no route to (reaches says
+// no): the app offers no Approve for a step the factory could not run, and
+// WaitingOn says so in words he can read (mw-gq6.584). A nil reaches judges
+// none; a step that ran clean or was superseded is not judged.
+func markUnreachable(need *PosternViewNeed, steps []PosternViewHandsStep, reaches func(host string) bool) {
+	if reaches == nil {
+		return
+	}
+	var hosts []string
+	for _, step := range steps {
+		if (step.Ran != nil && step.Ran.Exit == 0) || step.SupersededBy != "" || reaches(step.Host) {
+			continue
+		}
+		hosts = append(hosts, step.Host)
+	}
+	if len(hosts) == 0 {
+		return
+	}
+	reason := fmt.Sprintf("no Approve: the factory cannot reach %s (no [hands_hosts] entry for it); the Mayor adds the route, or run it by hand",
+		strings.Join(uniqueStrings(hosts), ", "))
+	need.NotReady = true
+	if need.WaitsFor == PosternWaitsYou {
+		need.WaitsFor = PosternWaitsMayor
+	}
+	need.WaitingOn = append(need.WaitingOn, reason)
+	need.Text = "Not ready yet: waiting on " + strings.Join(need.WaitingOn, ", ")
 }
 
 // allStepsRanClean reports whether steps is not empty and every one has a

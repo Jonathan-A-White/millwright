@@ -97,6 +97,17 @@ var newHandsViewLock = func() application.ViewLock {
 	return hostlock.NewTry(filepath.Join(home, handsViewLockDir), handsViewLockFile)
 }
 
+// handsReaches is the route check for the steps a host with this name would run:
+// its [hands_hosts] table, or nil, which judges no host, when the config
+// cannot be read.
+func handsReaches(host string) func(string) bool {
+	hosts, err := config.HandsHosts()
+	if err != nil {
+		return nil
+	}
+	return application.HandsReaches(host, hosts)
+}
+
 // newHandsView is the publisher mw hands add refreshes the live view through:
 // the very view mw postern view writes, set up when it is published so that a
 // rig with no postern key still adds its step. A test swaps it.
@@ -122,6 +133,7 @@ func (v handsView) Run(ctx context.Context) (application.PosternViewDoc, error) 
 		Cloud:      cloudBook,
 		CloudPlan:  cloudPlan,
 		Host:       v.host,
+		Reaches:    handsReaches(v.host),
 		Now:        posternViewClock,
 		VerifyDays: verifyDays,
 	})
@@ -151,7 +163,8 @@ func newHandsAddCmd() *cobra.Command {
 			"A user step runs as sh -c with PATH=" + hands.UserStepPath + ":$PATH, ~ the home of\n" +
 			"the host's user, as the seats' shells have it: so a step that names mw finds it in\n" +
 			"~/.local/bin. A user step for this host that names mw when no mw is there is kept with\n" +
-			"a warning on stderr.\n\n" +
+			"a warning on stderr. So is a step for a host with no [hands_hosts] entry in this host's\n" +
+			"config: the factory cannot run it, and Postern offers no Approve and says why.\n\n" +
 			"Once the step is kept, one Postern message is sent to the Governor on the bead's thread,\n" +
 			"whose tap opens Needs you. A push that fails is said on stderr and on the bead, and the\n" +
 			"step stays: mw hands add still exits 0. --no-push sends none. A --replace sends one only\n" +
@@ -185,8 +198,9 @@ func newHandsAddCmd() *cobra.Command {
 				ViewLock: newHandsViewLock(),
 				NoView:   noView,
 
-				Here:  viewHost,
-				Finds: hands.NewRunner("").Finds,
+				Here:    viewHost,
+				Finds:   hands.NewRunner("").Finds,
+				Reaches: handsReaches(viewHost),
 			}.Run(cmd.Context(), application.HandsAddRequest{
 				Bead:    args[0],
 				Step:    domain.HandsStep{ID: id, Host: host, As: as, Run: args[1], WayBack: wayBack},

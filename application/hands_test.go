@@ -322,3 +322,41 @@ func TestHandsAddWarnsWhenAUserStepNamesMwThatItWouldNotFind(t *testing.T) {
 		})
 	}
 }
+
+// A step for a host this host's config has no [hands_hosts] route to is kept
+// with a plain warning naming the missing entry, since the factory could never
+// run it and the Governor would see no Approve (mw-gq6.584). A step for this
+// host, or one for a host with a route, warns of nothing.
+func TestHandsAddWarnsWhenNoRouteReachesTheStepsHost(t *testing.T) {
+	hosts := map[string]string{"desktop": "ssh desktop"}
+	for _, c := range []struct {
+		name, host string
+		warns      bool
+	}{
+		{"cloud box with no entry", "cloud1", true},
+		{"host with an entry", "desktop", false},
+		{"this host", "laptop", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tracker := handsTracker()
+			var errs bytes.Buffer
+			_, err := application.HandsAdd{Tracker: tracker, Notes: tracker, Now: func() time.Time { return handsNow }, Err: &errs,
+				Here: "laptop", Reaches: application.HandsReaches("laptop", hosts),
+			}.Run(context.Background(), application.HandsAddRequest{Bead: "mw-f758y.8",
+				Step: domain.HandsStep{ID: "s", Host: c.host, As: "user", Run: "echo hi"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			warned := strings.Contains(errs.String(), "warning: step s is for cloud1, but there is no [hands_hosts] entry for cloud1 in this host's config")
+			if warned != c.warns {
+				t.Fatalf("expected warned=%v, got %q", c.warns, errs.String())
+			}
+			if c.warns && !strings.Contains(errs.String(), `cloud1 = "ssh <how to reach it>"`) {
+				t.Fatalf("expected the warning to say what to add, got %q", errs.String())
+			}
+			if len(handsSteps(t, tracker, "mw-f758y.8")) != 1 {
+				t.Fatal("expected the step kept either way")
+			}
+		})
+	}
+}
