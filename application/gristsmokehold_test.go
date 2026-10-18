@@ -263,3 +263,72 @@ func TestNamingFailingExamplesOnABead(t *testing.T) {
 		t.Fatalf("expected a closed bead refused, got %v", err)
 	}
 }
+
+// mw-gq6.579: the bug filed as the cause of a failing smoke names the failing
+// example in its title or description, and is not held by the failure it is the
+// fix of, though nobody named the example in its smoke_examples metadata. The
+// dispatch log says it ran over the hold, and why.
+func TestAHeldRigStillDispatchesTheBugWhoseTextNamesAFailingExample(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, _, _ := aFactory(t)
+	dispatch.Host, dispatch.Cap = "vps", 5
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "Some other story"})
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.2", Title: "[bug] A request answer carries a setting_offer"})
+	if err := tracker.SetDescription("mw-gq6.2", "The smoke fails on cairn/sweep/one: setting_offer wanted absent."); err != nil {
+		t.Fatal(err)
+	}
+	book := application.GristSmokeBook{Notes: tracker, Host: "vps"}
+	dispatch.SmokeHolds = book
+	failed := application.GristSmokeReport{App: "cairn", Examples: 3, Failures: []string{"cairn/sweep/one: setting_offer wanted absent"}}
+	if err := book.Record(ctx, "millwright", failed); err != nil {
+		t.Fatal(err)
+	}
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Started) != 1 || report.Started[0].StoryID != "mw-gq6.2" {
+		t.Fatalf("expected the bug that names the failing example started, got %+v passed %+v", report.Started, report.Passed)
+	}
+	if !strings.Contains(report.String(), "runs over the grist smoke hold of millwright") || !strings.Contains(report.String(), "cairn/sweep/one") {
+		t.Fatalf("expected the dispatch log to say the hold was passed and why, got %q", report.String())
+	}
+	if len(report.Passed) != 1 || report.Passed[0].StoryID != "mw-gq6.1" {
+		t.Fatalf("expected the other story still held, got %+v", report.Passed)
+	}
+}
+
+// mw-gq6.579: --filed <bead> with no example names the failing examples of the
+// app's last smoke, and a fix that names only some of them is on the line mw
+// status shows.
+func TestFilingABeadWithNoExamplesNamesWhatTheLastSmokeFailedOn(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.9", Title: "The bug"})
+	book := application.GristSmokeBook{Notes: tracker, Filed: tracker, Host: "vps"}
+	file := application.GristSmokeFile{Tracker: tracker, Book: book}
+
+	if _, err := file.Run(ctx, "mw-gq6.9", "cairn", nil); err == nil {
+		t.Fatal("expected a refusal when the app has no failing smoke and no example is named")
+	}
+	failed := application.GristSmokeReport{App: "cairn", Examples: 3, Failures: []string{
+		"cairn/sweep/one: wrong", "cairn/sweep/two: wrong", "the mill refused it: no licence"}}
+	if err := book.Record(ctx, "millwright", failed); err != nil {
+		t.Fatal(err)
+	}
+	named, err := file.Run(ctx, "mw-gq6.9", "cairn", nil)
+	if err != nil || strings.Join(named, ",") != "cairn/sweep/one,cairn/sweep/two" {
+		t.Fatalf("expected the failing examples named, got %v %v", named, err)
+	}
+	records, err := book.Records(ctx)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("expected one record, got %v %v", records, err)
+	}
+	// The refusal is no example's, so the failure is still held; the fix is on the line.
+	if why, _ := book.HeldBy(ctx, "millwright"); why == "" {
+		t.Fatal("expected the failure with a part unnamed still held")
+	}
+	if line := records[0].Line(); !strings.Contains(line, "mw-gq6.9 runs over the hold") {
+		t.Fatalf("expected mw status to name the fix that runs over the hold, got %q", line)
+	}
+}

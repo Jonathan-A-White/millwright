@@ -23,7 +23,7 @@ var DispatchGates = []DispatchGate{
 	{"landed", "its last run landed it and only the close was lost"},
 	{"blocked", "it waits on a story that is not closed"},
 	{"rig-not-checked-out", "the rig is not under [rigs] in the config file"},
-	{"smoke-hold", "the rig's last grist smoke failed and the story does not name a failing example"},
+	{"smoke-hold", "the rig's last grist smoke failed and the story does not name a failing example in its smoke_examples, title or description"},
 	{"metered-network", "the rig installs dependencies and the network is metered"},
 	{"formula-not-installed", "the path's formula is not installed in the vault"},
 	{"no-sweep", "a bug filed after the sweep rule has no line beginning 'Sweep:' in its acceptance"},

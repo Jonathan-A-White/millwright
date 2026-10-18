@@ -325,6 +325,9 @@ type Started struct {
 	// when the story was dispatched all the same: that the spec still fails, or
 	// why it could not be re-run. Empty for any other story.
 	Recheck string
+	// SmokeFix says the story ran over its rig's grist smoke hold, and why: it is
+	// the fix of the failing example. Empty for any story the hold did not touch.
+	SmokeFix string
 }
 
 // Passed is one ready story this dispatch did not take, and why. It is not a
@@ -840,9 +843,16 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// A rig whose last grist smoke failed holds its open stories, so that no
 		// more work lands on a mill that does not answer as its examples say. A story
 		// that names a failing example as its cause is the fix, and runs (mw-gq6.412).
-		if held := d.smokeHold(ctx, path.Rig, &smokeHolds); held.Reason != "" && !held.Names(detail.SmokeExamples) {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: held.Reason})
-			continue
+		// The story that is the fix, by its metadata or by the failing example it
+		// names in its text, is never held by the failure it is to mend, and the log
+		// says it ran over the hold (mw-gq6.579).
+		smokeFix := ""
+		if held := d.smokeHold(ctx, path.Rig, &smokeHolds); held.Reason != "" {
+			if smokeFix = held.Fix(detail); smokeFix == "" {
+				report.Passed = append(report.Passed, Passed{StoryID: id, Why: held.Reason})
+				continue
+			}
+			smokeFix = fmt.Sprintf("runs over the grist smoke hold of %s: %s", path.Rig, smokeFix)
 		}
 
 		// gate: metered-network
@@ -968,6 +978,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 
 		started, released, err := d.start(ctx, detail, path, rigDir, formulas)
 		started.Recheck = recheck
+		started.SmokeFix = smokeFix
 		if started.StoryID != "" {
 			report.Started = append(report.Started, started)
 			shares.add(detail)
@@ -2323,6 +2334,9 @@ func (r DispatchReport) String() string {
 		}
 		if started.Recheck != "" {
 			fmt.Fprintf(&b, " · %s", started.Recheck)
+		}
+		if started.SmokeFix != "" {
+			fmt.Fprintf(&b, " · %s", started.SmokeFix)
 		}
 		if molecule := started.Molecule; molecule.Poured() && started.Reused {
 			fmt.Fprintf(&b, " · %s reused as %s (%d steps still open)", molecule.Formula, molecule.RootID, len(molecule.Steps))

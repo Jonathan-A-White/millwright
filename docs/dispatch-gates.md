@@ -19,7 +19,7 @@ three.
 | `landed` | its last run landed it and only the close was lost |
 | `blocked` | it waits on a story that is not closed |
 | `rig-not-checked-out` | the rig is not under `[rigs]` in the config file |
-| `smoke-hold` | the rig's last grist smoke failed and the story does not name a failing example |
+| `smoke-hold` | the rig's last grist smoke failed and the story does not name a failing example in its smoke_examples, title or description |
 | `metered-network` | the rig installs dependencies and the network is metered |
 | `formula-not-installed` | the path's formula is not installed in the vault |
 | `no-sweep` | a bug filed after the sweep rule has no line beginning `Sweep:` in its acceptance (below) |
@@ -71,3 +71,20 @@ session's pane, and keeps the stop it read in the run (`harness-stop.txt`,
 numbered by attempt as the result is) for dispatch, `mw retry` and `mw status`.
 All of them read the limit's notice with the one reader, `HarnessStopOf` and
 `HarnessStopOfWords` (mw-gq6.471).
+
+## The smoke-hold gate, and the gates that cannot hold their own fix
+
+A failed grist smoke holds the open stories of its rig, except the fix: a story
+whose `smoke_examples` metadata, title or description names a failing example as
+`<app>/<kind>/<example>` runs over the hold, and `mw dispatch` says so (`runs over
+the grist smoke hold of <rig>: ...`). `mw grist smoke <app> --filed <bead>` with
+no example names the examples the last smoke failed on, and `mw status` names the
+beads that run over a hold (mw-gq6.579). Closing the bead ends it.
+
+The other gates cannot hold a fix behind the very failure it is to mend, each
+for its own reason: `shared-files` and `testers-per-rig` wait only for stories
+already running, which are past every gate and end on their own; `harness-hold`,
+`no-room` and `paused` wait for the host, not for a story; `no-sweep`,
+`handed-back` and `attempts-exhausted` read the story's own bead; `blocked` waits
+on a dependency a person filed. The false-hold guard is `mw release`'s, not
+dispatch's, and no smoke touches it.
