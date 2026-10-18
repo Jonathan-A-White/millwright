@@ -853,3 +853,67 @@ Feature: mw status
     When mw status reads the host
     Then reading status succeeds
     And the report has no heading for the suite
+
+  # mw-gq6.604: a story queued for batch landing has no session by design, so
+  # its run-out lease is no sign that it is stuck.
+  Scenario: A claimed story queued for batch landing is not called stranded, and says since when
+    Given the rig "millwright" lands in batches every 30 minutes
+    And a status story "mw-gq6.60" filed under it
+    And the status story "mw-gq6.60" is claimed with its session running
+    And the claim on "mw-gq6.60" was last renewed 3 hours ago
+    And the status story "mw-gq6.60" was queued for batch landing 40 minutes ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.60" is queued for batch landing since 40 minutes ago
+    And the report does not call any story stranded
+    And the report does not say any story is queued too long
+    And every line of the report is at most 60 columns wide
+
+  Scenario: A queued story says so when its rig's batch is running
+    Given the rig "millwright" lands in batches every 30 minutes
+    And a status story "mw-gq6.61" filed under it
+    And the status story "mw-gq6.61" is claimed with its session running
+    And the claim on "mw-gq6.61" was last renewed 3 hours ago
+    And the status story "mw-gq6.61" was queued for batch landing 150 minutes ago
+    And a batch-land job for the rig "millwright" began running 20 minutes ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.61" is queued for batch landing since 150 minutes ago
+    And the report says "mw-gq6.61" is in the batch running since 20 minutes ago
+    And the report does not call any story stranded
+    And the report does not say any story is queued too long
+    And every line of the report is at most 60 columns wide
+
+  Scenario: A story queued past twice its rig's batch_every with no batch running is the alarm
+    Given the rig "millwright" lands in batches every 30 minutes
+    And a status story "mw-gq6.62" filed under it
+    And the status story "mw-gq6.62" is claimed with its session running
+    And the claim on "mw-gq6.62" was last renewed 3 hours ago
+    And the status story "mw-gq6.62" was queued for batch landing 61 minutes ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.62" is queued too long
+    And the report says "mw-gq6.62" is queued for batch landing since 61 minutes ago
+    And the report does not call any story stranded
+    And every line of the report is at most 60 columns wide
+
+  Scenario: A story queued on another host that is awake is not called stranded either
+    Given the rig "millwright" lands in batches every 30 minutes
+    And a status story "mw-gq6.63" filed under it, overriding "host" with "laptop"
+    And the status story "mw-gq6.63" is claimed with its session running
+    And the claim on "mw-gq6.63" was last renewed 3 hours ago
+    And the status story "mw-gq6.63" was queued for batch landing 40 minutes ago
+    And the host "laptop" last synced 1 hour ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.63" is queued for batch landing since 40 minutes ago
+    And the report does not call any story stranded
+
+  Scenario: A claimed story that is not queued and whose lease ran out is still stranded
+    Given a status story "mw-gq6.64" filed under it
+    And the status story "mw-gq6.64" is claimed with its session running
+    And the claim on "mw-gq6.64" was last renewed 3 hours ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report calls "mw-gq6.64" stranded
+    And the report does not say any story is queued too long

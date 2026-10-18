@@ -448,6 +448,9 @@ type RunningStory struct {
 	// renewing (refused, queued, handed back): a claim whose session never
 	// started or is gone looks exactly so (mw-gq6.576).
 	Stranded time.Time
+	// Wait is what a queued story waits for, set only for one run=queued
+	// (mw-gq6.604).
+	Wait *BatchWait
 }
 
 // Stopped reports whether this story's session is not to be trusted as
@@ -509,6 +512,9 @@ type HostWork struct {
 	Halt *SyncHaltInfo
 	// Now is when the report was read, to judge the lease of a claimed story.
 	Now time.Time
+	// Waits is what each of its stories queued for batch landing waits for,
+	// by story id: such a story is never stranded by its lease (mw-gq6.604).
+	Waits map[string]BatchWait
 	// Asleep says this host has been silent for longer than the threshold — or
 	// has never synced, or left a note that is not a time. Its stories are
 	// stranded: nothing here will move them, and no other host will take them
@@ -818,6 +824,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	if err != nil {
 		return report, fmt.Errorf("reading what is in hand: %w", err)
 	}
+	waits := s.batchWaits(ctx, work)
 	runningRead := map[string]func() (RunningStory, error){}
 	for _, detail := range work.RunningOn(s.Host) {
 		if !detail.Hitl() {
@@ -844,6 +851,9 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 		if mark, ok := closing[detail.Story.ID]; ok {
 			rs.CloseOut, rs.Now = &mark, s.now()
+		}
+		if wait, ok := waits[detail.Story.ID]; ok && rs.Queued() {
+			rs.Wait = &wait
 		}
 		report.Running = append(report.Running, rs)
 		if !rs.Refused() && !rs.Queued() {
@@ -954,6 +964,9 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	others, err := elsewhereRead()
 	if err != nil {
 		return report, err
+	}
+	for i := range others {
+		others[i].Waits = waits
 	}
 	report.Others = others
 	report.Ticks = ReadHostTicks(ctx, s.Ticks)
@@ -2113,7 +2126,13 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 	}
 	for _, d := range w.Stories {
 		writeStoryIn(b, "    ", d, strings.TrimPrefix(note+" · "+readyOrClaimed(d), " · "))
-		if since := lapsedLease(d, w.Now); !d.Hitl() && !since.IsZero() {
+		if QueuedForBatch(d) {
+			wait := BatchWait{Since: d.QueuedAt}
+			if had, ok := w.Waits[d.Story.ID]; ok {
+				wait = had
+			}
+			wait.write(b, "      ")
+		} else if since := lapsedLease(d, w.Now); !d.Hitl() && !since.IsZero() {
 			wrapInto(b, "      ", strandedLine(since))
 		}
 	}
@@ -2277,7 +2296,11 @@ func (r RunningStory) write(b *strings.Builder) {
 		clip(b, "    refused, waiting on the Mayor (mw retry or a hold)")
 	}
 	if r.Queued() {
-		clip(b, "    queued for batch landing, waiting for its batch: no session")
+		wait := BatchWait{Since: r.Detail.QueuedAt}
+		if r.Wait != nil {
+			wait = *r.Wait
+		}
+		wait.write(b, "    ")
 	}
 	if r.HandedBack() {
 		clip(b, "    handed back at the merge slot's overall most: the next dispatch tick runs its close-out alone again")

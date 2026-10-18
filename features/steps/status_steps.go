@@ -41,6 +41,9 @@ type statusContext struct {
 	runner  *apptest.FakeRunner
 	// epicRules is what each rig requires of its epics.
 	epicRules *apptest.FakeEpicRules
+	// log is the event log the follower's jobs wrote to, nil until a
+	// scenario puts a job in it.
+	log *apptest.FakeEventLog
 
 	lastEpic string
 	now      time.Time
@@ -137,6 +140,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	registerStatusCauseSteps(ctx, c)
 	registerStatusVisionSteps(ctx, c)
 	registerStatusSuiteSteps(ctx, c)
+	registerStatusQueuedSteps(ctx, c)
 
 	ctx.Given(`^the status epic "([^"]*)" on the default path:$`, c.theStatusEpicOnTheDefaultPath)
 	ctx.Given(`^a status story "([^"]*)" filed under it$`, c.aStatusStoryFiledUnderIt)
@@ -654,6 +658,9 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 	}
 	if c.load != nil {
 		status.Load = c.load
+	}
+	if c.log != nil {
+		status.Log = c.log
 	}
 	if c.gristRuns != nil {
 		status.Grist = application.GristRoom{Runs: c.gristRuns, Now: func() time.Time { return c.now }}
