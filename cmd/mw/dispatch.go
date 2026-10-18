@@ -301,6 +301,11 @@ func newDispatchCmd() *cobra.Command {
 				return err
 			}
 
+			// What is running and ready, what the candidates wait on and the
+			// notes of every gate were each a bd a minute, most of a host's new
+			// connections to the beads server (mw-gq6.612): they are read over
+			// one connection, and a note written only when it changes.
+			defer keepBeadsConnection(dir, cmd.ErrOrStderr())()
 			gateway := mwGateway(dir, host)
 			files := mwVault(dir, host)
 			logs := hostTickLogs()

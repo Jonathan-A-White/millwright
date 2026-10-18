@@ -180,3 +180,33 @@ func TestTheLinesMwTidyAddsAreNotRunsOfTheTick(t *testing.T) {
 		t.Errorf("expected a tidy line after a resume line to leave its grace open, got %+v", grace)
 	}
 }
+
+// mw-gq6.612: the time of a good run moves on with every tick, and a ticks note
+// written each minute was a bd for a time shown as "last good". A note read
+// back says the counts still when they are as they were and its good runs are
+// at most TicksNoteSlack behind; a failure, a fault, a timer new to it, or a
+// good run further on, is said again.
+func TestATicksNoteIsSaidAgainOnlyWhenItsCountsChangeOrItFallsBehind(t *testing.T) {
+	good := time.Date(2026, 10, 18, 13, 0, 0, 0, time.UTC)
+	kept := application.ParseHostTicks(application.HostTicks{
+		Dispatch: application.TickCount{Known: true, LastGood: good},
+	}.Note())
+	for _, c := range []struct {
+		name string
+		now  application.HostTicks
+		said bool
+	}{
+		{"the same", application.HostTicks{Dispatch: application.TickCount{Known: true, LastGood: good}}, true},
+		{"a minute on", application.HostTicks{Dispatch: application.TickCount{Known: true, LastGood: good.Add(time.Minute)}}, true},
+		{"the slack on", application.HostTicks{Dispatch: application.TickCount{Known: true, LastGood: good.Add(application.TicksNoteSlack)}}, true},
+		{"past the slack", application.HostTicks{Dispatch: application.TickCount{Known: true, LastGood: good.Add(application.TicksNoteSlack + time.Minute)}}, false},
+		{"a failure since", application.HostTicks{Dispatch: application.TickCount{Known: true, LastGood: good, Failed: 1}}, false},
+		{"a fault since", application.HostTicks{Dispatch: application.TickCount{Known: true, LastGood: good, Faults: 1}}, false},
+		{"a timer new to it", application.HostTicks{Dispatch: application.TickCount{Known: true, LastGood: good}, Millhand: application.TickCount{Known: true, LastGood: good}}, false},
+		{"an older good run", application.HostTicks{Dispatch: application.TickCount{Known: true, LastGood: good.Add(-time.Minute)}}, false},
+	} {
+		if got := c.now.SaidBy(kept); got != c.said {
+			t.Errorf("%s: expected SaidBy %v, got %v", c.name, c.said, got)
+		}
+	}
+}

@@ -6,11 +6,13 @@ package contrib_test
 // runs on, and a few loops live for a second at a time at most.
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -234,4 +236,54 @@ func TestUnderLoadScriptIsExecutableAndParses(t *testing.T) {
 	if out, err := exec.Command("sh", "-n", "mw-under-load").CombinedOutput(); err != nil {
 		t.Fatalf("does not parse: %v %s", err, out)
 	}
+}
+
+// A command that ends at once has its loops stopped the moment they start,
+// when a TERM can be lost before `timeout` takes it up: mw-under-load must
+// still end with its command, not wait out the loops' deadline. Eight runs
+// side by side, ten times over, make the busy box the gate saw.
+func TestUnderLoadEndsAtOnceWhenTheCommandEndsAsItsLoopsStart(t *testing.T) {
+	failed := make(chan string, 80)
+	var wg sync.WaitGroup
+	for w := 0; w < 8; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 10; i++ {
+				if msg := endsWithItsCommand(t); msg != "" {
+					failed <- msg
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(failed)
+	for msg := range failed {
+		t.Error(msg)
+	}
+}
+
+// endsWithItsCommand runs `true` beside four loops and says what went wrong, if anything.
+func endsWithItsCommand(t *testing.T) string {
+	cmd := underLoad(t, "1.00", 16, []string{"MW_UNDER_LOAD_SECONDS=60"}, "true")
+	if err := cmd.Start(); err != nil {
+		return err.Error()
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Sprintf("the command succeeded, mw-under-load should too: %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+		return "mw-under-load still waiting on its loops 20 s after its command ended"
+	}
+	if left := anyLeft(cmd.Process.Pid); left != "" {
+		return "loops left after the command ended: " + left
+	}
+	return ""
 }

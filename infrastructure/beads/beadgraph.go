@@ -10,8 +10,12 @@ import (
 // BeadGraph implements application.BeadGraph: one bd list of every bead,
 // closed ones included, whose dependencies bd prints as edges. Mail, event and
 // molecule beads are left out: they are never an epic, a map or a ticket, and
-// they are most of the database.
+// they are most of the database. Over a kept connection it is three narrow
+// queries and no bd (mw-gq6.612).
 func (g *Gateway) BeadGraph(ctx context.Context) ([]domain.GraphBead, error) {
+	if graph, ok := g.graphOverConnection(ctx); ok {
+		return graph, nil
+	}
 	out, err := g.call(ctx, "list", "--all", "--limit", "0", "--exclude-type", "mail,event,molecule", "--json")
 	if err != nil {
 		return nil, err

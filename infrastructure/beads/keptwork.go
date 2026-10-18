@@ -1,0 +1,278 @@
+package beads
+
+import (
+	"context"
+	"database/sql"
+	"slices"
+	"sort"
+
+	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
+)
+
+// mw dispatch reads what is running and what is ready every minute, and mw
+// doctor the work in hand and every bead, and each of those reads started a bd:
+// after mw-gq6.608 the desktop's dispatch still started about 8 a minute and its
+// doctor 4, every one several new connections to the beads server (mw-gq6.612).
+// A Gateway given a database (WithHeadDB) reads them over the kept connection,
+// from the live beads only, and starts a bd only when that connection fails.
+
+// liveWhere is the beads the work is read from: every one that is not closed,
+// mail and events left out (there are thousands of each, and none is work), and
+// every epic, closed or not, for the defaults its stories inherit.
+const liveWhere = "(i.status <> 'closed' and i.issue_type not in ('mail', 'event')) or i.issue_type = 'epic'"
+
+// liveBeadsQuery, liveLabelsQuery and liveEdgesQuery are the live beads with
+// their labels and their edges, as beadsListQuery and its two lists read every
+// bead; an edge carries the status of the bead it names, so that a wait on a
+// bead closed long ago is known to be over without reading that bead.
+const (
+	liveBeadsQuery  = beadColumns + " where " + liveWhere + " order by i.created_at, i.id"
+	liveLabelsQuery = "select l.issue_id, l.label from labels l join issues i on i.id = l.issue_id where " + liveWhere +
+		" order by l.issue_id, l.label"
+	liveEdgesQuery = "select d.issue_id, coalesce(d.depends_on_issue_id, d.depends_on_wisp_id, d.depends_on_external) as depends_on_id," +
+		" d.type, t.status as target_status from dependencies d join issues i on i.id = d.issue_id" +
+		" left join issues t on t.id = d.depends_on_issue_id where " + liveWhere + " order by d.issue_id, d.created_at"
+)
+
+// liveListing is the live beads as one read over the kept connection found
+// them.
+type liveListing struct {
+	beads []bead
+	byID  map[string]bead
+	// targets is the status of every bead an edge names, "" for one that is no
+	// bead (a wisp, an outside reference, or one not there).
+	targets map[string]string
+}
+
+// liveOverConnection reads the live beads over the kept connection; ok is false
+// when there is no connection or it failed, and the caller starts a bd.
+func (g *Gateway) liveOverConnection(ctx context.Context) (*liveListing, bool) {
+	db := g.keptDB()
+	if db == nil {
+		return nil, false
+	}
+	targets := map[string]string{}
+	all, err := readListing(ctx, db, listingQueries{liveBeadsQuery, liveLabelsQuery, liveEdgesQuery}, targets)
+	if err != nil {
+		g.keptFailed(ctx, "the live beads", err)
+		return nil, false
+	}
+	l := &liveListing{beads: all, byID: make(map[string]bead, len(all)), targets: targets}
+	for _, b := range all {
+		l.byID[b.ID] = b
+	}
+	return l, true
+}
+
+// waiting says whether b has a blocking edge to a bead that is not closed, or
+// to one that is no bead, as bd's own idea of blocked has it.
+func (l *liveListing) waiting(b bead) bool {
+	for _, e := range b.edges() {
+		if e.Issue != b.ID || !slices.Contains(blockingKinds, e.Kind) {
+			continue
+		}
+		if l.targets[e.DependsOn] != StatusClosed {
+			return true
+		}
+	}
+	return false
+}
+
+// blocked is waiting for b or any bead it hangs from: bd holds back the
+// stories of an epic that waits.
+func (l *liveListing) blocked(b bead) bool {
+	seen := map[string]bool{}
+	for {
+		if l.waiting(b) {
+			return true
+		}
+		parent, held := l.byID[b.Parent]
+		if b.Parent == "" || !held || seen[b.Parent] {
+			return false
+		}
+		seen[b.Parent] = true
+		b = parent
+	}
+}
+
+// shown is b as a story, with its epic's defaults and what it waits on
+// narrowed to the beads not yet closed, as bd show prints it.
+func (l *liveListing) shown(b bead) application.StoryDetail {
+	var defaults domain.Path
+	if parent, held := l.byID[b.Parent]; held {
+		defaults = domain.PathFromMetadata(parent.pathMetadata())
+	}
+	detail := b.detail(defaults)
+	var open []string
+	for _, need := range detail.Needs {
+		if l.targets[need] != StatusClosed {
+			open = append(open, need)
+		}
+	}
+	detail.Needs = open
+	return detail
+}
+
+// ready is what `bd ready --unassigned --exclude-type epic` lists: the open
+// beads nobody holds, no epic, no molecule, nothing blocked, the most urgent
+// first and the oldest first among those.
+func (l *liveListing) ready() []application.StoryDetail {
+	var found []bead
+	for _, b := range l.beads {
+		if b.Status != StatusOpen || b.Assignee != "" || b.Type == TypeEpic || b.Type == "molecule" || l.blocked(b) {
+			continue
+		}
+		found = append(found, b)
+	}
+	sort.SliceStable(found, func(i, j int) bool {
+		if found[i].priority() != found[j].priority() {
+			return found[i].priority() < found[j].priority()
+		}
+		return found[i].created().Before(found[j].created())
+	})
+	return l.details(found)
+}
+
+// withStatus is the beads with status that are no epic, in the order filed.
+func (l *liveListing) withStatus(status string) []bead {
+	var found []bead
+	for _, b := range l.beads {
+		if b.Status == status && b.Type != TypeEpic {
+			found = append(found, b)
+		}
+	}
+	return found
+}
+
+func (l *liveListing) details(beads []bead) []application.StoryDetail {
+	out := make([]application.StoryDetail, 0, len(beads))
+	for _, b := range beads {
+		out = append(out, l.shown(b))
+	}
+	return out
+}
+
+// workInHand is Gateway.WorkInHand read from the listing.
+func (l *liveListing) workInHand() application.WorkInHand {
+	var stale []bead
+	for _, b := range l.withStatus(StatusOpen) {
+		if application.ClaimHost(b.Assignee) != "" {
+			stale = append(stale, b)
+		}
+	}
+	return application.WorkInHand{Ready: l.ready(), Running: l.details(l.withStatus(StatusInProgress)), OpenClaimed: l.details(stale)}
+}
+
+// onHost narrows details as Gateway.onHost does.
+func onHost(details []application.StoryDetail, host string, anyHost bool) []application.StoryDetail {
+	var on []application.StoryDetail
+	for _, detail := range details {
+		merged := detail.Merged().Host
+		if merged == "" || merged != host && !(anyHost && merged == domain.HostAuto) {
+			continue
+		}
+		on = append(on, detail)
+	}
+	return on
+}
+
+// elsewhere narrows details to what the hosts other than host hold.
+func elsewhere(details []application.StoryDetail, host string) []application.StoryDetail {
+	var away []application.StoryDetail
+	for _, detail := range details {
+		if merged := detail.Merged().Host; merged != "" && merged != host && merged != domain.HostAuto {
+			away = append(away, detail)
+		}
+	}
+	return away
+}
+
+// graphWhere is the beads BeadGraph reads, as its bd list leaves out mail,
+// events and molecules.
+const graphWhere = "i.issue_type not in ('mail', 'event', 'molecule')"
+
+const (
+	graphBeadsQuery  = "select i.id, i.title, i.status, i.issue_type, i.created_at from issues i where " + graphWhere + " order by i.created_at, i.id"
+	graphLabelsQuery = "select l.issue_id, l.label from labels l join issues i on i.id = l.issue_id where " + graphWhere +
+		" order by l.issue_id, l.label"
+	graphEdgesQuery = "select d.issue_id, coalesce(d.depends_on_issue_id, d.depends_on_wisp_id, d.depends_on_external) as depends_on_id, d.type" +
+		" from dependencies d join issues i on i.id = d.issue_id where " + graphWhere + " order by d.issue_id, d.created_at"
+)
+
+// graphOverConnection is BeadGraph over the kept connection, in three narrow
+// queries; ok is false when there is no connection or it failed.
+func (g *Gateway) graphOverConnection(ctx context.Context) ([]domain.GraphBead, bool) {
+	db := g.keptDB()
+	if db == nil {
+		return nil, false
+	}
+	graph, err := readGraph(ctx, db)
+	if err != nil {
+		g.keptFailed(ctx, "the bead graph", err)
+		return nil, false
+	}
+	return graph, true
+}
+
+func readGraph(ctx context.Context, db *sql.DB) ([]domain.GraphBead, error) {
+	bounded, cancel := context.WithTimeout(ctx, keptQueryBound)
+	defer cancel()
+	rows, err := db.QueryContext(bounded, graphBeadsQuery)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	graph := []domain.GraphBead{}
+	at := map[string]int{}
+	for rows.Next() {
+		var one domain.GraphBead
+		var created sql.NullString
+		if err := rows.Scan(&one.ID, &one.Title, &one.Status, &one.Type, &created); err != nil {
+			return nil, err
+		}
+		one.Created = bead{CreatedAt: rfc3339Of(created.String)}.created()
+		at[one.ID] = len(graph)
+		graph = append(graph, one)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+
+	labels, err := db.QueryContext(bounded, graphLabelsQuery)
+	if err != nil {
+		return nil, err
+	}
+	defer labels.Close()
+	for labels.Next() {
+		var id, label string
+		if err := labels.Scan(&id, &label); err != nil {
+			return nil, err
+		}
+		if i, held := at[id]; held {
+			graph[i].Labels = append(graph[i].Labels, label)
+		}
+	}
+	if err := labels.Err(); err != nil {
+		return nil, err
+	}
+	labels.Close()
+
+	edges, err := db.QueryContext(bounded, graphEdgesQuery)
+	if err != nil {
+		return nil, err
+	}
+	defer edges.Close()
+	for edges.Next() {
+		var id, kind string
+		var to sql.NullString
+		if err := edges.Scan(&id, &to, &kind); err != nil {
+			return nil, err
+		}
+		if i, held := at[id]; held && to.String != "" {
+			graph[i].Edges = append(graph[i].Edges, domain.BeadEdge{To: to.String, Kind: kind})
+		}
+	}
+	return graph, edges.Err()
+}

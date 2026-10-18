@@ -142,17 +142,24 @@ func rfc3339Of(text string) string {
 // comments, every label, every dependency (an edge to a bead, a wisp or an
 // external reference, whichever it names).
 const (
-	beadsListQuery = "select i.id as id, i.title as title, i.description as description, i.acceptance_criteria as acceptance_criteria," +
-		" i.status as status, i.issue_type as issue_type, i.assignee as assignee, i.estimated_minutes as estimated_minutes," +
-		" i.created_at as created_at, i.started_at as started_at, i.updated_at as updated_at, i.closed_at as closed_at," +
-		" i.priority as priority, i.metadata as metadata, le.lease_expires_at as lease_expires_at, coalesce(cc.n, 0) as comment_count" +
-		" from issues i left join leases le on le.issue_id = i.id" +
-		" left join (select issue_id, count(*) as n from comments group by issue_id) cc on cc.issue_id = i.id" +
-		" order by i.created_at, i.id"
+	beadsListQuery  = beadColumns + " order by i.created_at, i.id"
 	beadLabelsQuery = "select issue_id, label from labels order by issue_id, label"
 	beadEdgesQuery  = "select issue_id, coalesce(depends_on_issue_id, depends_on_wisp_id, depends_on_external) as depends_on_id, type from dependencies" +
 		" order by issue_id, created_at"
 )
+
+// beadColumns is a bead as a listing reads it, its lease and the count of its
+// comments beside it, for a where and an order to follow.
+const beadColumns = "select i.id as id, i.title as title, i.description as description, i.acceptance_criteria as acceptance_criteria," +
+	" i.status as status, i.issue_type as issue_type, i.assignee as assignee, i.estimated_minutes as estimated_minutes," +
+	" i.created_at as created_at, i.started_at as started_at, i.updated_at as updated_at, i.closed_at as closed_at," +
+	" i.priority as priority, i.metadata as metadata, le.lease_expires_at as lease_expires_at, coalesce(cc.n, 0) as comment_count" +
+	" from issues i left join leases le on le.issue_id = i.id" +
+	" left join (select issue_id, count(*) as n from comments group by issue_id) cc on cc.issue_id = i.id"
+
+// listingQueries are the three reads of a listing: its beads, their labels and
+// their edges.
+type listingQueries struct{ beads, labels, edges string }
 
 // listAllOverConnection is the beads `bd list --all --json` prints, read over
 // the kept connection in three queries; ok is false when there is no
@@ -162,7 +169,7 @@ func (g *Gateway) listAllOverConnection(ctx context.Context) (all []bead, ok boo
 	if db == nil {
 		return nil, false
 	}
-	all, err := readBeadListing(ctx, db)
+	all, err := readListing(ctx, db, listingQueries{beadsListQuery, beadLabelsQuery, beadEdgesQuery}, nil)
 	if err != nil {
 		g.keptFailed(ctx, "every bead", err)
 		return nil, false
@@ -170,12 +177,14 @@ func (g *Gateway) listAllOverConnection(ctx context.Context) (all []bead, ok boo
 	return all, true
 }
 
-// readBeadListing reads every bead, label and dependency from db.
-func readBeadListing(ctx context.Context, db *sql.DB) ([]bead, error) {
+// readListing reads the beads of a listing from db, with their labels and
+// dependencies. An edges query with a fourth column, the status of the bead an
+// edge names, leaves it in targets by that bead's id.
+func readListing(ctx context.Context, db *sql.DB, q listingQueries, targets map[string]string) ([]bead, error) {
 	bounded, cancel := context.WithTimeout(ctx, keptQueryBound)
 	defer cancel()
 
-	rows, err := db.QueryContext(bounded, beadsListQuery)
+	rows, err := db.QueryContext(bounded, q.beads)
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +233,7 @@ func readBeadListing(ctx context.Context, db *sql.DB) ([]bead, error) {
 	}
 	rows.Close()
 
-	labels, err := db.QueryContext(bounded, beadLabelsQuery)
+	labels, err := db.QueryContext(bounded, q.labels)
 	if err != nil {
 		return nil, err
 	}
@@ -242,18 +251,29 @@ func readBeadListing(ctx context.Context, db *sql.DB) ([]bead, error) {
 		return nil, err
 	}
 
-	edges, err := db.QueryContext(bounded, beadEdgesQuery)
+	edges, err := db.QueryContext(bounded, q.edges)
 	if err != nil {
 		return nil, err
 	}
 	defer edges.Close()
+	cols, err := edges.Columns()
+	if err != nil {
+		return nil, err
+	}
 	for edges.Next() {
 		var e edge
-		var target sql.NullString
-		if err := edges.Scan(&e.Issue, &target, &e.Kind); err != nil {
+		var target, status sql.NullString
+		into := []any{&e.Issue, &target, &e.Kind}
+		if len(cols) > 3 {
+			into = append(into, &status)
+		}
+		if err := edges.Scan(into...); err != nil {
 			return nil, err
 		}
 		e.DependsOn = target.String
+		if targets != nil && e.DependsOn != "" {
+			targets[e.DependsOn] = status.String
+		}
 		i, held := at[e.Issue]
 		if !held {
 			continue

@@ -203,10 +203,17 @@ func (g *Gateway) Size(_ context.Context) (int64, error) {
 	return total, nil
 }
 
-// SetNote implements application.TrackerSync.
+// SetNote implements application.TrackerSync. A note the kept connection reads
+// as holding value already is not written again: the read costs no bd, and a
+// bd is several new connections to the server, for a note most passes leave as
+// it was (mw-gq6.612).
 func (g *Gateway) SetNote(ctx context.Context, key, value string) error {
 	if key == "" {
 		return fmt.Errorf("a note needs a key")
+	}
+	if held, ok := g.noteOverConnection(ctx, key); ok && held == strings.TrimSpace(value) {
+		g.keepNote(key, held)
+		return nil
 	}
 	_, err := g.call(ctx, "kv", "set", key, value)
 	if err != nil {
@@ -227,10 +234,16 @@ func firstLine(said string) string {
 }
 
 // ClearNote implements application.TrackerSync. A key that is not there is
-// already cleared, so bd's word that it is missing is not a failure.
+// already cleared, so bd's word that it is missing is not a failure; and one the
+// kept connection reads as not there, or empty, is not cleared again, which
+// costs no bd (mw-gq6.612).
 func (g *Gateway) ClearNote(ctx context.Context, key string) error {
 	if key == "" {
 		return fmt.Errorf("a note needs a key")
+	}
+	if held, ok := g.noteOverConnection(ctx, key); ok && held == "" {
+		g.keepNote(key, "")
+		return nil
 	}
 	if _, err := g.call(ctx, "kv", "clear", key); err != nil {
 		said := strings.ToLower(err.Error())

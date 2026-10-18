@@ -14,9 +14,10 @@ const connectionsQuery = "show global status like 'Connections'"
 
 // ServerConnections is how many connections the beads server has answered since
 // it started, which the beads-churn check takes two samples of to find a rate
-// (mw-gq6.596). It is an error on a host whose beads are not served.
+// (mw-gq6.596). It is an error on a host whose beads are not served. It is read
+// over the kept connection when there is one (mw-gq6.612).
 func (g *Gateway) ServerConnections(ctx context.Context) (int64, error) {
-	out, err := g.call(ctx, "sql", "--json", connectionsQuery)
+	out, err := g.sqlRows(ctx, connectionsQuery)
 	if err != nil {
 		return 0, err
 	}
