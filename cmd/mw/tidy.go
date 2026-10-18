@@ -23,7 +23,8 @@ func newTidyCmd() *cobra.Command {
 		Long: "tidy does four things and nothing else (docs/tidy.md is the table):\n" +
 			"  1. closes an \"Answer: ...\" mail bead over 1 day old;\n" +
 			"  2. closes a mail bead the mailbox holds read, over 7 days old;\n" +
-			"  3. clears a postern question note whose bead is closed;\n" +
+			"  3. clears a postern question note whose bead is closed, unless it is a decision card nobody\n" +
+			"     answered: that stays, and the Mayor is mailed once;\n" +
 			"  4. closes the steps left open, then the root, of a formula (mw-mol-*) whose story is\n" +
 			"     closed: the story its first step names, \"Understand <story>: ...\" or \"Do <story>: ...\".\n\n" +
 			"Each act writes one line on what it touched, \"Tidied by mw tidy: <why>\", and one to the\n" +
@@ -51,6 +52,7 @@ func newTidyCmd() *cobra.Command {
 				Notes:    gateway,
 				Beads:    gateway,
 				Formulas: gateway,
+				Host:     host,
 				DryRun:   dryRun,
 				Out:      cmd.OutOrStdout(),
 			}

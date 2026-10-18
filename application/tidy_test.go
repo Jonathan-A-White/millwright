@@ -123,3 +123,36 @@ func TestFormulaStoryOfReadsTheStoryTheFirstStepNames(t *testing.T) {
 		}
 	}
 }
+
+// A decision card nobody answered on a closed bead is kept, and a Mayor who
+// cannot be mailed leaves it unmarked so the next pass tries again
+// (mw-gq6.618).
+func TestTidyKeepsAnUnansweredCardWhenTheMayorCannotBeMailed(t *testing.T) {
+	ctx := context.Background()
+	mail := apptest.NewFakeMailbox()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("t", domain.Path{})
+	tracker.AddStory("t", domain.Story{ID: "t.1", Title: "t.1"})
+	if err := tracker.CommentOnStory(ctx, "t.1", "QUESTION 2026-10-16T11:00:38Z asked by postern, txid abc: Squash? (recommended A; options A, B)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetStatus("t.1", apptest.StatusClosed); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetNote(ctx, application.PosternQuestionKey("t.1"), `{"txid":"abc","q":"Squash?"}`); err != nil {
+		t.Fatal(err)
+	}
+	mail.Err = errors.New("the mail store is not answering")
+
+	_, err := application.Tidy{Mail: mail, Notes: tracker, Beads: tracker}.Run(ctx)
+	if err == nil || !strings.Contains(err.Error(), "mailing the Mayor") {
+		t.Fatalf("expected the mail fault, got %v", err)
+	}
+	notes, _ := tracker.NotesWithPrefix(ctx, application.PosternQuestionKey(""))
+	if _, there := notes[application.PosternQuestionKey("t.1")]; !there {
+		t.Error("the card was cleared although the Mayor was not told")
+	}
+	if said := tracker.Comments("t.1"); len(said) != 1 {
+		t.Errorf("expected only the QUESTION comment, got %q", said)
+	}
+}

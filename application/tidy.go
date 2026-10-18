@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -35,6 +36,15 @@ const (
 	// per act. It is not a run of the tick: MillhandTickOutcome and the resume
 	// rules read past it.
 	TidyLogPrefix = "tidy: "
+
+	// TidyUnansweredMarker starts the comment mw tidy leaves on a closed bead
+	// when it has mailed the Mayor about a decision card nobody answered; the
+	// card's txid follows. Its presence is how a second pass knows not to mail
+	// again.
+	TidyUnansweredMarker = TidyWhy + "its decision card has no answer, so it is left in place and the Mayor is mailed"
+
+	// TidyUnansweredSubject starts the subject of that mail.
+	TidyUnansweredSubject = "Unanswered card on closed "
 )
 
 // TidyMail is one open mail bead as mw tidy looks at it.
@@ -59,6 +69,10 @@ type TidyMailbox interface {
 	// that is not mail — a story, an epic, a map, a hitl bead — is an error
 	// and nothing is changed.
 	CloseMail(ctx context.Context, id, reason string) error
+
+	// Send files one message, as Mailbox does: mw tidy mails the Mayor about a
+	// decision card nobody answered.
+	Send(ctx context.Context, message NewMessage) (string, error)
 }
 
 // TidyNotes is the part of the tracker's key-value store mw tidy clears a
@@ -72,6 +86,7 @@ type TidyNotes interface {
 // through, and says what it did on it. It never closes one.
 type TidyBeads interface {
 	ShowBeads(ctx context.Context, ids []string) ([]StoryDetail, error)
+	StoryComments(ctx context.Context, id string) ([]Comment, error)
 	CommentOnStory(ctx context.Context, id, text string) error
 }
 
@@ -113,12 +128,18 @@ const (
 	TidyQuestionNote = "question note"
 	TidyFormulaStep  = "formula step"
 	TidyFormulaRoot  = "formula"
+
+	// TidyUnansweredCard is the act on a decision card nobody answered whose
+	// bead is closed: the Mayor is mailed and the card stays.
+	TidyUnansweredCard = "unanswered card"
 )
 
 // Tidy closes what is plainly finished, within fixed bounds, and nothing else:
 // an Answer mail bead over TidyAnswerAge old, a mail bead read and over
 // TidyReadAge old, a postern question note whose bead is closed, and the beads
-// left open of a formula whose story is closed. It never closes a story, an
+// left open of a formula whose story is closed. A question note that is a
+// decision card nobody answered is not cleared: the Mayor is mailed once and the
+// card stays (mw-gq6.618). It never closes a story, an
 // epic, a map or a hitl bead, and never deletes anything;
 // the mail it closes stays in the tracker, closed. Each act writes one line on
 // what it touched and one to the tick log. A dry run says what it would do
@@ -130,6 +151,9 @@ type Tidy struct {
 	// Formulas is what the formula beads of closed stories are closed
 	// through; nil leaves formulas alone.
 	Formulas TidyFormulas
+
+	// Host is the host mw tidy runs on, the mail to the Mayor is from.
+	Host string
 
 	// Log is the tick log each act adds a line to; nil writes none.
 	Log TickLog
@@ -262,6 +286,16 @@ func (t Tidy) questions(ctx context.Context, report *TidyReport) error {
 			continue
 		}
 		id := bead.Story.ID
+		if note, isCard := decisionCardOf(notes[PosternQuestionKey(id)]); isCard {
+			held, err := t.unansweredCard(ctx, bead, note, report)
+			if err != nil {
+				faults = append(faults, err)
+				continue
+			}
+			if held {
+				continue
+			}
+		}
 		act := TidyAct{Kind: TidyQuestionNote, ID: id, Why: TidyWhy + "its question note outlived the closed bead"}
 		if !t.DryRun {
 			if err := t.Beads.CommentOnStory(ctx, id, act.Why); err != nil {
@@ -276,6 +310,86 @@ func (t Tidy) questions(ctx context.Context, report *TidyReport) error {
 		report.Acts = append(report.Acts, act)
 	}
 	return errors.Join(faults...)
+}
+
+// decisionCardOf reads a question note as a decision card: one that recorded the
+// txid it was asked under or the question. A note that is neither, "{}" or
+// anything undecodable, is a stale mark and not a card.
+func decisionCardOf(value string) (posternQuestionNote, bool) {
+	var note posternQuestionNote
+	if err := json.Unmarshal([]byte(value), &note); err != nil {
+		return posternQuestionNote{}, false
+	}
+	return note, strings.TrimSpace(note.Txid) != "" || strings.TrimSpace(note.Q) != ""
+}
+
+// unansweredCard says whether the decision card of a closed bead is held, that
+// is left in place for the Mayor. It is held when no ANSWER comment follows the
+// bead's newest QUESTION comment. The first time, the Mayor is mailed and the
+// bead is commented with TidyUnansweredMarker and the card's txid; a pass that
+// finds that comment mails no one again. An error means the comments could not
+// be read or the Mayor could not be mailed: the card is left, unmailed, for the
+// next pass.
+func (t Tidy) unansweredCard(ctx context.Context, bead StoryDetail, note posternQuestionNote, report *TidyReport) (held bool, err error) {
+	id := bead.Story.ID
+	comments, err := t.Beads.StoryComments(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("reading the comments of %s to see whether its card was answered: %w", id, err)
+	}
+	if cardAnswered(comments) {
+		return false, nil
+	}
+	marker := TidyUnansweredMarker + " (txid " + strings.TrimSpace(note.Txid) + ")"
+	for _, c := range comments {
+		if c.Text == marker {
+			return true, nil
+		}
+	}
+	act := TidyAct{Kind: TidyUnansweredCard, ID: id, Why: TidyWhy + "its decision card has no answer and was left in place"}
+	if !t.DryRun {
+		question := note.Q
+		if facts, ok := questionFromComments(comments); question == "" && ok {
+			question = facts.Text
+		}
+		first, _, _ := strings.Cut(strings.TrimSpace(question), "\n")
+		if first == "" {
+			first = "(the question text was not recorded)"
+		}
+		body := fmt.Sprintf("%s (%s) was closed with a decision card nobody answered, txid %s.\n\nQuestion: %s\nOptions: %s\n\n"+
+			"mw tidy left the card in place. Re-ask it on an open bead, or clear its note by hand with a reason.",
+			id, bead.Story.Title, strings.TrimSpace(note.Txid), strings.TrimSpace(question), strings.Join(note.Options, ", "))
+		if _, err := t.Mail.Send(ctx, NewMessage{
+			From:    SeatIdentity(MwSeat, t.Host),
+			To:      MayorMailbox,
+			Subject: TidyUnansweredSubject + id + ": " + clippedTo(strings.Join(strings.Fields(first), " "), PosternAnswerSubjectLimit),
+			Body:    body,
+		}); err != nil {
+			return false, fmt.Errorf("mailing the Mayor about the unanswered card on %s: %w", id, err)
+		}
+		if err := t.Beads.CommentOnStory(ctx, id, marker); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s could not be commented on, so the Mayor may be mailed again: %s", id, oneLine(err.Error())))
+		}
+		t.log(ctx, act, report)
+	}
+	report.Acts = append(report.Acts, act)
+	return true, nil
+}
+
+// cardAnswered reports whether an ANSWER comment follows the newest QUESTION
+// comment of comments (oldest first), or any does when no QUESTION is there.
+func cardAnswered(comments []Comment) bool {
+	asked := -1
+	for i, c := range comments {
+		if strings.HasPrefix(c.Text, "QUESTION ") {
+			asked = i
+		}
+	}
+	for _, c := range comments[asked+1:] {
+		if strings.HasPrefix(c.Text, "ANSWER ") {
+			return true
+		}
+	}
+	return false
 }
 
 // formulas closes what the fourth row of docs/tidy.md names: the steps left
@@ -398,8 +512,14 @@ func (r TidyReport) String() string {
 	}
 	for _, act := range r.Acts {
 		what := verb
-		if act.Kind == TidyQuestionNote {
+		switch act.Kind {
+		case TidyQuestionNote:
 			what = strings.Replace(what, "close", "clear", 1)
+		case TidyUnansweredCard:
+			what = "mailed "
+			if r.DryRun {
+				what = "would mail "
+			}
 		}
 		clip(&b, "  "+what+act.String())
 	}

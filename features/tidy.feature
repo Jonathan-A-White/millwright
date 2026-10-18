@@ -4,7 +4,8 @@ Feature: mw tidy
 
     1. close an "Answer: ..." mail bead over 1 day old;
     2. close a mail bead the mailbox holds read, over 7 days old;
-    3. clear a postern question note whose bead is closed;
+    3. clear a postern question note whose bead is closed, unless it is a
+       decision card nobody answered: that stays, and the Mayor is mailed once;
     4. close the beads left open of a formula poured for a story that is closed.
 
   Each act writes one line on what it touched, "Tidied by mw tidy: <why>", and
@@ -44,6 +45,40 @@ Feature: mw tidy
     And the tidy story "mw-q.1" carries the comment "Tidied by mw tidy: its question note outlived the closed bead"
     And the tidy story "mw-q.1" is still closed
     And the tidy story "mw-q.2" carries no comment
+
+  # mw-gq6.618: the Governor's A/B/C on squashing the beads history was cleared
+  # with its bead and nobody was told.
+  Scenario: A decision card nobody answered on a closed bead is kept and the Mayor is mailed once
+    Given a tidy story "mw-q.1" that is closed
+    And a postern decision card for "mw-q.1" asking "Squash the beads history? A, B or C"
+    When mw tidy runs
+    Then tidying succeeds
+    And the question note for "mw-q.1" is kept
+    And the Mayor was mailed 1 time, the subject "Unanswered card on closed mw-q.1: Squash the beads history? A, B or C"
+    When mw tidy runs
+    Then tidying succeeds
+    And the question note for "mw-q.1" is kept
+    And the Mayor was mailed 1 time, the subject "Unanswered card on closed mw-q.1: Squash the beads history? A, B or C"
+
+  Scenario: A decision card that was answered on a closed bead is cleared as before
+    Given a tidy story "mw-q.1" that is closed
+    And a postern decision card for "mw-q.1" asking "Squash the beads history? A, B or C"
+    And the decision card for "mw-q.1" was answered
+    When mw tidy runs
+    Then tidying succeeds
+    And the question note for "mw-q.1" is cleared
+    And the tidy story "mw-q.1" carries the comment "Tidied by mw tidy: its question note outlived the closed bead"
+    And the Mayor was mailed 0 times
+
+  Scenario: A dry run says it would mail the Mayor about an unanswered card and mails no one
+    Given a tidy story "mw-q.1" that is closed
+    And a postern decision card for "mw-q.1" asking "Squash the beads history? A, B or C"
+    When mw tidy runs with --dry-run
+    Then tidying succeeds
+    And the tidy report says "would mail unanswered card mw-q.1"
+    And the question note for "mw-q.1" is kept
+    And the Mayor was mailed 0 times
+    And nothing was written to the tidy tracker
 
   Scenario: A story, an epic and a hitl bead of any age are never touched
     Given a tidy story "mw-s.1" that is open and 400 days old

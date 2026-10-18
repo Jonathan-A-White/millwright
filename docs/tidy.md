@@ -9,7 +9,8 @@ change to that file and to this table together, so it shows in a diff.
 | --- | --- | --- | --- |
 | 1 | A mail bead whose subject starts `Answer: ` | Older than 1 day, read or not | Close it |
 | 2 | A mail bead the mailbox holds read | Older than 7 days | Close it |
-| 3 | A `postern.question.<bead>` note | Its bead is closed | Clear the note |
+| 3 | A `postern.question.<bead>` note | Its bead is closed, and the note is not a decision card without an ANSWER after its QUESTION | Clear the note |
+| 3a | A decision card (a note with a txid or question) nobody answered, on a closed bead | Always, once per card | Mail the Mayor `Unanswered card on closed <bead>: <question>`, comment the bead, keep the card |
 | 4 | A formula's step or root left open (`mw-mol-*`) | The story its first step names (`Understand <story>: ...`, `Do <story>: ...`) is closed, and no story not closed records the formula as its own | Close it, the steps before the root |
 
 Each act writes one line on what it touched, `Tidied by mw tidy: <why>`: the
@@ -24,7 +25,7 @@ It never:
   mail, and the beads adapter refuses to close any bead that is not of type
   mail;
 - deletes anything: closed mail stays in the tracker;
-- clears a question note whose bead is open, or a bead it cannot read;
+- clears a question note whose bead is open, or a bead it cannot read, or a decision card nobody answered (row 3a: the Mayor re-asks it on an open bead or clears it by hand);
 - closes a step of an open or running story's formula, or of a formula whose
   story no step names: a formula's beads are listed and closed as a formula's,
   and the beads adapter refuses to close any bead without the `-mol-` infix.

@@ -55,6 +55,9 @@ func InitializeTidyScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a tidy story "([^"]*)" labelled "([^"]*)" that is open and (\d+) days old$`, c.anOldLabelledTidyStory)
 	ctx.Given(`^a tidy epic "([^"]*)" that is open and (\d+) days old$`, c.anOldTidyEpic)
 	ctx.Given(`^a postern question note for "([^"]*)" and for "([^"]*)"$`, c.questionNotes)
+	ctx.Given(`^a postern decision card for "([^"]*)" asking "([^"]*)"$`, c.decisionCard)
+	ctx.Given(`^the decision card for "([^"]*)" was answered$`, c.cardAnswered)
+	ctx.Then(`^the Mayor was mailed (\d+) times? ?(?:, the subject "([^"]*)")?$`, c.mayorMailed)
 
 	ctx.Given(`^a tidy story "([^"]*)" that is (open|closed|running), with a formula poured whose session closed (\d+) of its 3 steps$`, c.aTidyStoryWithAFormula)
 	ctx.Given(`^the root of the tidy formula of "([^"]*)" was closed already$`, c.theRootWasClosedAlready)
@@ -197,6 +200,47 @@ func (c *tidyContext) questionNotes(first, second string) error {
 		if err := c.tracker.SetNote(context.Background(), application.PosternQuestionKey(bead), "{}"); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// decisionCard asks a question as mw postern send does: a QUESTION comment on
+// the bead and a note holding the txid and the question.
+func (c *tidyContext) decisionCard(bead, question string) error {
+	ctx := context.Background()
+	text := fmt.Sprintf("QUESTION 2026-09-28T11:00:38Z asked by postern, txid abc123: %s (recommended A; options A, B, C)", question)
+	if err := c.tracker.CommentOnStory(ctx, bead, text); err != nil {
+		return err
+	}
+	note := fmt.Sprintf(`{"txid":"abc123","options":["A","B","C"],"asked":"2026-09-28T11:00:38Z","q":%q,"rec":"A"}`, question)
+	return c.tracker.SetNote(ctx, application.PosternQuestionKey(bead), note)
+}
+
+func (c *tidyContext) cardAnswered(bead string) error {
+	return c.tracker.CommentOnStory(context.Background(), bead, "ANSWER 2026-09-28T12:00:00Z from governor, answers card abc123, txid def456: A")
+}
+
+func (c *tidyContext) mayorMailed(count, subject string) error {
+	n, err := strconv.Atoi(count)
+	if err != nil {
+		return err
+	}
+	inbox, err := c.mail.Inbox(context.Background(), application.MayorMailbox)
+	if err != nil {
+		return err
+	}
+	// The mail the fixtures sent are for "mayor" too: count only the ones tidy sent.
+	var sent []application.Message
+	for _, m := range inbox {
+		if strings.HasPrefix(m.Subject, "Unanswered card") {
+			sent = append(sent, m)
+		}
+	}
+	if len(sent) != n {
+		return fmt.Errorf("the Mayor was mailed %d times about cards, want %d: %+v", len(sent), n, sent)
+	}
+	if subject != "" && sent[0].Subject != subject {
+		return fmt.Errorf("the mail's subject is %q, want %q", sent[0].Subject, subject)
 	}
 	return nil
 }
