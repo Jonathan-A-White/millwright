@@ -914,6 +914,19 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// gate: tester-no-landed-story
+		// A Tester story with no 'Landed story:' line cannot file a finding, so
+		// its session would be spent for nothing: it waits, open and unclaimed,
+		// for the Mayor to add the line or close it (mw-gq6.594).
+		if NamesNoLandedStory(detail) {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "tester-no-landed-story", Why: fmt.Sprintf(
+				"it is a Tester story and its description has no %q line: it is not claimed", TesterLandedLine+"<id>")})
+			if !d.DryRun {
+				d.refuseTesterWithNoLandedStory(ctx, detail, &report)
+			}
+			continue
+		}
+
 		// gate: attempts-exhausted
 		// Before the cap, because a story that is not started takes none of the
 		// sessions the cap counts, and the Mayor is to be told of it now rather
@@ -2285,6 +2298,54 @@ func (d Dispatch) refuseSweepless(ctx context.Context, detail StoryDetail, verdi
 			id, title, d.Host, ReasonNoSweep, verdict, fix),
 	}); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: the mail to %s about its missing sweep could not be sent: %v", id, MayorMailbox, err))
+	}
+}
+
+// ReasonTesterNoLandedStory is the code a comment carries when mw dispatch would
+// not claim a Tester story because its description has no 'Landed story:' line
+// (mw-gq6.594): the marker that a second dispatch finding the comment already
+// there says and mails nothing again.
+const ReasonTesterNoLandedStory = "tester-no-landed-story"
+
+// refuseTesterWithNoLandedStory tells the story, and the Mayor, once, that a
+// Tester story was not claimed for want of its landed-story line. The comment is
+// written first and is the once, as for refuseSweepless.
+func (d Dispatch) refuseTesterWithNoLandedStory(ctx context.Context, detail StoryDetail, report *DispatchReport) {
+	id := detail.Story.ID
+	comments, err := d.Tracker.StoryComments(ctx, id)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"%s: whether it was already told it names no landed story could not be read, so nobody is told again: %v", id, err))
+		return
+	}
+	for _, comment := range comments {
+		if strings.Contains(comment.Text, ReasonTesterNoLandedStory) {
+			return
+		}
+	}
+
+	fix := fmt.Sprintf("Add a line %q to its description (bd update %s --description), or close it with bd close.", TesterLandedLine+"<id>", id)
+	said := fmt.Sprintf("mw dispatch on %s did not claim this Tester story (%s): its description has no %q line, so a session on it could not file a finding. %s It is left open and is dispatched once it has one.",
+		d.Host, ReasonTesterNoLandedStory, TesterLandedLine+"<id>", fix)
+	if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: the comment about its missing landed-story line could not be written, so nobody is told: %v", id, err))
+		return
+	}
+	if d.Mailbox == nil {
+		return
+	}
+	title := strings.Join(strings.Fields(detail.Story.Title), " ")
+	if title == "" {
+		title = id
+	}
+	if _, err := d.Mailbox.Send(ctx, NewMessage{
+		From:    SeatIdentity(MwSeat, d.Host),
+		To:      MayorMailbox,
+		Subject: MailBlocked + ": " + title,
+		Body: fmt.Sprintf("%s (%s) is a Tester story naming no landed story, so mw dispatch on %s did not claim it (%s).\n\n%s\n",
+			id, title, d.Host, ReasonTesterNoLandedStory, fix),
+	}); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: the mail to %s about its missing landed-story line could not be sent: %v", id, MayorMailbox, err))
 	}
 }
 

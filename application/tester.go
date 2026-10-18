@@ -93,6 +93,12 @@ func TesterLanded(d StoryDetail) string {
 	return ""
 }
 
+// NamesNoLandedStory reports whether d is a Tester story whose description has
+// no TesterLandedLine: its session could run and then file nothing (mw-gq6.594).
+func NamesNoLandedStory(d StoryDetail) bool {
+	return IsTesterStory(d) && TesterLanded(d) == ""
+}
+
 // TesterFindings is what one Tester found: how many findings it tagged bug and
 // taste, and the FINDINGS section as it wrote it.
 type TesterFindings struct {

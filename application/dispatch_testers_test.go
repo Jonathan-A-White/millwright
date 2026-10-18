@@ -21,6 +21,9 @@ func aTesterOn(t *testing.T, tracker *apptest.FakeTracker, id, rig, host string,
 	if err := tracker.SetLabels(id, application.LabelTester); err != nil {
 		t.Fatalf("labelling %s: %v", id, err)
 	}
+	if err := tracker.SetDescription(id, application.TesterLandedLine+"mw-landed.1 (landed on main)"); err != nil {
+		t.Fatalf("describing %s: %v", id, err)
+	}
 	if running {
 		if err := tracker.ClaimStory(context.Background(), id); err != nil {
 			t.Fatalf("claiming %s: %v", id, err)

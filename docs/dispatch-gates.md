@@ -23,6 +23,7 @@ three.
 | `metered-network` | the rig installs dependencies and the network is metered |
 | `formula-not-installed` | the path's formula is not installed in the vault |
 | `no-sweep` | a bug filed after the sweep rule has no line beginning `Sweep:` in its acceptance (below) |
+| `tester-no-landed-story` | a Tester story's description has no `Landed story: <id>` line: its session could not file a finding (mw-gq6.594) |
 | `attempts-exhausted` | it was started `max_attempts` times already |
 | `handed-back` | its Builder handed it back (a comment opening `HANDED BACK`) and no later comment opening `RE-PATHED:` says what changed (below) |
 | `shared-files` | it names a file a running story of the rig names or has changed; since when is kept in the note `host.<host>.files_held` |
@@ -85,7 +86,7 @@ The other gates cannot hold a fix behind the very failure it is to mend, each
 for its own reason: `shared-files` and `testers-per-rig` wait only for stories
 already running, which are past every gate and end on their own; `harness-hold`,
 `no-room` and `paused` wait for the host, not for a story; `no-sweep`,
-`handed-back` and `attempts-exhausted` read the story's own bead; `blocked` waits
+`tester-no-landed-story`, `handed-back` and `attempts-exhausted` read the story's own bead; `blocked` waits
 on a dependency a person filed. The false-hold guard is `mw release`'s, not
 dispatch's, and no smoke touches it.
 
@@ -116,6 +117,7 @@ is mapped there too, and a test says so.
 | `metered-network` | metered network |
 | `formula-not-installed` | formula not installed |
 | `no-sweep` | no sweep |
+| `tester-no-landed-story` | tester names no landed story |
 | `attempts-exhausted` | attempts exhausted |
 | `handed-back` | handed back |
 | `shared-files` | files overlap |
