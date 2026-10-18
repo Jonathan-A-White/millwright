@@ -48,6 +48,8 @@ type DamperFacts struct {
 	Graph []domain.GraphBead
 	// Notes are the tracker's notes, read for his open cards and unrun hands steps.
 	Notes map[string]string
+	// Starved are the rigs the hosts' dispatches note they hold back whole.
+	Starved []StarvedRig
 }
 
 // DamperAlarm is one tripped alarm: the principle in a word (WIP, ageing,
@@ -73,6 +75,7 @@ type DamperCounts struct {
 	GrillingsBare int
 	TesterRigs    int
 	ReviewQueue   int
+	StarvedRigs   int
 }
 
 // DampersHeading heads the section naming the alarms that are tripped: the
@@ -216,6 +219,10 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 	add := func(principle, text string, beads []string) {
 		report.Alarms = append(report.Alarms, DamperAlarm{Principle: principle, Text: text, Beads: beads})
 	}
+	// A rig with nothing running is the loudest: it comes first.
+	starved := StarvedAlarms(facts.Starved, facts.Work, facts.Now)
+	report.Alarms = append(report.Alarms, starved...)
+	report.Counts.StarvedRigs = len(starved)
 	if len(readyP1) > limits.ReadyP1 {
 		add(DamperWIP, fmt.Sprintf("%d ready P1 stories (limit %d)", len(readyP1), limits.ReadyP1), readyP1)
 	}
@@ -348,6 +355,11 @@ func (s DamperSurvey) Dampers(ctx context.Context, work WorkInHand, now time.Tim
 			}
 		}
 	}
+	starved, err := s.readStarved(ctx)
+	if err != nil {
+		return DampersReport{}, err
+	}
+	facts.Starved = starved
 	if s.Graph != nil {
 		graph, err := s.Graph.BeadGraph(ctx)
 		if err != nil {

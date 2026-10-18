@@ -334,7 +334,10 @@ type Started struct {
 // failure: most of them are somebody else's work.
 type Passed struct {
 	StoryID string
-	Why     string
+	// Gate is the gate of DispatchGates that passed it over, or PourRefusedGate;
+	// StarvedHolds names the hold each one is (mw-gq6.580).
+	Gate string
+	Why  string
 }
 
 // Failed is one story this dispatch claimed and could not start. Released says
@@ -764,14 +767,14 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			if !hasHitlLabel(detail.Labels) {
 				label = LabelDemo + ", no files key"
 			}
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "hitl", Why: fmt.Sprintf(
 				"the Governor must be present for it (labelled %s): it is worked with the Mayor, never by a dispatched session", label)})
 			continue
 		}
 		// gate: no-path
 		path, err := detail.Path()
 		if err != nil {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: "it has no path: " + err.Error()})
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "no-path", Why: "it has no path: " + err.Error()})
 			continue
 		}
 		// The tracker filters by host too; this is the second lock on the same
@@ -780,7 +783,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// nobody's: the Mayor has not said where it is worked yet.
 		// gate: no-host
 		if path.Host == "" {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: "its path names no host, so no host may take it"})
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "no-host", Why: "its path names no host, so no host may take it"})
 			continue
 		}
 		// gate: other-host
@@ -788,7 +791,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// the cap is checked below as it is for any story.
 		auto := path.Host == domain.HostAuto
 		if path.Host != d.Host && !auto {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: "it is worked on " + path.Host})
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "other-host", Why: "it is worked on " + path.Host})
 			continue
 		}
 		// gate: harness-hold
@@ -796,14 +799,14 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// stop names: its usage limit's reset, or a quarter hour after a rate
 		// limit or an overloaded API (mw-gq6.434).
 		if hold := report.HarnessHold; hold != nil {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: hold.harnessHeld(d.Host)})
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "harness-hold", Why: hold.harnessHeld(d.Host)})
 			continue
 		}
 		// gate: no-room
 		// A story this host would take waits for the room to take it, whichever
 		// host it names (mw-t0z3fu.1). It stays ready, claimed by nobody.
 		if noRoom != "" {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf("%s has no room: %s", d.Host, noRoom)})
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "no-room", Why: fmt.Sprintf("%s has no room: %s", d.Host, noRoom)})
 			continue
 		}
 
@@ -812,7 +815,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// was lost: claiming it would work it again on top of its own landed
 		// commits (mw-gq6.191). The run state is read off the listing.
 		if hasLabel(detail.Labels, RunState+":"+RunLanded) {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "landed", Why: fmt.Sprintf(
 				"its last run landed it (%s=%s) and only its close was lost, so it is not claimed again: `mw next %s` closes it, and more work on it is a new story",
 				RunState, RunLanded, id)})
 			continue
@@ -826,7 +829,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		if blocker, status, blocked, err := blockedBy(ctx, reads, detail); err != nil {
 			return report, fmt.Errorf("dispatching on %s: %w", d.Host, err)
 		} else if blocked {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "blocked", Why: fmt.Sprintf(
 				"waits on %s (%s)", blocker, status)})
 			continue
 		}
@@ -834,7 +837,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// gate: rig-not-checked-out
 		rigDir, checkedOut := d.Rigs[path.Rig]
 		if !checkedOut {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "rig-not-checked-out", Why: fmt.Sprintf(
 				"the rig %s is not checked out on %s: add it under [rigs] in the config file", path.Rig, d.Host)})
 			continue
 		}
@@ -849,7 +852,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		smokeFix := ""
 		if held := d.smokeHold(ctx, path.Rig, &smokeHolds); held.Reason != "" {
 			if smokeFix = held.Fix(detail); smokeFix == "" {
-				report.Passed = append(report.Passed, Passed{StoryID: id, Why: held.Reason})
+				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "smoke-hold", Why: held.Reason})
 				continue
 			}
 			smokeFix = fmt.Sprintf("runs over the grist smoke hold of %s: %s", path.Rig, smokeFix)
@@ -859,7 +862,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// A story on a rig that installs dependencies waits for a network that is
 		// not metered. It stays open and unclaimed, so no attempt is spent on it.
 		if network != nil && network.Metered && d.HeavyNet[path.Rig] {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "metered-network", Why: fmt.Sprintf(
 				"the rig %s installs dependencies and the network is metered %s: it waits for one that is not", path.Rig, network.Why())})
 			continue
 		}
@@ -876,7 +879,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				}
 			}
 			if !formulas[path.Formula] {
-				report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "formula-not-installed", Why: fmt.Sprintf(
 					"its formula %s is not installed here, so it is not claimed", path.Formula)})
 				if !d.DryRun {
 					d.refuseUninstalledFormula(ctx, id, path.Formula, &report)
@@ -895,7 +898,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			if verdict == domain.SweepInDescription {
 				why += ": " + verdict.MoveWords(id)
 			}
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: why + ": it is not claimed"})
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "no-sweep", Why: why + ": it is not claimed"})
 			if !d.DryRun {
 				d.refuseSweepless(ctx, detail, verdict, &report)
 			}
@@ -908,7 +911,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// than once whatever is running has finished.
 		// Only the story's own attempts count, as for mw retry (mw-gq6.486).
 		if own, uncounted := OwnAttempts(detail); own >= d.maxAttempts() {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: exhaustedWhy(detail.Attempts, own, d.maxAttempts(), uncounted) +
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "attempts-exhausted", Why: exhaustedWhy(detail.Attempts, own, d.maxAttempts(), uncounted) +
 				": it is not started again until its counter is reset by hand"})
 			if !d.DryRun {
 				d.exhausted(ctx, detail, &report)
@@ -921,11 +924,11 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// not run again: the same Builder would hand it back the same way. Before
 		// the cap, so it takes none of the sessions (mw-gq6.418).
 		if at, handedBack, err := reads.handedBack(ctx, detail); err != nil {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "handed-back", Why: fmt.Sprintf(
 				"whether its Builder handed it back could not be read, so it is not claimed: %v", oneLine(err.Error()))})
 			continue
 		} else if handedBack {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "handed-back", Why: fmt.Sprintf(
 				"its Builder handed it back on %s and nothing says what changed since: %s",
 				handedBackDay(at), repathedWith(id))})
 			continue
@@ -937,7 +940,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// takes none of the sessions, and the next ready story is started in its
 		// place (mw-gq6.349).
 		if share, sharing := shares.shared(ctx, detail); sharing {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: share.String()})
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "shared-files", Why: share.String()})
 			held.hold(id)
 			continue
 		}
@@ -948,7 +951,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// Tester stories as the [dampers] testers_per_rig key allows, on any host:
 		// the damper is a limit and not only an alarm (mw-gq6.546).
 		if hold, holding := testerHold(shares.running, detail, d.TestersPerRig); holding {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: hold.String()})
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "testers-per-rig", Why: hold.String()})
 			continue
 		}
 
@@ -963,7 +966,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			if pulse.Lowered() {
 				why += " while a tutor is in use (grist first)"
 			}
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: why})
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "cap", Why: why})
 			continue
 		}
 
@@ -988,7 +991,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			if errors.As(err, &pour) {
 				// Not a failed run either: the story is blocked with the reason on
 				// it, the claim kept, and the next dispatch holds it as refused.
-				report.Passed = append(report.Passed, Passed{StoryID: id, Why: pour.Error()})
+				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: PourRefusedGate, Why: pour.Error()})
 			} else {
 				report.Failed = append(report.Failed, Failed{StoryID: id, Err: err, Released: released})
 				d.tellStuck(ctx, id, err, &report)
@@ -999,6 +1002,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	}
 
 	d.keepFilesHeld(ctx, ready, held, &report)
+	d.keepStarved(ctx, ready, shares.running, &report)
 	report.Notes = append(report.Notes, shares.notes...)
 	d.print(report.String())
 	d.answerWaitingGrist(ctx, &report)

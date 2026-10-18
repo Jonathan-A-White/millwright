@@ -30,7 +30,8 @@ import (
 // nothing but a check's own probe or cure, and never AI or mail itself: a
 // check left needing a person is a beads note, one key per check, and
 // `mw millhand tick` is what wakes the Millhand for it. The only pushes are
-// the alarms to the Governor, mayor-stale's, mayor-stuck's and boost-reach's, sent from their cures.
+// the alarms to the Governor, mayor-stale's, mayor-stuck's and boost-reach's, sent from their cures,
+// and starved-rig's one mail to the Mayor an episode.
 func newDoctorCmd() *cobra.Command {
 	var dryRun bool
 	var envFile, posternBin string
@@ -321,6 +322,16 @@ func newDoctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// A rig with ready stories and none running for over an hour, named with
+			// what holds it; the cure is the one mail to the Mayor of its episode.
+			starvedRigs := &application.StarvedRigCheck{
+				Host:   host,
+				Alarms: func(ctx context.Context) ([]application.DamperAlarm, error) { return dampers.Starved(ctx, time.Now()) },
+				Mail: func(ctx context.Context, message application.NewMessage) error {
+					_, err := mwGateway(vault, host).Send(ctx, message)
+					return err
+				},
+			}
 			return runDoctor(cmd, application.Doctor{
 				Dampers: dampers,
 				Checks: append(application.DoctorChecks{
@@ -350,6 +361,7 @@ func newDoctorCmd() *cobra.Command {
 					battery,
 					boostReach,
 					boostAsleep,
+					starvedRigs,
 					ageKey,
 				}, checks...),
 				State: store,

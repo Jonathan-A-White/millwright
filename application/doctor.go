@@ -341,7 +341,7 @@ type DamperCounter interface {
 // Doctor runs a table of checks, each its own probe, cure, damper and way
 // back, and logs what it found on this host. Nothing in it needs the network
 // except a check's own probe or cure; it writes nothing to the tracker and
-// sends no mail.
+// sends no mail of its own (a check's cure may: starved-rig mails the Mayor).
 type Doctor struct {
 	Checks DoctorChecks
 	State  DoctorState
