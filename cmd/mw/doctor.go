@@ -332,9 +332,15 @@ func newDoctorCmd() *cobra.Command {
 					return err
 				},
 			}
+			// The connection rate of a beads server this host runs; a host that
+			// reaches another's, or has none, leaves it to the host that runs it.
+			var churn application.DoctorChecks
+			if beadsServedHere() {
+				churn = application.DoctorChecks{doctor.NewBeadsChurn(mwGateway(vault, host).ServerConnections, store)}
+			}
 			return runDoctor(cmd, application.Doctor{
 				Dampers: dampers,
-				Checks: append(application.DoctorChecks{
+				Checks: append(append(application.DoctorChecks{
 					doctor.NewDaemonReload(units),
 					doctor.NewWifi(reach, powershell, store),
 					doctor.NewTunnel(tunnelHost, reach, tunnelUnit, tunnelProbe),
@@ -363,7 +369,7 @@ func newDoctorCmd() *cobra.Command {
 					boostAsleep,
 					starvedRigs,
 					ageKey,
-				}, checks...),
+				}, churn...), checks...),
 				State: store,
 				Log:   store,
 				Notes: mwGateway(vault, host),
@@ -495,3 +501,15 @@ func (b brokenFlushLog) Last(context.Context) (application.BeadsFlushRecord, err
 }
 
 func (b brokenFlushLog) Record(context.Context, application.BeadsFlushRecord) error { return b.err }
+
+// beadsServedHere says whether this host's beads server runs on this host: the
+// environment bd reads names a server at a loopback address. mw doctor's
+// beads-churn check reads that server's connection count, and a host that only
+// reaches another's would raise the same alarm twice.
+func beadsServedHere() bool {
+	switch strings.TrimSpace(os.Getenv(config.BeadsDoltServerHostEnv)) {
+	case "127.0.0.1", "localhost", "::1", "[::1]":
+		return true
+	}
+	return false
+}
