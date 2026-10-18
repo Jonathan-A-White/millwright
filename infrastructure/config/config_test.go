@@ -1697,7 +1697,7 @@ func TestGristCeilingsDefault(t *testing.T) {
 	}
 	if strings.Join(got.Models, ",") != "haiku,sonnet,opus" || strings.Join(got.Efforts, ",") != "low,medium,high" || got.MaxAttachments != 4 || got.MaxAttachmentBytes != 8388608 ||
 		got.DailyLimit != 50 || got.Concurrency != 2 || got.Timeout != 10*time.Minute ||
-		got.PoolQuiet != 10*time.Minute || got.PoolMaxAge != 15*time.Minute {
+		got.PoolQuiet != 10*time.Minute || got.PoolMaxAge != 15*time.Minute || !got.PersonCap {
 		t.Fatalf("expected the default ceilings, got %+v", got)
 	}
 }
@@ -1731,6 +1731,21 @@ cairn = "/home/jwhite/rigs/Cairn"
 	apps, err := config.GristApps()
 	if err != nil || len(apps) != 1 || apps["cairn"] != "/home/jwhite/rigs/Cairn" {
 		t.Fatalf("expected cairn's checkout, got %v %v", apps, err)
+	}
+}
+
+// person_cap is on unless the table says false (mw-cvwm1u.6).
+func TestGristPersonCapIsOnUnlessTheTableSaysFalse(t *testing.T) {
+	for said, want := range map[string]bool{"": true, "person_cap = true": true, "person_cap = false": false} {
+		writeConfig(t, "[grist]\n"+said+"\n")
+		got, err := config.Grist()
+		if err != nil || got.PersonCap != want {
+			t.Errorf("%q: expected person_cap %v, got %v %v", said, want, got.PersonCap, err)
+		}
+	}
+	writeConfig(t, "[grist]\nperson_cap = maybe\n")
+	if _, err := config.Grist(); err == nil || !strings.Contains(err.Error(), "person_cap") {
+		t.Fatalf("expected person_cap = maybe refused, naming it, got %v", err)
 	}
 }
 

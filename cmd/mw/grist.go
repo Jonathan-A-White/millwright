@@ -656,6 +656,16 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		mailbox = mwGateway(vaultDir, host)
 	}
 	slots := hostlock.GrindSlots(stateDir, ceilings.Concurrency)
+	// A person's device keys share one day at the person's cap, unless the
+	// [grist] table turns person_cap off (mw-cvwm1u.6).
+	var persons *application.PersonCap
+	if ceilings.PersonCap {
+		base, err := config.PosternBackend()
+		if err != nil {
+			return application.GristGrind{}, err
+		}
+		persons = application.NewPersonCap(base, os.Stderr)
+	}
 	return application.GristGrind{
 		Postern:      backend,
 		Cipher:       postern.NewCipher(keys),
@@ -676,6 +686,7 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		Apps:         apps,
 		GovernorKey:  governorKey,
 		TestKey:      testKey,
+		Persons:      persons,
 		Ceilings: application.GristCeilings{
 			Models: ceilings.Models, Efforts: ceilings.Efforts, MaxAttachments: ceilings.MaxAttachments,
 			MaxAttachmentBytes: ceilings.MaxAttachmentBytes, DailyLimit: ceilings.DailyLimit,

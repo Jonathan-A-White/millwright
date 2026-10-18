@@ -273,9 +273,12 @@ type RetryReport struct {
 	// give-back is guarded on.
 	holder string
 
-	// unclaimed says the story was open with no claim at all when the retry read
-	// it (one a dispatch passed over), so there is none to give back.
+	// unclaimed says the story had no claim at all when the retry read it, open
+	// (one a dispatch passed over) or held (one whose claim an earlier stop gave
+	// back and a person then held), so there is none to give back (mw-gq6.611).
+	// wasHeld says it was held, and so is opened unless --hold keeps it so.
 	unclaimed bool
+	wasHeld   bool
 
 	// Held says the claim was given back and the story left held, not open,
 	// because Hold was asked.
@@ -462,7 +465,8 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	report.Hitl = detail.Hitl()
 	report.NoCause = detail.Cause == ""
 	report.refunded = detail.AttemptsRefunded
-	report.unclaimed = detail.Assignee == "" && (detail.Status == StatusOpen || (r.Hold && detail.Held()))
+	report.unclaimed = detail.Assignee == "" && (detail.Status == StatusOpen || detail.Held())
+	report.wasHeld = detail.Held()
 	report.molecule = detail.Molecule.RootID
 
 	// Only the story's own attempts count (mw-gq6.450): one mw cause named
@@ -754,7 +758,7 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 	if report.Held {
 		comment = r.heldComment(report, nothing)
 	}
-	comment += report.stopSaid() + report.formulaSaid()
+	comment += report.unclaimedSaid() + report.stopSaid() + report.formulaSaid()
 	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
 		return report, fmt.Errorf("retrying %s: it was retried, but the comment naming what happened could not be written: %w", storyID, err)
 	}
@@ -796,11 +800,15 @@ func (r Retry) closeFormula(ctx context.Context, report *RetryReport) {
 }
 
 // release gives the claim back, guarded on whoever held it when the retry read
-// the story. A story that was open with no claim has none to give back.
+// the story. A story with no claim, open or held, has none to give back: it is
+// held again for --hold, and a held one is opened otherwise (mw-gq6.611).
 func (r Retry) release(ctx context.Context, report RetryReport) error {
 	if report.unclaimed {
 		if r.Hold {
 			return r.Tracker.HoldStory(ctx, report.StoryID)
+		}
+		if report.wasHeld {
+			return r.Tracker.ReleaseStory(ctx, report.StoryID)
 		}
 		return nil
 	}
@@ -908,7 +916,7 @@ func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere strin
 				"so its worktree and branch are left there. %s",
 			r.Host, report.Attempt, storyID, elsewhere, heldSaid)
 	}
-	comment += report.stopSaid() + report.formulaSaid()
+	comment += report.unclaimedSaid() + report.stopSaid() + report.formulaSaid()
 	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
 		return report, fmt.Errorf("retrying %s: the claim was given back, but the comment naming what happened could not be written: %w", storyID, err)
 	}
@@ -1006,6 +1014,9 @@ func (r RetryReport) String() string {
 // writeOpen says what the claim's give-back left: the story open for the next
 // dispatch tick, or held when --hold asked for it.
 func (r RetryReport) writeOpen(b *strings.Builder) {
+	if r.unclaimed {
+		fmt.Fprintf(b, "  claim   the claim was already given back\n")
+	}
 	if r.Held {
 		fmt.Fprintf(b, "  held    the claim was given back; the story is held, not open: no dispatch tick takes it until mw release\n")
 		return
@@ -1024,6 +1035,15 @@ func (r RetryReport) formulaSaid() string {
 		said += fmt.Sprintf(" What was left open of the formula %s could not all be closed: %s.", r.molecule, r.FormulaLeft)
 	}
 	return said
+}
+
+// unclaimedSaid is what a retry's comment adds when the story had no claim to
+// give back (mw-gq6.611).
+func (r RetryReport) unclaimedSaid() string {
+	if !r.unclaimed {
+		return ""
+	}
+	return " The claim was already given back."
 }
 
 // stopSaid is what a retry's comment adds when the attempt it retried was a
