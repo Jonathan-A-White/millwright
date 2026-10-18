@@ -316,6 +316,14 @@ type PosternView struct {
 	// cannot be read, judge a host by its sync and its claims alone.
 	Signs HostSigns
 
+	// Cloud, when set, is the cloud's book, read with CloudPlan so that a
+	// cloud box the factory destroyed (a host named for the plan's prefix and
+	// a number, held by no box in the book) is left out of the hosts rather
+	// than aged into a red chip (mw-ev7oyy.45). Nil, or a book that cannot
+	// be read, leaves every host in.
+	Cloud     CloudBook
+	CloudPlan CloudPlan
+
 	// Now is the clock written_at is stamped with and every window is
 	// measured against. The zero value reads the real one.
 	Now func() time.Time
@@ -1633,8 +1641,12 @@ func (v PosternView) hosts(ctx context.Context, b *viewBuild, notes map[string]s
 			lastSync[name] = strings.TrimSpace(value)
 		}
 	}
+	destroyed := v.destroyedBoxes(ctx)
 	names := make([]string, 0, len(lastSync))
 	for name := range lastSync {
+		if destroyed(name) {
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -1685,6 +1697,33 @@ func (v PosternView) hosts(ctx context.Context, b *viewBuild, notes map[string]s
 		})
 	}
 	return hosts, alarms
+}
+
+// destroyedBoxes says whether a host is a cloud box the factory destroyed: its
+// name is the plan's prefix and a number, and the cloud's book holds no such
+// box. A box up (even one still being made or silent) is in the book, and one
+// made again under the same name is in it too, so it is listed. With no book,
+// or one that cannot be read, nothing is called destroyed.
+func (v PosternView) destroyedBoxes(ctx context.Context) func(name string) bool {
+	if v.Cloud == nil {
+		return func(string) bool { return false }
+	}
+	state, err := v.Cloud.Read(ctx)
+	if err != nil {
+		return func(string) bool { return false }
+	}
+	up := map[string]bool{}
+	for _, box := range state.Boxes {
+		up[box.Name] = true
+	}
+	prefix := v.CloudPlan.prefix()
+	return func(name string) bool {
+		number, ok := strings.CutPrefix(name, prefix)
+		if !ok || number == "" || strings.Trim(number, "0123456789") != "" {
+			return false
+		}
+		return !up[name]
+	}
 }
 
 // upNext fills in each host's up_next from the beads the view already holds,

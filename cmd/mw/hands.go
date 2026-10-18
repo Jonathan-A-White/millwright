@@ -114,10 +114,13 @@ func (v handsView) Run(ctx context.Context) (application.PosternViewDoc, error) 
 	if err != nil {
 		return application.PosternViewDoc{}, err
 	}
+	cloudBook, cloudPlan := posternCloud()
 	view, err := sealedPosternView(application.PosternView{
 		Tracker:    v.gateway,
 		Notes:      v.gateway,
 		Signs:      posternSigns(),
+		Cloud:      cloudBook,
+		CloudPlan:  cloudPlan,
 		Host:       v.host,
 		Now:        posternViewClock,
 		VerifyDays: verifyDays,
