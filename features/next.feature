@@ -479,6 +479,49 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" records attempt 2
     And the first attempt's branch of "mw-gq6.1" is kept
 
+  # mw-gq6.595: the close-out turns of a Builder count against the cap, so a story
+  # whose closing comment is written and whose gate is green can be cut at the cap.
+  # That is done work: it lands, and the ledger says it was cut at the cap.
+  Scenario: A session stopped at its turn cap after its closing comment, with the rig's tests green, lands
+    Given the story "mw-gq6.1" was started once
+    And the session of "mw-gq6.1" reported this result:
+      """
+      {"type": "result", "subtype": "error_max_turns", "is_error": true, "num_turns": 121, "session_id": "s-cap"}
+      """
+    And a closing comment with "Internal: nothing for the Governor to look at" and "For the rig memory:" was written on "mw-gq6.1" after its newest commit
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+    And the last ledger line holds:
+      | landed on main            |
+      | landed after the turn cap |
+
+  Scenario: A session stopped at its turn cap after its closing comment, with the rig's tests failing, is still given back
+    Given the story "mw-gq6.1" was started once
+    And the session of "mw-gq6.1" reported this result:
+      """
+      {"type": "result", "subtype": "error_max_turns", "is_error": true, "num_turns": 121, "session_id": "s-cap"}
+      """
+    And a closing comment with "Internal: nothing for the Governor to look at" and "For the rig memory:" was written on "mw-gq6.1" after its newest commit
+    And the rig's tests fail, saying "FAIL: TestSomething"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the report says it stopped for "turn-cap"
+    And the story "mw-gq6.1" carries a comment quoting: capped at 121 turns
+
+  Scenario: A session stopped at its turn cap whose closing comment came before its newest commit is still given back
+    Given the story "mw-gq6.1" was started once
+    And the session of "mw-gq6.1" reported this result:
+      """
+      {"type": "result", "subtype": "error_max_turns", "is_error": true, "num_turns": 121, "session_id": "s-cap"}
+      """
+    And a closing comment with "Internal: nothing for the Governor to look at" and "For the rig memory:" was written on "mw-gq6.1" before its newest commit
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the report says it stopped for "turn-cap"
+
   # mw-gq6.393: the give-back that follows an open-steps stop met a passing fault
   # of the beads server on the desktop and the story kept its claim. A give-back
   # that fails that way is tried again, as the reads and the other writes are.

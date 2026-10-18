@@ -585,6 +585,11 @@ type closeOut struct {
 	target   string
 	result   SessionResult
 
+	// cappedAfterClosing says the harness stopped the session at its turn cap
+	// after it wrote its closing comment, so the close-out judges it as a
+	// finished one (mw-gq6.595).
+	cappedAfterClosing bool
+
 	// worktreeFailed says the rig's tests failed in the worktree and the
 	// close-out went on to the merged result (mw-gq6.552): a merge that is a
 	// fast-forward then still has its tests run, since no run has passed.
@@ -930,13 +935,19 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", readErr), "")
 	}
 	c.result, report.Result = result, result
+	fetched := false
 	if CappedAtTurns(result) {
 		// The session ran to its turn cap and its harness stopped it
 		// (mw-1ljpo9.6): it is not waiting for a person, so stop gives the
-		// claim back and the next attempt keeps this one's branch.
-		return n.stop(ctx, c, report, ReasonTurnCap, TurnCapWhy(result.Turns), "")
-	}
-	if !result.Finished() {
+		// claim back and the next attempt keeps this one's branch. Unless it
+		// wrote its closing comment first: the close-out turns count against
+		// the cap, so that session is done and the gate below judges it
+		// (mw-gq6.595).
+		if !n.cappedAfterClosing(ctx, c, report) {
+			return n.stop(ctx, c, report, ReasonTurnCap, TurnCapWhy(result.Turns), "")
+		}
+		c.cappedAfterClosing, fetched = true, true
+	} else if !result.Finished() {
 		// Stopped by the harness for something that is not the work's: the
 		// claim is kept as for any stop, and mw dispatch gives it back itself
 		// once the stop's time has come, the attempt not counted (mw-gq6.434).
@@ -948,11 +959,19 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 
 	// The target branch as the remote has it now is what the work is measured
 	// against: the other host may have landed on it while this story was worked.
-	if err := n.fetchRetrying(ctx, report, c.rigDir); err != nil {
-		return n.stop(ctx, c, report, ReasonGitFailed, fmt.Sprintf("the rig could not be brought up to date with %s: %v", n.remote(), err), "")
+	if !fetched {
+		if err := n.fetchRetrying(ctx, report, c.rigDir); err != nil {
+			return n.stop(ctx, c, report, ReasonGitFailed, fmt.Sprintf("the rig could not be brought up to date with %s: %v", n.remote(), err), "")
+		}
 	}
 	n.readLanding(ctx, c, report)
 	if found := n.refusals(ctx, c, report, false); len(found) > 0 {
+		if c.cappedAfterClosing {
+			// Cut at the cap and not done: given back as any capped session is,
+			// with what the close-out found said beside it (mw-gq6.595).
+			return n.stop(ctx, c, report, ReasonTurnCap, TurnCapWhy(result.Turns),
+				"It wrote its closing comment before the cap, but the close-out refused it as "+string(found[0].Reason)+": "+found[0].Why)
+		}
 		report.Refused = true
 		return n.stop(ctx, c, report, found[0].Reason, found[0].Why, found[0].Said)
 	}
@@ -1030,6 +1049,9 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// The work is on the target branch at the remote from here: nothing below
 	// is undone, and nothing below stops the story being closed.
 	outcome := fmt.Sprintf("%s, %d commits, mw next re-ran the rig's tests: pass", landed.LandedAs(c.target), report.Commits)
+	if c.cappedAfterClosing {
+		outcome += "; " + LandedAfterTurnCap
+	}
 
 	// Written before anything else, because it is what tells a later run that
 	// this story is landed. Everything after the push can fail — the close did,
@@ -2725,6 +2747,45 @@ const MaxTurnsSubtype = "error_max_turns"
 // CappedAtTurns reports whether the harness stopped the session at its turn cap
 // (mw-1ljpo9.6).
 func CappedAtTurns(result SessionResult) bool { return result.Subtype == MaxTurnsSubtype }
+
+// LandedAfterTurnCap ends the outcome of a story whose session was cut at the
+// turn cap after its closing comment and which landed all the same (mw-gq6.595).
+const LandedAfterTurnCap = "landed after the turn cap"
+
+// cappedAfterClosing reports whether a session its harness stopped at the turn
+// cap had written its closing comment ('For the rig memory' after its newest
+// commit) before it was stopped: the close-out turns of a Builder count against
+// the cap, so such a session is done, and only the rig's gate is left to judge
+// it (mw-gq6.595). It fetches the rig, which the close-out needs anyway; anything
+// it cannot read counts as no.
+func (n Next) cappedAfterClosing(ctx context.Context, c *closeOut, report *NextReport) bool {
+	if IsTesterStory(c.detail) {
+		return false
+	}
+	if err := n.fetchRetrying(ctx, report, c.rigDir); err != nil {
+		return false
+	}
+	commits, err := n.Landing.Commits(ctx, c.rigDir, c.branch, StartPoint(n.remote(), c.target))
+	if err != nil || len(commits) == 0 {
+		return false
+	}
+	var newest time.Time
+	for _, commit := range commits {
+		if commit.Committed.After(newest) {
+			newest = commit.Committed
+		}
+	}
+	comments, err := n.Tracker.StoryComments(ctx, c.id)
+	if err != nil {
+		return false
+	}
+	for _, comment := range comments {
+		if comment.Created.After(newest) && strings.Contains(comment.Text, "For the rig memory") {
+			return true
+		}
+	}
+	return false
+}
 
 // TurnCapWhy is the reason a story whose session was stopped at its turn cap is
 // given back, with the turns the harness counted when it says.
