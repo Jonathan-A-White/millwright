@@ -224,3 +224,17 @@ func TestFileRefusesAPlanInAGuestRigWithoutTheOwnersWords(t *testing.T) {
 		t.Errorf("expected --guest-ask to pass the guest check, got %v", err)
 	}
 }
+
+func TestFileHelpNamesCheck(t *testing.T) {
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"file", "--help"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "--check") {
+		t.Errorf("expected mw file --help to name --check, got:\n%s", out)
+	}
+}

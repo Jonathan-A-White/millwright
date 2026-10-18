@@ -313,7 +313,7 @@ Feature: Filing the Mayor's plan
       }
       """
     When the plan is filed
-    Then filing is refused, saying: story judge: it is a millwright story and no line begins with 'Expect:': it needs a line 'Expect: <metric> up' or 'Expect: <metric> down', or 'Expect: none, because <why>'
+    Then filing is refused, saying: story judge: it is a millwright story and no line begins with 'Expect:': the Expect line must be a line of its own in the acceptance field
     And filing is refused, saying: story speed: it is a millwright story and 'Expect: speed up' is not
     And filing is refused, saying: story doc: it is a millwright story and 'Expect: none' gives no reason
     And nothing is written

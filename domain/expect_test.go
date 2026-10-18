@@ -92,3 +92,29 @@ func TestAMillwrightStoryWithAnExpectAndAnotherRigsStoryWithoutOneAreFiled(t *te
 		}
 	}
 }
+
+// The Expect rule is said whole in every refusal, so that one round trip
+// teaches all of it (mw-gq6.609): it is a line of its own, in the acceptance
+// field, in one of the forms.
+func TestEveryExpectRefusalSaysTheWholeRule(t *testing.T) {
+	cases := map[string]struct{ acceptance, description string }{
+		"missing":                 {"1. It works.", ""},
+		"inside a sentence":       {"1. It works. Please add Expect: none, because a doc to it.", ""},
+		"in the description only": {"1. It works.", "Why.\nExpect: refusals down"},
+		"unreadable":              {"1. It works.\nExpect: speed up", ""},
+	}
+	for name, c := range cases {
+		plan := expectPlan("millwright", c.acceptance)
+		plan.Stories[0].Description = c.description
+		err := plan.Validate()
+		if err == nil {
+			t.Errorf("%s: was filable", name)
+			continue
+		}
+		for _, want := range []string{"line of its own", "acceptance field", domain.ExpectForms} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: the refusal does not say %q:\n%s", name, want, err)
+			}
+		}
+	}
+}
