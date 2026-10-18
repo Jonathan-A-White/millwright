@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // The labels a bug found by the whole suite carries: bug, as every bug filed by
@@ -123,7 +124,8 @@ func (f SuiteFiler) fileOne(ctx context.Context, epic EpicDetail, report SuiteRe
 
 // openSuiteBug is the open bead under the suite epic, labelled suite, whose
 // title names file: the one a run's failure of the file is written on, and the
-// one mw status names beside the failing count.
+// one mw status names beside the failing count (fixedSuiteBug is the one it
+// names when that has been closed).
 func openSuiteBug(epic EpicDetail, file string) (StoryDetail, bool) {
 	for _, story := range epic.Stories {
 		if story.Status != StatusClosed && carriesAny(story.Labels, []string{LabelSuite}) && namesFile(story.Story.Title, file) {
@@ -131,6 +133,24 @@ func openSuiteBug(epic EpicDetail, file string) (StoryDetail, bool) {
 		}
 	}
 	return StoryDetail{}, false
+}
+
+// fixedSuiteBug is the bead under the suite epic, labelled suite, whose title
+// names file and that was closed after since: the bug a run began before is
+// mended by, until the next run says otherwise. When several were, the one
+// closed last. A bead closed with no time recorded cannot be said to be after.
+func fixedSuiteBug(epic EpicDetail, file string, since time.Time) (StoryDetail, bool) {
+	var fixed StoryDetail
+	found := false
+	for _, story := range epic.Stories {
+		if story.Status != StatusClosed || !carriesAny(story.Labels, []string{LabelSuite}) || !namesFile(story.Story.Title, file) {
+			continue
+		}
+		if story.ClosedAt.After(since) && (!found || story.ClosedAt.After(fixed.ClosedAt)) {
+			fixed, found = story, true
+		}
+	}
+	return fixed, found
 }
 
 // namesFile reports whether a title names file as a word of its own, so that

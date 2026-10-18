@@ -821,6 +821,21 @@ Feature: mw status
     And the report has the line "SUITE"
     And the report has the line "  lampas 2026-09-18 9f3c2ab1d: 2 failing: mw-a, mw-b"
 
+  # mw-gq6.610: a failure whose bug has landed is not an unfiled one.
+
+  Scenario: SUITE names the bug that fixed a failing file, closed since the run began
+    Given the status rig "lampas" runs the nightly suite, its bugs filed under the epic "mw-suite"
+    And the epic "mw-suite" holds the bug "mw-c" for "src/c.test.ts" of "lampas", closed today at "11:20"
+    And the last suite of "lampas" was kept today at "9f3c2ab1d", failing "src/c.test.ts"
+    When mw status reads the host
+    Then the SUITE section reads "lampas 2026-09-18 9f3c2ab1d: 1 failing: fixed by mw-c (landed 11:20Z), until the next run"
+
+  Scenario: SUITE says unfiled for a failing file no bug names
+    Given the status rig "lampas" runs the nightly suite, its bugs filed under the epic "mw-suite"
+    And the last suite of "lampas" was kept today at "9f3c2ab1d", failing "src/d.test.ts"
+    When mw status reads the host
+    Then the SUITE section reads "lampas 2026-09-18 9f3c2ab1d: 1 failing: unfiled"
+
   Scenario: A rig whose last suite passed says all pass
     Given the status rig "lampas" runs the nightly suite, its bugs filed under the epic "mw-suite"
     And the last suite of "lampas" was kept today at "9f3c2ab1d", all passed
