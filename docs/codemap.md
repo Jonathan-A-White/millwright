@@ -20,7 +20,7 @@
 | CardLog, ReportSentLog | application/card.go, reportsend.go | {cardlog,reportlog} |
 | CloseOutMarks, LiveHeartbeats, UserProcesses (Tester) | application/closeout.go, application/liveheartbeats.go, application/testerleftovers.go | {closeout,procs,benchflag} |
 | Worktrees, Rebases, BranchChanges, RigFiles | application/worktrees.go, application/wrongrig.go | rig/{worktree,rigfiles}.go |
-| HostLoad, GateLock, Cloud*, BenchmarkBook | application/hostload.go, application/gate.go, application/benchmark.go | {hostload,hostlock/gate.go,cloud,vault/{cloudbook,benchmarks}.go} |
+| HostLoad, GateLock, Cloud*, BenchmarkBook | application/hostload.go, application/gate.go, application/benchmark.go | {hostload,hostlock/gate.go,ticketq,cloud,vault/{cloudbook,benchmarks}.go} |
 | TickLog, Notifier, HomeMoveHost, OldHome, {Vault,Tracker}Birth | application/{millhandtick,homemove,init}.go | {ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go |
 | Landing, Checks, SpecChecks, MergeSlot, Batch*, LandProcesses | application/landing.go, application/batchland.go | rig/{landing,checks,slot}.go, vault/batch.go, apartproc |
 | AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter, FormulaInstaller | application/afterlanding.go, application/selfupdate.go, application/backendstage.go, application/formulainstall.go | {rig/{afterlanding,built,backend},userunits,vault/formulas}.go |

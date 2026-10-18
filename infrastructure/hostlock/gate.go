@@ -6,13 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/ticketq"
 )
 
 // GateFile is the gate lock's name inside its directory.
@@ -69,9 +68,6 @@ func NewGate(dir string, opts ...GateOption) *Gate {
 
 func (g *Gate) path() string { return filepath.Join(g.Dir, GateFile) }
 
-// ticketSeq tells apart the tickets one process makes in the same instant.
-var ticketSeq atomic.Uint64
-
 // Take implements application.GateLock.
 func (g *Gate) Take(ctx context.Context, holder string, held func(by string)) (application.GateTurn, error) {
 	queue := filepath.Join(g.Dir, GateQueueDir)
@@ -85,17 +81,18 @@ func (g *Gate) Take(ctx context.Context, holder string, held func(by string)) (a
 	}
 
 	started := g.now()
-	ticket, err := g.takeTicket(queue, holder, started)
+	tickets := &ticketq.Queue{Dir: queue, Cap: g.cap, Now: g.now}
+	ticket, err := tickets.Join(holder, started)
 	if err != nil {
 		file.Close()
 		return application.GateTurn{}, err
 	}
 	// Whatever way Take ends, the ticket goes: the lock is taken, or the wait is over.
-	defer ticket.drop()
+	defer ticket.Drop()
 
 	var waitedFor string
 	for {
-		head, headHolder := g.head(queue, ticket.name)
+		head, headHolder := tickets.Head(ticket.Name())
 		var err error
 		if head {
 			err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
@@ -145,127 +142,6 @@ func (g *Gate) Take(ctx context.Context, holder string, held func(by string)) (a
 		Waited:  g.now().Sub(started),
 		For:     waitedFor,
 	}, nil
-}
-
-// gateTicket is a waiter's place in the queue: a file in the queue directory
-// named by when its wait began, flocked by its owner so that a dead owner shows
-// as a ticket nobody holds.
-type gateTicket struct {
-	path string
-	name string
-	file *os.File
-}
-
-// takeTicket joins the queue. The ticket is made under a name the queue does not
-// list, locked, and only then renamed into place, so that nobody finds it
-// unlocked and takes it for a dead waiter's.
-func (g *Gate) takeTicket(queue, holder string, started time.Time) (*gateTicket, error) {
-	name := fmt.Sprintf("%020d-%010d-%d", started.UnixNano(), ticketSeq.Add(1), os.Getpid())
-	building, err := os.CreateTemp(queue, ".ticket-")
-	if err != nil {
-		return nil, fmt.Errorf("making a ticket in this host's gate queue %s: %w", queue, err)
-	}
-	fail := func(err error) (*gateTicket, error) {
-		building.Close()
-		os.Remove(building.Name())
-		return nil, fmt.Errorf("making a ticket in this host's gate queue %s: %w", queue, err)
-	}
-	if err := syscall.Flock(int(building.Fd()), syscall.LOCK_EX); err != nil {
-		return fail(err)
-	}
-	if _, err := building.WriteString(holder + "\n"); err != nil {
-		return fail(err)
-	}
-	final := filepath.Join(queue, name)
-	if err := os.Rename(building.Name(), final); err != nil {
-		return fail(err)
-	}
-	return &gateTicket{path: final, name: name, file: building}, nil
-}
-
-// drop gives the ticket back.
-func (t *gateTicket) drop() {
-	os.Remove(t.path)
-	t.file.Close()
-}
-
-// head says whether the ticket named mine is the first live one in the queue,
-// and whose ticket is first. Tickets of waiters that are gone, or older than the
-// cap, are skipped and cleared on the way.
-func (g *Gate) head(queue, mine string) (bool, string) {
-	entries, err := os.ReadDir(queue)
-	if err != nil {
-		return true, "somebody" // no queue to read: wait on the flock alone
-	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".") {
-			g.clearUnfinished(filepath.Join(queue, entry.Name()))
-			continue
-		}
-		names = append(names, entry.Name())
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if name == mine {
-			return true, "somebody"
-		}
-		if g.skipped(queue, name) {
-			continue
-		}
-		return false, gateHolder(filepath.Join(queue, name))
-	}
-	// Mine is not listed (cleared from under me): nothing stands before it.
-	return true, "somebody"
-}
-
-// skipped says whether the ticket called name no longer counts, and removes it
-// when it does not: its owner is gone, which is to say nobody holds its flock,
-// or its wait began longer ago than the cap, so its owner has given up.
-func (g *Gate) skipped(queue, name string) bool {
-	path := filepath.Join(queue, name)
-	if began, ok := ticketBegan(name); ok && g.now().Sub(began) >= g.cap {
-		os.Remove(path)
-		return true
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return true // gone already
-	}
-	defer file.Close()
-	if syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil {
-		os.Remove(path)
-		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-		return true
-	}
-	return false
-}
-
-// clearUnfinished removes a ticket that was being made when its maker died: far
-// older than the moment it takes to make one, and held by nobody.
-func (g *Gate) clearUnfinished(path string) {
-	info, err := os.Stat(path)
-	if err != nil || g.now().Sub(info.ModTime()) < time.Minute {
-		return
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return
-	}
-	defer file.Close()
-	if syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil {
-		os.Remove(path)
-		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-	}
-}
-
-// ticketBegan is when the wait a ticket stands for began, read from its name.
-func ticketBegan(name string) (time.Time, bool) {
-	var nanos int64
-	if _, err := fmt.Sscanf(name, "%d-", &nanos); err != nil {
-		return time.Time{}, false
-	}
-	return time.Unix(0, nanos), true
 }
 
 // gateHolding is a gate lock somebody has: the open file whose flock it is.
