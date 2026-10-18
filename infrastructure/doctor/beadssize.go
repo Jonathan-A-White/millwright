@@ -47,11 +47,29 @@ var beadsSizeCacheGlobs = []string{
 // git-remote-cache repacks itself on the next sync, and the tracker's own GC
 // keeps to its cadence regardless.
 func (b *BeadsSize) beadsSizeNoCure() error {
+	if b.Home {
+		return fmt.Errorf(
+			"no cure: changed nothing; %s; the tracker's own GC runs at least every %dh but frees nothing while every commit is kept; %s",
+			b.cachesFound(), int(application.DefaultGCInterval.Hours()), b.squashCure(),
+		)
+	}
 	return fmt.Errorf(
 		"no cure: changed nothing; %s; a crowded git-remote-cache now repacks itself with the next sync; "+
 			"the tracker's own GC also runs at least every %dh; a person clears space by hand only if both still fall behind",
 		b.cachesFound(), int(application.DefaultGCInterval.Hours()),
 	)
+}
+
+// squashCure names the cure for the home's store past budget: what fills it is
+// the database's history, every commit reachable, so no GC, full or not, frees
+// it; only the daily collection's squash does (on a copy of the home's store,
+// 4.85 GB to 0.85 GB, where a full Dolt GC freed 21 KB: mw-gq6.615). That
+// squash cannot be undone, so it runs only on the Governor's word.
+func (b *BeadsSize) squashCure() string {
+	if b.Squash {
+		return "the cure is the daily collection's squash of the beads history (sync.beads_squash is on), which cannot be undone"
+	}
+	return "the cure is the daily collection's squash of the beads history, off until the Governor turns sync.beads_squash on (mw-gq6.504)"
 }
 
 // cachesFound says how many git-remote-cache clones the vault holds and how
@@ -88,6 +106,13 @@ type BeadsSize struct {
 	// mw doctor sets it from config.BeadsBudgetBytes; the zero value reads
 	// application.DefaultBeadsBudgetBytes.
 	Budget int64
+	// Home says this host keeps the one beads database, so that its daily
+	// collection's squash of the history is the cure for a store past budget
+	// (mw-gq6.615). mw doctor sets it on the host that serves beads.
+	Home bool
+	// Squash is sync.beads_squash: whether that squash may run at all, which
+	// is the Governor's word (mw-gq6.504).
+	Squash bool
 }
 
 // NewBeadsSize is the check over the vault at dir, against the standard
@@ -123,9 +148,13 @@ func (b *BeadsSize) Cure(context.Context) error { return b.beadsSizeNoCure() }
 // Damper implements application.DoctorCheck.
 func (b *BeadsSize) Damper() (time.Duration, int) { return BeadsSizeDamperWait, BeadsSizeDamperCap }
 
-// WayBack implements application.DoctorCheck: nothing ever changes, so there
-// is nothing to undo.
+// WayBack implements application.DoctorCheck: this check never changes
+// anything, so there is nothing to undo; on the home it names the cure that
+// does run, elsewhere a person clears space by hand.
 func (b *BeadsSize) WayBack() string {
+	if b.Home {
+		return "none: this check changes nothing; " + b.squashCure()
+	}
 	return "none: no cure runs; a person clears space in .beads by hand"
 }
 

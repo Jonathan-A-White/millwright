@@ -124,6 +124,10 @@ func newDoctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			beadsSquash, err := config.SyncBeadsSquash()
+			if err != nil {
+				return err
+			}
 			vault, err := config.Vault()
 			if err != nil {
 				return err
@@ -352,7 +356,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewVaultDirty(vault, host, store),
 					formulasCheck,
 					doctor.NewTimers(units),
-					&doctor.BeadsSize{Dir: vault, Budget: beadsBudget},
+					&doctor.BeadsSize{Dir: vault, Budget: beadsBudget, Home: beadsServedHere(), Squash: beadsSquash},
 					doctor.NewBeadsStores(vault),
 					doctor.NewBeadsBatch(vault, mwGateway(vault, host).AutoCommit),
 					beadsFlushCheck,

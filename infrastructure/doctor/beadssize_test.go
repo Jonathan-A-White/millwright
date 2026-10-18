@@ -196,3 +196,42 @@ func TestBeadsSizeKeepsOneAndAHalfGigabytesWhenTheConfigSaysNothing(t *testing.T
 		t.Fatalf("expected faulty at 1.6 GB past the default budget, got %v", verdict)
 	}
 }
+
+// The home's beads sat damped past the budget for days saying "way back: none:
+// no cure runs" (mw-gq6.615), though there is a cure: on a copy of the home's
+// store the collection's squash of the history took it from 4.85 GB to 0.85 GB,
+// where a full Dolt GC freed nothing. On the home the check names that cure,
+// and whether the config has it on.
+func TestBeadsSizeOnTheHomeNamesTheSquashAsTheCure(t *testing.T) {
+	t.Parallel()
+	dir := bsVault(t, 200)
+
+	held := &doctor.BeadsSize{Dir: dir, Budget: 100, Home: true}
+	wayBack := held.WayBack()
+	for _, want := range []string{"squash of the beads history", "sync.beads_squash", "mw-gq6.504"} {
+		if !strings.Contains(wayBack, want) {
+			t.Fatalf("expected the home's way back to name the squash held off (%q), got %q", want, wayBack)
+		}
+	}
+	if strings.Contains(wayBack, "no cure runs") {
+		t.Fatalf("expected the home's way back not to say no cure runs, got %q", wayBack)
+	}
+	if err := held.Cure(context.Background()); err == nil || !strings.Contains(err.Error(), "sync.beads_squash") {
+		t.Fatalf("expected the cure's word to name the squash, got %v", err)
+	}
+
+	on := (&doctor.BeadsSize{Dir: dir, Budget: 100, Home: true, Squash: true}).WayBack()
+	if !strings.Contains(on, "sync.beads_squash is on") || !strings.Contains(on, "cannot be undone") {
+		t.Fatalf("expected the home's way back to say the squash is on and cannot be undone, got %q", on)
+	}
+}
+
+// A host whose beads are another's has no squash of its own to run: its
+// .beads is cleared by hand, as before.
+func TestBeadsSizeAwayFromTheHomeStillSaysNoCureRuns(t *testing.T) {
+	t.Parallel()
+	check := &doctor.BeadsSize{Dir: bsVault(t, 200), Budget: 100, Squash: true}
+	if wayBack := check.WayBack(); !strings.Contains(wayBack, "no cure runs") || strings.Contains(wayBack, "squash") {
+		t.Fatalf("expected a host away from the home to say no cure runs, got %q", wayBack)
+	}
+}

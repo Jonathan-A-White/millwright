@@ -4746,7 +4746,10 @@ the Laptop's does: otherwise the check reads ok and never dials.
 BEADS line warns on, 1.5 GB unless `beads_budget_bytes` (or `MW_BEADS_BUDGET_BYTES`)
 says otherwise; past it there is no cure — repacking would delete packs
 — so it only ever writes the check's own `doctor.beads-size` note for the
-Millhand to look at.
+Millhand to look at. On the host that serves beads its way back names the cure
+that does exist: the daily collection's squash of the beads history, and whether
+`sync.beads_squash` has it on. No GC, full or not, frees a store whose history is
+all kept (mw-gq6.615); a sync whose collection or squash fails says so on its line.
 
 **beads-churn** is for the host that runs the beads server (its `BEADS_DOLT_SERVER_HOST`
 is a loopback address): each run reads the server's own count of connections it has
