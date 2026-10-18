@@ -14,6 +14,8 @@
 # command; a KILL cannot be trapped, but each loop watches mw-under-load's pid
 # and stops when it is gone), and within 30 minutes whatever happens (each loop
 # runs under its own `timeout`). A loop never outlives the check it was made for.
+# A TERM sent the moment a loop starts can be lost before `timeout` takes it
+# up, so the loops are stopped by a stop file first and the TERM second.
 #
 # Never start busy loops, stress or yes by hand on a host to make load: on
 # 2026-10-16 sixteen of them on the Laptop put its load at 44 of 20 cores, and
@@ -62,8 +64,12 @@ loops=$free
 me=$$
 pids=""
 cmd=""
+# Made only when the loops are stopped; each loop ends once it is there.
+stop="${TMPDIR:-/tmp}/mw-under-load-stop.$me"
 
 stop_loops() {
+	[ -n "$pids" ] || return 0
+	: >"$stop" 2>/dev/null
 	for p in $pids; do
 		kill -TERM "$p" 2>/dev/null
 	done
@@ -71,6 +77,7 @@ stop_loops() {
 		wait "$p" 2>/dev/null
 	done
 	pids=""
+	rm -f "$stop"
 }
 
 cleanup() {
@@ -98,9 +105,10 @@ trap cleanup EXIT
 
 echo "mw-under-load: load $load of $cores cores; running the command beside $loops busy loop(s), each ending within $seconds s" >&2
 
+rm -f "$stop"
 i=0
 while [ "$i" -lt "$loops" ]; do
-	timeout "$seconds" sh -c 'while kill -0 "$1" 2>/dev/null; do :; done' mw-under-load-loop "$me" &
+	MW_UNDER_LOAD_STOP=$stop timeout "$seconds" sh -c 'while kill -0 "$1" 2>/dev/null && [ ! -e "$MW_UNDER_LOAD_STOP" ]; do :; done' mw-under-load-loop "$me" &
 	pids="$pids $!"
 	i=$((i + 1))
 done
