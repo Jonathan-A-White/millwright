@@ -5,11 +5,13 @@ go 1.27.1
 require (
 	github.com/bsv-blockchain/go-sdk v1.6.0
 	github.com/cucumber/godog v0.16.0
+	github.com/go-sql-driver/mysql v1.10.1
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.60.1
 )
 
 require (
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/cucumber/gherkin/go/v42 v42.0.0 // indirect
 	github.com/cucumber/messages/go/v34 v34.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect

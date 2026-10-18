@@ -10,6 +10,7 @@ package beads
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,6 +55,16 @@ type Gateway struct {
 	createBound time.Duration
 	mu          sync.RWMutex
 	reads       chan struct{}
+	// now is the Gateway's clock; nil is time.Now.
+	now func() time.Time
+	// headDB is the connection the head is read over, kept open for the life of
+	// the Gateway; nil reads it by starting a bd (mw-gq6.596).
+	headDB *sql.DB
+	// headSkipUntil is when a failed headDB is tried again, and headMu guards it.
+	headMu        sync.Mutex
+	headSkipUntil time.Time
+	// notes keeps what Note read for a while; nil reads every note from bd.
+	notes *noteCache
 }
 
 // Gateway satisfies the ports.
@@ -94,6 +105,20 @@ func WithSleep(sleep func(ctx context.Context, d time.Duration) error) Option {
 // on the database's single-writer lock or on a Dolt server under load, and the
 // caller's own, longer bound would only end it with no word of why (mw-gq6.563).
 const DefaultCreateBound = 90 * time.Second
+
+// WithClock gives the Gateway the clock its waits (a head connection that
+// failed, a kept note) are told by, in place of time.Now: for a test.
+func WithClock(now func() time.Time) Option {
+	return func(g *Gateway) { g.now = now }
+}
+
+// clock is the time now, by the Gateway's clock.
+func (g *Gateway) clock() time.Time {
+	if g.now != nil {
+		return g.now()
+	}
+	return time.Now()
+}
 
 // WithCreateBound sets how long a bd create may run before it is stopped, in
 // place of DefaultCreateBound: for a test that cannot wait that long.
