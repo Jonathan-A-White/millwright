@@ -120,6 +120,27 @@ func TestHisPriorityIsTrueWhereTheDescriptionQuotesHimSettingOne(t *testing.T) {
 	}
 }
 
+func TestABeadLabelledHisPriorityIsHisPriorityWhateverItsDescriptionSays(t *testing.T) {
+	labelled := liveBead("t-lab")
+	labelled.Labels = []string{"x", "his-priority"}
+	labelled.Description = "Reason: the Governor said SpellForge goes up now."
+	plain := liveBead("t-plain")
+	plain.Labels = []string{"x"}
+	plain.Description = "Set the priority of the cache higher."
+	bare := liveBead("t-bare")
+	bare.Description = "The Governor said SpellForge goes up now."
+	by := map[string]application.TriageLine{}
+	for _, line := range dumpOf(t, labelled, plain, bare) {
+		by[line.ID] = line
+	}
+	if !by["t-lab"].HisPriority {
+		t.Errorf("a bead labelled his-priority should be his_priority: %+v", by["t-lab"])
+	}
+	if by["t-plain"].HisPriority || by["t-bare"].HisPriority {
+		t.Errorf("a bead without the label or a description shape should not be: %+v %+v", by["t-plain"], by["t-bare"])
+	}
+}
+
 func dumpOf(t *testing.T, beads ...application.TriageBead) []application.TriageLine {
 	t.Helper()
 	lines, err := application.TriageDump{Source: &apptest.FakeTriage{Beads: beads}, Now: func() time.Time { return triageNow }}.Run(context.Background(), nil)

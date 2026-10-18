@@ -199,8 +199,8 @@ func cutTriage(dump string, budget int) SleepPart {
 	ranked := append([]TriageLine(nil), lines...)
 	sort.SliceStable(ranked, func(i, j int) bool {
 		a, b := ranked[i], ranked[j]
-		if a.HisPriority != b.HisPriority {
-			return a.HisPriority
+		if his(a) != his(b) {
+			return his(a)
 		}
 		if a.Ready != b.Ready {
 			return a.Ready
@@ -234,6 +234,10 @@ func cutTriage(dump string, budget int) SleepPart {
 	return part
 }
 
+// his is whether the bead's priority is the Governor's: the dump's mark, or the
+// label on the bead (a dump made before the label counted still reads right).
+func his(l TriageLine) bool { return l.HisPriority || HasHisPriorityLabel(l.Labels) }
+
 // encodeSleepLines is the dump lines as the agent reads them, descriptions cut
 // to runes characters.
 func encodeSleepLines(lines []TriageLine, runes int) string {
@@ -247,7 +251,7 @@ func encodeSleepLines(lines []TriageLine, runes int) string {
 		_ = enc.Encode(sleepLine{
 			ID: l.ID, Type: l.Type, Status: l.Status, Priority: l.Priority, Labels: l.Labels, Rig: l.Rig,
 			Size: l.Size, Parent: l.Parent, DaysSinceUpdate: l.DaysSinceUpdate, Ready: l.Ready, DaysReady: l.DaysReady,
-			Deps: l.Deps, Dependents: l.Dependents, Description: string(description), HisPriority: l.HisPriority,
+			Deps: l.Deps, Dependents: l.Dependents, Description: string(description), HisPriority: his(l),
 		})
 	}
 	return out.String()

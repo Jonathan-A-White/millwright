@@ -150,7 +150,7 @@ func triageLines(beads []TriageBead, now time.Time) []TriageLine {
 			Description: clipRunes(b.Description, TriageDescriptionRunes),
 			Deps:        []string{}, Dependents: []string{},
 		}
-		line.HisPriority = HisPriority(b.Description)
+		line.HisPriority = HisPriority(b.Description) || HasHisPriorityLabel(b.Labels)
 		updated := b.Updated
 		if updated.IsZero() {
 			updated = b.Created
@@ -227,6 +227,20 @@ var hisPriorityShapes = []*regexp.Regexp{
 func HisPriority(description string) bool {
 	for _, shape := range hisPriorityShapes {
 		if shape.MatchString(description) {
+			return true
+		}
+	}
+	return false
+}
+
+// HisPriorityLabel is the label the Mayor sets on a bead whenever he records a
+// priority from the Governor's word, whatever the description says.
+const HisPriorityLabel = "his-priority"
+
+// HasHisPriorityLabel is whether labels carry HisPriorityLabel.
+func HasHisPriorityLabel(labels []string) bool {
+	for _, l := range labels {
+		if strings.EqualFold(l, HisPriorityLabel) {
 			return true
 		}
 	}

@@ -31,7 +31,9 @@ func newTriageDumpCmd() *cobra.Command {
 			"no event, no mw-mol-* formula bead — to --out: id, type, status, priority, labels, rig, size,\n" +
 			"parent, created, updated, days since update, whether it is ready and for how many days, what it\n" +
 			"waits on and what waits on it, the first 500 characters of its description, and his_priority\n" +
-			"when the description quotes the Governor setting a priority. It prints how many lines it wrote.\n\n" +
+			"when the bead is labelled his-priority (the Mayor sets it whenever he records a priority from\n" +
+			"the Governor's word) or the description quotes the Governor setting a priority. It prints how\n" +
+			"many lines it wrote.\n\n" +
 			"--sweep-orphans lists, instead, the formula beads of closed stories, and changes nothing;\n" +
 			"with --apply it closes them, each with a comment saying why.",
 		Args: cobra.NoArgs,
