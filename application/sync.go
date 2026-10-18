@@ -553,9 +553,18 @@ type SyncReport struct {
 	// nothing needed reclaiming, only that it was not this sync's turn.
 	GCed bool
 
+	// GCErr is why the collection this sync asked for failed; nil when it
+	// got through or was not due. It is never the sync's own error: the
+	// collection is tried again on the next sync.
+	GCErr error
+
 	// Squashed is how many commits of the beads history this sync folded
 	// into one, on the host that keeps the one database. Zero on most syncs.
 	Squashed int
+
+	// SquashErr is why a squash this sync tried failed, the history left as
+	// it was; nil when none was tried or it got through (mw-gq6.615).
+	SquashErr error
 
 	// Mode is how this sync treated the beads database. Empty reads
 	// BeadsSyncRemote.
@@ -627,8 +636,14 @@ func (r SyncReport) String() string {
 	if r.Squashed > 0 {
 		fmt.Fprintf(&b, "; squashed %d commits of beads history", r.Squashed)
 	}
+	if r.SquashErr != nil {
+		fmt.Fprintf(&b, "; beads history not squashed: %v", r.SquashErr)
+	}
 	if r.GCed {
 		b.WriteString("; garbage collected")
+	}
+	if r.GCErr != nil {
+		fmt.Fprintf(&b, "; garbage collection failed: %v", r.GCErr)
 	}
 	if !r.At.IsZero() {
 		fmt.Fprintf(&b, "; level at %s", r.At.UTC().Format(LastSyncFormat))
@@ -894,7 +909,7 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 		case BeadsSyncShared:
 		default:
 			retried, err := s.syncTrackerMarking(ctx)
-			report.GCed = s.maybeGC(ctx)
+			s.maybeGC(ctx, &report)
 			if err != nil {
 				return report, fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
 			}
@@ -1144,7 +1159,7 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 	// A cycle that halted still went through the database, which keeps growing
 	// whether or not the remote answers: the collection runs on its own
 	// cadence either way (mw-gq6.449).
-	report.GCed = s.maybeGC(ctx)
+	s.maybeGC(ctx, &report)
 	if err != nil {
 		err = fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
 		if noteErr == nil {
@@ -1166,24 +1181,26 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 }
 
 // maybeGC asks the tracker to reclaim disk space when it has been at least
-// GCInterval since this host last did, and reports whether it did. Nothing
-// here is worth failing a sync over: a tracker that fails to collect leaves
-// the report unmarked, and the next sync tries again on its own cadence.
-func (s Sync) maybeGC(ctx context.Context) bool {
+// GCInterval since this host last did, and says in report whether it did.
+// Nothing here is worth failing a sync over: a tracker that fails to collect
+// leaves its words in the report, and the next sync tries again.
+func (s Sync) maybeGC(ctx context.Context, report *SyncReport) {
 	if !s.dueForGC(ctx) {
-		return false
+		return
 	}
-	return s.gc(ctx)
+	s.gc(ctx, report)
 }
 
-// gc asks the tracker to reclaim disk space and records when, reporting
-// whether it did.
-func (s Sync) gc(ctx context.Context) bool {
+// gc asks the tracker to reclaim disk space and records when, saying in
+// report whether it did, or why not (mw-gq6.615): a failure is not recorded,
+// so the next sync tries again.
+func (s Sync) gc(ctx context.Context, report *SyncReport) {
 	if err := s.Tracker.GC(ctx); err != nil {
-		return false
+		report.GCErr = err
+		return
 	}
 	_ = s.Tracker.SetNote(ctx, LastGCKey(s.Host), s.now().UTC().Format(LastSyncFormat))
-	return true
+	report.GCed = true
 }
 
 // collectTheOneDatabase is the collection on the host that keeps the one
@@ -1193,29 +1210,29 @@ func (s Sync) collectTheOneDatabase(ctx context.Context, report *SyncReport) {
 	if !s.dueForGC(ctx) {
 		return
 	}
-	report.Squashed = s.maybeSquash(ctx, *report)
-	report.GCed = s.gc(ctx)
+	report.Squashed, report.SquashErr = s.maybeSquash(ctx, *report)
+	s.gc(ctx, report)
 }
 
 // maybeSquash squashes the beads history, when the config has turned Squash
 // on, once it holds SquashAt commits and
 // nothing can pull the old history back in: no backup has got through for
 // BackupDownBeforeSquash, this sync's own included. It reports how many
-// commits it folded, 0 when it did not. Like the collection it never fails a
-// sync: a history that cannot be counted or squashed is left as it was, for
-// the next collection to try.
-func (s Sync) maybeSquash(ctx context.Context, report SyncReport) int {
+// commits it folded, 0 when it did not, and why a squash it tried failed.
+// Like the collection it never fails a sync: a history that cannot be counted
+// or squashed is left as it was, for the next collection to try.
+func (s Sync) maybeSquash(ctx context.Context, report SyncReport) (int, error) {
 	if !s.Squash || s.History == nil || report.BackedUp || !s.backupDownFor(ctx, BackupDownBeforeSquash) {
-		return 0
+		return 0, nil
 	}
 	commits, err := s.History.HistoryCommits(ctx)
 	if err != nil || commits < s.squashAt() {
-		return 0
+		return 0, nil
 	}
 	if err := s.History.SquashHistory(ctx); err != nil {
-		return 0
+		return 0, err
 	}
-	return commits
+	return commits, nil
 }
 
 // backupDownFor reports whether no backup of the one database has got through

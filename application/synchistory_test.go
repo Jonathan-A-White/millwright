@@ -237,3 +237,47 @@ func TestTheHomeNeverSquashesUntilTheConfigTurnsItOn(t *testing.T) {
 		t.Fatalf("expected the day's collection to run all the same, got GCed=%v and %d", report.GCed, tracker.GCs())
 	}
 }
+
+// The home's beads sat past their budget for days while every daily collection
+// "succeeded" (mw-gq6.615): a collection that cannot give the space back must
+// at least say so. A squash that fails leaves the history as it was, and the
+// sync's line says why.
+func TestASquashThatFailsIsSaidAndLeavesTheHistory(t *testing.T) {
+	sync, tracker := keepingAHistory(t, 96_100)
+	tracker.SquashErr = errors.New("bd sql: connection refused")
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected a failed squash not to fail the sync, got %v", err)
+	}
+	if report.SquashErr == nil || report.SquashErr.Error() != "bd sql: connection refused" {
+		t.Fatalf("expected the report to carry why the squash failed, got %v", report.SquashErr)
+	}
+	if commits, _ := tracker.HistoryCommits(context.Background()); commits != 96_100 {
+		t.Fatalf("expected a failed squash to leave the history untouched, got %d commits", commits)
+	}
+	if line := report.String(); !strings.Contains(line, "beads history not squashed: bd sql: connection refused") {
+		t.Fatalf("expected the sync's line to say the squash failed, got %q", line)
+	}
+}
+
+// A collection that fails is said on the sync's line, and not recorded as
+// done: the next sync tries it again.
+func TestACollectionThatFailsIsSaidAndTriedAgain(t *testing.T) {
+	sync, tracker := keepingAHistory(t, 96_100)
+	tracker.GCErr = errors.New("bd gc: database is locked")
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected a failed collection not to fail the sync, got %v", err)
+	}
+	if report.GCed || report.GCErr == nil {
+		t.Fatalf("expected the report to carry the failed collection, got GCed=%v GCErr=%v", report.GCed, report.GCErr)
+	}
+	if line := report.String(); !strings.Contains(line, "garbage collection failed: bd gc: database is locked") {
+		t.Fatalf("expected the sync's line to say the collection failed, got %q", line)
+	}
+	if last, _ := tracker.Note(context.Background(), application.LastGCKey("vps")); last != "" {
+		t.Fatalf("expected a failed collection not to be recorded as done, got %q", last)
+	}
+}
