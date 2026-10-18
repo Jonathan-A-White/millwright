@@ -38,6 +38,7 @@ func registerTesterSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the story "([^"]*)" carries the closing comment "([^"]*)"$`, c.theStoryCarriesTheClosingComment)
 	ctx.Given(`^the story "([^"]*)" is labelled "([^"]*)" for the trial$`, c.theStoryIsLabelledForTheTrial)
 	ctx.Given(`^the Tester story "([^"]*)" testing "([^"]*)" has been worked in its own worktree, committing nothing$`, c.aTesterStoryWorked)
+	ctx.Given(`^the Tester story "([^"]*)" naming no landed story has been worked in its own worktree, committing nothing$`, c.aTesterStoryWorkedNamingNone)
 	ctx.Given(`^the Tester of "([^"]*)" commented on "([^"]*)": "([^"]*)"$`, c.theTesterCommented)
 	ctx.Given(`^the Tester of "([^"]*)" committed a script to its branch$`, c.theTesterCommittedAScript)
 	ctx.Given(`^the trial saw these landings on "([^"]*)": (.+)$`, c.theTrialSawLandings)
@@ -159,6 +160,18 @@ func (c *nextContext) addTester(id, landed string) error {
 
 func (c *nextContext) aTesterStoryWorked(id, landed string) error {
 	if err := c.addTester(id, landed); err != nil {
+		return err
+	}
+	return c.claimAndCut(id)
+}
+
+// aTesterStoryWorkedNamingNone is a Tester story of the kind filed before the
+// 'Landed story:' line was required: labelled tester, its description naming none.
+func (c *nextContext) aTesterStoryWorkedNamingNone(id string) error {
+	if err := c.addTester(id, "mw-l.1"); err != nil {
+		return err
+	}
+	if err := c.tracker.SetDescription(id, "Drive it on a phone-sized screen."); err != nil {
 		return err
 	}
 	return c.claimAndCut(id)

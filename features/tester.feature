@@ -217,6 +217,18 @@ Feature: A one-week Tester trial
     When mw closes out "mw-l.2"
     Then the story "mw-l.2" is not closed
     And the report says it stopped for "no-findings"
+    And the story "mw-l.2" is open and unclaimed
+
+  # mw-gq6.594: nothing is left to land, so the claim is given back and the
+  # Mayor can close the story with a plain bd close.
+  Scenario: A Tester story naming no landed story is refused and its claim is given back
+    Given the story "mw-l.1" is planned and ready to be worked here
+    And the Tester story "mw-l.2" naming no landed story has been worked in its own worktree, committing nothing
+    And the session of "mw-l.2" reported a plain success
+    When mw closes out "mw-l.2"
+    Then the story "mw-l.2" is not closed
+    And the report says it stopped for "no-findings"
+    And the story "mw-l.2" is open and unclaimed
 
   # A session cannot read its own fuel: a Haiku Tester wrote "~210000
   # (estimate)" (mw-2zh33g.12). The close-out records it from the result file,

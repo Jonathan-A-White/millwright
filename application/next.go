@@ -2586,7 +2586,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	// another name as it keeps any leftover of an earlier attempt. Every other
 	// stop keeps the claim, because the claim is the evidence.
 	given := false
-	if reason == ReasonOpenSteps || reason == ReasonTurnCap {
+	if reason == ReasonOpenSteps || reason == ReasonTurnCap || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
 		if err := n.releaseOnStop(ctx, c.id, report); err != nil {
 			trouble = append(trouble, fmt.Sprintf("the claim on %s could not be given back: %v", c.id, err))
 		} else {
@@ -2595,7 +2595,11 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	}
 
 	claim := "the claim was not given back"
-	if given && continues {
+	if given && reason == ReasonNoFindings {
+		// A Tester story that left nothing to land (mw-gq6.594): its claim is not
+		// the evidence, so it is given back and the Mayor can bd close it.
+		claim = "the claim was given back and it is open again, so it can be closed with a plain bd close"
+	} else if given && continues {
 		claim = fmt.Sprintf("the claim was given back and it is open again: the next dispatch tick takes it as attempt %d "+
 			"and keeps the branch under another name to cut its own from", c.detail.Attempts+1)
 	} else if given {
