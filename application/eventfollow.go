@@ -167,6 +167,12 @@ type EventFollow struct {
 	// the Laptop on 2026-10-01) never holds up the events. Without it each
 	// pass publishes in turn.
 	Aside bool
+	// PublishEvery is the least time between the views of two different heads,
+	// so that a beads busy with writes (a head that moves every few seconds)
+	// does not have the view read, with its handful of bd reads, for each:
+	// the newest head is published once the time has passed. Zero publishes
+	// every head. The events themselves are never held back by it.
+	PublishEvery time.Duration
 	// Every is the wait between two passes; zero means
 	// DefaultEventFollowEvery.
 	Every time.Duration
@@ -251,6 +257,25 @@ func (f EventFollow) Run(ctx context.Context) error {
 	}
 	var read, trimmedDay string
 	var cursor *FollowCursor
+	// letThrough is the head last let through to the view and when: a new head
+	// waits for PublishEvery after it.
+	var letThrough string
+	var letThroughAt time.Time
+	clock := time.Now
+	if f.Now != nil {
+		clock = f.Now
+	}
+	publishDue := func(head string) bool {
+		if f.PublishEvery <= 0 || head == letThrough || letThroughAt.IsZero() {
+			return true
+		}
+		return clock().Sub(letThroughAt) >= f.PublishEvery
+	}
+	letThroughHead := func(head string) {
+		if head != letThrough {
+			letThrough, letThroughAt = head, clock()
+		}
+	}
 	for ctx.Err() == nil {
 		head, err := f.Head.Head(ctx)
 		switch {
@@ -269,6 +294,10 @@ func (f EventFollow) Run(ctx context.Context) error {
 					quiet("following the beads")
 				}
 			}
+			if !publishDue(head) {
+				break
+			}
+			letThroughHead(head)
 			if !f.Aside {
 				publishAt(head)
 				break

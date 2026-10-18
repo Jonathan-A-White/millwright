@@ -456,3 +456,43 @@ func TestAVerifiedBeadIsRememberedByTheCursorSoAFollowerStartedAgainEmitsItOnce(
 		t.Fatalf("the log holds\n%s\nwant\n%s", strings.ReplaceAll(got, " ", "\n"), strings.ReplaceAll(want, " ", "\n"))
 	}
 }
+
+// A beads busy with writes moves its head every few seconds, and each head's
+// view costs the server a handful of reads (mw-gq6.596): with PublishEvery the
+// view of a head waits until the last one's time has passed, and the newest
+// head is the one published.
+func TestFollowPublishesADifferentHeadNoOftenerThanPublishEvery(t *testing.T) {
+	now := time.Date(2026, 10, 18, 6, 0, 0, 0, time.UTC)
+	head := &apptest.FakeHead{Heads: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"}}
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	var published int
+	follow := application.EventFollow{
+		Head:         head,
+		Publish:      func(context.Context) error { published++; return nil },
+		PublishEvery: 10 * time.Second,
+		Now:          func() time.Time { return now },
+		Sleep: func(context.Context, time.Duration) error {
+			if head.Calls() >= 13 {
+				stop()
+				return ctx.Err()
+			}
+			now = now.Add(time.Second)
+			return nil
+		},
+	}
+	if err := follow.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// a at 0 s; the next head let through at 10 s (k), none after it by 12 s.
+	if published != 2 {
+		t.Fatalf("published %d views over 13 heads in 12 seconds, want 2 (the first, and the head at 10 s)", published)
+	}
+}
+
+func TestFollowPublishesEveryHeadWithoutPublishEvery(t *testing.T) {
+	head := &apptest.FakeHead{Heads: []string{"a", "b", "c", "d"}}
+	if published, _ := followRun(t, head, 4, nothingWrong); published != 4 {
+		t.Fatalf("published %d views over four heads, want 4", published)
+	}
+}
