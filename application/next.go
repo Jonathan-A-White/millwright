@@ -2583,8 +2583,10 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	// not waiting for a person (mw-gq6.341), nor is one whose session ran to its
 	// turn cap (mw-1ljpo9.6): the claim is given back so that the
 	// next dispatch tick takes it as another attempt, keeping this branch under
-	// another name as it keeps any leftover of an earlier attempt. Every other
-	// stop keeps the claim, because the claim is the evidence.
+	// another name as it keeps any leftover of an earlier attempt. So is a Tester
+	// story's that left no FINDINGS (mw-gq6.594): nothing is left to land, and the
+	// Mayor can bd close it. Every other stop keeps the claim, because the claim
+	// is the evidence.
 	given := false
 	if reason == ReasonOpenSteps || reason == ReasonTurnCap || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
 		if err := n.releaseOnStop(ctx, c.id, report); err != nil {
