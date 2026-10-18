@@ -178,6 +178,11 @@ func newNextCmd() *cobra.Command {
 				return fmt.Errorf("closing out %s: the vault %s cannot be worked from: %w", args[0], dir, err)
 			}
 
+			// A close-out that waits for a slot on another rig reads a note every
+			// CrossSlotPoll, and each read started a bd, several connections to the
+			// beads server, four times a minute for as long as it waited
+			// (mw-gq6.608): the notes are read over one connection kept open.
+			defer keepBeadsConnection(dir, cmd.ErrOrStderr())()
 			gateway := mwGateway(dir, host)
 			bench, err := config.Benchmark()
 			if err != nil {

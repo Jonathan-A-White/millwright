@@ -132,6 +132,10 @@ func newDoctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Every run clears or reads a note for each check, and a bd started for
+			// each was most of a host's new connections to the beads server on a
+			// five-minute clock (mw-gq6.608): they are read over one connection.
+			defer keepBeadsConnection(vault, cmd.ErrOrStderr())()
 
 			// Read here but judged by the check itself: a beads_sync or a
 			// BEADS_DOLT_SERVER_PORT this host cannot read is beads-server's
