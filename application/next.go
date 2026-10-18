@@ -2041,12 +2041,16 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 	}
 	// Told once: the run that landed the story says so, and a later run that
 	// only closes it has nothing new for the Mayor.
+	verdict, unmet := MailLanded, ""
+	if c.tested == "" {
+		// A run that only closes the story files the bug an earlier one could not.
+		verdict, unmet = n.landedWithoutACs(ctx, c, report, again)
+	}
 	if !again {
-		verdict := MailLanded
 		if c.tested != "" {
 			verdict = MailTested
 		}
-		n.mailTheMayor(ctx, c, report, verdict, n.closingProposals(ctx, c))
+		n.mailTheMayor(ctx, c, report, verdict, joinBlocks(unmet, n.closingProposals(ctx, c)))
 	}
 	if closeErr != nil {
 		return *report, fmt.Errorf("closing out %s: it %s, but the story could not be closed, so it is landed and still open: %w",

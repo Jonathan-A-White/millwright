@@ -35,6 +35,22 @@ Feature: mw land lands a batch rig's queue under one gate run
     And metrics/factory.jsonl holds a line for batch 1 of the rig: 3 stories, 1 gate run, no fixer, outcome "green"
     And the Mayor was sent no mail saying the batch was held
 
+  Scenario: A story of the batch whose closing comment says an AC is not met lands marked and files a held bug (mw-gq6.602)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+    And the story "mw-gq6.1" has the acceptance:
+      """
+      1. The first thing works.
+      2. The second thing works.
+      """
+    And the story "mw-gq6.1" carries the closing comment "Done.\nAC 2 NOT met: the harness refused the step.\nFor the rig memory: nothing"
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And that mail's subject is "Landed, AC 2 NOT met: The story mw-gq6.1"
+    And exactly 1 bug was filed under "mw-gq6"
+    And the filed bug is titled "[bug] mw-gq6.1 landed without its AC 2: The second thing works."
+    And the filed bug is held and labelled "bug" and "friction"
+
   Scenario: The after-landing command runs once for a batch whose rig checkout was already level with the batch commit (mw-gq6.484)
     Given the rig names a command to run after a landing
     And something else brings the rig checkout level with the origin the moment a push reaches it

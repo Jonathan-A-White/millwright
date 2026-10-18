@@ -3813,6 +3813,21 @@ a bug whose comment names none is said as `not given`. `mw status` lists under
 which is the register's standing sweep: the Mayor has each check made (a story,
 or a look) and records it with `checked`. See `features/errors.feature`.
 
+A landing whose closing comment says an acceptance criterion is not met. When a
+line of the story's closing comment says `AC <n> NOT met` or `AC <n> NOT done`
+(also `AC 2 and 4 NOT met`, `AC 1, 2 and 5 NOT met`; case-sensitive, so `not met`
+in prose names nothing, and `AC 1, 3 and 4 done; AC 2 NOT done` names AC 2 only),
+`mw next` lands the story all the same, since the rest of the work is good and a
+harness that refused a step is not the Builder's fault, but it does not let it
+pass as whole. Its Landed mail is titled `Landed, AC <n> NOT met: <title>` and
+quotes the line, and one held `[bug]` is filed under the landed story's epic,
+titled `<id> landed without its AC <n>: <the criterion's first 80 characters>`,
+labelled `bug` and `friction`, with the landed story's path, the comment's line
+and the criterion in its description, and a `Sweep:` line in its acceptance, for
+the Mayor to read, word and release. A bug of that title already filed, open or
+closed, is the one filed: a close-out run again files nothing. `mw land` takes
+the same check for each story of a batch. See `features/ac_not_met.feature`.
+
 ## Closing what is plainly finished
 
 ```sh
