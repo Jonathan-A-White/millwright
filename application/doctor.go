@@ -369,7 +369,18 @@ type Doctor struct {
 
 	// Out is where the report is printed. A nil Out prints nothing.
 	Out io.Writer
+
+	// noted is the keys of this host's notes as Run found them: a check that
+	// is ok clears its note only when it is there (nil, when the listing
+	// failed or there is no Notes, clears every one).
+	noted *notedKeys
 }
+
+// notedKeys is the set of this host's doctor notes held at the start of a run.
+// Each clear is a bd of its own, several connections to the beads server, so a
+// run that cleared the note of every ok check was one bd for each of the
+// table's checks every five minutes on every host (mw-gq6.608).
+type notedKeys struct{ held map[string]bool }
 
 type doctorDryRunKey struct{}
 
@@ -403,6 +414,8 @@ func (d Doctor) Run(ctx context.Context, name string, dryRun bool) (DoctorReport
 
 	if dryRun {
 		ctx = context.WithValue(ctx, doctorDryRunKey{}, true)
+	} else {
+		d.noted = d.readNoted(ctx)
 	}
 	var report DoctorReport
 	for _, check := range checks {
@@ -656,6 +669,9 @@ func (d Doctor) writeNote(ctx context.Context, check string, result DoctorResult
 		_ = d.append(ctx, DoctorResult{Check: check, Verdict: "note-failed", Reason: oneLine(err.Error())})
 		return false
 	}
+	if d.noted != nil {
+		d.noted.held[DoctorNoteKey(d.Host, check)] = true
+	}
 	return true
 }
 
@@ -665,9 +681,35 @@ func (d Doctor) clearNote(ctx context.Context, check string) {
 	if d.Notes == nil {
 		return
 	}
-	if err := d.Notes.ClearNote(ctx, DoctorNoteKey(d.Host, check)); err != nil {
-		_ = d.append(ctx, DoctorResult{Check: check, Verdict: "note-failed", Reason: oneLine(err.Error())})
+	key := DoctorNoteKey(d.Host, check)
+	if d.noted != nil && !d.noted.held[key] {
+		return
 	}
+	if err := d.Notes.ClearNote(ctx, key); err != nil {
+		_ = d.append(ctx, DoctorResult{Check: check, Verdict: "note-failed", Reason: oneLine(err.Error())})
+		return
+	}
+	if d.noted != nil {
+		delete(d.noted.held, key)
+	}
+}
+
+// readNoted lists this host's doctor notes in one read, or says nil when there
+// is none to list or the listing fails, and every ok check then clears its note
+// as it always did.
+func (d Doctor) readNoted(ctx context.Context) *notedKeys {
+	if d.Notes == nil {
+		return nil
+	}
+	found, err := d.Notes.NotesWithPrefix(ctx, DoctorNoteKey(d.Host, ""))
+	if err != nil {
+		return nil
+	}
+	noted := &notedKeys{held: make(map[string]bool, len(found))}
+	for key := range found {
+		noted.held[key] = true
+	}
+	return noted
 }
 
 // checkLogLines is this check's own last DoctorNoteLogLines lines out of the
