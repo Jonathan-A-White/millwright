@@ -238,3 +238,64 @@ func TestInvestAddAndOutcomeCommitTheLedgerAndPush(t *testing.T) {
 		t.Errorf("the commits were not pushed (remote at %s)", pushed)
 	}
 }
+
+// moveTheRemote makes the vault's remote move without the vault's clone
+// hearing of it, as it does on the busy home vault when a landing commits the
+// ledger: another clone pushes, and the clone's push is then refused as not a
+// fast-forward. It returns that other clone.
+func moveTheRemote(t *testing.T, vaultDir, remote string) (other string) {
+	t.Helper()
+	root := filepath.Dir(vaultDir)
+	other = filepath.Join(root, "other")
+	gitIn(t, root, "clone", "-q", remote, other)
+	gitIn(t, other, "config", "user.name", "test")
+	gitIn(t, other, "config", "user.email", "test@millwright.invalid")
+	putFile(t, other, "seats/mayor/ledger.md", "one\na landing's line\n")
+	gitIn(t, other, "add", "-A")
+	gitIn(t, other, "commit", "-qm", "A landing commits the ledger")
+	gitIn(t, other, "push", "-q", "origin", "main")
+	return other
+}
+
+func TestSeatRecordVerbPushesEvenWhenTheRemoteMovedAfterTheCommit(t *testing.T) {
+	vaultDir, remote := gitVaultWithRemote(t, true)
+	moveTheRemote(t, vaultDir, remote)
+
+	_, stderr := runMW(t, "errors", "add", "new-class", "--symptom", "a clock", "--kinds", "pwa")
+
+	if pushed := gitIn(t, remote, "rev-parse", "main"); pushed != gitIn(t, vaultDir, "rev-parse", "HEAD") {
+		t.Errorf("the commit was not pushed (remote at %s)", pushed)
+	}
+	if files := gitIn(t, remote, "ls-tree", "-r", "--name-only", "main"); !strings.Contains(files, "common-errors/new-class.md") {
+		t.Errorf("the remote lacks the new class:\n%s", files)
+	}
+	if stderr != "" {
+		t.Errorf("a push that worked said something: %q", stderr)
+	}
+}
+
+func TestSeatRecordVerbFailsPlainlyWhenTheRebasedPushStillCannotGo(t *testing.T) {
+	vaultDir, remote := gitVaultWithRemote(t, true)
+	// The other host's commit changes the very file this verb adds, so the rebase conflicts.
+	other := moveTheRemote(t, vaultDir, remote)
+	putFile(t, other, "seats/builder/common-errors/new-class.md", recordedClass+"theirs\n")
+	gitIn(t, other, "add", "-A")
+	gitIn(t, other, "commit", "-qm", "The same class from the other host")
+	gitIn(t, other, "push", "-q", "origin", "main")
+
+	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(errOut)
+	root.SetArgs([]string{"errors", "add", "new-class", "--symptom", "a clock", "--kinds", "pwa"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatalf("mw errors add exited well though its commit could not be pushed")
+	}
+	if !strings.Contains(err.Error(), "not pushed") {
+		t.Errorf("the error should say the commit was not pushed, got %v", err)
+	}
+	if dirty := gitIn(t, vaultDir, "status", "--porcelain", "--untracked-files=no"); dirty != "" {
+		t.Errorf("the vault is left mid-rebase or dirty:\n%s", dirty)
+	}
+}

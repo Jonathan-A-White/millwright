@@ -314,18 +314,65 @@ func (v *Vault) waitForCloseOut(ctx context.Context) error {
 // Push implements application.VaultFiles. A clone with nothing to push does not
 // reach the remote at all, so a sync with nothing to do costs one fetch and no
 // network write.
+//
+// A push the remote refuses because it holds commits this clone lacks (the other
+// host, or a landing, committed the ledger since the last pull) is not left at
+// git's hint: the clone is rebased onto the remote, as Pull does, and the push is
+// tried again, up to pushRebases times. A rebase that cannot finish is undone,
+// and the error says both the refusal and why the rebase did not help
+// (mw-gq6.583). A clone whose branch tracks nothing gets
+// application.ErrVaultNoUpstream.
 func (v *Vault) Push(ctx context.Context) (int, error) {
 	outgoing, err := v.commitsBetween(ctx, "@{upstream}", "HEAD")
 	if err != nil {
+		if tracksNothing(err) {
+			return 0, fmt.Errorf("%w, so there is nothing to push to: %w", application.ErrVaultNoUpstream, err)
+		}
 		return 0, err
 	}
 	if outgoing == 0 {
 		return 0, nil
 	}
-	if _, err := v.git(ctx, "push"); err != nil {
-		return 0, err
+	for rebased := 0; ; rebased++ {
+		_, err := v.git(ctx, "push")
+		if err == nil {
+			return outgoing, nil
+		}
+		if rebased == pushRebases || !pushRefused(err) {
+			return 0, err
+		}
+		if _, pulled := v.Pull(ctx); pulled != nil {
+			return 0, fmt.Errorf("%w (and rebasing onto what the remote holds did not work: %v)", err, pulled)
+		}
+		if outgoing, err = v.commitsBetween(ctx, "@{upstream}", "HEAD"); err != nil {
+			return 0, err
+		}
+		if outgoing == 0 {
+			return 0, nil
+		}
 	}
-	return outgoing, nil
+}
+
+// pushRebases is how many times a refused push is rebased and tried again: the
+// remote may move once more while the rebase runs.
+const pushRebases = 3
+
+// tracksNothing reports whether git failed to count the commits ahead of the
+// upstream because the branch has none: it says "unknown revision" or "no
+// upstream configured" of @{upstream}, by its version.
+func tracksNothing(err error) bool {
+	said := err.Error()
+	return strings.Contains(said, "@{upstream}") &&
+		(strings.Contains(said, "unknown revision") || strings.Contains(said, "no upstream"))
+}
+
+// pushRefused reports whether git refused a push because the remote has moved
+// on (rejected as a non-fast-forward, or "fetch first"): the refusals a rebase
+// cures. A refused key, a name that does not resolve and the rest are not it.
+func pushRefused(err error) bool {
+	said := err.Error()
+	return strings.Contains(said, "[rejected]") &&
+		(strings.Contains(said, "fetch first") || strings.Contains(said, "non-fast-forward"))
 }
 
 // Head implements application.VaultFiles: the commit this clone has checked
