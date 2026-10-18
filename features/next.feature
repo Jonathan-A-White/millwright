@@ -1012,13 +1012,13 @@ Feature: Closing out a finished story and carrying on
       | 311,200 tokens |
       | $4.21          |
 
-  Scenario: A demo that lands is left open and held for the Governor's Looks good
+  Scenario: A demo that lands is left open and waits for the Governor's Looks good
     Given the story "mw-gq6.1" is labelled "demo"
     And the session of "mw-gq6.1" reported a plain success
     When mw closes out "mw-gq6.1"
     Then the work of "mw-gq6.1" is on "main" at the rig's origin
-    And the story "mw-gq6.1" is left open and held, though it landed
-    And the story "mw-gq6.1" carries a comment quoting: A demo: left open and held for the Governor's 'Looks good'.
+    And the demo "mw-gq6.1" waits for the Governor, though it landed
+    And the story "mw-gq6.1" carries a comment quoting: A demo: left open for the Governor's 'Looks good'.
     And the last ledger line names "mw-gq6.1"
     And the session of "mw-gq6.1" is closed
     And exactly one mail was sent, to "mayor" from "mw@vps"
@@ -1026,12 +1026,12 @@ Feature: Closing out a finished story and carrying on
     And that mail's body holds:
       | left open (a demo) |
 
-  Scenario: A story titled DEMO with no label is left open and held too
+  Scenario: A story titled DEMO with no label waits for the Governor too
     Given the story "mw-gq6.1" is titled "DEMO catch it first"
     And the session of "mw-gq6.1" reported a plain success
     When mw closes out "mw-gq6.1"
-    Then the story "mw-gq6.1" is left open and held, though it landed
-    And the story "mw-gq6.1" carries a comment quoting: A demo: left open and held for the Governor's 'Looks good'.
+    Then the demo "mw-gq6.1" waits for the Governor, though it landed
+    And the story "mw-gq6.1" carries a comment quoting: A demo: left open for the Governor's 'Looks good'.
 
   Scenario: A Landed mail carries the closing comment's rig-memory proposals as mw memory lines to paste
     Given the builder seat keeps a facts folder for the rig "millwright"

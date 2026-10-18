@@ -2061,8 +2061,9 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 }
 
 // holdDemo is what landing does in place of closeStory for a demo, which only
-// the Governor's "Looks good" closes: it is left open and held, tried again the
-// way a close is, and counts as held when a read back finds it so.
+// the Governor's "Looks good" closes: it is left open, labelled hitl and
+// unclaimed, tried again the way a close is, and counts as waiting when a read
+// back finds it so.
 func (n Next) holdDemo(ctx context.Context, c *closeOut, report *NextReport, outcome string) error {
 	tries := n.pushTries()
 	var last error
@@ -2078,7 +2079,7 @@ func (n Next) holdDemo(ctx context.Context, c *closeOut, report *NextReport, out
 		if last == nil {
 			return nil
 		}
-		if detail, err := n.Tracker.ShowStory(ctx, c.id); err == nil && detail.Held() && detail.Assignee == "" {
+		if detail, err := n.Tracker.ShowStory(ctx, c.id); err == nil && demoWaits(detail) {
 			return nil
 		}
 	}
