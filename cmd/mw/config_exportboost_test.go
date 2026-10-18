@@ -5,11 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
+	mwconfig "github.com/Jonathan-A-White/millwright/infrastructure/config"
 )
 
 // bootstrapTableLine is contrib/boost-bootstrap.sh's own table_line, cut out
@@ -17,18 +19,25 @@ import (
 // new Boost does.
 func bootstrapTableLine(t *testing.T) string {
 	t.Helper()
+	return bootstrapFunction(t, "table_line")
+}
+
+// bootstrapFunction is the named function of contrib/boost-bootstrap.sh, cut out
+// of the script as it stands.
+func bootstrapFunction(t *testing.T, name string) string {
+	t.Helper()
 	script, err := os.ReadFile(filepath.Join("..", "..", "contrib", "boost-bootstrap.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(script)
-	start := strings.Index(text, "\ntable_line() {")
+	start := strings.Index(text, "\n"+name+"() {")
 	if start < 0 {
-		t.Fatal("contrib/boost-bootstrap.sh has no table_line function")
+		t.Fatalf("contrib/boost-bootstrap.sh has no %s function", name)
 	}
 	end := strings.Index(text[start:], "\n}\n")
 	if end < 0 {
-		t.Fatal("contrib/boost-bootstrap.sh's table_line has no end")
+		t.Fatalf("contrib/boost-bootstrap.sh's %s has no end", name)
 	}
 	return text[start+1 : start+end+3]
 }
@@ -67,6 +76,14 @@ postern = "npm ci && TZ=UTC npm test && (cd server && go test ./...)"
 
 [changed_specs]
 lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"
+
+[test_parts.lampas]
+"install" = "npm ci --no-audit --no-fund"
+"vitest 2/2" = "TZ=UTC npx vitest run --shard 2/2"
+"vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"
+
+[test_parts.postern]
+"shots" = "npm run gate:shots"
 
 [after_landing]
 millwright = "make build"
@@ -114,6 +131,40 @@ millwright = "make build"
 	}
 	if line := read("after_landing", "millwright"); line != "" {
 		t.Errorf("the export carries [after_landing]: %q", line)
+	}
+
+	// The [test_parts.<rig>] tables of the rigs a Boost clones come out of the
+	// bootstrap's config_parts whole and in order, and a config.toml made of
+	// them is what config.TestParts reads (mw-gq6.592).
+	boost := t.TempDir()
+	script := bootstrapFunction(t, "rig_list") + "\n" + bootstrapFunction(t, "parts_table") + "\n" + bootstrapFunction(t, "config_parts") + "\nconfig_parts"
+	cmd := exec.Command("bash", "-c", script)
+	cmd.Env = append(os.Environ(), "TABLES_FILE="+file, "RIG_NAMES=lampas postern argus", "RIG=/rig")
+	parts, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("config_parts: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(boost, ".config", "mw"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(boost, ".config", "mw", "config.toml"), append([]byte("host = \"cloud1\"\n"), parts...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", boost)
+	got, err := mwconfig.TestParts()
+	if err != nil {
+		t.Fatalf("config.TestParts on the copied config: %v", err)
+	}
+	want := map[string][]mwconfig.TestPart{
+		"lampas": {
+			{Name: "install", Command: "npm ci --no-audit --no-fund"},
+			{Name: "vitest 2/2", Command: "TZ=UTC npx vitest run --shard 2/2"},
+			{Name: "vitest 1/2", Command: "TZ=UTC npx vitest run --shard 1/2"},
+		},
+		"postern": {{Name: "shots", Command: "npm run gate:shots"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("config.TestParts on the copied config = %+v, want %+v", got, want)
 	}
 
 	shown, err := exec.Command("git", "-C", vault, "show", "--name-only", "--format=", "HEAD").Output()

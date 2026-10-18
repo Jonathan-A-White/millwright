@@ -27,7 +27,7 @@ const (
 const boostConfigNoCure = "no cure: a person runs mw config export-boost on the home"
 
 // BoostConfig is the check, on the home, that the vault's
-// hosts/boost-config.toml holds the home's [tests] and [changed_specs] lines
+// hosts/boost-config.toml holds the home's [tests], [changed_specs] and [test_parts.<rig>] tables
 // alike (mw-gq6.456). contrib/boost-bootstrap.sh gives a new Boost its lines
 // from that file, so a rig's line the file lacks or holds differently gates
 // that rig on the next Boost with make test, or with the old command. A host
@@ -92,7 +92,7 @@ func (b *BoostConfig) probe(ctx context.Context) (application.Verdict, string) {
 	if err != nil {
 		return application.DoctorCannotTell, err.Error()
 	}
-	fix := fmt.Sprintf("run mw config export-boost (a Boost made now copies its [tests] and [changed_specs] lines from %s)", application.BoostConfigFile)
+	fix := fmt.Sprintf("run mw config export-boost (a Boost made now copies its [tests], [changed_specs] and [test_parts] tables from %s)", application.BoostConfigFile)
 	_, exists, err := b.Target.Read()
 	if err != nil {
 		return application.DoctorCannotTell, fmt.Sprintf("reading %s: %v", b.Target.Path(), err)
@@ -112,19 +112,19 @@ func (b *BoostConfig) probe(ctx context.Context) (application.Verdict, string) {
 		application.BoostConfigFile, b.Config.Path(), strings.Join(drift, ", "), fix)
 }
 
-// readBoostTables is the two tables of file.
+// readBoostTables is the tables of file a Boost copies.
 func readBoostTables(file application.ConfigFile) (domain.BoostTables, error) {
 	data, _, err := file.Read()
 	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", file.Path(), err)
+		return domain.BoostTables{}, fmt.Errorf("reading %s: %w", file.Path(), err)
 	}
 	parsed, err := domain.ParseConfigTOML(string(data))
 	if err != nil {
-		return nil, fmt.Errorf("%s does not parse as TOML: %w", file.Path(), err)
+		return domain.BoostTables{}, fmt.Errorf("%s does not parse as TOML: %w", file.Path(), err)
 	}
 	tables, err := domain.BoostTablesOf(parsed)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", file.Path(), err)
+		return domain.BoostTables{}, fmt.Errorf("%s: %w", file.Path(), err)
 	}
 	return tables, nil
 }

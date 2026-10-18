@@ -25,10 +25,11 @@
 #                 says which. This script's own checkout is only checked.
 #   9  config     ~/.config/mw/config.toml, if there is none: host, vault, cap, beads_sync = "auto",
 #                 beads_server_host, the [rigs] table, and a [tests] line for each rig (a [changed_specs] line
-#                 where there is one) copied from the vault's hosts/boost-config.toml, so mw next gates a rig
-#                 with its own tests and not with `make test`. In an existing one only the host line is
-#                 ever edited, set to BOOST_HOST (a snapshot carries the box it was made from's); what else
-#                 it lacks is said.
+#                 and a [test_parts.<rig>] table, which splits its gate into parts for mw check --part,
+#                 where there is one) copied from the vault's hosts/boost-config.toml, so mw next gates a
+#                 rig with its own tests and not with `make test`. In an existing one only the host line is
+#                 ever edited, set to BOOST_HOST (a snapshot carries the box it was made from's), and a
+#                 [test_parts.<rig>] table it lacks altogether is added at its end; what else it lacks is said.
 #  10  browsers   Playwright chromium and its system deps (root), at the version each cloned rig that depends
 #                 on @playwright/test has locked
 #  11  beads      ~/.config/mw/beads.env (mode 600): bd's BEADS_DOLT_* pointing at the home's beads server
@@ -644,9 +645,10 @@ s_rigs() {
 # What a rig's tests are is not the Boost's to know: the home's config.toml holds
 # a [tests] line per rig, and a Boost without them gates every rig with `make test`
 # (mw-gq6.453). The factory keeps those tables in the vault, in hosts/boost-config.toml
-# (a [tests] and a [changed_specs] table of one-line `rig = "command"` entries, written
-# from the home's config.toml by `mw config export-boost`, mw-gq6.456), and this step
-# copies the lines of the rigs it cloned.
+# (a [tests] and a [changed_specs] table of one-line `rig = "command"` entries, and a
+# [test_parts.<rig>] table of one-line `"part" = "command"` entries for a rig whose gate
+# is run in parts, written from the home's config.toml by `mw config export-boost`,
+# mw-gq6.456, mw-gq6.592), and this step copies the lines and tables of the rigs it cloned.
 TABLES_FILE=$BOOST_VAULT/hosts/boost-config.toml
 rig_list() { # millwright first, then BOOST_RIGS in order, one per line
 	echo millwright
@@ -671,6 +673,20 @@ config_table() { # <table>: a blank line, [table] and the lines of the rigs this
 	done
 	[ -z "$lines" ] || printf '\n[%s]\n%s' "$1" "$lines"
 }
+parts_table() { # <rig>: the vault file's [test_parts.<rig>] table as written, header first; empty if none
+	[ -f "$TABLES_FILE" ] || return 0
+	awk -v r="$1" '
+		/^[[:space:]]*\[/ { if (on) exit; on = ($0 == "[test_parts." r "]" || $0 == "[test_parts.\"" r "\"]"); if (on) print; next }
+		on && !/^[[:space:]]*(#.*)?$/ { print }
+	' "$TABLES_FILE"
+}
+config_parts() { # the [test_parts.<rig>] tables of the rigs this Boost has, each after a blank line
+	local rn table
+	for rn in $(rig_list); do
+		table=$(parts_table "$rn")
+		[ -z "$table" ] || printf '\n%s\n' "$table"
+	done
+}
 config_lines() { # the lines a config for this Boost holds, one per line: [rigs], then the tables
 	printf 'vault = "%s"\n' "$BOOST_VAULT"
 	printf 'host = "%s"\n' "$BOOST_HOST"
@@ -684,6 +700,7 @@ config_lines() { # the lines a config for this Boost holds, one per line: [rigs]
 	done
 	config_table tests
 	config_table changed_specs
+	config_parts
 }
 # config_host <file>: the host the config names, before its first table; empty if none.
 config_host() {
@@ -700,7 +717,7 @@ with_host() {
 	' "$1"
 }
 s_config() {
-	local want line rn now
+	local want line rn now table missing_parts
 	step config "$MW_DIR/config.toml"
 	want=$(config_lines)
 	# A rig the vault's file does not name is said, not guessed. millwright's own
@@ -722,13 +739,27 @@ s_config() {
 		elif act "set host = \"$BOOST_HOST\" in $MW_DIR/config.toml (it says ${now:-no host}; a snapshot carries the box it was made from's), every other line kept"; then
 			put "$(stat -c %a "$MW_DIR/config.toml")" "$MW_DIR/config.toml" "$(with_host "$MW_DIR/config.toml")"
 		fi
+		# A [test_parts.<rig>] table the config lacks altogether is added at its end, so a Boost made
+		# before a rig's gate was split into parts runs it in parts too; a table it has is never edited.
+		missing_parts=""
+		for rn in $(rig_list); do
+			table=$(parts_table "$rn")
+			[ -n "$table" ] || continue
+			grep -Fxq -- "$(printf '%s\n' "$table" | head -n 1)" "$MW_DIR/config.toml" || missing_parts="$missing_parts
+$table
+"
+		done
+		if [ -n "$missing_parts" ] && act "append the [test_parts.<rig>] tables the config lacks to $MW_DIR/config.toml, copied from $TABLES_FILE; no line in it is edited"; then
+			put "$(stat -c %a "$MW_DIR/config.toml")" "$MW_DIR/config.toml" "$(cat "$MW_DIR/config.toml")
+$missing_parts"
+		fi
 		while IFS= read -r line; do
 			case $line in '' | '['*) continue ;; esac
 			grep -Fxq -- "$line" "$MW_DIR/config.toml" || note "config.toml has no line: $line"
 		done <<EOF
 $want
 EOF
-	elif act "write $MW_DIR/config.toml (host $BOOST_HOST, cap $BOOST_CAP, beads_sync auto, $(echo "$want" | grep -c ' = "' || true) settings, [tests] and [changed_specs] lines from $TABLES_FILE)"; then
+	elif act "write $MW_DIR/config.toml (host $BOOST_HOST, cap $BOOST_CAP, beads_sync auto, $(echo "$want" | grep -c ' = "' || true) settings, [tests] and [changed_specs] lines and [test_parts.<rig>] tables from $TABLES_FILE)"; then
 		ensure_mw_dir
 		put 644 "$MW_DIR/config.toml" "$want"
 	fi
