@@ -145,6 +145,42 @@ Feature: mw retry
     And the story "mw-gq6.1" is open and unassigned
     And the story "mw-gq6.1" still records 1 attempt
 
+  # mw-gq6.597: a story stopped before mw next gave its claim back (mw-gq6.594's
+  # give-back did not reach it) is still claimed and nobody can close it; --hold
+  # gives the claim back and leaves the story held, never open, so no dispatch
+  # takes it and a plain bd close can finish it.
+
+  Scenario: A story stopped before its claim was given back is released and held, never open
+    Given the story "mw-gq6.1" was refused at pour: claimed and blocked, with no worktree or branch ever made
+    When mw retries "mw-gq6.1" with --hold
+    Then the retry succeeds
+    And the story "mw-gq6.1" is held and unassigned
+    And the claim of "mw-gq6.1" went from claimed to held in one write, never through open
+    And the story "mw-gq6.1" carries a comment saying it is held, not open
+    And the retry says "mw-gq6.1" is held and no dispatch tick takes it
+
+  Scenario: A held retry of a story with commits bundles its branch and holds it too
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the session of "mw-gq6.1" has ended
+    When mw retries "mw-gq6.1" with --hold
+    Then the retry succeeds
+    And the branch of "mw-gq6.1" was bundled into "runs/mw-gq6.1/attempt-1.bundle" in the vault, and it verifies
+    And the story "mw-gq6.1" is held and unassigned
+    And the story "mw-gq6.1" carries a comment saying it is held, not open
+
+  Scenario: A held retry of a story worked on another host holds it without reading a worktree
+    Given the story "mw-gq6.1" ran on the host "laptop" and is claimed there by "mw@laptop"
+    When mw retries "mw-gq6.1" with --hold
+    Then the retry succeeds
+    And the story "mw-gq6.1" is held and unassigned
+    And no worktree of "mw-gq6.1" was read or made here
+
+  Scenario: A retry without --hold still opens the story
+    Given the story "mw-gq6.1" was refused at pour: claimed and blocked, with no worktree or branch ever made
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And the story "mw-gq6.1" is open and unassigned
+
   # mw-2zh33g.1: a nudge to name the cause, never a block.
 
   Scenario: A story with no cause recorded is retried, and the retry reminds of mw cause

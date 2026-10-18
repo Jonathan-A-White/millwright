@@ -286,6 +286,68 @@ func TestRetryOfAStoryWithNoWorktreeReadsNothingAndGivesTheClaimBack(t *testing.
 	}
 }
 
+// TestRetryHoldGivesBackTheClaimOfAStoryStoppedBeforeItsClaimWasGivenBack pins
+// mw-gq6.597: a story mw next stopped before releaseOnStop gave its claim back
+// stays in_progress, claimed by its host. mw retry --hold gives that claim back
+// in one write that leaves the story held, never open, so no dispatch takes it.
+func TestRetryHoldGivesBackTheClaimOfAStoryStoppedBeforeItsClaimWasGivenBack(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	aRetryStory(t, tracker, "mw-gq6.1")
+	landing := &fakeRetryLanding{NoWorktree: true}
+	var out strings.Builder
+
+	retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out)
+	retry.Hold = true
+	report, err := retry.Run(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatalf("expected the retry to succeed, got: %v\n%s", err, out.String())
+	}
+	if !report.ClaimReleased || !report.Held {
+		t.Errorf("expected the claim given back and the story held, got %+v", report)
+	}
+	detail, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !detail.Held() || detail.Assignee != "" {
+		t.Errorf("expected the story held and unassigned, got status %q assignee %q", detail.Status, detail.Assignee)
+	}
+	for _, call := range tracker.Asked() {
+		if call == "ReleaseClaim" || call == "ReleaseClaimHeldBy" {
+			t.Errorf("the story was opened on its way to held (%s): %v", call, tracker.Asked())
+		}
+	}
+	if !strings.Contains(out.String(), "held, not open") {
+		t.Errorf("expected the report to say the story is held, not open, got %q", out.String())
+	}
+	said := strings.Join(tracker.Comments("mw-gq6.1"), "\n")
+	if !strings.Contains(said, "held, not open") || strings.Contains(said, "next dispatch tick takes it") {
+		t.Errorf("expected a comment saying it is held, not open, and none that a dispatch takes it, got %q", said)
+	}
+}
+
+// TestRetryHoldLeavesAHeldStoryWithNoClaimHeld is the retry run twice: the
+// story is held and unclaimed already, and --hold leaves it so.
+func TestRetryHoldLeavesAHeldStoryWithNoClaimHeld(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	aRetryStory(t, tracker, "mw-gq6.1")
+	landing := &fakeRetryLanding{NoWorktree: true}
+	retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &strings.Builder{})
+	retry.Hold = true
+	for i := 0; i < 2; i++ {
+		if _, err := retry.Run(context.Background(), "mw-gq6.1"); err != nil {
+			t.Fatalf("run %d: expected the retry to succeed, got: %v", i+1, err)
+		}
+	}
+	detail, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !detail.Held() || detail.Assignee != "" {
+		t.Errorf("expected the story held and unassigned, got status %q assignee %q", detail.Status, detail.Assignee)
+	}
+}
+
 func TestRetryThatFailsPartwayReportsOnlyWhatItDid(t *testing.T) {
 	tracker := apptest.NewFakeTracker()
 	aRetryStory(t, tracker, "mw-gq6.1")
