@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -462,6 +463,10 @@ type RecordVault interface {
 	Push(ctx context.Context) (int, error)
 }
 
+// ErrVaultNoUpstream is what VaultFiles' Push says of a vault whose branch
+// tracks no remote branch: nothing to push to, which is not a push that failed.
+var ErrVaultNoUpstream = errors.New("the vault's branch tracks no remote branch")
+
 // VaultCommitBound bounds a commit that is made once its files are written: long
 // enough for a local git commit on a loaded box, short enough that a git stuck on
 // a lock does not hold a stopped mw for ever.
@@ -488,9 +493,11 @@ func commitWritten(ctx context.Context, vault vaultCommitter, message string, pa
 // recordInVault commits exactly the files a verb wrote, under a message that
 // names the command and its subject, and pushes. A vault that holds someone
 // else's uncommitted change is not swept into the commit: only the paths are.
-// A commit that fails is an error, the files being written and not recorded; a
-// push that fails is said on warn and is not, the commit being kept for the
-// next sync to carry (mw-gq6.501).
+// A commit that fails is an error, the files being written and not recorded; so
+// is a push that fails after Push has rebased onto the remote and tried again
+// (mw-gq6.583), the commit being kept for the next sync to carry. A vault that
+// tracks no remote has nothing to push to: that is said on warn and is no error
+// (mw-gq6.501).
 func recordInVault(ctx context.Context, vault RecordVault, warn io.Writer, message string, paths []string) error {
 	if vault == nil {
 		return nil
@@ -502,8 +509,15 @@ func recordInVault(ctx context.Context, vault RecordVault, warn io.Writer, messa
 	if len(recorded) == 0 {
 		return nil
 	}
-	if _, err := vault.Push(ctx); err != nil && warn != nil {
-		fmt.Fprintf(warn, "%s: committed in the vault, not pushed (mw sync carries it): %v\n", message, err)
+	if _, err := vault.Push(ctx); err != nil {
+		said := fmt.Errorf("%s: committed in the vault, not pushed (mw sync carries it): %w", message, err)
+		if errors.Is(err, ErrVaultNoUpstream) {
+			if warn != nil {
+				fmt.Fprintln(warn, said)
+			}
+			return nil
+		}
+		return said
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package vault_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -721,5 +722,81 @@ func TestCommitDoesNotWaitOutAnyOtherFailure(t *testing.T) {
 	_, err := files.Commit(context.Background(), " ", []string{"runs/mw-gq6.554/result.json"})
 	if err == nil || time.Since(start) > 5*time.Second {
 		t.Fatalf("expected an immediate failure, got %v after %s", err, time.Since(start))
+	}
+}
+
+// A push the remote refuses because the other host got there first is rebased
+// onto what came in and tried again (mw-gq6.583).
+func TestPushRebasesOntoWhatTheRemoteGotMeanwhileAndTriesAgain(t *testing.T) {
+	here, there := twoHosts(t)
+	files := vault.New(here)
+
+	write(t, there, "seats/builder/other.md", "the other host's file\n")
+	run(t, there, "git", "add", "-A")
+	run(t, there, "git", "commit", "-qm", "The other host writes")
+	run(t, there, "git", "push", "-q")
+
+	write(t, here, "seats/builder/mine.md", "this host's file\n")
+	if _, err := files.Commit(context.Background(), "this host writes", []string{"seats/builder/mine.md"}); err != nil {
+		t.Fatalf("committing: %v", err)
+	}
+	pushed, err := files.Push(context.Background())
+	if err != nil {
+		t.Fatalf("pushing after the remote moved: %v", err)
+	}
+	if pushed != 1 {
+		t.Fatalf("expected the one commit pushed, got %d", pushed)
+	}
+	remote := strings.TrimSpace(run(t, here, "git", "rev-parse", "origin/main"))
+	if head := strings.TrimSpace(run(t, here, "git", "rev-parse", "HEAD")); remote != head {
+		t.Fatalf("the remote is at %s, the clone at %s", remote, head)
+	}
+	run(t, there, "git", "pull", "-q", "--rebase")
+	for _, name := range []string{"seats/builder/mine.md", "seats/builder/other.md"} {
+		if _, err := os.Stat(filepath.Join(there, name)); err != nil {
+			t.Errorf("the remote lacks %s: %v", name, err)
+		}
+	}
+}
+
+// A rebase that stops on a conflict is undone and the push says why it did not go.
+func TestPushThatCannotRebaseSaysSoAndLeavesTheCloneAsItWas(t *testing.T) {
+	here, there := twoHosts(t)
+	write(t, there, "seats/builder/same.md", "theirs\n")
+	run(t, there, "git", "add", "-A")
+	run(t, there, "git", "commit", "-qm", "The other host writes")
+	run(t, there, "git", "push", "-q")
+
+	write(t, here, "seats/builder/same.md", "mine\n")
+	files := vault.New(here)
+	if _, err := files.Commit(context.Background(), "this host writes", []string{"seats/builder/same.md"}); err != nil {
+		t.Fatalf("committing: %v", err)
+	}
+	before := strings.TrimSpace(run(t, here, "git", "rev-parse", "HEAD"))
+	if _, err := files.Push(context.Background()); err == nil {
+		t.Fatalf("expected the push to fail on a conflict")
+	}
+	if after := strings.TrimSpace(run(t, here, "git", "rev-parse", "HEAD")); after != before {
+		t.Fatalf("the clone moved from %s to %s", before, after)
+	}
+	if status := run(t, here, "git", "status", "--porcelain", "--untracked-files=no"); status != "" {
+		t.Fatalf("the clone is left mid-rebase: %s", status)
+	}
+}
+
+// A clone that tracks nothing is not a rejected push: the error names it.
+func TestPushOfACloneThatTracksNothingSaysItHasNoUpstream(t *testing.T) {
+	if _, err := exec.LookPath(vault.Git); err != nil {
+		t.Skipf("%s is not on PATH", vault.Git)
+	}
+	dir := t.TempDir()
+	run(t, dir, "git", "init", "-q", "-b", "main")
+	identify(t, dir)
+	write(t, dir, "a.md", "a\n")
+	run(t, dir, "git", "add", "-A")
+	run(t, dir, "git", "commit", "-qm", "first")
+	_, err := vault.New(dir).Push(context.Background())
+	if !errors.Is(err, application.ErrVaultNoUpstream) {
+		t.Fatalf("expected ErrVaultNoUpstream, got %v", err)
 	}
 }
