@@ -298,6 +298,28 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 		t.Fatalf("claiming %s again: %v", storyID, err)
 	}
 
+	// A claim given back to held (mw retry --hold, mw-gq6.597) is deferred and
+	// unassigned, in the one update, and is not ready for anyone.
+	claimed, err := gateway.ShowStory(ctx, storyID)
+	if err != nil {
+		t.Fatalf("reading who holds %s: %v", storyID, err)
+	}
+	if err := gateway.HoldClaimHeldBy(ctx, storyID, claimed.Assignee); err != nil {
+		t.Fatalf("giving back the claim on %s to held: %v", storyID, err)
+	}
+	if detail, err := gateway.ShowStory(ctx, storyID); err != nil || !detail.Held() || detail.Assignee != "" {
+		t.Fatalf("expected %s held and unassigned, got %+v: %v", storyID, detail, err)
+	}
+	if held, err := gateway.ReadyForHost(ctx, "vps"); err != nil || len(held) != 0 {
+		t.Fatalf("expected nothing ready once %s was held, got %+v: %v", storyID, held, err)
+	}
+	if err := gateway.ReleaseStory(ctx, storyID); err != nil {
+		t.Fatalf("letting %s through again: %v", storyID, err)
+	}
+	if err := gateway.ClaimStory(ctx, storyID); err != nil {
+		t.Fatalf("claiming %s once more: %v", storyID, err)
+	}
+
 	// What mw records on a dispatched story: run=running, with where it runs.
 	if err := gateway.SetStoryState(ctx, storyID, application.RunState, application.RunRunning,
 		"dispatched by the test"); err != nil {

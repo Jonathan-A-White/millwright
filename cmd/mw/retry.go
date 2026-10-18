@@ -18,9 +18,9 @@ import (
 // mw-gq6.92).
 func newRetryCmd() *cobra.Command {
 	var repathed string
-	var fromMain bool
+	var fromMain, hold bool
 	cmd := &cobra.Command{
-		Use:   "retry <story-id>",
+		Use:   "retry <story-id> [--hold]",
 		Short: "Recover a story after a refused landing, so the next dispatch tick tries it again",
 		Long: "retry is run on the story's own host once its session has ended — typically after `mw next`\n" +
 			"has refused its landing. In order, refusing at the first that does not hold: the session named\n" +
@@ -52,7 +52,11 @@ func newRetryCmd() *cobra.Command {
 			"next.retry_from_branch = false in the config file.\n\n" +
 			"An attempt keeps its branch when it left work, committed or found in the worktree (which retry\n" +
 			"commits), whatever ended it, unless mw next refused it for what its commits hold (a signed\n" +
-			"commit, a tracked binary) or --from-main was given; a branch with nothing ahead is deleted.",
+			"commit, a tracked binary) or --from-main was given; a branch with nothing ahead is deleted.\n\n" +
+			"--hold gives the claim back and leaves the story held, never open, in the one write: no dispatch\n" +
+			"tick can take it, and a plain bd close can finish it. It is for a story stopped before mw next\n" +
+			"gave its claim back, that is to be closed or looked at, not worked afresh; run it on the claiming\n" +
+			"host. mw release lets a held story through again.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := config.Vault()
@@ -104,6 +108,7 @@ func newRetryCmd() *cobra.Command {
 				Out:         cmd.OutOrStdout(),
 				RePathed:    repathed,
 				FromMain:    fromMain || !fromBranch,
+				Hold:        hold,
 			}.Run(cmd.Context(), args[0])
 			return err
 		},
@@ -112,5 +117,7 @@ func newRetryCmd() *cobra.Command {
 		"what changed since the Builder handed the story back: written as a RE-PATHED: comment, and lets the retry of a handed-back story go on")
 	cmd.Flags().BoolVar(&fromMain, "from-main", false,
 		"start the next attempt from the target, deleting the branch, rather than continuing the branch a refused or capped attempt left")
+	cmd.Flags().BoolVar(&hold, "hold", false,
+		"give the claim back and leave the story held, never open, so no dispatch tick takes it and a plain bd close can finish it")
 	return cmd
 }

@@ -178,6 +178,27 @@ func TestReleaseClaimHeldByNamesTheHolderAsTheGuard(t *testing.T) {
 	}
 }
 
+// HoldClaimHeldBy is that same guarded give-back with the story left deferred
+// (held) in the one update, never open (mw-gq6.597).
+func TestHoldClaimHeldByLeavesTheStoryDeferredInTheOneUpdate(t *testing.T) {
+	gateway, log := leaseStandIn(t, map[string]string{
+		"update": `[{"id": "t-1"}]`,
+	})
+	if err := gateway.HoldClaimHeldBy(context.Background(), "t-1", "mw@laptop"); err != nil {
+		t.Fatalf("holding: %v", err)
+	}
+	asked, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("reading what bd was asked: %v", err)
+	}
+	if want := "update t-1 --status deferred --assignee  --if-assignee mw@laptop"; !strings.Contains(string(asked), want) {
+		t.Fatalf("expected bd to be asked %q, got %q", want, asked)
+	}
+	if strings.Contains(string(asked), "--status open") {
+		t.Fatalf("the story was opened on its way to held: %q", asked)
+	}
+}
+
 // A claim removes every run:* label in the update that makes it, so that a
 // story an earlier attempt left run:blocked on is not shown refused before its
 // session starts (mw-gq6.258); the real bd's side of it is

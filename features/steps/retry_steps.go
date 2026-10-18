@@ -86,6 +86,11 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the vault cannot reach its origin$`, c.theVaultCannotReachItsOrigin)
 
 	ctx.When(`^mw retries "([^"]*)"$`, c.mwRetries)
+	ctx.When(`^mw retries "([^"]*)" with --hold$`, c.mwRetriesHolding)
+	ctx.Then(`^the story "([^"]*)" is held and unassigned$`, c.theStoryIsHeldAndUnassigned)
+	ctx.Then(`^the claim of "([^"]*)" went from claimed to held in one write, never through open$`, c.theClaimWentToHeldInOneWrite)
+	ctx.Then(`^the story "([^"]*)" carries a comment saying it is held, not open$`, c.theStoryCarriesTheHeldComment)
+	ctx.Then(`^the retry says "([^"]*)" is held and no dispatch tick takes it$`, c.theRetrySaysItIsHeld)
 	ctx.Given(`^the session of "([^"]*)" was stopped by the harness, saying: (.+)$`, c.theSessionsResultSaid)
 	ctx.Given(`^the session of "([^"]*)" ended in error, its result saying: (.+)$`, c.theSessionsResultSaid)
 	ctx.Given(`^the session of "([^"]*)" was stopped by the harness before it wrote a result, printing: (.+)$`, c.theSessionPrinted)
@@ -473,7 +478,12 @@ func (c *retryContext) theStoryRecordsRefunds(id string, want int) error {
 // mwRetries runs the use case the way mw retry does: the real worktrees, the
 // real landing and the real vault, with stand-ins only for the beads database
 // and the terminal.
-func (c *retryContext) mwRetries(id string) error {
+func (c *retryContext) mwRetries(id string) error { return c.retries(id, false) }
+
+// mwRetriesHolding is mw retry --hold.
+func (c *retryContext) mwRetriesHolding(id string) error { return c.retries(id, true) }
+
+func (c *retryContext) retries(id string, hold bool) error {
 	if c.commentsBefore == nil {
 		c.commentsBefore = map[string]int{}
 	}
@@ -493,6 +503,7 @@ func (c *retryContext) mwRetries(id string) error {
 		Notes:     c.tracker,
 		Now:       c.clock(),
 		Out:       &c.printed,
+		Hold:      hold,
 	}.Run(context.Background(), id)
 	return nil
 }
@@ -743,6 +754,54 @@ func (c *retryContext) theStoryIsOpenAndUnassigned(id string) error {
 	}
 	if detail.Assignee != "" {
 		return fmt.Errorf("expected %s to be unassigned, got %q", id, detail.Assignee)
+	}
+	return nil
+}
+
+// theStoryIsHeldAndUnassigned checks the story is held, not open, with nobody's claim on it.
+func (c *retryContext) theStoryIsHeldAndUnassigned(id string) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if !detail.Held() {
+		return fmt.Errorf("expected %s to be held, got %q", id, detail.Status)
+	}
+	if detail.Assignee != "" {
+		return fmt.Errorf("expected %s to be unassigned, got %q", id, detail.Assignee)
+	}
+	return nil
+}
+
+// theClaimWentToHeldInOneWrite checks no write opened the story on the way:
+// a dispatch tick between two writes would have taken it.
+func (c *retryContext) theClaimWentToHeldInOneWrite(string) error {
+	var held int
+	for _, call := range c.tracker.Asked() {
+		switch call {
+		case "ReleaseClaim", "ReleaseClaimHeldBy":
+			return fmt.Errorf("the story was opened by %s on its way to held; calls: %v", call, c.tracker.Asked())
+		case "HoldClaimHeldBy":
+			held++
+		}
+	}
+	if held != 1 {
+		return fmt.Errorf("expected one HoldClaimHeldBy, got %d; calls: %v", held, c.tracker.Asked())
+	}
+	return nil
+}
+
+func (c *retryContext) theStoryCarriesTheHeldComment(id string) error {
+	joined := strings.Join(c.tracker.Comments(id), "\n")
+	if !strings.Contains(joined, "held, not open") {
+		return fmt.Errorf("expected a comment on %s saying it is held, not open, got %q", id, c.tracker.Comments(id))
+	}
+	return nil
+}
+
+func (c *retryContext) theRetrySaysItIsHeld(id string) error {
+	if !c.report.Held || !strings.Contains(c.printed.String(), "held, not open") {
+		return fmt.Errorf("expected the report of %s to say it is held, not open, got %+v and %q", id, c.report, c.printed.String())
 	}
 	return nil
 }

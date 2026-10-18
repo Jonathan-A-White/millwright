@@ -248,6 +248,11 @@ type Retry struct {
 	// from the target. Without it, a branch that note names is kept for the
 	// next attempt to continue, its worktree taken away all the same.
 	FromMain bool
+
+	// Hold is mw retry --hold (mw-gq6.597): the claim is given back and the
+	// story left held, never open, so no dispatch takes it again. It is for a
+	// story that is to be closed, or looked at, not worked afresh.
+	Hold bool
 }
 
 // RetryReport is what one retry did, or why it changed nothing.
@@ -271,6 +276,10 @@ type RetryReport struct {
 	// unclaimed says the story was open with no claim at all when the retry read
 	// it (one a dispatch passed over), so there is none to give back.
 	unclaimed bool
+
+	// Held says the claim was given back and the story left held, not open,
+	// because Hold was asked.
+	Held bool
 
 	// RePathed says a RE-PATHED: comment was written on the story.
 	RePathed bool
@@ -453,7 +462,7 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	report.Hitl = detail.Hitl()
 	report.NoCause = detail.Cause == ""
 	report.refunded = detail.AttemptsRefunded
-	report.unclaimed = detail.Assignee == "" && detail.Status == StatusOpen
+	report.unclaimed = detail.Assignee == "" && (detail.Status == StatusOpen || (r.Hold && detail.Held()))
 	report.molecule = detail.Molecule.RootID
 
 	// Only the story's own attempts count (mw-gq6.450): one mw cause named
@@ -701,7 +710,7 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 		return report, fmt.Errorf("retrying %s: the worktree and branch are gone, but the claim could not be given back: %w",
 			storyID, err)
 	}
-	report.ClaimReleased = true
+	report.ClaimReleased, report.Held = true, r.Hold
 	if err := r.settleAttempts(ctx, &report, r.Host); err != nil {
 		return report, err
 	}
@@ -742,12 +751,34 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 				"The next dispatch tick takes it as %s.",
 			r.Host, attempt, storyID, report.Branch, report.Target, report.nextSaid(true))
 	}
+	if report.Held {
+		comment = r.heldComment(report, nothing)
+	}
 	comment += report.stopSaid() + report.formulaSaid()
 	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
 		return report, fmt.Errorf("retrying %s: it was retried, but the comment naming what happened could not be written: %w", storyID, err)
 	}
 
 	return report, nil
+}
+
+// heldComment is the comment of a --hold retry that read this host's worktree
+// (or found none): what became of the branch, then that the story is held.
+func (r Retry) heldComment(report RetryReport, nothing string) string {
+	var kept string
+	switch {
+	case report.NoWorktree:
+		kept = "without reading a worktree: " + nothing
+	case report.Bundled && report.BranchKept:
+		kept = fmt.Sprintf("after bundling branch %s at %s into %s (pushed to the vault as %s); the worktree is gone and the branch is kept",
+			report.Branch, shortCommit(report.BranchCommit), report.BundlePath, shortVaultCommit(report.VaultCommit))
+	case report.Bundled:
+		kept = fmt.Sprintf("after bundling branch %s at %s into %s (pushed to the vault as %s); the worktree and branch are gone",
+			report.Branch, shortCommit(report.BranchCommit), report.BundlePath, shortVaultCommit(report.VaultCommit))
+	default:
+		kept = fmt.Sprintf("after finding nothing to keep: %s had no commits ahead of %s; the worktree and branch are gone", report.Branch, report.Target)
+	}
+	return fmt.Sprintf("mw retry --hold on %s gave back the claim on attempt %d of %s %s. %s", r.Host, report.Attempt, report.StoryID, kept, heldSaid)
 }
 
 // closeFormula closes what the retried attempt left open of its formula, before
@@ -768,10 +799,20 @@ func (r Retry) closeFormula(ctx context.Context, report *RetryReport) {
 // the story. A story that was open with no claim has none to give back.
 func (r Retry) release(ctx context.Context, report RetryReport) error {
 	if report.unclaimed {
+		if r.Hold {
+			return r.Tracker.HoldStory(ctx, report.StoryID)
+		}
 		return nil
+	}
+	if r.Hold {
+		return r.Tracker.HoldClaimHeldBy(ctx, report.StoryID, report.holder)
 	}
 	return r.Tracker.ReleaseClaimHeldBy(ctx, report.StoryID, report.holder)
 }
+
+// heldSaid is what a --hold retry's comment says of the story: it is held, not
+// open, so no dispatch tick takes it until mw release lets it.
+const heldSaid = "The story is held, not open: no dispatch tick takes it until mw release lets it through, and a plain bd close can finish it."
 
 // rePathed writes the RE-PATHED: comment, when --repathed said what changed, so
 // that nothing holds the story back once it is open again (mw-gq6.418). It is
@@ -851,7 +892,7 @@ func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere strin
 	if err := r.release(ctx, report); err != nil {
 		return report, fmt.Errorf("retrying %s: the claim could not be given back: %w", storyID, err)
 	}
-	report.ClaimReleased = true
+	report.ClaimReleased, report.Held = true, r.Hold
 	if err := r.settleAttempts(ctx, &report, elsewhere); err != nil {
 		return report, err
 	}
@@ -861,6 +902,12 @@ func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere strin
 			"so its worktree and branch are left there, and the next dispatch on %s bundles whatever they hold before it cuts a fresh one. "+
 			"The story is open again and the next dispatch tick takes it as %s.",
 		r.Host, report.Attempt, storyID, elsewhere, elsewhere, report.nextSaid(true))
+	if report.Held {
+		comment = fmt.Sprintf(
+			"mw retry --hold on %s gave back the claim on attempt %d of %s without reading a worktree: the story was worked on %s, "+
+				"so its worktree and branch are left there. %s",
+			r.Host, report.Attempt, storyID, elsewhere, heldSaid)
+	}
 	comment += report.stopSaid() + report.formulaSaid()
 	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
 		return report, fmt.Errorf("retrying %s: the claim was given back, but the comment naming what happened could not be written: %w", storyID, err)
@@ -918,8 +965,7 @@ func (r RetryReport) String() string {
 		fmt.Fprintf(&b, "  there   the story was worked on %s; its worktree and branch are left there, not read from here\n", r.Elsewhere)
 		r.writeFormula(&b)
 		if r.ClaimReleased {
-			fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as %s\n", r.nextSaid(false))
-			r.writeHitl(&b)
+			r.writeOpen(&b)
 		}
 		return b.String()
 	}
@@ -952,10 +998,20 @@ func (r RetryReport) String() string {
 	}
 	r.writeFormula(&b)
 	if r.ClaimReleased {
-		fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as %s\n", r.nextSaid(false))
-		r.writeHitl(&b)
+		r.writeOpen(&b)
 	}
 	return b.String()
+}
+
+// writeOpen says what the claim's give-back left: the story open for the next
+// dispatch tick, or held when --hold asked for it.
+func (r RetryReport) writeOpen(b *strings.Builder) {
+	if r.Held {
+		fmt.Fprintf(b, "  held    the claim was given back; the story is held, not open: no dispatch tick takes it until mw release\n")
+		return
+	}
+	fmt.Fprintf(b, "  open    the claim was given back; the next dispatch tick takes it as %s\n", r.nextSaid(false))
+	r.writeHitl(b)
 }
 
 // formulaSaid is what a retry's comment adds of the formula it closed.

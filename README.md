@@ -1629,6 +1629,12 @@ attempt starts from the target, as before; `retry_from_branch = false` under
 `[next]` in the config file is the rollback for every story. See
 `features/retry_from_branch.feature`.
 
+`mw retry --hold` (mw-gq6.597) gives the claim back and leaves the story held,
+never open, in the one write, so no dispatch tick takes it and a plain `bd close`
+can finish it. It is for a story `mw next` stopped before it gave its claim back,
+that is to be closed or looked at, not worked afresh; run it on the claiming host.
+`mw release` lets a held story through again. See `features/retry.feature`.
+
 ## Running a rig's whole suite
 
 A story's gate runs the rig's `[tests]` command and only the e2e specs the

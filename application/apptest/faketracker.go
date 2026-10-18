@@ -1479,6 +1479,15 @@ func (f *FakeTracker) ReleaseClaimHeldBy(ctx context.Context, id, holder string)
 	return f.release(ctx, id, holder, "ReleaseClaimHeldBy")
 }
 
+// HoldClaimHeldBy implements application.WorkTracker: ReleaseClaimHeldBy that
+// leaves the story held, not open, in the one write.
+func (f *FakeTracker) HoldClaimHeldBy(ctx context.Context, id, holder string) error {
+	if holder == "" {
+		holder = f.me()
+	}
+	return f.release(ctx, id, holder, "HoldClaimHeldBy")
+}
+
 func (f *FakeTracker) release(_ context.Context, id, holder, noted string) error {
 	f.note(noted)
 	f.mu.Lock()
@@ -1499,7 +1508,9 @@ func (f *FakeTracker) release(_ context.Context, id, holder, noted string) error
 		if s.detail.Assignee != holder {
 			return fmt.Errorf("release %s: held by %q, not %s", id, s.detail.Assignee, holder)
 		}
-		if s.detail.Status == StatusInProgress {
+		if noted == "HoldClaimHeldBy" {
+			s.detail.Status = StatusDeferred
+		} else if s.detail.Status == StatusInProgress {
 			s.detail.Status = StatusOpen
 		}
 		s.detail.Assignee = ""

@@ -673,6 +673,12 @@ type WorkTracker interface {
 	// ReleaseClaim.
 	ReleaseClaimHeldBy(ctx context.Context, id, holder string) error
 
+	// HoldClaimHeldBy is ReleaseClaimHeldBy that leaves the story held
+	// (StatusHeld) rather than open, in the one write: no dispatcher can take
+	// the story between the give-back and the hold (mw-gq6.597). It is
+	// conditional on holder the same way.
+	HoldClaimHeldBy(ctx context.Context, id, holder string) error
+
 	// SetStoryState records one dimension of a story's operational state — what
 	// it is doing right now, as against what it is — with the reason it changed.
 	// A dispatched story is run=running.
