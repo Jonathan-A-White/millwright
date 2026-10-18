@@ -314,6 +314,11 @@ func (i PosternInbox) toApply(ctx context.Context, pass *moveHomePass, after int
 		if err != nil {
 			return nil, nil, 0, err
 		}
+		if len(mine) == 0 {
+			// Nothing to tell applied from not: the read of the applied notes is a
+			// call to the beads server on every pass of the follower (mw-gq6.596).
+			return mine, map[string]string{}, newest, nil
+		}
 		applied, err := i.appliedNotes(ctx)
 		return mine, applied, newest, err
 	}
