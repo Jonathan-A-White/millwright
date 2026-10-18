@@ -1378,6 +1378,9 @@ millwright = "make test"           # how a close-out asks this rig if it is gree
 [changed_specs]
 lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"  # run after the rig's tests on the tests/e2e/*.spec.ts files a story added or changed (default: nothing)
 
+[related_tests]
+lampas = "npm ci --no-audit --no-fund && TZ=UTC npx vitest related --run --passWithNoTests {files} && npm run typecheck && npm run lint && npm run build"  # the landing gate runs this in place of [tests], on the files a story changed (default: the whole [tests] line)
+
 [test_parts.lampas]                # optional: the rig's gate as parts, one table for a rig; see "A gate in parts" below (default: none)
 "lint"       = "npm run lint"      # each key is a part's name, each value its command line, run in the worktree, in the order written
 "vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"
@@ -1427,6 +1430,24 @@ says `{specs}`, and run it with `/bin/sh` in the worktree — and again on the
 merged result when merging made a merge commit. No such file, no run; a failing
 run refuses the landing as `tests-fail` (`merged-tests-fail` on the merged
 result), naming the specs. A rig the table does not name lands as it always did.
+
+A rig `[related_tests]` names has a shorter gate (mw-gq6.601): at the landing gate,
+`mw next` and `mw land` run that line in place of the rig's `[tests]` line, with
+`{files}` replaced by the files the branch added, copied, modified or renamed since
+its merge-base with the target branch (the diff `{specs}` is read from), each quoted
+for the shell. A batch is given the union of its stories' files; the version a
+landing raises is left out of them, since a test runner relates `package.json` to a
+great part of the tests. The same line is used wherever the gate runs the rig's
+tests for a landing: in the worktree, in the throwaway worktree where a batch rig's
+failure is run again with the target merged in, on a merged result, and on a batch
+after its fixer. A branch that only deleted files leaves nothing to name: the
+`[tests]` line is run, and `mw next` says so on stderr. `mw check`, `mw suite` and a
+rig the table does not name run the whole `[tests]` line, so the nightly suite
+(`mw suite <rig>`) still runs everything once a day. For vitest, end the line's test
+command with `--passWithNoTests`, so a story whose files no test is related to does
+not fail the gate for it. The way back is to delete the line. A Boost does not copy
+`[related_tests]` from `hosts/boost-config.toml`: it gates with `[tests]` unless its own
+config.toml names the line.
 
 A gate in parts (mw-gq6.567). A Builder's tool call is cut off after 590 seconds, and
 `mw check`'s whole-gate run, or a gate waited on in the background, can outrun that
