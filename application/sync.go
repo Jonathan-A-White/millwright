@@ -993,6 +993,19 @@ func (s Sync) levelBoostConfig(ctx context.Context, report *SyncReport) {
 // noteMwCommit leaves the commit of this host's mw for the other hosts to read.
 // It is best effort, like the counts of the timers: a note that cannot be
 // written costs the other host a reading and is not the sync's to fail.
+// noteTicks leaves this host's timers' counts as TicksKey, unless the note
+// there already says them (HostTicks.SaidBy). Best effort, as the counts are.
+func (s Sync) noteTicks(ctx context.Context) {
+	held := ReadHostTicks(ctx, s.Ticks)
+	if !held.Known() {
+		return
+	}
+	if kept, err := s.Tracker.Note(ctx, TicksKey(s.Host)); err == nil && held.SaidBy(ParseHostTicks(kept)) {
+		return
+	}
+	_ = s.Tracker.SetNote(ctx, TicksKey(s.Host), held.Note())
+}
+
 func (s Sync) noteMwCommit(ctx context.Context) {
 	if s.MwCommit != "" {
 		_ = s.Tracker.SetNote(ctx, MwCommitKey(s.Host), s.MwCommit)
@@ -1013,9 +1026,7 @@ func (s Sync) noteMwCommit(ctx context.Context) {
 func (s Sync) recordLevelInTheOneDatabase(ctx context.Context, report SyncReport) (SyncReport, error) {
 	at := s.now()
 	noteErr := s.Tracker.SetNote(ctx, LastSyncKey(s.Host), at.UTC().Format(LastSyncFormat))
-	if held := ReadHostTicks(ctx, s.Ticks); held.Known() {
-		_ = s.Tracker.SetNote(ctx, TicksKey(s.Host), held.Note())
-	}
+	s.noteTicks(ctx)
 	s.noteMwCommit(ctx)
 
 	if report.Mode == BeadsSyncShared {
@@ -1126,9 +1137,7 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 	// the next one carries fresher ones. They are best effort: a note that cannot
 	// be written costs the other host a reading, and must not cost this one its
 	// dispatch.
-	if held := ReadHostTicks(ctx, s.Ticks); held.Known() {
-		_ = s.Tracker.SetNote(ctx, TicksKey(s.Host), held.Note())
-	}
+	s.noteTicks(ctx)
 	s.noteMwCommit(ctx)
 
 	retried, err := s.syncTrackerMarking(ctx)

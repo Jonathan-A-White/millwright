@@ -218,6 +218,31 @@ func (h HostTicks) Note() string {
 	return strings.Join(parts, "; ")
 }
 
+// TicksNoteSlack is how far behind the last good runs a host's ticks note may
+// fall, while its counts are as they were, before a sync writes it again. The
+// time of a good run moves on with every tick, and a write each minute was a
+// bd, several new connections to the beads server, for a time mw status shows
+// as "last good" (mw-gq6.612); a failed run or a fault is written at once, and
+// the note of when the host was last level on every sync.
+const TicksNoteSlack = 10 * time.Minute
+
+// SaidBy reports whether kept, a ticks note read back, already says what h
+// does: the same timers with the same counts, and for each its last good run
+// no more than TicksNoteSlack behind h's.
+func (h HostTicks) SaidBy(kept HostTicks) bool {
+	for _, pair := range [][2]TickCount{{h.Dispatch, kept.Dispatch}, {h.Millhand, kept.Millhand}} {
+		now, then := pair[0], pair[1]
+		if now.Known != then.Known || now.Failed != then.Failed || now.Faults != then.Faults ||
+			now.LastGood.IsZero() != then.LastGood.IsZero() {
+			return false
+		}
+		if behind := now.LastGood.Sub(then.LastGood); behind < 0 || behind > TicksNoteSlack {
+			return false
+		}
+	}
+	return true
+}
+
 // ParseHostTicks reads a note back. A part that cannot be read is left out, so
 // that a note of some future shape is shown as far as it can be, and never as an
 // error.
