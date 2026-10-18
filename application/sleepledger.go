@@ -38,8 +38,26 @@ const (
 // it: what was predicted, what it cost, how it is measured, and, once measured,
 // the result and the verdict.
 type SleepLedgerEntry struct {
-	ID        string `json:"id"`
-	Filed     string `json:"filed,omitempty"`
+	ID    string `json:"id"`
+	Filed string `json:"filed,omitempty"`
+	// Title through Why are the idea as mw loop rank reads it (looprank.go):
+	// the Governor's criteria as fields. Bead is the story filed for the idea,
+	// empty while none is.
+	Title     string `json:"title,omitempty"`
+	Bead      string `json:"bead,omitempty"`
+	Expect    string `json:"expect,omitempty"`
+	Quality   string `json:"quality,omitempty"`
+	HisTime   string `json:"his_time,omitempty"`
+	Fuel      string `json:"fuel,omitempty"`
+	Speed     string `json:"speed,omitempty"`
+	Compounds *bool  `json:"compounds,omitempty"`
+	Size      string `json:"size,omitempty"`
+	Why       *struct {
+		Quality string `json:"quality,omitempty"`
+		HisTime string `json:"his_time,omitempty"`
+		Fuel    string `json:"fuel,omitempty"`
+		Speed   string `json:"speed,omitempty"`
+	} `json:"why,omitempty"`
 	Predicted struct {
 		Tokens  string `json:"tokens,omitempty"`
 		Speed   string `json:"speed,omitempty"`

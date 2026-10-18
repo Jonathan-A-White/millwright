@@ -673,6 +673,17 @@ in the window, then what `mw invest due` lists); IDEAS (entries of
 the parts as one object under `quality_speed_fuel`, `causes`, `errors`, `verdicts`,
 `ideas`, `share`.
 
+```sh
+bin/mw loop rank [--top N] [--json]
+```
+The unfiled ideas of `plans/improvements/ledger.jsonl` (no `bead`) in the order the weekly sitting files them
+from, a line each: rank, title, the four axes as arrows (`quality`, `his_time`, `fuel`, `speed`, each `up` ↑,
+`level` → or `down` ↓ for the expected effect, up better), `C` when it `compounds`, its `size` (XS to XL) and its
+`expect` line. Quality up comes first, then his time, fuel and speed (down last), then a compounding change, then the
+smallest size, then the ledger's own order. An idea missing a field, or whose Expect line `mw report` cannot read, is
+listed last as `unscored` with the field named. The sleep pass writes each idea with these fields in the `ideas` of its
+`recommendations.json`. `--top N` prints the first N; `--json` prints a list.
+
 ## The factory's investments
 
 ```sh

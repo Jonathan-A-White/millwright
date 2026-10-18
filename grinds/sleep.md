@@ -38,7 +38,7 @@ full dump only to place what moved.
 ## What you write (the answer's five parts)
 
 1. **recommendations**: a JSON object, as a string, shaped
-   `{"arc": "<his arc in one line>", "calls": [...], "stuck": [...], "investment_check": [...]}`.
+   `{"arc": "<his arc in one line>", "calls": [...], "stuck": [...], "investment_check": [...], "ideas": [...]}`.
    - `calls`: each priority change you recommend:
      `{"bead", "from", "to", "why", "evidence"}` (priority as `P0`..`P4`). Never
      recommend changing a priority with `his_priority: true`; if one looks stale,
@@ -54,6 +54,21 @@ full dump only to place what moved.
      investments: `{"rig", "cause", "count", "of", "open_investment", "verdict"}`
      where `verdict` is one of `covered`, `partly`, `uncovered` and, for
      `uncovered`, what investment would remove it.
+   - `ideas`: one record for every improvement you write in part 4, in the same
+     order, so that `mw loop rank` can order them by his criteria:
+     `{"title", "quality", "his_time", "fuel", "speed", "compounds", "size", "expect", "why"}`.
+     Give every field on every idea; one left out puts the idea last, unscored.
+     `quality`, `his_time`, `fuel` and `speed` are each `"up"`, `"level"` or
+     `"down"`: the effect you expect on that axis (quality: escaped bugs, refusals,
+     landings that do not do what they say; his_time: fewer cards and hand steps;
+     fuel: cost per landing; speed: dispatch to landing), where up is better.
+     `compounds` is `true` when the change is a shared library piece, a factory
+     command, a rule or a guard that removes a class of error, and `false` for a
+     one-off. `size` is `"XS"`, `"S"`, `"M"`, `"L"` or `"XL"`. `expect` is the
+     line the filed story will carry, `"Expect: <metric> up"` or
+     `"Expect: <metric> down"` with a metric of mw report, or
+     `"Expect: none, because <why>"`. `why` is an object with one line of why for
+     each of the four axes: `{"quality", "his_time", "fuel", "speed"}`.
 2. **questions**: markdown, at most five numbered questions for the Governor, each a
    one-line choice with your recommendation and the evidence. Only what you cannot
    decide under the principles.

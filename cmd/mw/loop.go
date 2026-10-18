@@ -18,7 +18,7 @@ func newLoopCmd() *cobra.Command {
 		Short: "The weekly improvement loop's reads",
 		Args:  cobra.NoArgs,
 	}
-	cmd.AddCommand(newLoopBriefCmd())
+	cmd.AddCommand(newLoopBriefCmd(), newLoopRankCmd())
 	return cmd
 }
 
@@ -67,6 +67,41 @@ func newLoopBriefCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&since, "since", "", "where the window starts: 7d, a day (2026-10-09) or a UTC time; 7d by default")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the six parts as one JSON object")
+	return cmd
+}
+
+// newLoopRankCmd builds `mw loop rank`: the unfiled ideas in the order the weekly sitting files them.
+func newLoopRankCmd() *cobra.Command {
+	var top int
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "rank [--top N] [--json]",
+		Short: "The improvements ledger's unfiled ideas, ordered by his criteria",
+		Long: "rank prints the ideas of plans/improvements/ledger.jsonl that have no bead filed, a line each: its\n" +
+			"rank, title, the four axes as arrows (quality, his_time, fuel, speed; ↑ up, → level, ↓ down), C\n" +
+			"when it compounds, its size and its Expect line. The order is quality up first, then his time,\n" +
+			"fuel and speed (each down last), then a compounding change before one that does not, then the\n" +
+			"smallest size, then the ledger's own order. An idea missing a field, or whose Expect line\n" +
+			"mw report cannot read, is listed last as unscored with the field named; none is dropped.\n" +
+			"--top N prints the first N; --json prints them as a list. It changes nothing.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if top < 0 {
+				return fmt.Errorf("--top %d: give a number of ideas, 1 or more", top)
+			}
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			here, err := config.Host()
+			if err != nil {
+				return err
+			}
+			return application.LoopRank{Vault: mwVault(dir, here), Top: top, JSON: asJSON, Out: cmd.OutOrStdout()}.Run(cmd.Context())
+		},
+	}
+	cmd.Flags().IntVar(&top, "top", 0, "print only the first N ideas")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print the ideas as a JSON list")
 	return cmd
 }
 
