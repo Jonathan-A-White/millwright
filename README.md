@@ -3000,8 +3000,18 @@ sunday_effort  = "xhigh"   # and effort (xhigh when left out)
 size of each part; it starts no agent, writes no file and mails nothing. `--model` and `--effort` replace the
 day's. `mw fuel [--days n]` adds up the tokens of the model passes that keep a run log in `runs/<kind>/` (the
 sleep pass, kind `sleep`, and the To do ranking, kind `todo-rank`) and prints a line for each kind, with how many
-passes ran on which model and effort. Not yet built: the improvements ledger and the 14-day outcome scoring
-(investments.md, section 6, slice b).
+passes ran on which model and effort.
+
+The pass's learning is kept in two places. `plans/improvements/ledger.jsonl` holds a line for each improvement the
+Mayor approved (`id`, `filed`, `predicted` {tokens, speed, quality}, `cost` {size, tokens}, `measure` {metric,
+baseline, window}, `landed`, `measured_at`, `result`, `verdict` keep or rollback, `lesson`); the Mayor writes it,
+and `mw sleep ledger` prints it, a line each, with PENDING for an improvement not yet measured.
+`mw sleep outcome <date>` scores the priority calls in `plans/sleep-<date>/recommendations.json` against the beads
+as they are now: a call is **held** when its bead landed, or is open and still where the pass put it; it is
+**thawed** when the pass iced it and it is open above the icebox, and **overridden** when the pass set a priority
+and another was set. It also counts the beads the Governor verified, prints "4 of 5 calls held" and the like, and
+keeps the score as `outcome.json` beside the pass's files. It is meant for a pass 14 days old; a younger one is
+scored all the same, with the day it is on. Filling the ledger's `result` from `mw report` is still the Mayor's.
 
 ## Saved prompts
 

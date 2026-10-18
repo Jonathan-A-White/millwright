@@ -118,3 +118,32 @@ func TestRunFilesListsAKindAndNothingForOneNotThere(t *testing.T) {
 		t.Fatalf("got %v (%v)", got, err)
 	}
 }
+
+func TestTheLedgerIsReadFromPlansImprovementsAndEmptyWhenThereIsNone(t *testing.T) {
+	dir := t.TempDir()
+	v := vault.New(dir)
+	ctx := context.Background()
+	if got, err := v.ReadImprovements(ctx); err != nil || got != "" {
+		t.Fatalf("ledger = %q (%v), want empty and no error", got, err)
+	}
+	put(t, dir, "plans/improvements/ledger.jsonl", `{"id":"I1"}`+"\n")
+	if got, err := v.ReadImprovements(ctx); err != nil || !strings.Contains(got, "I1") {
+		t.Fatalf("ledger = %q (%v)", got, err)
+	}
+}
+
+func TestAPlanFileIsReadAndANameOutsideThePlansIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	v := vault.New(dir)
+	ctx := context.Background()
+	put(t, dir, "plans/sleep-2026-10-01/recommendations.json", "[]")
+	if got, err := v.ReadPlanFile(ctx, "sleep-2026-10-01", "recommendations.json"); err != nil || got != "[]" {
+		t.Fatalf("plan file = %q (%v)", got, err)
+	}
+	if _, err := v.ReadPlanFile(ctx, "..", "x"); err == nil {
+		t.Fatal("a directory that reaches outside the vault was read")
+	}
+	if _, err := v.ReadPlanFile(ctx, "sleep-2026-10-02", "recommendations.json"); err == nil {
+		t.Fatal("a plan file that is not there was read")
+	}
+}

@@ -26,7 +26,7 @@ func newSleepCmd() *cobra.Command {
 		Use:   "sleep",
 		Short: "The sleep pass: priorities, maps and improvements written by one fresh agent",
 	}
-	cmd.AddCommand(newSleepPassCmd())
+	cmd.AddCommand(newSleepPassCmd(), newSleepLedgerCmd(), newSleepOutcomeCmd())
 	return cmd
 }
 
@@ -73,6 +73,56 @@ func newSleepPassCmd() *cobra.Command {
 	cmd.Flags().StringVar(&model, "model", "", "the agent's model, replacing the day's")
 	cmd.Flags().StringVar(&effort, "effort", "", "the agent's effort, replacing the day's")
 	return cmd
+}
+
+func newSleepLedgerCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "ledger",
+		Short: "Print the improvements ledger, a line an improvement with its verdict",
+		Long: "ledger prints plans/improvements/ledger.jsonl in the vault: one line for each improvement the\n" +
+			"Mayor approved, with when it was filed and landed, its measure, its result and its verdict\n" +
+			"(KEEP or ROLLBACK, PENDING until it is measured) and its lesson. It changes nothing.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			host, err := config.Host()
+			if err != nil {
+				return err
+			}
+			return application.SleepLedger{Vault: mwVault(dir, host), Out: cmd.OutOrStdout()}.Run(cmd.Context())
+		},
+	}
+}
+
+func newSleepOutcomeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "outcome <date>",
+		Short: "Score the priority calls of the sleep pass of a date against where the beads are now",
+		Long: "outcome reads plans/sleep-<date>/recommendations.json and says, of the pass's priority calls,\n" +
+			"how many held: the bead landed, or is open and still where the pass put it. A call is not held\n" +
+			"when the pass iced a bead and it was thawed, or set a priority and another was set (overridden).\n" +
+			"It also counts the beads the Governor verified. It is meant for a pass 14 days old; a younger\n" +
+			"one is scored all the same and the report says what day it is on. The score is kept as\n" +
+			"plans/sleep-<date>/outcome.json and committed in the vault. It changes no bead.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			host, err := config.Host()
+			if err != nil {
+				return err
+			}
+			_, err = application.SleepOutcome{
+				Vault: mwVault(dir, host), Beads: mwGateway(dir, host), Out: cmd.OutOrStdout(),
+			}.Run(cmd.Context(), args[0])
+			return err
+		},
+	}
 }
 
 // newSleepPass is the sleep pass as the configured vault and rigs run it.

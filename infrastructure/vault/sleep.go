@@ -29,6 +29,9 @@ var (
 	_ application.SleepRuns    = (*Vault)(nil)
 	_ application.SleepEarlier = (*Vault)(nil)
 	_ application.FuelRuns     = (*Vault)(nil)
+
+	_ application.SleepLedgerVault  = (*Vault)(nil)
+	_ application.SleepOutcomeVault = (*Vault)(nil)
 )
 
 // Principles implements application.SleepVault: plans/principles.md, else the
@@ -85,6 +88,35 @@ func (v *Vault) PutPlanFile(_ context.Context, dir, name, contents string) (stri
 		return "", fmt.Errorf("writing %s: %w", at, err)
 	}
 	return rel, nil
+}
+
+// ReadPlanFile implements application.SleepOutcomeVault: plans/<dir>/<name>.
+func (v *Vault) ReadPlanFile(_ context.Context, dir, name string) (string, error) {
+	if err := safeName("plans directory", dir); err != nil {
+		return "", err
+	}
+	if err := safeName("plan file", name); err != nil {
+		return "", err
+	}
+	text, err := os.ReadFile(filepath.Join(v.dir, plansDir, dir, name))
+	if err != nil {
+		return "", fmt.Errorf("reading plans/%s/%s: %w", dir, name, err)
+	}
+	return string(text), nil
+}
+
+// ReadImprovements implements application.SleepLedgerVault: the improvements ledger,
+// empty when the vault has none yet.
+func (v *Vault) ReadImprovements(_ context.Context) (string, error) {
+	rel := path.Join(plansDir, application.SleepLedgerDir, application.SleepLedgerFile)
+	text, err := os.ReadFile(filepath.Join(v.dir, filepath.FromSlash(rel)))
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", rel, err)
+	}
+	return string(text), nil
 }
 
 // RunFiles implements application.FuelRuns: the names in runs/<kind>/, sorted;
