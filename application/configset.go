@@ -161,7 +161,7 @@ type BoostConfigVault interface {
 
 // ConfigExportBoost rewrites the vault's hosts/boost-config.toml from the
 // home's config file: `mw config export-boost` (mw-gq6.456). It carries the
-// [tests] and [changed_specs] tables (domain.BoostTableNames) and nothing
+// [tests], [changed_specs] and [test_parts.<rig>] tables (domain.BoostTableNames) and nothing
 // else of the config, and commits that one file.
 type ConfigExportBoost struct {
 	// Config is the home's ~/.config/mw/config.toml.
@@ -215,7 +215,7 @@ func (e ConfigExportBoost) Run(ctx context.Context, dryRun bool) error {
 		fmt.Fprintf(e.Out, "%s is already level with %s: nothing to write\n", e.Target.Path(), e.Config.Path())
 		return nil
 	}
-	drift := domain.BoostTablesDrift(tables, nil)
+	drift := domain.BoostTablesDrift(tables, domain.BoostTables{})
 	if exists {
 		if was, err := domain.ParseConfigTOML(string(old)); err != nil {
 			drift = []string{fmt.Sprintf("the old file does not parse as TOML: %v", err)}
@@ -243,7 +243,7 @@ func (e ConfigExportBoost) Run(ctx context.Context, dryRun bool) error {
 	if err := e.Target.Write([]byte(text)); err != nil {
 		return fmt.Errorf("writing %s: %w", e.Target.Path(), err)
 	}
-	message := fmt.Sprintf("%s: [tests] and [changed_specs] from %s's config.toml (mw config export-boost)", BoostConfigFile, e.Host)
+	message := fmt.Sprintf("%s: [tests], [changed_specs] and [test_parts] from %s's config.toml (mw config export-boost)", BoostConfigFile, e.Host)
 	committed, err := commitWritten(ctx, e.Vault, message, []string{BoostConfigFile})
 	if err != nil {
 		return fmt.Errorf("%s is written but not committed: %w", e.Target.Path(), err)

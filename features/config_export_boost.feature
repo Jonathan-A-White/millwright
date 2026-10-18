@@ -1,6 +1,7 @@
 Feature: mw config export-boost writes the vault's hosts/boost-config.toml from the home's config
-  contrib/boost-bootstrap.sh gives a new Boost the [tests] and [changed_specs] lines of
-  the rigs it clones from the vault's hosts/boost-config.toml (mw-gq6.453). That file was
+  contrib/boost-bootstrap.sh gives a new Boost the [tests] and [changed_specs] lines and the
+  [test_parts.<rig>] tables (a rig's gate in parts, mw-gq6.592) of the rigs it clones from the
+  vault's hosts/boost-config.toml (mw-gq6.453). That file was
   kept in step with the home's ~/.config/mw/config.toml by hand, and a line added on the
   home and not in the file made the next Boost gate that rig with make test. `mw config
   export-boost`, run on the home, rewrites the file from the home's two tables, and
@@ -22,6 +23,11 @@ Feature: mw config export-boost writes the vault's hosts/boost-config.toml from 
       [changed_specs]
       lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"
 
+      [test_parts.lampas]
+      "install" = "npm ci --no-audit --no-fund"
+      "vitest 2/2" = "TZ=UTC npx vitest run --shard 2/2"
+      "vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"
+
       [after_landing]
       millwright = "make build"
 
@@ -29,7 +35,7 @@ Feature: mw config export-boost writes the vault's hosts/boost-config.toml from 
       postern = true
       """
 
-  Scenario: on the home it writes only [tests] and [changed_specs], and commits that file alone
+  Scenario: on the home it writes only [tests], [changed_specs] and [test_parts.<rig>], and commits that file alone
     Given the export runs on the home
     When mw config export-boost runs
     Then mw config export-boost succeeded
@@ -41,9 +47,15 @@ Feature: mw config export-boost writes the vault's hosts/boost-config.toml from 
 
       [changed_specs]
       lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"
+
+      [test_parts.lampas]
+      "install" = "npm ci --no-audit --no-fund"
+      "vitest 2/2" = "TZ=UTC npx vitest run --shard 2/2"
+      "vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"
       """
     And the export committed "hosts/boost-config.toml" and nothing else
     And mw config export-boost printed "[tests] argus: missing"
+    And mw config export-boost printed "[test_parts.lampas]: missing"
 
   Scenario: it names each line it brings level: missing, different and gone from the home
     Given the export runs on the home
@@ -59,7 +71,25 @@ Feature: mw config export-boost writes the vault's hosts/boost-config.toml from 
     And mw config export-boost printed "[tests] argus: differs"
     And mw config export-boost printed "[tests] legend: not on the home"
     And mw config export-boost printed "[changed_specs] lampas: missing"
+    And mw config export-boost printed "[test_parts.lampas]: missing"
     And mw config export-boost did not print "[tests] millwright"
+
+  Scenario: a rig's parts in a different order are a difference, and a table gone from the home is named
+    Given the export runs on the home
+    And the vault's hosts/boost-config.toml for the export holding:
+      """
+      [test_parts.lampas]
+      "vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"
+      "vitest 2/2" = "TZ=UTC npx vitest run --shard 2/2"
+      "install" = "npm ci --no-audit --no-fund"
+
+      [test_parts.postern]
+      "shots" = "npm run gate:shots"
+      """
+    When mw config export-boost runs
+    Then mw config export-boost succeeded
+    And mw config export-boost printed "[test_parts.lampas]: differs"
+    And mw config export-boost printed "[test_parts.postern]: not on the home"
 
   Scenario: a second export finds the file level, writes nothing and commits nothing
     Given the export runs on the home

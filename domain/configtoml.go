@@ -155,6 +155,35 @@ func (c *ConfigTOML) Table(name string) map[string]string {
 	return values
 }
 
+// TableEntries is every `key = value` of one table in the order the file has
+// them, the values as the file spells them; none when the table has no key.
+// Table gives the same by key, which loses the order a list of parts needs.
+func (c *ConfigTOML) TableEntries(name string) []TOMLEntry {
+	var entries []TOMLEntry
+	for _, st := range c.stmts {
+		if !st.header && st.table == name {
+			entries = append(entries, TOMLEntry{Key: st.key, Value: c.valueText(st)})
+		}
+	}
+	return entries
+}
+
+// TOMLEntry is one `key = value` of a table, the value as the file spells it.
+type TOMLEntry struct{ Key, Value string }
+
+// TableNames is the dotted name of every [table] header of the file, in order
+// (a [[table]] array is not one), for a reader that wants each table below a
+// prefix, as [test_parts.lampas] is below test_parts.
+func (c *ConfigTOML) TableNames() []string {
+	var names []string
+	for _, st := range c.stmts {
+		if st.header && !st.array {
+			names = append(names, st.table)
+		}
+	}
+	return names
+}
+
 // ArrayTables is every [[name]] entry of the file in order, each its keys to
 // the values as the file spells them, or nil when the file has none.
 func (c *ConfigTOML) ArrayTables(name string) []map[string]string {
