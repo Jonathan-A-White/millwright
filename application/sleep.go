@@ -189,7 +189,9 @@ type SleepResult struct {
 	// Dir is the plans directory, from the vault's root.
 	Dir string
 	// Files are the files written there, by name.
-	Files   []string
+	Files []string
+	// Folds is how many folds the pass proposed in folds.md.
+	Folds   int
 	Summary string
 	Fuel    Fuel
 }
@@ -222,29 +224,32 @@ type SleepRunLog struct {
 	Files []string          `json:"files,omitempty"`
 }
 
-// SleepSchema is the schema the agent answers in: the four files and the
+// SleepSchema is the schema the agent answers in: the five files and the
 // summary.
 const SleepSchema = `{
   "type": "object",
   "additionalProperties": false,
-  "required": ["recommendations", "questions", "maps", "improvements", "summary"],
+  "required": ["recommendations", "questions", "maps", "improvements", "folds", "summary"],
   "properties": {
     "recommendations": {"type": "string", "minLength": 2},
     "questions": {"type": "string", "minLength": 1},
     "maps": {"type": "string", "minLength": 1},
     "improvements": {"type": "string", "minLength": 1},
+    "folds": {"type": "string"},
     "summary": {"type": "string", "minLength": 1}
   }
 }`
 
 // sleepAnswer is the agent's answer: the contents of recommendations.json,
-// questions.md, maps.md and improvements.md, and the Mayor's summary.
+// questions.md, maps.md, improvements.md and folds.md, and the Mayor's summary.
 type sleepAnswer struct {
 	Recommendations string `json:"recommendations"`
 	Questions       string `json:"questions"`
 	Maps            string `json:"maps"`
 	Improvements    string `json:"improvements"`
-	Summary         string `json:"summary"`
+	// Folds is the proposed folds, each under a '## ' heading; empty when none.
+	Folds   string `json:"folds"`
+	Summary string `json:"summary"`
 }
 
 // SleepPass is mw sleep pass: one fresh agent given the principles and the
@@ -362,6 +367,8 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 		return result, errors.Join(fmt.Errorf("mw sleep pass: the agent's answer is refused, no plan was written (%s): %s", grind.Subtype, refused), logErr, commitErr)
 	}
 
+	foldsText, folds := sleepFolds(answer.Folds)
+	result.Folds = folds
 	plans := SleepPlansPrefix + window.Date
 	result.Dir = "plans/" + plans
 	files := []struct{ name, text string }{
@@ -369,6 +376,7 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 		{"questions.md", answer.Questions},
 		{"maps.md", answer.Maps},
 		{"improvements.md", answer.Improvements},
+		{"folds.md", foldsText},
 		{"summary.md", answer.Summary},
 	}
 	for _, part := range bundle {
@@ -392,7 +400,8 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 
 	// The whole mail is under 150 words, the pointer to the files included.
 	pointer := "Files: " + result.Dir + "/"
-	result.Summary = trimWords(answer.Summary, sleepSummaryWords-len(strings.Fields(pointer)))
+	foldLine := fmt.Sprintf("Folds proposed: %d.", folds)
+	result.Summary = trimWords(answer.Summary, sleepSummaryWords-len(strings.Fields(pointer))-len(strings.Fields(foldLine))) + "\n\n" + foldLine
 	var mailErr error
 	if p.Mailbox != nil {
 		_, mailErr = p.Mailbox.Send(ctx, NewMessage{
@@ -445,6 +454,24 @@ func withoutEmpty(paths []string) []string {
 		}
 	}
 	return kept
+}
+
+// sleepNoFolds is folds.md when the agent proposed no fold.
+const sleepNoFolds = "No fold proposed tonight.\n"
+
+// sleepFolds is the text of folds.md and the number of folds in it: one for
+// each '## ' heading. An empty part is the line that says none.
+func sleepFolds(text string) (string, int) {
+	if strings.TrimSpace(text) == "" {
+		return sleepNoFolds, 0
+	}
+	count := 0
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "## ") {
+			count++
+		}
+	}
+	return text, count
 }
 
 func passWord(deep bool) string {

@@ -3011,12 +3011,13 @@ fails is not tried again that day, for it costs fuel.
 The pass gathers a bundle, each part a file in the agent's working directory: the triage dump (`mw triage dump`)
 and what moved since the last one, the ready stories in dispatch's order with what holds the next ones back
 (`mw queue --json`), each rig's git log of the last 10 days, the sessions' results of the day aggregated by
-model, and `mw report --since 7d --json`. It starts one agent with `plans/principles.md` (else the newest
+model, `mw report --since 7d --json`, and `mw fold <rig>` for each rig with an open or held bug. It starts one agent with `plans/principles.md` (else the newest
 `plans/triage-<date>/principles.md`) and the rule in `grinds/sleep.md`, which also carries his two asks of
 2026-10-15: every ready story not started within 24 hours is listed with why it waits (files key, host, hold,
 smoke) and fixed or raised, and the top refusal causes of each rig are weighed against the open investments.
 The agent answers in a schema; mw writes, into `plans/sleep-<date>/` of the vault, `recommendations.json`,
-`questions.md`, `maps.md`, `improvements.md` (each improvement with a prediction on tokens, speed and quality,
+`questions.md`, `maps.md`, `folds.md` (the bug groups worth folding into one story, so piles are folded
+daily; the mail names how many), `improvements.md` (each improvement with a prediction on tokens, speed and quality,
 its cost, its measure and its rollback), `summary.md`, and the dump as `triage.jsonl` (tomorrow's diff starts
 from it), and commits them with the run log `runs/sleep/<date>.json`. It mails the Mayor the summary, at most
 150 words. An answer that misses a part, or whose recommendations are not JSON, is refused: no plan is

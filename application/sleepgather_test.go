@@ -68,6 +68,7 @@ func TestTheBundleHoldsTheDumpTheDiffTheQueueTheGitLogsTheRunsAndTheReport(t *te
 		"git-log.txt":     "## alpha\nabc123 a commit in /rigs/alpha",
 		"runs.txt":        "claude-sonnet-5-5: 1 sessions",
 		"report.txt":      "mw report --since 7d\n",
+		"folds.txt":       "no rig has an open or held bug",
 	} {
 		if got := parts[file].Text; !strings.Contains(got, want) {
 			t.Errorf("%s = %q, want it to hold %q", file, got, want)
@@ -78,6 +79,71 @@ func TestTheBundleHoldsTheDumpTheDiffTheQueueTheGitLogsTheRunsAndTheReport(t *te
 	}
 	if strings.Index(parts["git-log.txt"].Text, "## alpha") > strings.Index(parts["git-log.txt"].Text, "## zeta") {
 		t.Error("the rigs are not in name order")
+	}
+}
+
+func TestTheBundleHoldsTheFoldListOfEachRigWithAnOpenOrHeldBug(t *testing.T) {
+	g := gatherFixture()
+	g.Dump = func(_ context.Context, w io.Writer) error {
+		_, err := io.WriteString(w, strings.Join([]string{
+			`{"id":"lam-1","type":"bug","status":"open","rig":"lampas"}`,
+			`{"id":"lam-2","type":"bug","status":"open","rig":"lampas"}`,
+			`{"id":"lam-3","type":"task","status":"open","labels":["bug"],"rig":"lampas"}`,
+			`{"id":"lam-4","type":"bug","status":"deferred","rig":"lampas"}`,
+			`{"id":"cai-1","type":"bug","status":"closed","rig":"cairn"}`,
+			`{"id":"mw-a.1","type":"task","status":"open","rig":"millwright"}`,
+			`{"id":"fel-1","type":"bug","status":"deferred","rig":"fellowship"}`,
+		}, "\n")+"\n")
+		return err
+	}
+	var asked []string
+	g.Mw = func(_ context.Context, args ...string) (string, error) {
+		if args[0] == "fold" {
+			asked = append(asked, args[1])
+			return args[1] + ": 1 group of 3 or more\n\nscreen:Lampas Review (4)\n", nil
+		}
+		return "mw " + strings.Join(args, " ") + "\n", nil
+	}
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := partsByFile(bundle)[application.SleepFoldsFile]
+	if !strings.Contains(part.Text, "## lampas\nlampas: 1 group of 3 or more") || !strings.Contains(part.Text, "screen:Lampas Review (4)") {
+		t.Errorf("folds = %q, want lampas's mw fold list", part.Text)
+	}
+	if got := strings.Join(asked, ","); got != "fellowship,lampas" {
+		t.Errorf("mw fold was run for %q, want only the rigs with an open or held bug: fellowship,lampas", got)
+	}
+	if strings.Contains(part.Text, "cairn") || strings.Contains(part.Text, "millwright") {
+		t.Errorf("a rig with no open or held bug is in the folds: %q", part.Text)
+	}
+}
+
+func TestARigWithNoBugAddsNothingToTheFolds(t *testing.T) {
+	bundle, err := gatherFixture().Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := partsByFile(bundle)[application.SleepFoldsFile]
+	if strings.Contains(part.Text, "mw fold") || !strings.Contains(part.Text, "no rig has an open or held bug") {
+		t.Errorf("folds = %q, want no fold list and a line that says so", part.Text)
+	}
+}
+
+func TestAFoldListThatCannotBeReadIsSaidSoAndThePassGoesOn(t *testing.T) {
+	g := gatherFixture()
+	g.Dump = func(_ context.Context, w io.Writer) error {
+		_, err := io.WriteString(w, `{"id":"lam-1","type":"bug","status":"open","rig":"lampas"}`+"\n")
+		return err
+	}
+	g.Mw = func(context.Context, ...string) (string, error) { return "", errors.New("bd is busy") }
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := partsByFile(bundle)[application.SleepFoldsFile].Text; !strings.Contains(got, "## lampas\n(this part could not be read: bd is busy)") {
+		t.Errorf("folds = %q", got)
 	}
 }
 

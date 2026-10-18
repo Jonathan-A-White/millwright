@@ -20,6 +20,7 @@ const (
 	SleepGitFile    = "git-log.txt"
 	SleepRunsFile   = "runs.txt"
 	SleepReportFile = "report.txt"
+	SleepFoldsFile  = "folds.txt"
 )
 
 // sleepBudgets is the most bytes of each part of the bundle the agent is given:
@@ -33,11 +34,12 @@ var sleepBudgets = map[string]int{
 	SleepGitFile:    20_000,
 	SleepRunsFile:   4_000,
 	SleepReportFile: 24_000,
+	SleepFoldsFile:  12_000,
 }
 
 // SleepTotalBudget is the most bytes of the whole bundle: the sum of the parts'
 // budgets.
-const SleepTotalBudget = 132_000
+const SleepTotalBudget = 144_000
 
 // SleepBudgetOf is the most bytes of the part held in file.
 func SleepBudgetOf(file string) int { return sleepBudgets[file] }
@@ -113,7 +115,40 @@ func (g SleepGather) Gather(ctx context.Context, window SleepWindow) (SleepBundl
 	// The report's text form, which carries what the rule reads; its JSON is
 	// ten times the size (413 KB against 17 KB on 2026-10-16).
 	bundle = append(bundle, cutPart("report", SleepReportFile, g.said(g.Mw(ctx, "report", "--since", window.ReportSince()))))
+	bundle = append(bundle, cutPart("folds", SleepFoldsFile, g.folds(ctx, dump.String())))
 	return bundle, nil
+}
+
+// folds is mw fold's list of each rig that has an open or held bug, in the
+// rigs' name order: the groups of bugs the Mayor folds in the morning
+// (mw-gq6.607). A rig with no such bug adds nothing; a list that cannot be read
+// is said so under the rig's name.
+func (g SleepGather) folds(ctx context.Context, dump string) string {
+	lines, err := ReadTriageLines(strings.NewReader(dump))
+	if err != nil {
+		return fmt.Sprintf("(the dump could not be read for the bugs: %v)\n", err)
+	}
+	withBugs := map[string]bool{}
+	for _, l := range lines {
+		status := strings.ToLower(strings.TrimSpace(l.Status))
+		isBug := strings.EqualFold(l.Type, LabelBug) || hasLabel(l.Labels, LabelBug)
+		if isBug && l.Rig != "" && (status == StatusOpen || status == StatusHeld) {
+			withBugs[l.Rig] = true
+		}
+	}
+	if len(withBugs) == 0 {
+		return "(no rig has an open or held bug)\n"
+	}
+	rigs := make([]string, 0, len(withBugs))
+	for rig := range withBugs {
+		rigs = append(rigs, rig)
+	}
+	sort.Strings(rigs)
+	var out strings.Builder
+	for _, rig := range rigs {
+		out.WriteString("## " + rig + "\n" + withNewline(g.said(g.Mw(ctx, "fold", rig))) + "\n")
+	}
+	return out.String()
 }
 
 // cutPart is the part held in file, cut to its budget by lines.

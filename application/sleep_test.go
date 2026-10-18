@@ -93,6 +93,7 @@ const fixtureAnswer = `{
   "questions": "# Questions\n1. Keep Lampas polish in Later?\n",
   "maps": "# Maps\nFog lifted: none.\n",
   "improvements": "# Improvements\n## 1. Cut Lampas merge conflicts\nPrediction: tokens -10%.\n",
+  "folds": "# Folds\n## lampas: screen:Lampas Review\nBugs: lam-1, lam-2, lam-3. Size: S.\n## lampas: class:stale-cache\nBugs: lam-4, lam-5, lam-6. Shared: refreshCard.\n",
   "summary": "Tonight: one priority call, one question. Lampas merge conflicts are the top refusal cause."
 }`
 
@@ -237,7 +238,7 @@ func TestADryRunSaysEachPartAgainstItsBudgetAndWhichWereCut(t *testing.T) {
 		t.Fatal(err)
 	}
 	said := f.out.String()
-	for _, want := range []string{"bytes of 50,000", "bytes of 24,000", "bytes of 132,000", "CUT by mw", "cut by mw to fit"} {
+	for _, want := range []string{"bytes of 50,000", "bytes of 24,000", "bytes of 144,000", "CUT by mw", "cut by mw to fit"} {
 		if !strings.Contains(said, want) {
 			t.Errorf("the dry run did not say %q:\n%s", want, said[strings.Index(said, "--- bundle"):])
 		}
@@ -252,7 +253,7 @@ func TestARunOnAFixtureBundleWritesTheFilesAndMailsTheSummary(t *testing.T) {
 	}
 	dir := "sleep-2026-10-16"
 	want := []string{
-		dir + "/improvements.md", dir + "/maps.md", dir + "/questions.md",
+		dir + "/folds.md", dir + "/improvements.md", dir + "/maps.md", dir + "/questions.md",
 		dir + "/recommendations.json", dir + "/summary.md", dir + "/triage.jsonl",
 		"sleep/2026-10-16.json",
 	}
@@ -272,7 +273,7 @@ func TestARunOnAFixtureBundleWritesTheFilesAndMailsTheSummary(t *testing.T) {
 	if len(f.vault.commits) != 1 || strings.Join(f.vault.commits[0], ",") != "plans/"+dir+",runs/sleep/2026-10-16.json" {
 		t.Fatalf("commits = %v, want one, of the plans directory and the run log by their paths from the vault's root", f.vault.commits)
 	}
-	if result.Dir != "plans/"+dir || len(result.Files) != 6 {
+	if result.Dir != "plans/"+dir || len(result.Files) != 7 {
 		t.Errorf("result = %+v", result)
 	}
 
@@ -314,6 +315,45 @@ func TestTheRunLogCountsTheFuelUnderItsOwnKind(t *testing.T) {
 	}
 	if log.Model != "opus" || log.Effort != "medium" || log.Tokens.Total != 100000 || log.Outcome != application.SleepWritten {
 		t.Errorf("log = %+v", log)
+	}
+}
+
+func TestAFoldsPartIsWrittenAsFoldsMdAndTheSummaryNamesHowManyFolds(t *testing.T) {
+	f := newSleepFixture()
+	result, err := f.pass.Run(context.Background(), application.SleepOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := f.vault.files["sleep-2026-10-16/folds.md"]
+	if !strings.Contains(got, "lampas: screen:Lampas Review") || !strings.Contains(got, "refreshCard") {
+		t.Errorf("folds.md = %q", got)
+	}
+	inbox, _ := f.mailbox.Inbox(context.Background(), "mayor")
+	if !strings.Contains(inbox[0].Body, "Folds proposed: 2") || !strings.Contains(result.Summary, "Folds proposed: 2") {
+		t.Errorf("the summary does not name the two folds: %q", inbox[0].Body)
+	}
+	if n := len(strings.Fields(inbox[0].Body)); n > 150 {
+		t.Errorf("the mail is %d words, want at most 150", n)
+	}
+}
+
+func TestAnEmptyFoldsPartWritesAFoldsMdThatSaysNone(t *testing.T) {
+	for name, answer := range map[string]string{
+		"empty":   strings.Replace(fixtureAnswer, `"folds": "# Folds\n## lampas: screen:Lampas Review\nBugs: lam-1, lam-2, lam-3. Size: S.\n## lampas: class:stale-cache\nBugs: lam-4, lam-5, lam-6. Shared: refreshCard.\n"`, `"folds": ""`, 1),
+		"missing": strings.Replace(fixtureAnswer, `"folds"`, `"unrelated"`, 1),
+	} {
+		f := newSleepFixture()
+		f.grinder.Result.Answer = json.RawMessage(answer)
+		if _, err := f.pass.Run(context.Background(), application.SleepOptions{}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := f.vault.files["sleep-2026-10-16/folds.md"]; !strings.Contains(got, "No fold") {
+			t.Errorf("%s: folds.md = %q, want it to say none", name, got)
+		}
+		inbox, _ := f.mailbox.Inbox(context.Background(), "mayor")
+		if !strings.Contains(inbox[0].Body, "Folds proposed: 0") {
+			t.Errorf("%s: the summary does not say no fold: %q", name, inbox[0].Body)
+		}
 	}
 }
 
