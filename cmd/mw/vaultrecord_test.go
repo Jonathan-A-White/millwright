@@ -189,6 +189,33 @@ func TestMemorySupersedeAndMigrateCommitEveryFileTheyTouched(t *testing.T) {
 	}
 }
 
+// mw memory demote --question appends the question to eval.md and commits it
+// with the fact in one commit, leaving no tracked change (mw-gq6.574). The other
+// verbs that write a fact (retire, recheck, promote) commit their one file.
+func TestMemoryDemoteWithAQuestionCommitsEvalAndFactTogether(t *testing.T) {
+	vaultDir, _ := gitVaultWithRemote(t, true)
+	putFile(t, vaultDir, "seats/builder/rigs/demo/facts/old-fact.md",
+		"---\nstatus: current\nkind: gotcha\nsubject: clock\nsource: mw-a.1\nsince: 2026-10-01\n---\nan old sentence about clocks\n")
+	putFile(t, vaultDir, "seats/builder/rigs/demo/eval.md", "Q: something else\nexpect: other\n")
+	gitIn(t, vaultDir, "add", "-A")
+	gitIn(t, vaultDir, "commit", "-qm", "facts")
+	gitIn(t, vaultDir, "push", "-q")
+
+	before := gitIn(t, vaultDir, "rev-parse", "HEAD")
+	runMW(t, "memory", "demote", "demo", "old-fact", "--question", "old sentence clocks")
+	theCommitHolds(t, vaultDir, before,
+		"seats/builder/rigs/demo/eval.md", "seats/builder/rigs/demo/facts/old-fact.md")
+
+	before = gitIn(t, vaultDir, "rev-parse", "HEAD")
+	runMW(t, "memory", "promote", "demo", "old-fact")
+	theCommitHolds(t, vaultDir, before, "seats/builder/rigs/demo/facts/old-fact.md")
+	runMW(t, "memory", "recheck", "demo", "old-fact", "--why", "doubt")
+	runMW(t, "memory", "retire", "demo", "old-fact", "--reason", "gone")
+	if dirty := gitIn(t, vaultDir, "status", "--porcelain", "--untracked-files=all"); dirty != "" {
+		t.Errorf("the vault is left dirty:\n%s", dirty)
+	}
+}
+
 // mw invest add and mw invest outcome commit the investments ledger in the
 // step that writes it and push, so that a tracked ledger is never left for a
 // person to commit before dispatch will run (mw-gq6.502).

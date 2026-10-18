@@ -144,6 +144,9 @@ func (foldersOf) WriteRigFact(context.Context, string, string, string, string) (
 func (foldersOf) ReadRigEval(context.Context, string, string) (string, bool, error) {
 	return "", false, nil
 }
+func (foldersOf) WriteRigEval(context.Context, string, string, string) (string, error) {
+	return "", nil
+}
 
 func TestHasFactsFolderAndMemoryAddRefusalAgreeOnWhichRigsHaveOne(t *testing.T) {
 	ctx := context.Background()

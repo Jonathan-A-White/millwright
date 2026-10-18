@@ -22,6 +22,9 @@ func (q queryFiles) WriteRigFact(context.Context, string, string, string, string
 func (q queryFiles) ReadRigEval(context.Context, string, string) (string, bool, error) {
 	return "", false, nil
 }
+func (q queryFiles) WriteRigEval(context.Context, string, string, string) (string, error) {
+	return "", nil
+}
 
 // queryLog is the host's query log in memory.
 type queryLog struct {
@@ -173,5 +176,129 @@ func TestListSaysWhenANearFullRenderLeavesTheNewestFactsSearchOnly(t *testing.T)
 	}
 	if got := list(8000); strings.Contains(got, "search-only") {
 		t.Errorf("expected no line with room in the render:\n%s", got)
+	}
+}
+
+// editableFiles is a rig's facts and eval.md in memory that a verb can write.
+type editableFiles struct {
+	files map[string]string
+	eval  string
+	wrote []string
+}
+
+func (e *editableFiles) ReadRigFacts(context.Context, string, string) (string, map[string]string, bool, error) {
+	return "About.", e.files, true, nil
+}
+func (e *editableFiles) WriteRigFact(_ context.Context, _, _, slug, text string) (string, error) {
+	e.files[slug+".md"] = text
+	e.wrote = append(e.wrote, slug+".md")
+	return "/vault/" + slug + ".md", nil
+}
+func (e *editableFiles) ReadRigEval(context.Context, string, string) (string, bool, error) {
+	return e.eval, e.eval != "", nil
+}
+func (e *editableFiles) WriteRigEval(_ context.Context, _, _, text string) (string, error) {
+	e.eval = text
+	e.wrote = append(e.wrote, "eval.md")
+	return "/vault/eval.md", nil
+}
+
+// recordingVault notes each commit's message and paths.
+type recordingVault struct {
+	messages []string
+	paths    [][]string
+}
+
+func (r *recordingVault) Commit(_ context.Context, message string, paths []string) ([]string, error) {
+	r.messages = append(r.messages, message)
+	r.paths = append(r.paths, paths)
+	return paths, nil
+}
+func (r *recordingVault) Push(context.Context) (int, error) { return 1, nil }
+
+func anEditableMemory(files *editableFiles, vault *recordingVault, out *bytes.Buffer) application.Memory {
+	return application.Memory{
+		Files: files, Vault: vault, Seat: "builder", Out: out,
+		Now: func() time.Time { return time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC) },
+	}
+}
+
+func TestAddNamesACurrentFactNearTheNewOneAndStillWritesIt(t *testing.T) {
+	files := &editableFiles{files: map[string]string{
+		"window-open-noopener-returns-null.md": queryFact("window.open", "window.open with noopener always returns null, so test the popup by its URL."),
+		"bd-c.md":                              queryFact("bd", "Use -C with bd."),
+	}}
+	var out bytes.Buffer
+	m := anEditableMemory(files, &recordingVault{}, &out)
+	err := m.Add(context.Background(), application.MemoryAdd{
+		Rig: "kiln", Subject: "window.open", Source: "mw-2", Kind: application.FactGotcha,
+		Sentence: "A window.open with noopener in its features always returns null.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := files.files["a-windowopen-with-noopener-in.md"]; !ok {
+		t.Errorf("the fact was not written: %v", files.wrote)
+	}
+	if !strings.Contains(out.String(), "near: window-open-noopener-returns-null window.open with noopener") {
+		t.Errorf("expected a near line:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "near: bd-c") {
+		t.Errorf("a fact of another subject and other words is not near:\n%s", out.String())
+	}
+}
+
+func TestAddSaysNothingNearWhenNoCurrentFactIsClose(t *testing.T) {
+	retired := strings.Replace(queryFact("git", "Rebase before landing."), "status: current", "status: retired\nretired: 2026-10-01\nreason: old", 1)
+	files := &editableFiles{files: map[string]string{"old.md": retired}}
+	var out bytes.Buffer
+	err := anEditableMemory(files, &recordingVault{}, &out).Add(context.Background(), application.MemoryAdd{
+		Rig: "kiln", Subject: "git", Source: "mw-2", Kind: application.FactGotcha, Sentence: "Rebase before landing.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "near:") {
+		t.Errorf("a retired fact is not near:\n%s", out.String())
+	}
+}
+
+func demotable() *editableFiles {
+	return &editableFiles{
+		files: map[string]string{"gate.md": queryFact("gate", "The gate runs make test then make lint.")},
+		eval:  "Q: where is the tmux socket\nexpect: other\n",
+	}
+}
+
+func TestDemoteWithAQuestionAppendsItToTheEvalAndCommitsBothFilesTogether(t *testing.T) {
+	files, vault := demotable(), &recordingVault{}
+	var out bytes.Buffer
+	err := anEditableMemory(files, vault, &out).Demote(context.Background(), "kiln", "gate", "gate make lint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "Q: where is the tmux socket\nexpect: other\n\nQ: gate make lint\nexpect: gate\n"; files.eval != want {
+		t.Errorf("eval.md:\n%q\nwant\n%q", files.eval, want)
+	}
+	if !strings.Contains(files.files["gate.md"], "boot: no") {
+		t.Errorf("the fact is not demoted:\n%s", files.files["gate.md"])
+	}
+	if len(vault.paths) != 1 || len(vault.paths[0]) != 2 {
+		t.Fatalf("expected one commit of two files, got %v", vault.paths)
+	}
+	if got := strings.Join(vault.paths[0], " "); !strings.Contains(got, "eval.md") || !strings.Contains(got, "gate.md") {
+		t.Errorf("the commit lacks a file: %v", vault.paths[0])
+	}
+}
+
+func TestDemoteWithAQuestionThatDoesNotFindTheFactRefusesAndChangesNothing(t *testing.T) {
+	files, vault := demotable(), &recordingVault{}
+	before := files.eval
+	err := anEditableMemory(files, vault, &bytes.Buffer{}).Demote(context.Background(), "kiln", "gate", "unrelated words")
+	if err == nil || !strings.Contains(err.Error(), "no eval question finds gate") {
+		t.Fatalf("expected a refusal, got %v", err)
+	}
+	if files.eval != before || len(files.wrote) != 0 || len(vault.paths) != 0 {
+		t.Errorf("something changed: eval %q, wrote %v, commits %v", files.eval, files.wrote, vault.paths)
 	}
 }
