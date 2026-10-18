@@ -48,12 +48,29 @@ func (n Next) beginGate(ctx context.Context, c *closeOut, reading LoadReading) {
 	}
 }
 
-// timedChecks runs the rig's tests and adds how long they took to the gate.
-func (n Next) timedChecks(ctx context.Context, c *closeOut, dir string) (Checked, error) {
+// timedChecks runs the rig's tests and adds how long they took to the gate. A
+// rig that names a related-tests line (mw-gq6.601) is run that line in place of
+// its tests, given the files the span says changed; an empty span, a rig with no
+// line, and a branch with no file to give it run the rig's whole tests.
+func (n Next) timedChecks(ctx context.Context, c *closeOut, report *NextReport, dir string, span RelatedSpan) (Checked, error) {
 	started := n.now()
-	checked, err := n.Checks.Run(ctx, c.path.Rig, dir)
-	c.gate.seconds += n.now().Sub(started).Seconds()
-	return checked, err
+	defer func() { c.gate.seconds += n.now().Sub(started).Seconds() }()
+	if n.RelatedChecks != nil && span.Base != "" {
+		run, err := n.RelatedChecks.RunRelated(ctx, c.path.Rig, dir, span)
+		switch {
+		case err != nil:
+			return Checked{}, err
+		case run.Ran:
+			return run.Checked, nil
+		case run.NoFiles:
+			note := fmt.Sprintf("the rig %s names a related-tests line, but the branch left no file to run the related-tests line on, so its whole tests are run", c.path.Rig)
+			if n.Err != nil && !slices.Contains(report.Notes, note) {
+				fmt.Fprintf(n.Err, "mw next: %s\n", note)
+			}
+			report.Notes = appendNew(report.Notes, note)
+		}
+	}
+	return n.Checks.Run(ctx, c.path.Rig, dir)
 }
 
 // settle says what the last run of the gate came to, with the reading it was

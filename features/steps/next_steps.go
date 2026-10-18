@@ -75,8 +75,9 @@ type nextContext struct {
 	checkLoad    *apptest.FakeHostLoad       // the host's load as mw check reads it; nil reads none
 	sessionModes application.TranscriptModes // the permission mode the session ran in, as its transcript shows; nil shows none
 	specCommands map[string]string           // the [changed_specs] table this scenario's host has
-	gateParts    []application.GatePart       // the parts this scenario's host names the rig's gate as
-	partToCheck  int                          // the --part of the check being run, 0 for none
+	related      map[string]string           // the [related_tests] table this scenario's host has
+	gateParts    []application.GatePart      // the parts this scenario's host names the rig's gate as
+	partToCheck  int                         // the --part of the check being run, 0 for none
 	background   *backgroundChecks           // the checks a scenario started with --background
 	racer        string                      // the other host, landing work mid-push
 	refusal      []string                    // what the origin's hook says when it refuses a push
@@ -218,6 +219,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextUnionSteps(ctx, c)
 	registerNextMergeFixSteps(ctx, c)
 	registerNextSpecsSteps(ctx, c)
+	registerRelatedTestsSteps(ctx, c)
 	registerNextReattemptSteps(ctx, c)
 	registerRetryFromBranchSteps(ctx, c)
 	registerNextGiveBackSteps(ctx, c)
@@ -1028,6 +1030,13 @@ func (c *nextContext) nextUseCase() application.Next {
 		tracker, heartbeatWait = c.lease.watch(c.tracker), c.lease.wait
 	}
 
+	// Only mw next and mw land are given the related-tests line: mw check is
+	// built without it (features/steps/check_steps.go), as mw suite is.
+	var related application.RelatedChecks
+	if len(c.related) > 0 {
+		related = rig.NewChecks(rig.WithRelatedCommands(c.related))
+	}
+
 	return application.Next{
 		Tracker:       tracker,
 		HeartbeatWait: heartbeatWait,
@@ -1076,6 +1085,8 @@ func (c *nextContext) nextUseCase() application.Next {
 		Units:          c.unitRestarter(),
 		Stamps:         c.stamps,
 		Tester:         c.testerTrial(),
+
+		RelatedChecks: related,
 	}
 }
 

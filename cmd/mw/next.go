@@ -130,6 +130,10 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			relatedTests, err := config.RelatedTests()
+			if err != nil {
+				return err
+			}
 			afterLanding, err := config.AfterLanding()
 			if err != nil {
 				return err
@@ -232,16 +236,21 @@ func newNextCmd() *cobra.Command {
 				transcripts = claude.NewTranscripts(projects)
 				modes = claude.NewTranscripts(projects)
 			}
-			checks := rig.NewChecks(rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNice(nice), rig.WithJobs(jobs))
+			checks := rig.NewChecks(rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithRelatedCommands(relatedTests), rig.WithNice(nice), rig.WithJobs(jobs))
 			_, err = application.Next{
-				Tracker:     gateway,
-				Worktrees:   worktrees,
-				Landing:     worktrees,
-				Changes:     worktrees,
-				Errors:      files,
-				RigFacts:    files,
-				Checks:      checks,
-				SpecChecks:  checks,
+				Tracker:    gateway,
+				Worktrees:  worktrees,
+				Landing:    worktrees,
+				Changes:    worktrees,
+				Errors:     files,
+				RigFacts:   files,
+				Checks:     checks,
+				SpecChecks: checks,
+
+				// The landing gate runs the rig's related-tests line when it has
+				// one; mw check and mw suite are never given it (mw-gq6.601).
+				RelatedChecks: checks,
+
 				Load:        hostload.Proc{SwapSample: benchmarkSwapSample},
 				Slot:        rig.NewSlots(gateScaledSlotWait(vault.Benchmarks{Vault: files}, rigs, host, benchmarkLimits(bench))),
 				CrossSlot:   application.CrossSlot{Notes: gateway, Host: host},

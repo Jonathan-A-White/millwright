@@ -224,6 +224,7 @@ const (
 	TestsTable             = "tests"
 	AfterLandingTable      = "after_landing"
 	ChangedSpecsTable      = "changed_specs"
+	RelatedTestsTable      = "related_tests"
 	AfterLandingLimitTable = "after_landing_limit"
 	// HeavyNetTable names the rigs whose gate or close-out installs dependencies
 	// (npm ci, go mod download): `postern = true`. A story on one waits while the
@@ -2403,6 +2404,20 @@ func ChangedSpecs() (map[string]string, error) {
 		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
 	}
 	return tableIn(filepath.Join(home, File), ChangedSpecsTable)
+}
+
+// RelatedTests reports the line each rig's landing gate runs in place of its
+// tests, by rig name, read from the `[related_tests]` table of
+// ~/.config/mw/config.toml (mw-gq6.601): `lampas = "npm ci && npx vitest related
+// --run {files} && npm run build"`, where {files} is the files the story's
+// branch changed. A rig that says nothing has its whole tests run, and a machine
+// with no such table is not an error.
+func RelatedTests() (map[string]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	return tableIn(filepath.Join(home, File), RelatedTestsTable)
 }
 
 // AfterLanding reports the command each rig has run after a landing has moved

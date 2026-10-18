@@ -41,6 +41,7 @@ type Checks struct {
 	command  string
 	parts    map[string][]application.GatePart
 	specs    map[string]string
+	related  map[string]string
 	git      string
 	shell    string
 	nice     int
@@ -113,7 +114,7 @@ func WithJobs(n int) CheckOption {
 // NewChecks returns the checks of a rig whose tests are DefaultCommand, unless
 // an option says otherwise.
 func NewChecks(opts ...CheckOption) *Checks {
-	c := &Checks{commands: map[string]string{}, command: DefaultCommand, parts: map[string][]application.GatePart{}, specs: map[string]string{}, git: Program, shell: Shell}
+	c := &Checks{commands: map[string]string{}, command: DefaultCommand, parts: map[string][]application.GatePart{}, specs: map[string]string{}, related: map[string]string{}, git: Program, shell: Shell}
 	for _, opt := range opts {
 		opt(c)
 	}

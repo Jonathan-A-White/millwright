@@ -160,7 +160,7 @@ func checkFuelKnob(span, code string) error {
 		if !quoted(table) {
 			return fmt.Errorf("mw reads no [%s] table", table)
 		}
-		if words[1] == "<host>" {
+		if words[1] == "<host>" || words[1] == "<rig>" {
 			return nil
 		}
 		if !quoted(words[1]) {
