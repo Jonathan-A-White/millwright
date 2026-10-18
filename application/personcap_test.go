@@ -14,20 +14,52 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	posternhttp "github.com/Jonathan-A-White/millwright/infrastructure/postern"
 )
 
-// aPersonBackend is a fake postern backend answering GET /api/register/person:
-// every key in keys is one person's (dailyLimit limit), any other is unknown.
-// asked counts the lookups it answered.
-func aPersonBackend(t *testing.T, limit int, keys ...string) (url string, asked *atomic.Int32) {
+// aMillKey is a fresh key for the mill to sign with.
+func aMillKey(t *testing.T) *posternhttp.KeyFile {
+	t.Helper()
+	keys := posternhttp.New(t.TempDir() + "/mill.key")
+	if err := keys.Generate(); err != nil {
+		t.Fatal(err)
+	}
+	return keys
+}
+
+// aSigningBackend serves a fake postern backend: GET /api/challenge hands out a
+// nonce, and any other route is answered by next only when the call carries a
+// Postern2 Authorization header, else 401 as the backend does since postern 0.8.22.
+func aSigningBackend(t *testing.T, next http.HandlerFunc) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/challenge" {
+			_, _ = w.Write([]byte(`{"nonce":"nonce-1"}`))
+			return
+		}
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "Postern2 ") {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
+// aPersonBackend is a fake postern backend answering the signed GET
+// /api/register/person: every key in keys is one person's (dailyLimit limit),
+// any other is unknown. It refuses an unsigned call with 401. register is the
+// mill's signed lookup of it; asked counts the signed lookups it answered.
+func aPersonBackend(t *testing.T, limit int, keys ...string) (register application.PersonRegister, asked *atomic.Int32) {
 	t.Helper()
 	asked = &atomic.Int32{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		asked.Add(1)
+	url := aSigningBackend(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/register/person" {
 			http.NotFound(w, r)
 			return
 		}
+		asked.Add(1)
 		asker := r.URL.Query().Get("key")
 		for _, k := range keys {
 			if k == asker {
@@ -36,9 +68,15 @@ func aPersonBackend(t *testing.T, limit int, keys ...string) (url string, asked 
 			}
 		}
 		_, _ = w.Write([]byte(`{"known":false}`))
-	}))
-	t.Cleanup(server.Close)
-	return server.URL, asked
+	})
+	return posternhttp.NewHTTP(url, aMillKey(t)), asked
+}
+
+// aRegister is a PersonRegister answering with f.
+type aRegister func(ctx context.Context, key string) (application.Person, bool, error)
+
+func (f aRegister) RegisterPerson(ctx context.Context, key string) (application.Person, bool, error) {
+	return f(ctx, key)
 }
 
 // sentLines is n answered grist from key, sent earlier on the mill's day.
@@ -88,7 +126,7 @@ func (a *answers) first() application.GristAnswer {
 // B is refused on the next grist from either, with the daily-cap message; at 49
 // in all it passes.
 func TestPersonCapCountsEveryDeviceKeyOfAPersonTogether(t *testing.T) {
-	url, _ := aPersonBackend(t, 50, gristPhoneKey, gristStrangerKey)
+	register, _ := aPersonBackend(t, 50, gristPhoneKey, gristStrangerKey)
 	for name, tc := range map[string]struct {
 		fromA, fromB int
 		refused      bool
@@ -102,7 +140,7 @@ func TestPersonCapCountsEveryDeviceKeyOfAPersonTogether(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			// The home's own limit is 250: the person's 50 is what counts.
-			mill, got := aMillWithADay(t, application.NewPersonCap(url, &bytes.Buffer{}), 250,
+			mill, got := aMillWithADay(t, application.NewPersonCap(register, &bytes.Buffer{}), 250,
 				sentLines(gristPhoneKey, tc.fromA), sentLines(gristStrangerKey, tc.fromB))
 			if _, err := mill.Run(context.Background()); err != nil {
 				t.Fatal(err)
@@ -120,13 +158,13 @@ func TestPersonCapCountsEveryDeviceKeyOfAPersonTogether(t *testing.T) {
 
 // A key the backend does not know keeps the per-key rule at the home's limit.
 func TestPersonCapLeavesAnUnknownKeyAtTheHomesLimit(t *testing.T) {
-	url, asked := aPersonBackend(t, 50, gristStrangerKey) // the phone's key is nobody's
+	register, asked := aPersonBackend(t, 50, gristStrangerKey) // the phone's key is nobody's
 	for name, tc := range map[string]struct {
 		sent    int
 		refused bool
 	}{"60 sent is under 250": {60, false}, "249 sent": {249, false}, "250 sent": {250, true}} {
 		t.Run(name, func(t *testing.T) {
-			mill, got := aMillWithADay(t, application.NewPersonCap(url, &bytes.Buffer{}), 250, sentLines(gristPhoneKey, tc.sent))
+			mill, got := aMillWithADay(t, application.NewPersonCap(register, &bytes.Buffer{}), 250, sentLines(gristPhoneKey, tc.sent))
 			if _, err := mill.Run(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -154,16 +192,32 @@ func TestPersonCapFallsBackToThePerKeyRuleWhenTheBackendIsDown(t *testing.T) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
 	t.Cleanup(sick.Close)
+	// A backend that does not accept the mill's key, or one that is not the
+	// mill's to ask, answers the signed call 401 or 403.
+	refusing := func(code int) string {
+		return aSigningBackend(t, func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, `{"error":"refused"}`, code)
+		})
+	}
 
 	for name, persons := range map[string]func(log *bytes.Buffer) *application.PersonCap{
-		"unreachable": func(log *bytes.Buffer) *application.PersonCap { return application.NewPersonCap(goneURL, log) },
-		"an error":    func(log *bytes.Buffer) *application.PersonCap { return application.NewPersonCap(sick.URL, log) },
+		"unreachable": func(log *bytes.Buffer) *application.PersonCap {
+			return application.NewPersonCap(posternhttp.NewHTTP(goneURL, aMillKey(t)), log)
+		},
+		"an error": func(log *bytes.Buffer) *application.PersonCap {
+			return application.NewPersonCap(posternhttp.NewHTTP(sick.URL, aMillKey(t)), log)
+		},
+		"a 401 to the signed call": func(log *bytes.Buffer) *application.PersonCap {
+			return application.NewPersonCap(posternhttp.NewHTTP(refusing(http.StatusUnauthorized), aMillKey(t)), log)
+		},
+		"a 403 to the signed call": func(log *bytes.Buffer) *application.PersonCap {
+			return application.NewPersonCap(posternhttp.NewHTTP(refusing(http.StatusForbidden), aMillKey(t)), log)
+		},
 		"slow": func(log *bytes.Buffer) *application.PersonCap {
-			c := application.NewPersonCap("http://backend.invalid", log)
-			c.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				<-r.Context().Done() // the call is held to its timeout
-				return nil, r.Context().Err()
-			})}
+			c := application.NewPersonCap(aRegister(func(ctx context.Context, _ string) (application.Person, bool, error) {
+				<-ctx.Done() // the call is held to its timeout
+				return application.Person{}, false, ctx.Err()
+			}), log)
 			c.Timeout = 5 * time.Millisecond
 			return c
 		},
@@ -185,22 +239,41 @@ func TestPersonCapFallsBackToThePerKeyRuleWhenTheBackendIsDown(t *testing.T) {
 	}
 }
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+// The backend refuses an unsigned lookup, so a lookup that is not signed with
+// the mill's key never reaches the person: the signed one does.
+func TestPersonCapLookupIsSignedAndAnUnsignedOneIsRefused(t *testing.T) {
+	register, asked := aPersonBackend(t, 50, gristPhoneKey)
+	var log bytes.Buffer
+	person, known := application.NewPersonCap(register, &log).Lookup(context.Background(), gristPhoneKey)
+	if !known || person.DailyLimit != 50 || log.Len() != 0 {
+		t.Fatalf("expected the person at 50 with nothing said, got %+v %v %q", person, known, log.String())
+	}
+	if asked.Load() != 1 {
+		t.Fatalf("expected one signed lookup answered, got %d", asked.Load())
+	}
+	// The same route called plain, as the mill did before this fix, gets 401.
+	url := aSigningBackend(t, func(http.ResponseWriter, *http.Request) { t.Error("an unsigned call must not be answered") })
+	resp, err := http.Get(url + "/api/register/person?key=" + gristPhoneKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for an unsigned call, got %d", resp.StatusCode)
+	}
+}
 
 // The lookup is held to 2 seconds.
 func TestPersonCapAsksWithinTwoSeconds(t *testing.T) {
-	persons := application.NewPersonCap("http://backend.invalid", &bytes.Buffer{})
 	var held time.Duration
-	persons.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		deadline, ok := r.Context().Deadline()
+	persons := application.NewPersonCap(aRegister(func(ctx context.Context, _ string) (application.Person, bool, error) {
+		deadline, ok := ctx.Deadline()
 		if !ok {
-			return nil, errors.New("no deadline")
+			return application.Person{}, false, errors.New("no deadline")
 		}
 		held = time.Until(deadline)
-		return nil, errors.New("stop here")
-	})}
+		return application.Person{}, false, errors.New("stop here")
+	}), &bytes.Buffer{})
 	persons.Lookup(context.Background(), gristPhoneKey)
 	if held <= time.Second || held > 2*time.Second {
 		t.Fatalf("expected a deadline of 2 s, got %v", held)
@@ -209,9 +282,9 @@ func TestPersonCapAsksWithinTwoSeconds(t *testing.T) {
 
 // What the backend says about a key is kept 5 minutes, a stranger too.
 func TestPersonCapKeepsAnAnswerFiveMinutes(t *testing.T) {
-	url, asked := aPersonBackend(t, 50, gristPhoneKey)
+	register, asked := aPersonBackend(t, 50, gristPhoneKey)
 	now := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
-	persons := application.NewPersonCap(url, &bytes.Buffer{})
+	persons := application.NewPersonCap(register, &bytes.Buffer{})
 	persons.Now = func() time.Time { return now }
 
 	person, known := persons.Lookup(context.Background(), gristPhoneKey)
@@ -242,7 +315,7 @@ func TestPersonCapWarnsOncePerFailure(t *testing.T) {
 	gone.Close()
 	var log bytes.Buffer
 	now := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
-	persons := application.NewPersonCap(url, &log)
+	persons := application.NewPersonCap(posternhttp.NewHTTP(url, aMillKey(t)), &log)
 	persons.Now = func() time.Time { return now }
 	for range 3 {
 		if _, known := persons.Lookup(context.Background(), gristPhoneKey); known {

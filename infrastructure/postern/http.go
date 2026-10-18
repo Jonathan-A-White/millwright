@@ -30,6 +30,7 @@ var _ application.Postern = (*HTTP)(nil)
 var _ application.PosternStream = (*HTTP)(nil)
 var _ application.Prompts = (*HTTP)(nil)
 var _ application.IdeasOnlyReader = (*HTTP)(nil)
+var _ application.PersonRegister = (*HTTP)(nil)
 
 // httpTimeout bounds each call to the backend: it sits at the far end of a
 // WireGuard tunnel, and a broadcast waits on WhatsOnChain behind it.
@@ -399,6 +400,26 @@ func (h *HTTP) IdeasOnly(ctx context.Context, pubkey string) (application.IdeasO
 		now.Tz = body.Setting.Schedule.Tz
 	}
 	return now, nil
+}
+
+// RegisterPerson implements application.PersonRegister: GET
+// /api/register/person?key=<key>, the self-registered person a device key
+// belongs to. The route is Postern2-signed (postern 0.8.22) and answers the
+// mill's key, so the target is signed exactly as it is sent.
+func (h *HTTP) RegisterPerson(ctx context.Context, key string) (application.Person, bool, error) {
+	var body struct {
+		Known      bool     `json:"known"`
+		PersonID   string   `json:"personId"`
+		Keys       []string `json:"keys"`
+		DailyLimit int      `json:"dailyLimit"`
+	}
+	if err := h.authDo(ctx, http.MethodGet, "/api/register/person?key="+url.QueryEscape(key), nil, &body); err != nil {
+		return application.Person{}, false, err
+	}
+	if !body.Known {
+		return application.Person{}, false, nil
+	}
+	return application.Person{ID: body.PersonID, Keys: body.Keys, DailyLimit: body.DailyLimit}, true, nil
 }
 
 // authDo is do, proven to the backend first: it asks for a fresh challenge

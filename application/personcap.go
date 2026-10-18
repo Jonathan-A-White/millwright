@@ -2,12 +2,8 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
-	"strings"
 	"sync"
 	"time"
 )
@@ -33,17 +29,24 @@ type Person struct {
 	DailyLimit int
 }
 
+// PersonRegister is the postern backend's person lookup, signed by the mill's
+// own key: GET /api/register/person, which the backend answers only to a signed
+// call (postern 0.8.22). It reports the person the key belongs to, and whether
+// it belongs to one. postern.HTTP is the real implementation.
+type PersonRegister interface {
+	RegisterPerson(ctx context.Context, key string) (Person, bool, error)
+}
+
 // PersonCap asks the postern backend whether a sender key belongs to a
 // self-registered person, so the mill can count the day of all the person's
 // device keys together at the person's own cap. A key the backend does not know,
-// or a backend that cannot be reached, is no person: the mill's per-key rule
-// stands. It is safe for concurrent use; its answers are kept in memory.
+// or a backend that cannot be reached or refuses the mill, is no person: the
+// mill's per-key rule stands. It is safe for concurrent use; its answers are
+// kept in memory.
 type PersonCap struct {
-	// Backend is the postern backend's base URL.
-	Backend string
-	// Client makes the call; nil is http.DefaultClient. Timeout is how long it
-	// waits, zero PersonLookupTimeout.
-	Client  *http.Client
+	// Register makes the lookup.
+	Register PersonRegister
+	// Timeout is how long one lookup waits, zero PersonLookupTimeout.
 	Timeout time.Duration
 	// Now is the clock the kept answers age by; nil is time.Now.
 	Now func() time.Time
@@ -60,10 +63,9 @@ type personKept struct {
 	until  time.Time
 }
 
-// NewPersonCap is a PersonCap asking the backend at backend, saying its
-// failures on log.
-func NewPersonCap(backend string, log io.Writer) *PersonCap {
-	return &PersonCap{Backend: backend, Log: log}
+// NewPersonCap is a PersonCap asking register, saying its failures on log.
+func NewPersonCap(register PersonRegister, log io.Writer) *PersonCap {
+	return &PersonCap{Register: register, Log: log}
 }
 
 // Lookup reports the person the sender key belongs to, and whether it belongs
@@ -86,7 +88,7 @@ func (c *PersonCap) Lookup(ctx context.Context, key string) (Person, bool) {
 	if err != nil {
 		keep = PersonFailureKeepFor
 		if c.Log != nil {
-			fmt.Fprintf(c.Log, "mw grist: the person lookup at %s failed, so the daily limit counts each key alone for now: %v\n", c.Backend, err)
+			fmt.Fprintf(c.Log, "mw grist: the person lookup failed, so the daily limit counts each key alone for now: %v\n", err)
 		}
 	}
 	if c.kept == nil {
@@ -96,7 +98,7 @@ func (c *PersonCap) Lookup(ctx context.Context, key string) (Person, bool) {
 	return person, known
 }
 
-// ask makes the call: GET /api/register/person?key=<key>.
+// ask makes the call, held to the lookup timeout.
 func (c *PersonCap) ask(ctx context.Context, key string) (Person, bool, error) {
 	timeout := c.Timeout
 	if timeout <= 0 {
@@ -104,39 +106,14 @@ func (c *PersonCap) ask(ctx context.Context, key string) (Person, bool, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		strings.TrimRight(c.Backend, "/")+"/api/register/person?key="+url.QueryEscape(key), nil)
-	if err != nil {
+	person, known, err := c.Register.RegisterPerson(ctx, key)
+	if err != nil || !known {
 		return Person{}, false, err
 	}
-	client := c.Client
-	if client == nil {
-		client = http.DefaultClient
+	if person.DailyLimit <= 0 {
+		person.DailyLimit = DefaultGristDailyLimit
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return Person{}, false, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return Person{}, false, fmt.Errorf("the backend answered %s", resp.Status)
-	}
-	var said struct {
-		Known      bool     `json:"known"`
-		PersonID   string   `json:"personId"`
-		Keys       []string `json:"keys"`
-		DailyLimit int      `json:"dailyLimit"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&said); err != nil {
-		return Person{}, false, fmt.Errorf("reading the backend's answer: %w", err)
-	}
-	if !said.Known {
-		return Person{}, false, nil
-	}
-	if said.DailyLimit <= 0 {
-		said.DailyLimit = DefaultGristDailyLimit
-	}
-	return Person{ID: said.PersonID, Keys: said.Keys, DailyLimit: said.DailyLimit}, true, nil
+	return person, true, nil
 }
 
 // dailyCap says how many grist the sender may send today and whose fingerprints

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -797,5 +798,46 @@ func TestAnotherUnauthorizedReasonIsNotRetried(t *testing.T) {
 	}
 	if len(b.requests) != 2 {
 		t.Fatalf("expected one challenge and one signed request, got %d requests", len(b.requests))
+	}
+}
+
+// The person lookup is signed by the mill's key (postern 0.8.22): a challenge,
+// then GET /api/register/person with a Postern2 signature over the target
+// exactly as sent, the key's characters escaped.
+func TestRegisterPersonSignsTheTargetItSends(t *testing.T) {
+	keys, pubKeyHex := testKeyAndAddress(t)
+	const asked = "03ab+/=x y"
+	target := "/api/register/person?key=" + url.QueryEscape(asked)
+	b, backend := serveWithKeys(t, map[string]answer{
+		"GET " + target: {200, `{"known":true,"personId":"p1","keys":["k1","k2"],"dailyLimit":50}`},
+	}, keys)
+
+	person, known, err := backend.RegisterPerson(context.Background(), asked)
+	if err != nil {
+		t.Fatalf("looking the person up: %v", err)
+	}
+	if want := (application.Person{ID: "p1", Keys: []string{"k1", "k2"}, DailyLimit: 50}); !known || !reflect.DeepEqual(person, want) {
+		t.Fatalf("expected %+v known, got %+v %v", want, person, known)
+	}
+	if len(b.requests) != 2 {
+		t.Fatalf("expected a challenge request then the lookup, got %d", len(b.requests))
+	}
+	if b.requests[0].URL.Path != "/api/challenge" {
+		t.Fatalf("expected GET /api/challenge first, got %s", b.requests[0].URL.Path)
+	}
+	if got := b.requests[1].RequestURI; got != target {
+		t.Fatalf("expected the request target %q, got %q", target, got)
+	}
+	verifyPosternAuthorization(t, b.requests[1], b.bodies[1], pubKeyHex, b.issuedNonces[0])
+}
+
+// A key the backend does not know is no person, and no error.
+func TestRegisterPersonOfAStrangerIsUnknown(t *testing.T) {
+	_, backend := serve(t, map[string]answer{
+		"GET /api/register/person?key=02ff": {200, `{"known":false}`},
+	})
+	person, known, err := backend.RegisterPerson(context.Background(), "02ff")
+	if err != nil || known || !reflect.DeepEqual(person, application.Person{}) {
+		t.Fatalf("expected nobody and no error, got %+v %v %v", person, known, err)
 	}
 }

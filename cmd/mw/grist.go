@@ -660,11 +660,8 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 	// [grist] table turns person_cap off (mw-cvwm1u.6).
 	var persons *application.PersonCap
 	if ceilings.PersonCap {
-		base, err := config.PosternBackend()
-		if err != nil {
-			return application.GristGrind{}, err
-		}
-		persons = application.NewPersonCap(base, os.Stderr)
+		// The route is signed by the mill's own key, as the mill's other calls are.
+		persons = application.NewPersonCap(backend, os.Stderr)
 	}
 	return application.GristGrind{
 		Postern:      backend,
