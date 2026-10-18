@@ -224,6 +224,32 @@ func TestTheTriageDumpIsCompactedBeforeAnyBeadIsLeftOutAndTheWholeDumpIsKept(t *
 	}
 }
 
+func TestACompactedDumpCarriesHisPriorityForABeadLabelledSo(t *testing.T) {
+	g := gatherFixture()
+	var dump strings.Builder
+	for i := 0; i < 100; i++ {
+		labels := `["x"]`
+		if i == 7 {
+			labels = `["x","his-priority"]`
+		}
+		fmt.Fprintf(&dump, `{"id":"mw-a.%d","type":"task","status":"open","priority":2,"labels":%s,"his_priority":false,"description":"%s"}`+"\n", i, labels, strings.Repeat("d", 500))
+	}
+	g.Dump = func(_ context.Context, w io.Writer) error { _, err := io.WriteString(w, dump.String()); return err }
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := partsByFile(bundle)["triage.jsonl"]
+	if got := strings.Count(part.Text, `"his_priority":true`); got != 1 {
+		t.Errorf("the compacted dump marks %d beads his_priority, want only mw-a.7:\n%s", got, part.Text[:300])
+	}
+	for _, line := range strings.Split(part.Text, "\n") {
+		if strings.Contains(line, `"his_priority":true`) && !strings.Contains(line, `"id":"mw-a.7"`) {
+			t.Errorf("wrong bead marked: %s", line[:80])
+		}
+	}
+}
+
 func TestAMoreBusyRigDoesNotPushTheOthersOutOfTheGitLog(t *testing.T) {
 	g := liveSizedGather()
 	g.Git = func(_ context.Context, dir string, _ int) (string, error) {
