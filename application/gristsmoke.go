@@ -489,6 +489,10 @@ type GristSmokeRecord struct {
 	// record under GristLevelPrefix and joined to it when the records are read; a
 	// record with only this has no smoke yet (At is zero).
 	Behind string `json:"behind,omitempty"`
+	// Fixes are the open beads that name some failing example but not all, so that
+	// the failure still holds the rig yet each of them runs over the hold. Worked
+	// out when the records are read (Records), never kept.
+	Fixes []string `json:"-"`
 }
 
 // Held says the failure holds the stories of Rig: it failed, and its failing
@@ -518,8 +522,12 @@ func (r GristSmokeRecord) Line() string {
 		if r.Rig != "" {
 			held = "the open stories of " + r.Rig + " are held"
 		}
-		return fmt.Sprintf("grist smoke: %s FAILED %s (%s): %s. `mw grist smoke %s` that passes lifts the hold, or `mw grist smoke %s --lift`.",
+		line := fmt.Sprintf("grist smoke: %s FAILED %s (%s): %s. `mw grist smoke %s` that passes lifts the hold, or `mw grist smoke %s --lift`.",
 			r.App, r.At.UTC().Format("2006-01-02 15:04Z"), held, strings.Join(r.Failures, "; "), r.App, r.App)
+		if len(r.Fixes) > 0 {
+			line += " " + strings.Join(r.Fixes, ", ") + " runs over the hold, as it names a failing example."
+		}
+		return line
 	}
 	if len(r.NotRun) > 0 {
 		return fmt.Sprintf("grist smoke: %s not run %s: %s", r.App, r.At.UTC().Format("2006-01-02 15:04Z"), strings.Join(r.NotRun, "; "))
@@ -563,6 +571,25 @@ type GristSmokeHold struct {
 // the fix of one of the failing examples.
 func (h GristSmokeHold) Names(story []string) bool {
 	return slices.ContainsFunc(story, func(example string) bool { return slices.Contains(h.Examples, example) })
+}
+
+// Fix says why a story is the fix of the failure, and so is not held by it, and
+// is empty when it is not: it names a failing example in its SmokeExamplesField,
+// or, the bead filed as the cause having been filed without that, in its title or
+// description, as <app>/<kind>/<example>. A fix held behind the hold it is to
+// lift is the one story that can never end it (mw-gq6.579).
+func (h GristSmokeHold) Fix(detail StoryDetail) string {
+	for _, example := range detail.SmokeExamples {
+		if slices.Contains(h.Examples, example) {
+			return "it names the failing example " + example + " in its smoke_examples"
+		}
+	}
+	for _, example := range h.Examples {
+		if strings.Contains(detail.Story.Title, example) || strings.Contains(detail.Description, example) {
+			return "its title or description names the failing example " + example
+		}
+	}
+	return ""
 }
 
 // GristSmokeFiled is what the smoke asks the tracker: which failing examples an
@@ -794,7 +821,34 @@ func (b GristSmokeBook) Records(ctx context.Context) ([]GristSmokeRecord, error)
 		records[i].Behind = why
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].App < records[j].App })
+	b.markFixes(ctx, records)
 	return records, nil
+}
+
+// markFixes sets Fixes on each failed record that holds its rig: the open beads
+// that name some of its failing examples. A tracker that cannot be read names none.
+func (b GristSmokeBook) markFixes(ctx context.Context, records []GristSmokeRecord) {
+	if b.Filed == nil {
+		return
+	}
+	var named map[string]string
+	for i, r := range records {
+		if !r.Held() {
+			continue
+		}
+		if named == nil {
+			var err error
+			if named, err = b.Filed.FiledSmokeExamples(ctx); err != nil {
+				return
+			}
+		}
+		for _, example := range r.FailingExamples() {
+			if bead, ok := named[example]; ok && !slices.Contains(records[i].Fixes, bead) {
+				records[i].Fixes = append(records[i].Fixes, bead)
+			}
+		}
+		sort.Strings(records[i].Fixes)
+	}
 }
 
 // Holds implements GristSmokeHolds: a rig is held by the first of its failed
@@ -1006,10 +1060,25 @@ type GristSmokeFile struct {
 // value as it is now. An example is <kind>/<example> or <app>/<kind>/<example>;
 // the bead must be open.
 func (f GristSmokeFile) Run(ctx context.Context, bead, app string, examples []string) ([]string, error) {
-	if app == "" || len(examples) == 0 {
+	if app == "" {
 		return nil, errors.New("mw grist smoke --filed: name the app and at least one example, as <kind>/<example>")
 	}
 	var named []string
+	if len(examples) == 0 {
+		// No example named: the bead is the cause of the failure the app's last
+		// smoke found (mw-gq6.579).
+		var record GristSmokeRecord
+		ok := false
+		if f.Book.Notes != nil {
+			record, ok = f.Book.read(ctx, GristSmokePrefix+app)
+		}
+		if !ok || !record.Failed {
+			return nil, fmt.Errorf("mw grist smoke --filed: %s has no failing smoke to name, so name the examples as <kind>/<example>", app)
+		}
+		if named = record.FailingExamples(); len(named) == 0 {
+			return nil, fmt.Errorf("mw grist smoke --filed: the failure of %s is no example's, so there is none to name: name them as <kind>/<example>", app)
+		}
+	}
 	for _, example := range examples {
 		example = strings.TrimSpace(example)
 		switch parts := strings.Split(example, "/"); {

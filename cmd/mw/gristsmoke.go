@@ -127,7 +127,11 @@ func newGristSmokeCmd() *cobra.Command {
 			"  mw grist smoke lampas --filed mw-5r3p30.313 tutor/hello tutor/photo\n" +
 			"which sets the bead's smoke_examples metadata (comma-separated <app>/<kind>/<example>), and ends the\n" +
 			"hold of a failure it now names in full. The bead itself is never held by a failure it names, so the\n" +
-			"fix can run. Closing the bead ends it: the next failing smoke on those examples holds again.",
+			"fix can run. With no example, --filed names the examples the app's last smoke failed on:\n" +
+			"  mw grist smoke lampas --filed mw-5r3p30.582\n" +
+			"A held rig also runs an open story whose title or description names a failing example as\n" +
+			"<app>/<kind>/<example>; mw dispatch says it ran over the hold. Closing the bead ends it: the next\n" +
+			"failing smoke on those examples holds again.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if filed == "" && len(args) != 1 {
