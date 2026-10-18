@@ -15,7 +15,7 @@ The application/ files of each use case in [docs/codemap.md](codemap.md), which 
 | Seat* | application/seat{context,up,reap,handover}.go |
 | Talk*, TalkShow | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go |
 | Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go |
-| Secrets*, Google*, Contacts (mw contacts find), Hands*, Ask, Watch, Doctor | application/secrets.go, application/hands.go, application/ask.go, application/watch.go, application/doctor.go |
+| Secrets*, Google*, Contacts (mw contacts find), Hands*, Ask, Watch, Doctor | application/secrets.go, application/hands.go, application/ask.go, application/watch.go, application/doctor.go, application/starved.go |
 | SeatBoot{,Set}, SeatRead, Memory[Log], Errors, Init | application/seatboot.go, application/memory.go, application/memorymigrate.go, application/errors.go, application/init.go |
 | Postern*, Digest + Factory loop section (LoopSource) | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go, application/posternhand.go, application/posternmirror.go, application/digest.go |
 | Event* | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go |

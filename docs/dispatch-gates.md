@@ -88,3 +88,37 @@ already running, which are past every gate and end on their own; `harness-hold`,
 `handed-back` and `attempts-exhausted` read the story's own bead; `blocked` waits
 on a dependency a person filed. The false-hold guard is `mw release`'s, not
 dispatch's, and no smoke touches it.
+
+## The starved-rig alarm
+
+When a pass leaves a rig with ready stories passed over (the Governor's own
+excepted) and none running or started, the host's dispatch notes it in
+`host.<host>.starved`: the rig, when it was first so held, the hold and why. A
+rig held that way for over an hour (`application.StarvedAfter`) with a story
+ready and none running is an alarm: `mw doctor` (check `starved-rig`) mails the
+Mayor once per episode, and `mw status` prints the same line first under DAMPERS.
+It clears when a story of the rig starts. The hold is named from the gate that
+passed most of the rig's stories over, by `application.StarvedHolds`; a new gate
+is mapped there too, and a test says so.
+
+| Gate | Hold name |
+|-|-|
+| `hitl` | Governor's own story |
+| `no-path` | unreadable path |
+| `no-host` | no host |
+| `other-host` | another host (asleep?) |
+| `harness-hold` | harness stop |
+| `no-room` | no room |
+| `landed` | lost close |
+| `blocked` | blocked |
+| `rig-not-checked-out` | rig not checked out |
+| `smoke-hold` | smoke hold |
+| `metered-network` | metered network |
+| `formula-not-installed` | formula not installed |
+| `no-sweep` | no sweep |
+| `attempts-exhausted` | attempts exhausted |
+| `handed-back` | handed back |
+| `shared-files` | files overlap |
+| `testers-per-rig` | damper |
+| `cap` | cap |
+| `pour-refused` | pour refused |
