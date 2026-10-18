@@ -184,7 +184,7 @@ func TestDigestJobIsDueMondayAtElevenUTCAndNotBefore(t *testing.T) {
 			if _, due := job.Probe(ctx); due != c.due {
 				t.Fatalf("at %s the digest job is due = %v, want %v", c.name, due, c.due)
 			}
-			if err := job.Run(ctx); err != nil {
+			if err := madeOrPassedOver(job.Run(ctx)); err != nil {
 				t.Fatalf("running the job: %v", err)
 			}
 			if (sends == 1) != c.due {

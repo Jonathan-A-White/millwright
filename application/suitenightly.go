@@ -155,7 +155,10 @@ func (n *NightlySuite) due(ctx context.Context) ([]string, error) {
 func (n *NightlySuite) run(ctx context.Context) error {
 	due, err := n.due(ctx)
 	if len(due) == 0 {
-		return err
+		if err != nil {
+			return err
+		}
+		return SkippedPass("no suite run: no rig is due (none asks for it, each has today's result, or this host is not the home)")
 	}
 	day := n.now().Format("2006-01-02")
 	n.mu.Lock()

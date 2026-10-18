@@ -157,7 +157,7 @@ hours per job; the jobs of a shorter clock never do (mw-gq6.531). A pass cut sho
 follower is stopping (a landing of millwright restarts it onto the new build, ending the systemctl
 the pass waited on) is not failed: it is `done` with the detail `cut short by the follower
 stopping; run again when it is back`, and the first look of the follower that comes back runs it
-again, scheduled for `run again after the follower restarted`. The `batch-land` job's `mw land`
+again, scheduled for `run again after the follower restarted`. The once-a-day jobs (`sleep`, `todo-rank`, `digest`) mark their day begun before they run and take the mark back when a stop cut the pass short, so the run again makes the pass in full; a pass that ends having made nothing is `done` with the reason as its detail (`not made: the pass of 2026-10-17 was already begun`), never with none (mw-gq6.590). The `batch-land` job's `mw land`
 and the `suite` job's `mw suite` run in a process apart from the follower (a systemd scope of
 their own, state under `~/.local/state/mw/land` and `.../suite`), so a stop leaves them running:
 such a pass is `done` with the detail `the follower stopped while it waited; the work runs on

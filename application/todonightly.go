@@ -110,33 +110,45 @@ func (n *TodoNightly) Job() SpringJob {
 // begun today, and this is the home. The home is asked last, for it reads a file
 // in the vault.
 func (n *TodoNightly) due(ctx context.Context) bool {
+	return n.whyNotDue(ctx) == ""
+}
+
+// whyNotDue says in a few words why the pass is not to be made now, "" when it
+// is.
+func (n *TodoNightly) whyNotDue(ctx context.Context) string {
 	now := n.now().UTC()
 	if now.Hour() < n.Hour {
-		return false
+		return fmt.Sprintf("not made: it is before %02d:00Z", n.Hour)
 	}
 	day := now.Format(time.DateOnly)
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.tried == day {
-		return false
+		return "not made: the pass of " + day + " was already begun"
 	}
 	last, err := n.Notes.Note(ctx, TodoRankDayKey)
 	if err != nil {
 		n.say("mw events follow: reading the day of the last To do pass: %v\n", err)
-		return false
+		return "not made: reading the day of the last pass failed: " + firstLine(err.Error())
 	}
 	if strings.TrimSpace(last) == day {
 		n.tried = day
-		return false
+		return "not made: the pass of " + day + " was already begun"
 	}
 	at, err := n.Home(ctx)
-	return err == nil && at
+	if err != nil {
+		return "not made: asking whether this is the home failed: " + firstLine(err.Error())
+	}
+	if !at {
+		return "not made: this host is not the home"
+	}
+	return ""
 }
 
 // run makes the night's pass, then tells him of what it found.
 func (n *TodoNightly) run(ctx context.Context) error {
-	if !n.due(ctx) {
-		return nil
+	if why := n.whyNotDue(ctx); why != "" {
+		return SkippedPass(why)
 	}
 	day := n.now().UTC().Format(time.DateOnly)
 	n.mu.Lock()
@@ -145,10 +157,15 @@ func (n *TodoNightly) run(ctx context.Context) error {
 	if err := n.Notes.SetNote(ctx, TodoRankDayKey, day); err != nil {
 		return fmt.Errorf("marking the day of the To do pass: %w", err)
 	}
-	if err := n.Rank(ctx); err != nil {
-		return err
+	err := n.Rank(ctx)
+	if err == nil {
+		err = errors.Join(n.tellSlipped(ctx), n.weeklyLetGo(ctx))
 	}
-	return errors.Join(n.tellSlipped(ctx), n.weeklyLetGo(ctx))
+	return unmarkDayIfCutShort(ctx, n.Notes, TodoRankDayKey, err, func() {
+		n.mu.Lock()
+		n.tried = ""
+		n.mu.Unlock()
+	})
 }
 
 // tellSlipped posts, in the thread of each open card the pass marked slipped

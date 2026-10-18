@@ -577,31 +577,43 @@ func (n *SleepNightly) Job() SpringJob {
 // been begun today, and this is the home, asked last for it reads a file in
 // the vault.
 func (n *SleepNightly) due(ctx context.Context) bool {
+	return n.whyNotDue(ctx) == ""
+}
+
+// whyNotDue says in a few words why the pass is not to be made now, "" when it
+// is.
+func (n *SleepNightly) whyNotDue(ctx context.Context) string {
 	now := n.now()
 	if now.Hour() < n.Hour || (now.Hour() == n.Hour && now.Minute() < n.Minute) {
-		return false
+		return fmt.Sprintf("not made: it is before %02d:%02dZ", n.Hour, n.Minute)
 	}
 	day := now.Format(time.DateOnly)
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.tried == day {
-		return false
+		return "not made: the pass of " + day + " was already begun"
 	}
 	last, err := n.Notes.Note(ctx, SleepDayKey)
 	if err != nil {
-		return false
+		return "not made: reading the day of the last pass failed: " + firstLine(err.Error())
 	}
 	if strings.TrimSpace(last) == day {
 		n.tried = day
-		return false
+		return "not made: the pass of " + day + " was already begun"
 	}
 	at, err := n.Home(ctx)
-	return err == nil && at
+	if err != nil {
+		return "not made: asking whether this is the home failed: " + firstLine(err.Error())
+	}
+	if !at {
+		return "not made: this host is not the home"
+	}
+	return ""
 }
 
 func (n *SleepNightly) run(ctx context.Context) error {
-	if !n.due(ctx) {
-		return nil
+	if why := n.whyNotDue(ctx); why != "" {
+		return SkippedPass(why)
 	}
 	day := n.now().Format(time.DateOnly)
 	n.mu.Lock()
@@ -610,5 +622,9 @@ func (n *SleepNightly) run(ctx context.Context) error {
 	if err := n.Notes.SetNote(ctx, SleepDayKey, day); err != nil {
 		return fmt.Errorf("marking the day of the sleep pass: %w", err)
 	}
-	return n.Run(ctx)
+	return unmarkDayIfCutShort(ctx, n.Notes, SleepDayKey, n.Run(ctx), func() {
+		n.mu.Lock()
+		n.tried = ""
+		n.mu.Unlock()
+	})
 }
