@@ -325,7 +325,7 @@ carries the first three per host. It only reads.
 their `class:<slug>` label (`mw tester file --class`), else under the screen their title names (the words before
 the first `:` after the app name, as in `Lampas Review:`), the largest group first, only groups of `--min`
 (default 3) or more, each bug with its id and title. A bug a session is working is shown and marked `in progress:
-do not fold`; iced bugs are left out. It runs no model and writes nothing. The fold rule: a folded bug keeps its
+do not fold`; iced bugs and a story that is itself a fold (its title says `<screen> fold:` after the app) are left out. It runs no model and writes nothing. The fold rule: a folded bug keeps its
 own check in the shared fix's test and closes only when it passes (mw-gq6.588).
 
 A host has **room** for a story of any host, `auto` or named, only while its

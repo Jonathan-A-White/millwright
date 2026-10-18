@@ -77,6 +77,9 @@ func (f Fold) Run(ctx context.Context) (FoldReport, error) {
 		if !hasLabel(d.Labels, LabelBug) && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(d.Story.Title)), "[bug]") {
 			continue
 		}
+		if isFoldTitle(d.Story.Title, f.Rig) {
+			continue
+		}
 		report.Bugs++
 		key := foldKey(d, f.Rig)
 		if key == "" {
@@ -129,6 +132,14 @@ func (f Fold) print(report FoldReport) {
 		}
 	}
 	fmt.Fprintf(f.Out, "\n%s\n", FoldRule)
+}
+
+// isFoldTitle is true for a story that is itself a fold: the words after the
+// app name end in 'fold' before the colon ('[bug] lampas: Lampas fold: ...'). A
+// fold carries its folded bugs as blockers, so it is left out of the groups.
+func isFoldTitle(title, rig string) bool {
+	screen := strings.ToLower(titleScreen(title, rig))
+	return screen == "fold" || strings.HasSuffix(screen, " fold")
 }
 
 // foldKey is the key a bug is grouped by: its class:<slug> label, else the

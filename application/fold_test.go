@@ -146,3 +146,35 @@ func TestFoldNamesTheRuleAndAnEmptyResult(t *testing.T) {
 		t.Errorf("the fold rule is not stated: %q", application.FoldRule)
 	}
 }
+
+// A fold names itself '<screen> fold:' after the app, as 'Lampas fold' does; it
+// carries its folded bugs as blockers and is not a bug of their screen.
+func TestFoldLeavesOutAStoryThatIsItselfAFold(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-e", domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelSonnet, Effort: domain.EffortHigh, Host: "laptop", Formula: "tdd-feature"})
+	bug := func(id, title string) {
+		tracker.AddStory("mw-e", domain.Story{ID: id, Title: title})
+		if err := tracker.SetLabels(id, application.LabelBug); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bug("mw-e.1", "[bug] lampas: Lampas Review: card overflows")
+	bug("mw-e.2", "[bug] lampas: Lampas Review: score hidden")
+	bug("mw-e.3", "[bug] lampas: Lampas Review: stats clipped")
+	bug("mw-e.4", "[bug] lampas: Lampas Review fold: card, score and stats")
+	bug("mw-e.5", "Lampas fold: three more")
+	bug("mw-e.6", "[bug] lampas: Lampas fold: Review layout")
+	report, out := runFold(t, tracker, 3)
+	if len(report.Groups) != 1 {
+		t.Fatalf("expected one group, got %+v", report.Groups)
+	}
+	if got := strings.Join(groupIDs(report.Groups[0]), ","); got != "mw-e.1,mw-e.2,mw-e.3" {
+		t.Errorf("expected the three bugs and no fold, got %s", got)
+	}
+	if report.Bugs != 3 {
+		t.Errorf("a fold is not counted among the bugs, got %d", report.Bugs)
+	}
+	if strings.Contains(out, "fold:") || strings.Contains(out, "screen:Lampas fold") {
+		t.Errorf("output lists a fold:\n%s", out)
+	}
+}
