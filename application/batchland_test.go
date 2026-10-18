@@ -637,3 +637,80 @@ func TestABatchLineCountsTheFixerItsFuelAndBothGateRuns(t *testing.T) {
 		t.Fatalf("expected a batch held after its fixer to say held, with a fixer, got %+v", m)
 	}
 }
+
+// quietQueueTracker is a tracker that counts the work in hand it is asked for
+// and answers, in one cheap read, whether any story is queued for batch landing.
+type quietQueueTracker struct {
+	*apptest.FakeTracker
+	works  int
+	asks   int
+	failed error
+}
+
+func (q *quietQueueTracker) WorkInHand(ctx context.Context) (application.WorkInHand, error) {
+	q.works++
+	return q.FakeTracker.WorkInHand(ctx)
+}
+
+func (q *quietQueueTracker) AnyQueuedForBatch(ctx context.Context) (bool, error) {
+	q.asks++
+	if q.failed != nil {
+		return false, q.failed
+	}
+	work, err := q.FakeTracker.WorkInHand(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, d := range work.Running {
+		if application.QueuedForBatch(d) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// mw-gq6.600: the follower asks the batch-land job every pass whether a rig is
+// due, and each ask listed the work in hand: three bd and a bd show or more,
+// every few seconds, most of the beads server's connections. A tracker that can
+// say in one read that nothing is queued spares it the listing.
+func TestTheBatchLandProbeListsNoWorkWhileNothingIsQueued(t *testing.T) {
+	j := newLandingJob(t)
+	quiet := &quietQueueTracker{FakeTracker: j.tracker}
+	landings := &application.BatchLandings{
+		Rigs: map[string]string{"lampas": "/rigs/lampas"}, Rules: j.rules, Tracker: quiet,
+		Home: func(context.Context) (bool, error) { return true, nil },
+		Land: j.land, Notes: j.tracker, Host: "desktop",
+		Now: func() time.Time { return j.now },
+	}
+	job := landings.Job()
+	for i := 0; i < 50; i++ {
+		if reason, wanted := job.Probe(context.Background()); wanted {
+			t.Fatalf("probe %d: nothing is queued, yet the job wants to run: %s", i, reason)
+		}
+	}
+	if quiet.works != 0 || quiet.asks != 50 {
+		t.Fatalf("expected 50 cheap asks and no work in hand listed, got %d asks, %d listings", quiet.asks, quiet.works)
+	}
+
+	j.queued("lampas", "lp-1", 2)
+	if reason, wanted := job.Probe(context.Background()); !wanted || quiet.works != 1 {
+		t.Fatalf("expected a queued story to be read and the rig due, got %q, %v after %d listings", reason, wanted, quiet.works)
+	}
+}
+
+// A tracker that cannot answer the cheap ask does not hide a queue: the work in
+// hand is read, as it was.
+func TestTheBatchLandProbeListsTheWorkWhenTheCheapAskFails(t *testing.T) {
+	j := newLandingJob(t)
+	quiet := &quietQueueTracker{FakeTracker: j.tracker, failed: fmt.Errorf("no kept connection")}
+	landings := &application.BatchLandings{
+		Rigs: map[string]string{"lampas": "/rigs/lampas"}, Rules: j.rules, Tracker: quiet,
+		Home: func(context.Context) (bool, error) { return true, nil },
+		Land: j.land, Notes: j.tracker, Host: "desktop",
+		Now: func() time.Time { return j.now },
+	}
+	j.queued("lampas", "lp-1", 2)
+	if reason, wanted := landings.Job().Probe(context.Background()); !wanted || quiet.works != 1 {
+		t.Fatalf("expected the queue found by the work in hand, got %q, %v after %d listings", reason, wanted, quiet.works)
+	}
+}

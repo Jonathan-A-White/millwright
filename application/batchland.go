@@ -1148,6 +1148,15 @@ type BatchQueues interface {
 	WorkInHand(ctx context.Context) (WorkInHand, error)
 }
 
+// AnyQueuedForBatch is a tracker that can say, in one cheap read, whether any
+// story is queued for batch landing: the follower asks the batch-land job every
+// pass, and listing the work in hand each time was most of the connections the
+// beads server saw (mw-gq6.600). A tracker that is not one, or whose read
+// fails, is asked for the work in hand as before.
+type AnyQueuedForBatch interface {
+	AnyQueuedForBatch(ctx context.Context) (bool, error)
+}
+
 // BatchLandings is the follower's job that runs mw land on every rig of this
 // host whose queue is due, on the home only (plans/0117, Land Rush 4).
 //
@@ -1239,6 +1248,11 @@ type batchQueue struct {
 
 // queues reads the queue of every rig of this host that has one.
 func (b *BatchLandings) queues(ctx context.Context) (map[string]batchQueue, error) {
+	if asked, ok := b.Tracker.(AnyQueuedForBatch); ok {
+		if queued, err := asked.AnyQueuedForBatch(ctx); err == nil && !queued {
+			return map[string]batchQueue{}, nil
+		}
+	}
 	work, err := b.Tracker.WorkInHand(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reading the queued stories: %w", err)
