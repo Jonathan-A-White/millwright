@@ -20,8 +20,9 @@
 #      are each refused in one line, nothing changed
 #   e. the checkout mode (the script run from inside a rig) skips the clone
 #   f. config.toml gets a [tests] line for every rig it clones, and [changed_specs]
-#      where the vault's hosts/boost-config.toml has one, copied from that file;
-#      a rig that file does not name is said, not guessed (mw-gq6.453)
+#      where the vault's hosts/boost-config.toml has one, copied from that file, and
+#      a [test_parts.<rig>] table (the rig's gate in parts) likewise, in order; a
+#      rig that file does not name is said, not guessed (mw-gq6.453, mw-gq6.592)
 #   g. each cloned rig that depends on @playwright/test has chromium installed
 #      with its system deps, at that rig's own version; the step is planned in a
 #      dry run and skipped on a second run (mw-gq6.453)
@@ -250,6 +251,16 @@ lampas = "npm ci --no-audit --no-fund && TZ=UTC npm test"
 [changed_specs]
 postern = "npm run build && npx playwright test --project=shots {specs}"
 lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"
+
+[test_parts.lampas]
+"install" = "npm ci --no-audit --no-fund"
+"vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"
+
+[test_parts.postern]
+"install" = "npm ci --no-audit --no-fund"
+"vitest 2/2" = "TZ=UTC npx vitest run --shard 2/2"
+"shots" = "npm run gate:shots"
+"vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"
 EOF2
 # postern depends on @playwright/test, locked at 1.49.1; argus does not.
 POSTERN_TEMPLATE=$T/postern-template
@@ -424,6 +435,12 @@ for want in 'millwright = "make test"' \
 	sed -n '/^\[tests\]$/,/^$/p' "$CONF" | grep -Fxq "$want" || fail "$NAME: config.toml has no [tests] line: $want: $(cat "$CONF")"
 done
 sed -n '/^\[changed_specs\]$/,/^$/p' "$CONF" | grep -Fxq 'postern = "npm run build && npx playwright test --project=shots {specs}"' || fail "$NAME: config.toml has no [changed_specs] line for postern: $(cat "$CONF")"
+# f. [test_parts.<rig>] for a rig cloned, its lines in the vault file's order; none for a rig not cloned
+[ "$(sed -n '/^\[test_parts\.postern\]$/,/^$/p' "$CONF" | grep -v '^$')" = '[test_parts.postern]
+"install" = "npm ci --no-audit --no-fund"
+"vitest 2/2" = "TZ=UTC npx vitest run --shard 2/2"
+"shots" = "npm run gate:shots"
+"vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"' ] || fail "$NAME: config.toml has no [test_parts.postern] as the vault's file has it: $(cat "$CONF")"
 grep -Fq 'lampas' "$CONF" && fail "$NAME: config.toml names lampas, a rig that was not cloned: $(cat "$CONF")"
 # g. chromium, at the rig's own locked version, only where the rig depends on @playwright/test
 grep -F 'npx --yes playwright@1.49.1 install --with-deps chromium (in '"$HOME_DIR"'/postern)' "$CALLS" >/dev/null || fail "$NAME: no Playwright chromium install in postern at 1.49.1: $(grep npx "$CALLS")"
@@ -563,8 +580,8 @@ grep -F 'git clone' "$CALLS" | grep -Fq 'millwright.git' && fail "$NAME: it clon
 grep -Fq 'millwright = "'"$INRIG"'"' "$HOME_DIR/.config/mw/config.toml" || fail "$NAME: config.toml does not name $INRIG: $(cat "$HOME_DIR/.config/mw/config.toml")"
 echo "ok: $NAME"
 
-# --- f. an existing config.toml is never edited, and the lacking [tests] lines are said ----
-NAME="an existing config.toml without [tests] is left alone and the missing lines are named"
+# --- f. an existing config.toml keeps every line (only a lacking [test_parts] table is added), and the lacking [tests] lines are said ----
+NAME="an existing config.toml without [tests] keeps its lines, gets the missing [test_parts] table, and the missing lines are named"
 mkdir -p "$HOME_DIR/.config/mw"
 printf 'host = "cloud1"\n\n[rigs]\nargus = "%s/argus"\n' "$HOME_DIR" >"$HOME_DIR/.config/mw/config.toml"
 before_conf=$(cat "$HOME_DIR/.config/mw/config.toml")
@@ -573,8 +590,27 @@ OUT=$(env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELE
 	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$VAULT_TEMPLATE" POSTERNTEMPLATE="$POSTERN_TEMPLATE" ORIGINS="$ORIGINS" OTHERTEMPLATE="$OTHER_TEMPLATE" \
 	bash "$INRIG/contrib/boost-bootstrap.sh" --env-file "$ENVFILE" 2>&1) || RC=$?
 [ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
-[ "$(cat "$HOME_DIR/.config/mw/config.toml")" = "$before_conf" ] || fail "$NAME: config.toml was edited"
+after_conf=$(cat "$HOME_DIR/.config/mw/config.toml")
+case $after_conf in "$before_conf"*) ;; *) fail "$NAME: a line of config.toml was edited: $after_conf" ;; esac
+[ "${after_conf#"$before_conf"}" = '
+
+[test_parts.postern]
+"install" = "npm ci --no-audit --no-fund"
+"vitest 2/2" = "TZ=UTC npx vitest run --shard 2/2"
+"shots" = "npm run gate:shots"
+"vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"' ] || fail "$NAME: config.toml got more than postern's [test_parts] table at its end: $after_conf"
 printf '%s\n' "$OUT" | grep -Fq 'config.toml has no line: argus = "npm ci' || fail "$NAME: the missing [tests] line for argus is not named: $OUT"
+echo "ok: $NAME"
+
+NAME="a second run on that config adds nothing more, and a [test_parts] table it has is not edited"
+sed -i 's/^"shots" = .*/"shots" = "npm run mine"/' "$HOME_DIR/.config/mw/config.toml"
+before_conf=$(cat "$HOME_DIR/.config/mw/config.toml")
+RC=0
+OUT=$(env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELEASE="$T/os-release" \
+	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$VAULT_TEMPLATE" POSTERNTEMPLATE="$POSTERN_TEMPLATE" ORIGINS="$ORIGINS" OTHERTEMPLATE="$OTHER_TEMPLATE" \
+	bash "$INRIG/contrib/boost-bootstrap.sh" --env-file "$ENVFILE" 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
+[ "$(cat "$HOME_DIR/.config/mw/config.toml")" = "$before_conf" ] || fail "$NAME: config.toml was edited"
 echo "ok: $NAME"
 
 # --- g. a vault that does not say what a rig's tests are: said, not guessed ----------------
