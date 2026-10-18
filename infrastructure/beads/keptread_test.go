@@ -72,6 +72,14 @@ func (c keptConn) QueryContext(_ context.Context, query string, _ []driver.Named
 			{"t-1.1", "By hand", "do it", "1. it works", "in_progress", "task", "mw@laptop", int64(30), "2026-10-01 10:05:00", "2026-10-01 11:00:00", "2026-10-01 11:00:00", nil, int64(2), `{}`, "2026-10-01 11:05:00", int64(1)},
 			{"t-0", "Long gone", "", "", "closed", "task", nil, nil, "2026-08-01 00:00:00", nil, "2026-08-01 00:00:00", "2026-08-01 00:00:00", int64(2), `{}`, nil, int64(3)},
 		}}, nil
+	case strings.Contains(q, "hitl:todo"):
+		return &keptRows{cols: []string{"id", "metadata"}, rows: [][]driver.Value{
+			{"td-1", `{"todo_due":"2026-10-14T08:00:00Z"}`},
+			{"td-2", `{"todo_due":"2026-10-14T09:00:00Z","todo_reminded":"2026-10-14T09:00:00Z"}`},
+			{"td-3", `{}`},                // no due time: not a card the reminder is after
+			{"td-4", nil},                 // no metadata at all
+			{"td-5", `{"todo_due":"  "}`}, // a blank due is none
+		}}, nil
 	case strings.Contains(q, "run:queued"):
 		cols := []string{"id", "metadata", "parent_metadata"}
 		if c.s.queued.Load() {
@@ -330,5 +338,50 @@ func TestNotesAreReadOverTheKeptConnectionWithoutStartingABd(t *testing.T) {
 	}
 	if got := bdsStarted(t, asked); got != 0 {
 		t.Fatalf("expected no bd started, got %d", got)
+	}
+}
+
+// The follower looks for a To do card past due every minute: the cards with a
+// due time are one query over the kept connection, no bd (mw-gq6.608).
+func TestTodoDueCardsAreReadOverTheKeptConnectionWithoutStartingABd(t *testing.T) {
+	s := &keptServer{}
+	program, asked := standInSnapshotProgram(t, bdListing, bdTable)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(s.open(t)))
+
+	for i := 0; i < 20; i++ {
+		cards, err := g.TodoDueCards(context.Background())
+		if err != nil {
+			t.Fatalf("read %d: %v", i, err)
+		}
+		want := []application.TodoDueCard{
+			{ID: "td-1", Due: "2026-10-14T08:00:00Z"},
+			{ID: "td-2", Due: "2026-10-14T09:00:00Z", Reminded: "2026-10-14T09:00:00Z"},
+		}
+		if !reflect.DeepEqual(cards, want) {
+			t.Fatalf("read %d: expected the two cards with a due time, got %+v", i, cards)
+		}
+	}
+	if got := bdsStarted(t, asked); got != 0 {
+		t.Fatalf("expected no bd started, got %d", got)
+	}
+	if got := s.opens.Load(); got != 1 {
+		t.Fatalf("expected the one connection, got %d", got)
+	}
+}
+
+func TestTodoDueCardsErrWithoutAConnectionSoTheReadyCardsAreListed(t *testing.T) {
+	g := beads.New(t.TempDir())
+	if _, err := g.TodoDueCards(context.Background()); err == nil {
+		t.Fatal("expected an error where there is no kept connection")
+	}
+	s := &keptServer{}
+	s.fail.Store(true)
+	var said strings.Builder
+	g = beads.New(t.TempDir(), beads.WithHeadDB(s.open(t)), beads.WithKeptSaid(&said))
+	if _, err := g.TodoDueCards(context.Background()); err == nil {
+		t.Fatal("expected an error where the connection fails")
+	}
+	if !strings.Contains(said.String(), "the To do cards") || !strings.Contains(said.String(), "bd reads") {
+		t.Fatalf("expected the log to say the read failed and bd reads instead, got %q", said.String())
 	}
 }

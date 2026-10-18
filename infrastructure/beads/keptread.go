@@ -340,6 +340,59 @@ var errNoKeptConnection = errors.New("there is no kept connection to the beads s
 
 var _ application.QueuedStoryReader = (*Gateway)(nil)
 
+// todoDueCardsQuery is a row for each open To do card that is not an epic: its
+// id and its own metadata, which holds the due time and the one it was last
+// reminded for.
+const todoDueCardsQuery = "select i.id as id, i.metadata as metadata" +
+	" from issues i join labels l on l.issue_id = i.id" +
+	" where l.label = " + "'" + application.LabelHitlTodo + "'" + " and i.status = 'open' and i.issue_type <> 'epic'" +
+	" order by i.id"
+
+// TodoDueCards implements application.TodoDueReader over the kept connection:
+// the open To do cards that carry a due time, in one query, in place of the
+// listing of every ready card. With no connection, or when it fails (said in
+// the follower's log), it errs and the caller lists the ready cards.
+func (g *Gateway) TodoDueCards(ctx context.Context) ([]application.TodoDueCard, error) {
+	db := g.keptDB()
+	if db == nil {
+		return nil, errNoKeptConnection
+	}
+	cards, err := readTodoDueCards(ctx, db)
+	if err != nil {
+		g.keptFailed(ctx, "the To do cards", err)
+		return nil, err
+	}
+	return cards, nil
+}
+
+// readTodoDueCards reads the To do cards with a due time from db.
+func readTodoDueCards(ctx context.Context, db *sql.DB) ([]application.TodoDueCard, error) {
+	bounded, cancel := context.WithTimeout(ctx, headQueryBound)
+	defer cancel()
+	rows, err := db.QueryContext(bounded, todoDueCardsQuery)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cards := []application.TodoDueCard{}
+	for rows.Next() {
+		var id string
+		var own sql.NullString
+		if err := rows.Scan(&id, &own); err != nil {
+			return nil, err
+		}
+		card := bead{ID: id, Metadata: metadataOf(own)}
+		due := strings.TrimSpace(card.text(application.TodoDueField))
+		if due == "" {
+			continue
+		}
+		cards = append(cards, application.TodoDueCard{ID: id, Due: due, Reminded: strings.TrimSpace(card.text(application.TodoRemindedField))})
+	}
+	return cards, rows.Err()
+}
+
+var _ application.TodoDueReader = (*Gateway)(nil)
+
 // noteOverConnection is `bd kv get key` over the kept connection: the note's
 // value, "" for a key that is not there; ok is false when there is no
 // connection or it failed, and the caller starts a bd.
