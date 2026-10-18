@@ -13,8 +13,9 @@ import (
 const DefaultFoldMin = 3
 
 // FoldRule is the rule the Mayor folds by, said in the command's help: bugs
-// that share a cause are fixed once, and none of them is closed unproven.
-const FoldRule = "Fold rule: a folded bug keeps its own check in the shared fix's test and closes only when it passes."
+// that share a cause are fixed once, each bug's own check is copied into the
+// fold's acceptance criteria, and mw fold supersede closes the bug as superseded.
+const FoldRule = "Fold rule: a folded bug's check is copied into the fold's acceptance criteria and the bug is closed as superseded by the fold."
 
 // Fold is `mw fold <rig>`: a rig's open and held bugs grouped by the error class
 // they carry (the class:<slug> label) or, with none, by the screen their title

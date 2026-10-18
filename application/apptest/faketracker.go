@@ -929,11 +929,82 @@ func (f *FakeTracker) RemoveLabel(_ context.Context, id, label string) error {
 // AddBlocker implements application.WorkTracker, for a story the fake holds.
 func (f *FakeTracker) AddBlocker(_ context.Context, blocked, blocker string) error {
 	return f.write(blocked, func(s *fakeStory) error {
+		if f.waitsOnLocked(blocker, blocked) {
+			return fmt.Errorf("adding %s as a blocker of %s would create a cycle", blocker, blocked)
+		}
 		if !carries(s.needs, blocker) {
 			s.needs = append(append([]string(nil), s.needs...), blocker)
 		}
 		return nil
 	})
+}
+
+// waitsOnLocked is true when the story id waits, directly or through others, on
+// target, or is target: what makes bd refuse a blocker as a cycle. The caller
+// holds the lock.
+func (f *FakeTracker) waitsOnLocked(id, target string) bool {
+	seen := map[string]bool{}
+	var walk func(string) bool
+	walk = func(at string) bool {
+		if at == target {
+			return true
+		}
+		if seen[at] {
+			return false
+		}
+		seen[at] = true
+		if s, ok := f.stories[at]; ok {
+			for _, need := range s.needs {
+				if walk(need) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return walk(id)
+}
+
+// RemoveBlocker implements application.FoldWriter: blocked no longer waits on
+// blocker; a link that is not there is left as it is.
+func (f *FakeTracker) RemoveBlocker(_ context.Context, blocked, blocker string) error {
+	return f.write(blocked, func(s *fakeStory) error {
+		var kept []string
+		for _, need := range s.needs {
+			if need != blocker {
+				kept = append(kept, need)
+			}
+		}
+		s.needs = kept
+		return nil
+	})
+}
+
+// SupersedeStory implements application.FoldWriter as bd supersede does: the
+// story is closed with a reference to its replacement, and a story that already
+// waits on its replacement is refused ("already exists with type blocks").
+func (f *FakeTracker) SupersedeStory(_ context.Context, id, with string) error {
+	return f.write(id, func(s *fakeStory) error {
+		if carries(s.needs, with) {
+			return fmt.Errorf("dependency %s -> %s already exists with type blocks", id, with)
+		}
+		s.detail.Status = StatusClosed
+		s.closeReason = "Superseded by " + with
+		return nil
+	})
+}
+
+// SupersededBy is the story a story was superseded by through SupersedeStory;
+// empty when it was not.
+func (f *FakeTracker) SupersededBy(id string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if s, ok := f.stories[id]; ok {
+		if with, ok := strings.CutPrefix(s.closeReason, "Superseded by "); ok {
+			return with
+		}
+	}
+	return ""
 }
 
 // HoldStory implements application.WorkTracker.
