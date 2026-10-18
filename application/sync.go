@@ -528,6 +528,13 @@ type SyncReport struct {
 	Pushed int
 	At     time.Time
 
+	// ConfigAppended names what this sync appended to the Boost's config.toml
+	// from the vault's hosts/boost-config.toml ("[test_parts.postern]"),
+	// ConfigDiffers what the config holds differently and was left, and
+	// ConfigNote why the config could not be brought level (mw-gq6.593).
+	ConfigAppended, ConfigDiffers []string
+	ConfigNote                    string
+
 	// StampNote is why the chain stamp of what this sync pushed was not
 	// queued. Empty when it was, or when nothing was pushed.
 	StampNote string
@@ -607,6 +614,15 @@ func (r SyncReport) String() string {
 	}
 	if r.StampNote != "" {
 		fmt.Fprintf(&b, "; chain stamp: not queued: %s", r.StampNote)
+	}
+	if len(r.ConfigAppended) > 0 {
+		fmt.Fprintf(&b, "; config.toml: appended %s", strings.Join(r.ConfigAppended, ", "))
+	}
+	if len(r.ConfigDiffers) > 0 {
+		fmt.Fprintf(&b, "; config.toml differs from %s and was left: %s", BoostConfigFile, strings.Join(r.ConfigDiffers, ", "))
+	}
+	if r.ConfigNote != "" {
+		fmt.Fprintf(&b, "; config.toml: not brought level: %s", r.ConfigNote)
 	}
 	if r.Squashed > 0 {
 		fmt.Fprintf(&b, "; squashed %d commits of beads history", r.Squashed)
@@ -733,6 +749,15 @@ type Sync struct {
 	// level. Empty leaves no note: a build that knows no commit says nothing.
 	MwCommit string
 
+	// BoostConfig is this host's ~/.config/mw/config.toml and BoostTarget the
+	// vault's hosts/boost-config.toml. On a host that is not the home, a sync
+	// whose vault half got level appends to BoostConfig any [tests],
+	// [changed_specs] line or [test_parts.<rig>] table of the rigs it has that
+	// BoostTarget holds and it lacks, and says what it appended; a line it has
+	// is never edited, and one that differs is only said (mw-gq6.593). Nil of
+	// either, or an unknown home, does nothing.
+	BoostConfig, BoostTarget ConfigFile
+
 	// GCInterval is how long this host waits between asking the tracker to
 	// reclaim disk space. Zero reads DefaultGCInterval.
 	GCInterval time.Duration
@@ -849,6 +874,7 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 		if report.Pushed > 0 {
 			s.queueStamp(ctx, &report)
 		}
+		s.levelBoostConfig(ctx, &report)
 	}
 
 	// A host whose vault half never ran is not level, and the note says it was.
@@ -911,6 +937,57 @@ func (s Sync) queueStamp(ctx context.Context, report *SyncReport) {
 	if err != nil {
 		report.StampNote = firstLine(err.Error())
 	}
+}
+
+// levelBoostConfig brings a Boost's config.toml level with the vault's
+// hosts/boost-config.toml, as the vault's half has just pulled it
+// (mw-gq6.593). Best effort, like the stamp: whatever stops it is a note on the
+// report, never the sync's failure. The home's config is the source of the
+// file, so it is left alone, as is any host while the home cannot be told.
+func (s Sync) levelBoostConfig(ctx context.Context, report *SyncReport) {
+	if s.BoostConfig == nil || s.BoostTarget == nil || s.Home == nil {
+		return
+	}
+	if home, err := IsHome(ctx, s.Home, s.Host); err != nil || home {
+		return
+	}
+	target, exists, err := s.BoostTarget.Read()
+	if err != nil {
+		report.ConfigNote = firstLine(err.Error())
+		return
+	}
+	data, there, err := s.BoostConfig.Read()
+	if err != nil {
+		report.ConfigNote = firstLine(err.Error())
+		return
+	}
+	if !exists || !there {
+		return
+	}
+	parsed, err := domain.ParseConfigTOML(string(target))
+	if err != nil {
+		report.ConfigNote = firstLine(fmt.Sprintf("%s does not parse as TOML: %v", s.BoostTarget.Path(), err))
+		return
+	}
+	tables, err := domain.BoostTablesOf(parsed)
+	if err != nil {
+		report.ConfigNote = firstLine(fmt.Sprintf("%s: %v", s.BoostTarget.Path(), err))
+		return
+	}
+	out, appended, differing, err := domain.LevelBoostConfig(string(data), tables)
+	if err != nil {
+		report.ConfigNote = firstLine(fmt.Sprintf("%s: %v", s.BoostConfig.Path(), err))
+		return
+	}
+	report.ConfigDiffers = differing
+	if len(appended) == 0 {
+		return
+	}
+	if err := s.BoostConfig.Write([]byte(out)); err != nil {
+		report.ConfigNote = firstLine(fmt.Sprintf("writing %s: %v", s.BoostConfig.Path(), err))
+		return
+	}
+	report.ConfigAppended = appended
 }
 
 // noteMwCommit leaves the commit of this host's mw for the other hosts to read.

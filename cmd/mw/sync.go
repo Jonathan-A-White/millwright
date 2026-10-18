@@ -10,6 +10,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/configfile"
 
 	"github.com/spf13/cobra"
 )
@@ -204,6 +205,16 @@ func hostSync(sync application.Sync) (application.Sync, error) {
 		sync.MwCommit = builtCommit()
 	}
 	sync.Squash = squash
+	if sync.BoostConfig == nil && sync.BoostTarget == nil {
+		// A config or vault that cannot be placed levels nothing: the commands
+		// around this one report on them.
+		if path, err := config.FilePath(); err == nil {
+			if vault, err := config.Vault(); err == nil {
+				sync.BoostConfig = configfile.New(path)
+				sync.BoostTarget = configfile.New(filepath.Join(vault, application.BoostConfigFile))
+			}
+		}
+	}
 	if sync.History == nil {
 		// The beads gateway is the history's adapter too; a tracker that
 		// keeps none squashes nothing.
