@@ -452,3 +452,184 @@ func TestATesterBugWithItsSweepInTheFindingIsToldItBelongsInAccept(t *testing.T)
 		t.Errorf("a finding with no Sweep line anywhere keeps today's text, got %v", err)
 	}
 }
+
+// classFinding is a double-tap finding of the error class tap-settle on a screen.
+func classFinding(screen string) application.TesterFinding {
+	finding := testerFinding()
+	finding.Title = "Double tap on " + screen + " files twice"
+	finding.Finding = "Tap Save twice fast on " + screen + ": two entries."
+	finding.Shot = "/tmp/tester-mw-e.2/05-" + screen + ".png"
+	finding.HowToCheck = "1. Open " + screen + ".\n2. Tap Save twice fast: one entry."
+	finding.Class = "tap-settle"
+	return finding
+}
+
+func TestASecondFindingOfTheSameClassAndAppJoinsTheFirst(t *testing.T) {
+	tracker, rules := testerFileEpic(t)
+	var out bytes.Buffer
+	filer := application.TesterFiler{Tracker: tracker, Rules: rules, Out: &out}
+
+	first, err := filer.File(context.Background(), "mw-e.2", classFinding("Settings"))
+	if err != nil || first.ID == "" {
+		t.Fatalf("expected the first finding filed, got %+v, %v", first, err)
+	}
+	story, err := tracker.ShowStory(context.Background(), first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(story.Labels, "class:tap-settle") || !slices.Contains(story.Labels, application.LabelBug) {
+		t.Errorf("expected the labels bug and class:tap-settle, got %q", story.Labels)
+	}
+	before := len(tracker.Stories())
+
+	second := classFinding("Library")
+	second.Acceptance = "npx vitest run src/Library.test.tsx passes\nSweep: every Save button is grepped for a settle"
+	joined, err := filer.File(context.Background(), "mw-e.2", second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined.ID != "" || joined.Joined != first.ID {
+		t.Fatalf("expected nothing filed and %s joined, got %+v", first.ID, joined)
+	}
+	if after := len(tracker.Stories()); after != before {
+		t.Errorf("expected no story filed, %d became %d", before, after)
+	}
+	comments := tracker.Comments(first.ID)
+	if len(comments) != 1 {
+		t.Fatalf("expected one comment on %s, got %q", first.ID, comments)
+	}
+	for _, want := range []string{
+		"Also on: Double tap on Library files twice",
+		"Tap Save twice fast on Library: two entries.",
+		"/tmp/tester-mw-e.2/05-Library.png",
+		"2. Tap Save twice fast: one entry.",
+		"npx vitest run src/Library.test.tsx passes",
+		"Sweep: every Save button is grepped for a settle",
+	} {
+		if !strings.Contains(comments[0], want) {
+			t.Errorf("expected the comment to hold %q, got:\n%s", want, comments[0])
+		}
+	}
+	if !strings.Contains(out.String(), "joined: "+first.ID) {
+		t.Errorf("expected the output to say 'joined: %s', got %q", first.ID, out.String())
+	}
+}
+
+func TestAFindingOfAnotherAppOrClassIsFiledNew(t *testing.T) {
+	tracker, rules := testerFileEpic(t)
+	filer := application.TesterFiler{Tracker: tracker, Rules: rules}
+	first, err := filer.File(context.Background(), "mw-e.2", classFinding("Settings"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	otherApp := classFinding("Library")
+	otherApp.App = "otherapp"
+	filedApp, err := filer.File(context.Background(), "mw-e.2", otherApp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherClass := classFinding("Search")
+	otherClass.Class = "stale-closure"
+	filedClass, err := filer.File(context.Background(), "mw-e.2", otherClass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noClass := classFinding("Help")
+	noClass.Class = ""
+	filedNone, err := filer.File(context.Background(), "mw-e.2", noClass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, filed := range map[string]application.TesterFiled{"app": filedApp, "class": filedClass, "no class": filedNone} {
+		if filed.ID == "" || filed.Joined != "" || filed.ID == first.ID {
+			t.Errorf("another %s: expected a new story, got %+v", name, filed)
+		}
+	}
+	if comments := tracker.Comments(first.ID); len(comments) != 0 {
+		t.Errorf("expected no comment on %s, got %q", first.ID, comments)
+	}
+	story, err := tracker.ShowStory(context.Background(), filedNone.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(story.Labels, func(l string) bool { return strings.HasPrefix(l, "class:") }) {
+		t.Errorf("expected no class label without --class, got %q", story.Labels)
+	}
+}
+
+func TestAClosedStoryOfTheClassIsNeverJoined(t *testing.T) {
+	tracker, rules := testerFileEpic(t)
+	filer := application.TesterFiler{Tracker: tracker, Rules: rules}
+	first, err := filer.File(context.Background(), "mw-e.2", classFinding("Settings"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetStatus(first.ID, apptest.StatusClosed); err != nil {
+		t.Fatal(err)
+	}
+	second, err := filer.File(context.Background(), "mw-e.2", classFinding("Library"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID == "" || second.Joined != "" || second.ID == first.ID {
+		t.Errorf("expected a new story, got %+v", second)
+	}
+	if comments := tracker.Comments(first.ID); len(comments) != 0 {
+		t.Errorf("expected no comment on the closed story, got %q", comments)
+	}
+}
+
+func TestAnOpenStoryOfTheClassIsJoinedToo(t *testing.T) {
+	tracker, rules := testerFileEpic(t)
+	filer := application.TesterFiler{Tracker: tracker, Rules: rules}
+	first, err := filer.File(context.Background(), "mw-e.2", classFinding("Settings"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.ReleaseStory(context.Background(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	second, err := filer.File(context.Background(), "mw-e.2", classFinding("Library"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Joined != first.ID {
+		t.Errorf("expected %s joined, got %+v", first.ID, second)
+	}
+}
+
+type classRegister map[string]string
+
+func (r classRegister) ReadErrorRegister(context.Context, string) (map[string]string, string, error) {
+	return r, "", nil
+}
+func (r classRegister) WriteErrorClass(context.Context, string, string, string) (string, error) {
+	return "", nil
+}
+func (r classRegister) WriteErrorKinds(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
+func TestAClassNotInTheRegisterIsRefused(t *testing.T) {
+	tracker, rules := testerFileEpic(t)
+	filer := application.TesterFiler{Tracker: tracker, Rules: rules, Register: classRegister{"tap-settle": "x"}, Seat: "builder"}
+	before := len(tracker.Stories())
+	bad := classFinding("Settings")
+	bad.Class = "tap-setle"
+	_, err := filer.File(context.Background(), "mw-e.2", bad)
+	if err == nil || !strings.Contains(err.Error(), "mw errors list") {
+		t.Fatalf("expected a refusal that points at mw errors list, got %v", err)
+	}
+	if len(tracker.Stories()) != before {
+		t.Error("expected nothing filed")
+	}
+	if _, err := filer.File(context.Background(), "mw-e.2", classFinding("Settings")); err != nil {
+		t.Errorf("expected a class of the register to file, got %v", err)
+	}
+	notSlug := classFinding("Settings")
+	notSlug.Class = "Tap Settle"
+	if _, err := (application.TesterFiler{Tracker: tracker, Rules: rules}).File(context.Background(), "mw-e.2", notSlug); err == nil {
+		t.Error("expected a class that is no slug to be refused")
+	}
+}

@@ -52,7 +52,16 @@ type TesterFinding struct {
 	// Host is the host the fix is to run on; empty files it for any (auto),
 	// whatever host the landed story ran on.
 	Host string
+	// Class is the slug of the common-errors class the finding is an instance
+	// of; empty when none fits. The story is labelled class:<slug>, and a finding
+	// of a class an open or held story of the same app already carries joins that
+	// story rather than becoming another one (mw-gq6.587).
+	Class string
 }
+
+// ClassLabelPrefix starts the label a story filed for a common-errors class
+// carries: class:<slug>.
+const ClassLabelPrefix = "class:"
 
 // TesterFiled is what filing one finding did.
 type TesterFiled struct {
@@ -62,6 +71,9 @@ type TesterFiled struct {
 	// case nothing was filed.
 	Duplicate      string
 	DuplicateTitle string
+	// Joined is the open or held story of the same class and app the finding was
+	// added to as a comment, when there is one; nothing was filed.
+	Joined string
 	// Waits are the open or running stories of the rig that name a file this
 	// one does, which it waits on.
 	Waits []string
@@ -84,6 +96,10 @@ type TesterFiler struct {
 	Tracker TesterFileTracker
 	// Rules says which label marks the epic's last story; nil leaves the demo be.
 	Rules EpicRules
+	// Register, when set, is the common-errors register a --class slug must name
+	// a class of, in the seat Seat; nil takes any slug.
+	Register ErrorFiles
+	Seat     string
 	// Out is where it says what it did; nil prints nothing.
 	Out io.Writer
 }
@@ -107,6 +123,22 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 		return TesterFiled{}, fmt.Errorf("filing a Tester finding: it needs acceptance a run can check")
 	case strings.TrimSpace(finding.HowToCheck) == "":
 		return TesterFiled{}, fmt.Errorf("filing a Tester finding: it needs a HOW TO CHECK IT")
+	}
+	finding.Class = strings.TrimSpace(finding.Class)
+	if finding.Class != "" {
+		if err := checkSlug(finding.Class); err != nil {
+			return TesterFiled{}, fmt.Errorf("filing a Tester finding: the class %q may hold only a-z, 0-9 and hyphens: name a slug from mw errors list", finding.Class)
+		}
+		if f.Register != nil {
+			classes, _, err := f.Register.ReadErrorRegister(ctx, f.Seat)
+			if err != nil {
+				return TesterFiled{}, fmt.Errorf("filing a Tester finding: reading the common-errors register: %w", err)
+			}
+			if _, known := classes[finding.Class]; !known {
+				return TesterFiled{}, fmt.Errorf("filing a Tester finding: no class %q in the common-errors register (mw errors list names them): "+
+					"name one, or leave --class off", finding.Class)
+			}
+		}
 	}
 	// A bug finding owes a sweep as a bug the Mayor files does (mw-gq6.447).
 	if verdict := domain.SweepOfStory(finding.Acceptance, finding.Finding); finding.Kind == TesterKindBug && !verdict.Passes() {
@@ -154,6 +186,20 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 		return filed, nil
 	}
 
+	if finding.Class != "" {
+		if mate, ok := classMate(stories, path.Rig, app, finding.Class); ok {
+			if err := f.Tracker.CommentOnStory(ctx, mate.Story.ID, testerJoinComment(finding)); err != nil {
+				return filed, fmt.Errorf("adding the finding to %s: %w", mate.Story.ID, err)
+			}
+			filed.Joined = mate.Story.ID
+			f.say("joined: %s\n", mate.Story.ID)
+			f.say("  nothing filed: %s is open or held with the class %s in %s; the finding is its comment 'Also on: %s'\n",
+				mate.Story.ID, finding.Class, app, finding.Title)
+			f.say("  put 'joined: %s' under the finding in FINDINGS\n", mate.Story.ID)
+			return filed, nil
+		}
+	}
+
 	path.Files = ""
 	path.Host = domain.HostAuto
 	if host := strings.TrimSpace(finding.Host); host != "" {
@@ -178,6 +224,9 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 	}
 	if finding.Kind == TesterKindBug {
 		story.Labels = []string{LabelBug}
+	}
+	if finding.Class != "" {
+		story.Labels = append(story.Labels, ClassLabelPrefix+finding.Class)
 	}
 	id, err := f.Tracker.CreateStory(ctx, story)
 	if err != nil {
@@ -320,4 +369,47 @@ func heldFindingsNamingSameFile(stories []StoryDetail, path domain.Path, landedI
 		}
 	}
 	return ids
+}
+
+// classMate is the story of rig that is not closed, is no epic or Tester story,
+// carries the label class:<class> and names app in its title: the story a
+// finding of that class in that app joins. The oldest wins, which is the first
+// the tracker lists.
+func classMate(stories []StoryDetail, rig, app, class string) (StoryDetail, bool) {
+	for _, d := range stories {
+		if d.IsEpic || d.Closed() || IsTesterStory(d) || d.Merged().Rig != rig || !hasLabel(d.Labels, ClassLabelPrefix+class) {
+			continue
+		}
+		if titleApp(d.Story.Title) == strings.ToLower(app) {
+			return d, true
+		}
+	}
+	return StoryDetail{}, false
+}
+
+// titleApp is the app a filed finding's title names: '[bug] <app>: <title>'.
+func titleApp(title string) string {
+	title = strings.TrimSpace(title)
+	for _, tag := range []string{"[" + TesterKindBug + "]", "[" + TesterKindTaste + "]"} {
+		title = strings.TrimSpace(strings.TrimPrefix(title, tag))
+	}
+	app, _, found := strings.Cut(title, ":")
+	if !found {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(app))
+}
+
+// testerJoinComment is what a finding that joins a story of its class adds to
+// it: the finding, its shot, how to check it and its acceptance, under the
+// screen it is also on (the finding's one-line title).
+func testerJoinComment(finding TesterFinding) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Also on: %s\n\n%s\n", finding.Title, strings.TrimSpace(finding.Finding))
+	if shot := strings.TrimSpace(finding.Shot); shot != "" {
+		fmt.Fprintf(&b, "\nShot: %s\n", shot)
+	}
+	fmt.Fprintf(&b, "\nHOW TO CHECK IT, for the Governor:\n%s\n", strings.TrimSpace(finding.HowToCheck))
+	fmt.Fprintf(&b, "\nAccept:\n%s\n", strings.TrimSpace(finding.Acceptance))
+	return b.String()
 }

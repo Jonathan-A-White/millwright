@@ -1719,6 +1719,9 @@ key, priority 2 for a `[bug]` and 3 for a `[taste]`, a wait on every running or 
 rig, and on every earlier still-held finding filed for the same landed story, that names the same
 file (so findings that touch one file go in series), and the epic's open demo (the rig's `epic_last_story_labels`) waiting
 on it. A finding whose title an open bead of the rig already has files nothing and names that bead.
+`--class <slug>` (a class of the common-errors register, `mw errors list`) labels the story `class:<slug>`; a finding
+of a class that an open or held story of the same app already carries files nothing: it is added to that story as a
+comment `Also on: <title>` (finding, shot, HOW TO CHECK IT, acceptance) and `joined: <id>` is printed (mw-gq6.587).
 A bug whose acceptance has no line beginning `Sweep:` is refused, as `mw dispatch` would refuse it
 (mw-gq6.447), and so is a plan given to `mw file` with such a bug in it.
 It never releases; a finding that crosses an app's VISION.md is flagged and not filed. The Tester

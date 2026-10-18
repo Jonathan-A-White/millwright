@@ -103,7 +103,7 @@ func testerTrial() (application.TesterTrial, error) {
 func newTesterFileCmd() *cobra.Command {
 	var finding application.TesterFinding
 	cmd := &cobra.Command{
-		Use:   "file <tester-story-id> --kind bug|taste --title <one line> --finding <text> --how <text> --accept <text> [--files a,b] [--host <host>] [--shot <path>] [--fix <one line>]",
+		Use:   "file <tester-story-id> --kind bug|taste --title <one line> --finding <text> --how <text> --accept <text> [--files a,b] [--host <host>] [--shot <path>] [--fix <one line>] [--class <slug>]",
 		Short: "File a Tester's finding as a held story under the landed story's epic",
 		Long: "file is what a Tester runs for each finding that still happens on main, in place of the Mayor's triage.\n" +
 			"It reads the landed story from the Tester story's 'Landed story:' line and files, held, under the landed\n" +
@@ -113,7 +113,10 @@ func newTesterFileCmd() *cobra.Command {
 			"or open story of the rig, and on every earlier held finding of the same landing, that names the same\n" +
 			"file, and the epic's open demo waiting on it. A finding whose title an open bead of the rig already has is not filed: the bead\n" +
 			"is named. A bug whose --accept has no line beginning 'Sweep:' is refused, as mw dispatch would refuse it.\n" +
-			"It prints the id; put 'held: <id>' (or 'duplicate of: <id>') under the finding in FINDINGS.\n" +
+			"--class <slug> (a class of the common-errors register, mw errors list) labels the story class:<slug>; when an\n" +
+			"open or held story of the same app already carries that class, nothing is filed: the finding, its shot, HOW TO\n" +
+			"CHECK IT and acceptance are added to that story as a comment 'Also on: <title>' and 'joined: <id>' is printed.\n" +
+			"It prints the id; put 'held: <id>' (or 'duplicate of: <id>' or 'joined: <id>') under the finding in FINDINGS.\n" +
 			"It releases nothing: that stays the Mayor's. A text flag whose value starts with @ reads that file.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -138,6 +141,9 @@ func newTesterFileCmd() *cobra.Command {
 				Tracker: mwGateway(dir, host),
 				Rules:   vault.New(dir),
 				Out:     cmd.OutOrStdout(),
+				Seat:    BuilderSeat,
+
+				Register: vault.New(dir),
 			}.File(cmd.Context(), args[0], finding)
 			return err
 		},
@@ -152,6 +158,7 @@ func newTesterFileCmd() *cobra.Command {
 	flags.StringVar(&finding.HowToCheck, "how", "", "HOW TO CHECK IT, for the Governor (@file reads a file)")
 	flags.StringVar(&finding.Acceptance, "accept", "", "acceptance checkable by running something; a bug's needs a line beginning 'Sweep:' too (@file reads a file)")
 	flags.StringVar(&finding.Files, "files", "", "the files key: the repo paths or globs the fix expects to change, comma-separated")
+	flags.StringVar(&finding.Class, "class", "", "the common-errors class (a slug from mw errors list) the finding is an instance of; the story is labelled class:<slug>, and an open or held story of the same app with that class is joined instead of a new one filed")
 	flags.StringVar(&finding.Host, "host", "", "the host the fix must run on; auto (any host) by default, not the landed story's host")
 	return cmd
 }

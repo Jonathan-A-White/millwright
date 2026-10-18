@@ -256,13 +256,16 @@ func TestTheTesterFormulaFilesEachFindingStillOnMainAsAHeldStoryAndListsTheIds(t
 		"VISION.md",
 		"stays the Mayor's",
 		"commits nothing",
+		"--class <slug>",
+		"mw errors list",
+		"leave --class off",
 	} {
 		if !strings.Contains(file, want) {
 			t.Errorf("expected the 'file' step to say %q, got %q", want, file)
 		}
 	}
 	findings := steps["findings"]
-	for _, want := range []string{"held: <id>", "duplicate of: <id>", "not filed: <reason>"} {
+	for _, want := range []string{"held: <id>", "duplicate of: <id>", "joined: <id>", "not filed: <reason>"} {
 		if !strings.Contains(findings, want) {
 			t.Errorf("expected the 'findings' step to carry %q, got %q", want, findings)
 		}
