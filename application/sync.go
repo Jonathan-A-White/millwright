@@ -990,9 +990,6 @@ func (s Sync) levelBoostConfig(ctx context.Context, report *SyncReport) {
 	report.ConfigAppended = appended
 }
 
-// noteMwCommit leaves the commit of this host's mw for the other hosts to read.
-// It is best effort, like the counts of the timers: a note that cannot be
-// written costs the other host a reading and is not the sync's to fail.
 // noteTicks leaves this host's timers' counts as TicksKey, unless the note
 // there already says them (HostTicks.SaidBy). Best effort, as the counts are.
 func (s Sync) noteTicks(ctx context.Context) {
@@ -1006,6 +1003,9 @@ func (s Sync) noteTicks(ctx context.Context) {
 	_ = s.Tracker.SetNote(ctx, TicksKey(s.Host), held.Note())
 }
 
+// noteMwCommit leaves the commit of this host's mw for the other hosts to read.
+// It is best effort, like the counts of the timers: a note that cannot be
+// written costs the other host a reading and is not the sync's to fail.
 func (s Sync) noteMwCommit(ctx context.Context) {
 	if s.MwCommit != "" {
 		_ = s.Tracker.SetNote(ctx, MwCommitKey(s.Host), s.MwCommit)
