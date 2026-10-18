@@ -175,8 +175,11 @@ type FakeDoctorNotes struct {
 	notes  map[string]string
 	sets   int
 	clears int
+	lists  int
 
 	Err error
+	// ListErr, when set, is what NotesWithPrefix answers instead of the notes.
+	ListErr error
 }
 
 // NewFakeDoctorNotes is a notes port with nothing kept yet.
@@ -237,6 +240,10 @@ func (f *FakeDoctorNotes) Clears() int {
 func (f *FakeDoctorNotes) NotesWithPrefix(_ context.Context, prefix string) (map[string]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.lists++
+	if f.ListErr != nil {
+		return nil, f.ListErr
+	}
 	if f.Err != nil {
 		return nil, f.Err
 	}
@@ -247,6 +254,13 @@ func (f *FakeDoctorNotes) NotesWithPrefix(_ context.Context, prefix string) (map
 		}
 	}
 	return found, nil
+}
+
+// Lists is how many times NotesWithPrefix was called, whether or not it succeeded.
+func (f *FakeDoctorNotes) Lists() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lists
 }
 
 // Get is the value kept for key, and whether it is there at all.

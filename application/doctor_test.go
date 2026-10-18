@@ -769,3 +769,101 @@ func TestDampersOverTheirLimitAreNoFaultOfTheHost(t *testing.T) {
 		t.Errorf("expected the over-limit count still said, got:\n%s", out.String())
 	}
 }
+
+// Every plain ok clears its check's note on every run, and each clear is a bd
+// of its own (several server connections each) on every host every five
+// minutes (mw-gq6.608): the notes are listed once, and only one that is there
+// is cleared.
+func TestARunClearsOnlyTheNotesThatAreThereAndListsThemOnce(t *testing.T) {
+	state := apptest.NewFakeDoctorState()
+	log := &apptest.FakeDoctorLog{}
+	notes := apptest.NewFakeDoctorNotes()
+	now := doctorNow
+	stale := application.DoctorNoteKey("vps", "wifi")
+	if err := notes.SetNote(context.Background(), stale, "stale"); err != nil {
+		t.Fatalf("setting a note: %v", err)
+	}
+	// Another host's note under the same check name is not this host's to clear.
+	theirs := application.DoctorNoteKey("laptop", "wifi")
+	if err := notes.SetNote(context.Background(), theirs, "theirs"); err != nil {
+		t.Fatalf("setting a note: %v", err)
+	}
+	d := application.Doctor{
+		Checks: application.DoctorChecks{
+			&apptest.FakeDoctorCheck{CheckName: "wifi", Verdict: application.DoctorOK},
+			&apptest.FakeDoctorCheck{CheckName: "tunnel", Verdict: application.DoctorOK},
+			&apptest.FakeDoctorCheck{CheckName: "timers", Verdict: application.DoctorOK},
+		},
+		State: state, Log: log, Notes: notes, Host: "vps",
+		Now: func() time.Time { return now },
+	}
+
+	if _, err := d.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	if got := notes.Clears(); got != 1 {
+		t.Errorf("expected one clear, of the note that was there, got %d", got)
+	}
+	if got := notes.Lists(); got != 1 {
+		t.Errorf("expected the notes listed once, got %d", got)
+	}
+	if _, ok := notes.Get(stale); ok {
+		t.Errorf("expected the stale note cleared")
+	}
+	if _, ok := notes.Get(theirs); !ok {
+		t.Errorf("expected the other host's note left alone")
+	}
+}
+
+func TestARunThatCannotListTheNotesClearsEachCheckAsBefore(t *testing.T) {
+	state := apptest.NewFakeDoctorState()
+	log := &apptest.FakeDoctorLog{}
+	notes := apptest.NewFakeDoctorNotes()
+	notes.ListErr = errors.New("the server is unreachable")
+	now := doctorNow
+	d := application.Doctor{
+		Checks: application.DoctorChecks{
+			&apptest.FakeDoctorCheck{CheckName: "wifi", Verdict: application.DoctorOK},
+			&apptest.FakeDoctorCheck{CheckName: "tunnel", Verdict: application.DoctorOK},
+		},
+		State: state, Log: log, Notes: notes, Host: "vps",
+		Now: func() time.Time { return now },
+	}
+
+	if _, err := d.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	if got := notes.Clears(); got != 2 {
+		t.Errorf("expected each check's note cleared when the listing failed, got %d clears", got)
+	}
+}
+
+func TestANoteWrittenByACheckInARunIsClearedByTheNextRun(t *testing.T) {
+	state := apptest.NewFakeDoctorState()
+	log := &apptest.FakeDoctorLog{}
+	notes := apptest.NewFakeDoctorNotes()
+	now := doctorNow
+	check := &apptest.FakeDoctorCheck{
+		CheckName: "widget", Verdict: application.DoctorFaulty, Reason: "misaligned",
+		Wait: time.Minute, Cap: 1,
+	}
+	d := application.Doctor{
+		Checks: application.DoctorChecks{check},
+		State:  state, Log: log, Notes: notes, Host: "vps",
+		Now: func() time.Time { return now },
+	}
+	d.Run(context.Background(), "", false)
+	d.Run(context.Background(), "", false)
+	key := application.DoctorNoteKey("vps", "widget")
+	if _, ok := notes.Get(key); !ok {
+		t.Fatalf("expected a note for the check left faulty")
+	}
+
+	check.Verdict = application.DoctorOK
+	if _, err := d.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	if _, ok := notes.Get(key); ok {
+		t.Errorf("expected the note cleared once the check was ok")
+	}
+}

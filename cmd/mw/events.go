@@ -104,14 +104,12 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 	// beads server (mw-gq6.596). The head, the view's reads of every bead, the
 	// notes and the comments, and the feed are read over one connection kept
 	// open (mw-gq6.600), and a note is read from bd once in followerNoteWait.
-	followerGatewayOptions = []beads.Option{beads.WithNoteCache(followerNoteWait), beads.WithKeptSaid(cmd.ErrOrStderr())}
 	if dir, err := config.Vault(); err == nil {
-		if db := beads.ServerHeadDB(dir); db != nil {
-			defer db.Close()
-			followerGatewayOptions = append(followerGatewayOptions, beads.WithHeadDB(db))
-		}
+		defer keepBeadsConnection(dir, cmd.ErrOrStderr(), beads.WithNoteCache(followerNoteWait))()
+	} else {
+		followerGatewayOptions = []beads.Option{beads.WithNoteCache(followerNoteWait), beads.WithKeptSaid(cmd.ErrOrStderr())}
+		defer func() { followerGatewayOptions = nil }()
 	}
-	defer func() { followerGatewayOptions = nil }()
 	gateway, host, err := posternGateway()
 	if err != nil {
 		return err

@@ -108,6 +108,24 @@ type TodoReminder struct {
 	Err io.Writer
 }
 
+// TodoDueCard is an open To do card that carries a due time, as the cheap read
+// of them says it: the card, its todo_due and the todo_due it was last
+// reminded for.
+type TodoDueCard struct {
+	ID       string
+	Due      string
+	Reminded string
+}
+
+// TodoDueReader is a tracker that can read the open To do cards that carry a due
+// time in one cheap read: the follower asks every TodoReminderEvery, and listing
+// the ready cards each time started a bd, several connections to the beads
+// server, a minute for as long as the follower ran (mw-gq6.608). A tracker that
+// is not one, or whose read fails, is asked for the ready cards as before.
+type TodoDueReader interface {
+	TodoDueCards(ctx context.Context) ([]TodoDueCard, error)
+}
+
 // Run reads the open cards and reminds him of each one due. A card is marked
 // reminded before the push is sent, so a pass that dies half-way never sends
 // twice; a push that fails takes the mark off again, so the next pass tries it
@@ -117,6 +135,9 @@ func (r TodoReminder) Run(ctx context.Context) (int, error) {
 	now := time.Now()
 	if r.Now != nil {
 		now = r.Now()
+	}
+	if !r.anyDue(ctx, now) {
+		return 0, nil
 	}
 	cards, err := r.Tracker.ReadyWithLabel(ctx, LabelHitlTodo)
 	if err != nil {
@@ -146,6 +167,38 @@ func (r TodoReminder) Run(ctx context.Context) (int, error) {
 		return sent, fmt.Errorf("a reminder was not sent: %s", strings.Join(failed, "; "))
 	}
 	return sent, nil
+}
+
+// anyDue says whether a card is due now and not yet reminded of it, from the
+// tracker's one cheap read of the cards with a due time. A card whose due is not
+// a time is said and passed over here as the pass over the ready cards passes it
+// over. With no such read, or when it fails, it says true: the ready cards are
+// then listed, as they always were.
+func (r TodoReminder) anyDue(ctx context.Context, now time.Time) bool {
+	reader, ok := r.Tracker.(TodoDueReader)
+	if !ok {
+		return true
+	}
+	cards, err := reader.TodoDueCards(ctx)
+	if err != nil {
+		return true
+	}
+	var passedOver []string
+	for _, card := range cards {
+		at, err := parseTodoDue(card.Due)
+		if err != nil {
+			passedOver = append(passedOver, fmt.Sprintf("%s: its todo_due is passed over: %v\n", card.ID, err))
+			continue
+		}
+		if !at.After(now) && strings.TrimSpace(card.Reminded) != strings.TrimSpace(card.Due) {
+			// The pass over the ready cards says the ones passed over itself.
+			return true
+		}
+	}
+	for _, line := range passedOver {
+		r.say("%s", line)
+	}
+	return false
 }
 
 // remind marks card reminded, sends the push, and takes the mark off again
