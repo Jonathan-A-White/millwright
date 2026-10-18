@@ -84,10 +84,15 @@ func isExpectMetric(metric string) bool {
 // story of the factory's own rig does.
 func OwesAnExpect(rig string) bool { return rig == FactoryRig }
 
+// ExpectRule is the whole rule of the Expect line, said once in every refusal
+// so that one refusal teaches all of it (mw-gq6.609): where the line goes, how
+// it begins, and what it may say.
+const ExpectRule = "the Expect line must be a line of its own in the acceptance field (the description is not read, and a line inside a sentence is not one), beginning 'Expect:', as " + ExpectForms
+
 // ExpectRefusal is what mw file says of a factory story whose Expect line is
 // missing or unreadable.
 func ExpectRefusal(err error) string {
-	return fmt.Sprintf("it is a %s story and %s: it needs a line %s", FactoryRig, err, ExpectForms)
+	return fmt.Sprintf("it is a %s story and %s: %s", FactoryRig, err, ExpectRule)
 }
 
 // ExpectRefusalIn is ExpectRefusal for a story whose description is known: an
@@ -95,7 +100,7 @@ func ExpectRefusal(err error) string {
 // since the line is read from the acceptance field only (mw-gq6.548).
 func ExpectRefusalIn(err error, description string) string {
 	if errors.Is(err, ErrNoExpect) && len(LinesBeginning(description, "Expect")) > 0 {
-		return fmt.Sprintf("it is a %s story and its Expect line is in the description, not the acceptance field: put it in the acceptance as %s", FactoryRig, ExpectForms)
+		return fmt.Sprintf("it is a %s story and its Expect line is in the description, not the acceptance field: %s", FactoryRig, ExpectRule)
 	}
 	return ExpectRefusal(err)
 }

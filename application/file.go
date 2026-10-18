@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -200,30 +201,14 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	if f.Tracker == nil {
 		return FiledPlan{}, fmt.Errorf("filing a plan: there is no work tracker to file it in")
 	}
-	if err := plan.Validate(); err != nil {
+	reasons, guests, rules, err := f.refusals(ctx, plan)
+	if len(reasons) > 0 {
+		return FiledPlan{}, &domain.PlanRefused{Reasons: reasons}
+	}
+	if err != nil {
 		return FiledPlan{}, err
 	}
 	order, err := plan.Order()
-	if err != nil {
-		return FiledPlan{}, err
-	}
-	if err := f.validateFormulas(ctx, plan, order); err != nil {
-		return FiledPlan{}, err
-	}
-	if err := f.validateFiles(plan, order); err != nil {
-		return FiledPlan{}, err
-	}
-	if err := validateTesterStories(plan, order); err != nil {
-		return FiledPlan{}, err
-	}
-	guests, err := f.guestRigsOf(ctx, plan)
-	if err != nil {
-		return FiledPlan{}, err
-	}
-	if err := f.checkGuests(guests); err != nil {
-		return FiledPlan{}, err
-	}
-	rules, err := f.requirementsOf(ctx, plan)
 	if err != nil {
 		return FiledPlan{}, err
 	}
@@ -349,6 +334,57 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	return filed, nil
 }
 
+// Check reads a plan as Run does and files none of it: it says every reason
+// the plan cannot be filed, across every story, in one *domain.PlanRefused, or
+// prints how many stories would be filed. Only a reading that fails (the
+// tracker or the rig's file cannot be read) stops it short of the rest.
+func (f File) Check(ctx context.Context, plan domain.Plan) error {
+	if f.Tracker == nil {
+		return fmt.Errorf("checking a plan: there is no work tracker to check it against")
+	}
+	reasons, _, _, err := f.refusals(ctx, plan)
+	if len(reasons) > 0 {
+		return &domain.PlanRefused{Reasons: reasons}
+	}
+	if err != nil {
+		return err
+	}
+	f.print(fmt.Sprintf("ok: %d stories would be filed\n", len(plan.Stories)))
+	return nil
+}
+
+// refusals is every reason the plan cannot be filed, one check after another and
+// none stopping the rest: what Run and Check both ask, so that a plan Check
+// passes is a plan Run does not refuse. It also returns the guest rigs and the
+// rig's requirements Run goes on to record. The error is a reading that failed;
+// the checks that did not need it have still been made.
+func (f File) refusals(ctx context.Context, plan domain.Plan) ([]string, []guestRig, domain.EpicRequirements, error) {
+	var reasons []string
+	var readErr error
+	note := func(err error) {
+		var refused *domain.PlanRefused
+		switch {
+		case err == nil:
+		case errors.As(err, &refused):
+			reasons = append(reasons, refused.Reasons...)
+		case readErr == nil:
+			readErr = err
+		}
+	}
+
+	note(plan.Validate())
+	reasons = append(reasons, f.validateFormulasOf(ctx, plan, &readErr)...)
+	reasons = append(reasons, f.validateFiles(plan.Stories, plan.Epic.Defaults)...)
+	reasons = append(reasons, validateTesterStories(plan.Stories, plan.Epic.Defaults)...)
+
+	guests, err := f.guestRigsOf(ctx, plan)
+	note(err)
+	note(f.checkGuests(guests))
+	rules, err := f.requirementsOf(ctx, plan)
+	note(err)
+	return reasons, guests, rules, readErr
+}
+
 // FormulaTitles is the port by which a tracker says what a formula's step
 // titles are, as the formula's file words them: {{story}} and {{title}} still
 // in them. A tracker that is not one cannot be asked, and the title check that
@@ -357,16 +393,17 @@ type FormulaTitles interface {
 	FormulaStepTitles(ctx context.Context, formula string) ([]string, error)
 }
 
-// validateFormulas refuses the whole plan, naming the story key, when a
-// story's path names a formula this tracker has not installed — before
-// anything is written, the same as plan.Validate does for the rest of a
-// path. It also refuses a story whose title, with what its formula's step
+// validateFormulasOf says, naming the story key, each story whose path names a
+// formula this tracker has not installed, as plan.Validate does for the rest of
+// a path. It also says each story whose title, with what its formula's step
 // titles add to it at the pour, is over the tracker's limit: such a story is
-// filed fine and then can never be dispatched (mw-gq6.244). The tracker is asked only when some story in the plan names a
-// formula at all, so a plan that never mentions one costs nothing extra.
-func (f File) validateFormulas(ctx context.Context, plan domain.Plan, order []domain.PlanStory) error {
+// filed fine and then can never be dispatched (mw-gq6.244). The tracker is asked
+// only when some story in the plan names a formula at all, so a plan that never
+// mentions one costs nothing extra. A tracker that cannot be asked puts its
+// error in readErr.
+func (f File) validateFormulasOf(ctx context.Context, plan domain.Plan, readErr *error) []string {
 	var needsCheck bool
-	for _, story := range order {
+	for _, story := range plan.Stories {
 		path, err := story.PathFrom(plan.Epic.Defaults)
 		if err == nil && path.Formula != "" {
 			needsCheck = true
@@ -379,83 +416,96 @@ func (f File) validateFormulas(ctx context.Context, plan domain.Plan, order []do
 
 	installed, err := f.Tracker.Formulas(ctx)
 	if err != nil {
-		return fmt.Errorf("checking which formulas are installed: %w", err)
+		if *readErr == nil {
+			*readErr = fmt.Errorf("checking which formulas are installed: %w", err)
+		}
+		return nil
 	}
+	var reasons []string
 	overheads := map[string]int{}
-	for _, story := range order {
+	for _, story := range plan.Stories {
 		path, err := story.PathFrom(plan.Epic.Defaults)
 		if err != nil {
 			continue
 		}
 		if err := path.ValidateFormula(installed); err != nil {
-			return fmt.Errorf("filing story %s: %w", story.Key, err)
+			reasons = append(reasons, fmt.Sprintf("filing story %s: %s", story.Key, err))
+			continue
 		}
-		if err := f.validateStepTitles(ctx, story, path.Formula, overheads); err != nil {
-			return err
+		reason, err := f.validateStepTitles(ctx, story, path.Formula, overheads)
+		if err != nil {
+			if *readErr == nil {
+				*readErr = err
+			}
+			continue
+		}
+		if reason != "" {
+			reasons = append(reasons, reason)
 		}
 	}
-	return nil
+	return reasons
 }
 
-// validateTesterStories refuses the whole plan, naming the story key, when a
-// Tester story in it (labelled tester, or worked by the tester formula) has no
-// 'Landed story:' line: such a story runs its whole session and then cannot
-// file a finding (mw-gq6.594). Before anything is written.
-func validateTesterStories(plan domain.Plan, order []domain.PlanStory) error {
-	for _, story := range order {
-		path, err := story.PathFrom(plan.Epic.Defaults)
+// validateTesterStories says, naming the story key, each Tester story in the
+// plan (labelled tester, or worked by the tester formula) that has no 'Landed
+// story:' line: such a story runs its whole session and then cannot file a
+// finding (mw-gq6.594).
+func validateTesterStories(stories []domain.PlanStory, defaults domain.Path) []string {
+	var reasons []string
+	for _, story := range stories {
+		path, err := story.PathFrom(defaults)
 		if err != nil {
 			continue
 		}
 		detail := StoryDetail{Description: story.Description, Labels: story.Labels}
 		detail.Story.Overrides = path
 		if NamesNoLandedStory(detail) {
-			return fmt.Errorf("filing story %s: it is a Tester story and its description has no %q line, so its session could not file a finding; add the line",
-				story.Key, TesterLandedLine+"<id>")
+			reasons = append(reasons, fmt.Sprintf("filing story %s: it is a Tester story and its description has no %q line, so its session could not file a finding; add the line",
+				story.Key, TesterLandedLine+"<id>"))
 		}
 	}
-	return nil
+	return reasons
 }
 
-// validateFiles refuses the whole plan, naming the story key, when a story's
-// files key names a crowded directory, as mw path set refuses it (mw-gq6.442):
-// before anything is written.
-func (f File) validateFiles(plan domain.Plan, order []domain.PlanStory) error {
-	for _, story := range order {
-		path, err := story.PathFrom(plan.Epic.Defaults)
+// validateFiles says, naming the story key, each story whose files key names a
+// crowded directory, as mw path set refuses it (mw-gq6.442).
+func (f File) validateFiles(stories []domain.PlanStory, defaults domain.Path) []string {
+	var reasons []string
+	for _, story := range stories {
+		path, err := story.PathFrom(defaults)
 		if err != nil {
 			continue
 		}
 		if err := crowdedFiles(f.Rigs, f.RigFiles, path); err != nil {
-			return fmt.Errorf("filing story %s: %w", story.Key, err)
+			reasons = append(reasons, fmt.Sprintf("filing story %s: %s", story.Key, err))
 		}
 	}
-	return nil
+	return reasons
 }
 
-// validateStepTitles refuses a story whose title, plus the most its formula's
-// step titles put before it, is over domain.MaxTitleLength. The titles of a
-// formula are read once however many stories name it.
-func (f File) validateStepTitles(ctx context.Context, story domain.PlanStory, formula string, overheads map[string]int) error {
+// validateStepTitles says why a story is refused whose title, plus the most its
+// formula's step titles put before it, is over domain.MaxTitleLength, or "" when
+// it fits. The titles of a formula are read once however many stories name it.
+func (f File) validateStepTitles(ctx context.Context, story domain.PlanStory, formula string, overheads map[string]int) (string, error) {
 	reader, ok := f.Tracker.(FormulaTitles)
 	if !ok || formula == "" {
-		return nil
+		return "", nil
 	}
 	overhead, known := overheads[formula]
 	if !known {
 		titles, err := reader.FormulaStepTitles(ctx, formula)
 		if err != nil {
-			return fmt.Errorf("reading the step titles of the formula %s: %w", formula, err)
+			return "", fmt.Errorf("reading the step titles of the formula %s: %w", formula, err)
 		}
 		overhead = domain.StepTitleOverhead(titles)
 		overheads[formula] = overhead
 	}
 	if n := len(story.Title); n+overhead > domain.MaxTitleLength {
-		return fmt.Errorf("filing story %s: its title is %d bytes, and pouring the formula %s adds up to %d to it in a step title, "+
+		return fmt.Sprintf("filing story %s: its title is %d bytes, and pouring the formula %s adds up to %d to it in a step title, "+
 			"%d in all, and the tracker takes at most %d: shorten the title by %d",
-			story.Key, n, formula, overhead, n+overhead, domain.MaxTitleLength, n+overhead-domain.MaxTitleLength)
+			story.Key, n, formula, overhead, n+overhead, domain.MaxTitleLength, n+overhead-domain.MaxTitleLength), nil
 	}
-	return nil
+	return "", nil
 }
 
 // print writes one block of the report, when there is somewhere to write it.

@@ -27,6 +27,7 @@ func newFileCmd() *cobra.Command {
 	var waive []string
 	var because string
 	var guestAsk string
+	var check bool
 
 	cmd := &cobra.Command{
 		Use:   "file <plan.json>",
@@ -55,7 +56,10 @@ func newFileCmd() *cobra.Command {
 			"A rig's file may also say guest = \"<owner>\": a guest repo, whose owner is not the Governor.\n" +
 			"A plan with a story in one is refused, naming the rig and the owner, and nothing is\n" +
 			"written, unless the owner asked: --guest-ask \"<their words>\", which are written on the\n" +
-			"epic. mw status and mw brief show 'guest: <owner>' beside such a rig's stories.",
+			"epic. mw status and mw brief show 'guest: <owner>' beside such a rig's stories.\n\n" +
+			"--check runs every one of these checks and files nothing: it prints every refusal across\n" +
+			"every story of the plan at once, exits non-zero if there is any, and otherwise prints\n" +
+			"'ok: <n> stories would be filed'. --waive and --guest-ask count as they do when filing.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			written, err := os.ReadFile(args[0])
@@ -78,7 +82,7 @@ func newFileCmd() *cobra.Command {
 
 			// A rig table that cannot be read costs the plan only the wrong-rig warning.
 			rigs, _ := config.Rigs()
-			_, err = application.File{
+			filing := application.File{
 				Tracker:  gateway,
 				Rules:    vault.New(dir),
 				Rigs:     rigs,
@@ -88,7 +92,11 @@ func newFileCmd() *cobra.Command {
 				Contacts: contactBook(),
 				Out:      cmd.OutOrStdout(),
 				Approve:  approval(cmd, approved),
-			}.Run(cmd.Context(), plan)
+			}
+			if check {
+				return filing.Check(cmd.Context(), plan)
+			}
+			_, err = filing.Run(cmd.Context(), plan)
 			return err
 		},
 	}
@@ -101,6 +109,8 @@ func newFileCmd() *cobra.Command {
 		"the Governor's own words for waiving it, written on the epic")
 	cmd.Flags().StringVar(&guestAsk, "guest-ask", "",
 		"the owner's own words asking for work in a guest rig, written on the epic; needed to file a plan in one")
+	cmd.Flags().BoolVar(&check, "check", false,
+		"run every check filing runs, print every refusal across the plan, and file nothing")
 	return cmd
 }
 
