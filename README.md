@@ -321,6 +321,13 @@ priority, age and size, a line under one the files guard would hold, and then th
 five blocked stories with the stories each waits on. The Postern view's `hosts[].up_next`
 carries the first three per host. It only reads.
 
+`mw fold <rig> [--min N]` lists the rig's open and held bugs for the Mayor's weekly fold pass: grouped under
+their `class:<slug>` label (`mw tester file --class`), else under the screen their title names (the words before
+the first `:` after the app name, as in `Lampas Review:`), the largest group first, only groups of `--min`
+(default 3) or more, each bug with its id and title. A bug a session is working is shown and marked `in progress:
+do not fold`; iced bugs are left out. It runs no model and writes nothing. The fold rule: a folded bug keeps its
+own check in the shared fix's test and closes only when it passes (mw-gq6.588).
+
 A host has **room** for a story of any host, `auto` or named, only while its
 1-minute load average is under `room_load_per_core` of a core each (default 1.0,
 so under its core count) and at least `room_min_free_mb` of memory is available

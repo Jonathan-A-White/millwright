@@ -58,7 +58,7 @@ Each use case's application/ files are in [docs/codemap-detail.md](codemap-detai
 | Event* | cmd/mw/events.go | event_follow |
 | Prompt*, Cards, Todo* | cmd/mw/prompt.go, cmd/mw/card.go, cmd/mw/todo.go, cmd/mw/todo_search.go, infra/todoindex/index.go | {prompt,card,todo*} |
 | Grist* | cmd/mw/grist.go, cmd/mw/gristsmoke.go | {grist*,scorer} |
-| Triage*, Queue, Sleep | infra/beads/triage.go, cmd/mw/triage.go, cmd/mw/queue.go, cmd/mw/sleep.go | - |
+| Triage*, Queue, Fold, Sleep | infra/beads/triage.go, cmd/mw/triage.go, cmd/mw/queue.go, cmd/mw/fold.go, cmd/mw/sleep.go | - |
 
 cmd/mw/root.go, cmd/mw/version.go
 
