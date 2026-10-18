@@ -53,6 +53,7 @@ var StarvedHolds = map[string]string{
 	"tester-no-landed-story": "tester names no landed story",
 	"attempts-exhausted":     "attempts exhausted",
 	"handed-back":            "handed back",
+	"needs-files-key":        "needs files key",
 	"shared-files":           "files overlap",
 	"testers-per-rig":        "damper",
 	"cap":                    "cap",

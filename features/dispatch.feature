@@ -1077,51 +1077,77 @@ Feature: Dispatching the stories this host is ready to work
     Then no session was started
     And dispatch passed over "mw-gq6.2", saying: waiting: shares src/Preface.tsx with mw-gq6.1
 
-  # A story with no files key on a rig that expects one (files_expected = true in
-  # its file in the vault) overlaps every story of the rig (mw-gq6.390): the
-  # Mayor un-holds a story without mw release, so no one is told its key is
-  # missing, and a story that names nothing is not known to touch nothing.
+  # A ready story with no files key on a rig that expects one (files_expected =
+  # true in its file in the vault) is held at the needs-files-key gate and holds
+  # nothing else back (mw-gq6.599): the Mayor un-holds a story without mw release,
+  # so no one is told its key is missing, and one such story used to hold the
+  # whole rig. A running one overlaps only by what its branch has changed.
 
-  Scenario: On a rig that expects files, a story with no files key waits for a running story
+  Scenario: On a rig that expects files, a story with no files key is not started and blocks no sibling
+    Given the rig "millwright" expects a files key
+    And a ready story "mw-gq6.2" of that epic
+    And a ready story "mw-gq6.3" of that epic expecting to change "src/x.ts"
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.3"
+    And the story "mw-gq6.2" is not claimed
+    And dispatch passed over "mw-gq6.2" at the gate "needs-files-key"
+    And dispatch passed over "mw-gq6.2", saying: needs files key: mw path set mw-gq6.2 files=<csv>
+
+  Scenario: On a rig that expects files, a story with no files key is not started when nothing else is claimed
+    Given the rig "millwright" expects a files key
+    And a ready story "mw-gq6.2" of that epic
+    When dispatch runs on "vps" with a cap of 3
+    Then no session was started
+    And the story "mw-gq6.2" is not claimed
+
+  Scenario: On a rig that expects files, a story with no files key does not wait for a running story
     Given the rig "millwright" expects a files key
     And a story "mw-gq6.1" of that epic is already running here, expecting to change "a.go"
     And a ready story "mw-gq6.2" of that epic
     When dispatch runs on "vps" with a cap of 3
     Then no session was started
-    And the story "mw-gq6.2" is not claimed
-    And dispatch passed over "mw-gq6.2", saying: waiting: no files key (millwright expects one), so it shares every file with mw-gq6.1
+    And dispatch passed over "mw-gq6.2" at the gate "needs-files-key"
 
-  Scenario: On a rig that expects files, a running story with no files key keeps a ready story waiting
+  Scenario: On a rig that expects files, a running story with no files key holds a story naming a file its branch changed
+    Given the rig "millwright" expects a files key
+    And a story "mw-gq6.1" of that epic is already running here, its branch changing "src/Reader.tsx"
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Reader.tsx"
+    When dispatch runs on "vps" with a cap of 3
+    Then no session was started
+    And the story "mw-gq6.2" is not claimed
+    And dispatch passed over "mw-gq6.2", saying: waiting: shares src/Reader.tsx with mw-gq6.1
+
+  Scenario: On a rig that expects files, a running story with no files key holds back no story naming other files
+    Given the rig "millwright" expects a files key
+    And a story "mw-gq6.1" of that epic is already running here, its branch changing "src/Reader.tsx"
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Preface.tsx"
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.2"
+
+  Scenario: On a rig that expects files, a running story with no files key and no changes yet holds back no story
     Given the rig "millwright" expects a files key
     And a story "mw-gq6.1" of that epic is already running here
     And a ready story "mw-gq6.2" of that epic expecting to change "a.go"
     When dispatch runs on "vps" with a cap of 3
-    Then no session was started
-    And the story "mw-gq6.2" is not claimed
-    And dispatch passed over "mw-gq6.2", saying: waiting: mw-gq6.1 has no files key (millwright expects one), so it shares every file with it
-
-  Scenario: On a rig that expects files, a story with no files key starts when nothing else is claimed
-    Given the rig "millwright" expects a files key
-    And a ready story "mw-gq6.2" of that epic
-    When dispatch runs on "vps" with a cap of 3
     Then one session was started, for "mw-gq6.2"
-    And the story "mw-gq6.2" is claimed by this host
 
-  Scenario: On a rig that expects files, a story with no files key waits for a story running on the other host
+  Scenario: On a rig that expects files, a story starts on the next dispatch once its files key is set
     Given the rig "millwright" expects a files key
-    And a story "mw-gq6.1" of that epic is running on "laptop", expecting to change "a.go"
     And a ready story "mw-gq6.2" of that epic
     When dispatch runs on "vps" with a cap of 3
     Then no session was started
-    And dispatch passed over "mw-gq6.2", saying: waiting: no files key (millwright expects one), so it shares every file with mw-gq6.1 (running on laptop)
+    When the story "mw-gq6.2" is pathed with files "src/x.ts"
+    And dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.2"
 
-  Scenario: On a rig that expects files, of two ready stories with no files key the first is started
+  Scenario: On a rig that expects files, of two ready stories with no files key neither is started
     Given the rig "millwright" expects a files key
     And a ready story "mw-gq6.2" of that epic
     And a ready story "mw-gq6.3" of that epic
     When dispatch runs on "vps" with a cap of 3
-    Then one session was started, for "mw-gq6.2"
-    And dispatch passed over "mw-gq6.3", saying: waiting: no files key (millwright expects one), so it shares every file with mw-gq6.2
+    Then no session was started
+    And dispatch passed over "mw-gq6.2" at the gate "needs-files-key"
+    And dispatch passed over "mw-gq6.3" at the gate "needs-files-key"
 
   # A Tester story commits nothing, so it claims no files (mw-gq6.413).
 
@@ -1161,6 +1187,12 @@ Feature: Dispatching the stories this host is ready to work
     When mw status is read on "vps"
     Then mw status lists "mw-gq6.2" as ready, saying "waiting: shares src/Reader.tsx with mw-gq6.1"
     And mw status lists "mw-gq6.3" as ready, saying nothing of waiting
+
+  Scenario: mw status says a story with no files key needs one
+    Given the rig "millwright" expects a files key
+    And a ready story "mw-gq6.2" of that epic
+    When mw status is read on "vps"
+    Then mw status lists "mw-gq6.2" as ready, saying "needs files key: mw path set mw-gq6.2 files=<csv>"
 
   Scenario: mw status shows a story waiting on what a running story's branch has changed
     Given a story "mw-gq6.1" of that epic is already running here, its branch changing "src/Reader.tsx"

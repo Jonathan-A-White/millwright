@@ -1186,7 +1186,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 // dispatch finds it, by id; nil when none does. A branch whose changes cannot
 // be read is said, and holds nothing back.
 func (s Status) sharing(ctx context.Context, running []RunningStory, ready []StoryDetail) map[string]FileShare {
-	shares := fileShares{changes: s.Changes, rigs: s.Rigs}
+	shares := fileShares{changes: s.Changes, rules: s.Rules, rigs: s.Rigs}
 	for _, rs := range running {
 		shares.add(rs.Detail)
 	}

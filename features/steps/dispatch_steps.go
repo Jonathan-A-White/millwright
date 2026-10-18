@@ -224,6 +224,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^dispatch would start, in this order:$`, c.dispatchWouldStartInOrder)
 	ctx.Then(`^the dry run report lists them in that order$`, c.theReportListsThemInOrder)
 	ctx.Then(`^dispatch passed over "([^"]*)", saying: (.+)$`, c.dispatchPassedOver)
+	ctx.Then(`^dispatch passed over "([^"]*)" at the gate "([^"]*)"$`, c.dispatchPassedOverAtGate)
 	ctx.Then(`^dispatch started nothing, leaving the dead window of "([^"]*)" as it was$`, c.dispatchStartedNothingNewAt)
 	ctx.Then(`^the branch of "([^"]*)" still has its (\d+) commits?$`, c.theBranchStillHasItsCommits)
 	ctx.Then(`^dispatch said once that "([^"]*)" is refused and waits for the Mayor$`, c.dispatchSaidOnceItIsRefused)
@@ -1665,6 +1666,23 @@ func (c *dispatchContext) dispatchPassedOver(id, saying string) error {
 			return fmt.Errorf("expected the report to print why %s was passed over, got:\n%s", id, printed)
 		}
 		return nil
+	}
+	return fmt.Errorf("expected %s to be passed over, got %+v", id, report.Passed)
+}
+
+// dispatchPassedOverAtGate says the story was passed over by the named gate.
+func (c *dispatchContext) dispatchPassedOverAtGate(id, gate string) error {
+	report, err := c.dispatched()
+	if err != nil {
+		return err
+	}
+	for _, passed := range report.Passed {
+		if passed.StoryID == id {
+			if passed.Gate != gate {
+				return fmt.Errorf("expected %s to be passed over at the gate %q, got %q (%s)", id, gate, passed.Gate, passed.Why)
+			}
+			return nil
+		}
 	}
 	return fmt.Errorf("expected %s to be passed over, got %+v", id, report.Passed)
 }

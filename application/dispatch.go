@@ -228,8 +228,8 @@ type Dispatch struct {
 	Changes BranchChanges
 
 	// Rules is the rig files of the vault. On a rig whose file says files_expected
-	// = true, a story with no files key overlaps every story of the rig
-	// (mw-gq6.390). A nil Rules expects nothing of any rig.
+	// = true, a ready story with no files key waits at the needs-files-key gate
+	// (mw-gq6.599). A nil Rules expects nothing of any rig.
 	Rules EpicRules
 
 	// Rechecks re-runs a nightly-suite bug's spec on its rig's main before the bug
@@ -956,12 +956,23 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// gate: needs-files-key
+		// A story with no files key on a rig that expects one waits, unclaimed,
+		// until it has one: it takes none of the sessions and holds back no other
+		// story (mw-gq6.599). `mw path set <id> files=<csv>` ends it.
+		share, sharing := shares.shared(ctx, detail)
+		if sharing && share.Unkeyed == NeedsFilesKey {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "needs-files-key", Why: share.String()})
+			held.pass(id)
+			continue
+		}
+
 		// gate: shared-files
 		// A story that names a file a running story on its rig names too, or has
 		// changed on its branch, waits for it, unclaimed, before the cap: it
 		// takes none of the sessions, and the next ready story is started in its
 		// place (mw-gq6.349).
-		if share, sharing := shares.shared(ctx, detail); sharing {
+		if sharing {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "shared-files", Why: share.String()})
 			held.hold(id)
 			continue

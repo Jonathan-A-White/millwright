@@ -18,38 +18,30 @@ type FileShare struct {
 	// Host is where the story waited for is claimed, when that is not the host
 	// asking (mw-gq6.389); empty for one of its own.
 	Host string
-	// Rig is the rig the two stories are on, said when a story names no files
-	// on a rig that expects them (mw-gq6.390); Unkeyed says which of the two
-	// that is, and File is empty then.
-	Rig     string
+	// Unkeyed says why the ready story waits when it is not for a file a
+	// running story shares: NeedsFilesKey, and File and Host are empty then.
 	Unkeyed Unkeyed
 }
 
-// Unkeyed is which story of a share names no files key on a rig that expects
-// one: such a story may change any file, so it shares every file with every
-// story of its rig (mw-gq6.390).
+// Unkeyed is what a share is for. A ready story that names no files key on a
+// rig that expects one is held until it has one, and holds nothing else back
+// (mw-gq6.599); a running story that names none overlaps only by the files its
+// branch has changed, as one that names files does.
 type Unkeyed int
 
 const (
-	// KeyedBoth is a share of a file two stories name.
+	// KeyedBoth is a share of a file two stories name or have changed.
 	KeyedBoth Unkeyed = iota
-	// ReadyUnkeyed is a ready story that names no files, waiting for a running one.
-	ReadyUnkeyed
-	// RunningUnkeyed is a running story that names no files, which a ready one waits for.
-	RunningUnkeyed
+	// NeedsFilesKey is a ready story that names no files, on a rig that expects them.
+	NeedsFilesKey
 )
 
 // String is the share as mw dispatch and mw status say it.
 func (s FileShare) String() string {
-	var line string
-	switch s.Unkeyed {
-	case ReadyUnkeyed:
-		line = fmt.Sprintf("waiting: no files key (%s expects one), so it shares every file with %s", s.Rig, s.With)
-	case RunningUnkeyed:
-		line = fmt.Sprintf("waiting: %s has no files key (%s expects one), so it shares every file with it", s.With, s.Rig)
-	default:
-		line = fmt.Sprintf("waiting: shares %s with %s", s.File, s.With)
+	if s.Unkeyed == NeedsFilesKey {
+		return fmt.Sprintf("needs files key: mw path set %s files=<csv>", s.With)
 	}
+	line := fmt.Sprintf("waiting: shares %s with %s", s.File, s.With)
 	if s.Host != "" {
 		line += fmt.Sprintf(" (running on %s)", s.Host)
 	}
@@ -58,8 +50,9 @@ func (s FileShare) String() string {
 
 // fileShares finds the running story a ready one shares a file with. A ready
 // story that names no files shares none, and is dispatched as it always was,
-// unless its rig expects a files key (mw-gq6.390): then it shares every file
-// with every story of the rig, as a running one that names none does. A story
+// unless its rig expects a files key: then it needs one (mw-gq6.599) and is
+// held for it, holding nothing else back. A running story that names none is
+// compared by what its branch has changed, as one that names files is. A story
 // of the tester formula that names none claims no files, and neither waits nor
 // is waited for (mw-gq6.413).
 // What a running story's branch has changed is read once a pass, and only for
@@ -113,22 +106,13 @@ func (f *fileShares) shared(ctx context.Context, ready StoryDetail) (FileShare, 
 		// A branch an earlier attempt left, with files changed on it, says what
 		// the story touches as well as a files key does.
 		if ours = f.branchChanged(ctx, ready); len(ours) == 0 {
-			for _, running := range f.running {
-				theirs := running.Merged()
-				if running.Story.ID != ready.Story.ID && theirs.Rig == path.Rig && !claimsNoFiles(theirs) {
-					return FileShare{With: running.Story.ID, Host: f.away[running.Story.ID], Rig: path.Rig, Unkeyed: ReadyUnkeyed}, true
-				}
-			}
-			return FileShare{}, false
+			return FileShare{With: ready.Story.ID, Unkeyed: NeedsFilesKey}, true
 		}
 	}
 	for _, running := range f.running {
 		theirs := running.Merged()
 		if running.Story.ID == ready.Story.ID || theirs.Rig != path.Rig || claimsNoFiles(theirs) {
 			continue
-		}
-		if expects && len(domain.FileList(theirs.Files)) == 0 {
-			return FileShare{With: running.Story.ID, Host: f.away[running.Story.ID], Rig: path.Rig, Unkeyed: RunningUnkeyed}, true
 		}
 		// What the story has really changed, as mw next recorded it where any host
 		// reads it, counts with its files key (mw-gq6.406).

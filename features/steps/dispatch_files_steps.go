@@ -28,6 +28,7 @@ func (c *dispatchContext) registerFileSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the branch of "([^"]*)" has a commit changing "([^"]*)"$`, c.theBranchHasACommitChanging)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here under the formula "([^"]*)"$`, c.aStoryRunningUnderTheFormula)
 	ctx.Given(`^the rig "([^"]*)" expects a files key$`, c.theRigExpectsAFilesKey)
+	ctx.When(`^the story "([^"]*)" is pathed with files "([^"]*)"$`, c.theStoryIsPathedWithFiles)
 	ctx.Given(`^the story "([^"]*)" has recorded "([^"]*)" as changed$`, c.theStoryHasRecordedAsChanged)
 	ctx.When(`^mw status is read on "([^"]*)"$`, c.mwStatusIsReadOn)
 	ctx.Then(`^mw status lists "([^"]*)" as ready, saying "([^"]*)"$`, c.mwStatusListsAsReadySaying)
@@ -42,6 +43,12 @@ func (c *dispatchContext) theRigExpectsAFilesKey(rigName string) error {
 	}
 	c.rules.Require(rigName, domain.EpicRequirements{FilesExpected: true})
 	return nil
+}
+
+// theStoryIsPathedWithFiles is mw path set <id> files=<csv>: the key is
+// written to the story's metadata and nothing else changes (mw-gq6.599).
+func (c *dispatchContext) theStoryIsPathedWithFiles(id, files string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{"files": files})
 }
 
 func (c *dispatchContext) aReadyStoryExpectingToChange(id, files string) error {
@@ -124,8 +131,13 @@ func (c *dispatchContext) theBranchHasACommitChanging(id, file string) error {
 // the real worktrees adapter to read a running story's branch through.
 func (c *dispatchContext) mwStatusIsReadOn(host string) error {
 	c.out.Reset()
+	var rules application.EpicRules
+	if c.rules != nil {
+		rules = c.rules
+	}
 	c.status, c.statusErr = application.Status{
 		Tracker: c.tracker,
+		Rules:   rules,
 		Host:    host,
 		Seat:    "builder",
 		Rigs:    map[string]string{"millwright": c.rig},
