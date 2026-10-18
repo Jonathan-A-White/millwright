@@ -48,9 +48,15 @@ func (g *Gateway) ReadyForHost(ctx context.Context, host string) ([]application.
 // by a label, so bd applies its own idea of blocked, held and claimed, and
 // unlike ReadyForHost it neither asks for unassigned beads nor drops the ones
 // whose Path names no host: a bead for the Governor is nobody's to dispatch.
+// A Gateway with a kept connection reads it from the live beads as bd's idea of
+// ready is applied there (keptwork.go), and StoryState from the story's labels
+// (mw-gq6.613).
 func (g *Gateway) ReadyWithLabel(ctx context.Context, label string) ([]application.StoryDetail, error) {
 	if strings.TrimSpace(label) == "" {
 		return nil, fmt.Errorf("which label are the ready stories carrying?")
+	}
+	if live, ok := g.liveOverConnection(ctx); ok {
+		return live.readyWithLabel(label), nil
 	}
 	out, err := g.call(ctx, "ready", "--label", label, "--exclude-type", "epic", "--limit", "0", "--json")
 	if err != nil {
@@ -409,6 +415,9 @@ func (g *Gateway) StoryState(ctx context.Context, id, dimension string) (string,
 		return "", fmt.Errorf("reading a state: which story?")
 	case strings.TrimSpace(dimension) == "":
 		return "", fmt.Errorf("reading the state of %s: which dimension?", id)
+	}
+	if value, ok := g.stateOverConnection(ctx, id, dimension); ok {
+		return value, nil
 	}
 	out, _, err := g.run(ctx, "state", id, dimension)
 	if err != nil {

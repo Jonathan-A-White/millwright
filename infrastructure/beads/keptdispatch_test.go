@@ -82,6 +82,16 @@ func (c factoryConn) QueryContext(_ context.Context, query string, _ []driver.Na
 			rows = append(rows, []driver.Value{b[0], b[1], b[4], b[5], b[8]})
 		}
 		return &keptRows{cols: []string{"id", "title", "status", "issue_type", "created_at"}, rows: rows}, nil
+	case strings.Contains(q, "from labels where issue_id = '"):
+		// One bead's labels under a dimension, as a story state asks.
+		asked := regexp.MustCompile(`issue_id = '([^']*)' and label like '([^']*)%'`).FindStringSubmatch(q)
+		rows := [][]driver.Value{}
+		for _, l := range s.labels {
+			if asked != nil && l[0] == asked[1] && strings.HasPrefix(strings.ToLower(l[1]), asked[2]) {
+				rows = append(rows, []driver.Value{l[1]})
+			}
+		}
+		return &keptRows{cols: []string{"label"}, rows: rows}, nil
 	case strings.Contains(q, "label from labels"):
 		rows := [][]driver.Value{}
 		for _, l := range s.labels {
