@@ -104,6 +104,10 @@ type FakeTracker struct {
 	packChecks int
 	// GCErr, when set, is what GC reports instead of collecting.
 	GCErr error
+	// RepackErr, when set, is what a successful Sync says its check of the
+	// remote caches found wrong, once (TakeRepackErr), as the beads gateway's
+	// failed repack is (mw-gq6.619).
+	RepackErr error
 	// history is how many commits HistoryCommits reports; squashes counts
 	// the calls to SquashHistory that got through.
 	history  int
@@ -2218,6 +2222,15 @@ func (f *FakeTracker) Sync(_ context.Context) error {
 	}
 	f.packChecks++
 	return nil
+}
+
+// TakeRepackErr implements application.TrackerRepackSaid.
+func (f *FakeTracker) TakeRepackErr() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	err := f.RepackErr
+	f.RepackErr = nil
+	return err
 }
 
 // PackChecks reports how many successful synchronisation cycles checked the

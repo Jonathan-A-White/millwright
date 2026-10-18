@@ -281,3 +281,44 @@ func TestACollectionThatFailsIsSaidAndTriedAgain(t *testing.T) {
 		t.Fatalf("expected a failed collection not to be recorded as done, got %q", last)
 	}
 }
+
+// A history that cannot be counted is left as it was, and the sync's line says
+// so (mw-gq6.619): the squash never being tried must not read as a squash that
+// was not needed.
+func TestAHistoryThatCannotBeCountedIsSaid(t *testing.T) {
+	sync, tracker := keepingAHistory(t, 96_100)
+	tracker.HistoryErr = errors.New("bd sql is not supported in embedded mode")
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected an uncountable history not to fail the sync, got %v", err)
+	}
+	if report.SquashErr == nil {
+		t.Fatalf("expected the report to carry why the history was not counted, got nil")
+	}
+	line := report.String()
+	if !strings.Contains(line, "beads history not squashed: counting the history: bd sql is not supported in embedded mode") {
+		t.Fatalf("expected the sync's line to name the step and the error, got %q", line)
+	}
+	if !report.GCed {
+		t.Fatalf("expected the day's collection to run all the same")
+	}
+}
+
+// A repack of the remote caches that fails after a sync that got through is
+// said on the sync's line, and does not fail the sync (mw-gq6.619).
+func TestARepackThatFailsIsSaidAndDoesNotFailTheSync(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	tracker.RepackErr = errors.New("git repack: Permission denied")
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected a failed repack not to fail the sync, got %v", err)
+	}
+	if report.RepackErr == nil {
+		t.Fatalf("expected the report to carry the failed repack, got nil")
+	}
+	if line := report.String(); !strings.Contains(line, "remote cache repack failed: git repack: Permission denied") {
+		t.Fatalf("expected the sync's line to name the step and the error, got %q", line)
+	}
+}

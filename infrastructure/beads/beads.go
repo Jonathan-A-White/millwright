@@ -69,6 +69,10 @@ type Gateway struct {
 	keptSaid io.Writer
 	// notes keeps what Note read for a while; nil reads every note from bd.
 	notes *noteCache
+	// repackErr is why the repack the last successful Sync ended with failed,
+	// and repackMu guards it (TakeRepackErr).
+	repackMu  sync.Mutex
+	repackErr error
 }
 
 // Gateway satisfies the ports.

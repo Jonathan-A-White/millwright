@@ -323,6 +323,15 @@ type TrackerSync interface {
 	GC(ctx context.Context) error
 }
 
+// TrackerRepackSaid is what a tracker may say besides: the housekeeping it
+// does at the end of a Sync that got through — repacking the remote caches —
+// never fails the sync, but a failure there is not to go unsaid
+// (mw-gq6.619). TakeRepackErr gives why the last such repack failed, once;
+// nil when it got through or none was due.
+type TrackerRepackSaid interface {
+	TakeRepackErr() error
+}
+
 // TrackerHistory is the history the one beads database keeps of itself: a
 // commit for every write, about 35 KB each on the Laptop's, and every one of
 // them reachable, so no collection ever reclaims any (mw-gq6.455: 96,100
@@ -558,6 +567,11 @@ type SyncReport struct {
 	// collection is tried again on the next sync.
 	GCErr error
 
+	// RepackErr is why the repack of the remote caches, which a sync that got
+	// through ends with, failed; nil when it got through or none was due. It
+	// is never the sync's own error (mw-gq6.619).
+	RepackErr error
+
 	// Squashed is how many commits of the beads history this sync folded
 	// into one, on the host that keeps the one database. Zero on most syncs.
 	Squashed int
@@ -638,6 +652,9 @@ func (r SyncReport) String() string {
 	}
 	if r.SquashErr != nil {
 		fmt.Fprintf(&b, "; beads history not squashed: %v", r.SquashErr)
+	}
+	if r.RepackErr != nil {
+		fmt.Fprintf(&b, "; remote cache repack failed: %v", r.RepackErr)
 	}
 	if r.GCed {
 		b.WriteString("; garbage collected")
@@ -908,7 +925,7 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 			}
 		case BeadsSyncShared:
 		default:
-			retried, err := s.syncTrackerMarking(ctx)
+			retried, err := s.syncTrackerMarking(ctx, &report)
 			s.maybeGC(ctx, &report)
 			if err != nil {
 				return report, fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
@@ -1083,7 +1100,7 @@ func (s Sync) backupIfDue(ctx context.Context, report *SyncReport) {
 		report.BackupMetered = true
 		return
 	}
-	retried, err := s.syncTrackerMarking(ctx)
+	retried, err := s.syncTrackerMarking(ctx, report)
 	report.Retried = retried
 	if err != nil {
 		report.BackupErr = err
@@ -1155,7 +1172,7 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 	s.noteTicks(ctx)
 	s.noteMwCommit(ctx)
 
-	retried, err := s.syncTrackerMarking(ctx)
+	retried, err := s.syncTrackerMarking(ctx, &report)
 	// A cycle that halted still went through the database, which keeps growing
 	// whether or not the remote answers: the collection runs on its own
 	// cadence either way (mw-gq6.449).
@@ -1226,7 +1243,10 @@ func (s Sync) maybeSquash(ctx context.Context, report SyncReport) (int, error) {
 		return 0, nil
 	}
 	commits, err := s.History.HistoryCommits(ctx)
-	if err != nil || commits < s.squashAt() {
+	if err != nil {
+		return 0, fmt.Errorf("counting the history: %w", err)
+	}
+	if commits < s.squashAt() {
 		return 0, nil
 	}
 	if err := s.History.SquashHistory(ctx); err != nil {
@@ -1327,12 +1347,15 @@ func (s Sync) syncTracker(ctx context.Context) (string, error) {
 // publishes the halt into the tracker for the other host to read once it
 // can; SyncHalts is read straight by this host's own mw status and mw nudge,
 // so it must not wait on the very sync that is stuck to carry the word.
-func (s Sync) syncTrackerMarking(ctx context.Context) (string, error) {
+func (s Sync) syncTrackerMarking(ctx context.Context, report *SyncReport) (string, error) {
 	retried, err := s.syncTracker(ctx)
 	if err != nil {
 		RecordSyncHalt(ctx, s.SyncHalts, err, s.now())
 	} else {
 		ClearSyncHalt(ctx, s.SyncHalts)
+		if saying, ok := s.Tracker.(TrackerRepackSaid); ok {
+			report.RepackErr = saying.TakeRepackErr()
+		}
 	}
 	return retried, err
 }

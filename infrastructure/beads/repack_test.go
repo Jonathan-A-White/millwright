@@ -323,6 +323,13 @@ func TestSyncSwallowsAFailureRepackingACrowdedCache(t *testing.T) {
 	if err := gateway.Sync(context.Background()); err != nil {
 		t.Fatalf("expected a repack failure not to fail the sync, got %v", err)
 	}
+	// ... but it is said, for the sync's line to carry (mw-gq6.619).
+	if err := gateway.TakeRepackErr(); err == nil {
+		t.Fatalf("expected the failed repack to be kept for the sync's report, got nil")
+	}
+	if err := gateway.TakeRepackErr(); err != nil {
+		t.Fatalf("expected a failed repack to be said once, got %v again", err)
+	}
 }
 
 // TestSyncAlsoRepacksACacheWhosePacksTotalMoreThanTheByteThreshold is

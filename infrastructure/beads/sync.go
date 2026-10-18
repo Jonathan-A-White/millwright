@@ -20,11 +20,12 @@ import (
 // Gateway also brings the one beads database level with the other host's, and
 // is where a read-only reader of the hosts' notes — mw status — reads them.
 var (
-	_ application.TrackerSync    = (*Gateway)(nil)
-	_ application.TrackerHistory = (*Gateway)(nil)
-	_ application.TrackerFlush   = (*Gateway)(nil)
-	_ application.TrackerNotes   = (*Gateway)(nil)
-	_ application.DoctorNotes    = (*Gateway)(nil)
+	_ application.TrackerSync       = (*Gateway)(nil)
+	_ application.TrackerRepackSaid = (*Gateway)(nil)
+	_ application.TrackerHistory    = (*Gateway)(nil)
+	_ application.TrackerFlush      = (*Gateway)(nil)
+	_ application.TrackerNotes      = (*Gateway)(nil)
+	_ application.DoctorNotes       = (*Gateway)(nil)
 )
 
 // beadsDir is where bd keeps everything about one vault's database — the
@@ -46,7 +47,8 @@ var NoteMissing = []string{"not set", "not found"}
 // full pack on every `bd dolt push`/pull, faster than a daily collection can
 // keep up. A repack that fails there is never a reason to fail the sync
 // itself — the pull, conflict check and push already got through — so its
-// error is dropped rather than returned.
+// error is not returned: it is kept for TakeRepackErr, for the sync's line
+// to say (mw-gq6.619).
 //
 // bd's exit code is surfaced as it was, in a *application.SyncHalt. Nothing is
 // retried here: a conflict (bd 2) does sometimes come right within seconds,
@@ -63,7 +65,7 @@ func (g *Gateway) Sync(ctx context.Context) error {
 	}
 	out, errs, err := g.run(ctx, "sync")
 	if err == nil {
-		_ = g.repackCrowdedRemoteCaches(ctx)
+		g.keepRepackErr(g.repackCrowdedRemoteCaches(ctx))
 		return nil
 	}
 
@@ -380,4 +382,23 @@ func (g *Gateway) AutoCommit(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return strings.ToLower(strings.TrimSpace(string(out))), nil
+}
+
+// TakeRepackErr implements application.TrackerRepackSaid: why the repack the
+// last successful Sync ended with failed, once. The sync itself did not fail
+// for it, but a failure nobody is told of reads as a cache kept in check
+// (mw-gq6.619).
+func (g *Gateway) TakeRepackErr() error {
+	g.repackMu.Lock()
+	defer g.repackMu.Unlock()
+	err := g.repackErr
+	g.repackErr = nil
+	return err
+}
+
+// keepRepackErr remembers the outcome of the repack a sync just ended with.
+func (g *Gateway) keepRepackErr(err error) {
+	g.repackMu.Lock()
+	defer g.repackMu.Unlock()
+	g.repackErr = err
 }
