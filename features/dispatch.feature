@@ -1130,8 +1130,16 @@ Feature: Dispatching the stories this host is ready to work
     And the formula "tester" is installed
     And a story "mw-gq6.1" of that epic is already running here, expecting to change "a.go"
     And a ready story "mw-gq6.2" of that epic that overrides "formula" with "tester"
+    And the story "mw-gq6.2" names the landed story "mw-gq6.1"
     When dispatch runs on "vps" with a cap of 3
     Then one session was started, for "mw-gq6.2"
+
+  # mw-gq6.594: such a story could run a whole session and then file nothing.
+  Scenario: A Tester story naming no landed story is not started
+    Given the formula "tester" is installed
+    And a ready story "mw-gq6.2" of that epic that overrides "formula" with "tester"
+    When dispatch runs on "vps" with a cap of 3
+    Then no session was started
 
   Scenario: On a rig that expects files, a running Tester story with no files key keeps no ready story waiting
     Given the rig "millwright" expects a files key

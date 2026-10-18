@@ -118,6 +118,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a ready story "([^"]*)" of that epic$`, c.aReadyStoryOfThatEpic)
 	ctx.Given(`^a ready story "([^"]*)" of that epic with a title (\d+) characters long$`, c.aReadyStoryWithALongTitle)
 	ctx.Given(`^a ready story "([^"]*)" of that epic that overrides "([^"]*)" with "([^"]*)"$`, c.aReadyStoryThatOverrides)
+	ctx.Given(`^the story "([^"]*)" names the landed story "([^"]*)"$`, c.theStoryNamesTheLandedStory)
 	ctx.Given(`^a ready story "([^"]*)" of that epic at priority (\d+), filed at "([^"]*)"$`, c.aReadyStoryAtPriority)
 	ctx.Given(`^a ready story "([^"]*)" of that epic labelled "([^"]*)"$`, c.aReadyStoryLabelled)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here$`, c.aStoryAlreadyRunningHere)
@@ -406,6 +407,10 @@ func (c *dispatchContext) aReadyStoryThatOverrides(id, field, value string) erro
 	}
 	c.tracker.AddStory(c.lastEpic, story)
 	return nil
+}
+
+func (c *dispatchContext) theStoryNamesTheLandedStory(id, landed string) error {
+	return c.tracker.SetDescription(id, application.TesterLandedLine+landed+" (landed on main)\n\nDrive it.")
 }
 
 func (c *dispatchContext) aStoryAlreadyRunningHere(id string) error {
