@@ -489,6 +489,41 @@ lampas = "npx playwright test {specs}"
 	}
 }
 
+func TestRelatedTestsSaysWhatEachRigsGateRunsOnTheFilesAStoryChanged(t *testing.T) {
+	writeConfig(t, `host = "laptop"
+
+[tests]
+lampas = "npm test"
+
+[related_tests]
+lampas = "npx vitest related --run {files}"
+`)
+
+	related, err := config.RelatedTests()
+	if err != nil {
+		t.Fatalf("reading the related-tests lines: %v", err)
+	}
+	if len(related) != 1 || related["lampas"] != "npx vitest related --run {files}" {
+		t.Errorf("expected only the rig's related-tests line, got %+v", related)
+	}
+}
+
+func TestRelatedTestsIsEmptyOnAHostWithNoSuchTable(t *testing.T) {
+	writeConfig(t, `host = "laptop"
+
+[tests]
+lampas = "npm test"
+`)
+
+	related, err := config.RelatedTests()
+	if err != nil {
+		t.Fatalf("reading the related-tests lines: %v", err)
+	}
+	if len(related) != 0 {
+		t.Errorf("expected no related-tests line, got %+v", related)
+	}
+}
+
 func TestAfterLandingLimitSaysHowLongEachRigsCommandMayRun(t *testing.T) {
 	writeConfig(t, `host = "laptop"
 

@@ -122,11 +122,11 @@ type gated struct {
 // waiting for another close-out's gate to end, and keeps it until its own ends,
 // the retry included, however it ends (mw-gq6.388). A lock that cannot be taken
 // is said, and the tests run without it.
-func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, what string) gated {
+func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, what string, span RelatedSpan) gated {
 	if lock := n.waitForTheGateLock(ctx, c, report, what); lock != nil {
 		defer n.giveTheGateLockBack(report, lock)
 	}
-	return n.gateOnACalmHost(ctx, c, report, dir, what)
+	return n.gateOnACalmHost(ctx, c, report, dir, what, span)
 }
 
 // waitForTheGateLock takes this host's gate lock for the tests what names,
@@ -213,7 +213,7 @@ func (m mergedGate) what() string {
 // merge gives the slot back while it waits (waitForTheMergedGate), takes it
 // again, and tries again from a fresh fetch. A close-out that holds no slot
 // across hosts waits where it is.
-func (n Next) mergedResultGate(ctx context.Context, c *closeOut, report *NextReport, dir string) (gated, string) {
+func (n Next) mergedResultGate(ctx context.Context, c *closeOut, report *NextReport, dir string, span RelatedSpan) (gated, string) {
 	m := &c.merged
 	for {
 		waits := n.mergedGateWaits(ctx, c, report)
@@ -227,7 +227,7 @@ func (n Next) mergedResultGate(ctx context.Context, c *closeOut, report *NextRep
 	}
 
 	if m.failed {
-		again, err := n.timedChecks(ctx, c, dir)
+		again, err := n.timedChecks(ctx, c, report, dir, span)
 		c.gate.settle(again, err, m.busy)
 		said := fmt.Sprintf("%s ran twice: the first run failed while %s was at load %.1f of %d cores, the second run %s",
 			onMerged, n.Host, m.busy.Load, m.busy.Cores, secondRun(again, err))
@@ -239,7 +239,7 @@ func (n Next) mergedResultGate(ctx context.Context, c *closeOut, report *NextRep
 	before := m.before
 	m.calmed = false
 	n.beginGate(ctx, c, before)
-	checked, err := n.timedChecks(ctx, c, dir)
+	checked, err := n.timedChecks(ctx, c, report, dir, span)
 	if err != nil || checked.NotRun || checked.Passed {
 		c.gate.settle(checked, err, before)
 		return gated{Checked: checked, Err: err}, ""
@@ -256,7 +256,7 @@ func (n Next) mergedResultGate(ctx context.Context, c *closeOut, report *NextRep
 	n.print(fmt.Sprintf("  retry   %s failed while %s was at load %.1f of %d cores: running them once more when it calms\n",
 		onMerged, n.Host, busy.Load, busy.Cores))
 	m.failed, m.busy = true, busy
-	return n.mergedResultGate(ctx, c, report, dir)
+	return n.mergedResultGate(ctx, c, report, dir, span)
 }
 
 // mergedGateWaits says what the next run on a merged result would wait for,
@@ -336,10 +336,10 @@ func gateWaited(d time.Duration) string {
 // run, or after it — is run once more when the host has calmed, and only a
 // second failure counts. A run that fails on a calm host counts at once. A
 // command that would not start is not a load fault and is never run again.
-func (n Next) gateOnACalmHost(ctx context.Context, c *closeOut, report *NextReport, dir, what string) gated {
+func (n Next) gateOnACalmHost(ctx context.Context, c *closeOut, report *NextReport, dir, what string, span RelatedSpan) gated {
 	before, gaveUp := n.calmed(ctx, report, c, what)
 	n.beginGate(ctx, c, before)
-	checked, err := n.timedChecks(ctx, c, dir)
+	checked, err := n.timedChecks(ctx, c, report, dir, span)
 	if err != nil || checked.NotRun || checked.Passed {
 		c.gate.settle(checked, err, before)
 		return gated{Checked: checked, Err: err}
@@ -357,7 +357,7 @@ func (n Next) gateOnACalmHost(ctx context.Context, c *closeOut, report *NextRepo
 	n.print(fmt.Sprintf("  retry   %s failed while %s was at load %.1f of %d cores: running them once more when it calms\n",
 		what, n.Host, busy.Load, busy.Cores))
 	n.calmed(ctx, report, c, what+" again")
-	again, err := n.timedChecks(ctx, c, dir)
+	again, err := n.timedChecks(ctx, c, report, dir, span)
 	c.gate.settle(again, err, busy)
 	said := fmt.Sprintf("%s ran twice: the first run failed while %s was at load %.1f of %d cores, the second run %s",
 		what, n.Host, busy.Load, busy.Cores, secondRun(again, err))

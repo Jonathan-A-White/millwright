@@ -359,6 +359,39 @@ type Checks interface {
 	Run(ctx context.Context, rig, dir string) (Checked, error)
 }
 
+// RelatedRun is one try at a rig's related-tests line: the files the branch
+// changed, and what the line came to. Ran is false when nothing was run, and
+// then NoFiles says why: the rig names a line but the branch left no file to
+// give it (a branch that only deleted files); with NoFiles false, the rig names
+// no line.
+type RelatedRun struct {
+	Checked
+	Files   []string
+	Ran     bool
+	NoFiles bool
+}
+
+// RelatedSpan is what a related-tests line is given the files of: what the
+// worktree's HEAD changed since its merge-base with Base (three dots, as
+// SpecChecks has it). Skip, when it is not empty, is a commit of mw's own that
+// is not the branch's work, the version bump of a landing: its changes are
+// left out (a bump of package.json would otherwise make a rig's test runner
+// relate that file to a great part of its tests), and what comes after it is
+// not.
+type RelatedSpan struct {
+	Base string
+	Skip string
+}
+
+// RelatedChecks is the port a rig's related-tests line is run through
+// (mw-gq6.601): the rig's own command for the part of its tests that bear on
+// the files a branch changed, given those files, in place of the rig's whole
+// tests at the landing gate. Only the gate is given this port; mw check and mw
+// suite run the whole tests.
+type RelatedChecks interface {
+	RunRelated(ctx context.Context, rig, dir string, span RelatedSpan) (RelatedRun, error)
+}
+
 // SpecsChecked is one run of a rig's changed-specs command: the spec files it
 // was run on (empty when the story changed none, or the rig names no command, and
 // then nothing was run) and what that run came to.

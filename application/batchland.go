@@ -202,6 +202,11 @@ type BatchReport struct {
 	Committed []string
 	Mailed    []string
 	Notes     []string
+
+	// versionCommit is the commit that raised the batch's version: no work of
+	// any story's, and so left out of the files the rig's related-tests line is
+	// given (mw-gq6.601).
+	versionCommit string
 }
 
 // Label names the batch in a sentence: "batch 3 of lampas".
@@ -499,6 +504,7 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 			return
 		}
 		report.Version = bumped.Version
+		report.versionCommit = bumped.Commit
 		report.Notes = append(report.Notes, bumped.Tidied...)
 	}
 
@@ -561,7 +567,7 @@ func (r BatchReport) allOnTarget() bool {
 func (b BatchLand) runGate(ctx context.Context, dir, rigDir string, report *BatchReport, nr *NextReport) gated {
 	n := b.Next
 	began := n.now()
-	gate := n.gate(ctx, b.batchCloseOut(report, rigDir), nr, dir, gateOnTheBatch)
+	gate := n.gate(ctx, b.batchCloseOut(report, rigDir), nr, dir, gateOnTheBatch, RelatedSpan{Base: report.Base, Skip: report.versionCommit})
 	report.Tested, report.Gate = true, gate.Checked
 	report.GateRuns++
 	report.GateTook += n.now().Sub(began)

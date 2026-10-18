@@ -198,7 +198,12 @@ type Next struct {
 	// SpecChecks runs a rig's changed-specs command after the rig's gate, on the
 	// specs the story added or changed (mw-gq6.366). Nil runs none.
 	SpecChecks SpecChecks
-	Vault      Vault
+
+	// RelatedChecks runs a rig's related-tests line at the landing gate, in
+	// place of the rig's whole tests, on the files the branch changed
+	// (mw-gq6.601). Nil runs the whole tests: mw check never sets it.
+	RelatedChecks RelatedChecks
+	Vault         Vault
 
 	// CrossSlot is the rig's merge slot across hosts, on the beads server both
 	// hosts share, taken inside Slot so that the other host's close-outs wait
@@ -1608,7 +1613,7 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 	}
 
 	// What the rig itself says about the work, in the worktree the session left.
-	gate := n.gate(ctx, c, report, c.worktree, "the rig's tests")
+	gate := n.gate(ctx, c, report, c.worktree, "the rig's tests", RelatedSpan{Base: base})
 	where, mergedRun := c.worktree, false
 	if gate.Err == nil && !gate.Checked.NotRun && !gate.Checked.Passed && (all || c.batch) {
 		// A rig that lands in batches has no merge of its own here, and a check
@@ -1736,7 +1741,7 @@ func (n Next) batchRunOnTheMerge(ctx context.Context, c *closeOut, report *NextR
 	note += fmt.Sprintf("), but %s has %d commits this branch was cut before, so they are run once more with %s merged in", c.target, behind, c.target)
 	report.Notes = append(report.Notes, note)
 	n.print("  note    " + note + "\n")
-	return n.gate(ctx, c, report, dir, "the rig's tests with the target merged in"), dir, true
+	return n.gate(ctx, c, report, dir, "the rig's tests with the target merged in", RelatedSpan{Base: base}), dir, true
 }
 
 // ExpectedPermissionMode is the permission mode a story's session is launched
@@ -2279,6 +2284,9 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 		return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("%s could not be merged into %s: %w", c.branch, c.target, err))
 	}
 
+	// versionCommit is the commit that raised the version, which is no work of
+	// the branch's and is left out of the files its related-tests line is given.
+	var versionCommit string
 	if len(version.Files) > 0 {
 		version.Before, version.Branch, version.StoryID = landed.Before, c.branch, c.id
 		bumped, err := n.Landing.BumpVersion(ctx, dir, version)
@@ -2294,6 +2302,7 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 			// that kind on top needs no run of its own. A story that raised
 			// the version itself has only its note committed, and no Version.
 			landed.Commit, landed.Version = bumped.Commit, bumped.Version
+			versionCommit = bumped.Commit
 		}
 	}
 
@@ -2301,7 +2310,7 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 	// tested on: the story's tests passed on the story's branch, and the other
 	// host's passed on its own. Only this result matters now.
 	if !landed.FastForward || c.worktreeFailed {
-		gate, waits := n.mergedResultGate(ctx, c, report, dir)
+		gate, waits := n.mergedResultGate(ctx, c, report, dir, RelatedSpan{Base: landed.Before, Skip: versionCommit})
 		if waits != "" {
 			return Landed{}, offTheSlot{waits}
 		}
