@@ -1097,6 +1097,8 @@ func (f *FakeTracker) StoriesSince(_ context.Context, since time.Time) ([]applic
 		}
 		if !known || recent {
 			d.CommentCount = len(f.stories[id].comments)
+			// Every blocker, a closed one too, as the real listing's edges say.
+			d.Needs = append([]string(nil), f.stories[id].needs...)
 			touched = append(touched, d)
 		}
 	}

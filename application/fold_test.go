@@ -178,3 +178,47 @@ func TestFoldLeavesOutAStoryThatIsItselfAFold(t *testing.T) {
 		t.Errorf("output lists a fold:\n%s", out)
 	}
 }
+
+// A bug that already waits on a fold story is folded: the screen it names is
+// not listed as a group while two of its three bugs wait on a fold (mw-gq6.591).
+func TestFoldLeavesOutABugThatAlreadyWaitsOnAFold(t *testing.T) {
+	build := func(waiting bool) *apptest.FakeTracker {
+		tracker := apptest.NewFakeTracker()
+		tracker.AddEpic("mw-e", domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelSonnet, Effort: domain.EffortHigh, Host: "laptop", Formula: "tdd-feature"})
+		bug := func(id, title string) {
+			tracker.AddStory("mw-e", domain.Story{ID: id, Title: title})
+			if err := tracker.SetLabels(id, application.LabelBug); err != nil {
+				t.Fatal(err)
+			}
+		}
+		bug("mw-e.1", "[bug] lampas: Talk: mic stays red")
+		bug("mw-e.2", "[bug] lampas: Talk: page lost")
+		bug("mw-e.3", "[bug] lampas: Talk: title stale")
+		bug("mw-e.4", "[bug] lampas: Lampas fold: Talk")
+		bug("mw-e.5", "[bug] lampas: Settings: toggle sticks")
+		if waiting {
+			tracker.Needs("mw-e.1", "mw-e.4")
+			tracker.Needs("mw-e.2", "mw-e.4")
+			// a link to a story that is no fold is not a fold
+			tracker.Needs("mw-e.3", "mw-e.5")
+		}
+		return tracker
+	}
+	report, out := runFold(t, build(true), 3)
+	if len(report.Groups) != 0 {
+		t.Errorf("expected no group while two of three bugs wait on a fold, got %+v\n%s", report.Groups, out)
+	}
+	report, _ = runFold(t, build(false), 3)
+	if len(report.Groups) != 1 || report.Groups[0].Key != "screen:Talk" || len(report.Groups[0].Bugs) != 3 {
+		t.Errorf("expected Talk as a group of 3 with all three free, got %+v", report.Groups)
+	}
+	// a bug that waits on a fold already closed is free again
+	closed := build(true)
+	if err := closed.SetStatus("mw-e.4", apptest.StatusClosed); err != nil {
+		t.Fatal(err)
+	}
+	report, _ = runFold(t, closed, 3)
+	if len(report.Groups) != 1 || len(report.Groups[0].Bugs) != 3 {
+		t.Errorf("expected Talk back as a group once its fold is closed, got %+v", report.Groups)
+	}
+}
