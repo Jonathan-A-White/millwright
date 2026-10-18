@@ -1154,13 +1154,21 @@ type BatchQueues interface {
 	WorkInHand(ctx context.Context) (WorkInHand, error)
 }
 
-// AnyQueuedForBatch is a tracker that can say, in one cheap read, whether any
-// story is queued for batch landing: the follower asks the batch-land job every
-// pass, and listing the work in hand each time was most of the connections the
-// beads server saw (mw-gq6.600). A tracker that is not one, or whose read
-// fails, is asked for the work in hand as before.
-type AnyQueuedForBatch interface {
-	AnyQueuedForBatch(ctx context.Context) (bool, error)
+// QueuedStory is a story queued for batch landing as the queue read says it:
+// the rig its Path names, and when mw queued it (zero when it recorded none).
+type QueuedStory struct {
+	ID       string
+	Rig      string
+	QueuedAt time.Time
+}
+
+// QueuedStoryReader is a tracker that can read the stories queued for batch
+// landing (run=queued, claimed) in one cheap read: the follower asks the
+// batch-land job every pass, and listing the work in hand each time was most of
+// the connections the beads server saw (mw-gq6.600, mw-gq6.605). A tracker that
+// is not one, or whose read fails, is asked for the work in hand as before.
+type QueuedStoryReader interface {
+	QueuedStories(ctx context.Context) ([]QueuedStory, error)
 }
 
 // BatchLandings is the follower's job that runs mw land on every rig of this
@@ -1252,11 +1260,18 @@ type batchQueue struct {
 	oldest time.Time
 }
 
-// queues reads the queue of every rig of this host that has one.
+// queues reads the queue of every rig of this host that has one: in one read
+// when the tracker can (the beads gateway, over its kept connection, which says
+// in the follower's log when it fails), else, or when that read fails, from the
+// work in hand.
 func (b *BatchLandings) queues(ctx context.Context) (map[string]batchQueue, error) {
-	if asked, ok := b.Tracker.(AnyQueuedForBatch); ok {
-		if queued, err := asked.AnyQueuedForBatch(ctx); err == nil && !queued {
-			return map[string]batchQueue{}, nil
+	if reader, ok := b.Tracker.(QueuedStoryReader); ok {
+		if stories, err := reader.QueuedStories(ctx); err == nil {
+			queues := map[string]batchQueue{}
+			for _, story := range stories {
+				b.addToQueue(queues, story.Rig, story.QueuedAt)
+			}
+			return queues, nil
 		}
 	}
 	work, err := b.Tracker.WorkInHand(ctx)
@@ -1272,17 +1287,23 @@ func (b *BatchLandings) queues(ctx context.Context) (map[string]batchQueue, erro
 		if err != nil {
 			continue
 		}
-		if _, here := b.Rigs[path.Rig]; !here {
-			continue
-		}
-		q := queues[path.Rig]
-		if q.queued == 0 || detail.QueuedAt.Before(q.oldest) {
-			q.oldest = detail.QueuedAt
-		}
-		q.queued++
-		queues[path.Rig] = q
+		b.addToQueue(queues, path.Rig, detail.QueuedAt)
 	}
 	return queues, nil
+}
+
+// addToQueue counts a story queued at queuedAt in the queue of its rig, if the
+// rig is checked out on this host.
+func (b *BatchLandings) addToQueue(queues map[string]batchQueue, rig string, queuedAt time.Time) {
+	if _, here := b.Rigs[rig]; !here {
+		return
+	}
+	q := queues[rig]
+	if q.queued == 0 || queuedAt.Before(q.oldest) {
+		q.oldest = queuedAt
+	}
+	q.queued++
+	queues[rig] = q
 }
 
 // due is the rigs whose queue is to be landed now, in name order. A rig whose

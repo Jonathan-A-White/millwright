@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // The follower builds the Governor's view every ten seconds and reads the
@@ -269,38 +270,75 @@ func readBeadListing(ctx context.Context, db *sql.DB) ([]bead, error) {
 	return all, edges.Err()
 }
 
-// anyQueuedQuery is one row when some story in hand carries the run:queued
-// label, none when none does.
-const anyQueuedQuery = "select 1 as queued from issues i join labels l on l.issue_id = i.id" +
-	" where l.label = 'run:queued' and i.status = 'in_progress' limit 1"
+// queuedStoriesQuery is a row for each story in hand that carries the
+// run:queued label: its id, its own metadata, and the metadata of the epic it
+// hangs from, which hold the Path the batch is landed by. An epic is not a
+// story a batch lands.
+const queuedStoriesQuery = "select i.id as id, i.metadata as metadata, p.metadata as parent_metadata" +
+	" from issues i join labels l on l.issue_id = i.id" +
+	" left join dependencies d on d.issue_id = i.id and d.type = 'parent-child'" +
+	" left join issues p on p.id = d.depends_on_issue_id" +
+	" where l.label = 'run:queued' and i.status = 'in_progress' and i.issue_type <> 'epic'" +
+	" order by i.id"
 
-// AnyQueuedForBatch implements application.AnyQueuedForBatch over the kept
-// connection: one cheap query in place of the listings of the work in hand.
-// With no connection, or when it fails, it errs and the caller lists the work.
-func (g *Gateway) AnyQueuedForBatch(ctx context.Context) (bool, error) {
+// QueuedStories implements application.QueuedStoryReader over the kept
+// connection: one query in place of the listings of the work in hand. With no
+// connection, or when it fails (said in the follower's log), it errs and the
+// caller lists the work.
+func (g *Gateway) QueuedStories(ctx context.Context) ([]application.QueuedStory, error) {
 	db := g.keptDB()
 	if db == nil {
-		return false, errNoKeptConnection
+		return nil, errNoKeptConnection
 	}
-	bounded, cancel := context.WithTimeout(ctx, headQueryBound)
-	defer cancel()
-	rows, err := db.QueryContext(bounded, anyQueuedQuery)
+	stories, err := readQueuedStories(ctx, db)
 	if err != nil {
 		g.keptFailed(ctx, "the queued stories", err)
-		return false, err
+		return nil, err
+	}
+	return stories, nil
+}
+
+// readQueuedStories reads the queued stories from db. A story whose Path is not
+// a whole one is left out, as a listing of the work in hand leaves it out.
+func readQueuedStories(ctx context.Context, db *sql.DB) ([]application.QueuedStory, error) {
+	bounded, cancel := context.WithTimeout(ctx, headQueryBound)
+	defer cancel()
+	rows, err := db.QueryContext(bounded, queuedStoriesQuery)
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
-	found := rows.Next()
-	if err := rows.Err(); err != nil {
-		g.keptFailed(ctx, "the queued stories", err)
-		return false, err
+	stories := []application.QueuedStory{}
+	for rows.Next() {
+		var id string
+		var own, parent sql.NullString
+		if err := rows.Scan(&id, &own, &parent); err != nil {
+			return nil, err
+		}
+		story := bead{ID: id, Metadata: metadataOf(own)}
+		path, err := domain.Story{Overrides: domain.PathFromMetadata(story.pathMetadata())}.
+			PathFrom(domain.PathFromMetadata(bead{Metadata: metadataOf(parent)}.pathMetadata()))
+		if err != nil {
+			continue
+		}
+		stories = append(stories, application.QueuedStory{ID: id, Rig: path.Rig, QueuedAt: story.queuedAt()})
 	}
-	return found, nil
+	return stories, rows.Err()
+}
+
+// metadataOf is a bead's metadata column read as bd prints it: an object, or
+// nothing when the column is null or holds anything else.
+func metadataOf(column sql.NullString) map[string]any {
+	var metadata map[string]any
+	if column.Valid && json.Unmarshal([]byte(column.String), &metadata) != nil {
+		return nil
+	}
+	return metadata
 }
 
 var errNoKeptConnection = errors.New("there is no kept connection to the beads server")
 
-var _ application.AnyQueuedForBatch = (*Gateway)(nil)
+var _ application.QueuedStoryReader = (*Gateway)(nil)
 
 // noteOverConnection is `bd kv get key` over the kept connection: the note's
 // value, "" for a key that is not there; ok is false when there is no

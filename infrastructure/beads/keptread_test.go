@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -72,10 +73,17 @@ func (c keptConn) QueryContext(_ context.Context, query string, _ []driver.Named
 			{"t-0", "Long gone", "", "", "closed", "task", nil, nil, "2026-08-01 00:00:00", nil, "2026-08-01 00:00:00", "2026-08-01 00:00:00", int64(2), `{}`, nil, int64(3)},
 		}}, nil
 	case strings.Contains(q, "run:queued"):
+		cols := []string{"id", "metadata", "parent_metadata"}
 		if c.s.queued.Load() {
-			return &keptRows{cols: []string{"queued"}, rows: [][]driver.Value{{int64(1)}}}, nil
+			epic := `{"rig":"lampas","branch":"main","harness":"claude","model":"opus","effort":"high","host":"desktop"}`
+			return &keptRows{cols: cols, rows: [][]driver.Value{
+				{"lp-2", `{"queued_at":"2026-10-18T09:30:00Z"}`, epic},
+				{"lp-1", `{"queued_at":"2026-10-18T09:00:00Z","size":"S"}`, epic},
+				{"lp-3", `{}`, nil}, // no epic, so no path: not a story a rig can land
+				{"mw-1", `{"rig":"millwright"}`, epic},
+			}}, nil
 		}
-		return &keptRows{cols: []string{"queued"}}, nil
+		return &keptRows{cols: cols}, nil
 	case strings.Contains(q, "from labels"):
 		return &keptRows{cols: []string{"issue_id", "label"}, rows: [][]driver.Value{{"t-1.1", "hitl"}, {"t-1.1", "run:running"}}}, nil
 	case strings.Contains(q, "from dependencies"):
@@ -250,22 +258,32 @@ func TestSnapshotFallsBackToBdAndSaysSoWhenTheConnectionFails(t *testing.T) {
 	}
 }
 
-// The follower's batch-land job asks every pass whether a story is queued: one
-// query over the kept connection, no bd, and no listing of the work in hand.
-func TestAnyQueuedForBatchIsAskedOverTheKeptConnectionWithoutStartingABd(t *testing.T) {
+// The follower's batch-land job reads the queue every pass: one query over the
+// kept connection, no bd, and no listing of the work in hand (mw-gq6.600,
+// mw-gq6.605). The rig of a story is its own, over its epic's default.
+func TestQueuedStoriesAreReadOverTheKeptConnectionWithoutStartingABd(t *testing.T) {
 	s := &keptServer{}
 	program, asked := standInSnapshotProgram(t, bdListing, bdTable)
 	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(s.open(t)))
 
 	for i := 0; i < 20; i++ {
-		queued, err := g.AnyQueuedForBatch(context.Background())
-		if err != nil || queued {
-			t.Fatalf("ask %d: expected nothing queued, got %v, %v", i, queued, err)
+		queued, err := g.QueuedStories(context.Background())
+		if err != nil || len(queued) != 0 {
+			t.Fatalf("read %d: expected nothing queued, got %v, %v", i, queued, err)
 		}
 	}
 	s.queued.Store(true)
-	if queued, err := g.AnyQueuedForBatch(context.Background()); err != nil || !queued {
-		t.Fatalf("expected a queued story found, got %v, %v", queued, err)
+	queued, err := g.QueuedStories(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []application.QueuedStory{
+		{ID: "lp-2", Rig: "lampas", QueuedAt: time.Date(2026, 10, 18, 9, 30, 0, 0, time.UTC)},
+		{ID: "lp-1", Rig: "lampas", QueuedAt: time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)},
+		{ID: "mw-1", Rig: "millwright"},
+	}
+	if !reflect.DeepEqual(queued, want) {
+		t.Fatalf("expected the two lampas stories and the millwright one, got %+v", queued)
 	}
 	if got := bdsStarted(t, asked); got != 0 {
 		t.Fatalf("expected no bd started, got %d", got)
@@ -275,16 +293,20 @@ func TestAnyQueuedForBatchIsAskedOverTheKeptConnectionWithoutStartingABd(t *test
 	}
 }
 
-func TestAnyQueuedForBatchErrsWithoutAConnectionSoTheWorkIsListed(t *testing.T) {
+func TestQueuedStoriesErrWithoutAConnectionSoTheWorkIsListed(t *testing.T) {
 	g := beads.New(t.TempDir())
-	if _, err := g.AnyQueuedForBatch(context.Background()); err == nil {
+	if _, err := g.QueuedStories(context.Background()); err == nil {
 		t.Fatal("expected an error where there is no kept connection, so the caller lists the work")
 	}
 	s := &keptServer{}
 	s.fail.Store(true)
-	g = beads.New(t.TempDir(), beads.WithHeadDB(s.open(t)))
-	if _, err := g.AnyQueuedForBatch(context.Background()); err == nil {
+	var said strings.Builder
+	g = beads.New(t.TempDir(), beads.WithHeadDB(s.open(t)), beads.WithKeptSaid(&said))
+	if _, err := g.QueuedStories(context.Background()); err == nil {
 		t.Fatal("expected an error where the connection fails")
+	}
+	if !strings.Contains(said.String(), "the queued stories") || !strings.Contains(said.String(), "bd reads") {
+		t.Fatalf("expected the follower's log to say the queue read failed and bd reads instead, got %q", said.String())
 	}
 }
 
