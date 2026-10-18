@@ -1060,3 +1060,105 @@ func TestStatusPrintsDampers(t *testing.T) {
 		t.Errorf("expected no DAMPERS section when nothing is tripped")
 	}
 }
+
+// fullRenderStatus is an mw status over a seat whose memory of its rigs has the
+// sizes given, with a 8000 byte budget.
+func fullRenderStatus(t *testing.T, sizes ...application.RigMemorySize) application.StatusReport {
+	t.Helper()
+	vault := newFakeVault()
+	vault.memorySizes = sizes
+	tracker := aTrackerPathedToVPS(t)
+	report, err := application.Status{
+		Tracker:        tracker,
+		Notes:          tracker,
+		Vault:          vault,
+		Host:           "vps",
+		Seat:           "builder",
+		HostSilence:    2 * time.Hour,
+		RigMemoryBytes: 8000,
+		Now:            func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	return report
+}
+
+// oneSpaced joins the report's wrapped lines, so a sentence the report breaks
+// to the screen's width reads as the one line it is.
+func oneSpaced(text string) string { return strings.Join(strings.Fields(text), " ") }
+
+func TestStatusNamesARigWhoseRenderIsNearFullAndWhoseNewestFactsAreSearchOnly(t *testing.T) {
+	printed := oneSpaced(fullRenderStatus(t, application.RigMemorySize{Rig: "lampas", Bytes: 7936, Facts: true, SearchOnlyNewest: 9}).String())
+	want := "lampas memory: boot render 7936/8000; the last 9 new facts are search-only: prune (seats/mayor/pruning.md)"
+	if !strings.Contains(printed, want) {
+		t.Errorf("missing %q:\n%s", want, printed)
+	}
+	if !strings.Contains(printed, application.RigMemoryHeading) {
+		t.Errorf("the line should sit under %s:\n%s", application.RigMemoryHeading, printed)
+	}
+}
+
+func TestStatusSaysOneFactAsOneNotNines(t *testing.T) {
+	printed := oneSpaced(fullRenderStatus(t, application.RigMemorySize{Rig: "lampas", Bytes: 7700, Facts: true, SearchOnlyNewest: 1}).String())
+	if !strings.Contains(printed, "the last 1 new fact is search-only") {
+		t.Errorf("missing the one-fact wording:\n%s", printed)
+	}
+}
+
+func TestStatusIsSilentWhenTheRenderHasRoomOrTheNewestFactIsInTheRender(t *testing.T) {
+	printed := fullRenderStatus(t,
+		application.RigMemorySize{Rig: "roomy", Bytes: 5724, Facts: true, SearchOnlyNewest: 9},
+		application.RigMemorySize{Rig: "booted", Bytes: 7936, Facts: true},
+		application.RigMemorySize{Rig: "justunder", Bytes: 7599, Facts: true, SearchOnlyNewest: 3},
+		application.RigMemorySize{Rig: "flat", Bytes: 7936, SearchOnlyNewest: 3},
+	).String()
+	if strings.Contains(printed, "search-only") || strings.Contains(printed, application.RigMemoryHeading) {
+		t.Errorf("expected no line:\n%s", printed)
+	}
+}
+
+func TestStatusNamesANearFullRenderAtTheEdgeOfFivePercent(t *testing.T) {
+	printed := oneSpaced(fullRenderStatus(t, application.RigMemorySize{Rig: "edge", Bytes: 7600, Facts: true, SearchOnlyNewest: 3}).String())
+	if !strings.Contains(printed, "edge memory: boot render 7600/8000; the last 3 new facts are search-only: prune") {
+		t.Errorf("missing the line at 95%%:\n%s", printed)
+	}
+}
+
+func TestNewestSearchOnlyCountsTheCurrentFactsNewerThanTheNewestOneInTheRender(t *testing.T) {
+	fact := func(slug, since string, status application.FactStatus, unbooted bool) application.RigFact {
+		return application.RigFact{Slug: slug, Status: status, Since: since, Unbooted: unbooted}
+	}
+	cases := []struct {
+		name  string
+		facts []application.RigFact
+		want  int
+	}{
+		{"none", nil, 0},
+		{"all in the render", []application.RigFact{fact("a", "2026-10-01", application.FactCurrent, false)}, 0},
+		{"three newest demoted", []application.RigFact{
+			fact("old", "2026-10-01", application.FactCurrent, false),
+			fact("n1", "2026-10-17", application.FactCurrent, true),
+			fact("n2", "2026-10-17", application.FactCurrent, true),
+			fact("n3", "2026-10-16", application.FactCurrent, true),
+		}, 3},
+		{"newest is in the render", []application.RigFact{
+			fact("old", "2026-10-01", application.FactCurrent, true),
+			fact("new", "2026-10-17", application.FactCurrent, false),
+		}, 0},
+		{"a booted fact on the same day leaves it silent", []application.RigFact{
+			fact("a", "2026-10-17", application.FactCurrent, false),
+			fact("b", "2026-10-17", application.FactCurrent, true),
+		}, 0},
+		{"retired and recheck facts are not new facts", []application.RigFact{
+			fact("a", "2026-10-01", application.FactCurrent, false),
+			fact("b", "2026-10-17", application.FactRetired, true),
+			fact("c", "2026-10-17", application.FactRecheck, true),
+		}, 0},
+	}
+	for _, c := range cases {
+		if got := application.NewestSearchOnly(c.facts); got != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
+		}
+	}
+}

@@ -192,7 +192,7 @@ func (v *Vault) RigMemorySizes(_ context.Context, seat string) ([]application.Ri
 		return nil, fmt.Errorf("listing the %s seat's memories of its rigs: %w", seat, err)
 	}
 
-	factRigs := map[string]int{}
+	factRigs := map[string]application.RigMemorySize{}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -203,13 +203,16 @@ func (v *Vault) RigMemorySizes(_ context.Context, seat string) ([]application.Ri
 		}
 		if ok {
 			facts, _ := application.LoadRigFacts(files)
-			factRigs[entry.Name()] = len(application.RenderRigMemory(about, facts))
+			factRigs[entry.Name()] = application.RigMemorySize{
+				Rig: entry.Name(), Bytes: len(application.RenderRigMemory(about, facts)), Facts: true,
+				SearchOnlyNewest: application.NewestSearchOnly(facts),
+			}
 		}
 	}
 
 	var sizes []application.RigMemorySize
-	for rig, bytes := range factRigs {
-		sizes = append(sizes, application.RigMemorySize{Rig: rig, Bytes: bytes, Facts: true})
+	for _, size := range factRigs {
+		sizes = append(sizes, size)
 	}
 	for _, entry := range entries {
 		rig, ok := strings.CutSuffix(entry.Name(), application.MemoryExt)
