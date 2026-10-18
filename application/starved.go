@@ -27,6 +27,10 @@ const MailStarved = "Starved"
 // gate of DispatchGates names: its formula was refused when poured.
 const PourRefusedGate = "pour-refused"
 
+// ClaimLostGate stands for the other reason no gate names: another host
+// claimed the story first, between the ready list and the claim (mw-gq6.569).
+const ClaimLostGate = "claim-lost"
+
 // StarvedHolds maps every reason mw dispatch passes a ready story over for, by
 // the gate's name in DispatchGates (and PourRefusedGate), to the hold name the
 // starved-rig alarm gives it. A gate added to Dispatch.run is mapped here too:
@@ -52,6 +56,7 @@ var StarvedHolds = map[string]string{
 	"testers-per-rig":       "damper",
 	"cap":                   "cap",
 	PourRefusedGate:         "pour refused",
+	ClaimLostGate:           "claim lost",
 }
 
 // StarvedKey is the note a host's dispatch keeps of the rigs it holds back

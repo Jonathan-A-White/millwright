@@ -826,8 +826,12 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// filed on a story moments after bd decided it was ready is not always
 		// caught by it (mw-gq6.93), so what the candidate still waits on is read
 		// back fresh here rather than taken on the ready listing's word.
+		// What it waits on that cannot be read is this story's trouble alone: it is
+		// passed over with the reason and the stories after it go on (mw-gq6.569).
 		if blocker, status, blocked, err := blockedBy(ctx, reads, detail); err != nil {
-			return report, fmt.Errorf("dispatching on %s: %w", d.Host, err)
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "blocked", Why: fmt.Sprintf(
+				"what it waits on could not be read, so it is not claimed: %v", oneLine(err.Error()))})
+			continue
 		} else if blocked {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "blocked", Why: fmt.Sprintf(
 				"waits on %s (%s)", blocker, status)})
@@ -875,7 +879,12 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		if path.Formula != "" {
 			if formulas == nil {
 				if formulas, err = d.installedFormulas(ctx); err != nil {
-					return report, fmt.Errorf("dispatching on %s: %w", d.Host, err)
+					// Read again for the next story that names a formula; this one
+					// waits, unclaimed, and the tick goes on (mw-gq6.569).
+					formulas = nil
+					report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "formula-not-installed", Why: fmt.Sprintf(
+						"which formulas are installed could not be read, so it is not claimed: %v", oneLine(err.Error()))})
+					continue
 				}
 			}
 			if !formulas[path.Formula] {
@@ -988,7 +997,13 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 		if err != nil {
 			var pour *pourRefusal
-			if errors.As(err, &pour) {
+			var lost *claimLost
+			if errors.As(err, &lost) {
+				// Another host's dispatcher claimed it first: the story is theirs
+				// and nothing here is wrong. It takes none of the cap, and the
+				// stories after it are still worked (mw-gq6.569).
+				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: ClaimLostGate, Why: lost.Error()})
+			} else if errors.As(err, &pour) {
 				// Not a failed run either: the story is blocked with the reason on
 				// it, the claim kept, and the next dispatch holds it as refused.
 				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: PourRefusedGate, Why: pour.Error()})
@@ -1301,6 +1316,10 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	}
 
 	if err := d.Tracker.ClaimStory(ctx, id); err != nil {
+		var held *ClaimHeldError
+		if errors.As(err, &held) {
+			return Started{}, false, &claimLost{holder: held.Holder}
+		}
 		return Started{}, false, fmt.Errorf("claiming %s: %w", id, err)
 	}
 	d.print(fmt.Sprintf("  claimed %s\n", id))
@@ -1688,6 +1707,12 @@ type pourRefusal struct{ err error }
 
 func (e *pourRefusal) Error() string { return e.err.Error() }
 func (e *pourRefusal) Unwrap() error { return e.err }
+
+// claimLost is what start returns when another holder's claim got there first,
+// so that run passes the story over instead of failing the tick.
+type claimLost struct{ holder string }
+
+func (e *claimLost) Error() string { return "claimed by " + e.holder + " first" }
 
 // JobPourRefused is the actor of the job event a refused pour writes, kept
 // apart from "dispatch", which is the follower's job of springing dispatches
