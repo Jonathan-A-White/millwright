@@ -22,9 +22,16 @@ import (
 // two-host factory is which machine a story belongs on. A story whose Path
 // names domain.HostAuto is offered to every host: whichever takes it writes
 // its own name in place of "auto" when it claims.
+//
+// A Gateway with a kept connection reads it, and RunningStories,
+// RunningElsewhere, RunningEverywhere and WorkInHand, from the live beads over
+// that connection (keptwork.go), and starts no bd unless it fails (mw-gq6.612).
 func (g *Gateway) ReadyForHost(ctx context.Context, host string) ([]application.StoryDetail, error) {
 	if host == "" {
 		return nil, fmt.Errorf("which host are the ready stories for?")
+	}
+	if live, ok := g.liveOverConnection(ctx); ok {
+		return onHost(live.ready(), host, true), nil
 	}
 	out, err := g.call(ctx, "ready", "--unassigned", "--exclude-type", "epic", "--json")
 	if err != nil {
@@ -95,6 +102,9 @@ func (g *Gateway) RunningStories(ctx context.Context, host string) ([]applicatio
 	if host == "" {
 		return nil, fmt.Errorf("which host's running stories?")
 	}
+	if live, ok := g.liveOverConnection(ctx); ok {
+		return onHost(live.details(live.withStatus(StatusInProgress)), host, false), nil
+	}
 	out, err := g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
 	if err != nil {
 		return nil, err
@@ -113,6 +123,9 @@ func (g *Gateway) RunningElsewhere(ctx context.Context, host string) ([]applicat
 	if host == "" {
 		return nil, fmt.Errorf("which host's running stories are the others'?")
 	}
+	if live, ok := g.liveOverConnection(ctx); ok {
+		return elsewhere(live.details(live.withStatus(StatusInProgress)), host), nil
+	}
 	out, err := g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
 	if err != nil {
 		return nil, err
@@ -125,13 +138,7 @@ func (g *Gateway) RunningElsewhere(ctx context.Context, host string) ([]applicat
 	if err != nil {
 		return nil, err
 	}
-	var elsewhere []application.StoryDetail
-	for _, detail := range details {
-		if merged := detail.Merged().Host; merged != "" && merged != host && merged != domain.HostAuto {
-			elsewhere = append(elsewhere, detail)
-		}
-	}
-	return elsewhere, nil
+	return elsewhere(details, host), nil
 }
 
 // RunningEverywhere implements application.RunningEverywhere: the in-progress
@@ -141,6 +148,10 @@ func (g *Gateway) RunningElsewhere(ctx context.Context, host string) ([]applicat
 func (g *Gateway) RunningEverywhere(ctx context.Context, host string) (here, away []application.StoryDetail, err error) {
 	if host == "" {
 		return nil, nil, fmt.Errorf("which host's running stories?")
+	}
+	if live, ok := g.liveOverConnection(ctx); ok {
+		running := live.details(live.withStatus(StatusInProgress))
+		return onHost(running, host, false), elsewhere(running, host), nil
 	}
 	out, err := g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
 	if err != nil {
@@ -174,6 +185,9 @@ func (g *Gateway) RunningEverywhere(ctx context.Context, host string) (here, awa
 // Nothing here narrows to a host, and nothing judges whether a host is awake:
 // mw status does both, from what this returns and the note the host left.
 func (g *Gateway) WorkInHand(ctx context.Context) (application.WorkInHand, error) {
+	if live, ok := g.liveOverConnection(ctx); ok {
+		return live.workInHand(), nil
+	}
 	out, err := g.call(ctx, "ready", "--unassigned", "--exclude-type", "epic", "--json")
 	if err != nil {
 		return application.WorkInHand{}, err
@@ -227,15 +241,7 @@ func (g *Gateway) onHost(ctx context.Context, stories []bead, host string, anyHo
 	if err != nil {
 		return nil, err
 	}
-	var on []application.StoryDetail
-	for _, detail := range details {
-		merged := detail.Merged().Host
-		if merged == "" || merged != host && !(anyHost && merged == domain.HostAuto) {
-			continue
-		}
-		on = append(on, detail)
-	}
-	return on, nil
+	return onHost(details, host, anyHost), nil
 }
 
 // overlaid is beads read as stories, each with its epic's default Path

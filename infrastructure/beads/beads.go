@@ -884,7 +884,9 @@ func (g *Gateway) StoriesComments(ctx context.Context, ids []string) (map[string
 	if len(ids) == 0 {
 		return map[string][]application.Comment{}, nil
 	}
-	if len(ids) > 1 && g.sideBySide([]string{"show"}) {
+	// Over a kept connection the one query costs no bd, however few the ids
+	// (mw-gq6.612).
+	if (len(ids) > 1 && g.sideBySide([]string{"show"})) || g.keptDB() != nil {
 		if said, err := g.commentsOf(ctx, ids); err == nil {
 			return said, nil
 		}
