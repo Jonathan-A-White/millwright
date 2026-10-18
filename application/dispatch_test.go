@@ -726,18 +726,52 @@ func TestDispatchCountsARefusedStoryWhoseSessionIsStillAlive(t *testing.T) {
 	}
 }
 
-func TestDispatchLeavesAClaimWithNoWindowAtAllCountedRunningAsBefore(t *testing.T) {
+// mw-gq6.576: mw-ev7oyy.28 was claimed on the desktop and its session never
+// started (no window, no run folder), and the claim sat in_progress for 34
+// hours, because a window gone outright was left counted running whatever its
+// lease said. A gone window with a lapsed lease is given back like a dead pane.
+func TestDispatchGivesBackAClaimWhoseSessionNeverStartedOnceItsLeaseHasLapsed(t *testing.T) {
 	ctx := context.Background()
 	dispatch, tracker, _, runner, _ := aFactory(t)
 	now := time.Date(2026, 9, 24, 23, 30, 0, 0, time.UTC)
 	dispatch.Now = func() time.Time { return now }
 	tracker.Clock = func() time.Time { return now }
 	claimedStory(t, tracker, "mw-gq6.9", 1)
-	if err := tracker.SetLeaseExpires("mw-gq6.9", now.Add(-time.Hour)); err != nil {
+	expires := now.Add(-time.Hour)
+	if err := tracker.SetLeaseExpires("mw-gq6.9", expires); err != nil {
 		t.Fatalf("setting the lease: %v", err)
 	}
-	// No session of this name was ever started: the window is gone outright,
-	// the case mw sweep already flags and a person settles with mw retry.
+	// No session of this name was ever started: the window is gone outright.
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("expected the dispatch to run cleanly, got %v", err)
+	}
+	if len(report.Reclaimed) != 1 || report.Reclaimed[0].StoryID != "mw-gq6.9" || !report.Reclaimed[0].LeaseExpired.Equal(expires) {
+		t.Fatalf("expected the claim with no session given back, got %+v", report.Reclaimed)
+	}
+	if len(report.Started) != 1 || report.Started[0].StoryID != "mw-gq6.9" || report.Started[0].Attempt != 1 {
+		t.Fatalf("expected the story dispatched again as attempt 1, the one that never ran refunded, got %+v", report.Started)
+	}
+	if closed := runner.Closed(); len(closed) != 0 {
+		t.Fatalf("expected nothing closed for a window that was never there, got %q", closed)
+	}
+	comments := tracker.Comments("mw-gq6.9")
+	if len(comments) == 0 || !strings.Contains(comments[0], "no session") {
+		t.Fatalf("expected a comment saying there was no session, got %q", comments)
+	}
+}
+
+func TestDispatchLeavesAClaimWithNoWindowCountedRunningWhileItsLeaseHolds(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	now := time.Date(2026, 9, 24, 23, 30, 0, 0, time.UTC)
+	dispatch.Now = func() time.Time { return now }
+	tracker.Clock = func() time.Time { return now }
+	claimedStory(t, tracker, "mw-gq6.9", 1)
+	if err := tracker.SetLeaseExpires("mw-gq6.9", now.Add(10*time.Minute)); err != nil {
+		t.Fatalf("setting the lease: %v", err)
+	}
 
 	report, err := dispatch.Run(ctx)
 	if err != nil {
