@@ -95,6 +95,10 @@ func (g *Gateway) Note(ctx context.Context, key string) (string, error) {
 			return kept, nil
 		}
 	}
+	if value, ok := g.noteOverConnection(ctx, key); ok {
+		g.keepNote(key, value)
+		return value, nil
+	}
 	out, err := g.call(ctx, "kv", "get", key)
 	if err != nil {
 		said := strings.ToLower(err.Error())
@@ -123,6 +127,9 @@ func (g *Gateway) keepNote(key, value string) {
 // non-string value (bd's own "schema_version" among them) is not a note and
 // is skipped rather than failing the read.
 func (g *Gateway) NotesWithPrefix(ctx context.Context, prefix string) (map[string]string, error) {
+	if found, ok := g.notesOverConnection(ctx, prefix); ok {
+		return found, nil
+	}
 	out, err := g.call(ctx, "kv", "list", "--json")
 	if err != nil {
 		return nil, err

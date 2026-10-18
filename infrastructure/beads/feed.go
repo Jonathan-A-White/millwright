@@ -86,7 +86,7 @@ func sqlTime(s string) (time.Time, error) {
 }
 
 func (g *Gateway) feedRows(ctx context.Context, query string) ([]feedRow, error) {
-	out, err := g.call(ctx, "sql", "--json", query)
+	out, err := g.sqlRows(ctx, query)
 	if err != nil {
 		return nil, err
 	}

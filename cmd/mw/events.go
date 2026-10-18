@@ -101,9 +101,10 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 	}
 	// The follower reads the beads' head every second and a few notes on every
 	// pass; started as a bd each, those were 8.5 new connections a second to the
-	// beads server (mw-gq6.596). The head is read over one connection kept open,
-	// and a note is read from bd once in followerNoteWait.
-	followerGatewayOptions = []beads.Option{beads.WithNoteCache(followerNoteWait)}
+	// beads server (mw-gq6.596). The head, the view's reads of every bead, the
+	// notes and the comments, and the feed are read over one connection kept
+	// open (mw-gq6.600), and a note is read from bd once in followerNoteWait.
+	followerGatewayOptions = []beads.Option{beads.WithNoteCache(followerNoteWait), beads.WithKeptSaid(cmd.ErrOrStderr())}
 	if dir, err := config.Vault(); err == nil {
 		if db := beads.ServerHeadDB(dir); db != nil {
 			defer db.Close()
@@ -243,8 +244,9 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 			return err
 		},
 		Aside: true,
-		// Each head's view is read from the beads by a handful of bd calls; a
-		// busy beads moves its head every few seconds (mw-gq6.596).
+		// Each head's view is read from the beads over the kept connection, by bd
+		// only when it fails; a busy beads moves its head every few seconds
+		// (mw-gq6.596, mw-gq6.600).
 		PublishEvery: followerPublishEvery,
 		Every:        every,
 		Err:          cmd.ErrOrStderr(),

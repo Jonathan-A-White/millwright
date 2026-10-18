@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,6 +64,9 @@ type Gateway struct {
 	// headSkipUntil is when a failed headDB is tried again, and headMu guards it.
 	headMu        sync.Mutex
 	headSkipUntil time.Time
+	// keptSaid is where the Gateway says that the kept connection failed and bd
+	// read instead; nil says nothing.
+	keptSaid io.Writer
 	// notes keeps what Note read for a while; nil reads every note from bd.
 	notes *noteCache
 }

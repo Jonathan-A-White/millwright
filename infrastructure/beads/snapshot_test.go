@@ -21,11 +21,19 @@ import (
 // else; it returns the Gateway that runs it and the file it writes to.
 func standInSnapshot(t *testing.T, listing, table string) (*beads.Gateway, string) {
 	t.Helper()
+	program, asked := standInSnapshotProgram(t, listing, table)
+	return beads.New(t.TempDir(), beads.WithProgram(program)), asked
+}
+
+// standInSnapshotProgram is the stand-in bd of standInSnapshot, by the path of
+// the program, for a Gateway the test builds itself.
+func standInSnapshotProgram(t *testing.T, listing, table string) (program, asked string) {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in for bd is a shell script")
 	}
 	dir := t.TempDir()
-	asked := filepath.Join(dir, "asked")
+	asked = filepath.Join(dir, "asked")
 	for name, body := range map[string]string{"list": listing, "sql": table} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
@@ -43,7 +51,7 @@ esac
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return beads.New(t.TempDir(), beads.WithProgram(path)), asked
+	return path, asked
 }
 
 // mw-jrx0s.19: a view built through the snapshot is two bd calls — one list and

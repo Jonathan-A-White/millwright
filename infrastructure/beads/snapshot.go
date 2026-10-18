@@ -30,14 +30,21 @@ var _ application.RunningEverywhere = (*Gateway)(nil)
 // 0.5 s on the live vault, 2026-10-01) and `bd sql` is the cheapest of them: so
 // a build is two bd calls, not four (mw-jrx0s.19). The snapshot answers
 // AllNotes and StoriesComments from it.
+//
+// A Gateway given a database (WithHeadDB) reads both over that connection
+// instead, the listing as three queries (keptread.go) and the rest as rows of
+// `bd sql`'s own shape, and starts no bd unless the connection fails
+// (mw-gq6.600).
 func (g *Gateway) Snapshot(ctx context.Context) (application.WorkTracker, error) {
-	out, err := g.call(ctx, "list", "--all", "--limit", "0", "--json")
-	if err != nil {
-		return nil, err
-	}
-	all, err := decodeBeads(out)
-	if err != nil {
-		return nil, fmt.Errorf("reading every bead: %w", err)
+	all, kept := g.listAllOverConnection(ctx)
+	if !kept {
+		out, err := g.call(ctx, "list", "--all", "--limit", "0", "--json")
+		if err != nil {
+			return nil, err
+		}
+		if all, err = decodeBeads(out); err != nil {
+			return nil, fmt.Errorf("reading every bead: %w", err)
+		}
 	}
 	s := &snapshot{
 		WorkTracker: g, beads: all,
@@ -100,7 +107,7 @@ func (g *Gateway) readNotesAndComments(ctx context.Context, all []bead, now time
 	if len(quoted) == 0 {
 		quoted = append(quoted, "''")
 	}
-	out, err := g.call(ctx, "sql", "--json", strings.ReplaceAll(notesAndCommentsQuery, "{ids}", strings.Join(quoted, ", ")))
+	out, err := g.sqlRows(ctx, strings.ReplaceAll(notesAndCommentsQuery, "{ids}", strings.Join(quoted, ", ")))
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -160,7 +167,7 @@ func (g *Gateway) commentsOf(ctx context.Context, ids []string) (map[string][]ap
 		for _, id := range chunk {
 			quoted = append(quoted, sqlQuoted(id))
 		}
-		out, err := g.call(ctx, "sql", "--json", strings.ReplaceAll(beadCommentsQuery, "{ids}", strings.Join(quoted, ", ")))
+		out, err := g.sqlRows(ctx, strings.ReplaceAll(beadCommentsQuery, "{ids}", strings.Join(quoted, ", ")))
 		if err != nil {
 			return nil, err
 		}

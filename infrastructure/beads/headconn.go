@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +34,12 @@ const headQueryBound = 10 * time.Second
 // connection is tried again after HeadConnRetryWait.
 func WithHeadDB(db *sql.DB) Option {
 	return func(g *Gateway) { g.headDB = db }
+}
+
+// WithKeptSaid gives the Gateway the writer it tells, once each time it goes
+// back to starting a bd because the kept connection failed.
+func WithKeptSaid(w io.Writer) Option {
+	return func(g *Gateway) { g.keptSaid = w }
 }
 
 // ServerHeadDB opens, without yet dialling, the database of the vault's beads
@@ -85,26 +93,20 @@ func ServerHeadDB(vault string) *sql.DB {
 // that is the answer: false when there is no connection, it is being left
 // alone after a failure, or it failed now.
 func (g *Gateway) headOverConnection(ctx context.Context) (string, bool) {
-	if g.headDB == nil {
-		return "", false
-	}
-	g.headMu.Lock()
-	skip := g.clock().Before(g.headSkipUntil)
-	g.headMu.Unlock()
-	if skip {
+	db := g.keptDB()
+	if db == nil {
 		return "", false
 	}
 	bounded, cancel := context.WithTimeout(ctx, headQueryBound)
 	defer cancel()
 	var head string
-	err := g.headDB.QueryRowContext(bounded, headQuery).Scan(&head)
+	err := db.QueryRowContext(bounded, headQuery).Scan(&head)
 	if head = strings.TrimSpace(head); err == nil && head != "" {
 		return head, true
 	}
-	if ctx.Err() == nil {
-		g.headMu.Lock()
-		g.headSkipUntil = g.clock().Add(HeadConnRetryWait)
-		g.headMu.Unlock()
+	if err == nil {
+		err = errors.New("no hash")
 	}
+	g.keptFailed(ctx, "the head", err)
 	return "", false
 }
