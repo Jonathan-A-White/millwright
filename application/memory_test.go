@@ -302,3 +302,43 @@ func TestDemoteWithAQuestionThatDoesNotFindTheFactRefusesAndChangesNothing(t *te
 		t.Errorf("something changed: eval %q, wrote %v, commits %v", files.eval, files.wrote, vault.paths)
 	}
 }
+
+func TestDemoteWithAQuestionThatDoesNotFindTheFactRefusesEvenWhenAnotherQuestionDoes(t *testing.T) {
+	files, vault := demotable(), &recordingVault{}
+	files.eval += "\nQ: gate make test\nexpect: gate\n"
+	before, factBefore := files.eval, files.files["gate.md"]
+	err := anEditableMemory(files, vault, &bytes.Buffer{}).Demote(context.Background(), "kiln", "gate", "unrelated words")
+	if err == nil || !strings.Contains(err.Error(), "does not put it in the top 3") {
+		t.Fatalf("expected a refusal naming the question, got %v", err)
+	}
+	if files.eval != before || files.files["gate.md"] != factBefore || len(files.wrote) != 0 || len(vault.paths) != 0 {
+		t.Errorf("something changed: eval %q, wrote %v, commits %v", files.eval, files.wrote, vault.paths)
+	}
+}
+
+func TestDemoteWithAQuestionThatFindsTheFactAppendsItWhenAnotherQuestionAlreadyDoes(t *testing.T) {
+	files, vault := demotable(), &recordingVault{}
+	files.eval += "\nQ: gate make test\nexpect: gate\n"
+	err := anEditableMemory(files, vault, &bytes.Buffer{}).Demote(context.Background(), "kiln", "gate", "gate make lint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(files.eval, "\nQ: gate make lint\nexpect: gate\n") {
+		t.Errorf("the question was not appended:\n%q", files.eval)
+	}
+	if !strings.Contains(files.files["gate.md"], "boot: no") {
+		t.Errorf("the fact is not demoted:\n%s", files.files["gate.md"])
+	}
+}
+
+func TestDemoteWithoutAQuestionAcceptsAnyExistingQuestionThatFindsTheFact(t *testing.T) {
+	files, vault := demotable(), &recordingVault{}
+	files.eval += "\nQ: gate make test\nexpect: gate\n"
+	before := files.eval
+	if err := anEditableMemory(files, vault, &bytes.Buffer{}).Demote(context.Background(), "kiln", "gate", ""); err != nil {
+		t.Fatal(err)
+	}
+	if files.eval != before || !strings.Contains(files.files["gate.md"], "boot: no") {
+		t.Errorf("eval %q, fact %s", files.eval, files.files["gate.md"])
+	}
+}

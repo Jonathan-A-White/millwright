@@ -491,8 +491,9 @@ func (m Memory) Recheck(ctx context.Context, rig, slug, why string) error {
 // current, and query and list still show it. It is refused unless some question
 // of the rig's eval.md expects the fact and passes, so that a Builder who needs
 // the fact can still find it. A question given appends that question, expecting
-// the fact, to eval.md first; it is checked before anything is written, and
-// eval.md and the fact are committed together.
+// the fact, to eval.md first; that question itself must put the fact in the top
+// results (no other question stands in for it), it is checked before anything
+// is written, and eval.md and the fact are committed together.
 func (m Memory) Demote(ctx context.Context, rig, slug, question string) error {
 	_, files, facts, err := m.load(ctx, rig)
 	if err != nil {
@@ -523,8 +524,14 @@ func (m Memory) Demote(ctx context.Context, rig, slug, question string) error {
 	if err != nil {
 		return err
 	}
+	// A question given is the one that must find the fact: it is the last
+	// appended, so no earlier question may stand in for it.
+	checked := report.Questions
+	if asked && len(checked) > 0 {
+		checked = checked[len(checked)-1:]
+	}
 	found := false
-	for _, q := range report.Questions {
+	for _, q := range checked {
 		for _, expected := range q.Expect {
 			if expected == slug && !q.Failed {
 				found = true
