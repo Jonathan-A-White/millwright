@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -589,6 +590,12 @@ type closeOut struct {
 	// after it wrote its closing comment, so the close-out judges it as a
 	// finished one (mw-gq6.595).
 	cappedAfterClosing bool
+
+	// codemapBytes is the size of the union-merged docs/codemap.md when the
+	// merged result's tests failed only on its size and the landing let it
+	// through (codemapBandPercent), 0 otherwise; a landing that pushes files
+	// the bug that asks for the map to be trimmed.
+	codemapBytes int
 
 	// worktreeFailed says the rig's tests failed in the worktree and the
 	// close-out went on to the merged result (mw-gq6.552): a merge that is a
@@ -2306,7 +2313,7 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 			return Landed{}, failedFor(ReasonTestsNotRun, fmt.Errorf("the rig's tests could not be run on the merged result in %s: `%s` did not start, so nothing was pushed\n\n```\n%s\n```",
 				dir, checked.Command, checked.Tail(CheckLines)))
 		}
-		if !checked.Passed {
+		if !checked.Passed && !n.codemapBandLetsIn(c, report, checked) {
 			ran := ""
 			if gate.Said != "" {
 				ran = " (" + gate.Said + ")"
@@ -2328,7 +2335,155 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 	if err := n.pushRetrying(ctx, report, dir, c.target); err != nil {
 		return Landed{}, err
 	}
+	n.fileCodemapTrim(ctx, c, report)
 	return landed, nil
+}
+
+// codemapCap is the byte cap scripts/check-codemap.sh puts on docs/codemap.md,
+// and codemapBandPercent how far over it a union-merged map may be for a
+// landing to go through anyway (mw-gq6.598): a story whose own branch passed
+// the script is not refused for a squeeze that sibling landings made, once its
+// tests are otherwise green. The band is bounded so that the map cannot grow
+// without end; the bug a landing in it files asks for the map to be trimmed.
+const (
+	codemapCap         = 10240
+	codemapBandPercent = 10
+)
+
+// codemapSizeLine is the line scripts/check-codemap.sh stops at when the map is
+// over its cap; its size check is the first of five, so it is the only line the
+// script prints then.
+var codemapSizeLine = regexp.MustCompile(`^check-codemap: docs/codemap\.md is (\d+) bytes, over the (\d+)-byte limit`)
+
+// codemapOverTheCap is the size of the merged map when the failed run of the
+// rig's tests says nothing but that it is over its cap: one check-codemap line,
+// the size one, and no failing test or other check beside it.
+func codemapOverTheCap(output string) (int, bool) {
+	bytes := 0
+	for _, line := range strings.Split(domain.StripANSI(output), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "check-codemap:"):
+			found := codemapSizeLine.FindStringSubmatch(line)
+			if found == nil || bytes != 0 {
+				return 0, false
+			}
+			size, _ := strconv.Atoi(found[1])
+			if limit, _ := strconv.Atoi(found[2]); limit != codemapCap {
+				return 0, false
+			}
+			bytes = size
+		case strings.HasPrefix(line, "check-"), strings.HasPrefix(line, "FAIL"), strings.HasPrefix(line, "--- FAIL"),
+			strings.HasPrefix(line, "panic:"), strings.Contains(line, "*** ["):
+			return 0, false
+		}
+	}
+	return bytes, bytes > codemapCap
+}
+
+// codemapBandLetsIn says whether a failed run of the rig's tests on the merged
+// result is let through: its only failure is the size of docs/codemap.md, which
+// is over its cap by at most codemapBandPercent, and the story's own branch
+// passed the same tests in its worktree, map included, so that a map past the
+// cap is the other landings' doing. It keeps the size for the bug filed once
+// the landing is pushed.
+func (n Next) codemapBandLetsIn(c *closeOut, report *NextReport, checked Checked) bool {
+	bytes, over := codemapOverTheCap(checked.Output)
+	if !over || c.worktreeFailed || bytes > codemapCap+codemapCap*codemapBandPercent/100 {
+		return false
+	}
+	c.codemapBytes = bytes
+	note := fmt.Sprintf("docs/codemap.md is %d bytes on the merged result, %d over its %d-byte cap and inside the %d%% band, and the rest of the tests pass: landing %s, and a bug asks for the map to be trimmed",
+		bytes, bytes-codemapCap, codemapCap, codemapBandPercent, c.id)
+	report.Notes = append(report.Notes, note)
+	n.print("  note    " + note + "\n")
+	return true
+}
+
+// codemapTrimMark is what every title of the bug that asks for the map to be
+// trimmed holds, and so how an open one is found.
+const codemapTrimMark = "-byte cap after "
+
+func codemapTrimTitle(over int, id string) string {
+	return fmt.Sprintf("docs/codemap.md is %d bytes over its %d%s%s: merge or shorten rows", over, codemapCap, codemapTrimMark, id)
+}
+
+// fileCodemapTrim files the one open bug that asks for the map to be trimmed
+// after a landing let it through over its cap, under the landed story's epic
+// with its path; while such a bug is open, a landing adds its story and the
+// bytes to that bug's description instead. A write that fails is a note and a
+// mail to the Mayor: the landing is pushed and is never undone for it.
+func (n Next) fileCodemapTrim(ctx context.Context, c *closeOut, report *NextReport) {
+	if c.codemapBytes == 0 {
+		return
+	}
+	over := c.codemapBytes - codemapCap
+	lost := func(what string, err error) {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: %v", what, err))
+		n.mailLostWrite(ctx, c, report, what, fmt.Sprintf("docs/codemap.md is %d bytes after %s, over its %d-byte cap, and nothing asks for it to be trimmed; file a bug for it: %v", c.codemapBytes, c.id, codemapCap, err))
+	}
+	var open *StoryDetail
+	if lister, ok := n.Tracker.(TesterStories); ok {
+		stories, err := readRetrying(ctx, n, report, "the open stories", func() ([]StoryDetail, error) { return lister.StoriesSince(ctx, time.Time{}) })
+		if err != nil {
+			lost("the bug that asks for docs/codemap.md to be trimmed could not be filed, the open stories being unreadable", err)
+			return
+		}
+		for i, d := range stories {
+			if !d.IsEpic && !d.Closed() && d.Merged().Rig == c.path.Rig &&
+				strings.HasPrefix(d.Story.Title, "docs/codemap.md is ") && strings.Contains(d.Story.Title, codemapTrimMark) {
+				open = &stories[i]
+				break
+			}
+		}
+	}
+	if open != nil {
+		if strings.Contains(open.Description, "after "+c.id+":") {
+			return
+		}
+		text := strings.TrimRight(open.Description, "\n") + fmt.Sprintf("\nAlso after %s: %d bytes, %d over the cap.\n", c.id, c.codemapBytes, over)
+		err := writeRetrying(ctx, n, report, "the trim bug's description", func() error {
+			return n.Tracker.EditStory(ctx, open.Story.ID, StoryEdit{Description: &text})
+		})
+		if err != nil {
+			lost("the open trim bug "+open.Story.ID+" could not be told of the landing", err)
+			return
+		}
+		report.Notes = append(report.Notes, fmt.Sprintf("%s, the open bug that asks for docs/codemap.md to be trimmed, now names %s", open.Story.ID, c.id))
+		return
+	}
+
+	path := c.path
+	path.Files, path.Size, path.MaxTurns, path.Bump = "docs/codemap.md", domain.SizeXS, "", ""
+	story := NewStory{
+		EpicID:     c.detail.EpicID,
+		Standalone: c.detail.EpicID == "",
+		Title:      codemapTrimTitle(over, c.id),
+		Description: fmt.Sprintf("mw next landed %s although the union-merged docs/codemap.md is %d bytes, %d over its %d-byte cap: the story's own branch passed scripts/check-codemap.sh, "+
+			"and sibling landings grew the map. A landing is let in up to %d%% over the cap and no further, so trim the map before more landings fill the band.\n\n"+
+			"Landed: %s, %d bytes, %d over.\n\nSource: mw next on %s (mw-gq6.598).\n",
+			c.id, c.codemapBytes, over, codemapCap, codemapBandPercent, c.id, c.codemapBytes, over, n.Host),
+		Acceptance: "1. scripts/check-codemap.sh exits 0, and `wc -c docs/codemap.md` is at most 10240.\n" +
+			"2. make test passes.\n" +
+			"Sweep: none, because the cap is one page and the next landing past the band is refused by mw next, naming check-codemap.",
+		Priority:  2,
+		Overrides: path,
+		Labels:    []string{LabelBug},
+	}
+	var id string
+	err := writeRetrying(ctx, n, report, "the trim bug", func() error {
+		var err error
+		id, err = n.Tracker.CreateStory(ctx, story)
+		return err
+	})
+	if err == nil {
+		err = writeRetrying(ctx, n, report, "the release of the trim bug", func() error { return n.Tracker.ReleaseStory(ctx, id) })
+	}
+	if err != nil {
+		lost("the bug that asks for docs/codemap.md to be trimmed could not be filed", err)
+		return
+	}
+	report.Notes = append(report.Notes, fmt.Sprintf("filed %s: docs/codemap.md is %d bytes over its %d-byte cap", id, over, codemapCap))
 }
 
 // changelogEntry is the note a landing writes into the rig's changelog files:

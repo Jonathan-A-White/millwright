@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -455,5 +456,173 @@ func TestACloseOutThatGivesTheSlotAcrossHostsBackToWaitStillLandsWithNoTryLost(t
 	}
 	if !strings.Contains(report.String(), "ran twice") {
 		t.Fatalf("expected the report to say the merged result's tests ran twice, got:\n%s", report.String())
+	}
+}
+
+// A landing whose own branch passes check-codemap, and whose union-merged map
+// is over its cap only because sibling landings grew it, lands inside a band
+// and files one open bug to trim the map (mw-gq6.598).
+
+// aCodemapGate is the rig's tests: the first run, in the story's worktree, and
+// each one after it, on the merged result, say what they print and whether they
+// pass.
+type aCodemapGate struct {
+	runs []application.Checked
+	ran  int
+}
+
+func (g *aCodemapGate) Run(context.Context, string, string) (application.Checked, error) {
+	run := g.runs[min(g.ran, len(g.runs)-1)]
+	g.ran++
+	run.Command = "make test && scripts/check-codemap.sh"
+	return run, nil
+}
+
+var passingGate = application.Checked{Passed: true, Output: "ok  \tgithub.com/Jonathan-A-White/millwright/application\t3.1s\nOK: docs/codemap.md is 9000 bytes\n"}
+
+// overTheCap is the run of the rig's tests on a merged result whose map is
+// bytes long and fails only check-codemap's SIZE, as scripts/check-codemap.sh
+// says it.
+func overTheCap(bytes int) application.Checked {
+	return application.Checked{Output: fmt.Sprintf("ok  \tgithub.com/Jonathan-A-White/millwright/application\t3.1s\n"+
+		"check-codemap: docs/codemap.md is %d bytes, over the 10240-byte limit; make room by merging rows or shortening them\n", bytes)}
+}
+
+type aCodemapLanding struct {
+	tracker *apptest.FakeTracker
+	mail    *apptest.FakeMailbox
+}
+
+func aCodemapTracker() *apptest.FakeTracker {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story", Overrides: domain.Path{Files: "application/next.go", Size: domain.SizeS}})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.2", Title: "Another story"})
+	return tracker
+}
+
+// closeOutWithMap closes out the finished story id on tracker, its branch
+// merging into a merge commit whose tests then run as gate says; behind is how
+// many commits the target has that the branch was cut before.
+func closeOutWithMap(t *testing.T, tracker *apptest.FakeTracker, id string, behind int, gate *aCodemapGate) (application.NextReport, error) {
+	t.Helper()
+	vault := newFakeVault()
+	vault.written[id+"/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
+	lands := &mergingLanding{fakeRetryLanding{AheadCount: 1, BehindCount: behind}}
+	return application.Next{
+		Tracker: tracker, Vault: vault, Worktrees: lands, Landing: lands, Rules: apptest.NewFakeEpicRules(),
+		Checks: gate, Slot: aSlot{}, Mailbox: apptest.NewFakeMailbox(),
+		Seat: "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(context.Background(), id)
+}
+
+// trimBugs are the open bugs on tracker that ask for the map to be trimmed.
+func trimBugs(t *testing.T, tracker *apptest.FakeTracker) []application.StoryDetail {
+	t.Helper()
+	all, err := tracker.StoriesSince(context.Background(), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bugs []application.StoryDetail
+	for _, d := range all {
+		if strings.HasPrefix(d.Story.Title, "docs/codemap.md is ") && !d.Closed() {
+			bugs = append(bugs, d)
+		}
+	}
+	return bugs
+}
+
+func TestALandingWhoseMergedMapIsOverTheCapByUnderTenPercentLandsAndFilesOneTrimBug(t *testing.T) {
+	for _, bytes := range []int{10241, 11264} {
+		t.Run(fmt.Sprint(bytes), func(t *testing.T) {
+			tracker := aCodemapTracker()
+			report, err := closeOutWithMap(t, tracker, "mw-x.1", 0, &aCodemapGate{runs: []application.Checked{passingGate, overTheCap(bytes)}})
+			if err != nil || !report.Landed {
+				t.Fatalf("expected the story landed, got %v and %+v", err, report)
+			}
+			bugs := trimBugs(t, tracker)
+			if len(bugs) != 1 {
+				t.Fatalf("expected one trim bug, got %+v", bugs)
+			}
+			bug := bugs[0]
+			if want := fmt.Sprintf("docs/codemap.md is %d bytes over its 10240-byte cap after mw-x.1: merge or shorten rows", bytes-10240); bug.Story.Title != want {
+				t.Errorf("expected the title %q, got %q", want, bug.Story.Title)
+			}
+			if bug.Status != apptest.StatusOpen || bug.Priority != 2 || !slices.Contains(bug.Labels, application.LabelBug) || bug.EpicID != "mw-x" {
+				t.Errorf("expected an open P2 bug under mw-x, got status %q, P%d, labels %v, epic %q", bug.Status, bug.Priority, bug.Labels, bug.EpicID)
+			}
+			path := bug.Merged()
+			want := domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop",
+				Files: "docs/codemap.md", Size: domain.SizeXS}
+			if path != want {
+				t.Errorf("expected the path %+v, got %+v", want, path)
+			}
+			if !strings.Contains(bug.Acceptance, "scripts/check-codemap.sh") || domain.SweepOf(bug.Acceptance) != domain.SweepGiven {
+				t.Errorf("expected an acceptance that runs scripts/check-codemap.sh and has a Sweep line, got %q", bug.Acceptance)
+			}
+			if !strings.Contains(bug.Description, "mw-x.1") || !strings.Contains(bug.Description, fmt.Sprint(bytes)) {
+				t.Errorf("expected the description to name the story and the bytes, got %q", bug.Description)
+			}
+		})
+	}
+}
+
+func TestASecondLandingInTheBandAddsToTheOpenTrimBugAndFilesNoSecond(t *testing.T) {
+	tracker := aCodemapTracker()
+	for id, bytes := range map[string]int{"mw-x.1": 10300, "mw-x.2": 10900} {
+		report, err := closeOutWithMap(t, tracker, id, 0, &aCodemapGate{runs: []application.Checked{passingGate, overTheCap(bytes)}})
+		if err != nil || !report.Landed {
+			t.Fatalf("expected %s landed, got %v and %+v", id, err, report)
+		}
+	}
+	bugs := trimBugs(t, tracker)
+	if len(bugs) != 1 {
+		t.Fatalf("expected the one open trim bug, got %d: %+v", len(bugs), bugs)
+	}
+	for _, want := range []string{"mw-x.1", "mw-x.2", "10300", "10900"} {
+		if !strings.Contains(bugs[0].Description, want) {
+			t.Errorf("expected the trim bug to name %q, got %q", want, bugs[0].Description)
+		}
+	}
+}
+
+func TestALandingOutsideTheBandIsRefusedAsBeforeNamingTheCheck(t *testing.T) {
+	const other = "--- FAIL: TestSomething (0.00s)\nFAIL\n"
+	for name, c := range map[string]struct {
+		gate   *aCodemapGate
+		behind int
+	}{
+		"map over the band": {&aCodemapGate{runs: []application.Checked{passingGate, overTheCap(11265)}}, 0},
+		"branch failing check-codemap against its own base": {&aCodemapGate{runs: []application.Checked{
+			{Output: overTheCap(10500).Output}, overTheCap(10500)}}, 1},
+		"a test failing beside the size": {&aCodemapGate{runs: []application.Checked{passingGate,
+			{Output: other + overTheCap(10500).Output}}}, 0},
+		"make failing beside the size": {&aCodemapGate{runs: []application.Checked{passingGate,
+			{Output: overTheCap(10500).Output + "make: *** [Makefile:31: test] Error 1\n"}}}, 0},
+		"a missing path": {&aCodemapGate{runs: []application.Checked{passingGate,
+			{Output: "check-codemap: docs/codemap.md, docs/codemap-detail.md or docs/adding-a-command.md names `x/y.go`, which does not exist\n"}}}, 0},
+		"a conflict marker": {&aCodemapGate{runs: []application.Checked{passingGate,
+			{Output: "check-codemap: docs/codemap.md line 4 is a conflict marker: <<<<<<< HEAD\n"}}}, 0},
+		"a stale row": {&aCodemapGate{runs: []application.Checked{passingGate,
+			{Output: "check-codemap: docs/codemap.md line 9 repeats line 3: | Show |\n"}}}, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tracker := aCodemapTracker()
+			report, err := closeOutWithMap(t, tracker, "mw-x.1", c.behind, c.gate)
+			if report.Landed || report.Reason != application.ReasonMergedTestsFail {
+				t.Fatalf("expected a refusal for failing tests, got %v and %+v", err, report)
+			}
+			if err == nil || !strings.Contains(err.Error(), "check-codemap") && !strings.Contains(err.Error(), "FAIL") {
+				t.Errorf("expected the refusal to show the failing check, got %v", err)
+			}
+			if !strings.Contains(err.Error(), "failed on the merged result") {
+				t.Errorf("expected the refusal to say the tests failed on the merged result, got %v", err)
+			}
+			if bugs := trimBugs(t, tracker); len(bugs) != 0 {
+				t.Errorf("expected no trim bug, got %+v", bugs)
+			}
+		})
 	}
 }
