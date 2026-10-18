@@ -329,3 +329,42 @@ func TestFilingAStoryWithABadSizeIsRefused(t *testing.T) {
 		t.Errorf("expected nothing written, got %v", tracker.Epics())
 	}
 }
+
+// mw-gq6.594: a Tester story with no 'Landed story:' line could run a whole
+// session and then file nothing, so a plan holding one is refused before any of
+// it is written.
+func TestAPlanWithATesterStoryNamingNoLandedStoryIsRefusedBeforeAnythingIsFiled(t *testing.T) {
+	for name, story := range map[string]domain.PlanStory{
+		"labelled tester": {Key: "drive", Title: "Tester: drive it", Labels: []string{application.LabelTester},
+			Description: "Drive it on a phone.", Acceptance: "FINDINGS written\nExpect: none, because a test plan"},
+		"worked by the tester formula": {Key: "drive", Title: "Tester: drive it", Overrides: domain.Path{Formula: application.TesterFormula},
+			Description: "Drive it on a phone.", Acceptance: "FINDINGS written\nExpect: none, because a test plan"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tracker := apptest.NewFakeTracker()
+			tracker.AddFormula("tdd-feature")
+			tracker.AddFormula(application.TesterFormula)
+			plan := twoStoryPlan()
+			plan.Stories = append(plan.Stories, story)
+
+			_, err := application.File{Tracker: tracker}.Run(context.Background(), plan)
+			if err == nil || !strings.Contains(err.Error(), "drive") || !strings.Contains(err.Error(), application.TesterLandedLine) {
+				t.Fatalf("want a refusal naming the story and the line, got %v", err)
+			}
+			if len(tracker.Stories()) != 0 || len(tracker.Epics()) != 0 {
+				t.Errorf("something was filed: %v %v", tracker.Epics(), tracker.Stories())
+			}
+		})
+	}
+}
+
+func TestAPlanWithATesterStoryNamingItsLandedStoryIsFiled(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
+	plan := twoStoryPlan()
+	plan.Stories = append(plan.Stories, domain.PlanStory{Key: "drive", Title: "Tester: drive it", Labels: []string{application.LabelTester},
+		Description: application.TesterLandedLine + "mw-gq6.5 (landed on main)", Acceptance: "FINDINGS written\nExpect: none, because a test plan"})
+	if _, err := (application.File{Tracker: tracker}).Run(context.Background(), plan); err != nil {
+		t.Fatalf("filing: %v", err)
+	}
+}

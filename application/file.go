@@ -213,6 +213,9 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	if err := f.validateFiles(plan, order); err != nil {
 		return FiledPlan{}, err
 	}
+	if err := validateTesterStories(plan, order); err != nil {
+		return FiledPlan{}, err
+	}
 	guests, err := f.guestRigsOf(ctx, plan)
 	if err != nil {
 		return FiledPlan{}, err
@@ -389,6 +392,26 @@ func (f File) validateFormulas(ctx context.Context, plan domain.Plan, order []do
 		}
 		if err := f.validateStepTitles(ctx, story, path.Formula, overheads); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// validateTesterStories refuses the whole plan, naming the story key, when a
+// Tester story in it (labelled tester, or worked by the tester formula) has no
+// 'Landed story:' line: such a story runs its whole session and then cannot
+// file a finding (mw-gq6.594). Before anything is written.
+func validateTesterStories(plan domain.Plan, order []domain.PlanStory) error {
+	for _, story := range order {
+		path, err := story.PathFrom(plan.Epic.Defaults)
+		if err != nil {
+			continue
+		}
+		detail := StoryDetail{Description: story.Description, Labels: story.Labels}
+		detail.Story.Overrides = path
+		if NamesNoLandedStory(detail) {
+			return fmt.Errorf("filing story %s: it is a Tester story and its description has no %q line, so its session could not file a finding; add the line",
+				story.Key, TesterLandedLine+"<id>")
 		}
 	}
 	return nil
