@@ -338,6 +338,18 @@ func (s PosternSnapshot) Build(ctx context.Context) (PosternSnapshotDoc, error) 
 		return PosternSnapshotDoc{}, err
 	}
 
+	// Every bead is read at once and the live epics, their children and what
+	// the children wait on are answered from that one read, as the Governor's
+	// view does: the tracker's own reads start a bd for each epic's children,
+	// every ten minutes while the beads move (mw-gq6.613).
+	if snapshotter, ok := s.Tracker.(TrackerSnapshot); ok {
+		snapshot, err := snapshotter.Snapshot(ctx)
+		if err != nil {
+			return PosternSnapshotDoc{}, fmt.Errorf("reading the beads: %w", err)
+		}
+		s.Tracker = snapshot
+	}
+
 	ids, err := s.Tracker.LiveEpics(ctx)
 	if err != nil {
 		return PosternSnapshotDoc{}, fmt.Errorf("listing the live epics: %w", err)

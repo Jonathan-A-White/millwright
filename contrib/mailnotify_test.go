@@ -1875,3 +1875,44 @@ func TestAMayorAtTheUsageLimitIsNotTypedAndTheNudgeIsHeldUntilItIsIdle(t *testin
 		})
 	}
 }
+
+// mw-gq6.613: half of the Laptop's new connections to the beads server came from
+// this tick, every minute, with nothing changed. A tick that finds no new mail
+// and the beads where it left them starts at most two bd of its own, the inbox
+// and the level, and runs no snapshot, no view and no sync; the mw it runs for
+// the quiet alarm and the postern count read over a connection kept open for
+// their run (cmd/mw's keptquiet_test.go), so those start none.
+func TestATickWithNothingChangedStartsAtMostTwoBd(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.servesTheView()
+	f.posternKey()
+	f.posternCount(0)
+
+	f.tick()
+	if f.posternSubCalls("snapshot") != 1 || f.viewRuns() != 1 {
+		t.Fatalf("expected the first tick to write the snapshot and the view, got %q", f.read("postern.log"))
+	}
+
+	// Past both intervals, with the beads where the first tick left them.
+	f.setSnapshotLastAt(time.Now().Add(-1 * time.Hour))
+	f.setViewLastAt(time.Now().Add(-1 * time.Hour))
+	bdBefore, nudgesBefore, syncsBefore := f.bdCalls(), f.nudgeCalls(), f.syncs()
+	snapshotsBefore, viewsBefore := f.posternSubCalls("snapshot"), f.viewRuns()
+
+	f.tick()
+
+	bd := strings.Split(strings.TrimSpace(f.read("bd.log")), "\n")[bdBefore:]
+	if len(bd) > 2 {
+		t.Errorf("expected at most two bd started by a tick with nothing changed, got %d:\n%s", len(bd), strings.Join(bd, "\n"))
+	}
+	if f.posternSubCalls("snapshot") != snapshotsBefore || f.viewRuns() != viewsBefore {
+		t.Errorf("expected no snapshot and no view with the beads unchanged, got %q", f.read("postern.log"))
+	}
+	if f.syncs() != syncsBefore {
+		t.Errorf("expected no sync inside the sync interval, got %d more", f.syncs()-syncsBefore)
+	}
+	if f.nudgeCalls() != nudgesBefore+1 {
+		t.Errorf("expected the quiet alarm read once, got %d more", f.nudgeCalls()-nudgesBefore)
+	}
+}

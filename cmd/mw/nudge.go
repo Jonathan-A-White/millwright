@@ -75,6 +75,12 @@ func newNudgeCmd() *cobra.Command {
 				transcripts = claude.NewTranscripts(projects)
 			}
 
+			// The quiet alarm is run every minute by contrib/mail-notify, and a bd
+			// started for each read was most of the Laptop's new connections to the
+			// beads server: they are read over one connection (mw-gq6.613). Kept
+			// after hostBeads, which may point this process at the home's server.
+			defer keepBeadsConnection(dir, cmd.ErrOrStderr())()
+
 			tracker := mwGateway(dir, host)
 			clauses, err := application.Nudge{
 				Tracker:     tracker,

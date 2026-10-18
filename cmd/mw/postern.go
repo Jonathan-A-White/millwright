@@ -278,6 +278,13 @@ func newPosternInboxCmd() *cobra.Command {
 					}
 				}
 			}
+			if unreadCount {
+				// contrib/mail-notify counts every minute: the cursor and the held
+				// notes are read over one connection, not a bd each (mw-gq6.613).
+				if dir, err := config.Vault(); err == nil {
+					defer keepBeadsConnection(dir, cmd.ErrOrStderr())()
+				}
+			}
 			inbox, wired, err := newPosternInbox(cmd.OutOrStdout())
 			if err != nil {
 				return err
@@ -659,6 +666,13 @@ func newPosternSnapshotCmd() *cobra.Command {
 			"--json prints the plaintext instead of writing anything, for inspection.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Its reads of the beads are one connection's, not a bd each
+			// (mw-gq6.613).
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			defer keepBeadsConnection(dir, cmd.ErrOrStderr())()
 			gateway, _, err := posternGateway()
 			if err != nil {
 				return err
