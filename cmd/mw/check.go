@@ -23,6 +23,7 @@ import (
 // non-zero when any check fails.
 func newCheckCmd() *cobra.Command {
 	var noSlot, background, logIsStdout bool
+	var part int
 	cmd := &cobra.Command{
 		Use:   "check <story-id>",
 		Short: "Run the checks mw next makes before landing a story, on its branch, and change nothing",
@@ -50,6 +51,12 @@ func newCheckCmd() *cobra.Command {
 			"until the session ends, and it does not try the merge, so a branch that passes here can still be\n" +
 			"stopped by a conflict or by the other host's work. The commits are counted against the target\n" +
 			"branch as the rig last saw the remote's.\n\n" +
+			"A rig whose whole gate outruns a foreground tool call's 590 seconds is named as parts in the host's\n" +
+			"config file (the [test_parts.<rig>] tables, mw-gq6.567). mw check <story> --part N then runs part N\n" +
+			"alone, with no wait for a calm host and no second run, and keeps what it said at the branch's tip;\n" +
+			"run it once for each part, each as a call of its own, and then mw check <story> with no --part: that\n" +
+			"runs none of the gate again, it reads the parts' records and reports the whole gate green, or names\n" +
+			"each part that failed or was not run at this commit, with the call that runs it.\n\n" +
 			"The formula's last step is normally still open when a session runs check, so a session runs it\n" +
 			"after committing and closes that step once nothing else is refused.",
 		Args: cobra.ExactArgs(1),
@@ -107,13 +114,26 @@ func newCheckCmd() *cobra.Command {
 			if projects, err := claude.DefaultProjectsRoot(); err == nil {
 				modes = claude.NewTranscripts(projects)
 			}
-			checks := rig.NewChecks(rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNice(nice), rig.WithJobs(jobs))
+			configured, err := config.TestParts()
+			if err != nil {
+				return err
+			}
+			parts := map[string][]application.GatePart{}
+			for rigName, named := range configured {
+				for _, p := range named {
+					parts[rigName] = append(parts[rigName], application.GatePart{Name: p.Name, Command: p.Command})
+				}
+			}
+			checks := rig.NewChecks(rig.WithParts(parts), rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNice(nice), rig.WithJobs(jobs))
 			k := application.Check{
 				Tracker:    mwGateway(dir, host),
 				Landing:    worktrees,
 				Checks:     checks,
 				SpecChecks: checks,
 				Slot:       slot,
+				Parts:      checks,
+				Records:    mwVault(dir, host),
+				Part:       part,
 				Load:       hostload.Proc{},
 				Modes:      modes,
 				Host:       host,
@@ -130,6 +150,7 @@ func newCheckCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&background, "background", false, "start the check detached, writing its whole output to runs/<story>/check-<attempt>.log in the vault, print that log's path and return at once")
 	cmd.Flags().BoolVar(&logIsStdout, "log-is-stdout", false, "the output of this check is already being written to the story's log (set by --background)")
 	_ = cmd.Flags().MarkHidden("log-is-stdout")
+	cmd.Flags().IntVar(&part, "part", 0, "run part N of the rig's gate alone, for a rig whose host names its gate as parts, and keep what it said; a check with no --part then reports the whole gate from the parts' records")
 	cmd.Flags().BoolVar(&noSlot, "no-slot", false, "run the rig's tests without taking the rig's merge slot, so without waiting for a close-out's gate")
 	return cmd
 }

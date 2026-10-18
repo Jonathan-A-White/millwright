@@ -75,6 +75,8 @@ type nextContext struct {
 	checkLoad    *apptest.FakeHostLoad       // the host's load as mw check reads it; nil reads none
 	sessionModes application.TranscriptModes // the permission mode the session ran in, as its transcript shows; nil shows none
 	specCommands map[string]string           // the [changed_specs] table this scenario's host has
+	gateParts    []application.GatePart       // the parts this scenario's host names the rig's gate as
+	partToCheck  int                          // the --part of the check being run, 0 for none
 	background   *backgroundChecks           // the checks a scenario started with --background
 	racer        string                      // the other host, landing work mid-push
 	refusal      []string                    // what the origin's hook says when it refuses a push

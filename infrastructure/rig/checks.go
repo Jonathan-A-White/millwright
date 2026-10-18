@@ -39,6 +39,7 @@ const (
 type Checks struct {
 	commands map[string]string
 	command  string
+	parts    map[string][]application.GatePart
 	specs    map[string]string
 	git      string
 	shell    string
@@ -76,6 +77,19 @@ func WithCommands(commands map[string]string) CheckOption {
 	}
 }
 
+// WithParts names the parts each rig's gate is split into, by rig name, as the
+// `[test_parts.<rig>]` tables of the config file have them (mw-gq6.567). A rig
+// the map does not name has its tests run whole.
+func WithParts(parts map[string][]application.GatePart) CheckOption {
+	return func(c *Checks) {
+		for rig, named := range parts {
+			if len(named) > 0 {
+				c.parts[rig] = named
+			}
+		}
+	}
+}
+
 // WithCheckShell names the shell that reads the command line.
 func WithCheckShell(path string) CheckOption {
 	return func(c *Checks) { c.shell = path }
@@ -99,7 +113,7 @@ func WithJobs(n int) CheckOption {
 // NewChecks returns the checks of a rig whose tests are DefaultCommand, unless
 // an option says otherwise.
 func NewChecks(opts ...CheckOption) *Checks {
-	c := &Checks{commands: map[string]string{}, command: DefaultCommand, specs: map[string]string{}, git: Program, shell: Shell}
+	c := &Checks{commands: map[string]string{}, command: DefaultCommand, parts: map[string][]application.GatePart{}, specs: map[string]string{}, git: Program, shell: Shell}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -122,6 +136,13 @@ func (c *Checks) Command(rig string) string {
 	}
 	return c.command
 }
+
+// Parts implements application.GateParts: the parts a rig's gate is named as, in
+// the order they are run; none when its tests run whole.
+func (c *Checks) Parts(rig string) []application.GatePart { return c.parts[rig] }
+
+// Checks satisfies the port a split gate is read and run through.
+var _ application.GateParts = (*Checks)(nil)
 
 // Run implements application.Checks.
 func (c *Checks) Run(ctx context.Context, rig, dir string) (application.Checked, error) {

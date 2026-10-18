@@ -69,6 +69,15 @@ type Check struct {
 	// keeps none.
 	Logs CheckLogs
 
+	// Parts is how the rig's gate is named as parts on this host, and Records
+	// where what each part said is kept (mw-gq6.567). When the rig's gate has
+	// parts, Part N alone runs part N and nothing else of the check, and Part 0
+	// runs none of the gate: it reads the parts' records at the branch's tip. Nil
+	// Parts, or nil Records, is a rig whose tests run whole, as before.
+	Parts   GateParts
+	Records CheckRecords
+	Part    int
+
 	// Modes is the harness's record of the permission mode the story's session
 	// ran in (mw-gq6.545); Next's own. Nil reads none.
 	Modes TranscriptModes
@@ -186,7 +195,8 @@ func (k Check) Run(ctx context.Context, storyID string) (CheckReport, error) {
 		// Nothing was printed, so the log would end with no verdict at all.
 		fmt.Fprintf(&kept, "mw check: %v\n", err)
 	}
-	if k.Logs != nil && report.Attempt > 0 {
+	// A part has its own record; the log is the whole check's verdict.
+	if k.Logs != nil && report.Attempt > 0 && k.Part == 0 {
 		name := CheckLogFileName(report.Attempt)
 		if _, werr := k.Logs.PutRunFile(ctx, storyID, name, kept.String()); werr != nil && shown != nil {
 			fmt.Fprintf(shown, "  note    the log of this check could not be kept in the run of %s: %v\n", storyID, werr)
@@ -240,12 +250,24 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		branch:   StoryBranch(storyID),
 		target:   path.Branch,
 	}
+	// A part prints its own report: none of the whole check's verdict.
+	if k.Part != 0 {
+		return k.checkPart(ctx, report, c)
+	}
 	report.Branch, report.Target = c.branch, c.target
 
 	// The rig's tests are run holding the rig's merge slot, as a close-out's
 	// are, so that one gate per rig runs at a time on this host.
 	checks := k.Checks
-	if k.Slot != nil {
+	load := k.Load
+	split := k.splitGate(path.Rig)
+	if split {
+		// A split gate runs nothing here: the parts were run, each in a call of
+		// its own, and this reads what they said at the tip. It takes no slot
+		// and waits for no calm host, so it finishes at once.
+		checks = recordedGate{records: k.Records, storyID: storyID, attempt: report.Attempt, parts: k.partsOf(path.Rig), tip: k.cleanTip(ctx, c)}
+		load = nil
+	} else if k.Slot != nil {
 		checks = slottedChecks{
 			checks: k.Checks,
 			slot:   k.Slot,
@@ -280,7 +302,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		Checks:     checks,
 		SpecChecks: specs,
 		Remote:     k.Remote,
-		Load:       k.Load,
+		Load:       load,
 		Modes:      k.Modes,
 		LoadPoll:   k.LoadPoll,
 		LoadBound:  k.LoadBound,
@@ -289,6 +311,9 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		Out:        k.Out,
 	}.refusals(ctx, c, &read, true)
 	report.Commits, report.Notes = read.Commits, read.Notes
+	if split && report.Passed() {
+		report.Notes = append(report.Notes, fmt.Sprintf("the gate ran as %d parts and every part passed at the tip", len(k.partsOf(path.Rig))))
+	}
 	if tip != "" {
 		if after, err := k.Landing.RefHead(ctx, c.rigDir, c.branch); err == nil && after == tip {
 			report.Tip = tip
