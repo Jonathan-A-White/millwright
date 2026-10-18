@@ -450,33 +450,45 @@ func (w *DigestWeekly) Job() SpringJob {
 // DigestHour, none has been sent today, and this is the home. The home is
 // asked last, for it reads a file in the vault.
 func (w *DigestWeekly) due(ctx context.Context) bool {
+	return w.whyNotDue(ctx) == ""
+}
+
+// whyNotDue says in a few words why the digest is not to be sent now, "" when
+// it is.
+func (w *DigestWeekly) whyNotDue(ctx context.Context) string {
 	now := w.now()
 	if now.Weekday() != DigestWeekday || now.Hour() < DigestHour {
-		return false
+		return fmt.Sprintf("not sent: it is not yet %s %02d:00Z", DigestWeekday, DigestHour)
 	}
 	day := now.Format(time.DateOnly)
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.tried == day {
-		return false
+		return "not sent: the digest of " + day + " was already begun"
 	}
 	last, err := w.Notes.Note(ctx, DigestLastKey)
 	if err != nil {
 		w.say("mw events follow: reading the day of the last weekly digest: %v\n", err)
-		return false
+		return "not sent: reading the day of the last digest failed: " + firstLine(err.Error())
 	}
 	if strings.TrimSpace(last) == day {
 		w.tried = day
-		return false
+		return "not sent: the digest of " + day + " was already begun"
 	}
 	at, err := w.Home(ctx)
-	return err == nil && at
+	if err != nil {
+		return "not sent: asking whether this is the home failed: " + firstLine(err.Error())
+	}
+	if !at {
+		return "not sent: this host is not the home"
+	}
+	return ""
 }
 
 // run sends the digest if it is due, marking the day first.
 func (w *DigestWeekly) run(ctx context.Context) error {
-	if !w.due(ctx) {
-		return nil
+	if why := w.whyNotDue(ctx); why != "" {
+		return SkippedPass(why)
 	}
 	day := w.now().Format(time.DateOnly)
 	w.mu.Lock()
@@ -485,7 +497,11 @@ func (w *DigestWeekly) run(ctx context.Context) error {
 	if err := w.Notes.SetNote(ctx, DigestLastKey, day); err != nil {
 		return fmt.Errorf("marking the day of the weekly digest: %w", err)
 	}
-	return w.Send(ctx)
+	return unmarkDayIfCutShort(ctx, w.Notes, DigestLastKey, w.Send(ctx), func() {
+		w.mu.Lock()
+		w.tried = ""
+		w.mu.Unlock()
+	})
 }
 
 func (w *DigestWeekly) say(format string, args ...any) {

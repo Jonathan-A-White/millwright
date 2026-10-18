@@ -444,7 +444,7 @@ func TestAFailedSleepPassIsNotRetriedTheSameDay(t *testing.T) {
 	if _, due := job.Probe(ctx); due {
 		t.Fatal("a pass that failed is due again the same day")
 	}
-	if err := job.Run(ctx); err != nil || runs != 1 {
+	if err := madeOrPassedOver(job.Run(ctx)); err != nil || runs != 1 {
 		t.Fatalf("a second run the same day: %v, runs = %d", err, runs)
 	}
 }

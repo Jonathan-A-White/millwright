@@ -33,6 +33,17 @@ const SpringLeftRunningDetail = "the follower stopped while it waited; the work 
 // done with SpringLeftRunningDetail.
 var ErrLeftRunning = errors.New("left running apart from the follower")
 
+// SkippedPassError is the error of a pass that found nothing to do and made
+// nothing; the pass is written done with Why as its detail, so that a done
+// event with no output says why (mw-gq6.590).
+type SkippedPassError struct{ Why string }
+
+func (e *SkippedPassError) Error() string { return e.Why }
+
+// SkippedPass is the error a job's Run returns when it ends without making what
+// it is for, with why in a few words.
+func SkippedPass(why string) error { return &SkippedPassError{Why: why} }
+
 // LeftRunning is err, from a wait that ctx ending cut short, marked
 // ErrLeftRunning when ctx has ended.
 func LeftRunning(ctx context.Context, err error) error {
@@ -40,6 +51,25 @@ func LeftRunning(ctx context.Context, err error) error {
 		return err
 	}
 	return fmt.Errorf("%w: %w", ErrLeftRunning, err)
+}
+
+// unmarkDayIfCutShort is err, the end of a once-a-day pass that marked its day
+// begun before it ran. A pass the follower's stopping cut short is not that
+// day's pass: the mark is taken back (and reset clears the job's own memory of
+// it), so that the follower that comes back runs the pass again in full and not
+// as a no-op that finds the day marked (mw-gq6.590). A pass that failed with the
+// follower running keeps its mark: it costs fuel, so it is made the next day.
+func unmarkDayIfCutShort(ctx context.Context, notes interface {
+	SetNote(ctx context.Context, key, value string) error
+}, key string, err error, reset func()) error {
+	if err == nil || ctx.Err() == nil {
+		return err
+	}
+	reset()
+	if setErr := notes.SetNote(context.WithoutCancel(ctx), key, ""); setErr != nil {
+		return fmt.Errorf("%w (and taking back the day's mark failed: %v)", err, setErr)
+	}
+	return err
 }
 
 // SpringRestartedReason is the detail of the scheduled event of a pass run
@@ -382,10 +412,14 @@ func (s *EventSpring) launch(ctx context.Context, j SpringJob, st *springState, 
 		s.say(j, s.write(ctx, j, st, events.JobRunning, ""))
 		s.mu.Unlock()
 		err := j.Run(ctx)
-		cutShort := err != nil && s.stopping(ctx)
+		var skipped *SkippedPassError
+		isSkip := errors.As(err, &skipped)
+		cutShort := err != nil && !isSkip && s.stopping(ctx)
 		s.mu.Lock()
 		tell := false
-		if cutShort && errors.Is(err, ErrLeftRunning) {
+		if isSkip {
+			s.say(j, s.write(ctx, j, st, events.JobDone, clippedTo(oneLine(skipped.Why), DispatchLogReasonLimit)))
+		} else if cutShort && errors.Is(err, ErrLeftRunning) {
 			s.say(j, s.write(ctx, j, st, events.JobDone, SpringLeftRunningDetail))
 		} else if cutShort {
 			s.say(j, s.write(ctx, j, st, events.JobDone, SpringInterruptedDetail))

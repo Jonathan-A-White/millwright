@@ -132,8 +132,11 @@ func (c *ContributeBack) due(ctx context.Context) (month string, due bool, err e
 // run files the review of this month, if it is due, and notes it filed.
 func (c *ContributeBack) run(ctx context.Context) error {
 	month, due, err := c.due(ctx)
-	if err != nil || !due {
+	if err != nil {
 		return err
+	}
+	if !due {
+		return SkippedPass("not filed: the review of " + month + " is not due, or already filed, or this host is not the home")
 	}
 	title := ContributeBackTitle(month)
 	bead, err := c.Tracker.CreateStory(ctx, NewStory{
