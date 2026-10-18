@@ -2515,6 +2515,7 @@ efforts = "low,medium,high"   # what a grist may ask for; the grind file's own e
 max_attachments = 4
 max_attachment_bytes = 8388608
 daily_limit = 50         # grist a day from one key
+person_cap = true        # a self-registered person's device keys are counted together at the person's own cap (50), asked of the postern backend; false counts each key alone at daily_limit
 concurrency = 2          # grists ground at once, the mill's own limit; the rest queue. The host's cap on Builders does not apply
 timeout = "10m"
 pool_quiet = "10m"       # a kind with no grist this long keeps no warm session; "0s" keeps no warm pool at all

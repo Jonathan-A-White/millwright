@@ -918,6 +918,10 @@ type GristSettings struct {
 	// PoolMaxAge is how long a warm session waits before it is retired unused.
 	PoolQuiet  time.Duration
 	PoolMaxAge time.Duration
+	// PersonCap is whether a self-registered person's device keys share one
+	// daily limit, at the person's own cap, asked of the postern backend; false
+	// counts every key alone at DailyLimit (mw-cvwm1u.6).
+	PersonCap bool
 }
 
 // Grist reports the ceilings of the `[grist]` table of
@@ -927,7 +931,9 @@ type GristSettings struct {
 // one key), `concurrency` (grinds at once, the mill's own limit, apart from
 // the host's cap on Builders), `timeout` (a Go duration, "10m"), `pool_quiet`
 // (a duration, "0s" for no warm pool) and `pool_max_age` (a duration above
-// zero), each its default when the table says nothing.
+// zero) and `person_cap` (true or false: whether a self-registered person's
+// device keys are counted together at the person's own cap), each its default
+// when the table says nothing.
 func Grist() (GristSettings, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -940,7 +946,7 @@ func Grist() (GristSettings, error) {
 	}
 	settings := GristSettings{
 		Models: list(DefaultGristModels), Efforts: list(DefaultGristEfforts), Timeout: DefaultGristTimeout,
-		PoolQuiet: DefaultGristPoolQuiet, PoolMaxAge: DefaultGristPoolMaxAge,
+		PoolQuiet: DefaultGristPoolQuiet, PoolMaxAge: DefaultGristPoolMaxAge, PersonCap: true,
 	}
 	if models := list(table["models"]); len(models) > 0 {
 		settings.Models = models
@@ -984,6 +990,13 @@ func Grist() (GristSettings, error) {
 			return GristSettings{}, fmt.Errorf("the [%s] table of %s says pool_max_age = %q: it must be a duration, \"15m\"", GristTable, path, said)
 		}
 		settings.PoolMaxAge = age
+	}
+	if said := strings.TrimSpace(table["person_cap"]); said != "" {
+		on, err := strconv.ParseBool(said)
+		if err != nil {
+			return GristSettings{}, fmt.Errorf("the [%s] table of %s says person_cap = %q: it must be true or false", GristTable, path, said)
+		}
+		settings.PersonCap = on
 	}
 	return settings, nil
 }
