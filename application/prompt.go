@@ -302,13 +302,13 @@ func waitingHands(notes map[string]string) promptSection {
 		if !ok {
 			continue
 		}
-		// hands.ran.*, hands.superseded.* and hands.approval.* are not step
+		// hands.ran.*, hands.superseded.*, hands.retired.* and hands.approval.* are not step
 		// lists: a step list is a JSON array, which they are not.
 		if records, err := parseHandsSteps(notes[key]); err != nil || len(records) == 0 {
 			continue
 		}
 		for _, step := range viewHandsSteps(bead, notes) {
-			if step.Ran != nil || step.SupersededBy != "" {
+			if step.Ran != nil || step.SupersededBy != "" || step.Retired != "" {
 				continue
 			}
 			section.lines = append(section.lines, fmt.Sprintf("  %s  step %s on %s as %s: %s",

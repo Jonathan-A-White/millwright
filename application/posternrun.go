@@ -31,7 +31,7 @@ func (i PosternInbox) runsHands() bool {
 // over two minutes ahead) and not signed before the step was added, it has
 // not run before, the step has not already run OK (a stale screen's Approve;
 // --replace forgets a run), and the step's host is this one or one
-// [hands_hosts] reaches. The approval is
+// [hands_hosts] reaches, and the step is not retired and its bead is not closed. The approval is
 // marked spent before the step starts, so a crash cannot run it twice. How
 // it ran — or why it did not — is commented on the bead, sent back to him in
 // the bead's thread, re the approval's txid, and mailed to the Mayor.
@@ -80,6 +80,20 @@ func (i PosternInbox) applyRun(ctx context.Context, m PosternInboxMessage, actio
 		}
 		return refuseTelling(fmt.Sprintf("it is superseded by %s, a newer step that took its place, so it never runs.", by),
 			fmt.Sprintf("Not run: replaced by %s; tap that one.", replacement))
+	}
+	retired, err := i.Memory.Note(ctx, HandsRetiredKey(action.Bead, step.ID))
+	if err != nil {
+		return posternApplied{}, err
+	}
+	if why := strings.TrimSpace(retired); why != "" {
+		return refuse(fmt.Sprintf("it was retired (%s), so it never runs.", why))
+	}
+	beads, err := i.Tracker.ShowBeads(ctx, []string{action.Bead})
+	if err != nil {
+		return posternApplied{}, fmt.Errorf("reading %s: %w", action.Bead, err)
+	}
+	if len(beads) > 0 && beads[0].Story.ID == action.Bead && beads[0].Closed() {
+		return refuse(fmt.Sprintf("%s is closed, so its steps never run.", action.Bead))
 	}
 	waits, err := i.handsWaits(ctx, action.Bead)
 	if err != nil {

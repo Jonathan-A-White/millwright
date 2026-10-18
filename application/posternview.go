@@ -177,6 +177,9 @@ type PosternViewHandsStep struct {
 	// SupersededBy is the bead holding the newer step that took this one's place:
 	// it cannot be approved (mw-gq6.190).
 	SupersededBy string `json:"superseded_by,omitempty"`
+	// Retired is why the step was retired (mw hands retire): a step he no longer
+	// needs, which cannot be approved. Absent on a step still in play.
+	Retired string `json:"retired,omitempty"`
 }
 
 // PosternViewPath is a bead's merged Path as §11 writes it: every field, empty
@@ -927,7 +930,9 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 			// A demo bead is labelled hitl only to keep it from dispatch; it
 			// is his demo card alone unless it also carries a hands step.
 			demoOnly := hasLabel(d.Labels, LabelDemo) && len(steps) == 0
-			if !demoOnly && !allStepsRanClean(steps) {
+			if !demoOnly && !allStepsSettled(steps) {
+				// A retired step is not his to take: it stays off the need.
+				steps = withoutRetired(steps)
 				need := b.need(PosternNeedHands, e, firstKnown(d.Created, d.Updated), viewSummary(d.Description))
 				need.Steps = steps
 				waiting = append(waiting, waitingNeed{need: need, entry: e, window: PosternViewStaleHands, fact: handsFact(steps)})
@@ -1819,6 +1824,7 @@ func viewHandsSteps(bead string, notes map[string]string) []PosternViewHandsStep
 			step.Ran = &ran
 		}
 		step.SupersededBy = strings.TrimSpace(notes[HandsSupersededKey(bead, record.ID)])
+		step.Retired = strings.TrimSpace(notes[HandsRetiredKey(bead, record.ID)])
 		steps = append(steps, step)
 	}
 	return steps
@@ -1880,20 +1886,31 @@ func markUnreachable(need *PosternViewNeed, steps []PosternViewHandsStep, reache
 	need.Text = "Not ready yet: waiting on " + strings.Join(need.WaitingOn, ", ")
 }
 
-// allStepsRanClean reports whether steps is not empty and every one has a
-// last run with exit 0: the bead then waits on the Mayor's acceptance check,
-// not on the Governor's hands. A failed step, one not yet run, or no steps at
-// all leaves the hands need standing.
-func allStepsRanClean(steps []PosternViewHandsStep) bool {
+// allStepsSettled reports whether steps is not empty and every one has run
+// clean (a last run with exit 0) or was retired: the bead then waits on the
+// Mayor's acceptance check, not on the Governor's hands. A failed step, one not
+// yet run, or no steps at all leaves the hands need standing.
+func allStepsSettled(steps []PosternViewHandsStep) bool {
 	if len(steps) == 0 {
 		return false
 	}
 	for _, step := range steps {
-		if step.Ran == nil || step.Ran.Exit != 0 {
+		if step.Retired == "" && (step.Ran == nil || step.Ran.Exit != 0) {
 			return false
 		}
 	}
 	return true
+}
+
+// withoutRetired is steps less the retired ones.
+func withoutRetired(steps []PosternViewHandsStep) []PosternViewHandsStep {
+	kept := make([]PosternViewHandsStep, 0, len(steps))
+	for _, step := range steps {
+		if step.Retired == "" {
+			kept = append(kept, step)
+		}
+	}
+	return kept
 }
 
 // workable reports whether a bead is open or in progress: neither held nor
