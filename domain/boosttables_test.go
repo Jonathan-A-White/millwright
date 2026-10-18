@@ -191,3 +191,90 @@ func TestBoostTablesDriftNamesATestPartsTableMissingDifferentOrExtra(t *testing.
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
+
+const levelVaultText = `# header
+[tests]
+lampas = "npm ci && npm test"
+postern = "make test"
+
+[changed_specs]
+lampas = "npx playwright test {specs}"
+
+[test_parts.lampas]
+"unit" = "npm test"
+"e2e" = "npx playwright test"
+
+[test_parts.postern]
+"gate" = "make gate"
+`
+
+func levelVault(t *testing.T) BoostTables {
+	t.Helper()
+	tables, err := BoostTablesOf(mustParse(t, levelVaultText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tables
+}
+
+func TestLevelBoostConfigAppendsATableAndLinesTheConfigLacksAndChangesNoOtherByte(t *testing.T) {
+	config := "vault = \"/v\" # mine\nhost = \"cloud1\"\n\n[rigs]\nmillwright = \"/m\"\nlampas = \"/l\"\npostern = \"/p\"\n\n[tests]\nlampas = \"npm ci && npm test\"\n\n[test_parts.lampas]\n\"unit\" = \"npm test\"\n\"e2e\" = \"npx playwright test\"\n"
+	out, appended, differing, err := LevelBoostConfig(config, levelVault(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(differing) != 0 {
+		t.Errorf("differing = %v, want none", differing)
+	}
+	wantAppended := []string{"[tests] postern", "[changed_specs] lampas", "[test_parts.postern]"}
+	if !reflect.DeepEqual(appended, wantAppended) {
+		t.Errorf("appended = %v, want %v", appended, wantAppended)
+	}
+	for _, line := range strings.Split(strings.TrimSuffix(config, "\n"), "\n") {
+		if !strings.Contains(out, line+"\n") {
+			t.Errorf("the line %q was lost from\n%s", line, out)
+		}
+	}
+	if !strings.HasSuffix(out, "\n[test_parts.postern]\n\"gate\" = \"make gate\"\n") {
+		t.Errorf("the postern parts table is not appended whole at the end:\n%s", out)
+	}
+	parsed := mustParse(t, out)
+	got, err := BoostTablesOf(parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Lines["tests"]["postern"] != "make test" || got.Lines["changed_specs"]["lampas"] != "npx playwright test {specs}" {
+		t.Errorf("the lines were not appended: %+v", got.Lines)
+	}
+
+	again, appended, differing, err := LevelBoostConfig(out, levelVault(t))
+	if err != nil || again != out || len(appended) != 0 || len(differing) != 0 {
+		t.Errorf("a second run changed %q (appended %v, differing %v, err %v)", again, appended, differing, err)
+	}
+}
+
+func TestLevelBoostConfigSaysADifferentLineAndLeavesIt(t *testing.T) {
+	config := "[rigs]\nlampas = \"/l\"\n\n[tests]\nlampas = \"make test\"\n\n[test_parts.lampas]\n\"unit\" = \"npm test\"\n"
+	out, appended, differing, err := LevelBoostConfig(config, levelVault(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "lampas = \"make test\"\n") || strings.Contains(out, "npm ci") {
+		t.Errorf("a differing line was overwritten:\n%s", out)
+	}
+	want := []string{"[tests] lampas: differs", "[test_parts.lampas]: differs"}
+	if !reflect.DeepEqual(differing, want) {
+		t.Errorf("differing = %v, want %v", differing, want)
+	}
+	if !reflect.DeepEqual(appended, []string{"[changed_specs] lampas"}) {
+		t.Errorf("appended = %v", appended)
+	}
+}
+
+func TestLevelBoostConfigTakesOnlyTheRigsTheBoostHas(t *testing.T) {
+	config := "[rigs]\nmillwright = \"/m\"\n"
+	out, appended, _, err := LevelBoostConfig(config, levelVault(t))
+	if err != nil || out != config || len(appended) != 0 {
+		t.Errorf("a Boost with no lampas or postern took %q, %v (err %v)", out, appended, err)
+	}
+}

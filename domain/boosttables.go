@@ -163,3 +163,76 @@ func sortedKeys[V any](m map[string]V) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// LevelBoostConfig brings a Boost's config file level with the vault's tables
+// (mw-gq6.593): for each rig the config's [rigs] names, a [tests] or
+// [changed_specs] line it lacks is appended to its table (the table too, when
+// it lacks that), and a [test_parts.<rig>] table it lacks altogether is appended
+// whole, with its parts in order. A line or table the config has is never edited
+// or removed: one that differs from the vault's is only named, as
+// "[tests] rig: differs" or "[test_parts.rig]: differs". out is the config's
+// text with the additions, every other byte as it was; appended names each
+// addition, as "[tests] rig" or "[test_parts.rig]".
+func LevelBoostConfig(config string, vault BoostTables) (out string, appended, differing []string, err error) {
+	file, err := ParseConfigTOML(config)
+	if err != nil {
+		return config, nil, nil, err
+	}
+	have, err := BoostTablesOf(file)
+	if err != nil {
+		return config, nil, nil, err
+	}
+	var rigs []string
+	for rig := range file.Table("rigs") {
+		rigs = append(rigs, rig)
+	}
+	sort.Strings(rigs)
+
+	out = config
+	for _, name := range BoostTableNames {
+		for _, rig := range rigs {
+			want, inVault := vault.Lines[name][rig]
+			if !inVault {
+				continue
+			}
+			got, has := have.Lines[name][rig]
+			switch {
+			case has && got != want:
+				differing = append(differing, fmt.Sprintf("[%s] %s: differs", name, rig))
+			case !has:
+				// Re-read each time: the table may be the one just added.
+				current, perr := ParseConfigTOML(out)
+				if perr != nil {
+					return config, nil, nil, perr
+				}
+				out = current.Set(name, boostKey(rig), tomlBasicString(want))
+				appended = append(appended, fmt.Sprintf("[%s] %s", name, rig))
+			}
+		}
+	}
+	for _, rig := range rigs {
+		want := vault.Parts[rig]
+		if len(want) == 0 {
+			continue
+		}
+		table := BoostPartsPrefix + boostKey(rig)
+		if got, has := have.Parts[rig]; has {
+			if !slices.Equal(got, want) {
+				differing = append(differing, fmt.Sprintf("[%s%s]: differs", BoostPartsPrefix, rig))
+			}
+			continue
+		}
+		if out != "" && !strings.HasSuffix(out, "\n") {
+			out += "\n"
+		}
+		if strings.TrimSpace(out) != "" && !strings.HasSuffix(out, "\n\n") {
+			out += "\n"
+		}
+		out += "[" + table + "]\n"
+		for _, part := range want {
+			out += tomlBasicString(part.Name) + " = " + tomlBasicString(part.Command) + "\n"
+		}
+		appended = append(appended, fmt.Sprintf("[%s%s]", BoostPartsPrefix, rig))
+	}
+	return out, appended, differing, nil
+}
