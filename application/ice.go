@@ -30,7 +30,7 @@ const (
 	// a bead was iced (cleared by the thaw) and when it was last thawed.
 	IcedNotePrefix    = "icebox.iced."
 	ThawedNotePrefix  = "icebox.thawed."
-	icedCommentPrefix = "Iced: "
+	icedCommentPrefix = HeldCommentPrefix + " Iced: "
 	thawedComment     = "Thawed"
 )
 
@@ -82,48 +82,57 @@ func (i Ice) Run(ctx context.Context, id, reason string) error {
 // follows the icing: an icing that fails moves nothing, and returns a report
 // with no Iced; a rewiring that fails returns what it moved so far, Iced set,
 // and the error.
+//
+// A bead already iced is not iced again (no reason is needed, nothing is
+// written to it): only the rewiring runs, so a bead iced before the rewiring
+// existed, or by hand, can be moved behind its dependents. The rewiring is
+// idempotent: a second run moves nothing, and the report says Already.
 func (i Ice) Do(ctx context.Context, id, reason string) (IceRewire, error) {
-	if err := i.ice(ctx, id, reason); err != nil {
+	already, err := i.ice(ctx, id, reason)
+	if err != nil {
 		return IceRewire{}, err
 	}
 	if i.Graph == nil || i.Wires == nil {
-		return IceRewire{}, nil
+		return IceRewire{Iced: id, Already: already}, nil
 	}
 	report, err := IceRewireOf(ctx, i.Graph, i.Wires, id)
 	report.Iced = id // the bead is iced whether or not its dependents were moved
+	report.Already = already
 	return report, err
 }
 
-func (i Ice) ice(ctx context.Context, id, reason string) error {
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		return fmt.Errorf("icing %s: say why with --reason", id)
-	}
+// ice writes the icing and says whether the bead was iced already, in which
+// case it writes nothing.
+func (i Ice) ice(ctx context.Context, id, reason string) (already bool, err error) {
 	detail, err := i.Tracker.ShowStory(ctx, id)
 	if err != nil {
-		return fmt.Errorf("reading %s to ice it: %w", id, err)
+		return false, fmt.Errorf("reading %s to ice it: %w", id, err)
 	}
 	switch {
 	case detail.IsEpic:
-		return fmt.Errorf("icing %s: it is an epic; ice its stories one by one", id)
+		return false, fmt.Errorf("icing %s: it is an epic; ice its stories one by one", id)
 	case detail.Closed():
-		return fmt.Errorf("icing %s: it is closed", id)
+		return false, fmt.Errorf("icing %s: it is closed", id)
 	case detail.Iced():
-		return fmt.Errorf("icing %s: it is already iced", id)
+		return true, nil
 	case strings.EqualFold(strings.TrimSpace(detail.Status), StatusInProgress) || strings.TrimSpace(detail.Assignee) != "":
-		return fmt.Errorf("icing %s: it is claimed by %s; end the session first", id, detail.Assignee)
+		return false, fmt.Errorf("icing %s: it is claimed by %s; end the session first", id, detail.Assignee)
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return false, fmt.Errorf("icing %s: say why with --reason", id)
 	}
 	if err := i.Tracker.AddLabel(ctx, id, LabelIcebox); err != nil {
-		return fmt.Errorf("labelling %s %s: %w", id, LabelIcebox, err)
+		return false, fmt.Errorf("labelling %s %s: %w", id, LabelIcebox, err)
 	}
 	if err := i.Tracker.SetStoryPriority(ctx, id, IcedPriority); err != nil {
-		return fmt.Errorf("setting %s to priority %d: %w", id, IcedPriority, err)
+		return false, fmt.Errorf("setting %s to priority %d: %w", id, IcedPriority, err)
 	}
 	if err := i.Tracker.HoldStory(ctx, id); err != nil {
-		return fmt.Errorf("holding %s: %w", id, err)
+		return false, fmt.Errorf("holding %s: %w", id, err)
 	}
 	if err := i.Tracker.CommentOnStory(ctx, id, icedCommentPrefix+reason); err != nil {
-		return fmt.Errorf("commenting on %s: %w", id, err)
+		return false, fmt.Errorf("commenting on %s: %w", id, err)
 	}
 	if i.Notes != nil {
 		now := time.Now
@@ -131,10 +140,10 @@ func (i Ice) ice(ctx context.Context, id, reason string) error {
 			now = i.Now
 		}
 		if err := i.Notes.SetNote(ctx, IcedNoteKey(id), now().UTC().Format(time.RFC3339)); err != nil {
-			return fmt.Errorf("noting when %s was iced: %w", id, err)
+			return false, fmt.Errorf("noting when %s was iced: %w", id, err)
 		}
 	}
-	return nil
+	return false, nil
 }
 
 // Thaw takes a bead out of the icebox: the label off, the priority set, one

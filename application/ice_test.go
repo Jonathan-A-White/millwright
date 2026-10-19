@@ -55,8 +55,8 @@ func TestIceLabelsHoldsAndCommentsInOneWord(t *testing.T) {
 	if d.Status != apptest.StatusDeferred {
 		t.Errorf("expected the bead held, got %s", d.Status)
 	}
-	if got := tracker.Comments("mw-i.1"); len(got) != 1 || got[0] != "Iced: waiting on the new rig" {
-		t.Errorf("expected the one comment 'Iced: waiting on the new rig', got %v", got)
+	if got := tracker.Comments("mw-i.1"); len(got) != 1 || got[0] != "HELD: Iced: waiting on the new rig" {
+		t.Errorf("expected the one comment 'HELD: Iced: waiting on the new rig', got %v", got)
 	}
 }
 

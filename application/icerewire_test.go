@@ -122,3 +122,77 @@ func TestIcingWithoutAGraphOnlyIcesAsBefore(t *testing.T) {
 		t.Errorf("mw-c.2 waits on %v, want it untouched", got)
 	}
 }
+
+// An iced bead that still heads a chain (iced by hand, or before the rewire
+// existed) is moved behind its live dependents by icing it again.
+func TestIcingAnAlreadyIcedBeadMovesItBehindTheLiveBeadsThatWaitOnIt(t *testing.T) {
+	tracker := chainFixture()
+	// Iced the old way: no rewire.
+	if err := ice(t, tracker, "mw-c.1", "not yet"); err != nil {
+		t.Fatal(err)
+	}
+	if got := blockersNow(t, tracker, "mw-c.2"); !slices.Equal(got, []string{"mw-c.1"}) {
+		t.Fatalf("setup: mw-c.2 waits on %v, want the iced mw-c.1", got)
+	}
+
+	report, err := iceRewiring(tracker).Do(context.Background(), "mw-c.1", "")
+	if err != nil {
+		t.Fatalf("icing an iced bead: %v", err)
+	}
+	for _, x := range []string{"mw-c.2", "mw-c.3"} {
+		if got := blockersNow(t, tracker, x); !slices.Equal(got, []string{"mw-c.0"}) {
+			t.Errorf("%s waits on %v, want only mw-c.0", x, got)
+		}
+	}
+	if got := blockersNow(t, tracker, "mw-c.1"); !slices.Contains(got, "mw-c.2") || !slices.Contains(got, "mw-c.3") {
+		t.Errorf("mw-c.1 waits on %v, want it behind mw-c.2 and mw-c.3", got)
+	}
+	if !report.Already || report.Iced != "mw-c.1" || len(report.Moves) != 3 {
+		t.Errorf("report = %+v, want Already, Iced mw-c.1 and three moves", report)
+	}
+	// The rerun writes no second label, priority or comment.
+	if got := tracker.Comments("mw-c.1"); len(got) != 1 {
+		t.Errorf("comments = %q, want only the first icing's", got)
+	}
+}
+
+func TestIcingAnIcedBeadASecondTimeChangesNothingAndSaysSo(t *testing.T) {
+	tracker := chainFixture()
+	mustDo2 := func() application.IceRewire {
+		report, err := iceRewiring(tracker).Do(context.Background(), "mw-c.1", "not yet")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	mustDo2() // iced and rewired
+	before := map[string][]string{}
+	for _, id := range []string{"mw-c.0", "mw-c.1", "mw-c.2", "mw-c.3", "mw-c.5"} {
+		before[id] = blockersNow(t, tracker, id)
+	}
+	comments := len(tracker.Comments("mw-c.1"))
+
+	report := mustDo2()
+	if len(report.Moves) != 0 || !report.Already {
+		t.Errorf("report = %+v, want Already and no moves", report)
+	}
+	said := report.String()
+	if !strings.Contains(said, "already iced") || !strings.Contains(strings.ToLower(said), "nothing") {
+		t.Errorf("the report %q does not say it was already iced and nothing moved", said)
+	}
+	for id, was := range before {
+		if got := blockersNow(t, tracker, id); !slices.Equal(got, was) {
+			t.Errorf("%s waited on %v and now waits on %v", id, was, got)
+		}
+	}
+	if got := len(tracker.Comments("mw-c.1")); got != comments {
+		t.Errorf("the second run wrote %d comments", got-comments)
+	}
+}
+
+func TestIcingABeadNotYetIcedStillNeedsAReason(t *testing.T) {
+	tracker := chainFixture()
+	if _, err := iceRewiring(tracker).Do(context.Background(), "mw-c.2", " "); err == nil {
+		t.Error("expected a bead not yet iced to need a reason")
+	}
+}

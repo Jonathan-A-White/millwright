@@ -36,11 +36,22 @@ type IceMove struct {
 type IceRewire struct {
 	Iced  string
 	Moves []IceMove
+	// Already is true when the bead was iced before this run, so that only the
+	// rewiring ran.
+	Already bool
 }
 
-// String says what was moved, one line a dependent, or "" when nothing was.
+// String says what was moved, one line a dependent, or "" when nothing was. For
+// a bead that was iced already it opens by saying so, and says when nothing
+// moved.
 func (r IceRewire) String() string {
 	var b strings.Builder
+	if r.Already {
+		fmt.Fprintf(&b, "%s is already iced.\n", r.Iced)
+		if len(r.Moves) == 0 {
+			fmt.Fprintf(&b, "Nothing moved: no live bead waits on %s.\n", r.Iced)
+		}
+	}
 	for _, m := range r.Moves {
 		fmt.Fprintf(&b, "%s no longer waits on %s", m.Dependent, r.Iced)
 		if len(m.Took) > 0 {

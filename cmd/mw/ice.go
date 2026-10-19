@@ -16,9 +16,11 @@ func newIceCmd() *cobra.Command {
 		Use:   "ice <id> --reason <text>",
 		Short: "Put a bead in the icebox: label icebox, priority 4, held, one comment",
 		Long: "ice sets the label icebox, the priority 4 and the status held on a bead and writes the\n" +
-			"comment 'Iced: <reason>': work that is not decided against, only not yet. mw status counts\n" +
+			"comment 'HELD: Iced: <reason>': work that is not decided against, only not yet. mw status counts\n" +
 			"it on its ICEBOX line and not among the held, and mw release leaves it held.\n\n" +
 			"An epic, a finished bead and a claimed one are refused, and nothing is written.\n\n" +
+			"A bead that is iced already is not iced again and needs no --reason: only the move below runs again,\n" +
+			"for a bead iced by hand or before the move existed. It is idempotent: a second run changes nothing and says so.\n\n" +
 			"An iced bead never blocks a live one: for each live bead X that waited on the iced bead I, X stops\n" +
 			"waiting on I, waits on I's open blockers instead, and I waits on X. mw ice prints what it moved.\n" +
 			"An X that reaches I through a closed bead cannot be waited on (bd refuses it as a cycle): it is\n" +
@@ -33,7 +35,9 @@ func newIceCmd() *cobra.Command {
 			if moved.Iced == "" {
 				return err // the icing itself failed: nothing was written
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Iced %s.\n", args[0])
+			if !moved.Already {
+				fmt.Fprintf(cmd.OutOrStdout(), "Iced %s.\n", args[0])
+			}
 			fmt.Fprint(cmd.OutOrStdout(), moved.String())
 			return err
 		},
