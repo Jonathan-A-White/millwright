@@ -40,6 +40,10 @@ const (
 	// MailNotCommitted is the subject when a batch landed whole but its records
 	// could not be committed in the vault (mw-gq6.554).
 	MailNotCommitted = "Not committed"
+	// MailSmokeFailed is the subject when the grist smoke made after a batch
+	// landed failed: the batch is landed, and the rig's open stories are held
+	// until a smoke passes (mw-gq6.626).
+	MailSmokeFailed = "Smoke failed"
 )
 
 // BatchRecords is the port a batch's records are kept through, in the vault
@@ -331,10 +335,17 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 		}
 	}
 
+	var smoke *landedSmoke
 	if report.Landed {
-		b.recordLanded(ctx, rigDir, &report, &nr)
+		smoke = b.recordLanded(ctx, rigDir, &report, &nr)
 	}
 	release()
+	// The grist smoke sends every example of every app the batch touched, and
+	// nothing it does needs the rig's merge slot or holds back a mail: the next
+	// landing of the rig goes ahead meanwhile (mw-gq6.626).
+	if smoke != nil {
+		b.smoke(ctx, smoke, &report, &nr)
+	}
 	b.keepRecords(ctx, &report)
 	b.keepMetric(ctx, &report)
 	b.mailTheMayor(ctx, &report, &nr)
@@ -667,10 +678,33 @@ func ConflictLines(said string) []string {
 	return lines
 }
 
+// BatchLogPrefix opens every line mw land prints as a step is made, as against
+// the report it prints at the end.
+const BatchLogPrefix = "mw land: "
+
+// say prints one line of what mw land is doing, as it does it, so that a log
+// read while a landing runs shows how far it has come (mw-gq6.626).
+func (b BatchLand) say(format string, args ...any) {
+	b.Next.print(BatchLogPrefix + fmt.Sprintf(format, args...) + "\n")
+}
+
+// landedSmoke is the grist smoke a landed batch still has to make, which is
+// made after the rig's merge slot is let go.
+type landedSmoke struct {
+	last *closeOut
+	once NextReport
+	// noted is how many of once's notes the report already holds.
+	noted int
+}
+
 // recordLanded is everything that follows the push, for each story of the
-// batch and then once: none of it undoes the landing or stops the rest.
-func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *BatchReport, nr *NextReport) {
+// batch and then once: none of it undoes the landing or stops the rest. The
+// merge slot is held through the rig's checkout, its after-landing command and
+// the Landed mails, and not through the grist smoke, which it hands back for the
+// caller to make once the slot is let go; nil when there is none to make.
+func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *BatchReport, nr *NextReport) *landedSmoke {
 	n := b.Next
+	b.say("landed %s on %s at %s, %d stories", report.Label(), report.Target, shortCommit(report.Commit), len(report.Merged))
 	together := make([]string, len(report.Merged))
 	for i, s := range report.Merged {
 		together[i] = s.ID
@@ -742,6 +776,9 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 				report.Closed = append(report.Closed, s.ID)
 			}
 		}
+		if closed || heldDemo {
+			b.say("closed %s", s.ID)
+		}
 
 		mailed := NextReport{
 			StoryID: s.ID, Host: n.Host, Title: s.Title, Target: report.Target, Commits: s.Commits, Pushes: 1,
@@ -758,8 +795,10 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 	// smoke run for many minutes (mw-gq6.493, mw-gq6.502). The batch's records
 	// are written and committed after.
 
-	// Once for the batch: the rig's checkout, the after-landing command and the
-	// smoke, as the newest story's.
+	// Once for the batch: the rig's checkout and the after-landing command, as
+	// the newest story's. Both move or build what the rig's checkout holds, which
+	// another landing of the rig would move under them, so the merge slot is held
+	// through them; and the Landed mail says first that the command did not run.
 	last := b.storyCloseOut(report.Merged[len(report.Merged)-1], rigDir)
 	last.smokeApps = smokeApps
 	once := NextReport{StoryID: report.Label(), Host: n.Host, Target: report.Target, How: Landed{Commit: report.Commit}}
@@ -769,15 +808,53 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 	if record := runFilePath(last.id, last.afterLog); last.afterLog != "" && record != "" {
 		report.Records = append(report.Records, record)
 	}
-	n.smoke(ctx, last, &once)
+	b.say("after landing done: the rig's checkout is brought up and its command run or skipped")
 	nr.Notes = append(nr.Notes, once.Notes...)
 
+	// The mails go before the smoke, which is minutes for each example of each
+	// app: the Mayor is told of a landing when it is made (mw-gq6.626).
 	for _, m := range mails {
 		m.sent.AfterLandingSkipped = once.AfterLandingSkipped
 		verdict, said := n.closingMail(ctx, m.c, m.sent, false)
 		n.mailTheMayor(ctx, m.c, m.sent, verdict, said)
 		report.Mailed = append(report.Mailed, MailLanded+": "+m.c.id)
+		b.say("mailed %s: %s", MailLanded, m.c.id)
 	}
+	if len(smokeApps) == 0 {
+		return nil
+	}
+	return &landedSmoke{last: last, once: once, noted: len(once.Notes)}
+}
+
+// smoke makes the grist smoke of the apps a landed batch changed the grist of,
+// after the rig's merge slot is let go, and says each step of it in the log. Its
+// lines are notes of the report. A smoke that fails mails the Mayor, naming the
+// batch, besides what it always does: the comment on the story, the alarm event
+// and the hold on the rig's open stories (GristSmokeBook). It undoes nothing.
+func (b BatchLand) smoke(ctx context.Context, s *landedSmoke, report *BatchReport, nr *NextReport) {
+	n := b.Next
+	b.say("the merge slot of %s is let go; starting the grist smoke of %s", report.Rig, strings.Join(s.last.smokeApps, ", "))
+	failed := n.smoke(ctx, s.last, &s.once)
+	for _, note := range s.once.Notes[s.noted:] {
+		b.say("%s", note)
+	}
+	nr.Notes = append(nr.Notes, s.once.Notes[s.noted:]...)
+	if len(failed) == 0 {
+		return
+	}
+	mail := NewMessage{
+		From:    SeatIdentity(MwSeat, n.Host),
+		To:      MayorMailbox,
+		Subject: MailSmokeFailed + ": " + report.Label(),
+		Body: fmt.Sprintf("mw land on %s landed %s on %s at %s, and the grist smoke it made afterwards failed. "+
+			"The landing is not undone; the open stories of %s are held until a smoke passes.\n\n%s\n",
+			n.Host, report.Label(), report.Target, shortCommit(report.Commit), report.Rig, strings.Join(failed, "\n")),
+	}
+	if err := n.sendMayorMail(ctx, s.last, &s.once, mail, MailSmokeFailed); err != nil {
+		nr.Notes = append(nr.Notes, fmt.Sprintf("the mail to %s about the grist smoke of %s could not be sent: %v", MayorMailbox, report.Label(), err))
+		return
+	}
+	b.say("mailed %s: %s", MailSmokeFailed, report.Label())
 }
 
 // appendNew adds to list what it does not hold yet.

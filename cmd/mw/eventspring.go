@@ -237,7 +237,7 @@ func gristLevelSpringJob(host string, heartbeat time.Duration, out io.Writer) (a
 		return application.GristLevel{
 			Apps: apps, Rigs: rigs, Checkout: worktrees, Mailbox: gateway, Host: host, Out: out,
 			Book:  gristSmokeBook(gateway, host),
-			Smoke: hostGristSmoke(gateway, host, rigs, worktrees),
+			Smoke: hostGristSmoke(gateway, host, rigs, worktrees, nil, ""),
 			Home: func(ctx context.Context) (bool, error) {
 				return application.IsHome(ctx, mwVault(dir, host), host)
 			},

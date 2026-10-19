@@ -53,6 +53,9 @@ type nextContext struct {
 	// otherLand is what went wrong with the other mw land a scenario ran ahead
 	// of its own while it waited for the slot (mw-gq6.514), nil when it landed.
 	otherLand error
+	// smokeWatch, when set, is the grist smoke a batch landing makes in place of
+	// the real one, looking at the world as it runs (mw-gq6.626).
+	smokeWatch *smokeWatch
 	// leftovers is the user's process table, for features/tester.feature's sweep
 	// of what a Tester's session left running (mw-gq6.409).
 	leftovers *apptest.FakeUserProcesses
@@ -1038,9 +1041,15 @@ func (c *nextContext) nextUseCase() application.Next {
 		related = rig.NewChecks(rig.WithRelatedCommands(c.related))
 	}
 
+	var smoke application.GristSmokeAfter
+	if c.smokeWatch != nil {
+		smoke = c.smokeAfter()
+	}
+
 	return application.Next{
 		Tracker:       tracker,
 		HeartbeatWait: heartbeatWait,
+		Smoke:         smoke,
 		Worktrees:     worktrees,
 		Landing:       worktrees,
 		Changes:       worktrees,

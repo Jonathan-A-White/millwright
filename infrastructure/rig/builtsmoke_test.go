@@ -73,3 +73,18 @@ func TestBuiltSmokerFallsBackWhenTheBuildLeftNoMw(t *testing.T) {
 		t.Fatal("expected an error with no built mw and no fallback")
 	}
 }
+
+// mw-gq6.626: what the built mw says as it sends each example is copied to the
+// progress writer, and still kept for the error.
+func TestBuiltSmokerCopiesTheBuiltMwsProgress(t *testing.T) {
+	dir := builtMw(t, `echo "sending cairn/sweep/one ..." >&2
+echo '{"app":"cairn","examples":1}'`)
+	var progress strings.Builder
+	report, err := NewBuiltSmoker(dir, nil).WithProgress(&progress).Run(context.Background(), "cairn", "")
+	if err != nil || report.Examples != 1 {
+		t.Fatalf("expected the report, got %+v, %v", report, err)
+	}
+	if got := progress.String(); got != "sending cairn/sweep/one ...\n" {
+		t.Fatalf("expected the built mw's progress, got %q", got)
+	}
+}

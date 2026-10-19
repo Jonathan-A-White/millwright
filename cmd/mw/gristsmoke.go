@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -69,8 +70,9 @@ func (u unavailableSmoker) Run(_ context.Context, app, _ string) (application.Gr
 // hostGristSmoke is what a landing smokes with on this host: nothing on a host
 // with no [grist-apps], and otherwise the smoke after the landing's changes. A
 // host that cannot be read for it says so and smokes nothing: the landing goes
-// on.
-func hostGristSmoke(notes application.GristSmokeNotes, host string, rigs map[string]string, touches application.LandingTouches) application.GristSmokeAfter {
+// on. A progress that is not nil is where the smoke says each example it sends,
+// as it sends it, line by line under prefix (mw land's log: mw-gq6.626).
+func hostGristSmoke(notes application.GristSmokeNotes, host string, rigs map[string]string, touches application.LandingTouches, progress io.Writer, prefix string) application.GristSmokeAfter {
 	apps, err := config.GristApps()
 	if err != nil || len(apps) == 0 {
 		return application.GristSmokeAfter{}
@@ -79,8 +81,12 @@ func hostGristSmoke(notes application.GristSmokeNotes, host string, rigs map[str
 	if err != nil {
 		paths = nil
 	}
+	var out io.Writer
+	if progress != nil {
+		out = &prefixedLines{to: progress, prefix: prefix}
+	}
 	var smoker application.GristAppSmoker
-	if made, err := newSmoker(nil, 0); err != nil {
+	if made, err := newSmoker(out, 0); err != nil {
 		smoker = unavailableSmoker{err}
 	} else {
 		smoker = made
@@ -89,11 +95,33 @@ func hostGristSmoke(notes application.GristSmokeNotes, host string, rigs map[str
 	// the one this process is (mw-gq6.339).
 	var built application.GristAppSmoker
 	if dir := rigs[application.FactoryRig]; dir != "" {
-		built = rig.NewBuiltSmoker(dir, smoker)
+		built = rig.NewBuiltSmoker(dir, smoker).WithProgress(out)
 	}
 	return application.GristSmokeAfter{
 		Touches: touches, Smoke: smoker, Built: built, Book: gristSmokeBook(notes, host),
 		Apps: apps, Rigs: rigs, ClientPaths: paths,
+	}
+}
+
+// prefixedLines writes what it is given to a writer a line at a time, each line
+// under a prefix, so that a smoke's progress reads as part of a log of its own.
+type prefixedLines struct {
+	to      io.Writer
+	prefix  string
+	pending []byte
+}
+
+func (p *prefixedLines) Write(data []byte) (int, error) {
+	p.pending = append(p.pending, data...)
+	for {
+		end := bytes.IndexByte(p.pending, '\n')
+		if end < 0 {
+			return len(data), nil
+		}
+		if _, err := fmt.Fprintf(p.to, "%s%s\n", p.prefix, p.pending[:end]); err != nil {
+			return len(data), err
+		}
+		p.pending = p.pending[end+1:]
 	}
 }
 

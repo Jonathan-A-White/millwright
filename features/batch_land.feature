@@ -97,6 +97,29 @@ Feature: mw land lands a batch rig's queue under one gate run
     Then the vault held no modified tracked file as each story was closed
     And the vault holds no modified tracked file
 
+  Scenario: The Landed mails, the log and the merge slot do not wait for the grist smoke (mw-gq6.626)
+    Given the batch's landing changes the rig's grist, and its smoke looks at the world as it runs
+    And these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And the Landed mail of each of these stories was already sent when the smoke began:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the rig's merge slot was free while the smoke ran
+    And mw land had printed a line for each step before the smoke began: "mw land: landed", "mw land: closed mw-gq6.2", "mw land: mailed Landed: mw-gq6.2"
+    And mw land prints the smoke's result after the mails
+
+  Scenario: A grist smoke that fails after a batch lands mails the Mayor, naming the batch (mw-gq6.626)
+    Given the batch's landing changes the rig's grist, and its smoke fails
+    And these stories are queued for batch landing:
+      | mw-gq6.1 |
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And the Mayor is mailed that the grist smoke of the batch failed
+    And mw land says "tutor/hello"
+
   Scenario: A story claimed on another host is closed by this host once its batch lands, and the takeover is noted on it
     Given the tracker acts as "mw@laptop", this host's mw
     And these stories are queued for batch landing:

@@ -79,6 +79,7 @@ func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^mw land says "([^"]*)"$`, c.mwLandSays)
 	ctx.Then(`^"([^"]*)" on "([^"]*)" at the rig's origin has one "([^"]*)" heading and one date line under it$`, c.theMarkdownHasOneHeading)
 	registerBatchFixSteps(ctx, c)
+	registerBatchLandSmokeSteps(ctx, c)
 }
 
 // tableIDs is the first cell of every row of a one-column table.

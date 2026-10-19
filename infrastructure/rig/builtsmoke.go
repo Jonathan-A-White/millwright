@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,7 @@ const BuiltBinary = "bin/mw"
 type BuiltSmoker struct {
 	binary   string
 	fallback application.GristAppSmoker
+	progress io.Writer
 }
 
 var _ application.GristAppSmoker = BuiltSmoker{}
@@ -55,6 +57,9 @@ func (b BuiltSmoker) Run(ctx context.Context, app, kind string) (application.Gri
 	cmd := exec.CommandContext(ctx, b.binary, args...)
 	var out, errs bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errs
+	if b.progress != nil {
+		cmd.Stderr = io.MultiWriter(&errs, b.progress)
+	}
 	runErr := cmd.Run()
 	var report application.GristSmokeReport
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil || report.App == "" {
@@ -68,6 +73,13 @@ func (b BuiltSmoker) Run(ctx context.Context, app, kind string) (application.Gri
 		return application.GristSmokeReport{App: app}, errors.New("the built mw's smoke said nothing that can be read: " + firstLineOf(said))
 	}
 	return report, nil
+}
+
+// WithProgress is the smoker that also copies what the built mw says as it goes,
+// one line for each example it sends, to out: nil keeps it to itself.
+func (b BuiltSmoker) WithProgress(out io.Writer) BuiltSmoker {
+	b.progress = out
+	return b
 }
 
 func firstLineOf(text string) string {

@@ -469,25 +469,27 @@ func (n Next) keepAfterLandingLog(ctx context.Context, c *closeOut, report *Next
 // smoke runs the grist smoke of the apps the landing changed the grist of, and
 // says what it found in the report. A failure is written on the story too, and
 // is already an alarm event, a line of mw status and a hold on the rig's open
-// stories (GristSmokeBook); the landing is not undone.
-func (n Next) smoke(ctx context.Context, c *closeOut, report *NextReport) {
+// stories (GristSmokeBook); the landing is not undone. It returns the lines of
+// the apps that failed, none when the smoke passed or was not made.
+func (n Next) smoke(ctx context.Context, c *closeOut, report *NextReport) (failed []string) {
 	if len(c.smokeApps) == 0 {
-		return
+		return nil
 	}
 	if !report.Rig.Current() {
 		report.Notes = append(report.Notes, fmt.Sprintf("grist smoke: not run for %s, %s", strings.Join(c.smokeApps, ", "), report.Rig.NotCurrent(c.target)))
-		return
+		return nil
 	}
 	lines, failed := n.Smoke.Run(ctx, c.path.Rig, c.smokeApps)
 	report.Notes = append(report.Notes, lines...)
 	if len(failed) == 0 {
-		return
+		return nil
 	}
 	comment := fmt.Sprintf("mw next on %s landed this story, and the grist smoke it makes after a landing that touches grist failed. "+
 		"The landing is not undone; the open stories of %s are held until a smoke passes.\n\n%s", n.Host, c.path.Rig, strings.Join(failed, "\n"))
 	if err := n.Tracker.CommentOnStory(ctx, c.id, comment); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the grist smoke's failure could not be written on the story: %v", err))
 	}
+	return failed
 }
 
 // deploy runs the rig's command under the rig's after-landing lock, so that it

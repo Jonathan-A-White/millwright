@@ -289,7 +289,7 @@ func newNextCmd() *cobra.Command {
 				Deployed:     hostDeployedMarks(),
 				Home:         files,
 				Backend:      hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr()),
-				Smoke:        hostGristSmoke(gateway, host, rigs, worktrees),
+				Smoke:        hostGristSmoke(gateway, host, rigs, worktrees, nil, ""),
 				Units:        userunits.Systemctl{},
 				Stamps:       stamps,
 				CloseOuts:    hostCloseOuts(),
