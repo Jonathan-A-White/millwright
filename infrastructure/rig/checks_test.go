@@ -241,3 +241,102 @@ while :; do sleep 0.1; done`
 		t.Errorf("expected the group that ignored TERM to be killed, pid %d is still running", pid)
 	}
 }
+
+// gone waits, up to a bound, for pid to end: no process, or one that has died
+// and waits only to be reaped.
+func gone(pid int) bool {
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+		if err != nil || !alive(pid) {
+			return true
+		}
+		if _, after, ok := strings.Cut(string(stat), ") "); ok && strings.HasPrefix(after, "Z") {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
+}
+
+// leavesBehind is a command that starts what Playwright's webServer is (a server
+// in a session of its own, which ignores TERM) and a plain background child,
+// writes both pids, and goes on as rest says.
+func leavesBehind(dir, rest string) string {
+	return `setsid sh -c 'trap "" TERM; echo $$ > "$1"; exec sleep 600' sh "` + filepath.Join(dir, "server.pid") + `" >/dev/null 2>&1 &
+sh -c 'echo $$ > "$1"; exec sleep 600' sh "` + filepath.Join(dir, "child.pid") + `" >/dev/null 2>&1 &
+while [ ! -s "` + filepath.Join(dir, "server.pid") + `" ] || [ ! -s "` + filepath.Join(dir, "child.pid") + `" ]; do sleep 0.05; done
+` + rest
+}
+
+// TestARunLineLeavesNothingRunningWhenItsCommandReturns: what a suite or gate
+// command started is gone when the command returns, even a server in a session
+// of its own that outlived its parent, as the Lampas preview server on port
+// 5142 outlived the nightly suite's e2e run (mw-gq6.625).
+func TestARunLineLeavesNothingRunningWhenItsCommandReturns(t *testing.T) {
+	dir := t.TempDir()
+	checked, err := rig.NewChecks().RunLine(context.Background(), dir, leavesBehind(dir, "exit 1"))
+	if err != nil {
+		t.Fatalf("running the command: %v", err)
+	}
+	if checked.Passed {
+		t.Fatalf("expected the command to fail as it said, got %+v", checked)
+	}
+	for _, name := range []string{"server.pid", "child.pid"} {
+		pid := pidFrom(t, filepath.Join(dir, name))
+		t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+		if !gone(pid) {
+			t.Errorf("expected nothing the command started to be running once it returned, %s %d still is", name, pid)
+		}
+	}
+}
+
+// TestARunLineStoppedAtItsTimeoutLeavesNothingRunning: the same when the command
+// is stopped because its context ended, and the server ignores the TERM.
+func TestARunLineStoppedAtItsTimeoutLeavesNothingRunning(t *testing.T) {
+	rig.SetTermGraceForTest(t, time.Second)
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := rig.NewChecks().RunLine(ctx, dir, leavesBehind(dir, "while :; do sleep 0.1; done"))
+		done <- err
+	}()
+	var pids []int
+	for _, name := range []string{"server.pid", "child.pid"} {
+		pid := pidFrom(t, filepath.Join(dir, name))
+		t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+		pids = append(pids, pid)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the stopped command never returned")
+	}
+	for _, pid := range pids {
+		if !gone(pid) {
+			t.Errorf("expected nothing the command started to be running once it was stopped, pid %d still is", pid)
+		}
+	}
+}
+
+// TestARunLineWhoseChildHoldsItsOutputReturnsPassedAndLeavesNothing: a child
+// left running with the command's output still open, `sleep 600 &`, neither
+// holds the run up nor turns a pass into an error, and is gone after it.
+func TestARunLineWhoseChildHoldsItsOutputReturnsPassedAndLeavesNothing(t *testing.T) {
+	dir := t.TempDir()
+	pidfile := filepath.Join(dir, "child.pid")
+	checked, err := rig.NewChecks().RunLine(context.Background(), dir, `sleep 600 &
+echo $! > "`+pidfile+`"
+echo green`)
+	pid := pidFrom(t, pidfile)
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	if err != nil || !checked.Passed || !strings.Contains(checked.Output, "green") {
+		t.Fatalf("expected a pass that printed green, got %+v, %v", checked, err)
+	}
+	if !gone(pid) {
+		t.Errorf("expected the child to be gone once the command returned, pid %d still runs", pid)
+	}
+}
