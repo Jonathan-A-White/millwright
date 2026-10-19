@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -199,6 +200,12 @@ var termGrace = 10 * time.Second
 // alike. A context that ends stops the command and everything it started, not
 // only the shell: `make` and the compiler under it are the ones still running
 // when a limit is reached.
+//
+// The command leaves nothing running when it ends, however it ends: its group
+// and everything that carries its mark are killed, so a preview server
+// Playwright started in a group of its own does not hold the port the next run
+// needs (mw-gq6.625). A rig that means to leave a server running starts it
+// through its service manager, not as a child of its command.
 func runLine(ctx context.Context, shell, command, dir string, nice int, env []string) (string, error) {
 	argv := []string{shell, "-c", command}
 	if nice > 0 {
@@ -224,13 +231,42 @@ func runLine(ctx context.Context, shell, command, dir string, nice int, env []st
 	}
 	cmd.WaitDelay = grace + killGrace
 
+	// The mark finds what left the group. The output is read through a pipe of
+	// mw's own, so that a leftover holding it open does not keep the wait from
+	// ending: the kill after it is what closes it.
+	mark := newRunMark()
+	cmd.Env = append(cmd.Env, mark+"=1")
+	read, write, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+	defer read.Close()
+	cmd.Stdout, cmd.Stderr = write, write
+	if err := cmd.Start(); err != nil {
+		write.Close()
+		return "", err
+	}
+	write.Close()
 	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	err := cmd.Run()
+	copied := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&out, read)
+		close(copied)
+	}()
+
+	err = cmd.Wait()
 	if killer != nil {
 		killer.Stop()
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	reapMarked(mark)
+	// What cleared its environment and left the group is not found by its mark:
+	// the output is not waited for past the grace on its account.
+	select {
+	case <-copied:
+	case <-time.After(killGrace):
+		read.Close()
+		<-copied
 	}
 	return out.String(), err
 }

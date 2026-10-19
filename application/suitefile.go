@@ -73,6 +73,10 @@ func (f SuiteFiler) File(ctx context.Context, epic string, report SuiteReport) (
 			return nil, fmt.Errorf("reading the suite epic %s: %w", epic, err)
 		}
 		for _, file := range result.Failing {
+			if file.Void {
+				// A run alone that ran no test is the tooling's fault: no bug of the file.
+				continue
+			}
 			one, err := f.fileOne(ctx, detail, report, file)
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("%s: %v", file.File, err))
@@ -233,6 +237,11 @@ func suiteMail(host string, report SuiteReport, filed []SuiteFiled, failures []s
 		fmt.Fprintf(&b, "%s  %s  %s\n", one.ID, one.File, how)
 		for _, note := range one.Notes {
 			fmt.Fprintf(&b, "  %s\n", note)
+		}
+	}
+	for _, file := range result.Failing {
+		if file.Void {
+			fmt.Fprintf(&b, "recheck void  %s  not filed, the tooling's fault: %s\n", file.File, strings.TrimPrefix(file.Alone, "recheck void: "))
 		}
 	}
 	for _, said := range result.Unnamed {
