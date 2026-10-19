@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -46,6 +47,7 @@ type syncContext struct {
 	mode           application.BeadsSyncMode
 	backupInterval time.Duration
 	skipBackup     bool
+	squashAt       int // 0: the history is not squashed
 
 	headBefore   string // this host's HEAD before the sync
 	remoteBefore string // the shared remote's main before the sync
@@ -92,7 +94,12 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^this host's beads live in another host's database$`, c.thisHostsBeadsLiveElsewhere)
 	ctx.Given(`^the sync is asked to leave the backup to another run$`, c.theSyncIsAskedToSkipTheBackup)
 
+	ctx.Given(`^the collection is refused with "([^"]*)"$`, c.theCollectionIsRefused)
+	ctx.Given(`^the squash is refused with "([^"]*)"$`, c.theSquashIsRefused)
+	ctx.Given(`^its beads history holds (\d+) commits and is squashed from (\d+) on$`, c.itsHistoryIsSquashedFrom)
+
 	ctx.When(`^this host syncs$`, c.thisHostSyncs)
+	ctx.When(`^the collection is no longer refused and this host syncs again$`, c.theCollectionIsAllowedAndSyncsAgain)
 
 	ctx.Then(`^the vault pull waited (\d+) times?$`, c.thePullWaited)
 	ctx.Then(`^the sync succeeds$`, c.theSyncSucceeds)
@@ -121,6 +128,8 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the beads database was never synced$`, c.theDatabaseWasNeverSynced)
 	ctx.Then(`^the beads database was never asked to reclaim its disk space$`, c.theDatabaseWasNeverCollected)
 	ctx.Then(`^the beads database was asked to reclaim its disk space once$`, c.theDatabaseWasCollectedOnce)
+	ctx.Then(`^the sync says "([^"]*)"$`, c.theSyncSays)
+	ctx.Then(`^the sync does not say "([^"]*)"$`, c.theSyncDoesNotSay)
 	ctx.Then(`^the sync says no backup was due$`, c.theSyncSaysNoBackupWasDue)
 	ctx.Then(`^the sync says a backup ran$`, c.theSyncSaysABackupRan)
 	ctx.Then(`^the sync says the backup was left to another run$`, c.theSyncSaysTheBackupWasLeft)
@@ -305,6 +314,9 @@ func (c *syncContext) thisHostSyncs() error {
 		Mode:           c.mode,
 		BackupInterval: c.backupInterval,
 		SkipBackup:     c.skipBackup,
+	}
+	if c.squashAt > 0 {
+		sync.Squash, sync.SquashAt, sync.History = true, c.squashAt, c.tracker
 	}
 	c.report, c.err = sync.Run(context.Background())
 	return nil
@@ -760,6 +772,41 @@ func (c *syncContext) bothHostsCommittedACharter() error {
 func (c *syncContext) thePullWaited(times int) error {
 	if c.waits != times {
 		return fmt.Errorf("expected the vault pull to wait %d times, it waited %d", times, c.waits)
+	}
+	return nil
+}
+
+func (c *syncContext) theCollectionIsRefused(words string) error {
+	c.tracker.GCErr = errors.New(words)
+	return nil
+}
+
+func (c *syncContext) theSquashIsRefused(words string) error {
+	c.tracker.SquashErr = errors.New(words)
+	return nil
+}
+
+func (c *syncContext) itsHistoryIsSquashedFrom(commits, at int) error {
+	c.tracker.SetHistory(commits)
+	c.squashAt = at
+	return nil
+}
+
+func (c *syncContext) theCollectionIsAllowedAndSyncsAgain() error {
+	c.tracker.GCErr = nil
+	return c.thisHostSyncs()
+}
+
+func (c *syncContext) theSyncSays(words string) error {
+	if line := c.report.String(); !strings.Contains(line, words) {
+		return fmt.Errorf("expected the sync to say %q, got %q", words, line)
+	}
+	return nil
+}
+
+func (c *syncContext) theSyncDoesNotSay(words string) error {
+	if line := c.report.String(); strings.Contains(line, words) {
+		return fmt.Errorf("expected the sync not to say %q, got %q", words, line)
 	}
 	return nil
 }

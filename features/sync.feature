@@ -182,3 +182,36 @@ Feature: Keeping the vault and beads in step between hosts
     And the beads database holds the time of the sync under host.vps.last_sync
     And the beads database was never synced
     And the beads database was never asked to reclaim its disk space
+
+  # mw-gq6.629: on the home the server's beads user may not call DOLT_GC, and bd
+  # gc exits 0 on that refusal. The collection is the local Dolt user's (the
+  # dolt command line in the data folder), and one that is refused or fails is
+  # a failure, never a last_gc.
+  Scenario: A due collection on the host that keeps the one database is recorded once it succeeded
+    Given this host keeps the one beads database, backed up every 30 minutes
+    When this host syncs
+    Then the sync succeeds
+    And the beads database was asked to reclaim its disk space once
+    And the beads database holds the time of the sync under host.vps.last_gc
+    And the sync says "garbage collected"
+
+  Scenario: A collection the server refuses is said, not recorded, and tried again by the next sync
+    Given this host keeps the one beads database, backed up every 30 minutes
+    And the collection is refused with "command denied to user 'beads'@'%'"
+    When this host syncs
+    Then the sync succeeds
+    And the sync says "garbage collection failed: command denied to user 'beads'@'%'"
+    And nothing is recorded under host.vps.last_gc
+    When the collection is no longer refused and this host syncs again
+    Then the beads database was asked to reclaim its disk space once
+    And the beads database holds the time of the sync under host.vps.last_gc
+
+  Scenario: A squash whose full collection is refused is not reported as a squash
+    Given this host keeps the one beads database, backed up every 3000 minutes
+    And its beads history holds 96100 commits and is squashed from 50000 on
+    And its last backup of the beads database was 1500 minutes ago
+    And the squash is refused with "command denied to user 'beads'@'%'"
+    When this host syncs
+    Then the sync succeeds
+    And the sync says "beads history not squashed: command denied to user 'beads'@'%'"
+    And the sync does not say "squashed 96100 commits"
