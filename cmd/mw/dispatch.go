@@ -178,7 +178,9 @@ func newDispatchCmd() *cobra.Command {
 			"minute), dispatch waits and tries the sync again, dispatch_sync_tries times in all,\n" +
 			"dispatch_sync_wait apart. If the name still cannot be resolved it claims nothing, prints one\n" +
 			"line beginning \"local network fault\" and leaves with " + fmt.Sprint(application.NetworkFaultExit) + ", which a timer may\n" +
-			"treat as a wait. Every other sync failure is not retried.\n\n" +
+			"treat as a wait. Every other sync failure is not retried. The fetch of a rig's origin before a\n" +
+			"session starts waits the same way, and a lasting fault there gives the claim back and leaves\n" +
+			"with the same status.\n\n" +
 			"Only one real dispatch runs on a host at a time: one started while another holds the\n" +
 			"host's dispatch lock (~/.local/state/mw-dispatch/lock-<vault hash>) prints \"another mw dispatch is running\n" +
 			"here; nothing done\" and leaves with 0.\n\n" +

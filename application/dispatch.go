@@ -463,6 +463,10 @@ type DispatchReport struct {
 	// SyncRetries is how many times the sync had to be tried again, because a
 	// name could not be resolved, before it got through.
 	SyncRetries int
+	// FetchRetries is how many times the rig fetch before a session had to be
+	// tried again, over all the stories started, because of a passing fault of
+	// the network.
+	FetchRetries int
 }
 
 // inStartOrder is the stories in the order a dispatch starts them: the most
@@ -1012,12 +1016,25 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
-		started, released, err := d.start(ctx, detail, path, rigDir, formulas)
+		started, released, err := d.start(ctx, detail, path, rigDir, formulas, &report)
 		started.Recheck = recheck
 		started.SmokeFix = smokeFix
 		if started.StoryID != "" {
 			report.Started = append(report.Started, started)
 			shares.add(detail)
+		}
+		if fault, gaveUp := LocalFault(err); gaveUp {
+			// The rig's origin could not be reached for a name that would not
+			// resolve, and the claim has been given back: not a failed run, and the
+			// stories after this one would fare no better. The one line is printed
+			// here, so that nothing else is. A session started before this story
+			// stands, so a dispatch that started one goes on to its report.
+			if len(report.Started) == 0 {
+				d.print(fault.Line() + "\n")
+				return report, err
+			}
+			report.Notes = append(report.Notes, "local network fault: "+fault.Said+"; the stories after it were not tried")
+			break
 		}
 		if err != nil {
 			var pour *pourRefusal
@@ -1192,6 +1209,27 @@ func (d Dispatch) syncWaitingForTheNetwork(ctx context.Context) (SyncReport, int
 	}
 }
 
+// fetchRigWaitingForTheNetwork fetches the rig's origin the way the landing's
+// close-out does (fetchWhilePassing): a fetch that failed on a passing fault of
+// the network is tried again after SyncWait, up to SyncTries tries, and it
+// reports how many times it had to try again. A fault that is still there on
+// the last try is a *LocalNetworkFault, as it is for the sync; every other
+// failure comes back at once, as it was.
+func (d Dispatch) fetchRigWaitingForTheNetwork(ctx context.Context, rigDir string) (int, error) {
+	tries := max(d.SyncTries, 1)
+	wait := d.Wait
+	if wait == nil {
+		wait = waitFor
+	}
+	retries, err := fetchWhilePassing(ctx, tries,
+		func() error { return d.Worktrees.Fetch(ctx, rigDir) },
+		func(int) time.Duration { return d.SyncWait }, wait, nil)
+	if fault, passing := Faulted(err); passing && ctx.Err() == nil {
+		return retries, &LocalNetworkFault{Said: fault.Why, Tries: retries + 1}
+	}
+	return retries, err
+}
+
 // PourTries and PourWait are how many times a pour is tried, and how long the
 // pause between the tries is, when the database timed out or dropped the
 // connection (mw-gq6.386): a Dolt server under load answers slowly, not never.
@@ -1315,7 +1353,7 @@ func roomHeld(ctx context.Context, log EventLog, host string) (bool, error) {
 // nobody is working is left exactly as ready as it was found. Once the session
 // is running, nothing is undone: a claim given back under a live session is how
 // one story gets worked twice.
-func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Path, rigDir string, formulas map[string]bool) (Started, bool, error) {
+func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Path, rigDir string, formulas map[string]bool, report *DispatchReport) (Started, bool, error) {
 	id := detail.Story.ID
 	started := Started{
 		StoryID:  id,
@@ -1417,7 +1455,9 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 
 	// The target branch as the rig's origin has it now, not as this host saw it
 	// last: the other host may have pushed to it since.
-	if err := d.Worktrees.Fetch(ctx, rigDir); err != nil {
+	retries, err := d.fetchRigWaitingForTheNetwork(ctx, rigDir)
+	report.FetchRetries += retries
+	if err != nil {
 		return undo("fetching the rig", err, false)
 	}
 
@@ -2395,6 +2435,13 @@ func (r DispatchReport) String() string {
 			times = "time"
 		}
 		fmt.Fprintf(&b, "  retried the sync %d %s: a name could not be resolved until the network came back\n", r.SyncRetries, times)
+	}
+	if r.FetchRetries > 0 {
+		times := "times"
+		if r.FetchRetries == 1 {
+			times = "time"
+		}
+		fmt.Fprintf(&b, "  retried the rig fetch %d %s: a name could not be resolved until the network came back\n", r.FetchRetries, times)
 	}
 	for _, landed := range r.LandedAlready {
 		fmt.Fprintf(&b, "  closed %s · %s · already landed: %s\n", landed.StoryID, landed.Session, landed.By)

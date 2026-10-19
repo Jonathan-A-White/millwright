@@ -3253,7 +3253,10 @@ unit lists in `SuccessExitStatus=5 7`, so a sleeping network does not show as a
 failed unit and the next tick simply tries again. The tries and the waits together
 may not run past 90 seconds (`mw dispatch` refuses a config that would), because
 the unit is stopped at 45 minutes. Every other sync failure is not retried and
-fails as before, and `mw sync` by hand never waits. After changing the unit file,
+fails as before, and `mw sync` by hand never waits. The fetch of a rig's origin
+before each session starts waits the same way (and says `retried the rig fetch 2
+times`); one that never gets through gives the story's claim back, prints the same
+`local network fault` line and leaves with 7. After changing the unit file,
 copy it again and `systemctl --user daemon-reload`.
 
 **A second tick while a dispatch is still running does no harm.** A oneshot unit

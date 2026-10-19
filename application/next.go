@@ -2648,20 +2648,13 @@ const FetchRetries = 3
 // wait apart and about a minute in all with the default PushWait, one note per
 // retry. A fetch that failed for any other reason comes back at once as it was.
 func (n Next) fetchRetrying(ctx context.Context, report *NextReport, rigDir string) error {
-	for retry := 0; ; retry++ {
-		err := n.Worktrees.Fetch(ctx, rigDir)
-		if err == nil {
-			return nil
-		}
-		if _, passing := Faulted(err); !passing || retry == FetchRetries {
-			return err
-		}
-		wait := n.retryPause(retry + 1)
-		report.Notes = append(report.Notes, retryNote("fetch", err, wait))
-		if waitErr := n.retryWait(ctx, wait); waitErr != nil {
-			return fmt.Errorf("%w (and waiting %s to fetch again: %v)", err, wait, waitErr)
-		}
-	}
+	_, err := fetchWhilePassing(ctx, FetchRetries+1,
+		func() error { return n.Worktrees.Fetch(ctx, rigDir) },
+		n.retryPause, n.retryWait,
+		func(err error, wait time.Duration) {
+			report.Notes = append(report.Notes, retryNote("fetch", err, wait))
+		})
+	return err
 }
 
 // readRetrying runs one read of the work tracker, and when it failed on a

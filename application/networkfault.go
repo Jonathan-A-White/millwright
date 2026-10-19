@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -120,3 +121,31 @@ func Faulted(err error) (*TransientFault, bool) {
 // ReadRetries is how many times a bd read that failed on a passing fault of the
 // network is tried again before the close-out stops (mw-gq6.374).
 const ReadRetries = 4
+
+// fetchWhilePassing runs one fetch of a rig from its origin, and when it failed
+// on a passing fault (see TransientFault) tries it again after pause(retry),
+// until it has been tried tries times in all. onRetry is told each fault and the
+// wait before the try it leads to. It reports how many times it had to try
+// again. A fetch that failed for any other reason comes back at once, as it was;
+// one that still fails on a passing fault comes back as that fault. It is the
+// one place the rig's fetches wait out the network: the landing's close-out
+// (mw-gq6.373) and the dispatch before a session start both come through it.
+func fetchWhilePassing(ctx context.Context, tries int, fetch func() error, pause func(retry int) time.Duration,
+	wait func(context.Context, time.Duration) error, onRetry func(err error, wait time.Duration)) (int, error) {
+	for retry := 0; ; retry++ {
+		err := fetch()
+		if err == nil {
+			return retry, nil
+		}
+		if _, passing := Faulted(err); !passing || retry+1 >= tries {
+			return retry, err
+		}
+		d := pause(retry + 1)
+		if onRetry != nil {
+			onRetry(err, d)
+		}
+		if waitErr := wait(ctx, d); waitErr != nil {
+			return retry, fmt.Errorf("%w (and waiting %s to fetch again: %v)", err, d, waitErr)
+		}
+	}
+}
