@@ -309,6 +309,14 @@ func (Host) CreateBeadsUser(ctx context.Context) (string, bool, error) {
 	if port == "" {
 		port = "3307"
 	}
+	return CreateBeadsUserOn(ctx, port, user, password)
+}
+
+// CreateBeadsUserOn is the statements CreateBeadsUser sends, to the server on
+// 127.0.0.1:port as root, for a user and password it is given rather than
+// reads from the environment: mw member init makes a server of its own and has
+// not sourced the beads.env it just wrote.
+func CreateBeadsUserOn(ctx context.Context, port, user, password string) (string, bool, error) {
 	sql := fmt.Sprintf("CREATE USER IF NOT EXISTS %s@'%%' IDENTIFIED BY %s;\nGRANT ALL PRIVILEGES ON *.* TO %s@'%%' WITH GRANT OPTION;\n",
 		sqlString(user), sqlString(password), sqlString(user))
 
