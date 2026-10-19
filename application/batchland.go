@@ -81,8 +81,9 @@ type BatchMetrics interface {
 // aside with git's conflict list, and one with a commit signed as a machine's
 // work (AIAttribution) is set aside, never merged, naming the commit. It
 // raises the rig's version once for the batch, with one changelog entry per
-// story; it runs the rig's tests once on the batch, under the host's gate lock and the calm rule; and only when that
-// run passes does it push the target branch, which is a fast-forward of what
+// story; it runs the rig's tests once on the batch, under the host's gate lock and the calm rule, and after them the rig's
+// changed-specs command once on the union of the specs the batch added or changed (mw-gq6.627); and only when
+// those pass does it push the target branch, which is a fast-forward of what
 // the origin had, never forced. Each story merged is then closed run=landed,
 // naming the batch's commit and its own merge commit, with a chain stamp and a
 // ledger line naming the batch; the rig's checkout is brought up, and the
@@ -181,6 +182,10 @@ type BatchReport struct {
 	// Gate is the last run of the rig's tests on the batch: the one, or the
 	// one mw made once the fixer had ended.
 	Gate Checked
+	// GateLog is what the last gate ran, as gate.log holds it: the rig's
+	// tests, and after them the rig's changed-specs command when the batch
+	// added or changed a spec (mw-gq6.627). Gate is then the run that decided.
+	GateLog string
 	// GateRuns are the runs of the rig's tests the batch made, and GateTook
 	// how long they took together.
 	GateRuns int
@@ -576,13 +581,14 @@ func (r BatchReport) allOnTarget() bool {
 	return true
 }
 
-// runGate is one run of the rig's tests on the batch, under the gate lock and
-// the calm rule, counted with the others the batch made.
+// runGate is one run of the rig's tests on the batch, and after them of its
+// changed specs, under the gate lock and the calm rule, counted with the others
+// the batch made.
 func (b BatchLand) runGate(ctx context.Context, dir, rigDir string, report *BatchReport, nr *NextReport) gated {
 	n := b.Next
 	began := n.now()
-	gate := n.gate(ctx, b.batchCloseOut(report, rigDir), nr, dir, gateOnTheBatch, RelatedSpan{Base: report.Base, Skip: report.versionCommit})
-	report.Tested, report.Gate = true, gate.Checked
+	gate, log := n.gateWithSpecs(ctx, b.batchCloseOut(report, rigDir), nr, dir, gateOnTheBatch, RelatedSpan{Base: report.Base, Skip: report.versionCommit})
+	report.Tested, report.Gate, report.GateLog = true, gate.Checked, log
 	report.GateRuns++
 	report.GateTook += n.now().Sub(began)
 	if gate.Err == nil && !gate.Checked.NotRun && !gate.Checked.Passed && report.RedAt.IsZero() {
@@ -892,16 +898,24 @@ func (b BatchLand) batchCloseOut(report *BatchReport, rigDir string) *closeOut {
 	}
 }
 
+// gateLog is the last gate run as gate.log holds it.
+func (r BatchReport) gateLog() string {
+	if r.GateLog != "" {
+		return r.GateLog
+	}
+	return gateLogOf(r.Gate)
+}
+
 // keepRecords writes the batch's three records. One that cannot be written is
 // a note: the batch is landed, or held, as it is.
 func (b BatchLand) keepRecords(ctx context.Context, report *BatchReport) {
 	gateLog := "not run: " + report.Held + "\n"
 	if report.Tested {
-		gateLog = fmt.Sprintf("$ %s\n%s", report.Gate.Command, report.Gate.Output)
+		gateLog = report.gateLog()
 	}
 	if f := report.Fixer; f != nil && f.Tested && report.GateRuns > 1 {
-		gateLog = fmt.Sprintf("$ %s\n%s\n# the fixer %s was given the batch; once it had ended mw ran the tests again:\n%s",
-			f.Gate.Command, f.Gate.Output, f.Name, gateLog)
+		gateLog = fmt.Sprintf("%s\n# the fixer %s was given the batch; once it had ended mw ran the tests again:\n%s",
+			f.gateLog(), f.Name, gateLog)
 	}
 	outcome := fmt.Sprintf("landed %s on %s, %d stories: %s\n", report.Commit, report.Target, len(report.Merged), strings.Join(storyIDs(report.Merged), ", "))
 	if !report.Landed {

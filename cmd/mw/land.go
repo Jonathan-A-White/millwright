@@ -80,10 +80,6 @@ func newLandCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			relatedTests, err := config.RelatedTests()
-			if err != nil {
-				return err
-			}
 			afterLanding, err := config.AfterLanding()
 			if err != nil {
 				return err
@@ -114,7 +110,10 @@ func newLandCmd() *cobra.Command {
 			gateway := mwGateway(dir, host)
 			files := mwVault(dir, host)
 			worktrees := rig.New()
-			checks := rig.NewChecks(rig.WithCommands(tests), rig.WithRelatedCommands(relatedTests), rig.WithNice(nice), rig.WithJobs(jobs))
+			checks, err := landingChecks(gateCommands{related: true})
+			if err != nil {
+				return err
+			}
 			_, err = application.BatchLand{
 				Next: application.Next{
 					Tracker:   gateway,
@@ -124,8 +123,11 @@ func newLandCmd() *cobra.Command {
 					Checks:    checks,
 
 					// The batch's gate runs the rig's related-tests line when it has
-					// one, on the union of its stories' files (mw-gq6.601).
+					// one, on the union of its stories' files (mw-gq6.601), and the
+					// rig's changed-specs command after it on the union of its specs
+					// (mw-gq6.627).
 					RelatedChecks: checks,
+					SpecChecks:    checks,
 
 					Load:      hostload.Proc{SwapSample: benchmarkSwapSample},
 					Slot:      rig.NewSlots(),

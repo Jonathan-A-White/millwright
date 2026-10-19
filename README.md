@@ -1455,6 +1455,11 @@ says `{specs}`, and run it with `/bin/sh` in the worktree — and again on the
 merged result when merging made a merge commit. No such file, no run; a failing
 run refuses the landing as `tests-fail` (`merged-tests-fail` on the merged
 result), naming the specs. A rig the table does not name lands as it always did.
+`mw land` runs it too (mw-gq6.627): under the batch's one gate lock, after the
+batch's `[tests]` run has passed, once, on the batch's merged result, with the
+union of the specs the batch's stories added or changed; the command and its
+output follow the tests' in the batch's `gate.log`, and a failing run holds the
+batch exactly as failing tests do (the one fixer included).
 
 A rig `[related_tests]` names has a shorter gate (mw-gq6.601): at the landing gate,
 `mw next` and `mw land` run that line in place of the rig's `[tests]` line, with
