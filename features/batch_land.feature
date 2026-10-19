@@ -165,6 +165,47 @@ Feature: mw land lands a batch rig's queue under one gate run
     And the batch records of batch 1 hold the merge order, the gate log and the outcome "held"
     And metrics/factory.jsonl holds a line for batch 1 of the rig: 3 stories, 1 gate run, no fixer, outcome "held"
 
+  Scenario: The batch's gate runs the rig's changed-specs command once, on the union of the specs its stories added, after the tests (mw-gq6.627)
+    Given "mw-gq6.1" is queued for batch landing, having also added the spec "tests/e2e/unlock-room.spec.ts"
+    And "mw-gq6.2" is queued for batch landing, having also added the spec "tests/e2e/ipa-course.spec.ts"
+    And these stories are queued for batch landing:
+      | mw-gq6.3 |
+    And the rig has a changed-specs command that logs the specs it is given
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And the rig's tests were run once on the batch
+    And the changed-specs command was run once, given: tests/e2e/ipa-course.spec.ts tests/e2e/unlock-room.spec.ts
+    And the gate log of batch 1 shows the tests' command, then the changed-specs command and its output "run tests/e2e/ipa-course.spec.ts"
+
+  Scenario: A failing changed spec fails the batch's gate as failing tests do, and pushes nothing (mw-gq6.627)
+    Given "mw-gq6.1" is queued for batch landing, having also added the spec "tests/e2e/unlock-room.spec.ts"
+    And these stories are queued for batch landing:
+      | mw-gq6.2 |
+    And the rig has a changed-specs command that fails, saying "1 failed: unlock-room.spec.ts:12"
+    When mw lands the batch of the rig
+    Then "main" at the rig's origin is where it was before the batch
+    And these stories are still queued for batch landing, none of them closed:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the batch is held, and the Mayor's mail names every story in it and says "1 failed: unlock-room.spec.ts:12"
+    And the gate log of batch 1 shows the tests' command, then the changed-specs command and its output "1 failed: unlock-room.spec.ts:12"
+    And metrics/factory.jsonl holds a line for batch 1 of the rig: 2 stories, 1 gate run, no fixer, outcome "held"
+
+  Scenario: A batch that added no spec runs no changed-specs command (mw-gq6.627)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+    And the rig has a changed-specs command that logs the specs it is given
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And the changed-specs command was not run
+
+  Scenario: A rig with no changed-specs command lands a batch that added a spec as it always did (mw-gq6.627)
+    Given "mw-gq6.1" is queued for batch landing, having also added the spec "tests/e2e/unlock-room.spec.ts"
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And the rig's tests were run once on the batch
+    And the changed-specs command was not run
+
   Scenario: --dry-run prints the batch it would make and changes nothing
     Given these stories are queued for batch landing:
       | mw-gq6.1 |

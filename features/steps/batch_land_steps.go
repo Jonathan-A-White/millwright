@@ -52,6 +52,8 @@ func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^"([^"]*)" is not on "([^"]*)" at the rig's origin$`, c.isNotOnTheTarget)
 	ctx.Given(`^the tracker acts as "([^"]*)", this host's mw$`, c.theTrackerActsAs)
 	ctx.Given(`^"([^"]*)" is claimed by "([^"]*)", on another host$`, c.claimedOnAnotherHost)
+	ctx.Given(`^"([^"]*)" is queued for batch landing, having also added the spec "([^"]*)"$`, c.aStoryIsQueuedAddingASpec)
+	ctx.Then(`^the gate log of batch (\d+) shows the tests' command, then the changed-specs command and its output "([^"]*)"$`, c.theGateLogShowsTheSpecs)
 	ctx.When(`^mw lands the batch of the rig$`, c.mwLandsTheBatch)
 	registerLedgerWatchSteps(ctx, c)
 	ctx.Then(`^the story "([^"]*)" is recorded as landed and is still open$`, c.landedAndStillOpen)
@@ -121,6 +123,39 @@ func (c *nextContext) aStoryIsQueuedWriting(id, file string) error {
 		return err
 	}
 	return c.queueByCloseOut(id)
+}
+
+// aStoryIsQueuedAddingASpec queues a story whose branch also adds the file
+// given. The rig's changed-specs command is set after the queueing, as the
+// close-out of a story runs it on the story's worktree too.
+func (c *nextContext) aStoryIsQueuedAddingASpec(id, file string) error {
+	if err := c.theStoryHasBeenWorked(id); err != nil {
+		return err
+	}
+	if err := c.theStoryAddedAFile(id, file); err != nil {
+		return err
+	}
+	return c.queueByCloseOut(id)
+}
+
+// theGateLogShowsTheSpecs reads the gate log of the batch: the rig's tests
+// command first, the changed-specs command after it, and that command's
+// output.
+func (c *nextContext) theGateLogShowsTheSpecs(number int, output string) error {
+	held, err := os.ReadFile(filepath.Join(c.batchDir(number), application.BatchGateLogFile))
+	if err != nil {
+		return fmt.Errorf("expected the gate log of batch %d: %w", number, err)
+	}
+	log := string(held)
+	tests := strings.Index(log, "$ ")
+	specs := strings.Index(log, "$ printf 'run %s\\n'")
+	if tests != 0 || specs <= tests {
+		return fmt.Errorf("expected the gate log to begin with the tests' command and show the changed-specs command after it, got:\n%s", log)
+	}
+	if !strings.Contains(log[specs:], output) {
+		return fmt.Errorf("expected the changed-specs command's output %q in the gate log, got:\n%s", output, log)
+	}
+	return nil
 }
 
 func (c *nextContext) queueByCloseOut(id string) error {
