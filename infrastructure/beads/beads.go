@@ -49,8 +49,11 @@ const TypeEpic = "epic"
 type Gateway struct {
 	vault   string
 	program string
-	actor   string
-	sleep   func(ctx context.Context, d time.Duration) error
+	// dolt is the Dolt command line, run as the local user in a served host's
+	// data folder for the collection the server's beads user may not call.
+	dolt  string
+	actor string
+	sleep func(ctx context.Context, d time.Duration) error
 	// createBound is how long a bd create may run before it is stopped; zero
 	// is DefaultCreateBound.
 	createBound time.Duration
@@ -89,6 +92,13 @@ type Option func(*Gateway)
 // the real thing.
 func WithProgram(program string) Option {
 	return func(g *Gateway) { g.program = program }
+}
+
+// WithDoltProgram names the Dolt command line to run, for a host that keeps it
+// somewhere unusual — and for a test that needs a stand-in for it. The default
+// is dolt, found on PATH.
+func WithDoltProgram(program string) Option {
+	return func(g *Gateway) { g.dolt = program }
 }
 
 // WithActor names who beads records as the actor of everything this Gateway

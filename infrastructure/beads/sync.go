@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -155,21 +156,117 @@ func (g *Gateway) NotesWithPrefix(ctx context.Context, prefix string) (map[strin
 	return found, nil
 }
 
-// GC implements application.TrackerSync: asks bd to reclaim the disk space
-// its own auto-commit history piles up — its compact and Dolt GC phases —
+// GC implements application.TrackerSync: reclaims the disk space the beads
+// database's own auto-commit history piles up — its compact and Dolt GC phases —
 // then repacks the git-remote-cache bare clones Dolt keeps beside the
 // database, the one thing bd's own gc never touches: every `bd dolt
 // push`/pull leaves a new full pack there. Decay, which deletes issues closed
 // a long time ago, is skipped: choosing to delete tracked work is a person's
 // call, not something a sync makes on a timer.
 //
-// A repack that fails is reported the same way a failed `bd gc` itself would
-// be: a plain error from GC, never a reason bd's own collection is undone.
+// A collection the server refused is a failure (collect), and so is a repack
+// that fails: a plain error from GC, never a reason the collection is undone.
 func (g *Gateway) GC(ctx context.Context) error {
-	if _, err := g.call(ctx, "gc", "--skip-decay", "--force"); err != nil {
+	if err := g.collect(ctx, false); err != nil {
 		return err
 	}
 	return g.repackRemoteCaches(ctx)
+}
+
+// deniedWords are how a Dolt server says its user may not call a procedure:
+// "command denied to user 'beads'@'%'". bd gc exits 0 on that answer
+// (mw-gq6.629), so every collection reads what was said as well as the exit.
+const deniedWords = "command denied"
+
+// collect reclaims the disk space of the beads database, fully when full is
+// set (a full collection reaches the history an earlier one moved to the old
+// generation). On a host that serves its beads the server's user may not call
+// DOLT_GC, so the Dolt command line runs it as the local Dolt user in the data
+// folder; elsewhere bd gc does. An answer that the command was denied is an
+// error on either, whatever the exit status.
+func (g *Gateway) collect(ctx context.Context, full bool) error {
+	dataDir, database, served, err := g.servedDatabase()
+	if err != nil {
+		return err
+	}
+	if served {
+		procedure := "CALL DOLT_GC()"
+		if full {
+			procedure = "CALL DOLT_GC('--full')"
+		}
+		return g.runDolt(ctx, dataDir, "--use-db", database, "sql", "-q", procedure)
+	}
+	args := []string{"gc", "--skip-decay", "--force"}
+	if full {
+		args = append(args, "--full")
+	}
+	return g.callProcedure(ctx, args...)
+}
+
+// callProcedure is call for a command that runs a privileged procedure on the
+// server: an answer of "command denied" is a failure although bd exited 0.
+func (g *Gateway) callProcedure(ctx context.Context, args ...string) error {
+	out, errs, err := g.run(ctx, args...)
+	if err != nil {
+		return g.failed(err, out, errs, args)
+	}
+	if told := said(out, errs); strings.Contains(strings.ToLower(told), deniedWords) {
+		return fmt.Errorf("%s %s: %s", g.program, strings.Join(args, " "), told)
+	}
+	return nil
+}
+
+// servedDatabase says whether this host serves its beads (.beads/dolt holds the
+// data folder, as it does for serverModeRefusal) and, when it does, the data
+// folder and the name of the database in it, from .beads/metadata.json.
+func (g *Gateway) servedDatabase() (dataDir, database string, served bool, err error) {
+	dataDir = filepath.Join(g.vault, beadsDir, "dolt")
+	if info, statErr := os.Stat(dataDir); statErr != nil || !info.IsDir() {
+		return "", "", false, nil
+	}
+	raw, readErr := os.ReadFile(filepath.Join(g.vault, beadsDir, "metadata.json"))
+	var meta struct {
+		Database string `json:"dolt_database"`
+	}
+	if readErr != nil || json.Unmarshal(raw, &meta) != nil || meta.Database == "" {
+		return "", "", false, fmt.Errorf("collecting the beads in %s: no dolt_database named in %s", g.vault, filepath.Join(beadsDir, "metadata.json"))
+	}
+	return dataDir, meta.Database, true, nil
+}
+
+// runDolt runs the Dolt command line in dir, as the local user: dolt reaches a
+// server running on the data folder as __dolt_local_user__, which the beads
+// user's refusals do not bind. Only one runs at a time beside the bd calls, as
+// the database takes a single writer. Like bd it has a process group of its
+// own and no standard input.
+func (g *Gateway) runDolt(ctx context.Context, dir string, args ...string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	program := g.dolt
+	if program == "" {
+		program = "dolt"
+	}
+	cmd := exec.CommandContext(ctx, program, args...)
+	cmd.Dir = dir
+	cmd.Stdin = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = killGrace
+	var out, errs bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errs
+	err := cmd.Run()
+	told := strings.TrimSpace(errs.String() + "\n" + out.String())
+	if err != nil && ctx.Err() != nil {
+		return fmt.Errorf("stopped: %w", ctx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("%s %s in %s: %w: %s", program, strings.Join(args, " "), dir, err, told)
+	}
+	if strings.Contains(strings.ToLower(told), deniedWords) {
+		return fmt.Errorf("%s %s in %s: %s", program, strings.Join(args, " "), dir, told)
+	}
+	return nil
 }
 
 // Size implements application.TrackerNotes: every byte this host's beads
@@ -313,10 +410,10 @@ func (g *Gateway) SquashHistory(ctx context.Context) error {
 	if len(first) != 1 || strings.TrimSpace(first[0].Hash) == "" {
 		return fmt.Errorf("squashing the beads history: bd sql named no first commit")
 	}
-	if _, err := g.call(ctx, "sql", fmt.Sprintf("CALL DOLT_RESET('--soft', %s)", sqlQuoted(first[0].Hash))); err != nil {
+	if err := g.callProcedure(ctx, "sql", fmt.Sprintf("CALL DOLT_RESET('--soft', %s)", sqlQuoted(first[0].Hash))); err != nil {
 		return err
 	}
-	if _, err := g.call(ctx, "sql", fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", squashMessage)); err != nil &&
+	if err := g.callProcedure(ctx, "sql", fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", squashMessage)); err != nil &&
 		!strings.Contains(err.Error(), "nothing to commit") {
 		return err
 	}
@@ -327,12 +424,14 @@ func (g *Gateway) SquashHistory(ctx context.Context) error {
 		return err
 	}
 	for _, remote := range remotes {
-		if _, err := g.call(ctx, "sql", fmt.Sprintf("CALL DOLT_BRANCH('-D', '-r', %s)", sqlQuoted(remote.Name))); err != nil {
+		if err := g.callProcedure(ctx, "sql", fmt.Sprintf("CALL DOLT_BRANCH('-D', '-r', %s)", sqlQuoted(remote.Name))); err != nil {
 			return err
 		}
 	}
-	_, err := g.call(ctx, "gc", "--skip-decay", "--force", "--full")
-	return err
+	if err := g.collect(ctx, true); err != nil {
+		return fmt.Errorf("the full collection after the squash: %w", err)
+	}
+	return nil
 }
 
 // query runs one SQL query through bd and reads its JSON rows into rows.
