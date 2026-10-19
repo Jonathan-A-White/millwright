@@ -103,12 +103,16 @@ type SuiteLoad struct {
 // SuiteFile is one test file that failed in the whole run: the first failing
 // test of it and the first lines of its error, and how it went when it was run
 // again alone. Flaky is a file that failed in the whole run and passed alone.
+// Void is a file whose run alone said nothing of it: it could not be run, or it
+// failed without running the file's test (a port in use, a build that failed),
+// which is the tooling's fault and no bug of the file (mw-gq6.625).
 type SuiteFile struct {
 	File  string `json:"file"`
 	Phase string `json:"phase"`
 	Test  string `json:"first_failing_test,omitempty"`
 	Error string `json:"first_error,omitempty"`
 	Flaky bool   `json:"flaky"`
+	Void  bool   `json:"void,omitempty"`
 	Alone string `json:"alone"`
 }
 
@@ -164,8 +168,11 @@ func (r SuiteReport) String() string {
 	fmt.Fprintf(&b, ", %s\n", time.Duration(r.Result.DurationSeconds*float64(time.Second)).Round(time.Second))
 	for _, file := range r.Result.Failing {
 		how := "failed twice"
-		if file.Flaky {
+		switch {
+		case file.Flaky:
 			how = "flaky: passed alone"
+		case file.Void:
+			how = file.Alone + " (tooling: not filed)"
 		}
 		fmt.Fprintf(&b, "  %s  %s", file.File, how)
 		if file.Test != "" {
@@ -390,14 +397,16 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 			alone, err := s.Runner.RunLine(ctx, dir, again)
 			switch {
 			case err != nil:
-				file.Alone = "could not be run: " + err.Error()
+				file.Alone, file.Void = "recheck void: could not be run: "+err.Error(), true
 			case alone.NotRun:
-				file.Alone = "could not be run: " + alone.Tail(3)
+				file.Alone, file.Void = "recheck void: could not be run: "+alone.Tail(3), true
 			default:
 				log.section(again, alone.Output)
 				file.Alone, file.Flaky = "failed", false
 				if alone.Passed {
 					file.Alone, file.Flaky = "passed", true
+				} else if why := voidRecheck(failed.File, alone); why != "" {
+					file.Alone, file.Void = "recheck void: "+why, true
 				}
 			}
 			result.Failing = append(result.Failing, file)
@@ -440,6 +449,29 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 	}
 	s.say("%s", report.String())
 	return report, nil
+}
+
+// portInUse is what a run says when the server its tests need cannot start,
+// because something already listens where it would: Playwright's webServer, or
+// a server's own EADDRINUSE.
+var portInUse = regexp.MustCompile(`(?i)is already used|address already in use|EADDRINUSE`)
+
+// voidRecheck says why a run of file alone that failed says nothing of the file,
+// or "" when it is the file failing again: a run whose server could not start,
+// or one whose output names no failing test of the file, ran none of it.
+func voidRecheck(file string, alone Checked) string {
+	output := domain.StripANSI(alone.Output)
+	for _, line := range strings.Split(output, "\n") {
+		if portInUse.MatchString(line) {
+			return "its server could not start: " + strings.TrimSpace(line)
+		}
+	}
+	for _, failed := range FailingFiles(output) {
+		if failed.File == file {
+			return ""
+		}
+	}
+	return "it failed without running a test of the file: " + strings.TrimSpace(domain.StripANSI(alone.Tail(1)))
 }
 
 // SpecRecheck is one spec run alone on a rig's main: whether it passed, at which
