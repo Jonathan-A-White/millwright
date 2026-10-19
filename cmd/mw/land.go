@@ -11,6 +11,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/userunits"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
 )
@@ -114,49 +115,45 @@ func newLandCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			next := application.Next{
+				Tracker:   gateway,
+				Worktrees: worktrees,
+				Landing:   worktrees,
+				Changes:   worktrees,
+				Checks:    checks,
+
+				// The batch's gate runs the rig's related-tests line when it has
+				// one, on the union of its stories' files (mw-gq6.601), and the
+				// rig's changed-specs command after it on the union of its specs
+				// (mw-gq6.627).
+				RelatedChecks: checks,
+				SpecChecks:    checks,
+
+				Load:      hostload.Proc{SwapSample: benchmarkSwapSample},
+				Slot:      rig.NewSlots(),
+				GateLock:  hostGateLock(),
+				Mailbox:   gateway,
+				Memory:    gateway,
+				Runner:    tmux.New(),
+				Boot:      builderBoot(files, host, tests, nice, jobs, turns),
+				Events:    homeEventLog(),
+				Seat:      BuilderSeat,
+				Host:      host,
+				Rigs:      rigs,
+				PushTries: pushTries,
+				PushWait:  time.Duration(pushWaitSeconds) * time.Second,
+				Out:       cmd.OutOrStdout(),
+				Err:       cmd.ErrOrStderr(),
+
+				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
+				DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
+				Deployed:     hostDeployedMarks(),
+				Smoke:        hostGristSmoke(gateway, host, rigs, worktrees, cmd.OutOrStdout(), application.BatchLogPrefix+"grist smoke: "),
+				Units:        userunits.Systemctl{},
+				Stamps:       stamps,
+			}
 			_, err = application.BatchLand{
-				Next: application.Next{
-					Tracker:   gateway,
-					Worktrees: worktrees,
-					Landing:   worktrees,
-					Changes:   worktrees,
-					Checks:    checks,
-
-					// The batch's gate runs the rig's related-tests line when it has
-					// one, on the union of its stories' files (mw-gq6.601), and the
-					// rig's changed-specs command after it on the union of its specs
-					// (mw-gq6.627).
-					RelatedChecks: checks,
-					SpecChecks:    checks,
-
-					Load:      hostload.Proc{SwapSample: benchmarkSwapSample},
-					Slot:      rig.NewSlots(),
-					GateLock:  hostGateLock(),
-					Vault:     files,
-					Rules:     files,
-					Files:     files,
-					RigFacts:  files,
-					Mailbox:   gateway,
-					Memory:    gateway,
-					Runner:    tmux.New(),
-					Boot:      builderBoot(files, host, tests, nice, jobs, turns),
-					Events:    homeEventLog(),
-					Seat:      BuilderSeat,
-					Host:      host,
-					Rigs:      rigs,
-					PushTries: pushTries,
-					PushWait:  time.Duration(pushWaitSeconds) * time.Second,
-					Out:       cmd.OutOrStdout(),
-					Err:       cmd.ErrOrStderr(),
-
-					AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
-					DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
-					Deployed:     hostDeployedMarks(),
-					Home:         files,
-					Smoke:        hostGristSmoke(gateway, host, rigs, worktrees, cmd.OutOrStdout(), application.BatchLogPrefix+"grist smoke: "),
-					Units:        userunits.Systemctl{},
-					Stamps:       stamps,
-				},
+				Next:    withVaultPorts(next, files),
 				Records: files,
 				Metrics: files,
 				Fix:     true,
@@ -172,4 +169,17 @@ func newLandCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&one, "one", false,
 		"take only the oldest queued story: how the follower lands what a rig flipped back to landing = each had queued")
 	return cmd
+}
+
+// withVaultPorts gives a landing's Next the ports that are the vault, which a
+// Landed mail reads its blocks through: the rig's facts and the common-errors
+// register, as mw next gives them (mw-gq6.631).
+func withVaultPorts(n application.Next, files *vault.Vault) application.Next {
+	n.Vault = files
+	n.Rules = files
+	n.Files = files
+	n.Errors = files
+	n.RigFacts = files
+	n.Home = files
+	return n
 }
