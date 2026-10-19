@@ -101,11 +101,13 @@ type MemorySupersede struct {
 }
 
 // MemoryList is the request mw memory list makes. An empty Status lists every
-// status.
+// status. Current lists only the current facts and cannot be combined with a
+// Status.
 type MemoryList struct {
-	Rig    string
-	Status FactStatus
-	Oldest bool
+	Rig     string
+	Status  FactStatus
+	Oldest  bool
+	Current bool
 }
 
 // MemoryQuery is the request mw memory query makes: every term must match.
@@ -635,6 +637,12 @@ func (m Memory) List(ctx context.Context, req MemoryList) error {
 	case "", FactCurrent, FactRecheck, FactSuperseded, FactRetired:
 	default:
 		return fmt.Errorf("unknown status %q (current, recheck, superseded or retired)", req.Status)
+	}
+	if req.Current && req.Status != "" {
+		return fmt.Errorf("--current and --status both choose which facts to list: use one")
+	}
+	if req.Current {
+		req.Status = FactCurrent
 	}
 	about, files, _, err := m.load(ctx, req.Rig)
 	if err != nil {

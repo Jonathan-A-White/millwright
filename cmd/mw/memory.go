@@ -159,13 +159,15 @@ func newMemoryRecheckCmd() *cobra.Command {
 
 func newMemoryListCmd() *cobra.Command {
 	var status string
-	var oldest bool
+	var oldest, current bool
 	cmd := &cobra.Command{
-		Use:   "list <rig> [--status current|recheck|superseded|retired] [--oldest]",
+		Use:   "list <rig> [--current | --status current|recheck|superseded|retired] [--oldest]",
 		Short: "List a rig's facts and the size of what a Builder reads against the budget",
 		Long: "list prints one line a fact, 'slug  status  kind  [subject]  since  source', current facts\n" +
 			"first and by subject (--oldest: by since, oldest first), then a line with the size of the\n" +
-			"render a Builder reads against the budget (config rig_memory_bytes). Exit 0.",
+			"render a Builder reads against the budget (config rig_memory_bytes). --current lists only the\n" +
+			"current facts, leaving out the recheck, superseded and retired ones (the render size is still\n" +
+			"printed); it cannot be combined with --status. Exit 0.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			memory, err := memoryFor(cmd)
@@ -173,12 +175,13 @@ func newMemoryListCmd() *cobra.Command {
 				return err
 			}
 			return memory.List(cmd.Context(), application.MemoryList{
-				Rig: args[0], Status: application.FactStatus(status), Oldest: oldest,
+				Rig: args[0], Status: application.FactStatus(status), Oldest: oldest, Current: current,
 			})
 		},
 	}
 	cmd.Flags().StringVar(&status, "status", "", "only facts of this status")
 	cmd.Flags().BoolVar(&oldest, "oldest", false, "oldest first, by since")
+	cmd.Flags().BoolVar(&current, "current", false, "only current facts: no recheck, superseded or retired one")
 	return cmd
 }
 
@@ -196,7 +199,8 @@ func newMemoryMigrateCmd() *cobra.Command {
 			"you start' or 'Decided' in it, else gotcha; its subject the first path-like token (a <placeholder> kept\n" +
 			"whole) or one-word backticked token of at most 40 characters, else general; its since a date in the line, else today. A line it cannot place is\n" +
 			"printed as 'not placed' and left out. --dry-run prints every fact and writes nothing.\n" +
-			"Otherwise it removes the two files it read (no git command is run: the Mayor commits). It\n" +
+			"Otherwise it removes the two files it read, then commits what it wrote and removed (message\n" +
+			"'mw memory migrate <rig>') and pushes it itself. It\n" +
 			"refuses a rig that already has a facts folder, and one with no memory file.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

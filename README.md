@@ -2751,7 +2751,7 @@ mw memory add <rig> --kind gotcha|decision --subject <s> --source <bead|rig@sha|
 mw memory supersede <rig> <slug> --source <...> [--slug <new>] "<sentence>"
 mw memory retire <rig> <slug> --reason "<why>"
 mw memory recheck <rig> <slug> [--why "<text>"]
-mw memory list <rig> [--status current|recheck|superseded|retired] [--oldest]
+mw memory list <rig> [--current | --status current|recheck|superseded|retired] [--oldest]
 mw memory migrate <rig> [--dry-run]
 mw memory query <rig> <term>...
 mw memory eval <rig>
@@ -2772,7 +2772,7 @@ sentence and sets `retired:` and the `reason`. `recheck` sets status recheck (th
 `--why` appended to the reason), which a Builder does not read at boot; `add`
 refuses its slug until `supersede` or `retire` settles it. `list` prints
 `slug  status  kind  [subject]  since  source`, current facts first by subject
-(`--oldest`: by since), then `render N/8000 bytes`, the size `mw status` holds
+(`--oldest`: by since; `--current`: only the current facts), then `render N/8000 bytes`, the size `mw status` holds
 to `rig_memory_bytes`.
 
 `migrate` moves a rig kept as one memory file to facts in one run. It reads

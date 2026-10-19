@@ -179,6 +179,36 @@ func TestListSaysWhenANearFullRenderLeavesTheNewestFactsSearchOnly(t *testing.T)
 	}
 }
 
+func TestListCurrentOnlyHidesEveryFactThatIsNotCurrentAndKeepsTheRenderLine(t *testing.T) {
+	retired := strings.Replace(queryFact("git", "Never push."), "status: current", "status: retired\nretired: 2026-10-01\nreason: old", 1)
+	list := func(current bool) string {
+		var out bytes.Buffer
+		m := application.Memory{
+			Files: queryFiles{files: map[string]string{"a.md": queryFact("bd", "Use -C with bd."), "c.md": retired}},
+			Seat:  "builder", Out: &out, Budget: 8000,
+		}
+		if err := m.List(context.Background(), application.MemoryList{Rig: "kiln", Current: current}); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	if got := list(false); !strings.Contains(got, "c  retired") || !strings.Contains(got, "a  current") {
+		t.Errorf("without the flag every fact is listed:\n%s", got)
+	}
+	got := list(true)
+	if strings.Contains(got, "retired") || !strings.Contains(got, "a  current") {
+		t.Errorf("--current lists the current fact and no retired one:\n%s", got)
+	}
+	if !strings.Contains(got, "render ") {
+		t.Errorf("--current still ends with the render size:\n%s", got)
+	}
+	var out bytes.Buffer
+	m := application.Memory{Files: queryFiles{files: map[string]string{"a.md": queryFact("bd", "x")}}, Seat: "builder", Out: &out}
+	if err := m.List(context.Background(), application.MemoryList{Rig: "kiln", Current: true, Status: application.FactRetired}); err == nil {
+		t.Errorf("--current with --status should be refused")
+	}
+}
+
 // editableFiles is a rig's facts and eval.md in memory that a verb can write.
 type editableFiles struct {
 	files map[string]string
