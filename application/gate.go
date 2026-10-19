@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -127,6 +128,46 @@ func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, wh
 		defer n.giveTheGateLockBack(report, lock)
 	}
 	return n.gateOnACalmHost(ctx, c, report, dir, what, span)
+}
+
+// gateWithSpecs is gate for a landing that has no close-out of its own to run
+// the rig's changed-specs command after the gate, as mw next does (specsRefusal):
+// a batch (mw-gq6.627). Under the one gate lock it runs the rig's tests, and,
+// when they passed, the rig's changed-specs command on the specs the span's
+// range added or changed in dir, once. The gated it returns is the verdict: the
+// tests' own when they did not pass or no spec was changed, else the specs'
+// run, with Said naming the specs. log is what the gate ran as a gate log
+// holds it, one "$ command" and its output after another.
+func (n Next) gateWithSpecs(ctx context.Context, c *closeOut, report *NextReport, dir, what string, span RelatedSpan) (verdict gated, log string) {
+	if lock := n.waitForTheGateLock(ctx, c, report, what); lock != nil {
+		defer n.giveTheGateLockBack(report, lock)
+	}
+	tests := n.gateOnACalmHost(ctx, c, report, dir, what, span)
+	log = gateLogOf(tests.Checked)
+	if tests.Err != nil || tests.Checked.NotRun || !tests.Checked.Passed || n.SpecChecks == nil {
+		return tests, log
+	}
+	run, err := n.SpecChecks.RunSpecs(ctx, c.path.Rig, dir, span.Base)
+	if err != nil {
+		return gated{Err: fmt.Errorf("the rig's changed specs could not be run in %s: %w", dir, err)}, log
+	}
+	if len(run.Specs) == 0 {
+		return tests, log
+	}
+	if !strings.HasSuffix(log, "\n") {
+		log += "\n"
+	}
+	log += gateLogOf(run.Checked)
+	verdict = gated{Checked: run.Checked}
+	if !run.Passed && !run.NotRun {
+		verdict.Said = "the changed specs: " + strings.Join(run.Specs, ", ")
+	}
+	return verdict, log
+}
+
+// gateLogOf is one command of a gate as a gate log holds it.
+func gateLogOf(c Checked) string {
+	return fmt.Sprintf("$ %s\n%s", c.Command, c.Output)
 }
 
 // waitForTheGateLock takes this host's gate lock for the tests what names,

@@ -53,7 +53,8 @@ func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the tracker acts as "([^"]*)", this host's mw$`, c.theTrackerActsAs)
 	ctx.Given(`^"([^"]*)" is claimed by "([^"]*)", on another host$`, c.claimedOnAnotherHost)
 	ctx.Given(`^"([^"]*)" is queued for batch landing, having also added the spec "([^"]*)"$`, c.aStoryIsQueuedAddingASpec)
-	ctx.Then(`^the gate log of batch (\d+) shows the tests' command, then the changed-specs command and its output "([^"]*)"$`, c.theGateLogShowsTheSpecs)
+	ctx.Then(`^the changed-specs command was run once, given the specs: (.+)$`, c.theChangedSpecsRanOnceOnSpecs)
+	ctx.Then(`^the gate log of batch (\d+) shows the tests' command, then the changed-specs command, with the text "([^"]*)"$`, c.theGateLogShowsTheSpecs)
 	ctx.When(`^mw lands the batch of the rig$`, c.mwLandsTheBatch)
 	registerLedgerWatchSteps(ctx, c)
 	ctx.Then(`^the story "([^"]*)" is recorded as landed and is still open$`, c.landedAndStillOpen)
@@ -138,6 +139,23 @@ func (c *nextContext) aStoryIsQueuedAddingASpec(id, file string) error {
 	return c.queueByCloseOut(id)
 }
 
+// theChangedSpecsRanOnceOnSpecs is theChangedSpecsRanOnce for a command that
+// logs one line for each spec it is given.
+func (c *nextContext) theChangedSpecsRanOnceOnSpecs(given string) error {
+	held, err := os.ReadFile(c.specLog())
+	if err != nil {
+		return fmt.Errorf("expected the changed-specs command to have run, but it left no log: %w", err)
+	}
+	var want string
+	for _, spec := range strings.Fields(given) {
+		want += "run " + spec + "\n"
+	}
+	if string(held) != want {
+		return fmt.Errorf("expected the changed-specs command to have been run once, given %q, got:\n%s", given, held)
+	}
+	return nil
+}
+
 // theGateLogShowsTheSpecs reads the gate log of the batch: the rig's tests
 // command first, the changed-specs command after it, and that command's
 // output.
@@ -153,7 +171,7 @@ func (c *nextContext) theGateLogShowsTheSpecs(number int, output string) error {
 		return fmt.Errorf("expected the gate log to begin with the tests' command and show the changed-specs command after it, got:\n%s", log)
 	}
 	if !strings.Contains(log[specs:], output) {
-		return fmt.Errorf("expected the changed-specs command's output %q in the gate log, got:\n%s", output, log)
+		return fmt.Errorf("expected %q after the changed-specs command in the gate log, got:\n%s", output, log)
 	}
 	return nil
 }

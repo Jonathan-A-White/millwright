@@ -20,6 +20,8 @@ type BatchFixing struct {
 	// and Gate is the run it was given.
 	Tested bool
 	Gate   Checked
+	// GateLog is that run as gate.log holds it, the changed specs included.
+	GateLog string
 
 	Started bool
 	Ended   SessionStatus
@@ -121,7 +123,7 @@ func (r BatchReport) storiesInOrder() []BatchStory {
 // a red batch, and leaves one with branches set aside to land the rest.
 func (b BatchLand) fix(ctx context.Context, dir, rigDir string, settings domain.LandingSettings, report *BatchReport, why string) bool {
 	n := b.Next
-	f := &BatchFixing{Name: BatchFixerName(report.Rig, report.Number), Why: why, Tested: report.Tested, Gate: report.Gate}
+	f := &BatchFixing{Name: BatchFixerName(report.Rig, report.Number), Why: why, Tested: report.Tested, Gate: report.Gate, GateLog: report.GateLog}
 	report.Fixer = f
 	notStarted := func(trouble string) bool {
 		f.Trouble = trouble
@@ -364,4 +366,12 @@ func (r BatchReport) fixerMail() string {
 	}
 	fmt.Fprintf(&b, "Its run: %s/%s/\n", RunsDir, f.Name)
 	return b.String()
+}
+
+// gateLog is the run the fixer was given as gate.log holds it.
+func (f BatchFixing) gateLog() string {
+	if f.GateLog != "" {
+		return f.GateLog
+	}
+	return gateLogOf(f.Gate)
 }

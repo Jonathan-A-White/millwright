@@ -82,22 +82,6 @@ func newCheckCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			tests, err := config.Tests()
-			if err != nil {
-				return err
-			}
-			changedSpecs, err := config.ChangedSpecs()
-			if err != nil {
-				return err
-			}
-			nice, err := config.BuilderNice()
-			if err != nil {
-				return err
-			}
-			jobs, err := config.BuilderJobs()
-			if err != nil {
-				return err
-			}
 
 			var slot application.MergeSlot
 			if !noSlot {
@@ -114,17 +98,10 @@ func newCheckCmd() *cobra.Command {
 			if projects, err := claude.DefaultProjectsRoot(); err == nil {
 				modes = claude.NewTranscripts(projects)
 			}
-			configured, err := config.TestParts()
+			checks, err := landingChecks(gateCommands{parts: true})
 			if err != nil {
 				return err
 			}
-			parts := map[string][]application.GatePart{}
-			for rigName, named := range configured {
-				for _, p := range named {
-					parts[rigName] = append(parts[rigName], application.GatePart{Name: p.Name, Command: p.Command})
-				}
-			}
-			checks := rig.NewChecks(rig.WithParts(parts), rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNice(nice), rig.WithJobs(jobs))
 			k := application.Check{
 				Tracker:    mwGateway(dir, host),
 				Landing:    worktrees,

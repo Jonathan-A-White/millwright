@@ -174,8 +174,8 @@ Feature: mw land lands a batch rig's queue under one gate run
     When mw lands the batch of the rig
     Then the batch landed on "main" in one push, forcing nothing
     And the rig's tests were run once on the batch
-    And the changed-specs command was run once, given: tests/e2e/ipa-course.spec.ts tests/e2e/unlock-room.spec.ts
-    And the gate log of batch 1 shows the tests' command, then the changed-specs command and its output "run tests/e2e/ipa-course.spec.ts"
+    And the changed-specs command was run once, given the specs: tests/e2e/ipa-course.spec.ts tests/e2e/unlock-room.spec.ts
+    And the gate log of batch 1 shows the tests' command, then the changed-specs command, with the text "tests/e2e/unlock-room.spec.ts"
 
   Scenario: A failing changed spec fails the batch's gate as failing tests do, and pushes nothing (mw-gq6.627)
     Given "mw-gq6.1" is queued for batch landing, having also added the spec "tests/e2e/unlock-room.spec.ts"
@@ -188,7 +188,7 @@ Feature: mw land lands a batch rig's queue under one gate run
       | mw-gq6.1 |
       | mw-gq6.2 |
     And the batch is held, and the Mayor's mail names every story in it and says "1 failed: unlock-room.spec.ts:12"
-    And the gate log of batch 1 shows the tests' command, then the changed-specs command and its output "1 failed: unlock-room.spec.ts:12"
+    And the gate log of batch 1 shows the tests' command, then the changed-specs command, with the text "1 failed: unlock-room.spec.ts:12"
     And metrics/factory.jsonl holds a line for batch 1 of the rig: 2 stories, 1 gate run, no fixer, outcome "held"
 
   Scenario: A batch that added no spec runs no changed-specs command (mw-gq6.627)

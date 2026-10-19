@@ -126,14 +126,6 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			changedSpecs, err := config.ChangedSpecs()
-			if err != nil {
-				return err
-			}
-			relatedTests, err := config.RelatedTests()
-			if err != nil {
-				return err
-			}
 			afterLanding, err := config.AfterLanding()
 			if err != nil {
 				return err
@@ -241,7 +233,10 @@ func newNextCmd() *cobra.Command {
 				transcripts = claude.NewTranscripts(projects)
 				modes = claude.NewTranscripts(projects)
 			}
-			checks := rig.NewChecks(rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithRelatedCommands(relatedTests), rig.WithNice(nice), rig.WithJobs(jobs))
+			checks, err := landingChecks(gateCommands{related: true})
+			if err != nil {
+				return err
+			}
 			_, err = application.Next{
 				Tracker:    gateway,
 				Worktrees:  worktrees,
