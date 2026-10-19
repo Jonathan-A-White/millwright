@@ -128,6 +128,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeStampScenario(ctx)
 	steps.InitializeHomeScenario(ctx)
 	steps.InitializeInitScenario(ctx)
+	steps.InitializeMemberScenario(ctx)
 	steps.InitializeMailBeadsScenario(ctx)
 	steps.InitializeMailScenario(ctx)
 	steps.InitializeMemoryScenario(ctx)

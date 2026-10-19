@@ -21,6 +21,7 @@
 | CloseOutMarks, LiveHeartbeats, UserProcesses (Tester) | application/closeout.go, application/liveheartbeats.go, application/testerleftovers.go | {closeout,procs,benchflag} |
 | Worktrees, Rebases, BranchChanges, RigFiles | application/worktrees.go, application/wrongrig.go | rig/{worktree,rigfiles}.go |
 | HostLoad, GateLock, Cloud*, BenchmarkBook | application/hostload.go, application/gate.go, application/benchmark.go | {hostload,hostlock/gate.go,ticketq,cloud,vault/{cloudbook,benchmarks}.go} |
+| MemberHost | application/member.go | member |
 | TickLog, Notifier, HomeMoveHost, OldHome, {Vault,Tracker}Birth | application/{millhandtick,homemove,init}.go | {ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go |
 | Landing, Checks, SpecChecks, RelatedChecks, MergeSlot, Batch*, LandProcesses | application/landing.go, application/batchland.go | rig/{landing,checks,specs,slot}.go, vault/batch.go, apartproc |
 | AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter, FormulaInstaller | application/afterlanding.go, application/selfupdate.go, application/backendstage.go, application/formulainstall.go | {rig/{afterlanding,built,backend},userunits,vault/formulas}.go |
@@ -49,6 +50,7 @@ Each use case's application/ files are in [docs/codemap-detail.md](codemap-detai
 | Suite, SuiteFiler, NightlySuite, ContributeBack | cmd/mw/suite.go, cmd/mw/suitenightly.go | {suite*,contribute_back} |
 | Config* | cmd/mw/config.go | config_* |
 | IdeasOnly* | cmd/mw/ideasonly.go | ideas_only, postern_inbox_apply, talk_wait |
+| Member[Remove] ([docs/family.md](family.md)) | cmd/mw/member.go | member |
 | Seat* | cmd/mw/seat.go | seat_* |
 | Talk*, TalkShow | cmd/mw/talk.go | talk_* |
 | Millhand, Deputy, MillhandTick | cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | {millhand*,deputy} |
