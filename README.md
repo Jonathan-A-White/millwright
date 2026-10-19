@@ -491,6 +491,20 @@ lists; `mw release <epic>` leaves an iced child held and names it. Postern's
 `{action:'thaw'}` from the Governor's key does what `mw thaw` does. See
 `application/ice_test.go`.
 
+An iced bead never blocks a live one. `mw ice` moves the bead behind what waited on it:
+for each live bead X that waited on the iced bead I, X drops I, takes I's open blockers
+and I waits on X, and it prints each move. An X that reaches I through a closed bead
+cannot be waited on (bd refuses the wait as a cycle), so it is freed of I and I is not
+moved behind it; the line says so. `mw stuck` (zero tokens, exit 0) lists every held
+root that live beads wait behind, over `blocks` links: an iced bead, a deferred bead
+whose blockers are all closed and which has no reason (a label `grilling`, `hitl`,
+`demo` or `icebox`, or a comment opening `HELD:`), and a claim whose lease ran out
+over 6 hours ago; each with the count and ids of the live beads behind it. `mw status`
+prints `stuck: N live beads behind M held roots: <ids>` in its DAMPERS section when N is
+above 0, and the sleep pass's bundle holds `stuck.txt`, `mw stuck`'s output, so its
+summary names the roots. See `application/stuck_test.go` and
+`application/icerewire_test.go`.
+
 ## Naming why a story failed
 
 ```sh

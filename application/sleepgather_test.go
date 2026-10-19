@@ -69,6 +69,7 @@ func TestTheBundleHoldsTheDumpTheDiffTheQueueTheGitLogsTheRunsAndTheReport(t *te
 		"runs.txt":        "claude-sonnet-5-5: 1 sessions",
 		"report.txt":      "mw report --since 7d\n",
 		"folds.txt":       "no rig has an open or held bug",
+		"stuck.txt":       "mw stuck\n",
 	} {
 		if got := parts[file].Text; !strings.Contains(got, want) {
 			t.Errorf("%s = %q, want it to hold %q", file, got, want)
@@ -375,5 +376,31 @@ func TestEveryPartTheBundleHoldsFitsInATurnEachAndTheAnswerHasTwoMore(t *testing
 	if application.SleepMaxTurns < application.SleepPartCount()+2 {
 		t.Errorf("the turn cap is %d, a read of each of %d parts and the answer needs %d",
 			application.SleepMaxTurns, application.SleepPartCount(), application.SleepPartCount()+2)
+	}
+}
+
+func TestTheBundleHoldsWhatMwStuckSaysAndNamesItsRoots(t *testing.T) {
+	g := gatherFixture()
+	g.Mw = func(_ context.Context, args ...string) (string, error) {
+		if args[0] == "stuck" {
+			return "stuck: 3 live beads behind 1 held root\nmw-a.9 (iced): 3 behind: mw-a.1 mw-a.2 mw-a.3\n", nil
+		}
+		return "", nil
+	}
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := partsByFile(bundle)[application.SleepStuckFile].Text; !strings.Contains(got, "mw-a.9 (iced): 3 behind") {
+		t.Errorf("stuck = %q, want mw stuck's roots", got)
+	}
+
+	g.Mw = func(context.Context, ...string) (string, error) { return "", errors.New("bd is busy") }
+	bundle, err = g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := partsByFile(bundle)[application.SleepStuckFile].Text; !strings.Contains(got, "bd is busy") {
+		t.Errorf("stuck = %q, want it to say it could not be read", got)
 	}
 }

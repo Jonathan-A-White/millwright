@@ -65,10 +65,36 @@ type Ice struct {
 	// Notes remembers when; nil remembers nothing.
 	Notes IceNotes
 	Now   func() time.Time
+	// Graph and Wires, both set, make icing move the bead behind the live beads
+	// that waited on it (IceRewire); either nil leaves the waits as they are.
+	Graph BeadGraph
+	Wires BlockerWires
 }
 
 // Run ices the bead for the reason.
 func (i Ice) Run(ctx context.Context, id, reason string) error {
+	_, err := i.Do(ctx, id, reason)
+	return err
+}
+
+// Do ices the bead for the reason and, when Graph and Wires are set, moves it
+// behind the live beads that waited on it, and says what it moved. The rewiring
+// follows the icing: an icing that fails moves nothing, and returns a report
+// with no Iced; a rewiring that fails returns what it moved so far, Iced set,
+// and the error.
+func (i Ice) Do(ctx context.Context, id, reason string) (IceRewire, error) {
+	if err := i.ice(ctx, id, reason); err != nil {
+		return IceRewire{}, err
+	}
+	if i.Graph == nil || i.Wires == nil {
+		return IceRewire{}, nil
+	}
+	report, err := IceRewireOf(ctx, i.Graph, i.Wires, id)
+	report.Iced = id // the bead is iced whether or not its dependents were moved
+	return report, err
+}
+
+func (i Ice) ice(ctx context.Context, id, reason string) error {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return fmt.Errorf("icing %s: say why with --reason", id)

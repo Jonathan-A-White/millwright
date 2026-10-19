@@ -984,6 +984,32 @@ func (f *FakeTracker) RemoveBlocker(_ context.Context, blocked, blocker string) 
 	})
 }
 
+// BeadGraph implements application.BeadGraph over the stories the fake holds,
+// closed ones included: each carries a 'blocks' edge to everything it waits on,
+// finished or not, as the real graph does.
+func (f *FakeTracker) BeadGraph(_ context.Context) ([]domain.GraphBead, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	graph := make([]domain.GraphBead, 0, len(f.order))
+	for _, id := range f.order {
+		s := f.stories[id]
+		kind := "task"
+		if s.detail.IsEpic {
+			kind = "epic"
+		}
+		one := domain.GraphBead{ID: id, Title: s.detail.Story.Title, Status: s.detail.Status, Type: kind,
+			Labels: append([]string(nil), s.detail.Labels...)}
+		for _, need := range s.needs {
+			one.Edges = append(one.Edges, domain.BeadEdge{To: need, Kind: "blocks"})
+		}
+		graph = append(graph, one)
+	}
+	return graph, nil
+}
+
 // SupersedeStory implements application.FoldWriter as bd supersede does: the
 // story is closed with a reference to its replacement, and a story that already
 // waits on its replacement is refused ("already exists with type blocks").

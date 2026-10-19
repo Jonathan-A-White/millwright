@@ -21,6 +21,7 @@ const (
 	SleepRunsFile   = "runs.txt"
 	SleepReportFile = "report.txt"
 	SleepFoldsFile  = "folds.txt"
+	SleepStuckFile  = "stuck.txt"
 )
 
 // sleepBudgets is the most bytes of each part of the bundle the agent is given:
@@ -35,11 +36,12 @@ var sleepBudgets = map[string]int{
 	SleepRunsFile:   4_000,
 	SleepReportFile: 24_000,
 	SleepFoldsFile:  12_000,
+	SleepStuckFile:  6_000,
 }
 
 // SleepTotalBudget is the most bytes of the whole bundle: the sum of the parts'
 // budgets.
-const SleepTotalBudget = 144_000
+const SleepTotalBudget = 150_000
 
 // SleepBudgetOf is the most bytes of the part held in file.
 func SleepBudgetOf(file string) int { return sleepBudgets[file] }
@@ -116,6 +118,9 @@ func (g SleepGather) Gather(ctx context.Context, window SleepWindow) (SleepBundl
 	// ten times the size (413 KB against 17 KB on 2026-10-16).
 	bundle = append(bundle, cutPart("report", SleepReportFile, g.said(g.Mw(ctx, "report", "--since", window.ReportSince()))))
 	bundle = append(bundle, cutPart("folds", SleepFoldsFile, g.folds(ctx, dump.String())))
+	// The held roots that live beads wait behind (mw stuck): the pass names
+	// them in its summary (mw-gq6.621).
+	bundle = append(bundle, cutPart("stuck", SleepStuckFile, g.said(g.Mw(ctx, "stuck"))))
 	return bundle, nil
 }
 

@@ -38,7 +38,8 @@ func newSleepPassCmd() *cobra.Command {
 		Short: "Gather the night's bundle and have one fresh agent write the day's priorities, maps and improvements",
 		Long: "pass gathers the night's bundle: the triage dump and what moved since the last one, the ready\n" +
 			"stories in dispatch's order (mw queue), each rig's git log of the last 10 days, the sessions'\n" +
-			"results aggregated by model, and mw report (7 days; on Sundays 30). It starts one fresh agent\n" +
+			"results aggregated by model, mw report (7 days; on Sundays 30) and mw stuck (the held roots live\n" +
+			"beads wait behind, which the summary names). It starts one fresh agent\n" +
 			"with the principles (plans/principles.md, else the newest plans/triage-<date>/principles.md)\n" +
 			"and that bundle. The agent answers with the day's priorities (recommendations.json and\n" +
 			"questions.md), maps (maps.md) and improvements (improvements.md), which mw writes with a\n" +

@@ -238,7 +238,7 @@ func TestADryRunSaysEachPartAgainstItsBudgetAndWhichWereCut(t *testing.T) {
 		t.Fatal(err)
 	}
 	said := f.out.String()
-	for _, want := range []string{"bytes of 50,000", "bytes of 24,000", "bytes of 144,000", "CUT by mw", "cut by mw to fit"} {
+	for _, want := range []string{"bytes of 50,000", "bytes of 24,000", "bytes of 150,000", "CUT by mw", "cut by mw to fit"} {
 		if !strings.Contains(said, want) {
 			t.Errorf("the dry run did not say %q:\n%s", want, said[strings.Index(said, "--- bundle"):])
 		}

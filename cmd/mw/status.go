@@ -38,6 +38,8 @@ func newStatusCmd() *cobra.Command {
 			"synced at all, is marked asleep and its work\n" +
 			"is listed as stranded, with the one line that re-paths a story here. Re-pathing is a\n" +
 			"person's act: status only says which stories are waiting for one.\n\n" +
+			"A DAMPERS section line 'stuck: N live beads behind M held roots: <ids>' names the held beads that\n" +
+			"live beads wait behind and that cannot move on their own (mw stuck lists them with what is behind).\n\n" +
 			"A WAITING ON THE MAYOR section lists each hands bead (hitl) with no step filed yet, which\n" +
 			"the postern view says waits on the Mayor, with its bead, its age and what it waits on. It\n" +
 			"costs one read of the notes, and builds and keeps nothing of the view.\n\n" +
@@ -297,6 +299,7 @@ func damperSurvey(tracker *beads.Gateway) (application.DamperSurvey, error) {
 	}
 	return application.DamperSurvey{
 		Tracker: tracker, Notes: tracker, Graph: tracker,
+		Stuck: application.StuckSurvey{Graph: tracker, Comments: tracker, Claims: tracker},
 		Limits: application.DamperLimits{
 			ReadyP1: limits.ReadyP1, P1UntouchedDays: limits.P1UntouchedDays, DemoWaitingDays: limits.DemoWaitingDays,
 			GrillingDays: limits.GrillingDays, TestersPerRig: limits.TestersPerRig, ReviewQueue: limits.ReviewQueue,

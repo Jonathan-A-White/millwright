@@ -18,18 +18,24 @@ func newIceCmd() *cobra.Command {
 		Long: "ice sets the label icebox, the priority 4 and the status held on a bead and writes the\n" +
 			"comment 'Iced: <reason>': work that is not decided against, only not yet. mw status counts\n" +
 			"it on its ICEBOX line and not among the held, and mw release leaves it held.\n\n" +
-			"An epic, a finished bead and a claimed one are refused, and nothing is written.",
+			"An epic, a finished bead and a claimed one are refused, and nothing is written.\n\n" +
+			"An iced bead never blocks a live one: for each live bead X that waited on the iced bead I, X stops\n" +
+			"waiting on I, waits on I's open blockers instead, and I waits on X. mw ice prints what it moved.\n" +
+			"An X that reaches I through a closed bead cannot be waited on (bd refuses it as a cycle): it is\n" +
+			"freed of I and I is not made to wait on it, and the line says so.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, err := beads.FromConfig()
 			if err != nil {
 				return err
 			}
-			if err := (application.Ice{Tracker: gateway, Notes: gateway}).Run(cmd.Context(), args[0], reason); err != nil {
-				return err
+			moved, err := (application.Ice{Tracker: gateway, Notes: gateway, Graph: gateway, Wires: gateway}).Do(cmd.Context(), args[0], reason)
+			if moved.Iced == "" {
+				return err // the icing itself failed: nothing was written
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Iced %s.\n", args[0])
-			return nil
+			fmt.Fprint(cmd.OutOrStdout(), moved.String())
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&reason, "reason", "", "why the bead is iced (required)")

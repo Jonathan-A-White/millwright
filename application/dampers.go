@@ -50,6 +50,8 @@ type DamperFacts struct {
 	Notes map[string]string
 	// Starved are the rigs the hosts' dispatches note they hold back whole.
 	Starved []StarvedRig
+	// Stuck are the held roots that live beads wait behind (mw stuck).
+	Stuck StuckReport
 }
 
 // DamperAlarm is one tripped alarm: the principle in a word (WIP, ageing,
@@ -76,6 +78,9 @@ type DamperCounts struct {
 	TesterRigs    int
 	ReviewQueue   int
 	StarvedRigs   int
+	// StuckLive and StuckRoots are the live beads behind held roots and the roots.
+	StuckLive  int
+	StuckRoots int
 }
 
 // DampersHeading heads the section naming the alarms that are tripped: the
@@ -88,6 +93,8 @@ const (
 	DamperWIP    = "WIP"
 	DamperAgeing = "ageing"
 	DamperReview = "review"
+	// DamperStuck is the alarm for live beads behind a held root that cannot move.
+	DamperStuck = "stuck"
 )
 
 // damperNamed is how many beads an alarm's line names before it counts the rest.
@@ -113,6 +120,9 @@ func (l DamperLimits) orDefaults() DamperLimits {
 // to five beads, then how many more.
 func (a DamperAlarm) Line() string {
 	line := a.Principle + " · " + a.Text
+	if a.Principle == DamperStuck {
+		line = a.Principle + ": " + a.Text
+	}
 	if len(a.Beads) == 0 {
 		return line
 	}
@@ -223,6 +233,14 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 	starved := StarvedAlarms(facts.Starved, facts.Work, facts.Now)
 	report.Alarms = append(report.Alarms, starved...)
 	report.Counts.StarvedRigs = len(starved)
+	if live := facts.Stuck.LiveBehind(); live > 0 {
+		roots := make([]string, len(facts.Stuck.Roots))
+		for n, root := range facts.Stuck.Roots {
+			roots[n] = root.ID
+		}
+		report.Counts.StuckLive, report.Counts.StuckRoots = live, len(roots)
+		add(DamperStuck, facts.Stuck.Summary(), roots)
+	}
 	if len(readyP1) > limits.ReadyP1 {
 		add(DamperWIP, fmt.Sprintf("%d ready P1 stories (limit %d)", len(readyP1), limits.ReadyP1), readyP1)
 	}
@@ -339,6 +357,10 @@ type DamperSurvey struct {
 	// Graph, when set, is read for the open grillings; nil judges none.
 	Graph  BeadGraph
 	Limits DamperLimits
+	// Stuck, when set, finds the held roots live beads wait behind; nil finds
+	// none. A stuck check that cannot be read costs the section only its stuck
+	// line.
+	Stuck StuckFinder
 }
 
 // Dampers reads the alarms from work already read.
@@ -366,6 +388,11 @@ func (s DamperSurvey) Dampers(ctx context.Context, work WorkInHand, now time.Tim
 			return DampersReport{}, fmt.Errorf("reading the grillings: %w", err)
 		}
 		facts.Graph = graph
+	}
+	if s.Stuck != nil {
+		if stuck, err := s.Stuck.Find(ctx); err == nil {
+			facts.Stuck = stuck
+		}
 	}
 	return ReadDampers(facts, s.Limits), nil
 }

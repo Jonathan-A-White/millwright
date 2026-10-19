@@ -25,6 +25,10 @@ a size you can read whole, so do not page through them or read one twice):
   read for each turn, time on the model, tokens.
 - `folds.txt`: for each rig with an open or held bug, `mw fold <rig>`: its bugs grouped
   by error class or screen, the groups of three or more first.
+- `stuck.txt`: `mw stuck`: each held root that live beads wait behind (an iced bead, a
+  held bead with no written reason and no open blocker, a claim with no session for
+  over 6 hours), with the live beads behind it. These beads cannot move until the root
+  does; name the roots in the summary and ask in a question what to do with each.
 - `report.txt`: `mw report` in its text form: quality, speed and fuel by rig, model
   and host, the cheap wins, the landings that were investments and how they
   measured.
@@ -92,7 +96,7 @@ full dump only to place what moved.
    nothing: the Mayor files the folds in the morning.
 6. **summary**: under 150 words, plain, for the Mayor's mail: the arc, the one or
    two calls that matter, the top refusal cause and whether an investment covers
-   it, and the count of stuck stories.
+   it, and the count of stuck stories, naming the roots `stuck.txt` lists.
 
 ## How to reason
 
