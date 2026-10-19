@@ -1,10 +1,14 @@
 package application_test
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
 )
 
@@ -97,5 +101,96 @@ func TestTheInversionWalkIsTheOneMwStuckUses(t *testing.T) {
 	}
 	if !strings.Contains(got, "mw-i.2 P2→P1") {
 		t.Errorf("DAMPERS = %q, want the held P2 named", got)
+	}
+}
+
+func TestInversionListNamesEveryInversionOnALineWithWhatWaitsOnIt(t *testing.T) {
+	// Twelve P3 beads each under its own P1; one of them is his.
+	graph := &apptest.FakeBeadGraph{}
+	for n := 1; n <= 12; n++ {
+		low, top := fmt.Sprintf("mw-i.%02d", n), fmt.Sprintf("mw-t.%02d", n)
+		var labels []string
+		if n == 5 {
+			labels = []string{application.HisPriorityLabel}
+		}
+		graph.Add(low, "low", "open", "task", labels)
+		graph.SetPriority(low, 3)
+		graph.Add(top, "top", "open", "task", nil, blocks(low)...)
+		graph.SetPriority(top, 1)
+	}
+	got, err := application.InversionLister{Graph: graph}.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	if len(lines) != 12 {
+		t.Fatalf("%d lines, want 12:\n%s", len(lines), got)
+	}
+	for n, line := range lines {
+		id := fmt.Sprintf("mw-i.%02d", n+1)
+		top := fmt.Sprintf("mw-t.%02d", n+1)
+		if !strings.HasPrefix(line, id+" ") || !strings.Contains(line, "P3") || !strings.Contains(line, top) {
+			t.Errorf("line %d = %q, want %s, its priority and %s", n+1, line, id, top)
+		}
+		if n+1 == 5 {
+			if !strings.Contains(line, "(his)") || strings.Contains(line, "→") {
+				t.Errorf("his line = %q, want (his) and no raise", line)
+			}
+		} else if !strings.Contains(line, "P3→P1") || strings.Contains(line, "(his)") {
+			t.Errorf("line = %q, want P3→P1 and no (his)", line)
+		}
+	}
+}
+
+func TestInversionListNamesTheHighestPriorityBeadThatWaitsEvenThroughAnother(t *testing.T) {
+	graph := &apptest.FakeBeadGraph{}
+	graph.Add("mw-i.1", "top", "open", "task", nil, blocks("mw-i.2")...)
+	graph.SetPriority("mw-i.1", 0)
+	graph.Add("mw-i.2", "mid", "open", "task", nil, blocks("mw-i.3")...)
+	graph.SetPriority("mw-i.2", 2)
+	graph.Add("mw-i.3", "low", "open", "task", nil)
+	graph.SetPriority("mw-i.3", 4)
+	got, err := application.InversionLister{Graph: graph}.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "mw-i.3 P4→P0 waited on by mw-i.1") {
+		t.Errorf("list = %q, want mw-i.3 raised to P0 for mw-i.1", got)
+	}
+}
+
+func TestInversionListSaysSoWhenThereIsNone(t *testing.T) {
+	graph := &apptest.FakeBeadGraph{}
+	graph.Add("mw-i.1", "a", "open", "task", nil, blocks("mw-i.2")...)
+	graph.Add("mw-i.2", "b", "open", "task", nil)
+	got, err := application.InversionLister{Graph: graph}.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "no priority inversion\n" {
+		t.Errorf("list = %q, want the single line saying none", got)
+	}
+}
+
+func TestInversionListReportsAGraphItCannotRead(t *testing.T) {
+	graph := &apptest.FakeBeadGraph{Err: errors.New("no server")}
+	if _, err := (application.InversionLister{Graph: graph}).List(context.Background()); err == nil || !strings.Contains(err.Error(), "no server") {
+		t.Errorf("err = %v, want the read error", err)
+	}
+}
+
+func TestDampersInversionLineEndsItsCutListWithAPointerToMwStuckInversions(t *testing.T) {
+	var graph []domain.GraphBead
+	for n := 1; n <= 10; n++ {
+		graph = append(graph,
+			graphBead(fmt.Sprintf("mw-i.%02d", n), 3, "open", nil),
+			graphBead(fmt.Sprintf("mw-t.%02d", n), 1, "open", nil, fmt.Sprintf("mw-i.%02d", n)))
+	}
+	got := dampersOf(graph)
+	if !strings.Contains(got, "+2 (all: mw stuck --inversions)") {
+		t.Errorf("DAMPERS = %q, want the cut ending with a pointer to mw stuck --inversions", got)
+	}
+	if few := dampersOf(graph[:4]); strings.Contains(few, "mw stuck --inversions") {
+		t.Errorf("a list not cut points to the command anyway: %q", few)
 	}
 }

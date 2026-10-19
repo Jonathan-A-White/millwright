@@ -13,7 +13,8 @@ import (
 
 // newStuckCmd builds `mw stuck`: the held beads that live beads wait behind.
 func newStuckCmd() *cobra.Command {
-	return &cobra.Command{
+	var inversions bool
+	cmd := &cobra.Command{
 		Use:   "stuck",
 		Short: "List the held beads that live beads wait behind and that cannot move on their own",
 		Long: "stuck lists every held root that live beads wait behind, transitively, over 'blocks' links: a chain\n" +
@@ -28,12 +29,24 @@ func newStuckCmd() *cobra.Command {
 			"Each root is printed with the count and the ids of the live beads behind it; a root with nothing live\n" +
 			"behind it is not listed. mw status shows the same as a 'stuck:' line in its DAMPERS section, and the\n" +
 			"sleep pass reads this output. It reads and writes nothing, runs no model and always exits 0 when it\n" +
-			"could read the beads.",
+			"could read the beads.\n\n" +
+			"With --inversions it prints instead every priority inversion, one a line, with no cut (mw status cuts\n" +
+			"its list at 8): a bead below the priority of the live beads that wait on it, as 'id P2→P1 waited on by\n" +
+			"<id> (P1)', the raise being a proposal; a his-priority bead prints 'id P3 (his)' and no raise. With none\n" +
+			"it prints a single line saying so. It reads and writes nothing.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			gateway, err := beads.FromConfig()
 			if err != nil {
 				return err
+			}
+			if inversions {
+				list, err := application.InversionLister{Graph: gateway}.List(cmd.Context())
+				if err != nil {
+					return err
+				}
+				fmt.Fprint(cmd.OutOrStdout(), list)
+				return nil
 			}
 			report, err := application.StuckSurvey{Graph: gateway, Comments: gateway, Claims: gateway}.Find(cmd.Context())
 			if err != nil {
@@ -43,4 +56,6 @@ func newStuckCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&inversions, "inversions", false, "print every priority inversion, one a line, instead of the stuck roots")
+	return cmd
 }

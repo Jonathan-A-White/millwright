@@ -40,3 +40,17 @@ func TestSleepPassHelpSaysItReadsMwStuck(t *testing.T) {
 		t.Errorf("mw sleep pass --help does not say it reads mw stuck:\n%s", cmd.Long)
 	}
 }
+
+func TestStuckHasAnInversionsFlagThatIsPlainWhenOff(t *testing.T) {
+	cmd, _, err := newRootCmd().Find([]string{"stuck"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flag := cmd.Flags().Lookup("inversions")
+	if flag == nil || flag.DefValue != "false" {
+		t.Fatalf("mw stuck has no --inversions flag defaulting to off: %v", flag)
+	}
+	if !strings.Contains(cmd.Long, "--inversions") {
+		t.Errorf("mw stuck --help does not say what --inversions does:\n%s", cmd.Long)
+	}
+}

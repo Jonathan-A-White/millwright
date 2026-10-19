@@ -136,7 +136,7 @@ func (a DamperAlarm) Line() string {
 	}
 	line += ": " + strings.Join(named, " ")
 	if rest := len(a.Beads) - len(named); rest > 0 {
-		line += fmt.Sprintf(" +%d", rest)
+		line += fmt.Sprintf(" +%d (all: mw stuck --inversions)", rest)
 	}
 	return line
 }
@@ -423,6 +423,11 @@ type Inversion struct {
 	// Raise is the highest priority among the live beads that wait on it,
 	// directly or through live beads: the priority it would be raised to.
 	Raise int
+	// WaitedOnBy is the highest-priority live bead that waits on it, directly
+	// or through live beads (the lowest id among equals).
+	WaitedOnBy string
+	// WaiterPriority is that bead's priority.
+	WaiterPriority int
 	// His is whether the bead carries the his-priority label: it is named, no
 	// raise is proposed, and the Mayor questions it only on a card.
 	His bool
@@ -435,6 +440,37 @@ func (i Inversion) Text() string {
 		return fmt.Sprintf("%s P%d (his)", i.ID, i.Priority)
 	}
 	return fmt.Sprintf("%s P%d→P%d", i.ID, i.Priority, i.Raise)
+}
+
+// Line is the inversion as mw stuck --inversions prints it: Text, then the
+// bead that waits on it, 'mw-a.2 P2→P1 waited on by mw-a.1 (P1)'.
+func (i Inversion) Line() string {
+	return fmt.Sprintf("%s waited on by %s (P%d)", i.Text(), i.WaitedOnBy, i.WaiterPriority)
+}
+
+// InversionLister lists every priority inversion for mw stuck --inversions:
+// the whole list that the DAMPERS line cuts at inversionsNamed. It reads the
+// beads and writes nothing.
+type InversionLister struct {
+	Graph BeadGraph
+}
+
+// List is one line for each inversion in id order, or a single line saying
+// there is none.
+func (l InversionLister) List(ctx context.Context) (string, error) {
+	beads, err := l.Graph.BeadGraph(ctx)
+	if err != nil {
+		return "", fmt.Errorf("reading the beads for the inversions: %w", err)
+	}
+	found := InversionsOf(beads)
+	if len(found) == 0 {
+		return "no priority inversion\n", nil
+	}
+	var out strings.Builder
+	for _, one := range found {
+		out.WriteString(one.Line() + "\n")
+	}
+	return out.String(), nil
 }
 
 // inversionsNamed is how many inversions the DAMPERS line names before it
@@ -454,7 +490,7 @@ func InversionSummary(found []Inversion) string {
 	}
 	line := fmt.Sprintf("%d %s below what waits on %s: %s", len(found), plural(len(found), "bead", "beads"), plural(len(found), "it", "them"), strings.Join(texts, ", "))
 	if rest := len(found) - len(named); rest > 0 {
-		line += fmt.Sprintf(" +%d", rest)
+		line += fmt.Sprintf(" +%d (all: mw stuck --inversions)", rest)
 	}
 	return line
 }
@@ -479,12 +515,14 @@ func InversionsOf(beads []domain.GraphBead) []Inversion {
 		if b.Type == "epic" || strings.Contains(b.ID, "-mol-") || !(open || held) || len(dependents[b.ID]) == 0 {
 			continue
 		}
-		raise := b.Priority
+		raise, waiter := b.Priority, ""
 		for _, waiting := range liveBehind(byID, dependents, b.ID) {
-			raise = min(raise, byID[waiting].Priority)
+			if byID[waiting].Priority < raise {
+				raise, waiter = byID[waiting].Priority, waiting
+			}
 		}
 		if raise < b.Priority {
-			found = append(found, Inversion{ID: b.ID, Priority: b.Priority, Raise: raise, His: HasHisPriorityLabel(b.Labels)})
+			found = append(found, Inversion{ID: b.ID, Priority: b.Priority, Raise: raise, WaitedOnBy: waiter, WaiterPriority: raise, His: HasHisPriorityLabel(b.Labels)})
 		}
 	}
 	sort.Slice(found, func(a, b int) bool { return found[a].ID < found[b].ID })
