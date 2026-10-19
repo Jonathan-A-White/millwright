@@ -42,7 +42,7 @@ Each use case's application/ files are in [docs/codemap-detail.md](codemap-detai
 
 | Use case | Command | features/*.feature |
 |-|-|-|
-| File, Release, Ice, Thaw, Stuck, Retry, Cause, Note, Path* | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/ice.go, cmd/mw/stuck.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/note.go, cmd/mw/path.go | {file*,release,retry*,cause,note,path_set} |
+| File, Release, Ice, Thaw, Stuck (+ inversions in DAMPERS), Retry, Cause, Note, Path* | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/ice.go, cmd/mw/stuck.go, application/dampers.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/note.go, cmd/mw/path.go | {file*,release,retry*,cause,note,path_set} |
 | Show, Peek, Prove, StampHead, Tester[File], FactoryReport[Send], Invest[Book], Loop (rank: application/looprank.go) | cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go, cmd/mw/invest.go, cmd/mw/loop.go | {show,peek,prove,stamp,tester,report*,invest} |
 | Dispatch, Next, BatchLand, AfterLandingRun, BdRetry | cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/land.go, cmd/mw/afterlanding.go, cmd/mw/bd.go | {dispatch,next,batch_land,after_*,bd_*}; a landing is let in up to 10% over the 10240-byte map cap (codemapBandPercent in next.go) and files one trim bug; a closing comment saying `AC n NOT met` marks the Landed mail and files a held bug (application/acunmet.go) |
 | Check*, Status, CloudCheck, CloudMake, Brief | cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | {check,status,cloud,brief} |

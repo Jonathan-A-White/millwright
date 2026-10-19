@@ -502,7 +502,10 @@ whose blockers are all closed and which has no reason (a label `grilling`, `hitl
 over 6 hours ago; each with the count and ids of the live beads behind it. `mw status`
 prints `stuck: N live beads behind M held roots: <ids>` in its DAMPERS section when N is
 above 0, and the sleep pass's bundle holds `stuck.txt`, `mw stuck`'s output, so its
-summary names the roots. See `application/stuck_test.go` and
+summary names the roots. A bead below the priority of the beads waiting on it, directly
+or through live beads (the walk `mw stuck` uses), is named in DAMPERS as
+`inversion: mw-a.2 P2→P1` (`mw-a.3 P3 (his)` for a his-priority bead: no raise proposed),
+and the same list ends `stuck.txt`; it changes no priority. See `application/stuck_test.go` and
 `application/icerewire_test.go`.
 
 ## Naming why a story failed

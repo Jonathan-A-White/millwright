@@ -76,12 +76,12 @@ func (c factoryConn) QueryContext(_ context.Context, query string, _ []driver.Na
 		return &keptRows{cols: []string{"id", "title", "description", "acceptance_criteria", "status", "issue_type", "assignee",
 			"estimated_minutes", "created_at", "started_at", "updated_at", "closed_at", "priority", "metadata",
 			"lease_expires_at", "comment_count"}, rows: rows}, nil
-	case strings.HasPrefix(q, "select i.id, i.title, i.status, i.issue_type, i.created_at from issues i"):
+	case strings.HasPrefix(q, "select i.id, i.title, i.status, i.issue_type, i.priority, i.created_at from issues i"):
 		rows := [][]driver.Value{}
 		for _, b := range s.beads {
-			rows = append(rows, []driver.Value{b[0], b[1], b[4], b[5], b[8]})
+			rows = append(rows, []driver.Value{b[0], b[1], b[4], b[5], b[12], b[8]})
 		}
-		return &keptRows{cols: []string{"id", "title", "status", "issue_type", "created_at"}, rows: rows}, nil
+		return &keptRows{cols: []string{"id", "title", "status", "issue_type", "priority", "created_at"}, rows: rows}, nil
 	case strings.Contains(q, "from labels where issue_id = '"):
 		// One bead's labels under a dimension, as a story state asks.
 		asked := regexp.MustCompile(`issue_id = '([^']*)' and label like '([^']*)%'`).FindStringSubmatch(q)
@@ -443,7 +443,7 @@ func TestTheWorkIsReadOverTheKeptConnectionAsBdListsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(graph) != len(server.beads) || graph[2].ID != "mw-e.2" || len(graph[2].Edges) != 2 {
+	if len(graph) != len(server.beads) || graph[2].ID != "mw-e.2" || len(graph[2].Edges) != 2 || graph[2].Priority != 2 || graph[7].Priority != 1 {
 		t.Errorf("expected every bead in the graph with its edges, got %+v", graph)
 	}
 	if calls := bdCallsSince(t, asked, 0); len(calls) != 0 {

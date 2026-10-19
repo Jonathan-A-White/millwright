@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // The bundle's files, by name.
@@ -120,8 +123,38 @@ func (g SleepGather) Gather(ctx context.Context, window SleepWindow) (SleepBundl
 	bundle = append(bundle, cutPart("folds", SleepFoldsFile, g.folds(ctx, dump.String())))
 	// The held roots that live beads wait behind (mw stuck): the pass names
 	// them in its summary (mw-gq6.621).
-	bundle = append(bundle, cutPart("stuck", SleepStuckFile, g.said(g.Mw(ctx, "stuck"))))
+	// With them, the beads below the priority of what waits on them
+	// (mw-gq6.623), read from the same dump.
+	bundle = append(bundle, cutPart("stuck", SleepStuckFile, withNewline(g.said(g.Mw(ctx, "stuck")))+inversionsOfDump(dump.String())))
 	return bundle, nil
+}
+
+// inversionsOfDump is the priority inversions of the dump's live beads, one a
+// line, under a heading; a dump that cannot be read says so.
+func inversionsOfDump(dump string) string {
+	lines, err := ReadTriageLines(strings.NewReader(dump))
+	if err != nil {
+		return fmt.Sprintf("\npriority inversions: (the dump could not be read: %v)\n", err)
+	}
+	beads := make([]domain.GraphBead, len(lines))
+	for n, l := range lines {
+		beads[n] = domain.GraphBead{ID: l.ID, Status: l.Status, Type: l.Type, Priority: l.Priority, Labels: l.Labels}
+		if l.HisPriority {
+			beads[n].Labels = append(slices.Clone(l.Labels), HisPriorityLabel)
+		}
+		for _, dep := range l.Deps {
+			beads[n].Edges = append(beads[n].Edges, domain.BeadEdge{To: dep, Kind: "blocks"})
+		}
+	}
+	found := InversionsOf(beads)
+	if len(found) == 0 {
+		return "\nno priority inversion: no bead sits below what waits on it.\n"
+	}
+	out := "\npriority inversions: " + fmt.Sprintf("%d %s below what waits on %s (the raise is a proposal; (his) is his word, a card only)\n", len(found), plural(len(found), "bead", "beads"), plural(len(found), "it", "them"))
+	for _, one := range found {
+		out += one.Text() + "\n"
+	}
+	return out
 }
 
 // folds is mw fold's list of each rig that has an open or held bug, in the

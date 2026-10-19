@@ -29,6 +29,9 @@ a size you can read whole, so do not page through them or read one twice):
   held bead with no written reason and no open blocker, a claim with no session for
   over 6 hours), with the live beads behind it. These beads cannot move until the root
   does; name the roots in the summary and ask in a question what to do with each.
+  It ends with the priority inversions of the dump: each open or held bead below the
+  priority of what waits on it, with the raise (`mw-a.2 P2→P1`); a bead marked `(his)`
+  is his word, so raise it only by a card. Propose the raises; change no priority here.
 - `report.txt`: `mw report` in its text form: quality, speed and fuel by rig, model
   and host, the cheap wins, the landings that were investments and how they
   measured.

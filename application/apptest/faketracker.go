@@ -1001,7 +1001,7 @@ func (f *FakeTracker) BeadGraph(_ context.Context) ([]domain.GraphBead, error) {
 			kind = "epic"
 		}
 		one := domain.GraphBead{ID: id, Title: s.detail.Story.Title, Status: s.detail.Status, Type: kind,
-			Labels: append([]string(nil), s.detail.Labels...)}
+			Labels: append([]string(nil), s.detail.Labels...), Priority: s.detail.Priority}
 		for _, need := range s.needs {
 			one.Edges = append(one.Edges, domain.BeadEdge{To: need, Kind: "blocks"})
 		}

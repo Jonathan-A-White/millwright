@@ -25,6 +25,8 @@ type GraphBead struct {
 	// Type is the tracker's word for the kind of bead: epic, task, bug.
 	Type   string
 	Labels []string
+	// Priority is the bead's priority, 0 being the most urgent.
+	Priority int
 	// Created is when the bead was filed; zero when the tracker did not say.
 	Created time.Time
 	// Edges are the links this bead itself carries, each to another bead. A

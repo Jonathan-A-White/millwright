@@ -404,3 +404,34 @@ func TestTheBundleHoldsWhatMwStuckSaysAndNamesItsRoots(t *testing.T) {
 		t.Errorf("stuck = %q, want it to say it could not be read", got)
 	}
 }
+
+func TestTheBundleCarriesTheInversionsOfTheDump(t *testing.T) {
+	g := gatherFixture()
+	g.Dump = func(_ context.Context, w io.Writer) error {
+		_, err := io.WriteString(w,
+			`{"id":"mw-a.1","type":"task","status":"open","priority":1,"deps":["mw-a.2"]}`+"\n"+
+				`{"id":"mw-a.2","type":"task","status":"open","priority":2,"deps":["mw-a.3"]}`+"\n"+
+				`{"id":"mw-a.3","type":"task","status":"open","priority":3,"labels":["his-priority"]}`+"\n")
+		return err
+	}
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := partsByFile(bundle)[application.SleepStuckFile].Text
+	for _, want := range []string{"mw-a.2 P2→P1", "mw-a.3 P3 (his)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the bundle's inversions = %q, want %q", got, want)
+		}
+	}
+
+	g.Dump = func(_ context.Context, w io.Writer) error {
+		_, err := io.WriteString(w, `{"id":"mw-a.1","type":"task","status":"open","priority":2,"deps":["mw-a.2"]}`+"\n"+
+			`{"id":"mw-a.2","type":"task","status":"open","priority":1}`+"\n")
+		return err
+	}
+	bundle, _ = g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if got := partsByFile(bundle)[application.SleepStuckFile].Text; strings.Contains(got, "P2→") || strings.Contains(got, "inversion") && !strings.Contains(got, "no priority inversion") {
+		t.Errorf("the bundle names an inversion where there is none: %q", got)
+	}
+}

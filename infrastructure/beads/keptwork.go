@@ -245,7 +245,7 @@ func (g *Gateway) stateOverConnection(ctx context.Context, id, dimension string)
 const graphWhere = "i.issue_type not in ('mail', 'event', 'molecule')"
 
 const (
-	graphBeadsQuery  = "select i.id, i.title, i.status, i.issue_type, i.created_at from issues i where " + graphWhere + " order by i.created_at, i.id"
+	graphBeadsQuery  = "select i.id, i.title, i.status, i.issue_type, i.priority, i.created_at from issues i where " + graphWhere + " order by i.created_at, i.id"
 	graphLabelsQuery = "select l.issue_id, l.label from labels l join issues i on i.id = l.issue_id where " + graphWhere +
 		" order by l.issue_id, l.label"
 	graphEdgesQuery = "select d.issue_id, coalesce(d.depends_on_issue_id, d.depends_on_wisp_id, d.depends_on_external) as depends_on_id, d.type" +
@@ -280,8 +280,13 @@ func readGraph(ctx context.Context, db *sql.DB) ([]domain.GraphBead, error) {
 	for rows.Next() {
 		var one domain.GraphBead
 		var created sql.NullString
-		if err := rows.Scan(&one.ID, &one.Title, &one.Status, &one.Type, &created); err != nil {
+		var priority sql.NullInt64
+		if err := rows.Scan(&one.ID, &one.Title, &one.Status, &one.Type, &priority, &created); err != nil {
 			return nil, err
+		}
+		one.Priority = application.DefaultPriority
+		if priority.Valid {
+			one.Priority = int(priority.Int64)
 		}
 		one.Created = bead{CreatedAt: rfc3339Of(created.String)}.created()
 		at[one.ID] = len(graph)

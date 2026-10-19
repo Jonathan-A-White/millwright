@@ -81,6 +81,8 @@ type DamperCounts struct {
 	// StuckLive and StuckRoots are the live beads behind held roots and the roots.
 	StuckLive  int
 	StuckRoots int
+	// Inversions are the beads below the priority of what waits on them.
+	Inversions int
 }
 
 // DampersHeading heads the section naming the alarms that are tripped: the
@@ -95,6 +97,8 @@ const (
 	DamperReview = "review"
 	// DamperStuck is the alarm for live beads behind a held root that cannot move.
 	DamperStuck = "stuck"
+	// DamperInversion is the alarm for a bead below the priority of what waits on it.
+	DamperInversion = "inversion"
 )
 
 // damperNamed is how many beads an alarm's line names before it counts the rest.
@@ -120,7 +124,7 @@ func (l DamperLimits) orDefaults() DamperLimits {
 // to five beads, then how many more.
 func (a DamperAlarm) Line() string {
 	line := a.Principle + " · " + a.Text
-	if a.Principle == DamperStuck {
+	if a.Principle == DamperStuck || a.Principle == DamperInversion {
 		line = a.Principle + ": " + a.Text
 	}
 	if len(a.Beads) == 0 {
@@ -240,6 +244,10 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 		}
 		report.Counts.StuckLive, report.Counts.StuckRoots = live, len(roots)
 		add(DamperStuck, facts.Stuck.Summary(), roots)
+	}
+	if inverted := InversionsOf(facts.Graph); len(inverted) > 0 {
+		report.Counts.Inversions = len(inverted)
+		add(DamperInversion, InversionSummary(inverted), nil)
 	}
 	if len(readyP1) > limits.ReadyP1 {
 		add(DamperWIP, fmt.Sprintf("%d ready P1 stories (limit %d)", len(readyP1), limits.ReadyP1), readyP1)
@@ -404,4 +412,81 @@ func (s DamperSurvey) DamperCounts(ctx context.Context) (DampersReport, error) {
 		return DampersReport{}, fmt.Errorf("reading what is in hand: %w", err)
 	}
 	return s.Dampers(ctx, work, time.Now())
+}
+
+// Inversion is a bead waited on by a bead of higher priority: it goes later in
+// the dispatch order than what it holds up.
+type Inversion struct {
+	ID string
+	// Priority is the bead's own, 0 being the most urgent.
+	Priority int
+	// Raise is the highest priority among the live beads that wait on it,
+	// directly or through live beads: the priority it would be raised to.
+	Raise int
+	// His is whether the bead carries the his-priority label: it is named, no
+	// raise is proposed, and the Mayor questions it only on a card.
+	His bool
+}
+
+// Text is the inversion as a line says it: 'mw-a.2 P2→P1', or 'mw-a.3 P3
+// (his)' for a bead of his.
+func (i Inversion) Text() string {
+	if i.His {
+		return fmt.Sprintf("%s P%d (his)", i.ID, i.Priority)
+	}
+	return fmt.Sprintf("%s P%d→P%d", i.ID, i.Priority, i.Raise)
+}
+
+// inversionsNamed is how many inversions the DAMPERS line names before it
+// counts the rest; the sleep pass's list names them all.
+const inversionsNamed = 8
+
+// InversionSummary is the inversions on one line for the DAMPERS section: the
+// count, then the first inversionsNamed.
+func InversionSummary(found []Inversion) string {
+	named := found
+	if len(named) > inversionsNamed {
+		named = named[:inversionsNamed]
+	}
+	texts := make([]string, len(named))
+	for n, one := range named {
+		texts[n] = one.Text()
+	}
+	line := fmt.Sprintf("%d %s below what waits on %s: %s", len(found), plural(len(found), "bead", "beads"), plural(len(found), "it", "them"), strings.Join(texts, ", "))
+	if rest := len(found) - len(named); rest > 0 {
+		line += fmt.Sprintf(" +%d", rest)
+	}
+	return line
+}
+
+// InversionsOf finds each open or held bead (not an epic) whose priority is
+// below the highest priority among the live beads waiting on it, in id order.
+// The beads that wait are found by mw stuck's walk (liveBehind): through live
+// beads only, so a held bead in the middle of a chain cuts it. It reads nothing
+// and proposes only: no priority is changed.
+func InversionsOf(beads []domain.GraphBead) []Inversion {
+	byID := make(map[string]domain.GraphBead, len(beads))
+	dependents := map[string][]string{}
+	for _, b := range beads {
+		byID[b.ID] = b
+		for _, blocker := range blockedOn(b) {
+			dependents[blocker] = append(dependents[blocker], b.ID)
+		}
+	}
+	var found []Inversion
+	for _, b := range beads {
+		open, held := strings.EqualFold(b.Status, StatusOpen), strings.EqualFold(b.Status, StatusHeld)
+		if b.Type == "epic" || strings.Contains(b.ID, "-mol-") || !(open || held) || len(dependents[b.ID]) == 0 {
+			continue
+		}
+		raise := b.Priority
+		for _, waiting := range liveBehind(byID, dependents, b.ID) {
+			raise = min(raise, byID[waiting].Priority)
+		}
+		if raise < b.Priority {
+			found = append(found, Inversion{ID: b.ID, Priority: b.Priority, Raise: raise, His: HasHisPriorityLabel(b.Labels)})
+		}
+	}
+	sort.Slice(found, func(a, b int) bool { return found[a].ID < found[b].ID })
+	return found
 }
