@@ -1276,7 +1276,7 @@ func (i PosternInbox) holdOnTap(ctx context.Context, m PosternInboxMessage, bead
 	if len(held) == 0 {
 		return notApplied("it has no open, unclaimed stories")
 	}
-	comment := fmt.Sprintf("HELD by the Governor via postern, txid %s: %d open stories held: %s", m.Txid, len(held), strings.Join(held, ", "))
+	comment := fmt.Sprintf("HELD: by the Governor via postern, txid %s: %d open stories held: %s", m.Txid, len(held), strings.Join(held, ", "))
 	if err := i.Tracker.CommentOnStory(ctx, bead, comment); err != nil {
 		return err
 	}

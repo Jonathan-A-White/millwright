@@ -634,7 +634,7 @@ func (c *posternInboxContext) beadIsCommentedAHELDWithTxid(bead, txid string) er
 		return fmt.Errorf("expected a comment on %s, found none", bead)
 	}
 	got := comments[len(comments)-1].Text
-	if !strings.HasPrefix(got, "HELD by the Governor via postern, txid "+txid) {
+	if !strings.HasPrefix(got, "HELD: by the Governor via postern, txid "+txid) {
 		return fmt.Errorf("expected the last comment on %s to be a HELD naming %s, got %q", bead, txid, got)
 	}
 	return nil

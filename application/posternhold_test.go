@@ -34,7 +34,7 @@ func TestApplyHoldOfAClaimedStoryEmitsACancelEvent(t *testing.T) {
 		t.Fatalf("the event is %+v, want a normal-lane control cancel of mw-e.4 by %s", ev, application.GovernorPosternActor)
 	}
 	comments := f.tracker.Comments("mw-e.4")
-	if len(comments) != 1 || !strings.HasPrefix(comments[0], "HELD by the Governor via postern, txid tx-claimed") || !strings.Contains(comments[0], "cancel") {
+	if len(comments) != 1 || !strings.HasPrefix(comments[0], "HELD: by the Governor via postern, txid tx-claimed") || !strings.Contains(comments[0], "cancel") {
 		t.Fatalf("comments %q, want the HELD comment saying the session is cancelled", comments)
 	}
 	if got := f.status(t, "mw-e.4"); got != apptest.StatusInProgress {

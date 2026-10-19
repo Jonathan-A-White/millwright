@@ -154,7 +154,7 @@ func TestApplyHoldsAnOpenUnclaimedStoryAndRefusesAClaimedOne(t *testing.T) {
 	if got := f.status(t, "mw-e.3"); got != apptest.StatusDeferred {
 		t.Fatalf("expected mw-e.3 held, got %s", got)
 	}
-	if got := f.tracker.Comments("mw-e.3"); len(got) != 1 || got[0] != "HELD by the Governor via postern, txid tx-hold" {
+	if got := f.tracker.Comments("mw-e.3"); len(got) != 1 || got[0] != "HELD: by the Governor via postern, txid tx-hold" {
 		t.Fatalf("expected the HELD comment, got %v", got)
 	}
 	if got := f.status(t, "mw-e.4"); got != apptest.StatusInProgress {

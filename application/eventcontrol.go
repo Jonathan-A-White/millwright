@@ -300,7 +300,7 @@ func (c *EventControl) cancel(ctx context.Context, ev events.Event) bool {
 		return false
 	}
 	c.quiet("hold:" + id)
-	if err := c.Tracker.CommentOnStory(ctx, id, note); err != nil {
+	if err := c.Tracker.CommentOnStory(ctx, id, HeldCommentPrefix+" "+note); err != nil {
 		c.say("comment:"+id, fmt.Errorf("%s could not be commented on: %w", id, err))
 	}
 	return true

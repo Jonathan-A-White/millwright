@@ -588,7 +588,7 @@ func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, ac
 				return refuse(fmt.Sprintf("it is claimed%s, and its cancel could not be written: %v", claimedBy(bead.Assignee), err))
 			}
 			return done(fmt.Sprintf("Held: %s", action.Bead), fmt.Sprintf(
-				"HELD by the Governor via postern, txid %s: the story is claimed%s, so its session is being cancelled (control event %d)",
+				"HELD: by the Governor via postern, txid %s: the story is claimed%s, so its session is being cancelled (control event %d)",
 				m.Txid, claimedBy(bead.Assignee), cancel.Seq))
 		}
 		if !strings.EqualFold(strings.TrimSpace(bead.Status), StatusOpen) || strings.TrimSpace(bead.Assignee) != "" {
@@ -597,7 +597,7 @@ func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, ac
 		if err := i.Tracker.HoldStory(ctx, action.Bead); err != nil {
 			return refuse(err.Error())
 		}
-		return done(fmt.Sprintf("Held: %s", action.Bead), fmt.Sprintf("HELD by the Governor via postern, txid %s", m.Txid))
+		return done(fmt.Sprintf("Held: %s", action.Bead), fmt.Sprintf("HELD: by the Governor via postern, txid %s", m.Txid))
 
 	case PosternActionPriority:
 		if action.Priority == nil {

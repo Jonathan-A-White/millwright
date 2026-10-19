@@ -482,7 +482,7 @@ bin/mw thaw mw-gq6.9 --priority 2                    # label off, P2 (default 3)
 ```
 
 The icebox is work not yet decided against. `mw ice` sets the label `icebox`,
-priority 4 and the held status, and writes the comment `Iced: <reason>`; an
+priority 4 and the held status, and writes the comment `HELD: Iced: <reason>`; an
 epic, a finished bead and a claimed one are refused. `mw thaw` takes the label
 off, sets the priority (3 unless told) and writes `Thawed`; the bead stays held,
 and `mw release` is the yes. `mw status` prints an `ICEBOX:` line (the count, the
@@ -2249,7 +2249,7 @@ with `--follow` goes on printing what is appended.
 `resume-host <host>`, `cap <host> <n>` and `priority <n>` (with `--bead`). The Governor's hold tap
 on a story a session has claimed writes a `cancel` (actor `governor@postern`); the follower, each
 pass, closes that story's session, gives the claim back, holds the story, records `run=cancelled`
-and comments `cancelled by <actor> at <time>`, leaving the worktree for `mw retry`. A
+and comments `HELD: cancelled by <actor> at <time>`, leaving the worktree for `mw retry`. A
 `pause-host` makes that host's `mw dispatch` do nothing, saying it is paused, until a
 `resume-host`. `mw status` shows a `PAUSED` line and a `CANCELLED` section for the last day.
 A cancel acts on the home's log, so it reaches the host whose follower reads it; a pause reaches a

@@ -759,6 +759,9 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 		comment = r.heldComment(report, nothing)
 	}
 	comment += report.unclaimedSaid() + report.stopSaid() + report.formulaSaid()
+	if report.Held {
+		comment = HeldCommentPrefix + " " + comment
+	}
 	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
 		return report, fmt.Errorf("retrying %s: it was retried, but the comment naming what happened could not be written: %w", storyID, err)
 	}
@@ -917,6 +920,9 @@ func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere strin
 			r.Host, report.Attempt, storyID, elsewhere, heldSaid)
 	}
 	comment += report.unclaimedSaid() + report.stopSaid() + report.formulaSaid()
+	if report.Held {
+		comment = HeldCommentPrefix + " " + comment
+	}
 	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
 		return report, fmt.Errorf("retrying %s: the claim was given back, but the comment naming what happened could not be written: %w", storyID, err)
 	}

@@ -54,7 +54,7 @@ Feature: mw postern inbox --apply
     Given a postern action "hold" on bead "mw-act.3" from "governor-pubkey-hex" with txid "tx-hold"
     When mw postern inbox --apply is run
     Then bead "mw-act.3" now stands "deferred"
-    And bead "mw-act.3"'s last comment reads "HELD by the Governor via postern, txid tx-hold"
+    And bead "mw-act.3"'s last comment reads "HELD: by the Governor via postern, txid tx-hold"
 
   Scenario: A hold on a story already claimed is refused, and the Mayor is told why
     Given bead "mw-act.3" is claimed by "mw@laptop"

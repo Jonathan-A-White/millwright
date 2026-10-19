@@ -289,7 +289,7 @@ reads the cancels since its cursor, kept as `control` in `nudge.json` beside the
 follower with no cursor starts at the head, so a cancel from before it began is history. For
 a story claimed on its own host it closes the story's session as the reaper closes a window,
 gives the claim back, holds the story, sets its run state to `cancelled`, and comments
-`cancelled by <actor> at <time>`. The worktree and branch stay for a Clerk or `mw retry`. A
+`HELD: cancelled by <actor> at <time>`. The worktree and branch stay for a Clerk or `mw retry`. A
 cancel of a story that is not claimed, or is claimed on another host, is left and said on the
 follower's stderr. Only the home's log is read, so a cancel reaches the host whose follower
 reads that log. A pause reaches a Boost by a note: the control pass mirrors a `pause-host <h>`

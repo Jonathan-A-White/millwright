@@ -85,7 +85,7 @@ func TestCancelEndsTheSessionAndHoldsTheStoryWithANote(t *testing.T) {
 	if run, _ := w.tracker.StoryState(context.Background(), "mw-e.1", application.RunState); run != application.RunCancelled {
 		t.Fatalf("run state %q, want %q", run, application.RunCancelled)
 	}
-	if got := w.tracker.Comments("mw-e.1"); len(got) != 1 || got[0] != "cancelled by governor@postern at 2026-10-01T12:00:00Z" {
+	if got := w.tracker.Comments("mw-e.1"); len(got) != 1 || got[0] != "HELD: cancelled by governor@postern at 2026-10-01T12:00:00Z" {
 		t.Fatalf("comments %q, want the cancelled-by note", got)
 	}
 	w.pass(t)
