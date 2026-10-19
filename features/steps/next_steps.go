@@ -194,6 +194,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	})
 	ctx.Then(`^nothing of the formula poured for "([^"]*)" is left open, its root and (\d+) steps? closed saying "([^"]*)"$`,
 		func(id string, steps int, text string) error { return formulaClosedSaying(c.tracker, id, steps, text) })
+	ctx.Given(`^a formula was poured for "([^"]*)" and every step, the closing-comment step too, is closed$`, c.aFormulaWithEveryStepClosed)
+	ctx.Given(`^the comment "([^"]*)" was written on "([^"]*)" after its newest commit$`, c.aCommentWasWrittenAfterTheNewestCommit)
 	ctx.Given(`^a closing comment with "([^"]*)" and "([^"]*)" was written on "([^"]*)" (after|before) its newest commit$`, c.aClosingCommentWasWritten)
 	ctx.Given(`^the story "([^"]*)" is claimed here with no session behind it$`, c.aStoryClaimedWithNoSession)
 	ctx.Given(`^the story "([^"]*)" is claimed here, its landing was refused and its session has ended$`, c.aStoryWhoseLandingWasRefused)
@@ -876,6 +878,24 @@ func (c *nextContext) aFormulaWithOnlyTheClosingStepOpen(id string) error {
 		c.tracker.CloseStep(step.ID)
 	}
 	return nil
+}
+
+// aFormulaWithEveryStepClosed pours the formula of aFormulaWithOnlyTheClosingStepOpen
+// and closes the closing-comment step as well: a Builder that closed the step
+// whatever it left on the story (mw-gq6.630).
+func (c *nextContext) aFormulaWithEveryStepClosed(id string) error {
+	if err := c.aFormulaWithOnlyTheClosingStepOpen(id); err != nil {
+		return err
+	}
+	molecule, _ := c.tracker.Poured(id)
+	c.tracker.CloseStep(molecule.Steps[len(molecule.Steps)-1].ID)
+	return nil
+}
+
+// aCommentWasWrittenAfterTheNewestCommit comments on a story with text, stamped
+// an hour after now, which is after the commits the scenario makes.
+func (c *nextContext) aCommentWasWrittenAfterTheNewestCommit(text, id string) error {
+	return c.tracker.CommentOnStoryAt(id, unescape(text), time.Now().Add(time.Hour))
 }
 
 // aClosingCommentWasWritten comments on a story with the two markers of a

@@ -96,9 +96,13 @@ const (
 	ReasonSignedCommit    Reason = "signed-commit"
 	ReasonTrackedBinary   Reason = "tracked-binary"
 	ReasonOpenSteps       Reason = "open-steps"
-	ReasonTestsFail       Reason = "tests-fail"
-	ReasonMergeConflict   Reason = "merge-conflict"
-	ReasonMergedTestsFail Reason = "merged-tests-fail"
+	// ReasonNoClosingComment is a story whose formula is finished but whose
+	// branch is not: no closing comment was written after its newest commit
+	// (mw-gq6.630). Like open steps, it is the Builder's to mend.
+	ReasonNoClosingComment Reason = "no-closing-comment"
+	ReasonTestsFail        Reason = "tests-fail"
+	ReasonMergeConflict    Reason = "merge-conflict"
+	ReasonMergedTestsFail  Reason = "merged-tests-fail"
 	// A Tester story's branch (mw-it6qk5.5): it committed something, or wrote
 	// no FINDINGS.
 	ReasonTesterCommitted Reason = "tester-committed"
@@ -1601,7 +1605,12 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 	if all {
 		closing = previewClosingStep
 	}
-	if refusal, open := n.openStepsRefusal(ctx, c, report, closing, base); open && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+	if refusal, open := n.openStepsRefusal(ctx, c, report, closing, base); open {
+		if refuse(refusal.Reason, refusal.Why, refusal.Said) {
+			return found
+		}
+	} else if refusal, missing := n.closingCommentRefusal(ctx, c, base); missing && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+		// A finished formula is not a closing comment: the story is read for one.
 		return found
 	}
 
@@ -1839,6 +1848,21 @@ func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextRep
 	return Refusal{}, false
 }
 
+// closingCommentRefusal is the refusal of a story whose formula is finished but
+// which carries no closing comment written after its newest commit; false when
+// it has one, or has no formula (mw-gq6.630). A Builder can close the step that
+// asks for the comment and leave '•' on the story, so the step is not trusted:
+// the comment is read. It is a hand-back, as open steps are, for the Builder to
+// mend by writing the comment.
+func (n Next) closingCommentRefusal(ctx context.Context, c *closeOut, base string) (Refusal, bool) {
+	if c.detail.Molecule.RootID == "" || n.closingCommentOnStory(ctx, c, base) {
+		return Refusal{}, false
+	}
+	return Refusal{ReasonNoClosingComment, fmt.Sprintf("the formula of %s is finished, but the story has no closing comment written after its newest commit", c.id),
+		"A closing comment has HOW TO CHECK IT, for the Governor (or the line 'Internal: nothing for the Governor to look at') and 'For the rig memory:'. " +
+			"A closed 'Write the closing comment' step is not one: write the comment on the story, after the last commit, and run mw next again."}, true
+}
+
 // ClosingStepNote is the note of a close-out that closed the closing-comment
 // step itself, or with preview that a close-out would.
 func ClosingStepNote(preview bool) string {
@@ -1856,6 +1880,13 @@ func (n Next) closingCommentWritten(ctx context.Context, c *closeOut, step Formu
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(step.Title)), strings.ToLower(ClosingCommentStepTitle)) {
 		return false
 	}
+	return n.closingCommentOnStory(ctx, c, base)
+}
+
+// closingCommentOnStory reports whether the story carries a closing comment
+// written after the newest commit of its branch, whether or not the step that
+// asks for it is closed (mw-gq6.630). Anything it cannot read counts as no.
+func (n Next) closingCommentOnStory(ctx context.Context, c *closeOut, base string) bool {
 	commits, err := n.Landing.Commits(ctx, c.rigDir, c.branch, base)
 	if err != nil {
 		return false
@@ -2777,7 +2808,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	// Mayor can bd close it. Every other stop keeps the claim, because the claim
 	// is the evidence.
 	given := false
-	if reason == ReasonOpenSteps || reason == ReasonTurnCap || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
+	if reason == ReasonOpenSteps || reason == ReasonNoClosingComment || reason == ReasonTurnCap || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
 		if err := n.releaseOnStop(ctx, c.id, report); err != nil {
 			trouble = append(trouble, fmt.Sprintf("the claim on %s could not be given back: %v", c.id, err))
 		} else {

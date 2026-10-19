@@ -420,6 +420,36 @@ Feature: Closing out a finished story and carrying on
     Then nothing was landed on "main"
     And the report says it stopped for "open-steps"
 
+  # mw-gq6.630: a Builder can close the closing-comment step and leave a comment
+  # that is not one ('•', mw-5r3p30.634): the close-out asks for the comment
+  # itself, not for the step to be closed, and hands the story back to be mended.
+  Scenario: A story whose closing-comment step is closed but whose only comment after its newest commit is a bullet is handed back
+    Given the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And the comment "•" was written on "mw-gq6.1" after its newest commit
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the report says it stopped for "no-closing-comment"
+    And the printed report says "no closing comment"
+    And the story "mw-gq6.1" carries a comment quoting: takes it as attempt 1
+    And the worktree of "mw-gq6.1" is still there
+
+  Scenario: A story with no comment at all and every step closed is handed back for its closing comment
+    Given the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the report says it stopped for "no-closing-comment"
+
+  Scenario: A story with every step closed and a real closing comment after its newest commit lands
+    Given the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And a closing comment with "HOW TO CHECK IT" and "For the rig memory:" was written on "mw-gq6.1" after its newest commit
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+
   Scenario: Any other open step still stops the close-out, closing comment or not
     Given the session of "mw-gq6.1" reported a plain success
     And a formula was poured for "mw-gq6.1" and one of its steps is still open
@@ -553,6 +583,7 @@ Feature: Closing out a finished story and carrying on
   Scenario: A landed story's formula is closed with it
     Given the session of "mw-gq6.1" reported a plain success
     And a formula was poured for "mw-gq6.1" and its session closed 3 of its 3 steps
+    And a closing comment with "Internal: nothing for the Governor to look at" and "For the rig memory:" was written on "mw-gq6.1" after its newest commit
     When mw closes out "mw-gq6.1"
     Then the story "mw-gq6.1" is closed
     And nothing of the formula poured for "mw-gq6.1" is left open, its root and 0 steps closed saying "mw-gq6.1 landed"
@@ -569,6 +600,7 @@ Feature: Closing out a finished story and carrying on
   Scenario: A story refused for failing tests has its formula closed too
     Given the session of "mw-gq6.1" reported a plain success
     And a formula was poured for "mw-gq6.1" and its session closed 3 of its 3 steps
+    And a closing comment with "Internal: nothing for the Governor to look at" and "For the rig memory:" was written on "mw-gq6.1" after its newest commit
     And the rig's tests fail, saying "undefined: Ledger"
     When mw closes out "mw-gq6.1"
     Then the report says it stopped for "tests-fail"

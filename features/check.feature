@@ -102,6 +102,16 @@ Feature: Checking a branch before its session ends
     And the check prints: would close the closing-comment step
     And the check wrote nothing to the tracker, the ledger, the vault or git
 
+  # mw-gq6.630: the check says before mw next does that a closed closing-comment
+  # step is not a closing comment.
+  Scenario: A closed closing-comment step with only a bullet on the story fails the check
+    Given a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And the comment "•" was written on "mw-gq6.1" after its newest commit
+    When a session checks "mw-gq6.1"
+    Then the check fails
+    And the check prints: no closing comment
+    And the check wrote nothing to the tracker, the ledger, the vault or git
+
   Scenario: Every check that fails is printed at once, not only the first
     Given a commit on the branch of "mw-gq6.1" carries "Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
     And a formula was poured for "mw-gq6.1" and one of its steps is still open
