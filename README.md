@@ -3137,6 +3137,21 @@ init` writes it under, and ends with one `mw sync`, printed or its failure.
 Moving a seat's home to a new host with this command needs more besides — see
 *Moving a host*, above. See `features/init.feature`.
 
+## A member's own factory
+
+```sh
+mw member init --name luke --vault ~/luke-vault --dolt-port 3308 \
+    --holder "Jonathan (the Governor)" --backend http://10.88.0.2:8788
+```
+
+Run as another Linux user on this machine, it makes that user's own factory: their
+`~/.config/mw/config.toml` and `beads.env`, a Dolt user unit on the port chosen, a vault laid
+from the starter kit with its beads database made on that server, and a `## Family` section
+in the Mayor's charter that names the licence holder, whose approval every epic needs. It
+never overwrites; `mw member remove` stops and disables the unit and deletes nothing. The
+steps it cannot do (the user, linger, the Claude login, the vault's remote) are in
+[docs/family.md](docs/family.md). See `features/member.feature`.
+
 ## Running a host on a timer
 
 A host that only works stories needs no session of its own to keep it going: a
