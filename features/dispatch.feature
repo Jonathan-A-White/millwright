@@ -80,6 +80,34 @@ Feature: Dispatching the stories this host is ready to work
     And the sync was tried 1 time, waiting nothing
     And dispatch leaves with status 1
 
+  Scenario: A rig fetch that cannot resolve a name is tried again, and the session starts once it can
+    Given a ready story "mw-gq6.1" of that epic
+    And the rig fetch cannot resolve a name for its first 2 tries
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+    And the rig was fetched 3 times, waiting 15s between the tries
+    And the dispatch report says the rig fetch was retried 2 times
+
+  Scenario: A rig fetch that never resolves a name is a local network fault, not a failed run
+    Given a ready story "mw-gq6.1" of that epic
+    And the rig fetch can never resolve a name
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch printed the line "local network fault: could not resolve host; nothing dispatched" last
+    And no session was started
+    And the story "mw-gq6.1" is not claimed
+    And the rig was fetched 3 times, waiting 15s between the tries
+    And dispatch leaves with status 7
+
+  Scenario: Any other rig fetch failure is not tried again and fails as it always did
+    Given a ready story "mw-gq6.1" of that epic
+    And the rig fetch is refused with "git@github.com: Permission denied (publickey)."
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch failed, saying: fetching the rig of mw-gq6.1
+    And no session was started
+    And the story "mw-gq6.1" is not claimed
+    And the rig was fetched 1 time, waiting nothing
+    And dispatch leaves with status 1
+
   Scenario: A halted beads sync is not tried again either
     Given a ready story "mw-gq6.1" of that epic
     And the beads sync halts with exit code 2

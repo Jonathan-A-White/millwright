@@ -45,6 +45,9 @@ type dispatchContext struct {
 	// which a scenario never really sits through.
 	out   bytes.Buffer
 	waits []time.Duration
+	// fetch is the rig fetch a scenario made fail, when it did; otherwise the
+	// dispatch fetches the rig for real.
+	fetch *failingFetch
 	// maxAttempts is the cap on attempts a scenario's config file gave, when it
 	// gave one; otherwise the dispatch is run with the default the config would.
 	maxAttempts int
@@ -138,6 +141,9 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the beads sync halts with exit code (\d+)$`, c.theBeadsSyncHalts)
 	ctx.Given(`^the sync cannot resolve a name for its first (\d+) tries$`, c.theSyncCannotResolveForItsFirstTries)
 	ctx.Given(`^the sync can never resolve a name$`, c.theSyncCanNeverResolve)
+	ctx.Given(`^the rig fetch cannot resolve a name for its first (\d+) tries$`, c.theRigFetchCannotResolveForItsFirstTries)
+	ctx.Given(`^the rig fetch can never resolve a name$`, c.theRigFetchCanNeverResolve)
+	ctx.Given(`^the rig fetch is refused with "([^"]*)"$`, c.theRigFetchIsRefused)
 	ctx.Given(`^the vault's pull is refused with "([^"]*)"$`, c.theVaultsPullIsRefused)
 	ctx.Given(`^the config file says dispatch_sync_tries is (\d+) and dispatch_sync_wait is "([^"]*)"$`, c.theConfigSaysTheSyncKnobs)
 	ctx.Given(`^the config file says max_attempts is (\d+)$`, c.theConfigSaysMaxAttempts)
@@ -200,6 +206,10 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the sync was tried (\d+) times?, waiting (\d+)s between the tries$`, c.theSyncWasTriedWaiting)
 	ctx.Then(`^the sync was tried (\d+) times?, waiting nothing$`, c.theSyncWasTriedWaitingNothing)
 	ctx.Then(`^the dispatch report says the sync was retried (\d+) times$`, c.theReportSaysTheSyncWasRetried)
+	ctx.Then(`^the rig was fetched (\d+) times?, waiting (\d+)s between the tries$`, c.theRigWasFetchedWaiting)
+	ctx.Then(`^the rig was fetched (\d+) times?, waiting nothing$`, c.theRigWasFetchedWaitingNothing)
+	ctx.Then(`^the dispatch report says the rig fetch was retried (\d+) times$`, c.theReportSaysTheRigFetchWasRetried)
+	ctx.Then(`^dispatch printed the line "([^"]*)" last$`, c.dispatchPrintedTheLineLast)
 	ctx.Then(`^dispatch printed the one line "([^"]*)"$`, c.dispatchPrintedTheOneLine)
 	ctx.Then(`^dispatch leaves with status (\d+)$`, c.dispatchLeavesWithStatus)
 	ctx.Then(`^the dispatch log holds exactly one line: "([^"]*)"$`, c.theDispatchLogHoldsExactly)
@@ -586,6 +596,92 @@ func (c *dispatchContext) theSyncCanNeverResolve() error {
 	return nil
 }
 
+// failingFetch is the rig's worktrees with a fetch that fails: for its first
+// failFor tries, or for every try when failFor is 0. A name that cannot be
+// resolved comes back as the adapter says it, a TransientFault.
+type failingFetch struct {
+	application.Worktrees
+	err     error
+	failFor int
+	tries   int
+}
+
+func (f *failingFetch) Fetch(ctx context.Context, rigDir string) error {
+	f.tries++
+	if f.failFor == 0 || f.tries <= f.failFor {
+		return f.err
+	}
+	return f.Worktrees.Fetch(ctx, rigDir)
+}
+
+func rigResolveFailure() error {
+	return &application.TransientFault{
+		Why: "could not resolve host",
+		Err: errors.New("git fetch origin in /rig: exit status 128: fatal: unable to access 'https://github.com/x/y/': Could not resolve host: github.com"),
+	}
+}
+
+func (c *dispatchContext) theRigFetchCannotResolveForItsFirstTries(tries int) error {
+	c.fetch = &failingFetch{err: rigResolveFailure(), failFor: tries}
+	return nil
+}
+
+func (c *dispatchContext) theRigFetchCanNeverResolve() error {
+	c.fetch = &failingFetch{err: rigResolveFailure()}
+	return nil
+}
+
+func (c *dispatchContext) theRigFetchIsRefused(said string) error {
+	c.fetch = &failingFetch{err: fmt.Errorf("git fetch origin in /rig: exit status 128: %s", said)}
+	return nil
+}
+
+func (c *dispatchContext) theRigWasFetchedWaiting(tries, seconds int) error {
+	if got := c.fetch.tries; got != tries {
+		return fmt.Errorf("expected the rig to be fetched %d times, it was fetched %d", tries, got)
+	}
+	want := time.Duration(seconds) * time.Second
+	if len(c.waits) != tries-1 {
+		return fmt.Errorf("expected %d waits between %d tries, got %v", tries-1, tries, c.waits)
+	}
+	for _, waited := range c.waits {
+		if waited != want {
+			return fmt.Errorf("expected every wait to be %s, got %v", want, c.waits)
+		}
+	}
+	return nil
+}
+
+func (c *dispatchContext) theRigWasFetchedWaitingNothing(tries int) error {
+	if got := c.fetch.tries; got != tries {
+		return fmt.Errorf("expected the rig to be fetched %d time, it was fetched %d", tries, got)
+	}
+	if len(c.waits) != 0 {
+		return fmt.Errorf("expected no wait, got %v", c.waits)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theReportSaysTheRigFetchWasRetried(retries int) error {
+	if c.report.FetchRetries != retries {
+		return fmt.Errorf("expected the report to count %d fetch retries, got %d", retries, c.report.FetchRetries)
+	}
+	want := fmt.Sprintf("retried the rig fetch %d times", retries)
+	if !strings.Contains(c.out.String(), want) {
+		return fmt.Errorf("expected what dispatch printed to say %q, got:\n%s", want, c.out.String())
+	}
+	return nil
+}
+
+// dispatchPrintedTheLineLast says the last thing dispatch printed was that line,
+// and that the error it left with is not to be printed again.
+func (c *dispatchContext) dispatchPrintedTheLineLast(line string) error {
+	if got := c.out.String(); !strings.HasSuffix(got, line+"\n") {
+		return fmt.Errorf("expected dispatch to end by printing %q, got %q", line, got)
+	}
+	return nil
+}
+
 func (c *dispatchContext) theVaultsPullIsRefused(said string) error {
 	c.files.PullErr = fmt.Errorf("git pull --rebase in /vault: exit status 128: %s", said)
 	return nil
@@ -952,13 +1048,18 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 		knobs = *c.configured
 	}
 	worktrees := rig.New()
+	var rigFetching application.Worktrees = worktrees
+	if c.fetch != nil {
+		c.fetch.Worktrees = worktrees
+		rigFetching = c.fetch
+	}
 	var tracker application.WorkTracker = c.tracker
 	if c.offersAll {
 		tracker = offersEveryStory{c.tracker}
 	}
 	dispatcher := application.Dispatch{
 		Tracker:   tracker,
-		Worktrees: worktrees,
+		Worktrees: rigFetching,
 		Landing:   worktrees,
 		Runner:    c.runner,
 		Memory:    c.tracker,
