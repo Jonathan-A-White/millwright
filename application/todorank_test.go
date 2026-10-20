@@ -2,6 +2,7 @@ package application
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -54,5 +55,19 @@ func TestTodoRankForFallsBetweenNeighboursAndNumbersTheListOnlyWhenItMust(t *tes
 		if rank != c.rank || !reflect.DeepEqual(renumbered, c.renumbered) {
 			t.Errorf("%s: expected %s and %v, got %s and %v", c.name, c.rank, c.renumbered, rank, renumbered)
 		}
+	}
+}
+
+func TestTodoLeftOutOfNowNamesWhatItWaitsOnAndStaysUnderTheWhyBound(t *testing.T) {
+	if got, want := todoLeftOutOfNow([]string{"mw-1"}), "left out of Now: waits on mw-1"; got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+	long := []string{"mw-gq6.6620", "mw-gq6.6621", "mw-gq6.6622", "mw-gq6.6623", "mw-gq6.6624", "mw-gq6.6625"}
+	got := todoLeftOutOfNow(long)
+	if n := len([]rune(got)); n >= TodoRowWhyMax {
+		t.Errorf("the why is %d characters, it must be under %d: %q", n, TodoRowWhyMax, got)
+	}
+	if !strings.HasPrefix(got, "left out of Now: waits on mw-gq6.6620") {
+		t.Errorf("expected the why to begin with the first blocker, got %q", got)
 	}
 }

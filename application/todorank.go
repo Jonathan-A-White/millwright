@@ -158,10 +158,16 @@ type TodoRankLogCard struct {
 // hitl:todo card in a row (TodoRows) with a one-line why. The model is given
 // the open cards, the cards closed in the last TodoRankDoneDays and his about
 // file; its answer is judged whole (judgeTodoRows), and a refused answer
-// writes nothing.
+// writes nothing. A card that waits on an unfinished story is never in Do now:
+// it is not given to the model, and one standing in now goes to later with the
+// why "left out of Now: waits on <id>" (todorankwaits.go).
 type TodoRankPass struct {
 	Tracker WorkTracker
 	Closed  ClosedTodoCards
+	// Graph, when set, is read for the open cards that wait on an unfinished
+	// story, including the ones the tracker keeps out of its ready list. A nil
+	// Graph leaves only the ready cards' own Needs to say what waits.
+	Graph   BeadGraph
 	Grinder Grinder
 	Runs    TodoRankRuns
 
@@ -200,38 +206,60 @@ func (p TodoRankPass) Run(ctx context.Context, dryRun bool) ([]TodoRankRow, erro
 	if err != nil {
 		return nil, fmt.Errorf("mw todo rank: %w", err)
 	}
-	open, done, lists, err := p.read(ctx, now)
+	ready, done, lists, err := p.read(ctx, now)
 	if err != nil {
 		return nil, fmt.Errorf("mw todo rank: %w", err)
 	}
-	if len(open) == 0 {
+	open, waiting, err := p.splitWaiting(ctx, ready)
+	if err != nil {
+		return nil, fmt.Errorf("mw todo rank: %w", err)
+	}
+	if len(open) == 0 && len(waiting) == 0 {
 		p.say("mw todo rank: no open To do card to rank\n")
 		return nil, nil
 	}
 
-	dir, err := os.MkdirTemp("", "mw-todo-rank-")
-	if err != nil {
-		return nil, fmt.Errorf("mw todo rank: %w", err)
-	}
-	defer os.RemoveAll(dir)
-	result, err := p.Grinder.Grind(ctx, GrindCall{
-		Dir: dir, Model: p.Model, Effort: p.Effort, System: todoRankSystem(p.Instructions), Schema: TodoRankSchema,
-		Prompt: todoRankMessage(now, zone, about, open, done, lists), Timeout: todoRankTimeout, MaxTurns: todoRankMaxTurns,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("mw todo rank: the model's pass failed, nothing was written: %w", err)
-	}
-	if result.IsError || len(result.Answer) == 0 {
-		return nil, fmt.Errorf("mw todo rank: the model gave no answer (%s), nothing was written: %s", result.Subtype, strings.TrimSpace(result.Said))
-	}
-	rows, refused := judgeTodoRows(open, result.Answer)
-	if len(refused) > 0 {
-		return nil, fmt.Errorf("mw todo rank: the model's answer is refused, nothing was written: %s", strings.Join(refused, "; "))
+	var rows []TodoRankRow
+	var usage Fuel
+	if len(open) > 0 {
+		dir, err := os.MkdirTemp("", "mw-todo-rank-")
+		if err != nil {
+			return nil, fmt.Errorf("mw todo rank: %w", err)
+		}
+		defer os.RemoveAll(dir)
+		result, err := p.Grinder.Grind(ctx, GrindCall{
+			Dir: dir, Model: p.Model, Effort: p.Effort, System: todoRankSystem(p.Instructions), Schema: TodoRankSchema,
+			Prompt: todoRankMessage(now, zone, about, open, done, lists), Timeout: todoRankTimeout, MaxTurns: todoRankMaxTurns,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("mw todo rank: the model's pass failed, nothing was written: %w", err)
+		}
+		if result.IsError || len(result.Answer) == 0 {
+			return nil, fmt.Errorf("mw todo rank: the model gave no answer (%s), nothing was written: %s", result.Subtype, strings.TrimSpace(result.Said))
+		}
+		var refused []string
+		rows, refused = judgeTodoRows(open, result.Answer)
+		if len(refused) > 0 {
+			return nil, fmt.Errorf("mw todo rank: the model's answer is refused, nothing was written: %s", strings.Join(refused, "; "))
+		}
+		usage = result.Fuel
 	}
 
-	titles := make(map[string]string, len(open))
+	// A card that waits on an unfinished story is not given to the model, and
+	// is kept out of Do now: one standing there goes to later, and its why says
+	// what it waits on. A waiting card in any other row is left as it is.
+	held := heldOutOfNow(waiting)
+	titles := make(map[string]string, len(open)+len(waiting))
 	for _, card := range open {
 		titles[card.Story.ID] = strings.TrimSpace(card.Story.Title)
+	}
+	cards := slices.Clone(open)
+	for n, w := range waiting {
+		titles[w.card.Story.ID] = strings.TrimSpace(w.card.Story.Title)
+		cards = append(cards, w.card)
+		if held[n].Row != w.card.TodoRow {
+			rows = append(rows, held[n])
+		}
 	}
 	if dryRun {
 		p.say("mw todo rank: %d cards ranked (a dry run: nothing written)\n", len(rows))
@@ -239,19 +267,27 @@ func (p TodoRankPass) Run(ctx context.Context, dryRun bool) ([]TodoRankRow, erro
 		return rows, nil
 	}
 
-	logged := make([]TodoRankLogCard, len(rows))
+	logged := make([]TodoRankLogCard, 0, len(cards))
 	written := 0
-	for n, card := range open {
-		row := rows[n]
-		logged[n] = TodoRankLogCard{TodoRankRow: row}
+	for n, card := range cards {
+		var row TodoRankRow
+		if n < len(open) {
+			row = rows[n]
+		} else {
+			row = held[n-len(open)]
+		}
+		entry := TodoRankLogCard{TodoRankRow: row}
 		fields := map[string]string{}
 		if row.Row != card.TodoRow || row.Why != card.TodoRowWhy {
 			fields[TodoRowField], fields[TodoRowWhyField] = row.Row, row.Why
-			logged[n].Written = true
+			entry.Written = true
 		}
 		if due := slippedStar(card, now); due != "" {
 			fields[TodoSlippedField] = due
-			logged[n].Slipped = due
+			entry.Slipped = due
+		}
+		if n < len(open) || len(fields) > 0 {
+			logged = append(logged, entry)
 		}
 		if len(fields) == 0 {
 			continue
@@ -262,7 +298,7 @@ func (p TodoRankPass) Run(ctx context.Context, dryRun bool) ([]TodoRankRow, erro
 		written++
 	}
 
-	fuel := result.Fuel
+	fuel := usage
 	entry := TodoRankLog{
 		At: now.UTC().Format(time.RFC3339), Model: p.Model, Effort: p.Effort,
 		Elapsed: time.Since(started).Round(time.Millisecond).String(),

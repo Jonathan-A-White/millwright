@@ -150,6 +150,8 @@ func newTodoRankCmd() *cobra.Command {
 			"[todo] rank_model and rank_effort in the config (sonnet and medium).\n\n" +
 			"  mw todo rank\n" +
 			"  mw todo rank --dry-run\n\n" +
+			"A card that waits on a story not yet finished is never in now: it is not given to the model, and\n" +
+			"one standing in now goes to later, with the why \"left out of Now: waits on <id>\".\n\n" +
 			"An answer that misses a card, names one it was not given, says another row, puts more than\n" +
 			"three cards in now or make-time, or lets a starred card go is refused and nothing is written.\n" +
 			"--dry-run prints the rows and writes nothing.",
@@ -169,7 +171,7 @@ func newTodoRankCmd() *cobra.Command {
 			}
 			gateway := mwGateway(dir, host)
 			pass := application.TodoRankPass{
-				Tracker: gateway, Closed: gateway, Grinder: claude.NewGrinder(), Runs: mwVault(dir, host),
+				Tracker: gateway, Closed: gateway, Graph: gateway, Grinder: claude.NewGrinder(), Runs: mwVault(dir, host),
 				Instructions: millwright.TodoRankInstructions, AboutFile: filepath.Join(dir, application.TodoAboutFile),
 				Model: settings.RankModel, Effort: settings.RankEffort, Zone: settings.Zone, Out: cmd.OutOrStdout(),
 			}
@@ -222,7 +224,7 @@ func todoRankSpringJob(host string, out io.Writer) (application.SpringJob, error
 	}
 	gateway := mwGateway(dir, host)
 	pass := application.TodoRankPass{
-		Tracker: gateway, Closed: gateway, Grinder: claude.NewGrinder(), Runs: mwVault(dir, host),
+		Tracker: gateway, Closed: gateway, Graph: gateway, Grinder: claude.NewGrinder(), Runs: mwVault(dir, host),
 		Instructions: millwright.TodoRankInstructions, AboutFile: filepath.Join(dir, application.TodoAboutFile),
 		Model: settings.RankModel, Effort: settings.RankEffort, Zone: settings.Zone, Out: out,
 	}
