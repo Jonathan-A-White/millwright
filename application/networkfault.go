@@ -73,6 +73,39 @@ func LocalFault(err error) (*LocalNetworkFault, bool) {
 	return fault, errors.As(err, &fault)
 }
 
+// RemoteUnreachable is a step that could not reach a git remote even though its
+// name resolved: a connection that failed or timed out, a TLS handshake that did
+// not finish, an HTTP 5xx from the host (mw-gq6.648). The adapters that run git
+// and bd are the one place that reads those words; the application sees only
+// this type. It is one tick's blip until it has lasted SkippedTicksAlarm ticks:
+// the dispatch skips the tick, claims nothing and leaves with 0. Err is the
+// failure as it was.
+type RemoteUnreachable struct {
+	// Remote is the host that could not be reached, as the tool named it.
+	Remote string
+	// Said is the one line of the tool's output that said so.
+	Said string
+	Err  error
+}
+
+// Error is the failure as the adapter reported it.
+func (u *RemoteUnreachable) Error() string {
+	if u.Err != nil {
+		return u.Err.Error()
+	}
+	return u.Said
+}
+
+// Unwrap gives back the failure underneath.
+func (u *RemoteUnreachable) Unwrap() error { return u.Err }
+
+// Unreachable reports whether err is a failure to reach a remote, and what was
+// said.
+func Unreachable(err error) (*RemoteUnreachable, bool) {
+	var gone *RemoteUnreachable
+	return gone, errors.As(err, &gone)
+}
+
 // waitFor waits d, or until ctx ends, whichever is first. A zero wait does not
 // wait at all.
 func waitFor(ctx context.Context, d time.Duration) error {

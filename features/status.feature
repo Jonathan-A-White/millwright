@@ -458,6 +458,14 @@ Feature: mw status
     Then reading status succeeds
     And the TICKS section says of the dispatch: "1 local network fault, 2 failed"
 
+  Scenario: Skipped ticks, the remote unreachable, are counted apart from failed runs
+    Given the dispatch log of "vps" holds a good run at "2026-09-21T09:00:00Z"
+    And the dispatch log of "vps" then holds 2 skipped runs
+    When mw status reads the host
+    Then reading status succeeds
+    And the TICKS section says of the dispatch: "remote unreachable 2 in a row"
+    And the TICKS section does not say of the dispatch: "failed 2 in a row"
+
   Scenario: A good run resets the count
     Given the dispatch log of "vps" holds a good run at "2026-09-21T09:00:00Z"
     And the dispatch log of "vps" then holds 3 failed runs

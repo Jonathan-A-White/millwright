@@ -61,3 +61,43 @@ func TestNameNotResolvedLeavesEveryOtherFailureAlone(t *testing.T) {
 		})
 	}
 }
+
+func TestUnreachableReadsAConnectionThatFailedAndNamesTheHost(t *testing.T) {
+	for name, tc := range map[string]struct{ said, remote string }{
+		"git over https, the mw-6k44rl failure": {
+			"fatal: unable to access 'https://github.com/x/y.git/': Failed to connect to github.com port 443 after 135 ms: Couldn't connect to server\n", "github.com"},
+		"a timeout":                 {"ssh: connect to host github.com port 22: Connection timed out\nfatal: Could not read from remote repository.\n", "github.com"},
+		"a refused connection":      {"ssh: connect to host git.example.org port 22: Connection refused\n", "git.example.org"},
+		"a TLS handshake":           {"fatal: unable to access 'https://github.com/x/y.git/': gnutls_handshake() failed: The TLS connection was non-properly terminated.\n", "github.com"},
+		"an HTTP 503":               {"fatal: unable to access 'https://user@github.com/x/y.git/': The requested URL returned error: 503\n", "github.com"},
+		"an RPC failure with a 502": {"error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502\n", netfault.UnknownRemote},
+		"no route":                  {"ssh: connect to host github.com port 22: No route to host\n", "github.com"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			line, remote, found := netfault.Unreachable(tc.said)
+			if !found || line == "" {
+				t.Fatalf("expected %q to be a remote that could not be reached", tc.said)
+			}
+			if remote != tc.remote {
+				t.Errorf("expected the remote %q, got %q", tc.remote, remote)
+			}
+		})
+	}
+}
+
+func TestUnreachableLeavesWhatTheRemoteStatesAlone(t *testing.T) {
+	for name, said := range map[string]string{
+		"a refused key":         "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\n",
+		"a rejected push":       " ! [rejected]        main -> main (non-fast-forward)\n",
+		"a merge conflict":      "CONFLICT (content): Merge conflict in ledger.jsonl\n",
+		"a 404":                 "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 404\n",
+		"a name not resolved":   "fatal: unable to access 'https://github.com/x/y/': Could not resolve host: github.com\n",
+		"a stray 5xx in a path": "error: pathspec 'a 5xx' did not match\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if line, _, found := netfault.Unreachable(said); found {
+				t.Errorf("expected %q not to be an unreachable remote, matched %q", said, line)
+			}
+		})
+	}
+}

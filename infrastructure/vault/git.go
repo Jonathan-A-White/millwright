@@ -545,6 +545,9 @@ func (v *Vault) git(ctx context.Context, args ...string) (string, error) {
 		if line, unresolved := netfault.NameNotResolved(said); unresolved {
 			return "", &application.NameNotResolved{Said: line, Err: failed}
 		}
+		if line, remote, gone := netfault.Unreachable(said); gone {
+			return "", &application.RemoteUnreachable{Remote: remote, Said: line, Err: failed}
+		}
 		return "", failed
 	}
 	return out.String(), nil

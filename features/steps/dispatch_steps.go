@@ -43,6 +43,9 @@ type dispatchContext struct {
 	rules *apptest.FakeEpicRules
 	mail  *apptest.FakeMailbox
 
+	// priorTicks is how many ticks a scenario has already put in the dispatch log.
+	priorTicks int
+
 	// out is what the dispatch printed, and waits is every wait it asked for,
 	// which a scenario never really sits through.
 	out   bytes.Buffer
@@ -147,6 +150,10 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the rig fetch can never resolve a name$`, c.theRigFetchCanNeverResolve)
 	ctx.Given(`^the rig fetch is refused with "([^"]*)"$`, c.theRigFetchIsRefused)
 	ctx.Given(`^the vault's pull is refused with "([^"]*)"$`, c.theVaultsPullIsRefused)
+	ctx.Given(`^the vault's pull cannot connect to "([^"]*)"$`, c.theVaultsPullCannotConnect)
+	ctx.Given(`^the vault's push cannot connect to "([^"]*)"$`, c.theVaultsPushCannotConnect)
+	ctx.Given(`^the vault's push is rejected with "([^"]*)"$`, c.theVaultsPushIsRejected)
+	ctx.Given(`^the dispatch log already holds (\d+) (skipped|good|failed) runs?$`, c.theDispatchLogAlreadyHolds)
 	ctx.Given(`^the config file says dispatch_sync_tries is (\d+) and dispatch_sync_wait is "([^"]*)"$`, c.theConfigSaysTheSyncKnobs)
 	ctx.Given(`^the config file says max_attempts is (\d+)$`, c.theConfigSaysMaxAttempts)
 	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times?$`, c.theStoryHasBeenTried)
@@ -689,6 +696,48 @@ func (c *dispatchContext) dispatchPrintedTheLineLast(line string) error {
 
 func (c *dispatchContext) theVaultsPullIsRefused(said string) error {
 	c.files.PullErr = fmt.Errorf("git pull --rebase in /vault: exit status 128: %s", said)
+	return nil
+}
+
+// connectFailure is what the vault's adapter hands back when git could not
+// reach the remote: the typed error, with git's own words under it.
+func connectFailure(host string) error {
+	said := fmt.Sprintf("Failed to connect to %s port 443: Connection timed out", host)
+	return &application.RemoteUnreachable{Remote: host, Said: said, Err: fmt.Errorf("git pull --rebase in /vault: exit status 128: fatal: unable to access 'https://%s/x/y/': %s", host, said)}
+}
+
+func (c *dispatchContext) theVaultsPullCannotConnect(host string) error {
+	c.files.PullErr = connectFailure(host)
+	return nil
+}
+
+func (c *dispatchContext) theVaultsPushCannotConnect(host string) error {
+	c.files.PushErr = connectFailure(host)
+	return nil
+}
+
+func (c *dispatchContext) theVaultsPushIsRejected(said string) error {
+	c.files.PushErr = fmt.Errorf("git push in /vault: exit status 1: %s", said)
+	return nil
+}
+
+// theDispatchLogAlreadyHolds puts earlier ticks into the log, a quarter of an
+// hour apart from two hours before the scenario's tick, the way the timer left
+// them: each call goes on from the last line the log holds.
+func (c *dispatchContext) theDispatchLogAlreadyHolds(count int, what string) error {
+	words := map[string]string{
+		"skipped": application.DispatchLogSkipped + "github.com unreachable: Failed to connect to github.com port 443: Connection timed out",
+		"good":    application.DispatchLogOK + "nothing ready",
+		"failed":  application.DispatchLogFailed + "dispatching on vps: the hosts could not be brought level",
+	}[what]
+	log := ticklog.New(c.dispatchLogDir())
+	for i := 0; i < count; i++ {
+		at := dispatchNow.Add(-2 * time.Hour).Add(time.Duration(c.priorTicks) * 15 * time.Minute)
+		c.priorTicks++
+		if err := log.Append(context.Background(), at.UTC().Format(time.RFC3339)+" "+words); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

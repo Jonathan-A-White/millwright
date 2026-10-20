@@ -27,9 +27,10 @@ var tickKinds = map[string]string{
 // read out of the same words a real host's log holds.
 var tickWords = map[string]map[string]string{
 	"dispatch": {
-		"good":   "ok: 1 started",
-		"failed": "failed: dispatching on vps: the hosts could not be brought level",
-		"fault":  "local network fault",
+		"good":    "ok: 1 started",
+		"failed":  "failed: dispatching on vps: the hosts could not be brought level",
+		"fault":   "local network fault",
+		"skipped": "skipped: github.com unreachable: Failed to connect to github.com port 443",
 	},
 	"Millhand tick": {
 		"good":   "quiet",
@@ -43,7 +44,7 @@ var tickWords = map[string]map[string]string{
 func (c *statusContext) registerTickSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the (dispatch|Millhand tick) log of "([^"]*)" holds a good run at "([^"]*)"$`, c.aLogHoldsAGoodRunAt)
 	ctx.Given(`^the (dispatch|Millhand tick) log of "([^"]*)" then holds a line saying "([^"]*)" at "([^"]*)"$`, c.aLogThenHoldsALineSayingAt)
-	ctx.Given(`^the (dispatch|Millhand tick) log of "([^"]*)" (?:then )?holds (\d+) (good run|failed run|local network fault)s?$`,
+	ctx.Given(`^the (dispatch|Millhand tick) log of "([^"]*)" (?:then )?holds (\d+) (good run|failed run|local network fault|skipped run)s?$`,
 		c.aLogHoldsRuns)
 	ctx.Given(`^the host "([^"]*)" syncs$`, c.theHostSyncs)
 
@@ -118,7 +119,7 @@ func (c *statusContext) aLogHoldsRuns(kind, host, countText, what string) error 
 	if err != nil {
 		return fmt.Errorf("the count %q is not a number: %w", countText, err)
 	}
-	outcome := map[string]string{"good run": "good", "failed run": "failed", "local network fault": "fault"}[what]
+	outcome := map[string]string{"good run": "good", "failed run": "failed", "local network fault": "fault", "skipped run": "skipped"}[what]
 
 	next := time.Date(2026, 9, 21, 9, 0, 0, 0, time.UTC)
 	if last, ok := c.lastTick[host+"/"+kind]; ok {
