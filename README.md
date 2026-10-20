@@ -3294,7 +3294,14 @@ unit lists in `SuccessExitStatus=5 7`, so a sleeping network does not show as a
 failed unit and the next tick simply tries again. The tries and the waits together
 may not run past 90 seconds (`mw dispatch` refuses a config that would), because
 the unit is stopped at 45 minutes. Every other sync failure is not retried and
-fails as before, and `mw sync` by hand never waits. The fetch of a rig's origin
+fails as before, and `mw sync` by hand never waits. A sync that cannot reach the
+remote at all (`Failed to connect to github.com port 443`, a timeout, a TLS
+handshake, an HTTP 5xx) is one tick's blip and leaves with 0: the tick claims
+nothing and logs `skipped: <remote> unreachable: <reason>`; `mw status` shows the
+run under the dispatch as `remote unreachable N in a row`, not as failed. The
+third such tick in a row fails the unit once, naming the remote and the first
+one's time, so an outage still mails the Mayor; a tick that gets through resets
+the count (mw-gq6.648). The fetch of a rig's origin
 before each session starts waits the same way (and says `retried the rig fetch 2
 times`); one that never gets through gives the story's claim back, prints the same
 `local network fault` line and leaves with 7. After changing the unit file,

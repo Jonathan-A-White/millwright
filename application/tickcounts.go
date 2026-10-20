@@ -51,6 +51,9 @@ const (
 	// TickFault is a run that could not be made because this host's own network
 	// was down. It is not a failure, and is counted apart.
 	TickFault
+	// TickSkipped is a run that could not reach a git remote and did nothing:
+	// one tick's blip, counted apart from a failure until it lasts (mw-gq6.648).
+	TickSkipped
 )
 
 // String is the outcome in a phrase.
@@ -62,6 +65,8 @@ func (o TickOutcome) String() string {
 		return "a failed run"
 	case TickFault:
 		return "a local network fault"
+	case TickSkipped:
+		return "a skipped run"
 	default:
 		return "no run"
 	}
@@ -80,6 +85,11 @@ type TickCount struct {
 	// Failed and Faults are the runs since LastGood, or in the whole log when
 	// there is no good one, that failed and that were local network faults.
 	Failed, Faults int
+	// Skipped is how many of the newest runs, running back to the first run that
+	// was anything else, were skipped because a remote could not be reached, and
+	// FirstSkipped the time of the oldest of them.
+	Skipped      int
+	FirstSkipped time.Time
 }
 
 // CountTicks reads a log's lines, newest first, until the last good run. A log
@@ -93,11 +103,16 @@ func CountTicks(ctx context.Context, log TickLog, outcome func(line string) (tim
 		return TickCount{}
 	}
 	var count TickCount
+	streak := true
 	for i := len(lines) - 1; i >= 0; i-- {
 		at, what := outcome(lines[i])
-		switch what {
-		case TickUnread:
+		if what == TickUnread {
 			continue
+		}
+		if what != TickSkipped {
+			streak = false
+		}
+		switch what {
 		case TickGood:
 			count.Known, count.LastGood = true, at
 			return count
@@ -105,6 +120,11 @@ func CountTicks(ctx context.Context, log TickLog, outcome func(line string) (tim
 			count.Failed++
 		case TickFault:
 			count.Faults++
+		case TickSkipped:
+			if streak {
+				count.Skipped++
+				count.FirstSkipped = at
+			}
 		}
 		count.Known = true
 	}
@@ -134,6 +154,8 @@ func DispatchOutcome(line string) (time.Time, TickOutcome) {
 		return at, TickGood
 	case strings.HasPrefix(words, DispatchLogFault):
 		return at, TickFault
+	case strings.HasPrefix(words, DispatchLogSkipped):
+		return at, TickSkipped
 	case strings.HasPrefix(words, DispatchLogFailed):
 		// A line written before a lost claim was told from a failure: the only
 		// thing it says went wrong is a story another host took first.
@@ -221,7 +243,11 @@ func (h HostTicks) Note() string {
 		if !timer.count.LastGood.IsZero() {
 			good = timer.count.LastGood.UTC().Format(time.RFC3339)
 		}
-		parts = append(parts, fmt.Sprintf("%s good=%s failed=%d faults=%d", timer.name, good, timer.count.Failed, timer.count.Faults))
+		part := fmt.Sprintf("%s good=%s failed=%d faults=%d", timer.name, good, timer.count.Failed, timer.count.Faults)
+		if timer.count.Skipped > 0 {
+			part += fmt.Sprintf(" skipped=%d", timer.count.Skipped)
+		}
+		parts = append(parts, part)
 	}
 	return strings.Join(parts, "; ")
 }
@@ -240,7 +266,7 @@ const TicksNoteSlack = 10 * time.Minute
 func (h HostTicks) SaidBy(kept HostTicks) bool {
 	for _, pair := range [][2]TickCount{{h.Dispatch, kept.Dispatch}, {h.Millhand, kept.Millhand}} {
 		now, then := pair[0], pair[1]
-		if now.Known != then.Known || now.Failed != then.Failed || now.Faults != then.Faults ||
+		if now.Known != then.Known || now.Failed != then.Failed || now.Faults != then.Faults || now.Skipped != then.Skipped ||
 			now.LastGood.IsZero() != then.LastGood.IsZero() {
 			return false
 		}
@@ -292,15 +318,18 @@ func parseTickCount(fields []string) (TickCount, bool) {
 				count.LastGood = at
 			}
 			good = true
-		case "failed", "faults":
+		case "failed", "faults", "skipped":
 			n, err := strconv.Atoi(value)
 			if err != nil || n < 0 {
 				return TickCount{}, false
 			}
-			if key == "failed" {
+			switch key {
+			case "failed":
 				count.Failed, failed = n, true
-			} else {
+			case "faults":
 				count.Faults, faults = n, true
+			default:
+				count.Skipped = n
 			}
 		}
 	}
@@ -309,7 +338,8 @@ func parseTickCount(fields []string) (TickCount, bool) {
 
 // write is one timer's count as mw status shows it, under the label: the last
 // good run on one line, and on the next how many runs since have failed. Local
-// network faults are said apart, and only when there were some.
+// network faults are said apart, and only when there were some; so are the
+// skipped runs, the remote unreachable, on a line of their own.
 func (c TickCount) write(b *strings.Builder, pad, label string) {
 	if !c.Known {
 		return
@@ -318,6 +348,9 @@ func (c TickCount) write(b *strings.Builder, pad, label string) {
 		clip(b, fmt.Sprintf("%s%s · no good run logged", pad, label))
 	} else {
 		clip(b, fmt.Sprintf("%s%s · last good %s", pad, label, c.LastGood.UTC().Format(TicksTimeFormat)))
+	}
+	if c.Skipped > 0 {
+		clip(b, fmt.Sprintf("%s  remote unreachable %d in a row", pad, c.Skipped))
 	}
 	if c.Faults > 0 {
 		faults := "local network faults"

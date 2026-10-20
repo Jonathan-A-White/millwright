@@ -210,3 +210,37 @@ func TestATicksNoteIsSaidAgainOnlyWhenItsCountsChangeOrItFallsBehind(t *testing.
 		}
 	}
 }
+
+func TestSkippedTicksAreCountedAsTheNewestRunOfThem(t *testing.T) {
+	at := func(m int) string { return time.Date(2026, 9, 21, 12, m, 0, 0, time.UTC).Format(time.RFC3339) + " " }
+	skip := "skipped: github.com unreachable: Failed to connect to github.com port 443"
+	log := heldLog(t, at(0)+"ok: 1 started", at(5)+skip, at(10)+"failed: x", at(15)+skip, at(20)+skip)
+	count := application.CountTicks(context.Background(), log, application.DispatchOutcome)
+	if count.Skipped != 2 || count.Failed != 1 || !count.FirstSkipped.Equal(time.Date(2026, 9, 21, 12, 15, 0, 0, time.UTC)) {
+		t.Errorf("expected 2 skipped from 12:15 and 1 failed, got %+v", count)
+	}
+	if _, got := application.DispatchOutcome(at(0) + skip); got != application.TickSkipped {
+		t.Errorf("expected a skipped run, got %s", got)
+	}
+}
+
+func TestTheTicksNoteCarriesSkippedOnlyWhenThereAreSome(t *testing.T) {
+	none := application.HostTicks{Dispatch: application.TickCount{Known: true, Failed: 1}}
+	if note := none.Note(); strings.Contains(note, "skipped") {
+		t.Errorf("expected no skipped= in %q", note)
+	}
+	some := application.HostTicks{Dispatch: application.TickCount{Known: true, Skipped: 2}}
+	note := some.Note()
+	if !strings.Contains(note, "skipped=2") {
+		t.Fatalf("expected skipped=2 in %q", note)
+	}
+	if back := application.ParseHostTicks(note); back.Dispatch.Skipped != 2 || !some.SaidBy(back) {
+		t.Errorf("expected the note to read back as it was, got %+v", back.Dispatch)
+	}
+	if old := application.ParseHostTicks("dispatch good=none failed=0 faults=0"); !old.Dispatch.Known || old.Dispatch.Skipped != 0 {
+		t.Errorf("expected a note without skipped= to read, got %+v", old.Dispatch)
+	}
+	if some.SaidBy(none) {
+		t.Errorf("expected a note without the skipped runs not to say what some does")
+	}
+}

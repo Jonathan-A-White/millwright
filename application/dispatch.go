@@ -536,8 +536,18 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 		}
 	}
 	report, err := d.run(ctx)
+	// A remote that cannot be reached is one tick's blip: the tick is skipped, with
+	// the line saying so and no failure, until SkippedTicksAlarm ticks in a row
+	// have been; the tick that makes that many fails, once, and the ones after it
+	// are skipped again. Without a log to count by every tick would be the first,
+	// so the failure is let through as it always was.
+	words := dispatchLogWords(report, err)
+	if gone, unreachable := Unreachable(err); unreachable && d.Log != nil && !d.DryRun {
+		d.print(words + "\n")
+		err = d.skippedTick(ctx, gone)
+	}
 	if d.Log != nil && !d.DryRun {
-		line := d.now().UTC().Format(time.RFC3339) + " " + dispatchLogWords(report, err)
+		line := d.now().UTC().Format(time.RFC3339) + " " + words
 		if logErr := d.Log.Append(ctx, line); logErr != nil && err == nil {
 			err = fmt.Errorf("appending to the dispatch log: %w", logErr)
 		}
@@ -545,15 +555,29 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 	return report, err
 }
 
+// skippedTick is what Run reports of a tick that could not reach a remote: nil,
+// unless this is the SkippedTicksAlarm'th in a row, counted from the log as it
+// stands before this tick's own line is added.
+func (d Dispatch) skippedTick(ctx context.Context, gone *RemoteUnreachable) error {
+	before := CountTicks(ctx, d.Log, DispatchOutcome)
+	if before.Skipped+1 != SkippedTicksAlarm {
+		return nil
+	}
+	return fmt.Errorf("dispatching on %s: %s unreachable for %d ticks in a row since %s: %s",
+		d.Host, gone.Remote, SkippedTicksAlarm, before.FirstSkipped.UTC().Format(time.RFC3339), oneLine(gone.Said))
+}
+
 // The words a dispatch's line of its log holds after the time. ok says the run
 // did what it is for, and is followed by how many sessions it started or that
 // nothing was ready; a local network fault is a run that could not be made, not
-// one that failed; failed is followed by why, on one line.
+// one that failed; skipped is followed by the remote that could not be reached
+// and why (mw-gq6.648); failed is followed by why, on one line.
 const (
 	DispatchLogOK           = "ok: "
 	DispatchLogNothingReady = DispatchLogOK + "nothing ready"
 	DispatchLogPaused       = DispatchLogOK + "paused"
 	DispatchLogFault        = "local network fault"
+	DispatchLogSkipped      = "skipped: "
 	DispatchLogFailed       = "failed: "
 )
 
@@ -567,6 +591,9 @@ func dispatchLogWords(report DispatchReport, err error) string {
 	case err != nil:
 		if _, fault := LocalFault(err); fault {
 			return DispatchLogFault
+		}
+		if gone, unreachable := Unreachable(err); unreachable {
+			return skippedWords(gone)
 		}
 		// A tick whose only fault is claims lost to another host did nothing
 		// wrong: two dispatchers racing for one ready story is normal (mw-gq6.643).
@@ -587,6 +614,18 @@ func dispatchLogWords(report DispatchReport, err error) string {
 	}
 	return words
 }
+
+// skippedWords is what a tick that could not reach a remote says of itself:
+// "skipped: <remote> unreachable: <reason>".
+func skippedWords(gone *RemoteUnreachable) string {
+	return fmt.Sprintf("%s%s unreachable: %s", DispatchLogSkipped, gone.Remote, clippedTo(oneLine(gone.Said), DispatchLogReasonLimit))
+}
+
+// SkippedTicksAlarm is how many ticks in a row may skip because a remote could
+// not be reached before the unit fails and the Mayor is told, once (mw-gq6.648):
+// a blip of a tick or two is no news, three in a row, about a quarter of an
+// hour, is an outage.
+const SkippedTicksAlarm = 3
 
 // lostClaimsOnly reads what a failed dispatch said of itself, with or without
 // the "failed: " in front: it reports who held each story when every failure in
@@ -663,6 +702,10 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			// Not a failed run: the network is not back yet, and the next tick tries
 			// again. The one line is printed here, so that nothing else is.
 			d.print(fault.Line() + "\n")
+			return report, err
+		}
+		if _, unreachable := Unreachable(err); unreachable {
+			// One tick's blip, not a halt: Run skips the tick and counts it.
 			return report, err
 		}
 		if err != nil {

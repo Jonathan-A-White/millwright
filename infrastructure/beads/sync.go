@@ -83,6 +83,10 @@ func (g *Gateway) Sync(ctx context.Context) error {
 	if line, unresolved := netfault.NameNotResolved(told); unresolved {
 		return &application.NameNotResolved{Said: line, Err: halt}
 	}
+	// A conflict (2) or a stuck working set (4) is never a blip, whatever else bd said.
+	if line, remote, gone := netfault.Unreachable(told); gone && halt.Code != 2 && halt.Code != 4 {
+		return &application.RemoteUnreachable{Remote: remote, Said: line, Err: halt}
+	}
 	return halt
 }
 

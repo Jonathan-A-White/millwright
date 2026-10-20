@@ -80,6 +80,76 @@ Feature: Dispatching the stories this host is ready to work
     And the sync was tried 1 time, waiting nothing
     And dispatch leaves with status 1
 
+  # One tick that cannot reach the remote is a skipped tick, not a failed unit:
+  # the next tick, minutes later, finds GitHub answering again (mw-gq6.648).
+  Scenario: A tick that cannot connect to the remote is skipped and leaves with status 0
+    Given a ready story "mw-gq6.1" of that epic
+    And the vault's pull cannot connect to "github.com"
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch printed the one line "skipped: github.com unreachable: Failed to connect to github.com port 443: Connection timed out"
+    And no session was started
+    And the story "mw-gq6.1" is not claimed
+    And dispatch leaves with status 0
+    And the dispatch log holds exactly one line: "2026-09-21T12:00:00Z skipped: github.com unreachable: Failed to connect to github.com port 443: Connection timed out"
+
+  Scenario: A tick whose push cannot reach the remote is skipped too
+    Given a ready story "mw-gq6.1" of that epic
+    And the vault's push cannot connect to "github.com"
+    When dispatch runs on "vps" with a cap of 1
+    Then no session was started
+    And dispatch leaves with status 0
+    And the dispatch log holds exactly one line: "2026-09-21T12:00:00Z skipped: github.com unreachable: Failed to connect to github.com port 443: Connection timed out"
+
+  Scenario: Two skipped ticks in a row are still no failure
+    Given the dispatch log already holds 1 skipped run
+    And a ready story "mw-gq6.1" of that epic
+    And the vault's pull cannot connect to "github.com"
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch leaves with status 0
+    And the dispatch log holds 2 lines
+
+  Scenario: The third skipped tick in a row fails the unit, naming the remote and the first failure's time
+    Given the dispatch log already holds 2 skipped runs
+    And a ready story "mw-gq6.1" of that epic
+    And the vault's pull cannot connect to "github.com"
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch failed, saying: github.com unreachable for 3 ticks in a row since 2026-09-21T10:00:00Z
+    And dispatch leaves with status 1
+    And no session was started
+    And the story "mw-gq6.1" is not claimed
+
+  Scenario: Only the third tick alarms; a fourth skips quietly again
+    Given the dispatch log already holds 3 skipped runs
+    And a ready story "mw-gq6.1" of that epic
+    And the vault's pull cannot connect to "github.com"
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch leaves with status 0
+
+  Scenario: A reachable tick resets the count
+    Given the dispatch log already holds 2 skipped runs
+    And the dispatch log already holds 1 good run
+    And the dispatch log already holds 1 skipped run
+    And a ready story "mw-gq6.1" of that epic
+    And the vault's pull cannot connect to "github.com"
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch leaves with status 0
+
+  Scenario: A failed run in between breaks the count of skipped ticks
+    Given the dispatch log already holds 2 skipped runs
+    And the dispatch log already holds 1 failed run
+    And a ready story "mw-gq6.1" of that epic
+    And the vault's pull cannot connect to "github.com"
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch leaves with status 0
+
+  Scenario: A rejected push still fails the unit at once
+    Given a ready story "mw-gq6.1" of that epic
+    And the vault's push is rejected with "! [rejected] main -> main (non-fast-forward)"
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch failed, saying: non-fast-forward
+    And dispatch leaves with status 1
+    And the dispatch log holds exactly one line that begins "2026-09-21T12:00:00Z failed: " and says "non-fast-forward"
+
   Scenario: A rig fetch that cannot resolve a name is tried again, and the session starts once it can
     Given a ready story "mw-gq6.1" of that epic
     And the rig fetch cannot resolve a name for its first 2 tries
