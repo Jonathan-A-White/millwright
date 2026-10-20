@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -70,4 +71,58 @@ func (v *Vault) PutBatchFile(_ context.Context, rig string, number int, name, co
 		return "", fmt.Errorf("writing %s: %w", at, err)
 	}
 	return rel, nil
+}
+
+var _ application.GristBatches = (*Vault)(nil)
+
+// BatchOf implements application.GristBatches: the highest batch of the rig
+// whose outcome.txt says it landed the story ("landed <commit> on <target>, <n>
+// stories: <ids>"). A batch that was held, or that set the story aside, did not
+// carry it.
+func (v *Vault) BatchOf(_ context.Context, rig, story string) (int, bool, error) {
+	if err := safeName("rig", rig); err != nil {
+		return 0, false, err
+	}
+	dir := filepath.Join(v.dir, filepath.FromSlash(path.Join(application.BatchDir, rig)))
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("listing %s: %w", dir, err)
+	}
+	found, highest := false, 0
+	for _, entry := range entries {
+		number, err := strconv.Atoi(entry.Name())
+		if err != nil || !entry.IsDir() || number <= highest {
+			continue
+		}
+		outcome, err := os.ReadFile(filepath.Join(dir, entry.Name(), application.BatchOutcomeFile))
+		if err != nil {
+			continue
+		}
+		if landedStory(string(outcome), story) {
+			found, highest = true, number
+		}
+	}
+	return highest, found, nil
+}
+
+// landedStory reports whether the first line of a batch's outcome.txt is a
+// landing that names story among its stories.
+func landedStory(outcome, story string) bool {
+	first, _, _ := strings.Cut(outcome, "\n")
+	if !strings.HasPrefix(first, "landed ") {
+		return false
+	}
+	_, ids, ok := strings.Cut(first, " stories: ")
+	if !ok {
+		return false
+	}
+	for _, id := range strings.Split(ids, ",") {
+		if strings.TrimSpace(id) == story {
+			return true
+		}
+	}
+	return false
 }

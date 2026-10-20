@@ -43,3 +43,36 @@ func TestBatchesAreNumberedPerRigAndTheirFilesKeptUnderRunsBatch(t *testing.T) {
 		t.Fatalf("expected batch 0 refused")
 	}
 }
+
+func TestBatchOfFindsTheLandedBatchThatCarriedAStory(t *testing.T) {
+	v := New(t.TempDir())
+	ctx := context.Background()
+	put := func(rig string, n int, outcome string) {
+		t.Helper()
+		if _, err := v.PutBatchFile(ctx, rig, n, "outcome.txt", outcome); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("lampas", 127, "held: the rig's tests on the batch failed\nnothing was pushed; main stays at abc, and every story in the batch stays queued\n")
+	put("lampas", 128, "landed be19c521 on main, 3 stories: mw-x.679, mw-x.681, mw-x.411\nset aside, still queued: mw-x.9\n")
+	put("lampas", 129, "landed 0a0a0a0a on main, 1 stories: mw-x.4110\n")
+	put("cairn", 3, "landed 0a0a0a0a on main, 1 stories: mw-x.681\n")
+	for _, tc := range []struct {
+		rig, story string
+		number     int
+		found      bool
+	}{
+		{"lampas", "mw-x.681", 128, true},
+		{"lampas", "mw-x.411", 128, true},
+		{"lampas", "mw-x.4110", 129, true},
+		{"lampas", "mw-x.9", 0, false},
+		{"lampas", "mw-x.68", 0, false},
+		{"cairn", "mw-x.681", 3, true},
+		{"nowhere", "mw-x.681", 0, false},
+	} {
+		n, ok, err := v.BatchOf(ctx, tc.rig, tc.story)
+		if err != nil || ok != tc.found || n != tc.number {
+			t.Errorf("BatchOf(%s, %s) = %d, %v, %v; want %d, %v", tc.rig, tc.story, n, ok, err, tc.number, tc.found)
+		}
+	}
+}

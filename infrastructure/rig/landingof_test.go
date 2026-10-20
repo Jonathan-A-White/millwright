@@ -38,6 +38,25 @@ func TestLandingOfFindsTheCommitMwNextMadeForAStory(t *testing.T) {
 	}
 }
 
+func TestLandingOfFindsTheVersionCommitOfABatch(t *testing.T) {
+	here, _ := aRig(t)
+	write(t, here, "a.txt", "a")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Version 0.1.373 (batch 128 of lampas)")
+	want := run(t, here, "git", "rev-parse", "HEAD")
+
+	w := rig.New()
+	got, ok, err := w.LandingOf(context.Background(), here, "main", "batch 128 of lampas")
+	if err != nil || !ok || got.Version != "0.1.373" || got.Commit != want {
+		t.Errorf("LandingOf batch 128 = %+v, %v, %v; want 0.1.373 at %s", got, ok, err, want)
+	}
+	for _, label := range []string{"batch 12 of lampas", "batch 128 of cairn"} {
+		if got, ok, err := w.LandingOf(context.Background(), here, "main", label); err != nil || ok {
+			t.Errorf("LandingOf %s = %+v, %v, %v; want none", label, got, ok, err)
+		}
+	}
+}
+
 func TestLandingOfOnABranchTheRigLacksIsNoLanding(t *testing.T) {
 	here, _ := aRig(t)
 	if got, ok, err := rig.New().LandingOf(context.Background(), here, "nope", "mw-x.1"); err != nil || ok {
