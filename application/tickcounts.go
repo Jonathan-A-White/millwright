@@ -32,6 +32,9 @@ func TicksKey(host string) string { return "host." + host + ".ticks" }
 type TickLogs struct {
 	Dispatch TickLog
 	Millhand TickLog
+	// RecheckSkips is the log of the pre-dispatch re-runs that were not made
+	// (mw-gq6.640). It is no timer's: it is read for its own section, not counted.
+	RecheckSkips TickLog
 }
 
 // TickOutcome is what one line of a log says about the run it records.
