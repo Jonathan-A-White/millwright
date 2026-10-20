@@ -5,8 +5,10 @@ Needs the scorer's venv, espeak-ng and the model in the cache: test.sh runs
 these, and refuses with a plain line when one is missing.
 """
 
+import io
 import os
 import unittest
+import wave
 
 from mw_scorer import pipeline
 
@@ -174,6 +176,74 @@ class GreekFixtures(unittest.TestCase):
     def test_a_language_espeak_does_not_know_is_refused(self):
         with self.assertRaises(ValueError):
             self.scorer.score(TARGET, "xx-nope", clip("clean.wav"))
+
+
+def joined(*names):
+    """The clips one after another as one WAV (they are all 16 kHz mono 16-bit)."""
+    out, params = io.BytesIO(), None
+    with wave.open(out, "wb") as w:
+        for name in names:
+            with wave.open(io.BytesIO(clip(name))) as r:
+                params = params or r.getparams()
+                w.setparams(params)
+                w.writeframes(r.readframes(r.getnframes()))
+    return out.getvalue()
+
+
+class WovenFixtures(unittest.TestCase):
+    """A reading in two languages: the English fixture and then the Greek one, read
+    one after the other as one clip, scored as segments {en, el}.
+
+    The model has no Greek in its training, so as for GreekFixtures the Greek half is
+    held to what was read, not to every word being right."""
+
+    SEGMENTS = [(TARGET, "en"), (GREEK, "el")]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.scorer = scorer()
+        cls.wav = joined("clean.wav", "el-clean.wav")
+
+    def score(self, segments, lang="en"):
+        result = self.scorer.score(" ".join(t for t, _ in segments), lang, self.wav, segments=segments)
+        Fixtures.assertContract(self, result)
+        return result
+
+    def test_a_correct_mixed_reading_marks_no_word_missed(self):
+        result = self.score(self.SEGMENTS)
+        words = TARGET.split() + GREEK.split()
+        self.assertEqual([w["text"] for w in result["words"]], words)
+        self.assertEqual({w["error"] for w in result["words"]} & {"omission", "not_reached"}, set())
+        self.assertGreaterEqual(result["accuracy"], 80)
+
+    def test_each_word_keeps_its_segment_and_language(self):
+        result = self.score(self.SEGMENTS)
+        want = [(0, "en")] * len(TARGET.split()) + [(1, "el")] * len(GREEK.split())
+        self.assertEqual([(w["segment"], w["lang"]) for w in result["words"]], want)
+
+    def test_the_english_words_are_expected_in_english_ipa_and_the_greek_in_greek_ipa(self):
+        result = self.score(self.SEGMENTS)
+        self.assertEqual(result["words"][1]["expected_phonemes"], ["k", "æ", "t"])
+        greek = {w["text"]: w for w in result["words"][len(TARGET.split()):]}
+        self.assertEqual(greek["τοις"]["expected_phonemes"], ["t", "i", "s"])
+
+    def test_the_same_clip_against_an_all_english_reference_misses_the_greek_words(self):
+        woven = self.score(self.SEGMENTS)
+        english = self.scorer.score(TARGET + " " + GREEK, "en", self.wav)
+        Fixtures.assertContract(self, english)
+
+        def read(result):
+            greek = [w for w in result["words"] if w["text"] in GREEK.split() and w["error"] != "insertion"]
+            return sum(1 for w in greek if w["error"] == "none" and w["produced_phonemes"])
+
+        self.assertGreater(read(woven), read(english))
+
+    def test_segments_of_one_language_are_scored_as_the_one_language_request(self):
+        one = self.scorer.score(TARGET, "en", clip("clean.wav"))
+        seg = self.scorer.score(TARGET, "en", clip("clean.wav"), segments=[(TARGET, "en")])
+        for w in seg["words"]:
+            self.assertEqual((w.pop("segment"), w.pop("lang")), (0, "en"))
+        self.assertEqual(seg, one)
 
 
 if __name__ == "__main__":

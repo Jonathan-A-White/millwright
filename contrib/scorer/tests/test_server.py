@@ -29,14 +29,48 @@ class StandIn:
         self.asked = []
         self.raise_ = None
 
-    def score(self, target_text, lang, wav):
-        self.asked.append((target_text, lang, wav))
+    def score(self, target_text, lang, wav, segments=None):
+        self.asked.append((target_text, lang, wav) if segments is None else (target_text, lang, wav, segments))
         if self.raise_:
             raise self.raise_
         return ANSWER
 
     def health(self):
         return {"model": "stand-in"}
+
+
+class Parser(unittest.TestCase):
+    AUDIO = base64.b64encode(b"RIFFwav").decode()
+
+    def test_the_old_shape_is_still_accepted(self):
+        got = server.parse_request({"target_text": "the cat", "lang": "el", "audio_wav_base64": self.AUDIO})
+        self.assertEqual((got.target_text, got.lang, got.segments, got.wav), ("the cat", "el", None, b"RIFFwav"))
+
+    def test_the_old_shape_defaults_to_english(self):
+        got = server.parse_request({"target_text": "the cat", "audio_wav_base64": self.AUDIO})
+        self.assertEqual((got.lang, got.segments), ("en", None))
+
+    def test_segments_are_read_in_order_with_their_languages(self):
+        got = server.parse_request({"segments": [{"text": "For God so loved", "lang": "en"},
+                                                 {"text": "τὸν κόσμον", "lang": "el-GR"}],
+                                    "audio_wav_base64": self.AUDIO})
+        self.assertEqual(got.segments, [("For God so loved", "en"), ("τὸν κόσμον", "el")])
+        self.assertEqual(got.target_text, "For God so loved τὸν κόσμον")
+
+    def test_segments_win_over_a_target_text_beside_them(self):
+        got = server.parse_request({"target_text": "ignored", "lang": "en", "audio_wav_base64": self.AUDIO,
+                                    "segments": [{"text": "τὸν", "lang": "el"}]})
+        self.assertEqual((got.target_text, got.segments), ("τὸν", [("τὸν", "el")]))
+
+    def test_a_segment_must_be_en_or_el(self):
+        with self.assertRaises(ValueError) as err:
+            server.parse_request({"segments": [{"text": "hola", "lang": "es"}], "audio_wav_base64": self.AUDIO})
+        self.assertIn("en or el", str(err.exception))
+
+    def test_segments_with_no_words_are_refused(self):
+        with self.assertRaises(ValueError) as err:
+            server.parse_request({"segments": [{"text": " ", "lang": "en"}], "audio_wav_base64": self.AUDIO})
+        self.assertIn("segments[0]", str(err.exception))
 
 
 class Server(unittest.TestCase):
@@ -105,6 +139,27 @@ class Server(unittest.TestCase):
         status, body = self.call("POST", "/score", {"target_text": "cat", "audio_wav_base64": "UklGRg=="})
         self.assertEqual(status, 500)
         self.assertIn("out of memory", body)
+
+    def test_segments_are_passed_in_order_with_the_audio(self):
+        status, body = self.call("POST", "/score", {
+            "segments": [{"text": "For God so loved", "lang": "en"}, {"text": "τὸν κόσμον", "lang": "el"}],
+            "audio_wav_base64": base64.b64encode(b"RIFFwav").decode()})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(self.scorer.asked, [("For God so loved τὸν κόσμον", "en", b"RIFFwav",
+                                              [("For God so loved", "en"), ("τὸν κόσμον", "el")])])
+
+    def test_a_bad_segment_is_refused_400_naming_it(self):
+        audio = base64.b64encode(b"RIFF").decode()
+        for segments, word in [
+            ("For God", "segments"), ([], "segments"), (["For God"], "segments[0]"),
+            ([{"text": "For", "lang": "en"}, {"text": "", "lang": "el"}], "segments[1]"),
+            ([{"text": "bonjour", "lang": "fr"}], "fr"), ([{"text": "cat"}], "lang"),
+            ([{"text": 7, "lang": "en"}], "text"),
+        ]:
+            status, body = self.call("POST", "/score", {"segments": segments, "audio_wav_base64": audio})
+            self.assertEqual(status, 400, (segments, body))
+            self.assertIn(word, body)
+        self.assertEqual(self.scorer.asked, [])
 
     def test_an_unknown_path_is_404(self):
         status, _ = self.call("GET", "/nothing")

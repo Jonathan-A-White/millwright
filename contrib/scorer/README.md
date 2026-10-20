@@ -49,7 +49,8 @@ sudo apt remove espeak-ng   # hand step, if nothing else uses it
 ## The contract
 
 `docs/scorers.md` is the contract. `POST /score` takes
-`{"target_text", "lang", "audio_wav_base64"}` (a WAV file; mw sends 16 kHz
+`{"target_text", "lang", "audio_wav_base64"}` or `{"segments", "audio_wav_base64"}`
+(a woven reading, below) (a WAV file; mw sends 16 kHz
 mono, anything else PCM is converted) and answers `200` with a ReadingResult:
 `engine` `local`, one entry per target word in reading order plus one per added
 word, each with `expected_phonemes` and `produced_phonemes` in ARPAbet (IPA
@@ -112,6 +113,22 @@ nothing to leave out in `align`). At the start of a word the stop alone is expec
 (`d`, `b`, `ɡ`). To add one, give it a row in `_IPA_FOLD`,
 `_IPA_NEAR_VOWELS` and `g2p._LANGS`, a pair of fixture clips in
 `fixtures/make.sh`, and a test class beside `GreekFixtures`.
+
+## A woven reading
+
+`segments` (`[{"text", "lang": "en"|"el"}, ...]`, docs/scorers.md) in place of
+`target_text` and `lang` is a reading in two languages. `server.parse_request` reads
+either shape; `Scorer.score(..., segments=[(text, lang)])` scores it. Each segment goes
+through its own espeak-ng voice (`g2p.expected_woven`; the backends are cached by voice,
+so a request asking for both makes both) and the words are laid end to end. With two
+languages every phone is IPA, and each expected phone is marked with its language
+(`phones.speak`) so that `phones.woven_cost` compares what was heard as that word's
+language: one cost function cannot fold the heard IPA for Greek and not for English,
+because it is not told which word a phone is for until the alignment has matched it.
+A woven word's result carries `segment` and `lang`. Segments of one language are
+scored as that language alone. Tests: `tests/test_segments.py` (no model),
+`WovenFixtures` in `tests/test_fixtures.py` (the English and Greek clips read one
+after the other).
 
 The Greek fixtures are espeak-ng's robotic voice, which the model hears worse
 than the English one: the clean clip scores 93 with `πάντα` called a

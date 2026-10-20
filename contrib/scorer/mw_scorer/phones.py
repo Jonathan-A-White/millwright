@@ -153,11 +153,23 @@ def to_ipa_phones(ipa, lang):
     return out
 
 
-class Optional(str):
+class Spoken(str):
+    """An expected phone that knows the language its word is read in (a woven reading,
+    woven_cost). It is a str, so it compares, folds and serialises as the plain phone."""
+
+    lang = ""
+
+
+class Optional(Spoken):
     """A phone the target expects but a reader may leave out: it is deleted for nothing
     (align._gap). It is a str, so it compares, folds and serialises as the plain phone."""
 
-    __slots__ = ()
+
+def speak(phone, lang):
+    """The phone marked as one of lang (a bare code, "en"), still Optional when it was."""
+    out = type(phone)(phone) if isinstance(phone, Spoken) else Spoken(phone)
+    out.lang = lang
+    return out
 
 
 # A Greek voiced stop is spelled with two letters, and espeak-ng says only the stop
@@ -214,6 +226,30 @@ def ipa_cost(lang):
         return 1
 
     return cost
+
+
+def woven_cost(expected, produced):
+    """The substitution_cost of a woven reading, whose words are read in different
+    languages but all compared as IPA phones (to_ipa_phones(ipa, "")). What was heard
+    is the model's raw IPA with no language, so it is compared as the language of the
+    expected phone's word (speak): English through the ARPAbet classes (an English
+    reader's ɪ is not i), any other language folded as its own table has it and costed
+    by ipa_cost. English has a table of its own and Greek's never reaches an English word."""
+    lang = getattr(expected, "lang", "")
+    if is_english(lang):
+        return substitution_cost((to_arpabet(expected) or [expected])[0], (to_arpabet(produced) or [produced])[0])
+    fold = _fold_for(lang)
+    return _woven_ipa_cost(lang)(fold.get(expected, expected), fold.get(produced, produced))
+
+
+_woven_costs = {}
+
+
+def _woven_ipa_cost(lang):
+    code = lang.split("-")[0].lower()
+    if code not in _woven_costs:
+        _woven_costs[code] = ipa_cost(code)
+    return _woven_costs[code]
 
 
 def is_english(lang):

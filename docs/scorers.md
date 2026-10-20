@@ -100,6 +100,35 @@ command stops with a line saying so.
 }
 ```
 
+A reading in more than one language (a verse woven of English and Greek) sends
+`segments` in place of `target_text` and `lang`: the target's pieces in reading order,
+each with its own language, `en` or `el` (a region, `el-GR`, counts as its language):
+
+```json
+{
+  "segments": [
+    {"text": "For God so loved", "lang": "en"},
+    {"text": "τὸν κόσμον", "lang": "el"}
+  ],
+  "audio_wav_base64": "UklGRiQAAABXQVZFZm10IBAAAAEAAQAwHQAAYDsAAAIAEAA..."
+}
+```
+
+Both shapes are accepted; a request with `segments` is scored by them, and its
+`target_text` and `lang` are not used. A segment with no text, with a language other
+than `en` or `el`, or a `segments` that is not a non-empty list is a `400` naming the
+segment. Each segment goes through its own espeak-ng voice (`en-us` or `el`) and the
+reference is their words in order. When the segments are in two languages the reading
+is compared in IPA, word by word: every word's `expected_phonemes` and
+`produced_phonemes` are IPA symbols (English too), and what is heard is compared as
+the language of the word it is matched to (English as English, so an English reader's
+sheep is not seep; Greek folded as the Greek table has it). Segments of one language
+alone are scored exactly as the `target_text` and `lang` of that language would be,
+ARPAbet for English. Either way, each word of the target in the answer also carries
+`"segment"` (the number of its segment in the request, from 0) and `"lang"`; a word
+the reader added (`insertion`) carries neither, and a request without `segments`
+gets neither on any word.
+
 `audio_wav_base64` is the standard base64 of the 16 kHz mono WAV file. The
 scorer answers `200` with a `ReadingResult` as above. Any other status is an
 error, and its body is shown. A connection refused names `local_url` and this

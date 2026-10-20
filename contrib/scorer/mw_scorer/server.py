@@ -1,7 +1,7 @@
 """The scorer's HTTP face (docs/scorers.md): POST /score and GET /health.
 
 One process, standard library only; the scorer behind it is anything with
-score(target_text, lang, wav_bytes) -> ReadingResult dict and health() -> dict.
+score(target_text, lang, wav_bytes[, segments=...]) -> ReadingResult dict and health() -> dict.
 A ValueError from it is the request's fault (400); anything else is a 500.
 """
 
@@ -10,8 +10,68 @@ import binascii
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import NamedTuple
 
 MAX_BODY = 64 << 20
+
+# The languages a woven reading may have a segment in.
+SEGMENT_LANGS = ("en", "el")
+
+
+class Request(NamedTuple):
+    """A /score request, read: the target's text, its language, the segments of a woven
+    reading as [(text, lang)] in reading order (None for a one-language request) and the WAV."""
+    target_text: str
+    lang: str
+    segments: list
+    wav: bytes
+
+
+def parse_request(req):
+    """The Request in a decoded JSON object; a ValueError says what is wrong with it.
+
+    Two shapes: {"target_text", "lang", "audio_wav_base64"} for a reading in one language
+    (lang defaults to "en"), and {"segments": [{"text", "lang"}, ...], "audio_wav_base64"}
+    for a woven one, the segments in reading order, each "en" or "el" (a region, "el-GR",
+    counts as its language). A request with segments is scored by them; its target_text
+    and lang are not used, and the Request's target_text is the segments' text joined."""
+    segments = _segments(req["segments"]) if req.get("segments") is not None else None
+    if segments is None:
+        target, lang = req.get("target_text"), req.get("lang") or "en"
+        if not isinstance(target, str) or not target.strip():
+            raise ValueError("target_text is missing or empty")
+        if not isinstance(lang, str):
+            raise ValueError("lang is not a string")
+    else:
+        target, lang = " ".join(text for text, _ in segments), segments[0][1]
+    audio = req.get("audio_wav_base64")
+    if not isinstance(audio, str) or not audio:
+        raise ValueError("audio_wav_base64 is missing or empty")
+    try:
+        wav = base64.b64decode(audio, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("audio_wav_base64 is not standard base64") from None
+    return Request(target, lang, segments, wav)
+
+
+def _segments(raw):
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("segments is not a non-empty list of {text, lang}")
+    out = []
+    for k, seg in enumerate(raw):
+        name = "segments[%d]" % k
+        if not isinstance(seg, dict):
+            raise ValueError("%s is not an object with text and lang" % name)
+        text, lang = seg.get("text"), seg.get("lang")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("%s text is missing or empty" % name)
+        if not isinstance(lang, str) or not lang:
+            raise ValueError("%s lang is missing: send en or el" % name)
+        code = lang.split("-")[0].lower()
+        if code not in SEGMENT_LANGS:
+            raise ValueError("%s lang %r is not one a woven reading has: en or el" % (name, lang))
+        out.append((text, code))
+    return out
 
 
 def make_server(host, port, scorer, log=None):
@@ -37,19 +97,15 @@ def make_server(host, port, scorer, log=None):
                 return self._text(400, "the request is not JSON")
             if not isinstance(req, dict):
                 return self._text(400, "the request is not a JSON object")
-            target, lang, audio = req.get("target_text"), req.get("lang") or "en", req.get("audio_wav_base64")
-            if not isinstance(target, str) or not target.strip():
-                return self._text(400, "target_text is missing or empty")
-            if not isinstance(lang, str):
-                return self._text(400, "lang is not a string")
-            if not isinstance(audio, str) or not audio:
-                return self._text(400, "audio_wav_base64 is missing or empty")
             try:
-                wav = base64.b64decode(audio, validate=True)
-            except (binascii.Error, ValueError):
-                return self._text(400, "audio_wav_base64 is not standard base64")
+                parsed = parse_request(req)
+            except ValueError as err:
+                return self._text(400, str(err))
             try:
-                result = scorer.score(target, lang, wav)
+                if parsed.segments is None:
+                    result = scorer.score(parsed.target_text, parsed.lang, parsed.wav)
+                else:
+                    result = scorer.score(parsed.target_text, parsed.lang, parsed.wav, segments=parsed.segments)
             except ValueError as err:
                 return self._text(400, str(err))
             except Exception as err:  # noqa: BLE001 - every other failure is the scorer's, said as a 500
