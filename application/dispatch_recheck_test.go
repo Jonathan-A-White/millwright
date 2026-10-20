@@ -371,3 +371,54 @@ func TestASuiteRecheckOfASpecThatFailsIsNotAPassAndOneThatCannotRunIsAnError(t *
 		t.Errorf("a rig this host does not have is an error")
 	}
 }
+
+// A re-run is made in a worktree just cut from main, which has no node_modules:
+// a changed-specs command that builds first (lampas's) finds no tsc there. The
+// runner below is as honest as that: the dependencies are there only when the
+// command installs them before it builds (mw-gq6.638).
+func TestASuiteRecheckInstallsTheRigsDependenciesBeforeItBuildsAndRunsTheSpec(t *testing.T) {
+	runs := &apptest.FakeSuiteRunner{Respond: func(_, command string) (application.Checked, error) {
+		install, build := strings.Index(command, "npm ci"), strings.Index(command, "npm run build")
+		if build >= 0 && (install < 0 || install > build) {
+			return application.Checked{NotRun: true, Output: "> tsc -b && vite build\nsh: 1: tsc: not found\n"}, nil
+		}
+		return application.Checked{Passed: true, Output: "  2 passed (6.0s)\n"}, nil
+	}}
+	suite, _ := recheckSuite(runs)
+	suite.Tests["lampas"] = "npm ci --no-audit --no-fund && TZ=UTC npm test && npm run typecheck && npm run build"
+	suite.ChangedSpecs["lampas"] = "npm run build && TZ=UTC npx playwright test --project=shots " + application.SpecsPlaceholder
+
+	got, err := suite.Recheck(context.Background(), "lampas", greekSpec)
+	if err != nil || !got.Passed || got.Tests != 2 {
+		t.Fatalf("got %+v, %v, want a pass of 2 tests", got, err)
+	}
+	ran := runs.Ran()
+	want := "npm ci --no-audit --no-fund && npm run build && TZ=UTC npx playwright test --project=shots " + greekSpec
+	if len(ran) != 1 || ran[0].Command != want {
+		t.Errorf("ran %+v, want the install, then the changed-specs command: %s", ran, want)
+	}
+}
+
+func TestASuiteRecheckOfAnUnitTestFileAddsNoSecondInstall(t *testing.T) {
+	runs := &apptest.FakeSuiteRunner{}
+	suite, _ := recheckSuite(runs)
+	suite.Tests["lampas"] = "npm ci --no-audit --no-fund && npm test"
+	if _, err := suite.Recheck(context.Background(), "lampas", "src/dates.test.ts"); err != nil {
+		t.Fatal(err)
+	}
+	if ran := runs.Ran(); len(ran) != 1 || ran[0].Command != "npm ci --no-audit --no-fund && npm test src/dates.test.ts" {
+		t.Errorf("ran %+v, want the tests command with the file added and one install", ran)
+	}
+}
+
+func TestASuiteRecheckOfARigWhoseTestsInstallNothingRunsTheSpecCommandAsItIs(t *testing.T) {
+	runs := &apptest.FakeSuiteRunner{}
+	suite, _ := recheckSuite(runs)
+	suite.Tests["lampas"] = "make test"
+	if _, err := suite.Recheck(context.Background(), "lampas", greekSpec); err != nil {
+		t.Fatal(err)
+	}
+	if ran := runs.Ran(); len(ran) != 1 || ran[0].Command != "npx playwright test "+greekSpec {
+		t.Errorf("ran %+v, want the changed-specs command alone", ran)
+	}
+}

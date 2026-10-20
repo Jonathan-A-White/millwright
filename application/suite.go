@@ -488,6 +488,19 @@ type SpecRecheck struct {
 // SpecRecheckTail is how many lines of the run a closing comment keeps.
 const SpecRecheckTail = 8
 
+// installers are the commands that fetch a rig's dependencies into a fresh tree.
+var installers = regexp.MustCompile(`^(npm (ci|install)|yarn install|pnpm install)( |$)`)
+
+// installStep is the first step of a rig's tests command when that step installs
+// the rig's dependencies (`npm ci ... && npm test`), and empty when it does not.
+func installStep(tests string) string {
+	first, _, _ := strings.Cut(strings.TrimSpace(tests), " && ")
+	if installers.MatchString(first) {
+		return first
+	}
+	return ""
+}
+
 var passedCount = regexp.MustCompile(`(\d+) passed`)
 
 // Recheck runs one spec alone on the head of rig's origin, in a worktree of its
@@ -503,6 +516,11 @@ func (s Suite) Recheck(ctx context.Context, rig, spec string) (SpecRecheck, erro
 	var command string
 	if specs := strings.TrimSpace(s.ChangedSpecs[rig]); specs != "" && strings.Contains(path.Base(spec), ".spec.") {
 		command = strings.ReplaceAll(specs, SpecsPlaceholder, shellWord(spec))
+		// The tree is cut from main and has no dependencies; the whole gate installs
+		// them before it runs the specs, and this re-run has to as well (mw-gq6.638).
+		if install := installStep(s.Tests[rig]); install != "" {
+			command = install + " && " + command
+		}
 	} else if tests := strings.TrimSpace(s.Tests[rig]); tests != "" {
 		command = tests + " " + shellWord(spec)
 	} else {
