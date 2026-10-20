@@ -191,3 +191,28 @@ Feature: mw grist grind takes a recording, scores it, and keeps every grind's ra
     And the engine "azure" was given no recording
     And the session's request carries a reading_result from "local", with 3 words
     And the pass notes "azure skipped: no el"
+
+  Scenario: A woven reading's pieces go to the engine in order, each in its own language
+    Given the grind "reading" scores a webm recording against "target_text" in the languages "en" and "el"
+    And the phone sends a "cairn" "reading" grist, version "1.1", of "In the beginning was ὁ λόγος" read aloud in a webm recording woven of "en:In the beginning was" and "el:ὁ λόγος"
+    When the mill grinds
+    Then the mill answered 1, refused 0, failed 0, and left 0 waiting
+    And the engine "local" was given the pieces "en:In the beginning was" and "el:ὁ λόγος" in that order
+    And the run's scorers.json records the pieces "en:In the beginning was" and "el:ὁ λόγος"
+
+  Scenario: An engine that takes one text only is given the pieces' text joined, in the grist's language
+    Given the engine "azure" takes one text only
+    And the grind "reading" scores a webm recording against "target_text" in the languages "en" and "el"
+    And the phone sends a "cairn" "reading" grist, version "1.1", of "In the beginning was ὁ λόγος" read aloud in a webm recording woven of "en:In the beginning was" and "el:ὁ λόγος"
+    When the mill grinds
+    Then the engine "azure" was given the target "In the beginning was ὁ λόγος" in "en" with no pieces
+
+  Scenario: A reading with no pieces is scored as one text, as it always was
+    Given the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording
+    When the mill grinds
+    Then the engine "local" was given the target "the cat sat" in "en" with no pieces
+
+  Scenario: Pieces that are not a list of text and language are the engine's error, never a silent one-text score
+    Given the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording whose segments are "not a list"
+    When the mill grinds
+    Then the session's request carries the error "the grist's segments are not a non-empty list of {text, lang}" for the engine "local"

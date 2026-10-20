@@ -93,6 +93,30 @@ type Scorer interface {
 	Score(ctx context.Context, audio []byte, mime, targetText, lang string) (ReadingResult, error)
 }
 
+// ScoreSegment is one piece of a woven reading: text read in one language, "en"
+// or "el". The pieces of a woven reading are given in the order they were read.
+type ScoreSegment struct {
+	Text string `json:"text"`
+	Lang string `json:"lang"`
+}
+
+// SegmentScorer is an engine that can score a woven reading, whose pieces are
+// in different languages, each in its own. An engine that does not implement it
+// is given the pieces' text joined, in the grist's one language.
+type SegmentScorer interface {
+	ScoreSegments(ctx context.Context, audio []byte, mime string, segments []ScoreSegment) (ReadingResult, error)
+}
+
+// JoinSegments is the pieces' text joined with single spaces, as the app's
+// target_text is.
+func JoinSegments(segments []ScoreSegment) string {
+	texts := make([]string, len(segments))
+	for i, s := range segments {
+		texts[i] = s.Text
+	}
+	return strings.Join(texts, " ")
+}
+
 // LangScorer is an engine that can say which languages it cannot score. An
 // engine that does not implement it is taken to score every language.
 type LangScorer interface {

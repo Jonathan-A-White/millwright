@@ -30,28 +30,46 @@ type Local struct {
 }
 
 // Local satisfies the port.
-var _ application.Scorer = (*Local)(nil)
+var (
+	_ application.Scorer        = (*Local)(nil)
+	_ application.SegmentScorer = (*Local)(nil)
+)
 
 // NewLocal is the local engine talking to the scorer at url.
 func NewLocal(url string) *Local {
 	return &Local{URL: strings.TrimRight(url, "/")}
 }
 
-// localRequest is the body of POST <url>/score (docs/scorers.md).
+// localRequest is the body of POST <url>/score (docs/scorers.md): target_text
+// and lang for a reading in one language, segments for a woven one (which the
+// scorer scores by, each piece in its own language).
 type localRequest struct {
-	TargetText string `json:"target_text"`
-	Lang       string `json:"lang"`
-	AudioWav   string `json:"audio_wav_base64"`
+	TargetText string                     `json:"target_text,omitempty"`
+	Lang       string                     `json:"lang,omitempty"`
+	Segments   []application.ScoreSegment `json:"segments,omitempty"`
+	AudioWav   string                     `json:"audio_wav_base64"`
 }
 
 // Score converts the audio to 16 kHz mono WAV, posts it with the target text,
 // and reads the ReadingResult the scorer answers with.
 func (l *Local) Score(ctx context.Context, audio []byte, mime, targetText, lang string) (application.ReadingResult, error) {
+	return l.score(ctx, audio, mime, localRequest{TargetText: targetText, Lang: lang})
+}
+
+// ScoreSegments posts the pieces of a woven reading in order, each with its
+// language, for the scorer to score word by word in the language it is in.
+func (l *Local) ScoreSegments(ctx context.Context, audio []byte, mime string, segments []application.ScoreSegment) (application.ReadingResult, error) {
+	return l.score(ctx, audio, mime, localRequest{Segments: segments})
+}
+
+// score converts the audio, puts it in the request given and posts it.
+func (l *Local) score(ctx context.Context, audio []byte, mime string, request localRequest) (application.ReadingResult, error) {
 	wav, err := ToWav16k(audio, mime)
 	if err != nil {
 		return application.ReadingResult{}, err
 	}
-	body, err := json.Marshal(localRequest{TargetText: targetText, Lang: lang, AudioWav: base64.StdEncoding.EncodeToString(wav)})
+	request.AudioWav = base64.StdEncoding.EncodeToString(wav)
+	body, err := json.Marshal(request)
 	if err != nil {
 		return application.ReadingResult{}, err
 	}

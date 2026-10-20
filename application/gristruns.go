@@ -67,11 +67,14 @@ type GristRunAttachment struct {
 // type, the text it was read against and the language, and what each engine
 // said, keyed by the engine's name: a ReadingResult, or {"error": "..."}.
 type GristRunScore struct {
-	Attachment int                        `json:"attachment"`
-	Mime       string                     `json:"mime"`
-	Target     string                     `json:"target_text"`
-	Lang       string                     `json:"lang"`
-	Results    map[string]json.RawMessage `json:"reading_result"`
+	Attachment int    `json:"attachment"`
+	Mime       string `json:"mime"`
+	Target     string `json:"target_text"`
+	Lang       string `json:"lang"`
+	// Segments are the pieces of a woven reading as the engines were given
+	// them; none for a reading in one language.
+	Segments []ScoreSegment             `json:"segments,omitempty"`
+	Results  map[string]json.RawMessage `json:"reading_result"`
 }
 
 // GristRunAnswer is how the grind ended.

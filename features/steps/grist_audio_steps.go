@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -34,6 +35,8 @@ type sentClip struct {
 type audioContext struct {
 	c       *gristContext
 	engines map[string]*apptest.FakeScorer
+	// oneText names the engines that take one text only, with no pieces.
+	oneText map[string]bool
 	store   *grist.Runs
 	ticks   bool
 	mu      sync.Mutex
@@ -43,6 +46,14 @@ type audioContext struct {
 	target  string
 	listed  []application.GristRunLine
 	listing bytes.Buffer
+}
+
+// oneTextEngine is an engine that is a Scorer and nothing more: it cannot be
+// given the pieces of a woven reading.
+type oneTextEngine struct{ fake *apptest.FakeScorer }
+
+func (e oneTextEngine) Score(ctx context.Context, audio []byte, mime, target, lang string) (application.ReadingResult, error) {
+	return e.fake.Score(ctx, audio, mime, target, lang)
 }
 
 // audioGrind is a grind file of the feature's, by kind.
@@ -56,6 +67,10 @@ type audioGrind struct {
 func (a *audioContext) registry() application.ScorerRegistry {
 	engines := map[string]application.Scorer{}
 	for name, engine := range a.engines {
+		if a.oneText[name] {
+			engines[name] = oneTextEngine{engine}
+			continue
+		}
 		engines[name] = engine
 	}
 	return application.NewScorerRegistry(engines)
@@ -101,6 +116,10 @@ func registerGristAudio(ctx *godog.ScenarioContext, c *gristContext) {
 
 	ctx.Given(`^the phone sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", of "([^"]*)" read aloud in a webm recording in the language "([^"]*)"$`, a.phoneSendsReadingIn)
 
+	ctx.Given(`^the phone sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", of "([^"]*)" read aloud in a webm recording woven of "([^"]*)" and "([^"]*)"$`, a.phoneSendsWoven)
+	ctx.Given(`^the phone sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", of "([^"]*)" read aloud in a webm recording whose segments are "([^"]*)"$`, a.phoneSendsBadSegments)
+	ctx.Given(`^the engine "([^"]*)" takes one text only$`, a.engineTakesOneText)
+
 	ctx.When(`^mw grist runs lists the runs$`, a.listRuns)
 	ctx.When(`^mw grist runs lists the runs since a day after they were made$`, a.listRunsSinceTomorrow)
 
@@ -121,6 +140,9 @@ func registerGristAudio(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Then(`^the session's directory held no audio$`, a.directoryHeldNoAudio)
 	ctx.Then(`^the session's prompt and system prompt hold no audio$`, a.promptsHoldNoAudio)
 	ctx.Then(`^no engine was given a recording$`, a.noEngineWasGiven)
+	ctx.Then(`^the engine "([^"]*)" was given the pieces "([^"]*)" and "([^"]*)" in that order$`, a.engineWasGivenPieces)
+	ctx.Then(`^the engine "([^"]*)" was given the target "([^"]*)" in "([^"]*)" with no pieces$`, a.engineWasGivenNoPieces)
+	ctx.Then(`^the run's scorers\.json records the pieces "([^"]*)" and "([^"]*)"$`, a.runScorersRecordPieces)
 	ctx.Then(`^the engine "([^"]*)" was given the language "([^"]*)"$`, a.engineWasGivenLang)
 	ctx.Then(`^the engine "([^"]*)" was given no recording$`, a.engineWasGivenNone)
 	ctx.Then(`^the run's scorers\.json records the language "([^"]*)"$`, a.runScorersRecordLang)
@@ -294,6 +316,85 @@ func (a *audioContext) phoneSendsReadingIn(app, kind, v, target, lang string) er
 		return err
 	}
 	return a.c.sendAttached(a.c.phoneKey, a.c.phoneApps, app, kind, v, 0, &sentClip{data: a.clip, mime: "audio/webm", input: input})
+}
+
+// pieces reads "en:In the" and "el:λόγος" as the pieces of a woven reading.
+func pieces(texts ...string) []application.ScoreSegment {
+	var out []application.ScoreSegment
+	for _, t := range texts {
+		lang, text, _ := strings.Cut(t, ":")
+		out = append(out, application.ScoreSegment{Text: text, Lang: lang})
+	}
+	return out
+}
+
+func (a *audioContext) phoneSendsWoven(app, kind, v, target, first, second string) error {
+	a.target = target
+	a.clip = []byte("webm bytes of the child reading " + target)
+	input, err := json.Marshal(map[string]any{"schemaVersion": v, "mode": "reading", "target_text": target, "lang": "en", "segments": pieces(first, second)})
+	if err != nil {
+		return err
+	}
+	return a.c.sendAttached(a.c.phoneKey, a.c.phoneApps, app, kind, v, 0, &sentClip{data: a.clip, mime: "audio/webm", input: input})
+}
+
+func (a *audioContext) phoneSendsBadSegments(app, kind, v, target, segments string) error {
+	a.target = target
+	a.clip = []byte("webm bytes of the child reading " + target)
+	input, err := json.Marshal(map[string]any{"schemaVersion": v, "mode": "reading", "target_text": target, "segments": segments})
+	if err != nil {
+		return err
+	}
+	return a.c.sendAttached(a.c.phoneKey, a.c.phoneApps, app, kind, v, 0, &sentClip{data: a.clip, mime: "audio/webm", input: input})
+}
+
+func (a *audioContext) engineTakesOneText(name string) error {
+	if _, ok := a.engines[name]; !ok {
+		return fmt.Errorf("no engine %q is configured", name)
+	}
+	if a.oneText == nil {
+		a.oneText = map[string]bool{}
+	}
+	a.oneText[name] = true
+	return nil
+}
+
+func (a *audioContext) engineWasGivenPieces(name, first, second string) error {
+	calls, err := a.engineCalls(name)
+	if err != nil {
+		return err
+	}
+	want := pieces(first, second)
+	if len(calls) != 1 || !reflect.DeepEqual(calls[0].Segments, want) {
+		return fmt.Errorf("expected the engine %s given one recording in the pieces %+v, got %+v", name, want, calls)
+	}
+	return nil
+}
+
+func (a *audioContext) engineWasGivenNoPieces(name, target, lang string) error {
+	calls, err := a.engineCalls(name)
+	if err != nil {
+		return err
+	}
+	if len(calls) != 1 || calls[0].Segments != nil || calls[0].Target != target || calls[0].Lang != lang {
+		return fmt.Errorf("expected the engine %s given one recording of %q in %q with no pieces, got %+v", name, target, lang, calls)
+	}
+	return nil
+}
+
+func (a *audioContext) runScorersRecordPieces(first, second string) error {
+	raw, err := a.runFile("scorers.json")
+	if err != nil {
+		return err
+	}
+	var scored []application.GristRunScore
+	if err := json.Unmarshal(raw, &scored); err != nil {
+		return err
+	}
+	if want := pieces(first, second); len(scored) != 1 || !reflect.DeepEqual(scored[0].Segments, want) {
+		return fmt.Errorf("expected scorers.json to record the pieces %+v, got %s", want, raw)
+	}
+	return nil
 }
 
 // engineCalls is what the engine was given.
