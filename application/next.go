@@ -2246,7 +2246,7 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 			}
 		}
 	}
-	var lost error
+	var firstLost, lost error
 	fetch := c.cross != nil
 	for try := 1; try <= n.tries(); {
 		if fetch {
@@ -2271,14 +2271,21 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 		case errors.As(err, &off):
 			n.waitOffTheSlot(ctx, c, report, off.waits)
 		case Rejected(err):
+			if firstLost == nil {
+				firstLost = err
+			}
 			lost = err
 			try++
 		default:
 			return Landed{}, err
 		}
 	}
-	return Landed{}, failedFor(ReasonPushLost, fmt.Errorf("%s could not be landed on %s: the other host got there first %d times running; nothing was forced: %w",
-		c.branch, c.target, n.tries(), lost))
+	first := ""
+	if n.tries() > 1 {
+		first = fmt.Sprintf(" (the first push was refused too: %s)", firstLine(firstLost.Error()))
+	}
+	return Landed{}, failedFor(ReasonPushLost, fmt.Errorf("%s could not be landed on %s: the other host got there first %d times running; nothing was forced%s: %w",
+		c.branch, c.target, n.tries(), first, lost))
 }
 
 // landingRequirements reads the rig's file for a landing: leniently when the

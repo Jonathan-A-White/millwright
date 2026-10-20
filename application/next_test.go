@@ -626,3 +626,41 @@ func TestALandingOutsideTheBandIsRefusedAsBeforeNamingTheCheck(t *testing.T) {
 		})
 	}
 }
+
+// aRemoteThatRefusesEveryPush refuses each push as a rejection, in words that
+// number it, so that a test can see which refusals an error names.
+type aRemoteThatRefusesEveryPush struct {
+	fakeRetryLanding
+	pushes int
+}
+
+func (*aRemoteThatRefusesEveryPush) Merge(context.Context, string, string) (application.Landed, error) {
+	return application.Landed{Commit: "0123456789abcdef"}, nil
+}
+
+func (r *aRemoteThatRefusesEveryPush) Push(context.Context, string, string, string) error {
+	r.pushes++
+	return fmt.Errorf("! [remote rejected] main -> main (cannot lock ref, refusal %d): %w", r.pushes, application.ErrPushRejected)
+}
+
+// A landing refused every time stops push-lost and the error names the first
+// refusal as well as the last (mw-gq6.637).
+func TestALandingRefusedEveryTimeNamesTheFirstRefusalAndTheLast(t *testing.T) {
+	remote := &aRemoteThatRefusesEveryPush{fakeRetryLanding: fakeRetryLanding{AheadCount: 1}}
+	next := aCloseOutOn("laptop", "mw-x.7", aSlot{}, application.CrossSlot{}, remote, &scriptedChecks{passes: []bool{true}})
+	next.Tries = 2
+
+	_, err := next.Run(context.Background(), "mw-x.7")
+	if err == nil {
+		t.Fatal("expected the landing to fail when every push is refused")
+	}
+	said := err.Error()
+	for _, want := range []string{"refusal 1", "refusal 2"} {
+		if !strings.Contains(said, want) {
+			t.Errorf("expected the error to name %q, got %v", want, err)
+		}
+	}
+	if remote.pushes != 2 {
+		t.Errorf("expected 2 pushes, got %d", remote.pushes)
+	}
+}
