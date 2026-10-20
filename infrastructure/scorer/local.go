@@ -16,16 +16,46 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-// DefaultLocalTimeout is how long the local engine waits for a score: the
-// scorer loads a model and listens to the whole clip.
-const DefaultLocalTimeout = 2 * time.Minute
+// The local engine waits for a score as long as the clip allows: the scorer
+// loads a model and listens to the whole clip in one pass, about 0.25 s of CPU
+// for each second of audio (measured over 48 verse readings, mw-gq6.660), so
+// the limit is LocalBaseTimeout plus LocalSecondsAllowance for each second of
+// audio, never more than MaxLocalTimeout. A Lampas reading may be 600 s
+// (recorder.ts): 120 + 0.5 x 600 = 420 s; one of 300 s gets 270 s.
+const (
+	// LocalBaseTimeout is the limit for no audio at all: the model's load.
+	LocalBaseTimeout = 2 * time.Minute
+	// LocalSecondsAllowance is the seconds allowed for each second of audio,
+	// twice the 0.25 measured.
+	LocalSecondsAllowance = 0.5
+	// LocalTimeoutMargin is what the grind's own limit keeps for the model
+	// step after the scoring.
+	LocalTimeoutMargin = time.Minute
+	// MaxLocalTimeout is the most the limit grows to: the grind's limit
+	// (application.DefaultGristTimeout) less LocalTimeoutMargin.
+	MaxLocalTimeout = application.DefaultGristTimeout - LocalTimeoutMargin
+)
+
+// LocalTimeoutFor is how long the local engine waits for the score of audio of
+// the given seconds: LocalBaseTimeout plus LocalSecondsAllowance each second,
+// at most MaxLocalTimeout.
+func LocalTimeoutFor(audioSeconds float64) time.Duration {
+	if audioSeconds < 0 {
+		audioSeconds = 0
+	}
+	limit := LocalBaseTimeout + time.Duration(audioSeconds*LocalSecondsAllowance*float64(time.Second))
+	return min(limit, MaxLocalTimeout)
+}
+
+// wav16kBytesPerSecond is what a second of 16 kHz mono 16-bit WAV takes.
+const wav16kBytesPerSecond = 16000 * 2
 
 // Local is the `local` engine: an HTTP client of the scorer in contrib/scorer,
 // which runs on this host (or one the config names) and does the listening.
 type Local struct {
 	// URL is the scorer's base URL, "http://127.0.0.1:8765".
 	URL string
-	// Timeout bounds one request; zero is DefaultLocalTimeout.
+	// Timeout bounds one request; zero is LocalTimeoutFor the clip's seconds.
 	Timeout time.Duration
 }
 
@@ -75,7 +105,7 @@ func (l *Local) score(ctx context.Context, audio []byte, mime string, request lo
 	}
 	timeout := l.Timeout
 	if timeout <= 0 {
-		timeout = DefaultLocalTimeout
+		timeout = LocalTimeoutFor(float64(len(wav)) / wav16kBytesPerSecond)
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -117,11 +147,12 @@ func (l *Local) score(ctx context.Context, audio []byte, mime string, request lo
 	return result, nil
 }
 
-// reach turns a transport failure into a line that says what to do.
+// reach turns a transport failure into a line that says what to do; a timeout
+// is an application.ScoreTimeout, so the grind can say the reading was not scored.
 func (l *Local) reach(err error, timeout time.Duration) error {
 	var timedOut net.Error
 	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timedOut) && timedOut.Timeout()) {
-		return fmt.Errorf("the local scorer at %s timed out after %s", l.URL, timeout)
+		return &application.ScoreTimeout{Where: "the local scorer at " + l.URL, Limit: timeout}
 	}
 	return fmt.Errorf("the local scorer at %s cannot be reached (%v): install and start it as docs/scorers.md says, or set local_url in the [scorers] table", l.URL, err)
 }

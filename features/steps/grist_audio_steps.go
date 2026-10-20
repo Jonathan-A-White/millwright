@@ -108,6 +108,7 @@ func registerGristAudio(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Given(`^the grind "([^"]*)" takes at most (\d+) turns$`, a.grindTakesTurns)
 	ctx.Given(`^the scorer engines "([^"]*)" and "([^"]*)" are configured, each scoring any reading as "([^"]*)"$`, a.enginesConfigured)
 	ctx.Given(`^the engine "([^"]*)" breaks down with "([^"]*)"$`, a.engineFails)
+	ctx.Given(`^the engine "([^"]*)" ran out of time after (\d+) seconds$`, a.engineTimesOut)
 	ctx.Given(`^the engine "([^"]*)" heard the reading stop after its first word$`, a.engineStopsEarly)
 	ctx.Given(`^the engine "([^"]*)" timed its words$`, a.engineTimesWords)
 	ctx.Given(`^the mill keeps its runs under its state directory$`, a.keepsRuns)
@@ -287,6 +288,15 @@ func (a *audioContext) engineFails(name, why string) error {
 		return fmt.Errorf("no engine %q is configured", name)
 	}
 	engine.Err = fmt.Errorf("%s", why)
+	return nil
+}
+
+func (a *audioContext) engineTimesOut(name string, seconds int) error {
+	engine, ok := a.engines[name]
+	if !ok {
+		return fmt.Errorf("no engine %q is configured", name)
+	}
+	engine.Err = &application.ScoreTimeout{Where: "the " + name + " scorer", Limit: time.Duration(seconds) * time.Second}
 	return nil
 }
 

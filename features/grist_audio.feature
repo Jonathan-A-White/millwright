@@ -192,6 +192,16 @@ Feature: mw grist grind takes a recording, scores it, and keeps every grind's ra
     And the session's request carries a reading_result from "local", with 3 words
     And the pass notes "azure skipped: no el"
 
+  Scenario: An engine that ran out of time says the reading was not scored, in the answer, the record and the pass (mw-gq6.660)
+    Given the engine "azure" ran out of time after 270 seconds
+    And the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording
+    When the mill grinds
+    Then the mill answered 1, refused 0, failed 0, and left 0 waiting
+    And the session's request carries a reading_result from "local", with 3 words
+    And the session's request carries the error "the reading was not scored: it took over 270 s" for the engine "azure"
+    And the app's decrypted reply has the error "the reading was not scored: it took over 270 s" for the engine "azure"
+    And the pass notes "azure: the reading was not scored: it took over 270 s"
+
   Scenario: A woven reading's pieces go to the engine in order, each in its own language
     Given the grind "reading" scores a webm recording against "target_text" in the languages "en" and "el"
     And the phone sends a "cairn" "reading" grist, version "1.1", of "In the beginning was ὁ λόγος" read aloud in a webm recording woven of "en:In the beginning was" and "el:ὁ λόγος"

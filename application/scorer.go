@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // The kinds of error a scorer reports for one word of a reading. docs/scorers.md
@@ -83,6 +84,18 @@ func (r ReadingResult) Validate() error {
 		}
 	}
 	return nil
+}
+
+// ScoreTimeout is the error of an engine that gave up waiting for a score
+// after Limit: the grind says the reading was not scored (mw-gq6.660).
+type ScoreTimeout struct {
+	// Where names the engine, "the local scorer at http://127.0.0.1:8765".
+	Where string
+	Limit time.Duration
+}
+
+func (e *ScoreTimeout) Error() string {
+	return fmt.Sprintf("%s timed out after %s", e.Where, e.Limit)
 }
 
 // Scorer is one engine that scores a reading: audio of someone reading

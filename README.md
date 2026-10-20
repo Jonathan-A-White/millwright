@@ -2822,6 +2822,12 @@ with `local_url` (default `http://127.0.0.1:8765`), `azure_key_file` and
 a 0600 `azure_key_file` and `azure_region`. The contract, with
 the request and response JSON, is `docs/scorers.md`; see `features/scorer.feature`.
 
+The local engine's time limit grows with the clip (`scorer.LocalTimeoutFor`):
+120 s plus 0.5 s for each second of audio, at most 540 s (the grind's 10 minutes less
+a minute for the model step), so 0 s of audio gets 120 s, 20 s 130 s, a 300 s reading 270 s and a
+600 s reading 420 s. A scorer that runs out of time is not silent: the answer's `reading_result`
+entry, `scorers.json` and the pass's notes say `the reading was not scored: it took over <n> s`.
+
 A grist may carry a recording (`audio/webm`, `audio/ogg`, `audio/mp4`, `audio/mpeg`,
 `audio/wav`) for a grind whose file says `"scoring": {"audio": true, "target_field":
 "target_text"}` and lists the type under `attachments.mime`; a grind that does not

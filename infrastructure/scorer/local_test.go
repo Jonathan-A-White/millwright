@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -219,5 +220,50 @@ func TestLocalPostsNoSegmentsForAReadingInOneLanguage(t *testing.T) {
 	}
 	if _, has := raw["segments"]; has {
 		t.Errorf("a one-language request carried segments: %s", raw["segments"])
+	}
+}
+
+// TestLocalTimeoutGrowsWithTheClip: the local scorer's limit is the old two
+// minutes plus half a second for each second of audio, never past the grind's
+// limit less the model step's margin (mw-gq6.660).
+func TestLocalTimeoutGrowsWithTheClip(t *testing.T) {
+	for _, c := range []struct {
+		audio float64
+		want  time.Duration
+	}{
+		{0, 120 * time.Second},
+		{20, 130 * time.Second},
+		{300, 270 * time.Second},
+		{600, 420 * time.Second},
+		{3600, scorer.MaxLocalTimeout},
+	} {
+		if got := scorer.LocalTimeoutFor(c.audio); got != c.want {
+			t.Errorf("%v s of audio: limit %s, want %s", c.audio, got, c.want)
+		}
+	}
+	if scorer.MaxLocalTimeout != application.DefaultGristTimeout-scorer.LocalTimeoutMargin {
+		t.Errorf("the cap %s is not the grind's limit less the margin %s", scorer.MaxLocalTimeout, scorer.LocalTimeoutMargin)
+	}
+}
+
+// TestLocalTimeoutIsATypedError: a request that runs out of time returns the
+// application.ScoreTimeout the grind reports, with the limit it waited (mw-gq6.660).
+func TestLocalTimeoutIsATypedError(t *testing.T) {
+	needFfmpeg(t)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+	local := scorer.NewLocal(srv.URL)
+	local.Timeout = 100 * time.Millisecond
+	_, err := local.Score(context.Background(), clip(t), "audio/webm", "cat", "en")
+	var out *application.ScoreTimeout
+	if !errors.As(err, &out) || out.Limit != 100*time.Millisecond {
+		t.Fatalf("expected a *application.ScoreTimeout of 100ms, got %v", err)
 	}
 }

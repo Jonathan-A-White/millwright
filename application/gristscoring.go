@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -120,7 +121,7 @@ func (g GristGrind) scoreRecordings(ctx context.Context, w *gristWork, plain *Gr
 		if !isGristAudio(clip.mime) {
 			continue
 		}
-		results, took := g.scoreClip(ctx, engines, clip, read)
+		results, took := g.scoreClip(ctx, w, engines, clip, read)
 		if w.scorerSeconds == nil {
 			w.scorerSeconds = map[string]float64{}
 		}
@@ -189,7 +190,7 @@ func (g GristGrind) enginesFor(w *gristWork, engines []string) []string {
 
 // scoreClip runs every engine on one recording at once, and reports what each
 // said by its name, with the seconds each took.
-func (g GristGrind) scoreClip(ctx context.Context, engines []string, clip gristClip, read gristReading) (map[string]json.RawMessage, map[string]float64) {
+func (g GristGrind) scoreClip(ctx context.Context, w *gristWork, engines []string, clip gristClip, read gristReading) (map[string]json.RawMessage, map[string]float64) {
 	results := make(map[string]json.RawMessage, len(engines))
 	took := make(map[string]float64, len(engines))
 	var mu sync.Mutex
@@ -199,9 +200,12 @@ func (g GristGrind) scoreClip(ctx context.Context, engines []string, clip gristC
 		go func() {
 			defer wg.Done()
 			begun := g.now()
-			said := g.scoreWith(ctx, name, clip, read)
+			said, note := g.scoreWith(ctx, name, clip, read)
 			seconds := g.now().Sub(begun).Seconds()
 			mu.Lock()
+			if note != "" {
+				w.notes = append(w.notes, note)
+			}
 			results[name] = said
 			took[name] = seconds
 			mu.Unlock()
@@ -212,17 +216,19 @@ func (g GristGrind) scoreClip(ctx context.Context, engines []string, clip gristC
 }
 
 // scoreWith is one engine's answer for one recording, as JSON: its
-// ReadingResult, or {"error": "..."}.
-func (g GristGrind) scoreWith(ctx context.Context, name string, clip gristClip, read gristReading) json.RawMessage {
+// ReadingResult, or {"error": "..."}; and a note for the pass when the engine
+// ran out of time, so the reading is said not to be scored, never dropped
+// in silence.
+func (g GristGrind) scoreWith(ctx context.Context, name string, clip gristClip, read gristReading) (json.RawMessage, string) {
 	if read.badSegments != "" {
-		return mustJSON(gristEngineError{read.badSegments})
+		return mustJSON(gristEngineError{read.badSegments}), ""
 	}
 	if read.target == "" && read.segments == nil {
-		return mustJSON(gristEngineError{fmt.Sprintf("the grist's request has no text to score against in %q", read.field)})
+		return mustJSON(gristEngineError{fmt.Sprintf("the grist's request has no text to score against in %q", read.field)}), ""
 	}
 	engine, err := g.Scorers.Get(name)
 	if err != nil {
-		return mustJSON(gristEngineError{err.Error()})
+		return mustJSON(gristEngineError{err.Error()}), ""
 	}
 	var result ReadingResult
 	if segmenter, ok := engine.(SegmentScorer); ok && read.segments != nil {
@@ -234,12 +240,17 @@ func (g GristGrind) scoreWith(ctx context.Context, name string, clip gristClip, 
 		result, err = engine.Score(ctx, clip.data, clip.mime, read.target, read.lang)
 	}
 	if err != nil {
-		return mustJSON(gristEngineError{err.Error()})
+		var out *ScoreTimeout
+		if errors.As(err, &out) {
+			said := fmt.Sprintf("the reading was not scored: it took over %d s", int(out.Limit.Seconds()))
+			return mustJSON(gristEngineError{said}), name + ": " + said
+		}
+		return mustJSON(gristEngineError{err.Error()}), ""
 	}
 	if result.Engine == "" {
 		result.Engine = name
 	}
-	return mustJSON(result)
+	return mustJSON(result), ""
 }
 
 // mustJSON is v as JSON; a value of the types used here always encodes.
