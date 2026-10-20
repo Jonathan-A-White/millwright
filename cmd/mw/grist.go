@@ -348,6 +348,7 @@ func newRequestStatus(out io.Writer) (application.GristStatus, error) {
 		Tracker:  mwGateway(vaultDir, host),
 		Rules:    vault.New(vaultDir),
 		Landings: rig.New(),
+		Batches:  vault.New(vaultDir),
 		Rigs:     rigs,
 		Out:      out,
 	}, nil

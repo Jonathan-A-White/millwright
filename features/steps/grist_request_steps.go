@@ -27,6 +27,7 @@ type requestContext struct {
 	before   int
 	store    *grist.Requests
 	landings *apptest.FakeLandings
+	batches  *apptest.FakeBatches
 	rules    *apptest.FakeEpicRules
 }
 
@@ -44,6 +45,13 @@ func (r *requestContext) landingsFake() *apptest.FakeLandings {
 		r.landings = apptest.NewFakeLandings()
 	}
 	return r.landings
+}
+
+func (r *requestContext) batchesFake() *apptest.FakeBatches {
+	if r.batches == nil {
+		r.batches = apptest.NewFakeBatches()
+	}
+	return r.batches
 }
 
 func (r *requestContext) rulesFake() *apptest.FakeEpicRules {
@@ -80,6 +88,7 @@ func registerGristRequest(ctx *godog.ScenarioContext, c *gristContext) {
 		step(`^the bead "([^"]*)" goes in progress$`, r.goesInProgress)
 		step(`^the bead "([^"]*)" is closed$`, r.isClosed)
 		step(`^the bead "([^"]*)" is closed after landing in version "([^"]*)" at the commit "([^"]*)"$`, r.isClosedAfterLanding)
+		step(`^the bead "([^"]*)" is closed after landing in batch (\d+) of "([^"]*)" in version "([^"]*)" at the commit "([^"]*)"$`, r.isClosedAfterBatchLanding)
 		step(`^the rig "([^"]*)" names the public url "([^"]*)"$`, r.rigNamesPublicURL)
 		step(`^the status pass runs$`, r.statusPassRuns)
 	}
@@ -90,6 +99,8 @@ func registerGristRequest(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Then(`^the bead "([^"]*)" is not closed$`, r.isNotClosed)
 	ctx.Then(`^the mill keeps a state file for "([^"]*)" under its requests directory$`, r.keepsStateFile)
 	ctx.Then(`^the status pass sent no status$`, r.noStatus)
+	ctx.Then(`^the status pass noted "([^"]*)"$`, r.passNoted)
+	ctx.Then(`^the status pass noted nothing$`, r.passNotedNothing)
 	ctx.Then(`^the status pass sent one "([^"]*)" status for that grist and "([^"]*)"$`, r.sentOne)
 	ctx.Then(`^the status pass sent one "([^"]*)" status for that grist and "([^"]*)" carrying:$`, r.sentOneCarrying)
 }
@@ -118,6 +129,33 @@ func (r *requestContext) isClosedAfterLanding(bead, version, commit string) erro
 	return r.isClosed(bead)
 }
 
+// isClosedAfterBatchLanding is a close after a batch landing: the batch's
+// records name the bead, and the rig's only commit for it is the batch's own,
+// "Version <v> (batch <n> of <rig>)".
+func (r *requestContext) isClosedAfterBatchLanding(bead string, number int, rig, version, commit string) error {
+	r.batchesFake().Carry(rig, bead, number)
+	r.landingsFake().Land(fmt.Sprintf("batch %d of %s", number, rig), version, commit)
+	return r.isClosed(bead)
+}
+
+func (r *requestContext) passNoted(text string) error {
+	for _, line := range strings.Split(r.c.out.String(), "\n") {
+		if strings.HasPrefix(line, "note ") && strings.Contains(line, text) {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected the status pass to note %q, it printed:\n%s", text, r.c.out.String())
+}
+
+func (r *requestContext) passNotedNothing() error {
+	for _, line := range strings.Split(r.c.out.String(), "\n") {
+		if strings.HasPrefix(line, "note ") {
+			return fmt.Errorf("expected the status pass to note nothing, it printed:\n%s", r.c.out.String())
+		}
+	}
+	return nil
+}
+
 func (r *requestContext) rigNamesPublicURL(rig, url string) error {
 	r.rulesFake().Require(rig, domain.EpicRequirements{PublicURL: url})
 	return nil
@@ -139,7 +177,7 @@ func (r *requestContext) statusPassRuns() error {
 func (r *requestContext) pass() application.GristStatus {
 	return application.GristStatus{
 		Postern: r.c.backend, Cipher: &apptest.FakeCipher{From: r.c.millKey}, Keys: r.c.keys,
-		Requests: r.requests(), Tracker: r.c.tracker, Rules: r.rulesFake(), Landings: r.landingsFake(),
+		Requests: r.requests(), Tracker: r.c.tracker, Rules: r.rulesFake(), Landings: r.landingsFake(), Batches: r.batchesFake(),
 		Rigs: map[string]string{"cairn": "/rigs/cairn"}, Now: r.c.audio.now, Out: &r.c.out,
 	}
 }

@@ -222,8 +222,12 @@ type BatchReport struct {
 }
 
 // Label names the batch in a sentence: "batch 3 of lampas".
-func (r BatchReport) Label() string {
-	return fmt.Sprintf("batch %d of %s", r.Number, r.Rig)
+func (r BatchReport) Label() string { return BatchLabel(r.Rig, r.Number) }
+
+// BatchLabel names batch number of rig in a sentence, as the batch's version
+// commit names it: "Version <v> (batch 3 of lampas)".
+func BatchLabel(rig string, number int) string {
+	return fmt.Sprintf("batch %d of %s", number, rig)
 }
 
 // gateOnTheBatch is the one run of the rig's tests, as what it says names it.

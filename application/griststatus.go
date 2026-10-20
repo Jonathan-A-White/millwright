@@ -94,11 +94,20 @@ type GristLanding struct {
 }
 
 // GristLandings finds where a story landed in a rig's checkout, by the commit
-// mw next made for it ("Version <v> (<story>)").
+// mw next made for it ("Version <v> (<story>)"), or for the batch that carried
+// it ("Version <v> (batch <n> of <rig>)": the label is passed as the story).
 type GristLandings interface {
-	// LandingOf reports the landing of story on branch of the rig checked out
-	// at rigDir; false when the branch holds none.
+	// LandingOf reports the landing of story (or of a batch's label) on branch
+	// of the rig checked out at rigDir; false when the branch holds none.
 	LandingOf(ctx context.Context, rigDir, branch, story string) (GristLanding, bool, error)
+}
+
+// GristBatches finds the batch of a rig that carried a story, from what the
+// batch itself kept of the stories it landed (runs/batch/<rig>/<n>/).
+type GristBatches interface {
+	// BatchOf reports the number of the batch of rig that landed story; false
+	// when no batch of the rig did.
+	BatchOf(ctx context.Context, rig, story string) (int, bool, error)
 }
 
 // sendRequestStatus seals a status from the mill key to the key that sent the
@@ -225,6 +234,9 @@ type GristStatus struct {
 	Rules    EpicRules
 	Landings GristLandings
 	Rigs     map[string]string
+	// Batches finds the batch a story was landed in, for a rig that lands in
+	// batches; nil looks for the story's own commit only.
+	Batches GristBatches
 
 	// Now reads the clock; nil reads the real one.
 	Now func() time.Time
@@ -292,8 +304,17 @@ func (g GristStatus) one(ctx context.Context, record GristRequestRecord) (string
 		status.Status, status.Reason = GristRequestDeclined, record.Declined.reason()
 	case detail.Closed():
 		landing, found, err := g.landing(ctx, detail, record.Bead)
-		if err != nil || !found {
+		if err != nil {
 			return "", err
+		}
+		if !found {
+			// A closed bead whose request was told its landing already has
+			// nothing to look for; any other is named, each pass, until its
+			// landing is found or the Mayor marks it declined.
+			if record.Last != nil && (record.Last.Status == GristRequestLanded || record.Last.Status == GristRequestAdopted) {
+				return "", nil
+			}
+			return "", fmt.Errorf("closed, but no landing of it was found in %s on %s (neither its own commit nor a batch that carried it)", detail.Merged().Rig, detail.Merged().Branch)
 		}
 		status.Status = GristRequestLanded
 		if record.Setting != "" {
@@ -324,7 +345,10 @@ func (g GristStatus) one(ctx context.Context, record GristRequestRecord) (string
 	return fmt.Sprintf("%s: %s (request %s of %s)", record.Bead, status.Status, record.Request, record.App), nil
 }
 
-// landing finds where the closed bead landed in its rig, if it did.
+// landing finds where the closed bead landed in its rig, if it did: by the
+// commit mw next made for the story alone, or, when the rig lands in batches,
+// by the commit of the batch that carried it, which the batch's own records
+// name.
 func (g GristStatus) landing(ctx context.Context, detail StoryDetail, bead string) (GristLanding, bool, error) {
 	path := detail.Merged()
 	dir, ok := g.Rigs[path.Rig]
@@ -334,6 +358,20 @@ func (g GristStatus) landing(ctx context.Context, detail StoryDetail, bead strin
 	landing, found, err := g.Landings.LandingOf(ctx, dir, path.Branch, bead)
 	if err != nil {
 		return GristLanding{}, false, fmt.Errorf("looking for the landing in %s: %w", dir, err)
+	}
+	if found || g.Batches == nil {
+		return landing, found, nil
+	}
+	number, carried, err := g.Batches.BatchOf(ctx, path.Rig, bead)
+	if err != nil {
+		return GristLanding{}, false, fmt.Errorf("looking for the batch that carried it: %w", err)
+	}
+	if !carried {
+		return GristLanding{}, false, nil
+	}
+	landing, found, err = g.Landings.LandingOf(ctx, dir, path.Branch, BatchLabel(path.Rig, number))
+	if err != nil {
+		return GristLanding{}, false, fmt.Errorf("looking for the landing of %s in %s: %w", BatchLabel(path.Rig, number), dir, err)
 	}
 	return landing, found, nil
 }
