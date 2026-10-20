@@ -527,8 +527,11 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 	// First, before the sync or any claim, so that a host with a Millhand that
 	// never ticks keeps its mw level: the same look as the Millhand tick's, and
 	// what it says is printed. A build that fails costs the tick nothing.
+	var updateFailure *SelfUpdateFailure
 	if !d.DryRun {
-		for _, note := range d.SelfUpdate.Run(ctx) {
+		var updated []string
+		updated, updateFailure = d.SelfUpdate.Update(ctx)
+		for _, note := range updated {
 			d.print(note + "\n")
 		}
 		for _, note := range d.Backend.Pending(ctx) {
@@ -551,6 +554,19 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 	// row fails it instead, once (mw-gq6.650).
 	if fault, faulted := LocalFault(err); faulted && d.Log != nil && !d.DryRun {
 		err = d.faultedTick(ctx, fault, err)
+	}
+	// A mw that cannot update itself runs old unseen, tick after tick, with the
+	// tick going on: the third failed self-update in a row fails the unit, once,
+	// whatever else the tick met (mw-gq6.654).
+	if updateFailure != nil && d.Log != nil && !d.DryRun {
+		if alarm := d.failedUpdate(ctx, updateFailure); alarm != nil {
+			if _, faulted := LocalFault(err); err == nil || faulted {
+				err = alarm
+			} else {
+				err = errors.Join(err, alarm)
+			}
+		}
+		words += SelfUpdateLogWords(updateFailure.Step, updateFailure.Said)
 	}
 	if d.Log != nil && !d.DryRun {
 		line := d.now().UTC().Format(time.RFC3339) + " " + words
@@ -589,6 +605,21 @@ func (d Dispatch) faultedTick(ctx context.Context, fault *LocalNetworkFault, err
 		d.Host, FaultedTicksAlarm, before.First.UTC().Format(time.RFC3339), oneLine(fault.Said))
 }
 
+// failedUpdate is the failure Run reports when this tick's failed self-update is
+// the SelfUpdateAlarm'th in a row, counted from the log as it stands before this
+// tick's own line is added; nil for any other.
+func (d Dispatch) failedUpdate(ctx context.Context, failure *SelfUpdateFailure) error {
+	before := NewestRun(ctx, d.Log, SelfUpdateOutcome)
+	if before.Outcome != TickFailed {
+		before = TickRun{}
+	}
+	if before.Count+1 != SelfUpdateAlarm {
+		return nil
+	}
+	return fmt.Errorf("dispatching on %s: its mw could not be brought level for %d ticks in a row since %s: %s: %s",
+		d.Host, SelfUpdateAlarm, before.First.UTC().Format(time.RFC3339), failure.Step, oneLine(failure.Said))
+}
+
 // The words a dispatch's line of its log holds after the time. ok says the run
 // did what it is for, and is followed by how many sessions it started or that
 // nothing was ready; a local network fault is a run that could not be made, not
@@ -602,6 +633,16 @@ const (
 	DispatchLogSkipped      = "skipped: "
 	DispatchLogFailed       = "failed: "
 )
+
+// SelfUpdateLogWords is what a tick whose self-update failed adds to its line of
+// the log, after the rest of its words (mw-gq6.654).
+func SelfUpdateLogWords(step, said string) string {
+	return selfUpdateLogMark + step + ": " + clippedTo(oneLine(said), DispatchLogReasonLimit)
+}
+
+// selfUpdateLogMark opens those words; a line without it is a tick whose
+// self-update did not fail.
+const selfUpdateLogMark = " | self-update failed at "
 
 // DispatchLogReasonLimit is how many characters of a failure's reason its line
 // of the log keeps: a complaint of many lines of git's is one line, and short.
@@ -653,6 +694,11 @@ const SkippedTicksAlarm = 3
 // before the unit fails and the Mayor is told, once (mw-gq6.650): the same three
 // as SkippedTicksAlarm, counted from the same log.
 const FaultedTicksAlarm = SkippedTicksAlarm
+
+// SelfUpdateAlarm is how many ticks in a row may fail to bring this host's mw
+// level before the unit fails and the Mayor is told, once (mw-gq6.654): the same
+// three as SkippedTicksAlarm, counted from the same log.
+const SelfUpdateAlarm = SkippedTicksAlarm
 
 // lostClaimsOnly reads what a failed dispatch said of itself, with or without
 // the "failed: " in front: it reports who held each story when every failure in

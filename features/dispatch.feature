@@ -119,6 +119,66 @@ Feature: Dispatching the stories this host is ready to work
     Then dispatch failed, saying: local network fault for 3 ticks in a row since 2026-09-21T10:00:00Z
     And dispatch leaves with status 1
 
+  # A host whose mw cannot update itself runs an old mw unseen: one failed
+  # self-update stays quiet, the third in a row fails the unit once (mw-gq6.654).
+  Scenario: One tick whose self-update fails goes on as it always did and sends nothing
+    Given a ready story "mw-gq6.1" of that epic
+    And the host's self-update fails at fetch with "fatal: unable to access 'https://github.com/x/y/': The requested URL returned error: 403"
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch leaves with status 0
+    And the dispatch printed "self-update: millwright could not be brought level: fetching"
+    And the Mayor has 0 mails
+
+  Scenario Outline: The third tick in a row whose self-update fails at <step> fails the unit, naming the step, its error and the first tick's time
+    Given the dispatch log already holds 2 runs whose self-update failed
+    And a ready story "mw-gq6.1" of that epic
+    And the host's self-update fails at <step> with "<said>"
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch failed, saying: its mw could not be brought level for 3 ticks in a row since 2026-09-21T10:00:00Z: <step>: <said>
+    And dispatch leaves with status 1
+
+    Examples:
+      | step         | said                                              |
+      | fetch        | fatal: Authentication failed                      |
+      | fast-forward | error: Your local changes would be overwritten    |
+
+  Scenario: The third tick in a row whose build fails names the build and what it printed
+    Given the dispatch log already holds 2 runs whose self-update failed
+    And a ready story "mw-gq6.1" of that epic
+    And the host's self-update fails at build with "undefined: Frobnicate"
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch failed, saying: its mw could not be brought level for 3 ticks in a row since 2026-09-21T10:00:00Z: build: after landing: make build: exit status 2: undefined: Frobnicate
+    And dispatch leaves with status 1
+
+  Scenario: Two ticks in a row whose self-update fails still send nothing
+    Given the dispatch log already holds 1 run whose self-update failed
+    And a ready story "mw-gq6.1" of that epic
+    And the host's self-update fails at build with "undefined: Frobnicate"
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch leaves with status 0
+
+  Scenario: Only the third tick alarms; a fourth does not until a good self-update has reset the count
+    Given the dispatch log already holds 3 runs whose self-update failed
+    And a ready story "mw-gq6.1" of that epic
+    And the host's self-update fails at fetch with "fatal: Authentication failed"
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch leaves with status 0
+
+  Scenario: A good self-update resets the count
+    Given the dispatch log already holds 2 runs whose self-update failed
+    And the dispatch log already holds 1 good run
+    And the dispatch log already holds 1 run whose self-update failed
+    And a ready story "mw-gq6.1" of that epic
+    And the host's self-update fails at fetch with "fatal: Authentication failed"
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch leaves with status 0
+
+  Scenario: A tick that fails its self-update is told in its line of the log
+    Given a ready story "mw-gq6.1" of that epic
+    And the host's self-update fails at fetch with "fatal: Authentication failed"
+    When dispatch runs on "vps" with a cap of 1
+    Then the dispatch log holds exactly one line that begins "2026-09-21T12:00:00Z ok: 1 started" and says "self-update failed at fetch: fatal: Authentication failed"
+
   Scenario: Any other sync failure is not tried again and fails as it always did
     Given a ready story "mw-gq6.1" of that epic
     And the vault's pull is refused with "git@github.com: Permission denied (publickey)."

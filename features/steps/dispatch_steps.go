@@ -43,6 +43,10 @@ type dispatchContext struct {
 	rules *apptest.FakeEpicRules
 	mail  *apptest.FakeMailbox
 
+	// selfUpdate is the self-update a scenario made fail, when it did; otherwise
+	// the dispatch updates nothing (mw-gq6.654).
+	selfUpdate application.SelfUpdate
+
 	// priorTicks is how many ticks a scenario has already put in the dispatch log.
 	priorTicks int
 
@@ -154,6 +158,9 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the vault's push cannot connect to "([^"]*)"$`, c.theVaultsPushCannotConnect)
 	ctx.Given(`^the vault's push is rejected with "([^"]*)"$`, c.theVaultsPushIsRejected)
 	ctx.Given(`^the dispatch log already holds (\d+) (skipped|good|failed|local network) (?:runs?|faults?)$`, c.theDispatchLogAlreadyHolds)
+	ctx.Given(`^the dispatch log already holds (\d+) runs? whose self-update failed$`, c.theDispatchLogAlreadyHoldsFailedSelfUpdates)
+	ctx.Given(`^the host's self-update fails at (fetch|fast-forward|build) with "([^"]*)"$`, c.theHostsSelfUpdateFails)
+	ctx.Then(`^the dispatch printed "([^"]*)"$`, c.theDispatchPrinted)
 	ctx.Given(`^the config file says dispatch_sync_tries is (\d+) and dispatch_sync_wait is "([^"]*)"$`, c.theConfigSaysTheSyncKnobs)
 	ctx.Given(`^the config file says max_attempts is (\d+)$`, c.theConfigSaysMaxAttempts)
 	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times?$`, c.theStoryHasBeenTried)
@@ -742,6 +749,79 @@ func (c *dispatchContext) theDispatchLogAlreadyHolds(count int, what string) err
 	return nil
 }
 
+// theDispatchLogAlreadyHoldsFailedSelfUpdates puts earlier ticks into the log
+// as theDispatchLogAlreadyHolds does, each one a tick that went on after a
+// self-update that failed (mw-gq6.654).
+func (c *dispatchContext) theDispatchLogAlreadyHoldsFailedSelfUpdates(count int) error {
+	words := application.DispatchLogNothingReady + application.SelfUpdateLogWords("fetch", "fatal: Authentication failed")
+	log := ticklog.New(c.dispatchLogDir())
+	for i := 0; i < count; i++ {
+		at := dispatchNow.Add(-2 * time.Hour).Add(time.Duration(c.priorTicks) * 15 * time.Minute)
+		c.priorTicks++
+		if err := log.Append(context.Background(), at.UTC().Format(time.RFC3339)+" "+words); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// brokenCheckout is a checkout of the factory rig, behind its origin, whose
+// fetch or fast-forward fails with the words a scenario gave.
+type brokenCheckout struct {
+	fetchErr, advanceErr error
+}
+
+func (b brokenCheckout) Fetch(context.Context, string) error { return b.fetchErr }
+func (b brokenCheckout) Tip(context.Context, string, string, string) (string, error) {
+	return "bbbbbbbbbbbb", nil
+}
+func (b brokenCheckout) Head(context.Context, string) (string, error)          { return "aaaaaaaaaaaa", nil }
+func (b brokenCheckout) Uncommitted(context.Context, string) ([]string, error) { return nil, nil }
+func (b brokenCheckout) Advance(context.Context, string, string, string) (application.Advanced, error) {
+	return application.Advanced{Moved: b.advanceErr == nil}, b.advanceErr
+}
+
+// brokenBuild is an after-landing command that exits 2 printing output.
+type brokenBuild struct{ output string }
+
+func (brokenBuild) Command(string) string { return "make build" }
+func (b brokenBuild) Run(context.Context, string, string) (application.Ran, error) {
+	return application.Ran{Command: "make build", Status: 2, Output: b.output}, nil
+}
+
+// builtNothing remembers no build.
+type builtNothing struct{}
+
+func (builtNothing) Built(context.Context, string) (string, error)   { return "", nil }
+func (builtNothing) MarkBuilt(context.Context, string, string) error { return nil }
+
+// theHostsSelfUpdateFails makes the host's self-update fail at a step: the fetch
+// or the fast-forward with the words given, or the build with the words it printed.
+func (c *dispatchContext) theHostsSelfUpdateFails(step, said string) error {
+	checkout := brokenCheckout{}
+	var after application.AfterLanding = brokenBuild{output: said}
+	switch step {
+	case "fetch":
+		checkout.fetchErr = errors.New(said)
+	case "fast-forward":
+		checkout.advanceErr = errors.New(said)
+	}
+	c.selfUpdate = application.SelfUpdate{
+		Rigs:     map[string]string{application.FactoryRig: c.rig},
+		Checkout: checkout,
+		After:    after,
+		Built:    builtNothing{},
+	}
+	return nil
+}
+
+func (c *dispatchContext) theDispatchPrinted(want string) error {
+	if !strings.Contains(c.out.String(), want) {
+		return fmt.Errorf("expected what dispatch printed to say %q, got:\n%s", want, c.out.String())
+	}
+	return nil
+}
+
 // syncKnobs are what the config gives dispatch for its sync.
 type syncKnobs struct {
 	tries int
@@ -1145,6 +1225,7 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 		Log:         ticklog.New(c.dispatchLogDir()),
 		Now:         func() time.Time { return dispatchNow },
 	}
+	dispatcher.SelfUpdate = c.selfUpdate
 	if c.load != nil {
 		dispatcher.Load = c.load
 	}

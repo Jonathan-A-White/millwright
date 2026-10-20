@@ -111,46 +111,67 @@ func updatedRevision(commit string) string {
 // factory rig level and built, and on the home it deploys the other rigs too
 // (deployOthers).
 func (s SelfUpdate) Run(ctx context.Context) []string {
-	return append(s.runFactory(ctx), s.deployOthers(ctx)...)
+	notes, _ := s.Update(ctx)
+	return notes
 }
 
-func (s SelfUpdate) runFactory(ctx context.Context) []string {
+// SelfUpdateFailure is the step that kept the factory rig's checkout from being
+// brought level and built on one tick, and the first line of what it said
+// (mw-gq6.654): the dispatch counts these tick after tick.
+type SelfUpdateFailure struct {
+	// Step is fetch, fast-forward or build, or the read of origin's main or of the
+	// checkout's commit.
+	Step string
+	Said string
+}
+
+// Update is Run that also says, as a SelfUpdateFailure, when the factory rig could
+// not be brought level or built. A checkout left alone, as it should be, is no
+// failure; nor is a failed deploy of another rig.
+func (s SelfUpdate) Update(ctx context.Context) ([]string, *SelfUpdateFailure) {
+	notes, failure := s.runFactory(ctx)
+	return append(notes, s.deployOthers(ctx)...), failure
+}
+
+func (s SelfUpdate) runFactory(ctx context.Context) ([]string, *SelfUpdateFailure) {
 	dir := s.Rigs[FactoryRig]
 	if dir == "" || s.Checkout == nil || s.After == nil || s.Built == nil || s.After.Command(FactoryRig) == "" {
-		return nil
+		return nil, nil
 	}
-	failed := func(doing string, err error) []string {
-		return []string{fmt.Sprintf("%s could not be brought level: %s: %s", selfUpdateWords, doing, firstLine(err.Error()))}
+	failed := func(step, doing string, err error) ([]string, *SelfUpdateFailure) {
+		said := firstLine(err.Error())
+		return []string{fmt.Sprintf("%s could not be brought level: %s: %s", selfUpdateWords, doing, said)},
+			&SelfUpdateFailure{Step: step, Said: said}
 	}
 
 	if err := s.Checkout.Fetch(ctx, dir); err != nil {
-		return failed("fetching", err)
+		return failed("fetch", "fetching", err)
 	}
 	tip, err := s.Checkout.Tip(ctx, dir, DefaultRemote, FactoryBranch)
 	if err != nil || tip == "" {
 		if err == nil {
 			err = fmt.Errorf("origin has no %s", FactoryBranch)
 		}
-		return failed("reading origin's "+FactoryBranch, err)
+		return failed("read origin's "+FactoryBranch, "reading origin's "+FactoryBranch, err)
 	}
 	before, err := s.Checkout.Head(ctx, dir)
 	if err != nil {
-		return failed("reading the checkout's commit", err)
+		return failed("read the checkout's commit", "reading the checkout's commit", err)
 	}
 	advanced, err := s.Checkout.Advance(ctx, dir, FactoryBranch, tip)
 	if err != nil {
-		return failed("fast-forwarding", err)
+		return failed("fast-forward", "fast-forwarding", err)
 	}
 	if advanced.Left != "" {
-		return []string{selfUpdateWords + " checkout left alone: " + advanced.Left}
+		return []string{selfUpdateWords + " checkout left alone: " + advanced.Left}, nil
 	}
 	head, err := s.Checkout.Head(ctx, dir)
 	if err != nil {
-		return failed("reading the checkout's commit", err)
+		return failed("read the checkout's commit", "reading the checkout's commit", err)
 	}
 
 	formulaNotes := s.installFormulas(ctx, dir, head)
-	with := func(notes []string) []string { return append(formulaNotes, notes...) }
+	with := func(notes []string) ([]string, *SelfUpdateFailure) { return append(formulaNotes, notes...), nil }
 
 	// Level already: build only what an earlier tick's failed build left
 	// unbuilt, and only a tree that is exactly a commit.
@@ -164,13 +185,17 @@ func (s SelfUpdate) runFactory(ctx context.Context) []string {
 	}
 
 	ran, err := s.After.Run(ctx, FactoryRig, dir)
+	var buildSaid string
 	switch {
 	case err != nil:
-		return with([]string{fmt.Sprintf("%s at %s: %s; the old mw is kept, the next tick tries again",
-			selfUpdateWords, updatedRevision(head), afterLandingLine(s.After.Command(FactoryRig), "could not be run: "+firstLine(err.Error())))})
+		buildSaid = afterLandingLine(s.After.Command(FactoryRig), "could not be run: "+firstLine(err.Error()))
 	case !ran.Succeeded():
-		return with([]string{fmt.Sprintf("%s at %s: %s; the old mw is kept, the next tick tries again",
-			selfUpdateWords, updatedRevision(head), ran.Line())})
+		buildSaid = ran.Line()
+	}
+	if buildSaid != "" {
+		notes, _ := with([]string{fmt.Sprintf("%s at %s: %s; the old mw is kept, the next tick tries again",
+			selfUpdateWords, updatedRevision(head), buildSaid)})
+		return notes, &SelfUpdateFailure{Step: "build", Said: firstLine(buildSaid)}
 	}
 
 	notes := []string{fmt.Sprintf("%s %s → %s, built", selfUpdateWords, updatedRevision(before), updatedRevision(head))}
