@@ -124,3 +124,26 @@ func TestTodoSearchTakesPunctuationAsText(t *testing.T) {
 		}
 	}
 }
+
+// A card that waits on an unfinished story is on his board, so it is found
+// (mw-gq6.663): the tracker's ready list leaves it out.
+func TestTodoSearchFindsAnOpenCardThatWaitsOnAnUnfinishedStory(t *testing.T) {
+	tracker, search, out := todoSearchBoard(t)
+	tracker.AddStory("mw-todo", domain.Story{ID: "mw-todo.3", Title: "Pick the Max plan or an API key"})
+	if err := tracker.SetLabels("mw-todo.3", application.LabelHitl, application.LabelHitlTodo); err != nil {
+		t.Fatal(err)
+	}
+	tracker.AddStory("mw-other", domain.Story{ID: "mw-story", Title: "The story it waits on"})
+	if err := tracker.AddBlocker(context.Background(), "mw-todo.3", "mw-story"); err != nil {
+		t.Fatal(err)
+	}
+	search.Graph = tracker
+
+	printed, err := search.Run(context.Background(), []string{"plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if printed != 1 || !strings.Contains(out.String(), "mw-todo.3") {
+		t.Fatalf("expected the waiting card mw-todo.3 to be found, printed %d:\n%s", printed, out)
+	}
+}

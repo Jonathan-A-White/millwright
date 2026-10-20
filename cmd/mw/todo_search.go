@@ -59,7 +59,7 @@ func newTodoSearchCmd() *cobra.Command {
 			}
 			gateway := mwGateway(dir, host)
 			_, err = application.TodoSearch{
-				Tracker: gateway, Closed: gateway, Index: todoindex.Index{Path: path}, Out: cmd.OutOrStdout(),
+				Tracker: gateway, Graph: gateway, Closed: gateway, Index: todoindex.Index{Path: path}, Out: cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args)
 			return err
 		},

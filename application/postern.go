@@ -647,6 +647,10 @@ type PosternInbox struct {
 	// note the question it answers was marked open under. A nil Tracker
 	// leaves every reply printed as text, exactly as an unknown bead does.
 	Tracker WorkTracker
+	// Graph, when set, is read for the open to-dos that wait on an unfinished
+	// story, which the tracker's ready list leaves out (openTodoCards). A nil
+	// Graph reads the ready to-dos only.
+	Graph BeadGraph
 	// Events, when set, is the home's event log: the Governor's hold tap on a
 	// story a session has claimed appends a cancel event to it, which the
 	// follower acts on (mw-jrx0s.16). Nil leaves such a hold refused, as it

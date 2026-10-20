@@ -73,7 +73,7 @@ func (r *talkWaitRun) inboxForIdeas() PosternInbox {
 	return PosternInbox{
 		Postern: r.Postern, Cipher: r.Cipher, Keys: r.Keys, Memory: r.Memory,
 		GovernorKey: r.GovernorKey, AttachmentDir: r.AttachmentDir, Transcriber: r.Transcriber,
-		Ideas: r.Ideas, Tracker: r.Tracker, Lock: r.Lock, Now: r.Now,
+		Ideas: r.Ideas, Tracker: r.Tracker, Graph: r.Graph, Lock: r.Lock, Now: r.Now,
 		Sender: &PosternSend{Postern: r.Postern, Cipher: r.Cipher, Keys: r.Keys, GovernorKey: r.GovernorKey, Now: r.Now},
 	}
 }

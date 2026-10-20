@@ -50,12 +50,43 @@ func unfinishedBlockers(byID map[string]domain.GraphBead, b domain.GraphBead) []
 
 // splitWaiting divides the open cards the tracker lists as ready from those
 // that wait on an unfinished story, and adds the waiting cards the ready list
-// leaves out, which it reads from the bead graph: the tracker keeps a blocked
-// card out of the ready list, so a card that stood in Do now when its blocker
-// was added would stay there. Without a Graph, a ready card's own Needs are
-// what it waits on.
+// leaves out (splitWaitingCards).
 func (p TodoRankPass) splitWaiting(ctx context.Context, ready []StoryDetail) (free []StoryDetail, waiting []todoWaiting, err error) {
-	if p.Graph == nil {
+	return splitWaitingCards(ctx, p.Tracker, p.Graph, ready)
+}
+
+// openTodoCards lists every open hitl:todo card, waiting or not: the cards the
+// tracker lists as ready, and the ones it keeps out of that list because they
+// wait on an unfinished story. It is the one way mw todo search and Postern's
+// reading of his messages list the open to-dos (mw-gq6.663); a nil graph lists
+// the ready ones only. What reads only the ready cards, because a card he
+// cannot act on yet should not alarm him, calls ReadyWithLabel itself.
+func openTodoCards(ctx context.Context, tracker WorkTracker, graph BeadGraph) ([]StoryDetail, error) {
+	ready, err := tracker.ReadyWithLabel(ctx, LabelHitlTodo)
+	if err != nil {
+		return nil, err
+	}
+	if graph == nil {
+		return ready, nil
+	}
+	free, waiting, err := splitWaitingCards(ctx, tracker, graph, ready)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range waiting {
+		free = append(free, w.card)
+	}
+	return free, nil
+}
+
+// splitWaitingCards divides the open cards the tracker lists as ready from
+// those that wait on an unfinished story, and adds the waiting cards the ready
+// list leaves out, which it reads from the bead graph: the tracker keeps a
+// blocked card out of the ready list, so a card that stood in Do now when its
+// blocker was added would stay there. Without a graph, a ready card's own Needs
+// are what it waits on.
+func splitWaitingCards(ctx context.Context, tracker WorkTracker, g BeadGraph, ready []StoryDetail) (free []StoryDetail, waiting []todoWaiting, err error) {
+	if g == nil {
 		for _, card := range ready {
 			if len(card.Needs) > 0 {
 				waiting = append(waiting, todoWaiting{card: card, on: slices.Clone(card.Needs)})
@@ -65,7 +96,7 @@ func (p TodoRankPass) splitWaiting(ctx context.Context, ready []StoryDetail) (fr
 		}
 		return free, waiting, nil
 	}
-	graph, err := p.Graph.BeadGraph(ctx)
+	graph, err := g.BeadGraph(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading the bead graph for the cards that wait: %w", err)
 	}
@@ -96,7 +127,7 @@ func (p TodoRankPass) splitWaiting(ctx context.Context, ready []StoryDetail) (fr
 	if len(ids) == 0 {
 		return free, waiting, nil
 	}
-	found, err := p.Tracker.ShowBeads(ctx, ids)
+	found, err := tracker.ShowBeads(ctx, ids)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading the cards that wait, %s: %w", strings.Join(ids, ", "), err)
 	}

@@ -139,6 +139,7 @@ func (r TodoReminder) Run(ctx context.Context) (int, error) {
 	if !r.anyDue(ctx, now) {
 		return 0, nil
 	}
+	// Ready cards only, on purpose: a card that waits on an unfinished story is left out, for he cannot act on it yet (mw-gq6.663).
 	cards, err := r.Tracker.ReadyWithLabel(ctx, LabelHitlTodo)
 	if err != nil {
 		return 0, fmt.Errorf("reading the To do cards: %w", err)

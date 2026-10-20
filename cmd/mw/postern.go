@@ -372,6 +372,7 @@ func newPosternInbox(out io.Writer) (application.PosternInbox, posternWiring, er
 		Keys:          keys,
 		Memory:        gateway,
 		Tracker:       gateway,
+		Graph:         gateway,
 		Mailbox:       gateway,
 		Contacts:      contactBook(),
 		Events:        homeEventLog(),
