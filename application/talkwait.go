@@ -92,6 +92,11 @@ type TalkTurn struct {
 	Role  string `json:"role"`
 	Model string `json:"model"`
 	Cut   bool   `json:"cut"`
+	// Part and Parts say that this record is part Part of Parts of one turn,
+	// sent in parts because the whole is over what one record holds; both are
+	// zero for a turn sent whole.
+	Part  int `json:"part,omitempty"`
+	Parts int `json:"parts,omitempty"`
 	// Links are bead ids the Governor may want to open from the answer, sent
 	// beside the text and never in it. Absent when there are none.
 	Links []string `json:"links,omitempty"`
@@ -185,6 +190,11 @@ type TalkWait struct {
 	// the postern inbox's hook never keep, or answer, the same one together.
 	Lock HostLock
 
+	// PartsWait is how long after the first part of a turn sent in parts the
+	// wait holds for the rest before it prints what came; zero is
+	// DefaultTalkWaitPartsWait.
+	PartsWait time.Duration
+
 	// Limit is how long to wait; zero is DefaultTalkWaitLimit. MinBackoff and
 	// MaxBackoff bound the pause before the stream is opened again; zero is
 	// each one's default.
@@ -274,6 +284,11 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 	if known {
 		run.saved = cursor
 	}
+	defer func() {
+		if run.partsTimer != nil {
+			run.partsTimer.Stop()
+		}
+	}()
 	run.ideasStart(ctx)
 	if run.ideasDue(ctx) && run.giveBackIdeas(false) {
 		return run.ideasEnded(ctx)
@@ -284,7 +299,20 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 
 	backoff := minBackoff
 	for {
-		err := w.Stream.Events(ctx, run.onEvent)
+		if run.partsLate() && run.hearParts(w.now()) {
+			return run.finish(ctx)
+		}
+		streamCtx, endStream := context.WithCancelCause(ctx)
+		run.watchStream(endStream)
+		err := w.Stream.Events(streamCtx, run.onEvent)
+		endStream(nil)
+		if ctx.Err() == nil && !errors.Is(err, errTalkHeard) && !errors.Is(err, errIdeasEnded) && run.partsLate() {
+			// The rest of a turn sent in parts did not come in time.
+			if run.hearParts(w.now()) {
+				return run.finish(ctx)
+			}
+			continue
+		}
 		switch {
 		case errors.Is(err, errTalkHeard):
 			return run.finish(ctx)
@@ -297,6 +325,12 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 			var handed *talkHandedOver
 			if errors.As(context.Cause(ctx), &handed) {
 				return run.handedOver(handed.h), nil
+			}
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) && run.parts != nil && run.Ideas == nil {
+				// The limit came with a turn half heard: say what came.
+				if run.hearParts(w.now()) {
+					return run.finish(ctx)
+				}
 			}
 			if err := run.save(context.WithoutCancel(ctx)); err != nil {
 				return TalkWaitReport{}, err
@@ -385,8 +419,11 @@ type talkWaitRun struct {
 	// turn is the Governor's turn the wait ends on, nil when it ends on new
 	// postern messages alone; posts are those messages, the ones the wait
 	// paged past before it reached the turn included.
-	turn     *TalkTurn
-	turnSeq  int64
+	turn    *TalkTurn
+	turnSeq int64
+	// missing is the lines saying which parts of the turn did not come, ""
+	// when it came whole.
+	missing  string
 	turnTxid string
 	call     *CallRecord
 	callTxid string
@@ -396,6 +433,73 @@ type talkWaitRun struct {
 	posts     []PosternInboxMessage
 	heardAt   time.Time
 	printedAt time.Time
+
+	// parts is the turn sent in parts that the wait is still hearing, nil
+	// when it is hearing none; partsTimer is the PartsWait that ends it, and
+	// partsDue and endStream, under partsMu, are what the timer sets and ends.
+	parts      *talkParts
+	partsTimer *time.Timer
+	partsMu    sync.Mutex
+	partsDue   bool
+	endStream  context.CancelCauseFunc
+}
+
+// errTalkPartsDue ends the stream when the rest of a turn sent in parts did
+// not come within PartsWait.
+var errTalkPartsDue = errors.New("the rest of a turn sent in parts did not come in time")
+
+// watchStream says which stream the parts timer ends; a timer that fired
+// before there was one ends this one at once.
+func (r *talkWaitRun) watchStream(end context.CancelCauseFunc) {
+	r.partsMu.Lock()
+	defer r.partsMu.Unlock()
+	r.endStream = end
+	if r.partsDue {
+		end(errTalkPartsDue)
+	}
+}
+
+// partsLate reports whether the timer of the turn being heard in parts has fired.
+func (r *talkWaitRun) partsLate() bool {
+	r.partsMu.Lock()
+	defer r.partsMu.Unlock()
+	return r.parts != nil && r.partsDue
+}
+
+// armParts starts the wait for the rest of a turn whose first part has come.
+func (r *talkWaitRun) armParts() {
+	wait := r.PartsWait
+	if wait <= 0 {
+		wait = DefaultTalkWaitPartsWait
+	}
+	r.partsTimer = time.AfterFunc(wait, func() {
+		r.partsMu.Lock()
+		defer r.partsMu.Unlock()
+		r.partsDue = true
+		if r.endStream != nil {
+			r.endStream(errTalkPartsDue)
+		}
+	})
+}
+
+// hearParts makes of the parts that have come the Governor's turn, whole or,
+// with the lines for what is missing, half; it reports whether the wait ends on
+// it. A turn kept for after Ideas only is not heard, and the wait goes on.
+func (r *talkWaitRun) hearParts(arrived time.Time) bool {
+	heard := r.parts
+	r.parts = nil
+	r.partsTimer.Stop()
+	r.partsMu.Lock()
+	r.partsDue = false
+	r.partsMu.Unlock()
+	turn := heard.joined()
+	if r.keepTurn(heard.first, turn) {
+		return false
+	}
+	r.turn, r.turnSeq, r.turnTxid, r.heardAt = turn, heard.first.Seq, heard.first.Txid, arrived
+	r.channel = recordChannel(heard.first.Txid)
+	r.missing = heard.missingLines()
+	return true
 }
 
 // onEvent handles one event: a hello puts a first run's cursor at the head,
@@ -471,6 +575,23 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 		} else if record.Class == talkRecordClass && record.To == pubKey {
 			turn, ok := r.governorsTurn(record, privKey)
 			if ok {
+				if r.parts != nil && !r.parts.is(turn) && r.hearParts(arrived) {
+					// Another turn begins: the half heard is the Governor's word first.
+					r.cursor = record.Seq - 1
+					return errTalkHeard
+				}
+				if turn.inParts() {
+					if r.parts == nil {
+						r.parts = newTalkParts(record, turn)
+						r.armParts()
+					}
+					r.parts.add(turn)
+					r.cursor = record.Seq
+					if r.parts.complete() && r.hearParts(arrived) {
+						return errTalkHeard
+					}
+					continue
+				}
 				if r.keepTurn(record, turn) {
 					r.cursor = record.Seq
 					continue
@@ -497,7 +618,7 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 		}
 		r.cursor = record.Seq
 	}
-	if len(r.posts) > 0 {
+	if len(r.posts) > 0 && r.parts == nil {
 		r.heardAt = arrived
 		return errTalkHeard
 	}
@@ -654,8 +775,8 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 		// that the time still measures the wake and not the blob.
 		saved := r.turnSaved()
 		image := r.turnImage(ctx)
-		r.printf(r.Out, "talk %s turn %d (role %s)\nmodel %s\n%scut %s\ntext: %s\n%s%s%sindex-to-print %d ms\n",
-			r.turn.Talk.ID, r.turn.Talk.Turn, r.turn.Role, model, switched, cut, r.turn.Text, saved, image, about, report.IndexToPrint.Milliseconds())
+		r.printf(r.Out, "talk %s turn %d (role %s)\nmodel %s\n%scut %s\ntext: %s\n%s%s%s%sindex-to-print %d ms\n",
+			r.turn.Talk.ID, r.turn.Talk.Turn, r.turn.Role, model, switched, cut, r.turn.Text, saved, image, r.missing, about, report.IndexToPrint.Milliseconds())
 	}
 	if len(r.posts) > 0 {
 		r.printf(r.Out, "new postern message: %d unread, read them with mw postern inbox\n", len(r.posts))
@@ -800,7 +921,15 @@ func (s TalkShow) Run(ctx context.Context, id string) error {
 	// The wait's own reading of a record decides which are the Governor's.
 	reader := &talkWaitRun{TalkWait: TalkWait{Cipher: s.Cipher, GovernorKey: s.GovernorKey, Err: s.Err}}
 	inbox := PosternInbox{Postern: s.Postern, Cipher: s.Cipher, Keys: s.Keys, AttachmentDir: s.AttachmentDir}
-	shown := 0
+	// A turn sent in parts is shown once, at its first part, joined; a part
+	// that never came is said.
+	type shownTurn struct {
+		record PosternRecord
+		turn   *TalkTurn
+		parts  *talkParts
+	}
+	var turns []shownTurn
+	halves := map[int]*talkParts{}
 	for _, record := range records {
 		if record.Class != talkRecordClass || record.To != pubKey {
 			continue
@@ -809,10 +938,28 @@ func (s TalkShow) Run(ctx context.Context, id string) error {
 		if !ok || turn.Talk.ID != id {
 			continue
 		}
+		if !turn.inParts() {
+			turns = append(turns, shownTurn{record: record, turn: turn})
+			continue
+		}
+		heard := halves[turn.Talk.Turn]
+		if heard == nil || !heard.is(turn) {
+			heard = newTalkParts(record, turn)
+			halves[turn.Talk.Turn] = heard
+			turns = append(turns, shownTurn{record: record, parts: heard})
+		}
+		heard.add(turn)
+	}
+	shown := 0
+	for _, t := range turns {
+		turn, missing := t.turn, ""
+		if t.parts != nil {
+			turn, missing = t.parts.joined(), t.parts.missingLines()
+		}
 		shown++
-		fmt.Fprintf(s.Out, "talk %s turn %d (role %s) at %s\ntext: %s\n%s",
-			turn.Talk.ID, turn.Talk.Turn, turn.Role, record.Ts.UTC().Format(time.RFC3339), turn.Text,
-			inbox.talkImageLine(ctx, turn.Attachment, record.Txid))
+		fmt.Fprintf(s.Out, "talk %s turn %d (role %s) at %s\ntext: %s\n%s%s",
+			turn.Talk.ID, turn.Talk.Turn, turn.Role, t.record.Ts.UTC().Format(time.RFC3339), turn.Text,
+			inbox.talkImageLine(ctx, turn.Attachment, t.record.Txid), missing)
 	}
 	if shown == 0 {
 		return fmt.Errorf("mw talk show: no turn of talk %s that the Governor sent this key", id)
@@ -902,13 +1049,18 @@ func (r *talkWaitRun) voiceTranscript(ctx context.Context, m PosternInboxMessage
 
 // save moves the stored cursor to the one in hand.
 func (r *talkWaitRun) save(ctx context.Context) error {
-	if !r.known || r.cursor == r.saved {
+	// A turn only half heard is not read: its first part is where the next run starts.
+	cursor := r.cursor
+	if r.parts != nil {
+		cursor = min(cursor, r.parts.first.Seq-1)
+	}
+	if !r.known || cursor == r.saved {
 		return nil
 	}
-	if err := r.Memory.SetNote(ctx, TalkWaitCursorKey, strconv.FormatInt(r.cursor, 10)); err != nil {
+	if err := r.Memory.SetNote(ctx, TalkWaitCursorKey, strconv.FormatInt(cursor, 10)); err != nil {
 		return fmt.Errorf("saving the talk cursor: %w", err)
 	}
-	r.saved = r.cursor
+	r.saved = cursor
 	return nil
 }
 
