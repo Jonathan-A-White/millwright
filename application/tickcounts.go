@@ -206,6 +206,20 @@ func DispatchOutcome(line string) (time.Time, TickOutcome) {
 	return time.Time{}, TickUnread
 }
 
+// SelfUpdateOutcome reads a line of the dispatch log for what became of the
+// tick's self-update (mw-gq6.654): a failed run if the line says it failed, a
+// good one for any other tick, whatever else the tick met.
+func SelfUpdateOutcome(line string) (time.Time, TickOutcome) {
+	at, outcome := DispatchOutcome(line)
+	switch {
+	case outcome == TickUnread:
+		return time.Time{}, TickUnread
+	case strings.Contains(line, selfUpdateLogMark):
+		return at, TickFailed
+	}
+	return at, TickGood
+}
+
 // MillhandTickOutcome reads a line of the tick log, the one MillhandTick writes:
 // its verdict, and after it the notes of what went wrong on the way, joined by
 // "; ".

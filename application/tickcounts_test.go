@@ -256,3 +256,20 @@ func TestTheTicksNoteCarriesSkippedOnlyWhenThereAreSome(t *testing.T) {
 		t.Errorf("expected a note without the skipped runs not to say what some does")
 	}
 }
+
+func TestFailedSelfUpdatesAreCountedAsTheUnbrokenRunOfThemAtTheEnd(t *testing.T) {
+	at := func(m int) string { return time.Date(2026, 9, 21, 12, m, 0, 0, time.UTC).Format(time.RFC3339) + " " }
+	failed := application.DispatchLogNothingReady + application.SelfUpdateLogWords("build", "after landing: make build: exit status 2")
+	log := heldLog(t, at(0)+failed, at(5)+"ok: 1 started", at(10)+failed, at(15)+application.DispatchLogFault+application.SelfUpdateLogWords("fetch", "x"), at(20)+failed)
+	run := application.NewestRun(context.Background(), log, application.SelfUpdateOutcome)
+	if run.Outcome != application.TickFailed || run.Count != 3 || !run.First.Equal(time.Date(2026, 9, 21, 12, 10, 0, 0, time.UTC)) {
+		t.Errorf("expected a run of 3 failed self-updates from 12:10, got %+v", run)
+	}
+	// A failed tick of the dispatch that updated its mw is still a good self-update.
+	if _, got := application.SelfUpdateOutcome(at(0) + "failed: x"); got != application.TickGood {
+		t.Errorf("expected a failed run with no mark to be a good self-update, got %v", got)
+	}
+	if _, got := application.SelfUpdateOutcome("not a line"); got != application.TickUnread {
+		t.Errorf("expected an unread line, got %v", got)
+	}
+}

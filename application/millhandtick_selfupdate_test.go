@@ -158,3 +158,37 @@ func TestATickSaysWhyAnUpdateCouldNotBeMade(t *testing.T) {
 		t.Errorf("got %q", report.Line)
 	}
 }
+
+func TestUpdateNamesTheStepThatFailed(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*fakeCheckout, *fakeAfter)
+		step  string
+		said  string
+	}{
+		{"fetch", func(c *fakeCheckout, _ *fakeAfter) { c.fetchErr = errors.New("fatal: Authentication failed\nmore") }, "fetch", "fatal: Authentication failed"},
+		{"build", func(_ *fakeCheckout, a *fakeAfter) {
+			a.ran = application.Ran{Command: "make build", Status: 2, Output: "boom"}
+		}, "build", "after landing: make build: exit status 2: boom"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tick, checkout, after, _ := anUpdatingTick(t)
+			tc.setup(checkout, after)
+			_, failure := tick.SelfUpdate.Update(context.Background())
+			if failure == nil || failure.Step != tc.step || failure.Said != tc.said {
+				t.Fatalf("expected a failure at %s saying %q, got %+v", tc.step, tc.said, failure)
+			}
+		})
+	}
+	t.Run("a good update and a checkout left alone are no failure", func(t *testing.T) {
+		tick, checkout, after, _ := anUpdatingTick(t)
+		after.ran = application.Ran{Command: "make build"}
+		if _, failure := tick.SelfUpdate.Update(context.Background()); failure != nil {
+			t.Fatalf("expected no failure, got %+v", failure)
+		}
+		checkout.left = "main here has commits of its own"
+		if _, failure := tick.SelfUpdate.Update(context.Background()); failure != nil {
+			t.Fatalf("expected a checkout left alone to be no failure, got %+v", failure)
+		}
+	})
+}
