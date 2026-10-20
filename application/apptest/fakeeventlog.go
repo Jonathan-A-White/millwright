@@ -18,10 +18,13 @@ type FakeEventLog struct {
 	days     []string
 	head     uint64
 	failErr  error
+	scanned  int
+	newest   application.EventNewest
 }
 
 var _ application.EventLog = (*FakeEventLog)(nil)
 var _ application.EventArchive = (*FakeEventLog)(nil)
+var _ application.EventNewestLog = (*FakeEventLog)(nil)
 
 // FailNext makes the next Append fail with err, writing nothing.
 func (f *FakeEventLog) FailNext(err error) {
@@ -49,6 +52,9 @@ func (f *FakeEventLog) Append(_ context.Context, evs []events.Event) (uint64, er
 		numbered[i] = e
 	}
 	f.evs = append(f.evs, numbered...)
+	for _, e := range numbered {
+		f.newest.Add(e)
+	}
 	f.head = seq
 	return seq, nil
 }
@@ -57,7 +63,30 @@ func (f *FakeEventLog) Append(_ context.Context, evs []events.Event) (uint64, er
 func (f *FakeEventLog) Since(_ context.Context, seq uint64) ([]events.Event, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return after(f.evs, seq), nil
+	out := after(f.evs, seq)
+	f.scanned += len(out)
+	return out, nil
+}
+
+// Scanned is how many events Since has handed to readers so far: what a test
+// reads to see that a reader did not scan the log.
+func (f *FakeEventLog) Scanned() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.scanned
+}
+
+// Newest implements application.EventNewestLog: what the fake has folded of
+// each event as it was appended, so reading it scans nothing.
+func (f *FakeEventLog) Newest(context.Context) (application.EventNewest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := f.newest
+	out.Jobs = make(map[string]application.JobNewest, len(f.newest.Jobs))
+	for k, v := range f.newest.Jobs {
+		out.Jobs[k] = v
+	}
+	return out, nil
 }
 
 // after is the events of evs with a seq above seq.

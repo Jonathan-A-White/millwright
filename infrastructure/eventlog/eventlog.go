@@ -180,7 +180,10 @@ func (l *Log) sidecar() (uint64, error) {
 }
 
 // Since implements application.EventLog. A torn last line, being written as
-// it is read or left by a crash, is not an event yet and is skipped.
+// it is read or left by a crash, is not an event yet and is skipped. The log is
+// in seq order, so a Since past the first event finds where to begin by reading
+// the log from its end, and reads only what it returns (mw-gq6.655); Since(0)
+// is the whole log.
 func (l *Log) Since(_ context.Context, seq uint64) ([]events.Event, error) {
 	f, err := os.Open(l.Path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -190,6 +193,15 @@ func (l *Log) Since(_ context.Context, seq uint64) ([]events.Event, error) {
 		return nil, fmt.Errorf("opening the event log: %w", err)
 	}
 	defer f.Close()
+	var start int64
+	if seq > 0 {
+		if start, err = startAfter(f, seq); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("reading the event log: %w", err)
+	}
 	var out []events.Event
 	r := bufio.NewReader(f)
 	for n := 1; ; n++ {
@@ -202,12 +214,104 @@ func (l *Log) Since(_ context.Context, seq uint64) ([]events.Event, error) {
 		}
 		var e events.Event
 		if err := json.Unmarshal(line, &e); err != nil {
-			return nil, fmt.Errorf("line %d of %s: %w", n, l.Path, err)
+			return nil, fmt.Errorf("line %d after byte %d of %s: %w", n, start, l.Path, err)
 		}
 		if e.Seq > seq {
 			out = append(out, e)
 		}
 	}
+}
+
+// backChunk is how much of the log's end startAfter reads at a time; it grows
+// for a line longer than that.
+const backChunk = 256 << 10
+
+// startAfter is the byte offset at which the log's lines with a seq above seq
+// begin: the end of the last whole line whose seq is at most seq, or 0 when
+// there is none. It reads the log backward from its last whole line, a chunk at
+// a time, and stops at that line.
+func startAfter(f *os.File, seq uint64) (int64, error) {
+	end, _, err := lastWhole(f)
+	if err != nil {
+		return 0, err
+	}
+	chunk := int64(backChunk)
+	for end > 0 {
+		from := max(end-chunk, 0)
+		buf := make([]byte, end-from)
+		if _, err := f.ReadAt(buf, from); err != nil && !errors.Is(err, io.EOF) {
+			return 0, fmt.Errorf("reading the event log: %w", err)
+		}
+		whole := buf
+		if from > 0 {
+			cut := bytes.IndexByte(buf, '\n')
+			if cut < 0 || cut == len(buf)-1 {
+				// No whole line starts in this chunk: read a bigger one.
+				chunk *= 2
+				continue
+			}
+			whole = buf[cut+1:]
+			from += int64(cut) + 1
+		}
+		// whole is the lines from offset from to end, each ending in a newline.
+		stop := int64(len(whole))
+		for stop > 0 {
+			begin := int64(bytes.LastIndexByte(whole[:stop-1], '\n')) + 1
+			var e struct {
+				Seq uint64 `json:"seq"`
+			}
+			if err := json.Unmarshal(whole[begin:stop], &e); err != nil {
+				return 0, fmt.Errorf("reading the event log backward from byte %d: %w", from+stop, err)
+			}
+			if e.Seq <= seq {
+				return from + stop, nil
+			}
+			stop = begin
+		}
+		end = from
+	}
+	return 0, nil
+}
+
+// statePath is the file beside the log that holds what Newest has folded of it:
+// log.jsonl's is log.newest.json.
+func (l *Log) statePath() string {
+	return strings.TrimSuffix(l.Path, filepath.Ext(l.Path)) + ".newest.json"
+}
+
+// Newest implements application.EventNewestLog. It reads the state file, folds
+// in the events after the seq it covers (only those are read), and leaves the
+// result in the file for the next reader. A state file that is absent, cannot be
+// read, or covers more than the log holds (a log begun again) is made anew from
+// the whole log, once. The file is only a cache: a failure to write it is not
+// the reader's.
+func (l *Log) Newest(ctx context.Context) (application.EventNewest, error) {
+	head, err := l.head()
+	if err != nil {
+		return application.EventNewest{}, err
+	}
+	var n application.EventNewest
+	if data, err := os.ReadFile(l.statePath()); err == nil {
+		if json.Unmarshal(data, &n) != nil || n.Seq > head {
+			n = application.EventNewest{}
+		}
+	}
+	if n.Seq >= head {
+		return n, nil
+	}
+	evs, err := l.Since(ctx, n.Seq)
+	if err != nil {
+		return application.EventNewest{}, err
+	}
+	for _, e := range evs {
+		n.Add(e)
+	}
+	if len(evs) > 0 {
+		if data, err := json.Marshal(n); err == nil {
+			_ = writeSynced(l.statePath(), append(data, '\n'))
+		}
+	}
+	return n, nil
 }
 
 // Head implements application.EventLog.
