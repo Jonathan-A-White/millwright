@@ -102,54 +102,28 @@ func (s Status) batchWaits(ctx context.Context, work WorkInHand) map[string]Batc
 var batchRigNamed = regexp.MustCompile(`([^\s,]+) \(\d+ queued`)
 
 // batchJobsRunning is, for each rig, when a batch-land job that names it began
-// running, read off the events of the log: a job whose newest event says
-// running is running now. The whole log is read, not its newest few: a batch
-// runs for as long as its gate takes, and the factory writes events faster
-// than that, so its running event falls out of any fixed window (mw-gq6.652).
-// The log keeps only what a reader has yet to pass, so this is not the archive.
-// A log that is absent or cannot be read names none.
+// running, read off the newest events the log keeps of each job (NewestOf): a
+// job whose newest event says running is running now. The log is not scanned for
+// them and no window is read: a batch runs for as long as its gate takes, and
+// the factory writes events faster than that, so its running event falls out of
+// any fixed window (mw-gq6.652, mw-gq6.655). A log that is absent or cannot be
+// read names none.
 func (s Status) batchJobsRunning(ctx context.Context) map[string]time.Time {
 	if s.Log == nil {
 		return nil
 	}
-	evs, err := s.Log.Since(ctx, 0)
+	newest, err := NewestOf(ctx, s.Log)
 	if err != nil {
 		return nil
 	}
-	type job struct {
-		rigs    []string
-		state   string
-		running time.Time
-	}
-	byActor := map[string]*job{}
-	for _, e := range evs {
-		if e.Kind != events.KindJob || !strings.HasPrefix(e.Actor, BatchLandJobName+"@") {
-			continue
-		}
-		j := byActor[e.Actor]
-		if j == nil {
-			j = &job{}
-			byActor[e.Actor] = j
-		}
-		j.state = e.To
-		switch e.To {
-		case events.JobScheduled:
-			j.rigs = nil
-			for _, m := range batchRigNamed.FindAllStringSubmatch(e.Detail, -1) {
-				j.rigs = append(j.rigs, m[1])
-			}
-		case events.JobRunning:
-			j.running = e.Ts
-		}
-	}
 	out := map[string]time.Time{}
-	for _, j := range byActor {
-		if j.state != events.JobRunning {
+	for actor, j := range newest.Jobs {
+		if !strings.HasPrefix(actor, BatchLandJobName+"@") || j.Last.To != events.JobRunning {
 			continue
 		}
-		for _, rig := range j.rigs {
-			if at, had := out[rig]; !had || j.running.Before(at) {
-				out[rig] = j.running
+		for _, m := range batchRigNamed.FindAllStringSubmatch(j.Scheduled.Detail, -1) {
+			if at, had := out[m[1]]; !had || j.Running.Ts.Before(at) {
+				out[m[1]] = j.Running.Ts
 			}
 		}
 	}

@@ -2389,44 +2389,26 @@ func clippedTo(text string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// idleLookback is how many of the log's last events idleSince reads.
-const idleLookback = 200
-
 // idleSince is when the factory fell idle, or the zero time when it has not:
 // the time of the last event no job wrote, when every event since is a job's,
 // the last non-job event is IdleAfter old, and no job has begun a pass it has not
-// ended. A log it cannot read says nothing.
+// ended. It reads the newest events the log keeps of each job (NewestOf), however
+// far back they lie. A log it cannot read says nothing.
 func (s Status) idleSince(ctx context.Context) time.Time {
 	after := s.IdleAfter
 	if after <= 0 {
 		return time.Time{}
 	}
-	head, err := s.Log.Head(ctx)
-	if err != nil || head == 0 {
+	newest, err := NewestOf(ctx, s.Log)
+	if err != nil || newest.Seq == 0 {
 		return time.Time{}
 	}
-	var from uint64
-	if head > idleLookback {
-		from = head - idleLookback
+	since := newest.Other.Ts
+	if newest.Other.Seq == 0 {
+		since = newest.First.Ts
 	}
-	evs, err := s.Log.Since(ctx, from)
-	if err != nil || len(evs) == 0 {
-		return time.Time{}
-	}
-	var since time.Time
-	state := map[string]string{}
-	for _, e := range evs {
-		if e.Kind != events.KindJob {
-			since = e.Ts
-			continue
-		}
-		state[e.Actor] = e.To
-	}
-	if since.IsZero() {
-		since = evs[0].Ts
-	}
-	for _, to := range state {
-		if to == events.JobScheduled || to == events.JobRunning {
+	for _, j := range newest.Jobs {
+		if j.Last.To == events.JobScheduled || j.Last.To == events.JobRunning {
 			return time.Time{}
 		}
 	}

@@ -585,16 +585,19 @@ func TestSpringAClockJobTakesNoBearingsFromAnotherHostOrAnotherJob(t *testing.T)
 	}
 }
 
-func TestSpringAClockJobWhosePassIsBeyondTheStartUpReadCountsAsDue(t *testing.T) {
+// A pass is found however many events lie since it (mw-gq6.655): it is read
+// from the newest events the log keeps of each job, not from a window of the
+// log's end.
+func TestSpringAClockJobWhosePassLiesFarBackInTheLogIsStillNotDue(t *testing.T) {
 	r, runs := clockRig(t)
 	r.passEnded(t, "beads-flush@laptop", events.JobDone, time.Minute)
-	for i := 0; i < application.SpringClockLookback; i++ {
+	for i := 0; i < 3000; i++ {
 		r.append(t, beadMoved("mw-a", events.BeadOpen, events.BeadOpen))
 	}
 	r.spin(t)
 	r.spring.Wait()
-	if *runs != 1 {
-		t.Fatalf("the clock job ran %d times on the first Spring, want 1", *runs)
+	if *runs != 0 {
+		t.Fatalf("the clock job ran %d times on the first Spring, want 0: its pass was a minute ago", *runs)
 	}
 }
 
