@@ -697,6 +697,7 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		Grinds:       rig.NewGrinds(),
 		Refreshes:    application.NewGrindRefreshes(application.GrindRefreshEvery),
 		Grinder:      claude.NewGrinder(),
+		Credits:      newGristCredits(host, stateDir, ceilings),
 		Pass:         hostlock.NewTry(stateDir, hostlock.PassFile),
 		Grinding:     slots[0],
 		MoreGrinding: slots[1:],

@@ -94,6 +94,7 @@ type gristContext struct {
 	clientTiming clientTimingContext // features/grist_client_timing.feature
 	slots        slotsContext        // features/grist_concurrent.feature
 	pool         poolContext         // features/grist_pool.feature
+	credits      creditsContext      // features/grist_credits.feature
 
 	// statuses is the request status pass a dispatch tick is given
 	// (features/grist_request.feature); nil is none.
@@ -136,6 +137,7 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	registerGristTiming(ctx, c)
 	registerGristClientTiming(ctx, c)
 	registerGristPool(ctx, c)
+	registerGristCredits(ctx, c)
 
 	ctx.Given(`^a mill on the host "([^"]*)"$`, c.aMill)
 	ctx.Given(`^the app "([^"]*)" is checked out here, its main at commit "([^"]*)" with the grind "([^"]*)"$`, c.theAppIsCheckedOut)
@@ -548,6 +550,12 @@ func (c *gristContext) aGrindIsRunningOn(host string) error {
 }
 
 func (c *gristContext) mill() application.GristGrind {
+	mill := c.plainMill()
+	c.credits.wire(&mill)
+	return mill
+}
+
+func (c *gristContext) plainMill() application.GristGrind {
 	return application.GristGrind{
 		Postern: c.timing.postern(c.backend), Cipher: &apptest.FakeCipher{From: c.millKey}, Keys: c.keys,
 		State: c.state, Grinds: c.grinds, Grinder: c.timing.grinder(c.grinder),

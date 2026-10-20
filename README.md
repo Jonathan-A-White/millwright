@@ -2572,6 +2572,24 @@ its grist to a session started cold, and says so in the pass's report. A pass
 run by `mw grist grind` or the dispatch tick has no pool. `mw status` shows the
 pool in one line under the host's: `grist pool: lampas/bible-talk 1 warm, 0 busy`.
 
+With `[grist]` `api_credits = true` and an Anthropic API key in `api_key_file`
+(default `~/.config/mw/anthropic-api.key`; it must be mode 0600, else the mill
+says in its report that the file is not used), the mill bills a grist to that key:
+the claude session of a grind, cold or warm, gets `ANTHROPIC_API_KEY` in its
+environment and nowhere else (never an argument, a log, an event or a line of
+the record). Otherwise the session has no `ANTHROPIC_API_KEY` and uses the
+subscription login. Builders and seats never get the key. Every line of
+`grinds.jsonl` says `billing`: `"api"` or `"subscription"`. A grind billed to
+the key that ends with "Credit balance is too low", a spend limit, or an error
+that the key is invalid, writes `credits.json` in `grist_state_dir`
+(`{"spent_at": ...}`), retires the warm sessions started on the key, and
+runs the same grist again at once on the subscription: one answer, one line in
+the record, one count against `daily_limit`. One `grist-credits-spent` job
+event (it says `credits spent` or `key refused`) is left in the normal lane for
+the Mayor; nothing pages the Governor. While the mark stands every grist uses
+the subscription; the first grist 24 hours after it tries the key again, and
+getting through clears the mark. See `features/grist_credits.feature`.
+
 ```toml
 grist_key_file  = "/home/jwhite/.config/mw/mill.key"   # MW_GRIST_KEY_FILE
 grist_state_dir = "/home/jwhite/.local/state/mw/grist" # MW_GRIST_STATE_DIR
@@ -2588,6 +2606,8 @@ concurrency = 2          # grists ground at once, the mill's own limit; the rest
 timeout = "10m"
 pool_quiet = "10m"       # a kind with no grist this long keeps no warm session; "0s" keeps no warm pool at all
 pool_max_age = "15m"     # a warm session waiting this long is retired unused
+api_credits = false      # true bills a grist to the Anthropic API key in api_key_file, and to the subscription once the key's credit is spent
+api_key_file = "/home/jwhite/.config/mw/anthropic-api.key"   # a full path or ~/..., mode 0600 (default shown)
 
 [grist-apps]             # where each app's rig is checked out here
 cairn = "/home/jwhite/rigs/Cairn"
