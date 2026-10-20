@@ -908,6 +908,34 @@ Feature: mw status
     And the report does not say any story is queued too long
     And every line of the report is at most 60 columns wide
 
+  # mw-gq6.652: a batch outlives the newest 200 events of a busy log, and is
+  # still running.
+  Scenario: A batch that began running before the newest 500 events is still the batch running
+    Given the rig "millwright" lands in batches every 30 minutes
+    And a status story "mw-gq6.65" filed under it
+    And the status story "mw-gq6.65" is claimed with its session running
+    And the claim on "mw-gq6.65" was last renewed 3 hours ago
+    And the status story "mw-gq6.65" was queued for batch landing 150 minutes ago
+    And a batch-land job for the rig "millwright" began running 20 minutes ago
+    And 500 other events were written since
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.65" is in the batch running since 20 minutes ago
+    And the report does not say any story is queued too long
+
+  Scenario: A batch that has ended is not the batch running, however many events lie since
+    Given the rig "millwright" lands in batches every 30 minutes
+    And a status story "mw-gq6.66" filed under it
+    And the status story "mw-gq6.66" is claimed with its session running
+    And the claim on "mw-gq6.66" was last renewed 3 hours ago
+    And the status story "mw-gq6.66" was queued for batch landing 150 minutes ago
+    And a batch-land job for the rig "millwright" began running 20 minutes ago
+    And the batch-land job ended
+    And 500 other events were written since
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.66" is queued too long
+
   Scenario: A story queued past twice its rig's batch_every with no batch running is the alarm
     Given the rig "millwright" lands in batches every 30 minutes
     And a status story "mw-gq6.62" filed under it

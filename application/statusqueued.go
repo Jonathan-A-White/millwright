@@ -102,22 +102,17 @@ func (s Status) batchWaits(ctx context.Context, work WorkInHand) map[string]Batc
 var batchRigNamed = regexp.MustCompile(`([^\s,]+) \(\d+ queued`)
 
 // batchJobsRunning is, for each rig, when a batch-land job that names it began
-// running, read off the newest events of the log: a job whose newest event
-// says running is running now. A log that is absent or cannot be read names
-// none.
+// running, read off the events of the log: a job whose newest event says
+// running is running now. The whole log is read, not its newest few: a batch
+// runs for as long as its gate takes, and the factory writes events faster
+// than that, so its running event falls out of any fixed window (mw-gq6.652).
+// The log keeps only what a reader has yet to pass, so this is not the archive.
+// A log that is absent or cannot be read names none.
 func (s Status) batchJobsRunning(ctx context.Context) map[string]time.Time {
 	if s.Log == nil {
 		return nil
 	}
-	head, err := s.Log.Head(ctx)
-	if err != nil || head == 0 {
-		return nil
-	}
-	var from uint64
-	if head > idleLookback {
-		from = head - idleLookback
-	}
-	evs, err := s.Log.Since(ctx, from)
+	evs, err := s.Log.Since(ctx, 0)
 	if err != nil {
 		return nil
 	}
