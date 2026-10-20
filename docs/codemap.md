@@ -33,7 +33,7 @@
 | GristCredits, GristCredit{Key,State}, GristCreditsAdmin (mw grist credits: status, on, off, key, clear; config [grist] api_credits, api_key_file; state grist/credits.json) | application/gristcredits.go | {grist/credits,claude/grind}.go, cmd/mw/grist_credits.go |
 | IdeasOnlyReader, IdeasOnlyFiles | ideasonly.go | {postern/http.go,ideasonly} |
 | Suite* | application/suite.go, application/suitenightly.go | {rig/{worktree,checks}.go,vault/vault.go,apartproc} |
-| Scorer, ScoreTimeout, SecretStore, Google*, ContactBook (local scorer limit: scorer.LocalTimeoutFor = 120 s + 0.5 s per audio second, max 540 s) | application/scorer.go, secrets.go, application/google.go, application/contacts.go | {scorer,sops,google} |
+| Scorer, ScoreTimeout, SecretStore, Google*, ContactBook (scorer.LocalTimeoutFor: 120 s+0.5 s/audio s, max 540) | application/scorer.go, secrets.go, application/google.go, application/contacts.go | {scorer,sops,google} |
 
 Fakes: application/apptest/fake*.go.
 
