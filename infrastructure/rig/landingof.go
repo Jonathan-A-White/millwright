@@ -55,3 +55,31 @@ func (w *Worktrees) landingOn(ctx context.Context, rigDir, ref, story string) (a
 	}
 	return application.GristLanding{}, false, nil
 }
+
+// StoryCommitOf implements application.GristLandings for a rig that writes no
+// version, whose landings have no "Version <v>" commit: the merge of the
+// story's branch ("Merge branch 'mw/<story>' into ..."), else the newest
+// commit whose subject ends "(<story>)", as a story's own commits do. The
+// branch is read as the rig's origin has it when it has it, and then as the
+// checkout does.
+func (w *Worktrees) StoryCommitOf(ctx context.Context, rigDir, branch, story string) (string, bool, error) {
+	quoted := regexp.QuoteMeta(story)
+	for _, ref := range []string{w.remote + "/" + branch, branch} {
+		if _, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err != nil {
+			continue
+		}
+		for _, pattern := range []string{
+			"^Merge branch '([^'/]+/)?" + quoted + "'",
+			"^.* \\(" + quoted + "\\)$",
+		} {
+			out, err := w.git(ctx, rigDir, "log", "-E", "-1", "--format=%H", "--grep="+pattern, ref)
+			if err != nil {
+				return "", false, err
+			}
+			if commit := strings.TrimSpace(out); commit != "" {
+				return commit, true, nil
+			}
+		}
+	}
+	return "", false, nil
+}

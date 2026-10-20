@@ -63,3 +63,41 @@ func TestLandingOfOnABranchTheRigLacksIsNoLanding(t *testing.T) {
 		t.Errorf("LandingOf on a missing branch = %+v, %v, %v; want none and no error", got, ok, err)
 	}
 }
+
+func TestStoryCommitOfFindsTheCommitOfAStoryInARigWithNoVersion(t *testing.T) {
+	here, _ := aRig(t)
+	commit := func(file, subject string) string {
+		write(t, here, file, file)
+		run(t, here, "git", "add", "-A")
+		run(t, here, "git", "commit", "-qm", subject)
+		return run(t, here, "git", "rev-parse", "HEAD")
+	}
+	commit("a.txt", "Do the first thing (mw-x.1)")
+	wantNewest := commit("b.txt", "Do the rest of the first thing (mw-x.1)")
+	commit("c.txt", "Mentions (mw-x.3) mid-line, and ends otherwise")
+	run(t, here, "git", "checkout", "-q", "-b", "mw/mw-x.2")
+	commit("d.txt", "Work with no story id in its subject")
+	run(t, here, "git", "checkout", "-q", "main")
+	commit("e.txt", "Main moves on")
+	run(t, here, "git", "merge", "-q", "--no-ff", "-m", "Merge branch 'mw/mw-x.2' into HEAD", "mw/mw-x.2")
+	wantMerge := run(t, here, "git", "rev-parse", "HEAD")
+
+	w := rig.New()
+	got, ok, err := w.StoryCommitOf(context.Background(), here, "main", "mw-x.1")
+	if err != nil || !ok || got != wantNewest {
+		t.Errorf("StoryCommitOf mw-x.1 = %q, %v, %v; want its newest commit %s", got, ok, err, wantNewest)
+	}
+	got, ok, err = w.StoryCommitOf(context.Background(), here, "main", "mw-x.2")
+	if err != nil || !ok || got != wantMerge {
+		t.Errorf("StoryCommitOf mw-x.2 = %q, %v, %v; want its merge %s", got, ok, err, wantMerge)
+	}
+	// "." in a bead id is no wildcard, and a subject must end with the story.
+	for _, story := range []string{"mw-x.3", "mw-xx1", "mw-x.", "mw-x.22"} {
+		if got, ok, err := w.StoryCommitOf(context.Background(), here, "main", story); err != nil || ok {
+			t.Errorf("StoryCommitOf %s = %q, %v, %v; want none", story, got, ok, err)
+		}
+	}
+	if got, ok, err := w.StoryCommitOf(context.Background(), here, "nope", "mw-x.1"); err != nil || ok {
+		t.Errorf("StoryCommitOf on a missing branch = %q, %v, %v; want none and no error", got, ok, err)
+	}
+}
