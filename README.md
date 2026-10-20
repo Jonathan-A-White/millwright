@@ -3883,11 +3883,13 @@ mw errors seed
 
 `add` refuses a slug already in the register, a slug or kind that is not
 lower-case letters, digits and hyphens, no kinds and a value with a newline.
-`checked` appends a check dated today (UTC). A `found:<bead>` in a rig whose kinds
-(`kinds.toml`) the class does not list adds those kinds to the class's `kinds` and
-prints them, `added kinds to <slug>: <kinds>`, so the class is checked in the rigs
-of the kinds it has now occurred in; `ok` changes no kinds, and neither does a
-rig `kinds.toml` does not name. A class is found as many times as
+`checked` appends a check dated today (UTC). A `found:<bead>` in a rig that shares
+none of the class's kinds adds the rig's first kind in `kinds.toml` to the class's
+`kinds` and prints it, `added kinds to <slug>: <kind>`, so the class is checked in
+the rigs of that kind too; a find in a rig that shares at least one kind changes no
+kinds (adding all of a rig's kinds would send a `pwa` fault to every rig of the
+rig's other kinds), `ok` changes no kinds, and neither does a rig `kinds.toml` does
+not name. A class is found as many times as
 it has distinct `found:` beads; when a find makes it two, `checked` says so,
 naming each find, and asks the shared-component question: would one shared
 component carry the fix to every rig of its kinds? Nothing is filed for it: the

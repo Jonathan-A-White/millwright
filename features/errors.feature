@@ -51,14 +51,22 @@ Feature: The common-errors register
     When mw status reads the error register
     Then the status does not show "ERROR CLASSES TO CHECK"
 
-  Scenario: A find in a rig whose kinds the class does not list adds them to the class
+  Scenario: A find in a rig sharing a kind with the class changes no kinds
+    Given an empty error register
+    And the Mayor says the rig "lampas" is of the kinds "pwa grind phonics"
+    And the Mayor adds the error class "a-pwa-class" of the kinds "pwa" found in "legend" by "mw-a.1"
+    When the Mayor records the check of "a-pwa-class" in "lampas" as "found:mw-b.2"
+    Then the error class "a-pwa-class" lists the kinds "pwa"
+    And mw errors does not say "added kinds"
+
+  Scenario: A find in a rig sharing no kind with the class adds the rig's first kind only
     Given an empty error register
     And the Mayor says the rig "lampas" is of the kinds "pwa grind"
     And the Mayor says the rig "millwright" is of the kinds "go-cli"
     And the Mayor adds the error class "a-cli-class" of the kinds "go-cli" found in "millwright" by "mw-a.1"
     When the Mayor records the check of "a-cli-class" in "lampas" as "found:mw-b.2"
-    Then mw errors says "added kinds to a-cli-class: pwa, grind"
-    And the error class "a-cli-class" lists the kinds "go-cli pwa grind"
+    Then mw errors says "added kinds to a-cli-class: pwa"
+    And the error class "a-cli-class" lists the kinds "go-cli pwa"
 
   Scenario: A check that found nothing changes no kinds
     Given an empty error register

@@ -152,7 +152,26 @@ func classKinds(t *testing.T, files *apptest.FakeErrorFiles, slug string) string
 	return strings.Join(class.Kinds, ",")
 }
 
-func TestErrorsCheckedFoundInARigAddsThatRigsMissingKindsToTheClass(t *testing.T) {
+func TestErrorsCheckedFoundInARigSharingAKindWithTheClassChangesNoKinds(t *testing.T) {
+	files := &apptest.FakeErrorFiles{}
+	var out bytes.Buffer
+	register := errorsOn(files, &out)
+	ctx := context.Background()
+	_ = register.Kinds(ctx, "lampas", []string{"pwa", "grind", "phonics"})
+	_ = register.Add(ctx, application.ErrorAdd{Slug: "a-pwa-class", Symptom: "s", Kinds: []string{"pwa"}})
+	out.Reset()
+	if err := register.Checked(ctx, "a-pwa-class", "lampas", "found:mw-b.2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := classKinds(t, files, "a-pwa-class"); got != "pwa" {
+		t.Errorf("a find in a rig sharing a kind adds nothing, got kinds %q", got)
+	}
+	if strings.Contains(out.String(), "added kinds") {
+		t.Errorf("nothing added, nothing said, got %q", out.String())
+	}
+}
+
+func TestErrorsCheckedFoundInARigSharingNoKindAddsOnlyTheRigsFirstKind(t *testing.T) {
 	files := &apptest.FakeErrorFiles{}
 	var out bytes.Buffer
 	register := errorsOn(files, &out)
@@ -165,10 +184,10 @@ func TestErrorsCheckedFoundInARigAddsThatRigsMissingKindsToTheClass(t *testing.T
 	if err := register.Checked(ctx, "a-class", "legend", "found:mw-b.2"); err != nil {
 		t.Fatal(err)
 	}
-	if got := classKinds(t, files, "a-class"); got != "go-cli,pwa,grind" {
-		t.Errorf("a find in legend should add its kinds, got kinds %q", got)
+	if got := classKinds(t, files, "a-class"); got != "go-cli,pwa" {
+		t.Errorf("a find in legend should add its first kind, got kinds %q", got)
 	}
-	if !strings.Contains(out.String(), "added kinds to a-class: pwa, grind") {
+	if !strings.Contains(out.String(), "added kinds to a-class: pwa (") {
 		t.Errorf("the kinds added should be printed, got %q", out.String())
 	}
 
@@ -176,7 +195,7 @@ func TestErrorsCheckedFoundInARigAddsThatRigsMissingKindsToTheClass(t *testing.T
 	if err := register.Checked(ctx, "a-class", "legend", "found:mw-c.3"); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out.String(), "added kinds") || classKinds(t, files, "a-class") != "go-cli,pwa,grind" {
+	if strings.Contains(out.String(), "added kinds") || classKinds(t, files, "a-class") != "go-cli,pwa" {
 		t.Errorf("kinds already listed add nothing, got %q, kinds %q", out.String(), classKinds(t, files, "a-class"))
 	}
 }

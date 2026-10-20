@@ -639,8 +639,9 @@ func (e Errors) Add(ctx context.Context, req ErrorAdd) error {
 }
 
 // Checked records that a rig was checked for a class, dated today. A find
-// (found:<bead>) in a rig whose kinds the class does not list adds those kinds
-// to the class and says which; an ok changes no kinds. When that find makes the
+// (found:<bead>) in a rig that shares none of the class's kinds adds the rig's
+// first kind (kinds.toml) to the class and says so; a find in a rig that shares
+// a kind, and an ok, change no kinds (mw-gq6.635). When that find makes the
 // class seen twice, it says so and asks the shared-component question. It files
 // nothing.
 func (e Errors) Checked(ctx context.Context, slug, rig, result string) error {
@@ -662,12 +663,14 @@ func (e Errors) Checked(ctx context.Context, slug, rig, result string) error {
 	before := len(class.Occurrences())
 	class.Checks = append(class.Checks, ErrorCheck{Date: e.today(), Rig: rig, Found: found})
 	var added []string
-	if found != "" {
+	if found != "" && len(kinds[rig]) > 0 {
+		shares := false
 		for _, kind := range kinds[rig] {
-			if !slices.Contains(class.Kinds, kind) {
-				class.Kinds = append(class.Kinds, kind)
-				added = append(added, kind)
-			}
+			shares = shares || slices.Contains(class.Kinds, kind)
+		}
+		if !shares {
+			class.Kinds = append(class.Kinds, kinds[rig][0])
+			added = append(added, kinds[rig][0])
 		}
 	}
 	written, err := e.put(ctx, class)
