@@ -100,6 +100,11 @@ type GristLandings interface {
 	// LandingOf reports the landing of story (or of a batch's label) on branch
 	// of the rig checked out at rigDir; false when the branch holds none.
 	LandingOf(ctx context.Context, rigDir, branch, story string) (GristLanding, bool, error)
+	// StoryCommitOf reports the commit that landed story on branch of the rig
+	// checked out at rigDir when the rig writes no version, so no "Version <v>"
+	// commit was made for it: the merge of the story's branch, else the newest
+	// commit whose subject ends "(<story>)". False when the branch holds none.
+	StoryCommitOf(ctx context.Context, rigDir, branch, story string) (string, bool, error)
 }
 
 // GristBatches finds the batch of a rig that carried a story, from what the
@@ -348,7 +353,7 @@ func (g GristStatus) one(ctx context.Context, record GristRequestRecord) (string
 // landing finds where the closed bead landed in its rig, if it did: by the
 // commit mw next made for the story alone, or, when the rig lands in batches,
 // by the commit of the batch that carried it, which the batch's own records
-// name.
+// name, or, when the rig writes no version, by the story's own commit.
 func (g GristStatus) landing(ctx context.Context, detail StoryDetail, bead string) (GristLanding, bool, error) {
 	path := detail.Merged()
 	dir, ok := g.Rigs[path.Rig]
@@ -359,21 +364,46 @@ func (g GristStatus) landing(ctx context.Context, detail StoryDetail, bead strin
 	if err != nil {
 		return GristLanding{}, false, fmt.Errorf("looking for the landing in %s: %w", dir, err)
 	}
-	if found || g.Batches == nil {
+	if found {
+		return landing, true, nil
+	}
+	number, carried := 0, false
+	if g.Batches != nil {
+		number, carried, err = g.Batches.BatchOf(ctx, path.Rig, bead)
+		if err != nil {
+			return GristLanding{}, false, fmt.Errorf("looking for the batch that carried it: %w", err)
+		}
+	}
+	if carried {
+		landing, found, err = g.Landings.LandingOf(ctx, dir, path.Branch, BatchLabel(path.Rig, number))
+		if err != nil {
+			return GristLanding{}, false, fmt.Errorf("looking for the landing of %s in %s: %w", BatchLabel(path.Rig, number), dir, err)
+		}
 		return landing, found, nil
 	}
-	number, carried, err := g.Batches.BatchOf(ctx, path.Rig, bead)
-	if err != nil {
-		return GristLanding{}, false, fmt.Errorf("looking for the batch that carried it: %w", err)
-	}
-	if !carried {
+	return g.unversionedLanding(ctx, dir, path.Rig, path.Branch, bead)
+}
+
+// unversionedLanding finds the landing of a bead in a rig that writes no
+// version (no version_files), which makes no "Version <v>" commit: the commit
+// of the story itself, with no version. A rig that writes a version, or whose
+// rules cannot be read, has none this way.
+func (g GristStatus) unversionedLanding(ctx context.Context, dir, rig, branch, bead string) (GristLanding, bool, error) {
+	if g.Rules == nil {
 		return GristLanding{}, false, nil
 	}
-	landing, found, err = g.Landings.LandingOf(ctx, dir, path.Branch, BatchLabel(path.Rig, number))
+	rules, err := g.Rules.EpicRequirements(ctx, rig)
 	if err != nil {
-		return GristLanding{}, false, fmt.Errorf("looking for the landing of %s in %s: %w", BatchLabel(path.Rig, number), dir, err)
+		return GristLanding{}, false, fmt.Errorf("reading the rig file of %s: %w", rig, err)
 	}
-	return landing, found, nil
+	if len(rules.VersionFiles) > 0 {
+		return GristLanding{}, false, nil
+	}
+	commit, found, err := g.Landings.StoryCommitOf(ctx, dir, branch, bead)
+	if err != nil {
+		return GristLanding{}, false, fmt.Errorf("looking for the commit of %s in %s: %w", bead, dir, err)
+	}
+	return GristLanding{Commit: commit}, found, nil
 }
 
 // fillLanding puts the landing in the status, with the commit's link when the
