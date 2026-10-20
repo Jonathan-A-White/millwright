@@ -528,6 +528,18 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 	}
 
 	gate := b.runGate(ctx, dir, rigDir, report, nr)
+	// A batch whose failing tests fail on the target branch alone is not the
+	// stories' to fix: no fixer is started, and the batch is held on the bead that
+	// carries main's red (mw-gq6.645).
+	if gate.Err == nil && !gate.Checked.NotRun && !gate.Checked.Passed && report.Fixer == nil {
+		bc := b.batchCloseOut(report, rigDir)
+		if red := n.mainAlone(ctx, bc, nr, gate.Checked, report.Base); red != nil {
+			if n.holdBatchOnMainRed(ctx, bc, nr, red) {
+				report.Held = fmt.Sprintf("main is red: %s, carried by %s; no fixer was started and the stories stay queued", red.tests(), red.Bug)
+				return
+			}
+		}
+	}
 	// A red batch is given its one fixer, unless it had it already; once the
 	// fixer has ended mw runs the tests again itself: its word is not the gate.
 	if gate.Err == nil && !gate.Checked.NotRun && !gate.Checked.Passed && b.mayFix() && report.Fixer == nil {

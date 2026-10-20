@@ -103,19 +103,20 @@ func newCheckCmd() *cobra.Command {
 				return err
 			}
 			k := application.Check{
-				Tracker:    mwGateway(dir, host),
-				Landing:    worktrees,
-				Checks:     checks,
-				SpecChecks: checks,
-				Slot:       slot,
-				Parts:      checks,
-				Records:    mwVault(dir, host),
-				Part:       part,
-				Load:       hostload.Proc{},
-				Modes:      modes,
-				Host:       host,
-				Rigs:       rigs,
-				Out:        cmd.OutOrStdout(),
+				Tracker:     mwGateway(dir, host),
+				Landing:     worktrees,
+				Checks:      checks,
+				SpecChecks:  checks,
+				NamedChecks: checks,
+				Slot:        slot,
+				Parts:       checks,
+				Records:     mwVault(dir, host),
+				Part:        part,
+				Load:        hostload.Proc{},
+				Modes:       modes,
+				Host:        host,
+				Rigs:        rigs,
+				Out:         cmd.OutOrStdout(),
 			}
 			if !logIsStdout {
 				k.Logs = mwVault(dir, host)

@@ -186,3 +186,39 @@ func shellWords(words []string) string {
 	}
 	return strings.Join(quoted, " ")
 }
+
+// TestsPlaceholder is where a rig's named-tests line takes the names of the
+// tests that failed (mw-gq6.645).
+const TestsPlaceholder = "{tests}"
+
+// Checks satisfies the port a rig's named-tests line is run through.
+var _ application.NamedChecks = (*Checks)(nil)
+
+// WithNamedCommands names the line each rig runs just the failed tests by name
+// with, by rig name, as the [named_tests] table of the config file has it. A rig
+// the table does not name is never asked, and a failure of its tests is never
+// found to be main's own.
+func WithNamedCommands(commands map[string]string) CheckOption {
+	return func(c *Checks) {
+		for rig, command := range commands {
+			if strings.TrimSpace(command) != "" {
+				c.named[rig] = command
+			}
+		}
+	}
+}
+
+// RunNamed implements application.NamedChecks: the names put into the rig's
+// named-tests line where it says {tests} and run in dir as the rig's tests are.
+// A rig with no line, or no names, runs nothing.
+func (c *Checks) RunNamed(ctx context.Context, rig, dir string, tests []string) (application.NamedRun, error) {
+	template, named := c.named[rig]
+	if !named || len(tests) == 0 {
+		return application.NamedRun{}, nil
+	}
+	checked, err := c.RunLine(ctx, dir, strings.ReplaceAll(template, TestsPlaceholder, shellWords(tests)))
+	if err != nil {
+		return application.NamedRun{}, err
+	}
+	return application.NamedRun{Checked: checked, Ran: true}, nil
+}

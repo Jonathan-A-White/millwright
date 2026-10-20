@@ -286,6 +286,21 @@ Feature: Dispatching the stories this host is ready to work
     And dispatch said that "mw-gq6.9" has its close-out run again
     And dispatch leaves with status 0
 
+  Scenario: A story held on main's red has its close-out run again, alone, only once the bug that carries the fix is closed
+    Given a story "mw-gq6.9" of that epic was dispatched and left its worktree with 2 commits
+    And the story "mw-gq6.9" has been tried 1 time
+    And the close-out of "mw-gq6.9" held it on main's red, carried by an open bug
+    When dispatch runs on "vps" with a cap of 1
+    Then no session was started
+    And the story "mw-gq6.9" is still held on main's red
+    And the story "mw-gq6.9" records 1 attempt
+    When the bug that carries main's red is closed
+    And dispatch runs on "vps" with a cap of 1
+    Then the session for "mw-gq6.9" runs only its close-out, "mw next mw-gq6.9", in the worktree of "mw-gq6.9", keeping its words in the run
+    And the story "mw-gq6.9" is recorded as running
+    And the story "mw-gq6.9" records 1 attempt
+    And dispatch said that "mw-gq6.9" has its close-out run again
+
   Scenario: A crashed session with no refusal recorded is still reclaimed and started again
     Given a story "mw-gq6.9" of that epic was dispatched and left its worktree with 1 commit
     And the story "mw-gq6.9" has been tried 1 time

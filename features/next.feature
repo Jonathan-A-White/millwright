@@ -836,6 +836,64 @@ Feature: Closing out a finished story and carrying on
     And the worktree of "mw-gq6.1" is still there
     And 2 sessions were ever started for "mw-gq6.1"
 
+  # mw-gq6.645: the tests that failed on the merged result are run by name on the
+  # target branch alone, before the story is blamed.
+  Scenario: A merged result that fails only because main fails the same test holds the story on a new held bug
+    Given the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And the rig's tests fail, saying "--- FAIL: TestTogether (0.01s)", only once "main" is merged in
+    And the rig has a named-tests command that fails on main alone, saying "--- FAIL: TestTogether"
+    And the session of "mw-gq6.1" was the first that dispatch started for it
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the named-tests command was run once, given: TestTogether
+    And the story "mw-gq6.1" is held on main's red, waiting on a new held bug naming "TestTogether"
+    And the report says "mw-gq6.1" was held on main's red, not sent back
+    And a mail with the subject "Main is red: The story mw-gq6.1" holds:
+      | main is red: TestTogether, carried by |
+    And the last ledger line holds:
+      | not landed (main-red): |
+      | main alone fails TestTogether too (checked in |
+    And the story "mw-gq6.1" carries a comment quoting: Main is red
+    And the worktree of "mw-gq6.1" is still there
+    And 1 sessions were ever started for "mw-gq6.1"
+    And the attempts counted on "mw-gq6.1" come to 1
+
+  Scenario: A merged result that fails a test an open bug names holds the story on that bug and files none
+    Given the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And an open bug "Scorer fixtures raise wave.Error" names the failing test "TestTogether"
+    And the rig's tests fail, saying "--- FAIL: TestTogether (0.01s)", only once "main" is merged in
+    And the rig has a named-tests command that fails on main alone, saying "--- FAIL: TestTogether"
+    And the session of "mw-gq6.1" was the first that dispatch started for it
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is held on main's red, waiting on the open bug "Scorer fixtures raise wave.Error"
+    And the report says "mw-gq6.1" was held on main's red, not sent back
+    And 1 sessions were ever started for "mw-gq6.1"
+    And the attempts counted on "mw-gq6.1" come to 1
+
+  Scenario: A merged result that fails a test main passes alone is sent back as before
+    Given the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And the rig's tests fail, saying "--- FAIL: TestTogether (0.01s)", only once "main" is merged in
+    And the rig has a named-tests command that passes on main alone
+    And the session of "mw-gq6.1" was the first that dispatch started for it
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the named-tests command was run once, given: TestTogether
+    And a fresh session is running for "mw-gq6.1" in its worktree, told to fix the merged tests
+    And the story "mw-gq6.1" is recorded as sent back to fix the merged tests
+    And the report says "mw-gq6.1" was sent back to fix the merged tests
+    And the last ledger line holds:
+      | not landed (merged-tests-fail): |
+      | main alone passes TestTogether (checked in |
+    And the attempts counted on "mw-gq6.1" come to 2
+
   Scenario: A push the origin refuses with a many-line error keeps the whole error beside the run
     Given the session of "mw-gq6.1" reported a plain success
     And the origin refuses every push, saying:

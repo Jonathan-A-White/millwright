@@ -365,6 +365,19 @@ Feature: mw land lands a batch rig's queue under one gate run
     Then no fixer was started
     And the batch is held, and the Mayor's mail names every story in it and says "the push to main failed"
 
+  Scenario: A red batch whose failing test fails on main alone starts no fixer and is held on the bug that carries main's red (mw-gq6.645)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the rig's tests fail, saying "--- FAIL: TestTogether (0.01s)"
+    And the rig has a named-tests command that fails on main alone, saying "--- FAIL: TestTogether"
+    And mw land may start a fixer, which commits "TRIED" and says it touched "mw-gq6.1"
+    When mw lands the batch of the rig
+    Then no fixer was started
+    And the named-tests command was run once, given: TestTogether
+    And the batch is held, and the Mayor's mail names every story in it and says "main is red: TestTogether, carried by"
+    And "main" at the rig's origin is where it was before the batch
+
   Scenario: A rig with nothing queued is given no fixer (mw-gq6.503)
     Given mw land may start a fixer, which commits "TRIED" and says it touched "mw-gq6.1"
     When mw lands the batch of the rig

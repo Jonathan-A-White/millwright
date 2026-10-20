@@ -18,6 +18,17 @@ import (
 func (d Dispatch) closeOutAgain(ctx context.Context, detail StoryDetail, report *DispatchReport) bool {
 	id := detail.Story.ID
 	name := SessionName(id)
+	// A story held on main's own red waits for the bead that carries the fix
+	// (mw-gq6.645): it holds no session and counts against no cap until then.
+	wait, over, err := mainRedWaitOver(ctx, d.Tracker, id)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: whether the bead %s it waits on for main's fix is closed could not be read, so its close-out was left for the next tick: %v", id, wait, err))
+		return false
+	}
+	if !over {
+		return false
+	}
+	mainFixed := wait != "" && wait != MainRedFixed
 	status, err := d.Runner.Status(ctx, name)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: handed back for its close-out alone, but whether its session %s is running could not be read, so it was left for the next tick: %v", id, name, err))
@@ -53,6 +64,13 @@ func (d Dispatch) closeOutAgain(ctx context.Context, detail StoryDetail, report 
 	}
 	why := fmt.Sprintf("mw dispatch on %s ran the close-out of %s again, alone, in %s from its committed branch %s: its last close-out handed it back at the merge slot's overall most. No new session and no new attempt.",
 		d.Host, id, name, StoryBranch(id))
+	if mainFixed {
+		why = fmt.Sprintf("mw dispatch on %s ran the close-out of %s again, alone, in %s from its committed branch %s: %s, which carried main's red, is closed. No new session and no new attempt.",
+			d.Host, id, name, StoryBranch(id), wait)
+		if err := d.Tracker.SetStoryState(ctx, id, MainRedState, MainRedFixed, why); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s: %s is closed, but it could not be recorded as %s=%s: %v", id, wait, MainRedState, MainRedFixed, err))
+		}
+	}
 	if err := d.Tracker.SetStoryState(ctx, id, RunState, RunRunning, why); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: its close-out runs again, but it could not be recorded as %s=%s: %v", id, RunState, RunRunning, err))
 	}

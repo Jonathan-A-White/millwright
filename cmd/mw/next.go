@@ -247,6 +247,10 @@ func newNextCmd() *cobra.Command {
 				Checks:     checks,
 				SpecChecks: checks,
 
+				// The tests a merged result fails are run by name on the target
+				// branch alone, to tell main's red from the story's (mw-gq6.645).
+				NamedChecks: checks,
+
 				// The landing gate runs the rig's related-tests line when it has
 				// one; mw check and mw suite are never given it (mw-gq6.601).
 				RelatedChecks: checks,

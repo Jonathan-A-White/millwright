@@ -128,6 +128,7 @@ func newLandCmd() *cobra.Command {
 				// (mw-gq6.627).
 				RelatedChecks: checks,
 				SpecChecks:    checks,
+				NamedChecks:   checks,
 
 				Load:      hostload.Proc{SwapSample: benchmarkSwapSample},
 				Slot:      rig.NewSlots(),

@@ -1407,6 +1407,9 @@ lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"  
 [related_tests]
 lampas = "npm ci --no-audit --no-fund && TZ=UTC npx vitest related --run --passWithNoTests {files} && npm run typecheck && npm run lint && npm run build"  # the landing gate runs this in place of [tests], on the files a story changed (default: the whole [tests] line)
 
+[named_tests]
+millwright = "go test -tags beads_integration -run \"^($(echo {tests} | tr ' ' '|'))$\" ./..."  # run on the target branch alone, with {tests} the names of the tests a merged result failed (default: nothing, and a failure is always the story's)
+
 [test_parts.lampas]                # optional: the rig's gate as parts, one table for a rig; see "A gate in parts" below (default: none)
 "lint"       = "npm run lint"      # each key is a part's name, each value its command line, run in the worktree, in the order written
 "vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"
@@ -1479,6 +1482,22 @@ command with `--passWithNoTests`, so a story whose files no test is related to d
 not fail the gate for it. The way back is to delete the line. A Boost does not copy
 `[related_tests]` from `hosts/boost-config.toml`: it gates with `[tests]` unless its own
 config.toml names the line.
+
+Main's own red (mw-gq6.645). When the rig's tests fail on a story's merged result (or
+in its worktree, or on a batch), and the rig names a `[named_tests]` line, `mw next`
+and `mw land` first run just the tests that failed, by name, on the target branch
+alone, in a clean throwaway worktree of `origin/<target>`; the time that took is a note
+on the ledger line. If the target fails the same tests, the failure is main's: a story
+is not sent back, not refused and not counted as an attempt, but held, waiting on the
+open bug whose description names the failing tests (else on a new held `[bug]` that
+`mw next` files for the Mayor), as `run=close-out-again` with `mainred=<bug>`; the
+Mayor's mail is headed `Main is red:`. The next dispatch tick after that bug is closed
+runs the story's close-out alone again, with no new Builder session. A batch that goes
+red on main's red starts no fixer and is held. If the target passes them, the story
+is blamed exactly as before. A rig the table does not name is never asked. `mw check`
+makes the same run, to say the failure is main's. The test names are those the
+failed run printed (go test's `--- FAIL: TestX`, vitest's `FAIL file > test`), each
+once, given to the line quoted.
 
 A gate in parts (mw-gq6.567). A Builder's tool call is cut off after 590 seconds, and
 `mw check`'s whole-gate run, or a gate waited on in the background, can outrun that
