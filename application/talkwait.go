@@ -182,6 +182,9 @@ type TalkWait struct {
 	// what he sends about one is not kept as an idea, and so ends the wait as
 	// it would outside Ideas only. Nil keeps every message of his.
 	Tracker WorkTracker
+	// Graph, when set, lets the Tracker's to-dos include the ones that wait on
+	// an unfinished story (openTodoCards).
+	Graph BeadGraph
 	// Release, when set, gives the Governor's ideas back when Ideas only ends,
 	// by the stream's event or by the clock: the wait then ends printing them.
 	// Nil leaves them held, and the wait on.

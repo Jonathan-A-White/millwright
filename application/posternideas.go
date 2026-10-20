@@ -140,7 +140,7 @@ func (i PosternInbox) textAboutAToDo(ctx context.Context, m PosternInboxMessage)
 	if i.Tracker == nil {
 		return false
 	}
-	cards, err := i.Tracker.ReadyWithLabel(ctx, LabelHitlTodo)
+	cards, err := openTodoCards(ctx, i.Tracker, i.Graph)
 	if err != nil {
 		i.printf("reading the to-dos to tell whether %s is about one: %v; keeping it as an idea\n", m.Txid, err)
 		return false

@@ -173,6 +173,7 @@ func (n *TodoNightly) run(ctx context.Context) error {
 // the post, so a pass that dies half-way never posts twice; a post that fails
 // takes the mark back, so the next night tries it again.
 func (n *TodoNightly) tellSlipped(ctx context.Context) error {
+	// Ready cards only, on purpose: a card that waits on an unfinished story is left out, for he cannot act on it yet (mw-gq6.663).
 	cards, err := n.Tracker.ReadyWithLabel(ctx, LabelHitlTodo)
 	if err != nil {
 		return fmt.Errorf("reading the To do cards to tell of slipped ones: %w", err)
@@ -229,6 +230,7 @@ func (n *TodoNightly) weeklyLetGo(ctx context.Context) error {
 	} else if strings.TrimSpace(sent) == week {
 		return nil
 	}
+	// Ready cards only, on purpose: a card that waits on an unfinished story is left out of the Let go card, for he cannot act on it yet (mw-gq6.663).
 	cards, err := n.Tracker.ReadyWithLabel(ctx, LabelHitlTodo)
 	if err != nil {
 		return fmt.Errorf("reading the To do cards for the Let go card: %w", err)

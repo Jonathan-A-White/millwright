@@ -54,9 +54,12 @@ type TodoIndex interface {
 // that hold the words. It only reads the tracker.
 type TodoSearch struct {
 	Tracker WorkTracker
-	Closed  ClosedTodoCards
-	Index   TodoIndex
-	Out     io.Writer
+	// Graph, when set, is read for the open cards that wait on an unfinished
+	// story, which the tracker's ready list leaves out (openTodoCards).
+	Graph  BeadGraph
+	Closed ClosedTodoCards
+	Index  TodoIndex
+	Out    io.Writer
 }
 
 // todoSearchSince is the closing time the closed cards are read from: all of
@@ -96,7 +99,7 @@ func (s TodoSearch) Run(ctx context.Context, words []string) (int, error) {
 // rebuild reads the open cards and the closed ones, with their comments, and
 // has the index replaced by them.
 func (s TodoSearch) rebuild(ctx context.Context) error {
-	open, err := s.Tracker.ReadyWithLabel(ctx, LabelHitlTodo)
+	open, err := openTodoCards(ctx, s.Tracker, s.Graph)
 	if err != nil {
 		return fmt.Errorf("reading the open To do cards: %w", err)
 	}

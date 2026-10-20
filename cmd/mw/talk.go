@@ -210,6 +210,7 @@ func newTalkWaitCmd() *cobra.Command {
 				Memory:      gateway,
 				Mailbox:     gateway,
 				Tracker:     gateway,
+				Graph:       gateway,
 				GovernorKey: governorKey,
 				Transcriber: transcriber, AttachmentDir: attachmentDir,
 				Log:        eventlog.New(logPath),

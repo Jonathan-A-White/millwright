@@ -133,3 +133,25 @@ func TestIdeasOnlyLetsAMessageBeginningTodoColonThrough(t *testing.T) {
 		t.Fatalf("expected TODO: to pass whatever the tracker says")
 	}
 }
+
+// A message about an open to-do that waits on an unfinished story is about a
+// to-do all the same (mw-gq6.663).
+func TestTextAboutAToDoThatWaitsOnAnUnfinishedStory(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-lst", domain.Path{})
+	tracker.AddStory("mw-lst", domain.Story{ID: "mw-lst.1", Title: "Choose the Max plan or an API key"})
+	if err := tracker.SetLabels("mw-lst.1", application.LabelHitl, application.LabelHitlTodo); err != nil {
+		t.Fatal(err)
+	}
+	tracker.AddStory("mw-other", domain.Story{ID: "mw-story", Title: "The story it waits on"})
+	if err := tracker.AddBlocker(context.Background(), "mw-lst.1", "mw-story"); err != nil {
+		t.Fatal(err)
+	}
+	inbox := application.PosternInbox{Tracker: tracker, Graph: tracker, Out: &bytes.Buffer{}}
+	for _, text := range []string{"what is mw-lst.1 about", "remind me to choose soon"} {
+		m := application.PosternInboxMessage{Txid: "direct:1", Class: application.TalkRecordClass, Thread: application.TalkRecordClass, Text: text}
+		if !inbox.AboutAToDo(context.Background(), m) {
+			t.Errorf("%q is about the waiting to-do mw-lst.1 but was not taken to be", text)
+		}
+	}
+}
