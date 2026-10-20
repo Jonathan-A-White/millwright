@@ -38,6 +38,12 @@
 #   j. the vault's .beads is mode 700 after the clone, and one already there at
 #      0775 is set to 700 and said; bd warns on every call at any other mode,
 #      and a second run skips it (mw-gq6.451)
+#   k. a box whose ~/millwright clone already exists, behind origin/main, has it fetched and
+#      fast-forwarded and mw built before the box takes a story; a clone that is dirty, on
+#      another branch or with commits of its own is left as it is and said; a dry run plans it;
+#      a second run changes nothing; and config.toml says [after_landing] millwright = "make build",
+#      written when a config is made and added to one that lacks it, never over a line it has,
+#      so a landing of a millwright story rebuilds the box's mw (mw-gq6.632)
 # The shell linter is run over the script when it is installed, and skipped when not.
 
 set -eu
@@ -155,7 +161,7 @@ EOF
 
 # git clone is a real clone, of a repository made once from the template the url
 # names and kept outside the fake machine (the origin a fetch reaches); every other
-# git call is the real git. A fetch and a reset are logged, as a clone is.
+# git call is the real git. A fetch, a reset and a merge are logged, as a clone is.
 stub git <<'EOF'
 if [ "$1" = clone ]; then
 	echo "git $*" >>"$CALLS"
@@ -177,7 +183,7 @@ if [ "$1" = clone ]; then
 	fi
 	exec /usr/bin/git clone -q "file://$origin" "$3"
 fi
-case " $* " in *" fetch "* | *" reset "*) echo "git $*" >>"$CALLS" ;; esac
+case " $* " in *" fetch "* | *" reset "* | *" merge "*) echo "git $*" >>"$CALLS" ;; esac
 exec /usr/bin/git "$@"
 EOF
 
@@ -223,11 +229,12 @@ echo 'package main' >"$TEMPLATE/cmd/mw/main.go"
 cat >"$TEMPLATE/scripts/install.sh" <<'EOF'
 #!/bin/sh
 echo "install.sh $*" >>"$CALLS"
+head=$(git -C "$(dirname "$0")/.." rev-parse HEAD)
 if [ "$1" = --dry-run ]; then
-	[ -e "$STATE/mw-built" ] || echo "    would: make build"
+	[ "$(cat "$STATE/mw-built" 2>/dev/null)" = "$head" ] || echo "    would: make build"
 	exit 0
 fi
-touch "$STATE/mw-built"
+echo "$head" >"$STATE/mw-built"
 EOF
 cat >"$TEMPLATE/scripts/install-units.sh" <<'EOF'
 #!/bin/sh
@@ -365,7 +372,7 @@ snapshot() {
 
 # changing: the calls in the log that change the machine.
 changing() {
-	grep -E '^(apt-get install|git clone|git .* (fetch|reset) |npm install|npx .* install |curl .*(\.tar\.xz)|loginctl|systemctl (user|system) (enable|start|daemon-reload)|install\.sh [^-]|install\.sh$|install-units\.sh)' "$1" || true
+	grep -E '^(apt-get install|git clone|git .* (reset|merge) |npm install|npx .* install |curl .*(\.tar\.xz)|loginctl|systemctl (user|system) (enable|start|daemon-reload)|install\.sh [^-]|install\.sh$|install-units\.sh)' "$1" || true
 }
 
 STEPS="packages node git wireguard rig claude vault rigs config browsers beads profile dispatch"
@@ -428,6 +435,8 @@ grep -Fq 'beads_server_host = "10.88.0.2"' "$CONF" || fail "$NAME: config.toml d
 grep -Fq 'beads_sync = "auto"' "$CONF" || fail "$NAME: config.toml has no beads_sync: $(cat "$CONF")"
 grep -Fq 'argus = "'"$HOME_DIR"'/argus"' "$CONF" || fail "$NAME: config.toml does not list the argus rig: $(cat "$CONF")"
 grep -Fq 'millwright = "'"$HOME_DIR"'/millwright"' "$CONF" || fail "$NAME: config.toml does not list the millwright rig: $(cat "$CONF")"
+# k. a landing of a millwright story rebuilds this box's mw
+sed -n '/^\[after_landing\]$/,/^$/p' "$CONF" | grep -Fxq 'millwright = "make build"' || fail "$NAME: config.toml has no [after_landing] millwright = \"make build\": $(cat "$CONF")"
 # f. [tests] for every rig cloned, [changed_specs] where the vault's file has one
 for want in 'millwright = "make test"' \
 	'argus = "npm ci --no-audit --no-fund && npm run lint && npm run build"' \
@@ -580,8 +589,8 @@ grep -F 'git clone' "$CALLS" | grep -Fq 'millwright.git' && fail "$NAME: it clon
 grep -Fq 'millwright = "'"$INRIG"'"' "$HOME_DIR/.config/mw/config.toml" || fail "$NAME: config.toml does not name $INRIG: $(cat "$HOME_DIR/.config/mw/config.toml")"
 echo "ok: $NAME"
 
-# --- f. an existing config.toml keeps every line (only a lacking [test_parts] table is added), and the lacking [tests] lines are said ----
-NAME="an existing config.toml without [tests] keeps its lines, gets the missing [test_parts] table, and the missing lines are named"
+# --- f. an existing config.toml keeps every line (only a lacking [test_parts] table and [after_landing] millwright line are added), and the lacking [tests] lines are said ----
+NAME="an existing config.toml without [tests] keeps its lines, gets the missing [test_parts] table and [after_landing] line, and the missing lines are named"
 mkdir -p "$HOME_DIR/.config/mw"
 printf 'host = "cloud1"\n\n[rigs]\nargus = "%s/argus"\n' "$HOME_DIR" >"$HOME_DIR/.config/mw/config.toml"
 before_conf=$(cat "$HOME_DIR/.config/mw/config.toml")
@@ -598,7 +607,10 @@ case $after_conf in "$before_conf"*) ;; *) fail "$NAME: a line of config.toml wa
 "install" = "npm ci --no-audit --no-fund"
 "vitest 2/2" = "TZ=UTC npx vitest run --shard 2/2"
 "shots" = "npm run gate:shots"
-"vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"' ] || fail "$NAME: config.toml got more than postern's [test_parts] table at its end: $after_conf"
+"vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"
+
+[after_landing]
+millwright = "make build"' ] || fail "$NAME: config.toml got more than postern's [test_parts] table and [after_landing] at its end: $after_conf"
 printf '%s\n' "$OUT" | grep -Fq 'config.toml has no line: argus = "npm ci' || fail "$NAME: the missing [tests] line for argus is not named: $OUT"
 echo "ok: $NAME"
 
@@ -726,6 +738,91 @@ chmod 700 "$BEADS_DIR"
 OUT2=$(boost --env-file "$T/cloud2.env" 2>&1) || fail "$NAME: a second run failed: $OUT2"
 vault_out=$(printf '%s\n' "$OUT2" | awk '/^==> \[/ { on = ($0 ~ /\] vault:/) } on')
 printf '%s\n' "$vault_out" | grep -Fq "skip: $BEADS_DIR is mode 700" || fail "$NAME: a second run does not skip .beads: $vault_out"
+echo "ok: $NAME"
+
+# --- k. a millwright clone that is behind origin is brought level and built ------------------
+RIG_DIR=$HOME_DIR/millwright
+rig_git() { HOME=$HOME_DIR /usr/bin/git -C "$RIG_DIR" "$@"; }
+push_rig() { # <file>: a new commit on origin's main of the rig
+	W2=$T/rig-push
+	rm -rf "$W2"
+	/usr/bin/git clone -q "file://$ORIGINS/rig-template.git" "$W2"
+	echo "$1" >>"$W2/CHANGELOG"
+	/usr/bin/git -C "$W2" add -A
+	/usr/bin/git -C "$W2" -c user.name=t -c user.email=t@t commit -q -m "$1"
+	/usr/bin/git -C "$W2" push -q origin main
+}
+NAME="a millwright clone behind origin/main is fast-forwarded and mw is built before the box takes a story"
+push_rig landing-one
+new_head=$(/usr/bin/git -C "$ORIGINS/rig-template.git" rev-parse main)
+[ "$(rig_git rev-parse HEAD)" != "$new_head" ] || fail "$NAME: the clone is already at origin"
+OUT=$(boost --dry-run --env-file "$T/cloud2.env" 2>&1) || fail "$NAME: the dry run failed: $OUT"
+rig_out=$(printf '%s\n' "$OUT" | awk '/^==> \[/ { on = ($0 ~ /\] rig:/) } on')
+printf '%s\n' "$rig_out" | grep -F "would:" | grep -Fq "fast-forward $RIG_DIR to origin/main" || fail "$NAME: a dry run does not plan the fast-forward: $rig_out"
+[ "$(rig_git rev-parse HEAD)" != "$new_head" ] || fail "$NAME: a dry run moved the clone"
+# a box made before [after_landing] was written: its config lacks the table
+sed -i '/^\[after_landing\]$/,/^$/d' "$CONF"
+grep -Fq 'after_landing' "$CONF" && fail "$NAME: could not take [after_landing] out of the config: $(cat "$CONF")"
+: >"$CALLS"
+before_conf=$(cat "$CONF")
+RC=0
+OUT=$(boost --env-file "$T/cloud2.env" 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
+[ "$(rig_git rev-parse HEAD)" = "$new_head" ] || fail "$NAME: the clone is not at origin/main: $OUT"
+[ "$(cat "$STATE/mw-built")" = "$new_head" ] || fail "$NAME: mw was not built at origin/main ($new_head): $OUT"
+printf '%s\n' "$OUT" | grep -Fq "fast-forwarded $RIG_DIR" || fail "$NAME: the log does not say the clone was fast-forwarded: $OUT"
+grep -Fq 'install.sh' "$CALLS" || fail "$NAME: install.sh did not run: $(cat "$CALLS")"
+after_conf=$(cat "$CONF")
+case $after_conf in "$before_conf"*) ;; *) fail "$NAME: a line of config.toml was edited: $after_conf" ;; esac
+[ "${after_conf#"$before_conf"}" = '
+
+[after_landing]
+millwright = "make build"' ] || fail "$NAME: config.toml got more than [after_landing] at its end: $after_conf"
+echo "ok: $NAME"
+
+NAME="a second run, with the clone level and mw built, changes nothing"
+before=$(snapshot)
+: >"$CALLS"
+OUT2=$(boost --env-file "$T/cloud2.env" 2>&1) || fail "$NAME: a second run failed: $OUT2"
+[ "$(snapshot)" = "$before" ] || fail "$NAME: the machine changed"
+[ -z "$(changing "$CALLS")" ] || fail "$NAME: a changing command ran: $(changing "$CALLS")"
+rig_out=$(printf '%s\n' "$OUT2" | awk '/^==> \[/ { on = ($0 ~ /\] rig:/) } on')
+printf '%s\n' "$rig_out" | grep -Eq '^    (run|would):' && fail "$NAME: the rig step acts on a second run: $rig_out"
+echo "ok: $NAME"
+
+NAME="a millwright clone that is dirty, or has commits of its own, is left as it is and said"
+push_rig landing-two
+rig_git config user.name t
+rig_git config user.email t@t
+echo mine >>"$RIG_DIR/go.mod"
+head_before=$(rig_git rev-parse HEAD)
+OUT=$(boost --env-file "$T/cloud2.env" 2>&1) || fail "$NAME: exited non-zero: $OUT"
+[ "$(rig_git rev-parse HEAD)" = "$head_before" ] || fail "$NAME: a dirty clone was moved"
+[ "$(tail -n 1 "$RIG_DIR/go.mod")" = mine ] || fail "$NAME: the clone's own change was lost"
+printf '%s\n' "$OUT" | grep -F "note:" | grep -Fq "$RIG_DIR" || fail "$NAME: a dirty clone is not said: $OUT"
+rig_git checkout -q -- go.mod
+echo own >"$RIG_DIR/own.txt"
+rig_git add own.txt
+rig_git commit -q -m "a commit of the box's own"
+head_before=$(rig_git rev-parse HEAD)
+OUT=$(boost --env-file "$T/cloud2.env" 2>&1) || fail "$NAME: exited non-zero: $OUT"
+[ "$(rig_git rev-parse HEAD)" = "$head_before" ] || fail "$NAME: a clone with commits of its own was moved"
+printf '%s\n' "$OUT" | grep -F "note:" | grep -Fq "$RIG_DIR" || fail "$NAME: a clone with commits of its own is not said: $OUT"
+echo "ok: $NAME"
+
+NAME="an existing [after_landing] table without a millwright key gets the line, one with it keeps its own"
+sed -i '/^\[after_landing\]$/,/^$/d' "$CONF"
+printf '\n[after_landing]\npostern = "deploy"\n' >>"$CONF"
+RC=0
+OUT=$(boost --env-file "$T/cloud2.env" 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
+[ "$(sed -n '/^\[after_landing\]$/,/^$/p' "$CONF" | grep -v '^$')" = '[after_landing]
+millwright = "make build"
+postern = "deploy"' ] || fail "$NAME: the table is not the box's line and the host's: $(cat "$CONF")"
+[ "$(grep -c '^\[after_landing\]' "$CONF")" = 1 ] || fail "$NAME: more than one [after_landing] table: $(cat "$CONF")"
+sed -i 's/^millwright = "make build"$/millwright = ""/' "$CONF"
+OUT=$(boost --env-file "$T/cloud2.env" 2>&1) || fail "$NAME: exited non-zero: $OUT"
+grep -Fxq 'millwright = ""' "$CONF" || fail "$NAME: a host's own millwright line was overwritten: $(cat "$CONF")"
 echo "ok: $NAME"
 
 echo "OK: contrib/boost-bootstrap.sh prints and runs every step in order, checks before it acts so a second run changes nothing, writes tokens only to mode 600 files, and refuses bad input"

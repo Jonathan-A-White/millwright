@@ -1578,6 +1578,25 @@ host in OTHER HOSTS, beside the sync line: `mw 243b096`, or `mw 74016ca · behin
 fetched) is not that commit. A host that left no commit is called behind main too:
 its `mw` is older than the note. Main unknown says nothing of any host.
 
+Every kind of host, and how its `mw` is rebuilt (mw-gq6.632; `mw status` shows the
+commit of each, 2026-10-20: laptop and desktop level with main, cloud1 and cloud2 a few
+landings behind, cloud3 left no commit, vps asleep):
+
+| Host | Its `mw` is built | Kept level with main by |
+| --- | --- | --- |
+| Laptop (home or not) | `make build` in its own checkout, linked by `scripts/install.sh` | a landing of a millwright story on it; the self-update of `mw dispatch` and `mw millhand tick`; `mw after-landing millwright` by hand |
+| desktop Boost | `contrib/boost-bootstrap.sh`, which runs `install.sh` | the same self-update, the default `make build` or its `[after_landing]` line |
+| cloud box (cloud1, 2, 3…) | the same bootstrap, run by cloud-init on every box made, from Ubuntu or from a snapshot | the same self-update; and the bootstrap, which fast-forwards an existing millwright clone to `origin/main` and builds `mw` before the box takes a story, and writes `millwright = "make build"` into `[after_landing]` |
+| VPS | by hand with `scripts/install.sh` (its config names `millwright` under `[rigs]` and no `[after_landing]`) | the self-update, when its dispatch or millhand tick units run; none otherwise, so `mw status` names it behind main |
+
+A box made from a snapshot carries the `mw` and the millwright clone the snapshot was
+made with, and until mw-gq6.632 the bootstrap, which cloud-init runs on every box, left an
+existing clone as it was (`already cloned (not updated)`), so such a box began on the
+snapshot's `mw` and had only the self-update to bring it level: cloud1, made 2026-10-19
+from a snapshot, had no `mw check --part` (landed 2026-10-18) when a Builder asked for it
+the next night. The bootstrap now fast-forwards the clone and builds before the box takes a
+story. Run `contrib/boost-bootstrap.sh` again on a box that is behind and it is level.
+
 ## Landing a rig's stories in batches
 
 A rig whose file in the vault says `landing = "batch"` (plans/0117, Land Rush)

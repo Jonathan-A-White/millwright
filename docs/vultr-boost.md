@@ -336,9 +336,11 @@ a snapshot is working in about two. To make the snapshot:
    --name cloud1`.
 
 A box made from it runs the bootstrap again through cloud-init, which changes only
-what is the box's own (its name, WireGuard key and address): the `host` line of the
-`config.toml` it carries is set to the box's name, and a broken checkout is repaired
-or cloned again. Nothing else in that `config.toml` is edited, so a snapshot made before the bootstrap wrote `[tests]`
+what is the box's own (its name, WireGuard key and address) and brings `mw` level with
+main: the `host` line of the `config.toml` it carries is set to the box's name, a
+broken checkout is repaired or cloned again, and its millwright clone is fast-forwarded
+to `origin/main` and `mw` built from it, so the box does not run the `mw` the snapshot
+was made with (mw-gq6.632). Nothing else in that `config.toml` is edited, so a snapshot made before the bootstrap wrote `[tests]`
 keeps a config without it: the bootstrap names the lines it lacks, and `mw doctor
 rig-tests` names the rigs. The snapshot holds
 what the box held, its tokens too: delete it at Vultr (my.vultr.com, Snapshots)

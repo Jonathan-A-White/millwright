@@ -14,7 +14,10 @@
 #                 and ~/.config/mw/github.env (GH_TOKEN=...)
 #   4  wireguard  /etc/wireguard/wg0.conf (mode 600) for this host, wg-quick@wg0 enabled and up (root)
 #   5  rig        the millwright rig (this checkout, or cloned to $MW_HOME), then scripts/install.sh:
-#                 Go and bd at the pinned versions, mw built and linked into ~/.local/bin
+#                 Go and bd at the pinned versions, mw built and linked into ~/.local/bin. A clone
+#                 already there is fetched and fast-forwarded to origin/main first (one that is dirty,
+#                 off main or with commits of its own is left alone and said), so a box made from a
+#                 snapshot builds main's mw and not the snapshot's (mw-gq6.632)
 #   6  claude     Claude Code (npm, into ~/.local) and ~/.config/mw/claude.env (CLAUDE_CODE_OAUTH_TOKEN=...)
 #   7  vault      the vault cloned to BOOST_VAULT, its .beads made mode 700 (bd warns at any other)
 #   8  rigs       every rig in BOOST_RIGS cloned beside it
@@ -28,8 +31,10 @@
 #                 and a [test_parts.<rig>] table, which splits its gate into parts for mw check --part,
 #                 where there is one) copied from the vault's hosts/boost-config.toml, so mw next gates a
 #                 rig with its own tests and not with `make test`. In an existing one only the host line is
-#                 ever edited, set to BOOST_HOST (a snapshot carries the box it was made from's), and a
-#                 [test_parts.<rig>] table it lacks altogether is added at its end; what else it lacks is said.
+#                 ever edited, set to BOOST_HOST (a snapshot carries the box it was made from's), a
+#                 [test_parts.<rig>] table it lacks altogether is added at its end, and an [after_landing]
+#                 millwright = "make build" it lacks is added; what else it lacks is said. A config
+#                 made here has that line too, so a landing of a millwright story rebuilds the box's mw.
 #  10  browsers   Playwright chromium and its system deps (root), at the version each cloned rig that depends
 #                 on @playwright/test has locked
 #  11  beads      ~/.config/mw/beads.env (mode 600): bd's BEADS_DOLT_* pointing at the home's beads server
@@ -552,6 +557,48 @@ needs_toolchain() {
 	case $out in *"    would:"*) return 0 ;; esac
 	return 1
 }
+# update_clone <dir>: bring a clone of the rig level with origin's main, so that the mw built
+# from it is main's and not the one a snapshot or an old bootstrap left (mw-gq6.632: cloud1,
+# made after --part landed, had an mw without it, and its own self-update never ran because
+# that mw was too old to have one). Only a fast-forward: a clone that is dirty, on another
+# branch or has commits of its own is left as it is and said, never reset.
+origin_tip() { # <dir> <branch>: origin's commit for the branch, empty when origin cannot be asked
+	GH_TOKEN="${BOOST_GITHUB_TOKEN}" git_in "$1" ls-remote origin "refs/heads/$2" 2>/dev/null | awk 'NR == 1 { print $1 }'
+}
+update_clone() {
+	local dir=$1 branch tip head
+	branch=$(git_in "$dir" symbolic-ref --short HEAD 2>/dev/null) || branch=""
+	if [ "$branch" != main ]; then
+		note "$dir is on ${branch:-no branch}, not main, so it was not updated: put it on main and run this again, or mw is not main's"
+		return 0
+	fi
+	head=$(git_in "$dir" rev-parse HEAD 2>/dev/null) || return 0
+	tip=$(origin_tip "$dir" main)
+	if [ -z "$tip" ]; then
+		note "origin could not be asked for main, so $dir was not updated"
+		return 0
+	fi
+	if [ "$tip" = "$head" ]; then
+		skip "$dir is level with origin/main"
+		return 0
+	fi
+	if ! act "fetch origin and fast-forward $dir to origin/main (${tip%"${tip#???????}"}), then build mw from it"; then
+		return 0
+	fi
+	if ! GH_TOKEN="${BOOST_GITHUB_TOKEN}" git_in "$dir" fetch -q origin main; then
+		note "git fetch failed in $dir, so it was not updated"
+		return 0
+	fi
+	if [ -n "$(git_in "$dir" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+		note "$dir has uncommitted changes, so it was not updated: mw is not main's"
+	elif ! git_in "$dir" merge-base --is-ancestor HEAD FETCH_HEAD 2>/dev/null; then
+		note "$dir has commits origin/main does not (or origin moved), so it was not updated: mw is not main's"
+	elif git_in "$dir" merge -q --ff-only FETCH_HEAD >/dev/null; then
+		printf '    fast-forwarded %s from %s to %s\n' "$dir" "${head%"${head#???????}"}" "$(git_in "$dir" rev-parse --short=7 HEAD)"
+	else
+		note "$dir could not be fast-forwarded: mw is not main's"
+	fi
+}
 s_rig() {
 	step rig "$RIG, then Go, bd and mw through scripts/install.sh"
 	local why
@@ -562,8 +609,9 @@ s_rig() {
 			note "the checkout this script is in, $RIG, is broken ($why): mend it by hand"
 		fi
 	elif is_checkout "$RIG"; then
-		skip "already cloned (not updated)"
+		skip "already cloned"
 		mend "$RIG" "$REPO_URL"
+		update_clone "$RIG"
 	else
 		if [ -e "$RIG" ] && [ -n "$(ls -A "$RIG" 2>/dev/null)" ]; then
 			die "$RIG exists and is not a millwright checkout; move it aside or set MW_HOME. Nothing more was changed."
@@ -701,6 +749,25 @@ config_lines() { # the lines a config for this Boost holds, one per line: [rigs]
 	config_table tests
 	config_table changed_specs
 	config_parts
+	printf '\n[after_landing]\nmillwright = "%s"\n' "$MW_AFTER_LANDING"
+}
+# A landing of a millwright story, and mw's own self-update, run this in the rig: it keeps the
+# box's mw level with main (mw runs the same command by default on a host whose [rigs] has the
+# rig and whose [after_landing] has no millwright key; written out so the config says it).
+MW_AFTER_LANDING="make build"
+# has_after_landing <file>: true when the config's [after_landing] table has a millwright key.
+has_after_landing() {
+	awk '/^[[:space:]]*\[/ { on = ($0 ~ /^[[:space:]]*\[after_landing\][[:space:]]*$/); next } on && /^[[:space:]]*millwright[[:space:]]*=/ { found = 1 } END { exit !found }' "$1"
+}
+# with_after_landing <file>: the config with millwright = "make build" in its [after_landing]
+# table, put first in it when there is one (every other line as it was), else a new table at its end.
+with_after_landing() {
+	if grep -Eq '^[[:space:]]*\[after_landing\][[:space:]]*$' "$1"; then
+		awk -v line="millwright = \"$MW_AFTER_LANDING\"" '{ print } !done && /^[[:space:]]*\[after_landing\][[:space:]]*$/ { print line; done = 1 }' "$1"
+	else
+		printf '%s\n' "$(cat "$1")"
+		printf '\n[after_landing]\nmillwright = "%s"\n' "$MW_AFTER_LANDING"
+	fi
 }
 # config_host <file>: the host the config names, before its first table; empty if none.
 config_host() {
@@ -753,13 +820,16 @@ $table
 			put "$(stat -c %a "$MW_DIR/config.toml")" "$MW_DIR/config.toml" "$(cat "$MW_DIR/config.toml")
 $missing_parts"
 		fi
+		if ! has_after_landing "$MW_DIR/config.toml" && act "set millwright = \"$MW_AFTER_LANDING\" in the [after_landing] table of $MW_DIR/config.toml, so a landing of a millwright story rebuilds this box's mw; no line in it is edited"; then
+			put "$(stat -c %a "$MW_DIR/config.toml")" "$MW_DIR/config.toml" "$(with_after_landing "$MW_DIR/config.toml")"
+		fi
 		while IFS= read -r line; do
 			case $line in '' | '['*) continue ;; esac
 			grep -Fxq -- "$line" "$MW_DIR/config.toml" || note "config.toml has no line: $line"
 		done <<EOF
 $want
 EOF
-	elif act "write $MW_DIR/config.toml (host $BOOST_HOST, cap $BOOST_CAP, beads_sync auto, $(echo "$want" | grep -c ' = "' || true) settings, [tests] and [changed_specs] lines and [test_parts.<rig>] tables from $TABLES_FILE)"; then
+	elif act "write $MW_DIR/config.toml (host $BOOST_HOST, cap $BOOST_CAP, beads_sync auto, $(echo "$want" | grep -c ' = "' || true) settings, [tests] and [changed_specs] lines and [test_parts.<rig>] tables from $TABLES_FILE, [after_landing] millwright = \"$MW_AFTER_LANDING\")"; then
 		ensure_mw_dir
 		put 644 "$MW_DIR/config.toml" "$want"
 	fi
