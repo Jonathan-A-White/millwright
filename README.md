@@ -3306,7 +3306,10 @@ nothing and logs `skipped: <remote> unreachable: <reason>`; `mw status` shows th
 run under the dispatch as `remote unreachable N in a row`, not as failed. The
 third such tick in a row fails the unit once, naming the remote and the first
 one's time, so an outage still mails the Mayor; a tick that gets through resets
-the count (mw-gq6.648). The fetch of a rig's origin
+the count (mw-gq6.648). A name that cannot be resolved for long (the exit 7 above)
+is counted the same way: the third such tick in a row leaves with 1 instead, once,
+naming the fault and the first one's time, and the ticks after it leave with 7
+again until a good one resets the count (mw-gq6.650). The fetch of a rig's origin
 before each session starts waits the same way (and says `retried the rig fetch 2
 times`); one that never gets through gives the story's claim back, prints the same
 `local network fault` line and leaves with 7. After changing the unit file,

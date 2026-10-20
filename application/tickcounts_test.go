@@ -224,6 +224,18 @@ func TestSkippedTicksAreCountedAsTheNewestRunOfThem(t *testing.T) {
 	}
 }
 
+func TestLocalNetworkFaultsAreCountedAsTheUnbrokenRunOfThemAtTheEnd(t *testing.T) {
+	at := func(m int) string { return time.Date(2026, 9, 21, 12, m, 0, 0, time.UTC).Format(time.RFC3339) + " " }
+	log := heldLog(t, at(0)+"ok: 1 started", at(5)+"local network fault", at(10)+"failed: x", at(15)+"local network fault", at(20)+"local network fault")
+	run := application.NewestRun(context.Background(), log, application.DispatchOutcome)
+	if run.Outcome != application.TickFault || run.Count != 2 || !run.First.Equal(time.Date(2026, 9, 21, 12, 15, 0, 0, time.UTC)) {
+		t.Errorf("expected a run of 2 faults from 12:15, got %+v", run)
+	}
+	if got := application.NewestRun(context.Background(), nil, application.DispatchOutcome); got.Count != 0 {
+		t.Errorf("expected no run of no log, got %+v", got)
+	}
+}
+
 func TestTheTicksNoteCarriesSkippedOnlyWhenThereAreSome(t *testing.T) {
 	none := application.HostTicks{Dispatch: application.TickCount{Known: true, Failed: 1}}
 	if note := none.Note(); strings.Contains(note, "skipped") {

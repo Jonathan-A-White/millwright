@@ -153,7 +153,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the vault's pull cannot connect to "([^"]*)"$`, c.theVaultsPullCannotConnect)
 	ctx.Given(`^the vault's push cannot connect to "([^"]*)"$`, c.theVaultsPushCannotConnect)
 	ctx.Given(`^the vault's push is rejected with "([^"]*)"$`, c.theVaultsPushIsRejected)
-	ctx.Given(`^the dispatch log already holds (\d+) (skipped|good|failed) runs?$`, c.theDispatchLogAlreadyHolds)
+	ctx.Given(`^the dispatch log already holds (\d+) (skipped|good|failed|local network) (?:runs?|faults?)$`, c.theDispatchLogAlreadyHolds)
 	ctx.Given(`^the config file says dispatch_sync_tries is (\d+) and dispatch_sync_wait is "([^"]*)"$`, c.theConfigSaysTheSyncKnobs)
 	ctx.Given(`^the config file says max_attempts is (\d+)$`, c.theConfigSaysMaxAttempts)
 	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times?$`, c.theStoryHasBeenTried)
@@ -726,9 +726,10 @@ func (c *dispatchContext) theVaultsPushIsRejected(said string) error {
 // them: each call goes on from the last line the log holds.
 func (c *dispatchContext) theDispatchLogAlreadyHolds(count int, what string) error {
 	words := map[string]string{
-		"skipped": application.DispatchLogSkipped + "github.com unreachable: Failed to connect to github.com port 443: Connection timed out",
-		"good":    application.DispatchLogOK + "nothing ready",
-		"failed":  application.DispatchLogFailed + "dispatching on vps: the hosts could not be brought level",
+		"skipped":       application.DispatchLogSkipped + "github.com unreachable: Failed to connect to github.com port 443: Connection timed out",
+		"good":          application.DispatchLogOK + "nothing ready",
+		"failed":        application.DispatchLogFailed + "dispatching on vps: the hosts could not be brought level",
+		"local network": application.DispatchLogFault,
 	}[what]
 	log := ticklog.New(c.dispatchLogDir())
 	for i := 0; i < count; i++ {

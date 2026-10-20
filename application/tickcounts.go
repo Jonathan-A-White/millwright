@@ -131,6 +131,45 @@ func CountTicks(ctx context.Context, log TickLog, outcome func(line string) (tim
 	return count
 }
 
+// TickRun is the unbroken run of one outcome at the end of a log: how many of
+// the newest runs, back to the first that was anything else, had it, and the time
+// of the oldest of them.
+type TickRun struct {
+	Outcome TickOutcome
+	Count   int
+	First   time.Time
+}
+
+// NewestRun reads a log, newest line first, for the run of the outcome of its
+// newest run (mw-gq6.650): three local network faults in a row, say, whatever
+// came before them. A log that is not there, cannot be read or holds no run has
+// a run of none.
+func NewestRun(ctx context.Context, log TickLog, outcome func(line string) (time.Time, TickOutcome)) TickRun {
+	if log == nil {
+		return TickRun{}
+	}
+	lines, err := log.Read(ctx)
+	if err != nil {
+		return TickRun{}
+	}
+	var run TickRun
+	for i := len(lines) - 1; i >= 0; i-- {
+		at, what := outcome(lines[i])
+		if what == TickUnread {
+			continue
+		}
+		if run.Count == 0 {
+			run.Outcome = what
+		}
+		if what != run.Outcome {
+			break
+		}
+		run.Count++
+		run.First = at
+	}
+	return run
+}
+
 // splitTickLine is a log line's time and the words after it.
 func splitTickLine(line string) (at time.Time, words string, ok bool) {
 	stamp, words, found := strings.Cut(strings.TrimSpace(line), " ")

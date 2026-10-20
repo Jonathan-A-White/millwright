@@ -191,7 +191,9 @@ func newDispatchCmd() *cobra.Command {
 			"A sync that cannot reach a git remote (a connection that failed or timed out, a TLS handshake\n" +
 			"that did not finish, an HTTP 5xx) is one tick's blip: dispatch claims nothing, logs \"skipped:\n" +
 			"<remote> unreachable: <reason>\" and leaves with 0. The third such tick in a row fails, once,\n" +
-			"naming the remote and the time of the first; a tick that reaches it again resets the count.\n\n" +
+			"naming the remote and the time of the first; a tick that reaches it again resets the count.\n" +
+			"A local network fault counts the same way: the third in a row fails, once, naming the fault\n" +
+			"and the time of the first, instead of leaving with " + fmt.Sprint(application.NetworkFaultExit) + ".\n\n" +
 			"Only one real dispatch runs on a host at a time: one started while another holds the\n" +
 			"host's dispatch lock (~/.local/state/mw-dispatch/lock-<vault hash>) prints \"another mw dispatch is running\n" +
 			"here; nothing done\" and leaves with 0.\n\n" +

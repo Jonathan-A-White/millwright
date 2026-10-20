@@ -70,6 +70,55 @@ Feature: Dispatching the stories this host is ready to work
     And the sync was tried 3 times, waiting 15s between the tries
     And dispatch leaves with status 7
 
+  # A fault that lasts must not go unseen: the first two ticks leave with 7 and
+  # say nothing, the third in a row fails the unit once (mw-gq6.650).
+  Scenario: One tick of a local network fault leaves with status 7 and sends nothing
+    Given a ready story "mw-gq6.1" of that epic
+    And the sync can never resolve a name
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch leaves with status 7
+    And the Mayor has 0 mails
+
+  Scenario: Two local network faults in a row still leave with status 7
+    Given the dispatch log already holds 1 local network fault
+    And a ready story "mw-gq6.1" of that epic
+    And the sync can never resolve a name
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch leaves with status 7
+
+  Scenario: The third local network fault in a row fails the unit, naming the fault and the first one's time
+    Given the dispatch log already holds 2 local network faults
+    And a ready story "mw-gq6.1" of that epic
+    And the sync can never resolve a name
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch failed, saying: local network fault for 3 ticks in a row since 2026-09-21T10:00:00Z
+    And dispatch leaves with status 1
+    And no session was started
+
+  Scenario: Only the third tick alarms; a fourth leaves with status 7 again
+    Given the dispatch log already holds 3 local network faults
+    And a ready story "mw-gq6.1" of that epic
+    And the sync can never resolve a name
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch leaves with status 7
+
+  Scenario: A good tick resets the count of local network faults
+    Given the dispatch log already holds 2 local network faults
+    And the dispatch log already holds 1 good run
+    And the dispatch log already holds 1 local network fault
+    And a ready story "mw-gq6.1" of that epic
+    And the sync can never resolve a name
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch leaves with status 7
+
+  Scenario: A rig fetch fault that lasts alarms on the third tick too
+    Given the dispatch log already holds 2 local network faults
+    And a ready story "mw-gq6.1" of that epic
+    And the rig fetch can never resolve a name
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch failed, saying: local network fault for 3 ticks in a row since 2026-09-21T10:00:00Z
+    And dispatch leaves with status 1
+
   Scenario: Any other sync failure is not tried again and fails as it always did
     Given a ready story "mw-gq6.1" of that epic
     And the vault's pull is refused with "git@github.com: Permission denied (publickey)."
