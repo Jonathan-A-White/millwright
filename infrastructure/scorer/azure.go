@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -47,8 +48,9 @@ type Azure struct {
 
 // Azure satisfies the port.
 var (
-	_ application.Scorer     = (*Azure)(nil)
-	_ application.LangScorer = (*Azure)(nil)
+	_ application.Scorer        = (*Azure)(nil)
+	_ application.LangScorer    = (*Azure)(nil)
+	_ application.SegmentScorer = (*Azure)(nil)
 )
 
 // NewAzure is the azure engine for the key in keyFile and the region given.
@@ -170,6 +172,24 @@ func (a *Azure) Score(ctx context.Context, audio []byte, mime, targetText, lang 
 		return application.ReadingResult{}, fmt.Errorf("azure: %w", err)
 	}
 	return result, nil
+}
+
+// ScoreSegments scores a woven reading that is all in one language as the one
+// text its pieces make, in that language. Azure assesses one language at a time
+// and has no Greek, so a reading in two languages is refused, not scored as
+// one language with the other's letters in it.
+func (a *Azure) ScoreSegments(ctx context.Context, audio []byte, mime string, segments []application.ScoreSegment) (application.ReadingResult, error) {
+	var langs []string
+	for _, segment := range segments {
+		base, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(segment.Lang)), "-")
+		if !slices.Contains(langs, base) {
+			langs = append(langs, base)
+		}
+	}
+	if len(langs) != 1 {
+		return application.ReadingResult{}, fmt.Errorf("azure scores one language at a time: this reading has pieces in %s", strings.Join(langs, " and "))
+	}
+	return a.Score(ctx, audio, mime, application.JoinSegments(segments), strings.TrimSpace(segments[0].Lang))
 }
 
 // azureLocale is the locale Azure wants for a language code: "en" is en-US,

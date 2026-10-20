@@ -175,3 +175,49 @@ func TestLocalTimesOut(t *testing.T) {
 		t.Fatalf("expected a timeout, got %v", err)
 	}
 }
+
+func TestLocalPostsTheSegmentsOfAWovenReadingInOrder(t *testing.T) {
+	needFfmpeg(t)
+	var raw map[string]json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		_, _ = w.Write([]byte(goodAnswer))
+	}))
+	defer srv.Close()
+
+	segments := []application.ScoreSegment{{Text: "In the beginning was", Lang: "en"}, {Text: "ὁ λόγος", Lang: "el"}}
+	result, err := scorer.NewLocal(srv.URL).ScoreSegments(context.Background(), clip(t), "audio/webm", segments)
+	if err != nil {
+		t.Fatalf("ScoreSegments: %v", err)
+	}
+	if len(result.Words) != 3 {
+		t.Errorf("unexpected result %+v", result)
+	}
+	var got []application.ScoreSegment
+	if err := json.Unmarshal(raw["segments"], &got); err != nil || len(got) != 2 || got[0] != segments[0] || got[1] != segments[1] {
+		t.Errorf("segments were posted as %s (%v), expected %+v", raw["segments"], err, segments)
+	}
+	if _, has := raw["audio_wav_base64"]; !has {
+		t.Errorf("the request carried no audio_wav_base64: %v", raw)
+	}
+	if _, has := raw["lang"]; has {
+		t.Errorf("a woven request names no lang of its own, got %s", raw["lang"])
+	}
+}
+
+func TestLocalPostsNoSegmentsForAReadingInOneLanguage(t *testing.T) {
+	needFfmpeg(t)
+	var raw map[string]json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		_, _ = w.Write([]byte(goodAnswer))
+	}))
+	defer srv.Close()
+
+	if _, err := scorer.NewLocal(srv.URL).Score(context.Background(), clip(t), "audio/webm", "the cat sat", "en"); err != nil {
+		t.Fatalf("Score: %v", err)
+	}
+	if _, has := raw["segments"]; has {
+		t.Errorf("a one-language request carried segments: %s", raw["segments"])
+	}
+}

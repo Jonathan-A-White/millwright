@@ -28,16 +28,34 @@ type ScorerCall struct {
 	Mime   string
 	Target string
 	Lang   string
+	// Segments are the pieces of a woven reading, in order; none for a reading
+	// in one language (Target and Lang say it).
+	Segments []application.ScoreSegment
 }
 
 // FakeScorer satisfies the port.
-var _ application.Scorer = (*FakeScorer)(nil)
+var (
+	_ application.Scorer        = (*FakeScorer)(nil)
+	_ application.SegmentScorer = (*FakeScorer)(nil)
+)
 
 // Score implements application.Scorer.
 func (f *FakeScorer) Score(_ context.Context, audio []byte, mime, targetText, lang string) (application.ReadingResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, ScorerCall{Audio: audio, Mime: mime, Target: targetText, Lang: lang})
+	if f.Err != nil {
+		return application.ReadingResult{}, f.Err
+	}
+	return f.Result, nil
+}
+
+// ScoreSegments implements application.SegmentScorer: Target is the pieces'
+// text joined, Lang is empty.
+func (f *FakeScorer) ScoreSegments(_ context.Context, audio []byte, mime string, segments []application.ScoreSegment) (application.ReadingResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, ScorerCall{Audio: audio, Mime: mime, Target: application.JoinSegments(segments), Segments: append([]application.ScoreSegment(nil), segments...)})
 	if f.Err != nil {
 		return application.ReadingResult{}, f.Err
 	}

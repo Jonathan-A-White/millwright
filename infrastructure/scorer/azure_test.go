@@ -303,3 +303,43 @@ func TestAzureHasNoGreek(t *testing.T) {
 		t.Errorf("scoring Greek should be refused plainly, got %v", err)
 	}
 }
+
+func TestAzureRefusesAWovenReadingInTwoLanguagesSayingWhy(t *testing.T) {
+	asked := false
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { asked = true }))
+	defer srv.Close()
+
+	segments := []application.ScoreSegment{{Text: "In the beginning was", Lang: "en"}, {Text: "ὁ λόγος", Lang: "el"}}
+	_, err := azureAgainst(t, srv).ScoreSegments(context.Background(), []byte("audio"), "audio/webm", segments)
+	if err == nil || !strings.Contains(err.Error(), "azure scores one language at a time") || !strings.Contains(err.Error(), "en and el") {
+		t.Fatalf("expected a refusal naming the languages, got %v", err)
+	}
+	if asked {
+		t.Error("azure was asked for a reading it refuses")
+	}
+}
+
+func TestAzureScoresAWovenReadingAllInOneLanguageAsOneText(t *testing.T) {
+	needFfmpeg(t)
+	var gotHeader http.Header
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader, gotQuery = r.Header.Clone(), r.URL.RawQuery
+		_, _ = w.Write(azureAnswer(t))
+	}))
+	defer srv.Close()
+
+	segments := []application.ScoreSegment{{Text: "the cat", Lang: "en"}, {Text: "sat", Lang: "en-US"}}
+	if _, err := azureAgainst(t, srv).ScoreSegments(context.Background(), clip(t), "audio/webm", segments); err != nil {
+		t.Fatalf("ScoreSegments: %v", err)
+	}
+	if !strings.Contains(gotQuery, "language=en-US") {
+		t.Errorf("query %q is not English", gotQuery)
+	}
+	raw, _ := base64.StdEncoding.DecodeString(gotHeader.Get("Pronunciation-Assessment"))
+	var header struct{ ReferenceText string }
+	_ = json.Unmarshal(raw, &header)
+	if header.ReferenceText != "the cat sat" {
+		t.Errorf("reference text = %q, expected the pieces joined", header.ReferenceText)
+	}
+}

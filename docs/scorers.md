@@ -129,6 +129,15 @@ ARPAbet for English. Either way, each word of the target in the answer also carr
 the reader added (`insertion`) carries neither, and a request without `segments`
 gets neither on any word.
 
+The mill sends `segments` when a grist's request carries them (a non-empty list of
+`{text, lang}`, from the app, beside its `target_text`): the `local` engine posts them in
+place of `target_text` and `lang`. The `azure` engine scores one language at a time, so it
+scores segments all in one language as their text joined, and refuses a reading in two
+(`azure scores one language at a time: this reading has pieces in en and el`). An engine
+that has no segments method is given the pieces' text joined, in the grist's `lang`. A
+`segments` that is not a list of `{text, lang}` is every engine's error, never a one-text
+score.
+
 `audio_wav_base64` is the standard base64 of the 16 kHz mono WAV file. The
 scorer answers `200` with a `ReadingResult` as above. Any other status is an
 error, and its body is shown. A connection refused names `local_url` and this
@@ -287,7 +296,7 @@ and `mw` never deletes it:
 | --- | --- |
 | `input.json` | the app's request as the session was given it, with `reading_result` |
 | `attachment-N.<ext>` | each attachment as it was opened, in order (photos too) |
-| `scorers.json` | a list, one entry for each recording: `attachment`, `mime`, `target_text`, `lang`, `reading_result` by engine; `[]` when nothing was scored |
+| `scorers.json` | a list, one entry for each recording: `attachment`, `mime`, `target_text`, `lang`, `segments` (only for a woven reading), `reading_result` by engine; `[]` when nothing was scored |
 | `answer.json` | `status` (answered, refused or failed), `reason`, `answer`, `said`, `turns`, `total_cost_usd` |
 | `timing.json` | `txid`, `app`, `kind`, `model`, `effort`; `sent` (the grist record's time; `received` minus it is the queue wait), `received`, `scored_at`, `harness_started`, `answered`; `scoring_seconds`, `scorers` (each engine's seconds), `harness_seconds`, `seconds` (received to answered); `sent` and `scorers` are left out when unknown |
 

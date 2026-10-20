@@ -112,20 +112,22 @@ func (g GristGrind) scoreRecordings(ctx context.Context, w *gristWork, plain *Gr
 	if raw, found := fields[w.grind.Scoring.TargetField]; found {
 		_ = json.Unmarshal(raw, &target)
 	}
+	read := gristReading{target: target, lang: w.lang, field: w.grind.Scoring.TargetField}
+	read.segments, read.badSegments = segmentsOf(fields["segments"])
 	started := g.now()
 	var all []map[string]json.RawMessage
 	for i, clip := range w.clips {
 		if !isGristAudio(clip.mime) {
 			continue
 		}
-		results, took := g.scoreClip(ctx, engines, clip, target, w.lang, w.grind.Scoring.TargetField)
+		results, took := g.scoreClip(ctx, engines, clip, read)
 		if w.scorerSeconds == nil {
 			w.scorerSeconds = map[string]float64{}
 		}
 		for name, seconds := range took {
 			w.scorerSeconds[name] += seconds
 		}
-		w.scores = append(w.scores, GristRunScore{Attachment: i + 1, Mime: clip.mime, Target: target, Lang: w.lang, Results: results})
+		w.scores = append(w.scores, GristRunScore{Attachment: i + 1, Mime: clip.mime, Target: target, Lang: w.lang, Segments: read.segments, Results: results})
 		all = append(all, results)
 	}
 	scored := g.now()
@@ -139,6 +141,36 @@ func (g GristGrind) scoreRecordings(ctx context.Context, w *gristWork, plain *Gr
 		fields["reading_results"] = w.readings
 	}
 	plain.Input = mustJSON(fields)
+}
+
+// gristReading is what a recording is scored against: the text of the app's
+// request and the language it is scored in, and, for a woven reading, its
+// pieces in order. badSegments says why the request's segments cannot be read;
+// then no engine is asked.
+type gristReading struct {
+	target, lang, field string
+	segments            []ScoreSegment
+	badSegments         string
+}
+
+// segmentsOf reads the request's "segments", the pieces of a woven reading. An
+// absent, null or empty one is no pieces; one that is not a list of {text,
+// lang} is the reason it cannot be scored.
+func segmentsOf(raw json.RawMessage) ([]ScoreSegment, string) {
+	if text := strings.TrimSpace(string(raw)); text == "" || text == "null" || text == "[]" {
+		return nil, ""
+	}
+	var segments []ScoreSegment
+	if err := json.Unmarshal(raw, &segments); err != nil {
+		return nil, "the grist's segments are not a non-empty list of {text, lang}"
+	}
+	for i := range segments {
+		segments[i].Lang = strings.TrimSpace(segments[i].Lang)
+		if strings.TrimSpace(segments[i].Text) == "" || segments[i].Lang == "" {
+			return nil, fmt.Sprintf("segment %d of the grist's segments has no text or no lang: each is {text, lang}", i+1)
+		}
+	}
+	return segments, ""
 }
 
 // enginesFor is the engines that can score the grist's language; one that
@@ -157,7 +189,7 @@ func (g GristGrind) enginesFor(w *gristWork, engines []string) []string {
 
 // scoreClip runs every engine on one recording at once, and reports what each
 // said by its name, with the seconds each took.
-func (g GristGrind) scoreClip(ctx context.Context, engines []string, clip gristClip, target, lang, field string) (map[string]json.RawMessage, map[string]float64) {
+func (g GristGrind) scoreClip(ctx context.Context, engines []string, clip gristClip, read gristReading) (map[string]json.RawMessage, map[string]float64) {
 	results := make(map[string]json.RawMessage, len(engines))
 	took := make(map[string]float64, len(engines))
 	var mu sync.Mutex
@@ -167,7 +199,7 @@ func (g GristGrind) scoreClip(ctx context.Context, engines []string, clip gristC
 		go func() {
 			defer wg.Done()
 			begun := g.now()
-			said := g.scoreWith(ctx, name, clip, target, lang, field)
+			said := g.scoreWith(ctx, name, clip, read)
 			seconds := g.now().Sub(begun).Seconds()
 			mu.Lock()
 			results[name] = said
@@ -181,15 +213,26 @@ func (g GristGrind) scoreClip(ctx context.Context, engines []string, clip gristC
 
 // scoreWith is one engine's answer for one recording, as JSON: its
 // ReadingResult, or {"error": "..."}.
-func (g GristGrind) scoreWith(ctx context.Context, name string, clip gristClip, target, lang, field string) json.RawMessage {
-	if target == "" {
-		return mustJSON(gristEngineError{fmt.Sprintf("the grist's request has no text to score against in %q", field)})
+func (g GristGrind) scoreWith(ctx context.Context, name string, clip gristClip, read gristReading) json.RawMessage {
+	if read.badSegments != "" {
+		return mustJSON(gristEngineError{read.badSegments})
+	}
+	if read.target == "" && read.segments == nil {
+		return mustJSON(gristEngineError{fmt.Sprintf("the grist's request has no text to score against in %q", read.field)})
 	}
 	engine, err := g.Scorers.Get(name)
 	if err != nil {
 		return mustJSON(gristEngineError{err.Error()})
 	}
-	result, err := engine.Score(ctx, clip.data, clip.mime, target, lang)
+	var result ReadingResult
+	if segmenter, ok := engine.(SegmentScorer); ok && read.segments != nil {
+		result, err = segmenter.ScoreSegments(ctx, clip.data, clip.mime, read.segments)
+	} else if read.segments != nil {
+		// An engine that takes one text is given the pieces joined, in the grist's language.
+		result, err = engine.Score(ctx, clip.data, clip.mime, JoinSegments(read.segments), read.lang)
+	} else {
+		result, err = engine.Score(ctx, clip.data, clip.mime, read.target, read.lang)
+	}
 	if err != nil {
 		return mustJSON(gristEngineError{err.Error()})
 	}
