@@ -3,6 +3,7 @@ package vault_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -756,6 +757,76 @@ func TestPushRebasesOntoWhatTheRemoteGotMeanwhileAndTriesAgain(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(there, name)); err != nil {
 			t.Errorf("the remote lacks %s: %v", name, err)
 		}
+	}
+}
+
+// refuseWith installs a pre-receive hook in the remote of a clone that refuses
+// a push the way GitHub does when another push landed in the same second, for
+// as many pushes as the file named by counter allows: the hook refuses while the
+// file holds a number above zero and counts it down.
+func refuseWith(t *testing.T, here string, refusals int) {
+	t.Helper()
+	remote := strings.TrimSpace(run(t, here, "git", "config", "remote.origin.url"))
+	counter := filepath.Join(t.TempDir(), "refusals")
+	if err := os.WriteFile(counter, []byte(fmt.Sprintf("%d\n", refusals)), 0o644); err != nil {
+		t.Fatalf("writing the counter: %v", err)
+	}
+	hook := fmt.Sprintf(`#!/bin/sh
+left=$(cat %[1]s)
+if [ "$left" -gt 0 ]; then
+	echo $((left - 1)) > %[1]s
+	echo "cannot lock ref 'refs/heads/main': is at 3e031e3 but expected 9c1d0aa" >&2
+	exit 1
+fi
+`, counter)
+	if err := os.WriteFile(filepath.Join(remote, "hooks", "pre-receive"), []byte(hook), 0o755); err != nil {
+		t.Fatalf("writing the hook: %v", err)
+	}
+}
+
+// A push GitHub refuses with "cannot lock ref" (another push landed in the same
+// second) is followed by one pull and one more push, and when that goes the
+// push has succeeded (mw-gq6.636).
+func TestPushTriesAgainAfterTheRemoteCouldNotLockTheRef(t *testing.T) {
+	here, _ := twoHosts(t)
+	files := vault.New(here)
+	write(t, here, "seats/builder/mine.md", "this host's file\n")
+	if _, err := files.Commit(context.Background(), "this host writes", []string{"seats/builder/mine.md"}); err != nil {
+		t.Fatalf("committing: %v", err)
+	}
+	refuseWith(t, here, 1)
+
+	pushed, err := files.Push(context.Background())
+	if err != nil {
+		t.Fatalf("pushing after one cannot-lock-ref refusal: %v", err)
+	}
+	if pushed != 1 {
+		t.Fatalf("expected the one commit pushed, got %d", pushed)
+	}
+	remote := strings.TrimSpace(run(t, here, "git", "ls-remote", "origin", "refs/heads/main"))
+	if head := strings.TrimSpace(run(t, here, "git", "rev-parse", "HEAD")); !strings.HasPrefix(remote, head) {
+		t.Fatalf("the remote holds %q, the clone is at %s", remote, head)
+	}
+}
+
+// A remote that refuses every push is still a failure, and the error names the
+// first refusal as well as the last.
+func TestPushRefusedAgainAfterTheRetryFailsNamingBothAttempts(t *testing.T) {
+	here, _ := twoHosts(t)
+	files := vault.New(here)
+	write(t, here, "seats/builder/mine.md", "this host's file\n")
+	if _, err := files.Commit(context.Background(), "this host writes", []string{"seats/builder/mine.md"}); err != nil {
+		t.Fatalf("committing: %v", err)
+	}
+	refuseWith(t, here, 100)
+
+	_, err := files.Push(context.Background())
+	if err == nil {
+		t.Fatalf("expected the push to fail when every attempt is refused")
+	}
+	said := err.Error()
+	if !strings.Contains(said, "cannot lock ref") || !strings.Contains(said, "first push") || !strings.Contains(said, "tried again") {
+		t.Fatalf("expected the error to name the refusal of both attempts, got %v", err)
 	}
 }
 

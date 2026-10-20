@@ -333,12 +333,19 @@ func (v *Vault) Push(ctx context.Context) (int, error) {
 	if outgoing == 0 {
 		return 0, nil
 	}
+	var first error
 	for rebased := 0; ; rebased++ {
 		_, err := v.git(ctx, "push")
 		if err == nil {
 			return outgoing, nil
 		}
-		if rebased == pushRebases || !pushRefused(err) {
+		if rebased == 0 {
+			first = err
+		}
+		if rebased == pushRebases || !pushRefused(err) || (rebased > 0 && pushLockRefused(err)) {
+			if rebased > 0 {
+				err = fmt.Errorf("%w (the first push was refused too, and tried again after a pull: %v)", err, first)
+			}
 			return 0, err
 		}
 		if _, pulled := v.Pull(ctx); pulled != nil {
@@ -367,12 +374,22 @@ func tracksNothing(err error) bool {
 }
 
 // pushRefused reports whether git refused a push because the remote has moved
-// on (rejected as a non-fast-forward, or "fetch first"): the refusals a rebase
-// cures. A refused key, a name that does not resolve and the rest are not it.
+// on (rejected as a non-fast-forward, or "fetch first", or the remote could not
+// lock the ref because another push landed in the same moment): the refusals a
+// rebase cures. A refused key, a name that does not resolve and the rest are not it.
 func pushRefused(err error) bool {
 	said := err.Error()
-	return strings.Contains(said, "[rejected]") &&
+	return pushLockRefused(err) || strings.Contains(said, "[rejected]") &&
 		(strings.Contains(said, "fetch first") || strings.Contains(said, "non-fast-forward"))
+}
+
+// pushLockRefused reports whether the remote refused a push because another push
+// to the same ref landed in the same moment: GitHub's "[remote rejected] ...
+// cannot lock ref 'refs/heads/main': is at X but expected Y". A pull and one more
+// push cures it (mw-gq6.636); a refusal that comes twice is not a race.
+func pushLockRefused(err error) bool {
+	said := err.Error()
+	return strings.Contains(said, "[remote rejected]") && strings.Contains(said, "cannot lock ref")
 }
 
 // Head implements application.VaultFiles: the commit this clone has checked

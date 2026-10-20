@@ -83,6 +83,7 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the other host appended a line to the Mayor's ledger and pushed it$`, c.theOtherHostAppendedAndPushed)
 	ctx.Given(`^this host appended its own line to the Mayor's ledger$`, c.thisHostAppended)
 	ctx.Given(`^this host has an uncommitted change to the Mayor's ledger$`, c.thisHostHasAnUncommittedChange)
+	ctx.Given(`^the remote will refuse (\d+) push(?:es)? with "([^"]*)" because another push landed in the same second$`, c.theRemoteWillRefuse)
 	ctx.Given(`^the other host pushed the run files of "([^"]*)"$`, c.theOtherHostPushedRunFiles)
 	ctx.Given(`^a close-out here has written the same run files of "([^"]*)" and has not committed them yet$`, c.aCloseOutHasWrittenRunFiles)
 	ctx.Given(`^the close-out commits them a moment later$`, c.theCloseOutCommitsLater)
@@ -112,6 +113,7 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the failure says, in plain words:$`, c.theFailureSays)
 	ctx.Then(`^the Mayor's ledger on this host holds, in this order:$`, c.theLedgerHoldsInThisOrder)
 	ctx.Then(`^no conflict is left in the vault$`, c.noConflictIsLeft)
+	ctx.Then(`^the remote holds this host's line$`, c.theRemoteHoldsThisHostsLine)
 	ctx.Then(`^the other host sees both lines once it pulls$`, c.theOtherHostSeesBothLines)
 	ctx.Then(`^the sync reports (\d+) commit pulled and (\d+) commit pushed$`, c.theSyncReports)
 	ctx.Then(`^the sync reports nothing pulled and nothing pushed$`, c.theSyncReportsNothing)
@@ -807,6 +809,42 @@ func (c *syncContext) theSyncSays(words string) error {
 func (c *syncContext) theSyncDoesNotSay(words string) error {
 	if line := c.report.String(); strings.Contains(line, words) {
 		return fmt.Errorf("expected the sync not to say %q, got %q", words, line)
+	}
+	return nil
+}
+
+// theRemoteWillRefuse puts a hook in the shared remote that refuses the next
+// refusals pushes the way GitHub does when another push to the ref landed in the
+// same second, saying words as git relays them.
+func (c *syncContext) theRemoteWillRefuse(refusals int, words string) error {
+	remote := filepath.Join(c.root, "origin.git")
+	counter := filepath.Join(c.root, "refusals")
+	if err := os.WriteFile(counter, []byte(fmt.Sprintf("%d\n", refusals)), 0o644); err != nil {
+		return err
+	}
+	hook := fmt.Sprintf(`#!/bin/sh
+left=$(cat %[1]s)
+if [ "$left" -gt 0 ]; then
+	echo $((left - 1)) > %[1]s
+	echo "%[2]s 'refs/heads/main': is at 3e031e3 but expected 9c1d0aa" >&2
+	exit 1
+fi
+`, counter, words)
+	return os.WriteFile(filepath.Join(remote, "hooks", "pre-receive"), []byte(hook), 0o755)
+}
+
+// theRemoteHoldsThisHostsLine reads the Mayor's ledger as the remote has it.
+func (c *syncContext) theRemoteHoldsThisHostsLine() error {
+	out, err := runGit(c.there, "pull", "-q", "--rebase")
+	if err != nil {
+		return fmt.Errorf("pulling from the remote: %v: %s", err, out)
+	}
+	body, err := os.ReadFile(filepath.Join(c.there, mayorLedger))
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(string(body), thisLine) {
+		return fmt.Errorf("the remote's ledger lacks %q: %s", thisLine, body)
 	}
 	return nil
 }
