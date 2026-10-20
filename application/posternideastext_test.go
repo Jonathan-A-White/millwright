@@ -95,3 +95,41 @@ func TestIdeasOnlyHoldsWhatItCannotTieToAToDo(t *testing.T) {
 		t.Fatalf("expected a message that says 'to do' to pass whatever the tracker says")
 	}
 }
+
+// A message that begins 'TODO:' is the Governor asking for it to be looked at
+// at once: Ideas only lets it through whatever its channel and whatever the
+// tracker says, in any case and with or without a space after the colon
+// (mw-8ifimx.18). Further in, the word still passes by the ordinary rule
+// (it says 'todo'); the prefix is what holds in a bead's thread that is no
+// to-do.
+func TestIdeasOnlyLetsAMessageBeginningTodoColonThrough(t *testing.T) {
+	inbox := toDoTextInbox(t)
+	general := func(text string) application.PosternInboxMessage {
+		return application.PosternInboxMessage{Txid: "direct:1", Class: "message", Thread: application.PosternGeneralThread, Text: text}
+	}
+	cases := []struct {
+		name string
+		m    application.PosternInboxMessage
+		want bool
+	}{
+		{"upper case, a space", general("TODO: an app for the roof"), true},
+		{"upper case, no space", general("TODO:an app for the roof"), true},
+		{"lower case", general("todo: an app for the roof"), true},
+		{"mixed case", general("ToDo: an app for the roof"), true},
+		{"leading blanks", general("  \nTODO: an app for the roof"), true},
+		{"no words after it", general("TODO:"), true},
+		{"in a thread that is no to-do", application.PosternInboxMessage{Txid: "direct:1", Class: "message", Thread: "mw-lst.2", ThreadIsBead: true, Text: "TODO: an app for the roof"}, true},
+		{"on a named topic", application.PosternInboxMessage{Txid: "direct:1", Class: "message", Thread: "ideas", Text: "TODO: an app for the roof"}, true},
+		{"as a Talk turn", application.PosternInboxMessage{Txid: "direct:1", Class: application.TalkRecordClass, Thread: application.TalkRecordClass, Text: "TODO: an app for the roof"}, true},
+	}
+	for _, c := range cases {
+		if got := inbox.AboutAToDo(context.Background(), c.m); got != c.want {
+			t.Errorf("%s: aboutAToDo = %v, want %v", c.name, got, c.want)
+		}
+	}
+	// With a tracker that cannot be read, the prefix still gets through.
+	inbox.Tracker.(*apptest.FakeTracker).Err = context.DeadlineExceeded
+	if !inbox.AboutAToDo(context.Background(), general("TODO: an app for the roof")) {
+		t.Fatalf("expected TODO: to pass whatever the tracker says")
+	}
+}

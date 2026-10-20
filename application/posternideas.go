@@ -83,12 +83,16 @@ func (i PosternInbox) holdIdeaAnswering(ctx context.Context, m PosternInboxMessa
 }
 
 // aboutAToDo reports whether m is about one of the Governor's own to-dos, the
-// one kind of word of his that Ideas only does not keep: an action or an
+// one kind of word of his that Ideas only does not keep: a message that begins
+// 'TODO:' (beginsTodoColon), whatever its channel; an action or an
 // answer naming a bead, or a message in a bead's thread, where that bead is
 // labelled hitl:todo; or any other message or Talk turn whose words are about
 // a to-do (textAboutAToDo). A bead the tracker cannot read or find is not
 // known to be one, and its message is kept as an idea.
 func (i PosternInbox) aboutAToDo(ctx context.Context, m PosternInboxMessage) bool {
+	if beginsTodoColon(m.Text) {
+		return true
+	}
 	bead := ""
 	if reply, ok := decodePosternReply(m.Text); ok {
 		bead = reply.Bead
@@ -108,6 +112,14 @@ func (i PosternInbox) aboutAToDo(ctx context.Context, m PosternInboxMessage) boo
 		return false
 	}
 	return len(found) > 0 && found[0].Todo()
+}
+
+// beginsTodoColon reports whether text begins with 'TODO:', in any case, after
+// any blanks: the Governor's way of asking that a message be looked at at once
+// though Ideas only is on (mw-8ifimx.18).
+func beginsTodoColon(text string) bool {
+	text = strings.TrimSpace(text)
+	return len(text) >= 5 && strings.EqualFold(text[:5], "todo:")
 }
 
 // textAboutAToDo reports whether the words of m, a Talk turn or a free-text

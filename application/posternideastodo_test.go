@@ -117,3 +117,28 @@ func TestIdeasOnlyPassesAMessageAboutAToDoAndHoldsAnIdea(t *testing.T) {
 		t.Fatalf("expected only the idea held, got %+v", files.held)
 	}
 }
+
+// A message beginning 'TODO:' reaches the Mayor during Ideas only, so the
+// summary of what was held, read at the end, does not list it; a message
+// without the prefix is still held and listed (mw-8ifimx.18).
+func TestIdeasOnlyHoldsNoTodoColonMessageAndSummaryDoesNotListIt(t *testing.T) {
+	f, inbox, files := ideasTodoFixture(t)
+	f.message(t, releaseTapGovernorKey, "tx-upper", "TODO: an app for the roof")
+	f.message(t, releaseTapGovernorKey, "tx-lower", "todo:an app for the gutters")
+	f.message(t, releaseTapGovernorKey, "tx-idea", "an app for the attic")
+
+	if _, err := inbox.Apply(context.Background()); err != nil {
+		t.Fatalf("applying: %v", err)
+	}
+	if len(files.held) != 1 || files.held[0].Txid != "tx-idea" {
+		t.Fatalf("expected only the message without the prefix held, got %+v", files.held)
+	}
+	var out strings.Builder
+	report, err := application.IdeasOnlyShow{Mode: *inbox.Ideas, Out: &out}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("showing: %v", err)
+	}
+	if len(report.Held) != 1 || report.Held[0].Txid != "tx-idea" || strings.Contains(out.String(), "TODO") || strings.Contains(out.String(), "tx-upper") || strings.Contains(out.String(), "tx-lower") {
+		t.Fatalf("expected the summary to list only tx-idea, got %q", out.String())
+	}
+}
