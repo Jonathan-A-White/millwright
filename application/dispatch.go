@@ -568,13 +568,46 @@ func dispatchLogWords(report DispatchReport, err error) string {
 		if _, fault := LocalFault(err); fault {
 			return DispatchLogFault
 		}
+		// A tick whose only fault is claims lost to another host did nothing
+		// wrong: two dispatchers racing for one ready story is normal (mw-gq6.643).
+		if holders, lost := lostClaimsOnly(err.Error()); lost {
+			return DispatchLogOK + "claim lost to " + strings.Join(holders, ", ")
+		}
 		return DispatchLogFailed + clippedTo(oneLine(err.Error()), DispatchLogReasonLimit)
 	case report.Paused != nil:
 		return DispatchLogPaused + " by " + report.Paused.Actor
 	case len(report.Started) == 0 && len(report.Passed) == 0 && len(report.FixedOnMain) == 0:
 		return DispatchLogNothingReady
 	}
-	return fmt.Sprintf("%s%d started", DispatchLogOK, len(report.Started))
+	words := fmt.Sprintf("%s%d started", DispatchLogOK, len(report.Started))
+	for _, passed := range report.Passed {
+		if passed.Gate == ClaimLostGate {
+			words += "; " + passed.StoryID + " " + passed.Why
+		}
+	}
+	return words
+}
+
+// lostClaimsOnly reads what a failed dispatch said of itself, with or without
+// the "failed: " in front: it reports who held each story when every failure in
+// it is a claim another actor already held, and false for anything else,
+// including no failure at all.
+func lostClaimsOnly(said string) (holders []string, lost bool) {
+	said = strings.TrimPrefix(said, DispatchLogFailed)
+	if rest, found := strings.CutPrefix(said, "dispatching on "); found {
+		_, said, found = strings.Cut(rest, ": ")
+		if !found {
+			return nil, false
+		}
+	}
+	for _, failure := range strings.Split(said, "; ") {
+		holder, held := ClaimHeldBy(errors.New(failure))
+		if !held || !strings.HasSuffix(failure, ", so it was not taken") {
+			return nil, false
+		}
+		holders = append(holders, holder)
+	}
+	return holders, len(holders) > 0
 }
 
 // now is the clock the log is dated by.
@@ -1388,9 +1421,8 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	}
 
 	if err := d.Tracker.ClaimStory(ctx, id); err != nil {
-		var held *ClaimHeldError
-		if errors.As(err, &held) {
-			return Started{}, false, &claimLost{holder: held.Holder}
+		if holder, held := ClaimHeldBy(err); held {
+			return Started{}, false, &claimLost{holder: holder}
 		}
 		return Started{}, false, fmt.Errorf("claiming %s: %w", id, err)
 	}

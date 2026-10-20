@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -796,6 +797,28 @@ type ClaimHeldError struct {
 
 func (e *ClaimHeldError) Error() string {
 	return fmt.Sprintf("%s is already claimed by %s, so it was not taken", e.ID, e.Holder)
+}
+
+// claimHeld matches the words of a ClaimHeldError, for a refusal that reached
+// a caller as its text and not its type.
+var claimHeld = regexp.MustCompile(`(\S+) is already claimed by (\S+), so it was not taken`)
+
+// ClaimHeldBy reports whether err is a claim refused because another actor
+// holds the story, and who. It reads the typed error first and the words of one
+// after it, so that a refusal that crossed a boundary which kept only its text
+// (a log line, a flattened error) is still known for what it was.
+func ClaimHeldBy(err error) (holder string, held bool) {
+	var typed *ClaimHeldError
+	if errors.As(err, &typed) {
+		return typed.Holder, true
+	}
+	if err == nil {
+		return "", false
+	}
+	if found := claimHeld.FindStringSubmatch(err.Error()); found != nil {
+		return found[2], true
+	}
+	return "", false
 }
 
 // CloseHeldError is a close refused because another actor holds the story's

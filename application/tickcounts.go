@@ -135,6 +135,11 @@ func DispatchOutcome(line string) (time.Time, TickOutcome) {
 	case strings.HasPrefix(words, DispatchLogFault):
 		return at, TickFault
 	case strings.HasPrefix(words, DispatchLogFailed):
+		// A line written before a lost claim was told from a failure: the only
+		// thing it says went wrong is a story another host took first.
+		if _, lost := lostClaimsOnly(words); lost {
+			return at, TickGood
+		}
 		return at, TickFailed
 	}
 	return time.Time{}, TickUnread
