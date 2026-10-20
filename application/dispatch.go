@@ -247,6 +247,12 @@ type Dispatch struct {
 	// cannot have it by then is skipped. Zero is DispatchGateWait.
 	GateWait time.Duration
 
+	// RecheckSkips is where a re-run of a suite bug's spec that was not made, or
+	// whose bug could not be closed, is kept: one dated line with the story and
+	// the words of its started line, read by mw status and mw doctor so that a
+	// guard that cannot run is seen (mw-gq6.640). Nil keeps none.
+	RecheckSkips TickLog
+
 	// DryRun prints what would be started and writes nothing at all: nothing is
 	// synced, nothing claimed, no worktree made, no formula poured, no session
 	// started.
@@ -1083,17 +1089,21 @@ func (d Dispatch) recheckSuiteBug(ctx context.Context, detail StoryDetail, path 
 	found, err := d.recheckUnderGate(ctx, id, path.Rig, spec, report)
 	var busy gateBusy
 	if errors.As(err, &busy) {
+		d.noteRecheckSkip(ctx, report, id, busy.Error())
 		return busy.Error(), false
 	}
 	switch {
 	case err != nil:
+		d.noteRecheckSkip(ctx, report, id, "not re-run on main first: "+firstLine(err.Error()))
 		return fmt.Sprintf("not re-run on main first: %v", oneLine(err.Error())), false
 	case !found.Passed:
 		return fmt.Sprintf("re-run on main first: %s still fails at %s", spec, short(found.Sha)), false
 	}
 	one := FixedOnMain{StoryID: id, Spec: spec, Sha: found.Sha, Tests: found.Tests}
 	if err := d.Tracker.CloseStory(ctx, id, one.reason()); err != nil {
-		return fmt.Sprintf("%s passes on main but the story could not be closed: %v", spec, oneLine(err.Error())), false
+		said := fmt.Sprintf("%s passes on main but the story could not be closed: %v", spec, oneLine(err.Error()))
+		d.noteRecheckSkip(ctx, report, id, said)
+		return said, false
 	}
 	comment := fmt.Sprintf("mw dispatch on %s re-ran %s on %s's main before dispatching this bug, and it passes at %s, "+
 		"so the bug was closed with no session (a story that landed after the nightly suite's sha fixed it).\n\nThe end of the run:\n%s",

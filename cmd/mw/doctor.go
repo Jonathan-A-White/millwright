@@ -340,6 +340,16 @@ func newDoctorCmd() *cobra.Command {
 					return err
 				},
 			}
+			// A re-run of a suite bug's spec that dispatch did not make in the last
+			// day; the cure is one mail a day to the Mayor (mw-gq6.640).
+			recheckSkips := &application.RecheckSkipCheck{
+				Host: host,
+				Log:  hostTickLogs().RecheckSkips,
+				Mail: func(ctx context.Context, message application.NewMessage) error {
+					_, err := mwGateway(vault, host).Send(ctx, message)
+					return err
+				},
+			}
 			// The connection rate of a beads server this host runs; a host that
 			// reaches another's, or has none, leaves it to the host that runs it.
 			var churn application.DoctorChecks
@@ -376,6 +386,7 @@ func newDoctorCmd() *cobra.Command {
 					boostReach,
 					boostAsleep,
 					starvedRigs,
+					recheckSkips,
 					ageKey,
 				}, churn...), checks...),
 				State: store,

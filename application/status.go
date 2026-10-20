@@ -646,6 +646,9 @@ type StatusReport struct {
 	FinishedKnown bool
 	// Ticks are how this host's own timers are doing, counted from their logs.
 	Ticks HostTicks
+	// RecheckSkips are the re-runs of a suite bug's spec before dispatch that
+	// were not made in the last 24 hours, oldest first (mw-gq6.640).
+	RecheckSkips []RecheckSkip
 	// AtLimit is every window on this host's terminal whose pane is stopped at
 	// the harness's usage limit, in the terminal's order.
 	AtLimit []WindowAtLimit
@@ -970,6 +973,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 	report.Others = others
 	report.Ticks = ReadHostTicks(ctx, s.Ticks)
+	report.RecheckSkips = ReadRecheckSkips(ctx, s.Ticks.RecheckSkips, s.now())
 	report.AtLimit = WindowsAtLimit(ctx, s.Panes, s.now())
 	report.MillhandResume = MillhandResumeLine(ctx, s.Ticks.Millhand, s.now())
 
@@ -1899,6 +1903,14 @@ func (r StatusReport) String() string {
 		r.Ticks.write(&b, "  ")
 		if r.MillhandResume != "" {
 			clip(&b, "    "+r.MillhandResume)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(r.RecheckSkips) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", RecheckSkipsHeading, len(r.RecheckSkips)))
+		for _, skip := range r.RecheckSkips {
+			wrapInto(&b, "  ", skip.Line())
 		}
 		b.WriteString("\n")
 	}

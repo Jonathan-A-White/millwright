@@ -53,6 +53,10 @@ func mwVault(dir, host string) *vault.Vault {
 // synced anywhere, though the counts of what is in it are.
 var DispatchStateDir = filepath.Join(".local", "state", "mw-dispatch")
 
+// RecheckSkipStateDir is where mw dispatch keeps the log of the re-runs of a suite
+// bug's spec that it did not make, under the home directory (mw-gq6.640).
+var RecheckSkipStateDir = filepath.Join(".local", "state", "mw-dispatch-rechecks")
+
 // SyncHaltStateDir is where this host marks its own sync halted, under the
 // home directory: shared between mw dispatch and mw millhand tick, and read
 // straight back by mw status here. Nothing in it is synced anywhere.
@@ -150,6 +154,9 @@ func hostTickLogs() application.TickLogs {
 	return application.TickLogs{
 		Dispatch: ticklog.New(filepath.Join(home, DispatchStateDir)),
 		Millhand: ticklog.New(filepath.Join(home, MillhandTickStateDir)),
+		// The re-runs of a suite bug's spec that dispatch did not make, read by
+		// mw status and mw doctor (mw-gq6.640).
+		RecheckSkips: ticklog.New(filepath.Join(home, RecheckSkipStateDir)),
 	}
 }
 
@@ -392,6 +399,7 @@ func newDispatchCmd() *cobra.Command {
 			// A rehearsal is not a run: it leaves nothing in the log.
 			if !dryRun {
 				dispatch.Log = logs.Dispatch
+				dispatch.RecheckSkips = logs.RecheckSkips
 			}
 			report, err := dispatch.Run(cmd.Context())
 			if _, gaveUp := application.LocalFault(err); gaveUp {

@@ -15,7 +15,7 @@
 | Transcript*, HostSigns, PeekRemote | application/seatcontext.go, application/peek.go, nudge.go | {claude,peekremote,vault/git.go} |
 | Reap{Terminal,Log,Armer} | application/seatreap.go | {tmux/reap,vault/reaplog,reaper/arm}.go |
 | WatchProbes | watch.go | watch |
-| Doctor*, VPSProbe | doctor.go, application/vpsnginx.go | {doctor,vpsnginx} |
+| Doctor*, VPSProbe, RecheckSkipCheck | doctor.go, application/vpsnginx.go, application/recheckskips.go | {doctor,vpsnginx} |
 | Network* | application/network.go | network |
 | CardLog, ReportSentLog | application/card.go, reportsend.go | {cardlog,reportlog} |
 | CloseOutMarks, LiveHeartbeats, UserProcesses (Tester) | application/closeout.go, application/liveheartbeats.go, application/testerleftovers.go | {closeout,procs,benchflag} |
