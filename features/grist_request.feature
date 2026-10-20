@@ -13,8 +13,9 @@ Feature: mw grist request links a bead to an app's request and tells the sender 
   landed when it is closed with a landing (the version and commit of the rig's
   "Version <v> (<bead>)" commit, or for a rig that lands in batches the version
   commit of the batch whose records name the bead, "Version <v> (batch <n> of
-  <rig>)", and a url only when the rig's file in the vault names public_url; a
-  closed bead with no landing is named in a note of each pass), declined when the Mayor marked it with mw grist request
+  <rig>)", or for a rig that writes no version the commit of the story itself,
+  with no version, and a url only when the rig's file in the vault names
+  public_url; a closed bead with no landing is named in a note of each pass), declined when the Mayor marked it with mw grist request
   decline and closed it (the reason's text from a menu, and an optional line),
   adopted-as-setting when the Mayor marked it with mw grist request adopt. What
   was sent is kept in a state file for the bead, so a second pass sends nothing.
@@ -141,6 +142,33 @@ Feature: mw grist request links a bead to an app's request and tells the sender 
       | commit  | fedcba9876543210fedcba9876543210fedcba98 |
     When the status pass runs
     Then the status pass sent no status
+
+  Scenario: A bead landed in a rig that writes no version is told landed with the commit and no version, once
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    And the rig "cairn" names the public url "https://github.com/Jonathan-A-White/cairn"
+    And the bead "mw-x.1" goes in progress
+    And the status pass runs
+    And the bead "mw-x.1" is closed after landing with no version at the commit "fedcba9876543210fedcba9876543210fedcba98"
+    When the status pass runs
+    Then the status pass sent one "landed" status for that grist and "mw-x.1" carrying:
+      | field  | value                                                                                    |
+      | commit | fedcba9876543210fedcba9876543210fedcba98                                                 |
+      | url    | https://github.com/Jonathan-A-White/cairn/commit/fedcba9876543210fedcba9876543210fedcba98 |
+    And the status pass noted nothing
+    When the status pass runs
+    Then the status pass sent no status
+
+  Scenario: A bead whose commit is in a rig that writes a version is not told landed until its version commit is there
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    And the rig "cairn" writes the version in "package.json"
+    And the bead "mw-x.1" is closed after landing with no version at the commit "fedcba9876543210fedcba9876543210fedcba98"
+    When the status pass runs
+    Then the status pass sent no status
+    And the status pass noted "mw-x.1"
 
   Scenario: A bead closed with no landing is told nothing, and the pass notes the bead
     Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos

@@ -89,6 +89,8 @@ func registerGristRequest(ctx *godog.ScenarioContext, c *gristContext) {
 		step(`^the bead "([^"]*)" is closed$`, r.isClosed)
 		step(`^the bead "([^"]*)" is closed after landing in version "([^"]*)" at the commit "([^"]*)"$`, r.isClosedAfterLanding)
 		step(`^the bead "([^"]*)" is closed after landing in batch (\d+) of "([^"]*)" in version "([^"]*)" at the commit "([^"]*)"$`, r.isClosedAfterBatchLanding)
+		step(`^the bead "([^"]*)" is closed after landing with no version at the commit "([^"]*)"$`, r.isClosedAfterUnversionedLanding)
+		step(`^the rig "([^"]*)" writes the version in "([^"]*)"$`, r.rigWritesVersionIn)
 		step(`^the rig "([^"]*)" names the public url "([^"]*)"$`, r.rigNamesPublicURL)
 		step(`^the status pass runs$`, r.statusPassRuns)
 	}
@@ -153,6 +155,19 @@ func (r *requestContext) passNotedNothing() error {
 			return fmt.Errorf("expected the status pass to note nothing, it printed:\n%s", r.c.out.String())
 		}
 	}
+	return nil
+}
+
+// isClosedAfterUnversionedLanding is a close after a landing in a rig that
+// writes no version: the rig's only commit for the bead is its own, with no
+// "Version <v>" subject.
+func (r *requestContext) isClosedAfterUnversionedLanding(bead, commit string) error {
+	r.landingsFake().LandWithoutVersion(bead, commit)
+	return r.isClosed(bead)
+}
+
+func (r *requestContext) rigWritesVersionIn(rig, file string) error {
+	r.rulesFake().Require(rig, domain.EpicRequirements{VersionFiles: []string{file}})
 	return nil
 }
 
