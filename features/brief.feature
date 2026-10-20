@@ -173,7 +173,7 @@ Feature: mw brief
     And the brief knows the Governor's Ideas only is on until "2026-10-12T21:00:00Z" with 1 idea held
     When mw brief reads "mw-6ww"
     Then reading the brief succeeds
-    And the brief opens with the line "Governor: Ideas only until 21:00 UTC (1 idea held)"
+    And the brief opens with the line "Governor: Ideas only until 21:00 UTC (1 idea held); to-dos still work"
     And the brief lists "mw-6ww.1" under the heading "Open"
 
   Scenario: Out of Ideas only the brief has no such line

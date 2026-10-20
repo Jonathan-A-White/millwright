@@ -549,7 +549,7 @@ type StatusReport struct {
 	// not known: what each other host's mw commit is read against.
 	MainCommit string
 	// IdeasOnly is the line 'Governor: Ideas only until 21:00 UTC (2 ideas
-	// held)', "" when the Governor is not in Ideas only.
+	// held); to-dos still work', "" when the Governor is not in Ideas only.
 	IdeasOnly string
 	Running   []RunningStory
 	// Cap is how many sessions this host may run at once, 0 when it was not
@@ -1676,7 +1676,13 @@ func (r StatusReport) String() string {
 	var b strings.Builder
 	clip(&b, fmt.Sprintf("mw status · %s", r.Host))
 	if r.IdeasOnly != "" {
-		clip(&b, r.IdeasOnly)
+		// The line is too wide for the phone with its note that to-dos still
+		// work, which goes on a line of its own.
+		head, note, hasNote := strings.Cut(r.IdeasOnly, "; ")
+		clip(&b, head)
+		if hasNote {
+			clip(&b, "  "+note)
+		}
 	}
 	b.WriteString("\n")
 

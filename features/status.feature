@@ -802,6 +802,7 @@ Feature: mw status
     When mw status reads the host
     Then reading status succeeds
     And the status report has a line "Governor: Ideas only until 21:00 UTC (2 ideas held)" right under its title
+    And the status report has the line "  to-dos still work" under it
 
   Scenario: Out of Ideas only the report has no such line
     Given the status report knows the Governor's Ideas only is off

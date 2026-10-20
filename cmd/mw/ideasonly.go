@@ -90,7 +90,7 @@ func newIdeasOnlyCmd() *cobra.Command {
 			"its thread with 'Recorded for after 21:00 UTC', at zero tokens. mw keeps its own note of the\n" +
 			"mode in state.json beside it: a backend out of reach shows what was last known, and a note\n" +
 			"that says on is not believed past its end. mw status and mw brief print one heading line,\n" +
-			"'Governor: Ideas only until 21:00 UTC (2 ideas held)', while it is on.\n\n" +
+			"'Governor: Ideas only until 21:00 UTC (2 ideas held); to-dos still work', while it is on.\n\n" +
 			"It changes nothing on the backend and releases nothing; mw ideas-only release does that.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

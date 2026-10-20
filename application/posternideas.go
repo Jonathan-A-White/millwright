@@ -56,7 +56,7 @@ func (i PosternInbox) holdIdeaAnswering(ctx context.Context, m PosternInboxMessa
 	if line, ok := p.held[m.Txid]; ok {
 		return line, true, false, nil
 	}
-	if !p.state.OnAt(i.Ideas.now()) {
+	if !p.state.OnAt(i.Ideas.now()) || i.aboutAToDo(ctx, m) {
 		return "", false, false, nil
 	}
 	file := i.ideaFiles(ctx, m)
@@ -79,6 +79,34 @@ func (i PosternInbox) holdIdeaAnswering(ctx context.Context, m PosternInboxMessa
 		i.printf("%s was kept, but not answered: %v\n", m.Txid, err)
 	}
 	return line, true, true, nil
+}
+
+// aboutAToDo reports whether m is about one of the Governor's own to-dos, the
+// one kind of word of his that Ideas only does not keep: an action or an
+// answer naming a bead, or a message in a bead's thread, where that bead is
+// labelled hitl:todo. A bead the tracker cannot read or find is not known to
+// be one, and its message is kept as an idea.
+func (i PosternInbox) aboutAToDo(ctx context.Context, m PosternInboxMessage) bool {
+	if i.Tracker == nil {
+		return false
+	}
+	bead := ""
+	if reply, ok := decodePosternReply(m.Text); ok {
+		bead = reply.Bead
+	} else if action, ok := decodePosternAction(m.Text); ok {
+		bead = action.Bead
+	} else if m.ThreadIsBead {
+		bead = m.Thread
+	}
+	if bead = strings.TrimSpace(bead); bead == "" {
+		return false
+	}
+	found, err := i.Tracker.ShowBeads(ctx, []string{bead})
+	if err != nil {
+		i.printf("reading %s to tell whether %s is about a to-do: %v; keeping it as an idea\n", bead, m.Txid, err)
+		return false
+	}
+	return len(found) > 0 && found[0].Todo()
 }
 
 // ideaWords is what the held line says of m, whose file was written to file: a tap as 'release mw-act.1', a

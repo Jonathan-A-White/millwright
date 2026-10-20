@@ -77,6 +77,13 @@ func (c *statusContext) registerIdeasOnlySteps(ctx *godog.ScenarioContext) {
 		}
 		return nil
 	})
+	ctx.Then(`^the status report has the line "([^"]*)" under it$`, func(line string) error {
+		lines := strings.Split(c.report.String(), "\n")
+		if len(lines) < 3 || lines[2] != line {
+			return fmt.Errorf("expected %q under the Ideas only line, got:\n%s", line, c.report.String())
+		}
+		return nil
+	})
 	ctx.Then(`^the status report has no line beginning "([^"]*)"$`, func(prefix string) error {
 		if lineBeginning(c.report.String(), prefix) {
 			return fmt.Errorf("expected no line beginning %q, got:\n%s", prefix, c.report.String())

@@ -249,7 +249,7 @@ Feature: mw talk wait
     When the Governor's turn 3 of talk "talk-7" saying "An idea: a quieter dashboard" is indexed
     Then mw talk wait is still waiting
     When the wait comes to its time limit
-    Then the wait printed "Ideas only until 21:00 UTC (0 ideas held)"
+    Then the wait printed "Ideas only until 21:00 UTC (0 ideas held); to-dos still work"
     And the wait printed "1 idea held"
     And the wait did not print "talk talk-7 turn 3"
     And the wait did not print "quieter dashboard"

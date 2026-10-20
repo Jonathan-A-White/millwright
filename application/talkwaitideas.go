@@ -48,7 +48,7 @@ func (r *talkWaitRun) ideasOn() bool {
 	return r.Ideas != nil && r.ideaStateNow().OnAt(r.Ideas.now())
 }
 
-// ideasBanner is 'Ideas only until 21:00 UTC (2 ideas held)'.
+// ideasBanner is IdeasOnlyBanner of the wait's note.
 func (r *talkWaitRun) ideasBanner(ctx context.Context) string {
 	held, _ := r.Ideas.Files.Held(ctx)
 	return IdeasOnlyBanner(r.ideaStateNow(), len(held), r.Ideas.now())
@@ -73,7 +73,7 @@ func (r *talkWaitRun) inboxForIdeas() PosternInbox {
 	return PosternInbox{
 		Postern: r.Postern, Cipher: r.Cipher, Keys: r.Keys, Memory: r.Memory,
 		GovernorKey: r.GovernorKey, AttachmentDir: r.AttachmentDir, Transcriber: r.Transcriber,
-		Ideas: r.Ideas, Lock: r.Lock, Now: r.Now,
+		Ideas: r.Ideas, Tracker: r.Tracker, Lock: r.Lock, Now: r.Now,
 		Sender: &PosternSend{Postern: r.Postern, Cipher: r.Cipher, Keys: r.Keys, GovernorKey: r.GovernorKey, Now: r.Now},
 	}
 }

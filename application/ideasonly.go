@@ -13,7 +13,8 @@ import (
 // backend (postern's docs/protocol.md section 25): until a time or on a weekly
 // schedule he is away on purpose. The backend pushes him nothing but a ring
 // and an emergency; the factory runs on. While it is on mw keeps every record
-// of his instead of acting on it, and says so in his thread at zero tokens.
+// of his instead of acting on it, and says so in his thread at zero tokens;
+// only what he sends about his own to-dos (hitl:todo beads) is applied as ever.
 
 // The things that can turn Ideas only on, as the backend names them.
 const (
@@ -219,9 +220,10 @@ func (m IdeasOnlyMode) Line(ctx context.Context) string {
 // say whether the Governor is in Ideas only.
 const IdeasOnlyLineWait = 5 * time.Second
 
-// IdeasOnlyBanner is "Ideas only until 21:00 UTC (2 ideas held)".
+// IdeasOnlyBanner is "Ideas only until 21:00 UTC (2 ideas held); to-dos still
+// work": what he sends about his own to-dos is applied as ever.
 func IdeasOnlyBanner(state IdeasOnlyState, held int, now time.Time) string {
-	return fmt.Sprintf("Ideas only until %s (%s)", IdeasOnlyUntilLabel(state, now), IdeasHeldPhrase(held))
+	return fmt.Sprintf("Ideas only until %s (%s); to-dos still work", IdeasOnlyUntilLabel(state, now), IdeasHeldPhrase(held))
 }
 
 // IdeasHeldPhrase is "1 idea held", "0 ideas held", "3 ideas held".

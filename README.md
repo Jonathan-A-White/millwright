@@ -4224,7 +4224,9 @@ zone beside it when his schedule names one), then how many ideas are held and a
 line for each. It changes nothing and releases nothing.
 
 While the mode is on, mw keeps every record of his instead of acting on it, at
-zero tokens:
+zero tokens, except what he sends about his own to-dos (beads labelled
+`hitl:todo`): an action on one (close, done, snooze, an edit) or a reply in its
+thread is applied at once, as outside the mode:
 
 - `mw postern inbox --apply` (the backend's hook) appends each verified record of
   the Governor's, a tap included, to
@@ -4234,13 +4236,14 @@ zero tokens:
   key with `Recorded for after 21:00 UTC`. The plain `mw postern inbox` then
   shows `held for after 21:00 UTC: <txid>` in its place, never his words, and
   `--unread-count` leaves it out.
-- `mw talk wait` prints `Ideas only until 21:00 UTC (N ideas held)` as it
+- `mw talk wait` prints `Ideas only until 21:00 UTC (N ideas held); to-dos still
+  work` as it
   starts, keeps a turn, a call request or a message of his the same way (a turn
   is answered with a talk `answer` record), and waits on. It still ends on its
   limit, a handover, and a message or mail from anyone else. It keeps the state
   file level from the stream's `ideas-only` event.
 - `mw status` and `mw brief` open with `Governor: Ideas only until 21:00 UTC (N
-  ideas held)`.
+  ideas held); to-dos still work`.
 
 `state.json` beside the held file is mw's note of the mode: a backend out of
 reach shows what was last known, and a note that says on is not believed past

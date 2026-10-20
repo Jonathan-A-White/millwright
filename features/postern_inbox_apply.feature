@@ -474,6 +474,23 @@ Feature: mw postern inbox --apply
     And the Governor was told "Recorded for after 21:00 UTC" re "tx-release"
     And no mail was sent for the reply
 
+  Scenario: With Ideas only on, a close of one of his to-dos is applied at once and nothing is held
+    Given Ideas only is on until "2026-09-25T21:00:00Z" for the postern inbox
+    And epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And the Governor sends the postern action {"action":"close","bead":"mw-todo.1"} with txid "tx-todo-close"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" now stands "closed"
+    And the txid "tx-todo-close" is marked applied
+    And no idea is held
+
+  Scenario: With Ideas only on, a close of a bead that is not a to-do is still held
+    Given Ideas only is on until "2026-09-25T21:00:00Z" for the postern inbox
+    And the Governor sends the postern action {"action":"close","bead":"mw-act.1"} with txid "tx-story-close"
+    When mw postern inbox --apply is run
+    Then bead "mw-act.1" now stands "deferred"
+    And the idea "tx-story-close" is held in "general" saying "close mw-act.1"
+    And the txid "tx-story-close" is not marked applied
+
   Scenario: A message in a bead's channel is kept and answered in that channel, and the bead is not commented
     Given Ideas only is on until "2026-09-25T21:00:00Z" for the postern inbox
     And a postern message from "governor-pubkey-hex" in the channel of bead "mw-act.3" with text "Try the other way" and txid "tx-thread"
