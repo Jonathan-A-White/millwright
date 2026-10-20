@@ -993,3 +993,153 @@ func TestARebaseThatConflictsIsUndoneAndNamesItsFiles(t *testing.T) {
 		t.Errorf("expected the rebase undone, git status says:\n%s", status)
 	}
 }
+
+// refuseLockOnce installs a pre-receive hook in the bare remote of here that
+// refuses the next refusals pushes the way GitHub does when another push lands
+// in the same moment: git shows it as "[remote rejected] ... (cannot lock ref
+// ...)", not as "! [rejected]".
+func refuseLockOnce(t *testing.T, here string, refusals int) {
+	t.Helper()
+	remote := run(t, here, "git", "config", "remote.origin.url")
+	counter := filepath.Join(t.TempDir(), "refusals")
+	write(t, filepath.Dir(counter), filepath.Base(counter), fmt.Sprintf("%d\n", refusals))
+	hook := fmt.Sprintf(`#!/bin/sh
+left=$(cat %[1]s)
+if [ "$left" -gt 0 ]; then
+	echo $((left - 1)) > %[1]s
+	echo "cannot lock ref 'refs/heads/main': is at 3e031e3 but expected 9c1d0aa" >&2
+	exit 1
+fi
+`, counter)
+	if err := os.WriteFile(filepath.Join(remote, "hooks", "pre-receive"), []byte(hook), 0o755); err != nil {
+		t.Fatalf("writing the hook: %v", err)
+	}
+}
+
+// landOnce opens a landing at origin/main, merges branch and pushes it.
+func landOnce(t *testing.T, here, branch string) error {
+	t.Helper()
+	ctx := context.Background()
+	worktrees := rig.New()
+	run(t, here, "git", "fetch", "-q", "origin")
+	dir, err := worktrees.OpenLanding(ctx, here, "origin/main")
+	if err != nil {
+		t.Fatalf("opening the landing: %v", err)
+	}
+	defer func() {
+		if err := worktrees.CloseLanding(ctx, here, dir); err != nil {
+			t.Errorf("closing the landing: %v", err)
+		}
+	}()
+	if _, err := worktrees.Merge(ctx, dir, branch); err != nil {
+		t.Fatalf("merging: %v", err)
+	}
+	return worktrees.Push(ctx, dir, "origin", "main")
+}
+
+// A push GitHub refuses with "[remote rejected] ... cannot lock ref" is
+// answered as a rejection, which mw next meets by fetching, merging afresh and
+// pushing again; the push after it goes through (mw-gq6.637).
+func TestAPushTheRemoteCouldNotLockTheRefForIsARejectionAndTheNextOneLands(t *testing.T) {
+	here, _ := aRig(t)
+	aBranchAppending(t, here, "mw/story", "README.md", "the story")
+	refuseLockOnce(t, here, 1)
+
+	err := landOnce(t, here, "mw/story")
+	if err == nil || !application.Rejected(err) {
+		t.Fatalf("expected a rejection, got %v", err)
+	}
+	if application.Transient(err) {
+		t.Errorf("expected a rejection, not a transient fault, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "cannot lock ref") {
+		t.Errorf("expected git's own words kept, got %v", err)
+	}
+
+	if err := landOnce(t, here, "mw/story"); err != nil {
+		t.Fatalf("expected the push after the one refusal to land, got %v", err)
+	}
+	remote := run(t, here, "git", "ls-remote", "origin", "refs/heads/main")
+	if want := run(t, here, "git", "rev-parse", "origin/main"); !strings.HasPrefix(remote, want) {
+		t.Fatalf("the remote holds %q, expected %s", remote, want)
+	}
+}
+
+// A remote rejection that does not say it could not lock the ref, a hook
+// declining in its own words, stays a plain failure: only the lock race is
+// answered by a fresh merge.
+func TestAPushAHookDeclinedIsNotARejection(t *testing.T) {
+	worktrees := aGitThatSays(t, " ! [remote rejected] main -> main (pre-receive hook declined)")
+
+	err := worktrees.Push(context.Background(), t.TempDir(), "origin", "main")
+	if err == nil || application.Rejected(err) || application.Transient(err) {
+		t.Fatalf("expected a plain refusal, got %v", err)
+	}
+}
+
+// GitHub's own wording, with the reason inside the parentheses and no hook.
+func TestAPushGitHubRefusedWithCannotLockRefIsARejection(t *testing.T) {
+	worktrees := aGitThatSays(t, " ! [remote rejected] main -> main (cannot lock ref 'refs/heads/main': is at 3e031e3 but expected 9c1d0aa)")
+
+	err := worktrees.Push(context.Background(), t.TempDir(), "origin", "main")
+	if !application.Rejected(err) {
+		t.Fatalf("expected a rejection, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "cannot lock ref") {
+		t.Errorf("expected git's own words kept, got %v", err)
+	}
+}
+
+// Every wording a push is read by: the rejections mw next answers with a fresh
+// merge, the refusals no retry changes, and the faults at the remote or the
+// network worth trying again (mw-gq6.637).
+func TestAPushIsReadByEachOfTheWordsGitSaysItBy(t *testing.T) {
+	const (
+		rejection = "rejection"
+		refusal   = "refusal"
+		transient = "transient"
+	)
+	for _, tc := range []struct{ kind, said string }{
+		{rejection, " ! [rejected] main -> main (non-fast-forward)"},
+		{rejection, "error: failed to push some refs\nhint: Updates were rejected because the remote contains work (fetch first)"},
+		{rejection, " ! [rejected] main -> main (stale info)"},
+		{rejection, " [rejected] main -> main, your branch is behind"},
+		{rejection, " ! [remote rejected] main -> main (cannot lock ref 'refs/heads/main': is at 3e031e3 but expected 9c1d0aa)"},
+
+		{refusal, "remote: error: refusing to update checked out branch"},
+		{refusal, "remote: error: GH006: Protected branch update failed"},
+		{refusal, " ! [remote rejected] main -> main (pre-receive hook declined)"},
+		{refusal, "git@github.com: Permission denied (publickey)."},
+		{refusal, "remote: Permission to x/y.git denied to someone."},
+		{refusal, "remote: error: not authorized"},
+		{refusal, " ! [remote rejected] main -> main (some other reason)"},
+
+		{transient, "remote: fatal error in commit_refs"},
+		{transient, "fatal: Connection reset by peer"},
+		{transient, "fatal: Connection timed out after 300 seconds"},
+		{transient, "fatal: early EOF"},
+		{transient, "error: unexpected disconnect while reading sideband packet"},
+		{transient, "fatal: the remote end hung up unexpectedly"},
+		{transient, "fatal: Could not resolve host: github.com"},
+		{transient, "fatal: Temporary failure in name resolution"},
+		{transient, "fatal: Couldn't connect to server"},
+		{transient, "fatal: Failed to connect to github.com port 443"},
+		{transient, "error: RPC failed; curl 56"},
+		{transient, "error: The requested URL returned error: 502"},
+		{transient, "fatal: HTTP/1.1 503 Service Unavailable"},
+		{transient, "error: HTTP 504"},
+		{transient, " ! [remote rejected] main -> main (failure)"},
+	} {
+		err := aGitThatSays(t, tc.said).Push(context.Background(), t.TempDir(), "origin", "main")
+		got := refusal
+		switch {
+		case application.Rejected(err):
+			got = rejection
+		case application.Transient(err):
+			got = transient
+		}
+		if err == nil || got != tc.kind {
+			t.Errorf("%q: expected a %s, got a %s (%v)", tc.said, tc.kind, got, err)
+		}
+	}
+}

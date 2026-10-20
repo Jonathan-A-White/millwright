@@ -527,14 +527,18 @@ func (w *Worktrees) CloseLanding(ctx context.Context, rigDir, landingDir string)
 
 // rejected reports whether git refused a push because the branch had moved on
 // the remote, as against failing for any other reason. git says so in words;
-// its exit status is 1 either way.
+// its exit status is 1 either way. A remote that could not lock the ref because
+// another push landed in the same moment (GitHub's "[remote rejected] ...
+// cannot lock ref 'refs/heads/main': is at X but expected Y") is the same race
+// and is answered the same way (mw-gq6.637).
 func rejected(err error) bool {
 	said := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(said, "non-fast-forward"),
 		strings.Contains(said, "fetch first"),
 		strings.Contains(said, "! [rejected]"),
-		strings.Contains(said, "[rejected]") && strings.Contains(said, "behind"):
+		strings.Contains(said, "[rejected]") && strings.Contains(said, "behind"),
+		strings.Contains(said, "[remote rejected]") && strings.Contains(said, "cannot lock ref"):
 		return true
 	}
 	return false
