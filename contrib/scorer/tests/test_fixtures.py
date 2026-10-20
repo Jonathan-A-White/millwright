@@ -180,13 +180,16 @@ class GreekFixtures(unittest.TestCase):
 
 def joined(*names):
     """The clips one after another as one WAV (they are all 16 kHz mono 16-bit)."""
-    out, params = io.BytesIO(), None
+    frames, params = [], None
+    for name in names:
+        with wave.open(io.BytesIO(clip(name))) as r:
+            params = params or r.getparams()
+            frames.append(r.readframes(r.getnframes()))
+    out = io.BytesIO()
     with wave.open(out, "wb") as w:
-        for name in names:
-            with wave.open(io.BytesIO(clip(name))) as r:
-                params = params or r.getparams()
-                w.setparams(params)
-                w.writeframes(r.readframes(r.getnframes()))
+        w.setparams(params)  # once, before the first frame: wave refuses a change after
+        for chunk in frames:
+            w.writeframes(chunk)
     return out.getvalue()
 
 
