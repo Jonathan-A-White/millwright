@@ -1752,8 +1752,10 @@ mail is sent. See `features/suite.feature`.
 **A suite bug is re-checked before it is dispatched** (mw-gq6.414). A story that landed after the
 nightly suite's sha may have fixed the bug already. Before `mw dispatch` claims a story labelled `suite`
 whose `files` key is exactly one test file, it runs that file alone on a fresh worktree of the rig's
-origin main (`recheck-<rig>` beside the story worktrees), with the command `mw suite` runs a file alone
-with (`[changed_specs]` for a `*.spec.*` file when the rig has one, `[tests]` plus the file otherwise).
+origin main (`recheck-<rig>` beside the story worktrees): a `*.spec.*` file with the rig's `[changed_specs]`
+command when it has one, any other file through the unit-runner step of `[tests]` alone (`npm test -- <file>`,
+vitest, jest), after the install step when the line opens with one, never the whole gate line (mw-gq6.639).
+A rig whose `[tests]` has no such step (a make target, a wrapper script) is not re-run, and the story's line says so.
 If it passes, the bug is closed with the reason `fixed on main before dispatch: <spec> passes at <sha>
 (<n> tests)` and a comment holding the end of the run, and no session, claim or worktree is made; it
 takes none of the cap. If it fails, or cannot be run, the story is dispatched as before and its line in

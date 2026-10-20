@@ -343,8 +343,8 @@ func TestASuiteRechecksAnUnitTestFileWithTheTestsCommand(t *testing.T) {
 	if _, err := suite.Recheck(context.Background(), "lampas", "src/dates.test.ts"); err != nil {
 		t.Fatal(err)
 	}
-	if ran := runs.Ran(); len(ran) != 1 || ran[0].Command != "npm test src/dates.test.ts" {
-		t.Errorf("ran %+v, want the tests command with the file added", ran)
+	if ran := runs.Ran(); len(ran) != 1 || ran[0].Command != "npm test -- src/dates.test.ts" {
+		t.Errorf("ran %+v, want the unit runner with the file after --", ran)
 	}
 }
 
@@ -406,8 +406,8 @@ func TestASuiteRecheckOfAnUnitTestFileAddsNoSecondInstall(t *testing.T) {
 	if _, err := suite.Recheck(context.Background(), "lampas", "src/dates.test.ts"); err != nil {
 		t.Fatal(err)
 	}
-	if ran := runs.Ran(); len(ran) != 1 || ran[0].Command != "npm ci --no-audit --no-fund && npm test src/dates.test.ts" {
-		t.Errorf("ran %+v, want the tests command with the file added and one install", ran)
+	if ran := runs.Ran(); len(ran) != 1 || ran[0].Command != "npm ci --no-audit --no-fund && npm test -- src/dates.test.ts" {
+		t.Errorf("ran %+v, want the install and the unit runner with the file, one install", ran)
 	}
 }
 
@@ -420,5 +420,93 @@ func TestASuiteRecheckOfARigWhoseTestsInstallNothingRunsTheSpecCommandAsItIs(t *
 	}
 	if ran := runs.Ran(); len(ran) != 1 || ran[0].Command != "npx playwright test "+greekSpec {
 		t.Errorf("ran %+v, want the changed-specs command alone", ran)
+	}
+}
+
+// A rig's [tests] line is the whole gate (lampas's runs typecheck, lint and
+// build after its unit tests); a re-run of one unit-test file runs the file
+// through the unit runner and nothing else (mw-gq6.639).
+func TestASuiteRecheckOfAnUnitTestFileRunsOnlyTheFileThroughTheUnitRunnerNotTheWholeTestsLine(t *testing.T) {
+	for name, c := range map[string]struct{ tests, want string }{
+		"lampas: install, unit runner, then the rest of the gate": {
+			"npm ci --no-audit --no-fund && TZ=UTC npm test && npm run typecheck && npm run lint && npm run build",
+			"npm ci --no-audit --no-fund && TZ=UTC npm test -- src/dates.test.ts",
+		},
+		"unit runner last, after lint and tsc": {
+			"npm ci --no-audit --no-fund && npm run lint && npx tsc -b && npm test",
+			"npm ci --no-audit --no-fund && npm test -- src/dates.test.ts",
+		},
+		"no install": {"npm run lint && npm run test", "npm run test -- src/dates.test.ts"},
+		"runner that already has arguments": {
+			"npm ci && npm test -- --reporter=dot && npm run build",
+			"npm ci && npm test -- --reporter=dot src/dates.test.ts",
+		},
+		"vitest called directly": {"npm ci && npx vitest run && npm run build", "npm ci && npx vitest run src/dates.test.ts"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			runs := &apptest.FakeSuiteRunner{}
+			suite, _ := recheckSuite(runs)
+			suite.Tests["lampas"] = c.tests
+			if _, err := suite.Recheck(context.Background(), "lampas", "src/dates.test.ts"); err != nil {
+				t.Fatal(err)
+			}
+			if ran := runs.Ran(); len(ran) != 1 || ran[0].Command != c.want {
+				t.Errorf("ran %+v, want %q", ran, c.want)
+			}
+		})
+	}
+}
+
+func TestASuiteRecheckOfAnUnitTestFileOfARigWithNoWayToRunOneFileAloneRunsNothingAndSaysSo(t *testing.T) {
+	for name, tests := range map[string]string{
+		"make":      "make test && scripts/check-codemap.sh",
+		"coverage":  "npm ci && npm run lint && npm run test:coverage && npm run build",
+		"a wrapper": "whisper-hid-gate",
+	} {
+		t.Run(name, func(t *testing.T) {
+			runs := &apptest.FakeSuiteRunner{}
+			suite, trees := recheckSuite(runs)
+			suite.Tests["lampas"] = tests
+			_, err := suite.Recheck(context.Background(), "lampas", "src/dates.test.ts")
+			if err == nil || !strings.Contains(err.Error(), "no way to run one unit-test file alone") {
+				t.Fatalf("got %v, want an error saying the rig has no way to run one file alone", err)
+			}
+			if ran := runs.Ran(); len(ran) != 0 || len(trees.Added()) != 0 {
+				t.Errorf("nothing should be run or cut, ran %+v, added %v", ran, trees.Added())
+			}
+		})
+	}
+}
+
+func TestADispatchLineSaysAUnitTestBugOfARigWithNoWayToRunOneFileAloneWasNotReRun(t *testing.T) {
+	dispatch, tracker, _, _, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{
+		ID: "mw-gq6.1", Title: "[bug] millwright main: src/dates.test.ts fails on main",
+		Overrides: domain.Path{Files: "src/dates.test.ts"},
+	})
+	if err := tracker.SetLabels("mw-gq6.1", application.LabelBug, application.LabelSuite); err != nil {
+		t.Fatal(err)
+	}
+	runs := &apptest.FakeSuiteRunner{}
+	suite, _ := recheckSuite(runs)
+	suite.Rigs = map[string]string{"millwright": "/rigs/millwright"}
+	suite.Tests = map[string]string{"millwright": "make test"}
+	heads := apptest.NewFakeRigHeads()
+	heads.SetHead("/rigs/millwright", "9f3c2ab41d0e")
+	suite.Heads = heads
+	dispatch.Rechecks = suite
+
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if ids := startedIDs(report); len(ids) != 1 || ids[0] != "mw-gq6.1" {
+		t.Fatalf("started %v, want the bug dispatched as before", ids)
+	}
+	if !strings.Contains(report.String(), "not re-run on main first: ") || !strings.Contains(report.String(), "no way to run one unit-test file alone") {
+		t.Errorf("the dispatch line should say so, got:\n%s", report.String())
+	}
+	if ran := runs.Ran(); len(ran) != 0 {
+		t.Errorf("ran %+v", ran)
 	}
 }

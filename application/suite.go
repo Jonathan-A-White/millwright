@@ -501,6 +501,31 @@ func installStep(tests string) string {
 	return ""
 }
 
+// unitRunners are the steps of a tests command that run a rig's unit tests with
+// a runner that takes a file to run alone: npm test (the file goes after --),
+// pnpm or yarn test, and vitest or jest called directly. `npm run test:coverage`
+// and a make target or a wrapper script are none of them.
+var unitRunners = regexp.MustCompile(`^(?:[A-Za-z_][A-Za-z0-9_]*=\S* +)*(?:(npm (?:run )?test)|pnpm test|yarn test|npx (?:vitest|jest)|vitest|jest)(?: |$)`)
+
+// unitStepFor is the step of a rig's tests command that runs the rig's unit
+// tests, with file added so that it runs that one file alone, or "" when the
+// command has no such step (mw-gq6.639). The rest of the line, the install
+// aside, is the rest of the gate and is no part of a re-run of one file.
+func unitStepFor(tests, file string) string {
+	for _, step := range strings.Split(tests, " && ") {
+		step = strings.TrimSpace(step)
+		found := unitRunners.FindStringSubmatch(step)
+		if found == nil {
+			continue
+		}
+		if found[1] != "" && !strings.Contains(step, " -- ") {
+			step += " --"
+		}
+		return step + " " + shellWord(file)
+	}
+	return ""
+}
+
 var passedCount = regexp.MustCompile(`(\d+) passed`)
 
 // Recheck runs one spec alone on the head of rig's origin, in a worktree of its
@@ -522,7 +547,14 @@ func (s Suite) Recheck(ctx context.Context, rig, spec string) (SpecRecheck, erro
 			command = install + " && " + command
 		}
 	} else if tests := strings.TrimSpace(s.Tests[rig]); tests != "" {
-		command = tests + " " + shellWord(spec)
+		step := unitStepFor(tests, spec)
+		if step == "" {
+			return SpecRecheck{}, fmt.Errorf("the rig %s has no way to run one unit-test file alone: its [tests] command has no unit runner step (npm test, vitest, jest) to give %s to", rig, spec)
+		}
+		command = step
+		if install := installStep(tests); install != "" {
+			command = install + " && " + step
+		}
 	} else {
 		return SpecRecheck{}, fmt.Errorf("the rig %s has no [tests] entry in the config file: there is no command to run %s with", rig, spec)
 	}
