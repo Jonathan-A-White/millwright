@@ -584,6 +584,7 @@ func (c *talkWaitContext) arm() error {
 	if c.ideas {
 		mode := c.ideasMode()
 		wait.Ideas = &mode
+		wait.Tracker = c.memory
 		wait.Release = c.ideasRelease(&mode)
 	}
 	go func() {

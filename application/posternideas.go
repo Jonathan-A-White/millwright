@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // ideasPass is what one pass of the inbox, or of mw talk wait, knows of
@@ -84,12 +85,10 @@ func (i PosternInbox) holdIdeaAnswering(ctx context.Context, m PosternInboxMessa
 // aboutAToDo reports whether m is about one of the Governor's own to-dos, the
 // one kind of word of his that Ideas only does not keep: an action or an
 // answer naming a bead, or a message in a bead's thread, where that bead is
-// labelled hitl:todo. A bead the tracker cannot read or find is not known to
-// be one, and its message is kept as an idea.
+// labelled hitl:todo; or any other message or Talk turn whose words are about
+// a to-do (textAboutAToDo). A bead the tracker cannot read or find is not
+// known to be one, and its message is kept as an idea.
 func (i PosternInbox) aboutAToDo(ctx context.Context, m PosternInboxMessage) bool {
-	if i.Tracker == nil {
-		return false
-	}
 	bead := ""
 	if reply, ok := decodePosternReply(m.Text); ok {
 		bead = reply.Bead
@@ -97,8 +96,10 @@ func (i PosternInbox) aboutAToDo(ctx context.Context, m PosternInboxMessage) boo
 		bead = action.Bead
 	} else if m.ThreadIsBead {
 		bead = m.Thread
+	} else {
+		return i.textAboutAToDo(ctx, m)
 	}
-	if bead = strings.TrimSpace(bead); bead == "" {
+	if bead = strings.TrimSpace(bead); bead == "" || i.Tracker == nil {
 		return false
 	}
 	found, err := i.Tracker.ShowBeads(ctx, []string{bead})
@@ -107,6 +108,117 @@ func (i PosternInbox) aboutAToDo(ctx context.Context, m PosternInboxMessage) boo
 		return false
 	}
 	return len(found) > 0 && found[0].Todo()
+}
+
+// textAboutAToDo reports whether the words of m, a Talk turn or a free-text
+// message, are about a to-do: they say 'to do', 'to-do' or 'todo', name the id
+// of an open hitl:todo bead, or share a distinctive word with the title of one
+// or of its list. The tracker is read only when the words do not say 'to do'
+// themselves; a tracker that cannot be read leaves the message an idea.
+func (i PosternInbox) textAboutAToDo(ctx context.Context, m PosternInboxMessage) bool {
+	words := todoWords(m.Text)
+	if len(words) == 0 {
+		return false
+	}
+	for n, w := range words {
+		if w == "todo" || w == "todos" || (w == "to" && n+1 < len(words) && (words[n+1] == "do" || words[n+1] == "dos")) {
+			return true
+		}
+	}
+	if i.Tracker == nil {
+		return false
+	}
+	cards, err := i.Tracker.ReadyWithLabel(ctx, LabelHitlTodo)
+	if err != nil {
+		i.printf("reading the to-dos to tell whether %s is about one: %v; keeping it as an idea\n", m.Txid, err)
+		return false
+	}
+	have := map[string]bool{}
+	for _, w := range words {
+		have[w] = true
+	}
+	lower := strings.ToLower(m.Text)
+	var epics []string
+	seen := map[string]bool{}
+	for _, card := range cards {
+		if card.IsEpic || !card.Todo() {
+			continue
+		}
+		if namesBeadID(lower, strings.ToLower(card.Story.ID)) || titleSharesWord(have, card.Story.Title) {
+			return true
+		}
+		if card.EpicID != "" && !seen[card.EpicID] {
+			seen[card.EpicID] = true
+			epics = append(epics, card.EpicID)
+		}
+	}
+	if len(epics) == 0 {
+		return false
+	}
+	lists, err := i.Tracker.ShowBeads(ctx, epics)
+	if err != nil {
+		i.printf("reading the lists of the to-dos to tell whether %s is about one: %v; keeping it as an idea\n", m.Txid, err)
+		return false
+	}
+	for _, list := range lists {
+		if titleSharesWord(have, list.Story.Title) {
+			return true
+		}
+	}
+	return false
+}
+
+// todoWords is text in lower case, split at everything that is not a letter or
+// a digit.
+func todoWords(text string) []string {
+	return strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+}
+
+// namesBeadID reports whether lower, a message in lower case, names the bead id
+// (also in lower case) as a whole: mw-e.3 is not named by mw-e.30 or mw-e.3.1.
+func namesBeadID(lower, id string) bool {
+	if id == "" {
+		return false
+	}
+	for from := 0; ; {
+		at := strings.Index(lower[from:], id)
+		if at < 0 {
+			return false
+		}
+		start, end := from+at, from+at+len(id)
+		before := start == 0 || !isIDRune(rune(lower[start-1]))
+		after := end == len(lower) || !isIDRune(rune(lower[end])) && !(lower[end] == '.' && end+1 < len(lower) && isIDRune(rune(lower[end+1])))
+		if before && after {
+			return true
+		}
+		from = start + 1
+	}
+}
+
+func isIDRune(r rune) bool {
+	return r == '-' || r == '.' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+// titleSharesWord reports whether a distinctive word of title is among have:
+// five letters or more, and not one of the plain words in commonTitleWords.
+func titleSharesWord(have map[string]bool, title string) bool {
+	for _, w := range todoWords(title) {
+		if len(w) >= 5 && !commonTitleWords[w] && have[w] {
+			return true
+		}
+	}
+	return false
+}
+
+// commonTitleWords are words of a to-do's title that say nothing of which
+// to-do it is, and so tie a message to none.
+var commonTitleWords = map[string]bool{
+	"about": true, "after": true, "before": true, "check": true, "could": true, "every": true, "first": true,
+	"going": true, "other": true, "please": true, "should": true, "their": true, "there": true,
+	"these": true, "thing": true, "things": true, "think": true, "those": true, "today": true,
+	"which": true, "while": true, "would": true, "write": true, "watch": true, "start": true,
+	"story": true, "never": true, "again": true, "being": true, "where": true, "idea": true, "ideas": true,
+	"help": true, "week": true, "needs": true, "make": true, "send": true, "email": true,
 }
 
 // ideaWords is what the held line says of m, whose file was written to file: a tap as 'release mw-act.1', a

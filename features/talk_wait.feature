@@ -257,6 +257,18 @@ Feature: mw talk wait
     And the Governor was answered in talk "talk-7" turn 3 saying "Recorded for after 21:00 UTC"
     And the Governor was answered 1 time in all
 
+  Scenario: With Ideas only on, a turn about one of his to-dos ends the wait and is not kept, and a turn about anything else is kept
+    Given Ideas only is on until 9 hours on for mw talk wait
+    And the Governor has the open to-do "mw-lst.1" titled "Write the lesson plan" on the list "mw-lst" titled "Discipleship Institute" for mw talk wait
+    And mw talk wait has a time limit of 3000 milliseconds
+    And mw talk wait is armed
+    When the Governor's turn 1 of talk "talk-7" saying "a new idea for Lampas" is indexed
+    Then mw talk wait is still waiting
+    When the Governor's turn 2 of talk "talk-7" saying "can you help me with the instructions in my to do for my discipleship Institute" is indexed
+    Then mw talk wait ends within 2 seconds
+    And the wait printed "talk talk-7 turn 2"
+    And Ideas only is keeping 1 idea
+
   Scenario: With Ideas only on, a call request is kept and answered in the general thread
     Given Ideas only is on until 9 hours on for mw talk wait
     And mw talk wait has a time limit of 3000 milliseconds

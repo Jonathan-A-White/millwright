@@ -4226,7 +4226,10 @@ line for each. It changes nothing and releases nothing.
 While the mode is on, mw keeps every record of his instead of acting on it, at
 zero tokens, except what he sends about his own to-dos (beads labelled
 `hitl:todo`): an action on one (close, done, snooze, an edit) or a reply in its
-thread is applied at once, as outside the mode:
+thread is applied at once, as outside the mode, and so is a Talk turn or a
+message whose words are about a to-do (they say 'to do', 'to-do' or 'todo',
+name the id of an open to-do, or share a distinctive word with its title or its
+list's) and reaches the Mayor as ever:
 
 - `mw postern inbox --apply` (the backend's hook) appends each verified record of
   the Governor's, a tap included, to

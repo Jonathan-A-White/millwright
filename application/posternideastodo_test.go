@@ -8,6 +8,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // ideasTodoFixture is the apply fixture with Ideas only on until an hour from
@@ -94,5 +95,25 @@ func TestIdeasOnlyBannerSaysToDosStillWork(t *testing.T) {
 	want := "Ideas only until 13:00 UTC (2 ideas held); to-dos still work"
 	if got := application.IdeasOnlyBanner(state, 2, now); got != want {
 		t.Fatalf("banner = %q, want %q", got, want)
+	}
+}
+
+// A message about a to-do reaches the Mayor during Ideas only; any other is
+// still held (mw-8ifimx.13).
+func TestIdeasOnlyPassesAMessageAboutAToDoAndHoldsAnIdea(t *testing.T) {
+	f, inbox, files := ideasTodoFixture(t)
+	f.tracker.AddEpic("mw-lst", domain.Path{})
+	f.tracker.DescribeEpic("mw-lst", "Discipleship Institute", apptest.StatusOpen, application.DefaultPriority)
+	f.tracker.AddStory("mw-lst", domain.Story{ID: "mw-lst.1", Title: "Write the lesson plan"})
+	mustDo(t, f.tracker.SetLabels("mw-lst.1", application.LabelHitl, application.LabelHitlTodo))
+	f.message(t, releaseTapGovernorKey, "tx-todo-words", "helping me because I'm asking about to do")
+	f.message(t, releaseTapGovernorKey, "tx-list-words", "can you help me with the instructions in my notes for my discipleship Institute")
+	f.message(t, releaseTapGovernorKey, "tx-idea", "a new idea for Lampas")
+
+	if _, err := inbox.Apply(context.Background()); err != nil {
+		t.Fatalf("applying: %v", err)
+	}
+	if len(files.held) != 1 || files.held[0].Txid != "tx-idea" {
+		t.Fatalf("expected only the idea held, got %+v", files.held)
 	}
 }

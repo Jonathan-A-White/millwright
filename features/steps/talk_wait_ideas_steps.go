@@ -158,6 +158,12 @@ func (c *talkWaitContext) registerIdeasOnlySteps(ctx *godog.ScenarioContext) {
 		c.ideas = true
 		return nil
 	})
+	ctx.Given(`^the Governor has the open to-do "([^"]*)" titled "([^"]*)" on the list "([^"]*)" titled "([^"]*)" for mw talk wait$`, func(id, title, list, listTitle string) error {
+		c.memory.AddEpic(list, domain.Path{})
+		c.memory.DescribeEpic(list, listTitle, apptest.StatusOpen, application.DefaultPriority)
+		c.memory.AddStory(list, domain.Story{ID: id, Title: title})
+		return c.memory.SetLabels(id, application.LabelHitl, application.LabelHitlTodo)
+	})
 	ctx.Given(`^Ideas only is off for mw talk wait$`, func() error {
 		c.ideas = true
 		return nil
