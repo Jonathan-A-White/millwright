@@ -26,6 +26,7 @@ func registerStatusQueuedSteps(ctx *godog.ScenarioContext, c *statusContext) {
 	ctx.Given(`^a batch-land job for the rig "([^"]*)" began running (\d+) minutes ago$`, c.aBatchLandJobBeganRunning)
 	ctx.Given(`^the batch-land job ended$`, c.theBatchLandJobEnded)
 	ctx.Given(`^(\d+) other events were written since$`, c.otherEventsWrittenSince)
+	ctx.Then(`^reading status scanned fewer than (\d+) events of the log$`, c.statusScannedFewerThan)
 	ctx.Then(`^the report says "([^"]*)" is queued for batch landing since (\d+) minutes ago$`, c.theReportSaysQueuedSince)
 	ctx.Then(`^the report says "([^"]*)" is in the batch running since (\d+) minutes ago$`, c.theReportSaysInTheBatchSince)
 	ctx.Then(`^the report says "([^"]*)" is queued too long$`, c.theReportSaysQueuedTooLong)
@@ -169,4 +170,13 @@ func (c *statusContext) theReportCallsNoneStranded() error {
 
 func (c *statusContext) theReportCallsStranded(id string) error {
 	return c.reportSaysOf(id, "STRANDED: lease ran out")
+}
+
+// statusScannedFewerThan holds that the reading of status handed fewer than n
+// events of the log to its readers: the log was not scanned for a job's state.
+func (c *statusContext) statusScannedFewerThan(n int) error {
+	if got := c.log.Scanned(); got >= n {
+		return fmt.Errorf("reading status scanned %d events of the log, want fewer than %d", got, n)
+	}
+	return nil
 }

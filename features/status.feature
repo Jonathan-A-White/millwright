@@ -936,6 +936,22 @@ Feature: mw status
     Then reading status succeeds
     And the report says "mw-gq6.66" is queued too long
 
+  # mw-gq6.655: a job's newest state is read from what the log keeps of each job,
+  # not by scanning the log, so a batch that began 100000 events back is seen
+  # at once.
+  Scenario: A batch that began 100000 events back is the batch running, and the log is not scanned for it
+    Given the rig "millwright" lands in batches every 30 minutes
+    And a status story "mw-gq6.67" filed under it
+    And the status story "mw-gq6.67" is claimed with its session running
+    And the claim on "mw-gq6.67" was last renewed 3 hours ago
+    And the status story "mw-gq6.67" was queued for batch landing 150 minutes ago
+    And a batch-land job for the rig "millwright" began running 20 minutes ago
+    And 100000 other events were written since
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.67" is in the batch running since 20 minutes ago
+    And reading status scanned fewer than 1000 events of the log
+
   Scenario: A story queued past twice its rig's batch_every with no batch running is the alarm
     Given the rig "millwright" lands in batches every 30 minutes
     And a status story "mw-gq6.62" filed under it

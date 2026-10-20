@@ -35,6 +35,13 @@ func InitializeEventClockRestartScenario(ctx *godog.ScenarioContext) {
 		c.jobs = []application.SpringJob{application.ClockJob("beads-flush", 15*time.Minute, c.run("beads-flush"))}
 		return nil
 	})
+	ctx.Given(`^a (\d+)-hour clock job on a follower that shares one event log across restarts$`, func(hours int) error {
+		c.setUp("beads-flush")
+		c.jobs = []application.SpringJob{application.ClockJob("beads-flush", time.Duration(hours)*time.Hour, c.run("beads-flush"))}
+		return nil
+	})
+	ctx.Given(`^the clock job passed (\d+) hours ago$`, func(n int) error { return c.passed(n * 3600) })
+	ctx.Given(`^(\d+) events of no job are written since$`, c.otherEventsSince)
 	ctx.Given(`^a follower that shares one event log across restarts and runs dispatch on a heartbeat of an hour$`, func() error {
 		c.setUp("dispatch")
 		c.jobs = []application.SpringJob{application.DispatchJob(time.Hour, c.run("dispatch"))}
@@ -114,4 +121,14 @@ func (c *eventClockRestartContext) restarts(times, apart int) error {
 		}
 	}
 	return nil
+}
+
+// otherEventsSince buries the log's last pass under n events of no job.
+func (c *eventClockRestartContext) otherEventsSince(n int) error {
+	evs := make([]events.Event, n)
+	for i := range evs {
+		evs[i] = events.Event{Ts: c.now, Kind: events.KindBeadChanged, Lane: events.LaneNormal, Actor: "mayor@laptop", Bead: "mw-other", From: "running", To: "running", Detail: "comment"}
+	}
+	_, err := c.log.Append(context.Background(), evs)
+	return err
 }

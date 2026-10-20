@@ -24,3 +24,22 @@ Feature: mw events follow keeps a clock job's time across restarts
     And dispatch passed 3 hours ago
     When the follower is restarted 1 times, 10 minutes apart, springing at each start
     Then dispatch has run 0 times
+
+  # mw-gq6.655: the clock job's last pass is read from what the log keeps of
+  # each job, not from the newest 1000 events, so a period longer than the
+  # factory takes to write 1000 events is kept across a restart.
+  Scenario: a restarted follower does not rerun an hourly clock job that ran within its hour
+    Given a 1-hour clock job on a follower that shares one event log across restarts
+    And the clock job passed 40 minutes ago
+    And 3000 events of no job are written since
+    When the follower is restarted 1 times, 10 minutes apart, springing at each start
+    Then the clock job has run 0 times
+    When 30 minutes pass and the follower springs
+    Then the clock job has run 1 times
+
+  Scenario: a restarted follower does not rerun a daily clock job that ran within its day
+    Given a 24-hour clock job on a follower that shares one event log across restarts
+    And the clock job passed 20 hours ago
+    And 3000 events of no job are written since
+    When the follower is restarted 1 times, 10 minutes apart, springing at each start
+    Then the clock job has run 0 times

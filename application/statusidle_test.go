@@ -103,3 +103,70 @@ func TestStatusWithNoLogNamesNoIdleLine(t *testing.T) {
 		t.Fatalf("a report with no log has no IDLE line: %v\n%s", err, report.String())
 	}
 }
+
+// buried is n events of no kind that matters here, each at hhmm: a log's
+// length between an old event and the present.
+func buried(n int, hhmm string, e events.Event) []events.Event {
+	evs := make([]events.Event, n)
+	for i := range evs {
+		evs[i] = atTime(hhmm, e)
+	}
+	return evs
+}
+
+func TestStatusIdleSeesAJobStillRunningAHundredThousandEventsBackWithoutScanningTheLog(t *testing.T) {
+	log := &apptest.FakeEventLog{}
+	emit := func(evs ...events.Event) {
+		t.Helper()
+		for i := range evs {
+			evs[i].Lane = events.LaneNormal
+		}
+		if _, err := log.Append(context.Background(), evs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	emit(landed("12:00"), job("12:05", "batch-land@laptop", events.JobScheduled, events.JobRunning))
+	emit(buried(100000, "12:10", events.Event{Kind: events.KindJob, Actor: "dispatch@laptop", From: events.JobRunning, To: events.JobDone})...)
+	out := statusOver(t, log)
+	if strings.Contains(out, "IDLE") {
+		t.Fatalf("a job still running is not idle, however far back its running event lies:\n%s", out)
+	}
+	if got := log.Scanned(); got >= 1000 {
+		t.Fatalf("status scanned %d events of the log, want fewer than 1000", got)
+	}
+}
+
+func TestStatusIdleIsSinceTheLastEventNoJobWroteHoweverFarBack(t *testing.T) {
+	log := &apptest.FakeEventLog{}
+	first := []events.Event{landed("12:00")}
+	first = append(first, buried(100000, "12:10", events.Event{Kind: events.KindJob, Actor: "dispatch@laptop", From: events.JobRunning, To: events.JobDone})...)
+	for i := range first {
+		first[i].Lane = events.LaneNormal
+	}
+	if _, err := log.Append(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	out := statusOver(t, log)
+	if !strings.Contains(out, "IDLE since 12:00 ·") && !strings.Contains(out, "IDLE since 12:00\n") {
+		t.Fatalf("expected the idle line since the landing at 12:00 in:\n%s", out)
+	}
+	if got := log.Scanned(); got >= 1000 {
+		t.Fatalf("status scanned %d events of the log, want fewer than 1000", got)
+	}
+}
+
+// statusOver is mw status read at 14:00 over a log, the factory called idle
+// after ten minutes.
+func statusOver(t *testing.T, log application.EventLog) string {
+	t.Helper()
+	tracker := apptest.NewFakeTracker()
+	report, err := application.Status{
+		Tracker: tracker, Notes: tracker, Host: "laptop", Seat: "builder",
+		Log: log, IdleAfter: 10 * time.Minute, Harness: fixedHarness{n: 0},
+		Now: func() time.Time { return time.Date(2026, 10, 1, 14, 0, 0, 0, time.UTC) },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return report.String()
+}

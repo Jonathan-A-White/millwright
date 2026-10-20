@@ -2198,6 +2198,11 @@ The home keeps one sequenced, append-only log of the factory's events
 (`docs/events.md`): one JSON event per line in `events_log_path` (default
 `~/.local/state/mw/events/log.jsonl`), fsynced on every append, its head in
 `log.seq` beside it. Its seq is the cursor a handover or the app reads from.
+`log.newest.json` beside it is a cache the readers keep, not a record: the newest
+events of each job, the newest event no job wrote and the first it saw, so that
+`mw status` and the follower's first look read a job's state in the time of the
+events since the last read, however old the job's last event is (mw-gq6.655).
+Delete it and the next read makes it again from the whole log.
 
 `mw events follow [--every 1s]` does not exit. Every `--every` (default one
 second) it reads the beads' head — Dolt's hash of the whole database, one
