@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -34,28 +35,18 @@ type HostPause struct {
 }
 
 // PausedHost reports whether the log's latest pause-host or resume-host for
-// host is a pause, and that pause. The log is read whole: a pause is rare and
-// a pass reads the log once.
+// host is a pause, and that pause. It reads the log's newest events (NewestOf),
+// not the log.
 func PausedHost(ctx context.Context, log EventLog, host string) (HostPause, bool, error) {
-	evs, err := log.Since(ctx, 0)
+	newest, err := NewestOf(ctx, log)
 	if err != nil {
 		return HostPause{}, false, fmt.Errorf("reading the event log for a pause of %s: %w", host, err)
 	}
-	var pause HostPause
-	var paused bool
-	for _, ev := range evs {
-		c, ok := events.ControlOf(ev)
-		if !ok || c.Host != host {
-			continue
-		}
-		switch c.Word {
-		case events.ControlPauseHost:
-			pause, paused = HostPause{Seq: ev.Seq, At: ev.Ts, Actor: ev.Actor}, true
-		case events.ControlResumeHost:
-			pause, paused = HostPause{}, false
-		}
+	ev, ok := newest.Pauses[host]
+	if c, parsed := events.ControlOf(ev); !ok || !parsed || c.Word != events.ControlPauseHost {
+		return HostPause{}, false, nil
 	}
-	return pause, paused, nil
+	return HostPause{Seq: ev.Seq, At: ev.Ts, Actor: ev.Actor}, true, nil
 }
 
 // PausedKey is the key of the bd kv note that mirrors a pause-host for host:
@@ -103,25 +94,22 @@ type Cancel struct {
 }
 
 // CancelsSince is the latest cancel event of each bead at or after since,
-// oldest first.
+// oldest first. It reads the log's newest events (NewestOf), not the log.
 func CancelsSince(ctx context.Context, log EventLog, since time.Time) ([]Cancel, error) {
-	evs, err := log.Since(ctx, 0)
+	newest, err := NewestOf(ctx, log)
 	if err != nil {
 		return nil, fmt.Errorf("reading the event log for cancels: %w", err)
 	}
-	latest := map[string]int{}
-	var cancels []Cancel
-	for _, ev := range evs {
-		if c, ok := events.ControlOf(ev); !ok || c.Word != events.ControlCancel || ev.Ts.Before(since) {
-			continue
+	var latest []events.Event
+	for _, ev := range newest.Cancels {
+		if !ev.Ts.Before(since) {
+			latest = append(latest, ev)
 		}
-		cancel := Cancel{Bead: ev.Bead, Actor: ev.Actor, At: ev.Ts}
-		if i, seen := latest[ev.Bead]; seen {
-			cancels[i] = cancel
-			continue
-		}
-		latest[ev.Bead] = len(cancels)
-		cancels = append(cancels, cancel)
+	}
+	sort.Slice(latest, func(i, j int) bool { return latest[i].Seq < latest[j].Seq })
+	cancels := make([]Cancel, 0, len(latest))
+	for _, ev := range latest {
+		cancels = append(cancels, Cancel{Bead: ev.Bead, Actor: ev.Actor, At: ev.Ts})
 	}
 	return cancels, nil
 }

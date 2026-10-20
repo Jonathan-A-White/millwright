@@ -86,6 +86,14 @@ func (f *FakeEventLog) Newest(context.Context) (application.EventNewest, error) 
 	for k, v := range f.newest.Jobs {
 		out.Jobs[k] = v
 	}
+	out.Pauses = make(map[string]events.Event, len(f.newest.Pauses))
+	for k, v := range f.newest.Pauses {
+		out.Pauses[k] = v
+	}
+	out.Cancels = make(map[string]events.Event, len(f.newest.Cancels))
+	for k, v := range f.newest.Cancels {
+		out.Cancels[k] = v
+	}
 	return out, nil
 }
 

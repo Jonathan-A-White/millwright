@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain/events"
@@ -195,3 +196,33 @@ func TestSinceSkipsATornLastLineAfterTheSeq(t *testing.T) {
 }
 
 var _ application.EventNewestLog = (*eventlog.Log)(nil)
+
+// A state file an older build made lacks the pauses and the cancels: it is made
+// anew from the whole log, once, so that PausedHost and CancelsSince find a
+// pause far back (mw-gq6.659).
+func TestNewestIsMadeAnewFromAStateFileOfAnOlderBuild(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events", "log.jsonl")
+	writeLog(t, path, 3000, func(seq uint64) events.Event {
+		switch seq {
+		case 2:
+			return events.Event{Ts: ts, Kind: events.KindControl, Actor: "mw@laptop", Detail: "pause-host vps", Lane: events.LaneNormal}
+		case 3:
+			return events.Event{Ts: ts, Kind: events.KindControl, Bead: "mw-a", Actor: "governor@postern", Detail: "cancel", Lane: events.LaneNormal}
+		}
+		return mail("mw-" + strconv.FormatUint(seq, 10))
+	})
+	old := `{"seq":3000,"first":{"seq":1},"other":{"seq":3000},"jobs":{}}` + "\n"
+	if err := os.WriteFile(strings.TrimSuffix(path, ".jsonl")+".newest.json", []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	log := eventlog.New(path)
+
+	pause, paused, err := application.PausedHost(context.Background(), log, "vps")
+	if err != nil || !paused || pause.Seq != 2 || pause.Actor != "mw@laptop" {
+		t.Fatalf("got pause %+v paused=%v err=%v, want the pause at seq 2 by mw@laptop", pause, paused, err)
+	}
+	cancels, err := application.CancelsSince(context.Background(), log, ts.Add(-time.Hour))
+	if err != nil || len(cancels) != 1 || cancels[0].Bead != "mw-a" {
+		t.Fatalf("got cancels %+v (%v), want one of mw-a", cancels, err)
+	}
+}

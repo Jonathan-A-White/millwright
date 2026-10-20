@@ -21,17 +21,33 @@ type JobNewest struct {
 // current state does not scan the log (mw-gq6.655): the newest events of each
 // job actor, the newest event no job wrote, and the first event it was built
 // from. It covers the log up to Seq.
+//
+// Pauses holds the newest pause-host or resume-host event of each host, and
+// Cancels the newest cancel event of each bead, so that PausedHost and
+// CancelsSince read no event (mw-gq6.659). Version is EventNewestVersion for a
+// record that holds them; a record kept before them lacks it and is made anew.
 type EventNewest struct {
-	Seq   uint64               `json:"seq"`
-	First events.Event         `json:"first"`
-	Other events.Event         `json:"other"`
-	Jobs  map[string]JobNewest `json:"jobs"`
+	Version int                     `json:"version"`
+	Seq     uint64                  `json:"seq"`
+	First   events.Event            `json:"first"`
+	Other   events.Event            `json:"other"`
+	Jobs    map[string]JobNewest    `json:"jobs"`
+	Pauses  map[string]events.Event `json:"pauses,omitempty"`
+	Cancels map[string]events.Event `json:"cancels,omitempty"`
 }
+
+// EventNewestVersion is the version of the record Add builds: 2 added Pauses and
+// Cancels.
+const EventNewestVersion = 2
 
 // Add folds the next event of the log in. Events are added in seq order.
 func (n *EventNewest) Add(e events.Event) {
+	n.Version = EventNewestVersion
 	if e.Seq > n.Seq {
 		n.Seq = e.Seq
+	}
+	if c, ok := events.ControlOf(e); ok {
+		n.addControl(c, e)
 	}
 	if n.First.Seq == 0 {
 		n.First = e
@@ -54,6 +70,23 @@ func (n *EventNewest) Add(e events.Event) {
 		j.Ended = e
 	}
 	n.Jobs[e.Actor] = j
+}
+
+// addControl keeps e, a control event that says c, when it is the newest of its
+// host's pause and resume words or of its bead's cancels.
+func (n *EventNewest) addControl(c events.Control, e events.Event) {
+	switch c.Word {
+	case events.ControlPauseHost, events.ControlResumeHost:
+		if n.Pauses == nil {
+			n.Pauses = map[string]events.Event{}
+		}
+		n.Pauses[c.Host] = e
+	case events.ControlCancel:
+		if n.Cancels == nil {
+			n.Cancels = map[string]events.Event{}
+		}
+		n.Cancels[e.Bead] = e
+	}
 }
 
 // EventNewestLog is an EventLog that keeps its EventNewest between reads, and

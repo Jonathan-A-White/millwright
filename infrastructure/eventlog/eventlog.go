@@ -305,7 +305,8 @@ func (l *Log) statePath() string {
 // in the events after the seq it covers (only those are read), and leaves the
 // result in the file for the next reader. A state file that is absent, cannot be
 // read, or covers more than the log holds (a log begun again) is made anew from
-// the whole log, once. The file is only a cache: a failure to write it is not
+// the whole log, once; so is one an older build made, which lacks what a newer
+// reader asks of it (EventNewestVersion). The file is only a cache: a failure to write it is not
 // the reader's.
 func (l *Log) Newest(ctx context.Context) (application.EventNewest, error) {
 	head, err := l.head()
@@ -314,7 +315,7 @@ func (l *Log) Newest(ctx context.Context) (application.EventNewest, error) {
 	}
 	var n application.EventNewest
 	if data, err := os.ReadFile(l.statePath()); err == nil {
-		if json.Unmarshal(data, &n) != nil || n.Seq > head {
+		if json.Unmarshal(data, &n) != nil || n.Seq > head || (n.Seq > 0 && n.Version != application.EventNewestVersion) {
 			n = application.EventNewest{}
 		}
 	}
