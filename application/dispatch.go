@@ -546,6 +546,12 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 		d.print(words + "\n")
 		err = d.skippedTick(ctx, gone)
 	}
+	// A local network fault that lasts is not to go unseen: the unit leaves with
+	// NetworkFaultExit, a success to the timer, tick after tick, so the third in a
+	// row fails it instead, once (mw-gq6.650).
+	if fault, faulted := LocalFault(err); faulted && d.Log != nil && !d.DryRun {
+		err = d.faultedTick(ctx, fault, err)
+	}
 	if d.Log != nil && !d.DryRun {
 		line := d.now().UTC().Format(time.RFC3339) + " " + words
 		if logErr := d.Log.Append(ctx, line); logErr != nil && err == nil {
@@ -565,6 +571,22 @@ func (d Dispatch) skippedTick(ctx context.Context, gone *RemoteUnreachable) erro
 	}
 	return fmt.Errorf("dispatching on %s: %s unreachable for %d ticks in a row since %s: %s",
 		d.Host, gone.Remote, SkippedTicksAlarm, before.FirstSkipped.UTC().Format(time.RFC3339), oneLine(gone.Said))
+}
+
+// faultedTick is what Run reports of a tick that gave up waiting for the network:
+// the fault as it was, with its exit status 7, unless this is the
+// FaultedTicksAlarm'th in a row, counted from the log as it stands before this
+// tick's own line is added; that one is a plain failure naming the fault.
+func (d Dispatch) faultedTick(ctx context.Context, fault *LocalNetworkFault, err error) error {
+	before := NewestRun(ctx, d.Log, DispatchOutcome)
+	if before.Outcome != TickFault {
+		before = TickRun{}
+	}
+	if before.Count+1 != FaultedTicksAlarm {
+		return err
+	}
+	return fmt.Errorf("dispatching on %s: local network fault for %d ticks in a row since %s: %s",
+		d.Host, FaultedTicksAlarm, before.First.UTC().Format(time.RFC3339), oneLine(fault.Said))
 }
 
 // The words a dispatch's line of its log holds after the time. ok says the run
@@ -626,6 +648,11 @@ func skippedWords(gone *RemoteUnreachable) string {
 // a blip of a tick or two is no news, three in a row, about a quarter of an
 // hour, is an outage.
 const SkippedTicksAlarm = 3
+
+// FaultedTicksAlarm is how many ticks in a row may end in a local network fault
+// before the unit fails and the Mayor is told, once (mw-gq6.650): the same three
+// as SkippedTicksAlarm, counted from the same log.
+const FaultedTicksAlarm = SkippedTicksAlarm
 
 // lostClaimsOnly reads what a failed dispatch said of itself, with or without
 // the "failed: " in front: it reports who held each story when every failure in
