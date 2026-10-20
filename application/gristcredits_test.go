@@ -417,3 +417,82 @@ func TestWarmSessionsOnTheKeyAreRetiredWhenTheMarkIsWritten(t *testing.T) {
 	}
 	pool.Close()
 }
+
+// storeOf is a GristCreditKeyStore of a test's own: a file that is present or
+// not, and the last key written to it.
+type storeOf struct {
+	apptest.FakeCreditKey
+	present bool
+	written string
+}
+
+func (s *storeOf) Present(context.Context) (bool, error) { return s.present, nil }
+func (s *storeOf) Write(_ context.Context, key string) error {
+	s.written = key
+	return nil
+}
+
+func TestCreditsReportCountsTheUTCCalendarMonthOfLinesBilledToTheKey(t *testing.T) {
+	record := &apptest.FakeGristState{}
+	at := func(text string) time.Time {
+		t.Helper()
+		parsed, err := time.Parse(time.RFC3339, text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return parsed
+	}
+	for _, line := range []application.GrindLine{
+		{Time: at("2026-09-30T23:59:59Z"), Billing: application.BillingAPI, CostUSD: 7},
+		{Time: at("2026-10-01T00:00:00Z"), Billing: application.BillingAPI, CostUSD: 1.25},
+		{Time: at("2026-10-15T00:00:00Z"), Billing: application.BillingSubscription, CostUSD: 50},
+		{Time: at("2026-10-19T22:00:00-05:00"), Billing: application.BillingAPI, CostUSD: 2},
+		{Time: at("2026-11-01T00:00:00Z"), Billing: application.BillingAPI, CostUSD: 9},
+		{Time: at("2026-10-10T00:00:00Z")},
+	} {
+		if err := record.Append(context.Background(), line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	admin := application.GristCreditsAdmin{
+		Keys: &storeOf{present: true}, State: &apptest.FakeCreditState{}, Record: record,
+		Now: func() time.Time { return creditsNow },
+	}
+	report, err := admin.Report(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Month != "2026-10" || report.Grists != 2 || report.CostUSD != 3.25 || report.BudgetUSD != 200 {
+		t.Errorf("expected 2 grists, $3.25 of $200 in 2026-10, got %+v", report)
+	}
+	if report.LastAPI == nil || !report.LastAPI.Equal(at("2026-11-01T00:00:00Z")) {
+		t.Errorf("expected the last api grist to be the latest of all time, got %v", report.LastAPI)
+	}
+}
+
+func TestCreditsSetKeyChecksTheLineAfterTheHomeAndNeverRepeatsIt(t *testing.T) {
+	home := &apptest.FakeHomeFile{Text: "laptop 2026-09-29T00:10:00Z mw@laptop\n"}
+	for line, want := range map[string]string{
+		"":                      "the line was empty",
+		"   ":                   "the line was empty",
+		"sk-other-secret":       "does not start with sk-ant-",
+		"sk-ant-two words here": "is not one key",
+	} {
+		store := &storeOf{}
+		var out strings.Builder
+		err := application.GristCreditsAdmin{Keys: store, State: &apptest.FakeCreditState{}, Home: home, Host: "laptop", Out: &out}.
+			SetKey(context.Background(), func() (string, error) { return line + "\n", nil })
+		if err == nil || !strings.Contains(err.Error(), want) || store.written != "" {
+			t.Errorf("line %q: expected a refusal saying %q and nothing written, got %v (written %q)", line, want, err, store.written)
+		}
+		if strings.TrimSpace(line) != "" && strings.Contains(err.Error()+out.String(), strings.TrimSpace(line)) {
+			t.Errorf("line %q was repeated: %v %s", line, err, out.String())
+		}
+	}
+	store := &storeOf{}
+	err := application.GristCreditsAdmin{Keys: store, State: &apptest.FakeCreditState{}, Home: home, Host: "cloud1"}.
+		SetKey(context.Background(), func() (string, error) { t.Fatal("read a line away from home"); return "", nil })
+	if err == nil || !strings.Contains(err.Error(), "is not home") {
+		t.Errorf("expected a refusal away from home, got %v", err)
+	}
+}

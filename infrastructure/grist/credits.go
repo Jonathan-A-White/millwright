@@ -74,7 +74,7 @@ type CreditKeyFile struct {
 }
 
 // CreditKeyFile satisfies the port.
-var _ application.GristCreditKey = CreditKeyFile{}
+var _ application.GristCreditKeyStore = CreditKeyFile{}
 
 // Read implements application.GristCreditKey.
 func (k CreditKeyFile) Read(context.Context) (key, refused string) {
@@ -102,4 +102,46 @@ func (k CreditKeyFile) Read(context.Context) (key, refused string) {
 		return "", fmt.Sprintf("the API key file %s does not hold one key, so grists are billed to the subscription", k.Path)
 	}
 	return key, ""
+}
+
+// Present implements application.GristCreditKeyStore: a file of any kind at
+// Path, none of it read.
+func (k CreditKeyFile) Present(context.Context) (bool, error) {
+	_, err := os.Lstat(k.Path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// Write implements application.GristCreditKeyStore: the key and a newline in a
+// temporary file of the key file's directory, 0600 from its creation, synced
+// and renamed over Path, so a reader sees the old key or the new, whole, and
+// a file that was readable by others is replaced by one that is not.
+func (k CreditKeyFile) Write(_ context.Context, key string) error {
+	dir := filepath.Dir(k.Path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(dir, ".anthropic-api-key-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temp.Name())
+	if err := temp.Chmod(0o600); err != nil {
+		temp.Close()
+		return err
+	}
+	if _, err := temp.WriteString(key + "\n"); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temp.Name(), k.Path)
 }

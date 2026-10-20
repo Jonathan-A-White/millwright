@@ -81,3 +81,34 @@ func TestTheKeyFileIsUsedOnlyAtMode0600(t *testing.T) {
 		t.Fatalf("expected an empty file refused, got %q %q", key, why)
 	}
 }
+
+func TestCreditKeyFileWriteIsAtomicOwnerOnlyAndReplacesAWideFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "anthropic-api.key")
+	key := grist.CreditKeyFile{Path: path}
+	if present, err := key.Present(context.Background()); err != nil || present {
+		t.Fatalf("expected no file, got %v %v", present, err)
+	}
+	if err := key.Write(context.Background(), "sk-ant-one"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := key.Write(context.Background(), "sk-ant-two"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("expected mode 0600, got %v %v", info, err)
+	}
+	if got, refused := key.Read(context.Background()); got != "sk-ant-two" || refused != "" {
+		t.Errorf("expected the new key, got %q %q", got, refused)
+	}
+	if present, _ := key.Present(context.Background()); !present {
+		t.Error("expected the file present")
+	}
+	left, _ := os.ReadDir(filepath.Dir(path))
+	if len(left) != 1 {
+		t.Errorf("expected no temporary file left, got %v", left)
+	}
+}

@@ -30,6 +30,7 @@ func newGristCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 	}
 	root.AddCommand(newGristKeyCmd())
+	root.AddCommand(newGristCreditsCmd())
 	root.AddCommand(newGristGrindCmd())
 	root.AddCommand(newGristSendCmd())
 	root.AddCommand(newGristRequestCmd())

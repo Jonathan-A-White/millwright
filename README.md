@@ -2595,6 +2595,20 @@ the Mayor; nothing pages the Governor. While the mark stands every grist uses
 the subscription; the first grist 24 hours after it tries the key again, and
 getting through clears the mark. See `features/grist_credits.feature`.
 
+`mw grist credits` (also `status`; `--json` for one object) looks the key's
+state up and changes nothing: whether `api_credits` is on or off, whether the
+key file is there (yes or no, never any of the key), the spent mark's time or
+none, this UTC calendar month's grists billed to the key and the sum of their
+`total_cost_usd` against $200, and the time of the last grist billed to the
+key. `mw grist credits on` and `off` set `[grist]` `api_credits` in this host's
+`config.toml` through the writer `mw config set` uses, and print the old value,
+the new, the backup and the way back. `mw grist credits key` reads one line
+from stdin (echo off at a terminal), refuses an empty line, one that does not
+start with `sk-ant-`, and any host that is not home (`mw home`), and writes
+`api_key_file` mode 0600, written whole and renamed into place; it never prints
+the key. `mw grist credits clear` removes the spent mark when the month's
+credits renew. See `features/grist_credits_command.feature`.
+
 ```toml
 grist_key_file  = "/home/jwhite/.config/mw/mill.key"   # MW_GRIST_KEY_FILE
 grist_state_dir = "/home/jwhite/.local/state/mw/grist" # MW_GRIST_STATE_DIR
