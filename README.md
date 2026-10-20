@@ -2506,9 +2506,14 @@ built, sealed to the **mill key** and carried by the postern backend as a
 `grist` record (postern's `docs/protocol.md` §18). The mill runs on the
 factory's home host.
 
-`mw grist key` makes the mill key once, 0600 at `grist_key_file` (default
-`~/.config/mw/mill.key`; never the Mayor's key), and prints its public key and
-fingerprint. It never overwrites a key or prints the private half.
+`mw grist key` prints the mill key's public key and fingerprint (the key is at
+`grist_key_file`, default `~/.config/mw/mill.key`; never the Mayor's key). It is
+a lookup: with no key there it makes nothing, says there is none and how to make
+one, and leaves with 1. `mw grist key --create` makes the key, once, 0600, and
+only on the home host (`mw home`); on any other host, or when the home cannot be
+told, it is refused unless `--force-host` is given too. It never overwrites a key
+or prints the private half. `mw grist key --help` says the same; the scenarios are
+in `features/grist_key.feature`.
 
 `mw grist grind` is one pass, then it exits. It reads what the backend holds
 for the mill key and answers each grist once, sealed back to its sender with

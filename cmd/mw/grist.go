@@ -52,26 +52,46 @@ func gristKeys() (*postern.KeyFile, error) {
 	return postern.New(path), nil
 }
 
-// newGristKeyCmd builds `mw grist key`: the mill key, made once, and its
-// public half.
+// newGristKeyCmd builds `mw grist key`: the mill key's public half, and with
+// --create the key made once on the home host.
 func newGristKeyCmd() *cobra.Command {
-	return &cobra.Command{
+	var create, forceHost bool
+
+	cmd := &cobra.Command{
 		Use:   "key",
-		Short: "Make the mill key if there is none, and print its public key and fingerprint",
-		Long: "key generates the mill key (config grist_key_file, default ~/.config/mw/mill.key) when\n" +
-			"there is none yet, 0600, a key of its own and never the Mayor's; then prints its public key\n" +
-			"and its fingerprint. The postern backend is told the public key as POSTERN_MILL_KEY. It\n" +
-			"never prints the private key, and never overwrites a key already there.",
+		Short: "Print the mill key's public key and fingerprint; --create makes the key on the home host",
+		Long: "key prints the public key and the fingerprint of the mill key (config grist_key_file,\n" +
+			"default ~/.config/mw/mill.key). The postern backend is told the public key as\n" +
+			"POSTERN_MILL_KEY. With no key there it makes nothing, says so, and leaves with 1.\n\n" +
+			"--create makes the key when there is none yet, 0600, a key of its own and never the\n" +
+			"Mayor's, and only on the home host (mw home): on any other host, or when the home cannot be\n" +
+			"told, it is refused unless --force-host is given too. Where a key is already there --create\n" +
+			"changes nothing. It never prints the private key, and never overwrites a key already there.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			keys, err := gristKeys()
 			if err != nil {
 				return err
 			}
-			_, err = application.GristKey{Keys: keys, Out: cmd.OutOrStdout()}.Run(cmd.Context())
+			use := application.GristKey{Keys: keys, Out: cmd.OutOrStdout(), Create: create, ForceHost: forceHost}
+			if create && !forceHost {
+				dir, err := config.Vault()
+				if err != nil {
+					return err
+				}
+				host, err := config.Host()
+				if err != nil {
+					return err
+				}
+				use.Home, use.Host = mwVault(dir, host), host
+			}
+			_, err = use.Run(cmd.Context())
 			return err
 		},
 	}
+	cmd.Flags().BoolVar(&create, "create", false, "make the mill key when there is none (home host only)")
+	cmd.Flags().BoolVar(&forceHost, "force-host", false, "with --create, make the key on a host that is not home")
+	return cmd
 }
 
 // newGristGrindCmd builds `mw grist grind`: one pass of the mill.

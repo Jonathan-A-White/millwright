@@ -138,15 +138,21 @@ func (k *fakeMillKey) Sign([]application.PosternUtxo, []byte) (string, error) {
 func (k *fakeMillKey) MarkSpent([]application.PosternUtxo) error { return nil }
 func (k *fakeMillKey) MarkSent(string) error                     { return nil }
 
-// mw grist key makes the key once, then only says its public half.
-func TestGristKeyMakesTheKeyOnceAndPrintsItsPublicHalf(t *testing.T) {
+// mw grist key makes nothing without Create; with it, the key is made once,
+// then only its public half is said.
+func TestGristKeyMakesTheKeyOnlyWhenAskedAndOnlyOnce(t *testing.T) {
 	keys := &fakeMillKey{}
 	var out bytes.Buffer
-	first, err := application.GristKey{Keys: keys, Out: &out}.Run(context.Background())
+	home := &apptest.FakeHomeFile{Text: "laptop 2026-09-29T00:10:00Z mw@laptop\n"}
+	if _, err := (application.GristKey{Keys: keys, Out: &out}).Run(context.Background()); err == nil || keys.generated != 0 || out.Len() != 0 {
+		t.Fatalf("expected a refusal that made and printed nothing, got %v (%d generated)\n%s", err, keys.generated, out.String())
+	}
+	create := application.GristKey{Keys: keys, Out: &out, Create: true, Home: home, Host: "laptop"}
+	first, err := create.Run(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := application.GristKey{Keys: keys, Out: &out}.Run(context.Background())
+	second, err := create.Run(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,6 +167,28 @@ func TestGristKeyMakesTheKeyOnceAndPrintsItsPublicHalf(t *testing.T) {
 	}
 	if strings.Contains(printed, "the-private-key") {
 		t.Fatalf("the private key was printed:\n%s", printed)
+	}
+}
+
+// Create makes the key on the home host only: another host, a home that cannot
+// be told or no home file at all is refused, until ForceHost is given.
+func TestGristKeyCreateMakesTheKeyOnlyOnHomeUnlessForced(t *testing.T) {
+	for name, home := range map[string]application.HomeFile{
+		"another host is home": &apptest.FakeHomeFile{Text: "laptop 2026-09-29T00:10:00Z mw@laptop\n"},
+		"the home is unknown":  &apptest.FakeHomeFile{Missing: true},
+		"no home file given":   nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			keys := &fakeMillKey{}
+			use := application.GristKey{Keys: keys, Create: true, Home: home, Host: "cloud1"}
+			if _, err := use.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "--force-host") || keys.generated != 0 {
+				t.Fatalf("expected a refusal naming --force-host, got %v (%d generated)", err, keys.generated)
+			}
+			use.ForceHost = true
+			if _, err := use.Run(context.Background()); err != nil || keys.generated != 1 {
+				t.Fatalf("expected --force-host to make the key, got %v (%d generated)", err, keys.generated)
+			}
+		})
 	}
 }
 

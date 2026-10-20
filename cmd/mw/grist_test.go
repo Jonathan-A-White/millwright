@@ -23,17 +23,54 @@ func runGrist(t *testing.T, args ...string) (string, error) {
 	return out.String(), err
 }
 
-// mw grist key makes the mill key where config says, once, and prints its
-// public half and fingerprint, never its private key.
-func TestGristKeyMakesTheMillKeyOnce(t *testing.T) {
-	mwConfig(t, "host = \"laptop\"\n")
+// gristKeyAt runs mw grist key as host with the vault's home file saying
+// home is home (no home file when it is empty), and the mill key where config
+// says.
+func gristKeyAt(t *testing.T, host, home string, args ...string) (string, error) {
+	t.Helper()
+	vault := t.TempDir()
+	if home != "" {
+		text := home + " 2026-09-29T00:10:00Z mw@" + home + "\n"
+		if err := os.WriteFile(filepath.Join(vault, "home"), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("MW_VAULT", vault)
+	t.Setenv("MW_HOST", host)
+	return runGrist(t, append([]string{"key"}, args...)...)
+}
+
+func millKeyPath(t *testing.T) string {
+	t.Helper()
 	t.Setenv("MW_GRIST_KEY_FILE", "")
 	home, _ := os.UserHomeDir()
-	path := filepath.Join(home, ".config", "mw", "mill.key")
+	return filepath.Join(home, ".config", "mw", "mill.key")
+}
 
-	first, err := runGrist(t, "key")
+// mw grist key is a lookup: with no key there it says so and how to make one,
+// and creates nothing (mw-gq6.646).
+func TestGristKeyWithNoKeyCreatesNothing(t *testing.T) {
+	mwConfig(t, "host = \"laptop\"\n")
+	path := millKeyPath(t)
+
+	out, err := gristKeyAt(t, "laptop", "laptop")
+	if err == nil || !strings.Contains(err.Error()+out, "no mill key") || !strings.Contains(err.Error()+out, "--create") {
+		t.Fatalf("expected it to say there is no mill key and name --create, got %v\n%s", err, out)
+	}
+	if _, err := os.Lstat(path); err == nil {
+		t.Fatalf("mw grist key made %s", path)
+	}
+}
+
+// --create makes the mill key where config says, once, on the home host, and
+// prints its public half and fingerprint, never its private key.
+func TestGristKeyCreateMakesTheMillKeyOnce(t *testing.T) {
+	mwConfig(t, "host = \"laptop\"\n")
+	path := millKeyPath(t)
+
+	first, err := gristKeyAt(t, "laptop", "laptop", "--create")
 	if err != nil {
-		t.Fatalf("mw grist key: %v\n%s", err, first)
+		t.Fatalf("mw grist key --create: %v\n%s", err, first)
 	}
 	wif, err := os.ReadFile(path)
 	if err != nil {
@@ -46,23 +83,56 @@ func TestGristKeyMakesTheMillKeyOnce(t *testing.T) {
 		t.Fatalf("expected the key made and its private half never printed, got:\n%s", first)
 	}
 
-	second, err := runGrist(t, "key")
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, _ := os.ReadFile(path)
-	if string(again) != string(wif) || strings.Contains(second, "Wrote a new") {
-		t.Fatalf("expected the key left as it was, got:\n%s", second)
-	}
-	var public string
-	for _, line := range strings.Split(second, "\n") {
-		if rest, ok := strings.CutPrefix(line, "public key: "); ok {
-			public = rest
+	// With the key there, plain mw grist key prints it as it always did, and
+	// --create leaves it as it was.
+	for _, args := range [][]string{nil, {"--create"}} {
+		second, err := gristKeyAt(t, "laptop", "laptop", args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, _ := os.ReadFile(path)
+		if string(again) != string(wif) || strings.Contains(second, "Wrote a new") {
+			t.Fatalf("expected the key left as it was, got:\n%s", second)
+		}
+		var public string
+		for _, line := range strings.Split(second, "\n") {
+			if rest, ok := strings.CutPrefix(line, "public key: "); ok {
+				public = rest
+			}
+		}
+		if len(public) != 66 || !strings.Contains(second, "fingerprint: "+application.KeyFingerprint(public)) ||
+			!strings.Contains(second, "POSTERN_MILL_KEY="+public) {
+			t.Fatalf("expected the public key and its fingerprint, got:\n%s", second)
 		}
 	}
-	if len(public) != 66 || !strings.Contains(second, "fingerprint: "+application.KeyFingerprint(public)) ||
-		!strings.Contains(second, "POSTERN_MILL_KEY="+public) {
-		t.Fatalf("expected the public key and its fingerprint, got:\n%s", second)
+}
+
+// --create is refused, and writes nothing, on a host that is not home, and on
+// one whose home cannot be told, unless --force-host is given.
+func TestGristKeyCreateIsRefusedOffHomeUnlessForced(t *testing.T) {
+	for name, tc := range map[string]struct{ host, home string }{
+		"a host that is not home":  {"cloud1", "laptop"},
+		"a home that is not known": {"cloud1", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mwConfig(t, "host = \"cloud1\"\n")
+			path := millKeyPath(t)
+
+			out, err := gristKeyAt(t, tc.host, tc.home, "--create")
+			if err == nil || !strings.Contains(err.Error(), "--force-host") {
+				t.Fatalf("expected a refusal naming --force-host, got %v\n%s", err, out)
+			}
+			if _, err := os.Lstat(path); err == nil {
+				t.Fatalf("mw grist key --create made %s off home", path)
+			}
+
+			if out, err := gristKeyAt(t, tc.host, tc.home, "--create", "--force-host"); err != nil {
+				t.Fatalf("mw grist key --create --force-host: %v\n%s", err, out)
+			}
+			if _, err := os.Lstat(path); err != nil {
+				t.Fatalf("expected --force-host to make %s: %v", path, err)
+			}
+		})
 	}
 }
 
@@ -99,7 +169,7 @@ func TestGristKeyRefusesTheMayorsKeyFile(t *testing.T) {
 			}
 			t.Setenv("MW_GRIST_KEY_FILE", strings.ReplaceAll(tc.grist, "$HOME", home))
 
-			out, err := runGrist(t, "key")
+			out, err := gristKeyAt(t, "laptop", "laptop", "--create")
 			if err == nil || !strings.Contains(err.Error(), "Mayor's postern key") {
 				t.Fatalf("expected a refusal saying it is the Mayor's key, got %v\n%s", err, out)
 			}

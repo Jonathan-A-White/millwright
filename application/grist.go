@@ -432,12 +432,23 @@ func KeyFingerprint(pubKeyHex string) string {
 	return digits[0:4] + " " + digits[4:8] + " " + digits[8:12] + " " + digits[12:16]
 }
 
-// GristKey makes the mill key if there is none yet, and says its public
-// half and fingerprint: what the postern backend is told as
-// POSTERN_MILL_KEY. It never prints the private key.
+// GristKey says the mill key's public half and fingerprint: what the postern
+// backend is told as POSTERN_MILL_KEY. It never prints the private key. With
+// no key there it makes nothing and says so, unless Create is set, and then
+// only on the home host (or with ForceHost): a Boost that runs no mill must
+// not grow a key of its own by a look at it.
 type GristKey struct {
 	Keys PosternKeyFile
 	Out  io.Writer
+	// Create allows making the key when there is none.
+	Create bool
+	// ForceHost lets Create make the key on a host that is not home, or when the
+	// home cannot be told.
+	ForceHost bool
+	// Home is the vault's home file, and Host this host's name, for Create's
+	// check that this host is home.
+	Home HomeFile
+	Host string
 }
 
 // GristKeyReport is the mill key's public half, and whether this run made it.
@@ -458,8 +469,9 @@ func (r GristKeyReport) String() string {
 	return b.String()
 }
 
-// Run makes the key when there is none, then reports its public half.
-func (k GristKey) Run(_ context.Context) (GristKeyReport, error) {
+// Run reports the key's public half; with Create, and no key there, it makes
+// the key first.
+func (k GristKey) Run(ctx context.Context) (GristKeyReport, error) {
 	if k.Keys == nil {
 		return GristKeyReport{}, fmt.Errorf("mw grist key: no mill key file is configured")
 	}
@@ -469,6 +481,12 @@ func (k GristKey) Run(_ context.Context) (GristKeyReport, error) {
 		return report, err
 	}
 	if !exists {
+		if !k.Create {
+			return report, fmt.Errorf("mw grist key: there is no mill key at %s, and none was made; to make one, run `mw grist key --create` on the home host, where the mill runs", report.Path)
+		}
+		if err := k.homeOrForced(ctx); err != nil {
+			return report, err
+		}
 		if err := k.Keys.Generate(); err != nil {
 			return report, err
 		}
@@ -482,4 +500,23 @@ func (k GristKey) Run(_ context.Context) (GristKeyReport, error) {
 		fmt.Fprintln(k.Out, report.String())
 	}
 	return report, nil
+}
+
+// homeOrForced is nil when this host is home or ForceHost is set; otherwise the
+// reason the key is not made here.
+func (k GristKey) homeOrForced(ctx context.Context) error {
+	if k.ForceHost {
+		return nil
+	}
+	if k.Home == nil {
+		return fmt.Errorf("mw grist key: cannot tell whether this host is home; run it on the home host, or give --force-host")
+	}
+	record, err := WhereIsHome(ctx, k.Home)
+	if err != nil {
+		return fmt.Errorf("mw grist key: %w; make the key on the home host, or give --force-host", err)
+	}
+	if record.Host != k.Host {
+		return fmt.Errorf("mw grist key: this host (%s) is not home (%s is), and the mill runs on the home host; make the key there, or give --force-host", k.Host, record.Host)
+	}
+	return nil
 }
