@@ -175,6 +175,7 @@ scorer beside Azure's: tuning it against Azure is a later epic's work.
 ```sh
 contrib/scorer/test.sh          # everything, the three fixture clips included (needs the install)
 contrib/scorer/test.sh --pure   # the alignment and the HTTP face only, with any python3
+contrib/scorer/test.sh --gate-note  # runs nothing; says so when the full run cannot run here
 ```
 
 `fixtures/make.sh` remakes the four clips of "the cat sat on the mat" with
@@ -184,7 +185,9 @@ contrib/scorer/test.sh --pure   # the alignment and the HTTP face only, with any
 `not_reached`). The clip that found the bug was the Governor's own voice and is
 not in the repo: `test_align.py`'s `PartialReading` holds the phones the model
 heard of it instead, by hand. The mw gate never needs torch: `contrib/scorer_test.go` runs
-`test.sh --pure`, and the whole of `test.sh` only where the venv is installed.
+`test.sh --pure`, and the whole of `test.sh` only where the venv is installed; `make test` ends
+with `test.sh --gate-note`, which prints NOT RUN where it was skipped, so a gate that passed on
+`--pure` alone says so.
 `MW_SCORER_URL=http://127.0.0.1:8765 go test ./infrastructure/scorer/` scores
 `cap.wav` through mw's own client against the running unit.
 

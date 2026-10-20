@@ -28,8 +28,12 @@ build:
 	$(GO) build -o $(BIN) ./cmd/mw
 	CGO_ENABLED=0 $(GO) build -o $(HANDS_ROOT_BIN) ./cmd/mw-hands-root
 
+# The gate ends by saying, in its own output, when the scorer's full tests could
+# not run on this host (no venv, no espeak-ng): the Go test for them skips there
+# without a word (mw-gq6.644).
 test:
 	$(GO) test -tags $(TAGS) $(PKG)
+	contrib/scorer/test.sh --gate-note
 
 # go vet, then the code map check: docs/codemap.md must be under its size
 # limit, name only paths that exist, and leave out no port, use case or
