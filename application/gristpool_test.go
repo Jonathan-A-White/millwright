@@ -60,7 +60,7 @@ func TestAKindKeepsNoMoreWarmSessionsThanSlots(t *testing.T) {
 	warmer := &poolWarmer{}
 	pool := &GristPool{Warmer: warmer, Slots: 2, TempDir: t.TempDir(), Now: func() time.Time { return now }}
 	for range 3 {
-		pool.take(ctx, poolSpec)
+		pool.take(ctx, poolSpec, BillingSubscription)
 	}
 	view := pool.View()
 	if len(view.Kinds) != 1 || view.Kinds[0].Warm != 2 || view.Kinds[0].Busy != 3 {
@@ -91,7 +91,7 @@ func TestThePoolSavesItsBoardOnChangeAndHeartbeat(t *testing.T) {
 	ctx, now := context.Background(), roomNowFor(t)
 	board := &poolBoard{}
 	pool := &GristPool{Warmer: &poolWarmer{}, Slots: 2, TempDir: t.TempDir(), Board: board, Now: func() time.Time { return now }}
-	pool.take(ctx, poolSpec)
+	pool.take(ctx, poolSpec, BillingSubscription)
 	pool.ended(ctx, poolSpec)
 	if len(board.saved) != 2 {
 		t.Fatalf("expected the board saved at the take and at the end, got %d", len(board.saved))
@@ -142,14 +142,14 @@ func TestAWarmSessionThatCannotStartIsNotRetriedEachTick(t *testing.T) {
 	ctx, now := context.Background(), roomNowFor(t)
 	warmer := &failingWarmer{}
 	pool := &GristPool{Warmer: warmer, Slots: 2, TempDir: t.TempDir(), Now: func() time.Time { return now }}
-	pool.take(ctx, poolSpec)
+	pool.take(ctx, poolSpec, BillingSubscription)
 	for range 5 {
 		pool.Tick(ctx)
 	}
 	if warmer.tries != 1 {
 		t.Fatalf("expected one try, got %d", warmer.tries)
 	}
-	pool.take(ctx, poolSpec)
+	pool.take(ctx, poolSpec, BillingSubscription)
 	if warmer.tries != 2 {
 		t.Fatalf("expected one more try at the next grist, got %d", warmer.tries)
 	}

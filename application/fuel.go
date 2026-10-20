@@ -85,6 +85,10 @@ type SessionResult struct {
 	// StopReason is why the model stopped, when the harness says:
 	// `refusal` is the model declining the work.
 	StopReason string
+	// ErrorsText is the harness's `errors` as it printed them (a list of
+	// messages, or of objects), whole, for a reader that looks in them for a
+	// phrase; empty when it printed none.
+	ErrorsText string
 }
 
 // Finished reports whether the session got where it was going. Anything else —
@@ -196,6 +200,7 @@ type resultFile struct {
 	IsError        bool              `json:"is_error"`
 	Result         string            `json:"result"`
 	Error          string            `json:"error"`
+	Errors         json.RawMessage   `json:"errors"`
 	Content        string            `json:"content"`
 	TerminalReason string            `json:"terminal_reason"`
 	SessionID      string            `json:"session_id"`
@@ -297,6 +302,9 @@ func ReadSessionResult(printed string) (SessionResult, error) {
 	}
 	if answer := strings.TrimSpace(string(file.Structured)); answer != "" && answer != "null" {
 		result.Answer = json.RawMessage(answer)
+	}
+	if errs := strings.TrimSpace(string(file.Errors)); errs != "" && errs != "null" && errs != "[]" {
+		result.ErrorsText = errs
 	}
 	switch {
 	case file.TotalCostUSD != nil:

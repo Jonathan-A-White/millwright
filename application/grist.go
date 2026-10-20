@@ -272,6 +272,9 @@ type GrindCall struct {
 	Timeout time.Duration
 	// MaxTurns is the most turns the session may take; 0 sets no limit.
 	MaxTurns int
+	// APIKey is the Anthropic API key the session is billed to, given to the
+	// harness in its environment alone; empty bills the subscription login.
+	APIKey string
 }
 
 // GrindSource reads an app's grinds from its rig's checkout on this host, at
@@ -362,6 +365,10 @@ type GrindLine struct {
 	// when the result named none, and on lines written before it was kept.
 	ModelID string `json:"model_id,omitempty"`
 	Effort  string `json:"effort,omitempty"`
+	// Billing is what the grind was billed to: "api" (the key of [grist]
+	// api_credits) or "subscription". A line written before it was kept says
+	// nothing; a grist that ran no grind says "subscription".
+	Billing string `json:"billing"`
 	// ModelFrom and EffortFrom say where Model and Effort came from: "grist"
 	// when the sender asked for them, "grind file" otherwise.
 	ModelFrom  string `json:"model_from,omitempty"`

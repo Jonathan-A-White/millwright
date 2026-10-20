@@ -107,6 +107,10 @@ type GristPool struct {
 	// TempDir is where each warm session's private directory is made; empty
 	// is the system's.
 	TempDir string
+	// Credits, when set, decides what each warm session is started on, and the
+	// pool retires the ones started on the key when the key is spent. Nil
+	// starts every session on the subscription.
+	Credits *GristCredits
 	// Board, when set, is told what the pool holds whenever that changes, and
 	// at least every GristPoolHeartbeat while the pool is ticked.
 	Board GristPoolBoard
@@ -153,6 +157,9 @@ type gristWarm struct {
 	spec    gristWarmSpec
 	dir     string
 	started time.Time
+	// billing is what the session was started on: BillingAPI when its
+	// environment carries the key.
+	billing string
 }
 
 // gristWarmSpec is everything a grind's session is started with but its
@@ -189,12 +196,22 @@ func (p *GristPool) Configure(slots int, quiet, maxAge time.Duration) {
 	p.Slots, p.Quiet, p.MaxAge = slots, quiet, maxAge
 }
 
+// UseCredits sets what the pool starts its sessions on, as config [grist] says
+// it now; warm sessions started on another billing are retired by the next
+// grist or tick.
+func (p *GristPool) UseCredits(c *GristCredits) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Credits = c
+}
+
 // take is a warm session for a grist ground with spec, or nil when the pool
 // has none: the grist then starts its own, cold. Either way the grist counts
 // as the kind's demand and as busy until ended, and the pool starts what the
 // kind now wants. Warm sessions of the kind started for another spec (its
-// grind changed) are retired unused. A nil pool takes nothing.
-func (p *GristPool) take(ctx context.Context, spec gristWarmSpec) *gristWarm {
+// grind changed), or on another billing than billing (the key was spent since),
+// are retired unused. A nil pool takes nothing.
+func (p *GristPool) take(ctx context.Context, spec gristWarmSpec, billing string) *gristWarm {
 	if p == nil || p.Warmer == nil {
 		return nil
 	}
@@ -217,7 +234,7 @@ func (p *GristPool) take(ctx context.Context, spec gristWarmSpec) *gristWarm {
 	kept := k.idle[:0]
 	for _, w := range k.idle {
 		switch {
-		case w.spec != spec || w.session.Exited() || p.aged(w, now):
+		case w.spec != spec || w.billing != billing || w.session.Exited() || p.aged(w, now):
 			p.retire(w)
 		case taken == nil:
 			taken = w
@@ -227,7 +244,7 @@ func (p *GristPool) take(ctx context.Context, spec gristWarmSpec) *gristWarm {
 	}
 	clear(k.idle[len(kept):])
 	k.idle = kept
-	p.fill(k, now)
+	p.fill(ctx, k, now)
 	p.save(ctx, now, false)
 	return taken
 }
@@ -256,6 +273,10 @@ func (p *GristPool) Tick(ctx context.Context) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := p.now()
+	billing := BillingSubscription
+	if len(p.kinds) > 0 {
+		billing = p.Credits.Choose(ctx).Billing
+	}
 	for key, k := range p.kinds {
 		want := p.want(k, now)
 		kept := k.idle[:0]
@@ -264,7 +285,7 @@ func (p *GristPool) Tick(ctx context.Context) {
 			case w.session.Exited():
 				k.failed = true
 				p.retire(w)
-			case p.aged(w, now) || len(kept) >= want:
+			case p.aged(w, now) || len(kept) >= want || w.billing != billing:
 				p.retire(w)
 			default:
 				kept = append(kept, w)
@@ -272,12 +293,38 @@ func (p *GristPool) Tick(ctx context.Context) {
 		}
 		clear(k.idle[len(kept):])
 		k.idle = kept
-		p.fill(k, now)
+		p.fill(ctx, k, now)
 		if len(k.idle) == 0 && k.busy == 0 && len(k.demand) == 0 {
 			delete(p.kinds, key)
 		}
 	}
 	p.save(ctx, now, true)
+}
+
+// RetireKeyed retires every warm session started on the API key, as when the
+// key is found spent, and starts their replacements on what the credits now
+// choose. A nil pool does nothing.
+func (p *GristPool) RetireKeyed(ctx context.Context) {
+	if p == nil || p.Warmer == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := p.now()
+	for _, k := range p.kinds {
+		kept := k.idle[:0]
+		for _, w := range k.idle {
+			if w.billing == BillingAPI {
+				p.retire(w)
+				continue
+			}
+			kept = append(kept, w)
+		}
+		clear(k.idle[len(kept):])
+		k.idle = kept
+		p.fill(ctx, k, now)
+	}
+	p.save(ctx, now, false)
 }
 
 // Close retires every warm session, as when the follower stops or this host
@@ -344,9 +391,9 @@ func (p *GristPool) want(k *gristPoolKind, now time.Time) int {
 
 // fill starts warm sessions for k until it holds what it wants, stopping at
 // the first that cannot start. p.mu is held.
-func (p *GristPool) fill(k *gristPoolKind, now time.Time) {
+func (p *GristPool) fill(ctx context.Context, k *gristPoolKind, now time.Time) {
 	for !k.failed && len(k.idle) < p.want(k, now) {
-		w, err := p.start(k.spec, now)
+		w, err := p.start(ctx, k.spec, now)
 		if err != nil {
 			k.failed = true
 			p.say(fmt.Sprintf("mw grist pool: a warm session for %s %s could not start, so its grist starts cold: %v", k.spec.app, k.spec.kind, err))
@@ -356,8 +403,9 @@ func (p *GristPool) fill(k *gristPoolKind, now time.Time) {
 	}
 }
 
-// start starts one warm session for spec in a private directory of its own.
-func (p *GristPool) start(spec gristWarmSpec, now time.Time) (*gristWarm, error) {
+// start starts one warm session for spec in a private directory of its own,
+// on the API key when the credits choose it.
+func (p *GristPool) start(ctx context.Context, spec gristWarmSpec, now time.Time) (*gristWarm, error) {
 	dir, err := os.MkdirTemp(p.TempDir, "mw-grist-")
 	if err != nil {
 		return nil, err
@@ -365,12 +413,15 @@ func (p *GristPool) start(spec gristWarmSpec, now time.Time) (*gristWarm, error)
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
-	session, err := p.Warmer.Warm(spec.call(dir))
+	billing := p.Credits.Choose(ctx)
+	call := spec.call(dir)
+	call.APIKey = billing.Key()
+	session, err := p.Warmer.Warm(call)
 	if err != nil {
 		os.RemoveAll(dir)
 		return nil, err
 	}
-	return &gristWarm{session: session, spec: spec, dir: dir, started: now}, nil
+	return &gristWarm{session: session, spec: spec, dir: dir, started: now, billing: billing.Billing}, nil
 }
 
 // retire ends a warm session never given a grist, and removes its directory.

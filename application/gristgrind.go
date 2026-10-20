@@ -2,6 +2,7 @@ package application
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -137,6 +138,10 @@ type GristGrind struct {
 	// the follower's, kept from one pass to the next. Nil starts every
 	// session cold, as mw grist grind and the dispatch tick do.
 	Pool *GristPool
+	// Credits, when set, decides what each grind is billed to: the Anthropic
+	// API key while it has credit, else the subscription. Nil bills the
+	// subscription.
+	Credits *GristCredits
 
 	// TempDir is where each grind's private directory is made; empty is
 	// the system's.
@@ -280,6 +285,9 @@ type gristWork struct {
 	slotAsked time.Time
 	slotted   bool
 	harnessOK bool
+	// billing is what the grind was billed to ("api" or "subscription"); empty
+	// when no grind ran.
+	billing string
 }
 
 // harnessPhases is the harness run's start-up and model seconds. The harness
@@ -964,7 +972,11 @@ func (g GristGrind) slot(ctx context.Context, held []func()) (int, func(), strin
 // for it, and is removed however the grind ends.
 func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) {
 	spec := w.warmSpec(g.Ceilings.filled().Timeout)
-	warm := g.Pool.take(ctx, spec)
+	billing := g.Credits.Choose(ctx)
+	if billing.Note != "" {
+		w.notes = append(w.notes, billing.Note)
+	}
+	warm := g.Pool.take(ctx, spec, billing.Billing)
 	defer g.Pool.ended(ctx, spec)
 	dir := ""
 	if warm != nil {
@@ -994,8 +1006,12 @@ func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) 
 	w.input = plain.Input
 	call := spec.call(dir)
 	call.Prompt = gristPrompt(plain, photos, gristTag())
+	call.APIKey, w.billing = billing.Key(), billing.Billing
 	w.harnessStarted = g.now()
 	result, err := g.harness(ctx, w, warm, call)
+	if w.billing == BillingAPI {
+		result, err = g.billed(ctx, w, call, billing, result, err)
+	}
 	w.answered = g.now()
 	w.result = result
 	w.harnessOK = err == nil
@@ -1005,6 +1021,36 @@ func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) 
 	}
 	w.settle(status, reason)
 	g.keepRun(ctx, w)
+}
+
+// billed settles a grind that was billed to the API key. A grind the key's
+// credit or the key itself failed (CreditFailureOf) writes the spent mark,
+// retires the warm sessions started on the key and runs the same grist again at
+// once on the subscription: the grist is one line of the record, so it counts
+// once against the day. A grind that got through on a key tried again after the
+// mark clears the mark.
+func (g GristGrind) billed(ctx context.Context, w *gristWork, call GrindCall, billing GristBilling, result SessionResult, err error) (SessionResult, error) {
+	why := CreditFailureOf(result, err)
+	if why == "" {
+		if billing.Retry && err == nil && result.Finished() {
+			if clearErr := g.Credits.Succeeded(ctx); clearErr != nil {
+				w.notes = append(w.notes, fmt.Sprintf("the spent mark could not be cleared: %v", clearErr))
+			}
+		}
+		return result, err
+	}
+	said := result.Said
+	if err != nil {
+		said = err.Error()
+	}
+	if _, spendErr := g.Credits.Spend(ctx, why, said); spendErr != nil {
+		w.notes = append(w.notes, spendErr.Error())
+	}
+	g.Pool.RetireKeyed(ctx)
+	w.notes = append(w.notes, fmt.Sprintf("the API key was not used for %s (%s), so it ran again on the subscription", shortTxid(w.record.Txid), why))
+	call.APIKey, w.billing = "", BillingSubscription
+	w.harnessStarted = g.now()
+	return g.Grinder.Grind(ctx, call)
 }
 
 // warmSpec is the session w's grind is started with, but for its directory
@@ -1255,7 +1301,8 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	line := GrindLine{
 		Time: now.UTC(), Txid: w.record.Txid, App: name.App, Kind: name.Kind, V: name.V,
 		Sender: w.sender, Model: w.model, ModelID: w.result.ModelID, Effort: w.effort, ModelFrom: w.modelFrom, EffortFrom: w.effortFrom,
-		Status: w.status, Reason: w.reason, Photos: len(w.plain.Attachments),
+		Billing: cmp.Or(w.billing, BillingSubscription),
+		Status:  w.status, Reason: w.reason, Photos: len(w.plain.Attachments),
 		Tokens: w.result.Fuel.Total(), CostUSD: w.result.CostUSD, Turns: w.result.Turns,
 		Denials: w.result.Denials, Seconds: now.Sub(w.started).Seconds(), Commit: w.commit,
 		Delivered: delivered,

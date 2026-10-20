@@ -184,6 +184,7 @@ func gristSpringJob(host string, out io.Writer) (application.SpringJob, bool, er
 		// pool_quiet = "0s" keeps no warm pool.
 		if settings, err := config.Grist(); err == nil && settings.PoolQuiet > 0 {
 			pool.Configure(settings.Concurrency, settings.PoolQuiet, settings.PoolMaxAge)
+			pool.UseCredits(mill.Credits)
 			mill.Pool = pool
 		} else {
 			pool.Close()

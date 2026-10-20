@@ -1749,6 +1749,29 @@ func TestGristPersonCapIsOnUnlessTheTableSaysFalse(t *testing.T) {
 	}
 }
 
+// api_credits is off, and api_key_file is ~/.config/mw/anthropic-api.key, unless
+// the table says otherwise (mw-5k4qcj.1).
+func TestGristAPICreditsAreOffUnlessTheTableSaysTrue(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	got, err := config.Grist()
+	home, _ := os.UserHomeDir()
+	if err != nil || got.APICredits || got.APIKeyFile != filepath.Join(home, ".config", "mw", "anthropic-api.key") {
+		t.Fatalf("expected api_credits off and the default key file, got %+v %v", got, err)
+	}
+	writeConfig(t, "[grist]\napi_credits = true\napi_key_file = \"~/keys/a.key\"\n")
+	home, _ = os.UserHomeDir()
+	got, err = config.Grist()
+	if err != nil || !got.APICredits || got.APIKeyFile != filepath.Join(home, "keys", "a.key") {
+		t.Fatalf("expected api_credits on and the table's key file, got %+v %v", got, err)
+	}
+	for _, bad := range []string{"api_credits = maybe", `api_key_file = "a.key"`} {
+		writeConfig(t, "[grist]\n"+bad+"\n")
+		if _, err := config.Grist(); err == nil || !strings.Contains(err.Error(), "api_") {
+			t.Errorf("expected %q refused, naming the key, got %v", bad, err)
+		}
+	}
+}
+
 func TestGristCeilingsThatAreNotNumbersAreRefused(t *testing.T) {
 	for _, bad := range []string{"daily_limit = 0", "concurrency = 0", "concurrency = two", "max_attachments = four", `timeout = "soon"`,
 		`pool_quiet = "-1m"`, `pool_quiet = "soon"`, `pool_max_age = "0s"`} {

@@ -1234,3 +1234,65 @@ func TestACloseOutWithNoLogPathIsNotTeed(t *testing.T) {
 		t.Errorf("expected no tee without a log path, got %q", line)
 	}
 }
+
+// The mill's API key is the mill's alone (mw-5k4qcj.1): with [grist] api_credits
+// on and a key file in the home, a Builder's session, run from its assembled
+// line, and a seat's window have no ANTHROPIC_API_KEY, and the key is in no
+// part of either command.
+func TestNoBuilderOrSeatIsGivenTheMillsAPIKeyEvenWithTheSwitchOn(t *testing.T) {
+	const secret = "sk-ant-the-mills-own-key"
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".config", "mw"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".config", "mw", "config.toml"), []byte("[grist]\napi_credits = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".config", "mw", "anthropic-api.key"), []byte(secret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv(APIKeyEnv, "")
+	os.Unsetenv(APIKeyEnv)
+
+	dir := t.TempDir()
+	out := filepath.Join(dir, "env")
+	harness := filepath.Join(dir, "claude")
+	writeScript(t, harness, "env > "+out+"\n")
+	spec, err := New(WithProgram(harness)).Session(launch(func(l *application.Launch) {
+		l.ResultFile = filepath.Join(dir, "result.json")
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, set := spec.Env[APIKeyEnv]; set {
+		t.Errorf("expected no %s in the Builder's environment, got %+v", APIKeyEnv, spec.Env)
+	}
+	cmd := exec.Command(spec.Command[0], spec.Command[1:]...)
+	cmd.Dir = dir
+	cmd.Env = os.Environ()
+	for name, value := range spec.Env {
+		cmd.Env = append(cmd.Env, name+"="+value)
+	}
+	if said, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("running the Builder's line: %v\n%s", err, said)
+	}
+	printed, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("the Builder's harness printed nothing: %v", err)
+	}
+	if strings.Contains(string(printed), APIKeyEnv) || strings.Contains(string(printed), secret) {
+		t.Errorf("expected the Builder's harness to have no %s, it ran with:\n%s", APIKeyEnv, printed)
+	}
+	if strings.Contains(strings.Join(spec.Command, " "), secret) {
+		t.Errorf("expected the key out of the Builder's command, got %q", spec.Command)
+	}
+
+	window, err := New().SeatSession(application.SeatLaunch{Seat: "mayor", Name: "mayor", Dir: dir, Charter: filepath.Join(dir, "charter.md"), Kickoff: "boot"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, set := window.Env[APIKeyEnv]; set || strings.Contains(strings.Join(window.Command, " "), secret) {
+		t.Errorf("expected no key in the seat's window, got %+v %q", window.Env, window.Command)
+	}
+}
