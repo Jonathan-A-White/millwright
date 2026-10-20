@@ -2,11 +2,14 @@ package rig_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 )
 
@@ -164,5 +167,44 @@ func TestGrindsListTheFilesUnderADirectoryAtACommit(t *testing.T) {
 	}
 	if none, err := grinds.List(ctx, here, commit, "nothing"); err != nil || len(none) != 0 {
 		t.Fatalf("expected none under a directory that is not there, got %q %v", none, err)
+	}
+}
+
+// hangingGit is a stand-in for git whose every command hangs, as a fetch does
+// against a remote that never answers (GitHub down, mw-gq6.647).
+func hangingGit(t *testing.T) string {
+	t.Helper()
+	program := filepath.Join(t.TempDir(), "git")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\nexec sleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return program
+}
+
+// A refresh whose fetch hangs is killed at its limit and comes back as a
+// timed-out refresh, so the grind goes on from the local commit.
+func TestAHungFetchIsKilledAtTheRefreshLimitAndCountsAsTimedOut(t *testing.T) {
+	grinds := rig.NewGrinds(rig.WithProgram(hangingGit(t)), rig.WithRefreshLimit(300*time.Millisecond))
+	started := time.Now()
+	done := make(chan error, 1)
+	go func() { done <- grinds.Refresh(context.Background(), t.TempDir()) }()
+	select {
+	case err := <-done:
+		if took := time.Since(started); took > 300*time.Millisecond+time.Second {
+			t.Errorf("expected the refresh back within the limit plus a second, it took %v", took)
+		}
+		if !errors.Is(err, application.ErrGrindRefreshTimedOut) {
+			t.Fatalf("expected a timed-out refresh, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the refresh was still hanging after 5 seconds: its fetch has no time limit")
+	}
+}
+
+// The limit the mill uses unless told otherwise is a named constant of 20
+// seconds or less.
+func TestTheRefreshLimitIsTwentySecondsOrLess(t *testing.T) {
+	if rig.GrindRefreshLimit <= 0 || rig.GrindRefreshLimit > 20*time.Second {
+		t.Fatalf("expected a limit of 20 s or less, got %v", rig.GrindRefreshLimit)
 	}
 }

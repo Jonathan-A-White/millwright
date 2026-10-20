@@ -109,6 +109,12 @@ Feature: mw grist grind takes a recording, scores it, and keeps every grind's ra
     Then the run's timing.json has when the grist was sent, so the queue wait, and the seconds of "local" and "azure"
     And the run's timing.json has queued_s and run_s, the seconds it waited and the seconds it ran (mw-t0z3fu.4)
 
+  Scenario: A run's timing.json names a refresh that timed out
+    Given the fetch of "cairn" runs past its time limit
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    When the mill grinds
+    Then the run's timing.json says the refresh timed out
+
   Scenario: A grind that fails is kept too
     Given the grind's session ends in an error
     And the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording

@@ -115,6 +115,10 @@ type GristRunTiming struct {
 	// written leave both out; EndToEnd reads them from the times.
 	QueuedSeconds *float64 `json:"queued_s,omitempty"`
 	RunSeconds    float64  `json:"run_s"`
+	// RefreshTimedOut is set when the fetch that brings the app's checkout level
+	// with the remote ran past its limit before this grind, so the grind was
+	// read from the checkout's local commit (mw-gq6.647).
+	RefreshTimedOut bool `json:"refresh_timed_out,omitempty"`
 }
 
 // withWaits fills QueuedSeconds and RunSeconds from the times already in t.

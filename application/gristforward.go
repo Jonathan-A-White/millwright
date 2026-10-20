@@ -222,6 +222,7 @@ func (g GristGrind) keepForwardRun(ctx context.Context, w *gristWork) {
 			Seconds: w.answered.Sub(w.received).Seconds(),
 		}.withWaits(),
 	}
+	run.Timing.RefreshTimedOut = w.refreshTimedOut
 	if err := g.Runs.Keep(ctx, run); err != nil {
 		w.notes = append(w.notes, fmt.Sprintf("the record of the run of %s could not be kept: %v", shortTxid(w.record.Txid), err))
 	}

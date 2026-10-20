@@ -3,6 +3,8 @@ package application_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,5 +53,33 @@ func TestAFailedFetchIsReportedAndNotRetriedWithinAMinute(t *testing.T) {
 	}
 	if got := grinds.Refreshes("/rigs/cairn"); got != 1 {
 		t.Fatalf("expected one try, got %d", got)
+	}
+}
+
+// Three grists queued behind a fetch that timed out do not fetch again: the
+// one slow fetch costs one limit, not one per grist (mw-gq6.647).
+func TestGristsBehindATimedOutFetchDoNotFetchAgain(t *testing.T) {
+	clock := time.Date(2026, 10, 20, 16, 20, 0, 0, time.UTC)
+	grinds := apptest.NewFakeGrinds()
+	grinds.RefreshErr = fmt.Errorf("fetching main: %w", application.ErrGrindRefreshTimedOut)
+	refreshes := &application.GrindRefreshes{Every: application.GrindRefreshEvery, Now: func() time.Time { return clock }}
+
+	var wg sync.WaitGroup
+	errs := make([]error, 3)
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = refreshes.Refresh(context.Background(), grinds, "/rigs/lampas")
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if !errors.Is(err, application.ErrGrindRefreshTimedOut) {
+			t.Errorf("grist %d: expected the timed-out refresh, got %v", i, err)
+		}
+	}
+	if got := grinds.Refreshes("/rigs/lampas"); got != 1 {
+		t.Fatalf("expected one fetch for three grists, got %d", got)
 	}
 }

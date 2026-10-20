@@ -141,6 +141,7 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the app "([^"]*)" is checked out here, its main at commit "([^"]*)" with the grind "([^"]*)"$`, c.theAppIsCheckedOut)
 	ctx.Given(`^the remote's main for "([^"]*)" is at commit "([^"]*)" with the grind "([^"]*)" taking version "([^"]*)"$`, c.theRemoteHasAGrind)
 	ctx.Given(`^the remote of "([^"]*)" cannot be reached$`, c.theRemoteCannotBeReached)
+	ctx.Given(`^the fetch of "([^"]*)" runs past its time limit$`, c.theFetchTimesOut)
 	ctx.Given(`^a phone whose licence opens "([^"]*)"$`, c.aPhoneWhoseLicenceOpens)
 	ctx.Given(`^the phone sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", with (\d+) photos?$`, c.thePhoneSends)
 	ctx.Given(`^the Governor's key sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", with (\d+) photos?$`, c.theGovernorSends)
@@ -273,6 +274,11 @@ func (c *gristContext) theRemoteHasAGrind(app, commit, kind, v string) error {
 
 func (c *gristContext) theRemoteCannotBeReached(app string) error {
 	c.grinds.RefreshErr = fmt.Errorf("could not resolve host: the remote of %s", app)
+	return nil
+}
+
+func (c *gristContext) theFetchTimesOut(app string) error {
+	c.grinds.RefreshErr = fmt.Errorf("fetching main in %s: %w", c.checkout(app), application.ErrGrindRefreshTimedOut)
 	return nil
 }
 

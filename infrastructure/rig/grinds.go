@@ -18,6 +18,11 @@ import (
 // Commit reads the remote's main instead whenever it is ahead of this one.
 const GrindBranch = "refs/heads/main"
 
+// GrindRefreshLimit is the longest the mill lets one refresh of a checkout's
+// main run, the fetch and its retries together: a remote that cannot answer
+// (GitHub down) must not hold every grist behind it for minutes (mw-gq6.647).
+const GrindRefreshLimit = 15 * time.Second
+
 // Grinds reads an app's grinds from its rig's checkout by asking git: the
 // adapter behind application.GrindSource. It reads the object store only,
 // never the working tree, so whatever is half-done in the checkout is never
@@ -26,6 +31,7 @@ type Grinds struct {
 	program  string
 	remote   string
 	raceWait time.Duration
+	limit    time.Duration
 }
 
 // Grinds satisfies the port.
@@ -34,7 +40,7 @@ var _ application.GrindSource = (*Grinds)(nil)
 // NewGrinds is a grind source that runs git as this host has it.
 func NewGrinds(opts ...Option) *Grinds {
 	w := New(opts...)
-	return &Grinds{program: w.program, remote: w.remote, raceWait: w.raceWait}
+	return &Grinds{program: w.program, remote: w.remote, raceWait: w.raceWait, limit: w.refreshLimit}
 }
 
 // Refresh implements application.GrindSource: it fetches the remote's main
@@ -42,8 +48,24 @@ func NewGrinds(opts ...Option) *Grinds {
 // ref's lock to another git process in the checkout, a close-out's fetch most
 // often, is tried again here RaceRetries times, a growing short wait apart:
 // the mill has nobody else to try it again, and keeps a failed refresh for a
-// while (mw-gq6.439). Any other failure comes back at once.
+// while (mw-gq6.439). Any other failure comes back at once. The whole refresh
+// is held to GrindRefreshLimit: a fetch that runs past it is killed and comes
+// back wrapping application.ErrGrindRefreshTimedOut (mw-gq6.647).
 func (g *Grinds) Refresh(ctx context.Context, checkout string) error {
+	parent := ctx
+	if g.limit > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, g.limit)
+		defer cancel()
+	}
+	err := g.refresh(ctx, checkout)
+	if err != nil && parent.Err() == nil && ctx.Err() != nil {
+		return fmt.Errorf("%w: %w after %v", err, application.ErrGrindRefreshTimedOut, g.limit)
+	}
+	return err
+}
+
+func (g *Grinds) refresh(ctx context.Context, checkout string) error {
 	for retry := 0; ; retry++ {
 		_, err := g.git(ctx, checkout, "fetch", "--quiet", g.remote, "main")
 		if err == nil {

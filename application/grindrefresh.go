@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -9,6 +10,11 @@ import (
 // GrindRefreshEvery is how often the mill asks a rig's remote for its main:
 // at most once a minute per rig, however many grists come.
 const GrindRefreshEvery = time.Minute
+
+// ErrGrindRefreshTimedOut is what a GrindSource's Refresh wraps when its fetch
+// ran past its time limit and was killed, so the mill can tell a remote too
+// slow to answer from one that refused (mw-gq6.647).
+var ErrGrindRefreshTimedOut = errors.New("the refresh ran past its time limit")
 
 // GrindRefreshes remembers when each rig's checkout was last refreshed, and
 // what came of it, so that grists arriving together fetch once.

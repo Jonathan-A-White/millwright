@@ -236,6 +236,8 @@ type gristWork struct {
 	clientTiming *GristClientTiming
 	grind        GrindFile
 	commit       string
+	// refreshTimedOut is set when the fetch before this grind ran past its limit.
+	refreshTimedOut bool
 	// model and effort are what the grind runs on: the grist's own when it
 	// asks, else the grind file's; modelFrom and effortFrom say which.
 	model, effort         string
@@ -623,6 +625,7 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 	// this checkout's: bring them level, and grind with what the checkout has
 	// if the remote cannot be reached.
 	if err := g.refresh(ctx, checkout); err != nil {
+		w.refreshTimedOut = errors.Is(err, ErrGrindRefreshTimedOut)
 		w.notes = append(w.notes, fmt.Sprintf("%s could not be brought level with the remote, so the grind is read from its local commit: %v", checkout, err))
 	}
 	if w.commit, err = g.Grinds.Commit(ctx, checkout); err != nil {

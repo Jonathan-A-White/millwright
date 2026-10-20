@@ -34,10 +34,12 @@ const (
 // Worktrees makes and removes the worktrees of the rigs this host has checked
 // out. It holds no state: every call names the rig it works in.
 type Worktrees struct {
-	program     string
-	remote      string
-	raceWait    time.Duration
-	mergeScript string
+	program  string
+	remote   string
+	raceWait time.Duration
+	// refreshLimit is the longest a grind refresh's fetch may run (mw-gq6.647).
+	refreshLimit time.Duration
+	mergeScript  string
 }
 
 // Worktrees satisfies the port.
@@ -68,6 +70,13 @@ func WithRaceWait(d time.Duration) Option {
 	return func(w *Worktrees) { w.raceWait = d }
 }
 
+// WithRefreshLimit sets how long a grind refresh may run before its fetch is
+// killed and counted as failed; a test gives a short one so as never to wait
+// GrindRefreshLimit.
+func WithRefreshLimit(d time.Duration) Option {
+	return func(w *Worktrees) { w.refreshLimit = d }
+}
+
 // WithMergeScript replaces the trim-safe merge driver mw carries
 // (millwright.TrimMergeScript) on every merge and rebase: for a test that needs
 // a driver that fails.
@@ -77,7 +86,7 @@ func WithMergeScript(script string) Option {
 
 // New returns a Worktrees that runs git as this host has it.
 func New(opts ...Option) *Worktrees {
-	w := &Worktrees{program: Program, remote: DefaultRemote, raceWait: DefaultRaceWait}
+	w := &Worktrees{program: Program, remote: DefaultRemote, raceWait: DefaultRaceWait, refreshLimit: GrindRefreshLimit}
 	for _, opt := range opts {
 		opt(w)
 	}

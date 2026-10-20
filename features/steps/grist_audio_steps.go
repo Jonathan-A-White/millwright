@@ -134,6 +134,7 @@ func registerGristAudio(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Then(`^the run's answer\.json says "([^"]*)"$`, a.runAnswerSays)
 	ctx.Then(`^the run's timing\.json has when it was received, scored, started and answered, and how many seconds each took$`, a.runTimingHas)
 	ctx.Then(`^the run's timing\.json has when the grist was sent, so the queue wait, and the seconds of "([^"]*)" and "([^"]*)"$`, a.runTimingHasSentAndScorers)
+	ctx.Then(`^the run's timing\.json says the refresh timed out$`, a.runTimingSaysRefreshTimedOut)
 	ctx.Then(`^the run's timing\.json has queued_s and run_s, the seconds it waited and the seconds it ran \(mw-t0z3fu\.4\)$`, a.runTimingHasQueuedAndRun)
 	ctx.Then(`^the list has one line for the grist with its kind "([^"]*)", its model "([^"]*)", more than 0 seconds, and "([^"]*)"$`, a.listHasOne)
 	ctx.Then(`^the list has no lines$`, a.listHasNone)
@@ -722,6 +723,21 @@ func (a *audioContext) runTimingHasSentAndScorers(first, second string) error {
 		if timing.Scorers[engine] <= 0 {
 			return fmt.Errorf("expected seconds for the scorer %s in timing.json, got %s", engine, raw)
 		}
+	}
+	return nil
+}
+
+func (a *audioContext) runTimingSaysRefreshTimedOut() error {
+	raw, err := a.runFile("timing.json")
+	if err != nil {
+		return err
+	}
+	var timing application.GristRunTiming
+	if err := json.Unmarshal(raw, &timing); err != nil {
+		return err
+	}
+	if !timing.RefreshTimedOut {
+		return fmt.Errorf("expected refresh_timed_out in timing.json, got %s", raw)
 	}
 	return nil
 }
