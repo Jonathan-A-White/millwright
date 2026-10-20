@@ -193,6 +193,7 @@ type talkWaitContext struct {
 	memory      *apptest.FakeTracker
 	mailbox     *apptest.FakeMailbox
 	limit       time.Duration
+	partsWait   time.Duration
 
 	run       *talkWaitRun
 	lastEvent time.Time
@@ -337,6 +338,16 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 		c.limit = time.Duration(ms) * time.Millisecond
 		return nil
 	})
+	ctx.Given(`^mw talk wait waits (\d+) milliseconds for the rest of a turn sent in parts$`, func(ms int) error {
+		c.partsWait = time.Duration(ms) * time.Millisecond
+		return nil
+	})
+	ctx.When(`^part (\d+) of (\d+) of the Governor's turn (\d+) of talk "([^"]*)" saying "([^"]*)" is indexed$`,
+		func(part, parts, turn int, id, text string) error {
+			plain := map[string]any{"talk": map[string]any{"id": id, "turn": turn}, "text": text, "role": "turn", "part": part, "parts": parts}
+			raw, _ := json.Marshal(plain)
+			return c.record("talk", c.mayor, c.governorKey, string(raw), true)
+		})
 	ctx.Given(`^mw talk wait's cursor is at the start of the index$`, func() error {
 		return c.memory.SetNote(context.Background(), application.TalkWaitCursorKey, "0")
 	})
@@ -573,6 +584,7 @@ func (c *talkWaitContext) arm() error {
 		GovernorKey:   c.governorKey,
 		AttachmentDir: c.inboxDir(),
 		Limit:         c.limit,
+		PartsWait:     c.partsWait,
 		MinBackoff:    5 * time.Millisecond,
 		MaxBackoff:    20 * time.Millisecond,
 		Out:           &run.out,

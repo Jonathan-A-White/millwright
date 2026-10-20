@@ -4174,6 +4174,14 @@ A talk the Governor opened from a card, a thread or a prompt carries an `about`
 field, and the wait prints it after the text line as `about: bead mw-xxx <title>`
 (no such line when the record has none), so the first answer is about the right thing.
 
+A turn over what one record holds (7000 bytes of text) is sent in parts: each is
+a record of the same talk and turn with `part` (k, from 1) and `parts` (n) beside
+the text. The wait holds for every part (up to 60 seconds after the first;
+`PartsWait`), joins the texts in order with no separator, and prints and saves
+the whole as one turn; `mw talk show` joins them the same way. A part that did
+not come in time is said, under the text, as `missing part 3 of 3`, and what
+came is printed. A turn with no part fields is as it always was.
+
 It also ends when a new postern message for the Mayor's key arrives, so the
 Governor's words in a channel are not left unread while a talk runs. A message
 is new when it is past the postern inbox's cursor (read, in the wait's own

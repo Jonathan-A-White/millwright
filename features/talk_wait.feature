@@ -83,6 +83,28 @@ Feature: mw talk wait
     And the wait printed "cut no"
     And the wait printed an index-to-print time in milliseconds
 
+  Scenario: a turn sent in parts is joined in order and saved whole
+    Given mw talk wait is armed
+    When part 2 of 3 of the Governor's turn 4 of talk "talk-9" saying "two " is indexed
+    And part 1 of 3 of the Governor's turn 4 of talk "talk-9" saying "one " is indexed
+    Then mw talk wait is still waiting
+    When part 3 of 3 of the Governor's turn 4 of talk "talk-9" saying "three" is indexed
+    Then mw talk wait ends within 1 second
+    And the wait printed "talk talk-9 turn 4"
+    And the wait printed "text: one two three"
+    And the wait did not print "missing part"
+    And the inbox dir holds "direct-1.txt" with the text "one two three"
+
+  Scenario: a part that does not come is said, and what came is printed and saved
+    Given mw talk wait waits 300 milliseconds for the rest of a turn sent in parts
+    And mw talk wait is armed
+    When part 1 of 3 of the Governor's turn 4 of talk "talk-9" saying "one " is indexed
+    And part 2 of 3 of the Governor's turn 4 of talk "talk-9" saying "two " is indexed
+    Then mw talk wait ends within 2 seconds
+    And the wait printed "text: one two "
+    And the wait printed "missing part 3 of 3"
+    And the inbox dir holds "direct-1.txt" with the text "one two "
+
   Scenario: a turn that changes no model and cuts nothing says so
     Given mw talk wait is armed
     When the Governor's turn 1 of talk "talk-8" saying "Hello" is indexed
