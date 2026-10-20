@@ -24,6 +24,8 @@ func registerStatusQueuedSteps(ctx *godog.ScenarioContext, c *statusContext) {
 	ctx.Given(`^the rig "([^"]*)" lands in batches every (\d+) minutes$`, c.theRigLandsInBatchesEvery)
 	ctx.Given(`^the status story "([^"]*)" was queued for batch landing (\d+) minutes ago$`, c.theStoryWasQueuedMinutesAgo)
 	ctx.Given(`^a batch-land job for the rig "([^"]*)" began running (\d+) minutes ago$`, c.aBatchLandJobBeganRunning)
+	ctx.Given(`^the batch-land job ended$`, c.theBatchLandJobEnded)
+	ctx.Given(`^(\d+) other events were written since$`, c.otherEventsWrittenSince)
 	ctx.Then(`^the report says "([^"]*)" is queued for batch landing since (\d+) minutes ago$`, c.theReportSaysQueuedSince)
 	ctx.Then(`^the report says "([^"]*)" is in the batch running since (\d+) minutes ago$`, c.theReportSaysInTheBatchSince)
 	ctx.Then(`^the report says "([^"]*)" is queued too long$`, c.theReportSaysQueuedTooLong)
@@ -81,6 +83,25 @@ func (c *statusContext) aBatchLandJobBeganRunning(rig, minutes string) error {
 		{Ts: at, Kind: events.KindJob, Lane: events.LaneNormal, Actor: actor, To: events.JobScheduled, Detail: fmt.Sprintf("landing of %s (3 queued)", rig)},
 		{Ts: at, Kind: events.KindJob, Lane: events.LaneNormal, Actor: actor, From: events.JobScheduled, To: events.JobRunning},
 	})
+	return err
+}
+
+// theBatchLandJobEnded leaves the done event the follower writes when the
+// batch-land job's pass ends.
+func (c *statusContext) theBatchLandJobEnded() error {
+	_, err := c.log.Append(context.Background(), []events.Event{
+		{Ts: c.now, Kind: events.KindJob, Lane: events.LaneNormal, Actor: application.BatchLandJobName + "@" + statusHost, From: events.JobRunning, To: events.JobDone},
+	})
+	return err
+}
+
+// otherEventsWrittenSince buries what is in the log under n events of no job.
+func (c *statusContext) otherEventsWrittenSince(n int) error {
+	evs := make([]events.Event, n)
+	for i := range evs {
+		evs[i] = events.Event{Ts: c.now, Kind: events.KindBeadChanged, Lane: events.LaneNormal, Actor: "mayor@" + statusHost, Bead: "mw-other", From: "running", To: "running", Detail: "comment"}
+	}
+	_, err := c.log.Append(context.Background(), evs)
 	return err
 }
 
