@@ -554,6 +554,31 @@ func TestAFetchThatCannotResolveTheRemoteIsANameThatCouldNotBeResolved(t *testin
 	}
 }
 
+func TestAGitThatCannotConnectToTheRemoteIsARemoteThatCouldNotBeReached(t *testing.T) {
+	fakeGit(t, "fatal: unable to access https://github.com/x/y/: Failed to connect to github.com port 443 after 21000 ms: Connection timed out")
+
+	_, err := vault.New(t.TempDir()).Push(context.Background())
+	gone, ok := application.Unreachable(err)
+	if !ok {
+		t.Fatalf("expected a remote that could not be reached, got %T: %v", err, err)
+	}
+	if gone.Remote != "github.com" || !strings.Contains(gone.Said, "Failed to connect to github.com port 443") {
+		t.Fatalf("expected github.com and the line git said, got %q and %q", gone.Remote, gone.Said)
+	}
+	if _, resolved := application.Unresolved(err); resolved {
+		t.Fatalf("expected a refused connection not to be a name that could not be resolved")
+	}
+}
+
+func TestARefusedKeyIsNotARemoteThatCouldNotBeReached(t *testing.T) {
+	fakeGit(t, "git@github.com: Permission denied (publickey).")
+
+	_, err := vault.New(t.TempDir()).Push(context.Background())
+	if _, ok := application.Unreachable(err); ok {
+		t.Fatalf("expected a refused key not to be an unreachable remote, got %v", err)
+	}
+}
+
 func TestAnyOtherGitFailureIsLeftExactlyAsGitSaidIt(t *testing.T) {
 	fakeGit(t, "git@github.com: Permission denied (publickey).")
 

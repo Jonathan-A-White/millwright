@@ -299,3 +299,21 @@ func TestSyncDoesNotCallAnyOtherFailureAnUnresolvedName(t *testing.T) {
 		t.Fatalf("expected a conflict not to be a name that could not be resolved, got %v", err)
 	}
 }
+
+// A bd that could not connect to the remote comes back as a remote that could not
+// be reached, with its halt, and so its exit code, underneath; a conflict never
+// does, whatever else bd said (mw-gq6.648).
+func TestSyncNamesAFailureToConnectAndKeepsBdsExitCode(t *testing.T) {
+	err := standIn(t, "fatal: unable to access 'https://github.com/x/': Failed to connect to github.com port 443: Connection timed out", 1).Sync(context.Background())
+	gone, ok := application.Unreachable(err)
+	if !ok || gone.Remote != "github.com" {
+		t.Fatalf("expected github.com to be unreachable, got %T: %v", err, err)
+	}
+	if halt, ok := application.Halted(err); !ok || halt.Code != 1 {
+		t.Fatalf("expected the halt bd gave to be kept underneath, got %v", err)
+	}
+	err = standIn(t, "CONFLICT in the working set; Failed to connect to github.com port 443", 2).Sync(context.Background())
+	if _, ok := application.Unreachable(err); ok {
+		t.Fatalf("expected a conflict not to be an unreachable remote, got %v", err)
+	}
+}
