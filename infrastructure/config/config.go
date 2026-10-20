@@ -721,6 +721,11 @@ var DefaultGristTestKeyFile = filepath.Join(".config", "mw", "grist-test.key")
 // otherwise.
 var DefaultGristStateDir = filepath.Join(".local", "state", "mw", "grist")
 
+// DefaultGristAPIKeyFile is where the mill looks for the Anthropic API key it
+// may bill a grist to ([grist] api_credits), under the home directory, when
+// [grist] api_key_file says nothing.
+var DefaultGristAPIKeyFile = filepath.Join(".config", "mw", "anthropic-api.key")
+
 // The ceilings above every grind when the [grist] table says nothing:
 // application's own defaults are the same.
 const (
@@ -923,6 +928,11 @@ type GristSettings struct {
 	// daily limit, at the person's own cap, asked of the postern backend; false
 	// counts every key alone at DailyLimit (mw-cvwm1u.6).
 	PersonCap bool
+	// APICredits is whether the mill bills a grist to the Anthropic API key in
+	// APIKeyFile (a full path) instead of the subscription; false bills the
+	// subscription, as before.
+	APICredits bool
+	APIKeyFile string
 }
 
 // Grist reports the ceilings of the `[grist]` table of
@@ -933,8 +943,11 @@ type GristSettings struct {
 // the host's cap on Builders), `timeout` (a Go duration, "10m"), `pool_quiet`
 // (a duration, "0s" for no warm pool) and `pool_max_age` (a duration above
 // zero) and `person_cap` (true or false: whether a self-registered person's
-// device keys are counted together at the person's own cap), each its default
-// when the table says nothing.
+// device keys are counted together at the person's own cap), `api_credits`
+// (true or false, false: whether the mill bills a grist to an Anthropic API key
+// while that key has credit) and `api_key_file` (a full path, or ~/ and the
+// rest, default ~/.config/mw/anthropic-api.key), each its default when the
+// table says nothing.
 func Grist() (GristSettings, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -948,6 +961,7 @@ func Grist() (GristSettings, error) {
 	settings := GristSettings{
 		Models: list(DefaultGristModels), Efforts: list(DefaultGristEfforts), Timeout: DefaultGristTimeout,
 		PoolQuiet: DefaultGristPoolQuiet, PoolMaxAge: DefaultGristPoolMaxAge, PersonCap: true,
+		APIKeyFile: filepath.Join(home, DefaultGristAPIKeyFile),
 	}
 	if models := list(table["models"]); len(models) > 0 {
 		settings.Models = models
@@ -998,6 +1012,22 @@ func Grist() (GristSettings, error) {
 			return GristSettings{}, fmt.Errorf("the [%s] table of %s says person_cap = %q: it must be true or false", GristTable, path, said)
 		}
 		settings.PersonCap = on
+	}
+	if said := strings.TrimSpace(table["api_credits"]); said != "" {
+		on, err := strconv.ParseBool(said)
+		if err != nil {
+			return GristSettings{}, fmt.Errorf("the [%s] table of %s says api_credits = %q: it must be true or false", GristTable, path, said)
+		}
+		settings.APICredits = on
+	}
+	if said := strings.TrimSpace(table["api_key_file"]); said != "" {
+		if rest, ok := strings.CutPrefix(said, "~/"); ok {
+			said = filepath.Join(home, rest)
+		}
+		if !filepath.IsAbs(said) {
+			return GristSettings{}, fmt.Errorf("the [%s] table of %s says api_key_file = %q: it must be a full path", GristTable, path, said)
+		}
+		settings.APIKeyFile = said
 	}
 	return settings, nil
 }
