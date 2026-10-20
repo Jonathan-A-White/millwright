@@ -38,7 +38,7 @@
 #  10  browsers   Playwright chromium and its system deps (root), at the version each cloned rig that depends
 #                 on @playwright/test has locked
 #  11  beads      ~/.config/mw/beads.env (mode 600): bd's BEADS_DOLT_* pointing at the home's beads server
-#  12  profile    a marked block in ~/.profile that reads those env files and puts ~/.local/bin on PATH
+#  12  profile    a marked block in ~/.profile that reads those env files and puts ~/.local/bin and the go dirs on PATH
 #  13  dispatch   ~/.config/mw/dispatch.env, a drop-in that lets the dispatch service read the env files,
 #                 a timer drop-in that ticks every five minutes (a Boost has no follower to spring it),
 #                 linger, mw-dispatch.timer enabled (scripts/install-units.sh), then one dispatch started
@@ -904,23 +904,51 @@ s_beads() {
 
 # --- 12. ~/.profile ---------------------------------------------------------------
 PROFILE_BEGIN='# >>> mw boost-bootstrap >>>'
+PROFILE_END='# <<< mw boost-bootstrap <<<'
+# Each dir is guarded on its own: Ubuntu's default ~/.profile has already put
+# ~/.local/bin on PATH, which must not stop the go dirs being added.
 profile_block() {
 	cat <<'EOF'
 # >>> mw boost-bootstrap >>>
-case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:/usr/local/go/bin:$HOME/.local/go/bin:$PATH" ;; esac
+for d in /usr/local/go/bin "$HOME/.local/go/bin" "$HOME/.local/bin"; do
+	case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH" ;; esac
+done
 for f in beads github claude; do
 	[ -r "$HOME/.config/mw/$f.env" ] && { set -a; . "$HOME/.config/mw/$f.env"; set +a; }
 done
 # <<< mw boost-bootstrap <<<
 EOF
 }
+# profile_current: the marked block as ~/.profile has it now (empty when it has no end mark).
+profile_current() {
+	awk -v b="$PROFILE_BEGIN" -v e="$PROFILE_END" '
+		$0 == b { on = 1 }
+		on { buf = buf $0 "\n" }
+		on && $0 == e { printf "%s", buf; exit }
+	' "$HOME/.profile"
+}
 s_profile() {
-	local block
-	step profile "$HOME/.profile reads the env files and has ~/.local/bin on PATH"
+	local block current tmp
+	step profile "$HOME/.profile reads the env files and has ~/.local/bin and the go dirs on PATH"
+	block=$(profile_block)
 	if grep -Fxq "$PROFILE_BEGIN" "$HOME/.profile" 2>/dev/null; then
-		skip "the block is already in ~/.profile"
+		current=$(profile_current)
+		if [ "$current" = "$block" ]; then
+			skip "the block is already in ~/.profile"
+		elif [ -z "$current" ]; then
+			skip "the block in ~/.profile has no end mark; left as it is"
+			note "$HOME/.profile has '$PROFILE_BEGIN' but no '$PROFILE_END'; mend it by hand and run again"
+		elif act "replace the marked block in ~/.profile"; then
+			tmp=$(mktemp "$HOME/.profile.boost.XXXXXX")
+			awk -v b="$PROFILE_BEGIN" -v e="$PROFILE_END" -v blk="$block" '
+				$0 == b && !done { print blk; skipping = 1; next }
+				skipping { if ($0 == e) { skipping = 0; done = 1 } ; next }
+				{ print }
+			' "$HOME/.profile" >"$tmp"
+			cat "$tmp" >"$HOME/.profile"
+			rm -f "$tmp"
+		fi
 	elif act "append a marked block to ~/.profile"; then
-		block=$(profile_block)
 		if [ -s "$HOME/.profile" ]; then block=$'\n'$block; fi
 		printf '%s\n' "$block" >>"$HOME/.profile"
 	fi

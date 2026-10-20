@@ -91,6 +91,14 @@ OTHER_TEMPLATE=$T/other-template
 mkdir -p "$HOME_DIR" "$BOOT/etc" "$STATE" "$BIN" "$TEMPLATE" "$ORIGINS" "$OTHER_TEMPLATE"
 echo "a rig" >"$OTHER_TEMPLATE/README"
 : >"$CALLS"
+# Ubuntu's own default ~/.profile, which puts ~/.local/bin on PATH when it exists: the
+# box the script runs on already has that dir on a login shell's PATH.
+cat >"$HOME_DIR/.profile" <<'EOF'
+# ~/.profile: executed by the command interpreter for login shells.
+if [ -d "$HOME/.local/bin" ] ; then
+    PATH="$HOME/.local/bin:$PATH"
+fi
+EOF
 
 # Fake tokens: distinctive, so a grep finds every place they landed.
 GH_TOKEN_VALUE="ghp_FAKEgithubTOKEN0123456789abcdef"
@@ -465,6 +473,13 @@ grep -Fq 'AllowedIPs = 10.88.0.0/24' "$WGC" || fail "$NAME: wg0.conf has no Allo
 [ -e "$STATE/units/user/enabled-mw-dispatch.timer" ] || fail "$NAME: mw-dispatch.timer was not enabled"
 [ -e "$BOOT/var/lib/systemd/linger/tester" ] || fail "$NAME: linger was not enabled"
 grep -Fq 'boost-bootstrap' "$HOME_DIR/.profile" || fail "$NAME: ~/.profile has no block"
+# a login shell finds the installed go, though Ubuntu's own ~/.profile (above the block) already put ~/.local/bin on PATH
+mkdir -p "$HOME_DIR/.local/go/bin"
+printf '#!/bin/sh\n' >"$HOME_DIR/.local/go/bin/go"
+chmod +x "$HOME_DIR/.local/go/bin/go"
+login_go() { env -i HOME="$HOME_DIR" PATH=/usr/bin:/bin bash -lc 'command -v go'; }
+[ "$(login_go)" = "$HOME_DIR/.local/go/bin/go" ] || fail "$NAME: a login shell does not find go: '$(login_go)'"
+[ "$(env -i HOME="$HOME_DIR" PATH=/usr/bin:/bin bash -lc 'printf "%s" "$PATH"' | tr ':' '\n' | grep -Fxc "$HOME_DIR/.local/bin")" = 1 ] || fail "$NAME: ~/.local/bin is not on a login shell's PATH exactly once"
 [ -f "$HOME_DIR/.config/mw/dispatch.env" ] || fail "$NAME: no dispatch.env"
 grep -Fq 'PATH=' "$HOME_DIR/.config/mw/dispatch.env" || fail "$NAME: dispatch.env has no PATH"
 DROPIN=$HOME_DIR/.config/systemd/user/mw-dispatch.service.d
@@ -495,6 +510,37 @@ for s in $STEPS; do
 	printf '%s\n' "$step_out" | grep -Eq '^    (run|would):' && fail "$NAME: step $s acts on a second run: $step_out"
 	printf '%s\n' "$step_out" | grep -Fq '    skip:' || fail "$NAME: step $s does not say it skipped: $step_out"
 done
+echo "ok: $NAME"
+
+NAME="a ~/.profile with the old one-guard block gets it replaced in place, once"
+OLD_BLOCK='# >>> mw boost-bootstrap >>>
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:/usr/local/go/bin:$HOME/.local/go/bin:$PATH" ;; esac
+for f in beads github claude; do
+	[ -r "$HOME/.config/mw/$f.env" ] && { set -a; . "$HOME/.config/mw/$f.env"; set +a; }
+done
+# <<< mw boost-bootstrap <<<'
+PROFILE=$HOME_DIR/.profile
+cp "$PROFILE" "$T/profile-new"
+awk '/^# >>> mw boost-bootstrap >>>$/ { exit } { print }' "$T/profile-new" >"$PROFILE"
+printf '%s\n' "$OLD_BLOCK" >>"$PROFILE"
+printf '# after the block\n' >>"$PROFILE"
+[ -z "$(login_go)" ] || fail "$NAME: the old block should leave a login shell without go: '$(login_go)'"
+OUT=$(boost --dry-run --env-file "$ENVFILE" 2>&1) || fail "$NAME: the dry run failed: $OUT"
+profile_out=$(printf '%s\n' "$OUT" | awk '/^==> \[/ { on = ($0 ~ /\] profile:/) } on')
+printf '%s\n' "$profile_out" | grep -F "would:" | grep -Fq "replace" || fail "$NAME: a dry run does not plan the replacement: $profile_out"
+[ -z "$(login_go)" ] || fail "$NAME: a dry run changed ~/.profile"
+OUT=$(boost --env-file "$ENVFILE" 2>&1) || fail "$NAME: exited non-zero: $OUT"
+profile_out=$(printf '%s\n' "$OUT" | awk '/^==> \[/ { on = ($0 ~ /\] profile:/) } on')
+printf '%s\n' "$profile_out" | grep -F "run:" | grep -Fq "replace" || fail "$NAME: the profile step does not say it replaced the block: $profile_out"
+[ "$(grep -Fc '# >>> mw boost-bootstrap >>>' "$PROFILE")" = 1 ] || fail "$NAME: not one marked block: $(cat "$PROFILE")"
+[ "$(grep -Fc '# <<< mw boost-bootstrap <<<' "$PROFILE")" = 1 ] || fail "$NAME: not one block end: $(cat "$PROFILE")"
+[ "$(login_go)" = "$HOME_DIR/.local/go/bin/go" ] || fail "$NAME: a login shell does not find go after the replacement: '$(login_go)'"
+[ "$(tail -n 1 "$PROFILE")" = "# after the block" ] || fail "$NAME: what followed the block was lost: $(cat "$PROFILE")"
+head -n 1 "$PROFILE" | grep -Fq '# ~/.profile: executed' || fail "$NAME: what preceded the block was lost: $(cat "$PROFILE")"
+OUT=$(boost --env-file "$ENVFILE" 2>&1) || fail "$NAME: a run after failed: $OUT"
+profile_out=$(printf '%s\n' "$OUT" | awk '/^==> \[/ { on = ($0 ~ /\] profile:/) } on')
+printf '%s\n' "$profile_out" | grep -Eq '^    (run|would):' && fail "$NAME: the profile step acts on the run after: $profile_out"
+printf '%s\n' "$profile_out" | grep -Fq '    skip:' || fail "$NAME: the profile step does not skip on the run after: $profile_out"
 echo "ok: $NAME"
 
 # --- c. no token anywhere but a file of mode 600 ------------------------------
