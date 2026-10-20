@@ -193,7 +193,9 @@ func newDispatchCmd() *cobra.Command {
 			"<remote> unreachable: <reason>\" and leaves with 0. The third such tick in a row fails, once,\n" +
 			"naming the remote and the time of the first; a tick that reaches it again resets the count.\n" +
 			"A local network fault counts the same way: the third in a row fails, once, naming the fault\n" +
-			"and the time of the first, instead of leaving with " + fmt.Sprint(application.NetworkFaultExit) + ".\n\n" +
+			"and the time of the first, instead of leaving with " + fmt.Sprint(application.NetworkFaultExit) + ".\n" +
+			"So does a self-update (this host's mw brought level with the factory rig) that fails at its\n" +
+			"fetch, fast-forward or build: the third tick in a row fails, naming the step and its error.\n\n" +
 			"Only one real dispatch runs on a host at a time: one started while another holds the\n" +
 			"host's dispatch lock (~/.local/state/mw-dispatch/lock-<vault hash>) prints \"another mw dispatch is running\n" +
 			"here; nothing done\" and leaves with 0.\n\n" +
