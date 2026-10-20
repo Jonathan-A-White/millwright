@@ -148,7 +148,7 @@ func newStatusCmd() *cobra.Command {
 				return err
 			}
 
-			tracker := mwGateway(dir, host)
+			tracker := statusTracker(dir, host)
 			events, err := eventsShipping(host)
 			if err != nil {
 				return err
@@ -258,6 +258,14 @@ func newStatusCmd() *cobra.Command {
 			return err
 		},
 	}
+}
+
+// statusTracker is the tracker every section of mw status reads from. It keeps
+// what the run reads of bd (the list of every bead, the table of notes), so that
+// the snapshot, the bead graph, the stuck check and the causes share one list
+// and the notes are read once (mw-gq6.659); status writes nothing.
+func statusTracker(dir, host string) *beads.Gateway {
+	return mwGateway(dir, host, beads.WithRunCache())
 }
 
 // eventsShipping is where mw status reads the event follower's sending from,

@@ -25,8 +25,9 @@ import (
 // with what says holds for it — printing it and exiting well, or, for a
 // subcommand whose answer starts "fail:", printing the rest to standard error
 // and exiting 1 — and records every argv. It returns a Gateway that runs it
-// and the file the argvs are written to.
-func leaseStandIn(t *testing.T, says map[string]string) (*beads.Gateway, string) {
+// and the file the argvs are written to. Options are given to the Gateway after
+// the stand-in's own.
+func leaseStandIn(t *testing.T, says map[string]string, opts ...beads.Option) (*beads.Gateway, string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in for bd is a shell script")
@@ -48,7 +49,7 @@ func leaseStandIn(t *testing.T, says map[string]string) (*beads.Gateway, string)
 	if err := os.WriteFile(path, []byte(script.String()), 0o755); err != nil {
 		t.Fatalf("writing the stand-in: %v", err)
 	}
-	return beads.New(dir, beads.WithProgram(path), beads.WithActor("mw@vps")), log
+	return beads.New(dir, append([]beads.Option{beads.WithProgram(path), beads.WithActor("mw@vps")}, opts...)...), log
 }
 
 // shellQuoted is text as one single-quoted word of sh.

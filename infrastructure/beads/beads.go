@@ -45,6 +45,13 @@ const (
 // TypeEpic is beads' name for the type of bead an epic is filed as.
 const TypeEpic = "epic"
 
+// TypeEvent and TypeMolecule are the types of the event and molecule beads: with
+// mail, most of a database.
+const (
+	TypeEvent    = "event"
+	TypeMolecule = "molecule"
+)
+
 // Gateway reads and writes stories in one vault's beads database.
 type Gateway struct {
 	vault   string
@@ -72,6 +79,9 @@ type Gateway struct {
 	keptSaid io.Writer
 	// notes keeps what Note read for a while; nil reads every note from bd.
 	notes *noteCache
+	// cache keeps what one run of a command that only reads asked of bd
+	// (WithRunCache); nil asks bd every time.
+	cache *runCache
 	// repackErr is why the repack the last successful Sync ended with failed,
 	// and repackMu guards it (TakeRepackErr).
 	repackMu  sync.Mutex
@@ -344,7 +354,7 @@ func (g *Gateway) ShowEpic(ctx context.Context, id string) (application.EpicDeta
 	if strings.TrimSpace(id) == "" {
 		return application.EpicDetail{}, fmt.Errorf("reading an epic: which epic?")
 	}
-	epic, err := g.showOne(ctx, id)
+	epic, err := g.epicOwn(ctx, id)
 	if err != nil {
 		return application.EpicDetail{}, err
 	}
@@ -367,13 +377,15 @@ func (g *Gateway) ShowEpic(ctx context.Context, id string) (application.EpicDeta
 // filed, each with the epic's defaults overlaid: one bd list, closed and
 // claimed stories included.
 func (g *Gateway) childrenOf(ctx context.Context, id string, defaults domain.Path) ([]application.StoryDetail, error) {
-	out, err := g.call(ctx, "list", "--parent", id, "--limit", "0", "--all", "--json")
-	if err != nil {
-		return nil, err
-	}
-	stories, err := decodeBeads(out)
-	if err != nil {
-		return nil, fmt.Errorf("reading the stories of %s: %w", id, err)
+	stories, kept := g.childrenInRun(ctx, id, true)
+	if !kept {
+		out, err := g.call(ctx, "list", "--parent", id, "--limit", "0", "--all", "--json")
+		if err != nil {
+			return nil, err
+		}
+		if stories, err = decodeBeads(out); err != nil {
+			return nil, fmt.Errorf("reading the stories of %s: %w", id, err)
+		}
 	}
 	var filed []application.StoryDetail
 	for _, story := range inSiblingOrder(stories) {
@@ -506,6 +518,9 @@ func (g *Gateway) ShowEpics(ctx context.Context, ids []string) ([]application.Ep
 func (g *Gateway) ShowBeads(ctx context.Context, ids []string) ([]application.StoryDetail, error) {
 	if len(ids) == 0 {
 		return nil, nil
+	}
+	if details, ok := g.showBeadsInRun(ctx, ids); ok {
+		return details, nil
 	}
 	found, err := g.showMany(ctx, ids)
 	if err != nil {
@@ -702,6 +717,9 @@ func (g *Gateway) showEach(ctx context.Context, ids []string, extra ...string) (
 // a bead is lost only when bd show says it is not there. Against a database in
 // the vault there is no round trip to save, and readBeads reads them whole.
 func (g *Gateway) readOwn(ctx context.Context, ids []string) (map[string]bead, error) {
+	if held, ok := g.beadsInRun(ctx, ids); ok {
+		return held, nil
+	}
 	if len(ids) == 0 || !g.sideBySide([]string{"list"}) {
 		return g.readBeads(ctx, ids)
 	}
@@ -1014,6 +1032,15 @@ func (g *Gateway) ReclaimStory(ctx context.Context, id string) (bool, error) {
 	return false, nil
 }
 
+// epicOwn reads an epic for its own fields: from the run's list when the Gateway
+// keeps one that holds it, else as showOne.
+func (g *Gateway) epicOwn(ctx context.Context, id string) (bead, error) {
+	if held, ok := g.beadsInRun(ctx, []string{id}); ok {
+		return held[id], nil
+	}
+	return g.showOne(ctx, id)
+}
+
 // showOne reads exactly one bead.
 func (g *Gateway) showOne(ctx context.Context, id string) (bead, error) {
 	out, err := g.call(ctx, "show", id, "--json")
@@ -1118,6 +1145,9 @@ func breakerOpen(said string) bool {
 // The Gateway's lock is let go of while it waits, so that the reads beside it
 // are not held back.
 func (g *Gateway) run(ctx context.Context, args ...string) ([]byte, []byte, error) {
+	if g.cache != nil && !readsOnly(args) {
+		g.cache.reset()
+	}
 	for try := 0; ; try++ {
 		out, errs, err := g.runOnce(ctx, args...)
 		if err == nil || try == len(breakerWaits) || ctx.Err() != nil || !breakerOpen(said(out, errs)) {

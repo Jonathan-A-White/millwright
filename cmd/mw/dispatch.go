@@ -32,8 +32,8 @@ const BuilderSeat = "builder"
 // dispatcher's shell and a close attempted from inside a Builder session are
 // the same act by the same program, and bd lets only the actor that claimed a
 // story close it.
-func mwGateway(dir, host string) *beads.Gateway {
-	return beads.New(dir, append([]beads.Option{beads.WithActor(application.SeatIdentity(application.MwSeat, host))}, followerGatewayOptions...)...)
+func mwGateway(dir, host string, more ...beads.Option) *beads.Gateway {
+	return beads.New(dir, append(append([]beads.Option{beads.WithActor(application.SeatIdentity(application.MwSeat, host))}, followerGatewayOptions...), more...)...)
 }
 
 // followerGatewayOptions are what every Gateway made while the follower runs

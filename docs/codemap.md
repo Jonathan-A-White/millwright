@@ -5,7 +5,7 @@
 | Port | In application/ | Adapter (infra/) |
 |-|-|-|
 | `WorkTracker` | application/worktracker.go | beads |
-| TrackerNotes, SweepNotes, BeadGraph, IceNotes, IcedBeads | application/{status,sweep,ice}.go | same |
+| TrackerNotes, SweepNotes, BeadGraph, IceNotes, IcedBeads (WithRunCache: one bead list, one kv list a read-only run) | application/{status,sweep,ice}.go | same, beads/runcache.go |
 | VaultFiles, Tracker{Sync,History,Flush}, SyncHaltMarker | application/sync.go | {vault/git,beads/sync}.go, synchalt, flushlog |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | beads/mail.go |
 | EpicRules (+LandingRules) | application/epicrules.go | vault/epicrules.go |
@@ -25,7 +25,7 @@
 | TickLog, Notifier, HomeMoveHost, OldHome, {Vault,Tracker}Birth | application/{millhandtick,homemove,init}.go | {ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go |
 | Landing, Checks, SpecChecks, RelatedChecks, NamedChecks (main's red), MergeSlot, Batch*, LandProcesses | application/landing.go, application/mainred.go, application/batchland.go | rig/{landing,checks,specs,slot}.go, vault/batch.go, apartproc |
 | AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter, FormulaInstaller | application/afterlanding.go, application/selfupdate.go, application/backendstage.go, application/formulainstall.go | {rig/{afterlanding,built,backend},userunits,vault/formulas}.go |
-| EventLog (EventNewestLog: each job's newest events, NewestOf), BeadFeed, {Follow,Nudge}Cursors, ShipStates, SubscribeFiles, EventSpringer, EventController, HarnessCount | application/event*.go, application/eventnewest.go, status.go | {eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go |
+| EventLog (EventNewestLog: each job's newest events, pauses and cancels, NewestOf), BeadFeed, {Follow,Nudge}Cursors, ShipStates, SubscribeFiles, EventSpringer, EventController, HarnessCount | application/event*.go, application/eventnewest.go, status.go | {eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go |
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | {postern,hands*,homemove} |
 | PosternInboxShow (kept messages, --show) | application/posternkeep.go | postern_inbox |
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | {bsv,stampqueue,chainlookup}, rig/worktree.go |

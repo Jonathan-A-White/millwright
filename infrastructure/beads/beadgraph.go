@@ -2,7 +2,6 @@ package beads
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -16,13 +15,9 @@ func (g *Gateway) BeadGraph(ctx context.Context) ([]domain.GraphBead, error) {
 	if graph, ok := g.graphOverConnection(ctx); ok {
 		return graph, nil
 	}
-	out, err := g.call(ctx, "list", "--all", "--limit", "0", "--exclude-type", "mail,event,molecule", "--json")
+	beads, err := g.listing(ctx, TypeMail, TypeEvent, TypeMolecule)
 	if err != nil {
 		return nil, err
-	}
-	beads, err := decodeBeads(out)
-	if err != nil {
-		return nil, fmt.Errorf("reading every bead: %w", err)
 	}
 	graph := make([]domain.GraphBead, 0, len(beads))
 	for _, b := range beads {

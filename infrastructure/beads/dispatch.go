@@ -463,13 +463,15 @@ func (g *Gateway) OpenSteps(ctx context.Context, moleculeID string) ([]applicati
 	if strings.TrimSpace(moleculeID) == "" {
 		return nil, nil
 	}
-	out, err := g.call(ctx, "list", "--parent", moleculeID, "--limit", "0", "--json")
-	if err != nil {
-		return nil, err
-	}
-	poured, err := decodeBeads(out)
-	if err != nil {
-		return nil, fmt.Errorf("reading the steps of %s: %w", moleculeID, err)
+	poured, kept := g.childrenInRun(ctx, moleculeID, false)
+	if !kept {
+		out, err := g.call(ctx, "list", "--parent", moleculeID, "--limit", "0", "--json")
+		if err != nil {
+			return nil, err
+		}
+		if poured, err = decodeBeads(out); err != nil {
+			return nil, fmt.Errorf("reading the steps of %s: %w", moleculeID, err)
+		}
 	}
 
 	open := make([]bead, 0, len(poured))

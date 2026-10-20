@@ -106,6 +106,9 @@ func (g *Gateway) Note(ctx context.Context, key string) (string, error) {
 		g.keepNote(key, value)
 		return value, nil
 	}
+	if value, answered := g.noteInRun(ctx, key); answered {
+		return value, nil
+	}
 	out, err := g.call(ctx, "kv", "get", key)
 	if err != nil {
 		said := strings.ToLower(err.Error())
@@ -137,16 +140,9 @@ func (g *Gateway) NotesWithPrefix(ctx context.Context, prefix string) (map[strin
 	if found, ok := g.notesOverConnection(ctx, prefix); ok {
 		return found, nil
 	}
-	out, err := g.call(ctx, "kv", "list", "--json")
+	all, err := g.noteTable(ctx)
 	if err != nil {
 		return nil, err
-	}
-	if len(bytes.TrimSpace(out)) == 0 {
-		return map[string]string{}, nil
-	}
-	var all map[string]any
-	if err := json.Unmarshal(out, &all); err != nil {
-		return nil, fmt.Errorf("parsing bd kv list --json: %w", err)
 	}
 	found := map[string]string{}
 	for key, value := range all {
@@ -158,6 +154,22 @@ func (g *Gateway) NotesWithPrefix(ctx context.Context, prefix string) (map[strin
 		}
 	}
 	return found, nil
+}
+
+// readNoteTable is `bd kv list --json`: every note and bd's own settings.
+func (g *Gateway) readNoteTable(ctx context.Context) (map[string]any, error) {
+	out, err := g.call(ctx, "kv", "list", "--json")
+	if err != nil {
+		return nil, err
+	}
+	if len(bytes.TrimSpace(out)) == 0 {
+		return map[string]any{}, nil
+	}
+	var all map[string]any
+	if err := json.Unmarshal(out, &all); err != nil {
+		return nil, fmt.Errorf("parsing bd kv list --json: %w", err)
+	}
+	return all, nil
 }
 
 // GC implements application.TrackerSync: reclaims the disk space the beads

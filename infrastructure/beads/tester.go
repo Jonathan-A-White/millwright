@@ -2,7 +2,6 @@ package beads
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -17,13 +16,9 @@ var _ application.TesterStories = (*Gateway)(nil)
 // overlaid; epics, mail, events and molecules are left out, and so is a story
 // whose times bd gives are all before since.
 func (g *Gateway) StoriesSince(ctx context.Context, since time.Time) ([]application.StoryDetail, error) {
-	out, err := g.call(ctx, "list", "--all", "--limit", "0", "--exclude-type", "mail,event,molecule", "--json")
+	all, err := g.listing(ctx, TypeMail, TypeEvent, TypeMolecule)
 	if err != nil {
 		return nil, err
-	}
-	all, err := decodeBeads(out)
-	if err != nil {
-		return nil, fmt.Errorf("reading every bead: %w", err)
 	}
 	byID := make(map[string]bead, len(all))
 	for _, b := range all {

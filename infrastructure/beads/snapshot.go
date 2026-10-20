@@ -38,14 +38,24 @@ var _ application.RunningEverywhere = (*Gateway)(nil)
 func (g *Gateway) Snapshot(ctx context.Context) (application.WorkTracker, error) {
 	all, kept := g.listAllOverConnection(ctx)
 	if !kept {
-		out, err := g.call(ctx, "list", "--all", "--limit", "0", "--json")
-		if err != nil {
+		var err error
+		if all, err = g.listing(ctx); err != nil {
 			return nil, err
 		}
-		if all, err = decodeBeads(out); err != nil {
-			return nil, fmt.Errorf("reading every bead: %w", err)
-		}
 	}
+	s := newSnapshot(g, all)
+	// The listing is enough to build a view should this read fail, so the
+	// snapshot goes without notes and comments and the view asks for them
+	// itself.
+	notes, comments, held, err := g.readNotesAndComments(ctx, all, time.Now())
+	if err == nil {
+		s.notes, s.comments, s.commentsHeld = notes, comments, held
+	}
+	return s, nil
+}
+
+// newSnapshot is the listing indexed, with no notes and no comments.
+func newSnapshot(g *Gateway, all []bead) *snapshot {
 	s := &snapshot{
 		WorkTracker: g, beads: all,
 		byID: make(map[string]bead, len(all)), children: map[string][]bead{},
@@ -56,14 +66,7 @@ func (g *Gateway) Snapshot(ctx context.Context) (application.WorkTracker, error)
 			s.children[b.Parent] = append(s.children[b.Parent], b)
 		}
 	}
-	// The listing is enough to build a view should this read fail, so the
-	// snapshot goes without notes and comments and the view asks for them
-	// itself.
-	notes, comments, held, err := g.readNotesAndComments(ctx, all, time.Now())
-	if err == nil {
-		s.notes, s.comments, s.commentsHeld = notes, comments, held
-	}
-	return s, nil
+	return s
 }
 
 // commentWindow is how long after a bead closed the snapshot still reads its
