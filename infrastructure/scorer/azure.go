@@ -22,6 +22,7 @@ import (
 )
 
 // DefaultAzureTimeout is how long the azure engine waits for an assessment.
+// A fixed limit is safe: the clip is refused above azureMaxSeconds before it is sent.
 const DefaultAzureTimeout = 2 * time.Minute
 
 // azureMaxSeconds is the longest clip the engine sends: Azure says a
@@ -226,7 +227,7 @@ func (a *Azure) refusal(code int, status string, body []byte) error {
 func (a *Azure) reach(err error, timeout time.Duration) error {
 	var timedOut net.Error
 	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timedOut) && timedOut.Timeout()) {
-		return fmt.Errorf("azure at %s timed out after %s", a.URL(), timeout)
+		return &application.ScoreTimeout{Where: "azure at " + a.URL(), Limit: timeout}
 	}
 	return fmt.Errorf("azure at %s cannot be reached (%v): check the network and azure_region", a.URL(), err)
 }
