@@ -369,3 +369,78 @@ func TestAppendsDuringTrimsAreNeverLost(t *testing.T) {
 		t.Fatalf("%d events archived and %d kept, want 65 in all", len(old), len(kept))
 	}
 }
+
+// A line over the old 64 KB tail read: the next Append and a Since past the
+// first event must still find the last whole line (mw-gq6.658).
+func TestALastLineOverSixtyFourKBDoesNotStallTheLog(t *testing.T) {
+	log := eventlog.New(filepath.Join(t.TempDir(), "log.jsonl"))
+	big := mail("mw-1")
+	big.Detail = strings.Repeat("x", 200<<10)
+	appendOK(t, log, mail("mw-0"), big)
+	if head, err := log.Head(context.Background()); err != nil || head != 2 {
+		t.Fatalf("Head after a 200 KB line = %d, %v; want 2, nil", head, err)
+	}
+	if last := appendOK(t, log, mail("mw-2")); last != 3 {
+		t.Fatalf("the append after a 200 KB line ended at seq %d, want 3", last)
+	}
+	evs, err := log.Since(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("Since(1): %v", err)
+	}
+	if got := seqs(evs); len(got) != 2 || got[0] != 2 || got[1] != 3 || len(evs[0].Detail) != 200<<10 {
+		t.Fatalf("Since(1) gave seqs %v, want 2 3 with the long detail whole", got)
+	}
+	// And the long line is the last one, with a torn half after it.
+	big2 := mail("mw-3")
+	big2.Detail = strings.Repeat("y", 150<<10)
+	appendOK(t, log, big2)
+	if evs, err := log.Since(context.Background(), 3); err != nil || len(evs) != 1 || evs[0].Seq != 4 {
+		t.Fatalf("Since(3) = %v, %v; want the one long event, seq 4", seqs(evs), err)
+	}
+}
+
+func TestAnEventOverTheCapIsRefusedPlainlyAndTheLogStaysWritable(t *testing.T) {
+	log := eventlog.New(filepath.Join(t.TempDir(), "log.jsonl"))
+	appendOK(t, log, mail("mw-1"))
+	huge := mail("mw-2")
+	huge.Detail = strings.Repeat("z", eventlog.MaxEventLine)
+	_, err := log.Append(context.Background(), []events.Event{huge})
+	if err == nil || !strings.Contains(err.Error(), string(events.KindMail)) || !strings.Contains(err.Error(), "bytes") {
+		t.Fatalf("expected the oversized event refused naming its kind and size, got %v", err)
+	}
+	if head, _ := log.Head(context.Background()); head != 1 {
+		t.Fatalf("a refused event moved the head to %d", head)
+	}
+	if last := appendOK(t, log, mail("mw-3")); last != 2 {
+		t.Fatalf("the append after the refusal ended at seq %d, want 2", last)
+	}
+}
+
+// The last line is found whatever its length against the 64 KB chunks the
+// log is read back in, with a torn line after it or without.
+func TestTheLastLineIsFoundAtLengthsAroundTheChunkSize(t *testing.T) {
+	for _, n := range []int{0, 100, 64<<10 - 200, 64 << 10, 64<<10 + 1, 128<<10 - 150, 128 << 10, 300 << 10} {
+		for _, torn := range []bool{false, true} {
+			path := filepath.Join(t.TempDir(), "log.jsonl")
+			log := eventlog.New(path)
+			e := mail("mw-1")
+			e.Detail = strings.Repeat("q", n)
+			appendOK(t, log, mail("mw-0"), e)
+			if torn {
+				f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.WriteString(`{"seq":3,"ts":"2026-`)
+				f.Close()
+			}
+			if last := appendOK(t, log, mail("mw-2")); last != 3 {
+				t.Fatalf("detail %d bytes, torn %v: the append ended at seq %d, want 3", n, torn, last)
+			}
+			evs, err := log.Since(context.Background(), 0)
+			if err != nil || len(evs) != 3 || len(evs[1].Detail) != n {
+				t.Fatalf("detail %d bytes, torn %v: the log reads %v, %v", n, torn, seqs(evs), err)
+			}
+		}
+	}
+}

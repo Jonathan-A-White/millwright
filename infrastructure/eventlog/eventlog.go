@@ -40,9 +40,13 @@ func (l *Log) seqPath() string {
 	return strings.TrimSuffix(l.Path, filepath.Ext(l.Path)) + ".seq"
 }
 
-// tailRead is how much of the log's end Append reads to find the last
-// line's seq: far more than one event.
-const tailRead = 64 << 10
+// MaxEventLine is the most bytes one event's encoded line may take: Append
+// refuses a longer one, so no line grows past what a reader can hold.
+const MaxEventLine = 1 << 20
+
+// tailChunk is how much of the log's end lastWhole reads at a time; it reads
+// further back, chunk by chunk, for a line longer than that.
+const tailChunk = 64 << 10
 
 // lockPath is the file whose flock serializes the writers of the log: log.jsonl's
 // is log.lock. It is a file of its own, not the log, because a trim replaces
@@ -112,6 +116,9 @@ func (l *Log) Append(_ context.Context, evs []events.Event) (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
+		if len(line) > MaxEventLine {
+			return 0, fmt.Errorf("the %s event for %q is %d bytes encoded; an event is at most %d, so it was not written (put the long text in a file and name it)", e.Kind, e.Bead, len(line), MaxEventLine)
+		}
 		buf.Write(line)
 		buf.WriteByte('\n')
 	}
@@ -131,31 +138,46 @@ func (l *Log) Append(_ context.Context, evs []events.Event) (uint64, error) {
 }
 
 // lastWhole is where the log's last whole line ends, and that line's seq (0
-// for an empty log).
+// for an empty log). It reads the log backward from its end, tailChunk at a
+// time: first to the last newline (a torn line after it is skipped), then to the
+// newline before that, so a line of any length is found, and the file is read
+// no further back than that line's start.
 func lastWhole(f *os.File) (int64, uint64, error) {
 	info, err := f.Stat()
 	if err != nil {
 		return 0, 0, err
 	}
 	size := info.Size()
-	from := size - tailRead
-	if from < 0 {
-		from = 0
-	}
-	tail := make([]byte, size-from)
-	if _, err := f.ReadAt(tail, from); err != nil && !errors.Is(err, io.EOF) {
-		return 0, 0, fmt.Errorf("reading the event log's end: %w", err)
-	}
-	cut := bytes.LastIndexByte(tail, '\n')
-	if cut < 0 {
-		if from > 0 {
-			return 0, 0, fmt.Errorf("the event log's last %d bytes hold no whole line", tailRead)
+	// pos is where the next chunk ends; end is the offset just past the last
+	// newline, -1 until it is found; line is the last line's bytes so far, grown
+	// at the front as the chunks come from further back.
+	end := int64(-1)
+	var line []byte
+	for pos := size; pos > 0; {
+		from := max(pos-tailChunk, 0)
+		chunk := make([]byte, pos-from)
+		if _, err := f.ReadAt(chunk, from); err != nil && !errors.Is(err, io.EOF) {
+			return 0, 0, fmt.Errorf("reading the event log's end: %w", err)
 		}
+		if end < 0 {
+			cut := bytes.LastIndexByte(chunk, '\n')
+			if cut < 0 {
+				pos = from
+				continue
+			}
+			end = from + int64(cut) + 1
+			chunk = chunk[:cut]
+		}
+		if cut := bytes.LastIndexByte(chunk, '\n'); cut >= 0 {
+			line = append(append([]byte{}, chunk[cut+1:]...), line...)
+			break
+		}
+		line = append(append([]byte{}, chunk...), line...)
+		pos = from
+	}
+	if end < 0 {
 		return 0, 0, nil
 	}
-	end := from + int64(cut) + 1
-	whole := tail[:cut]
-	line := whole[bytes.LastIndexByte(whole, '\n')+1:]
 	var e events.Event
 	if err := json.Unmarshal(line, &e); err != nil {
 		return 0, 0, fmt.Errorf("reading the event log's last line: %w", err)
