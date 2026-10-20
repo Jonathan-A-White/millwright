@@ -37,6 +37,8 @@ type dispatchContext struct {
 	tracker *apptest.FakeTracker
 	runner  *apptest.FakeRunner
 	files   *apptest.FakeVaultFiles
+	// mainRedBug is the bug a scenario's close-out held a story on (mw-gq6.645).
+	mainRedBug string
 	// rules is the rig files of the vault, when a scenario gave one (mw-gq6.390).
 	rules *apptest.FakeEpicRules
 	mail  *apptest.FakeMailbox
@@ -239,6 +241,9 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the branch of "([^"]*)" still has its (\d+) commits?$`, c.theBranchStillHasItsCommits)
 	ctx.Then(`^dispatch said once that "([^"]*)" is refused and waits for the Mayor$`, c.dispatchSaidOnceItIsRefused)
 	ctx.Given(`^the close-out of "([^"]*)" handed it back at the merge slot's overall most$`, c.theCloseOutHandedItBack)
+	ctx.Given(`^the close-out of "([^"]*)" held it on main's red, carried by an open bug$`, c.theCloseOutHeldItOnMainsRed)
+	ctx.When(`^the bug that carries main's red is closed$`, c.theBugThatCarriesMainsRedIsClosed)
+	ctx.Then(`^the story "([^"]*)" is still held on main's red$`, c.theStoryIsStillHeldOnMainsRed)
 	ctx.Then(`^the session for "([^"]*)" runs only its close-out, "([^"]*)", in the worktree of "([^"]*)", keeping its words in the run$`, c.theSessionRunsOnlyItsCloseOut)
 	ctx.Then(`^dispatch said that "([^"]*)" has its close-out run again$`, c.dispatchSaidItsCloseOutRunsAgain)
 	ctx.Then(`^dispatch reclaimed "([^"]*)" for a dead pane with an expired lease$`, c.dispatchReclaimedForADeadPane)
@@ -2097,6 +2102,47 @@ func (c *dispatchContext) theMailSays(words string) error {
 func (c *dispatchContext) theCloseOutHandedItBack(id string) error {
 	return c.tracker.SetStoryState(context.Background(), id, application.RunState, application.RunCloseOutAgain,
 		"(merge-slot) the merge slot of millwright was still held at the overall most a close-out waits")
+}
+
+// theCloseOutHeldItOnMainsRed is what a close-out records when the tests that
+// failed on its story's merged result fail on main alone too (mw-gq6.645): the
+// bug that carries the fix, the wait on it, and run=close-out-again.
+func (c *dispatchContext) theCloseOutHeldItOnMainsRed(id string) error {
+	ctx := context.Background()
+	bug, err := c.tracker.CreateStory(ctx, application.NewStory{
+		Standalone:  true,
+		Title:       "[bug] main is red: TestTogether",
+		Description: "TestTogether fails on main by itself.",
+		Labels:      []string{application.LabelBug},
+	})
+	if err != nil {
+		return err
+	}
+	if err := c.tracker.ReleaseStory(ctx, bug); err != nil {
+		return err
+	}
+	c.mainRedBug = bug
+	if err := c.tracker.AddBlocker(ctx, id, bug); err != nil {
+		return err
+	}
+	if err := c.tracker.SetStoryState(ctx, id, application.MainRedState, bug, "main is red: TestTogether"); err != nil {
+		return err
+	}
+	return c.tracker.SetStoryState(ctx, id, application.RunState, application.RunCloseOutAgain, "(main-red) main is red: TestTogether")
+}
+
+func (c *dispatchContext) theBugThatCarriesMainsRedIsClosed() error {
+	return c.tracker.CloseStory(context.Background(), c.mainRedBug, "fixed by the test")
+}
+
+func (c *dispatchContext) theStoryIsStillHeldOnMainsRed(id string) error {
+	if got := c.tracker.State(id, application.RunState); got != application.RunCloseOutAgain {
+		return fmt.Errorf("expected %s to be %s=%s still, got %q", id, application.RunState, application.RunCloseOutAgain, got)
+	}
+	if got := c.tracker.State(id, application.MainRedState); got != c.mainRedBug {
+		return fmt.Errorf("expected %s to wait on %s (%s), got %q", id, c.mainRedBug, application.MainRedState, got)
+	}
+	return nil
 }
 
 // theSessionRunsOnlyItsCloseOut checks the story's session runs the close-out

@@ -40,6 +40,11 @@ type Check struct {
 	// specs the branch added or changed (mw-gq6.366). Nil runs none.
 	SpecChecks SpecChecks
 
+	// NamedChecks runs just the tests that failed, by name, on the target
+	// branch alone, so that a check says when main is red itself (mw-gq6.645).
+	// Nil never asks.
+	NamedChecks NamedChecks
+
 	// Slot is the merge slot of the rig, taken around the rig's tests so that
 	// one gate per rig runs at a time on this host. Nil takes no slot.
 	Slot MergeSlot
@@ -297,18 +302,19 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	// close-out cannot come apart.
 	var read NextReport
 	report.Refusals = Next{
-		Tracker:    k.Tracker,
-		Landing:    k.Landing,
-		Checks:     checks,
-		SpecChecks: specs,
-		Remote:     k.Remote,
-		Load:       load,
-		Modes:      k.Modes,
-		LoadPoll:   k.LoadPoll,
-		LoadBound:  k.LoadBound,
-		LoadWait:   k.LoadWait,
-		Host:       k.Host,
-		Out:        k.Out,
+		Tracker:     k.Tracker,
+		Landing:     k.Landing,
+		Checks:      checks,
+		SpecChecks:  specs,
+		NamedChecks: k.NamedChecks,
+		Remote:      k.Remote,
+		Load:        load,
+		Modes:       k.Modes,
+		LoadPoll:    k.LoadPoll,
+		LoadBound:   k.LoadBound,
+		LoadWait:    k.LoadWait,
+		Host:        k.Host,
+		Out:         k.Out,
 	}.refusals(ctx, c, &read, true)
 	report.Commits, report.Notes = read.Commits, read.Notes
 	if split && report.Passed() {

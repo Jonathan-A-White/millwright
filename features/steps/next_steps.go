@@ -80,6 +80,8 @@ type nextContext struct {
 	sessionModes application.TranscriptModes // the permission mode the session ran in, as its transcript shows; nil shows none
 	specCommands map[string]string           // the [changed_specs] table this scenario's host has
 	related      map[string]string           // the [related_tests] table this scenario's host has
+	mainRedBug   string                      // the open bug that names main's failing test, when a scenario filed one
+	named        map[string]string           // the [named_tests] table this scenario's host has
 	gateParts    []application.GatePart      // the parts this scenario's host names the rig's gate as
 	partToCheck  int                         // the --part of the check being run, 0 for none
 	background   *backgroundChecks           // the checks a scenario started with --background
@@ -1061,6 +1063,13 @@ func (c *nextContext) nextUseCase() application.Next {
 		related = rig.NewChecks(rig.WithRelatedCommands(c.related))
 	}
 
+	// mw next and mw check are given the named-tests line, with which the tests
+	// a merged result fails are run on the target branch alone (mw-gq6.645).
+	var named application.NamedChecks
+	if len(c.named) > 0 {
+		named = rig.NewChecks(rig.WithNamedCommands(c.named))
+	}
+
 	var smoke application.GristSmokeAfter
 	if c.smokeWatch != nil {
 		smoke = c.smokeAfter()
@@ -1117,6 +1126,7 @@ func (c *nextContext) nextUseCase() application.Next {
 		Tester:         c.testerTrial(),
 
 		RelatedChecks: related,
+		NamedChecks:   named,
 	}
 }
 

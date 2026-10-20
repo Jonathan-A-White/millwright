@@ -37,7 +37,11 @@ func landingChecks(which gateCommands) (*rig.Checks, error) {
 	if err != nil {
 		return nil, err
 	}
-	options := []rig.CheckOption{rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNice(nice), rig.WithJobs(jobs)}
+	named, err := config.NamedTests()
+	if err != nil {
+		return nil, err
+	}
+	options := []rig.CheckOption{rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNamedCommands(named), rig.WithNice(nice), rig.WithJobs(jobs)}
 	if which.related {
 		related, err := config.RelatedTests()
 		if err != nil {

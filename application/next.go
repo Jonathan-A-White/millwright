@@ -209,6 +209,12 @@ type Next struct {
 	RelatedChecks RelatedChecks
 	Vault         Vault
 
+	// NamedChecks runs just the tests that failed on a merged result, by name,
+	// on the target branch alone, to tell a story's failure from main's own red
+	// (mw-gq6.645). Nil, or a rig that names no line, blames the story as
+	// before.
+	NamedChecks NamedChecks
+
 	// CrossSlot is the rig's merge slot across hosts, on the beads server both
 	// hosts share, taken inside Slot so that the other host's close-outs wait
 	// their turn rather than race this one to the remote (mw-gq6.359). The zero
@@ -465,6 +471,11 @@ type NextReport struct {
 	Queued   bool
 	QueuedAs string
 	Trusted  string
+	// MainRed is what the close-out found when the tests that failed on the
+	// story's merged result fail on the target branch alone too: the story was
+	// held on the bead that carries main's fix, not sent back or refused
+	// (mw-gq6.645). Nil when it did not.
+	MainRed *MainRed
 	// HandedBack says the merge slot was still held at the overall most a
 	// close-out waits, and the story was handed back for its close-out alone
 	// (RunCloseOutAgain), its claim, worktree and branch kept (mw-gq6.467).
@@ -605,6 +616,15 @@ type closeOut struct {
 	// through (codemapBandPercent), 0 otherwise; a landing that pushes files
 	// the bug that asks for the map to be trimmed.
 	codemapBytes int
+
+	// mainRed is what a refusal for failing tests found of the target branch
+	// alone, when it fails them too (mw-gq6.645).
+	mainRed *MainRed
+
+	// mergedFailed is the last run of the rig's tests that failed on a merged
+	// result, from which the failing tests are named (mw-gq6.645); the zero
+	// Checked when none did.
+	mergedFailed Checked
 
 	// worktreeFailed says the rig's tests failed in the worktree and the
 	// close-out went on to the merged result (mw-gq6.552): a merge that is a
@@ -988,6 +1008,11 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 			return n.stop(ctx, c, report, ReasonTurnCap, TurnCapWhy(result.Turns),
 				"It wrote its closing comment before the cap, but the close-out refused it as "+string(found[0].Reason)+": "+found[0].Why)
 		}
+		if found[0].Reason == ReasonMainRed && c.mainRed != nil {
+			if rep, held := n.holdOnMainRed(ctx, c, report, c.mainRed, ""); held {
+				return rep, nil
+			}
+		}
 		report.Refused = true
 		return n.stop(ctx, c, report, found[0].Reason, found[0].Why, found[0].Said)
 	}
@@ -1051,6 +1076,13 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 			}
 			kept = "It was not sent back to rebase: " + whyNot + "\n\n" + kept
 		case reasonOf(landErr) == ReasonMergedTestsFail:
+			// The tests that failed on the merged result may fail on the target
+			// branch alone: that is main's red, not the story's (mw-gq6.645).
+			if red := n.mainAlone(ctx, c, report, c.mergedFailed, StartPoint(n.remote(), c.target)); red != nil {
+				if rep, held := n.holdOnMainRed(ctx, c, report, red, kept); held {
+					return rep, nil
+				}
+			}
 			whyNot := n.sendBackForFailingTests(ctx, c, report, landErr, kept)
 			if whyNot == "" {
 				return *report, nil
@@ -1666,7 +1698,20 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 				why += fmt.Sprintf("; %s has %d commits this branch was cut before, which may fix it: mw next goes on to the merged result with them", c.target, behind)
 			}
 		}
-		refuse(reason, why, n.failedTestsDetail(ctx, c, report, checked, where))
+		detail := n.failedTestsDetail(ctx, c, report, checked, where)
+		// A failure the target branch has alone is main's red, not the story's:
+		// a close-out holds the story on main's fix instead of refusing it, and
+		// a check says so (mw-gq6.645).
+		if red := n.mainAlone(ctx, c, report, checked, base); red != nil {
+			why = fmt.Sprintf("main is red: %s fail on %s alone too (`%s`), so the failure is not this branch's", red.tests(), c.target, checked.Command)
+			if all {
+				why += "; mw next holds the story on main's fix and runs its close-out again once that is closed"
+			} else {
+				c.mainRed = red
+			}
+			reason = ReasonMainRed
+		}
+		refuse(reason, why, detail)
 	}
 
 	// The specs the story added or changed, which the rig's gate does not run
@@ -2360,6 +2405,7 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 				dir, checked.Command, checked.Tail(CheckLines)))
 		}
 		if !checked.Passed && !n.codemapBandLetsIn(c, report, checked) {
+			c.mergedFailed = checked
 			ran := ""
 			if gate.Said != "" {
 				ran = " (" + gate.Said + ")"
@@ -3566,6 +3612,9 @@ func (r NextReport) String() string {
 	case r.Interrupted:
 		fmt.Fprintf(&b, "  INTERRUPTED %s\n", r.Why)
 		b.WriteString("          nothing was recorded as its outcome: its claim, worktree and branch are as they were\n")
+	case r.MainRed != nil:
+		fmt.Fprintf(&b, "  HELD (%s) %s\n", r.Reason, r.Why)
+		b.WriteString("          not sent back and no attempt counted: the next dispatch tick after the bead that carries main's fix is closed runs its close-out alone again\n")
 	case r.HandedBack:
 		fmt.Fprintf(&b, "  HANDED BACK (%s) %s\n", r.Reason, r.Why)
 		b.WriteString("          its claim, worktree and branch are kept: the next dispatch tick runs its close-out alone again, not a new session\n")
