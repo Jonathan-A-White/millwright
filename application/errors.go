@@ -638,9 +638,11 @@ func (e Errors) Add(ctx context.Context, req ErrorAdd) error {
 	return e.record(ctx, "add "+class.Slug, written)
 }
 
-// Checked records that a rig was checked for a class, dated today, and when
-// that find makes the class seen twice, says so and asks the shared-component
-// question. It files nothing.
+// Checked records that a rig was checked for a class, dated today. A find
+// (found:<bead>) in a rig whose kinds the class does not list adds those kinds
+// to the class and says which; an ok changes no kinds. When that find makes the
+// class seen twice, it says so and asks the shared-component question. It files
+// nothing.
 func (e Errors) Checked(ctx context.Context, slug, rig, result string) error {
 	if err := safeRig(rig); err != nil {
 		return err
@@ -649,7 +651,7 @@ func (e Errors) Checked(ctx context.Context, slug, rig, result string) error {
 	if err != nil {
 		return err
 	}
-	classes, files, _, err := e.load(ctx)
+	classes, files, kinds, err := e.load(ctx)
 	if err != nil {
 		return err
 	}
@@ -659,9 +661,21 @@ func (e Errors) Checked(ctx context.Context, slug, rig, result string) error {
 	}
 	before := len(class.Occurrences())
 	class.Checks = append(class.Checks, ErrorCheck{Date: e.today(), Rig: rig, Found: found})
+	var added []string
+	if found != "" {
+		for _, kind := range kinds[rig] {
+			if !slices.Contains(class.Kinds, kind) {
+				class.Kinds = append(class.Kinds, kind)
+				added = append(added, kind)
+			}
+		}
+	}
 	written, err := e.put(ctx, class)
 	if err != nil {
 		return err
+	}
+	if len(added) > 0 {
+		fmt.Fprintf(e.Out, "added kinds to %s: %s (the class was found in %s)\n", slug, strings.Join(added, ", "), rig)
 	}
 	if err := e.record(ctx, fmt.Sprintf("checked %s %s %s", slug, rig, result), written); err != nil {
 		return err

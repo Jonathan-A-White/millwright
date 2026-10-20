@@ -54,6 +54,8 @@ func InitializeErrorsScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^mw errors printed the path of "([^"]*)"$`, c.printedThePathOf)
 	ctx.Then(`^mw errors refuses, saying "([^"]*)"$`, c.refusesSaying)
 	ctx.Then(`^mw errors says "([^"]*)"$`, c.says)
+	ctx.Then(`^mw errors does not say "([^"]*)"$`, c.doesNotSay)
+	ctx.Then(`^the error class "([^"]*)" lists the kinds "([^"]*)"$`, c.theClassListsTheKinds)
 	ctx.Then(`^mw errors asks the shared component question$`, func() error { return c.says(application.SharedComponentQuestion) })
 	ctx.Then(`^the error register holds only class files$`, c.holdsOnlyClassFiles)
 	ctx.Then(`^every class in the error register names its kinds$`, c.everyClassNamesItsKinds)
@@ -159,6 +161,31 @@ func (c *errorsContext) says(words string) error {
 	}
 	if !strings.Contains(c.out.String(), words) {
 		return fmt.Errorf("expected %q, got:\n%s", words, c.out.String())
+	}
+	return nil
+}
+
+func (c *errorsContext) doesNotSay(words string) error {
+	if c.err != nil {
+		return fmt.Errorf("mw errors failed: %v", c.err)
+	}
+	if strings.Contains(c.out.String(), words) {
+		return fmt.Errorf("expected no %q, got:\n%s", words, c.out.String())
+	}
+	return nil
+}
+
+func (c *errorsContext) theClassListsTheKinds(slug, kinds string) error {
+	files, _, err := vault.New(c.root).ReadErrorRegister(context.Background(), memorySeat)
+	if err != nil {
+		return err
+	}
+	class, err := application.ParseErrorClass(slug, files[slug])
+	if err != nil {
+		return err
+	}
+	if got, want := strings.Join(class.Kinds, " "), kinds; got != want {
+		return fmt.Errorf("the class %s lists the kinds %q, want %q", slug, got, want)
 	}
 	return nil
 }

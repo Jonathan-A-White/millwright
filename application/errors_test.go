@@ -143,6 +143,76 @@ func TestErrorsCheckedAppendsADatedLineAndAtTwoFindsAsksTheSharedComponentQuesti
 	}
 }
 
+func classKinds(t *testing.T, files *apptest.FakeErrorFiles, slug string) string {
+	t.Helper()
+	class, err := application.ParseErrorClass(slug, files.Classes[slug])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(class.Kinds, ",")
+}
+
+func TestErrorsCheckedFoundInARigAddsThatRigsMissingKindsToTheClass(t *testing.T) {
+	files := &apptest.FakeErrorFiles{}
+	var out bytes.Buffer
+	register := errorsOn(files, &out)
+	ctx := context.Background()
+	_ = register.Kinds(ctx, "legend", []string{"pwa", "grind"})
+	_ = register.Kinds(ctx, "millwright", []string{"go-cli"})
+	_ = register.Add(ctx, application.ErrorAdd{Slug: "a-class", Symptom: "s", Kinds: []string{"go-cli"}, Found: "millwright:mw-a.1"})
+
+	out.Reset()
+	if err := register.Checked(ctx, "a-class", "legend", "found:mw-b.2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := classKinds(t, files, "a-class"); got != "go-cli,pwa,grind" {
+		t.Errorf("a find in legend should add its kinds, got kinds %q", got)
+	}
+	if !strings.Contains(out.String(), "added kinds to a-class: pwa, grind") {
+		t.Errorf("the kinds added should be printed, got %q", out.String())
+	}
+
+	out.Reset()
+	if err := register.Checked(ctx, "a-class", "legend", "found:mw-c.3"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "added kinds") || classKinds(t, files, "a-class") != "go-cli,pwa,grind" {
+		t.Errorf("kinds already listed add nothing, got %q, kinds %q", out.String(), classKinds(t, files, "a-class"))
+	}
+}
+
+func TestErrorsCheckedOkChangesNoKinds(t *testing.T) {
+	files := &apptest.FakeErrorFiles{}
+	var out bytes.Buffer
+	register := errorsOn(files, &out)
+	ctx := context.Background()
+	_ = register.Kinds(ctx, "legend", []string{"pwa"})
+	_ = register.Add(ctx, application.ErrorAdd{Slug: "a-class", Symptom: "s", Kinds: []string{"go-cli"}})
+	out.Reset()
+	if err := register.Checked(ctx, "a-class", "legend", "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if got := classKinds(t, files, "a-class"); got != "go-cli" {
+		t.Errorf("an ok check changes no kinds, got %q", got)
+	}
+	if strings.Contains(out.String(), "added kinds") {
+		t.Errorf("an ok check says nothing of kinds, got %q", out.String())
+	}
+}
+
+func TestErrorsCheckedFoundInARigWithNoKindsChangesNoKinds(t *testing.T) {
+	files := &apptest.FakeErrorFiles{}
+	register := errorsOn(files, &bytes.Buffer{})
+	ctx := context.Background()
+	_ = register.Add(ctx, application.ErrorAdd{Slug: "a-class", Symptom: "s", Kinds: []string{"go-cli"}})
+	if err := register.Checked(ctx, "a-class", "ghost-rig", "found:mw-b.2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := classKinds(t, files, "a-class"); got != "go-cli" {
+		t.Errorf("a rig the kinds file does not name adds nothing, got %q", got)
+	}
+}
+
 func TestErrorsCheckedRefusesAnUnknownClassOrResult(t *testing.T) {
 	files := &apptest.FakeErrorFiles{}
 	register := errorsOn(files, &bytes.Buffer{})

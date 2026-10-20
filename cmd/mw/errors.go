@@ -128,8 +128,10 @@ func newErrorsCheckedCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "checked <slug> <rig> <ok|found:<bead>>",
 		Short: "Record that a rig was checked for a class, dated today",
-		Long: "checked appends a dated check line. When a find makes the class seen twice, it says so and asks\n" +
-			"the shared-component question; it files nothing.",
+		Long: "checked appends a dated check line. A find (found:<bead>) in a rig whose kinds (kinds.toml)\n" +
+			"the class does not list adds those kinds to the class and prints the kinds it added; ok changes\n" +
+			"no kinds. When a find makes the class seen twice, it says so and asks the shared-component\n" +
+			"question; it files nothing.",
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			register, err := errorsFor(cmd)
