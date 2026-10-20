@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // Files reads the checkouts of the rigs on this host from disk.
@@ -65,6 +67,42 @@ func (Files) FilesIn(rigDir, dir string, most int) (int, bool) {
 		return nil
 	})
 	return n, true
+}
+
+// Matching implements application.RigFiles: the files in the checkout at rigDir
+// that the glob covers, counted no further than one past most. The walk starts
+// at the directory the glob names before its first wildcard, and skips what
+// FilesIn does not count.
+func (Files) Matching(rigDir, pattern string, most int) int {
+	start := ""
+	for _, part := range strings.Split(pattern, "/") {
+		if strings.ContainsAny(part, "*?[") {
+			break
+		}
+		start = path.Join(start, part)
+	}
+	root := filepath.Join(rigDir, filepath.FromSlash(start))
+	var n int
+	_ = filepath.WalkDir(root, func(file string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			if file != root && (strings.HasPrefix(entry.Name(), ".") || entry.Name() == "node_modules") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(rigDir, file)
+		if err != nil || !domain.Covers(pattern, filepath.ToSlash(rel)) {
+			return nil
+		}
+		if n++; n > most {
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return n
 }
 
 // Docs reads one file of a rig's checkout on this host, for a seat's boot

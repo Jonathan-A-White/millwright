@@ -93,11 +93,11 @@ Feature: Setting and showing a story's path
   # to change. It is the story's own, so --from never copies it.
 
   Scenario: The files key is set by name and shown
-    When the path of "B" is set with rig=lampas files=src/Reader.tsx,src/data/*.ts
+    When the path of "B" is set with rig=lampas files=src/Reader.tsx,src/data/Rows.ts
     Then setting the path succeeds
-    And the story "B" has the path key "files" as "src/Reader.tsx,src/data/*.ts"
+    And the story "B" has the path key "files" as "src/Reader.tsx,src/data/Rows.ts"
     When the path of "B" is shown
-    Then the path shown has the line: files=src/Reader.tsx,src/data/*.ts
+    Then the path shown has the line: files=src/Reader.tsx,src/data/Rows.ts
 
   Scenario: Copying a sibling's path never copies its files
     Given the path-set story "F" is open with the metadata:
@@ -158,4 +158,13 @@ Feature: Setting and showing a story's path
   Scenario: A files key naming a bare directory is refused, saying how to name files
     When the path of "B" is set with rig=lampas files=src/Talk.tsx,src/,features/ask-composer.feature
     Then setting the path is refused, saying: name the files the story will change
+    And nothing was written
+
+  # mw-gq6.633: tests/e2e/*.ts, a glob over more than twenty files, held a P1
+  # for twenty-five hours as a whole directory would. A glob is counted too;
+  # where the rig is not here to count it, one ending in a wildcard is refused.
+
+  Scenario: A files key naming a glob ending in a wildcard is refused where the rig is not here
+    When the path of "B" is set with rig=lampas files=src/Talk.tsx,tests/e2e/*.ts
+    Then setting the path is refused, saying: name the files instead
     And nothing was written

@@ -789,9 +789,10 @@ the same line under READY. A story with no `files` dispatches as it always did.
 Dispatch keeps when it first held each such story in the host's note
 `host.<host>.files_held`, and once one has waited over 6 hours `mw status` adds
 `held by files for <duration>` under it. `mw path set` and `mw file` refuse a
-`files` key naming a directory of more than 20 files in the rig's checkout here,
-or a whole directory (`src/`, `src/**`) where the rig is not checked out to count
-it: name the files instead.
+`files` key naming a directory, or a glob (`tests/e2e/*.ts`), that covers more than
+20 files in the rig's checkout here, saying how many it matches, or a whole
+directory (`src/`, `src/**`) or a glob ending in a wildcard (`dir/*.ext`,
+`dir/*`) where the rig is not checked out to count it: name the files instead.
 See the files scenarios of `features/dispatch.feature`.
 
 ## Booting a session into a seat

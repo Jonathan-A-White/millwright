@@ -41,6 +41,10 @@ func SharedFile(ours, theirs []string) (string, bool) {
 	return "", false
 }
 
+// Covers reports whether the pattern, a file, a directory or a glob as
+// SharedFile reads them, names the path or a directory it is in.
+func Covers(pattern, name string) bool { return covers(pattern, name) }
+
 // covers reports whether the pattern names the path or a directory it is in.
 func covers(pattern, name string) bool {
 	if pattern == name {
@@ -90,25 +94,63 @@ type NamedDirectory struct {
 
 // Directories is each name of a files key that may name a directory, in
 // order: the ones written as a whole directory, and the plain ones. A glob
-// narrower than a whole directory, "src/*.tsx", is left out.
+// narrower than a whole directory, "src/chat/*.tsx", is left out: Globs has it.
 func Directories(files string) []NamedDirectory {
 	var found []NamedDirectory
 	for _, written := range strings.Split(files, ",") {
 		written = strings.TrimSpace(written)
-		name := strings.TrimPrefix(written, "./")
-		if name == "" {
-			continue
-		}
-		whole := strings.HasSuffix(name, "/") || name == "."
-		parts := strings.Split(strings.Trim(name, "/"), "/")
-		for len(parts) > 0 && (parts[len(parts)-1] == "*" || parts[len(parts)-1] == "**" || parts[len(parts)-1] == ".") {
-			parts, whole = parts[:len(parts)-1], true
-		}
-		dir := strings.Join(parts, "/")
-		if strings.ContainsAny(dir, "*?[") {
+		dir, whole, ok := directoryOf(written)
+		if !ok {
 			continue
 		}
 		found = append(found, NamedDirectory{Written: written, Dir: dir, Whole: whole})
+	}
+	return found
+}
+
+// directoryOf reads one written name as the directory it may name, and whether
+// its words alone say it covers all of it; ok is false for an empty name and
+// for a glob narrower than a whole directory.
+func directoryOf(written string) (dir string, whole, ok bool) {
+	name := strings.TrimPrefix(written, "./")
+	if name == "" {
+		return "", false, false
+	}
+	whole = strings.HasSuffix(name, "/") || name == "."
+	parts := strings.Split(strings.Trim(name, "/"), "/")
+	for len(parts) > 0 && (parts[len(parts)-1] == "*" || parts[len(parts)-1] == "**" || parts[len(parts)-1] == ".") {
+		parts, whole = parts[:len(parts)-1], true
+	}
+	dir = strings.Join(parts, "/")
+	if strings.ContainsAny(dir, "*?[") {
+		return "", false, false
+	}
+	return dir, whole, true
+}
+
+// NamedGlob is one glob of a files key narrower than a whole directory, as it
+// was written (Written), as FileList reads it (Pattern), and whether its last
+// segment is a wildcard (BareWildcard: "tests/e2e/*.ts", "src/*/*"), which
+// names however many files the directory comes to hold.
+type NamedGlob struct {
+	Written      string
+	Pattern      string
+	BareWildcard bool
+}
+
+// Globs is each name of a files key that is a glob narrower than a whole
+// directory, in order: "tests/e2e/*.ts", "src/**/*.ts". A name Directories
+// reads ("src/*", "src/**", a plain path) is not here.
+func Globs(files string) []NamedGlob {
+	var found []NamedGlob
+	for _, written := range strings.Split(files, ",") {
+		written = strings.TrimSpace(written)
+		if _, _, ok := directoryOf(written); ok || written == "" {
+			continue
+		}
+		pattern := strings.Trim(strings.TrimPrefix(written, "./"), "/")
+		last := pattern[strings.LastIndex(pattern, "/")+1:]
+		found = append(found, NamedGlob{Written: written, Pattern: pattern, BareWildcard: strings.ContainsAny(last, "*?[")})
 	}
 	return found
 }

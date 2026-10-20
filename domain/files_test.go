@@ -60,3 +60,15 @@ func TestDirectoriesReadsEachNameThatMayBeADirectory(t *testing.T) {
 		t.Errorf("expected\n%+v\ngot\n%+v", want, got)
 	}
 }
+
+func TestGlobsReadsEachNameNarrowerThanAWholeDirectory(t *testing.T) {
+	got := domain.Globs(" src/, src/Talk.tsx, src/chat/*.tsx, src/ipa/**, ./tests/e2e/*.ts, tests/**/spec.ts, **, ")
+	want := []domain.NamedGlob{
+		{Written: "src/chat/*.tsx", Pattern: "src/chat/*.tsx", BareWildcard: true},
+		{Written: "./tests/e2e/*.ts", Pattern: "tests/e2e/*.ts", BareWildcard: true},
+		{Written: "tests/**/spec.ts", Pattern: "tests/**/spec.ts"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("expected\n%+v\ngot\n%+v", want, got)
+	}
+}

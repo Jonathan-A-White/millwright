@@ -27,7 +27,7 @@ three.
 | `attempts-exhausted` | it was started `max_attempts` times already |
 | `handed-back` | its Builder handed it back (a comment opening `HANDED BACK`) and no later comment opening `RE-PATHED:` says what changed (below) |
 | `needs-files-key` | it names no files key and its rig's file says `files_expected = true`: `mw path set <id> files=<csv>` ends it, and it holds no other story back (mw-gq6.599) |
-| `shared-files` | it names a file a running story of the rig names or has changed; since when is kept in the note `host.<host>.files_held` |
+| `shared-files` | it names a file a running story of the rig names or has changed; since when is kept in the note `host.<host>.files_held`. A files key naming a directory or a glob over more than 20 files is refused by `mw path set` and `mw file` (globs are counted too, mw-gq6.633), so none is held behind a crowd |
 | `testers-per-rig` | it is a Tester story and its rig runs `testers_per_rig` (the `[dampers]` key, default 1) Tester stories already, on any host |
 | `cap` | the host runs as many sessions as it may |
 

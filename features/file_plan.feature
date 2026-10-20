@@ -204,14 +204,14 @@ Feature: Filing the Mayor's plan
     Then the ready stories of the epic on vps are gateway, formulas
 
   Scenario: A story's files in the plan are written as its files key
-    Given the story "gateway" names the files "application/file.go, domain/*.go"
+    Given the story "gateway" names the files "application/file.go, domain/**/plan.go"
     When the plan is filed
-    Then the filed story "gateway" carries the files key "application/file.go, domain/*.go"
+    Then the filed story "gateway" carries the files key "application/file.go, domain/**/plan.go"
 
   Scenario: A story whose files overlap a running story's names it, and the dependency to add
-    Given the story "gateway" names the files "application/file.go, domain/*.go"
+    Given the story "gateway" names the files "application/file.go, domain/**/plan.go"
     And the story "module" names the files "go.mod"
-    And the story "formulas" names the files "formulas/*.toml"
+    And the story "formulas" names the files "formulas/tdd-feature.toml"
     And the story "mw-run1" "Rework the plan" is running on the rig "millwright" with the files "domain/plan.go"
     When the plan is filed
     Then filing succeeds

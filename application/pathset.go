@@ -29,9 +29,10 @@ type PathSet struct {
 
 	// Rigs are the rigs checked out on this host, by name, and RigFiles counts
 	// the files of a directory in one: a files key that names a directory of
-	// more than MostFilesInADirectory files is refused (mw-gq6.442). A rig not
-	// checked out here cannot be counted in, so a whole directory named for it
-	// ("src/") is refused there too.
+	// more than MostFilesInADirectory files is refused (mw-gq6.442), and so is a
+	// glob matching more. A rig not checked out here cannot be counted in, so a
+	// whole directory named for it ("src/") is refused there too, and a glob
+	// ending in a wildcard ("tests/e2e/*.ts").
 	Rigs     map[string]string
 	RigFiles RigFiles
 
@@ -138,19 +139,27 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 	return path, nil
 }
 
-// MostFilesInADirectory is the most files a directory a files key names may
-// hold (mw-gq6.442). Dispatch holds a story behind every running story on its
-// rig that touches anything under a directory it names, so a key naming src/
-// kept a lampas bug unstarted for three days; twenty is a module's worth, a few
-// stories' files, and well short of a whole source tree.
+// MostFilesInADirectory is the most files a directory a files key names, or a
+// glob in it, may hold (mw-gq6.442, mw-gq6.633). Dispatch holds a story behind
+// every running story on its rig that touches anything under a directory it
+// names, so a key naming src/ kept a lampas bug unstarted for three days, and
+// tests/e2e/*.ts, over more files than that, held a P1 for twenty-five hours;
+// twenty is a module's worth, a few stories' files, and well short of a whole
+// source tree.
 const MostFilesInADirectory = 20
+
+// mostGlobCount is where a glob's files stop being counted for a refusal to
+// say how many there are.
+const mostGlobCount = 1000
 
 // crowdedFiles refuses a path whose files key names a directory of more than
 // MostFilesInADirectory files in its rig's checkout here, or one written as a
 // whole directory ("src/", "src/**") when the rig is not checked out here to
-// count it in. A directory the checkout does not have yet is a new one, and is
-// taken: nothing running touches it. A nil RigFiles counts nothing, so a whole
-// directory is refused and a plain name is taken, as for a rig not here.
+// count it in; and likewise a glob that matches more than that many files, or,
+// where the rig is not checked out, one whose last segment is a wildcard
+// ("tests/e2e/*.ts"). A directory the checkout does not have yet is a new one,
+// and is taken: nothing running touches it. A nil RigFiles counts nothing, so a
+// whole directory is refused and a plain name is taken, as for a rig not here.
 func crowdedFiles(rigs map[string]string, files RigFiles, path domain.Path) error {
 	rig := strings.TrimSpace(path.Rig)
 	rigDir, here := rigs[rig]
@@ -166,6 +175,21 @@ func crowdedFiles(rigs map[string]string, files RigFiles, path domain.Path) erro
 			return crowded(named, fmt.Sprintf("a directory of more than %d files in %s", MostFilesInADirectory, rig))
 		}
 	}
+	for _, glob := range domain.Globs(path.Files) {
+		if !here {
+			if glob.BareWildcard {
+				return crowdedGlob(glob, fmt.Sprintf("a glob whose last part is a wildcard, and %s is not checked out here to count what it matches", orRig(rig)))
+			}
+			continue
+		}
+		if n := files.Matching(rigDir, glob.Pattern, mostGlobCount); n > MostFilesInADirectory {
+			count := fmt.Sprintf("%d", n)
+			if n > mostGlobCount {
+				count = fmt.Sprintf("more than %d", mostGlobCount)
+			}
+			return crowdedGlob(glob, fmt.Sprintf("a glob that matches %s files in %s, more than the %d a files key may", count, rig, MostFilesInADirectory))
+		}
+	}
 	return nil
 }
 
@@ -174,7 +198,14 @@ func crowdedFiles(rigs map[string]string, files RigFiles, path domain.Path) erro
 func crowded(named domain.NamedDirectory, what string) error {
 	return fmt.Errorf("the files key names %s, %s, and dispatch holds a story behind every running story "+
 		"that touches anything in it: name the files the story will change, comma-separated, "+
-		"as files=src/Talk.tsx,src/chat/*.tsx, or a directory of at most %d files", named.Written, what, MostFilesInADirectory)
+		"as files=src/Talk.tsx,src/chat/Chat.tsx, or a directory of at most %d files", named.Written, what, MostFilesInADirectory)
+}
+
+// crowdedGlob is the refusal of a files key naming a glob over too many files.
+func crowdedGlob(glob domain.NamedGlob, what string) error {
+	return fmt.Errorf("the files key names %s, %s, and dispatch holds a story behind every running story "+
+		"that touches any file it matches: name the files instead, the ones the story will change, comma-separated, "+
+		"as files=src/Talk.tsx,src/chat/Chat.tsx, or a glob of at most %d files", glob.Written, what, MostFilesInADirectory)
 }
 
 // orRig is the rig as a refusal names it, "its rig" when the path has none.

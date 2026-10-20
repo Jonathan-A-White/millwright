@@ -37,13 +37,14 @@ func newPathSetCmd() *cobra.Command {
 			"  mw path set B --from A model=opus    copy them, with model overridden\n" +
 			"  mw path set B rig=lampas             set only the rig\n" +
 			"  mw path set B size=M                 set only the size (XS, S, M, L or XL)\n" +
-			"  mw path set B files=src/Reader.tsx,src/data/*.ts\n\n" +
+			"  mw path set B files=src/Reader.tsx,src/data/Rows.ts\n\n" +
 			"Only the seven keys are copied from the sibling, never its files nor its other\n" +
 			"metadata. --from does not copy size (nor bump): a size is the story's own, so give it\n" +
 			"as size=S after --from. An unknown key, a sibling with no rig, and a story that is in\n" +
 			"progress or closed are refused, and nothing is written: a path is adjusted only before a story starts.\n" +
-			"So is a files key naming a directory of more than " + strconv.Itoa(application.MostFilesInADirectory) + " files in the rig's checkout here, or\n" +
-			"a whole directory (src/, src/**) where the rig is not checked out to count it.\n\n" +
+			"So is a files key naming a directory of more than " + strconv.Itoa(application.MostFilesInADirectory) + " files in the rig's checkout here, a glob matching more than that, or\n" +
+			"a whole directory (src/, src/**) or a glob ending in a wildcard (tests/e2e/*.ts) where the rig is not\n" +
+			"checked out to count it.\n\n" +
 			"A story in an epic whose rig asks for a last story (epic_last_story_labels) with exactly one\n" +
 			"open or held story carrying it is made a need of that story, and one line says so.",
 		Args: cobra.MinimumNArgs(1),

@@ -19,6 +19,11 @@ type RigFiles interface {
 	// it when dir is "", counted no further than one past most, and whether dir
 	// is a directory there at all (mw-gq6.442).
 	FilesIn(rigDir, dir string, most int) (int, bool)
+
+	// Matching is how many files in the checkout at rigDir a glob of a files
+	// key covers (a file under a directory it matches counts), counted no
+	// further than one past most (mw-gq6.633).
+	Matching(rigDir, pattern string, most int) int
 }
 
 // WrongRig is a story whose files key names paths that exist in none of its

@@ -65,3 +65,34 @@ func TestADirectorysFilesAreCountedUpToOnePastTheMost(t *testing.T) {
 		}
 	}
 }
+
+func TestAGlobsFilesAreCountedUpToOnePastTheMost(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"tests/e2e/a.ts", "tests/e2e/b.ts", "tests/e2e/c.json", "tests/e2e/sub/d.ts",
+		"tests/e2e/node_modules/x.ts", "tests/unit/e.ts", "top.ts"} {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := rig.Files{}
+	for _, c := range []struct {
+		pattern string
+		most    int
+		n       int
+	}{
+		{"tests/e2e/*.ts", 20, 2},
+		{"tests/e2e/*.ts", 1, 2},
+		{"tests/**/*.ts", 20, 4},
+		{"tests/*/*.ts", 20, 3},
+		{"*.ts", 20, 1},
+		{"gone/*.ts", 20, 0},
+	} {
+		if n := files.Matching(dir, c.pattern, c.most); n != c.n {
+			t.Errorf("Matching(%q, %d) = %d; want %d", c.pattern, c.most, n, c.n)
+		}
+	}
+}

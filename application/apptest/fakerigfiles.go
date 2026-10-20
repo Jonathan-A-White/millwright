@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // FakeRigFiles is an in-memory application.RigFiles: the paths each checkout
@@ -63,4 +64,18 @@ func (f *FakeRigFiles) FilesIn(rigDir, dir string, most int) (int, bool) {
 		}
 	}
 	return min(n, most+1), n > 0
+}
+
+// Matching implements application.RigFiles: the files the checkout holds that
+// the glob covers, counted no further than one past most.
+func (f *FakeRigFiles) Matching(rigDir, pattern string, most int) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var n int
+	for name := range f.files[rigDir] {
+		if domain.Covers(pattern, name) {
+			n++
+		}
+	}
+	return min(n, most+1)
 }
