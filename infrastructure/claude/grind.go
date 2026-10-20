@@ -59,6 +59,27 @@ func NewGrinder(opts ...GrinderOption) *Grinder {
 	return g
 }
 
+// APIKeyEnv is the variable Claude Code reads an Anthropic API key from: when
+// it is set the session is billed to that key, else to the login.
+const APIKeyEnv = "ANTHROPIC_API_KEY"
+
+// GrindEnv is the environment a grind's session runs in: environ without any
+// ANTHROPIC_API_KEY, so the subscription login is used, and with the call's
+// key when it carries one. The key travels here and nowhere else: never in the
+// argument list.
+func GrindEnv(environ []string, call application.GrindCall) []string {
+	env := make([]string, 0, len(environ)+1)
+	for _, entry := range environ {
+		if !strings.HasPrefix(entry, APIKeyEnv+"=") {
+			env = append(env, entry)
+		}
+	}
+	if call.APIKey != "" {
+		env = append(env, APIKeyEnv+"="+call.APIKey)
+	}
+	return env
+}
+
 // GrindArgs is a grind's command line after the program, one argument each,
 // never read by a shell: the prompt is the last.
 func GrindArgs(call application.GrindCall) ([]string, error) {
@@ -141,6 +162,7 @@ func (g *Grinder) Grind(ctx context.Context, call application.GrindCall) (applic
 
 	cmd := exec.CommandContext(ctx, g.program, args...)
 	cmd.Dir = call.Dir
+	cmd.Env = GrindEnv(os.Environ(), call)
 	cmd.Stdin = null
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
@@ -213,6 +235,7 @@ func (g *Grinder) Warm(call application.GrindCall) (application.WarmSession, err
 	}
 	cmd := exec.Command(g.program, args...)
 	cmd.Dir = call.Dir
+	cmd.Env = GrindEnv(os.Environ(), call)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.WaitDelay = time.Second
 	stdin, err := cmd.StdinPipe()
