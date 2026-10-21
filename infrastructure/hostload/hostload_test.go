@@ -139,3 +139,17 @@ func TestProcLeavesTheSwapRateUnknownWithoutASampleTimeOrAFile(t *testing.T) {
 		}
 	}
 }
+
+func TestUptimeIsTheLineTheProgramPrints(t *testing.T) {
+	program := filepath.Join(t.TempDir(), "uptime")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\necho ' 09:00:00 up 3 days,  load average: 0.20, 0.30, 0.40'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	line, err := hostload.Uptime{Program: program}.Uptime(context.Background())
+	if want := "09:00:00 up 3 days,  load average: 0.20, 0.30, 0.40"; err != nil || line != want {
+		t.Errorf("uptime = %q, %v; want %q", line, err, want)
+	}
+	if _, err := (hostload.Uptime{Program: "/no/such/uptime"}).Uptime(context.Background()); err == nil {
+		t.Errorf("a program that is not there was no error")
+	}
+}

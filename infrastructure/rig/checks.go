@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -178,6 +179,20 @@ var _ application.SuiteRunner = (*Checks)(nil)
 // shell in dir, judged as Run judges a rig's tests, with the environment of
 // the rig it is run for.
 func (c *Checks) RunLine(ctx context.Context, rig, dir, command string) (application.Checked, error) {
+	return c.runLineWith(ctx, rig, dir, command, nil)
+}
+
+// Checks satisfies the port a nightly timing run's command line is run through.
+var _ application.TimingRunner = (*Checks)(nil)
+
+// RunTiming implements application.TimingRunner: RunLine with env added after
+// the rig's own, so that MW_TIMING=only takes the place of the MW_TIMING=skip
+// every other run of the rig's tests is given.
+func (c *Checks) RunTiming(ctx context.Context, rig, dir, command string, env map[string]string) (application.Checked, error) {
+	return c.runLineWith(ctx, rig, dir, command, env)
+}
+
+func (c *Checks) runLineWith(ctx context.Context, rig, dir, command string, extra map[string]string) (application.Checked, error) {
 	if dir == "" {
 		return application.Checked{}, fmt.Errorf("running `%s`: where?", command)
 	}
@@ -185,7 +200,16 @@ func (c *Checks) RunLine(ctx context.Context, rig, dir, command string) (applica
 		return application.Checked{}, fmt.Errorf("running `%s`: %w", command, err)
 	}
 
-	output, err := runLine(ctx, c.shell, command, dir, c.nice, c.commandEnv(rig))
+	env := c.commandEnv(rig)
+	names := make([]string, 0, len(extra))
+	for name := range extra {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		env = append(env, name+"="+extra[name])
+	}
+	output, err := runLine(ctx, c.shell, command, dir, c.nice, env)
 	checked := application.Checked{Command: command, Output: output, Passed: err == nil}
 	if err == nil {
 		return checked, nil
