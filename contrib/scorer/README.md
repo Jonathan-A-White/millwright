@@ -35,6 +35,16 @@ MW_SCORER_HESITATION_SECONDS=0.8   # a gap longer than this before a word is a h
 MW_SCORER_THREADS=4                # CPU threads the model may use
 ```
 
+## Measuring, and the log
+
+Never send a test clip to the live scorer on `127.0.0.1:8765`: it works one request at a
+time and the mill's readings wait behind it. `contrib/scorer/measure.sh` starts a private
+one from the installed venv on a free port, prints `MW_SCORER_URL=<url>` and stops it on
+exit (`measure.sh CMD...` runs CMD with that variable set, then stops it); docs/scorers.md
+("Measuring") says more. The live scorer logs, to `journalctl --user -u mw-scorer`, one line
+for each request it scored, `mw-scorer: scored audio=5.0s wall=0.4s`, and a `WARNING` line
+when a request took over 60 s (`server.SLOW_SECONDS`).
+
 ## The way back
 
 ```sh

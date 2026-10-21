@@ -217,6 +217,30 @@ produces `[]`, and for an insertion the `Phonemes` listed are what was said, so 
 shows the status and Azure's own words. A request that takes longer than two minutes is
 timed out.
 
+## Measuring
+
+**Never send a test clip to `127.0.0.1:8765`.** That is the live scorer, the one the
+mill and the Governor's readings use. It works one request at a time, so a long test
+clip makes every reading behind it wait, and the mill gives up on the local scorer
+after its time limit: a 10-minute clip sent there once held three smoke readings until
+they timed out (mw-gq6.665). To measure, time or try the scorer, start a private one:
+
+```sh
+contrib/scorer/measure.sh                       # prints MW_SCORER_URL=http://127.0.0.1:<port>, runs until Ctrl-C
+contrib/scorer/measure.sh sh -c 'curl ... "$MW_SCORER_URL/score"'   # runs the command with MW_SCORER_URL set, then stops the scorer
+```
+
+It starts `python -m mw_scorer` from the installed venv (`install.sh`) on a free local
+port, with this checkout's code, prints the URL on its first line, and stops the scorer
+whenever it exits. Point the client at that URL (`MW_SCORER_URL=<url> go test
+./infrastructure/scorer/`, or `local_url` in a throwaway config), never at the live one.
+It loads the model again (a few seconds, ~1.8 GB of memory).
+
+The live scorer says when it is hogged: for each request it scored it writes one line
+to its journal (`journalctl --user -u mw-scorer`), `mw-scorer: scored audio=<s>s
+wall=<s>s`, and when the wall time is over 60 s a second line, `mw-scorer: WARNING: a
+request took <s>s (over 60s) ...`.
+
 ## In a grist
 
 An app's grind file opts a recording in (`grinds/<kind>.json`, `application/grist.go`'s
