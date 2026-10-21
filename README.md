@@ -2685,6 +2685,15 @@ was wanted and what came; a refused, failed or unanswered grist is a failure
 too. A kind with no scenario is a warning, not a failure, and a grind that
 forwards to the Mayor is not smoked. It exits 1 on a failure.
 
+A model's answer is a sample, so a smoke re-sends a failing example twice before it holds
+(mw-gq6.664): an answer that misses its `expect` or does not fit the schema is sent two more
+times. A miss on all three sends fails and holds as above. A miss that does not repeat holds
+nothing: the report says `flaky: <app>/<kind>/<example> missed 1 of 3` (`mw status` shows it as a
+warning under GRIST SMOKE), and one mail to the Mayor, `Smoke flake: <app>/<kind>/<example>`, gives
+the field, what was wanted and got, and the failing run's txid, so the slip is still filed. A
+smoke that is "not run" (limit, licence, backend) sends nothing more; a refusal, a silence and a
+failure of the mill's own are not re-sent.
+
 After every landing in a rig, `mw next` runs the smoke without being asked: for
 an app whose rig landed a change to `grinds/` or to the rig's grist client paths,
 and for every app with grinds when the factory's own rig landed a change to

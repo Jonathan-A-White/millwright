@@ -29,8 +29,8 @@
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | {postern,hands*,homemove} |
 | PosternInboxShow (kept messages, --show) | application/posternkeep.go | postern_inbox |
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | {bsv,stampqueue,chainlookup}, rig/worktree.go |
-| Grinder, WarmGrinder, GristPoolBoard, GrindSource, Grist*, VisionSource | grist.go, application/gristpool.go, application/vision.go, application/gristruns.go, application/personcap.go, griststatus.go, gristsmoke.go | {claude/grind,rig/{grinds,landingof},hostlock/try}.go, grist |
-| GristCredits, GristCredit{Key,State}, GristCreditsAdmin (mw grist credits: status, on, off, key, clear; config [grist] api_credits, api_key_file; state grist/credits.json) | application/gristcredits.go | {grist/credits,claude/grind}.go, cmd/mw/grist_credits.go |
+| Grinder, WarmGrinder, GristPoolBoard, GrindSource, Grist* (smoke re-sends misses twice), VisionSource | grist.go, application/gristpool.go, application/vision.go, application/gristruns.go, application/personcap.go, griststatus.go, gristsmoke.go | {claude/grind,rig/{grinds,landingof},hostlock/try}.go, grist |
+| GristCredits, GristCredit{Key,State}, GristCreditsAdmin (grist credits status|on|off|key|clear; [grist] api_credits, api_key_file; credits.json) | application/gristcredits.go | {grist/credits,claude/grind}.go, cmd/mw/grist_credits.go |
 | IdeasOnlyReader, IdeasOnlyFiles | ideasonly.go | {postern/http.go,ideasonly} |
 | Suite* | application/suite.go, application/suitenightly.go | {rig/{worktree,checks}.go,vault/vault.go,apartproc} |
 | Scorer, ScoreTimeout, SecretStore, Google*, ContactBook (scorer.LocalTimeoutFor: 120 s+0.5 s/audio s, max 540) | application/scorer.go, secrets.go, application/google.go, application/contacts.go | {scorer,sops,google} |
