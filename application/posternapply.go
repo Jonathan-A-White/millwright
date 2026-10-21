@@ -268,12 +268,7 @@ func (i PosternInbox) apply(ctx context.Context, tapsOnly bool, after int64) (li
 			}
 			continue
 		}
-		var outcome string
-		var saved []posternSavedFile
-		if len(m.files()) > 0 {
-			outcome, saved = i.attachmentOutcome(ctx, m)
-		}
-		result, handled, err := i.applyOne(ctx, m, outcome, saved)
+		result, outcome, handled, err := i.applySavingFiles(ctx, m)
 		if err != nil {
 			return lines, after, err
 		}
@@ -372,6 +367,19 @@ func (i PosternInbox) markApplied(ctx context.Context, applied map[string]string
 	}
 	applied[result.Txid] = result.line()
 	return nil
+}
+
+// applySavingFiles is applyOne for a message whose files are saved first: the
+// one place a Governor message is applied, so that no route marks a message
+// applied with its files unsaved (mw-gq6.686). outcome is the lines a reader is
+// shown of the files' download, "" when the message carries none.
+func (i PosternInbox) applySavingFiles(ctx context.Context, m PosternInboxMessage) (result posternApplied, outcome string, handled bool, err error) {
+	var saved []posternSavedFile
+	if len(m.files()) > 0 {
+		outcome, saved = i.attachmentOutcome(ctx, m)
+	}
+	result, handled, err = i.applyOne(ctx, m, outcome, saved)
+	return result, outcome, handled, err
 }
 
 // applyOne applies one verified message from the Governor, reporting what it

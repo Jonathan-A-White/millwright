@@ -177,7 +177,7 @@ func ideaCardItems(held []IdeasOnlyHeld, ended time.Time) []string {
 
 // applyHeldTaps applies, in the order he made them, each of the held records
 // that is one of his section 13 taps and not yet applied: as the hook would
-// have, through applyOne. It reports a line for each applied and for each that
+// have, through applySavingFiles. It reports a line for each applied and for each that
 // could not be, so that one bad tap never holds the rest back; the inbox's own
 // read tries it again. With no tracker nothing can be applied, and the taps
 // are left to that read.
@@ -208,7 +208,7 @@ func (i PosternInbox) applyHeldTaps(ctx context.Context, held []IdeasOnlyHeld) (
 		if _, isTap := decodePosternAction(m.Text); !isTap {
 			continue
 		}
-		result, handled, err := i.applyOne(ctx, m, "", nil)
+		result, _, handled, err := i.applySavingFiles(ctx, m)
 		if err == nil && handled {
 			err = i.markApplied(ctx, done, result)
 		}

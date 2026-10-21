@@ -827,16 +827,24 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 				continue
 			}
 		}
-		line, saved := i.attachmentOutcome(ctx, m)
+		// A message of the Governor's that this read applies has its files
+		// saved by the same applySavingFiles the Apply pass uses; any other has
+		// them downloaded for the lines under it.
+		governor := m.Verified && i.isGovernor(m) && i.Tracker != nil
+		var line string
+		if !governor {
+			line, _ = i.attachmentOutcome(ctx, m)
+		}
 		// A record whose sender is not verified is never read as a reply,
 		// however its plaintext decodes: recording its answer on a bead
 		// would take a forged or unverifiable claim as someone's word.
 		switch {
-		case m.Verified && i.isGovernor(m) && i.Tracker != nil:
-			result, handled, err := i.applyOne(ctx, m, line, saved)
+		case governor:
+			result, outcome, handled, err := i.applySavingFiles(ctx, m)
 			if err != nil {
 				return nil, err
 			}
+			line = outcome
 			if handled {
 				if err := i.markApplied(ctx, applied, result); err != nil {
 					return nil, err
