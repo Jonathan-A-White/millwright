@@ -80,3 +80,16 @@ func TestMailInboxHasAnAllFlag(t *testing.T) {
 		t.Fatalf("expected mw mail inbox to have --all, off unless given, got %+v", all)
 	}
 }
+
+// The Mayor's mail names `bd mail inbox --unread`: mw mail inbox lists only the
+// unread, so --unread is accepted and changes nothing (mw-gq6.678).
+func TestMailInboxAcceptsUnreadAndChangesNothing(t *testing.T) {
+	inbox, _, err := newRootCmd().Find([]string{"mail", "inbox"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unread := inbox.Flags().Lookup("unread")
+	if unread == nil || unread.DefValue != "false" {
+		t.Fatalf("expected mw mail inbox to have --unread, off unless given, got %+v", unread)
+	}
+}

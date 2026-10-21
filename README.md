@@ -3747,7 +3747,14 @@ ago or more (300, five minutes; 60 on the desktop, where a sync is a few local
 writes);
 lists `bd mail inbox` and compares its ids with the ones it has announced; and
 runs `mw nudge` (below), reusing the same synced beads. For new mail, it types
-`New mail for mayor: <n> message(s). Run bd mail inbox.`; for whatever `mw
+`New mail for mayor: <n> message(s): <ids>. Run bd mail inbox.`, naming the ids
+it counts (the first ten, then `and <m> more`; mw-gq6.678): every one is in
+that same listing, which is the unread mail (the open mail of the mailbox,
+the set `mw mail inbox` lists, and a mail leaves it once it is read or
+replied to), so the count can be checked against it by id. `bd mail inbox`
+is itself the unread listing: its delegate takes `--unread` for a mailbox
+name and lists nothing, where `mw mail inbox [--unread]` accepts the flag;
+for whatever `mw
 nudge` still has to say once its own per-condition hourly damper is applied,
 `Quiet alarm for mayor: <clause>[; <clause> ...]. Run mw status.` — either or
 both, only when the pane is not working (no `esc to interrupt`) and its input
