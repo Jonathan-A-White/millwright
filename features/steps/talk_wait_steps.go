@@ -652,8 +652,14 @@ func (c *talkWaitContext) arm() error {
 	})
 }
 
+// talkWaitBudget is how long waitFor lets a condition come true. It is a ceiling,
+// not a delay: the wait returns the moment the condition holds, so a generous
+// one costs nothing when the host is quiet and keeps a loaded host from failing
+// a scenario that only needed more time.
+const talkWaitBudget = 30 * time.Second
+
 func (c *talkWaitContext) waitFor(what string, ok func() bool) error {
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(talkWaitBudget)
 	for time.Now().Before(deadline) {
 		if ok() {
 			return nil
