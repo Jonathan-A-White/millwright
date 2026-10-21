@@ -1029,14 +1029,21 @@ func (r *talkWaitRun) postNotice(ctx context.Context, m PosternInboxMessage) str
 	if more := postWordLines(m.Text) - 1; more > 0 {
 		notice += fmt.Sprintf(" [+%d more lines]", more)
 	}
-	switch pictures {
-	case 0:
-	case 1:
-		notice += " [carries 1 picture: mw postern inbox downloads them]"
-	default:
-		notice += fmt.Sprintf(" [carries %d pictures: mw postern inbox downloads them]", pictures)
-	}
+	notice += carriesPictures(pictures, "mw postern inbox downloads them")
 	return notice
+}
+
+// carriesPictures is the suffix that says a message carried n pictures, " [carries
+// N picture(s): <what>]", the same words in the wait's notice and in the Apply
+// pass's mail; "" for none.
+func carriesPictures(n int, what string) string {
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return " [carries 1 picture: " + what + "]"
+	}
+	return fmt.Sprintf(" [carries %d pictures: %s]", n, what)
 }
 
 // postWordLines is how many lines of text have any words.

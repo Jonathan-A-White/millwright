@@ -842,7 +842,11 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 					return nil, err
 				}
 				switch {
-				case result.Kind == "answer", result.Kind == "comment" && len(m.files()) == 0:
+				case result.Kind == "answer":
+					continue
+				case result.Kind == "comment" && len(m.files()) == 0:
+					i.printf("%s\n", result.line())
+					i.printCommentWords(m, result.line())
 					continue
 				case result.Kind != "comment":
 					i.printf("%s\n", result.line())
@@ -885,6 +889,13 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 // line holds what was heard.
 func (i PosternInbox) printAppliedEarlier(m PosternInboxMessage, note string) {
 	i.printf("already applied earlier: %s\n", note)
+	i.printCommentWords(m, note)
+}
+
+// printCommentWords prints the whole text of m when note, the line of what a
+// pass did with it, says it applied it as a comment: the pass put the words on
+// the bead and this read is the Mayor's only sight of them.
+func (i PosternInbox) printCommentWords(m PosternInboxMessage, note string) {
 	if strings.HasPrefix(note, "applied comment ") && strings.TrimSpace(m.Text) != "" {
 		i.printf("%s\n", m.Text)
 	}

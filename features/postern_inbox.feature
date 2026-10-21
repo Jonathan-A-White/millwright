@@ -9,9 +9,9 @@ Feature: mw postern inbox
   them read, by moving a cursor kept in a bd kv note, never an event of its
   own. --unread-count prints only how many are unread, without reading them,
   so a notifier can poll it without consuming anything. A verified message
-  from the Governor whose channel is a bead's lands as a comment on that bead
-  instead of printing in the inbox, once per txid; a named channel, or a
-  sender who is not the Governor, is left in the inbox as before.
+  from the Governor whose channel is a bead's lands as a comment on that bead,
+  once per txid, and is printed whole under the line that says so; a named
+  channel, or a sender who is not the Governor, is left in the inbox as before.
 
   Background:
     Given a throwaway postern key
@@ -175,14 +175,15 @@ Feature: mw postern inbox
     Then reading succeeds
     And it printed "channel mw-abc.2"
 
-  Scenario: a Governor's message in a bead's channel lands as a comment on that bead, not in the inbox
+  Scenario: a Governor's message in a bead's channel lands as a comment on that bead and is printed whole once
     Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
     And bead "mw-thread.1" is known to the tracker
     And a postern message from "governor-pubkey-hex" in the channel of bead "mw-thread.1" with text "ship it" and txid "gov-txid-1"
     When mw postern inbox is run
     Then reading succeeds
     And bead "mw-thread.1" is commented by the Governor saying "ship it"
-    And it did not print "ship it"
+    And it printed "applied comment mw-thread.1 txid gov-txid-1"
+    And it printed "ship it"
 
   Scenario: a Governor's message in a bead's channel that begins VERIFIED is recorded with VERIFIED as the comment's first word
     Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
