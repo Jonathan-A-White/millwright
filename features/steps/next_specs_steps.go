@@ -21,6 +21,7 @@ func registerNextSpecsSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig has a changed-specs command that logs the specs it is given$`, c.theRigLogsChangedSpecs)
 	ctx.Given(`^the rig has a changed-specs command that fails, saying "([^"]*)"$`, c.theRigsChangedSpecsFail)
 	ctx.Given(`^the rig has a changed-specs command that fails only once "([^"]*)" is merged in$`, c.theRigsChangedSpecsFailOnlyWhenMerged)
+	ctx.Given(`^the rig's timing_tests name the spec "([^"]*)"$`, c.theRigsTimingTestsNameTheSpec)
 	ctx.Given(`^the story "([^"]*)" also added the spec "([^"]*)"$`, c.theStoryAddedAFile)
 	ctx.Given(`^the story "([^"]*)" also added the file "([^"]*)"$`, c.theStoryAddedAFile)
 
@@ -38,6 +39,14 @@ func (c *nextContext) setSpecCommand(command string) {
 		c.specCommands = map[string]string{}
 	}
 	c.specCommands[c.rigKey()] = command
+}
+
+func (c *nextContext) theRigsTimingTestsNameTheSpec(spec string) error {
+	if c.timingTests == nil {
+		c.timingTests = map[string][]string{}
+	}
+	c.timingTests[c.rigKey()] = append(c.timingTests[c.rigKey()], spec)
+	return nil
 }
 
 func (c *nextContext) theRigLogsChangedSpecs() error {

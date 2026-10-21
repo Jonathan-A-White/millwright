@@ -394,10 +394,13 @@ type RelatedChecks interface {
 
 // SpecsChecked is one run of a rig's changed-specs command: the spec files it
 // was run on (empty when the story changed none, or the rig names no command, and
-// then nothing was run) and what that run came to.
+// then nothing was run) and what that run came to. LeftOut are the changed
+// specs the rig's timing_tests name, which are not given to the command: they
+// run only in the nightly timing job (mw-gq6.682).
 type SpecsChecked struct {
 	Checked
-	Specs []string
+	Specs   []string
+	LeftOut []string
 }
 
 // SpecChecks is the port a rig's changed-specs command is run through

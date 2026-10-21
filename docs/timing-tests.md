@@ -41,6 +41,12 @@ same two, so `npm test` run by hand matches the gate. A rig without the key is
 run exactly as before: neither variable is set. mw never deletes or moves a
 tagged file; the rig's test setup reads the variables.
 
+The specs a branch changed are handed to `[changed_specs]` without the tagged ones
+(and the files to `[related_tests]`), the same globs the nightly run matches by:
+the rig's config leaves them out of every run under `MW_TIMING=skip`, so a
+command named on one alone finds nothing to run. The gate log says
+`left out: timing test, runs nightly: <spec>`.
+
 ## The nightly timing run
 
 The home's follower runs the tagged tests itself: the job `timing@<host>`. From

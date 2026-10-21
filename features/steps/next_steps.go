@@ -79,6 +79,7 @@ type nextContext struct {
 	checkLoad    *apptest.FakeHostLoad       // the host's load as mw check reads it; nil reads none
 	sessionModes application.TranscriptModes // the permission mode the session ran in, as its transcript shows; nil shows none
 	specCommands map[string]string           // the [changed_specs] table this scenario's host has
+	timingTests  map[string][]string         // the rigs' timing_tests globs, by rig
 	related      map[string]string           // the [related_tests] table this scenario's host has
 	mainRedBug   string                      // the open bug that names main's failing test, when a scenario filed one
 	named        map[string]string           // the [named_tests] table this scenario's host has
@@ -1085,8 +1086,8 @@ func (c *nextContext) nextUseCase() application.Next {
 		Changes:       worktrees,
 		Errors:        files,
 		RigFacts:      files,
-		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
-		SpecChecks:    rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
+		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands), rig.WithTimingTests(c.timingTests)),
+		SpecChecks:    rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands), rig.WithTimingTests(c.timingTests)),
 		Slot:          c.mergeSlot(),
 		CrossSlot:     c.crossSlot(),
 		GateLock:      c.gateLock(),

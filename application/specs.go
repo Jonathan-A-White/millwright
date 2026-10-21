@@ -17,6 +17,9 @@ func (n Next) specsRefusal(ctx context.Context, c *closeOut, report *NextReport,
 		return Refusal{}, false
 	}
 	run, err := n.SpecChecks.RunSpecs(ctx, c.path.Rig, dir, base)
+	if len(run.LeftOut) > 0 {
+		report.Notes = appendNew(report.Notes, LeftOutTimingSpecs(run.LeftOut))
+	}
 	named := strings.Join(run.Specs, ", ")
 	switch {
 	case err != nil:
@@ -29,6 +32,12 @@ func (n Next) specsRefusal(ctx context.Context, c *closeOut, report *NextReport,
 	}
 	why := fmt.Sprintf("the rig's changed specs fail %s: `%s` did not pass [%s]", where, run.Command, named)
 	return Refusal{fail, why, n.failedTestsDetail(ctx, c, report, run.Checked, dir)}, true
+}
+
+// LeftOutTimingSpecs says which changed specs the changed-specs command was not
+// given, and why: the rig's timing_tests name them (mw-gq6.682).
+func LeftOutTimingSpecs(specs []string) string {
+	return "left out: timing test, runs nightly: " + strings.Join(specs, ", ")
 }
 
 // specsFailReason is what a failing changed-specs run in the story's worktree
