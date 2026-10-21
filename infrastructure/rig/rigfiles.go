@@ -2,12 +2,15 @@ package rig
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -103,6 +106,36 @@ func (Files) Matching(rigDir, pattern string, most int) int {
 		return nil
 	})
 	return n
+}
+
+// callerSearchLimit is how long the search for test callers may take.
+const callerSearchLimit = 20 * time.Second
+
+// TestCallers implements application.RigFiles: the tracked test files of the
+// checkout at rigDir (those under features/ or tests/, and any *_test.go) that
+// name any of the stems, in one git grep (mw-gq6.661). The config's [tests] is a
+// command, not a list of globs, so those three are the test files of every rig.
+func (Files) TestCallers(rigDir string, stems []string) (int, error) {
+	args := []string{"-C", rigDir, "grep", "-l", "-F", "--no-color"}
+	for _, stem := range stems {
+		args = append(args, "-e", stem)
+	}
+	args = append(args, "--", "features", "tests", ":(glob)**/*_test.go")
+	ctx, cancel := context.WithTimeout(context.Background(), callerSearchLimit)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", args...).Output()
+	if err == nil && len(out) == 0 {
+		return 0, nil
+	}
+	if err != nil {
+		// git grep says no match with status 1 and nothing printed.
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 && len(out) == 0 {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("counting the test callers in %s: %w", rigDir, err)
+	}
+	return len(strings.Split(strings.TrimSpace(string(out)), "\n")), nil
 }
 
 // Docs reads one file of a rig's checkout on this host, for a seat's boot

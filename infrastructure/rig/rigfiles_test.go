@@ -2,6 +2,7 @@ package rig_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -94,5 +95,47 @@ func TestAGlobsFilesAreCountedUpToOnePastTheMost(t *testing.T) {
 		if n := files.Matching(dir, c.pattern, c.most); n != c.n {
 			t.Errorf("Matching(%q, %d) = %d; want %d", c.pattern, c.most, n, c.n)
 		}
+	}
+}
+
+func TestTestCallersAreTheTrackedTestFilesThatNameAStem(t *testing.T) {
+	dir := t.TempDir()
+	for name, text := range map[string]string{
+		"features/a.feature":      "open Settings\n",
+		"tests/b.test.ts":         "import Settings\n",
+		"src/c_test.go":           "// Settings\n",
+		"src/screens/Settings.go": "Settings itself\n",
+		"tests/other.test.ts":     "Reader only\n",
+		"docs/notes.md":           "Settings in prose\n",
+	} {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	files := rig.Files{}
+	for _, c := range []struct {
+		stems []string
+		want  int
+	}{
+		{[]string{"Settings"}, 3},
+		{[]string{"Settings", "Reader"}, 4},
+		{[]string{"Nowhere"}, 0},
+	} {
+		got, err := files.TestCallers(dir, c.stems)
+		if err != nil || got != c.want {
+			t.Errorf("TestCallers(%q) = %d, %v; want %d", c.stems, got, err, c.want)
+		}
+	}
+	if _, err := files.TestCallers(t.TempDir(), []string{"Settings"}); err == nil {
+		t.Error("a directory that is no checkout was searched without an error")
 	}
 }

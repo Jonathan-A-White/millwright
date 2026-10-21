@@ -43,6 +43,10 @@ type PathSet struct {
 
 	// Out is where the path that was set is printed. A nil Out prints nothing.
 	Out io.Writer
+
+	// Err is where the warning of a story with more test callers than its size
+	// allows goes (mw-gq6.661). A nil Err prints none.
+	Err io.Writer
 }
 
 // Run sets the path of story id. from names the sibling to copy the seven
@@ -123,6 +127,14 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		fmt.Fprintf(s.Out, "Set the path of %s:\n%s", id, pathLines(now))
 		if governorsDemo(story.Labels, story.Story.Overrides.Overlay(path).Files) && !hasHitlLabel(story.Labels) {
 			fmt.Fprintln(s.Out, demoNoHitlLine(id))
+		}
+	}
+	// The test files that call the story's files are changed with them, so the
+	// size is judged by them too (mw-gq6.661). Only a files or size key being
+	// written is judged; a warning, never a refusal.
+	if named.Files != "" || named.Size != "" {
+		if callers, ok := testCallersOf(s.Rigs, s.RigFiles, id, story.Merged().Overlay(path)); ok {
+			callerNotes(s.Out, s.Err, callers)
 		}
 	}
 	// A story filed by hand into an epic is made a need of the epic's last

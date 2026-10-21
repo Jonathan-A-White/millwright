@@ -56,6 +56,10 @@ type File struct {
 	// Out is where the tree is printed. A nil Out prints nothing.
 	Out io.Writer
 
+	// Err is where the warnings go: a story with more test callers than its size
+	// allows (mw-gq6.661). A nil Err prints none.
+	Err io.Writer
+
 	// Approve is asked, once the tree has been printed, whether the stories may
 	// be released. A nil Approve leaves them held — which is what an unattended
 	// run does, since nobody is there to say yes.
@@ -299,6 +303,8 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	}
 	// Warnings only: the stories are filed, and released, all the same.
 	f.print(sizeWarnings(filed.Stories, true, false))
+	// Warnings only here: it is mw file --check that fails for them.
+	f.testCallers(plan, func(key string) string { return ids[key] })
 	for _, id := range ownDemos {
 		f.print(demoNoHitlLine(id) + "\n")
 	}
@@ -349,8 +355,39 @@ func (f File) Check(ctx context.Context, plan domain.Plan) error {
 	if err != nil {
 		return err
 	}
+	if over := f.testCallers(plan, func(key string) string { return key }); len(over) > 0 {
+		return fmt.Errorf("%s: more test callers than the size allows: split the story, size it up, or say why not with \"callers_ok\" (mw-gq6.661)",
+			strings.Join(over, ", "))
+	}
 	f.print(fmt.Sprintf("ok: %d stories would be filed\n", len(plan.Stories)))
 	return nil
+}
+
+// testCallers counts the test callers of each story of the plan that names files
+// and a size, says it and warns of the ones over their size's allowance (see
+// TestCallers), and returns the labels of the ones over that do not say
+// "callers_ok". label names a story by its plan key.
+func (f File) testCallers(plan domain.Plan, label func(key string) string) []string {
+	var over []string
+	for _, story := range plan.Stories {
+		path, err := story.PathFrom(plan.Epic.Defaults)
+		if err != nil {
+			continue
+		}
+		callers, ok := testCallersOf(f.Rigs, f.RigFiles, label(story.Key), path)
+		if !ok {
+			continue
+		}
+		waived := strings.TrimSpace(story.CallersOK) != ""
+		warn := f.Err
+		if waived {
+			warn = nil
+		}
+		if callerNotes(f.Out, warn, callers) && !waived {
+			over = append(over, callers.Label)
+		}
+	}
+	return over
 }
 
 // refusals is every reason the plan cannot be filed, one check after another and
