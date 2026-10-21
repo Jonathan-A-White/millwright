@@ -41,6 +41,12 @@ a size you can read whole, so do not page through them or read one twice):
   that names an old version, an Ideas only card item whose idea a bead or a handoff
   already names). That evidence is a lead, not a verdict: read the item's comments and
   judge. `OTHER ITEMS` follows; judge those too, but only from what you can see.
+- `evidence.txt` and `candidates.txt`: what he sent in the last day (a week on Sundays): for
+  each message or picture, its txid, its time and his words; a picture is a file in your
+  working directory, named in the text (`picture: direct-<hash>.jpg`), which you read with
+  the Read tool like any other file. `candidates.txt` holds the open demos and the landings
+  of the last week nobody has recorded as verified, each with the text that says how to see
+  it working. They are the same sets `mw verify match` reads.
 - `report.txt`: `mw report` in its text form: quality, speed and fuel by rig, model
   and host, the cheap wins, the landings that were investments and how they
   measured.
@@ -53,7 +59,7 @@ On a Sunday you are given the whole picture and a month of report: read everythi
 not only what moved. On other nights weigh the diff and the day's runs; read the
 full dump only to place what moved.
 
-## What you write (the answer's seven parts, the sixth optional)
+## What you write (the answer's eight parts, the sixth and seventh optional)
 
 1. **recommendations**: a JSON object, as a string, shaped
    `{"arc": "<his arc in one line>", "calls": [...], "stuck": [...], "investment_check": [...], "ideas": [...]}`.
@@ -117,10 +123,21 @@ full dump only to place what moved.
    `ask-him` and the Mayor puts it on one batched card. Leave the part out when nothing
    is stale. You clear nothing: the Mayor clears what is plainly moot at the next
    sitting.
-7. **summary**: under 150 words, plain, for the Mayor's mail: the arc, the one or
+7. **proposals** (optional): the candidates the evidence shows met, as a list of
+   `{"bead", "txid", "shows", "confidence"}`: `bead` is a candidate of `candidates.txt`,
+   `txid` the txid of one message or picture of `evidence.txt` that shows its change working
+   as the candidate's text describes, in his own use of it (a screenshot of the new screen, a
+   message saying he used the new thing), `shows` the one thing in it that proves the check,
+   `confidence` from 0 to 1. Evidence that only mentions the work, asks for it or shows
+   something else is no match; leave out what you doubt. mw writes a PROPOSED comment on the
+   bead for each proposal at or over its confidence (0.8 unless `[verify]` says otherwise), and
+   `proposals.md`; nothing is closed, and the Mayor confirms with `mw verify confirm`. A demo
+   his evidence shows met is a proposal and never also a line of `stale`: put it in one place.
+   Leave the part out when nothing is met.
+8. **summary**: under 150 words, plain, for the Mayor's mail: the arc, the one or
    two calls that matter, the top refusal cause and whether an investment covers
    it, and the count of stuck stories, naming the roots `stuck.txt` lists. mw adds the
-   count of stale items itself.
+   counts of stale items and of proposals itself.
 
 ## How to reason
 

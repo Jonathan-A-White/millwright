@@ -150,6 +150,13 @@ func newSleepPass(dir, host string, out io.Writer) (application.SleepPass, error
 	}
 	gateway := mwGateway(dir, host)
 	files := mwVault(dir, host)
+	// His messages and pictures are read from the dir the inbox pass saves them
+	// in; without a home for it the evidence part says it could not be read.
+	inbox, _ := config.PosternInboxDir()
+	verify, err := config.Verify()
+	if err != nil {
+		return application.SleepPass{}, err
+	}
 	return application.SleepPass{
 		Gatherer: application.SleepGather{
 			Dump: func(ctx context.Context, w io.Writer) error {
@@ -162,8 +169,11 @@ func newSleepPass(dir, host string, out io.Writer) (application.SleepPass, error
 			Runs:     files,
 			Earlier:  files,
 			NeedsYou: needsYouSurvey(dir, gateway, files, rigs).Read,
+			Beads:    gateway, InboxDir: inbox,
 		},
 		Vault: files, Grinder: claude.NewGrinder(), Mailbox: gateway,
+		Beads:  gateway,
+		Verify: application.VerifySettings{Model: verify.Model, Effort: verify.Effort, Confidence: verify.Confidence},
 		Settings: application.SleepSettings{
 			NightlyModel: settings.NightlyModel, NightlyEffort: settings.NightlyEffort,
 			SundayModel: settings.SundayModel, SundayEffort: settings.SundayEffort,

@@ -3232,7 +3232,10 @@ model, `mw report --since 7d --json`, `mw fold <rig>` for each rig with an open 
 demos, the unrun hands steps), with its age, its question or step, the states of its epic and of what it needs, a
 demo's version against the rig's, its last two comments, and, first, the stale candidates mw found evidence for (a
 card on a parked grilling or bug, a closed epic or replacement, a demo that names an old version, a card of
-"Your ideas from Ideas only (N)" whose idea a bead or a handoff already names). It starts one agent with `plans/principles.md` (else the newest
+"Your ideas from Ideas only (N)" whose idea a bead or a handoff already names), and `evidence.txt` and
+`candidates.txt` (mw-4xdnis.5): his messages and pictures of the last day (a week on Sundays), the pictures as files
+in the agent's directory, and the open demos and the unverified landings of the week with their check text, the sets
+`mw verify match` reads. It starts one agent with `plans/principles.md` (else the newest
 `plans/triage-<date>/principles.md`) and the rule in `grinds/sleep.md`, which also carries his two asks of
 2026-10-15: every ready story not started within 24 hours is listed with why it waits (files key, host, hold,
 smoke) and fixed or raised, and the top refusal causes of each rig are weighed against the open investments.
@@ -3242,7 +3245,12 @@ daily; the mail names how many), `improvements.md` (each improvement with a pred
 its cost, its measure and its rollback), `stale.md` (when the answer has one: a line for each item of his Needs you
 judged stale, with its evidence and an action, `clear-card`, `retire-step`, `close-superseded`, `tick-item` or
 `ask-him`; a demo or anything touching money, keys or a charter is always `ask-him`; the Mayor clears what is moot at
-the next sitting, and the mail says how many are stale), `summary.md`, and the dump as `triage.jsonl` (tomorrow's diff starts
+the next sitting, and the mail says how many are stale), `proposals.md` (when the answer has proposals: the
+candidates his evidence of the day shows met, each with its txid, what it shows and its confidence; mw writes the
+PROPOSED comment on the bead for those at or over `[verify] confidence`, through the writer `mw verify match` uses, none
+for a bead already PROPOSED for that txid or already VERIFIED, and nothing closes; `mw verify confirm` is the Mayor's.
+A demo met is a proposal and never also in `stale.md`: mw drops a stale line that names a proposed bead), `summary.md`
+(which counts them, as the mail does), and the dump as `triage.jsonl` (tomorrow's diff starts
 from it), and commits them with the run log `runs/sleep/<date>.json`. It mails the Mayor the summary, at most
 150 words. An answer that misses a part, or whose recommendations are not JSON, is refused: no plan is
 written, the run log of the spent fuel is.
@@ -3262,7 +3270,8 @@ sunday_effort  = "xhigh"   # and effort (xhigh when left out)
 ```
 
 `mw sleep pass --dry-run` gathers the bundle and prints the agent's model, its system prompt, its prompt and the
-size of each part; it starts no agent, writes no file and mails nothing. `--model` and `--effort` replace the
+size of each part (the evidence and candidates among them, with the pictures beside the evidence counted); it starts
+no agent, writes no file, no comment and mails nothing. `--model` and `--effort` replace the
 day's. `mw fuel [--days n]` adds up the tokens of the model passes that keep a run log in `runs/<kind>/` (the
 sleep pass, kind `sleep`, and the To do ranking, kind `todo-rank`) and prints a line for each kind, with how many
 passes ran on which model and effort.

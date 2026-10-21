@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -25,6 +27,12 @@ const (
 	SleepReportFile = "report.txt"
 	SleepFoldsFile  = "folds.txt"
 	SleepStuckFile  = "stuck.txt"
+	// SleepEvidenceFile holds the Governor's messages of the window, and names
+	// his pictures, which sit in the agent's directory beside it; SleepCandidatesFile
+	// holds the check text of the open demos and unverified landings they may
+	// show met (mw-4xdnis.5).
+	SleepEvidenceFile   = "evidence.txt"
+	SleepCandidatesFile = "candidates.txt"
 )
 
 // sleepBudgets is the most bytes of each part of the bundle the agent is given:
@@ -43,11 +51,15 @@ var sleepBudgets = map[string]int{
 	// His review queue, an item to a block: 57 items came to about 30,000 bytes
 	// on 2026-10-21 (mw-gq6.674).
 	SleepNeedsYouFile: 30_000,
+	// A day's messages of his, and the check text of a week's demos and
+	// landings, cut to fit a turn like the other parts (mw-4xdnis.5).
+	SleepEvidenceFile:   16_000,
+	SleepCandidatesFile: 40_000,
 }
 
 // SleepTotalBudget is the most bytes of the whole bundle: the sum of the parts'
 // budgets.
-const SleepTotalBudget = 180_000
+const SleepTotalBudget = 236_000
 
 // SleepBudgetOf is the most bytes of the part held in file.
 func SleepBudgetOf(file string) int { return sleepBudgets[file] }
@@ -102,6 +114,12 @@ type SleepGather struct {
 	// NeedsYou reads his review queue for needs-you.txt; nil leaves the part
 	// saying there is nothing to read it from.
 	NeedsYou func(ctx context.Context) (NeedsYouFacts, error)
+	// Beads and InboxDir are where evidence.txt and candidates.txt are read
+	// from: the tracker's open demos and landings, and the dir the inbox pass
+	// saves his messages and pictures in. Without Beads or InboxDir the two
+	// parts say they could not be read.
+	Beads    VerifyBeads
+	InboxDir string
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 }
@@ -133,7 +151,150 @@ func (g SleepGather) Gather(ctx context.Context, window SleepWindow) (SleepBundl
 	// (mw-gq6.623), read from the same dump.
 	bundle = append(bundle, cutPart("stuck", SleepStuckFile, withNewline(g.said(g.Mw(ctx, "stuck")))+inversionsOfDump(dump.String())))
 	bundle = append(bundle, g.needsYou(ctx))
+	evidence, candidates := g.verifyParts(ctx, window, now)
+	bundle = append(bundle, evidence, candidates)
 	return bundle, nil
+}
+
+// verifyParts are evidence.txt and candidates.txt: his messages and pictures
+// written within the window, and the check text of the open demos and the
+// unverified landings of the last week. The evidence part carries both lists,
+// for the pass to check the agent's proposals against. The sets are
+// mw verify match's (ReadVerifyEvidence, VerifyCandidates).
+func (g SleepGather) verifyParts(ctx context.Context, window SleepWindow, now time.Time) (SleepPart, SleepPart) {
+	evidence := SleepPart{Name: "evidence", File: SleepEvidenceFile, Budget: sleepBudgets[SleepEvidenceFile]}
+	candidates := SleepPart{Name: "candidates", File: SleepCandidatesFile, Budget: sleepBudgets[SleepCandidatesFile]}
+	if g.Beads == nil || g.InboxDir == "" {
+		unread := "(this part could not be read: nothing was given to read his messages and the open demos from)\n"
+		evidence.Text, candidates.Text = unread, unread
+		return evidence, candidates
+	}
+	days := window.RunsDays()
+	found, err := ReadVerifyEvidence(g.InboxDir, now.Add(-time.Duration(days)*24*time.Hour), nil)
+	if err != nil {
+		evidence.Text = fmt.Sprintf("(this part could not be read: %v)\n", err)
+	}
+	wanted, err := VerifyCandidates(ctx, g.Beads, now, DefaultVerifySince)
+	if err != nil {
+		candidates.Text = fmt.Sprintf("(this part could not be read: %v)\n", err)
+	}
+	if evidence.Text == "" {
+		evidence.Text, evidence.Cut, evidence.Attach, found = evidenceText(found, days, evidence.Budget)
+	}
+	if candidates.Text == "" {
+		candidates.Text, candidates.Cut = candidatesText(wanted, candidates.Budget)
+	}
+	if evidence.Attach != nil || len(found) > 0 || len(wanted) > 0 {
+		evidence.Verify = &SleepVerify{Candidates: wanted, Evidence: found}
+	}
+	return evidence, candidates
+}
+
+const (
+	// sleepEvidenceText is the most bytes of one message of his the part holds.
+	sleepEvidenceText = 1500
+	// sleepMaxPictures is the most pictures given to the agent, the newest: it
+	// reads each with a tool call, and a Sunday's week can hold a hundred.
+	sleepMaxPictures = 12
+)
+
+// evidenceText is evidence.txt: for each message or picture, newest last, its
+// txid, its time and his words; a picture is named by the file in the agent's
+// directory. The newest verifyMaxEvidence are read. It reports the pictures to
+// put in the directory and the evidence it holds.
+func evidenceText(found []VerifyEvidence, days, budget int) (text, cut string, attach []SleepAttachment, held []VerifyEvidence) {
+	if len(found) == 0 {
+		return fmt.Sprintf("(he sent no message or picture in the last %d %s)\n", days, plural(days, "day", "days")), "", nil, nil
+	}
+	if len(found) > verifyMaxEvidence {
+		found = found[len(found)-verifyMaxEvidence:]
+	}
+	given := map[string]bool{}
+	for i := len(found) - 1; i >= 0 && len(given) < sleepMaxPictures; i-- {
+		for _, path := range found[i].Files {
+			if !strings.EqualFold(filepath.Ext(path), ".txt") && len(given) < sleepMaxPictures {
+				given[path] = true
+			}
+		}
+	}
+	var out strings.Builder
+	for _, e := range found {
+		fmt.Fprintf(&out, "## %s, written %s\n", e.Txid, e.At.Format(verifyTimeFormat))
+		for _, path := range e.Files {
+			name := filepath.Base(path)
+			if strings.EqualFold(filepath.Ext(name), ".txt") {
+				body, err := os.ReadFile(path)
+				if err != nil {
+					fmt.Fprintf(&out, "(his message could not be read: %v)\n", err)
+					continue
+				}
+				out.WriteString(strings.TrimSpace(cutBytes(string(body), sleepEvidenceText)) + "\n")
+				continue
+			}
+			if !given[path] {
+				fmt.Fprintf(&out, "picture: %s (not given: only the newest %d pictures are)\n", name, sleepMaxPictures)
+				continue
+			}
+			size := 0
+			if info, err := os.Stat(path); err == nil {
+				size = int(info.Size())
+			}
+			attach = append(attach, SleepAttachment{Name: name, Path: path, Size: size})
+			fmt.Fprintf(&out, "picture: %s (a file in your working directory; read it)\n", name)
+		}
+		out.WriteString("\n")
+	}
+	text, cut = cutLines(out.String(), budget)
+	return text, cut, attach, found
+}
+
+// The check text kept of a candidate, in bytes: a demo's at most sleepDemoCheck,
+// a landing's sleepLandingCheck, and the room a candidate's heading takes.
+const (
+	sleepDemoCheck    = 1200
+	sleepLandingCheck = 400
+	sleepCandHeading  = 160
+)
+
+// candidatesText is candidates.txt: the open demos first, each with its check
+// text cut to fit, then as many of the newest landings as the rest of the budget
+// holds, with a shorter check each; it says how many landings were left out.
+func candidatesText(wanted []VerifyCandidate, budget int) (text, cut string) {
+	if len(wanted) == 0 {
+		return "(no demo is open and no landing of the last week is unverified)\n", ""
+	}
+	demos, landings := candidatesOf(wanted, VerifyKindDemo), candidatesOf(wanted, VerifyKindLanding)
+	var out strings.Builder
+	block := func(c VerifyCandidate, check int) {
+		fmt.Fprintf(&out, "## %s (%s): %s\n%s\n\n", c.Bead, c.Kind, c.Title, strings.TrimSpace(cutBytes(c.Check, check)))
+	}
+	demoCheck := sleepDemoCheck
+	if len(demos) > 0 {
+		demoCheck = min(sleepDemoCheck, max(sleepLandingCheck, budget*3/4/len(demos)-sleepCandHeading))
+	}
+	for _, c := range demos {
+		block(c, demoCheck)
+	}
+	// room is left for the line that says what was left out.
+	const room = 200
+	fit := max(0, (budget-out.Len()-room)/(sleepLandingCheck+sleepCandHeading))
+	left := 0
+	if len(landings) > fit {
+		left = len(landings) - fit
+		landings = landings[left:]
+	}
+	for _, c := range landings {
+		block(c, sleepLandingCheck)
+	}
+	if left > 0 {
+		cut = fmt.Sprintf("%d older unverified %s left out to fit; mw verify match reads them", left, plural(left, "landing", "landings"))
+		fmt.Fprintf(&out, "(mw cut this part: %s)\n", cut)
+	}
+	text, note := cutLines(out.String(), budget)
+	if note != "" {
+		cut = strings.TrimPrefix(cut+"; "+note, "; ")
+	}
+	return text, cut
 }
 
 // needsYou is the part that holds his review queue, with the evidence of the
