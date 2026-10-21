@@ -166,6 +166,8 @@ type GristTalkStore interface {
 	Load(ctx context.Context, key GristTalkKey) (talk GristTalk, found bool, err error)
 	// Save writes the talk's record in place of any it had.
 	Save(ctx context.Context, talk GristTalk) error
+	// Remove deletes the talk's record; one already gone is no error.
+	Remove(ctx context.Context, key GristTalkKey) error
 	// List reports every record kept.
 	List(ctx context.Context) ([]GristTalk, error)
 	// Transcript reports whether the harness still keeps the transcript of
@@ -784,4 +786,84 @@ func (e GristTalksEnd) Run(ctx context.Context, app, talk string) (int, error) {
 		fmt.Fprintf(e.Out, "ended %d talk%s: %s of %s, no key points written\n", ended, map[bool]string{true: "", false: "s"}[ended == 1], talk, app)
 	}
 	return ended, nil
+}
+
+// The words a talk of the eval or the smoke is named with, before the example
+// and a nonce: eval:<example>:<nonce>, smoke:<kind>/<example>:<nonce>. The
+// sweep's Tidy ends talks of these prefixes only.
+const (
+	GristEvalTalkPrefix  = "eval"
+	GristSmokeTalkPrefix = "smoke"
+)
+
+// GristTalkSweep deletes talks outright, record and transcripts both: the talks
+// the eval and the smoke start for an example have no use once it is answered
+// (mw-pxji7y.4). It is `mw grist talks --end` taken to its end, for talks that
+// are never kept: the record goes too, and every session's transcript at once,
+// not a day on.
+type GristTalkSweep struct {
+	Store GristTalkStore
+	// Now is the clock; nil is time.Now.
+	Now func() time.Time
+}
+
+// End deletes every talk of app named talk (one for each sender who has one):
+// the sessions' transcripts, those of earlier sessions of the talk too, and the
+// record. It reports how many records it deleted; a talk with no record is none,
+// and no error, since the mill may keep its talks on another host.
+func (s GristTalkSweep) End(ctx context.Context, app, talk string) (int, error) {
+	return s.forget(ctx, func(t GristTalk) bool { return t.App == app && t.Talk == talk })
+}
+
+// Tidy deletes every talk of app that an eval or a smoke started and left (one
+// killed midway leaves its record): a talk named eval: or smoke: that was last
+// used GristTalkQuiet or more ago. A younger one may be a run still going.
+func (s GristTalkSweep) Tidy(ctx context.Context, app string) (int, error) {
+	now := time.Now()
+	if s.Now != nil {
+		now = s.Now()
+	}
+	return s.forget(ctx, func(t GristTalk) bool {
+		return t.App == app && now.Sub(t.LastUsed) >= GristTalkQuiet &&
+			(strings.HasPrefix(t.Talk, GristEvalTalkPrefix+":") || strings.HasPrefix(t.Talk, GristSmokeTalkPrefix+":"))
+	})
+}
+
+// forget deletes the talks that match, and says how many it did. It tries
+// every one, and reports the first failure.
+func (s GristTalkSweep) forget(ctx context.Context, match func(GristTalk) bool) (int, error) {
+	if s.Store == nil {
+		return 0, fmt.Errorf("the mill keeps no talks here")
+	}
+	talks, err := s.Store.List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	deleted := 0
+	var first error
+	for _, t := range talks {
+		if !match(t) {
+			continue
+		}
+		sessions := slices.Clone(t.Ended)
+		if t.Session != "" {
+			sessions = append(sessions, t.Session)
+		}
+		failed := false
+		for _, session := range sessions {
+			if err := s.Store.RemoveTranscript(t.Cwd, session); err != nil {
+				failed = true
+				first = cmp.Or(first, fmt.Errorf("the transcript of the talk %q's session %s could not be deleted: %w", t.Talk, session, err))
+			}
+		}
+		if failed {
+			continue
+		}
+		if err := s.Store.Remove(ctx, t.GristTalkKey); err != nil {
+			first = cmp.Or(first, fmt.Errorf("the record of the talk %q could not be deleted: %w", t.Talk, err))
+			continue
+		}
+		deleted++
+	}
+	return deleted, first
 }

@@ -92,6 +92,15 @@ func (t *Talks) Save(_ context.Context, talk application.GristTalk) error {
 	return (&State{Dir: t.Dir}).writeWhole(t.path(talk.GristTalkKey), append(data, '\n'))
 }
 
+// Remove implements application.GristTalkStore.
+func (t *Talks) Remove(_ context.Context, key application.GristTalkKey) error {
+	err := os.Remove(t.path(key))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
 // List implements application.GristTalkStore, in the order of the files'
 // names. A record that cannot be read is left out.
 func (t *Talks) List(context.Context) ([]application.GristTalk, error) {

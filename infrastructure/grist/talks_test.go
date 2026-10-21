@@ -112,3 +112,28 @@ func TestTalksRemoveATranscript(t *testing.T) {
 		}
 	}
 }
+
+// Remove deletes one talk's record and no other, and a record already gone is
+// no error (the eval and smoke end their talks with it).
+func TestTalksRemoveDeletesOneRecord(t *testing.T) {
+	dir := t.TempDir()
+	talks := &grist.Talks{Dir: dir}
+	ctx := context.Background()
+	key := application.GristTalkKey{App: "lampas", Sender: "abcd", Talk: "eval:x:00000000"}
+	other := application.GristTalkKey{App: "lampas", Sender: "abcd", Talk: "rom.8@1"}
+	for _, k := range []application.GristTalkKey{key, other} {
+		if err := talks.Save(ctx, application.GristTalk{GristTalkKey: k, Session: "s-1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := talks.Remove(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	if err := talks.Remove(ctx, key); err != nil {
+		t.Fatalf("removing a record twice: %v", err)
+	}
+	all, err := talks.List(ctx)
+	if err != nil || len(all) != 1 || all[0].Talk != "rom.8@1" {
+		t.Fatalf("expected only the other talk left, got %+v, %v", all, err)
+	}
+}
