@@ -40,11 +40,14 @@ var sleepBudgets = map[string]int{
 	SleepReportFile: 24_000,
 	SleepFoldsFile:  12_000,
 	SleepStuckFile:  6_000,
+	// His review queue, an item to a block: 57 items came to about 30,000 bytes
+	// on 2026-10-21 (mw-gq6.674).
+	SleepNeedsYouFile: 30_000,
 }
 
 // SleepTotalBudget is the most bytes of the whole bundle: the sum of the parts'
 // budgets.
-const SleepTotalBudget = 150_000
+const SleepTotalBudget = 180_000
 
 // SleepBudgetOf is the most bytes of the part held in file.
 func SleepBudgetOf(file string) int { return sleepBudgets[file] }
@@ -96,6 +99,9 @@ type SleepGather struct {
 	Rigs    map[string]string
 	Runs    SleepRuns
 	Earlier SleepEarlier
+	// NeedsYou reads his review queue for needs-you.txt; nil leaves the part
+	// saying there is nothing to read it from.
+	NeedsYou func(ctx context.Context) (NeedsYouFacts, error)
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 }
@@ -126,7 +132,25 @@ func (g SleepGather) Gather(ctx context.Context, window SleepWindow) (SleepBundl
 	// With them, the beads below the priority of what waits on them
 	// (mw-gq6.623), read from the same dump.
 	bundle = append(bundle, cutPart("stuck", SleepStuckFile, withNewline(g.said(g.Mw(ctx, "stuck")))+inversionsOfDump(dump.String())))
+	bundle = append(bundle, g.needsYou(ctx))
 	return bundle, nil
+}
+
+// needsYou is the part that holds his review queue, with the evidence of the
+// stale items; a queue that cannot be read is said so.
+func (g SleepGather) needsYou(ctx context.Context) SleepPart {
+	part := SleepPart{Name: "needs you", File: SleepNeedsYouFile, Budget: sleepBudgets[SleepNeedsYouFile]}
+	if g.NeedsYou == nil {
+		part.Text = "(this part could not be read: nothing was given to read his review queue from)\n"
+		return part
+	}
+	facts, err := g.NeedsYou(ctx)
+	if err != nil {
+		part.Text = fmt.Sprintf("(this part could not be read: %v)\n", err)
+		return part
+	}
+	part.Text, part.Cut = facts.TextCut(part.Budget)
+	return part
 }
 
 // inversionsOfDump is the priority inversions of the dump's live beads, one a

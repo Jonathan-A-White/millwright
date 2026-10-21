@@ -191,7 +191,9 @@ type SleepResult struct {
 	// Files are the files written there, by name.
 	Files []string
 	// Folds is how many folds the pass proposed in folds.md.
-	Folds   int
+	Folds int
+	// Stale is how many items of his Needs you stale.md names.
+	Stale   int
 	Summary string
 	Fuel    Fuel
 }
@@ -224,8 +226,8 @@ type SleepRunLog struct {
 	Files []string          `json:"files,omitempty"`
 }
 
-// SleepSchema is the schema the agent answers in: the five files and the
-// summary.
+// SleepSchema is the schema the agent answers in: the files (stale.md may be
+// left out) and the summary.
 const SleepSchema = `{
   "type": "object",
   "additionalProperties": false,
@@ -236,6 +238,7 @@ const SleepSchema = `{
     "maps": {"type": "string", "minLength": 1},
     "improvements": {"type": "string", "minLength": 1},
     "folds": {"type": "string"},
+    "stale": {"type": "string"},
     "summary": {"type": "string", "minLength": 1}
   }
 }`
@@ -248,7 +251,10 @@ type sleepAnswer struct {
 	Maps            string `json:"maps"`
 	Improvements    string `json:"improvements"`
 	// Folds is the proposed folds, each under a '## ' heading; empty when none.
-	Folds   string `json:"folds"`
+	Folds string `json:"folds"`
+	// Stale is stale.md: a line for each item of his Needs you judged stale; an
+	// answer without it writes no stale.md (mw-gq6.674).
+	Stale   string `json:"stale"`
 	Summary string `json:"summary"`
 }
 
@@ -379,6 +385,11 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 		{"folds.md", foldsText},
 		{"summary.md", answer.Summary},
 	}
+	stale := staleItems(answer.Stale)
+	result.Stale = stale
+	if strings.TrimSpace(answer.Stale) != "" {
+		files = append(files, struct{ name, text string }{"stale.md", answer.Stale})
+	}
 	for _, part := range bundle {
 		if part.Keep {
 			files = append(files, struct{ name, text string }{part.File, part.Text})
@@ -401,7 +412,12 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 	// The whole mail is under 150 words, the pointer to the files included.
 	pointer := "Files: " + result.Dir + "/"
 	foldLine := fmt.Sprintf("Folds proposed: %d.", folds)
-	result.Summary = trimWords(answer.Summary, sleepSummaryWords-len(strings.Fields(pointer))-len(strings.Fields(foldLine))) + "\n\n" + foldLine
+	staleLine := "Stale in Needs you: none reported."
+	if stale > 0 {
+		staleLine = fmt.Sprintf("Stale in Needs you: %d (stale.md).", stale)
+	}
+	counts := foldLine + " " + staleLine
+	result.Summary = trimWords(answer.Summary, sleepSummaryWords-len(strings.Fields(pointer))-len(strings.Fields(counts))) + "\n\n" + counts
 	var mailErr error
 	if p.Mailbox != nil {
 		_, mailErr = p.Mailbox.Send(ctx, NewMessage{
@@ -454,6 +470,18 @@ func withoutEmpty(paths []string) []string {
 		}
 	}
 	return kept
+}
+
+// staleItems is how many items stale.md names: a line each, headings and blank
+// lines not counted.
+func staleItems(text string) int {
+	count := 0
+	for _, line := range strings.Split(text, "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			count++
+		}
+	}
+	return count
 }
 
 // sleepNoFolds is folds.md when the agent proposed no fold.

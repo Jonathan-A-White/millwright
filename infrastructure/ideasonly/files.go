@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -99,6 +100,34 @@ func (f *Files) Held(_ context.Context) ([]application.IdeasOnlyHeld, error) {
 		return nil, fmt.Errorf("reading %s: %w", f.heldPath(), err)
 	}
 	return held, nil
+}
+
+// Released reads the ideas given back, oldest release first: every line of
+// released/*.jsonl. A file that cannot be read is passed over: the sleep pass
+// reads what there is.
+func (f *Files) Released(_ context.Context) ([]application.IdeasOnlyHeld, error) {
+	dir := filepath.Join(f.dir, "released")
+	names, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("listing %s: %w", dir, err)
+	}
+	var released []application.IdeasOnlyHeld
+	for _, name := range names {
+		raw, err := os.ReadFile(filepath.Join(dir, name.Name()))
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(raw), "\n") {
+			var idea application.IdeasOnlyHeld
+			if json.Unmarshal([]byte(line), &idea) == nil && idea.Txid != "" {
+				released = append(released, idea)
+			}
+		}
+	}
+	return released, nil
 }
 
 // Hold implements application.IdeasOnlyFiles: one line appended, 0600, unless

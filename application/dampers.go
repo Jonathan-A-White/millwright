@@ -197,10 +197,7 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 	report := DampersReport{Limits: limits}
 	days := func(n int) time.Duration { return time.Duration(n) * 24 * time.Hour }
 
-	var live []StoryDetail
-	live = append(live, facts.Work.Ready...)
-	live = append(live, facts.Work.Running...)
-	live = append(live, facts.Work.OpenClaimed...)
+	live := liveStories(facts.Work)
 
 	var readyP1, untouched, demos, oldDemos []string
 	for _, d := range facts.Work.Ready {
@@ -215,7 +212,7 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 		if touched := firstKnown(d.Updated, d.Created); d.Priority == 1 && !touched.IsZero() && facts.Now.Sub(touched) > days(limits.P1UntouchedDays) {
 			untouched = append(untouched, d.Story.ID)
 		}
-		if hasLabel(d.Labels, LabelDemo) {
+		if isQueuedDemo(d) {
 			demos = append(demos, d.Story.ID)
 			if filed := firstKnown(d.Created, d.Updated); !filed.IsZero() && facts.Now.Sub(filed) > days(limits.DemoWaitingDays) {
 				oldDemos = append(oldDemos, d.Story.ID)
@@ -223,8 +220,7 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 		}
 	}
 
-	closed := closedBeads(facts.Graph)
-	cards := damperCards(facts.Notes, closed)
+	cards, _, hands := reviewQueue(facts)
 	var bare []string
 	byID := map[string]domain.GraphBead{}
 	for _, b := range facts.Graph {
@@ -254,7 +250,6 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 	}
 	sort.Strings(rigs)
 
-	hands := damperHands(facts.Notes, closed)
 	queue := append(append(slices.Clone(cards), demos...), hands...)
 
 	report.Counts = DamperCounts{
@@ -353,6 +348,34 @@ func hasHitlCardLinked(b domain.GraphBead, all []domain.GraphBead, byID map[stri
 		}
 	}
 	return false
+}
+
+// liveStories are the stories ready, running and claimed, in that order.
+func liveStories(work WorkInHand) []StoryDetail {
+	var live []StoryDetail
+	live = append(live, work.Ready...)
+	live = append(live, work.Running...)
+	return append(live, work.OpenClaimed...)
+}
+
+// isQueuedDemo is whether d is a demo of his review queue: a workable story
+// that is not an epic and carries the demo label.
+func isQueuedDemo(d StoryDetail) bool {
+	return !d.IsEpic && workable(d) && hasLabel(d.Labels, LabelDemo)
+}
+
+// reviewQueue is his review queue as mw stuck --dampers counts it, by bead: the
+// cards still open, the live demos and the hands steps unrun, one entry for each
+// item. The sleep pass's needs-you.txt reads it through here, so that it and his
+// phone count the same things.
+func reviewQueue(facts DamperFacts) (cards, demos, hands []string) {
+	closed := closedBeads(facts.Graph)
+	for _, d := range liveStories(facts.Work) {
+		if isQueuedDemo(d) {
+			demos = append(demos, d.Story.ID)
+		}
+	}
+	return damperCards(facts.Notes, closed), demos, damperHands(facts.Notes, closed)
 }
 
 // closedBeads are the ids of the beads the graph shows closed. A note outlives

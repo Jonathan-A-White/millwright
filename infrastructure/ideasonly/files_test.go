@@ -100,3 +100,23 @@ func TestReleaseMovesTheHeldFileToTheReleasedFolderAndNeverOverwrites(t *testing
 		t.Fatalf("expected the second to carry a counter, found %v", kept)
 	}
 }
+
+func TestReleasedReadsEveryIdeaGivenBackAndNothingWhenNoneWas(t *testing.T) {
+	files := ideasonly.New(filepath.Join(t.TempDir(), "ideas-only"))
+	ctx := context.Background()
+	if got, err := files.Released(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("Released before any release = %v, %v", got, err)
+	}
+	for n, txid := range []string{"direct:1", "direct:2"} {
+		if err := files.Hold(ctx, application.IdeasOnlyHeld{Txid: txid, Seq: 1, Text: "an idea"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := files.Release(ctx, time.Date(2026, 10, 12+n, 21, 0, 0, 0, time.UTC)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := files.Released(ctx)
+	if err != nil || len(got) != 2 || got[0].Txid != "direct:1" || got[1].Txid != "direct:2" {
+		t.Errorf("Released = %+v, %v, want both ideas, oldest release first", got, err)
+	}
+}

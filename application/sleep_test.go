@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -238,7 +239,7 @@ func TestADryRunSaysEachPartAgainstItsBudgetAndWhichWereCut(t *testing.T) {
 		t.Fatal(err)
 	}
 	said := f.out.String()
-	for _, want := range []string{"bytes of 50,000", "bytes of 24,000", "bytes of 150,000", "CUT by mw", "cut by mw to fit"} {
+	for _, want := range []string{"bytes of 50,000", "bytes of 24,000", "bytes of 180,000", "CUT by mw", "cut by mw to fit"} {
 		if !strings.Contains(said, want) {
 			t.Errorf("the dry run did not say %q:\n%s", want, said[strings.Index(said, "--- bundle"):])
 		}
@@ -554,5 +555,83 @@ func TestEventJobsAreDescribedOneToALine(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], "1h0m0s") || !strings.Contains(lines[1], "5m0s") {
 		t.Errorf("lines = %q, want each clock named", lines)
+	}
+}
+
+const fixtureStale = "- mw-5g.6 hands step: its install was overtaken by mw-5g.9 (closed 2026-10-20). Action: retire-step\n" +
+	"- mw-lv.1 demo: names v0.1.5, the rig is at 0.1.305. Action: ask-him\n"
+
+// answerWithStale is the fixture answer with a stale.md.
+func answerWithStale(t *testing.T) string {
+	t.Helper()
+	var answer map[string]any
+	if err := json.Unmarshal([]byte(fixtureAnswer), &answer); err != nil {
+		t.Fatal(err)
+	}
+	answer["stale"] = fixtureStale
+	raw, err := json.Marshal(answer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func TestAStaleMdInTheAnswerIsWrittenAndTheSummaryNamesHowManyAreStale(t *testing.T) {
+	f := newSleepFixture()
+	f.grinder.Result.Answer = json.RawMessage(answerWithStale(t))
+	result, err := f.pass.Run(context.Background(), application.SleepOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := "sleep-2026-10-16"
+	if got := f.vault.files[dir+"/stale.md"]; got != fixtureStale {
+		t.Errorf("stale.md = %q, want the agent's text", got)
+	}
+	if result.Stale != 2 || !slices.Contains(result.Files, "stale.md") {
+		t.Errorf("result = %+v, want 2 stale and stale.md among the files", result)
+	}
+	if !strings.Contains(result.Summary, "Stale in Needs you: 2") {
+		t.Errorf("summary = %q, want it to say 2 are stale", result.Summary)
+	}
+	inbox, _ := f.mailbox.Inbox(context.Background(), "mayor")
+	if len(inbox) != 1 || !strings.Contains(inbox[0].Body, "Stale in Needs you: 2") || !strings.Contains(inbox[0].Body, "plans/"+dir+"/") {
+		t.Errorf("the mail = %+v", inbox)
+	}
+	if words := len(strings.Fields(inbox[0].Body)); words > 150 {
+		t.Errorf("the mail is %d words, want 150 or fewer", words)
+	}
+}
+
+func TestAnAnswerWithoutAStaleMdStillWritesTheOtherFiles(t *testing.T) {
+	f := newSleepFixture()
+	result, err := f.pass.Run(context.Background(), application.SleepOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.vault.files["sleep-2026-10-16/stale.md"]; ok || slices.Contains(result.Files, "stale.md") {
+		t.Errorf("a stale.md was written for an answer with none: %v", result.Files)
+	}
+	if result.Stale != 0 || !strings.Contains(result.Summary, "Stale in Needs you: none reported") {
+		t.Errorf("summary = %q (%d stale)", result.Summary, result.Stale)
+	}
+	for _, name := range []string{"questions.md", "maps.md", "improvements.md", "summary.md", "recommendations.json"} {
+		if f.vault.files["sleep-2026-10-16/"+name] == "" {
+			t.Errorf("%s was not written", name)
+		}
+	}
+}
+
+func TestADryRunPrintsTheNeedsYouPartsSizeAmongTheParts(t *testing.T) {
+	f := newSleepFixture()
+	f.gatherer.bundle = append(fixtureBundle(), application.SleepPart{
+		Name: "needs you", File: application.SleepNeedsYouFile, Text: "NEEDS YOU: 3 items\n", Budget: application.SleepBudgetOf(application.SleepNeedsYouFile),
+	})
+	if _, err := f.pass.Run(context.Background(), application.SleepOptions{DryRun: true}); err != nil {
+		t.Fatal(err)
+	}
+	said := f.out.String()
+	size := fmt.Sprintf("%-20s %d bytes of %s", application.SleepNeedsYouFile, len("NEEDS YOU: 3 items\n"), application.Thousands(application.SleepBudgetOf(application.SleepNeedsYouFile)))
+	if !strings.Contains(said, size) {
+		t.Errorf("the dry run's sizes lack %q:\n%s", size, said[strings.Index(said, "--- bundle"):])
 	}
 }

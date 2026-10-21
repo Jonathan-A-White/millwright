@@ -32,6 +32,15 @@ a size you can read whole, so do not page through them or read one twice):
   It ends with the priority inversions of the dump: each open or held bead below the
   priority of what waits on it, with the raise (`mw-a.2 P2→P1`); a bead marked `(his)`
   is his word, so raise it only by a card. Propose the raises; change no priority here.
+- `needs-you.txt`: every item of his review queue, counted as `mw stuck --dampers`
+  counts it (cards, demos, hands steps), each with its kind, age in days, title, its
+  question or step, the state of its epic and of what it needs, the rig's current
+  version where a demo names one, and its last two comments. It opens with the
+  `STALE CANDIDATES`: items on which mw found evidence of its own (a card on a parked
+  grilling or bug, a bead whose epic is closed, a replacement that is closed, a demo
+  that names an old version, an Ideas only card item whose idea a bead or a handoff
+  already names). That evidence is a lead, not a verdict: read the item's comments and
+  judge. `OTHER ITEMS` follows; judge those too, but only from what you can see.
 - `report.txt`: `mw report` in its text form: quality, speed and fuel by rig, model
   and host, the cheap wins, the landings that were investments and how they
   measured.
@@ -44,7 +53,7 @@ On a Sunday you are given the whole picture and a month of report: read everythi
 not only what moved. On other nights weigh the diff and the day's runs; read the
 full dump only to place what moved.
 
-## What you write (the answer's six parts)
+## What you write (the answer's seven parts, the sixth optional)
 
 1. **recommendations**: a JSON object, as a string, shaped
    `{"arc": "<his arc in one line>", "calls": [...], "stuck": [...], "investment_check": [...], "ideas": [...]}`.
@@ -97,9 +106,21 @@ full dump only to place what moved.
    and, where the bugs share a cause, the shared function or component. Leave out a
    group with a bug in progress. Empty when no group is worth folding. You file
    nothing: the Mayor files the folds in the morning.
-6. **summary**: under 150 words, plain, for the Mayor's mail: the arc, the one or
+6. **stale** (optional): markdown, one line for each item of `needs-you.txt` you judge
+   STALE, and none for a live one. Each line is `- <bead id> <kind>: <the evidence: a
+   closed bead id, a date, a version>. Action: <action>`, the action one of
+   `clear-card` (a card whose question is moot), `retire-step` (a hands step that is
+   done another way, overtaken or moot), `close-superseded` (a bead whose work was
+   done by another, closed), `tick-item` (an Ideas only card item the Mayor already
+   handled: `mw card update <card txid> --tick <n>`) or `ask-him`. A demo, and anything
+   that touches money, keys or a charter, is never cleared on your word: its action is
+   `ask-him` and the Mayor puts it on one batched card. Leave the part out when nothing
+   is stale. You clear nothing: the Mayor clears what is plainly moot at the next
+   sitting.
+7. **summary**: under 150 words, plain, for the Mayor's mail: the arc, the one or
    two calls that matter, the top refusal cause and whether an investment covers
-   it, and the count of stuck stories, naming the roots `stuck.txt` lists.
+   it, and the count of stuck stories, naming the roots `stuck.txt` lists. mw adds the
+   count of stale items itself.
 
 ## How to reason
 

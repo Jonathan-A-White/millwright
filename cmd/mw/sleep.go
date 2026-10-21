@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,9 +17,13 @@ import (
 
 	millwright "github.com/Jonathan-A-White/millwright"
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/gitcmd"
+	"github.com/Jonathan-A-White/millwright/infrastructure/ideasonly"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
 // newSleepCmd builds `mw sleep`: the sleep pass, the factory's nightly sweep.
@@ -39,14 +45,20 @@ func newSleepPassCmd() *cobra.Command {
 		Long: "pass gathers the night's bundle: the triage dump and what moved since the last one, the ready\n" +
 			"stories in dispatch's order (mw queue), each rig's git log of the last 10 days, the sessions'\n" +
 			"results aggregated by model, mw report (7 days; on Sundays 30) and mw stuck (the held roots live\n" +
-			"beads wait behind, which the summary names). It starts one fresh agent\n" +
+			"beads wait behind, which the summary names) and needs-you.txt: every item of his review queue\n" +
+			"(the cards, demos and hands steps mw stuck --dampers counts), each with its age, question or\n" +
+			"step, its epic's and dependencies' states, a demo's version against the rig's, its last two\n" +
+			"comments, and, first, the stale candidates mw found evidence for (a card on a parked grilling,\n" +
+			"a closed replacement, a handled Ideas only item). It starts one fresh agent\n" +
 			"with the principles (plans/principles.md, else the newest plans/triage-<date>/principles.md)\n" +
 			"and that bundle. The agent answers with the day's priorities (recommendations.json and\n" +
 			"questions.md), maps (maps.md) and improvements (improvements.md), which mw writes with a\n" +
 			"summary.md and the dump (triage.jsonl, tomorrow's diff starts from it) into\n" +
 			"plans/sleep-<date>/ in the vault and commits, with the run log runs/sleep/<date>.json that\n" +
-			"mw fuel counts under the kind sleep. It mails the Mayor the summary, under 150 words. It files\n" +
-			"no bead.\n\n" +
+			"mw fuel counts under the kind sleep. An answer may add stale.md: a line for each item of his Needs\n" +
+			"you judged stale, with its evidence and an action (clear-card, retire-step, close-superseded,\n" +
+			"tick-item or ask-him); the Mayor clears them at the next sitting. It mails the Mayor the summary,\n" +
+			"under 150 words, with how many are stale. It files no bead and clears nothing.\n\n" +
 			"The model and effort are [sleep] nightly_model and nightly_effort (opus and medium), and on\n" +
 			"Sundays, UTC, sunday_model and sunday_effort (fable and xhigh); --model and --effort replace\n" +
 			"the day's. The follower makes the pass once a day from [events] sleep_hour (07:30 UTC).\n\n" +
@@ -144,11 +156,12 @@ func newSleepPass(dir, host string, out io.Writer) (application.SleepPass, error
 				_, err := application.TriageDump{Source: gateway}.Run(ctx, w)
 				return err
 			},
-			Mw:      runMwItself,
-			Git:     rigGitLog,
-			Rigs:    rigs,
-			Runs:    files,
-			Earlier: files,
+			Mw:       runMwItself,
+			Git:      rigGitLog,
+			Rigs:     rigs,
+			Runs:     files,
+			Earlier:  files,
+			NeedsYou: needsYouSurvey(dir, gateway, files, rigs).Read,
 		},
 		Vault: files, Grinder: claude.NewGrinder(), Mailbox: gateway,
 		Settings: application.SleepSettings{
@@ -157,6 +170,83 @@ func newSleepPass(dir, host string, out io.Writer) (application.SleepPass, error
 		},
 		Instructions: millwright.SleepInstructions, Host: host, Out: out,
 	}, nil
+}
+
+// needsYouSurvey is where the pass reads his review queue from: the tracker the
+// DAMPERS alarms count it in, the cards sent from this host, the ideas of Ideas
+// only given back, the Mayor's last handoffs and the rigs' versions. A source
+// that is not there costs only what it would have said.
+func needsYouSurvey(dir string, gateway *beads.Gateway, files *vault.Vault, rigs map[string]string) application.NeedsYouSurvey {
+	survey := application.NeedsYouSurvey{
+		Tracker: gateway, Graph: gateway, Notes: gateway, Comments: gateway,
+		Versions: func(ctx context.Context) map[string]string { return rigVersions(ctx, files, rigs) },
+		Evidence: func(ctx context.Context) ([]application.NeedsYouText, error) { return ideaEvidence(ctx, dir, gateway) },
+	}
+	if limits, err := config.Dampers(); err == nil {
+		survey.Limit = limits.ReviewQueue
+	}
+	if cards, err := sentCards(); err == nil {
+		survey.Cards = cards
+	}
+	if state, err := config.IdeasOnlyDir(); err == nil {
+		survey.Released = ideasonly.New(state).Released
+	}
+	return survey
+}
+
+// sleepHandoffs is how many of the Mayor's newest handoffs the sweep of the
+// Ideas only cards reads for the txids they name.
+const sleepHandoffs = 60
+
+// ideaEvidence is the texts a handled idea's txid is named in: the Mayor's
+// newest handoffs and the live beads' descriptions.
+func ideaEvidence(ctx context.Context, vaultDir string, gateway *beads.Gateway) ([]application.NeedsYouText, error) {
+	var texts []application.NeedsYouText
+	handoffs := filepath.Join(vaultDir, "seats", "mayor", "handoffs")
+	if names, err := os.ReadDir(handoffs); err == nil {
+		sort.Slice(names, func(a, b int) bool { return names[a].Name() < names[b].Name() })
+		if len(names) > sleepHandoffs {
+			names = names[len(names)-sleepHandoffs:]
+		}
+		for _, name := range names {
+			if raw, err := os.ReadFile(filepath.Join(handoffs, name.Name())); err == nil {
+				texts = append(texts, application.NeedsYouText{Source: "handoff " + strings.TrimSuffix(name.Name(), ".md"), Text: string(raw)})
+			}
+		}
+	}
+	var dump bytes.Buffer
+	if _, err := (application.TriageDump{Source: gateway}).Run(ctx, &dump); err != nil {
+		return texts, fmt.Errorf("the live beads: %w", err)
+	}
+	lines, err := application.ReadTriageLines(&dump)
+	if err != nil {
+		return texts, err
+	}
+	for _, line := range lines {
+		texts = append(texts, application.NeedsYouText{Source: line.ID, Text: line.Description})
+	}
+	return texts, nil
+}
+
+// rigVersions is the current version of each rig checked out, by rig name, read
+// from the first of the rig's version_files in its checkout; a rig with none
+// has no entry.
+func rigVersions(ctx context.Context, rules application.EpicRules, rigs map[string]string) map[string]string {
+	versions := map[string]string{}
+	for name, checkout := range rigs {
+		req, err := rules.EpicRequirements(ctx, name)
+		if err != nil || len(req.VersionFiles) == 0 {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(checkout, filepath.FromSlash(req.VersionFiles[0])))
+		if err != nil {
+			continue
+		}
+		if version, err := domain.VersionOf(raw); err == nil {
+			versions[name] = version
+		}
+	}
+	return versions
 }
 
 // runMwItself runs this binary with args and reports what it printed.
