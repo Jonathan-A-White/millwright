@@ -160,6 +160,13 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 		c.aPosternMessageFromThreadedOnBead)
 	ctx.Given(`^a postern message from "([^"]*)" in the channel of bead "([^"]*)" with text "([^"]*)" and txid "([^"]*)" carrying a screenshot$`,
 		c.aPosternMessageFromThreadedOnBeadCarryingAScreenshot)
+	ctx.Given(`^a postern message from "([^"]*)" in the channel of bead "([^"]*)" with the lines "([^"]*)" and txid "([^"]*)"$`,
+		func(from, bead, lines, txid string) error {
+			return c.aPosternMessageFromThreadedOnBead(from, bead, strings.ReplaceAll(lines, " / ", "\n"), txid)
+		})
+	ctx.Then(`^it printed the lines "([^"]*)"$`, func(lines string) error {
+		return c.itPrintedText(strings.ReplaceAll(lines, " / ", "\n") + "\n")
+	})
 	ctx.Given(`^a postern message from "([^"]*)" in channel "([^"]*)" with text "([^"]*)" and txid "([^"]*)"$`,
 		c.aPosternMessageFromOnTopic)
 	ctx.Given(`^a postern message from "([^"]*)" with text "([^"]*)" and txid "([^"]*)"$`, c.aPosternMessageFromInGeneral)

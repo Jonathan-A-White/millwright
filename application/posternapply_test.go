@@ -358,6 +358,26 @@ func TestInboxShowsAnAppliedMessageAsOneLineAndNeverAppliesItTwice(t *testing.T)
 	}
 }
 
+// A comment of the Governor's the pass already applied is shown by the Mayor's
+// read as the line and his whole text, every line of it: the line alone hid
+// his answer (mw-gq6.675). An action stays its one line.
+func TestInboxShowsAnAppliedGovernorCommentWithItsWholeText(t *testing.T) {
+	f := newApplyFixture(t)
+	text := "Q1 = B, Fable xhigh.\nQ2 = A.\nThis needs tlc across the board."
+	threaded, _ := json.Marshal(application.PosternThreadedMessage{Thread: application.PosternThread{Bead: "mw-e.2"}, Text: text})
+	f.message(t, releaseTapGovernorKey, "tx-words", string(threaded))
+	f.apply(t)
+	f.out.Reset()
+
+	if _, err := f.inbox().Run(context.Background()); err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	want := "already applied earlier: applied comment mw-e.2 txid tx-words\n" + text + "\n"
+	if got := f.out.String(); got != want {
+		t.Fatalf("expected the line and his three lines whole, got %q", got)
+	}
+}
+
 // An answer the pass applied is printed by the Mayor's next read once, marked
 // as old so it cannot be taken for the newest answer; the read after it does
 // not meet it at all (mw-gq6.148).

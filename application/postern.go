@@ -799,7 +799,7 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 	}
 	if settled > 0 {
 		for _, m := range newestFirst[len(newestFirst)-settled:] {
-			i.printf("already applied earlier: %s\n", applied[m.Txid])
+			i.printAppliedEarlier(m, applied[m.Txid])
 		}
 		if last := mine[settled-1].Seq; last > cursor {
 			if err := i.Memory.SetNote(ctx, PosternCursorKey, strconv.FormatInt(last, 10)); err != nil {
@@ -811,9 +811,9 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 	var ideas ideasPass
 	for _, m := range newestFirst[:len(newestFirst)-settled] {
 		// A message a pass already applied (Apply, the on-message hook's)
-		// is one line: what was done, never its text, never done again.
+		// is one line: what was done, never done again.
 		if done, ok := applied[m.Txid]; ok && m.Txid != "" {
-			i.printf("already applied earlier: %s\n", done)
+			i.printAppliedEarlier(m, done)
 			continue
 		}
 		// A message kept for Ideas only is one line too, never its text.
@@ -876,6 +876,18 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 		}
 	}
 	return newestFirst, nil
+}
+
+// printAppliedEarlier prints the line of a message a pass already applied. A
+// comment of the Governor's in a bead's thread is his words, which the pass put
+// on the bead and this read is the Mayor's only sight of: they follow the line
+// whole. An action, an answer and the rest are their line only; a voice note's
+// line holds what was heard.
+func (i PosternInbox) printAppliedEarlier(m PosternInboxMessage, note string) {
+	i.printf("already applied earlier: %s\n", note)
+	if strings.HasPrefix(note, "applied comment ") && strings.TrimSpace(m.Text) != "" {
+		i.printf("%s\n", m.Text)
+	}
 }
 
 // channelLabel is the channel mw postern inbox prints a message under:

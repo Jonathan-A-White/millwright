@@ -231,6 +231,28 @@ func (c *talkWaitContext) record(class, to, from, plaintext string, announce boo
 	return nil
 }
 
+// messageWithFiles indexes a message to the Mayor carrying text and that many
+// jpeg pictures, and a voice note first when voice; the wait names them and
+// never fetches them, so the backend holds no blobs.
+func (c *talkWaitContext) messageWithFiles(text string, pictures int, voice bool) error {
+	var files []*application.PosternAttachment
+	if voice {
+		files = append(files, &application.PosternAttachment{Hash: strings.Repeat("0", 64), Size: 10, Mime: "audio/webm"})
+	}
+	for n := 0; n < pictures; n++ {
+		files = append(files, &application.PosternAttachment{Hash: strings.Repeat(fmt.Sprint(n+1), 64), Size: 10, Mime: "image/jpeg"})
+	}
+	msg := application.PosternThreadedMessage{Text: text, Attachments: files}
+	if len(files) == 1 {
+		msg.Attachment, msg.Attachments = files[0], nil
+	}
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	return c.record("message", c.mayor, c.governorKey, string(raw), true)
+}
+
 func talkTurnPlaintext(id string, turn int, role, text, model string, cut bool) string {
 	plain := map[string]any{"talk": map[string]any{"id": id, "turn": turn}, "text": text, "role": role}
 	if model != "" {
@@ -426,6 +448,15 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^a "([^"]*)" record to the Mayor is indexed$`, func(class string) error {
 		return c.record(class, c.mayor, c.governorKey, class+" text", true)
 	})
+	ctx.When(`^a "message" record to the Mayor saying "([^"]*)" with (\d+) pictures? is indexed$`, func(text string, pictures int) error {
+		return c.messageWithFiles(text, pictures, false)
+	})
+	ctx.When(`^a "message" record to the Mayor saying "([^"]*)" with (\d+) pictures? and a voice note is indexed$`, func(text string, pictures int) error {
+		return c.messageWithFiles(text, pictures, true)
+	})
+	ctx.When(`^a "message" record to the Mayor saying "([^"]*)" lines "([^"]*)" is indexed$`, func(text, lines string) error {
+		return c.record("message", c.mayor, c.governorKey, strings.ReplaceAll(lines, " / ", "\n"), true)
+	})
 	ctx.Given(`^a "([^"]*)" record to the Mayor has been indexed$`, func(class string) error {
 		return c.record(class, c.mayor, c.governorKey, class+" text", false)
 	})
@@ -491,6 +522,14 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Then(`^mw talk wait ends within (\d+) seconds?$`, c.endsWithin)
 	ctx.Then(`^mw talk wait is still waiting$`, c.stillWaiting)
+	ctx.Then(`^the wait printed the notice "([^"]*)"$`, func(notice string) error {
+		for _, line := range strings.Split(c.run.out.String(), "\n") {
+			if strings.HasPrefix(line, "  channel ") && strings.HasSuffix(line, ", txid direct:1: "+notice) {
+				return nil
+			}
+		}
+		return fmt.Errorf("expected a notice line ending %q, the wait printed:\n%s", notice, c.run.out.String())
+	})
 	ctx.Then(`^the wait printed "([^"]*)"$`, func(text string) error {
 		return c.printed(text, true)
 	})
