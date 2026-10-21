@@ -125,7 +125,7 @@ func newGristGrindCmd() *cobra.Command {
 // newGristSendCmd builds `mw grist send`: a grist sent from the terminal as
 // the key it is given, and, with --wait, its answer.
 func newGristSendCmd() *cobra.Command {
-	var keyFile, app, kind, request, backend, version string
+	var keyFile, app, kind, request, backend, version, talk string
 	var photos []string
 	var wait time.Duration
 
@@ -140,7 +140,10 @@ func newGristSendCmd() *cobra.Command {
 			"leaves with 0 when it is answered, 1 when it is refused or failed (saying why on standard\n" +
 			"error), and 2 when no answer came in time; the grist keeps waiting at the backend.\n\n" +
 			"It reads no key but --key, which has no default and is a file holding the key to send as\n" +
-			"(a key the backend holds a licence for), and it never prints a private key.",
+			"(a key the backend holds a licence for), and it never prints a private key.\n\n" +
+			"--talk names the talk the grist is a turn of, as an app names it: the mill resumes that talk's\n" +
+			"session within the hour, leaving out the request's history, and the answer's talk says\n" +
+			"whether it was fresh or resumed.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			keys := postern.New(keyFile)
@@ -159,7 +162,7 @@ func newGristSendCmd() *cobra.Command {
 				Log:     cmd.ErrOrStderr(),
 			}
 			_, err := send.Run(cmd.Context(), application.GristSendRequest{
-				App: app, Kind: kind, Version: version, RequestFile: request, Photos: photos, Wait: wait,
+				App: app, Kind: kind, Version: version, RequestFile: request, Photos: photos, Wait: wait, Talk: talk,
 			})
 			return err
 		},
@@ -172,6 +175,7 @@ func newGristSendCmd() *cobra.Command {
 	cmd.Flags().StringVar(&backend, "backend", "", "the postern backend's URL (default: postern_backend)")
 	cmd.Flags().DurationVar(&wait, "wait", 0, "how long to wait for the answer, e.g. 5m; 0 sends and does not wait")
 	cmd.Flags().StringVar(&version, "schema-version", "", "the version of the app's request schema (default: the request's schemaVersion)")
+	cmd.Flags().StringVar(&talk, "talk", "", "the talk the grist is a turn of, as an app names it (at most 80 bytes): the mill resumes its session")
 	for _, name := range []string{"key", "app", "kind", "request"} {
 		_ = cmd.MarkFlagRequired(name)
 	}

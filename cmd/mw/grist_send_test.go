@@ -227,7 +227,7 @@ func TestGristSendHelpDocumentsEveryFlag(t *testing.T) {
 	if status != 0 {
 		t.Fatalf("mw grist send --help left with %d", status)
 	}
-	for _, flag := range []string{"--key", "--app", "--kind", "--request", "--photo", "--backend", "--wait", "--schema-version"} {
+	for _, flag := range []string{"--key", "--app", "--kind", "--request", "--photo", "--backend", "--wait", "--schema-version", "--talk"} {
 		line := ""
 		for _, l := range strings.Split(out, "\n") {
 			if strings.Contains(l, flag+" ") {

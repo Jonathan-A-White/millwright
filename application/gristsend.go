@@ -67,6 +67,9 @@ type GristSendRequest struct {
 	Photos []string
 	// Wait is how long to wait for the answer; zero sends and does not wait.
 	Wait time.Duration
+	// Talk names the talk the grist is a turn of, as an app names it; empty
+	// is none.
+	Talk string
 }
 
 // GristSendReport is what one send did: the txid the grist goes by, and the
@@ -222,6 +225,9 @@ func (s GristSend) prepare(req GristSendRequest) (GristPlaintext, []gristPhoto, 
 	if strings.TrimSpace(version) == "" {
 		return GristPlaintext{}, nil, fmt.Errorf("mw grist send: the request has no schemaVersion to say which version of the app's schema it is: give --schema-version")
 	}
+	if len(req.Talk) > GristTalkMax {
+		return GristPlaintext{}, nil, fmt.Errorf("mw grist send: --talk is %d bytes, over the %d a talk's name may be", len(req.Talk), GristTalkMax)
+	}
 	if len(req.Photos) > GristSendMaxPhotos {
 		return GristPlaintext{}, nil, fmt.Errorf("mw grist send: %d photos is over the %d a grist may carry", len(req.Photos), GristSendMaxPhotos)
 	}
@@ -233,7 +239,7 @@ func (s GristSend) prepare(req GristSendRequest) (GristPlaintext, []gristPhoto, 
 		}
 		photos = append(photos, photo)
 	}
-	plain := GristPlaintext{Grist: GristName{App: req.App, Kind: req.Kind, V: version}, Input: json.RawMessage(raw)}
+	plain := GristPlaintext{Grist: GristName{App: req.App, Kind: req.Kind, V: version, Talk: req.Talk}, Input: json.RawMessage(raw)}
 	return plain, photos, nil
 }
 

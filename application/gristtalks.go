@@ -79,17 +79,20 @@ type GristTalkKey struct {
 // sessions this talk has had before this one, ended, oldest first.
 type GristTalk struct {
 	GristTalkKey
-	Session       string    `json:"session"`
-	Cwd           string    `json:"cwd"`
-	Spec          string    `json:"spec"`
-	Billing       string    `json:"billing"`
-	Turns         int       `json:"turns"`
-	ContextTokens int       `json:"context_tokens"`
-	CacheRead     int       `json:"cache_read"`
-	CostTotal     float64   `json:"cost_total"`
-	LastUsed      time.Time `json:"last_used"`
-	Started       time.Time `json:"started"`
-	Ended         []string  `json:"ended,omitempty"`
+	Session       string  `json:"session"`
+	Cwd           string  `json:"cwd"`
+	Spec          string  `json:"spec"`
+	Billing       string  `json:"billing"`
+	Turns         int     `json:"turns"`
+	ContextTokens int     `json:"context_tokens"`
+	CacheRead     int     `json:"cache_read"`
+	CostTotal     float64 `json:"cost_total"`
+	// FuelTotal is the session's fuel to date as the harness reports it,
+	// cumulative over a resumed session as its cost is.
+	FuelTotal Fuel      `json:"fuel_total"`
+	LastUsed  time.Time `json:"last_used"`
+	Started   time.Time `json:"started"`
+	Ended     []string  `json:"ended,omitempty"`
 }
 
 // GristTalkStore keeps the talks' records and the one directory each app's
@@ -208,8 +211,9 @@ type gristTalkTurn struct {
 	reason  string
 	record  GristTalk
 	// cost is this turn's own cost, and sessionCost the session's to date as
-	// the harness reported it.
+	// the harness reported it; fuel is this turn's own fuel.
 	cost, sessionCost float64
+	fuel              Fuel
 }
 
 // answer is what the turn tells the app.
@@ -233,32 +237,46 @@ func (t *gristTalkTurn) mark(line *GrindLine, talk, said string) {
 	}
 	line.Talk, line.SessionID, line.Resumed = talk, cmp.Or(said, t.session), t.resumed
 	line.CostUSD, line.SessionCostUSD = t.cost, t.sessionCost
+	line.Tokens, line.Fuel = t.fuel.Total(), nil
+	if f := t.fuel; f.Total() > 0 {
+		line.Fuel = &GrindFuel{Input: f.Input, Output: f.Output, CacheRead: f.CacheRead, CacheWrite: f.CacheWrite}
+	}
 }
 
 // gristTalkRecord is the record a talk keeps after a turn that gave result:
 // prev's session carried on when resumed, else a new one, prev's own session
-// ended. The turn's cost is the difference of the session's cumulative cost
-// when resumed and the harness reported a total no less than before.
-func gristTalkRecord(prev GristTalk, found bool, key GristTalkKey, session, cwd, spec, billing string, resumed bool, result SessionResult, now time.Time) (GristTalk, float64) {
+// ended. A resumed session's cost and fuel are cumulative as the harness
+// reports them (seen on claude 2.1.306), so the turn's own are the
+// differences, where every count is no less than before.
+func gristTalkRecord(prev GristTalk, found bool, key GristTalkKey, session, cwd, spec, billing string, resumed bool, result SessionResult, now time.Time) (GristTalk, float64, Fuel) {
 	usage := result.Usage
 	record := GristTalk{
 		GristTalkKey: key, Session: session, Cwd: cwd, Spec: spec, Billing: billing,
 		Turns: 1, ContextTokens: usage.Input + usage.CacheRead + usage.CacheWrite, CacheRead: usage.CacheRead,
-		CostTotal: result.CostUSD, LastUsed: now.UTC(), Started: now.UTC(), Ended: slices.Clone(prev.Ended),
+		CostTotal: result.CostUSD, FuelTotal: result.Fuel, LastUsed: now.UTC(), Started: now.UTC(), Ended: slices.Clone(prev.Ended),
 	}
-	cost := result.CostUSD
+	cost, fuel := result.CostUSD, result.Fuel
 	if resumed {
 		record.Turns, record.Started = prev.Turns+1, prev.Started
 		if result.CostUSD >= prev.CostTotal {
 			cost = result.CostUSD - prev.CostTotal
 		}
-		return record, cost
+		was, is := prev.FuelTotal, result.Fuel
+		if is.Input >= was.Input && is.Output >= was.Output && is.CacheRead >= was.CacheRead && is.CacheWrite >= was.CacheWrite {
+			fuel = Fuel{Input: is.Input - was.Input, Output: is.Output - was.Output, CacheRead: is.CacheRead - was.CacheRead, CacheWrite: is.CacheWrite - was.CacheWrite}
+		}
+		return record, cost, fuel
 	}
 	if found && prev.Session != "" && prev.Session != session {
 		record.Ended = append(record.Ended, prev.Session)
 	}
-	return record, cost
+	return record, cost, fuel
 }
+
+// gristResumedNote opens a resumed turn's message: the request it carries has
+// no history, and the app's instructions read an empty history as a talk just
+// begun.
+const gristResumedNote = "This grist is the next turn of the talk this session has held so far. The request's history is left out of it: the turns above are that history, so read them as its history.\n\n"
 
 // newSessionID is a random version 4 UUID, as the harness takes a session id.
 func newSessionID() (string, error) {
@@ -369,7 +387,7 @@ func (g GristGrind) grindTalk(ctx context.Context, w *gristWork, privKey string)
 		resume.Resume = prev.Session
 		stripped := plain
 		stripped.Input = withoutHistory(plain.Input)
-		resume.Prompt = gristPrompt(stripped, photos, gristTag())
+		resume.Prompt = gristResumedNote + gristPrompt(stripped, photos, gristTag())
 		w.harnessStarted = g.now()
 		result, err = g.Grinder.Grind(ctx, resume)
 		if w.billing == BillingAPI {
@@ -404,7 +422,7 @@ func (g GristGrind) grindTalk(ctx context.Context, w *gristWork, privKey string)
 	}
 	w.settle(status, why)
 	if err == nil {
-		turn.record, turn.cost = gristTalkRecord(prev, found, key, turn.session, cwd, hash, w.billing, turn.resumed, result, w.answered)
+		turn.record, turn.cost, turn.fuel = gristTalkRecord(prev, found, key, turn.session, cwd, hash, w.billing, turn.resumed, result, w.answered)
 		turn.sessionCost = result.CostUSD
 		if saveErr := store.Save(ctx, turn.record); saveErr != nil {
 			w.notes = append(w.notes, fmt.Sprintf("the record of the talk %q could not be written: %v", key.Talk, saveErr))

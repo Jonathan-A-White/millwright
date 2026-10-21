@@ -465,6 +465,10 @@ func (t *talkContext) messageHistory(name, with string) error {
 	if has := strings.Contains(message, `"history"`); has != (with == "with") {
 		return fmt.Errorf("%s's message holds the history: %v, want %s: %q", name, has, with, message)
 	}
+	// A message without the history says first that the session holds it.
+	if says := strings.HasPrefix(message, "This grist is the next turn of the talk"); says != (with == "without") {
+		return fmt.Errorf("%s's message says the history is above: %v, want %v: %q", name, says, with == "without", message)
+	}
 	return nil
 }
 

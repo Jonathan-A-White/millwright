@@ -2601,7 +2601,8 @@ session per app, sender key and talk, its record under the state directory's
 The first turn starts the session with `--session-id` (and without
 `--no-session-persistence`); a turn within the hour of the last resumes it with
 `--resume`, every other flag the same, the request's `history` left out since
-the session holds it. One grist at a time per talk, in the order they came. A
+the session holds it (its message opens by saying so: an app's instructions may
+read an empty history as a talk just begun). One grist at a time per talk, in the order they came. A
 turn an hour or more after the last (`quiet`), a changed model, effort,
 instructions or schema (`spec`), a change of billing (`billing`), a lost
 transcript (`transcript`) or a resume that fails (`resume-failed`) starts a fresh
@@ -2611,7 +2612,8 @@ session with the request whole. The answer says which: `talk: {session:
 and `session_cost_usd` the session's to date. `mw grist talks [app]` lists the
 live talks, one a line: app, talk, turns, context tokens, the last turn's cache
 read, the time since its last use and the session; `--json` prints them as JSON.
-A grist with no talk runs exactly as before. See `features/grist_talk.feature`.
+`mw grist send --talk <talk>` sends a turn of a talk from the terminal. A grist
+with no talk runs exactly as before. See `features/grist_talk.feature`.
 
 With `[grist]` `api_credits = true` and an Anthropic API key in `api_key_file`
 (default `~/.config/mw/anthropic-api.key`; it must be mode 0600, else the mill

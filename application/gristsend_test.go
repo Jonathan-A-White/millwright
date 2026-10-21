@@ -2,6 +2,8 @@ package application_test
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,5 +118,30 @@ func TestGristSendReadsPastAnswersThatAreNotItsOwn(t *testing.T) {
 	_, err := send.Run(context.Background(), req)
 	if unanswered, ok := application.GristUnansweredIn(err); !ok || unanswered.Answer != nil || application.ExitStatus(err) != 2 {
 		t.Fatalf("expected no answer and status 2, got %v", err)
+	}
+}
+
+// --talk travels in the grist's name, beside app, kind and v; a talk over 80
+// bytes is refused before anything is sent.
+func TestGristSendNamesTheTalk(t *testing.T) {
+	send, backend, req := aGristSend(t)
+	req.Talk = strings.Repeat("t", application.GristTalkMax+1)
+	if _, err := send.Run(context.Background(), req); err == nil || len(backend.Delivered()) != 0 {
+		t.Fatalf("an 81-byte talk was sent: %v", err)
+	}
+	req.Talk = "rom.8@2026-10-21T12:00:00Z"
+	if _, err := send.Run(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	var payload application.PosternPayload
+	if err := json.Unmarshal(backend.Delivered()[0], &payload); err != nil {
+		t.Fatal(err)
+	}
+	plain, err := base64.StdEncoding.DecodeString(payload.Ct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(plain), `"talk":"rom.8@2026-10-21T12:00:00Z"`) {
+		t.Fatalf("the grist names no talk: %q", plain)
 	}
 }
