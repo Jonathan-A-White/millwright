@@ -808,6 +808,10 @@ func (g GristGrind) judgePhotos(w *gristWork, ceilings GristCeilings) string {
 		if !slices.Contains(GristMimes, mime) || (len(took.Mime) > 0 && !slices.Contains(took.Mime, mime)) {
 			return GristReasonMime
 		}
+		// A text file is only ever taken to be forwarded: no model reads it.
+		if isGristText(mime) && w.grind.Forward == "" {
+			return fmt.Sprintf("A file of type %s in this grist is not one its grind takes: only a grind that forwards to the Mayor takes it.", mime)
+		}
 		// A recording is only ever taken to be scored.
 		if isGristAudio(mime) && !w.grind.Scoring.Audio {
 			return GristReasonMime

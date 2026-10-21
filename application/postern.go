@@ -1085,7 +1085,7 @@ func (i PosternInbox) attachmentPath(attachment *PosternAttachment, name string)
 
 // posternAttachmentExtension is the file extension an attachment of mime is
 // written under: postern's docs/protocol.md section 14's list — images,
-// voice notes, a PDF or plain text. Anything else — which the phone never
+// voice notes, a PDF, plain text or a CSV. Anything else — which the phone never
 // sends — is written .bin rather than refusing a file already safely
 // downloaded and decrypted. A mime's parameters (audio/webm;codecs=opus)
 // are no part of its type.
@@ -1112,6 +1112,8 @@ func posternAttachmentExtension(mime string) string {
 		return ".pdf"
 	case "text/plain":
 		return ".txt"
+	case "text/csv":
+		return ".csv"
 	default:
 		return ".bin"
 	}

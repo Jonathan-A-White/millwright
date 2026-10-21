@@ -185,13 +185,22 @@ var GristImageMimes = []string{"image/jpeg", "image/png", "image/webp"}
 // scores them: what the phone's browser makes.
 var GristAudioMimes = []string{"audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/wav"}
 
-// GristMimes are the attachment types the factory lets a grist carry, photos
-// and recordings. A grind may take fewer, never more.
-var GristMimes = append(append([]string(nil), GristImageMimes...), GristAudioMimes...)
+// GristTextMimes are the file types a grist may carry only to a grind that
+// forwards to the Mayor, whose mail keeps the file: no model reads one.
+var GristTextMimes = []string{"text/csv"}
+
+// GristMimes are the attachment types the factory lets a grist carry, photos,
+// recordings and text files. A grind may take fewer, never more.
+var GristMimes = append(append(append([]string(nil), GristImageMimes...), GristAudioMimes...), GristTextMimes...)
 
 // isGristAudio reports whether mime, as a grist names it, is a recording.
 func isGristAudio(mime string) bool {
 	return slices.Contains(GristAudioMimes, strings.ToLower(strings.TrimSpace(mime)))
+}
+
+// isGristText reports whether mime, as a grist names it, is a text file.
+func isGristText(mime string) bool {
+	return slices.Contains(GristTextMimes, strings.ToLower(strings.TrimSpace(mime)))
 }
 
 // GrindEfforts are the efforts a grind may name: the harness's own levels.
