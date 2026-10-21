@@ -1697,7 +1697,8 @@ func TestGristCeilingsDefault(t *testing.T) {
 	}
 	if strings.Join(got.Models, ",") != "haiku,sonnet,opus" || strings.Join(got.Efforts, ",") != "low,medium,high" || got.MaxAttachments != 4 || got.MaxAttachmentBytes != 8388608 ||
 		got.DailyLimit != 50 || got.Concurrency != 2 || got.Timeout != 10*time.Minute ||
-		got.PoolQuiet != 10*time.Minute || got.PoolMaxAge != 15*time.Minute || !got.PersonCap {
+		got.PoolQuiet != 10*time.Minute || got.PoolMaxAge != 15*time.Minute || !got.PersonCap ||
+		got.TalkContextCap != 80000 || got.TalkMaxTurns != 40 {
 		t.Fatalf("expected the default ceilings, got %+v", got)
 	}
 }
@@ -1715,6 +1716,8 @@ concurrency = 3
 timeout = "5m"
 pool_quiet = "0s"
 pool_max_age = "20m"
+talk_context_cap = 50000
+talk_max_turns = 12
 
 [grist-apps]
 cairn = "/home/jwhite/rigs/Cairn"
@@ -1725,7 +1728,7 @@ cairn = "/home/jwhite/rigs/Cairn"
 	}
 	if strings.Join(got.Models, ",") != "haiku,sonnet" || strings.Join(got.Efforts, ",") != "low,xhigh" || got.MaxAttachments != 2 || got.MaxAttachmentBytes != 4194304 ||
 		got.DailyLimit != 20 || got.Concurrency != 3 || got.Timeout != 5*time.Minute ||
-		got.PoolQuiet != 0 || got.PoolMaxAge != 20*time.Minute {
+		got.PoolQuiet != 0 || got.PoolMaxAge != 20*time.Minute || got.TalkContextCap != 50000 || got.TalkMaxTurns != 12 {
 		t.Fatalf("expected the table's ceilings, got %+v", got)
 	}
 	apps, err := config.GristApps()
@@ -1774,7 +1777,7 @@ func TestGristAPICreditsAreOffUnlessTheTableSaysTrue(t *testing.T) {
 
 func TestGristCeilingsThatAreNotNumbersAreRefused(t *testing.T) {
 	for _, bad := range []string{"daily_limit = 0", "concurrency = 0", "concurrency = two", "max_attachments = four", `timeout = "soon"`,
-		`pool_quiet = "-1m"`, `pool_quiet = "soon"`, `pool_max_age = "0s"`} {
+		`pool_quiet = "-1m"`, `pool_quiet = "soon"`, `pool_max_age = "0s"`, "talk_context_cap = 0", "talk_context_cap = lots", "talk_max_turns = 0", "talk_max_turns = -3"} {
 		writeConfig(t, "[grist]\n"+bad+"\n")
 		if _, err := config.Grist(); err == nil {
 			t.Errorf("expected %q refused", bad)

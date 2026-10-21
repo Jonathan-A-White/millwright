@@ -88,3 +88,27 @@ func TestTalksFindTheTranscriptWhereClaudeKeepsIt(t *testing.T) {
 		t.Fatalf("the transcript was not found: %v, %v", kept, err)
 	}
 }
+
+// A transcript is deleted where Claude Code keeps it; one already gone is no
+// error, and a session name that is a path is refused.
+func TestTalksRemoveATranscript(t *testing.T) {
+	projects := t.TempDir()
+	talks := &grist.Talks{Projects: projects}
+	path := grist.TranscriptPath(projects, "/home/x/.local/state", "s-1")
+	os.MkdirAll(filepath.Dir(path), 0o700)
+	os.WriteFile(path, []byte("{}\n"), 0o600)
+	if err := talks.RemoveTranscript("/home/x/.local/state", "s-1"); err != nil {
+		t.Fatal(err)
+	}
+	if kept, _ := talks.Transcript("/home/x/.local/state", "s-1"); kept {
+		t.Fatal("the transcript is still there")
+	}
+	if err := talks.RemoveTranscript("/home/x/.local/state", "s-1"); err != nil {
+		t.Fatalf("a transcript already gone is an error: %v", err)
+	}
+	for _, session := range []string{"", "../s-1", "a/b", ".."} {
+		if err := talks.RemoveTranscript("/home/x/.local/state", session); err == nil {
+			t.Errorf("the session %q was accepted", session)
+		}
+	}
+}

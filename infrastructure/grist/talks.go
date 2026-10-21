@@ -136,6 +136,21 @@ func (t *Talks) Transcript(cwd, session string) (bool, error) {
 	return err == nil, err
 }
 
+// RemoveTranscript implements application.GristTalkStore.
+func (t *Talks) RemoveTranscript(cwd, session string) error {
+	if t.Projects == "" {
+		return fmt.Errorf("there is no home directory to find Claude Code's transcripts in")
+	}
+	if session == "" || session != filepath.Base(session) || session == "." || session == ".." || !filepath.IsAbs(cwd) {
+		return fmt.Errorf("%q in %q is not a session to delete the transcript of", session, cwd)
+	}
+	err := os.Remove(TranscriptPath(t.Projects, cwd, session))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
 // TranscriptPath is where Claude Code keeps the transcript of session, run
 // from cwd, under projects: the directory is cwd with every character but a
 // letter or digit made "-".

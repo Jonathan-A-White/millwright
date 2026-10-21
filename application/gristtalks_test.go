@@ -2,6 +2,8 @@ package application
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -82,5 +84,49 @@ func TestWithoutHistoryKeepsTheRestInOrder(t *testing.T) {
 		if got := string(withoutHistory(json.RawMessage(in))); got != want {
 			t.Errorf("withoutHistory(%s) = %s, want %s", in, got, want)
 		}
+	}
+}
+
+// Key points are the session's answer trimmed and held to GristKeyPointsMax
+// characters (not bytes); an error, an unfinished session, a bad shape or
+// empty points are none, with the reason.
+func TestKeyPointsOf(t *testing.T) {
+	long := strings.Repeat("é", GristKeyPointsMax+10)
+	got, why := keyPointsOf(SessionResult{Answer: json.RawMessage(`{"key_points":"  Luke is 14.\n"}`)}, nil)
+	if got != "Luke is 14." || why != "" {
+		t.Errorf("trimmed key points are %q (%s)", got, why)
+	}
+	got, _ = keyPointsOf(SessionResult{Answer: json.RawMessage(`{"key_points":"` + long + `"}`)}, nil)
+	if len([]rune(got)) != GristKeyPointsMax {
+		t.Errorf("long key points are %d characters", len([]rune(got)))
+	}
+	for name, c := range map[string]struct {
+		result SessionResult
+		err    error
+	}{
+		"error":      {err: errors.New("exit status 1")},
+		"unfinished": {result: SessionResult{IsError: true, Said: "no"}},
+		"shape":      {result: SessionResult{Answer: json.RawMessage(`[1]`)}},
+		"empty":      {result: SessionResult{Answer: json.RawMessage(`{"key_points":" "}`)}},
+		"missing":    {},
+	} {
+		if got, why := keyPointsOf(c.result, c.err); got != "" || why == "" {
+			t.Errorf("%s: key points %q, why %q", name, got, why)
+		}
+	}
+}
+
+// A session ended with key points leaves no session and names it ended, with
+// the time; a session started after it ends nothing again.
+func TestGristTalkEndKeepsTheSessionForTidy(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	talk := GristTalk{Session: "s-1", Turns: 3, Ended: []string{"s-0"}}
+	talk.end(now, "Luke is 14.")
+	if talk.Session != "" || talk.KeyPoints != "Luke is 14." || len(talk.Ended) != 2 || !talk.EndedAt["s-1"].Equal(now) {
+		t.Fatalf("the ended talk is %+v", talk)
+	}
+	next, _, _ := gristTalkRecord(talk, true, GristTalkKey{}, "s-2", "/cwd", "spec", BillingSubscription, false, SessionResult{}, now)
+	if next.Session != "s-2" || next.KeyPoints != "" || len(next.Ended) != 2 || !next.EndedAt["s-1"].Equal(now) {
+		t.Fatalf("the talk after it is %+v", next)
 	}
 }

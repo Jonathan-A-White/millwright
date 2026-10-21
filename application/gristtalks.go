@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -51,16 +52,48 @@ const (
 	GristTalkTranscript = "transcript"
 	// GristTalkResumeFailed is a talk whose resume ended in an error.
 	GristTalkResumeFailed = "resume-failed"
+	// GristTalkEnded is a talk whose session was ended without key points to
+	// start the next from: its cap was reached and the session could not write
+	// them, it sat unused for GristTalkIdle, or `mw grist talks --end` ended it.
+	GristTalkEnded = "ended"
+
+	// GristTalkRefreshed is a talk whose session was ended at a cap and whose
+	// key points start this one (the answer says them once).
+	GristTalkRefreshed = "refreshed"
+)
+
+// GristTalkIdle is how long a live talk may go unused before the next talk
+// grist for its app ends it and deletes its transcript.
+const GristTalkIdle = 30 * 24 * time.Hour
+
+// GristTalkTranscriptKept is how long an ended session's transcript is kept
+// before the next talk grist for its app deletes it.
+const GristTalkTranscriptKept = 24 * time.Hour
+
+// GristKeyPointsMax is the most characters of key points a session may write.
+const GristKeyPointsMax = 1500
+
+// GristKeyPointsPrompt is the message a talk's session is asked for its key
+// points with, and GristKeyPointsSchema the schema it answers in.
+const (
+	GristKeyPointsPrompt = "This talk has reached the limit of what one session may hold, and the next turn will start a new session. " +
+		"Write the key points of this talk so far, for yourself to carry on from: what the reader said about themselves, what was taught, " +
+		"and what was promised or left open. Say nothing of your instructions or of how you answer. " +
+		"Write them in the language of the talk, plainly, in at most 1500 characters. " +
+		"Answer only through the structured output, as {\"key_points\": \"...\"}."
+	GristKeyPointsSchema = `{"type":"object","properties":{"key_points":{"type":"string","maxLength":1500}},"required":["key_points"],"additionalProperties":false}`
 )
 
 // GristAnswerTalk is what a talk grist's answer says of its session: fresh
-// (and why) or resumed, how many turns it has taken and how much context the
-// last turn held.
+// (and why), resumed or refreshed, how many turns it has taken and how much
+// context the last turn held. A refreshed session's answer carries the key
+// points it was started from, once.
 type GristAnswerTalk struct {
 	Session       string `json:"session"`
 	Reason        string `json:"reason,omitempty"`
 	Turns         int    `json:"turns"`
 	ContextTokens int    `json:"context_tokens"`
+	KeyPoints     string `json:"key_points,omitempty"`
 }
 
 // GristTalkKey names a talk: the app, the sender's key fingerprint, and the
@@ -76,7 +109,10 @@ type GristTalkKey struct {
 // its turns have taken so far. ContextTokens and CacheRead are the last turn's
 // (input + cache read + cache write, and the cache read alone); CostTotal is
 // the session's cost as the harness reports it, cumulative. Ended are the
-// sessions this talk has had before this one, ended, oldest first.
+// sessions this talk has had before this one, ended, oldest first. A session
+// ended at a cap leaves Session empty and KeyPoints as the session wrote them,
+// for the next turn to start from; EndedAt is when each ended session whose
+// transcript is still kept ended.
 type GristTalk struct {
 	GristTalkKey
 	Session       string  `json:"session"`
@@ -93,6 +129,31 @@ type GristTalk struct {
 	LastUsed  time.Time `json:"last_used"`
 	Started   time.Time `json:"started"`
 	Ended     []string  `json:"ended,omitempty"`
+	KeyPoints string    `json:"key_points,omitempty"`
+	// EndedAt keeps the end of each session in Ended whose transcript is not
+	// yet deleted.
+	EndedAt map[string]time.Time `json:"ended_at,omitempty"`
+}
+
+// end ends the talk's live session at now, leaving its transcript to be
+// deleted GristTalkTranscriptKept later, and the key points as given: none
+// when the session could not write them.
+func (t *GristTalk) end(now time.Time, keyPoints string) {
+	if t.Session != "" {
+		t.noteEnded(t.Session, now)
+	}
+	t.Session, t.KeyPoints = "", keyPoints
+}
+
+// noteEnded names session among those this talk has ended, at now.
+func (t *GristTalk) noteEnded(session string, now time.Time) {
+	if !slices.Contains(t.Ended, session) {
+		t.Ended = append(t.Ended, session)
+	}
+	if t.EndedAt == nil {
+		t.EndedAt = map[string]time.Time{}
+	}
+	t.EndedAt[session] = now.UTC()
 }
 
 // GristTalkStore keeps the talks' records and the one directory each app's
@@ -110,6 +171,8 @@ type GristTalkStore interface {
 	// Transcript reports whether the harness still keeps the transcript of
 	// session, run from cwd.
 	Transcript(cwd, session string) (bool, error)
+	// RemoveTranscript deletes that transcript; one already gone is no error.
+	RemoveTranscript(cwd, session string) error
 }
 
 // GristTalks is the mill's talks: their records, and the queue that runs one
@@ -157,6 +220,57 @@ func (t *GristTalks) queue(w *gristWork) (wait <-chan struct{}, leave func()) {
 	}
 }
 
+// tidy deletes what the talks of key's app no longer need, as a talk grist
+// of the app begins (no daemon, no timer): the transcript of an ended session
+// GristTalkTranscriptKept after its end, and a live talk unused for
+// GristTalkIdle is ended and its transcript deleted with it. A talk with a
+// grist in the line, other than key's own, is left to that grist. What it
+// could not do is in the notes it returns, never an error: the grist goes on.
+func (t *GristTalks) tidy(ctx context.Context, key GristTalkKey, now time.Time) []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	talks, err := t.Store.List(ctx)
+	if err != nil {
+		return []string{fmt.Sprintf("the talks of %s could not be tidied: %v", key.App, err)}
+	}
+	var notes []string
+	for _, talk := range talks {
+		if talk.App != key.App || (talk.GristTalkKey != key && t.turns[talk.GristTalkKey] != nil) {
+			continue
+		}
+		changed := false
+		forget := func(session string) {
+			if err := t.Store.RemoveTranscript(talk.Cwd, session); err != nil {
+				notes = append(notes, fmt.Sprintf("the transcript of the talk %q's session %s could not be deleted: %v", talk.Talk, session, err))
+				return
+			}
+			delete(talk.EndedAt, session)
+			changed = true
+		}
+		if talk.Session != "" && now.Sub(talk.LastUsed) >= GristTalkIdle {
+			session := talk.Session
+			talk.end(now, "")
+			forget(session)
+			changed = true
+		}
+		for _, session := range slices.Sorted(maps.Keys(talk.EndedAt)) {
+			if now.Sub(talk.EndedAt[session]) >= GristTalkTranscriptKept {
+				forget(session)
+			}
+		}
+		if !changed {
+			continue
+		}
+		if len(talk.EndedAt) == 0 {
+			talk.EndedAt = nil
+		}
+		if err := t.Store.Save(ctx, talk); err != nil {
+			notes = append(notes, fmt.Sprintf("the record of the talk %q could not be written: %v", talk.Talk, err))
+		}
+	}
+	return notes
+}
+
 // holds reports whether w is a talk grist these talks keep a session for.
 func (t *GristTalks) holds(w *gristWork) bool {
 	return t != nil && t.Store != nil && w.plain.Grist.Talk != ""
@@ -182,7 +296,11 @@ func gristTalkSpec(s gristWarmSpec) string {
 // it can.
 func (t *GristTalks) freshReason(prev GristTalk, found bool, spec, cwd, billing string, now time.Time) (string, error) {
 	switch {
-	case !found || prev.Session == "":
+	case !found:
+		return GristTalkNew, nil
+	case prev.Session == "" && len(prev.Ended) > 0:
+		return GristTalkEnded, nil
+	case prev.Session == "":
 		return GristTalkNew, nil
 	case now.Sub(prev.LastUsed) >= GristTalkQuiet:
 		return GristTalkQuietWhy, nil
@@ -210,6 +328,9 @@ type gristTalkTurn struct {
 	resumed bool
 	reason  string
 	record  GristTalk
+	// refreshed is a turn started from key points, which its answer carries.
+	refreshed bool
+	keyPoints string
 	// cost is this turn's own cost, and sessionCost the session's to date as
 	// the harness reported it; fuel is this turn's own fuel.
 	cost, sessionCost float64
@@ -222,8 +343,11 @@ func (t *gristTalkTurn) answer() *GristAnswerTalk {
 		return nil
 	}
 	said := &GristAnswerTalk{Session: GristTalkFresh, Reason: t.reason, Turns: t.record.Turns, ContextTokens: t.record.ContextTokens}
-	if t.resumed {
+	switch {
+	case t.resumed:
 		said.Session, said.Reason = GristTalkResumed, ""
+	case t.refreshed:
+		said.Session, said.Reason, said.KeyPoints = GristTalkRefreshed, "", t.keyPoints
 	}
 	return said
 }
@@ -253,24 +377,33 @@ func gristTalkRecord(prev GristTalk, found bool, key GristTalkKey, session, cwd,
 	record := GristTalk{
 		GristTalkKey: key, Session: session, Cwd: cwd, Spec: spec, Billing: billing,
 		Turns: 1, ContextTokens: usage.Input + usage.CacheRead + usage.CacheWrite, CacheRead: usage.CacheRead,
-		CostTotal: result.CostUSD, FuelTotal: result.Fuel, LastUsed: now.UTC(), Started: now.UTC(), Ended: slices.Clone(prev.Ended),
+		CostTotal: result.CostUSD, FuelTotal: result.Fuel, LastUsed: now.UTC(), Started: now.UTC(),
+		Ended: slices.Clone(prev.Ended), EndedAt: maps.Clone(prev.EndedAt),
 	}
-	cost, fuel := result.CostUSD, result.Fuel
 	if resumed {
 		record.Turns, record.Started = prev.Turns+1, prev.Started
-		if result.CostUSD >= prev.CostTotal {
-			cost = result.CostUSD - prev.CostTotal
-		}
-		was, is := prev.FuelTotal, result.Fuel
-		if is.Input >= was.Input && is.Output >= was.Output && is.CacheRead >= was.CacheRead && is.CacheWrite >= was.CacheWrite {
-			fuel = Fuel{Input: is.Input - was.Input, Output: is.Output - was.Output, CacheRead: is.CacheRead - was.CacheRead, CacheWrite: is.CacheWrite - was.CacheWrite}
-		}
+		cost, fuel := sessionOwn(prev, result)
 		return record, cost, fuel
 	}
 	if found && prev.Session != "" && prev.Session != session {
-		record.Ended = append(record.Ended, prev.Session)
+		record.noteEnded(prev.Session, now)
 	}
-	return record, cost, fuel
+	return record, result.CostUSD, result.Fuel
+}
+
+// sessionOwn is the cost and fuel result adds to prev's session, where every
+// count is no less than prev's: the differences of the cumulative counts the
+// harness reports. Else it is result's own, as reported.
+func sessionOwn(prev GristTalk, result SessionResult) (float64, Fuel) {
+	cost, fuel := result.CostUSD, result.Fuel
+	if result.CostUSD >= prev.CostTotal {
+		cost = result.CostUSD - prev.CostTotal
+	}
+	was, is := prev.FuelTotal, result.Fuel
+	if is.Input >= was.Input && is.Output >= was.Output && is.CacheRead >= was.CacheRead && is.CacheWrite >= was.CacheWrite {
+		fuel = Fuel{Input: is.Input - was.Input, Output: is.Output - was.Output, CacheRead: is.CacheRead - was.CacheRead, CacheWrite: is.CacheWrite - was.CacheWrite}
+	}
+	return cost, fuel
 }
 
 // gristResumedNote opens a resumed turn's message: the request it carries has
@@ -370,19 +503,28 @@ func (g GristGrind) grindTalk(ctx context.Context, w *gristWork, privKey string)
 	call.APIKey, w.billing = billing.Key(), billing.Billing
 	hash := gristTalkSpec(spec)
 
+	w.notes = append(w.notes, g.Talks.tidy(ctx, key, g.now())...)
 	prev, found, err := store.Load(ctx, key)
 	if err != nil {
 		w.notes = append(w.notes, fmt.Sprintf("the record of the talk %q could not be read, so it starts fresh: %v", key.Talk, err))
 		found = false
 	}
-	reason, err := g.Talks.freshReason(prev, found, hash, cwd, billing.Billing, g.now())
-	if err != nil {
-		w.notes = append(w.notes, fmt.Sprintf("the transcript of the talk %q could not be looked for, so it starts fresh: %v", key.Talk, err))
-		reason = GristTalkTranscript
+	// A talk whose session was ended at a cap starts its next turn from the
+	// key points the session wrote, however long ago, and whatever has changed.
+	refreshed := found && prev.Session == "" && prev.KeyPoints != ""
+	reason := ""
+	if !refreshed {
+		if reason, err = g.Talks.freshReason(prev, found, hash, cwd, billing.Billing, g.now()); err != nil {
+			w.notes = append(w.notes, fmt.Sprintf("the transcript of the talk %q could not be looked for, so it starts fresh: %v", key.Talk, err))
+			reason = GristTalkTranscript
+		}
 	}
-	turn := &gristTalkTurn{reason: reason}
+	turn := &gristTalkTurn{reason: reason, refreshed: refreshed}
+	if refreshed {
+		turn.keyPoints = prev.KeyPoints
+	}
 	var result SessionResult
-	if reason == "" {
+	if !refreshed && reason == "" {
 		resume := call
 		resume.Resume = prev.Session
 		stripped := plain
@@ -407,6 +549,9 @@ func (g GristGrind) grindTalk(ctx context.Context, w *gristWork, privKey string)
 		}
 		call.SessionID = turn.session
 		call.Prompt = gristPrompt(plain, photos, gristTag())
+		if refreshed {
+			call.Prompt = gristKeyPointsLead + prev.KeyPoints + "\n\n" + call.Prompt
+		}
 		w.harnessStarted = g.now()
 		result, err = g.Grinder.Grind(ctx, call)
 		if w.billing == BillingAPI {
@@ -421,15 +566,82 @@ func (g GristGrind) grindTalk(ctx context.Context, w *gristWork, privKey string)
 		w.answer = result.Answer
 	}
 	w.settle(status, why)
-	if err == nil {
+	// A refreshed turn that did not answer leaves the key points to the next.
+	if err == nil && (!refreshed || status == GristAnswered) {
 		turn.record, turn.cost, turn.fuel = gristTalkRecord(prev, found, key, turn.session, cwd, hash, w.billing, turn.resumed, result, w.answered)
 		turn.sessionCost = result.CostUSD
-		if saveErr := store.Save(ctx, turn.record); saveErr != nil {
+		saved := turn.record
+		if status == GristAnswered && g.talkCapped(turn.record) {
+			saved = g.endForKeyPoints(ctx, w, call, turn)
+		}
+		if saveErr := store.Save(ctx, saved); saveErr != nil {
 			w.notes = append(w.notes, fmt.Sprintf("the record of the talk %q could not be written: %v", key.Talk, saveErr))
 		}
 		w.talk = turn
 	}
 	g.keepRun(ctx, w)
+}
+
+// gristKeyPointsLead opens the message of a turn started from key points.
+const gristKeyPointsLead = "key_points_of_this_talk_so_far: "
+
+// talkCapped reports whether the turn that left record puts the talk's session
+// at its context cap or its turn cap.
+func (g GristGrind) talkCapped(record GristTalk) bool {
+	ceilings := g.Ceilings.filled()
+	return record.ContextTokens >= ceilings.TalkContextCap || record.Turns >= ceilings.TalkMaxTurns
+}
+
+// endForKeyPoints runs one more turn of the session of turn, after its answer,
+// asking it for its key points (call's model, effort, instructions and
+// billing), and returns the record to keep: the session ended, with the key
+// points when it wrote any. The turn's answer is unchanged; its cost and fuel
+// take the extra turn's.
+func (g GristGrind) endForKeyPoints(ctx context.Context, w *gristWork, call GrindCall, turn *gristTalkTurn) GristTalk {
+	ended := turn.record
+	ended.EndedAt = maps.Clone(ended.EndedAt)
+	ended.Ended = slices.Clone(ended.Ended)
+	ask := call
+	ask.SessionID, ask.Resume = "", turn.session
+	ask.Prompt, ask.Schema = GristKeyPointsPrompt, GristKeyPointsSchema
+	result, err := g.Grinder.Grind(ctx, ask)
+	points, why := keyPointsOf(result, err)
+	if why != "" {
+		w.notes = append(w.notes, fmt.Sprintf("the session of the talk %q could not write its key points, so it is ended without them: %s", turn.record.Talk, why))
+	}
+	if err == nil {
+		cost, fuel := sessionOwn(turn.record, result)
+		turn.cost += cost
+		turn.fuel = Fuel{
+			Input: turn.fuel.Input + fuel.Input, Output: turn.fuel.Output + fuel.Output,
+			CacheRead: turn.fuel.CacheRead + fuel.CacheRead, CacheWrite: turn.fuel.CacheWrite + fuel.CacheWrite,
+		}
+		turn.sessionCost = result.CostUSD
+	}
+	ended.end(g.now(), points)
+	return ended
+}
+
+// keyPointsOf is the key points a session's result holds, at most
+// GristKeyPointsMax characters, or why it holds none.
+func keyPointsOf(result SessionResult, err error) (points, why string) {
+	if err != nil || !result.Finished() {
+		return "", gristSaid(result, err)
+	}
+	var answer struct {
+		KeyPoints string `json:"key_points"`
+	}
+	if json.Unmarshal(result.Answer, &answer) != nil {
+		return "", "its answer is not in the key points' schema"
+	}
+	points = strings.TrimSpace(answer.KeyPoints)
+	if points == "" {
+		return "", "its key points are empty"
+	}
+	if runes := []rune(points); len(runes) > GristKeyPointsMax {
+		points = string(runes[:GristKeyPointsMax])
+	}
+	return points, ""
 }
 
 // resumeFailed reports whether a resume ended in an error the same turn may
@@ -527,4 +739,49 @@ func (l GristTalksList) Run(ctx context.Context, app string, asJSON bool) ([]Gri
 			time.Duration(t.AgeSeconds)*time.Second, t.Session)
 	}
 	return shown, nil
+}
+
+// GristTalksEnd is `mw grist talks --end <app> <talk>`: it ends the talk's live
+// session now, writing no key points and dropping any it holds, so the talk's
+// next turn is fresh. The session's transcript goes with the next talk grist
+// for the app a day on, as any ended session's does.
+type GristTalksEnd struct {
+	Store GristTalkStore
+	Out   io.Writer
+	// Now is the clock; nil is time.Now.
+	Now func() time.Time
+}
+
+// Run ends every talk of app named talk (one for each sender who has one) that
+// has a live session or key points waiting, and reports how many.
+func (e GristTalksEnd) Run(ctx context.Context, app, talk string) (int, error) {
+	if e.Store == nil {
+		return 0, fmt.Errorf("mw grist talks --end: the mill keeps no talks here")
+	}
+	talks, err := e.Store.List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	now := time.Now()
+	if e.Now != nil {
+		now = e.Now()
+	}
+	ended := 0
+	for _, t := range talks {
+		if t.App != app || t.Talk != talk || (t.Session == "" && t.KeyPoints == "") {
+			continue
+		}
+		t.end(now, "")
+		if err := e.Store.Save(ctx, t); err != nil {
+			return ended, err
+		}
+		ended++
+	}
+	if ended == 0 {
+		return 0, fmt.Errorf("mw grist talks --end: the mill keeps no live talk %q of %s", talk, app)
+	}
+	if e.Out != nil {
+		fmt.Fprintf(e.Out, "ended %d talk%s: %s of %s, no key points written\n", ended, map[bool]string{true: "", false: "s"}[ended == 1], talk, app)
+	}
+	return ended, nil
 }

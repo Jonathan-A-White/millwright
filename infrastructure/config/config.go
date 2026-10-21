@@ -740,6 +740,10 @@ const (
 	// defaults for the follower's warm pool, said again.
 	DefaultGristPoolQuiet  = 10 * time.Minute
 	DefaultGristPoolMaxAge = 15 * time.Minute
+	// DefaultGristTalkContextCap (tokens) and DefaultGristTalkMaxTurns are
+	// application's own too: where a talk's session is ended for its key points.
+	DefaultGristTalkContextCap = 80000
+	DefaultGristTalkMaxTurns   = 40
 )
 
 // GristKeyFile reports where the mill key is kept: $MW_GRIST_KEY_FILE if it
@@ -928,6 +932,10 @@ type GristSettings struct {
 	// daily limit, at the person's own cap, asked of the postern backend; false
 	// counts every key alone at DailyLimit (mw-cvwm1u.6).
 	PersonCap bool
+	// TalkContextCap is the context tokens at which a talk's session is ended
+	// for its key points, and TalkMaxTurns the turns at which it is.
+	TalkContextCap int
+	TalkMaxTurns   int
 	// APICredits is whether the mill bills a grist to the Anthropic API key in
 	// APIKeyFile (a full path) instead of the subscription; false bills the
 	// subscription, as before.
@@ -942,7 +950,9 @@ type GristSettings struct {
 // one key), `concurrency` (grinds at once, the mill's own limit, apart from
 // the host's cap on Builders), `timeout` (a Go duration, "10m"), `pool_quiet`
 // (a duration, "0s" for no warm pool) and `pool_max_age` (a duration above
-// zero) and `person_cap` (true or false: whether a self-registered person's
+// zero), `talk_context_cap` (context tokens, default 80000) and
+// `talk_max_turns` (default 40), where a talk's session is ended for its key
+// points, and `person_cap` (true or false: whether a self-registered person's
 // device keys are counted together at the person's own cap), `api_credits`
 // (true or false, false: whether the mill bills a grist to an Anthropic API key
 // while that key has credit) and `api_key_file` (a full path, or ~/ and the
@@ -961,6 +971,7 @@ func Grist() (GristSettings, error) {
 	settings := GristSettings{
 		Models: list(DefaultGristModels), Efforts: list(DefaultGristEfforts), Timeout: DefaultGristTimeout,
 		PoolQuiet: DefaultGristPoolQuiet, PoolMaxAge: DefaultGristPoolMaxAge, PersonCap: true,
+		TalkContextCap: DefaultGristTalkContextCap, TalkMaxTurns: DefaultGristTalkMaxTurns,
 		APIKeyFile: filepath.Join(home, DefaultGristAPIKeyFile),
 	}
 	if models := list(table["models"]); len(models) > 0 {
@@ -985,6 +996,15 @@ func Grist() (GristSettings, error) {
 		return GristSettings{}, err
 	}
 	settings.MaxAttachments, settings.DailyLimit, settings.Concurrency = int(most), int(daily), int(concurrency)
+	contextCap, err := countIn(table, "talk_context_cap", DefaultGristTalkContextCap, path)
+	if err != nil {
+		return GristSettings{}, err
+	}
+	maxTurns, err := countIn(table, "talk_max_turns", DefaultGristTalkMaxTurns, path)
+	if err != nil {
+		return GristSettings{}, err
+	}
+	settings.TalkContextCap, settings.TalkMaxTurns = int(contextCap), int(maxTurns)
 	if said := strings.TrimSpace(table["timeout"]); said != "" {
 		timeout, err := time.ParseDuration(said)
 		if err != nil || timeout <= 0 {

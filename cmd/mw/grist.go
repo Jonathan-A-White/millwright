@@ -716,7 +716,7 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		Ceilings: application.GristCeilings{
 			Models: ceilings.Models, Efforts: ceilings.Efforts, MaxAttachments: ceilings.MaxAttachments,
 			MaxAttachmentBytes: ceilings.MaxAttachmentBytes, DailyLimit: ceilings.DailyLimit,
-			Timeout: ceilings.Timeout,
+			Timeout: ceilings.Timeout, TalkContextCap: ceilings.TalkContextCap, TalkMaxTurns: ceilings.TalkMaxTurns,
 		},
 		Out: out,
 	}, nil

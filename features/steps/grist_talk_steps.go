@@ -30,6 +30,8 @@ type talkContext struct {
 	next  string            // the talk the next grist names; empty is none
 	sent  map[string]string // each grist's question to its txid
 	out   bytes.Buffer
+	// endErr is what mw grist talks --end returned.
+	endErr error
 }
 
 // talkStandIn is the claude program of this feature. Each run logs "start",
@@ -39,7 +41,10 @@ type talkContext struct {
 // as claude keeps it, a transcript under projects/<cwd's slug>/, and its
 // cumulative cost grows by 0.0125 a turn. A resume fails, exit 1, when the
 // transcript is gone or resume-fails exists. A run whose q has a hold-<q> file
-// waits until the run named in it has started.
+// waits until the run named in it has started. A run asked for key points (its
+// --json-schema names key_points, features/grist_talk_cap.feature) answers
+// them, empty when key-points-empty exists, and exits 1 when key-points-fail
+// does.
 const talkStandIn = `#!/bin/sh
 dir=$(dirname "$0")
 mode=cold
@@ -62,8 +67,15 @@ for a; do
   case "$prev" in --session-id) sid=$a; new=1;; --resume) sid=$a; resume=1;; esac
   prev=$a
 done
+kp=""
+case "$*" in *'"key_points"'*) kp=1;; esac
 slug=$(pwd | sed 's/[^A-Za-z0-9]/-/g')
 transcript="$dir/projects/$slug/$sid.jsonl"
+if [ -n "$kp" ] && [ -f "$dir/key-points-fail" ]; then
+  printf '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"key points failed","num_turns":0,"duration_ms":5}\n'
+  printf 'end %s %s %s\n' "$$" "$mode" "$q" >> "$dir/runs.log"
+  exit 1
+fi
 if [ -n "$resume" ] && { [ -f "$dir/resume-fails" ] || [ ! -f "$transcript" ]; }; then
   printf '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"No conversation found with session ID: %s","num_turns":0,"duration_ms":5}\n' "$sid"
   printf 'end %s %s %s\n' "$$" "$mode" "$q" >> "$dir/runs.log"
@@ -77,7 +89,9 @@ if [ -n "$sid" ]; then
 fi
 cost=$(printf '0.%04d' $((turns * 125)))
 printf '{"type":"result","subtype":"success","is_error":false,"result":"","stop_reason":"end_turn","num_turns":1,"duration_ms":100,"session_id":"%s","total_cost_usd":%s,"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":%d,"cache_creation_input_tokens":500},"structured_output":' "$sid" "$cost" $((turns * 1000))
-cat "$dir/answer.json"
+if [ -z "$kp" ]; then cat "$dir/answer.json"
+elif [ -f "$dir/key-points-empty" ]; then printf '{"key_points":""}'
+else printf '{"key_points":"The reader'"'"'s son Luke is 14."}'; fi
 printf '}\n'
 printf 'end %s %s %s\n' "$$" "$mode" "$q" >> "$dir/runs.log"
 `
@@ -129,6 +143,7 @@ func registerGristTalk(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Then(`^"([^"]*)" started after "([^"]*)" ended, resuming its session$`, t.startedAfterEnded)
 	ctx.Then(`^the last session's id is not session 1's$`, t.newID)
 	ctx.Then(`^the talk's record names session 1's as ended$`, t.recordNamesEnded)
+	registerGristTalkCap(ctx, c)
 	ctx.Then(`^(\d+) sessions ran$`, t.sessionsRan)
 	ctx.Then(`^no session ran$`, func() error { return t.sessionsRan(0) })
 	ctx.Then(`^no session ran with --resume$`, t.noResume)

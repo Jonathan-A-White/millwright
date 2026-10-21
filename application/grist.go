@@ -208,6 +208,10 @@ type GristCeilings struct {
 	MaxAttachmentBytes int64
 	DailyLimit         int
 	Timeout            time.Duration
+	// TalkContextCap and TalkMaxTurns are where a talk's session is ended for
+	// its key points: the context tokens of a turn, and a session's turns.
+	TalkContextCap int
+	TalkMaxTurns   int
 }
 
 // The ceilings when config says nothing; infrastructure/config's defaults
@@ -217,6 +221,8 @@ const (
 	DefaultGristMaxAttachmentBytes = 8 << 20
 	DefaultGristDailyLimit         = 50
 	DefaultGristTimeout            = 10 * time.Minute
+	DefaultGristTalkContextCap     = 80000
+	DefaultGristTalkMaxTurns       = 40
 )
 
 // DefaultGristModels are the models a grind may name when config says
@@ -246,6 +252,12 @@ func (c GristCeilings) filled() GristCeilings {
 	}
 	if c.Timeout <= 0 {
 		c.Timeout = DefaultGristTimeout
+	}
+	if c.TalkContextCap <= 0 {
+		c.TalkContextCap = DefaultGristTalkContextCap
+	}
+	if c.TalkMaxTurns <= 0 {
+		c.TalkMaxTurns = DefaultGristTalkMaxTurns
 	}
 	return c
 }
