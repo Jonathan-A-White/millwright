@@ -90,7 +90,11 @@ the scorer is a `500`. `GET /health` answers `200` once the model is loaded.
    weighted Levenshtein distance: a far phone, an added or a left-out phone
    costs 1; a near phone (vowel for vowel, voicing pairs such as T/D, the
    nasals, th-fronting, r/w) 0.5; the cot-caught vowels AO/AA 0.25. Each word
-   takes the produced phones aligned to it.
+   takes the produced phones aligned to it. A long reading (over 200 phones) is
+   aligned in sections between the stretches of 8 phones that the text and the
+   reading share once each, and each section's table is kept in a band of 64
+   phones either side of its best cell (made wider when the alignment reaches
+   its edge), so the time is linear in the reading: 0.14 s at 300 s, 0.25 s at 600 s.
 4. **Labelled**, one error per word:
    `omission` when nothing was heard for it; `mispronunciation` when its
    distance is 1 or more (one far phone, or two near ones); `hesitation` when
@@ -160,10 +164,13 @@ scorer beside Azure's: tuning it against Azure is a later epic's work.
 
 ## Known limits
 
-- The model's time is linear in the clip (about 0.23 s per audio second on the
-  Laptop, 4 threads), but the alignment's is not: it fills a table of expected
-  phones by produced phones, so a 600 s reading spends about 50 s there and a
-  longer one grows with the square (docs/scorers.md, "Measuring").
+- The model's time and the alignment's are both linear in the clip (about 0.23
+  s per audio second for the model on the Laptop, 4 threads; under 0.001 s for
+  the alignment). A reading that shares almost nothing with the text, so that
+  the alignment keeps reaching the edge of its band, falls back to the whole
+  table and grows with the square; where two alignments cost the same inside a
+  passage the reader skipped, the sectioned one may give the phones to other
+  words than the whole table did (mw-gq6.667).
 
 - Where the reading stopped is the best fit of what the model heard, so a
   last word the model barely heard may be `not_reached` where a careful ear

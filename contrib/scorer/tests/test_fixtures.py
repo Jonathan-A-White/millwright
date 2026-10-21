@@ -9,8 +9,11 @@ import io
 import os
 import unittest
 import wave
+from unittest import mock
 
-from mw_scorer import pipeline
+from mw_scorer import align, pipeline
+
+from . import reference_align
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIXTURES = os.path.join(HERE, "..", "fixtures")
@@ -251,3 +254,52 @@ class WovenFixtures(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AlignedAsBefore(unittest.TestCase):
+    """The words the fixture clips are scored to are the words the whole-table alignment
+    (tests/reference_align.py) gave them, and so are the same readings repeated to 300 s
+    (mw-gq6.667)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.scorer = scorer()
+
+    def aligned(self, target, lang, name, segments=None, wav=None):
+        """(args, kwargs) the pipeline gave align.score_reading for a clip."""
+        with mock.patch.object(pipeline.align, "score_reading", wraps=align.score_reading) as spy:
+            self.scorer.score(target, lang, wav or clip(name), segments=segments)
+        return spy.call_args
+
+    def reference(self, call):
+        (words, produced, seconds), kwargs = call.args, call.kwargs
+        return reference_align.score_reading(words, [reference_align.Phone(*p) for p in produced], seconds, **kwargs)
+
+    def assertAsBefore(self, call):
+        self.assertEqual(align.score_reading(*call.args, **call.kwargs), self.reference(call))
+
+    def test_every_fixture_clip(self):
+        for name, target, lang in [("clean.wav", TARGET, "en"), ("cap.wav", TARGET, "en"),
+                                   ("no-the.wav", TARGET, "en"), ("partial.wav", TARGET, "en"),
+                                   ("el-clean.wav", GREEK, "el"), ("el-misread.wav", GREEK, "el")]:
+            with self.subTest(clip=name):
+                self.assertAsBefore(self.aligned(target, lang, name))
+
+    def test_the_woven_fixture(self):
+        segments = [(TARGET, "en"), (GREEK, "el")]
+        call = self.aligned(" ".join(t for t, _ in segments), "en", "", segments=segments,
+                            wav=joined("clean.wav", "el-clean.wav"))
+        self.assertAsBefore(call)
+
+    def test_a_fixture_clip_read_over_and_over_for_300_seconds(self):
+        call = self.aligned(TARGET, "en", "clean.wav")
+        (words, produced, seconds), kwargs = call.args, call.kwargs
+        times = int(300 / seconds) + 1
+        long_words = list(words) * times
+        long_produced = [p._replace(start=round(p.start + k * seconds, 2), end=round(p.end + k * seconds, 2))
+                         for k in range(times) for p in produced]
+        got = align.score_reading(long_words, long_produced, seconds * times, **kwargs)
+        want = reference_align.score_reading(long_words, [reference_align.Phone(*p) for p in long_produced],
+                                             seconds * times, **kwargs)
+        self.assertEqual(got, want)
+        self.assertGreater(got["seconds"], 300)

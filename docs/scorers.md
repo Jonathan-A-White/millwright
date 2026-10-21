@@ -240,8 +240,10 @@ It loads the model again (a few seconds, ~1.8 GB of memory).
 
 Measured on the Laptop with the private scorer (mw-gq6.666): the model's time is 0.21 to
 0.24 s per audio second at 300 s and at 600 s (one pass was 0.54 s at 300 s, 0.9 at 600 s). The
-whole request is 0.32 then 0.40 s per audio second, because the alignment fills a table of
-expected by produced phones and grows with the square of the words (11 s at 300 s, 48 s at 600 s).
+whole request was 0.32 then 0.40 s per audio second, because the alignment filled a table of
+expected by produced phones and grew with the square of the words (11 s at 300 s, 48 s at 600 s);
+since mw-gq6.667 it is aligned in sections and a band (0.14 s at 300 s, 0.25 s at 600 s), and the
+whole request is 0.17 s per audio second at both.
 
 The live scorer says when it is hogged: for each request it scored it writes one line
 to its journal (`journalctl --user -u mw-scorer`), `mw-scorer: scored audio=<s>s
