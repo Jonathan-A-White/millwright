@@ -271,48 +271,79 @@ func (m Memory) putAndRecord(ctx context.Context, rig string, fact RigFact, subj
 	return m.record(ctx, subject, path)
 }
 
-// Add writes a new current fact.
+// Add writes a new current fact. It ends by saying plainly what happened:
+// "added <slug>" (with the near facts named), or "not added: <why>" with the
+// error returned, so the exit code matches the sentence.
 func (m Memory) Add(ctx context.Context, req MemoryAdd) error {
+	fact, near, err := m.newFact(ctx, req)
+	if err != nil {
+		return m.notAdded(err)
+	}
+	path, err := m.put(ctx, req.Rig, fact)
+	if err != nil {
+		return m.notAdded(err)
+	}
+	// A fact written but not committed is not "not added": record's error says so.
+	if err := m.record(ctx, "add "+req.Rig+" "+fact.Slug, path); err != nil {
+		return err
+	}
+	said := "added " + fact.Slug
+	for i, other := range near {
+		fmt.Fprintf(m.Out, "near: %s %s\n", other.Slug, firstWords(other.Sentence, nearWords))
+		if i == 0 {
+			said += " (near: " + other.Slug
+		} else {
+			said += ", " + other.Slug
+		}
+	}
+	if len(near) > 0 {
+		said += ")"
+	}
+	fmt.Fprintln(m.Out, said)
+	return nil
+}
+
+// notAdded says why add wrote nothing and returns the same error.
+func (m Memory) notAdded(err error) error {
+	fmt.Fprintf(m.Out, "not added: %v\n", err)
+	return err
+}
+
+// newFact checks an add and builds the fact to write, with the current facts near it.
+func (m Memory) newFact(ctx context.Context, req MemoryAdd) (RigFact, []RigFact, error) {
 	switch req.Kind {
 	case FactGotcha, FactDecision:
 	default:
-		return fmt.Errorf("unknown kind %q (gotcha or decision)", req.Kind)
+		return RigFact{}, nil, fmt.Errorf("unknown kind %q (gotcha or decision)", req.Kind)
 	}
 	if err := factLine("the sentence", req.Sentence); err != nil {
-		return err
+		return RigFact{}, nil, err
 	}
 	if err := factLine("the subject", req.Subject); err != nil {
-		return err
+		return RigFact{}, nil, err
 	}
 	if err := factLine("the source", req.Source); err != nil {
-		return err
+		return RigFact{}, nil, err
 	}
 	slug := req.Slug
 	if slug == "" {
 		slug = FactSlug(req.Sentence)
 	}
 	if err := checkSlug(slug); err != nil {
-		return err
+		return RigFact{}, nil, err
 	}
 	_, files, facts, err := m.load(ctx, req.Rig)
 	if err != nil {
-		return err
+		return RigFact{}, nil, err
 	}
 	if err := m.free(req.Rig, slug, files, facts); err != nil {
-		return err
+		return RigFact{}, nil, err
 	}
 	fact := RigFact{
 		Slug: slug, Subject: req.Subject, Kind: req.Kind, Status: FactCurrent,
 		Source: req.Source, Since: m.today(), Sentence: strings.TrimSpace(req.Sentence),
 	}
-	near := nearFacts(fact, facts)
-	if err := m.putAndRecord(ctx, req.Rig, fact, "add "+req.Rig+" "+slug); err != nil {
-		return err
-	}
-	for _, other := range near {
-		fmt.Fprintf(m.Out, "near: %s %s\n", other.Slug, firstWords(other.Sentence, nearWords))
-	}
-	return nil
+	return fact, nearFacts(fact, facts), nil
 }
 
 // nearWords is how many words of a near fact's sentence add prints after its slug.
@@ -438,7 +469,11 @@ func (m Memory) Supersede(ctx context.Context, req MemorySupersede) error {
 	if err != nil {
 		return err
 	}
-	return m.record(ctx, "supersede "+req.Rig+" "+old.Slug+" with "+slug, written, retired)
+	if err := m.record(ctx, "supersede "+req.Rig+" "+old.Slug+" with "+slug, written, retired); err != nil {
+		return err
+	}
+	fmt.Fprintf(m.Out, "superseded %s with %s\n", old.Slug, slug)
+	return nil
 }
 
 // Retire keeps a fact's sentence and gives the reason it is no longer read.
@@ -458,7 +493,11 @@ func (m Memory) Retire(ctx context.Context, rig, slug, reason string) error {
 		return fmt.Errorf("the fact %q of the rig %s is already retired", slug, rig)
 	}
 	fact.Status, fact.Retired, fact.Reason = FactRetired, m.today(), strings.TrimSpace(reason)
-	return m.putAndRecord(ctx, rig, fact, "retire "+rig+" "+slug)
+	if err := m.putAndRecord(ctx, rig, fact, "retire "+rig+" "+slug); err != nil {
+		return err
+	}
+	fmt.Fprintf(m.Out, "retired %s\n", slug)
+	return nil
 }
 
 // Recheck flags a fact as in doubt, with why appended to its reason. A flagged
@@ -486,7 +525,11 @@ func (m Memory) Recheck(ctx context.Context, rig, slug, why string) error {
 		}
 		fact.Reason = why
 	}
-	return m.putAndRecord(ctx, rig, fact, "recheck "+rig+" "+slug)
+	if err := m.putAndRecord(ctx, rig, fact, "recheck "+rig+" "+slug); err != nil {
+		return err
+	}
+	fmt.Fprintf(m.Out, "flagged %s to recheck\n", slug)
+	return nil
 }
 
 // Demote keeps a current fact out of the boot render (boot: no). The fact stays
@@ -558,7 +601,11 @@ func (m Memory) Demote(ctx context.Context, rig, slug, question string) error {
 	if err != nil {
 		return err
 	}
-	return m.record(ctx, "demote "+rig+" "+slug, append(written, path)...)
+	if err := m.record(ctx, "demote "+rig+" "+slug, append(written, path)...); err != nil {
+		return err
+	}
+	fmt.Fprintf(m.Out, "demoted %s out of the boot render\n", slug)
+	return nil
 }
 
 // appendEvalQuestion adds a Q and its expect to an eval.md text, a blank line
@@ -587,7 +634,11 @@ func (m Memory) Promote(ctx context.Context, rig, slug string) error {
 		return fmt.Errorf("the fact %q of the rig %s is not demoted", slug, rig)
 	}
 	fact.Unbooted = false
-	return m.putAndRecord(ctx, rig, fact, "promote "+rig+" "+slug)
+	if err := m.putAndRecord(ctx, rig, fact, "promote "+rig+" "+slug); err != nil {
+		return err
+	}
+	fmt.Fprintf(m.Out, "promoted %s into the boot render\n", slug)
+	return nil
 }
 
 // NearFullPercent is how full, of its budget, a rig's boot render is called
