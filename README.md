@@ -3274,6 +3274,38 @@ and another was set. It also counts the beads the Governor verified, prints "4 o
 keeps the score as `outcome.json` beside the pass's files. It is meant for a pass 14 days old; a younger one is
 scored all the same, with the day it is on. Filling the ledger's `result` from `mw report` is still the Mayor's.
 
+## What his use shows met (`mw verify match`)
+
+A demo or a landing is verified when he has seen it work. He often shows it without saying so: a screenshot, a
+message. `mw verify match [--since <dur>] [--txid <id>]... [--dry-run]` has one bounded agent call match them
+(mw-4xdnis). The **candidates** are every open demo (the demos `mw stuck --dampers` counts, one shared function,
+`QueuedDemos`) with its description and the HOW TO CHECK IT of its epic's closed stories, and every landing closed
+within `--since` (default `7d`) with the HOW TO CHECK IT of its closing comment, except a bead with a comment whose
+first word is `VERIFIED`, a superseded close and a 'never released' one. The **evidence** is the messages and
+pictures of his that the inbox pass saved in `~/.local/state/mw/postern/inbox/` within `--since`, or only the
+`--txid` ones given. The agent reads one file for each candidate and each piece of evidence and answers which
+candidates the evidence shows met, with the txid, what exactly shows it and a confidence.
+
+A match at or over `[verify] confidence` becomes a comment on its bead that opens `PROPOSED VERIFIED by the
+Governor's use, from <txid> (<time>): <what it shows> (confidence 0.NN, <model>, run <id>)`; a bead already proposed
+for that txid is not commented twice. One mail to the Mayor per run, `Proposed: N verified by his use`, lists each
+with the line that confirms it, and none is sent when nothing is proposed. **Nothing closes**, no status changes and
+no comment opens with `VERIFIED`: that word is the record, and a seat writes it. The run is recorded in
+`~/.local/state/mw/verify/<run>.json`: model, effort, billing, tokens, the candidates, and every answer with what
+became of it, the ones under the confidence included. A run reads the newest 30 messages and pictures and the newest
+120 unverified landings (every open demo always); `--dry-run` prints the candidates, the evidence and the directory's
+size and calls no agent.
+
+```toml
+[verify]
+model      = "haiku"    # the model of the one call; it must read a picture (haiku when left out)
+effort     = "medium"   # and its effort (medium when left out)
+confidence = 0.8        # the least confidence, above 0 and up to 1, at which a match is proposed (0.8 when left out)
+```
+
+The call is billed to the API key when `[grist] api_credits` is on, as the mill's grinds are. The steps are in
+`features/verify_match.feature`.
+
 ## Saved prompts
 
 The Mayor keeps prompts on the postern backend, so the Governor can run one by

@@ -1681,6 +1681,44 @@ func TestGatewayReadsAndClearsACardsDueTime(t *testing.T) {
 	}
 }
 
+// mw verify match reads the closed stories since a time with the reason each was
+// closed and whether a supersedes link marks it (mw-4xdnis.2).
+func TestGatewayListsTheClosedStoriesWithTheirReasonAndSupersedes(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	epic := bdRun(t, vault, beads.Program, "create", "An epic", "-t", "epic", "--silent")
+	landed := bdRun(t, vault, beads.Program, "create", "Landed", "--parent", epic, "--silent")
+	old := bdRun(t, vault, beads.Program, "create", "Folded", "--silent")
+	fresh := bdRun(t, vault, beads.Program, "create", "Its fold", "--silent")
+	bdRun(t, vault, beads.Program, "close", landed, "--reason", "landed on main")
+	bdRun(t, vault, beads.Program, "supersede", old, "--with", fresh)
+	gateway := beads.New(vault)
+
+	closed, err := gateway.ClosedStories(ctx, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]application.ClosedStory{}
+	for _, c := range closed {
+		by[c.ID] = c
+	}
+	if c := by[landed]; c.EpicID != epic || c.CloseReason != "landed on main" || c.ClosedAt.IsZero() || c.Superseded {
+		t.Errorf("expected %s landed under %s, got %+v", landed, epic, c)
+	}
+	if c, ok := by[old]; !ok || !c.Superseded {
+		t.Errorf("expected %s marked superseded, got %+v (%v)", old, c, ok)
+	}
+	if _, ok := by[epic]; ok {
+		t.Errorf("an epic is left out")
+	}
+	if closed, err = gateway.ClosedStories(ctx, time.Now().Add(time.Hour)); err != nil || len(closed) != 0 {
+		t.Fatalf("expected none closed in the hour to come, got %v: %+v", err, closed)
+	}
+}
+
 // The ranking pass (mw-ht6gsw.2) reads the cards closed since a time, and a
 // card's row and why read back as metadata.
 func TestGatewayListsTheCardsClosedSinceATimeAndReadsTheirRow(t *testing.T) {

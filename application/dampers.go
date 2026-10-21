@@ -212,11 +212,11 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 		if touched := firstKnown(d.Updated, d.Created); d.Priority == 1 && !touched.IsZero() && facts.Now.Sub(touched) > days(limits.P1UntouchedDays) {
 			untouched = append(untouched, d.Story.ID)
 		}
-		if isQueuedDemo(d) {
-			demos = append(demos, d.Story.ID)
-			if filed := firstKnown(d.Created, d.Updated); !filed.IsZero() && facts.Now.Sub(filed) > days(limits.DemoWaitingDays) {
-				oldDemos = append(oldDemos, d.Story.ID)
-			}
+	}
+	for _, d := range QueuedDemos(facts.Work) {
+		demos = append(demos, d.Story.ID)
+		if filed := firstKnown(d.Created, d.Updated); !filed.IsZero() && facts.Now.Sub(filed) > days(limits.DemoWaitingDays) {
+			oldDemos = append(oldDemos, d.Story.ID)
 		}
 	}
 
@@ -364,16 +364,27 @@ func isQueuedDemo(d StoryDetail) bool {
 	return !d.IsEpic && workable(d) && hasLabel(d.Labels, LabelDemo)
 }
 
+// QueuedDemos are the demos of his review queue among the stories ready,
+// running and claimed: the one place the open demos are found, which the
+// DAMPERS alarms, the sleep pass's needs-you.txt and mw verify match all read.
+func QueuedDemos(work WorkInHand) []StoryDetail {
+	var demos []StoryDetail
+	for _, d := range liveStories(work) {
+		if isQueuedDemo(d) {
+			demos = append(demos, d)
+		}
+	}
+	return demos
+}
+
 // reviewQueue is his review queue as mw stuck --dampers counts it, by bead: the
 // cards still open, the live demos and the hands steps unrun, one entry for each
 // item. The sleep pass's needs-you.txt reads it through here, so that it and his
 // phone count the same things.
 func reviewQueue(facts DamperFacts) (cards, demos, hands []string) {
 	closed := closedBeads(facts.Graph)
-	for _, d := range liveStories(facts.Work) {
-		if isQueuedDemo(d) {
-			demos = append(demos, d.Story.ID)
-		}
+	for _, d := range QueuedDemos(facts.Work) {
+		demos = append(demos, d.Story.ID)
 	}
 	return damperCards(facts.Notes, closed), demos, damperHands(facts.Notes, closed)
 }

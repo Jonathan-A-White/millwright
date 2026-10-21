@@ -87,6 +87,37 @@ func (g *Gateway) ClosedWithLabel(ctx context.Context, label string, since time.
 	return g.overlaid(ctx, beads)
 }
 
+var _ application.VerifyBeads = (*Gateway)(nil)
+
+// ClosedStories implements application.VerifyBeads: `bd list` of the closed
+// beads, closed at since or later, epics left out, each with the reason it was
+// closed and whether it carries a supersedes link (bd supersede leaves no
+// close reason, only the link).
+func (g *Gateway) ClosedStories(ctx context.Context, since time.Time) ([]application.ClosedStory, error) {
+	out, err := g.call(ctx, "list", "--status", StatusClosed, "--closed-after", since.UTC().Format(time.RFC3339),
+		"--exclude-type", "epic", "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	beads, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading what was closed since %s: %w", since.UTC().Format(time.RFC3339), err)
+	}
+	closed := make([]application.ClosedStory, 0, len(beads))
+	for _, b := range beads {
+		story := application.ClosedStory{
+			ID: b.ID, Title: b.Title, Type: b.Type, EpicID: b.Parent, CloseReason: b.CloseReason, ClosedAt: b.closedAt(),
+		}
+		for _, e := range b.edges() {
+			if e.Kind == "supersedes" && e.Issue == b.ID {
+				story.Superseded = true
+			}
+		}
+		closed = append(closed, story)
+	}
+	return closed, nil
+}
+
 // IcedBeads implements application.IcedBeads: `bd list` of the held beads
 // carrying the icebox label, epics left out.
 func (g *Gateway) IcedBeads(ctx context.Context) ([]application.StoryDetail, error) {
