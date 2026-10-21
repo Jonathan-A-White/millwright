@@ -37,7 +37,7 @@ def main():
         print("mw-scorer: %s" % err, file=sys.stderr)
         return 1
     httpd = server.make_server(args.host, args.port, scorer)
-    print("mw-scorer: listening on %s:%d" % (args.host, args.port), flush=True)
+    print("mw-scorer: listening on %s:%d" % (args.host, httpd.server_address[1]), flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

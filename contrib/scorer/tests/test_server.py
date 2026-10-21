@@ -8,6 +8,7 @@ import io
 import json
 import threading
 import unittest
+import wave
 import urllib.error
 import urllib.request
 
@@ -28,15 +29,40 @@ class StandIn:
     def __init__(self):
         self.asked = []
         self.raise_ = None
+        self.took = 0
+        self.clock = None
 
     def score(self, target_text, lang, wav, segments=None):
         self.asked.append((target_text, lang, wav) if segments is None else (target_text, lang, wav, segments))
+        if self.clock:
+            self.clock.now += self.took
         if self.raise_:
             raise self.raise_
         return ANSWER
 
     def health(self):
         return {"model": "stand-in"}
+
+
+def silence_wav(seconds, rate=16000):
+    """A mono 16-bit WAV of that many seconds of silence."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\0\0" * int(seconds * rate))
+    return buf.getvalue()
+
+
+class Clock:
+    """A clock the stand-in scorer moves: the server reads the wall time of a request from it."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
 
 
 class Parser(unittest.TestCase):
@@ -76,7 +102,9 @@ class Parser(unittest.TestCase):
 class Server(unittest.TestCase):
     def setUp(self):
         self.scorer = StandIn()
-        self.httpd = server.make_server("127.0.0.1", 0, self.scorer, log=io.StringIO())
+        self.log = io.StringIO()
+        self.clock = Clock()
+        self.httpd = server.make_server("127.0.0.1", 0, self.scorer, log=self.log, clock=self.clock)
         self.url = "http://127.0.0.1:%d" % self.httpd.server_address[1]
         self.thread = threading.Thread(target=self.httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         self.thread.start()
@@ -160,6 +188,40 @@ class Server(unittest.TestCase):
             self.assertEqual(status, 400, (segments, body))
             self.assertIn(word, body)
         self.assertEqual(self.scorer.asked, [])
+
+    def score_taking(self, audio_seconds, wall_seconds):
+        """Post a clip of audio_seconds to a scorer that takes wall_seconds; return the log lines."""
+        self.scorer.took = wall_seconds
+        self.scorer.clock = self.clock
+        status, body = self.call("POST", "/score", {
+            "target_text": "cat", "audio_wav_base64": base64.b64encode(silence_wav(audio_seconds)).decode()})
+        self.assertEqual(status, 200, body)
+        return self.log.getvalue().splitlines()
+
+    def test_every_request_logs_one_line_with_the_audio_seconds_and_the_wall_seconds(self):
+        lines = self.score_taking(5, 0.4)
+        self.assertEqual(lines, ["mw-scorer: scored audio=5.0s wall=0.4s"])
+
+    def test_a_request_over_60_seconds_also_logs_a_warning(self):
+        lines = self.score_taking(600, 75.5)
+        self.assertEqual(lines, [
+            "mw-scorer: scored audio=600.0s wall=75.5s",
+            "mw-scorer: WARNING: a request took 75.5s (over 60s) for 600.0s of audio: "
+            "the scorer takes one request at a time and others waited behind it",
+        ])
+
+    def test_a_request_of_exactly_60_seconds_logs_no_warning(self):
+        self.assertEqual(len(self.score_taking(10, 60)), 1)
+
+    def test_audio_that_is_not_a_wav_logs_its_seconds_as_unknown(self):
+        self.scorer.took = 1
+        self.scorer.clock = self.clock
+        self.call("POST", "/score", {"target_text": "cat", "audio_wav_base64": base64.b64encode(b"RIFFwav").decode()})
+        self.assertEqual(self.log.getvalue().splitlines(), ["mw-scorer: scored audio=? wall=1.0s"])
+
+    def test_a_refused_request_logs_no_scored_line(self):
+        self.call("POST", "/score", {"target_text": "cat"})
+        self.assertEqual(self.log.getvalue(), "")
 
     def test_an_unknown_path_is_404(self):
         status, _ = self.call("GET", "/nothing")

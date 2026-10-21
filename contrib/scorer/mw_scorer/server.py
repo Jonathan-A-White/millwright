@@ -7,12 +7,19 @@ A ValueError from it is the request's fault (400); anything else is a 500.
 
 import base64
 import binascii
+import io
 import json
 import sys
+import time
+import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import NamedTuple
 
 MAX_BODY = 64 << 20
+
+# A request that takes longer than this many wall seconds is also logged as a warning:
+# the scorer works one request at a time, so everything behind it waits.
+SLOW_SECONDS = 60
 
 # The languages a woven reading may have a segment in.
 SEGMENT_LANGS = ("en", "el")
@@ -74,9 +81,20 @@ def _segments(raw):
     return out
 
 
-def make_server(host, port, scorer, log=None):
+def audio_seconds(wav):
+    """The length of a WAV file in seconds, or None when it is not one the standard library reads."""
+    try:
+        with wave.open(io.BytesIO(wav)) as w:
+            return w.getnframes() / w.getframerate()
+    except (wave.Error, EOFError, ZeroDivisionError):
+        return None
+
+
+def make_server(host, port, scorer, log=None, clock=time.monotonic):
     """A server on host:port answering for scorer; port 0 picks a free one.
-    A failure of the scorer (a 500) is also written to log, standard error by default."""
+    Written to log (standard error by default): a failure of the scorer (a 500), and for each
+    request it scored one line with the audio's seconds and the wall seconds it took, and a
+    warning line when that was over SLOW_SECONDS. clock is the wall clock, for a test to move."""
     log = log or sys.stderr
 
     class Handler(BaseHTTPRequestHandler):
@@ -101,6 +119,7 @@ def make_server(host, port, scorer, log=None):
                 parsed = parse_request(req)
             except ValueError as err:
                 return self._text(400, str(err))
+            started = clock()
             try:
                 if parsed.segments is None:
                     result = scorer.score(parsed.target_text, parsed.lang, parsed.wav)
@@ -110,7 +129,17 @@ def make_server(host, port, scorer, log=None):
                 return self._text(400, str(err))
             except Exception as err:  # noqa: BLE001 - every other failure is the scorer's, said as a 500
                 return self._text(500, "the scorer failed: %s" % err)
+            self._note_scored(parsed.wav, clock() - started)
             self._json(200, result)
+
+        def _note_scored(self, wav, wall):
+            audio = audio_seconds(wav)
+            heard = "?" if audio is None else "%.1fs" % audio
+            print("mw-scorer: scored audio=%s wall=%.1fs" % (heard, wall), file=log, flush=True)
+            if wall > SLOW_SECONDS:
+                print("mw-scorer: WARNING: a request took %.1fs (over %ds) for %s of audio: the scorer takes "
+                      "one request at a time and others waited behind it" % (wall, SLOW_SECONDS, heard),
+                      file=log, flush=True)
 
         def _json(self, status, body):
             self._send(status, "application/json", json.dumps(body).encode())
