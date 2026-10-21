@@ -220,3 +220,53 @@ func TestGrindArgsCarryMaxTurnsOnlyWhenTheGrindSetsIt(t *testing.T) {
 		}
 	}
 }
+
+// A talk's first turn keeps its session under the id it is given, and a later
+// turn resumes it: each in the place --no-session-persistence has otherwise,
+// every other argument the same.
+func TestGrindArgsKeepATalksSession(t *testing.T) {
+	call := aGrindCall(t, "/tmp/mw-grist-1")
+	cold, err := claude.GrindArgs(call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for flag, set := range map[string]func(*application.GrindCall){
+		"--session-id": func(c *application.GrindCall) { c.SessionID = "0b3f6c1e-1111-4222-8333-444455556666" },
+		"--resume":     func(c *application.GrindCall) { c.Resume = "0b3f6c1e-1111-4222-8333-444455556666" },
+	} {
+		talk := call
+		set(&talk)
+		args, err := claude.GrindArgs(talk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := make([]string, 0, len(cold)+1)
+		for _, a := range cold {
+			if a == "--no-session-persistence" {
+				want = append(want, flag, "0b3f6c1e-1111-4222-8333-444455556666")
+				continue
+			}
+			want = append(want, a)
+		}
+		if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+			t.Fatalf("%s: expected\n%q\ngot\n%q", flag, want, args)
+		}
+	}
+}
+
+// A talk's session runs with the one-hour prompt cache, in place of any the
+// mill's own environment set; a grist with no talk is given the environment
+// as it was.
+func TestGrindEnvGivesATalkTheHoursCache(t *testing.T) {
+	environ := []string{"HOME=/home/mill", claude.CacheTTLEnv + "=5m"}
+	call := aGrindCall(t, "/tmp/mw-grist-1")
+	if got := claude.GrindEnv(environ, call); strings.Join(got, "\n") != strings.Join(environ, "\n") {
+		t.Fatalf("a grist with no talk was given %q", got)
+	}
+	call.Resume = "0b3f6c1e-1111-4222-8333-444455556666"
+	got := claude.GrindEnv(environ, call)
+	want := []string{"HOME=/home/mill", claude.CacheTTLEnv + "=1h"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("a talk's resume was given %q, want %q", got, want)
+	}
+}

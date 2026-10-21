@@ -41,6 +41,7 @@ func newGristCmd() *cobra.Command {
 	root.AddCommand(newGristStatsCmd())
 	root.AddCommand(newGristTimingCmd())
 	root.AddCommand(newGristSmokeCmd())
+	root.AddCommand(newGristTalksCmd())
 	return root
 }
 
@@ -707,6 +708,7 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		GovernorKey:  governorKey,
 		TestKey:      testKey,
 		Persons:      persons,
+		Talks:        application.NewGristTalks(grist.NewTalks(stateDir)),
 		Ceilings: application.GristCeilings{
 			Models: ceilings.Models, Efforts: ceilings.Efforts, MaxAttachments: ceilings.MaxAttachments,
 			MaxAttachmentBytes: ceilings.MaxAttachmentBytes, DailyLimit: ceilings.DailyLimit,

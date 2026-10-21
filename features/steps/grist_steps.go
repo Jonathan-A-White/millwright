@@ -95,6 +95,7 @@ type gristContext struct {
 	slots        slotsContext        // features/grist_concurrent.feature
 	pool         poolContext         // features/grist_pool.feature
 	credits      creditsContext      // features/grist_credits.feature
+	talk         talkContext         // features/grist_talk.feature
 
 	// statuses is the request status pass a dispatch tick is given
 	// (features/grist_request.feature); nil is none.
@@ -138,6 +139,7 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	registerGristClientTiming(ctx, c)
 	registerGristPool(ctx, c)
 	registerGristCredits(ctx, c)
+	registerGristTalk(ctx, c)
 
 	ctx.Given(`^a mill on the host "([^"]*)"$`, c.aMill)
 	ctx.Given(`^the app "([^"]*)" is checked out here, its main at commit "([^"]*)" with the grind "([^"]*)"$`, c.theAppIsCheckedOut)
@@ -330,7 +332,7 @@ func (c *gristContext) send(key string, apps []string, app, kind, v string, phot
 func (c *gristContext) sendAttached(key string, apps []string, app, kind, v string, photos int, clip *sentClip) error {
 	sealer := &apptest.FakeCipher{From: key}
 	plain := c.vectors.Grist
-	plain.Grist = application.GristName{App: app, Kind: kind, V: v, Model: c.askModel, Effort: c.askEffort}
+	plain.Grist = application.GristName{App: app, Kind: kind, V: v, Model: c.askModel, Effort: c.askEffort, Talk: c.talk.next}
 	plain.Attachments = nil
 	if c.askInput != nil {
 		plain.Input = c.askInput
@@ -573,6 +575,7 @@ func (c *gristContext) plainMill() application.GristGrind {
 		Now:         c.timing.nowOr(c.audio.now),
 		Notices:     c.timing.notices,
 		Pool:        c.pool.port(),
+		Talks:       c.talk.talks(),
 		Out:         &c.out,
 	}
 }

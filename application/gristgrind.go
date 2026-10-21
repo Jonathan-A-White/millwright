@@ -138,6 +138,9 @@ type GristGrind struct {
 	// the follower's, kept from one pass to the next. Nil starts every
 	// session cold, as mw grist grind and the dispatch tick do.
 	Pool *GristPool
+	// Talks keeps one session per talk a grist names; nil runs a grist that
+	// names one as if it named none.
+	Talks *GristTalks
 	// Credits, when set, decides what each grind is billed to: the Anthropic
 	// API key while it has credit, else the subscription. Nil bills the
 	// subscription.
@@ -288,6 +291,12 @@ type gristWork struct {
 	// billing is what the grind was billed to ("api" or "subscription"); empty
 	// when no grind ran.
 	billing string
+	// talkWait is closed when the grist's turn in its talk has come, and
+	// talkLeave gives the turn to the talk's next grist; talk is the turn as it
+	// ran, nil for a grist with no talk or a session that gave no result.
+	talkWait  <-chan struct{}
+	talkLeave func()
+	talk      *gristTalkTurn
 }
 
 // harnessPhases is the harness run's start-up and model seconds. The harness
@@ -515,7 +524,11 @@ func (p *gristPass) grind(at int, w *gristWork, n int) {
 	p.grinding++
 	w.started = p.g.now()
 	w.slotted = true
+	// The talk's line is taken here, in the order the grists came, and not in
+	// the goroutine, where a later grist of the talk could take it first.
+	w.talkWait, w.talkLeave = p.g.Talks.queue(w)
 	go func() {
+		defer w.talkLeave()
 		p.g.grindOne(p.ctx, w, p.privKey)
 		p.ground <- gristGround{at: at, w: w, slot: n}
 	}()
@@ -592,7 +605,8 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		return
 	}
 	if err := json.Unmarshal([]byte(text), &w.plain); err != nil || !gristKind.MatchString(w.plain.Grist.App) ||
-		!gristKind.MatchString(w.plain.Grist.Kind) || strings.TrimSpace(w.plain.Grist.V) == "" {
+		!gristKind.MatchString(w.plain.Grist.Kind) || strings.TrimSpace(w.plain.Grist.V) == "" ||
+		len(w.plain.Grist.Talk) > GristTalkMax {
 		w.settle(GristRefused, GristReasonMalformed)
 		return
 	}
@@ -971,6 +985,10 @@ func (g GristGrind) slot(ctx context.Context, held []func()) (int, func(), strin
 // is the warm session's when the pool has one for the grist, else one made
 // for it, and is removed however the grind ends.
 func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) {
+	if g.Talks.holds(w) {
+		g.grindTalk(ctx, w, privKey)
+		return
+	}
 	spec := w.warmSpec(g.Ceilings.filled().Timeout)
 	billing := g.Credits.Choose(ctx)
 	if billing.Note != "" {
@@ -1280,7 +1298,7 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	ready := g.now()
 	body := GristAnswer{
 		Re: w.record.Txid, Status: w.status, Reason: w.reason, Answer: w.answer,
-		ReadingResult: w.reading, ReadingResults: w.readings,
+		ReadingResult: w.reading, ReadingResults: w.readings, Talk: w.talk.answer(),
 		Grind: GristAnswerGrind{App: name.App, Kind: name.Kind, V: name.V, Commit: w.commit},
 	}
 	if w.status == GristAnswered {
@@ -1310,6 +1328,7 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	if fuel := w.result.Fuel; fuel.Total() > 0 {
 		line.Fuel = &GrindFuel{Input: fuel.Input, Output: fuel.Output, CacheRead: fuel.CacheRead, CacheWrite: fuel.CacheWrite}
 	}
+	w.talk.mark(&line, name.Talk, w.result.SessionID)
 	line.WakeSeconds = crossClockPhase(w.record.Ts, w.noticed)
 	line.PickupSeconds = phase(w.noticed, w.received)
 	if w.slotted {

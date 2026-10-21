@@ -32,12 +32,16 @@ const GristLimited = "limited"
 // GristName names the grind a grist asks for: the app, the kind of grist,
 // and the version of the app's own request schema. Model and Effort are what
 // the sender asks the grind to run on; empty, the grind file's own are used.
+// Talk, when the app names one (at most GristTalkMax bytes), is the
+// conversation the grist is a turn of: the mill keeps one session per talk
+// (application/gristtalks.go).
 type GristName struct {
 	App    string `json:"app"`
 	Kind   string `json:"kind"`
 	V      string `json:"v"`
 	Model  string `json:"model,omitempty"`
 	Effort string `json:"effort,omitempty"`
+	Talk   string `json:"talk,omitempty"`
 }
 
 // String is the name as a report prints it: cairn/sweep 1.1.
@@ -76,7 +80,8 @@ type GristAnswerGrind struct {
 // when it is. ReadingResult is there when the grind scored a recording: the
 // scores by engine, exactly as the session was given them (the first
 // recording's, and ReadingResults, one for each in order, when the grist
-// carried more than one); never the audio.
+// carried more than one); never the audio. Talk is there when the grist named
+// a talk and its session gave a result: fresh or resumed.
 type GristAnswer struct {
 	Re             string           `json:"re"`
 	Status         string           `json:"status"`
@@ -84,6 +89,7 @@ type GristAnswer struct {
 	Answer         json.RawMessage  `json:"answer,omitempty"`
 	ReadingResult  json.RawMessage  `json:"reading_result,omitempty"`
 	ReadingResults json.RawMessage  `json:"reading_results,omitempty"`
+	Talk           *GristAnswerTalk `json:"talk,omitempty"`
 	Grind          GristAnswerGrind `json:"grind"`
 }
 
@@ -275,6 +281,12 @@ type GrindCall struct {
 	// APIKey is the Anthropic API key the session is billed to, given to the
 	// harness in its environment alone; empty bills the subscription login.
 	APIKey string
+	// SessionID starts a talk's session that the harness keeps, under this id;
+	// Resume carries on the kept session of this id instead. Either runs with
+	// the one-hour prompt cache (GristTalkCacheTTL). Both empty, the session is
+	// kept nowhere.
+	SessionID string
+	Resume    string
 }
 
 // GrindSource reads an app's grinds from its rig's checkout on this host, at
@@ -377,11 +389,20 @@ type GrindLine struct {
 	Reason     string `json:"reason,omitempty"`
 	// Photos is how many photos the grist carried, which the mill deletes once
 	// the answer is delivered. Always written: 0 is an answer.
-	Photos  int        `json:"photos"`
-	Tokens  int        `json:"tokens,omitempty"`
-	Fuel    *GrindFuel `json:"fuel,omitempty"`
-	CostUSD float64    `json:"total_cost_usd,omitempty"`
-	Turns   int        `json:"turns,omitempty"`
+	Photos int        `json:"photos"`
+	Tokens int        `json:"tokens,omitempty"`
+	Fuel   *GrindFuel `json:"fuel,omitempty"`
+	// CostUSD is this grist's own cost: for a talk's resumed turn, this turn's
+	// alone, the difference of the session's cumulative total, which
+	// SessionCostUSD keeps as the harness reported it.
+	CostUSD        float64 `json:"total_cost_usd,omitempty"`
+	SessionCostUSD float64 `json:"session_cost_usd,omitempty"`
+	Turns          int     `json:"turns,omitempty"`
+	// Talk is the talk the grist named, SessionID its session, and Resumed
+	// whether this turn resumed it; left out for a grist with no talk.
+	Talk      string `json:"talk,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Resumed   bool   `json:"resumed,omitempty"`
 	// Denials is how many times the session was refused a tool: a Read of
 	// a mistyped path, say. Not a failure by itself.
 	Denials   int     `json:"denials,omitempty"`

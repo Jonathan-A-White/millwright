@@ -76,6 +76,9 @@ type SessionResult struct {
 	// something. A session that was stopped from working says so here.
 	Denials int
 	Fuel    Fuel
+	// Usage is the result's own `usage`, whatever Fuel was read from: the
+	// last turn's input, cache read and cache write are what its context held.
+	Usage Fuel
 
 	// Answer is the harness's `structured_output`: the answer a session run
 	// with a JSON schema (`--json-schema`) gave, already held to that schema
@@ -298,6 +301,7 @@ func ReadSessionResult(printed string) (SessionResult, error) {
 		Woken:            file.ResultIndex > 0,
 		WholeSessionFuel: wholeSession,
 		Fuel:             fuel,
+		Usage:            Fuel{Input: file.Usage.Input, Output: file.Usage.Output, CacheRead: file.Usage.CacheRead, CacheWrite: file.Usage.CacheWrite},
 		StopReason:       file.StopReason,
 	}
 	if answer := strings.TrimSpace(string(file.Structured)); answer != "" && answer != "null" {

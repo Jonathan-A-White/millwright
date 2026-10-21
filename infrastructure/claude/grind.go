@@ -63,29 +63,49 @@ func NewGrinder(opts ...GrinderOption) *Grinder {
 // it is set the session is billed to that key, else to the login.
 const APIKeyEnv = "ANTHROPIC_API_KEY"
 
+// CacheTTLEnv is the variable Claude Code reads its prompt cache's life from:
+// a talk's session sets it to application.GristTalkCacheTTL.
+const CacheTTLEnv = "CLAUDE_CODE_PROMPT_CACHE_TTL"
+
 // GrindEnv is the environment a grind's session runs in: environ without any
 // ANTHROPIC_API_KEY, so the subscription login is used, and with the call's
 // key when it carries one. The key travels here and nowhere else: never in the
-// argument list.
+// argument list. A talk's session (a call with a SessionID or a Resume) runs
+// with the one-hour prompt cache, CacheTTLEnv in place of any environ had.
 func GrindEnv(environ []string, call application.GrindCall) []string {
-	env := make([]string, 0, len(environ)+1)
+	talk := call.SessionID != "" || call.Resume != ""
+	env := make([]string, 0, len(environ)+2)
 	for _, entry := range environ {
-		if !strings.HasPrefix(entry, APIKeyEnv+"=") {
-			env = append(env, entry)
+		if strings.HasPrefix(entry, APIKeyEnv+"=") || talk && strings.HasPrefix(entry, CacheTTLEnv+"=") {
+			continue
 		}
+		env = append(env, entry)
 	}
 	if call.APIKey != "" {
 		env = append(env, APIKeyEnv+"="+call.APIKey)
+	}
+	if talk {
+		env = append(env, CacheTTLEnv+"="+application.GristTalkCacheTTL)
 	}
 	return env
 }
 
 // GrindArgs is a grind's command line after the program, one argument each,
-// never read by a shell: the prompt is the last.
+// never read by a shell: the prompt is the last. A talk's session is kept:
+// --session-id starts it, --resume carries it on, each in the place
+// --no-session-persistence has otherwise, and every other flag the same, so
+// the resumed turn's prompt cache matches the first's.
 func GrindArgs(call application.GrindCall) ([]string, error) {
 	schema, err := GrindSchema(call.Schema)
 	if err != nil {
 		return nil, err
+	}
+	session := []string{"--no-session-persistence"}
+	switch {
+	case call.Resume != "":
+		session = []string{"--resume", call.Resume}
+	case call.SessionID != "":
+		session = []string{"--session-id", call.SessionID}
 	}
 	args := []string{
 		"--print",
@@ -96,7 +116,9 @@ func GrindArgs(call application.GrindCall) ([]string, error) {
 		"--tools", GrindTools,
 		"--strict-mcp-config",
 		"--permission-prompts", "none",
-		"--no-session-persistence",
+	}
+	args = append(args, session...)
+	args = append(args,
 		"--disable-slash-commands",
 		// --safe-mode is claude's documented switch (claude --help: "all
 		// customizations (CLAUDE.md, skills, plugins, hooks, MCP servers ...)
@@ -106,7 +128,7 @@ func GrindArgs(call application.GrindCall) ([]string, error) {
 		"--safe-mode",
 		"--system-prompt", call.System,
 		"--json-schema", schema,
-	}
+	)
 	// The one limit a grind file may set. Nothing else is forbidden here: no
 	// flag turns subagents off.
 	if call.MaxTurns > 0 {
