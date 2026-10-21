@@ -79,3 +79,39 @@ Feature: A story is sized by the tests that call its files
     Given the callers story "B" is open on the rig "lampas"
     When the callers path of "B" is set with model=opus
     Then the callers output does not mention: test callers
+
+  Scenario: Setting callers_ok on a story over its allowance counts the callers and does not warn
+    Given the callers story "B" is open on the rig "lampas"
+    When the callers path of "B" is set with files=src/screens/Settings.tsx size=XS
+    And the callers reason of "B" is set to "additive: new function beside the old"
+    Then the callers story "B" has the metadata callers_ok "additive: new function beside the old"
+    And the callers output has the line: B: test callers: 12 for size XS (allows 5)
+    And the callers warning is empty
+
+  Scenario: A story that carries callers_ok is not warned of when its size is set later
+    Given the callers story "B" is open on the rig "lampas"
+    And the callers story "B" already carries callers_ok "additive: new function beside the old"
+    When the callers path of "B" is set with files=src/screens/Settings.tsx size=XS
+    Then the callers output has the line: B: test callers: 12 for size XS (allows 5)
+    And the callers warning is empty
+
+  Scenario: An empty callers_ok is refused
+    Given the callers story "B" is open on the rig "lampas"
+    When the callers path of "B" is set with callers_ok=
+    Then the callers check is refused
+    And the callers story "B" has no metadata callers_ok
+
+  Scenario: Filing a plan story with callers_ok writes it to the filed story
+    Given the callers story "pages" says callers_ok "the callers only import the type"
+    When the callers plan is filed
+    Then the callers plan is filed
+    And the callers story "f-1.1" has the metadata callers_ok "the callers only import the type"
+    And the callers warning is empty
+
+  Scenario: Copying a sibling's path does not copy its callers_ok
+    Given the callers story "A" is open on the rig "lampas"
+    And the callers story "A" already carries callers_ok "additive: new function beside the old"
+    And the callers story "B" is open on the rig "lampas"
+    When the callers path of "B" is copied from "A" with files=src/screens/Settings.tsx size=XS
+    Then the callers story "B" has no metadata callers_ok
+    And the callers warning has the line: WARN: 12 test callers for size XS

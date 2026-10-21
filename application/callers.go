@@ -18,6 +18,10 @@ type TestCallers struct {
 	Label string
 	Count int
 	Size  domain.Size
+	// Waived is the story's callers_ok, the reason more callers than its size
+	// allows do not need a split (mw-gq6.672); empty waives nothing. The count
+	// line is still said for a waived story, the warning is not.
+	Waived string
 }
 
 // Allows is the most test callers the size allows.
@@ -25,6 +29,10 @@ func (t TestCallers) Allows() int { return t.Size.CallersAllowed() }
 
 // Over says the count is more than the size allows.
 func (t TestCallers) Over() bool { return t.Count > t.Allows() }
+
+// Unwaived says the count is more than the size allows and the story does not
+// say why that is fine.
+func (t TestCallers) Unwaived() bool { return t.Over() && strings.TrimSpace(t.Waived) == "" }
 
 // Line is the count as mw file and mw path set say it, whatever the count is.
 func (t TestCallers) Line() string {
@@ -54,18 +62,19 @@ func testCallersOf(rigs map[string]string, files RigFiles, label string, path do
 	if err != nil {
 		return TestCallers{}, false
 	}
-	return TestCallers{Label: label, Count: n, Size: path.Size}, true
+	return TestCallers{Label: label, Count: n, Size: path.Size, Waived: path.CallersOK}, true
 }
 
 // callerNotes prints the count of test callers of a story to out, and, when it
-// is over its size's allowance, the warning to warn. It reports whether the
-// story is over, so that mw file --check can fail for it.
+// is over its size's allowance and does not carry callers_ok, the warning to
+// warn. It reports whether the story is over without a callers_ok, so that mw
+// file --check can fail for it.
 func callerNotes(out, warn io.Writer, callers TestCallers) bool {
 	if out != nil {
 		fmt.Fprintln(out, callers.Line())
 	}
-	if callers.Over() && warn != nil {
+	if callers.Unwaived() && warn != nil {
 		fmt.Fprintln(warn, callers.Warning())
 	}
-	return callers.Over()
+	return callers.Unwaived()
 }

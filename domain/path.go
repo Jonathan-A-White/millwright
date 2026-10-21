@@ -123,7 +123,15 @@ type Path struct {
 	// instead of its patch: the epic's last story says so here, and never edits
 	// the version itself (mw-gq6.527). A story's own, like Files.
 	Bump string `json:"bump,omitempty"`
+	// CallersOK is why the story may name files that more test files call than
+	// its size allows (mw-gq6.672): a reason, not a flag. It is a story metadata
+	// key outside Fields, so a path's eleven keys are as they were, and a story's
+	// own like Files; a plan writes it as the story's "callers_ok" instead.
+	CallersOK string `json:"-"`
 }
+
+// CallersOKField is the metadata key a story's CallersOK is stored under.
+const CallersOKField = "callers_ok"
 
 // BumpMinor is the one value a path's bump may hold.
 const BumpMinor = "minor"
@@ -208,6 +216,8 @@ func (p *Path) Set(field, value string) error {
 		p.Size = Size(value)
 	case "bump":
 		p.Bump = value
+	case CallersOKField:
+		p.CallersOK = value
 	default:
 		return UnknownFieldError{Field: field}
 	}
@@ -239,6 +249,8 @@ func (p Path) Field(field string) (string, error) {
 		return string(p.Size), nil
 	case "bump":
 		return p.Bump, nil
+	case CallersOKField:
+		return p.CallersOK, nil
 	default:
 		return "", UnknownFieldError{Field: field}
 	}
@@ -254,6 +266,9 @@ func (p Path) Metadata() map[string]string {
 			continue
 		}
 		m[field] = value
+	}
+	if p.CallersOK != "" {
+		m[CallersOKField] = p.CallersOK
 	}
 	return m
 }
@@ -337,6 +352,9 @@ func (p Path) Overlay(override Path) Path {
 	}
 	if override.Bump != "" {
 		p.Bump = override.Bump
+	}
+	if override.CallersOK != "" {
+		p.CallersOK = override.CallersOK
 	}
 	return p
 }

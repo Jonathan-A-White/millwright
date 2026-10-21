@@ -57,6 +57,11 @@ func InitializeFileCallersScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^the callers plan is checked$`, c.thePlanIsChecked)
 	ctx.When(`^the callers plan is filed$`, c.thePlanIsFiled)
 	ctx.When(`^the callers path of "([^"]*)" is set with (.+)$`, c.thePathIsSet)
+	ctx.Given(`^the callers story "([^"]*)" already carries callers_ok "([^"]*)"$`, c.theStoryCarriesCallersOK)
+	ctx.When(`^the callers reason of "([^"]*)" is set to "([^"]*)"$`, c.theReasonIsSet)
+	ctx.When(`^the callers path of "([^"]*)" is copied from "([^"]*)" with (.+)$`, c.thePathIsCopied)
+	ctx.Then(`^the callers story "([^"]*)" has the metadata callers_ok "([^"]*)"$`, c.storyHasCallersOK)
+	ctx.Then(`^the callers story "([^"]*)" has no metadata callers_ok$`, c.storyHasNoCallersOK)
 	ctx.Then(`^the callers check is refused$`, c.theCheckIsRefused)
 	ctx.Then(`^the callers check passes$`, c.theCheckPasses)
 	ctx.Then(`^the callers plan is filed$`, c.theFilingSucceeded)
@@ -184,6 +189,46 @@ func (c *callersContext) thePathIsSet(id, pairs string) error {
 		Out:      &c.out,
 		Err:      &c.errOut,
 	}.Run(context.Background(), id, "", strings.Fields(pairs))
+	return nil
+}
+
+func (c *callersContext) theStoryCarriesCallersOK(id, why string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{"callers_ok": why})
+}
+
+func (c *callersContext) pathSet() application.PathSet {
+	return application.PathSet{
+		Tracker:  c.tracker,
+		Rigs:     map[string]string{c.rigName: c.rigDir},
+		RigFiles: rig.Files{},
+		Out:      &c.out,
+		Err:      &c.errOut,
+	}
+}
+
+func (c *callersContext) theReasonIsSet(id, why string) error {
+	c.out.Reset()
+	c.errOut.Reset()
+	_, c.err = c.pathSet().Run(context.Background(), id, "", []string{"callers_ok=" + why})
+	return nil
+}
+
+func (c *callersContext) thePathIsCopied(id, from, pairs string) error {
+	_, c.err = c.pathSet().Run(context.Background(), id, from, strings.Fields(pairs))
+	return nil
+}
+
+func (c *callersContext) storyHasCallersOK(id, want string) error {
+	if got := c.tracker.Metadata(id)["callers_ok"]; got != want {
+		return fmt.Errorf("expected %s to carry callers_ok %q; it has %q", id, want, got)
+	}
+	return nil
+}
+
+func (c *callersContext) storyHasNoCallersOK(id string) error {
+	if got := c.tracker.Metadata(id)["callers_ok"]; got != "" {
+		return fmt.Errorf("expected %s to carry no callers_ok; it has %q", id, got)
+	}
 	return nil
 }
 

@@ -378,12 +378,7 @@ func (f File) testCallers(plan domain.Plan, label func(key string) string) []str
 		if !ok {
 			continue
 		}
-		waived := strings.TrimSpace(story.CallersOK) != ""
-		warn := f.Err
-		if waived {
-			warn = nil
-		}
-		if callerNotes(f.Out, warn, callers) && !waived {
+		if callerNotes(f.Out, f.Err, callers) {
 			over = append(over, callers.Label)
 		}
 	}

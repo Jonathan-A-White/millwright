@@ -51,7 +51,8 @@ type PlanStory struct {
 	Labels []string `json:"labels"`
 	// CallersOK is why the story may name files that more test files call than
 	// its size allows (mw-gq6.661): the Mayor's reason, which waives mw file
-	// --check's failure for it. Empty waives nothing.
+	// --check's failure for it and is written to the filed story's metadata
+	// (mw-gq6.672). Empty waives nothing.
 	CallersOK string `json:"callers_ok,omitempty"`
 }
 
@@ -61,6 +62,11 @@ func (s PlanStory) PathOverrides() Path {
 	overrides := s.Overrides
 	if strings.TrimSpace(s.Files) != "" {
 		overrides.Files = strings.TrimSpace(s.Files)
+	}
+	// The plan's callers_ok is stored on the filed story as its metadata, so a
+	// later mw path set on it stays quiet too (mw-gq6.672).
+	if why := strings.TrimSpace(s.CallersOK); why != "" {
+		overrides.CallersOK = why
 	}
 	return overrides
 }

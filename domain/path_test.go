@@ -365,3 +365,25 @@ func TestBumpIsEmptyOrMinor(t *testing.T) {
 		t.Fatalf("expected no bump to be valid, got %v", err)
 	}
 }
+
+func TestCallersOKIsAMetadataKeyOutsideTheFields(t *testing.T) {
+	path := domain.Path{Rig: "lampas", CallersOK: "additive: new function beside the old"}
+	meta := path.Metadata()
+	if meta["callers_ok"] != "additive: new function beside the old" {
+		t.Fatalf("Metadata() = %v; want callers_ok written", meta)
+	}
+	if back := domain.PathFromMetadata(meta); back.CallersOK != path.CallersOK {
+		t.Errorf("PathFromMetadata lost callers_ok: %q", back.CallersOK)
+	}
+	for _, field := range domain.Fields {
+		if field == "callers_ok" {
+			t.Errorf("callers_ok is in Fields, which are the eleven path keys")
+		}
+	}
+	if got := (domain.Path{Rig: "a"}).Overlay(domain.Path{CallersOK: "why"}); got.CallersOK != "why" {
+		t.Errorf("Overlay dropped callers_ok: %q", got.CallersOK)
+	}
+	if _, empty := (domain.Path{Rig: "a"}).Metadata()["callers_ok"]; empty {
+		t.Errorf("an unset callers_ok was written")
+	}
+}

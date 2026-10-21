@@ -47,7 +47,9 @@ func newPathSetCmd() *cobra.Command {
 			"checked out to count it.\n\n" +
 			"A story with files and a size is told 'test callers: N for size S (allows M)': the rig's test\n" +
 			"files (features/, tests/, *_test.go) naming its files by base name, against XS 5, S 10, M 20,\n" +
-			"L 35, XL 50. Over that, a WARN on stderr says to split the story or size it up; nothing is refused.\n\n" +
+			"L 35, XL 50. Over that, a WARN on stderr says to split the story or size it up; nothing is refused.\n" +
+			"callers_ok=\"<why>\" is the story's own reason the callers are fine (say, the change is additive): the count\n" +
+			"line still prints for it, the WARN does not, and --from does not copy it.\n\n" +
 			"A story in an epic whose rig asks for a last story (epic_last_story_labels) with exactly one\n" +
 			"open or held story carrying it is made a need of that story, and one line says so.",
 		Args: cobra.MinimumNArgs(1),

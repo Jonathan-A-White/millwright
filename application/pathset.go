@@ -61,7 +61,7 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		return domain.Path{}, fmt.Errorf("setting a path: which story?")
 	}
 	if from == "" && len(pairs) == 0 {
-		return domain.Path{}, fmt.Errorf("setting a path: name a story to copy with --from, or keys to set as key=value (keys: %s)", strings.Join(domain.Fields, ", "))
+		return domain.Path{}, fmt.Errorf("setting a path: name a story to copy with --from, or keys to set as key=value (keys: %s)", settableKeys)
 	}
 
 	var path domain.Path
@@ -91,6 +91,8 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		path.Size = ""
 		// And its bump: one story raises the minor, not the ones copied from it.
 		path.Bump = ""
+		// And its callers_ok: the reason is for the sibling's files (mw-gq6.672).
+		path.CallersOK = ""
 		if path.Rig == "" {
 			return domain.Path{}, fmt.Errorf("the story %s has no rig, so there is no path to copy from it: nothing was written", from)
 		}
@@ -130,9 +132,9 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		}
 	}
 	// The test files that call the story's files are changed with them, so the
-	// size is judged by them too (mw-gq6.661). Only a files or size key being
-	// written is judged; a warning, never a refusal.
-	if named.Files != "" || named.Size != "" {
+	// size is judged by them too (mw-gq6.661). Only a files, size or callers_ok key
+	// being written is judged; a warning, never a refusal.
+	if named.Files != "" || named.Size != "" || named.CallersOK != "" {
 		if callers, ok := testCallersOf(s.Rigs, s.RigFiles, id, story.Merged().Overlay(path)); ok {
 			callerNotes(s.Out, s.Err, callers)
 		}
@@ -228,18 +230,22 @@ func orRig(rig string) string {
 	return rig
 }
 
+// settableKeys are the keys mw path set takes, as a refusal names them: the
+// eleven path keys and callers_ok (mw-gq6.672).
+var settableKeys = strings.Join(append(append([]string{}, domain.Fields...), domain.CallersOKField), ", ")
+
 // parsePathPairs reads key=value settings into a path, refusing a key that is
-// not one of the eleven and a value left empty.
+// not one of the eleven or callers_ok and a value left empty.
 func parsePathPairs(pairs []string) (domain.Path, error) {
 	var path domain.Path
 	for _, pair := range pairs {
 		key, value, ok := strings.Cut(pair, "=")
 		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
 		if !ok || value == "" {
-			return domain.Path{}, fmt.Errorf("%q is not key=value with a value (keys: %s)", pair, strings.Join(domain.Fields, ", "))
+			return domain.Path{}, fmt.Errorf("%q is not key=value with a value (keys: %s)", pair, settableKeys)
 		}
 		if err := path.Set(key, value); err != nil {
-			return domain.Path{}, fmt.Errorf("%q is not a path key: the keys are %s", key, strings.Join(domain.Fields, ", "))
+			return domain.Path{}, fmt.Errorf("%q is not a path key: the keys are %s", key, settableKeys)
 		}
 	}
 	if path.Size != "" && !domain.KnownSize(path.Size) {
@@ -261,6 +267,10 @@ func pathLines(path domain.Path) string {
 			value = PathUnset
 		}
 		fmt.Fprintf(&b, "%s=%s\n", key, value)
+	}
+	// callers_ok is no path key, so it is shown only for a story that carries one.
+	if path.CallersOK != "" {
+		fmt.Fprintf(&b, "%s=%s\n", domain.CallersOKField, path.CallersOK)
 	}
 	return b.String()
 }

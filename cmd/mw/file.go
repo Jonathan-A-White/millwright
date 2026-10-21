@@ -61,7 +61,8 @@ func newFileCmd() *cobra.Command {
 			"rig's test files (features/, tests/, *_test.go) that name any of its files by base name\n" +
 			"without extension, counted in the checkout on this host. XS allows 5, S 10, M 20, L 35, XL 50.\n" +
 			"Over that, 'WARN: N test callers for size S; split ... or size up' goes to stderr, and --check\n" +
-			"fails, unless the story says why not as \"callers_ok\": \"<why>\".\n\n" +
+			"fails, unless the story says why not as \"callers_ok\": \"<why>\", which is also written to the filed\n" +
+			"story's metadata, so that mw path set on it is quiet too.\n\n" +
 			"--check runs every one of these checks and files nothing: it prints every refusal across\n" +
 			"every story of the plan at once, exits non-zero if there is any, and otherwise prints\n" +
 			"'ok: <n> stories would be filed'. --waive and --guest-ask count as they do when filing.",
