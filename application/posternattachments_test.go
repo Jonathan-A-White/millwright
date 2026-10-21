@@ -307,3 +307,50 @@ func TestInboxSavesAudioInAttachmentsWithoutTranscribingIt(t *testing.T) {
 		t.Errorf("expected one comment naming the audio file, got %v", comments)
 	}
 }
+
+// The apply pass refuses a file whose hash does not match and goes on to the
+// next message, on the general thread as on a bead thread.
+func TestApplyRefusesAHashMismatchAndGoesOn(t *testing.T) {
+	for _, tc := range []struct{ name, bead string }{{"general thread", ""}, {"bead thread", "mw-many.3"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newManyFiles(t)
+			f.tracker.AddStory("epic", domain.Story{ID: "mw-many.3"})
+			bad := f.add(t, "image/png", pngBytes)
+			good := f.add(t, "image/jpeg", jpegBytes)
+			wrong := hex.EncodeToString(sha256.New().Sum(nil))
+			f.backend.SetBlob(wrong, []byte("not what the hash says"))
+			bad.Hash = wrong
+			thread := map[string]any{}
+			if tc.bead != "" {
+				thread["bead"] = tc.bead
+			}
+			f.post(t, "bad-txid", map[string]any{"thread": thread, "text": "one bad", "attachment": bad})
+			f.post(t, "good-txid", map[string]any{"thread": thread, "text": "one good", "attachment": good})
+			inbox := f.inbox(&bytes.Buffer{})
+			inbox.Out = &bytes.Buffer{}
+			inbox.Mailbox = apptest.NewFakeMailbox()
+
+			if _, err := inbox.Apply(context.Background()); err != nil {
+				t.Fatalf("applying: %v", err)
+			}
+			noted, err := f.tracker.Note(context.Background(), application.PosternAppliedKey("bad-txid"))
+			if err != nil {
+				t.Fatalf("reading the applied note: %v", err)
+			}
+			if !strings.HasPrefix(noted, "applied ") || !strings.Contains(noted, "attachment refused: hash mismatch") {
+				t.Errorf("expected the refusal recorded, got %q", noted)
+			}
+			path := f.assertWritten(t, "good-txid.jpg", jpegBytes)
+			noted, err = f.tracker.Note(context.Background(), application.PosternAppliedKey("good-txid"))
+			if err != nil {
+				t.Fatalf("reading the applied note: %v", err)
+			}
+			if !strings.Contains(noted, "[image: "+path+"]") {
+				t.Errorf("expected the saved path recorded, got %q", noted)
+			}
+			if _, err := os.Stat(filepath.Join(f.dir, "bad-txid.png")); err == nil {
+				t.Errorf("expected nothing written for the refused file")
+			}
+		})
+	}
+}

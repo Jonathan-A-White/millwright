@@ -160,6 +160,7 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 		c.aPosternMessageFromThreadedOnBead)
 	ctx.Given(`^a postern message from "([^"]*)" in the channel of bead "([^"]*)" with text "([^"]*)" and txid "([^"]*)" carrying a screenshot$`,
 		c.aPosternMessageFromThreadedOnBeadCarryingAScreenshot)
+	registerPosternInboxApplySteps(ctx, c)
 	ctx.Given(`^a postern message from "([^"]*)" in the channel of bead "([^"]*)" with the lines "([^"]*)" and txid "([^"]*)"$`,
 		func(from, bead, lines, txid string) error {
 			return c.aPosternMessageFromThreadedOnBead(from, bead, strings.ReplaceAll(lines, " / ", "\n"), txid)
@@ -416,6 +417,12 @@ func (c *posternInboxContext) aPosternMessageFromThreadedOnBead(from, bead, text
 // remembers the image and the txid so a later Then step can compute the
 // path mw postern inbox should have written it to.
 func (c *posternInboxContext) aPosternMessageFromThreadedOnBeadCarryingAScreenshot(from, bead, text, txid string) error {
+	return c.aPosternMessageCarryingAScreenshot(from, application.PosternThread{Bead: bead}, text, txid)
+}
+
+// aPosternMessageCarryingAScreenshot is that step for any thread: a zero
+// thread is the General one.
+func (c *posternInboxContext) aPosternMessageCarryingAScreenshot(from string, thread application.PosternThread, text, txid string) error {
 	image := bytes.Repeat([]byte{0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d, 0x0a, 0x1a}, 400) // a stand-in PNG
 	c.cipher.From = from
 	imageCtB64, err := c.cipher.Encrypt(c.pubKey, string(image))
@@ -431,7 +438,7 @@ func (c *posternInboxContext) aPosternMessageFromThreadedOnBeadCarryingAScreensh
 	c.backend.SetBlob(hash, raw)
 
 	wrapped, err := json.Marshal(application.PosternThreadedMessage{
-		Thread:     application.PosternThread{Bead: bead},
+		Thread:     thread,
 		Text:       text,
 		Attachment: &application.PosternAttachment{Hash: hash, Size: int64(len(raw)), Mime: "image/png"},
 	})

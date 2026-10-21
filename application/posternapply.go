@@ -270,7 +270,7 @@ func (i PosternInbox) apply(ctx context.Context, tapsOnly bool, after int64) (li
 		}
 		var outcome string
 		var saved []posternSavedFile
-		if len(m.files()) > 0 && (m.ThreadIsBead || i.isVoiceNote(m)) {
+		if len(m.files()) > 0 {
 			outcome, saved = i.attachmentOutcome(ctx, m)
 		}
 		result, handled, err := i.applyOne(ctx, m, outcome, saved)
@@ -288,6 +288,9 @@ func (i PosternInbox) apply(ctx context.Context, tapsOnly bool, after int64) (li
 		}
 		lines = append(lines, result.summary())
 		i.printf("%s\n", result.summary())
+		if outcome != "" && !m.ThreadIsBead && !i.isVoiceNote(m) {
+			i.printf("%s\n", outcome)
+		}
 	}
 	resume = max(after, newest)
 	if stuck > 0 && stuck-1 < resume {
@@ -428,13 +431,31 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 			fmt.Sprintf("The Governor by postern %s, txid %s, on %s:\n\n%s%s", sentInFull(m.Ts), m.Txid, m.Thread, m.Text, answerSuffix(m))); err != nil {
 			return posternApplied{}, false, err
 		}
-		result := posternApplied{Kind: "comment", Bead: m.Thread, Txid: m.Txid}
-		if len(saved) > 0 {
-			result.Detail = posternSavedNames(saved)
-		}
-		return result, true, nil
+		return posternApplied{Kind: "comment", Bead: m.Thread, Txid: m.Txid, Detail: filesDetail(outcome, saved)}, true, nil
+	}
+	if len(m.files()) > 0 {
+		// Words on the general thread or a named channel have no bead to be
+		// commented on, but the files he sends are saved and their paths recorded;
+		// the Mayor's read shows the applied line and his whole text.
+		return posternApplied{Kind: "comment", Bead: m.Thread, Txid: m.Txid, Detail: filesDetail(outcome, saved)}, true, nil
 	}
 	return posternApplied{}, false, nil
+}
+
+// filesDetail is what an applied message's note says of its files: each one
+// written, and each one refused, in the words attachmentOutcome printed.
+func filesDetail(outcome string, saved []posternSavedFile) string {
+	detail := posternSavedNames(saved)
+	for _, line := range strings.Split(outcome, "\n") {
+		written := false
+		for _, file := range saved {
+			written = written || strings.HasPrefix(line, file.Path)
+		}
+		if line != "" && !written {
+			detail = strings.TrimSpace(detail + " " + line)
+		}
+	}
+	return detail
 }
 
 // isLooksGood reports whether text is only the words "looks good": trimmed,
