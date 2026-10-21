@@ -41,6 +41,7 @@ func newPosternCmd() *cobra.Command {
 	root.AddCommand(newPosternSnapshotCmd())
 	root.AddCommand(newPosternViewCmd())
 	root.AddCommand(newPosternBeadCmd())
+	root.AddCommand(newPosternClearCmd())
 	root.AddCommand(newPosternServeCmd())
 	root.AddCommand(newPosternNginxCmd())
 	root.AddCommand(newPosternMirrorCmd())

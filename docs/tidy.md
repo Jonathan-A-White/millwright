@@ -25,7 +25,7 @@ It never:
   mail, and the beads adapter refuses to close any bead that is not of type
   mail;
 - deletes anything: closed mail stays in the tracker;
-- clears a question note whose bead is open, or a bead it cannot read, or a decision card nobody answered (row 3a: the Mayor re-asks it on an open bead or clears it by hand);
+- clears a question note whose bead is open, or a bead it cannot read, or a decision card nobody answered (row 3a: the Mayor re-asks it on an open bead or clears it with `mw postern clear`, below);
 - closes a step of an open or running story's formula, or of a formula whose
   story no step names: a formula's beads are listed and closed as a formula's,
   and the beads adapter refuses to close any bead without the `-mol-` infix.
@@ -44,3 +44,15 @@ and the formulas of stories closed before that, row 4 closes.
 The Millhand's tick runs it after the sweep, and `mw tidy` runs it by hand;
 `--dry-run` lists what it would do and changes nothing. See
 `features/tidy.feature`.
+
+## Clearing an answered card on an open bead
+
+`mw tidy` never clears a question note on an open bead (row 3), so a card the
+Governor has answered stays in his Needs you while its bead stays open (it was
+approved and released, or fixed another way). The command for that is
+`mw postern clear <bead> --why "<text>"`. It does three things and changes
+nothing else: it clears the bead's `postern.question.<bead>` note, comments the
+bead `Card cleared by mw postern clear: <why>`, and posts a short reply under
+the card's txid saying it is cleared and why, so his phone thread closes the
+loop. The bead's status and fields are never touched. A bead with no question
+note is refused, naming it. `--dry-run` prints the three acts and does none.
