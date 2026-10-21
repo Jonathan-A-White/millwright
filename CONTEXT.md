@@ -114,6 +114,10 @@ _Avoid_: Spec, recipe, prompt, template
 The factory's side of grist: `mw grist grind` on the home host, holding the mill key. Not a seat: each grind is one short harness session with no seat.
 _Avoid_: Worker, service, daemon
 
+**Talk session**:
+The one Claude session the mill keeps for an app's conversation with its tutor (`talk` in the grist envelope; not the Governor's Talk with the Mayor): its first turn starts it, every later turn within the hour resumes it with the app's history stripped; after an hour of quiet, or at its context cap once it has written its key points, a fresh one carries on from the app's summary. One per (app, sender key, talk), one grist at a time. ADR 0007.
+_Avoid_: Conversation id, thread, chat session
+
 ### Postern
 
 **Channel**:
