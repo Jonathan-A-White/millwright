@@ -108,7 +108,7 @@ func TestTheNotifierTypesTheMailWhenTheFollowerIsNotActive(t *testing.T) {
 	f.inbox("mw-aaa")
 	f.write("vault/seats/mayor/subscribe.toml", "kinds = [\"mail\"]\n", 0o644)
 	f.tick()
-	f.typed("New mail for mayor: 1 message(s). Run bd mail inbox.\n")
+	f.typed(announce("mw-aaa"))
 }
 
 func TestTheNotifierTypesTheMailWhenTheSeatsFileNamesNoMail(t *testing.T) {
@@ -117,7 +117,7 @@ func TestTheNotifierTypesTheMailWhenTheSeatsFileNamesNoMail(t *testing.T) {
 	f.inbox("mw-bbb")
 	f.followerTells(`["message"]`)
 	f.tick()
-	f.typed("New mail for mayor: 1 message(s). Run bd mail inbox.\n")
+	f.typed(announce("mw-bbb"))
 }
 
 func TestTheNotifierTypesTheMailWhenTheSeatHasNoSubscribeFile(t *testing.T) {
@@ -126,7 +126,7 @@ func TestTheNotifierTypesTheMailWhenTheSeatHasNoSubscribeFile(t *testing.T) {
 	f.inbox("mw-ccc")
 	f.write("view-follow-active", "", 0o644)
 	f.tick()
-	f.typed("New mail for mayor: 1 message(s). Run bd mail inbox.\n")
+	f.typed(announce("mw-ccc"))
 }
 
 // heartbeat marks a wait as armed just now, or ago before it.
@@ -172,7 +172,7 @@ func TestTheNotifierFallsBackToTypingWhenTheWaitsHeartbeatIsStale(t *testing.T) 
 
 	f.tick()
 
-	f.typed("New mail for mayor: 1 message(s). Run bd mail inbox.\n")
+	f.typed(announce("mw-aaa"))
 }
 
 func TestTheNotifierStillTypesTheQuietAlarmWhileAWaitIsArmed(t *testing.T) {
