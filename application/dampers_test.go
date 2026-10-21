@@ -2,8 +2,10 @@ package application_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -192,5 +194,86 @@ func TestDampersInversionLineEndsItsCutListWithAPointerToMwStuckInversions(t *te
 	}
 	if few := dampersOf(graph[:4]); strings.Contains(few, "mw stuck --inversions") {
 		t.Errorf("a list not cut points to the command anyway: %q", few)
+	}
+}
+
+// reviewFixture is the clean fixture with a hands step not run on each of the
+// beads, a card on each of the cards, and the graph holding each bead as given.
+func reviewFixture(t *testing.T, statuses map[string]string, steps, cards []string) application.DamperFacts {
+	t.Helper()
+	facts := aCleanDamperFixture()
+	for _, bead := range steps {
+		raw, _ := json.Marshal([]application.HandsStepRecord{{HandsStep: domain.HandsStep{ID: "a", Host: "desktop", As: "user", Run: "true"}}})
+		facts.Notes[application.HandsStepsKey(bead)] = string(raw)
+	}
+	for _, bead := range cards {
+		facts.Notes[application.PosternQuestionKey(bead)] = `{"q":"which?"}`
+	}
+	for bead, status := range statuses {
+		facts.Graph = append(facts.Graph, domain.GraphBead{ID: bead, Title: "Bead " + bead, Status: status, Type: "task"})
+	}
+	return facts
+}
+
+func TestReviewQueueCountsAHandsStepOnlyWhileItsBeadIsOpen(t *testing.T) {
+	facts := reviewFixture(t, map[string]string{"mw-h.closed": "closed", "mw-h.open": "open"}, []string{"mw-h.closed", "mw-h.open"}, nil)
+	report := application.ReadDampers(facts, application.DamperLimits{ReviewQueue: 1})
+	// the clean fixture holds 2 (a card and a demo); the open bead's step makes 3
+	if report.Counts.ReviewQueue != 3 {
+		t.Errorf("ReviewQueue = %d, want 3: the closed bead's step is not counted", report.Counts.ReviewQueue)
+	}
+	var review application.DamperAlarm
+	for _, alarm := range report.Alarms {
+		if alarm.Principle == application.DamperReview {
+			review = alarm
+		}
+	}
+	if slices.Contains(review.Beads, "mw-h.closed") || !slices.Contains(review.Beads, "mw-h.open") {
+		t.Errorf("review alarm names %v, want mw-h.open and not mw-h.closed", review.Beads)
+	}
+	if !strings.Contains(review.Text, "1 hands steps") {
+		t.Errorf("review alarm says %q, want 1 hands steps", review.Text)
+	}
+}
+
+func TestReviewQueueCountsACardOnlyWhileItsBeadIsOpen(t *testing.T) {
+	facts := reviewFixture(t, map[string]string{"mw-c.closed": "closed", "mw-c.open": "in_progress"}, nil, []string{"mw-c.closed", "mw-c.open"})
+	report := application.ReadDampers(facts, application.DamperLimits{ReviewQueue: 1})
+	if report.Counts.ReviewQueue != 3 {
+		t.Errorf("ReviewQueue = %d, want 3: the closed bead's card is not counted", report.Counts.ReviewQueue)
+	}
+}
+
+func TestReviewQueueCountsABeadTheGraphDoesNotHold(t *testing.T) {
+	facts := reviewFixture(t, nil, []string{"mw-h.unknown"}, nil)
+	if got := application.ReadDampers(facts, application.DamperLimits{}).Counts.ReviewQueue; got != 3 {
+		t.Errorf("ReviewQueue = %d, want 3: a bead the graph does not show is counted", got)
+	}
+}
+
+func TestDamperAlarmHintNamesACommandThatPrintsTheWholeList(t *testing.T) {
+	var cards []string
+	for n := 1; n <= 12; n++ {
+		cards = append(cards, fmt.Sprintf("mw-q.%02d", n))
+	}
+	facts := reviewFixture(t, nil, nil, cards)
+	report := application.ReadDampers(facts, application.DamperLimits{})
+	var b strings.Builder
+	report.Write(&b)
+	got := strings.Join(strings.Fields(b.String()), " ")
+	if !strings.Contains(got, "(all: mw stuck --dampers)") || strings.Contains(got, "mw stuck --inversions") {
+		t.Errorf("DAMPERS = %q, want the cut ending with a pointer to mw stuck --dampers", got)
+	}
+	full := report.FullList()
+	for _, bead := range cards {
+		if !strings.Contains(full, bead+"\n") {
+			t.Errorf("FullList lacks %s:\n%s", bead, full)
+		}
+	}
+	if !strings.Contains(full, "review") {
+		t.Errorf("FullList does not name the alarm:\n%s", full)
+	}
+	if got := (application.DampersReport{}).FullList(); !strings.Contains(got, "no damper alarm") {
+		t.Errorf("FullList with none = %q, want it to say so", got)
 	}
 }

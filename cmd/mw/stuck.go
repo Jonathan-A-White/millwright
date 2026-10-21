@@ -13,7 +13,7 @@ import (
 
 // newStuckCmd builds `mw stuck`: the held beads that live beads wait behind.
 func newStuckCmd() *cobra.Command {
-	var inversions bool
+	var inversions, dampers bool
 	cmd := &cobra.Command{
 		Use:   "stuck",
 		Short: "List the held beads that live beads wait behind and that cannot move on their own",
@@ -33,12 +33,28 @@ func newStuckCmd() *cobra.Command {
 			"With --inversions it prints instead every priority inversion, one a line, with no cut (mw status cuts\n" +
 			"its list at 8): a bead below the priority of the live beads that wait on it, as 'id P2→P1 waited on by\n" +
 			"<id> (P1)', the raise being a proposal; a his-priority bead prints 'id P3 (his)' and no raise. With none\n" +
-			"it prints a single line saying so. It reads and writes nothing.",
+			"it prints a single line saying so. It reads and writes nothing.\n\n" +
+			"With --dampers it prints instead every DAMPERS alarm mw status shows, each with every bead it names,\n" +
+			"one a line (mw status cuts a list at 5 and ends it '+N (all: mw stuck --dampers)'): the review queue's\n" +
+			"cards, demos and hands steps, the untouched P1s, the waiting demos, the grillings with no card. With\n" +
+			"no alarm tripped it prints a single line saying so. It reads and writes nothing.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			gateway, err := beads.FromConfig()
 			if err != nil {
 				return err
+			}
+			if dampers {
+				survey, err := damperSurvey(gateway)
+				if err != nil {
+					return err
+				}
+				report, err := survey.DamperCounts(cmd.Context())
+				if err != nil {
+					return err
+				}
+				fmt.Fprint(cmd.OutOrStdout(), report.FullList())
+				return nil
 			}
 			if inversions {
 				list, err := application.InversionLister{Graph: gateway}.List(cmd.Context())
@@ -57,5 +73,7 @@ func newStuckCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&inversions, "inversions", false, "print every priority inversion, one a line, instead of the stuck roots")
+	cmd.Flags().BoolVar(&dampers, "dampers", false, "print every DAMPERS alarm with all the beads it names, one a line, instead of the stuck roots")
+	cmd.MarkFlagsMutuallyExclusive("inversions", "dampers")
 	return cmd
 }

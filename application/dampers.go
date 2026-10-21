@@ -136,9 +136,39 @@ func (a DamperAlarm) Line() string {
 	}
 	line += ": " + strings.Join(named, " ")
 	if rest := len(a.Beads) - len(named); rest > 0 {
-		line += fmt.Sprintf(" +%d (all: mw stuck --inversions)", rest)
+		line += fmt.Sprintf(" +%d (all: %s)", rest, a.fullCommand())
 	}
 	return line
+}
+
+// fullCommand is the command that prints every bead of the alarm: mw stuck for
+// the held roots, mw stuck --dampers for the rest.
+func (a DamperAlarm) fullCommand() string {
+	if a.Principle == DamperStuck {
+		return "mw stuck"
+	}
+	return "mw stuck --dampers"
+}
+
+// FullList is every alarm with every bead it names, one a line under the
+// alarm's own text, for mw stuck --dampers: the whole list that Line cuts at
+// damperNamed. With no alarm tripped it is a single line saying so.
+func (r DampersReport) FullList() string {
+	if len(r.Alarms) == 0 {
+		return "no damper alarm\n"
+	}
+	var out strings.Builder
+	for _, alarm := range r.Alarms {
+		head := alarm.Principle + " · " + alarm.Text
+		if alarm.Principle == DamperStuck || alarm.Principle == DamperInversion {
+			head = alarm.Principle + ": " + alarm.Text
+		}
+		out.WriteString(head + "\n")
+		for _, bead := range alarm.Beads {
+			out.WriteString("  " + bead + "\n")
+		}
+	}
+	return out.String()
 }
 
 // Write writes the DAMPERS section, with a blank line after it, or nothing
@@ -193,7 +223,8 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 		}
 	}
 
-	cards := damperCards(facts.Notes)
+	closed := closedBeads(facts.Graph)
+	cards := damperCards(facts.Notes, closed)
 	var bare []string
 	byID := map[string]domain.GraphBead{}
 	for _, b := range facts.Graph {
@@ -223,7 +254,7 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 	}
 	sort.Strings(rigs)
 
-	hands := damperHands(facts.Notes)
+	hands := damperHands(facts.Notes, closed)
 	queue := append(append(slices.Clone(cards), demos...), hands...)
 
 	report.Counts = DamperCounts{
@@ -324,25 +355,38 @@ func hasHitlCardLinked(b domain.GraphBead, all []domain.GraphBead, byID map[stri
 	return false
 }
 
-// damperCards are the beads with a question still marked open, from the
-// postern.question.* notes, in key order.
-func damperCards(notes map[string]string) []string {
+// closedBeads are the ids of the beads the graph shows closed. A note outlives
+// its bead, so the review queue leaves out what it finds there; a bead the graph
+// does not hold is not in the set and is counted.
+func closedBeads(graph []domain.GraphBead) map[string]bool {
+	closed := map[string]bool{}
+	for _, b := range graph {
+		if strings.EqualFold(b.Status, StatusClosed) {
+			closed[b.ID] = true
+		}
+	}
+	return closed
+}
+
+// damperCards are the beads, not closed, with a question still marked open, from
+// the postern.question.* notes, in key order.
+func damperCards(notes map[string]string, closed map[string]bool) []string {
 	var beads []string
 	for _, key := range sortedKeys(notes) {
-		if bead, ok := strings.CutPrefix(key, PosternQuestionKey("")); ok && strings.TrimSpace(notes[key]) != "" {
+		if bead, ok := strings.CutPrefix(key, PosternQuestionKey("")); ok && !closed[bead] && strings.TrimSpace(notes[key]) != "" {
 			beads = append(beads, bead)
 		}
 	}
 	return beads
 }
 
-// damperHands are the beads of the hands steps no run was recorded for, one
-// entry for each step, in key order.
-func damperHands(notes map[string]string) []string {
+// damperHands are the beads, not closed, of the hands steps no run was recorded
+// for, one entry for each step, in key order: the steps mw hands list prints.
+func damperHands(notes map[string]string, closed map[string]bool) []string {
 	var beads []string
 	for _, key := range sortedKeys(notes) {
 		bead, ok := strings.CutPrefix(key, HandsStepsKey(""))
-		if !ok {
+		if !ok || closed[bead] {
 			continue
 		}
 		if records, err := parseHandsSteps(notes[key]); err != nil || len(records) == 0 {

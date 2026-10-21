@@ -54,3 +54,19 @@ func TestStuckHasAnInversionsFlagThatIsPlainWhenOff(t *testing.T) {
 		t.Errorf("mw stuck --help does not say what --inversions does:\n%s", cmd.Long)
 	}
 }
+
+func TestStuckHasADampersFlagThatPrintsEveryAlarmWhole(t *testing.T) {
+	cmd, _, err := newRootCmd().Find([]string{"stuck"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flag := cmd.Flags().Lookup("dampers")
+	if flag == nil || flag.DefValue != "false" {
+		t.Fatalf("mw stuck has no --dampers flag defaulting to off: %v", flag)
+	}
+	for _, want := range []string{"--dampers", "every DAMPERS alarm", "one a line", "review queue"} {
+		if !strings.Contains(cmd.Long, want) {
+			t.Errorf("mw stuck --help does not say %q:\n%s", want, cmd.Long)
+		}
+	}
+}
