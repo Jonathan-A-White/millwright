@@ -13,7 +13,11 @@ Feature: mw grist smoke tests an app's grist end to end
   whose grind ran out of time, is the mill's fault too: it is sent once more
   before it fails. A send the postern backend refuses with 429, 502, 503 or 504
   (a chain service throttling its licence check) is the backend's fault: it is
-  sent once more after a wait, and counted "not run" if refused again.
+  sent once more after a wait, and counted "not run" if refused again. An
+  example whose answer the model got wrong (it misses its expect, or does not
+  fit the schema) is sent twice more before it holds: if one of those is right
+  it holds nothing, the report says "flaky: <example> missed 1 of 3", and the
+  Mayor is mailed "Smoke flake: <example>" so that the slip is still filed.
 
   Background:
     Given the app "trade-tracker" has the grind "price-check" whose answer must carry a price and a confidence
@@ -80,6 +84,47 @@ Feature: mw grist smoke tests an app's grist end to end
       """
     When mw grist smoke is run for "trade-tracker"
     Then the smoke failed, saying "price-check/blank-paper: the answer misses what the example expects: price: wanted null, got 12.5"
+
+  Scenario: an example that misses once and passes when sent again is flaky and holds nothing
+    Given the mill answers the next grist with:
+      """
+      {"price": 12.5, "confidence": "low"}
+      """
+    And the mill answers the next grist with:
+      """
+      {"price": null, "confidence": "low"}
+      """
+    And the mill answers the next grist with:
+      """
+      {"price": null, "confidence": "low"}
+      """
+    When mw grist smoke is run for "trade-tracker"
+    Then the smoke passed, saying "flaky: trade-tracker/price-check/blank-paper missed 1 of 3"
+    And the smoke sent 3 grist
+    And no alarm was posted
+    And the Mayor was mailed "Smoke flake: trade-tracker/price-check/blank-paper" saying "wanted null, got 12.5"
+    And the Mayor was mailed "Smoke flake: trade-tracker/price-check/blank-paper" saying "direct:smoke"
+    And mw status shows "warning: flaky: trade-tracker/price-check/blank-paper"
+
+  Scenario: an example that misses on every send fails and holds, and mails no flake
+    Given a rig "trade-tracker" checked out where the app "trade-tracker" is
+    And the mill answers the next grist with:
+      """
+      {"price": 12.5, "confidence": "low"}
+      """
+    And the mill answers the next grist with:
+      """
+      {"price": 12.5, "confidence": "low"}
+      """
+    And the mill answers the next grist with:
+      """
+      {"price": 12.5, "confidence": "low"}
+      """
+    When a landing in "trade-tracker" changes "grinds/price-check.json"
+    Then the smoke sent 3 grist
+    And an alarm event was posted saying "grist smoke: trade-tracker FAILED"
+    And the open stories of "trade-tracker" are held, saying "price: wanted null, got 12.5"
+    And the Mayor was mailed nothing
 
   Scenario: a refused grist (no licence) fails the smoke
     Given the mill refuses the next grist because "no licence opens trade-tracker"
@@ -240,11 +285,13 @@ Feature: mw grist smoke tests an app's grist end to end
     When mw grist smoke is run for "trade-tracker"
     Then the smoke was not run, saying "trade-tracker: not run: The factory cannot grind just now: it has reached its usage limit; send it again after 2026-10-16 13:00Z."
 
-  Scenario: a grind that fails for itself still fails the smoke
+  Scenario: a grind that fails for itself on every send still fails the smoke
     Given the mill fails the next grist because "The grind's answer did not match its schema; send it again."
+    And the mill fails the next grist because "The grind's answer did not match its schema; send it again."
+    And the mill fails the next grist because "The grind's answer did not match its schema; send it again."
     When mw grist smoke is run for "trade-tracker"
     Then the smoke failed, saying "the mill failed it: The grind's answer did not match its schema; send it again."
-    And the smoke sent 1 grist
+    And the smoke sent 3 grist
 
   Scenario: an example whose mill session did not finish is sent once more, and passes when it is answered
     Given a rig "trade-tracker" checked out where the app "trade-tracker" is

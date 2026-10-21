@@ -89,6 +89,37 @@ type GristSmokeReport struct {
 	// set by GristSmokeBook.Mark; empty when any failure is not named, so the
 	// failure holds.
 	FiledOn []string `json:"filed_on,omitempty"`
+	// Flakes are the examples that missed and then passed when sent again, so
+	// that they hold nothing; each is also a Warning.
+	Flakes []GristSmokeFlake `json:"flakes,omitempty"`
+}
+
+// GristSmokeResends is how many more times a smoke sends an example whose
+// answer was wrong before the miss holds: a model's answer is a sample, and a
+// slip seen in 1 of 100 runs is a fact about the grind's instructions, worth a
+// bug, and not a hold on the landing rig's queue (mw-gq6.664).
+const GristSmokeResends = 2
+
+// GristSmokeFlake is an example whose answer was wrong and then right when it
+// was sent again, so that it holds nothing but is still the Mayor's to file.
+type GristSmokeFlake struct {
+	// Example is <app>/<kind>/<example>.
+	Example string `json:"example"`
+	// Missed of Sent is how many of the sends that came back with an answer were
+	// wrong.
+	Missed int `json:"missed"`
+	Sent   int `json:"sent"`
+	// Misses are what the first wrong answer lacked: the field, what was wanted
+	// and what came. An answer that did not fit the schema is one miss of the
+	// field "(answer)".
+	Misses []ExpectFailure `json:"misses"`
+	// Txid is the grist of the first wrong answer, the failing run.
+	Txid string `json:"txid,omitempty"`
+}
+
+// String is the flake as a report and mw status say it.
+func (f GristSmokeFlake) String() string {
+	return fmt.Sprintf("flaky: %s missed %d of %d", f.Example, f.Missed, f.Sent)
 }
 
 // Failed says an example failed.
@@ -108,15 +139,28 @@ func (r GristSmokeReport) Line() string {
 		if len(r.FiledOn) > 0 {
 			filed = ", all filed on " + strings.Join(r.FiledOn, ", ") + ": not held"
 		}
-		return fmt.Sprintf("grist smoke: %s: FAILED %d of %d examples%s: %s", r.App, len(r.Failures), r.Examples, filed, strings.Join(r.Failures, "; "))
+		return fmt.Sprintf("grist smoke: %s: FAILED %d of %d examples%s: %s%s", r.App, len(r.Failures), r.Examples, filed, strings.Join(r.Failures, "; "), r.flakyNote())
 	case len(r.NotRun) > 0:
-		return fmt.Sprintf("grist smoke: %s: not run: %s", r.App, strings.Join(r.NotRun, "; "))
+		return fmt.Sprintf("grist smoke: %s: not run: %s%s", r.App, strings.Join(r.NotRun, "; "), r.flakyNote())
 	}
 	said := fmt.Sprintf("grist smoke: %s: ok, %d examples answered as expected", r.App, r.Examples)
 	if len(r.Warnings) > 0 {
 		said += " (" + strings.Join(r.Warnings, "; ") + ")"
 	}
 	return said
+}
+
+// flakyNote is the flakes as a line that has no Warnings in it ends, empty when
+// there are none.
+func (r GristSmokeReport) flakyNote() string {
+	var said []string
+	for _, f := range r.Flakes {
+		said = append(said, f.String())
+	}
+	if len(said) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(said, "; ") + ")"
 }
 
 // ErrGristSmokeFailed is the error mw grist smoke leaves with when an example
@@ -230,7 +274,13 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 		name := strings.TrimSuffix(path.Base(example), ".json")
 		report.Examples++
 		s.say("sending %s/%s ...", label, name)
-		why, notRun := s.example(ctx, checkout, commit, app, kind, example, schema)
+		why, notRun, flake := s.example(ctx, checkout, commit, app, kind, example, schema)
+		if flake != nil {
+			report.Flakes = append(report.Flakes, *flake)
+			report.Warnings = append(report.Warnings, flake.String())
+			s.say("  %s", flake)
+			continue
+		}
 		if notRun != "" {
 			if !slices.Contains(report.NotRun, notRun) {
 				report.NotRun = append(report.NotRun, notRun)
@@ -251,37 +301,39 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 // came, fits the schema and shows everything expected. notRun, when it is not
 // empty, says instead that the mill could not be asked, for a reason that is
 // not the example's (see GristSmokeReport.NotRun). An example whose mill
-// session did not finish is sent once more before it fails.
-func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, file, schema string) (why, notRun string) {
+// session did not finish is sent once more before it fails. An example whose
+// answer was wrong is sent GristSmokeResends more times: when one of them is
+// right the example does not fail, and flake says so instead.
+func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, file, schema string) (why, notRun string, flake *GristSmokeFlake) {
 	data, _, err := s.Grinds.ReadAt(ctx, checkout, commit, file)
 	if err != nil {
-		return "the example could not be read: " + firstLine(err.Error()), ""
+		return "the example could not be read: " + firstLine(err.Error()), "", nil
 	}
 	example, err := ParseGristExample(data)
 	if err != nil {
-		return "the example is wrong: " + err.Error(), ""
+		return "the example is wrong: " + err.Error(), "", nil
 	}
 	dir, err := os.MkdirTemp(s.TempDir, "mw-grist-smoke-")
 	if err != nil {
-		return "no directory to send it from: " + err.Error(), ""
+		return "no directory to send it from: " + err.Error(), "", nil
 	}
 	defer os.RemoveAll(dir)
 	request := filepath.Join(dir, "request.json")
 	if err := os.WriteFile(request, example.Request, 0o600); err != nil {
-		return "the request could not be written: " + err.Error(), ""
+		return "the request could not be written: " + err.Error(), "", nil
 	}
 	var photos []string
 	for _, name := range example.Photos {
 		if name == "" || path.Base(name) != name {
-			return fmt.Sprintf("the photo %q is not a file beside the example", name), ""
+			return fmt.Sprintf("the photo %q is not a file beside the example", name), "", nil
 		}
 		photo, found, err := s.Grinds.ReadAt(ctx, checkout, commit, path.Join(path.Dir(file), name))
 		if err != nil || !found {
-			return fmt.Sprintf("the photo %s is not beside the example", name), ""
+			return fmt.Sprintf("the photo %s is not beside the example", name), "", nil
 		}
 		local := filepath.Join(dir, name)
 		if err := os.WriteFile(local, photo, 0o600); err != nil {
-			return "a photo could not be written: " + err.Error(), ""
+			return "a photo could not be written: " + err.Error(), "", nil
 		}
 		photos = append(photos, local)
 	}
@@ -290,6 +342,50 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 		wait = GristSmokeWait
 	}
 	send := GristSendRequest{App: app, Kind: kind, Version: example.SchemaVersion, RequestFile: request, Photos: photos, Wait: wait}
+	first := s.try(ctx, send, wait, schema, example.Expect)
+	if !first.slip {
+		return first.why, first.notRun, nil
+	}
+	// The answer was a model's and wrong: send the example again before it
+	// holds the landing rig's queue. A send again that cannot be told apart
+	// (the mill failed it, the backend refused it) ends the sending, and the
+	// first miss stands unless an answer was right by then.
+	sent, missed := 1, 1
+	for i := 0; i < GristSmokeResends; i++ {
+		s.say("  the answer was wrong; sending it again (%d of %d) ...", i+1, GristSmokeResends)
+		again := s.try(ctx, send, wait, schema, example.Expect)
+		if again.slip {
+			sent, missed = sent+1, missed+1
+		} else if again.why == "" && again.notRun == "" {
+			sent++
+		} else {
+			break
+		}
+	}
+	if missed == sent {
+		return first.why, "", nil
+	}
+	return "", "", &GristSmokeFlake{
+		Example: app + "/" + kind + "/" + strings.TrimSuffix(path.Base(file), ".json"),
+		Missed:  missed, Sent: sent, Misses: first.misses, Txid: first.txid,
+	}
+}
+
+// smokeTry is one send of an example and what came of it.
+type smokeTry struct {
+	why, notRun string
+	// slip says the model's answer was wrong (it does not fit the schema, misses
+	// the example's expect, or the mill failed it for that): another send may
+	// well pass. A refusal, a silence, or a failure of the mill's own is not a
+	// slip.
+	slip   bool
+	misses []ExpectFailure
+	txid   string
+}
+
+// try sends the example once (twice when the mill or the backend was in
+// trouble) and says what came of it.
+func (s GristSmoke) try(ctx context.Context, send GristSendRequest, wait time.Duration, schema string, expect map[string]json.RawMessage) smokeTry {
 	sent, err := s.Send.Run(ctx, send)
 	retried := false
 	if gristMillsFault(err) {
@@ -311,45 +407,56 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 	if unanswered, ok := GristUnansweredIn(err); ok {
 		if unanswered.Answer == nil {
 			if retried {
-				return fmt.Sprintf("no answer in %s when it was retried", wait), ""
+				return smokeTry{why: fmt.Sprintf("no answer in %s when it was retried", wait)}
 			}
-			return fmt.Sprintf("no answer in %s", wait), ""
+			return smokeTry{why: fmt.Sprintf("no answer in %s", wait)}
 		}
 		status, reason := unanswered.Answer.Status, strings.TrimSpace(unanswered.Answer.Reason)
 		if gristAnswerIsNotTheExamples(status, reason) {
-			return "", reason
+			return smokeTry{notRun: reason}
 		}
 		switch {
 		case retried && status == GristFailed:
-			return "the mill failed it, and again when it was retried: " + reason, ""
+			return smokeTry{why: "the mill failed it, and again when it was retried: " + reason}
 		case retried:
-			return fmt.Sprintf("the mill failed it, then %s it when it was retried: %s", status, reason), ""
+			return smokeTry{why: fmt.Sprintf("the mill failed it, then %s it when it was retried: %s", status, reason)}
 		}
-		return fmt.Sprintf("the mill %s it: %s", status, reason), ""
+		if status == GristFailed && reason == GristReasonNoAnswer {
+			// The model's answer did not fit the schema.
+			return smokeTry{
+				why: fmt.Sprintf("the mill %s it: %s", status, reason), slip: true, txid: unanswered.Txid,
+				misses: []ExpectFailure{{Field: "(answer)", Wanted: "an answer that fits the grind's schema", Got: reason}},
+			}
+		}
+		return smokeTry{why: fmt.Sprintf("the mill %s it: %s", status, reason)}
 	}
 	if errors.Is(err, ErrPosternUnreachable) {
-		return "", ErrPosternUnreachable.Error() + ": " + firstLine(err.Error())
+		return smokeTry{notRun: ErrPosternUnreachable.Error() + ": " + firstLine(err.Error())}
 	}
 	if status, ok := gristBackendsFault(err); ok {
-		return "", fmt.Sprintf("the postern backend refused it with %d, and again when it was retried: %s", status, firstLine(err.Error()))
+		return smokeTry{notRun: fmt.Sprintf("the postern backend refused it with %d, and again when it was retried: %s", status, firstLine(err.Error()))}
 	}
 	if err != nil {
-		return "it could not be sent: " + firstLine(err.Error()), ""
+		return smokeTry{why: "it could not be sent: " + firstLine(err.Error())}
 	}
 	if sent.Answer == nil {
-		return "the mill left no answer", ""
+		return smokeTry{why: "the mill left no answer"}
 	}
 	if violations := SchemaViolations(sent.Answer.Answer, schema); len(violations) > 0 {
-		return "the answer does not fit the grind's schema: " + strings.Join(violations, ", "), ""
+		return smokeTry{
+			why: "the answer does not fit the grind's schema: " + strings.Join(violations, ", "), slip: true, txid: sent.Txid,
+			misses: []ExpectFailure{{Field: "(answer)", Wanted: "an answer that fits the grind's schema", Got: strings.Join(violations, ", ")}},
+		}
 	}
 	var missed []string
-	for _, f := range CheckExpect(sent.Answer.Answer, example.Expect) {
+	misses := CheckExpect(sent.Answer.Answer, expect)
+	for _, f := range misses {
 		missed = append(missed, f.String())
 	}
 	if len(missed) > 0 {
-		return "the answer misses what the example expects: " + strings.Join(missed, "; "), ""
+		return smokeTry{why: "the answer misses what the example expects: " + strings.Join(missed, "; "), slip: true, misses: misses, txid: sent.Txid}
 	}
-	return "", ""
+	return smokeTry{}
 }
 
 // gristAnswerIsNotTheExamples says the mill would not grind a grist for a
@@ -384,9 +491,11 @@ func gristAnswerIsNotTheExamples(status, reason string) bool {
 //	  the wrong type is another reason, and fails at once.
 //	GristReasonNotSent: mill's fault, retried. The factory could not mail a
 //	  forwarded grist on (temp dir, keeping the photos, the mailbox).
-//	GristReasonNoAnswer: app's fault, fails at once. The grind's answer did not
-//	  match its schema: the grind or its instructions are what the smoke is
-//	  there to test, and a second send would only hide a flaky grind.
+//	GristReasonNoAnswer: app's fault, not retried here. The grind's answer did
+//	  not match its schema: the grind or its instructions are what the smoke is
+//	  there to test. GristSmoke.example sends it again GristSmokeResends times
+//	  as a wrong answer, and a miss that does not repeat is a flake, said and
+//	  mailed, not a hold (mw-gq6.664).
 func gristMillsFault(err error) bool {
 	unanswered, ok := GristUnansweredIn(err)
 	if !ok || unanswered.Answer == nil || unanswered.Answer.Status != GristFailed {
@@ -611,8 +720,10 @@ type GristSmokeBook struct {
 	// Events is the home's event log, where a failure is posted as a failed job
 	// event. A nil Events posts none.
 	Events EventLog
-	Host   string
-	Now    func() time.Time
+	// Mailbox is where the Mayor is mailed of a flaky example. Nil mails none.
+	Mailbox Mailbox
+	Host    string
+	Now     func() time.Time
 }
 
 var (
@@ -633,6 +744,41 @@ func (b GristSmokeBook) now() time.Time {
 // failure by hand keeps the rig an earlier failure held. An app with no grinds
 // has its record forgotten.
 func (b GristSmokeBook) Record(ctx context.Context, rig string, report GristSmokeReport) error {
+	mailed := b.mailFlakes(ctx, report)
+	return errors.Join(b.record(ctx, rig, report), mailed)
+}
+
+// mailFlakes mails the Mayor once for each flaky example of a smoke, so that a
+// slip a re-send hid still gets filed (mw-gq6.664).
+func (b GristSmokeBook) mailFlakes(ctx context.Context, report GristSmokeReport) error {
+	if b.Mailbox == nil {
+		return nil
+	}
+	var failed []error
+	for _, flake := range report.Flakes {
+		var misses []string
+		for _, miss := range flake.Misses {
+			misses = append(misses, fmt.Sprintf("  field %s: wanted %s, got %s", miss.Field, miss.Wanted, miss.Got))
+		}
+		_, err := b.Mailbox.Send(ctx, NewMessage{
+			From:    SeatIdentity(MwSeat, b.Host),
+			To:      MayorMailbox,
+			Subject: "Smoke flake: " + flake.Example,
+			Body: fmt.Sprintf("The grist smoke of %s sent %s %d times and its answer was wrong in %d of them (%s), right in the others, so it held nothing.\n\n"+
+				"The first wrong answer (the failing run's txid %s):\n%s\n\n"+
+				"A model's answer that misses now and then is a fact about the grind's instructions: file it as a bug, and name the example on it "+
+				"(mw grist smoke %s --filed <bead> %s) so that a later miss of it that repeats is not held.",
+				report.App, flake.Example, flake.Sent, flake.Missed, flake, flake.Txid, strings.Join(misses, "\n"),
+				report.App, strings.TrimPrefix(flake.Example, report.App+"/")),
+		})
+		if err != nil {
+			failed = append(failed, fmt.Errorf("the Mayor could not be mailed of the flake %s: %w", flake.Example, err))
+		}
+	}
+	return errors.Join(failed...)
+}
+
+func (b GristSmokeBook) record(ctx context.Context, rig string, report GristSmokeReport) error {
 	if b.Notes == nil {
 		return nil
 	}

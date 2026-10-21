@@ -106,6 +106,7 @@ type smokeContext struct {
 	sender  *smokeSender
 	notes   *apptest.FakeTracker
 	events  *apptest.FakeEventLog
+	mailbox *apptest.FakeMailbox
 	apps    map[string]string
 	rigs    map[string]string
 	client  map[string][]string
@@ -117,7 +118,7 @@ type smokeContext struct {
 }
 
 func (c *smokeContext) book() application.GristSmokeBook {
-	return application.GristSmokeBook{Notes: c.notes, Filed: c.notes, Events: c.events, Host: "laptop", Now: func() time.Time { return gristNow }}
+	return application.GristSmokeBook{Notes: c.notes, Filed: c.notes, Events: c.events, Mailbox: c.mailbox, Host: "laptop", Now: func() time.Time { return gristNow }}
 }
 
 func (c *smokeContext) smoke() application.GristSmoke {
@@ -130,7 +131,7 @@ func InitializeGristSmokeScenario(ctx *godog.ScenarioContext) {
 	ctx.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		*c = smokeContext{
 			grinds: apptest.NewFakeGrinds(), sender: &smokeSender{}, notes: apptest.NewFakeTracker(),
-			events: &apptest.FakeEventLog{}, apps: map[string]string{},
+			events: &apptest.FakeEventLog{}, mailbox: apptest.NewFakeMailbox(), apps: map[string]string{},
 			rigs: map[string]string{"millwright": "/rigs/millwright"}, client: map[string][]string{},
 			touches: &smokeTouches{},
 		}
@@ -167,6 +168,8 @@ func InitializeGristSmokeScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the smoke sent (\d+) grist$`, c.sentTotal)
 	ctx.Then(`^the smoke sent the grist of "([^"]*)" with the version "([^"]*)"$`, c.sentWithVersion)
 	ctx.Then(`^no alarm was posted$`, c.noAlarm)
+	ctx.Then(`^the Mayor was mailed "([^"]*)" saying "([^"]*)"$`, c.mayorMailed)
+	ctx.Then(`^the Mayor was mailed nothing$`, c.mayorMailedNothing)
 	ctx.Then(`^an alarm event was posted saying "([^"]*)"$`, c.alarmPosted)
 	ctx.Then(`^the landing smoked "([^"]*)"$`, c.landingSmoked)
 	ctx.Then(`^the landing's smoke line says "([^"]*)"$`, c.landingLineSays)
@@ -465,4 +468,32 @@ func (c *smokeContext) landingLineSays(said string) error {
 		}
 	}
 	return fmt.Errorf("no line of the landing's smoke said %q: %q", said, c.lines)
+}
+
+func (c *smokeContext) mayorMailed(subject, body string) error {
+	inbox, err := c.mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if err != nil {
+		return err
+	}
+	if len(inbox) != 1 {
+		return fmt.Errorf("the Mayor was mailed %d messages, not one", len(inbox))
+	}
+	if inbox[0].Subject != subject {
+		return fmt.Errorf("the mail's subject is %q, not %q", inbox[0].Subject, subject)
+	}
+	if !strings.Contains(inbox[0].Body, body) {
+		return fmt.Errorf("the mail says %q, not %q", inbox[0].Body, body)
+	}
+	return nil
+}
+
+func (c *smokeContext) mayorMailedNothing() error {
+	inbox, err := c.mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if err != nil {
+		return err
+	}
+	if len(inbox) != 0 {
+		return fmt.Errorf("the Mayor was mailed %d messages", len(inbox))
+	}
+	return nil
 }

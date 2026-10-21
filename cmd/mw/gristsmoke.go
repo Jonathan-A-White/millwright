@@ -22,7 +22,8 @@ import (
 // The tracker also says which failing examples an open bead names, when it can.
 func gristSmokeBook(notes application.GristSmokeNotes, host string) application.GristSmokeBook {
 	filed, _ := notes.(application.GristSmokeFiled)
-	return application.GristSmokeBook{Notes: notes, Filed: filed, Events: homeEventLog(), Host: host}
+	mailbox, _ := notes.(application.Mailbox)
+	return application.GristSmokeBook{Notes: notes, Filed: filed, Events: homeEventLog(), Mailbox: mailbox, Host: host}
 }
 
 // newSmoker is the grist smoke as this host is set up to make it: the grinds
@@ -143,7 +144,9 @@ func newGristSmokeCmd() *cobra.Command {
 			"is_null, one_of, between ([low, high]: a number within), contains, matches (a pattern), present and all (a list of such checks, each of\n" +
 			"which must hold). It passes when the grist is\n" +
 			"answered, the answer fits the grind's answer schema and meets every expect; a failure names\n" +
-			"the example, the field, what was wanted and what came. A kind with no example is a warning.\n" +
+			"the example, the field, what was wanted and what came. An example whose answer is wrong is sent\n" +
+			"twice more before it holds: a miss that does not repeat is \"flaky: <example> missed 1 of 3\", holds\n" +
+			"nothing and is mailed to the Mayor. A kind with no example is a warning.\n" +
 			"A smoke the mill would not take for a reason that is not the examples' (the key's daily limit,\n" +
 			"its licence, the backend out of reach, the factory's usage limit or its model overloaded) is\n" +
 			"\"not run\": it fails nothing and holds nothing.\n\n" +
