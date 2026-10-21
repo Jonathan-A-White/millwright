@@ -2615,6 +2615,25 @@ read, the time since its last use and the session; `--json` prints them as JSON.
 `mw grist send --talk <talk>` sends a turn of a talk from the terminal. A grist
 with no talk runs exactly as before. See `features/grist_talk.feature`.
 
+A talk's session is bounded. When a turn's result puts the talk's context tokens
+at or over `[grist]` `talk_context_cap` (default 80000), or its turns at
+`talk_max_turns` (default 40), the mill runs one more `--resume` turn on that
+session with a fixed prompt and the schema `{key_points}` (at most 1500
+characters: what the reader said about themselves, what was taught, what was
+promised or left open, in the talk's language), keeps the key points on the
+talk's record and ends the session. The app's turn is answered as it was
+(`talk.session` `resumed`). The talk's next turn runs cold with a new session
+id, its message opening with `key_points_of_this_talk_so_far: <text>` before the
+request, history and all; its answer says `talk.session` `refreshed` and carries
+`talk.key_points` once, and its turns restart at 1. A session that cannot write
+key points (the call fails, or they come back empty) is ended without them, and
+the next turn is `fresh` with reason `ended`, the app's history kept. The next
+talk grist for an app also tidies, with no daemon and no timer: an ended
+session's transcript (`~/.claude/projects/<cwd-slug>/<session>.jsonl`) is
+deleted 24 hours after its end, and a live talk unused for 30 days is ended and
+its transcript deleted. `mw grist talks --end <app> <talk>` ends a talk now,
+writing no key points. See `features/grist_talk_cap.feature`.
+
 With `[grist]` `api_credits = true` and an Anthropic API key in `api_key_file`
 (default `~/.config/mw/anthropic-api.key`; it must be mode 0600, else the mill
 says in its report that the file is not used), the mill bills a grist to that key:
@@ -2663,6 +2682,8 @@ concurrency = 2          # grists ground at once, the mill's own limit; the rest
 timeout = "10m"
 pool_quiet = "10m"       # a kind with no grist this long keeps no warm session; "0s" keeps no warm pool at all
 pool_max_age = "15m"     # a warm session waiting this long is retired unused
+talk_context_cap = 80000 # context tokens at which a talk's session is ended for its key points
+talk_max_turns = 40      # turns at which it is
 api_credits = false      # true bills a grist to the Anthropic API key in api_key_file, and to the subscription once the key's credit is spent
 api_key_file = "/home/jwhite/.config/mw/anthropic-api.key"   # a full path or ~/..., mode 0600 (default shown)
 

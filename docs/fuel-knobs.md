@@ -58,6 +58,7 @@ cloud3 has no [grist] table (read), and the desktop's is not recorded here.
 | One grind's turns | `grinds/<kind>.json maxTurns` | per grind; 0 leaves it to the harness's own limit | A cap | A grind that needs more turns fails instead of answering |
 | Photos a grist may carry | `[grist] max_attachments`, `[grist] max_attachment_bytes` | home none recorded: 4 photos of at most 8 MB | Fewer or smaller | What the model could read off a missing photo |
 | How long a grind may run | `[grist] timeout` | home none recorded: 10m | Shorter | A slow grind is cut off with no answer, its fuel spent |
+| How long a talk's session grows | `[grist] talk_context_cap`, `[grist] talk_max_turns` | home none recorded: 80000 context tokens, 40 turns (mw-pxji7y.2) | Lower | The session is ended sooner and the next turn starts from its key points (one extra turn at each end), so less of the talk is read afresh each turn but older detail is only as good as the key points |
 
 Not fuel: `[grist] pool_quiet` and `[grist] pool_max_age` keep warm sessions
 waiting for a grist, and a warm session sends the model nothing until its grist
