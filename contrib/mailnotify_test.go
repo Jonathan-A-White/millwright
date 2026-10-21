@@ -21,11 +21,24 @@ import (
 )
 
 const (
-	announcement = "New mail for mayor: %d message(s). Run bd mail inbox.\n"
 
 	// The empty input line of Claude Code: the prompt mark and a no-break space.
 	emptyPrompt = `printf '\342\235\257\302\240\n'`
 )
+
+// announce is the line the notifier types for new mail naming these ids: the
+// count, then the first ten ids and "and <n> more" after them (mw-gq6.678).
+func announce(ids ...string) string {
+	shown := ids
+	if len(shown) > 10 {
+		shown = shown[:10]
+	}
+	named := strings.Join(shown, ", ")
+	if more := len(ids) - len(shown); more > 0 {
+		named += fmt.Sprintf(" and %d more", more)
+	}
+	return fmt.Sprintf("New mail for mayor: %d message(s): %s. Run bd mail inbox.\n", len(ids), named)
+}
 
 // killedElapsed matches the one log line a snapshot the timeout killed
 // leaves: a mention of the kill and how many seconds it ran before it.
@@ -419,7 +432,7 @@ func TestNewMailAndAnIdlePromptTypesOneLineAndRecordsTheIds(t *testing.T) {
 
 	f.tick()
 
-	f.typed(fmt.Sprintf(announcement, 2))
+	f.typed(announce("mw-aaa", "mw-bbb"))
 	if got := f.announced(); got != "mw-aaa\nmw-bbb\n" {
 		t.Fatalf("recorded ids %q", got)
 	}
@@ -452,10 +465,10 @@ func TestASecondTickAfterAnnouncingTypesNothingAgain(t *testing.T) {
 	f.inbox("mw-aaa", "mw-bbb")
 
 	f.tick()
-	f.typed(fmt.Sprintf(announcement, 2))
+	f.typed(announce("mw-aaa", "mw-bbb"))
 	f.tick()
 
-	f.nothingMoreTyped(fmt.Sprintf(announcement, 2))
+	f.nothingMoreTyped(announce("mw-aaa", "mw-bbb"))
 	if f.syncs() != 1 {
 		t.Fatalf("the second tick synced again inside five minutes: %q", f.read("mw.log"))
 	}
@@ -463,7 +476,7 @@ func TestASecondTickAfterAnnouncingTypesNothingAgain(t *testing.T) {
 	// Only the mail that is new since is announced, and by how many.
 	f.inbox("mw-aaa", "mw-bbb", "mw-ccc")
 	f.tick()
-	f.typed(fmt.Sprintf(announcement, 2) + fmt.Sprintf(announcement, 1))
+	f.typed(announce("mw-aaa", "mw-bbb") + announce("mw-ccc"))
 	if got := f.announced(); got != "mw-aaa\nmw-bbb\nmw-ccc\n" {
 		t.Fatalf("recorded ids %q", got)
 	}
@@ -483,7 +496,7 @@ func TestTheLineCountsTheNewMessagesNotTheWholeInbox(t *testing.T) {
 
 	f.tick()
 
-	f.typed(fmt.Sprintf(announcement, 2))
+	f.typed(announce("mw-new1", "mw-new2"))
 }
 
 // With no record of what was announced, every id in the inbox is new: this is
@@ -499,7 +512,7 @@ func TestWithNoRecordOfAnnouncedMailEveryIdIsNew(t *testing.T) {
 
 	f.tick()
 
-	f.typed(fmt.Sprintf(announcement, 233))
+	f.typed(announce(ids...))
 }
 
 func TestTextOnTheInputLineIsNeverTypedOverAndTheIdsAreNotRecorded(t *testing.T) {
@@ -533,7 +546,7 @@ func TestADimSuggestionOnTheInputLineIsNotADraftAndIsTypedOver(t *testing.T) {
 
 	f.tick()
 
-	f.typed(fmt.Sprintf(announcement, 1))
+	f.typed(announce("mw-aaa"))
 }
 
 func TestATypedDraftOnACapturedScreenIsNeverTypedOver(t *testing.T) {
@@ -607,7 +620,7 @@ func TestTheLimitIsTheHostsToSet(t *testing.T) {
 
 	f.tick()
 
-	f.typed(fmt.Sprintf(announcement, 1))
+	f.typed(announce("mw-aaa"))
 }
 
 // cores is what nproc says, the limit the notifier defaults to.
@@ -649,7 +662,7 @@ func TestTheLimitDefaultsToTheCoreCount(t *testing.T) {
 				}
 				return
 			}
-			f.typed(fmt.Sprintf(announcement, 1))
+			f.typed(announce("mw-aaa"))
 		})
 	}
 }
@@ -725,7 +738,7 @@ func TestTheMayorsWindowIsFoundFromWhateverTheActingFileSays(t *testing.T) {
 
 			f.tick()
 
-			f.typed(fmt.Sprintf(announcement, 1))
+			f.typed(announce("mw-aaa"))
 		})
 	}
 }
@@ -918,7 +931,7 @@ func TestQuietAlarmAndNewMailEachTypeTheirOwnLine(t *testing.T) {
 
 	f.tick()
 
-	f.typed(fmt.Sprintf(announcement, 1) + "Quiet alarm for mayor: mw-gq6.30 in progress 73 min, no mail. Run mw status.\n")
+	f.typed(announce("mw-aaa") + "Quiet alarm for mayor: mw-gq6.30 in progress 73 min, no mail. Run mw status.\n")
 	if got := f.announced(); got != "mw-aaa\n" {
 		t.Fatalf("recorded ids %q", got)
 	}
@@ -1170,7 +1183,7 @@ func TestAFailingPosternSnapshotDoesNotStopTheTick(t *testing.T) {
 
 	f.tick()
 
-	f.typed(fmt.Sprintf(announcement, 1))
+	f.typed(announce("mw-aaa"))
 	if n := f.posternSubCalls("snapshot"); n != 1 {
 		t.Fatalf("mw postern snapshot was called %d times, want 1 (even though it failed)", n)
 	}
@@ -1195,7 +1208,7 @@ func TestASlowPosternSnapshotIsKilledByItsOwnTimeoutAndDoesNotStopTheTick(t *tes
 	out := f.tick()
 	elapsed := time.Since(start)
 
-	f.typed(fmt.Sprintf(announcement, 1))
+	f.typed(announce("mw-aaa"))
 	if n := f.posternSubCalls("snapshot"); n != 1 {
 		t.Fatalf("mw postern snapshot was called %d times, want 1 (even though it hung)", n)
 	}
@@ -1445,7 +1458,7 @@ func TestAFailingPosternViewIsLoggedAndDoesNotStopTheTick(t *testing.T) {
 
 	out := f.tick()
 
-	f.typed(fmt.Sprintf(announcement, 1))
+	f.typed(announce("mw-aaa"))
 	if n := f.viewRuns(); n != 1 {
 		t.Fatalf("mw postern view ran %d times, want 1 (even though it failed)", n)
 	}
@@ -1468,7 +1481,7 @@ func TestASlowPosternViewIsKilledByItsOwnTimeoutAndNotRetriedInsideItsInterval(t
 	out := f.tick()
 	elapsed := time.Since(start)
 
-	f.typed(fmt.Sprintf(announcement, 1))
+	f.typed(announce("mw-aaa"))
 	if elapsed >= 4*time.Second {
 		t.Fatalf("the tick took %v; a view bounded to a 1s timeout should never have run near the 5s it tried to sleep", elapsed)
 	}
@@ -1629,7 +1642,7 @@ func TestAnEnterTheSessionDroppedIsPressedAgainAndTheTickSaysSo(t *testing.T) {
 	if !strings.Contains(out, "pressed Enter again and it went") {
 		t.Fatalf("the tick said %q, want that Enter was pressed again and it went", out)
 	}
-	if got := f.read("taken"); got != fmt.Sprintf(announcement, 1) {
+	if got := f.read("taken"); got != announce("mw-aaa") {
 		t.Fatalf("the window took %q, want the announcement", got)
 	}
 	if got := f.announced(); got != "mw-aaa\n" {
@@ -1706,18 +1719,18 @@ func TestMailReadAfterItWasAnnouncedIsNeverAnnouncedAgain(t *testing.T) {
 	f.inbox("mw-aaa")
 
 	f.tick()
-	f.typed(fmt.Sprintf(announcement, 1))
+	f.typed(announce("mw-aaa"))
 
 	f.inbox() // bd mail read mw-aaa
 	f.tick()
 	f.tick()
-	f.nothingMoreTyped(fmt.Sprintf(announcement, 1))
+	f.nothingMoreTyped(announce("mw-aaa"))
 
 	f.inbox("mw-bbb")
 	f.tick()
-	f.typed(fmt.Sprintf(announcement, 1) + fmt.Sprintf(announcement, 1))
+	f.typed(announce("mw-aaa") + announce("mw-bbb"))
 	f.tick()
-	f.nothingMoreTyped(fmt.Sprintf(announcement, 1) + fmt.Sprintf(announcement, 1))
+	f.nothingMoreTyped(announce("mw-aaa") + announce("mw-bbb"))
 }
 
 // The inbox is listed at step 3 and typed from at step 8, with the quiet alarm,
@@ -1732,7 +1745,7 @@ func TestMailReadWhileTheTickWasRunningIsNotAnnounced(t *testing.T) {
 
 	f.tick()
 
-	f.typed(fmt.Sprintf(announcement, 1))
+	f.typed(announce("mw-bbb"))
 	if got := f.announced(); got != "mw-bbb\n" {
 		t.Fatalf("recorded ids %q, want only the mail still unread", got)
 	}
@@ -1777,7 +1790,7 @@ func TestOnlyMailPastTheEventNudgesCursorIsCounted(t *testing.T) {
 
 	f.tick()
 
-	f.typed(fmt.Sprintf(announcement, 2))
+	f.typed(announce("mw-bbb", "mw-ccc"))
 }
 
 // The log the follower keeps is found where mw's config says it is.
@@ -1813,7 +1826,7 @@ func TestMailNoEventNudgeToldIsTypedAsEver(t *testing.T) {
 
 	f.tick()
 
-	f.typed(fmt.Sprintf(announcement, 1))
+	f.typed(announce("mw-aaa"))
 	if got := f.announced(); got != "mw-aaa\n" {
 		t.Fatalf("recorded ids %q", got)
 	}
@@ -1829,7 +1842,7 @@ func TestACursorPastMailTheSeatDoesNotSubscribeToStillTypes(t *testing.T) {
 
 	f.tick()
 
-	f.typed(fmt.Sprintf(announcement, 1))
+	f.typed(announce("mw-aaa"))
 }
 
 // A Mayor parked at the harness's usage limit is not idle: the harness will not
@@ -1868,7 +1881,7 @@ func TestAMayorAtTheUsageLimitIsNotTypedAndTheNudgeIsHeldUntilItIsIdle(t *testin
 				time.Sleep(20 * time.Millisecond)
 			}
 			f.tick()
-			f.typed(fmt.Sprintf(announcement, 1))
+			f.typed(announce("mw-aaa"))
 			if got := f.announced(); got != "mw-aaa\n" {
 				t.Fatalf("recorded ids %q", got)
 			}
@@ -1915,4 +1928,46 @@ func TestATickWithNothingChangedStartsAtMostTwoBd(t *testing.T) {
 	if f.nudgeCalls() != nudgesBefore+1 {
 		t.Errorf("expected the quiet alarm read once, got %d more", f.nudgeCalls()-nudgesBefore)
 	}
+}
+
+// The typed count names the ids it counts, so the Mayor can find each in the
+// unread listing (mw-gq6.678): a mail nobody read is named and listed, one read
+// or replied to (which leaves the listing) is named no more.
+func TestTheLineNamesTheIdsItCountsAndEachIsInTheUnreadListing(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.inbox("mw-aaa", "mw-bbb")
+
+	f.tick()
+
+	typed := announce("mw-aaa", "mw-bbb")
+	f.typed(typed)
+	listed := f.read("inbox")
+	for _, id := range []string{"mw-aaa", "mw-bbb"} {
+		if !strings.Contains(typed, id) || !strings.Contains(listed, id) {
+			t.Fatalf("%s is not both in the line %q and in the listing %q", id, typed, listed)
+		}
+	}
+
+	// mw-aaa is read, mw-bbb replied to; mw-ccc arrives: only it is counted.
+	f.inbox("mw-ccc")
+	f.tick()
+	f.typed(typed + announce("mw-ccc"))
+}
+
+// A long run of new mail names the first ten ids and says how many more there
+// are, rather than putting a whole inbox on the input line.
+func TestTheLineNamesTenIdsAndCountsTheRest(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	var ids []string
+	for i := 0; i < 12; i++ {
+		ids = append(ids, fmt.Sprintf("mw-id%02d", i))
+	}
+	f.inbox(ids...)
+
+	f.tick()
+
+	want := "New mail for mayor: 12 message(s): mw-id00, mw-id01, mw-id02, mw-id03, mw-id04, mw-id05, mw-id06, mw-id07, mw-id08, mw-id09 and 2 more. Run bd mail inbox.\n"
+	f.typed(want)
 }

@@ -24,7 +24,14 @@
 #      it has already announced, leaving out, for a seat whose
 #      seats/<seat>/subscribe.toml names mail, each mail mw events follow has
 #      told it of already: one whose mail event in the follower's log is at or
-#      before the seat's cursor in nudge.json beside it (mw-gq6.457);
+#      before the seat's cursor in nudge.json beside it (mw-gq6.457). The
+#      typed line names the ids it counts (the first ten, then "and <n>
+#      more"), all taken from that one listing, so each is in `bd mail inbox`
+#      and in `mw mail inbox`, which list the same set (the open mail of the
+#      mailbox) and drop a mail once it is read or replied to. A bd mail
+#      delegate that takes `--unread` for a mailbox name lists nothing: the
+#      unread listing is `bd mail inbox` itself, or `mw mail inbox`
+#      (mw-gq6.678);
 #   4. when this host has a postern key file, runs `mw postern inbox
 #      --unread-count` and compares it with the count last noted: above zero
 #      and higher than that is something to type, same count or fewer is not,
@@ -65,7 +72,7 @@
 #   8. if there is new mail, a postern count risen since last noted, or a
 #      clause survived the damper, finds the Mayor's window from the vault's
 #      .mayor-acting and, once it is not working and its input line is empty,
-#      types "New mail for mayor: <n> message(s). Run bd mail inbox." and
+#      types "New mail for mayor: <n> message(s): <ids>. Run bd mail inbox." and
 #      Enter, then "New postern message for mayor (<n> unread)" and Enter,
 #      then "Quiet alarm for mayor: <clause>[; <clause> ...]. Run mw status."
 #      and Enter (checking the window is idle again first before each line
@@ -425,6 +432,20 @@ list_new_mail() {
 	[ -n "$new" ] && count=$(echo "$new" | wc -l | tr -d ' ')
 	return 0
 }
+
+# named_ids prints the ids the typed count counts, the first MAIL_NAMED_IDS of
+# `new` (ten), comma separated, and "and <n> more" after them when there are
+# more (mw-gq6.678). They are the same ids `bd mail inbox` lists for the
+# mailbox, since `new` is cut from that listing: a reader who looks for them
+# there finds them, and does not have to trust a bare number.
+MAIL_NAMED_IDS=10
+named_ids() {
+	shown=$(echo "$new" | head -n "$MAIL_NAMED_IDS" | paste -sd, - | sed 's/,/, /g')
+	if [ "$count" -gt "$MAIL_NAMED_IDS" ]; then
+		shown="$shown and $((count - MAIL_NAMED_IDS)) more"
+	fi
+	echo "$shown"
+}
 say "step 3: the mail inbox"
 list_new_mail
 
@@ -732,7 +753,7 @@ if [ -n "$new" ]; then
 	fi
 fi
 if [ -n "$new" ]; then
-	line="New mail for $MAILBOX: $count message(s). Run bd mail inbox."
+	line="New mail for $MAILBOX: $count message(s): $(named_ids). Run bd mail inbox."
 	if type_line "$line"; then
 		# 9. Only now are the ids announced. What is no longer in the inbox is
 		# dropped from the record, so it does not grow.
