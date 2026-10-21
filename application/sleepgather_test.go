@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 )
 
 type earlierDump struct {
@@ -433,5 +436,133 @@ func TestTheBundleCarriesTheInversionsOfTheDump(t *testing.T) {
 	bundle, _ = g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
 	if got := partsByFile(bundle)[application.SleepStuckFile].Text; strings.Contains(got, "P2→") || strings.Contains(got, "inversion") && !strings.Contains(got, "no priority inversion") {
 		t.Errorf("the bundle names an inversion where there is none: %q", got)
+	}
+}
+
+// evidenceGather is the fixture with one open demo, a message of his and a
+// picture of his in the inbox, written an hour and two hours before the pass.
+func evidenceGather(t *testing.T) (application.SleepGather, string) {
+	t.Helper()
+	g := gatherFixture()
+	inbox := t.TempDir()
+	now := g.Now()
+	for name, age := range map[string]time.Duration{"direct-aaa.txt": time.Hour, "direct-bbb.jpg": 2 * time.Hour, "direct-old.txt": 40 * time.Hour} {
+		path := filepath.Join(inbox, name)
+		if err := os.WriteFile(path, []byte("I tapped Save and saw "+name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, now.Add(-age), now.Add(-age)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	demo := verifyDemo("d-1", "e-1", "Open the app and look for the green tick.")
+	g.Beads = &apptest.FakeVerifyBeads{Work: application.WorkInHand{Ready: []application.StoryDetail{demo}}}
+	g.InboxDir = inbox
+	return g, inbox
+}
+
+func TestTheBundleHoldsTheDaysEvidenceAndTheCandidatesCheckText(t *testing.T) {
+	g, inbox := evidenceGather(t)
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := partsByFile(bundle)
+	evidence, candidates := parts[application.SleepEvidenceFile], parts[application.SleepCandidatesFile]
+	for _, want := range []string{"direct:aaa", "I tapped Save and saw direct-aaa.txt", "direct:bbb", "direct-bbb.jpg"} {
+		if !strings.Contains(evidence.Text, want) {
+			t.Errorf("evidence.txt lacks %q:\n%s", want, evidence.Text)
+		}
+	}
+	if strings.Contains(evidence.Text, "direct:old") {
+		t.Errorf("evidence.txt holds a message from before the window:\n%s", evidence.Text)
+	}
+	for _, want := range []string{"d-1", "demo", "green tick"} {
+		if !strings.Contains(candidates.Text, want) {
+			t.Errorf("candidates.txt lacks %q:\n%s", want, candidates.Text)
+		}
+	}
+	for _, part := range []application.SleepPart{evidence, candidates} {
+		if part.Budget == 0 || part.Budget != application.SleepBudgetOf(part.File) || len(part.Text) > part.Budget {
+			t.Errorf("%s is %d bytes against a budget of %d", part.File, len(part.Text), part.Budget)
+		}
+	}
+	if len(evidence.Attach) != 1 || evidence.Attach[0].Name != "direct-bbb.jpg" || evidence.Attach[0].Path != filepath.Join(inbox, "direct-bbb.jpg") {
+		t.Errorf("the picture is not attached by its path: %+v", evidence.Attach)
+	}
+	if evidence.Verify == nil || len(evidence.Verify.Candidates) != 1 || len(evidence.Verify.Evidence) != 2 {
+		t.Errorf("the part does not carry what the proposals are checked against: %+v", evidence.Verify)
+	}
+	sizes := bundle.Sizes()
+	for _, want := range []string{application.SleepEvidenceFile, application.SleepCandidatesFile, "1 picture"} {
+		if !strings.Contains(sizes, want) {
+			t.Errorf("the sizes lack %q:\n%s", want, sizes)
+		}
+	}
+}
+
+func TestEvidenceAndCandidatesAreCutToTheirBudgets(t *testing.T) {
+	g, inbox := evidenceGather(t)
+	now := g.Now()
+	for n := range 60 {
+		path := filepath.Join(inbox, fmt.Sprintf("direct-%03d.txt", n))
+		if err := os.WriteFile(path, []byte(strings.Repeat("a long word of his ", 400)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Chtimes(path, now.Add(-time.Duration(n)*time.Minute), now.Add(-time.Duration(n)*time.Minute))
+	}
+	var demos []application.StoryDetail
+	for n := range 80 {
+		demos = append(demos, verifyDemo(fmt.Sprintf("d-%03d", n), "e-1", strings.Repeat("step one, step two, step three. ", 200)))
+	}
+	g.Beads = &apptest.FakeVerifyBeads{Work: application.WorkInHand{Ready: demos}}
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := partsByFile(bundle)
+	if part := parts[application.SleepEvidenceFile]; len(part.Text) > part.Budget || part.Cut == "" {
+		t.Errorf("evidence.txt is %d bytes against %d, cut = %q", len(part.Text), part.Budget, part.Cut)
+	}
+	if part := parts[application.SleepCandidatesFile]; len(part.Text) > part.Budget || !strings.Contains(part.Text, "d-000") {
+		t.Errorf("candidates.txt is %d bytes against %d and lacks its first demo", len(part.Text), part.Budget)
+	}
+}
+
+func TestLandingsThatDoNotFitAreLeftOutOldestFirstAndTheDemosStay(t *testing.T) {
+	g, _ := evidenceGather(t)
+	now := g.Now()
+	fake := &apptest.FakeVerifyBeads{
+		Work:     application.WorkInHand{Ready: []application.StoryDetail{verifyDemo("d-1", "e-1", "Open the app and look for the green tick.")}},
+		Comments: map[string][]application.Comment{},
+	}
+	for n := range 300 {
+		id := fmt.Sprintf("s-%03d", n)
+		fake.Closed = append(fake.Closed, application.ClosedStory{
+			ID: id, Title: "Story " + id, Type: "task", EpicID: "e-9", CloseReason: "landed on main", ClosedAt: now.Add(-time.Duration(300-n) * time.Minute),
+		})
+		fake.Comments[id] = verifyComment(closingWithCheck)
+	}
+	g.Beads = fake
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := partsByFile(bundle)[application.SleepCandidatesFile]
+	if len(part.Text) > part.Budget || !strings.Contains(part.Text, "d-1 (demo)") || !strings.Contains(part.Text, "s-299") ||
+		strings.Contains(part.Text, "s-000") || !strings.Contains(part.Cut, "older unverified landings left out") {
+		t.Errorf("candidates.txt (%d bytes of %d, cut %q) does not keep the demo and the newest landings:\n%.600s", len(part.Text), part.Budget, part.Cut, part.Text)
+	}
+}
+
+func TestAGatherWithNothingToReadTheEvidenceFromSaysSo(t *testing.T) {
+	bundle, err := gatherFixture().Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{application.SleepEvidenceFile, application.SleepCandidatesFile} {
+		if text := partsByFile(bundle)[file].Text; !strings.Contains(text, "could not be read") {
+			t.Errorf("%s = %q, want it to say it could not be read", file, text)
+		}
 	}
 }

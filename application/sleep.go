@@ -39,8 +39,8 @@ const (
 // The pass's session: it reads a handful of files and answers once.
 const (
 	// SleepMaxTurns lets the agent read each of the bundle's parts once, page
-	// the larger ones, and answer (mw-gq6.522).
-	SleepMaxTurns = 12
+	// the larger ones, look at a few of his pictures, and answer (mw-gq6.522).
+	SleepMaxTurns = 30
 	sleepTimeout  = 40 * time.Minute
 	// sleepSummaryWords is the most words of the summary mailed to the Mayor.
 	sleepSummaryWords = 150
@@ -121,6 +121,25 @@ type SleepPart struct {
 	// Keep also keeps the part in the pass's plans directory under File: the
 	// triage dump is, for tomorrow's diff to start from.
 	Keep bool
+	// Attach are files the agent is given beside the part, by name: his pictures.
+	Attach []SleepAttachment
+	// Verify, on the evidence part, is the evidence and the candidates it was
+	// made from, which the agent's proposals are checked against.
+	Verify *SleepVerify
+}
+
+// SleepAttachment is a file copied into the agent's directory as it is, a
+// picture of the Governor's. Path is where mw reads it from.
+type SleepAttachment struct {
+	Name string
+	Path string
+	Size int
+}
+
+// SleepVerify is what evidence.txt and candidates.txt were made from.
+type SleepVerify struct {
+	Candidates []VerifyCandidate
+	Evidence   []VerifyEvidence
 }
 
 // SleepBundle is what the pass gathers: the triage dump and diff, the
@@ -134,6 +153,13 @@ func (b SleepBundle) Sizes() string {
 	total := 0
 	for _, part := range b {
 		fmt.Fprintf(&sizes, "  %-14s %-20s %s bytes of %s", part.Name, part.File, Thousands(len(part.Text)), Thousands(part.Budget))
+		if n := len(part.Attach); n > 0 {
+			size := 0
+			for _, a := range part.Attach {
+				size += a.Size
+			}
+			fmt.Fprintf(&sizes, " (+ %d %s, %s bytes, beside it)", n, plural(n, "picture", "pictures"), Thousands(size))
+		}
 		if part.Cut != "" {
 			fmt.Fprintf(&sizes, " (CUT by mw: %s)", part.Cut)
 		}
@@ -193,9 +219,11 @@ type SleepResult struct {
 	// Folds is how many folds the pass proposed in folds.md.
 	Folds int
 	// Stale is how many items of his Needs you stale.md names.
-	Stale   int
-	Summary string
-	Fuel    Fuel
+	Stale int
+	// Proposed is how many PROPOSED comments the pass wrote (proposals.md).
+	Proposed int
+	Summary  string
+	Fuel     Fuel
 }
 
 // SleepTokens is the agent's tokens as the run log keeps them.
@@ -224,10 +252,12 @@ type SleepRunLog struct {
 	// Cut says, for each part mw cut to its budget, how.
 	Cut   map[string]string `json:"cut,omitempty"`
 	Files []string          `json:"files,omitempty"`
+	// Proposed is how many PROPOSED comments the pass wrote.
+	Proposed int `json:"proposed,omitempty"`
 }
 
-// SleepSchema is the schema the agent answers in: the files (stale.md may be
-// left out) and the summary.
+// SleepSchema is the schema the agent answers in: the files (stale.md and the
+// proposals may be left out) and the summary.
 const SleepSchema = `{
   "type": "object",
   "additionalProperties": false,
@@ -239,6 +269,20 @@ const SleepSchema = `{
     "improvements": {"type": "string", "minLength": 1},
     "folds": {"type": "string"},
     "stale": {"type": "string"},
+    "proposals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["bead", "txid", "shows", "confidence"],
+        "properties": {
+          "bead": {"type": "string"},
+          "txid": {"type": "string"},
+          "shows": {"type": "string", "minLength": 1},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+        }
+      }
+    },
     "summary": {"type": "string", "minLength": 1}
   }
 }`
@@ -254,8 +298,12 @@ type sleepAnswer struct {
 	Folds string `json:"folds"`
 	// Stale is stale.md: a line for each item of his Needs you judged stale; an
 	// answer without it writes no stale.md (mw-gq6.674).
-	Stale   string `json:"stale"`
-	Summary string `json:"summary"`
+	Stale string `json:"stale"`
+	// Proposals are the candidates the day's evidence shows met, in the form of
+	// mw verify match's matches (mw-4xdnis.5); an answer without them proposes
+	// nothing.
+	Proposals []verifyMatchLine `json:"proposals"`
+	Summary   string            `json:"summary"`
 }
 
 // SleepPass is mw sleep pass: one fresh agent given the principles and the
@@ -268,6 +316,11 @@ type SleepPass struct {
 	Grinder  Grinder
 	Mailbox  Mailbox
 	Settings SleepSettings
+	// Beads is where the PROPOSED comments are written, and Verify the
+	// [verify] confidence they are held to; without Beads none is written
+	// (mw-4xdnis.5).
+	Beads  VerifyBeads
+	Verify VerifySettings
 	// Instructions is grinds/sleep.md, the rule the agent is given.
 	Instructions string
 	// Host signs the summary: sleep@<host>.
@@ -336,6 +389,15 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 		if err := os.WriteFile(filepath.Join(dir, part.File), []byte(part.Text), 0o644); err != nil {
 			return result, fmt.Errorf("mw sleep pass: %w", err)
 		}
+		for _, picture := range part.Attach {
+			data, err := os.ReadFile(picture.Path)
+			if err != nil {
+				return result, fmt.Errorf("mw sleep pass: his picture: %w", err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, picture.Name), data, 0o644); err != nil {
+				return result, fmt.Errorf("mw sleep pass: %w", err)
+			}
+		}
 	}
 	grind, err := p.Grinder.Grind(ctx, GrindCall{
 		Dir: dir, Model: model, Effort: effort, System: system, Schema: SleepSchema,
@@ -385,10 +447,30 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 		{"folds.md", foldsText},
 		{"summary.md", answer.Summary},
 	}
-	stale := staleItems(answer.Stale)
+	proposals, proposalsText, proposeErr := p.propose(ctx, model, window.Date, bundle, answer.Proposals)
+	result.Proposed = len(proposals)
+	log.Proposed = len(proposals)
+	// A demo his evidence shows met is a proposal, never also stale.
+	staleText := answer.Stale
+	for _, one := range proposals {
+		staleText = withoutLinesNaming(staleText, one.Bead)
+	}
+	stale := staleItems(staleText)
 	result.Stale = stale
-	if strings.TrimSpace(answer.Stale) != "" {
-		files = append(files, struct{ name, text string }{"stale.md", answer.Stale})
+	if strings.TrimSpace(staleText) != "" {
+		files = append(files, struct{ name, text string }{"stale.md", staleText})
+	}
+	proposedLine := "Proposed as verified by his use: none."
+	if len(proposals) > 0 {
+		proposedLine = fmt.Sprintf("Proposed as verified by his use: %d (proposals.md).", len(proposals))
+		for n, file := range files {
+			if file.name == "summary.md" {
+				files[n].text = strings.TrimSpace(file.text) + "\n\n" + proposedLine
+			}
+		}
+	}
+	if proposalsText != "" {
+		files = append(files, struct{ name, text string }{"proposals.md", proposalsText})
 	}
 	for _, part := range bundle {
 		if part.Keep {
@@ -416,7 +498,7 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 	if stale > 0 {
 		staleLine = fmt.Sprintf("Stale in Needs you: %d (stale.md).", stale)
 	}
-	counts := foldLine + " " + staleLine
+	counts := foldLine + " " + staleLine + " " + proposedLine
 	result.Summary = trimWords(answer.Summary, sleepSummaryWords-len(strings.Fields(pointer))-len(strings.Fields(counts))) + "\n\n" + counts
 	var mailErr error
 	if p.Mailbox != nil {
@@ -430,7 +512,80 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 		}
 	}
 	p.say("mw sleep pass: %d files written to %s (%s/%s, %s tokens)\n", len(result.Files), result.Dir, model, effort, Thousands(log.Tokens.Total))
-	return result, errors.Join(logErr, commitErr, mailErr)
+	return result, errors.Join(proposeErr, logErr, commitErr, mailErr)
+}
+
+// propose writes the PROPOSED comments of the agent's proposals, through the
+// writer mw verify match uses (verifyProposer), against the candidates and the
+// evidence the bundle was made from. It reports the proposals made and the text
+// of proposals.md, which names every proposal with what became of it; ""
+// when the agent made none. A comment that cannot be written is the error.
+func (p SleepPass) propose(ctx context.Context, model, date string, bundle SleepBundle, matches []verifyMatchLine) ([]VerifyProposal, string, error) {
+	if len(matches) == 0 {
+		return nil, "", nil
+	}
+	var from SleepVerify
+	for _, part := range bundle {
+		if part.Verify != nil {
+			from = *part.Verify
+		}
+	}
+	var made []VerifyProposal
+	var records []verifyMatchRecord
+	var err error
+	if p.Beads == nil {
+		for _, m := range matches {
+			records = append(records, verifyMatchRecord{verifyMatchLine: m, Outcome: "left out: no tracker to write the comment to"})
+		}
+	} else {
+		writer := verifyProposer{Beads: p.Beads, Confidence: p.Verify.orDefaults().Confidence, Model: model, Run: SleepPlansPrefix + date}
+		made, records, err = writer.propose(ctx, from.Candidates, from.Evidence, matches)
+	}
+	var text strings.Builder
+	fmt.Fprintf(&text, "# Proposed as verified by his use, %s\n\n", date)
+	text.WriteString("Each is a PROPOSED comment on its bead; nothing is closed. The first word VERIFIED is the Mayor's or the Deputy's to write.\n\n")
+	for _, r := range records {
+		fmt.Fprintf(&text, "- %s %s (confidence %.2f): %s: %s\n", r.Bead, r.Txid, r.Confidence, strings.Join(strings.Fields(r.Shows), " "), r.Outcome)
+		if r.Outcome == verifyProposedOutcome {
+			fmt.Fprintf(&text, "  confirm: mw verify confirm %s --txid %s\n", r.Bead, r.Txid)
+		}
+	}
+	return made, text.String(), err
+}
+
+// withoutLinesNaming is text without the lines that name the bead id.
+func withoutLinesNaming(text, id string) string {
+	var kept []string
+	for _, line := range strings.Split(text, "\n") {
+		if !namesBead(line, id) {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
+// namesBead reports whether line holds id as a whole bead id: not as the start
+// of a longer one (mw-a.1 in mw-a.10, or mw-a.1.2).
+func namesBead(line, id string) bool {
+	isID := func(b byte) bool {
+		return b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b == '-' || b == '_'
+	}
+	for from := 0; from < len(line); {
+		at := strings.Index(line[from:], id)
+		if at < 0 {
+			return false
+		}
+		start, end := from+at, from+at+len(id)
+		from = start + 1
+		if start > 0 && (isID(line[start-1]) || line[start-1] == '.') {
+			continue
+		}
+		if end < len(line) && (isID(line[end]) || (line[end] == '.' && end+1 < len(line) && isID(line[end+1]))) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // keepLog writes the run log of the pass and reports its path from the

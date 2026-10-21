@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -239,7 +241,7 @@ func TestADryRunSaysEachPartAgainstItsBudgetAndWhichWereCut(t *testing.T) {
 		t.Fatal(err)
 	}
 	said := f.out.String()
-	for _, want := range []string{"bytes of 50,000", "bytes of 24,000", "bytes of 180,000", "CUT by mw", "cut by mw to fit"} {
+	for _, want := range []string{"bytes of 50,000", "bytes of 24,000", "bytes of 236,000", "CUT by mw", "cut by mw to fit"} {
 		if !strings.Contains(said, want) {
 			t.Errorf("the dry run did not say %q:\n%s", want, said[strings.Index(said, "--- bundle"):])
 		}
@@ -633,5 +635,155 @@ func TestADryRunPrintsTheNeedsYouPartsSizeAmongTheParts(t *testing.T) {
 	size := fmt.Sprintf("%-20s %d bytes of %s", application.SleepNeedsYouFile, len("NEEDS YOU: 3 items\n"), application.Thousands(application.SleepBudgetOf(application.SleepNeedsYouFile)))
 	if !strings.Contains(said, size) {
 		t.Errorf("the dry run's sizes lack %q:\n%s", size, said[strings.Index(said, "--- bundle"):])
+	}
+}
+
+// proposalFixture is a pass whose bundle carries one open demo (d-1) and one
+// message of his (direct:aaa), and whose agent answers with answer.
+func proposalFixture(t *testing.T, proposals string) (*sleepFixture, *apptest.FakeVerifyBeads) {
+	t.Helper()
+	f := newSleepFixture()
+	beads := &apptest.FakeVerifyBeads{Now: time.Date(2026, 10, 16, 7, 30, 0, 0, time.UTC)}
+	picture := filepath.Join(t.TempDir(), "direct-bbb.jpg")
+	if err := os.WriteFile(picture, []byte("JPEGBYTES"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.gatherer.bundle = append(fixtureBundle(),
+		application.SleepPart{
+			Name: "evidence", File: application.SleepEvidenceFile, Text: "direct:aaa: I used it\n", Budget: application.SleepBudgetOf(application.SleepEvidenceFile),
+			Attach: []application.SleepAttachment{{Name: "direct-bbb.jpg", Path: picture, Size: 9}},
+			Verify: &application.SleepVerify{
+				Candidates: []application.VerifyCandidate{{Bead: "d-1", Kind: application.VerifyKindDemo, Title: "Demo d-1", Check: "see the green tick"}},
+				Evidence: []application.VerifyEvidence{
+					{Txid: "direct:aaa", At: time.Date(2026, 10, 16, 6, 30, 0, 0, time.UTC)},
+					{Txid: "direct:bbb", At: time.Date(2026, 10, 16, 5, 30, 0, 0, time.UTC)},
+				},
+			},
+		},
+		application.SleepPart{Name: "candidates", File: application.SleepCandidatesFile, Text: "d-1 demo: see the green tick\n", Budget: application.SleepBudgetOf(application.SleepCandidatesFile)},
+	)
+	answer := fixtureAnswer
+	if proposals != "" {
+		answer = strings.Replace(fixtureAnswer, `"summary"`, `"proposals": `+proposals+`, "summary"`, 1)
+	}
+	f.grinder.Result.Answer = json.RawMessage(answer)
+	f.pass.Beads = beads
+	f.pass.Verify = application.VerifySettings{Confidence: 0.8}
+	return f, beads
+}
+
+const oneProposal = `[{"bead":"d-1","txid":"direct:aaa","shows":"the green tick after Save","confidence":0.9}]`
+
+func TestAProposalAt09WritesProposalsMdOnePROPOSEDCommentAndIsCountedInTheSummary(t *testing.T) {
+	f, beads := proposalFixture(t, oneProposal)
+	result, err := f.pass.Run(context.Background(), application.SleepOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := f.grinder.Calls()[0]
+	if string(call.Files["direct-bbb.jpg"]) != "JPEGBYTES" || !strings.Contains(string(call.Files[application.SleepEvidenceFile]), "direct:aaa") ||
+		!strings.Contains(string(call.Files[application.SleepCandidatesFile]), "green tick") {
+		t.Errorf("the agent's dir lacks the evidence, the picture or the candidates: %v", slices.Collect(func(yield func(string) bool) {
+			for name := range call.Files {
+				yield(name)
+			}
+		}))
+	}
+	if !strings.Contains(call.Call.Schema, `"proposals"`) {
+		t.Error("the schema has no proposals")
+	}
+	if len(beads.Written) != 1 || beads.Written[0].ID != "d-1" ||
+		!strings.HasPrefix(beads.Written[0].Text, "PROPOSED VERIFIED by the Governor's use, from direct:aaa (2026-10-16 06:30Z): the green tick after Save (confidence 0.90, opus, run ") {
+		t.Fatalf("comments = %+v", beads.Written)
+	}
+	md := f.vault.files["sleep-2026-10-16/proposals.md"]
+	for _, want := range []string{"d-1", "direct:aaa", "the green tick after Save", "0.90", "mw verify confirm d-1 --txid direct:aaa"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("proposals.md lacks %q:\n%s", want, md)
+		}
+	}
+	if !slices.Contains(result.Files, "proposals.md") || result.Proposed != 1 {
+		t.Errorf("result = %+v", result)
+	}
+	if summary := f.vault.files["sleep-2026-10-16/summary.md"]; !strings.Contains(summary, "Proposed as verified by his use: 1") {
+		t.Errorf("summary.md = %q, want the count of proposals", summary)
+	}
+	inbox, _ := f.mailbox.Inbox(context.Background(), "mayor")
+	if len(inbox) != 1 || !strings.Contains(inbox[0].Body, "Proposed as verified by his use: 1") {
+		t.Errorf("the mail = %+v", inbox)
+	}
+	if words := len(strings.Fields(inbox[0].Body)); words > 150 {
+		t.Errorf("the mail is %d words, want 150 or fewer", words)
+	}
+}
+
+func TestAnAnswerWithoutProposalsStillWritesTheOtherFiles(t *testing.T) {
+	f, beads := proposalFixture(t, "")
+	result, err := f.pass.Run(context.Background(), application.SleepOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.vault.files["sleep-2026-10-16/proposals.md"]; ok || len(beads.Written) != 0 || result.Proposed != 0 {
+		t.Errorf("a proposal was made from an answer with none: %v, %+v", result.Files, beads.Written)
+	}
+	for _, name := range []string{"questions.md", "maps.md", "improvements.md", "summary.md", "recommendations.json"} {
+		if f.vault.files["sleep-2026-10-16/"+name] == "" {
+			t.Errorf("%s was not written", name)
+		}
+	}
+	if strings.Contains(f.vault.files["sleep-2026-10-16/summary.md"], "Proposed as verified") {
+		t.Error("summary.md counts proposals when there were none")
+	}
+}
+
+func TestACandidateAlreadyProposedForThatTxidOrVerifiedGetsNoNewComment(t *testing.T) {
+	for name, existing := range map[string]string{
+		"proposed": "PROPOSED VERIFIED by the Governor's use, from direct:aaa (2026-10-15 06:30Z): the tick (confidence 0.90, haiku, run 1)",
+		"verified": "VERIFIED by the Governor's use, inferred by the Mayor from direct:zzz: the tick (by hand)",
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, beads := proposalFixture(t, oneProposal)
+			beads.Comments = map[string][]application.Comment{"d-1": {{Author: "mw", Text: existing}}}
+			result, err := f.pass.Run(context.Background(), application.SleepOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(beads.Written) != 0 || result.Proposed != 0 {
+				t.Errorf("a comment was written over %s: %+v", name, beads.Written)
+			}
+			if md := f.vault.files["sleep-2026-10-16/proposals.md"]; !strings.Contains(md, "left out: already") {
+				t.Errorf("proposals.md does not say why it was left out:\n%s", md)
+			}
+		})
+	}
+}
+
+func TestAProposedDemoIsNotAlsoStale(t *testing.T) {
+	f, _ := proposalFixture(t, oneProposal)
+	answer := strings.Replace(fixtureAnswer, `"summary"`, `"proposals": `+oneProposal+`, "stale": "- d-1 demo: its epic closed. Action: ask-him\n- mw-x.2 card: moot. Action: clear-card", "summary"`, 1)
+	f.grinder.Result.Answer = json.RawMessage(answer)
+	result, err := f.pass.Run(context.Background(), application.SleepOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := f.vault.files["sleep-2026-10-16/stale.md"]
+	if strings.Contains(stale, "d-1") || !strings.Contains(stale, "mw-x.2") || result.Stale != 1 {
+		t.Errorf("stale.md = %q (%d), want only mw-x.2: a stale demo is a proposal", stale, result.Stale)
+	}
+}
+
+func TestADryRunPrintsTheEvidenceAndCandidatesSizesAmongTheParts(t *testing.T) {
+	f, beads := proposalFixture(t, "")
+	if _, err := f.pass.Run(context.Background(), application.SleepOptions{DryRun: true}); err != nil {
+		t.Fatal(err)
+	}
+	said := f.out.String()
+	for _, want := range []string{application.SleepEvidenceFile, application.SleepCandidatesFile, "1 picture"} {
+		if !strings.Contains(said, want) {
+			t.Errorf("the dry run lacks %q:\n%s", want, said[strings.Index(said, "--- bundle"):])
+		}
+	}
+	if len(beads.Written) != 0 {
+		t.Error("a dry run wrote a comment")
 	}
 }

@@ -409,12 +409,28 @@ func judgeVerifyAnswer(grind SessionResult) (verifyAnswer, string) {
 	return answer, ""
 }
 
-// propose writes a PROPOSED comment for each answer at or over the confidence
-// that names a candidate and a piece of evidence, unless the bead is already
-// proposed for that txid. It reports the proposals made and every answer with
-// what became of it. A comment that cannot be written is reported after the
-// rest are tried.
+// propose writes the PROPOSED comments of an answer (verifyProposer).
 func (p VerifyMatch) propose(ctx context.Context, settings VerifySettings, run string, candidates []VerifyCandidate, evidence []VerifyEvidence, answer verifyAnswer) ([]VerifyProposal, []verifyMatchRecord, error) {
+	writer := verifyProposer{Beads: p.Beads, Confidence: settings.Confidence, Model: settings.Model, Run: run}
+	return writer.propose(ctx, candidates, evidence, answer.Matches)
+}
+
+// verifyProposer is the one writer of the PROPOSED comment: mw verify match and
+// the sleep pass both write theirs through it.
+type verifyProposer struct {
+	Beads VerifyBeads
+	// Confidence is the least confidence at which a match is proposed.
+	Confidence float64
+	// Model and Run say in the comment who matched and in which run.
+	Model, Run string
+}
+
+// propose writes a PROPOSED comment for each match at or over the confidence
+// that names a candidate and a piece of evidence, unless the bead is already
+// proposed for that txid or already VERIFIED. It reports the proposals made and
+// every match with what became of it. A comment that cannot be written is
+// reported after the rest are tried.
+func (w verifyProposer) propose(ctx context.Context, candidates []VerifyCandidate, evidence []VerifyEvidence, matches []verifyMatchLine) ([]VerifyProposal, []verifyMatchRecord, error) {
 	known := map[string]bool{}
 	var ids []string
 	for _, c := range candidates {
@@ -425,7 +441,7 @@ func (p VerifyMatch) propose(ctx context.Context, settings VerifySettings, run s
 	for _, e := range evidence {
 		at[e.Txid] = e.At
 	}
-	comments, err := p.Beads.StoriesComments(ctx, ids)
+	comments, err := w.Beads.StoriesComments(ctx, ids)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading the comments before proposing: %w", err)
 	}
@@ -433,7 +449,7 @@ func (p VerifyMatch) propose(ctx context.Context, settings VerifySettings, run s
 	var records []verifyMatchRecord
 	var errs []error
 	done := map[string]bool{}
-	for _, m := range answer.Matches {
+	for _, m := range matches {
 		m.Shows = strings.Join(strings.Fields(m.Shows), " ")
 		record := verifyMatchRecord{verifyMatchLine: m}
 		switch {
@@ -441,19 +457,21 @@ func (p VerifyMatch) propose(ctx context.Context, settings VerifySettings, run s
 			record.Outcome = "left out: no such candidate"
 		case at[m.Txid].IsZero():
 			record.Outcome = "left out: no such evidence"
-		case m.Confidence < settings.Confidence:
-			record.Outcome = fmt.Sprintf("left out: confidence under %.2f", settings.Confidence)
+		case m.Confidence < w.Confidence:
+			record.Outcome = fmt.Sprintf("left out: confidence under %.2f", w.Confidence)
+		case verifiedIn(comments[m.Bead]):
+			record.Outcome = "left out: already verified"
 		case done[m.Bead+" "+m.Txid] || proposedFor(comments[m.Bead], m.Txid):
 			record.Outcome = "left out: already proposed for this txid"
 		default:
 			done[m.Bead+" "+m.Txid] = true
 			text := fmt.Sprintf("%s VERIFIED by the Governor's use, from %s (%s): %s (confidence %.2f, %s, run %s)",
-				VerifyProposedWord, m.Txid, at[m.Txid].Format(verifyTimeFormat), m.Shows, m.Confidence, settings.Model, run)
-			if err := p.Beads.CommentOnStory(ctx, m.Bead, text); err != nil {
+				VerifyProposedWord, m.Txid, at[m.Txid].Format(verifyTimeFormat), m.Shows, m.Confidence, w.Model, w.Run)
+			if err := w.Beads.CommentOnStory(ctx, m.Bead, text); err != nil {
 				record.Outcome = "not written: " + err.Error()
 				errs = append(errs, fmt.Errorf("commenting on %s: %w", m.Bead, err))
 			} else {
-				record.Outcome = "proposed"
+				record.Outcome = verifyProposedOutcome
 				proposals = append(proposals, VerifyProposal{Bead: m.Bead, Txid: m.Txid, At: at[m.Txid], Shows: m.Shows, Confidence: m.Confidence})
 			}
 		}
@@ -461,6 +479,9 @@ func (p VerifyMatch) propose(ctx context.Context, settings VerifySettings, run s
 	}
 	return proposals, records, errors.Join(errs...)
 }
+
+// verifyProposedOutcome is the outcome of a match that became a proposal.
+const verifyProposedOutcome = "proposed"
 
 // mail sends the Mayor one mail for the run, listing each proposal and the line
 // that confirms it; none when nothing was proposed.
