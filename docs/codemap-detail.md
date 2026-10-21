@@ -9,7 +9,7 @@ The application/ files of each use case in [docs/codemap.md](codemap.md), which 
 | Dispatch, Next, BatchLand, AfterLandingRun, BdRetry | application/dispatch.go, application/next.go, application/afterlandingrun.go |
 | Check*, Status, CloudCheck, CloudMake, Brief | application/check.go, application/checkparts.go, application/status.go, application/cloud.go, application/cloudmake.go, application/brief.go |
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | application/sweep.go, application/tidy.go, application/nudge.go, application/mail.go, application/home.go, application/homemove.go |
-| Suite, SuiteFiler, NightlySuite, ContributeBack | application/suite{file,status}.go, application/contributeback.go |
+| Suite, SuiteFiler, NightlySuite, NightlyTiming (TimingFiler), ContributeBack | application/suite{file,status}.go, application/timingnightly.go, application/contributeback.go |
 | Config* | application/configset.go |
 | IdeasOnly* | application/ideasonly.go, application/ideasonlyrelease.go |
 | Seat* | application/seat{context,up,reap,handover}.go |

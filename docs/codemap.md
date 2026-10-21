@@ -29,11 +29,11 @@
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | {postern,hands*,homemove} |
 | PosternInboxShow (kept messages, --show) | application/posternkeep.go | postern_inbox |
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | {bsv,stampqueue,chainlookup}, rig/worktree.go |
-| Grinder, WarmGrinder, GristPoolBoard, GristTalkStore, GrindSource, Grist* (smoke re-sends misses twice), VisionSource | grist.go, application/gristpool.go, application/vision.go, application/gristruns.go, application/personcap.go, griststatus.go, gristsmoke.go | {claude/grind,rig/{grinds,landingof},hostlock/try}.go, grist |
-| GristCredits, GristCredit{Key,State}, GristCreditsAdmin (grist credits *; api_credits, api_key_file) | application/gristcredits.go | {grist/credits,claude/grind}.go, cmd/mw/grist_credits.go |
+| Grinder, WarmGrinder, GristPoolBoard, GristTalkStore, GrindSource, Grist*, VisionSource | grist.go, application/gristpool.go, application/vision.go, application/gristruns.go, application/personcap.go, griststatus.go, gristsmoke.go | {claude/grind,rig/{grinds,landingof},hostlock/try}.go, grist |
+| GristCredits, GristCredit{Key,State}, GristCreditsAdmin | application/gristcredits.go | {grist/credits,claude/grind}.go, cmd/mw/grist_credits.go |
 | IdeasOnlyReader, IdeasOnlyFiles | ideasonly.go | {postern/http.go,ideasonly} |
-| Suite* | application/suite.go, application/suitenightly.go | {rig/{worktree,checks}.go,vault/vault.go,apartproc} |
-| Scorer, ScoreTimeout, SecretStore, Google*, ContactBook (scorer.LocalTimeoutFor: 120 s+0.5 s/audio s, max 540) | application/scorer.go, secrets.go, application/google.go, application/contacts.go | {scorer,sops,google} |
+| Suite*, Timing* | application/suite.go, application/suitenightly.go, application/timingnightly.go | {rig/{worktree,checks,timing}.go,vault/{vault,timing}.go,apartproc} |
+| Scorer, ScoreTimeout, SecretStore, Google*, ContactBook | application/scorer.go, secrets.go, application/google.go, application/contacts.go | {scorer,sops,google} |
 
 Fakes: application/apptest/fake*.go.
 
@@ -48,7 +48,7 @@ Each use case's application/ files are in [docs/codemap-detail.md](codemap-detai
 | Dispatch, Next, BatchLand, AfterLandingRun, BdRetry | cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/land.go, cmd/mw/afterlanding.go, cmd/mw/bd.go | {dispatch,next,batch_land,after_*,bd_*}; a landing is let in up to 10% over the 10240-byte map cap (codemapBandPercent in next.go) and files one trim bug; a closing comment saying `AC n NOT met` marks the Landed mail and files a held bug (application/acunmet.go) |
 | Check*, Status, CloudCheck, CloudMake, Brief | cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | {check,status,cloud,brief} |
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | {sweep,tidy,sync,mail,home} |
-| Suite, SuiteFiler, NightlySuite, ContributeBack | cmd/mw/suite.go, cmd/mw/suitenightly.go | {suite*,contribute_back} |
+| Suite, SuiteFiler, NightlySuite, NightlyTiming, ContributeBack | cmd/mw/suite.go, cmd/mw/suitenightly.go, cmd/mw/timingnightly.go | {suite*,timing_nightly,contribute_back} |
 | Config* | cmd/mw/config.go | config_* |
 | IdeasOnly* | cmd/mw/ideasonly.go | ideas_only, postern_inbox_apply, talk_wait |
 | Member[Remove] ([docs/family.md](family.md)) | cmd/mw/member.go | member |
