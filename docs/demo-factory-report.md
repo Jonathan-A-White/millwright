@@ -32,6 +32,11 @@ CHEAP WINS
 3. mw-bsf54t.4 +22 more used 3+ attempts: split them
 ```
 
+Since mw-gq6.677 the summary has one more line after FUEL, `HIS TIME review queue N
+(limit 8), demos waiting N`, and a millwright story may say `Expect: review queue down`
+or `Expect: demos waiting down` beside the other metrics (`refusals`, `attempts/landing`,
+`bugs/landing`, `escaped bugs`, `dispatch-to-landing`, `tokens/landing`, `$/landing`).
+
 ## The demo (Governor, on the phone)
 
 1. Open the Factory channel at or after 12:00Z (the post comes from the home, once

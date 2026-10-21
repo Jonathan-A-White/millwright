@@ -54,6 +54,27 @@ type changeMetric struct {
 	format func(float64) string
 }
 
+// snapshotMetric is a metric that is a count at a moment (his review queue, the
+// demos waiting) and not a sum over days: it is read from the daily snapshots,
+// and compared as the mean of those kept in each stretch of days (mw-gq6.677).
+type snapshotMetric struct {
+	of     func(MetricSnapshot) *float64
+	format func(float64) string
+}
+
+var snapshotMetrics = map[string]snapshotMetric{
+	"review queue":  {func(s MetricSnapshot) *float64 { return s.ReviewQueue }, oneDecimal},
+	"demos waiting": {func(s MetricSnapshot) *float64 { return s.DemosWaiting }, oneDecimal},
+}
+
+// formatOf is how a metric's figure reads.
+func formatOf(metric string) func(float64) string {
+	if m, ok := snapshotMetrics[metric]; ok {
+		return m.format
+	}
+	return changeMetrics[metric].format
+}
+
 var changeMetrics = map[string]changeMetric{
 	"refusals": {func(es []reportEntry) (float64, bool) {
 		q := sumQuality(es)
@@ -85,6 +106,28 @@ var changeMetrics = map[string]changeMetric{
 		f := sumFuel(es)
 		return f.USDPerLanding, f.WithCost > 0
 	}, func(v float64) string { return fmt.Sprintf("$%.2f", v) }},
+}
+
+func oneDecimal(v float64) string { return fmt.Sprintf("%.1f", v) }
+
+// snapshotMean is the mean of the metric over the snapshots of the days from up
+// to, not including, to, and whether any of them had it.
+func snapshotMean(metric snapshotMetric, kept []MetricSnapshot, from, to time.Time) (float64, bool) {
+	sum, n := 0.0, 0
+	for _, s := range kept {
+		day, err := time.Parse(LedgerDate, s.Day)
+		if err != nil || day.Before(from) || !day.Before(to) {
+			continue
+		}
+		if v := metric.of(s); v != nil {
+			sum += *v
+			n++
+		}
+	}
+	if n == 0 {
+		return 0, false
+	}
+	return sum / float64(n), true
 }
 
 // FactoryChange is one millwright landing of the last ChangeDays days: what its
@@ -124,8 +167,9 @@ func judgeChange(e domain.Expect, before, after float64) string {
 }
 
 // factoryChanges finds the millwright landings among entries, and measures
-// each, with the bugs that escaped it by escaped.
-func factoryChanges(all []reportEntry, stories map[string]StoryDetail, escaped map[string][]string, now time.Time) []FactoryChange {
+// each, with the bugs that escaped it by escaped; kept are the daily snapshots a
+// metric that is a count at a moment is read from.
+func factoryChanges(all []reportEntry, kept []MetricSnapshot, stories map[string]StoryDetail, escaped map[string][]string, now time.Time) []FactoryChange {
 	today := reportDay(now)
 	first := map[string]reportEntry{}
 	for _, e := range all {
@@ -158,7 +202,7 @@ func factoryChanges(all []reportEntry, stories map[string]StoryDetail, escaped m
 			change.Expect, change.Verdict = expect, ChangeNone
 		default:
 			change.Expect = expect
-			change.measure(all, landing.at)
+			change.measure(all, kept, landing.at)
 		}
 		changes = append(changes, change)
 	}
@@ -173,10 +217,19 @@ func factoryChanges(all []reportEntry, stories map[string]StoryDetail, escaped m
 
 // measure sets the verdict of a change whose story named a metric, once the
 // ChangeVerdictDays after the landing day are over.
-func (c *FactoryChange) measure(all []reportEntry, landed time.Time) {
-	metric := changeMetrics[c.Expect.Metric]
-	before, haveBefore := metric.value(entriesBetween(all, landed.AddDate(0, 0, -ChangeVerdictDays), landed))
-	after, haveAfter := metric.value(entriesBetween(all, landed.AddDate(0, 0, 1), landed.AddDate(0, 0, ChangeVerdictDays+1)))
+func (c *FactoryChange) measure(all []reportEntry, kept []MetricSnapshot, landed time.Time) {
+	beforeFrom, beforeTo := landed.AddDate(0, 0, -ChangeVerdictDays), landed
+	afterFrom, afterTo := landed.AddDate(0, 0, 1), landed.AddDate(0, 0, ChangeVerdictDays+1)
+	var before, after float64
+	var haveBefore, haveAfter bool
+	if metric, ok := snapshotMetrics[c.Expect.Metric]; ok {
+		before, haveBefore = snapshotMean(metric, kept, beforeFrom, beforeTo)
+		after, haveAfter = snapshotMean(metric, kept, afterFrom, afterTo)
+	} else {
+		metric := changeMetrics[c.Expect.Metric]
+		before, haveBefore = metric.value(entriesBetween(all, beforeFrom, beforeTo))
+		after, haveAfter = metric.value(entriesBetween(all, afterFrom, afterTo))
+	}
 	if !haveBefore || !haveAfter {
 		c.Verdict = ChangeNoData
 		return
@@ -224,7 +277,7 @@ func writeChanges(b *strings.Builder, changes []FactoryChange) {
 			fmt.Fprintf(b, "  landed %s, Expect: %s\n  no data in the %d days before or after\n", c.Landed, c.Expect, ChangeVerdictDays)
 		default:
 			fmt.Fprintf(b, "  landed %s, Expect: %s\n", c.Landed, c.Expect)
-			format := changeMetrics[c.Expect.Metric].format
+			format := formatOf(c.Expect.Metric)
 			moved := ""
 			if *c.Before != 0 {
 				moved = fmt.Sprintf(" (%+.0f%%)", 100*fraction(*c.After-*c.Before, *c.Before))
@@ -296,10 +349,16 @@ type MetricSnapshot struct {
 	DispatchToLandingS *float64 `json:"dispatch_to_landing_s,omitempty"`
 	TokensPerLanding   *float64 `json:"tokens_per_landing,omitempty"`
 	USDPerLanding      *float64 `json:"usd_per_landing,omitempty"`
+	// ReviewQueue and DemosWaiting are his time as mw status DAMPERS counts it on
+	// the day (not over the week): the open cards, open demos and unrun hands
+	// steps, and the demos waiting DemoWaitingDays or more. Left out when the
+	// report was not given the means to count them.
+	ReviewQueue  *float64 `json:"review_queue,omitempty"`
+	DemosWaiting *float64 `json:"demos_waiting,omitempty"`
 }
 
 // takeSnapshot is the key metrics of the whole factory over the week to today.
-func takeSnapshot(all []reportEntry, now time.Time) MetricSnapshot {
+func takeSnapshot(all []reportEntry, review *ReviewTime, now time.Time) MetricSnapshot {
 	today := reportDay(now)
 	week := entriesBetween(all, today.AddDate(0, 0, -ChangeWindowDays+1), today.AddDate(0, 0, 1))
 	q := sumQuality(week)
@@ -315,6 +374,10 @@ func takeSnapshot(all []reportEntry, now time.Time) MetricSnapshot {
 	set(&s.DispatchToLandingS, "dispatch-to-landing")
 	set(&s.TokensPerLanding, "tokens/landing")
 	set(&s.USDPerLanding, "$/landing")
+	if review != nil {
+		queue, demos := float64(review.Queue), float64(review.DemosWaiting)
+		s.ReviewQueue, s.DemosWaiting = &queue, &demos
+	}
 	return s
 }
 
@@ -332,7 +395,7 @@ func (r FactoryReport) record(ctx context.Context, result FactoryReportResult, a
 		}
 	}
 	if r.Snapshots != nil && r.Rig == "" && r.Host == "" {
-		if err := r.keepSnapshot(ctx, takeSnapshot(all, now)); err != nil {
+		if err := r.keepSnapshot(ctx, takeSnapshot(all, result.Review, now)); err != nil {
 			problems = append(problems, err.Error())
 		}
 	}
@@ -357,7 +420,7 @@ func (r FactoryReport) tellMayor(ctx context.Context, c FactoryChange, at time.T
 	if err := r.Notes.SetNote(ctx, key, at.UTC().Format(LedgerDate)); err != nil {
 		return fmt.Errorf("%s: noting that the Mayor is told: %w", c.Story, err)
 	}
-	format := changeMetrics[c.Expect.Metric].format
+	format := formatOf(c.Expect.Metric)
 	body := fmt.Sprintf("%s (%s) landed %s expecting %s, and %s went the other way past the %.0f%% band: "+
 		"%s in the %d days before, %s in the %d days after (the whole factory, %s to %s).\n\n"+
 		"Look at it, and either fix it, take it back, or say the measure was noise: mw report shows FACTORY CHANGES.\n",

@@ -31,6 +31,8 @@ func TestParseExpectReadsTheMetricAndTheDirection(t *testing.T) {
 		"Expect: tokens/landing down":                                   {Metric: "tokens/landing", Direction: "down"},
 		"Expect: bugs/landing down":                                     {Metric: "bugs/landing", Direction: "down"},
 		"Expect: none, because this is a doc":                           {Metric: domain.ExpectNone},
+		"Expect: review queue down":                                     {Metric: "review queue", Direction: "down"},
+		"2. Expect: demos waiting down, because the Mayor shows them":   {Metric: "demos waiting", Direction: "down"},
 	} {
 		got, err := domain.ParseExpect(text)
 		if err != nil || got != want {
@@ -115,6 +117,25 @@ func TestEveryExpectRefusalSaysTheWholeRule(t *testing.T) {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("%s: the refusal does not say %q:\n%s", name, want, err)
 			}
+		}
+	}
+}
+
+// His time is a measure the Expect list names: the review queue and the demos
+// waiting (mw-gq6.677), and a refusal of an unknown metric lists them.
+func TestTheExpectListNamesHisReviewQueueAndTheDemosWaiting(t *testing.T) {
+	for _, acceptance := range []string{"Expect: review queue down", "Expect: demos waiting down"} {
+		if err := expectPlan("millwright", "1. It works.\n2. "+acceptance).Validate(); err != nil {
+			t.Errorf("%q was refused: %v", acceptance, err)
+		}
+	}
+	err := expectPlan("millwright", "1. It works.\n2. Expect: review time down").Validate()
+	if err == nil {
+		t.Fatal("an unknown metric was filable")
+	}
+	for _, want := range append(domain.ExpectMetrics(), "review queue", "demos waiting") {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %q:\n%s", want, err)
 		}
 	}
 }
