@@ -4054,7 +4054,7 @@ class), the `kinds` of rig it can occur in (pwa, go-cli, grind, phonics...), the
 Mayor weighs it) and `since`; then under `## Checked` one dated line a rig
 checked, `- <date> <rig> ok|found:<bead>`. Beside them `kinds.toml` says what
 kinds each rig is, `<rig> = ["pwa", "grind"]`. A Builder reads the register by
-need (`mw errors list`, `mw errors show <slug>`), never at boot. The Mayor keeps
+need (`mw errors list`, `mw errors show <slug>`); a bug's Builder is shown the classes of its rig's kinds at boot. The Mayor keeps
 it, one writer, as he keeps rig memory; each verb writes files, prints each
 file it wrote, commits those files alone as `mw errors <verb> <subject>` and pushes (a push that
 does not go is said on stderr, exit 0, the commit kept), spends no fuel and files nothing:
@@ -4090,7 +4090,10 @@ them, never over one it holds; a fresh vault is born with them.
 The loop. A bug's Builder is asked at boot to end its closing comment's body,
 just before `For the rig memory:`, with `For common errors:` and one line,
 `<slug>: <one line on the class>` (the register's slug when it has the class), or
-`nothing`. The Landed mail turns it into a line to paste: `mw errors checked
+`nothing`. The ask is followed at boot by the register's classes whose kinds meet
+its rig's (`kinds.toml`), one `<slug>: <symptom>` entry each, the most recently
+found first and cut near 3000 bytes with `... and N more: mw errors list`, so the
+Builder names a class the register holds rather than a new one. The Landed mail turns it into a line to paste: `mw errors checked
 <slug> <rig> found:<story>` for a class the register holds, `mw errors add <slug>
 --found <rig>:<story> --kinds <the rig's kinds> --symptom '<line>'` for a new one;
 a bug whose comment names none is said as `not given`. `mw status` lists under

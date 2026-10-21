@@ -2,9 +2,10 @@ Feature: The common-errors register
   An error class seen in one app is checked in every app it can occur in. The
   register is in the vault, seats/builder/common-errors/, one file a class, and
   kinds.toml beside them says what kinds each rig is. The Mayor keeps it with mw
-  errors, which spends no fuel and only writes files; a Builder reads it by
-  need, never at boot. A class found twice asks the Mayor whether a shared
-  component would carry one fix to every rig; nothing is filed for him.
+  errors, which spends no fuel and only writes files; a bug's Builder is shown the
+  classes of its rig's kinds at boot and reads any class by need. A class found
+  twice asks the Mayor whether a shared component would carry one fix to every
+  rig; nothing is filed for him.
 
   Scenario: The Mayor adds a class and it is a file in the register
     Given an empty error register

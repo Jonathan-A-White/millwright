@@ -356,6 +356,7 @@ func builderBoot(files *vault.Vault, host string, tests map[string]string, nice,
 		BdRetry:   bdRetrySession(),
 		MaxTurns:  turns,
 		Queries:   memoryQueryLog(),
+		Errors:    files,
 	}
 }
 

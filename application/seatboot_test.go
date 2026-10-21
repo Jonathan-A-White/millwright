@@ -625,3 +625,113 @@ func TestSeatBootNamesMemoryQueryOnlyForTheFactsRigItBootsInto(t *testing.T) {
 		})
 	}
 }
+
+// registerWithKinds is a common-errors register held in memory: class files by
+// slug and the text of kinds.toml.
+type registerWithKinds struct {
+	classes map[string]string
+	kinds   string
+}
+
+func (r registerWithKinds) ReadErrorRegister(context.Context, string) (map[string]string, string, error) {
+	return r.classes, r.kinds, nil
+}
+func (r registerWithKinds) WriteErrorClass(context.Context, string, string, string) (string, error) {
+	return "", nil
+}
+func (r registerWithKinds) WriteErrorKinds(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
+func aClassFile(slug, symptom, since string, kinds ...string) string {
+	return application.ErrorClass{Slug: slug, Symptom: symptom, Kinds: kinds, Since: since}.String()
+}
+
+func bootABug(t *testing.T, register application.ErrorFiles) string {
+	t.Helper()
+	h := &fakeHarness{}
+	boot := aSeatBoot(newFakeVault(), h)
+	boot.Errors = register
+	bug := aStory(func(d *application.StoryDetail) { d.Story.Title = "[bug] the gloss is the neighbour's" })
+	if _, err := boot.Boot(context.Background(), bug, "/worktree"); err != nil {
+		t.Fatalf("booting the bug: %v", err)
+	}
+	return h.launch.Kickoff
+}
+
+// A bug's Builder is shown the classes of the register whose kinds meet its
+// rig's, one slug: symptom line each, so that it names one (mw-gq6.683).
+func TestBootShowsABugsBuilderTheClassesOfItsRigsKinds(t *testing.T) {
+	kickoff := bootABug(t, registerWithKinds{
+		classes: map[string]string{
+			"go-class":   aClassFile("go-class", "a go-cli fault", "2026-10-01", "go-cli"),
+			"both-class": aClassFile("both-class", "a fault of both", "2026-10-02", "pwa", "go-cli"),
+			"pwa-class":  aClassFile("pwa-class", "a pwa-only fault", "2026-10-03", "pwa"),
+		},
+		kinds: "millwright = [\"go-cli\"]\nlegend = [\"pwa\"]\n",
+	})
+	i := strings.Index(kickoff, application.CommonErrorsAsk)
+	if i < 0 {
+		t.Fatalf("expected the ask in the kickoff, got %q", kickoff)
+	}
+	after := kickoff[i+len(application.CommonErrorsAsk):]
+	for _, want := range []string{application.CommonErrorsHeld, "go-class: a go-cli fault", "both-class: a fault of both"} {
+		if !strings.Contains(after, want) {
+			t.Errorf("expected %q after the ask, got %q", want, after)
+		}
+	}
+	if strings.Contains(kickoff, "pwa-class") {
+		t.Errorf("a class of other kinds only should not be listed, got %q", kickoff)
+	}
+}
+
+// A rig with no kinds, or an empty register, gets the ask as it was.
+func TestBootAddsNoClassListWithoutKindsOrClasses(t *testing.T) {
+	for name, register := range map[string]application.ErrorFiles{
+		"no kinds for the rig": registerWithKinds{
+			classes: map[string]string{"pwa-class": aClassFile("pwa-class", "x", "2026-10-03", "pwa")},
+			kinds:   "legend = [\"pwa\"]\n",
+		},
+		"empty register": registerWithKinds{kinds: "millwright = [\"go-cli\"]\n"},
+		"no register":    nil,
+	} {
+		kickoff := bootABug(t, register)
+		if strings.Contains(kickoff, application.CommonErrorsHeld) || !strings.Contains(kickoff, application.CommonErrorsAsk) {
+			t.Errorf("%s: expected the ask and no list, got %q", name, kickoff)
+		}
+	}
+	// Exactly as before: the kickoff ends with the ask.
+	if kickoff := bootABug(t, nil); !strings.HasSuffix(strings.TrimSpace(kickoff), strings.TrimSpace(application.CommonErrorsAsk)) {
+		t.Errorf("expected the kickoff to end with the ask, got %q", kickoff)
+	}
+}
+
+// A long register is cut near 3000 bytes, the classes most recently found
+// first, and ends with the count left out and where to read them.
+func TestBootCapsTheClassListAndSaysHowManyMore(t *testing.T) {
+	classes := map[string]string{}
+	for i := 0; i < 60; i++ {
+		slug := fmt.Sprintf("class-%02d", i)
+		classes[slug] = aClassFile(slug, strings.Repeat("a long symptom ", 20), fmt.Sprintf("2026-09-%02d", i%28+1), "go-cli")
+	}
+	// The newest by far: it must be kept.
+	classes["the-newest"] = aClassFile("the-newest", "found today", "2026-10-21", "go-cli")
+	kickoff := bootABug(t, registerWithKinds{classes: classes, kinds: "millwright = [\"go-cli\"]\n"})
+	list := kickoff[strings.Index(kickoff, application.CommonErrorsHeld):]
+	if len(list) > 3300 {
+		t.Errorf("expected the list near 3000 bytes, got %d", len(list))
+	}
+	if !strings.Contains(list, "the-newest: found today") {
+		t.Errorf("expected the newest class first, got %q", list)
+	}
+	lines := strings.Split(strings.TrimSpace(list), " | ")
+	last := lines[len(lines)-1]
+	if !strings.HasPrefix(last, "... and ") || !strings.HasSuffix(last, " more: mw errors list") {
+		t.Errorf("expected a closing '... and N more: mw errors list', got %q", last)
+	}
+	for _, line := range lines {
+		if strings.Contains(line, "a long symptom") && len(line) > len("class-00: ")+145 {
+			t.Errorf("expected a symptom cut to about 140 characters, got %d: %q", len(line), line)
+		}
+	}
+}

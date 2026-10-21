@@ -875,6 +875,94 @@ const CommonErrorsAsk = " This story is a bug: just before 'For the rig memory:'
 	"`mw errors list` already holds it (read `mw errors show <slug>` by need), a new lower-case hyphenated one when it does not; " +
 	"or the single word nothing. The Mayor places it in the common-errors register: you do not run mw errors add or checked."
 
+// CommonErrorsHeld heads the list of register classes a bug's Builder is shown
+// after CommonErrorsAsk.
+const CommonErrorsHeld = "Classes the register holds for this rig's kinds (name one of these if it fits; a new slug only when none does):"
+
+const (
+	// commonErrorsListCap is about how many bytes the list of classes may take.
+	commonErrorsListCap = 3000
+	// commonErrorSymptomCap is how many characters of a class's symptom the list keeps.
+	commonErrorSymptomCap = 140
+	// commonErrorsSeparator ends an entry: a kickoff holds no newline, since its
+	// command is one shell line.
+	commonErrorsSeparator = " | "
+)
+
+// CommonErrorsFor is what a bug's Builder is shown of the register at boot,
+// after CommonErrorsAsk: the classes whose kinds meet the rig's, one
+// `<slug>: <symptom>` entry each (the symptom cut to commonErrorSymptomCap),
+// the most recently found first, and, when they would pass commonErrorsListCap,
+// '... and N more: mw errors list'. It is empty for a rig with no kinds, a
+// register with no class of them, or a register that cannot be read: the ask
+// then stands as it was.
+func CommonErrorsFor(ctx context.Context, register ErrorFiles, seat, rig string) string {
+	if register == nil {
+		return ""
+	}
+	files, kindsText, err := register.ReadErrorRegister(ctx, seat)
+	if err != nil {
+		return ""
+	}
+	rigKinds, err := ParseRigKinds(kindsText)
+	if err != nil || len(rigKinds[rig]) == 0 {
+		return ""
+	}
+	classes, _ := LoadErrorClasses(files)
+	var meet []ErrorClass
+	for _, class := range classes {
+		if slices.ContainsFunc(class.Kinds, func(kind string) bool { return slices.Contains(rigKinds[rig], kind) }) {
+			meet = append(meet, class)
+		}
+	}
+	if len(meet) == 0 {
+		return ""
+	}
+	sort.SliceStable(meet, func(i, j int) bool { return meet[i].lastFound() > meet[j].lastFound() })
+
+	var b strings.Builder
+	b.WriteString(" " + CommonErrorsHeld)
+	kept := 0
+	for _, class := range meet {
+		entry := class.Slug + ": " + cutSymptom(class.Symptom)
+		if kept == 0 {
+			entry = " " + entry
+		} else {
+			entry = commonErrorsSeparator + entry
+		}
+		if kept > 0 && b.Len()+len(entry) > commonErrorsListCap {
+			break
+		}
+		b.WriteString(entry)
+		kept++
+	}
+	if more := len(meet) - kept; more > 0 {
+		fmt.Fprintf(&b, "%s... and %d more: mw errors list", commonErrorsSeparator, more)
+	}
+	return b.String()
+}
+
+// lastFound is the date a class was last found in a rig, or when it was first
+// seen when no check found it again.
+func (c ErrorClass) lastFound() string {
+	last := c.Since
+	for _, check := range c.Checks {
+		if check.Found != "" && check.Date > last {
+			last = check.Date
+		}
+	}
+	return last
+}
+
+// cutSymptom is a symptom on one line, cut to commonErrorSymptomCap characters.
+func cutSymptom(symptom string) string {
+	symptom = strings.Join(strings.Fields(symptom), " ")
+	if runes := []rune(symptom); len(runes) > commonErrorSymptomCap {
+		return string(runes[:commonErrorSymptomCap-3]) + "..."
+	}
+	return symptom
+}
+
 // isBugStory is a story a bug by its type, its [bug] title or its bug label.
 func isBugStory(d StoryDetail) bool {
 	return domain.IsBugStory(d.Type, d.Story.Title) || slices.Contains(d.Labels, "bug")

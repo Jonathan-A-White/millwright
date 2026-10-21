@@ -340,6 +340,10 @@ type SeatBoot struct {
 	// The session is told to wrap up at TurnCapWrapUp of them, and at the cap
 	// its harness stops it and mw next gives the story back. 0 sets no cap.
 	MaxTurns int
+
+	// Errors is the common-errors register a bug's Builder is shown the classes
+	// of its rig's kinds from, after its ask (mw-gq6.683); nil shows none.
+	Errors ErrorFiles
 }
 
 // DefaultMaxTurns is the most turns a Builder's session takes when the host's
@@ -380,7 +384,12 @@ func (b SeatBoot) Boot(ctx context.Context, detail StoryDetail, dir string) (Ses
 			return TesterKickoffPrompt(b.Seat, detail.Story.ID, vaultDir)
 		}
 		if isBugStory(detail) {
-			return KickoffPrompt(b.Seat, detail.Story.ID, vaultDir, memory) + CommonErrorsAsk
+			rig := ""
+			if path, err := detail.Path(); err == nil {
+				rig = path.Rig
+			}
+			return KickoffPrompt(b.Seat, detail.Story.ID, vaultDir, memory) + CommonErrorsAsk +
+				CommonErrorsFor(ctx, b.Errors, b.Seat, rig)
 		}
 		return KickoffPrompt(b.Seat, detail.Story.ID, vaultDir, memory)
 	})
