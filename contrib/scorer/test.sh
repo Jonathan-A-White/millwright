@@ -5,7 +5,7 @@
 #                                   needs the venv install.sh makes, espeak-ng and
 #                                   the model in the cache
 #   contrib/scorer/test.sh --pure   only the tests that need no model (the
-#                                   alignment and the HTTP face), with any python3
+#                                   alignment, the windows and the HTTP face), with any python3
 #   contrib/scorer/test.sh --gate-note
 #                                   runs nothing: says so, on stdout, when the full
 #                                   run above could not run here (no venv, no
@@ -35,7 +35,7 @@ if [ "${1:-}" = "--gate-note" ]; then
 elif [ "${1:-}" = "--pure" ]; then
 	python=$(command -v python3 || true)
 	[ -n "$python" ] || { echo "test.sh: python3 is not installed" >&2; exit 1; }
-	set -- -p 'test_[as]*.py'   # test_align.py, test_segments.py and test_server.py: no torch, no espeak-ng
+	set -- -p 'test_[as]*.py'   # test_align.py, test_audio_windows.py, test_segments.py and test_server.py: no torch, no espeak-ng
 else
 	if why=$(cannot_run_full); then
 		echo "test.sh: $why (or test.sh --pure)" >&2

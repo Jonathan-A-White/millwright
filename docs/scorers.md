@@ -72,7 +72,9 @@ An engine is a name in config and a file in `infrastructure/scorer/`.
   and an alignment, on CPU, run as the systemd user unit `mw-scorer`:
   `contrib/scorer/install.sh` installs it (after the hand step
   `sudo apt install espeak-ng`), and `contrib/scorer/README.md` says how it
-  scores, its limits and the way back.
+  scores, its limits and the way back. A clip longer than 30 s is heard in windows
+  of about that length, cut at its quietest places (`mw_scorer/windows.py`), so
+  the model's time grows with the clip, not with its square.
 - **`azure`** (`infrastructure/scorer/azure.go`) is Azure Speech's pronunciation
   assessment, the reference the local model is measured against. **The clip leaves
   this host**: it is sent to Microsoft, so add `azure` to `engines` only on a host
@@ -235,6 +237,11 @@ port, with this checkout's code, prints the URL on its first line, and stops the
 whenever it exits. Point the client at that URL (`MW_SCORER_URL=<url> go test
 ./infrastructure/scorer/`, or `local_url` in a throwaway config), never at the live one.
 It loads the model again (a few seconds, ~1.8 GB of memory).
+
+Measured on the Laptop with the private scorer (mw-gq6.666): the model's time is 0.21 to
+0.24 s per audio second at 300 s and at 600 s (one pass was 0.54 s at 300 s, 0.9 at 600 s). The
+whole request is 0.32 then 0.40 s per audio second, because the alignment fills a table of
+expected by produced phones and grows with the square of the words (11 s at 300 s, 48 s at 600 s).
 
 The live scorer says when it is hogged: for each request it scored it writes one line
 to its journal (`journalctl --user -u mw-scorer`), `mw-scorer: scored audio=<s>s
