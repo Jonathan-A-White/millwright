@@ -57,7 +57,7 @@ func TestWarmArgsAreTheColdOnesTakingTheirMessageOnStandardInput(t *testing.T) {
 	}
 	schema, _ := claude.GrindSchema(warmCall.Schema)
 	for _, pair := range [][2]string{
-		{"--tools", claude.GrindTools}, {"--system-prompt", warmCall.System}, {"--json-schema", schema},
+		{"--tools", claude.GrindTools}, {"--system-prompt-file", claude.SystemPromptPath(warmCall)}, {"--json-schema", schema},
 		{"--model", "sonnet"}, {"--effort", "low"}, {"--max-turns", "6"}, {"--permission-prompts", "none"},
 	} {
 		at := slices.Index(warm, pair[0])
@@ -113,6 +113,9 @@ func TestAWarmSessionWaitsForItsMessageAndAnswersIt(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if session.Exited() {
 		t.Fatal("expected the warm session to wait for its message")
+	}
+	if got, err := os.ReadFile(claude.SystemPromptPath(call)); err != nil || string(got) != call.System {
+		t.Fatalf("expected the warm session's system prompt in its directory, got %q, %v", got, err)
 	}
 	if _, err := os.Stat(filepath.Join(seen, "message")); err == nil {
 		t.Fatal("expected no message before Answer")

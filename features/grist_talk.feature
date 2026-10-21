@@ -28,7 +28,7 @@ Feature: The mill keeps one Claude session per talk, within the hour
     Given the phone sends a talk grist in "rom.8@1" asking "q2"
     When the mill grinds again
     Then session 2 resumed session 1's from cairn's own directory, with CLAUDE_CODE_PROMPT_CACHE_TTL=1h
-    And session 2 was given the same --model, --system-prompt and --json-schema as session 1
+    And session 2 was given the same --model, --system-prompt-file and --json-schema as session 1
     And session 2's message holds the request without its history
     And the answer to "q2" says the talk's session is "resumed", at turn 2
 
@@ -54,7 +54,7 @@ Feature: The mill keeps one Claude session per talk, within the hour
       --no-session-persistence
       --disable-slash-commands
       --safe-mode
-      --system-prompt
+      --system-prompt-file
       <system prompt>
       --json-schema
       <schema>

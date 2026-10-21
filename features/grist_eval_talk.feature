@@ -85,7 +85,7 @@ Feature: mw grist eval and the smoke run a two-turn talk example and leave no ta
       --no-session-persistence
       --disable-slash-commands
       --safe-mode
-      --system-prompt
+      --system-prompt-file
       <system prompt>
       --json-schema
       <schema>

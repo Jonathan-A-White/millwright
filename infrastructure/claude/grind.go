@@ -3,12 +3,15 @@ package claude
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,8 +93,58 @@ func GrindEnv(environ []string, call application.GrindCall) []string {
 	return env
 }
 
+// SystemPromptPath is where the grind's instructions are kept for claude to read
+// with --system-prompt-file: in the grind's own directory, under a name that
+// holds a digest of the text. A talk's grinds share one directory, so two kinds
+// (or two versions of a grind) with different instructions never meet in one
+// file, and one claude never reads another's text half written.
+func SystemPromptPath(call application.GrindCall) string {
+	sum := sha256.Sum256([]byte(call.System))
+	return filepath.Join(call.Dir, "system-prompt-"+hex.EncodeToString(sum[:8])+".md")
+}
+
+// WriteSystemPrompt writes call.System to SystemPromptPath, for the command
+// line GrindArgs and WarmArgs give: whole or not at all, and readable by the
+// owner only.
+func WriteSystemPrompt(call application.GrindCall) error {
+	if call.Dir == "" {
+		return errors.New("the grind has no directory to keep its instructions in")
+	}
+	fail := func(err error) error {
+		return fmt.Errorf("the grind's instructions could not be written to %s: %w", call.Dir, err)
+	}
+	tmp, err := os.CreateTemp(call.Dir, ".system-prompt-")
+	if err != nil {
+		return fail(err)
+	}
+	_, err = tmp.WriteString(call.System)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), SystemPromptPath(call))
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+		return fail(err)
+	}
+	return nil
+}
+
+// PromptArgMax is the longest prompt a grind carries as its last argument. One
+// argument may be 131,072 bytes on Linux (MAX_ARG_STRLEN), and execve fails
+// outright past it; a longer prompt (a talk's history, a long input) is sent on
+// the session's standard input instead, which claude --print reads as the prompt
+// (mw-gq6.690).
+const PromptArgMax = 64 << 10
+
+// PromptOnStdin says a grind's prompt goes on the session's standard input, as
+// it is too long for an argument.
+func PromptOnStdin(call application.GrindCall) bool { return len(call.Prompt) > PromptArgMax }
+
 // GrindArgs is a grind's command line after the program, one argument each,
-// never read by a shell: the prompt is the last. A talk's session is kept:
+// never read by a shell: the prompt is the last, unless PromptOnStdin. The instructions are named by
+// file (WriteSystemPrompt writes it), never carried in an argument. A talk's session is kept:
 // --session-id starts it, --resume carries it on, each in the place
 // --no-session-persistence has otherwise, and every other flag the same, so
 // the resumed turn's prompt cache matches the first's.
@@ -126,13 +179,18 @@ func GrindArgs(call application.GrindCall) ([]string, error) {
 		// not promise it stops CLAUDE.md discovery in the directory's
 		// ancestors or ~/.claude. --bare would too, but reads no OAuth login.
 		"--safe-mode",
-		"--system-prompt", call.System,
+		// A file, never the text: one argv string is at most 131,072 bytes on
+		// Linux, and a grind's instructions can pass it (mw-gq6.690).
+		"--system-prompt-file", SystemPromptPath(call),
 		"--json-schema", schema,
 	)
 	// The one limit a grind file may set. Nothing else is forbidden here: no
 	// flag turns subagents off.
 	if call.MaxTurns > 0 {
 		args = append(args, "--max-turns", strconv.Itoa(call.MaxTurns))
+	}
+	if PromptOnStdin(call) {
+		return args, nil
 	}
 	return append(args, call.Prompt), nil
 }
@@ -160,13 +218,17 @@ func GrindSchema(schema string) (string, error) {
 }
 
 // Grind implements application.Grinder. The session reads nothing from its
-// standard input (the null device: claude otherwise waits for it), runs in a
+// standard input (the null device: claude otherwise waits for it) but a prompt
+// too long for an argument (PromptOnStdin), runs in a
 // process group of its own, and is killed with the whole group at the
 // call's timeout. What it prints is its result JSON, read even when it
 // exits non-zero: an error result says why.
 func (g *Grinder) Grind(ctx context.Context, call application.GrindCall) (application.SessionResult, error) {
 	args, err := GrindArgs(call)
 	if err != nil {
+		return application.SessionResult{}, err
+	}
+	if err := WriteSystemPrompt(call); err != nil {
 		return application.SessionResult{}, err
 	}
 	timeout := call.Timeout
@@ -186,6 +248,9 @@ func (g *Grinder) Grind(ctx context.Context, call application.GrindCall) (applic
 	cmd.Dir = call.Dir
 	cmd.Env = GrindEnv(os.Environ(), call)
 	cmd.Stdin = null
+	if PromptOnStdin(call) {
+		cmd.Stdin = strings.NewReader(call.Prompt)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = time.Second
@@ -253,6 +318,9 @@ func WarmArgs(call application.GrindCall) ([]string, error) {
 func (g *Grinder) Warm(call application.GrindCall) (application.WarmSession, error) {
 	args, err := WarmArgs(call)
 	if err != nil {
+		return nil, err
+	}
+	if err := WriteSystemPrompt(call); err != nil {
 		return nil, err
 	}
 	cmd := exec.Command(g.program, args...)

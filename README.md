@@ -2587,7 +2587,13 @@ deleted from the backend. Each grist handled adds one line to
 `grinds.jsonl` in `grist_state_dir` (default `~/.local/state/mw/grist`): time,
 txid, app, kind, sender fingerprint, model, the model id the harness's result
 named (`model_id`), effort, where each came from, status,
-reason, Fuel, seconds and commit, never the grist's content. A grist's `grist`
+reason, Fuel, seconds, commit and `notes` (what the pass said of the run, such
+as the error that kept the harness from finishing: the reason the sender gets
+names no cause), never the grist's content. A grind's instructions reach claude
+as `--system-prompt-file` (a file in the grind's own directory, never an
+argument: one argument may not pass 131,072 bytes), and a prompt over 64 KiB on
+its standard input. `mw grist smoke` warns of instructions over 100,000 bytes.
+A grist's `grist`
 header may carry `model` and `effort`: they replace the grind file's for that
 grist, and must be within `[grist]` `models` and `efforts`, else the grist is
 refused naming the value.

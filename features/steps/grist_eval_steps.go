@@ -124,7 +124,7 @@ prompt=""
 while [ $# -gt 0 ]; do
   [ "$1" = "--model" ] && model="$2"
   [ "$1" = "--effort" ] && effort="$2"
-  [ "$1" = "--system-prompt" ] && system="$2"
+  [ "$1" = "--system-prompt-file" ] && system="$(cat "$2")"
   prompt="$1"
   shift
 done

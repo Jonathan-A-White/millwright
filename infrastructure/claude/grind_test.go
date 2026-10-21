@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +50,7 @@ func TestGrindArgsAreExactlyTheVerifiedFlags(t *testing.T) {
 		"--print", "--output-format", "json", "--model", "sonnet", "--effort", "low",
 		"--restricted", "--tools", "Read", "--strict-mcp-config", "--permission-prompts", "none",
 		"--no-session-persistence", "--disable-slash-commands", "--safe-mode",
-		"--system-prompt", call.System, "--json-schema", schema, call.Prompt,
+		"--system-prompt-file", claude.SystemPromptPath(call), "--json-schema", schema, call.Prompt,
 	}
 	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("expected\n%q\ngot\n%q", want, args)
@@ -268,5 +269,100 @@ func TestGrindEnvGivesATalkTheHoursCache(t *testing.T) {
 	want := []string{"HOME=/home/mill", claude.CacheTTLEnv + "=1h"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("a talk's resume was given %q, want %q", got, want)
+	}
+}
+
+// A system prompt past one argv string's limit (Linux: 131,072 bytes) reaches
+// claude as a file in the grind's directory, byte for byte; no argument is
+// longer than a path or a flag (mw-gq6.690: Lampas's bible-talk grind passed
+// its 131,254 bytes as one string, and claude never started).
+func TestGrindPassesTheSystemPromptAsAFileNotAnArgument(t *testing.T) {
+	dir := t.TempDir()
+	call := aGrindCall(t, dir)
+	call.System = strings.Repeat("The mill's rules, over and over.\n", 200000/33+1)[:200000]
+
+	args, err := claude.GrindArgs(call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, arg := range args {
+		if len(arg) > 4096 {
+			t.Fatalf("expected no argument over 4096 bytes, got one of %d", len(arg))
+		}
+	}
+	at := slices.Index(args, "--system-prompt-file")
+	if at < 0 || args[at+1] != claude.SystemPromptPath(call) || slices.Contains(args, "--system-prompt") {
+		t.Fatalf("expected --system-prompt-file in the grind's directory, got %q", args)
+	}
+
+	copied := filepath.Join(t.TempDir(), "system-prompt-as-claude-saw-it")
+	program, _ := grindStandIn(t, "while [ $# -gt 0 ]; do [ \"$1\" = --system-prompt-file ] && cp \"$2\" "+copied+"; shift; done\ncat <<'EOF'\n"+liveResult+"\nEOF\n")
+	if _, err := claude.NewGrinder(claude.WithGrindProgram(program)).Grind(context.Background(), call); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(copied)
+	if err != nil || string(got) != call.System {
+		t.Fatalf("expected the file to hold the system prompt byte for byte (%d bytes), got %d bytes, err %v", len(call.System), len(got), err)
+	}
+	info, err := os.Stat(claude.SystemPromptPath(call))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("expected the file private to its owner, got %v %v", info, err)
+	}
+}
+
+// A talk's grinds share one directory: instructions that differ are kept in
+// files of their own, and none is left half written or a temporary beside them.
+func TestSystemPromptsOfDifferentGrindsDoNotShareAFile(t *testing.T) {
+	dir := t.TempDir()
+	one, two := aGrindCall(t, dir), aGrindCall(t, dir)
+	two.System = "Another grind's rules."
+	for _, call := range []application.GrindCall{one, two} {
+		if err := claude.WriteSystemPrompt(call); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if claude.SystemPromptPath(one) == claude.SystemPromptPath(two) {
+		t.Fatal("expected a file for each text")
+	}
+	for _, call := range []application.GrindCall{one, two} {
+		if got, _ := os.ReadFile(claude.SystemPromptPath(call)); string(got) != call.System {
+			t.Fatalf("expected %q kept, got %q", call.System, got)
+		}
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 2 {
+		t.Fatalf("expected the two files and nothing else, got %v", entries)
+	}
+}
+
+// A prompt too long for one argument (a talk's long history, say) goes on the
+// session's standard input, not on the command line; a shorter one stays the
+// last argument.
+func TestGrindSendsAPromptTooLongForAnArgumentOnStandardInput(t *testing.T) {
+	seenPrompt := filepath.Join(t.TempDir(), "prompt")
+	program, _ := grindStandIn(t, "cat > "+seenPrompt+"\ncat <<'EOF'\n"+liveResult+"\nEOF\n")
+	call := aGrindCall(t, t.TempDir())
+	call.Prompt = strings.Repeat("A long history, again and again.\n", 200000/33+1)
+
+	args, err := claude.GrindArgs(call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, arg := range args {
+		if len(arg) > 4096 {
+			t.Fatalf("expected no argument over 4096 bytes, got one of %d", len(arg))
+		}
+	}
+	if !claude.PromptOnStdin(call) || slices.Contains(args, call.Prompt) {
+		t.Fatalf("expected the prompt off the command line, got %q", args)
+	}
+	if _, err := claude.NewGrinder(claude.WithGrindProgram(program)).Grind(context.Background(), call); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(seenPrompt); string(got) != call.Prompt {
+		t.Fatalf("expected the prompt whole on standard input, got %d bytes of %d", len(got), len(call.Prompt))
+	}
+	short := aGrindCall(t, t.TempDir())
+	if claude.PromptOnStdin(short) {
+		t.Fatal("expected a short prompt left on the command line")
 	}
 }

@@ -131,7 +131,7 @@ func registerGristTalk(ctx *godog.ScenarioContext, c *gristContext) {
 
 	ctx.Then(`^(session \d+|the last session) started a new session from cairn's own directory, with CLAUDE_CODE_PROMPT_CACHE_TTL=1h$`, t.startedNew)
 	ctx.Then(`^(session \d+|the last session) resumed session (\d+)'s from cairn's own directory, with CLAUDE_CODE_PROMPT_CACHE_TTL=1h$`, t.resumed)
-	ctx.Then(`^session (\d+) was given the same --model, --system-prompt and --json-schema as session (\d+)$`, t.sameFlags)
+	ctx.Then(`^session (\d+) was given the same --model, --system-prompt-file and --json-schema as session (\d+)$`, t.sameFlags)
 	ctx.Then(`^(session \d+|the last session)'s message holds the request (with|without) its history$`, t.messageHistory)
 	ctx.Then(`^the answer to "([^"]*)" says the talk's session is "([^"]*)"(?: because "([^"]*)")?, at turn (\d+)$`, t.answerSays)
 	ctx.Then(`^the answer to "([^"]*)" says nothing of a talk$`, t.answerSaysNothing)
@@ -453,7 +453,7 @@ func (t *talkContext) sameFlags(n, m int) error {
 		}
 	}
 	a, b := withoutSession(both[0]), withoutSession(both[1])
-	for _, name := range []string{"--model", "--system-prompt", "--json-schema"} {
+	for _, name := range []string{"--model", "--system-prompt-file", "--json-schema"} {
 		if _, ok := flag(a, name); !ok {
 			return fmt.Errorf("session %d was not given %s", n, name)
 		}
@@ -552,7 +552,7 @@ func (t *talkContext) argumentsAre(n int, want *godog.DocString) error {
 		return err
 	}
 	shown := slices.Clone(args)
-	for name, mark := range map[string]string{"--system-prompt": "<system prompt>", "--json-schema": "<schema>"} {
+	for name, mark := range map[string]string{"--system-prompt-file": "<system prompt>", "--json-schema": "<schema>"} {
 		if i := slices.Index(shown, name); i >= 0 && i+1 < len(shown) {
 			shown[i+1] = mark
 		}
