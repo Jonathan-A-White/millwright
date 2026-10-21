@@ -2748,7 +2748,7 @@ func TestSleepNamesTheNightlyAndTheSundayModelAndEffort(t *testing.T) {
 func TestVerifyDefaultsToHaikuMediumAndEightTenths(t *testing.T) {
 	writeConfig(t, "host = \"laptop\"\n")
 	got, err := config.Verify()
-	want := config.VerifySettings{Model: "haiku", Effort: "medium", Confidence: 0.8}
+	want := config.VerifySettings{Model: "haiku", Effort: "medium", Confidence: 0.8, Realtime: true}
 	if err != nil || got != want {
 		t.Fatalf("defaults = %+v (%v), want %+v", got, err, want)
 	}
@@ -2757,14 +2757,28 @@ func TestVerifyDefaultsToHaikuMediumAndEightTenths(t *testing.T) {
 func TestVerifyNamesTheModelTheEffortAndTheConfidence(t *testing.T) {
 	writeConfig(t, "[verify]\nmodel = \"sonnet\"\neffort = high\nconfidence = 0.65\n")
 	got, err := config.Verify()
-	want := config.VerifySettings{Model: "sonnet", Effort: "high", Confidence: 0.65}
+	want := config.VerifySettings{Model: "sonnet", Effort: "high", Confidence: 0.65, Realtime: true}
 	if err != nil || got != want {
 		t.Fatalf("read = %+v (%v), want %+v", got, err, want)
 	}
 	// each key alone leaves the others at their defaults
 	writeConfig(t, "[verify]\nconfidence = 1\n")
-	if got, err = config.Verify(); err != nil || got != (config.VerifySettings{Model: "haiku", Effort: "medium", Confidence: 1}) {
+	if got, err = config.Verify(); err != nil || got != (config.VerifySettings{Model: "haiku", Effort: "medium", Confidence: 1, Realtime: true}) {
 		t.Fatalf("confidence alone = %+v (%v)", got, err)
+	}
+}
+
+func TestVerifyRealtimeIsOnUntilTheTableSaysFalse(t *testing.T) {
+	for said, want := range map[string]bool{"true": true, "false": false, `"false"`: false} {
+		writeConfig(t, "[verify]\nrealtime = "+said+"\n")
+		got, err := config.Verify()
+		if err != nil || got.Realtime != want || got.Model != "haiku" {
+			t.Errorf("realtime = %s read %+v (%v), want Realtime %v and the other defaults", said, got, err, want)
+		}
+	}
+	writeConfig(t, "[verify]\nrealtime = sometimes\n")
+	if _, err := config.Verify(); err == nil || !strings.Contains(err.Error(), "realtime") {
+		t.Errorf("expected a realtime that is not a bool refused naming realtime, got %v", err)
 	}
 }
 

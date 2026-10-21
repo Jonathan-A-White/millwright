@@ -1700,6 +1700,9 @@ func Sleep() (SleepSettings, error) {
 // runs on: `model` and `effort` (haiku and medium when it does not say) and
 // `confidence`, the least confidence, above 0 and up to 1, at which a match
 // becomes a proposal (0.8). All three are PROVISIONAL: the Governor confirms.
+// `realtime` (true when it does not say) is whether the follower runs a match
+// for each picture of his that the inbox pass saves; false leaves it to the
+// nightly sweep and to mw verify match by hand.
 const VerifyTable = "verify"
 
 // The defaults of the [verify] table. application.DefaultVerifyModel,
@@ -1714,6 +1717,8 @@ const (
 type VerifySettings struct {
 	Model, Effort string
 	Confidence    float64
+	// Realtime is whether the follower matches a picture of his as it saves it.
+	Realtime bool
 }
 
 // Verify reports the `[verify]` table of ~/.config/mw/config.toml. A machine
@@ -1737,6 +1742,14 @@ func Verify() (VerifySettings, error) {
 	}
 	settings := VerifySettings{
 		Model: said("model", DefaultVerifyModel), Effort: said("effort", DefaultVerifyEffort), Confidence: DefaultVerifyConfidence,
+		Realtime: true,
+	}
+	if value := strings.TrimSpace(table["realtime"]); value != "" {
+		on, err := strconv.ParseBool(strings.Trim(value, `"'`))
+		if err != nil {
+			return VerifySettings{}, fmt.Errorf("the [%s] table of %s says realtime = %q: it must be true or false", VerifyTable, path, value)
+		}
+		settings.Realtime = on
 	}
 	if value := strings.TrimSpace(table["confidence"]); value != "" {
 		confidence, err := strconv.ParseFloat(value, 64)
