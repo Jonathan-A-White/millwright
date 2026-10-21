@@ -19,7 +19,7 @@ func newVerifyCmd() *cobra.Command {
 		Use:   "verify",
 		Short: "Match the Governor's messages and pictures to the demos and landings they show met",
 	}
-	cmd.AddCommand(newVerifyMatchCmd())
+	cmd.AddCommand(newVerifyMatchCmd(), newVerifyConfirmCmd(), newVerifyListCmd())
 	return cmd
 }
 
@@ -106,4 +106,56 @@ func parseVerifySince(said string) (time.Duration, error) {
 		return 0, fmt.Errorf("--since %q: use a duration like 36h or 7d", said)
 	}
 	return window, nil
+}
+
+func newVerifyConfirmCmd() *cobra.Command {
+	var txid, as, shows string
+	cmd := &cobra.Command{
+		Use:   "confirm <bead> --txid <txid> [--as mayor|deputy] [--shows \"<text>\"]",
+		Short: "Record a PROPOSED match as verified by his use: the VERIFIED comment, the demo closed, its card cleared",
+		Long: "confirm reads the PROPOSED comment for that txid on the bead (mw verify match wrote it) and writes the\n" +
+			"standing comment, whose first word is VERIFIED:\n" +
+			"  VERIFIED by the Governor's use, inferred by the <Mayor|Deputy> from <txid>: <shows> (proposed by mw verify match, run <id>)\n" +
+			"A bead that carries the label demo and is open or deferred is then closed on that reason, and its card is\n" +
+			"cleared as mw postern clear does, with one reply in the card's thread. Any other bead, a landing already\n" +
+			"closed, gets the comment only and keeps its status. No agent is called.\n\n" +
+			"A bead with no PROPOSED comment for the txid is refused, unless --shows \"<text>\" says what shows it: the\n" +
+			"comment then ends (by hand). A demo whose title, description or epic touches money, keys, secrets or a\n" +
+			"charter is refused: it is his word to give, not a seat's. A bead already carrying a VERIFIED comment is refused.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			gateway, _, err := posternGateway()
+			if err != nil {
+				return err
+			}
+			return application.VerifyConfirm{
+				Beads: gateway, Notes: gateway, Sender: newHandsPush(gateway), Out: cmd.OutOrStdout(),
+			}.Run(cmd.Context(), application.VerifyConfirmRequest{Bead: args[0], Txid: txid, As: as, Shows: shows})
+		},
+	}
+	cmd.Flags().StringVar(&txid, "txid", "", "the txid of his message or picture that shows it (required)")
+	cmd.Flags().StringVar(&as, "as", "mayor", "who infers it: mayor or deputy")
+	cmd.Flags().StringVar(&shows, "shows", "", "what the evidence shows; required when no PROPOSED comment names the txid, and then recorded as by hand")
+	_ = cmd.MarkFlagRequired("txid")
+	return cmd
+}
+
+func newVerifyListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "Print the proposals of mw verify match that wait to be confirmed",
+		Long: "list prints every open demo, and every landing of the last 14 days, that has a PROPOSED comment and no\n" +
+			"VERIFIED one: the bead, the txid, what it shows, the confidence, and the mw verify confirm line. A demo\n" +
+			"that asks his own word (money, keys, a charter) is listed with that reason instead of the line. It reads\n" +
+			"the tracker and calls no agent; it supersedes the vault's bin/mayor-unverified.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			gateway, _, err := posternGateway()
+			if err != nil {
+				return err
+			}
+			_, err = application.VerifyList{Beads: gateway, Out: cmd.OutOrStdout()}.Run(cmd.Context())
+			return err
+		},
+	}
 }
