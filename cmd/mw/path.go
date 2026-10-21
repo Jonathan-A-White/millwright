@@ -45,6 +45,9 @@ func newPathSetCmd() *cobra.Command {
 			"So is a files key naming a directory of more than " + strconv.Itoa(application.MostFilesInADirectory) + " files in the rig's checkout here, a glob matching more than that, or\n" +
 			"a whole directory (src/, src/**) or a glob ending in a wildcard (tests/e2e/*.ts) where the rig is not\n" +
 			"checked out to count it.\n\n" +
+			"A story with files and a size is told 'test callers: N for size S (allows M)': the rig's test\n" +
+			"files (features/, tests/, *_test.go) naming its files by base name, against XS 5, S 10, M 20,\n" +
+			"L 35, XL 50. Over that, a WARN on stderr says to split the story or size it up; nothing is refused.\n\n" +
 			"A story in an epic whose rig asks for a last story (epic_last_story_labels) with exactly one\n" +
 			"open or held story carrying it is made a need of that story, and one line says so.",
 		Args: cobra.MinimumNArgs(1),
@@ -56,7 +59,7 @@ func newPathSetCmd() *cobra.Command {
 			// A rig table that cannot be read leaves no checkout to count a
 			// directory in: a whole directory is refused, a plain name taken.
 			rigs, _ := config.Rigs()
-			_, err = application.PathSet{Tracker: gateway, Rigs: rigs, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout()}.
+			_, err = application.PathSet{Tracker: gateway, Rigs: rigs, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}.
 				Run(cmd.Context(), args[0], from, args[1:])
 			return err
 		},

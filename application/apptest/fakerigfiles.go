@@ -14,6 +14,10 @@ import (
 type FakeRigFiles struct {
 	mu    sync.Mutex
 	files map[string]map[string]bool
+	// callers is the test callers each checkout is said to have, and the
+	// stems asked for the last time.
+	callers map[string]int
+	asked   []string
 }
 
 var _ application.RigFiles = (*FakeRigFiles)(nil)
@@ -78,4 +82,30 @@ func (f *FakeRigFiles) Matching(rigDir, pattern string, most int) int {
 		}
 	}
 	return min(n, most+1)
+}
+
+// SetTestCallers says how many test files the checkout at rigDir has that name
+// any stem asked for.
+func (f *FakeRigFiles) SetTestCallers(rigDir string, n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.callers == nil {
+		f.callers = map[string]int{}
+	}
+	f.callers[rigDir] = n
+}
+
+// AskedStems are the stems the last TestCallers was asked for.
+func (f *FakeRigFiles) AskedStems() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.asked...)
+}
+
+// TestCallers implements application.RigFiles.
+func (f *FakeRigFiles) TestCallers(rigDir string, stems []string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append([]string(nil), stems...)
+	return f.callers[rigDir], nil
 }

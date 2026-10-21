@@ -68,6 +68,25 @@ func KnownSize(s Size) bool {
 	return false
 }
 
+// CallersAllowed is the most test files that may name a story's files before the
+// story is bigger than its size says (mw-gq6.661): XS 5, S 10, M 20, L 35, XL 50.
+// A size that is not one of Sizes allows none to be judged, and is 0.
+func (s Size) CallersAllowed() int {
+	switch s {
+	case SizeXS:
+		return 5
+	case SizeS:
+		return 10
+	case SizeM:
+		return 20
+	case SizeL:
+		return 35
+	case SizeXL:
+		return 50
+	}
+	return 0
+}
+
 // Big says the size is L or XL: more than one session is likely to finish.
 func (s Size) Big() bool { return s == SizeL || s == SizeXL }
 

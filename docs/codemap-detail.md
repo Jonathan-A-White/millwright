@@ -4,7 +4,7 @@ The application/ files of each use case in [docs/codemap.md](codemap.md), which 
 
 | Use case | In application/ |
 |-|-|
-| File, Release, Ice, Thaw, Retry, Cause, Note, Path* | application/file.go, application/release.go, application/ice.go, application/icerewire.go, application/stuck.go, application/retry.go, application/cause.go, application/note.go, application/pathset.go |
+| File, Release, Ice, Thaw, Retry, Cause, Note, Path* | application/file.go, application/callers.go, application/release.go, application/ice.go, application/icerewire.go, application/stuck.go, application/retry.go, application/cause.go, application/note.go, application/pathset.go |
 | Show, Peek, Prove, StampHead, Tester[File], FactoryReport[Send], Invest[Book], Loop | application/show.go, application/stamphead.go, application/testerreport.go, application/testerfile.go, application/factoryreport.go, application/reportsend.go, application/invest.go, application/loop.go, application/looprank.go |
 | Dispatch, Next, BatchLand, AfterLandingRun, BdRetry | application/dispatch.go, application/next.go, application/afterlandingrun.go |
 | Check*, Status, CloudCheck, CloudMake, Brief | application/check.go, application/checkparts.go, application/status.go, application/cloud.go, application/cloudmake.go, application/brief.go |

@@ -778,6 +778,19 @@ progress or closed are refused with nothing written: a Path is adjusted only
 before a story starts. `mw path show` prints `(unset)` for a key the story has
 no value for. See `features/path_set.feature`.
 
+**Test callers (mw-gq6.661).** A story is sized by the screens it names, but the
+tests that call those screens change with them. When a story names files and a
+size, `mw path set` and `mw file` (and `mw file --check`) count the rig's test
+files (those under `features/` or `tests/`, and any `*_test.go`) that name any
+of its files by base name without extension, in one `git grep -l -F` of the
+rig's checkout on this host, and say `<story>: test callers: N for size S
+(allows M)`. The size allows, in all: XS 5, S 10, M 20, L 35, XL 50. Over that,
+`WARN: N test callers for size S; split (a first story moving the callers onto
+one helper) or size up` goes to stderr, and `mw file --check` exits non-zero for
+it unless the plan's story carries `"callers_ok": "<why>"`. Filing and
+`mw path set` only warn. A story with no size, no plain file in its files key,
+or a rig not checked out here is not counted. See `features/file_callers.feature`.
+
 The eighth key, `files`, is the comma-separated repo paths or globs (`*` within a
 directory, `**` across them; a directory covers what is under it) the story
 expects to change. It is the story's own, so `--from` never copies it. `mw

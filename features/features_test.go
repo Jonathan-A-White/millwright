@@ -113,6 +113,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeEventClockRestartScenario(ctx)
 	steps.InitializeEventFollowScenario(ctx)
 	steps.InitializeEventGristSpringScenario(ctx)
+	steps.InitializeFileCallersScenario(ctx)
 	steps.InitializeFilePlanScenario(ctx)
 	steps.InitializeFilesExpectedScenario(ctx)
 	steps.InitializeGristEvalScenario(ctx)

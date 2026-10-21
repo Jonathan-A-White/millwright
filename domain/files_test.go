@@ -72,3 +72,19 @@ func TestGlobsReadsEachNameNarrowerThanAWholeDirectory(t *testing.T) {
 		t.Errorf("expected\n%+v\ngot\n%+v", want, got)
 	}
 }
+
+func TestCallerStemsAreTheBaseNamesOfThePlainFilesOnce(t *testing.T) {
+	got := domain.CallerStems("src/screens/Settings.tsx, ./src/Settings.test.tsx, src/a/, src/**/*.ts, Makefile, .gitignore, src/screens/Settings.css")
+	want := []string{"Settings", "Settings.test", "Makefile"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("CallerStems = %q, want %q", got, want)
+	}
+}
+
+func TestEachSizeAllowsItsTestCallers(t *testing.T) {
+	for size, want := range map[domain.Size]int{domain.SizeXS: 5, domain.SizeS: 10, domain.SizeM: 20, domain.SizeL: 35, domain.SizeXL: 50, "": 0} {
+		if got := size.CallersAllowed(); got != want {
+			t.Errorf("%q allows %d, want %d", size, got, want)
+		}
+	}
+}

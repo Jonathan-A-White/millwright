@@ -24,6 +24,11 @@ type RigFiles interface {
 	// key covers (a file under a directory it matches counts), counted no
 	// further than one past most (mw-gq6.633).
 	Matching(rigDir, pattern string, most int) int
+
+	// TestCallers is how many of the rig's test files (those under features/ or
+	// tests/, and any *_test.go) name any of the stems, which are base names
+	// without extension, in the checkout at rigDir (mw-gq6.661).
+	TestCallers(rigDir string, stems []string) (int, error)
 }
 
 // WrongRig is a story whose files key names paths that exist in none of its

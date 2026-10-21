@@ -49,6 +49,10 @@ type PlanStory struct {
 	Files string `json:"files,omitempty"`
 	// Labels are the tags the story is filed with, as the tracker spells them.
 	Labels []string `json:"labels"`
+	// CallersOK is why the story may name files that more test files call than
+	// its size allows (mw-gq6.661): the Mayor's reason, which waives mw file
+	// --check's failure for it. Empty waives nothing.
+	CallersOK string `json:"callers_ok,omitempty"`
 }
 
 // PathOverrides are the fields of the epic's default Path this story departs
