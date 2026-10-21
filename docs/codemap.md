@@ -61,7 +61,7 @@ Each use case's application/ files: [docs/codemap-detail.md](codemap-detail.md),
 | Event* | cmd/mw/events.go | event_follow |
 | Prompt*, Cards, Todo* | cmd/mw/prompt.go, cmd/mw/card.go, cmd/mw/todo.go, cmd/mw/todo_search.go, infra/todoindex/index.go | {prompt,card,todo*} |
 | Grist* (eval, smoke: turn_2) | cmd/mw/grist.go, cmd/mw/gristsmoke.go, cmd/mw/grist_talks.go | {grist*,scorer} |
-| Triage*, Queue, Fold (+supersede), Sleep, Verify (mw verify match) | infra/beads/triage.go, cmd/mw/triage.go, cmd/mw/queue.go, cmd/mw/fold.go, cmd/mw/sleep.go, cmd/mw/verify.go | verify_match |
+| Triage*, Queue, Fold (+supersede), Sleep, Verify (match, confirm, list) | infra/beads/triage.go, cmd/mw/triage.go, cmd/mw/queue.go, cmd/mw/fold.go, cmd/mw/sleep.go, cmd/mw/verify.go | verify_* |
 
 cmd/mw/root.go, cmd/mw/version.go
 

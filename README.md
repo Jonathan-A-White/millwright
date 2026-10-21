@@ -3306,6 +3306,20 @@ confidence = 0.8        # the least confidence, above 0 and up to 1, at which a 
 The call is billed to the API key when `[grist] api_credits` is on, as the mill's grinds are. The steps are in
 `features/verify_match.feature`.
 
+### Confirming a proposal (`mw verify confirm`, `mw verify list`)
+
+`mw verify list` prints every open demo, and every landing of the last 14 days, that has a `PROPOSED` comment and no
+`VERIFIED` one: the bead, the txid, what it shows, the confidence and the `mw verify confirm` line. It supersedes the
+vault's `bin/mayor-unverified`. `mw verify confirm <bead> --txid <txid> [--as mayor|deputy] [--shows "<text>"]` reads
+the `PROPOSED` comment for that txid and writes the standing record, whose first word is `VERIFIED`: `VERIFIED by
+the Governor's use, inferred by the <Mayor|Deputy> from <txid>: <what it shows> (proposed by mw verify match, run
+<id>)`. A bead that carries the label `demo` and is open or deferred is then closed on that reason, and its card is
+cleared as `mw postern clear` does, with one reply in the card's thread; a landing already closed gets the comment
+only. A bead with no `PROPOSED` comment for the txid is refused unless `--shows` says what shows it, and then the
+comment ends `(by hand)`. A demo whose title, description or epic touches money, keys, secrets or a charter is listed
+but never confirmed by a seat: it is his word to give. Neither command calls an agent. The steps are in
+`features/verify_confirm.feature`.
+
 ## Saved prompts
 
 The Mayor keeps prompts on the postern backend, so the Governor can run one by
