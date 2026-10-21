@@ -505,7 +505,10 @@ above 0, and the sleep pass's bundle holds `stuck.txt`, `mw stuck`'s output, so 
 summary names the roots. A bead below the priority of the beads waiting on it, directly
 or through live beads (the walk `mw stuck` uses), is named in DAMPERS as
 `inversion: mw-a.2 P2→P1` (`mw-a.3 P3 (his)` for a his-priority bead: no raise proposed),
-and the same list ends `stuck.txt`; it changes no priority. See `application/stuck_test.go` and
+and the same list ends `stuck.txt`; it changes no priority. His review queue counts only beads
+not closed (a card, a demo, a hands step: the steps `mw hands list` prints); an alarm that names more
+beads than DAMPERS shows ends `+N (all: mw stuck --dampers)`, and `mw stuck --dampers` prints every
+alarm with every bead it names, one a line. See `application/stuck_test.go` and
 `application/icerewire_test.go`.
 
 ## Naming why a story failed
