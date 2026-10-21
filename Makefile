@@ -15,6 +15,23 @@ TAGS ?= beads_integration
 
 JOBS ?= $(shell nproc)
 
+# Timing tests (docs/timing-tests.md): Go tests that need a real clock are named
+# with a Timing suffix. MW_TIMING=skip leaves them out, MW_TIMING=only runs
+# nothing else; unset runs every test. No test is named so yet.
+TIMING_FLAGS :=
+ifeq ($(MW_TIMING),skip)
+TIMING_FLAGS := -skip Timing
+endif
+ifeq ($(MW_TIMING),only)
+TIMING_FLAGS := -run Timing
+endif
+
+# The package timeout go test is given, stated rather than left at Go's 10 min
+# default: infrastructure/beads alone took 167 s (go test -count=1, host load
+# 6 to 12, 2026-10-21) and the gate runs other packages beside it, so 20m is
+# about seven times that and still ends a hung package.
+TEST_TIMEOUT ?= 20m
+
 export GOFLAGS := -p=$(JOBS)
 export GOMAXPROCS := $(JOBS)
 
@@ -32,7 +49,7 @@ build:
 # not run on this host (no venv, no espeak-ng): the Go test for them skips there
 # without a word (mw-gq6.644).
 test:
-	$(GO) test -tags $(TAGS) $(PKG)
+	$(GO) test -tags $(TAGS) -timeout $(TEST_TIMEOUT) $(TIMING_FLAGS) $(PKG)
 	contrib/scorer/test.sh --gate-note
 
 # go vet, then the code map check: docs/codemap.md must be under its size
