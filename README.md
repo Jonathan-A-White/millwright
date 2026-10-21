@@ -2720,7 +2720,8 @@ refused when the example is read), `contains` (a substring, or an element of a l
 part must hold. `all` is a list of checks of those same kinds on the same field,
 each of which must hold: `"answer": { "all": [ { "matches": "gardener" },
 { "matches": "library" } ] }` wants both words, and a failure names the one
-that is missing. A new behaviour of a grind is a new scenario file. The smoke sends as
+that is missing. A new behaviour of a grind is a new scenario file; a scenario of a talk adds `turn_2`, a second turn sent
+under the same talk with the history left out (see `mw grist eval` below). The smoke sends as
 the **test key** `grist_test_key_file` (default `~/.config/mw/grist-test.key`,
 env `MW_GRIST_TEST_KEY_FILE`: a key file the backend holds a licence for each
 app's grist; never the mill's or the Mayor's, and mw does not make it) and
@@ -2877,6 +2878,32 @@ key unless told to, and nothing prints a private key; `--backend` defaults to
 `mw grist eval --grind <rig>/grinds/<kind>.json --photos <dir> [--models haiku,sonnet] [--out <dir>]` grinds each photo
 that has a `<name>.txt` of expected names once per model, serially, as the mill would, and scores the names in the answer's `items[].name` or `lines[].text` (an answer with neither says "no names to score") as hits, misses, extras and unsure items with seconds, cost and tokens per photo and model; a grind the harness stopped for a usage or rate limit, or its model's service failing, is "not run", never "failed".
 It writes `eval-<UTC>.jsonl` and `.md` under `--out` and never touches the backend, the mill's counts or the cap; `--help` says the rest. See `features/grist_eval.feature`.
+
+`mw grist eval <app> <kind> --example <name> [--example ...]` is the other eval: it sends the named examples of the app's grind
+(`grinds/examples/<kind>/<name>.json` at the rig's `main`, exactly the smoke's examples) once each through the backend as the
+test key, with no resend, hold or record, prints each answer, and leaves with 1 when one misses its `expect`. It exists for the
+example you are working on; each example costs a grist.
+
+An example of a **talk** adds `turn_2`, a second turn with its own `request` (and `photos`), beside the `request`, which is turn 1:
+
+```json
+{ "schemaVersion": "1",
+  "request": { "question": "my son Luke is 14 ...", "history": [] },
+  "turn_2":  { "request": { "question": "what did I tell you about my son?" } },
+  "expect":  { "answer": { "matches": "Luke" } } }
+```
+
+Turn 1 is sent with the talk `eval:<example>:<nonce>` (`smoke:<kind>/<example>:<nonce>` for the smoke), then turn 2 under the same talk
+and with no `history` (a `history` in `turn_2.request` is taken out; the mill resumes the session, which holds turn 1). Turn 1's answer
+must fit the answer schema; only turn 2's is held to `expect`. A failure says `turn 1:` or `turn 2:` before the reason. A wrong
+answer is sent again by the smoke as a whole new talk, as any example is. The layout rules the examples read, and whether a two-turn
+example carries each: `schemaVersion` (beside the requests; one for both turns, and a `schemaVersion` inside `turn_2.request` must
+agree), `request` (turn 1; `turn_2.request` is turn 2's, required), `photos` (turn 1's, and `turn_2.photos` is turn 2's: files beside
+the example), `expect` (turn 2's answer alone), `description` (free text, ignored). An example with no `turn_2` runs as it always did,
+with no talk. Every talk the eval or the smoke starts is ended when it has been answered or has failed: its record under the mill's
+state directory (`talks/`) and every transcript of its sessions are deleted, so `mw grist talks <app>` shows none of them; and the
+next eval or smoke of the app ends any `eval:` or `smoke:` talk unused for an hour, which a run killed midway leaves (only where the mill runs: a
+host with no `talks/` has none to end). See `features/grist_eval_talk.feature`.
 
 `mw grist score --engine local --target "the cat sat" --audio clip.webm [--lang en]`
 hands a recording of someone reading a text aloud to a scoring engine and prints
