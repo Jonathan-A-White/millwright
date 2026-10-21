@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/gitcmd"
 )
 
@@ -40,20 +41,26 @@ func WithSpecCommands(commands map[string]string) CheckOption {
 // RunSpecs implements application.SpecChecks: the spec files dir has added,
 // copied, modified or renamed since its merge-base with base, put into the rig's
 // changed-specs command where it says {specs} and run by the shell in dir. A
-// rig with no command, and a branch that changed no spec, run nothing.
+// spec the rig's timing_tests name runs only in the nightly timing job, so it is
+// left out and named in LeftOut (mw-gq6.682). A rig with no command, and a branch
+// that changed no spec to run, run nothing.
 func (c *Checks) RunSpecs(ctx context.Context, rig, dir, base string) (application.SpecsChecked, error) {
 	template, named := c.specs[rig]
 	if !named {
 		return application.SpecsChecked{}, nil
 	}
-	specs, err := c.changedSpecs(ctx, dir, base)
-	if err != nil || len(specs) == 0 {
+	changed, err := c.changedSpecs(ctx, dir, base)
+	if err != nil {
 		return application.SpecsChecked{}, err
+	}
+	specs, leftOut := c.leavingOutTiming(rig, changed)
+	if len(specs) == 0 {
+		return application.SpecsChecked{LeftOut: leftOut}, nil
 	}
 	command := strings.ReplaceAll(template, SpecsPlaceholder, shellWords(specs))
 
 	output, err := runLine(ctx, c.shell, command, dir, c.nice, c.commandEnv(rig))
-	run := application.SpecsChecked{Checked: application.Checked{Command: command, Output: output, Passed: err == nil}, Specs: specs}
+	run := application.SpecsChecked{Checked: application.Checked{Command: command, Output: output, Passed: err == nil}, Specs: specs, LeftOut: leftOut}
 	if err == nil {
 		return run, nil
 	}
@@ -96,10 +103,11 @@ func (c *Checks) RunRelated(ctx context.Context, rig, dir string, span applicati
 	if !named {
 		return application.RelatedRun{}, nil
 	}
-	files, err := c.changedFilesSkipping(ctx, dir, span)
+	changed, err := c.changedFilesSkipping(ctx, dir, span)
 	if err != nil {
 		return application.RelatedRun{}, err
 	}
+	files, _ := c.leavingOutTiming(rig, changed)
 	if len(files) == 0 {
 		return application.RelatedRun{NoFiles: true}, nil
 	}
@@ -108,6 +116,30 @@ func (c *Checks) RunRelated(ctx context.Context, rig, dir string, span applicati
 		return application.RelatedRun{}, err
 	}
 	return application.RelatedRun{Checked: checked, Files: files, Ran: true}, nil
+}
+
+// leavingOutTiming splits files into those a rig command may be given and those
+// the rig's timing_tests globs name, which run only in the nightly timing job
+// and which the rig's own config leaves out of every other run (mw-gq6.682). It
+// matches as the nightly job does (domain.Covers). A rig with no timing_tests
+// keeps every file.
+func (c *Checks) leavingOutTiming(rig string, files []string) (kept, leftOut []string) {
+	globs := c.timing[rig]
+	for _, file := range files {
+		timing := false
+		for _, glob := range globs {
+			if domain.Covers(glob, file) {
+				timing = true
+				break
+			}
+		}
+		if timing {
+			leftOut = append(leftOut, file)
+		} else {
+			kept = append(kept, file)
+		}
+	}
+	return kept, leftOut
 }
 
 // changedFilesSkipping lists the files HEAD of dir changed as span says: all

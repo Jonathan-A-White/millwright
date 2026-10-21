@@ -55,6 +55,7 @@ func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^"([^"]*)" is queued for batch landing, having also added the spec "([^"]*)"$`, c.aStoryIsQueuedAddingASpec)
 	ctx.Then(`^the changed-specs command was run once, given the specs: (.+)$`, c.theChangedSpecsRanOnceOnSpecs)
 	ctx.Then(`^the gate log of batch (\d+) shows the tests' command, then the changed-specs command, with the text "([^"]*)"$`, c.theGateLogShowsTheSpecs)
+	ctx.Then(`^the gate log of batch (\d+) says "([^"]*)"$`, c.theGateLogSays)
 	ctx.When(`^mw lands the batch of the rig$`, c.mwLandsTheBatch)
 	registerLedgerWatchSteps(ctx, c)
 	ctx.Then(`^the story "([^"]*)" is recorded as landed and is still open$`, c.landedAndStillOpen)
@@ -172,6 +173,18 @@ func (c *nextContext) theGateLogShowsTheSpecs(number int, output string) error {
 	}
 	if !strings.Contains(log[specs:], output) {
 		return fmt.Errorf("expected %q after the changed-specs command in the gate log, got:\n%s", output, log)
+	}
+	return nil
+}
+
+// theGateLogSays reads the gate log of the batch for text it must hold.
+func (c *nextContext) theGateLogSays(number int, text string) error {
+	held, err := os.ReadFile(filepath.Join(c.batchDir(number), application.BatchGateLogFile))
+	if err != nil {
+		return fmt.Errorf("expected the gate log of batch %d: %w", number, err)
+	}
+	if !strings.Contains(string(held), text) {
+		return fmt.Errorf("expected the gate log to say %q, got:\n%s", text, held)
 	}
 	return nil
 }

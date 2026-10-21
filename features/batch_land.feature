@@ -199,6 +199,16 @@ Feature: mw land lands a batch rig's queue under one gate run
     Then the batch landed on "main" in one push, forcing nothing
     And the changed-specs command was not run
 
+  Scenario: A spec the rig's timing_tests name is left out of the changed-specs command, and the gate log says so (mw-gq6.682)
+    Given "mw-gq6.1" is queued for batch landing, having also added the spec "tests/e2e/turn-pages-trace.spec.ts"
+    And "mw-gq6.2" is queued for batch landing, having also added the spec "tests/e2e/ipa-course.spec.ts"
+    And the rig's timing_tests name the spec "tests/e2e/turn-pages-trace.spec.ts"
+    And the rig has a changed-specs command that logs the specs it is given
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And the changed-specs command was run once, given the specs: tests/e2e/ipa-course.spec.ts
+    And the gate log of batch 1 says "left out: timing test, runs nightly: tests/e2e/turn-pages-trace.spec.ts"
+
   Scenario: A rig with no changed-specs command lands a batch that added a spec as it always did (mw-gq6.627)
     Given "mw-gq6.1" is queued for batch landing, having also added the spec "tests/e2e/unlock-room.spec.ts"
     When mw lands the batch of the rig

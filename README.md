@@ -1472,7 +1472,10 @@ its `[tests]` line does not run (mw-gq6.366): after the tests pass, `mw next`
 and `mw check` read the `tests/e2e/*.spec.ts` files the story's branch added or
 changed since its merge-base with the target branch, put them where the line
 says `{specs}`, and run it with `/bin/sh` in the worktree — and again on the
-merged result when merging made a merge commit. No such file, no run; a failing
+merged result when merging made a merge commit. No such file, no run. A spec the rig's `timing_tests` name runs only in the
+nightly timing job (mw-gq6.682): it is left out of the line's `{specs}` (and a
+timed file of the related-tests line's `{files}`), and the gate log says
+`left out: timing test, runs nightly`. A failing
 run refuses the landing as `tests-fail` (`merged-tests-fail` on the merged
 result), naming the specs. A rig the table does not name lands as it always did.
 `mw land` runs it too (mw-gq6.627): under the batch's one gate lock, after the

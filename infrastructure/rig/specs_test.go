@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 )
 
@@ -120,5 +121,95 @@ func TestSpecNamesAreQuotedForTheShell(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(log); string(got) != "tests/e2e/it's here.spec.ts\n" {
 		t.Errorf("expected the name to survive the shell whole, got %q", got)
+	}
+}
+
+func TestAChangedTimingSpecIsLeftOutOfTheRigsChangedSpecsCommand(t *testing.T) {
+	timing := map[string][]string{"lampas": {"tests/e2e/turn-pages-trace.spec.ts"}}
+	command := func(log string) map[string]string {
+		return map[string]string{"lampas": "printf '%s\\n' {specs} > " + log}
+	}
+
+	t.Run("only a timing spec changed: nothing is run and the spec is named as left out", func(t *testing.T) {
+		dir := specsRepo(t, "tests/e2e/turn-pages-trace.spec.ts")
+		log := filepath.Join(t.TempDir(), "log")
+		checks := rig.NewChecks(rig.WithSpecCommands(command(log)), rig.WithTimingTests(timing))
+
+		run, err := checks.RunSpecs(context.Background(), "lampas", dir, "main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(log); err == nil {
+			t.Error("expected the changed-specs command never to run on a timing spec")
+		}
+		if len(run.Specs) != 0 || run.Command != "" {
+			t.Errorf("expected no run, got %+v", run)
+		}
+		if want := []string{"tests/e2e/turn-pages-trace.spec.ts"}; !reflect.DeepEqual(run.LeftOut, want) {
+			t.Errorf("LeftOut = %v, want %v", run.LeftOut, want)
+		}
+	})
+
+	t.Run("a timing spec and an ordinary one changed: the command gets the ordinary one", func(t *testing.T) {
+		dir := specsRepo(t, "tests/e2e/turn-pages-trace.spec.ts", "tests/e2e/talk-fit.spec.ts")
+		log := filepath.Join(t.TempDir(), "log")
+		checks := rig.NewChecks(rig.WithSpecCommands(command(log)), rig.WithTimingTests(timing))
+
+		run, err := checks.RunSpecs(context.Background(), "lampas", dir, "main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"tests/e2e/talk-fit.spec.ts"}; !run.Passed || !reflect.DeepEqual(run.Specs, want) {
+			t.Errorf("expected a passing run on %v, got %+v", want, run)
+		}
+		if got, _ := os.ReadFile(log); string(got) != "tests/e2e/talk-fit.spec.ts\n" {
+			t.Errorf("expected the command to be given the ordinary spec only, got %q", got)
+		}
+		if want := []string{"tests/e2e/turn-pages-trace.spec.ts"}; !reflect.DeepEqual(run.LeftOut, want) {
+			t.Errorf("LeftOut = %v, want %v", run.LeftOut, want)
+		}
+	})
+
+	t.Run("a rig with no timing_tests runs every changed spec, as before", func(t *testing.T) {
+		dir := specsRepo(t, "tests/e2e/turn-pages-trace.spec.ts", "tests/e2e/talk-fit.spec.ts")
+		log := filepath.Join(t.TempDir(), "log")
+		checks := rig.NewChecks(rig.WithSpecCommands(command(log)), rig.WithTimingTests(map[string][]string{"other": {"tests/e2e/*.spec.ts"}}))
+
+		run, err := checks.RunSpecs(context.Background(), "lampas", dir, "main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"tests/e2e/talk-fit.spec.ts", "tests/e2e/turn-pages-trace.spec.ts"}
+		if !reflect.DeepEqual(run.Specs, want) || len(run.LeftOut) != 0 {
+			t.Errorf("expected every changed spec, got %+v", run)
+		}
+		if got, _ := os.ReadFile(log); string(got) != strings.Join(want, "\n")+"\n" {
+			t.Errorf("expected the command as before, got %q", got)
+		}
+	})
+}
+
+func TestAChangedTimingFileIsLeftOutOfTheRelatedTestsLine(t *testing.T) {
+	dir := specsRepo(t, "tests/e2e/turn-pages-trace.spec.ts", "src/x.ts")
+	log := filepath.Join(t.TempDir(), "log")
+	checks := rig.NewChecks(
+		rig.WithRelatedCommands(map[string]string{"lampas": "printf '%s\\n' {files} > " + log}),
+		rig.WithTimingTests(map[string][]string{"lampas": {"tests/e2e/turn-pages-trace.spec.ts"}}))
+
+	run, err := checks.RunRelated(context.Background(), "lampas", dir, application.RelatedSpan{Base: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"src/x.ts"}; !run.Ran || !reflect.DeepEqual(run.Files, want) {
+		t.Errorf("expected the line run on %v, got %+v", want, run)
+	}
+	if got, _ := os.ReadFile(log); string(got) != "src/x.ts\n" {
+		t.Errorf("expected the line to be given src/x.ts only, got %q", got)
+	}
+
+	only := specsRepo(t, "tests/e2e/turn-pages-trace.spec.ts")
+	run, err = checks.RunRelated(context.Background(), "lampas", only, application.RelatedSpan{Base: "main"})
+	if err != nil || run.Ran || !run.NoFiles {
+		t.Errorf("expected nothing to run on a branch that changed only a timing test, got %+v (error: %v)", run, err)
 	}
 }

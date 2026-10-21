@@ -151,6 +151,12 @@ func (n Next) gateWithSpecs(ctx context.Context, c *closeOut, report *NextReport
 	if err != nil {
 		return gated{Err: fmt.Errorf("the rig's changed specs could not be run in %s: %w", dir, err)}, log
 	}
+	if len(run.LeftOut) > 0 {
+		if !strings.HasSuffix(log, "\n") {
+			log += "\n"
+		}
+		log += LeftOutTimingSpecs(run.LeftOut) + "\n"
+	}
 	if len(run.Specs) == 0 {
 		return tests, log
 	}
