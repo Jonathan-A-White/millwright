@@ -242,6 +242,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextBatchSteps(ctx, c)
 	registerNextSlotCapSteps(ctx, c)
 	registerBatchLandSteps(ctx, c)
+	registerBatchLandTagSteps(ctx, c)
 	registerVaultLeftoversSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)

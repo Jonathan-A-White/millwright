@@ -515,6 +515,90 @@ func (w *Worktrees) Push(ctx context.Context, landingDir, remote, branch string)
 	return nil
 }
 
+var _ application.TagPublisher = (*Worktrees)(nil)
+
+// PublishTags implements application.TagPublisher: each tag of the repository
+// that points (itself or through an annotated tag object) at a commit of
+// base..HEAD and is not on the remote is pushed, by its own refspec without a
+// plus. A tag the remote already has at another commit is only reported.
+// named are version tags the criteria name; those the remote lacks afterwards
+// are Missing.
+func (w *Worktrees) PublishTags(ctx context.Context, landingDir, remote, base string, named []string) (application.PublishedTags, error) {
+	var out application.PublishedTags
+	if remote == "" {
+		remote = w.remote
+	}
+	onRemote, err := w.remoteTags(ctx, landingDir, remote)
+	if err != nil {
+		return out, err
+	}
+	if base != "" {
+		landed, err := w.git(ctx, landingDir, "rev-list", base+"..HEAD")
+		if err != nil {
+			return out, err
+		}
+		inRange := map[string]bool{}
+		for _, sha := range strings.Fields(landed) {
+			inRange[sha] = true
+		}
+		tags, err := w.git(ctx, landingDir, "for-each-ref", "--format=%(refname:strip=2) %(objectname) %(*objectname)", "refs/tags")
+		if err != nil {
+			return out, err
+		}
+		for _, line := range strings.Split(tags, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			name, commit := fields[0], fields[len(fields)-1]
+			if !inRange[commit] {
+				continue
+			}
+			if there, ok := onRemote[name]; ok {
+				if there != commit {
+					out.Elsewhere = append(out.Elsewhere, name)
+				}
+				continue
+			}
+			if _, err := w.git(ctx, landingDir, "push", remote, "refs/tags/"+name+":refs/tags/"+name); err != nil {
+				out.Failed = append(out.Failed, fmt.Sprintf("%s could not be pushed to origin: %s", name, strings.SplitN(err.Error(), "\n", 2)[0]))
+				continue
+			}
+			onRemote[name] = commit
+			out.Pushed = append(out.Pushed, name)
+		}
+	}
+	for _, tag := range named {
+		if _, ok := onRemote[tag]; !ok {
+			out.Missing = append(out.Missing, tag)
+		}
+	}
+	return out, nil
+}
+
+// remoteTags is the commit each tag of the remote points at, an annotated
+// tag through the commit it names.
+func (w *Worktrees) remoteTags(ctx context.Context, dir, remote string) (map[string]string, error) {
+	listed, err := w.git(ctx, dir, "ls-remote", "--tags", remote)
+	if err != nil {
+		return nil, err
+	}
+	tags := map[string]string{}
+	for _, line := range strings.Split(listed, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 || !strings.HasPrefix(fields[1], "refs/tags/") {
+			continue
+		}
+		name := strings.TrimPrefix(fields[1], "refs/tags/")
+		if peeled := strings.TrimSuffix(name, "^{}"); peeled != name {
+			tags[peeled] = fields[0]
+		} else if _, ok := tags[name]; !ok {
+			tags[name] = fields[0]
+		}
+	}
+	return tags, nil
+}
+
 // CloseLanding implements application.Landing.
 func (w *Worktrees) CloseLanding(ctx context.Context, rigDir, landingDir string) error {
 	if landingDir == "" {

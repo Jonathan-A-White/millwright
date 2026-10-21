@@ -171,6 +171,10 @@ type BatchReport struct {
 	Base   string
 	Commit string
 
+	// tags is what became of the release tags in the batch's range, as the
+	// whole batch's; each story's mail takes its own part (PublishedTags.ForStory).
+	tags PublishedTags
+
 	// Queue is every story the batch took, oldest queued first; Merged and
 	// SetAside are the two parts of it.
 	Queue    []BatchStory
@@ -584,6 +588,15 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 		}
 		return
 	}
+	var named []string
+	for _, s := range report.Merged {
+		for _, tag := range ACVersionTags(s.detail.Acceptance) {
+			if !containsString(named, tag) {
+				named = append(named, tag)
+			}
+		}
+	}
+	report.tags = n.publishTags(ctx, nr, dir, report.Base, named)
 	report.Commit, report.Landed = commit, true
 }
 
@@ -804,6 +817,7 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 
 		mailed := NextReport{
 			StoryID: s.ID, Host: n.Host, Title: s.Title, Target: report.Target, Commits: s.Commits, Pushes: 1,
+			Tags:   report.tags.ForStory(s.detail.Acceptance),
 			Landed: true, How: Landed{Commit: s.Merge, FastForward: s.FastForward, Version: report.Version, Unioned: s.Unioned},
 			Ledger: line, Closed: closed, DemoHeld: heldDemo, NotClosed: "see the batch's report",
 			Notes: append([]string{fmt.Sprintf("landed by mw land in %s (%s), whose commit %s is on %s", report.Label(), strings.Join(together, ", "),

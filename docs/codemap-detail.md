@@ -22,3 +22,4 @@ The application/ files of each use case in [docs/codemap.md](codemap.md), which 
 | Prompt*, Cards, Todo* | application/prompt.go, application/tododue.go, application/todosize.go, application/todorank.go, application/todosearch.go |
 | Grist* | application/grist.go, application/gristtiming.go, application/gristlevel.go, application/gristgrind.go, application/gristsend.go, application/gristrequest.go, application/griststatus.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go |
 | Triage*, Queue, Fold, Sleep | application/triage.go, application/queue.go, application/fold.go, application/foldsupersede.go, application/sleep.go, application/sleepgather.go, application/sleepledger.go, application/fuelkinds.go |
+| TagPublisher, PublishedTags (a landing pushes the release tags of its range and warns of an AC tag not on origin) | application/tags.go (rig/landing.go PublishTags) |

@@ -292,6 +292,11 @@ func (c *nextContext) theBatchLandedInOnePush(branch string) error {
 				return fmt.Errorf("mw land forced a push: %q", line)
 			}
 		}
+		// A tag the batch carries is pushed beside the branch (mw-gq6.673), by
+		// its own unforced refspec; it is not a second push of the branch.
+		if strings.Contains(line, " refs/tags/") {
+			continue
+		}
 		if !strings.HasSuffix(line, "refs/heads/"+branch) {
 			return fmt.Errorf("expected mw land to push only %s, got %q", branch, line)
 		}

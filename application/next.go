@@ -494,6 +494,10 @@ type NextReport struct {
 	// Pushes is how many times the push was attempted: more than one means the
 	// other host landed something while this story was being landed.
 	Pushes int
+	// Tags is what became of the release tags the landing carries to the
+	// remote: pushed, left alone because the remote has them elsewhere, or
+	// named by the acceptance criteria and still not there (mw-gq6.673).
+	Tags PublishedTags
 	// CrossSlot is what became of the rig's cross-host merge slot: how long
 	// the close-out waited for it and for whose landing, a holder gone away it
 	// was taken over from, or why it was skipped. Empty when there was nothing
@@ -2427,6 +2431,7 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 	if err := n.pushRetrying(ctx, report, dir, c.target); err != nil {
 		return Landed{}, err
 	}
+	report.Tags = n.publishTags(ctx, report, dir, landed.Before, ACVersionTags(c.detail.Acceptance))
 	n.fileCodemapTrim(ctx, c, report)
 	return landed, nil
 }
@@ -3630,6 +3635,11 @@ func (r NextReport) String() string {
 			fmt.Fprintf(&b, "  STOPPED %s\n", r.Why)
 		} else {
 			fmt.Fprintf(&b, "  STOPPED (%s) %s\n", r.Reason, r.Why)
+		}
+	}
+	if r.Landed {
+		for _, line := range r.Tags.Lines() {
+			b.WriteString(line + "\n")
 		}
 	}
 	switch {
