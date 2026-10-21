@@ -100,7 +100,7 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 		}
 		defer holding.Release(ctx)
 	}
-	checked, err := k.Parts.RunLine(ctx, c.worktree, part.Command)
+	checked, err := k.Parts.RunLine(ctx, c.path.Rig, c.worktree, part.Command)
 	if err != nil {
 		return report, fmt.Errorf("checking %s: %s could not be run: %w", c.id, label, err)
 	}

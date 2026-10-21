@@ -103,7 +103,7 @@ func without(list []string, drop string) []string {
 
 // SuiteRan is one command line the fake runner was asked to run.
 type SuiteRan struct {
-	Dir, Command string
+	Rig, Dir, Command string
 }
 
 // FakeSuiteRunner is an application.SuiteRunner that runs nothing: Respond says
@@ -120,9 +120,9 @@ type FakeSuiteRunner struct {
 var _ application.SuiteRunner = (*FakeSuiteRunner)(nil)
 
 // RunLine implements application.SuiteRunner.
-func (f *FakeSuiteRunner) RunLine(_ context.Context, dir, command string) (application.Checked, error) {
+func (f *FakeSuiteRunner) RunLine(_ context.Context, rig, dir, command string) (application.Checked, error) {
 	f.mu.Lock()
-	f.ran = append(f.ran, SuiteRan{Dir: dir, Command: command})
+	f.ran = append(f.ran, SuiteRan{Rig: rig, Dir: dir, Command: command})
 	respond := f.Respond
 	f.mu.Unlock()
 	if respond == nil {

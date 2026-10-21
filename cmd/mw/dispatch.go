@@ -362,7 +362,7 @@ func newDispatchCmd() *cobra.Command {
 				Home:          files,
 				GateLock:      hostGateLock(),
 				Rechecks: application.Suite{
-					Trees: worktrees, Heads: worktrees, Runner: rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs)),
+					Trees: worktrees, Heads: worktrees, Runner: rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs), rig.WithTimingTests(files.TimingTests(cmd.Context()))),
 					Rigs: rigs, Tests: tests, ChangedSpecs: changedSpecs,
 				},
 				DryRun: dryRun,

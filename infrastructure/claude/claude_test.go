@@ -1132,6 +1132,31 @@ func TestTheBuildersSessionIsGivenItsWorkerLimit(t *testing.T) {
 	}
 }
 
+// TestTheBuildersSessionIsGivenItsRigsTimingTests: a Builder running its rig's
+// tests by hand leaves out what the gate leaves out (mw-eo6dj9.2); a session of
+// a rig that names none gets no MW_TIMING.
+func TestTheBuildersSessionIsGivenItsRigsTimingTests(t *testing.T) {
+	timing := map[string][]string{"millwright": {"tests/timing/**", "**/*.timing.test.ts"}}
+	spec, err := New(WithTimingTests(timing)).Session(launch(nil))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	if spec.Env["MW_TIMING"] != "skip" || spec.Env["MW_TIMING_TESTS"] != "tests/timing/**,**/*.timing.test.ts" {
+		t.Errorf("expected MW_TIMING=skip and the globs, got %q and %q", spec.Env["MW_TIMING"], spec.Env["MW_TIMING_TESTS"])
+	}
+	for _, opts := range [][]Option{nil, {WithTimingTests(map[string][]string{"lampas": {"x/**"}})}} {
+		spec, err := New(opts...).Session(launch(nil))
+		if err != nil {
+			t.Fatalf("assembling the session: %v", err)
+		}
+		for _, name := range []string{"MW_TIMING", "MW_TIMING_TESTS"} {
+			if v, set := spec.Env[name]; set {
+				t.Errorf("expected no %s for a rig without timing tests, got %q", name, v)
+			}
+		}
+	}
+}
+
 // A close-out alone runs mw next in the environment a session's close-out runs
 // in, the host's beads environment and the seat's identity, and nothing else:
 // no harness, no heartbeat, no boot file or result (mw-gq6.467).

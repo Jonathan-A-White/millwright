@@ -44,6 +44,7 @@ type Checks struct {
 	specs    map[string]string
 	related  map[string]string
 	named    map[string]string
+	timing   map[string][]string
 	git      string
 	shell    string
 	nice     int
@@ -113,20 +114,38 @@ func WithJobs(n int) CheckOption {
 	return func(c *Checks) { c.jobs = n }
 }
 
+// WithTimingTests gives each rig's commands MW_TIMING=skip and MW_TIMING_TESTS
+// as the rig's timing_tests globs, by rig name (application.TimingEnv), so the
+// tests that need a real clock leave the gate and the suite runs. A rig the map
+// does not name, or names with no globs, is run as it was.
+func WithTimingTests(timing map[string][]string) CheckOption {
+	return func(c *Checks) {
+		for rig, globs := range timing {
+			if len(globs) > 0 {
+				c.timing[rig] = globs
+			}
+		}
+	}
+}
+
 // NewChecks returns the checks of a rig whose tests are DefaultCommand, unless
 // an option says otherwise.
 func NewChecks(opts ...CheckOption) *Checks {
-	c := &Checks{commands: map[string]string{}, command: DefaultCommand, parts: map[string][]application.GatePart{}, specs: map[string]string{}, related: map[string]string{}, named: map[string]string{}, git: Program, shell: Shell}
+	c := &Checks{commands: map[string]string{}, command: DefaultCommand, parts: map[string][]application.GatePart{}, specs: map[string]string{}, related: map[string]string{}, named: map[string]string{}, timing: map[string][]string{}, git: Program, shell: Shell}
 	for _, opt := range opts {
 		opt(c)
 	}
 	return c
 }
 
-// workerEnv is the worker limit as KEY=VALUE words for a command's environment.
-func (c *Checks) workerEnv() []string {
+// commandEnv is the worker limit and the rig's timing tests as KEY=VALUE words
+// for the environment of a command run for the rig.
+func (c *Checks) commandEnv(rig string) []string {
 	var env []string
 	for name, value := range application.WorkerLimitEnv(c.jobs) {
+		env = append(env, name+"="+value)
+	}
+	for name, value := range application.TimingEnv(application.TimingSkip, c.timing[rig]) {
 		env = append(env, name+"="+value)
 	}
 	return env
@@ -149,15 +168,16 @@ var _ application.GateParts = (*Checks)(nil)
 
 // Run implements application.Checks.
 func (c *Checks) Run(ctx context.Context, rig, dir string) (application.Checked, error) {
-	return c.RunLine(ctx, dir, c.Command(rig))
+	return c.RunLine(ctx, rig, dir, c.Command(rig))
 }
 
 // Checks satisfies the port a suite's command lines are run through.
 var _ application.SuiteRunner = (*Checks)(nil)
 
 // RunLine implements application.SuiteRunner: the command line, read by the
-// shell in dir, judged as Run judges a rig's tests.
-func (c *Checks) RunLine(ctx context.Context, dir, command string) (application.Checked, error) {
+// shell in dir, judged as Run judges a rig's tests, with the environment of
+// the rig it is run for.
+func (c *Checks) RunLine(ctx context.Context, rig, dir, command string) (application.Checked, error) {
 	if dir == "" {
 		return application.Checked{}, fmt.Errorf("running `%s`: where?", command)
 	}
@@ -165,7 +185,7 @@ func (c *Checks) RunLine(ctx context.Context, dir, command string) (application.
 		return application.Checked{}, fmt.Errorf("running `%s`: %w", command, err)
 	}
 
-	output, err := runLine(ctx, c.shell, command, dir, c.nice, c.workerEnv())
+	output, err := runLine(ctx, c.shell, command, dir, c.nice, c.commandEnv(rig))
 	checked := application.Checked{Command: command, Output: output, Passed: err == nil}
 	if err == nil {
 		return checked, nil
