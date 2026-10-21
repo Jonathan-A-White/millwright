@@ -52,7 +52,7 @@ func (c *Checks) RunSpecs(ctx context.Context, rig, dir, base string) (applicati
 	}
 	command := strings.ReplaceAll(template, SpecsPlaceholder, shellWords(specs))
 
-	output, err := runLine(ctx, c.shell, command, dir, c.nice, c.workerEnv())
+	output, err := runLine(ctx, c.shell, command, dir, c.nice, c.commandEnv(rig))
 	run := application.SpecsChecked{Checked: application.Checked{Command: command, Output: output, Passed: err == nil}, Specs: specs}
 	if err == nil {
 		return run, nil
@@ -103,7 +103,7 @@ func (c *Checks) RunRelated(ctx context.Context, rig, dir string, span applicati
 	if len(files) == 0 {
 		return application.RelatedRun{NoFiles: true}, nil
 	}
-	checked, err := c.RunLine(ctx, dir, strings.ReplaceAll(template, FilesPlaceholder, shellWords(files)))
+	checked, err := c.RunLine(ctx, rig, dir, strings.ReplaceAll(template, FilesPlaceholder, shellWords(files)))
 	if err != nil {
 		return application.RelatedRun{}, err
 	}
@@ -216,7 +216,7 @@ func (c *Checks) RunNamed(ctx context.Context, rig, dir string, tests []string) 
 	if !named || len(tests) == 0 {
 		return application.NamedRun{}, nil
 	}
-	checked, err := c.RunLine(ctx, dir, strings.ReplaceAll(template, TestsPlaceholder, shellWords(tests)))
+	checked, err := c.RunLine(ctx, rig, dir, strings.ReplaceAll(template, TestsPlaceholder, shellWords(tests)))
 	if err != nil {
 		return application.NamedRun{}, err
 	}

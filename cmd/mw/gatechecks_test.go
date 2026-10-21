@@ -48,7 +48,7 @@ func TestLandingChecksCarriesTheRigsChangedSpecsCommandOnEveryPath(t *testing.T)
 		"mw next and mw land": {related: true},
 		"mw check":            {parts: true},
 	} {
-		checks, err := landingChecks(which)
+		checks, err := landingChecks(t.TempDir(), which)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -58,6 +58,56 @@ func TestLandingChecksCarriesTheRigsChangedSpecsCommandOnEveryPath(t *testing.T)
 		}
 		if !run.Passed || !strings.Contains(run.Command, "echo ran tests/e2e/a.spec.ts") {
 			t.Fatalf("%s: expected the rig's changed-specs command run on the spec, got %+v", name, run)
+		}
+	}
+}
+
+// A rig whose file names timing_tests has its gate commands run with
+// MW_TIMING=skip on every path that lands a story (mw-eo6dj9.2); a rig whose
+// file has no such key is run with no MW_TIMING at all.
+func TestLandingChecksRunsARigWithTimingTestsWithTheSkipEnvironment(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".config", "mw"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := "[tests]\nlampas = \"env | grep '^MW_TIMING' | sort; true\"\nfellowship = \"env | grep '^MW_TIMING' | sort; true\"\n"
+	if err := os.WriteFile(filepath.Join(home, ".config", "mw", "config.toml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	vaultDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(vaultDir, "rigs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rigFile := "timing_tests = [\"tests/timing/**\"]\n"
+	if err := os.WriteFile(filepath.Join(vaultDir, "rigs", "lampas.toml"), []byte(rigFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vaultDir, "rigs", "fellowship.toml"), []byte("union_merge_files = [\"docs/*.md\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, which := range map[string]gateCommands{
+		"mw next and mw land": {related: true},
+		"mw check":            {parts: true},
+	} {
+		checks, err := landingChecks(vaultDir, which)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		with, err := checks.Run(context.Background(), "lampas", t.TempDir())
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if want := "MW_TIMING=skip\nMW_TIMING_TESTS=tests/timing/**\n"; with.Output != want {
+			t.Errorf("%s: a rig with timing_tests ran with %q, want %q", name, with.Output, want)
+		}
+		without, err := checks.Run(context.Background(), "fellowship", t.TempDir())
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if without.Output != "" {
+			t.Errorf("%s: a rig without timing_tests ran with %q, want no MW_TIMING", name, without.Output)
 		}
 	}
 }

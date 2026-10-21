@@ -85,7 +85,7 @@ func newSuiteCmd() *cobra.Command {
 				filer = &application.SuiteFiler{Tracker: gateway, Rules: vault.New(dir), Mailbox: gateway, Host: host}
 			}
 			worktrees := rig.New()
-			checks := rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs))
+			checks := rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs), rig.WithTimingTests(vault.New(dir).TimingTests(cmd.Context())))
 			report, err := application.Suite{
 				Trees:        worktrees,
 				Heads:        worktrees,

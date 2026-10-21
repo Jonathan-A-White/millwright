@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
+
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
 // gateCommands says which of the rig's gate commands a path runs. [tests] and
@@ -15,12 +18,12 @@ type gateCommands struct {
 	parts   bool
 }
 
-// landingChecks is the one place the gate's commands are read from the config
+// landingChecks (vaultDir is where the rigs' files are) is the one place the gate's commands are read from the config
 // file and put into the rig's Checks, so that mw next, mw land and mw check
 // cannot drift apart on which of [tests], [test_parts] and [changed_specs] a
 // landing runs (mw-gq6.627: mw land was built without [changed_specs] and ran
 // none). The Checks is also the SpecChecks of the same rigs.
-func landingChecks(which gateCommands) (*rig.Checks, error) {
+func landingChecks(vaultDir string, which gateCommands) (*rig.Checks, error) {
 	tests, err := config.Tests()
 	if err != nil {
 		return nil, err
@@ -41,7 +44,7 @@ func landingChecks(which gateCommands) (*rig.Checks, error) {
 	if err != nil {
 		return nil, err
 	}
-	options := []rig.CheckOption{rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNamedCommands(named), rig.WithNice(nice), rig.WithJobs(jobs)}
+	options := []rig.CheckOption{rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNamedCommands(named), rig.WithNice(nice), rig.WithJobs(jobs), rig.WithTimingTests(vault.New(vaultDir).TimingTests(context.Background()))}
 	if which.related {
 		related, err := config.RelatedTests()
 		if err != nil {

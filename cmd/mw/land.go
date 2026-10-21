@@ -111,7 +111,7 @@ func newLandCmd() *cobra.Command {
 			gateway := mwGateway(dir, host)
 			files := mwVault(dir, host)
 			worktrees := rig.New()
-			checks, err := landingChecks(gateCommands{related: true})
+			checks, err := landingChecks(dir, gateCommands{related: true})
 			if err != nil {
 				return err
 			}

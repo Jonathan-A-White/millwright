@@ -220,6 +220,7 @@ type Harness struct {
 	serverHost     string
 	nice           int
 	jobs           int
+	timing         map[string][]string
 }
 
 // Harness satisfies the port.
@@ -287,6 +288,14 @@ func WithNice(n int) Option {
 // default, adds nothing.
 func WithJobs(n int) Option {
 	return func(h *Harness) { h.jobs = n }
+}
+
+// WithTimingTests gives a session working a rig MW_TIMING=skip and the rig's
+// timing_tests globs as MW_TIMING_TESTS (application.TimingEnv), by rig name,
+// so the tests a Builder runs by hand leave out what the gate leaves out
+// (mw-eo6dj9.2). A rig this does not name gets nothing.
+func WithTimingTests(timing map[string][]string) Option {
+	return func(h *Harness) { h.timing = timing }
 }
 
 // New returns a Harness that runs Claude Code as this host has it, unless an
@@ -477,6 +486,10 @@ func (h *Harness) spec(l application.Launch, line string) application.SessionSpe
 	}
 	// The host's cap on test workers, when it says one (mw-gq6.399).
 	for name, value := range application.WorkerLimitEnv(h.jobs) {
+		env[name] = value
+	}
+	// The rig's timing tests, left out as the gate leaves them out.
+	for name, value := range application.TimingEnv(application.TimingSkip, h.timing[l.Path.Rig]) {
 		env[name] = value
 	}
 	return application.SessionSpec{

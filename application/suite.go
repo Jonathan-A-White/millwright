@@ -53,7 +53,7 @@ type SuiteTrees interface {
 // directory, by the shell. A command that ran and failed is a Checked that did
 // not pass; an error is a command that could not be run at all.
 type SuiteRunner interface {
-	RunLine(ctx context.Context, dir, command string) (Checked, error)
+	RunLine(ctx context.Context, rig, dir, command string) (Checked, error)
 }
 
 // SuiteRecords is the port a suite's result files are written to the vault
@@ -372,7 +372,7 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 	s.say("  run     %s at %s on %s\n", rig, short(head.Commit), head.Branch)
 	for _, phase := range phases {
 		result.Commands = append(result.Commands, phase.command)
-		checked, err := s.Runner.RunLine(ctx, dir, phase.command)
+		checked, err := s.Runner.RunLine(ctx, rig, dir, phase.command)
 		if err != nil {
 			return SuiteReport{}, fmt.Errorf("running `%s` in %s: %w", phase.command, dir, err)
 		}
@@ -394,7 +394,7 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		for _, failed := range files {
 			file := SuiteFile{File: failed.File, Phase: phase.name, Test: failed.Test, Error: failed.Error}
 			again := phase.alone(failed.File)
-			alone, err := s.Runner.RunLine(ctx, dir, again)
+			alone, err := s.Runner.RunLine(ctx, rig, dir, again)
 			switch {
 			case err != nil:
 				file.Alone, file.Void = "recheck void: could not be run: "+err.Error(), true
@@ -564,7 +564,7 @@ func (s Suite) Recheck(ctx context.Context, rig, spec string) (SpecRecheck, erro
 	}
 	defer release()
 
-	checked, err := s.Runner.RunLine(ctx, dir, command)
+	checked, err := s.Runner.RunLine(ctx, rig, dir, command)
 	if err != nil {
 		return SpecRecheck{}, fmt.Errorf("running `%s` in %s: %w", command, dir, err)
 	}

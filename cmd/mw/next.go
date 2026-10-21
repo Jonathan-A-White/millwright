@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -233,7 +234,7 @@ func newNextCmd() *cobra.Command {
 				transcripts = claude.NewTranscripts(projects)
 				modes = claude.NewTranscripts(projects)
 			}
-			checks, err := landingChecks(gateCommands{related: true})
+			checks, err := landingChecks(dir, gateCommands{related: true})
 			if err != nil {
 				return err
 			}
@@ -347,7 +348,7 @@ func withHostDispatchLocks(d application.Dispatch, vault string) application.Dis
 func builderBoot(files *vault.Vault, host string, tests map[string]string, nice, jobs, turns int) application.SeatBoot {
 	return application.SeatBoot{
 		Vault:     files,
-		Harness:   sessionHarness(files.Dir(), host, claude.WithTests(tests), claude.WithNice(nice), claude.WithJobs(jobs)),
+		Harness:   sessionHarness(files.Dir(), host, claude.WithTests(tests), claude.WithNice(nice), claude.WithJobs(jobs), claude.WithTimingTests(files.TimingTests(context.Background()))),
 		Seat:      BuilderSeat,
 		Host:      host,
 		After:     afterSession(),

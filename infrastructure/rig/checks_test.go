@@ -275,7 +275,7 @@ while [ ! -s "` + filepath.Join(dir, "server.pid") + `" ] || [ ! -s "` + filepat
 // 5142 outlived the nightly suite's e2e run (mw-gq6.625).
 func TestARunLineLeavesNothingRunningWhenItsCommandReturns(t *testing.T) {
 	dir := t.TempDir()
-	checked, err := rig.NewChecks().RunLine(context.Background(), dir, leavesBehind(dir, "exit 1"))
+	checked, err := rig.NewChecks().RunLine(context.Background(), "", dir, leavesBehind(dir, "exit 1"))
 	if err != nil {
 		t.Fatalf("running the command: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestARunLineStoppedAtItsTimeoutLeavesNothingRunning(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := rig.NewChecks().RunLine(ctx, dir, leavesBehind(dir, "while :; do sleep 0.1; done"))
+		_, err := rig.NewChecks().RunLine(ctx, "", dir, leavesBehind(dir, "while :; do sleep 0.1; done"))
 		done <- err
 	}()
 	var pids []int
@@ -328,7 +328,7 @@ func TestARunLineStoppedAtItsTimeoutLeavesNothingRunning(t *testing.T) {
 func TestARunLineWhoseChildHoldsItsOutputReturnsPassedAndLeavesNothing(t *testing.T) {
 	dir := t.TempDir()
 	pidfile := filepath.Join(dir, "child.pid")
-	checked, err := rig.NewChecks().RunLine(context.Background(), dir, `sleep 600 &
+	checked, err := rig.NewChecks().RunLine(context.Background(), "", dir, `sleep 600 &
 echo $! > "`+pidfile+`"
 echo green`)
 	pid := pidFrom(t, pidfile)
@@ -338,5 +338,37 @@ echo green`)
 	}
 	if !gone(pid) {
 		t.Errorf("expected the child to be gone once the command returned, pid %d still runs", pid)
+	}
+}
+
+// TestARigWithTimingTestsRunsItsCommandsWithTheTimingEnvironment: the command
+// of a rig that names timing tests is handed MW_TIMING=skip and the globs, in
+// the gate, in a part of it and in a suite; a rig without the key is handed none.
+func TestARigWithTimingTestsRunsItsCommandsWithTheTimingEnvironment(t *testing.T) {
+	const printEnv = `env | grep '^MW_TIMING' | sort`
+	checks := rig.NewChecks(
+		rig.WithCommand(printEnv),
+		rig.WithTimingTests(map[string][]string{"lampas": {"tests/timing/**", "**/*.timing.test.ts"}}))
+
+	checked, err := checks.Run(context.Background(), "lampas", t.TempDir())
+	if err != nil {
+		t.Fatalf("running the rig's tests: %v", err)
+	}
+	want := "MW_TIMING=skip\nMW_TIMING_TESTS=tests/timing/**,**/*.timing.test.ts\n"
+	if checked.Output != want {
+		t.Errorf("a rig with timing tests printed %q, want %q", checked.Output, want)
+	}
+
+	// A part of the gate and a suite phase run through RunLine with their rig.
+	if line, err := checks.RunLine(context.Background(), "lampas", t.TempDir(), printEnv); err != nil || line.Output != want {
+		t.Errorf("RunLine for the rig printed %q, %v; want %q", line.Output, err, want)
+	}
+
+	checked, err = checks.Run(context.Background(), "spell-forge", t.TempDir())
+	if err != nil {
+		t.Fatalf("running the other rig's tests: %v", err)
+	}
+	if checked.Output != "" {
+		t.Errorf("a rig without timing tests printed %q, want nothing", checked.Output)
 	}
 }

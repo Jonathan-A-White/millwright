@@ -30,6 +30,7 @@ const (
 	VersionFilesKey        = "version_files"
 	ChangelogFilesKey      = "changelog_files"
 	UnionMergeFilesKey     = "union_merge_files"
+	TimingTestsKey         = "timing_tests"
 	PublicURLKey           = "public_url"
 	FilesExpectedKey       = "files_expected"
 	NightlySuiteKey        = "nightly_suite"
@@ -61,6 +62,7 @@ var beadID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 //	version_files          = ["package.json", "package-lock.json"]
 //	changelog_files        = ["public/changelog.json", "CHANGELOG.md"]
 //	union_merge_files      = ["ATTRIBUTION.md", "docs/*.md"]
+//	timing_tests           = ["tests/timing/**", "**/*.timing.test.ts"]
 //	public_url             = "https://github.com/Jonathan-A-White/lampas"
 //	files_expected         = true
 //	nightly_suite          = true
@@ -111,7 +113,7 @@ func (v *Vault) readRigFile(_ context.Context, rig string, lenient bool) (domain
 
 // knownKeys are the keys a rig's file has.
 var knownKeys = map[string]bool{
-	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true, UnionMergeFilesKey: true,
+	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true, UnionMergeFilesKey: true, TimingTestsKey: true,
 	PublicURLKey: true, FilesExpectedKey: true, NightlySuiteKey: true, SuiteEpicKey: true,
 	LandingKey: true, BatchEveryKey: true, BatchMinKey: true, BatchMaxKey: true,
 	BatchFixerModelKey: true, BatchFixerEffortKey: true, BatchFixerTurnsKey: true,
@@ -212,7 +214,7 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 			requirements.Sections = names
 		case EpicLastStoryLabelsKey:
 			requirements.LastStoryLabels = names
-		case VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey:
+		case VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey:
 			for _, name := range names {
 				if path.IsAbs(name) || name != path.Clean(name) || name == ".." || strings.HasPrefix(name, "../") {
 					return requirements, nil, fmt.Errorf("the list for %s: %q is not a path inside the rig (write it relative, as in %q)", key, name, "pwa/package.json")
@@ -224,19 +226,23 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 			switch key {
 			case ChangelogFilesKey:
 				requirements.ChangelogFiles = names
-			case UnionMergeFilesKey:
+			case UnionMergeFilesKey, TimingTestsKey:
 				for _, name := range names {
 					if _, err := path.Match(name, ""); err != nil {
 						return requirements, nil, fmt.Errorf("the list for %s: %q is not a path or glob (%v)", key, name, err)
 					}
 				}
-				requirements.UnionMergeFiles = names
+				if key == TimingTestsKey {
+					requirements.TimingTests = names
+				} else {
+					requirements.UnionMergeFiles = names
+				}
 			default:
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s and the landing keys %s, %s, %s, %s, %s, %s and %s)",
-				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, PublicURLKey, FilesExpectedKey, NightlySuiteKey, SuiteEpicKey,
+			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s and the landing keys %s, %s, %s, %s, %s, %s and %s)",
+				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, FilesExpectedKey, NightlySuiteKey, SuiteEpicKey,
 				LandingKey, BatchEveryKey, BatchMinKey, BatchMaxKey, BatchFixerModelKey, BatchFixerEffortKey, BatchFixerTurnsKey)
 		}
 	}
@@ -361,4 +367,30 @@ func splitOutsideQuotes(list string) []string {
 		}
 	}
 	return append(items, list[start:])
+}
+
+// TimingTests reads the timing_tests of every rig that has a file in the vault's
+// rigs directory, by rig name; a rig that names none is left out. It is how the
+// gate, mw suite and a Builder's session learn which tests to leave out
+// (application.TimingEnv). A file that cannot be read is left out too, so that
+// one rig's bad file cannot stop another rig's gate: that rig's own landing
+// refuses the file, and until then its tests run in full.
+func (v *Vault) TimingTests(ctx context.Context) map[string][]string {
+	timing := map[string][]string{}
+	entries, err := os.ReadDir(filepath.Join(v.dir, application.RigsDir))
+	if err != nil {
+		return timing
+	}
+	for _, entry := range entries {
+		rig, isRigFile := strings.CutSuffix(entry.Name(), RigFileExt)
+		if !isRigFile || entry.IsDir() {
+			continue
+		}
+		requirements, _, err := v.LandingRequirements(ctx, rig)
+		if err != nil || len(requirements.TimingTests) == 0 {
+			continue
+		}
+		timing[rig] = requirements.TimingTests
+	}
+	return timing
 }

@@ -39,6 +39,12 @@ type EpicRequirements struct {
 	// of each (mw-gq6.424). It is no requirement of an epic either, so Any does
 	// not count it.
 	UnionMergeFiles []string
+	// TimingTests, when it is not empty, are the globs, relative to the rig's
+	// root, of its test files that need a real clock to mean anything: the gate
+	// and the suite runs of its tests are handed MW_TIMING=skip and the globs, so
+	// that a rig's own test setup leaves them out (mw-eo6dj9.2). It is no
+	// requirement of an epic either, so Any does not count it.
+	TimingTests []string
 	// PublicURL, when it is not empty, is the web address of the rig's public
 	// repository, as in https://github.com/<owner>/<rig>: a commit's link is
 	// that, /commit/ and the commit. A rig that is private names none. It is no

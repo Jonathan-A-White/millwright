@@ -98,7 +98,7 @@ func newCheckCmd() *cobra.Command {
 			if projects, err := claude.DefaultProjectsRoot(); err == nil {
 				modes = claude.NewTranscripts(projects)
 			}
-			checks, err := landingChecks(gateCommands{parts: true})
+			checks, err := landingChecks(dir, gateCommands{parts: true})
 			if err != nil {
 				return err
 			}
