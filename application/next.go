@@ -746,7 +746,8 @@ func (n Next) Run(ctx context.Context, storyID string) (NextReport, error) {
 // story is landed and closed. It is the last thing Run does, after the report is
 // printed, because mw next usually runs inside that very session: closing it
 // hangs up this process, and nothing after it is sure to run. A story that was
-// not closed keeps its session, exited, on screen — that is what it is kept for.
+// not closed keeps its session, exited, on screen — that is what it is kept for —
+// unless the tracker holds it closed or open again (finishedStory).
 // A session that is already gone is no error, and a session that cannot be
 // closed is said, not returned: the story is closed either way.
 func (n Next) closeSession(ctx context.Context, report NextReport) {
@@ -759,12 +760,31 @@ func (n Next) closeSession(ctx context.Context, report NextReport) {
 		// Sent back: the story's name is the fresh session's now, and the one
 		// this close-out ran in has been moved aside to be closed.
 		name = report.Aside
-	case !report.Closed && !report.DemoHeld && !report.Queued:
+	case !report.Closed && !report.DemoHeld && !report.Queued && !n.finishedStory(ctx, report.StoryID):
 		return
 	}
 	if err := n.Runner.Close(ctx, name); err != nil {
 		n.print(fmt.Sprintf("  note    the session %s could not be closed: %v\n", name, err))
 	}
+}
+
+// finishedStory says a close-out that did not close its story still leaves the
+// story with nothing for its session's pane to be evidence of: the tracker now
+// holds it closed, or open (its claim was given back, or never held), so that
+// whatever session is next started for it is a fresh one (mw-gq6.687). A story
+// still in progress is a refusal whose claim is kept, and its dead pane stays
+// on screen for the Mayor (mw-gq6.61, mw-gq6.182). A story that cannot be read
+// is taken for one still in progress: the pane is kept.
+func (n Next) finishedStory(ctx context.Context, storyID string) bool {
+	if n.Tracker == nil {
+		return false
+	}
+	detail, err := n.Tracker.ShowStory(ctx, storyID)
+	if err != nil {
+		return false
+	}
+	status := strings.TrimSpace(detail.Status)
+	return detail.Closed() || strings.EqualFold(status, StatusOpen) && strings.TrimSpace(detail.Assignee) == ""
 }
 
 // Heartbeat renews storyID's claim's lease every HeartbeatInterval for as
