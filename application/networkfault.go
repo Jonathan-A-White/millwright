@@ -106,6 +106,32 @@ func Unreachable(err error) (*RemoteUnreachable, bool) {
 	return gone, errors.As(err, &gone)
 }
 
+// VaultPushRaced is a vault push the remote refused every time it was tried,
+// with the refusal that comes when another push to the same ref lands in the
+// same moment (GitHub's "cannot lock ref"), after the vault had waited and pulled
+// between the tries (mw-gq6.689). Concurrent pushers (the mill's close-outs, the
+// Mayor, the other host) make it, and the next tick goes: a dispatch tick whose
+// only failure is this one warns and leaves with 0. Err is the last refusal,
+// naming the first too.
+type VaultPushRaced struct {
+	// Attempts is how many pushes were made in all.
+	Attempts int
+	Err      error
+}
+
+// Error is the refusal as the adapter reported it.
+func (r *VaultPushRaced) Error() string { return r.Err.Error() }
+
+// Unwrap gives back the refusal underneath.
+func (r *VaultPushRaced) Unwrap() error { return r.Err }
+
+// PushRaced reports whether err is a vault push that lost the race for the ref
+// through every retry, and what was found.
+func PushRaced(err error) (*VaultPushRaced, bool) {
+	var raced *VaultPushRaced
+	return raced, errors.As(err, &raced)
+}
+
 // waitFor waits d, or until ctx ends, whichever is first. A zero wait does not
 // wait at all.
 func waitFor(ctx context.Context, d time.Duration) error {

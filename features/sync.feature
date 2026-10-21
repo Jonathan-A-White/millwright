@@ -48,7 +48,15 @@ Feature: Keeping the vault and beads in step between hosts
     And the sync reports 0 commit pulled and 1 commit pushed
     And the remote holds this host's line
 
-  Scenario: A push refused with "cannot lock ref" twice fails, naming both attempts
+  Scenario: A push the remote keeps refusing to lock the ref for is tried again after a wait and a pull, three times
+    Given this host appended its own line to the Mayor's ledger
+    And the remote will refuse 3 pushes with "cannot lock ref" because another push landed in the same second
+    When this host syncs
+    Then the sync succeeds
+    And the sync reports 0 commit pulled and 1 commit pushed
+    And the remote holds this host's line
+
+  Scenario: A push refused with "cannot lock ref" through every retry fails, naming both attempts
     Given this host appended its own line to the Mayor's ledger
     And the remote will refuse 100 pushes with "cannot lock ref" because another push landed in the same second
     When this host syncs

@@ -781,6 +781,15 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			// One tick's blip, not a halt: Run skips the tick and counts it.
 			return report, err
 		}
+		if raced, lost := PushRaced(err); lost {
+			// Other pushers kept the remote's lock on the ref through every retry:
+			// the next tick goes, so the tick warns and leaves with 0, nothing
+			// claimed, and no halt is marked (mw-gq6.689).
+			note := fmt.Sprintf("WARN the vault push was refused with \"cannot lock ref\" after %d pushes, with a wait and a pull between them; nothing claimed this tick, the next tick tries again", raced.Attempts)
+			report.Notes = append(report.Notes, note)
+			d.print("  " + note + "\n")
+			return report, nil
+		}
 		if err != nil {
 			RecordSyncHalt(ctx, d.SyncHalts, err, d.now())
 			d.tellVaultBlocked(ctx, err, &report)

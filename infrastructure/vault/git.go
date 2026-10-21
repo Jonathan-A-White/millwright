@@ -298,14 +298,19 @@ func closeOutIsWriting(err error) bool {
 }
 
 func (v *Vault) waitForCloseOut(ctx context.Context) error {
+	return v.pause(ctx, closeOutWait, "the close-out to commit")
+}
+
+// pause waits d for what, with the injected wait when there is one.
+func (v *Vault) pause(ctx context.Context, d time.Duration, what string) error {
 	if v.wait != nil {
-		return v.wait(ctx, closeOutWait)
+		return v.wait(ctx, d)
 	}
-	timer := time.NewTimer(closeOutWait)
+	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		return fmt.Errorf("waiting %s for the close-out to commit: %w", closeOutWait, ctx.Err())
+		return fmt.Errorf("waiting %s for %s: %w", d, what, ctx.Err())
 	case <-timer.C:
 		return nil
 	}
@@ -334,19 +339,38 @@ func (v *Vault) Push(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 	var first error
-	for rebased := 0; ; rebased++ {
+	rebased, locked := 0, 0
+	for attempts := 1; ; attempts++ {
 		_, err := v.git(ctx, "push")
 		if err == nil {
 			return outgoing, nil
 		}
-		if rebased == 0 {
+		if attempts == 1 {
 			first = err
 		}
-		if rebased == pushRebases || !pushRefused(err) || (rebased > 0 && pushLockRefused(err)) {
-			if rebased > 0 {
+		lock := pushLockRefused(err)
+		spent := rebased >= pushRebases
+		if lock {
+			spent = locked >= len(pushLockBackoffs)
+		}
+		if spent || !pushRefused(err) {
+			if attempts > 1 {
 				err = fmt.Errorf("%w (the first push was refused too, and tried again after a pull: %v)", err, first)
 			}
+			if lock {
+				err = &application.VaultPushRaced{Attempts: attempts, Err: err}
+			}
 			return 0, err
+		}
+		if lock {
+			// Another pusher landed in the same moment: it is gone in a few
+			// seconds, so the pull and the next push wait for it.
+			if waitErr := v.pause(ctx, pushLockBackoffs[locked], "the remote's lock on the ref to clear"); waitErr != nil {
+				return 0, fmt.Errorf("%w (and %v)", err, waitErr)
+			}
+			locked++
+		} else {
+			rebased++
 		}
 		if _, pulled := v.Pull(ctx); pulled != nil {
 			return 0, fmt.Errorf("%w (and rebasing onto what the remote holds did not work: %v)", err, pulled)
@@ -360,8 +384,13 @@ func (v *Vault) Push(ctx context.Context) (int, error) {
 	}
 }
 
-// pushRebases is how many times a refused push is rebased and tried again: the
-// remote may move once more while the rebase runs.
+// pushLockBackoffs are the waits before each retry of a push the remote could
+// not lock the ref for, so up to len retries: a lock is held for as long as the
+// other push takes to land, which a pull alone does not outwait (mw-gq6.689).
+var pushLockBackoffs = []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second}
+
+// pushRebases is how many times a push refused as a non-fast-forward is rebased
+// and tried again: the remote may move once more while the rebase runs.
 const pushRebases = 3
 
 // tracksNothing reports whether git failed to count the commits ahead of the
@@ -385,8 +414,8 @@ func pushRefused(err error) bool {
 
 // pushLockRefused reports whether the remote refused a push because another push
 // to the same ref landed in the same moment: GitHub's "[remote rejected] ...
-// cannot lock ref 'refs/heads/main': is at X but expected Y". A pull and one more
-// push cures it (mw-gq6.636); a refusal that comes twice is not a race.
+// cannot lock ref 'refs/heads/main': is at X but expected Y". A pull and a push
+// again after a short wait cure it (mw-gq6.636, mw-gq6.689).
 func pushLockRefused(err error) bool {
 	said := err.Error()
 	return strings.Contains(said, "[remote rejected]") && strings.Contains(said, "cannot lock ref")

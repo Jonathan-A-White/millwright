@@ -814,7 +814,7 @@ fi
 // push has succeeded (mw-gq6.636).
 func TestPushTriesAgainAfterTheRemoteCouldNotLockTheRef(t *testing.T) {
 	here, _ := twoHosts(t)
-	files := vault.New(here)
+	files := vault.New(here, vault.WithWait(func(context.Context, time.Duration) error { return nil }))
 	write(t, here, "seats/builder/mine.md", "this host's file\n")
 	if _, err := files.Commit(context.Background(), "this host writes", []string{"seats/builder/mine.md"}); err != nil {
 		t.Fatalf("committing: %v", err)
@@ -834,11 +834,46 @@ func TestPushTriesAgainAfterTheRemoteCouldNotLockTheRef(t *testing.T) {
 	}
 }
 
-// A remote that refuses every push is still a failure, and the error names the
-// first refusal as well as the last.
-func TestPushRefusedAgainAfterTheRetryFailsNamingBothAttempts(t *testing.T) {
+// A push GitHub keeps refusing with "cannot lock ref" while other pushers
+// land (the mill's close-outs, the Mayor, the desktop) is pulled and tried
+// again after a short wait, up to three times: three refusals then an accepting
+// remote is a push that went (mw-gq6.689).
+func TestPushWaitsAndTriesAgainWhileTheRemoteKeepsRefusingToLockTheRef(t *testing.T) {
 	here, _ := twoHosts(t)
-	files := vault.New(here)
+	var waits []time.Duration
+	files := vault.New(here, vault.WithWait(func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return nil
+	}))
+	write(t, here, "seats/builder/mine.md", "this host's file\n")
+	if _, err := files.Commit(context.Background(), "this host writes", []string{"seats/builder/mine.md"}); err != nil {
+		t.Fatalf("committing: %v", err)
+	}
+	refuseWith(t, here, 3)
+
+	pushed, err := files.Push(context.Background())
+	if err != nil {
+		t.Fatalf("pushing after three cannot-lock-ref refusals: %v", err)
+	}
+	if pushed != 1 {
+		t.Fatalf("expected the one commit pushed, got %d", pushed)
+	}
+	want := []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second}
+	if fmt.Sprint(waits) != fmt.Sprint(want) {
+		t.Fatalf("waited %v before the retries, want %v", waits, want)
+	}
+	remote := strings.TrimSpace(run(t, here, "git", "ls-remote", "origin", "refs/heads/main"))
+	if head := strings.TrimSpace(run(t, here, "git", "rev-parse", "HEAD")); !strings.HasPrefix(remote, head) {
+		t.Fatalf("the remote holds %q, the clone is at %s", remote, head)
+	}
+}
+
+// A remote that refuses every push is still a failure: the error names the
+// first refusal as well as the last, and says how many pushes were made, as the
+// VaultPushRaced a dispatch tick answers with a warning (mw-gq6.689).
+func TestPushRefusedAgainAfterTheRetriesFailsNamingBothAttempts(t *testing.T) {
+	here, _ := twoHosts(t)
+	files := vault.New(here, vault.WithWait(func(context.Context, time.Duration) error { return nil }))
 	write(t, here, "seats/builder/mine.md", "this host's file\n")
 	if _, err := files.Commit(context.Background(), "this host writes", []string{"seats/builder/mine.md"}); err != nil {
 		t.Fatalf("committing: %v", err)
@@ -852,6 +887,34 @@ func TestPushRefusedAgainAfterTheRetryFailsNamingBothAttempts(t *testing.T) {
 	said := err.Error()
 	if !strings.Contains(said, "cannot lock ref") || !strings.Contains(said, "first push") || !strings.Contains(said, "tried again") {
 		t.Fatalf("expected the error to name the refusal of both attempts, got %v", err)
+	}
+	raced, ok := application.PushRaced(err)
+	if !ok || raced.Attempts != 4 {
+		t.Fatalf("expected a VaultPushRaced after 4 pushes, got %+v (%v)", raced, ok)
+	}
+}
+
+// A push refused for a reason a wait does not cure is not a race: no wait, no
+// VaultPushRaced.
+func TestPushThatCannotRebaseIsNotARace(t *testing.T) {
+	here, there := twoHosts(t)
+	write(t, there, "seats/builder/same.md", "theirs\n")
+	run(t, there, "git", "add", "-A")
+	run(t, there, "git", "commit", "-qm", "The other host writes")
+	run(t, there, "git", "push", "-q")
+
+	write(t, here, "seats/builder/same.md", "mine\n")
+	waited := false
+	files := vault.New(here, vault.WithWait(func(context.Context, time.Duration) error { waited = true; return nil }))
+	if _, err := files.Commit(context.Background(), "this host writes", []string{"seats/builder/same.md"}); err != nil {
+		t.Fatalf("committing: %v", err)
+	}
+	_, err := files.Push(context.Background())
+	if err == nil {
+		t.Fatal("expected a conflicting rebase to fail the push")
+	}
+	if _, raced := application.PushRaced(err); raced || waited {
+		t.Fatalf("a conflict is not a race (raced=%v, waited=%v): %v", raced, waited, err)
 	}
 }
 

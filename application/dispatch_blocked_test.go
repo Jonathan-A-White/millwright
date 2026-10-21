@@ -2,12 +2,15 @@ package application_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // blockedSync is a HostSync that refuses on a vault holding uncommitted files.
@@ -159,5 +162,44 @@ func TestTheDirtyVaultFixQuotesWhatTheShellWouldSplit(t *testing.T) {
 	want := "git -C '/home/j w/vault' commit -m 'commit as found what dispatch on vps was refused on' -- seats/mayor/ledger.md 'plans/a b.md'"
 	if got != want {
 		t.Errorf("expected\n  %s\ngot\n  %s", want, got)
+	}
+}
+
+// A vault push GitHub refused through every retry (other pushers landing in the
+// same seconds) is a tick that did not get its sync, not a unit that failed:
+// the tick warns naming the attempts, claims nothing and ends with no error;
+// the next one goes (mw-gq6.689).
+func TestDispatchWarnsAndEndsCleanWhenTheVaultPushIsStillRefusedAfterTheRetries(t *testing.T) {
+	dispatch, tracker, _, _, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	refused := fmt.Errorf("syncing the vault on vps: %w", &application.VaultPushRaced{
+		Attempts: 4, Err: errors.New("git push: [remote rejected] main -> main (cannot lock ref 'refs/heads/main')"),
+	})
+	dispatch.Sync = &stubSync{err: refused}
+	var out strings.Builder
+	dispatch.Out = &out
+
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected a raced push not to fail the tick, got %v", err)
+	}
+	if len(report.Started) != 0 {
+		t.Fatalf("expected nothing started, got %v", startedIDs(report))
+	}
+	if detail, _ := tracker.ShowStory(context.Background(), "mw-gq6.1"); detail.Assignee != "" {
+		t.Fatalf("the story was claimed by %q", detail.Assignee)
+	}
+	if said := out.String(); !strings.Contains(said, "WARN") || !strings.Contains(said, "4 pushes") {
+		t.Fatalf("expected a WARN line naming the attempts, got %q", said)
+	}
+}
+
+// A sync that failed for a reason a wait does not cure still fails the tick.
+func TestDispatchStillFailsOnAVaultPushRefusedForAnotherReason(t *testing.T) {
+	dispatch, _, _, _, _ := aFactory(t)
+	dispatch.Sync = &stubSync{err: fmt.Errorf("syncing the vault on vps: git push: Permission denied (publickey)")}
+
+	if _, err := dispatch.Run(context.Background()); err == nil {
+		t.Fatal("expected an authentication failure to fail the tick")
 	}
 }
