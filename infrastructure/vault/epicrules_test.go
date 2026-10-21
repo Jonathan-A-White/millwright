@@ -425,3 +425,53 @@ func TestAnUnknownLandingValueReadsAsEachWithAWarningNotAnError(t *testing.T) {
 		t.Errorf("warnings = %v, want six", got.Warnings)
 	}
 }
+
+func TestARigsFileListsTheTimingTestsALandingGateLeavesOut(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	writeRigFile(t, dir, "lampas", "timing_tests = [\"tests/timing/**\", \"**/*.timing.test.ts\"]\n")
+	got, err := v.EpicRequirements(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	if want := []string{"tests/timing/**", "**/*.timing.test.ts"}; !reflect.DeepEqual(got.TimingTests, want) {
+		t.Errorf("timing tests = %v, want %v", got.TimingTests, want)
+	}
+	if got.Any() {
+		t.Errorf("timing_tests is no requirement of an epic, but Any() = true")
+	}
+
+	writeRigFile(t, dir, "lampas", "union_merge_files = [\"docs/*.md\"]\n")
+	if got, err := v.EpicRequirements(context.Background(), "lampas"); err != nil || len(got.TimingTests) != 0 {
+		t.Errorf("a file without the key read %v, %v; want none", got.TimingTests, err)
+	}
+
+	// A landing reads the key, and still reads past one it does not know.
+	writeRigFile(t, dir, "lampas", "timing_tests = [\"a/**\"]\nfuture_key = [\"x\"]\n")
+	landing, unknown, err := v.LandingRequirements(context.Background(), "lampas")
+	if err != nil || !reflect.DeepEqual(unknown, []string{"future_key"}) || !reflect.DeepEqual(landing.TimingTests, []string{"a/**"}) {
+		t.Errorf("a landing read %+v, unknown %v, %v", landing, unknown, err)
+	}
+
+	for _, bad := range []string{`"x"`, `["/etc/*"]`, `["../x"]`, `["a/[.ts"]`} {
+		writeRigFile(t, dir, "lampas", "timing_tests = "+bad+"\n")
+		if _, err := v.EpicRequirements(context.Background(), "lampas"); err == nil || !strings.Contains(err.Error(), "timing_tests") {
+			t.Errorf("timing_tests = %s: err = %v, want a refusal naming timing_tests", bad, err)
+		}
+	}
+}
+
+func TestTimingTestsOfEveryRigAreReadAndAnUnreadableFileIsLeftOut(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	writeRigFile(t, dir, "lampas", "timing_tests = [\"tests/timing/**\"]\n")
+	writeRigFile(t, dir, "spell-forge", "epic_sections = [\"Demo\"]\n")
+	writeRigFile(t, dir, "broken", "timing_tests = \"x\"\n")
+	got := v.TimingTests(context.Background())
+	if want := map[string][]string{"lampas": {"tests/timing/**"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("timing tests = %v, want %v", got, want)
+	}
+	if got := vault.New(t.TempDir()).TimingTests(context.Background()); len(got) != 0 {
+		t.Errorf("a vault with no rigs gave %v", got)
+	}
+}
