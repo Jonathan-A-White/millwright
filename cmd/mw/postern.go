@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -480,7 +481,32 @@ func posternTaps(out io.Writer) (*application.PosternTaps, error) {
 		return nil, err
 	}
 	inbox.Lock = hostlock.New(filepath.Dir(wired.attachmentDir), hostlock.WithWait(posternTapLockWait))
+	inbox.Pictures = verifyHook(out)
 	return &application.PosternTaps{Inbox: inbox, Every: posternTapEvery}, nil
+}
+
+// verifyHook is the follower's real-time mw verify match: a run for the txids of
+// the pictures a pass saved, begun apart from the pass. [verify] realtime = false,
+// or a [verify] table that cannot be read, gives none (the second said on out).
+func verifyHook(out io.Writer) application.PicturesHook {
+	settings, err := config.Verify()
+	if err != nil {
+		fmt.Fprintf(out, "mw events follow: no real-time verify match: %v\n", err)
+		return nil
+	}
+	if !settings.Realtime {
+		return nil
+	}
+	return &application.VerifyHook{
+		Err: out,
+		Match: func(ctx context.Context, txids []string) (application.VerifyResult, error) {
+			match, _, err := newVerifyMatch(io.Discard)
+			if err != nil {
+				return application.VerifyResult{}, err
+			}
+			return match.Run(ctx, application.VerifyOptions{Txids: txids})
+		},
+	}
 }
 
 // posternThreads is the file mw remembers the channel of each post in, for

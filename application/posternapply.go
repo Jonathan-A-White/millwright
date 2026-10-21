@@ -126,6 +126,8 @@ type posternApplied struct {
 	Detail           string
 	// Said, when set, is the whole summary: a prompt call is printed as a call.
 	Said string
+	// pictures is true when a file that is not audio was saved with the message.
+	pictures bool
 }
 
 // summary is the line a pass prints for it: never a message's text.
@@ -210,6 +212,11 @@ func (i PosternInbox) apply(ctx context.Context, tapsOnly bool, after int64) (li
 		return nil, resume, err
 	}
 	defer release()
+	// The pictures saved are matched once the pass has ended, apart from it:
+	// the pass never waits on the match (mw-4xdnis.4).
+	if i.Pictures != nil {
+		defer i.Pictures.Flush(ctx)
+	}
 
 	home, err := i.homeHost(ctx)
 	if err != nil {
@@ -233,7 +240,7 @@ func (i PosternInbox) apply(ctx context.Context, tapsOnly bool, after int64) (li
 	stuck := int64(0)
 	var ideas ideasPass
 	for _, m := range mine {
-		if tapsOnly && !isOneTap(m) {
+		if tapsOnly && !isOneTap(m) && !i.isPictureNote(m) {
 			continue
 		}
 		if m.Txid == "" {
@@ -280,6 +287,9 @@ func (i PosternInbox) apply(ctx context.Context, tapsOnly bool, after int64) (li
 		}
 		if err := i.markApplied(ctx, applied, result); err != nil {
 			return lines, after, err
+		}
+		if result.pictures && i.Pictures != nil {
+			i.Pictures.Saved(result.Txid)
 		}
 		lines = append(lines, result.summary())
 		i.printf("%s\n", result.summary())
@@ -379,7 +389,34 @@ func (i PosternInbox) applySavingFiles(ctx context.Context, m PosternInboxMessag
 		outcome, saved = i.attachmentOutcome(ctx, m)
 	}
 	result, handled, err = i.applyOne(ctx, m, outcome, saved)
+	for _, file := range saved {
+		result.pictures = result.pictures || !isPosternAudio(file.Mime)
+	}
 	return result, outcome, handled, err
+}
+
+// isPictureNote reports whether m is a message of the Governor's that the
+// follower applies on its own beside his one-taps: words and pictures on the
+// general thread or a named channel, which applyOne only saves and notes, so a
+// picture is saved and matched (mw verify match) within seconds, not when the
+// inbox is next run. A reply, an action, a voice note and anything on a bead's
+// thread stay for the pass that comments and mails.
+func (i PosternInbox) isPictureNote(m PosternInboxMessage) bool {
+	if i.Pictures == nil || m.Class == PosternClassMoveHome || m.ThreadIsBead || i.isVoiceNote(m) {
+		return false
+	}
+	if _, ok := decodePosternReply(m.Text); ok {
+		return false
+	}
+	if _, ok := decodePosternAction(m.Text); ok {
+		return false
+	}
+	for _, file := range m.files() {
+		if file != nil && !isPosternAudio(file.Mime) {
+			return true
+		}
+	}
+	return false
 }
 
 // applyOne applies one verified message from the Governor, reporting what it

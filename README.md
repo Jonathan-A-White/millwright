@@ -3301,10 +3301,23 @@ size and calls no agent.
 model      = "haiku"    # the model of the one call; it must read a picture (haiku when left out)
 effort     = "medium"   # and its effort (medium when left out)
 confidence = 0.8        # the least confidence, above 0 and up to 1, at which a match is proposed (0.8 when left out)
+realtime   = true       # whether the follower matches a picture of his as it saves it (true when left out)
 ```
 
 The call is billed to the API key when `[grist] api_credits` is on, as the mill's grinds are. The steps are in
 `features/verify_match.feature`.
+
+**Real time.** With `[verify] realtime` on (the default; `realtime = false` turns it off and leaves the matching to the
+nightly sweep and to `mw verify match` by hand), the follower's pass over his messages (the one that applies his taps)
+also applies a message of his on the general thread or a named channel that carries a picture, saving the files as
+`mw postern inbox` would; a message on a bead's thread, a voice note, a reply and an action stay with the inbox's own
+pass. When a pass has saved one or more pictures it ends, and then starts `mw verify match --txid <txid>` for them, in
+a goroutine apart from the pass, which never waits on it; the match has its own timeout (the agent call's ten minutes
+and a margin). At most one match runs at a time: a picture saved while it runs is queued, and the next run takes every
+queued txid, one `--txid` each. The follower says `verify match <txid>...: N proposed`, or the error, on its standard
+error; a failed match is logged and never stops the pass or the follower. A boost host applies none of his messages,
+so it matches none. A match in flight when the follower stops (a restart after a landing) is lost, and its picture
+waits for the nightly sweep. The steps are in `features/verify_realtime.feature`.
 
 ### Confirming a proposal (`mw verify confirm`, `mw verify list`)
 

@@ -178,6 +178,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeTodoNightlyScenario(ctx)
 	steps.InitializeVerifyMatchScenario(ctx)
 	steps.InitializeVerifyConfirmScenario(ctx)
+	steps.InitializeVerifyRealtimeScenario(ctx)
 	steps.InitializeTodoSizeScenario(ctx)
 	steps.InitializeWatchScenario(ctx)
 	steps.InitializeSyncScenario(ctx)

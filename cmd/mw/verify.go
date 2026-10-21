@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -49,37 +50,9 @@ func newVerifyMatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			dir, err := config.Vault()
+			match, _, err := newVerifyMatch(cmd.OutOrStdout())
 			if err != nil {
 				return err
-			}
-			host, err := config.Host()
-			if err != nil {
-				return err
-			}
-			settings, err := config.Verify()
-			if err != nil {
-				return err
-			}
-			inbox, err := config.PosternInboxDir()
-			if err != nil {
-				return err
-			}
-			runs, err := config.VerifyRunDir()
-			if err != nil {
-				return err
-			}
-			gateway := mwGateway(dir, host)
-			match := application.VerifyMatch{
-				Beads: gateway, Grinder: claude.NewGrinder(), Mailbox: gateway,
-				Settings: application.VerifySettings{Model: settings.Model, Effort: settings.Effort, Confidence: settings.Confidence},
-				InboxDir: inbox, RunDir: runs, Host: host, Out: cmd.OutOrStdout(),
-			}
-			// The API key bills the call when [grist] api_credits is on, as it does the mill's grinds.
-			if ceilings, err := config.Grist(); err == nil && ceilings.APICredits {
-				if state, err := config.GristStateDir(); err == nil {
-					match.Credits = newGristCredits(host, state, ceilings)
-				}
 			}
 			_, err = match.Run(cmd.Context(), application.VerifyOptions{Since: window, Txids: txids, DryRun: dryRun})
 			return err
@@ -89,6 +62,44 @@ func newVerifyMatchCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&txids, "txid", nil, "match only the evidence of this txid, whatever its age (repeatable)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the candidates, the evidence and the directory's size; call no agent")
 	return cmd
+}
+
+// newVerifyMatch is the mw verify match the config describes, saying what it did
+// on out, and the [verify] settings it was read with.
+func newVerifyMatch(out io.Writer) (application.VerifyMatch, config.VerifySettings, error) {
+	dir, err := config.Vault()
+	if err != nil {
+		return application.VerifyMatch{}, config.VerifySettings{}, err
+	}
+	host, err := config.Host()
+	if err != nil {
+		return application.VerifyMatch{}, config.VerifySettings{}, err
+	}
+	settings, err := config.Verify()
+	if err != nil {
+		return application.VerifyMatch{}, settings, err
+	}
+	inbox, err := config.PosternInboxDir()
+	if err != nil {
+		return application.VerifyMatch{}, settings, err
+	}
+	runs, err := config.VerifyRunDir()
+	if err != nil {
+		return application.VerifyMatch{}, settings, err
+	}
+	gateway := mwGateway(dir, host)
+	match := application.VerifyMatch{
+		Beads: gateway, Grinder: claude.NewGrinder(), Mailbox: gateway,
+		Settings: application.VerifySettings{Model: settings.Model, Effort: settings.Effort, Confidence: settings.Confidence},
+		InboxDir: inbox, RunDir: runs, Host: host, Out: out,
+	}
+	// The API key bills the call when [grist] api_credits is on, as it does the mill's grinds.
+	if ceilings, err := config.Grist(); err == nil && ceilings.APICredits {
+		if state, err := config.GristStateDir(); err == nil {
+			match.Credits = newGristCredits(host, state, ceilings)
+		}
+	}
+	return match, settings, nil
 }
 
 // parseVerifySince reads --since: a Go duration, or whole days as 7d.

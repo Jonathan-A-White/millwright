@@ -731,6 +731,12 @@ type PosternInbox struct {
 	// Nil leaves them held.
 	Cards *Cards
 
+	// Pictures, when set, is told of each Governor message an Apply pass applied
+	// with a picture saved, and once when the pass ends (VerifyHook): the
+	// follower's real-time mw verify match. With it set, the follower's own pass
+	// also applies his picture messages on the general thread or a channel.
+	Pictures PicturesHook
+
 	// Now is the clock an approval's age is read by. The zero value reads
 	// the real one.
 	Now func() time.Time
