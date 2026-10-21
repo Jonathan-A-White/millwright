@@ -96,6 +96,7 @@ type gristContext struct {
 	pool         poolContext         // features/grist_pool.feature
 	credits      creditsContext      // features/grist_credits.feature
 	talk         talkContext         // features/grist_talk.feature
+	evalTalk     evalTalkContext     // features/grist_eval_talk.feature
 
 	// statuses is the request status pass a dispatch tick is given
 	// (features/grist_request.feature); nil is none.
@@ -140,6 +141,7 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	registerGristPool(ctx, c)
 	registerGristCredits(ctx, c)
 	registerGristTalk(ctx, c)
+	registerGristEvalTalk(ctx, c)
 
 	ctx.Given(`^a mill on the host "([^"]*)"$`, c.aMill)
 	ctx.Given(`^the app "([^"]*)" is checked out here, its main at commit "([^"]*)" with the grind "([^"]*)"$`, c.theAppIsCheckedOut)

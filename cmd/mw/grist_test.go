@@ -196,3 +196,27 @@ func TestGristEvalHelpNamesEveryFlagAndTheTwoRequired(t *testing.T) {
 		t.Fatalf("expected --grind required, got %v", err)
 	}
 }
+
+// mw grist eval <app> <kind> --example sends examples of the app's rig: its help
+// names --example and the two-turn layout (turn_2), and it refuses an app and a
+// kind with no example named, and the photo eval's flags beside them.
+func TestGristEvalHelpNamesTheExampleModeAndTheTwoTurnLayout(t *testing.T) {
+	help, err := runGrist(t, "eval", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"--example", "<app> <kind>", "turn_2", "eval:<example>:<nonce>", "no history"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("expected the help to name %q, got:\n%s", want, help)
+		}
+	}
+	if _, err := runGrist(t, "eval", "lampas", "bible-talk"); err == nil || !strings.Contains(err.Error(), "--example") {
+		t.Errorf("expected an app and a kind with no example to be refused, got %v", err)
+	}
+	if _, err := runGrist(t, "eval", "lampas", "bible-talk", "--example", "x", "--photos", "/tmp"); err == nil || !strings.Contains(err.Error(), "photo eval") {
+		t.Errorf("expected the photo eval's flags to be refused beside an example, got %v", err)
+	}
+	if _, err := runGrist(t, "eval", "--example", "x"); err == nil {
+		t.Error("expected an example with no app and kind to be refused")
+	}
+}

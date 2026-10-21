@@ -1,7 +1,10 @@
 package application
 
 import (
+	"cmp"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,8 +63,24 @@ type GristSmoke struct {
 	// Sleep is the wait before an example the backend refused is sent once
 	// more; nil waits for real.
 	Sleep func(ctx context.Context, d time.Duration) error
+	// Talks ends the talks an example of two turns starts, and the ones a run
+	// killed midway left; nil keeps none of that (a mill that keeps no talks
+	// here, a test).
+	Talks GristTalkEnder
+	// TalkPrefix begins the names of the talks it sends: GristSmokeTalkPrefix
+	// when empty, GristEvalTalkPrefix for `mw grist eval`.
+	TalkPrefix string
 	// Out is where progress is printed; nil prints nothing.
 	Out io.Writer
+}
+
+// GristTalkEnder is what the smoke and the eval end their talks with: End
+// deletes the talk of app named talk, Tidy the old ones of the eval and the
+// smoke an earlier run left. Both say how many they deleted. GristTalkSweep is
+// the real one.
+type GristTalkEnder interface {
+	End(ctx context.Context, app, talk string) (int, error)
+	Tidy(ctx context.Context, app string) (int, error)
 }
 
 // GristSmokeReport is what one smoke of one app found.
@@ -172,21 +191,12 @@ var ErrGristSmokeFailed = errors.New("a grist smoke example failed")
 // example that failed is in the report.
 func (s GristSmoke) Run(ctx context.Context, app, kind string) (GristSmokeReport, error) {
 	report := GristSmokeReport{App: app}
-	checkout, ok := s.Apps[app]
-	if !ok || checkout == "" {
-		return report, fmt.Errorf("mw grist smoke: the app %q has no rig in the [grist-apps] table of the config file (it has: %s)", app, strings.Join(s.appNames(), ", "))
-	}
-	if s.Grinds == nil || s.Send == nil {
-		return report, errors.New("mw grist smoke: no grind source or sender is configured")
-	}
-	if err := s.Grinds.Refresh(ctx, checkout); err != nil {
-		s.say("note: %s's rig could not be refreshed, so its own main is read: %v", app, firstLine(err.Error()))
-	}
-	commit, err := s.Grinds.Commit(ctx, checkout)
+	checkout, commit, err := s.open(ctx, "mw grist smoke", app)
 	if err != nil {
-		return report, fmt.Errorf("mw grist smoke: %w", err)
+		return report, err
 	}
 	report.Commit = commit
+	s.tidy(ctx, app)
 	files, err := s.Grinds.List(ctx, checkout, commit, GristSmokeDir)
 	if err != nil {
 		return report, fmt.Errorf("mw grist smoke: %w", err)
@@ -211,6 +221,26 @@ func (s GristSmoke) Run(ctx context.Context, app, kind string) (GristSmokeReport
 		report.NotRun = nil
 	}
 	return report, nil
+}
+
+// open finds app's rig, brings it level with its remote when it can, and says
+// the commit of its main the grinds are read at; who is the command that asks,
+// for its errors.
+func (s GristSmoke) open(ctx context.Context, who, app string) (checkout, commit string, err error) {
+	checkout, ok := s.Apps[app]
+	if !ok || checkout == "" {
+		return "", "", fmt.Errorf("%s: the app %q has no rig in the [grist-apps] table of the config file (it has: %s)", who, app, strings.Join(s.appNames(), ", "))
+	}
+	if s.Grinds == nil || s.Send == nil {
+		return "", "", fmt.Errorf("%s: no grind source or sender is configured", who)
+	}
+	if err := s.Grinds.Refresh(ctx, checkout); err != nil {
+		s.say("note: %s's rig could not be refreshed, so its own main is read: %v", app, firstLine(err.Error()))
+	}
+	if commit, err = s.Grinds.Commit(ctx, checkout); err != nil {
+		return "", "", fmt.Errorf("%s: %w", who, err)
+	}
+	return checkout, commit, nil
 }
 
 // smokeKinds are the kinds the grinds listed hold: a grinds/<kind>.json.
@@ -240,9 +270,8 @@ func (s GristSmoke) appNames() []string {
 // kind smokes one grind: its examples, or a warning when it has none.
 func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string, files []string, report *GristSmokeReport) {
 	label := app + "/" + kind
-	raw, found, err := s.Grinds.ReadAt(ctx, checkout, commit, path.Join(GristSmokeDir, kind+".json"))
-	var grind GrindFile
-	if err != nil || !found || json.Unmarshal(raw, &grind) != nil {
+	grind, ok := s.readGrind(ctx, checkout, commit, kind)
+	if !ok {
 		report.Failures = append(report.Failures, label+": the grind file could not be read")
 		return
 	}
@@ -260,12 +289,7 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 		report.Warnings = append(report.Warnings, label+": no example (grinds/examples/"+kind+"/<name>.json)")
 		return
 	}
-	schema := ""
-	if rigPath(grind.AnswerSchema) {
-		if text, ok, err := s.Grinds.ReadAt(ctx, checkout, commit, grind.AnswerSchema); err == nil && ok {
-			schema = string(text)
-		}
-	}
+	schema := s.readSchema(ctx, checkout, commit, grind)
 	if schema == "" {
 		report.Failures = append(report.Failures, label+": the answer schema "+grind.AnswerSchema+" could not be read")
 		return
@@ -297,6 +321,104 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 	}
 }
 
+// smokePrepared is an example read, and the grists to send for it, their
+// requests and photos written under dir.
+type smokePrepared struct {
+	example GristExample
+	turns   []GristSendRequest
+	wait    time.Duration
+	dir     string
+}
+
+// prepare reads the example in file and writes what it sends into a directory
+// of its own, which the caller removes. why is empty when it did.
+func (s GristSmoke) prepare(ctx context.Context, checkout, commit, app, kind, file string) (prepared smokePrepared, why string) {
+	data, _, err := s.Grinds.ReadAt(ctx, checkout, commit, file)
+	if err != nil {
+		return smokePrepared{}, "the example could not be read: " + firstLine(err.Error())
+	}
+	example, err := ParseGristExample(data)
+	if err != nil {
+		return smokePrepared{}, "the example is wrong: " + err.Error()
+	}
+	dir, err := os.MkdirTemp(s.TempDir, "mw-grist-smoke-")
+	if err != nil {
+		return smokePrepared{}, "no directory to send it from: " + err.Error()
+	}
+	prepared.dir = dir
+	defer func() {
+		if why != "" {
+			os.RemoveAll(dir)
+		}
+	}()
+	request := filepath.Join(dir, "request.json")
+	if err := os.WriteFile(request, example.Request, 0o600); err != nil {
+		return smokePrepared{}, "the request could not be written: " + err.Error()
+	}
+	var photos []string
+	for _, name := range example.Photos {
+		if name == "" || path.Base(name) != name {
+			return smokePrepared{}, fmt.Sprintf("the photo %q is not a file beside the example", name)
+		}
+		photo, found, err := s.Grinds.ReadAt(ctx, checkout, commit, path.Join(path.Dir(file), name))
+		if err != nil || !found {
+			return smokePrepared{}, fmt.Sprintf("the photo %s is not beside the example", name)
+		}
+		local := filepath.Join(dir, name)
+		if err := os.WriteFile(local, photo, 0o600); err != nil {
+			return smokePrepared{}, "a photo could not be written: " + err.Error()
+		}
+		photos = append(photos, local)
+	}
+	wait := s.Wait
+	if wait <= 0 {
+		wait = GristSmokeWait
+	}
+	turns := []GristSendRequest{{App: app, Kind: kind, Version: example.SchemaVersion, RequestFile: request, Photos: photos, Wait: wait}}
+	if turn := example.Turn2; turn != nil {
+		second := filepath.Join(dir, "request-2.json")
+		// The session holds turn 1, so turn 2 goes without a history, whatever the
+		// example carries (the app's input schema may need one there).
+		if err := os.WriteFile(second, withoutHistory(turn.Request), 0o600); err != nil {
+			return smokePrepared{}, "the request of turn 2 could not be written: " + err.Error()
+		}
+		var photos2 []string
+		for _, name := range turn.Photos {
+			photo, found, err := s.Grinds.ReadAt(ctx, checkout, commit, path.Join(path.Dir(file), name))
+			if err != nil || !found {
+				return smokePrepared{}, fmt.Sprintf("the photo %s of turn 2 is not beside the example", name)
+			}
+			local := filepath.Join(dir, "turn-2-"+name)
+			if err := os.WriteFile(local, photo, 0o600); err != nil {
+				return smokePrepared{}, "a photo of turn 2 could not be written: " + err.Error()
+			}
+			photos2 = append(photos2, local)
+		}
+		turns = append(turns, GristSendRequest{App: app, Kind: kind, Version: example.Version(), RequestFile: second, Photos: photos2, Wait: wait})
+	}
+	return smokePrepared{example: example, turns: turns, wait: wait, dir: dir}, ""
+}
+
+// readGrind reads grinds/<kind>.json at commit; ok is false when it cannot be.
+func (s GristSmoke) readGrind(ctx context.Context, checkout, commit, kind string) (grind GrindFile, ok bool) {
+	raw, found, err := s.Grinds.ReadAt(ctx, checkout, commit, path.Join(GristSmokeDir, kind+".json"))
+	if err != nil || !found || json.Unmarshal(raw, &grind) != nil {
+		return GrindFile{}, false
+	}
+	return grind, true
+}
+
+// readSchema reads the grind's answer schema at commit; empty when it cannot be.
+func (s GristSmoke) readSchema(ctx context.Context, checkout, commit string, grind GrindFile) string {
+	if !rigPath(grind.AnswerSchema) {
+		return ""
+	}
+	if text, ok, err := s.Grinds.ReadAt(ctx, checkout, commit, grind.AnswerSchema); err == nil && ok {
+		return string(text)
+	}
+	return ""
+}
+
 // example sends one example and reports why it failed, empty when the answer
 // came, fits the schema and shows everything expected. notRun, when it is not
 // empty, says instead that the mill could not be asked, for a reason that is
@@ -305,44 +427,14 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 // answer was wrong is sent GristSmokeResends more times: when one of them is
 // right the example does not fail, and flake says so instead.
 func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, file, schema string) (why, notRun string, flake *GristSmokeFlake) {
-	data, _, err := s.Grinds.ReadAt(ctx, checkout, commit, file)
-	if err != nil {
-		return "the example could not be read: " + firstLine(err.Error()), "", nil
+	prepared, why := s.prepare(ctx, checkout, commit, app, kind, file)
+	if why != "" {
+		return why, "", nil
 	}
-	example, err := ParseGristExample(data)
-	if err != nil {
-		return "the example is wrong: " + err.Error(), "", nil
-	}
-	dir, err := os.MkdirTemp(s.TempDir, "mw-grist-smoke-")
-	if err != nil {
-		return "no directory to send it from: " + err.Error(), "", nil
-	}
-	defer os.RemoveAll(dir)
-	request := filepath.Join(dir, "request.json")
-	if err := os.WriteFile(request, example.Request, 0o600); err != nil {
-		return "the request could not be written: " + err.Error(), "", nil
-	}
-	var photos []string
-	for _, name := range example.Photos {
-		if name == "" || path.Base(name) != name {
-			return fmt.Sprintf("the photo %q is not a file beside the example", name), "", nil
-		}
-		photo, found, err := s.Grinds.ReadAt(ctx, checkout, commit, path.Join(path.Dir(file), name))
-		if err != nil || !found {
-			return fmt.Sprintf("the photo %s is not beside the example", name), "", nil
-		}
-		local := filepath.Join(dir, name)
-		if err := os.WriteFile(local, photo, 0o600); err != nil {
-			return "a photo could not be written: " + err.Error(), "", nil
-		}
-		photos = append(photos, local)
-	}
-	wait := s.Wait
-	if wait <= 0 {
-		wait = GristSmokeWait
-	}
-	send := GristSendRequest{App: app, Kind: kind, Version: example.SchemaVersion, RequestFile: request, Photos: photos, Wait: wait}
-	first := s.try(ctx, send, wait, schema, example.Expect)
+	defer os.RemoveAll(prepared.dir)
+	example, turns, wait := prepared.example, prepared.turns, prepared.wait
+	name := strings.TrimSuffix(path.Base(file), ".json")
+	first := s.attempt(ctx, kind+"/"+name, turns, wait, schema, example.Expect)
 	if !first.slip {
 		return first.why, first.notRun, nil
 	}
@@ -353,7 +445,7 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 	sent, missed := 1, 1
 	for i := 0; i < GristSmokeResends; i++ {
 		s.say("  the answer was wrong; sending it again (%d of %d) ...", i+1, GristSmokeResends)
-		again := s.try(ctx, send, wait, schema, example.Expect)
+		again := s.attempt(ctx, kind+"/"+name, turns, wait, schema, example.Expect)
 		if again.slip {
 			sent, missed = sent+1, missed+1
 		} else if again.why == "" && again.notRun == "" {
@@ -371,9 +463,84 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 	}
 }
 
+// attempt sends the example once whole: its one grist, or its turns one after
+// the other under a talk of its own, that is ended whatever came of them. A
+// turn that did not come right ends the attempt, its failure said to be that
+// turn's; only the last turn is held to the example's expect.
+func (s GristSmoke) attempt(ctx context.Context, label string, turns []GristSendRequest, wait time.Duration, schema string, expect map[string]json.RawMessage) smokeTry {
+	if len(turns) == 1 {
+		return s.try(ctx, turns[0], wait, schema, expect)
+	}
+	talk := s.talkName(label)
+	defer s.endTalk(ctx, turns[0].App, talk)
+	var got smokeTry
+	for i, turn := range turns {
+		turn.Talk = talk
+		want := map[string]json.RawMessage(nil)
+		if i == len(turns)-1 {
+			want = expect
+		}
+		got = s.try(ctx, turn, wait, schema, want)
+		if got.why != "" || got.notRun != "" {
+			if got.why != "" {
+				got.why = fmt.Sprintf("turn %d: %s", i+1, got.why)
+			}
+			for j := range got.misses {
+				got.misses[j].Field = fmt.Sprintf("turn %d %s", i+1, got.misses[j].Field)
+			}
+			return got
+		}
+	}
+	return got
+}
+
+// talkName is a talk for one send of the example label (<kind>/<example>):
+// <prefix>:<label>:<nonce>, the label cut short to fit GristTalkMax. The nonce
+// is the send's own, so that the sends of one example never share a session.
+func (s GristSmoke) talkName(label string) string {
+	prefix := cmp.Or(s.TalkPrefix, GristSmokeTalkPrefix)
+	var nonce [4]byte
+	_, _ = rand.Read(nonce[:])
+	tail := ":" + hex.EncodeToString(nonce[:])
+	room := GristTalkMax - len(prefix) - 1 - len(tail)
+	if len(label) > room {
+		label = label[:room]
+	}
+	return prefix + ":" + label + tail
+}
+
+// endTalk deletes a talk the run started, now that it is answered or has
+// failed; what stops it is said, never an error: the next run's tidy ends it.
+func (s GristSmoke) endTalk(ctx context.Context, app, talk string) {
+	if s.Talks == nil {
+		return
+	}
+	// A run that was cancelled still ends the talk it started.
+	if _, err := s.Talks.End(context.WithoutCancel(ctx), app, talk); err != nil {
+		s.say("  note: the talk %s could not be ended: %s", talk, firstLine(err.Error()))
+	}
+}
+
+// tidy deletes the eval and smoke talks of app that an earlier run, killed
+// midway, left behind.
+func (s GristSmoke) tidy(ctx context.Context, app string) {
+	if s.Talks == nil {
+		return
+	}
+	if n, err := s.Talks.Tidy(context.WithoutCancel(ctx), app); err != nil {
+		s.say("note: the old talks of %s could not be tidied: %s", app, firstLine(err.Error()))
+	} else if n > 0 {
+		s.say("note: ended %d talk%s an earlier run left", n, map[bool]string{true: "", false: "s"}[n == 1])
+	}
+}
+
 // smokeTry is one send of an example and what came of it.
 type smokeTry struct {
 	why, notRun string
+	// answer is the answer of the last grist sent, when it came and fit.
+	answer json.RawMessage
+	// talk is what that answer said of its talk's session, when it said.
+	talk *GristAnswerTalk
 	// slip says the model's answer was wrong (it does not fit the schema, misses
 	// the example's expect, or the mill failed it for that): another send may
 	// well pass. A refusal, a silence, or a failure of the mill's own is not a
@@ -456,7 +623,7 @@ func (s GristSmoke) try(ctx context.Context, send GristSendRequest, wait time.Du
 	if len(missed) > 0 {
 		return smokeTry{why: "the answer misses what the example expects: " + strings.Join(missed, "; "), slip: true, misses: misses, txid: sent.Txid}
 	}
-	return smokeTry{}
+	return smokeTry{answer: sent.Answer.Answer, talk: sent.Answer.Talk}
 }
 
 // gristAnswerIsNotTheExamples says the mill would not grind a grist for a

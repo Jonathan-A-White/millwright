@@ -361,14 +361,16 @@ func newRequestStatus(out io.Writer) (application.GristStatus, error) {
 }
 
 // newGristEvalCmd builds `mw grist eval`: a grind tried on photos whose
-// answers are known, on each model named, and scored.
+// answers are known, on each model named, and scored; or, given an app and a
+// kind, on the examples of the app's rig.
 func newGristEvalCmd() *cobra.Command {
 	var grind, photos, effort, out string
-	var models []string
+	var models, examples []string
+	var wait time.Duration
 
 	cmd := &cobra.Command{
-		Use:   "eval",
-		Short: "Try a grind on photos with known answers, on each model named, and score it",
+		Use:   "eval --grind <file> --photos <dir> | <app> <kind> --example <name>",
+		Short: "Try a grind on photos with known answers, or on an example of its app, and score it",
 		Long: "eval runs one grind over a directory of photos, each with a <name>.txt beside it listing what\n" +
 			"is really in it (one name a line; a \"Container: X\" line names a container whose indented\n" +
 			"lines are its items), on each model named, one session at a time through the same grinder\n" +
@@ -380,9 +382,40 @@ func newGristEvalCmd() *cobra.Command {
 			"of the model's. A photo with no .txt is skipped.\n\n" +
 			"It writes eval-<UTC timestamp>.jsonl (every row, with the full answer) and .md (the tables)\n" +
 			"under --out. It never touches the postern backend, the mill's state or the dispatch cap, and\n" +
-			"the photos and answers never enter a bead or the vault.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+			"the photos and answers never enter a bead or the vault.\n\n" +
+			"With an app and a kind instead, eval sends the app's examples of that grind\n" +
+			"(grinds/examples/<kind>/<name>.json at its rig's main, as the smoke reads them; --example names\n" +
+			"each, and each costs a grist) once each through the postern backend as the test key, and\n" +
+			"prints the answers and whether each meets its example's expect, as the smoke checks it,\n" +
+			"without the smoke's resends, hold or record. It exits 1 when one does not.\n" +
+			"An example of a talk has a second turn: \"turn_2\": {\"request\": {...}, \"photos\": [...]}\n" +
+			"beside its request, which is turn 1. Turn 1 is sent with the talk eval:<example>:<nonce>, and\n" +
+			"turn 2 under the same talk with its own request and no history, so the mill resumes the\n" +
+			"session; only turn 2's answer is held to the example's expect (turn 1's must fit the schema).\n" +
+			"Every talk it starts is ended when answered (its record and transcript deleted, from the\n" +
+			"mill's state directory), and an eval: or smoke: talk of the app left by a run killed midway\n" +
+			"and unused for an hour is ended first. --grind, --photos, --models, --effort and --out\n" +
+			"belong to the photo eval, not this.",
+		Args: cobra.MaximumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 || len(examples) > 0 {
+				if len(args) != 2 || len(examples) == 0 {
+					return fmt.Errorf("mw grist eval <app> <kind> --example <name> takes the app, the kind of the grind and the examples to send (each costs a grist)")
+				}
+				if grind != "" || photos != "" || len(models) > 0 || effort != "" || out != "" {
+					return fmt.Errorf("mw grist eval <app> <kind> sends the examples of the app's rig: --grind, --photos, --models, --effort and --out are for the photo eval")
+				}
+				smoke, err := newSmoker(cmd.OutOrStdout(), wait)
+				if err != nil {
+					return err
+				}
+				return application.GristEvalExamples{Smoke: smoke, Out: cmd.OutOrStdout()}.Run(cmd.Context(), args[0], args[1], examples)
+			}
+			for flag, value := range map[string]string{"grind": grind, "photos": photos} {
+				if value == "" {
+					return fmt.Errorf("required flag(s) %q not set", flag)
+				}
+			}
 			ceilings, err := config.Grist()
 			if err != nil {
 				return err
@@ -408,14 +441,13 @@ func newGristEvalCmd() *cobra.Command {
 			return err
 		},
 	}
-	cmd.Flags().StringVar(&grind, "grind", "", "a grinds/<kind>.json in a rig checkout, read from its working tree; its instructions and schema are read from the same checkout (required)")
-	cmd.Flags().StringVar(&photos, "photos", "", "a directory of .jpg, .jpeg, .png or .webp photos, each with a <name>.txt beside it (required)")
+	cmd.Flags().StringVar(&grind, "grind", "", "a grinds/<kind>.json in a rig checkout, read from its working tree; its instructions and schema are read from the same checkout (required for the photo eval)")
+	cmd.Flags().StringVar(&photos, "photos", "", "a directory of .jpg, .jpeg, .png or .webp photos, each with a <name>.txt beside it (required for the photo eval)")
 	cmd.Flags().StringSliceVar(&models, "models", nil, "the models to try, comma separated, each one the [grist] models allows (default: the grind file's model)")
 	cmd.Flags().StringVar(&effort, "effort", "", "the effort to run at: low, medium, high, xhigh or max (default: the grind file's)")
 	cmd.Flags().StringVar(&out, "out", "", "the directory the .jsonl and .md are written to (default: eval under grist_state_dir, ~/.local/state/mw/grist/eval)")
-	for _, name := range []string{"grind", "photos"} {
-		_ = cmd.MarkFlagRequired(name)
-	}
+	cmd.Flags().StringSliceVar(&examples, "example", nil, "an example of <app> <kind> to send, grinds/examples/<kind>/<name>.json, repeatable (required with an app and a kind)")
+	cmd.Flags().DurationVar(&wait, "wait", application.GristSmokeWait, "how long each example waits for its answer")
 	return cmd
 }
 

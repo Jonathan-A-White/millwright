@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -587,4 +589,111 @@ func (e GristEval) now() time.Time {
 		return time.Now()
 	}
 	return e.Now()
+}
+
+// ErrGristEvalFailed is the error `mw grist eval <app> <kind> --example` leaves
+// with when an example did not pass; the report says which.
+var ErrGristEvalFailed = errors.New("a grist eval example did not pass")
+
+// GristEvalExamples is `mw grist eval <app> <kind> --example <name>...`: the
+// examples of an app's grind (grinds/examples/<kind>/<name>.json at its rig's
+// main) sent through the backend as the smoke's test key, one send each, and
+// each answer held to the grind's schema and to the example's expect. It is the
+// smoke on the examples asked for, with no resend, no hold and no record, and
+// with the answer printed so that a person can read it. An example of two turns
+// is sent as the smoke sends it: turn 1, then turn 2 under the same talk (named
+// eval:<example>:<nonce>), judged on turn 2's answer; every talk it starts is
+// ended when it is answered, and an eval or smoke talk an earlier run left, last
+// used an hour ago, is ended first (GristTalkSweep).
+type GristEvalExamples struct {
+	// Smoke reads the rig and sends; its Talks end the talks. Its TalkPrefix and
+	// Out are the eval's own.
+	Smoke GristSmoke
+	// Out is where the report is printed; nil prints nothing.
+	Out io.Writer
+}
+
+// Run sends the examples named of app's grind of kind, or every one of the kind
+// when none is named. It returns ErrGristEvalFailed when an example did not pass
+// or could not be run, and another error when nothing could be tried at all.
+func (e GristEvalExamples) Run(ctx context.Context, app, kind string, names []string) error {
+	s := e.Smoke
+	s.TalkPrefix, s.Out = GristEvalTalkPrefix, e.Out
+	checkout, commit, err := s.open(ctx, "mw grist eval", app)
+	if err != nil {
+		return err
+	}
+	files, err := s.Grinds.List(ctx, checkout, commit, GristExamplesDir+"/"+kind)
+	if err != nil {
+		return fmt.Errorf("mw grist eval: %w", err)
+	}
+	grind, ok := s.readGrind(ctx, checkout, commit, kind)
+	if !ok {
+		return fmt.Errorf("mw grist eval: %s has no grind of kind %q at %s (grinds/%s.json)", app, kind, shortTxid(commit), kind)
+	}
+	if grind.Forward != "" {
+		return fmt.Errorf("mw grist eval: the grind %s/%s forwards to the %s, so it is not evaluated", app, kind, grind.Forward)
+	}
+	schema := s.readSchema(ctx, checkout, commit, grind)
+	if schema == "" {
+		return fmt.Errorf("mw grist eval: the answer schema %s of %s/%s could not be read", grind.AnswerSchema, app, kind)
+	}
+	have := map[string]string{}
+	var all []string
+	for _, f := range files {
+		if path.Dir(f) == path.Join(GristExamplesDir, kind) && path.Ext(f) == ".json" {
+			name := strings.TrimSuffix(path.Base(f), ".json")
+			have[name] = f
+			all = append(all, name)
+		}
+	}
+	sort.Strings(all)
+	if len(names) == 0 {
+		names = all
+	}
+	if len(names) == 0 {
+		return fmt.Errorf("mw grist eval: %s/%s has no example (grinds/examples/%s/<name>.json)", app, kind, kind)
+	}
+	for _, name := range names {
+		if _, ok := have[name]; !ok {
+			return fmt.Errorf("mw grist eval: %s/%s has no example %q (it has: %s)", app, kind, name, strings.Join(all, ", "))
+		}
+	}
+	s.tidy(ctx, app)
+	failed := 0
+	for _, name := range names {
+		label := app + "/" + kind + "/" + name
+		s.say("sending %s ...", label)
+		prepared, why := s.prepare(ctx, checkout, commit, app, kind, have[name])
+		if why != "" {
+			s.say("  FAILED: %s", why)
+			failed++
+			continue
+		}
+		got := s.attempt(ctx, name, prepared.turns, prepared.wait, schema, prepared.example.Expect)
+		os.RemoveAll(prepared.dir)
+		switch {
+		case got.notRun != "":
+			s.say("  NOT RUN: %s", got.notRun)
+			failed++
+		case got.why != "":
+			s.say("  FAILED: %s", got.why)
+			failed++
+		default:
+			s.say("  ok")
+			if got.talk != nil {
+				s.say("  the talk's session was %s, at turn %d", got.talk.Session, got.talk.Turns)
+			}
+			var shown bytes.Buffer
+			if json.Indent(&shown, got.answer, "  ", "  ") == nil {
+				s.say("  answer: %s", shown.String())
+			}
+		}
+	}
+	if failed > 0 {
+		s.say("grist eval: %s/%s: %d of %d examples did not pass", app, kind, failed, len(names))
+		return ErrGristEvalFailed
+	}
+	s.say("grist eval: %s/%s: %d examples passed", app, kind, len(names))
+	return nil
 }

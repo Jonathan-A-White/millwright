@@ -13,6 +13,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/grist"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 )
@@ -50,13 +51,19 @@ func newSmoker(out io.Writer, wait time.Duration) (application.GristSmoke, error
 	if err != nil {
 		return application.GristSmoke{}, err
 	}
-	return application.GristSmoke{
+	smoke := application.GristSmoke{
 		Grinds: rig.NewGrinds(),
 		Send:   application.GristSend{Postern: backend, Cipher: posternCipher(keys), Keys: keys, Now: posternClock},
 		Apps:   apps,
 		Wait:   wait,
 		Out:    out,
-	}, nil
+	}
+	// The talks of an example of two turns are the mill's, on this host's state
+	// directory when the mill runs here; a host with no talks there has none to end.
+	if stateDir, err := config.GristStateDir(); err == nil {
+		smoke.Talks = application.GristTalkSweep{Store: grist.NewTalks(stateDir)}
+	}
+	return smoke, nil
 }
 
 // unavailableSmoker is the smoke of a host that is set up to smoke (it has

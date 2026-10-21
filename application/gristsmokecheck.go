@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -40,11 +41,46 @@ import (
 //	"expect": {"answer": {"all": [{"matches": "gardener"}, {"matches": "library"}]}}
 //
 // A failure of an all check names the one of its list that did not hold.
+//
+// An example of a talk adds turn_2, the second turn: its own request (and
+// photos), sent under the same talk after the first. Then request is turn 1,
+// turn_2.request is turn 2, sent without its history (the mill's session holds
+// it; the request may carry one for the app's schema), and
+// expect is the check of turn 2's answer; turn 1's only has to fit the schema.
+// An example with no turn_2 is one turn, as it always was.
+//
+//	{
+//	  "schemaVersion": "1",
+//	  "request": {"question": "my son is Luke"},
+//	  "turn_2":  {"request": {"question": "who is my son?"}},
+//	  "expect":  {"answer": {"matches": "Luke"}}
+//	}
 type GristExample struct {
 	SchemaVersion string                     `json:"schemaVersion"`
 	Request       json.RawMessage            `json:"request"`
 	Photos        []string                   `json:"photos"`
+	Turn2         *GristExampleTurn          `json:"turn_2,omitempty"`
 	Expect        map[string]json.RawMessage `json:"expect"`
+}
+
+// Version is the version the example's grists are sent as: the schemaVersion
+// beside the request, else the one in the first request, else none.
+func (e GristExample) Version() string {
+	if e.SchemaVersion != "" {
+		return e.SchemaVersion
+	}
+	var first struct {
+		SchemaVersion string `json:"schemaVersion"`
+	}
+	_ = json.Unmarshal(e.Request, &first)
+	return first.SchemaVersion
+}
+
+// GristExampleTurn is the second turn of a talk example: a request and the
+// photos beside the example that go with it.
+type GristExampleTurn struct {
+	Request json.RawMessage `json:"request"`
+	Photos  []string        `json:"photos"`
 }
 
 // ParseGristExample reads one example file, refusing one that has no request
@@ -64,6 +100,24 @@ func ParseGristExample(data []byte) (GristExample, error) {
 		_ = json.Unmarshal(example.Request, &inRequest)
 		if inRequest.SchemaVersion != "" && inRequest.SchemaVersion != example.SchemaVersion {
 			return GristExample{}, fmt.Errorf("schemaVersion is %s beside the request but %s in it", example.SchemaVersion, inRequest.SchemaVersion)
+		}
+	}
+	if turn := example.Turn2; turn != nil {
+		if len(strings.TrimSpace(string(turn.Request))) == 0 {
+			return GristExample{}, fmt.Errorf("turn_2 has no request")
+		}
+		var inRequest struct {
+			SchemaVersion string `json:"schemaVersion"`
+		}
+		_ = json.Unmarshal(turn.Request, &inRequest)
+		version := example.Version()
+		if inRequest.SchemaVersion != "" && inRequest.SchemaVersion != version {
+			return GristExample{}, fmt.Errorf("turn_2's schemaVersion is %s but the example's is %s", inRequest.SchemaVersion, version)
+		}
+		for _, name := range turn.Photos {
+			if name == "" || filepath.Base(name) != name {
+				return GristExample{}, fmt.Errorf("the photo %q of turn_2 is not a file beside the example", name)
+			}
 		}
 	}
 	for field, raw := range example.Expect {
