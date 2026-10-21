@@ -12,9 +12,12 @@ import wave
 
 import numpy as np
 
+from . import windows
+
 MODEL = "facebook/wav2vec2-lv-60-espeak-cv-ft"
 REVISION = "ae45363bf3413b374fecd9dc8bc1df0e24c3b7f4"
 RATE = 16000
+QUIET_FRAMES = 5   # a pause to cut in is at least this many frames (100 ms) quiet
 FILES = ["config.json", "preprocessor_config.json", "vocab.json", "pytorch_model.bin"]
 
 
@@ -43,9 +46,26 @@ class Listener:
         self.frame = self.model.config.inputs_to_logits_ratio / RATE
 
     def tokens_heard(self, audio):
-        """The tokens in the audio (float32, 16 kHz mono) as (token, start, end) seconds."""
+        """The tokens in the audio (float32, 16 kHz mono) as (token, start, end) seconds.
+
+        Audio longer than windows.WINDOW seconds is heard in windows (windows.py says why and
+        where they are cut); the tokens come back on the whole clip's clock, each once."""
         if len(audio) < RATE // 10:
             return []
+        out = []
+        for w in self.windows(audio):
+            shift = w.start / RATE
+            for token, start, end in self._decode(audio[w.start:w.end]):
+                if w.owns(start + shift, end + shift):
+                    out.append((token, round(start + shift, 2), round(end + shift, 2)))
+        return out
+
+    def windows(self, audio):
+        """The windows a clip of this audio is heard in (windows.plan), cut where it is quietest."""
+        return windows.plan(len(audio), lambda lo, hi: lo + quietest(audio[lo:hi]))
+
+    def _decode(self, audio):
+        """One pass of the model over the audio: its tokens as (token, start, end) seconds from its start."""
         x = self.features(audio, sampling_rate=RATE, return_tensors="pt").input_values
         with self._torch.inference_mode():
             ids = self.model(x).logits[0].argmax(-1).tolist()
@@ -57,7 +77,18 @@ class Listener:
                 else:
                     out.append([self.tokens[k], f * self.frame, (f + 1) * self.frame])
             prev = k
-        return [(t, round(s, 2), round(e, 2)) for t, s, e in out]
+        return [(t, s, e) for t, s, e in out]
+
+
+def quietest(audio):
+    """The offset in the audio where it is quietest: the middle of the quietest run of
+    QUIET_FRAMES frames of 20 ms, by mean absolute level."""
+    blocks = len(audio) // windows.FRAME
+    if blocks <= QUIET_FRAMES:
+        return len(audio) // 2
+    level = np.abs(audio[: blocks * windows.FRAME]).reshape(blocks, windows.FRAME).mean(axis=1)
+    run = np.convolve(level, np.ones(QUIET_FRAMES), mode="valid")
+    return (int(run.argmin()) + QUIET_FRAMES // 2) * windows.FRAME
 
 
 def silence(seconds):

@@ -80,7 +80,12 @@ the scorer is a `500`. `GET /health` answers `200` once the model is loaded.
 2. **Produced.** The clip through the wav2vec2 CTC model, which emits espeak-ng
    IPA: the likeliest token per 20 ms frame, repeats collapsed, blanks dropped,
    each token keeping its time. IPA to ARPAbet, so both sides spell a phone the
-   same way.
+   same way. A clip longer than 30 s is heard in windows (`windows.py`), because
+   the model's cost grows with the square of what it hears at once: each window
+   of about 30 s is cut where the clip is quietest within 3 s of that length,
+   heard with 1 s of its neighbours for context, and keeps the tokens whose
+   middle is in its own part, so no token is heard twice and the times are the
+   whole clip's. A clip of 30 s or less is one pass.
 3. **Aligned.** The expected phones end to end against the produced ones, by a
    weighted Levenshtein distance: a far phone, an added or a left-out phone
    costs 1; a near phone (vowel for vowel, voicing pairs such as T/D, the
@@ -154,6 +159,11 @@ dropped, which is how a misread word sounds ("cap" for "cat"). It is the free
 scorer beside Azure's: tuning it against Azure is a later epic's work.
 
 ## Known limits
+
+- The model's time is linear in the clip (about 0.23 s per audio second on the
+  Laptop, 4 threads), but the alignment's is not: it fills a table of expected
+  phones by produced phones, so a 600 s reading spends about 50 s there and a
+  longer one grows with the square (docs/scorers.md, "Measuring").
 
 - Where the reading stopped is the best fit of what the model heard, so a
   last word the model barely heard may be `not_reached` where a careful ear
