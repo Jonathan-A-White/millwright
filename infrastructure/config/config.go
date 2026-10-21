@@ -63,6 +63,11 @@
 //	[postern]
 //	verify_days = 4                    # days a landing's verify need stays in Needs you before it is published folded
 //
+//	[verify]                           # mw verify match: which demos and landings his messages and pictures show met (PROVISIONAL)
+//	model      = "haiku"
+//	effort     = "medium"
+//	confidence = 0.8                   # a match at or over this becomes a PROPOSED comment
+//
 //	[tester]                           # the one-week Tester trial, on the home only
 //	rigs   = ["lampas"]
 //	until  = "2026-10-16T20:00:00Z"    # UTC; no Tester story is sprung from then on
@@ -1689,6 +1694,71 @@ func Sleep() (SleepSettings, error) {
 		NightlyModel: said("nightly_model", "opus"), NightlyEffort: said("nightly_effort", "medium"),
 		SundayModel: said("sunday_model", "fable"), SundayEffort: said("sunday_effort", "xhigh"),
 	}, nil
+}
+
+// VerifyTable is the table of the config file that says what mw verify match
+// runs on: `model` and `effort` (haiku and medium when it does not say) and
+// `confidence`, the least confidence, above 0 and up to 1, at which a match
+// becomes a proposal (0.8). All three are PROVISIONAL: the Governor confirms.
+const VerifyTable = "verify"
+
+// The defaults of the [verify] table. application.DefaultVerifyModel,
+// DefaultVerifyEffort and DefaultVerifyConfidence are the same.
+const (
+	DefaultVerifyModel      = "haiku"
+	DefaultVerifyEffort     = "medium"
+	DefaultVerifyConfidence = 0.8
+)
+
+// VerifySettings is what the `[verify]` table says, the defaults filled in.
+type VerifySettings struct {
+	Model, Effort string
+	Confidence    float64
+}
+
+// Verify reports the `[verify]` table of ~/.config/mw/config.toml. A machine
+// with no such table has the defaults, which is not an error; a confidence that
+// is not a number above 0 and up to 1 is refused.
+func Verify() (VerifySettings, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return VerifySettings{}, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, VerifyTable)
+	if err != nil {
+		return VerifySettings{}, err
+	}
+	said := func(key, fallback string) string {
+		if value := strings.Trim(strings.TrimSpace(table[key]), `"'`); value != "" {
+			return value
+		}
+		return fallback
+	}
+	settings := VerifySettings{
+		Model: said("model", DefaultVerifyModel), Effort: said("effort", DefaultVerifyEffort), Confidence: DefaultVerifyConfidence,
+	}
+	if value := strings.TrimSpace(table["confidence"]); value != "" {
+		confidence, err := strconv.ParseFloat(value, 64)
+		if err != nil || confidence <= 0 || confidence > 1 {
+			return VerifySettings{}, fmt.Errorf("the [%s] table of %s says confidence = %q: it must be a number above 0 and up to 1", VerifyTable, path, value)
+		}
+		settings.Confidence = confidence
+	}
+	return settings, nil
+}
+
+// DefaultVerifyRunDir is where mw verify match records each run, under the home
+// directory: host state, never the vault.
+var DefaultVerifyRunDir = filepath.Join(".local", "state", "mw", "verify")
+
+// VerifyRunDir reports the full path to DefaultVerifyRunDir. There is no setting for it.
+func VerifyRunDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("there is no home directory to record a verify run in: %w", err)
+	}
+	return filepath.Join(home, DefaultVerifyRunDir), nil
 }
 
 // countIn reads a [grist] key that is a whole number, 1 or more, and

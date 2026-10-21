@@ -31,6 +31,7 @@ type bead struct {
 	StartedAt        string            `json:"started_at"`
 	UpdatedAt        string            `json:"updated_at"`
 	ClosedAt         string            `json:"closed_at"`
+	CloseReason      string            `json:"close_reason"`
 	LeaseExpiresAt   string            `json:"lease_expires_at"`
 	Priority         *int              `json:"priority"`
 	Metadata         map[string]any    `json:"metadata"`

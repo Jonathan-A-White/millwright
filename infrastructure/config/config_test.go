@@ -2745,6 +2745,38 @@ func TestSleepNamesTheNightlyAndTheSundayModelAndEffort(t *testing.T) {
 	}
 }
 
+func TestVerifyDefaultsToHaikuMediumAndEightTenths(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	got, err := config.Verify()
+	want := config.VerifySettings{Model: "haiku", Effort: "medium", Confidence: 0.8}
+	if err != nil || got != want {
+		t.Fatalf("defaults = %+v (%v), want %+v", got, err, want)
+	}
+}
+
+func TestVerifyNamesTheModelTheEffortAndTheConfidence(t *testing.T) {
+	writeConfig(t, "[verify]\nmodel = \"sonnet\"\neffort = high\nconfidence = 0.65\n")
+	got, err := config.Verify()
+	want := config.VerifySettings{Model: "sonnet", Effort: "high", Confidence: 0.65}
+	if err != nil || got != want {
+		t.Fatalf("read = %+v (%v), want %+v", got, err, want)
+	}
+	// each key alone leaves the others at their defaults
+	writeConfig(t, "[verify]\nconfidence = 1\n")
+	if got, err = config.Verify(); err != nil || got != (config.VerifySettings{Model: "haiku", Effort: "medium", Confidence: 1}) {
+		t.Fatalf("confidence alone = %+v (%v)", got, err)
+	}
+}
+
+func TestVerifyConfidenceThatIsNotAFractionIsRefused(t *testing.T) {
+	for _, bad := range []string{"0", "-0.2", "1.5", "high"} {
+		writeConfig(t, "[verify]\nconfidence = "+bad+"\n")
+		if _, err := config.Verify(); err == nil || !strings.Contains(err.Error(), "confidence") {
+			t.Errorf("expected %q refused naming confidence, got %v", bad, err)
+		}
+	}
+}
+
 // The Google OAuth client's JSON lives under the home directory unless config
 // or the environment says otherwise, and a path said is a full one; the token
 // is always ~/.config/mw/google-token.json, never a setting that could point
