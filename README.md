@@ -2593,6 +2593,26 @@ its grist to a session started cold, and says so in the pass's report. A pass
 run by `mw grist grind` or the dispatch tick has no pool. `mw status` shows the
 pool in one line under the host's: `grist pool: lampas/bible-talk 1 warm, 0 busy`.
 
+A grist may name its talk: `talk` (at most 80 characters) beside `app`, `kind`
+and `v`, the conversation it is a turn of (ADR 0007). The mill keeps one Claude
+session per app, sender key and talk, its record under the state directory's
+`talks/`, and runs every talk session of an app from one directory,
+`cwd/<app>`, with `CLAUDE_CODE_PROMPT_CACHE_TTL=1h` and never on the warm pool.
+The first turn starts the session with `--session-id` (and without
+`--no-session-persistence`); a turn within the hour of the last resumes it with
+`--resume`, every other flag the same, the request's `history` left out since
+the session holds it. One grist at a time per talk, in the order they came. A
+turn an hour or more after the last (`quiet`), a changed model, effort,
+instructions or schema (`spec`), a change of billing (`billing`), a lost
+transcript (`transcript`) or a resume that fails (`resume-failed`) starts a fresh
+session with the request whole. The answer says which: `talk: {session:
+"fresh"|"resumed", reason, turns, context_tokens}`. The record's line names the
+`talk`, its `session_id` and `resumed`; its `total_cost_usd` is that turn's own,
+and `session_cost_usd` the session's to date. `mw grist talks [app]` lists the
+live talks, one a line: app, talk, turns, context tokens, the last turn's cache
+read, the time since its last use and the session; `--json` prints them as JSON.
+A grist with no talk runs exactly as before. See `features/grist_talk.feature`.
+
 With `[grist]` `api_credits = true` and an Anthropic API key in `api_key_file`
 (default `~/.config/mw/anthropic-api.key`; it must be mode 0600, else the mill
 says in its report that the file is not used), the mill bills a grist to that key:

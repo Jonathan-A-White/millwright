@@ -29,8 +29,8 @@
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | {postern,hands*,homemove} |
 | PosternInboxShow (kept messages, --show) | application/posternkeep.go | postern_inbox |
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | {bsv,stampqueue,chainlookup}, rig/worktree.go |
-| Grinder, WarmGrinder, GristPoolBoard, GrindSource, Grist* (smoke re-sends misses twice), VisionSource | grist.go, application/gristpool.go, application/vision.go, application/gristruns.go, application/personcap.go, griststatus.go, gristsmoke.go | {claude/grind,rig/{grinds,landingof},hostlock/try}.go, grist |
-| GristCredits, GristCredit{Key,State}, GristCreditsAdmin (grist credits status|on|off|key|clear; [grist] api_credits, api_key_file; credits.json) | application/gristcredits.go | {grist/credits,claude/grind}.go, cmd/mw/grist_credits.go |
+| Grinder, WarmGrinder, GristPoolBoard, GristTalkStore, GrindSource, Grist* (smoke re-sends misses twice), VisionSource | grist.go, application/gristpool.go, application/vision.go, application/gristruns.go, application/personcap.go, griststatus.go, gristsmoke.go | {claude/grind,rig/{grinds,landingof},hostlock/try}.go, grist |
+| GristCredits, GristCredit{Key,State}, GristCreditsAdmin (grist credits *; api_credits, api_key_file) | application/gristcredits.go | {grist/credits,claude/grind}.go, cmd/mw/grist_credits.go |
 | IdeasOnlyReader, IdeasOnlyFiles | ideasonly.go | {postern/http.go,ideasonly} |
 | Suite* | application/suite.go, application/suitenightly.go | {rig/{worktree,checks}.go,vault/vault.go,apartproc} |
 | Scorer, ScoreTimeout, SecretStore, Google*, ContactBook (scorer.LocalTimeoutFor: 120 s+0.5 s/audio s, max 540) | application/scorer.go, secrets.go, application/google.go, application/contacts.go | {scorer,sops,google} |
@@ -60,7 +60,7 @@ Each use case's application/ files are in [docs/codemap-detail.md](codemap-detai
 | Postern* (+clear), Digest + Factory loop (LoopSource) | cmd/mw/postern.go, cmd/mw/posternview.go, cmd/mw/posternbead.go, cmd/mw/posternmirror.go, cmd/mw/digest.go | postern_* |
 | Event* | cmd/mw/events.go | event_follow |
 | Prompt*, Cards, Todo* | cmd/mw/prompt.go, cmd/mw/card.go, cmd/mw/todo.go, cmd/mw/todo_search.go, infra/todoindex/index.go | {prompt,card,todo*} |
-| Grist* | cmd/mw/grist.go, cmd/mw/gristsmoke.go | {grist*,scorer} |
+| Grist* | cmd/mw/grist.go, cmd/mw/gristsmoke.go, cmd/mw/grist_talks.go | {grist*,scorer} |
 | Triage*, Queue, Fold (+supersede), Sleep | infra/beads/triage.go, cmd/mw/triage.go, cmd/mw/queue.go, cmd/mw/fold.go, cmd/mw/sleep.go | - |
 
 cmd/mw/root.go, cmd/mw/version.go
