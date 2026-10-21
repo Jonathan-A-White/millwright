@@ -428,7 +428,7 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 			return posternApplied{Kind: "comment", Bead: m.Thread, Txid: m.Txid}, true, nil
 		}
 		if err := i.mail(ctx, fmt.Sprintf("Governor on %s: %s", m.Thread, clippedTo(strings.Join(strings.Fields(m.Text), " "), 60)),
-			fmt.Sprintf("The Governor by postern %s, txid %s, on %s:\n\n%s%s", sentInFull(m.Ts), m.Txid, m.Thread, m.Text, answerSuffix(m))); err != nil {
+			fmt.Sprintf("The Governor by postern %s, txid %s, on %s:\n\n%s%s", sentInFull(m.Ts), m.Txid, m.Thread, m.Text+picturesSuffix(m, saved), answerSuffix(m))); err != nil {
 			return posternApplied{}, false, err
 		}
 		return posternApplied{Kind: "comment", Bead: m.Thread, Txid: m.Txid, Detail: filesDetail(outcome, saved)}, true, nil
@@ -440,6 +440,28 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 		return posternApplied{Kind: "comment", Bead: m.Thread, Txid: m.Txid, Detail: filesDetail(outcome, saved)}, true, nil
 	}
 	return posternApplied{}, false, nil
+}
+
+// picturesSuffix is what a mail of m says of its pictures, the files that are
+// not audio: how many, and the path of each one saved. "" when it carries none.
+func picturesSuffix(m PosternInboxMessage, saved []posternSavedFile) string {
+	pictures := 0
+	for _, file := range m.files() {
+		if file != nil && !isPosternAudio(file.Mime) {
+			pictures++
+		}
+	}
+	var paths []string
+	for _, file := range saved {
+		if !isPosternAudio(file.Mime) {
+			paths = append(paths, file.Path)
+		}
+	}
+	what := strings.Join(paths, ", ")
+	if len(paths) < pictures {
+		what = strings.TrimPrefix(what+fmt.Sprintf(", %d not saved", pictures-len(paths)), ", ")
+	}
+	return carriesPictures(pictures, what)
 }
 
 // filesDetail is what an applied message's note says of its files: each one
