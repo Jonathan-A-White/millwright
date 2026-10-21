@@ -16,10 +16,13 @@ const DefaultVerifyHookTimeout = verifyTimeout + 5*time.Minute
 
 // PicturesHook is what the inbox pass tells of the Governor messages it applied
 // with a picture saved: Saved for each one as it is applied, Flush once when the
-// pass ends. Neither waits for what the hook goes on to do.
+// pass ends. Neither waits for what the hook goes on to do. Wait returns when
+// the run begun has ended: the follower's pass never calls it, and the --apply
+// pass, a short process, does before it exits (mw-4xdnis.6).
 type PicturesHook interface {
 	Saved(txid string)
 	Flush(ctx context.Context)
+	Wait()
 }
 
 // VerifyHook is the real-time half of mw verify match: the txids of the pictures
@@ -35,6 +38,9 @@ type VerifyHook struct {
 	Timeout time.Duration
 	// Err is where a run says what it did, one line each. A nil Err says nothing.
 	Err io.Writer
+	// Who begins each of those lines: the command that began the run. Empty is
+	// the follower's, "mw events follow".
+	Who string
 
 	mu      sync.Mutex
 	pending []string
@@ -95,10 +101,13 @@ func (h *VerifyHook) run(ctx context.Context, txids []string) {
 	if h.Err == nil {
 		return
 	}
-	names := strings.Join(txids, " ")
+	names, who := strings.Join(txids, " "), h.Who
+	if who == "" {
+		who = "mw events follow"
+	}
 	if err != nil {
-		fmt.Fprintf(h.Err, "mw events follow: verify match %s: %v\n", names, err)
+		fmt.Fprintf(h.Err, "%s: verify match %s: %v\n", who, names, err)
 		return
 	}
-	fmt.Fprintf(h.Err, "mw events follow: verify match %s: %d proposed\n", names, len(result.Proposed))
+	fmt.Fprintf(h.Err, "%s: verify match %s: %d proposed\n", who, names, len(result.Proposed))
 }

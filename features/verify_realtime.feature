@@ -4,6 +4,10 @@ Feature: the follower matches a picture of his as soon as it saves it
   which never waits on it; a match that finds his use of a demo leaves one
   PROPOSED comment on it. Nothing closes.
 
+  The backend's on-message hook runs mw postern inbox --apply, which applies his
+  picture before the follower's pass sees it: that pass starts the match too, and
+  returns once it has ended. A txid it matched is never matched again.
+
   Background:
     Given a realtime fixture with the demo "d-green"
 
@@ -22,3 +26,13 @@ Feature: the follower matches a picture of his as soon as it saves it
     Given he sent the words "just words" with no picture as "direct:bbb"
     When the follower's pass runs
     Then the realtime stand-in was not called
+
+  Scenario: a picture applied by mw postern inbox --apply is matched before that pass returns
+    Given he sent the picture "direct:ccc" with the words "the green tick"
+    And the realtime stand-in answers "d-green" from "direct:ccc" showing "the green tick after Save" at 0.9 and answers in a moment
+    When the apply pass runs
+    Then the realtime bead "d-green" has one comment opening PROPOSED that names "direct:ccc" and "the green tick after Save"
+    And the realtime stand-in was called once
+    And no realtime bead was closed
+    When the follower's pass runs
+    Then the realtime stand-in was called once

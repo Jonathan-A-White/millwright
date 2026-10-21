@@ -170,8 +170,19 @@ func (a posternApplied) line() string {
 // all a pass applies, so that nothing the home's own pass records is recorded
 // twice, and a tracker the boost cannot reach (the old home's, dead) does not
 // stop it: see toApply.
+//
+// A picture it saved is matched (mw verify match) as the follower's pass matches
+// one, and Apply returns once that match has ended, bounded by the hook's own
+// timeout: this pass is a process that ends with it, and the backend's hook
+// applies a picture before the follower's pass sees it (mw-4xdnis.6). A match
+// that fails or runs past its bound is said by the hook and changes nothing of
+// what Apply returns. A txid matched here is applied, so the follower's pass
+// never meets it again.
 func (i PosternInbox) Apply(ctx context.Context) ([]string, error) {
 	lines, _, err := i.apply(ctx, false, 0)
+	if i.Pictures != nil {
+		i.Pictures.Wait()
+	}
 	return lines, err
 }
 

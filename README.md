@@ -3332,8 +3332,14 @@ realtime   = true       # whether the follower matches a picture of his as it sa
 The call is billed to the API key when `[grist] api_credits` is on, as the mill's grinds are. The steps are in
 `features/verify_match.feature`.
 
-**Real time.** With `[verify] realtime` on (the default; `realtime = false` turns it off and leaves the matching to the
-nightly sweep and to `mw verify match` by hand), the follower's pass over his messages (the one that applies his taps)
+**Real time.** With `[verify] realtime` on (the default; `realtime = false` turns it off on both routes below and leaves
+the matching to the nightly sweep and to `mw verify match` by hand), a picture is matched by whichever pass applies it,
+by one of two routes. The first is `mw postern inbox --apply`, the backend's on-message hook, which usually gets there
+first: it applies his picture, and then starts `mw verify match --txid <txid>` for what it saved and waits for that match
+to end before it exits (the match has its own timeout, the agent call's ten minutes and a margin; the hand-off unit
+keeps it outside the backend's cgroup), saying `mw postern inbox --apply: verify match <txid>...: N proposed`, or the
+error, on its standard error. A match that fails or outruns its timeout is one line there and changes neither what the
+pass applied nor its exit status. The second route is the follower's pass over his messages (the one that applies his taps): it
 also applies a message of his on the general thread or a named channel that carries a picture, saving the files as
 `mw postern inbox` would; a message on a bead's thread, a voice note, a reply and an action stay with the inbox's own
 pass. When a pass has saved one or more pictures it ends, and then starts `mw verify match --txid <txid>` for them, in
@@ -3342,7 +3348,8 @@ and a margin). At most one match runs at a time: a picture saved while it runs i
 queued txid, one `--txid` each. The follower says `verify match <txid>...: N proposed`, or the error, on its standard
 error; a failed match is logged and never stops the pass or the follower. A boost host applies none of his messages,
 so it matches none. A match in flight when the follower stops (a restart after a landing) is lost, and its picture
-waits for the nightly sweep. The steps are in `features/verify_realtime.feature`.
+waits for the nightly sweep. A txid is applied once, by one route: what the `--apply` pass matched, the follower's pass
+finds applied and does not match again. The steps are in `features/verify_realtime.feature`.
 
 ### Confirming a proposal (`mw verify confirm`, `mw verify list`)
 

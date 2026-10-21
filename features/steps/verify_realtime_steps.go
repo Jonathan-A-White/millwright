@@ -74,7 +74,9 @@ func InitializeVerifyRealtimeScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^he sent the picture "([^"]*)" with the words "([^"]*)"$`, c.sentPicture)
 	ctx.Given(`^he sent the words "([^"]*)" with no picture as "([^"]*)"$`, func(words, txid string) error { return c.post(txid, map[string]any{"text": words}) })
 	ctx.Given(`^the realtime stand-in answers "([^"]*)" from "([^"]*)" showing "([^"]*)" at (\d+\.\d+) and waits$`, c.standInWaits)
+	ctx.Given(`^the realtime stand-in answers "([^"]*)" from "([^"]*)" showing "([^"]*)" at (\d+\.\d+) and answers in a moment$`, c.standInAnswersSoon)
 	ctx.When(`^the follower's pass runs$`, c.pass)
+	ctx.When(`^the apply pass runs$`, c.applyPass)
 	ctx.When(`^the realtime stand-in is let go$`, c.letGo)
 	ctx.Then(`^the pass has returned while the realtime stand-in is still waiting$`, c.passReturnedFirst)
 	ctx.Then(`^the realtime stand-in was called once$`, func() error { return c.calls(1) })
@@ -160,9 +162,42 @@ func (c *verifyRealtimeContext) standInWaits(bead, txid, shows, confidence strin
 	return nil
 }
 
-func (c *verifyRealtimeContext) pass() error {
+// standInAnswersSoon is standInWaits that lets itself go a moment after the
+// grind begins, for a pass that waits on the match.
+func (c *verifyRealtimeContext) standInAnswersSoon(bead, txid, shows, confidence string) error {
+	if err := c.standInWaits(bead, txid, shows, confidence); err != nil {
+		return err
+	}
+	hold, entered := c.hold, c.entered
+	c.hold = nil
+	go func() {
+		<-entered
+		time.Sleep(200 * time.Millisecond)
+		close(hold)
+	}()
+	return nil
+}
+
+func (c *verifyRealtimeContext) wiredInbox() application.PosternInbox {
 	inboxDir := filepath.Join(c.dir, "postern", "inbox")
-	c.hook = &application.VerifyHook{
+	if c.hook == nil {
+		c.hook = c.newHook(inboxDir)
+	}
+	return application.PosternInbox{
+		Postern: c.backend, Cipher: c.cipher, Keys: c.keys,
+		Memory: c.tracker, Tracker: c.tracker, GovernorKey: realtimeGovernorKey, AttachmentDir: inboxDir,
+		Pictures: c.hook, Out: &bytes.Buffer{},
+	}
+}
+
+// applyPass is mw postern inbox --apply, as the backend's on-message hook runs it.
+func (c *verifyRealtimeContext) applyPass() error {
+	_, c.passErr = c.wiredInbox().Apply(context.Background())
+	return c.passErr
+}
+
+func (c *verifyRealtimeContext) newHook(inboxDir string) *application.VerifyHook {
+	return &application.VerifyHook{
 		Err: &c.said,
 		Match: func(ctx context.Context, txids []string) (application.VerifyResult, error) {
 			return application.VerifyMatch{
@@ -172,11 +207,11 @@ func (c *verifyRealtimeContext) pass() error {
 			}.Run(ctx, application.VerifyOptions{Txids: txids})
 		},
 	}
-	taps := &application.PosternTaps{Inbox: application.PosternInbox{
-		Postern: c.backend, Cipher: c.cipher, Keys: c.keys,
-		Memory: c.tracker, Tracker: c.tracker, GovernorKey: realtimeGovernorKey, AttachmentDir: inboxDir,
-		Pictures: c.hook, Out: &bytes.Buffer{},
-	}}
+}
+
+// pass is one pass of the follower's, over the hook the scenario shares with the apply pass.
+func (c *verifyRealtimeContext) pass() error {
+	taps := &application.PosternTaps{Inbox: c.wiredInbox()}
 	c.passErr = taps.Tap(context.Background())
 	return c.passErr
 }

@@ -155,3 +155,98 @@ func TestFollowerPassLeavesAPictureMessageAloneWithoutTheHook(t *testing.T) {
 		t.Errorf("expected nothing applied without the hook, got %q", note)
 	}
 }
+
+// The --apply pass is a short process: it returns only when the match it began
+// has ended, so that the match outlives nothing (mw-4xdnis.6).
+func TestApplyPassWaitsForTheMatchItBegan(t *testing.T) {
+	f := newManyFiles(t)
+	f.postPicture(t, "pic-apply", "the green tick")
+	log := newMatchLog()
+	hook := &application.VerifyHook{Match: log.match}
+	inbox := f.inbox(&bytes.Buffer{})
+	inbox.Pictures = hook
+
+	returned := make(chan error, 1)
+	go func() {
+		_, err := inbox.Apply(context.Background())
+		returned <- err
+	}()
+	select {
+	case <-log.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the match never began")
+	}
+	select {
+	case err := <-returned:
+		t.Fatalf("the pass returned (%v) while the match was still running", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	log.release <- struct{}{}
+	select {
+	case err := <-returned:
+		if err != nil {
+			t.Fatalf("the pass: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the pass never returned after the match ended")
+	}
+	if got := log.seen(); len(got) != 1 || !slices.Equal(got[0], []string{"pic-apply"}) {
+		t.Fatalf("expected one run over pic-apply, got %v", got)
+	}
+}
+
+// A txid the --apply pass matched is not matched again by the follower's pass,
+// and a message without a picture starts no match on either route.
+func TestATxidTheApplyPassMatchedIsNotMatchedAgainByTheFollower(t *testing.T) {
+	f := newManyFiles(t)
+	f.postPicture(t, "pic-once", "the green tick")
+	f.post(t, "words-only", map[string]any{"text": "just words"})
+	log := newMatchLog()
+	log.release <- struct{}{}
+	log.release <- struct{}{}
+	hook := &application.VerifyHook{Match: log.match}
+	inbox := f.inbox(&bytes.Buffer{})
+	inbox.Pictures = hook
+
+	if _, err := inbox.Apply(context.Background()); err != nil {
+		t.Fatalf("the apply pass: %v", err)
+	}
+	taps := &application.PosternTaps{Inbox: inbox}
+	if err := taps.Tap(context.Background()); err != nil {
+		t.Fatalf("the follower's pass: %v", err)
+	}
+	hook.Wait()
+	if got := log.seen(); len(got) != 1 || !slices.Equal(got[0], []string{"pic-once"}) {
+		t.Fatalf("expected one run over pic-once alone, got %v", got)
+	}
+}
+
+// With no hook (realtime = false gives none) the --apply pass starts no match.
+func TestApplyPassWithoutTheHookStartsNoMatch(t *testing.T) {
+	f := newManyFiles(t)
+	f.postPicture(t, "pic-off", "a shot")
+	lines, err := f.inbox(&bytes.Buffer{}).Apply(context.Background())
+	if err != nil || len(lines) != 1 {
+		t.Fatalf("expected the message applied, got %v (%v)", lines, err)
+	}
+}
+
+// A match that runs past its bound is cut off, said in one line, and leaves the
+// --apply pass's result and error as they were.
+func TestAMatchPastItsBoundLeavesTheApplyPassAlone(t *testing.T) {
+	f := newManyFiles(t)
+	f.postPicture(t, "pic-slow", "a shot")
+	log := newMatchLog()
+	said := &bytes.Buffer{}
+	hook := &application.VerifyHook{Match: log.match, Err: said, Timeout: 50 * time.Millisecond, Who: "mw postern inbox --apply"}
+	inbox := f.inbox(&bytes.Buffer{})
+	inbox.Pictures = hook
+
+	lines, err := inbox.Apply(context.Background())
+	if err != nil || len(lines) != 1 {
+		t.Fatalf("expected the pass to apply the one message and not fail, got %v (%v)", lines, err)
+	}
+	if got := strings.Count(said.String(), "\n"); got != 1 || !strings.HasPrefix(said.String(), "mw postern inbox --apply: verify match pic-slow: ") {
+		t.Errorf("expected one line from the apply route naming the txid, got %q", said.String())
+	}
+}

@@ -481,17 +481,23 @@ func posternTaps(out io.Writer) (*application.PosternTaps, error) {
 		return nil, err
 	}
 	inbox.Lock = hostlock.New(filepath.Dir(wired.attachmentDir), hostlock.WithWait(posternTapLockWait))
-	inbox.Pictures = verifyHook(out)
+	inbox.Pictures = verifyHook(out, "")
 	return &application.PosternTaps{Inbox: inbox, Every: posternTapEvery}, nil
 }
 
-// verifyHook is the follower's real-time mw verify match: a run for the txids of
-// the pictures a pass saved, begun apart from the pass. [verify] realtime = false,
-// or a [verify] table that cannot be read, gives none (the second said on out).
-func verifyHook(out io.Writer) application.PicturesHook {
+// verifyHook is the real-time mw verify match: a run for the txids of the
+// pictures a pass saved, begun apart from the pass. The follower's pass (who "")
+// never waits on it; the --apply pass waits for it before it exits. [verify]
+// realtime = false, or a [verify] table that cannot be read, gives none (the
+// second said on out). It returns the interface only when there is a hook: a nil
+// *VerifyHook in it would not be nil.
+func verifyHook(out io.Writer, who string) application.PicturesHook {
 	settings, err := config.Verify()
 	if err != nil {
-		fmt.Fprintf(out, "mw events follow: no real-time verify match: %v\n", err)
+		if who == "" {
+			who = "mw events follow"
+		}
+		fmt.Fprintf(out, "%s: no real-time verify match: %v\n", who, err)
 		return nil
 	}
 	if !settings.Realtime {
@@ -499,6 +505,7 @@ func verifyHook(out io.Writer) application.PicturesHook {
 	}
 	return &application.VerifyHook{
 		Err: out,
+		Who: who,
 		Match: func(ctx context.Context, txids []string) (application.VerifyResult, error) {
 			match, _, err := newVerifyMatch(io.Discard)
 			if err != nil {
