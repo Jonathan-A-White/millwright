@@ -28,7 +28,7 @@ func TestEveryReasonDispatchPassesAStoryOverIsMappedToAHoldName(t *testing.T) {
 	if application.StarvedHolds[application.PourRefusedGate] == "" {
 		t.Errorf("the pour refusal has no hold name in application.StarvedHolds")
 	}
-	known := map[string]bool{application.PourRefusedGate: true, application.ClaimLostGate: true}
+	known := map[string]bool{application.PourRefusedGate: true, application.ClaimLostGate: true, application.LeftoverRefusedGate: true}
 	for _, gate := range application.DispatchGates {
 		known[gate.Name] = true
 	}

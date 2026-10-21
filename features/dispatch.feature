@@ -504,22 +504,20 @@ Feature: Dispatching the stories this host is ready to work
     And the earlier branch of "mw-gq6.9" was kept as "mw/mw-gq6.9-attempt1" with its 2 commits
     And the dispatch line for "mw-gq6.9" names the kept branch and the attempt
 
-  # mw-gq6.326: a dirty leftover is never touched; the story fails with the
-  # worktree named (and is mailed as stuck on its second identical failure),
-  # and the other stories ready this tick are still worked.
+  # mw-gq6.669: a dead attempt's uncommitted work (a story that hit the turn
+  # cap leaves it) is committed onto its branch as mw retry does, and the
+  # branch is kept; the fresh attempt then starts, and other stories with it.
 
-  Scenario: A leftover worktree with uncommitted work is left as it was, and named
+  Scenario: A leftover worktree with uncommitted work is committed onto its branch and kept before the fresh cut
     Given a story "mw-gq6.9" of that epic was dispatched and left its worktree with 1 commit
     And the worktree of "mw-gq6.9" holds uncommitted work
     And the story "mw-gq6.9" has been tried 1 time
     And the session of "mw-gq6.9" has a dead pane and its lease has expired
     And a ready story "mw-gq6.1" of that epic
     When dispatch runs on "vps" with a cap of 2
-    Then dispatch failed, saying: holds uncommitted work
+    Then a session was started for "mw-gq6.9" all the same
+    And the earlier branch of "mw-gq6.9" was kept as "mw/mw-gq6.9-attempt1" with its 2 commits
     And a session was started for "mw-gq6.1" all the same
-    And the branch of "mw-gq6.9" still has its 1 commit
-    And the worktree of "mw-gq6.9" still holds its uncommitted work
-    And the story "mw-gq6.9" is not claimed
 
   Scenario: A dead pane whose lease has not expired still counts against the cap
     Given a ready story "mw-gq6.1" of that epic

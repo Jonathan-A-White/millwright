@@ -31,6 +31,11 @@ const PourRefusedGate = "pour-refused"
 // claimed the story first, between the ready list and the claim (mw-gq6.569).
 const ClaimLostGate = "claim-lost"
 
+// LeftoverRefusedGate stands for a third: an earlier attempt's worktree could
+// not be cleared out of the way of the fresh cut, because a live session of the
+// story is in it or its uncommitted work could not be committed (mw-gq6.669).
+const LeftoverRefusedGate = "leftover-refused"
+
 // StarvedHolds maps every reason mw dispatch passes a ready story over for, by
 // the gate's name in DispatchGates (and PourRefusedGate), to the hold name the
 // starved-rig alarm gives it. A gate added to Dispatch.run is mapped here too:
@@ -59,6 +64,7 @@ var StarvedHolds = map[string]string{
 	"cap":                    "cap",
 	PourRefusedGate:          "pour refused",
 	ClaimLostGate:            "claim lost",
+	LeftoverRefusedGate:      "earlier attempt in the way",
 }
 
 // StarvedKey is the note a host's dispatch keeps of the rigs it holds back

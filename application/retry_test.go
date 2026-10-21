@@ -36,6 +36,8 @@ type fakeRetryLanding struct {
 	UncommittedErr   error
 	LeftoversSHA     string
 	LeftoversErr     error
+	// leftoverMessages is every message CommitLeftovers was given.
+	leftoverMessages []string
 
 	BundleSHA string
 	BundleErr error
@@ -116,9 +118,10 @@ func (f *fakeRetryLanding) Uncommitted(context.Context, string) ([]string, error
 	return append([]string(nil), f.UncommittedPaths...), nil
 }
 
-func (f *fakeRetryLanding) CommitLeftovers(context.Context, string, string) (string, error) {
+func (f *fakeRetryLanding) CommitLeftovers(_ context.Context, _, message string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.leftoverMessages = append(f.leftoverMessages, message)
 	if f.LeftoversErr != nil {
 		return "", f.LeftoversErr
 	}

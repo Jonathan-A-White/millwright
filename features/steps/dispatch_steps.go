@@ -269,7 +269,6 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the earlier branch of "([^"]*)" was kept as "([^"]*)" with its (\d+) commits?$`, c.theEarlierBranchWasKept)
 	ctx.Then(`^the dispatch line for "([^"]*)" names the kept branch and the attempt$`, c.theDispatchLineNamesTheKeptBranchAndTheAttempt)
 	ctx.Then(`^a session was started for "([^"]*)" all the same$`, c.aSessionWasStartedAllTheSame)
-	ctx.Then(`^the worktree of "([^"]*)" still holds its uncommitted work$`, c.theWorktreeStillHoldsItsUncommittedWork)
 	ctx.Then(`^the dry run report says (\d+) of (\d+) sessions were already running$`, c.theReportSaysHowManyWereRunning)
 	ctx.Then(`^dispatch reports (\d+) of (\d+) sessions were already running$`, c.theReportSaysHowManyWereRunning)
 	ctx.Then(`^the story "([^"]*)" records (\d+) attempts?$`, c.theStoryRecordsAttempts)
@@ -481,15 +480,6 @@ func (c *dispatchContext) aStoryLeftAWorktreeWithCommits(id string, n int) error
 // story's worktree: what a session that died mid-work leaves (mw-gq6.326).
 func (c *dispatchContext) theWorktreeHoldsUncommittedWork(id string) error {
 	return os.WriteFile(filepath.Join(c.worktreeOf(id), "half-done.md"), []byte("not committed\n"), 0o644)
-}
-
-// theWorktreeStillHoldsItsUncommittedWork checks dispatch left that file where
-// it was.
-func (c *dispatchContext) theWorktreeStillHoldsItsUncommittedWork(id string) error {
-	if _, err := os.Stat(filepath.Join(c.worktreeOf(id), "half-done.md")); err != nil {
-		return fmt.Errorf("expected the uncommitted work of %s to be left alone: %w", id, err)
-	}
-	return nil
 }
 
 // deadPaneWithLease is mw-gq6.106's shape: the tmux window a story's earlier

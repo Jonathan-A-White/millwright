@@ -1204,31 +1204,92 @@ func TestDispatchNeverWritesOverABranchKeptBefore(t *testing.T) {
 	}
 }
 
-func TestDispatchLeavesADirtyLeftoverAloneAndSaysWhich(t *testing.T) {
+// mw-gq6.669: a turn-capped story leaves its work uncommitted, and mw retry
+// commits it; dispatch used to refuse it and fail the unit, so the two are one
+// helper now and only a live session, or a commit that fails, holds it back.
+func TestDispatchCommitsADeadAttemptsUncommittedWorkBeforeKeepingItsBranch(t *testing.T) {
 	ctx := context.Background()
-	dispatch, tracker, worktrees, _ := aLeftover(t)
-	dispatch.Landing = &fakeRetryLanding{UncommittedPaths: []string{"half-done.go"}}
+	dispatch, _, worktrees, _ := aLeftover(t)
+	landing := &fakeRetryLanding{UncommittedPaths: []string{"half-done.go"}}
+	dispatch.Landing = landing
 
 	report, err := dispatch.Run(ctx)
-	if err == nil {
-		t.Fatalf("expected the run to report the story stuck, got %+v", report.Started)
+	if err != nil || len(report.Started) != 1 {
+		t.Fatalf("expected mw-gq6.1 started, got %+v, %v (failed: %+v)", report.Started, err, report.Failed)
 	}
-	dir := application.WorktreeDir("/rigs/millwright", "mw-gq6.1")
-	if len(report.Failed) != 1 || !strings.Contains(report.Failed[0].Err.Error(), dir) || !strings.Contains(report.Failed[0].Err.Error(), "half-done.go") {
-		t.Fatalf("expected one failure naming the dirty worktree and what is in it, got %+v", report.Failed)
+	if got := landing.leftoverMessages; len(got) != 1 || got[0] != "mw-gq6.1 attempt 1: uncommitted leftovers" {
+		t.Errorf("expected the leftovers committed once under retry's message, got %q", got)
+	}
+	if got := worktrees.renames(); len(got) != 1 || got[0] != "mw/mw-gq6.1 mw/mw-gq6.1-attempt1" {
+		t.Errorf("expected the old branch kept as its attempt, got %q", got)
+	}
+	if added, removed := worktrees.was(); len(added) != 1 || len(removed) != 1 {
+		t.Errorf("expected the old worktree removed and a fresh one cut, got %q %q", added, removed)
+	}
+}
+
+func TestDispatchLeavesADeadAttemptAloneWhenALiveSessionIsInItsWorktree(t *testing.T) {
+	ctx := context.Background()
+	dispatch, _, worktrees, runner := aLeftover(t)
+	landing := &fakeRetryLanding{UncommittedPaths: []string{"half-done.go"}}
+	dispatch.Landing = landing
+	session := application.SessionName("mw-gq6.1")
+	// The session is not there when the leftover is first looked for, and is by
+	// the time its worktree is read: the instant another dispatcher wins.
+	var asked int
+	worktrees.OnExists = func() {
+		asked++
+		if asked == 2 {
+			if err := runner.Start(ctx, application.SessionSpec{Name: session, Dir: "/other", Command: []string{"claude"}}); err != nil {
+				t.Fatalf("starting the live session: %v", err)
+			}
+		}
+	}
+
+	report, _ := dispatch.Run(ctx)
+	if len(report.Failed) != 0 || len(report.Passed) != 1 || report.Passed[0].StoryID != "mw-gq6.1" || report.Passed[0].Gate != application.LeftoverRefusedGate {
+		t.Fatalf("expected the story passed over as refused, got passed %+v failed %+v", report.Passed, report.Failed)
+	}
+	if why := report.Passed[0].Why; !strings.Contains(why, "mw-gq6.1") || !strings.Contains(why, session) {
+		t.Errorf("expected the refusal to name the story and the live session %s, got %q", session, why)
+	}
+	if len(landing.leftoverMessages) != 0 {
+		t.Errorf("expected nothing committed, got %q", landing.leftoverMessages)
 	}
 	if got := worktrees.renames(); len(got) != 0 {
-		t.Errorf("expected no branch renamed, got %q", got)
+		t.Errorf("expected nothing renamed, got %q", got)
 	}
 	if added, removed := worktrees.was(); len(added) != 0 || len(removed) != 0 {
 		t.Errorf("expected nothing cut or removed, got %q %q", added, removed)
 	}
-	detail, err := tracker.ShowStory(ctx, "mw-gq6.1")
+}
+
+// A commit that fails refuses that story alone: the unit does not fail, and
+// the other ready story is still worked.
+func TestDispatchPassesOverADeadAttemptWhoseLeftoversCannotBeCommitted(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, worktrees, _ := aLeftover(t)
+	dispatch.Cap = 2
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.2", Title: "Another story"})
+	dispatch.Landing = &fakeRetryLanding{UncommittedPaths: []string{"half-done.go"}, LeftoversErr: fmt.Errorf("git: hook refused")}
+
+	report, err := dispatch.Run(ctx)
 	if err != nil {
-		t.Fatalf("showing the story: %v", err)
+		t.Fatalf("expected the run not to fail for one refused story, got %v", err)
 	}
-	if detail.Assignee != "" || detail.Status == apptest.StatusInProgress {
-		t.Fatalf("expected the claim given back, got status %q assignee %q", detail.Status, detail.Assignee)
+	if len(report.Passed) != 1 || report.Passed[0].StoryID != "mw-gq6.1" || report.Passed[0].Gate != application.LeftoverRefusedGate ||
+		!strings.Contains(report.Passed[0].Why, "hook refused") {
+		t.Fatalf("expected mw-gq6.1 refused with the reason, got %+v", report.Passed)
+	}
+	var startedOther bool
+	for _, started := range report.Started {
+		startedOther = startedOther || started.StoryID == "mw-gq6.2"
+	}
+	if !startedOther {
+		t.Fatalf("expected the other ready story to dispatch, got %+v", report.Started)
+	}
+	if got := worktrees.renames(); len(got) != 0 {
+		t.Errorf("expected nothing renamed, got %q", got)
 	}
 }
 

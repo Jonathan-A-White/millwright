@@ -1193,12 +1193,17 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 		if err != nil {
 			var pour *pourRefusal
+			var refused *leftoverRefusal
 			var lost *claimLost
 			if errors.As(err, &lost) {
 				// Another host's dispatcher claimed it first: the story is theirs
 				// and nothing here is wrong. It takes none of the cap, and the
 				// stories after it are still worked (mw-gq6.569).
 				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: ClaimLostGate, Why: lost.Error()})
+			} else if errors.As(err, &refused) {
+				// An earlier attempt is in the way and is somebody's to settle:
+				// only this story waits, and the unit does not fail for it.
+				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: LeftoverRefusedGate, Why: refused.Error()})
 			} else if errors.As(err, &pour) {
 				// Not a failed run either: the story is blocked with the reason on
 				// it, the claim kept, and the next dispatch holds it as refused.
@@ -1630,7 +1635,12 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		}
 		kept, err := d.keepLeftover(ctx, rigDir, id, started, leftoverAttempt)
 		if err != nil {
-			return undo("clearing the way for the new worktree", err, false)
+			gone, released, undone := undo("clearing the way for the new worktree", err, false)
+			var refusal *leftoverRefusal
+			if errors.As(err, &refusal) {
+				undone = &leftoverRefusal{err: undone}
+			}
+			return gone, released, undone
 		}
 		started.KeptBranch = kept
 	}
@@ -1855,12 +1865,13 @@ func (s Started) handedSaid() string {
 
 // keepLeftover clears an earlier attempt's worktree and branch out of the way of
 // a fresh cut without losing anything (mw-gq6.326). A worktree holding
-// uncommitted work is refused, naming it and what is in it: it is somebody's to
-// settle by hand, and nothing is changed. Otherwise the clean worktree is taken
-// away (never forced) and the branch is renamed to mw/<id>-attempt<N>, N the
-// attempt that made it, with a number added if that name is taken by an attempt
-// kept before; no branch is ever deleted. It returns the name the branch was
-// kept under, empty when there was no branch.
+// uncommitted work has it committed onto the branch first, exactly as mw retry
+// does (mw-gq6.669), unless a live session of the story is in it, or the commit
+// fails: then nothing is changed and a leftoverRefusal says why. The clean
+// worktree is taken away (never forced) and the branch is renamed to
+// mw/<id>-attempt<N>, N the attempt that made it, with a number added if that
+// name is taken by an attempt kept before; no branch is ever deleted. It returns
+// the name the branch was kept under, empty when there was no branch.
 func (d Dispatch) keepLeftover(ctx context.Context, rigDir, id string, started Started, attempt int) (string, error) {
 	hasDir, err := d.Worktrees.Exists(ctx, rigDir, started.Worktree, "")
 	if err != nil {
@@ -1876,8 +1887,16 @@ func (d Dispatch) keepLeftover(ctx context.Context, rigDir, id string, started S
 			return "", fmt.Errorf("reading what the worktree %s left uncommitted: %w", started.Worktree, err)
 		}
 		if len(left) > 0 {
-			return "", fmt.Errorf("the worktree %s of an earlier attempt holds uncommitted work (%s), so it and its branch %s were left as they were; commit or discard it by hand, or mw retry %s",
-				started.Worktree, strings.Join(left, ", "), started.Branch, id)
+			// A session that began since leftoverAt looked is working in this
+			// worktree right now: its files are not leftovers.
+			if status, err := d.Runner.Status(ctx, started.Session); err == nil && status.Running() {
+				return "", &leftoverRefusal{err: fmt.Errorf("the session %s of %s is running, and the worktree %s holds uncommitted work (%s), so it and its branch %s were left as they were",
+					started.Session, id, started.Worktree, strings.Join(left, ", "), started.Branch)}
+			}
+			if _, err := commitLeftovers(ctx, d.Landing, started.Worktree, id, attempt); err != nil {
+				return "", &leftoverRefusal{err: fmt.Errorf("%s, so the worktree %s and its branch %s were left as they were; commit or discard it by hand, or mw retry %s",
+					err, started.Worktree, started.Branch, id)}
+			}
 		}
 		if err := d.Worktrees.RemoveWithoutForce(ctx, rigDir, started.Worktree); err != nil {
 			return "", fmt.Errorf("the worktree %s of an earlier attempt could not be removed: %w", started.Worktree, err)
@@ -1902,6 +1921,14 @@ func (d Dispatch) keepLeftover(ctx context.Context, rigDir, id string, started S
 	}
 	return kept, nil
 }
+
+// leftoverRefusal is keepLeftover leaving an earlier attempt's worktree as it
+// was, which run passes over instead of failing: only this story is stuck, and
+// the stories after it are still worked (mw-gq6.669).
+type leftoverRefusal struct{ err error }
+
+func (e *leftoverRefusal) Error() string { return e.err.Error() }
+func (e *leftoverRefusal) Unwrap() error { return e.err }
 
 // ReasonPourRefused is the code a story is marked blocked under when the
 // tracker refused to pour its formula.

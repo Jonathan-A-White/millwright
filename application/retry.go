@@ -85,6 +85,25 @@ type salvagedBranch struct {
 	VaultCommit string
 }
 
+// commitLeftovers commits whatever dir holds uncommitted onto its branch as
+// "<id> attempt N: uncommitted leftovers", and says whether there was anything
+// to commit. It is the one place a dead attempt's unfinished work is kept, for
+// mw retry and for a dispatch that finds it in the way (mw-gq6.669).
+func commitLeftovers(ctx context.Context, landing Landing, dir, storyID string, attempt int) (bool, error) {
+	left, err := landing.Uncommitted(ctx, dir)
+	if err != nil {
+		return false, fmt.Errorf("reading what %s left uncommitted: %w", dir, err)
+	}
+	if len(left) == 0 {
+		return false, nil
+	}
+	message := fmt.Sprintf("%s attempt %d: uncommitted leftovers", storyID, attempt)
+	if _, err := landing.CommitLeftovers(ctx, dir, message); err != nil {
+		return false, fmt.Errorf("committing what %s left uncommitted (%s): %w", dir, strings.Join(left, ", "), err)
+	}
+	return true, nil
+}
+
 // salvageBranch bundles branch's commits ahead of base into the vault — first
 // committing whatever dir holds uncommitted, if anything — and then removes
 // the worktree at dir and, unless keepBranch says the next attempt continues
@@ -103,16 +122,10 @@ type salvagedBranch struct {
 func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, files VaultFiles, vlt Vault, rigDir, storyID, dir, branch, base string, attempt int, keepBranch, keepWork bool) (salvagedBranch, error) {
 	var s salvagedBranch
 
-	left, err := landing.Uncommitted(ctx, dir)
+	committed, err := commitLeftovers(ctx, landing, dir, storyID, attempt)
+	s.CommittedLeftovers = committed
 	if err != nil {
-		return s, fmt.Errorf("reading what %s left uncommitted: %w", dir, err)
-	}
-	if len(left) > 0 {
-		message := fmt.Sprintf("%s attempt %d: uncommitted leftovers", storyID, attempt)
-		if _, err := landing.CommitLeftovers(ctx, dir, message); err != nil {
-			return s, fmt.Errorf("committing what %s left uncommitted (%s): %w", dir, strings.Join(left, ", "), err)
-		}
-		s.CommittedLeftovers = true
+		return s, err
 	}
 
 	ahead, err := landing.Ahead(ctx, rigDir, branch, base)
