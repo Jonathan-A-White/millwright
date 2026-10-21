@@ -225,3 +225,90 @@ func TestWaitWithoutMailKindDoesNotConsultTheBox(t *testing.T) {
 		t.Fatalf("err %v, box read %d times; want none", err, box.inboxCalls)
 	}
 }
+
+func handoverEvent(seat, successor string, at uint64) events.Event {
+	return events.Event{Kind: events.KindHandover, Actor: seat, Detail: events.Handover{Seat: seat, Successor: successor, At: at}.Detail()}
+}
+
+// A handover to this window that landed before the wait was armed (the
+// successor reading its boot while the old session handed over: mw-gq6.668)
+// ends the wait at once: the seat is already this window's.
+func TestHandoverWaitBegunAfterAHandoverToItsWindowHoldsTheSeatAtOnce(t *testing.T) {
+	log := logWith(t, jobEvent, mailEvent, handoverEvent("mayor", "mayor-w", 2), jobEvent)
+	var out bytes.Buffer
+	got, err := application.EventWait{
+		Log:          log,
+		Subscription: application.Subscription{Seat: "mayor", Kinds: []string{events.KindHandover}},
+		Self:         "mayor-w",
+		Sleep:        func(context.Context, time.Duration) error { t.Fatal("it slept"); return nil },
+		Out:          &out,
+	}.Run(context.Background())
+	if err != nil || len(got) != 1 || got[0].Seq != 3 {
+		t.Fatalf("got %+v, %v; want the handover, event 3", got, err)
+	}
+	if first := strings.SplitN(out.String(), "\n", 2)[0]; !strings.HasPrefix(first, "You hold the mayor seat from event 2:") {
+		t.Fatalf("printed %q, want 'You hold the mayor seat from event 2'", out.String())
+	}
+}
+
+func TestHandoverWaitBegunAfterAHandoverToAnotherWindowOrAwayFromItsWindowWaits(t *testing.T) {
+	cases := map[string][]events.Event{
+		"to another window":  {handoverEvent("mayor", "mayor-other", 1)},
+		"then away from it":  {handoverEvent("mayor", "mayor-w", 1), handoverEvent("mayor", "mayor-next", 2)},
+		"another seat's":     {handoverEvent("deputy", "mayor-w", 1)},
+		"no handover at all": {jobEvent},
+	}
+	for name, evs := range cases {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+			got, err := application.EventWait{
+				Log:          logWith(t, evs...),
+				Subscription: application.Subscription{Seat: "mayor", Kinds: []string{events.KindHandover}},
+				Self:         "mayor-w",
+				Limit:        20 * time.Millisecond,
+				Every:        time.Millisecond,
+				Out:          &out,
+			}.Run(context.Background())
+			if err != nil || len(got) != 0 {
+				t.Fatalf("got %+v, %v; want it to wait out its limit", got, err)
+			}
+			if !strings.Contains(out.String(), "No events for mayor by ") {
+				t.Fatalf("printed %q, want the time-limit line", out.String())
+			}
+		})
+	}
+}
+
+func TestHandoverWaitGivenSincePastTheHandoverIgnoresIt(t *testing.T) {
+	log := logWith(t, handoverEvent("mayor", "mayor-w", 0), jobEvent)
+	since := uint64(1)
+	var out bytes.Buffer
+	got, err := application.EventWait{
+		Log:          log,
+		Subscription: application.Subscription{Seat: "mayor", Kinds: []string{events.KindHandover}},
+		Self:         "mayor-w",
+		Since:        &since,
+		Limit:        20 * time.Millisecond,
+		Every:        time.Millisecond,
+		Out:          &out,
+	}.Run(context.Background())
+	if err != nil || len(got) != 0 || strings.Contains(out.String(), "You hold") {
+		t.Fatalf("got %+v, %v, printed %q; want the handover ignored", got, err, out.String())
+	}
+}
+
+// The look-back is for a wait that listens for the handover: a mail wait
+// re-armed in the successor's session must not end on the old handover.
+func TestWaitWithoutTheHandoverKindDoesNotLookBackForOne(t *testing.T) {
+	got, err := application.EventWait{
+		Log:          logWith(t, handoverEvent("mayor", "mayor-w", 0)),
+		Subscription: application.Subscription{Seat: "mayor", Kinds: []string{events.KindMail}},
+		Self:         "mayor-w",
+		Limit:        20 * time.Millisecond,
+		Every:        time.Millisecond,
+		Out:          &bytes.Buffer{},
+	}.Run(context.Background())
+	if err != nil || len(got) != 0 {
+		t.Fatalf("got %+v, %v; want it to wait out its limit", got, err)
+	}
+}

@@ -454,7 +454,10 @@ func newEventsWaitCmd() *cobra.Command {
 			"A handover of the seat (mw seat handover) ends the wait whatever the kinds. In the old session's\n" +
 			"window it prints the events up to N, then 'handed over at N: answer nothing after event N'; in the\n" +
 			"successor's window, whose name is --as (default: this tmux window's), 'You hold the seat from event N'.\n" +
-			"A wait begun --since N or later ignores a handover that marked N.",
+			"A wait begun --since N or later ignores a handover that marked N. A wait with handover among its kinds\n" +
+			"and no --since looks back first: when the seat's newest handover in the log is to its own window (--as),\n" +
+			"it prints 'You hold the seat from event N' and exits 0 at once, the handover having landed before it\n" +
+			"was armed; a newest handover to another window, or none, leaves it to wait as above.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if seat == "" {

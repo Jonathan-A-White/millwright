@@ -32,7 +32,10 @@ const DefaultEventWaitEvery = time.Second
 // before the handover, is told it holds the seat from N, with the events
 // past N; a successor's wait begun at or after N does not see it. That holds
 // for a wait given --since; a wait begun at the head with no --since takes the
-// seat from any handover appended after it began, whatever its N.
+// seat from any handover appended after it began, whatever its N. Such a wait
+// with the handover among its kinds also looks back first: when the seat's
+// newest handover is to its own window (Self), it holds the seat at once,
+// the handover having landed before the wait was armed (mw-gq6.668).
 type EventWait struct {
 	Log EventLog
 	// Subscription is the seat and the kinds that end the wait.
@@ -93,6 +96,14 @@ func (w EventWait) Run(ctx context.Context) ([]events.Event, error) {
 		if unread, err := w.Box.Inbox(ctx, w.Subscription.Seat); err == nil && len(unread) > 0 {
 			fmt.Fprintln(w.Out, UnreadMailLine(w.Subscription.Seat, len(unread)))
 			return nil, nil
+		}
+	}
+
+	if w.Since == nil {
+		if taken, ok, err := w.heldBeforeArming(ctx); err != nil {
+			return nil, err
+		} else if ok {
+			return taken, nil
 		}
 	}
 
@@ -163,15 +174,46 @@ func (w EventWait) Run(ctx context.Context) ([]events.Event, error) {
 	}
 }
 
-// waitsForMail reports whether mail is among the kinds the wait ends on.
-func (w EventWait) waitsForMail() bool {
-	for _, kind := range w.Subscription.Kinds {
-		if kind == events.KindMail {
+// heldBeforeArming is the look-back of a wait that listens for a handover and
+// has no Since: when the seat's newest handover in the log is to this window,
+// the seat is already its own (the handover landed while the successor read its
+// boot, before it armed this wait: mw-gq6.668), so it prints the hold line and
+// returns that handover at once. A handover to another window, one followed by
+// a handover away, a wait that does not know its window or one that does not
+// listen for a handover wait as they do without it.
+func (w EventWait) heldBeforeArming(ctx context.Context) ([]events.Event, bool, error) {
+	if w.Self == "" || !w.waitsFor(events.KindHandover) {
+		return nil, false, nil
+	}
+	evs, err := w.Log.Since(ctx, 0)
+	if err != nil {
+		return nil, false, err
+	}
+	var newest events.Event
+	var held events.Handover
+	for _, ev := range evs {
+		if h, ok := events.HandoverOf(ev); ok && h.Seat == w.Subscription.Seat {
+			newest, held = ev, h
+		}
+	}
+	if newest.Seq == 0 || held.Successor != w.Self {
+		return nil, false, nil
+	}
+	return w.takeSeat(newest, held, nil), true, nil
+}
+
+// waitsFor reports whether kind is among the kinds the wait ends on.
+func (w EventWait) waitsFor(kind string) bool {
+	for _, k := range w.Subscription.Kinds {
+		if k == kind {
 			return true
 		}
 	}
 	return false
 }
+
+// waitsForMail reports whether mail is among the kinds the wait ends on.
+func (w EventWait) waitsForMail() bool { return w.waitsFor(events.KindMail) }
 
 // UnreadMailLine is what a wait prints when it finds mail already unread in
 // the seat's box as it begins.

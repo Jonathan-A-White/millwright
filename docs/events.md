@@ -116,7 +116,9 @@ session still answers, and `mw seat handover --at <N>` (default: the log's head)
 `mw events wait --for <seat>` or `mw talk wait` that began before the event, in any
 window but the successor's, ends at once on it with "handed over at N"; the successor's
 `mw events wait` ends on it with "you hold the seat from N", and one begun `--since N` or
-later ignores it. The old session reads and answers up to N, the successor from N on.
+later ignores it. A wait with `handover` among its kinds and no `--since` looks back first: when the
+seat's newest handover is to its own window it says "you hold the seat from N" and ends at once, the
+handover having landed before it was armed (mw-gq6.668). The old session reads and answers up to N, the successor from N on.
 
 ## A close-out that could not record
 
