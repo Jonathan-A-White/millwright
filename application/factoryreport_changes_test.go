@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -21,8 +22,10 @@ type changeFactory struct {
 	files     *vault.Vault
 	mailbox   *apptest.FakeMailbox
 	snapshots *apptest.FakeMetricSnapshots
-	now       time.Time
-	n         int
+	// review, when set, is his review queue and demos waiting today.
+	review *reviewCounts
+	now    time.Time
+	n      int
 }
 
 func newChangeFactory(t *testing.T) *changeFactory {
@@ -91,6 +94,10 @@ func (f *changeFactory) report(withWrites bool) (application.FactoryReportResult
 	report := application.FactoryReport{
 		Tracker: f.tracker, Files: f.files, Seat: "builder", Benchmarks: &apptest.FakeBenchmarks{},
 		Now: func() time.Time { return f.now }, Out: &out,
+	}
+	report.History = f.snapshots
+	if f.review != nil {
+		report.Review = f.review
 	}
 	if withWrites {
 		report.Notes, report.Mailbox, report.Snapshots = f.tracker, f.mailbox, f.snapshots
@@ -353,5 +360,106 @@ func TestAKeptChangeIsNoCheapWin(t *testing.T) {
 		if w.Rule == application.WinWorseChange {
 			t.Errorf("a KEPT change is a cheap win: %+v", w)
 		}
+	}
+}
+
+// reviewCounts is the DAMPERS counts of his time as a report reads them.
+type reviewCounts struct{ queue, demos int }
+
+func (r *reviewCounts) DamperCounts(context.Context) (application.DampersReport, error) {
+	return application.DampersReport{Counts: application.DamperCounts{ReviewQueue: r.queue, DemosWaiting: r.demos}}, nil
+}
+
+// snapshotOn keeps a day's snapshot with his time counts, as an earlier report send did.
+func (f *changeFactory) snapshotOn(day string, queue, demos float64) {
+	f.t.Helper()
+	if err := f.snapshots.Append(context.Background(), application.MetricSnapshot{Day: day, ReviewQueue: &queue, DemosWaiting: &demos}); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// His time is read from the daily snapshots: the mean of those in the 14 days
+// before the landing day against the mean of those in the 14 days after it.
+func TestAChangeIsJudgedOnHisTimeFromTheMeanOfTheDailySnapshots(t *testing.T) {
+	for _, c := range []struct {
+		name, acceptance string
+		counts           []float64 // on 09-25, 09-28 (before) and 10-03, 10-06 (after)
+		verdict, printed string
+	}{
+		{"queue fell", "Expect: review queue down", []float64{6, 8, 3, 5}, application.ChangeKept, "7.0 → 4.0 (-43%): KEPT"},
+		{"queue rose", "Expect: review queue down", []float64{3, 5, 6, 8}, application.ChangeWorse, "4.0 → 7.0 (+75%): WORSE"},
+		{"queue held in the band", "Expect: review queue down", []float64{10, 10, 10, 10}, application.ChangeKept, "10.0 → 10.0 (+0%): KEPT"},
+		{"demos rose", "Expect: demos waiting down", []float64{1, 1, 4, 4}, application.ChangeWorse, "1.0 → 4.0 (+300%): WORSE"},
+	} {
+		f := newChangeFactory(t)
+		metric := func(day string, v float64) {
+			if c.acceptance == "Expect: demos waiting down" {
+				f.snapshotOn(day, 0, v)
+			} else {
+				f.snapshotOn(day, v, 0)
+			}
+		}
+		for i, day := range []string{"2026-09-25", "2026-09-28", "2026-10-03", "2026-10-06"} {
+			metric(day, c.counts[i])
+		}
+		f.snapshotOn("2026-10-01", 99, 99) // the landing day is in neither
+		f.snapshotOn("2026-09-10", 99, 99) // nor is a day before the 14
+		f.snapshotOn("2026-10-16", 99, 99) // nor one after
+		f.change(c.acceptance, "2026-10-01")
+		result, printed := f.report(false)
+		if len(result.Changes) != 1 || result.Changes[0].Verdict != c.verdict {
+			t.Errorf("%s: changes %+v, want %q\n%s", c.name, result.Changes, c.verdict, printed)
+		}
+		if !strings.Contains(printed, c.printed) {
+			t.Errorf("%s: the report does not say %q:\n%s", c.name, c.printed, printed)
+		}
+	}
+}
+
+func TestAChangeOnHisTimeWithNoSnapshotsOnOneSideHasNoData(t *testing.T) {
+	f := newChangeFactory(t)
+	f.snapshotOn("2026-09-27", 6, 1) // none after
+	f.change("Expect: review queue down", "2026-10-01")
+	result, _ := f.report(false)
+	if len(result.Changes) != 1 || result.Changes[0].Verdict != application.ChangeNoData {
+		t.Errorf("changes %+v, want no data", result.Changes)
+	}
+}
+
+func TestTheReportPrintsHisTimeForTheWholeFactoryAndKeepsItInTheDailySnapshot(t *testing.T) {
+	f := newChangeFactory(t)
+	f.rows("2026-10-16", "lampas", 3, 1)
+	f.review = &reviewCounts{queue: 5, demos: 0}
+	result, printed := f.report(true)
+	if result.Review == nil || result.Review.Queue != 5 || result.Review.DemosWaiting != 0 {
+		t.Fatalf("review %+v, want a queue of 5 and no demos waiting", result.Review)
+	}
+	for _, want := range []string{"HIS TIME", "  review queue 5 (limit 8)\n", "  demos waiting 0 (7 days or more)\n"} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("the report does not say %q:\n%s", want, printed)
+		}
+	}
+	got := f.snapshots.All()
+	if len(got) != 1 || got[0].ReviewQueue == nil || *got[0].ReviewQueue != 5 || got[0].DemosWaiting == nil || *got[0].DemosWaiting != 0 {
+		t.Errorf("snapshots %+v, want one with a review queue of 5 and 0 demos waiting", got)
+	}
+	data, err := json.Marshal(got[0])
+	if err != nil || !strings.Contains(string(data), `"review_queue":5`) || !strings.Contains(string(data), `"demos_waiting":0`) {
+		t.Errorf("the snapshot as JSON is %s (%v), want review_queue and demos_waiting", data, err)
+	}
+	if summary := result.Summary(); !strings.Contains(summary, "review queue 5") {
+		t.Errorf("the summary does not say the review queue:\n%s", summary)
+	}
+}
+
+func TestAReportWithNoReviewCountsLeavesHisTimeOut(t *testing.T) {
+	f := newChangeFactory(t)
+	f.rows("2026-10-16", "lampas", 3, 1)
+	result, printed := f.report(true)
+	if result.Review != nil || strings.Contains(printed, "HIS TIME") {
+		t.Errorf("review %+v printed:\n%s", result.Review, printed)
+	}
+	if got := f.snapshots.All(); len(got) != 1 || got[0].ReviewQueue != nil || got[0].DemosWaiting != nil {
+		t.Errorf("snapshots %+v, want his time left out", got)
 	}
 }

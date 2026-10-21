@@ -19,6 +19,9 @@ func (r FactoryReportResult) Summary() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Factory, %d days to %s\n", days, r.Window.Until.UTC().Format(LedgerDate))
 	r.summaryQualitySpeedFuel(&b)
+	if t := r.Review; t != nil {
+		summaryLine(&b, "", "HIS TIME ", fmt.Sprintf("review queue %d (limit %d), demos waiting %d", t.Queue, t.QueueLimit, t.DemosWaiting))
+	}
 
 	if bad := worse(r.Changes); len(bad) > 0 {
 		var names []string

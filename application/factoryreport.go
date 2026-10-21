@@ -103,8 +103,31 @@ type FactoryReport struct {
 	Notes     ReportNotes
 	Mailbox   Mailbox
 	Snapshots MetricSnapshots
-	Now       func() time.Time
-	Out       io.Writer
+	// History, when set, is read for the daily snapshots a change on his time
+	// is judged from (Snapshots is read for them too); it writes nothing.
+	History MetricSnapshots
+	// Review, when set, counts his review queue and the demos waiting for the
+	// whole factory (a report narrowed to a rig or host, or to a landing, leaves
+	// them out); left nil the report has no HIS TIME part.
+	Review ReviewCounter
+	Now    func() time.Time
+	Out    io.Writer
+}
+
+// ReviewCounter counts what waits for him, as mw status DAMPERS does. The real
+// adapter is DamperSurvey; DamperCounts reads the work and judges it.
+type ReviewCounter interface {
+	DamperCounts(ctx context.Context) (DampersReport, error)
+}
+
+// ReviewTime is his time at the moment of the report: ReviewQueue is the open
+// cards, open demos and unrun hands steps, against the limit the DAMPERS alarm
+// trips at, and DemosWaiting the demos waiting DemoDays or more.
+type ReviewTime struct {
+	Queue        int `json:"review_queue"`
+	QueueLimit   int `json:"review_queue_limit"`
+	DemosWaiting int `json:"demos_waiting"`
+	DemoDays     int `json:"demo_days"`
 }
 
 // FactoryCommits reads a commit of a rig's checkout as the checkout has it,
@@ -260,6 +283,8 @@ type FactoryReportResult struct {
 	// ModelCompare is MODELS, the models side by side after FUEL; nil for a
 	// landing.
 	ModelCompare *ModelCompare `json:"model_compare,omitempty"`
+	// Review is his time today, whole-factory; nil when the report counted none.
+	Review *ReviewTime `json:"his_time,omitempty"`
 }
 
 // reportEntry is one thing the window saw: a landing, a refusal, a bug filed
@@ -496,7 +521,22 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			entries = append(entries, e)
 		}
 	}
-	result.Changes = factoryChanges(all, byID, escapedBy(escapes), now)
+	var kept []MetricSnapshot
+	if history := r.snapshotHistory(); history != nil {
+		if kept, err = history.Snapshots(ctx); err != nil {
+			return result, fmt.Errorf("reporting quality: the key metrics kept so far: %w", err)
+		}
+	}
+	if r.Review != nil && r.Rig == "" && r.Host == "" && result.Landing == nil {
+		counted, err := r.Review.DamperCounts(ctx)
+		if err != nil {
+			return result, fmt.Errorf("reporting quality: counting his review queue: %w", err)
+		}
+		limits := counted.Limits.orDefaults()
+		result.Review = &ReviewTime{Queue: counted.Counts.ReviewQueue, QueueLimit: limits.ReviewQueue,
+			DemosWaiting: counted.Counts.DemosWaiting, DemoDays: limits.DemoWaitingDays}
+	}
+	result.Changes = factoryChanges(all, kept, byID, escapedBy(escapes), now)
 	if result.Landing != nil {
 		if d, known := byID[result.Landing.Story]; known && strings.TrimSpace(d.Story.Title) != "" {
 			result.Landing.Title = d.Story.Title
@@ -540,6 +580,14 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		}
 	}
 	return result, r.record(ctx, result, all, now)
+}
+
+// snapshotHistory is where the daily snapshots are read from, if anywhere.
+func (r FactoryReport) snapshotHistory() MetricSnapshots {
+	if r.Snapshots != nil {
+		return r.Snapshots
+	}
+	return r.History
 }
 
 // heavyStories are the stories of the window that used up their attempts or
@@ -793,11 +841,23 @@ func (r FactoryReportResult) String() string {
 	}
 	var b strings.Builder
 	r.writeParts(&b)
+	r.Review.write(&b)
 	writeModels(&b, r.ModelCompare)
 	writeChanges(&b, r.Changes)
 	writeInvestments(&b, r.Investments)
 	writeCheapWins(&b, r.CheapWins)
 	return b.String()
+}
+
+// write prints HIS TIME, the counts of what waits for him; nothing when there
+// are none.
+func (t *ReviewTime) write(b *strings.Builder) {
+	if t == nil {
+		return
+	}
+	b.WriteString("\nHIS TIME\n")
+	fmt.Fprintf(b, "  review queue %d (limit %d)\n", t.Queue, t.QueueLimit)
+	fmt.Fprintf(b, "  demos waiting %d (%d days or more)\n", t.DemosWaiting, t.DemoDays)
 }
 
 // writeParts prints the window and the QUALITY, SPEED and FUEL parts.

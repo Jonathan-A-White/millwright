@@ -299,7 +299,9 @@ carry acceptance criteria, and wait only on stories the plan has, never on
 itself or in a circle; a bug (a `[bug]` title or the `bug` label) must carry a
 line beginning `Sweep:`, as `mw dispatch` would otherwise refuse it as `no-sweep`
 (mw-gq6.447); a story of the `millwright` rig must carry a line `Expect: <metric> up`
-or `down`, or `Expect: none, because <why>`, so that FACTORY CHANGES can judge it
+or `down` (the metric one of `refusals`, `attempts/landing`, `bugs/landing`, `escaped bugs`,
+`dispatch-to-landing`, `tokens/landing`, `$/landing`, `review queue` or `demos waiting`), or
+`Expect: none, because <why>`, so that FACTORY CHANGES can judge it
 (mw-2zh33g.14) — and reports every reason it will not file a plan, not
 just the first. A plan that cannot be filed leaves the tracker untouched: half
 a plan in the tracker looks like work somebody meant.
@@ -622,6 +624,16 @@ model its ledger row says ran it, so a story moved from sonnet to opus keeps its
 sonnet refusals under sonnet. Then `by kind` gives each rig and bug or feature what
 each model landed and its first-try share. A model with nothing to measure a number by
 shows `-`, not 0. `--json` has it all under `model_compare` (`models`, `kinds`).
+
+HIS TIME, between MODELS and FACTORY CHANGES, is his review queue (the open cards, open
+demos and unrun hands steps `mw status` DAMPERS counts, against its limit) and the demos
+waiting the DAMPERS number of days or more, for the whole factory (a report narrowed with
+`--rig` or `--host`, or `--since` a landing, leaves it out); `--json` has it under
+`his_time`. They are counts at a moment, so `mw report send` keeps them in each day's
+snapshot in `metrics/factory.jsonl` (`review_queue`, `demos_waiting`), and a story with
+`Expect: review queue down` or `Expect: demos waiting down` is judged under FACTORY CHANGES
+on the mean of the snapshots kept in the 14 days before its landing day against the mean
+of those in the 14 days after it; with none on a side it says `no data`.
 
 CHEAP WINS ends the report: at most three one-line suggestions, each naming its rig,
 host, kind or story and what to try, chosen by fixed rules in this order (quality

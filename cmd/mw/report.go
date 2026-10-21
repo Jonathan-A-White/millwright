@@ -51,6 +51,10 @@ func newReportCmd() *cobra.Command {
 			"acceptance, that metric for the whole factory in the 7 days before and the 7 days after the\n" +
 			"landing day ('too soon' until the 7 days are over), and WORSE when it went the wrong way by\n" +
 			"more than a 10% band, and the bugs that escaped it ('too soon' until its 14 days are over).\n" +
+			"HIS TIME (for the whole factory, not with --rig, --host or --since a landing) is his review\n" +
+			"queue and the demos waiting, as mw status DAMPERS counts them; 'Expect: review queue down' and\n" +
+			"'Expect: demos waiting down' compare the mean of the daily snapshots in metrics/factory.jsonl\n" +
+			"in the 14 days before the landing day with the mean in the 14 days after.\n" +
 			"It reads and writes nothing, and prints in 60 columns.\n" +
 			"The INVESTMENTS part follows FACTORY CHANGES: of the factory's investments (mw invest) the wins\n" +
 			"the window recorded, named with their measured gain, the losses with their lesson and the\n" +
@@ -88,8 +92,15 @@ func newReportCmd() *cobra.Command {
 				return err
 			}
 			files := mwVault(dir, here)
+			gateway := mwGateway(dir, here)
+			review, err := damperSurvey(gateway)
+			if err != nil {
+				return err
+			}
 			_, err = application.FactoryReport{
-				Tracker:     mwGateway(dir, here),
+				Tracker:     gateway,
+				History:     files,
+				Review:      review,
 				Files:       files,
 				Benchmarks:  vault.Benchmarks{Vault: files},
 				Rules:       files,

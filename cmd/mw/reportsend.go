@@ -74,6 +74,10 @@ func newReportSendCmd() *cobra.Command {
 				return err
 			}
 			gateway := mwGateway(dir, here)
+			review, err := damperSurvey(gateway)
+			if err != nil {
+				return err
+			}
 			_, err = application.FactoryReportSend{
 				Report: application.FactoryReport{
 					Tracker:     gateway,
@@ -84,6 +88,7 @@ func newReportSendCmd() *cobra.Command {
 					Notes:       gateway,
 					Mailbox:     gateway,
 					Snapshots:   files,
+					Review:      review,
 					InvestShare: share, InvestShareMin: shareMin, InvestShareMax: shareMax,
 				},
 				Home: files,
