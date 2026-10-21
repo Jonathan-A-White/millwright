@@ -227,10 +227,11 @@ func (s Suite) say(format string, args ...any) {
 }
 
 // calmed waits, up to the bound, for the host to stop being busy by the rule
-// the close-out's gate uses (LoadReading.Busy), and reports the last reading it
+// the close-out's gate uses (LoadReading.Busy), saying what it is waiting to run
+// before, and reports the last reading it
 // took, how long it waited, and whether the bound ran out with the host still
 // busy. A host whose load is not asked for, or cannot be read, is not busy.
-func (s Suite) calmed(ctx context.Context) (reading LoadReading, read bool, waited time.Duration, gaveUp bool, err error) {
+func (s Suite) calmed(ctx context.Context, before string) (reading LoadReading, read bool, waited time.Duration, gaveUp bool, err error) {
 	poll, bound := s.LoadPoll, s.LoadBound
 	if poll <= 0 {
 		poll = GateLoadPoll
@@ -252,7 +253,7 @@ func (s Suite) calmed(ctx context.Context) (reading LoadReading, read bool, wait
 
 	reading, read = look()
 	if read && reading.Busy() {
-		s.say("  wait    %s is at load %.1f of %d cores: waiting up to %s for it to calm before the suite\n", s.Host, reading.Load, reading.Cores, bound)
+		s.say("  wait    %s is at load %.1f of %d cores: waiting up to %s for it to calm before %s\n", s.Host, reading.Load, reading.Cores, bound, before)
 	}
 	for read && reading.Busy() {
 		if waited >= bound {
@@ -339,7 +340,7 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		})
 	}
 
-	reading, read, waited, gaveUp, err := s.calmed(ctx)
+	reading, read, waited, gaveUp, err := s.calmed(ctx, "the suite")
 	if err != nil {
 		return SuiteReport{}, fmt.Errorf("waiting for %s to calm: %w", s.Host, err)
 	}
