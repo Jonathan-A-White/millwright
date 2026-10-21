@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -128,7 +129,42 @@ func WriteSystemPrompt(call application.GrindCall) error {
 		os.Remove(tmp.Name())
 		return fail(err)
 	}
+	removeOldSystemPrompts(call.Dir, SystemPromptPath(call), time.Now())
 	return nil
+}
+
+// OldSystemPromptAge is how long the instructions of an older digest are kept:
+// a grind or warm still running on them has read its file long before.
+const OldSystemPromptAge = 24 * time.Hour
+
+// removeOldSystemPrompts removes the system-prompt-<digest>.md files in dir other
+// than current whose last write is over OldSystemPromptAge before now, so a
+// directory does not gain a file for every change of instructions for good
+// (mw-gq6.691). A failure is logged, never returned: the new instructions are
+// already written.
+func removeOldSystemPrompts(dir, current string, now time.Time) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		log.Printf("the old instructions in %s could not be listed: %v", dir, err)
+		return
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, "system-prompt-") || !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		if path == current {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || now.Sub(info.ModTime()) <= OldSystemPromptAge {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			log.Printf("the old instructions %s could not be removed: %v", path, err)
+		}
+	}
 }
 
 // PromptArgMax is the longest prompt a grind carries as its last argument. One

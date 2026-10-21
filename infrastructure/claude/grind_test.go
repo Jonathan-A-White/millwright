@@ -334,6 +334,81 @@ func TestSystemPromptsOfDifferentGrindsDoNotShareAFile(t *testing.T) {
 	}
 }
 
+// The instructions of an older digest are removed once a day has passed since
+// the file was written, so a grind or warm still running on them keeps its file.
+func TestWriteSystemPromptRemovesOldDigestsOverADayOld(t *testing.T) {
+	dir := t.TempDir()
+	old := filepath.Join(dir, "system-prompt-0123456789abcdef.md")
+	recent := filepath.Join(dir, "system-prompt-fedcba9876543210.md")
+	unrelated := filepath.Join(dir, "photo-1.jpg")
+	for path, age := range map[string]time.Duration{old: 25 * time.Hour, recent: time.Hour, unrelated: 48 * time.Hour} {
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		when := time.Now().Add(-age)
+		if err := os.Chtimes(path, when, when); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call := aGrindCall(t, dir)
+
+	if err := claude.WriteSystemPrompt(call); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected the day-old digest removed, got %v", err)
+	}
+	for _, kept := range []string{recent, unrelated, claude.SystemPromptPath(call)} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Fatalf("expected %s kept, got %v", kept, err)
+		}
+	}
+}
+
+// The current digest's own file is rewritten, never removed, however old it was.
+func TestWriteSystemPromptKeepsTheCurrentDigestEvenWhenOld(t *testing.T) {
+	dir := t.TempDir()
+	call := aGrindCall(t, dir)
+	if err := os.WriteFile(claude.SystemPromptPath(call), []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	when := time.Now().Add(-72 * time.Hour)
+	if err := os.Chtimes(claude.SystemPromptPath(call), when, when); err != nil {
+		t.Fatal(err)
+	}
+	if err := claude.WriteSystemPrompt(call); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(claude.SystemPromptPath(call)); string(got) != call.System {
+		t.Fatalf("expected %q, got %q", call.System, got)
+	}
+}
+
+// An old file that cannot be removed (here a directory with something in it)
+// never fails the write of the new instructions.
+func TestWriteSystemPromptIgnoresAnOldFileItCannotRemove(t *testing.T) {
+	dir := t.TempDir()
+	stuck := filepath.Join(dir, "system-prompt-0123456789abcdef.md")
+	if err := os.MkdirAll(filepath.Join(stuck, "inside"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	when := time.Now().Add(-25 * time.Hour)
+	if err := os.Chtimes(stuck, when, when); err != nil {
+		t.Fatal(err)
+	}
+	call := aGrindCall(t, dir)
+
+	if err := claude.WriteSystemPrompt(call); err != nil {
+		t.Fatalf("expected the write to succeed, got %v", err)
+	}
+	if got, _ := os.ReadFile(claude.SystemPromptPath(call)); string(got) != call.System {
+		t.Fatalf("expected %q kept, got %q", call.System, got)
+	}
+	if _, err := os.Stat(stuck); err != nil {
+		t.Fatalf("expected the stuck entry still there, got %v", err)
+	}
+}
+
 // A prompt too long for one argument (a talk's long history, say) goes on the
 // session's standard input, not on the command line; a shorter one stays the
 // last argument.
