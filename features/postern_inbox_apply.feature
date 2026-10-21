@@ -514,6 +514,27 @@ Feature: mw postern inbox --apply
     Then the idea "tx-shot" is held in "mw-act.3" saying "this one"
     And the idea "tx-shot" kept the file it carried
 
+  Scenario: A picture the Governor sends on the general thread is saved, named by its txid, and the pass prints where
+    Given a postern message from "governor-pubkey-hex" with text "look at this" and txid "tx-gen-shot" carrying a screenshot
+    When mw postern inbox --apply is run
+    Then reading succeeds
+    And the decrypted image is written under the attachment directory
+    And the txid "tx-gen-shot" is marked applied naming the decrypted image's path
+    And it did not print "look at this"
+
+  Scenario: A picture the Governor sends in a named channel is saved the same way
+    Given a postern message from "governor-pubkey-hex" in channel "garden" with text "the beds" and txid "tx-chan-shot" carrying a screenshot
+    When mw postern inbox --apply is run
+    Then reading succeeds
+    And the decrypted image is written under the attachment directory
+    And the txid "tx-chan-shot" is marked applied naming the decrypted image's path
+
+  Scenario: A picture the Governor sends in a bead's channel is saved and named in the bead's comment, as ever
+    Given a postern message from "governor-pubkey-hex" in the channel of bead "mw-act.3" with text "this one" and txid "tx-bead-shot" carrying a screenshot
+    When mw postern inbox --apply is run
+    Then reading succeeds
+    And bead "mw-act.3"'s last comment names the decrypted image's path
+
   Scenario: Words from anyone but the Governor are not kept
     Given Ideas only is on until "2026-09-25T21:00:00Z" for the postern inbox
     And a postern message from "someone-else-pubkey-hex" with text "Hello" and txid "tx-other"
