@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -163,7 +164,7 @@ func forwardSubject(app, text string) string {
 }
 
 // forwardBody is the mail: the full text, the other fields of the request one
-// to a line, then who sent it and where the pictures are kept, then the command
+// to a line, then who sent it and where the pictures and any text files are kept, then the command
 // that links it to a bead, and last the app's vision to weigh it against.
 func (g GristGrind) forwardBody(ctx context.Context, w *gristWork, in forwardedInput, paths []string) string {
 	body := forwardMain(w, in, paths)
@@ -191,7 +192,13 @@ func forwardMain(w *gristWork, in forwardedInput, paths []string) string {
 		b.WriteString("Pictures: none\n")
 		return forwardWithRequestLine(b.String(), w.record.Txid)
 	}
-	fmt.Fprintf(&b, "Pictures: %d, kept on the mill's host\n", len(paths))
+	label := "Pictures"
+	for _, p := range paths {
+		if filepath.Ext(p) == posternAttachmentExtension("text/csv") {
+			label = "Files"
+		}
+	}
+	fmt.Fprintf(&b, "%s: %d, kept on the mill's host\n", label, len(paths))
 	for _, p := range paths {
 		b.WriteString(p + "\n")
 	}

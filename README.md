@@ -2814,7 +2814,11 @@ does not forward to."), as does a grist over the grind's or the factory's attach
 limits (a grind taking six pictures needs `[grist]` `max_attachments = 6`). A grist
 the mill cannot mail is failed, so the app may send it again. `model`, `effort`,
 `instructions` and `answerSchema` are not read. `mw grist runs` and `stats` count it
-as the kind `forward`. An app's `grinds/feedback.json`:
+as the kind `forward`. A forwarding grind may also take a `text/csv` file (list `"text/csv"`
+under `attachments.mime`; it counts toward `max_attachments` and `max_attachment_bytes`): the
+mill keeps it as `picture-<n>.csv` beside the pictures, the mail's `Files:` line names its path,
+and a grind a model reads refuses it, naming the type, because no model reads a text file.
+An app's `grinds/feedback.json`:
 
 ```json
 {
