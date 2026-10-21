@@ -66,7 +66,9 @@ func newMemoryAddCmd() *cobra.Command {
 		Long: "add writes facts/<slug>.md with status current and since today (UTC). The slug defaults to the\n" +
 			"sentence's first five words, lower-case and hyphenated. The source is a bead, rig@sha or\n" +
 			"mayor:<date>. After writing it prints 'near: <slug> <first words>' for each current fact of the\n" +
-			"same subject, or sharing four long words with the sentence, so a repeated rule is seen. It refuses a rig the seat has no folder for, a slug that already has a file\n" +
+			"same subject, or sharing four long words with the sentence, so a repeated rule is seen, then says\n" +
+			"'added <slug>' (with '(near: <slug>)' when it named near facts). A refusal prints 'not added: <why>' and\n" +
+			"exits non-zero. It refuses a rig the seat has no folder for, a slug that already has a file\n" +
 			"(one flagged recheck is to be superseded or retired), a sentence with a newline and a kind\n" +
 			"that is not gotcha or decision.",
 		Args: cobra.ExactArgs(2),

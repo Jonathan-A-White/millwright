@@ -293,6 +293,111 @@ func TestAddSaysNothingNearWhenNoCurrentFactIsClose(t *testing.T) {
 	}
 }
 
+func TestAddSaysItAddedTheFactAfterTheNearLines(t *testing.T) {
+	files := &editableFiles{files: map[string]string{
+		"window-open-noopener-returns-null.md": queryFact("window.open", "window.open with noopener always returns null, so test the popup by its URL."),
+	}}
+	var out bytes.Buffer
+	err := anEditableMemory(files, &recordingVault{}, &out).Add(context.Background(), application.MemoryAdd{
+		Rig: "kiln", Subject: "window.open", Source: "mw-2", Kind: application.FactGotcha,
+		Sentence: "A window.open with noopener in its features always returns null.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	last := lines[len(lines)-1]
+	if last != "added a-windowopen-with-noopener-in (near: window-open-noopener-returns-null)" {
+		t.Errorf("the last line should say the fact was added, naming the near fact:\n%s", out.String())
+	}
+	if len(lines) < 3 || !strings.HasPrefix(lines[len(lines)-2], "near: ") {
+		t.Errorf("the near line comes before the added line:\n%s", out.String())
+	}
+}
+
+func TestAddSaysAddedAloneWhenNoFactIsNear(t *testing.T) {
+	files := &editableFiles{files: map[string]string{}}
+	var out bytes.Buffer
+	err := anEditableMemory(files, &recordingVault{}, &out).Add(context.Background(), application.MemoryAdd{
+		Rig: "kiln", Subject: "git", Source: "mw-2", Kind: application.FactGotcha, Slug: "rebase-first", Sentence: "Rebase before landing.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(out.String(), "added rebase-first\n") || strings.Contains(out.String(), "(near:") {
+		t.Errorf("expected a plain 'added rebase-first':\n%s", out.String())
+	}
+}
+
+func TestAddSaysNotAddedAndReturnsTheErrorWhenItRefuses(t *testing.T) {
+	taken := &editableFiles{files: map[string]string{"taken.md": queryFact("bd", "A fact.")}}
+	for name, req := range map[string]application.MemoryAdd{
+		"a taken slug": {Rig: "kiln", Subject: "bd", Source: "mw-2", Kind: application.FactGotcha, Slug: "taken", Sentence: "Another one."},
+		"a bad kind":   {Rig: "kiln", Subject: "bd", Source: "mw-2", Kind: "rumour", Sentence: "Another one."},
+	} {
+		var out bytes.Buffer
+		err := anEditableMemory(taken, &recordingVault{}, &out).Add(context.Background(), req)
+		if err == nil {
+			t.Fatalf("%s: add should be refused", name)
+		}
+		if want := "not added: " + err.Error() + "\n"; out.String() != want {
+			t.Errorf("%s: printed %q, want %q", name, out.String(), want)
+		}
+	}
+	var out bytes.Buffer
+	m := application.Memory{Files: &noRigFiles{}, Seat: "builder", Out: &out}
+	err := m.Add(context.Background(), application.MemoryAdd{Rig: "ghost", Subject: "bd", Source: "mw-1", Kind: application.FactGotcha, Sentence: "Anything at all."})
+	if err == nil || !strings.HasPrefix(out.String(), "not added: ") {
+		t.Errorf("an unknown rig should print 'not added: ...' and return an error: %v / %q", err, out.String())
+	}
+}
+
+// noRigFiles is a seat with no folder for any rig.
+type noRigFiles struct{ editableFiles }
+
+func (noRigFiles) ReadRigFacts(context.Context, string, string) (string, map[string]string, bool, error) {
+	return "", nil, false, nil
+}
+
+func TestTheOtherVerbsSayWhatTheyDid(t *testing.T) {
+	ctx := context.Background()
+	fact := func() *editableFiles {
+		f := demotable()
+		f.files["old.md"] = queryFact("gate", "The gate is old.")
+		return f
+	}
+	cases := []struct {
+		name string
+		run  func(application.Memory) error
+		want string
+	}{
+		{"supersede", func(m application.Memory) error {
+			return m.Supersede(ctx, application.MemorySupersede{Rig: "kiln", Old: "old", Slug: "new", Source: "mw-3", Sentence: "The gate is new."})
+		}, "superseded old with new\n"},
+		{"retire", func(m application.Memory) error { return m.Retire(ctx, "kiln", "old", "gone") }, "retired old\n"},
+		{"recheck", func(m application.Memory) error { return m.Recheck(ctx, "kiln", "old", "doubt") }, "flagged old to recheck\n"},
+		{"demote", func(m application.Memory) error { return m.Demote(ctx, "kiln", "gate", "gate make lint") }, "demoted gate out of the boot render\n"},
+	}
+	for _, c := range cases {
+		var out bytes.Buffer
+		if err := c.run(anEditableMemory(fact(), &recordingVault{}, &out)); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if !strings.HasSuffix(out.String(), c.want) {
+			t.Errorf("%s: output should end %q:\n%s", c.name, c.want, out.String())
+		}
+	}
+	demoted := demotable()
+	demoted.files["gate.md"] = strings.Replace(demoted.files["gate.md"], "status: current", "status: current\nboot: no", 1)
+	var out bytes.Buffer
+	if err := anEditableMemory(demoted, &recordingVault{}, &out).Promote(ctx, "kiln", "gate"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(out.String(), "promoted gate into the boot render\n") {
+		t.Errorf("promote should say what it did:\n%s", out.String())
+	}
+}
+
 func demotable() *editableFiles {
 	return &editableFiles{
 		files: map[string]string{"gate.md": queryFact("gate", "The gate runs make test then make lint.")},

@@ -15,6 +15,7 @@ Feature: mw memory
       | sentence | Point every bd call at the vault with -C.      |
     Then the memory command succeeded
     And the memory command printed the fact file "point-every-bd-call-at" of the rig "millwright"
+    And the memory command printed "added point-every-bd-call-at"
     And the fact file "point-every-bd-call-at" of the rig "millwright" holds:
       """
       ---
@@ -201,6 +202,7 @@ Feature: mw memory
   Scenario: add refuses a sentence with a newline
     When the Mayor adds a fact to the rig "millwright" a sentence of two lines
     Then the memory command was refused saying "no newline"
+    And the memory command printed "not added: the sentence must be one line, with no newline"
     And the rig "millwright" has no fact files
 
   Scenario: add refuses an unknown kind
