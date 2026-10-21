@@ -873,10 +873,15 @@ func (g GristGrind) readGrindText(ctx context.Context, w *gristWork, checkout st
 // joined as joinGrindParts says. found is false when p is neither, or the
 // directory has no part.
 func (g GristGrind) readInstructions(ctx context.Context, checkout, commit, p string) (text []byte, found bool, err error) {
-	if text, found, err = g.Grinds.ReadAt(ctx, checkout, commit, p); err != nil || found {
+	return readGrindInstructions(ctx, g.Grinds, checkout, commit, p)
+}
+
+// readGrindInstructions is readInstructions over any grind source.
+func readGrindInstructions(ctx context.Context, grinds GrindSource, checkout, commit, p string) (text []byte, found bool, err error) {
+	if text, found, err = grinds.ReadAt(ctx, checkout, commit, p); err != nil || found {
 		return text, found, err
 	}
-	files, err := g.Grinds.List(ctx, checkout, commit, p)
+	files, err := grinds.List(ctx, checkout, commit, p)
 	if err != nil {
 		return nil, false, err
 	}
@@ -885,7 +890,7 @@ func (g GristGrind) readInstructions(ctx context.Context, checkout, commit, p st
 		if path.Dir(file) != p || !isGrindPart(file) {
 			continue
 		}
-		part, ok, err := g.Grinds.ReadAt(ctx, checkout, commit, file)
+		part, ok, err := grinds.ReadAt(ctx, checkout, commit, file)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1037,6 +1042,7 @@ func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) 
 	w.answered = g.now()
 	w.result = result
 	w.harnessOK = err == nil
+	w.noteHarnessError(err)
 	status, reason := gristOutcome(result, err, w.schema, w.answered)
 	if status == GristAnswered {
 		w.answer = result.Answer
@@ -1101,6 +1107,23 @@ func (g GristGrind) harness(ctx context.Context, w *gristWork, warm *gristWarm, 
 	w.harnessStarted = g.now()
 	return g.Grinder.Grind(ctx, call)
 }
+
+// noteHarnessError keeps the words of an error the harness's call returned in
+// w's notes, so that the record of the run says why the grind did not finish:
+// the reason the sender is given names no cause (mw-gq6.690).
+func (w *gristWork) noteHarnessError(err error) {
+	if err == nil {
+		return
+	}
+	words := strings.TrimSpace(err.Error())
+	if len(words) > gristNoteMax {
+		words = words[:gristNoteMax] + "..."
+	}
+	w.notes = append(w.notes, fmt.Sprintf("the harness could not finish the grind of %s: %s", shortTxid(w.record.Txid), words))
+}
+
+// gristNoteMax is the most of an error's words a run's note keeps.
+const gristNoteMax = 1000
 
 // gristOutcome is how a grind ended: answered, refused or failed, and the
 // reason when it was not answered. ended is when the session ended: a session
@@ -1327,7 +1350,7 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 		Status:  w.status, Reason: w.reason, Photos: len(w.plain.Attachments),
 		Tokens: w.result.Fuel.Total(), CostUSD: w.result.CostUSD, Turns: w.result.Turns,
 		Denials: w.result.Denials, Seconds: now.Sub(w.started).Seconds(), Commit: w.commit,
-		Delivered: delivered,
+		Delivered: delivered, Notes: w.notes,
 	}
 	if fuel := w.result.Fuel; fuel.Total() > 0 {
 		line.Fuel = &GrindFuel{Input: fuel.Input, Output: fuel.Output, CacheRead: fuel.CacheRead, CacheWrite: fuel.CacheWrite}

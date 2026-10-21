@@ -62,6 +62,7 @@ func newSmoker(out io.Writer, wait time.Duration) (application.GristSmoke, error
 	// directory when the mill runs here; a host with no talks there has none to end.
 	if stateDir, err := config.GristStateDir(); err == nil {
 		smoke.Talks = application.GristTalkSweep{Store: grist.NewTalks(stateDir)}
+		smoke.Record = grist.New(stateDir)
 	}
 	return smoke, nil
 }

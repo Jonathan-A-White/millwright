@@ -612,3 +612,28 @@ func TestGristGrindRecordsTheModelIDTheResultNames(t *testing.T) {
 		t.Errorf("expected one line with no model_id, got %s", raw)
 	}
 }
+
+// A grind whose harness could not run (claude never started, say) is answered
+// failed as before, but the record of the run keeps the error's words in its
+// notes: nothing said why in the Lampas outage of mw-gq6.690, where claude's
+// exec failed with "argument list too long" and the line held only a reason.
+func TestGristGrindRecordsTheHarnessErrorInTheRunsNotes(t *testing.T) {
+	mill, backend, grinder := aSmallMill(t)
+	grinder.Err = errors.New("claude: fork/exec /usr/bin/claude: argument list too long")
+	if _, err := mill.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := mill.State.Lines(context.Background())
+	if err != nil || len(lines) != 1 {
+		t.Fatalf("expected one line, got %v, %v", lines, err)
+	}
+	if lines[0].Status != application.GristFailed || lines[0].Reason != application.GristReasonSessionEnd {
+		t.Fatalf("expected the session ended, got %+v", lines[0])
+	}
+	if got := strings.Join(lines[0].Notes, "\n"); !strings.Contains(got, "argument list too long") {
+		t.Fatalf("expected the error's text in the notes, got %q", got)
+	}
+	if answer := openFakeAnswer(t, backend.Delivered()[0]); strings.Contains(answer.Reason, "argument list") {
+		t.Fatalf("expected the sender told nothing of the mill's inside, got %q", answer.Reason)
+	}
+}

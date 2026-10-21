@@ -63,6 +63,10 @@ type GristSmoke struct {
 	// Sleep is the wait before an example the backend refused is sent once
 	// more; nil waits for real.
 	Sleep func(ctx context.Context, d time.Duration) error
+	// Record is the mill's record of its runs (its grinds.jsonl), when this host
+	// holds it: a grind that did not finish is said with the notes the mill kept
+	// of why. Nil says no more than the answer's reason.
+	Record GristRecord
 	// Talks ends the talks an example of two turns starts, and the ones a run
 	// killed midway left; nil keeps none of that (a mill that keeps no talks
 	// here, a test).
@@ -72,6 +76,32 @@ type GristSmoke struct {
 	TalkPrefix string
 	// Out is where progress is printed; nil prints nothing.
 	Out io.Writer
+}
+
+// GristRecord is the mill's record of its runs, read: GristState has it.
+type GristRecord interface {
+	Lines(ctx context.Context) ([]GrindLine, error)
+}
+
+// said is reason with, when the mill's record of the run txid holds notes, the
+// notes: the reason a sender is told names no cause (mw-gq6.690).
+func (s GristSmoke) said(ctx context.Context, txid, reason string) string {
+	if s.Record == nil || txid == "" || reason != GristReasonSessionEnd {
+		return reason
+	}
+	lines, err := s.Record.Lines(ctx)
+	if err != nil {
+		return reason
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		if lines[i].Txid == txid {
+			if len(lines[i].Notes) > 0 {
+				return reason + " (" + firstLine(strings.Join(lines[i].Notes, "; ")) + ")"
+			}
+			break
+		}
+	}
+	return reason
 }
 
 // GristTalkEnder is what the smoke and the eval end their talks with: End
@@ -275,6 +305,9 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 		report.Failures = append(report.Failures, label+": the grind file could not be read")
 		return
 	}
+	if n := s.instructionsSize(ctx, checkout, commit, grind); n > GristInstructionsWarnBytes {
+		report.Warnings = append(report.Warnings, fmt.Sprintf("%s: its instructions are %d bytes, over %d (a big prompt costs on every grind)", label, n, GristInstructionsWarnBytes))
+	}
 	if grind.Forward != "" {
 		report.Warnings = append(report.Warnings, label+": forwards to the "+grind.Forward+", so it is not smoked")
 		return
@@ -406,6 +439,25 @@ func (s GristSmoke) readGrind(ctx context.Context, checkout, commit, kind string
 		return GrindFile{}, false
 	}
 	return grind, true
+}
+
+// GristInstructionsWarnBytes is the size of a grind's instructions (the parts
+// of a directory joined) over which the smoke warns: they go to the model on
+// every grind, and past 131,072 bytes claude could not be started with them as
+// one argument (mw-gq6.690).
+const GristInstructionsWarnBytes = 100_000
+
+// instructionsSize is the size in bytes of the grind's instructions at commit,
+// the file or the parts of its directory joined; 0 when they cannot be read.
+func (s GristSmoke) instructionsSize(ctx context.Context, checkout, commit string, grind GrindFile) int {
+	if !rigPath(grind.Instructions) {
+		return 0
+	}
+	text, found, err := readGrindInstructions(ctx, s.Grinds, checkout, commit, grind.Instructions)
+	if err != nil || !found {
+		return 0
+	}
+	return len(text)
 }
 
 // readSchema reads the grind's answer schema at commit; empty when it cannot be.
@@ -582,6 +634,7 @@ func (s GristSmoke) try(ctx context.Context, send GristSendRequest, wait time.Du
 		if gristAnswerIsNotTheExamples(status, reason) {
 			return smokeTry{notRun: reason}
 		}
+		reason = s.said(ctx, unanswered.Txid, reason)
 		switch {
 		case retried && status == GristFailed:
 			return smokeTry{why: "the mill failed it, and again when it was retried: " + reason}

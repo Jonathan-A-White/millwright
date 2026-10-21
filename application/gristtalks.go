@@ -563,6 +563,7 @@ func (g GristGrind) grindTalk(ctx context.Context, w *gristWork, privKey string)
 	w.answered = g.now()
 	w.result = result
 	w.harnessOK = err == nil
+	w.noteHarnessError(err)
 	status, why := gristOutcome(result, err, w.schema, w.answered)
 	if status == GristAnswered {
 		w.answer = result.Answer

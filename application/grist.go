@@ -430,6 +430,11 @@ type GrindLine struct {
 	Seconds   float64 `json:"seconds"`
 	Commit    string  `json:"commit,omitempty"`
 	Delivered bool    `json:"delivered"`
+	// Notes are what the pass said of this run: why the harness could not
+	// finish the grind (the error's words, which the answer to the sender does
+	// not carry), a billing change, a warm session that ran cold. Left out when
+	// there are none, and on lines written before they were kept.
+	Notes []string `json:"notes,omitempty"`
 
 	// The phases of the answer's wait, in seconds with one decimal, each left
 	// out where its time is not known (an old line, a refusal that ran no

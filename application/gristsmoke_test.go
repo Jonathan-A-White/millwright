@@ -159,3 +159,68 @@ func TestAServerErrorNamingAnUpstream429IsTheBackendsFault(t *testing.T) {
 		t.Errorf("expected two sends and not run, got %d sends, %+v", sender.sent, report)
 	}
 }
+
+// mw-gq6.690: a grind whose session did not finish is said with the words the
+// mill kept of why in its record of the run, beside the reason the sender is
+// given, which names no cause.
+func TestASmokeFailureOfASessionThatDidNotFinishSaysWhyFromTheMillsRecord(t *testing.T) {
+	sender := &smokeScript{errs: []error{
+		&application.GristUnanswered{Txid: "direct:one", Answer: &application.GristAnswer{Status: application.GristFailed, Reason: application.GristReasonSessionEnd}},
+		&application.GristUnanswered{Txid: "direct:two", Answer: &application.GristAnswer{Status: application.GristFailed, Reason: application.GristReasonSessionEnd}},
+	}}
+	smoke, _ := smokeWith(sender)
+	state := apptest.NewFakeGristState()
+	smoke.Record = state
+	for _, txid := range []string{"direct:one", "direct:two"} {
+		line := application.GrindLine{Txid: txid, Status: application.GristFailed, Reason: application.GristReasonSessionEnd,
+			Notes: []string{"the harness could not finish the grind of " + txid + ": claude: fork/exec /usr/bin/claude: argument list too long"}}
+		if err := state.Append(context.Background(), line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := smoke.Run(context.Background(), "lampas", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Failures) != 1 || !strings.Contains(report.Failures[0], application.GristReasonSessionEnd) || !strings.Contains(report.Failures[0], "argument list too long") {
+		t.Fatalf("expected the failure to say why beside the reason, got %q", report.Failures)
+	}
+}
+
+// mw-gq6.690: a grind whose instructions (a file, or the parts of a directory
+// joined) pass 100,000 bytes is a warning of the smoke, naming app and kind;
+// one under it says nothing.
+func TestASmokeWarnsOfInstructionsOverAHundredThousandBytes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		parts map[string]string
+		warns bool
+	}{
+		"one big file":        {map[string]string{"grinds/tutor.md": strings.Repeat("x", 100_001)}, true},
+		"a small file":        {map[string]string{"grinds/tutor.md": strings.Repeat("x", 99_000)}, false},
+		"many parts together": {map[string]string{"grinds/tutor.instructions/a.md": strings.Repeat("x", 60_000), "grinds/tutor.instructions/b.md": strings.Repeat("y", 60_000)}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			smoke, _ := smokeWith(&smokeScript{errs: []error{nil}})
+			grinds := smoke.Grinds.(*apptest.FakeGrinds)
+			file := "grinds/tutor.md"
+			if _, many := tc.parts["grinds/tutor.instructions/a.md"]; many {
+				file = "grinds/tutor.instructions"
+			}
+			grinds.SetFile("/rigs/lampas", "c1", "grinds/tutor.json", []byte(`{"grind": 1, "app": "lampas", "kind": "tutor", "versions": ["1"], "model": "sonnet", "effort": "low", "instructions": "`+file+`", "answerSchema": "schemas/tutor.json"}`))
+			for p, text := range tc.parts {
+				grinds.SetFile("/rigs/lampas", "c1", p, []byte(text))
+			}
+			report, err := smoke.Run(context.Background(), "lampas", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := strings.Join(report.Warnings, "\n")
+			if tc.warns != (strings.Contains(got, "lampas/tutor") && strings.Contains(got, "instructions are")) {
+				t.Fatalf("expected a warning: %v, got warnings %q", tc.warns, got)
+			}
+			if report.Failed() {
+				t.Fatalf("expected no failure, got %+v", report)
+			}
+		})
+	}
+}
