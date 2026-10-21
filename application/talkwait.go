@@ -999,25 +999,55 @@ const voiceNoteToFollow = "voice note (words to follow by mail Voice: ...; read 
 // for a post carrying audio, "voice note" with the transcript in quotes when
 // it is known (the inbox heard it, or the wait hears it now) and "words to
 // follow" when it is not, then any typed words as "with the words: <text>".
+// Words on further lines end it with " [+N more lines]", and files that are
+// not audio with " [carries N picture(s): mw postern inbox downloads them]",
+// so a notice read in place of the inbox never hides what the message holds.
 func (r *talkWaitRun) postNotice(ctx context.Context, m PosternInboxMessage) string {
 	var audio *PosternAttachment
+	pictures := 0
 	for _, file := range m.files() {
-		if file != nil && isPosternAudio(file.Mime) {
-			audio = file
-			break
+		switch {
+		case file == nil:
+		case isPosternAudio(file.Mime):
+			if audio == nil {
+				audio = file
+			}
+		default:
+			pictures++
 		}
 	}
-	if audio == nil {
-		return postFirstLine(m.Text)
+	notice := postFirstLine(m.Text)
+	if audio != nil {
+		notice = voiceNoteToFollow
+		if words := r.voiceTranscript(ctx, m, audio); words != "" {
+			notice = fmt.Sprintf("voice note: %q", words)
+		}
+		if typed := strings.TrimSpace(m.Text); typed != "" {
+			notice += " with the words: " + postFirstLine(typed)
+		}
 	}
-	notice := voiceNoteToFollow
-	if words := r.voiceTranscript(ctx, m, audio); words != "" {
-		notice = fmt.Sprintf("voice note: %q", words)
+	if more := postWordLines(m.Text) - 1; more > 0 {
+		notice += fmt.Sprintf(" [+%d more lines]", more)
 	}
-	if typed := strings.TrimSpace(m.Text); typed != "" {
-		notice += " with the words: " + postFirstLine(typed)
+	switch pictures {
+	case 0:
+	case 1:
+		notice += " [carries 1 picture: mw postern inbox downloads them]"
+	default:
+		notice += fmt.Sprintf(" [carries %d pictures: mw postern inbox downloads them]", pictures)
 	}
 	return notice
+}
+
+// postWordLines is how many lines of text have any words.
+func postWordLines(text string) int {
+	n := 0
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // voiceTranscript is the words of m's voice note, "" when they are not known:

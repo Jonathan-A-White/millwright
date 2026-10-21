@@ -156,6 +156,65 @@ func TestTalkWaitStillSaysNoTextForAFileThatIsNotAudio(t *testing.T) {
 	}
 }
 
+// addFiles indexes a message from the Governor to the Mayor with the words
+// text and files of the given mimes, and returns its seq. The wait never
+// fetches a file it does not hear, so no blob is stored.
+func (f *talkPosternFixture) addFiles(txid, text string, mimes ...string) int64 {
+	f.t.Helper()
+	var files []*application.PosternAttachment
+	for n, mime := range mimes {
+		files = append(files, &application.PosternAttachment{Hash: strings.Repeat("a", 60) + string(rune('a'+n)) + "bcd", Size: 10, Mime: mime})
+	}
+	msg := application.PosternThreadedMessage{Text: text}
+	if len(files) == 1 {
+		msg.Attachment = files[0]
+	} else {
+		msg.Attachments = files
+	}
+	plaintext := text
+	if len(files) > 0 {
+		body, _ := json.Marshal(msg)
+		plaintext = string(body)
+	}
+	ct, err := f.cipher.Encrypt(talkWaitMayorKey, plaintext)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return f.postern.AddRecord(application.PosternRecord{
+		Txid: txid, Class: "message", To: talkWaitMayorKey, From: talkWaitGovernorKey, Ciphertext: ct,
+	}).Seq
+}
+
+// The notice of a message says what it holds beyond its first line: pictures
+// it carries and lines it has, so the inbox is not skipped (mw-gq6.675).
+func TestTalkWaitNoticeNamesPicturesAndFurtherLines(t *testing.T) {
+	cases := []struct {
+		name, text string
+		mimes      []string
+		want       string
+	}{
+		{"two pictures", "see these", []string{"image/jpeg", "image/jpeg"}, "see these [carries 2 pictures: mw postern inbox downloads them]"},
+		{"one picture", "see this", []string{"image/jpeg"}, "see this [carries 1 picture: mw postern inbox downloads them]"},
+		{"text only", "plain words", nil, "plain words"},
+		{"voice note and a picture", "", []string{"audio/webm", "image/png"},
+			voiceToFollow + " [carries 1 picture: mw postern inbox downloads them]"},
+		{"three lines", "one\ntwo\nthree", nil, "one [+2 more lines]"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newTalkPosternFixture(t)
+			seq := f.addFiles("direct:n1", c.text, c.mimes...)
+			_, printed := f.run(seq)
+			want := "channel general, txid direct:n1: " + c.want + "\n"
+			if !strings.Contains(printed, want) {
+				t.Errorf("expected the line %q, got:\n%s", want, printed)
+			}
+		})
+	}
+}
+
+const voiceToFollow = "voice note (words to follow by mail Voice: ...; read with mw postern inbox)"
+
 // A turn's plaintext decodes with its picture into the one attachment type a
 // message's file decodes into, and without it to none.
 func TestTalkTurnDecodesWithAndWithoutAnAttachment(t *testing.T) {

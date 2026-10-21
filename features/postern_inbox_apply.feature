@@ -6,8 +6,8 @@ Feature: mw postern inbox --apply
   knows how to apply — a reply, a comment in a bead's thread, an action — is
   applied at once, each at most once per txid, commented on its bead and
   mailed to the Mayor. It moves no cursor and prints no message's text. The
-  Mayor's own read then shows an applied message as one line, and never
-  applies it twice. An action this host does not know is left as text.
+  Mayor's own read then shows an applied message as one line (his comment in
+  a bead's thread is followed by his whole text), and never applies it twice. An action this host does not know is left as text.
 
   Background:
     Given a throwaway postern key
@@ -49,6 +49,14 @@ Feature: mw postern inbox --apply
     Then it printed "already applied earlier: applied release mw-act.2 txid tx-once"
     And bead "mw-act.2" has 1 comment
     And the postern inbox cursor is saved as a note
+
+  Scenario: The Mayor's read shows an applied comment of the Governor's whole, not one line
+    Given a postern message from "governor-pubkey-hex" in the channel of bead "mw-act.3" with the lines "Q1 = B / Q2 = A / This needs tlc across the board" and txid "tx-words"
+    When mw postern inbox --apply is run
+    And mw postern inbox is run
+    Then it printed "already applied earlier: applied comment mw-act.3 txid tx-words"
+    And it printed the lines "Q1 = B / Q2 = A / This needs tlc across the board"
+    And bead "mw-act.3" has 1 comment
 
   Scenario: A hold on an open, unclaimed story holds it
     Given a postern action "hold" on bead "mw-act.3" from "governor-pubkey-hex" with txid "tx-hold"

@@ -132,6 +132,25 @@ Feature: mw talk wait
     And the wait printed "direct:1"
     And the wait printed "message text"
 
+  Scenario Outline: the notice of a postern message says what it carries beyond its first line
+    Given mw talk wait is armed
+    When <record>
+    Then mw talk wait ends within 1 second
+    And the wait printed the notice "<notice>"
+
+    Examples:
+      | record                                                                                  | notice                                                                         |
+      | a "message" record to the Mayor saying "see these" with 2 pictures is indexed           | see these [carries 2 pictures: mw postern inbox downloads them]                |
+      | a "message" record to the Mayor saying "see this" with 1 picture is indexed             | see this [carries 1 picture: mw postern inbox downloads them]                  |
+      | a "message" record to the Mayor saying "" with 1 picture and a voice note is indexed    | voice note (words to follow by mail Voice: ...; read with mw postern inbox) [carries 1 picture: mw postern inbox downloads them] |
+      | a "message" record to the Mayor saying "" lines "one / two / three" is indexed          | one [+2 more lines]                                                            |
+
+  Scenario: the notice of a text-only postern message is its first line and nothing else
+    Given mw talk wait is armed
+    When a "message" record to the Mayor is indexed
+    Then mw talk wait ends within 1 second
+    And the wait printed the notice "message text"
+
   Scenario: a postern message mw postern inbox has read does not wake it
     Given mw talk wait's cursor is at the start of the index
     And a "message" record to the Mayor has been indexed
