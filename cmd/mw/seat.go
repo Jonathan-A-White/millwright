@@ -180,7 +180,6 @@ func newSeatReapCmd() *cobra.Command {
 			if args[0] == application.DeputySeat {
 				reap.Mail = mwGateway(dir, host)
 				reap.Mailbox = application.DeputyMailbox
-				reap.NudgeFormat = application.DeputyNudgeFormat
 			}
 			_, err = reap.Run(cmd.Context())
 			return err

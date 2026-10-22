@@ -19,7 +19,7 @@ Feature: mw millhand tick
        A Millhand that stays up — neither reaped nor restarted — whose box
        holds unread mail is told of it without a fresh session: an idle pane
        is typed the same wake line the Mayor's own notifier types ("New mail
-       for millhand: N message(s). Run bd mail inbox.") and the tick says
+       for millhand: N message(s): <ids>. Run bd mail inbox.") and the tick says
        "nudged". A pane with text already on its input line is never typed
        over: the tick says "idle with text on its input line" and leaves one
        doctor note for the Mayor, so a person decides. Either way "already up"
@@ -155,7 +155,7 @@ Feature: mw millhand tick
     When mw millhand tick is run
     Then mw millhand tick succeeds
     And mw millhand tick prints one dated line saying "nudged (millhand-test)"
-    And the window "millhand-test" was typed "New mail for millhand: 1 message(s). Run bd mail inbox.\n"
+    And the window "millhand-test" was typed "New mail for millhand: 1 message(s): mail-1. Run bd mail inbox.\n"
     And the window "millhand-test" was not closed
     And no window was opened
     And the tick did not sync

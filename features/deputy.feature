@@ -69,7 +69,7 @@ Feature: mw deputy
     When mw deputy is run
     Then mw deputy succeeds
     And mw deputy says it nudged the Deputy in the window "deputy-2026-09-30-02"
-    And the line "New mail for deputy: 2 message(s). Run bd mail inbox." was typed into the window "deputy-2026-09-30-02"
+    And the line "New mail for deputy: 2 message(s): mail-1, mail-2. Run bd mail inbox." was typed into the window "deputy-2026-09-30-02"
     And no window was opened
     And no reaper was armed
 

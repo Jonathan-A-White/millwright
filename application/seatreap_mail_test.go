@@ -3,7 +3,6 @@ package application_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -48,7 +47,7 @@ func newDeputyReaper(t *testing.T, box application.Mailbox) *aDeputyReaper {
 	r.reap = application.SeatReap{
 		Seats: files, Terminal: windows, Log: r.log,
 		Seat: "mayor", Host: "laptop", Window: "@3", WhenIdle: true,
-		Mail: box, Mailbox: application.DeputyMailbox, NudgeFormat: application.DeputyNudgeFormat,
+		Mail: box, Mailbox: application.DeputyMailbox,
 		Interval: time.Minute, Limit: 30 * time.Minute,
 		Now: func() time.Time { return r.now },
 		Sleep: func(context.Context, time.Duration) error {
@@ -83,12 +82,19 @@ func TestAnIdleDeputyWithUnreadMailIsNudgedNotClosedAndClosedOnceItsBoxIsEmpty(t
 		}
 	}
 
+	var ids []string
+	for _, m := range mustInbox(t, box) {
+		ids = append(ids, m.ID)
+	}
 	report, err := r.reap.Run(context.Background())
 	if err != nil || report.Outcome != application.ReapClosed {
 		t.Fatalf("expected the window closed once the box was empty, it ended %q with %v", report.Outcome, err)
 	}
 
-	nudge := fmt.Sprintf(application.DeputyNudgeFormat, 2) + "\n"
+	nudge := application.MailNudgeLine(application.DeputyMailbox, ids) + "\n"
+	if len(ids) != 2 {
+		t.Fatalf("expected two unread messages, got %v", ids)
+	}
 	if typed := r.windows.Typed("@3"); len(typed) != 1 || typed[0] != nudge {
 		t.Errorf("expected the nudge typed once, got %q", typed)
 	}

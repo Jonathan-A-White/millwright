@@ -260,7 +260,7 @@ func (c *seatReapContext) theReaperWatches(window, mode string, seconds, limit i
 		Sleep:    c.sleep,
 	}
 	if c.box != nil {
-		reap.Mail, reap.Mailbox, reap.NudgeFormat = c.box, c.boxName, application.DeputyNudgeFormat
+		reap.Mail, reap.Mailbox = c.box, c.boxName
 	}
 	c.report, c.err = reap.Run(context.Background())
 	return nil

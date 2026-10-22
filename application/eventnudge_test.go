@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func TestNudgeTypesTheMailLineAloneIntoAnIdlePaneWhenEveryEventIsMail(t *testing
 	w.pass(t) // the seat starts at the head: nothing is told
 	appendAll(t, w.log, jobEvent, events.Event{Kind: events.KindMail, Bead: "mw-m1", Detail: "deputy"}, events.Event{Kind: events.KindMail, Bead: "mw-m2", Detail: "deputy"})
 	w.pass(t)
-	want := []string{"New mail for deputy: 2 message(s). Run bd mail inbox.\n"}
+	want := []string{"New mail for deputy: 2 message(s): mw-m1, mw-m2. Run bd mail inbox.\n"}
 	if got := w.windows.Typed("@7"); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("typed %q, want %q", got, want)
 	}
@@ -110,7 +111,7 @@ func TestNudgeLeavesABusyPaneAndTellsItOnceIdle(t *testing.T) {
 		}
 		_ = w.windows.Pane("@7", application.PaneIdle)
 		w.pass(t)
-		if got := w.windows.Typed("@7"); len(got) != 1 || got[0] != "New mail for deputy: 1 message(s). Run bd mail inbox.\n" {
+		if got := w.windows.Typed("@7"); len(got) != 1 || got[0] != "New mail for deputy: 1 message(s): mw-m1. Run bd mail inbox.\n" {
 			t.Fatalf("pane %s: once idle it was typed %q", state, got)
 		}
 		if len(w.sprung) != 0 {
@@ -284,7 +285,7 @@ func TestNudgeTellsOnlyMailStillUnreadWhenAHeldNudgeIsTyped(t *testing.T) {
 	}
 	_ = w.windows.Pane("@1", application.PaneIdle)
 	w.pass(t)
-	if got := w.windows.Typed("@1"); len(got) != 1 || got[0] != "New mail for mayor: 1 message(s). Run bd mail inbox.\n" {
+	if got := w.windows.Typed("@1"); len(got) != 1 || got[0] != "New mail for mayor: 1 message(s): "+ids[2]+". Run bd mail inbox.\n" {
 		t.Fatalf("typed %q, want the one mail still unread", got)
 	}
 
@@ -304,5 +305,66 @@ func TestNudgeTellsOnlyMailStillUnreadWhenAHeldNudgeIsTyped(t *testing.T) {
 	w.pass(t)
 	if got := w.windows.Typed("@1"); len(got) != 1 {
 		t.Fatalf("typed %q for mail already read", got)
+	}
+}
+
+// The mail line names the ids it counts, in seq order, the first ten and then
+// "and <k> more", in the words contrib/mail-notify types (mw-gq6.693).
+func TestNudgeMailLineNamesTheIdsItCounts(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		n    int
+		want string
+	}{
+		{"three", 3, "New mail for mayor: 3 message(s): mw-id00, mw-id01, mw-id02. Run bd mail inbox.\n"},
+		{"twelve", 12, "New mail for mayor: 12 message(s): mw-id00, mw-id01, mw-id02, mw-id03, mw-id04, mw-id05, mw-id06, mw-id07, mw-id08, mw-id09 and 2 more. Run bd mail inbox.\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newNudgeWorld(t)
+			w.subs.Set("mayor", `kinds = ["mail"]`)
+			w.windows.HoldsWithID("@1", "mayor-2026-10-01-02", time.Time{})
+			w.pass(t)
+			for i := 0; i < tc.n; i++ {
+				appendAll(t, w.log, events.Event{Kind: events.KindMail, Bead: fmt.Sprintf("mw-id%02d", i), Detail: "mayor"})
+			}
+			w.pass(t)
+			if got := w.windows.Typed("@1"); len(got) != 1 || got[0] != tc.want {
+				t.Fatalf("typed %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A mail event stillUnread drops (already read) is neither counted nor named.
+func TestNudgeMailLineLeavesOutMailAlreadyRead(t *testing.T) {
+	w := newNudgeWorld(t)
+	mailbox := apptest.NewFakeMailbox()
+	w.nudge.Inbox = mailbox.Inbox
+	w.subs.Set("mayor", `kinds = ["mail"]`)
+	w.windows.HoldsWithID("@1", "mayor-2026-10-01-02", time.Time{})
+	w.pass(t)
+	var ids []string
+	for _, subject := range []string{"one", "two", "three"} {
+		id, err := mailbox.Send(context.Background(), application.NewMessage{From: "builder", To: "mayor", Subject: subject, Body: "b"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+		appendAll(t, w.log, events.Event{Kind: events.KindMail, Bead: id, Detail: "mayor"})
+	}
+	if _, err := mailbox.Read(context.Background(), ids[1], "mayor"); err != nil {
+		t.Fatal(err)
+	}
+	w.pass(t)
+	want := "New mail for mayor: 2 message(s): " + ids[0] + ", " + ids[2] + ". Run bd mail inbox.\n"
+	if got := w.windows.Typed("@1"); len(got) != 1 || got[0] != want {
+		t.Fatalf("typed %q, want %q", got, want)
+	}
+}
+
+// MailNudgeLine is the one place the line is made.
+func TestMailNudgeLineNamesAtMostTenIds(t *testing.T) {
+	if got, want := application.MailNudgeLine("deputy", []string{"a"}), "New mail for deputy: 1 message(s): a. Run bd mail inbox."; got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }

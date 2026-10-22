@@ -11,9 +11,35 @@ import (
 	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
-// MailNudgeFormat is the line typed into a seat's pane when every event it is
-// told of is mail: the words the mail notifier types for the Mayor's box.
-const MailNudgeFormat = "New mail for %s: %d message(s). Run bd mail inbox."
+// MailNudgeNamedIds is how many ids MailNudgeLine names before "and <k> more":
+// the same ten contrib/mail-notify names (mw-gq6.678).
+const MailNudgeNamedIds = 10
+
+// MailNudgeLine is the line typed into a seat's pane to tell it of unread mail:
+// the words the mail notifier (contrib/mail-notify) types for the Mayor's box,
+// naming the ids it counts, the first MailNudgeNamedIds and then "and <k> more"
+// (mw-gq6.693). It carries no trailing newline: Type presses Enter of its own.
+// Every site that tells a seat of mail makes its line here.
+func MailNudgeLine(box string, ids []string) string {
+	shown := ids
+	if len(shown) > MailNudgeNamedIds {
+		shown = shown[:MailNudgeNamedIds]
+	}
+	named := strings.Join(shown, ", ")
+	if more := len(ids) - len(shown); more > 0 {
+		named += fmt.Sprintf(" and %d more", more)
+	}
+	return fmt.Sprintf("New mail for %s: %d message(s): %s. Run bd mail inbox.", box, len(ids), named)
+}
+
+// messageIds is the ids of messages, in the order given.
+func messageIds(messages []Message) []string {
+	ids := make([]string, len(messages))
+	for i, m := range messages {
+		ids[i] = m.ID
+	}
+	return ids
+}
 
 // NudgeCursors keeps, for each seat, the last seq the follower has told it
 // of, or has seen nothing to tell it in.
@@ -33,7 +59,7 @@ type EventNudger interface {
 // and, for each seat with events since the last it was told of that match:
 //
 //   - a window that is up and idle at an empty input line is typed one line:
-//     MailNudgeFormat when every event is mail, else EventsNudgeLine, which
+//     MailNudgeLine when every event is mail, else EventsNudgeLine, which
 //     the mail among other events is told by. One mail is one notice: never
 //     the events line and then the mail line for the same mail (mw-gq6.457).
 //     After a line is typed the input line is read once Settle has passed: if
@@ -160,7 +186,11 @@ func (n *EventNudge) Nudge(ctx context.Context) error {
 		case found:
 			typed := line
 			if mail == len(matched) {
-				typed = fmt.Sprintf(MailNudgeFormat, seat, mail)
+				ids := make([]string, len(matched))
+					for i, ev := range matched {
+						ids[i] = ev.Bead
+					}
+					typed = MailNudgeLine(seat, ids)
 			}
 			told, err := n.tell(ctx, window, typed)
 			if err != nil {

@@ -2352,7 +2352,7 @@ spring = true   # deputy and millhand only: bring the seat up when its window is
 box is the seat's. Each pass the follower reads these files and, for a seat with new matching
 events: when the seat's window (`<seat>-*`, of several the one its acting file names) is up
 and its pane idle at an empty input line, types one line: `New events for <seat>: N. Run mw
-events tail --since <seq>.`, or `New mail for <seat>: N message(s). Run bd mail inbox.` when
+events tail --since <seq>.`, or `New mail for <seat>: N message(s): <ids>. Run bd mail inbox.` when
 every event is mail (one mail is one notice, mw-gq6.457); leaves a busy pane alone and tells
 it on a later pass; and when the window is down and the seat is marked `spring = true`, runs
 its up command (`mw deputy`, `mw millhand`) with the events line as its reason. A seat whose window is down and not marked is told nothing: it
@@ -4735,7 +4735,7 @@ finished a brief and sits at an empty prompt will not see mail until something
 wakes it. So when the window is up and the Deputy's box holds unread mail, `mw
 deputy` looks at the pane. If it is idle at an empty input line, `mw deputy`
 types the same line the Mayor's notifier types, `New mail for deputy: N
-message(s). Run bd mail inbox.`, with the half-second pause before Enter that
+message(s): <ids>. Run bd mail inbox.`, with the half-second pause before Enter that
 the notifier uses, prints `nudged the Deputy in window <name>` and exits 0. If
 the pane is busy (`esc to interrupt` on screen, or text already on the input
 line) it types nothing, says `the Deputy is busy in window <name>; the mail

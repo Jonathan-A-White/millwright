@@ -636,30 +636,26 @@ func (t MillhandTick) mailWhileUp(ctx context.Context, name string) (line string
 	if mailErr != nil {
 		return "", false, nil
 	}
-	unread := 0
+	var ids []string
 	for _, group := range mail {
-		unread += len(group.subjects)
+		ids = append(ids, group.ids...)
 	}
-	if unread == 0 {
+	if len(ids) == 0 {
 		return "", false, nil
 	}
 
 	if state == PaneInput {
 		return t.reportIdleWithText(ctx, name), true, nil
 	}
-	return t.nudge(ctx, name, window.ID, unread)
+	return t.nudge(ctx, name, window.ID, ids)
 }
 
-// MillhandNudgeFormat is the line a tick types into an idle Millhand's window
-// when its box holds unread mail it has not been told of yet: the same words
-// the Mayor's own notifier (contrib/mail-notify) types, naming the Millhand
-// instead. It carries no trailing newline: Type presses Enter of its own.
-const MillhandNudgeFormat = "New mail for millhand: %d message(s). Run bd mail inbox."
-
-// nudge types the wake line into an idle Millhand's window, once, and says so
-// in the tick's line. A dry run says what it would type and types nothing.
-func (t MillhandTick) nudge(ctx context.Context, name, window string, unread int) (line string, handled bool, err error) {
-	text := fmt.Sprintf(MillhandNudgeFormat, unread)
+// nudge types the wake line (MailNudgeLine, for the Millhand's box, naming the
+// ids of the unread mail) into an idle Millhand's window, once, and says so in
+// the tick's line. A dry run says what it would type and types nothing.
+func (t MillhandTick) nudge(ctx context.Context, name, window string, ids []string) (line string, handled bool, err error) {
+	unread := len(ids)
+	text := MailNudgeLine(MillhandSeat, ids)
 	if t.DryRun {
 		return fmt.Sprintf("dry run: would nudge the Millhand's window %s: %s", name, oneLine(text)), true, nil
 	}
@@ -956,11 +952,12 @@ func (t MillhandTick) mailBoxes() []string {
 	return []string{SeatIdentity(MillhandSeat, t.Host), MillhandSeat, t.Host}
 }
 
-// boxMail is the unread mail found in one mailbox: its quoted subjects,
-// oldest first.
+// boxMail is the unread mail found in one mailbox: its quoted subjects and
+// their message ids, oldest first.
 type boxMail struct {
 	box      string
 	subjects []string
+	ids      []string
 }
 
 // unreadMail is the unread mail in every mailbox this host's Millhand reads,
@@ -993,7 +990,7 @@ func (t MillhandTick) unreadMail(ctx context.Context) ([]boxMail, error) {
 		for i, message := range messages {
 			subjects[i] = fmt.Sprintf("%q", oneLine(message.Subject))
 		}
-		groups = append(groups, boxMail{box: mailbox, subjects: subjects})
+		groups = append(groups, boxMail{box: mailbox, subjects: subjects, ids: messageIds(messages)})
 	}
 	return groups, failed
 }

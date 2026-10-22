@@ -213,13 +213,12 @@ type SeatReap struct {
 
 	// Mail, when set, is the box of a seat that has one (the Deputy's): in idle
 	// mode, before closing, the reaper counts Mailbox's unread mail in it. Mail
-	// waiting is typed to the idle pane as NudgeFormat (given the count; a
-	// default when empty) and the window is left open, until the session hands
+	// waiting is typed to the idle pane as MailNudgeLine (naming its ids) and
+	// the window is left open, until the session hands
 	// off again; a count that fails is not a reason to close either. Nil, as for
 	// every seat without a box, closes as it always did.
-	Mail        Mailbox
-	Mailbox     string
-	NudgeFormat string
+	Mail    Mailbox
+	Mailbox string
 
 	// Settle is how long after the mail nudge is typed the input line is read,
 	// to see that Enter took it (TypeConfirmed). Zero reads it at once.
@@ -386,7 +385,7 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 			unknown = false
 			if len(waiting) > 0 {
 				idle = 0
-				text := s.nudge(len(waiting))
+				text := s.nudge(waiting)
 				outcome, err := TypeConfirmed(ctx, s.Terminal, ReapWindow{ID: s.Window, Name: s.Window}, text, s.Settle)
 				if err != nil {
 					if _, err := s.say(ctx, fmt.Sprintf("the mail nudge could not be typed: %v; not closing", err)); err != nil {
@@ -602,12 +601,10 @@ func (s SeatReap) closedLine(limit *PaneLimit) string {
 	return "closed: the seat is held by someone else, and " + pane
 }
 
-// nudge is the line typed to tell an idle session n messages wait for it.
-func (s SeatReap) nudge(n int) string {
-	if s.NudgeFormat == "" {
-		return fmt.Sprintf("New mail for %s: %d message(s). Run bd mail inbox.", s.Mailbox, n)
-	}
-	return fmt.Sprintf(s.NudgeFormat, n)
+// nudge is the line typed to tell an idle session the waiting messages wait
+// for it, naming their ids (MailNudgeLine).
+func (s SeatReap) nudge(waiting []Message) string {
+	return MailNudgeLine(s.Mailbox, messageIds(waiting))
 }
 
 func (s SeatReap) now() time.Time {

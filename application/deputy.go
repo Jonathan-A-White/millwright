@@ -26,11 +26,6 @@ const DeputyEffort = domain.EffortHigh
 // DeputyMailbox is the mailbox the Deputy's events wait is armed on.
 const DeputyMailbox = "deputy"
 
-// DeputyNudgeFormat is the line typed into an idle Deputy's window when its box
-// holds unread mail: the words the Mayor's notifier (contrib/mail-notify) types
-// for its own box, naming the Deputy. Type presses Enter of its own.
-const DeputyNudgeFormat = "New mail for " + DeputyMailbox + ": %d message(s). Run bd mail inbox."
-
 // DeputyAlreadyUp is a Deputy bring-up that started nothing because a window of
 // the Deputy's is already open. It is not a fault: it carries DeputyUpExit and
 // says so in one line. Busy says the pane was at work and unread mail was left
@@ -305,7 +300,7 @@ func (d Deputy) wakeIdle(ctx context.Context, name string) (SeatUpReport, error)
 	if state != PaneIdle {
 		return SeatUpReport{}, &DeputyAlreadyUp{Window: name, Busy: true}
 	}
-	text := fmt.Sprintf(DeputyNudgeFormat, len(inbox))
+	text := MailNudgeLine(DeputyMailbox, messageIds(inbox))
 	outcome, err := TypeConfirmed(ctx, d.Terminal, ReapWindow{ID: id, Name: name}, text, d.Settle)
 	if err != nil {
 		return SeatUpReport{}, fmt.Errorf("typing the mail nudge into the window %s: %w", name, err)
