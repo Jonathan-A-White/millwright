@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // slipScript is a mill that answers each send with the next scripted answer:
@@ -147,5 +149,73 @@ func TestAFlakyExampleMailsTheMayorOnce(t *testing.T) {
 	records, _ := book.Records(ctx)
 	if len(records) != 1 || records[0].Failed || strings.Join(records[0].Warnings, ";") != "flaky: lampas/tutor/hello missed 1 of 3" {
 		t.Errorf("expected the record to warn flaky and not be failed, got %+v", records)
+	}
+}
+
+// mw-gq6.696: a flake of an example an open bead already names says so in its
+// mail and is added to that bead as a dated note, so the Mayor has nothing to
+// file; an example no open bead names keeps the ask to file a bug.
+func TestAFlakyExampleAnOpenBeadNamesIsNotedOnItAndMailedAsNamed(t *testing.T) {
+	ctx := context.Background()
+	box := apptest.NewFakeMailbox()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddStory("mw-5r3p30", domain.Story{ID: "mw-5r3p30.722", Title: "A bug the smoke found"})
+	if err := tracker.SetStoryMetadata(ctx, "mw-5r3p30.722", map[string]string{application.SmokeExamplesField: "lampas/tutor/hello"}); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 10, 22, 1, 56, 0, 0, time.UTC)
+	book := application.GristSmokeBook{Notes: tracker, Filed: tracker, Comments: tracker, Mailbox: box, Host: "laptop", Now: func() time.Time { return at }}
+	smoke, _ := smokeWith(&slipScript{answers: []string{"slip", "ok", "ok"}})
+	report, err := smoke.Run(ctx, "lampas", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := book.Record(ctx, "millwright", report); err != nil {
+		t.Fatal(err)
+	}
+	inbox, err := box.Inbox(ctx, application.MayorMailbox)
+	if err != nil || len(inbox) != 1 {
+		t.Fatalf("expected one mail to the Mayor, got %v %v", inbox, err)
+	}
+	if !strings.Contains(inbox[0].Body, "already named on mw-5r3p30.722, nothing to file") {
+		t.Errorf("expected the mail to say the example is named, got %q", inbox[0].Body)
+	}
+	if strings.Contains(inbox[0].Body, "file it as a bug") || strings.Contains(inbox[0].Body, "--filed") {
+		t.Errorf("expected no ask to file a bug, got %q", inbox[0].Body)
+	}
+	comments := tracker.Comments("mw-5r3p30.722")
+	if len(comments) != 1 {
+		t.Fatalf("expected one note on the named bead, got %q", comments)
+	}
+	for _, want := range []string{"2026-10-22", "lampas/tutor/hello", "missed 1 of 3", "direct:send1", "confidence"} {
+		if !strings.Contains(comments[0], want) {
+			t.Errorf("expected the note to hold %q, got %q", want, comments[0])
+		}
+	}
+}
+
+func TestAFlakyExampleNoOpenBeadNamesKeepsTheAskToFileABug(t *testing.T) {
+	ctx := context.Background()
+	box := apptest.NewFakeMailbox()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddStory("mw-5r3p30", domain.Story{ID: "mw-5r3p30.1", Title: "Another bug"})
+	if err := tracker.SetStoryMetadata(ctx, "mw-5r3p30.1", map[string]string{application.SmokeExamplesField: "lampas/tutor/other"}); err != nil {
+		t.Fatal(err)
+	}
+	book := application.GristSmokeBook{Notes: tracker, Filed: tracker, Comments: tracker, Mailbox: box, Host: "laptop"}
+	smoke, _ := smokeWith(&slipScript{answers: []string{"slip", "ok", "ok"}})
+	report, err := smoke.Run(ctx, "lampas", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := book.Record(ctx, "millwright", report); err != nil {
+		t.Fatal(err)
+	}
+	inbox, _ := box.Inbox(ctx, application.MayorMailbox)
+	if len(inbox) != 1 || !strings.Contains(inbox[0].Body, "file it as a bug") || strings.Contains(inbox[0].Body, "already named") {
+		t.Fatalf("expected today's ask to file a bug, got %+v", inbox)
+	}
+	if got := tracker.Comments("mw-5r3p30.1"); len(got) != 0 {
+		t.Errorf("expected no note on a bead that does not name the example, got %q", got)
 	}
 }

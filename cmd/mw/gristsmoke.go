@@ -23,8 +23,9 @@ import (
 // The tracker also says which failing examples an open bead names, when it can.
 func gristSmokeBook(notes application.GristSmokeNotes, host string) application.GristSmokeBook {
 	filed, _ := notes.(application.GristSmokeFiled)
+	comments, _ := notes.(application.GristSmokeCommenter)
 	mailbox, _ := notes.(application.Mailbox)
-	return application.GristSmokeBook{Notes: notes, Filed: filed, Events: homeEventLog(), Mailbox: mailbox, Host: host}
+	return application.GristSmokeBook{Notes: notes, Filed: filed, Comments: comments, Events: homeEventLog(), Mailbox: mailbox, Host: host}
 }
 
 // newSmoker is the grist smoke as this host is set up to make it: the grinds
@@ -154,14 +155,16 @@ func newGristSmokeCmd() *cobra.Command {
 			"answered, the answer fits the grind's answer schema and meets every expect; a failure names\n" +
 			"the example, the field, what was wanted and what came. An example whose answer is wrong is sent\n" +
 			"twice more before it holds: a miss that does not repeat is \"flaky: <example> missed 1 of 3\", holds\n" +
-			"nothing and is mailed to the Mayor. A kind with no example is a warning.\n" +
+			"nothing and is mailed to the Mayor, who is told \"already named on <bead>, nothing to file\" (and the miss\n" +
+			"is added to that bead as a dated note) when an open bead already names the example.\nA kind with no example is a warning.\n" +
 			"A smoke the mill would not take for a reason that is not the examples' (the key's daily limit,\n" +
 			"its licence, the backend out of reach, the factory's usage limit or its model overloaded) is\n" +
 			"\"not run\": it fails nothing and holds nothing.\n\n" +
 			"What it finds is kept (mw status shows it): a failure after a landing holds the rig's open\n" +
 			"stories until a smoke passes. --lift ends that hold without a smoke. It exits 1 on a failure.\n\n" +
 			"A failure whose every failing example is already named on an open bead holds nothing: its line\n" +
-			"says \"all filed on <bead>: not held\" and mw status shows \"filed on <bead>, not held\". Name them when\n" +
+			"says \"all filed on <bead>: not held\", mw status shows \"filed on <bead>, not held\" and each miss is added to\n" +
+			"the naming bead as a dated note. Name them when\n" +
 			"you file the cause, with --filed <bead> and the examples (<kind>/<example>, or <app>/<kind>/<example>):\n" +
 			"  mw grist smoke lampas --filed mw-5r3p30.313 tutor/hello tutor/photo\n" +
 			"which sets the bead's smoke_examples metadata (comma-separated <app>/<kind>/<example>), and ends the\n" +

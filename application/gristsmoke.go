@@ -940,10 +940,18 @@ type GristSmokeBook struct {
 	// Events is the home's event log, where a failure is posted as a failed job
 	// event. A nil Events posts none.
 	Events EventLog
+	// Comments is where a miss of an example an open bead already names is
+	// written as a dated note on that bead (mw-gq6.696). Nil writes none.
+	Comments GristSmokeCommenter
 	// Mailbox is where the Mayor is mailed of a flaky example. Nil mails none.
 	Mailbox Mailbox
 	Host    string
 	Now     func() time.Time
+}
+
+// GristSmokeCommenter writes a comment on a bead.
+type GristSmokeCommenter interface {
+	CommentOnStory(ctx context.Context, id, text string) error
 }
 
 var (
@@ -965,34 +973,94 @@ func (b GristSmokeBook) now() time.Time {
 // has its record forgotten.
 func (b GristSmokeBook) Record(ctx context.Context, rig string, report GristSmokeReport) error {
 	mailed := b.mailFlakes(ctx, report)
-	return errors.Join(b.record(ctx, rig, report), mailed)
+	report = b.Mark(ctx, report)
+	noted := b.noteFiled(ctx, report)
+	return errors.Join(b.record(ctx, rig, report), mailed, noted)
 }
 
 // mailFlakes mails the Mayor once for each flaky example of a smoke, so that a
-// slip a re-send hid still gets filed (mw-gq6.664).
+// slip a re-send hid still gets filed (mw-gq6.664). An example an open bead
+// already names is not to be filed: the mail says so, and the miss is added to
+// that bead as a dated note (mw-gq6.696).
 func (b GristSmokeBook) mailFlakes(ctx context.Context, report GristSmokeReport) error {
 	if b.Mailbox == nil {
 		return nil
 	}
+	named := b.named(ctx)
 	var failed []error
 	for _, flake := range report.Flakes {
 		var misses []string
 		for _, miss := range flake.Misses {
 			misses = append(misses, fmt.Sprintf("  field %s: wanted %s, got %s", miss.Field, miss.Wanted, miss.Got))
 		}
+		next := fmt.Sprintf("A model's answer that misses now and then is a fact about the grind's instructions: file it as a bug, and name the example on it "+
+			"(mw grist smoke %s --filed <bead> %s) so that a later miss of it that repeats is not held.",
+			report.App, strings.TrimPrefix(flake.Example, report.App+"/"))
+		if bead, ok := named[flake.Example]; ok {
+			next = "It is already named on " + bead + ", nothing to file."
+			note := fmt.Sprintf("%s grist smoke of %s: %s, the failing run's txid %s:\n%s",
+				b.now().UTC().Format("2006-01-02 15:04Z"), report.App, flake, flake.Txid, strings.Join(misses, "\n"))
+			if err := b.note(ctx, bead, note); err != nil {
+				next += " The miss could not be added to it as a note, so add it by hand: " + firstLine(err.Error())
+				failed = append(failed, fmt.Errorf("the flake %s could not be noted on %s: %w", flake.Example, bead, err))
+			} else {
+				next += " The miss is added to it as a dated note."
+			}
+		}
 		_, err := b.Mailbox.Send(ctx, NewMessage{
 			From:    SeatIdentity(MwSeat, b.Host),
 			To:      MayorMailbox,
 			Subject: "Smoke flake: " + flake.Example,
 			Body: fmt.Sprintf("The grist smoke of %s sent %s %d times and its answer was wrong in %d of them (%s), right in the others, so it held nothing.\n\n"+
-				"The first wrong answer (the failing run's txid %s):\n%s\n\n"+
-				"A model's answer that misses now and then is a fact about the grind's instructions: file it as a bug, and name the example on it "+
-				"(mw grist smoke %s --filed <bead> %s) so that a later miss of it that repeats is not held.",
-				report.App, flake.Example, flake.Sent, flake.Missed, flake, flake.Txid, strings.Join(misses, "\n"),
-				report.App, strings.TrimPrefix(flake.Example, report.App+"/")),
+				"The first wrong answer (the failing run's txid %s):\n%s\n\n%s",
+				report.App, flake.Example, flake.Sent, flake.Missed, flake, flake.Txid, strings.Join(misses, "\n"), next),
 		})
 		if err != nil {
 			failed = append(failed, fmt.Errorf("the Mayor could not be mailed of the flake %s: %w", flake.Example, err))
+		}
+	}
+	return errors.Join(failed...)
+}
+
+// named are the examples an open bead names, each with the bead; empty when the
+// tracker cannot be asked.
+func (b GristSmokeBook) named(ctx context.Context) map[string]string {
+	if b.Filed == nil {
+		return nil
+	}
+	named, err := b.Filed.FiledSmokeExamples(ctx)
+	if err != nil {
+		return nil
+	}
+	return named
+}
+
+// note writes text on bead; no Comments writes nothing and is an error, so that
+// a mail never says a note was added that was not.
+func (b GristSmokeBook) note(ctx context.Context, bead, text string) error {
+	if b.Comments == nil {
+		return errors.New("no tracker to write the note on")
+	}
+	return b.Comments.CommentOnStory(ctx, bead, text)
+}
+
+// noteFiled adds each failure of a report that an open bead names in full
+// (FiledOn) to the bead naming it, as a dated note, so that the Mayor has
+// nothing to add by hand (mw-gq6.696). A report that holds writes none.
+func (b GristSmokeBook) noteFiled(ctx context.Context, report GristSmokeReport) error {
+	if len(report.FiledOn) == 0 || b.Comments == nil {
+		return nil
+	}
+	named := b.named(ctx)
+	var failed []error
+	for _, failure := range report.Failures {
+		bead, ok := named[smokeExampleOf(failure)]
+		if !ok {
+			continue
+		}
+		note := fmt.Sprintf("%s grist smoke of %s, already named on %s: %s", b.now().UTC().Format("2006-01-02 15:04Z"), report.App, bead, failure)
+		if err := b.note(ctx, bead, note); err != nil {
+			failed = append(failed, fmt.Errorf("the failure of %s could not be noted on %s: %w", smokeExampleOf(failure), bead, err))
 		}
 	}
 	return errors.Join(failed...)
@@ -1006,7 +1074,6 @@ func (b GristSmokeBook) record(ctx context.Context, rig string, report GristSmok
 	if report.NoGrinds {
 		return b.Notes.ClearNote(ctx, key)
 	}
-	report = b.Mark(ctx, report)
 	record := GristSmokeRecord{
 		App: report.App, Rig: rig, At: b.now().UTC(), Commit: report.Commit, Examples: report.Examples,
 		Failed: report.Failed(), Failures: report.Failures, Warnings: report.Warnings, NotRun: report.NotRun,

@@ -118,7 +118,7 @@ type smokeContext struct {
 }
 
 func (c *smokeContext) book() application.GristSmokeBook {
-	return application.GristSmokeBook{Notes: c.notes, Filed: c.notes, Events: c.events, Mailbox: c.mailbox, Host: "laptop", Now: func() time.Time { return gristNow }}
+	return application.GristSmokeBook{Notes: c.notes, Filed: c.notes, Comments: c.notes, Events: c.events, Mailbox: c.mailbox, Host: "laptop", Now: func() time.Time { return gristNow }}
 }
 
 func (c *smokeContext) smoke() application.GristSmoke {
