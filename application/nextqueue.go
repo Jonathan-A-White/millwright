@@ -30,6 +30,7 @@ func (n Next) readLanding(ctx context.Context, c *closeOut, report *NextReport) 
 	}
 	rules, _, err := n.landingRequirements(ctx, c.path.Rig)
 	if err != nil {
+		c.landingReadErr = fmt.Errorf("the read of %s/%s.toml before the rig's tests failed: %w", RigsDir, c.path.Rig, err)
 		return
 	}
 	for _, warning := range rules.Warnings {
@@ -38,6 +39,12 @@ func (n Next) readLanding(ctx context.Context, c *closeOut, report *NextReport) 
 	if rules.LandingSettings().Mode != domain.LandingBatch {
 		return
 	}
+	n.markBatch(ctx, c)
+}
+
+// markBatch records that the story is to be queued: its branch's tip, and the
+// commit mw check passed at, which the checks trust when it is that very tip.
+func (n Next) markBatch(ctx context.Context, c *closeOut) {
 	c.batch = true
 	tip, err := n.Landing.RefHead(ctx, c.rigDir, c.branch)
 	if err != nil {
@@ -52,6 +59,31 @@ func (n Next) readLanding(ctx context.Context, c *closeOut, report *NextReport) 
 	if CheckedTip(log) == tip {
 		c.trusted = tip
 	}
+}
+
+// rereadLanding settles, once the checks have passed, whether the rig lands in
+// batches, for a close-out whose first read, before them, said it lands each or
+// could not be made. The checks take minutes, and the vault is brought level
+// by the hosts meanwhile, so a rig flipped to batch while its story ran is
+// read as the batch rig it is now and queued, not stopped by the merge's guard
+// (mw-gq6.697). A read that fails again is left to the guard in merge, which
+// names it.
+func (n Next) rereadLanding(ctx context.Context, c *closeOut, report *NextReport) {
+	if n.Rules == nil || c.batch {
+		return
+	}
+	rules, _, err := n.landingRequirements(ctx, c.path.Rig)
+	if err != nil {
+		c.landingReadErr = fmt.Errorf("the read of %s/%s.toml after the rig's tests failed: %w", RigsDir, c.path.Rig, err)
+		return
+	}
+	c.landingReadErr = nil
+	if rules.LandingSettings().Mode != domain.LandingBatch {
+		return
+	}
+	report.Notes = append(report.Notes, fmt.Sprintf("%s lands in batches now: %s/%s.toml said otherwise when this close-out began, and was read again after the rig's tests, so the story is queued",
+		c.path.Rig, RigsDir, c.path.Rig))
+	n.markBatch(ctx, c)
 }
 
 // queue is what a close-out that passed does on a rig that lands in batches,

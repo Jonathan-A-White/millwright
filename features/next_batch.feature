@@ -106,3 +106,14 @@ Feature: A rig that lands in batches queues each story that passes its close-out
     When mw closes out "mw-gq6.1" a second time
     Then the story "mw-gq6.1" is closed
     And the comment on "mw-gq6.1" says: mw@laptop took the claim over from mw@cloud1 to close it
+
+  Scenario: A rig flipped to batch while its story ran is queued, not stopped
+    Given the rig lands its stories each by itself
+    And the session of "mw-gq6.1" reported a plain success
+    And the rig's file is changed to landing = "batch" while the rig's tests run
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is recorded as queued for batch landing
+    And the branch of "mw-gq6.1" is on the rig's origin as "mw/mw-gq6.1"
+    And nothing was landed on "main"
+    And the close-out never says "only mw land pushes"
+    And the close-out says the rig's file was read again after the tests and said batch

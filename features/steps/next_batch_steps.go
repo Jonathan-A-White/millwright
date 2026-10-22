@@ -2,6 +2,7 @@ package steps
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -23,6 +24,9 @@ func registerNextBatchSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the last ledger line says it was tested by mw check at the tip of "([^"]*)"$`, c.theLastLedgerLineTrustsTheCheck)
 	ctx.Then(`^the last ledger line does not say "([^"]*)"$`, c.theLastLedgerLineDoesNotSay)
 	ctx.Then(`^the close-out says the story is queued already$`, c.theCloseOutSaysQueuedAlready)
+	ctx.Given(`^the rig's file is changed to landing = "batch" while the rig's tests run$`, c.theRigFileFlipsToBatchDuringTheTests)
+	ctx.Then(`^the close-out never says "([^"]*)"$`, c.theCloseOutNeverSays)
+	ctx.Then(`^the close-out says the rig's file was read again after the tests and said batch$`, c.theCloseOutSaysTheFileWasReadAgain)
 }
 
 func (c *nextContext) theRigLandsInBatches() error {
@@ -102,6 +106,29 @@ func (c *nextContext) theLastLedgerLineDoesNotSay(words string) error {
 func (c *nextContext) theCloseOutSaysQueuedAlready() error {
 	if c.err == nil || !strings.Contains(c.err.Error(), "queued for batch landing already") {
 		return fmt.Errorf("expected the close-out to fail saying the story is queued for batch landing already, got %v", c.err)
+	}
+	return nil
+}
+
+// theRigFileFlipsToBatchDuringTheTests makes the rig's tests the moment the
+// vault gains landing = "batch": the file said each when the close-out first
+// read it, before the tests, as a vault the other host had not yet pushed to.
+func (c *nextContext) theRigFileFlipsToBatchDuringTheTests() error {
+	file := filepath.Join(c.vault, application.RigsDir, c.rigKey()+vault.RigFileExt)
+	c.checkCommand = fmt.Sprintf("printf 'run\\n' >> %s; printf '%s = \"batch\"\\n' > %s", c.checkLog, vault.LandingKey, file)
+	return nil
+}
+
+func (c *nextContext) theCloseOutNeverSays(words string) error {
+	if strings.Contains(c.printed.String(), words) || c.err != nil && strings.Contains(c.err.Error(), words) {
+		return fmt.Errorf("expected the close-out never to say %q, got %v\n%s", words, c.err, c.printed.String())
+	}
+	return nil
+}
+
+func (c *nextContext) theCloseOutSaysTheFileWasReadAgain() error {
+	if want := "lands in batches now"; !strings.Contains(c.printed.String(), want) {
+		return fmt.Errorf("expected the report to say %q, got:\n%s", want, c.printed.String())
 	}
 	return nil
 }

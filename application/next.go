@@ -615,6 +615,10 @@ type closeOut struct {
 	// finished one (mw-gq6.595).
 	cappedAfterClosing bool
 
+	// landingReadErr is why the close-out's last read of the rig's file for how
+	// it lands failed, nil when it did not; merge's guard names it.
+	landingReadErr error
+
 	// codemapBytes is the size of the union-merged docs/codemap.md when the
 	// merged result's tests failed only on its size and the landing let it
 	// through (codemapBandPercent), 0 otherwise; a landing that pushes files
@@ -1043,6 +1047,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	if IsTesterStory(c.detail) {
 		return n.closeTested(ctx, c, report)
 	}
+	n.rereadLanding(ctx, c, report)
 	if c.batch {
 		return n.queue(ctx, c, report)
 	}
@@ -2297,11 +2302,16 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 				RigsDir, c.path.Rig, ".toml", key, n.Host))
 		}
 		// Only mw land pushes the target branch of a rig that lands in batches
-		// (plans/0117): a close-out that got this far on one, its first read of
-		// the rig's file having failed, is stopped before anything is merged.
+		// (plans/0117): a close-out that got this far on one, its reads of the
+		// rig's file before and after the tests having failed or said otherwise,
+		// is stopped before anything is merged.
 		if rules.LandingSettings().Mode == domain.LandingBatch {
-			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("%s lands in batches, so only mw land pushes %s: nothing was merged; run mw next %s again to queue it",
-				c.path.Rig, c.target, c.id))
+			why := "its file said so only when the merge read it, after the reads before and after the rig's tests"
+			if c.landingReadErr != nil {
+				why = c.landingReadErr.Error()
+			}
+			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("%s lands in batches, so only mw land pushes %s: nothing was merged (%s); run mw next %s again to queue it",
+				c.path.Rig, c.target, why, c.id))
 		}
 		version.Files = rules.VersionFiles
 		version.Minor = c.path.Bump == domain.BumpMinor
