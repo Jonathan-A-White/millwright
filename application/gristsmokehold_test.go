@@ -332,3 +332,37 @@ func TestFilingABeadWithNoExamplesNamesWhatTheLastSmokeFailedOn(t *testing.T) {
 		t.Fatalf("expected mw status to name the fix that runs over the hold, got %q", line)
 	}
 }
+
+// mw-gq6.696: a failure whose every failing example an open bead names holds
+// nothing, and the miss is added to that bead as a dated note; a failure with
+// an example no bead names holds and writes no note.
+func TestAFailureEveryExampleOfWhichIsNamedIsNotedOnTheNamingBead(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.2", Title: "The fix"})
+	_ = tracker.SetStoryMetadata(ctx, "mw-gq6.2", map[string]string{application.SmokeExamplesField: "cairn/sweep/one, cairn/sweep/two"})
+	at := time.Date(2026, 10, 22, 1, 56, 0, 0, time.UTC)
+	book := application.GristSmokeBook{Notes: tracker, Filed: tracker, Comments: tracker, Host: "laptop", Now: func() time.Time { return at }}
+
+	all := application.GristSmokeReport{App: "cairn", Examples: 2, Failures: []string{"cairn/sweep/one: the answer lacked a price", "cairn/sweep/two: no answer in 5m0s"}}
+	if err := book.Record(ctx, "legend", all); err != nil {
+		t.Fatal(err)
+	}
+	comments := tracker.Comments("mw-gq6.2")
+	if len(comments) != 2 {
+		t.Fatalf("expected a note for each failing example, got %q", comments)
+	}
+	for i, want := range []string{"cairn/sweep/one: the answer lacked a price", "cairn/sweep/two: no answer in 5m0s"} {
+		if !strings.Contains(comments[i], "2026-10-22") || !strings.Contains(comments[i], want) || !strings.Contains(comments[i], "already named on mw-gq6.2") {
+			t.Errorf("expected a dated note of %q saying it is already named, got %q", want, comments[i])
+		}
+	}
+
+	some := application.GristSmokeReport{App: "cairn", Examples: 2, Failures: []string{"cairn/sweep/one: bad", "cairn/sweep/three: bad"}}
+	if err := book.Record(ctx, "legend", some); err != nil {
+		t.Fatal(err)
+	}
+	if got := tracker.Comments("mw-gq6.2"); len(got) != 2 {
+		t.Errorf("expected no note for a failure that holds, got %q", got)
+	}
+}
