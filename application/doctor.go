@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -849,3 +852,73 @@ func licenceList(value string) []string {
 	}
 	return out
 }
+
+// StaleLandingsAge is how old a landing directory is let grow before mw doctor
+// names it: a landing is made and taken away inside one close-out, minutes
+// long, so one a day old was left behind (mw-gq6.698).
+const StaleLandingsAge = 24 * time.Hour
+
+// StaleLandingsCheck is the mw doctor check that names the throwaway landing
+// directories (LandingPrefix) older than StaleLandingsAge, each with its id,
+// the part of the name after the prefix. A landing closes its own directory;
+// one still here is one a close-out could not take away. It removes nothing:
+// git may still hold a record of the worktree, so a person runs `git worktree
+// remove --force <dir>` in the rig, and the check says so.
+type StaleLandingsCheck struct {
+	// Dirs are the directories landings are made in: the home directory and the
+	// directory each rig lives in. A directory that is not there, or named
+	// twice, is read once or not at all.
+	Dirs []string
+	// Now is the clock; nil reads time.Now.
+	Now func() time.Time
+}
+
+var _ DoctorCheck = (*StaleLandingsCheck)(nil)
+
+// Name implements DoctorCheck.
+func (c *StaleLandingsCheck) Name() string { return "stale-landings" }
+
+// Probe implements DoctorCheck: cannot-tell, naming the stale directories,
+// when there are any; ok otherwise. The reason holds no age, so that the same
+// directories said again read the same and are said once.
+func (c *StaleLandingsCheck) Probe(context.Context) (Verdict, string) {
+	now := time.Now()
+	if c.Now != nil {
+		now = c.Now()
+	}
+	var stale []string
+	seen := map[string]bool{}
+	for _, dir := range c.Dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() || !strings.HasPrefix(entry.Name(), LandingPrefix) {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+			info, err := entry.Info()
+			if err != nil || seen[path] || now.Sub(info.ModTime()) <= StaleLandingsAge {
+				continue
+			}
+			seen[path] = true
+			stale = append(stale, fmt.Sprintf("%s (%s)", strings.TrimPrefix(entry.Name(), LandingPrefix), path))
+		}
+	}
+	if len(stale) == 0 {
+		return DoctorOK, ""
+	}
+	sort.Strings(stale)
+	return DoctorCannotTell, fmt.Sprintf("%d landing directories older than a day, left by a close-out that could not take them away (id, path): %s; remove one with `git worktree remove --force <path>` in its rig, then `git worktree prune`",
+		len(stale), strings.Join(stale, ", "))
+}
+
+// Cure implements DoctorCheck. Nothing is cured: Probe never says faulty.
+func (c *StaleLandingsCheck) Cure(context.Context) error { return nil }
+
+// Damper implements DoctorCheck.
+func (c *StaleLandingsCheck) Damper() (time.Duration, int) { return time.Hour, 1 }
+
+// WayBack implements DoctorCheck.
+func (c *StaleLandingsCheck) WayBack() string { return "nothing was changed" }

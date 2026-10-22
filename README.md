@@ -5184,6 +5184,14 @@ refused a lampas story that way, mw-gq6.453). There is no cure: a person adds th
 home's line for the rig, and `contrib/boost-bootstrap.sh` does it when it makes the
 config, from the vault's `hosts/boost-config.toml`.
 
+**stale-landings** names every `.mw-landing-<id>` directory, in the home directory
+and beside each rig, older than 24 hours, each with its id: a landing is made and
+taken away inside one close-out, so one that old was left behind. It is
+cannot-tell, said once for the same set, and changes nothing; the reason says to
+remove one with `git worktree remove --force <path>` in its rig, then `git worktree
+prune`. (A landing now removes its own directory even when git has lost its record
+of it or the close-out was cancelled.)
+
 **tmp-leftovers** cures the fault behind the VPS reaching 94% disk on
 2026-09-25 from the factory's own dead leftovers: a killed bd's dolt spool
 files (`/tmp/nbs-spool-*`), `/tmp/bd`, and a stale Claude Code session

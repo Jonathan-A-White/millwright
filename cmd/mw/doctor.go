@@ -350,6 +350,16 @@ func newDoctorCmd() *cobra.Command {
 					return err
 				},
 			}
+			// Landing directories a close-out could not take away, looked for in the
+			// home directory and beside every rig, where a landing is made.
+			landingDirs := []string{}
+			if home, homeErr := os.UserHomeDir(); homeErr == nil {
+				landingDirs = append(landingDirs, home)
+			}
+			for _, rigDir := range rigsAt {
+				landingDirs = append(landingDirs, filepath.Dir(filepath.Clean(rigDir)))
+			}
+			staleLandings := &application.StaleLandingsCheck{Dirs: landingDirs}
 			// The connection rate of a beads server this host runs; a host that
 			// reaches another's, or has none, leaves it to the host that runs it.
 			var churn application.DoctorChecks
@@ -387,6 +397,7 @@ func newDoctorCmd() *cobra.Command {
 					boostAsleep,
 					starvedRigs,
 					recheckSkips,
+					staleLandings,
 					ageKey,
 				}, churn...), checks...),
 				State: store,
