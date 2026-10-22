@@ -867,3 +867,74 @@ func TestANoteWrittenByACheckInARunIsClearedByTheNextRun(t *testing.T) {
 		t.Errorf("expected the note cleared once the check was ok")
 	}
 }
+
+func TestAWholeRunLeavesItsVerdictAndSaysItAgainOnlyWhenItChangesOrGrowsOld(t *testing.T) {
+	notes := apptest.NewFakeDoctorNotes()
+	now := doctorNow
+	faulty := &apptest.FakeDoctorCheck{CheckName: "boost-config", Verdict: application.DoctorFaulty, Reason: "tests.millwright differs\nsecond line",
+		CureErr: errors.New("no cure"), Cap: 1}
+	doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now, faulty)
+	doctor.Verdicts, doctor.Host = notes, "laptop"
+	run := func(name string) {
+		t.Helper()
+		if _, err := doctor.Run(context.Background(), name, false); err != nil {
+			if _, fault := application.DoctorFaults(err); !fault {
+				t.Fatalf("running: %v", err)
+			}
+		}
+	}
+
+	run("boost-config")
+	if notes.Sets() != 0 {
+		t.Fatalf("expected a run of one named check to leave no verdict, got %d writes", notes.Sets())
+	}
+
+	run("")
+	want := "2026-09-23T12:00:00Z faulty boost-config: tests.millwright differs second line"
+	if got, _ := notes.Get(application.DoctorVerdictKey("laptop")); got != want {
+		t.Fatalf("expected the verdict %q, got %q", want, got)
+	}
+	now = now.Add(time.Hour)
+	run("")
+	if notes.Sets() != 1 {
+		t.Errorf("expected the same verdict within the refresh time to be left alone, got %d writes", notes.Sets())
+	}
+	now = now.Add(application.DoctorVerdictRefresh)
+	run("")
+	if notes.Sets() != 2 {
+		t.Errorf("expected the same verdict to be said again after the refresh time, got %d writes", notes.Sets())
+	}
+	faulty.Verdict = application.DoctorOK
+	run("")
+	if got, _ := notes.Get(application.DoctorVerdictKey("laptop")); !strings.HasSuffix(got, " ok") || notes.Sets() != 3 {
+		t.Errorf("expected a changed verdict to be left at once as ok, got %q after %d writes", got, notes.Sets())
+	}
+}
+
+func TestADryRunLeavesNoVerdict(t *testing.T) {
+	notes := apptest.NewFakeDoctorNotes()
+	now := doctorNow
+	doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now,
+		&apptest.FakeDoctorCheck{CheckName: "widget", Verdict: application.DoctorOK})
+	doctor.Verdicts, doctor.Host = notes, "laptop"
+	if _, err := doctor.Run(context.Background(), "", true); err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	if notes.Sets() != 0 {
+		t.Errorf("expected no verdict from a dry run, got %d writes", notes.Sets())
+	}
+}
+
+func TestADoctorVerdictReadsBackWhatItSaid(t *testing.T) {
+	said := application.DoctorVerdict{At: doctorNow, Faulty: []application.DoctorFinding{{Check: "a", Reason: "x: y || z"}, {Check: "b", Reason: "w"}}}
+	if _, ok := application.ParseDoctorVerdict("2026-09-23T12:00:00Z faulty nothing here"); ok {
+		t.Errorf("expected a finding with no colon to be unreadable")
+	}
+	if _, ok := application.ParseDoctorVerdict("yesterday ok"); ok {
+		t.Errorf("expected a note with no time to be unreadable")
+	}
+	back, ok := application.ParseDoctorVerdict(application.DoctorVerdict{At: doctorNow, Faulty: said.Faulty[1:]}.Note())
+	if !ok || len(back.Faulty) != 1 || back.Faulty[0].Reason != "w" || !back.At.Equal(doctorNow) {
+		t.Errorf("expected the verdict back, got %+v ok=%v", back, ok)
+	}
+}

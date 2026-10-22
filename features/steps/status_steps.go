@@ -190,6 +190,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the configuration says a rig's memory may be (\d+) bytes$`, c.theConfigurationSaysARigsMemoryMayBe)
 
 	c.registerTickSteps(ctx)
+	c.registerDoctorLineSteps(ctx)
 	c.registerEpicSteps(ctx)
 
 	c.registerIdeasOnlySteps(ctx)

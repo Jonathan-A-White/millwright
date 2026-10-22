@@ -403,8 +403,11 @@ func newDoctorCmd() *cobra.Command {
 				State: store,
 				Log:   store,
 				Notes: mwGateway(vault, host),
-				Host:  host,
-				Out:   cmd.OutOrStdout(),
+				// The verdict rides the same notes, so the home reads it with the
+				// rest of this host's (mw-gq6.705).
+				Verdicts: mwGateway(vault, host),
+				Host:     host,
+				Out:      cmd.OutOrStdout(),
 			}, name, dryRun)
 		},
 	}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -260,6 +261,10 @@ type DoctorResult struct {
 	// cure failed, except a damped tick of a DoctorCoolingQuiet check held
 	// only by the wait after a good cure — so this run's exit status should say so.
 	Faulty bool
+	// Found is what the probe said was wrong, set only on a Faulty result: the
+	// Reason of a failed cure is the cure's own error, which says why it could
+	// not put the fault right and not what the fault is.
+	Found string
 }
 
 // line is how one result is logged, dated by the caller: "<check> <verdict>
@@ -355,6 +360,13 @@ type Doctor struct {
 	// nothing, so a caller with nowhere to keep one still runs.
 	Notes DoctorNotes
 
+	// Verdicts is where a whole run leaves its verdict for the other hosts to
+	// read, as DoctorVerdictKey: ok, or each check it left faulty with what the
+	// probe found. The note rides the tracker every host already shares, so the
+	// home reads a Boost's doctor without a tunnel to it (mw-gq6.705). Nil
+	// leaves none. A run of one named check, or a dry run, leaves none either.
+	Verdicts DoctorVerdictNotes
+
 	// Dampers, when set, is read after the checks for the one line that repeats
 	// the DAMPERS counts mw status judges its alarms by. A reading that fails
 	// is said on that line and changes nothing else. Nil leaves the line out.
@@ -429,6 +441,10 @@ func (d Doctor) Run(ctx context.Context, name string, dryRun bool) (DoctorReport
 		report.Results = append(report.Results, result)
 	}
 
+	if !dryRun && name == "" {
+		d.leaveVerdict(ctx, report)
+	}
+
 	if d.Out != nil {
 		fmt.Fprint(d.Out, report.String())
 		if d.Dampers != nil && name == "" {
@@ -482,7 +498,11 @@ func (d Doctor) one(ctx context.Context, check DoctorCheck, dryRun bool) (Doctor
 		return d.cannotTell(ctx, name, reason, dryRun)
 	}
 
-	return d.faulty(ctx, check, reason, dryRun)
+	result, err := d.faulty(ctx, check, reason, dryRun)
+	if result.Faulty {
+		result.Found = reason
+	}
+	return result, err
 }
 
 // ok is the DoctorOK half of one. A plain ok, with no reason, is logged and
@@ -734,6 +754,108 @@ func (d Doctor) checkLogLines(ctx context.Context, check string) []string {
 		matched = matched[len(matched)-DoctorNoteLogLines:]
 	}
 	return matched
+}
+
+// DoctorVerdictKey is where a host leaves what its last whole doctor run found,
+// for the other hosts to read: DoctorVerdictKey("laptop") == "host.laptop.doctor".
+func DoctorVerdictKey(host string) string { return "host." + host + ".doctor" }
+
+// DoctorVerdictRefresh is how often a run says again a verdict it has already
+// left, so the note's time shows the doctor is still running; a verdict that
+// changes is left at once. DoctorVerdictStale is how old a verdict may be
+// before the home calls it stale rather than believes it.
+const (
+	DoctorVerdictRefresh = 6 * time.Hour
+	DoctorVerdictStale   = 24 * time.Hour
+)
+
+// DoctorVerdictNotes is the part of the tracker's notes a run leaves its
+// verdict through.
+type DoctorVerdictNotes interface {
+	Note(ctx context.Context, key string) (string, error)
+	SetNote(ctx context.Context, key, value string) error
+}
+
+// DoctorFinding is one check a run left faulty and what its probe found.
+type DoctorFinding struct{ Check, Reason string }
+
+// DoctorVerdict is what a whole doctor run found, as it is left in the note:
+// "<time> ok", or "<time> faulty <check>: <reason> || <check>: <reason>".
+type DoctorVerdict struct {
+	At     time.Time
+	Faulty []DoctorFinding
+}
+
+const doctorFindingSep = " || "
+
+// Note is the verdict as it is left in DoctorVerdictKey's note.
+func (v DoctorVerdict) Note() string {
+	at := v.At.UTC().Format(time.RFC3339)
+	if len(v.Faulty) == 0 {
+		return at + " ok"
+	}
+	parts := make([]string, len(v.Faulty))
+	for i, f := range v.Faulty {
+		parts[i] = f.Check + ": " + oneLine(f.Reason)
+	}
+	return at + " faulty " + strings.Join(parts, doctorFindingSep)
+}
+
+// ParseDoctorVerdict reads a note back, and says whether it could be read.
+func ParseDoctorVerdict(note string) (DoctorVerdict, bool) {
+	stamp, rest, _ := strings.Cut(strings.TrimSpace(note), " ")
+	at, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		return DoctorVerdict{}, false
+	}
+	verdict := DoctorVerdict{At: at}
+	if rest == "ok" {
+		return verdict, true
+	}
+	body, found := strings.CutPrefix(rest, "faulty ")
+	if !found {
+		return DoctorVerdict{}, false
+	}
+	for _, part := range strings.Split(body, doctorFindingSep) {
+		check, reason, found := strings.Cut(part, ": ")
+		if !found || check == "" {
+			return DoctorVerdict{}, false
+		}
+		verdict.Faulty = append(verdict.Faulty, DoctorFinding{Check: check, Reason: reason})
+	}
+	return verdict, true
+}
+
+// same says another verdict found the same, whatever time it was left at.
+func (v DoctorVerdict) same(o DoctorVerdict) bool {
+	return slices.Equal(v.Faulty, o.Faulty)
+}
+
+// leaveVerdict leaves what this whole run found for the other hosts. A verdict
+// the note already holds is left alone until DoctorVerdictRefresh has passed.
+// Best effort, like a check's own note: one that cannot be read or written is
+// logged as note-failed and the run goes on.
+func (d Doctor) leaveVerdict(ctx context.Context, report DoctorReport) {
+	if d.Verdicts == nil {
+		return
+	}
+	verdict := DoctorVerdict{At: d.now()}
+	for _, result := range report.Results {
+		if result.Faulty {
+			verdict.Faulty = append(verdict.Faulty, DoctorFinding{Check: result.Check, Reason: oneLine(result.Found)})
+		}
+	}
+	key := DoctorVerdictKey(d.Host)
+	if kept, err := d.Verdicts.Note(ctx, key); err == nil {
+		if held, ok := ParseDoctorVerdict(kept); ok && held.same(DoctorVerdict{Faulty: verdict.Faulty}) {
+			if age := verdict.At.Sub(held.At); age >= 0 && age < DoctorVerdictRefresh {
+				return
+			}
+		}
+	}
+	if err := d.Verdicts.SetNote(ctx, key, verdict.Note()); err != nil {
+		_ = d.append(ctx, DoctorResult{Check: "doctor", Verdict: "note-failed", Reason: oneLine(err.Error())})
+	}
 }
 
 // now is the clock episodes and log lines are read and dated by.

@@ -1065,3 +1065,55 @@ Feature: mw status
     Then reading status succeeds
     And the READY line of "mw-gq6.103" says every host has passed it, naming "laptop: the rig millwright installs dependencies" and "desktop: the rig millwright is not checked out on desktop"
     And the report has no DAMPERS section
+
+  Scenario: A Boost whose doctor left boost-config faulty shows the check and its reason under its host
+    Given a status story "mw-gq6.110" filed under it, overriding "host" with "laptop"
+    And the host "laptop" syncs
+    And the doctor of "laptop" runs now and finds "boost-config" faulty: "tests.millwright differs"
+    When mw status reads the host
+    Then reading status succeeds
+    And under OTHER HOSTS the host "laptop" shows the doctor line: "doctor boost-config faulty: tests.millwright differs"
+    And the DAMPERS section says the doctor of "laptop" finds "boost-config" faulty: "tests.millwright differs"
+
+  Scenario: Every check the doctor of a Boost leaves faulty reaches the home by the same note
+    Given a status story "mw-gq6.111" filed under it, overriding "host" with "laptop"
+    And the host "laptop" syncs
+    And the doctor of "laptop" runs now and finds "boost-config" faulty: "tests.millwright differs" and "rigtests" faulty: "make test fails"
+    When mw status reads the host
+    Then reading status succeeds
+    And under OTHER HOSTS the host "laptop" shows the doctor line: "doctor boost-config faulty: tests.millwright differs"
+    And under OTHER HOSTS the host "laptop" shows the doctor line: "doctor rigtests faulty: make test fails"
+
+  Scenario: A Boost whose doctor found everything ok shows no doctor line and no doctor alarm
+    Given a status story "mw-gq6.112" filed under it, overriding "host" with "laptop"
+    And the host "laptop" syncs
+    And the doctor of "laptop" runs now and finds everything ok
+    When mw status reads the host
+    Then reading status succeeds
+    And under OTHER HOSTS the host "laptop" shows no doctor line
+    And the report has no DAMPERS section
+
+  Scenario: A Boost whose doctor report is a day old is said to be stale, not ok
+    Given a status story "mw-gq6.113" filed under it, overriding "host" with "laptop"
+    And the host "laptop" syncs
+    And the doctor of "laptop" ran 30 hours ago and found everything ok
+    When mw status reads the host
+    Then reading status succeeds
+    And under OTHER HOSTS the host "laptop" shows the doctor line: "doctor report is 1d old: stale"
+    And the report has no DAMPERS section
+
+  Scenario: A stale faulty report is not trusted as a fresh alarm but names what it last said
+    Given a status story "mw-gq6.114" filed under it, overriding "host" with "laptop"
+    And the host "laptop" syncs
+    And the doctor of "laptop" ran 30 hours ago and found "boost-config" faulty: "tests.millwright differs"
+    When mw status reads the host
+    Then reading status succeeds
+    And under OTHER HOSTS the host "laptop" shows the doctor line: "doctor report is 1d old: stale (last said: boost-config faulty)"
+    And the report has no DAMPERS section
+
+  Scenario: A Boost that has never reported a doctor run shows no doctor line
+    Given a status story "mw-gq6.115" filed under it, overriding "host" with "laptop"
+    And the host "laptop" syncs
+    When mw status reads the host
+    Then reading status succeeds
+    And under OTHER HOSTS the host "laptop" shows no doctor line

@@ -530,6 +530,12 @@ type HostWork struct {
 	// Ticks are the counts of that host's timers as it left them with its last
 	// sync: nothing known of a host that has left none.
 	Ticks HostTicks
+	// DoctorSaid is the note that host's last whole doctor run left, exactly as
+	// the tracker held it ("" when it has left none); Doctor is that note read.
+	// DoctorUnreadable says it holds something that is not a verdict.
+	DoctorSaid       string
+	Doctor           DoctorVerdict
+	DoctorUnreadable bool
 	// MwCommit is the short commit that host's mw was built from, as it left it
 	// with its last sync, "" when it has left none. BehindMain says main's
 	// commit is known and is not that one, or the host noted none: the host
@@ -1217,6 +1223,10 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 	}
 
+	for _, other := range report.Others {
+		report.Dampers.Alarms = append(report.Dampers.Alarms, other.DoctorAlarms()...)
+	}
+
 	if err := report.markGuests(ctx, s.Rules); err != nil {
 		return report, err
 	}
@@ -1492,14 +1502,14 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 	// another: all of them are started before the first is waited for.
 	now := s.now()
 	type noted struct {
-		synced, halted, ticks, mw func() (string, error)
+		synced, halted, ticks, mw, doctor func() (string, error)
 	}
 	notes := make([]noted, len(hosts))
 	for i, host := range hosts {
 		read := func(key string) func() (string, error) {
 			return later(func() (string, error) { return s.Notes.Note(ctx, key) })
 		}
-		notes[i] = noted{read(LastSyncKey(host)), read(SyncHaltKey(host)), read(TicksKey(host)), read(MwCommitKey(host))}
+		notes[i] = noted{read(LastSyncKey(host)), read(SyncHaltKey(host)), read(TicksKey(host)), read(MwCommitKey(host)), read(DoctorVerdictKey(host))}
 	}
 
 	work := make([]HostWork, 0, len(hosts))
@@ -1545,6 +1555,17 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 		}
 		held.MwCommit = strings.TrimSpace(commit)
 		held.BehindMain = behindMain(held.MwCommit, s.MainCommit)
+
+		doctor, err := notes[i].doctor()
+		if err != nil {
+			return nil, fmt.Errorf("reading what the doctor of %s found: %w", host, err)
+		}
+		if held.DoctorSaid = strings.TrimSpace(doctor); held.DoctorSaid != "" {
+			var ok bool
+			if held.Doctor, ok = ParseDoctorVerdict(held.DoctorSaid); !ok {
+				held.DoctorUnreadable = true
+			}
+		}
 		work = append(work, held)
 	}
 	return work, nil
@@ -2168,6 +2189,7 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 		clip(b, "    re-path: "+RepathHint+here)
 	}
 	w.writeMw(b, main)
+	w.writeDoctor(b)
 	w.Ticks.write(b, "    ")
 
 	note := ""
@@ -2186,6 +2208,53 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 			wrapInto(b, "      ", strandedLine(since))
 		}
 	}
+}
+
+// DoctorStale says the host's doctor report is older than a day, or the note
+// is not a verdict at all: neither is to be believed as ok.
+func (w HostWork) DoctorStale() bool {
+	return w.DoctorSaid != "" && !w.DoctorUnreadable && w.Now.Sub(w.Doctor.At) > DoctorVerdictStale
+}
+
+// writeDoctor says what the host's doctor last found, one line a faulty check,
+// naming the check and why. An ok report says nothing; one older than a day
+// says it is stale, and what it last said was faulty, and one that cannot be
+// read says so. A host that has left none says nothing.
+func (w HostWork) writeDoctor(b *strings.Builder) {
+	switch {
+	case w.DoctorSaid == "":
+		return
+	case w.DoctorUnreadable:
+		wrapInto(b, "    ", fmt.Sprintf("doctor note is not a verdict: %q", w.DoctorSaid))
+	case w.DoctorStale():
+		line := fmt.Sprintf("doctor report is %s old: stale", gcAge(w.Now.Sub(w.Doctor.At)))
+		if len(w.Doctor.Faulty) > 0 {
+			names := make([]string, len(w.Doctor.Faulty))
+			for i, f := range w.Doctor.Faulty {
+				names[i] = f.Check + " faulty"
+			}
+			line += " (last said: " + strings.Join(names, ", ") + ")"
+		}
+		wrapInto(b, "    ", line)
+	default:
+		for _, f := range w.Doctor.Faulty {
+			wrapInto(b, "    ", "doctor "+f.Check+" faulty: "+f.Reason)
+		}
+	}
+}
+
+// DoctorAlarms are the DAMPERS alarms of a host's doctor, one for each check
+// its fresh report left faulty: a stale report is said under the host, but is
+// not an alarm about a fault it may no longer have.
+func (w HostWork) DoctorAlarms() []DamperAlarm {
+	if w.DoctorSaid == "" || w.DoctorUnreadable || w.DoctorStale() {
+		return nil
+	}
+	var alarms []DamperAlarm
+	for _, f := range w.Doctor.Faulty {
+		alarms = append(alarms, DamperAlarm{Principle: DamperDoctor, Text: fmt.Sprintf("%s: %s faulty: %s", w.Host, f.Check, f.Reason)})
+	}
+	return alarms
 }
 
 // writeMw is the line beside the sync line that says which mw the host runs:

@@ -103,6 +103,9 @@ const (
 	// that installs dependencies, while the network is metered: dispatch passes
 	// them, and only host=auto lets another host take them (mw-gq6.702).
 	DamperMetered = "metered"
+	// DamperDoctor is the alarm for a check another host's doctor left faulty:
+	// its report reaches the home as a note, since nobody reads that host's log.
+	DamperDoctor = "doctor"
 )
 
 // damperNamed is how many beads an alarm's line names before it counts the rest.
@@ -128,7 +131,7 @@ func (l DamperLimits) orDefaults() DamperLimits {
 // to five beads, then how many more.
 func (a DamperAlarm) Line() string {
 	line := a.Principle + " · " + a.Text
-	if a.Principle == DamperStuck || a.Principle == DamperInversion || a.Principle == DamperMetered || a.Principle == DamperNoHost {
+	if a.Principle == DamperStuck || a.Principle == DamperInversion || a.Principle == DamperMetered || a.Principle == DamperNoHost || a.Principle == DamperDoctor {
 		line = a.Principle + ": " + a.Text
 	}
 	if len(a.Beads) == 0 {
