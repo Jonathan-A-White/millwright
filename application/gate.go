@@ -3,8 +3,11 @@ package application
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // The defaults of how a close-out lets a busy host calm before the rig's gate:
@@ -241,6 +244,8 @@ type mergedGate struct {
 	// failure counts.
 	failed bool
 	busy   LoadReading
+	// first is the first run, whose output names the tests that failed.
+	first Checked
 }
 
 // what is the next run, as what it says names it.
@@ -276,8 +281,7 @@ func (n Next) mergedResultGate(ctx context.Context, c *closeOut, report *NextRep
 	if m.failed {
 		again, err := n.timedChecks(ctx, c, report, dir, span)
 		c.gate.settle(again, err, m.busy)
-		said := fmt.Sprintf("%s ran twice: the first run failed while %s was at load %.1f of %d cores, the second run %s",
-			onMerged, n.Host, m.busy.Load, m.busy.Cores, secondRun(again, err))
+		said := ranTwice(onMerged, n.Host, m.busy, m.first, again, err)
 		report.Notes = append(report.Notes, said)
 		m.calmed, m.failed = false, false
 		return gated{Checked: again, Err: err, Said: said}, ""
@@ -302,7 +306,7 @@ func (n Next) mergedResultGate(ctx context.Context, c *closeOut, report *NextRep
 	}
 	n.print(fmt.Sprintf("  retry   %s failed while %s was at load %.1f of %d cores: running them once more when it calms\n",
 		onMerged, n.Host, busy.Load, busy.Cores))
-	m.failed, m.busy = true, busy
+	m.failed, m.busy, m.first = true, busy, checked
 	return n.mergedResultGate(ctx, c, report, dir, span)
 }
 
@@ -406,10 +410,95 @@ func (n Next) gateOnACalmHost(ctx context.Context, c *closeOut, report *NextRepo
 	n.calmed(ctx, report, c, what+" again")
 	again, err := n.timedChecks(ctx, c, report, dir, span)
 	c.gate.settle(again, err, busy)
-	said := fmt.Sprintf("%s ran twice: the first run failed while %s was at load %.1f of %d cores, the second run %s",
-		what, n.Host, busy.Load, busy.Cores, secondRun(again, err))
+	said := ranTwice(what, n.Host, busy, checked, again, err)
 	report.Notes = append(report.Notes, said)
 	return gated{Checked: again, Err: err, Said: said}
+}
+
+// ranTwice says how a gate that was run twice went. A first run whose tests
+// passed on the second is a flake, and the sentence names the tests the first
+// run failed, as the output of that run is not kept (mw-gq6.699).
+func ranTwice(what, host string, busy LoadReading, first, again Checked, err error) string {
+	said := fmt.Sprintf("%s ran twice: the first run failed while %s was at load %.1f of %d cores, the second run %s",
+		what, host, busy.Load, busy.Cores, secondRun(again, err))
+	if err == nil && !again.NotRun && again.Passed {
+		flaked := FlakedTests(first.Output)
+		if flaked == "" {
+			flaked = "the first run's output named no failing test"
+		}
+		said += ". Flaked: " + flaked
+	}
+	return said
+}
+
+// flakedListed is the most flaked tests a sentence names.
+const flakedListed = 5
+
+// goTestFile is a line of go test's output that names a file of a test, as
+// `    a_test.go:9: message` does.
+var goTestFile = regexp.MustCompile(`^\s+(\S+_test\.go):\d+`)
+
+// FlakedTests is the tests a run's output says failed as `<file>:<case>`, the
+// ones the Mayor files or folds a flake by: go test's `--- FAIL: TestX` with
+// the file of the first line printed under it, vitest's `FAIL file > test` as
+// `file:test`; a failure whose file is not told is the case alone. A go test
+// whose subtest failed too is named by the subtest. They are joined by "; ",
+// at most flakedListed of them, and empty when the output names none.
+func FlakedTests(output string) string {
+	lines := strings.Split(strings.ReplaceAll(domain.StripANSI(output), "\r\n", "\n"), "\n")
+	failing, _ := FailingTests(output, 1<<30)
+	var named []string
+	for _, line := range failing {
+		switch {
+		case strings.HasPrefix(line, "--- FAIL: "):
+			named = append(named, strings.Fields(strings.TrimPrefix(line, "--- FAIL: "))[0])
+		case strings.HasPrefix(line, "FAIL "):
+			file, test, ok := strings.Cut(strings.TrimPrefix(line, "FAIL "), " > ")
+			if ok {
+				named = append(named, file+":"+test)
+			} else {
+				named = append(named, file)
+			}
+		default:
+			named = append(named, line)
+		}
+	}
+	var said []string
+	for i, name := range named {
+		if i+1 < len(named) && strings.HasPrefix(named[i+1], name+"/") {
+			continue // the subtest says more than its parent
+		}
+		if !strings.Contains(name, ":") {
+			if file := goTestFileOf(lines, name); file != "" {
+				name = file + ":" + name
+			}
+		}
+		said = append(said, name)
+	}
+	if len(said) > flakedListed {
+		said = append(said[:flakedListed], fmt.Sprintf("and %d more", len(said)-flakedListed))
+	}
+	return strings.Join(said, "; ")
+}
+
+// goTestFileOf is the test file the first line under go test's `--- FAIL: name`
+// names, empty when none is told before the next failure.
+func goTestFileOf(lines []string, name string) string {
+	for i, line := range lines {
+		if !strings.HasPrefix(strings.TrimSpace(line), "--- FAIL: "+name+" ") {
+			continue
+		}
+		for _, next := range lines[i+1:] {
+			if strings.HasPrefix(strings.TrimSpace(next), "--- FAIL: ") {
+				break
+			}
+			if m := goTestFile.FindStringSubmatch(next); m != nil {
+				return m[1]
+			}
+		}
+		return ""
+	}
+	return ""
 }
 
 func secondRun(checked Checked, err error) string {
