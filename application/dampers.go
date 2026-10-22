@@ -99,6 +99,10 @@ const (
 	DamperStuck = "stuck"
 	// DamperInversion is the alarm for a bead below the priority of what waits on it.
 	DamperInversion = "inversion"
+	// DamperMetered is the alarm for ready stories pinned to this host, on a rig
+	// that installs dependencies, while the network is metered: dispatch passes
+	// them, and only host=auto lets another host take them (mw-gq6.702).
+	DamperMetered = "metered"
 )
 
 // damperNamed is how many beads an alarm's line names before it counts the rest.
@@ -124,14 +128,16 @@ func (l DamperLimits) orDefaults() DamperLimits {
 // to five beads, then how many more.
 func (a DamperAlarm) Line() string {
 	line := a.Principle + " · " + a.Text
-	if a.Principle == DamperStuck || a.Principle == DamperInversion {
+	if a.Principle == DamperStuck || a.Principle == DamperInversion || a.Principle == DamperMetered {
 		line = a.Principle + ": " + a.Text
 	}
 	if len(a.Beads) == 0 {
 		return line
 	}
 	named := a.Beads
-	if len(named) > damperNamed {
+	// Every story the metered alarm names is one the Mayor repaths, and no other
+	// command lists them, so it is never cut.
+	if len(named) > damperNamed && a.Principle != DamperMetered {
 		named = named[:damperNamed]
 	}
 	line += ": " + strings.Join(named, " ")
@@ -169,6 +175,30 @@ func (r DampersReport) FullList() string {
 		}
 	}
 	return out.String()
+}
+
+// MeteredPinned is the alarm for the ready stories pinned to host whose rig is
+// in heavy: while the network is metered mw dispatch on that host passes them
+// all (gate metered-network), and a pin to a home host lets no other take them.
+// It is the zero alarm, with no beads, when none is. Epics and hands beads are
+// never dispatched, so they are left out (mw-gq6.702).
+func MeteredPinned(work WorkInHand, host string, heavy map[string]bool) (DamperAlarm, bool) {
+	var stuck []string
+	for _, d := range work.Ready {
+		merged := d.Merged()
+		if d.IsEpic || d.Hitl() || merged.Host == "" || merged.Host == domain.HostAuto || merged.Host != host || !heavy[merged.Rig] {
+			continue
+		}
+		stuck = append(stuck, d.Story.ID)
+	}
+	if len(stuck) == 0 {
+		return DamperAlarm{}, false
+	}
+	return DamperAlarm{
+		Principle: DamperMetered,
+		Text:      fmt.Sprintf("pinned to %s, metered, its rig installs dependencies: set host=auto", host),
+		Beads:     stuck,
+	}, true
 }
 
 // Write writes the DAMPERS section, with a blank line after it, or nothing

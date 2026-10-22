@@ -985,3 +985,40 @@ Feature: mw status
     Then reading status succeeds
     And the report calls "mw-gq6.64" stranded
     And the report does not say any story is queued too long
+
+  # mw-gq6.702: dispatch passes every story of a rig that installs dependencies
+  # while the network is metered, and nothing said so. A story pinned to this
+  # host is named under DAMPERS with the cure.
+
+  Scenario: A story pinned to this host on a rig that installs dependencies is named while the network is metered
+    Given a status story "mw-gq6.90" filed under it
+    And a status story "mw-gq6.91" filed under it, overriding "host" with "auto"
+    And the network is metered
+    And the status config names the rig "millwright" as installing dependencies
+    When mw status reads the host
+    Then reading status succeeds
+    And the DAMPERS section names "mw-gq6.90" as pinned to "vps", metered, its rig installs dependencies, saying: set host=auto
+    And the DAMPERS section does not name "mw-gq6.91"
+
+  Scenario: Nothing is said when the network is not metered
+    Given a status story "mw-gq6.92" filed under it
+    And the network is not metered
+    And the status config names the rig "millwright" as installing dependencies
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no DAMPERS section
+
+  Scenario: Nothing is said of a story pinned to another host
+    Given a status story "mw-gq6.93" filed under it, overriding "host" with "laptop"
+    And the network is metered
+    And the status config names the rig "millwright" as installing dependencies
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no DAMPERS section
+
+  Scenario: Nothing is said of a rig that does not install dependencies
+    Given a status story "mw-gq6.94" filed under it
+    And the network is metered
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no DAMPERS section

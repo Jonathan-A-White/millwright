@@ -77,7 +77,9 @@ func newStatusCmd() *cobra.Command {
 			"chain of the daily cap ([events] chain_daily_cap).\n\n" +
 			"A NETWORK line says whether the network is metered: 'NETWORK metered (Windows: <profile>, cost\n" +
 			"<type>)' or 'NETWORK unmetered', as Windows' own setting says it on WSL (config `metered`\n" +
-			"overrides). While metered, no beads backup runs and no story on a heavy_net rig starts.\n\n" +
+			"overrides). While metered, no beads backup runs and no story on a heavy_net rig starts; a DAMPERS\n" +
+			"line 'metered: pinned to <host>, metered, its rig installs dependencies: set host=auto' names each\n" +
+			"ready story pinned to this host on such a rig, which only host=auto lets another host take.\n\n" +
 			"A VPS NGINX line says whether the VPS's nginx postern_api upstream sends the phone to the home\n" +
 			"first and every other backend as `backup`: 'VPS NGINX ok (home first, N backup)', 'VPS NGINX\n" +
 			"FAULT: <what>', or 'VPS NGINX not checked (<why>)' when the VPS cannot be reached over ssh. It\n" +
@@ -199,7 +201,12 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			heavy, err := config.HeavyNet()
+			if err != nil {
+				return err
+			}
 			_, err = application.Status{
+				HeavyNet:         heavy,
 				Tracker:          tracker,
 				Dampers:          dampers,
 				TestersPerRig:    dampers.Limits.TestersPerRig,

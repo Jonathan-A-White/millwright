@@ -50,6 +50,9 @@ func newPathSetCmd() *cobra.Command {
 			"L 35, XL 50. Over that, a WARN on stderr says to split the story or size it up; nothing is refused.\n" +
 			"callers_ok=\"<why>\" is the story's own reason the callers are fine (say, the change is additive): the count\n" +
 			"line still prints for it, the WARN does not, and --from does not copy it.\n\n" +
+			"A path that pins a story to a home host (laptop or desktop) on a rig named under [heavy_net] gets a\n" +
+			"WARN on stderr naming host=auto: that rig installs dependencies, so its stories are not started while\n" +
+			"the host's network is metered, and a pin keeps any other host from taking them. It is set all the same.\n\n" +
 			"A story in an epic whose rig asks for a last story (epic_last_story_labels) with exactly one\n" +
 			"open or held story carrying it is made a need of that story, and one line says so.",
 		Args: cobra.MinimumNArgs(1),
@@ -61,7 +64,9 @@ func newPathSetCmd() *cobra.Command {
 			// A rig table that cannot be read leaves no checkout to count a
 			// directory in: a whole directory is refused, a plain name taken.
 			rigs, _ := config.Rigs()
-			_, err = application.PathSet{Tracker: gateway, Rigs: rigs, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}.
+			// Likewise a [heavy_net] table that cannot be read warns of nothing.
+			heavy, _ := config.HeavyNet()
+			_, err = application.PathSet{Tracker: gateway, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}.
 				Run(cmd.Context(), args[0], from, args[1:])
 			return err
 		},

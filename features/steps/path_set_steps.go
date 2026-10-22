@@ -19,7 +19,11 @@ type pathSetContext struct {
 	tracker *apptest.FakeTracker
 
 	printed bytes.Buffer
-	err     error
+	// warned is what the command wrote on stderr, and heavy the rigs the config
+	// names under [heavy_net].
+	warned bytes.Buffer
+	heavy  map[string]bool
+	err    error
 
 	// writesBefore is how many writes the tracker had taken when the command ran.
 	writesBefore int
@@ -39,6 +43,9 @@ func InitializePathSetScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the path-set story "([^"]*)" is open with no metadata$`, c.aStoryIsOpenWithNoMetadata)
 	ctx.Given(`^the path-set story "([^"]*)" is in progress$`, c.aStoryIsInProgress)
 	ctx.Given(`^the path-set story "([^"]*)" is closed$`, c.aStoryIsClosed)
+	ctx.Given(`^the path-set config names the rig "([^"]*)" as installing dependencies$`, c.theConfigNamesTheRigAsHeavy)
+	ctx.Then(`^the path-set warned, saying: (.+)$`, c.theSetWarnedSaying)
+	ctx.Then(`^the path-set did not warn$`, c.theSetDidNotWarn)
 	ctx.When(`^the path of "([^"]*)" is set from "([^"]*)"$`, c.thePathIsSetFrom)
 	ctx.When(`^the path of "([^"]*)" is set from "([^"]*)" with (.+)$`, c.thePathIsSetFromWith)
 	ctx.When(`^the path of "([^"]*)" is set with no keys$`, c.thePathIsSetWithNoKeys)
@@ -84,8 +91,9 @@ func (c *pathSetContext) aStoryIsClosed(id string) error {
 
 func (c *pathSetContext) set(id, from string, pairs []string) error {
 	c.printed.Reset()
+	c.warned.Reset()
 	c.writesBefore = c.tracker.Writes()
-	_, c.err = application.PathSet{Tracker: c.tracker, Out: &c.printed}.Run(context.Background(), id, from, pairs)
+	_, c.err = application.PathSet{Tracker: c.tracker, HeavyNet: c.heavy, Out: &c.printed, Err: &c.warned}.Run(context.Background(), id, from, pairs)
 	return nil
 }
 
@@ -182,6 +190,28 @@ func (c *pathSetContext) echoedWhatShowPrints(id string) error {
 	_, after, found := strings.Cut(c.printed.String(), ":\n")
 	if !found || after != shown.String() {
 		return fmt.Errorf("expected the echo to end with what showing the path prints:\n%s\ngot:\n%s", shown.String(), c.printed.String())
+	}
+	return nil
+}
+
+func (c *pathSetContext) theConfigNamesTheRigAsHeavy(rig string) error {
+	if c.heavy == nil {
+		c.heavy = map[string]bool{}
+	}
+	c.heavy[rig] = true
+	return nil
+}
+
+func (c *pathSetContext) theSetWarnedSaying(want string) error {
+	if !strings.Contains(c.warned.String(), "WARN") || !strings.Contains(c.warned.String(), want) {
+		return fmt.Errorf("expected a WARN on stderr saying %q, got:\n%s", want, c.warned.String())
+	}
+	return nil
+}
+
+func (c *pathSetContext) theSetDidNotWarn() error {
+	if c.warned.Len() != 0 {
+		return fmt.Errorf("expected no warning, got:\n%s", c.warned.String())
 	}
 	return nil
 }

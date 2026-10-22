@@ -168,3 +168,35 @@ Feature: Setting and showing a story's path
     When the path of "B" is set with rig=lampas files=src/Talk.tsx,tests/e2e/*.ts
     Then setting the path is refused, saying: name the files instead
     And nothing was written
+
+  # mw-gq6.702: a story pinned to a home host on a rig that installs
+  # dependencies never dispatches while that host's network is metered. The
+  # filing sets the trap (the epic's default host, or --from a sibling's), so
+  # the set warns on stderr, names host=auto as the cure, and still sets what
+  # was asked.
+
+  Scenario: Copying a pinned host onto a rig that installs dependencies warns and still sets it
+    Given the path-set config names the rig "millwright" as installing dependencies
+    When the path of "B" is set from "A"
+    Then setting the path succeeds
+    And the story "B" has the path key "host" as "laptop"
+    And the path-set warned, saying: host=auto
+
+  Scenario: Naming a home host on a rig that installs dependencies warns
+    Given the path-set config names the rig "millwright" as installing dependencies
+    When the path of "B" is set with rig=millwright host=desktop
+    Then setting the path succeeds
+    And the story "B" has the path key "host" as "desktop"
+    And the path-set warned, saying: host=desktop
+
+  Scenario: host=auto on a rig that installs dependencies draws no warning
+    Given the path-set config names the rig "millwright" as installing dependencies
+    When the path of "B" is set from "A" with host=auto
+    Then setting the path succeeds
+    And the path-set did not warn
+
+  Scenario: A pinned host on a rig that does not install dependencies draws no warning
+    Given the path-set config names the rig "lampas" as installing dependencies
+    When the path of "B" is set from "A"
+    Then setting the path succeeds
+    And the path-set did not warn

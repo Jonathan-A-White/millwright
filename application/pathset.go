@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -43,6 +44,11 @@ type PathSet struct {
 
 	// Out is where the path that was set is printed. A nil Out prints nothing.
 	Out io.Writer
+
+	// HeavyNet names the rigs that install dependencies ([heavy_net]): a path
+	// that pins one to a home host draws a warning on Err naming host=auto
+	// (mw-gq6.702). A nil HeavyNet warns of none.
+	HeavyNet map[string]bool
 
 	// Err is where the warning of a story with more test callers than its size
 	// allows goes (mw-gq6.661). A nil Err prints none.
@@ -137,6 +143,15 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 	if named.Files != "" || named.Size != "" || named.CallersOK != "" {
 		if callers, ok := testCallersOf(s.Rigs, s.RigFiles, id, story.Merged().Overlay(path)); ok {
 			callerNotes(s.Out, s.Err, callers)
+		}
+	}
+	// Only a path written with a host or a rig (--from writes both) is judged: a
+	// model= set on a story already pinned is not this warning's to repeat.
+	if s.Err != nil && (from != "" || named.Host != "" || named.Rig != "") {
+		if now := story.Merged().Overlay(path); s.HeavyNet[now.Rig] && slices.Contains(domain.HomeHosts, now.Host) {
+			fmt.Fprintf(s.Err, "WARN: host=%s on %s, a rig that installs dependencies: while that host's network is metered "+
+				"mw dispatch starts none of its stories, and no other host may take it. Set host=auto: mw path set %s host=auto\n",
+				now.Host, now.Rig, id)
 		}
 	}
 	// A story filed by hand into an epic is made a need of the epic's last

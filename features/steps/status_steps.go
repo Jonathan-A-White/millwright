@@ -45,6 +45,11 @@ type statusContext struct {
 	// scenario puts a job in it.
 	log *apptest.FakeEventLog
 
+	// network is the reading a scenario gave, nil for none, and heavy the rigs it
+	// named as installing dependencies (mw-gq6.702).
+	network *apptest.FakeNetwork
+	heavy   map[string]bool
+
 	lastEpic string
 	now      time.Time
 	// silentHoursWas is what $MW_HOST_SILENT_HOURS held before this scenario
@@ -189,6 +194,12 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 
 	c.registerIdeasOnlySteps(ctx)
 	ctx.When(`^mw status reads the host$`, c.mwStatusReadsTheHost)
+	ctx.Given(`^the network is metered$`, func() error { c.network = apptest.Metered(); return nil })
+	ctx.Given(`^the network is not metered$`, func() error { c.network = apptest.Unmetered(); return nil })
+	ctx.Given(`^the status config names the rig "([^"]*)" as installing dependencies$`, c.theConfigNamesTheRigAsHeavy)
+	ctx.Then(`^the DAMPERS section names "([^"]*)" as pinned to "([^"]*)", metered, its rig installs dependencies, saying: (.+)$`, c.theDampersNameThePinned)
+	ctx.Then(`^the DAMPERS section does not name "([^"]*)"$`, c.theDampersDoNotName)
+	ctx.Then(`^the report has no DAMPERS section$`, c.theReportHasNoDampers)
 
 	ctx.Given(`^the status story "([^"]*)" was filed (\d+) minutes ago$`, c.theStatusStoryWasFiledMinutesAgo)
 	ctx.Given(`^the status story "([^"]*)" carries a question card$`, c.theStatusStoryCarriesAQuestionCard)
@@ -655,6 +666,9 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 		CapWhy:         c.capWhy,
 		Causes:         c.tracker,
 		Ideas:          c.ideas,
+	}
+	if c.network != nil {
+		status.Network, status.HeavyNet = c.network, c.heavy
 	}
 	if c.load != nil {
 		status.Load = c.load
@@ -1524,6 +1538,49 @@ func (c *statusContext) theReportHasNoHeadingForWaitingOnOthers() error {
 	}
 	if strings.Contains(c.report.String(), application.WaitingOnOthersHeading) {
 		return fmt.Errorf("expected no %q heading, got:\n%s", application.WaitingOnOthersHeading, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theConfigNamesTheRigAsHeavy(rig string) error {
+	if c.heavy == nil {
+		c.heavy = map[string]bool{}
+	}
+	c.heavy[rig] = true
+	return nil
+}
+
+// dampersText is the DAMPERS section with its lines joined by single spaces,
+// since an alarm's line wraps to the phone's width.
+func (c *statusContext) dampersText() string {
+	return strings.Join(strings.Fields(headedBy(c.report.String(), application.DampersHeading)), " ")
+}
+
+func (c *statusContext) theDampersNameThePinned(id, host, say string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	text := c.dampersText()
+	want := fmt.Sprintf("pinned to %s, metered, its rig installs dependencies: %s", host, say)
+	if !strings.Contains(text, want) || !strings.Contains(text, id) {
+		return fmt.Errorf("expected the DAMPERS section to say %q and name %s, got:\n%s", want, id, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theDampersDoNotName(id string) error {
+	if strings.Contains(c.dampersText(), id) {
+		return fmt.Errorf("expected the DAMPERS section not to name %s, got:\n%s", id, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportHasNoDampers() error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if text := headedBy(c.report.String(), application.DampersHeading); text != "" {
+		return fmt.Errorf("expected no DAMPERS section, got:\n%s", text)
 	}
 	return nil
 }

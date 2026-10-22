@@ -335,6 +335,11 @@ type Status struct {
 	// Network, when set, is asked for the NETWORK line: metered or not.
 	Network NetworkReader
 
+	// HeavyNet names the rigs that install dependencies ([heavy_net]): while the
+	// network is metered, a ready story pinned to this host on one of them is
+	// named under DAMPERS, since dispatch passes it (mw-gq6.702).
+	HeavyNet map[string]bool
+
 	// Cap is how many sessions may run on this host at once, and Load and Room
 	// are how its room to start another is judged (mw-t0z3fu.1): the HOST line
 	// says how many of the cap are in use and, when the host has no room, why
@@ -1185,6 +1190,12 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			s.print("mw status: the dampers could not be read: " + err.Error() + "\n")
 		} else {
 			report.Dampers = dampers
+		}
+	}
+
+	if report.Network != nil && report.Network.Metered {
+		if alarm, found := MeteredPinned(work, s.Host, s.HeavyNet); found {
+			report.Dampers.Alarms = append(report.Dampers.Alarms, alarm)
 		}
 	}
 
