@@ -57,7 +57,20 @@ if command -v shellcheck >/dev/null 2>&1; then
 	shellcheck -s sh "$DOCKERFILE_DIR/run.sh" "$0" || fail "shellcheck found something"
 fi
 
-START=$(date +%s)
+# Time from /proc/uptime, in whole seconds: it never steps backwards, where the
+# wall clock can (WSL2 steps it back, so two `date +%s` reads gave a wrong or
+# negative time; see scripts/check-heavy.sh). Where there is no /proc/uptime the
+# wall clock is all there is.
+seconds() {
+	if [ -r /proc/uptime ]; then
+		read -r up _ </proc/uptime
+		echo "${up%.*}"
+	else
+		date +%s
+	fi
+}
+
+START=$(seconds)
 
 docker build -q -t "$IMAGE" "$DOCKERFILE_DIR" >/dev/null || fail "docker build failed"
 
@@ -70,7 +83,7 @@ if ! docker exec "$CONTAINER" sh /run.sh; then
 	fail "the container did not prove the bootstrap (see the output above)"
 fi
 
-END=$(date +%s)
+END=$(seconds)
 SIZE=$(docker image inspect "$IMAGE" --format '{{.Size}}' 2>/dev/null || echo 0)
 
 echo "check-bootstrap: wall time $((END - START))s, image size $((SIZE / 1024 / 1024)) MB"
