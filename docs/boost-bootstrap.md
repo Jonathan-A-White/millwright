@@ -91,7 +91,7 @@ It is written by `mw config export-boost`, run on the home: it rewrites the file
 home's `[tests]`, `[changed_specs]` and `[test_parts.<rig>]` (nothing else of the config), names each line it
 brings level, and commits the file in the vault (mw-gq6.456). When a rig's line changes in
 the home's `config.toml`, run it again, or the next Boost gets the old line; `mw doctor
-boost-config`, on the home, says when the two differ, naming each rig. Only the rigs in
+boost-config`, on the home, says when the two differ, naming each rig; on a Boost it says when a line the Boost holds differs from the file's, naming both values and the `mw config set` that levels it (a line the Boost lacks is not faulty: `mw sync` appends it). Only the rigs in
 `BOOST_RIGS` are copied, in the order of `[rigs]`.
 
 The home's other per-rig tables are not copied, on purpose (a Boost's `mw` still follows
