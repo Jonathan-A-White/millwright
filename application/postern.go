@@ -1180,6 +1180,9 @@ func (i PosternInbox) recordAnswer(ctx context.Context, m PosternInboxMessage, r
 			i.printf("mw postern inbox: the answer to %s is recorded, but mailing the Mayor failed: %v\n", reply.Bead, err)
 		}
 	}
+	var asked posternQuestionNote
+	_ = json.Unmarshal([]byte(noteValue), &asked)
+	i.grillAnswered(ctx, m, reply, asked)
 	if isReleaseTap(reply.Answer) {
 		if err := i.releaseOnTap(ctx, m, reply.Bead, noteValue); err != nil {
 			return false, err

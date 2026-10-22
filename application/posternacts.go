@@ -179,6 +179,7 @@ func (i PosternInbox) recordActedAnswer(ctx context.Context, m PosternInboxMessa
 	if err := i.mail(ctx, subject, comment); err != nil {
 		i.printf("mw postern inbox: the answer to %s is recorded, but mailing the Mayor failed: %v\n", bead, err)
 	}
+	i.grillAnswered(ctx, m, PosternReply{Bead: bead, Answer: option + " (by his acts)", Re: note.Txid}, note)
 	if i.Sender == nil || strings.TrimSpace(note.Txid) == "" {
 		return
 	}
