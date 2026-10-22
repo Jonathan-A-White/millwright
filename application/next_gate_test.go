@@ -17,13 +17,19 @@ import (
 // says what the next of its results is, and the last is said again.
 type scriptedChecks struct {
 	passes []bool
-	runs   int
+	// outputs, when set, is what each run prints, in place of "run N".
+	outputs []string
+	runs    int
 }
 
 func (s *scriptedChecks) Run(context.Context, string, string) (application.Checked, error) {
 	pass := s.passes[min(s.runs, len(s.passes)-1)]
+	out := fmt.Sprintf("run %d\n", s.runs+1)
+	if len(s.outputs) > 0 {
+		out = s.outputs[min(s.runs, len(s.outputs)-1)]
+	}
 	s.runs++
-	return application.Checked{Command: "make test", Passed: pass, Output: fmt.Sprintf("run %d\n", s.runs)}, nil
+	return application.Checked{Command: "make test", Passed: pass, Output: out}, nil
 }
 
 // aSlot is a merge slot that is always free.
@@ -62,6 +68,13 @@ type gateRun struct {
 // a host whose load reads as readings.
 func aCloseOutWhoseTestsGo(t *testing.T, passes []bool, readings []application.LoadReading, bound time.Duration) (*gateRun, *scriptedChecks) {
 	t.Helper()
+	return aCloseOutWhoseTestsPrint(t, &scriptedChecks{passes: passes}, readings, bound)
+}
+
+// aCloseOutWhoseTestsPrint is aCloseOutWhoseTestsGo for tests that print what
+// they are scripted to.
+func aCloseOutWhoseTestsPrint(t *testing.T, checks *scriptedChecks, readings []application.LoadReading, bound time.Duration) (*gateRun, *scriptedChecks) {
+	t.Helper()
 	ctx := context.Background()
 	tracker := apptest.NewFakeTracker()
 	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
@@ -69,7 +82,6 @@ func aCloseOutWhoseTestsGo(t *testing.T, passes []bool, readings []application.L
 	vault := newFakeVault()
 	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
 	lands := &aLandingLanding{fakeRetryLanding{AheadCount: 1}}
-	checks := &scriptedChecks{passes: passes}
 	run := &gateRun{vault: vault, out: &strings.Builder{}, mailbox: apptest.NewFakeMailbox()}
 	run.report, run.err = application.Next{
 		Tracker: tracker, Vault: vault, Worktrees: lands, Landing: lands,
@@ -106,6 +118,38 @@ func TestAGateThatFailsOnABusyHostRunsOnceMoreWhenItCalmsAndLandsWhenThatPasses(
 	}
 	if mail, _ := run.mailbox.Inbox(context.Background(), application.MayorMailbox); len(mail) != 1 || !strings.Contains(mail[0].Body, "second run passed") {
 		t.Errorf("expected the mail to the Mayor to name both runs, got %+v", mail)
+	}
+}
+
+func TestAGateThatFlakedAndPassedOnRetryNamesTheTestInTheMailAndTheLedger(t *testing.T) {
+	first := "--- FAIL: TestSlowThing (0.31s)\n    slow_test.go:42: timed out\nFAIL\nFAIL\tgithub.com/x/y\t0.4s\n"
+	checks := &scriptedChecks{passes: []bool{false, true}, outputs: []string{first, "ok\n"}}
+	run, _ := aCloseOutWhoseTestsPrint(t, checks, []application.LoadReading{calm(), busy(), calm()}, 15*time.Minute)
+
+	if run.err != nil || !run.report.Landed {
+		t.Fatalf("expected the story landed on the second run, got err %v and %+v", run.err, run.report)
+	}
+	const want = "Flaked: slow_test.go:TestSlowThing"
+	mail, _ := run.mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if len(mail) != 1 || !strings.Contains(mail[0].Body, want) {
+		t.Errorf("expected the mail to the Mayor to say %q, got %+v", want, mail)
+	}
+	if len(run.vault.ledger) != 1 || !strings.Contains(run.vault.ledger[0], want) {
+		t.Errorf("expected the ledger line to say %q, got %q", want, run.vault.ledger)
+	}
+}
+
+func TestFlakedTestsAreNamedAsFileAndCaseForGoAndVitestOutput(t *testing.T) {
+	goOut := "--- FAIL: TestA (0.00s)\n    --- FAIL: TestA/sub (0.00s)\n        a_test.go:9: bad\n--- FAIL: TestB (0.10s)\nFAIL\n"
+	vitest := " FAIL  src/x.test.ts > suite > case one\n FAIL  src/x.test.ts > case two 31ms\n"
+	for _, c := range []struct{ name, output, want string }{
+		{"go subtest, parent left out", goOut, "a_test.go:TestA/sub; TestB"},
+		{"vitest", vitest, "src/x.test.ts:suite > case one; src/x.test.ts:case two"},
+		{"nothing named", "boom\n", ""},
+	} {
+		if got := application.FlakedTests(c.output); got != c.want {
+			t.Errorf("%s: expected %q, got %q", c.name, c.want, got)
+		}
 	}
 }
 
