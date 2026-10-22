@@ -63,7 +63,7 @@ func (s *site) deploy(host string) (string, int) {
 	if err != nil {
 		s.t.Fatal(err)
 	}
-	cmd := exec.Command(script, s.dist, host, s.live)
+	cmd := command(s.t, script, s.dist, host, s.live)
 	cmd.Env = []string{"PATH=" + s.bin + ":" + os.Getenv("PATH"), "HOME=" + s.t.TempDir()}
 	out, err := cmd.CombinedOutput()
 	if err == nil {
@@ -278,7 +278,7 @@ func TestSiteDeployRefusesWhatItCannotQuoteOrCannotUse(t *testing.T) {
 		"a dir with space":  {s.dist, "local", "/tmp/a b"},
 		"an option as host": {s.dist, "-oProxyCommand=x", s.live},
 	} {
-		out, err := exec.Command(script, args...).CombinedOutput()
+		out, err := command(t, script, args...).CombinedOutput()
 		exited, ok := err.(*exec.ExitError)
 		if !ok || exited.ExitCode() != 2 {
 			t.Errorf("%s: expected exit status 2, got %v:\n%s", name, err, out)
@@ -287,7 +287,7 @@ func TestSiteDeployRefusesWhatItCannotQuoteOrCannotUse(t *testing.T) {
 	if err := os.Remove(filepath.Join(s.dist, "index.html")); err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command(script, s.dist, "local", s.live).CombinedOutput()
+	out, err := command(t, script, s.dist, "local", s.live).CombinedOutput()
 	if exited, ok := err.(*exec.ExitError); !ok || exited.ExitCode() != 1 || !strings.Contains(string(out), "index.html") {
 		t.Errorf("expected a dist with no index.html to fail with status 1 naming it, got %v:\n%s", err, out)
 	}

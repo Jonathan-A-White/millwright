@@ -17,8 +17,9 @@ import (
 	"testing"
 )
 
-func gitTry(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+func gitTry(t testing.TB, dir string, args ...string) (string, error) {
+	t.Helper()
+	cmd := command(t, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
@@ -30,7 +31,7 @@ func gitTry(dir string, args ...string) (string, error) {
 
 func gitIn(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	out, err := gitTry(dir, args...)
+	out, err := gitTry(t, dir, args...)
 	if err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
@@ -124,7 +125,7 @@ func mergeCodemapBranchesWith(t *testing.T, driver, base string, alpha, beta fun
 		return []string{"-c", driver, "merge", "--no-edit", branch}
 	}
 	gitIn(t, dir, merge("alpha")...)
-	_, mergeErr := gitTry(dir, merge("beta")...)
+	_, mergeErr := gitTry(t, dir, merge("beta")...)
 	merged, err := os.ReadFile(mapPath)
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +236,7 @@ func runDriver(t *testing.T, base, ours, theirs string) string {
 			t.Fatal(err)
 		}
 	}
-	cmd := exec.Command("sh", script, "base", "ours", "theirs")
+	cmd := command(t, "sh", script, "base", "ours", "theirs")
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("trim-merge.sh: %v\n%s", err, out)
@@ -366,7 +367,7 @@ func TestRealCodemapPassesItsCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("sh", "scripts/check-codemap.sh")
+	cmd := command(t, "sh", "scripts/check-codemap.sh")
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("scripts/check-codemap.sh on the real map: %v\n%s", err, out)
@@ -457,7 +458,7 @@ func checkCodemapIn(t *testing.T, codemap string) (int, string) {
 		}
 	}
 	gitIn(t, dir, "init", "-q")
-	cmd := exec.Command("sh", "scripts/check-codemap.sh")
+	cmd := command(t, "sh", "scripts/check-codemap.sh")
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err == nil {

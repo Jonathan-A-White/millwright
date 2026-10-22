@@ -37,7 +37,7 @@ func runTimerUnits(t *testing.T, output string, status string) (string, bool) {
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command("sh", script)
+	cmd := command(t, "sh", script)
 	cmd.Env = append(os.Environ(),
 		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"HOME="+dir,
@@ -182,7 +182,7 @@ func runTimerUnitsOnCopy(t *testing.T, change func(root string)) (string, bool) 
 	if err := os.WriteFile(filepath.Join(bin, "systemd-analyze"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("sh", filepath.Join(root, "scripts", "check-timer-units.sh"))
+	cmd := command(t, "sh", filepath.Join(root, "scripts", "check-timer-units.sh"))
 	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "HOME="+root)
 	out, err := cmd.CombinedOutput()
 	if _, isExit := err.(*exec.ExitError); err != nil && !isExit {

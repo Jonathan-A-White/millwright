@@ -8,9 +8,9 @@ package contrib_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -23,17 +23,25 @@ func (f *factory) retiredWait(env ...string) string {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	cmd := exec.Command(script, "--kinds", "mail")
-	cmd.Env = append([]string{
-		"PATH=" + f.path("bin") + ":" + os.Getenv("PATH"),
-		"HOME=" + f.dir,
-		"MW_TEST_DIR=" + f.dir,
-	}, env...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		f.t.Fatalf("mail-wait failed: %v\n%s", err, out)
+	// A stand-in that is "Text file busy" for a moment fails the run at once
+	// with that message and no mw run: it is run again, a few times.
+	for attempt := 0; ; attempt++ {
+		cmd := command(f.t, script, "--kinds", "mail")
+		cmd.Env = append([]string{
+			f.pathEnv(),
+			"HOME=" + f.dir,
+			"MW_TEST_DIR=" + f.dir,
+		}, env...)
+		out, err := cmd.CombinedOutput()
+		if err != nil && attempt < 20 && strings.Contains(string(out), "Text file busy") {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		if err != nil {
+			f.t.Fatalf("mail-wait failed: %v\n%s", err, out)
+		}
+		return string(out)
 	}
-	return string(out)
 }
 
 func TestTheWaitIsRetiredAndRunsMwEventsWaitForTheMayor(t *testing.T) {
@@ -63,7 +71,7 @@ func TestTheWaitScriptIsExecutableAndParses(t *testing.T) {
 	if info.Mode()&0o111 == 0 {
 		t.Fatal("contrib/mail-wait is not executable")
 	}
-	if out, err := exec.Command("sh", "-n", "mail-wait").CombinedOutput(); err != nil {
+	if out, err := command(t, "sh", "-n", "mail-wait").CombinedOutput(); err != nil {
 		t.Fatalf("sh -n: %v\n%s", err, out)
 	}
 }
@@ -185,4 +193,47 @@ func TestTheNotifierStillTypesTheQuietAlarmWhileAWaitIsArmed(t *testing.T) {
 	f.tick()
 
 	f.typed("Quiet alarm for mayor: story mw-x has run long. Run mw status.\n")
+}
+
+// pathDirs is the PATH a factory's scripts run with, split.
+func (f *factory) pathDirs() []string {
+	return strings.Split(strings.TrimPrefix(f.pathEnv(), "PATH="), ":")
+}
+
+func TestTheFactorysPathHoldsNoMwOrBdButItsOwn(t *testing.T) {
+	// A stand-in that is briefly "Text file busy" (a parallel test's fork holds
+	// a copy of the descriptor that wrote it) is skipped by dash, which goes on
+	// down PATH to the next mw it finds: the host's real one, whose `events
+	// wait` blocks for 50 minutes (mw-gq6.700).
+	f := newFactory(t)
+	for _, dir := range f.pathDirs() {
+		if dir == f.path("bin") {
+			continue
+		}
+		for _, program := range []string{"mw", "bd"} {
+			if _, err := os.Stat(filepath.Join(dir, program)); err == nil {
+				t.Errorf("the factory's PATH holds %s", filepath.Join(dir, program))
+			}
+		}
+	}
+}
+
+func TestTheWaitRunsAgainWhenItsStandInIsBusyForAMoment(t *testing.T) {
+	f := newFactory(t)
+	// Hold bin/mw open for writing, as a forked child of another test does.
+	busy, err := os.OpenFile(f.path("bin/mw"), os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.AfterFunc(300*time.Millisecond, func() { busy.Close() })
+	t.Cleanup(func() { busy.Close() })
+
+	out := f.retiredWait()
+
+	if out != "retired: mw events wait\n" {
+		t.Fatalf("mail-wait printed %q", out)
+	}
+	if got := f.read("events.log"); got != "events wait --for mayor --kinds mail\n" {
+		t.Fatalf("mail-wait ran mw %q", got)
+	}
 }

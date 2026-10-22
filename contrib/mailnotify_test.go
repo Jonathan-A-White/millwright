@@ -191,7 +191,7 @@ func newFactory(t *testing.T) *factory {
 	}
 	t.Cleanup(func() {
 		// kill-server fails when the server has already stopped: that is fine.
-		_ = exec.Command("tmux", "-L", f.socket, "kill-server").Run()
+		_ = command(f.t, "tmux", "-L", f.socket, "kill-server").Run()
 		dir := os.Getenv("TMUX_TMPDIR")
 		if dir == "" {
 			dir = "/tmp"
@@ -334,7 +334,7 @@ func (f *factory) announced() string { return f.read("state/announced") }
 
 func (f *factory) tmux(args ...string) string {
 	f.t.Helper()
-	out, err := exec.Command("tmux", append([]string{"-L", f.socket}, args...)...).CombinedOutput()
+	out, err := command(f.t, "tmux", append([]string{"-L", f.socket}, args...)...).CombinedOutput()
 	if err != nil {
 		f.t.Fatalf("tmux %v: %v\n%s", args, err, out)
 	}
@@ -375,9 +375,9 @@ func (f *factory) mayor(state, acting string) string {
 // tick runs the script once, as the timer would.
 func (f *factory) tick() string {
 	f.t.Helper()
-	cmd := exec.Command(f.script)
+	cmd := command(f.t, f.script)
 	cmd.Env = []string{
-		"PATH=" + f.path("bin") + ":" + os.Getenv("PATH"),
+		f.pathEnv(),
 		"HOME=" + f.dir,
 		"TMUX_TMPDIR=" + os.Getenv("TMUX_TMPDIR"),
 		"LC_ALL=C.UTF-8",
@@ -626,7 +626,7 @@ func TestTheLimitIsTheHostsToSet(t *testing.T) {
 // cores is what nproc says, the limit the notifier defaults to.
 func cores(t *testing.T) int {
 	t.Helper()
-	out, err := exec.Command("nproc").Output()
+	out, err := command(t, "nproc").Output()
 	if err != nil {
 		t.Skipf("nproc: %v", err)
 	}
@@ -702,7 +702,7 @@ func TestATickWhileAnotherRunsDoesNothing(t *testing.T) {
 	}
 	// The holder says when it has the lock, so the tick never runs before it
 	// does, however long the host takes to start it (mw-gq6.440).
-	holder := exec.Command("flock", f.path("state/lock"), "sh", "-c", `touch "$1" && exec sleep 10`, "sh", f.path("held"))
+	holder := command(f.t, "flock", f.path("state/lock"), "sh", "-c", `touch "$1" && exec sleep 10`, "sh", f.path("held"))
 	if err := holder.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -770,7 +770,7 @@ func TestNoTmuxServerAtAllTypesNothingAndStartsNothing(t *testing.T) {
 
 	f.tick()
 
-	if out, err := exec.Command("tmux", "-L", f.socket, "list-sessions").CombinedOutput(); err == nil {
+	if out, err := command(f.t, "tmux", "-L", f.socket, "list-sessions").CombinedOutput(); err == nil {
 		t.Fatalf("the script started a tmux server: %s", out)
 	}
 	if got := f.announced(); got != "" {
@@ -1265,7 +1265,7 @@ func TestTheScriptIsExecutableAndParses(t *testing.T) {
 	if info.Mode()&0o111 == 0 {
 		t.Fatal("contrib/mail-notify is not executable")
 	}
-	if out, err := exec.Command("sh", "-n", "mail-notify").CombinedOutput(); err != nil {
+	if out, err := command(t, "sh", "-n", "mail-notify").CombinedOutput(); err != nil {
 		t.Fatalf("sh -n: %v\n%s", err, out)
 	}
 }
@@ -1970,4 +1970,20 @@ func TestTheLineNamesTenIdsAndCountsTheRest(t *testing.T) {
 
 	want := "New mail for mayor: 12 message(s): mw-id00, mw-id01, mw-id02, mw-id03, mw-id04, mw-id05, mw-id06, mw-id07, mw-id08, mw-id09 and 2 more. Run bd mail inbox.\n"
 	f.typed(want)
+}
+
+// pathEnv is the PATH line the script runs with: the stand-ins, then only the
+// system directories and those of the programs the script needs. Never the
+// test process's whole PATH: dash skips a stand-in that is briefly "Text file
+// busy" (a parallel test's fork still holds the descriptor that wrote it) and
+// runs the next program of that name down PATH, and for mw that is the host's
+// real one, whose `events wait` blocks for 50 minutes (mw-gq6.700).
+func (f *factory) pathEnv() string {
+	dirs := []string{f.path("bin"), "/usr/bin", "/bin"}
+	for _, program := range []string{"tmux", "flock"} {
+		if p, err := exec.LookPath(program); err == nil {
+			dirs = append(dirs, filepath.Dir(p))
+		}
+	}
+	return "PATH=" + strings.Join(dirs, ":")
 }

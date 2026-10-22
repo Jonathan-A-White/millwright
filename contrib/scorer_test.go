@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestScorerTestsThatNeedNoModel(t *testing.T) {
@@ -22,7 +23,7 @@ func TestScorerTestsThatNeedNoModel(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 is not installed")
 	}
-	if out, err := exec.Command("scorer/test.sh", "--pure").CombinedOutput(); err != nil {
+	if out, err := command(t, "scorer/test.sh", "--pure").CombinedOutput(); err != nil {
 		t.Fatalf("contrib/scorer/test.sh --pure: %v\n%s", err, out)
 	}
 }
@@ -41,7 +42,9 @@ func TestScorerScoresTheFixtureClips(t *testing.T) {
 		t.Skipf("no scorer venv at %s: contrib/scorer/install.sh has not run on this host", filepath.Join(home, "venv"))
 	}
 	readScorerSources(t)
-	if out, err := exec.Command("scorer/test.sh").CombinedOutput(); err != nil {
+	// The one test that loads the real model: it takes over a minute on a busy
+	// host, so it has its own, longer deadline.
+	if out, err := commandWithin(t, 8*time.Minute, "scorer/test.sh").CombinedOutput(); err != nil {
 		t.Fatalf("contrib/scorer/test.sh: %v\n%s", err, out)
 	}
 }
@@ -68,7 +71,7 @@ func readScorerSources(t *testing.T) {
 // what it printed.
 func scorerScript(t *testing.T, home, bin string, args ...string) (string, error) {
 	t.Helper()
-	cmd := exec.Command("scorer/test.sh", args...)
+	cmd := command(t, "scorer/test.sh", args...)
 	cmd.Env = append(os.Environ(), "MW_SCORER_HOME="+home, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()
 	return string(out), err

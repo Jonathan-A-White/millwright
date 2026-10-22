@@ -7,7 +7,6 @@ package contrib_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,7 +18,7 @@ func checkTrackedBinaries(t *testing.T, repo string) (string, error) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("sh", script, repo)
+	cmd := command(t, "sh", script, repo)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
