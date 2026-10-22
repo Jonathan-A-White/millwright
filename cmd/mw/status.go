@@ -80,6 +80,10 @@ func newStatusCmd() *cobra.Command {
 			"overrides). While metered, no beads backup runs and no story on a heavy_net rig starts; a DAMPERS\n" +
 			"line 'metered: pinned to <host>, metered, its rig installs dependencies: set host=auto' names each\n" +
 			"ready story pinned to this host on such a rig, which only host=auto lets another host take.\n\n" +
+			"A ready story every host has passed for a reason of the host's own (its rig not checked out there,\n" +
+			"or metered on a heavy_net rig) says 'passed by every host, so none takes it' under its READY line,\n" +
+			"naming each host's reason, as the hosts' dispatch notes it. Passed for over 20 minutes, a DAMPERS\n" +
+			"line 'no host can take it: ...' names it with each host's fix.\n\n" +
 			"A VPS NGINX line says whether the VPS's nginx postern_api upstream sends the phone to the home\n" +
 			"first and every other backend as `backup`: 'VPS NGINX ok (home first, N backup)', 'VPS NGINX\n" +
 			"FAULT: <what>', or 'VPS NGINX not checked (<why>)' when the VPS cannot be reached over ssh. It\n" +

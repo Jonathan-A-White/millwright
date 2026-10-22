@@ -128,7 +128,7 @@ func (l DamperLimits) orDefaults() DamperLimits {
 // to five beads, then how many more.
 func (a DamperAlarm) Line() string {
 	line := a.Principle + " · " + a.Text
-	if a.Principle == DamperStuck || a.Principle == DamperInversion || a.Principle == DamperMetered {
+	if a.Principle == DamperStuck || a.Principle == DamperInversion || a.Principle == DamperMetered || a.Principle == DamperNoHost {
 		line = a.Principle + ": " + a.Text
 	}
 	if len(a.Beads) == 0 {

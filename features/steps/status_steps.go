@@ -200,6 +200,10 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the DAMPERS section names "([^"]*)" as pinned to "([^"]*)", metered, its rig installs dependencies, saying: (.+)$`, c.theDampersNameThePinned)
 	ctx.Then(`^the DAMPERS section does not name "([^"]*)"$`, c.theDampersDoNotName)
 	ctx.Then(`^the report has no DAMPERS section$`, c.theReportHasNoDampers)
+	ctx.Given(`^the host "([^"]*)" passed "([^"]*)" (\d+) minutes ago at the gate "([^"]*)" because "([^"]*)"$`, c.theHostPassedTheStory)
+	ctx.Then(`^the READY line of "([^"]*)" says every host has passed it, naming "([^"]*)" and "([^"]*)"$`, c.theReadyLineSaysEveryHostPassed)
+	ctx.Then(`^the READY line of "([^"]*)" does not say every host has passed it$`, c.theReadyLineSaysNotEveryHostPassed)
+	ctx.Then(`^the DAMPERS section says "([^"]*)" of "([^"]*)", with the fixes "([^"]*)" and "([^"]*)"$`, c.theDampersSayNoHostCanTake)
 
 	ctx.Given(`^the status story "([^"]*)" was filed (\d+) minutes ago$`, c.theStatusStoryWasFiledMinutesAgo)
 	ctx.Given(`^the status story "([^"]*)" carries a question card$`, c.theStatusStoryCarriesAQuestionCard)
@@ -1581,6 +1585,81 @@ func (c *statusContext) theReportHasNoDampers() error {
 	}
 	if text := headedBy(c.report.String(), application.DampersHeading); text != "" {
 		return fmt.Errorf("expected no DAMPERS section, got:\n%s", text)
+	}
+	return nil
+}
+
+// theHostPassedTheStory leaves the note a host's dispatch keeps of the ready
+// stories it passed for a reason of the host's own, with the line this story
+// was first passed that many minutes before the scenario's clock.
+func (c *statusContext) theHostPassedTheStory(host, id, minutesText, gate, why string) error {
+	minutes, err := strconv.Atoi(minutesText)
+	if err != nil {
+		return fmt.Errorf("the minutes %q are not a number: %w", minutesText, err)
+	}
+	key := application.HostPassedKey(host)
+	kept, err := c.tracker.Note(context.Background(), key)
+	if err != nil {
+		return err
+	}
+	passed := append(application.ParseHostPassed(kept), application.HostPassed{
+		Story: id, Since: c.now.Add(-time.Duration(minutes) * time.Minute), Gate: gate, Why: why})
+	return c.tracker.SetNote(context.Background(), key, application.FormatHostPassed(passed))
+}
+
+// readyLineOf is the READY section's lines for one story, joined by single
+// spaces: the story's own line and what hangs under it.
+func (c *statusContext) readyLineOf(id string) (string, error) {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return "", err
+	}
+	lines := strings.Split(headedBy(c.report.String(), "READY"), "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, id) {
+			continue
+		}
+		end := i + 1
+		for end < len(lines) && strings.HasPrefix(lines[end], "    ") {
+			end++
+		}
+		return strings.Join(strings.Fields(strings.Join(lines[i:end], " ")), " "), nil
+	}
+	return "", fmt.Errorf("expected %s under READY, got:\n%s", id, c.report.String())
+}
+
+func (c *statusContext) theReadyLineSaysEveryHostPassed(id, first, second string) error {
+	line, err := c.readyLineOf(id)
+	if err != nil {
+		return err
+	}
+	for _, want := range []string{"passed by every host", first, second} {
+		if !strings.Contains(line, want) {
+			return fmt.Errorf("expected the READY line of %s to hold %q, got:\n%s", id, want, c.report.String())
+		}
+	}
+	return nil
+}
+
+func (c *statusContext) theReadyLineSaysNotEveryHostPassed(id string) error {
+	line, err := c.readyLineOf(id)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(line, "passed by every host") {
+		return fmt.Errorf("expected the READY line of %s not to say every host passed it, got:\n%s", id, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theDampersSayNoHostCanTake(principle, id, first, second string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	text := c.dampersText()
+	for _, want := range []string{principle, id, first, second} {
+		if !strings.Contains(text, want) {
+			return fmt.Errorf("expected the DAMPERS section to hold %q, got:\n%s", want, c.report.String())
+		}
 	}
 	return nil
 }

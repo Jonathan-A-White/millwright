@@ -1227,6 +1227,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	}
 
 	d.keepFilesHeld(ctx, ready, held, &report)
+	d.keepHostPassed(ctx, ready, &report)
 	d.keepStarved(ctx, ready, shares.running, &report)
 	report.Notes = append(report.Notes, shares.notes...)
 	d.print(report.String())

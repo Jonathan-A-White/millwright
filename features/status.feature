@@ -1022,3 +1022,46 @@ Feature: mw status
     When mw status reads the host
     Then reading status succeeds
     And the report has no DAMPERS section
+
+  # mw-gq6.703: a ready story every host passes for a reason of the host's own
+  # (the rig is not checked out there, the home is metered and the rig installs
+  # dependencies) sat unclaimed with nothing in mw status saying why. Each
+  # host's dispatch keeps a note of what it passed that way; status reads them all.
+
+  Scenario: A ready story every host has passed says so on its READY line, naming each host's reason
+    Given a status story "mw-gq6.100" filed under it, overriding "host" with "auto"
+    And the host "laptop" passed "mw-gq6.100" 5 minutes ago at the gate "metered-network" because "the rig millwright installs dependencies and the network is metered"
+    And the host "desktop" passed "mw-gq6.100" 5 minutes ago at the gate "rig-not-checked-out" because "the rig millwright is not checked out on desktop: add it under [rigs] in the config file"
+    And the host "vps" passed "mw-gq6.100" 5 minutes ago at the gate "rig-not-checked-out" because "the rig millwright is not checked out on vps: add it under [rigs] in the config file"
+    When mw status reads the host
+    Then reading status succeeds
+    And the READY line of "mw-gq6.100" says every host has passed it, naming "laptop: the rig millwright installs dependencies and the network is metered" and "desktop: the rig millwright is not checked out on desktop"
+    And the report has no DAMPERS section
+
+  Scenario: A ready story one host can take is not said to be passed by every host
+    Given a status story "mw-gq6.101" filed under it, overriding "host" with "auto"
+    And the host "laptop" passed "mw-gq6.101" 40 minutes ago at the gate "metered-network" because "the rig millwright installs dependencies and the network is metered"
+    And the host "desktop" passed "mw-gq6.101" 40 minutes ago at the gate "rig-not-checked-out" because "the rig millwright is not checked out on desktop: add it under [rigs] in the config file"
+    When mw status reads the host
+    Then reading status succeeds
+    And the READY line of "mw-gq6.101" does not say every host has passed it
+    And the report has no DAMPERS section
+
+  Scenario: A story every host has passed for 21 minutes is named under DAMPERS with the fix
+    Given a status story "mw-gq6.102" filed under it, overriding "host" with "auto"
+    And the host "laptop" passed "mw-gq6.102" 21 minutes ago at the gate "metered-network" because "the rig millwright installs dependencies and the network is metered"
+    And the host "desktop" passed "mw-gq6.102" 21 minutes ago at the gate "rig-not-checked-out" because "the rig millwright is not checked out on desktop: add it under [rigs] in the config file"
+    And the host "vps" passed "mw-gq6.102" 21 minutes ago at the gate "rig-not-checked-out" because "the rig millwright is not checked out on vps: add it under [rigs] in the config file"
+    When mw status reads the host
+    Then reading status succeeds
+    And the DAMPERS section says "no host can take it" of "mw-gq6.102", with the fixes "clone millwright on desktop and mw config set rigs.millwright" and "clone millwright on vps and mw config set rigs.millwright"
+
+  Scenario: A story every host has passed for 19 minutes is not yet named under DAMPERS
+    Given a status story "mw-gq6.103" filed under it, overriding "host" with "auto"
+    And the host "laptop" passed "mw-gq6.103" 19 minutes ago at the gate "metered-network" because "the rig millwright installs dependencies and the network is metered"
+    And the host "desktop" passed "mw-gq6.103" 19 minutes ago at the gate "rig-not-checked-out" because "the rig millwright is not checked out on desktop: add it under [rigs] in the config file"
+    And the host "vps" passed "mw-gq6.103" 19 minutes ago at the gate "rig-not-checked-out" because "the rig millwright is not checked out on vps: add it under [rigs] in the config file"
+    When mw status reads the host
+    Then reading status succeeds
+    And the READY line of "mw-gq6.103" says every host has passed it, naming "laptop: the rig millwright installs dependencies" and "desktop: the rig millwright is not checked out on desktop"
+    And the report has no DAMPERS section

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -579,6 +581,10 @@ type StatusReport struct {
 	// has it (mw-gq6.442): a story starved by a files key wider than it needs
 	// shows itself.
 	HeldByFiles map[string]string
+	// NoHostTakes are the ready stories every host that could take them has
+	// passed for a reason of the host's own (a rig not checked out there, a
+	// metered network), by story id, as the hosts' notes have it (mw-gq6.703).
+	NoHostTakes map[string]NoHostTakes
 	// Waiting are the beads labelled hitl that are open and not blocked, on any
 	// host or none, and the stories labelled hitl this host has claimed: worked
 	// with the Governor present, so neither a dispatcher's to take nor a session
@@ -899,6 +905,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report.Sharing = s.sharing(ctx, report.Running, report.Ready)
 	report.TesterHolds = s.testerHolds(work, report.Ready)
 	report.HeldByFiles = s.heldByFiles(ctx, report.Ready)
+	report.NoHostTakes = s.noHostTakes(ctx, report.Ready)
 
 	// A bead for the Governor may have no Path at all, so no listing keyed by
 	// host finds it: ask for the label itself. A hitl story ready on this host
@@ -1193,8 +1200,19 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 	}
 
+	var pinned []string
 	if report.Network != nil && report.Network.Metered {
 		if alarm, found := MeteredPinned(work, s.Host, s.HeavyNet); found {
+			report.Dampers.Alarms = append(report.Dampers.Alarms, alarm)
+			pinned = alarm.Beads
+		}
+	}
+	// A story the metered alarm already names, with its cure, is not named twice.
+	for _, id := range slices.Sorted(maps.Keys(report.NoHostTakes)) {
+		if slices.Contains(pinned, id) {
+			continue
+		}
+		if alarm, found := report.NoHostTakes[id].Alarm(s.now()); found {
 			report.Dampers.Alarms = append(report.Dampers.Alarms, alarm)
 		}
 	}
@@ -1782,6 +1800,9 @@ func (r StatusReport) String() string {
 		}
 		if held := r.HeldByFiles[d.Story.ID]; held != "" {
 			wrapInto(&b, "    ", held)
+		}
+		if takes, passed := r.NoHostTakes[d.Story.ID]; passed {
+			wrapInto(&b, "    ", takes.String())
 		}
 	}
 	b.WriteString("\n")
