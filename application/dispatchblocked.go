@@ -28,6 +28,9 @@ func vaultBlockedKey(host string) string { return "dispatch.vault-blocked." + ho
 // for the seconds between its write and its commit (mw-gq6.233); the mail goes
 // when the next tick meets the same files, and then once per VaultBlockedMailEvery.
 // A different set of files is a new reason and waits for its own second sighting.
+// A pull git refused because a sibling mw command had written files and not yet
+// committed them is not met here at all: the sync waits for the commit and pulls
+// again, and only files still dirty after its waits come this way (mw-gq6.706).
 //
 // With no Mailbox, or no Memory to keep the sighting in, nothing is sent: mail on
 // every tick would be worse than none. A mail or note that fails is a note on

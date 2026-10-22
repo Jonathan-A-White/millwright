@@ -467,6 +467,13 @@ type RecordVault interface {
 // tracks no remote branch: nothing to push to, which is not a push that failed.
 var ErrVaultNoUpstream = errors.New("the vault's branch tracks no remote branch")
 
+// ErrVaultBeingWritten is what VaultFiles' Pull and Push say, wrapped, of a
+// git that refused to rebase because tracked files had changed under it and
+// were not yet committed: a sibling mw command on this host (a close-out, a
+// landing) between writing a vault file and committing it. The commit is
+// moments behind, so a sync waits and tries again (mw-gq6.706).
+var ErrVaultBeingWritten = errors.New("the vault holds tracked files a sibling mw command has written and not yet committed")
+
 // VaultCommitBound bounds a commit that is made once its files are written: long
 // enough for a local git commit on a loaded box, short enough that a git stuck on
 // a lock does not hold a stopped mw for ever.
@@ -509,7 +516,7 @@ func recordInVault(ctx context.Context, vault RecordVault, warn io.Writer, messa
 	if len(recorded) == 0 {
 		return nil
 	}
-	if _, err := vault.Push(ctx); err != nil {
+	if _, err := retryPastASiblingsWrite(ctx, sleepFor, vault.Push); err != nil {
 		said := fmt.Errorf("%s: committed in the vault, not pushed (mw sync carries it): %w", message, err)
 		if errors.Is(err, ErrVaultNoUpstream) {
 			if warn != nil {

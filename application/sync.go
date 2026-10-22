@@ -897,16 +897,20 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 				return report, fmt.Errorf("syncing the vault on %s: the ledger mark is written but not committed: %w", s.Host, err)
 			}
 		}
-		if report.Pulled, err = s.Vault.Pull(ctx); err != nil {
+		if report.Pulled, err = s.pastASiblingsWrite(ctx, &report, s.Vault.Pull); err != nil {
 			return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
 		}
-		if report.Pushed, err = s.Vault.Push(ctx); err != nil {
-			return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
+		if len(report.Blocked) == 0 {
+			if report.Pushed, err = s.pastASiblingsWrite(ctx, &report, s.Vault.Push); err != nil {
+				return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
+			}
 		}
-		if report.Pushed > 0 {
-			s.queueStamp(ctx, &report)
+		if len(report.Blocked) == 0 {
+			if report.Pushed > 0 {
+				s.queueStamp(ctx, &report)
+			}
+			s.levelBoostConfig(ctx, &report)
 		}
-		s.levelBoostConfig(ctx, &report)
 	}
 
 	// A host whose vault half never ran is not level, and the note says it was.
@@ -943,6 +947,50 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 		return s.recordLevelInTheOneDatabase(ctx, report)
 	}
 	return s.syncBeadsRecordingLevel(ctx, report)
+}
+
+// siblingWriteWaits are the pauses before each retry of a pull or push that git
+// refused because a sibling mw command on this host (a close-out, a landing) had
+// written tracked vault files and not yet committed them: the commit is moments
+// behind its write, so a few seconds clear it (mw-gq6.706).
+var siblingWriteWaits = []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second}
+
+// pastASiblingsWrite runs step, a pull or a push of the vault, and runs it
+// again after a pause while git refuses it with ErrVaultBeingWritten, up to
+// len(siblingWriteWaits) times. The vault was read clean before the step, so
+// what changed under it is a sibling's write. If the refusal outlasts the waits
+// and the vault is dirty when read again, that is a vault holding uncommitted
+// work like any other: report.Blocked names the files and the caller takes the
+// blocked path, which mails the Mayor if the same files stay. Any other error,
+// and a refusal that outlasts the waits on a clean vault, is the step's error.
+func (s Sync) pastASiblingsWrite(ctx context.Context, report *SyncReport, step func(context.Context) (int, error)) (int, error) {
+	moved, err := retryPastASiblingsWrite(ctx, s.wait, step)
+	if err != nil && errors.Is(err, ErrVaultBeingWritten) {
+		if dirty, readErr := s.Vault.Uncommitted(ctx); readErr == nil && len(dirty) > 0 {
+			report.Blocked = dirty
+			return 0, nil
+		}
+	}
+	return moved, err
+}
+
+// retryPastASiblingsWrite runs step, a pull or a push of the vault, and runs it
+// again after each of siblingWriteWaits while git refuses it with
+// ErrVaultBeingWritten. wait is the pause, which ends early with an error when
+// ctx does. Every verb that pulls or pushes the vault outside a sync goes
+// through it too, so that none is the one that races a sibling's commit.
+func retryPastASiblingsWrite(ctx context.Context, wait func(context.Context, time.Duration) error, step func(context.Context) (int, error)) (int, error) {
+	moved, err := step(ctx)
+	for _, pause := range siblingWriteWaits {
+		if err == nil || !errors.Is(err, ErrVaultBeingWritten) {
+			return moved, err
+		}
+		if waited := wait(ctx, pause); waited != nil {
+			return 0, fmt.Errorf("%w (and waiting for the sibling's commit was cut short: %v)", err, waited)
+		}
+		moved, err = step(ctx)
+	}
+	return moved, err
 }
 
 // VaultRig is the rig name a stamp of a vault push carries: the vault is no

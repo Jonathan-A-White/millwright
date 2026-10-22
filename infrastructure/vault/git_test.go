@@ -959,3 +959,45 @@ func TestPushOfACloneThatTracksNothingSaysItHasNoUpstream(t *testing.T) {
 		t.Fatalf("expected ErrVaultNoUpstream, got %v", err)
 	}
 }
+
+// A close-out also rewrites tracked files (seats/builder/ledger.md) before it
+// commits them. A pull that lands between the write and the commit is refused
+// with "Please commit or stash them"; the refusal is handed up as
+// application.ErrVaultBeingWritten, so that a sync waits and pulls again
+// (mw-gq6.706), and the vault is left as the close-out had it.
+func TestPullNamesARefusalForFilesASiblingHasWrittenAndNotCommitted(t *testing.T) {
+	here, there := twoHosts(t)
+
+	write(t, there, "other.md", "from the other host\n")
+	run(t, there, "git", "add", "-A")
+	run(t, there, "git", "commit", "-qm", "The other host's file")
+	run(t, there, "git", "push", "-q")
+
+	write(t, here, "seats/mayor/ledger.md", "2026-09-17 the factory opened.\nand a line the close-out has not committed.\n")
+
+	files := vault.New(here, vault.WithWait(func(context.Context, time.Duration) error { return nil }))
+	_, err := files.Pull(context.Background())
+	if !errors.Is(err, application.ErrVaultBeingWritten) {
+		t.Fatalf("expected the refusal to be ErrVaultBeingWritten, got %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(here, "seats/mayor/ledger.md")); !strings.Contains(string(got), "close-out has not committed") {
+		t.Fatalf("expected the close-out's write left as it was, got %q", got)
+	}
+
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Close-out")
+	if _, err := files.Pull(context.Background()); err != nil {
+		t.Fatalf("expected the pull to work once the commit is made, got %v", err)
+	}
+}
+
+// Other refusals are not it.
+func TestPullDoesNotCallAnotherRefusalASiblingsWrite(t *testing.T) {
+	fakeGit(t, "fatal: refusing to merge unrelated histories")
+
+	files := vault.New(t.TempDir(), vault.WithWait(func(context.Context, time.Duration) error { return nil }))
+	_, err := files.Pull(context.Background())
+	if err == nil || errors.Is(err, application.ErrVaultBeingWritten) {
+		t.Fatalf("expected a plain failure, got %v", err)
+	}
+}

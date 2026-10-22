@@ -154,7 +154,7 @@ func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, fi
 		if _, err := commitWritten(ctx, files, commitMessage, []string{relPath}); err != nil {
 			return s, fmt.Errorf("committing the bundle %s in the vault: %w", relPath, err)
 		}
-		if _, err := files.Push(ctx); err != nil {
+		if _, err := retryPastASiblingsWrite(ctx, sleepFor, files.Push); err != nil {
 			return s, fmt.Errorf("the bundle %s is committed in the vault but could not be pushed, so nothing more was touched: %w", relPath, err)
 		}
 		s.VaultPushed = true

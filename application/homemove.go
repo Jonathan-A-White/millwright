@@ -679,7 +679,7 @@ func (r *homeMoveRun) asideText() string {
 
 func (r *homeMoveRun) vault(ctx context.Context) error {
 	m := r.m
-	pulled, err := m.Vault.Pull(ctx)
+	pulled, err := retryPastASiblingsWrite(ctx, sleepFor, m.Vault.Pull)
 	if err != nil {
 		return fmt.Errorf("bringing the vault level (git pull --rebase): %w", err)
 	}
@@ -714,7 +714,7 @@ func (r *homeMoveRun) vault(ctx context.Context) error {
 	r.backs = []string{fmt.Sprintf("git -C %s revert --no-edit %s && git -C %s push", m.VaultDir, sha, m.VaultDir)}
 	r.say("committed it as %s.", sha)
 
-	if _, err := m.Vault.Push(ctx); err != nil {
+	if _, err := retryPastASiblingsWrite(ctx, sleepFor, m.Vault.Push); err != nil {
 		return fmt.Errorf("pushing the vault: %w. The commit is only here: GitHub does not have it, so the old home has no fence yet", err)
 	}
 	r.say("pushed. The fence is up: an old home that comes back reads the home file, sees it is not home and stays quiet.")

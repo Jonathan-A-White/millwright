@@ -246,6 +246,12 @@ func (v *Vault) Pull(ctx context.Context) (int, error) {
 	}
 	if err != nil {
 		err = v.namingTheDriver(ctx, err)
+		if siblingIsWriting(err) {
+			// A sibling mw command on this host wrote tracked vault files and has
+			// not committed them yet. Nothing was changed: the sync, which holds
+			// the wait and the retry, is told which refusal this is.
+			err = fmt.Errorf("%w: %w", application.ErrVaultBeingWritten, err)
+		}
 		if _, aborted := v.git(ctx, "rebase", "--abort"); aborted == nil {
 			return 0, fmt.Errorf("%w (the rebase was undone: the vault is as it was)", err)
 		}
@@ -295,6 +301,17 @@ const untrackedInTheWay = "untracked working tree files would be overwritten"
 // in the way that a close-out is about to commit. Every other refusal is not it.
 func closeOutIsWriting(err error) bool {
 	return strings.Contains(err.Error(), untrackedInTheWay)
+}
+
+// siblingIsWriting reports whether git refused a pull --rebase because tracked
+// files in the working tree hold changes nobody has committed ("cannot pull
+// with rebase: You have unstaged changes", "Your index contains uncommitted
+// changes", each ending "Please commit or stash them"). The vault is read clean
+// before a sync pulls, so these are a sibling mw command's write whose commit is
+// moments behind (mw-gq6.706).
+func siblingIsWriting(err error) bool {
+	said := err.Error()
+	return strings.Contains(said, "cannot pull with rebase") && strings.Contains(said, "Please commit or stash them")
 }
 
 func (v *Vault) waitForCloseOut(ctx context.Context) error {
@@ -373,7 +390,7 @@ func (v *Vault) Push(ctx context.Context) (int, error) {
 			rebased++
 		}
 		if _, pulled := v.Pull(ctx); pulled != nil {
-			return 0, fmt.Errorf("%w (and rebasing onto what the remote holds did not work: %v)", err, pulled)
+			return 0, fmt.Errorf("%w (and rebasing onto what the remote holds did not work: %w)", err, pulled)
 		}
 		if outgoing, err = v.commitsBetween(ctx, "@{upstream}", "HEAD"); err != nil {
 			return 0, err
