@@ -670,7 +670,7 @@ Feature: mw doctor
     Then mw doctor leaves with the status 0
     And the doctor log holds "boost-config ok"
 
-  Scenario: The real boost-config check on a host that is not home is ok, though its tables are a part of the home's
+  Scenario: The real boost-config check on a host that is not home is ok when it only lacks a line the vault holds, as mw sync appends it
     Given the home host's config.toml for boost-config holding:
       """
       [tests]
@@ -681,6 +681,47 @@ Feature: mw doctor
       [tests]
       argus = "npm test"
       lampas = "npm test"
+      """
+    When mw doctor's boost-config check runs on a host that is not home
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "boost-config ok"
+
+  Scenario: The real boost-config check on a host that is not home is faulty when its [tests] line differs from the vault's, naming both values and the fix
+    Given the home host's config.toml for boost-config holding:
+      """
+      [tests]
+      millwright = "make test"
+      """
+    And the vault's hosts/boost-config.toml for boost-config holding:
+      """
+      [tests]
+      millwright = "make test && scripts/check-codemap.sh"
+      """
+    When mw doctor's boost-config check runs on a host that is not home
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "boost-config cure-failed no cure"
+    And mw doctor printed "tests.millwright"
+    And mw doctor printed "tests.millwright: here"
+    And mw doctor printed "make test && scripts/check-codemap.sh"
+    And mw doctor printed "mw config set tests.millwright"
+
+  Scenario: The real boost-config check on a host that is not home is ok when every line it holds is level with the vault's
+    Given the home host's config.toml for boost-config holding:
+      """
+      [tests]
+      millwright = "make test && scripts/check-codemap.sh"
+
+      [test_parts.lampas]
+      "install" = "npm ci"
+      """
+    And the vault's hosts/boost-config.toml for boost-config holding:
+      """
+      [tests]
+      millwright = 'make test && scripts/check-codemap.sh'
+      argus = "npm test"
+
+      [test_parts.lampas]
+      "install" = "npm ci"
       """
     When mw doctor's boost-config check runs on a host that is not home
     Then mw doctor leaves with the status 0

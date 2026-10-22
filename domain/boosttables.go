@@ -155,6 +155,45 @@ func BoostTablesDrift(home, vault BoostTables) []string {
 	return drift
 }
 
+// BoostHeld is one line (or one whole [test_parts.<rig>] table) that a Boost
+// holds differently from the vault's hosts/boost-config.toml: Key is "tests.rig"
+// or "test_parts.rig", and Here and Vault are what each holds (a part table as
+// its `"name" = "command"` lines, joined by "; ").
+type BoostHeld struct{ Key, Here, Vault string }
+
+// BoostTablesHeldDifferently is every line that both a Boost's tables and the
+// vault's hold with different values, in table and then rig order, then each
+// rig's [test_parts.<rig>] table when both hold it and its parts or their order
+// differ (mw-gq6.704). A line only one of them holds is left out: sync appends
+// what a Boost lacks (mw-gq6.593), and a Boost may hold a line the vault does
+// not.
+func BoostTablesHeldDifferently(here, vault BoostTables) []BoostHeld {
+	var held []BoostHeld
+	for _, name := range BoostTableNames {
+		for _, rig := range sortedKeys(here.Lines[name]) {
+			got := here.Lines[name][rig]
+			if want, ok := vault.Lines[name][rig]; ok && got != want {
+				held = append(held, BoostHeld{Key: name + "." + rig, Here: got, Vault: want})
+			}
+		}
+	}
+	for _, rig := range sortedKeys(here.Parts) {
+		got := here.Parts[rig]
+		if want, ok := vault.Parts[rig]; ok && !slices.Equal(got, want) {
+			held = append(held, BoostHeld{Key: BoostPartsPrefix + rig, Here: partsText(got), Vault: partsText(want)})
+		}
+	}
+	return held
+}
+
+func partsText(parts []BoostPart) string {
+	lines := make([]string, len(parts))
+	for i, part := range parts {
+		lines[i] = tomlBasicString(part.Name) + " = " + tomlBasicString(part.Command)
+	}
+	return strings.Join(lines, "; ")
+}
+
 func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for key := range m {
