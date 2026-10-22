@@ -2104,6 +2104,17 @@ the bead, clears the note, and mails the Mayor. A reply that carries `re` (the t
 card it was tapped on) makes the comment say `, answers card <short txid>` before its
 `, txid <txid>: <answer>`; one without `re` reads as it always did.
 
+`mw grill <ticket> --ask "<question>" --recommend "<option>" --option "A: ..." --option "B: ..."` asks a
+grilling ticket's next question (the ticket must carry the label `grilling`): it sends the decision card
+exactly as `mw postern send --class decision-needed --bead <ticket>` does, and keeps ONE running checklist
+card on the ticket's channel current beside it. The first question sends the card; each later one updates it
+with one more item. An item reads `Q<n>: <question> — open, waiting on card <txid>` until the Governor answers
+and `Q<n>: <question> — answered <option> at <time> (card <txid>)` once `mw postern inbox` (or `--apply`)
+applies his answer, which also ticks the item off. A tap that names a card of another question changes
+nothing. The card's txid and the questions are kept in the ticket's note `postern.grill.<ticket>`; a failure to
+update the card is printed and never undoes the recorded answer. It is a use case of `application/grill.go`
+with its tests in `application/grill_test.go`.
+
 An `--option` may end `|<bead>:<state>[,<bead>:<state>...]` (state: `open`,
 `held`, `landed`, `verified` or `closed`), as `--option 'A: Release both|mw-x.1:open,mw-x.2:open'`:
 the card shows the text alone, and once `mw postern inbox --apply` applies one of the
