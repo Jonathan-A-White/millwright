@@ -604,9 +604,23 @@ func (w *Worktrees) CloseLanding(ctx context.Context, rigDir, landingDir string)
 	if landingDir == "" {
 		return nil
 	}
+	// A close-out that was stopped has a done context, and a landing is taken
+	// away whatever became of the one that opened it.
+	ctx = context.WithoutCancel(ctx)
 	// The branch is empty: a landing is detached, and the branch it landed on
 	// lives at the remote.
-	return w.Remove(ctx, rigDir, landingDir, "")
+	err := w.Remove(ctx, rigDir, landingDir, "")
+	if err == nil || !strings.HasPrefix(filepath.Base(landingDir), application.LandingPrefix) {
+		return err
+	}
+	// git would not (it has lost its record of the worktree): the directory is
+	// a landing's, made for this one landing and holding nothing else, so it is
+	// taken away by hand and git's records are tidied after it.
+	if rmErr := os.RemoveAll(landingDir); rmErr != nil {
+		return fmt.Errorf("%w; taking it away by hand failed too: %v", err, rmErr)
+	}
+	_, _ = w.git(ctx, rigDir, "worktree", "prune")
+	return nil
 }
 
 // rejected reports whether git refused a push because the branch had moved on
