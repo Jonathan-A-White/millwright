@@ -9,7 +9,6 @@ package contrib_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -62,7 +61,7 @@ func newInstallRig(t *testing.T, config string) *installRig {
 
 func (r *installRig) run(t *testing.T, stdin string, env []string, args ...string) (string, error) {
 	t.Helper()
-	cmd := exec.Command(r.script, args...)
+	cmd := command(t, r.script, args...)
 	cmd.Env = append([]string{"PATH=" + r.bin + ":/usr/bin:/bin", "MW_HANDS_INSTALL_PREFIX=" + r.prefix, "HOME=/nowhere"}, env...)
 	cmd.Stdin = strings.NewReader(stdin)
 	out, err := cmd.CombinedOutput()

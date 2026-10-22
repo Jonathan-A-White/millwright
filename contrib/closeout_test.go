@@ -166,7 +166,7 @@ func (w *closeoutWorld) run(script string, env []string, args ...string) (string
 	if err != nil {
 		w.t.Fatal(err)
 	}
-	cmd := exec.Command(abs, args...)
+	cmd := command(w.t, abs, args...)
 	cmd.Dir = w.vault
 	cmd.Env = append([]string{
 		"PATH=" + w.path,
@@ -340,7 +340,7 @@ func TestTheCloseOutScriptIsExecutableAndParses(t *testing.T) {
 	if info.Mode()&0o111 == 0 {
 		t.Fatal("contrib/mw-closeout is not executable")
 	}
-	if out, err := exec.Command("sh", "-n", "mw-closeout").CombinedOutput(); err != nil {
+	if out, err := command(t, "sh", "-n", "mw-closeout").CombinedOutput(); err != nil {
 		t.Fatalf("sh -n: %v\n%s", err, out)
 	}
 }

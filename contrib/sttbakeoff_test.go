@@ -14,7 +14,7 @@ func TestSttBakeoffScoring(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 is not installed")
 	}
-	if out, err := exec.Command("stt-bakeoff/test.sh").CombinedOutput(); err != nil {
+	if out, err := command(t, "stt-bakeoff/test.sh").CombinedOutput(); err != nil {
 		t.Fatalf("contrib/stt-bakeoff/test.sh: %v\n%s", err, out)
 	}
 }

@@ -27,7 +27,7 @@ func underLoad(t *testing.T, load string, cores int, extra []string, args ...str
 	if err := os.WriteFile(loadavg, []byte(load+" 0.50 0.50 1/100 12345\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("./mw-under-load", args...)
+	cmd := command(t, "./mw-under-load", args...)
 	cmd.Env = append(os.Environ(),
 		"MW_UNDER_LOAD_LOADAVG="+loadavg,
 		"MW_UNDER_LOAD_CORES="+strconv.Itoa(cores),
@@ -42,7 +42,7 @@ func underLoad(t *testing.T, load string, cores int, extra []string, args ...str
 // mw-under-load with this pid started and that are still alive.
 func loopsOf(t *testing.T, pid int) []string {
 	t.Helper()
-	out, _ := exec.Command("pgrep", "-f", "mw-under-load-loop "+strconv.Itoa(pid)+"$").Output()
+	out, _ := command(t, "pgrep", "-f", "mw-under-load-loop "+strconv.Itoa(pid)+"$").Output()
 	var loops []string
 	for _, p := range strings.Fields(string(out)) {
 		comm, err := os.ReadFile("/proc/" + p + "/comm")
@@ -54,8 +54,8 @@ func loopsOf(t *testing.T, pid int) []string {
 }
 
 // anyLeft reports every process still carrying this run's loop marker.
-func anyLeft(pid int) string {
-	out, _ := exec.Command("pgrep", "-f", "mw-under-load-loop "+strconv.Itoa(pid)+"$").Output()
+func anyLeft(t *testing.T, pid int) string {
+	out, _ := command(t, "pgrep", "-f", "mw-under-load-loop "+strconv.Itoa(pid)+"$").Output()
 	return strings.TrimSpace(string(out))
 }
 
@@ -110,7 +110,7 @@ func TestUnderLoadStartsAtMostFourLoopsAndEndsThemWhenTheCommandEnds(t *testing.
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("the command succeeded, mw-under-load should too: %v", err)
 	}
-	if left := anyLeft(pid); left != "" {
+	if left := anyLeft(t, pid); left != "" {
 		t.Fatalf("loops left after the command ended: %s", left)
 	}
 }
@@ -177,8 +177,8 @@ func TestUnderLoadEndsEveryLoopWhenItIsKilledWithTermOrInt(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = cmd.Wait()
-		if !waitFor(func() bool { return anyLeft(pid) == "" }) {
-			t.Fatalf("%v: loops left after mw-under-load was killed: %s", sig, anyLeft(pid))
+		if !waitFor(func() bool { return anyLeft(t, pid) == "" }) {
+			t.Fatalf("%v: loops left after mw-under-load was killed: %s", sig, anyLeft(t, pid))
 		}
 	}
 }
@@ -193,8 +193,8 @@ func TestUnderLoadLoopsEndOnTheirOwnWhenItIsKilledOutright(t *testing.T) {
 	_ = cmd.Wait()
 	_ = os.WriteFile(release, nil, 0o644)
 	// A KILL cannot be trapped; the loops see their parent gone, or reach their own deadline.
-	if !waitFor(func() bool { return anyLeft(pid) == "" }) {
-		t.Fatalf("loops outlived a KILLed mw-under-load: %s", anyLeft(pid))
+	if !waitFor(func() bool { return anyLeft(t, pid) == "" }) {
+		t.Fatalf("loops outlived a KILLed mw-under-load: %s", anyLeft(t, pid))
 	}
 }
 
@@ -233,7 +233,7 @@ func TestUnderLoadScriptIsExecutableAndParses(t *testing.T) {
 	if info.Mode()&0o111 == 0 {
 		t.Fatal("contrib/mw-under-load is not executable")
 	}
-	if out, err := exec.Command("sh", "-n", "mw-under-load").CombinedOutput(); err != nil {
+	if out, err := command(t, "sh", "-n", "mw-under-load").CombinedOutput(); err != nil {
 		t.Fatalf("does not parse: %v %s", err, out)
 	}
 }
@@ -282,7 +282,7 @@ func endsWithItsCommand(t *testing.T) string {
 		<-done
 		return "mw-under-load still waiting on its loops 20 s after its command ended"
 	}
-	if left := anyLeft(cmd.Process.Pid); left != "" {
+	if left := anyLeft(t, cmd.Process.Pid); left != "" {
 		return "loops left after the command ended: " + left
 	}
 	return ""

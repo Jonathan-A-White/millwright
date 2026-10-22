@@ -7,7 +7,6 @@ package contrib_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -59,7 +58,7 @@ func runTranscribe(t *testing.T, home, bin string, args ...string) (string, stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(script, args...)
+	cmd := command(t, script, args...)
 	cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+bin+":/usr/bin:/bin", "POSTERN_WHISPER_MODEL=", "POSTERN_WHISPER_CLI=", "TMPDIR="+home)
 	var out, errs strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &errs

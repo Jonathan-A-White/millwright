@@ -2,7 +2,6 @@ package contrib_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -43,7 +42,7 @@ exit 0
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("sh", script)
+	cmd := command(t, "sh", script)
 	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
