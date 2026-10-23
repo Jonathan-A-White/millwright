@@ -76,25 +76,66 @@ func TestLingerReadsLoginctl(t *testing.T) {
 	}
 }
 
+// settleBudget is how long a test waits for a dial to a live listener to
+// connect. A wait that succeeds ends at once, so the budget costs nothing on a
+// calm host; it is 30 s because on a host at load 40 of 20 cores (mw-gq6.722) a
+// wait of one second judges the host, not the code. A check that expects a
+// refusal keeps refuseWait, because it waits the whole time out by design.
+const (
+	settleBudget = 30 * time.Second
+	refuseWait   = 200 * time.Millisecond
+)
+
 func TestPortFreeAndServerAnswersSeeAListener(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	h := &Host{Wait: time.Second, Poll: 10 * time.Millisecond}
-	if err := h.PortFree(context.Background(), port); err == nil {
+	waits := &Host{Wait: settleBudget, Poll: 10 * time.Millisecond}
+	refuses := &Host{Wait: refuseWait, Poll: 10 * time.Millisecond}
+	if err := waits.PortFree(context.Background(), port); err == nil {
 		t.Error("PortFree is nil for a port with a listener")
 	}
-	if err := h.ServerAnswers(context.Background(), port); err != nil {
+	if err := waits.ServerAnswers(context.Background(), port); err != nil {
 		t.Errorf("ServerAnswers = %v for a port with a listener", err)
 	}
 	listener.Close()
-	if err := h.PortFree(context.Background(), port); err != nil {
+	if err := waits.PortFree(context.Background(), port); err != nil {
 		t.Errorf("PortFree = %v once the listener is gone", err)
 	}
-	if err := h.ServerAnswers(context.Background(), port); err == nil {
+	if err := refuses.ServerAnswers(context.Background(), port); err == nil {
 		t.Error("ServerAnswers is nil for a port nothing listens on")
+	}
+}
+
+func TestServerAnswersWaitsForAListenerThatComesUpLate(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := probe.Addr().String()
+	port := probe.Addr().(*net.TCPAddr).Port
+	probe.Close()
+	up := make(chan net.Listener, 1)
+	go func() {
+		time.Sleep(1500 * time.Millisecond)
+		late, err := net.Listen("tcp", address)
+		if err != nil {
+			up <- nil
+			return
+		}
+		up <- late
+	}()
+	h := &Host{Wait: settleBudget, Poll: 10 * time.Millisecond}
+	err = h.ServerAnswers(context.Background(), port)
+	if late := <-up; late != nil {
+		late.Close()
+	} else {
+		t.Skip("the port was taken between the probe and the listener")
+	}
+	if err != nil {
+		t.Errorf("ServerAnswers = %v for a listener that came up after 1.5 s", err)
 	}
 }
 
