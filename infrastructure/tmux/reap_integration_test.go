@@ -91,7 +91,7 @@ func TestPaneStateReadsWhatTheScreenSays(t *testing.T) {
 
 	waitForPane(t, windows, idle, application.PaneIdle)
 	waitForPane(t, windows, ghost, application.PaneIdle)
-	waitForPane(t, windows, typed, application.PaneInput)
+	waitForPane(t, windows, typed, application.PaneDraft)
 	waitForPane(t, windows, working, application.PaneWorking)
 }
 
@@ -263,15 +263,51 @@ func TestTypeSendsTextAndEnterIntoARealPane(t *testing.T) {
 	})
 }
 
-func TestReaperNeverClosesARealWindowWithTextOnItsInputLine(t *testing.T) {
+// A session that has handed off and left only unsent text on its input line is
+// done: its window is closed, where it used to wait out the reaper's limit
+// (mw-gq6.709).
+func TestReaperClosesARealWindowHoldingOnlyUnsentTextAfterAHandoff(t *testing.T) {
 	windows, _ := privateWindows(t)
 	typed := openStandIn(t, windows, t.TempDir(), "mayor-2026-09-19-12", typedInput)
-	waitForPane(t, windows, typed, application.PaneInput)
+	waitForPane(t, windows, typed, application.PaneDraft)
 
-	reap, dir := reaperOn(t, windows, typed, 1500*time.Millisecond, nil)
+	reap, dir := reaperOn(t, windows, typed, 30*time.Second, nil)
 	reap.WhenIdle = true
 	handoff := filepath.Join(dir, "seats", "mayor", "handoffs", "2026-09-19-12.md")
 	if err := os.WriteFile(handoff, []byte("left for the next\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A window is dated to the second: the handoff is surely after it.
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(handoff, later, later); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := reap.Run(context.Background())
+	if err != nil || report.Outcome != application.ReapClosed {
+		t.Fatalf("expected the watch to close the window, it ended %q with %v", report.Outcome, err)
+	}
+	if !strings.Contains(report.Said, "unsent text") {
+		t.Errorf("expected the log to say the pane held only unsent text, got %q", report.Said)
+	}
+}
+
+// A session with a turn running is never closed over, text on its input line
+// or not.
+func TestReaperNeverClosesARealWindowWithATurnRunning(t *testing.T) {
+	windows, _ := privateWindows(t)
+	working := openStandIn(t, windows, t.TempDir(), "mayor-2026-09-19-12", workingLine)
+	waitForPane(t, windows, working, application.PaneWorking)
+
+	reap, dir := reaperOn(t, windows, working, 1500*time.Millisecond, nil)
+	reap.WhenIdle = true
+	handoff := filepath.Join(dir, "seats", "mayor", "handoffs", "2026-09-19-12.md")
+	if err := os.WriteFile(handoff, []byte("left for the next\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A window is dated to the second: the handoff is surely after it.
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(handoff, later, later); err != nil {
 		t.Fatal(err)
 	}
 
@@ -279,8 +315,8 @@ func TestReaperNeverClosesARealWindowWithTextOnItsInputLine(t *testing.T) {
 	if err == nil || report.Outcome != application.ReapGaveUp {
 		t.Fatalf("expected the watch to give up, it ended %q with %v", report.Outcome, err)
 	}
-	if _, err := windows.PaneState(context.Background(), typed); err != nil {
-		t.Errorf("expected the window with text on its input line to be left open: %v", err)
+	if _, err := windows.PaneState(context.Background(), working); err != nil {
+		t.Errorf("expected the window with a turn running to be left open: %v", err)
 	}
 }
 

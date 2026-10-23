@@ -53,10 +53,17 @@ const (
 	PaneIdle PaneState = "idle"
 	// PaneWorking is a session that is running something.
 	PaneWorking PaneState = "working"
-	// PaneInput is a pane that is not at an empty input line: there is text on
-	// it, or it is not at a prompt at all. Someone may be in the middle of a
-	// sentence, and a window is never closed over their words.
+	// PaneInput is a pane that is not at an empty input line and is not a
+	// draft either: it is not at a prompt at all — a question being asked, a
+	// menu, a session that has not started. A window is never closed over it.
 	PaneInput PaneState = "input"
+	// PaneDraft is a pane at a prompt with text on its input line and no turn
+	// running (PaneHoldsOnlyDraft). Someone may be in the middle of a
+	// sentence, so nothing is typed over it, and a session still at work is
+	// never closed over it; but one that has handed off is done, and the text
+	// is only what it left unsent, so a reaper closes that window and `mw
+	// deputy` replaces it (mw-gq6.709).
+	PaneDraft PaneState = "draft"
 	// PaneFirstRun is a pane at one of Claude Code's own first-run screens — a
 	// theme choice, the login menu — before it has a prompt of its own at all.
 	// It is never idle and never restarted: a fresh session would show the very
@@ -175,8 +182,10 @@ const (
 // open, and the window's pane is idle. In idle mode, for a session with nobody
 // to hand over to, it closes the window once a handoff has been written after
 // the window was opened and the pane is idle. Idle is asked on two looks in a
-// row, and a pane with anything on its input line is never closed, in either
-// mode: a person may be typing. A pane stopped at the harness's usage limit
+// row. A pane with text on its input line counts as idle too when no turn is
+// running in it (PaneDraft): in either mode the session has handed off by then,
+// it is done, and the text is only what it left unsent (mw-gq6.709). Nothing
+// is ever typed over such text. A pane stopped at the harness's usage limit
 // counts as idle here, and is closed saying so: it holds no draft and is idle
 // again only after the reset (mw-gq6.473).
 //
@@ -328,7 +337,7 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 			idle = 0
 			continue
 		}
-		limit, closable := s.paneClosable(ctx, window, armed)
+		limit, draft, closable := s.paneClosable(ctx, window, armed)
 		if !closable {
 			idle = 0
 			continue
@@ -368,9 +377,9 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 		}
 
 		// A pane stopped at the usage limit works nothing typed into it
-		// before the reset: it is closed over the mail, which waits for the
-		// seat's next session.
-		if s.WhenIdle && s.Mail != nil && limit == nil {
+		// before the reset, and one holding unsent text is not typed over: it
+		// is closed over the mail, which waits for the seat's next session.
+		if s.WhenIdle && s.Mail != nil && limit == nil && !draft {
 			waiting, err := s.Mail.Inbox(ctx, s.Mailbox)
 			if err != nil {
 				idle = 0
@@ -413,7 +422,7 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 			}
 			return report, fmt.Errorf("closing the window %s: %w", s.Window, err)
 		}
-		return s.end(ctx, ReapClosed, s.closedLine(limit))
+		return s.end(ctx, ReapClosed, s.closedLine(limit, draft))
 	}
 
 	report, err := s.end(ctx, ReapGaveUp, fmt.Sprintf("gave up after %s without closing anything", limit))
@@ -507,24 +516,29 @@ func newestHandoffSince(handoffs []Handoff, opened time.Time) (time.Time, bool) 
 }
 
 // paneClosable reports whether the window's pane may be closed under a seat
-// whose session is done: it is idle, or it is stopped at the usage limit, which
-// holds no draft and will not be idle again before the reset (mw-gq6.473); the
-// limit is given when it is. A pane that cannot be read is not closable.
-func (s SeatReap) paneClosable(ctx context.Context, window ReapWindow, armed time.Time) (*PaneLimit, bool) {
+// whose session is done: it is idle, or it holds only unsent text and no turn
+// is running (PaneDraft), which a session that has handed off leaves behind
+// when it stops (mw-gq6.709), or it is stopped at the usage limit, which holds
+// no draft and will not be idle again before the reset (mw-gq6.473); the limit
+// is given when it is, and draft says it was text. A pane that cannot be read
+// is not closable.
+func (s SeatReap) paneClosable(ctx context.Context, window ReapWindow, armed time.Time) (limit *PaneLimit, draft, closable bool) {
 	state, err := s.Terminal.PaneState(ctx, window.ID)
 	switch {
 	case err != nil:
-		return nil, false
+		return nil, false, false
 	case state == PaneIdle:
-		return nil, true
+		return nil, false, true
+	case state == PaneDraft:
+		return nil, true, true
 	case state != PaneLimited:
-		return nil, false
+		return nil, false, false
 	}
-	limit, on := paneLimitOf(ctx, s.Terminal, window, armed)
+	found, on := paneLimitOf(ctx, s.Terminal, window, armed)
 	if !on {
-		return nil, false
+		return nil, false, false
 	}
-	return &limit, true
+	return &found, false, true
 }
 
 // paneIdle reports whether the window's pane is idle: a pane that cannot be read
@@ -590,10 +604,13 @@ func (s SeatReap) armedLine() string {
 	return fmt.Sprintf("armed; waiting for %s to name a successor whose window is open, and an idle pane", ActingFileName(s.Seat))
 }
 
-func (s SeatReap) closedLine(limit *PaneLimit) string {
+func (s SeatReap) closedLine(limit *PaneLimit, draft bool) string {
 	pane := "the pane was idle"
-	if limit != nil {
+	switch {
+	case limit != nil:
 		pane = "the pane was " + limit.String()
+	case draft:
+		pane = "the pane held only unsent text on its input line"
 	}
 	if s.WhenIdle {
 		return "closed: the seat has written a handoff since this window opened, and " + pane

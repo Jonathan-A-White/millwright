@@ -25,6 +25,7 @@ import (
 func registerDeputySteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Given(`^the Deputy's box holds (\d+) unread messages$`, c.theDeputysBoxHolds)
 	ctx.Given(`^the pane of the window "([^"]*)" is busy$`, c.thePaneIsBusy)
+	ctx.Given(`^the pane of the window "([^"]*)" holds only unsent text$`, c.thePaneHoldsOnlyUnsentText)
 	ctx.Given(`^the pane of the window "([^"]*)" shows the usage limit "([^"]*)"$`, c.thePaneShowsTheUsageLimit)
 	ctx.Given(`^the window "([^"]*)" loses the first Enter key it is sent$`, c.theWindowLosesTheFirstEnter)
 	ctx.Given(`^the window "([^"]*)" loses every Enter key it is sent$`, c.theWindowLosesEveryEnter)
@@ -35,7 +36,7 @@ func registerDeputySteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Then(`^mw deputy succeeds$`, c.seatUpSucceeds)
 	ctx.Then(`^mw deputy is refused saying the Deputy is already up in "([^"]*)"$`, c.deputyRefusedForBeingUp)
 	ctx.Then(`^mw deputy is refused saying there is no charter$`, c.refusedForNoCharter)
-	ctx.Then(`^mw deputy is refused saying the Deputy is busy in "([^"]*)" and the mail waits$`, c.deputyRefusedForBeingBusy)
+	ctx.Then(`^mw deputy is refused saying "([^"]*)"$`, c.deputyRefusedSaying)
 	ctx.Then(`^mw deputy is refused saying the Deputy in "([^"]*)" is stopped at the usage limit until "([^"]*)" and the mail waits for the reset$`, c.deputyRefusedForTheLimit)
 	ctx.Then(`^mw deputy says "([^"]*)"$`, c.deputySays)
 	ctx.Then(`^mw deputy says it pressed Enter again$`, c.deputySaysEnterAgain)
@@ -191,12 +192,19 @@ func (c *seatUpContext) enterWasPressed(times int, window string) error {
 	return nil
 }
 
-func (c *seatUpContext) deputyRefusedForBeingBusy(window string) error {
-	said, err := c.refused("the Deputy being busy")
+func (c *seatUpContext) thePaneHoldsOnlyUnsentText(window string) error {
+	id, open := c.windows.IDOf(window)
+	if !open {
+		return fmt.Errorf("the window %s is not open", window)
+	}
+	return c.windows.Pane(id, application.PaneDraft)
+}
+
+func (c *seatUpContext) deputyRefusedSaying(want string) error {
+	said, err := c.refused("the Deputy being up")
 	if err != nil {
 		return err
 	}
-	want := "the Deputy is busy in window " + window + "; the mail waits"
 	if !strings.Contains(said, want) {
 		return fmt.Errorf("expected the refusal to say %q, got %q", want, said)
 	}

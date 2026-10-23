@@ -225,7 +225,7 @@ func (f *FakeWindows) PaneState(_ context.Context, id string) (application.PaneS
 		return "", fmt.Errorf("no window %s is open", id)
 	}
 	if f.lines[id] != "" && f.panes[i] == application.PaneIdle {
-		return application.PaneInput, nil
+		return application.PaneDraft, nil
 	}
 	return f.panes[i], nil
 }

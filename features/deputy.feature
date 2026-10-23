@@ -22,6 +22,13 @@ Feature: mw deputy
   Deputy, which reads the mail from its handoff. A handed-off Deputy that is
   still busy is left alone, as any busy Deputy is.
 
+  A Deputy whose session handed off and stopped with only unsent text on its
+  input line, with no turn running, is done as well: mw closes that window and
+  starts a fresh Deputy, as for an idle one. The same pane with a turn running
+  is busy, and mw says why: "busy: a turn is running". A Deputy that has not
+  handed off and has text on its input line is not nudged over it, and mw
+  says so instead of calling it busy.
+
   A Deputy stopped at the harness's usage limit is neither idle nor busy: mw
   types nothing into it and closes nothing before the limit resets, since a
   fresh Deputy would meet the same limit, and says so: until when, in the
@@ -97,7 +104,7 @@ Feature: mw deputy
     And the pane of the window "deputy-2026-09-30-02" is busy
     And the Deputy's box holds 1 unread messages
     When mw deputy is run
-    Then mw deputy is refused saying the Deputy is busy in "deputy-2026-09-30-02" and the mail waits
+    Then mw deputy is refused saying "the Deputy is busy in window deputy-2026-09-30-02: a turn is running; the mail waits"
     And mw deputy leaves with the status 8
     And nothing was typed into the window "deputy-2026-09-30-02"
     And no window was opened
@@ -146,13 +153,46 @@ Feature: mw deputy
     And seat up says it started the seat in the window "deputy-2026-09-30-02"
     And a reaper was armed on the window "deputy-2026-09-30-02" in when-idle mode for the "deputy" seat
 
+  Scenario: A Deputy that has handed off and left only unsent text on its input line is closed and a fresh Deputy is started
+    Given the window "deputy-2026-09-29-02" was opened at "2026-09-29T08:00:00Z"
+    And the "deputy" seat's newest handoff was written at "2026-09-29T09:00:00Z"
+    And the pane of the window "deputy-2026-09-29-02" holds only unsent text
+    And the Deputy's box holds 2 unread messages
+    When mw deputy is run
+    Then mw deputy succeeds
+    And mw deputy says "closed the window deputy-2026-09-29-02: its Deputy had handed off"
+    And the window "deputy-2026-09-29-02" was closed
+    And exactly one window was opened
+    And seat up says it started the seat in the window "deputy-2026-09-30-02"
+
+  Scenario: A Deputy that has handed off and still has a turn running is busy, and mw says a turn is running
+    Given the window "deputy-2026-09-29-02" was opened at "2026-09-29T08:00:00Z"
+    And the "deputy" seat's newest handoff was written at "2026-09-29T09:00:00Z"
+    And the pane of the window "deputy-2026-09-29-02" is busy
+    And the Deputy's box holds 1 unread messages
+    When mw deputy is run
+    Then mw deputy is refused saying "the Deputy is busy in window deputy-2026-09-29-02: a turn is running; the mail waits"
+    And the window "deputy-2026-09-29-02" was not closed
+    And no window was opened
+
+  Scenario: A Deputy that has not handed off and has text on its input line is not typed over
+    Given the window "deputy-2026-09-30-02" was opened at "2026-09-30T08:00:00Z"
+    And the pane of the window "deputy-2026-09-30-02" holds only unsent text
+    And the Deputy's box holds 1 unread messages
+    When mw deputy is run
+    Then mw deputy is refused saying "text waits unsent on the input line of the Deputy in window deputy-2026-09-30-02, and the session has not handed off; the mail waits"
+    And mw deputy leaves with the status 8
+    And nothing was typed into the window "deputy-2026-09-30-02"
+    And the window "deputy-2026-09-30-02" was not closed
+    And no window was opened
+
   Scenario: A Deputy that has handed off but is still busy is left alone
     Given the window "deputy-2026-09-29-02" was opened at "2026-09-29T08:00:00Z"
     And the "deputy" seat's newest handoff was written at "2026-09-29T09:00:00Z"
     And the pane of the window "deputy-2026-09-29-02" is busy
     And the Deputy's box holds 1 unread messages
     When mw deputy is run
-    Then mw deputy is refused saying the Deputy is busy in "deputy-2026-09-29-02" and the mail waits
+    Then mw deputy is refused saying "the Deputy is busy in window deputy-2026-09-29-02: a turn is running; the mail waits"
     And the window "deputy-2026-09-29-02" was not closed
     And no window was opened
 

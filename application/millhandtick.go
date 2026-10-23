@@ -628,7 +628,7 @@ func (t MillhandTick) mailWhileUp(ctx context.Context, name string) (line string
 		return "", false, nil
 	}
 	state, err := t.Millhand.Terminal.PaneState(ctx, window.ID)
-	if err != nil || (state != PaneIdle && state != PaneInput) {
+	if err != nil || (state != PaneIdle && state != PaneInput && state != PaneDraft) {
 		return "", false, nil
 	}
 
@@ -644,7 +644,7 @@ func (t MillhandTick) mailWhileUp(ctx context.Context, name string) (line string
 		return "", false, nil
 	}
 
-	if state == PaneInput {
+	if state == PaneInput || state == PaneDraft {
 		return t.reportIdleWithText(ctx, name), true, nil
 	}
 	return t.nudge(ctx, name, window.ID, ids)

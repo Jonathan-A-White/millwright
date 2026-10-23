@@ -143,8 +143,8 @@ func newSeatReapCmd() *cobra.Command {
 			"the vault) names someone else than it did when the watch was armed, that someone's window is open,\n" +
 			"and the window's pane is idle. With --when-idle, for a session with nobody to hand over to, it closes\n" +
 			"the window once a handoff newer than the window exists and its pane is idle. Idle means an empty\n" +
-			"input line with nothing running, on two looks in a row; a window whose input line holds text is never\n" +
-			"closed, in either mode. The Deputy's window, with --when-idle, is not closed over unread mail in the\n" +
+			"input line with nothing running, or holding only unsent text with no turn running, on two looks in a\n" +
+			"row, in either mode. The Deputy's window, with --when-idle, is not closed over unread mail in the\n" +
 			"Deputy's box: the reaper types the mail nudge into the idle pane, logs it, and waits for a handoff\n" +
 			"written after it; a mail count that fails closes nothing.\n\n" +
 			"It looks every --interval (30s) and gives up after --limit (3h), closing nothing and saying so. Arming,\n" +

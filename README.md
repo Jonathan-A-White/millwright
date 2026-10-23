@@ -4465,9 +4465,16 @@ ever closes another's. `mw seat up` starts it, and it can be run by hand.
   closes the window once a handoff newer than the window exists and the pane is
   idle. A window nothing can date counts as opened when the watch was armed.
 
-Idle means an empty input line with nothing running, on two looks in a row. A
-window whose input line holds text is never closed, in either mode: someone
-may be typing. Only the tmux adapter reads a pane. A pane stopped at the
+Idle means an empty input line with nothing running, on two looks in a row. So
+does a pane holding only unsent text on its input line with no turn running, in
+either mode: a session that has handed off and stopped leaves such text behind
+(Deputy 757's unsent boot prompt kept its window open for three hours,
+mw-gq6.709), and the log says `the pane held only unsent text on its input
+line`. Nothing is ever typed over the text, so a Deputy's window in that state
+is closed over unread mail too, which waits for the next Deputy. A pane that is
+not at a prompt (a question, a menu) is never closed. Only the tmux adapter
+reads a pane, and `application.PaneHoldsOnlyDraft` is its one reading of unsent
+text, which `mw doctor mayor-stale` also uses for input left on the prompt line. A pane stopped at the
 harness's usage limit counts as idle here: it holds no draft and is idle again
 only after the reset, so it is closed, saying `the pane was stopped at the usage
 limit until <reset>: <the notice>`, and no mail nudge is typed into it.
@@ -4785,9 +4792,13 @@ deputy` looks at the pane. If it is idle at an empty input line, `mw deputy`
 types the same line the Mayor's notifier types, `New mail for deputy: N
 message(s): <ids>. Run bd mail inbox.`, with the half-second pause before Enter that
 the notifier uses, prints `nudged the Deputy in window <name>` and exits 0. If
-the pane is busy (`esc to interrupt` on screen, or text already on the input
-line) it types nothing, says `the Deputy is busy in window <name>; the mail
-waits` and exits **8**. With no unread mail, or a pane or box it cannot read,
+the pane is not idle it types nothing, says why and exits **8**: `the Deputy is
+busy in window <name>: a turn is running; the mail waits` (`esc to interrupt` on
+screen), `text waits unsent on the input line of the Deputy in window <name>,
+and the session has not handed off; the mail waits`, or a note that it is at a
+question or menu. A window whose session has handed off and whose pane holds only
+unsent text with no turn running is closed and a fresh Deputy started, as for an
+idle one. With no unread mail, or a pane or box it cannot read,
 it says "already up" as above. A pane stopped at the harness's usage limit (its
 "Stop and wait for limit to reset" menu, or its `You've hit your … limit ·
 resets …` notice above the input line) is typed nothing, mail or none: before the

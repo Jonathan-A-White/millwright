@@ -337,6 +337,18 @@ func TestInputLeftUntakenOnThePromptIsStale(t *testing.T) {
 	}
 }
 
+// The reading is application.PaneHoldsOnlyDraft's, which the reapers close a
+// handed-off window by; a numbered menu choice behind the mark it leaves out
+// stays stale here, as it always was (mw-gq6.709).
+func TestAMenuChoiceLeftOnThePromptIsStale(t *testing.T) {
+	r := newStaleRig(t)
+	r.write(r.pane, "● Which one?\n\n❯ 1. The first\n  2. The second\n")
+	r.run(0)
+	if got := r.run(16); got.Verdict != "cured" {
+		t.Fatalf("expected cured, got %+v", got)
+	}
+}
+
 func TestAnIdleMayorWhoseInputIsTakenIsAliveAgain(t *testing.T) {
 	r := newStaleRig(t)
 	r.write(r.pane, "❯ nudge text\n")

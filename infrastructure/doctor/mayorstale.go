@@ -63,13 +63,6 @@ const mayorStalePromptStateName = "mayor-stale-prompt"
 // not by the harness's selection arrow.
 var mayorStaleChoice = regexp.MustCompile(`^\s*(?:[❯>]\s*)?\d+\.\s`)
 
-// mayorStaleBusy is what a harness draws while a turn runs. Its elapsed clock
-// redraws the pane, so a pane that shows it and has not changed is a frozen turn.
-const mayorStaleBusy = "esc to interrupt"
-
-// mayorStaleInput is the mark that begins the harness's input line.
-const mayorStaleInput = "❯"
-
 // MayorStale is the check that notices a Mayor which still holds the seat but
 // has stopped. The heartbeat is the seat's own pane, read only where the
 // harness redraws it: a running turn (the pane shows "esc to interrupt"), or
@@ -251,24 +244,28 @@ func (m *MayorStale) window(ctx context.Context) (id, name string, held bool, ve
 // no turn running is a Mayor waiting for its next word, and any other pane is
 // not one this check can call dead. A pane parked on the usage limit is
 // mayor-stuck's: a respawn would meet the same limit (mw-gq6.433).
+//
+// Text left on the input line is read by application.PaneHoldsOnlyDraft, the
+// reading the seats' reapers close a handed-off window by, so that the two
+// call the same pane the same thing (mw-gq6.709).
 func paneStalls(pane string) bool {
 	pane = strings.ReplaceAll(pane, "\u00a0", " ")
 	if _, limit := limitOf(pane); limit {
 		return false
 	}
-	if _, prompt := promptOf(pane); prompt || strings.Contains(pane, mayorStaleBusy) {
+	if _, prompt := promptOf(pane); prompt || strings.Contains(pane, application.PaneWorkingMarker) {
 		return true
 	}
-	// The input line is the lowest line that begins with the mark: earlier
-	// ones are the Governor's past words in the transcript.
-	lines := strings.Split(pane, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if rest, ok := strings.CutPrefix(lines[i], mayorStaleInput); ok {
-			return strings.TrimSpace(rest) != ""
-		}
+	if application.PaneHoldsOnlyDraft(pane) {
+		return true
 	}
-	return false
+	// A numbered choice behind the mark is a menu nobody answered, and stands
+	// as still as unsent text does.
+	return mayorStaleMenuChoice.MatchString(application.InputDraft(pane))
 }
+
+// mayorStaleMenuChoice is a numbered option read off the input line's own mark.
+var mayorStaleMenuChoice = regexp.MustCompile(`^\d+\.\s`)
 
 // since is when the pane of window last changed, as far as this check has
 // looked: now, for a pane or window it has not seen before, which it saves.
