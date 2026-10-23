@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -117,6 +118,31 @@ func (g *Grinds) Commit(ctx context.Context, checkout string) (string, error) {
 		return local, nil
 	}
 	return remote, nil
+}
+
+// Grinds satisfies the port that reads a ref.
+var _ application.GrindRefs = (*Grinds)(nil)
+
+// ResolveRef implements application.GrindRefs. A ref that is a directory is a
+// worktree of the rig: its HEAD is read, from it, and a note says when it holds
+// changes that are not committed. Any other ref is resolved in the checkout.
+func (g *Grinds) ResolveRef(ctx context.Context, checkout, ref string) (readFrom, commit, note string, err error) {
+	readFrom, rev := checkout, ref
+	worktree := false
+	if info, statErr := os.Stat(ref); statErr == nil && info.IsDir() {
+		readFrom, rev, worktree = ref, "HEAD", true
+	}
+	out, err := g.git(ctx, readFrom, "rev-parse", "--verify", "--quiet", rev+"^{commit}")
+	if err != nil {
+		return "", "", "", fmt.Errorf("the ref %q names no commit in %s: %w", ref, readFrom, err)
+	}
+	commit = strings.TrimSpace(out)
+	if worktree {
+		if dirty, derr := g.git(ctx, readFrom, "status", "--porcelain", "--untracked-files=no"); derr == nil && strings.TrimSpace(dirty) != "" {
+			note = fmt.Sprintf("%s has changes that are not committed; the grind is read at its commit %s", readFrom, commit[:min(12, len(commit))])
+		}
+	}
+	return readFrom, commit, note, nil
 }
 
 // ReadAt implements application.GrindSource: `git ls-tree` says whether the

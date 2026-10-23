@@ -74,6 +74,10 @@ type GristSmoke struct {
 	// TalkPrefix begins the names of the talks it sends: GristSmokeTalkPrefix
 	// when empty, GristEvalTalkPrefix for `mw grist eval`.
 	TalkPrefix string
+	// Override, when set, is the text of a grind at a ref that every send
+	// carries for the mill to grind with, in a talk of its own even for an
+	// example of one turn (`mw grist eval --ref`); nil is the grind at main.
+	Override *GristGrindOverride
 	// Out is where progress is printed; nil prints nothing.
 	Out io.Writer
 }
@@ -407,7 +411,7 @@ func (s GristSmoke) prepare(ctx context.Context, checkout, commit, app, kind, fi
 	if wait <= 0 {
 		wait = GristSmokeWait
 	}
-	turns := []GristSendRequest{{App: app, Kind: kind, Version: example.SchemaVersion, RequestFile: request, Photos: photos, Wait: wait}}
+	turns := []GristSendRequest{{App: app, Kind: kind, Version: example.SchemaVersion, RequestFile: request, Photos: photos, Wait: wait, GrindOverride: s.Override}}
 	if turn := example.Turn2; turn != nil {
 		second := filepath.Join(dir, "request-2.json")
 		// The session holds turn 1, so turn 2 goes without a history, whatever the
@@ -427,7 +431,7 @@ func (s GristSmoke) prepare(ctx context.Context, checkout, commit, app, kind, fi
 			}
 			photos2 = append(photos2, local)
 		}
-		turns = append(turns, GristSendRequest{App: app, Kind: kind, Version: example.Version(), RequestFile: second, Photos: photos2, Wait: wait})
+		turns = append(turns, GristSendRequest{App: app, Kind: kind, Version: example.Version(), RequestFile: second, Photos: photos2, Wait: wait, GrindOverride: s.Override})
 	}
 	return smokePrepared{example: example, turns: turns, wait: wait, dir: dir}, ""
 }
@@ -520,7 +524,7 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 // turn that did not come right ends the attempt, its failure said to be that
 // turn's; only the last turn is held to the example's expect.
 func (s GristSmoke) attempt(ctx context.Context, label string, turns []GristSendRequest, wait time.Duration, schema string, expect map[string]json.RawMessage) smokeTry {
-	if len(turns) == 1 {
+	if len(turns) == 1 && s.Override == nil {
 		return s.try(ctx, turns[0], wait, schema, expect)
 	}
 	talk := s.talkName(label)
@@ -661,6 +665,11 @@ func (s GristSmoke) try(ctx context.Context, send GristSendRequest, wait time.Du
 	}
 	if sent.Answer == nil {
 		return smokeTry{why: "the mill left no answer"}
+	}
+	if send.GrindOverride != nil && !sent.Answer.Grind.Override {
+		// A mill that does not know the override grinds with main's text and
+		// would pass or fail the example for the wrong grind.
+		return smokeTry{why: "the mill answered with the grind at main, not the ref's text (is the mill up to date?)"}
 	}
 	if violations := SchemaViolations(sent.Answer.Answer, schema); len(violations) > 0 {
 		return smokeTry{

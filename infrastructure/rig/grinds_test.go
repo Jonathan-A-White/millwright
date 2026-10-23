@@ -208,3 +208,44 @@ func TestTheRefreshLimitIsTwentySecondsOrLess(t *testing.T) {
 		t.Fatalf("expected a limit of 20 s or less, got %v", rig.GrindRefreshLimit)
 	}
 }
+
+// A ref names a branch of the checkout, or a worktree of the rig whose HEAD is
+// read: either way the grind is read at that commit and not at main, and a
+// worktree with changes not committed says so.
+func TestGrindsAreReadAtARefOrAWorktreeNotAtMain(t *testing.T) {
+	here, _ := aRig(t)
+	write(t, here, "grinds/sweep.md", "SAY MAIN\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Main's instructions")
+	main := run(t, here, "git", "rev-parse", "HEAD")
+	tree := filepath.Join(t.TempDir(), "story")
+	run(t, here, "git", "worktree", "add", "-q", "-b", "mw/story", tree)
+	write(t, tree, "grinds/sweep.md", "SAY REF\n")
+	run(t, tree, "git", "add", "-A")
+	run(t, tree, "git", "commit", "-qm", "Reworded")
+	ref := run(t, tree, "git", "rev-parse", "HEAD")
+
+	ctx := context.Background()
+	grinds := rig.NewGrinds()
+	for _, name := range []string{"mw/story", tree} {
+		from, commit, note, err := grinds.ResolveRef(ctx, here, name)
+		if err != nil || commit != ref || note != "" {
+			t.Fatalf("%s: expected the branch's commit %s, got %q %q %v", name, ref, commit, note, err)
+		}
+		data, found, err := grinds.ReadAt(ctx, from, commit, "grinds/sweep.md")
+		if err != nil || !found || string(data) != "SAY REF\n" {
+			t.Fatalf("%s: expected the ref's instructions, got %q %v %v", name, data, found, err)
+		}
+	}
+	if data, _, _ := grinds.ReadAt(ctx, here, main, "grinds/sweep.md"); string(data) != "SAY MAIN\n" {
+		t.Fatalf("expected main to keep its own, got %q", data)
+	}
+
+	write(t, tree, "grinds/sweep.md", "SAY HALF DONE\n")
+	if _, _, note, err := grinds.ResolveRef(ctx, here, tree); err != nil || !strings.Contains(note, "not committed") {
+		t.Errorf("expected a note that a change is not committed, got %q %v", note, err)
+	}
+	if _, _, _, err := grinds.ResolveRef(ctx, here, "no/such"); err == nil {
+		t.Error("expected a ref naming no commit to be an error")
+	}
+}

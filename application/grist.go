@@ -63,6 +63,18 @@ type GristPlaintext struct {
 	// grist, kept raw: a malformed one is ignored (GristClientTiming), never a
 	// reason to refuse the grist.
 	ClientTiming json.RawMessage `json:"client_timing,omitempty"`
+	// GrindOverride is the instructions and schema `mw grist eval --ref` brings
+	// from a ref, for the mill to grind this one grist with in place of the
+	// grind's own at main. The mill takes it only from the factory's test key,
+	// in an eval or smoke talk (GristGrind.judgeOverride).
+	GrindOverride *GristGrindOverride `json:"grind_override,omitempty"`
+}
+
+// GristGrindOverride is the text of a grind as a ref holds it: its instructions
+// (the file or the parts of its directory joined) and its answer schema.
+type GristGrindOverride struct {
+	Instructions string `json:"instructions"`
+	Schema       string `json:"schema"`
 }
 
 // GristAnswerGrind is which grind answered a grist, and the commit of the
@@ -72,6 +84,9 @@ type GristAnswerGrind struct {
 	Kind   string `json:"kind"`
 	V      string `json:"v"`
 	Commit string `json:"commit,omitempty"`
+	// Override says the grind was run with the text the grist brought
+	// (GristPlaintext.GrindOverride), not the one at Commit.
+	Override bool `json:"override,omitempty"`
 }
 
 // GristAnswer is the plaintext of the mill's answer to one grist, sealed to
@@ -328,6 +343,15 @@ type GrindSource interface {
 	// List reports the path, relative to the rig's root, of every file at
 	// or under dir at commit, sorted; none when there is no such directory.
 	List(ctx context.Context, checkout, commit, dir string) ([]string, error)
+}
+
+// GrindRefs is a GrindSource that can also read a ref instead of main, for `mw
+// grist eval --ref`. ref is a git ref the checkout holds, or a worktree of the
+// rig; the grind is then read at the commit returned, from the checkout returned
+// (the worktree itself for a worktree, whose uncommitted changes are not read:
+// note says so). The real adapter is infrastructure/rig's Grinds.
+type GrindRefs interface {
+	ResolveRef(ctx context.Context, checkout, ref string) (readFrom, commit, note string, err error)
 }
 
 // GristState is the mill's own state on its host: how far it has read, the

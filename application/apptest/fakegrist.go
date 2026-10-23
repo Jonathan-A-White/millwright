@@ -129,6 +129,10 @@ type FakeGrinds struct {
 	remoteCommits map[string]string
 	remoteFiles   map[string]map[string][]byte
 	refreshes     map[string]int
+	// refs are the commits a ref names in a checkout, refFiles the files a ref's
+	// commit holds, both from SetRefFile.
+	refs     map[string]string
+	refFiles map[string]map[string][]byte
 	// Err, when set, is returned by every method but Refresh.
 	Err error
 	// RefreshErr, when set, is returned by Refresh, which then changes nothing.
@@ -143,7 +147,7 @@ func NewFakeGrinds() *FakeGrinds {
 	return &FakeGrinds{
 		commits: map[string]string{}, files: map[string]map[string][]byte{},
 		remoteCommits: map[string]string{}, remoteFiles: map[string]map[string][]byte{},
-		refreshes: map[string]int{},
+		refreshes: map[string]int{}, refs: map[string]string{}, refFiles: map[string]map[string][]byte{},
 	}
 }
 
@@ -157,6 +161,43 @@ func (f *FakeGrinds) SetRemoteFile(checkout, commit, path string, data []byte) {
 		f.remoteFiles[checkout] = map[string][]byte{}
 	}
 	f.remoteFiles[checkout][path] = append([]byte(nil), data...)
+}
+
+// SetRefFile puts data at path in the commit the ref names in the checkout, a
+// commit other than its main's; GrindRefs reads it.
+func (f *FakeGrinds) SetRefFile(checkout, ref, commit, path string, data []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refs[checkout+"\x00"+ref] = commit
+	key := checkout + "\x00" + commit
+	if f.refFiles[key] == nil {
+		f.refFiles[key] = map[string][]byte{}
+	}
+	f.refFiles[key][path] = append([]byte(nil), data...)
+}
+
+var _ application.GrindRefs = (*FakeGrinds)(nil)
+
+// ResolveRef implements application.GrindRefs: the commit SetRefFile gave the ref.
+func (f *FakeGrinds) ResolveRef(_ context.Context, checkout, ref string) (string, string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	commit, ok := f.refs[checkout+"\x00"+ref]
+	if !ok {
+		return "", "", "", fmt.Errorf("the ref %q names no commit in %s", ref, checkout)
+	}
+	return checkout, commit, "", nil
+}
+
+// filesAt is the files the checkout holds at commit: its main's, or a ref's.
+func (f *FakeGrinds) filesAt(checkout, commit string) (map[string][]byte, error) {
+	if files, ok := f.refFiles[checkout+"\x00"+commit]; ok {
+		return files, nil
+	}
+	if f.commits[checkout] != commit {
+		return nil, fmt.Errorf("%s has no commit %s", checkout, commit)
+	}
+	return f.files[checkout], nil
 }
 
 // Refreshes reports how many times the checkout was Refreshed, failed or not.
@@ -221,10 +262,11 @@ func (f *FakeGrinds) ReadAt(_ context.Context, checkout, commit, path string) ([
 	if f.Err != nil {
 		return nil, false, f.Err
 	}
-	if f.commits[checkout] != commit {
-		return nil, false, fmt.Errorf("%s has no commit %s", checkout, commit)
+	files, err := f.filesAt(checkout, commit)
+	if err != nil {
+		return nil, false, err
 	}
-	data, ok := f.files[checkout][path]
+	data, ok := files[path]
 	return append([]byte(nil), data...), ok, nil
 }
 
@@ -235,11 +277,12 @@ func (f *FakeGrinds) List(_ context.Context, checkout, commit, dir string) ([]st
 	if f.Err != nil {
 		return nil, f.Err
 	}
-	if f.commits[checkout] != commit {
-		return nil, fmt.Errorf("%s has no commit %s", checkout, commit)
+	held, err := f.filesAt(checkout, commit)
+	if err != nil {
+		return nil, err
 	}
 	var files []string
-	for name := range f.files[checkout] {
+	for name := range held {
 		if name == dir || strings.HasPrefix(name, strings.TrimSuffix(dir, "/")+"/") {
 			files = append(files, name)
 		}

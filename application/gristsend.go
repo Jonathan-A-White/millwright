@@ -70,6 +70,10 @@ type GristSendRequest struct {
 	// Talk names the talk the grist is a turn of, as an app names it; empty
 	// is none.
 	Talk string
+	// GrindOverride, when set, is the instructions and schema the mill grinds
+	// this grist with in place of the grind's at main. It is only for a grist
+	// in an eval: or smoke: talk, and the mill takes it from the test key alone.
+	GrindOverride *GristGrindOverride
 }
 
 // GristSendReport is what one send did: the txid the grist goes by, and the
@@ -231,6 +235,9 @@ func (s GristSend) prepare(req GristSendRequest) (GristPlaintext, []gristPhoto, 
 	if len(req.Photos) > GristSendMaxPhotos {
 		return GristPlaintext{}, nil, fmt.Errorf("mw grist send: %d photos is over the %d a grist may carry", len(req.Photos), GristSendMaxPhotos)
 	}
+	if req.GrindOverride != nil && !strings.HasPrefix(req.Talk, GristEvalTalkPrefix+":") && !strings.HasPrefix(req.Talk, GristSmokeTalkPrefix+":") {
+		return GristPlaintext{}, nil, fmt.Errorf("mw grist send: grind text of a ref may only be sent in an %s: or %s: talk", GristEvalTalkPrefix, GristSmokeTalkPrefix)
+	}
 	photos := make([]gristPhoto, 0, len(req.Photos))
 	for _, path := range req.Photos {
 		photo, err := readGristPhoto(path)
@@ -239,7 +246,7 @@ func (s GristSend) prepare(req GristSendRequest) (GristPlaintext, []gristPhoto, 
 		}
 		photos = append(photos, photo)
 	}
-	plain := GristPlaintext{Grist: GristName{App: req.App, Kind: req.Kind, V: version, Talk: req.Talk}, Input: json.RawMessage(raw)}
+	plain := GristPlaintext{Grist: GristName{App: req.App, Kind: req.Kind, V: version, Talk: req.Talk}, Input: json.RawMessage(raw), GrindOverride: req.GrindOverride}
 	return plain, photos, nil
 }
 
