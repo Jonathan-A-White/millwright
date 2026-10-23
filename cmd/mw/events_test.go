@@ -188,6 +188,24 @@ func TestEventsEmitEmergencyWritesTheEventInTheEmergencyLane(t *testing.T) {
 	}
 }
 
+func TestEventsEmitClearsNamesTheEmergencyItEnds(t *testing.T) {
+	path := eventsHome(t)
+	if out, err := runEvents(t, "emit", "--kind", "job", "--from", "running", "--to", "failed", "--emergency"); err != nil {
+		t.Fatalf("emit: %v\n%s", err, out)
+	}
+	if out, err := runEvents(t, "emit", "--kind", "job", "--from", "running", "--to", "done", "--clears", "1"); err != nil {
+		t.Fatalf("emit --clears: %v\n%s", err, out)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[1], `"clears":1`) || !strings.Contains(lines[1], `"lane":"normal"`) {
+		t.Fatalf("expected a normal-lane event clearing seq 1, got %q", data)
+	}
+}
+
 func TestEventsTrimMovesOldEventsToTheArchiveAndTailReadsThemBack(t *testing.T) {
 	path := eventsHome(t)
 	for i := 0; i < 6; i++ {

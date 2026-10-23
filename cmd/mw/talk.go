@@ -350,8 +350,9 @@ func newTalkCallCmd() *cobra.Command {
 			"--link <bead> (repeatable) puts a bead id in the record's links field, beside the text and never\n" +
 			"in it. It refuses when postern_governor_key is not set.\n\n" +
 			"The ring is also written to the home's event log as one event in the emergency lane (a message,\n" +
-			"its detail the ring's txid), which the follower sends alone and at once; a failure to write it is\n" +
-			"said and does not fail the call.",
+			"its detail 'The Mayor is calling: <text>'), which the follower sends alone and at once; a failure\n" +
+			"to write it is said and does not fail the call. mw talk wait ends the ring with a normal-lane event\n" +
+			"that clears it when the Governor answers, or after 15 minutes; a new ring ends one still open.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			keys, err := posternKeys()

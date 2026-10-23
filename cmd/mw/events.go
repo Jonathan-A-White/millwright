@@ -311,7 +311,9 @@ func newEventsEmitCmd() *cobra.Command {
 			"  mw events emit --kind control --detail \"pause-host laptop\"\n\n" +
 			"--emergency puts the event in the emergency lane: the follower sends it alone, as a record of one\n" +
 			"event, on chain and direct at once, ahead of the pending batches and of the 2 s window, and mw status\n" +
-			"counts it among today's emergencies.",
+			"counts it among today's emergencies. An emergency ends with an event in the normal lane whose --clears is its\n" +
+			"seq (the number emit printed): the Governor's app takes that banner down.\n\n" +
+			"  mw events emit --kind job --from running --to done --clears 41",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if e.Kind == "" {
@@ -342,6 +344,7 @@ func newEventsEmitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&e.To, "to", "", "the state after")
 	cmd.Flags().StringVar(&e.Detail, "detail", "", "what happened: a job's outcome on done or failed")
 	cmd.Flags().StringVar(&e.Actor, "actor", "", "who: <job>@<host> for a job (default mw@<host>)")
+	cmd.Flags().Uint64Var(&e.Clears, "clears", 0, "the seq of the emergency this event ends")
 	cmd.Flags().BoolVar(&emergency, "emergency", false, "send it alone and at once, ahead of the batches (the emergency lane)")
 	return cmd
 }

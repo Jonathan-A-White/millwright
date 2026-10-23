@@ -13,7 +13,7 @@ The application/ files of each use case in [docs/codemap.md](codemap.md), which 
 | Config* | application/configset.go |
 | IdeasOnly* | application/ideasonly.go, application/ideasonlyrelease.go |
 | Seat* | application/seat{context,up,reap,handover}.go, application/seattake.go |
-| Talk*, TalkShow | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go |
+| Talk*, TalkShow | application/talkcall.go, application/talkring.go, application/talkmodel.go, application/talksay.go, application/talkwait.go |
 | Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go |
 | Secrets*, Google*, Contacts (mw contacts find), Hands*, Ask, Watch, Doctor | application/secrets.go, application/hands.go, application/ask.go, application/watch.go, application/doctor.go, application/starved.go, application/hostpassed.go, application/unitfailed.go (`mw doctor unit-failed`, features/unit_failed.feature), cmd/mw/doctor_unitfailed.go, infrastructure/doctor/unitfailed.go |
 | SeatBoot{,Set}, SeatRead, Memory[Log], Errors, Init | application/seatboot.go, application/memory.go, application/memorymigrate.go, application/errors.go, application/init.go, application/member.go |

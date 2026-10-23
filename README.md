@@ -4743,9 +4743,12 @@ did go direct; a chain added by itself that fails is only said, on a
 `chain: not sent: ...` line, and the call still succeeds.
 
 The ring also rides the emergency lane (mw-jrx0s.12): `mw talk call` writes one `message`
-event, in that lane, to the home's event log, its detail the ring's txid, so the follower
-sends the Governor's app a record of it at once. A failure to write it is said and the call
-still succeeds.
+event, in that lane, to the home's event log, its detail words (`The Mayor is calling: <reason>`,
+never the txid), so the follower sends the Governor's app a record of it at once. A failure to
+write it is said and the call still succeeds. The ring's seq is kept in the note `talk.call.ring`
+and the ring ends with one event in the normal lane whose `clears` is that seq: when `mw talk wait`
+hears the Governor's turn or call record, when it finds the ring older than 15 minutes, or when a
+newer ring replaces it.
 
 ```
 call ring sent
