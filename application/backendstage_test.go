@@ -65,10 +65,10 @@ func (f *fakeBuilds) NewestChange(_ context.Context, rigDir, subdir string) (app
 	return f.Newest, f.NewestErr
 }
 
-func (f *fakeBuilds) Staged(out string) bool {
+func (f *fakeBuilds) Staged(_ context.Context, _, stageDir, name, commit string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.Have[out]
+	return f.Have[filepath.Join(stageDir, name+"-"+commit[:7])], nil
 }
 
 const landedCommit = "4c9db71e0f7a5b3c2d1e8f9a0b1c2d3e4f5a6b7c"

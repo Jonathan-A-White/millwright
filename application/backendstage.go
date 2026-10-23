@@ -110,8 +110,11 @@ type BackendBuilds interface {
 	// host could not tell it of (mw-gq6.723).
 	NewestChange(ctx context.Context, rigDir, subdir string) (BackendCommit, error)
 
-	// Staged reports whether a binary is already at out.
-	Staged(out string) bool
+	// Staged reports whether stageDir already holds a binary named <name>-<short
+	// commit> for commit, or one built at a later commit of the rig's main that
+	// contains it: a landing on the home stages the commit it landed, which is
+	// the version commit after the one that changed the backend.
+	Staged(ctx context.Context, rigDir, stageDir, name, commit string) (bool, error)
 }
 
 // BackendCommit is a commit of a rig's main that changed its backend: its hash
@@ -314,7 +317,12 @@ func (b BackendStage) findUnstaged(ctx context.Context, home string) []string {
 		if newest.Commit == "" {
 			continue
 		}
-		if b.Builds.Staged(filepath.Join(cfg.Stage, filepath.Base(cfg.Live)+"-"+updatedRevision(newest.Commit))) {
+		staged, err := b.Builds.Staged(ctx, rigDir, cfg.Stage, filepath.Base(cfg.Live), newest.Commit)
+		if err != nil {
+			notes = append(notes, "backend: whether "+name+"'s backend is staged could not be read: "+firstLine(err.Error()))
+			continue
+		}
+		if staged {
 			continue
 		}
 		l := BackendLanding{Rig: name, Story: updatedRevision(newest.Commit), Title: newest.Subject, Commit: newest.Commit}

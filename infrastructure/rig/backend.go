@@ -153,8 +153,32 @@ func (w *Worktrees) NewestChange(ctx context.Context, rigDir, subdir string) (ap
 	return application.BackendCommit{Commit: commit, Subject: subject}, nil
 }
 
-// Staged implements application.BackendBuilds.
-func (w *Worktrees) Staged(out string) bool {
-	_, err := os.Stat(out)
-	return err == nil
+// Staged implements application.BackendBuilds: a file <name>-<short> in stageDir
+// whose short is the start of commit or of a commit of the remote's default
+// branch that has commit among its ancestors.
+func (w *Worktrees) Staged(ctx context.Context, rigDir, stageDir, name, commit string) (bool, error) {
+	files, err := filepath.Glob(filepath.Join(stageDir, name+"-*"))
+	if err != nil || len(files) == 0 {
+		return false, err
+	}
+	covering := []string{commit}
+	if branch, err := w.defaultBranch(ctx, rigDir); err == nil {
+		out, err := w.git(ctx, rigDir, "rev-list", "--ancestry-path", commit+".."+application.StartPoint(w.remote, branch))
+		if err != nil {
+			return false, err
+		}
+		covering = append(covering, strings.Fields(out)...)
+	}
+	for _, file := range files {
+		short := strings.TrimPrefix(filepath.Base(file), name+"-")
+		if short == "" || strings.Contains(short, ".") {
+			continue
+		}
+		for _, full := range covering {
+			if strings.HasPrefix(full, short) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }

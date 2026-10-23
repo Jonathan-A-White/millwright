@@ -240,16 +240,41 @@ func TestNewestChangeIsTheNewestCommitOfTheRemotesMainThatTouchedTheDirectory(t 
 	}
 }
 
-func TestStagedSaysWhetherABinaryIsAtThePath(t *testing.T) {
+// A binary staged at a later commit of main covers an earlier one, because the
+// landing on the home stages the version commit that follows the backend change;
+// one built at a commit before it, or off main, does not.
+func TestStagedIsTrueForABinaryBuiltAtTheCommitOrALaterOneOfMain(t *testing.T) {
+	here := aRigWithAServer(t)
+	ctx := context.Background()
 	worktrees := rig.New()
-	out := filepath.Join(t.TempDir(), "postern-abc1234")
-	if worktrees.Staged(out) {
-		t.Fatal("expected nothing staged")
+	changed := run(t, here, "git", "rev-parse", "HEAD")
+	stage := t.TempDir()
+
+	if got, err := worktrees.Staged(ctx, here, stage, "postern", changed); err != nil || got {
+		t.Fatalf("expected an empty stage to cover nothing, got %v, %v", got, err)
 	}
-	if err := os.WriteFile(out, []byte("x"), 0o755); err != nil {
+
+	write(t, here, "src/app.txt", "a newer app\n")
+	run(t, here, "git", "commit", "-qam", "Version 0.1.1")
+	run(t, here, "git", "push", "-q", "origin", "main")
+	later := run(t, here, "git", "rev-parse", "HEAD")
+
+	older := filepath.Join(stage, "postern-fffffff")
+	if err := os.WriteFile(older, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if !worktrees.Staged(out) {
-		t.Fatal("expected the binary found")
+	if got, _ := worktrees.Staged(ctx, here, stage, "postern", later); got {
+		t.Fatal("expected a binary of another commit not to cover the later one")
+	}
+	os.Remove(older)
+
+	if err := os.WriteFile(filepath.Join(stage, "postern-"+later[:7]), []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := worktrees.Staged(ctx, here, stage, "postern", changed); err != nil || !got {
+		t.Fatalf("expected the binary of the later commit to cover the change, got %v, %v", got, err)
+	}
+	if got, err := worktrees.Staged(ctx, here, stage, "other", changed); err != nil || got {
+		t.Fatalf("expected another binary's name not to count, got %v, %v", got, err)
 	}
 }
