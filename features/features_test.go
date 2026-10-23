@@ -161,6 +161,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeSelfUpdateScenario(ctx)
 	steps.InitializeSeatContextScenario(ctx)
 	steps.InitializeSeatReapScenario(ctx)
+	steps.InitializeSeatTakeScenario(ctx)
 	steps.InitializeSessionEnvScenario(ctx)
 	steps.InitializeSeatUpScenario(ctx)
 	steps.InitializeContributeBackScenario(ctx)
