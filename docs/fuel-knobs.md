@@ -80,6 +80,20 @@ The Mayor's own model and effort are not an mw dial: they are chosen when the
 Mayor is respawned, by the vault's respawn script, and the Mayor runs on Opus
 at high today (handoffs of 2026-10-16 and 2026-10-17).
 
+## Pausing the factory
+
+The quickest way to spend nothing until the week resets (mw-gq6.707). The hold is the usage-limit
+hold note, host.<host>.harness_hold, on every host: a session already running finishes, nothing
+new is claimed, and no cap is set to 0 and no unit is masked. The paused set is kept in
+plans/pause-<date>/paused.json in the vault.
+
+| Dial | Turned by | Now, by host | Cheaper | What is lost |
+|-|-|-|-|-|
+| Pause every host at the Governor's word | `mw pause --reason <words>`, on the home; ended by `mw resume` | not paused on any host (nothing recorded; `mw resume` says "not paused" when so) | Paused: every host holds new claims, each Builder checks its work in to its branch and says PAUSED, cloud boxes go down | Landings while it lasts; a cloud box's stories start again from their pushed branches, not from the live session |
+| When the pause ends | `mw pause --until <RFC3339>`; with none, computed from the usage reported and the burn (PROVISIONAL); `mw resume` ends it at once | a week, open-ended, when no usage was reported | Longer: the quota left is not spent on a Builder that cannot finish | The week's last hours, if the time is set too late |
+| The factory pauses itself at the reserve | `mw usage set <percent>`: the Governor's reading, from his screenshot (PROVISIONAL), against 100% less R(t), 10% of the quota with a week left to 0% with an hour left | no reading kept | A higher reserve is not a dial: it is the Governor's rule (10% to 0%) | Nothing, until the usage is reported: nothing reads it by itself yet |
+| The burn at full throttle the resume time is sized to | `mw pause --rate <percent>`, a percent of the quota an hour; else measured from the seat ledgers and the readings | measured; one reading cannot measure it | A lower rate resumes earlier | A rate too low runs the quota out before the reset |
+
 ## Ideas only
 
 | Dial | Turned by | Now, by host | Cheaper | What is lost |

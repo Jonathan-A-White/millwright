@@ -9,6 +9,7 @@
 | VaultFiles, Tracker{Sync,History,Flush}, SyncHaltMarker | application/sync.go | {vault/git,beads/sync}.go, synchalt, flushlog |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | beads/mail.go |
 | EpicRules (+LandingRules) | application/epicrules.go | vault/epicrules.go |
+| Pause{Fleet,Book,Timer,Git} | application/pause.go | pause, rig |
 | Vault, Harness, SeatBootFiles, RigDocs, BootCommands | seatboot.go, application/seatboot_manifest.go, application/harness.go | {vault,claude,shellcmd}, rig/rigfiles.go |
 | Runner, BdProgram | application/runner.go, application/bdretry.go | {tmux,bdprogram} |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | {vault/{seat,reaplog},tmux/window,claude/claude}.go |
@@ -45,11 +46,12 @@ Each use case's application/ files: [docs/codemap-detail.md](codemap-detail.md),
 |-|-|-|
 | File, Release, Ice, Thaw, Stuck (--inversions; inversions in DAMPERS), Retry, Cause, Note, Path* | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/ice.go, cmd/mw/stuck.go, application/dampers.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/note.go, cmd/mw/path.go | {file*,release,retry*,cause,note,path_set} |
 | Show, Peek, Prove, StampHead, Tester[File], FactoryReport[Send], Invest[Book], Loop (rank: application/looprank.go) | cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go, cmd/mw/invest.go, cmd/mw/loop.go | {show,peek,prove,stamp,tester,report*,invest} |
-| Dispatch, Next, BatchLand, AfterLandingRun, BdRetry | cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/land.go, cmd/mw/afterlanding.go, cmd/mw/bd.go | {dispatch,next,batch_land,after_*,bd_*}; a landing may pass the 10240-byte map cap by 10% (codemapBandPercent), filing a trim bug; `AC n NOT met` in a closing comment marks the Landed mail, files a held bug (application/acunmet.go) |
+| Dispatch, Next, BatchLand, AfterLandingRun, BdRetry | cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/land.go, cmd/mw/afterlanding.go, cmd/mw/bd.go | {dispatch,next,batch_land,after_*,bd_*} |
 | Check*, Status, CloudCheck, CloudMake, Brief | cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | {check,status,cloud,brief} |
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | {sweep,tidy,sync,mail,home} |
 | Suite, SuiteFiler, NightlySuite, NightlyTiming, ContributeBack | cmd/mw/suite.go, cmd/mw/suitenightly.go, cmd/mw/timingnightly.go | {suite*,timing_nightly,contribute_back} |
 | Config* | cmd/mw/config.go | config_* |
+| Pause, Resume, Usage | cmd/mw/pause.go, cmd/mw/resume.go, cmd/mw/usage.go | pause |
 | IdeasOnly* | cmd/mw/ideasonly.go | ideas_only, postern_inbox_apply, talk_wait |
 | Member[Remove] ([docs/family.md](family.md)) | cmd/mw/member.go | member |
 | Seat* | cmd/mw/seat.go | seat_* |

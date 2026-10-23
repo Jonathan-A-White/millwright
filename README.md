@@ -1955,6 +1955,38 @@ there is none; in both the note is written straight into the database every
 sync. See *The factory on one host (the desktop)*, above, and
 `features/sync.feature`.
 
+## Pausing the factory (mw pause, mw resume, mw usage)
+
+`mw pause --reason "<his words>"` on the home stops the factory where it stands, and `mw resume` starts
+it again. The hold is the usage-limit hold note, `host.<host>.harness_hold`, set on every host (the
+home, the hosts of `[hands_hosts]`, and each cloud box up, reached at `ssh mw@<box>.mw` without a line
+there), each asked over ssh to run `mw pause --here`. No cap is set to 0 and no dispatch unit is masked.
+
+- Every running Builder is typed the `PAUSE:` line and each host waits up to `--wait` (10 minutes) for its
+  branch to be pushed and its story to carry a comment opening `PAUSED`. What a Builder did not do, mw does
+  itself: it commits the worktree's leftovers, pushes `mw/<story>` and writes the `PAUSED` comment, and the
+  paused set says which of the two did it.
+- `cloud.max_boxes` is set to 0 (the old value kept, the way back printed); a cloud box's sessions are
+  ended and the box is brought down once its branches are pushed, and kept up when one is not.
+- The paused set (story, host, window, branch and commit, whether the branch is pushed and the `PAUSED`
+  comment present, each host's cap as it stood) is kept in `plans/pause-<date>/paused.json` in the vault,
+  written on `--bead <id>` if one is given, mailed to the Mayor, and printed.
+- `--until <RFC3339>` ends the hold notes at that time and schedules `mw resume` for it as a one-shot
+  systemd user timer, `mw-resume-<date>`, whose unit is printed. Without it the end is computed
+  (PROVISIONAL) from the usage reported: the moment the quota left, burned at the measured full-throttle
+  rate (`--rate` gives one by hand), would run out 15 minutes before the reset. `--dry-run` prints that
+  sum and changes nothing. With no usage reported the pause lasts a week.
+- `mw resume` reads the paused set: it clears the hold notes, types `RESUME:` into each Builder's session
+  still alive, runs `mw retry` for each story whose session is gone, puts `cloud.max_boxes` back, cancels
+  the timer and mails the Mayor.
+- A second `mw pause` or `mw resume` changes nothing and says so. Neither touches the `mw-seats` windows.
+- `mw usage set <percent> [--resets <RFC3339>]` keeps the Governor's reading of the quota used (a
+  PROVISIONAL source: his screenshot). The reserve R(t) is 10% of the quota with a week left and 0% with an
+  hour left, a straight line between; when the reading has reached 100% less R(t), `mw pause` runs by
+  itself. `mw usage show` prints the last reading against the reserve.
+
+See `features/pause.feature`.
+
 ## Keeping the factory's tokens
 
 `mw secrets` keeps the tokens the factory hands to a machine (a cloud
