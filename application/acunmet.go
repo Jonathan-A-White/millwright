@@ -19,9 +19,9 @@ const LabelFriction = "friction"
 const acNotMetFirst = 80
 
 // acNotMetLine finds 'AC 3 NOT met', 'AC 2 and 4 NOT done', 'AC 1, 3 and 4 NOT
-// met' in a line: the numbers right before the marker, which is case-sensitive,
-// so 'AC 1, 3 and 4 done; AC 2 NOT done' names AC 2 only and prose saying 'not
-// met' names none (mw-gq6.602).
+// met' in a line, quoted spans blanked first (maskQuoted): the numbers right
+// before the marker, which is case-sensitive, so 'AC 1, 3 and 4 done; AC 2 NOT
+// done' names AC 2 only and prose saying 'not met' names none (mw-gq6.602).
 var acNotMetLine = regexp.MustCompile(`\bACs?\s+(\d+(?:\s*(?:,\s*and|,|and|&)\s*\d+)*)\s*:?\s+(?:(?:is|are|was|were)\s+)?NOT (?:met|done)\b`)
 
 var acNumber = regexp.MustCompile(`\d+`)
@@ -59,7 +59,7 @@ func ReadACNotMet(text string) ACNotMet {
 	var found ACNotMet
 	seen := map[int]bool{}
 	for _, line := range strings.Split(text, "\n") {
-		matches := acNotMetLine.FindAllStringSubmatch(line, -1)
+		matches := acNotMetLine.FindAllStringSubmatch(maskQuoted(line), -1)
 		if len(matches) == 0 {
 			continue
 		}

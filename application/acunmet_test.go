@@ -25,6 +25,12 @@ func TestReadACNotMet(t *testing.T) {
 		{"lower case is prose", "AC 3 was not met by my first try.", nil, ""},
 		{"no criterion named", "The work is NOT met by the old tests.", nil, ""},
 		{"all done", "AC 1, 2 and 3 done.", nil, ""},
+		{"mw-gq6.720's sweep line", "Sweep: acunmet.go reads 'AC n NOT met' on any line, so a quoted 'AC 3 NOT met' counts. Low risk.", nil, ""},
+		{"single quotes", "The mail says 'AC 3 NOT met' when it should not.", nil, ""},
+		{"double quotes", `The mail says "AC 3 NOT met" when it should not.`, nil, ""},
+		{"curly quotes", "The mail says \u201cAC 3 NOT met\u201d when it should not.", nil, ""},
+		{"backticks", "The mail says `AC 3 NOT met` when it should not.", nil, ""},
+		{"quoted and said on one line", "A quoted 'AC 3 NOT met' counts; AC 4 NOT met.", []int{4}, "Landed, AC 4 NOT met"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
