@@ -59,15 +59,50 @@ func anyLeft(t *testing.T, pid int) string {
 	return strings.TrimSpace(string(out))
 }
 
-// waitFor polls up to 10 s (the box may be busy) for cond.
+// waitFor polls for cond until settleBudget has passed, by the clock: a poll
+// that itself runs slowly (a pgrep over a busy host) does not stretch it.
 func waitFor(cond func() bool) bool {
-	for i := 0; i < 200; i++ {
+	return waitWithin(settleBudget, cond)
+}
+
+// waitWithin polls for cond until d has passed.
+func waitWithin(d time.Duration, cond func() bool) bool {
+	deadline := time.Now().Add(d)
+	for {
 		if cond() {
 			return true
 		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return cond()
+}
+
+// waitLoops waits until the mw-under-load with this pid has n busy loops, each
+// already running as `timeout`: the command can start before the last loop has
+// exec'd, so a count taken the moment the command is up is short on a busy box.
+// It returns what it last saw, and stops early when there are more than n.
+func waitLoops(t *testing.T, pid, n int) []string {
+	t.Helper()
+	var got []string
+	waitFor(func() bool {
+		got = loopsOf(t, pid)
+		return len(got) >= n
+	})
+	return got
+}
+
+// killLoops ends any loop of this mw-under-load still alive, so a test that
+// found loops outliving a KILL does not leave them running to their deadline.
+func killLoops(t *testing.T, pid int) {
+	t.Helper()
+	out, _ := command(t, "pgrep", "-f", "mw-under-load-loop "+strconv.Itoa(pid)+"$").Output()
+	for _, p := range strings.Fields(string(out)) {
+		if n, err := strconv.Atoi(p); err == nil {
+			_ = syscall.Kill(n, syscall.SIGKILL)
+		}
+	}
 }
 
 // startHolding starts a mw-under-load whose command writes its pid to a file,
@@ -101,7 +136,7 @@ func startHolding(t *testing.T, load string, cores int, extra ...string) (*exec.
 func TestUnderLoadStartsAtMostFourLoopsAndEndsThemWhenTheCommandEnds(t *testing.T) {
 	cmd, release := startHolding(t, "1.00", 16)
 	pid := cmd.Process.Pid
-	if got := loopsOf(t, pid); len(got) != 4 {
+	if got := waitLoops(t, pid, 4); len(got) != 4 {
 		t.Fatalf("a host with 15 free cores should get 4 loops, got %d: %v", len(got), got)
 	}
 	if err := os.WriteFile(release, nil, 0o644); err != nil {
@@ -117,7 +152,7 @@ func TestUnderLoadStartsAtMostFourLoopsAndEndsThemWhenTheCommandEnds(t *testing.
 
 func TestUnderLoadStartsAsManyLoopsAsWholeFreeCores(t *testing.T) {
 	cmd, _ := startHolding(t, "4.50", 6)
-	if got := loopsOf(t, cmd.Process.Pid); len(got) != 1 {
+	if got := waitLoops(t, cmd.Process.Pid, 1); len(got) != 1 {
 		t.Fatalf("1.5 free cores should give 1 loop, got %d: %v", len(got), got)
 	}
 }
@@ -170,7 +205,7 @@ func TestUnderLoadEndsEveryLoopWhenItIsKilledWithTermOrInt(t *testing.T) {
 	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
 		cmd, _ := startHolding(t, "1.00", 8, "MW_UNDER_LOAD_MAX=2")
 		pid := cmd.Process.Pid
-		if got := loopsOf(t, pid); len(got) != 2 {
+		if got := waitLoops(t, pid, 2); len(got) != 2 {
 			t.Fatalf("%v: wanted 2 loops before the kill, got %v", sig, got)
 		}
 		if err := cmd.Process.Signal(sig); err != nil {
@@ -183,24 +218,31 @@ func TestUnderLoadEndsEveryLoopWhenItIsKilledWithTermOrInt(t *testing.T) {
 	}
 }
 
+// A KILL cannot be trapped, so the loops must see their parent gone. Their own
+// deadline is set far past the wait, so a loop that only ends at its deadline
+// fails here: the wait is settleBudget (30 s) however loaded the host, the
+// deadline 300 s. (With the deadline at 3 s, as this test once had it, a loop
+// with no parent check at all ended in time and the test passed: mw-gq6.715.)
 func TestUnderLoadLoopsEndOnTheirOwnWhenItIsKilledOutright(t *testing.T) {
-	cmd, release := startHolding(t, "1.00", 8, "MW_UNDER_LOAD_MAX=2", "MW_UNDER_LOAD_SECONDS=3")
+	cmd, release := startHolding(t, "1.00", 8, "MW_UNDER_LOAD_MAX=2", "MW_UNDER_LOAD_SECONDS=300")
 	pid := cmd.Process.Pid
-	if got := loopsOf(t, pid); len(got) != 2 {
+	t.Cleanup(func() { killLoops(t, pid) })
+	if got := waitLoops(t, pid, 2); len(got) != 2 {
 		t.Fatalf("wanted 2 loops before the kill, got %v", got)
 	}
 	_ = cmd.Process.Kill()
 	_ = cmd.Wait()
 	_ = os.WriteFile(release, nil, 0o644)
-	// A KILL cannot be trapped; the loops see their parent gone, or reach their own deadline.
+	start := time.Now()
 	if !waitFor(func() bool { return anyLeft(t, pid) == "" }) {
-		t.Fatalf("loops outlived a KILLed mw-under-load: %s", anyLeft(t, pid))
+		t.Fatalf("loops outlived a KILLed mw-under-load by %v: %s", time.Since(start).Round(time.Millisecond), anyLeft(t, pid))
 	}
+	t.Logf("the loops saw their parent gone and ended %v after the KILL", time.Since(start).Round(time.Millisecond))
 }
 
 func TestUnderLoadEachLoopCarriesItsOwnDeadline(t *testing.T) {
 	cmd, _ := startHolding(t, "1.00", 8, "MW_UNDER_LOAD_MAX=1", "MW_UNDER_LOAD_SECONDS=99999")
-	loops := loopsOf(t, cmd.Process.Pid)
+	loops := waitLoops(t, cmd.Process.Pid, 1)
 	if len(loops) != 1 {
 		t.Fatalf("wanted 1 loop, got %v", loops)
 	}
@@ -266,23 +308,34 @@ func TestUnderLoadEndsAtOnceWhenTheCommandEndsAsItsLoopsStart(t *testing.T) {
 
 // endsWithItsCommand runs `true` beside four loops and says what went wrong, if anything.
 func endsWithItsCommand(t *testing.T) string {
-	cmd := underLoad(t, "1.00", 16, []string{"MW_UNDER_LOAD_SECONDS=60"}, "true")
+	cmd := underLoad(t, "1.00", 16, []string{"MW_UNDER_LOAD_SECONDS=600"}, "true")
 	if err := cmd.Start(); err != nil {
 		return err.Error()
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
+	// The loops' deadline is 600 s, well past this wait: a mw-under-load that
+	// waited out its loops would still be waiting here. 45 s keeps under the
+	// 60 s scriptDeadline that command() puts on the run.
 	select {
 	case err := <-done:
 		if err != nil {
 			return fmt.Sprintf("the command succeeded, mw-under-load should too: %v", err)
 		}
-	case <-time.After(20 * time.Second):
+	case <-time.After(45 * time.Second):
 		_ = cmd.Process.Kill()
 		<-done
-		return "mw-under-load still waiting on its loops 20 s after its command ended"
+		killLoops(t, cmd.Process.Pid)
+		return "mw-under-load still waiting on its loops 45 s after its command ended"
 	}
-	if left := anyLeft(t, cmd.Process.Pid); left != "" {
+	// mw-under-load has stopped its loops and waited for them, but a loop whose
+	// TERM was lost before `timeout` took it up (see its header) is a busy shell
+	// that ends once it is next scheduled: seen on the Laptop at load 115 of 20
+	// cores, a `timeout` left for a moment after mw-under-load had exited and gone
+	// within 300 ms. So the loops get the settle budget to be gone, not one look.
+	if !waitFor(func() bool { return anyLeft(t, cmd.Process.Pid) == "" }) {
+		left := anyLeft(t, cmd.Process.Pid)
+		killLoops(t, cmd.Process.Pid)
 		return "loops left after the command ended: " + left
 	}
 	return ""

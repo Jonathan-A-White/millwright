@@ -21,6 +21,13 @@ const (
 	// pipeGrace is how long, after the deadline kills the child, a grandchild
 	// that still holds its output pipe is waited for before the pipe is cut.
 	pipeGrace = 2 * time.Second
+	// settleBudget is how long a test waits for a process to start, end or
+	// show something. A wait that succeeds ends at once, so the budget costs
+	// nothing on a calm host; it is long because on a host at load 60 of 20
+	// cores (mw-gq6.715) a freshly forked process can take seconds to run its
+	// first instruction, and a wait of a fixed few seconds then judges the
+	// host, not the script.
+	settleBudget = 30 * time.Second
 )
 
 // command is exec.Command for a test: killed at scriptDeadline, and its output
