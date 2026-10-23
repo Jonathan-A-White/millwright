@@ -362,7 +362,7 @@ func (f *factory) mayor(state, acting string) string {
 	}
 	f.write("vault/.mayor-acting", strings.NewReplacer("ID", id, "INDEX", index).Replace(acting)+"\n", 0o644)
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(settleBudget)
 	for !strings.Contains(f.tmux("capture-pane", "-p", "-t", id), "❯") {
 		if time.Now().After(deadline) {
 			f.t.Fatalf("the pane never drew its prompt: %q", f.tmux("capture-pane", "-p", "-t", id))
@@ -400,7 +400,7 @@ func (f *factory) tick() string {
 // tty and a cat, so it is given a moment to arrive.
 func (f *factory) typed(want string) {
 	f.t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(settleBudget)
 	for f.read("typed") != want {
 		if time.Now().After(deadline) {
 			f.t.Fatalf("the window was typed %q, want %q", f.read("typed"), want)
@@ -707,7 +707,7 @@ func TestATickWhileAnotherRunsDoesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = holder.Process.Kill(); _ = holder.Wait() })
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+	for deadline := time.Now().Add(settleBudget); ; time.Sleep(20 * time.Millisecond) {
 		if _, err := os.Stat(f.path("held")); err == nil {
 			break
 		}
@@ -1873,7 +1873,7 @@ func TestAMayorAtTheUsageLimitIsNotTypedAndTheNudgeIsHeldUntilItIsIdle(t *testin
 
 			// The limit resets: the pane is idle again and gets the held nudge.
 			f.write("reset", "", 0o644)
-			deadline := time.Now().Add(5 * time.Second)
+			deadline := time.Now().Add(settleBudget)
 			for strings.Contains(f.tmux("capture-pane", "-p", "-t", id), "Stop and wait") {
 				if time.Now().After(deadline) {
 					t.Fatal("the pane never cleared its limit screen")
