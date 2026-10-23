@@ -1428,6 +1428,27 @@ func (a GristSmokeAfter) Wants(ctx context.Context, rig, rigDir, base, branch st
 	return apps, notes
 }
 
+// Unsmoked says the landing of branch onto base in rig changes grist that this
+// host cannot smoke, because it names no [grist-apps]: before the merge, as
+// Wants is. A host that can smoke (Enabled) answers false, as does one that
+// cannot read what a landing changed; and a change that cannot be read counts
+// as a change.
+func (a GristSmokeAfter) Unsmoked(ctx context.Context, rig, rigDir, base, branch string) bool {
+	if a.Enabled() || a.Touches == nil {
+		return false
+	}
+	specs := append([]string{GristSmokeGrindsPath}, a.ClientPaths[rig]...)
+	if rig == FactoryRig {
+		specs = append(specs, GristSmokeFactoryPaths...)
+	}
+	for _, spec := range specs {
+		if changed, err := a.Touches.Changed(ctx, rigDir, base, branch, spec); err != nil || changed {
+			return true
+		}
+	}
+	return false
+}
+
 // appsOf are the apps checked out in rig's directory, or named for it.
 func (a GristSmokeAfter) appsOf(rig string) []string {
 	var own []string

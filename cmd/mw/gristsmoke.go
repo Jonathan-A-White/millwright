@@ -77,19 +77,24 @@ func (u unavailableSmoker) Run(_ context.Context, app, _ string) (application.Gr
 	return application.GristSmokeReport{App: app}, u.err
 }
 
-// hostGristSmoke is what a landing smokes with on this host: nothing on a host
-// with no [grist-apps], and otherwise the smoke after the landing's changes. A
-// host that cannot be read for it says so and smokes nothing: the landing goes
-// on. A progress that is not nil is where the smoke says each example it sends,
+// hostGristSmoke is what a landing smokes with on this host: on a host with no
+// [grist-apps] only the question of whether a landing changed grist, so that it
+// can say who smokes it, and otherwise the smoke after the landing's changes. A
+// host that cannot be read for it smokes nothing: the landing goes on. A progress that is not nil is where the smoke says each example it sends,
 // as it sends it, line by line under prefix (mw land's log: mw-gq6.626).
 func hostGristSmoke(notes application.GristSmokeNotes, host string, rigs map[string]string, touches application.LandingTouches, progress io.Writer, prefix string) application.GristSmokeAfter {
 	apps, err := config.GristApps()
-	if err != nil || len(apps) == 0 {
+	if err != nil {
 		return application.GristSmokeAfter{}
 	}
 	paths, err := config.GristSmokePaths()
 	if err != nil {
 		paths = nil
+	}
+	if len(apps) == 0 {
+		// Nothing to smoke here, but a landing can still be asked whether it
+		// changed grist, to say who smokes it (mw-gq6.728).
+		return application.GristSmokeAfter{Touches: touches, Rigs: rigs, ClientPaths: paths}
 	}
 	var out io.Writer
 	if progress != nil {

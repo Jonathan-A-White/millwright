@@ -472,6 +472,9 @@ func (n Next) keepAfterLandingLog(ctx context.Context, c *closeOut, report *Next
 // stories (GristSmokeBook); the landing is not undone. It returns the lines of
 // the apps that failed, none when the smoke passed or was not made.
 func (n Next) smoke(ctx context.Context, c *closeOut, report *NextReport) (failed []string) {
+	if c.smokeUnhosted {
+		report.Notes = append(report.Notes, n.noSmokeLine(ctx, c.path.Rig))
+	}
 	if len(c.smokeApps) == 0 {
 		return nil
 	}
@@ -490,6 +493,26 @@ func (n Next) smoke(ctx context.Context, c *closeOut, report *NextReport) (faile
 		report.Notes = append(report.Notes, fmt.Sprintf("the grist smoke's failure could not be written on the story: %v", err))
 	}
 	return failed
+}
+
+// readSmokeElsewhere looks, before the story is merged, at whether its own
+// commits changed grist that this host cannot smoke for it (mw-gq6.728).
+func (n Next) readSmokeElsewhere(ctx context.Context, c *closeOut) {
+	c.smokeUnhosted = n.Smoke.Unsmoked(ctx, c.path.Rig, c.rigDir, StartPoint(n.remote(), c.target), c.branch)
+}
+
+// noSmokeLine is the line for a landing of grist on a host that names no
+// [grist-apps]: when another host is home it says the home smokes it (its
+// GristLevel tick fast-forwards the app's checkout and smokes what moved), else
+// that it was not smoked. The factory's own rig is never the home's to smoke
+// that way.
+func (n Next) noSmokeLine(ctx context.Context, rig string) string {
+	if rig != FactoryRig && n.Home != nil {
+		if record, err := WhereIsHome(ctx, n.Home); err == nil && record.Host != n.Host {
+			return "grist smoke: handed to the home (" + record.Host + ")"
+		}
+	}
+	return "grist smoke: not run, this host names no [grist-apps]"
 }
 
 // deploy runs the rig's command under the rig's after-landing lock, so that it

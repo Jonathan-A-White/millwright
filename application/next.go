@@ -652,6 +652,10 @@ type closeOut struct {
 	// smokeApps are the apps whose grist the story's own commits changed.
 	smokeApps []string
 
+	// smokeUnhosted says the story's own commits changed grist that this host,
+	// naming no [grist-apps], cannot smoke (mw-gq6.728).
+	smokeUnhosted bool
+
 	// outsideKey are the files the story's own commits changed that its files
 	// key does not name, read before the landing (mw-gq6.406).
 	outsideKey []string
@@ -1062,6 +1066,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	var smokeNotes []string
 	c.smokeApps, smokeNotes = n.Smoke.Wants(ctx, c.path.Rig, c.rigDir, StartPoint(n.remote(), c.target), c.branch)
 	report.Notes = append(report.Notes, smokeNotes...)
+	n.readSmokeElsewhere(ctx, c)
 	n.readFilesOutsideTheKey(ctx, c, report)
 
 	// Only one close-out at a time may touch a rig's target branch: this host's
