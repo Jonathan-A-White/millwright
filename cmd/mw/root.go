@@ -59,6 +59,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newCauseCmd())
 	root.AddCommand(newTodoCmd())
 	root.AddCommand(newPathCmd())
+	root.AddCommand(newPauseCmd())
+	root.AddCommand(newResumeCmd())
 	root.AddCommand(newRetryCmd())
 	root.AddCommand(newSeatCmd())
 	root.AddCommand(newSecretsCmd())
@@ -75,6 +77,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newInvestCmd())
 	root.AddCommand(newTidyCmd())
 	root.AddCommand(newTriageCmd())
+	root.AddCommand(newUsageCmd())
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newWatchCmd())
 
