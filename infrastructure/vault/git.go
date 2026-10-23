@@ -192,10 +192,12 @@ func insideTheVault(path string) error {
 	return nil
 }
 
-// Pull implements application.VaultFiles: git pull --rebase, and the count of
-// the other host's commits that came in. A rebase that stops on a conflict is
-// aborted, so that the vault is left exactly as it was found and a person can
-// look at it without first undoing a half-finished merge.
+// Pull implements application.VaultFiles: a fetch and a rebase onto what it
+// fetched (what git pull --rebase does, without its race with a commit that
+// lands while it fetches), and the count of the other host's commits that came
+// in. A rebase that stops on a conflict is aborted, so that the vault is left
+// exactly as it was found and a person can look at it without first undoing a
+// half-finished merge.
 //
 // Every pull defines mw's trim-safe merge driver, for the files the vault's
 // .gitattributes names merge=trimsafe (its rig memories): a prune synced while
@@ -230,9 +232,22 @@ func (v *Vault) Pull(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("writing the ledger mark for the pull: %w", err)
 	}
-	pull := append(driver.Config(), "-c", "core.attributesFile="+attributes.Name(), "pull", "--rebase")
+	config := append(driver.Config(), "-c", "core.attributesFile="+attributes.Name())
+	pull := func() error {
+		// A fetch, then a rebase onto what it fetched, rather than `git pull
+		// --rebase`: a pull that finds HEAD moved while it fetched (a Clerk's
+		// `mw memory` committing in the same moment) takes the fetch to have updated
+		// the current branch, fast-forwards, and dies with "Not possible to
+		// fast-forward" when the local commit diverges (mw-gq6.713). The rebase
+		// reads HEAD when it starts, so a commit that landed meanwhile is replayed.
+		if _, err := v.git(ctx, "fetch"); err != nil {
+			return err
+		}
+		_, err := v.git(ctx, append(append([]string(nil), config...), "rebase", "@{upstream}")...)
+		return err
+	}
 
-	_, err = v.git(ctx, pull...)
+	err = pull()
 	if err != nil && closeOutIsWriting(err) {
 		// mw next's close-out writes a run's files into this checkout and
 		// commits them a moment later; a pull that lands between the two finds
@@ -242,7 +257,15 @@ func (v *Vault) Pull(ctx context.Context) (int, error) {
 		if waited := v.waitForCloseOut(ctx); waited != nil {
 			return 0, waited
 		}
-		_, err = v.git(ctx, pull...)
+		err = pull()
+	} else if err != nil && lockHeld(err) {
+		// Another git in this clone holds the index for a moment (a commit in the
+		// same instant): wait, and try once more before the unit fails.
+		if waited := v.pause(ctx, busyWait, "the other git in the vault to let go"); waited != nil {
+			return 0, waited
+		}
+		_, _ = v.git(ctx, "rebase", "--abort") // nothing to undo when the rebase never began
+		err = pull()
 	}
 	if err != nil {
 		err = v.namingTheDriver(ctx, err)
@@ -289,6 +312,10 @@ func (v *Vault) namingTheDriver(ctx context.Context, err error) error {
 		err, strings.Join(driven, ", "), value)
 }
 
+// busyWait is how long a pull waits for another git's index.lock to go before
+// its one retry.
+const busyWait = 3 * time.Second
+
 // closeOutWait is how long a pull waits for a close-out's commit before its one
 // retry.
 const closeOutWait = 3 * time.Second
@@ -303,15 +330,16 @@ func closeOutIsWriting(err error) bool {
 	return strings.Contains(err.Error(), untrackedInTheWay)
 }
 
-// siblingIsWriting reports whether git refused a pull --rebase because tracked
+// siblingIsWriting reports whether git refused a pull's rebase because tracked
 // files in the working tree hold changes nobody has committed ("cannot pull
-// with rebase: You have unstaged changes", "Your index contains uncommitted
-// changes", each ending "Please commit or stash them"). The vault is read clean
+// with rebase" or "cannot rebase: You have unstaged changes", "Your index
+// contains uncommitted changes", each ending "Please commit or stash them"). The vault is read clean
 // before a sync pulls, so these are a sibling mw command's write whose commit is
 // moments behind (mw-gq6.706).
 func siblingIsWriting(err error) bool {
 	said := err.Error()
-	return strings.Contains(said, "cannot pull with rebase") && strings.Contains(said, "Please commit or stash them")
+	return (strings.Contains(said, "cannot pull with rebase") || strings.Contains(said, "cannot rebase")) &&
+		strings.Contains(said, "Please commit or stash them")
 }
 
 func (v *Vault) waitForCloseOut(ctx context.Context) error {

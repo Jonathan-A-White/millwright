@@ -359,6 +359,7 @@ func TestPullAndPushMoveOnlyWhatIsThere(t *testing.T) {
 	files := vault.New(here)
 
 	pulled, err := files.Pull(context.Background())
+
 	if err != nil {
 		t.Fatalf("pulling: %v", err)
 	}
@@ -502,6 +503,113 @@ func TestPullFailsWhenTheFilesAreStillInTheWayAfterTheOneRetry(t *testing.T) {
 	_, err := files.Pull(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "untracked working tree files would be overwritten") {
 		t.Fatalf("expected git's refusal after the retry, got %v", err)
+	}
+	if waited != 1 {
+		t.Fatalf("expected exactly one wait, waited %d times", waited)
+	}
+}
+
+// commitDuringFetch installs a hook in a clone that, once, makes a commit of
+// change to a tracked file when a fetch updates the remote-tracking branch: a
+// Clerk's `mw memory` committing in the vault at the moment mw is pulling it
+// (mw-gq6.713).
+func commitDuringFetch(t *testing.T, dir, file string) {
+	t.Helper()
+	script := "#!/bin/sh\n" +
+		"unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\n" +
+		"[ \"$1\" = committed ] || exit 0\n" +
+		"grep -q refs/remotes/origin/main || exit 0\n" +
+		"[ -e '" + dir + "/.git/raced' ] && exit 0\n" +
+		"touch '" + dir + "/.git/raced'\n" +
+		"cd '" + dir + "' && echo clerk >> " + file + " && git commit -qm 'A Clerk commits' -- " + file + "\n"
+	hook := filepath.Join(dir, ".git", "hooks", "reference-transaction")
+	if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+		t.Fatalf("making the hooks directory: %v", err)
+	}
+	if err := os.WriteFile(hook, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the hook: %v", err)
+	}
+}
+
+// A commit that lands in this vault while the pull fetches is not a reason to
+// fail: `git pull --rebase` notices that the fetch "updated the current branch
+// head", tries to fast-forward and dies with "Not possible to fast-forward"
+// when the local commit diverges. The pull rebases the local commit onto the
+// fetched head, and the push after it carries the commit out (mw-gq6.713).
+func TestPullRebasesACommitThatLandsLocallyWhileItFetches(t *testing.T) {
+	here, there := twoHosts(t)
+	write(t, there, "seats/mayor/other.md", "the other host\n")
+	run(t, there, "git", "add", "-A")
+	run(t, there, "git", "commit", "-qm", "The other host writes")
+	run(t, there, "git", "push", "-q")
+	commitDuringFetch(t, here, "seats/mayor/ledger.md")
+
+	files := vault.New(here)
+	pulled, err := files.Pull(context.Background())
+
+	if err != nil {
+		t.Fatalf("expected the local commit to be rebased onto the fetched head, got %v", err)
+	}
+	if pulled != 1 {
+		t.Fatalf("expected the other host's one commit to come in, got %d", pulled)
+	}
+	if _, err := os.Stat(filepath.Join(here, "seats/mayor/other.md")); err != nil {
+		t.Fatalf("expected the other host's file after the pull: %v", err)
+	}
+	if ledger, err := os.ReadFile(filepath.Join(here, "seats/mayor/ledger.md")); err != nil || !strings.Contains(string(ledger), "clerk") {
+		t.Fatalf("expected the Clerk's line in the ledger, got %q (%v)", ledger, err)
+	}
+	pushed, err := files.Push(context.Background())
+	if err != nil || pushed != 1 {
+		t.Fatalf("expected the Clerk's commit to be pushed, pushed %d, err %v", pushed, err)
+	}
+	run(t, there, "git", "pull", "-q", "--rebase")
+	if ledger, err := os.ReadFile(filepath.Join(there, "seats/mayor/ledger.md")); err != nil || !strings.Contains(string(ledger), "clerk") {
+		t.Fatalf("expected the other host to have the Clerk's line, got %q (%v)", ledger, err)
+	}
+}
+
+// A rebase that git cannot start because another git holds the index lock (a
+// Clerk's commit in the same moment) is waited out once and tried again.
+func TestPullWaitsOnceForAnIndexLockAndTriesAgain(t *testing.T) {
+	here, there := twoHosts(t)
+	write(t, there, "seats/mayor/other.md", "the other host\n")
+	run(t, there, "git", "add", "-A")
+	run(t, there, "git", "commit", "-qm", "The other host writes")
+	run(t, there, "git", "push", "-q")
+
+	lock := filepath.Join(here, ".git", "index.lock")
+	write(t, here, ".git/index.lock", "")
+	var waited []time.Duration
+	files := vault.New(here, vault.WithWait(func(_ context.Context, d time.Duration) error {
+		waited = append(waited, d)
+		return os.Remove(lock)
+	}))
+	if _, err := files.Pull(context.Background()); err != nil {
+		t.Fatalf("expected the pull to finish once the lock went, got %v", err)
+	}
+	if len(waited) != 1 {
+		t.Fatalf("expected one wait before the one retry, got %v", waited)
+	}
+}
+
+// The retry is one: a lock that is still held after the wait is the pull's
+// failure, and the vault is left as it was.
+func TestPullFailsWhenTheIndexLockIsStillHeldAfterTheOneRetry(t *testing.T) {
+	here, there := twoHosts(t)
+	write(t, there, "seats/mayor/other.md", "the other host\n")
+	run(t, there, "git", "add", "-A")
+	run(t, there, "git", "commit", "-qm", "The other host writes")
+	run(t, there, "git", "push", "-q")
+
+	write(t, here, ".git/index.lock", "")
+	waited := 0
+	files := vault.New(here, vault.WithWait(func(context.Context, time.Duration) error {
+		waited++
+		return nil
+	}))
+	if _, err := files.Pull(context.Background()); err == nil {
+		t.Fatal("expected a lock that stays to fail the pull")
 	}
 	if waited != 1 {
 		t.Fatalf("expected exactly one wait, waited %d times", waited)
