@@ -40,6 +40,8 @@ const (
 	GristReasonPhotoForged = "A photo in this grist is not the one the grist announced."
 	GristReasonDeclined    = "The model declined this grist."
 	GristReasonForward     = "The app's grind forwards to someone the mill does not forward to."
+	GristReasonOverride    = "Only the factory's test key may bring its own grind text, and only in an eval or smoke talk."
+	GristReasonOverrideBad = "The grind text this grist brings is empty or its schema is not JSON."
 
 	// gristReasonDailyStart and gristReasonDailyEnd are the words round the
 	// limit in GristReasonDaily's reason.
@@ -251,6 +253,7 @@ type gristWork struct {
 	model, effort         string
 	modelFrom, effortFrom string
 	ran                   bool // a grind was run
+	override              bool // the grist's own grind text is what runs
 	system                string
 	schema                string
 	verified              bool            // the backend's signer is the key that sealed the grist
@@ -618,6 +621,12 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 	}
 	g.judgeClientTiming(w, lines)
 	name := w.plain.Grist
+	if w.plain.GrindOverride != nil {
+		if reason := g.judgeOverride(w, envelopeFrom); reason != "" {
+			w.settle(GristRefused, reason)
+			return
+		}
+	}
 	if !slices.Contains(r.SignerApps, name.App) && !(g.GovernorKey != "" && envelopeFrom == g.GovernorKey) {
 		w.settle(GristRefused, GristReasonLicence)
 		return
@@ -707,6 +716,35 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		return
 	}
 	w.system, w.schema = g.readGrindText(ctx, w, checkout)
+	if w.plain.GrindOverride != nil && w.status == "" {
+		w.override = true
+		w.system, w.schema = overrideText(w)
+	}
+}
+
+// judgeOverride is why the grind text a grist brings is not taken, or "": a
+// live app's grist, from any key, is ground only with the grind at main; the
+// text of a ref is taken from the factory's test key alone, and only in a talk
+// named eval: or smoke:, the names `mw grist eval` and `mw grist smoke` send under.
+func (g GristGrind) judgeOverride(w *gristWork, envelopeFrom string) string {
+	talk := w.plain.Grist.Talk
+	if g.TestKey == "" || envelopeFrom != g.TestKey ||
+		!(strings.HasPrefix(talk, GristEvalTalkPrefix+":") || strings.HasPrefix(talk, GristSmokeTalkPrefix+":")) {
+		return GristReasonOverride
+	}
+	return ""
+}
+
+// overrideText is the instructions and compacted schema a grist brought; both
+// empty, with w settled refused, when they are no grind's.
+func overrideText(w *gristWork) (instructions, schema string) {
+	o := w.plain.GrindOverride
+	var compact bytes.Buffer
+	if strings.TrimSpace(o.Instructions) == "" || json.Compact(&compact, []byte(o.Schema)) != nil {
+		w.settle(GristRefused, GristReasonOverrideBad)
+		return "", ""
+	}
+	return o.Instructions, compact.String()
 }
 
 // judgeClientTiming reads the client_timing the grist carries, if any, and keeps
@@ -1326,7 +1364,7 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	body := GristAnswer{
 		Re: w.record.Txid, Status: w.status, Reason: w.reason, Answer: w.answer,
 		ReadingResult: w.reading, ReadingResults: w.readings, Talk: w.talk.answer(),
-		Grind: GristAnswerGrind{App: name.App, Kind: name.Kind, V: name.V, Commit: w.commit},
+		Grind: GristAnswerGrind{App: name.App, Kind: name.Kind, V: name.V, Commit: w.commit, Override: w.override},
 	}
 	if w.status == GristAnswered {
 		body.Reason = ""
