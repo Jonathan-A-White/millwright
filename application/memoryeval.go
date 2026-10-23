@@ -44,6 +44,48 @@ func (q EvalQuestion) Terms() []string {
 	return terms
 }
 
+// expects reports whether the question names the slug among its expected facts.
+func (q EvalQuestion) expects(slug string) bool {
+	for _, expected := range q.Expect {
+		if expected == slug {
+			return true
+		}
+	}
+	return false
+}
+
+// finds reports whether the fact is among the first EvalTop results of the
+// question run as a query over all, which are in the order query reads them.
+func (q EvalQuestion) finds(all []RigFact, slug string) bool {
+	rank := 0
+	for _, fact := range all {
+		if !fact.matches(q.Terms()) {
+			continue
+		}
+		rank++
+		if fact.Slug == slug {
+			return rank <= EvalTop
+		}
+	}
+	return false
+}
+
+// addExpect adds a slug to the expect line of a question's block in an eval.md
+// text, after the slugs already there.
+func addExpect(text string, q EvalQuestion, slug string) string {
+	lines := strings.Split(text, "\n")
+	for i := q.Line - 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "" {
+			break
+		}
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "expect:") {
+			lines[i] = strings.TrimRight(lines[i], " \t") + ", " + slug
+			break
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // ParseEval reads an eval.md: blocks of 'Q: <question>' and 'expect: <slug>,
 // <slug>...', separated by blank lines; a line starting with '#' is a comment.
 // A block that is not a Q with an expect, or has no words to look for in its Q,

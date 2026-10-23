@@ -100,7 +100,10 @@ func newMemorySupersedeCmd() *cobra.Command {
 		Short: "Replace a fact with a new current one, linking the two",
 		Long: "supersede writes a new current fact (with supersedes: <old>, the old one's subject and kind)\n" +
 			"and marks the old one superseded, with superseded-by: <new>. It refuses a slug that is\n" +
-			"unknown or already superseded or retired.",
+			"unknown or already superseded or retired. A demoted old fact (boot: no) gives a demoted new\n" +
+			"one, and the eval.md questions that expect the old one expect the new one too when they find\n" +
+			"it. It prints the render size against the budget, and WARNs when it is over. A slug made\n" +
+			"from the sentence that is taken is refused, saying to pass --slug <new>.",
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			memory, err := memoryFor(cmd)

@@ -325,8 +325,8 @@ func (m Memory) newFact(ctx context.Context, req MemoryAdd) (RigFact, []RigFact,
 	if err := factLine("the source", req.Source); err != nil {
 		return RigFact{}, nil, err
 	}
-	slug := req.Slug
-	if slug == "" {
+	slug, derived := req.Slug, req.Slug == ""
+	if derived {
 		slug = FactSlug(req.Sentence)
 	}
 	if err := checkSlug(slug); err != nil {
@@ -336,7 +336,7 @@ func (m Memory) newFact(ctx context.Context, req MemoryAdd) (RigFact, []RigFact,
 	if err != nil {
 		return RigFact{}, nil, err
 	}
-	if err := m.free(req.Rig, slug, files, facts); err != nil {
+	if err := m.free(req.Rig, slug, derived, files, facts); err != nil {
 		return RigFact{}, nil, err
 	}
 	fact := RigFact{
@@ -408,13 +408,17 @@ func firstWords(text string, n int) string {
 }
 
 // free refuses a slug that already has a file, saying so plainly for a fact
-// that is flagged to recheck.
-func (m Memory) free(rig, slug string, files map[string]string, facts map[string]RigFact) error {
+// that is flagged to recheck. A slug made from the sentence (derived) says so
+// and says to pass --slug, because the person never chose it.
+func (m Memory) free(rig, slug string, derived bool, files map[string]string, facts map[string]RigFact) error {
 	if _, taken := files[slug+MemoryExt]; !taken {
 		return nil
 	}
 	if facts[slug].Status == FactRecheck {
 		return fmt.Errorf("the fact %q of the rig %s is flagged to recheck: supersede or retire it", slug, rig)
+	}
+	if derived {
+		return fmt.Errorf("the fact %q of the rig %s already exists: that slug was made from the first %d words of the sentence; pass --slug <new> to name the new fact", slug, rig, factSlugWords)
 	}
 	return fmt.Errorf("the fact %q of the rig %s already exists", slug, rig)
 }
@@ -427,8 +431,8 @@ func (m Memory) Supersede(ctx context.Context, req MemorySupersede) error {
 	if err := factLine("the source", req.Source); err != nil {
 		return err
 	}
-	slug := req.Slug
-	if slug == "" {
+	slug, derived := req.Slug, req.Slug == ""
+	if derived {
 		slug = FactSlug(req.Sentence)
 	}
 	if err := checkSlug(slug); err != nil {
@@ -449,13 +453,15 @@ func (m Memory) Supersede(ctx context.Context, req MemorySupersede) error {
 	if slug == old.Slug {
 		return fmt.Errorf("the new fact needs a slug other than %q: give one with --slug", slug)
 	}
-	if err := m.free(req.Rig, slug, files, facts); err != nil {
+	if err := m.free(req.Rig, slug, derived, files, facts); err != nil {
 		return err
 	}
+	// The new fact is read where the old one was: a demoted fact stays out of
+	// the boot render, so a supersede never grows it.
 	successor := RigFact{
 		Slug: slug, Subject: old.Subject, Kind: old.Kind, Status: FactCurrent,
 		Source: req.Source, Since: m.today(), Sentence: strings.TrimSpace(req.Sentence),
-		Supersedes: old.Slug,
+		Supersedes: old.Slug, Unbooted: old.Unbooted,
 	}
 	old.Status, old.SupersededBy = FactSuperseded, slug
 	if err := successor.validate(); err != nil {
@@ -469,10 +475,93 @@ func (m Memory) Supersede(ctx context.Context, req MemorySupersede) error {
 	if err != nil {
 		return err
 	}
-	if err := m.record(ctx, "supersede "+req.Rig+" "+old.Slug+" with "+slug, written, retired); err != nil {
+	paths := []string{written, retired}
+	if successor.Unbooted {
+		evalPath, err := m.carryEvalQuestions(ctx, req.Rig, old, successor, facts)
+		if err != nil {
+			return err
+		}
+		if evalPath != "" {
+			paths = append(paths, evalPath)
+		}
+	}
+	if err := m.record(ctx, "supersede "+req.Rig+" "+old.Slug+" with "+slug, paths...); err != nil {
+		return err
+	}
+	if err := m.sayRender(ctx, req.Rig); err != nil {
 		return err
 	}
 	fmt.Fprintf(m.Out, "superseded %s with %s\n", old.Slug, slug)
+	return nil
+}
+
+// carryEvalQuestions makes the questions of eval.md that expect a demoted old
+// fact expect its successor too, when they find it, so a Builder who asked for
+// the old fact still finds the new one. It writes eval.md only if a question
+// changed, and returns its path from the vault's root (empty when untouched). A
+// successor that no question finds is warned of: it is out of the boot render
+// and nothing reaches it.
+func (m Memory) carryEvalQuestions(ctx context.Context, rig string, old, successor RigFact, facts map[string]RigFact) (string, error) {
+	text, found, err := m.Files.ReadRigEval(ctx, m.Seat, rig)
+	if err != nil {
+		return "", err
+	}
+	all := orderedFacts(withFact(facts, successor))
+	carried := false
+	if found {
+		questions, err := ParseEval(text)
+		if err != nil {
+			return "", err
+		}
+		for _, q := range questions {
+			if !q.expects(old.Slug) || q.expects(successor.Slug) || !q.finds(all, successor.Slug) {
+				continue
+			}
+			text, carried = addExpect(text, q, successor.Slug), true
+		}
+	}
+	if carried {
+		if _, err := m.Files.WriteRigEval(ctx, m.Seat, rig, text); err != nil {
+			return "", err
+		}
+		return pathpkg.Join(SeatsDir, m.Seat, RigsDir, rig, EvalFile), nil
+	}
+	if found {
+		if questions, err := ParseEval(text); err == nil {
+			for _, q := range questions {
+				if q.finds(all, successor.Slug) {
+					return "", nil
+				}
+			}
+		}
+	}
+	fmt.Fprintf(m.Out, "WARN: no eval question finds %s, which is out of the boot render (boot: no): add one to eval.md\n", successor.Slug)
+	return "", nil
+}
+
+// withFact is facts with one more, by its slug, without changing the map given.
+func withFact(facts map[string]RigFact, fact RigFact) map[string]RigFact {
+	out := make(map[string]RigFact, len(facts)+1)
+	for slug, f := range facts {
+		out[slug] = f
+	}
+	out[fact.Slug] = fact
+	return out
+}
+
+// sayRender prints the size of the rig's boot render against its budget, and
+// WARNs when it is over: it is what every Builder pays on every story.
+func (m Memory) sayRender(ctx context.Context, rig string) error {
+	about, files, _, err := m.load(ctx, rig)
+	if err != nil {
+		return err
+	}
+	all, _ := LoadRigFacts(files)
+	size := len(RenderRigMemory(about, all))
+	fmt.Fprintf(m.Out, "render %d/%d bytes\n", size, m.Budget)
+	if m.Budget > 0 && size > m.Budget {
+		fmt.Fprintf(m.Out, "WARN: the render is over the budget by %d bytes: demote or retire a fact (seats/mayor/pruning.md)\n", size-m.Budget)
+	}
 	return nil
 }
 

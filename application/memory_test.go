@@ -3,6 +3,7 @@ package application_test
 import (
 	"bytes"
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -475,5 +476,148 @@ func TestDemoteWithoutAQuestionAcceptsAnyExistingQuestionThatFindsTheFact(t *tes
 	}
 	if files.eval != before || !strings.Contains(files.files["gate.md"], "boot: no") {
 		t.Errorf("eval %q, fact %s", files.eval, files.files["gate.md"])
+	}
+}
+
+// aDemotedGate is a rig with a demoted fact "gate" (boot: no) that an eval
+// question finds, and a booted fact "other".
+func aDemotedGate() *editableFiles {
+	files := demotable()
+	files.files["gate.md"] = strings.Replace(files.files["gate.md"], "status: current", "status: current\nboot: no", 1)
+	files.eval += "\nQ: gate make lint\nexpect: gate\n"
+	return files
+}
+
+func TestSupersedingADemotedFactWritesTheNewFactDemotedToo(t *testing.T) {
+	files, vault := aDemotedGate(), &recordingVault{}
+	err := anEditableMemory(files, vault, &bytes.Buffer{}).Supersede(context.Background(), application.MemorySupersede{
+		Rig: "kiln", Old: "gate", Slug: "gate-new", Source: "mw-4", Sentence: "The gate runs make test and make lint in the foreground.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(files.files["gate-new.md"], "boot: no") {
+		t.Errorf("the new fact is in the boot render:\n%s", files.files["gate-new.md"])
+	}
+}
+
+func TestSupersedingADemotedFactCarriesItsEvalQuestionToTheNewFact(t *testing.T) {
+	files, vault := aDemotedGate(), &recordingVault{}
+	var out bytes.Buffer
+	err := anEditableMemory(files, vault, &out).Supersede(context.Background(), application.MemorySupersede{
+		Rig: "kiln", Old: "gate", Slug: "gate-new", Source: "mw-4", Sentence: "The gate runs make test and make lint in the foreground.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(files.eval, "Q: gate make lint\nexpect: gate, gate-new\n") {
+		t.Errorf("the question does not expect the new fact:\n%s", files.eval)
+	}
+	if strings.Contains(files.eval, "expect: other, gate-new") {
+		t.Errorf("a question of another fact was changed:\n%s", files.eval)
+	}
+	if len(vault.paths) != 1 || !strings.Contains(strings.Join(vault.paths[0], " "), "eval.md") {
+		t.Errorf("eval.md is not in the commit: %v", vault.paths)
+	}
+	if strings.Contains(out.String(), "WARN") && strings.Contains(out.String(), "no eval question") {
+		t.Errorf("warned of no question though one finds the new fact:\n%s", out.String())
+	}
+}
+
+func TestSupersedingADemotedFactNoQuestionFindsWarnsAndKeepsItDemoted(t *testing.T) {
+	files, vault := aDemotedGate(), &recordingVault{}
+	var out bytes.Buffer
+	err := anEditableMemory(files, vault, &out).Supersede(context.Background(), application.MemorySupersede{
+		Rig: "kiln", Old: "gate", Slug: "gate-new", Source: "mw-4", Sentence: "Nothing alike at all.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(files.files["gate-new.md"], "boot: no") {
+		t.Errorf("the new fact is in the boot render:\n%s", files.files["gate-new.md"])
+	}
+	if !strings.Contains(out.String(), "WARN: no eval question finds gate-new") {
+		t.Errorf("no warning that no question finds the new fact:\n%s", out.String())
+	}
+}
+
+func TestSupersedingABootFactKeepsItInTheBootRender(t *testing.T) {
+	files, vault := demotable(), &recordingVault{}
+	before := files.eval
+	err := anEditableMemory(files, vault, &bytes.Buffer{}).Supersede(context.Background(), application.MemorySupersede{
+		Rig: "kiln", Old: "gate", Slug: "gate-new", Source: "mw-4", Sentence: "The gate runs make test and make lint in the foreground.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(files.files["gate-new.md"], "boot:") || files.eval != before {
+		t.Errorf("fact:\n%s\neval: %q", files.files["gate-new.md"], files.eval)
+	}
+}
+
+func TestSupersedePrintsTheRenderSizeAndWarnsOverTheBudget(t *testing.T) {
+	for _, c := range []struct {
+		budget int
+		want   string
+		warn   bool
+	}{{100000, "render ", false}, {10, "WARN: the render is over the budget", true}} {
+		files := demotable()
+		var out bytes.Buffer
+		m := anEditableMemory(files, &recordingVault{}, &out)
+		m.Budget = c.budget
+		err := m.Supersede(context.Background(), application.MemorySupersede{
+			Rig: "kiln", Old: "gate", Slug: "gate-new", Source: "mw-4", Sentence: "The gate runs make test and make lint in the foreground.",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "render ") || !strings.Contains(out.String(), "/"+strconv.Itoa(c.budget)+" bytes") {
+			t.Errorf("budget %d: no render size line:\n%s", c.budget, out.String())
+		}
+		if got := strings.Contains(out.String(), "WARN"); got != c.warn {
+			t.Errorf("budget %d: warn %v:\n%s", c.budget, got, out.String())
+		}
+		if !strings.HasSuffix(out.String(), "superseded gate with gate-new\n") {
+			t.Errorf("the last line should say what was done:\n%s", out.String())
+		}
+	}
+}
+
+func TestADerivedSlugThatCollidesNamesItAndSaysToPassSlug(t *testing.T) {
+	sentence := "The gate runs ten parts each time."
+	derived := application.FactSlug(sentence)
+	taken := func() *editableFiles {
+		f := &editableFiles{files: map[string]string{
+			derived + ".md": queryFact("gate", "A fact."),
+			"old.md":        queryFact("gate", "The gate is old."),
+		}}
+		return f
+	}
+	check := func(verb string, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("%s: expected a refusal", verb)
+		}
+		for _, want := range []string{`"` + derived + `"`, "--slug <new>"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: the error lacks %q: %v", verb, want, err)
+			}
+		}
+	}
+	check("supersede", anEditableMemory(taken(), &recordingVault{}, &bytes.Buffer{}).Supersede(context.Background(), application.MemorySupersede{
+		Rig: "kiln", Old: "old", Source: "mw-4", Sentence: sentence,
+	}))
+	check("add", anEditableMemory(taken(), &recordingVault{}, &bytes.Buffer{}).Add(context.Background(), application.MemoryAdd{
+		Rig: "kiln", Subject: "gate", Source: "mw-4", Kind: application.FactGotcha, Sentence: sentence,
+	}))
+}
+
+func TestAnExplicitSlugThatCollidesDoesNotClaimItWasDerived(t *testing.T) {
+	files := &editableFiles{files: map[string]string{"taken.md": queryFact("bd", "A fact.")}}
+	err := anEditableMemory(files, &recordingVault{}, &bytes.Buffer{}).Add(context.Background(), application.MemoryAdd{
+		Rig: "kiln", Subject: "bd", Source: "mw-2", Kind: application.FactGotcha, Slug: "taken", Sentence: "Another one.",
+	})
+	if err == nil || !strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "first five words") {
+		t.Errorf("got %v", err)
 	}
 }
