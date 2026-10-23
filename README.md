@@ -3543,9 +3543,15 @@ do. It prints the `loginctl enable-linger` line as a hand step and never runs it
 
 Every service in `contrib/systemd/` (and the two under `contrib/systemd/system/`)
 names `OnFailure=mw-unit-failed@%n.service`. When a unit ends in failure (a
-non-zero exit, a kill, a timeout) systemd starts that template, which sends the
-Mayor one mail from the seat `doctor@<host>` naming the unit and the host, with
-the last 20 lines of the unit's journal. `install-units.sh` links the template
+non-zero exit, a kill, a timeout) systemd starts that template. The --user
+template runs `mw doctor unit-failed <unit>`: a unit a timer runs often fails
+once and is clean on its next run, so its first failure is only recorded (in the
+doctor's state directory, `unit-failed/<unit>`, with the last 20 lines of its
+journal); a second with no clean run between them sends the Mayor one mail from
+the seat `doctor@<host>` naming the unit and the host, with both journals' last
+lines, and a clean run between them starts the count again. A unit no timer runs
+is mailed at its first failure, as the system template's units all are.
+`features/unit_failed.feature` holds it. `install-units.sh` links the template
 along with whatever unit it is asked for. To try it:
 `systemctl --user start mw-unit-failed@mw-report.service.service`, then
 `MW_SEAT=mayor mw mail inbox`. `scripts/check-timer-units.sh` fails a unit that

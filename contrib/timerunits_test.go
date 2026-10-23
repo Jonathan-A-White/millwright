@@ -266,6 +266,36 @@ func TestCheckTimerUnitsOnFailure(t *testing.T) {
 	}
 }
 
+// The --user failure mailer runs `mw doctor unit-failed`, which holds a timer
+// unit's first failure back (mw-gq6.716); one that mails straight away again is
+// named.
+func TestCheckTimerUnitsFailureMailerHoldsTheFirstFailure(t *testing.T) {
+	const rel = "mw-unit-failed@.service"
+	out, passed := runTimerUnitsOnCopy(t, func(root string) {
+		path := filepath.Join(root, "contrib", "systemd", rel)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var lines []string
+		for _, l := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(l, "ExecStart=") {
+				l = "ExecStart=/bin/sh -c '%h/.local/bin/mw mail send mayor -s \"unit failed: %i\"'"
+			}
+			lines = append(lines, l)
+		}
+		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if passed {
+		t.Fatalf("the check passed a mailer that mails on every failure:\n%s", out)
+	}
+	if !strings.Contains(out, rel) || !strings.Contains(out, "unit-failed") {
+		t.Errorf("the check did not name %s and unit-failed; it printed:\n%s", rel, out)
+	}
+}
+
 // A unit whose ExecStart runs a mw command that leaves with a status that is
 // not a failure carries SuccessExitStatus= for it, or the OnFailure= mail goes
 // to the Mayor on every run (mw-gq6.532: mw doctor's 6 on every 5-minute tick).

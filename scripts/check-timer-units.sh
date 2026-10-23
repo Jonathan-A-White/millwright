@@ -355,6 +355,9 @@ success_status_missing() {
 	[ -n "$status_missing" ]
 }
 for unit in "$DIR"/*.service "$DIR"/system/*.service; do
+	# The failure mailer runs `mw doctor unit-failed`, which leaves only with 0 or
+	# a failure; it is not `mw doctor` and has no outcome status.
+	case ${unit##*/} in mw-unit-failed@.service) continue ;; esac
 	if success_status_missing "$unit"; then
 		fail "$unit runs a mw command that leaves with a status that is not a failure, but has no SuccessExitStatus= naming${status_missing}: OnFailure= would mail the Mayor on every run"
 	fi
@@ -362,9 +365,14 @@ done
 for template in "$FAILED_TEMPLATE" "$SYS_FAILED_TEMPLATE"; do
 	need "$template" "Type=oneshot"
 	need "$template" "TimeoutStartSec=2min"
-	grep -q '^ExecStart=.*mw mail send mayor .*%i' "$template" ||
-		fail "$template does not send a mail to the mayor naming the failed unit (%i)"
 done
+# The system template mails at once. The --user one runs `mw doctor unit-failed`,
+# which mails the Mayor on a timer unit's second failure in a row and at once for
+# a unit no timer runs (mw-gq6.716).
+grep -q '^ExecStart=.*mw mail send mayor .*%i' "$SYS_FAILED_TEMPLATE" ||
+	fail "$SYS_FAILED_TEMPLATE does not send a mail to the mayor naming the failed unit (%i)"
+grep -q '^ExecStart=.*mw doctor unit-failed %i$' "$FAILED_TEMPLATE" ||
+	fail "$FAILED_TEMPLATE does not run \`mw doctor unit-failed %i\`"
 
 # The scripts the services run must be there to run, and must parse.
 for script in "$MAIL_SCRIPT" "$HEALTH_SCRIPT"; do
