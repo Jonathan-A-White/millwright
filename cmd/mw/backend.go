@@ -70,6 +70,11 @@ func hostBackend(gateway *beads.Gateway, files application.HomeFile, host string
 	return stage
 }
 
+// backendStageLockFile is the lock a staging holds, beside the inbox lock: the
+// dispatch tick, the Millhand's tick and a landing are separate processes, and only
+// one at a time may file a commit's swap bead (mw-gq6.729).
+const backendStageLockFile = "backend-stage.lock"
+
 // autoSwap gives the stage what the home's tick runs a staged swap with
 // (application.BackendStage.Pending, mw-gq6.270): the hands runner, the Governor's
 // push for the result, and the postern inbox lock a pass of mw postern inbox --apply
@@ -93,5 +98,6 @@ func autoSwap(stage *application.BackendStage, gateway *beads.Gateway, errs io.W
 	stage.Runner = hands.NewRunner(helper)
 	stage.Say = newHandsPush(gateway)
 	stage.Lock = hostlock.NewTry(filepath.Dir(attachmentDir), hostlock.File)
+	stage.Claim = hostlock.NewTry(filepath.Dir(attachmentDir), backendStageLockFile)
 	stage.Now = handsClock
 }
