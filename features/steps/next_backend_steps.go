@@ -33,6 +33,9 @@ func registerNextBackendSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^this host names a backend for the rig, built in "([^"]*)", and is the home$`, c.thisHostIsHomeWithABackend)
 	ctx.Given(`^this host names a backend for the rig, built in "([^"]*)", and "([^"]*)" is the home$`, c.thisHostNamesABackendHomeElsewhere)
 	ctx.Given(`^the work of "([^"]*)" also changes "([^"]*)"$`, c.theWorkAlsoChanges)
+	ctx.Given(`^a commit on the branch of "([^"]*)" writes "([^"]*)" holding (\d+) git\+ssh lines$`, c.aCommitWritingALockfile)
+	ctx.Given(`^a commit on the branch of "([^"]*)" appends a line to "([^"]*)"$`, c.aCommitAppendingToAFile)
+	ctx.Given(`^the target branch of the rig holds "([^"]*)" with (\d+) git\+ssh lines, and the branch of "([^"]*)" is rebased onto it$`, c.theTargetHoldsALockfile)
 
 	ctx.Then(`^the backend was staged for the commit that landed on "([^"]*)", built from that commit$`, c.theBackendWasStaged)
 	ctx.Then(`^a new open hitl bead under "([^"]*)" holds one hands step that swaps it, with the check, backup, install, restart, four tries and way back$`, c.aHandsStepSwapsIt)
@@ -204,4 +207,48 @@ func (c *nextContext) theLandingWaitsForTheHome(home string) error {
 		return fmt.Errorf("expected the report to name the home %s, got %q", home, c.printed.String())
 	}
 	return nil
+}
+
+// lockfileWith is a package-lock.json body holding ssh dependencies resolved
+// over git+ssh:// and one resolved over git+https://.
+func lockfileWith(ssh int) []byte {
+	var b strings.Builder
+	b.WriteString("{\n")
+	for i := 0; i < ssh; i++ {
+		fmt.Fprintf(&b, "  \"resolved\": \"git+ssh://git@github.com/o/dep%d.git#abc%d\",\n", i, i)
+	}
+	b.WriteString("  \"resolved\": \"git+https://github.com/o/https.git#def\"\n}\n")
+	return []byte(b.String())
+}
+
+// aCommitWritingALockfile commits name on a story's branch with ssh git+ssh lines.
+func (c *nextContext) aCommitWritingALockfile(id, name string, ssh int) error {
+	return c.aCommitAdding(id, name, lockfileWith(ssh), 0o644)
+}
+
+// aCommitAppendingToAFile commits one more line at the end of name in a story's
+// worktree.
+func (c *nextContext) aCommitAppendingToAFile(id, name string) error {
+	full := filepath.Join(application.WorktreeDir(c.rig, id), name)
+	old, err := os.ReadFile(full)
+	if err != nil {
+		return err
+	}
+	return c.aCommitAdding(id, name, append(old, []byte("// one more line\n")...), 0o644)
+}
+
+// theTargetHoldsALockfile commits name with ssh git+ssh lines to the rig's main,
+// pushes it to the origin and rebases the story's branch onto it, so the lines
+// are on the target branch before the story starts.
+func (c *nextContext) theTargetHoldsALockfile(name string, ssh int, id string) error {
+	full := filepath.Join(c.rig, name)
+	if err := os.WriteFile(full, lockfileWith(ssh), 0o644); err != nil {
+		return err
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "A lockfile on main"}, {"push", "-q", "origin", "main"}} {
+		if err := gitRun(c.rig, "git", args...); err != nil {
+			return err
+		}
+	}
+	return gitRun(application.WorktreeDir(c.rig, id), "git", "rebase", "-q", "origin/main")
 }

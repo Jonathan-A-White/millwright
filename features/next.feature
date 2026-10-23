@@ -380,6 +380,34 @@ Feature: Closing out a finished story and carrying on
     When mw closes out "mw-gq6.1"
     Then the work of "mw-gq6.1" is on "main" at the rig's origin
 
+  # mw-gq6.740: `npm install github:<owner>/<repo>#<sha>` writes git+ssh:// into
+  # package-lock.json, which a machine with no GitHub key cannot install. A branch
+  # that adds such a line is turned away, naming the file, the count and the sed.
+  Scenario: A branch that adds a git+ssh line to a lockfile is not landed
+    Given the session of "mw-gq6.1" reported a plain success
+    And a commit on the branch of "mw-gq6.1" writes "package-lock.json" holding 2 git+ssh lines
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" is held blocked
+    And the story "mw-gq6.1" carries a comment quoting: package-lock.json has 2 added line(s) with git+ssh://
+    And the story "mw-gq6.1" carries a comment quoting: sed -i 's#git+ssh://git@github.com/#git+https://github.com/#g' package-lock.json
+    And the report says it stopped for "lockfile-ssh"
+    And the rig's tests were run 0 times
+
+  Scenario: A branch that adds a git+https line to a lockfile lands
+    Given the session of "mw-gq6.1" reported a plain success
+    And a commit on the branch of "mw-gq6.1" writes "package-lock.json" holding 0 git+ssh lines
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+
+  Scenario: A branch that leaves the git+ssh lines the target already holds lands
+    Given the target branch of the rig holds "package-lock.json" with 2 git+ssh lines, and the branch of "mw-gq6.1" is rebased onto it
+    And the session of "mw-gq6.1" reported a plain success
+    And a commit on the branch of "mw-gq6.1" appends a line to "package-lock.json"
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+
   Scenario: A formula step the session never closed stops the close-out
     Given the session of "mw-gq6.1" reported a plain success
     And a formula was poured for "mw-gq6.1" and one of its steps is still open

@@ -860,7 +860,7 @@ func (failingSetNote) SetNote(context.Context, string, string) error {
 func TestOnlyTheGateTheMergeAndTheTurnCapHandABranchOn(t *testing.T) {
 	for reason, want := range map[application.Reason]bool{
 		application.ReasonTestsFail: true, application.ReasonMergedTestsFail: true, application.ReasonMergeConflict: true,
-		application.ReasonTurnCap: true, application.ReasonOpenSteps: true, application.ReasonNoClosingComment: true,
+		application.ReasonTurnCap: true, application.ReasonOpenSteps: true, application.ReasonNoClosingComment: true, application.ReasonLockfileSSH: true,
 		application.ReasonUnmetCriterion: false, application.ReasonSignedCommit: false, application.ReasonTrackedBinary: false, application.ReasonNoCommits: false, application.ReasonUncommittedWork: false,
 	} {
 		if got := application.ContinuesFrom(reason); got != want {
