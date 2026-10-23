@@ -150,8 +150,7 @@ func UnmetCriteria(comment string) []string {
 // say a criterion is unmet, rather than to name the phrase: not inside quotes,
 // not after 'no', 'none' or 'without' in its clause, not followed by 'none'.
 func saysUnmet(sentence string) bool {
-	masked := quotedSpan.ReplaceAllStringFunc(sentence, blank)
-	masked = singleQuoted.ReplaceAllStringFunc(masked, blank)
+	masked := maskQuoted(sentence)
 	for _, at := range unmetPhraseExpr.FindAllStringIndex(masked, -1) {
 		clauseStart := 0
 		for _, end := range clauseEnd.FindAllStringIndex(masked[:at[0]], -1) {
@@ -163,6 +162,15 @@ func saysUnmet(sentence string) bool {
 		return true
 	}
 	return false
+}
+
+// maskQuoted is text with every quoted span (double, curly or single quotes,
+// backticks) blanked, so a phrase a comment names rather than says is not read
+// as said. Offsets stay those of text. It is the one quote strip of the readers
+// of a closing comment's verdict: saysUnmet and ReadACNotMet (mw-gq6.726).
+func maskQuoted(text string) string {
+	masked := quotedSpan.ReplaceAllStringFunc(text, blank)
+	return singleQuoted.ReplaceAllStringFunc(masked, blank)
 }
 
 // blank is s as spaces of the same length, so offsets in a masked sentence
