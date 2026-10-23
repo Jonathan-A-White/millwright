@@ -25,6 +25,7 @@ func registerStatusQueuedSteps(ctx *godog.ScenarioContext, c *statusContext) {
 	ctx.Given(`^the status story "([^"]*)" was queued for batch landing (\d+) minutes ago$`, c.theStoryWasQueuedMinutesAgo)
 	ctx.Given(`^a batch-land job for the rig "([^"]*)" began running (\d+) minutes ago$`, c.aBatchLandJobBeganRunning)
 	ctx.Given(`^the batch-land job ended$`, c.theBatchLandJobEnded)
+	ctx.Given(`^the follower restarted and ran the batch-land job again$`, c.theFollowerRestartedTheBatchLandJob)
 	ctx.Given(`^(\d+) other events were written since$`, c.otherEventsWrittenSince)
 	ctx.Then(`^reading status scanned fewer than (\d+) events of the log$`, c.statusScannedFewerThan)
 	ctx.Then(`^the report says "([^"]*)" is queued for batch landing since (\d+) minutes ago$`, c.theReportSaysQueuedSince)
@@ -92,6 +93,19 @@ func (c *statusContext) aBatchLandJobBeganRunning(rig, minutes string) error {
 func (c *statusContext) theBatchLandJobEnded() error {
 	_, err := c.log.Append(context.Background(), []events.Event{
 		{Ts: c.now, Kind: events.KindJob, Lane: events.LaneNormal, Actor: application.BatchLandJobName + "@" + statusHost, From: events.JobRunning, To: events.JobDone},
+	})
+	return err
+}
+
+// theFollowerRestartedTheBatchLandJob leaves the events a follower restarted in
+// the middle of a batch writes: the pass cut short, then scheduled again with a
+// reason that names no rig, and running (mw-gq6.727).
+func (c *statusContext) theFollowerRestartedTheBatchLandJob() error {
+	actor := application.BatchLandJobName + "@" + statusHost
+	_, err := c.log.Append(context.Background(), []events.Event{
+		{Ts: c.now, Kind: events.KindJob, Lane: events.LaneNormal, Actor: actor, From: events.JobRunning, To: events.JobDone, Detail: application.SpringInterruptedDetail},
+		{Ts: c.now, Kind: events.KindJob, Lane: events.LaneNormal, Actor: actor, From: events.JobDone, To: events.JobScheduled, Detail: application.SpringRestartedReason},
+		{Ts: c.now, Kind: events.KindJob, Lane: events.LaneNormal, Actor: actor, From: events.JobScheduled, To: events.JobRunning},
 	})
 	return err
 }

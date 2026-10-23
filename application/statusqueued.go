@@ -107,7 +107,9 @@ var batchRigNamed = regexp.MustCompile(`([^\s,]+) \(\d+ queued`)
 // them and no window is read: a batch runs for as long as its gate takes, and
 // the factory writes events faster than that, so its running event falls out of
 // any fixed window (mw-gq6.652, mw-gq6.655). A log that is absent or cannot be
-// read names none.
+// read names none. The rigs are read from the newest scheduled event that says
+// what the pass is for: a pass the restarted follower runs again is scheduled
+// with a reason that names no rig (mw-gq6.727).
 func (s Status) batchJobsRunning(ctx context.Context) map[string]time.Time {
 	if s.Log == nil {
 		return nil
@@ -121,7 +123,7 @@ func (s Status) batchJobsRunning(ctx context.Context) map[string]time.Time {
 		if !strings.HasPrefix(actor, BatchLandJobName+"@") || j.Last.To != events.JobRunning {
 			continue
 		}
-		for _, m := range batchRigNamed.FindAllStringSubmatch(j.Scheduled.Detail, -1) {
+		for _, m := range batchRigNamed.FindAllStringSubmatch(j.Reasoned.Detail, -1) {
 			if at, had := out[m[1]]; !had || j.Running.Ts.Before(at) {
 				out[m[1]] = j.Running.Ts
 			}

@@ -923,6 +923,21 @@ Feature: mw status
     And the report says "mw-gq6.65" is in the batch running since 20 minutes ago
     And the report does not say any story is queued too long
 
+  # mw-gq6.727: a follower restarted in the middle of a batch runs the pass again
+  # with a reason that names no rig, and the batch is still the one running.
+  Scenario: A batch the restarted follower runs again is still the batch running
+    Given the rig "millwright" lands in batches every 30 minutes
+    And a status story "mw-gq6.68" filed under it
+    And the status story "mw-gq6.68" is claimed with its session running
+    And the claim on "mw-gq6.68" was last renewed 3 hours ago
+    And the status story "mw-gq6.68" was queued for batch landing 150 minutes ago
+    And a batch-land job for the rig "millwright" began running 20 minutes ago
+    And the follower restarted and ran the batch-land job again
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.68" is queued for batch landing since 150 minutes ago
+    And the report does not say any story is queued too long
+
   Scenario: A batch that has ended is not the batch running, however many events lie since
     Given the rig "millwright" lands in batches every 30 minutes
     And a status story "mw-gq6.66" filed under it
