@@ -175,6 +175,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeTalkWaitScenario(ctx)
 	steps.InitializeTidyScenario(ctx)
 	steps.InitializeTimingNightlyScenario(ctx)
+	steps.InitializeUnitFailedScenario(ctx)
 	steps.InitializeTodoDueScenario(ctx)
 	steps.InitializeTodoRankScenario(ctx)
 	steps.InitializeTodoNightlyScenario(ctx)

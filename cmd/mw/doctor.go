@@ -31,7 +31,8 @@ import (
 // check left needing a person is a beads note, one key per check, and
 // `mw millhand tick` is what wakes the Millhand for it. The only pushes are
 // the alarms to the Governor, mayor-stale's, mayor-stuck's and boost-reach's, sent from their cures,
-// and starved-rig's one mail to the Mayor an episode.
+// and starved-rig's one mail to the Mayor an episode. Its subcommand unit-failed
+// is not a check: it is what a failed unit's OnFailure= runs.
 func newDoctorCmd() *cobra.Command {
 	var dryRun bool
 	var envFile, posternBin string
@@ -414,6 +415,7 @@ func newDoctorCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what each faulty check would do; change nothing")
 	cmd.Flags().StringVar(&envFile, "env-file", "", "for licences: the postern backend's environment file (default ~/.config/postern/env)")
 	cmd.Flags().StringVar(&posternBin, "postern", "postern", "for licences: the postern binary the backend runs, asked for `rights --json`")
+	cmd.AddCommand(newDoctorUnitFailedCmd())
 	return cmd
 }
 
