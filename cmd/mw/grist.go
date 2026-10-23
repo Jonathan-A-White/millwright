@@ -364,7 +364,7 @@ func newRequestStatus(out io.Writer) (application.GristStatus, error) {
 // answers are known, on each model named, and scored; or, given an app and a
 // kind, on the examples of the app's rig.
 func newGristEvalCmd() *cobra.Command {
-	var grind, photos, effort, out string
+	var grind, photos, effort, out, ref string
 	var models, examples []string
 	var wait time.Duration
 
@@ -395,7 +395,15 @@ func newGristEvalCmd() *cobra.Command {
 			"Every talk it starts is ended when answered (its record and transcript deleted, from the\n" +
 			"mill's state directory), and an eval: or smoke: talk of the app left by a run killed midway\n" +
 			"and unused for an hour is ended first. --grind, --photos, --models, --effort and --out\n" +
-			"belong to the photo eval, not this.",
+			"belong to the photo eval, not this.\n\n" +
+			"--ref <git ref or worktree path> reads the grind, its instructions, its answer schema and its\n" +
+			"examples at that ref of the app's rig, not at main, and sends the instructions and schema\n" +
+			"with each example for the mill to grind with, so that a reword of a grind's instructions is\n" +
+			"proved before it lands: mw grist eval <app> <kind> --example <name> --ref <your branch>.\n" +
+			"A worktree path reads its committed HEAD (commit first: git commit -- <path>). Each example\n" +
+			"is then sent in a talk of its own, ended when answered, even one of a single turn. The mill\n" +
+			"takes that text from the test key alone and only in an eval: or smoke: talk, so a live app's\n" +
+			"grists are ground only with main's; the grind file's model and effort stay main's.",
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 || len(examples) > 0 {
@@ -409,7 +417,10 @@ func newGristEvalCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return application.GristEvalExamples{Smoke: smoke, Out: cmd.OutOrStdout()}.Run(cmd.Context(), args[0], args[1], examples)
+				return application.GristEvalExamples{Smoke: smoke, Ref: ref, Out: cmd.OutOrStdout()}.Run(cmd.Context(), args[0], args[1], examples)
+			}
+			if ref != "" {
+				return fmt.Errorf("--ref is for mw grist eval <app> <kind> --example <name>: the photo eval reads the checkout --grind names")
 			}
 			for flag, value := range map[string]string{"grind": grind, "photos": photos} {
 				if value == "" {
@@ -448,6 +459,7 @@ func newGristEvalCmd() *cobra.Command {
 	cmd.Flags().StringVar(&out, "out", "", "the directory the .jsonl and .md are written to (default: eval under grist_state_dir, ~/.local/state/mw/grist/eval)")
 	cmd.Flags().StringSliceVar(&examples, "example", nil, "an example of <app> <kind> to send, grinds/examples/<kind>/<name>.json, repeatable (required with an app and a kind)")
 	cmd.Flags().DurationVar(&wait, "wait", application.GristSmokeWait, "how long each example waits for its answer")
+	cmd.Flags().StringVar(&ref, "ref", "", "a git ref of the app's rig, or a worktree of it: read the grind, instructions, schema and examples there, not at main, and grind with them (only with an app and a kind)")
 	return cmd
 }
 

@@ -609,6 +609,12 @@ type GristEvalExamples struct {
 	// Smoke reads the rig and sends; its Talks end the talks. Its TalkPrefix and
 	// Out are the eval's own.
 	Smoke GristSmoke
+	// Ref, when set, is a git ref of the app's rig or a worktree of it: the
+	// grind, its instructions, its schema and its examples are read there and
+	// not at main, and every send carries the instructions and schema for the
+	// mill to grind with (GristGrindOverride), so a change to them is proved
+	// before it lands. The grind file's own model and effort stay main's.
+	Ref string
 	// Out is where the report is printed; nil prints nothing.
 	Out io.Writer
 }
@@ -623,13 +629,29 @@ func (e GristEvalExamples) Run(ctx context.Context, app, kind string, names []st
 	if err != nil {
 		return err
 	}
+	where := shortTxid(commit)
+	if e.Ref != "" {
+		refs, ok := s.Grinds.(GrindRefs)
+		if !ok {
+			return fmt.Errorf("mw grist eval: this host's grind source cannot read a ref")
+		}
+		var note string
+		if checkout, commit, note, err = refs.ResolveRef(ctx, checkout, e.Ref); err != nil {
+			return fmt.Errorf("mw grist eval: --ref: %w", err)
+		}
+		where = "ref " + e.Ref + " (" + shortTxid(commit) + ")"
+		if note != "" {
+			s.say("note: %s", note)
+		}
+		s.say("reading %s/%s at %s, not at main", app, kind, where)
+	}
 	files, err := s.Grinds.List(ctx, checkout, commit, GristExamplesDir+"/"+kind)
 	if err != nil {
 		return fmt.Errorf("mw grist eval: %w", err)
 	}
 	grind, ok := s.readGrind(ctx, checkout, commit, kind)
 	if !ok {
-		return fmt.Errorf("mw grist eval: %s has no grind of kind %q at %s (grinds/%s.json)", app, kind, shortTxid(commit), kind)
+		return fmt.Errorf("mw grist eval: %s has no grind of kind %q at %s (grinds/%s.json)", app, kind, where, kind)
 	}
 	if grind.Forward != "" {
 		return fmt.Errorf("mw grist eval: the grind %s/%s forwards to the %s, so it is not evaluated", app, kind, grind.Forward)
@@ -637,6 +659,13 @@ func (e GristEvalExamples) Run(ctx context.Context, app, kind string, names []st
 	schema := s.readSchema(ctx, checkout, commit, grind)
 	if schema == "" {
 		return fmt.Errorf("mw grist eval: the answer schema %s of %s/%s could not be read", grind.AnswerSchema, app, kind)
+	}
+	if e.Ref != "" {
+		text, found, err := readGrindInstructions(ctx, s.Grinds, checkout, commit, grind.Instructions)
+		if err != nil || !found || strings.TrimSpace(string(text)) == "" || !rigPath(grind.Instructions) {
+			return fmt.Errorf("mw grist eval: the instructions %s of %s/%s could not be read at %s", grind.Instructions, app, kind, where)
+		}
+		s.Override = &GristGrindOverride{Instructions: string(text), Schema: schema}
 	}
 	have := map[string]string{}
 	var all []string
