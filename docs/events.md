@@ -370,7 +370,7 @@ One `events` record's plaintext is one batch: the events numbered `from` to
 - `normal`: the ~2 s batch, on chain and direct.
 - `emergency`: one event sent alone and at once; `from` equals `to`. A writer asks for it
   by putting the event in the log in this lane: `mw events emit --emergency`, `mw talk call`
-  (a `message` whose detail is the ring's txid), and mayor-stale's alarm in `mw doctor` (a
+  (a `message` whose detail is `The Mayor is calling: <reason>`; it ends with a normal-lane event whose `clears` is its seq, written by `mw talk wait` when the Governor answers or 15 minutes pass, or by the next `mw talk call`), and mayor-stale's alarm in `mw doctor` (a
   `job` event, running to failed, actor `doctor@<host>`, the alarm's text as detail; the
   boost-reach, vps-nginx and battery alarms too). When the alarm's condition ends (the Boost answers
   again, the VPS upstream is right again, the Mayor is fresh again, the battery recovers or is plugged in) `mw doctor` writes
@@ -378,7 +378,7 @@ One `events` record's plaintext is one batch: the events numbered `from` to
   `doctor@<host>`, the way back as detail, whose `clears` is the seq of the emergency it ends. The
   doctor keeps that seq between runs; an alarm whose emergency could not be written has none, and
   its end names no `clears` (or, for the Mayor and the battery, says nothing). A battery that fell to
-  Low and then to Critical wrote two emergencies and so clears both, one event each. Each
+  Low and then to Critical wrote two emergencies and so clears both, one event each; so does a vps-nginx fault whose words changed. Each
   pass of the follower's sender sends these first: on chain and direct together, before the
   pending fallback batches are retried and without waiting for the 2 s window, and on chain
   even past `chain_daily_cap`. They have an allowance of their own, `[events] emergency_daily_cap`

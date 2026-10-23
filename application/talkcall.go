@@ -60,8 +60,7 @@ func (r TalkCallRequest) validate() error {
 // turn. The record's class is call and it carries, in the clear beside class
 // and ct, the role ring, which is what makes the backend push "The Mayor is
 // calling". A direct record also carries the reason as its summary, the body
-// of that push, cut to 80 runes. It reads one note, the channel TalkWait last
-// heard the Governor by, and writes none.
+// of that push, cut to 80 runes. It reads the channel note TalkWait last wrote and writes the open ring's note.
 //
 // On chain — the request's Chain, or the Governor's newest record having come
 // by chain — the ring is also broadcast, through the backend's broadcast,
@@ -70,7 +69,10 @@ func (r TalkCallRequest) validate() error {
 // good, so the reason is never on it. The direct delivery goes first; a chain that was
 // asked for and fails is an error naming the txid that did go direct, one
 // added by itself is only said. The ring also rides the emergency lane of
-// the event log when Log is set.
+// the event log when Log is set: a message whose detail is words, "The Mayor
+// is calling: <reason>", never the txid. Its seq is kept in the note
+// TalkRingKey (when Notes is set) for mw talk wait to end it, as the
+// Governor's answer or TalkRingFor does; a new ring ends one still open.
 type TalkCall struct {
 	Postern Postern
 	// Chain is what the ring also goes on, when it goes on chain.
@@ -89,7 +91,7 @@ type TalkCall struct {
 	FloatSats int64
 
 	// Log, when set, is the home's event log: the ring is also one event in
-	// the emergency lane (a message by Actor, its detail the ring's txid), so
+	// the emergency lane (a message by Actor, its detail the ring in words), so
 	// the Governor's app is told at once, ahead of any batch. A failure to
 	// write it is said on Out and does not fail the call.
 	Log   EventLog
@@ -158,12 +160,21 @@ func (c TalkCall) Run(ctx context.Context, req TalkCallRequest) (TalkCallReport,
 	report := TalkCallReport{Txid: txid}
 	var notes strings.Builder
 	if c.Log != nil {
-		_, err := EventEmit{
+		// A new ring takes the place of one still open: the old one ends here.
+		if err := endRing(ctx, c.Log, c.Notes, c.now(), c.Actor, "The Mayor is calling again; this call is replaced", false); err != nil {
+			fmt.Fprintf(&notes, "earlier ring: not ended: %v\n", err)
+		}
+		ev, err := EventEmit{
 			Log: c.Log, Now: c.now, Emergency: true,
-			Event: events.Event{Kind: events.KindMessage, Actor: c.Actor, Detail: txid},
+			Event: events.Event{Kind: events.KindMessage, Actor: c.Actor, Detail: ringEventText(req.Text)},
 		}.Run(ctx)
-		if err != nil {
+		switch {
+		case err != nil:
 			fmt.Fprintf(&notes, "emergency event: not written: %v\n", err)
+		case c.Notes != nil:
+			if err := keepRing(ctx, c.Notes, ev.Seq, c.now()); err != nil {
+				fmt.Fprintf(&notes, "ring note: not kept, so its end is not written: %v\n", err)
+			}
 		}
 	}
 	if wanted, automatic := c.wantsChain(ctx, req); wanted {

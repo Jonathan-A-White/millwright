@@ -341,6 +341,7 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 			if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return TalkWaitReport{}, ctx.Err()
 			}
+			run.settleRing(context.WithoutCancel(ctx), false)
 			w.printf(w.Out, "No talk turn by %s; the wait ended on its time limit (%s). Arm it again.\n",
 				w.now().UTC().Format(time.RFC3339), w.now().Sub(started).Round(time.Second))
 			run.ideasEnd(ctx)
@@ -748,6 +749,7 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 		}
 	}
 	report := TalkWaitReport{Turn: r.turn, Call: r.call, CallTxid: r.callTxid, Postern: r.posts}
+	r.settleRing(ctx, r.call != nil || r.turn != nil)
 	if r.call != nil {
 		if r.call.Role == CallRoleLater {
 			r.printf(r.Out, "later %s\n", r.call.RingTxid)
@@ -820,6 +822,20 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 	}
 	report.Mail = mail
 	return report, nil
+}
+
+// settleRing ends the ring mw talk call left open: at once when the Governor
+// has answered (a turn, or a call record of his), otherwise only when it is
+// older than TalkRingFor. A failure is said on Err and changes nothing else.
+func (r *talkWaitRun) settleRing(ctx context.Context, answered bool) {
+	why := "The Governor answered the Mayor's call"
+	if !answered {
+		why = "The Mayor's call went unanswered and has timed out"
+	}
+	ctx = context.WithoutCancel(ctx)
+	if err := endRing(ctx, r.Log, r.Memory, r.now(), MayorSeat, why, !answered); err != nil {
+		r.printf(r.Err, "mw talk wait: ending the call's ring: %v\n", err)
+	}
 }
 
 // TalkWaitImageLimit bounds how long the wait spends fetching a turn's

@@ -155,8 +155,8 @@ func TestTalkCallAlsoEmitsOneEmergencyEventNamingTheRing(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("%d events in the log, want one", len(got))
 	}
-	if e := got[0]; e.Lane != events.LaneEmergency || e.Kind != events.KindMessage || e.Actor != "mayor@laptop" || e.Detail != "ring-txid" {
-		t.Fatalf("the event is %+v, want an emergency message by mayor@laptop whose detail is the ring's txid", e)
+	if e := got[0]; e.Lane != events.LaneEmergency || e.Kind != events.KindMessage || e.Actor != "mayor@laptop" || e.Detail != "The Mayor is calling: Back now." {
+		t.Fatalf("the event is %+v, want an emergency message by mayor@laptop whose detail is the ring in words", e)
 	}
 }
 
