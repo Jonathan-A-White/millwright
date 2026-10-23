@@ -159,6 +159,35 @@ func TestUnmetCriteriaLeavesACommentWhereEveryCriterionHoldsAlone(t *testing.T) 
 	}
 }
 
+func TestUnmetCriteriaTellsAPhraseSaidFromOneOnlyNamed(t *testing.T) {
+	for name, tc := range map[string]struct {
+		comment string
+		refused bool
+	}{
+		"partial refused":               {"AC2 holds only in part.", true},
+		"not run refused":               {"AC4: NOT RUN", true},
+		"not met refused":               {"AC3 is not met, measured by the Mayor.", true},
+		"partial after an unrelated no": {"AC1 has no test, so it holds only in part.", true},
+		"double quoted":                 {`AC3 holds, no "only in part" wording.`, false},
+		"single quoted":                 {"AC2 holds, and the comment has no 'not met' sentence", false},
+		"quoted without a negation":     {`AC2 holds, and the phrase "not run" is what the check looks for.`, false},
+		"none after the colon":          {"AC4 not run: none. AC4 holds.", false},
+		"none before":                   {"AC1: none not met, all hold.", false},
+		"without":                       {"AC2 holds without any part not done.", false},
+		"apostrophe is not a quote":     {"AC2 doesn't hold, it's not met", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := application.UnmetCriteria(tc.comment)
+			if tc.refused && len(got) != 1 {
+				t.Fatalf("expected the refusal to fire, got %q", got)
+			}
+			if !tc.refused && len(got) != 0 {
+				t.Fatalf("expected the comment to land, got %q", got)
+			}
+		})
+	}
+}
+
 func TestUnmetCriterionPhrasesEachSayWhereTheyWereSeen(t *testing.T) {
 	if len(application.UnmetCriterionPhrases) == 0 {
 		t.Fatal("expected a list of phrases")

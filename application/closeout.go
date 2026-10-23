@@ -93,7 +93,9 @@ type UnmetPhrase struct {
 // 2026-10-23 of the comments of the last 200 closed stories: every sentence
 // naming an AC beside one of these was a criterion left unmet, and no sentence
 // that kept the phrase from an AC was a false match. A phrase is matched
-// whole, in any case.
+// whole, in any case; one inside quotes, after 'no', 'none' or 'without' in its
+// clause, or followed by ': none' is named, not said, and does not count
+// (mw-gq6.714).
 var UnmetCriterionPhrases = []UnmetPhrase{
 	{"only in part", "mw-79en7t.9: 'AC2 and AC4 hold only in small part', landed as Landed 2026-10-22"},
 	{"only in small part", "mw-79en7t.9"},
@@ -110,6 +112,14 @@ var (
 	criterionRef    = regexp.MustCompile(`(?i)\bAC ?\d+\b|\bacceptance criteri`)
 	unmetPhraseExpr = regexp.MustCompile(`(?i)\b(` + unmetPhraseAlternatives() + `)\b`)
 	sentenceEnd     = regexp.MustCompile(`[.!?;]\s+|\n`)
+	// quotedSpan is text in double or curly quotes, backticks or single quotes;
+	// a single quote opens only after a space or bracket and closes before a
+	// space or mark, so an apostrophe in a word is not one.
+	quotedSpan   = regexp.MustCompile("\"[^\"]*\"|\u201c[^\u201d]*\u201d|`[^`]*`")
+	singleQuoted = regexp.MustCompile(`(^|[\s(\[])'[^']*'([\s.,:)\]!?]|$)`)
+	negation     = regexp.MustCompile(`(?i)\b(no|none|without)\b`)
+	nothingAfter = regexp.MustCompile(`(?i)^\s*[:=-]?\s*(none|nothing)\b`)
+	clauseEnd    = regexp.MustCompile(`[,:()]| - `)
 )
 
 func unmetPhraseAlternatives() string {
@@ -129,9 +139,34 @@ func UnmetCriteria(comment string) []string {
 	var found []string
 	for _, sentence := range sentenceEnd.Split(comment, -1) {
 		sentence = strings.Join(strings.Fields(sentence), " ")
-		if criterionRef.MatchString(sentence) && unmetPhraseExpr.MatchString(sentence) {
+		if criterionRef.MatchString(sentence) && saysUnmet(sentence) {
 			found = append(found, strings.Trim(sentence, " •-:"))
 		}
 	}
 	return found
+}
+
+// saysUnmet reports whether sentence uses a phrase of UnmetCriterionPhrases to
+// say a criterion is unmet, rather than to name the phrase: not inside quotes,
+// not after 'no', 'none' or 'without' in its clause, not followed by 'none'.
+func saysUnmet(sentence string) bool {
+	masked := quotedSpan.ReplaceAllStringFunc(sentence, blank)
+	masked = singleQuoted.ReplaceAllStringFunc(masked, blank)
+	for _, at := range unmetPhraseExpr.FindAllStringIndex(masked, -1) {
+		clauseStart := 0
+		for _, end := range clauseEnd.FindAllStringIndex(masked[:at[0]], -1) {
+			clauseStart = end[1]
+		}
+		if negation.MatchString(masked[clauseStart:at[0]]) || nothingAfter.MatchString(masked[at[1]:]) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// blank is s as spaces of the same length, so offsets in a masked sentence
+// stay those of the sentence.
+func blank(s string) string {
+	return strings.Repeat(" ", len(s))
 }
