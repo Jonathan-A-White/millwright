@@ -29,11 +29,15 @@ const DeputyMailbox = "deputy"
 // DeputyAlreadyUp is a Deputy bring-up that started nothing because a window of
 // the Deputy's is already open. It is not a fault: it carries DeputyUpExit and
 // says so in one line. Busy says the pane was at work and unread mail was left
-// waiting for it; Limit, when set, that the pane is stopped at the harness's
-// usage limit, which has not reset yet (mw-gq6.473).
+// waiting for it, and Pane says why that pane is not idle: PaneWorking, a turn
+// is running; PaneDraft, text waits unsent on the input line and the session
+// has not handed off; any other state, the pane is not at a prompt. Limit,
+// when set, says the pane is stopped at the harness's usage limit, which has
+// not reset yet (mw-gq6.473).
 type DeputyAlreadyUp struct {
 	Window string
 	Busy   bool
+	Pane   PaneState
 	Limit  *PaneLimit
 }
 
@@ -43,7 +47,13 @@ func (u *DeputyAlreadyUp) Error() string {
 		return fmt.Sprintf("the Deputy in window %s is %s; the mail waits for the reset", u.Window, u.Limit)
 	}
 	if u.Busy {
-		return fmt.Sprintf("the Deputy is busy in window %s; the mail waits", u.Window)
+		switch u.Pane {
+		case PaneDraft:
+			return fmt.Sprintf("text waits unsent on the input line of the Deputy in window %s, and the session has not handed off; the mail waits", u.Window)
+		case PaneWorking:
+			return fmt.Sprintf("the Deputy is busy in window %s: a turn is running; the mail waits", u.Window)
+		}
+		return fmt.Sprintf("the Deputy in window %s is not at its prompt (a question or a menu is up); the mail waits", u.Window)
 	}
 	return fmt.Sprintf("the Deputy is already up in the window %s: nothing was started", u.Window)
 }
@@ -220,9 +230,12 @@ func (d Deputy) now() time.Time {
 // closeHandedOff closes the Deputy's window when its session has already handed
 // off — a handoff was written after the window was opened — and its pane sits
 // idle: a session that has handed off will not work the mail, so nudging it
-// would leave the mail unread. It says whether it closed the window, and Run
-// then starts a fresh Deputy. A window nothing can date, a pane that is not
-// idle, or a terminal or handoff that cannot be read is a Deputy that is up.
+// would leave the mail unread. A pane idle at an empty input line is done, and
+// so is one holding only unsent text with no turn running (PaneDraft): it is
+// what a session that handed off and stopped leaves behind (mw-gq6.709). It
+// says whether it closed the window, and Run then starts a fresh Deputy. A
+// window nothing can date, a pane with a turn running or at a question, or a
+// terminal or handoff that cannot be read is a Deputy that is up.
 func (d Deputy) closeHandedOff(ctx context.Context, name string) (bool, error) {
 	if d.Terminal == nil {
 		return false, nil
@@ -252,7 +265,7 @@ func (d Deputy) closeHandedOff(ctx context.Context, name string) (bool, error) {
 		if window.Name != name {
 			continue
 		}
-		if state, err := d.Terminal.PaneState(ctx, window.ID); err != nil || state != PaneIdle {
+		if state, err := d.Terminal.PaneState(ctx, window.ID); err != nil || (state != PaneIdle && state != PaneDraft) {
 			return false, nil
 		}
 		if err := d.Terminal.Close(ctx, window.ID); err != nil {
@@ -298,7 +311,7 @@ func (d Deputy) wakeIdle(ctx context.Context, name string) (SeatUpReport, error)
 		return SeatUpReport{}, up
 	}
 	if state != PaneIdle {
-		return SeatUpReport{}, &DeputyAlreadyUp{Window: name, Busy: true}
+		return SeatUpReport{}, &DeputyAlreadyUp{Window: name, Busy: true, Pane: state}
 	}
 	text := MailNudgeLine(DeputyMailbox, messageIds(inbox))
 	outcome, err := TypeConfirmed(ctx, d.Terminal, ReapWindow{ID: id, Name: name}, text, d.Settle)
