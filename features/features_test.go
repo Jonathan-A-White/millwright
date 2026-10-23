@@ -138,6 +138,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeMergeSlotScenario(ctx)
 	steps.InitializeNextScenario(ctx)
 	steps.InitializePathScenario(ctx)
+	steps.InitializePauseScenario(ctx)
 	steps.InitializeAfterLandingScenario(ctx)
 	steps.InitializePeekScenario(ctx)
 	steps.InitializePosternBeadScenario(ctx)
