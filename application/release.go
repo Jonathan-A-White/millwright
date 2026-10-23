@@ -164,14 +164,21 @@ type heldRef struct {
 	ID, Parent string
 }
 
-var (
-	holdWord      = regexp.MustCompile(`(?i)\b(held|parked)\b`)
-	governorsWord = regexp.MustCompile(`(?i)\b(governor|his word)\b`)
-)
+var governorsWord = regexp.MustCompile(`(?i)\b(governor|his word)\b`)
+
+// holdsOnHisWord reports whether a comment is a hold on the Governor's word: one
+// that opens with HeldCommentPrefix, the way the factory writes a real hold, and
+// names the Governor or his word. The words held and Governor elsewhere in its
+// prose are not one: a filing note that says "the Governor to confirm" or quotes
+// him is no hold on his word (mw-gq6.720).
+func holdsOnHisWord(text string) bool {
+	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(text)), HeldCommentPrefix) &&
+		governorsWord.MatchString(text)
+}
 
 // wordHold is the newest comment on a story, or on its parent, that holds it on
-// the Governor's word: one that says held or parked together with Governor or
-// his word, and that no OverHoldMarker comment on the story is newer than. A
+// the Governor's word: one that opens HELD: and names the Governor or his word,
+// and that no OverHoldMarker comment on the story is newer than. A
 // comment of the story's own holds it; a comment on the parent holds it only
 // when it names the story's id, for an epic's comment about other stories is
 // not a hold on this one (mw-gq6.566). ok is false when there is none; on is
@@ -186,8 +193,7 @@ func wordHold(id string, own, parent []Comment, parentID string) (hold Comment, 
 	}
 	scan := func(comments []Comment, bead string, sameList bool) {
 		for i, c := range comments {
-			if !holdWord.MatchString(c.Text) || !governorsWord.MatchString(c.Text) ||
-				strings.HasPrefix(strings.TrimSpace(c.Text), OverHoldMarker) {
+			if !holdsOnHisWord(c.Text) {
 				continue
 			}
 			if !sameList && !namesID(c.Text, id) {

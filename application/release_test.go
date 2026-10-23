@@ -295,7 +295,7 @@ func TestAHoldOnTheEpicNamingOtherStoriesDoesNotHoldANewSibling(t *testing.T) {
 func TestAHoldOnTheEpicNamingTheStoryStillHoldsItAndSaysWhereTheCommentSits(t *testing.T) {
 	tracker, filed := filedAndHeld(t)
 	module := filed.Stories[0].ID
-	if err := tracker.CommentOnStory(context.Background(), filed.EpicID, "Parked on the Governor's word: "+module+" waits for him"); err != nil {
+	if err := tracker.CommentOnStory(context.Background(), filed.EpicID, "HELD: on the Governor's word: "+module+" waits for him"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -326,11 +326,78 @@ func TestAHoldOnTheStoryItselfNeedsNoIdAndNamesItsBead(t *testing.T) {
 func TestAStoryIdInACommentIsNotTakenFromALongerId(t *testing.T) {
 	tracker, filed := filedAndHeld(t)
 	module := filed.Stories[0].ID
-	if err := tracker.CommentOnStory(context.Background(), filed.EpicID, "Parked on the Governor's word: "+module+"7 waits for him"); err != nil {
+	if err := tracker.CommentOnStory(context.Background(), filed.EpicID, "HELD: on the Governor's word: "+module+"7 waits for him"); err != nil {
 		t.Fatal(err)
 	}
 
 	if _, err := (application.Release{Tracker: tracker}).Run(context.Background(), module); err != nil {
 		t.Fatalf("expected %s to release, the comment names %s7: %v", module, module, err)
+	}
+}
+
+// A real hold opens its comment with HELD: (application/stuck.go); the words held
+// and Governor anywhere else in a comment's prose are not one (mw-gq6.720).
+func TestACommentOpeningHELDAndNamingTheGovernorHoldsTheStory(t *testing.T) {
+	for _, text := range []string{
+		"HELD: by the Governor via postern, txid direct:abc123",
+		"HELD: the Governor's word, wait for him",
+		"held: his word, do not release yet",
+		"  HELD: the Governor wants to see it first",
+	} {
+		tracker, filed := filedAndHeld(t)
+		module := filed.Stories[0].ID
+		if err := tracker.CommentOnStory(context.Background(), module, text); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := application.Release{Tracker: tracker}.Run(context.Background(), module)
+		if err == nil {
+			t.Errorf("comment %q: expected the release to be refused", text)
+			continue
+		}
+		if want := "held on the Governor's word"; !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), strings.TrimSpace(text)) {
+			t.Errorf("comment %q: expected a refusal naming the comment, got: %v", text, err)
+		}
+	}
+}
+
+func TestReleasedOverHoldStillLiftsAHELDComment(t *testing.T) {
+	tracker, filed := filedAndHeld(t)
+	module := filed.Stories[0].ID
+	if err := tracker.CommentOnStory(context.Background(), module, "HELD: the Governor's word, wait for him"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := (application.Release{Tracker: tracker, OverHold: "he asked for it in chat"}).Run(context.Background(), module); err != nil {
+		t.Fatalf("expected --over-hold to release %s: %v", module, err)
+	}
+	if _, err := (application.Release{Tracker: tracker}).Run(context.Background(), module); err != nil {
+		t.Fatalf("expected the release marker to lift the hold: %v", err)
+	}
+}
+
+func TestProseThatOnlyMentionsHeldAndTheGovernorDoesNotHoldTheStory(t *testing.T) {
+	for _, text := range []string{
+		"Filed HELD: mw-bsf54t.13 ... Choices PROVISIONAL, the Governor to confirm ... HIS WORDS ...",
+		"Choices PROVISIONAL, the Governor to confirm",
+		`He said "the old one stays held until I say" and the Governor will say it`,
+		"Parked on the Governor's word: waits for him",
+		"Estimate revised; the Governor approved the plan, nothing is held",
+	} {
+		for _, onEpic := range []bool{false, true} {
+			tracker, filed := filedAndHeld(t)
+			module := filed.Stories[0].ID
+			bead, prose := module, text
+			if onEpic {
+				bead, prose = filed.EpicID, text+" ("+module+")"
+			}
+			if err := tracker.CommentOnStory(context.Background(), bead, prose); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := (application.Release{Tracker: tracker}).Run(context.Background(), module); err != nil {
+				t.Errorf("comment %q on %s: expected %s to release: %v", prose, bead, module, err)
+			}
+		}
 	}
 }
