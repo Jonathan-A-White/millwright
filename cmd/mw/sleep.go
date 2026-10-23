@@ -313,7 +313,8 @@ func sleepSpringJob(host string, hour, minute int, out io.Writer) (application.S
 		Home: func(ctx context.Context) (bool, error) {
 			return application.IsHome(ctx, mwVault(dir, host), host)
 		},
-		Now: time.Now,
+		Now:    time.Now,
+		Paused: application.FactoryPausedByNote(mwGateway(dir, host)),
 	}
 	return nightly.Job(), nil
 }

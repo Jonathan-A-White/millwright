@@ -70,6 +70,9 @@ type TodoNightly struct {
 	Now func() time.Time
 	// Err is where a card passed over is said. A nil Err says nothing.
 	Err io.Writer
+	// Paused says whether the factory is paused (mw pause), when the pass is not
+	// made; nil is never.
+	Paused func(ctx context.Context) (bool, error)
 
 	mu    sync.Mutex
 	tried string // the UTC day the pass was last begun
@@ -119,6 +122,9 @@ func (n *TodoNightly) whyNotDue(ctx context.Context) string {
 	now := n.now().UTC()
 	if now.Hour() < n.Hour {
 		return fmt.Sprintf("not made: it is before %02d:00Z", n.Hour)
+	}
+	if why := pausedWhy(ctx, n.Paused); why != "" {
+		return why
 	}
 	day := now.Format(time.DateOnly)
 	n.mu.Lock()

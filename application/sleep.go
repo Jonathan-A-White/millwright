@@ -749,6 +749,9 @@ type SleepNightly struct {
 	Now func() time.Time
 	// About says when, in the listing of mw events jobs.
 	About string
+	// Paused says whether the factory is paused (mw pause), when the pass is not
+	// made; nil is never.
+	Paused func(ctx context.Context) (bool, error)
 
 	mu    sync.Mutex
 	tried string // the UTC day the pass was last begun
@@ -796,6 +799,9 @@ func (n *SleepNightly) whyNotDue(ctx context.Context) string {
 	now := n.now()
 	if now.Hour() < n.Hour || (now.Hour() == n.Hour && now.Minute() < n.Minute) {
 		return fmt.Sprintf("not made: it is before %02d:%02dZ", n.Hour, n.Minute)
+	}
+	if why := pausedWhy(ctx, n.Paused); why != "" {
+		return why
 	}
 	day := now.Format(time.DateOnly)
 	n.mu.Lock()

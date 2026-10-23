@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -40,6 +41,37 @@ const (
 	// usage limit wrote is told from this one.
 	pauseSaid = "mw pause: "
 )
+
+// PauseNightPasses are the follower's night jobs a pause turns off and a resume
+// turns back on: the sleep pass and the To do rank. Each asks whether the
+// factory is paused before it begins (mw-gq6.710).
+var PauseNightPasses = []string{SleepJobName, TodoRankJobName}
+
+// FactoryPausedByNote reads whether a pause is in force from the note PauseBook keeps.
+func FactoryPausedByNote(notes interface {
+	Note(ctx context.Context, key string) (string, error)
+}) func(ctx context.Context) (bool, error) {
+	return func(ctx context.Context) (bool, error) {
+		dir, err := notes.Note(ctx, PauseCurrentKey)
+		return strings.TrimSpace(dir) != "", err
+	}
+}
+
+// pausedWhy is why a night pass is not made while the factory is paused, "" when
+// it is not (or paused is nil). A pause that cannot be read stops the pass too.
+func pausedWhy(ctx context.Context, paused func(ctx context.Context) (bool, error)) string {
+	if paused == nil {
+		return ""
+	}
+	held, err := paused(ctx)
+	if err != nil {
+		return "not made: reading whether the factory is paused failed: " + firstLine(err.Error())
+	}
+	if held {
+		return "not made: the factory is paused (mw pause); mw resume turns the pass back on"
+	}
+	return ""
+}
 
 // PauseDir is where a pause begun on day keeps its paused set, from the
 // vault's root.
@@ -416,13 +448,16 @@ type PausedSet struct {
 	MaxBoxesSet bool   `json:"max_boxes_set,omitempty"`
 	// Hosts are the hosts the pause reached, with the cap each had; Unreached
 	// are those it did not, with why.
-	Hosts     []PausedSetHost `json:"hosts"`
-	Unreached []string        `json:"unreached,omitempty"`
-	Boxes     []string        `json:"boxes_down,omitempty"`
-	Stories   []PausedStory   `json:"stories"`
-	Bead      string          `json:"bead,omitempty"`
-	Notes     []string        `json:"notes,omitempty"`
-	ResumedAt time.Time       `json:"resumed_at,omitzero"`
+	Hosts []PausedSetHost `json:"hosts"`
+	// NightPasses are the follower's night jobs the pause turned off (the sleep
+	// pass, the To do rank); the resume turns them back on.
+	NightPasses []string      `json:"night_passes,omitempty"`
+	Unreached   []string      `json:"unreached,omitempty"`
+	Boxes       []string      `json:"boxes_down,omitempty"`
+	Stories     []PausedStory `json:"stories"`
+	Bead        string        `json:"bead,omitempty"`
+	Notes       []string      `json:"notes,omitempty"`
+	ResumedAt   time.Time     `json:"resumed_at,omitzero"`
 }
 
 // PausedSetHost is one host of the paused set.
@@ -451,6 +486,9 @@ func (s PausedSet) String() string {
 	}
 	if s.MaxBoxesSet {
 		fmt.Fprintf(&b, "cloud.max_boxes 0 (was %s)\n", s.MaxBoxes)
+	}
+	if len(s.NightPasses) > 0 {
+		fmt.Fprintf(&b, "night passes off: %s\n", strings.Join(s.NightPasses, ", "))
 	}
 	for _, box := range s.Boxes {
 		fmt.Fprintf(&b, "box %s brought down\n", box)
@@ -638,7 +676,8 @@ func (p Pause) Run(ctx context.Context, req PauseRequest) (PausedSet, error) {
 	if paused {
 		hosts = set.Unreached
 	} else {
-		set = PausedSet{Date: now.Format("2006-01-02"), Reason: req.Reason, PausedAt: now, Until: until, Bead: req.Bead}
+		set = PausedSet{Date: now.Format("2006-01-02"), Reason: req.Reason, PausedAt: now, Until: until, Bead: req.Bead,
+			NightPasses: slices.Clone(PauseNightPasses)}
 		value, isSet, err := p.Config.MaxBoxes(ctx)
 		if err != nil {
 			return PausedSet{}, fmt.Errorf("cloud.max_boxes could not be read: %w", err)
@@ -822,6 +861,9 @@ func (r Resume) Run(ctx context.Context, dryRun bool) error {
 		} else {
 			notes = append(notes, "cloud.max_boxes put back to "+set.MaxBoxes)
 		}
+	}
+	if len(set.NightPasses) > 0 {
+		notes = append(notes, "night passes back on: "+strings.Join(set.NightPasses, ", "))
 	}
 	var retry []string
 	for _, ps := range set.Stories {
