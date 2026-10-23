@@ -40,6 +40,17 @@ func announce(ids ...string) string {
 	return fmt.Sprintf("New mail for mayor: %d message(s): %s. Run bd mail inbox.\n", len(ids), named)
 }
 
+const (
+	// hungSleep is how long a hung postern snapshot or view sleeps, and
+	// hungBound how long a tick running one may take: the timeout under test is
+	// 1 s, so a tick that passes hungBound did not kill it, while a loaded host
+	// (load 40 of 20 cores, mw-gq6.721) takes seconds for a tick's own shell
+	// work and stays far under it. hungSleep is past the 60 s a contrib script
+	// is let run, so a timeout that does not fire fails the tick too.
+	hungSleep = 120 * time.Second
+	hungBound = 30 * time.Second
+)
+
 // killedElapsed matches the one log line a snapshot the timeout killed
 // leaves: a mention of the kill and how many seconds it ran before it.
 var killedElapsed = regexp.MustCompile(`killed after \d+s`)
@@ -217,7 +228,7 @@ func newFactory(t *testing.T) *factory {
 		"postern) echo \"$*\" >> \"$MW_TEST_DIR/postern.log\"\n"+
 		"\tcase \"$2 ${3:-}\" in\n"+
 		"\t\"view --help\") if [ -f \"$MW_TEST_DIR/no-view\" ]; then printf 'Usage:\\n  mw postern [command]\\n'; else printf 'Usage:\\n  mw postern view [flags]\\n'; fi ;;\n"+
-		"\t\"view \") [ -f \"$MW_TEST_DIR/view-sleep\" ] && sleep \"$(cat \"$MW_TEST_DIR/view-sleep\")\"; [ -f \"$MW_TEST_DIR/view-fails\" ] && exit 1 ;;\n"+
+		"\t\"view \") [ -f \"$MW_TEST_DIR/view-sleep\" ] && exec sleep \"$(cat \"$MW_TEST_DIR/view-sleep\")\"; [ -f \"$MW_TEST_DIR/view-fails\" ] && exit 1 ;;\n"+
 		"\t*) cat \"$MW_TEST_DIR/postern-count\" 2>/dev/null ;;\n"+
 		"\tesac ;;\n"+
 		"esac\nexit 0\n", 0o755)
@@ -701,8 +712,10 @@ func TestATickWhileAnotherRunsDoesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The holder says when it has the lock, so the tick never runs before it
-	// does, however long the host takes to start it (mw-gq6.440).
-	holder := command(f.t, "flock", f.path("state/lock"), "sh", "-c", `touch "$1" && exec sleep 10`, "sh", f.path("held"))
+	// does, however long the host takes to start it (mw-gq6.440). It holds the
+	// lock past any tick (mw-gq6.721): the command's own deadline and the
+	// cleanup below end it, so a tick that starts late still finds the lock held.
+	holder := command(f.t, "flock", f.path("state/lock"), "sh", "-c", `touch "$1" && exec sleep 300`, "sh", f.path("held"))
 	if err := holder.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -1196,7 +1209,7 @@ func TestASlowPosternSnapshotIsKilledByItsOwnTimeoutAndDoesNotStopTheTick(t *tes
 	f.posternCount(0)
 	f.env = append(f.env, "MW_MAIL_SNAPSHOT_TIMEOUT=1")
 	f.write("bin/mw", "#!/bin/sh\ncase \"$1 $2\" in\n"+
-		"\"postern snapshot\") echo \"$*\" >> \"$MW_TEST_DIR/postern.log\"; sleep 5; exit 0 ;;\n"+
+		"\"postern snapshot\") echo \"$*\" >> \"$MW_TEST_DIR/postern.log\"; exec sleep 120 ;;\n"+
 		"esac\ncase \"$1\" in\n"+
 		"sync) echo \"$*\" >> \"$MW_TEST_DIR/mw.log\" ;;\n"+
 		"nudge) echo \"$*\" >> \"$MW_TEST_DIR/nudge.log\"; [ -f \"$MW_TEST_DIR/nudge-output\" ] && cat \"$MW_TEST_DIR/nudge-output\" ;;\n"+
@@ -1212,8 +1225,8 @@ func TestASlowPosternSnapshotIsKilledByItsOwnTimeoutAndDoesNotStopTheTick(t *tes
 	if n := f.posternSubCalls("snapshot"); n != 1 {
 		t.Fatalf("mw postern snapshot was called %d times, want 1 (even though it hung)", n)
 	}
-	if elapsed >= 4*time.Second {
-		t.Fatalf("the tick took %v; a snapshot bounded to a 1s timeout should never have run anywhere near the 5s it tried to sleep", elapsed)
+	if elapsed >= hungBound {
+		t.Fatalf("the tick took %v; a snapshot bounded to a 1s timeout should never have run anywhere near the %v it tried to sleep", elapsed, hungSleep)
 	}
 	if !killedElapsed.MatchString(out) {
 		t.Fatalf("output %q does not report the kill with its elapsed seconds", out)
@@ -1474,7 +1487,7 @@ func TestASlowPosternViewIsKilledByItsOwnTimeoutAndNotRetriedInsideItsInterval(t
 	f.posternKey()
 	f.posternCount(0)
 	f.env = append(f.env, "MW_MAIL_VIEW_TIMEOUT=1")
-	f.write("view-sleep", "5", 0o644)
+	f.write("view-sleep", strconv.Itoa(int(hungSleep/time.Second)), 0o644)
 	f.inbox("mw-aaa")
 
 	start := time.Now()
@@ -1482,8 +1495,8 @@ func TestASlowPosternViewIsKilledByItsOwnTimeoutAndNotRetriedInsideItsInterval(t
 	elapsed := time.Since(start)
 
 	f.typed(announce("mw-aaa"))
-	if elapsed >= 4*time.Second {
-		t.Fatalf("the tick took %v; a view bounded to a 1s timeout should never have run near the 5s it tried to sleep", elapsed)
+	if elapsed >= hungBound {
+		t.Fatalf("the tick took %v; a view bounded to a 1s timeout should never have run near the %v it tried to sleep", elapsed, hungSleep)
 	}
 	if !strings.Contains(out, "mw postern view exceeded 1s") || !killedElapsed.MatchString(out) {
 		t.Fatalf("output %q does not report the view's kill with its elapsed seconds", out)
