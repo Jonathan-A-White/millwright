@@ -10,9 +10,15 @@ import (
 // a reader asks of it: its last event of any state, its newest scheduled and
 // running events, and the newest end of a pass (done or failed). An event with
 // seq 0 is one the job has not written.
+//
+// Reasoned is the newest scheduled event whose detail says what the pass is for:
+// not the one a restarted follower writes (SpringRestartedReason), which names
+// no work and so loses what the pass it runs again was scheduled for
+// (mw-gq6.727).
 type JobNewest struct {
 	Last      events.Event `json:"last"`
 	Scheduled events.Event `json:"scheduled"`
+	Reasoned  events.Event `json:"reasoned"`
 	Running   events.Event `json:"running"`
 	Ended     events.Event `json:"ended"`
 }
@@ -37,8 +43,8 @@ type EventNewest struct {
 }
 
 // EventNewestVersion is the version of the record Add builds: 2 added Pauses and
-// Cancels.
-const EventNewestVersion = 2
+// Cancels, 3 added a job's Reasoned.
+const EventNewestVersion = 3
 
 // Add folds the next event of the log in. Events are added in seq order.
 func (n *EventNewest) Add(e events.Event) {
@@ -64,6 +70,9 @@ func (n *EventNewest) Add(e events.Event) {
 	switch e.To {
 	case events.JobScheduled:
 		j.Scheduled = e
+		if e.Detail != SpringRestartedReason {
+			j.Reasoned = e
+		}
 	case events.JobRunning:
 		j.Running = e
 	case events.JobDone, events.JobFailed:
