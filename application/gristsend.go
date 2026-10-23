@@ -156,6 +156,11 @@ func (s GristSend) Run(ctx context.Context, req GristSendRequest) (GristSendRepo
 		}
 		plain.Attachments = append(plain.Attachments, attachment)
 	}
+	// A ref's text too big to ride in the message is uploaded the same way, and
+	// the message names it by hash.
+	if err := s.uploadOverride(ctx, mill, &plain); err != nil {
+		return GristSendReport{}, err
+	}
 	// The request is the app's own, so its text is left as written: < > and
 	// & are not escaped.
 	var text bytes.Buffer
@@ -275,19 +280,46 @@ func readGristPhoto(path string) (gristPhoto, error) {
 // Mayor's, and uploads the ciphertext, reporting the attachment that names
 // it in the grist.
 func (s GristSend) upload(ctx context.Context, mill string, photo gristPhoto) (PosternAttachment, error) {
-	sealed, err := s.Cipher.EncryptBytes(mill, photo.data)
+	return s.uploadSealed(ctx, mill, photo.path, photo.data, photo.mime)
+}
+
+// uploadSealed seals data to the mill key and uploads the ciphertext, reporting
+// the attachment that names it; what is the name errors give it.
+func (s GristSend) uploadSealed(ctx context.Context, mill, what string, data []byte, mime string) (PosternAttachment, error) {
+	sealed, err := s.Cipher.EncryptBytes(mill, data)
 	if err != nil {
-		return PosternAttachment{}, fmt.Errorf("sealing %s: %w", photo.path, err)
+		return PosternAttachment{}, fmt.Errorf("sealing %s: %w", what, err)
 	}
 	raw, err := base64.StdEncoding.DecodeString(sealed)
 	if err != nil {
-		return PosternAttachment{}, fmt.Errorf("sealing %s: the ciphertext is not base64: %w", photo.path, err)
+		return PosternAttachment{}, fmt.Errorf("sealing %s: the ciphertext is not base64: %w", what, err)
 	}
 	hash, size, err := s.Postern.UploadBlob(ctx, raw)
 	if err != nil {
-		return PosternAttachment{}, fmt.Errorf("uploading %s: %w", photo.path, err)
+		return PosternAttachment{}, fmt.Errorf("uploading %s: %w", what, err)
 	}
-	return PosternAttachment{Hash: hash, Size: size, Mime: photo.mime}, nil
+	return PosternAttachment{Hash: hash, Size: size, Mime: mime}, nil
+}
+
+// uploadOverride moves the grind text plain brings out of the message into a
+// blob when it is over GristOverrideInlineMax, because a direct message the
+// backend takes is 256 KiB at most (a bible-talk grind is far over). A smaller
+// text stays in the message.
+func (s GristSend) uploadOverride(ctx context.Context, mill string, plain *GristPlaintext) error {
+	o := plain.GrindOverride
+	if o == nil || len(o.Instructions)+len(o.Schema) <= GristOverrideInlineMax {
+		return nil
+	}
+	body, err := json.Marshal(o)
+	if err != nil {
+		return fmt.Errorf("building the grind text of the ref: %w", err)
+	}
+	attachment, err := s.uploadSealed(ctx, mill, "the grind text of the ref", body, GristOverrideMime)
+	if err != nil {
+		return err
+	}
+	plain.GrindOverride, plain.GrindOverrideBlob = nil, &attachment
+	return nil
 }
 
 // await pages the backend for the mill's answer to txid until wait is out,

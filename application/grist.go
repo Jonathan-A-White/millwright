@@ -68,7 +68,20 @@ type GristPlaintext struct {
 	// grind's own at main. The mill takes it only from the factory's test key,
 	// in an eval or smoke talk (GristGrind.judgeOverride).
 	GrindOverride *GristGrindOverride `json:"grind_override,omitempty"`
+	// GrindOverrideBlob names, by hash, the blob the GrindOverride went in when
+	// it was too big for the message (GristOverrideInlineMax): the override as
+	// JSON, sealed to the mill key and uploaded as a photo is. Never both.
+	GrindOverrideBlob *PosternAttachment `json:"grind_override_blob,omitempty"`
 }
+
+// GristOverrideInlineMax is the most bytes of instructions and schema a grist
+// carries inside its message. Past it they go as a blob: the backend takes a
+// direct message of 256 KiB at most, and the sealed message is a third bigger
+// than its text.
+const GristOverrideInlineMax = 96 * 1024
+
+// GristOverrideMime is the type of the blob a grind override goes in.
+const GristOverrideMime = "application/json"
 
 // GristGrindOverride is the text of a grind as a ref holds it: its instructions
 // (the file or the parts of its directory joined) and its answer schema.

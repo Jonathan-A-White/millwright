@@ -42,6 +42,10 @@ const (
 	GristReasonForward     = "The app's grind forwards to someone the mill does not forward to."
 	GristReasonOverride    = "Only the factory's test key may bring its own grind text, and only in an eval or smoke talk."
 	GristReasonOverrideBad = "The grind text this grist brings is empty or its schema is not JSON."
+	// GristReasonOverrideForged is for a grind text sent as a blob that is not
+	// the blob announced or not sealed by the grist's sender.
+	GristReasonOverrideForged = "The grind text this grist brings is not the blob the grist announced."
+	GristReasonOverrideLost   = "The grind text this grist brings could not be fetched; send it again."
 
 	// gristReasonDailyStart and gristReasonDailyEnd are the words round the
 	// limit in GristReasonDaily's reason.
@@ -619,11 +623,18 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 			return
 		}
 	}
+	if blob := w.plain.GrindOverrideBlob; blob != nil && (w.plain.GrindOverride != nil || !gristBlobHash.MatchString(blob.Hash)) {
+		w.settle(GristRefused, GristReasonMalformed)
+		return
+	}
 	g.judgeClientTiming(w, lines)
 	name := w.plain.Grist
-	if w.plain.GrindOverride != nil {
+	if w.plain.GrindOverride != nil || w.plain.GrindOverrideBlob != nil {
 		if reason := g.judgeOverride(w, envelopeFrom); reason != "" {
 			w.settle(GristRefused, reason)
+			return
+		}
+		if w.plain.GrindOverrideBlob != nil && !g.openOverrideBlob(ctx, w, privKey) {
 			return
 		}
 	}
@@ -733,6 +744,37 @@ func (g GristGrind) judgeOverride(w *gristWork, envelopeFrom string) string {
 		return GristReasonOverride
 	}
 	return ""
+}
+
+// openOverrideBlob downloads the blob the grist's grind text went in, checks it
+// is the blob announced and was sealed by the grist's own sender, opens it with
+// the mill key and keeps the text as the grist's GrindOverride, as if it had
+// come in the message. It reports false, with w settled, when it cannot.
+func (g GristGrind) openOverrideBlob(ctx context.Context, w *gristWork, privKey string) bool {
+	hash := w.plain.GrindOverrideBlob.Hash
+	raw, err := g.Postern.Blob(ctx, hash)
+	if err != nil {
+		w.settle(GristFailed, GristReasonOverrideLost)
+		return false
+	}
+	sum := sha256.Sum256(raw)
+	if !strings.EqualFold(hex.EncodeToString(sum[:]), hash) {
+		w.settle(GristRefused, GristReasonOverrideForged)
+		return false
+	}
+	text, sealedBy, err := g.Cipher.Decrypt(privKey, base64.StdEncoding.EncodeToString(raw))
+	if err != nil || sealedBy != w.to {
+		w.settle(GristRefused, GristReasonOverrideForged)
+		return false
+	}
+	w.sealed[strings.ToLower(hash)] = true
+	var override GristGrindOverride
+	if json.Unmarshal([]byte(text), &override) != nil {
+		w.settle(GristRefused, GristReasonOverrideBad)
+		return false
+	}
+	w.plain.GrindOverride = &override
+	return true
 }
 
 // overrideText is the instructions and compacted schema a grist brought; both
@@ -1437,8 +1479,12 @@ const gristProofMax = 16
 // at now, when its sender was verified: a hash the grist merely names may be
 // someone else's blob, and is never deleted for it.
 func (g GristGrind) provenBlobs(ctx context.Context, w *gristWork, privKey string) []string {
-	blobs := make([]string, 0, len(w.plain.Attachments))
-	for i, a := range w.plain.Attachments {
+	attachments := w.plain.Attachments
+	if blob := w.plain.GrindOverrideBlob; blob != nil {
+		attachments = append(slices.Clone(attachments), *blob)
+	}
+	blobs := make([]string, 0, len(attachments))
+	for i, a := range attachments {
 		hash := strings.ToLower(a.Hash)
 		if !gristBlobHash.MatchString(a.Hash) {
 			continue

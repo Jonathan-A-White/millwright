@@ -52,6 +52,10 @@ type FakePostern struct {
 	// DeliverErr, when set, is returned by Deliver alone: a backend that
 	// reads but will not take a record.
 	DeliverErr error
+	// MaxDeliverBytes, when above zero, is the biggest payload Deliver takes:
+	// a bigger one is refused as the postern backend refuses a direct message
+	// over its cap (413).
+	MaxDeliverBytes int
 }
 
 // FakePostern satisfies the port.
@@ -279,6 +283,9 @@ func (f *FakePostern) Deliver(_ context.Context, payload []byte) (string, error)
 	}
 	if f.DeliverErr != nil {
 		return "", f.DeliverErr
+	}
+	if f.MaxDeliverBytes > 0 && len(payload) > f.MaxDeliverBytes {
+		return "", fmt.Errorf("the postern backend said 413 to POST /api/messages: body exceeds %d KiB", f.MaxDeliverBytes/1024)
 	}
 	f.delivered = append(f.delivered, append([]byte(nil), payload...))
 	if f.NextTxid != "" {
