@@ -125,7 +125,7 @@ Feature: Releasing a plan filed earlier
     And the release says: Nothing to release
 
   Scenario: A story parked on the Governor's word on its parent is refused, and nothing is released
-    Given the epic of the filed plan carries the comment "Parked on the Governor's word 2026-10-12: <module> waits, file for later; held until he asks"
+    Given the epic of the filed plan carries the comment "HELD: on the Governor's word 2026-10-12: <module> waits, file for later; held until he asks"
     When the held story "module" is released
     Then releasing is refused, saying: held on the Governor's word
     And releasing is refused, saying: file for later
@@ -138,21 +138,36 @@ Feature: Releasing a plan filed earlier
     And every story of the filed plan is still held
 
   Scenario: --over-hold releases the story and writes the reason on it
-    Given the epic of the filed plan carries the comment "Parked on the Governor's word 2026-10-12: <module> waits, file for later; held until he asks"
+    Given the epic of the filed plan carries the comment "HELD: on the Governor's word 2026-10-12: <module> waits, file for later; held until he asks"
     When the held story "module" is released over the hold "he asked for it in chat"
     Then releasing succeeds
     And the story "module" of the filed plan is now open
     And the story "module" of the filed plan carries the comment "RELEASED OVER HOLD: he asked for it in chat"
 
   Scenario: A hold older than a release over it no longer holds the story
-    Given the epic of the filed plan carries the comment "Parked on the Governor's word: <module> held" dated 2026-10-12T13:25:00Z
+    Given the epic of the filed plan carries the comment "HELD: on the Governor's word: <module> held" dated 2026-10-12T13:25:00Z
     And the story "module" of the filed plan carries the comment "RELEASED OVER HOLD: asked for" dated 2026-10-16T00:24:00Z
     When the held story "module" is released
     Then releasing succeeds
     And the story "module" of the filed plan is now open
 
   Scenario: A hold on the epic that names other stories does not hold this one
-    Given the epic of the filed plan carries the comment "Parked on the Governor's word: <gateway> is held, file for later"
+    Given the epic of the filed plan carries the comment "HELD: on the Governor's word: <gateway> is held, file for later"
+    When the held story "module" is released
+    Then releasing succeeds
+    And the story "module" of the filed plan is now open
+
+  Scenario: A comment opening HELD: that names the Governor still holds the story, and --over-hold still lifts it
+    Given the story "module" of the filed plan carries the comment "HELD: by the Governor via postern, txid direct:abc123"
+    When the held story "module" is released
+    Then releasing is refused, saying: HELD: by the Governor via postern
+    And every story of the filed plan is still held
+    When the held story "module" is released over the hold "he asked for it in chat"
+    Then releasing succeeds
+    And the story "module" of the filed plan is now open
+
+  Scenario: A comment that only mentions held and the Governor in its prose does not hold the story
+    Given the story "module" of the filed plan carries the comment "Filed HELD: <module> ... Choices PROVISIONAL, the Governor to confirm ... HIS WORDS: held until I say"
     When the held story "module" is released
     Then releasing succeeds
     And the story "module" of the filed plan is now open
