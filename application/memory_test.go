@@ -3,6 +3,7 @@ package application_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -172,7 +173,7 @@ func TestListSaysWhenANearFullRenderLeavesTheNewestFactsSearchOnly(t *testing.T)
 		}
 		return out.String()
 	}
-	if got := list(50); !strings.Contains(got, "1 of the newest facts are search-only: prune") {
+	if got := list(50); !strings.Contains(got, "1 of the newest facts are search-only: run `mw memory make-room kiln --bytes N`") {
 		t.Errorf("expected the search-only line:\n%s", got)
 	}
 	if got := list(8000); strings.Contains(got, "search-only") {
@@ -619,5 +620,223 @@ func TestAnExplicitSlugThatCollidesDoesNotClaimItWasDerived(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "first five words") {
 		t.Errorf("got %v", err)
+	}
+}
+
+// roomFact is a fact file with the kind and since date a make-room test needs.
+func roomFact(subject, kind, since, sentence string) string {
+	return "---\nsubject: " + subject + "\nkind: " + kind + "\nstatus: current\nsource: mw-1\nsince: " + since + "\n---\n\n" + sentence + "\n"
+}
+
+// roomLine is what a fact adds to the render, newline included.
+func roomLine(subject, sentence string) int {
+	return len("- [" + subject + "] " + sentence + " (mw-1)\n")
+}
+
+// aFullRig is a rig whose boot render sits exactly at its budget: the oldest
+// gotchas are a decision, 'His' and 'Decided by the Governor' sentences (never
+// demoted), then three plain ones, then a fact of yesterday and one of two days
+// ago, which are too new to demote. The clock says 2026-10-18.
+func aFullRig() (*editableFiles, application.Memory, *bytes.Buffer, *recordingVault) {
+	files := &editableFiles{files: map[string]string{
+		"dec.md":    roomFact("rules", "decision", "2026-07-01", "Landings always go through the merge slot of the host."),
+		"his.md":    roomFact("rules", "gotcha", "2026-07-02", "His rule is that a story never touches the target branch."),
+		"gov.md":    roomFact("rules", "gotcha", "2026-07-03", "Decided by the Governor: a charter changes only on his word."),
+		"alpha.md":  roomFact("alpha", "gotcha", "2026-09-01", "The alpha service restarts only after its socket file is removed by hand."),
+		"bravo.md":  roomFact("bravo", "gotcha", "2026-09-05", "The bravo ledger keeps one line a landing and never rewrites an old line."),
+		"charly.md": roomFact("charly", "gotcha", "2026-09-09", "The charly fixture builds its vault in a temporary directory every run."),
+		"two.md":    roomFact("delta", "gotcha", "2026-10-16", "The delta probe answers only when the window is named by its id."),
+		"one.md":    roomFact("delta", "gotcha", "2026-10-17", "The echo gateway drops a message whose body is larger than the cap."),
+	}}
+	var out bytes.Buffer
+	m := anEditableMemory(files, &recordingVault{}, &out)
+	vault := &recordingVault{}
+	m.Vault = vault
+	list, _ := application.LoadRigFacts(files.files)
+	m.Budget = len(application.RenderRigMemory("About.", list))
+	return files, m, &out, vault
+}
+
+func renderSize(files *editableFiles) int {
+	list, _ := application.LoadRigFacts(files.files)
+	return len(application.RenderRigMemory("About.", list))
+}
+
+func demoted(files *editableFiles, slug string) bool {
+	return strings.Contains(files.files[slug+".md"], "boot: no")
+}
+
+func TestMakeRoomDemotesTheOldestEligibleGotchasAndNeverTheRest(t *testing.T) {
+	files, m, out, vault := aFullRig()
+	want := roomLine("alpha", "The alpha service restarts only after its socket file is removed by hand.") + 5
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	// alpha alone is 5 bytes short of want: bravo goes too, and charly stays.
+	for slug, isDemoted := range map[string]bool{
+		"alpha": true, "bravo": true, "charly": false,
+		"dec": false, "his": false, "gov": false, "two": false, "one": false,
+	} {
+		if demoted(files, slug) != isDemoted {
+			t.Errorf("%s demoted = %v, want %v\n%s", slug, demoted(files, slug), isDemoted, out)
+		}
+	}
+	if free := m.Budget - renderSize(files); free < want {
+		t.Errorf("%d bytes free, want at least %d", free, want)
+	}
+	var evalOut bytes.Buffer
+	m.Out = &evalOut
+	if err := m.Eval(context.Background(), "kiln"); err != nil {
+		t.Fatalf("eval fails after make-room: %v\n%s", err, evalOut.String())
+	}
+	for _, slug := range []string{"alpha", "bravo"} {
+		if !strings.Contains(evalOut.String(), "PASS 1 "+slug) && !strings.Contains(evalOut.String(), "PASS 2 "+slug) &&
+			!strings.Contains(evalOut.String(), "PASS 3 "+slug) {
+			t.Errorf("no eval question passes for %s:\n%s", slug, evalOut.String())
+		}
+	}
+	if !strings.Contains(files.eval, "Q: The alpha service restarts only after its socket\nexpect: alpha") {
+		t.Errorf("the question is not the first eight words of the sentence:\n%s", files.eval)
+	}
+	if len(vault.messages) != 2 {
+		t.Errorf("want one commit a demotion, got %v", vault.messages)
+	}
+}
+
+func TestMakeRoomWithRoomAlreadySaysSoAndChangesNothing(t *testing.T) {
+	files, m, out, _ := aFullRig()
+	m.Budget += 100
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: 50}); err != nil {
+		t.Fatal(err)
+	}
+	if len(files.wrote) != 0 || !strings.Contains(out.String(), "nothing to demote") {
+		t.Errorf("wrote %v, said:\n%s", files.wrote, out)
+	}
+}
+
+func TestMakeRoomSkipsAFactWhoseOwnSentenceDoesNotFindIt(t *testing.T) {
+	files, m, out, _ := aFullRig()
+	// Four facts open with the same eight words: the oldest sorts last by
+	// subject, so its question puts it fourth and it is passed over.
+	same := "Always run the gate before landing any change, said "
+	files.files["zed.md"] = roomFact("zed", "gotcha", "2026-06-01", same+"zed.")
+	for _, s := range []string{"a", "b", "c"} {
+		files.files[s+"-same.md"] = roomFact(s, "gotcha", "2026-06-02", same+s+".")
+	}
+	list, _ := application.LoadRigFacts(files.files)
+	m.Budget = len(application.RenderRigMemory("About.", list))
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: 10}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if demoted(files, "zed") {
+		t.Errorf("zed was demoted though its question puts it fourth:\n%s", files.eval)
+	}
+	if !demoted(files, "a-same") || !strings.Contains(out.String(), "skipped zed") {
+		t.Errorf("a-same should be the one taken, zed named as skipped:\n%s", out)
+	}
+}
+
+func TestMakeRoomTakesTheLeastQueriedSubjectAmongFactsOfOneDay(t *testing.T) {
+	files, m, out, _ := aFullRig()
+	files.files["bravo.md"] = roomFact("bravo", "gotcha", "2026-09-01", "The bravo ledger keeps one line a landing and never rewrites an old line.")
+	m.Queries = &queryLog{records: []application.MemoryQueryRecord{
+		{At: time.Date(2026, 10, 17, 9, 0, 0, 0, time.UTC), Rig: "kiln", Hits: 1, Subjects: []string{"alpha"}},
+		{At: time.Date(2026, 10, 17, 9, 0, 0, 0, time.UTC), Rig: "kiln", Hits: 1, Subjects: []string{"alpha"}},
+	}}
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: 10}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !demoted(files, "bravo") || demoted(files, "alpha") {
+		t.Errorf("the less queried bravo should go before alpha:\n%s", out)
+	}
+}
+
+func TestMakeRoomThatCannotFreeEnoughRefusesAndChangesNothing(t *testing.T) {
+	files, m, out, vault := aFullRig()
+	err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: 5000})
+	if err == nil || !strings.Contains(err.Error(), "nothing was changed") {
+		t.Fatalf("want a refusal, got %v\n%s", err, out)
+	}
+	if len(files.wrote) != 0 || len(vault.messages) != 0 {
+		t.Errorf("wrote %v, committed %v", files.wrote, vault.messages)
+	}
+}
+
+func TestMakeRoomDryRunPrintsThePlanAndWritesNothing(t *testing.T) {
+	files, m, out, vault := aFullRig()
+	before := map[string]string{}
+	for k, v := range files.files {
+		before[k] = v
+	}
+	evalBefore := files.eval
+	size := renderSize(files)
+	want := roomLine("alpha", "The alpha service restarts only after its socket file is removed by hand.") + 5
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want, DryRun: true}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, line := range []string{
+		"would demote alpha", "would demote bravo",
+		fmt.Sprintf("render before: %d/%d bytes", size, m.Budget),
+	} {
+		if !strings.Contains(out.String(), line) {
+			t.Errorf("the plan lacks %q:\n%s", line, out)
+		}
+	}
+	if strings.Contains(out.String(), "would demote charly") || !strings.Contains(out.String(), "render after: ") {
+		t.Errorf("the plan:\n%s", out)
+	}
+	if len(files.wrote) != 0 || len(vault.messages) != 0 || files.eval != evalBefore {
+		t.Errorf("a dry run wrote %v, committed %v", files.wrote, vault.messages)
+	}
+	for k, v := range before {
+		if files.files[k] != v {
+			t.Errorf("%s changed", k)
+		}
+	}
+	if len(before) != len(files.files) {
+		t.Errorf("the facts folder grew")
+	}
+}
+
+func TestAddWithMakeRoomMakesRoomForItsOwnLineThenAddsIt(t *testing.T) {
+	files, m, out, _ := aFullRig()
+	err := m.Add(context.Background(), application.MemoryAdd{
+		Rig: "kiln", Subject: "clk", Source: "mw-1", Kind: application.FactGotcha, MakeRoom: true,
+		Sentence: "The clock fixture starts at midnight UTC of the day.",
+	})
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if size := renderSize(files); size > m.Budget {
+		t.Errorf("the render is %d/%d after the add", size, m.Budget)
+	}
+	added := files.files["the-clock-fixture-starts-at.md"]
+	if added == "" || demoted(files, "the-clock-fixture-starts-at") {
+		t.Errorf("the new fact is missing or demoted:\n%s", added)
+	}
+	if !demoted(files, "alpha") {
+		t.Errorf("the oldest eligible gotcha was not demoted:\n%s", out)
+	}
+}
+
+func TestAddOverBudgetWithoutMakeRoomPrintsTheCommandAndTheOverage(t *testing.T) {
+	files, m, out, _ := aFullRig()
+	err := m.Add(context.Background(), application.MemoryAdd{
+		Rig: "kiln", Subject: "clk", Source: "mw-1", Kind: application.FactGotcha,
+		Sentence: "The clock fixture starts at midnight UTC of the day.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	over := renderSize(files) - m.Budget
+	for _, want := range []string{
+		fmt.Sprintf("over the budget by %d bytes", over), "mw memory make-room kiln --bytes 0",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the add does not say %q:\n%s", want, out)
+		}
+	}
+	if demoted(files, "alpha") {
+		t.Errorf("without --make-room nothing is demoted")
 	}
 }

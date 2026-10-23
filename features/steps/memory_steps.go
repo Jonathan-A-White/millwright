@@ -35,6 +35,9 @@ type memoryContext struct {
 	err  error
 
 	status application.StatusReport
+
+	// budget is the boot render budget a scenario sets; zero reads the config's.
+	budget int
 }
 
 // InitializeMemoryScenario registers the steps of features/memory.feature.
@@ -57,6 +60,16 @@ func InitializeMemoryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the rig "([^"]*)" has an about text of (\d+) bytes$`, c.theRigHasAnAboutText)
 
 	ctx.When(`^the Mayor adds a fact to the rig "([^"]*)":$`, c.theMayorAdds)
+	ctx.When(`^the Mayor adds a fact to the rig "([^"]*)" making room:$`, func(rig string, table *godog.Table) error {
+		return c.add(rig, table, true)
+	})
+	ctx.When(`^the Mayor makes room of (\d+) bytes in the rig "([^"]*)"( with --dry-run)?$`, func(n, rig, dry string) error {
+		bytes, _ := strconv.Atoi(n)
+		c.err = c.memory().MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: rig, Bytes: bytes, DryRun: dry != ""})
+		return nil
+	})
+	ctx.Given(`^the rig "([^"]*)" holds facts for making room$`, c.theRigHoldsFactsForMakingRoom)
+	ctx.Given(`^the memory budget is the size of the render of the rig "([^"]*)"$`, c.theBudgetIsTheRender)
 	ctx.When(`^the Mayor adds a fact to the rig "([^"]*)" a sentence of two lines$`, c.theMayorAddsTwoLines)
 	ctx.When(`^the Mayor supersedes the fact "([^"]*)" of the rig "([^"]*)":$`, c.theMayorSupersedes)
 	ctx.When(`^the Mayor retires the fact "([^"]*)" of the rig "([^"]*)" because "([^"]*)"$`, c.theMayorRetires)
@@ -116,6 +129,7 @@ func InitializeMemoryScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the rig "([^"]*)" has no facts folder$`, c.hasNoFactsFolder)
 	ctx.Then(`^a boot of the rig "([^"]*)" reads (\d+) current facts after its about text$`, c.bootReads)
 
+	ctx.Then(`^the rig "([^"]*)" keeps the facts "([^"]*)" in the boot render$`, c.keepsInTheBootRender)
 	ctx.Then(`^the memory command succeeded$`, c.succeeded)
 	ctx.Then(`^the memory command was refused saying "((?:[^"\\]|\\.)*)"$`, c.wasRefused)
 	ctx.Then(`^the memory command printed the fact file "([^"]*)" of the rig "([^"]*)"$`, c.printedTheFile)
@@ -197,7 +211,10 @@ func (c *memoryContext) theRigHasAnAboutText(rig, size string) error {
 }
 
 func (c *memoryContext) memory() application.Memory {
-	budget, _ := config.RigMemoryBytes()
+	budget := c.budget
+	if budget == 0 {
+		budget, _ = config.RigMemoryBytes()
+	}
 	c.out.Reset()
 	files := vault.New(c.root)
 	return application.Memory{
@@ -218,11 +235,48 @@ func pairs(table *godog.Table) map[string]string {
 }
 
 func (c *memoryContext) theMayorAdds(rig string, table *godog.Table) error {
+	return c.add(rig, table, false)
+}
+
+func (c *memoryContext) add(rig string, table *godog.Table, makeRoom bool) error {
 	p := pairs(table)
 	c.err = c.memory().Add(context.Background(), application.MemoryAdd{
 		Rig: rig, Slug: p["slug"], Subject: p["subject"], Source: p["source"],
-		Kind: application.FactKind(p["kind"]), Sentence: p["sentence"],
+		Kind: application.FactKind(p["kind"]), Sentence: p["sentence"], MakeRoom: makeRoom,
 	})
+	return nil
+}
+
+// theRigHoldsFactsForMakingRoom writes a decision, a 'His' gotcha and a gotcha
+// of the Governor's own word, all old; two plain old gotchas; and a gotcha of
+// the day before the scenario's clock, which make-room leaves in the boot render.
+func (c *memoryContext) theRigHoldsFactsForMakingRoom(rig string) error {
+	for _, f := range []struct{ slug, subject, kind, since, sentence string }{
+		{"old-decision", "gate", "decision", "2026-06-01", "The gate runs on the merge slot of the host."},
+		{"his-rule", "gate", "gotcha", "2026-06-02", "His rule is that a story never touches the target branch."},
+		{"governor-rule", "gate", "gotcha", "2026-06-03", "Decided by the Governor: a charter changes only on his word."},
+		{"oldest-gotcha", "socket", "gotcha", "2026-08-01", "The oldest service keeps its socket file until a restart removes it by hand."},
+		{"newer-gotcha", "ledger", "gotcha", "2026-09-01", "The newer ledger keeps one line a landing and never rewrites an old line."},
+		{"yesterday-gotcha", "clock", "gotcha", "2026-10-09", "The yesterday probe answers only when the window is named by its id."},
+	} {
+		text := fmt.Sprintf("---\nsubject: %s\nkind: %s\nstatus: current\nsource: mw-1\nsince: %s\n---\n\n%s\n",
+			f.subject, f.kind, f.since, f.sentence)
+		if err := os.WriteFile(filepath.Join(c.rigDir(rig), application.FactsDir, f.slug+".md"), []byte(text), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// theBudgetIsTheRender sets the budget to what the rig's boot render is now, so
+// that the rig is exactly full.
+func (c *memoryContext) theBudgetIsTheRender(rig string) error {
+	about, files, _, err := vault.New(c.root).ReadRigFacts(context.Background(), memorySeat, rig)
+	if err != nil {
+		return err
+	}
+	facts, _ := application.LoadRigFacts(files)
+	c.budget = len(application.RenderRigMemory(about, facts))
 	return nil
 }
 
@@ -502,6 +556,20 @@ func (c *memoryContext) bootReads(rig, count string) error {
 	}
 	if !strings.HasPrefix(render, strings.TrimSpace(seat.Memory)) {
 		return fmt.Errorf("the boot does not open with the about text:\n%s", render)
+	}
+	return nil
+}
+
+// keepsInTheBootRender checks that each named fact file has no boot: no.
+func (c *memoryContext) keepsInTheBootRender(rig, slugs string) error {
+	for _, slug := range strings.Split(slugs, ", ") {
+		got, err := os.ReadFile(filepath.Join(c.rigDir(rig), application.FactsDir, slug+".md"))
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(got), "boot: no") {
+			return fmt.Errorf("the fact %s of the rig %s is out of the boot render", slug, rig)
+		}
 	}
 	return nil
 }

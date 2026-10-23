@@ -92,6 +92,9 @@ type Memory struct {
 type MemoryAdd struct {
 	Rig, Slug, Subject, Source, Sentence string
 	Kind                                 FactKind
+	// MakeRoom demotes old gotchas first (MakeRoom, below) when the new line
+	// would take the boot render over its budget.
+	MakeRoom bool
 }
 
 // MemorySupersede is the request mw memory supersede makes. The new fact keeps
@@ -279,6 +282,17 @@ func (m Memory) Add(ctx context.Context, req MemoryAdd) error {
 	if err != nil {
 		return m.notAdded(err)
 	}
+	if req.MakeRoom {
+		cost, free, err := m.renderCost(ctx, req.Rig, fact)
+		if err != nil {
+			return m.notAdded(err)
+		}
+		if cost > free {
+			if err := m.makeRoom(ctx, req.Rig, cost, &fact, false); err != nil {
+				return m.notAdded(err)
+			}
+		}
+	}
 	path, err := m.put(ctx, req.Rig, fact)
 	if err != nil {
 		return m.notAdded(err)
@@ -300,7 +314,35 @@ func (m Memory) Add(ctx context.Context, req MemoryAdd) error {
 		said += ")"
 	}
 	fmt.Fprintln(m.Out, said)
+	return m.warnOverBudget(ctx, req.Rig)
+}
+
+// warnOverBudget says, after an add, that the render is over its budget and
+// which command makes the room: the oldest eligible gotchas, chosen by mw.
+func (m Memory) warnOverBudget(ctx context.Context, rig string) error {
+	about, files, _, err := m.load(ctx, rig)
+	if err != nil {
+		return err
+	}
+	all, _ := LoadRigFacts(files)
+	if size := len(RenderRigMemory(about, all)); m.Budget > 0 && size > m.Budget {
+		fmt.Fprintf(m.Out, "WARN: the render is %d/%d bytes, over the budget by %d bytes: run `mw memory make-room %s --bytes 0` (or add with --make-room)\n",
+			size, m.Budget, size-m.Budget, rig)
+	}
 	return nil
+}
+
+// renderCost is how many bytes a new fact adds to the rig's boot render, and
+// how many the render has free under the budget now.
+func (m Memory) renderCost(ctx context.Context, rig string, fact RigFact) (cost, free int, err error) {
+	about, files, _, err := m.load(ctx, rig)
+	if err != nil {
+		return 0, 0, err
+	}
+	all, _ := LoadRigFacts(files)
+	before := len(RenderRigMemory(about, all))
+	after := len(RenderRigMemory(about, append(all[:len(all):len(all)], fact)))
+	return after - before, m.Budget - before, nil
 }
 
 // notAdded says why add wrote nothing and returns the same error.
@@ -560,7 +602,7 @@ func (m Memory) sayRender(ctx context.Context, rig string) error {
 	size := len(RenderRigMemory(about, all))
 	fmt.Fprintf(m.Out, "render %d/%d bytes\n", size, m.Budget)
 	if m.Budget > 0 && size > m.Budget {
-		fmt.Fprintf(m.Out, "WARN: the render is over the budget by %d bytes: demote or retire a fact (seats/mayor/pruning.md)\n", size-m.Budget)
+		fmt.Fprintf(m.Out, "WARN: the render is over the budget by %d bytes: run `mw memory make-room %s --bytes 0` to demote the oldest eligible gotchas, or retire a fact by hand (seats/mayor/pruning.md)\n", size-m.Budget, rig)
 	}
 	return nil
 }
@@ -824,7 +866,7 @@ func (m Memory) List(ctx context.Context, req MemoryList) error {
 	size := len(RenderRigMemory(about, all))
 	fmt.Fprintf(m.Out, "render %d/%d bytes\n", size, m.Budget)
 	if unseen := NewestSearchOnly(all); unseen > 0 && m.Budget > 0 && size*100 >= m.Budget*NearFullPercent {
-		fmt.Fprintf(m.Out, "%d of the newest facts are search-only: prune (seats/mayor/pruning.md)\n", unseen)
+		fmt.Fprintf(m.Out, "%d of the newest facts are search-only: run `mw memory make-room %s --bytes N` (seats/mayor/pruning.md)\n", unseen, req.Rig)
 	}
 	return nil
 }
@@ -1114,4 +1156,156 @@ func (m Memory) Stats(ctx context.Context, req MemoryStats) error {
 		fmt.Fprintf(m.Out, "  %3d  %s\n", counts[subject], subject)
 	}
 	return nil
+}
+
+// MakeRoomKeepDays is how recent a fact's since may be for make-room to leave it
+// in the boot render: a fact placed within this many days is not demoted.
+const MakeRoomKeepDays = 2
+
+// makeRoomQuestionWords is how many words of a fact's sentence make the eval
+// question that finds it once it is demoted.
+const makeRoomQuestionWords = 8
+
+// MemoryMakeRoom is the request mw memory make-room makes: demote boot facts
+// until the render has Bytes free under the budget. DryRun prints the plan and
+// writes nothing.
+type MemoryMakeRoom struct {
+	Rig    string
+	Bytes  int
+	DryRun bool
+}
+
+// roomMove is one demotion make-room has planned, with the question that will
+// find the fact in eval.md.
+type roomMove struct {
+	slug, question string
+}
+
+// MakeRoom demotes current boot facts, one by one, until the render has Bytes
+// free under the budget. It chooses by a fixed rule: a gotcha, never a decision;
+// never a sentence beginning 'His ' or 'Decided by the Governor'; never one with
+// a since within MakeRoomKeepDays days; the oldest since first, then the subject
+// least queried (as stats counts), then by slug. Each goes through Demote with
+// the first words of its own sentence as the question; a fact that question
+// would not put in the top EvalTop results is skipped for the next. When the
+// facts that qualify cannot free enough, nothing is changed and it is an error.
+func (m Memory) MakeRoom(ctx context.Context, req MemoryMakeRoom) error {
+	if req.Bytes < 0 {
+		return fmt.Errorf("--bytes must be 0 or more")
+	}
+	return m.makeRoom(ctx, req.Rig, req.Bytes, nil, req.DryRun)
+}
+
+// makeRoom is MakeRoom; extra is a fact about to be added, which the questions
+// must still find their facts beside once it is there.
+func (m Memory) makeRoom(ctx context.Context, rig string, bytes int, extra *RigFact, dryRun bool) error {
+	if m.Budget <= 0 {
+		return fmt.Errorf("there is no boot render budget to make room under")
+	}
+	about, files, facts, err := m.load(ctx, rig)
+	if err != nil {
+		return err
+	}
+	all, _ := LoadRigFacts(files)
+	size := len(RenderRigMemory(about, all))
+	if m.Budget-size >= bytes {
+		fmt.Fprintf(m.Out, "render %d/%d bytes, %d free: nothing to demote\n", size, m.Budget, m.Budget-size)
+		return nil
+	}
+	moves, skipped, after := m.planRoom(ctx, rig, about, all, facts, extra, bytes)
+	for _, slug := range skipped {
+		fmt.Fprintf(m.Out, "skipped %s: the first %d words of its sentence do not put it in the top %d of an eval question\n", slug, makeRoomQuestionWords, EvalTop)
+	}
+	if m.Budget-after < bytes {
+		return fmt.Errorf("make-room can leave %d bytes free at most, not the %d asked (render %d/%d now): no more gotcha qualifies to demote; nothing was changed",
+			m.Budget-after, bytes, size, m.Budget)
+	}
+	fmt.Fprintf(m.Out, "render before: %d/%d bytes\n", size, m.Budget)
+	for _, move := range moves {
+		if dryRun {
+			fmt.Fprintf(m.Out, "would demote %s  (Q: %s)\n", move.slug, move.question)
+			continue
+		}
+		if err := m.Demote(ctx, rig, move.slug, move.question); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(m.Out, "render after: %d/%d bytes\n", after, m.Budget)
+	return nil
+}
+
+// planRoom chooses the demotions that free bytes, without writing anything, and
+// returns them, the facts it passed over because their own question would not
+// find them, and the render size once the demotions are made.
+func (m Memory) planRoom(ctx context.Context, rig, about string, all []RigFact, facts map[string]RigFact, extra *RigFact, bytes int) (moves []roomMove, skipped []string, size int) {
+	counts := map[string]int{}
+	if m.Queries != nil {
+		if records, err := m.Queries.ReadMemoryQueries(ctx); err == nil {
+			counts = SubjectQueryCounts(records, rig, m.clock().UTC().AddDate(0, 0, -7))
+		}
+	}
+	// Questions are checked against every fact, the one about to be added too: a
+	// demotion changes which facts are read at boot, never what a query finds.
+	known := facts
+	if extra != nil {
+		known = withFact(facts, *extra)
+	}
+	queried := orderedFacts(known)
+
+	var candidates []RigFact
+	for _, fact := range all {
+		if m.roomEligible(fact) {
+			candidates = append(candidates, fact)
+		}
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		a, b := candidates[i], candidates[j]
+		switch {
+		case a.Since != b.Since:
+			return a.Since < b.Since
+		case counts[a.Subject] != counts[b.Subject]:
+			return counts[a.Subject] < counts[b.Subject]
+		}
+		return a.Slug < b.Slug
+	})
+
+	working := append([]RigFact(nil), all...)
+	size = len(RenderRigMemory(about, working))
+	for _, fact := range candidates {
+		if m.Budget-size >= bytes {
+			break
+		}
+		question := firstWords(fact.Sentence, makeRoomQuestionWords)
+		q := EvalQuestion{Question: question}
+		if len(q.Terms()) == 0 || !q.finds(queried, fact.Slug) {
+			skipped = append(skipped, fact.Slug)
+			continue
+		}
+		for i := range working {
+			if working[i].Slug == fact.Slug {
+				working[i].Unbooted = true
+			}
+		}
+		size = len(RenderRigMemory(about, working))
+		moves = append(moves, roomMove{slug: fact.Slug, question: question})
+	}
+	return moves, skipped, size
+}
+
+// roomEligible reports whether make-room may demote a fact: a current gotcha in
+// the boot render that is not the Governor's own word and was not placed within
+// MakeRoomKeepDays days.
+func (m Memory) roomEligible(fact RigFact) bool {
+	if fact.Status != FactCurrent || fact.Unbooted || fact.Kind != FactGotcha {
+		return false
+	}
+	if strings.HasPrefix(fact.Sentence, "His ") || strings.HasPrefix(fact.Sentence, "Decided by the Governor") {
+		return false
+	}
+	placed, err := time.Parse(FactDateLayout, fact.Since)
+	if err != nil {
+		return false
+	}
+	newest := m.clock().UTC().AddDate(0, 0, -MakeRoomKeepDays).Format(FactDateLayout)
+	return placed.Format(FactDateLayout) < newest
 }

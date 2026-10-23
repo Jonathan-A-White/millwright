@@ -16,7 +16,7 @@ import (
 func newMemoryCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "memory",
-		Short: "Place, replace, retire, list, query, count queries of, eval, demote and promote the facts the Builder's seat keeps of a rig",
+		Short: "Place, replace, retire, list, query, count queries of, eval, demote, promote and make room among the facts the Builder's seat keeps of a rig",
 		Long: "A rig kept as facts has a folder in the Builder's seat, seats/builder/rigs/<rig>/, with an\n" +
 			"about.md and facts/<slug>.md, one typed fact a file. These verbs are how the Mayor changes\n" +
 			"them: each writes files, prints each file it wrote, commits those files alone and pushes\n" +
@@ -26,7 +26,7 @@ func newMemoryCmd() *cobra.Command {
 	}
 	root.AddCommand(newMemoryAddCmd(), newMemorySupersedeCmd(), newMemoryRetireCmd(),
 		newMemoryRecheckCmd(), newMemoryListCmd(), newMemoryMigrateCmd(), newMemoryQueryCmd(), newMemoryEvalCmd(),
-		newMemoryDemoteCmd(), newMemoryPromoteCmd(), newMemoryStatsCmd())
+		newMemoryDemoteCmd(), newMemoryPromoteCmd(), newMemoryStatsCmd(), newMemoryMakeRoomCmd())
 	return root
 }
 
@@ -60,8 +60,9 @@ func memoryQueryLog() application.MemoryQueryLog {
 
 func newMemoryAddCmd() *cobra.Command {
 	var kind, subject, source, slug string
+	var makeRoom bool
 	cmd := &cobra.Command{
-		Use:   "add <rig> --kind gotcha|decision --subject <s> --source <src> [--slug <slug>] \"<sentence>\"",
+		Use:   "add <rig> --kind gotcha|decision --subject <s> --source <src> [--slug <slug>] [--make-room] \"<sentence>\"",
 		Short: "Write a new current fact for a rig",
 		Long: "add writes facts/<slug>.md with status current and since today (UTC). The slug defaults to the\n" +
 			"sentence's first five words, lower-case and hyphenated. The source is a bead, rig@sha or\n" +
@@ -70,7 +71,9 @@ func newMemoryAddCmd() *cobra.Command {
 			"'added <slug>' (with '(near: <slug>)' when it named near facts). A refusal prints 'not added: <why>' and\n" +
 			"exits non-zero. It refuses a rig the seat has no folder for, a slug that already has a file\n" +
 			"(one flagged recheck is to be superseded or retired), a sentence with a newline and a kind\n" +
-			"that is not gotcha or decision.",
+			"that is not gotcha or decision. An add that takes the boot render over its budget still writes the\n" +
+			"fact, then WARNs with the overage and the command `mw memory make-room <rig> --bytes 0`;\n" +
+			"--make-room runs that first, for the new line's own size (see make-room), and adds only if it made the room.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			memory, err := memoryFor(cmd)
@@ -79,7 +82,7 @@ func newMemoryAddCmd() *cobra.Command {
 			}
 			return memory.Add(cmd.Context(), application.MemoryAdd{
 				Rig: args[0], Slug: slug, Subject: subject, Source: source,
-				Kind: application.FactKind(kind), Sentence: args[1],
+				Kind: application.FactKind(kind), Sentence: args[1], MakeRoom: makeRoom,
 			})
 		},
 	}
@@ -87,6 +90,7 @@ func newMemoryAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&subject, "subject", "", "what the fact is about; facts are grouped by it")
 	cmd.Flags().StringVar(&source, "source", "", "a bead, rig@sha or mayor:<date>")
 	cmd.Flags().StringVar(&slug, "slug", "", "the file's name; default the sentence's first five words")
+	cmd.Flags().BoolVar(&makeRoom, "make-room", false, "first demote old gotchas to make room in the boot render for this line (see make-room)")
 	_ = cmd.MarkFlagRequired("kind")
 	_ = cmd.MarkFlagRequired("subject")
 	_ = cmd.MarkFlagRequired("source")
@@ -326,5 +330,35 @@ func newMemoryStatsCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&since, "since", "7d", "a number of days (7d), a day (2026-10-09) or a UTC time")
+	return cmd
+}
+
+func newMemoryMakeRoomCmd() *cobra.Command {
+	var bytes int
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "make-room <rig> --bytes N [--dry-run]",
+		Short: "Demote the oldest eligible boot gotchas until the render has N bytes free under the budget",
+		Long: "make-room chooses by a fixed rule, at no cost in tokens: only a current gotcha in the boot\n" +
+			"render, never a decision, never a sentence beginning 'His ' or 'Decided by the Governor', never\n" +
+			"one whose since is within the last 2 days; the oldest since first (the subject `mw memory stats`\n" +
+			"shows least queried among equals, then slug order). Each goes through demote with the first eight\n" +
+			"words of its own sentence as the question; one that question would not put in the top 3 of eval is\n" +
+			"skipped (named 'skipped <slug>') for the next. It prints the render before, each demotion and the\n" +
+			"render after. When the facts that qualify cannot free N bytes it changes nothing and exits 1.\n" +
+			"--bytes 0 gets the render under the budget. --dry-run prints 'would demote <slug>' for each\n" +
+			"and the render before and after, and writes nothing.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			memory, err := memoryFor(cmd)
+			if err != nil {
+				return err
+			}
+			return memory.MakeRoom(cmd.Context(), application.MemoryMakeRoom{Rig: args[0], Bytes: bytes, DryRun: dryRun})
+		},
+	}
+	cmd.Flags().IntVar(&bytes, "bytes", 0, "how many bytes the boot render should have free under the budget")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would be demoted, and write nothing")
+	_ = cmd.MarkFlagRequired("bytes")
 	return cmd
 }

@@ -909,3 +909,62 @@ Feature: mw memory
       """
     When mw status reads the host for memory
     Then the memory status line is absent for the rig "millwright"
+
+  Scenario: make room demotes the oldest eligible gotcha, never the new one
+    Given the rig "millwright" holds facts for making room
+    And the memory budget is the size of the render of the rig "millwright"
+    When the Mayor adds a fact to the rig "millwright" making room:
+      | kind     | gotcha                                      |
+      | subject  | probe                                       |
+      | source   | mw-9                                        |
+      | slug     | fresh-probe                                 |
+      | sentence | The fresh probe waits for its socket file.  |
+    Then the memory command succeeded
+    And the memory command printed "demoted oldest-gotcha out of the boot render"
+    And the memory command printed "added fresh-probe"
+    And the fact file "oldest-gotcha" of the rig "millwright" holds:
+      """
+      ---
+      subject: socket
+      kind: gotcha
+      status: current
+      source: mw-1
+      since: 2026-08-01
+      boot: no
+      ---
+
+      The oldest service keeps its socket file until a restart removes it by hand.
+      """
+    And the file "eval.md" of the rig "millwright" holds:
+      """
+      Q: The oldest service keeps its socket file until
+      expect: oldest-gotcha
+      """
+    And the fact file "fresh-probe" of the rig "millwright" holds:
+      """
+      ---
+      subject: probe
+      kind: gotcha
+      status: current
+      source: mw-9
+      since: 2026-10-10
+      ---
+
+      The fresh probe waits for its socket file.
+      """
+    And the rig "millwright" keeps the facts "old-decision, his-rule, governor-rule, newer-gotcha, yesterday-gotcha" in the boot render
+
+  Scenario: make room with --dry-run says what it would demote and writes nothing
+    Given the rig "millwright" holds facts for making room
+    And the memory budget is the size of the render of the rig "millwright"
+    When the Mayor makes room of 10 bytes in the rig "millwright" with --dry-run
+    Then the memory command succeeded
+    And the memory command printed "would demote oldest-gotcha  (Q: The oldest service keeps its socket file until)"
+    And the rig "millwright" keeps the facts "oldest-gotcha, old-decision, his-rule, governor-rule, newer-gotcha, yesterday-gotcha" in the boot render
+
+  Scenario: make room that no gotcha can satisfy changes nothing
+    Given the rig "millwright" holds facts for making room
+    And the memory budget is the size of the render of the rig "millwright"
+    When the Mayor makes room of 5000 bytes in the rig "millwright"
+    Then the memory command was refused saying "nothing was changed"
+    And the rig "millwright" keeps the facts "oldest-gotcha, old-decision, his-rule, governor-rule, newer-gotcha, yesterday-gotcha" in the boot render

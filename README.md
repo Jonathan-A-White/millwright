@@ -3028,7 +3028,7 @@ home's dispatch never finds the vault dirty (mw-gq6.501). None deletes a fact; `
 Builder:
 
 ```sh
-mw memory add <rig> --kind gotcha|decision --subject <s> --source <bead|rig@sha|mayor:<date>> [--slug <slug>] "<sentence>"
+mw memory add <rig> --kind gotcha|decision --subject <s> --source <bead|rig@sha|mayor:<date>> [--slug <slug>] [--make-room] "<sentence>"
 mw memory supersede <rig> <slug> --source <...> [--slug <new>] "<sentence>"
 mw memory retire <rig> <slug> --reason "<why>"
 mw memory recheck <rig> <slug> [--why "<text>"]
@@ -3038,6 +3038,7 @@ mw memory query <rig> <term>...
 mw memory eval <rig>
 mw memory demote <rig> <slug> [--question "<terms>"]
 mw memory promote <rig> <slug>
+mw memory make-room <rig> --bytes N [--dry-run]
 ```
 
 `add` writes a current fact dated today (UTC); the slug defaults to the
@@ -3055,6 +3056,20 @@ refuses its slug until `supersede` or `retire` settles it. `list` prints
 `slug  status  kind  [subject]  since  source`, current facts first by subject
 (`--oldest`: by since; `--current`: only the current facts), then `render N/8000 bytes`, the size `mw status` holds
 to `rig_memory_bytes`.
+
+`make-room` demotes current boot facts until the render has N bytes free under the
+budget (`--bytes 0`: just under it), choosing by a fixed rule at no cost in tokens: a
+gotcha only (never a decision), never a sentence beginning `His ` or `Decided by the
+Governor`, never one whose since is within the last 2 days, the oldest since first, then
+the subject `mw memory stats` shows least queried, then slug order. Each goes through
+`demote` with the first eight words of its own sentence as the question; one that question
+would not put in the top 3 of `eval` is skipped (`skipped <slug>`) for the next. It prints the
+render before, each demotion and the render after; when the facts that qualify cannot free N
+bytes it changes nothing and exits 1. `--dry-run` prints `would demote <slug>` for each and
+the render before and after, and writes nothing. `add --make-room` makes room for the new
+line's own render cost first, then adds; an `add` without it that takes the render over the
+budget still writes the fact, then prints the overage and `mw memory make-room <rig> --bytes 0`
+(mw-gq6.738).
 
 `migrate` moves a rig kept as one memory file to facts in one run. It reads
 `seats/builder/rigs/<rig>.md` and `<rig>-archive.md`: the head (before the first
