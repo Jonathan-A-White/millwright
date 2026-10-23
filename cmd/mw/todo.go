@@ -235,6 +235,7 @@ func todoRankSpringJob(host string, out io.Writer) (application.SpringJob, error
 			return err
 		},
 		Tracker: gateway, Notes: gateway, Sender: handsPush{gateway: gateway}, Err: out,
+		Paused: application.FactoryPausedByNote(gateway),
 		Home: func(ctx context.Context) (bool, error) {
 			return application.IsHome(ctx, mwVault(dir, host), host)
 		},

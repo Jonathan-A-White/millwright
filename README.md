@@ -1971,14 +1971,18 @@ there), each asked over ssh to run `mw pause --here`. No cap is set to 0 and no 
 - The paused set (story, host, window, branch and commit, whether the branch is pushed and the `PAUSED`
   comment present, each host's cap as it stood) is kept in `plans/pause-<date>/paused.json` in the vault,
   written on `--bead <id>` if one is given, mailed to the Mayor, and printed.
+- The night passes are turned off while the pause stands: the paused set records them (`night passes off:
+  sleep, todo-rank`) and the follower's sleep pass and To do rank are not made until `mw resume` (mw-gq6.710).
+  A rig held only by a usage-limit hold note, this one or a real limit, raises no `Starved` alarm: it waits on
+  a known time. The same rig under any other damper still does.
 - `--until <RFC3339>` ends the hold notes at that time and schedules `mw resume` for it as a one-shot
   systemd user timer, `mw-resume-<date>`, whose unit is printed. Without it the end is computed
   (PROVISIONAL) from the usage reported: the moment the quota left, burned at the measured full-throttle
   rate (`--rate` gives one by hand), would run out 15 minutes before the reset. `--dry-run` prints that
   sum and changes nothing. With no usage reported the pause lasts a week.
 - `mw resume` reads the paused set: it clears the hold notes, types `RESUME:` into each Builder's session
-  still alive, runs `mw retry` for each story whose session is gone, puts `cloud.max_boxes` back, cancels
-  the timer and mails the Mayor.
+  still alive, runs `mw retry` for each story whose session is gone, puts `cloud.max_boxes` back, turns the
+  night passes back on, cancels the timer and mails the Mayor.
 - A second `mw pause` or `mw resume` changes nothing and says so. Neither touches the `mw-seats` windows.
 - `mw usage set <percent> [--resets <RFC3339>]` keeps the Governor's reading of the quota used (a
   PROVISIONAL source: his screenshot). The reserve R(t) is 10% of the quota with a week left and 0% with an

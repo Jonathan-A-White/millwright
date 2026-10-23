@@ -319,3 +319,71 @@ func TestMwDoctorOnAHealthyFactoryIsQuietAboutStarvedRigs(t *testing.T) {
 		t.Errorf("expected ok, got %v %q", verdict, reason)
 	}
 }
+
+// mw-gq6.710: a rig held only by a usage-limit hold note on its host (the one mw
+// pause sets, or a real limit) is waiting on a time that is known, not starved;
+// the same rig under another damper still is.
+func TestARigHeldOnlyByAUsageLimitHoldNoteRaisesNoStarvedAlarm(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, _, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.2", Title: "Another story"})
+	dispatch.Memory = tracker
+	first := time.Date(2026, 10, 22, 23, 0, 0, 0, time.UTC)
+	dispatch.Now = func() time.Time { return first }
+	hold := first.Add(40*time.Hour).Format(time.RFC3339) + " " + string(application.ReasonUsageLimit) + " mw pause: the Governor's word"
+	if err := tracker.SetNote(ctx, application.HarnessHoldKey("vps"), hold); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := dispatch.Run(ctx)
+	if err != nil || len(report.Started) != 0 || len(report.Passed) != 2 {
+		t.Fatalf("expected both stories passed over for the hold, got %+v %v", report, err)
+	}
+	if kept, _ := tracker.Note(ctx, application.StarvedKey("vps")); kept != "" {
+		t.Errorf("expected no starved note for a rig held only by the usage-limit hold, got %q", kept)
+	}
+
+	// Even a note some host kept before, for the same hold, raises no alarm.
+	clock := first.Add(3 * time.Hour)
+	dispatch.Now = func() time.Time { return clock }
+	if _, err := dispatch.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	survey := application.DamperSurvey{Tracker: tracker, Notes: tracker}
+	if alarms, err := survey.Starved(ctx, clock); err != nil || len(alarms) != 0 {
+		t.Errorf("expected no starved alarm under the usage-limit hold, got %+v %v", alarms, err)
+	}
+}
+
+func TestARigHeldByAnotherHarnessStopOrDamperIsStillStarved(t *testing.T) {
+	ctx := context.Background()
+	// A rate limit's hold is not a usage limit: it still names the harness stop.
+	dispatch, tracker, _, _, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	dispatch.Memory = tracker
+	first := time.Date(2026, 10, 22, 23, 0, 0, 0, time.UTC)
+	dispatch.Now = func() time.Time { return first }
+	hold := first.Add(40*time.Hour).Format(time.RFC3339) + " " + string(application.ReasonRateLimit) + " rate limited"
+	if err := tracker.SetNote(ctx, application.HarnessHoldKey("vps"), hold); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dispatch.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	kept, _ := tracker.Note(ctx, application.StarvedKey("vps"))
+	if records := application.ParseStarved(kept); len(records) != 1 || records[0].Hold != "harness stop" {
+		t.Errorf("expected the rate limit's hold kept as a starved rig held by the harness stop, got %q", kept)
+	}
+
+	// The same two stories under the smoke hold and no usage limit still are.
+	dispatch, tracker, _ = aSmokeHeldRig(t)
+	dispatch.Now = func() time.Time { return first }
+	if _, err := dispatch.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	kept, _ = tracker.Note(ctx, application.StarvedKey("vps"))
+	if records := application.ParseStarved(kept); len(records) != 1 || records[0].Hold != "smoke hold" {
+		t.Errorf("expected the smoke-held rig kept as starved, got %q", kept)
+	}
+}

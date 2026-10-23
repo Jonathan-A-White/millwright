@@ -344,6 +344,10 @@ type Passed struct {
 	// StarvedHolds names the hold each one is (mw-gq6.580).
 	Gate string
 	Why  string
+	// Waiting says the story waits on a time already known, which the
+	// starved-rig alarm does not call a starving: the host's hold for a usage
+	// limit, a real one or the one mw pause sets (mw-gq6.710).
+	Waiting bool
 }
 
 // Failed is one story this dispatch claimed and could not start. Released says
@@ -967,7 +971,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// stop names: its usage limit's reset, or a quarter hour after a rate
 		// limit or an overloaded API (mw-gq6.434).
 		if hold := report.HarnessHold; hold != nil {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "harness-hold", Why: hold.harnessHeld(d.Host)})
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "harness-hold", Why: hold.harnessHeld(d.Host), Waiting: hold.Reason == ReasonUsageLimit})
 			continue
 		}
 		// gate: no-room

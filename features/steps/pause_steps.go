@@ -49,6 +49,9 @@ type pauseContext struct {
 
 	before pauseCounts
 	failed error
+
+	// nightJobs are the follower's night jobs, by name, once a scenario sets them up.
+	nightJobs map[string]application.SpringJob
 }
 
 type pauseBuilder struct {
@@ -123,6 +126,10 @@ func InitializePauseScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^mw retry was run for "([^"]*)"$`, c.retried)
 	ctx.Then(`^mw retry was not run for "([^"]*)"$`, c.notRetried)
 	ctx.Then(`^the paused set under plans/pause-2026-10-22 says it was resumed$`, c.setResumed)
+	ctx.Given(`^the follower's sleep pass and To do rank are both due on "([^"]*)"$`, c.nightPassesDue)
+	ctx.Then(`^the paused set records the night passes "([^"]*)" and "([^"]*)" as off$`, c.setRecordsNightPasses)
+	ctx.Then(`^the sleep pass is (not )?due on "([^"]*)"$`, func(not, host string) error { return c.passDue(application.SleepJobName, not == "", host) })
+	ctx.Then(`^the To do rank is (not )?due on "([^"]*)"$`, func(not, host string) error { return c.passDue(application.TodoRankJobName, not == "", host) })
 	ctx.Then(`^with ([0-9.]+) hours left the reserve is ([0-9.]+) percent$`, c.reserveIs)
 }
 
@@ -673,6 +680,49 @@ func (c *pauseContext) refuses(want string) error {
 	}
 	if !strings.Contains(c.failed.Error(), want) {
 		return fmt.Errorf("mw refused with %q, not saying %q", c.failed, want)
+	}
+	return nil
+}
+
+// nightPassesDue sets up the follower's two night jobs on the home, at the
+// clock's hour, which is past both of their hours, asking the pause book
+// whether the factory is paused.
+func (c *pauseContext) nightPassesDue(host string) error {
+	paused := func(ctx context.Context) (bool, error) {
+		_, held, err := c.book.Current(ctx)
+		return held, err
+	}
+	home := func(context.Context) (bool, error) { return true, nil }
+	ok := func(context.Context) error { return nil }
+	c.nightJobs = map[string]application.SpringJob{
+		application.SleepJobName: (&application.SleepNightly{
+			Hour: 6, Notes: c.tracker, Run: ok, Home: home, Now: c.clock, Paused: paused,
+		}).Job(),
+		application.TodoRankJobName: (&application.TodoNightly{
+			Hour: 7, Rank: ok, Notes: c.tracker, Home: home, Now: c.clock, Paused: paused,
+		}).Job(),
+	}
+	return nil
+}
+
+func (c *pauseContext) setRecordsNightPasses(a, b string) error {
+	set, err := c.currentSet()
+	if err != nil {
+		return err
+	}
+	if len(set.NightPasses) != 2 || set.NightPasses[0] != a || set.NightPasses[1] != b {
+		return fmt.Errorf("the set records the night passes %v off, want %s and %s", set.NightPasses, a, b)
+	}
+	return nil
+}
+
+func (c *pauseContext) passDue(name string, wantDue bool, host string) error {
+	job, ok := c.nightJobs[name]
+	if !ok {
+		return fmt.Errorf("no %s job was set up on %s", name, host)
+	}
+	if _, due := job.Probe(context.Background()); due != wantDue {
+		return fmt.Errorf("the %s job is due on %s: %v, want %v", name, host, due, wantDue)
 	}
 	return nil
 }

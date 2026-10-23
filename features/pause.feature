@@ -193,3 +193,19 @@ Feature: mw pause and mw resume
     When the Governor tries mw pause with the reason "so we're at 99% usage"
     Then mw refuses, saying "already now"
     And the hold note of "laptop" is clear
+
+  Scenario: A pause records and stops the night passes
+    Given the follower's sleep pass and To do rank are both due on "laptop"
+    When the Governor runs mw pause with the reason "so we're at 97% usage"
+    Then the paused set records the night passes "sleep" and "todo-rank" as off
+    And the output says "night passes off: sleep, todo-rank"
+    And the sleep pass is not due on "laptop"
+    And the To do rank is not due on "laptop"
+
+  Scenario: A resume turns the night passes back on
+    Given the follower's sleep pass and To do rank are both due on "laptop"
+    And the Governor ran mw pause with the reason "so we're at 97% usage"
+    When the Governor runs mw resume
+    Then the output says "night passes back on: sleep, todo-rank"
+    And the sleep pass is due on "laptop"
+    And the To do rank is due on "laptop"
