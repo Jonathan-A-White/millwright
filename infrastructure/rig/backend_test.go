@@ -213,3 +213,68 @@ func TestChangedTakesAGlobPathspec(t *testing.T) {
 		}
 	}
 }
+
+// NewestChange reads the remote's main: the newest commit that touched the
+// backend directory, not the newest commit, and not one that is only local.
+func TestNewestChangeIsTheNewestCommitOfTheRemotesMainThatTouchedTheDirectory(t *testing.T) {
+	here := aRigWithAServer(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+	served := run(t, here, "git", "rev-parse", "HEAD")
+
+	write(t, here, "src/app.txt", "a newer app\n")
+	run(t, here, "git", "commit", "-qam", "Only the app")
+	run(t, here, "git", "push", "-q", "origin", "main")
+	write(t, here, "server/main.txt", "a local backend\n")
+	run(t, here, "git", "commit", "-qam", "Not pushed (mw-local.1)")
+
+	got, err := worktrees.NewestChange(ctx, here, "server")
+	if err != nil || got.Commit != served || got.Subject != "A server and an app" {
+		t.Fatalf("expected the pushed commit that touched server/, got %+v, %v", got, err)
+	}
+	if got, err := worktrees.NewestChange(ctx, here, "nowhere"); err != nil || got.Commit != "" {
+		t.Errorf("expected no commit for a directory nothing touched, got %+v, %v", got, err)
+	}
+	if _, err := worktrees.NewestChange(ctx, here, "../elsewhere"); err == nil {
+		t.Error("expected a directory outside the rig to be refused")
+	}
+}
+
+// A binary staged at a later commit of main covers an earlier one, because the
+// landing on the home stages the version commit that follows the backend change;
+// one built at a commit before it, or off main, does not.
+func TestStagedIsTrueForABinaryBuiltAtTheCommitOrALaterOneOfMain(t *testing.T) {
+	here := aRigWithAServer(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+	changed := run(t, here, "git", "rev-parse", "HEAD")
+	stage := t.TempDir()
+
+	if got, err := worktrees.Staged(ctx, here, stage, "postern", changed); err != nil || got {
+		t.Fatalf("expected an empty stage to cover nothing, got %v, %v", got, err)
+	}
+
+	write(t, here, "src/app.txt", "a newer app\n")
+	run(t, here, "git", "commit", "-qam", "Version 0.1.1")
+	run(t, here, "git", "push", "-q", "origin", "main")
+	later := run(t, here, "git", "rev-parse", "HEAD")
+
+	older := filepath.Join(stage, "postern-fffffff")
+	if err := os.WriteFile(older, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := worktrees.Staged(ctx, here, stage, "postern", later); got {
+		t.Fatal("expected a binary of another commit not to cover the later one")
+	}
+	os.Remove(older)
+
+	if err := os.WriteFile(filepath.Join(stage, "postern-"+later[:7]), []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := worktrees.Staged(ctx, here, stage, "postern", changed); err != nil || !got {
+		t.Fatalf("expected the binary of the later commit to cover the change, got %v, %v", got, err)
+	}
+	if got, err := worktrees.Staged(ctx, here, stage, "other", changed); err != nil || got {
+		t.Fatalf("expected another binary's name not to count, got %v, %v", got, err)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -102,6 +103,25 @@ type BackendBuilds interface {
 	// it then moves to out; the worktree is removed whatever happens. A binary
 	// already at out is left, so that building twice is building once.
 	Build(ctx context.Context, rigDir, commit, subdir, command, out string) error
+
+	// NewestChange is the newest commit on the rig's main that changed anything
+	// under subdir, as the remote has it after a fetch; a zero BackendCommit when
+	// there is none. It is how the home finds a backend change a landing on another
+	// host could not tell it of (mw-gq6.723).
+	NewestChange(ctx context.Context, rigDir, subdir string) (BackendCommit, error)
+
+	// Staged reports whether stageDir already holds a binary named <name>-<short
+	// commit> for commit, or one built at a later commit of the rig's main that
+	// contains it: a landing on the home stages the commit it landed, which is
+	// the version commit after the one that changed the backend.
+	Staged(ctx context.Context, rigDir, stageDir, name, commit string) (bool, error)
+}
+
+// BackendCommit is a commit of a rig's main that changed its backend: its hash
+// and subject line.
+type BackendCommit struct {
+	Commit  string
+	Subject string
 }
 
 // BackendShip is the port a built binary is copied to another host's stage
@@ -162,7 +182,10 @@ type BackendLanding struct {
 // the swap is the step's, run when the Governor approves it, or by the home's
 // tick (Pending, swapStaged) once no Talk is open, unless the rig's swap is
 // "hands" (mw-gq6.270). On a host that is not home, a landing leaves a note and the
-// home's next tick does the rest. A zero BackendStage, or a rig with no settings,
+// home's next tick does the rest. A landing on a host that names no backend for
+// the rig leaves nothing, for it cannot tell what the backend is built from: the
+// home's tick reads each rig's main for a backend change no one told it of
+// (findUnstaged, mw-gq6.723). A zero BackendStage, or a rig with no settings,
 // does nothing.
 type BackendStage struct {
 	// Rigs is where each rig is checked out on this host, Settings how each rig's
@@ -254,7 +277,67 @@ func (b BackendStage) Pending(ctx context.Context) []string {
 		}
 		notes = append(notes, b.attempt(ctx, l, home)...)
 	}
+	notes = append(notes, b.findUnstaged(ctx, home)...)
 	return append(notes, b.swapStaged(ctx)...)
+}
+
+// backendStoryRef is the story a commit of main names: its branch in a merge
+// ("Merge branch 'mw/mw-x.1' into HEAD") or the id its subject ends with.
+var backendStoryRef = regexp.MustCompile(`\bmw-[a-z0-9]+(?:\.[0-9]+)*\b`)
+
+// findUnstaged is the home's tick finding, itself, the backend changes it was
+// never told of (mw-gq6.723). A landing made on a host with no [backend.<rig>]
+// table cannot tell whether it changed the backend, and keeps no pending note,
+// so the home looks at each rig's main: when the newest commit that touched the
+// backend directory has no binary in the stage and no pending note, it is staged
+// as a landing on the home is. A commit already tried (its note kept, up to
+// BackendTries) is not made a fresh try, and one built earlier but swapped and
+// since cleaned from the stage is staged again, whose step then finds it live.
+func (b BackendStage) findUnstaged(ctx context.Context, home string) []string {
+	if b.Builds == nil || b.Tracker == nil || b.Hands == nil {
+		return nil
+	}
+	rigs := make([]string, 0, len(b.Settings))
+	for name := range b.Settings {
+		rigs = append(rigs, name)
+	}
+	sort.Strings(rigs)
+
+	var notes []string
+	for _, name := range rigs {
+		cfg, rigDir := b.Settings[name], b.Rigs[name]
+		if rigDir == "" {
+			continue
+		}
+		newest, err := b.Builds.NewestChange(ctx, rigDir, cfg.Dir)
+		if err != nil {
+			notes = append(notes, "backend: the newest change of "+name+"'s backend could not be read: "+firstLine(err.Error()))
+			continue
+		}
+		if newest.Commit == "" {
+			continue
+		}
+		staged, err := b.Builds.Staged(ctx, rigDir, cfg.Stage, filepath.Base(cfg.Live), newest.Commit)
+		if err != nil {
+			notes = append(notes, "backend: whether "+name+"'s backend is staged could not be read: "+firstLine(err.Error()))
+			continue
+		}
+		if staged {
+			continue
+		}
+		l := BackendLanding{Rig: name, Story: updatedRevision(newest.Commit), Title: newest.Subject, Commit: newest.Commit}
+		if kept, err := b.Notes.NotesWithPrefix(ctx, backendKey(l)); err != nil || len(kept) != 0 {
+			continue
+		}
+		if ref := backendStoryRef.FindString(newest.Subject); ref != "" {
+			if detail, err := b.Tracker.ShowStory(ctx, ref); err == nil {
+				l.Story, l.Title, l.Epic = ref, detail.Story.Title, detail.EpicID
+			}
+		}
+		notes = append(notes, fmt.Sprintf("backend: %s's main changed the backend at %s and no host told the home: staging it", name, updatedRevision(newest.Commit)))
+		notes = append(notes, b.attempt(ctx, l, home)...)
+	}
+	return notes
 }
 
 func (b BackendStage) homeHost(ctx context.Context) (string, error) {

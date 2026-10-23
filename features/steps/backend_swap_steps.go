@@ -27,6 +27,12 @@ func (swapBuilds) Changed(context.Context, string, string, string, string) (bool
 	return true, nil
 }
 func (swapBuilds) Build(context.Context, string, string, string, string, string) error { return nil }
+func (swapBuilds) NewestChange(context.Context, string, string) (application.BackendCommit, error) {
+	return application.BackendCommit{}, nil
+}
+func (swapBuilds) Staged(context.Context, string, string, string, string) (bool, error) {
+	return false, nil
+}
 
 type swapLock struct{ held bool }
 

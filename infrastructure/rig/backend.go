@@ -132,3 +132,53 @@ func (s BackendShip) Ship(ctx context.Context, host, src, dest string) error {
 	}
 	return nil
 }
+
+// NewestChange implements application.BackendBuilds: after a fetch (a fetch that
+// fails leaves the last one's view), the newest first-parent commit of the
+// remote's default branch that touched subdir.
+func (w *Worktrees) NewestChange(ctx context.Context, rigDir, subdir string) (application.BackendCommit, error) {
+	if !filepath.IsLocal(subdir) {
+		return application.BackendCommit{}, fmt.Errorf("the backend directory %q is not a directory inside the rig", subdir)
+	}
+	_ = w.Fetch(ctx, rigDir)
+	branch, err := w.defaultBranch(ctx, rigDir)
+	if err != nil {
+		return application.BackendCommit{}, err
+	}
+	out, err := w.git(ctx, rigDir, "log", "-1", "--first-parent", "--format=%H%x00%s", application.StartPoint(w.remote, branch), "--", subdir)
+	if err != nil {
+		return application.BackendCommit{}, err
+	}
+	commit, subject, _ := strings.Cut(strings.TrimSpace(out), "\x00")
+	return application.BackendCommit{Commit: commit, Subject: subject}, nil
+}
+
+// Staged implements application.BackendBuilds: a file <name>-<short> in stageDir
+// whose short is the start of commit or of a commit of the remote's default
+// branch that has commit among its ancestors.
+func (w *Worktrees) Staged(ctx context.Context, rigDir, stageDir, name, commit string) (bool, error) {
+	files, err := filepath.Glob(filepath.Join(stageDir, name+"-*"))
+	if err != nil || len(files) == 0 {
+		return false, err
+	}
+	covering := []string{commit}
+	if branch, err := w.defaultBranch(ctx, rigDir); err == nil {
+		out, err := w.git(ctx, rigDir, "rev-list", "--ancestry-path", commit+".."+application.StartPoint(w.remote, branch))
+		if err != nil {
+			return false, err
+		}
+		covering = append(covering, strings.Fields(out)...)
+	}
+	for _, file := range files {
+		short := strings.TrimPrefix(filepath.Base(file), name+"-")
+		if short == "" || strings.Contains(short, ".") {
+			continue
+		}
+		for _, full := range covering {
+			if strings.HasPrefix(full, short) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
