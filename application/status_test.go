@@ -1090,7 +1090,7 @@ func oneSpaced(text string) string { return strings.Join(strings.Fields(text), "
 
 func TestStatusNamesARigWhoseRenderIsNearFullAndWhoseNewestFactsAreSearchOnly(t *testing.T) {
 	printed := oneSpaced(fullRenderStatus(t, application.RigMemorySize{Rig: "lampas", Bytes: 7936, Facts: true, SearchOnlyNewest: 9}).String())
-	want := "lampas memory: boot render 7936/8000; the last 9 new facts are search-only: prune (seats/mayor/pruning.md)"
+	want := "lampas memory: boot render 7936/8000; the last 9 new facts are search-only: run `mw memory make-room lampas --bytes N` (seats/mayor/pruning.md)"
 	if !strings.Contains(printed, want) {
 		t.Errorf("missing %q:\n%s", want, printed)
 	}
@@ -1120,7 +1120,7 @@ func TestStatusIsSilentWhenTheRenderHasRoomOrTheNewestFactIsInTheRender(t *testi
 
 func TestStatusNamesANearFullRenderAtTheEdgeOfFivePercent(t *testing.T) {
 	printed := oneSpaced(fullRenderStatus(t, application.RigMemorySize{Rig: "edge", Bytes: 7600, Facts: true, SearchOnlyNewest: 3}).String())
-	if !strings.Contains(printed, "edge memory: boot render 7600/8000; the last 3 new facts are search-only: prune") {
+	if !strings.Contains(printed, "edge memory: boot render 7600/8000; the last 3 new facts are search-only: run `mw memory make-room edge --bytes N`") {
 		t.Errorf("missing the line at 95%%:\n%s", printed)
 	}
 }

@@ -2062,8 +2062,8 @@ func (r StatusReport) String() string {
 			if size.SearchOnlyNewest == 1 {
 				facts = "fact is"
 			}
-			wrapInto(&b, "  ", fmt.Sprintf("%s memory: boot render %d/%d; the last %d new %s search-only: prune (seats/mayor/pruning.md)",
-				size.Rig, size.Bytes, r.RigMemoryBudget, size.SearchOnlyNewest, facts))
+			wrapInto(&b, "  ", fmt.Sprintf("%s memory: boot render %d/%d; the last %d new %s search-only: run `mw memory make-room %s --bytes N` (seats/mayor/pruning.md)",
+				size.Rig, size.Bytes, r.RigMemoryBudget, size.SearchOnlyNewest, facts, size.Rig))
 		}
 		for _, failure := range r.RigEvals {
 			clip(&b, "  "+failure.Line())
