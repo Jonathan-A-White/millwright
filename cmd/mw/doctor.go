@@ -198,7 +198,7 @@ func newDoctorCmd() *cobra.Command {
 				if logPath, pathErr := config.EventsLogPath(); pathErr == nil {
 					seq, _ = emitDoctorEmergency(ctx, eventlog.New(logPath), eventsClock, host, text, cmd.ErrOrStderr())
 				}
-				return seq, err
+				return alarmSeq(seq, err, cmd.ErrOrStderr())
 			}
 			// The way back of an alarm: one event in the normal lane, naming the
 			// emergency it ends, so the Governor's app takes the banner down.
@@ -510,6 +510,19 @@ func emitDoctorEmergency(ctx context.Context, log application.EventLog, now func
 		return 0, err
 	}
 	return ev.Seq, nil
+}
+
+// alarmSeq is what a doctor alarm gives its check: the seq of the emergency
+// event and the push's error. A push that failed after the emergency event was
+// written is only said, with the seq returned and no error: the check would
+// otherwise try the alarm again at its next pass, writing a second emergency,
+// and the first, whose seq it never kept, could never be cleared.
+func alarmSeq(seq uint64, pushErr error, errOut io.Writer) (uint64, error) {
+	if seq != 0 && pushErr != nil {
+		fmt.Fprintf(errOut, "mw doctor: alarm push: not sent, the emergency event (seq %d) was: %v\n", seq, pushErr)
+		return seq, nil
+	}
+	return seq, pushErr
 }
 
 // emitDoctorClear puts the end of an alarm in the normal lane of log: a job

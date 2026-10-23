@@ -143,3 +143,20 @@ func TestAHostThatIsNotHomeChecksNothing(t *testing.T) {
 		t.Errorf("a host that is not home is n/a, got %v %q", res, r.alarms)
 	}
 }
+
+func TestAChangedFaultKeepsTheEmergencyOfTheFaultBeforeItAndPutRightClearsBoth(t *testing.T) {
+	r := newVPSRig(t)
+	r.run(vpsRoundRob)
+	r.run(vpsOther)
+	if len(r.clears) != 0 {
+		t.Fatalf("the upstream is still wrong: expected no clear, got %v", r.clears)
+	}
+	r.run(vpsOK)
+	if len(r.clears) != 2 || r.clears[0].clears != 101 || r.clears[1].clears != 102 {
+		t.Fatalf("expected both emergencies (101, 102) cleared, got %v", r.clears)
+	}
+	r.run(vpsOK)
+	if len(r.clears) != 2 {
+		t.Errorf("clearing is said once, got %v", r.clears)
+	}
+}

@@ -360,3 +360,20 @@ func TestDoctorLicencesKeepsPosternsRefusalInItsLine(t *testing.T) {
 		t.Fatalf("expected postern's own words in the failure, got %v", err)
 	}
 }
+
+// A push that failed after the emergency event was written must not make the
+// check write a second emergency at its next pass, leaving the first without
+// a clear: the seq is kept and the failure only said.
+func TestAlarmSeqKeepsTheEmergencyWhenOnlyThePushFailed(t *testing.T) {
+	var said bytes.Buffer
+	seq, err := alarmSeq(7, errors.New("backend down"), &said)
+	if seq != 7 || err != nil || !strings.Contains(said.String(), "backend down") {
+		t.Errorf("got seq %d, err %v, said %q: want 7, no error, the push failure said", seq, err, said.String())
+	}
+	if _, err := alarmSeq(0, errors.New("backend down"), &said); err == nil {
+		t.Error("with no emergency event written the push failure is still the error, to be tried again")
+	}
+	if seq, err := alarmSeq(7, nil, &said); seq != 7 || err != nil {
+		t.Errorf("a push that worked: got %d, %v", seq, err)
+	}
+}

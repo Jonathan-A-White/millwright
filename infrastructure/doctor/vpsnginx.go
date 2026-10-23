@@ -3,6 +3,7 @@ package doctor
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -57,13 +58,26 @@ type VPSNginx struct {
 }
 
 // vpsNginxDue is an alarm Probe found owing: its text, the fault it told (the
-// latch), whether it is the "put right" one and the seq it ends.
+// latch), whether it is the "put right" one and the seqs of the emergencies
+// told so far in this episode: a fault whose words change is a second
+// emergency, and putting it right ends each one.
 type vpsNginxDue struct {
 	text    string
 	fault   string
 	back    bool
-	clears  uint64
+	seqs    []uint64
 	pending bool
+}
+
+// seqsFrom is the seqs kept in paths after the fault told, oldest first.
+func seqsFrom(paths []string) []uint64 {
+	var seqs []uint64
+	for i := 1; i < len(paths); i++ {
+		if seq := seqAt(paths, i); seq != 0 {
+			seqs = append(seqs, seq)
+		}
+	}
+	return seqs
 }
 
 // NewVPSNginx is the check over the vault's home file, run on host, reading
@@ -115,6 +129,7 @@ func (v *VPSNginx) Probe(ctx context.Context) (application.Verdict, string) {
 			text: fmt.Sprintf("The VPS's nginx postern_api upstream is wrong: %s. Postern on the phone will hang or read offline. "+
 				"Fix it on the VPS (ssh root@allmymind.org): %s. The way back: %s.", reading.Why, reading.Fix, reading.WayBack),
 			fault:   reading.Why,
+			seqs:    seqsFrom(episode.SeenPaths),
 			pending: true,
 		}
 		return application.DoctorFaulty, v.due.text
@@ -126,7 +141,7 @@ func (v *VPSNginx) Probe(ctx context.Context) (application.Verdict, string) {
 	v.due = vpsNginxDue{
 		text:    "The VPS's nginx postern_api upstream is right again: home first, every other backend backup.",
 		back:    true,
-		clears:  seqAt(episode.SeenPaths, 1),
+		seqs:    seqsFrom(episode.SeenPaths),
 		pending: true,
 	}
 	return application.DoctorFaulty, v.due.text
@@ -144,8 +159,18 @@ func (v *VPSNginx) Cure(ctx context.Context) error {
 		if v.Clear == nil {
 			return fmt.Errorf("there is no way to send the vps-nginx \"right again\" event")
 		}
-		if err := v.Clear(ctx, due.text, due.clears); err != nil {
-			return fmt.Errorf("the vps-nginx alarm could not be sent: %w", err)
+		// One event for each emergency of the episode, the oldest first; an
+		// episode that kept none (0) still says the upstream is right again.
+		// A send that fails leaves every seq kept, so the next run sends them
+		// all again: the app dedupes by seq.
+		clears := due.seqs
+		if len(clears) == 0 {
+			clears = []uint64{0}
+		}
+		for _, seq := range clears {
+			if err := v.Clear(ctx, due.text, seq); err != nil {
+				return fmt.Errorf("the vps-nginx alarm could not be sent: %w", err)
+			}
 		}
 		v.due = vpsNginxDue{}
 		if err := v.State.Reset(ctx, VPSNginxSeenStateName); err != nil {
@@ -161,7 +186,11 @@ func (v *VPSNginx) Cure(ctx context.Context) error {
 		return fmt.Errorf("the vps-nginx alarm could not be sent: %w", err)
 	}
 	v.due = vpsNginxDue{}
-	err = v.State.Save(ctx, VPSNginxSeenStateName, application.DoctorEpisode{SeenPaths: withSeq([]string{due.fault}, seq)})
+	paths := []string{due.fault}
+	for _, earlier := range due.seqs {
+		paths = append(paths, strconv.FormatUint(earlier, 10))
+	}
+	err = v.State.Save(ctx, VPSNginxSeenStateName, application.DoctorEpisode{SeenPaths: withSeq(paths, seq)})
 	if err != nil {
 		return fmt.Errorf("saving this check's own state: %w", err)
 	}
