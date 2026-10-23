@@ -143,7 +143,7 @@ func starvedPass(ready []StoryDetail, passed []Passed, running []StoryDetail, st
 	var order = map[string][]string{}
 	for _, p := range passed {
 		rig, hold := rigOf[p.StoryID], StarvedHolds[p.Gate]
-		if rig == "" || hold == "" || p.Gate == "hitl" || busy[rig] {
+		if rig == "" || hold == "" || p.Gate == "hitl" || p.Waiting || busy[rig] {
 			continue
 		}
 		if holds[rig] == nil {
