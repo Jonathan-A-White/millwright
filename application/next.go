@@ -1066,7 +1066,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	var smokeNotes []string
 	c.smokeApps, smokeNotes = n.Smoke.Wants(ctx, c.path.Rig, c.rigDir, StartPoint(n.remote(), c.target), c.branch)
 	report.Notes = append(report.Notes, smokeNotes...)
-	n.readSmokeElsewhere(ctx, c)
+	n.readSmokeElsewhere(ctx, c, StartPoint(n.remote(), c.target), c.branch)
 	n.readFilesOutsideTheKey(ctx, c, report)
 
 	// Only one close-out at a time may touch a rig's target branch: this host's

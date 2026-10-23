@@ -56,6 +56,10 @@ type nextContext struct {
 	// smokeWatch, when set, is the grist smoke a batch landing makes in place of
 	// the real one, looking at the world as it runs (mw-gq6.626).
 	smokeWatch *smokeWatch
+	// smokeUnhosted, when set, is a landing that changes the rig's grist on a
+	// host that names no [grist-apps]; home is the vault's home file it reads.
+	smokeUnhosted bool
+	home          homeFile
 	// leftovers is the user's process table, for features/tester.feature's sweep
 	// of what a Tester's session left running (mw-gq6.409).
 	leftovers *apptest.FakeUserProcesses
@@ -1076,11 +1080,15 @@ func (c *nextContext) nextUseCase() application.Next {
 	if c.smokeWatch != nil {
 		smoke = c.smokeAfter()
 	}
+	if c.smokeUnhosted {
+		smoke = application.GristSmokeAfter{Touches: allTouched{}}
+	}
 
 	return application.Next{
 		Tracker:       tracker,
 		HeartbeatWait: heartbeatWait,
 		Smoke:         smoke,
+		Home:          c.homeReader(),
 		Worktrees:     worktrees,
 		Landing:       worktrees,
 		Changes:       worktrees,

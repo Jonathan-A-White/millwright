@@ -73,7 +73,23 @@ func (c *nextContext) smokeAfter() application.GristSmokeAfter {
 	}
 }
 
+// homeReader is the home file a scenario set, nil when it set none.
+func (c *nextContext) homeReader() application.HomeFile {
+	if c.home == "" {
+		return nil
+	}
+	return c.home
+}
+
 func registerBatchLandSmokeSteps(ctx *godog.ScenarioContext, c *nextContext) {
+	ctx.Given(`^the batch's landing changes the rig's grist, and this host names no \[grist-apps\]$`, func() error {
+		c.smokeUnhosted = true
+		return nil
+	})
+	ctx.Given(`^the batch's vault names "([^"]*)" as the home$`, func(host string) error {
+		c.home = homeFile(host + " 2026-10-01T05:00:00Z mayor\n")
+		return nil
+	})
 	ctx.Given(`^the batch's landing changes the rig's grist, and its smoke looks at the world as it runs$`, func() error {
 		c.smokeWatch = &smokeWatch{}
 		return nil

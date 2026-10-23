@@ -745,6 +745,9 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 		together[i] = s.ID
 	}
 	var smokeApps []string
+	// unhosted says some story changed grist this host cannot smoke, because it
+	// names no [grist-apps]: the batch says who smokes it, as a story does.
+	unhosted := false
 	// A story's mail is sent once the after-landing command has run or been
 	// skipped, so that it can say first that the deploy did not happen.
 	type mail struct {
@@ -757,6 +760,8 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 		apps, notes := n.Smoke.Wants(ctx, report.Rig, rigDir, report.Base, s.Branch)
 		nr.Notes = append(nr.Notes, notes...)
 		smokeApps = appendNew(smokeApps, apps...)
+		n.readSmokeElsewhere(ctx, c, report.Base, s.Branch)
+		unhosted = unhosted || c.smokeUnhosted
 
 		how := "its merge"
 		if s.FastForward {
@@ -836,7 +841,7 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 	// another landing of the rig would move under them, so the merge slot is held
 	// through them; and the Landed mail says first that the command did not run.
 	last := b.storyCloseOut(report.Merged[len(report.Merged)-1], rigDir)
-	last.smokeApps = smokeApps
+	last.smokeApps, last.smokeUnhosted = smokeApps, unhosted
 	once := NextReport{StoryID: report.Label(), Host: n.Host, Target: report.Target, How: Landed{Commit: report.Commit}}
 	n.advanceRig(ctx, last, &once)
 	report.Checkout = once.Rig
@@ -856,7 +861,7 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 		report.Mailed = append(report.Mailed, MailLanded+": "+m.c.id)
 		b.say("mailed %s: %s", MailLanded, m.c.id)
 	}
-	if len(smokeApps) == 0 {
+	if len(smokeApps) == 0 && !unhosted {
 		return nil
 	}
 	return &landedSmoke{last: last, once: once, noted: len(once.Notes)}
@@ -869,7 +874,9 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 // and the hold on the rig's open stories (GristSmokeBook). It undoes nothing.
 func (b BatchLand) smoke(ctx context.Context, s *landedSmoke, report *BatchReport, nr *NextReport) {
 	n := b.Next
-	b.say("the merge slot of %s is let go; starting the grist smoke of %s", report.Rig, strings.Join(s.last.smokeApps, ", "))
+	if len(s.last.smokeApps) > 0 {
+		b.say("the merge slot of %s is let go; starting the grist smoke of %s", report.Rig, strings.Join(s.last.smokeApps, ", "))
+	}
 	failed := n.smoke(ctx, s.last, &s.once)
 	for _, note := range s.once.Notes[s.noted:] {
 		b.say("%s", note)

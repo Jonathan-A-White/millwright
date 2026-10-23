@@ -64,7 +64,7 @@ func TestALandingOfGristOnAHostWithNoGristAppsSaysWhoSmokesIt(t *testing.T) {
 			c := &closeOut{id: "mw-1.1", target: "main", rigDir: "/rigs/" + tc.rig}
 			c.path.Rig = tc.rig
 
-			n.readSmokeElsewhere(context.Background(), c)
+			n.readSmokeElsewhere(context.Background(), c, "origin/main", c.branch)
 			report := &NextReport{Rig: Advanced{Moved: true}, Landed: true}
 			n.smoke(context.Background(), c, report)
 
