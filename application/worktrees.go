@@ -96,6 +96,19 @@ type BranchChanges interface {
 	// with its size in bytes. A branch that is not there has added nothing
 	// (mw-gq6.517).
 	AddedFiles(ctx context.Context, rigDir, base, branch string) ([]AddedFile, error)
+
+	// DiffLines is every line the same diff adds or removes in a file called
+	// name, at the repo root or at any depth, in the diff's own order. A branch
+	// that is not there has changed no line (mw-gq6.740).
+	DiffLines(ctx context.Context, rigDir, base, branch, name string) ([]DiffLine, error)
+}
+
+// DiffLine is one line a branch adds or removes in a file: the file's path, the
+// line without its diff sign and whether it was added.
+type DiffLine struct {
+	Path  string
+	Text  string
+	Added bool
 }
 
 // AddedFile is one file a branch adds: its path, its size and, for a file at

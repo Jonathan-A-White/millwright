@@ -116,3 +116,79 @@ func (n Next) trackedBinaryRefusal(ctx context.Context, c *closeOut, report *Nex
 		strings.Join(found, "\n"), StartPoint(n.remote(), c.target), c.id)
 	return Refusal{ReasonTrackedBinary, why, said}, true
 }
+
+// lockfileName is the file a git+ssh:// line is looked for in, at the repo root
+// or in any workspace; lockfileSSH is the scheme `npm install github:<owner>/<repo>`
+// writes, which a machine without a GitHub SSH key cannot install.
+const (
+	lockfileName = "package-lock.json"
+	lockfileSSH  = "git+ssh://"
+	githubSSH    = "git+ssh://git@github.com/"
+)
+
+// lockfileSSHRefusal is the refusal of a branch that adds a git+ssh:// line to a
+// package-lock.json (mw-gq6.740). Only lines the branch adds are counted, net of
+// the same line it removes from the same file: ones already on the target branch
+// are not the story's, a branch that turns them into git+https is fine, and a
+// line that merely moves is not new. A rig with no Changes, no lockfile, or a
+// branch that cannot be read is not refused: the check is a net.
+func (n Next) lockfileSSHRefusal(ctx context.Context, c *closeOut, report *NextReport) (Refusal, bool) {
+	if n.Changes == nil {
+		return Refusal{}, false
+	}
+	lines, err := n.Changes.DiffLines(ctx, c.rigDir, StartPoint(n.remote(), c.target), c.branch, lockfileName)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the %s lines %s changed could not be read to look for %s: %v", lockfileName, c.id, lockfileSSH, err))
+		return Refusal{}, false
+	}
+	type key struct{ path, text string }
+	net := map[key]int{}
+	var order []key
+	for _, line := range lines {
+		if !strings.Contains(line.Text, lockfileSSH) {
+			continue
+		}
+		k := key{line.Path, line.Text}
+		if _, seen := net[k]; !seen {
+			order = append(order, k)
+		}
+		if line.Added {
+			net[k]++
+		} else {
+			net[k]--
+		}
+	}
+	var paths []string
+	counts := map[string]int{}
+	foreign := false
+	for _, k := range order {
+		if net[k] <= 0 {
+			continue
+		}
+		if counts[k.path] == 0 {
+			paths = append(paths, k.path)
+		}
+		counts[k.path] += net[k]
+		foreign = foreign || !strings.Contains(k.text, githubSSH)
+	}
+	if len(paths) == 0 {
+		return Refusal{}, false
+	}
+	var found, fixes []string
+	total := 0
+	for _, path := range paths {
+		total += counts[path]
+		found = append(found, fmt.Sprintf("- %s has %d added line(s) with %s", path, counts[path], lockfileSSH))
+		fixes = append(fixes, fmt.Sprintf("sed -i 's#%s#git+https://github.com/#g' %s", githubSSH, path))
+	}
+	why := fmt.Sprintf("%s adds %d line(s) with %s to %s", c.branch, total, lockfileSSH, strings.Join(paths, ", "))
+	said := fmt.Sprintf("The lockfile(s) the branch changes:\n\n%s\n\n"+
+		"`npm install github:<owner>/<repo>#<sha>` writes the dependency as git+ssh://, and a machine with no GitHub SSH key "+
+		"(CI, a fresh host) cannot `npm ci` it. Nothing was merged: the branch is still the session's to amend. "+
+		"In the worktree run:\n\n%s\n\nthen commit the lockfile (amend the commit that added it, or add a commit) and run `mw next %s` again.",
+		strings.Join(found, "\n"), strings.Join(fixes, "\n"), c.id)
+	if foreign {
+		said += " A line for a host other than github.com needs the same rewrite to git+https://<host>/ by hand: the sed above leaves it as it is."
+	}
+	return Refusal{ReasonLockfileSSH, why, said}, true
+}

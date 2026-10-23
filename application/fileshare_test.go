@@ -64,6 +64,10 @@ func (b branchChangesStub) AddedFiles(context.Context, string, string, string) (
 	return nil, nil
 }
 
+func (b branchChangesStub) DiffLines(context.Context, string, string, string, string) ([]DiffLine, error) {
+	return nil, nil
+}
+
 func TestATesterStoryThatNamesFilesIsComparedAsBefore(t *testing.T) {
 	shares := &fileShares{rules: filesRules()}
 	shares.add(openStory("mw-t.1", "feature", "a.go"))

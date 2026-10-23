@@ -95,7 +95,12 @@ const (
 	ReasonUncommittedWork Reason = "uncommitted-work"
 	ReasonSignedCommit    Reason = "signed-commit"
 	ReasonTrackedBinary   Reason = "tracked-binary"
-	ReasonOpenSteps       Reason = "open-steps"
+	// ReasonLockfileSSH is a branch that adds a git+ssh:// line to a
+	// package-lock.json (mw-gq6.740): a machine with no GitHub key cannot
+	// npm ci it. The session mends it in its own worktree, so the branch is
+	// continued.
+	ReasonLockfileSSH Reason = "lockfile-ssh"
+	ReasonOpenSteps   Reason = "open-steps"
 	// ReasonNoClosingComment is a story whose formula is finished but whose
 	// branch is not: no closing comment was written after its newest commit
 	// (mw-gq6.630). Like open steps, it is the Builder's to mend.
@@ -1667,6 +1672,13 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 	// clone for good once landed, so it is turned away before the formula, the
 	// tests and the merge (mw-gq6.517).
 	if refusal, refused := n.trackedBinaryRefusal(ctx, c, report); refused && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+		return found
+	}
+
+	// What the commits write into a lockfile: a git+ssh:// line is one the
+	// next machine without a GitHub key cannot install, and the one sed that
+	// mends it is named while the branch is still the session's (mw-gq6.740).
+	if refusal, refused := n.lockfileSSHRefusal(ctx, c, report); refused && refuse(refusal.Reason, refusal.Why, refusal.Said) {
 		return found
 	}
 

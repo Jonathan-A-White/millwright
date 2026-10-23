@@ -462,6 +462,44 @@ func (w *Worktrees) AddedFiles(ctx context.Context, rigDir, base, branch string)
 	return added, nil
 }
 
+// DiffLines implements application.BranchChanges: the lines `git diff -U0` finds
+// added or removed, from the merge base of base and branch to branch, in the
+// files called name. A branch the rig does not have has changed no line.
+func (w *Worktrees) DiffLines(ctx context.Context, rigDir, base, branch, name string) ([]application.DiffLine, error) {
+	if _, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+		return nil, nil
+	}
+	out, err := w.git(ctx, rigDir, "diff", "-U0", "--no-color", "--no-renames", "--src-prefix=a/", "--dst-prefix=b/",
+		base+"..."+branch, "--", ":(glob)**/"+name)
+	if err != nil {
+		return nil, err
+	}
+	var lines []application.DiffLine
+	var path string
+	inHunk := false
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "diff --git "):
+			inHunk = false
+		case !inHunk && strings.HasPrefix(line, "--- "):
+			if old, ok := strings.CutPrefix(line, "--- a/"); ok {
+				path = old
+			}
+		case !inHunk && strings.HasPrefix(line, "+++ "):
+			if added, ok := strings.CutPrefix(line, "+++ b/"); ok {
+				path = added
+			}
+		case strings.HasPrefix(line, "@@"):
+			inHunk = true
+		case inHunk && strings.HasPrefix(line, "+"):
+			lines = append(lines, application.DiffLine{Path: path, Text: line[1:], Added: true})
+		case inHunk && strings.HasPrefix(line, "-"):
+			lines = append(lines, application.DiffLine{Path: path, Text: line[1:]})
+		}
+	}
+	return lines, nil
+}
+
 // isExecutableImage reports whether content begins as an ELF or a Mach-O
 // executable does.
 func isExecutableImage(content string) bool {
