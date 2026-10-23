@@ -3,11 +3,13 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -208,7 +210,15 @@ type BackendStage struct {
 	Runner HandsRunner
 	Say    PosternSender
 	Lock   SwapLock
-	Now    func() time.Time
+
+	// Claim is the host-wide claim a staging holds from its build to its last
+	// note, taken without waiting, so that the dispatch tick, the Millhand's tick and
+	// a landing, which are separate processes, do not each file a swap bead for the
+	// one commit (mw-gq6.729). A staging that finds it held files nothing, counts no
+	// try and is left for the next tick. Without one only this process's own
+	// stagings are kept apart (stagingClaim).
+	Claim SwapLock
+	Now   func() time.Time
 }
 
 // Wants reports whether this host names a backend for rig.
@@ -375,6 +385,14 @@ func (b BackendStage) save(ctx context.Context, l BackendLanding) error {
 func (b BackendStage) attempt(ctx context.Context, l BackendLanding, home string) []string {
 	words := fmt.Sprintf("backend: %s at %s", l.Rig, updatedRevision(l.Commit))
 	staged, err := b.stage(ctx, &l, home)
+	if errors.Is(err, errStagingHeld) {
+		// Not tried, so not counted: kept for the next tick, which finds the other's bead.
+		lines := []string{words + " waits: " + err.Error()}
+		if err := b.save(ctx, l); err != nil {
+			lines = append(lines, "backend: the landing could not be kept for the next tick: "+firstLine(err.Error()))
+		}
+		return lines
+	}
 	if err == nil {
 		if err := b.Notes.ClearNote(ctx, backendKey(l)); err != nil {
 			return append(staged, "backend: the pending note of "+l.Rig+" could not be cleared: "+firstLine(err.Error()))
@@ -398,6 +416,37 @@ func (b BackendStage) attempt(ctx context.Context, l BackendLanding, home string
 	return lines
 }
 
+// stagingClaim keeps the stagings of one process one at a time from the moment a
+// binary is built, where the look for a swap bead already filed and the filing of
+// one must not interleave (mw-gq6.729). A build is not held to it: building twice
+// is building once.
+var stagingClaim sync.Mutex
+
+// errStagingHeld is a staging that found another process's claim held: not a
+// failure, so no try is counted against it.
+var errStagingHeld = errors.New("another mw process is staging a backend here")
+
+// claimStaging takes the claim of a staging, and returns what lets it go.
+func (b BackendStage) claimStaging(ctx context.Context) (func(), error) {
+	stagingClaim.Lock()
+	if b.Claim == nil {
+		return stagingClaim.Unlock, nil
+	}
+	release, taken, err := b.Claim.TryTake(ctx)
+	if err != nil {
+		stagingClaim.Unlock()
+		return nil, fmt.Errorf("taking the staging claim: %w", err)
+	}
+	if !taken {
+		stagingClaim.Unlock()
+		return nil, errStagingHeld
+	}
+	return func() {
+		release()
+		stagingClaim.Unlock()
+	}, nil
+}
+
 // stage builds the backend, files the bead if it is not already filed and writes
 // the swap on it. l carries the bead across a retry, so a step that failed to be
 // written is written on the bead already filed rather than on a second.
@@ -415,6 +464,14 @@ func (b BackendStage) stage(ctx context.Context, l *BackendLanding, home string)
 		return nil, fmt.Errorf("building %s: %w", l.Rig, err)
 	}
 	step := BackendSwap(cfg, home, short, out)
+
+	// From here the bead is looked for and filed: one staging at a time, or two
+	// that both found none each file one.
+	release, err := b.claimStaging(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	if l.Bead == "" {
 		l.Bead = b.openSwapOf(ctx, cfg, step.ID)

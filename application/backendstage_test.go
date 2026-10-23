@@ -34,6 +34,10 @@ type fakeBuilds struct {
 	Newest    application.BackendCommit
 	NewestErr error
 	Have      map[string]bool
+
+	// OnBuild, when set, runs inside every Build, outside the fake's lock: a test
+	// holds callers there to make them meet.
+	OnBuild func()
 }
 
 type fakeBuild struct{ RigDir, Commit, Subdir, Command, Out string }
@@ -46,6 +50,9 @@ func (f *fakeBuilds) Changed(_ context.Context, rigDir, base, branch, subdir str
 }
 
 func (f *fakeBuilds) Build(_ context.Context, rigDir, commit, subdir, command, out string) error {
+	if f.OnBuild != nil {
+		f.OnBuild()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Built = append(f.Built, fakeBuild{rigDir, commit, subdir, command, out})
@@ -731,5 +738,117 @@ func TestTheHomesTickStagesABackendCommitThatNamesNoStory(t *testing.T) {
 	}
 	if got := len(filedUnder(t, home, "mw-j0f2d")); got != 0 {
 		t.Fatalf("expected no bead under the epic, got %d", got)
+	}
+}
+
+// meet makes n callers wait for one another at a point, so that all of them are
+// past what came before it when any of them goes on; one that never comes costs
+// the rest two seconds, not a hang.
+func meet(n int) func() {
+	var mu sync.Mutex
+	arrived := 0
+	all := make(chan struct{})
+	return func() {
+		mu.Lock()
+		arrived++
+		if arrived == n {
+			close(all)
+		}
+		mu.Unlock()
+		select {
+		case <-all:
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// Two ticks (the dispatch tick and the Millhand's) that look at the same
+// unstaged commit at once stage it once: one swap bead and one hands step, not
+// two beads a second apart (mw-gq6.729: mw-cvwm1u.20 and .21).
+func TestTwoTicksStagingTheSameCommitAtOnceFileOneSwapBead(t *testing.T) {
+	home := aBackendRig(t, "laptop", "laptop")
+	home.builds.Newest = application.BackendCommit{Commit: landedCommit, Subject: "Merge branch 'mw/mw-j0f2d.28' into HEAD"}
+	home.builds.OnBuild = meet(2)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			home.stage.Pending(context.Background())
+		}()
+	}
+	wg.Wait()
+
+	filed := filedUnder(t, home, "mw-j0f2d")
+	if len(filed) != 1 {
+		t.Fatalf("expected one swap bead for one commit staged by two ticks at once, got %d", len(filed))
+	}
+	if held := holdersOfSwap(t, home.tracker, "4c9db71"); len(held) != 1 {
+		t.Fatalf("expected one bead holding backend-4c9db71, got %v", held)
+	}
+	if steps := handsSteps(t, home.tracker, filed[0].Story.ID); len(steps) != 1 {
+		t.Fatalf("expected one hands step on %s, got %+v", filed[0].Story.ID, steps)
+	}
+}
+
+// A landing on the home and the home's tick that meet over one commit stage it once.
+func TestALandingAndATickStagingTheSameCommitAtOnceFileOneSwapBead(t *testing.T) {
+	home := aBackendRig(t, "laptop", "laptop")
+	home.builds.Newest = application.BackendCommit{Commit: landedCommit, Subject: "Merge branch 'mw/mw-j0f2d.28' into HEAD"}
+	home.builds.OnBuild = meet(2)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); home.stage.Landed(context.Background(), presenceLanding()) }()
+	go func() { defer wg.Done(); home.stage.Pending(context.Background()) }()
+	wg.Wait()
+
+	if filed := filedUnder(t, home, "mw-j0f2d"); len(filed) != 1 {
+		t.Fatalf("expected one swap bead, got %d", len(filed))
+	}
+}
+
+// claimLock is the host-wide claim another mw process holds while it stages.
+type claimLock struct{ held bool }
+
+func (l *claimLock) TryTake(context.Context) (func(), bool, error) {
+	if l.held {
+		return nil, false, nil
+	}
+	l.held = true
+	return func() { l.held = false }, true, nil
+}
+
+// A staging that finds another process holding the host's claim files nothing and
+// counts no try, and the next tick, with the claim free, files the one bead.
+func TestAStagingThatFindsTheClaimHeldFilesNothingAndCountsNoTry(t *testing.T) {
+	home := aBackendRig(t, "laptop", "laptop")
+	claim := &claimLock{held: true}
+	home.stage.Claim = claim
+	ctx := context.Background()
+
+	said := home.stage.Landed(ctx, presenceLanding())
+	if filed := filedUnder(t, home, "mw-j0f2d"); len(filed) != 0 {
+		t.Fatalf("expected nothing filed while another process holds the claim, got %d (said %q)", len(filed), said)
+	}
+	kept, err := home.tracker.NotesWithPrefix(ctx, application.BackendPendingPrefix)
+	mustDo(t, err)
+	if len(kept) != 1 {
+		t.Fatalf("expected the landing kept for the next tick, got %v", kept)
+	}
+	for _, text := range kept {
+		if strings.Contains(text, `"tries"`) {
+			t.Fatalf("expected no try counted for a claim held, got %s", text)
+		}
+	}
+
+	claim.held = false
+	home.stage.Pending(ctx)
+	if filed := filedUnder(t, home, "mw-j0f2d"); len(filed) != 1 {
+		t.Fatalf("expected the next tick to file the one bead, got %d", len(filed))
+	}
+	if claim.held {
+		t.Fatal("expected the claim let go after staging")
 	}
 }
