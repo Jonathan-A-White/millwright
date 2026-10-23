@@ -125,3 +125,47 @@ func TestACloseOutMarksItsStoryWhileItRunsAndWhileItWaitsForCalmAndClearsItAtThe
 		t.Errorf("expected the mark cleared when the close-out ended, got %+v", left)
 	}
 }
+
+func TestUnmetCriteriaNamesTheSentenceOfEveryPhraseBuildersUseForAnUnmetCriterion(t *testing.T) {
+	for name, tc := range map[string]struct{ comment, want string }{
+		"only in small part": {"AC1 and AC3 hold. AC2 and AC4 hold only in small part, because the kit does not fit.", "AC2 and AC4 hold only in small part"},
+		"NOT RUN":            {"NOT VERIFIED\n\n• AC3 (mw grist eval 3 of 3 on today-drill): NOT RUN. eval reads main.", "AC3 (mw grist eval 3 of 3 on today-drill): NOT RUN"},
+		"not met":            {"AC 3 NOT MET, measured by the Mayor.", "AC 3 NOT MET"},
+		"not switched":       {"AC2: the flag is not switched on in the app.", "AC2: the flag is not switched on in the app"},
+		"not done":           {"NOT DONE, AC4 (live proof):", "NOT DONE, AC4 (live proof)"},
+		"held in part":       {"The acceptance criteria: AC6 is held in part.", "AC6 is held in part"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := application.UnmetCriteria(tc.comment)
+			if len(got) != 1 || !strings.Contains(got[0], tc.want) {
+				t.Fatalf("expected one sentence holding %q, got %q", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestUnmetCriteriaLeavesACommentWhereEveryCriterionHoldsAlone(t *testing.T) {
+	for name, comment := range map[string]string{
+		"all hold":               "AC1, AC2 and AC3 hold; each was run and passes.\n\nHOW TO CHECK IT, for the Governor:\n1. Look.",
+		"phrase with no AC":      "The old test was not run red afterwards. Sweep of the bar: held in part.",
+		"AC in another sentence": "AC1 holds. A second pass was not done because nothing changed.",
+		"empty":                  "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := application.UnmetCriteria(comment); len(got) != 0 {
+				t.Fatalf("expected no unmet criterion, got %q", got)
+			}
+		})
+	}
+}
+
+func TestUnmetCriterionPhrasesEachSayWhereTheyWereSeen(t *testing.T) {
+	if len(application.UnmetCriterionPhrases) == 0 {
+		t.Fatal("expected a list of phrases")
+	}
+	for _, p := range application.UnmetCriterionPhrases {
+		if p.Phrase == "" || p.Source == "" {
+			t.Errorf("expected every phrase to have its source, got %+v", p)
+		}
+	}
+}

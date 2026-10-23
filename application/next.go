@@ -100,9 +100,15 @@ const (
 	// branch is not: no closing comment was written after its newest commit
 	// (mw-gq6.630). Like open steps, it is the Builder's to mend.
 	ReasonNoClosingComment Reason = "no-closing-comment"
-	ReasonTestsFail        Reason = "tests-fail"
-	ReasonMergeConflict    Reason = "merge-conflict"
-	ReasonMergedTestsFail  Reason = "merged-tests-fail"
+	// ReasonUnmetCriterion is a story whose closing comment says an acceptance
+	// criterion holds only in part, is not met or was not run (mw-gq6.711): not
+	// a landing, whatever the gate says. Its claim is kept, as for the tests
+	// failing: a new attempt would meet the same criterion, so the Mayor
+	// re-scopes or closes it.
+	ReasonUnmetCriterion  Reason = "unmet-criterion"
+	ReasonTestsFail       Reason = "tests-fail"
+	ReasonMergeConflict   Reason = "merge-conflict"
+	ReasonMergedTestsFail Reason = "merged-tests-fail"
 	// A Tester story's branch (mw-it6qk5.5): it committed something, or wrote
 	// no FINDINGS.
 	ReasonTesterCommitted Reason = "tester-committed"
@@ -1927,14 +1933,31 @@ func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextRep
 // it has one, or has no formula (mw-gq6.630). A Builder can close the step that
 // asks for the comment and leave '•' on the story, so the step is not trusted:
 // the comment is read. It is a hand-back, as open steps are, for the Builder to
-// mend by writing the comment.
+// mend by writing the comment. The comment it finds is read for criteria it
+// says are unmet (UnmetCriteria, mw-gq6.711): that is the refusal
+// ReasonUnmetCriterion, which keeps the claim for the Mayor.
 func (n Next) closingCommentRefusal(ctx context.Context, c *closeOut, base string) (Refusal, bool) {
-	if c.detail.Molecule.RootID == "" || n.closingCommentOnStory(ctx, c, base) {
+	if c.detail.Molecule.RootID == "" {
+		return Refusal{}, false
+	}
+	text, written := n.closingCommentTextOnStory(ctx, c, base)
+	if unmet := UnmetCriteria(text); written && len(unmet) > 0 {
+		return Refusal{ReasonUnmetCriterion, fmt.Sprintf("the closing comment of %s says an acceptance criterion is not met: %s", c.id, unmet[0]),
+			"The closing comment says, of acceptance criteria:\n" + bulletList(unmet) + "\n" +
+				"A story is landed when every acceptance criterion holds when run. One that holds only in part, is not met or was not run is not a landing: " +
+				"the story is handed back, and the Mayor re-scopes it or closes what is done."}, true
+	}
+	if written {
 		return Refusal{}, false
 	}
 	return Refusal{ReasonNoClosingComment, fmt.Sprintf("the formula of %s is finished, but the story has no closing comment written after its newest commit", c.id),
 		"A closing comment has HOW TO CHECK IT, for the Governor (or the line 'Internal: nothing for the Governor to look at') and 'For the rig memory:'. " +
 			"A closed 'Write the closing comment' step is not one: write the comment on the story, after the last commit, and run mw next again."}, true
+}
+
+// bulletList is lines, one to a line, each after a '- '.
+func bulletList(lines []string) string {
+	return "- " + strings.Join(lines, "\n- ")
 }
 
 // ClosingStepNote is the note of a close-out that closed the closing-comment
@@ -1961,9 +1984,16 @@ func (n Next) closingCommentWritten(ctx context.Context, c *closeOut, step Formu
 // written after the newest commit of its branch, whether or not the step that
 // asks for it is closed (mw-gq6.630). Anything it cannot read counts as no.
 func (n Next) closingCommentOnStory(ctx context.Context, c *closeOut, base string) bool {
+	_, written := n.closingCommentTextOnStory(ctx, c, base)
+	return written
+}
+
+// closingCommentTextOnStory is the newest closing comment written after the
+// newest commit of the story's branch, and whether there is one.
+func (n Next) closingCommentTextOnStory(ctx context.Context, c *closeOut, base string) (string, bool) {
 	commits, err := n.Landing.Commits(ctx, c.rigDir, c.branch, base)
 	if err != nil {
-		return false
+		return "", false
 	}
 	var newest time.Time
 	for _, commit := range commits {
@@ -1973,14 +2003,16 @@ func (n Next) closingCommentOnStory(ctx context.Context, c *closeOut, base strin
 	}
 	comments, err := n.Tracker.StoryComments(ctx, c.id)
 	if err != nil {
-		return false
+		return "", false
 	}
+	var text string
+	written := false
 	for _, comment := range comments {
 		if comment.Created.After(newest) && isClosingComment(comment.Text) {
-			return true
+			newest, text, written = comment.Created, comment.Text, true
 		}
 	}
-	return false
+	return text, written
 }
 
 // isClosingComment is a comment with the two sections of a Builder's closing

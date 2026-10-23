@@ -442,6 +442,18 @@ Feature: Closing out a finished story and carrying on
     Then nothing was landed on "main"
     And the report says it stopped for "no-closing-comment"
 
+  # mw-gq6.711: a closing comment that says an acceptance criterion holds only in
+  # part, is not met or was not run is not a landing: Refused, the story handed back.
+  Scenario: A closing comment that says an acceptance criterion holds only in part is refused
+    Given the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And the comment "AC1 holds. AC2 holds only in small part. Internal: nothing for the Governor to look at. For the rig memory: nothing" was written on "mw-gq6.1" after its newest commit
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the report says it stopped for "unmet-criterion"
+    And the printed report says "AC2 holds only in small part"
+
   Scenario: A story with every step closed and a real closing comment after its newest commit lands
     Given the session of "mw-gq6.1" reported a plain success
     And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
