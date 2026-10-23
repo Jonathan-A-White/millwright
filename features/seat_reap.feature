@@ -1,8 +1,8 @@
 Feature: mw seat reap
   A finished session's window closes itself. mw seat reap is a detached,
   zero-token watcher on one window that looks every half minute and closes the
-  window when its session is done: never before, and never over anything typed
-  on its input line. A session ends its own window; no session closes another's.
+  window when its session is done: never before, and never while a turn is
+  running in it. A session ends its own window; no session closes another's.
 
   In successor mode, the default, the window closes once the seat's acting file
   names someone else than it did when the watch was armed, that someone's window
@@ -10,6 +10,11 @@ Feature: mw seat reap
   two looks in a row. In idle mode, for a session with nobody to hand over to,
   the window closes once a handoff newer than the window has been written and
   the pane is idle on two looks in a row.
+
+  A pane that holds only unsent text on its input line, with no turn running,
+  is idle in this sense in both modes: a session that has handed off and
+  stopped leaves such text behind (its unsent boot prompt), and a window kept
+  open for it is a window nothing closes. Nothing is ever typed over the text.
 
   A seat with a mailbox, the Deputy's, is not closed over unread mail. In idle
   mode, once the window would close, the reaper counts the box's unread mail:
@@ -88,19 +93,19 @@ Feature: mw seat reap
     When the reaper watches "@3" in successor mode, looking every 30 seconds for up to 10 minutes
     Then the reaper closed the window "@3" on look 4
 
-  Scenario: Text on the input line prevents closing in successor mode
+  Scenario: Unsent text on the input line of a handed-over window does not stop it closing in successor mode
     Given the window "@4" named "mayor-2026-09-19-13" was opened at "2026-09-19T11:59:00Z"
     And before look 1 the acting file says "Mayor after handoff 12 (tmux window 4 'mayor-2026-09-19-13'), since 2026-09-19T12:01:00Z"
     And the pane of "@3" has text on its input line
     When the reaper watches "@3" in successor mode, looking every 30 seconds for up to 10 minutes
-    Then the reaper closed no window
-    And the window "@3" is still open
-    And the reaper gave up
+    Then the reaper closed the window "@3" on look 2
+    And the reaper log's line 2 says "reap @3: closed: the seat is held by someone else, and the pane held only unsent text on its input line"
 
-  Scenario: Text typed and then cleared delays closing until two idle looks follow
+  Scenario: A turn that starts after text was left delays closing until two idle looks follow
     Given the window "@4" named "mayor-2026-09-19-13" was opened at "2026-09-19T11:59:00Z"
     And before look 1 the acting file says "Mayor after handoff 12 (tmux window 4 'mayor-2026-09-19-13'), since 2026-09-19T12:01:00Z"
     And the pane of "@3" has text on its input line
+    And before look 2 the pane of "@3" is working
     And before look 3 the pane of "@3" is idle
     When the reaper watches "@3" in successor mode, looking every 30 seconds for up to 10 minutes
     Then the reaper closed the window "@3" on look 4
@@ -119,8 +124,15 @@ Feature: mw seat reap
     And the reaper log holds 2 lines
     And the reaper log's line 2 says "reap @3: closed"
 
-  Scenario: Idle mode does not close a window whose input line holds text
+  Scenario: Idle mode closes a handed-off window whose input line holds only unsent text
     Given the seat has written the handoff "2026-09-19-12" at "2026-09-19T11:00:00Z"
+    And the pane of "@3" has text on its input line
+    When the reaper watches "@3" in idle mode, looking every 30 seconds for up to 10 minutes
+    Then the reaper closed the window "@3" on look 2
+    And the reaper log's line 2 says "reap @3: closed: the seat has written a handoff since this window opened, and the pane held only unsent text on its input line"
+
+  Scenario: Idle mode does not close a window with text on its input line before a handoff newer than the window
+    Given the seat has written the handoff "2026-09-19-11" at "2026-09-19T09:00:00Z"
     And the pane of "@3" has text on its input line
     When the reaper watches "@3" in idle mode, looking every 30 seconds for up to 10 minutes
     Then the reaper closed no window

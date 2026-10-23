@@ -161,7 +161,7 @@ func (c *seatReapContext) theActingFileSays(text string) error {
 }
 
 func (c *seatReapContext) thePaneHasText(id string) error {
-	return c.windows.Pane(id, application.PaneInput)
+	return c.windows.Pane(id, application.PaneDraft)
 }
 
 func (c *seatReapContext) thePaneIsWorking(id string) error {

@@ -21,8 +21,13 @@ func TestClassifyPane(t *testing.T) {
 			"● Done.\n\n" + rule + "❯\u00a0\n" + rule + "  ? for shortcuts\n", application.PaneIdle},
 		{"an empty input line with a plain space", "❯ \n", application.PaneIdle},
 		{"an empty input line with nothing after the mark", "❯\n", application.PaneIdle},
-		{"text on the input line is not idle", rule + "❯ half a sente\n" + rule, application.PaneInput},
-		{"text after a no-break space is not idle", "❯\u00a0half a sente\n", application.PaneInput},
+		{"text on the input line is a draft, not idle", rule + "❯ half a sente\n" + rule, application.PaneDraft},
+		{"text after a no-break space is a draft", "❯\u00a0half a sente\n", application.PaneDraft},
+		{"an unsent boot prompt after a finished turn is a draft",
+			"● Handoff written.\n\n" + rule + "❯ Standing instructions: arm mw events wait. Woken for: Mayor 550 jobs 23-26\n" + rule + "  ? for shortcuts\n", application.PaneDraft},
+		{"text on the input line of a working session is working",
+			"✻ Thinking… (12s · esc to interrupt)\n" + rule + "❯ half a sente\n" + rule, application.PaneWorking},
+		{"a menu's selected choice is a question, not a draft", "Do you want to proceed?\n❯ 1. Yes\n  2. No\n", application.PaneInput},
 		{"a working session says how to interrupt it", "✻ Thinking… (12s · esc to interrupt)\n\n❯\u00a0\n", application.PaneWorking},
 		{"a screen with no prompt on it is not idle", "Do you want to proceed?\n 1. Yes\n 2. No\n", application.PaneInput},
 		{"a blank screen is not idle", "\n\n\n", application.PaneInput},
@@ -88,7 +93,7 @@ func TestClassifyPaneReadsTheUsageLimit(t *testing.T) {
 
 func TestTheLimitIsReadOffTheScreenWithoutItsEscapes(t *testing.T) {
 	screen := "  \x1b[2m⎿\x1b[0m  \x1b[31mYou've hit your weekly limit · resets Oct 16, 7am (UTC)\x1b[0m\n❯\u00a0\n"
-	shown, on := application.PaneUsageLimit(stripEscapes(screen))
+	shown, on := application.PaneUsageLimit(application.StripEscapes(screen))
 	if !on || shown != "⎿  You've hit your weekly limit · resets Oct 16, 7am (UTC)" {
 		t.Errorf("expected the notice without its escapes, got %q (%v)", shown, on)
 	}
@@ -110,13 +115,13 @@ func TestClassifyPaneReadsGhostSuggestionsAsAnEmptyInputLine(t *testing.T) {
 		{"a dim suggestion ended by normal intensity is an empty input line",
 			"❯ \x1b[1;2mthe dot is green\x1b[22m\n", application.PaneIdle},
 		{"a colour's own 2 is not dim: text in 38;2;r;g;b is a draft",
-			"❯ \x1b[38;2;10;20;30mhalf a sente\x1b[0m\n", application.PaneInput},
+			"❯ \x1b[38;2;10;20;30mhalf a sente\x1b[0m\n", application.PaneDraft},
 		{"undimmed text after the mark is a draft",
-			"❯\u00a0half a sente\n", application.PaneInput},
+			"❯\u00a0half a sente\n", application.PaneDraft},
 		{"undimmed text after a reset is a draft",
-			"❯ \x1b[2mthe dot is green\x1b[0m and more\n", application.PaneInput},
+			"❯ \x1b[2mthe dot is green\x1b[0m and more\n", application.PaneDraft},
 		{"dim text with a typed draft before it is a draft",
-			"❯ half\x1b[2m a suggestion\x1b[0m\n", application.PaneInput},
+			"❯ half\x1b[2m a suggestion\x1b[0m\n", application.PaneDraft},
 		{"an escape that draws no text leaves the input line empty",
 			"❯\x1b[7m \x1b[27m\x1b[0m\n", application.PaneIdle},
 		{"a working session with a dim word in its marker is still working",
@@ -136,7 +141,7 @@ func TestClassifyPaneReadsGhostSuggestionsAsAnEmptyInputLine(t *testing.T) {
 func TestClassifyPaneOnCapturedScreens(t *testing.T) {
 	for file, want := range map[string]application.PaneState{
 		"testdata/ghost-suggestion.txt": application.PaneIdle,
-		"testdata/real-draft.txt":       application.PaneInput,
+		"testdata/real-draft.txt":       application.PaneDraft,
 	} {
 		screen, err := os.ReadFile(file)
 		if err != nil {
@@ -188,7 +193,7 @@ func TestInputLineTextIsTheUndimmedDraftOnTheLastPromptLine(t *testing.T) {
 		"an earlier prompt in the history": {"❯ old words\nreply\n❯ \n", ""},
 		"no prompt":                        {"working...\n", ""},
 	} {
-		if got := inputLineText(tc.screen); got != tc.want {
+		if got := application.InputDraft(tc.screen); got != tc.want {
 			t.Errorf("%s: got %q, want %q", name, got, tc.want)
 		}
 	}
