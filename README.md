@@ -2434,6 +2434,7 @@ The Mayor's commands on the log:
 | `mw events emit --kind <k> [--bead <id>] [--emergency] ...` | Appends one event of its own, stamped now, and prints its seq; `--emergency` puts it in the emergency lane. |
 | `mw events wait --for <seat> [--kinds ...] [--since N] [--limit 50m]` | Blocks on the log, no polling and no bd, until an event the seat subscribed to; ends on a handover. |
 | `mw seat handover [--at N] [--to <window>]` | The old Mayor's last act: marks event N as the last it answers and names the successor. |
+| `mw seat take mayor [--as <name>] [--note <text>]` | A Mayor that took the seat with no handover (bin/mayor-up started it): writes `.mayor-acting` naming it, its window id and its session id, and with `--as` renames its window to its own name. |
 
 The follower is the user service `contrib/systemd/mw-view-follow.service`
 (the name kept from when it only republished the view; a daemon, so no timer;

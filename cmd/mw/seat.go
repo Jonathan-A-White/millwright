@@ -35,6 +35,7 @@ func newSeatCmd() *cobra.Command {
 	seat.AddCommand(newSeatUpCmd())
 	seat.AddCommand(newSeatReapCmd())
 	seat.AddCommand(newSeatHandoverCmd())
+	seat.AddCommand(newSeatTakeCmd())
 	seat.AddCommand(newSeatBootCmd())
 	seat.AddCommand(newSeatReadCmd())
 	return seat
@@ -249,6 +250,45 @@ func newSeatHandoverCmd() *cobra.Command {
 	}
 	cmd.Flags().Uint64Var(&at, "at", 0, "the seq of the last event the old Mayor answers (default: the log's head)")
 	cmd.Flags().StringVar(&to, "to", "", "the successor's window name (default: the newest other window of the Mayor)")
+	return cmd
+}
+
+// newSeatTakeCmd builds `mw seat take`: the acting file for a seat taken
+// without a handover, written by the session that took it.
+func newSeatTakeCmd() *cobra.Command {
+	var as, note string
+	cmd := &cobra.Command{
+		Use:   "take <seat> [--as <name>] [--note <text>]",
+		Short: "Write the acting file for a seat taken without a handover, naming this window and session",
+		Long: "take is what a session runs, in its own tmux pane, when it takes a seat with no handover from a\n" +
+			"predecessor: after bin/mayor-up started it, or after the last Mayor's window was closed. It writes the\n" +
+			"acting file (.<seat>-acting in the vault) naming the session, the id of the window it runs in (which mw\n" +
+			"doctor mayor-gone finds the window by) and its own session id (from $" + application.SessionEnv + "). Writing the\n" +
+			"file by hand left out the window and the session, and the doctor then reported the Mayor gone.\n\n" +
+			"bin/mayor-up calls its window after the handoff it booted from, not after the Mayor in it. --as <name>,\n" +
+			"which must begin with <seat>-, renames this window to the name the session is to have and writes that\n" +
+			"name; without it the window keeps its name, which must already begin with <seat>-. --note adds free text\n" +
+			"to the file (where the seat was taken from, and why). Where a predecessor is alive, wait for its handover\n" +
+			"instead: two sessions of a seat never act at once. It works on tmux's default server unless $" + TmuxSocketEnv + "\n" +
+			"names another.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			return application.SeatTake{
+				Seat:     args[0],
+				Terminal: seatWindows(),
+				Acting:   vault.New(dir),
+				Session:  os.Getenv(application.SessionEnv),
+				Now:      eventsClock,
+				Out:      cmd.OutOrStdout(),
+			}.Run(cmd.Context(), application.SeatTakeRequest{Name: as, Note: note})
+		},
+	}
+	cmd.Flags().StringVar(&as, "as", "", "the name this session and its window are to have (default: the window's own)")
+	cmd.Flags().StringVar(&note, "note", "", "free text kept in the acting file, such as where the seat was taken from")
 	return cmd
 }
 

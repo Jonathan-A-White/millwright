@@ -12,7 +12,7 @@ The application/ files of each use case in [docs/codemap.md](codemap.md), which 
 | Suite, SuiteFiler, NightlySuite, NightlyTiming (TimingFiler), ContributeBack | application/suite{file,status}.go, application/timingnightly.go, application/contributeback.go |
 | Config* | application/configset.go |
 | IdeasOnly* | application/ideasonly.go, application/ideasonlyrelease.go |
-| Seat* | application/seat{context,up,reap,handover}.go |
+| Seat* | application/seat{context,up,reap,handover}.go, application/seattake.go |
 | Talk*, TalkShow | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go |
 | Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go |
 | Secrets*, Google*, Contacts (mw contacts find), Hands*, Ask, Watch, Doctor | application/secrets.go, application/hands.go, application/ask.go, application/watch.go, application/doctor.go, application/starved.go, application/hostpassed.go |

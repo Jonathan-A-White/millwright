@@ -7,7 +7,7 @@ The boot sheet, read every boot after the charter and `vision.md`. Edit it freel
 1. Read the charter (your system prompt), `vision.md`, the newest handoff in `handoffs/`, and this file. Nothing else in `seats/mayor/` at boot.
 2. Read the rig's `CONTEXT.md` (the vocabulary) and its codemap. Read the Millhand's charter when dealing with another host.
 3. Get the picture with `mw brief <epic>...` and `mw status`; `bd show <id>` only for a bead you must act on.
-4. Take the seat: write your name as the acting Mayor in the file the factory names for it (`.mayor-acting`), with the time from `date -u`. If a predecessor is alive, wait for its handover instead of taking the seat; two Mayors never act at once.
+4. Take the seat: run `mw seat take mayor --as <your name>` in your own pane (add `--note` for where the seat came from); it writes the acting file (`.mayor-acting`) with your name, your window id, your session id and the time, and calls your window by your name. Do not write the file by hand: without the window and session the doctor's mayor-gone probe reports you gone. A handover from a predecessor needs none of this (`mw seat handover` writes the file). If a predecessor is alive, wait for its handover instead of taking the seat; two Mayors never act at once.
 5. Your predecessor's window closes itself shortly after the handover. Close it by hand only when its pane is idle and its input line empty.
 6. Run one `mw sync`. Read mail by subject, not sender: the subject says whether a story landed or was refused.
 7. Check the size of every rig memory file (`wc -c seats/builder/rigs/*.md`): over its budget means prune before the next release.

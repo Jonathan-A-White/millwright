@@ -12,7 +12,7 @@
 | Pause{Fleet,Book,Timer,Git} | application/pause.go | pause, rig |
 | Vault, Harness, SeatBootFiles, RigDocs, BootCommands | seatboot.go, application/seatboot_manifest.go, application/harness.go | {vault,claude,shellcmd}, rig/rigfiles.go |
 | Runner, BdProgram | application/runner.go, application/bdretry.go | {tmux,bdprogram} |
-| SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | {vault/{seat,reaplog},tmux/window,claude/claude}.go |
+| SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go, application/seattake.go | {vault/{seat,reaplog},tmux/window,claude/claude}.go |
 | Transcript*, HostSigns, PeekRemote | application/seatcontext.go, application/peek.go, nudge.go | {claude,peekremote,vault/git.go} |
 | Reap{Terminal,Log,Armer} | application/seatreap.go | {tmux/reap,vault/reaplog,reaper/arm}.go |
 | WatchProbes | watch.go | watch |
