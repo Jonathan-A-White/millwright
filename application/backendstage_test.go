@@ -28,6 +28,12 @@ type fakeBuilds struct {
 	BuildErr error
 	Built    []fakeBuild
 	Asked    []string
+
+	// Newest is what the rig's main says touched the backend last, Have the
+	// binaries already in the stage (every Build adds one).
+	Newest    application.BackendCommit
+	NewestErr error
+	Have      map[string]bool
 }
 
 type fakeBuild struct{ RigDir, Commit, Subdir, Command, Out string }
@@ -43,7 +49,26 @@ func (f *fakeBuilds) Build(_ context.Context, rigDir, commit, subdir, command, o
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Built = append(f.Built, fakeBuild{rigDir, commit, subdir, command, out})
+	if f.BuildErr == nil {
+		if f.Have == nil {
+			f.Have = map[string]bool{}
+		}
+		f.Have[out] = true
+	}
 	return f.BuildErr
+}
+
+func (f *fakeBuilds) NewestChange(_ context.Context, rigDir, subdir string) (application.BackendCommit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Asked = append(f.Asked, "newest "+rigDir+" "+subdir)
+	return f.Newest, f.NewestErr
+}
+
+func (f *fakeBuilds) Staged(out string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.Have[out]
 }
 
 const landedCommit = "4c9db71e0f7a5b3c2d1e8f9a0b1c2d3e4f5a6b7c"
@@ -613,5 +638,98 @@ func TestStagingAgainFreesTwoBeadsThatSupersededEachOther(t *testing.T) {
 	}
 	if approvable == 0 {
 		t.Fatal("expected at least one swap left approvable")
+	}
+}
+
+// A landing made on a host whose config names no backend for the rig (cloud1
+// lands postern, and only the Laptop has [backend.postern]) cannot tell that it
+// changed the backend, so it keeps nothing; the home's tick finds the change
+// itself on the rig's main and stages it as it would a landing on the home
+// (mw-gq6.723).
+func TestALandingOnAHostWithNoBackendIsFoundByTheHomesTick(t *testing.T) {
+	home := aBackendRig(t, "laptop", "laptop")
+	home.builds.Newest = application.BackendCommit{Commit: landedCommit, Subject: "Merge branch 'mw/mw-j0f2d.28' into HEAD"}
+
+	cloud := home
+	cloud.stage.Settings = nil
+	cloud.stage.Host = "cloud1"
+	if said := cloud.stage.Landed(context.Background(), presenceLanding()); len(said) != 0 {
+		t.Fatalf("expected a host with no backend to keep nothing, got %q", said)
+	}
+	if said := cloud.stage.Pending(context.Background()); len(said) != 0 || len(home.builds.Built) != 0 {
+		t.Fatalf("expected a host with no backend to stage nothing, got %q", said)
+	}
+
+	if said := home.stage.Pending(context.Background()); len(said) == 0 {
+		t.Fatal("expected the home's tick to say it staged the backend")
+	}
+	if len(home.builds.Built) != 1 || home.builds.Built[0].Commit != landedCommit || home.builds.Built[0].Subdir != "server" {
+		t.Fatalf("expected the newest backend commit of main built in server/, got %+v", home.builds.Built)
+	}
+	filed := filedUnder(t, home, "mw-j0f2d")
+	if len(filed) != 1 || !filed[0].Hitl() || len(handsSteps(t, home.tracker, filed[0].Story.ID)) != 1 {
+		t.Fatalf("expected one hitl bead under the story's epic holding the swap step, got %+v", filed)
+	}
+	if !strings.Contains(filed[0].Description, "mw-j0f2d.28") {
+		t.Fatalf("expected the bead to name the story the commit belongs to, got %q", filed[0].Description)
+	}
+
+	// The binary is staged now: the next tick has nothing to do.
+	if said := home.stage.Pending(context.Background()); len(said) != 0 || len(home.builds.Built) != 1 {
+		t.Fatalf("expected nothing more, got %q and %d builds", said, len(home.builds.Built))
+	}
+}
+
+// A backend commit of main whose binary is already staged is not staged again,
+// whether or not its swap bead is still open.
+func TestTheHomesTickLeavesAlreadyStagedBackendAlone(t *testing.T) {
+	home := aBackendRig(t, "laptop", "laptop")
+	home.builds.Newest = application.BackendCommit{Commit: landedCommit, Subject: "Merge branch 'mw/mw-j0f2d.28' into HEAD"}
+	home.builds.Have = map[string]bool{"/home/j/.local/share/postern/postern-4c9db71": true}
+
+	if said := home.stage.Pending(context.Background()); len(said) != 0 || len(home.builds.Built) != 0 || len(filedUnder(t, home, "mw-j0f2d")) != 0 {
+		t.Fatalf("expected nothing staged, got %q, %+v", said, home.builds.Built)
+	}
+}
+
+// A commit the tick has already tried and given up on is not made a fresh try
+// by the next look at main.
+func TestTheHomesTickDoesNotRetryABackendItGaveUpOn(t *testing.T) {
+	home := aBackendRig(t, "laptop", "laptop")
+	home.builds.Newest = application.BackendCommit{Commit: landedCommit, Subject: "Merge branch 'mw/mw-j0f2d.28' into HEAD"}
+	home.builds.BuildErr = errors.New("compile error")
+
+	for tick := 1; tick <= application.BackendTries+2; tick++ {
+		home.stage.Pending(context.Background())
+	}
+	if got := len(home.builds.Built); got != application.BackendTries {
+		t.Fatalf("expected %d builds and then none, got %d", application.BackendTries, got)
+	}
+}
+
+// With nothing under the backend directory on main, or main unreadable, the
+// tick stages nothing; an unreadable main is said, once per tick.
+func TestTheHomesTickStagesNothingWithoutABackendCommit(t *testing.T) {
+	home := aBackendRig(t, "laptop", "laptop")
+	if said := home.stage.Pending(context.Background()); len(said) != 0 || len(home.builds.Built) != 0 {
+		t.Fatalf("expected nothing for a main with no backend commit, got %q", said)
+	}
+	home.builds.NewestErr = errors.New("no remote")
+	said := home.stage.Pending(context.Background())
+	if len(said) != 1 || !strings.Contains(said[0], "no remote") || len(home.builds.Built) != 0 {
+		t.Fatalf("expected one line saying main could not be read, got %q", said)
+	}
+}
+
+// A commit whose subject names no story is staged all the same, as a bead
+// standing alone.
+func TestTheHomesTickStagesABackendCommitThatNamesNoStory(t *testing.T) {
+	home := aBackendRig(t, "laptop", "laptop")
+	home.builds.Newest = application.BackendCommit{Commit: landedCommit, Subject: "Raise the device limit"}
+	if said := home.stage.Pending(context.Background()); len(said) == 0 || len(home.builds.Built) != 1 {
+		t.Fatalf("expected the commit staged, got %q, %+v", said, home.builds.Built)
+	}
+	if got := len(filedUnder(t, home, "mw-j0f2d")); got != 0 {
+		t.Fatalf("expected no bead under the epic, got %d", got)
 	}
 }

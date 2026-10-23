@@ -19,6 +19,8 @@ import (
 // written the way mw hands add writes one, and the home is read from the vault's
 // home file. A host with no such table gets a stage that does nothing; a table
 // that cannot be read is said on errs and costs the landing or the tick nothing.
+// Only the home needs the table: it finds a backend change landed on another host
+// by reading the rig's main itself (BackendStage.Pending, mw-gq6.723).
 func hostBackend(gateway *beads.Gateway, files application.HomeFile, host string, rigs map[string]string, errs io.Writer) application.BackendStage {
 	settings, err := config.Backends()
 	if err != nil {

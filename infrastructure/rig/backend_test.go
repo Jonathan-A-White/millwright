@@ -213,3 +213,43 @@ func TestChangedTakesAGlobPathspec(t *testing.T) {
 		}
 	}
 }
+
+// NewestChange reads the remote's main: the newest commit that touched the
+// backend directory, not the newest commit, and not one that is only local.
+func TestNewestChangeIsTheNewestCommitOfTheRemotesMainThatTouchedTheDirectory(t *testing.T) {
+	here := aRigWithAServer(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+	served := run(t, here, "git", "rev-parse", "HEAD")
+
+	write(t, here, "src/app.txt", "a newer app\n")
+	run(t, here, "git", "commit", "-qam", "Only the app")
+	run(t, here, "git", "push", "-q", "origin", "main")
+	write(t, here, "server/main.txt", "a local backend\n")
+	run(t, here, "git", "commit", "-qam", "Not pushed (mw-local.1)")
+
+	got, err := worktrees.NewestChange(ctx, here, "server")
+	if err != nil || got.Commit != served || got.Subject != "A server and an app" {
+		t.Fatalf("expected the pushed commit that touched server/, got %+v, %v", got, err)
+	}
+	if got, err := worktrees.NewestChange(ctx, here, "nowhere"); err != nil || got.Commit != "" {
+		t.Errorf("expected no commit for a directory nothing touched, got %+v, %v", got, err)
+	}
+	if _, err := worktrees.NewestChange(ctx, here, "../elsewhere"); err == nil {
+		t.Error("expected a directory outside the rig to be refused")
+	}
+}
+
+func TestStagedSaysWhetherABinaryIsAtThePath(t *testing.T) {
+	worktrees := rig.New()
+	out := filepath.Join(t.TempDir(), "postern-abc1234")
+	if worktrees.Staged(out) {
+		t.Fatal("expected nothing staged")
+	}
+	if err := os.WriteFile(out, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !worktrees.Staged(out) {
+		t.Fatal("expected the binary found")
+	}
+}

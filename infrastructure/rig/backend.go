@@ -132,3 +132,29 @@ func (s BackendShip) Ship(ctx context.Context, host, src, dest string) error {
 	}
 	return nil
 }
+
+// NewestChange implements application.BackendBuilds: after a fetch (a fetch that
+// fails leaves the last one's view), the newest first-parent commit of the
+// remote's default branch that touched subdir.
+func (w *Worktrees) NewestChange(ctx context.Context, rigDir, subdir string) (application.BackendCommit, error) {
+	if !filepath.IsLocal(subdir) {
+		return application.BackendCommit{}, fmt.Errorf("the backend directory %q is not a directory inside the rig", subdir)
+	}
+	_ = w.Fetch(ctx, rigDir)
+	branch, err := w.defaultBranch(ctx, rigDir)
+	if err != nil {
+		return application.BackendCommit{}, err
+	}
+	out, err := w.git(ctx, rigDir, "log", "-1", "--first-parent", "--format=%H%x00%s", application.StartPoint(w.remote, branch), "--", subdir)
+	if err != nil {
+		return application.BackendCommit{}, err
+	}
+	commit, subject, _ := strings.Cut(strings.TrimSpace(out), "\x00")
+	return application.BackendCommit{Commit: commit, Subject: subject}, nil
+}
+
+// Staged implements application.BackendBuilds.
+func (w *Worktrees) Staged(out string) bool {
+	_, err := os.Stat(out)
+	return err == nil
+}
