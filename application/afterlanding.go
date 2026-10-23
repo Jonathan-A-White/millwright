@@ -496,9 +496,11 @@ func (n Next) smoke(ctx context.Context, c *closeOut, report *NextReport) (faile
 }
 
 // readSmokeElsewhere looks, before the story is merged, at whether its own
-// commits changed grist that this host cannot smoke for it (mw-gq6.728).
-func (n Next) readSmokeElsewhere(ctx context.Context, c *closeOut) {
-	c.smokeUnhosted = n.Smoke.Unsmoked(ctx, c.path.Rig, c.rigDir, StartPoint(n.remote(), c.target), c.branch)
+// commits (branch, from base) changed grist that this host cannot smoke for it
+// (mw-gq6.728). It only ever raises c.smokeUnhosted, so that a batch's one
+// close-out holds what any of its stories changed (mw-gq6.734).
+func (n Next) readSmokeElsewhere(ctx context.Context, c *closeOut, base, branch string) {
+	c.smokeUnhosted = c.smokeUnhosted || n.Smoke.Unsmoked(ctx, c.path.Rig, c.rigDir, base, branch)
 }
 
 // noSmokeLine is the line for a landing of grist on a host that names no
