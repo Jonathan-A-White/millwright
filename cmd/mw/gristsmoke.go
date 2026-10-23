@@ -143,7 +143,7 @@ func (p *prefixedLines) Write(data []byte) (int, error) {
 // newGristSmokeCmd builds `mw grist smoke <app>`: an app's grist tested end to
 // end.
 func newGristSmokeCmd() *cobra.Command {
-	var kind, filed string
+	var kind, filed, ref string
 	var wait time.Duration
 	var lift, asJSON bool
 
@@ -178,11 +178,42 @@ func newGristSmokeCmd() *cobra.Command {
 			"  mw grist smoke lampas --filed mw-5r3p30.582\n" +
 			"A held rig also runs an open story whose title or description names a failing example as\n" +
 			"<app>/<kind>/<example>; mw dispatch says it ran over the hold. Closing the bead ends it: the next\n" +
-			"failing smoke on those examples holds again.",
+			"failing smoke on those examples holds again.\n\n" +
+			"--ref <git ref or worktree path> is the smoke's size check alone, on the grinds as they are at that\n" +
+			"ref of the app's rig and not at main, so that a reword of a grind's instructions is size-checked\n" +
+			"before it lands: mw grist smoke <app> --ref <your branch>. A worktree path reads its committed\n" +
+			"HEAD (commit first). It prints the same warning when a grind's instructions are over the size the\n" +
+			"smoke warns at, and sends nothing, needs no test key or vault, records nothing and lifts or sets no hold;\n" +
+			"it is for use alone, not with --filed, --lift or --json. --kind limits it to one grind.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if filed == "" && len(args) != 1 {
 				return fmt.Errorf("mw grist smoke takes the app alone; examples go with --filed <bead>")
+			}
+			if ref != "" {
+				if filed != "" || lift || asJSON {
+					return fmt.Errorf("mw grist smoke --ref is the size check alone: it takes no --filed, --lift or --json")
+				}
+				apps, err := config.GristApps()
+				if err != nil {
+					return err
+				}
+				smoke := application.GristSmoke{Grinds: rig.NewGrinds(), Apps: apps, Out: cmd.OutOrStdout()}
+				report, err := smoke.SizeAtRef(cmd.Context(), args[0], kind, ref)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "grist smoke: %s: instructions size checked at ref %s, %d warning(s); nothing sent or recorded\n", args[0], ref, len(report.Warnings))
+				for _, warning := range report.Warnings {
+					fmt.Fprintf(cmd.OutOrStdout(), "warning: %s\n", warning)
+				}
+				if report.Failed() {
+					for _, failure := range report.Failures {
+						fmt.Fprintf(cmd.OutOrStdout(), "failed: %s\n", failure)
+					}
+					return application.ErrGristSmokeFailed
+				}
+				return nil
 			}
 			if filed != "" {
 				dir, err := config.Vault()
@@ -265,6 +296,7 @@ func newGristSmokeCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&wait, "wait", application.GristSmokeWait, "how long each example waits for its answer")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the report as one JSON object, and record nothing (what a landing asks of the mw it built)")
 	cmd.Flags().StringVar(&filed, "filed", "", "name the examples given after the app on this open bead, which holds their cause (smoke_examples), and run no smoke")
+	cmd.Flags().StringVar(&ref, "ref", "", "a git ref of the app's rig, or a worktree of it (its committed HEAD): check the grinds' instructions size there, not at main, and send nothing")
 	cmd.Flags().BoolVar(&lift, "lift", false, "end the hold a failed smoke of the app put on its rig's stories, without a smoke")
 	return cmd
 }

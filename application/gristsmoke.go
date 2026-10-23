@@ -309,8 +309,8 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 		report.Failures = append(report.Failures, label+": the grind file could not be read")
 		return
 	}
-	if n := s.instructionsSize(ctx, checkout, commit, grind); n > GristInstructionsWarnBytes {
-		report.Warnings = append(report.Warnings, fmt.Sprintf("%s: its instructions are %d bytes, over %d (a big prompt costs on every grind)", label, n, GristInstructionsWarnBytes))
+	if warning := s.sizeWarning(ctx, checkout, commit, label, grind); warning != "" {
+		report.Warnings = append(report.Warnings, warning)
 	}
 	if grind.Forward != "" {
 		report.Warnings = append(report.Warnings, label+": forwards to the "+grind.Forward+", so it is not smoked")
@@ -450,6 +450,70 @@ func (s GristSmoke) readGrind(ctx context.Context, checkout, commit, kind string
 // every grind, and past 131,072 bytes claude could not be started with them as
 // one argument (mw-gq6.690).
 const GristInstructionsWarnBytes = 100_000
+
+// sizeWarning is the warning for a grind whose instructions at commit are over
+// GristInstructionsWarnBytes, empty when they are not (or cannot be read).
+func (s GristSmoke) sizeWarning(ctx context.Context, checkout, commit, label string, grind GrindFile) string {
+	n := s.instructionsSize(ctx, checkout, commit, grind)
+	if n <= GristInstructionsWarnBytes {
+		return ""
+	}
+	return fmt.Sprintf("%s: its instructions are %d bytes, over %d (a big prompt costs on every grind)", label, n, GristInstructionsWarnBytes)
+}
+
+// SizeAtRef is `mw grist smoke <app> --ref <ref>`: the size check of the smoke
+// alone, on the grinds of app (or only of kind, when it is not empty) as they
+// are at ref, a git ref of the app's rig or a worktree of it (its committed
+// HEAD), and not at main, so that a reword is size-checked before it lands. It
+// sends nothing, needs no sender, and touches no record and no hold. The report
+// holds the commit read and the warnings.
+func (s GristSmoke) SizeAtRef(ctx context.Context, app, kind, ref string) (GristSmokeReport, error) {
+	report := GristSmokeReport{App: app}
+	checkout, ok := s.Apps[app]
+	if !ok || checkout == "" {
+		return report, fmt.Errorf("mw grist smoke: the app %q has no rig in the [grist-apps] table of the config file (it has: %s)", app, strings.Join(s.appNames(), ", "))
+	}
+	refs, ok := s.Grinds.(GrindRefs)
+	if !ok {
+		return report, fmt.Errorf("mw grist smoke: this host's grind source cannot read a ref")
+	}
+	checkout, commit, note, err := refs.ResolveRef(ctx, checkout, ref)
+	if err != nil {
+		return report, fmt.Errorf("mw grist smoke: --ref: %w", err)
+	}
+	report.Commit = commit
+	if note != "" {
+		s.say("note: %s", note)
+	}
+	s.say("reading %s's instructions at ref %s (%s), not at main", app, ref, shortTxid(commit))
+	files, err := s.Grinds.List(ctx, checkout, commit, GristSmokeDir)
+	if err != nil {
+		return report, fmt.Errorf("mw grist smoke: %w", err)
+	}
+	kinds := smokeKinds(files)
+	if kind != "" {
+		if !slices.Contains(kinds, kind) {
+			return report, fmt.Errorf("mw grist smoke: %s has no grind of kind %q at ref %s (it has: %s)", app, kind, ref, strings.Join(kinds, ", "))
+		}
+		kinds = []string{kind}
+	}
+	if len(kinds) == 0 {
+		report.NoGrinds = true
+		return report, nil
+	}
+	for _, k := range kinds {
+		label := app + "/" + k
+		grind, ok := s.readGrind(ctx, checkout, commit, k)
+		if !ok {
+			report.Failures = append(report.Failures, label+": the grind file could not be read")
+			continue
+		}
+		if warning := s.sizeWarning(ctx, checkout, commit, label, grind); warning != "" {
+			report.Warnings = append(report.Warnings, warning)
+		}
+	}
+	return report, nil
+}
 
 // instructionsSize is the size in bytes of the grind's instructions at commit,
 // the file or the parts of its directory joined; 0 when they cannot be read.
