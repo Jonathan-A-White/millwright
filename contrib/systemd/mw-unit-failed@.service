@@ -1,5 +1,5 @@
-# Tell the Mayor that a unit failed, as the user: one mail, then it exits. For
-# `systemctl --user`; a template, never enabled or started by a timer.
+# Tell the Mayor that a unit failed, as the user: one mail at most, then it
+# exits. For `systemctl --user`; a template, never enabled or started by a timer.
 #
 # Every other service in this directory names it in an OnFailure= line (with %n),
 # so systemd starts one instance of it, with the failed unit's name as the
@@ -7,10 +7,14 @@
 # timeout. Before this a failed `mw report send`, `mw doctor` or `mw dispatch`
 # ended in an exit code and a journal line and nobody was told (mw-gq6.511).
 #
-# The mail goes to the Mayor from a seat named for the host (doctor@<host>), and
-# names the unit and the host in its subject and carries the last 20 lines of
-# the unit's journal. It has no OnFailure= itself: a failed mail must not start
-# another (scripts/check-timer-units.sh holds that). To try it by hand:
+# `mw doctor unit-failed` decides whether the Mayor is told yet. A unit a timer
+# runs often fails once and is clean on its next run (mw-dispatch.service every
+# few minutes), so its first failure is only recorded; a second with no clean
+# run between them is mailed, naming both and carrying the last 20 lines of the
+# unit's journal at each. A unit no timer runs is mailed at its first failure
+# (mw-gq6.716). The mail goes to the Mayor from a seat named for the host
+# (doctor@<host>). This template has no OnFailure= itself: a failed mail must
+# not start another (scripts/check-timer-units.sh holds that). To try it by hand:
 #   systemctl --user start mw-unit-failed@mw-report.service.service
 [Unit]
 Description=Mail the Mayor that %i failed
@@ -18,13 +22,11 @@ Description=Mail the Mayor that %i failed
 [Service]
 Type=oneshot
 
-# The same environment as mw-report.service: the one fixed binary, and the
-# tracker's Dolt server through beads.env (mw mail send reads the vault).
+# The same environment as mw-report.service: the tracker's Dolt server through
+# beads.env (the mail is sent through the vault), and the PATH the host sets.
 EnvironmentFile=-%h/.config/mw/beads.env
 EnvironmentFile=-%h/.config/mw/dispatch.env
-Environment=MW_SEAT=doctor@%H
-# $$ is a single $ to systemd: the shell expands the command substitution.
-ExecStart=/bin/sh -c '%h/.local/bin/mw mail send mayor -s "unit failed: %i on %H" -m "$$(journalctl --user -u %i -n 20 --no-pager 2>&1)"'
+ExecStart=/usr/bin/env %h/.local/bin/mw doctor unit-failed %i
 
 # Type=oneshot has no start timeout by default, and a hung mail would then
 # block every later one.
