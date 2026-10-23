@@ -333,3 +333,19 @@ func TestNextRunningSeesAMwNextBelowThePane(t *testing.T) {
 		t.Errorf("expected no mw next in the idle window, got %v, %v", running, err)
 	}
 }
+
+func TestRenameCallsARealWindowByIDAndRefusesAnythingElse(t *testing.T) {
+	windows, _ := privateWindows(t)
+	dir := t.TempDir()
+	id := openStandIn(t, windows, dir, "mayor-2026-10-22-550", emptyInput)
+
+	if err := windows.Rename(context.Background(), id, "mayor-2026-10-22-552"); err != nil {
+		t.Fatalf("renaming %s: %v", id, err)
+	}
+	if got := idOf(t, windows, "mayor-2026-10-22-552"); got != id {
+		t.Errorf("expected the window %s to carry the new name, got %s", id, got)
+	}
+	if err := windows.Rename(context.Background(), "mayor-2026-10-22-552", "x"); err == nil {
+		t.Errorf("expected a name to be refused where a window id is wanted")
+	}
+}

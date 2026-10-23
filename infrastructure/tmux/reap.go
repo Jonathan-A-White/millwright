@@ -315,6 +315,17 @@ func (w *Windows) Close(ctx context.Context, window string) error {
 	return nil
 }
 
+// Rename implements application.SeatTakeTerminal: the window named by id is
+// called name from now on. tmux stops renaming a window itself once it is
+// named by hand, so the name stays.
+func (w *Windows) Rename(ctx context.Context, window, name string) error {
+	if err := windowID(window); err != nil {
+		return err
+	}
+	_, err := w.call(ctx, "rename-window", "-t", window, name)
+	return err
+}
+
 // noServer reports whether tmux failed for want of a server to ask: none is
 // running, or there is no socket to reach one by. It is an answer — nothing is
 // open — and not a failure.

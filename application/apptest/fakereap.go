@@ -12,6 +12,9 @@ import (
 // FakeWindows satisfies the terminal a reaper watches.
 var _ application.ReapTerminal = (*FakeWindows)(nil)
 
+// And the terminal `mw seat take` renames a window through.
+var _ application.SeatTakeTerminal = (*FakeWindows)(nil)
+
 // add opens a window of the given id — a numbered one when the id is empty —
 // with an idle pane. The caller holds the lock.
 func (f *FakeWindows) add(id string, window application.Window) {
@@ -386,5 +389,21 @@ func (f *FakeReapArmer) Arm(_ context.Context, arming application.ReapArming) er
 		return f.Err
 	}
 	f.Armed = append(f.Armed, arming)
+	return nil
+}
+
+// Rename implements application.SeatTakeTerminal: the open window of that id
+// is called name from now on.
+func (f *FakeWindows) Rename(_ context.Context, id, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return f.Err
+	}
+	i := f.index(id)
+	if i < 0 {
+		return fmt.Errorf("no window %s is open", id)
+	}
+	f.open[i].Name = name
 	return nil
 }
