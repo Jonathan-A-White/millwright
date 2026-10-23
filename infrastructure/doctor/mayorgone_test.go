@@ -161,6 +161,35 @@ func TestTheMayorGoneProbeIsNotFaultyWhenTheSessionIDMatchesAWindowOfADifferentN
 	}
 }
 
+// mw-gq6.708: a Mayor's window called something else than its acting file
+// says (bin/mayor-up names a window from the handoff) is found by the window
+// id the file names, but only when it is a window of the Mayor's: a tmux
+// server started afresh reuses ids.
+func TestTheMayorGoneProbeFindsAMayorWindowByTheIDTheActingFileNames(t *testing.T) {
+	vault := mayorGoneVaultText(t, "Mayor mayor-2026-10-22-552 (taken by hand; window @1005, session 7f3c1a90), since 2026-10-22T13:33:02Z\n")
+	for name, want := range map[string]application.Verdict{
+		"mayor-2026-10-22-550": application.DoctorOK,
+		"scratch":              application.DoctorFaulty,
+	} {
+		tmux := fakeMayorGoneTmux(t, "@1005|"+name, "0 claude")
+		check := &doctor.MayorGone{Vault: vault, Tmux: tmux, PS: "true"}
+
+		if verdict, reason := check.Probe(context.Background()); verdict != want {
+			t.Errorf("window @1005 called %q: expected %s, got %s (%s)", name, want, verdict, reason)
+		}
+	}
+}
+
+func TestTheMayorGoneProbeDoesNotTakeAWindowIDForAPrefixOfAnotherID(t *testing.T) {
+	vault := mayorGoneVaultText(t, "Mayor mayor-2026-10-22-552 (window @10), since 2026-10-22T13:33:02Z\n")
+	tmux := fakeMayorGoneTmux(t, "@100|mayor-2026-10-22-550", "0 claude")
+	check := &doctor.MayorGone{Vault: vault, Tmux: tmux, PS: "true"}
+
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty: @10 is not @100, got %s (%s)", verdict, reason)
+	}
+}
+
 // mw-43v9x.3: a host that is not home holds no Mayor, so the one that is
 // missing there is nothing to cure.
 func TestTheMayorGoneProbeIsOKOnAHostThatIsNotHome(t *testing.T) {

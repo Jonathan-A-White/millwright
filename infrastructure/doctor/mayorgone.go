@@ -93,8 +93,8 @@ func (m *MayorGone) Name() string { return MayorGoneName }
 // otherwise cannot-tell naming whichever of
 // .mayor-acting or bin/mayor-up is missing or not executable; otherwise
 // faulty naming the acting file when no open tmux window matches what it
-// names and no window's pane runs a process carrying a session id the acting
-// file names either — a Mayor resumed by `claude --resume` into a window of
+// names, no window of the Mayor's has the id it names, and no window's pane
+// runs a process carrying a session id the acting file names either — a Mayor resumed by `claude --resume` into a window of
 // another name still shows up there — faulty naming the window when it is
 // open but its pane holds nothing live but a bare shell, and ok when a live
 // process is found there.
@@ -179,7 +179,8 @@ func (m *MayorGone) WayBack() string {
 
 // locate finds the open window acting names: its name, the window id each
 // open window's name is found under, and whether one was found at all —
-// MatchActingName first, then a process carrying a session id acting names.
+// MatchActingName first, then a window of the seat whose id acting names,
+// then a process carrying a session id acting names.
 // An error is already worded for a cannot-tell reason.
 func (m *MayorGone) locate(ctx context.Context, acting, actingPath string) (name string, byName map[string]string, found bool, err error) {
 	names, byName, err := m.windows(ctx)
@@ -187,6 +188,9 @@ func (m *MayorGone) locate(ctx context.Context, acting, actingPath string) (name
 		return "", nil, false, fmt.Errorf("asking tmux for its windows: %v", err)
 	}
 	name, found = application.MatchActingName(acting, names)
+	if !found {
+		name, found = matchByWindowID(acting, byName, application.MayorSeat)
+	}
 	if !found {
 		sessionName, sessionFound, sessionErr := m.matchBySession(ctx, acting, byName)
 		if sessionErr != nil {
@@ -241,6 +245,30 @@ func (m *MayorGone) windows(ctx context.Context) (names []string, byName map[str
 // hyphens) cannot be mistaken for one. It catches both a bare Claude Code
 // session id and the leading segment of one written with its usual dashes.
 var mayorGoneSessionID = regexp.MustCompile(`[0-9a-fA-F]{8,}`)
+
+// mayorGoneWindowID is a tmux window id in an acting file's free text: @ and
+// the digits after it, as `mw seat take` writes it.
+var mayorGoneWindowID = regexp.MustCompile(`@[0-9]+`)
+
+// matchByWindowID is the name of a window in byName, called for the seat (its
+// name begins with seat and a hyphen), whose id acting names. It is how a
+// Mayor whose window is called something else than its acting file says —
+// bin/mayor-up names a window from the handoff, not from the Mayor in it — is
+// still found. The window must be the seat's: an id is reused by a tmux
+// server started afresh, and must not vouch for a window of any other kind.
+func matchByWindowID(acting string, byName map[string]string, seat string) (string, bool) {
+	ids := map[string]bool{}
+	for _, id := range mayorGoneWindowID.FindAllString(acting, -1) {
+		ids[id] = true
+	}
+	found, name := false, ""
+	for candidate, id := range byName {
+		if ids[id] && strings.HasPrefix(candidate, seat+"-") && (!found || candidate < name) {
+			found, name = true, candidate
+		}
+	}
+	return name, found
+}
 
 // matchBySession is the name of a window in byName whose pane runs a process
 // — or has one among its descendants — carrying a session id acting names,
