@@ -132,6 +132,14 @@ func (f *FakeVaultFiles) Commit(ctx context.Context, message string, paths []str
 		return nil, nil
 	}
 	f.commits = append(f.commits, VaultCommit{Message: message, Paths: append([]string(nil), paths...)})
+	// What git has committed is no longer uncommitted.
+	var left []string
+	for _, path := range f.Dirty {
+		if !holds(recorded, path) {
+			left = append(left, path)
+		}
+	}
+	f.Dirty = left
 	return recorded, nil
 }
 

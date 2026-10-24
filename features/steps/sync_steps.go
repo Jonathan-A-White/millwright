@@ -12,6 +12,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/cucumber/godog"
@@ -87,6 +88,9 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the other host pushed the run files of "([^"]*)"$`, c.theOtherHostPushedRunFiles)
 	ctx.Given(`^a close-out here has written the same run files of "([^"]*)" and has not committed them yet$`, c.aCloseOutHasWrittenRunFiles)
 	ctx.Given(`^the close-out commits them a moment later$`, c.theCloseOutCommitsLater)
+	ctx.Given(`^the failed first attempt of "([^"]*)" committed its run record and pushed it$`, c.theFirstAttemptCommittedItsRunRecord)
+	ctx.Given(`^"([^"]*)" is in progress on this host$`, c.aStoryIsInProgressHere)
+	ctx.Given(`^the new session of "([^"]*)" has rewritten its run record$`, c.theSessionRewroteItsRunRecord)
 	ctx.Given(`^both hosts committed a different charter$`, c.bothHostsCommittedACharter)
 	ctx.Given(`^bd sync will exit (\d+)$`, c.bdSyncWillExit)
 	ctx.Given(`^bd sync will exit (\d+), then clear on the next try$`, c.bdSyncWillExitThenClear)
@@ -108,6 +112,8 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the sync stops with the vault blocked$`, c.theSyncStopsWithTheVaultBlocked)
 	ctx.Then(`^mw exits (\d+)$`, c.mwExits)
 	ctx.Then(`^mw exits (\d+), which is neither a plain failure nor one of bd's own$`, c.mwExitsItsOwnStatus)
+	ctx.Then(`^the failure does not name "([^"]*)"$`, c.theFailureDoesNotName)
+	ctx.Then(`^the run record of "([^"]*)" is committed as the session left it$`, c.theRunRecordIsCommittedAsLeft)
 	ctx.Then(`^the failure is one line$`, c.theFailureIsOneLine)
 	ctx.Then(`^the uncommitted change is still there, and nothing was pulled over it$`, c.theUncommittedChangeIsStillThere)
 	ctx.Then(`^the failure says, in plain words:$`, c.theFailureSays)
@@ -845,6 +851,63 @@ func (c *syncContext) theRemoteHoldsThisHostsLine() error {
 	}
 	if !strings.Contains(string(body), thisLine) {
 		return fmt.Errorf("the remote's ledger lacks %q: %s", thisLine, body)
+	}
+	return nil
+}
+
+// theFirstAttemptCommittedItsRunRecord is the vault a retry finds: the failed
+// attempt's close-out committed runs/<story>/result.json, and the file is
+// tracked.
+func (c *syncContext) theFirstAttemptCommittedItsRunRecord(story string) error {
+	if err := writeFile(c.here, runFilesOf(story), "{\"is_error\":true}\n"); err != nil {
+		return err
+	}
+	for _, args := range [][]string{
+		{"add", "-A"},
+		{"commit", "-qm", "Close out the first attempt"},
+		{"push", "-q"},
+	} {
+		if _, err := runGit(c.here, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *syncContext) aStoryIsInProgressHere(story string) error {
+	c.tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Host: c.host})
+	c.tracker.AddStory("mw-x", domain.Story{ID: story, Title: "A retried story"})
+	return c.tracker.ClaimStory(context.Background(), story)
+}
+
+func (c *syncContext) theSessionRewroteItsRunRecord(story string) error {
+	return writeFile(c.here, runFilesOf(story), "{\"is_error\":false}\n")
+}
+
+func (c *syncContext) theFailureDoesNotName(text string) error {
+	if c.err == nil {
+		return fmt.Errorf("expected the sync to fail, but it reported %s", c.report)
+	}
+	if strings.Contains(c.err.Error(), text) {
+		return fmt.Errorf("expected the failure not to name %q, got %q", text, c.err)
+	}
+	return nil
+}
+
+// theRunRecordIsCommittedAsLeft reads git: the file holds what the session
+// wrote, and git sees no change to it.
+func (c *syncContext) theRunRecordIsCommittedAsLeft(story string) error {
+	committed, err := runGit(c.here, "show", "HEAD:"+runFilesOf(story))
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(committed, `"is_error":false`) {
+		return fmt.Errorf("expected the run record to be committed as the session left it, HEAD holds %q", committed)
+	}
+	if left, err := runGit(c.here, "status", "--porcelain", "--untracked-files=no", "--", runFilesOf(story)); err != nil {
+		return err
+	} else if left != "" {
+		return fmt.Errorf("expected the run record to be committed, git says %q", left)
 	}
 	return nil
 }

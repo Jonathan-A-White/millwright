@@ -110,6 +110,27 @@ Feature: Keeping the vault and beads in step between hosts
     And the beads database was synced once
     And nothing is recorded under host.vps.last_sync
 
+  Scenario: A retried story's rewritten run record is committed as found, and the sync goes on
+    Given the failed first attempt of "mw-x.1" committed its run record and pushed it
+    And "mw-x.1" is in progress on this host
+    And the new session of "mw-x.1" has rewritten its run record
+    When this host syncs
+    Then the sync succeeds
+    And the run record of "mw-x.1" is committed as the session left it
+
+  Scenario: Any other uncommitted file still refuses the sync, though a run record beside it is committed
+    Given the failed first attempt of "mw-x.1" committed its run record and pushed it
+    And "mw-x.1" is in progress on this host
+    And the new session of "mw-x.1" has rewritten its run record
+    And this host has an uncommitted change to the Mayor's ledger
+    When this host syncs
+    Then the sync stops with the vault blocked
+    And the failure says, in plain words:
+      | uncommitted           |
+      | seats/mayor/ledger.md |
+    And the failure does not name "runs/mw-x.1/result.json"
+    And the run record of "mw-x.1" is committed as the session left it
+
   Scenario: A close-out's files in the way of the pull are waited out, and the sync goes on
     Given the other host pushed the run files of "mw-x.1"
     And a close-out here has written the same run files of "mw-x.1" and has not committed them yet
