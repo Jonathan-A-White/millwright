@@ -208,7 +208,8 @@ func (f *FakeGrinds) Refreshes(checkout string) int {
 }
 
 // Refresh implements application.GrindSource: the remote's main, when one was
-// set, becomes the checkout's.
+// set, becomes the checkout's. The commit main was at stays readable, as a
+// fetched git checkout keeps the commits its main has moved on from.
 func (f *FakeGrinds) Refresh(_ context.Context, checkout string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -219,6 +220,13 @@ func (f *FakeGrinds) Refresh(_ context.Context, checkout string) error {
 	commit, ok := f.remoteCommits[checkout]
 	if !ok {
 		return nil
+	}
+	if old, had := f.commits[checkout]; had && old != commit {
+		kept := map[string][]byte{}
+		for path, data := range f.files[checkout] {
+			kept[path] = data
+		}
+		f.refFiles[checkout+"\x00"+old] = kept
 	}
 	f.commits[checkout] = commit
 	if f.files[checkout] == nil {

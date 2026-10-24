@@ -1,0 +1,1184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bible Talk Answer 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["answer", "question", "words"],
+  "properties": {
+    "answer": {
+      "description": "The reply to what he said, in short plain English; or the one-sentence refusal for anything outside the Bible.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1500
+    },
+    "question": {
+      "description": "What he just said, put into clean written words: the capitals and punctuation it needs (question marks, full stops), the ums, uhs, repeated words and dropped starts taken out, the meaning and his own words kept. Never an answer or an explanation; unchanged when it was clean already. Keeps the whole of what he said or pasted, every paragraph, to its last words: never cut at the first line. At most the length of what he said.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "words": {
+      "description": "The Greek words the answer speaks about, each with its lemma and a short note that includes its parsing. Empty when the answer is about no particular word.",
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["greek", "lemma", "note"],
+        "properties": {
+          "greek": { "description": "The word as it stands in the text.", "type": "string", "minLength": 1, "maxLength": 80 },
+          "lemma": { "description": "Its dictionary form.", "type": "string", "minLength": 1, "maxLength": 80 },
+          "note": { "description": "Its parsing and what it does here, in plain words.", "type": "string", "minLength": 1, "maxLength": 300 }
+        }
+      }
+    },
+    "syllables": {
+      "description": "Only when the question asked how to sound a word out (its focus kind is sound): the word's syllables in Greek letters, in order, each one short enough to say alone; for a Hebrew word (focus language he), in the pointed Hebrew letters. Leave it out otherwise.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": { "type": "string", "minLength": 1, "maxLength": 40 }
+    },
+    "transliteration": {
+      "description": "Only for a Hebrew word's sound question (focus kind sound and language he): how each entry of syllables sounds, in plain Latin letters with no special marks, in the same order and the same number, the stressed syllable in capitals (TSE, dek). Leave it out otherwise.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": { "type": "string", "minLength": 1, "maxLength": 40 }
+    },
+    "words_to_add": {
+      "description": "Only when he asked to put words on his words-to-learn list ('add σάρξ to my words'): the dictionary form of each word, in Greek letters. Leave it out otherwise.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+    },
+    "summary": {
+      "description": "Only when the request carried `fold`: the conversation's new running summary, which the app keeps and sends back as `summary` next time. The request's `summary` (if any) and every turn of `fold`, in order, written as one summary: his name, age and background as he told them, what he is learning and why, the passages and words talked about, what you explained and what he understood or not, what he decided or asked you to remember, and any question left open; never pleasantries, and never anything he has not said. At most 1000 characters, in plain English, and about him in the third person ('He ...'). Leave it out when the request had no `fold`.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "study_way_line": {
+      "description": "Only in a quiz (mode quiz), and only when he asked for a lasting change to how he is quizzed ('shorter quizzes', 'skip the map', 'more grammar'): one short line, in his terms, that states the change as a standing instruction for later quizzes. The app shows it with a Keep this button and keeps it only if he taps; it is not kept otherwise. Leave it out for anything that is only for today.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "quiz_goal_offer": {
+      "description": "Only in a quiz (mode quiz) with `quiz_goal` null and no `quiz_goal_once`, once you have understood why he wants the quiz: his goal in a few plain words of his own, at most 80 characters ('understanding what the passage says', 'learning Greek words'). The app shows it with Yes, from now on and Just this time buttons and keeps it as his Quiz goal only if he taps Yes. Leave it out once offered, when a goal is kept, and for anything else.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "profile_update": {
+      "description": "What you learned about him as a student in his words just now, or judged from how he writes and talks (see 'Learning about him'). Each entry is a field (age, pace, ways, background, why, or note for a short thing worth remembering) and its value in a few plain words of at most 100 characters (pace is quick, steady or slow); `guessed` true marks a judgement of yours that he did not say (only for age, as a band such as 'adult' or '60s', and background); `declined` true, with no value, when he would not say. The app keeps it on his phone, shows it in Settings > About you where he can change or remove it, and never lets it replace what he set himself. At most three. Leave it out when you learned nothing.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field"],
+        "properties": {
+          "field": { "type": "string", "enum": ["age", "pace", "ways", "background", "why", "note"] },
+          "value": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "guessed": { "const": true },
+          "declined": { "const": true }
+        }
+      }
+    },
+    "memory_update": {
+      "description": "What to remember about him for later, in the notes Lampas keeps on his phone (see 'His memory'): at most four entries, each `name` ('index', or a note's name: book:<Book>, word:<lemma>, topic:<slug>) and exactly one of `append` (one short plain line, at most 300 characters, added to the end of that note or of the index; a note that is not there is made), `replace` (the whole new text of that note or of the index) or `remove` (true: drop that note). `replace` and `remove` need `directed` true, and `directed` is true ONLY when he asked for exactly that change in his own words of this turn ('forget what you noted about Romans', 'change that note to ...'); never for your own tidying. The app refuses and logs a `replace` or `remove` without `directed`. Leave it out when there is nothing worth keeping.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "append"],
+            "properties": {
+              "name": { "description": "'index', or book:<Book>, word:<lemma>, topic:<slug>.", "type": "string", "minLength": 1, "maxLength": 60 },
+              "append": { "type": "string", "minLength": 1, "maxLength": 300 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "replace", "directed"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+              "replace": { "type": "string", "minLength": 1, "maxLength": 2000 },
+              "directed": { "const": true }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "remove", "directed"],
+            "properties": { "name": { "type": "string", "minLength": 1, "maxLength": 60 }, "remove": { "const": true }, "directed": { "const": true } }
+          }
+        ]
+      }
+    },
+    "wished_notes": {
+      "description": "The names of notes you would have used in this answer had they existed (book:<Book>, word:<lemma>, topic:<slug>, in the naming scheme), at most five. The app only counts them and keeps the last names; it sends you nothing more for them. Set it even when the same names are in `memory_update`: making a note for next time does not stand in for naming the note this answer lacked. Leave it out when the notes you were sent were enough.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "items": { "type": "string", "minLength": 1, "maxLength": 60 }
+    },
+    "profile_question": {
+      "description": "Only when the question in your `answer` asks him about himself as a student (see 'Learning about him'): which field it is about. The app notes it so you are not told to ask the same field again within a day. Never in an answer that records a decline (`profile_update` with `declined`), and never when his question or the history shows he declined: a decline ends the question for good. Leave it out for anything else.",
+      "type": "string",
+      "enum": ["age", "pace", "ways", "background", "why"]
+    },
+    "feedback_offer": {
+      "description": "Only when he asked for something Lampas does not do (to work with another app, a setting it does not have, a change to a screen): the one-line summary of his ask, in plain English and his terms, at most 200 characters. The app shows it as a Send this to the makers button under the answer and sends nothing unless he taps. Never a promise that the change will happen. Leave it out for anything else.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary"],
+      "properties": { "summary": { "description": "One line saying what he wants.", "type": "string", "minLength": 1, "maxLength": 200 } }
+    },
+    "setting_offer": {
+      "description": "Only when you propose a setting change he did not ask for outright (for example moving New words at to Frontier grammar): the one change, `key` and `value` as in `settings_changes`. The app shows it as a button, Change <setting>: <value>, and makes the change on his tap or when his next words are a yes (see `offer_reply`). A change he asked for outright goes in `settings_changes`. Leave it out for anything else.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value"],
+      "properties": {
+        "key": { "description": "A setting's key from the settings block.", "type": "string", "minLength": 1, "maxLength": 60 },
+        "value": {
+          "description": "The new value, as the settings block lists it.",
+          "anyOf": [{ "type": "string", "minLength": 1, "maxLength": 80 }, { "type": "number" }]
+        }
+      }
+    },
+    "offer_reply": {
+      "description": "Only when the request carried `pending_offer`, and only when his words are about that offer: 'confirm' when he says yes (the app then does exactly what a tap on the offer's button does), 'decline' when he says no (the offer is withdrawn and nothing is done), 'read_back' when he asks to hear it first (the offer stays; your answer speaks its exact text and asks for his yes). Leave it out for an ordinary question or when you are not sure: the offer then stays and nothing is done.",
+      "type": "string",
+      "enum": ["confirm", "decline", "read_back"]
+    },
+    "greek_offer": {
+      "description": "ONE short line offering to raise the Greek dial (`greek_interest` in the request) ONE step, to `greek_interest.next`, when his question shows real interest in the original (what a word really means, why translations differ, what the original says), or when he asks about the Greek while the dial is at 0 (see the instructions, 'Offering the Greek'). The app draws it as a button; a tap raises the dial one step. `kind` 'word' is about one word of the passage (give its dictionary form in `lemma`, a word of the passage you were given): after raising the dial the app opens that word's sheet; `kind` 'view' is about the verse or the original in general. A question about what one word means is always `word`, with its `lemma`; `view` only when no single word of the passage is what he asks about. Never when `reader_view` is `greek` (he is already reading the original), and never in the answer that sets `greek_asked` (he asked to see the Greek after his no: show it, offer nothing in that answer). `text` names the step `next.name`. At most one in a conversation (the history shows it), never when `memory.index` holds 'said no to the Greek offer', never at All in (no `next`), never more than one step, never in a quiz or a talk from a screen (the welcome is the one exception: see the instructions, 'The welcome'). Leave it out otherwise.",
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "text"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["view"] },
+            "text": {
+              "description": "The button's line, a plain question or invitation in English, such as 'Want to raise the Greek to Dipping a toe?', naming the step `greek_interest.next.name`. At most 120 characters.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "text", "lemma"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["word"] },
+            "text": {
+              "description": "The button's line, a plain question or invitation in English, such as 'Want to try Curious: tap a word to see its Greek?', naming the step `greek_interest.next.name`. At most 120 characters.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "lemma": {
+              "description": "The word's dictionary form, with its accents, a word of the passage you were given: ἀγαπάω.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            }
+          }
+        }
+      ]
+    },
+    "rusty_offer": {
+      "description": "Only when the request carried `rusty` and it fits the talk (see the instructions, 'When he has gone rusty'): the rusty items you named, which the app offers to move back to Frontier and practise. The app draws one button, 'Move back to Frontier and practise', and moves them only on his tap or his yes. `items` are entries of the request's `rusty`, by `kind` and `id`, worst first; the app keeps only the ones it listed. At most once in a conversation (the history shows it), never in a quiz, never after his no. Leave it out otherwise.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "id"],
+            "properties": { "kind": { "type": "string", "enum": ["word", "idea"] }, "id": { "type": "string", "minLength": 1, "maxLength": 80 } }
+          }
+        }
+      }
+    },
+    "today_offer": {
+      "description": "Only when the request carried `today` and he asked what is on today's drill, or what he has left to do today (see the instructions, 'The day's list'): true, after you named the items. The app draws one button, 'Open today's drill', and opens Today only on his tap or his yes. At most once in a conversation (the history shows it), never in a quiz, never after his no. Leave it out otherwise.",
+      "type": "boolean",
+      "const": true
+    },
+    "greek_asked": {
+      "description": "Only when he asked for Greek himself in this turn (the Greek word, the Greek view, what the original says) while `memory.index` holds 'said no to the Greek offer': true. The app then takes that line out of the index. Never to record an answer to your own offer: a yes or a no to the offer goes in `offer_reply`.",
+      "type": "boolean",
+      "const": true
+    },
+    "welcome_done": {
+      "description": "Only in the welcome (`mode` 'welcome'): true on the answer that is your line of thanks, which ends the interview (see the instructions, 'The welcome'). The app then ends the welcome. Never earlier, and never outside the welcome.",
+      "type": "boolean",
+      "const": true
+    },
+    "bridge": {
+      "description": "Only when the request carried `missing_foundations` and his question truly rests on them (see the instructions, 'When he is not ready for the question'): up to three of the ideas listed there that he lacks, the most important first (`direct` ones first), the idea to start with and one plain line why it comes first. The app shows 'Take me there: <title>' and opens that idea's sheet on his tap or his yes; it takes the start from the list, not from here. Never for an idea outside the list, never without `missing_foundations`, one bridge per answer.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["missing", "next", "why"],
+      "properties": {
+        "missing": {
+          "description": "The ideas he lacks for this question, most important first: one to three ids from `missing_foundations.ideas`.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "type": "string",
+            "enum": [
+              "alphabet",
+              "letter-alpha",
+              "letter-beta",
+              "letter-gamma",
+              "letter-delta",
+              "letter-epsilon",
+              "letter-zeta",
+              "letter-eta",
+              "letter-theta",
+              "letter-iota",
+              "letter-kappa",
+              "letter-lambda",
+              "letter-mu",
+              "letter-nu",
+              "letter-xi",
+              "letter-omicron",
+              "letter-pi",
+              "letter-rho",
+              "letter-sigma",
+              "letter-tau",
+              "letter-upsilon",
+              "letter-phi",
+              "letter-chi",
+              "letter-psi",
+              "letter-omega",
+              "diphthongs",
+              "diphthong-ai",
+              "diphthong-ei",
+              "diphthong-oi",
+              "diphthong-ui",
+              "diphthong-ou",
+              "diphthong-au",
+              "diphthong-eu",
+              "diphthong-eeu",
+              "consonant-pairs",
+              "pair-mp",
+              "pair-nt",
+              "pair-gk",
+              "pair-gg",
+              "pair-gch",
+              "pair-gks",
+              "syllables",
+              "breathings",
+              "breathing-rough",
+              "breathing-smooth",
+              "accents",
+              "iota-subscript",
+              "words-sound-alike",
+              "punctuation",
+              "movable-letters",
+              "marks-change-word",
+              "enclitics",
+              "noun",
+              "number-singular",
+              "number-plural",
+              "conjunction",
+              "negative",
+              "case-nominative",
+              "stem-and-ending",
+              "case-accusative",
+              "case-genitive",
+              "case-dative",
+              "case-vocative",
+              "gender-masculine",
+              "gender-feminine",
+              "gender-neuter",
+              "declension-1",
+              "declension-2",
+              "article",
+              "adjective",
+              "dictionary-entry",
+              "declension-3",
+              "comparative",
+              "superlative",
+              "numeral",
+              "proper-name",
+              "indeclinable",
+              "person-1st",
+              "person-2nd",
+              "person-3rd",
+              "pronoun",
+              "pronoun-personal",
+              "pronoun-demonstrative",
+              "pronoun-relative",
+              "pronoun-interrogative",
+              "pronoun-indefinite",
+              "pronoun-reflexive",
+              "pronoun-possessive",
+              "pronoun-reciprocal",
+              "pronoun-correlative",
+              "pronoun-correlative-interrogative",
+              "preposition",
+              "preposition-eis",
+              "preposition-en",
+              "preposition-ek",
+              "preposition-apo",
+              "preposition-pros",
+              "preposition-dia",
+              "preposition-kata",
+              "preposition-meta",
+              "preposition-peri",
+              "preposition-hypo",
+              "preposition-para",
+              "preposition-epi",
+              "verb",
+              "eimi",
+              "compound-verbs",
+              "tense-present",
+              "voice-active",
+              "mood-indicative",
+              "contract-verbs",
+              "tense-imperfect",
+              "tense-future",
+              "tense-aorist",
+              "augment",
+              "tense-perfect",
+              "reduplication",
+              "oida",
+              "tense-pluperfect",
+              "second-tenses",
+              "mi-verbs",
+              "voice-middle",
+              "voice-passive",
+              "tense-signs",
+              "principal-parts",
+              "voice-middle-or-passive",
+              "voice-middle-deponent",
+              "voice-passive-deponent",
+              "voice-middle-or-passive-deponent",
+              "voice-middle-significance",
+              "voice-impersonal-active",
+              "voice-none",
+              "mood-imperative",
+              "mood-subjunctive",
+              "mood-optative",
+              "mood-infinitive",
+              "mood-participle",
+              "mood-participle-imperative",
+              "particle",
+              "adverb",
+              "interrogative",
+              "conditional",
+              "interjection",
+              "attic-form",
+              "poetic",
+              "crasis",
+              "aramaic",
+              "hebrew",
+              "agreement",
+              "article-substantival",
+              "article-position",
+              "postpositive",
+              "clause-hoti",
+              "clause-hina",
+              "participle-adverbial",
+              "genitive-absolute",
+              "periphrastic",
+              "infinitive-articular",
+              "infinitive-complement",
+              "subjunctive-hortatory",
+              "prohibition",
+              "ou-me",
+              "condition"
+            ]
+          }
+        },
+        "next": {
+          "description": "The id of the idea to start with: `missing_foundations.ideas[0]`, his next step.",
+          "type": "string",
+          "enum": [
+            "alphabet",
+            "letter-alpha",
+            "letter-beta",
+            "letter-gamma",
+            "letter-delta",
+            "letter-epsilon",
+            "letter-zeta",
+            "letter-eta",
+            "letter-theta",
+            "letter-iota",
+            "letter-kappa",
+            "letter-lambda",
+            "letter-mu",
+            "letter-nu",
+            "letter-xi",
+            "letter-omicron",
+            "letter-pi",
+            "letter-rho",
+            "letter-sigma",
+            "letter-tau",
+            "letter-upsilon",
+            "letter-phi",
+            "letter-chi",
+            "letter-psi",
+            "letter-omega",
+            "diphthongs",
+            "diphthong-ai",
+            "diphthong-ei",
+            "diphthong-oi",
+            "diphthong-ui",
+            "diphthong-ou",
+            "diphthong-au",
+            "diphthong-eu",
+            "diphthong-eeu",
+            "consonant-pairs",
+            "pair-mp",
+            "pair-nt",
+            "pair-gk",
+            "pair-gg",
+            "pair-gch",
+            "pair-gks",
+            "syllables",
+            "breathings",
+            "breathing-rough",
+            "breathing-smooth",
+            "accents",
+            "iota-subscript",
+            "words-sound-alike",
+            "punctuation",
+            "movable-letters",
+            "marks-change-word",
+            "enclitics",
+            "noun",
+            "number-singular",
+            "number-plural",
+            "conjunction",
+            "negative",
+            "case-nominative",
+            "stem-and-ending",
+            "case-accusative",
+            "case-genitive",
+            "case-dative",
+            "case-vocative",
+            "gender-masculine",
+            "gender-feminine",
+            "gender-neuter",
+            "declension-1",
+            "declension-2",
+            "article",
+            "adjective",
+            "dictionary-entry",
+            "declension-3",
+            "comparative",
+            "superlative",
+            "numeral",
+            "proper-name",
+            "indeclinable",
+            "person-1st",
+            "person-2nd",
+            "person-3rd",
+            "pronoun",
+            "pronoun-personal",
+            "pronoun-demonstrative",
+            "pronoun-relative",
+            "pronoun-interrogative",
+            "pronoun-indefinite",
+            "pronoun-reflexive",
+            "pronoun-possessive",
+            "pronoun-reciprocal",
+            "pronoun-correlative",
+            "pronoun-correlative-interrogative",
+            "preposition",
+            "preposition-eis",
+            "preposition-en",
+            "preposition-ek",
+            "preposition-apo",
+            "preposition-pros",
+            "preposition-dia",
+            "preposition-kata",
+            "preposition-meta",
+            "preposition-peri",
+            "preposition-hypo",
+            "preposition-para",
+            "preposition-epi",
+            "verb",
+            "eimi",
+            "compound-verbs",
+            "tense-present",
+            "voice-active",
+            "mood-indicative",
+            "contract-verbs",
+            "tense-imperfect",
+            "tense-future",
+            "tense-aorist",
+            "augment",
+            "tense-perfect",
+            "reduplication",
+            "oida",
+            "tense-pluperfect",
+            "second-tenses",
+            "mi-verbs",
+            "voice-middle",
+            "voice-passive",
+            "tense-signs",
+            "principal-parts",
+            "voice-middle-or-passive",
+            "voice-middle-deponent",
+            "voice-passive-deponent",
+            "voice-middle-or-passive-deponent",
+            "voice-middle-significance",
+            "voice-impersonal-active",
+            "voice-none",
+            "mood-imperative",
+            "mood-subjunctive",
+            "mood-optative",
+            "mood-infinitive",
+            "mood-participle",
+            "mood-participle-imperative",
+            "particle",
+            "adverb",
+            "interrogative",
+            "conditional",
+            "interjection",
+            "attic-form",
+            "poetic",
+            "crasis",
+            "aramaic",
+            "hebrew",
+            "agreement",
+            "article-substantival",
+            "article-position",
+            "postpositive",
+            "clause-hoti",
+            "clause-hina",
+            "participle-adverbial",
+            "genitive-absolute",
+            "periphrastic",
+            "infinitive-articular",
+            "infinitive-complement",
+            "subjunctive-hortatory",
+            "prohibition",
+            "ou-me",
+            "condition"
+          ]
+        },
+        "why": {
+          "description": "One plain line saying why this comes first, such as 'Cases rest on nouns, which come first.' At most 200 characters.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    },
+    "form_values": {
+      "description": "Only while he is being helped to fill in a form (`form` in the request): the values to put in its fields from what he just said, each the field's `name` and the field's whole new value. Only text and link fields, never pictures; never a field the form does not list. Leave it out when his words fill nothing.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "value"],
+        "properties": {
+          "field": { "description": "The `name` of one field of `form`.", "type": "string", "minLength": 1, "maxLength": 30 },
+          "value": { "description": "The whole new value of the field.", "type": "string", "minLength": 1, "maxLength": 1200 }
+        }
+      }
+    },
+    "form_ask": {
+      "description": "Only while he is being helped to fill in a form: the `name` of the field the question in `answer` is about (a pictures field when you ask for a photo). Leave it out when there is nothing more to ask, which is when every required field is filled and he has nothing to add.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 30
+    },
+    "links": {
+      "description": "Links the app turns into buttons: a word or a verse opens in the reader's own study resources (lexicons, a Bible), of which he sees only the ones he has switched on, a setting opens the app's Settings at that setting, and a work (a commentary or book of his Logos library that he ticked, listed in the request's `works`) opens in Logos. At most three. Leave it out when no lexicon, verse or setting would help him.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "lemma"],
+            "properties": {
+              "kind": { "const": "word" },
+              "lemma": {
+                "description": "The word's dictionary form, in Greek letters, with its accents and breathings.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "reference"],
+            "properties": {
+              "kind": { "const": "verse" },
+              "reference": {
+                "description": "A verse of any book of the Bible, Old Testament or New, such as Romans 8:31, 1 John 1:9 or Isaiah 53:5.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "work"],
+            "properties": {
+              "kind": { "const": "work" },
+              "work": {
+                "description": "The `id` of a work in the request's `works`, exactly as given. Never one that is not listed there.",
+                "type": "string",
+                "enum": ["calvin-commentaries", "calvin-institutes-lcc", "calvin-institutes-beveridge"]
+              },
+              "reference": {
+                "description": "A commentary only: the verse (or chapter) to open it at, such as John 3:16 or Romans 8, in a book the work's `covers` names. Leave it out for a book.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              },
+              "place": {
+                "description": "A book whose request entry has `places` only: where in the book to open it, written as that entry says (book.chapter, such as 3.24, or book.chapter.section, such as 3.21.5). Leave it out for a commentary, and for a book with no `places`, and when you do not know the chapter that treats the question: the book then opens at its start.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 20
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "key"],
+            "properties": {
+              "kind": { "const": "setting" },
+              "key": {
+                "description": "The key of the setting, exactly as the instructions list it.",
+                "type": "string",
+                "enum": [
+                  "greekInterest",
+                  "theme",
+                  "font",
+                  "textSize",
+                  "layout",
+                  "sectionHeadings",
+                  "readingMode",
+                  "chapterButtons",
+                  "immersiveReader",
+                  "immersiveHint",
+                  "readSpan",
+                  "readLessons",
+                  "readTutor",
+                  "askBy",
+                  "talk",
+                  "send",
+                  "hebrewDepth",
+                  "tips",
+                  "weave",
+                  "weaveGrammar",
+                  "weaveOrder",
+                  "newWordsADay",
+                  "pickerGrammar",
+                  "grammarMove",
+                  "paradigmExtent",
+                  "goal",
+                  "grammarApproach",
+                  "handwritingDrills",
+                  "englishVoice",
+                  "greekVoice",
+                  "englishRate",
+                  "greekRate",
+                  "greekPronunciation",
+                  "englishAccent",
+                  "resource.strongs",
+                  "resource.logos",
+                  "resource.accordance",
+                  "audioBible",
+                  "readingPlan",
+                  "logosBible",
+                  "dailyReview",
+                  "dailyPlan",
+                  "dailyPsalms",
+                  "dailyDevotional",
+                  "devotional",
+                  "devotionalDraw",
+                  "todaysDevotional",
+                  "dailyTicks",
+                  "quizGoal"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "fetch": {
+      "description": "Only when the talk is heading toward New Testament verses that neither `verses` nor `held_passages` holds (see the instructions, 'Other passages'): their references by book name, chapter and verses, `Revelation 2:8-11`, at most 30 verses in all. The app reads them from his phone after this answer is shown, with no wait and no word to him but one quiet line, 'Tutor fetched Rev 2:8-11', and the next request carries them in `held_passages`. Leave it out otherwise.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": { "type": "string", "minLength": 3, "maxLength": 40 }
+    },
+    "go": {
+      "description": "Only when he asked, in words, to be taken to a chapter of the New Testament ('switch to Colossians 1', 'open John 3', 'take me to Romans 12'): the book and the chapter. The app opens the Reader there at once and says Opened; say in answer where you are taking him. Never for a chapter outside the 27 books of the New Testament, never on your own, and leave it out when he asked for no move.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["book", "chapter"],
+      "properties": {
+        "book": {
+          "description": "The book's name exactly as in the list.",
+          "type": "string",
+          "enum": [
+            "Matthew",
+            "Mark",
+            "Luke",
+            "John",
+            "Acts",
+            "Romans",
+            "1 Corinthians",
+            "2 Corinthians",
+            "Galatians",
+            "Ephesians",
+            "Philippians",
+            "Colossians",
+            "1 Thessalonians",
+            "2 Thessalonians",
+            "1 Timothy",
+            "2 Timothy",
+            "Titus",
+            "Philemon",
+            "Hebrews",
+            "James",
+            "1 Peter",
+            "2 Peter",
+            "1 John",
+            "2 John",
+            "3 John",
+            "Jude",
+            "Revelation"
+          ]
+        },
+        "chapter": { "description": "The chapter number, from 1 to the book's last chapter.", "type": "number", "minimum": 1, "maximum": 28 }
+      }
+    },
+    "settings_changes": {
+      "description": "The settings he asked to change, each applied at once by the app. Only when he asked for the change in words, never on your own; only the keys and values the instructions list; leave it out when he asked for no change.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "greekInterest" }, "value": { "type": "string", "enum": ["0", "1", "2", "3", "4", "5"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "theme" }, "value": { "type": "string", "enum": ["phone", "light", "dark", "sepia", "contrast"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "font" }, "value": { "type": "string", "enum": ["phone", "literata", "atkinson", "lexend"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "textSize" }, "value": { "type": "string", "enum": ["small", "normal", "large", "largest"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "layout" }, "value": { "type": "string", "enum": ["verse", "paragraph"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "sectionHeadings" }, "value": { "type": "string", "enum": ["on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "readingMode" }, "value": { "type": "string", "enum": ["scroll", "pages"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "chapterButtons" }, "value": { "type": "string", "enum": ["show", "hide"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "immersiveReader" }, "value": { "type": "string", "enum": ["on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "immersiveHint" }, "value": { "type": "string", "enum": ["on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "readSpan" }, "value": { "type": "string", "enum": ["book", "bible"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "readLessons" }, "value": { "type": "string", "enum": ["on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "readTutor" }, "value": { "type": "string", "enum": ["on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "askBy" }, "value": { "type": "string", "enum": ["speaking", "typing"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "talk" }, "value": { "type": "string", "enum": ["hold", "tap"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "send" }, "value": { "type": "string", "enum": ["release", "button"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "hebrewDepth" }, "value": { "type": "string", "enum": ["transliteration", "both", "full"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "tips" }, "value": { "type": "string", "enum": ["on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "weave" }, "value": { "type": "string", "enum": ["off", "solid", "solid+learning"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "weaveGrammar" }, "value": { "type": "string", "enum": ["any", "solid", "solid+frontier"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "weaveOrder" }, "value": { "type": "string", "enum": ["english", "greek"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "newWordsADay" }, "value": { "type": "string", "enum": ["0", "3", "5", "10"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "pickerGrammar" }, "value": { "type": "string", "enum": ["solid", "frontier"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "grammarMove" }, "value": { "type": "string", "enum": ["ask", "auto", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "paradigmExtent" }, "value": { "type": "string", "enum": ["any", "solid+frontier", "solid"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "goal" }, "value": { "type": "string", "maxLength": 80 } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "grammarApproach" }, "value": { "type": "string", "enum": ["ladder"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "handwritingDrills" }, "value": { "type": "string", "enum": ["auto", "on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "englishVoice" }, "value": { "type": "string", "enum": ["default"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "greekVoice" }, "value": { "type": "string", "enum": ["default"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "englishRate" }, "value": { "type": "number", "minimum": 0.5, "maximum": 1.5 } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "greekRate" }, "value": { "type": "number", "minimum": 0.5, "maximum": 1.5 } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "greekPronunciation" }, "value": { "type": "string", "enum": ["modern"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "englishAccent" }, "value": { "type": "string", "enum": ["american", "british", "ipa"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "resource.strongs" }, "value": { "type": "string", "enum": ["on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "resource.logos" }, "value": { "type": "string", "enum": ["on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "resource.accordance" }, "value": { "type": "string", "enum": ["on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "audioBible" }, "value": { "type": "string", "enum": ["off", "word-of-promise"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "readingPlan" }, "value": { "type": "string", "enum": ["off", "on"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "logosBible" }, "value": { "type": "string", "maxLength": 80 } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "dailyReview" }, "value": { "type": "string", "enum": ["on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "dailyPlan" }, "value": { "type": "string", "enum": ["on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "dailyPsalms" }, "value": { "type": "string", "enum": ["on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "dailyDevotional" }, "value": { "type": "string", "enum": ["on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": {
+              "key": { "const": "devotional" },
+              "value": {
+                "type": "string",
+                "enum": [
+                  "random",
+                  "LLS:HLINSSDYBYDY",
+                  "LLS:MANFAMDEVBCP",
+                  "LLS:HEARTOFPRAISE",
+                  "LLS:36.0.3",
+                  "LLS:365CALVIN",
+                  "LLS:365SPURGEON1",
+                  "LLS:365SPURGEON2",
+                  "LLS:365SPURGEON3",
+                  "LLS:365SPURGEON4",
+                  "LLS:365SPURGEON5",
+                  "LLS:365SPURGEON6",
+                  "LLS:40DAYSCROSS",
+                  "LLS:9780736971270",
+                  "LLS:FSBDEVOTIONAL",
+                  "LLS:DLYDCLRTNSSWRFR",
+                  "LLS:DYSHVNLVNGTRTHS",
+                  "LLS:20.10.8",
+                  "LLS:FRESHSTDEV",
+                  "LLS:GDSFTHFL",
+                  "LLS:9781434705846",
+                  "LLS:MKEYECNTCTGD",
+                  "LLS:MMNTGDDVBBLCLBK",
+                  "LLS:20.10.1",
+                  "LLS:20.10.2",
+                  "LLS:STRMSDSRT",
+                  "LLS:BTSTN10TNNVRSRY",
+                  "LLS:SPURGINTERP",
+                  "LLS:VOICELRD",
+                  "LLS:20.10.14",
+                  "LLS:TICHDD",
+                  "LLS:TICHDQ",
+                  "LLS:TICHDS",
+                  "LLS:9781496400536",
+                  "LLS:12MOSUNA",
+                  "LLS:12MOSUNB",
+                  "LLS:12MOSUNC",
+                  "LLS:WMNSDLYSPRTWRFR"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "devotionalDraw" }, "value": { "type": "string", "maxLength": 80 } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": {
+              "key": { "const": "todaysDevotional" },
+              "value": {
+                "type": "string",
+                "enum": [
+                  "another",
+                  "LLS:HLINSSDYBYDY",
+                  "LLS:MANFAMDEVBCP",
+                  "LLS:HEARTOFPRAISE",
+                  "LLS:36.0.3",
+                  "LLS:365CALVIN",
+                  "LLS:365SPURGEON1",
+                  "LLS:365SPURGEON2",
+                  "LLS:365SPURGEON3",
+                  "LLS:365SPURGEON4",
+                  "LLS:365SPURGEON5",
+                  "LLS:365SPURGEON6",
+                  "LLS:40DAYSCROSS",
+                  "LLS:9780736971270",
+                  "LLS:FSBDEVOTIONAL",
+                  "LLS:DLYDCLRTNSSWRFR",
+                  "LLS:DYSHVNLVNGTRTHS",
+                  "LLS:20.10.8",
+                  "LLS:FRESHSTDEV",
+                  "LLS:GDSFTHFL",
+                  "LLS:9781434705846",
+                  "LLS:MKEYECNTCTGD",
+                  "LLS:MMNTGDDVBBLCLBK",
+                  "LLS:20.10.1",
+                  "LLS:20.10.2",
+                  "LLS:STRMSDSRT",
+                  "LLS:BTSTN10TNNVRSRY",
+                  "LLS:SPURGINTERP",
+                  "LLS:VOICELRD",
+                  "LLS:20.10.14",
+                  "LLS:TICHDD",
+                  "LLS:TICHDQ",
+                  "LLS:TICHDS",
+                  "LLS:9781496400536",
+                  "LLS:12MOSUNA",
+                  "LLS:12MOSUNB",
+                  "LLS:12MOSUNC",
+                  "LLS:WMNSDLYSPRTWRFR"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "dailyTicks" }, "value": { "type": "string", "enum": ["on", "off"] } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": { "key": { "const": "quizGoal" }, "value": { "type": "string", "maxLength": 80 } }
+          }
+        ]
+      }
+    }
+  }
+}

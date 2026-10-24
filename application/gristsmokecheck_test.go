@@ -2,6 +2,7 @@ package application
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -148,5 +149,72 @@ func TestAnswersAreHeldToTheWholeOfTheSchema(t *testing.T) {
 		case c.says != "" && !strings.Contains(joined, c.says):
 			t.Errorf("%s: expected a violation saying %q, got %q", c.name, c.says, joined)
 		}
+	}
+}
+
+// mw-gq6.739's sweep: every grind answer schema of every rig that lists a
+// property only under a nested node (anyOf, or items by $ref), copied into
+// testdata/grind-schemas, is walked with an answer that uses such a property
+// and fits, and one that does not, so the walk is seen to read the nested node
+// rather than refuse the property or wave it through. The root of each is
+// additionalProperties false, so a property the walk did not find would be
+// "which the schema does not allow", the words of the bug.
+func TestTheWalkReadsPropertiesListedOnlyUnderNestedNodes(t *testing.T) {
+	cases := []struct {
+		schema string
+		fits   string
+		breaks string
+		why    string
+	}{
+		{
+			schema: "lampas-bible-talk",
+			fits: `{"answer": "I hold verses 1-3 here; Smyrna's letter begins at verse 8.", "question": "Smyrna?", "words": [],
+				"fetch": ["Revelation 2:8-11"],
+				"links": [{"kind": "work", "work": "calvin-commentaries", "reference": "Rev 2:8", "place": "v. 8"}, {"kind": "word", "lemma": "ἄγγελος"}],
+				"greek_offer": {"kind": "word", "text": "See the Greek word?", "lemma": "ἄγγελος"},
+				"memory_update": [{"name": "smyrna", "append": "asked about Smyrna"}, {"name": "old", "remove": true, "directed": true}],
+				"setting_offer": {"key": "textSize", "value": "large"}}`,
+			breaks: `{"answer": "ok", "question": "Smyrna?", "words": [], "links": [{"kind": "work", "work": "calvin-commentaries", "url": "https://example.org"}]}`,
+			why:    "answer.links.0 fits none of the schema's anyOf",
+		},
+		{
+			schema: "lampas-audible-position",
+			fits:   `{"book": "Rev", "chapter": 2, "position": "2:41", "left": "-0:00", "confidence": "high"}`,
+			breaks: `{"book": "Rev", "chapter": 0, "position": null, "left": null, "confidence": "low"}`,
+			why:    "answer.chapter fits none of the schema's anyOf",
+		},
+		{
+			schema: "lampas-tips",
+			fits:   `{"tip": {"id": "try-talk", "title": "Try Talk", "body": "Ask the tutor one question about today's verse.", "action": {"label": "Open Review", "screen": "review"}}}`,
+			breaks: `{"tip": {"id": "try-talk", "title": "Try Talk", "body": "Ask.", "action": {"label": "Open", "screen": "nowhere"}}}`,
+			why:    "answer.tip fits none of the schema's anyOf",
+		},
+		{
+			schema: "legend-legend-ask",
+			fits:   `{"answer": "A 1921 Morgan dollar.", "followUps": ["Is it silver?"], "settingsChanges": [{"key": "theme", "value": "dark", "why": "You asked for the dark look."}], "teachMore": {"topic": "mint marks", "why": "You asked where the S is."}}`,
+			breaks: `{"answer": "A 1921 Morgan dollar.", "followUps": [], "settingsChanges": [{"key": "theme", "value": "sepia", "why": "no"}], "teachMore": null}`,
+			why:    "answer.settingsChanges.0 fits none of the schema's anyOf",
+		},
+		{
+			schema: "cairn-sweep",
+			fits:   `{"schemaVersion": "1.1", "responseType": "sweep-result", "placeName": "Garage", "items": [{"name": "ladder", "aliases": ["step ladder"], "unsure": true}], "containers": [{"name": "blue bin", "items": [{"name": "tape"}]}]}`,
+			breaks: `{"schemaVersion": "1.1", "responseType": "sweep-result", "placeName": "Garage", "items": [{"name": "ladder", "count": 2}]}`,
+			why:    "answer.items.0 has count, which the schema does not allow",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.schema, func(t *testing.T) {
+			schema, err := os.ReadFile("testdata/grind-schemas/" + c.schema + ".answer.schema.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := SchemaViolations(json.RawMessage(c.fits), string(schema)); len(got) != 0 {
+				t.Errorf("the fitting answer was refused: %q", got)
+			}
+			got := SchemaViolations(json.RawMessage(c.breaks), string(schema))
+			if len(got) != 1 || got[0] != c.why {
+				t.Errorf("the breaking answer: want [%q], got %q", c.why, got)
+			}
+		})
 	}
 }

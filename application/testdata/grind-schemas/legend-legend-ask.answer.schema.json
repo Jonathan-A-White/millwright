@@ -1,0 +1,144 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "legend-ask-answer-1.0",
+  "title": "Legend Ask answer 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["answer", "followUps", "settingsChanges", "teachMore"],
+  "properties": {
+    "answer": {
+      "description": "The answer, in Markdown: under 180 words unless he asked for more.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2400
+    },
+    "followUps": {
+      "description": "Up to three short questions he might ask next, in his own voice.",
+      "type": "array",
+      "maxItems": 3,
+      "items": { "type": "string", "minLength": 1, "maxLength": 120 }
+    },
+    "settingsChanges": {
+      "description": "Settings you suggest he change, each with why in one short sentence. Shown to him as a card with Apply and Not now: nothing changes unless he taps Apply. Only the keys and values the instructions list; empty when there is nothing to suggest.",
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value", "why"],
+            "properties": {
+              "key": { "const": "theme" },
+              "value": { "type": "string", "enum": ["system", "light", "dark"] },
+              "why": { "type": "string", "minLength": 1, "maxLength": 200 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value", "why"],
+            "properties": {
+              "key": { "const": "textSize" },
+              "value": { "type": "string", "enum": ["small", "normal", "large", "larger"] },
+              "why": { "type": "string", "minLength": 1, "maxLength": 200 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value", "why"],
+            "properties": {
+              "key": { "const": "defaultKind" },
+              "value": { "type": "string", "enum": ["coin", "note", "other"] },
+              "why": { "type": "string", "minLength": 1, "maxLength": 200 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value", "why"],
+            "properties": {
+              "key": { "const": "showValues" },
+              "value": { "type": "boolean" },
+              "why": { "type": "string", "minLength": 1, "maxLength": 200 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value", "why"],
+            "properties": {
+              "key": { "const": "keepOriginals" },
+              "value": { "type": "boolean" },
+              "why": { "type": "string", "minLength": 1, "maxLength": 200 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value", "why"],
+            "properties": {
+              "key": { "const": "sizeCap" },
+              "value": { "type": "number", "minimum": 800, "maximum": 3200 },
+              "why": { "type": "string", "minLength": 1, "maxLength": 200 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value", "why"],
+            "properties": {
+              "key": { "const": "tutorVoice" },
+              "value": { "type": "boolean" },
+              "why": { "type": "string", "minLength": 1, "maxLength": 200 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value", "why"],
+            "properties": {
+              "key": { "const": "answerLength" },
+              "value": { "type": "string", "enum": ["short", "medium", "long"] },
+              "why": { "type": "string", "minLength": 1, "maxLength": 200 }
+            }
+          }
+        ]
+      }
+    },
+    "form_values": {
+      "description": "Only while he is being helped to fill in a form (`form` in the request): the values to put in its fields from what he just said, each the field's `name` and the field's whole new value. Only text, link and choice fields (a choice with one of its options, exactly), never pictures; never a field the form does not list. Leave it out when his words fill nothing.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "value"],
+        "properties": {
+          "field": { "description": "The `name` of one field of `form`.", "type": "string", "minLength": 1, "maxLength": 30 },
+          "value": { "description": "The whole new value of the field.", "type": "string", "minLength": 1, "maxLength": 1200 }
+        }
+      }
+    },
+    "form_ask": {
+      "description": "Only while he is being helped to fill in a form: the `name` of the field the question in `answer` is about (a pictures field when you ask for a photo). Leave it out when there is nothing more to ask, which is when every required field is filled and he has nothing to add.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 30
+    },
+    "teachMore": {
+      "description": "One topic worth learning next from this coin, and why; null when there is none.",
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["topic", "why"],
+          "properties": { "topic": { "type": "string", "minLength": 1, "maxLength": 80 }, "why": { "type": "string", "minLength": 1, "maxLength": 200 } }
+        }
+      ]
+    }
+  }
+}

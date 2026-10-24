@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Tips Answer 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tip"],
+  "properties": {
+    "tip": {
+      "description": "The one tip that would help him grow from where he is, or null when nothing would help right now.",
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "title", "body"],
+          "properties": {
+            "id": {
+              "description": "A short lowercase slug with hyphens, such as try-talk. Never one that is in shown.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
+            },
+            "title": { "description": "A few words to head the tip.", "type": "string", "minLength": 1, "maxLength": 60 },
+            "body": { "description": "One or two short sentences: the one small step to take.", "type": "string", "minLength": 1, "maxLength": 400 },
+            "action": {
+              "description": "Optional. A button that opens a screen of the app.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["label", "screen"],
+              "properties": {
+                "label": { "description": "The button's words, such as Open Review.", "type": "string", "minLength": 1, "maxLength": 30 },
+                "screen": {
+                  "description": "The screen it opens, by id.",
+                  "type": "string",
+                  "enum": ["words", "import", "test", "drill", "review", "placement", "goal", "about", "settings"]
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
