@@ -627,14 +627,19 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 	// (the mill failed it, the backend refused it) ends the sending, and the
 	// first miss stands unless an answer was right by then.
 	sent, missed := 1, 1
+	// Each line says what the send before it came to, so that the lines add up
+	// to the summary's "missed M of S" (mw-gq6.743).
+	previous := "wrong"
 	for i := 0; i < GristSmokeResends; i++ {
-		s.say("  the answer was wrong; sending it again (%d of %d) ...", i+1, GristSmokeResends)
+		s.say("  %s; sending it again (%d of %d) ...", previous, i+1, GristSmokeResends)
 		again := s.attempt(ctx, kind+"/"+name, turns, wait, schema, example.Expect)
 		groundAt = cmp.Or(groundAt, again.groundAt)
 		if again.slip {
 			sent, missed = sent+1, missed+1
+			previous = "wrong"
 		} else if again.why == "" && again.notRun == "" {
 			sent++
+			previous = "right"
 		} else {
 			break
 		}

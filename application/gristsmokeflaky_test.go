@@ -219,3 +219,53 @@ func TestAFlakyExampleNoOpenBeadNamesKeepsTheAskToFileABug(t *testing.T) {
 		t.Errorf("expected no note on a bead that does not name the example, got %q", got)
 	}
 }
+
+// mw-gq6.743: the line before each send again says what the send before it came
+// to, so the lines add up to the summary's "missed M of S".
+func TestEachResendLineSaysWhatThePreviousSendCameTo(t *testing.T) {
+	sender := &slipScript{answers: []string{"slip", "ok", "slip"}}
+	smoke, _ := smokeWith(sender)
+	var out strings.Builder
+	smoke.Out = &out
+	report, err := smoke.Run(context.Background(), "lampas", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"  wrong; sending it again (1 of 2) ...\n",
+		"  right; sending it again (2 of 2) ...\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("expected the output to say %q, got %q", want, out.String())
+		}
+	}
+	if strings.Count(out.String(), "wrong;") != 1 {
+		t.Errorf("expected only the first send called wrong, got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "flaky: lampas/tutor/hello missed 2 of 3") {
+		t.Errorf("expected the summary to say missed 2 of 3, got %q", out.String())
+	}
+	if len(report.Flakes) != 1 {
+		t.Errorf("expected one flake, got %+v", report.Flakes)
+	}
+}
+
+// mw-gq6.743: a miss on every send says wrong before each send again, as before.
+func TestEveryResendLineSaysWrongWhenEverySendWasWrong(t *testing.T) {
+	sender := &slipScript{answers: []string{"slip", "bad", "slip"}}
+	smoke, _ := smokeWith(sender)
+	var out strings.Builder
+	smoke.Out = &out
+	report, err := smoke.Run(context.Background(), "lampas", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"  wrong; sending it again (1 of 2) ...\n", "  wrong; sending it again (2 of 2) ...\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("expected the output to say %q, got %q", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "right;") || !report.Held() || len(report.Flakes) != 0 {
+		t.Errorf("expected nothing right and the miss held, got %q %+v", out.String(), report)
+	}
+}
