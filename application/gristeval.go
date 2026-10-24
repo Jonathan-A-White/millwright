@@ -699,8 +699,11 @@ func (e GristEvalExamples) Run(ctx context.Context, app, kind string, names []st
 			failed++
 			continue
 		}
-		got := s.attempt(ctx, name, prepared.turns, prepared.wait, schema, prepared.example.Expect)
+		got := s.attempt(ctx, name, prepared.turns, prepared.wait, smokeSchema{checkout: checkout, commit: commit, grind: grind, text: schema}, prepared.example.Expect)
 		os.RemoveAll(prepared.dir)
+		if got.groundAt != "" {
+			s.say("  note: %s", groundElsewhere(label, app, got.groundAt, commit))
+		}
 		switch {
 		case got.notRun != "":
 			s.say("  NOT RUN: %s", got.notRun)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -222,5 +223,163 @@ func TestASmokeWarnsOfInstructionsOverAHundredThousandBytes(t *testing.T) {
 				t.Fatalf("expected no failure, got %+v", report)
 			}
 		})
+	}
+}
+
+// smokeMill is a sender that stands for the mill: each send is answered with
+// the next answer in its list, and before the first it does what moved says,
+// as a mill that refreshes its own checkout of the rig before each grind.
+type smokeMill struct {
+	answers []application.GristAnswer
+	moved   func()
+	sent    int
+}
+
+func (m *smokeMill) Run(_ context.Context, _ application.GristSendRequest) (application.GristSendReport, error) {
+	if m.sent == 0 && m.moved != nil {
+		m.moved()
+	}
+	m.sent++
+	if len(m.answers) == 0 {
+		return application.GristSendReport{}, fmt.Errorf("no answer was scripted for send %d", m.sent)
+	}
+	next := m.answers[0]
+	m.answers = m.answers[1:]
+	return application.GristSendReport{Txid: fmt.Sprintf("direct:smoke-%d", m.sent), Answer: &next}, nil
+}
+
+// withoutProperty is the schema text with one root property taken out: the
+// answer schema as it was before a landing added the property.
+func withoutProperty(t *testing.T, schema []byte, name string) []byte {
+	t.Helper()
+	var root map[string]any
+	if err := json.Unmarshal(schema, &root); err != nil {
+		t.Fatal(err)
+	}
+	props, ok := root["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("the schema has no properties")
+	}
+	if _, there := props[name]; !there {
+		t.Fatalf("the schema does not list %s", name)
+	}
+	delete(props, name)
+	out, err := json.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// mw-gq6.739: the smoke read lampas's grinds at a87ab771 and ran for most of
+// an hour; lampas main moved to f6b9fb9d meanwhile, whose bible-talk schema
+// lists fetch and whose instructions ask for it, and the mill, which reads the
+// grind afresh for each grist, ground verse-outside-the-held-range there. The
+// smoke judged that answer by the schema it had read and failed the example:
+// "answer has fetch, which the schema does not allow". An answer the mill says
+// it ground at another commit is held to the schema at that commit, read from
+// the rig (fetched when the checkout has not seen it yet), and the smoke says
+// so in a warning; the examples after it are still read at the smoke's commit.
+func TestAnAnswerGroundAtAnotherCommitIsHeldToTheSchemaThere(t *testing.T) {
+	schemaNow, err := os.ReadFile("testdata/grind-schemas/lampas-bible-talk.answer.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemaBefore := withoutProperty(t, schemaNow, "fetch")
+	const checkout, before, after = "/rigs/lampas", "a87ab771", "f6b9fb9d"
+	grind := []byte(`{"grind": 1, "app": "lampas", "kind": "bible-talk", "versions": ["1"], "model": "sonnet", "effort": "medium", "instructions": "grinds/bible-talk.instructions", "answerSchema": "grinds/bible-talk.answer.schema.json"}`)
+	verseOutside := []byte(`{"schemaVersion": "1", "request": {"reference": "Revelation 2", "verses": "2:1-3", "question": "What does the Lord say to the church in Smyrna, further down this chapter?", "history": []},
+		"expect": {"answer": {"matches": "[Vv]erses? 1(-| to | through |–)3|1.{0,3}3"}, "settings_changes": {"present": false}, "setting_offer": {"present": false}}}`)
+	workNotTicked := []byte(`{"schemaVersion": "1", "request": {"reference": "John 1", "verses": "1:1", "question": "What does the Word mean here?", "history": []}, "expect": {"answer": {"matches": "Word"}}}`)
+	grinds := apptest.NewFakeGrinds()
+	grinds.SetFile(checkout, before, "grinds/bible-talk.json", grind)
+	grinds.SetFile(checkout, before, "grinds/bible-talk.instructions", []byte("You are the tutor."))
+	grinds.SetFile(checkout, before, "grinds/bible-talk.answer.schema.json", schemaBefore)
+	grinds.SetFile(checkout, before, "grinds/examples/bible-talk/verse-outside-the-held-range.json", verseOutside)
+	grinds.SetFile(checkout, before, "grinds/examples/bible-talk/work-not-ticked.json", workNotTicked)
+	mill := &smokeMill{
+		moved: func() {
+			// lampas main moves under the run: the fetch field lands.
+			grinds.SetRemoteFile(checkout, after, "grinds/bible-talk.json", grind)
+			grinds.SetRemoteFile(checkout, after, "grinds/bible-talk.instructions", []byte("You are the tutor. Other passages: name them in fetch."))
+			grinds.SetRemoteFile(checkout, after, "grinds/bible-talk.answer.schema.json", schemaNow)
+			grinds.SetRemoteFile(checkout, after, "grinds/examples/bible-talk/verse-outside-the-held-range.json", verseOutside)
+			grinds.SetRemoteFile(checkout, after, "grinds/examples/bible-talk/work-not-ticked.json", workNotTicked)
+		},
+		answers: []application.GristAnswer{
+			{Status: application.GristAnswered, Grind: application.GristAnswerGrind{App: "lampas", Kind: "bible-talk", V: "1", Commit: after},
+				Answer: json.RawMessage(`{"answer": "I hold verses 1-3 of Revelation 2 here; the letter to Smyrna begins at verse 8.", "question": "What does the Lord say to the church in Smyrna, further down this chapter?", "words": [], "fetch": ["Revelation 2:8-11"]}`)},
+			{Status: application.GristAnswered, Grind: application.GristAnswerGrind{App: "lampas", Kind: "bible-talk", V: "1", Commit: after},
+				Answer: json.RawMessage(`{"answer": "The Word is the Son, with God from the beginning.", "question": "What does the Word mean here?", "words": []}`)},
+		},
+	}
+	smoke := application.GristSmoke{Grinds: grinds, Send: mill, Apps: map[string]string{"lampas": checkout},
+		Sleep: func(context.Context, time.Duration) error { return nil }}
+	report, err := smoke.Run(context.Background(), "lampas", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Commit != before {
+		t.Fatalf("the smoke read the grinds at %s, want %s", report.Commit, before)
+	}
+	if len(report.Failures) != 0 {
+		t.Fatalf("the smoke failed:\n%s", strings.Join(report.Failures, "\n"))
+	}
+	if report.Examples != 2 || mill.sent != 2 {
+		t.Fatalf("sent %d, %d examples; want both sent once", mill.sent, report.Examples)
+	}
+	warnings := strings.Join(report.Warnings, "\n")
+	for _, want := range []string{"lampas/bible-talk/verse-outside-the-held-range", "schema at " + after, before, "moved"} {
+		if !strings.Contains(warnings, want) {
+			t.Errorf("the warnings do not say %q:\n%s", want, warnings)
+		}
+	}
+	if len(report.Warnings) != 1 {
+		t.Errorf("want one warning, got %d:\n%s", len(report.Warnings), warnings)
+	}
+}
+
+// The schema at the mill's commit is the one the answer is held to even when
+// the answer fits neither: the failure then names the mill's commit, not the
+// smoke's, so the Mayor reads the right schema.
+func TestAnAnswerThatFitsTheSchemaAtNeitherCommitFailsAgainstTheMills(t *testing.T) {
+	schemaNow, err := os.ReadFile("testdata/grind-schemas/lampas-bible-talk.answer.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const checkout, before, after = "/rigs/lampas", "a87ab771", "f6b9fb9d"
+	grind := []byte(`{"grind": 1, "app": "lampas", "kind": "bible-talk", "versions": ["1"], "model": "sonnet", "effort": "medium", "instructions": "grinds/bible-talk.instructions", "answerSchema": "grinds/bible-talk.answer.schema.json"}`)
+	example := []byte(`{"schemaVersion": "1", "request": {"reference": "Revelation 2", "verses": "2:1-3", "question": "Smyrna?", "history": []}, "expect": {"answer": {"matches": "verses"}}}`)
+	grinds := apptest.NewFakeGrinds()
+	grinds.SetFile(checkout, before, "grinds/bible-talk.json", grind)
+	grinds.SetFile(checkout, before, "grinds/bible-talk.instructions", []byte("You are the tutor."))
+	grinds.SetFile(checkout, before, "grinds/bible-talk.answer.schema.json", withoutProperty(t, schemaNow, "fetch"))
+	grinds.SetFile(checkout, before, "grinds/examples/bible-talk/verse-outside-the-held-range.json", example)
+	wrong := application.GristAnswer{Status: application.GristAnswered, Grind: application.GristAnswerGrind{App: "lampas", Kind: "bible-talk", V: "1", Commit: after},
+		Answer: json.RawMessage(`{"answer": "I hold verses 1-3.", "question": "Smyrna?", "words": [], "fetch": ["Revelation 2:8-11"], "footnote": "none"}`)}
+	mill := &smokeMill{
+		moved: func() {
+			grinds.SetRemoteFile(checkout, after, "grinds/bible-talk.json", grind)
+			grinds.SetRemoteFile(checkout, after, "grinds/bible-talk.instructions", []byte("You are the tutor."))
+			grinds.SetRemoteFile(checkout, after, "grinds/bible-talk.answer.schema.json", schemaNow)
+			grinds.SetRemoteFile(checkout, after, "grinds/examples/bible-talk/verse-outside-the-held-range.json", example)
+		},
+		answers: []application.GristAnswer{wrong, wrong, wrong},
+	}
+	smoke := application.GristSmoke{Grinds: grinds, Send: mill, Apps: map[string]string{"lampas": checkout},
+		Sleep: func(context.Context, time.Duration) error { return nil }}
+	report, err := smoke.Run(context.Background(), "lampas", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Failures) != 1 {
+		t.Fatalf("want one failure, got %q", report.Failures)
+	}
+	failure := report.Failures[0]
+	if strings.Contains(failure, "has fetch") || !strings.Contains(failure, "has footnote, which the schema does not allow") {
+		t.Errorf("the failure should be footnote's alone, got %q", failure)
+	}
+	if !strings.Contains(failure, "schema at "+after) {
+		t.Errorf("the failure should name the mill's commit %s, got %q", after, failure)
 	}
 }

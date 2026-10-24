@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://home-app.local/schemas/inventory/sweep-result/1.1",
+  "title": "Sweep Result 1.1",
+  "description": "The factory's answer to a Sweep Request 1.1 (ADR-0004): the kinds of things seen at one Place, and any Containers seen inside it with their own things. Imported after the person confirms or edits it. No quantities: this is knowledge of where kinds of things live, not stock control.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "responseType", "placeName", "items"],
+  "properties": {
+    "schemaVersion": { "const": "1.1" },
+    "responseType": { "const": "sweep-result" },
+    "placeName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Echo of the target Place name, so the person can confirm before import."
+    },
+    "items": {
+      "type": "array",
+      "description": "Things kept loose at the Place itself.",
+      "items": { "$ref": "#/$defs/item" }
+    },
+    "containers": {
+      "type": "array",
+      "description": "Containers seen inside the Place (a shoebox, a labelled bin), each with the things visible in it. One level only: a Container inside one of these gets its own photo.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "items"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "aliases": {
+            "type": "array",
+            "description": "Other names for the Container, e.g. the words on its label.",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "unsure": {
+            "type": "boolean",
+            "description": "True when this might not be a separate Container."
+          },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/item" }
+          }
+        }
+      }
+    },
+    "note": {
+      "type": "string",
+      "description": "One plain sentence the person should see, e.g. that part of the photo was too dark to read."
+    }
+  },
+  "$defs": {
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "aliases": {
+          "type": "array",
+          "description": "Optional alternate names the household might search by.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "unsure": {
+          "type": "boolean",
+          "description": "True when the thing is only partly visible or hard to name; the confirm step shows it unticked."
+        }
+      }
+    }
+  }
+}

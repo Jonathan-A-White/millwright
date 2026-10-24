@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Audible Position Answer 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["book", "chapter", "position", "left", "confidence"],
+  "properties": {
+    "book": {
+      "description": "The Bible book of the chapter now playing, as its OSIS code ('Gen', 'Lev', 'Ps', 'Matt', 'Rom', 'Rev'), or null when the picture shows no chapter of the Bible you can name.",
+      "anyOf": [{ "type": "null" }, { "type": "string", "minLength": 2, "maxLength": 8 }]
+    },
+    "chapter": {
+      "description": "The number of the chapter now playing, a whole number from 1, or null with `book` null. A book of one chapter (Obadiah, Philemon, 2 John, 3 John, Jude) is 1.",
+      "anyOf": [{ "type": "null" }, { "type": "number", "minimum": 1, "maximum": 150 }]
+    },
+    "position": {
+      "description": "The time played into the chapter as the screen prints it ('2:41', '1:02:05'), or null when the screen shows none.",
+      "anyOf": [{ "type": "null" }, { "type": "string", "minLength": 1, "maxLength": 12 }]
+    },
+    "left": {
+      "description": "The time left in the chapter as the screen prints it, the right-hand time under the progress bar, with its minus sign ('-2:14', '-1:02:05'), or null when the screen shows none. The app reads what she heard from it: a chapter with time left was stopped in, one at '-0:00' was heard to its end.",
+      "anyOf": [{ "type": "null" }, { "type": "string", "minLength": 1, "maxLength": 12 }]
+    },
+    "confidence": {
+      "description": "How sure the chapter is: 'high' when the screen prints the book and chapter plainly, 'medium' when part of it is worked out (the book from the title, a heading taken as chapter 1, a chapter line cut short), 'low' when it is partly a guess or the picture shows none.",
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    }
+  }
+}
