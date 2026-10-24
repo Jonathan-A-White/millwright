@@ -347,7 +347,10 @@ together.
 **How Millwright does it.** Every story's acceptance criteria are written to be
 checked by running something. `mw check <story>` makes, from inside the session,
 the checks `mw next` makes before landing: commits on the branch, none signed by
-a machine, every formula step closed, the rig's tests passing. `mw next` then
+a machine, every formula step closed, the rig's tests passing, and no `git+ssh://`
+line added to a `package-lock.json` (npm writes one for a `github:` dependency, and
+a host without a GitHub SSH key cannot `npm ci` it; the refusal quotes the line and
+the `sed` that mends it). `mw next` then
 merges under the rig's merge slot and, when the merge was not a fast-forward, runs
 the tests again on the merged result
 ([*Closing a story out*](../README.md#closing-a-story-out)).
