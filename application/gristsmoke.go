@@ -331,11 +331,19 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 		report.Failures = append(report.Failures, label+": the answer schema "+grind.AnswerSchema+" could not be read")
 		return
 	}
+	held := smokeSchema{checkout: checkout, commit: commit, grind: grind, text: schema}
 	for _, example := range examples {
 		name := strings.TrimSuffix(path.Base(example), ".json")
 		report.Examples++
 		s.say("sending %s/%s ...", label, name)
-		why, notRun, flake := s.example(ctx, checkout, commit, app, kind, example, schema)
+		why, notRun, flake, groundAt := s.example(ctx, checkout, commit, app, kind, example, held)
+		if groundAt != "" {
+			note := groundElsewhere(label+"/"+name, app, groundAt, commit)
+			if !slices.Contains(report.Warnings, note) {
+				report.Warnings = append(report.Warnings, note)
+			}
+			s.say("  note: %s", note)
+		}
 		if flake != nil {
 			report.Flakes = append(report.Flakes, *flake)
 			report.Warnings = append(report.Warnings, flake.String())
@@ -539,24 +547,80 @@ func (s GristSmoke) readSchema(ctx context.Context, checkout, commit string, gri
 	return ""
 }
 
+// smokeSchema is a grind's answer schema as the smoke read it: its text, and
+// the checkout, commit and grind it was read from, so that an answer the mill
+// ground at another commit can be held to the schema there (mw-gq6.739).
+type smokeSchema struct {
+	checkout, commit string
+	grind            GrindFile
+	text             string
+}
+
+// whereTheMillGround is the grind's answer schema at the commit the mill says
+// it ground the answer at, when that is not the commit the smoke read the
+// grinds at: the rig's main moved under a run of an hour and the mill, which
+// reads the grind afresh for each grist, took the new one (mw-gq6.739: lampas
+// bible-talk's fetch field landed mid-run and the smoke refused answers that
+// carried it); or the mill lags behind the smoke. A commit the checkout has
+// not seen is fetched. It is schema itself when the mill named no other
+// commit, ground an override (whose schema is the ref's, not main's), or the
+// grind or its schema at that commit cannot be read.
+func (s GristSmoke) whereTheMillGround(ctx context.Context, schema smokeSchema, ground GristAnswerGrind) smokeSchema {
+	if ground.Override || ground.Commit == "" || sameCommit(ground.Commit, schema.commit) {
+		return schema
+	}
+	text := s.schemaOfKind(ctx, schema.checkout, ground.Commit, schema.grind.Kind)
+	if text == "" {
+		if err := s.Grinds.Refresh(ctx, schema.checkout); err != nil {
+			return schema
+		}
+		text = s.schemaOfKind(ctx, schema.checkout, ground.Commit, schema.grind.Kind)
+	}
+	if text == "" {
+		return schema
+	}
+	return smokeSchema{checkout: schema.checkout, commit: ground.Commit, grind: schema.grind, text: text}
+}
+
+// schemaOfKind reads the kind's grind at commit and the answer schema it names;
+// empty when either cannot be read.
+func (s GristSmoke) schemaOfKind(ctx context.Context, checkout, commit, kind string) string {
+	grind, ok := s.readGrind(ctx, checkout, commit, kind)
+	if !ok {
+		return ""
+	}
+	return s.readSchema(ctx, checkout, commit, grind)
+}
+
+// groundElsewhere is the warning for an example (<app>/<kind>/<example>) whose
+// answer was held to the schema at groundAt, where the mill ground it, not at
+// read, where the smoke read the grinds.
+func groundElsewhere(example, app, groundAt, read string) string {
+	return fmt.Sprintf("%s: judged by the answer schema at %s, where the mill ground it; the smoke read %s's grinds at %s and its main moved during the run",
+		example, shortTxid(groundAt), app, shortTxid(read))
+}
+
 // example sends one example and reports why it failed, empty when the answer
 // came, fits the schema and shows everything expected. notRun, when it is not
 // empty, says instead that the mill could not be asked, for a reason that is
 // not the example's (see GristSmokeReport.NotRun). An example whose mill
 // session did not finish is sent once more before it fails. An example whose
 // answer was wrong is sent GristSmokeResends more times: when one of them is
-// right the example does not fail, and flake says so instead.
-func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, file, schema string) (why, notRun string, flake *GristSmokeFlake) {
+// right the example does not fail, and flake says so instead. groundAt is the
+// commit an answer was held to the schema at, when it was not the smoke's (see
+// smokeTry.groundAt).
+func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, file string, schema smokeSchema) (why, notRun string, flake *GristSmokeFlake, groundAt string) {
 	prepared, why := s.prepare(ctx, checkout, commit, app, kind, file)
 	if why != "" {
-		return why, "", nil
+		return why, "", nil, ""
 	}
 	defer os.RemoveAll(prepared.dir)
 	example, turns, wait := prepared.example, prepared.turns, prepared.wait
 	name := strings.TrimSuffix(path.Base(file), ".json")
 	first := s.attempt(ctx, kind+"/"+name, turns, wait, schema, example.Expect)
+	groundAt = first.groundAt
 	if !first.slip {
-		return first.why, first.notRun, nil
+		return first.why, first.notRun, nil, groundAt
 	}
 	// The answer was a model's and wrong: send the example again before it
 	// holds the landing rig's queue. A send again that cannot be told apart
@@ -566,6 +630,7 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 	for i := 0; i < GristSmokeResends; i++ {
 		s.say("  the answer was wrong; sending it again (%d of %d) ...", i+1, GristSmokeResends)
 		again := s.attempt(ctx, kind+"/"+name, turns, wait, schema, example.Expect)
+		groundAt = cmp.Or(groundAt, again.groundAt)
 		if again.slip {
 			sent, missed = sent+1, missed+1
 		} else if again.why == "" && again.notRun == "" {
@@ -575,25 +640,26 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 		}
 	}
 	if missed == sent {
-		return first.why, "", nil
+		return first.why, "", nil, groundAt
 	}
 	return "", "", &GristSmokeFlake{
 		Example: app + "/" + kind + "/" + strings.TrimSuffix(path.Base(file), ".json"),
 		Missed:  missed, Sent: sent, Misses: first.misses, Txid: first.txid,
-	}
+	}, groundAt
 }
 
 // attempt sends the example once whole: its one grist, or its turns one after
 // the other under a talk of its own, that is ended whatever came of them. A
 // turn that did not come right ends the attempt, its failure said to be that
 // turn's; only the last turn is held to the example's expect.
-func (s GristSmoke) attempt(ctx context.Context, label string, turns []GristSendRequest, wait time.Duration, schema string, expect map[string]json.RawMessage) smokeTry {
+func (s GristSmoke) attempt(ctx context.Context, label string, turns []GristSendRequest, wait time.Duration, schema smokeSchema, expect map[string]json.RawMessage) smokeTry {
 	if len(turns) == 1 && s.Override == nil {
 		return s.try(ctx, turns[0], wait, schema, expect)
 	}
 	talk := s.talkName(label)
 	defer s.endTalk(ctx, turns[0].App, talk)
 	var got smokeTry
+	groundAt := ""
 	for i, turn := range turns {
 		turn.Talk = talk
 		want := map[string]json.RawMessage(nil)
@@ -601,6 +667,10 @@ func (s GristSmoke) attempt(ctx context.Context, label string, turns []GristSend
 			want = expect
 		}
 		got = s.try(ctx, turn, wait, schema, want)
+		// A turn held to the schema at the mill's commit says so for the
+		// whole attempt, whichever turn it was.
+		groundAt = cmp.Or(groundAt, got.groundAt)
+		got.groundAt = groundAt
 		if got.why != "" || got.notRun != "" {
 			if got.why != "" {
 				got.why = fmt.Sprintf("turn %d: %s", i+1, got.why)
@@ -668,11 +738,15 @@ type smokeTry struct {
 	slip   bool
 	misses []ExpectFailure
 	txid   string
+	// groundAt is the commit the answer was held to the grind's schema at when
+	// the mill said it ground at a commit other than the smoke's (the rig's
+	// main moved under the run); empty when it was the smoke's own.
+	groundAt string
 }
 
 // try sends the example once (twice when the mill or the backend was in
 // trouble) and says what came of it.
-func (s GristSmoke) try(ctx context.Context, send GristSendRequest, wait time.Duration, schema string, expect map[string]json.RawMessage) smokeTry {
+func (s GristSmoke) try(ctx context.Context, send GristSendRequest, wait time.Duration, schema smokeSchema, expect map[string]json.RawMessage) smokeTry {
 	sent, err := s.Send.Run(ctx, send)
 	retried := false
 	if gristMillsFault(err) {
@@ -735,10 +809,21 @@ func (s GristSmoke) try(ctx context.Context, send GristSendRequest, wait time.Du
 		// would pass or fail the example for the wrong grind.
 		return smokeTry{why: "the mill answered with the grind at main, not the ref's text (is the mill up to date?)"}
 	}
-	if violations := SchemaViolations(sent.Answer.Answer, schema); len(violations) > 0 {
-		return smokeTry{
-			why: "the answer does not fit the grind's schema: " + strings.Join(violations, ", "), slip: true, txid: sent.Txid,
-			misses: []ExpectFailure{{Field: "(answer)", Wanted: "an answer that fits the grind's schema", Got: strings.Join(violations, ", ")}},
+	groundAt := ""
+	if violations := SchemaViolations(sent.Answer.Answer, schema.text); len(violations) > 0 {
+		// The mill may have ground it at another commit of the rig than the
+		// smoke read the grinds at: the answer is held to the schema there.
+		where := "the grind's schema"
+		if at := s.whereTheMillGround(ctx, schema, sent.Answer.Grind); at.commit != schema.commit {
+			groundAt = at.commit
+			violations = SchemaViolations(sent.Answer.Answer, at.text)
+			where = fmt.Sprintf("the grind's schema at %s, where the mill ground it (the smoke read the grinds at %s)", shortTxid(at.commit), shortTxid(schema.commit))
+		}
+		if len(violations) > 0 {
+			return smokeTry{
+				why: "the answer does not fit " + where + ": " + strings.Join(violations, ", "), slip: true, txid: sent.Txid, groundAt: groundAt,
+				misses: []ExpectFailure{{Field: "(answer)", Wanted: "an answer that fits the grind's schema", Got: strings.Join(violations, ", ")}},
+			}
 		}
 	}
 	var missed []string
@@ -747,9 +832,9 @@ func (s GristSmoke) try(ctx context.Context, send GristSendRequest, wait time.Du
 		missed = append(missed, f.String())
 	}
 	if len(missed) > 0 {
-		return smokeTry{why: "the answer misses what the example expects: " + strings.Join(missed, "; "), slip: true, misses: misses, txid: sent.Txid}
+		return smokeTry{why: "the answer misses what the example expects: " + strings.Join(missed, "; "), slip: true, misses: misses, txid: sent.Txid, groundAt: groundAt}
 	}
-	return smokeTry{answer: sent.Answer.Answer, talk: sent.Answer.Talk}
+	return smokeTry{answer: sent.Answer.Answer, talk: sent.Answer.Talk, groundAt: groundAt}
 }
 
 // gristAnswerIsNotTheExamples says the mill would not grind a grist for a
