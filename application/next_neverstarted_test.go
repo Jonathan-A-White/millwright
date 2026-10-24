@@ -177,3 +177,41 @@ func TestNextGivesBackAClaimOnlyAnEarlierAttemptLeftATranscriptFor(t *testing.T)
 		})
 	}
 }
+
+// mw-thms99: a claim stamped (claimed_at) a few seconds ago is a session that
+// is still starting, however long ago the story was first started: it is not
+// given back. One stamped past NeverStartedGrace still is.
+func TestNextGivesBackAClaimOnlyOncePastTheStartUpGrace(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		age      time.Duration
+		wantBack bool
+	}{
+		{"21 seconds after the claim", 21 * time.Second, false},
+		{"just inside the grace", application.NeverStartedGrace - time.Second, false},
+		{"just past the grace", application.NeverStartedGrace + time.Second, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			lands := &fakeRetryLanding{NoWorktree: true}
+			next, tracker := aNextWithAStrandedClaim(t, 3*time.Hour, lands, lands, aTranscript(""))
+			now := next.Now()
+			mustDo(t, tracker.SetStoryMetadata(ctx, "mw-x.2", map[string]string{
+				application.ClaimedAtField: now.Add(-c.age).Format(time.RFC3339),
+			}))
+
+			report, err := next.Run(ctx, "mw-x.1")
+			if err != nil {
+				t.Fatalf("mw next: %v", err)
+			}
+			detail, err := tracker.ShowStory(ctx, "mw-x.2")
+			if err != nil {
+				t.Fatalf("showing the story: %v", err)
+			}
+			gaveBack := detail.Status == application.StatusOpen && detail.Assignee == "" && len(report.GaveBack) == 1
+			if gaveBack != c.wantBack {
+				t.Fatalf("claim %s old: expected given back %v, got status %q assignee %q", c.age, c.wantBack, detail.Status, detail.Assignee)
+			}
+		})
+	}
+}

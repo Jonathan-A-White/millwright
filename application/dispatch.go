@@ -1566,12 +1566,9 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	}
 
 	// A session already holding the story's name is looked at before anything
-	// is taken, so that a refusal leaves everything as it was: the worktree the
-	// story may already have is a live session's, and nothing here may undo it.
-	lying, err := d.namesake(ctx, started.Session, id)
-	if err != nil {
-		return Started{}, false, err
-	}
+	// is taken: the worktree the story may already have is a live session's, and
+	// nothing here may undo it.
+	lying, running := d.namesake(ctx, started.Session)
 
 	if err := d.Tracker.ClaimStory(ctx, id); err != nil {
 		if holder, held := ClaimHeldBy(err); held {
@@ -1580,6 +1577,22 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		return Started{}, false, fmt.Errorf("claiming %s: %w", id, err)
 	}
 	d.print(fmt.Sprintf("  claimed %s\n", id))
+
+	// A session of the story's name is already running here: it is the story's
+	// own, and the claim just made is the one it works under. Nothing more is
+	// started, taken or given back (mw-thms99).
+	if running {
+		return d.adoptRunning(ctx, id, started.Session, started.Auto)
+	}
+
+	// The claim is stamped now, not once the session is up: for the minute the
+	// session takes to start, the stamp of an earlier claim would otherwise be
+	// what mw next measures the claim's age by, and read it as one that never
+	// started (mw-thms99).
+	if err := d.Tracker.SetStoryMetadata(ctx, id, map[string]string{ClaimedAtField: d.now().UTC().Format(time.RFC3339)}); err != nil {
+		released, relErr := d.release(ctx, id, fmt.Errorf("recording when %s was claimed: %w", id, err))
+		return Started{}, released, relErr
+	}
 
 	// The ready list was read before the claim, and another dispatcher may have
 	// poured this story's formula and recorded the molecule since: its session
@@ -2377,25 +2390,45 @@ func (d Dispatch) closeLanded(ctx context.Context, detail StoryDetail, session s
 }
 
 // namesake looks for a session already called name, the one a story is worked
-// in. A running one is a real second session, and the story is refused rather
-// than started twice. One that has ended is a corpse mw leaves on purpose
-// (remain-on-exit) that would make the runner refuse the name for ever; lying
-// says there is one to close before the new session starts.
-func (d Dispatch) namesake(ctx context.Context, name, id string) (lying bool, err error) {
+// in. A running one is the story's own session: start claims the story for it
+// and starts nothing (adoptRunning). One that has ended is a corpse mw leaves on
+// purpose (remain-on-exit) that would make the runner refuse the name for ever;
+// lying says there is one to close before the new session starts.
+func (d Dispatch) namesake(ctx context.Context, name string) (lying, running bool) {
 	status, err := d.Runner.Status(ctx, name)
 	if err != nil {
 		// A runner that cannot say cannot start the session either, and Start
 		// says so on the path that gives the claim back; refusing here would
 		// leave the failure unrecorded on the story.
-		return false, nil
+		return false, false
 	}
 	switch status.State {
 	case StateRunning:
-		return false, fmt.Errorf("the session %s of %s is still running here, so it was not started again; nothing was claimed, closed or removed", name, id)
+		return false, true
 	case StateExited, StateExitUnknown:
-		return true, nil
+		return true, false
 	}
-	return false, nil
+	return false, false
+}
+
+// adoptRunning keeps the claim just made for the story's own session, found
+// running here: no second session, worktree or molecule is made, and the story
+// is said once to be running under the claim. It is told on the story, and
+// the story is in progress from here, so the next tick does not meet it again.
+func (d Dispatch) adoptRunning(ctx context.Context, id, session string, auto bool) (Started, bool, error) {
+	// The session runs here, so the story is this host's, as a claim made for
+	// a session this dispatch started would make it.
+	if auto {
+		if err := d.Tracker.SetStoryMetadata(ctx, id, map[string]string{"host": d.Host}); err != nil {
+			return Started{}, false, fmt.Errorf("the claim of %s was kept for its running session %s, but its host could not be recorded as %s: %w", id, session, d.Host, err)
+		}
+	}
+	said := fmt.Sprintf("mw dispatch on %s claimed this story and found its session %s already running here, so it was not started again and the claim stays with it.", d.Host, session)
+	d.print(fmt.Sprintf("  kept the claim of %s: its session %s is already running here\n", id, session))
+	if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {
+		return Started{}, false, fmt.Errorf("the claim of %s was kept for its running session %s, but that could not be written on the story: %w", id, session, err)
+	}
+	return Started{}, false, nil
 }
 
 // release gives a claim back and writes on the story why it was given back. It

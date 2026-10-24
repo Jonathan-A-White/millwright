@@ -894,15 +894,15 @@ Feature: Dispatching the stories this host is ready to work
     And the worktree of "mw-gq6.1" is a checkout of the rig on branch "mw/mw-gq6.1"
     And the story "mw-gq6.1" is claimed by this host
 
-  Scenario: A story whose session is still running is not started twice
+  # mw-thms99: the claim is kept for the session that is running, not refused.
+  Scenario: A story whose session is still running is not started twice, and keeps its claim
     Given a ready story "mw-gq6.1" of that epic
     And a session for "mw-gq6.1" is still running in its worktree
     When dispatch runs on "vps" with a cap of 1
-    Then dispatch failed, saying: is still running
-    And nothing was closed
+    Then nothing was closed
     And the session for "mw-gq6.1" is still running in the worktree it began in
     And the worktree of "mw-gq6.1" is a checkout of the rig on branch "mw/mw-gq6.1"
-    And the story "mw-gq6.1" is not claimed
+    And the story "mw-gq6.1" is claimed by this host
 
   Scenario: The story's formula is poured and its step beads reach the boot file
     Given a ready story "mw-gq6.1" of that epic
