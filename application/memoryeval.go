@@ -86,6 +86,31 @@ func addExpect(text string, q EvalQuestion, slug string) string {
 	return strings.Join(lines, "\n")
 }
 
+// replaceExpect puts a slug in place of another in the expect line of a
+// question's block in an eval.md text.
+func replaceExpect(text string, q EvalQuestion, from, to string) string {
+	lines := strings.Split(text, "\n")
+	for i := q.Line - 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "" {
+			break
+		}
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "expect:") {
+			var slugs []string
+			for _, slug := range strings.Split(strings.TrimPrefix(strings.TrimSpace(lines[i]), "expect:"), ",") {
+				if slug = strings.TrimSpace(slug); slug == from {
+					slug = to
+				}
+				if slug != "" {
+					slugs = append(slugs, slug)
+				}
+			}
+			lines[i] = "expect: " + strings.Join(slugs, ", ")
+			break
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // ParseEval reads an eval.md: blocks of 'Q: <question>' and 'expect: <slug>,
 // <slug>...', separated by blank lines; a line starting with '#' is a comment.
 // A block that is not a Q with an expect, or has no words to look for in its Q,

@@ -518,14 +518,12 @@ func (m Memory) Supersede(ctx context.Context, req MemorySupersede) error {
 		return err
 	}
 	paths := []string{written, retired}
-	if successor.Unbooted {
-		evalPath, err := m.carryEvalQuestions(ctx, req.Rig, old, successor, facts)
-		if err != nil {
-			return err
-		}
-		if evalPath != "" {
-			paths = append(paths, evalPath)
-		}
+	evalPath, err := m.carryEvalQuestions(ctx, req.Rig, old, successor, facts)
+	if err != nil {
+		return err
+	}
+	if evalPath != "" {
+		paths = append(paths, evalPath)
 	}
 	if err := m.record(ctx, "supersede "+req.Rig+" "+old.Slug+" with "+slug, paths...); err != nil {
 		return err
@@ -537,18 +535,26 @@ func (m Memory) Supersede(ctx context.Context, req MemorySupersede) error {
 	return nil
 }
 
-// carryEvalQuestions makes the questions of eval.md that expect a demoted old
-// fact expect its successor too, when they find it, so a Builder who asked for
-// the old fact still finds the new one. It writes eval.md only if a question
-// changed, and returns its path from the vault's root (empty when untouched). A
-// successor that no question finds is warned of: it is out of the boot render
-// and nothing reaches it.
+// carryEvalQuestions makes the questions of eval.md that expect an old
+// fact expect its successor, when they find it, so a Builder who asked for the
+// old fact still finds the new one. The questions are run over the facts as
+// they stand once old is superseded, which ranks it after every current fact:
+// a question that still finds old keeps it and gains the successor, and one
+// that no longer does has old replaced by the successor, so it still passes. A
+// question that expects old and does not find the successor is warned of by
+// its line number: it fails until an expect is added, or once old leaves its
+// top results. It writes eval.md only if a question changed, and returns its
+// path from the vault's root (empty when untouched). A demoted successor that
+// no question finds is warned of too: it is out of the boot render and nothing
+// reaches it.
 func (m Memory) carryEvalQuestions(ctx context.Context, rig string, old, successor RigFact, facts map[string]RigFact) (string, error) {
 	text, found, err := m.Files.ReadRigEval(ctx, m.Seat, rig)
 	if err != nil {
 		return "", err
 	}
-	all := orderedFacts(withFact(facts, successor))
+	// old is ranked as it is now, superseded: the map given holds it as it was.
+	after := withFact(withFact(facts, old), successor)
+	all := orderedFacts(after)
 	carried := false
 	if found {
 		questions, err := ParseEval(text)
@@ -556,10 +562,23 @@ func (m Memory) carryEvalQuestions(ctx context.Context, rig string, old, success
 			return "", err
 		}
 		for _, q := range questions {
-			if !q.expects(old.Slug) || q.expects(successor.Slug) || !q.finds(all, successor.Slug) {
+			if !q.expects(old.Slug) {
 				continue
 			}
-			text, carried = addExpect(text, q, successor.Slug), true
+			switch {
+			case q.expects(successor.Slug):
+			case q.finds(all, successor.Slug):
+				if q.finds(all, old.Slug) {
+					text = addExpect(text, q, successor.Slug)
+				} else {
+					text = replaceExpect(text, q, old.Slug, successor.Slug)
+				}
+				carried = true
+			case !q.finds(all, old.Slug):
+				fmt.Fprintf(m.Out, "WARN: eval question at line %d (%s) expects %s, which is superseded now, and does not find %s: it will fail until an expect is added\n", q.Line, q.Question, old.Slug, successor.Slug)
+			default:
+				fmt.Fprintf(m.Out, "WARN: eval question at line %d (%s) expects %s, which is superseded now, and does not find %s: it passes only while %s stays in the top %d, and will fail from then until an expect is added\n", q.Line, q.Question, old.Slug, successor.Slug, old.Slug, EvalTop)
+			}
 		}
 	}
 	if carried {
@@ -577,7 +596,9 @@ func (m Memory) carryEvalQuestions(ctx context.Context, rig string, old, success
 			}
 		}
 	}
-	fmt.Fprintf(m.Out, "WARN: no eval question finds %s, which is out of the boot render (boot: no): add one to eval.md\n", successor.Slug)
+	if successor.Unbooted {
+		fmt.Fprintf(m.Out, "WARN: no eval question finds %s, which is out of the boot render (boot: no): add one to eval.md\n", successor.Slug)
+	}
 	return "", nil
 }
 

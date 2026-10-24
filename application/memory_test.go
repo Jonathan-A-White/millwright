@@ -525,6 +525,102 @@ func TestSupersedingADemotedFactCarriesItsEvalQuestionToTheNewFact(t *testing.T)
 	}
 }
 
+// aCrowdedDemotedGate is a rig with a demoted fact "gate" that the question
+// "gate make lint" expects, and two current facts of an earlier subject that the
+// question finds too: while "gate" is current it and they fill the top three
+// ahead of a new fact of its subject.
+func aCrowdedDemotedGate() *editableFiles {
+	files := aDemotedGate()
+	files.files["alpha-1.md"] = queryFact("alpha", "The gate make lint step one.")
+	files.files["alpha-2.md"] = queryFact("alpha", "The gate make lint step two.")
+	return files
+}
+
+func TestSupersedingADemotedFactThatTheOldOneCrowdedOutLeavesTheQuestionPassing(t *testing.T) {
+	files, vault := aCrowdedDemotedGate(), &recordingVault{}
+	files.eval = "Q: gate make lint\nexpect: gate\n"
+	var out bytes.Buffer
+	memory := anEditableMemory(files, vault, &out)
+	err := memory.Supersede(context.Background(), application.MemorySupersede{
+		Rig: "kiln", Old: "gate", Slug: "gate-new", Source: "mw-4", Sentence: "The gate runs make test and make lint in the foreground.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "WARN: eval question") || strings.Contains(out.String(), "WARN: no eval question") {
+		t.Errorf("warned though a question finds the new fact:\n%s", out.String())
+	}
+	out.Reset()
+	if err := memory.Eval(context.Background(), "kiln"); err != nil {
+		t.Fatalf("the eval fails after the supersede: %v\n%s\n%s", err, out.String(), files.eval)
+	}
+	if !strings.Contains(files.eval, "Q: gate make lint\nexpect: gate-new\n") {
+		t.Errorf("the superseded slug was not replaced:\n%s", files.eval)
+	}
+	if !strings.Contains(out.String(), "PASS 3 gate-new") {
+		t.Errorf("the new fact does not pass at the rank it now has:\n%s", out.String())
+	}
+}
+
+func TestSupersedingAFactTheQuestionStillFindsKeepsTheOldSlugAndAddsTheNew(t *testing.T) {
+	files, vault := aDemotedGate(), &recordingVault{}
+	files.eval = "Q: gate make lint\nexpect: gate\n"
+	memory := anEditableMemory(files, vault, &bytes.Buffer{})
+	err := memory.Supersede(context.Background(), application.MemorySupersede{
+		Rig: "kiln", Old: "gate", Slug: "gate-new", Source: "mw-4", Sentence: "The gate runs make test and make lint in the foreground.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(files.eval, "Q: gate make lint\nexpect: gate, gate-new\n") {
+		t.Errorf("eval.md:\n%s", files.eval)
+	}
+	if err := memory.Eval(context.Background(), "kiln"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSupersedingADemotedFactThatAQuestionOfTheOldOneDoesNotFindNamesTheQuestion(t *testing.T) {
+	files, vault := aCrowdedDemotedGate(), &recordingVault{}
+	files.files["alpha-3.md"] = queryFact("alpha", "The gate make lint step three.")
+	files.eval = "Q: gate make lint\nexpect: gate\n"
+	var out bytes.Buffer
+	memory := anEditableMemory(files, vault, &out)
+	err := memory.Supersede(context.Background(), application.MemorySupersede{
+		Rig: "kiln", Old: "gate", Slug: "gate-new", Source: "mw-4", Sentence: "Nothing alike at all.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "WARN: eval question at line 1 (gate make lint) expects gate, which is superseded now, and does not find gate-new: it will fail until an expect is added") {
+		t.Errorf("no warning naming the question:\n%s", out.String())
+	}
+	if !strings.Contains(files.files["gate-new.md"], "boot: no") || !strings.Contains(files.files["gate.md"], "superseded") {
+		t.Errorf("the supersede did not happen:\n%s\n%s", files.files["gate-new.md"], files.files["gate.md"])
+	}
+	if !strings.Contains(files.eval, "expect: gate\n") || strings.Contains(files.eval, "gate-new") {
+		t.Errorf("eval.md was changed:\n%s", files.eval)
+	}
+}
+
+func TestSupersedingABootFactWarnsOfAQuestionThatDoesNotFindTheNewFactEvenWhenTheOldOneIsStillFound(t *testing.T) {
+	files, vault := demotable(), &recordingVault{}
+	files.eval = "Q: gate make test\nexpect: gate\n"
+	var out bytes.Buffer
+	err := anEditableMemory(files, vault, &out).Supersede(context.Background(), application.MemorySupersede{
+		Rig: "kiln", Old: "gate", Slug: "gate-new", Source: "mw-4", Sentence: "Nothing alike at all.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "WARN: eval question at line 1 (gate make test) expects gate") || !strings.Contains(out.String(), "until an expect is added") {
+		t.Errorf("no warning naming the question:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "no eval question finds") {
+		t.Errorf("a boot fact needs no question to be found:\n%s", out.String())
+	}
+}
+
 func TestSupersedingADemotedFactNoQuestionFindsWarnsAndKeepsItDemoted(t *testing.T) {
 	files, vault := aDemotedGate(), &recordingVault{}
 	var out bytes.Buffer
