@@ -102,3 +102,23 @@ func TestAnAcceptanceThatSmokesWithARefIsNotWarnedOf(t *testing.T) {
 		t.Errorf("expected no warning, got %q", warn.String())
 	}
 }
+
+func TestAnAcceptanceThatNamesEvalOrSmokeInProseIsNeitherRefusedNorWarnedOf(t *testing.T) {
+	for _, prose := range []string{
+		"mw grist eval or smoke passes on the example",
+		"mw grist smoke and eval pass for lampas",
+		"mw grist eval on the example passes",
+		"mw grist smoke the app passes",
+		"mw grist eval a kind passes",
+	} {
+		var out, warn strings.Builder
+		err := gristFile(&out, &warn).Check(context.Background(),
+			gristAcceptancePlan(prose+"\nExpect: none, because a test plan"))
+		if err != nil {
+			t.Errorf("%q: expected the plan to pass, got %v", prose, err)
+		}
+		if warn.Len() != 0 {
+			t.Errorf("%q: expected no warning, got %q", prose, warn.String())
+		}
+	}
+}
