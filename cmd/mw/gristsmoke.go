@@ -184,7 +184,8 @@ func newGristSmokeCmd() *cobra.Command {
 			"before it lands: mw grist smoke <app> --ref <your branch>. A worktree path reads its committed\n" +
 			"HEAD (commit first). It prints the same warning when a grind's instructions are over the size the\n" +
 			"smoke warns at, and sends nothing, needs no test key or vault, records nothing and lifts or sets no hold;\n" +
-			"it is for use alone, not with --filed, --lift or --json. --kind limits it to one grind.",
+			"it is for use alone, not with --filed, --lift or --json. --kind limits it to one grind.\n\n" +
+			"To prove an example on a branch: smoke reads main; to prove an example on a branch, use mw grist eval <app> <kind> --example <name> --ref <worktree>.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if filed == "" && len(args) != 1 {

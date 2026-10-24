@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -55,6 +56,11 @@ type File struct {
 
 	// Out is where the tree is printed. A nil Out prints nothing.
 	Out io.Writer
+
+	// GristApps are the apps the config's [grist-apps] table names on this host,
+	// by app, to refuse an acceptance criterion that runs mw grist eval or smoke
+	// for any other (mw-ehxr4b). A nil GristApps checks nothing.
+	GristApps map[string]string
 
 	// Err is where the warnings go: a story with more test callers than its size
 	// allows (mw-gq6.661). A nil Err prints none.
@@ -305,6 +311,7 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	f.print(sizeWarnings(filed.Stories, true, false))
 	// Warnings only here: it is mw file --check that fails for them.
 	f.testCallers(plan, func(key string) string { return ids[key] })
+	f.warnSmokeWithoutRef(plan, func(key string) string { return ids[key] })
 	for _, id := range ownDemos {
 		f.print(demoNoHitlLine(id) + "\n")
 	}
@@ -355,6 +362,7 @@ func (f File) Check(ctx context.Context, plan domain.Plan) error {
 	if err != nil {
 		return err
 	}
+	f.warnSmokeWithoutRef(plan, func(key string) string { return key })
 	if over := f.testCallers(plan, func(key string) string { return key }); len(over) > 0 {
 		return fmt.Errorf("%s: more test callers than the size allows: split the story, size it up, or say why not with \"callers_ok\" (mw-gq6.661)",
 			strings.Join(over, ", "))
@@ -408,6 +416,7 @@ func (f File) refusals(ctx context.Context, plan domain.Plan) ([]string, []guest
 	reasons = append(reasons, f.validateFormulasOf(ctx, plan, &readErr)...)
 	reasons = append(reasons, f.validateFiles(plan.Stories, plan.Epic.Defaults)...)
 	reasons = append(reasons, validateTesterStories(plan.Stories, plan.Epic.Defaults)...)
+	reasons = append(reasons, f.validateGristApps(plan.Stories)...)
 
 	guests, err := f.guestRigsOf(ctx, plan)
 	note(err)
@@ -497,6 +506,90 @@ func validateTesterStories(stories []domain.PlanStory, defaults domain.Path) []s
 		}
 	}
 	return reasons
+}
+
+// gristRun is one `mw grist eval|smoke <app>` found in an acceptance criterion:
+// the verb, the app it names and whether the same line passes --ref.
+type gristRun struct {
+	Verb, App string
+	Ref       bool
+}
+
+// gristRunsIn finds each `mw grist eval <app>` and `mw grist smoke <app>` in the
+// text, line by line. An app is the first word after the verb that is not a flag.
+func gristRunsIn(text string) []gristRun {
+	var runs []gristRun
+	for _, line := range strings.Split(text, "\n") {
+		words := strings.Fields(line)
+		for i := 0; i+3 < len(words); i++ {
+			if strings.Trim(words[i], "`'\"") != "mw" || words[i+1] != "grist" {
+				continue
+			}
+			verb := words[i+2]
+			if verb != "eval" && verb != "smoke" {
+				continue
+			}
+			app := strings.Trim(words[i+3], "`'\".,;:()")
+			if app == "" || strings.HasPrefix(app, "-") || strings.HasPrefix(app, "<") {
+				continue
+			}
+			run := gristRun{Verb: verb, App: app}
+			for _, w := range words[i+3:] {
+				if w == "--ref" || strings.HasPrefix(w, "--ref=") {
+					run.Ref = true
+				}
+			}
+			runs = append(runs, run)
+		}
+	}
+	return runs
+}
+
+// validateGristApps says, naming the story key, each story whose acceptance
+// runs mw grist eval or smoke for an app the config's [grist-apps] does not name
+// (mw-ehxr4b): that criterion could not be run on this host.
+func (f File) validateGristApps(stories []domain.PlanStory) []string {
+	if f.GristApps == nil {
+		return nil
+	}
+	var have []string
+	for app := range f.GristApps {
+		have = append(have, app)
+	}
+	sort.Strings(have)
+	var reasons []string
+	for _, story := range stories {
+		seen := map[string]bool{}
+		for _, run := range gristRunsIn(story.Acceptance) {
+			if _, ok := f.GristApps[run.App]; ok || seen[run.App] {
+				continue
+			}
+			seen[run.App] = true
+			reasons = append(reasons, fmt.Sprintf("filing story %s: its acceptance runs mw grist %s %s, and %s is not in the [grist-apps] of the config; the apps it has are %s",
+				story.Key, run.Verb, run.App, run.App, strings.Join(have, ", ")))
+		}
+	}
+	return reasons
+}
+
+// SmokeReadsMainWarning is the warning for an acceptance that runs mw grist
+// smoke with no --ref: smoke reads the rig's main, so it cannot prove a branch.
+const SmokeReadsMainWarning = "smoke reads main; to prove a branch, use mw grist eval <app> <kind> --example <name> --ref <worktree>"
+
+// warnSmokeWithoutRef warns of each story whose acceptance runs mw grist smoke
+// with no --ref. It refuses nothing. label names a story by its plan key.
+func (f File) warnSmokeWithoutRef(plan domain.Plan, label func(key string) string) {
+	if f.Err == nil {
+		return
+	}
+	for _, story := range plan.Stories {
+		for _, run := range gristRunsIn(story.Acceptance) {
+			if run.Verb == "smoke" && !run.Ref {
+				fmt.Fprintf(f.Err, "WARN: %s: its acceptance runs mw grist smoke %s with no --ref: %s\n", label(story.Key), run.App, SmokeReadsMainWarning)
+				break
+			}
+		}
+	}
 }
 
 // validateFiles says, naming the story key, each story whose files key names a
