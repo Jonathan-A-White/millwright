@@ -135,3 +135,17 @@ func TestGristSmokeHelpNamesRefAndItsCommittedHEAD(t *testing.T) {
 		}
 	}
 }
+
+// mw grist smoke --help points a branch's examples at eval --ref, since smoke
+// reads the rig's main.
+func TestGristSmokeHelpPointsAtEvalRefForExamples(t *testing.T) {
+	out, err := runMw(t, "grist", "smoke", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "smoke reads main; to prove an example on a branch, use mw grist eval <app> <kind> --example <name> --ref <worktree>"
+	if !strings.Contains(out, want) {
+		t.Errorf("expected the help to say %q, got %q", want, out)
+	}
+	t.Log(want)
+}

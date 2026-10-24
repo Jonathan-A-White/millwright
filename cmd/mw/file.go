@@ -88,17 +88,19 @@ func newFileCmd() *cobra.Command {
 
 			// A rig table that cannot be read costs the plan only the wrong-rig warning.
 			rigs, _ := config.Rigs()
+			gristApps, _ := config.GristApps()
 			filing := application.File{
-				Tracker:  gateway,
-				Rules:    vault.New(dir),
-				Rigs:     rigs,
-				RigFiles: rig.Files{},
-				Waive:    application.EpicWaiver{Names: waive, Because: because},
-				GuestAsk: guestAsk,
-				Contacts: contactBook(),
-				Out:      cmd.OutOrStdout(),
-				Err:      cmd.ErrOrStderr(),
-				Approve:  approval(cmd, approved),
+				Tracker:   gateway,
+				Rules:     vault.New(dir),
+				Rigs:      rigs,
+				RigFiles:  rig.Files{},
+				GristApps: gristApps,
+				Waive:     application.EpicWaiver{Names: waive, Because: because},
+				GuestAsk:  guestAsk,
+				Contacts:  contactBook(),
+				Out:       cmd.OutOrStdout(),
+				Err:       cmd.ErrOrStderr(),
+				Approve:   approval(cmd, approved),
 			}
 			if check {
 				return filing.Check(cmd.Context(), plan)
