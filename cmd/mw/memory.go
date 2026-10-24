@@ -73,7 +73,9 @@ func newMemoryAddCmd() *cobra.Command {
 			"(one flagged recheck is to be superseded or retired), a sentence with a newline and a kind\n" +
 			"that is not gotcha or decision. An add that takes the boot render over its budget still writes the\n" +
 			"fact, then WARNs with the overage and the command `mw memory make-room <rig> --bytes 0`;\n" +
-			"--make-room runs that first, for the new line's own size (see make-room), and adds only if it made the room.",
+			"--make-room runs that first, for the new line's own size (see make-room), and adds only if it made the room.\n" +
+			"A new fact that ranks ahead of an expected fact and pushes it out of the top 3 of an eval.md question is\n" +
+			"named in a 'WARN: eval question at line N' line.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			memory, err := memoryFor(cmd)
@@ -134,7 +136,13 @@ func newMemoryRetireCmd() *cobra.Command {
 		Use:   "retire <rig> <slug> --reason <why>",
 		Short: "Retire a fact, keeping its sentence and the reason",
 		Long: "retire sets status retired, retired: today and the reason. The file stays. It refuses a slug\n" +
-			"that is unknown or already retired.",
+			"that is unknown or already retired. A fact ranks after every current one once retired, so each\n" +
+			"eval.md question that expects it is run over the facts as they will be: one that no longer\n" +
+			"finds it in its top 3 is named in a 'WARN: eval question at line N' line, since mw memory\n" +
+			"eval fails on it until an expect is added. A reason that begins 'merged into <slug>' or\n" +
+			"'superseded by <slug>', naming a current fact, replaces the expect with that slug when the\n" +
+			"question finds it (it adds the slug while the question still finds the retired one), as\n" +
+			"supersede does.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			memory, err := memoryFor(cmd)
@@ -155,7 +163,10 @@ func newMemoryRecheckCmd() *cobra.Command {
 		Use:   "recheck <rig> <slug> [--why <text>]",
 		Short: "Flag a fact as in doubt, so that it is no longer read at boot",
 		Long: "recheck sets status recheck, appending --why to the reason. A Builder reads current facts\n" +
-			"only; supersede or retire settles a fact in doubt, and add refuses its slug meanwhile.",
+			"only; supersede or retire settles a fact in doubt, and add refuses its slug meanwhile. A\n" +
+			"flagged fact ranks after every current one, so each eval.md question that expects it and no\n" +
+			"longer finds it in its top 3 is named in a 'WARN: eval question at line N' line, since mw\n" +
+			"memory eval fails on it until an expect is added.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			memory, err := memoryFor(cmd)

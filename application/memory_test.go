@@ -936,3 +936,158 @@ func TestAddOverBudgetWithoutMakeRoomPrintsTheCommandAndTheOverage(t *testing.T)
 		t.Errorf("without --make-room nothing is demoted")
 	}
 }
+
+// aCrowdedGate is a rig with a current fact "gate" that the question "gate make
+// lint" expects, and two current facts of an earlier subject that the question
+// finds too: gate is third among them while current, and falls to fourth if it
+// stops being current while a current fact of a later subject joins them.
+func aCrowdedGate() *editableFiles {
+	return &editableFiles{
+		files: map[string]string{
+			"gate.md":    queryFact("gate", "The gate runs make test then make lint."),
+			"alpha-1.md": queryFact("alpha", "The gate make lint step one."),
+			"alpha-2.md": queryFact("alpha", "The gate make lint step two."),
+		},
+		eval: "Q: gate make lint\nexpect: gate\n",
+	}
+}
+
+func TestRetiringAFactThatAQuestionNoLongerFindsWarnsOfTheQuestionAndRetiresIt(t *testing.T) {
+	files, vault := aCrowdedGate(), &recordingVault{}
+	files.files["zeta-1.md"] = queryFact("zeta", "The gate make lint step three.")
+	var out bytes.Buffer
+	if err := anEditableMemory(files, vault, &out).Retire(context.Background(), "kiln", "gate", "no longer true"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "WARN: eval question at line 1 (gate make lint) expects gate, which is retired now") {
+		t.Errorf("no warning naming the question and the slug:\n%s", out.String())
+	}
+	if !strings.Contains(files.files["gate.md"], "status: retired") || len(vault.messages) != 1 {
+		t.Errorf("the retire did not happen:\n%s\n%v", files.files["gate.md"], vault.messages)
+	}
+}
+
+func TestRetiringAFactThatAQuestionStillFindsPrintsNoWarning(t *testing.T) {
+	files := aCrowdedGate()
+	var out bytes.Buffer
+	if err := anEditableMemory(files, &recordingVault{}, &out).Retire(context.Background(), "kiln", "gate", "no longer true"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "WARN") {
+		t.Errorf("warned though the question still finds the fact:\n%s", out.String())
+	}
+}
+
+func TestRetiringAFactMergedIntoAnotherReplacesTheExpectWhenTheQuestionFindsTheOther(t *testing.T) {
+	for _, reason := range []string{"merged into gate-new", "superseded by gate-new (mw-4)"} {
+		files, vault := aCrowdedGate(), &recordingVault{}
+		files.files["gate-new.md"] = queryFact("zeta", "The gate runs make test and make lint in the foreground.")
+		files.files["alpha-3.md"] = queryFact("alpha", "The gate make lint step three.")
+		files.files["alpha-3.md"] = strings.Replace(files.files["alpha-3.md"], "status: current", "status: retired", 1)
+		var out bytes.Buffer
+		memory := anEditableMemory(files, vault, &out)
+		if err := memory.Retire(context.Background(), "kiln", "gate", reason); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), "WARN") {
+			t.Errorf("%s: warned though the question finds the other fact:\n%s", reason, out.String())
+		}
+		if !strings.Contains(files.eval, "Q: gate make lint\nexpect: gate-new\n") {
+			t.Errorf("%s: the expect was not replaced:\n%s", reason, files.eval)
+		}
+		out.Reset()
+		if err := memory.Eval(context.Background(), "kiln"); err != nil {
+			t.Errorf("%s: the eval fails after the retire: %v\n%s", reason, err, out.String())
+		}
+		if got := strings.Join(vault.paths[0], " "); !strings.Contains(got, "eval.md") || !strings.Contains(got, "gate.md") {
+			t.Errorf("%s: the commit lacks a file: %v", reason, vault.paths)
+		}
+	}
+}
+
+func TestRetiringAFactMergedIntoAFactTheQuestionDoesNotFindWarnsOfTheQuestion(t *testing.T) {
+	files := aCrowdedGate()
+	files.files["zeta-1.md"] = queryFact("zeta", "The gate make lint step three.")
+	files.files["gate-new.md"] = queryFact("zeta", "Nothing alike at all.")
+	var out bytes.Buffer
+	if err := anEditableMemory(files, &recordingVault{}, &out).Retire(context.Background(), "kiln", "gate", "merged into gate-new"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "WARN: eval question at line 1 (gate make lint) expects gate, which is retired now, and does not find gate-new") {
+		t.Errorf("no warning naming the question:\n%s", out.String())
+	}
+	if strings.Contains(files.eval, "gate-new") {
+		t.Errorf("eval.md was changed:\n%s", files.eval)
+	}
+}
+
+func TestRetiringWithAReasonNamingAFactThatIsNotCurrentChangesNoExpect(t *testing.T) {
+	files := aCrowdedGate()
+	files.files["zeta-1.md"] = queryFact("zeta", "The gate make lint step three.")
+	var out bytes.Buffer
+	if err := anEditableMemory(files, &recordingVault{}, &out).Retire(context.Background(), "kiln", "gate", "merged into nothing-here"); err != nil {
+		t.Fatal(err)
+	}
+	if files.eval != "Q: gate make lint\nexpect: gate\n" || !strings.Contains(out.String(), "WARN: eval question at line 1") {
+		t.Errorf("eval.md:\n%s\n%s", files.eval, out.String())
+	}
+}
+
+func TestFlaggingAFactThatAQuestionNoLongerFindsWarnsOfTheQuestionAndFlagsIt(t *testing.T) {
+	files, vault := aCrowdedGate(), &recordingVault{}
+	files.files["zeta-1.md"] = queryFact("zeta", "The gate make lint step three.")
+	var out bytes.Buffer
+	if err := anEditableMemory(files, vault, &out).Recheck(context.Background(), "kiln", "gate", "may have changed"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "WARN: eval question at line 1 (gate make lint) expects gate, which is flagged to recheck now") {
+		t.Errorf("no warning naming the question and the slug:\n%s", out.String())
+	}
+	if !strings.Contains(files.files["gate.md"], "status: recheck") || len(vault.messages) != 1 {
+		t.Errorf("the recheck did not happen:\n%s\n%v", files.files["gate.md"], vault.messages)
+	}
+}
+
+func TestFlaggingAFactThatAQuestionStillFindsPrintsNoWarning(t *testing.T) {
+	files := aCrowdedGate()
+	var out bytes.Buffer
+	if err := anEditableMemory(files, &recordingVault{}, &out).Recheck(context.Background(), "kiln", "gate", "may have changed"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "WARN") {
+		t.Errorf("warned though the question still finds the fact:\n%s", out.String())
+	}
+}
+
+func TestAddingAFactThatPushesAnExpectedFactOutOfAQuestionsTopResultsWarnsOfTheQuestion(t *testing.T) {
+	files := aCrowdedGate()
+	var out bytes.Buffer
+	err := anEditableMemory(files, &recordingVault{}, &out).Add(context.Background(), application.MemoryAdd{
+		Rig: "kiln", Subject: "aaa", Source: "mw-2", Kind: application.FactGotcha, Slug: "gate-more",
+		Sentence: "The gate make lint step zero.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "WARN: eval question at line 1 (gate make lint) expects gate") {
+		t.Errorf("no warning naming the question:\n%s", out.String())
+	}
+	if _, ok := files.files["gate-more.md"]; !ok {
+		t.Errorf("the fact was not added")
+	}
+}
+
+func TestAddingAFactThatPushesNothingOutPrintsNoQuestionWarning(t *testing.T) {
+	files := aCrowdedGate()
+	var out bytes.Buffer
+	err := anEditableMemory(files, &recordingVault{}, &out).Add(context.Background(), application.MemoryAdd{
+		Rig: "kiln", Subject: "zzz", Source: "mw-2", Kind: application.FactGotcha, Slug: "gate-more",
+		Sentence: "The gate make lint step last.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "WARN: eval question") {
+		t.Errorf("warned though nothing was pushed out:\n%s", out.String())
+	}
+}

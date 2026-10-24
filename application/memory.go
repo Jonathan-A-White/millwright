@@ -314,7 +314,28 @@ func (m Memory) Add(ctx context.Context, req MemoryAdd) error {
 		said += ")"
 	}
 	fmt.Fprintln(m.Out, said)
+	if err := m.warnPushedOutByAdd(ctx, req.Rig, fact); err != nil {
+		return err
+	}
 	return m.warnOverBudget(ctx, req.Rig)
+}
+
+// warnPushedOutByAdd warns of each eval.md question that finds an expected
+// fact in its top results without the fact just added, and no longer does with
+// it: a new current fact ranks ahead of every recheck, superseded and retired
+// one, and among the current ones by its subject and slug.
+func (m Memory) warnPushedOutByAdd(ctx context.Context, rig string, added RigFact) error {
+	_, _, after, err := m.load(ctx, rig)
+	if err != nil {
+		return err
+	}
+	before := make(map[string]RigFact, len(after))
+	for slug, fact := range after {
+		if slug != added.Slug {
+			before[slug] = fact
+		}
+	}
+	return m.warnPushedOut(ctx, rig, before, after, "a new fact, "+added.Slug+", now outranks")
 }
 
 // warnOverBudget says, after an add, that the render is over its budget and
@@ -557,28 +578,9 @@ func (m Memory) carryEvalQuestions(ctx context.Context, rig string, old, success
 	all := orderedFacts(after)
 	carried := false
 	if found {
-		questions, err := ParseEval(text)
+		text, carried, err = m.carryExpects(text, old, successor, all)
 		if err != nil {
 			return "", err
-		}
-		for _, q := range questions {
-			if !q.expects(old.Slug) {
-				continue
-			}
-			switch {
-			case q.expects(successor.Slug):
-			case q.finds(all, successor.Slug):
-				if q.finds(all, old.Slug) {
-					text = addExpect(text, q, successor.Slug)
-				} else {
-					text = replaceExpect(text, q, old.Slug, successor.Slug)
-				}
-				carried = true
-			case !q.finds(all, old.Slug):
-				fmt.Fprintf(m.Out, "WARN: eval question at line %d (%s) expects %s, which is superseded now, and does not find %s: it will fail until an expect is added\n", q.Line, q.Question, old.Slug, successor.Slug)
-			default:
-				fmt.Fprintf(m.Out, "WARN: eval question at line %d (%s) expects %s, which is superseded now, and does not find %s: it passes only while %s stays in the top %d, and will fail from then until an expect is added\n", q.Line, q.Question, old.Slug, successor.Slug, old.Slug, EvalTop)
-			}
 		}
 	}
 	if carried {
@@ -600,6 +602,72 @@ func (m Memory) carryEvalQuestions(ctx context.Context, rig string, old, success
 		fmt.Fprintf(m.Out, "WARN: no eval question finds %s, which is out of the boot render (boot: no): add one to eval.md\n", successor.Slug)
 	}
 	return "", nil
+}
+
+// carryExpects is the loop of carryEvalQuestions over an eval.md text, with all
+// the facts in the order query reads them, old as it now is: it returns the
+// text with the expects carried and whether any was, and warns of each question
+// that expects old and cannot find successor. A question is read from the
+// status old has, "superseded" or "retired".
+func (m Memory) carryExpects(text string, old, successor RigFact, all []RigFact) (string, bool, error) {
+	questions, err := ParseEval(text)
+	if err != nil {
+		return "", false, err
+	}
+	carried := false
+	for _, q := range questions {
+		if !q.expects(old.Slug) {
+			continue
+		}
+		switch {
+		case q.expects(successor.Slug):
+		case q.finds(all, successor.Slug):
+			if q.finds(all, old.Slug) {
+				text = addExpect(text, q, successor.Slug)
+			} else {
+				text = replaceExpect(text, q, old.Slug, successor.Slug)
+			}
+			carried = true
+		case !q.finds(all, old.Slug):
+			fmt.Fprintf(m.Out, "WARN: eval question at line %d (%s) expects %s, which is %s now, and does not find %s: it will fail until an expect is added\n", q.Line, q.Question, old.Slug, statusPhrase(old.Status), successor.Slug)
+		default:
+			fmt.Fprintf(m.Out, "WARN: eval question at line %d (%s) expects %s, which is %s now, and does not find %s: it passes only while %s stays in the top %d, and will fail from then until an expect is added\n", q.Line, q.Question, old.Slug, statusPhrase(old.Status), successor.Slug, old.Slug, EvalTop)
+		}
+	}
+	return text, carried, nil
+}
+
+// statusPhrase is a fact's status as a warning says it.
+func statusPhrase(s FactStatus) string {
+	if s == FactRecheck {
+		return "flagged to recheck"
+	}
+	return string(s)
+}
+
+// warnPushedOut names each question of the rig's eval.md that finds an expected
+// fact in its top EvalTop among before and no longer does among after, so that
+// a change to the facts does not leave mw memory eval failing with nothing said
+// at the time. why finishes "which ..." in the warning, saying what changed the
+// order. It reads eval.md and writes nothing.
+func (m Memory) warnPushedOut(ctx context.Context, rig string, before, after map[string]RigFact, why string) error {
+	text, found, err := m.Files.ReadRigEval(ctx, m.Seat, rig)
+	if err != nil || !found {
+		return err
+	}
+	questions, err := ParseEval(text)
+	if err != nil {
+		return err
+	}
+	was, now := orderedFacts(before), orderedFacts(after)
+	for _, q := range questions {
+		for _, slug := range q.Expect {
+			if q.finds(was, slug) && !q.finds(now, slug) {
+				fmt.Fprintf(m.Out, "WARN: eval question at line %d (%s) expects %s, which %s: it no longer finds it in its top %d, and will fail until an expect is added\n", q.Line, q.Question, slug, why, EvalTop)
+			}
+		}
+	}
+	return nil
 }
 
 // withFact is facts with one more, by its slug, without changing the map given.
@@ -644,11 +712,69 @@ func (m Memory) Retire(ctx context.Context, rig, slug, reason string) error {
 	if fact.Status == FactRetired {
 		return fmt.Errorf("the fact %q of the rig %s is already retired", slug, rig)
 	}
+	before := facts
 	fact.Status, fact.Retired, fact.Reason = FactRetired, m.today(), strings.TrimSpace(reason)
-	if err := m.putAndRecord(ctx, rig, fact, "retire "+rig+" "+slug); err != nil {
+	path, err := m.put(ctx, rig, fact)
+	if err != nil {
+		return err
+	}
+	paths := []string{path}
+	evalPath, err := m.settleEvalQuestions(ctx, rig, before, fact, mergedInto(fact.Reason, facts, slug))
+	if err != nil {
+		return err
+	}
+	if evalPath != "" {
+		paths = append(paths, evalPath)
+	}
+	if err := m.record(ctx, "retire "+rig+" "+slug, paths...); err != nil {
 		return err
 	}
 	fmt.Fprintf(m.Out, "retired %s\n", slug)
+	return nil
+}
+
+// settleEvalQuestions deals with the questions of eval.md that expect a fact
+// just retired (old, with the facts as they were in before). A reason that
+// names a current fact as the one it was merged into or superseded by
+// (mergedInto) has its questions carried to that fact as supersede carries
+// them: the eval.md it writes is returned by its path from the vault's root,
+// empty when untouched. Any other reason leaves eval.md alone and warns of each
+// question that no longer finds old.
+func (m Memory) settleEvalQuestions(ctx context.Context, rig string, before map[string]RigFact, old RigFact, successor *RigFact) (string, error) {
+	if successor == nil {
+		return "", m.warnPushedOut(ctx, rig, before, withFact(before, old), "is retired now")
+	}
+	text, found, err := m.Files.ReadRigEval(ctx, m.Seat, rig)
+	if err != nil || !found {
+		return "", err
+	}
+	text, carried, err := m.carryExpects(text, old, *successor, orderedFacts(withFact(before, old)))
+	if err != nil || !carried {
+		return "", err
+	}
+	if _, err := m.Files.WriteRigEval(ctx, m.Seat, rig, text); err != nil {
+		return "", err
+	}
+	return pathpkg.Join(SeatsDir, m.Seat, RigsDir, rig, EvalFile), nil
+}
+
+// mergedInto is the current fact a retire reason names with 'merged into
+// <slug>' or 'superseded by <slug>' at its start (case does not matter, and
+// quotes or a closing mark after the slug do not count), or nil when it names
+// none, or one that is unknown, not current or the fact itself.
+func mergedInto(reason string, facts map[string]RigFact, self string) *RigFact {
+	lower := strings.ToLower(strings.TrimSpace(reason))
+	for _, lead := range []string{"merged into ", "superseded by "} {
+		rest, ok := strings.CutPrefix(lower, lead)
+		if !ok {
+			continue
+		}
+		word, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
+		slug := strings.Trim(word, "`'\".,;:()")
+		if fact, known := facts[slug]; known && slug != self && fact.Status == FactCurrent {
+			return &fact
+		}
+	}
 	return nil
 }
 
@@ -677,7 +803,11 @@ func (m Memory) Recheck(ctx context.Context, rig, slug, why string) error {
 		}
 		fact.Reason = why
 	}
+	before := facts
 	if err := m.putAndRecord(ctx, rig, fact, "recheck "+rig+" "+slug); err != nil {
+		return err
+	}
+	if err := m.warnPushedOut(ctx, rig, before, withFact(before, fact), "is flagged to recheck now"); err != nil {
 		return err
 	}
 	fmt.Fprintf(m.Out, "flagged %s to recheck\n", slug)
