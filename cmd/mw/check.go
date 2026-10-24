@@ -47,6 +47,12 @@ func newCheckCmd() *cobra.Command {
 			"A check that passes on a clean worktree names the commit it passed at on a tip line just before\n" +
 			"its verdict: on a rig that lands in batches, mw next closing out that very commit trusts it and\n" +
 			"does not run the rig's tests again, and its ledger line says so (plans/0117).\n\n" +
+			"Two of the checks read the branch's diff, before the formula and the tests: a file the branch adds that\n" +
+			"is build output or very large (an executable at the repo root, over 2 MB outside testdata), and a\n" +
+			"git+ssh:// line the branch adds to any package-lock.json (mw-gq6.740, mw-fof4qr). npm writes one when it\n" +
+			"locks a github:<owner>/<repo>#<sha> dependency, and a host with no GitHub SSH key cannot npm ci it;\n" +
+			"the refusal quotes the line(s) and the one fix, sed -i 's#git+ssh://git@github.com/#git+https://github.com/#g'\n" +
+			"<file>. Lines the target branch already holds are not the story's and are not refused.\n\n" +
 			"It does not read the session's result, which is not written\n" +
 			"until the session ends, and it does not try the merge, so a branch that passes here can still be\n" +
 			"stopped by a conflict or by the other host's work. The commits are counted against the target\n" +

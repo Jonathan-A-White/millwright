@@ -45,12 +45,17 @@ func TestABranchThatAddsAGitSSHLineToALockfileIsRefusedWithTheFileTheCountAndThe
 	for _, want := range []string{
 		"package-lock.json has 1 added line",
 		"web/package-lock.json has 2 added line",
+		`"resolved": "git+ssh://git@github.com/o/a.git#abc",`,
+		`"resolved": "git+ssh://git@github.com/o/d.git#456",`,
 		"sed -i 's#git+ssh://git@github.com/#git+https://github.com/#g' package-lock.json",
 		"sed -i 's#git+ssh://git@github.com/#git+https://github.com/#g' web/package-lock.json",
 	} {
 		if !strings.Contains(refusal.Said, want) {
 			t.Errorf("expected the refusal to say %q, got:\n%s", want, refusal.Said)
 		}
+	}
+	if strings.Contains(refusal.Said, "git+https://github.com/o/b.git#def") {
+		t.Errorf("expected the refusal to quote only the git+ssh lines, got:\n%s", refusal.Said)
 	}
 	if !strings.Contains(refusal.Why, "git+ssh://") || !strings.Contains(refusal.Why, "package-lock.json") {
 		t.Errorf("expected the why to name git+ssh:// and the file, got %q", refusal.Why)

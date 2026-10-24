@@ -124,6 +124,8 @@ const (
 	lockfileName = "package-lock.json"
 	lockfileSSH  = "git+ssh://"
 	githubSSH    = "git+ssh://git@github.com/"
+	// lockfileQuoted is how many of a file's git+ssh lines the refusal quotes.
+	lockfileQuoted = 3
 )
 
 // lockfileSSHRefusal is the refusal of a branch that adds a git+ssh:// line to a
@@ -160,6 +162,7 @@ func (n Next) lockfileSSHRefusal(ctx context.Context, c *closeOut, report *NextR
 	}
 	var paths []string
 	counts := map[string]int{}
+	quoted := map[string][]string{}
 	foreign := false
 	for _, k := range order {
 		if net[k] <= 0 {
@@ -169,6 +172,9 @@ func (n Next) lockfileSSHRefusal(ctx context.Context, c *closeOut, report *NextR
 			paths = append(paths, k.path)
 		}
 		counts[k.path] += net[k]
+		if len(quoted[k.path]) < lockfileQuoted {
+			quoted[k.path] = append(quoted[k.path], "    "+strings.TrimSpace(k.text))
+		}
 		foreign = foreign || !strings.Contains(k.text, githubSSH)
 	}
 	if len(paths) == 0 {
@@ -179,6 +185,10 @@ func (n Next) lockfileSSHRefusal(ctx context.Context, c *closeOut, report *NextR
 	for _, path := range paths {
 		total += counts[path]
 		found = append(found, fmt.Sprintf("- %s has %d added line(s) with %s", path, counts[path], lockfileSSH))
+		found = append(found, quoted[path]...)
+		if counts[path] > len(quoted[path]) {
+			found = append(found, fmt.Sprintf("    ... and %d more", counts[path]-len(quoted[path])))
+		}
 		fixes = append(fixes, fmt.Sprintf("sed -i 's#%s#git+https://github.com/#g' %s", githubSSH, path))
 	}
 	why := fmt.Sprintf("%s adds %d line(s) with %s to %s", c.branch, total, lockfileSSH, strings.Join(paths, ", "))
