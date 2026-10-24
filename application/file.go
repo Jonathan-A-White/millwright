@@ -515,8 +515,18 @@ type gristRun struct {
 	Ref       bool
 }
 
+// proseWords are English words that follow "mw grist eval" or "smoke" in prose
+// ("eval or smoke passes", "smoke the app"): no app is named so, and an app name
+// is never one of them (mw-snbavi).
+var proseWords = map[string]bool{
+	"or": true, "and": true, "on": true, "the": true, "a": true, "an": true,
+	"to": true, "for": true, "in": true, "of": true, "with": true, "is": true,
+	"are": true, "passes": true, "pass": true, "runs": true, "run": true,
+}
+
 // gristRunsIn finds each `mw grist eval <app>` and `mw grist smoke <app>` in the
-// text, line by line. An app is the first word after the verb that is not a flag.
+// text, line by line. An app is the word after the verb, unless that is a flag,
+// a placeholder or a word of prose (proseWords): then the line names no app.
 func gristRunsIn(text string) []gristRun {
 	var runs []gristRun
 	for _, line := range strings.Split(text, "\n") {
@@ -530,7 +540,7 @@ func gristRunsIn(text string) []gristRun {
 				continue
 			}
 			app := strings.Trim(words[i+3], "`'\".,;:()")
-			if app == "" || strings.HasPrefix(app, "-") || strings.HasPrefix(app, "<") {
+			if app == "" || strings.HasPrefix(app, "-") || strings.HasPrefix(app, "<") || proseWords[strings.ToLower(app)] {
 				continue
 			}
 			run := gristRun{Verb: verb, App: app}
