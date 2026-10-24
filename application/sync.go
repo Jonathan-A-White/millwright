@@ -552,6 +552,12 @@ type SyncReport struct {
 	// running at all. It is empty for every sync that got to touch the vault.
 	Blocked []string
 
+	// RunRecordNote is why the run record of a story in progress here, which
+	// the sync commits as found, was not: the tracker could not say what is
+	// running, or the commit failed. Empty when there was nothing to commit or
+	// it was committed (mw-vwveeq.1).
+	RunRecordNote string
+
 	// Retried is the notice that a merge conflict on the first beads cycle
 	// cleared on the one retry, naming what bd said on that first try. Empty
 	// when no retry happened.
@@ -632,6 +638,9 @@ func (r SyncReport) String() string {
 		}
 	}
 	b.WriteString(r.beadsPhrase())
+	if r.RunRecordNote != "" {
+		fmt.Fprintf(&b, "; run record: %s", r.RunRecordNote)
+	}
 	if r.Retried != "" {
 		fmt.Fprintf(&b, "; %s", r.Retried)
 	}
@@ -883,7 +892,7 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 	if err != nil {
 		return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
 	}
-	report.Blocked = dirty
+	report.Blocked = s.commitRunRecords(ctx, dirty, &report)
 
 	if len(report.Blocked) == 0 {
 		if report.Marked, err = s.Vault.MarkLedgers(ctx); err != nil {
