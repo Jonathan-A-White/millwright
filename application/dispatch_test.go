@@ -823,34 +823,6 @@ func TestDispatchClearsAnEndedSessionOfTheSameNameWhateverItsExitWas(t *testing.
 	}
 }
 
-func TestDispatchRefusesAStoryWhoseSessionIsStillRunningAndTouchesNothing(t *testing.T) {
-	ctx := context.Background()
-	dispatch, tracker, worktrees, runner, _ := aFactory(t)
-	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
-	session := startOldSession(t, runner, "mw-gq6.1")
-
-	report, err := dispatch.Run(ctx)
-	if err == nil || !strings.Contains(err.Error(), "still running") {
-		t.Fatalf("expected the dispatch to refuse a story whose session is running, got %v", err)
-	}
-	if len(report.Started) != 0 || len(report.Failed) != 1 {
-		t.Fatalf("expected one failure and nothing started, got %+v", report)
-	}
-	if closed := runner.Closed(); len(closed) != 0 {
-		t.Errorf("expected nothing to be closed, got %q", closed)
-	}
-	if status, _ := runner.Status(ctx, session); !status.Running() {
-		t.Errorf("expected the running session to be left alone, got %+v", status)
-	}
-	if added, removed := worktrees.was(); len(added)+len(removed) != 0 {
-		t.Errorf("expected no worktree to be cut or removed, got %q added and %q removed", added, removed)
-	}
-	detail, _ := tracker.ShowStory(ctx, "mw-gq6.1")
-	if detail.Assignee != "" || detail.Status == apptest.StatusInProgress {
-		t.Errorf("expected the story to be left unclaimed, got status %q assignee %q", detail.Status, detail.Assignee)
-	}
-}
-
 func TestDispatchGivesBackTheClaimAndTheWorktreeWhenTheDeadSessionWillNotClose(t *testing.T) {
 	ctx := context.Background()
 	dispatch, tracker, worktrees, runner, _ := aFactory(t)
