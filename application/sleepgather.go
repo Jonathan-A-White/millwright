@@ -220,6 +220,9 @@ func evidenceText(found []VerifyEvidence, days, budget int) (text, cut string, a
 	var out strings.Builder
 	for _, e := range found {
 		fmt.Fprintf(&out, "## %s, written %s\n", e.Txid, e.At.Format(verifyTimeFormat))
+		if words, ok := evidenceWords(e); ok {
+			out.WriteString("the words he sent with the picture: " + strings.TrimSpace(cutBytes(words, sleepEvidenceText)) + "\n")
+		}
 		for _, path := range e.Files {
 			name := filepath.Base(path)
 			if strings.EqualFold(filepath.Ext(name), ".txt") {

@@ -125,6 +125,9 @@ type VerifyConfirmRequest struct {
 	// Shows, when given, is what the evidence shows; without a PROPOSED comment
 	// for the txid it is required, and the record says it was by hand.
 	Shows string
+	// Force, when given, is why a txid written before the bead's landing may
+	// still confirm it; the reason stands in the record.
+	Force string
 }
 
 // VerifyConfirm is mw verify confirm: it writes the VERIFIED comment for a
@@ -134,6 +137,11 @@ type VerifyConfirm struct {
 	Beads  VerifyConfirmBeads
 	Notes  PosternNotes
 	Sender PosternSender
+	// InboxDir is where the inbox pass saved his messages and pictures; it dates
+	// the txid of a confirm by hand. Empty dates it only by a PROPOSED comment.
+	InboxDir string
+	// Now is the clock; nil is time.Now.
+	Now func() time.Time
 	// Out is where each act is said. A nil Out says nothing.
 	Out io.Writer
 }
@@ -210,6 +218,18 @@ func (c VerifyConfirm) Run(ctx context.Context, req VerifyConfirmRequest) error 
 		}
 	}
 
+	older, err := c.olderThanLanding(ctx, bead, demo, req.Txid, proposal.At)
+	if err != nil {
+		return fmt.Errorf("mw verify confirm: %w", err)
+	}
+	if older != "" {
+		reason := strings.Join(strings.Fields(req.Force), " ")
+		if reason == "" {
+			return fmt.Errorf("mw verify confirm: %s, so it cannot show %s working; if you know better, say why with --force \"<reason>\"", older, req.Bead)
+		}
+		how += "; forced although " + older + ": " + reason
+	}
+
 	text := VerifiedComment(by, req.Txid, shows, how)
 	if err := c.Beads.CommentOnStory(ctx, req.Bead, text); err != nil {
 		return fmt.Errorf("mw verify confirm: commenting on %s: %w", req.Bead, err)
@@ -224,6 +244,50 @@ func (c VerifyConfirm) Run(ctx context.Context, req VerifyConfirmRequest) error 
 	}
 	c.printf("closed %s\n", req.Bead)
 	return c.clearCard(ctx, req)
+}
+
+// olderThanLanding says, when the evidence txid was written before the bead
+// landed, what is wrong ("direct:x was written 2026-10-23 21:50Z, before
+// mw-a landed at 2026-10-23 23:42Z"); "" when it was not, or when either time is
+// not known. The bead landed when it was closed, or, for an open demo, when the
+// newest story of its epic did. The txid is dated by the inbox's file, else by
+// the time its PROPOSED comment names (proposedAt).
+func (c VerifyConfirm) olderThanLanding(ctx context.Context, bead StoryDetail, demo bool, txid, proposedAt string) (string, error) {
+	landed := bead.ClosedAt
+	if demo {
+		landed = time.Time{}
+		if bead.EpicID != "" {
+			now := time.Now()
+			if c.Now != nil {
+				now = c.Now()
+			}
+			closed, err := c.Beads.ClosedStories(ctx, now.Add(-verifyEpicLookback))
+			if err != nil {
+				return "", fmt.Errorf("reading the landed stories: %w", err)
+			}
+			for _, s := range closed {
+				if s.landed() && s.EpicID == bead.EpicID && s.ID != bead.Story.ID && s.ClosedAt.After(landed) {
+					landed = s.ClosedAt
+				}
+			}
+		}
+	}
+	if landed.IsZero() {
+		return "", nil
+	}
+	var wrote time.Time
+	if c.InboxDir != "" {
+		if found, err := ReadVerifyEvidence(c.InboxDir, time.Time{}, []string{txid}); err == nil && len(found) == 1 {
+			wrote = found[0].At
+		}
+	}
+	if wrote.IsZero() {
+		wrote, _ = time.Parse(verifyTimeFormat, proposedAt)
+	}
+	if wrote.IsZero() || !wrote.Before(landed) {
+		return "", nil
+	}
+	return fmt.Sprintf("%s was written %s, before %s landed at %s", txid, wrote.UTC().Format(verifyTimeFormat), bead.Story.ID, landed.UTC().Format(verifyTimeFormat)), nil
 }
 
 // clearCard clears the demo's card the way mw postern clear does, with one reply

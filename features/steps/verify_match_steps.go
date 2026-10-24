@@ -54,6 +54,7 @@ func InitializeVerifyMatchScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Given(`^a verify fixture with the demos "([^"]*)" and "([^"]*)"$`, c.demos)
 	ctx.Given(`^a verify landing "([^"]*)" closed a day ago whose closing comment says how to check it$`, c.landing)
+	ctx.Given(`^a verify landing "([^"]*)" closed (\d+) minutes ago whose closing comment says how to check it$`, c.landingMinutesAgo)
 	ctx.Given(`^a saved message of his "([^"]*)" and a saved picture "([^"]*)"$`, c.evidence)
 	ctx.Given(`^the verify stand-in answers "([^"]*)" from "([^"]*)" showing "([^"]*)" at (\d+\.\d+)$`, c.standInAnswers)
 	ctx.When(`^mw verify match runs$`, func() error { return c.run(false) })
@@ -62,6 +63,13 @@ func InitializeVerifyMatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the verify bead "([^"]*)" has no new comment$`, c.hasNoComment)
 	ctx.Then(`^the Mayor has one verify mail saying "([^"]*)" with the line "([^"]*)"$`, c.mailSays)
 	ctx.Then(`^the verify run's record keeps the answer for "([^"]*)" as left out$`, c.recordKeeps)
+	ctx.Then(`^the verify run's record keeps the answer for "([^"]*)" from "([^"]*)" as dropped for being older than the landing$`, c.recordDropped)
+	ctx.Then(`^the verify output says "([^"]*)"$`, func(want string) error {
+		if !strings.Contains(c.out.String(), want) {
+			return fmt.Errorf("the output does not say %q:\n%s", want, c.out.String())
+		}
+		return nil
+	})
 	ctx.Then(`^the verify stand-in was called once$`, func() error { return c.calls(1) })
 	ctx.Then(`^the verify stand-in was not called$`, func() error { return c.calls(0) })
 	ctx.Then(`^no verify bead was closed$`, c.noneClosed)
@@ -90,9 +98,15 @@ func (c *verifyMatchContext) demos(first, second string) error {
 	return nil
 }
 
-func (c *verifyMatchContext) landing(id string) error {
+func (c *verifyMatchContext) landing(id string) error { return c.landingAgo(id, 24*time.Hour) }
+
+func (c *verifyMatchContext) landingMinutesAgo(id string, minutes int) error {
+	return c.landingAgo(id, time.Duration(minutes)*time.Minute)
+}
+
+func (c *verifyMatchContext) landingAgo(id string, ago time.Duration) error {
 	c.beads.Closed = append(c.beads.Closed, application.ClosedStory{
-		ID: id, Title: "Story " + id, Type: "task", CloseReason: "landed on main", ClosedAt: verifyMatchNow.Add(-24 * time.Hour),
+		ID: id, Title: "Story " + id, Type: "task", CloseReason: "landed on main", ClosedAt: verifyMatchNow.Add(-ago),
 	})
 	c.beads.Comments[id] = []application.Comment{{Author: "mw", Created: verifyMatchNow, Text: "Done.\n\nHOW TO CHECK IT, for the Governor:\n1. Tap Save.\n\nFor the rig memory:\nnothing"}}
 	return nil
@@ -210,6 +224,33 @@ func (c *verifyMatchContext) recordKeeps(bead string) error {
 		}
 	}
 	return fmt.Errorf("the record has no answer for %s: %s", bead, raw)
+}
+
+func (c *verifyMatchContext) recordDropped(bead, txid string) error {
+	names, err := filepath.Glob(filepath.Join(c.runs, "*.json"))
+	if err != nil || len(names) != 1 {
+		return fmt.Errorf("expected one run record, got %v (%v)", names, err)
+	}
+	raw, err := os.ReadFile(names[0])
+	if err != nil {
+		return err
+	}
+	var record struct {
+		Dropped int                                    `json:"dropped"`
+		Matches []struct{ Bead, Txid, Outcome string } `json:"matches"`
+	}
+	if err := json.Unmarshal(raw, &record); err != nil {
+		return err
+	}
+	for _, m := range record.Matches {
+		if m.Bead == bead && m.Txid == txid {
+			if !strings.Contains(m.Outcome, "older than the landing") || record.Dropped != 1 {
+				return fmt.Errorf("the record's outcome for %s from %s is %q, dropped %d", bead, txid, m.Outcome, record.Dropped)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("the record has no answer for %s from %s: %s", bead, txid, raw)
 }
 
 func (c *verifyMatchContext) calls(want int) error {

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -103,6 +104,10 @@ type VerifyCandidate struct {
 	Title string
 	// Check is the text that says how to see it working.
 	Check string
+	// LandedAt is when the change landed: a landing's close time, a demo's the
+	// newest close among the stories of its epic. Evidence written before it
+	// cannot show the change working. Zero when nothing is known to have landed.
+	LandedAt time.Time
 }
 
 // firstWord is the first word of a comment's text.
@@ -225,15 +230,19 @@ func VerifyCandidates(ctx context.Context, beads VerifyBeads, now time.Time, sin
 		}
 		var check strings.Builder
 		check.WriteString("The demo's description:\n" + strings.TrimSpace(d.Description) + "\n")
+		var landedAt time.Time
 		for _, c := range landed {
 			if d.EpicID == "" || c.EpicID != d.EpicID || c.ID == d.Story.ID {
 				continue
+			}
+			if c.ClosedAt.After(landedAt) {
+				landedAt = c.ClosedAt
 			}
 			if section := howToCheckIt(comments[c.ID]); section != "" {
 				check.WriteString(fmt.Sprintf("\nLanded under the same epic, %s (%s):\n%s\n", c.ID, c.Title, section))
 			}
 		}
-		out = append(out, VerifyCandidate{Bead: d.Story.ID, Kind: VerifyKindDemo, Title: d.Story.Title, Check: check.String()})
+		out = append(out, VerifyCandidate{Bead: d.Story.ID, Kind: VerifyKindDemo, Title: d.Story.Title, Check: check.String(), LandedAt: landedAt})
 	}
 	sort.SliceStable(landed, func(a, b int) bool { return landed[a].ClosedAt.Before(landed[b].ClosedAt) })
 	have := map[string]bool{}
@@ -245,7 +254,7 @@ func VerifyCandidates(ctx context.Context, beads VerifyBeads, now time.Time, sin
 			continue
 		}
 		if section := howToCheckIt(comments[c.ID]); section != "" {
-			out = append(out, VerifyCandidate{Bead: c.ID, Kind: VerifyKindLanding, Title: c.Title, Check: section + "\n"})
+			out = append(out, VerifyCandidate{Bead: c.ID, Kind: VerifyKindLanding, Title: c.Title, Check: section + "\n", LandedAt: c.ClosedAt})
 		}
 	}
 	return out, nil
@@ -260,6 +269,40 @@ type VerifyEvidence struct {
 	At time.Time
 	// Files are the full paths: the .txt of the message and its pictures.
 	Files []string
+}
+
+// KeptWords is the text of his message txid as the inbox kept it whole
+// (<txid>.message.json, PosternKeptFile) in dir; false when none is kept.
+func KeptWords(dir, txid string) (string, bool) {
+	raw, err := os.ReadFile(PosternKeptFile(dir, txid))
+	if err != nil {
+		return "", false
+	}
+	var kept keptMessage
+	if json.Unmarshal(raw, &kept) != nil {
+		return "", false
+	}
+	return kept.Text, true
+}
+
+// evidenceWords is the words he sent with a piece of evidence that holds a
+// picture and no .txt of its own: the text the inbox kept for its txid. A picture
+// read without them reads as a screenshot of the thing working, though they may
+// ask for it (mw-gq6.742). ok is false when the evidence holds no picture, has a
+// .txt of its own, or no words are kept.
+func evidenceWords(e VerifyEvidence) (text string, ok bool) {
+	picture := false
+	for _, path := range e.Files {
+		if strings.EqualFold(filepath.Ext(path), ".txt") {
+			return "", false
+		}
+		picture = true
+	}
+	if !picture {
+		return "", false
+	}
+	text, ok = KeptWords(filepath.Dir(e.Files[0]), e.Txid)
+	return strings.TrimSpace(text), ok && strings.TrimSpace(text) != ""
 }
 
 // verifyEvidenceExts are the files of the inbox that are evidence: his text and

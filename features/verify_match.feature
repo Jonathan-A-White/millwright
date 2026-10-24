@@ -26,3 +26,12 @@ Feature: mw verify match proposes what the Governor's use shows met
     And the verify stand-in was not called
     And no verify comment was written
     And the Mayor has no verify mail
+
+  Scenario: a picture sent before the landing is dropped and counted, one sent after it still proposes
+    Given a verify landing "s-late" closed 90 minutes ago whose closing comment says how to check it
+    And the verify stand-in answers "s-late" from "direct:bbb" showing "the picture of the new reading" at 0.9
+    And the verify stand-in answers "s-late" from "direct:aaa" showing "he used the new reading" at 0.9
+    When mw verify match runs
+    Then the verify bead "s-late" has one comment opening PROPOSED that names "direct:aaa" and "he used the new reading"
+    And the verify run's record keeps the answer for "s-late" from "direct:bbb" as dropped for being older than the landing
+    And the verify output says "1 dropped"

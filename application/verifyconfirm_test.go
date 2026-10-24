@@ -182,3 +182,45 @@ func TestVerifyListMarksADemoThatNeedsHisWord(t *testing.T) {
 		t.Fatalf("expected d-1 listed with the reason, got %+v:\n%s", waiting, out.String())
 	}
 }
+
+// A txid written before the bead landed cannot confirm it (mw-gq6.742).
+func TestVerifyConfirmRefusesAProposalWrittenBeforeTheDemosEpicLanded(t *testing.T) {
+	ctx := context.Background()
+	r := newConfirmRig(t)
+	// The proposal for d-1 is from direct:aaa, written 17:00Z; e-1 landed 17:30Z.
+	r.beads.Closed = append(r.beads.Closed, verifyClosed("s-e1", "e-1", "landed on main", 30*time.Minute))
+	err := r.confirm().Run(ctx, application.VerifyConfirmRequest{Bead: "d-1", Txid: "direct:aaa"})
+	if err == nil || !strings.Contains(err.Error(), "before d-1 landed") || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("expected a refusal naming the landing and --force, got %v", err)
+	}
+	if len(r.beads.Written) != 0 || len(r.beads.Shut) != 0 {
+		t.Fatalf("a refusal changes nothing: %+v %+v", r.beads.Written, r.beads.Shut)
+	}
+	if err := r.confirm().Run(ctx, application.VerifyConfirmRequest{Bead: "d-1", Txid: "direct:aaa", Force: "he used it again later"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) < 1 || firstWordOf(r.beads.Written[0].Text) != "VERIFIED" || !strings.Contains(r.beads.Written[0].Text, "forced although") || !strings.Contains(r.beads.Written[0].Text, "he used it again later") {
+		t.Fatalf("the reason stands in the record: %+v", r.beads.Written)
+	}
+}
+
+func TestVerifyConfirmByHandDatesTheTxidByTheInboxAndRefusesOneBeforeTheLanding(t *testing.T) {
+	ctx := context.Background()
+	r := newConfirmRig(t)
+	r.beads.Details = map[string]application.StoryDetail{
+		"s-1": {Story: domain.Story{ID: "s-1", Title: "Story s-1"}, Status: application.StatusClosed, ClosedAt: verifyNow.Add(-90 * time.Minute)},
+	}
+	confirm := r.confirm()
+	confirm.InboxDir = r.inbox
+	// direct:bbb was written two hours before the clock, s-1 landed 90 minutes before it.
+	err := confirm.Run(ctx, application.VerifyConfirmRequest{Bead: "s-1", Txid: "direct:bbb", Shows: "the lamp lit"})
+	if err == nil || !strings.Contains(err.Error(), "before s-1 landed") {
+		t.Fatalf("expected a refusal, got %v", err)
+	}
+	if len(r.beads.Written) != 0 {
+		t.Fatalf("a refusal writes nothing: %+v", r.beads.Written)
+	}
+	if err := confirm.Run(ctx, application.VerifyConfirmRequest{Bead: "s-1", Txid: "direct:aaa", Shows: "the lamp lit"}); err != nil {
+		t.Fatalf("evidence after the landing confirms: %v", err)
+	}
+}

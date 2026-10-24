@@ -3424,14 +3424,17 @@ finds applied and does not match again. The steps are in `features/verify_realti
 
 `mw verify list` prints every open demo, and every landing of the last 14 days, that has a `PROPOSED` comment and no
 `VERIFIED` one: the bead, the txid, what it shows, the confidence and the `mw verify confirm` line. It supersedes the
-vault's `bin/mayor-unverified`. `mw verify confirm <bead> --txid <txid> [--as mayor|deputy] [--shows "<text>"]` reads
+vault's `bin/mayor-unverified`. `mw verify confirm <bead> --txid <txid> [--as mayor|deputy] [--shows "<text>"] [--force "<reason>"]` reads
 the `PROPOSED` comment for that txid and writes the standing record, whose first word is `VERIFIED`: `VERIFIED by
 the Governor's use, inferred by the <Mayor|Deputy> from <txid>: <what it shows> (proposed by mw verify match, run
 <id>)`. A bead that carries the label `demo` and is open or deferred is then closed on that reason, and its card is
 cleared as `mw postern clear` does, with one reply in the card's thread; a landing already closed gets the comment
 only. A bead with no `PROPOSED` comment for the txid is refused unless `--shows` says what shows it, and then the
 comment ends `(by hand)`. A demo whose title, description or epic touches money, keys, secrets or a charter is listed
-but never confirmed by a seat: it is his word to give. Neither command calls an agent. The steps are in
+but never confirmed by a seat: it is his word to give. A txid written before the bead landed (a landing's close, or an
+open demo's newest epic story's close) cannot show it working and is refused unless `--force "<reason>"` says why; the
+reason stands in the comment. `mw verify match` and the sleep pass drop such a match the same way (the run log's
+`dropped` counts them) and give each picture the words he sent with it. Neither command calls an agent. The steps are in
 `features/verify_confirm.feature`.
 
 ## Saved prompts

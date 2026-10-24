@@ -120,9 +120,9 @@ func parseVerifySince(said string) (time.Duration, error) {
 }
 
 func newVerifyConfirmCmd() *cobra.Command {
-	var txid, as, shows string
+	var txid, as, shows, force string
 	cmd := &cobra.Command{
-		Use:   "confirm <bead> --txid <txid> [--as mayor|deputy] [--shows \"<text>\"]",
+		Use:   "confirm <bead> --txid <txid> [--as mayor|deputy] [--shows \"<text>\"] [--force \"<reason>\"]",
 		Short: "Record a PROPOSED match as verified by his use: the VERIFIED comment, the demo closed, its card cleared",
 		Long: "confirm reads the PROPOSED comment for that txid on the bead (mw verify match wrote it) and writes the\n" +
 			"standing comment, whose first word is VERIFIED:\n" +
@@ -132,21 +132,28 @@ func newVerifyConfirmCmd() *cobra.Command {
 			"closed, gets the comment only and keeps its status. No agent is called.\n\n" +
 			"A bead with no PROPOSED comment for the txid is refused, unless --shows \"<text>\" says what shows it: the\n" +
 			"comment then ends (by hand). A demo whose title, description or epic touches money, keys, secrets or a\n" +
-			"charter is refused: it is his word to give, not a seat's. A bead already carrying a VERIFIED comment is refused.",
+			"charter is refused: it is his word to give, not a seat's. A bead already carrying a VERIFIED comment is refused.\n\n" +
+			"A txid written before the bead landed (a landing's close, an open demo's newest epic story's close) cannot show\n" +
+			"it working, and is refused unless --force \"<reason>\" says why; the reason stands in the VERIFIED comment.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, _, err := posternGateway()
 			if err != nil {
 				return err
 			}
+			inbox, err := config.PosternInboxDir()
+			if err != nil {
+				return err
+			}
 			return application.VerifyConfirm{
-				Beads: gateway, Notes: gateway, Sender: newHandsPush(gateway), Out: cmd.OutOrStdout(),
-			}.Run(cmd.Context(), application.VerifyConfirmRequest{Bead: args[0], Txid: txid, As: as, Shows: shows})
+				Beads: gateway, Notes: gateway, Sender: newHandsPush(gateway), InboxDir: inbox, Out: cmd.OutOrStdout(),
+			}.Run(cmd.Context(), application.VerifyConfirmRequest{Bead: args[0], Txid: txid, As: as, Shows: shows, Force: force})
 		},
 	}
 	cmd.Flags().StringVar(&txid, "txid", "", "the txid of his message or picture that shows it (required)")
 	cmd.Flags().StringVar(&as, "as", "mayor", "who infers it: mayor or deputy")
 	cmd.Flags().StringVar(&shows, "shows", "", "what the evidence shows; required when no PROPOSED comment names the txid, and then recorded as by hand")
+	cmd.Flags().StringVar(&force, "force", "", "why a txid written before the bead landed may still confirm it; recorded in the comment")
 	_ = cmd.MarkFlagRequired("txid")
 	return cmd
 }

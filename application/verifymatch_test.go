@@ -250,3 +250,91 @@ func TestVerifyMatchReadsOnlyTheNewestLandingsAndEveryDemo(t *testing.T) {
 		t.Fatalf("the newest landing is read")
 	}
 }
+
+// A picture sent before a landing cannot show that landing met (mw-gq6.742):
+// mw-9q8wp1.9 was proposed from the very ask that made it.
+func TestVerifyMatchDropsEvidenceOlderThanTheLandingAndCountsIt(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[
+	 {"bead":"s-late","txid":"direct:bbb","shows":"the picture of the new reading","confidence":0.82},
+	 {"bead":"s-late","txid":"direct:aaa","shows":"he used the new reading","confidence":0.9}]}`)
+	r.beads.Closed = append(r.beads.Closed, verifyClosed("s-late", "e-9", "landed on main", 90*time.Minute))
+	r.beads.Comments["s-late"] = verifyComment(closingWithCheck)
+	result, err := r.match().Run(context.Background(), application.VerifyOptions{Since: 7 * 24 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) != 1 || !strings.Contains(r.beads.Written[0].Text, "direct:aaa") || strings.Contains(r.beads.Written[0].Text, "direct:bbb") {
+		t.Fatalf("expected one proposal, from the evidence after the landing: %+v", r.beads.Written)
+	}
+	if len(result.Proposed) != 1 || result.Proposed[0].Txid != "direct:aaa" {
+		t.Fatalf("proposed: %+v", result.Proposed)
+	}
+	raw, err := os.ReadFile(filepath.Join(r.runs, result.Run+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record struct {
+		Dropped int `json:"dropped"`
+		Matches []struct{ Txid, Outcome string }
+	}
+	if err := json.Unmarshal(raw, &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.Dropped != 1 {
+		t.Fatalf("the run log should count one dropped, got %d: %s", record.Dropped, raw)
+	}
+	if record.Matches[0].Txid != "direct:bbb" || !strings.Contains(record.Matches[0].Outcome, "older than the landing") {
+		t.Fatalf("the dropped match is not marked: %s", raw)
+	}
+	if !strings.Contains(r.out.String(), "1 dropped") {
+		t.Fatalf("the run does not say it dropped one:\n%s", r.out.String())
+	}
+}
+
+func TestVerifyMatchDropsEvidenceOlderThanTheNewestLandingOfADemosEpic(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[
+	 {"bead":"d-1","txid":"direct:bbb","shows":"a picture of the screen","confidence":0.95},
+	 {"bead":"d-1","txid":"direct:aaa","shows":"the green tick after Save","confidence":0.95}]}`)
+	// d-1's epic e-1 has two landings: one long ago, one 90 minutes ago.
+	r.beads.Closed = append(r.beads.Closed,
+		verifyClosed("s-old", "e-1", "landed on main", 20*time.Hour), verifyClosed("s-new", "e-1", "landed on main", 90*time.Minute))
+	if _, err := r.match().Run(context.Background(), application.VerifyOptions{Since: 7 * 24 * time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) != 1 || !strings.Contains(r.beads.Written[0].Text, "direct:aaa") {
+		t.Fatalf("expected only the evidence after the epic's newest landing to propose: %+v", r.beads.Written)
+	}
+}
+
+func TestVerifyMatchGivesAPictureTheWordsHeSentWithIt(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[]}`)
+	kept := `{"txid":"direct:bbb","text":"the reading should also say the book chapter and verse"}`
+	if err := os.WriteFile(filepath.Join(r.inbox, "direct-bbb.message.json"), []byte(kept), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.match().Run(context.Background(), application.VerifyOptions{Since: 7 * 24 * time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	call := r.grinder.Calls()[0]
+	words, ok := call.Files["direct-bbb.words.txt"]
+	if !ok || !strings.Contains(string(words), "the reading should also say the book chapter and verse") {
+		t.Fatalf("the picture's own words are not in the dir: %v", call.Files)
+	}
+	if !strings.Contains(call.Call.Prompt, "direct-bbb.words.txt") {
+		t.Fatalf("the prompt does not name the picture's words file:\n%s", call.Call.Prompt)
+	}
+	if !strings.Contains(call.Call.System, "the words he sent with a picture decide whether it asks for the change or shows it") {
+		t.Fatalf("the system prompt does not say a picture's own words decide:\n%s", call.Call.System)
+	}
+}
+
+func TestVerifyMatchSaysSoWhenNoWordsAreSavedWithAPicture(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[]}`)
+	if _, err := r.match().Run(context.Background(), application.VerifyOptions{Since: 7 * 24 * time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	words, ok := r.grinder.Calls()[0].Files["direct-bbb.words.txt"]
+	if !ok || !strings.Contains(string(words), "No words") {
+		t.Fatalf("a picture with no saved words still gets a words file that says so: %v", r.grinder.Calls()[0].Files)
+	}
+}

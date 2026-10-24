@@ -566,3 +566,18 @@ func TestAGatherWithNothingToReadTheEvidenceFromSaysSo(t *testing.T) {
 		}
 	}
 }
+
+func TestTheBundleGivesAPictureTheWordsHeSentWithIt(t *testing.T) {
+	g, inbox := evidenceGather(t)
+	kept := `{"txid":"direct:bbb","text":"the reading should also say the book and verse"}`
+	if err := os.WriteFile(filepath.Join(inbox, "direct-bbb.message.json"), []byte(kept), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := partsByFile(bundle)[application.SleepEvidenceFile].Text; !strings.Contains(text, "the words he sent with the picture: the reading should also say the book and verse") {
+		t.Errorf("evidence.txt does not give the picture its words:\n%s", text)
+	}
+}
