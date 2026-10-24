@@ -1,5 +1,7 @@
 package application
 
+import "regexp"
+
 // DispatchGate is one reason mw dispatch leaves a ready story unclaimed. Name is
 // the word the gate's own `// gate: <name>` comment in Dispatch.run carries.
 type DispatchGate struct {
@@ -25,6 +27,7 @@ var DispatchGates = []DispatchGate{
 	{"rig-not-checked-out", "the rig is not under [rigs] in the config file"},
 	{"smoke-hold", "the rig's last grist smoke failed and the story does not name a failing example in its smoke_examples, title or description"},
 	{"metered-network", "the rig installs dependencies and the network is metered"},
+	{"no-grist-key", "the story's acceptance or description runs mw grist eval or mw grist smoke, or its path carries smoke_examples, and the host has no readable grist test key"},
 	{"formula-not-installed", "the path's formula is not installed in the vault"},
 	{"no-sweep", "a bug filed after the sweep rule has no line beginning 'Sweep:' in its acceptance"},
 	{"tester-no-landed-story", "it is a Tester story whose description has no 'Landed story: <id>' line, so its session could not file a finding"},
@@ -34,4 +37,14 @@ var DispatchGates = []DispatchGate{
 	{"shared-files", "it names a file a running story of the rig names or has changed"},
 	{"testers-per-rig", "it is a Tester story and its rig runs testers_per_rig Tester stories already, on any host"},
 	{"cap", "the host runs as many sessions as it may"},
+}
+
+// gristCommand is a command that needs the factory's grist test key.
+var gristCommand = regexp.MustCompile(`\bmw grist (eval|smoke)\b`)
+
+// needsGristTestKey says a story's checks need the grist test key: its
+// acceptance or description runs mw grist eval or mw grist smoke, or it carries
+// a smoke_examples key (mw-gq6.741).
+func needsGristTestKey(detail StoryDetail) bool {
+	return len(detail.SmokeExamples) > 0 || gristCommand.MatchString(detail.Acceptance) || gristCommand.MatchString(detail.Description)
 }

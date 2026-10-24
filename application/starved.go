@@ -53,6 +53,7 @@ var StarvedHolds = map[string]string{
 	"rig-not-checked-out":    "rig not checked out",
 	"smoke-hold":             "smoke hold",
 	"metered-network":        "metered network",
+	"no-grist-key":           "no grist key",
 	"formula-not-installed":  "formula not installed",
 	"no-sweep":               "no sweep",
 	"tester-no-landed-story": "tester names no landed story",

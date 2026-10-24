@@ -370,6 +370,8 @@ func newDispatchCmd() *cobra.Command {
 
 				RetryFromBranch: fromBranch,
 				Rebases:         worktrees,
+
+				HasGristTestKey: hostHasGristTestKey,
 			}
 			// The mill answers what it left waiting, on the host that is home and
 			// where a [grist] table says so. A mill that cannot be set up costs

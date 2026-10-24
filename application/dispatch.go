@@ -215,6 +215,13 @@ type Dispatch struct {
 	Network  NetworkReader
 	HeavyNet map[string]bool
 
+	// HasGristTestKey says whether this host holds the factory's grist test key,
+	// which a story's checks need when they run mw grist eval or mw grist smoke
+	// (mw-gq6.741). A story that names such a check is passed over on a host
+	// without it and stays open for one that has it. A nil HasGristTestKey holds
+	// nothing back.
+	HasGristTestKey func() bool
+
 	// SmokeHolds is asked, once for each rig, whether a failed grist smoke holds
 	// the rig's open stories (mw-gq6.319): such a story is passed over and stays
 	// open, taken by the first tick after the smoke passes or the hold is lifted.
@@ -1040,6 +1047,17 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		if network != nil && network.Metered && d.HeavyNet[path.Rig] {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "metered-network", Why: fmt.Sprintf(
 				"the rig %s installs dependencies and the network is metered %s: it waits for one that is not", path.Rig, network.Why())})
+			continue
+		}
+
+		// gate: no-grist-key
+		// A story whose checks run mw grist eval or mw grist smoke cannot be
+		// checked on a host without the factory's grist test key: it stays open,
+		// unclaimed, for a host that has one, whether it names this host or auto
+		// (mw-gq6.741).
+		if d.HasGristTestKey != nil && needsGristTestKey(detail) && !d.HasGristTestKey() {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "no-grist-key", Why: fmt.Sprintf(
+				"its checks run mw grist eval or mw grist smoke and %s has no grist test key (grist_test_key_file in the config file): it waits for a host that has one", d.Host)})
 			continue
 		}
 

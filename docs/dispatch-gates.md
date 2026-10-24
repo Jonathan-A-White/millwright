@@ -21,6 +21,7 @@ three.
 | `rig-not-checked-out` | the rig is not under `[rigs]` in the config file |
 | `smoke-hold` | the rig's last grist smoke failed and the story does not name a failing example in its smoke_examples, title or description |
 | `metered-network` | the rig installs dependencies and the network is metered |
+| `no-grist-key` | the story's acceptance or description runs `mw grist eval` or `mw grist smoke`, or its path carries `smoke_examples`, and the host has no readable grist test key (`grist_test_key_file`); it waits for a host that has one (mw-gq6.741) |
 | `formula-not-installed` | the path's formula is not installed in the vault |
 | `no-sweep` | a bug filed after the sweep rule has no line beginning `Sweep:` in its acceptance (below) |
 | `tester-no-landed-story` | a Tester story's description has no `Landed story: <id>` line: its session could not file a finding (mw-gq6.594) |
@@ -116,6 +117,7 @@ is mapped there too, and a test says so.
 | `rig-not-checked-out` | rig not checked out |
 | `smoke-hold` | smoke hold |
 | `metered-network` | metered network |
+| `no-grist-key` | no grist key |
 | `formula-not-installed` | formula not installed |
 | `no-sweep` | no sweep |
 | `tester-no-landed-story` | tester names no landed story |

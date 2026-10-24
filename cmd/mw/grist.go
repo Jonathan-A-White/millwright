@@ -785,6 +785,19 @@ func gristTestPublicKey() string {
 	return pub
 }
 
+// hostHasGristTestKey says whether this host holds the grist smoke's test key
+// where its config names it: what a dispatch asks before it takes a story whose
+// checks run mw grist eval or smoke (mw-gq6.741). A key it cannot place or read
+// is none.
+func hostHasGristTestKey() bool {
+	path, err := config.GristTestKeyFile()
+	if err != nil {
+		return false
+	}
+	exists, err := postern.New(path).Exists()
+	return err == nil && exists
+}
+
 // hostGristRoom is what the dispatch and mw status read of the mill on this
 // host (mw-t0z3fu.4): its grind slots and its kept runs, with the room limits
 // the config file gave. nil, with no error, on a host with no [grist] table:
