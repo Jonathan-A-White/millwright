@@ -131,3 +131,52 @@ func TestADispatchWithNoGristKeyReaderHoldsNothingBack(t *testing.T) {
 		t.Fatalf("started %v, %v; want mw-gq6.1", startedIDs(report), err)
 	}
 }
+
+func TestDispatchOnAHostWithNoGristKeyReadsTheFilesKeyForGrinds(t *testing.T) {
+	for files, held := range map[string]bool{
+		"grinds/word-list.json":                     true,
+		"grinds/examples/x/y.json":                  true,
+		"application/x.go,grinds/examples/*/*.json": true,
+		"grinds/**":                  true,
+		"grinds":                     true,
+		"./grinds/word-list.json":    true,
+		"application/x.go,docs/y.md": false,
+		"docs/grinds/notes.md":       false,
+		"grindstone/x.go":            false,
+	} {
+		dispatch, tracker := aGristKeyFactory(t, false)
+		if err := tracker.SetStoryMetadata(context.Background(), "mw-gq6.1", map[string]string{"files": files}); err != nil {
+			t.Fatal(err)
+		}
+		report, err := dispatch.Run(context.Background())
+		if err != nil {
+			t.Fatalf("files %q: dispatching: %v", files, err)
+		}
+		if passed := passedFor(report, "mw-gq6.1"); (passed != nil && passed.Gate == "no-grist-key") != held {
+			t.Errorf("files %q: passed %+v, want held = %v", files, passed, held)
+		}
+	}
+}
+
+func TestDispatchGristKeyHoldsAStoryWhoseFilesKeyNamesGrindsOnAHostWithNoKey(t *testing.T) {
+	for _, hasKey := range []bool{false, true} {
+		dispatch, tracker := aGristKeyFactory(t, hasKey)
+		if err := tracker.SetStoryMetadata(context.Background(), "mw-gq6.1", map[string]string{"files": "grinds/examples/word-list/x.json"}); err != nil {
+			t.Fatal(err)
+		}
+		report, err := dispatch.Run(context.Background())
+		if err != nil {
+			t.Fatalf("key %v: dispatching: %v", hasKey, err)
+		}
+		passed := passedFor(report, "mw-gq6.1")
+		if hasKey {
+			if passed != nil {
+				t.Fatalf("passed over %+v on a host with the key", passed)
+			}
+			continue
+		}
+		if passed == nil || passed.Gate != "no-grist-key" || !strings.Contains(passed.Why, "files key") {
+			t.Fatalf("passed %+v, want mw-gq6.1 passed over with gate no-grist-key naming the files key", report.Passed)
+		}
+	}
+}
