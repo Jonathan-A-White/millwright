@@ -63,7 +63,7 @@ func TestADispatchClosesASuiteBugWhoseSpecPassesOnMainAndStartsNoSession(t *test
 	if len(recheck.asked) != 1 || recheck.asked[0] != "millwright "+greekSpec {
 		t.Fatalf("the re-run was asked for %v, want the spec of the bug on its rig", recheck.asked)
 	}
-	want := "fixed on main before dispatch: " + greekSpec + " passes at 9f3c2ab41 (3 tests)"
+	want := "already fixed on main at 9f3c2ab41: " + greekSpec + " passes (3 tests)"
 	if got := tracker.CloseReason("mw-gq6.1"); got != want {
 		t.Errorf("close reason:\n got %q\nwant %q", got, want)
 	}
@@ -85,7 +85,7 @@ func TestADispatchClosesASuiteBugWhoseSpecPassesOnMainAndStartsNoSession(t *test
 	if sessions := runner.Started(); len(sessions) != 0 {
 		t.Errorf("a session was started: %v", sessions)
 	}
-	if !strings.Contains(report.String(), "fixed on main before dispatch") {
+	if !strings.Contains(report.String(), "already fixed on main at") {
 		t.Errorf("the report should say it, got:\n%s", report.String())
 	}
 }

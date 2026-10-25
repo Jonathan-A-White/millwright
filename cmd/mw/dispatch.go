@@ -226,13 +226,17 @@ func newDispatchCmd() *cobra.Command {
 			"grist_slow_factor (default 1.5) times that kind's par (its median over the last 50) it starts none,\n" +
 			"until they recover; the reason is the room event's. Stories already running are never stopped, and\n" +
 			"a grind never waits for a slot.\n\n" +
-			"A story labelled suite (a bug the nightly whole suite filed) whose files key is one test file is\n" +
-			"re-checked first, before it is claimed: that spec is run alone on a fresh worktree of the rig's\n" +
-			"origin main, with the command mw suite runs a file alone with. If it passes, a story that landed\n" +
-			"since the suite's sha has fixed it: the bug is closed (\"fixed on main before dispatch: <spec> passes\n" +
-			"at <sha> (<n> tests)\") with the end of the run in a comment, and no session is started. If it fails,\n" +
-			"or cannot be run, the story is dispatched as ever and its line says so. A flaky file's bug and a dry run\n" +
-			"are never re-run.\n\n" +
+			"A bug is re-checked first, before it is claimed (mw-gq6.414, mw-gq6.775). Its check is, in this\n" +
+			"order: the one test file of a story labelled suite; a line beginning \"Check:\" that names a test\n" +
+			"file or a mw grist eval <app> <kind> --example line; any such eval line; a test file named in the\n" +
+			"title. A spec is run alone on a fresh worktree of the rig's origin main, with the command mw suite\n" +
+			"runs a file alone with; an eval line sends those examples through the backend as the test key against\n" +
+			"the app's main, from a host that holds the grist test key. If the check passes, a story that landed\n" +
+			"since the bug was filed has fixed it: the bug is closed (\"already fixed on main at <sha>: <check>\n" +
+			"passes\") with the end of the run in a comment, and no session is started. If it fails, or cannot be\n" +
+			"run, the story is dispatched as ever and its line says so; a bug that names no check is dispatched\n" +
+			"and its line says \"no check named\", and one that names an example on a host without the key says\n" +
+			"\"no key on this host\". A story that is not a bug, a flaky file's bug and a dry run are never re-run.\n\n" +
 			"--dry-run prints what it would start and writes nothing: nothing is synced, claimed, cut,\n" +
 			"poured or started.",
 		Args: cobra.NoArgs,
@@ -365,8 +369,9 @@ func newDispatchCmd() *cobra.Command {
 					Trees: worktrees, Heads: worktrees, Runner: rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs), rig.WithTimingTests(files.TimingTests(cmd.Context()))),
 					Rigs: rigs, Tests: tests, ChangedSpecs: changedSpecs,
 				},
-				DryRun: dryRun,
-				Out:    cmd.OutOrStdout(),
+				ExampleRechecks: hostExampleRecheck{},
+				DryRun:          dryRun,
+				Out:             cmd.OutOrStdout(),
 
 				RetryFromBranch: fromBranch,
 				Rebases:         worktrees,

@@ -239,11 +239,16 @@ type Dispatch struct {
 	// (mw-gq6.599). A nil Rules expects nothing of any rig.
 	Rules EpicRules
 
-	// Rechecks re-runs a nightly-suite bug's spec on its rig's main before the bug
-	// is dispatched (mw-gq6.414): a spec that passes there is fixed already, and
-	// the bug is closed with no session. A nil Rechecks re-runs nothing, and a dry
+	// Rechecks re-runs the spec a bug names (a nightly-suite bug's files key, a
+	// Check: line, its title: BugCheck) on its rig's main before the bug is
+	// dispatched (mw-gq6.414, mw-gq6.775): a spec that passes there is fixed
+	// already, and the bug is closed with no session. A nil Rechecks re-runs nothing, and a dry
 	// run re-runs nothing either.
 	Rechecks SpecRechecker
+	// ExampleRechecks sends the grist examples a bug names (mw grist eval <app>
+	// <kind> --example <name>) against the app's main, from a host with the grist
+	// test key. A nil ExampleRechecks sends none, and the bug is dispatched.
+	ExampleRechecks ExampleRechecker
 
 	// GateLock is the host's gate lock, the one a rig's gate takes (mw-gq6.416).
 	// A suite bug's re-run on main is a heavy run, so it is made only while the
@@ -285,8 +290,9 @@ type SpecRechecker interface {
 
 var _ SpecRechecker = Suite{}
 
-// FixedOnMain is one nightly-suite bug this dispatch closed without a session,
-// because its spec passes on the rig's main already (mw-gq6.414).
+// FixedOnMain is one bug this dispatch closed without a session, because the
+// check it names passes on the rig's main already (mw-gq6.414, mw-gq6.775). Spec
+// is that check as the reason names it.
 type FixedOnMain struct {
 	StoryID string
 	Spec    string
@@ -296,7 +302,7 @@ type FixedOnMain struct {
 
 // reason is what the story is closed with.
 func (f FixedOnMain) reason() string {
-	said := fmt.Sprintf("fixed on main before dispatch: %s passes at %s", f.Spec, short(f.Sha))
+	said := fmt.Sprintf("already fixed on main at %s: %s passes", short(f.Sha), f.Spec)
 	if f.Tests > 0 {
 		said += fmt.Sprintf(" (%d %s)", f.Tests, plural(f.Tests, "test", "tests"))
 	}
@@ -1197,7 +1203,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// a slot is free to take it and before any claim: it takes none of the
 		// sessions, and one that waits for a slot is not re-run tick after tick
 		// (mw-gq6.414).
-		recheck, fixed := d.recheckSuiteBug(ctx, detail, path, &report)
+		recheck, fixed := d.recheckBug(ctx, detail, path, &report)
 		if fixed {
 			continue
 		}
@@ -1260,19 +1266,38 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	return report, nil
 }
 
-// recheckSuiteBug re-runs the spec of a nightly-suite bug on its rig's main,
-// before the story is claimed. A spec that passes closes the story (no session,
-// no claim, no worktree) and fixed is true. Otherwise the story is dispatched as
-// it always was, and said is what the re-run came to for its line: that the spec
-// still fails, or why it could not be re-run. Nothing is re-run in a dry run, and
-// nothing for a story that is not labelled suite, names more than one file or is a flaky file's bug.
-func (d Dispatch) recheckSuiteBug(ctx context.Context, detail StoryDetail, path domain.Path, report *DispatchReport) (said string, fixed bool) {
-	spec, suiteBug := suiteSpec(detail, path.Files)
-	if d.Rechecks == nil || d.DryRun || !suiteBug {
+// recheckBug re-runs the check a bug names on its rig's main, before the story is
+// claimed (mw-gq6.414, mw-gq6.775). A check that passes closes the story (no
+// session, no claim, no worktree) and fixed is true. Otherwise the story is
+// dispatched as it always was, and said is what the re-run came to for its line:
+// that the check still fails, why it could not be run, or that the bug names none.
+// Nothing is re-run in a dry run, and nothing for a story that is not a bug, or is
+// a flaky file's bug.
+func (d Dispatch) recheckBug(ctx context.Context, detail StoryDetail, path domain.Path, report *DispatchReport) (said string, fixed bool) {
+	check, named, asked := bugCheck(detail, path.Files)
+	if (d.Rechecks == nil && d.ExampleRechecks == nil) || d.DryRun || !asked {
 		return "", false
 	}
 	id := detail.Story.ID
-	found, err := d.recheckUnderGate(ctx, id, path.Rig, spec, report)
+	if !named {
+		return noCheckNamed, false
+	}
+	var found SpecRecheck
+	var err error
+	if check.IsExample() {
+		if d.ExampleRechecks == nil {
+			return "", false
+		}
+		found, err = d.ExampleRechecks.RecheckExamples(ctx, check.App, check.Kind, check.Examples)
+		if errors.Is(err, ErrNoGristKey) {
+			return noGristKeyHere, false
+		}
+	} else {
+		if d.Rechecks == nil {
+			return "", false
+		}
+		found, err = d.recheckUnderGate(ctx, id, path.Rig, check.Spec, report)
+	}
 	var busy gateBusy
 	if errors.As(err, &busy) {
 		d.noteRecheckSkip(ctx, report, id, busy.Error())
@@ -1283,17 +1308,17 @@ func (d Dispatch) recheckSuiteBug(ctx context.Context, detail StoryDetail, path 
 		d.noteRecheckSkip(ctx, report, id, "not re-run on main first: "+firstLine(err.Error()))
 		return fmt.Sprintf("not re-run on main first: %v", oneLine(err.Error())), false
 	case !found.Passed:
-		return fmt.Sprintf("re-run on main first: %s still fails at %s", spec, short(found.Sha)), false
+		return fmt.Sprintf("re-run on main first: %s (%s) still fails at %s", check, check.Source, short(found.Sha)), false
 	}
-	one := FixedOnMain{StoryID: id, Spec: spec, Sha: found.Sha, Tests: found.Tests}
+	one := FixedOnMain{StoryID: id, Spec: check.String(), Sha: found.Sha, Tests: found.Tests}
 	if err := d.Tracker.CloseStory(ctx, id, one.reason()); err != nil {
-		said := fmt.Sprintf("%s passes on main but the story could not be closed: %v", spec, oneLine(err.Error()))
+		said := fmt.Sprintf("%s passes on main but the story could not be closed: %v", check, oneLine(err.Error()))
 		d.noteRecheckSkip(ctx, report, id, said)
 		return said, false
 	}
-	comment := fmt.Sprintf("mw dispatch on %s re-ran %s on %s's main before dispatching this bug, and it passes at %s, "+
-		"so the bug was closed with no session (a story that landed after the nightly suite's sha fixed it).\n\nThe end of the run:\n%s",
-		d.Host, spec, path.Rig, found.Sha, strings.TrimSpace(found.Tail))
+	comment := fmt.Sprintf("mw dispatch on %s ran %s (%s) on %s's main before dispatching this bug, and it passes at %s, "+
+		"so the bug was closed with no session (a story that landed after the bug was filed fixed it).\n\nThe end of the run:\n%s",
+		d.Host, check, check.Source, path.Rig, found.Sha, strings.TrimSpace(found.Tail))
 	if err := d.Tracker.CommentOnStory(ctx, id, comment); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: it was closed as fixed on main, but the run's tail could not be commented on: %v", id, err))
 	}
