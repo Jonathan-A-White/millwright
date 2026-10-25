@@ -2,6 +2,9 @@ package application_test
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,5 +135,268 @@ func TestVerifyEvidenceReadsAMessageAndItsPictureByTxid(t *testing.T) {
 	}
 	if _, err := application.ReadVerifyEvidence(dir, verifyNow, []string{"direct:nope"}); err == nil || !strings.Contains(err.Error(), "direct:nope") {
 		t.Fatalf("a txid with no file is an error naming it, got %v", err)
+	}
+}
+
+// The deploy check of mw verify <id> (mw-gq6.760): the deployed marker, the
+// healthz URL and the strings a bead names, against a fake marker file, a fake
+// HTTP server and a fake bundle.
+
+const deployedCommit = "8fde6ab55a1d5ccbad7d1cfdc8190382679d4874"
+
+// voteString holds a $, which a shell would have expanded.
+const voteString = "Vote for tonight's best trunk and you could win a $150 Amazon gift card"
+
+type deployMarks map[string]string
+
+func (m deployMarks) Built(_ context.Context, key string) (string, error) { return m[key], nil }
+func (m deployMarks) MarkBuilt(_ context.Context, key, commit string) error {
+	m[key] = commit
+	return nil
+}
+
+// httpWeb is a VerifyWeb that asks a real, local, fake server.
+type httpWeb struct{}
+
+func (httpWeb) Get(ctx context.Context, url string) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	return resp.StatusCode, body, err
+}
+
+// boardServer serves a health answer, an index page naming one hashed bundle
+// and that bundle, which holds bundleText.
+func boardServer(t *testing.T, health string, healthStatus int, bundleText string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/leaderboard/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(healthStatus)
+		_, _ = io.WriteString(w, health)
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, `<html><head><script type="module" crossorigin src="/assets/index-Ab12_cD.js"></script></head></html>`)
+	})
+	mux.HandleFunc("/assets/index-Ab12_cD.js", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, bundleText)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+type deployFixture struct {
+	beads *apptest.FakeVerifyBeads
+	rules *apptest.FakeEpicRules
+	marks deployMarks
+	out   *strings.Builder
+}
+
+func newDeployFixture(server *httptest.Server, healthz bool, description string, comments ...string) deployFixture {
+	f := deployFixture{
+		beads: &apptest.FakeVerifyBeads{Details: map[string]application.StoryDetail{}, Comments: map[string][]application.Comment{}},
+		rules: apptest.NewFakeEpicRules(),
+		marks: deployMarks{"leaderboard.deployed": deployedCommit},
+		out:   &strings.Builder{},
+	}
+	f.beads.Details["lb-1"] = application.StoryDetail{
+		Story:       domain.Story{ID: "lb-1", Title: "vote link", Overrides: domain.Path{Rig: "leaderboard"}},
+		Status:      "closed",
+		Description: description,
+		CloseReason: "landed on main in batch 20 of leaderboard (batch commit 8fde6ab55a1d, its fast-forward dac87a77c1cf, version 0.1.20), 1 commits, the rig's tests on the batch: pass",
+	}
+	for _, text := range comments {
+		f.beads.Comments["lb-1"] = append(f.beads.Comments["lb-1"], application.Comment{Author: "builder", Text: text})
+	}
+	requirements := domain.EpicRequirements{}
+	if server != nil {
+		requirements.SiteURL = server.URL + "/"
+		if healthz {
+			requirements.HealthzURL = server.URL + "/api/leaderboard/healthz"
+		}
+	}
+	f.rules.Require("leaderboard", requirements)
+	return f
+}
+
+func (f deployFixture) run(t *testing.T) (application.VerifyDeployResult, string) {
+	t.Helper()
+	result, err := application.VerifyDeploy{
+		Beads: f.beads, Rules: f.rules, Marks: f.marks, Web: httpWeb{}, Out: f.out,
+	}.Run(context.Background(), "lb-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result, f.out.String()
+}
+
+func TestVerifyDeployPassesWhenMarkerHealthzAndStringsAllAgree(t *testing.T) {
+	server := boardServer(t, "ok", http.StatusOK, `var a="x";var b="`+voteString+`";`)
+	f := newDeployFixture(server, true, "The vote card.\n\nVerify strings:\n"+voteString+"\n- `var a=\"x\"`\n\nMore text.", "Done.", "Verify strings: var b=")
+
+	result, out := f.run(t)
+
+	if result.Failed() {
+		t.Fatalf("expected a pass, got %+v\n%s", result, out)
+	}
+	for _, want := range []string{
+		"deploy OK", "8fde6ab55a1d", "healthz OK", "ok",
+		"found: " + voteString, "found: var a=\"x\"", "found: var b=",
+		"verify lb-1: deploy OK, healthz OK, strings 3/3 found",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestVerifyDeployCountsAStringNotInTheBundleAndFails(t *testing.T) {
+	server := boardServer(t, "ok", http.StatusOK, `var b="`+voteString+`";`)
+	f := newDeployFixture(server, true, "Verify strings:\n"+voteString+"\nnot in the bundle at all")
+
+	result, out := f.run(t)
+
+	if !result.Failed() {
+		t.Fatalf("a missing string must fail, got %+v\n%s", result, out)
+	}
+	for _, want := range []string{"found: " + voteString, "not found: not in the bundle at all", "strings 1/2 found"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestVerifyDeployFindsAStringWhoseApostropheTheBundleEscapes(t *testing.T) {
+	server := boardServer(t, "ok", http.StatusOK, `var b='Vote for tonight\'s best trunk';`)
+	f := newDeployFixture(server, true, "Verify strings:\nVote for tonight's best trunk")
+
+	result, out := f.run(t)
+
+	if result.Failed() || !strings.Contains(out, "strings 1/1 found") {
+		t.Fatalf("expected the escaped apostrophe to be found, got %+v\n%s", result, out)
+	}
+}
+
+func TestVerifyDeployFailsOnAMarkerThatIsNotTheLandingCommit(t *testing.T) {
+	server := boardServer(t, "ok", http.StatusOK, "")
+	f := newDeployFixture(server, true, "")
+	f.marks["leaderboard.deployed"] = "1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	result, out := f.run(t)
+
+	if !result.Failed() || !strings.Contains(out, "deploy MISMATCH") || !strings.Contains(out, "1111111") || !strings.Contains(out, "8fde6ab55a1d") {
+		t.Fatalf("expected a MISMATCH naming both commits, got %+v\n%s", result, out)
+	}
+}
+
+func TestVerifyDeployFailsOnADeployFailedMarkAtTheLandingCommit(t *testing.T) {
+	server := boardServer(t, "ok", http.StatusOK, "")
+	f := newDeployFixture(server, true, "")
+	f.marks["leaderboard.deploy-failed"] = deployedCommit + " 2"
+
+	result, out := f.run(t)
+
+	if !result.Failed() || !strings.Contains(out, "deploy MISMATCH") || !strings.Contains(out, "deploy-failed") {
+		t.Fatalf("expected a failed deploy to be named, got %+v\n%s", result, out)
+	}
+}
+
+func TestVerifyDeployFailsWhenHealthzDoesNotAnswerWell(t *testing.T) {
+	server := boardServer(t, "down", http.StatusServiceUnavailable, "")
+	f := newDeployFixture(server, true, "")
+
+	result, out := f.run(t)
+
+	if !result.Failed() || !strings.Contains(out, "healthz FAIL") || !strings.Contains(out, "503") {
+		t.Fatalf("expected healthz FAIL with the status, got %+v\n%s", result, out)
+	}
+}
+
+func TestVerifyDeployWithNoStringsSaysSoAndStillRunsTheOtherChecks(t *testing.T) {
+	server := boardServer(t, "ok", http.StatusOK, "")
+	f := newDeployFixture(server, true, "Nothing to grep here.", "A comment.")
+
+	result, out := f.run(t)
+
+	if result.Failed() {
+		t.Fatalf("no strings is no failure, got %+v\n%s", result, out)
+	}
+	for _, want := range []string{"no strings named on the bead", "deploy OK", "healthz OK", "verify lb-1: deploy OK, healthz OK, strings 0/0 found"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestVerifyDeployWithNoHealthzKeySaysSoAndFailsOnlyOnTheOtherChecks(t *testing.T) {
+	server := boardServer(t, "ok", http.StatusOK, `var b="here";`)
+	f := newDeployFixture(server, false, "Verify strings:\nhere")
+
+	result, out := f.run(t)
+
+	if result.Failed() || !strings.Contains(out, "no healthz for leaderboard") || !strings.Contains(out, "healthz none") {
+		t.Fatalf("expected no healthz to pass quietly, got %+v\n%s", result, out)
+	}
+
+	f = newDeployFixture(server, false, "Verify strings:\nnot here")
+	if result, out = f.run(t); !result.Failed() || !strings.Contains(out, "no healthz for leaderboard") {
+		t.Fatalf("a missing string still fails, got %+v\n%s", result, out)
+	}
+}
+
+func TestVerifyDeployNamesTheLandingCommitFromAnEachLandingToo(t *testing.T) {
+	server := boardServer(t, "ok", http.StatusOK, "")
+	f := newDeployFixture(server, true, "")
+	detail := f.beads.Details["lb-1"]
+	detail.CloseReason = "landed on main (fast-forward, 8fde6ab, version 0.1.4)"
+	f.beads.Details["lb-1"] = detail
+
+	result, out := f.run(t)
+
+	if result.Failed() || !strings.Contains(out, "deploy OK") {
+		t.Fatalf("expected the each-landing commit to be read, got %+v\n%s", result, out)
+	}
+}
+
+func TestVerifyDeployFailsWhenTheBeadNamesNoLandingCommit(t *testing.T) {
+	server := boardServer(t, "ok", http.StatusOK, "")
+	f := newDeployFixture(server, true, "")
+	detail := f.beads.Details["lb-1"]
+	detail.CloseReason = "never released: dropped"
+	f.beads.Details["lb-1"] = detail
+
+	result, out := f.run(t)
+
+	if !result.Failed() || !strings.Contains(out, "deploy MISMATCH") || !strings.Contains(out, "no landing commit") {
+		t.Fatalf("expected MISMATCH for a bead that names no commit, got %+v\n%s", result, out)
+	}
+}
+
+func TestVerifyDeployStringsSayNoSiteWhenTheRigHasNone(t *testing.T) {
+	f := newDeployFixture(nil, false, "Verify strings:\nhere")
+
+	result, out := f.run(t)
+
+	if !result.Failed() || !strings.Contains(out, "no site_url for leaderboard") || !strings.Contains(out, "strings 0/1 found") {
+		t.Fatalf("expected the missing site to fail the strings, got %+v\n%s", result, out)
+	}
+}
+
+func TestVerifyDeployRefusesABeadTheTrackerDoesNotHold(t *testing.T) {
+	f := newDeployFixture(nil, false, "")
+	_, err := application.VerifyDeploy{Beads: f.beads, Rules: f.rules, Marks: f.marks, Web: httpWeb{}, Out: f.out}.Run(context.Background(), "nope")
+	if err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("expected an error naming the bead, got %v", err)
 	}
 }

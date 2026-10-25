@@ -331,6 +331,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		QueuedAt:         b.queuedAt(),
 		Updated:          b.updated(),
 		ClosedAt:         b.closedAt(),
+		CloseReason:      b.CloseReason,
 		LeaseExpires:     b.leaseExpires(),
 		CommentCount:     b.CommentCount,
 		TodoRank:         b.rankText(application.TodoRankField),
