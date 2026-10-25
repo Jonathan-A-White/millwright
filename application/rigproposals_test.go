@@ -2,7 +2,10 @@ package application_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -160,6 +163,94 @@ func TestHasFactsFolderAndMemoryAddRefusalAgreeOnWhichRigsHaveOne(t *testing.T) 
 		refused := err != nil && strings.Contains(err.Error(), "make seats/builder/rigs/"+rig+"/ first")
 		if refused == want {
 			t.Errorf("%s: has folder %v but the list's error was %v", rig, want, err)
+		}
+	}
+}
+
+func TestAReadyMemoryCommandIsParsedToTheSameProposalAsTheTypedForm(t *testing.T) {
+	comment := "Done.\n\nFor the rig memory:\n" +
+		"mw memory add millwright --kind gotcha --subject bd --source mw-gq6.771 \"Point every bd call at the vault with -C.\"\n" +
+		"- mw memory add millwright --kind decision --subject 'tmux' --slug private-socket 'Tests use a builder'\\''s private socket.'\n" +
+		"mw memory supersede millwright bd-dash-c --source mw-gq6.771 \"Use -C, as its own call.\"\n" +
+		"mw memory retire millwright old-note --reason \"The script it described is gone.\"\n" +
+		"mw memory recheck millwright some-fact --why \"bd 1.4 may have changed it.\"\n"
+	got := application.ParseFactProposals(comment)
+	want := []application.FactProposal{
+		{Verb: application.ProposeGotcha, Subject: "bd", Sentence: "Point every bd call at the vault with -C."},
+		{Verb: application.ProposeDecision, Subject: "tmux", NewSlug: "private-socket", Sentence: "Tests use a builder's private socket."},
+		{Verb: application.ProposeSupersede, Slug: "bd-dash-c", Sentence: "Use -C, as its own call."},
+		{Verb: application.ProposeRetire, Slug: "old-note", Sentence: "The script it described is gone."},
+		{Verb: application.ProposeRecheck, Slug: "some-fact", Sentence: "bd 1.4 may have changed it."},
+	}
+	if len(got.Lines) != len(want) {
+		t.Fatalf("got %d lines, want %d: %+v", len(got.Lines), len(want), got.Lines)
+	}
+	for i, line := range got.Lines {
+		if line.Malformed != "" || !reflect.DeepEqual(line.Proposal, want[i]) {
+			t.Errorf("line %d: got %+v, want %+v", i, line, want[i])
+		}
+	}
+	// The mail renders each as the command that places it, with the story as source
+	// and a slug the Builder chose kept.
+	block := got.RigMemoryBlock("millwright", "mw-gq6.771", "")
+	for _, wantLine := range []string{
+		"mw memory add millwright --kind gotcha --subject 'bd' --source mw-gq6.771 'Point every bd call at the vault with -C.'",
+		"mw memory add millwright --kind decision --subject 'tmux' --slug private-socket --source mw-gq6.771 'Tests use a builder'\\''s private socket.'",
+	} {
+		if !strings.Contains(block, wantLine) {
+			t.Errorf("the block lacks %q:\n%s", wantLine, block)
+		}
+	}
+}
+
+func TestAMemoryCommandThatCannotBeReadIsNamedMalformed(t *testing.T) {
+	for name, line := range map[string]string{
+		"an add without a subject":   "mw memory add millwright --kind gotcha 'A sentence.'",
+		"an add of a wrong kind":     "mw memory add millwright --kind note --subject bd 'A sentence.'",
+		"an unclosed quote":          "mw memory add millwright --kind gotcha --subject bd 'A sentence.",
+		"a retire without a reason":  "mw memory retire millwright old-note",
+		"an unknown flag":            "mw memory add millwright --kind gotcha --subject bd --bogus x 'A sentence.'",
+		"an unknown mw memory verb":  "mw memory forget millwright old-note",
+		"a command with extra words": "mw memory add millwright --kind gotcha --subject bd 'One.' 'Two.'",
+		"a retire with a bad slug":   "mw memory retire millwright 'two words' --reason x",
+		"an empty sentence":          "mw memory add millwright --kind gotcha --subject bd ''",
+	} {
+		got := application.ParseFactProposals("For the rig memory:\n" + line + "\n")
+		if len(got.Lines) != 1 || got.Lines[0].Malformed != line {
+			t.Errorf("%s: got %+v, want one malformed line %q", name, got.Lines, line)
+		}
+	}
+}
+
+func TestEachFormulaAsksForReadyMemoryCommands(t *testing.T) {
+	for _, file := range []string{"tdd-feature.formula.json", "chore.formula.json"} {
+		raw, err := os.ReadFile(filepath.Join("..", "formulas", file))
+		if err != nil {
+			t.Fatalf("reading %s: %v", file, err)
+		}
+		var formula struct {
+			Steps []struct {
+				ID          string `json:"id"`
+				Description string `json:"description"`
+			} `json:"steps"`
+		}
+		if err := json.Unmarshal(raw, &formula); err != nil {
+			t.Fatalf("decoding %s: %v", file, err)
+		}
+		closing := 0
+		for _, s := range formula.Steps {
+			if !strings.Contains(s.Description, "For the rig memory:") {
+				continue
+			}
+			closing++
+			for _, want := range []string{"mw memory add <rig> --kind", "mw memory supersede <rig> <slug>", "mw memory retire <rig> <slug> --reason", "mw memory recheck <rig> <slug> --why"} {
+				if !strings.Contains(s.Description, want) {
+					t.Errorf("%s step %s: expected it to ask for %q, got %q", file, s.ID, want, s.Description)
+				}
+			}
+		}
+		if closing == 0 {
+			t.Errorf("%s: no closing step names the rig memory section", file)
 		}
 	}
 }
