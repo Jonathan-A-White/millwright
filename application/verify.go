@@ -4,11 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // The defaults of the [verify] table, and the names of what a proposal says.
@@ -382,4 +387,292 @@ func ReadVerifyEvidence(dir string, since time.Time, txids []string) ([]VerifyEv
 		}
 	}
 	return out, nil
+}
+
+// VerifyStringsHeading opens a block of the strings mw verify <id> looks for in
+// the live bundle: in a bead's description or a comment, the line
+// "Verify strings:" and, below it, one string per line up to the next blank
+// line. A string may also follow the heading on its own line.
+const VerifyStringsHeading = "Verify strings:"
+
+// VerifyDeployBeads is what mw verify <id> reads of the tracker.
+type VerifyDeployBeads interface {
+	ShowBeads(ctx context.Context, ids []string) ([]StoryDetail, error)
+	StoriesComments(ctx context.Context, ids []string) (map[string][]Comment, error)
+}
+
+// VerifyWeb asks a URL over HTTP. The real adapter is in cmd/mw; the tests ask a
+// fake server through it.
+type VerifyWeb interface {
+	// Get is the status and the body of a GET of url. A reply of any status is
+	// no error: only a request that got no reply is.
+	Get(ctx context.Context, url string) (status int, body []byte, err error)
+}
+
+// VerifyDeploy is mw verify <id> (mw-gq6.760): the half of verifying a landing
+// that needs no judgment, at no cost in tokens. It says whether the host's
+// deployed mark of the story's rig is the commit the bead says it landed at,
+// whether the rig's healthz answers, and whether the live bundle holds each
+// string the bead names. It writes nothing on the bead.
+type VerifyDeploy struct {
+	Beads VerifyDeployBeads
+	// Rules reads the rig's file in the vault, for its site_url and healthz_url.
+	Rules EpicRules
+	// Marks holds the host's deployed and deploy-failed marks; nil holds none.
+	Marks BuiltMarks
+	Web   VerifyWeb
+	Out   io.Writer
+}
+
+// VerifyDeployResult is how the three checks came out.
+type VerifyDeployResult struct {
+	Deploy  VerifyCheckOutcome
+	Healthz VerifyCheckOutcome
+	// Named is how many strings the bead names, Found how many are in the bundle.
+	Named, Found int
+}
+
+// VerifyCheckOutcome is one check's word in the summary line.
+type VerifyCheckOutcome string
+
+const (
+	VerifyOK       VerifyCheckOutcome = "OK"
+	VerifyMismatch VerifyCheckOutcome = "MISMATCH"
+	VerifyFail     VerifyCheckOutcome = "FAIL"
+	// VerifyNone is a check the rig has nothing to run for: no healthz key.
+	VerifyNone VerifyCheckOutcome = "none"
+)
+
+// Failed is whether any check failed; a check with nothing to run did not.
+func (r VerifyDeployResult) Failed() bool {
+	return r.Deploy != VerifyOK || r.Healthz == VerifyFail || r.Found < r.Named
+}
+
+// Line is the one summary line.
+func (r VerifyDeployResult) Line(id string) string {
+	return fmt.Sprintf("verify %s: deploy %s, healthz %s, strings %d/%d found", id, r.Deploy, r.Healthz, r.Found, r.Named)
+}
+
+// verifyBodyLimit bounds what is printed of a healthz body.
+const verifyBodyLimit = 200
+
+// Run does the checks of one bead, saying each on Out. The error is for a run
+// that could not be made (no such bead); a check that failed is in the result.
+func (v VerifyDeploy) Run(ctx context.Context, id string) (VerifyDeployResult, error) {
+	found, err := v.Beads.ShowBeads(ctx, []string{id})
+	if err != nil {
+		return VerifyDeployResult{}, fmt.Errorf("mw verify: reading %s: %w", id, err)
+	}
+	if len(found) != 1 {
+		return VerifyDeployResult{}, fmt.Errorf("mw verify: the tracker has no bead %s", id)
+	}
+	bead := found[0]
+	comments, err := v.Beads.StoriesComments(ctx, []string{id})
+	if err != nil {
+		return VerifyDeployResult{}, fmt.Errorf("mw verify: reading the comments of %s: %w", id, err)
+	}
+	rig := strings.TrimSpace(bead.Merged().Rig)
+	if rig == "" {
+		return VerifyDeployResult{}, fmt.Errorf("mw verify: %s names no rig in its path", id)
+	}
+	var requirements domain.EpicRequirements
+	if v.Rules != nil {
+		if requirements, err = v.Rules.EpicRequirements(ctx, rig); err != nil {
+			return VerifyDeployResult{}, fmt.Errorf("mw verify: reading the file of rig %s: %w", rig, err)
+		}
+	}
+
+	var result VerifyDeployResult
+	result.Deploy = v.checkDeploy(ctx, rig, bead.CloseReason)
+	result.Healthz = v.checkHealthz(ctx, rig, requirements.HealthzURL)
+	texts := []string{bead.Description}
+	for _, c := range comments[id] {
+		texts = append(texts, c.Text)
+	}
+	result.Named, result.Found = v.checkStrings(ctx, rig, requirements.SiteURL, VerifyStrings(texts...))
+	fmt.Fprintln(v.Out, result.Line(id))
+	return result, nil
+}
+
+var (
+	batchCommit = regexp.MustCompile(`batch commit ([0-9a-f]{7,40})`)
+	anyCommit   = regexp.MustCompile(`\b[0-9a-f]{7,40}\b`)
+)
+
+// landingCommit is the commit the bead says its story landed at: the batch
+// commit of a batch landing, else the commit a landing's close reason names.
+func landingCommit(closeReason string) string {
+	if m := batchCommit.FindStringSubmatch(closeReason); m != nil {
+		return m[1]
+	}
+	if strings.HasPrefix(closeReason, "landed") {
+		return anyCommit.FindString(closeReason)
+	}
+	return ""
+}
+
+func (v VerifyDeploy) checkDeploy(ctx context.Context, rig, closeReason string) VerifyCheckOutcome {
+	landed := landingCommit(closeReason)
+	var deployed, failed string
+	if v.Marks != nil {
+		deployed, _ = v.Marks.Built(ctx, deployedMark(rig))
+		failed, _ = v.Marks.Built(ctx, deployFailedMark(rig))
+	}
+	deployed = strings.TrimSpace(deployed)
+	failedAt, tries, _ := strings.Cut(strings.TrimSpace(failed), " ")
+	if failed != "" {
+		fmt.Fprintf(v.Out, "deploy-failed mark of %s: commit %s failed %s time(s)\n", rig, failedAt, tries)
+	}
+	switch {
+	case landed == "":
+		fmt.Fprintf(v.Out, "deploy MISMATCH: no landing commit on the bead (close reason: %q)\n", closeReason)
+	case deployed == "":
+		fmt.Fprintf(v.Out, "deploy MISMATCH: %s has no deployed mark on this host; the bead landed at %s\n", rig, landed)
+	case !sameCommit(deployed, landed):
+		fmt.Fprintf(v.Out, "deploy MISMATCH: %s is deployed at %s, the bead landed at %s\n", rig, deployed, landed)
+	case failed != "" && sameCommit(failedAt, landed):
+		fmt.Fprintf(v.Out, "deploy MISMATCH: %s is marked deployed at %s, yet a deploy-failed mark stands at that commit\n", rig, deployed)
+	default:
+		fmt.Fprintf(v.Out, "deploy OK: %s is deployed at %s, the commit the bead landed at (%s)\n", rig, deployed, landed)
+		return VerifyOK
+	}
+	return VerifyMismatch
+}
+
+func (v VerifyDeploy) checkHealthz(ctx context.Context, rig, healthz string) VerifyCheckOutcome {
+	if healthz == "" {
+		fmt.Fprintf(v.Out, "no healthz for %s\n", rig)
+		return VerifyNone
+	}
+	status, body, err := v.Web.Get(ctx, healthz)
+	said := strings.TrimSpace(string(body))
+	if len(said) > verifyBodyLimit {
+		said = said[:verifyBodyLimit] + "..."
+	}
+	switch {
+	case err != nil:
+		fmt.Fprintf(v.Out, "healthz FAIL: %s: %v\n", healthz, err)
+	case status < 200 || status > 299:
+		fmt.Fprintf(v.Out, "healthz FAIL: %s answered %d: %s\n", healthz, status, said)
+	default:
+		fmt.Fprintf(v.Out, "healthz OK: %s answered %d: %s\n", healthz, status, said)
+		return VerifyOK
+	}
+	return VerifyFail
+}
+
+// bundleRef finds the hashed bundle a rig's page loads: assets/index-<hash>.js.
+var bundleRef = regexp.MustCompile(`["']([^"']*assets/index-[^"']+\.js)["']`)
+
+// checkStrings looks for each of wanted in the bundles the rig's public page
+// names. It returns how many strings were named and how many were found.
+func (v VerifyDeploy) checkStrings(ctx context.Context, rig, site string, wanted []string) (named, found int) {
+	if len(wanted) == 0 {
+		fmt.Fprintln(v.Out, "no strings named on the bead")
+		return 0, 0
+	}
+	named = len(wanted)
+	bundle, why := v.liveBundle(ctx, rig, site)
+	if why != "" {
+		fmt.Fprintln(v.Out, why)
+	}
+	for _, want := range wanted {
+		if inBundle(bundle, want) {
+			found++
+			fmt.Fprintf(v.Out, "found: %s\n", want)
+		} else {
+			fmt.Fprintf(v.Out, "not found: %s\n", want)
+		}
+	}
+	return named, found
+}
+
+// liveBundle is the text of every bundle the rig's page names, or why there is
+// none.
+func (v VerifyDeploy) liveBundle(ctx context.Context, rig, site string) (string, string) {
+	if site == "" {
+		return "", fmt.Sprintf("no site_url for %s", rig)
+	}
+	status, page, err := v.Web.Get(ctx, site)
+	switch {
+	case err != nil:
+		return "", fmt.Sprintf("the page %s could not be read: %v", site, err)
+	case status < 200 || status > 299:
+		return "", fmt.Sprintf("the page %s answered %d", site, status)
+	}
+	base, err := url.Parse(site)
+	if err != nil {
+		return "", fmt.Sprintf("site_url %q of %s is not a URL: %v", site, rig, err)
+	}
+	var text strings.Builder
+	seen := map[string]bool{}
+	for _, m := range bundleRef.FindAllStringSubmatch(string(page), -1) {
+		ref, err := url.Parse(m[1])
+		if err != nil || seen[m[1]] {
+			continue
+		}
+		seen[m[1]] = true
+		address := base.ResolveReference(ref).String()
+		code, body, err := v.Web.Get(ctx, address)
+		if err != nil || code < 200 || code > 299 {
+			return text.String(), fmt.Sprintf("the bundle %s could not be read (status %d, %v)", address, code, err)
+		}
+		text.Write(body)
+		text.WriteByte('\n')
+	}
+	if len(seen) == 0 {
+		return "", fmt.Sprintf("no assets/index-*.js bundle named on %s", site)
+	}
+	return text.String(), ""
+}
+
+// inBundle is whether the bundle holds want as it stands, or as a JavaScript
+// string literal escapes its quotes. The search is for a fixed string: nothing
+// in want is a pattern, and no shell sees a $ in it.
+func inBundle(bundle, want string) bool {
+	for _, form := range []string{want, strings.ReplaceAll(want, "'", `\'`), strings.ReplaceAll(want, `"`, `\"`)} {
+		if strings.Contains(bundle, form) {
+			return true
+		}
+	}
+	return false
+}
+
+// VerifyStrings reads the strings the texts name under VerifyStringsHeading, in
+// order, each once. A bullet ("- " or "* ") and one pair of backticks or double
+// quotes round a string are taken off it.
+func VerifyStrings(texts ...string) []string {
+	var wanted []string
+	add := func(line string) {
+		line = strings.TrimSpace(line)
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "- "), "* "))
+		if len(line) >= 2 && (line[0] == '`' || line[0] == '"') && line[len(line)-1] == line[0] {
+			line = line[1 : len(line)-1]
+		}
+		if line == "" {
+			return
+		}
+		for _, have := range wanted {
+			if have == line {
+				return
+			}
+		}
+		wanted = append(wanted, line)
+	}
+	for _, text := range texts {
+		inBlock := false
+		for _, line := range strings.Split(text, "\n") {
+			trimmed := strings.TrimSpace(line)
+			switch {
+			case strings.HasPrefix(trimmed, VerifyStringsHeading):
+				inBlock = true
+				add(strings.TrimPrefix(trimmed, VerifyStringsHeading))
+			case trimmed == "":
+				inBlock = false
+			case inBlock:
+				add(trimmed)
+			}
+		}
+	}
+	return wanted
 }

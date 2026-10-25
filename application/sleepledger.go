@@ -143,8 +143,62 @@ type SleepLedgerVault interface {
 	ReadImprovements(ctx context.Context) (string, error)
 }
 
+// ledgerIdeas is the new ledger text and the new lines in it when a pass of
+// date appends the ideas of its recommendations to the ledger text held: a line
+// for each idea, filed that date with no bead, and none for an idea whose title
+// the ledger already holds for that date, so the same pass written twice adds
+// nothing. The text is unchanged and added 0 when the recommendations carry no
+// idea to add. A line already in the ledger is never edited.
+func ledgerIdeas(held, date, recommendations string) (text string, added int, err error) {
+	ideas, err := ParseSleepIdeas(recommendations)
+	if err != nil {
+		return held, 0, err
+	}
+	entries, err := ParseSleepLedger(held)
+	if err != nil {
+		return held, 0, err
+	}
+	ids := map[string]bool{}
+	titled := map[string]bool{}
+	for _, e := range entries {
+		ids[e.ID] = true
+		if e.Filed == date {
+			titled[strings.TrimSpace(e.Title)] = true
+		}
+	}
+	var lines strings.Builder
+	for _, idea := range ideas {
+		title := strings.TrimSpace(idea.Title)
+		if title == "" || titled[title] {
+			continue
+		}
+		titled[title] = true
+		id := ""
+		for n := len(ids) + 1; id == "" || ids[id]; n++ {
+			id = fmt.Sprintf("sleep-%s-%d", date, n)
+		}
+		ids[id] = true
+		idea.ID, idea.Filed, idea.Bead = id, date, ""
+		body, err := json.Marshal(idea)
+		if err != nil {
+			return held, 0, err
+		}
+		lines.Write(body)
+		lines.WriteByte('\n')
+		added++
+	}
+	if added == 0 {
+		return held, 0, nil
+	}
+	if held != "" && !strings.HasSuffix(held, "\n") {
+		held += "\n"
+	}
+	return held + lines.String(), added, nil
+}
+
 // SleepLedger is mw sleep ledger: it prints the improvements ledger, a line an
-// improvement. It reads and writes nothing of the factory's.
+// improvement. It reads and writes nothing of the factory's. The sleep pass is
+// what appends the lines: one for each idea of its recommendations (mw-gq6.776).
 type SleepLedger struct {
 	Vault SleepLedgerVault
 	Out   io.Writer

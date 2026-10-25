@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -12,16 +14,88 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
-// newVerifyCmd builds `mw verify`: what the Governor's own use shows met.
+// newVerifyCmd builds `mw verify`: what the Governor's own use shows met, and,
+// given a bead, the checks of a landing that need no judgment.
 func newVerifyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "verify",
-		Short: "Match the Governor's messages and pictures to the demos and landings they show met",
+		Use:   "verify [<bead>]",
+		Short: "Check a landing's deploy, healthz and live strings; or match the Governor's messages and pictures to what they show met",
+		Long: "mw verify <bead> runs the half of verifying a landing that needs no judgment, at no cost in tokens, and\n" +
+			"writes nothing on the bead. Three checks:\n" +
+			"  deploy   this host's deployed mark of the bead's rig (~/.local/state/mw/built-<rig>.deployed) is the commit the\n" +
+			"           bead says it landed at (its close reason: the batch commit of a batch landing); a standing\n" +
+			"           built-<rig>.deploy-failed mark is said, and fails when it is at that commit.\n" +
+			"  healthz  a GET of healthz_url from the rig's file in the vault (rigs/<rig>.toml) answers 2xx; its body is\n" +
+			"           printed. A rig with no healthz_url prints 'no healthz for <rig>' and fails nothing.\n" +
+			"  strings  the rig's page (site_url in the same file) is fetched, its hashed bundle (assets/index-<hash>.js)\n" +
+			"           found, and each string the bead names is looked for in it as a fixed string (no shell, no pattern:\n" +
+			"           a $ is a $), found or not found.\n\n" +
+			"The strings are named on the bead, in its description or a comment, under a line 'Verify strings:', one per\n" +
+			"line up to the next blank line (a string may also follow the heading on its own line; a leading '- ' and one\n" +
+			"pair of backticks or double quotes are taken off):\n" +
+			"  Verify strings:\n" +
+			"  Vote for tonight's best trunk\n" +
+			"  $150 Amazon gift card\n" +
+			"A bead that names none prints 'no strings named on the bead' and the other two checks still run.\n\n" +
+			"It ends with one line, 'verify <bead>: deploy OK|MISMATCH, healthz OK|FAIL|none, strings N/M found', and\n" +
+			"exits non-zero when a check failed. The Mayor's VERIFIED comment stays a judgment: this writes none.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			gateway, _, err := posternGateway()
+			if err != nil {
+				return err
+			}
+			result, err := application.VerifyDeploy{
+				Beads: gateway, Rules: vault.New(dir), Marks: hostDeployedMarks(), Web: verifyWeb{}, Out: cmd.OutOrStdout(),
+			}.Run(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if result.Failed() {
+				cmd.SilenceErrors = true
+				cmd.SilenceUsage = true
+				return fmt.Errorf("verify %s: a check failed", args[0])
+			}
+			return nil
+		},
 	}
 	cmd.AddCommand(newVerifyMatchCmd(), newVerifyConfirmCmd(), newVerifyListCmd())
 	return cmd
+}
+
+// verifyWebTimeout bounds one GET of mw verify <bead>.
+const verifyWebTimeout = 15 * time.Second
+
+// verifyBodyMax bounds what is read of one page or bundle.
+const verifyBodyMax = 16 << 20
+
+// verifyWeb is the application.VerifyWeb that asks over the network.
+type verifyWeb struct{}
+
+func (verifyWeb) Get(ctx context.Context, url string) (int, []byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, verifyWebTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, verifyBodyMax))
+	return resp.StatusCode, body, err
 }
 
 func newVerifyMatchCmd() *cobra.Command {

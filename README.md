@@ -3366,8 +3366,9 @@ passes ran on which model and effort.
 
 The pass's learning is kept in two places. `plans/improvements/ledger.jsonl` holds a line for each improvement the
 Mayor approved (`id`, `filed`, `predicted` {tokens, speed, quality}, `cost` {size, tokens}, `measure` {metric,
-baseline, window}, `landed`, `measured_at`, `result`, `verdict` keep or rollback, `lesson`); the Mayor writes it,
-and `mw sleep ledger` prints it, a line each, with PENDING for an improvement not yet measured.
+baseline, window}, `landed`, `measured_at`, `result`, `verdict` keep or rollback, `lesson`); the sleep pass
+appends a line for each idea in its recommendations.json (filed that day, no bead, never twice for one title and
+day) and the Mayor writes the rest, and `mw sleep ledger` prints it, a line each, with PENDING for an improvement not yet measured.
 `mw sleep outcome <date>` scores the priority calls in `plans/sleep-<date>/recommendations.json` against the beads
 as they are now: a call is **held** when its bead landed, or is open and still where the pass put it; it is
 **thawed** when the pass iced it and it is open above the icebox, and **overridden** when the pass set a priority

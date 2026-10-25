@@ -321,6 +321,10 @@ type SleepPass struct {
 	// (mw-4xdnis.5).
 	Beads  VerifyBeads
 	Verify VerifySettings
+	// Ledger is where the ideas of the pass's recommendations are appended to
+	// plans/improvements/ledger.jsonl, read through it and written through
+	// Vault; without it none is (mw-gq6.776).
+	Ledger SleepLedgerVault
 	// Instructions is grinds/sleep.md, the rule the agent is given.
 	Instructions string
 	// Host signs the summary: sleep@<host>.
@@ -478,6 +482,8 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 		}
 	}
 	paths := []string{result.Dir}
+	ledgerPath, ledgerErr := p.appendIdeas(ctx, window.Date, answer.Recommendations)
+	paths = append(paths, ledgerPath)
 	for _, file := range files {
 		if _, err := p.Vault.PutPlanFile(ctx, plans, file.name, withNewline(file.text)); err != nil {
 			return result, fmt.Errorf("mw sleep pass: writing %s: %w", file.name, err)
@@ -512,7 +518,36 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 		}
 	}
 	p.say("mw sleep pass: %d files written to %s (%s/%s, %s tokens)\n", len(result.Files), result.Dir, model, effort, Thousands(log.Tokens.Total))
-	return result, errors.Join(proposeErr, logErr, commitErr, mailErr)
+	return result, errors.Join(proposeErr, ledgerErr, logErr, commitErr, mailErr)
+}
+
+// appendIdeas appends a line to plans/improvements/ledger.jsonl for each idea of
+// the pass's recommendations that the ledger does not hold for that date, so mw
+// loop rank sees what improvements.md proposes. It reports the ledger's path
+// from the vault's root when it wrote it, and "" when it wrote nothing: no
+// Ledger, no idea, or all already there. Ideas that cannot be read are the
+// error, and the rest of the pass is written all the same.
+func (p SleepPass) appendIdeas(ctx context.Context, date, recommendations string) (string, error) {
+	if p.Ledger == nil {
+		return "", nil
+	}
+	held, err := p.Ledger.ReadImprovements(ctx)
+	if err != nil {
+		return "", fmt.Errorf("the pass's ideas were not appended to the improvements ledger: %w", err)
+	}
+	text, added, err := ledgerIdeas(held, date, recommendations)
+	if err != nil {
+		return "", fmt.Errorf("the pass's ideas were not appended to the improvements ledger: %w", err)
+	}
+	if added == 0 {
+		return "", nil
+	}
+	rel, err := p.Vault.PutPlanFile(ctx, SleepLedgerDir, SleepLedgerFile, text)
+	if err != nil {
+		return "", fmt.Errorf("the pass's ideas were not appended to the improvements ledger: %w", err)
+	}
+	p.say("mw sleep pass: %d ideas appended to %s\n", added, rel)
+	return rel, nil
 }
 
 // propose writes the PROPOSED comments of the agent's proposals, through the

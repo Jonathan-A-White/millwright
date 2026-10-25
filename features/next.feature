@@ -380,6 +380,30 @@ Feature: Closing out a finished story and carrying on
     When mw closes out "mw-gq6.1"
     Then the work of "mw-gq6.1" is on "main" at the rig's origin
 
+  # mw-gq6.772: an example that passed only the fake mill can fail live, so a
+  # branch that adds or changes a grind example is landed only when the closing
+  # comment carries a live `mw grist eval <app> <kind> --example <name>` line
+  # with PASS for it.
+  Scenario: A branch that adds a grind example with no live eval line in the closing comment is handed back
+    Given the session of "mw-gq6.1" reported a plain success
+    And a commit on the branch of "mw-gq6.1" adds the grind example "grinds/examples/bible-talk/verse-text-ask.json"
+    And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And the comment "Internal: nothing for the Governor to look at. For the rig memory: nothing" was written on "mw-gq6.1" after its newest commit
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the report says it stopped for "grist-example-unproved"
+    And the printed report says "bible-talk/verse-text-ask"
+    And the rig's tests were run 0 times
+
+  Scenario: A branch that adds a grind example with a passing live eval line in the closing comment lands
+    Given the session of "mw-gq6.1" reported a plain success
+    And a commit on the branch of "mw-gq6.1" adds the grind example "grinds/examples/bible-talk/verse-text-ask.json"
+    And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And the comment "mw grist eval lampas bible-talk --example verse-text-ask: PASS. Internal: nothing for the Governor to look at. For the rig memory: nothing" was written on "mw-gq6.1" after its newest commit
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+
   # mw-gq6.740: `npm install github:<owner>/<repo>#<sha>` writes git+ssh:// into
   # package-lock.json, which a machine with no GitHub key cannot install. A branch
   # that adds such a line is turned away, naming the file, the count and the sed.

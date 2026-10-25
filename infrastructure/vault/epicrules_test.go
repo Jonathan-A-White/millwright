@@ -223,6 +223,30 @@ func TestARigsFileNamesItsPublicURLAndRefusesOneThatIsNotAnHTTPSAddress(t *testi
 	}
 }
 
+func TestARigsFileNamesItsSiteAndHealthzURLsForMwVerifyAndRefusesAnythingElse(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	writeRigFile(t, dir, "leaderboard", "site_url = \"https://jonah.allmymind.org/\" # the board\nhealthz_url = \"https://jonah.allmymind.org/api/leaderboard/healthz\"\n")
+
+	got, err := v.EpicRequirements(context.Background(), "leaderboard")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	want := domain.EpicRequirements{SiteURL: "https://jonah.allmymind.org/", HealthzURL: "https://jonah.allmymind.org/api/leaderboard/healthz"}
+	if !reflect.DeepEqual(got, want) || got.Any() {
+		t.Errorf("requirements = %+v (Any %v), want %+v and no epic requirement", got, got.Any(), want)
+	}
+
+	for _, key := range []string{"site_url", "healthz_url"} {
+		for _, bad := range []string{`jonah.allmymind.org`, `["https://jonah.allmymind.org/"]`, `"ftp://x"`} {
+			writeRigFile(t, dir, "leaderboard", key+" = "+bad+"\n")
+			if _, err := v.EpicRequirements(context.Background(), "leaderboard"); err == nil || !strings.Contains(err.Error(), key) {
+				t.Errorf("%s = %s: err = %v, want a refusal naming %s", key, bad, err, key)
+			}
+		}
+	}
+}
+
 func TestARigsFileSaysWhetherItExpectsAFilesKeyAndRefusesAnythingElse(t *testing.T) {
 	dir := aVault(t)
 	v := vault.New(dir)

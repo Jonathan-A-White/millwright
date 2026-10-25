@@ -50,6 +50,13 @@ type EpicRequirements struct {
 	// that, /commit/ and the commit. A rig that is private names none. It is no
 	// requirement of an epic either, so Any does not count it.
 	PublicURL string
+	// SiteURL is the address of the rig's deployed public page, and HealthzURL
+	// the address that answers whether its backend is up: what mw verify <id>
+	// reads (mw-gq6.760). A rig without a deployed page, or without a backend,
+	// names none. Neither is a requirement of an epic either, so Any does not
+	// count them.
+	SiteURL    string
+	HealthzURL string
 	// FilesExpected says the rig's stories are expected to name `files` in their
 	// path: mw status, mw release and mw path show warn of one that does not,
 	// since the overlap guard of mw dispatch holds back only a story that names

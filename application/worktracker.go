@@ -153,6 +153,9 @@ type StoryDetail struct {
 	// ClosedAt is when the story was closed, as the tracker recorded it; zero
 	// when it is not closed or the tracker did not say.
 	ClosedAt time.Time
+	// CloseReason is why the story was closed, as the tracker has it; empty when
+	// it is not closed or the tracker did not say.
+	CloseReason string
 	// IsEpic is true when this is not a story but an epic filed under an epic:
 	// a listing of an epic's children returns it among them, and it is not work
 	// a session takes. A tracker that does not say leaves it false.
