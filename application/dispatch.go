@@ -435,6 +435,9 @@ func (d Dispatch) smokeHold(ctx context.Context, rig string, holds *map[string]G
 type HeldRefused struct {
 	StoryID string
 	Session string
+	// WindowClosed says the dead window was closed, its words being kept in the
+	// story's run (next-<attempt>.log) rather than only on screen (mw-gq6.797).
+	WindowClosed bool
 }
 
 // DispatchReport is what one dispatch did.
@@ -2194,7 +2197,17 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 		if d.retryHarnessStop(ctx, detail, name, dead, report) {
 			return true, false, nil
 		}
-		report.HeldRefused = append(report.HeldRefused, HeldRefused{StoryID: id, Session: name})
+		held := HeldRefused{StoryID: id, Session: name}
+		// A dead pane whose words are kept in the run is closed, not left on
+		// screen for days with the story in progress (mw-gq6.797).
+		if dead && closeOutLogKept(ctx, d.Boot.Vault, detail) {
+			if err := d.Runner.Close(ctx, name); err != nil {
+				report.Notes = append(report.Notes, fmt.Sprintf("%s: its refused close-out's dead window %s could not be closed: %v", id, name, err))
+			} else {
+				held.WindowClosed = true
+			}
+		}
+		report.HeldRefused = append(report.HeldRefused, held)
 		return false, true, nil
 	}
 	if !ended {
@@ -2731,6 +2744,9 @@ func (r DispatchReport) String() string {
 	for _, held := range r.HeldRefused {
 		fmt.Fprintf(&b, "  held    %s · %s · refused, waiting on the Mayor: not counted; its claim, worktree and branch are kept (mw retry)\n",
 			held.StoryID, held.Session)
+		if held.WindowClosed {
+			fmt.Fprintf(&b, "          window closed: the close-out's words are in runs/%s/next-<attempt>.log\n", held.StoryID)
+		}
 	}
 	for _, id := range r.Queued {
 		fmt.Fprintf(&b, "  queued  %s · queued for batch landing: not counted; its claim, worktree and branch wait for its batch\n", id)

@@ -777,7 +777,8 @@ func (n Next) Run(ctx context.Context, storyID string) (NextReport, error) {
 // printed, because mw next usually runs inside that very session: closing it
 // hangs up this process, and nothing after it is sure to run. A story that was
 // not closed keeps its session, exited, on screen — that is what it is kept for —
-// unless the tracker holds it closed or open again (finishedStory).
+// unless the tracker holds it closed or open again (finishedStory), or it was
+// refused and the close-out's words are kept in its run (refusedWithLogKept).
 // A session that is already gone is no error, and a session that cannot be
 // closed is said, not returned: the story is closed either way.
 func (n Next) closeSession(ctx context.Context, report NextReport) {
@@ -790,7 +791,7 @@ func (n Next) closeSession(ctx context.Context, report NextReport) {
 		// Sent back: the story's name is the fresh session's now, and the one
 		// this close-out ran in has been moved aside to be closed.
 		name = report.Aside
-	case !report.Closed && !report.DemoHeld && !report.Queued && !n.finishedStory(ctx, report.StoryID):
+	case !report.Closed && !report.DemoHeld && !report.Queued && !n.finishedStory(ctx, report.StoryID) && !n.refusedWithLogKept(ctx, report.StoryID):
 		return
 	}
 	if err := n.Runner.Close(ctx, name); err != nil {
@@ -815,6 +816,24 @@ func (n Next) finishedStory(ctx context.Context, storyID string) bool {
 	}
 	status := strings.TrimSpace(detail.Status)
 	return detail.Closed() || strings.EqualFold(status, StatusOpen) && strings.TrimSpace(detail.Assignee) == ""
+}
+
+// refusedWithLogKept says a close-out that refused the story (run=blocked, its
+// claim kept for the Mayor) has its words kept in the story's run, so that its
+// session's pane is not the evidence any more and is closed with the rest
+// (mw-gq6.797): left on screen it sat dead for 7 days with the story in progress
+// and nothing to say so. mw status names the story as refused, and mw retry
+// recovers it. A story that cannot be read, or whose log is not kept, keeps its
+// pane, as before.
+func (n Next) refusedWithLogKept(ctx context.Context, storyID string) bool {
+	if n.Tracker == nil || n.Vault == nil {
+		return false
+	}
+	if run, err := n.Tracker.StoryState(ctx, storyID, RunState); err != nil || run != RunBlocked {
+		return false
+	}
+	detail, err := n.Tracker.ShowStory(ctx, storyID)
+	return err == nil && closeOutLogKept(ctx, n.Vault, detail)
 }
 
 // Heartbeat renews storyID's claim's lease every HeartbeatInterval for as

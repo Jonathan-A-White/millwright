@@ -163,3 +163,17 @@ func (d Dispatch) heartbeatLogTail(ctx context.Context, id, logName string) stri
 	}
 	return fmt.Sprintf("\n\nThe heartbeat's last words (runs/%s/%s):\n%s", id, logName, strings.Join(lines, "\n"))
 }
+
+// closeOutLogKept says the close-out's words for the story's current attempt are
+// kept in its run (next-<attempt>.log, which the session's own command line tees
+// them into), so that the session's pane is no longer the only place they are:
+// the pane of a close-out that failed is then closed, not left dead on screen for
+// days (mw-gq6.797). A vault that cannot say, or has no such file, says no, and
+// the pane stays as the evidence.
+func closeOutLogKept(ctx context.Context, vault Vault, detail StoryDetail) bool {
+	if vault == nil {
+		return false
+	}
+	_, err := vault.ReadRunFile(ctx, detail.Story.ID, NextLogNameForAttempt(max(1, detail.Attempts)))
+	return err == nil
+}

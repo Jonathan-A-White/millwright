@@ -14,6 +14,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/procs"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
+	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -240,6 +241,7 @@ func newStatusCmd() *cobra.Command {
 				Seat:             BuilderSeat,
 				Ticks:            hostTickLogs(),
 				Panes:            seatWindows(),
+				Sessions:         tmux.New(),
 				Events:           events,
 				Log:              idleLog,
 				IdleAfter:        idleAfter,
