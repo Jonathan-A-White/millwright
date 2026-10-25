@@ -691,8 +691,10 @@ func ready(waitingOn []string, done map[string]bool) bool {
 
 // FiledSmokeExamples implements application.GristSmokeFiled: one `bd list` of
 // the beads carrying the smoke_examples metadata, closed ones left out (bd's
-// list leaves them out unless asked), each example with the bead that names it.
-func (g *Gateway) FiledSmokeExamples(ctx context.Context) (map[string]string, error) {
+// list leaves them out unless asked), each example with the bead that names it;
+// and, when examples are asked after, one `bd list` of every open bead, whose
+// title or description may name one of them (application.NamesSmokeExample).
+func (g *Gateway) FiledSmokeExamples(ctx context.Context, examples []string) (map[string]string, error) {
 	out, err := g.call(ctx, "list", "--has-metadata-key", application.SmokeExamplesField, "--limit", "0", "--json")
 	if err != nil {
 		return nil, err
@@ -709,6 +711,28 @@ func (g *Gateway) FiledSmokeExamples(ctx context.Context) (map[string]string, er
 		}
 		for _, example := range detail.SmokeExamples {
 			if _, named := found[example]; !named {
+				found[example] = b.ID
+			}
+		}
+	}
+	if len(examples) == 0 {
+		return found, nil
+	}
+	out, err = g.call(ctx, "list", "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	all, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading the open beads that name failing smoke examples in their text: %w", err)
+	}
+	for _, b := range all {
+		detail := b.detail(domain.Path{})
+		if detail.Closed() {
+			continue
+		}
+		for _, example := range examples {
+			if _, named := found[example]; !named && (application.NamesSmokeExample(detail.Story.Title, example) || application.NamesSmokeExample(detail.Description, example)) {
 				found[example] = b.ID
 			}
 		}

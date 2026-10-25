@@ -2318,8 +2318,9 @@ func (f *FakeTracker) NoteWrites(key string) int {
 }
 
 // FiledSmokeExamples implements application.GristSmokeFiled: the examples the
-// open stories name, each with the story that names it.
-func (f *FakeTracker) FiledSmokeExamples(_ context.Context) (map[string]string, error) {
+// open stories name in their metadata, and those of examples their title or
+// description names, each with the story that names it.
+func (f *FakeTracker) FiledSmokeExamples(_ context.Context, examples []string) (map[string]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.Err != nil {
@@ -2332,6 +2333,17 @@ func (f *FakeTracker) FiledSmokeExamples(_ context.Context) (map[string]string, 
 				if _, named := found[example]; !named {
 					found[example] = id
 				}
+			}
+		}
+	}
+	for _, id := range f.order {
+		s := f.stories[id]
+		if s == nil || s.detail.Closed() {
+			continue
+		}
+		for _, example := range examples {
+			if _, named := found[example]; !named && (application.NamesSmokeExample(s.detail.Story.Title, example) || application.NamesSmokeExample(s.detail.Description, example)) {
+				found[example] = id
 			}
 		}
 	}

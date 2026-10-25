@@ -151,6 +151,7 @@ func InitializeGristSmokeScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the rig "([^"]*)" names the grist client path "([^"]*)"$`, c.theRigNamesAClientPath)
 	ctx.Given(`^a landing in "([^"]*)" changes "([^"]*)"$`, c.aLandingChanges)
 	ctx.Given(`^the bead "([^"]*)" is open and names the failing example "([^"]*)"$`, c.theBeadNamesTheExample)
+	ctx.Given(`^the bead "([^"]*)" is open and its title says "([^"]*)"$`, c.theBeadIsOpenTitled)
 	ctx.Given(`^the bead "([^"]*)" is open$`, c.theBeadIsOpen)
 	ctx.Given(`^the bead "([^"]*)" is closed by its fix$`, c.theBeadIsClosed)
 
@@ -450,6 +451,11 @@ func (c *smokeContext) theBeadNamesTheExample(id, example string) error {
 		return err
 	}
 	return c.notes.SetStoryMetadata(context.Background(), id, map[string]string{application.SmokeExamplesField: example})
+}
+
+func (c *smokeContext) theBeadIsOpenTitled(id, title string) error {
+	c.notes.AddStory("mw-5r3p30", domain.Story{ID: id, Title: title})
+	return nil
 }
 
 func (c *smokeContext) theBeadIsClosed(id string) error {

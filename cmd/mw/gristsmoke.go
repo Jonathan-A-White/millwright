@@ -176,9 +176,13 @@ func newGristSmokeCmd() *cobra.Command {
 			"hold of a failure it now names in full. The bead itself is never held by a failure it names, so the\n" +
 			"fix can run. With no example, --filed names the examples the app's last smoke failed on:\n" +
 			"  mw grist smoke lampas --filed mw-5r3p30.582\n" +
-			"A held rig also runs an open story whose title or description names a failing example as\n" +
-			"<app>/<kind>/<example>; mw dispatch says it ran over the hold. Closing the bead ends it: the next\n" +
-			"failing smoke on those examples holds again.\n\n" +
+			"\"Already named\" is read the same way everywhere (the smoke's filed match, a flake's mail, mw status and the\n" +
+			"hold's fix): an open bead names a failing example when its smoke_examples metadata lists it, or when its\n" +
+			"title or description holds the example's full name <app>/<kind>/<example>, <kind>/<example>, or its bare\n" +
+			"name alone (verse-text-ask), standing on its own: verse-text-ask-two or another app's\n" +
+			"<app>/<kind>/verse-text-ask is not it. Only open beads count, and the metadata wins when two name it.\n" +
+			"A held rig also runs an open story named that way; mw dispatch says it ran over the hold. Closing\n" +
+			"the bead ends it: the next failing smoke on those examples holds again.\n\n" +
 			"--ref <git ref or worktree path> is the smoke's size check alone, on the grinds as they are at that\n" +
 			"ref of the app's rig and not at main, so that a reword of a grind's instructions is size-checked\n" +
 			"before it lands: mw grist smoke <app> --ref <your branch>. A worktree path reads its committed\n" +

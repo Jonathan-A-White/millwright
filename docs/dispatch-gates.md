@@ -78,8 +78,10 @@ All of them read the limit's notice with the one reader, `HarnessStopOf` and
 ## The smoke-hold gate, and the gates that cannot hold their own fix
 
 A failed grist smoke holds the open stories of its rig, except the fix: a story
-whose `smoke_examples` metadata, title or description names a failing example as
-`<app>/<kind>/<example>` runs over the hold, and `mw dispatch` says so (`runs over
+whose `smoke_examples` metadata, title or description names a failing example (as
+`<app>/<kind>/<example>`, `<kind>/<example>` or the bare example name standing on its own;
+`application.NamesSmokeExample`, the same reading the smoke's "already named" match uses,
+mw-gq6.773) runs over the hold, and `mw dispatch` says so (`runs over
 the grist smoke hold of <rig>: ...`). `mw grist smoke <app> --filed <bead>` with
 no example names the examples the last smoke failed on, and `mw status` names the
 beads that run over a hold (mw-gq6.579). Closing the bead ends it.

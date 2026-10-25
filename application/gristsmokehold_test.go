@@ -366,3 +366,73 @@ func TestAFailureEveryExampleOfWhichIsNamedIsNotedOnTheNamingBead(t *testing.T) 
 		t.Errorf("expected no note for a failure that holds, got %q", got)
 	}
 }
+
+// mw-gq6.773: an open bead whose title or description names a failing example,
+// by its bare name or as <app>/<kind>/<example>, already names it: the failure
+// holds nothing, posts no alarm, names the bead, and the miss is noted on it.
+func TestAFailureWhoseExampleAnOpenBeadsTextNamesIsFiledOnIt(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	log := &apptest.FakeEventLog{}
+	tracker.AddStory("mw-fu7dqf", domain.Story{ID: "mw-fu7dqf.14", Title: "[bug] the new example verse-text-ask fails live 2/2"})
+	tracker.AddStory("mw-fu7dqf", domain.Story{ID: "mw-fu7dqf.15", Title: "[bug] the answer to a request"})
+	if err := tracker.SetDescription("mw-fu7dqf.15", "It is lampas/tutor/hello that misses."); err != nil {
+		t.Fatal(err)
+	}
+	tracker.AddStory("mw-fu7dqf", domain.Story{ID: "mw-fu7dqf.16", Title: "Another app's example is wrong: legend/bible-talk/verse-text-ask"})
+	tracker.AddStory("mw-fu7dqf", domain.Story{ID: "mw-fu7dqf.17", Title: "verse-text-ask-two is wrong"})
+	at := time.Date(2026, 10, 25, 8, 2, 0, 0, time.UTC)
+	book := application.GristSmokeBook{Notes: tracker, Filed: tracker, Comments: tracker, Events: log, Host: "laptop", Now: func() time.Time { return at }}
+
+	report := book.Mark(ctx, application.GristSmokeReport{App: "lampas", Examples: 137, Failures: []string{"lampas/bible-talk/verse-text-ask: wrong"}})
+	if line := report.Line(); !strings.Contains(line, "all filed on mw-fu7dqf.14: not held") {
+		t.Fatalf("expected the bead naming the example in its title, got %q", line)
+	}
+	if err := book.Record(ctx, "lampas", report); err != nil {
+		t.Fatal(err)
+	}
+	if why, _ := book.HeldBy(ctx, "lampas"); why != "" {
+		t.Fatalf("expected nothing held, got %q", why)
+	}
+	if len(log.All()) != 0 {
+		t.Fatalf("expected no alarm, got %v", log.All())
+	}
+	if got := tracker.Comments("mw-fu7dqf.14"); len(got) != 1 || !strings.Contains(got[0], "already named on mw-fu7dqf.14") {
+		t.Fatalf("expected the miss noted on the bead, got %q", got)
+	}
+
+	full := book.Mark(ctx, application.GristSmokeReport{App: "lampas", Examples: 2, Failures: []string{"lampas/tutor/hello: wrong"}})
+	if len(full.FiledOn) != 1 || full.FiledOn[0] != "mw-fu7dqf.15" {
+		t.Fatalf("expected the bead naming the full name in its description, got %v", full.FiledOn)
+	}
+
+	// Another app's example, or a longer name that merely starts with it, is not it.
+	for _, failure := range []string{"lampas/bible-talk/verse-text", "lampas/bible-talk/verse-text-as"} {
+		if other := book.Mark(ctx, application.GristSmokeReport{App: "lampas", Failures: []string{failure + ": wrong"}}); len(other.FiledOn) != 0 {
+			t.Fatalf("expected %s named by no bead, got %v", failure, other.FiledOn)
+		}
+	}
+	_ = tracker.CloseStory(ctx, "mw-fu7dqf.14", "fixed")
+	if closed := book.Mark(ctx, application.GristSmokeReport{App: "lampas", Failures: []string{"lampas/bible-talk/verse-text-ask: wrong"}}); len(closed.FiledOn) != 0 {
+		t.Fatalf("expected a closed bead to name nothing, got %v", closed.FiledOn)
+	}
+}
+
+// mw-gq6.773: the forms of an example's name a bead's text may use.
+func TestNamesSmokeExampleReadsTheBareNameAndTheFullNameAtTheirEdges(t *testing.T) {
+	const example = "lampas/bible-talk/verse-text-ask"
+	for text, want := range map[string]bool{
+		"the new example verse-text-ask fails live 2/2": true,
+		"lampas/bible-talk/verse-text-ask":              true,
+		"(verse-text-ask), verse-text-ask.":             true,
+		"verse-text-ask-two fails":                      false,
+		"the verse-text-asked":                          false,
+		"my-verse-text-ask":                             false,
+		"legend/bible-talk/verse-text-ask":              false,
+		"nothing here":                                  false,
+	} {
+		if got := application.NamesSmokeExample(text, example); got != want {
+			t.Errorf("NamesSmokeExample(%q) = %v, want %v", text, got, want)
+		}
+	}
+}

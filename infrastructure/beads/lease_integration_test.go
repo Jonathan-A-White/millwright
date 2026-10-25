@@ -218,7 +218,7 @@ func TestAClosedBeadNamesNoSmokeExamplesInARealBd(t *testing.T) {
 		"--metadata", `{"smoke_examples":"lampas/tutor/old"}`)
 	bdRun(t, vault, beads.Program, "close", closed, "--reason", "fixed")
 
-	found, err := beads.New(vault, beads.WithActor("mw@vps")).FiledSmokeExamples(ctx)
+	found, err := beads.New(vault, beads.WithActor("mw@vps")).FiledSmokeExamples(ctx, nil)
 	if err != nil {
 		t.Fatalf("listing the filed examples: %v", err)
 	}
