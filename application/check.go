@@ -45,6 +45,12 @@ type Check struct {
 	// Nil never asks.
 	NamedChecks NamedChecks
 
+	// Changes reads the files the story's branch changes, so that mw check
+	// refuses what mw next would while the session can still mend it: a
+	// git+ssh:// line in a lockfile, build output, a grind example not proved
+	// live (mw-gq6.800). Nil looks at none, as Next's own.
+	Changes BranchChanges
+
 	// Slot is the merge slot of the rig, taken around the rig's tests so that
 	// one gate per rig runs at a time on this host. Nil takes no slot.
 	Slot MergeSlot
@@ -310,6 +316,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		Checks:      checks,
 		SpecChecks:  specs,
 		NamedChecks: k.NamedChecks,
+		Changes:     k.Changes,
 		Remote:      k.Remote,
 		Load:        load,
 		Modes:       k.Modes,

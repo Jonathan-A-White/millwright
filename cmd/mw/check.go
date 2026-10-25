@@ -114,6 +114,7 @@ func newCheckCmd() *cobra.Command {
 				Checks:      checks,
 				SpecChecks:  checks,
 				NamedChecks: checks,
+				Changes:     worktrees,
 				Slot:        slot,
 				Parts:       checks,
 				Records:     mwVault(dir, host),
