@@ -32,6 +32,17 @@ func TestSourceFilesFindsTextUnderDirAndSkipsNodeModules(t *testing.T) {
 	if found, err := (sourceFiles{}).Contains(src, "Absent"); err != nil || found {
 		t.Fatalf("expected an absent label not found, got %v %v", found, err)
 	}
+	write("components/Step.tsx", "`Step ${i} of ${n} - `")
+	write("components/Other.tsx", "of Step ")
+	if found, err := (sourceFiles{}).ContainsInOrder(src, []string{"Step ", " of ", " - "}); err != nil || !found {
+		t.Fatalf("expected the pieces found in order in one file, got %v %v", found, err)
+	}
+	if found, err := (sourceFiles{}).ContainsInOrder(src, []string{"of ", "Step "}); err != nil || !found {
+		t.Fatalf("expected pieces in order in Other.tsx, got %v %v", found, err)
+	}
+	if found, err := (sourceFiles{}).ContainsInOrder(src, []string{"Vote", "Step "}); err != nil || found {
+		t.Fatalf("expected pieces spread over two files not found, got %v %v", found, err)
+	}
 	if _, err := (sourceFiles{}).Contains(filepath.Join(src, "nope"), "x"); !errors.Is(err, application.ErrNoSource) {
 		t.Fatalf("expected ErrNoSource, got %v", err)
 	}

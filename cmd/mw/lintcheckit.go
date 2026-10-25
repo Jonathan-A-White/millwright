@@ -61,7 +61,11 @@ const sourceFileMax = 4 << 20
 // sourceFiles is the application.SourceText that walks a directory on disk.
 type sourceFiles struct{}
 
-func (sourceFiles) Contains(dir, text string) (bool, error) {
+func (s sourceFiles) Contains(dir, text string) (bool, error) {
+	return s.ContainsInOrder(dir, []string{text})
+}
+
+func (sourceFiles) ContainsInOrder(dir string, pieces []string) (bool, error) {
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {
 		return false, fmt.Errorf("%w: %s", application.ErrNoSource, dir)
@@ -87,10 +91,15 @@ func (sourceFiles) Contains(dir, text string) (bool, error) {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(body), text) {
-			return found
+		rest := string(body)
+		for _, piece := range pieces {
+			at := strings.Index(rest, piece)
+			if at < 0 {
+				return nil
+			}
+			rest = rest[at+len(piece):]
 		}
-		return nil
+		return found
 	})
 	if errors.Is(err, found) {
 		return true, nil

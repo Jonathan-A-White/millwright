@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -19,6 +20,9 @@ type SourceText interface {
 	// Contains is whether text, as a fixed string, is in any file under dir;
 	// ErrNoSource when dir is not a directory.
 	Contains(dir, text string) (bool, error)
+	// ContainsInOrder is whether one file under dir holds every piece, each
+	// after the one before; ErrNoSource when dir is not a directory.
+	ContainsInOrder(dir string, pieces []string) (bool, error)
 }
 
 // LintCheckItBeads is what mw lint-checkit reads of the tracker.
@@ -44,6 +48,8 @@ type LintCheckIt struct {
 // source lacks.
 type LintCheckItResult struct {
 	Quoted, Missing []string
+	// Skipped are the labels with no literal part to look for.
+	Skipped []string
 }
 
 // Failed is whether a quoted label is not in the source.
@@ -72,22 +78,66 @@ func (l LintCheckIt) Run(ctx context.Context, id string) (LintCheckItResult, err
 		return result, err
 	}
 	for _, label := range result.Quoted {
-		found, err := l.Src.Contains(src, label)
+		found, skipped, err := l.labelFound(src, label)
 		if err != nil {
 			return result, fmt.Errorf("mw lint-checkit: searching %s for %q: %w", src, label, err)
 		}
-		if !found {
+		switch {
+		case skipped:
+			result.Skipped = append(result.Skipped, label)
+		case !found:
 			result.Missing = append(result.Missing, label)
 		}
 	}
-	found := len(result.Quoted) - len(result.Missing)
-	if result.Failed() {
-		fmt.Fprintf(l.Out, "lint-checkit %s: %d quoted labels, %d found in src/, not found in src/: %s\n",
-			id, len(result.Quoted), found, strings.Join(result.Missing, ", "))
-		return result, nil
+	found := len(result.Quoted) - len(result.Missing) - len(result.Skipped)
+	line := fmt.Sprintf("lint-checkit %s: %d quoted labels, %d found in src/", id, len(result.Quoted), found)
+	if len(result.Skipped) > 0 {
+		line += fmt.Sprintf(", %d skipped (no literal part of %d characters to look for)", len(result.Skipped), minLiteralPart)
 	}
-	fmt.Fprintf(l.Out, "lint-checkit %s: %d quoted labels, %d found in src/\n", id, len(result.Quoted), found)
+	if result.Failed() {
+		line += ", not found in src/: " + strings.Join(result.Missing, ", ")
+	}
+	fmt.Fprintln(l.Out, line)
 	return result, nil
+}
+
+// minLiteralPart is the fewest characters a label's literal piece may have to
+// be looked for: a shorter one is in every file.
+const minLiteralPart = 3
+
+// placeholder is the variable part of a label that is a template: <...>, a lone
+// N, a run of digits, "..." or the ellipsis character.
+var placeholder = regexp.MustCompile(`<[^<>\n]*>|\bN\b|[0-9]+|\.\.\.|…`)
+
+// literalParts are the pieces of a label between its placeholders that have
+// minLiteralPart characters or more, in order, and whether the label has any
+// placeholder at all.
+func literalParts(label string) (parts []string, templated bool) {
+	pieces := placeholder.Split(label, -1)
+	for _, piece := range pieces {
+		if len([]rune(piece)) >= minLiteralPart {
+			parts = append(parts, piece)
+		}
+	}
+	return parts, len(pieces) > 1
+}
+
+// labelFound looks for a label as written, then, when it holds placeholders,
+// for its literal parts in order in one file. skipped is a label whose literal
+// parts are none: nothing to look for.
+func (l LintCheckIt) labelFound(src, label string) (found, skipped bool, err error) {
+	if found, err = l.Src.Contains(src, label); err != nil || found {
+		return found, false, err
+	}
+	parts, templated := literalParts(label)
+	if !templated {
+		return false, false, nil
+	}
+	if len(parts) == 0 {
+		return false, true, nil
+	}
+	found, err = l.Src.ContainsInOrder(src, parts)
+	return found, false, err
 }
 
 // commentAuthor and commentTime say which comment a section was read from;

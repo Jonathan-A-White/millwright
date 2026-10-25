@@ -24,6 +24,21 @@ func (s fakeSource) Contains(dir, text string) (bool, error) {
 	return strings.Contains(body, text), nil
 }
 
+func (s fakeSource) ContainsInOrder(dir string, pieces []string) (bool, error) {
+	body, ok := s[dir]
+	if !ok {
+		return false, application.ErrNoSource
+	}
+	for _, piece := range pieces {
+		at := strings.Index(body, piece)
+		if at < 0 {
+			return false, nil
+		}
+		body = body[at+len(piece):]
+	}
+	return true, nil
+}
+
 const checkItSteps = "Built the vote card.\n\n" +
 	"HOW TO CHECK IT, for the Governor\n" +
 	"1. Open the app and tap \"Vote now\".\n" +
@@ -164,5 +179,83 @@ func TestLintCheckItReadsTheSectionNotALaterNoteThatMentionsTheWords(t *testing.
 	}
 	if !strings.Contains(out.String(), "builder") || !strings.Contains(out.String(), "2026-10-24T09:30:00Z") {
 		t.Fatalf("expected the comment read named by author and time, got:\n%s", out)
+	}
+}
+
+func templateComment(labels ...string) string {
+	steps := "HOW TO CHECK IT, for the Governor\n"
+	for i, label := range labels {
+		steps += string(rune('1'+i)) + ". See \"" + label + "\".\n"
+	}
+	return steps + "For the rig memory: nothing\n"
+}
+
+func TestLintCheckItMatchesALabelWithAPlaceholderAroundItsLiteralParts(t *testing.T) {
+	cases := []struct{ name, label, source string }{
+		{"angle placeholder, template literal", "Show <password>", "<b>{`Show ${name}`}</b>"},
+		{"angle placeholder, jsx expression", "Show <password>", "<b>Show ${...}</b>"},
+		{"trailing ellipsis", "Step 5 of 9 - ...", "`Step ${i} of ${n} - `"},
+		{"unicode ellipsis", "Step 5 of 9 - …", "`Step ${i} of ${n} - `"},
+		{"lone N and a full stop", "Just looking - the routine is still on step N.", "`Just looking - the routine is still on step ${n}.`"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			result, out, err := runLintCheckIt(t, templateComment(c.label), fakeSource{"/rigs/leaderboard/src": c.source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Failed() || len(result.Skipped) != 0 {
+				t.Fatalf("expected %q found, got %+v\n%s", c.label, result, out)
+			}
+			if !strings.Contains(out, "1 quoted labels, 1 found in src/") {
+				t.Fatalf("expected the summary line, got:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestLintCheckItFailsATemplateWithAMisspeltLiteralPart(t *testing.T) {
+	cases := []struct{ label, source string }{
+		{"Show <password>", "Shwo ${name}"},
+		{"Step 5 of 9 - ...", "`Step ${i} off ${n} - `"},
+		{"Step 5 of 9 - ...", "`Stepp ${i} of ${n} - `"},
+		{"Step 5 of 9 - ...", "`${n} of Step ${i} - `"},
+	}
+	for _, c := range cases {
+		result, out, err := runLintCheckIt(t, templateComment(c.label), fakeSource{"/rigs/leaderboard/src": c.source})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Missing) != 1 || result.Missing[0] != c.label {
+			t.Fatalf("expected %q missing from %q, got %+v\n%s", c.label, c.source, result, out)
+		}
+	}
+}
+
+func TestLintCheckItSkipsALabelWithNoLiteralPartAndCountsIt(t *testing.T) {
+	comment := templateComment("<name>", "N", "Vote now")
+	result, out, err := runLintCheckIt(t, comment, fakeSource{"/rigs/leaderboard/src": "<button>Vote now</button>"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Failed() || len(result.Skipped) != 2 {
+		t.Fatalf("expected two skipped and none missing, got %+v\n%s", result, out)
+	}
+	if !strings.Contains(out, "3 quoted labels, 1 found in src/, 2 skipped (no literal part of 3 characters to look for)") {
+		t.Fatalf("expected the skipped count in the summary, got:\n%s", out)
+	}
+}
+
+func TestLintCheckItNamesSkippedLabelsAlongsideMissingOnes(t *testing.T) {
+	comment := templateComment("<name>", "Undo")
+	result, out, err := runLintCheckIt(t, comment, fakeSource{"/rigs/leaderboard/src": "nothing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Missing) != 1 || len(result.Skipped) != 1 {
+		t.Fatalf("got %+v\n%s", result, out)
+	}
+	if !strings.Contains(out, "2 quoted labels, 0 found in src/, 1 skipped (no literal part of 3 characters to look for), not found in src/: Undo") {
+		t.Fatalf("got:\n%s", out)
 	}
 }
