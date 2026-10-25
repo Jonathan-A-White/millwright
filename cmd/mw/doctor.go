@@ -305,6 +305,18 @@ func newDoctorCmd() *cobra.Command {
 				}
 				checks = append(checks, vpsCheck)
 			}
+			// The names pointed at the VPS, looked at for a site behind each: the
+			// hosts of the rigs' site_url and healthz_url, and [doctor] vps_names.
+			vpsNames, err := hostVPSNames(cmd.Context(), mwVault(vault, host))
+			if err != nil {
+				return err
+			}
+			if vpsNames != nil {
+				vpsNames.Note = func(ctx context.Context, text string) error {
+					return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.VPSNamesName), text)
+				}
+				checks = append(checks, vpsNames)
+			}
 			// How full each seat window's session is, read as the follower's
 			// watcher reads it: where Claude Code keeps the transcripts is
 			// unknown on a host with no home, and the check says it cannot tell.

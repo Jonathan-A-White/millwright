@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vpsnginx"
 )
 
@@ -90,4 +95,60 @@ func standbyBackend() (config.BackendSettings, bool) {
 		}
 	}
 	return config.BackendSettings{}, false
+}
+
+// hostVPSNames is the check that no name pointed at the VPS answers with nginx's
+// default page or a certificate error (mw-gq6.765), over the allmymind.org
+// hosts of every rig's site_url and healthz_url and the [doctor] table's
+// vps_names; nil, with no error, when this process is told not to look or there
+// is no name to look at.
+func hostVPSNames(ctx context.Context, rules interface {
+	EpicRequirements(ctx context.Context, rig string) (domain.EpicRequirements, error)
+}) (*doctor.VPSNames, error) {
+	if os.Getenv(vpsGuardOff) == "off" {
+		return nil, nil
+	}
+	guard, err := config.DoctorVPSGuard()
+	if err != nil {
+		return nil, err
+	}
+	extra, err := config.DoctorVPSNames()
+	if err != nil {
+		return nil, err
+	}
+	rigs, err := config.Rigs()
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var names []string
+	add := func(name string) {
+		if strings.HasSuffix(name, ".allmymind.org") && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	for _, name := range extra {
+		add(name)
+	}
+	for rig := range rigs {
+		requirements, err := rules.EpicRequirements(ctx, rig)
+		if err != nil {
+			continue
+		}
+		for _, address := range []string{requirements.SiteURL, requirements.HealthzURL} {
+			if u, err := url.Parse(address); err == nil {
+				add(u.Hostname())
+			}
+		}
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	sort.Strings(names)
+	vps := guard.SSH
+	if _, after, found := strings.Cut(vps, "@"); found {
+		vps = after
+	}
+	return doctor.NewVPSNames(vps, names), nil
 }
