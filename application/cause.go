@@ -215,3 +215,61 @@ func (r CauseReport) String() string {
 	}
 	return s
 }
+
+// CauseListRow is one story a cause is recorded for, as mw cause list prints it.
+type CauseListRow struct {
+	StoryID, Rig, Class, Why, Fix string
+}
+
+// String is the row as one line: id, rig, class, why and the fix bead, "-" when
+// there is none.
+func (r CauseListRow) String() string {
+	return strings.Join([]string{r.StoryID, r.Rig, r.Class, r.Why, orElse(r.Fix, "-")}, " · ")
+}
+
+// CauseList reads which story got which class of cause: every story touched
+// since Since that mw cause has named, one line each, oldest id first, for one
+// rig when Rig is set. It reads the tracker and nothing else: no session, no
+// tokens. The counts per rig are mw report's; this is the stories behind them.
+type CauseList struct {
+	Tracker TesterStories
+	// Since is where the window starts; zero lists every story.
+	Since time.Time
+	// Rig, when set, narrows the list to that rig.
+	Rig string
+	// Out is where the lines are printed. A nil Out prints nothing.
+	Out io.Writer
+}
+
+// Run lists the caused stories and prints them.
+func (l CauseList) Run(ctx context.Context) ([]CauseListRow, error) {
+	if l.Tracker == nil {
+		return nil, fmt.Errorf("listing causes: there is no work tracker to read them from")
+	}
+	stories, err := l.Tracker.StoriesSince(ctx, l.Since)
+	if err != nil {
+		return nil, fmt.Errorf("listing causes: %w", err)
+	}
+	var rows []CauseListRow
+	for _, d := range stories {
+		if d.IsEpic || strings.TrimSpace(d.Cause) == "" {
+			continue
+		}
+		rig := orElse(d.Merged().Rig, ReportUnknown)
+		if l.Rig != "" && rig != l.Rig {
+			continue
+		}
+		rows = append(rows, CauseListRow{StoryID: d.Story.ID, Rig: rig, Class: d.Cause,
+			Why: strings.Join(strings.Fields(d.CauseWhy), " "), Fix: d.CauseFix})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].StoryID < rows[j].StoryID })
+	if l.Out != nil {
+		if len(rows) == 0 {
+			fmt.Fprintln(l.Out, "no cause named in the window")
+		}
+		for _, row := range rows {
+			fmt.Fprintln(l.Out, row)
+		}
+	}
+	return rows, nil
+}
