@@ -2864,7 +2864,9 @@ mw grist smoke lampas --filed mw-5r3p30.313 tutor/hello tutor/photo
 
 (`--filed <bead>` takes the examples as `<kind>/<example>` or the full name, adds them to the
 bead's metadata, runs no smoke, and ends the hold of the app's last failure if the bead now names
-all of it). A smoke whose every failing example is named on an open bead says
+all of it). An open bead whose title or description holds the example's name (`<app>/<kind>/<example>`,
+`<kind>/<example>` or the bare name alone, as `verse-text-ask`) names it too, with no metadata (mw-gq6.773).
+A smoke whose every failing example is named on an open bead says
 `FAILED 3 of 9 examples, all filed on mw-5r3p30.313: not held`, `mw status` shows
 `filed on mw-5r3p30.313, not held` under GRIST SMOKE, no alarm is posted and nothing is held.
 One failing example not named, or a failure that is no example's (a refusal, a grind that

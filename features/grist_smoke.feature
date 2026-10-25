@@ -387,6 +387,18 @@ Feature: mw grist smoke tests an app's grist end to end
     And the open stories of "trade-tracker" are not held
     And no alarm was posted
 
+  Scenario: a failed smoke whose failing example an open bead's title names by its bare name holds nothing
+    Given a rig "trade-tracker" checked out where the app "trade-tracker" is
+    And the bead "mw-5r3p30.313" is open and its title says "the new example blank-paper fails live 2/2"
+    And the mill answers the next grist with:
+      """
+      {"price": 12.5, "confidence": "low"}
+      """
+    When a landing in "trade-tracker" changes "grinds/price-check.json"
+    Then the landing's smoke line says "FAILED 1 of 1 examples, all filed on mw-5r3p30.313: not held"
+    And the open stories of "trade-tracker" are not held
+    And no alarm was posted
+
   Scenario: one failing example that is not named still holds the rig
     Given a rig "trade-tracker" checked out where the app "trade-tracker" is
     And the app "trade-tracker" has the example "price-check/second" containing:

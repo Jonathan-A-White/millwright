@@ -1077,20 +1077,59 @@ func (h GristSmokeHold) Fix(detail StoryDetail) string {
 		}
 	}
 	for _, example := range h.Examples {
-		if strings.Contains(detail.Story.Title, example) || strings.Contains(detail.Description, example) {
+		if NamesSmokeExample(detail.Story.Title, example) || NamesSmokeExample(detail.Description, example) {
 			return "its title or description names the failing example " + example
 		}
 	}
 	return ""
 }
 
+// NamesSmokeExample says text names example, <app>/<kind>/<example>: it holds the
+// full name, <kind>/<example>, or the bare example name, each standing on its own
+// (not inside a longer name such as verse-text-ask-two, and the shorter forms not
+// as the tail of another app's name). It is the one reading of "an open bead
+// names the example" that the smoke's filed match and the hold's fix share
+// (mw-gq6.773).
+func NamesSmokeExample(text, example string) bool {
+	forms := []string{example}
+	if i := strings.Index(example, "/"); i >= 0 {
+		forms = append(forms, example[i+1:])
+		if j := strings.LastIndex(example, "/"); j > i {
+			forms = append(forms, example[j+1:])
+		}
+	}
+	for n, form := range forms {
+		for from := 0; ; {
+			at := strings.Index(text[from:], form)
+			if at < 0 {
+				break
+			}
+			start, end := from+at, from+at+len(form)
+			from = start + 1
+			if start > 0 && (isExampleNameByte(text[start-1]) || (n > 0 && text[start-1] == '/')) {
+				continue
+			}
+			if end < len(text) && isExampleNameByte(text[end]) {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func isExampleNameByte(c byte) bool {
+	return c == '-' || c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
 // GristSmokeFiled is what the smoke asks the tracker: which failing examples an
 // open bead already names.
 type GristSmokeFiled interface {
 	// FiledSmokeExamples are the examples named by the SmokeExamplesField of an
-	// open bead, each with the id of the bead that names it. A closed bead names
-	// none.
-	FiledSmokeExamples(ctx context.Context) (map[string]string, error)
+	// open bead, and those of examples (<app>/<kind>/<example>) that an open
+	// bead's title or description names (NamesSmokeExample), each with the id of
+	// the bead that names it; the metadata wins. A closed bead names none.
+	FiledSmokeExamples(ctx context.Context, examples []string) (map[string]string, error)
 }
 
 // GristSmokeBook keeps the record of each app's last smoke in the tracker's
@@ -1149,7 +1188,11 @@ func (b GristSmokeBook) mailFlakes(ctx context.Context, report GristSmokeReport)
 	if b.Mailbox == nil {
 		return nil
 	}
-	named := b.named(ctx)
+	var asked []string
+	for _, flake := range report.Flakes {
+		asked = append(asked, flake.Example)
+	}
+	named := b.named(ctx, asked)
 	var failed []error
 	for _, flake := range report.Flakes {
 		var misses []string
@@ -1187,11 +1230,11 @@ func (b GristSmokeBook) mailFlakes(ctx context.Context, report GristSmokeReport)
 
 // named are the examples an open bead names, each with the bead; empty when the
 // tracker cannot be asked.
-func (b GristSmokeBook) named(ctx context.Context) map[string]string {
+func (b GristSmokeBook) named(ctx context.Context, examples []string) map[string]string {
 	if b.Filed == nil {
 		return nil
 	}
-	named, err := b.Filed.FiledSmokeExamples(ctx)
+	named, err := b.Filed.FiledSmokeExamples(ctx, examples)
 	if err != nil {
 		return nil
 	}
@@ -1214,7 +1257,7 @@ func (b GristSmokeBook) noteFiled(ctx context.Context, report GristSmokeReport) 
 	if len(report.FiledOn) == 0 || b.Comments == nil {
 		return nil
 	}
-	named := b.named(ctx)
+	named := b.named(ctx, smokeExamplesOf(report.Failures))
 	var failed []error
 	for _, failure := range report.Failures {
 		bead, ok := named[smokeExampleOf(failure)]
@@ -1293,7 +1336,7 @@ func (b GristSmokeBook) Mark(ctx context.Context, report GristSmokeReport) Grist
 	if !report.Failed() || b.Filed == nil {
 		return report
 	}
-	named, err := b.Filed.FiledSmokeExamples(ctx)
+	named, err := b.Filed.FiledSmokeExamples(ctx, smokeExamplesOf(report.Failures))
 	if err != nil {
 		return report
 	}
@@ -1318,6 +1361,17 @@ func filedOn(failures []string, named map[string]string) []string {
 	}
 	sort.Strings(found)
 	return found
+}
+
+// smokeExamplesOf are the examples the failure lines are for, each once.
+func smokeExamplesOf(failures []string) []string {
+	var examples []string
+	for _, failure := range failures {
+		if example := smokeExampleOf(failure); example != "" && !slices.Contains(examples, example) {
+			examples = append(examples, example)
+		}
+	}
+	return examples
 }
 
 // smokeExampleOf is the example a failure line is for, <app>/<kind>/<example>
@@ -1427,16 +1481,13 @@ func (b GristSmokeBook) markFixes(ctx context.Context, records []GristSmokeRecor
 	if b.Filed == nil {
 		return
 	}
-	var named map[string]string
 	for i, r := range records {
 		if !r.Held() {
 			continue
 		}
-		if named == nil {
-			var err error
-			if named, err = b.Filed.FiledSmokeExamples(ctx); err != nil {
-				return
-			}
+		named, err := b.Filed.FiledSmokeExamples(ctx, r.FailingExamples())
+		if err != nil {
+			return
 		}
 		for _, example := range r.FailingExamples() {
 			if bead, ok := named[example]; ok && !slices.Contains(records[i].Fixes, bead) {
