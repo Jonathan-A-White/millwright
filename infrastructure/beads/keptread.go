@@ -476,3 +476,32 @@ func (g *Gateway) notesOverConnection(ctx context.Context, prefix string) (map[s
 	}
 	return found, true
 }
+
+// inboxWhere is the open mail assigned to a mailbox, as `bd list --type mail
+// --assignee <box> --status open` lists it.
+func inboxWhere(mailbox string) string {
+	return "i.issue_type = 'mail' and i.assignee = " + sqlQuoted(mailbox) + " and i.status = 'open'"
+}
+
+// inboxOverConnection is the open mail of a mailbox as `bd list` prints it, read
+// over the kept connection; ok is false when there is no connection or it
+// failed, and the caller starts a bd.
+func (g *Gateway) inboxOverConnection(ctx context.Context, mailbox string) (found []bead, ok bool) {
+	db := g.keptDB()
+	if db == nil {
+		return nil, false
+	}
+	where := inboxWhere(mailbox)
+	found, err := readListing(ctx, db, listingQueries{
+		beads: beadColumns + " where " + where + " order by i.created_at, i.id",
+		labels: "select l.issue_id, l.label from labels l join issues i on i.id = l.issue_id where " + where +
+			" order by l.issue_id, l.label",
+		edges: "select d.issue_id, coalesce(d.depends_on_issue_id, d.depends_on_wisp_id, d.depends_on_external) as depends_on_id, d.type" +
+			" from dependencies d join issues i on i.id = d.issue_id where " + where + " order by d.issue_id, d.created_at",
+	}, nil)
+	if err != nil {
+		g.keptFailed(ctx, "a mailbox", err)
+		return nil, false
+	}
+	return found, true
+}

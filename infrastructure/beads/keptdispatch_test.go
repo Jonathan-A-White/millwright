@@ -61,6 +61,9 @@ func (c factoryConn) Prepare(string) (driver.Stmt, error) { return nil, errors.N
 func (c factoryConn) Close() error                        { return nil }
 func (c factoryConn) Begin() (driver.Tx, error)           { return nil, errors.New("not used") }
 
+// inboxAsked is the mailbox a listing of the open mail asks for.
+var inboxAsked = regexp.MustCompile(`i\.issue_type = 'mail' and i\.assignee = '([^']*)'`)
+
 var keyAsked = regexp.MustCompile("where `key` = '([^']*)'")
 
 func (c factoryConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
@@ -158,6 +161,14 @@ func (c factoryConn) QueryContext(_ context.Context, query string, _ []driver.Na
 // listed says whether a listing query holds the bead id: a read of the live
 // beads leaves out a closed one that is no epic.
 func (s *factoryServer) listed(q, id string) bool {
+	if box := inboxAsked.FindStringSubmatch(q); box != nil {
+		for _, b := range s.beads {
+			if b[0] == id {
+				return b[5] == "mail" && b[6] == box[1] && b[4] == "open"
+			}
+		}
+		return false
+	}
 	if !strings.Contains(q, "i.status <> 'closed'") {
 		return true
 	}

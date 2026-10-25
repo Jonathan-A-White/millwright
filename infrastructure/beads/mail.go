@@ -86,14 +86,21 @@ func (g *Gateway) mailBead(ctx context.Context, id string) (bead, error) {
 // Inbox implements application.Mailbox: the open mail assigned to a mailbox,
 // oldest first. bd's default limit is asked to step aside, because an inbox
 // that showed the first fifty of a hundred would lose the rest without a word.
+//
+// The listing is read over the kept connection when there is one (a follower
+// that listed a Mayor's inbox of 1400 old messages by bd every few seconds cost
+// the server hundreds of connections a minute, mw-gq6.749), and by bd when there
+// is not or it fails.
 func (g *Gateway) Inbox(ctx context.Context, mailbox string) ([]application.Message, error) {
-	out, err := g.call(ctx, "list", "--type", TypeMail, "--assignee", mailbox, "--status", StatusOpen, "--limit", "0", "--json")
-	if err != nil {
-		return nil, err
-	}
-	found, err := decodeBeads(out)
-	if err != nil {
-		return nil, fmt.Errorf("reading the mail of %s: %w", mailbox, err)
+	found, ok := g.inboxOverConnection(ctx, mailbox)
+	if !ok {
+		out, err := g.call(ctx, "list", "--type", TypeMail, "--assignee", mailbox, "--status", StatusOpen, "--limit", "0", "--json")
+		if err != nil {
+			return nil, err
+		}
+		if found, err = decodeBeads(out); err != nil {
+			return nil, fmt.Errorf("reading the mail of %s: %w", mailbox, err)
+		}
 	}
 	unread := make([]application.Message, 0, len(found))
 	for _, mail := range inFiledOrder(found) {
