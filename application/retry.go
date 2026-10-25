@@ -266,6 +266,20 @@ type Retry struct {
 	// story left held, never open, so no dispatch takes it again. It is for a
 	// story that is to be closed, or looked at, not worked afresh.
 	Hold bool
+
+	// Reach asks the host a story was worked on what its worktree holds, when
+	// the retry runs on another host (mw-gq6.774). A nil Reach reaches no host,
+	// so such a retry is refused unless Force is given.
+	Reach WorktreeRemote
+
+	// Force is mw retry --force: a retry run off the story's host goes on although
+	// its worktree there holds uncommitted work, or could not be asked, and says
+	// that work is left unsaved there.
+	Force bool
+
+	// Err is where a work-left-unsaved warning is also printed. A nil Err prints
+	// it nowhere but the report and the story's comment.
+	Err io.Writer
 }
 
 // RetryReport is what one retry did, or why it changed nothing.
@@ -304,6 +318,11 @@ type RetryReport struct {
 	// only gave the claim back and left that host's worktree and branch for its
 	// own next dispatch; empty when the worktree was here.
 	Elsewhere string
+
+	// Unsaved is the warning of a forced retry from another host that left work
+	// there unsaved: "work left unsaved on <host>: <path>". Empty when nothing
+	// was left (mw-gq6.774).
+	Unsaved string
 
 	Worktree string
 	Branch   string
@@ -545,6 +564,10 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 		keepWork = !refused
 	}
 	if elsewhere := r.workedOn(path, detail.Assignee); elsewhere != "" && elsewhere != r.Host {
+		report, err := r.askAway(ctx, report, elsewhere)
+		if err != nil {
+			return report, err
+		}
 		return r.handBack(ctx, report, elsewhere)
 	}
 
@@ -897,6 +920,42 @@ func metadataSaid(fields map[string]string) string {
 	return strings.Join(said, ", ")
 }
 
+// askAway asks the host a story was worked on, which is not this one, what its
+// worktree there holds, before the claim is given back without reading it
+// (mw-gq6.774). A clean worktree, or none, lets the retry go on. Uncommitted
+// work, or a host that could not be asked, refuses it, naming the host and the
+// command to run there, unless Force is given: then the retry goes on and the
+// report says what is left unsaved.
+func (r Retry) askAway(ctx context.Context, report RetryReport, host string) (RetryReport, error) {
+	var state WorktreeState
+	var asked error
+	if r.Reach == nil {
+		asked = fmt.Errorf("this host has no way to reach %s", host)
+	} else {
+		state, asked = r.Reach.WorktreeState(ctx, host, report.StoryID)
+	}
+	if asked == nil && state.Clean() {
+		return report, nil
+	}
+	there := fmt.Sprintf("run `mw retry %s` on %s, which bundles it", report.StoryID, host)
+	if !r.Force {
+		if asked != nil {
+			return r.refuse(report, fmt.Sprintf(
+				"it was worked on %s, and %s could not be asked whether its worktree there holds uncommitted work (%s): "+
+					"%s, or add --force to give the claim back without knowing", host, host, oneLine(asked.Error()), there))
+		}
+		return r.refuse(report, fmt.Sprintf(
+			"it was worked on %s, and its worktree there, %s, holds uncommitted work (%s) that this retry would leave unsaved: "+
+				"%s, or add --force to give the claim back and leave it there", host, state.Path, strings.Join(state.Left, ", "), there))
+	}
+	where := state.Path
+	if asked != nil {
+		where = fmt.Sprintf("the worktree of %s (%s could not be asked what it holds: %s)", report.StoryID, host, oneLine(asked.Error()))
+	}
+	report.Unsaved = fmt.Sprintf("work left unsaved on %s: %s", host, where)
+	return report, nil
+}
+
 // handBack is a retry of a story another host worked: the claim is given back
 // and a comment says where the worktree and branch were left. Nothing on this
 // host's disk is read or changed, and whether that host's session still runs
@@ -917,6 +976,9 @@ func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere strin
 		return report, fmt.Errorf("retrying %s: the claim could not be given back: %w", storyID, err)
 	}
 	report.ClaimReleased, report.Held = true, r.Hold
+	if report.Unsaved != "" && r.Err != nil {
+		fmt.Fprintln(r.Err, report.Unsaved)
+	}
 	if err := r.settleAttempts(ctx, &report, elsewhere); err != nil {
 		return report, err
 	}
@@ -932,7 +994,7 @@ func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere strin
 				"so its worktree and branch are left there. %s",
 			r.Host, report.Attempt, storyID, elsewhere, heldSaid)
 	}
-	comment += report.unclaimedSaid() + report.stopSaid() + report.formulaSaid()
+	comment += report.unsavedSaid() + report.unclaimedSaid() + report.stopSaid() + report.formulaSaid()
 	if report.Held {
 		comment = HeldCommentPrefix + " " + comment
 	}
@@ -990,6 +1052,9 @@ func (r RetryReport) String() string {
 	}
 	if r.Elsewhere != "" {
 		fmt.Fprintf(&b, "  there   the story was worked on %s; its worktree and branch are left there, not read from here\n", r.Elsewhere)
+		if r.Unsaved != "" {
+			fmt.Fprintf(&b, "  unsaved %s\n", r.Unsaved)
+		}
 		r.writeFormula(&b)
 		if r.ClaimReleased {
 			r.writeOpen(&b)
@@ -1054,6 +1119,15 @@ func (r RetryReport) formulaSaid() string {
 		said += fmt.Sprintf(" What was left open of the formula %s could not all be closed: %s.", r.molecule, r.FormulaLeft)
 	}
 	return said
+}
+
+// unsavedSaid is what a retry's comment adds when it was forced from another
+// host and left work there unsaved (mw-gq6.774).
+func (r RetryReport) unsavedSaid() string {
+	if r.Unsaved == "" {
+		return ""
+	}
+	return " " + r.Unsaved + "."
 }
 
 // unclaimedSaid is what a retry's comment adds when the story had no claim to

@@ -184,6 +184,16 @@ func aRetryStory(t *testing.T, tracker *apptest.FakeTracker, id string) {
 	}
 }
 
+// aCleanRemote is a remote on which host's worktree of the story holds nothing
+// uncommitted, for a retry from another host that has nothing to refuse for.
+func aCleanRemote(host string) *apptest.FakeWorktreeRemote {
+	remote := apptest.NewFakeWorktreeRemote()
+	remote.Holds(host, application.WorktreeState{})
+	return remote
+}
+
+func aCleanDesktop() *apptest.FakeWorktreeRemote { return aCleanRemote("desktop") }
+
 // aRetry builds a Retry wired to fakes, ready to run against the story
 // aRetryStory set up.
 func aRetry(tracker *apptest.FakeTracker, landing *fakeRetryLanding, files *apptest.FakeVaultFiles, out *strings.Builder) application.Retry {
@@ -435,7 +445,9 @@ func TestRetryOfAStoryAnotherAssigneeHoldsStillRefusesWhenTheGiveBackDoes(t *tes
 	landing := &fakeRetryLanding{NoWorktree: true}
 	var out strings.Builder
 
-	_, err := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out).Run(context.Background(), "mw-gq6.1")
+	retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out)
+	retry.Reach = aCleanDesktop()
+	_, err := retry.Run(context.Background(), "mw-gq6.1")
 	if err == nil || !strings.Contains(err.Error(), "the claim could not be given back") {
 		t.Fatalf("expected the give-back's refusal, got: %v", err)
 	}
@@ -526,6 +538,7 @@ func TestRetryOfAHitlStoryGivesTheClaimBackAndNamesTheLabelAndTheCure(t *testing
 			if elsewhere {
 				// The story is pathed to "vps", so a retry run elsewhere only hands it back.
 				retry.Host = "desktop"
+				retry.Reach = aCleanRemote("vps")
 			}
 			report, err := retry.Run(context.Background(), "mw-gq6.1")
 			if err != nil {
@@ -626,6 +639,7 @@ func TestRetryFromAHostThatDoesNotHoldTheClaimGivesItBackByItsActualAssignee(t *
 
 	retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out)
 	retry.Host = "laptop"
+	retry.Reach = aCleanDesktop()
 	report, err := retry.Run(context.Background(), "mw-gq6.1")
 	if err != nil {
 		t.Fatalf("expected the retry to succeed, got: %v\n%s", err, out.String())

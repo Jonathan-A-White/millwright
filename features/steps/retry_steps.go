@@ -40,6 +40,20 @@ type retryContext struct {
 	report  application.RetryReport
 	err     error
 	printed bytes.Buffer
+	stderr  bytes.Buffer
+
+	// reach says what each other host's worktree of a story holds (mw-gq6.774).
+	reach *apptest.FakeWorktreeRemote
+}
+
+// remote is the stand-in for the other hosts, made on first use. A story that
+// ran on another host starts with a clean worktree there; a scenario says
+// otherwise.
+func (c *retryContext) remote() *apptest.FakeWorktreeRemote {
+	if c.reach == nil {
+		c.reach = apptest.NewFakeWorktreeRemote()
+	}
+	return c.reach
 }
 
 // retryRig and retryHost are the rig name and host every scenario of this
@@ -87,6 +101,12 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 
 	ctx.When(`^mw retries "([^"]*)"$`, c.mwRetries)
 	ctx.When(`^mw retries "([^"]*)" with --hold$`, c.mwRetriesHolding)
+	ctx.When(`^mw retries "([^"]*)" with --force$`, c.mwRetriesForced)
+	ctx.Given(`^the worktree of "([^"]*)" on the host "([^"]*)" holds uncommitted work in "([^"]*)"$`, c.theWorktreeThereHoldsUncommittedWork)
+	ctx.Given(`^the ssh line to the host "([^"]*)" is down$`, c.theHostCannotBeReached)
+	ctx.Then(`^the retry says "([^"]*)" on stderr and on the bead "([^"]*)"$`, c.theRetrySaysOnStderrAndTheBead)
+	ctx.Then(`^the retry says nothing of unsaved work on stderr or on the bead "([^"]*)"$`, c.theRetrySaysNothingUnsaved)
+	ctx.Then(`^the host "([^"]*)" was asked what its worktree holds$`, c.theHostWasAsked)
 	ctx.Then(`^the story "([^"]*)" is held and unassigned$`, c.theStoryIsHeldAndUnassigned)
 	ctx.Then(`^the claim of "([^"]*)" went from claimed to held in one write, never through open$`, c.theClaimWentToHeldInOneWrite)
 	ctx.Then(`^the story "([^"]*)" carries a comment saying it is held, not open$`, c.theStoryCarriesTheHeldComment)
@@ -354,6 +374,7 @@ func (c *retryContext) theRetryFoundNoWorktree(id string) error {
 // that host, and no worktree or branch of it on this host at all.
 func (c *retryContext) theStoryRanOnAnotherHost(id, host string) error {
 	c.tracker.AddStory(c.lastEpic, domain.Story{ID: id, Title: "The story " + id})
+	c.remote().Holds(host, application.WorktreeState{})
 	ctx := context.Background()
 	if err := c.tracker.ClaimStory(ctx, id); err != nil {
 		return err
@@ -366,6 +387,7 @@ func (c *retryContext) theStoryRanOnAnotherHost(id, host string) error {
 // fake's own.
 func (c *retryContext) theStoryIsClaimedByAnotherHostsActor(id, host, actor string) error {
 	c.tracker.AddStory(c.lastEpic, domain.Story{ID: id, Title: "The story " + id})
+	c.remote().Holds(host, application.WorktreeState{})
 	ctx := context.Background()
 	if err := c.tracker.ClaimAs(id, actor, time.Now().Add(time.Hour)); err != nil {
 		return err
@@ -478,12 +500,15 @@ func (c *retryContext) theStoryRecordsRefunds(id string, want int) error {
 // mwRetries runs the use case the way mw retry does: the real worktrees, the
 // real landing and the real vault, with stand-ins only for the beads database
 // and the terminal.
-func (c *retryContext) mwRetries(id string) error { return c.retries(id, false) }
+func (c *retryContext) mwRetries(id string) error { return c.retries(id, false, false) }
+
+// mwRetriesForced is mw retry --force.
+func (c *retryContext) mwRetriesForced(id string) error { return c.retries(id, false, true) }
 
 // mwRetriesHolding is mw retry --hold.
-func (c *retryContext) mwRetriesHolding(id string) error { return c.retries(id, true) }
+func (c *retryContext) mwRetriesHolding(id string) error { return c.retries(id, true, false) }
 
-func (c *retryContext) retries(id string, hold bool) error {
+func (c *retryContext) retries(id string, hold, force bool) error {
 	if c.commentsBefore == nil {
 		c.commentsBefore = map[string]int{}
 	}
@@ -504,6 +529,9 @@ func (c *retryContext) retries(id string, hold bool) error {
 		Now:       c.clock(),
 		Out:       &c.printed,
 		Hold:      hold,
+		Reach:     c.remote(),
+		Force:     force,
+		Err:       &c.stderr,
 	}.Run(context.Background(), id)
 	return nil
 }
@@ -907,6 +935,55 @@ func (c *retryContext) theRetryPrintedTheReminder(want string) error {
 func (c *retryContext) theRetryPrintedNoReminder() error {
 	if strings.Contains(c.printed.String(), "no cause recorded yet") {
 		return fmt.Errorf("expected no cause reminder, got %q", c.printed.String())
+	}
+	return nil
+}
+
+// theWorktreeThereHoldsUncommittedWork is what a session left on the host the
+// story ran on: a worktree with a change nobody committed.
+func (c *retryContext) theWorktreeThereHoldsUncommittedWork(id, host, path string) error {
+	c.remote().Holds(host, application.WorktreeState{Path: "/home/jonathan/.mw-worktrees/" + id, Left: []string{path}})
+	return nil
+}
+
+// theHostCannotBeReached is a host the ssh line to which is down.
+func (c *retryContext) theHostCannotBeReached(host string) error {
+	c.remote().Unreachable(host, fmt.Errorf("ssh: connect to host %s port 22: Connection refused", host))
+	return nil
+}
+
+func (c *retryContext) theHostWasAsked(host string) error {
+	for _, asked := range c.remote().Asked() {
+		if asked == host {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected %s to be asked what its worktree holds, asked: %v", host, c.remote().Asked())
+}
+
+// theRetrySaysOnStderrAndTheBead checks the one line a forced retry from another
+// host gives where it is seen at once and where it is kept.
+func (c *retryContext) theRetrySaysOnStderrAndTheBead(want, id string) error {
+	if !strings.Contains(c.stderr.String(), want) {
+		return fmt.Errorf("expected stderr to say %q, got %q", want, c.stderr.String())
+	}
+	comments := c.tracker.Comments(id)
+	for _, comment := range comments {
+		if strings.Contains(comment, want) {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected a comment on %s to say %q, got %q", id, want, comments)
+}
+
+func (c *retryContext) theRetrySaysNothingUnsaved(id string) error {
+	if strings.Contains(c.stderr.String(), "unsaved") {
+		return fmt.Errorf("expected nothing on stderr of unsaved work, got %q", c.stderr.String())
+	}
+	for _, comment := range c.tracker.Comments(id) {
+		if strings.Contains(comment, "unsaved") {
+			return fmt.Errorf("expected no comment on %s of unsaved work, got %q", id, comment)
+		}
 	}
 	return nil
 }
