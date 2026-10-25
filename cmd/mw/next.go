@@ -327,6 +327,18 @@ func beadsEnvFile() string {
 	return filepath.Join(home, ".config", "mw", "beads.env")
 }
 
+// claudeEnvFile is where this host keeps the Claude Code token for its sessions
+// (CLAUDE_CODE_OAUTH_TOKEN, from claude setup-token), read by every session mw
+// starts when the file exists (claude.WithClaudeEnvFile). Only the path is
+// used here, never the file.
+func claudeEnvFile() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "mw", "claude.env")
+}
+
 // builderBoot is how every dispatched session is assembled: into the Builder
 // seat, on this host, with this same mw chained on after the harness exits.
 // tests is the [tests] table, so the session may run its own rig's tests

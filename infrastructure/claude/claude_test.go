@@ -8,6 +8,7 @@ package claude
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1319,5 +1320,98 @@ func TestNoBuilderOrSeatIsGivenTheMillsAPIKeyEvenWithTheSwitchOn(t *testing.T) {
 	}
 	if _, set := window.Env[APIKeyEnv]; set || strings.Contains(strings.Join(window.Command, " "), secret) {
 		t.Errorf("expected no key in the seat's window, got %+v %q", window.Env, window.Command)
+	}
+}
+
+// A host with a one-year token keeps its claude.env in ~/.config/mw: a story's
+// session and a seat's window both export what it holds to claude, and the
+// token is in no part of what mw hands to tmux.
+func TestClaudeEnvFileReachesTheStoryAndTheSeatAndNoCommandLine(t *testing.T) {
+	const token = "test-token"
+	home := t.TempDir()
+	dir := filepath.Join(home, ".config", "mw")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "claude.env")
+	if err := os.WriteFile(file, []byte("CLAUDE_CODE_OAUTH_TOKEN="+token+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	os.Unsetenv("CLAUDE_CODE_OAUTH_TOKEN")
+
+	out := filepath.Join(home, "env")
+	harness := filepath.Join(home, "claude")
+	writeScript(t, harness, `printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN" > `+out+"\n")
+
+	run := func(command []string, env map[string]string) string {
+		t.Helper()
+		os.Remove(out)
+		cmd := exec.Command(command[0], command[1:]...)
+		cmd.Dir = home
+		cmd.Env = os.Environ()
+		for name, value := range env {
+			cmd.Env = append(cmd.Env, name+"="+value)
+		}
+		if said, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("running %q: %v\n%s", command, err, said)
+		}
+		printed, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatalf("the harness printed nothing: %v", err)
+		}
+		return string(printed)
+	}
+
+	spec, err := New(WithProgram(harness), WithClaudeEnvFile(file)).Session(launch(func(l *application.Launch) {
+		l.ResultFile = filepath.Join(home, "result.json")
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := run(spec.Command, spec.Env); got != token {
+		t.Errorf("expected the Builder's claude to hold the token, got %q", got)
+	}
+	if strings.Contains(strings.Join(spec.Command, " "), token) || strings.Contains(fmt.Sprint(spec.Env), token) {
+		t.Errorf("expected the token out of the Builder's command and environment, got %q %v", spec.Command, spec.Env)
+	}
+
+	window, err := New(WithProgram(harness), WithClaudeEnvFile(file)).SeatSession(seatLaunch(func(l *application.SeatLaunch) {
+		l.Dir = home
+		l.Kickoff = "boot"
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := run(window.Command, window.Env); got != token {
+		t.Errorf("expected the seat's claude to hold the token, got %q", got)
+	}
+	if strings.Contains(strings.Join(window.Command, " "), token) || strings.Contains(fmt.Sprint(window.Env), token) {
+		t.Errorf("expected the token out of the seat's command and environment, got %q %v", window.Command, window.Env)
+	}
+}
+
+// With no claude.env, or none named, a launch is what it was.
+func TestNoClaudeEnvFileLeavesTheLaunchAsItWas(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "claude.env")
+	plain, err := New().Session(launch(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range []*Harness{New(WithClaudeEnvFile(missing)), New(WithClaudeEnvFile(""))} {
+		spec, err := h.Session(launch(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(spec.Command, plain.Command) {
+			t.Errorf("expected the story's line unchanged, got %q want %q", spec.Command, plain.Command)
+		}
+		window, err := h.SeatSession(seatLaunch(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if window.Command[0] != Program {
+			t.Errorf("expected the seat to run %s itself, got %q", Program, window.Command)
+		}
 	}
 }

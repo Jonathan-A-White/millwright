@@ -22,7 +22,15 @@ token gets its row here before it is put.
 | `vultr_api_token` | the Vultr account's API key (epic mw-5gr3k0) | `contrib/vultr-boost` on the home ([vultr-boost.md](vultr-boost.md)), to make and unmake a Boost box | my.vultr.com, Account, API: disable the API or regenerate the key, then put the new one |
 | `boost_github_token` | a GitHub token that reads the vault and the rigs (optional) | `contrib/vultr-boost`, into the box's cloud-init | github.com, Settings, Developer settings: delete the token |
 | `boost_claude_token` | a Claude Code token from `claude setup-token` (optional) | `contrib/vultr-boost`, into the box's cloud-init | claude.ai, Settings: revoke the token |
+| `claude.env` (a file, not a vault name) | a Claude Code token from `claude setup-token`, as `CLAUDE_CODE_OAUTH_TOKEN=<token>`, one year long | every Claude session `mw` starts on the host, a story's and a seat's: the session's own shell reads it before `claude` runs (`claude.WithClaudeEnvFile`), so the token is on no command line | claude.ai, Settings: revoke the token, then write a new one into the file |
 | `boost_beads_password` | the beads server's password, if it has one (optional) | `contrib/vultr-boost`, into the box's cloud-init | change it on the beads server |
+
+`claude.env` is the one row that is not in `secrets.enc.yaml`: it is
+`~/.config/mw/claude.env`, mode 600, on each host that should keep working after
+its Claude login expires (a home, a desktop, the Laptop). Make the token once
+with `claude setup-token`, then write the file on the host (`umask 077`, then
+`printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$token" > ~/.config/mw/claude.env`). The same token may serve
+both hosts. A host with no such file starts sessions as it always did.
 
 Nothing else is kept here. The claude login, GitHub credentials, the Postern
 and mill keys and WireGuard keys are each where their own docs say, not in this

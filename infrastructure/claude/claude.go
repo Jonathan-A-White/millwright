@@ -9,6 +9,7 @@ package claude
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -217,6 +218,7 @@ type Harness struct {
 	permissionMode string
 	tests          map[string]string
 	envFile        string
+	claudeEnvFile  string
 	serverHost     string
 	nice           int
 	jobs           int
@@ -262,6 +264,30 @@ func WithTests(commands map[string]string) Option {
 // nothing. An empty path does nothing.
 func WithEnvFile(path string) Option {
 	return func(h *Harness) { h.envFile = path }
+}
+
+// WithClaudeEnvFile names a file of shell assignments, such as
+// ~/.config/mw/claude.env holding CLAUDE_CODE_OAUTH_TOKEN, that every Claude
+// Code session mw starts, a story's and a seat's, reads before the program runs,
+// so a host with a long-lived token keeps working after its login expires. A
+// session under the shared tmux server gets none of dispatch's environment and
+// mw passes only a few names with -e, so the file is read by the session's own
+// shell; the command line holds the file's path and never anything in it. It is
+// read when the launch is assembled only if it is there then: a file that is
+// missing, or an empty path, leaves the launch as it was.
+func WithClaudeEnvFile(path string) Option {
+	return func(h *Harness) { h.claudeEnvFile = path }
+}
+
+// claudeEnv is the claude env file's path when the file exists, else "".
+func (h *Harness) claudeEnv() string {
+	if h.claudeEnvFile == "" {
+		return ""
+	}
+	if info, err := os.Stat(h.claudeEnvFile); err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+	return h.claudeEnvFile
 }
 
 // WithBeadsServerHost names the host a session's bd reaches the beads database
@@ -462,6 +488,10 @@ func (h *Harness) spec(l application.Launch, line string) application.SessionSpe
 	if h.serverHost != "" {
 		line = "export BEADS_DOLT_SERVER_HOST=" + shellQuote(h.serverHost) + "; " + line
 	}
+	if c := h.claudeEnv(); c != "" {
+		q := shellQuote(c)
+		line = "if [ -r " + q + " ]; then set -a; . " + q + "; set +a; fi; " + line
+	}
 	if h.envFile != "" {
 		q := shellQuote(h.envFile)
 		line = "if [ -r " + q + " ]; then set -a; . " + q + "; set +a; fi; " + line
@@ -643,17 +673,19 @@ func (h *Harness) SeatSession(l application.SeatLaunch) (application.WindowSpec,
 
 // withEnvFile puts the host's beads environment in front of a seat's argv
 // without a shell ever reading the argv: a fixed one-line script reads the
-// file if it is readable, exports the server host when one was given, then
+// file, and the claude env file, if readable, exports the server host when one was given, then
 // replaces itself with "$@". The file's path, the host and the program are
 // arguments of it, so the kickoff still arrives untouched. Neither a file nor
 // a host configured leaves the argv as it was.
 func (h *Harness) withEnvFile(argv []string) []string {
-	if h.envFile == "" && h.serverHost == "" {
+	claudeEnv := h.claudeEnv()
+	if h.envFile == "" && h.serverHost == "" && claudeEnv == "" {
 		return argv
 	}
-	const script = `f=$1; h=$2; shift 2; if [ -r "$f" ]; then set -a; . "$f"; set +a; fi; ` +
+	const script = `f=$1; h=$2; c=$3; shift 3; if [ -r "$f" ]; then set -a; . "$f"; set +a; fi; ` +
+		`if [ -n "$c" ] && [ -r "$c" ]; then set -a; . "$c"; set +a; fi; ` +
 		`if [ -n "$h" ]; then export BEADS_DOLT_SERVER_HOST="$h"; fi; exec "$@"`
-	return append([]string{h.shell, "-c", script, "sh", h.envFile, h.serverHost}, argv...)
+	return append([]string{h.shell, "-c", script, "sh", h.envFile, h.serverHost, claudeEnv}, argv...)
 }
 
 // bdShimSetup is the shell that makes the directory holding the script that

@@ -159,7 +159,7 @@ func hostBeads(ctx context.Context, files application.HomeFile, host string) (ho
 // that cannot be told — no beads_sync auto, no home file, a config error that
 // the commands around this one report on their own — leaves both as they were.
 func sessionHarness(vaultDir, host string, opts ...claude.Option) *claude.Harness {
-	opts = append(opts, claude.WithEnvFile(beadsEnvFile()))
+	opts = append(opts, claude.WithEnvFile(beadsEnvFile()), claude.WithClaudeEnvFile(claudeEnvFile()))
 	configured, err := hostBeadsSync()
 	if err != nil {
 		return claude.New(opts...)
