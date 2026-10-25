@@ -1161,6 +1161,9 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		if sharing && share.Unkeyed == NeedsFilesKey {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "needs-files-key", Why: share.String()})
 			held.pass(id)
+			if !d.DryRun {
+				d.refuseUnkeyed(ctx, detail, &report)
+			}
 			continue
 		}
 
