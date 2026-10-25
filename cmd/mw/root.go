@@ -35,6 +35,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newIceCmd())
 	root.AddCommand(newStuckCmd())
 	root.AddCommand(newVerifyCmd())
+	root.AddCommand(newLintCheckItCmd())
 	root.AddCommand(newThawCmd())
 	root.AddCommand(newIdeasOnlyCmd())
 	root.AddCommand(newInitCmd())
