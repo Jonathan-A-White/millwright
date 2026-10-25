@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -711,6 +712,12 @@ func transientWhy(err error) (string, bool) {
 // onto a commit the checkout is an ancestor of cannot lose anybody's work, and
 // what is not an ancestor is said, not merged. Untracked files count as work
 // here, because a person's notes in the checkout are theirs as much as an edit.
+//
+// One Advance at a time runs on a checkout, across processes (advanceLock): a
+// landing's own fast-forward and the follower that levels the mill's checkout
+// after it ran at once, and the second read the first's half-written tree as
+// uncommitted work and raised an alarm for a checkout that was fine
+// (mw-gq6.794). The second now waits, and finds the checkout level.
 func (w *Worktrees) Advance(ctx context.Context, rigDir, branch, commit string) (application.Advanced, error) {
 	switch {
 	case branch == "":
@@ -718,7 +725,15 @@ func (w *Worktrees) Advance(ctx context.Context, rigDir, branch, commit string) 
 	case commit == "":
 		return application.Advanced{}, fmt.Errorf("advancing the checkout of %s: to which commit?", rigDir)
 	}
+	release, err := w.advanceLock(ctx, rigDir)
+	if err != nil {
+		return application.Advanced{}, err
+	}
+	defer release()
+	return w.advance(ctx, rigDir, branch, commit)
+}
 
+func (w *Worktrees) advance(ctx context.Context, rigDir, branch, commit string) (application.Advanced, error) {
 	// Already there: nothing to move. It is Level, and a place to build from only
 	// on the target branch and clean; on any other branch it is level with the
 	// commit but no place to build the target from, and Held says so.
@@ -778,6 +793,53 @@ func (w *Worktrees) Advance(ctx context.Context, rigDir, branch, commit string) 
 		return application.Advanced{}, err
 	}
 	return application.Advanced{Moved: true}, nil
+}
+
+// advanceLockFile is the lock Advance takes, kept in the checkout's git
+// directory, where git's own locks are and nothing shows in its status.
+const advanceLockFile = "mw-advance.lock"
+
+// advanceLockCap is the longest an Advance waits for another on the same
+// checkout: a fast-forward takes seconds, so a longer wait is a stuck one.
+const advanceLockCap = 5 * time.Minute
+
+// advanceLock takes the checkout's advance lock, waiting for whoever holds it,
+// and returns what gives it back. A flock goes when its process does, so a
+// holder that died holds nothing.
+func (w *Worktrees) advanceLock(ctx context.Context, rigDir string) (func(), error) {
+	gitDir, err := w.git(ctx, rigDir, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(strings.TrimSpace(gitDir), advanceLockFile)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("opening the lock %s that keeps one fast-forward at a time on %s: %w", path, rigDir, err)
+	}
+	started := time.Now()
+	for {
+		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() {
+				syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+				file.Close()
+			}, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) {
+			file.Close()
+			return nil, fmt.Errorf("taking the lock %s: %w", path, err)
+		}
+		if time.Since(started) >= advanceLockCap {
+			file.Close()
+			return nil, fmt.Errorf("another fast-forward of %s has held %s for %s: it is running long, or stuck", rigDir, path, advanceLockCap)
+		}
+		select {
+		case <-ctx.Done():
+			file.Close()
+			return nil, fmt.Errorf("waiting for the lock %s: %w", path, ctx.Err())
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
 }
 
 // namedUncommitted is how many uncommitted paths a report names before it
