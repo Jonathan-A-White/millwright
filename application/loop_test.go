@@ -39,7 +39,9 @@ func loopFixture() application.LoopInputs {
 		},
 		Classes: []application.ErrorClass{
 			{Slug: "stale-lock", Kinds: []string{"go-cli"}, Symptom: "a lock", Shared: "candidate", Checks: []application.ErrorCheck{
-				{Date: "2026-10-12", Rig: "lampas", Found: "lampas-1"}, {Date: "2026-10-13", Rig: "legend"}}},
+				{Date: "2026-10-12", Rig: "lampas", Found: "lampas-1"}, {Date: "2026-10-13", Rig: "legend", Found: "legend-1"}}},
+			{Slug: "one-off", Kinds: []string{"go-cli"}, Symptom: "once", Checks: []application.ErrorCheck{
+				{Date: "2026-10-14", Rig: "lampas", Found: "lampas-2"}}},
 			{Slug: "old-class", Kinds: []string{"go-cli"}, Symptom: "old", Checks: []application.ErrorCheck{
 				{Date: "2026-09-01", Rig: "lampas", Found: "lampas-0"}}},
 		},
@@ -148,5 +150,47 @@ func TestLoopBriefPrintsTheBoundTheResultCarries(t *testing.T) {
 	text := application.ReadLoopBrief(in).String()
 	if !strings.Contains(text, "bound: up to 33% allowed (quality falling: refusals up)") {
 		t.Errorf("the brief lacks the bound line:\n%s", text)
+	}
+}
+
+func errorsSection(text string) string {
+	start := strings.Index(text, "ERRORS")
+	end := strings.Index(text, "VERDICTS")
+	return text[start:end]
+}
+
+func TestLoopBriefDefaultListsOnlyClassesSeenTwiceOrMoreWithTheCount(t *testing.T) {
+	section := errorsSection(application.ReadLoopBrief(loopFixture()).String())
+	if !strings.Contains(section, "2 classes seen in the window") {
+		t.Errorf("the ERRORS count is missing:\n%s", section)
+	}
+	if !strings.Contains(section, "stale-lock: seen 2 times, in lampas, legend") {
+		t.Errorf("a class seen twice in the week was not listed:\n%s", section)
+	}
+	if strings.Contains(section, "one-off") {
+		t.Errorf("a class seen once was listed:\n%s", section)
+	}
+}
+
+func TestLoopBriefNoErrorsOmitsTheRegister(t *testing.T) {
+	brief := application.ReadLoopBrief(loopFixture()).WithoutErrors()
+	section := errorsSection(brief.String())
+	for _, slug := range []string{"stale-lock", "one-off"} {
+		if strings.Contains(section, slug) {
+			t.Errorf("--no-errors listed %s:\n%s", slug, section)
+		}
+	}
+	if !strings.Contains(section, "2 classes seen in the window") {
+		t.Errorf("--no-errors lost the count:\n%s", section)
+	}
+	raw, err := json.Marshal(brief)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "stale-lock") {
+		t.Errorf("--no-errors left the register in the JSON: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"errors":[]`) {
+		t.Errorf("the errors key is not an empty list: %s", raw)
 	}
 }

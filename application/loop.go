@@ -79,6 +79,8 @@ type LoopCauses struct {
 type LoopError struct {
 	Slug string   `json:"slug"`
 	Rigs []string `json:"rigs"`
+	// Seen is how many occurrences of the class are dated in the window.
+	Seen int `json:"seen"`
 	// Shared is the class's shared-component verdict, empty while unweighed.
 	Shared string `json:"shared"`
 	Asks   bool   `json:"asks_shared_question"`
@@ -123,7 +125,25 @@ type LoopBrief struct {
 	Verdicts         LoopVerdicts         `json:"verdicts"`
 	Ideas            LoopIdeas            `json:"ideas"`
 	Share            LoopShare            `json:"share"`
+
+	// errorsOmitted and errorClasses are set by WithoutErrors: the register is
+	// left out, the count of classes it held is kept.
+	errorsOmitted bool
+	errorClasses  int
 }
+
+// WithoutErrors is the brief with the ERRORS register left out, the count of
+// classes seen in the window kept. Its errors key is an empty list.
+func (b LoopBrief) WithoutErrors() LoopBrief {
+	b.errorClasses = len(b.Errors)
+	b.errorsOmitted = true
+	b.Errors = []LoopError{}
+	return b
+}
+
+// LoopErrorsRepeated is how often a class must be seen in the window for the
+// default brief to list it.
+const LoopErrorsRepeated = 2
 
 // ReadLoopBrief lays the sources out in the brief's six parts. It reads the
 // numbers off the result and the sources as they are; it computes none.
@@ -155,15 +175,17 @@ func ReadLoopBrief(in LoopInputs) LoopBrief {
 	brief.Errors = []LoopError{}
 	for _, class := range in.Classes {
 		rigs := map[string]bool{}
+		seenInWindow := 0
 		for _, seen := range class.Occurrences() {
 			if r.inWindowDay(seen.Date) {
 				rigs[seen.Rig] = true
+				seenInWindow++
 			}
 		}
 		if len(rigs) == 0 {
 			continue
 		}
-		e := LoopError{Slug: class.Slug, Shared: class.Shared, Asks: class.AsksSharedQuestion()}
+		e := LoopError{Slug: class.Slug, Seen: seenInWindow, Shared: class.Shared, Asks: class.AsksSharedQuestion()}
 		for rig := range rigs {
 			e.Rigs = append(e.Rigs, rig)
 		}
@@ -239,11 +261,23 @@ func (b LoopBrief) String() string {
 		fmt.Fprintf(&out, "  %s\n", c.line)
 	}
 
-	out.WriteString("\nERRORS (classes seen in the window)\n")
-	if len(b.Errors) == 0 {
-		out.WriteString("  none seen in the window\n")
+	classes := len(b.Errors)
+	if b.errorsOmitted {
+		classes = b.errorClasses
 	}
+	fmt.Fprintf(&out, "\nERRORS (%d classes seen in the window)\n", classes)
+	switch {
+	case classes == 0:
+		out.WriteString("  none seen in the window\n")
+	case b.errorsOmitted:
+		out.WriteString("  register left out (--no-errors); mw errors list has it\n")
+	}
+	repeated := 0
 	for _, e := range b.Errors {
+		if e.Seen < LoopErrorsRepeated {
+			continue
+		}
+		repeated++
 		shared := "shared: " + e.Shared
 		if e.Shared == "" {
 			shared = "shared: not weighed"
@@ -251,7 +285,14 @@ func (b LoopBrief) String() string {
 				shared += " (" + SharedComponentAsk + ")"
 			}
 		}
-		fmt.Fprintf(&out, "  %s: seen in %s, %s\n", e.Slug, strings.Join(e.Rigs, ", "), shared)
+		fmt.Fprintf(&out, "  %s: seen %d times, in %s, %s\n", e.Slug, e.Seen, strings.Join(e.Rigs, ", "), shared)
+	}
+	if !b.errorsOmitted && classes > 0 {
+		if repeated == 0 {
+			fmt.Fprintf(&out, "  none seen %d times or more; --json lists every class\n", LoopErrorsRepeated)
+		} else if repeated < classes {
+			fmt.Fprintf(&out, "  %d more seen once; --json lists every class\n", classes-repeated)
+		}
 	}
 
 	out.WriteString("\nVERDICTS (factory changes at 14 days, investments due)\n")
@@ -306,7 +347,9 @@ type LoopBriefRun struct {
 	// too, as the digest's PICKS: one more read of the tracker, none of the report.
 	Picks bool
 	JSON  bool
-	Out   io.Writer
+	// NoErrors leaves the ERRORS register out of the print, keeping its count.
+	NoErrors bool
+	Out      io.Writer
 }
 
 // Run reads and prints the brief.
@@ -316,6 +359,9 @@ func (l LoopBriefRun) Run(ctx context.Context) (LoopBrief, error) {
 		return LoopBrief{}, err
 	}
 	brief := ReadLoopBrief(in)
+	if l.NoErrors {
+		brief = brief.WithoutErrors()
+	}
 	if l.Out != nil {
 		if l.JSON {
 			enc := json.NewEncoder(l.Out)
