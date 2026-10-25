@@ -112,6 +112,42 @@ Feature: mw retry
     And no worktree of "mw-gq6.1" was read or made here
     And the story "mw-gq6.1" is open and unassigned
 
+  # mw-gq6.774: a retry off the story's host asks that host before it gives the claim back.
+
+  Scenario: A retry off the story's host refuses when its worktree there holds uncommitted work
+    Given the story "mw-gq6.1" ran on the host "desktop" and is claimed there by "mw@desktop"
+    And the worktree of "mw-gq6.1" on the host "desktop" holds uncommitted work in "application/retry.go"
+    And the story "mw-gq6.1" has been tried 1 time in all
+    When mw retries "mw-gq6.1"
+    Then the retry refuses, saying: run `mw retry mw-gq6.1` on desktop
+    And the host "desktop" was asked what its worktree holds
+    And the story "mw-gq6.1" is still claimed
+    And the story "mw-gq6.1" carries no new comment
+
+  Scenario: A retry off the story's host refuses when that host cannot be asked
+    Given the story "mw-gq6.1" ran on the host "desktop" and is claimed there by "mw@desktop"
+    And the ssh line to the host "desktop" is down
+    And the story "mw-gq6.1" has been tried 1 time in all
+    When mw retries "mw-gq6.1"
+    Then the retry refuses, saying: desktop could not be asked
+    And the story "mw-gq6.1" is still claimed
+
+  Scenario: A forced retry off the story's host says the work is left unsaved there, on stderr and on the bead
+    Given the story "mw-gq6.1" ran on the host "desktop" and is claimed there by "mw@desktop"
+    And the worktree of "mw-gq6.1" on the host "desktop" holds uncommitted work in "application/retry.go"
+    And the story "mw-gq6.1" has been tried 1 time in all
+    When mw retries "mw-gq6.1" with --force
+    Then the retry succeeds
+    And the retry says "work left unsaved on desktop: /home/jonathan/.mw-worktrees/mw-gq6.1" on stderr and on the bead "mw-gq6.1"
+    And the story "mw-gq6.1" is open and unassigned
+
+  Scenario: A forced retry off the story's host with a clean worktree there says nothing of unsaved work
+    Given the story "mw-gq6.1" ran on the host "desktop" and is claimed there by "mw@desktop"
+    And the story "mw-gq6.1" has been tried 1 time in all
+    When mw retries "mw-gq6.1" with --force
+    Then the retry succeeds
+    And the retry says nothing of unsaved work on stderr or on the bead "mw-gq6.1"
+
   # mw-gq6.364: where a story was worked comes from its claim, not the host key.
 
   Scenario: A retry from a host that does not hold the claim gives it back, guarded on the actual assignee

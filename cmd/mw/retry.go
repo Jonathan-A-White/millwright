@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/peekremote"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 
@@ -18,7 +20,7 @@ import (
 // mw-gq6.92).
 func newRetryCmd() *cobra.Command {
 	var repathed string
-	var fromMain, hold bool
+	var fromMain, hold, force, worktreeState bool
 	cmd := &cobra.Command{
 		Use:   "retry <story-id> [--hold]",
 		Short: "Recover a story after a refused landing, so the next dispatch tick tries it again",
@@ -34,7 +36,11 @@ func newRetryCmd() *cobra.Command {
 			"dispatch tick claims it as a fresh attempt. A refusal changes nothing at all.\n\n" +
 			"A story worked on another host has its worktree there, so run from anywhere else, retry reads\n" +
 			"no worktree: it gives the claim back, guarded on whoever actually holds it, and leaves that\n" +
-			"host's worktree and branch to be bundled by that host's next dispatch. Where a story was worked\n" +
+			"host's worktree and branch to be bundled by that host's next dispatch. First it asks that host,\n" +
+			"over the ssh line [hands_hosts] gives, whether its worktree holds anything uncommitted: if it\n" +
+			"does, or the host cannot be asked, the retry is refused, naming the host and the command to run\n" +
+			"there. --force goes on anyway and says \"work left unsaved on <host>: <path>\" on stderr and on\n" +
+			"the story. Where a story was worked\n" +
 			"is read from its claim (mw@<host>) first, and only without one from the host key of its path,\n" +
 			"so changing the host key of a story in progress moves neither its worktree nor its retry.\n\n" +
 			"It never resets a story's attempts, and a story already started max_attempts times is refused\n" +
@@ -70,6 +76,13 @@ func newRetryCmd() *cobra.Command {
 			rigs, err := config.Rigs()
 			if err != nil {
 				return err
+			}
+			reach, err := config.HandsHosts()
+			if err != nil {
+				return err
+			}
+			if worktreeState {
+				return worktreeStateHere(cmd, args[0], rigs)
 			}
 			maxAttempts, err := config.MaxAttempts()
 			if err != nil {
@@ -109,6 +122,9 @@ func newRetryCmd() *cobra.Command {
 				RePathed:    repathed,
 				FromMain:    fromMain || !fromBranch,
 				Hold:        hold,
+				Reach:       peekremote.Remote{Reach: reach},
+				Force:       force,
+				Err:         cmd.ErrOrStderr(),
 			}.Run(cmd.Context(), args[0])
 			return err
 		},
@@ -119,5 +135,29 @@ func newRetryCmd() *cobra.Command {
 		"start the next attempt from the target, deleting the branch, rather than continuing the branch a refused or capped attempt left")
 	cmd.Flags().BoolVar(&hold, "hold", false,
 		"give the claim back and leave the story held, never open, so no dispatch tick takes it and a plain bd close can finish it")
+	cmd.Flags().BoolVar(&force, "force", false,
+		"from a host other than the story's, give the claim back although its worktree there holds uncommitted work or could not be asked, and say the work is left unsaved")
+	cmd.Flags().BoolVar(&worktreeState, "worktree-state", false,
+		"print this host's worktree of the story and what it holds uncommitted, and change nothing: what a retry run on another host asks over ssh")
+	_ = cmd.Flags().MarkHidden("worktree-state")
 	return cmd
+}
+
+// worktreeStateHere is the far end of a retry run on another host: it prints
+// where the story's worktree is on this host and the paths it has changed and
+// not committed.
+func worktreeStateHere(cmd *cobra.Command, storyID string, rigs map[string]string) error {
+	gateway, err := beads.FromConfig()
+	if err != nil {
+		return err
+	}
+	worktrees := rig.New()
+	_, err = application.WorktreeHere{
+		Tracker:   gateway,
+		Worktrees: worktrees,
+		Landing:   worktrees,
+		Rigs:      rigs,
+		Out:       cmd.OutOrStdout(),
+	}.Run(cmd.Context(), storyID)
+	return err
 }
