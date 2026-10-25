@@ -32,6 +32,8 @@ const (
 	UnionMergeFilesKey     = "union_merge_files"
 	TimingTestsKey         = "timing_tests"
 	PublicURLKey           = "public_url"
+	SiteURLKey             = "site_url"
+	HealthzURLKey          = "healthz_url"
 	FilesExpectedKey       = "files_expected"
 	NightlySuiteKey        = "nightly_suite"
 	SuiteEpicKey           = "suite_epic"
@@ -64,6 +66,8 @@ var beadID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 //	union_merge_files      = ["ATTRIBUTION.md", "docs/*.md"]
 //	timing_tests           = ["tests/timing/**", "**/*.timing.test.ts"]
 //	public_url             = "https://github.com/Jonathan-A-White/lampas"
+//	site_url               = "https://lampas.allmymind.org/"
+//	healthz_url            = "https://jonah.allmymind.org/api/leaderboard/healthz"
 //	files_expected         = true
 //	nightly_suite          = true
 //	suite_epic             = "mw-5r3p30"
@@ -114,7 +118,7 @@ func (v *Vault) readRigFile(_ context.Context, rig string, lenient bool) (domain
 // knownKeys are the keys a rig's file has.
 var knownKeys = map[string]bool{
 	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true, UnionMergeFilesKey: true, TimingTestsKey: true,
-	PublicURLKey: true, FilesExpectedKey: true, NightlySuiteKey: true, SuiteEpicKey: true,
+	PublicURLKey: true, SiteURLKey: true, HealthzURLKey: true, FilesExpectedKey: true, NightlySuiteKey: true, SuiteEpicKey: true,
 	LandingKey: true, BatchEveryKey: true, BatchMinKey: true, BatchMaxKey: true,
 	BatchFixerModelKey: true, BatchFixerEffortKey: true, BatchFixerTurnsKey: true,
 }
@@ -196,6 +200,18 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 			requirements.PublicURL = strings.TrimRight(url[0], "/")
 			continue
 		}
+		if found && (key == SiteURLKey || key == HealthzURLKey) {
+			url, err := quotedStrings(value)
+			if err != nil || len(url) != 1 || !strings.HasPrefix(url[0], "http") || !strings.Contains(url[0], "://") {
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = \"https://<host>/...\"`, got %q", i+1, key, lines[i])
+			}
+			if key == SiteURLKey {
+				requirements.SiteURL = url[0]
+			} else {
+				requirements.HealthzURL = url[0]
+			}
+			continue
+		}
 		if !found || !strings.HasPrefix(value, "[") {
 			return requirements, nil, fmt.Errorf("line %d: expected `key = [\"name\", ...]`, got %q", i+1, lines[i])
 		}
@@ -241,8 +257,8 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s and the landing keys %s, %s, %s, %s, %s, %s and %s)",
-				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, FilesExpectedKey, NightlySuiteKey, SuiteEpicKey,
+			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s and the landing keys %s, %s, %s, %s, %s, %s and %s)",
+				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, SiteURLKey, HealthzURLKey, FilesExpectedKey, NightlySuiteKey, SuiteEpicKey,
 				LandingKey, BatchEveryKey, BatchMinKey, BatchMaxKey, BatchFixerModelKey, BatchFixerEffortKey, BatchFixerTurnsKey)
 		}
 	}
