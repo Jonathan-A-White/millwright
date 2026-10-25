@@ -312,6 +312,7 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	// Warnings only here: it is mw file --check that fails for them.
 	f.testCallers(plan, func(key string) string { return ids[key] })
 	f.warnSmokeWithoutRef(plan, func(key string) string { return ids[key] })
+	f.warnRemoteShell(plan, func(key string) string { return ids[key] })
 	for _, id := range ownDemos {
 		f.print(demoNoHitlLine(id) + "\n")
 	}
@@ -363,6 +364,7 @@ func (f File) Check(ctx context.Context, plan domain.Plan) error {
 		return err
 	}
 	f.warnSmokeWithoutRef(plan, func(key string) string { return key })
+	f.warnRemoteShell(plan, func(key string) string { return key })
 	if over := f.testCallers(plan, func(key string) string { return key }); len(over) > 0 {
 		return fmt.Errorf("%s: more test callers than the size allows: split the story, size it up, or say why not with \"callers_ok\" (mw-gq6.661)",
 			strings.Join(over, ", "))
@@ -596,6 +598,66 @@ func (f File) warnSmokeWithoutRef(plan domain.Plan, label func(key string) strin
 		for _, run := range gristRunsIn(story.Acceptance) {
 			if run.Verb == "smoke" && !run.Ref {
 				fmt.Fprintf(f.Err, "WARN: %s: its acceptance runs mw grist smoke %s with no --ref: %s\n", label(story.Key), run.App, SmokeReadsMainWarning)
+				break
+			}
+		}
+	}
+}
+
+// RemoteShellWarning is the warning for a story whose acceptance or description
+// needs a shell on another host: a Builder's remote shell is refused, so that
+// half is a hands step (mw-gq6.796).
+const RemoteShellWarning = "split that half into a hands step (mw hands): a Builder cannot take a shell on another host"
+
+// sshFlagsWithArg are the ssh options that take the next word as their value.
+var sshFlagsWithArg = map[string]bool{"-i": true, "-p": true, "-o": true, "-l": true, "-F": true, "-J": true}
+
+// remoteShellIn names what in the text needs a shell on another host: ssh to a
+// user@host, a dotted host name or the vps, certbot, or /etc/nginx. It is ""
+// for text that has none.
+func remoteShellIn(text string) string {
+	if strings.Contains(text, "/etc/nginx") {
+		return "/etc/nginx"
+	}
+	for _, line := range strings.Split(text, "\n") {
+		words := strings.Fields(line)
+		for i, w := range words {
+			switch strings.ToLower(strings.Trim(w, "`'\"*.,;:()")) {
+			case "certbot":
+				return "certbot"
+			case "ssh":
+			default:
+				continue
+			}
+			for j := i + 1; j < len(words); j++ {
+				arg := strings.Trim(words[j], "`'\"*,;:()")
+				if strings.HasPrefix(arg, "-") {
+					if sshFlagsWithArg[arg] {
+						j++
+					}
+					continue
+				}
+				if strings.Contains(arg, "@") || strings.Contains(strings.TrimRight(arg, "."), ".") || strings.EqualFold(arg, "vps") {
+					return "ssh " + arg
+				}
+				break
+			}
+		}
+	}
+	return ""
+}
+
+// warnRemoteShell warns of each story whose acceptance or description needs a
+// shell on another host (see remoteShellIn). It refuses nothing. label names a
+// story by its plan key.
+func (f File) warnRemoteShell(plan domain.Plan, label func(key string) string) {
+	if f.Err == nil {
+		return
+	}
+	for _, story := range plan.Stories {
+		for _, text := range []string{story.Acceptance, story.Description} {
+			if what := remoteShellIn(text); what != "" {
+				fmt.Fprintf(f.Err, "WARN: %s: it names %s, which needs a shell on another host: %s\n", label(story.Key), what, RemoteShellWarning)
 				break
 			}
 		}
