@@ -97,9 +97,24 @@ type EventNudge struct {
 	// busy does not count mail already read (mw-gq6.572). Nil tells every mail
 	// event.
 	Inbox func(ctx context.Context, mailbox string) ([]Message, error)
+	// Now is the clock a listing's age is told by. Nil is time.Now.
+	Now func() time.Time
 
-	mu   sync.Mutex
-	said map[string]string
+	mu       sync.Mutex
+	said     map[string]string
+	listings map[string]inboxListing
+}
+
+// InboxListingKept is how long a listing of a mailbox is used again while the
+// log has gained no event since it was made.
+const InboxListingKept = time.Minute
+
+// inboxListing is a mailbox's unread mail as it stood when the log's head was
+// at head: every mail event up to that seq is judged by it.
+type inboxListing struct {
+	at     time.Time
+	head   uint64
+	unread map[string]bool
 }
 
 // Nudge tells each subscribed seat of what is new for it.
@@ -175,30 +190,41 @@ func (n *EventNudge) Nudge(ctx context.Context) error {
 			}
 			haveWindows = true
 		}
-		matched, mail = n.stillUnread(ctx, seat, matched, mail)
+		window, found := n.windowOf(ctx, windows, seat)
+		if found {
+			// A pane that is not idle is left alone before anything is read for
+			// it: the unread mail is listed only for a pane that can be told,
+			// not each pass of an hour of work (mw-gq6.749).
+			idle, err := n.idle(ctx, window)
+			if err != nil {
+				n.say("tell:"+seat, err)
+				continue
+			}
+			n.quiet("tell:" + seat)
+			if !idle {
+				continue
+			}
+		}
+		matched, mail = n.stillUnread(ctx, seat, head, matched, mail)
 		if len(matched) == 0 {
 			set(seat, last)
 			continue
 		}
 		line := EventsNudgeLine(seat, len(matched), matched[0].Seq-1)
-		window, found := n.windowOf(ctx, windows, seat)
 		switch {
 		case found:
 			typed := line
 			if mail == len(matched) {
 				ids := make([]string, len(matched))
-					for i, ev := range matched {
-						ids[i] = ev.Bead
-					}
-					typed = MailNudgeLine(seat, ids)
+				for i, ev := range matched {
+					ids[i] = ev.Bead
+				}
+				typed = MailNudgeLine(seat, ids)
 			}
-			told, err := n.tell(ctx, window, typed)
-			if err != nil {
-				n.say("tell:"+seat, err)
+			if err := n.typeAndConfirm(ctx, window, typed); err != nil {
+				n.say("tell:"+seat, fmt.Errorf("typing the nudge into %s: %w", window.Name, err))
 			} else {
 				n.quiet("tell:" + seat)
-			}
-			if told {
 				set(seat, last)
 			}
 		case sub.Spring && n.Spring != nil:
@@ -222,7 +248,7 @@ func (n *EventNudge) Nudge(ctx context.Context) error {
 // unread in the mailbox the event names (the seat's own when it names none),
 // and says how many mail events are left. A mailbox that cannot be listed is
 // said on Err and its mail kept: a nudge too many is better than mail missed.
-func (n *EventNudge) stillUnread(ctx context.Context, seat string, matched []events.Event, mail int) ([]events.Event, int) {
+func (n *EventNudge) stillUnread(ctx context.Context, seat string, head uint64, matched []events.Event, mail int) ([]events.Event, int) {
 	if n.Inbox == nil || mail == 0 {
 		return matched, mail
 	}
@@ -240,8 +266,8 @@ func (n *EventNudge) stillUnread(ctx context.Context, seat string, matched []eve
 		}
 		ids, ok := unread[box]
 		if !ok {
-			inbox, err := n.Inbox(ctx, box)
-			if err != nil {
+			var err error
+			if ids, err = n.listing(ctx, box, head); err != nil {
 				n.say("inbox:"+box, err)
 				unread[box] = nil // listing failed: this box's mail is kept
 				kept = append(kept, ev)
@@ -249,10 +275,6 @@ func (n *EventNudge) stillUnread(ctx context.Context, seat string, matched []eve
 				continue
 			}
 			n.quiet("inbox:" + box)
-			ids = map[string]bool{}
-			for _, m := range inbox {
-				ids[m.ID] = true
-			}
 			unread[box] = ids
 		} else if ids == nil {
 			kept = append(kept, ev)
@@ -267,21 +289,46 @@ func (n *EventNudge) stillUnread(ctx context.Context, seat string, matched []eve
 	return kept, mail
 }
 
-// tell types the nudge into the window when its pane is idle, and reports
-// whether it did. A pane at work, or with text on its input line, is left
-// alone and is not a failure.
-func (n *EventNudge) tell(ctx context.Context, window ReapWindow, line string) (bool, error) {
+// listing is the ids unread in the box when the log's head stands at head. A
+// listing made less than InboxListingKept ago at a head no lower is used again,
+// so that a pane that cannot be typed into does not have the box listed each
+// pass; mail that came after it makes a new listing, never an old one's miss.
+func (n *EventNudge) listing(ctx context.Context, box string, head uint64) (map[string]bool, error) {
+	now := time.Now
+	if n.Now != nil {
+		now = n.Now
+	}
+	n.mu.Lock()
+	kept, held := n.listings[box]
+	n.mu.Unlock()
+	if held && head <= kept.head && now().Sub(kept.at) < InboxListingKept {
+		return kept.unread, nil
+	}
+	inbox, err := n.Inbox(ctx, box)
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[string]bool, len(inbox))
+	for _, m := range inbox {
+		ids[m.ID] = true
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.listings == nil {
+		n.listings = map[string]inboxListing{}
+	}
+	n.listings[box] = inboxListing{at: now(), head: head, unread: ids}
+	return ids, nil
+}
+
+// idle says whether the window's pane can be typed into. A pane at work, or
+// with text on its input line, is left alone and is not a failure.
+func (n *EventNudge) idle(ctx context.Context, window ReapWindow) (bool, error) {
 	state, err := n.Terminal.PaneState(ctx, window.ID)
 	if err != nil {
 		return false, fmt.Errorf("reading the pane of %s: %w", window.Name, err)
 	}
-	if state != PaneIdle {
-		return false, nil
-	}
-	if err := n.typeAndConfirm(ctx, window, line); err != nil {
-		return false, fmt.Errorf("typing the nudge into %s: %w", window.Name, err)
-	}
-	return true, nil
+	return state == PaneIdle, nil
 }
 
 // typeAndConfirm types the line with TypeConfirmed and says on Err what came of

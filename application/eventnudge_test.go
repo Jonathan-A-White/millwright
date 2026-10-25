@@ -368,3 +368,96 @@ func TestMailNudgeLineNamesAtMostTenIds(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
+
+// failingType is a terminal whose pane takes no typing.
+type failingType struct{ application.ReapTerminal }
+
+func (failingType) Type(context.Context, string, string) error {
+	return errors.New("no server running")
+}
+
+// countedInbox is a mailbox's Inbox that counts the listings it makes.
+func countedInbox(mailbox *apptest.FakeMailbox, listed *int) func(context.Context, string) ([]application.Message, error) {
+	return func(ctx context.Context, box string) ([]application.Message, error) {
+		*listed++
+		return mailbox.Inbox(ctx, box)
+	}
+}
+
+// mw-gq6.749: a Mayor's pane busy for an hour had the follower list its whole
+// inbox by bd every pass, because the mail it could not tell stayed unread
+// events. A pane that is not idle is not told, so the inbox is not listed for it
+// at all, and once it is idle it is told at once.
+func TestNudgeDoesNotListTheInboxWhileThePaneIsBusy(t *testing.T) {
+	w := newNudgeWorld(t)
+	mailbox := apptest.NewFakeMailbox()
+	var listed int
+	w.nudge.Inbox = countedInbox(mailbox, &listed)
+	w.subs.Set("mayor", `kinds = ["mail"]`)
+	w.windows.HoldsWithID("@1", "mayor-2026-10-01-02", time.Time{})
+	w.pass(t)
+	id, err := mailbox.Send(context.Background(), application.NewMessage{From: "builder", To: "mayor", Subject: "one", Body: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendAll(t, w.log, events.Event{Kind: events.KindMail, Bead: id, Detail: "mayor"})
+	_ = w.windows.Pane("@1", application.PaneWorking)
+	for i := 0; i < 10; i++ {
+		w.pass(t)
+	}
+	if listed > 2 {
+		t.Fatalf("the inbox was listed %d times over 10 passes of a busy pane, want at most 2", listed)
+	}
+	_ = w.windows.Pane("@1", application.PaneIdle)
+	w.pass(t)
+	if got := w.windows.Typed("@1"); len(got) != 1 {
+		t.Fatalf("typed %q once the pane was idle, want the mail line once", got)
+	}
+}
+
+// A listing is remembered for a minute while the log's head stands where it
+// was, so a pane that takes no typing does not have the inbox listed each pass;
+// mail that came after the listing is never taken for read.
+func TestNudgeRemembersAnInboxListingForAMinuteWhileTheHeadStandsStill(t *testing.T) {
+	w := newNudgeWorld(t)
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	w.nudge.Now = func() time.Time { return now }
+	mailbox := apptest.NewFakeMailbox()
+	var listed int
+	w.nudge.Inbox = countedInbox(mailbox, &listed)
+	w.subs.Set("mayor", `kinds = ["mail"]`)
+	w.windows.HoldsWithID("@1", "mayor-2026-10-01-02", time.Time{})
+	w.nudge.Terminal = failingType{w.windows}
+	w.pass(t)
+	send := func(subject string) string {
+		id, err := mailbox.Send(context.Background(), application.NewMessage{From: "builder", To: "mayor", Subject: subject, Body: "b"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		appendAll(t, w.log, events.Event{Kind: events.KindMail, Bead: id, Detail: "mayor"})
+		return id
+	}
+	send("one")
+	for i := 0; i < 10; i++ {
+		w.pass(t)
+		now = now.Add(time.Second)
+	}
+	if listed != 1 {
+		t.Fatalf("the inbox was listed %d times in 10 s with the log's head standing still, want 1", listed)
+	}
+	second := send("two")
+	w.pass(t)
+	if listed != 2 {
+		t.Fatalf("a new mail event did not have the inbox listed again: %d listings", listed)
+	}
+	now = now.Add(time.Minute)
+	w.pass(t)
+	if listed != 3 {
+		t.Fatalf("a listing a minute old was used: %d listings", listed)
+	}
+	w.nudge.Terminal = w.windows
+	w.pass(t)
+	if got := w.windows.Typed("@1"); len(got) != 1 || !strings.Contains(got[0], second) {
+		t.Fatalf("typed %q, want the mail line naming both mails", got)
+	}
+}

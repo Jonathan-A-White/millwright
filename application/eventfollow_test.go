@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -494,5 +495,47 @@ func TestFollowPublishesEveryHeadWithoutPublishEvery(t *testing.T) {
 	head := &apptest.FakeHead{Heads: []string{"a", "b", "c", "d"}}
 	if published, _ := followRun(t, head, 4, nothingWrong); published != 4 {
 		t.Fatalf("published %d views over four heads, want 4", published)
+	}
+}
+
+// mw-gq6.749 (the Millhand's sweep of 2026-10-25): the view the follower
+// publishes is read from the beads, so twenty bead changes in ten seconds must
+// not be twenty views, with or without the view published aside.
+func TestFollowRepublishesTheViewAtMostTwiceForTwentyChangesInTenSeconds(t *testing.T) {
+	for _, aside := range []bool{false, true} {
+		now := time.Date(2026, 10, 25, 15, 0, 0, 0, time.UTC)
+		var heads []string
+		for i := 0; i < 22; i++ {
+			heads = append(heads, fmt.Sprintf("head-%d", i))
+		}
+		head := &apptest.FakeHead{Heads: heads}
+		ctx, stop := context.WithCancel(context.Background())
+		var published atomic.Int32
+		follow := application.EventFollow{
+			Head:         head,
+			Publish:      func(context.Context) error { published.Add(1); return nil },
+			Aside:        aside,
+			PublishEvery: 10 * time.Second,
+			Now:          func() time.Time { return now },
+			Sleep: func(context.Context, time.Duration) error {
+				if head.Calls() >= 22 {
+					stop()
+					return ctx.Err()
+				}
+				// Twenty changes land in the first ten seconds, half a second apart.
+				now = now.Add(500 * time.Millisecond)
+				if aside {
+					time.Sleep(time.Millisecond) // the publishing goroutine takes its turn
+				}
+				return nil
+			},
+		}
+		if err := follow.Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+		stop()
+		if got := published.Load(); got > 2 {
+			t.Fatalf("aside=%v: %d views published for 20 changes in 10 seconds, want at most 2", aside, got)
+		}
 	}
 }
