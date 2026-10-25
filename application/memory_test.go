@@ -1091,3 +1091,67 @@ func TestAddingAFactThatPushesNothingOutPrintsNoQuestionWarning(t *testing.T) {
 		t.Errorf("warned though nothing was pushed out:\n%s", out.String())
 	}
 }
+
+func TestSupersedeByRetiresTheFactWithAReasonNamingTheOtherAndAddsNoFact(t *testing.T) {
+	files, vault := demotable(), &recordingVault{}
+	files.files["gate-new.md"] = queryFact("gate", "The gate runs make test and make lint in the foreground.")
+	var out bytes.Buffer
+	err := anEditableMemory(files, vault, &out).Supersede(context.Background(), application.MemorySupersede{
+		Rig: "kiln", Old: "gate", By: "gate-new",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files.files) != 2 {
+		t.Errorf("a fact was added: %v", files.files)
+	}
+	for _, want := range []string{"status: retired", "superseded by gate-new"} {
+		if !strings.Contains(files.files["gate.md"], want) {
+			t.Errorf("gate.md lacks %q:\n%s", want, files.files["gate.md"])
+		}
+	}
+	if !strings.Contains(files.files["gate-new.md"], "status: current") {
+		t.Errorf("the other fact changed:\n%s", files.files["gate-new.md"])
+	}
+	if len(vault.messages) != 1 {
+		t.Errorf("expected one commit, got %v", vault.messages)
+	}
+}
+
+func TestSupersedeByRefusesAMissingOtherFactAndChangesNothing(t *testing.T) {
+	files, vault := demotable(), &recordingVault{}
+	before := files.files["gate.md"]
+	err := anEditableMemory(files, vault, &bytes.Buffer{}).Supersede(context.Background(), application.MemorySupersede{
+		Rig: "kiln", Old: "gate", By: "nothing",
+	})
+	if err == nil || !strings.Contains(err.Error(), `no fact "nothing"`) {
+		t.Fatalf("expected a refusal naming the missing fact, got %v", err)
+	}
+	if files.files["gate.md"] != before || len(vault.messages) != 0 {
+		t.Errorf("something was written:\n%s\n%v", files.files["gate.md"], vault.messages)
+	}
+}
+
+func TestSupersedeByRefusesAFactThatIsNotCurrentOrIsTheFactItself(t *testing.T) {
+	files := demotable()
+	files.files["gone.md"] = strings.Replace(queryFact("gate", "Gone."), "status: current", "status: retired", 1)
+	for _, by := range []string{"gone", "gate"} {
+		err := anEditableMemory(files, &recordingVault{}, &bytes.Buffer{}).Supersede(context.Background(), application.MemorySupersede{
+			Rig: "kiln", Old: "gate", By: by,
+		})
+		if err == nil {
+			t.Errorf("--by %s: expected a refusal", by)
+		}
+	}
+}
+
+func TestSupersedeByRefusesANewSentenceSlugOrSourceAlongsideIt(t *testing.T) {
+	files := demotable()
+	files.files["gate-new.md"] = queryFact("gate", "The gate is new.")
+	err := anEditableMemory(files, &recordingVault{}, &bytes.Buffer{}).Supersede(context.Background(), application.MemorySupersede{
+		Rig: "kiln", Old: "gate", By: "gate-new", Sentence: "Another.",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--by") {
+		t.Errorf("expected a refusal naming --by, got %v", err)
+	}
+}

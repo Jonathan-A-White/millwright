@@ -98,9 +98,11 @@ type MemoryAdd struct {
 }
 
 // MemorySupersede is the request mw memory supersede makes. The new fact keeps
-// the old one's subject and kind.
+// the old one's subject and kind. With By set, no new fact is written: Old is
+// retired as superseded by the existing fact By, and Slug, Source and Sentence
+// must be empty.
 type MemorySupersede struct {
-	Rig, Old, Slug, Source, Sentence string
+	Rig, Old, Slug, Source, Sentence, By string
 }
 
 // MemoryList is the request mw memory list makes. An empty Status lists every
@@ -488,6 +490,9 @@ func (m Memory) free(rig, slug string, derived bool, files map[string]string, fa
 
 // Supersede writes a new current fact in place of an old one and links the two.
 func (m Memory) Supersede(ctx context.Context, req MemorySupersede) error {
+	if req.By != "" {
+		return m.supersedeBy(ctx, req)
+	}
 	if err := factLine("the sentence", req.Sentence); err != nil {
 		return err
 	}
@@ -554,6 +559,30 @@ func (m Memory) Supersede(ctx context.Context, req MemorySupersede) error {
 	}
 	fmt.Fprintf(m.Out, "superseded %s with %s\n", old.Slug, slug)
 	return nil
+}
+
+// supersedeBy retires a fact as superseded by a fact that already exists, as
+// `mw memory retire` with the reason 'superseded by <slug>' does, and writes no
+// new fact. The fact it names must be current and another fact.
+func (m Memory) supersedeBy(ctx context.Context, req MemorySupersede) error {
+	if req.Slug != "" || req.Source != "" || req.Sentence != "" {
+		return fmt.Errorf("--by supersedes with a fact that already exists: give no sentence, --slug or --source with it")
+	}
+	if req.By == req.Old {
+		return fmt.Errorf("the fact %q cannot be superseded by itself", req.Old)
+	}
+	_, files, facts, err := m.load(ctx, req.Rig)
+	if err != nil {
+		return err
+	}
+	by, err := existing(req.Rig, req.By, files, facts)
+	if err != nil {
+		return err
+	}
+	if by.Status != FactCurrent {
+		return fmt.Errorf("the fact %q of the rig %s is %s, not current: it cannot supersede another", by.Slug, req.Rig, by.Status)
+	}
+	return m.Retire(ctx, req.Rig, req.Old, "superseded by "+by.Slug)
 }
 
 // carryEvalQuestions makes the questions of eval.md that expect an old

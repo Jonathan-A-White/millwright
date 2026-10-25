@@ -97,6 +97,50 @@ Feature: mw memory
       Tests need no socket.
       """
 
+  Scenario: supersede --by retires a fact for one that already exists and adds no fact
+    Given the fact file "old-tmux" of the rig "millwright" holds:
+      """
+      ---
+      subject: tmux
+      kind: gotcha
+      status: current
+      source: mw-1
+      since: 2026-09-01
+      ---
+
+      Tests need no socket.
+      """
+    And the fact file "new-tmux" of the rig "millwright" holds:
+      """
+      ---
+      subject: tmux
+      kind: gotcha
+      status: current
+      source: mw-2
+      since: 2026-09-02
+      ---
+
+      Tests need their own socket.
+      """
+    When the Mayor supersedes the fact "old-tmux" of the rig "millwright" by "new-tmux"
+    Then the memory command succeeded
+    And the fact file "old-tmux" of the rig "millwright" holds:
+      """
+      ---
+      subject: tmux
+      kind: gotcha
+      status: retired
+      source: mw-1
+      since: 2026-09-01
+      retired: 2026-10-10
+      reason: superseded by new-tmux
+      ---
+
+      Tests need no socket.
+      """
+    When the Mayor supersedes the fact "new-tmux" of the rig "millwright" by "nothing"
+    Then the memory command was refused saying "no fact \"nothing\""
+
   Scenario: retire keeps the sentence and says why
     Given the fact file "old-tmux" of the rig "millwright" holds:
       """

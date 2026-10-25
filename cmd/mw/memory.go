@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -100,9 +101,9 @@ func newMemoryAddCmd() *cobra.Command {
 }
 
 func newMemorySupersedeCmd() *cobra.Command {
-	var source, slug string
+	var source, slug, by string
 	cmd := &cobra.Command{
-		Use:   "supersede <rig> <slug> --source <src> [--slug <new>] \"<sentence>\"",
+		Use:   "supersede <rig> <slug> (--source <src> [--slug <new>] \"<sentence>\" | --by <existing-slug>)",
 		Short: "Replace a fact with a new current one, linking the two",
 		Long: "supersede writes a new current fact (with supersedes: <old>, the old one's subject and kind)\n" +
 			"and marks the old one superseded, with superseded-by: <new>. It refuses a slug that is\n" +
@@ -112,21 +113,35 @@ func newMemorySupersedeCmd() *cobra.Command {
 			"longer finds the old one the new one replaces it; one that does not find the new one is\n" +
 			"named in a 'WARN: eval question at line N' line, since it fails until an expect is added.\n" +
 			"It prints the render size against the budget, and WARNs when it is over. A slug made\n" +
-			"from the sentence that is taken is refused, saying to pass --slug <new>.",
-		Args: cobra.ExactArgs(3),
+			"from the sentence that is taken is refused, saying to pass --slug <new>.\n" +
+			"With --by <existing-slug> and no sentence, supersede adds no fact: it retires <slug> with the\n" +
+			"reason 'superseded by <existing-slug>' (as retire does, carrying eval.md questions to it) and\n" +
+			"refuses a --by slug that is unknown, not current or the same fact. --by cannot be combined\n" +
+			"with a sentence, --slug or --source.",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if by != "" {
+				return cobra.ExactArgs(2)(cmd, args)
+			}
+			return cobra.ExactArgs(3)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if by == "" && source == "" {
+				return fmt.Errorf("required flag(s) \"source\" not set (or pass --by <existing-slug>)")
+			}
 			memory, err := memoryFor(cmd)
 			if err != nil {
 				return err
 			}
-			return memory.Supersede(cmd.Context(), application.MemorySupersede{
-				Rig: args[0], Old: args[1], Slug: slug, Source: source, Sentence: args[2],
-			})
+			req := application.MemorySupersede{Rig: args[0], Old: args[1], Slug: slug, Source: source, By: by}
+			if len(args) > 2 {
+				req.Sentence = args[2]
+			}
+			return memory.Supersede(cmd.Context(), req)
 		},
 	}
 	cmd.Flags().StringVar(&source, "source", "", "a bead, rig@sha or mayor:<date>")
 	cmd.Flags().StringVar(&slug, "slug", "", "the new fact's file name; default its sentence's first five words")
-	_ = cmd.MarkFlagRequired("source")
+	cmd.Flags().StringVar(&by, "by", "", "an existing current fact that replaces this one: retire it with the reason 'superseded by <slug>', adding no fact")
 	return cmd
 }
 
