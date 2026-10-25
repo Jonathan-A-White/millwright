@@ -31,6 +31,11 @@ type SeatManifest struct {
 	Seat string
 	// Cap is the manifest's own default cap, in bytes.
 	Cap int
+	// Ceiling is the most bytes the whole boot set may print, 0 for no
+	// ceiling: a set past it is still printed, then said to be over and the
+	// command fails, so that a part added later cannot quietly grow the
+	// seat's boot (mw-gq6.755).
+	Ceiling int
 	// Parts are what the boot set prints, in order.
 	Parts []BootPart
 	// Topics are the files whose headings are read by need, in order; a topic
@@ -67,11 +72,17 @@ func ParseSeatManifest(seat, text string) (SeatManifest, error) {
 	}
 	m := SeatManifest{Seat: seat, Cap: DefaultBootCap}
 	for key, literal := range file.Table("") {
-		if key != "cap" {
-			return SeatManifest{}, fmt.Errorf("the key %q is not one mw reads at the top of a manifest (only cap is)", key)
-		}
-		if m.Cap, err = bootCap(literal); err != nil {
-			return SeatManifest{}, fmt.Errorf("the manifest's cap: %w", err)
+		switch key {
+		case "cap":
+			if m.Cap, err = bootCap(literal); err != nil {
+				return SeatManifest{}, fmt.Errorf("the manifest's cap: %w", err)
+			}
+		case "ceiling":
+			if m.Ceiling, err = bootCap(literal); err != nil {
+				return SeatManifest{}, fmt.Errorf("the manifest's ceiling: %w", err)
+			}
+		default:
+			return SeatManifest{}, fmt.Errorf("the key %q is not one mw reads at the top of a manifest (only cap and ceiling are)", key)
 		}
 	}
 	for i, entry := range file.ArrayTables("boot") {
@@ -371,6 +382,8 @@ func (b SeatBootSet) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	out := &countingWriter{w: b.Out}
+	b.Out = out
 	fmt.Fprintf(b.Out, "# What the %s seat reads at boot (%s)\n\n", b.Seat, seatManifestPath(b.Seat))
 	failed := 0
 	for i, part := range m.Parts {
@@ -397,7 +410,24 @@ func (b SeatBootSet) Run(ctx context.Context) error {
 	if failed > 0 {
 		return fmt.Errorf("%d of %d parts of the %s seat's boot set could not be read", failed, len(m.Parts)+len(m.Topics), b.Seat)
 	}
+	if m.Ceiling > 0 && out.n > m.Ceiling {
+		over := fmt.Sprintf("the %s seat's boot set is %d bytes, over its manifest's ceiling of %d bytes: cut a part or move it to a topic", b.Seat, out.n, m.Ceiling)
+		fmt.Fprintf(b.Out, "\n[over the manifest's ceiling: %d of %d bytes]\n", out.n, m.Ceiling)
+		return fmt.Errorf("%s", over)
+	}
 	return nil
+}
+
+// countingWriter counts the bytes written through it.
+type countingWriter struct {
+	w io.Writer
+	n int
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += n
+	return n, err
 }
 
 // part prints one part of the boot set, and whether it could be read.
@@ -571,11 +601,19 @@ func seatTopics(ctx context.Context, files SeatBootFiles, rigs RigDocs, m SeatMa
 	return topics, problems
 }
 
-// printTopicIndex prints the one-screen index a seat reads by need from.
+// printTopicIndex prints the one-screen index a seat reads by need from: one
+// line for each file, its topics' slugs in order, since a slug is the heading's
+// own words and the file is said once rather than on every line (mw-gq6.755).
 func printTopicIndex(out io.Writer, seat string, topics []Topic) {
 	fmt.Fprintf(out, "mw seat read %s <topic> prints one of these:\n", seat)
-	for _, topic := range topics {
-		fmt.Fprintf(out, "- %s: %s (%s)\n", topic.Slug, topic.Heading, topic.Where())
+	for i := 0; i < len(topics); {
+		where := topics[i].Where()
+		slugs := []string{topics[i].Slug}
+		i++
+		for ; i < len(topics) && topics[i].Where() == where; i++ {
+			slugs = append(slugs, topics[i].Slug)
+		}
+		fmt.Fprintf(out, "- %s: %s\n", where, strings.Join(slugs, ", "))
 	}
 }
 

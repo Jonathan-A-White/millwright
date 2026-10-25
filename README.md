@@ -4452,7 +4452,10 @@ vault's root, or from a rig's checkout with `rig = "<rig>"`), `newest` (a
 directory of the vault whose newest `.md` by name is read: a seat's handoffs) or
 `command` (a shell line run in the vault, what it prints being the part), with
 `section` (one heading of the file, by text or slug) and `cap` (bytes; `0`
-none; default the manifest's own `cap`, else 8000). A path may hold `{host}`
+none; default the manifest's own `cap`, else 8000). A top-level `ceiling`
+(bytes, `0` none) bounds the whole set: past it the set is still printed, then
+`[over the manifest's ceiling: <n> of <m> bytes]`, and the command exits
+non-zero. The index is one line a file: its topics' slugs. A path may hold `{host}`
 and `{seat}`. A part past its cap is cut at a line end and ends
 `[cut at <cap> of <size> bytes]`. A part that cannot be read is said in its
 place, the rest is printed, and the command exits non-zero counting them.

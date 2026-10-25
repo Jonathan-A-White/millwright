@@ -102,10 +102,7 @@ func TestSeatReadMayorPrintsOneHeadingsSectionAndRefusesAnUnknownTopic(t *testin
 		t.Fatalf("mw seat boot mayor: %v\n%s", err, out)
 	}
 	if !strings.HasSuffix(out, "==> Read by need <==\n\nmw seat read mayor <topic> prints one of these:\n"+
-		"- mayor-procedures: Mayor procedures (one place) (seats/mayor/procedures.md)\n"+
-		"- boot: Boot (seats/mayor/procedures.md)\n"+
-		"- handing-off: Handing off (at ~180K) (seats/mayor/procedures.md)\n"+
-		"- standing-asks-of-the-governor: Standing asks of the Governor (seats/mayor/procedures.md)\n") {
+		"- seats/mayor/procedures.md: mayor-procedures, boot, handing-off, standing-asks-of-the-governor\n") {
 		t.Errorf("the boot set's index:\n%s", out)
 	}
 }
@@ -132,5 +129,48 @@ func TestSeatReadReadsATopicOfARigsFile(t *testing.T) {
 	_, err = runSeat(t, "read", "mayor", "governor")
 	if err == nil || !strings.Contains(err.Error(), "millwright") {
 		t.Errorf("a rig not checked out here: %v", err)
+	}
+}
+
+// A Mayor-shaped vault: the parts the Mayor's boot set names, at the sizes the
+// real ones are (mw-gq6.755). Its manifest keeps the vision, the standing asks
+// and the glossary out of the boot set, as topics, under a ceiling of 15K.
+func TestSeatBootMayorStaysUnderItsCeilingAndKeepsWhatMovedReadable(t *testing.T) {
+	filler := func(head string, n int) string {
+		return head + "\n\n" + strings.Repeat("A line the Mayor reads.\n", n)
+	}
+	procedures := "# Mayor procedures\n\n" +
+		filler("## Boot", 100) + "\n" +
+		filler("## Rules that bite every sitting", 160) + "\n" +
+		filler("## Who is talking", 28) + "\n" +
+		filler("## Standing asks of the Governor", 360) + "\n"
+	seatVault(t, map[string]string{
+		"seats/mayor/boot.toml": "ceiling = 15000\ncap = 8000\n\n" +
+			"[[boot]]\nnewest = \"seats/mayor/handoffs\"\ncap = 6000\n\n" +
+			"[[boot]]\nfile = \"seats/mayor/procedures.md\"\nsection = \"Boot\"\n\n" +
+			"[[boot]]\nfile = \"seats/mayor/procedures.md\"\nsection = \"Rules that bite every sitting\"\n\n" +
+			"[[boot]]\nfile = \"seats/mayor/procedures.md\"\nsection = \"Who is talking\"\n\n" +
+			"[[boot]]\ncommand = \"printf 'brief\\\\n'\"\n\n" +
+			"[[topic]]\nfile = \"seats/mayor/vision.md\"\n\n[[topic]]\nfile = \"seats/mayor/procedures.md\"\n",
+		"seats/mayor/vision.md":                  filler("# Vision", 100),
+		"seats/mayor/procedures.md":              procedures,
+		"seats/mayor/handoffs/2026-10-25-596.md": filler("# Handoff 596", 215),
+	})
+	out, err := runSeat(t, "boot", "mayor")
+	if err != nil {
+		t.Fatalf("mw seat boot mayor: %v\n%s", err, out)
+	}
+	if len(out) >= 15000 {
+		t.Errorf("mw seat boot mayor | wc -c is %d, want under 15000", len(out))
+	}
+	for _, moved := range []string{"==> seats/mayor/vision.md", "==> seats/mayor/procedures.md: Standing asks"} {
+		if strings.Contains(out, moved) {
+			t.Errorf("the boot set still prints %q", moved)
+		}
+	}
+	for _, topic := range []string{"vision", "standing-asks-of-the-governor"} {
+		if read, err := runSeat(t, "read", "mayor", topic); err != nil || read == "" {
+			t.Errorf("mw seat read mayor %s: %q, %v", topic, read, err)
+		}
 	}
 }
