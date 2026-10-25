@@ -312,8 +312,8 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 	if warning := s.sizeWarning(ctx, checkout, commit, label, grind); warning != "" {
 		report.Warnings = append(report.Warnings, warning)
 	}
-	if grind.Forward != "" {
-		report.Warnings = append(report.Warnings, label+": forwards to the "+grind.Forward+", so it is not smoked")
+	if who, forwards := grind.Forwards(); forwards {
+		report.Warnings = append(report.Warnings, label+": forwards to the "+who+", so it is not smoked")
 		return
 	}
 	var examples []string

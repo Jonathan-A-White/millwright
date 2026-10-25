@@ -147,6 +147,13 @@ type GrindFile struct {
 	Forward string `json:"forward,omitempty"`
 }
 
+// Forwards reports who the grind passes its grist on to, and whether it does:
+// the one decision `mw grist eval`, the smoke and the close-out's check of a
+// grind example make of whether a grind is a session at all (mw-gq6.801).
+func (g GrindFile) Forwards() (who string, forwards bool) {
+	return g.Forward, g.Forward != ""
+}
+
 // GristForwardMayor is the one seat a grind may forward its grist to.
 const GristForwardMayor = "mayor"
 

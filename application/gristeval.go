@@ -653,8 +653,8 @@ func (e GristEvalExamples) Run(ctx context.Context, app, kind string, names []st
 	if !ok {
 		return fmt.Errorf("mw grist eval: %s has no grind of kind %q at %s (grinds/%s.json)", app, kind, where, kind)
 	}
-	if grind.Forward != "" {
-		return fmt.Errorf("mw grist eval: the grind %s/%s forwards to the %s, so it is not evaluated", app, kind, grind.Forward)
+	if who, forwards := grind.Forwards(); forwards {
+		return fmt.Errorf("mw grist eval: the grind %s/%s forwards to the %s, so it is not evaluated", app, kind, who)
 	}
 	schema := s.readSchema(ctx, checkout, commit, grind)
 	if schema == "" {
