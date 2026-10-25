@@ -3291,6 +3291,22 @@ func DoctorVPSGuard() (VPSGuard, error) {
 	return guard, nil
 }
 
+// DoctorVPSNames reports the extra names mw doctor's vps-names check looks at,
+// beyond the hosts of the rigs' site_url and healthz_url: the `[doctor]`
+// table's `vps_names` list of ~/.config/mw/config.toml, empty when it says
+// nothing.
+func DoctorVPSNames() ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), DoctorTable)
+	if err != nil {
+		return nil, err
+	}
+	return list(table["vps_names"]), nil
+}
+
 // DefaultDoctorWgHub is the hub's ssh host:port mw doctor's wg check dials
 // over wg0, when the [doctor] table says nothing: this rig's own wireguard
 // hub.
