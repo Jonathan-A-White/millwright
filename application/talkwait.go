@@ -106,6 +106,21 @@ type TalkTurn struct {
 	// Attachment is a picture the Governor sent with the turn, a blob of the
 	// same shape as a message's file (section 8). Nil when there is none.
 	Attachment *PosternAttachment `json:"attachment,omitempty"`
+	// Attachments are the files of a turn that carries two or more: Postern
+	// writes one file as Attachment and several as Attachments (mw-gq6.802).
+	Attachments []*PosternAttachment `json:"attachments,omitempty"`
+}
+
+// files is every file t carries: Attachments when present, else the single
+// Attachment.
+func (t TalkTurn) files() []*PosternAttachment {
+	if len(t.Attachments) > 0 {
+		return t.Attachments
+	}
+	if t.Attachment != nil {
+		return []*PosternAttachment{t.Attachment}
+	}
+	return nil
 }
 
 // TalkAbout is the optional about field of a talk record: the kind of thing the
@@ -847,34 +862,49 @@ const TalkWaitImageLimit = 30 * time.Second
 // to AttachmentDir under the record's txid, as mw postern inbox writes a
 // message's, for the Mayor to look at before answering; a file already there
 // is not fetched again. A picture that cannot be had is "image: could not be
-// fetched (<reason>)", and the turn is printed all the same.
+// fetched (<reason>)", and the turn is printed all the same. A turn with
+// several files (`attachments`) gets one line each, "file:" for one that is not
+// a picture (mw-gq6.802).
 func (r *talkWaitRun) turnImage(ctx context.Context) string {
 	inbox := PosternInbox{Postern: r.Postern, Cipher: r.Cipher, Keys: r.Keys, AttachmentDir: r.AttachmentDir}
-	return inbox.talkImageLine(ctx, r.turn.Attachment, r.turnTxid)
+	return inbox.talkImageLine(ctx, r.turn, r.turnTxid)
 }
 
-// talkImageLine is turnImage for the picture of the turn recorded under txid.
-func (inbox PosternInbox) talkImageLine(ctx context.Context, picture *PosternAttachment, txid string) string {
-	if picture == nil {
-		return ""
+// talkImageLine is turnImage for the files of turn, recorded under txid: one
+// line each, in the order the Governor sent them. A turn with several files
+// names each <txid>-<n>; one file keeps the bare txid.
+func (inbox PosternInbox) talkImageLine(ctx context.Context, turn *TalkTurn, txid string) string {
+	files := turn.files()
+	var lines strings.Builder
+	for n, file := range files {
+		name := posternFileName(txid)
+		if len(files) > 1 {
+			name = fmt.Sprintf("%s-%d", name, n+1)
+		}
+		lines.WriteString(inbox.talkFileLine(ctx, file, txid, name))
 	}
+	return lines.String()
+}
+
+// talkFileLine is the line for one file of a turn, written under name.
+func (inbox PosternInbox) talkFileLine(ctx context.Context, picture *PosternAttachment, txid, name string) string {
+	label := posternAttachmentLabel(picture.Mime)
 	if inbox.AttachmentDir == "" || txid == "" {
-		return "image: could not be fetched (no postern inbox dir or no txid to name it by)\n"
+		return label + ": could not be fetched (no postern inbox dir or no txid to name it by)\n"
 	}
-	name := posternFileName(txid)
 	path := inbox.attachmentPath(picture, name)
 	if _, err := os.Stat(path); err != nil {
 		// The turn is heard: the wait's own limit does not cut the fetch short.
 		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), TalkWaitImageLimit)
 		defer cancel()
 		if path, _, err = inbox.downloadAttachment(fetchCtx, picture, name); err != nil {
-			return fmt.Sprintf("image: could not be fetched (%v)\n", err)
+			return fmt.Sprintf("%s: could not be fetched (%v)\n", label, err)
 		}
 	}
-	if label := posternSafeFileName(picture.Name); label != "" {
-		path += " (" + label + ")"
+	if shown := posternSafeFileName(picture.Name); shown != "" {
+		path += " (" + shown + ")"
 	}
-	return "image: " + path + "\n"
+	return label + ": " + path + "\n"
 }
 
 // turnSaved writes the turn's whole text to AttachmentDir as <txid>.txt, beside
@@ -978,7 +1008,7 @@ func (s TalkShow) Run(ctx context.Context, id string) error {
 		shown++
 		fmt.Fprintf(s.Out, "talk %s turn %d (role %s) at %s\ntext: %s\n%s%s",
 			turn.Talk.ID, turn.Talk.Turn, turn.Role, t.record.Ts.UTC().Format(time.RFC3339), turn.Text,
-			inbox.talkImageLine(ctx, turn.Attachment, t.record.Txid), missing)
+			inbox.talkImageLine(ctx, turn, t.record.Txid), missing)
 	}
 	if shown == 0 {
 		return fmt.Errorf("mw talk show: no turn of talk %s that the Governor sent this key", id)

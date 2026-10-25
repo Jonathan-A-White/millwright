@@ -466,3 +466,119 @@ func TestTalkShowRefusesATalkWithNoTurns(t *testing.T) {
 		t.Errorf("expected an error naming talk-404, got %v", err)
 	}
 }
+
+// talkFile is a file a multi-file turn carries: its bytes, mime and name; gone
+// leaves its blob out of the backend, as a file that cannot be fetched.
+type talkFile struct {
+	name, mime string
+	body       []byte
+	gone       bool
+}
+
+// addFilesTurn indexes a talk turn from the Governor to the Mayor carrying
+// files as the `attachments` array Postern writes for two or more, and returns
+// its seq.
+func (f *talkPosternFixture) addFilesTurn(txid, text string, files []talkFile) int64 {
+	f.t.Helper()
+	var entries []map[string]any
+	for _, file := range files {
+		sealed, err := f.cipher.EncryptBytes(talkWaitMayorKey, file.body)
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		raw, err := base64.StdEncoding.DecodeString(sealed)
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		sum := sha256.Sum256(raw)
+		hash := hex.EncodeToString(sum[:])
+		if !file.gone {
+			f.postern.SetBlob(hash, raw)
+		}
+		entries = append(entries, map[string]any{"hash": hash, "size": len(raw), "mime": file.mime, "name": file.name})
+	}
+	plain, _ := json.Marshal(map[string]any{
+		"talk": map[string]any{"id": "talk-12", "turn": 1}, "text": text, "role": application.TalkRoleTurn,
+		"attachments": entries,
+	})
+	ct, err := f.cipher.Encrypt(talkWaitMayorKey, string(plain))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return f.postern.AddRecord(application.PosternRecord{
+		Txid: txid, Class: "talk", To: talkWaitMayorKey, From: talkWaitGovernorKey, Ciphertext: ct,
+	}).Seq
+}
+
+// A turn carrying `attachments` prints one line per file, each written under
+// the turn's txid with its own index; a file that cannot be fetched is said
+// and does not cost the others (mw-gq6.802).
+func TestTalkWaitPrintsEveryFileOfATurnCarryingAttachments(t *testing.T) {
+	f := newTalkPosternFixture(t)
+	dir := t.TempDir()
+	seq := f.addFilesTurn("direct:many", "Look at these", []talkFile{
+		{name: "one.jpg", mime: "image/jpeg", body: []byte("first")},
+		{name: "two.png", mime: "image/png", body: []byte("second")},
+		{name: "three.jpg", mime: "image/jpeg", body: []byte("third"), gone: true},
+	})
+
+	printed := f.runInto(seq, dir)
+
+	one, two := filepath.Join(dir, "direct-many-1.jpg"), filepath.Join(dir, "direct-many-2.png")
+	for _, want := range []string{"image: " + one + " (one.jpg)\n", "image: " + two + " (two.png)\n", "image: could not be fetched ("} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("expected %q, got:\n%s", want, printed)
+		}
+	}
+	if strings.Count(printed, "image: ") != 3 {
+		t.Errorf("expected three image lines, got:\n%s", printed)
+	}
+	for path, body := range map[string]string{one: "first", two: "second"} {
+		if got, err := os.ReadFile(path); err != nil || string(got) != body {
+			t.Errorf("expected %q at %s, got %q (%v)", body, path, got, err)
+		}
+	}
+}
+
+// A file that is not a picture is named on a 'file:' line, not an 'image:' one.
+func TestTalkWaitNamesANonPictureFileOfATurnAsAFile(t *testing.T) {
+	f := newTalkPosternFixture(t)
+	dir := t.TempDir()
+	seq := f.addFilesTurn("direct:mix", "Both", []talkFile{
+		{name: "shot.png", mime: "image/png", body: []byte("png")},
+		{name: "spec.pdf", mime: "application/pdf", body: []byte("pdf")},
+	})
+
+	printed := f.runInto(seq, dir)
+
+	for _, want := range []string{
+		"image: " + filepath.Join(dir, "direct-mix-1.png") + " (shot.png)\n",
+		"file: " + filepath.Join(dir, "direct-mix-2.pdf") + " (spec.pdf)\n",
+	} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("expected %q, got:\n%s", want, printed)
+		}
+	}
+	if strings.Contains(printed, "image: "+filepath.Join(dir, "direct-mix-2.pdf")) {
+		t.Errorf("expected the PDF not to be called an image, got:\n%s", printed)
+	}
+}
+
+// mw talk show lists every file of a turn the way the wait does.
+func TestTalkShowListsEveryFileOfATurn(t *testing.T) {
+	f := newTalkPosternFixture(t)
+	dir := t.TempDir()
+	f.addFilesTurn("direct:many", "Look at these", []talkFile{
+		{name: "one.jpg", mime: "image/jpeg", body: []byte("first")},
+		{name: "spec.pdf", mime: "application/pdf", body: []byte("pdf")},
+	})
+
+	printed, err := f.show("talk-12", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "text: Look at these\nimage: " + filepath.Join(dir, "direct-many-1.jpg") + " (one.jpg)\nfile: " + filepath.Join(dir, "direct-many-2.pdf") + " (spec.pdf)\n"
+	if !strings.Contains(printed, want) {
+		t.Errorf("expected %q, got:\n%s", want, printed)
+	}
+}

@@ -95,6 +95,9 @@ func (p *talkParts) joined() *TalkTurn {
 		if whole.Attachment == nil {
 			whole.Attachment = part.Attachment
 		}
+		if len(whole.Attachments) == 0 {
+			whole.Attachments = part.Attachments
+		}
 		for _, link := range part.Links {
 			if !slices.Contains(whole.Links, link) {
 				whole.Links = append(whole.Links, link)
