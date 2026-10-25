@@ -1719,6 +1719,34 @@ func TestGatewayListsTheClosedStoriesWithTheirReasonAndSupersedes(t *testing.T) 
 	}
 }
 
+// The starved alarm reads one rig's newest closed stories, bounded, with the rig
+// and host each carries (mw-gq6.790).
+func TestGatewayListsOneRigsNewestClosedStoriesWithTheirHost(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	var ids []string
+	for _, c := range []struct{ title, rig, host string }{
+		{"First", "millwright", "desktop"}, {"Second", "millwright", "laptop"}, {"Third", "lampas", "desktop"},
+	} {
+		id := bdRun(t, vault, beads.Program, "create", c.title, "--silent", "--metadata", `{"rig":"`+c.rig+`","host":"`+c.host+`"}`)
+		bdRun(t, vault, beads.Program, "close", id, "--reason", "landed")
+		ids = append(ids, id)
+		time.Sleep(1100 * time.Millisecond)
+	}
+	gateway := beads.New(vault)
+
+	got, err := gateway.ClosedStoriesOfRig(ctx, "millwright", time.Now().Add(-time.Hour), 10)
+	if err != nil || len(got) != 2 || got[0].ID != ids[1] || got[0].Host != "laptop" || got[0].Rig != "millwright" || got[1].Host != "desktop" {
+		t.Fatalf("expected the rig's two stories newest first with their hosts, got %v: %+v", err, got)
+	}
+	if got, err = gateway.ClosedStoriesOfRig(ctx, "millwright", time.Now().Add(-time.Hour), 1); err != nil || len(got) != 1 || got[0].ID != ids[1] {
+		t.Fatalf("expected the limit to keep the newest only, got %v: %+v", err, got)
+	}
+}
+
 // The ranking pass (mw-ht6gsw.2) reads the cards closed since a time, and a
 // card's row and why read back as metadata.
 func TestGatewayListsTheCardsClosedSinceATimeAndReadsTheirRow(t *testing.T) {

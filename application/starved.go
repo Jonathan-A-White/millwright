@@ -322,43 +322,39 @@ func harnessWayOut(r StarvedRig, work WorkInHand) string {
 // StarvedRanDays is StarvedRanWindow in days, as the alarm states it.
 func StarvedRanDays() string { return fmt.Sprintf("%d days", int(StarvedRanWindow/(24*time.Hour))) }
 
-// closedLister is what reads the stories closed since a time; the beads gateway
-// is one (VerifyBeads.ClosedStories), a tracker without it makes the survey
-// claim nothing of closed work.
-type closedLister interface {
-	ClosedStories(ctx context.Context, since time.Time) ([]ClosedStory, error)
+// StarvedRanLimit is how many of a held rig's newest closed stories are read for
+// the hosts that ran it (mw-gq6.790): the read costs one list of that many rows,
+// never the 23,000 stories a fortnight closes across every rig.
+const StarvedRanLimit = 200
+
+// rigClosedLister is what reads a rig's newest closed stories since a time, each
+// with the Path it carries; the beads gateway is one
+// (Gateway.ClosedStoriesOfRig), a tracker without it makes the survey claim
+// nothing of closed work.
+type rigClosedLister interface {
+	ClosedStoriesOfRig(ctx context.Context, rig string, since time.Time, limit int) ([]ClosedStory, error)
 }
 
-// ranHosts reads the hosts a story closed within StarvedRanWindow of now was
-// routed to, per rig: one bounded list of the closed stories and one read of
-// them, and only when a harness-held rig needs it. ok is false when either read
-// is not to be had.
-func (s DamperSurvey) ranHosts(ctx context.Context, now time.Time) (ran map[string][]string, ok bool) {
-	lister, can := s.Tracker.(closedLister)
+// ranHosts reads the hosts the newest StarvedRanLimit stories of rig, closed
+// within StarvedRanWindow of now, were routed to: one list filtered by rig and
+// bounded, whose rows carry the host, so no story is shown. ok is false when
+// the read is not to be had.
+func (s DamperSurvey) ranHosts(ctx context.Context, rig string, now time.Time) (ran []string, ok bool) {
+	lister, can := s.Tracker.(rigClosedLister)
 	if !can {
 		return nil, false
 	}
-	closed, err := lister.ClosedStories(ctx, now.Add(-StarvedRanWindow))
+	closed, err := lister.ClosedStoriesOfRig(ctx, rig, now.Add(-StarvedRanWindow), StarvedRanLimit)
 	if err != nil {
 		return nil, false
 	}
-	ids := make([]string, len(closed))
-	for i, c := range closed {
-		ids[i] = c.ID
-	}
-	details, err := s.Tracker.ShowBeads(ctx, ids)
-	if err != nil {
-		return nil, false
-	}
-	seen := map[[2]string]bool{}
-	ran = map[string][]string{}
-	for _, d := range details {
-		rig, host := d.Merged().Rig, d.Merged().Host
-		if d.IsEpic || rig == "" || host == "" || host == domain.HostAuto || seen[[2]string{rig, host}] {
+	seen := map[string]bool{}
+	for _, c := range closed {
+		if c.Rig != rig || c.Host == "" || c.Host == domain.HostAuto || seen[c.Host] {
 			continue
 		}
-		seen[[2]string{rig, host}] = true
-		ran[rig] = append(ran[rig], host)
+		seen[c.Host] = true
+		ran = append(ran, c.Host)
 	}
 	return ran, true
 }
@@ -373,19 +369,23 @@ func (s DamperSurvey) readStarved(ctx context.Context, now time.Time) ([]Starved
 		return nil, fmt.Errorf("reading the hosts' notes of the rigs held back: %w", err)
 	}
 	var rigs []StarvedRig
-	var ran map[string][]string
-	var ranRead, ranTried bool
+	type ranRead struct {
+		hosts []string
+		ok    bool
+	}
+	readRan := map[string]ranRead{}
 	for _, key := range slices.Sorted(maps.Keys(notes)) {
 		if strings.HasPrefix(key, "host.") && strings.HasSuffix(key, ".starved") {
 			host := strings.TrimSuffix(strings.TrimPrefix(key, "host."), ".starved")
 			for _, r := range ParseStarved(notes[key]) {
 				r.Host = host
 				if r.Hold == StarvedHolds["harness-hold"] && s.Tracker != nil {
-					if !ranTried {
-						ran, ranRead = s.ranHosts(ctx, now)
-						ranTried = true
+					got, tried := readRan[r.Rig]
+					if !tried {
+						got.hosts, got.ok = s.ranHosts(ctx, r.Rig, now)
+						readRan[r.Rig] = got
 					}
-					r.Ran, r.RanRead = ran[r.Rig], ranRead
+					r.Ran, r.RanRead = got.hosts, got.ok
 				}
 				rigs = append(rigs, r)
 			}

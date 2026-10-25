@@ -3,8 +3,10 @@ package application_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -436,6 +438,39 @@ type closedTracker struct {
 	*apptest.FakeTracker
 	closed []application.ClosedStory
 	err    error
+	// shown collects the ids ShowBeads was asked for; nil leaves them uncounted.
+	shown *[]string
+	// asked collects the limit each rig list was given; nil leaves them uncounted.
+	asked *[]int
+}
+
+func (c closedTracker) ShowBeads(ctx context.Context, ids []string) ([]application.StoryDetail, error) {
+	if c.shown != nil {
+		*c.shown = append(*c.shown, ids...)
+	}
+	return c.FakeTracker.ShowBeads(ctx, ids)
+}
+
+// ClosedStoriesOfRig answers as the gateway does: the rig's stories closed since,
+// newest first, at most limit of them, each with the Path it carries.
+func (c closedTracker) ClosedStoriesOfRig(_ context.Context, rig string, since time.Time, limit int) ([]application.ClosedStory, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	if c.asked != nil {
+		*c.asked = append(*c.asked, limit)
+	}
+	var out []application.ClosedStory
+	for _, s := range c.closed {
+		if s.Rig == rig && !s.ClosedAt.Before(since) {
+			out = append(out, s)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ClosedAt.After(out[j].ClosedAt) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 func (c closedTracker) ClosedStories(_ context.Context, since time.Time) ([]application.ClosedStory, error) {
@@ -472,7 +507,7 @@ func aClosedStoryOn(t *testing.T, tracker *apptest.FakeTracker, id, host string,
 	if err := tracker.CloseStory(context.Background(), id, "landed"); err != nil {
 		t.Fatal(err)
 	}
-	return application.ClosedStory{ID: id, Title: "Landed", ClosedAt: statusNow.Add(-ago)}
+	return application.ClosedStory{ID: id, Title: "Landed", ClosedAt: statusNow.Add(-ago), Rig: "millwright", Host: host}
 }
 
 // 2026-10-25: the desktop's harness was held, millwright had two ready stories
@@ -538,5 +573,44 @@ func TestAHeldHarnessAlarmListsEveryOtherHostAndRoutesToTheFirst(t *testing.T) {
 func TestAStarvedRigHeldForAnotherReasonCarriesNoWayOutLine(t *testing.T) {
 	if text := starvedAlarms(t, starvedFixture(t, 4*time.Hour))[0].Text; strings.Contains(text, "mw path set") || strings.Contains(text, "no other host") {
 		t.Errorf("expected no way-out line for a smoke hold, got %q", text)
+	}
+}
+
+// 2026-10-25: mw-gq6.786 listed and showed every story closed in 14 days (about
+// 23,000) whenever a host was harness-held, and mw doctor, mw status and mw stuck
+// ran for minutes. The read is the held rig's newest stories, and none is shown.
+func TestAHeldHarnessAlarmReadsOnlyTheHeldRigsNewestClosedStories(t *testing.T) {
+	tracker := aHeldHostFixture(t)
+	var closed []application.ClosedStory
+	for i := 0; i < 5000; i++ {
+		rig, host := fmt.Sprintf("rig%d", i%4), "desktop"
+		if i%7 == 0 {
+			host = "vps"
+		}
+		closed = append(closed, application.ClosedStory{
+			ID: fmt.Sprintf("mw-bulk.%d", i), Rig: rig, Host: host, ClosedAt: statusNow.Add(-time.Duration(i+1) * time.Minute),
+		})
+	}
+	// The held rig's newest hundred ran on desktop, then one on the laptop, then
+	// thousands more on desktop.
+	for i := 0; i < 5100; i++ {
+		ago := time.Duration(i+1) * 30 * time.Second
+		if i >= 100 {
+			ago += time.Hour
+		}
+		closed = append(closed, application.ClosedStory{ID: fmt.Sprintf("mw-old.%d", i), Rig: "millwright", Host: "desktop", ClosedAt: statusNow.Add(-ago)})
+	}
+	closed = append(closed, application.ClosedStory{ID: "mw-gq6.9", Rig: "millwright", Host: "laptop", ClosedAt: statusNow.Add(-time.Hour)})
+	var shown []string
+	var asked []int
+	text := heldAlarmText(t, closedTracker{FakeTracker: tracker, closed: closed, shown: &shown, asked: &asked}, tracker)
+	if !strings.Contains(text, "laptop") || strings.Contains(text, "no other host") {
+		t.Errorf("expected the alarm to name laptop, got %q", text)
+	}
+	if len(shown) > 50 {
+		t.Errorf("expected at most 50 beads shown, got %d", len(shown))
+	}
+	if len(asked) != 1 || asked[0] <= 0 || asked[0] > 200 {
+		t.Errorf("expected one bounded list of the held rig, got limits %v", asked)
 	}
 }
