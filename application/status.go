@@ -1248,6 +1248,10 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 	}
 
+	if alarm, found := needsFilesKeyAlarm(report.Ready, report.NoFilesKey); found {
+		report.Dampers.Alarms = append(report.Dampers.Alarms, alarm)
+	}
+
 	for _, other := range report.Others {
 		report.Dampers.Alarms = append(report.Dampers.Alarms, other.DoctorAlarms()...)
 	}
