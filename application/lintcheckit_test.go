@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -127,5 +128,41 @@ func TestLintCheckItRefusesABeadWithNoRigOnThisHost(t *testing.T) {
 
 	if err == nil || !strings.Contains(err.Error(), "leaderboard") {
 		t.Fatalf("expected an error naming the rig, got %v", err)
+	}
+}
+
+// mw-lvcm5w.2's shape: the builder's closing comment holds the section, and a
+// later VERIFIED note only mentions the words.
+func lvcmComments() []application.Comment {
+	return []application.Comment{
+		{Author: "builder", Created: time.Date(2026, time.October, 24, 9, 30, 0, 0, time.UTC), Text: "Built it.\n\n" +
+			"HOW TO CHECK IT, for the Governor:\n" +
+			"1. Open the app and tap \"Steps\".\n" +
+			"2. Tap \"Back to current step\" and a button `Undo` shows.\n\n" +
+			"What's new: none\n\nFor the rig memory:\nnothing\n"},
+		{Author: "mw", Created: time.Date(2026, time.October, 24, 12, 0, 0, 0, time.UTC),
+			Text: "VERIFIED by the Governor's use: HOW TO CHECK IT posted in his thread, direct:abc"},
+	}
+}
+
+func TestLintCheckItReadsTheSectionNotALaterNoteThatMentionsTheWords(t *testing.T) {
+	beads := &apptest.FakeVerifyBeads{
+		Details: map[string]application.StoryDetail{
+			"lb-1": {Story: domain.Story{ID: "lb-1", Overrides: domain.Path{Rig: "leaderboard"}}, Status: "closed"},
+		},
+		Comments: map[string][]application.Comment{"lb-1": lvcmComments()},
+	}
+	out := &strings.Builder{}
+	src := fakeSource{"/rigs/leaderboard/src": "Steps Back to current step Undo"}
+
+	result, err := application.LintCheckIt{
+		Beads: beads, Src: src, Rigs: map[string]string{"leaderboard": "/rigs/leaderboard"}, Out: out,
+	}.Run(context.Background(), "lb-1")
+
+	if err != nil || result.Failed() || len(result.Quoted) != 3 {
+		t.Fatalf("expected the builder's three labels read, got %+v %v\n%s", result, err, out)
+	}
+	if !strings.Contains(out.String(), "builder") || !strings.Contains(out.String(), "2026-10-24T09:30:00Z") {
+		t.Fatalf("expected the comment read named by author and time, got:\n%s", out)
 	}
 }

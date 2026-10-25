@@ -400,3 +400,17 @@ func TestVerifyDeployRefusesABeadTheTrackerDoesNotHold(t *testing.T) {
 		t.Fatalf("expected an error naming the bead, got %v", err)
 	}
 }
+
+func TestVerifyCandidatesTakeTheSectionNotALaterNoteThatMentionsTheWords(t *testing.T) {
+	beads := &apptest.FakeVerifyBeads{
+		Closed:   []application.ClosedStory{verifyClosed("s-new", "", "landed", time.Hour)},
+		Comments: map[string][]application.Comment{"s-new": append(verifyComment(closingWithCheck), application.Comment{Author: "mw", Created: verifyNow, Text: "Sent to his phone; HOW TO CHECK IT posted in his thread, direct:abc"})},
+	}
+	got, err := application.VerifyCandidates(context.Background(), beads, verifyNow, 7*24*time.Hour)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("expected one candidate, got %+v (%v)", got, err)
+	}
+	if !strings.Contains(got[0].Check, "Tap Save and see the green tick") {
+		t.Fatalf("expected the builder's section, got %q", got[0].Check)
+	}
+}

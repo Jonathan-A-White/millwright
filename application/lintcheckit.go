@@ -26,7 +26,7 @@ type LintCheckItBeads = VerifyDeployBeads
 
 // LintCheckIt is mw lint-checkit <bead> (mw-gq6.764): HOW TO CHECK IT steps
 // quote the labels on the Governor's screen, and a label written from a guess
-// is a step he cannot follow. It reads the newest HOW TO CHECK IT of the bead's
+// is a step he cannot follow. It reads the newest HOW TO CHECK IT (a line that begins with the words) of the bead's
 // comments, takes each label quoted in it ("..." or backticks) and looks for
 // the label as a fixed string under the rig's src/. It writes nothing.
 type LintCheckIt struct {
@@ -56,12 +56,13 @@ func (l LintCheckIt) Run(ctx context.Context, id string) (LintCheckItResult, err
 	if err != nil {
 		return LintCheckItResult{}, fmt.Errorf("mw lint-checkit: reading the comments of %s: %w", id, err)
 	}
-	section := howToCheckIt(comments[id])
+	section, read := howToCheckItFrom(comments[id])
 	if section == "" {
 		fmt.Fprintf(l.Out, "lint-checkit %s: no HOW TO CHECK IT on the bead, nothing to check\n", id)
 		return LintCheckItResult{}, nil
 	}
 	result := LintCheckItResult{Quoted: quotedLabels(section)}
+	fmt.Fprintf(l.Out, "lint-checkit %s: read the HOW TO CHECK IT of the comment by %s at %s\n", id, commentAuthor(read), commentTime(read))
 	if len(result.Quoted) == 0 {
 		fmt.Fprintf(l.Out, "lint-checkit %s: HOW TO CHECK IT quotes no label, nothing to check\n", id)
 		return result, nil
@@ -87,6 +88,22 @@ func (l LintCheckIt) Run(ctx context.Context, id string) (LintCheckItResult, err
 	}
 	fmt.Fprintf(l.Out, "lint-checkit %s: %d quoted labels, %d found in src/\n", id, len(result.Quoted), found)
 	return result, nil
+}
+
+// commentAuthor and commentTime say which comment a section was read from;
+// "unknown" when the tracker gave none.
+func commentAuthor(c Comment) string {
+	if strings.TrimSpace(c.Author) == "" {
+		return "unknown"
+	}
+	return c.Author
+}
+
+func commentTime(c Comment) string {
+	if c.Created.IsZero() {
+		return "unknown time"
+	}
+	return c.Created.UTC().Format("2006-01-02T15:04:05Z")
 }
 
 // sourceDir is the src/ of the checkout to search: Dir, else the bead's rig.

@@ -166,11 +166,20 @@ func (c ClosedStory) landed() bool {
 // one: from its heading to the 'What's new:' or 'For the rig memory:' line, or
 // the end. "" when no comment has it.
 func howToCheckIt(comments []Comment) string {
+	section, _ := howToCheckItFrom(comments)
+	return section
+}
+
+// howToCheckItFrom is howToCheckIt and the comment it read. A heading is a line
+// that begins with the phrase, after spaces and an optional Markdown '#' or
+// '**': a later note that only mentions the words ("HOW TO CHECK IT posted in
+// his thread") is not one.
+func howToCheckItFrom(comments []Comment) (string, Comment) {
 	for i := len(comments) - 1; i >= 0; i-- {
 		lines := strings.Split(comments[i].Text, "\n")
 		start := -1
 		for n, line := range lines {
-			if strings.Contains(strings.ToUpper(line), howToCheckHeading) {
+			if isHowToCheckHeading(line) {
 				start = n
 				break
 			}
@@ -186,9 +195,16 @@ func howToCheckIt(comments []Comment) string {
 				break
 			}
 		}
-		return strings.TrimSpace(strings.Join(lines[start:end], "\n"))
+		return strings.TrimSpace(strings.Join(lines[start:end], "\n")), comments[i]
 	}
-	return ""
+	return "", Comment{}
+}
+
+// isHowToCheckHeading is whether line begins with the HOW TO CHECK IT phrase,
+// in any case, after spaces and any leading Markdown '#' or '*' marks.
+func isHowToCheckHeading(line string) bool {
+	line = strings.TrimLeft(strings.TrimSpace(line), "#* \t")
+	return strings.HasPrefix(strings.ToUpper(line), howToCheckHeading)
 }
 
 // VerifyCandidates are the beads the Governor's use may show met: every open
