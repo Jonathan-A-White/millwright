@@ -841,3 +841,32 @@ func TestRegisterPersonOfAStrangerIsUnknown(t *testing.T) {
 		t.Fatalf("expected nobody and no error, got %+v %v %v", person, known, err)
 	}
 }
+
+// RecordSeq finds where a record sits with one GET /api/messages?txid=, never
+// a page of the store; a txid the index does not hold reports the head, which
+// is next. A send then reads from there in one more page: two requests, with
+// a thousand records ahead of it.
+func TestRecordSeqIsOneRequestAndLetsAReaderStartThere(t *testing.T) {
+	grist := "direct:" + strings.Repeat("ab", 32)
+	found := `{"records":[{"seq":1000,"txid":"` + grist + `","scriptHex":""}],"next":1000,"more":false}`
+	b, backend := serve(t, map[string]answer{
+		"GET /api/messages?txid=" + url.QueryEscape(grist): {200, found},
+		"GET /api/messages?txid=direct%3Anone":             {200, `{"records":[],"next":1000,"more":false}`},
+		"GET /api/messages?since=1000&limit=200":           pageOf([]int64{1001}, 1001, false),
+	})
+
+	seq, err := backend.RecordSeq(context.Background(), grist)
+	if err != nil || seq != 1000 {
+		t.Fatalf("expected the record at 1000, got %d, %v", seq, err)
+	}
+	records, err := backend.Messages(context.Background(), seq)
+	if err != nil || len(records) != 1 || records[0].Seq != 1001 {
+		t.Fatalf("expected only the record after it, got %+v, %v", records, err)
+	}
+	if reqs := requestsFor(b, "/api/messages"); len(reqs) != 2 {
+		t.Fatalf("expected two requests for the messages, got %v", reqs)
+	}
+	if head, err := backend.RecordSeq(context.Background(), "direct:none"); err != nil || head != 1000 {
+		t.Fatalf("expected the head for a record not indexed, got %d, %v", head, err)
+	}
+}

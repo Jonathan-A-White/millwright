@@ -145,3 +145,80 @@ func TestGristSendNamesTheTalk(t *testing.T) {
 		t.Fatalf("the grist names no talk: %q", plain)
 	}
 }
+
+// A send reads only what came after its own grist: with a thousand records
+// already in the store, one send makes at most two GET /api/messages and is
+// handed no old record (it paged the whole store from 0 before: about 1150
+// pages a send at the real backend).
+func TestGristSendReadsOnlyWhatCameAfterItsOwnSend(t *testing.T) {
+	send, backend, req := aGristSend(t)
+	backend.NextTxid = "direct:mine"
+	req.Wait = time.Minute
+	now := time.Unix(1_790_000_000, 0)
+	send.Now = func() time.Time { return now }
+	send.Sleep = func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil }
+	for range 1000 {
+		backend.AddRecord(application.PosternRecord{Class: "message", From: "03other", To: "03someone"})
+	}
+	mill := &apptest.FakeCipher{From: "03mill"}
+	me, _, _ := send.Keys.PublicKey()
+	sealed, _ := mill.Encrypt(me, `{"re":"direct:mine","status":"answered","answer":{}}`)
+	backend.AddRecordOnDeliver(application.PosternRecord{Class: "grist", From: "03mill", To: me, Signer: "03mill", Ciphertext: sealed})
+
+	report, err := send.Run(context.Background(), req)
+	if err != nil || report.Answer == nil {
+		t.Fatalf("expected the answer, got %+v, %v", report, err)
+	}
+	if reads := backend.Reads(); reads > 2 {
+		t.Fatalf("one send made %d reads of the record store, want at most 2", reads)
+	}
+	if served := backend.Served(); served != 1 {
+		t.Fatalf("one send was handed %d records, want only the answer", served)
+	}
+}
+
+// pollTimes keeps the time of each page a send asks for, on the send's clock.
+type pollTimes struct {
+	application.Postern
+	now   func() time.Time
+	polls []time.Time
+}
+
+func (p *pollTimes) Messages(ctx context.Context, since int64) ([]application.PosternRecord, error) {
+	p.polls = append(p.polls, p.now())
+	return p.Postern.Messages(ctx, since)
+}
+
+// Between polls a send waits 1 s, then 2, 4 and 8, and 10 s from then on, so
+// a grist whose answer is slow is asked after at most once a second.
+func TestGristSendWaitsBetweenPollsAndBacksOff(t *testing.T) {
+	send, backend, req := aGristSend(t)
+	backend.NextTxid = "direct:mine"
+	req.Wait = time.Minute
+	now := time.Unix(1_790_000_000, 0)
+	send.Now = func() time.Time { return now }
+	send.Sleep = func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil }
+	polls := &pollTimes{Postern: backend, now: send.Now}
+	send.Postern = polls
+
+	if _, err := send.Run(context.Background(), req); application.ExitStatus(err) != 2 {
+		t.Fatalf("expected no answer and status 2, got %v", err)
+	}
+	var gaps []time.Duration
+	for i := 1; i < len(polls.polls); i++ {
+		gaps = append(gaps, polls.polls[i].Sub(polls.polls[i-1]))
+	}
+	want := []time.Duration{1, 2, 4, 8, 10, 10, 10, 10, 5}
+	for i := range want[:len(want)-1] {
+		want[i] *= time.Second
+	}
+	want[len(want)-1] *= time.Second
+	if len(gaps) != len(want) {
+		t.Fatalf("expected %d waits, got %v", len(want), gaps)
+	}
+	for i := range gaps {
+		if gaps[i] != want[i] {
+			t.Fatalf("expected the waits %v, got %v", want, gaps)
+		}
+	}
+}

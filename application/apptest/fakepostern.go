@@ -27,6 +27,9 @@ type FakePostern struct {
 	uploaded   [][]byte
 	deleted    []string
 	reads      int
+	served     int
+	onDeliver  []application.PosternRecord
+	sentAt     map[string]int64
 	streams    []*fakeStream
 
 	// StreamErr, when set, is what Events fails with at once: a backend that
@@ -162,11 +165,52 @@ func (f *FakePostern) Streams() int {
 	return len(f.streams)
 }
 
-// Reads is how many times Messages was called, failed or not.
+// Reads is how many times Messages or RecordSeq was called, failed or not:
+// each is one GET /api/messages at the real backend.
 func (f *FakePostern) Reads() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.reads
+}
+
+// Served is how many records Messages has handed back in all, which the real
+// backend pays for in pages.
+func (f *FakePostern) Served() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.served
+}
+
+// AddRecordOnDeliver queues a record to enter the index the next time Deliver
+// takes a message: the mill's answer, which cannot exist before the grist it
+// answers is sent.
+func (f *FakePostern) AddRecordOnDeliver(record application.PosternRecord) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onDeliver = append(f.onDeliver, record)
+}
+
+// RecordSeq implements application.Postern: the sequence number of the record
+// named txid, where Deliver put a grist of that name (the head then), or the
+// head when the index holds none of that name.
+func (f *FakePostern) RecordSeq(_ context.Context, txid string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reads++
+	if f.Err != nil {
+		return 0, f.Err
+	}
+	if seq, ok := f.sentAt[txid]; ok {
+		return seq, nil
+	}
+	var head int64
+	for _, r := range f.records {
+		if r.Txid == txid {
+			return r.Seq, nil
+		}
+		head = max(head, r.Seq)
+	}
+	return head, nil
 }
 
 // SetUtxos sets what Utxos reports for address.
@@ -213,6 +257,7 @@ func (f *FakePostern) Messages(_ context.Context, since int64) ([]application.Po
 		}
 	}
 	sort.Slice(found, func(i, j int) bool { return found[i].Seq < found[j].Seq })
+	f.served += len(found)
 	return found, nil
 }
 
@@ -288,10 +333,26 @@ func (f *FakePostern) Deliver(_ context.Context, payload []byte) (string, error)
 		return "", fmt.Errorf("the postern backend said 413 to POST /api/messages: body exceeds %d KiB", f.MaxDeliverBytes/1024)
 	}
 	f.delivered = append(f.delivered, append([]byte(nil), payload...))
-	if f.NextTxid != "" {
-		return f.NextTxid, nil
+	txid := f.NextTxid
+	if txid == "" {
+		txid = fmt.Sprintf("direct:fake-%d", len(f.delivered))
 	}
-	return fmt.Sprintf("direct:fake-%d", len(f.delivered)), nil
+	// The grist takes the place at the head, where the real index would put it.
+	if f.sentAt == nil {
+		f.sentAt = map[string]int64{}
+	}
+	f.sentAt[txid] = 0
+	for _, r := range f.records {
+		f.sentAt[txid] = max(f.sentAt[txid], r.Seq)
+	}
+	for _, record := range f.onDeliver {
+		if record.Seq == 0 {
+			record.Seq = int64(len(f.records)) + 1
+		}
+		f.records = append(f.records, record)
+	}
+	f.onDeliver = nil
+	return txid, nil
 }
 
 // Delivered reports the payloads Deliver was handed, in order.

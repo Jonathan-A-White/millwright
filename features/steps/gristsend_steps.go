@@ -132,8 +132,9 @@ func (c *gristSendContext) aKeyFileHoldingThePhonesKey() error {
 	return nil
 }
 
-// theMillHasAnswered puts the mill's answer to the grist txid, of the
-// vectors' status, in the backend's index, sealed to the phone.
+// theMillHasAnswered has the mill's answer to the grist txid, of the vectors'
+// status, sealed to the phone, enter the backend's index as the grist is
+// delivered: an answer cannot come before the grist it answers.
 func (c *gristSendContext) theMillHasAnswered(txid, status string) error {
 	answer, ok := c.vectors.Answers[status]
 	if !ok {
@@ -148,7 +149,7 @@ func (c *gristSendContext) theMillHasAnswered(txid, status string) error {
 	if err != nil {
 		return err
 	}
-	c.backend.AddRecord(application.PosternRecord{
+	c.backend.AddRecordOnDeliver(application.PosternRecord{
 		Txid: "direct:answer", Class: application.GristClass, From: c.mill, To: c.phone,
 		Signer: c.mill, Ts: gristNow, Ciphertext: sealed,
 	})

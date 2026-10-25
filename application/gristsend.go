@@ -19,9 +19,13 @@ import (
 // docs/protocol.md section 19.
 const GristSendMaxPhotos = 4
 
-// GristSendPollInterval is how often GristSend pages the backend for the
-// answer when it is not told another.
-const GristSendPollInterval = 5 * time.Second
+// GristSendPollInterval is the first wait between pages for the answer when
+// GristSend is not told another; each wait after it is twice the one before,
+// up to GristSendPollMax. PROVISIONAL.
+const GristSendPollInterval = time.Second
+
+// GristSendPollMax is the longest wait between pages for the answer.
+const GristSendPollMax = 10 * time.Second
 
 // GristSendTimedOutExit is the status mw grist send leaves with when no
 // answer came in time.
@@ -31,8 +35,9 @@ const GristSendTimedOutExit = 2
 // what an app's phone does, from a terminal (postern's docs/protocol.md
 // section 19). It seals each photo and the app's request to the mill key the
 // backend names, uploads the photos, posts the grist, and, asked to wait,
-// pages the backend for the answer whose re is the grist's txid. It never
-// reads or prints any key but Keys', and never a private key.
+// pages the backend, from the grist's own place in the record store on, for
+// the answer whose re is the grist's txid. It never reads or prints any key
+// but Keys', and never a private key.
 type GristSend struct {
 	Postern Postern
 	Cipher  Cipher
@@ -40,8 +45,8 @@ type GristSend struct {
 	// --key, never a default.
 	Keys PosternKeyFile
 
-	// Interval is how long to wait between pages; the zero value is
-	// GristSendPollInterval.
+	// Interval is how long to wait before the second page, doubling after each
+	// to GristSendPollMax; the zero value is GristSendPollInterval.
 	Interval time.Duration
 	// Now and Sleep are the clock and the wait between pages. The zero
 	// values read the real ones.
@@ -323,9 +328,12 @@ func (s GristSend) uploadOverride(ctx context.Context, mill string, plain *Grist
 }
 
 // await pages the backend for the mill's answer to txid until wait is out,
-// reporting nil when none came. An answer counts only when it is a grist
-// record to from that decrypts to the mill's own seal (and the backend's
-// proven signer, when it gives one, is the mill), and whose re is txid.
+// reporting nil when none came. It starts at the grist's own place in the
+// record store (the answer cannot come before it), never at the start of the
+// store, and waits between pages, longer after each. An answer counts only
+// when it is a grist record to from that decrypts to the mill's own seal (and
+// the backend's proven signer, when it gives one, is the mill), and whose re
+// is txid.
 func (s GristSend) await(ctx context.Context, txid, from, mill string, wait time.Duration) (*GristAnswer, error) {
 	privKey, err := s.Keys.PrivateKeyWIF()
 	if err != nil {
@@ -335,8 +343,11 @@ func (s GristSend) await(ctx context.Context, txid, from, mill string, wait time
 	if interval <= 0 {
 		interval = GristSendPollInterval
 	}
+	cursor, err := s.Postern.RecordSeq(ctx, txid)
+	if err != nil {
+		return nil, fmt.Errorf("finding where its answer will be failed: %w", err)
+	}
 	deadline := s.now().Add(wait)
-	var cursor int64
 	for {
 		records, err := s.Postern.Messages(ctx, cursor)
 		if err != nil {
@@ -355,6 +366,7 @@ func (s GristSend) await(ctx context.Context, txid, from, mill string, wait time
 		if err := s.sleep(ctx, min(interval, left)); err != nil {
 			return nil, err
 		}
+		interval = min(interval*2, max(GristSendPollMax, s.Interval))
 	}
 }
 

@@ -199,6 +199,11 @@ type Postern interface {
 	// Messages reports every indexed record after sequence number since,
 	// oldest first.
 	Messages(ctx context.Context, since int64) ([]PosternRecord, error)
+	// RecordSeq reports the sequence number of the record named txid, or the
+	// index head when the backend holds none of that name, in one request and
+	// never a page of the store: where a reader that wants only what comes
+	// after a record starts.
+	RecordSeq(ctx context.Context, txid string) (int64, error)
 	// Blob downloads the whole body stored under hash at the postern
 	// backend's blob store, postern's docs/protocol.md section 8: the raw
 	// ciphertext bytes an attachment was uploaded as, untouched.

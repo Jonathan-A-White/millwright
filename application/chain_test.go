@@ -20,8 +20,9 @@ type directOnlyBackend struct{}
 func (directOnlyBackend) Messages(context.Context, int64) ([]application.PosternRecord, error) {
 	return nil, nil
 }
-func (directOnlyBackend) Deliver(context.Context, []byte) (string, error) { return "", nil }
-func (directOnlyBackend) Blob(context.Context, string) ([]byte, error)    { return nil, nil }
+func (directOnlyBackend) RecordSeq(context.Context, string) (int64, error) { return 0, nil }
+func (directOnlyBackend) Deliver(context.Context, []byte) (string, error)  { return "", nil }
+func (directOnlyBackend) Blob(context.Context, string) ([]byte, error)     { return nil, nil }
 func (directOnlyBackend) UploadBlob(context.Context, []byte) (string, int64, error) {
 	return "", 0, nil
 }

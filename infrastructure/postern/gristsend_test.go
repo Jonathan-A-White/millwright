@@ -123,7 +123,7 @@ func TestGristSendRoundTripsTheGristVectors(t *testing.T) {
 			waiting := apptest.NewFakePostern()
 			waiting.NextTxid = txid
 			waiting.Mine = backend.Mine
-			waiting.AddRecord(application.PosternRecord{
+			waiting.AddRecordOnDeliver(application.PosternRecord{
 				Txid: "direct:answer", Class: application.GristClass, From: millPub, To: phonePub, Signer: millPub, Ciphertext: sealed,
 			})
 			var out bytes.Buffer

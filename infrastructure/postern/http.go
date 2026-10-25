@@ -142,6 +142,26 @@ func (h *HTTP) Messages(ctx context.Context, since int64) ([]application.Postern
 	}
 }
 
+// RecordSeq implements application.Postern: GET /api/messages?txid=<txid>,
+// which answers only the records of that transaction (or direct: name) and
+// whose next is the index head. The record's seq when it is there, else the
+// head. One request: nothing is paged.
+func (h *HTTP) RecordSeq(ctx context.Context, txid string) (int64, error) {
+	var body struct {
+		Records []apiRecord `json:"records"`
+		Next    int64       `json:"next"`
+	}
+	if err := h.authDo(ctx, http.MethodGet, "/api/messages?txid="+url.QueryEscape(txid), nil, &body); err != nil {
+		return 0, err
+	}
+	for _, r := range body.Records {
+		if r.Txid == txid {
+			return r.Seq, nil
+		}
+	}
+	return body.Next, nil
+}
+
 // Utxos is one of bsv.Coins: GET /api/utxos/{address}.
 func (h *HTTP) Utxos(ctx context.Context, address string) ([]application.PosternUtxo, error) {
 	var body struct {
