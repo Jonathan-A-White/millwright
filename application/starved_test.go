@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"regexp"
 	"strings"
@@ -428,17 +429,100 @@ func TestAHeldHarnessAlarmNamesTheCommandThatRoutesEachReadyStoryToAnotherHost(t
 	}
 }
 
-func TestAHeldHarnessAlarmWithNoOtherHostSaysSo(t *testing.T) {
-	alarms := starvedAlarms(t, aHeldHostFixture(t))
+// closedTracker is a tracker that also lists what was closed, as the real
+// gateway does (VerifyBeads.ClosedStories): the ids it is given are read back
+// with ShowBeads.
+type closedTracker struct {
+	*apptest.FakeTracker
+	closed []application.ClosedStory
+	err    error
+}
+
+func (c closedTracker) ClosedStories(_ context.Context, since time.Time) ([]application.ClosedStory, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	var out []application.ClosedStory
+	for _, s := range c.closed {
+		if !s.ClosedAt.Before(since) {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+// heldAlarmText is the one alarm text of a rig held on desktop, read from the
+// tracker.
+func heldAlarmText(t *testing.T, tracker application.WorkTracker, notes application.DamperNotes) string {
+	t.Helper()
+	alarms, err := application.DamperSurvey{Tracker: tracker, Notes: notes}.Starved(context.Background(), statusNow)
+	if err != nil {
+		t.Fatalf("reading the starved rigs: %v", err)
+	}
 	if len(alarms) != 1 {
 		t.Fatalf("expected one alarm, got %+v", alarms)
 	}
-	text := alarms[0].Text
-	if !strings.Contains(text, "no other host runs millwright") {
-		t.Errorf("expected the alarm to say no other host runs millwright, got %q", text)
+	return alarms[0].Text
+}
+
+// aClosedStoryOn closes a story of the rig that ran on host, ago before statusNow.
+func aClosedStoryOn(t *testing.T, tracker *apptest.FakeTracker, id, host string, ago time.Duration) application.ClosedStory {
+	t.Helper()
+	storyOn(t, tracker, id, "Landed", host)
+	if err := tracker.CloseStory(context.Background(), id, "landed"); err != nil {
+		t.Fatal(err)
+	}
+	return application.ClosedStory{ID: id, Title: "Landed", ClosedAt: statusNow.Add(-ago)}
+}
+
+// 2026-10-25: the desktop's harness was held, millwright had two ready stories
+// routed there, the laptop had no open millwright work but had landed one that
+// morning, and the alarm said no other host runs millwright.
+func TestAHeldHarnessAlarmNamesTheHostThatRanTheRigThroughAStoryNowClosed(t *testing.T) {
+	tracker := aHeldHostFixture(t)
+	landed := aClosedStoryOn(t, tracker, "mw-gq6.9", "laptop", 6*time.Hour)
+	text := heldAlarmText(t, closedTracker{FakeTracker: tracker, closed: []application.ClosedStory{landed}}, tracker)
+	for _, want := range []string{"laptop", "mw path set mw-gq6.1 host=laptop", "mw path set mw-gq6.2 host=laptop"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("expected %q in the alarm, got %q", want, text)
+		}
+	}
+	if strings.Contains(text, "no other host") {
+		t.Errorf("expected no claim that no other host runs the rig, got %q", text)
+	}
+	if strings.Contains(text, "\n") {
+		t.Errorf("expected one line, got %q", text)
+	}
+}
+
+func TestAHeldHarnessAlarmWithNoOtherHostSaysSoAndStatesTheWindow(t *testing.T) {
+	tracker := aHeldHostFixture(t)
+	// A story of the held host itself, and one closed before the window.
+	mine := aClosedStoryOn(t, tracker, "mw-gq6.8", "desktop", time.Hour)
+	old := aClosedStoryOn(t, tracker, "mw-gq6.9", "laptop", application.StarvedRanWindow+time.Hour)
+	text := heldAlarmText(t, closedTracker{FakeTracker: tracker, closed: []application.ClosedStory{mine, old}}, tracker)
+	if !strings.Contains(text, "no other host has run millwright in the last 14 days") {
+		t.Errorf("expected the alarm to say no other host has run millwright in the last 14 days, got %q", text)
 	}
 	if strings.Contains(text, "mw path set") {
 		t.Errorf("expected no command with no other host, got %q", text)
+	}
+}
+
+func TestAHeldHarnessAlarmNeverClaimsNoOtherHostWhenClosedWorkCannotBeRead(t *testing.T) {
+	for name, tracker := range map[string]application.WorkTracker{
+		"a tracker that lists no closed stories": aHeldHostFixture(t),
+		"a closed list that fails":               closedTracker{FakeTracker: aHeldHostFixture(t), err: errors.New("the vault is out of reach")},
+	} {
+		text := heldAlarmText(t, tracker, tracker.(interface {
+			NotesWithPrefix(context.Context, string) (map[string]string, error)
+		}))
+		if strings.Contains(text, "no other host") {
+			t.Errorf("%s: expected no claim that no other host runs the rig, got %q", name, text)
+		}
+		if !strings.Contains(text, "Way out: ") || !strings.Contains(text, "could not be read") {
+			t.Errorf("%s: expected the way out to say the hosts could not be read, got %q", name, text)
+		}
 	}
 }
 

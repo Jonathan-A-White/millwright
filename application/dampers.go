@@ -496,7 +496,7 @@ func (s DamperSurvey) Dampers(ctx context.Context, work WorkInHand, now time.Tim
 			}
 		}
 	}
-	starved, err := s.readStarved(ctx)
+	starved, err := s.readStarved(ctx, now)
 	if err != nil {
 		return DampersReport{}, err
 	}

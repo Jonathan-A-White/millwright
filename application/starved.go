@@ -18,6 +18,10 @@ import (
 // that also held its own fix, and nothing said so but the Governor's eyes.
 const StarvedAfter = time.Hour
 
+// StarvedRanWindow is how far back the closed stories are read for the hosts
+// that ran a rig (mw-gq6.786); the alarm states it in days when no host did.
+const StarvedRanWindow = 14 * 24 * time.Hour
+
 // StarvedPrinciple is the word a starved rig's DAMPERS line begins with.
 const StarvedPrinciple = "starved"
 
@@ -87,6 +91,12 @@ type StarvedRig struct {
 	// Host is the host whose note held the rig, set when the notes are read; the
 	// note's lines do not carry it, its key does.
 	Host string
+	// Ran are the hosts, other than Host, a story of the rig closed within
+	// StarvedRanWindow was routed to, and RanRead whether that was read at all:
+	// without it "no other host" is a guess (mw-gq6.786). Set when the notes are
+	// read, for a rig held by a harness stop; not kept in the note.
+	Ran     []string
+	RanRead bool
 }
 
 // FormatStarved is the note's value, its lines in rig order.
@@ -262,15 +272,23 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 // harnessWayOut is the sentence a rig held by a host's harness stop carries
 // (mw-gq6.785): each ready story of the rig routed to that host, with the one
 // mw path set command that sends it to the first other host that runs the rig,
-// or that no other host does. The hosts that run the rig are those a story of
-// it in hand (ready, claimed or running) is routed to. It re-routes nothing: a
-// story can be on a host for a reason, so the alarm only names the command. A
-// rig held for any other reason, or whose note names no host, has none.
+// or that no other host has run it in the last StarvedRanWindow. The hosts that
+// run the rig are those a story of it in hand (ready, claimed or running) is
+// routed to, and those a story of it closed within the window was (r.Ran). With
+// no host named and the closed stories unread, it makes no claim of "no other
+// host" (mw-gq6.786). It re-routes nothing: a story can be on a host for a
+// reason, so the alarm only names the command. A rig held for any other reason,
+// or whose note names no host, has none.
 func harnessWayOut(r StarvedRig, work WorkInHand) string {
 	if r.Hold != StarvedHolds["harness-hold"] || r.Host == "" {
 		return ""
 	}
 	others := map[string]bool{}
+	for _, host := range r.Ran {
+		if host != r.Host {
+			others[host] = true
+		}
+	}
 	for _, list := range [][]StoryDetail{work.Ready, work.Running, work.OpenClaimed} {
 		for _, d := range list {
 			if host := d.Merged().Host; !d.IsEpic && d.Merged().Rig == r.Rig && host != "" && host != domain.HostAuto && host != r.Host {
@@ -288,7 +306,10 @@ func harnessWayOut(r StarvedRig, work WorkInHand) string {
 		return ""
 	}
 	if len(others) == 0 {
-		return fmt.Sprintf("Way out: no other host runs %s", r.Rig)
+		if !r.RanRead {
+			return fmt.Sprintf("Way out: the hosts that ran %s in the last %s could not be read, so none is named", r.Rig, StarvedRanDays())
+		}
+		return fmt.Sprintf("Way out: no other host has run %s in the last %s", r.Rig, StarvedRanDays())
 	}
 	hosts := slices.Sorted(maps.Keys(others))
 	commands := make([]string, len(routed))
@@ -298,8 +319,52 @@ func harnessWayOut(r StarvedRig, work WorkInHand) string {
 	return fmt.Sprintf("Way out: other hosts that run %s: %s; to route a story there: %s", r.Rig, strings.Join(hosts, ", "), strings.Join(commands, " · "))
 }
 
+// StarvedRanDays is StarvedRanWindow in days, as the alarm states it.
+func StarvedRanDays() string { return fmt.Sprintf("%d days", int(StarvedRanWindow/(24*time.Hour))) }
+
+// closedLister is what reads the stories closed since a time; the beads gateway
+// is one (VerifyBeads.ClosedStories), a tracker without it makes the survey
+// claim nothing of closed work.
+type closedLister interface {
+	ClosedStories(ctx context.Context, since time.Time) ([]ClosedStory, error)
+}
+
+// ranHosts reads the hosts a story closed within StarvedRanWindow of now was
+// routed to, per rig: one bounded list of the closed stories and one read of
+// them, and only when a harness-held rig needs it. ok is false when either read
+// is not to be had.
+func (s DamperSurvey) ranHosts(ctx context.Context, now time.Time) (ran map[string][]string, ok bool) {
+	lister, can := s.Tracker.(closedLister)
+	if !can {
+		return nil, false
+	}
+	closed, err := lister.ClosedStories(ctx, now.Add(-StarvedRanWindow))
+	if err != nil {
+		return nil, false
+	}
+	ids := make([]string, len(closed))
+	for i, c := range closed {
+		ids[i] = c.ID
+	}
+	details, err := s.Tracker.ShowBeads(ctx, ids)
+	if err != nil {
+		return nil, false
+	}
+	seen := map[[2]string]bool{}
+	ran = map[string][]string{}
+	for _, d := range details {
+		rig, host := d.Merged().Rig, d.Merged().Host
+		if d.IsEpic || rig == "" || host == "" || host == domain.HostAuto || seen[[2]string{rig, host}] {
+			continue
+		}
+		seen[[2]string{rig, host}] = true
+		ran[rig] = append(ran[rig], host)
+	}
+	return ran, true
+}
+
 // readStarved reads every host's note of the rigs it holds back whole.
-func (s DamperSurvey) readStarved(ctx context.Context) ([]StarvedRig, error) {
+func (s DamperSurvey) readStarved(ctx context.Context, now time.Time) ([]StarvedRig, error) {
 	if s.Notes == nil {
 		return nil, nil
 	}
@@ -308,11 +373,20 @@ func (s DamperSurvey) readStarved(ctx context.Context) ([]StarvedRig, error) {
 		return nil, fmt.Errorf("reading the hosts' notes of the rigs held back: %w", err)
 	}
 	var rigs []StarvedRig
+	var ran map[string][]string
+	var ranRead, ranTried bool
 	for _, key := range slices.Sorted(maps.Keys(notes)) {
 		if strings.HasPrefix(key, "host.") && strings.HasSuffix(key, ".starved") {
 			host := strings.TrimSuffix(strings.TrimPrefix(key, "host."), ".starved")
 			for _, r := range ParseStarved(notes[key]) {
 				r.Host = host
+				if r.Hold == StarvedHolds["harness-hold"] && s.Tracker != nil {
+					if !ranTried {
+						ran, ranRead = s.ranHosts(ctx, now)
+						ranTried = true
+					}
+					r.Ran, r.RanRead = ran[r.Rig], ranRead
+				}
 				rigs = append(rigs, r)
 			}
 		}
@@ -322,7 +396,7 @@ func (s DamperSurvey) readStarved(ctx context.Context) ([]StarvedRig, error) {
 
 // Starved reads the starved-rig alarms alone, at now: what mw doctor judges.
 func (s DamperSurvey) Starved(ctx context.Context, now time.Time) ([]DamperAlarm, error) {
-	rigs, err := s.readStarved(ctx)
+	rigs, err := s.readStarved(ctx, now)
 	if err != nil || len(rigs) == 0 {
 		return nil, err
 	}
