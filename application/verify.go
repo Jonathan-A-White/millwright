@@ -86,6 +86,9 @@ type ClosedStory struct {
 	// Superseded is true when the bead carries a supersedes link: another
 	// story landed its work, so nothing landed under this one.
 	Superseded bool
+	// Rig and Host are the story's own Path as the list prints it; empty when
+	// the story carries none of its own (it takes its epic's).
+	Rig, Host string
 }
 
 // VerifyBeads is what mw verify match reads and writes in the tracker. The real
