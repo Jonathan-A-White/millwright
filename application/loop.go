@@ -253,7 +253,7 @@ func (b LoopBrief) String() string {
 		out.WriteString("\n" + b.QualitySpeedFuel.modelsText + "\n")
 	}
 
-	out.WriteString("\nCAUSES (refusals by cause class, per rig)\n")
+	out.WriteString("\nCAUSES (refusals by cause class, per rig; mw cause list --since <day> names each story)\n")
 	if len(b.Causes) == 0 {
 		out.WriteString("  no refusals in the window\n")
 	}

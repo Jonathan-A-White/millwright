@@ -536,6 +536,11 @@ cause (the section is left out when there are none); and `mw retry` of a story
 with no cause prints `no cause recorded yet: mw cause ...` and retries anyway.
 See `features/cause.feature`.
 
+`mw cause list [--since 7d|<day>] [--rig <rig>]` names the stories behind the counts of
+`mw report` and `mw loop brief`: one line for each story touched in the window that has a
+cause, `id · rig · class · why · fix bead` (`-` when none), ordered by id. It reads the
+stories only: no session, no tokens.
+
 ## Commenting on a bead with the clock's time
 
 ```sh
