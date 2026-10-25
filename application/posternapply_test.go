@@ -994,3 +994,53 @@ func TestPosternTapsReadsNoAppliedNotesWhenNothingIsNew(t *testing.T) {
 		t.Fatal("expected the applied notes read once there was a record to apply")
 	}
 }
+
+// The Governor's close of an epic whose event has beads held for it names
+// those beads, still open, in the comment on the epic and in the mail; the
+// close of one whose event holds none says nothing of the kind.
+func TestApplyCloseOfAnEpicNamesTheBeadsHeldForItsEvent(t *testing.T) {
+	f := newApplyFixture(t)
+	mustDo(t, f.tracker.SetStatus("mw-e.3", apptest.StatusClosed))
+	mustDo(t, f.tracker.SetStatus("mw-e.4", apptest.StatusClosed))
+	graph := &apptest.FakeBeadGraph{}
+	graph.Add("mw-k.1", "one", "deferred", "task", []string{"held-for-mw-e"})
+	graph.Add("mw-k.2", "two", "deferred", "task", []string{"held-for-mw-e"})
+	graph.Add("mw-k.3", "done", "closed", "task", []string{"held-for-mw-e"})
+	graph.Add("mw-k.4", "other event", "deferred", "task", []string{"held-for-mw-x"})
+	f.action(t, "tx-close", map[string]any{"action": "close", "bead": "mw-e"})
+	inbox := f.inbox()
+	inbox.Graph = graph
+
+	if _, err := inbox.Apply(context.Background()); err != nil {
+		t.Fatalf("applying: %v", err)
+	}
+
+	comments, _ := f.tracker.StoryComments(context.Background(), "mw-e")
+	if len(comments) != 1 || !strings.Contains(comments[0].Text, "Still held for it, to release: mw-k.1, mw-k.2") || strings.Contains(comments[0].Text, "mw-k.3") || strings.Contains(comments[0].Text, "mw-k.4") {
+		t.Fatalf("expected the comment to name mw-k.1 and mw-k.2 only, got %+v", comments)
+	}
+	mail, _ := f.mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if len(mail) != 1 || !strings.Contains(mail[0].Body, "mw-k.1, mw-k.2") {
+		t.Fatalf("expected the mail to name them, got %+v", mail)
+	}
+}
+
+func TestApplyCloseOfAnEpicWithNothingHeldForItLeavesTheCommentAsItWas(t *testing.T) {
+	f := newApplyFixture(t)
+	mustDo(t, f.tracker.SetStatus("mw-e.3", apptest.StatusClosed))
+	mustDo(t, f.tracker.SetStatus("mw-e.4", apptest.StatusClosed))
+	graph := &apptest.FakeBeadGraph{}
+	graph.Add("mw-k.4", "other event", "deferred", "task", []string{"held-for-mw-x"})
+	f.action(t, "tx-close", map[string]any{"action": "close", "bead": "mw-e"})
+	inbox := f.inbox()
+	inbox.Graph = graph
+
+	if _, err := inbox.Apply(context.Background()); err != nil {
+		t.Fatalf("applying: %v", err)
+	}
+
+	comments, _ := f.tracker.StoryComments(context.Background(), "mw-e")
+	if len(comments) != 1 || comments[0].Text != "Closed by the Governor via postern (tx-close)" {
+		t.Fatalf("expected the plain close comment, got %+v", comments)
+	}
+}

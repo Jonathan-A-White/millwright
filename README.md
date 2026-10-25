@@ -493,6 +493,13 @@ lists; `mw release <epic>` leaves an iced child held and names it. Postern's
 `{action:'thaw'}` from the Governor's key does what `mw thaw` does. See
 `application/ice_test.go`.
 
+Work held behind an event wears the label `held-for-<id>`, the id being that of the epic
+or demo whose close ends the event. `mw status` prints a HELD FOR AN EVENT section, one line
+for each such label some unclosed bead carries, with the count and ids of those beads (a label
+whose beads are all closed is left out), so that nothing is forgotten once the event ends. The
+Governor's close of that epic or demo by postern ('close' or 'Looks good') adds "Still held for it,
+to release: <ids>." to the comment and the mail. See `domain/heldfor_test.go`.
+
 An iced bead never blocks a live one. `mw ice` moves the bead behind what waited on it:
 for each live bead X that waited on the iced bead I, X drops I, takes I's open blockers
 and I waits on X, and it prints each move. An X that reaches I through a closed bead

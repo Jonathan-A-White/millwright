@@ -68,6 +68,11 @@ const HeldHandsHeading = "HELD, WITH A HANDS STEP"
 // none.
 const OpenButClaimedHeading = "OPEN BUT CLAIMED"
 
+// HeldForHeading is what heads the section naming the beads still open behind a
+// held-for-<event> label, so that the work an event held is not forgotten once
+// the event ends (mw-gq6.766).
+const HeldForHeading = "HELD FOR AN EVENT"
+
 // HeldHandsReader finds the beads that are held yet keep a hands step not yet
 // run: the view offers the Governor a Run only on a workable bead (workable),
 // so his phone shows none until the bead is open. MayorReader is the one
@@ -614,6 +619,9 @@ type StatusReport struct {
 	WaitingOnMayor []PosternViewNeed
 	// HeldHands are the held beads that keep a hands step, in id order.
 	HeldHands []StoryDetail
+	// HeldFor are the held-for-<event> labels some bead not yet closed carries,
+	// each with those beads, in label order. Empty when no Graph was given.
+	HeldFor []domain.HeldFor
 	// Dampers are the alarms tripped: too much in progress, work left to age,
 	// his review queue too long. Empty when none is or it was not asked.
 	Dampers DampersReport
@@ -1041,6 +1049,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			return report, fmt.Errorf("reading which open beads look finished: %w", err)
 		}
 		report.Finished, report.FinishedKnown = domain.FinishedStillOpen(graph), true
+		report.HeldFor = domain.HeldForLabels(graph)
 	}
 
 	fuel, err := s.fuelToday(ctx)
@@ -1950,6 +1959,14 @@ func (r StatusReport) String() string {
 		clip(&b, fmt.Sprintf("%s (%d)", HeldHandsHeading, len(r.HeldHands)))
 		for _, d := range r.HeldHands {
 			writeStory(&b, d, "no Run until it is open")
+		}
+		b.WriteString("\n")
+	}
+
+	if len(r.HeldFor) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", HeldForHeading, len(r.HeldFor)))
+		for _, held := range r.HeldFor {
+			clip(&b, fmt.Sprintf("  %s · %d open: %s", held.Label, len(held.Beads), strings.Join(held.Beads, " ")))
 		}
 		b.WriteString("\n")
 	}

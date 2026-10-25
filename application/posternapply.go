@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
@@ -576,7 +577,7 @@ func (i PosternInbox) applyLooksGood(ctx context.Context, m PosternInboxMessage)
 		return posternApplied{}, false, nil
 	}
 	reason := fmt.Sprintf("Demo accepted on the Governor's 'Looks good' (txid %s)", m.Txid)
-	comment := fmt.Sprintf("The Governor by postern %s, on the demo: %q (txid %s). %s", sentInFull(m.Ts), strings.TrimSpace(m.Text), m.Txid, reason)
+	comment := fmt.Sprintf("The Governor by postern %s, on the demo: %q (txid %s). %s", sentInFull(m.Ts), strings.TrimSpace(m.Text), m.Txid, reason) + i.heldForEvent(ctx, bead.Story.ID)
 	// The comment first, as applyClose writes it: a close that fails leaves no
 	// bead the Governor's word is not on.
 	if err := i.Tracker.CommentOnStory(ctx, bead.Story.ID, comment); err != nil {
@@ -828,7 +829,7 @@ func (i PosternInbox) applyClose(ctx context.Context, m PosternInboxMessage, bea
 	// The comment first: the epic's own is the record of the close, and a
 	// close that fails part-way leaves no bead the Governor's word is not on.
 	subject := fmt.Sprintf("Closed: %s", bead.Story.ID)
-	result, err := done(subject, reason)
+	result, err := done(subject, reason+i.heldForEvent(ctx, bead.Story.ID))
 	if err != nil {
 		return posternApplied{}, err
 	}
@@ -843,6 +844,26 @@ func (i PosternInbox) applyClose(ctx context.Context, m PosternInboxMessage, bea
 		return posternApplied{}, fmt.Errorf("closing %s for the Governor: %w", bead.Story.ID, err)
 	}
 	return result, nil
+}
+
+// heldForEvent is the sentence that names the beads still open behind the
+// held-for-<bead> label, for the close of the epic or demo that ends the event:
+// a space and the sentence, or "" when none is held for it, no Graph was given
+// or the graph could not be read (the close goes on; the standing view in
+// mw status shows them all the same).
+func (i PosternInbox) heldForEvent(ctx context.Context, bead string) string {
+	if i.Graph == nil {
+		return ""
+	}
+	graph, err := i.Graph.BeadGraph(ctx)
+	if err != nil {
+		return ""
+	}
+	held := domain.HeldForEvent(graph, bead)
+	if len(held) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" Still held for it, to release: %s.", strings.Join(held, ", "))
 }
 
 // heldUnder is the held (deferred) beads under epic, deepest first, or why
