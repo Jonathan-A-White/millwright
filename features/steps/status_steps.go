@@ -39,6 +39,9 @@ type statusContext struct {
 
 	tracker *apptest.FakeTracker
 	runner  *apptest.FakeRunner
+	// readGraph is whether the report is also given the tracker's whole bead
+	// graph, which adds the sections read from it.
+	readGraph bool
 	// epicRules is what each rig requires of its epics.
 	epicRules *apptest.FakeEpicRules
 	// log is the event log the follower's jobs wrote to, nil until a
@@ -169,6 +172,9 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the status story "([^"]*)" keeps the hands step "([^"]*)"$`, c.theStatusStoryKeepsAHandsStep)
 	ctx.Then(`^the report lists "([^"]*)" under HELD, WITH A HANDS STEP$`, c.theReportListsUnderHeldWithAHandsStep)
 	ctx.Then(`^the report has no heading for held beads with a hands step$`, c.theReportHasNoHeadingForHeldHands)
+	ctx.Given(`^mw status is also given the tracker's whole bead graph$`, func() error { c.readGraph = true; return nil })
+	ctx.Then(`^the report lists "([^"]*)" held for an event with (\d+) open beads?$`, c.theReportListsHeldForWithOpenBeads)
+	ctx.Then(`^the report does not list "([^"]*)" held for an event$`, c.theReportDoesNotListHeldFor)
 	ctx.Given(`^the status story "([^"]*)" is at priority (\d)$`, c.theStatusStoryIsAtPriority)
 	ctx.Given(`^the status story "([^"]*)" is finished$`, c.theStatusStoryIsFinished)
 	ctx.Given(`^the status story "([^"]*)" is claimed with its session running$`, c.theStatusStoryIsClaimedAndRunning)
@@ -511,6 +517,27 @@ func (c *statusContext) theReportHasNoHeadingForHeldHands() error {
 	return nil
 }
 
+func (c *statusContext) theReportListsHeldForWithOpenBeads(label string, n int) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	want := fmt.Sprintf("%s · %d open:", label, n)
+	if !strings.Contains(headedBy(c.report.String(), application.HeldForHeading), want) {
+		return fmt.Errorf("expected %q under %q, got:\n%s", want, application.HeldForHeading, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportDoesNotListHeldFor(label string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if strings.Contains(headedBy(c.report.String(), application.HeldForHeading), label) {
+		return fmt.Errorf("expected no %q under %q, got:\n%s", label, application.HeldForHeading, c.report.String())
+	}
+	return nil
+}
+
 func (c *statusContext) theStatusStoryIsFinished(id string) error {
 	return c.tracker.CloseStory(context.Background(), id, "worked by the test")
 }
@@ -693,6 +720,9 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 		CapWhy:         c.capWhy,
 		Causes:         c.tracker,
 		Ideas:          c.ideas,
+	}
+	if c.readGraph {
+		status.Graph = c.tracker
 	}
 	if c.network != nil {
 		status.Network, status.HeavyNet = c.network, c.heavy

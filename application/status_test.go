@@ -1162,3 +1162,50 @@ func TestNewestSearchOnlyCountsTheCurrentFactsNewerThanTheNewestOneInTheRender(t
 		}
 	}
 }
+
+func TestStatusListsEachHeldForLabelWithItsCountOfOpenBeads(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	graph := &apptest.FakeBeadGraph{}
+	graph.Add("k-1", "one", "deferred", "task", []string{"held-for-jonah"})
+	graph.Add("k-2", "two", "deferred", "task", []string{"held-for-jonah"})
+	graph.Add("k-3", "three", "closed", "task", []string{"held-for-jonah"})
+	graph.Add("m-1", "four", "deferred", "task", []string{"held-for-kestrel"})
+	graph.Add("z-1", "five", "closed", "task", []string{"held-for-ended"})
+
+	report, err := application.Status{
+		Tracker: tracker, Notes: tracker, Graph: graph, Host: "vps", Seat: "builder",
+		Now: func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	printed := report.String()
+	for _, want := range []string{
+		application.HeldForHeading + " (2)",
+		"held-for-jonah · 2 open: k-1 k-2",
+		"held-for-kestrel · 1 open: m-1",
+	} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("the report lacks %q:\n%s", want, printed)
+		}
+	}
+	if strings.Contains(printed, "held-for-ended") {
+		t.Errorf("the report lists a label with no open bead:\n%s", printed)
+	}
+}
+
+func TestStatusHasNoHeldForSectionWhenNothingIsHeldForAnEvent(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	graph := &apptest.FakeBeadGraph{}
+	graph.Add("z-1", "five", "closed", "task", []string{"held-for-ended"})
+	report, err := application.Status{
+		Tracker: tracker, Notes: tracker, Graph: graph, Host: "vps", Seat: "builder",
+		Now: func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	if strings.Contains(report.String(), application.HeldForHeading) {
+		t.Fatalf("the report has a held-for section though no bead is held for an event:\n%s", report.String())
+	}
+}

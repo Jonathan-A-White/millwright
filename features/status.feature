@@ -583,6 +583,23 @@ Feature: mw status
     And the report lists "mw-gq6.50" under HELD, WITH A HANDS STEP
     And the report has no heading for needs waiting on the Mayor
 
+  Scenario: Beads held behind an event are counted under HELD FOR AN EVENT by their label
+    Given mw status is also given the tracker's whole bead graph
+    And a status story "mw-gq6.60" filed under it
+    And a status story "mw-gq6.61" filed under it
+    And a status story "mw-gq6.62" filed under it
+    And a status story "mw-gq6.63" filed under it
+    And the status story "mw-gq6.60" is labelled "held-for-jonah"
+    And the status story "mw-gq6.61" is labelled "held-for-jonah"
+    And the status story "mw-gq6.62" is labelled "held-for-ended"
+    And the status story "mw-gq6.60" is held
+    And the status story "mw-gq6.61" is held
+    And the status story "mw-gq6.62" is finished
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "held-for-jonah" held for an event with 2 open beads
+    And the report does not list "held-for-ended" held for an event
+
   Scenario: An open bead with a hands step is not listed under HELD, WITH A HANDS STEP
     Given a status story "mw-gq6.51" filed under it
     And the status story "mw-gq6.51" is labelled "hitl"
