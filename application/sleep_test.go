@@ -787,3 +787,10 @@ func TestADryRunPrintsTheEvidenceAndCandidatesSizesAmongTheParts(t *testing.T) {
 		t.Error("a dry run wrote a comment")
 	}
 }
+
+// ReadImprovements is plans/improvements/ledger.jsonl as PutPlanFile left it.
+func (v *sleepVault) ReadImprovements(context.Context) (string, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.files[application.SleepLedgerDir+"/"+application.SleepLedgerFile], nil
+}

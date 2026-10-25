@@ -55,7 +55,8 @@ func newSleepPassCmd() *cobra.Command {
 			"questions.md), maps (maps.md) and improvements (improvements.md), which mw writes with a\n" +
 			"summary.md and the dump (triage.jsonl, tomorrow's diff starts from it) into\n" +
 			"plans/sleep-<date>/ in the vault and commits, with the run log runs/sleep/<date>.json that\n" +
-			"mw fuel counts under the kind sleep. An answer may add stale.md: a line for each item of his Needs\n" +
+			"mw fuel counts under the kind sleep. It also appends a line to plans/improvements/ledger.jsonl for\n" +
+			"each idea in the recommendations, so mw loop rank sees them. An answer may add stale.md: a line for each item of his Needs\n" +
 			"you judged stale, with its evidence and an action (clear-card, retire-step, close-superseded,\n" +
 			"tick-item or ask-him); the Mayor clears them at the next sitting. It mails the Mayor the summary,\n" +
 			"under 150 words, with how many are stale. It files no bead and clears nothing.\n\n" +
@@ -94,7 +95,9 @@ func newSleepLedgerCmd() *cobra.Command {
 		Short: "Print the improvements ledger, a line an improvement with its verdict",
 		Long: "ledger prints plans/improvements/ledger.jsonl in the vault: one line for each improvement the\n" +
 			"Mayor approved, with when it was filed and landed, its measure, its result and its verdict\n" +
-			"(KEEP or ROLLBACK, PENDING until it is measured) and its lesson. It changes nothing.",
+			"(KEEP or ROLLBACK, PENDING until it is measured) and its lesson. The sleep pass appends the lines:\n" +
+			"one for each idea in its recommendations.json, filed that day with no story, never twice for the\n" +
+			"same title and day. This command itself changes nothing.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -171,7 +174,7 @@ func newSleepPass(dir, host string, out io.Writer) (application.SleepPass, error
 			NeedsYou: needsYouSurvey(dir, gateway, files, rigs).Read,
 			Beads:    gateway, InboxDir: inbox,
 		},
-		Vault: files, Grinder: claude.NewGrinder(), Mailbox: gateway,
+		Vault: files, Ledger: files, Grinder: claude.NewGrinder(), Mailbox: gateway,
 		Beads:  gateway,
 		Verify: application.VerifySettings{Model: verify.Model, Effort: verify.Effort, Confidence: verify.Confidence},
 		Settings: application.SleepSettings{
