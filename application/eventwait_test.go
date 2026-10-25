@@ -251,6 +251,44 @@ func TestHandoverWaitBegunAfterAHandoverToItsWindowHoldsTheSeatAtOnce(t *testing
 	}
 }
 
+// The look-back reads the acting file when it is given: the seat is this
+// window's only when the file names it, and a handover older than the event
+// the file stands at is stale (mw-gq6.767).
+func TestHandoverWaitLookBackHoldsTheSeatOnlyWhenTheActingFileNamesItsWindowAtThatHandover(t *testing.T) {
+	cases := []struct {
+		name, acting string
+		holds        bool
+	}{
+		{"names this window at the handover's event", "Mayor mayor-w (handed over at event 2), since 2026-10-25T02:40:00Z\n", true},
+		{"names another window (the predecessor still acts)", "Mayor after handoff 592 (tmux window 0 'mayor-592', window id @3, desktop), since 2026-10-25T02:40:00Z\n", false},
+		{"names this window at a newer event", "Mayor mayor-w (handed over at event 9), since 2026-10-25T03:40:00Z\n", false},
+		{"names a longer window that begins with this one's", "Mayor mayor-w2 (handed over at event 2), since 2026-10-25T02:40:00Z\n", false},
+		{"no acting file", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var out bytes.Buffer
+			acting := c.acting
+			got, err := application.EventWait{
+				Log:          logWith(t, jobEvent, mailEvent, handoverEvent("mayor", "mayor-w", 2), jobEvent),
+				Subscription: application.Subscription{Seat: "mayor", Kinds: []string{events.KindHandover}},
+				Self:         "mayor-w",
+				Acting:       &acting,
+				Limit:        20 * time.Millisecond,
+				Every:        time.Millisecond,
+				Out:          &out,
+			}.Run(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			held := strings.Contains(out.String(), "You hold the mayor seat from event 2")
+			if held != c.holds || (c.holds && len(got) != 1) || (!c.holds && len(got) != 0) {
+				t.Fatalf("got %+v, printed %q; want holds=%v", got, out.String(), c.holds)
+			}
+		})
+	}
+}
+
 func TestHandoverWaitBegunAfterAHandoverToAnotherWindowOrAwayFromItsWindowWaits(t *testing.T) {
 	cases := map[string][]events.Event{
 		"to another window":  {handoverEvent("mayor", "mayor-other", 1)},

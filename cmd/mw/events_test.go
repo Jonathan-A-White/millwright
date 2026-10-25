@@ -236,3 +236,35 @@ func TestEventsTrimMovesOldEventsToTheArchiveAndTailReadsThemBack(t *testing.T) 
 		t.Fatalf("tail --since 1 after a trim printed %q, want seqs 2 to 6", out)
 	}
 }
+
+// A handover wait with no --since reads the seat's acting file: a handover to
+// this window that the file does not stand at (the predecessor still acts)
+// is stale and does not end the wait (mw-gq6.767).
+func TestEventsWaitHandoverWithNoSinceIgnoresAStaleHandoverToItsWindow(t *testing.T) {
+	eventsHome(t)
+	vaultDir := t.TempDir()
+	mwConfig(t, "vault = \""+vaultDir+"\"\nhost = \"laptop\"\n")
+	if out, err := runEvents(t, "emit", "--kind", "handover", "--detail", "mayor to mayor-w at 0"); err != nil {
+		t.Fatalf("emit: %v\n%s", err, out)
+	}
+	acting := filepath.Join(vaultDir, ".mayor-acting")
+	wait := func() string {
+		out, err := runEvents(t, "wait", "--for", "mayor", "--kinds", "handover", "--as", "mayor-w", "--limit", "300ms")
+		if err != nil {
+			t.Fatalf("wait: %v\n%s", err, out)
+		}
+		return out
+	}
+	if err := os.WriteFile(acting, []byte("Mayor after handoff 592 (tmux window 0 'mayor-592', window id @3, desktop), since 2026-10-25T02:40:00Z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := wait(); strings.Contains(out, "You hold") || !strings.Contains(out, "No events for mayor") {
+		t.Fatalf("the predecessor still acts, yet the wait printed %q", out)
+	}
+	if err := os.WriteFile(acting, []byte("Mayor mayor-w (handed over at event 0), since 2026-10-25T02:40:00Z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := wait(); !strings.Contains(out, "You hold the mayor seat from event 0") {
+		t.Fatalf("the file names this window at the handover, yet the wait printed %q", out)
+	}
+}

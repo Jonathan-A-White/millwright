@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain/events"
@@ -35,7 +37,9 @@ const DefaultEventWaitEvery = time.Second
 // seat from any handover appended after it began, whatever its N. Such a wait
 // with the handover among its kinds also looks back first: when the seat's
 // newest handover is to its own window (Self), it holds the seat at once,
-// the handover having landed before the wait was armed (mw-gq6.668).
+// the handover having landed before the wait was armed (mw-gq6.668), unless
+// Acting is set and the seat's acting file does not name Self at that
+// handover's event: a stale handover (mw-gq6.767).
 type EventWait struct {
 	Log EventLog
 	// Subscription is the seat and the kinds that end the wait.
@@ -50,6 +54,13 @@ type EventWait struct {
 	// start at (mw-gq6.512). The loop calls it never. Nil, or a box that cannot
 	// be read, leaves the wait as it was.
 	Box Mailbox
+	// Acting, when set, is the text of the seat's acting file ("" for none),
+	// which the look-back before arming consults: the seat is this window's only
+	// when the file names it and stands at the handover's event or earlier, so a
+	// handover to this window that the seat has since left (or never took, the
+	// old session still acting) is stale and the wait waits (mw-gq6.767). Nil
+	// leaves the look-back to the log alone.
+	Acting *string
 	// Self is the name of the window the wait runs in, empty when it is not
 	// known. It tells a handover of the seat to this window (the wait of the
 	// successor, woken to take the seat) from a handover to another (the old
@@ -199,7 +210,28 @@ func (w EventWait) heldBeforeArming(ctx context.Context) ([]events.Event, bool, 
 	if newest.Seq == 0 || held.Successor != w.Self {
 		return nil, false, nil
 	}
+	if w.Acting != nil && !actingHolds(*w.Acting, w.Self, held.At) {
+		return nil, false, nil
+	}
 	return w.takeSeat(newest, held, nil), true, nil
+}
+
+var actingEventRe = regexp.MustCompile(`handed over at event (\d+)`)
+
+// actingHolds reports whether an acting file's text puts the seat in the window
+// self at a handover marking at: it names the window as a whole word, and when
+// it says "handed over at event N", N is not past at.
+func actingHolds(text, self string, at uint64) bool {
+	named := regexp.MustCompile(`(^|[\s'"(])` + regexp.QuoteMeta(self) + `([\s'",)]|$)`)
+	if !named.MatchString(text) {
+		return false
+	}
+	if m := actingEventRe.FindStringSubmatch(text); m != nil {
+		if n, err := strconv.ParseUint(m[1], 10, 64); err == nil && n > at {
+			return false
+		}
+	}
+	return true
 }
 
 // waitsFor reports whether kind is among the kinds the wait ends on.

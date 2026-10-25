@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -460,7 +461,9 @@ func newEventsWaitCmd() *cobra.Command {
 			"A wait begun --since N or later ignores a handover that marked N. A wait with handover among its kinds\n" +
 			"and no --since looks back first: when the seat's newest handover in the log is to its own window (--as),\n" +
 			"it prints 'You hold the seat from event N' and exits 0 at once, the handover having landed before it\n" +
-			"was armed; a newest handover to another window, or none, leaves it to wait as above.",
+			"was armed, if the seat's acting file names that window at the handover's event (a handover the file\n" +
+			"does not stand at, the old session still acting, is stale: mw-gq6.767); a newest handover to another\n" +
+			"window, or none, leaves it to wait as above.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if seat == "" {
@@ -504,6 +507,12 @@ func newEventsWaitCmd() *cobra.Command {
 			}
 			if cmd.Flags().Changed("since") {
 				wait.Since = &since
+			} else if dir, err := config.Vault(); err == nil {
+				// The look-back before arming reads the acting file: a handover to this window
+				// that the file does not stand at is stale. An unreadable file reads as none.
+				text, _ := os.ReadFile(filepath.Join(dir, application.ActingFileName(seat)))
+				acting := string(text)
+				wait.Acting = &acting
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, os.Interrupt)
 			defer stop()
