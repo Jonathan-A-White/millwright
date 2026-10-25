@@ -61,12 +61,20 @@ hand-back.
 
 A session the harness stopped for something that is not the work's is held by
 its close-out under its own reason (`usage-limit`, `rate-limit`, `overloaded`,
-`server-error`), the claim kept. Until the time the stop names (the reset a usage
+`server-error`, `api-unreachable`, `login-expired`), the claim kept. Until the time the stop names (the reset a usage
 limit names, or a quarter hour after the session ended for the rest) the host
 claims nothing new; once it has come, a dispatch gives the stopped story back
 itself, its stopped attempt not counted, and it is started again. `mw retry` of
 such a story does not count the attempt either, and keeps the hold. The hold is
 kept in the host's note `host.<host>.harness_hold`.
+
+An expired Claude login (`Failed to authenticate: OAuth session expired and could
+not be refreshed`) holds the host for `LoginExpiredWait` (12 hours): the close-out
+writes the hold note itself and mails the Mayor once per host while that note
+stands, not per story, and `mw status` names the host as held for the login with
+the one command that clears it (`bd kv set host.<host>.harness_hold ""`) once the
+Governor has logged in again. A dispatch that finds the note cleared gives the
+stopped story back at once, its attempt not counted (mw-gq6.781).
 
 A usage limit can stop the harness before it writes its JSON: the close-out
 then reads the limit from what the harness printed in its place, or from the

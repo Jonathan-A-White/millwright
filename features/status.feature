@@ -364,6 +364,11 @@ Feature: mw status
     Then reading status succeeds
     And the report lists "mw-gq6.17" as stranded on the host "laptop"
 
+  Scenario: A host held for an expired Claude login says so and how to clear it
+    Given the host "vps" is held for an expired Claude login
+    When mw status reads the host
+    Then the report says the host "vps" is held for the Claude login and names the command that clears it
+
   Scenario: The other hosts section fits a phone screen too
     Given a status story "mw-gq6.18" titled "A story whose title runs on and on and on and on and on and on and on and on, well past a phone screen" pathed to the host "laptop"
     And the host "laptop" last synced 28 hours ago

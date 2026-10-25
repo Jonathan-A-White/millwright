@@ -184,6 +184,8 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the claim on "([^"]*)" was last renewed (\d+) hours? ago$`, c.theClaimWasLastRenewedHoursAgo)
 	ctx.Given(`^the host "([^"]*)" has never synced$`, c.theHostHasNeverSynced)
 	ctx.Given(`^the host "([^"]*)" left a last sync note that is not a time$`, c.theHostLeftANoteThatIsNotATime)
+	ctx.Given(`^the host "([^"]*)" is held for an expired Claude login$`, c.theHostIsHeldForAnExpiredLogin)
+	ctx.Then(`^the report says the host "([^"]*)" is held for the Claude login and names the command that clears it$`, c.theReportSaysTheHostIsHeldForTheLogin)
 	ctx.Given(`^the configuration says a host is asleep after (\d+) hours$`, c.theConfigurationSaysAHostIsAsleepAfter)
 	ctx.Given(`^the builder's memory of the rig "([^"]*)" is (\d+) bytes$`, c.theBuildersMemoryOfTheRigIs)
 	ctx.Given(`^the builder's archive of the rig "([^"]*)" is (\d+) bytes$`, c.theBuildersArchiveOfTheRigIs)
@@ -349,6 +351,26 @@ func (c *statusContext) theHostHasNeverSynced(host string) error {
 
 func (c *statusContext) theHostLeftANoteThatIsNotATime(host string) error {
 	return c.tracker.SetNote(context.Background(), application.LastSyncKey(host), "a while back")
+}
+
+// theHostIsHeldForAnExpiredLogin is the hold mw next leaves in the host's note
+// when a session fails to authenticate (mw-gq6.781).
+func (c *statusContext) theHostIsHeldForAnExpiredLogin(host string) error {
+	hold := c.now.Add(time.Hour).UTC().Format(time.RFC3339) + " " + string(application.ReasonLoginExpired) +
+		" Failed to authenticate: OAuth session expired and could not be refreshed"
+	return c.tracker.SetNote(context.Background(), application.HarnessHoldKey(host), hold)
+}
+
+func (c *statusContext) theReportSaysTheHostIsHeldForTheLogin(host string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	for _, want := range []string{"Claude login expired on " + host, application.LoginHoldClearCommand(host)} {
+		if !strings.Contains(c.report.String(), want) {
+			return fmt.Errorf("expected the printed report to say %q, got:\n%s", want, c.report.String())
+		}
+	}
+	return nil
 }
 
 // theConfigurationSaysAHostIsAsleepAfter pins the threshold in the environment
