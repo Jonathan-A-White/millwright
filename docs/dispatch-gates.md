@@ -48,6 +48,17 @@ BUGS WITHOUT A SWEEP, and nothing when there are none. `mw file` refuses a plan
 with such a bug in it, and `mw tester file` such a bug finding, with the same
 words, before anything is filed (mw-gq6.447).
 
+## The bug recheck
+
+Before a bug is claimed, a dispatch with a free slot re-runs the check the bug
+names (a suite spec, a `Check:` line, a `mw grist eval ... --example` line, a spec
+in the title) on its rig's main, and closes the bug with no session when it
+passes. It does not recheck a bug about a flake: one whose title or description
+says flake, flakes, flaked, flaking or flaky, whose title or description or
+acceptance asks `N of M` or `in a row`, or a flaky file's bug (` is flaky on
+main`). One pass proves nothing about those, and a session takes them instead
+(mw-gq6.784).
+
 ## The handed-back gate
 
 A story the Builder handed back (its newest hand-back comment opens

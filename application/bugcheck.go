@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -46,7 +47,8 @@ func (c BugCheck) String() string {
 }
 
 // bugCheck is the check a bug names, and whether dispatch re-runs the story at
-// all: a story that is not a bug, or a flaky file's bug, is never re-run, and
+// all: a story that is not a bug, or a flaky file's or a flaky example's bug, is
+// never re-run, and
 // says nothing of it. A bug that names no check is asked about, and found is
 // false. The order is the suite spec field, a line beginning "Check:", a line
 // running mw grist eval with --example, a test file in the title.
@@ -59,6 +61,9 @@ func bugCheck(detail StoryDetail, files string) (check BugCheck, found, asked bo
 		return BugCheck{}, false, false
 	}
 	if flaky := testFileName.FindString(title); flaky != "" && strings.Contains(title, flaky+flakyOnMain) {
+		return BugCheck{}, false, false
+	}
+	if flakeBug(detail) {
 		return BugCheck{}, false, false
 	}
 	for _, text := range []string{detail.Description, detail.Acceptance} {
@@ -87,6 +92,23 @@ func bugCheck(detail StoryDetail, files string) (check BugCheck, found, asked bo
 		return BugCheck{Source: CheckFromTitle, Spec: spec}, true, true
 	}
 	return BugCheck{}, false, true
+}
+
+// flakeWords are the words that say a bug is about a flake; manyRuns are the ways
+// an acceptance asks for more than one run ("3 of 3", "five in a row").
+var (
+	flakeWords = regexp.MustCompile(`(?i)\bflak(?:e|es|ed|ing|y)\b`)
+	manyRuns   = regexp.MustCompile(`(?i)\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten) of \d+\b|\bin a row\b`)
+)
+
+// flakeBug says a bug is about a flake, or asks for more than one passing run:
+// one pass on main does not fix it, so the recheck leaves it to a session
+// (mw-gq6.784). The same rule as a flaky file's bug, whose title says so.
+func flakeBug(detail StoryDetail) bool {
+	if flakeWords.MatchString(detail.Story.Title) || flakeWords.MatchString(detail.Description) {
+		return true
+	}
+	return manyRuns.MatchString(detail.Story.Title) || manyRuns.MatchString(detail.Description) || manyRuns.MatchString(detail.Acceptance)
 }
 
 // gristEvalCheck reads the first `mw grist eval <app> <kind> --example <name>`

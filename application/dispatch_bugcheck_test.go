@@ -329,3 +329,41 @@ func TestAGristExampleRecheckSendsToMainOnAHostWithTheKeyAndNothingWithout(t *te
 		t.Errorf("an example that does not exist is a check that could not be run")
 	}
 }
+
+// One pass proves nothing about a flake: a bug that says it flakes, or whose
+// acceptance asks for more than one run, is dispatched and not closed by the one
+// eval that passes (mw-gq6.784).
+func TestADispatchDoesNotCloseAFlakeBugOnOnePassingEval(t *testing.T) {
+	line := "Check: mw grist eval lampas verse-ask --example bridge-quite-a-bit\n"
+	for name, bug := range map[string]struct{ title, description, acceptance string }{
+		"flakes in the title":        {"[bug] lampas: verse-ask bridge-quite-a-bit flakes in a smoke", line, ""},
+		"flaky in the description":   {"[bug] lampas: verse-ask bridge-quite-a-bit", "The example is flaky.\n" + line, ""},
+		"N of M in the acceptance":   {"[bug] lampas: verse-ask bridge-quite-a-bit failed once", line, "1. The example passes 3 of 3 runs."},
+		"in a row in the acceptance": {"[bug] lampas: verse-ask bridge-quite-a-bit failed once", line, "1. Passes five in a row."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dispatch, tracker, _, _, _ := aFactory(t)
+			tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: bug.title, Overrides: domain.Path{Files: "grinds/verse-ask.json"}})
+			tracker.SetDescription("mw-gq6.1", bug.description)
+			if bug.acceptance != "" {
+				tracker.SetAcceptance("mw-gq6.1", bug.acceptance)
+			}
+			if err := tracker.SetLabels("mw-gq6.1", application.LabelBug); err != nil {
+				t.Fatal(err)
+			}
+			examples := &stubExamples{answer: application.SpecRecheck{Sha: "c0ffee1234567", Passed: true}}
+			dispatch.Rechecks, dispatch.ExampleRechecks = &stubRechecks{answer: application.SpecRecheck{Passed: true}}, examples
+
+			report, err := dispatch.Run(context.Background())
+			if err != nil {
+				t.Fatalf("dispatching: %v", err)
+			}
+			if len(examples.asked) != 0 || tracker.CloseReason("mw-gq6.1") != "" {
+				t.Errorf("a flake bug was re-run (%v) or closed (%q)", examples.asked, tracker.CloseReason("mw-gq6.1"))
+			}
+			if ids := startedIDs(report); len(ids) != 1 {
+				t.Errorf("started %v, want the bug dispatched", ids)
+			}
+		})
+	}
+}
