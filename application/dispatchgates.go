@@ -1,6 +1,11 @@
 package application
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+
+	"github.com/Jonathan-A-White/millwright/domain"
+)
 
 // DispatchGate is one reason mw dispatch leaves a ready story unclaimed. Name is
 // the word the gate's own `// gate: <name>` comment in Dispatch.run carries.
@@ -27,7 +32,7 @@ var DispatchGates = []DispatchGate{
 	{"rig-not-checked-out", "the rig is not under [rigs] in the config file"},
 	{"smoke-hold", "the rig's last grist smoke failed and the story does not name a failing example in its smoke_examples, title or description"},
 	{"metered-network", "the rig installs dependencies and the network is metered"},
-	{"no-grist-key", "the story's acceptance or description runs mw grist eval or mw grist smoke, or its path carries smoke_examples, and the host has no readable grist test key"},
+	{"no-grist-key", "the story's acceptance or description runs mw grist eval or mw grist smoke, or its path carries smoke_examples, or its files key names a path under grinds/, and the host has no readable grist test key"},
 	{"formula-not-installed", "the path's formula is not installed in the vault"},
 	{"no-sweep", "a bug filed after the sweep rule has no line beginning 'Sweep:' in its acceptance"},
 	{"tester-no-landed-story", "it is a Tester story whose description has no 'Landed story: <id>' line, so its session could not file a finding"},
@@ -43,8 +48,20 @@ var DispatchGates = []DispatchGate{
 var gristCommand = regexp.MustCompile(`\bmw grist (eval|smoke)\b`)
 
 // needsGristTestKey says a story's checks need the grist test key: its
-// acceptance or description runs mw grist eval or mw grist smoke, or it carries
-// a smoke_examples key (mw-gq6.741).
+// acceptance or description runs mw grist eval or mw grist smoke, it carries a
+// smoke_examples key (mw-gq6.741), or its files key names a path or glob under
+// grinds/, where a changed example must be proved live (mw-gq6.779).
 func needsGristTestKey(detail StoryDetail) bool {
-	return len(detail.SmokeExamples) > 0 || gristCommand.MatchString(detail.Acceptance) || gristCommand.MatchString(detail.Description)
+	return len(detail.SmokeExamples) > 0 || gristCommand.MatchString(detail.Acceptance) || gristCommand.MatchString(detail.Description) ||
+		filesKeyNamesGrinds(detail.Merged().Files)
+}
+
+// filesKeyNamesGrinds says a files key names grinds/ itself or anything under it.
+func filesKeyNamesGrinds(files string) bool {
+	for _, name := range domain.FileList(files) {
+		if name == GristSmokeDir || strings.HasPrefix(name, GristSmokeDir+"/") {
+			return true
+		}
+	}
+	return false
 }

@@ -1060,10 +1060,11 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// A story whose checks run mw grist eval or mw grist smoke cannot be
 		// checked on a host without the factory's grist test key: it stays open,
 		// unclaimed, for a host that has one, whether it names this host or auto
-		// (mw-gq6.741).
+		// (mw-gq6.741). A files key naming grinds/ counts: the close-out demands a
+		// live line for every grind example the branch changes (mw-gq6.779).
 		if d.HasGristTestKey != nil && needsGristTestKey(detail) && !d.HasGristTestKey() {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "no-grist-key", Why: fmt.Sprintf(
-				"its checks run mw grist eval or mw grist smoke and %s has no grist test key (grist_test_key_file in the config file): it waits for a host that has one", d.Host)})
+				"its checks run mw grist eval or mw grist smoke, or its files key names grinds/, and %s has no grist test key (grist_test_key_file in the config file): it waits for a host that has one", d.Host)})
 			continue
 		}
 
