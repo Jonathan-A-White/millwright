@@ -10,6 +10,7 @@ The application/ files of each use case in [docs/codemap.md](codemap.md), which 
 | Check*, Status, CloudCheck, CloudMake, Brief | application/check.go, application/checkparts.go, application/status.go, application/cloud.go, application/cloudmake.go, application/brief.go |
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | application/sweep.go, application/tidy.go, application/nudge.go, application/mail.go, application/home.go, application/homemove.go |
 | Suite, SuiteFiler, NightlySuite, NightlyTiming (TimingFiler), ContributeBack | application/suite{file,status}.go, application/timingnightly.go, application/contributeback.go |
+| Pre-dispatch recheck of a bug's own check (BugCheck: suite spec, `Check:` line, `mw grist eval ... --example` line, spec in the title; ExampleRechecker, GristExampleRecheck, SpecRechecker) | application/bugcheck.go finds it and sends examples (no key: ErrNoGristKey), application/dispatch.go recheckBug runs or closes, application/suite.go Suite.Recheck runs a spec, cmd/mw/grist.go hostExampleRecheck wires it |
 | Config* | application/configset.go |
 | IdeasOnly* | application/ideasonly.go, application/ideasonlyrelease.go |
 | Seat* | application/seat{context,up,reap,handover}.go, application/seattake.go |
