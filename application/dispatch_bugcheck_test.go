@@ -1,0 +1,331 @@
+package application_test
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
+)
+
+const (
+	teachSpec    = "tests/e2e/teach.spec.ts"
+	settingsSpec = "tests/e2e/settings.spec.ts"
+)
+
+// A bug names its check in one of four ways. Each one that passes on main closes
+// the bug with no session; each one that fails dispatches it, saying what it ran.
+func TestADispatchRechecksABugOnMainWhicheverWayItNamesItsCheck(t *testing.T) {
+	for name, bug := range map[string]struct {
+		title, description, files string
+		labels                    []string
+		wantSpec                  string
+	}{
+		"a suite spec": {
+			title: "[bug] lampas main: " + teachSpec + " fails on main", files: teachSpec,
+			labels: []string{application.LabelBug, application.LabelSuite}, wantSpec: teachSpec,
+		},
+		"a Check line": {
+			title:       "[bug] lampas: the Words button is found twice",
+			description: "It fails since mw-5r3p30.624.\n\nCheck: npx playwright test " + teachSpec + " --retries=0\n",
+			files:       "src/Words.tsx", labels: []string{application.LabelBug}, wantSpec: teachSpec,
+		},
+		"a spec path in the title": {
+			title: "[bug] lampas main: " + settingsSpec + " 'Quiz goal at phone width' fails in the nightly suite",
+			files: settingsSpec + ",src/settings/controls/quizGoal.tsx", labels: []string{application.LabelBug}, wantSpec: settingsSpec,
+		},
+		"a title that starts [bug] with no label": {
+			title: "[bug] lampas main: " + settingsSpec + " fails", files: "src/a.ts", wantSpec: settingsSpec,
+		},
+	} {
+		t.Run(name+" passes", func(t *testing.T) {
+			dispatch, tracker, worktrees, runner, _ := aFactory(t)
+			tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: bug.title, Overrides: domain.Path{Files: bug.files}})
+			tracker.SetDescription("mw-gq6.1", bug.description)
+			if err := tracker.SetLabels("mw-gq6.1", bug.labels...); err != nil {
+				t.Fatal(err)
+			}
+			recheck := &stubRechecks{answer: application.SpecRecheck{Spec: bug.wantSpec, Sha: "9f3c2ab41d0e", Passed: true, Tests: 2, Tail: "  2 passed (3s)\n"}}
+			dispatch.Rechecks = recheck
+
+			report, err := dispatch.Run(context.Background())
+			if err != nil {
+				t.Fatalf("dispatching: %v", err)
+			}
+			if len(recheck.asked) != 1 || recheck.asked[0] != "millwright "+bug.wantSpec {
+				t.Fatalf("the re-run was asked for %v, want %s", recheck.asked, bug.wantSpec)
+			}
+			want := "already fixed on main at 9f3c2ab41: " + bug.wantSpec + " passes (2 tests)"
+			if got := tracker.CloseReason("mw-gq6.1"); got != want {
+				t.Errorf("close reason:\n got %q\nwant %q", got, want)
+			}
+			if said := strings.Join(tracker.Comments("mw-gq6.1"), "\n"); !strings.Contains(said, "2 passed (3s)") {
+				t.Errorf("the comment should carry the run's output, got %q", said)
+			}
+			if len(report.Started) != 0 || len(worktrees.added) != 0 || len(runner.Started()) != 0 {
+				t.Errorf("nothing should be dispatched: %+v", report.Started)
+			}
+		})
+		t.Run(name+" fails", func(t *testing.T) {
+			dispatch, tracker, _, _, _ := aFactory(t)
+			tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: bug.title, Overrides: domain.Path{Files: bug.files}})
+			tracker.SetDescription("mw-gq6.1", bug.description)
+			if err := tracker.SetLabels("mw-gq6.1", bug.labels...); err != nil {
+				t.Fatal(err)
+			}
+			dispatch.Rechecks = &stubRechecks{answer: application.SpecRecheck{Spec: bug.wantSpec, Sha: "9f3c2ab41d0e", Passed: false}}
+
+			report, err := dispatch.Run(context.Background())
+			if err != nil {
+				t.Fatalf("dispatching: %v", err)
+			}
+			if ids := startedIDs(report); len(ids) != 1 {
+				t.Fatalf("started %v, want the bug dispatched", ids)
+			}
+			if tracker.CloseReason("mw-gq6.1") != "" {
+				t.Errorf("a failing check must not close the bug")
+			}
+			if got := report.Started[0].Recheck; !strings.Contains(got, bug.wantSpec) || !strings.Contains(got, "still fails at 9f3c2ab41") {
+				t.Errorf("the line should name the check and its result, got %q", got)
+			}
+		})
+	}
+}
+
+func TestADispatchStartsABugThatNamesNoCheckAndSaysSo(t *testing.T) {
+	dispatch, tracker, _, _, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "[bug] lampas: the card covers the text", Overrides: domain.Path{Files: "src/Card.tsx"}})
+	tracker.SetDescription("mw-gq6.1", "Check: look at it on the phone\nIt is wrong.")
+	if err := tracker.SetLabels("mw-gq6.1", application.LabelBug); err != nil {
+		t.Fatal(err)
+	}
+	recheck := &stubRechecks{answer: application.SpecRecheck{Passed: true}}
+	dispatch.Rechecks = recheck
+
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if ids := startedIDs(report); len(ids) != 1 {
+		t.Fatalf("started %v, want the bug dispatched", ids)
+	}
+	if len(recheck.asked) != 0 {
+		t.Errorf("nothing should be re-run, got %v", recheck.asked)
+	}
+	if !strings.Contains(report.Started[0].Recheck, "no check named") || !strings.Contains(report.String(), "no check named") {
+		t.Errorf("the line should say no check was named, got %q", report.Started[0].Recheck)
+	}
+}
+
+// A story that is not a bug is never re-run and its line says nothing of it.
+func TestADispatchNeverRechecksAStoryThatIsNotABugEvenWhenItNamesASpec(t *testing.T) {
+	dispatch, tracker, _, _, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "[taste] lampas: " + settingsSpec + " card stays", Overrides: domain.Path{Files: "src/a.ts"}})
+	tracker.SetDescription("mw-gq6.1", "Check: "+settingsSpec)
+	recheck := &stubRechecks{answer: application.SpecRecheck{Passed: true}}
+	dispatch.Rechecks = recheck
+
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if len(recheck.asked) != 0 || tracker.CloseReason("mw-gq6.1") != "" {
+		t.Errorf("a story that is not a bug was re-run (%v) or closed", recheck.asked)
+	}
+	if ids := startedIDs(report); len(ids) != 1 || report.Started[0].Recheck != "" {
+		t.Errorf("started %v with the line %q, want the story dispatched as before", ids, report.Started[0].Recheck)
+	}
+}
+
+// The check is found in this order: the suite spec field, a Check: line, a
+// grist eval line, a spec path in the title.
+func TestADispatchTakesTheFirstCheckInTheOrderTheBugNamesThem(t *testing.T) {
+	for name, bug := range map[string]struct {
+		title, description, files string
+		labels                    []string
+		want                      string
+	}{
+		"the suite spec before a Check line": {
+			title: "[bug] x " + settingsSpec, description: "Check: " + teachSpec, files: "tests/e2e/a.spec.ts",
+			labels: []string{application.LabelBug, application.LabelSuite}, want: "millwright tests/e2e/a.spec.ts",
+		},
+		"a Check line before the title": {
+			title: "[bug] x " + settingsSpec, description: "Check: " + teachSpec, files: "src/a.ts",
+			labels: []string{application.LabelBug}, want: "millwright " + teachSpec,
+		},
+		"the description's Check line before the acceptance's": {
+			title: "[bug] x", description: "Check: " + teachSpec, files: "src/a.ts",
+			labels: []string{application.LabelBug}, want: "millwright " + teachSpec,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dispatch, tracker, _, _, _ := aFactory(t)
+			tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: bug.title, Overrides: domain.Path{Files: bug.files}})
+			tracker.SetDescription("mw-gq6.1", bug.description)
+			tracker.SetAcceptance("mw-gq6.1", "Check: "+settingsSpec)
+			if err := tracker.SetLabels("mw-gq6.1", bug.labels...); err != nil {
+				t.Fatal(err)
+			}
+			recheck := &stubRechecks{answer: application.SpecRecheck{Passed: false}}
+			dispatch.Rechecks = recheck
+			if _, err := dispatch.Run(context.Background()); err != nil {
+				t.Fatalf("dispatching: %v", err)
+			}
+			if len(recheck.asked) != 1 || recheck.asked[0] != bug.want {
+				t.Errorf("asked %v, want %q", recheck.asked, bug.want)
+			}
+		})
+	}
+}
+
+// stubExamples is the ExampleRechecker a dispatch test gives: it answers what it
+// was told to and remembers what it was asked.
+type stubExamples struct {
+	answer application.SpecRecheck
+	err    error
+	asked  []string
+}
+
+func (s *stubExamples) RecheckExamples(_ context.Context, app, kind string, examples []string) (application.SpecRecheck, error) {
+	s.asked = append(s.asked, app+" "+kind+" "+strings.Join(examples, ","))
+	return s.answer, s.err
+}
+
+func aGristBug(t *testing.T, dispatch *application.Dispatch, tracker interface {
+	AddStory(string, domain.Story)
+	SetDescription(string, string) error
+	SetLabels(string, ...string) error
+}, where, line string) {
+	t.Helper()
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "[bug] lampas grist smoke: audible-position/romans-8 had no answer", Overrides: domain.Path{Files: "grinds/audible-position.json"}})
+	tracker.SetDescription("mw-gq6.1", where+line)
+	if err := tracker.SetLabels("mw-gq6.1", application.LabelBug); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestADispatchSendsTheGristExampleABugNamesToMainNotTheSpecRunner(t *testing.T) {
+	for name, line := range map[string]string{
+		"a Check line":      "Check: " + "mw grist eval lampas audible-position --example romans-8\n",
+		"a grist eval line": "The failing example: `mw grist eval lampas audible-position --example romans-8`.\n",
+	} {
+		t.Run(name+" passes", func(t *testing.T) {
+			dispatch, tracker, worktrees, runner, _ := aFactory(t)
+			aGristBug(t, &dispatch, tracker, "Seen in the smoke.\n", line)
+			specs := &stubRechecks{answer: application.SpecRecheck{Passed: true}}
+			examples := &stubExamples{answer: application.SpecRecheck{Sha: "c0ffee1234567", Passed: true, Tail: "grist eval: lampas/audible-position: 1 examples passed"}}
+			dispatch.Rechecks, dispatch.ExampleRechecks = specs, examples
+
+			report, err := dispatch.Run(context.Background())
+			if err != nil {
+				t.Fatalf("dispatching: %v", err)
+			}
+			if len(specs.asked) != 0 {
+				t.Errorf("the spec runner was asked for %v, want none", specs.asked)
+			}
+			if len(examples.asked) != 1 || examples.asked[0] != "lampas audible-position romans-8" {
+				t.Fatalf("the examples were asked for %v", examples.asked)
+			}
+			want := "already fixed on main at c0ffee123: mw grist eval lampas audible-position --example romans-8 passes"
+			if got := tracker.CloseReason("mw-gq6.1"); got != want {
+				t.Errorf("close reason:\n got %q\nwant %q", got, want)
+			}
+			if len(report.Started) != 0 || len(worktrees.added) != 0 || len(runner.Started()) != 0 {
+				t.Errorf("nothing should be dispatched: %+v", report.Started)
+			}
+		})
+		t.Run(name+" fails", func(t *testing.T) {
+			dispatch, tracker, _, _, _ := aFactory(t)
+			aGristBug(t, &dispatch, tracker, "", line)
+			dispatch.ExampleRechecks = &stubExamples{answer: application.SpecRecheck{Sha: "c0ffee1234567", Passed: false}}
+
+			report, err := dispatch.Run(context.Background())
+			if err != nil {
+				t.Fatalf("dispatching: %v", err)
+			}
+			if ids := startedIDs(report); len(ids) != 1 {
+				t.Fatalf("started %v, want the bug dispatched", ids)
+			}
+			if got := report.Started[0].Recheck; !strings.Contains(got, "mw grist eval lampas audible-position --example romans-8") || !strings.Contains(got, "still fails at c0ffee123") {
+				t.Errorf("the line should name the check and its result, got %q", got)
+			}
+		})
+	}
+}
+
+func TestADispatchDispatchesAGristBugFromAHostWithoutTheKeyAndSaysSo(t *testing.T) {
+	dispatch, tracker, _, _, _ := aFactory(t)
+	aGristBug(t, &dispatch, tracker, "", "Check: mw grist eval lampas audible-position --example romans-8\n")
+	dispatch.ExampleRechecks = &stubExamples{err: application.ErrNoGristKey}
+
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if ids := startedIDs(report); len(ids) != 1 {
+		t.Fatalf("started %v, want the bug dispatched", ids)
+	}
+	if got := report.Started[0].Recheck; got != "no key on this host: dispatching" {
+		t.Errorf("the line should say there is no key, got %q", got)
+	}
+	if tracker.CloseReason("mw-gq6.1") != "" {
+		t.Errorf("a check that was not run must not close the bug")
+	}
+}
+
+func TestADispatchReadsAGristEvalLineForItsAppKindAndEveryExample(t *testing.T) {
+	for line, want := range map[string]string{
+		"mw grist eval lampas tutor --example greets":                         "lampas tutor greets",
+		"`mw grist eval lampas tutor --example a --example b --wait 2m`":      "lampas tutor a,b",
+		"mw grist eval lampas tutor --example=greets.":                        "lampas tutor greets",
+		"mw grist eval lampas tutor --example greets --ref mw/story":          "",
+		"mw grist eval --grind rigs/lampas/grinds/tutor.json --photos /tmp/p": "",
+		"mw grist eval lampas tutor":                                          "",
+	} {
+		dispatch, tracker, _, _, _ := aFactory(t)
+		aGristBug(t, &dispatch, tracker, "", line+"\n")
+		examples := &stubExamples{answer: application.SpecRecheck{Passed: false}}
+		dispatch.ExampleRechecks = examples
+		if _, err := dispatch.Run(context.Background()); err != nil {
+			t.Fatalf("dispatching: %v", err)
+		}
+		have := strings.Join(examples.asked, ";")
+		if have != want {
+			t.Errorf("%q: asked %q, want %q", line, have, want)
+		}
+	}
+}
+
+func TestAGristExampleRecheckSendsToMainOnAHostWithTheKeyAndNothingWithout(t *testing.T) {
+	// main answers "main"; an example that expects it passes on main, one that
+	// expects what only a branch says does not.
+	mainOK := `{"schemaVersion": "1", "request": {"question": "hi"}, "expect": {"answer": {"matches": "main"}}}`
+	sender := &textSender{}
+	smoke, grinds := evalRig(t, sender)
+	grinds.SetFile("/rigs/lampas", "c1", "grinds/examples/tutor/main-ok.json", []byte(mainOK))
+
+	none := application.GristExampleRecheck{Smoke: smoke, HasKey: func() bool { return false }}
+	if _, err := none.RecheckExamples(context.Background(), "lampas", "tutor", []string{"main-ok"}); err != application.ErrNoGristKey {
+		t.Fatalf("a host with no key should get ErrNoGristKey, got %v", err)
+	}
+	if len(sender.sent) != 0 {
+		t.Fatalf("nothing should be sent without the key, got %d", len(sender.sent))
+	}
+
+	held := application.GristExampleRecheck{Smoke: smoke, HasKey: func() bool { return true }}
+	got, err := held.RecheckExamples(context.Background(), "lampas", "tutor", []string{"main-ok"})
+	if err != nil || !got.Passed || got.Sha != "c1" {
+		t.Fatalf("an example that meets its expect on main: got %+v, %v", got, err)
+	}
+	if len(sender.sent) != 1 || sender.sent[0].GrindOverride != nil {
+		t.Errorf("the example should be sent once, against main (no override), got %+v", sender.sent)
+	}
+	got, err = held.RecheckExamples(context.Background(), "lampas", "tutor", []string{"greets"})
+	if err != nil || got.Passed {
+		t.Errorf("an example that misses its expect on main is an answer, not a pass: got %+v, %v", got, err)
+	}
+	if _, err = held.RecheckExamples(context.Background(), "lampas", "tutor", []string{"no-such"}); err == nil {
+		t.Errorf("an example that does not exist is a check that could not be run")
+	}
+}

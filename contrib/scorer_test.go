@@ -23,7 +23,8 @@ func TestScorerTestsThatNeedNoModel(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 is not installed")
 	}
-	if out, err := command(t, "scorer/test.sh", "--pure").CombinedOutput(); err != nil {
+	// About 40 s on an idle host, so the 60 s default killed it on a loaded one.
+	if out, err := commandWithin(t, 5*time.Minute, "scorer/test.sh", "--pure").CombinedOutput(); err != nil {
 		t.Fatalf("contrib/scorer/test.sh --pure: %v\n%s", err, out)
 	}
 }

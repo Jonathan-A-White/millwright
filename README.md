@@ -1800,17 +1800,24 @@ main <sha>: <n> failing`, or `all pass`). A rig with no `suite_epic` is refused
 with `--file` before anything runs; without `--file` nothing is filed and no
 mail is sent. See `features/suite.feature`.
 
-**A suite bug is re-checked before it is dispatched** (mw-gq6.414). A story that landed after the
-nightly suite's sha may have fixed the bug already. Before `mw dispatch` claims a story labelled `suite`
-whose `files` key is exactly one test file, it runs that file alone on a fresh worktree of the rig's
-origin main (`recheck-<rig>` beside the story worktrees): a `*.spec.*` file with the rig's `[changed_specs]`
-command when it has one, any other file through the unit-runner step of `[tests]` alone (`npm test -- <file>`,
-vitest, jest), after the install step when the line opens with one, never the whole gate line (mw-gq6.639).
-A rig whose `[tests]` has no such step (a make target, a wrapper script) is not re-run, and the story's line says so.
-If it passes, the bug is closed with the reason `fixed on main before dispatch: <spec> passes at <sha>
-(<n> tests)` and a comment holding the end of the run, and no session, claim or worktree is made; it
-takes none of the cap. If it fails, or cannot be run, the story is dispatched as before and its line in
-the report says which. A story without the `suite` label is never re-run, nor is a flaky file's bug (one pass
+**A bug is re-checked before it is dispatched** (mw-gq6.414, mw-gq6.775). A story that landed after a
+bug was filed (or after the nightly suite's sha) may have fixed it already. Before `mw dispatch` claims a
+bug (a story labelled `bug` or whose title opens `[bug]`) it looks for the bug's check, in this order: the
+one test file of a story labelled `suite` (its `files` key); a line of the description or acceptance
+beginning `Check:` that names a test file or a `mw grist eval ... --example` line; any line running
+`mw grist eval <app> <kind> --example <name>` (no `--ref`); a test file named in the title. A spec is run alone
+on a fresh worktree of the rig's origin main (`recheck-<rig>` beside the story worktrees): a `*.spec.*` file
+with the rig's `[changed_specs]` command when it has one, any other file through the unit-runner step of
+`[tests]` alone (`npm test -- <file>`, vitest, jest), after the install step when the line opens with one,
+never the whole gate line (mw-gq6.639). A rig whose `[tests]` has no such step (a make target, a wrapper
+script) is not re-run, and the story's line says so. An eval line sends those examples through the backend
+as the test key against the app's main, from a host that holds the grist test key (each costs a grist); a
+host without it dispatches the bug and its line says `no key on this host: dispatching`.
+If the check passes, the bug is closed with the reason `already fixed on main at <sha>: <check> passes`
+(and `(<n> tests)` for a spec) and a comment holding the end of the run, and no session, claim or worktree
+is made; it takes none of the cap. If it fails, or cannot be run, the story is dispatched as before and its
+line in the report says which and names the check; a bug that names no check is dispatched and its line says
+`no check named: dispatching`. A story that is not a bug is never re-run, nor is a flaky file's bug (one pass
 does not fix a flake), nor is anything in a dry run.
 
 **The nightly run** (mw-8w7xb7.3). The home's follower (`mw events follow`) springs the job `suite@<host>`:

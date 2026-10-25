@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -796,6 +797,23 @@ func hostHasGristTestKey() bool {
 	}
 	exists, err := postern.New(path).Exists()
 	return err == nil && exists
+}
+
+// hostExampleRecheck is the dispatch's ExampleRechecker on this host: it sends the
+// examples a bug names, as mw grist eval does, against the app's main (mw-gq6.775).
+// A host without the grist test key sends nothing, and the smoke is set up only
+// when an example is to be sent.
+type hostExampleRecheck struct{}
+
+func (hostExampleRecheck) RecheckExamples(ctx context.Context, app, kind string, examples []string) (application.SpecRecheck, error) {
+	if !hostHasGristTestKey() {
+		return application.SpecRecheck{}, application.ErrNoGristKey
+	}
+	smoke, err := newSmoker(io.Discard, application.GristSmokeWait)
+	if err != nil {
+		return application.SpecRecheck{}, err
+	}
+	return application.GristExampleRecheck{Smoke: smoke, HasKey: hostHasGristTestKey}.RecheckExamples(ctx, app, kind, examples)
 }
 
 // hostGristRoom is what the dispatch and mw status read of the mill on this
