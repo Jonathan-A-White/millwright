@@ -3460,6 +3460,16 @@ reason stands in the comment. `mw verify match` and the sleep pass drop such a m
 `dropped` counts them) and give each picture the words he sent with it. Neither command calls an agent. The steps are in
 `features/verify_confirm.feature`.
 
+### Checking the labels of a HOW TO CHECK IT (`mw lint-checkit`)
+
+A HOW TO CHECK IT step that quotes a label written from a guess cannot be followed. `mw lint-checkit <bead> [--dir <checkout>]`
+reads the newest HOW TO CHECK IT of the bead's comments, takes each label it quotes (between double quotes, straight or
+curly, or between backticks) and looks for it as a fixed string under the `src/` of the bead's rig on this host, or of
+`<dir>` (a Builder passes `--dir .`). It prints `lint-checkit <bead>: N quoted labels, M found in src/`, names the labels
+`not found in src/`, and exits non-zero when there are any; a bead with no HOW TO CHECK IT, or none that quotes a label, passes.
+A rig with no `src/` is an error. The tdd-feature formula's closing step asks the Builder to quote labels from the source
+and run it. The tests are in `application/lintcheckit_test.go`.
+
 ## Saved prompts
 
 The Mayor keeps prompts on the postern backend, so the Governor can run one by
