@@ -492,7 +492,9 @@ func (f File) validateFormulasOf(ctx context.Context, plan domain.Plan, readErr 
 // validateTesterStories says, naming the story key, each Tester story in the
 // plan (labelled tester, or worked by the tester formula) that has no 'Landed
 // story:' line: such a story runs its whole session and then cannot file a
-// finding (mw-gq6.594).
+// finding (mw-gq6.594). A story titled as the Tester's are (TesterTitlePrefix)
+// is one too, whatever its label and formula say: mw-5r3p30.300 reached its
+// close-out that way (mw-gq6.797).
 func validateTesterStories(stories []domain.PlanStory, defaults domain.Path) []string {
 	var reasons []string
 	for _, story := range stories {
@@ -502,7 +504,8 @@ func validateTesterStories(stories []domain.PlanStory, defaults domain.Path) []s
 		}
 		detail := StoryDetail{Description: story.Description, Labels: story.Labels}
 		detail.Story.Overrides = path
-		if NamesNoLandedStory(detail) {
+		titled := strings.HasPrefix(strings.TrimSpace(story.Title), strings.TrimSpace(TesterTitlePrefix)+" ")
+		if NamesNoLandedStory(detail) || titled && TesterLanded(detail) == "" {
 			reasons = append(reasons, fmt.Sprintf("filing story %s: it is a Tester story and its description has no %q line, so its session could not file a finding; add the line",
 				story.Key, TesterLandedLine+"<id>"))
 		}

@@ -368,3 +368,26 @@ func TestAPlanWithATesterStoryNamingItsLandedStoryIsFiled(t *testing.T) {
 		t.Fatalf("filing: %v", err)
 	}
 }
+
+// mw-gq6.797: a story titled as the Tester's are ("Test: ...") is a Tester story
+// whether or not it carries the label or the formula, and mw-5r3p30.300, filed
+// that way, ran 76 turns before its close-out found no 'Landed story:' line. It is
+// refused at filing, by mw file and by mw file --check.
+func TestAPlanWithAStoryTitledAsATesterNamingNoLandedStoryIsRefusedAtFiling(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
+	plan := twoStoryPlan()
+	plan.Stories = append(plan.Stories, domain.PlanStory{Key: "drive", Title: application.TesterTitlePrefix + "drive it",
+		Description: "Drive it on a phone.", Acceptance: "FINDINGS written\nExpect: none, because a test plan"})
+
+	_, err := application.File{Tracker: tracker}.Run(context.Background(), plan)
+	if err == nil || !strings.Contains(err.Error(), "drive") || !strings.Contains(err.Error(), application.TesterLandedLine) {
+		t.Fatalf("want a refusal naming the story and the line, got %v", err)
+	}
+	if len(tracker.Stories()) != 0 || len(tracker.Epics()) != 0 {
+		t.Errorf("something was filed: %v %v", tracker.Epics(), tracker.Stories())
+	}
+	if err := (application.File{Tracker: tracker}).Check(context.Background(), plan); err == nil || !strings.Contains(err.Error(), application.TesterLandedLine) {
+		t.Errorf("want mw file --check to refuse it too, got %v", err)
+	}
+}
