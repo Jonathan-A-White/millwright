@@ -185,7 +185,8 @@ mw seat read mayor hand            # a prefix no other topic shares
 `mw seat boot <seat>` prints a title line, then each part of the manifest under
 a `==> <part> <==` line (the form `head` and `tail` use for many files, which no
 heading of a part's own can be mistaken for), then `==> Read by need <==` and
-the index, one line a topic: `- <slug>: <heading> (<file>)`. A part past its
+the index, one line a file: `- <file>: <slug>, <slug>, ...` (the slug is the
+heading's own words, so the heading is not printed twice; mw-gq6.755). A part past its
 cap is cut at a line end and ends `[cut at <cap> of <size> bytes]`. A part that
 cannot be read is said in its place, `[not read: <why>]` or `[failed: <why>]`
 after what a command printed, the rest is printed all the same, and the command
@@ -206,6 +207,9 @@ The manifest:
 
 ```toml
 cap = 8000                         # bytes a part may print, 0 none; default 8000
+ceiling = 15000                    # bytes the whole boot set may print, 0 none (the default):
+                                   # past it the set is printed, then said to be over, and the
+                                   # command exits non-zero (mw-gq6.755)
 
 [[boot]]                           # one of file, newest or command; in order
 file = "seats/mayor/vision.md"     # from the vault's root; {host} and {seat} are filled in
@@ -392,3 +396,18 @@ file = "docs/adding-a-command.md"
   manifest is a one-line follow-up.
 - lampas's `CLAUDE.md` and the vault's `AGENTS.md`: proposed, not edited; both
   belong to other files than this story's.
+
+## The Mayor's boot under a ceiling (mw-gq6.755)
+
+The Mayor's boot set printed 40.6K bytes on 2026-10-25 (a Mayor at 48-58K of
+context before any work). Where it went: the vision 2.7K, the newest handoff
+5.2K, Boot 2.9K, Rules that bite every sitting 4.0K, Who is talking 0.7K,
+Standing asks 9.0K, the glossary's two sections 5.4K, the brief 7.7K (cut at
+8,000), the index 2.6K. The charter-adjacent minimum is the handoff, Boot,
+Rules, Who is talking, the brief and the index; the vision, Standing asks and
+the glossary are topics (`mw seat read mayor vision`, `... standing-asks`,
+`... work`), and Boot says when to read each. The index is one line a file now
+(0.96K, from 2.6K), and `ceiling = 15000` in the manifest keeps the set from
+growing back. Measured on copies of the real files with the brief held to 1K,
+the set is ~14.8K; the handoff, Boot and Rules are 12.1K of that on their own,
+so the brief is what a ceiling of 15K leaves room for the least of.

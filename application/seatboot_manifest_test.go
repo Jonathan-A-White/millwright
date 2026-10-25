@@ -271,13 +271,9 @@ func TestSeatBootSetPrintsTheManifestsPartsInOrderWithinTheirCaps(t *testing.T) 
 		"==> seats/mayor/procedures.md: Boot <==\n\n## Boot\n\n1. Charter, vision, the newest handoff.\n2. CONTEXT.md.\n",
 		"==> $ mw brief mw-6ww <==\n\n" + strings.Repeat("a line of the brief\n", 5) + "[cut at 100 of 400 bytes]\n",
 		"==> Read by need <==\n\nmw seat read mayor <topic> prints one of these:\n",
-		"- mayor-procedures: Mayor procedures (one place) (seats/mayor/procedures.md)\n",
-		"- boot: Boot (seats/mayor/procedures.md)\n",
-		"- rules-that-bite-every-sitting: Rules that bite every sitting (seats/mayor/procedures.md)\n",
-		"- handing-off: Handing off (at ~180K by `bin/mayor-context`, or at the end of a ticket) (seats/mayor/procedures.md)\n",
-		"- a-sub-step-of-handing-off: A sub-step of handing off (seats/mayor/procedures.md)\n",
-		"- pruning-a-rigs-memory: Pruning a rig's memory (seats/mayor/pruning.md)\n",
-		"- governor: Governor (millwright: CONTEXT.md)\n",
+		"- seats/mayor/procedures.md: mayor-procedures, boot, rules-that-bite-every-sitting, handing-off, a-sub-step-of-handing-off\n",
+		"- seats/mayor/pruning.md: pruning-a-rigs-memory\n",
+		"- millwright: CONTEXT.md: millwright, language, governor\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the boot set lacks %q:\n%s", want, out)
@@ -449,12 +445,51 @@ func TestSeatReadWithNoTopicPrintsTheIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out, "mw seat read mayor <topic> prints one of these:\n- mayor-procedures: Mayor procedures (one place) (seats/mayor/procedures.md)\n- boot: Boot (seats/mayor/procedures.md)\n") {
+	if !strings.HasPrefix(out, "mw seat read mayor <topic> prints one of these:\n- seats/mayor/procedures.md: mayor-procedures, boot, ") {
 		t.Errorf("the index:\n%s", out)
 	}
 	files.manifests["deputy"] = "[[boot]]\nnewest = \"seats/deputy/handoffs\"\n"
 	out, err = seatRead(files, "deputy", "")
 	if err != nil || out != "the deputy seat names no topics in seats/deputy/boot.toml\n" {
 		t.Errorf("no topics: %q, %v", out, err)
+	}
+}
+
+func TestSeatBootSetOverItsManifestsCeilingSaysSoAndFails(t *testing.T) {
+	files := fixtureSeatFiles()
+	files.files["seats/mayor/big.md"] = "# Big\n\n" + strings.Repeat("A line the Mayor does not need at boot.\n", 100)
+	files.manifests["mayor"] = "ceiling = 1000\n\n[[boot]]\nfile = \"seats/mayor/vision.md\"\n\n[[boot]]\nfile = \"seats/mayor/big.md\"\ncap = 0\n"
+	out, err := bootSet(files, "mayor", "laptop")
+	if err == nil || !strings.Contains(err.Error(), "ceiling of 1000 bytes") {
+		t.Fatalf("a boot set over its ceiling: %v", err)
+	}
+	if !strings.Contains(out, "Where the factory is going.") || !strings.Contains(out, "[over the manifest's ceiling: ") {
+		t.Errorf("the boot set is still printed, with the overage said:\n%s", out)
+	}
+	if len(out) <= 1000 {
+		t.Errorf("printed %d bytes, expected the whole over-ceiling set", len(out))
+	}
+
+	// Within the ceiling, or with none, the set prints as before.
+	files.manifests["mayor"] = strings.Replace(files.manifests["mayor"], "ceiling = 1000", "ceiling = 9000", 1)
+	if out, err = bootSet(files, "mayor", "laptop"); err != nil || strings.Contains(out, "over the manifest's ceiling") {
+		t.Errorf("under its ceiling: %v\n%s", err, out)
+	}
+	files.manifests["mayor"] = strings.Replace(files.manifests["mayor"], "ceiling = 9000\n\n", "", 1)
+	if out, err = bootSet(files, "mayor", "laptop"); err != nil || strings.Contains(out, "over the manifest's ceiling") {
+		t.Errorf("with no ceiling: %v\n%s", err, out)
+	}
+}
+
+func TestParseSeatManifestReadsTheCeilingAndRefusesABadOne(t *testing.T) {
+	m, err := ParseSeatManifest("mayor", "ceiling = 15000\n[[boot]]\nfile = \"a.md\"\n")
+	if err != nil || m.Ceiling != 15000 {
+		t.Errorf("ceiling: %d, %v", m.Ceiling, err)
+	}
+	if m, err = ParseSeatManifest("mayor", "[[boot]]\nfile = \"a.md\"\n"); err != nil || m.Ceiling != 0 {
+		t.Errorf("no ceiling: %d, %v", m.Ceiling, err)
+	}
+	if _, err = ParseSeatManifest("mayor", "ceiling = -5\n[[boot]]\nfile = \"a.md\"\n"); err == nil || !strings.Contains(err.Error(), "ceiling") {
+		t.Errorf("a bad ceiling: %v", err)
 	}
 }
