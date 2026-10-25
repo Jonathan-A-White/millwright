@@ -101,6 +101,12 @@ const (
 	// continued.
 	ReasonLockfileSSH Reason = "lockfile-ssh"
 	ReasonOpenSteps   Reason = "open-steps"
+	// ReasonGristExampleUnproved is a branch that adds or changes a grind
+	// example (grinds/examples/<kind>/<name>.json) whose closing comment has no
+	// 'mw grist eval <app> <kind> --example <name>' line with PASS (mw-gq6.772):
+	// an example that passed only the fake mill can fail live. Like open steps,
+	// it is the Builder's to mend, by running the eval and saying so.
+	ReasonGristExampleUnproved Reason = "grist-example-unproved"
 	// ReasonNoClosingComment is a story whose formula is finished but whose
 	// branch is not: no closing comment was written after its newest commit
 	// (mw-gq6.630). Like open steps, it is the Builder's to mend.
@@ -1693,7 +1699,7 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 		if refuse(refusal.Reason, refusal.Why, refusal.Said) {
 			return found
 		}
-	} else if refusal, missing := n.closingCommentRefusal(ctx, c, base); missing && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+	} else if refusal, missing := n.closingCommentRefusal(ctx, c, report, base); missing && refuse(refusal.Reason, refusal.Why, refusal.Said) {
 		// A finished formula is not a closing comment: the story is read for one.
 		return found
 	}
@@ -1952,8 +1958,10 @@ func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextRep
 // the comment is read. It is a hand-back, as open steps are, for the Builder to
 // mend by writing the comment. The comment it finds is read for criteria it
 // says are unmet (UnmetCriteria, mw-gq6.711): that is the refusal
-// ReasonUnmetCriterion, which keeps the claim for the Mayor.
-func (n Next) closingCommentRefusal(ctx context.Context, c *closeOut, base string) (Refusal, bool) {
+// ReasonUnmetCriterion, which keeps the claim for the Mayor. A comment that
+// stands is then read for a live eval line of every grind example the branch
+// changes (gristExampleRefusal, mw-gq6.772).
+func (n Next) closingCommentRefusal(ctx context.Context, c *closeOut, report *NextReport, base string) (Refusal, bool) {
 	if c.detail.Molecule.RootID == "" {
 		return Refusal{}, false
 	}
@@ -1965,7 +1973,7 @@ func (n Next) closingCommentRefusal(ctx context.Context, c *closeOut, base strin
 				"the story is handed back, and the Mayor re-scopes it or closes what is done."}, true
 	}
 	if written {
-		return Refusal{}, false
+		return n.gristExampleRefusal(ctx, c, report, text)
 	}
 	return Refusal{ReasonNoClosingComment, fmt.Sprintf("the formula of %s is finished, but the story has no closing comment written after its newest commit", c.id),
 		"A closing comment has HOW TO CHECK IT, for the Governor (or the line 'Internal: nothing for the Governor to look at') and 'For the rig memory:'. " +
@@ -2945,7 +2953,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	// Mayor can bd close it. Every other stop keeps the claim, because the claim
 	// is the evidence.
 	given := false
-	if reason == ReasonOpenSteps || reason == ReasonNoClosingComment || reason == ReasonTurnCap || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
+	if reason == ReasonOpenSteps || reason == ReasonNoClosingComment || reason == ReasonGristExampleUnproved || reason == ReasonTurnCap || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
 		if err := n.releaseOnStop(ctx, c.id, report); err != nil {
 			trouble = append(trouble, fmt.Sprintf("the claim on %s could not be given back: %v", c.id, err))
 		} else {

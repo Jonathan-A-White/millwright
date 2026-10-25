@@ -35,6 +35,7 @@ func registerNextBackendSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the work of "([^"]*)" also changes "([^"]*)"$`, c.theWorkAlsoChanges)
 	ctx.Given(`^a commit on the branch of "([^"]*)" writes "([^"]*)" holding (\d+) git\+ssh lines$`, c.aCommitWritingALockfile)
 	ctx.Given(`^a commit on the branch of "([^"]*)" appends a line to "([^"]*)"$`, c.aCommitAppendingToAFile)
+	ctx.Given(`^a commit on the branch of "([^"]*)" adds the grind example "([^"]*)"$`, c.aCommitAddingAGrindExample)
 	ctx.Given(`^the target branch of the rig holds "([^"]*)" with (\d+) git\+ssh lines, and the branch of "([^"]*)" is rebased onto it$`, c.theTargetHoldsALockfile)
 
 	ctx.Then(`^the backend was staged for the commit that landed on "([^"]*)", built from that commit$`, c.theBackendWasStaged)
@@ -224,6 +225,12 @@ func lockfileWith(ssh int) []byte {
 // aCommitWritingALockfile commits name on a story's branch with ssh git+ssh lines.
 func (c *nextContext) aCommitWritingALockfile(id, name string, ssh int) error {
 	return c.aCommitAdding(id, name, lockfileWith(ssh), 0o644)
+}
+
+// aCommitAddingAGrindExample commits name, a path under grinds/examples/, on a
+// story's branch.
+func (c *nextContext) aCommitAddingAGrindExample(id, name string) error {
+	return c.aCommitAdding(id, name, []byte("{\"description\": \"an example\"}\n"), 0o644)
 }
 
 // aCommitAppendingToAFile commits one more line at the end of name in a story's

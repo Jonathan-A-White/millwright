@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -201,4 +203,87 @@ func (n Next) lockfileSSHRefusal(ctx context.Context, c *closeOut, report *NextR
 		said += " A line for a host other than github.com needs the same rewrite to git+https://<host>/ by hand: the sed above leaves it as it is."
 	}
 	return Refusal{ReasonLockfileSSH, why, said}, true
+}
+
+// gristExampleExpr is a path of a grind example, grinds/examples/<kind>/<name>.json,
+// by kind and name; the README beside the kinds, a recording beside an example and
+// a grind file itself are not one.
+var gristExampleExpr = regexp.MustCompile("^" + regexp.QuoteMeta(GristExamplesDir) + `/([^/]+)/([^/]+)\.json$`)
+
+// gristEvalPass is the word a closing-comment line that proves an example live
+// carries beside the command.
+var gristEvalPass = regexp.MustCompile(`\bPASS\b`)
+
+// GristEvalProofLine is the shape of the line a closing comment carries for a
+// grind example the branch adds or changes; the Builder formula says it too.
+const GristEvalProofLine = "mw grist eval <app> <kind> --example <name>: PASS"
+
+// provedGristExamples is the examples, as '<kind>/<name>', that comment proves
+// live: each line with 'mw grist eval <app> <kind>' and the word PASS names the
+// kind and every --example it was run with.
+func provedGristExamples(comment string) map[string]bool {
+	proved := map[string]bool{}
+	for _, line := range strings.Split(comment, "\n") {
+		if !gristEvalPass.MatchString(line) {
+			continue
+		}
+		var words []string
+		for _, word := range strings.Fields(line) {
+			words = append(words, strings.Trim(word, "`*,:;.()'\""))
+		}
+		at := slices.Index(words, "eval")
+		if at < 2 || words[at-2] != "mw" || words[at-1] != "grist" || at+3 >= len(words) {
+			continue
+		}
+		kind := words[at+2]
+		for i := at + 3; i < len(words); i++ {
+			switch {
+			case words[i] == "--example" && i+1 < len(words):
+				proved[kind+"/"+words[i+1]] = true
+			case strings.HasPrefix(words[i], "--example="):
+				proved[kind+"/"+strings.TrimPrefix(words[i], "--example=")] = true
+			}
+		}
+	}
+	return proved
+}
+
+// gristExampleRefusal is the refusal of a branch that adds or changes a grind
+// example (grinds/examples/<kind>/<name>.json) when the closing comment, text,
+// has no line 'mw grist eval <app> <kind> --example <name>' with PASS for it
+// (mw-gq6.772): mw-fu7dqf.12 landed an example that had passed only the fake
+// mill and failed live 2/2. The check is of the comment, as the rest of the
+// closing comment's are; whether the eval was run is the Builder's word.
+// A rig with no Changes, or a branch that cannot be read, is not refused: the
+// check is a net.
+func (n Next) gristExampleRefusal(ctx context.Context, c *closeOut, report *NextReport, text string) (Refusal, bool) {
+	if n.Changes == nil {
+		return Refusal{}, false
+	}
+	files, err := n.Changes.ChangedFiles(ctx, c.rigDir, StartPoint(n.remote(), c.target), c.branch)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the files %s changed could not be read to look for grind examples: %v", c.id, err))
+		return Refusal{}, false
+	}
+	proved := provedGristExamples(text)
+	var missing, lines []string
+	for _, file := range files {
+		match := gristExampleExpr.FindStringSubmatch(file)
+		if match == nil || proved[match[1]+"/"+match[2]] {
+			continue
+		}
+		missing = append(missing, match[1]+"/"+match[2])
+		lines = append(lines, fmt.Sprintf("- mw grist eval <app> %s --example %s", match[1], match[2]))
+	}
+	if len(missing) == 0 {
+		return Refusal{}, false
+	}
+	why := fmt.Sprintf("%s adds or changes %d grind example(s) the closing comment does not prove live: %s", c.branch, len(missing), strings.Join(missing, ", "))
+	said := fmt.Sprintf("A grind example that passes the fake mill can fail the live grist (mw-fu7dqf.12 landed one that failed 2 of 2). "+
+		"Run each on the branch against the real mill (add --ref %s) and write a line for it in the closing comment, "+
+		"%q, with the app, kind and example as run:\n\n%s\n\n"+
+		"Nothing was merged: the branch is still the session's to amend. Run the evals, write the closing comment again after the last commit, and run `mw next %s` again. "+
+		"An eval that does not pass is a criterion not met: say so, and the story is handed back.",
+		c.branch, GristEvalProofLine, strings.Join(lines, "\n"), c.id)
+	return Refusal{ReasonGristExampleUnproved, why, said}, true
 }
