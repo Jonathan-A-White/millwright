@@ -328,3 +328,24 @@ func TestABranchThatIsNotThereHasAddedNothing(t *testing.T) {
 		t.Errorf("expected nothing added and no error, got %+v, %v", got, err)
 	}
 }
+
+func TestAFileOfTheBranchIsReadAsTheBranchHasIt(t *testing.T) {
+	here := aRigWithAServer(t)
+	ctx := context.Background()
+	run(t, here, "git", "checkout", "-q", "-b", "mw/story")
+	write(t, here, "grinds/maker-request.json", `{"forward":"mayor"}`)
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "A grind")
+	run(t, here, "git", "checkout", "-q", "main")
+
+	got, found, err := rig.New().ReadBranchFile(ctx, here, "mw/story", "grinds/maker-request.json")
+	if err != nil || !found || string(got) != `{"forward":"mayor"}` {
+		t.Errorf("expected the branch's file, got %q, %v, %v", got, found, err)
+	}
+	if _, found, err := rig.New().ReadBranchFile(ctx, here, "mw/story", "grinds/none.json"); found || err != nil {
+		t.Errorf("expected a missing file not found without error, got %v, %v", found, err)
+	}
+	if _, found, err := rig.New().ReadBranchFile(ctx, here, "mw/worked-elsewhere", "grinds/maker-request.json"); found || err != nil {
+		t.Errorf("expected a missing branch not found without error, got %v, %v", found, err)
+	}
+}

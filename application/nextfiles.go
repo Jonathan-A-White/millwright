@@ -2,7 +2,9 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -248,6 +250,24 @@ func provedGristExamples(comment string) map[string]bool {
 	return proved
 }
 
+// branchGrindForwards reports who the branch's grinds/<kind>.json forwards its
+// grist to, through the one GrindFile.Forwards `mw grist eval` also decides by
+// (mw-gq6.801): such a grind is never evaluated, so no command can prove its
+// examples. A grind that cannot be read, or a Changes port that cannot read a
+// file of the branch, forwards to nobody: the proof is then still asked.
+func (n Next) branchGrindForwards(ctx context.Context, c *closeOut, kind string) (string, bool) {
+	files, ok := n.Changes.(BranchFiles)
+	if !ok {
+		return "", false
+	}
+	raw, found, err := files.ReadBranchFile(ctx, c.rigDir, c.branch, path.Join(GristSmokeDir, kind+".json"))
+	var grind GrindFile
+	if err != nil || !found || json.Unmarshal(raw, &grind) != nil {
+		return "", false
+	}
+	return grind.Forwards()
+}
+
 // gristExampleRefusal is the refusal of a branch that adds or changes a grind
 // example (grinds/examples/<kind>/<name>.json) when the closing comment, text,
 // has no line 'mw grist eval <app> <kind> --example <name>' with PASS for it
@@ -270,6 +290,10 @@ func (n Next) gristExampleRefusal(ctx context.Context, c *closeOut, report *Next
 	for _, file := range files {
 		match := gristExampleExpr.FindStringSubmatch(file)
 		if match == nil || proved[match[1]+"/"+match[2]] {
+			continue
+		}
+		if who, forwards := n.branchGrindForwards(ctx, c, match[1]); forwards {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s/%s not evaluated: %s forwards to %s, and mw grist eval does not evaluate a grind that forwards", match[1], match[2], match[1], who))
 			continue
 		}
 		missing = append(missing, match[1]+"/"+match[2])

@@ -103,6 +103,14 @@ type BranchChanges interface {
 	DiffLines(ctx context.Context, rigDir, base, branch, name string) ([]DiffLine, error)
 }
 
+// BranchFiles is a BranchChanges that can also read a file as a branch has it
+// (mw-gq6.801); Next asserts for it, and a Changes without it reads nothing.
+type BranchFiles interface {
+	// ReadBranchFile reports the file at path, relative to the rig's root, at
+	// the tip of branch; found is false when there is no such branch or file.
+	ReadBranchFile(ctx context.Context, rigDir, branch, path string) (data []byte, found bool, err error)
+}
+
 // DiffLine is one line a branch adds or removes in a file: the file's path, the
 // line without its diff sign and whether it was added.
 type DiffLine struct {

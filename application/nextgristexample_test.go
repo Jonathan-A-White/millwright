@@ -98,3 +98,68 @@ func TestAnUnprovedGrindExampleHandsTheBranchOnToTheNextAttempt(t *testing.T) {
 		t.Error("expected the branch to be continued: the Builder mends it by running the eval")
 	}
 }
+
+// forwardingStub is a BranchChanges that also reads the grind files of the
+// branch: the grinds it holds, by kind, as grinds/<kind>.json text.
+type forwardingStub struct {
+	changedStub
+	grinds map[string]string
+}
+
+func (f forwardingStub) ReadBranchFile(_ context.Context, _, _, file string) ([]byte, bool, error) {
+	for kind, text := range f.grinds {
+		if file == "grinds/"+kind+".json" {
+			return []byte(text), true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+const makerExample = "grinds/examples/maker-request/tutor-ask.json"
+
+func TestAGrindExampleOfAGrindThatForwardsIsNotRefusedAndTheReportSaysItWasNotEvaluated(t *testing.T) {
+	changes := forwardingStub{
+		changedStub: changedStub{branchChangesStub: branchChangesStub{makerExample}},
+		grinds:      map[string]string{"maker-request": `{"grind":1,"kind":"maker-request","forward":"mayor"}`},
+	}
+	refusal, refused, report := gristExampleRefusal(t, changes, "Added the example.")
+	if refused {
+		t.Fatalf("expected no refusal for an example of a grind that forwards, got %+v", refusal)
+	}
+	if len(report.Notes) != 1 || !strings.Contains(report.Notes[0], "not evaluated: maker-request forwards to mayor") {
+		t.Errorf("expected one note 'not evaluated: maker-request forwards to mayor', got %q", report.Notes)
+	}
+}
+
+func TestAGrindExampleOfAGrindThatDoesNotForwardIsStillRefused(t *testing.T) {
+	changes := forwardingStub{
+		changedStub: changedStub{branchChangesStub: branchChangesStub{verseExample}},
+		grinds:      map[string]string{"bible-talk": `{"grind":1,"kind":"bible-talk","model":"sonnet"}`},
+	}
+	if refusal, refused, _ := gristExampleRefusal(t, changes, "Added the example."); !refused || refusal.Reason != ReasonGristExampleUnproved {
+		t.Fatalf("expected %s, got %+v, %v", ReasonGristExampleUnproved, refusal, refused)
+	}
+}
+
+func TestOnlyTheForwardingKindsExamplesAreSpared(t *testing.T) {
+	changes := forwardingStub{
+		changedStub: changedStub{branchChangesStub: branchChangesStub{makerExample, verseExample}},
+		grinds: map[string]string{
+			"maker-request": `{"forward":"mayor"}`,
+			"bible-talk":    `{"model":"sonnet"}`,
+		},
+	}
+	refusal, refused, _ := gristExampleRefusal(t, changes, "")
+	if !refused || strings.Contains(refusal.Why, "maker-request") || !strings.Contains(refusal.Why, "bible-talk/verse-text-ask") {
+		t.Fatalf("expected a refusal naming only bible-talk/verse-text-ask, got %+v, %v", refusal, refused)
+	}
+}
+
+func TestAGrindFileSaysWhoItForwardsToThroughOneFunction(t *testing.T) {
+	if who, ok := (GrindFile{Forward: "mayor"}).Forwards(); !ok || who != "mayor" {
+		t.Errorf("expected a forward to mayor, got %q, %v", who, ok)
+	}
+	if who, ok := (GrindFile{}).Forwards(); ok || who != "" {
+		t.Errorf("expected no forward, got %q, %v", who, ok)
+	}
+}

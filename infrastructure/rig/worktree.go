@@ -419,6 +419,22 @@ func (w *Worktrees) ChangedFiles(ctx context.Context, rigDir, base, branch strin
 	return files, nil
 }
 
+var _ application.BranchFiles = (*Worktrees)(nil)
+
+// ReadBranchFile implements application.BranchFiles: `git show
+// <branch>:<path>`. A branch the rig does not have, or a file it lacks, is not
+// found.
+func (w *Worktrees) ReadBranchFile(ctx context.Context, rigDir, branch, file string) ([]byte, bool, error) {
+	if _, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch+":"+file); err != nil {
+		return nil, false, nil
+	}
+	out, err := w.git(ctx, rigDir, "show", "refs/heads/"+branch+":"+file)
+	if err != nil {
+		return nil, false, err
+	}
+	return []byte(out), true, nil
+}
+
 // AddedFiles implements application.BranchChanges: the files `git diff
 // --diff-filter=A` finds from the merge base of base and branch to branch, with
 // the size of each blob, and for those at the repository root whether the blob
