@@ -106,3 +106,38 @@ func TestMemoryMakeRoomDryRunWritesNothing(t *testing.T) {
 		t.Errorf("a dry run changed the vault:\n%s\nwas\n%s", after, before)
 	}
 }
+
+// mw memory supersede --by <slug> retires a fact as superseded by an existing
+// one, writes no new fact, commits the one file and is documented in --help
+// (mw-gq6.762).
+func TestMemorySupersedeByRetiresTheFactAndAddsNoFact(t *testing.T) {
+	vaultDir, _ := gitVaultWithRemote(t, true)
+	facts := "seats/builder/rigs/demo/facts/"
+	putFile(t, vaultDir, facts+"old-fact.md", tightFact("clock", "2026-10-01", "An old sentence."))
+	putFile(t, vaultDir, facts+"new-fact.md", tightFact("clock", "2026-10-02", "A new sentence."))
+	gitIn(t, vaultDir, "add", "-A")
+	gitIn(t, vaultDir, "commit", "-qm", "facts")
+	gitIn(t, vaultDir, "push", "-q")
+
+	help, _ := runMW(t, "memory", "supersede", "--help")
+	if !strings.Contains(help, "--by") || !strings.Contains(help, "superseded by <existing-slug>") {
+		t.Errorf("supersede --help does not document --by:\n%s", help)
+	}
+
+	before := gitIn(t, vaultDir, "rev-parse", "HEAD")
+	runMW(t, "memory", "supersede", "demo", "old-fact", "--by", "new-fact")
+	theCommitHolds(t, vaultDir, before, facts+"old-fact.md")
+	old, err := os.ReadFile(filepath.Join(vaultDir, facts, "old-fact.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"status: retired", "superseded by new-fact"} {
+		if !strings.Contains(string(old), want) {
+			t.Errorf("old-fact.md lacks %q:\n%s", want, old)
+		}
+	}
+	entries, _ := os.ReadDir(filepath.Join(vaultDir, facts))
+	if len(entries) != 2 {
+		t.Errorf("a fact was added: %v", entries)
+	}
+}

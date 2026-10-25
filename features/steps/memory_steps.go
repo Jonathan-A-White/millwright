@@ -72,6 +72,7 @@ func InitializeMemoryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the memory budget is the size of the render of the rig "([^"]*)"$`, c.theBudgetIsTheRender)
 	ctx.When(`^the Mayor adds a fact to the rig "([^"]*)" a sentence of two lines$`, c.theMayorAddsTwoLines)
 	ctx.When(`^the Mayor supersedes the fact "([^"]*)" of the rig "([^"]*)":$`, c.theMayorSupersedes)
+	ctx.When(`^the Mayor supersedes the fact "([^"]*)" of the rig "([^"]*)" by "([^"]*)"$`, c.theMayorSupersedesBy)
 	ctx.When(`^the Mayor retires the fact "([^"]*)" of the rig "([^"]*)" because "([^"]*)"$`, c.theMayorRetires)
 	ctx.When(`^the Mayor rechecks the fact "([^"]*)" of the rig "([^"]*)" saying "([^"]*)"$`, c.theMayorRechecks)
 	ctx.When(`^the Mayor lists the rig "([^"]*)"$`, func(rig string) error {
@@ -293,6 +294,11 @@ func (c *memoryContext) theMayorSupersedes(old, rig string, table *godog.Table) 
 	c.err = c.memory().Supersede(context.Background(), application.MemorySupersede{
 		Rig: rig, Old: old, Slug: p["slug"], Source: p["source"], Sentence: p["sentence"],
 	})
+	return nil
+}
+
+func (c *memoryContext) theMayorSupersedesBy(old, rig, by string) error {
+	c.err = c.memory().Supersede(context.Background(), application.MemorySupersede{Rig: rig, Old: old, By: by})
 	return nil
 }
 
