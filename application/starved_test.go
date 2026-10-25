@@ -387,3 +387,72 @@ func TestARigHeldByAnotherHarnessStopOrDamperIsStillStarved(t *testing.T) {
 		t.Errorf("expected the smoke-held rig kept as starved, got %q", kept)
 	}
 }
+
+// aHeldHostFixture is a tracker holding rig millwright's ready stories pinned
+// to desktop, whose note says its harness is held (mw-gq6.785), and one story
+// of the rig pinned to each of others.
+func aHeldHostFixture(t *testing.T, others ...string) *apptest.FakeTracker {
+	t.Helper()
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.1", "One", "desktop")
+	storyOn(t, tracker, "mw-gq6.2", "Two", "desktop")
+	for n, host := range others {
+		storyOn(t, tracker, "mw-gq6."+string(rune('3'+n)), "Elsewhere", host)
+	}
+	note := application.StarvedRig{
+		Rig: "millwright", Since: statusNow.Add(-2 * time.Hour), Hold: application.StarvedHolds["harness-hold"],
+		Reason: "desktop claims nothing new until 22:00Z: the harness stopped a session",
+	}
+	if err := tracker.SetNote(context.Background(), application.StarvedKey("desktop"), application.FormatStarved([]application.StarvedRig{note})); err != nil {
+		t.Fatal(err)
+	}
+	return tracker
+}
+
+func TestAHeldHarnessAlarmNamesTheCommandThatRoutesEachReadyStoryToAnotherHost(t *testing.T) {
+	alarms := starvedAlarms(t, aHeldHostFixture(t, "laptop"))
+	if len(alarms) != 1 {
+		t.Fatalf("expected one alarm, got %+v", alarms)
+	}
+	text := alarms[0].Text
+	for _, want := range []string{"mw path set mw-gq6.1 host=laptop", "mw path set mw-gq6.2 host=laptop"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("expected %q in the alarm, got %q", want, text)
+		}
+	}
+	if strings.Contains(text, "host=laptop mw-gq6.3") || strings.Contains(text, "mw path set mw-gq6.3") {
+		t.Errorf("expected no command for the story already on laptop, got %q", text)
+	}
+	if strings.Contains(text, "\n") {
+		t.Errorf("expected one line, got %q", text)
+	}
+}
+
+func TestAHeldHarnessAlarmWithNoOtherHostSaysSo(t *testing.T) {
+	alarms := starvedAlarms(t, aHeldHostFixture(t))
+	if len(alarms) != 1 {
+		t.Fatalf("expected one alarm, got %+v", alarms)
+	}
+	text := alarms[0].Text
+	if !strings.Contains(text, "no other host runs millwright") {
+		t.Errorf("expected the alarm to say no other host runs millwright, got %q", text)
+	}
+	if strings.Contains(text, "mw path set") {
+		t.Errorf("expected no command with no other host, got %q", text)
+	}
+}
+
+func TestAHeldHarnessAlarmListsEveryOtherHostAndRoutesToTheFirst(t *testing.T) {
+	text := starvedAlarms(t, aHeldHostFixture(t, "vps", "laptop"))[0].Text
+	for _, want := range []string{"laptop, vps", "mw path set mw-gq6.1 host=laptop"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("expected %q in the alarm, got %q", want, text)
+		}
+	}
+}
+
+func TestAStarvedRigHeldForAnotherReasonCarriesNoWayOutLine(t *testing.T) {
+	if text := starvedAlarms(t, starvedFixture(t, 4*time.Hour))[0].Text; strings.Contains(text, "mw path set") || strings.Contains(text, "no other host") {
+		t.Errorf("expected no way-out line for a smoke hold, got %q", text)
+	}
+}
