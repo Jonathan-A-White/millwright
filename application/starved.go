@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // StarvedAfter is how long a rig may have ready stories and none running, held
@@ -82,6 +84,9 @@ type StarvedRig struct {
 	// stories were passed over for, and Reason the words dispatch printed.
 	Hold   string
 	Reason string
+	// Host is the host whose note held the rig, set when the notes are read; the
+	// note's lines do not carry it, its key does.
+	Host string
 }
 
 // FormatStarved is the note's value, its lines in rig order.
@@ -246,9 +251,51 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 		if r.Reason != "" {
 			text += " — " + r.Reason
 		}
+		if way := harnessWayOut(r, work); way != "" {
+			text += ". " + way
+		}
 		alarms = append(alarms, DamperAlarm{Principle: StarvedPrinciple, Text: text, Beads: ready})
 	}
 	return alarms
+}
+
+// harnessWayOut is the sentence a rig held by a host's harness stop carries
+// (mw-gq6.785): each ready story of the rig routed to that host, with the one
+// mw path set command that sends it to the first other host that runs the rig,
+// or that no other host does. The hosts that run the rig are those a story of
+// it in hand (ready, claimed or running) is routed to. It re-routes nothing: a
+// story can be on a host for a reason, so the alarm only names the command. A
+// rig held for any other reason, or whose note names no host, has none.
+func harnessWayOut(r StarvedRig, work WorkInHand) string {
+	if r.Hold != StarvedHolds["harness-hold"] || r.Host == "" {
+		return ""
+	}
+	others := map[string]bool{}
+	for _, list := range [][]StoryDetail{work.Ready, work.Running, work.OpenClaimed} {
+		for _, d := range list {
+			if host := d.Merged().Host; !d.IsEpic && d.Merged().Rig == r.Rig && host != "" && host != domain.HostAuto && host != r.Host {
+				others[host] = true
+			}
+		}
+	}
+	var routed []string
+	for _, d := range work.Ready {
+		if !d.IsEpic && !d.Hitl() && d.Merged().Rig == r.Rig && d.Merged().Host == r.Host {
+			routed = append(routed, d.Story.ID)
+		}
+	}
+	if len(routed) == 0 {
+		return ""
+	}
+	if len(others) == 0 {
+		return fmt.Sprintf("Way out: no other host runs %s", r.Rig)
+	}
+	hosts := slices.Sorted(maps.Keys(others))
+	commands := make([]string, len(routed))
+	for i, id := range routed {
+		commands[i] = fmt.Sprintf("`mw path set %s host=%s`", id, hosts[0])
+	}
+	return fmt.Sprintf("Way out: other hosts that run %s: %s; to route a story there: %s", r.Rig, strings.Join(hosts, ", "), strings.Join(commands, " · "))
 }
 
 // readStarved reads every host's note of the rigs it holds back whole.
@@ -263,7 +310,11 @@ func (s DamperSurvey) readStarved(ctx context.Context) ([]StarvedRig, error) {
 	var rigs []StarvedRig
 	for _, key := range slices.Sorted(maps.Keys(notes)) {
 		if strings.HasPrefix(key, "host.") && strings.HasSuffix(key, ".starved") {
-			rigs = append(rigs, ParseStarved(notes[key])...)
+			host := strings.TrimSuffix(strings.TrimPrefix(key, "host."), ".starved")
+			for _, r := range ParseStarved(notes[key]) {
+				r.Host = host
+				rigs = append(rigs, r)
+			}
 		}
 	}
 	return rigs, nil
