@@ -22,8 +22,8 @@ func (d Dispatch) retryHarnessStop(ctx context.Context, detail StoryDetail, name
 	if !stopped {
 		return false
 	}
-	if stop.Until.After(d.now()) {
-		d.holdForHarness(ctx, stop, report)
+	if stop.Until.After(d.now()) && !d.loginHoldCleared(ctx, stop) {
+		d.holdForHarness(ctx, stop, report, detail.Story.ID)
 		return false
 	}
 
@@ -64,7 +64,7 @@ func (d Dispatch) retryHarnessStop(ctx context.Context, detail StoryDetail, name
 // holdForHarness holds this host's new claims until the stop's time, the
 // latest of every stop a pass finds, and keeps it in the host's note so that a
 // story given back by hand before then does not lift it (mw-gq6.434).
-func (d Dispatch) holdForHarness(ctx context.Context, stop HarnessStop, report *DispatchReport) {
+func (d Dispatch) holdForHarness(ctx context.Context, stop HarnessStop, report *DispatchReport, story string) {
 	if report.HarnessHold == nil || stop.Until.After(report.HarnessHold.Until) {
 		hold := stop
 		report.HarnessHold = &hold
@@ -75,7 +75,24 @@ func (d Dispatch) holdForHarness(ctx context.Context, stop HarnessStop, report *
 	if err := keepHarnessHold(ctx, d.Memory, d.Host, stop); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
 			"the hold on new claims until %s could not be kept in the host's note: %v", stop.Until.UTC().Format(time.RFC3339), err))
+		return
 	}
+	said, _ := holdHostForLogin(ctx, d.Memory, d.Mailbox, d.Host, story, stop, d.now())
+	report.Notes = append(report.Notes, said...)
+}
+
+// loginHoldCleared says the hold an expired login named has been cleared from
+// the host's note before its time, which is how the Governor says the login is
+// done: the stopped story is then given back at once, though the time it named
+// has not come. It needs the host's note to read, and a mw next that kept the
+// hold (holdHostForLogin) or this dispatch's own pass before it: with no note
+// to read it says nothing.
+func (d Dispatch) loginHoldCleared(ctx context.Context, stop HarnessStop) bool {
+	if stop.Reason != ReasonLoginExpired || d.Memory == nil {
+		return false
+	}
+	_, held := readHarnessHold(ctx, d.Memory, d.Host)
+	return !held
 }
 
 // readHarnessHoldNote takes the hold kept in the host's note into the pass —

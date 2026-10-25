@@ -697,6 +697,11 @@ type closeOut struct {
 	// none was kept; the close-out commits it.
 	harnessStop string
 
+	// loginTold is set when the Mayor has been mailed this host's expired login
+	// (holdHostForLogin), so that the refusal of this story does not mail the
+	// same news again (mw-gq6.781).
+	loginTold bool
+
 	// afterLog is the name of the file in the run that holds the whole output of
 	// the after-landing command (AfterLandingLogFileName), empty when none was
 	// kept; the close-out commits it.
@@ -1006,7 +1011,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		// A usage limit can stop the harness before it writes its JSON: what it
 		// printed instead, or its pane, still names the limit (mw-gq6.471).
 		if stop, stopped := n.harnessStopWithoutResult(ctx, c, report, printed); stopped {
-			return n.stop(ctx, c, report, stop.Reason, n.harnessStopWhy(stop), "")
+			return n.harnessStopped(ctx, c, report, stop)
 		}
 	}
 	switch {
@@ -1037,7 +1042,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		// claim is kept as for any stop, and mw dispatch gives it back itself
 		// once the stop's time has come, the attempt not counted (mw-gq6.434).
 		if stop, stopped := HarnessStopOf(result, sessionEnded(c.detail, result, n.now())); stopped {
-			return n.stop(ctx, c, report, stop.Reason, n.harnessStopWhy(stop), "")
+			return n.harnessStopped(ctx, c, report, stop)
 		}
 		return n.stop(ctx, c, report, ReasonSessionFailed, "the session did not finish: "+result.Trouble(), "")
 	}
@@ -1248,6 +1253,17 @@ func (n Next) emptyResult(ctx context.Context, c *closeOut, resultName, resultPa
 		said += "\n\nThe last lines of the session's pane:\n\n```\n" + tail + "\n```"
 	}
 	return why, said
+}
+
+// harnessStopped stops a close-out for a harness stop. One that is an expired
+// login also holds this host's new claims and tells the Mayor, once per host
+// (holdHostForLogin), so that the next story is not claimed to fail the same way
+// (mw-gq6.781).
+func (n Next) harnessStopped(ctx context.Context, c *closeOut, report *NextReport, stop HarnessStop) (NextReport, error) {
+	notes, told := holdHostForLogin(ctx, n.Memory, n.Mailbox, n.Host, c.id, stop, n.now())
+	report.Notes = append(report.Notes, notes...)
+	c.loginTold = told
+	return n.stop(ctx, c, report, stop.Reason, n.harnessStopWhy(stop), "")
 }
 
 // harnessStopWhy is why a close-out stopped for a harness stop.
@@ -3011,7 +3027,11 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 		verdict = MailRefused
 	}
 	mail := n.mayorMail(c, report, verdict, said)
-	if err := n.sendMayorMail(ctx, c, report, mail, verdict); err != nil {
+	if reason == ReasonLoginExpired && c.loginTold {
+		// Once per host per expiry, not per story (mw-gq6.781): the Mayor has the
+		// news in the mail holdHostForLogin sent.
+		mail = NewMessage{}
+	} else if err := n.sendMayorMail(ctx, c, report, mail, verdict); err != nil {
 		unwritten = append(unwritten, UnrecordedMail)
 	}
 	if len(unwritten) > 0 {

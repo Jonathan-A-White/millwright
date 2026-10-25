@@ -1257,6 +1257,10 @@ func GristReasonLimited(stop HarnessStop) string {
 		what = "its model's rate limit is reached"
 	case ReasonOverloaded:
 		what = "its model is overloaded"
+	case ReasonLoginExpired:
+		what = "its harness's login has expired"
+	case ReasonUnreachable:
+		what = "its model's service cannot be reached"
 	default:
 		what = "its model's service is failing"
 	}

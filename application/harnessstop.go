@@ -13,15 +13,29 @@ import (
 
 // The reasons a close-out lands nothing because the harness stopped the session
 // for something that is not the work's (mw-gq6.434): the account's usage limit,
-// the API's rate limit, an overloaded API, or the API failing outright. None of
-// them says anything of the story, so the attempt is not counted, and the host
-// claims nothing new until the time the stop names.
+// the API's rate limit, an overloaded API, the API failing outright or out of
+// reach, or the host's login expired. None of them says anything of the story, so
+// the attempt is not counted, and the host claims nothing new until the time the
+// stop names.
 const (
 	ReasonUsageLimit  Reason = "usage-limit"
 	ReasonRateLimit   Reason = "rate-limit"
 	ReasonOverloaded  Reason = "overloaded"
 	ReasonServerError Reason = "server-error"
+	// ReasonLoginExpired is the harness's own login gone (mw-gq6.781): "Failed to
+	// authenticate: OAuth session expired and could not be refreshed". Every
+	// session on the host fails the same way until a person logs in again.
+	ReasonLoginExpired Reason = "login-expired"
+	// ReasonUnreachable is the API not reachable from the host at all: no DNS,
+	// a refused or dropped connection.
+	ReasonUnreachable Reason = "api-unreachable"
 )
+
+// LoginExpiredWait is how long a host holds its new claims on an expired login
+// before it tries one story again: the login is a person's step, so it is
+// neither tried every tick nor left for a day, and clearing the hold note
+// (HarnessHoldKey) once logged in ends it at once.
+const LoginExpiredWait = 12 * time.Hour
 
 // HarnessStopWait is how long after the session ended a host waits on a stop
 // that names no time of its own: a rate limit, an overloaded or failing API. The
@@ -63,6 +77,14 @@ var (
 	// apiError is the harness's report of the API's own answer: "API Error: 529
 	// {...overloaded_error...}".
 	apiError = regexp.MustCompile(`(?i)^api error:?\s*(\d{3})?`)
+	// loginExpiredNotice is the harness's line when its login is gone: "Failed to
+	// authenticate: OAuth session expired and could not be refreshed", or the
+	// older "OAuth token has expired". It must open its line, so that a comment
+	// or a test that names the words is not read as saying them (mw-gq6.781).
+	loginExpiredNotice = regexp.MustCompile(`(?i)^(?:api error:?\s*(?:\d{3}\s*)?)?(?:failed to authenticate\b|oauth (?:session|token) (?:has )?expired\b)`)
+	// apiUnreachable is what the harness says when it cannot reach the API at
+	// all, after "API Error:": no DNS, a refused or dropped connection.
+	apiUnreachable = regexp.MustCompile(`(?i)can(?:'|’)?t reach the api server|connection (?:refused|dropped|reset|timed out)|\b(?:econnreset|econnrefused|etimedout|eai_again|enotfound)\b`)
 )
 
 // AtUsageLimit reports whether text holds the harness's notice that the usage
@@ -89,6 +111,24 @@ func usageLimitLine(text string) string {
 	return found
 }
 
+// loginExpiredLine is the line of text that opens with the harness's notice
+// that its login has expired, and empty when none does.
+func loginExpiredLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if line = strings.TrimSpace(line); loginExpiredNotice.MatchString(line) {
+			return line
+		}
+	}
+	return ""
+}
+
+// loginExpiredStop is the stop an expired login's line names: nothing but a
+// person logging in again ends it, so it holds for LoginExpiredWait unless the
+// hold note is cleared first.
+func loginExpiredStop(line string, ended time.Time) HarnessStop {
+	return HarnessStop{Reason: ReasonLoginExpired, Said: line, Until: ended.Add(LoginExpiredWait)}
+}
+
 // usageLimitStop is the stop a usage limit's line names.
 func usageLimitStop(line string, ended time.Time) HarnessStop {
 	return HarnessStop{Reason: ReasonUsageLimit, Said: line, Until: usageReset(line, ended)}
@@ -106,6 +146,9 @@ func HarnessStopOf(result SessionResult, ended time.Time) (HarnessStop, bool) {
 	}
 	if line := usageLimitLine(result.Said); line != "" {
 		return usageLimitStop(line, ended), true
+	}
+	if line := loginExpiredLine(result.Said); line != "" {
+		return loginExpiredStop(line, ended), true
 	}
 	said := firstLine(result.Said)
 	stop := HarnessStop{Said: said}
@@ -126,6 +169,8 @@ func HarnessStopOf(result SessionResult, ended time.Time) (HarnessStop, bool) {
 		stop.Reason = ReasonOverloaded
 	case strings.HasPrefix(status, "5") || strings.Contains(lower, "api_error"):
 		stop.Reason = ReasonServerError
+	case status == "" && apiUnreachable.MatchString(said):
+		stop.Reason = ReasonUnreachable
 	default:
 		// Another answer of the API's (a 400, a refused key) is the factory's to
 		// look at, not a stop that waits.
@@ -138,15 +183,17 @@ func HarnessStopOf(result SessionResult, ended time.Time) (HarnessStop, bool) {
 // HarnessStopOfWords reads whether words the harness printed that are not a
 // result — what it wrote where its JSON belonged, the tail of its pane, an
 // error that carries its last words — say it stopped at the usage limit
-// (mw-gq6.471). Only the usage limit's own line is read in them: the rest of
-// such words may be mw's or the work's, and an API's error among them may be
-// one the harness went on past.
+// (mw-gq6.471) or at an expired login (mw-gq6.781). Only those two lines are
+// read in them: the rest of such words may be mw's or the work's, and an API's
+// error among them may be one the harness went on past.
 func HarnessStopOfWords(words string, ended time.Time) (HarnessStop, bool) {
-	line := usageLimitLine(words)
-	if line == "" {
-		return HarnessStop{}, false
+	if line := usageLimitLine(words); line != "" {
+		return usageLimitStop(line, ended), true
 	}
-	return usageLimitStop(line, ended), true
+	if line := loginExpiredLine(words); line != "" {
+		return loginExpiredStop(line, ended), true
+	}
+	return HarnessStop{}, false
 }
 
 // usageReset is the time a usage limit resets, as the harness named it, or
@@ -301,7 +348,9 @@ type HarnessHold = HarnessStop
 
 // readHarnessHold reads the hold kept in the host's note. A note that is not
 // there, cannot be read or does not parse holds nothing.
-func readHarnessHold(ctx context.Context, notes SweepNotes, host string) (HarnessHold, bool) {
+func readHarnessHold(ctx context.Context, notes interface {
+	Note(ctx context.Context, key string) (string, error)
+}, host string) (HarnessHold, bool) {
 	if notes == nil {
 		return HarnessHold{}, false
 	}
