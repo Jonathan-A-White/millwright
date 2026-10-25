@@ -587,6 +587,10 @@ type StatusReport struct {
 	// has it (mw-gq6.442): a story starved by a files key wider than it needs
 	// shows itself.
 	HeldByFiles map[string]string
+	// UnderHandsStep is the line for each ready story whose epic keeps a hands
+	// step not yet run, by story id: dispatch does not wait on the step, so the
+	// child is shown with it beside it (mw-gq6.763).
+	UnderHandsStep map[string]string
 	// NoHostTakes are the ready stories every host that could take them has
 	// passed for a reason of the host's own (a rig not checked out there, a
 	// metered network), by story id, as the hosts' notes have it (mw-gq6.703).
@@ -911,6 +915,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report.Sharing = s.sharing(ctx, report.Running, report.Ready)
 	report.TesterHolds = s.testerHolds(work, report.Ready)
 	report.HeldByFiles = s.heldByFiles(ctx, report.Ready)
+	report.UnderHandsStep = s.underHandsStep(ctx, report.Ready)
 	report.NoHostTakes = s.noHostTakes(ctx, report.Ready)
 
 	// A bead for the Governor may have no Path at all, so no listing keyed by
@@ -1298,6 +1303,46 @@ func (s Status) heldByFiles(ctx context.Context, ready []StoryDetail) map[string
 			}
 			lines[detail.Story.ID] = line
 		}
+	}
+	return lines
+}
+
+// underHandsStep is the line for each ready story whose epic keeps a hands step
+// that has not run clean and was not superseded or retired, by story id: the
+// child is open to be dispatched while the epic still waits on his hands. Nil
+// when none is, or the notes cannot be read by prefix.
+func (s Status) underHandsStep(ctx context.Context, ready []StoryDetail) map[string]string {
+	notes, ok := s.Notes.(DamperNotes)
+	if !ok || len(ready) == 0 {
+		return nil
+	}
+	read, err := notes.NotesWithPrefix(ctx, "hands.")
+	if err != nil {
+		return nil
+	}
+	live := map[string][]string{}
+	var lines map[string]string
+	for _, detail := range ready {
+		epic := detail.EpicID
+		if epic == "" {
+			continue
+		}
+		ids, seen := live[epic]
+		if !seen {
+			for _, step := range viewHandsSteps(epic, read) {
+				if waitingHandsStep([]PosternViewHandsStep{step}) {
+					ids = append(ids, step.ID)
+				}
+			}
+			live[epic] = ids
+		}
+		if len(ids) == 0 {
+			continue
+		}
+		if lines == nil {
+			lines = map[string]string{}
+		}
+		lines[detail.Story.ID] = fmt.Sprintf("epic %s has a hands step not yet run: %s", epic, strings.Join(ids, ", "))
 	}
 	return lines
 }
@@ -1821,6 +1866,9 @@ func (r StatusReport) String() string {
 		}
 		if held := r.HeldByFiles[d.Story.ID]; held != "" {
 			wrapInto(&b, "    ", held)
+		}
+		if line := r.UnderHandsStep[d.Story.ID]; line != "" {
+			wrapInto(&b, "    ", line)
 		}
 		if takes, passed := r.NoHostTakes[d.Story.ID]; passed {
 			wrapInto(&b, "    ", takes.String())
