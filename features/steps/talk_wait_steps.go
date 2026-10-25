@@ -178,6 +178,10 @@ type talkWaitRun struct {
 	out     bytes.Buffer
 	errOut  bytes.Buffer
 	armedAt time.Time
+	// endedAt is when the wait's own goroutine saw mw talk wait return, so that
+	// a bound on how soon it ended is judged on the wait's clock, not on when a
+	// starved scenario goroutine got round to looking.
+	endedAt time.Time
 	err     error
 }
 
@@ -641,6 +645,7 @@ func (c *talkWaitContext) arm() error {
 	go func() {
 		defer close(run.done)
 		_, run.err = wait.Run(context.Background())
+		run.endedAt = time.Now()
 	}()
 	return c.waitFor("the wait to open the stream", func() bool {
 		select {
@@ -669,21 +674,30 @@ func (c *talkWaitContext) waitFor(what string, ok func() bool) error {
 	return fmt.Errorf("timed out waiting for %s", what)
 }
 
+// endsWithin holds the wait to a bound counted from the last event sent (or the
+// arming, when later), and judges it on when the wait itself returned. It waits
+// talkWaitBudget for a wait that is still going, so a loaded host
+// that starves this goroutine, or the wait, fails nothing that ended in time.
 func (c *talkWaitContext) endsWithin(seconds int) error {
 	base := c.lastEvent
 	if c.run.armedAt.After(base) {
 		base = c.run.armedAt
 	}
+	bound := time.Duration(seconds) * time.Second
 	select {
 	case <-c.run.done:
-		if c.run.err != nil {
-			return fmt.Errorf("mw talk wait failed: %w\n%s", c.run.err, c.run.errOut.String())
-		}
-		return nil
-	case <-time.After(time.Until(base.Add(time.Duration(seconds) * time.Second))):
+	case <-time.After(talkWaitBudget):
 		return fmt.Errorf("mw talk wait had not ended %d s after the event; so far it printed:\n%s%s",
 			seconds, c.run.out.String(), c.run.errOut.String())
 	}
+	if c.run.err != nil {
+		return fmt.Errorf("mw talk wait failed: %w\n%s", c.run.err, c.run.errOut.String())
+	}
+	if took := c.run.endedAt.Sub(base); took > bound {
+		return fmt.Errorf("mw talk wait ended %s after the event, past the %d s it is held to; it printed:\n%s%s",
+			took.Round(time.Millisecond), seconds, c.run.out.String(), c.run.errOut.String())
+	}
+	return nil
 }
 
 func (c *talkWaitContext) stillWaiting() error {

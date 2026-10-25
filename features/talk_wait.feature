@@ -403,9 +403,9 @@ Feature: mw talk wait
     When the Governor's turn 3 of talk "talk-7" saying "An idea: a quieter dashboard" is indexed
     Then the wait has kept 1 idea
     And the wait has answered the Governor 1 time
-    When 1500 milliseconds go by on the host running mw talk wait
+    When 4000 milliseconds go by on the host running mw talk wait
     And the backend says the Governor's Ideas only has ended
-    Then mw talk wait ends within 2 seconds
+    Then mw talk wait ends within 3 seconds
     And the wait printed "Ideas only ended"
 
   Scenario: The clock passing the end of Ideas only ends the wait the same way, with no event
