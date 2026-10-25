@@ -312,6 +312,11 @@ type Status struct {
 	// leaves its timer out; with neither there is no section.
 	Ticks TickLogs
 
+	// Sessions, when set, is asked whether a claimed story's session is alive,
+	// to name a story in progress past NoSessionNamedAfter with none
+	// (mw-gq6.797). Nil leaves that line out.
+	Sessions SessionStatuser
+
 	// Panes is this host's terminal, whose windows are read for a seat stopped
 	// at the usage limit (AtTheUsageLimitHeading). A nil Panes leaves the
 	// section out.
@@ -460,6 +465,11 @@ type RunningStory struct {
 	// renewing (refused, queued, handed back): a claim whose session never
 	// started or is gone looks exactly so (mw-gq6.576).
 	Stranded time.Time
+	// NoSession is when the claim began, when the story has been in progress
+	// longer than NoSessionNamedAfter with no live session behind it: a dead
+	// pane or no window (mw-gq6.797). Zero otherwise, and when the runner was
+	// not asked.
+	NoSession time.Time
 	// Wait is what a queued story waits for, set only for one run=queued
 	// (mw-gq6.604).
 	Wait *BatchWait
@@ -1484,7 +1494,53 @@ func (s Status) running(ctx context.Context, detail StoryDetail) (RunningStory, 
 	if !rs.Refused() && !rs.Queued() && !rs.HandedBack() {
 		rs.Stranded = lapsedLease(detail, s.now())
 	}
+	if rs.NoSession = s.noSession(ctx, rs); !rs.NoSession.IsZero() {
+		rs.Now = s.now()
+	}
 	return rs, nil
+}
+
+// SessionStatuser is the part of a Runner that says whether a session is alive.
+type SessionStatuser interface {
+	Status(ctx context.Context, name string) (SessionStatus, error)
+}
+
+// NoSessionNamedAfter is how long a story may be in progress with no live
+// session before mw status names it (mw-gq6.797). No rig keeps a timeout of its
+// own, so it is the age at which mw stuck counts a claim with no session a root.
+const NoSessionNamedAfter = StuckClaimAge
+
+// noSession is when the claim began, when the story has been in progress longer
+// than NoSessionNamedAfter and its session is not running: a dead pane, or no
+// window. A queued or handed-back story has no session by design, and a runner
+// that cannot say names nothing. Zero otherwise.
+func (s Status) noSession(ctx context.Context, rs RunningStory) time.Time {
+	detail := rs.Detail
+	if s.Sessions == nil || rs.Queued() || rs.HandedBack() || rs.CloseOut != nil ||
+		!strings.EqualFold(strings.TrimSpace(detail.Status), StatusInProgress) {
+		return time.Time{}
+	}
+	since := detail.ClaimStarted()
+	if since.IsZero() || s.now().Sub(since) < NoSessionNamedAfter {
+		return time.Time{}
+	}
+	status, err := s.Sessions.Status(ctx, rs.Session)
+	if err != nil || status.Running() {
+		return time.Time{}
+	}
+	return since
+}
+
+// noSessionLine is what the report says of a story in progress with no live
+// session, with the one command that fixes it: a refused story is recovered by
+// mw retry, any other is given back by the host's next mw dispatch tick. It is
+// short so that clip leaves the command whole.
+func (r RunningStory) noSessionLine() string {
+	fix := "mw dispatch"
+	if r.Refused() {
+		fix = "mw retry " + r.Detail.Story.ID
+	}
+	return fmt.Sprintf("NO SESSION %s, fix: %s", gcAge(r.Now.Sub(r.NoSession)), fix)
 }
 
 // lapsedLease is when a claimed story's lease ran out, when it had by now with
@@ -2496,6 +2552,9 @@ func (r RunningStory) write(b *strings.Builder) {
 	}
 	if !r.Stranded.IsZero() {
 		wrapInto(b, "    ", strandedLine(r.Stranded))
+	}
+	if !r.NoSession.IsZero() {
+		clip(b, "    "+r.noSessionLine())
 	}
 	if r.UsageLimit != "" {
 		clip(b, "    stopped at the usage limit: "+r.UsageLimit)
