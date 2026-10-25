@@ -38,6 +38,13 @@ const (
 	NightlySuiteKey        = "nightly_suite"
 	SuiteEpicKey           = "suite_epic"
 
+	// The capacity keys: what a deployed rig records of its limits before an
+	// event, each a whole number above zero (mw-gq6.761).
+	CapacityViewersKey          = "capacity_viewers"
+	CapacitySSECapKey           = "capacity_sse_cap"
+	CapacityNginxConnectionsKey = "capacity_nginx_worker_connections"
+	CapacityMemoryFreeKey       = "capacity_memory_free_mb"
+
 	// The landing keys: how a rig's stories land (plans/0117). A value of these
 	// that makes no sense reads as its default with a warning, never an error.
 	LandingKey          = "landing"
@@ -71,7 +78,11 @@ var beadID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 //	files_expected         = true
 //	nightly_suite          = true
 //	suite_epic             = "mw-5r3p30"
-//	landing                = "batch"   # or "each", the default
+//	capacity_viewers       = 300     # expected concurrent viewers
+//	capacity_sse_cap       = 500     # the cap on server-sent-event connections
+//	capacity_nginx_worker_connections = 1024
+//	capacity_memory_free_mb = 800    # memory expected free
+//	landing               = "batch"   # or "each", the default
 //	batch_every            = "30m"
 //	batch_min              = 2
 //	batch_max              = 6
@@ -121,6 +132,7 @@ var knownKeys = map[string]bool{
 	PublicURLKey: true, SiteURLKey: true, HealthzURLKey: true, FilesExpectedKey: true, NightlySuiteKey: true, SuiteEpicKey: true,
 	LandingKey: true, BatchEveryKey: true, BatchMinKey: true, BatchMaxKey: true,
 	BatchFixerModelKey: true, BatchFixerEffortKey: true, BatchFixerTurnsKey: true,
+	CapacityViewersKey: true, CapacitySSECapKey: true, CapacityNginxConnectionsKey: true, CapacityMemoryFreeKey: true,
 }
 
 // bareKey is what a key may be for a lenient read to set it aside as one it
@@ -155,6 +167,23 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 		if found && landingKeys[key] {
 			if warning := setLandingKey(&requirements.Landing, key, value); warning != "" {
 				requirements.Warnings = append(requirements.Warnings, fmt.Sprintf("line %d: %s", i+1, warning))
+			}
+			continue
+		}
+		if found && capacityKeys[key] {
+			n, err := strconv.Atoi(value)
+			if err != nil || n <= 0 {
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = <a whole number above zero>`, got %q", i+1, key, lines[i])
+			}
+			switch key {
+			case CapacityViewersKey:
+				requirements.Capacity.ExpectedViewers = n
+			case CapacitySSECapKey:
+				requirements.Capacity.SSECap = n
+			case CapacityNginxConnectionsKey:
+				requirements.Capacity.NginxWorkerConnections = n
+			default:
+				requirements.Capacity.MemoryFreeMB = n
 			}
 			continue
 		}
@@ -257,12 +286,18 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s and the landing keys %s, %s, %s, %s, %s, %s and %s)",
+			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
 				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, SiteURLKey, HealthzURLKey, FilesExpectedKey, NightlySuiteKey, SuiteEpicKey,
+				CapacityViewersKey, CapacitySSECapKey, CapacityNginxConnectionsKey, CapacityMemoryFreeKey,
 				LandingKey, BatchEveryKey, BatchMinKey, BatchMaxKey, BatchFixerModelKey, BatchFixerEffortKey, BatchFixerTurnsKey)
 		}
 	}
 	return requirements, unknown, nil
+}
+
+// capacityKeys are the keys of a rig's file that record its capacity facts.
+var capacityKeys = map[string]bool{
+	CapacityViewersKey: true, CapacitySSECapKey: true, CapacityNginxConnectionsKey: true, CapacityMemoryFreeKey: true,
 }
 
 // landingKeys are the keys of a rig's file that say how its stories land.

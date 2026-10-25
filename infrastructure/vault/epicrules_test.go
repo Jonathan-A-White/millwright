@@ -499,3 +499,27 @@ func TestTimingTestsOfEveryRigAreReadAndAnUnreadableFileIsLeftOut(t *testing.T) 
 		t.Errorf("a vault with no rigs gave %v", got)
 	}
 }
+
+func TestARigsFileKeepsItsCapacityFactsForMwDoctorAndRefusesAValueThatIsNoWholeNumber(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	writeRigFile(t, dir, "leaderboard", "capacity_viewers = 300 # the trunk-or-treat crowd\ncapacity_sse_cap = 500\ncapacity_nginx_worker_connections = 1024\ncapacity_memory_free_mb = 800\n")
+
+	got, err := v.EpicRequirements(context.Background(), "leaderboard")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	want := domain.Capacity{ExpectedViewers: 300, SSECap: 500, NginxWorkerConnections: 1024, MemoryFreeMB: 800}
+	if got.Capacity != want || got.Any() {
+		t.Errorf("capacity = %+v (Any %v), want %+v and no epic requirement", got.Capacity, got.Any(), want)
+	}
+
+	for _, key := range []string{"capacity_viewers", "capacity_sse_cap", "capacity_nginx_worker_connections", "capacity_memory_free_mb"} {
+		for _, bad := range []string{`"many"`, `0`, `-3`, `1.5`} {
+			writeRigFile(t, dir, "leaderboard", key+" = "+bad+"\n")
+			if _, err := v.EpicRequirements(context.Background(), "leaderboard"); err == nil || !strings.Contains(err.Error(), key) {
+				t.Errorf("%s = %s: err = %v, want a refusal naming %s", key, bad, err, key)
+			}
+		}
+	}
+}

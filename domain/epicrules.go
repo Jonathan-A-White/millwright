@@ -68,6 +68,10 @@ type EpicRequirements struct {
 	// under. Neither is a requirement of an epic, so Any does not count them.
 	NightlySuite bool
 	SuiteEpic    string
+	// Capacity is what the rig's file records of its limits before an event
+	// (mw-gq6.761). It is no requirement of an epic either, so Any does not
+	// count it.
+	Capacity Capacity
 	// Landing is how the rig's stories land, as its file wrote it: a key the
 	// file does not hold is left at its zero, and LandingSettings gives the
 	// settings with the defaults filled in. Nothing reads it before Land Rush 2.
@@ -80,7 +84,16 @@ type EpicRequirements struct {
 	Warnings []string
 }
 
-// LandingMode is how a rig's stories land on its main.
+// Capacity is the capacity facts a deployed rig records before an event: how
+// many viewers it expects at once, its cap on server-sent-event connections,
+// nginx's worker_connections and the memory it expects free, in MB. A fact the
+// file does not hold is left at zero.
+type Capacity struct {
+	ExpectedViewers        int
+	SSECap                 int
+	NginxWorkerConnections int
+	MemoryFreeMB           int
+}
 type LandingMode string
 
 const (

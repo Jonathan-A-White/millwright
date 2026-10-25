@@ -37,7 +37,7 @@ func newDoctorCmd() *cobra.Command {
 	var dryRun bool
 	var envFile, posternBin string
 	cmd := &cobra.Command{
-		Use:   "doctor [check | licences]",
+		Use:   "doctor [check | licences | capacity <rig>]",
 		Short: "Cure this host's known faults offline, on a table of checks",
 		Long: "doctor works a table of checks, each with a probe (never changes anything), a cure (run\n" +
 			"only when the probe says faulty and the damper allows it), a damper (a minimum wait\n" +
@@ -58,12 +58,22 @@ func newDoctorCmd() *cobra.Command {
 			"cockpit collection mapped to an app (it makes the cockpit key an app key) or one collection\n" +
 			"mapped to two apps. The rules are postern's, none is kept here: with postern missing or too\n" +
 			"old to know `rights`, it says so in one line and fails. It spends nothing, changes nothing,\n" +
-			"and leaves with " + fmt.Sprint(application.DoctorFaultExit) + " on a warning.",
-		Args: cobra.MaximumNArgs(1),
+			"and leaves with " + fmt.Sprint(application.DoctorFaultExit) + " on a warning.\n\n" +
+			"mw doctor capacity <rig> is not a check either but a read of the capacity block in the rig's\n" +
+			"file in the vault (capacity_viewers, capacity_sse_cap, capacity_nginx_worker_connections,\n" +
+			"capacity_memory_free_mb): one line per fact, its value or MISSING, so that a deployed rig's\n" +
+			"limits are written down before an event. It changes nothing and leaves with " + fmt.Sprint(application.DoctorFaultExit) + " when a fact is missing.",
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := ""
-			if len(args) == 1 {
+			if len(args) > 0 {
 				name = args[0]
+			}
+			if name == capacityArg {
+				return runDoctorCapacity(cmd, args[1:])
+			}
+			if len(args) > 1 {
+				return fmt.Errorf("mw doctor takes one check name, got %d arguments", len(args))
 			}
 			if name == licencesArg {
 				return runDoctorLicences(cmd, posternBin, envFile)
@@ -417,6 +427,37 @@ func newDoctorCmd() *cobra.Command {
 	cmd.Flags().StringVar(&posternBin, "postern", "postern", "for licences: the postern binary the backend runs, asked for `rights --json`")
 	cmd.AddCommand(newDoctorUnitFailedCmd())
 	return cmd
+}
+
+// capacityArg is the word that makes mw doctor read a rig's capacity facts
+// instead of working the table.
+const capacityArg = "capacity"
+
+// runDoctorCapacity prints the capacity facts the named rig's file in the vault
+// records and leaves faulty, as a doctor does, when any is missing.
+func runDoctorCapacity(cmd *cobra.Command, rest []string) error {
+	if len(rest) != 1 {
+		return fmt.Errorf("mw doctor capacity needs the rig to read, as in: mw doctor capacity leaderboard")
+	}
+	vault, err := config.Vault()
+	if err != nil {
+		return err
+	}
+	host, err := config.Host()
+	if err != nil {
+		return err
+	}
+	requirements, err := mwVault(vault, host).EpicRequirements(cmd.Context(), rest[0])
+	if err != nil {
+		return err
+	}
+	report := application.ReportCapacity(rest[0], requirements.Capacity)
+	fmt.Fprint(cmd.OutOrStdout(), report)
+	if report.Faulty() {
+		cmd.SilenceErrors = true
+		return &application.DoctorFault{Line: capacityArg}
+	}
+	return nil
 }
 
 // licencesArg is the word that makes mw doctor read the backend's licences
