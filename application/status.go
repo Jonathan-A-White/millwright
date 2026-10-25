@@ -709,6 +709,11 @@ type StatusReport struct {
 	// the pause-host event this host is under, if any.
 	Cancelled []Cancel
 	Paused    *HostPause
+	// HarnessHold is the hold on this host's new claims that a harness stop
+	// left in its note and that has not run out; nil when there is none. An
+	// expired Claude login is told apart, with the command that clears it
+	// (mw-gq6.781).
+	HarnessHold *HarnessHold
 	// MillhandResume is the "resumed ... (grace until ...)" line shown under
 	// the Millhand tick while its resume grace still holds; "" once it does
 	// not.
@@ -1117,6 +1122,12 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 		if pause, paused, err := PausedHost(ctx, s.Control, s.Host); err == nil && paused {
 			report.Paused = &pause
+		}
+	}
+
+	if s.Notes != nil {
+		if hold, held := readHarnessHold(ctx, s.Notes, s.Host); held && hold.Until.After(s.now()) {
+			report.HarnessHold = &hold
 		}
 	}
 
@@ -1836,6 +1847,18 @@ func (r StatusReport) String() string {
 
 	if r.Paused != nil {
 		clip(&b, fmt.Sprintf("PAUSED by %s %s: no story is started", r.Paused.Actor, r.Paused.At.UTC().Format("01-02 15:04Z")))
+		b.WriteString("\n")
+	}
+
+	if hold := r.HarnessHold; hold != nil {
+		if hold.Reason == ReasonLoginExpired {
+			clip(&b, fmt.Sprintf("HELD · Claude login expired on %s", r.Host))
+			clip(&b, fmt.Sprintf("  claims nothing new until %s; once the", hold.Until.UTC().Format("01-02 15:04Z")))
+			clip(&b, "  Governor has logged in again, clear it with:")
+			clip(&b, "    "+LoginHoldClearCommand(r.Host))
+		} else {
+			clip(&b, "HELD: "+hold.harnessHeld(r.Host))
+		}
 		b.WriteString("\n")
 	}
 
