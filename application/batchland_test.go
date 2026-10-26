@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -739,5 +741,125 @@ func TestTheBatchLandProbeListsTheWorkWhenTheQueueReadFails(t *testing.T) {
 	j.queued("lampas", "lp-1", 2)
 	if reason, wanted := j.landingsOn(reader).Job().Probe(context.Background()); !wanted || reader.works != 1 {
 		t.Fatalf("expected the queue found by the work in hand, got %q, %v after %d listings", reason, wanted, reader.works)
+	}
+}
+
+// mw-gq6.803: a landing that goes on apart (lampas' post-landing grist smoke
+// ran for an hour) held back every other rig's due batch on the host.
+
+// twoRigLandings is BatchLandings over lampas and millwright whose Land is as
+// given; both rigs' queues are old and hold two stories, so both are due.
+func twoRigLandings(t *testing.T, land func(ctx context.Context, rig string, one bool) error) (*aLandingJob, *application.BatchLandings) {
+	t.Helper()
+	j := newLandingJob(t)
+	for _, rig := range []string{"lampas", "millwright"} {
+		j.rule(rig, domain.LandingBatch)
+		j.queued(rig, rig+"-1", 600)
+		j.queued(rig, rig+"-2", 600)
+	}
+	return j, &application.BatchLandings{
+		Rigs:  map[string]string{"lampas": "/rigs/lampas", "millwright": "/rigs/millwright"},
+		Rules: j.rules, Tracker: j.tracker,
+		Home: func(context.Context) (bool, error) { return true, nil },
+		Land: land, Notes: j.tracker, Host: "desktop",
+		Now: func() time.Time { return j.now },
+	}
+}
+
+func TestALandingLeftRunningApartDoesNotStopTheNextRigsLanding(t *testing.T) {
+	var mu sync.Mutex
+	var asked []string
+	land := func(_ context.Context, rig string, _ bool) error {
+		mu.Lock()
+		defer mu.Unlock()
+		asked = append(asked, rig)
+		if rig == "lampas" {
+			return fmt.Errorf("%w: the wait ended", application.ErrLeftRunning)
+		}
+		return nil
+	}
+	_, landings := twoRigLandings(t, land)
+	err := landings.Job().Run(context.Background())
+	if !errors.Is(err, application.ErrLeftRunning) {
+		t.Fatalf("expected the pass to tell lampas went on apart, got %v", err)
+	}
+	sort.Strings(asked)
+	if want := []string{"lampas", "millwright"}; !reflect.DeepEqual(asked, want) {
+		t.Fatalf("expected both rigs landed in the pass, got %v", asked)
+	}
+}
+
+func TestARigsLandingStillRunningDoesNotHoldBackAnotherRigsLanding(t *testing.T) {
+	release := make(chan struct{})
+	millwrightAsked := make(chan struct{})
+	land := func(ctx context.Context, rig string, _ bool) error {
+		if rig == "lampas" {
+			<-release // the smoke goes on
+			return nil
+		}
+		close(millwrightAsked)
+		return nil
+	}
+	_, landings := twoRigLandings(t, land)
+	done := make(chan error, 1)
+	go func() { done <- landings.Job().Run(context.Background()) }()
+	select {
+	case <-millwrightAsked:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("millwright was not landed while the landing of lampas was still running")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("expected the pass to end well, got %v", err)
+	}
+}
+
+func TestARigThatFallsDueWhileAnotherLandingRunsIsLandedInThePass(t *testing.T) {
+	release := make(chan struct{})
+	millwrightAsked := make(chan struct{})
+	var j *aLandingJob
+	land := func(ctx context.Context, rig string, _ bool) error {
+		if rig == "lampas" {
+			<-release
+			return nil
+		}
+		close(millwrightAsked)
+		return nil
+	}
+	var landings *application.BatchLandings
+	j, landings = twoRigLandings(t, land)
+	// millwright's queue is young when the pass begins: not due.
+	j.rule("millwright", domain.LandingBatch)
+	for _, id := range []string{"millwright-1", "millwright-2"} {
+		mustDo(t, j.tracker.SetStoryMetadata(context.Background(), id, map[string]string{
+			application.QueuedAtField: j.now.Add(-time.Minute).Format(time.RFC3339),
+		}))
+	}
+	landings.Recheck = 10 * time.Millisecond
+	var clockMu sync.Mutex
+	now := j.now
+	landings.Now = func() time.Time { clockMu.Lock(); defer clockMu.Unlock(); return now }
+	done := make(chan error, 1)
+	go func() { done <- landings.Job().Run(context.Background()) }()
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-millwrightAsked:
+		close(release)
+		t.Fatal("millwright is not due yet, but was landed")
+	default:
+	}
+	clockMu.Lock()
+	now = now.Add(40 * time.Minute) // now it is
+	clockMu.Unlock()
+	select {
+	case <-millwrightAsked:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("millwright fell due while lampas was landing, but was not landed in the pass")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("expected the pass to end well, got %v", err)
 	}
 }

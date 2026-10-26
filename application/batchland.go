@@ -1353,6 +1353,9 @@ type BatchLandings struct {
 	Host  string
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+	// Recheck is how often a pass with a landing still running looks again
+	// for a rig that has fallen due; zero is DefaultBatchRecheck.
+	Recheck time.Duration
 
 	mu     sync.Mutex
 	failed map[string]time.Time // rig -> when its landing last failed
@@ -1506,34 +1509,85 @@ func (b *BatchLandings) requirements(ctx context.Context, rig string) (domain.Ep
 	return b.Rules.EpicRequirements(ctx, rig)
 }
 
-// run lands each due rig, one at a time. A rig whose landing failed does not
-// stop the next; the pass then fails, naming each.
+// DefaultBatchRecheck is how often a pass with a landing still running looks
+// again for a rig that has fallen due (BatchLandings.Recheck).
+const DefaultBatchRecheck = time.Minute
+
+// run lands each due rig, each in its own goroutine, so that a landing that
+// goes on for long (the grist smoke after a landing of lampas ran an hour)
+// does not hold back another rig's (mw-gq6.803): the gate lock and the merge
+// slot keep apart what must not overlap. While any landing runs, the pass
+// looks again every Recheck for a rig that has fallen due since, and lands it
+// too; a rig is landed once in a pass. A rig whose landing failed does not stop
+// the others; the pass then fails, naming each.
 func (b *BatchLandings) run(ctx context.Context) error {
 	due, err := b.due(ctx)
 	due, perr := b.pending(ctx, due)
 	if len(due) == 0 {
 		return errors.Join(err, perr)
 	}
-	errs := []error{err, perr}
+	var (
+		errMu   sync.Mutex
+		errs    = []error{err, perr}
+		started = map[string]bool{}
+		running int
+		ended   = make(chan struct{}, len(b.Rigs))
+	)
+	start := func(d batchDue) {
+		started[d.rig] = true
+		running++
+		go func() {
+			defer func() { ended <- struct{}{} }()
+			err := b.landRig(ctx, d)
+			if err == nil {
+				return
+			}
+			// ErrLeftRunning: the landing goes on apart, and the follower that
+			// comes back tells it.
+			if !errors.Is(err, ErrLeftRunning) {
+				b.mu.Lock()
+				if b.failed == nil {
+					b.failed = map[string]time.Time{}
+				}
+				b.failed[d.rig] = b.now()
+				b.mu.Unlock()
+			}
+			errMu.Lock()
+			errs = append(errs, fmt.Errorf("landing %s: %w", d.rig, err))
+			errMu.Unlock()
+		}()
+	}
 	for _, d := range due {
 		if ctx.Err() != nil {
+			errMu.Lock()
 			errs = append(errs, ctx.Err())
+			errMu.Unlock()
 			break
 		}
-		err := b.landRig(ctx, d)
-		if errors.Is(err, ErrLeftRunning) {
-			// The landing goes on apart: the follower that comes back tells it.
-			errs = append(errs, fmt.Errorf("landing %s: %w", d.rig, err))
-			break
-		}
-		if err != nil {
-			b.mu.Lock()
-			if b.failed == nil {
-				b.failed = map[string]time.Time{}
+		start(d)
+	}
+
+	recheck := b.Recheck
+	if recheck <= 0 {
+		recheck = DefaultBatchRecheck
+	}
+	tick := time.NewTicker(recheck)
+	defer tick.Stop()
+	for running > 0 {
+		select {
+		case <-ended:
+			running--
+		case <-tick.C:
+			if ctx.Err() != nil {
+				continue
 			}
-			b.failed[d.rig] = b.now()
-			b.mu.Unlock()
-			errs = append(errs, fmt.Errorf("landing %s: %w", d.rig, err))
+			// Only this goroutine starts landings, so started and running need no lock.
+			again, _ := b.due(ctx) // a read that fails is told by the next pass
+			for _, d := range again {
+				if !started[d.rig] {
+					start(d)
+				}
+			}
 		}
 	}
 	return errors.Join(errs...)
