@@ -5,8 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -107,7 +110,7 @@ func (c *Checks) RunRelated(ctx context.Context, rig, dir string, span applicati
 	if err != nil {
 		return application.RelatedRun{}, err
 	}
-	files, _ := c.leavingOutTiming(rig, changed)
+	files, _ := c.leavingOutTiming(rig, withFailedTests(dir, changed, span.Also))
 	if len(files) == 0 {
 		return application.RelatedRun{NoFiles: true}, nil
 	}
@@ -116,6 +119,29 @@ func (c *Checks) RunRelated(ctx context.Context, rig, dir string, span applicati
 		return application.RelatedRun{}, err
 	}
 	return application.RelatedRun{Checked: checked, Files: files, Ran: true}, nil
+}
+
+// withFailedTests is the changed files and, after them, the test files an own
+// check of the branch failed (span.Also) that dir holds, sorted and each once
+// (mw-gq6.808): a line that picks tests by import graph never selects a test
+// that reads source files as text. A failed file that is not a clean path inside
+// dir, or that dir does not hold (a test the branch lacks), is left out.
+func withFailedTests(dir string, changed, failed []string) []string {
+	if len(failed) == 0 {
+		return changed
+	}
+	files := slices.Clone(changed)
+	for _, file := range failed {
+		if !filepath.IsLocal(file) || slices.Contains(files, file) {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(file))); err != nil || info.IsDir() {
+			continue
+		}
+		files = append(files, file)
+	}
+	sort.Strings(files)
+	return files
 }
 
 // leavingOutTiming splits files into those a rig command may be given and those

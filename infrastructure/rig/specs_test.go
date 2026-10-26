@@ -44,7 +44,7 @@ func specsRepo(t *testing.T, files ...string) string {
 		write(name, "story\n")
 	}
 	git("add", "-A")
-	git("commit", "-qm", "story")
+	git("commit", "-q", "--allow-empty", "-m", "story")
 	return dir
 }
 
@@ -211,5 +211,49 @@ func TestAChangedTimingFileIsLeftOutOfTheRelatedTestsLine(t *testing.T) {
 	run, err = checks.RunRelated(context.Background(), "lampas", only, application.RelatedSpan{Base: "main"})
 	if err != nil || run.Ran || !run.NoFiles {
 		t.Errorf("expected nothing to run on a branch that changed only a timing test, got %+v (error: %v)", run, err)
+	}
+}
+
+func TestTheTestFilesAnOwnCheckFailedAreGivenToTheRelatedTestsLineWithTheChangedFiles(t *testing.T) {
+	dir := specsRepo(t, "src/x.ts")
+	log := filepath.Join(t.TempDir(), "log")
+	checks := rig.NewChecks(rig.WithRelatedCommands(map[string]string{"lampas": "printf '%s\\n' {files} > " + log}))
+	span := application.RelatedSpan{Base: "main", Also: []string{"tests/e2e/old.spec.ts", "src/x.ts", "tests/gone.test.ts", "../outside.test.ts"}}
+
+	run, err := checks.RunRelated(context.Background(), "lampas", dir, span)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"src/x.ts", "tests/e2e/old.spec.ts"}
+	if !run.Ran || !reflect.DeepEqual(run.Files, want) {
+		t.Errorf("expected the line run on %v (a failed file the branch lacks, or one outside it, left out), got %+v", want, run)
+	}
+	if got, _ := os.ReadFile(log); string(got) != "src/x.ts\ntests/e2e/old.spec.ts\n" {
+		t.Errorf("expected the line to be given the changed file and the failed one, got %q", got)
+	}
+}
+
+func TestAFailedTestFileIsRunByTheRelatedTestsLineOfABranchThatChangedNoFile(t *testing.T) {
+	dir := specsRepo(t)
+	log := filepath.Join(t.TempDir(), "log")
+	checks := rig.NewChecks(rig.WithRelatedCommands(map[string]string{"lampas": "printf '%s\\n' {files} > " + log}))
+
+	run, err := checks.RunRelated(context.Background(), "lampas", dir, application.RelatedSpan{Base: "main", Also: []string{"tests/e2e/old.spec.ts"}})
+	if err != nil || !run.Ran || run.NoFiles {
+		t.Fatalf("expected the line run on the failed file, got %+v (error: %v)", run, err)
+	}
+	if got, _ := os.ReadFile(log); string(got) != "tests/e2e/old.spec.ts\n" {
+		t.Errorf("expected the failed file given, got %q", got)
+	}
+}
+
+func TestARelatedTestsRunWithNoFailedFileIsGivenTheChangedFilesOnly(t *testing.T) {
+	dir := specsRepo(t, "src/x.ts")
+	log := filepath.Join(t.TempDir(), "log")
+	checks := rig.NewChecks(rig.WithRelatedCommands(map[string]string{"lampas": "printf '%s\\n' {files} > " + log}))
+
+	run, err := checks.RunRelated(context.Background(), "lampas", dir, application.RelatedSpan{Base: "main"})
+	if err != nil || !reflect.DeepEqual(run.Files, []string{"src/x.ts"}) {
+		t.Fatalf("expected the changed file only, got %+v (error: %v)", run, err)
 	}
 }
