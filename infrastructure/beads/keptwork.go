@@ -176,7 +176,7 @@ func (l *liveListing) workInHand() application.WorkInHand {
 			stale = append(stale, b)
 		}
 	}
-	return application.WorkInHand{Ready: l.ready(), Running: l.details(l.withStatus(StatusInProgress)), OpenClaimed: l.details(stale)}
+	return application.WorkInHand{Ready: l.ready(), Running: l.details(l.withStatus(StatusInProgress)), OpenClaimed: l.details(stale), Held: l.details(l.withStatus(StatusDeferred))}
 }
 
 // onHost narrows details as Gateway.onHost does.

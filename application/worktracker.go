@@ -267,6 +267,11 @@ type WorkInHand struct {
 	// still a host's claim (mw@<host>): neither ready, which asks for the
 	// unassigned, nor running, which asks for in progress (mw-gq6.417).
 	OpenClaimed []StoryDetail
+	// Held are the stories deferred (held back by the Mayor or the Governor),
+	// on any host or none; none of them is ready. Only the kept connection
+	// fills it: the fallback's bd calls are counted (a slow link pays seconds
+	// for each), so it leaves Held empty.
+	Held []StoryDetail
 }
 
 // ReadyOn is the ready stories whose Path names this host, or domain.HostAuto,

@@ -161,7 +161,7 @@ func TestTheCloudCheckReadsItsWorkInHandOverTheKeptConnection(t *testing.T) {
 		}
 		return []driver.Value{id, "The bead " + id, "", "", status, "task", who, nil, at, nil, at, nil, int64(2), `{"host":"auto"}`, nil, int64(0)}
 	}
-	server.beads = append(server.beads, story("mw-e.12", "open", ""), story("mw-e.13", "open", ""), story("mw-e.14", "open", "mw@laptop"))
+	server.beads = append(server.beads, story("mw-e.12", "open", ""), story("mw-e.13", "open", ""), story("mw-e.14", "open", "mw@laptop"), story("mw-e.15", "deferred", ""))
 	server.edges = append(server.edges,
 		[3]string{"mw-e.12", "mw-e", "parent-child"}, [3]string{"mw-e.13", "mw-e", "parent-child"}, [3]string{"mw-e.14", "mw-e", "parent-child"},
 		[3]string{"mw-e.13", "mw-e.5", "blocks"})
@@ -182,6 +182,9 @@ func TestTheCloudCheckReadsItsWorkInHandOverTheKeptConnection(t *testing.T) {
 
 	if report.Waiting != 1 {
 		t.Errorf("expected only mw-e.12 to wait for any host (mw-e.13 waits on a running story, mw-e.14 is held), got %d", report.Waiting)
+	}
+	if work, err := g.WorkInHand(ctx); err != nil || len(work.Held) != 1 || work.Held[0].Story.ID != "mw-e.15" {
+		t.Errorf("expected the deferred mw-e.15 as the one story held, got %+v, %v", work.Held, err)
 	}
 	if calls := bdCallsSince(t, asked, 0); len(calls) != 0 {
 		t.Errorf("expected no bd started by the cloud check, got %d:\n%s", len(calls), strings.Join(calls, "\n"))

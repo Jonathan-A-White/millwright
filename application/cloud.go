@@ -432,6 +432,7 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 			p.down(ctx, box.Name, "idle "+Clock(now.Sub(box.IdleSince)))
 		}
 	}
+	p.repathGone(ctx, work)
 	p.report.Waiting, p.report.Free = p.demand(work)
 	if p.report.Waiting > p.report.Free && len(p.state.Boxes) < c.Plan.MaxBoxes {
 		p.make(ctx)
@@ -497,6 +498,8 @@ type cloudPass struct {
 	dirty  string
 	report CloudReport
 	err    error
+	// repathed are the boxes whose stories the down pass re-pathed this check.
+	repathed map[string]bool
 }
 
 func (p *cloudPass) fail(err error) {
@@ -964,14 +967,34 @@ func (p *cloudPass) down(ctx context.Context, name, why string) bool {
 // claim. It says each story moved, as a cloud event; a story that cannot be
 // moved fails the check with its id, for the Mayor to re-path by hand.
 func (p *cloudPass) repath(ctx context.Context, name string) {
-	if p.check.Stories == nil {
+	if p.repathed == nil {
+		p.repathed = map[string]bool{}
+	}
+	p.repathed[name] = true
+	stories, ok := p.pathedStories(ctx, name)
+	if !ok {
 		return
+	}
+	p.repathFrom(ctx, stories, name)
+}
+
+// pathedStories is every story the tracker holds, to find those pathed to a
+// box; ok is false (and the check failed) when it cannot be read, and when the
+// check has no tracker to re-path with.
+func (p *cloudPass) pathedStories(ctx context.Context, name string) (stories []StoryDetail, ok bool) {
+	if p.check.Stories == nil {
+		return nil, false
 	}
 	stories, err := p.check.Stories.StoriesSince(ctx, time.Time{})
 	if err != nil {
 		p.fail(fmt.Errorf("reading the stories pathed to %s to re-path them: %w", name, err))
-		return
+		return nil, false
 	}
+	return stories, true
+}
+
+// repathFrom is repath over stories already read.
+func (p *cloudPass) repathFrom(ctx context.Context, stories []StoryDetail, name string) {
 	var moved, stuck []string
 	for _, story := range stories {
 		status := strings.ToLower(strings.TrimSpace(story.Status))
@@ -989,6 +1012,33 @@ func (p *cloudPass) repath(ctx context.Context, name string) {
 	}
 	if len(stuck) > 0 {
 		p.fail(fmt.Errorf("could not re-path %s from %s to host=auto: set it with %sauto", strings.Join(stuck, ", "), name, RepathHint))
+	}
+}
+
+// repathGone re-paths every open and deferred story whose path names a box the
+// book does not hold, however the story came to be pathed there: the down pass
+// re-paths once, and a story filed or re-pathed to the box after it was
+// destroyed would otherwise wait for ever. It reads the work in hand the check
+// already has, so it starts no read of its own. A host that is no box's name is
+// never touched, and a claimed story is left to its claim.
+func (p *cloudPass) repathGone(ctx context.Context, work WorkInHand) {
+	if p.check.Stories == nil {
+		return
+	}
+	stories := slices.Concat(work.Ready, work.Held)
+	held := map[string]bool{}
+	for _, box := range p.state.Boxes {
+		held[box.Name] = true
+	}
+	var gone []string
+	for _, story := range stories {
+		if host := story.Merged().Host; !story.IsEpic && p.check.Plan.isBox(host) && !held[host] && !p.repathed[host] && !slices.Contains(gone, host) {
+			gone = append(gone, host)
+		}
+	}
+	slices.Sort(gone)
+	for _, name := range gone {
+		p.repathFrom(ctx, stories, name)
 	}
 }
 

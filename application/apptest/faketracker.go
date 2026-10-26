@@ -1559,6 +1559,8 @@ func (f *FakeTracker) WorkInHand(_ context.Context) (application.WorkInHand, err
 			work.Ready = append(work.Ready, detail)
 		case s.detail.Status == StatusOpen && application.ClaimHost(s.detail.Assignee) != "":
 			work.OpenClaimed = append(work.OpenClaimed, detail)
+		case s.detail.Status == StatusDeferred && !s.detail.IsEpic:
+			work.Held = append(work.Held, detail)
 		}
 	}
 	return work, nil

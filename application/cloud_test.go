@@ -119,7 +119,7 @@ func TestABoxDestroyedByTheCheckRepathsItsOpenAndDeferredStoriesToAuto(t *testin
 	now := time.Date(2026, 10, 17, 22, 0, 0, 0, time.UTC)
 	up := now.Add(-2 * time.Hour)
 	tracker := pathedStories(t)
-	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-10", Boxes: []application.CloudBox{{Name: "cloud1", Up: up, IdleSince: up}}}}
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-10", Boxes: []application.CloudBox{{Name: "cloud1", Up: up, IdleSince: up}, {Name: "cloud2", Up: now.Add(-time.Hour)}}}}
 	report, err := application.CloudCheck{
 		Work: tracker, Stories: tracker, Provider: &apptest.FakeCloud{}, Book: book, Host: "desktop",
 		Plan: cloudPlan, Now: func() time.Time { return now },
@@ -137,6 +137,9 @@ func TestABoxDestroyedByTheCheckRepathsItsOpenAndDeferredStoriesToAuto(t *testin
 		if !strings.Contains(text, want) {
 			t.Errorf("expected %q in the report:\n%s", want, text)
 		}
+	}
+	if n := strings.Count(text, "re-pathed mw-c.1"); n != 1 {
+		t.Errorf("expected the move said once, said %d times:\n%s", n, text)
 	}
 	if strings.Contains(text, "mw-c.3") || strings.Contains(text, "mw-c.4") {
 		t.Errorf("expected the report to leave out the stories not moved:\n%s", text)
@@ -191,5 +194,81 @@ func TestABoxThatCannotBeDestroyedKeepsItsStoriesPathedToIt(t *testing.T) {
 	}.Run(context.Background())
 	if got := hostOf(t, tracker, "mw-c.1"); got != "cloud1" {
 		t.Errorf("expected mw-c.1 still on cloud1 while the box stands, got %s", got)
+	}
+}
+
+// goneBoxStories files an epic with open, deferred and claimed stories pathed
+// to cloud1, and open ones pathed to laptop, desktop, a named Boost and cloud2.
+func goneBoxStories(t *testing.T) *apptest.FakeTracker {
+	t.Helper()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-g", domain.Path{Rig: "millwright", Branch: "main", Host: domain.HostAuto})
+	for _, s := range []struct{ id, host, status string }{
+		{"mw-g.1", "cloud1", apptest.StatusOpen},
+		{"mw-g.2", "cloud1", apptest.StatusDeferred},
+		{"mw-g.3", "cloud1", apptest.StatusInProgress},
+		{"mw-g.4", "laptop", apptest.StatusOpen},
+		{"mw-g.5", "desktop", apptest.StatusOpen},
+		{"mw-g.6", "boost-tower", apptest.StatusOpen},
+		{"mw-g.7", "cloud2", apptest.StatusOpen},
+	} {
+		tracker.AddStory("mw-g", domain.Story{ID: s.id, Title: "story " + s.id})
+		if err := tracker.SetStoryMetadata(context.Background(), s.id, map[string]string{"host": s.host}); err != nil {
+			t.Fatal(err)
+		}
+		if err := tracker.SetStatus(s.id, s.status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return tracker
+}
+
+func TestAStoryPathedToAGoneBoxIsRepathedByALaterCheck(t *testing.T) {
+	now := time.Date(2026, 10, 26, 3, 12, 0, 0, time.UTC)
+	tracker := goneBoxStories(t)
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-10"}}
+	report, err := application.CloudCheck{
+		Work: tracker, Stories: tracker, Provider: &apptest.FakeCloud{}, Book: book, Host: "laptop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{
+		"mw-g.1": domain.HostAuto, "mw-g.2": domain.HostAuto, "mw-g.3": "cloud1", "mw-g.4": "laptop",
+		"mw-g.5": "desktop", "mw-g.6": "boost-tower", "mw-g.7": domain.HostAuto,
+	} {
+		if got := hostOf(t, tracker, id); got != want {
+			t.Errorf("expected %s on host %s, got %s", id, want, got)
+		}
+	}
+	text := report.String()
+	if !strings.Contains(text, "re-pathed mw-g.1, mw-g.2 from cloud1 to host=auto") {
+		t.Errorf("expected the move for cloud1 in the report:\n%s", text)
+	}
+	if !strings.Contains(text, "re-pathed mw-g.7 from cloud2 to host=auto") {
+		t.Errorf("expected the move for cloud2 in the report:\n%s", text)
+	}
+	if strings.Contains(text, "mw-g.4") || strings.Contains(text, "mw-g.5") || strings.Contains(text, "mw-g.6") {
+		t.Errorf("expected stories on hosts that are no cloud box left out:\n%s", text)
+	}
+}
+
+func TestAStoryPathedToABoxThatIsUpIsLeftAlone(t *testing.T) {
+	now := time.Date(2026, 10, 26, 3, 12, 0, 0, time.UTC)
+	tracker := goneBoxStories(t)
+	up := now.Add(-10 * time.Minute)
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-10", Boxes: []application.CloudBox{{Name: "cloud1", Up: up}}}}
+	_, err := application.CloudCheck{
+		Work: tracker, Stories: tracker, Provider: &apptest.FakeCloud{}, Book: book, Host: "laptop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{"mw-g.1": "cloud1", "mw-g.2": "cloud1", "mw-g.7": domain.HostAuto} {
+		if got := hostOf(t, tracker, id); got != want {
+			t.Errorf("expected %s on host %s, got %s", id, want, got)
+		}
 	}
 }
