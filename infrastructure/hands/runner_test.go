@@ -64,6 +64,26 @@ func TestRunnerStopsAStepAtItsLimit(t *testing.T) {
 	}
 }
 
+// A user step stopped at its limit says what to do next: a step that waits
+// at a screen must detach what it opens (mw-gq6.809).
+func TestRunnerTellsAUserStepAtItsLimitToDetachWhatItOpens(t *testing.T) {
+	runner := hands.NewRunner("/usr/local/sbin/mw-hands-root")
+	runner.UserLimit = 300 * time.Millisecond
+
+	outcome, err := runner.Run(context.Background(), userJob("sleep 30"))
+	if err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	if outcome.Exit != 124 {
+		t.Fatalf("expected exit 124, got %+v", outcome)
+	}
+	for _, want := range []string{"gave up on step s after 300ms", "must detach what it opens (nohup"} {
+		if !strings.Contains(outcome.Output, want) {
+			t.Fatalf("expected %q in the output, got %q", want, outcome.Output)
+		}
+	}
+}
+
 // A root step here goes to mw-hands-root through sudo -n, the whole request
 // on its standard input, for the helper to check again.
 func TestRunnerHandsARootStepToTheHelperThroughSudo(t *testing.T) {

@@ -3201,7 +3201,8 @@ and that approval has not run before (a `hands.approval.<hash>.<time>` note,
 written before the step starts). A step for this host (`host`) runs here; a
 step for another runs over that host's ssh prefix in `[hands_hosts]`, and one
 with no entry is refused naming the key to add. `as: user` runs `sh -c` as
-this host's user for at most 10 minutes; `as: root` hands the whole request, on
+this host's user for at most 10 minutes (a step that waits on him at a screen must
+detach what it opens, `nohup <cmd> >/dev/null 2>&1 &`, and exit at once); `as: root` hands the whole request, on
 standard input, to `sudo -n` `hands_root_helper`. The run is recorded in
 `hands.ran.<bead>.<id>` (`{at, exit, host}`), commented on the bead (`RAN step
 <id> on <host> as <as>, exit <n> (approved by the Governor via postern, txid
