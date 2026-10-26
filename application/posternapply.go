@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -939,9 +940,20 @@ func (i PosternInbox) lock(ctx context.Context) (func(), error) {
 	}
 	release, err := i.Lock.Take(ctx)
 	if err != nil {
+		if heldOff(err) {
+			return nil, errors.New("the postern inbox lock is held by another pass, normally the postern service applying the Governor's answer (it applies answers itself); nothing was read here; run mw postern inbox again once it has finished")
+		}
 		return nil, fmt.Errorf("taking the postern inbox's lock: %w", err)
 	}
 	return release, nil
+}
+
+// heldOff reports whether err from taking the lock is only that another pass
+// held it for the whole wait or until ctx ended — the adapter's "still held
+// after" give-up, or ctx's own end — not a lock that could not be taken.
+func heldOff(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		strings.Contains(err.Error(), "is still held after")
 }
 
 // answerSuffix is the answer command a mail body about message m ends with,

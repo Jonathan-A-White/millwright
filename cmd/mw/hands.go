@@ -163,7 +163,9 @@ func newHandsAddCmd() *cobra.Command {
 			"and so voids any approval of the old one.\n\n" +
 			"A user step runs as sh -c with PATH=" + hands.UserStepPath + ":$PATH, ~ the home of\n" +
 			"the host's user, as the seats' shells have it: so a step that names mw finds it in\n" +
-			"~/.local/bin. A user step for this host that names mw when no mw is there is kept with\n" +
+			"~/.local/bin. A user step is stopped at 10 minutes; one that waits on the Governor at a\n" +
+			"screen must detach what it opens (nohup <cmd> >/dev/null 2>&1 &) and exit at once.\n" +
+			"A user step for this host that names mw when no mw is there is kept with\n" +
 			"a warning on stderr. So is a step for a host with no [hands_hosts] entry in this host's\n" +
 			"config: the factory cannot run it, and Postern offers no Approve and says why.\n\n" +
 			"Once the step is kept, one Postern message is sent to the Governor on the bead's thread,\n" +

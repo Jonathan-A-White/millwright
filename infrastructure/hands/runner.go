@@ -52,6 +52,11 @@ const OutputKept = 1 << 20
 // PATH, and a step that ran `mw cloud check` there ended exit 127.
 const UserStepPath = "~/.local/bin:~/go/bin:/usr/local/go/bin"
 
+// DetachAdvice is what a user step stopped at its limit is told: a step that
+// waits on the Governor at a screen has no knowable length, so it opens what
+// he needs detached and exits at once.
+const DetachAdvice = "a step that waits on the Governor at a screen must detach what it opens (nohup <cmd> >/dev/null 2>&1 &) and exit at once; the result is checked by the next step"
+
 // Runner runs an approved step: a user step as sh -c with UserStepPath ahead
 // of its PATH, a root step by handing the request to mw-hands-root through
 // sudo -n on its standard input; on another host, both over that host's ssh
@@ -97,8 +102,11 @@ func (r Runner) Run(ctx context.Context, job application.HandsJob) (application.
 
 	err = cmd.Run()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return application.HandsOutcome{Exit: handsroot.TimedOutExit,
-			Output: output.String() + fmt.Sprintf("\nmw: gave up on step %s after %s\n", job.Request.ID, limit)}, nil
+		gaveUp := fmt.Sprintf("\nmw: gave up on step %s after %s\n", job.Request.ID, limit)
+		if job.Request.As == domain.HandsAsUser {
+			gaveUp = fmt.Sprintf("\nmw: gave up on step %s after %s: %s\n", job.Request.ID, limit, DetachAdvice)
+		}
+		return application.HandsOutcome{Exit: handsroot.TimedOutExit, Output: output.String() + gaveUp}, nil
 	}
 	var exited *exec.ExitError
 	switch {

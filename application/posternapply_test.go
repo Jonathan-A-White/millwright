@@ -1044,3 +1044,37 @@ func TestApplyCloseOfAnEpicWithNothingHeldForItLeavesTheCommentAsItWas(t *testin
 		t.Fatalf("expected the plain close comment, got %+v", comments)
 	}
 }
+
+// A pass held off by the inbox lock says so plainly and what to do, without
+// the lock adapter's wording or a context error (mw-gq6.809): the plain read
+// and the --apply pass alike, both still errors.
+func TestInboxHeldOffByTheLockSaysSoPlainly(t *testing.T) {
+	for name, run := range map[string]func(application.PosternInbox, context.Context) error{
+		"plain read": func(i application.PosternInbox, ctx context.Context) error { _, err := i.Run(ctx); return err },
+		"apply":      func(i application.PosternInbox, ctx context.Context) error { _, err := i.Apply(ctx); return err },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newApplyFixture(t)
+			inbox := f.inbox()
+			inbox.Lock = &heldLock{}
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+
+			err := run(inbox, ctx)
+
+			if err == nil {
+				t.Fatal("expected an error: nothing was read")
+			}
+			for _, want := range []string{"the postern inbox lock is held by another pass", "nothing was read here"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("expected %q in %q", want, err)
+				}
+			}
+			for _, not := range []string{"context canceled", "context deadline exceeded", "sync lock"} {
+				if strings.Contains(err.Error(), not) {
+					t.Fatalf("expected no %q in %q", not, err)
+				}
+			}
+		})
+	}
+}
