@@ -60,10 +60,11 @@ func NewAzure(keyFile, region string) *Azure {
 }
 
 // ScoresLang reports whether Azure's pronunciation assessment has the language:
-// it has no Greek (el-GR is not among its locales).
+// it has no Greek and no Hebrew (neither el-GR nor he-IL is among its 33
+// locales, Microsoft Learn's language support page, checked 2026-10-26).
 func (a *Azure) ScoresLang(lang string) bool {
 	base, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(lang)), "-")
-	return base != "el"
+	return base != "el" && base != "he"
 }
 
 // URL is the address the engine posts to, without the query: the endpoint when

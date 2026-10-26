@@ -294,13 +294,26 @@ func TestAzureDefaultEndpointIsTheRegionsShortAudioHost(t *testing.T) {
 
 func TestAzureHasNoGreek(t *testing.T) {
 	a := scorer.NewAzure(azureKey(t, 0o600), "westus2")
-	for lang, want := range map[string]bool{"en": true, "es": true, "fr": true, "el": false, "el-GR": false, " EL ": false} {
+	for lang, want := range map[string]bool{"en": true, "es": true, "fr": true, "el": false, "el-GR": false, " EL ": false, "he": false, "he-IL": false} {
 		if got := a.ScoresLang(lang); got != want {
 			t.Errorf("ScoresLang(%q) = %v, want %v", lang, got, want)
 		}
 	}
 	if _, err := a.Score(context.Background(), []byte("x"), "audio/wav", "γειά", "el"); err == nil || !strings.Contains(err.Error(), "no pronunciation assessment for el") {
 		t.Errorf("scoring Greek should be refused plainly, got %v", err)
+	}
+}
+
+// Azure's pronunciation assessment lists no he-IL (its 33 locales, Microsoft
+// Learn, checked 2026-10-26), so Hebrew is scored by the local engine alone and
+// the pass notes "azure skipped: no he" (mw-gdcyf98.8).
+func TestAzureHasNoHebrew(t *testing.T) {
+	a := scorer.NewAzure(azureKey(t, 0o600), "westus2")
+	if a.ScoresLang("he") {
+		t.Error("ScoresLang(he) = true, want false: Azure's assessment has no he-IL")
+	}
+	if _, err := a.Score(context.Background(), []byte("x"), "audio/wav", "בְּרֵאשִׁית", "he"); err == nil || !strings.Contains(err.Error(), "no pronunciation assessment for he") {
+		t.Errorf("scoring Hebrew should be refused plainly, got %v", err)
 	}
 }
 

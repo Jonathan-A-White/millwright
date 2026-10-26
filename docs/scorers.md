@@ -104,7 +104,7 @@ command stops with a line saying so.
 
 A reading in more than one language (a verse woven of English and Greek) sends
 `segments` in place of `target_text` and `lang`: the target's pieces in reading order,
-each with its own language, `en` or `el` (a region, `el-GR`, counts as its language):
+each with its own language, `en`, `el` or `he` (a region, `el-GR`, counts as its language):
 
 ```json
 {
@@ -118,8 +118,8 @@ each with its own language, `en` or `el` (a region, `el-GR`, counts as its langu
 
 Both shapes are accepted; a request with `segments` is scored by them, and its
 `target_text` and `lang` are not used. A segment with no text, with a language other
-than `en` or `el`, or a `segments` that is not a non-empty list is a `400` naming the
-segment. Each segment goes through its own espeak-ng voice (`en-us` or `el`) and the
+than `en`, `el` or `he`, or a `segments` that is not a non-empty list is a `400` naming the
+segment. Each segment goes through its own espeak-ng voice (`en-us`, `el` or `he`) and the
 reference is their words in order. When the segments are in two languages the reading
 is compared in IPA, word by word: every word's `expected_phonemes` and
 `produced_phonemes` are IPA symbols (English too), and what is heard is compared as
@@ -273,7 +273,8 @@ forbids subagents.
 
 `scoring.langs` is optional: the language codes the grind scores in, the first the
 default (`"langs": ["el", "en"]`). Absent, it is `["en"]`. The codes known are `en`
-(American English), `el` (modern Greek, monotonic letters) and `es`; a grind file naming
+(American English), `el` (modern Greek, monotonic letters), `es` and `he` (modern Hebrew,
+pointed or not); a grind file naming
 another is refused as unreadable. The grist's request may carry `"lang"`, one of the
 grind's (a region, `el-GR`, counts as its language); without it the first is used, and a
 `lang` the grind does not list refuses the grist, saying which it does ("This grist asks
@@ -282,10 +283,20 @@ engine is given and what `scorers.json` records as `lang`.
 
 An engine that cannot score the language is not run for the recording, and the pass
 notes `<engine> skipped: no <lang>`; its entry is left out of `reading_result`. Azure's
-pronunciation assessment has no Greek, so for `el` only the local engine scores. The
+pronunciation assessment has no Greek and no Hebrew (neither `el-GR` nor `he-IL` is among
+its 33 locales, Microsoft Learn's language support page, read 2026-10-26), so for `el` and
+`he` only the local engine scores and the pass notes `azure skipped: no he`. The
 local scorer reads Greek through espeak-ng's `el` voice and compares in IPA, not ARPAbet
 (`contrib/scorer/README.md`): a Greek word's `expected_phonemes` and `produced_phonemes`
 are IPA symbols. Erasmian pronunciation is not scored by any engine.
+
+Hebrew is compared as IPA like Greek, through espeak-ng's `he` voice. The target may carry
+its points (בְּרֵאשִׁית): the cantillation marks (U+0591 to U+05AF) are dropped, the vowel
+points read, the dagesh of a bet, kaf or pe makes it a stop (b, k, p), and the sin dot a
+samekh; an unpointed target is read by espeak-ng's own rules, which leave most vowels
+out, so a target to be scored should be pointed. Israeli pronunciation: five vowels, the
+shewa an e, khet and khaf alike, alef and ayin alike. The glottal stop and the e of a
+first-letter shewa are optional, since a speaker says them either way.
 
 Before the harness session, for each recording the mill runs **every** engine in
 `[scorers]` `engines` that can score the language, at once, with the string in the

@@ -22,7 +22,7 @@ MAX_BODY = 64 << 20
 SLOW_SECONDS = 60
 
 # The languages a woven reading may have a segment in.
-SEGMENT_LANGS = ("en", "el")
+SEGMENT_LANGS = ("en", "el", "he")
 
 
 class Request(NamedTuple):
@@ -73,10 +73,10 @@ def _segments(raw):
         if not isinstance(text, str) or not text.strip():
             raise ValueError("%s text is missing or empty" % name)
         if not isinstance(lang, str) or not lang:
-            raise ValueError("%s lang is missing: send en or el" % name)
+            raise ValueError("%s lang is missing: send en, el or he" % name)
         code = lang.split("-")[0].lower()
         if code not in SEGMENT_LANGS:
-            raise ValueError("%s lang %r is not one a woven reading has: en or el" % (name, lang))
+            raise ValueError("%s lang %r is not one a woven reading has: en, el or he" % (name, lang))
         out.append((text, code))
     return out
 

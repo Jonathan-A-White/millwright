@@ -637,3 +637,92 @@ func TestGristGrindRecordsTheHarnessErrorInTheRunsNotes(t *testing.T) {
 		t.Fatalf("expected the sender told nothing of the mill's inside, got %q", answer.Reason)
 	}
 }
+
+// aReadingMill is a mill with one grist waiting: a recording read aloud, asking
+// for lang ("" asks for none), against a grind whose scoring.langs is langs.
+// The engine "local" is a fake that scores any reading.
+func aReadingMill(t *testing.T, langs, lang string) (application.GristGrind, *apptest.FakePostern, *apptest.FakeGrinder, *apptest.FakeScorer) {
+	t.Helper()
+	const phone = "02466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27"
+	keys := &fakeMillKey{made: true}
+	mill, _, _ := keys.PublicKey()
+	backend := apptest.NewFakePostern()
+	sealer := &apptest.FakeCipher{From: phone}
+	clip, _ := sealer.EncryptBytes(mill, []byte("webm bytes"))
+	hash, size, _ := backend.UploadBlob(context.Background(), mustBase64(t, clip))
+	input := `{"schemaVersion":"1.1","mode":"reading","target_text":"בְּרֵאשִׁית"`
+	if lang != "" {
+		input += `,"lang":"` + lang + `"`
+	}
+	plain, _ := json.Marshal(application.GristPlaintext{
+		Grist: application.GristName{App: "cairn", Kind: "reading", V: "1.1"}, Input: json.RawMessage(input + `}`),
+		Attachments: []application.PosternAttachment{{Hash: hash, Size: size, Mime: "audio/webm"}},
+	})
+	ct, _ := sealer.Encrypt(mill, string(plain))
+	backend.AddRecord(application.PosternRecord{Txid: "direct:r1", Class: application.GristClass, From: phone, To: mill,
+		Signer: phone, SignerApps: []string{"cairn"}, Ciphertext: ct})
+
+	grinds := apptest.NewFakeGrinds()
+	grinds.SetFile("/rigs/cairn", "c0ffee", "grinds/reading.json", []byte(`{"grind":1,"app":"cairn","kind":"reading","versions":["1.1"],
+		"model":"sonnet","effort":"low","instructions":"grinds/reading.md","answerSchema":"schema.json",
+		"attachments":{"min":1,"max":2,"mime":["audio/webm"],"maxBytes":1000},
+		"scoring":{"audio":true,"target_field":"target_text","langs":`+langs+`}}`))
+	grinds.SetFile("/rigs/cairn", "c0ffee", "grinds/reading.md", []byte("Say how it went."))
+	grinds.SetFile("/rigs/cairn", "c0ffee", "schema.json", []byte(`{"type":"object"}`))
+	grinder := &apptest.FakeGrinder{Result: application.SessionResult{Subtype: "success", Answer: json.RawMessage(`{}`)}}
+	local := &apptest.FakeScorer{Result: application.ReadingResult{Engine: "local", Accuracy: 90, Words: []application.ReadingWord{{Text: "בְּרֵאשִׁית", Accuracy: 90}}}}
+	return application.GristGrind{
+		Postern: backend, Cipher: &apptest.FakeCipher{From: mill}, Keys: keys,
+		State: apptest.NewFakeGristState(), Grinds: grinds, Grinder: grinder,
+		Pass: &apptest.FakeGristLock{}, Grinding: &apptest.FakeGristLock{}, Host: "laptop",
+		Scorers: application.NewScorerRegistry(map[string]application.Scorer{"local": local}),
+		Apps:    map[string]string{"cairn": "/rigs/cairn"}, TempDir: t.TempDir(),
+		Now: func() time.Time { return time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC) },
+	}, backend, grinder, local
+}
+
+// Hebrew is a language a grind may score in and a grist may ask for; French
+// still is not, in the words it always was refused with (mw-gdcyf98.8).
+func TestGristGrindScoresHebrewWhenTheGrindNamesIt(t *testing.T) {
+	t.Run("a grind naming he, a grist asking for he", func(t *testing.T) {
+		mill, backend, _, local := aReadingMill(t, `["en","el","he"]`, "he")
+		if _, err := mill.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		delivered := backend.Delivered()
+		if len(delivered) != 1 {
+			t.Fatalf("expected one answer, got %d", len(delivered))
+		}
+		if answer := openFakeAnswer(t, delivered[0]); answer.Status != application.GristAnswered {
+			t.Fatalf("expected the grist answered, got %+v", answer)
+		}
+		calls := local.Calls()
+		if len(calls) != 1 || calls[0].Lang != "he" {
+			t.Fatalf("expected the engine given the language he, got %+v", calls)
+		}
+	})
+	t.Run("a grist asking for fr is refused as before", func(t *testing.T) {
+		mill, backend, _, local := aReadingMill(t, `["en","el","he"]`, "fr")
+		if _, err := mill.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		answer := openFakeAnswer(t, backend.Delivered()[0])
+		want := "This grist asks for the language fr; its grind scores in en, el and he."
+		if answer.Status != application.GristRefused || answer.Reason != want {
+			t.Fatalf("expected refused because %q, got %+v", want, answer)
+		}
+		if len(local.Calls()) != 0 {
+			t.Errorf("no engine should be given a recording, got %+v", local.Calls())
+		}
+	})
+	t.Run("a grind naming fr is broken", func(t *testing.T) {
+		mill, backend, _, _ := aReadingMill(t, `["en","fr"]`, "")
+		if _, err := mill.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		answer := openFakeAnswer(t, backend.Delivered()[0])
+		if answer.Status != application.GristRefused || answer.Reason != application.GristReasonBrokenGrind {
+			t.Fatalf("expected refused as a broken grind, got %+v", answer)
+		}
+	})
+}

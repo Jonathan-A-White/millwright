@@ -109,6 +109,17 @@ the scorer is a `500`. `GET /health` answers `200` once the model is loaded.
    otherwise an `insertion`. Word accuracy is 100 × (1 − distance ÷ expected
    phones); the reading's is the mean over the target's words.
 
+## Hebrew
+
+`lang` `he` is modern Hebrew (the Israeli pronunciation), compared as IPA like Greek. The
+target should be pointed: espeak-ng's `he` voice leaves most vowels out of bare letters.
+`g2p.py` puts a pointed word in the form the voice reads (it spells out a word with a
+dagesh, a shin or sin dot, a holam on a consonant or a cantillation mark), drops the
+cantillation (U+0591 to U+05AF) and makes the dagesh of a bet, kaf or pe a stop;
+`phones.py` folds the spellings of one Hebrew phone and marks the glottal stop and the e of
+a first-letter shewa optional. A shewa inside a word is not said, and a yod after a
+patah is (espeak-ng's own reading); the tests are `tests/test_hebrew.py`.
+
 ## Greek
 
 `lang` `el` is modern Greek, monotonic letters (a verse as a Greek reader says it
@@ -135,7 +146,7 @@ nothing to leave out in `align`). At the start of a word the stop alone is expec
 
 ## A woven reading
 
-`segments` (`[{"text", "lang": "en"|"el"}, ...]`, docs/scorers.md) in place of
+`segments` (`[{"text", "lang": "en"|"el"|"he"}, ...]`, docs/scorers.md) in place of
 `target_text` and `lang` is a reading in two languages. `server.parse_request` reads
 either shape; `Scorer.score(..., segments=[(text, lang)])` scores it. Each segment goes
 through its own espeak-ng voice (`g2p.expected_woven`; the backends are cached by voice,

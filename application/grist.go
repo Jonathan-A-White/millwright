@@ -182,8 +182,8 @@ type GrindScoring struct {
 }
 
 // GristScoringLangs are the language codes a grind's scoring.langs may name:
-// English, modern Greek (monotonic), and Spanish.
-var GristScoringLangs = []string{"en", "el", "es"}
+// English, modern Greek (monotonic), Spanish, and Hebrew.
+var GristScoringLangs = []string{"en", "el", "es", "he"}
 
 // DefaultGristScoringLang is the language a recording is scored in when the
 // grind names none.

@@ -88,10 +88,13 @@ class Parser(unittest.TestCase):
                                     "segments": [{"text": "τὸν", "lang": "el"}]})
         self.assertEqual((got.target_text, got.segments), ("τὸν", [("τὸν", "el")]))
 
-    def test_a_segment_must_be_en_or_el(self):
+    def test_a_segment_must_be_en_el_or_he(self):
         with self.assertRaises(ValueError) as err:
             server.parse_request({"segments": [{"text": "hola", "lang": "es"}], "audio_wav_base64": self.AUDIO})
-        self.assertIn("en or el", str(err.exception))
+        self.assertIn("en, el or he", str(err.exception))
+        got = server.parse_request({"segments": [{"text": "In", "lang": "en"}, {"text": "בְּרֵאשִׁית", "lang": "he-IL"}],
+                                    "audio_wav_base64": self.AUDIO})
+        self.assertEqual(got.segments, [("In", "en"), ("בְּרֵאשִׁית", "he")])
 
     def test_segments_with_no_words_are_refused(self):
         with self.assertRaises(ValueError) as err:

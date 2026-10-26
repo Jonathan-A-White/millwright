@@ -97,12 +97,27 @@ def substitution_cost(expected, produced):
 #   the consonant after them, /l/ is [ʎ] before [j], and /r/ is a tap or a trill;
 #   the model writes the Greek voiced stop as g or ɡ, and may hear σ and ζ with a
 #   hush ([ʃ], [ʒ]) which a Greek reader does not distinguish.
+#
+# Modern Hebrew (the Israeli pronunciation, which espeak-ng's "he" speaks):
+#   five vowels, as Greek, and the shewa is an e, so a schwa is a spelling of it;
+#   the guttural letters are two sounds, [χ] for khet and khaf (the model may write
+#   [x] or [ħ]) and [ʔ] for alef and ayin (it may write [ʕ] or [ʡ]); the resh is
+#   a uvular [ʁ] to espeak-ng and the model may write any rhotic; the sibilants
+#   [ɕ] [ʂ] are a shin and [ʑ] [ʐ] a zayin-with-a-hush; vav is [v], never [w].
 _IPA_FOLD = {
     "el": {
         "ɑ": "a", "ɐ": "a", "æ": "a", "ɛ": "e", "ə": "e", "ɪ": "i", "ɨ": "i", "y": "i", "ʏ": "i",
         "ɔ": "o", "ɒ": "o", "ʊ": "u",
         "ç": "x", "ʝ": "ɣ", "c": "k", "ɟ": "ɡ", "g": "ɡ", "ŋ": "n", "ɲ": "n", "ɱ": "m",
         "ʎ": "l", "ɫ": "l", "ɾ": "r", "ɹ": "r", "ɻ": "r", "ʃ": "s", "ʒ": "z",
+    },
+    "he": {
+        "ɑ": "a", "ɐ": "a", "æ": "a", "ɛ": "e", "ə": "e", "ɘ": "e", "ɜ": "e", "ɪ": "i", "ɨ": "i", "ɔ": "o", "ɒ": "o", "ɵ": "o",
+        "ʊ": "u", "ɯ": "u", "y": "u", "ʏ": "u",
+        "x": "χ", "ħ": "χ", "ʕ": "ʔ", "ʡ": "ʔ", "ʢ": "ʔ", "ɦ": "h",
+        "ɕ": "ʃ", "ʂ": "ʃ", "ʑ": "ʒ", "ʐ": "ʒ",
+        "r": "ʁ", "ɾ": "ʁ", "ɹ": "ʁ", "ɻ": "ʁ", "ʀ": "ʁ", "ɫ": "l",
+        "g": "ɡ", "c": "k", "ɟ": "ɡ", "w": "v", "ʋ": "v",
     },
 }
 
@@ -127,6 +142,7 @@ _IPA_MODEL = {frozenset(p) for p in [
 # Vowels by language that stand a step apart (a near miss, half a phone).
 _IPA_NEAR_VOWELS = {
     "el": {frozenset(p) for p in [("e", "i"), ("o", "u"), ("a", "e"), ("a", "o")]},
+    "he": {frozenset(p) for p in [("e", "i"), ("o", "u"), ("a", "e"), ("a", "o"), ("e", "o")]},
 }
 
 _IPA_VOWELS = set("aeiouyɑɐæɛəɪɨʏɔɒʊøœɜɵ")
@@ -186,6 +202,8 @@ def with_optional_nasals(word, phs, lang):
     ντ, μπ, γκ, γγ inside the word marked Optional, put in where espeak-ng left it out. A
     cluster at the start of the word stays the stop alone. When the clusters in the letters
     and the stops in the phones do not pair up one to one, the phones are left as they are."""
+    if lang.split("-")[0].lower() == "he":
+        return _optional_hebrew(word, phs)
     table = _OPTIONAL_NASALS.get(lang.split("-")[0].lower())
     if not table:
         return list(phs)
@@ -202,6 +220,19 @@ def with_optional_nasals(word, phs, lang):
             out[at - 1] = Optional(nasal)
         else:
             out.insert(at, Optional(nasal))
+    return out
+
+
+def _optional_hebrew(word, phs):
+    """The phones of a Hebrew word with the ones a reader may leave out marked Optional: the
+    glottal stop of an alef, ayin or final he, which a speaker of Israeli Hebrew says rarely
+    and the model seldom hears, and the e of a shewa on the first letter, which is said or
+    not (bereshit, be-reshit)."""
+    out = [Optional(p) if p == "ʔ" else p for p in phs]
+    letters = unicodedata.normalize("NFD", word)
+    first = re.match(r"[\u05D0-\u05EA][\u0591-\u05AF\u05B1-\u05BD\u05BF-\u05C7]*\u05B0", letters)
+    if first and len(out) > 1 and out[1] not in _IPA_VOWELS:
+        out.insert(1, Optional("e"))
     return out
 
 
