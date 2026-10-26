@@ -277,25 +277,41 @@ func newMemoryQueryCmd() *cobra.Command {
 }
 
 func newMemoryEvalCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "eval <rig>",
+	var fix bool
+	cmd := &cobra.Command{
+		Use:   "eval <rig> [--fix]",
 		Short: "Run a rig's scripted questions against its facts: the pass bar for its memory",
 		Long: "eval reads seats/builder/rigs/<rig>/eval.md, blocks of 'Q: <what a Builder would ask>' and\n" +
 			"'expect: <slug>[, <slug>...]' separated by blank lines ('#' lines are comments), and runs\n" +
 			"each Q as a query (its words as terms, the stop words a, an, the, to, of, in, on, is, does,\n" +
 			"how, what, when and where dropped). It prints 'PASS <rank> <slug>  Q' for each expected fact\n" +
-			"found in the top three results and 'FAIL <slug> not in top 3  Q' for each that is not, and\n" +
-			"exits 1 when any question fails. A rig with no eval.md prints 'no eval' and exits 0. It reads\n" +
-			"files and runs no git command. mw status says 'eval failing' for a rig that fails.",
+			"found in the top three results and 'FAIL <slug> not in top 3  Q' for each that is not. An\n" +
+			"expected fact that is superseded or retired is dead, whatever its rank: it prints\n" +
+			"'STALE <slug>: superseded by <head> (<status>)  Q' or 'STALE <slug>: retired: <reason>  Q',\n" +
+			"counts as a FAIL, and the command exits 1 when any question fails. A flagged (recheck) fact is\n" +
+			"not stale. A rig with no eval.md prints 'no eval' and exits 0. It reads files and runs no git\n" +
+			"command. mw status says 'eval failing' for a rig that fails.\n\n" +
+			"--fix rewrites eval.md so that nothing stale is expected, and commits it in the vault: a\n" +
+			"stale slug is replaced by the current fact that took its place (the end of its supersede\n" +
+			"chain, or the one a retire reason says it was merged into or superseded by) unless the\n" +
+			"question already expects that fact; it is dropped when there is none, when that fact is\n" +
+			"itself retired or when the question already expects it; a question left with no expect is\n" +
+			"removed whole. It prints one line for each change and leaves the rest of eval.md as it was.\n" +
+			"A FAIL that is not stale is not touched: it is printed, and the command exits 1.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			memory, err := memoryFor(cmd)
 			if err != nil {
 				return err
 			}
+			if fix {
+				return memory.EvalFix(cmd.Context(), args[0])
+			}
 			return memory.Eval(cmd.Context(), args[0])
 		},
 	}
+	cmd.Flags().BoolVar(&fix, "fix", false, "rewrite eval.md so that no expect names a superseded or retired fact")
+	return cmd
 }
 
 func newMemoryDemoteCmd() *cobra.Command {

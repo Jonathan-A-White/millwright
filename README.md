@@ -3057,7 +3057,7 @@ mw memory recheck <rig> <slug> [--why "<text>"]
 mw memory list <rig> [--current | --status current|recheck|superseded|retired] [--oldest]
 mw memory migrate <rig> [--dry-run]
 mw memory query <rig> <term>...
-mw memory eval <rig>
+mw memory eval <rig> [--fix]
 mw memory demote <rig> <slug> [--question "<terms>"]
 mw memory promote <rig> <slug>
 mw memory make-room <rig> --bytes N [--dry-run]
@@ -3137,9 +3137,19 @@ expect: vault-flag, never-sync-in-tests
 `mw memory eval <rig>` runs each `Q:` as a `query` (its words as terms, edged
 punctuation off, and the stop words a, an, the, to, of, in, on, is, does, how,
 what, when and where dropped, so every remaining word must start a word of one
-fact) and looks for each expected slug among the first three hits, whatever its
-status. It prints `PASS <rank> <slug>  <Q>` or `FAIL <slug> not in top 3  <Q>`
-for each slug, and exits 1 when any question has a FAIL. A rig with no
+fact) and looks for each expected slug among the first three hits. It prints
+`PASS <rank> <slug>  <Q>` or `FAIL <slug> not in top 3  <Q>` for each slug, and
+exits 1 when any question has a FAIL. An expected fact that is superseded or
+retired is dead whatever its rank: it prints `STALE <slug>: superseded by <head>
+(<status>)  <Q>` (the end of its supersede chain) or `STALE <slug>: retired:
+<reason>  <Q>`, counts as a FAIL, and a flagged (`recheck`) fact is not stale.
+`mw memory eval <rig> --fix` rewrites `eval.md` and commits it in the vault: a
+stale slug becomes the current fact that took its place (the head of its chain,
+or the one a retire reason says it was merged into or superseded by) unless the
+question already expects that fact, and is dropped when there is none, the head
+is itself retired or the question already expects it; a question left with no
+expect is removed whole. It prints one line for each change, leaves the rest of
+`eval.md` as it was, and still exits 1 for a FAIL that is not stale. A rig with no
 `eval.md` prints `no eval` and exits 0; an `eval.md` with a block that is not a
 `Q:` with an `expect:`, or a line that is neither, is refused naming its line.
 `mw status` runs the eval of every rig kept as facts (files only) and adds, under

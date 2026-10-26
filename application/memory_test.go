@@ -575,6 +575,16 @@ func TestSupersedingAFactTheQuestionStillFindsKeepsTheOldSlugAndAddsTheNew(t *te
 	if !strings.Contains(files.eval, "Q: gate make lint\nexpect: gate, gate-new\n") {
 		t.Errorf("eval.md:\n%s", files.eval)
 	}
+	// The old slug is superseded now, so the eval calls it stale until --fix drops it.
+	if err := memory.Eval(context.Background(), "kiln"); err == nil || !strings.Contains(err.Error(), "1 stale") {
+		t.Errorf("the eval should fail on the stale old slug, got %v", err)
+	}
+	if err := memory.EvalFix(context.Background(), "kiln"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(files.eval, "Q: gate make lint\nexpect: gate-new\n") {
+		t.Errorf("eval.md after the fix:\n%s", files.eval)
+	}
 	if err := memory.Eval(context.Background(), "kiln"); err != nil {
 		t.Fatal(err)
 	}

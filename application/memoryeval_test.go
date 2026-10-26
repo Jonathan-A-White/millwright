@@ -1,6 +1,8 @@
 package application_test
 
 import (
+	"bytes"
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -42,5 +44,179 @@ func TestParseEvalRefusesABlockThatIsNotWhole(t *testing.T) {
 		if _, err := application.ParseEval(text); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: got %v, want an error saying %q", text, err, want)
 		}
+	}
+}
+
+// staleFact is a fact file whose status is set by its extra front matter lines.
+func staleFact(status, extra, sentence string) string {
+	return "---\nsubject: zoo\nkind: gotcha\nstatus: " + status + "\nsource: mw-1\nsince: 2026-09-01\n" + extra + "---\n\n" + sentence + "\n"
+}
+
+// staleMemory is a rig whose facts hold every kind of expect the eval can
+// meet: a dead fact behind a chain, a retiree with and without a successor, a
+// current fact and a flagged one. Each family has its own animal, so a question
+// finds only its own.
+func staleMemory(eval string, out *bytes.Buffer) (application.Memory, *editableFiles, *recordingVault) {
+	files := &editableFiles{
+		files: map[string]string{
+			"old-a.md":  staleFact("superseded", "superseded-by: mid-a\n", "A zebra once."),
+			"mid-a.md":  staleFact("superseded", "supersedes: old-a\nsuperseded-by: head-a\n", "A zebra later."),
+			"head-a.md": staleFact("current", "supersedes: mid-a\n", "A zebra now."),
+			"old-b.md":  staleFact("superseded", "superseded-by: head-b\n", "A yak once."),
+			"head-b.md": staleFact("retired", "retired: 2026-10-01\nreason: gone\n", "A yak now."),
+			"cur-b.md":  staleFact("current", "", "A yak always."),
+			"old-c.md":  staleFact("retired", "retired: 2026-10-01\nreason: merged into head-c (mw-2)\n", "A wolf once."),
+			"head-c.md": staleFact("current", "", "A wolf now."),
+			"old-d.md":  staleFact("superseded", "superseded-by: head-d\n", "A vole once."),
+			"head-d.md": staleFact("current", "", "A vole now."),
+			"old-e.md":  staleFact("retired", "retired: 2026-10-01\nreason: stale\n", "A urial once."),
+			"cur-e.md":  staleFact("current", "", "A urial now."),
+			"old-f.md":  staleFact("retired", "retired: 2026-10-01\nreason: duplicate\n", "A tapir once."),
+			"cur-g.md":  staleFact("current", "", "A stoat now."),
+			"flag-h.md": staleFact("recheck", "reason: doubt\n", "A newt maybe."),
+		},
+		eval: eval,
+	}
+	vault := &recordingVault{}
+	return anEditableMemory(files, vault, out), files, vault
+}
+
+const staleEval = `# what a Builder asks about the zoo
+
+Q: zebra
+expect: old-a
+
+Q: yak
+expect: old-b, cur-b
+
+Q: wolf
+expect: old-c
+
+# the vole is asked twice
+Q: vole
+expect: old-d, head-d
+
+Q: urial
+expect: old-e, cur-e
+
+Q: tapir
+expect: old-f
+
+Q: stoat
+expect: cur-g
+
+Q: newt
+expect: flag-h
+`
+
+func TestEvalCallsAnExpectOfASupersededOrRetiredFactStaleAndFails(t *testing.T) {
+	var out bytes.Buffer
+	m, _, _ := staleMemory(staleEval, &out)
+	err := m.Eval(context.Background(), "zoo")
+	if err == nil || !strings.Contains(err.Error(), "eval failing: 6 of 8") {
+		t.Fatalf("got %v, want eval failing: 6 of 8", err)
+	}
+	want := `STALE old-a: superseded by head-a (current)  zebra
+STALE old-b: superseded by head-b (retired)  yak
+PASS 1 cur-b  yak
+STALE old-c: retired: merged into head-c (mw-2)  wolf
+STALE old-d: superseded by head-d (current)  vole
+PASS 1 head-d  vole
+STALE old-e: retired: stale  urial
+PASS 1 cur-e  urial
+STALE old-f: retired: duplicate  tapir
+PASS 1 cur-g  stoat
+PASS 1 flag-h  newt
+`
+	if out.String() != want {
+		t.Errorf("got:\n%s\nwant:\n%s", out.String(), want)
+	}
+}
+
+func TestEvalFixRewritesEachStaleExpectAndLeavesTheRestAlone(t *testing.T) {
+	var out bytes.Buffer
+	m, files, vault := staleMemory(staleEval, &out)
+	if err := m.EvalFix(context.Background(), "zoo"); err != nil {
+		t.Fatal(err)
+	}
+	wantOut := `replaced old-a with head-a at line 3 (zebra)
+dropped old-b at line 6 (yak): superseded by head-b, which is retired
+replaced old-c with head-c at line 9 (wolf)
+dropped old-d at line 13 (vole): head-d is already expected
+dropped old-e at line 16 (urial): retired: stale
+removed the question at line 19 (tapir): no expect left (old-f retired: duplicate)
+`
+	if out.String() != wantOut {
+		t.Errorf("printed:\n%s\nwant:\n%s", out.String(), wantOut)
+	}
+	wantEval := `# what a Builder asks about the zoo
+
+Q: zebra
+expect: head-a
+
+Q: yak
+expect: cur-b
+
+Q: wolf
+expect: head-c
+
+# the vole is asked twice
+Q: vole
+expect: head-d
+
+Q: urial
+expect: cur-e
+
+Q: stoat
+expect: cur-g
+
+Q: newt
+expect: flag-h
+`
+	if files.eval != wantEval {
+		t.Errorf("eval.md:\n%s\nwant:\n%s", files.eval, wantEval)
+	}
+	if len(vault.messages) != 1 || !strings.Contains(vault.messages[0], "memory eval fix zoo") {
+		t.Errorf("want one commit of the fix, got %v", vault.messages)
+	}
+	out.Reset()
+	if err := m.Eval(context.Background(), "zoo"); err != nil {
+		t.Errorf("eval after the fix: %v", err)
+	}
+	if strings.Contains(out.String(), "STALE") || strings.Contains(out.String(), "FAIL") {
+		t.Errorf("eval after the fix:\n%s", out.String())
+	}
+}
+
+func TestEvalFixWithNothingStaleWritesAndCommitsNothing(t *testing.T) {
+	var out bytes.Buffer
+	m, files, vault := staleMemory("Q: stoat\nexpect: cur-g\n", &out)
+	if err := m.EvalFix(context.Background(), "zoo"); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "nothing stale\n" || len(files.wrote) != 0 || len(vault.messages) != 0 {
+		t.Errorf("printed %q, wrote %v, committed %v", out.String(), files.wrote, vault.messages)
+	}
+}
+
+func TestEvalFixKeepsTheLastBlockOfAFileWhole(t *testing.T) {
+	var out bytes.Buffer
+	m, files, _ := staleMemory("Q: stoat\nexpect: cur-g\n\nQ: tapir\nexpect: old-f\n", &out)
+	if err := m.EvalFix(context.Background(), "zoo"); err != nil {
+		t.Fatal(err)
+	}
+	if want := "Q: stoat\nexpect: cur-g\n"; files.eval != want {
+		t.Errorf("got %q, want %q", files.eval, want)
+	}
+}
+
+func TestEvalFixDropsTheStaleOneOfThreeThatShareAChain(t *testing.T) {
+	var out bytes.Buffer
+	m, files, _ := staleMemory("Q: zebra\nexpect: old-a, mid-a\n", &out)
+	if err := m.EvalFix(context.Background(), "zoo"); err != nil {
+		t.Fatal(err)
+	}
+	if want := "Q: zebra\nexpect: head-a\n"; files.eval != want {
+		t.Errorf("got %q, want %q", files.eval, want)
 	}
 }
