@@ -269,3 +269,60 @@ func TestEveryResendLineSaysWrongWhenEverySendWasWrong(t *testing.T) {
 		t.Errorf("expected nothing right and the miss held, got %q %+v", out.String(), report)
 	}
 }
+
+// mw-gq6.806: an open mail, a molecule or a molecule's step whose title names the
+// example is no filing of it (the landing mail of a story that fixed it names it
+// too, and stays open until it is read); an open bug that names it still is.
+func TestAnExampleOnlyAnOpenMailOrMoleculeNamesIsNotNamed(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, id, kind string
+		named          bool
+	}{
+		{"an open mail", "mw-h2omel", "mail", false},
+		{"a molecule", "mw-mol-aaaaaa", "molecule", false},
+		{"a molecule's step", "mw-mol-bbbbbb", "task", false},
+		{"an open bug", "mw-bug1", "bug", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tracker := apptest.NewFakeTracker()
+			tracker.AddStory("mw-5r3p30", domain.Story{ID: tc.id, Title: "Fix lampas/tutor/hello so it answers"})
+			if err := tracker.SetType(tc.id, tc.kind); err != nil {
+				t.Fatal(err)
+			}
+			named, err := tracker.FiledSmokeExamples(ctx, []string{"lampas/tutor/hello"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, got := named["lampas/tutor/hello"]; got != tc.named {
+				t.Errorf("%s: named = %v, want %v (%v)", tc.name, got, tc.named, named)
+			}
+		})
+	}
+}
+
+func TestAFlakyExampleOnlyAnOpenMailNamesKeepsTheAskToFileABug(t *testing.T) {
+	ctx := context.Background()
+	box := apptest.NewFakeMailbox()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddStory("mw-5r3p30", domain.Story{ID: "mw-h2omel", Title: "Landed: lampas/tutor/hello answers again"})
+	if err := tracker.SetType("mw-h2omel", "mail"); err != nil {
+		t.Fatal(err)
+	}
+	book := application.GristSmokeBook{Notes: tracker, Filed: tracker, Comments: tracker, Mailbox: box, Host: "laptop"}
+	smoke, _ := smokeWith(&slipScript{answers: []string{"slip", "ok", "ok"}})
+	report, err := smoke.Run(ctx, "lampas", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := book.Record(ctx, "millwright", report); err != nil {
+		t.Fatal(err)
+	}
+	inbox, _ := box.Inbox(ctx, application.MayorMailbox)
+	if len(inbox) != 1 || !strings.Contains(inbox[0].Body, "file it as a bug") || strings.Contains(inbox[0].Body, "already named") {
+		t.Fatalf("expected the ask to file a bug, got %+v", inbox)
+	}
+	if got := tracker.Comments("mw-h2omel"); len(got) != 0 {
+		t.Errorf("expected no note on the mail, got %q", got)
+	}
+}

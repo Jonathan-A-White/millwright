@@ -2340,7 +2340,7 @@ func (f *FakeTracker) FiledSmokeExamples(_ context.Context, examples []string) (
 	}
 	for _, id := range f.order {
 		s := f.stories[id]
-		if s == nil || s.detail.Closed() {
+		if s == nil || s.detail.Closed() || !application.FilesSmokeExample(s.detail.Type, id) {
 			continue
 		}
 		for _, example := range examples {

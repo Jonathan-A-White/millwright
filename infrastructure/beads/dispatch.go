@@ -721,7 +721,8 @@ func ready(waitingOn []string, done map[string]bool) bool {
 // the beads carrying the smoke_examples metadata, closed ones left out (bd's
 // list leaves them out unless asked), each example with the bead that names it;
 // and, when examples are asked after, one `bd list` of every open bead, whose
-// title or description may name one of them (application.NamesSmokeExample).
+// title or description may name one of them (application.NamesSmokeExample); a
+// mail, a molecule and its steps are not asked (application.FilesSmokeExample).
 func (g *Gateway) FiledSmokeExamples(ctx context.Context, examples []string) (map[string]string, error) {
 	out, err := g.call(ctx, "list", "--has-metadata-key", application.SmokeExamplesField, "--limit", "0", "--json")
 	if err != nil {
@@ -756,7 +757,7 @@ func (g *Gateway) FiledSmokeExamples(ctx context.Context, examples []string) (ma
 	}
 	for _, b := range all {
 		detail := b.detail(domain.Path{})
-		if detail.Closed() {
+		if detail.Closed() || !application.FilesSmokeExample(b.Type, b.ID) {
 			continue
 		}
 		for _, example := range examples {

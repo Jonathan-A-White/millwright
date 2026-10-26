@@ -1084,6 +1084,14 @@ func (h GristSmokeHold) Fix(detail StoryDetail) string {
 	return ""
 }
 
+// FilesSmokeExample says a bead of this type and id can be the filing of a failing
+// smoke example by naming it in its text: a work bead, never a mail (a landing
+// mail's title is its story's, and it stays open until read), a molecule or one
+// of its steps (mw-gq6.806).
+func FilesSmokeExample(kind, id string) bool {
+	return kind != TypeMail && kind != "molecule" && !strings.Contains(id, "-mol-")
+}
+
 // NamesSmokeExample says text names example, <app>/<kind>/<example>: it holds the
 // full name, <kind>/<example>, or the bare example name, each standing on its own
 // (not inside a longer name such as verse-text-ask-two, and the shorter forms not
