@@ -632,6 +632,14 @@ type closeOut struct {
 	// finished one (mw-gq6.595).
 	cappedAfterClosing bool
 
+	// own are the stories whose own checks the related-tests line is given the
+	// failures of when this is a batch's close-out; nil is the story itself.
+	// failedFiles are the test files those checks failed, once failedRead says
+	// they were read (mw-gq6.808).
+	own         []ownCheck
+	failedFiles []string
+	failedRead  bool
+
 	// landingReadErr is why the close-out's last read of the rig's file for how
 	// it lands failed, nil when it did not; merge's guard names it.
 	landingReadErr error

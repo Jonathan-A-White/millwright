@@ -929,9 +929,13 @@ func (b BatchLand) storyCloseOut(s BatchStory, rigDir string) *closeOut {
 // batchCloseOut is the batch itself as the gate takes it: named for the
 // batch, in the rig, on its target.
 func (b BatchLand) batchCloseOut(report *BatchReport, rigDir string) *closeOut {
+	own := []ownCheck{}
+	for _, s := range report.Merged {
+		own = append(own, ownCheck{id: s.ID, attempt: max(1, s.detail.Attempts)})
+	}
 	return &closeOut{
 		id: report.Label(), path: domain.Path{Rig: report.Rig, Branch: report.Target}, rigDir: rigDir,
-		target: report.Target, began: b.Next.now(),
+		target: report.Target, began: b.Next.now(), own: own,
 	}
 }
 

@@ -377,10 +377,13 @@ type RelatedRun struct {
 // is not the branch's work, the version bump of a landing: its changes are
 // left out (a bump of package.json would otherwise make a rig's test runner
 // relate that file to a great part of its tests), and what comes after it is
-// not.
+// not. Also are test files that the stories' own checks failed (mw-gq6.808): a
+// line that picks tests by import graph never selects a test that reads source
+// files as text, so those files are given to it as well as the changed ones.
 type RelatedSpan struct {
 	Base string
 	Skip string
+	Also []string
 }
 
 // RelatedChecks is the port a rig's related-tests line is run through

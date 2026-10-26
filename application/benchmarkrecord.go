@@ -56,6 +56,7 @@ func (n Next) timedChecks(ctx context.Context, c *closeOut, report *NextReport, 
 	started := n.now()
 	defer func() { c.gate.seconds += n.now().Sub(started).Seconds() }()
 	if n.RelatedChecks != nil && span.Base != "" {
+		span.Also = n.failedInOwnChecks(ctx, c)
 		run, err := n.RelatedChecks.RunRelated(ctx, c.path.Rig, dir, span)
 		switch {
 		case err != nil:

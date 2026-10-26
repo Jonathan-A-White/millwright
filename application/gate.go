@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -509,4 +510,89 @@ func secondRun(checked Checked, err error) string {
 		return "passed"
 	}
 	return "failed"
+}
+
+// maxCheckParts is how many parts of a gate a story's check records are looked
+// for; a rig's gate is a handful of parts.
+const maxCheckParts = 32
+
+// ownCheck is a story whose own check records, the check-<attempt>.log and
+// check-<attempt>-part-<n>.log of its run, are read for the tests that failed.
+type ownCheck struct {
+	id      string
+	attempt int
+}
+
+// failingTestFile is a line of a run's output that names a failing test by its
+// file: vitest's `FAIL <file> > <test>` and the `×` and `✘` lines of its list
+// and Playwright's. The file is the first word that looks like a path with an
+// extension; go test's `--- FAIL: TestX` names none.
+var (
+	failingTestFile = regexp.MustCompile(`^\s*(?:FAIL +|× +|✘ +)`)
+	testFilePath    = regexp.MustCompile(`[A-Za-z0-9_@.\-]+(?:/[A-Za-z0-9_@.\-]+)*\.[A-Za-z][A-Za-z0-9]*`)
+	lineColumn      = regexp.MustCompile(`(?::\d+)+$`)
+)
+
+// failingTestFiles is the files a failing run's output names as the file of a
+// failing test, each once, in the order it named them (mw-gq6.808).
+func failingTestFiles(output string) []string {
+	var files []string
+	for _, line := range strings.Split(strings.ReplaceAll(domain.StripANSI(output), "\r\n", "\n"), "\n") {
+		if !failingTestFile.MatchString(line) {
+			continue
+		}
+		rest := failingTestFile.ReplaceAllString(line, "")
+		for _, word := range strings.Fields(rest) {
+			file := lineColumn.ReplaceAllString(word, "")
+			if testFilePath.FindString(file) != file || strings.HasPrefix(file, "-") {
+				continue
+			}
+			if !slices.Contains(files, file) {
+				files = append(files, file)
+			}
+			break
+		}
+	}
+	return files
+}
+
+// ownChecks are the stories whose own checks the close-out's related run is
+// given the failures of: the story itself, or, for a batch, every story it
+// merged.
+func (c *closeOut) ownChecks() []ownCheck {
+	if c.own != nil {
+		return c.own
+	}
+	return []ownCheck{{id: c.id, attempt: c.attempt()}}
+}
+
+// failedInOwnChecks are the test files that failed in the newest own check of
+// each story the close-out gates (mw-gq6.808), read once: a rig's related-tests
+// line selects tests by the files the branch changed, so a test that reads
+// source files as text, and a story's own check failed, would otherwise pass
+// the gate unseen. A check log that is not there, or cannot be read, names
+// none; the record of a gate part is read only when it says it failed.
+func (n Next) failedInOwnChecks(ctx context.Context, c *closeOut) []string {
+	if c.failedRead || n.Vault == nil {
+		return c.failedFiles
+	}
+	c.failedRead = true
+	for _, story := range c.ownChecks() {
+		whole, err := n.Vault.ReadRunFile(ctx, story.id, CheckLogFileName(story.attempt))
+		if err == nil {
+			c.failedFiles = appendNew(c.failedFiles, failingTestFiles(whole)...)
+		}
+		for part := 1; part <= maxCheckParts; part++ {
+			record, err := n.Vault.ReadRunFile(ctx, story.id, CheckPartFileName(story.attempt, part))
+			if err != nil {
+				continue
+			}
+			lines := strings.SplitN(record, "\n", 3)
+			if len(lines) < 3 || strings.TrimSpace(lines[1]) != partFailed {
+				continue
+			}
+			c.failedFiles = appendNew(c.failedFiles, failingTestFiles(lines[2])...)
+		}
+	}
+	return c.failedFiles
 }
