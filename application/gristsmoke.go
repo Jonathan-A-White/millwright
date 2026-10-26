@@ -1,6 +1,7 @@
 package application
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/rand"
@@ -80,6 +81,8 @@ type GristSmoke struct {
 	Override *GristGrindOverride
 	// Out is where progress is printed; nil prints nothing.
 	Out io.Writer
+	// Now is the clock the failing runs are timed by; nil is time.Now.
+	Now func() time.Time
 }
 
 // GristRecord is the mill's record of its runs, read: GristState has it.
@@ -145,6 +148,82 @@ type GristSmokeReport struct {
 	// Flakes are the examples that missed and then passed when sent again, so
 	// that they hold nothing; each is also a Warning.
 	Flakes []GristSmokeFlake `json:"flakes,omitempty"`
+	// Runs says when each example that failed, flaked or was not run went, and
+	// whether its grind changed on the app's main after (mw-gq6.807), keyed by
+	// <app>/<kind>/<example>. The grinds were all read at Commit.
+	Runs map[string]GristSmokeRun `json:"runs,omitempty"`
+}
+
+// GristSmokeRun is when the failing run of an example went and what the app's
+// main did to the example's grind after it, so that a miss from before a fix
+// that landed since is not read as a repeat (mw-gq6.807).
+type GristSmokeRun struct {
+	// At is when the example was first sent.
+	At time.Time `json:"at"`
+	// NotRun says the mill could not be asked (GristSmokeReport.NotRun), so the
+	// run is no miss.
+	NotRun bool `json:"not_run,omitempty"`
+	// Changed is the commit of the app's main, short, that holds the example's
+	// grind (the grind, its instructions, its answer schema or the example's
+	// own file) other than the commit the grinds were read at; empty when the
+	// main has not moved or has not touched them.
+	Changed string `json:"changed,omitempty"`
+}
+
+// runWent says when and at which commit of the grinds the example's run went.
+func (r GristSmokeRun) runWent(commit string) string {
+	return fmt.Sprintf("went at %s on the grinds read at %s", r.At.UTC().Format("2006-01-02 15:04:05Z"), shortCommit(commit))
+}
+
+// changedLine is the one line that says the example's grind changed after the
+// run, empty when it did not.
+func (r GristSmokeRun) changedLine(example string) string {
+	if r.Changed == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s's grind changed after this run, at %s: check that run's commit before filing", example, r.Changed)
+}
+
+// runNote is runs' note for example as a clause to add to a line: when the run
+// went, and the changed line when it has one; empty when the run is not known.
+func runNote(runs map[string]GristSmokeRun, commit, example string) string {
+	run, ok := runs[example]
+	if !ok || run.NotRun {
+		return ""
+	}
+	note := "run " + run.runWent(commit)
+	if line := run.changedLine(example); line != "" {
+		note += "; " + line
+	}
+	return note
+}
+
+// failuresWithRuns are failures, each with the note of its run when runs has
+// one: the lines the report and mw status say.
+func failuresWithRuns(failures []string, runs map[string]GristSmokeRun, commit string) []string {
+	said := make([]string, len(failures))
+	for i, failure := range failures {
+		said[i] = failure
+		if note := runNote(runs, commit, smokeExampleOf(failure)); note != "" {
+			said[i] += " (" + note + ")"
+		}
+	}
+	return said
+}
+
+// notRunNote is when the first example the mill could not be asked of went,
+// as a clause to add to the not-run line; empty when none is known.
+func notRunNote(runs map[string]GristSmokeRun, commit string) string {
+	var first *GristSmokeRun
+	for _, run := range runs {
+		if run.NotRun && (first == nil || run.At.Before(first.At)) {
+			first = &run
+		}
+	}
+	if first == nil {
+		return ""
+	}
+	return fmt.Sprintf(" (the first send went at %s on the grinds read at %s)", first.At.UTC().Format("2006-01-02 15:04:05Z"), shortCommit(commit))
 }
 
 // GristSmokeResends is how many more times a smoke sends an example whose
@@ -192,9 +271,9 @@ func (r GristSmokeReport) Line() string {
 		if len(r.FiledOn) > 0 {
 			filed = ", all filed on " + strings.Join(r.FiledOn, ", ") + ": not held"
 		}
-		return fmt.Sprintf("grist smoke: %s: FAILED %d of %d examples%s: %s%s", r.App, len(r.Failures), r.Examples, filed, strings.Join(r.Failures, "; "), r.flakyNote())
+		return fmt.Sprintf("grist smoke: %s: FAILED %d of %d examples%s: %s%s", r.App, len(r.Failures), r.Examples, filed, strings.Join(failuresWithRuns(r.Failures, r.Runs, r.Commit), "; "), r.flakyNote())
 	case len(r.NotRun) > 0:
-		return fmt.Sprintf("grist smoke: %s: not run: %s%s", r.App, strings.Join(r.NotRun, "; "), r.flakyNote())
+		return fmt.Sprintf("grist smoke: %s: not run: %s%s%s", r.App, strings.Join(r.NotRun, "; "), notRunNote(r.Runs, r.Commit), r.flakyNote())
 	}
 	said := fmt.Sprintf("grist smoke: %s: ok, %d examples answered as expected", r.App, r.Examples)
 	if len(r.Warnings) > 0 {
@@ -336,7 +415,13 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 		name := strings.TrimSuffix(path.Base(example), ".json")
 		report.Examples++
 		s.say("sending %s/%s ...", label, name)
+		at := s.now()
 		why, notRun, flake, groundAt := s.example(ctx, checkout, commit, app, kind, example, held)
+		if flake != nil || notRun != "" || why != "" {
+			report.addRun(label+"/"+name, GristSmokeRun{
+				At: at, NotRun: flake == nil && notRun != "", Changed: s.changedAfter(ctx, checkout, commit, kind, example),
+			})
+		}
 		if groundAt != "" {
 			note := groundElsewhere(label+"/"+name, app, groundAt, commit)
 			if !slices.Contains(report.Warnings, note) {
@@ -364,6 +449,58 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 		}
 		s.say("  ok")
 	}
+}
+
+// addRun keeps the run of example.
+func (r *GristSmokeReport) addRun(example string, run GristSmokeRun) {
+	if r.Runs == nil {
+		r.Runs = map[string]GristSmokeRun{}
+	}
+	r.Runs[example] = run
+}
+
+func (s GristSmoke) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
+}
+
+// changedAfter is the commit of the app's main, short, when it holds the
+// example's grind (the kind's grind file, its instructions and answer schema,
+// and the example's file) other than the commit the smoke read; empty when the
+// main is still at it, has not touched them, or cannot be read. It looks at the
+// remote's main again, as a smoke of a big app runs for an hour and a fix may
+// land under it (mw-gq6.807).
+func (s GristSmoke) changedAfter(ctx context.Context, checkout, commit, kind, example string) string {
+	_ = s.Grinds.Refresh(ctx, checkout)
+	now, err := s.Grinds.Commit(ctx, checkout)
+	if err != nil || now == "" || sameCommit(now, commit) {
+		return ""
+	}
+	grind, ok := s.readGrind(ctx, checkout, commit, kind)
+	if !ok {
+		return ""
+	}
+	files := []string{path.Join(GristSmokeDir, kind+".json"), example}
+	if rigPath(grind.AnswerSchema) {
+		files = append(files, grind.AnswerSchema)
+	}
+	for _, file := range files {
+		before, foundBefore, errBefore := s.Grinds.ReadAt(ctx, checkout, commit, file)
+		after, foundAfter, errAfter := s.Grinds.ReadAt(ctx, checkout, now, file)
+		if errBefore == nil && errAfter == nil && (foundBefore != foundAfter || !bytes.Equal(before, after)) {
+			return shortCommit(now)
+		}
+	}
+	if rigPath(grind.Instructions) {
+		before, foundBefore, errBefore := readGrindInstructions(ctx, s.Grinds, checkout, commit, grind.Instructions)
+		after, foundAfter, errAfter := readGrindInstructions(ctx, s.Grinds, checkout, now, grind.Instructions)
+		if errBefore == nil && errAfter == nil && (foundBefore != foundAfter || !bytes.Equal(before, after)) {
+			return shortCommit(now)
+		}
+	}
+	return ""
 }
 
 // smokePrepared is an example read, and the grists to send for it, their
@@ -975,6 +1112,9 @@ type GristSmokeRecord struct {
 	// NotRun is why the mill could not be asked (GristSmokeReport.NotRun). It
 	// is no failure and holds nothing.
 	NotRun []string `json:"not_run,omitempty"`
+	// Runs is when each example that failed or was not run went, and whether
+	// its grind changed after (GristSmokeReport.Runs).
+	Runs map[string]GristSmokeRun `json:"runs,omitempty"`
 	// Behind is why the home's checkout of the app's rig is not level with the
 	// rig's main (GristLevel), so that the mill grinds with older grinds than the
 	// app sends; empty when it is level. It is kept apart from the smoke's own
@@ -1007,7 +1147,7 @@ func (r GristSmokeRecord) FailingExamples() []string {
 func (r GristSmokeRecord) Line() string {
 	if r.Failed && len(r.FiledOn) > 0 {
 		return fmt.Sprintf("grist smoke: %s FAILED %s: %s. All filed on %s, not held.",
-			r.App, r.At.UTC().Format("2006-01-02 15:04Z"), strings.Join(r.Failures, "; "), strings.Join(r.FiledOn, ", "))
+			r.App, r.At.UTC().Format("2006-01-02 15:04Z"), strings.Join(failuresWithRuns(r.Failures, r.Runs, r.Commit), "; "), strings.Join(r.FiledOn, ", "))
 	}
 	if r.Failed {
 		held := "no rig's stories are held"
@@ -1015,14 +1155,14 @@ func (r GristSmokeRecord) Line() string {
 			held = "the open stories of " + r.Rig + " are held"
 		}
 		line := fmt.Sprintf("grist smoke: %s FAILED %s (%s): %s. `mw grist smoke %s` that passes lifts the hold, or `mw grist smoke %s --lift`.",
-			r.App, r.At.UTC().Format("2006-01-02 15:04Z"), held, strings.Join(r.Failures, "; "), r.App, r.App)
+			r.App, r.At.UTC().Format("2006-01-02 15:04Z"), held, strings.Join(failuresWithRuns(r.Failures, r.Runs, r.Commit), "; "), r.App, r.App)
 		if len(r.Fixes) > 0 {
 			line += " " + strings.Join(r.Fixes, ", ") + " runs over the hold, as it names a failing example."
 		}
 		return line
 	}
 	if len(r.NotRun) > 0 {
-		return fmt.Sprintf("grist smoke: %s not run %s: %s", r.App, r.At.UTC().Format("2006-01-02 15:04Z"), strings.Join(r.NotRun, "; "))
+		return fmt.Sprintf("grist smoke: %s not run %s: %s%s", r.App, r.At.UTC().Format("2006-01-02 15:04Z"), strings.Join(r.NotRun, "; "), notRunNote(r.Runs, r.Commit))
 	}
 	return fmt.Sprintf("grist smoke: %s ok %s, %d examples", r.App, r.At.UTC().Format("2006-01-02 15:04Z"), r.Examples)
 }
@@ -1207,13 +1347,20 @@ func (b GristSmokeBook) mailFlakes(ctx context.Context, report GristSmokeReport)
 		for _, miss := range flake.Misses {
 			misses = append(misses, fmt.Sprintf("  field %s: wanted %s, got %s", miss.Field, miss.Wanted, miss.Got))
 		}
+		changed := ""
+		if line := report.Runs[flake.Example].changedLine(flake.Example); line != "" {
+			changed = line + "\n\n"
+		}
 		next := fmt.Sprintf("A model's answer that misses now and then is a fact about the grind's instructions: file it as a bug, and name the example on it "+
 			"(mw grist smoke %s --filed <bead> %s) so that a later miss of it that repeats is not held.",
 			report.App, strings.TrimPrefix(flake.Example, report.App+"/"))
 		if bead, ok := named[flake.Example]; ok {
 			next = "It is already named on " + bead + ", nothing to file."
-			note := fmt.Sprintf("%s grist smoke of %s: %s, the failing run's txid %s:\n%s",
-				b.now().UTC().Format("2006-01-02 15:04Z"), report.App, flake, flake.Txid, strings.Join(misses, "\n"))
+			note := fmt.Sprintf("%s grist smoke of %s: %s, the failing run's txid %s, %s:\n%s",
+				b.now().UTC().Format("2006-01-02 15:04Z"), report.App, flake, flake.Txid, runLine(report, flake.Example), strings.Join(misses, "\n"))
+			if line := report.Runs[flake.Example].changedLine(flake.Example); line != "" {
+				note += "\n" + line
+			}
 			if err := b.note(ctx, bead, note); err != nil {
 				next += " The miss could not be added to it as a note, so add it by hand: " + firstLine(err.Error())
 				failed = append(failed, fmt.Errorf("the flake %s could not be noted on %s: %w", flake.Example, bead, err))
@@ -1226,14 +1373,25 @@ func (b GristSmokeBook) mailFlakes(ctx context.Context, report GristSmokeReport)
 			To:      MayorMailbox,
 			Subject: "Smoke flake: " + flake.Example,
 			Body: fmt.Sprintf("The grist smoke of %s sent %s %d times and its answer was wrong in %d of them (%s), right in the others, so it held nothing.\n\n"+
-				"The first wrong answer (the failing run's txid %s):\n%s\n\n%s",
-				report.App, flake.Example, flake.Sent, flake.Missed, flake, flake.Txid, strings.Join(misses, "\n"), next),
+				"The first wrong answer (the failing run's txid %s; %s):\n%s\n\n%s%s",
+				report.App, flake.Example, flake.Sent, flake.Missed, flake, flake.Txid, runLine(report, flake.Example), strings.Join(misses, "\n"), changed, next),
 		})
 		if err != nil {
 			failed = append(failed, fmt.Errorf("the Mayor could not be mailed of the flake %s: %w", flake.Example, err))
 		}
 	}
 	return errors.Join(failed...)
+}
+
+// runLine says when example's failing run went and on which commit of the
+// grinds, for a mail or a note; "when it went is not known" when the report
+// keeps no run of it.
+func runLine(report GristSmokeReport, example string) string {
+	run, ok := report.Runs[example]
+	if !ok {
+		return "the grinds were read at " + shortCommit(report.Commit) + "; when the run went is not known"
+	}
+	return "the failing run " + run.runWent(report.Commit)
 }
 
 // named are the examples an open bead names, each with the bead; empty when the
@@ -1273,6 +1431,12 @@ func (b GristSmokeBook) noteFiled(ctx context.Context, report GristSmokeReport) 
 			continue
 		}
 		note := fmt.Sprintf("%s grist smoke of %s, already named on %s: %s", b.now().UTC().Format("2006-01-02 15:04Z"), report.App, bead, failure)
+		if run, ok := report.Runs[smokeExampleOf(failure)]; ok && !run.NotRun {
+			note += " (run " + run.runWent(report.Commit) + ")"
+			if line := run.changedLine(smokeExampleOf(failure)); line != "" {
+				note += "\n" + line
+			}
+		}
 		if err := b.note(ctx, bead, note); err != nil {
 			failed = append(failed, fmt.Errorf("the failure of %s could not be noted on %s: %w", smokeExampleOf(failure), bead, err))
 		}
@@ -1291,7 +1455,7 @@ func (b GristSmokeBook) record(ctx context.Context, rig string, report GristSmok
 	record := GristSmokeRecord{
 		App: report.App, Rig: rig, At: b.now().UTC(), Commit: report.Commit, Examples: report.Examples,
 		Failed: report.Failed(), Failures: report.Failures, Warnings: report.Warnings, NotRun: report.NotRun,
-		FiledOn: report.FiledOn,
+		FiledOn: report.FiledOn, Runs: report.Runs,
 	}
 	before, had := b.read(ctx, key)
 	if len(record.NotRun) > 0 && had && before.Failed {
