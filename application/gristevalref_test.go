@@ -220,6 +220,8 @@ func TestAGristWithoutTextIsGroundWithMainsAsBefore(t *testing.T) {
 	fresh := apptest.NewFakePostern()
 	fresh.AddRecord(application.PosternRecord{Txid: "direct:g2", Class: application.GristClass, From: phone, To: millKey, Signer: phone, SignerApps: []string{"lampas"}, Ciphertext: ct})
 	mill.Postern = fresh
+	runs := &apptest.FakeGristRuns{}
+	mill.Runs = runs
 	if _, err := mill.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -227,6 +229,9 @@ func TestAGristWithoutTextIsGroundWithMainsAsBefore(t *testing.T) {
 	calls := grinder.Calls()
 	if answer.Grind.Override || len(calls) != 1 || !strings.HasSuffix(calls[0].Call.System, "SAY MAIN") {
 		t.Errorf("expected main's instructions, got %+v and %+v", answer, calls)
+	}
+	if len(runs.Kept) != 1 || runs.Kept[0].Factory {
+		t.Errorf("an app key's run is not the factory's: %+v", runs.Kept)
 	}
 }
 
@@ -245,5 +250,29 @@ func TestASendOfARefsTextOutsideAnEvalOrSmokeTalkIsNotSent(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "eval") {
 			t.Errorf("talk %q: expected the send refused, saying eval or smoke talks only, got %v", talk, err)
 		}
+	}
+}
+
+// A run is kept as the factory's when its key is the mill's test key, so the
+// room check does not take a smoke for a tutor in use.
+func TestAGrindFromTheTestKeyIsKeptAsTheFactorys(t *testing.T) {
+	for name, tc := range map[string]struct {
+		from, talk string
+		want       bool
+	}{
+		"the test key's eval":  {"factory", "eval:greets:ab12cd34", true},
+		"the test key's smoke": {"factory", "smoke:tutor/greets:ab12cd34", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mill, _, _ := overrideMill(t, tc.from, tc.talk)
+			runs := &apptest.FakeGristRuns{}
+			mill.Runs = runs
+			if _, err := mill.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if len(runs.Kept) != 1 || runs.Kept[0].Factory != tc.want {
+				t.Errorf("expected one run kept with Factory = %v, got %+v", tc.want, runs.Kept)
+			}
+		})
 	}
 }

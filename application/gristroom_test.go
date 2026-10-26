@@ -226,3 +226,61 @@ func TestAHostThatCannotReadItsRunsIsNotHeldBack(t *testing.T) {
 		t.Errorf("with nowhere kept, grist is not active: %+v %v", pulse, err)
 	}
 }
+
+// factoryRuns are n grinds of kind sent by the factory's own test key.
+func factoryRuns(kind string, n int, start time.Duration, e2e float64) []application.GristRunTiming {
+	runs := steady(kind, n, start, e2e)
+	for i := range runs {
+		runs[i].Factory = true
+	}
+	return runs
+}
+
+func TestTheFactorysOwnGrindsAreNotATutorInUse(t *testing.T) {
+	runs := roomRuns{factoryRuns("tutor-turn", 30, 9*time.Minute, 10)}
+	pulse := pulseOf(t, roomOf(runs), 5)
+	if pulse.Active || pulse.Recent != 0 || pulse.Cap != 5 || pulse.Lowered() {
+		t.Fatalf("smokes and evals sent by the test key within the window lower no cap: %+v", pulse)
+	}
+	if !pulse.Known {
+		t.Errorf("the mill has kept runs, so grist is known: %+v", pulse)
+	}
+	if got, want := pulse.Line(), "grist: quiet (none in 10 min)"; got != want {
+		t.Errorf("line = %q, want %q", got, want)
+	}
+}
+
+func TestOneRunFromAnotherKeyAmongTheFactorysMakesGristActive(t *testing.T) {
+	timings := append(factoryRuns("tutor-turn", 30, 9*time.Minute, 10), grindEnding("sentence-diagram", time.Minute, 2, 8))
+	pulse := pulseOf(t, roomOf(roomRuns{timings}), 5)
+	if !pulse.Active || pulse.Recent != 1 || pulse.Cap != 4 || pulse.Kind != "sentence-diagram" {
+		t.Fatalf("one run from a tutor's key makes grist active, as before: %+v", pulse)
+	}
+}
+
+func TestSlowFactoryRunsAloneNeverStopDispatch(t *testing.T) {
+	// Fast tutor grinds make the par; five slow ones from the test key follow,
+	// and one quick tutor grind keeps grist active.
+	old := steady("tutor-turn", 45, 100*time.Minute, 10)
+	slow := factoryRuns("tutor-turn", 5, 9*time.Minute, 300)
+	timings := append(append(old, slow...), grindEnding("tutor-turn", time.Minute, 2, 8))
+	pulse := pulseOf(t, roomOf(roomRuns{timings}), 6)
+	if !pulse.Active || pulse.Slow != "" {
+		t.Fatalf("slow test-key runs are not the tutor's wait: %+v", pulse)
+	}
+	// And a par made only of the factory's slow runs is not a par.
+	pulse = pulseOf(t, roomOf(roomRuns{append(factoryRuns("tutor-turn", 50, 100*time.Minute, 300), steady("tutor-turn", 5, 9*time.Minute, 30)...)}), 6)
+	if pulse.Slow != "" {
+		t.Errorf("the factory's runs set no par: %q", pulse.Slow)
+	}
+}
+
+func TestStatusAndDispatchReadTheSamePulseWithFactoryRuns(t *testing.T) {
+	// mw status and mw dispatch both ask GristRoom.Pulse; with only factory
+	// runs recent, the status line says quiet and the dispatch cap is the host's.
+	room := roomOf(roomRuns{factoryRuns("tutor-turn", 40, 9*time.Minute, 10)})
+	pulse := pulseOf(t, room, 5)
+	if pulse.Line() != "grist: quiet (none in 10 min)" || pulse.CapLine() != "" || pulse.Cap != 5 {
+		t.Errorf("status and dispatch should both see no tutor in use: line %q, cap line %q, cap %d", pulse.Line(), pulse.CapLine(), pulse.Cap)
+	}
+}

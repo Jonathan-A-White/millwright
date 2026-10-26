@@ -185,20 +185,27 @@ func (g GristRoom) Pulse(ctx context.Context, hostCap int) (GristPulse, error) {
 		pulse.InFlight = pulse.InFlight || held
 	}
 	var timings []GristRunTiming
+	kept := false
 	if g.Runs != nil {
 		all, err := g.Runs.Timings(ctx)
 		if err != nil {
 			return pulse, fmt.Errorf("reading the mill's runs: %w", err)
 		}
-		// A forwarded photo is for the Mayor, not a tutor answering.
+		// A forwarded photo is for the Mayor, not a tutor answering, and a run
+		// from the factory's own test key (a smoke, an eval) is no one waiting
+		// with an app open: neither makes grist active or sets a par.
 		for _, t := range all {
-			if t.Kind != GristForwardKind {
+			if t.Kind == GristForwardKind {
+				continue
+			}
+			kept = true
+			if !t.Factory {
 				timings = append(timings, t)
 			}
 		}
 	}
 	sort.SliceStable(timings, func(i, j int) bool { return timings[i].endedAt().Before(timings[j].endedAt()) })
-	pulse.Known = pulse.InFlight || len(timings) > 0
+	pulse.Known = pulse.InFlight || kept
 	// A board that cannot be read only leaves the pool's line out.
 	if g.Pool != nil {
 		if view, err := g.Pool.Pool(ctx); err == nil && !view.At.IsZero() && now().Sub(view.At) < GristPoolStale {

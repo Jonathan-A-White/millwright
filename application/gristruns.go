@@ -122,6 +122,11 @@ type GristRunTiming struct {
 	// with the remote ran past its limit before this grind, so the grind was
 	// read from the checkout's local commit (mw-gq6.647).
 	RefreshTimedOut bool `json:"refresh_timed_out,omitempty"`
+	// Factory is set when the grist came from the mill's test key: a smoke, an
+	// eval or a Builder's check, not a tutor answering someone. The room check
+	// leaves such runs out of what it reads as grist in use (mw-gq6.804). Runs
+	// kept before it was written read as not the factory's.
+	Factory bool `json:"factory,omitempty"`
 }
 
 // withWaits fills QueuedSeconds and RunSeconds from the times already in t.
