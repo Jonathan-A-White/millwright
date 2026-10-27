@@ -192,6 +192,12 @@ home's checkout onto origin's main when it is clean and on `main`, and makes the
 the commits it brought changed; a checkout it must leave alone is a line of `mw status` and one mail to
 the Mayor, and the pass is `done` all the same. Only a pass that could not fetch or move a checkout is `failed`.
 
+A pass levels the apps side by side, one level per checkout at a time, as the landing job lands its
+rigs (mw-gq6.816): a slow app's smoke (lampas's can run most of an hour) does not hold back the
+levelling of the apps after it by name. A level that fails does not stop the others; the pass then
+fails, naming each in the apps' order. The pass takes no gate lock of its own, so the host's gate lock
+stays one for every job that takes it.
+
 The `chain-stamp` job (docs/chain-stamps.md) runs in the follower itself, not in a unit, and on its
 own clock only: every minute, reason `clock`. `mw next` queues a stamp of each commit it lands in
 `~/.local/state/mw/stamps/pending.jsonl` (setting `stamps_dir`, `$MW_STAMPS_DIR`); a pass takes each
