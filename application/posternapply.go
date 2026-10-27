@@ -253,6 +253,14 @@ func (i PosternInbox) apply(ctx context.Context, tapsOnly bool, after int64) (li
 	stuck := int64(0)
 	var ideas ideasPass
 	for _, m := range mine {
+		// A message waiting for a part of it is applied whole or when its wait
+		// is over, and the pass reads from its first record until then.
+		if m.Waiting {
+			if stuck == 0 || m.firstSeq() < stuck {
+				stuck = m.firstSeq()
+			}
+			continue
+		}
 		if tapsOnly && !isOneTap(m) && !i.isPictureNote(m) {
 			continue
 		}

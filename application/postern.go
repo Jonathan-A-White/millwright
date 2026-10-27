@@ -398,6 +398,18 @@ type PosternThreadedMessage struct {
 	// empty on any other message.
 	Re   string `json:"re,omitempty"`
 	Role string `json:"role,omitempty"`
+	// Split, Part and Parts are section 8's *A message in parts*: one message
+	// too long for one record goes as several naming the same Split, each its
+	// 1-based Part of Parts. All empty on a message of one record.
+	Split string `json:"split,omitempty"`
+	Part  int    `json:"part,omitempty"`
+	Parts int    `json:"parts,omitempty"`
+}
+
+// validSplit reports whether the split fields are well formed, as postern's
+// readSplit has them: a split, parts of at least 2, 1 <= part <= parts.
+func (m PosternThreadedMessage) validSplit() bool {
+	return m.Split != "" && m.Parts >= 2 && m.Part >= 1 && m.Part <= m.Parts
 }
 
 // MarshalJSON writes the message in the field order postern's own
@@ -415,7 +427,10 @@ func (m PosternThreadedMessage) MarshalJSON() ([]byte, error) {
 		Attachments []*PosternAttachment `json:"attachments,omitempty"`
 		Re          string               `json:"re,omitempty"`
 		Role        string               `json:"role,omitempty"`
-	}{thread, m.Text, m.Attachment, m.Attachments, m.Re, m.Role})
+		Split       string               `json:"split,omitempty"`
+		Part        int                  `json:"part,omitempty"`
+		Parts       int                  `json:"parts,omitempty"`
+	}{thread, m.Text, m.Attachment, m.Attachments, m.Re, m.Role, m.Split, m.Part, m.Parts})
 }
 
 // PosternAttachment is a message's optional attachment, postern's
@@ -441,11 +456,27 @@ func decodePosternThreadedMessage(text string) (PosternThreadedMessage, bool) {
 	if err := json.Unmarshal([]byte(text), &wrapped); err != nil {
 		return PosternThreadedMessage{}, false
 	}
+	if !wrapped.validSplit() {
+		wrapped.Split, wrapped.Part, wrapped.Parts = "", 0, 0
+	}
 	answers := strings.TrimSpace(wrapped.Re) != "" && wrapped.Text != ""
-	if strings.TrimSpace(wrapped.Thread.Bead) == "" && strings.TrimSpace(wrapped.Thread.Topic) == "" && wrapped.Attachment == nil && len(wrapped.Attachments) == 0 && wrapped.Role == "" && !answers {
+	if strings.TrimSpace(wrapped.Thread.Bead) == "" && strings.TrimSpace(wrapped.Thread.Topic) == "" && wrapped.Attachment == nil && len(wrapped.Attachments) == 0 && wrapped.Role == "" && !answers && wrapped.Split == "" {
 		return PosternThreadedMessage{}, false
 	}
 	return wrapped, true
+}
+
+// posternSplitOf is the split, part and parts a decrypted message's plaintext
+// names, "" and zeros for a message of one record: only class message is ever
+// sent in parts.
+func posternSplitOf(class, text string) (split string, part, parts int) {
+	if class != "message" || !strings.Contains(text, `"split"`) {
+		return "", 0, 0
+	}
+	if wrapped, ok := decodePosternThreadedMessage(text); ok {
+		return wrapped.Split, wrapped.Part, wrapped.Parts
+	}
+	return "", 0, 0
 }
 
 // posternReOf is the txid a decrypted plaintext says it answers: the re of
@@ -592,6 +623,24 @@ type PosternInboxMessage struct {
 	// Attachments are the files of a post that carries two or more, in the
 	// order the sender listed them; nil for any other message.
 	Attachments []*PosternAttachment
+
+	// Split, Part and Parts are set on a record that is one part of a message
+	// sent in parts, until joinPosternParts makes the parts one message, whose
+	// own are empty (posternparts.go).
+	Split string
+	Part  int
+	Parts int
+	// FirstSeq is the lowest sequence number among the records a joined
+	// message was read from, Seq the highest; 0 on a message of one record,
+	// whose FirstSeq is its Seq. PartTxids are those records' txids.
+	FirstSeq  int64
+	PartTxids []string
+	// Missing is the lines naming each part of a joined message that has not
+	// come, "" when it is whole; Waiting is true while that is still within
+	// PosternPartsWait of its first part, and the message is neither read nor
+	// applied until the rest comes or the wait is over.
+	Missing string
+	Waiting bool
 }
 
 // files is every file m carries: Attachments when present, else the single
@@ -800,6 +849,8 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 		}
 	}
 	newestFirst := reversePosternInbox(mine)
+	// A message waiting for a part holds the cursor below its first record.
+	held, isHeld := heldBelow(mine)
 	// The oldest messages a pass already applied are shown first, marked as
 	// old, and the cursor is saved past them before anything else is tried:
 	// a read that dies later — the cold timeout, a failed write — leaves the
@@ -812,7 +863,11 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 		for _, m := range newestFirst[len(newestFirst)-settled:] {
 			i.printAppliedEarlier(m, applied[m.Txid])
 		}
-		if last := mine[settled-1].Seq; last > cursor {
+		last := mine[settled-1].Seq
+		if isHeld {
+			last = min(last, held)
+		}
+		if last > cursor {
 			if err := i.Memory.SetNote(ctx, PosternCursorKey, strconv.FormatInt(last, 10)); err != nil {
 				return nil, err
 			}
@@ -821,6 +876,13 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 	i.keepMessages(mine)
 	var ideas ideasPass
 	for _, m := range newestFirst[:len(newestFirst)-settled] {
+		// A message still waiting for a part of it is shown and left alone.
+		if m.Waiting {
+			if err := i.printWaiting(ctx, m, &ideas); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		// A message a pass already applied (Apply, the on-message hook's)
 		// is one line: what was done, never done again.
 		if done, ok := applied[m.Txid]; ok && m.Txid != "" {
@@ -893,8 +955,18 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 			}
 		}
 	}
-	if newest > cursor {
-		if err := i.Memory.SetNote(ctx, PosternCursorKey, strconv.FormatInt(newest, 10)); err != nil {
+	// Read up to the newest record, or only up to just below the first of a
+	// message still waiting for a part, with what was shown past it noted so
+	// that the next read does not show it again.
+	read := newest
+	if isHeld && held < newest {
+		read = held
+		if err := i.Memory.SetNote(ctx, PosternReadAheadKey, strconv.FormatInt(newest, 10)); err != nil {
+			return nil, err
+		}
+	}
+	if read > cursor {
+		if err := i.Memory.SetNote(ctx, PosternCursorKey, strconv.FormatInt(read, 10)); err != nil {
 			return nil, err
 		}
 	}
@@ -1524,7 +1596,22 @@ func (i PosternInbox) fetch(ctx context.Context) (mine []PosternInboxMessage, ne
 		return nil, 0, 0, err
 	}
 	mine, newest, err = i.fetchSince(ctx, cursor)
-	return mine, newest, cursor, err
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	for _, m := range mine {
+		if m.FirstSeq > 0 {
+			// A message in parts was read, so an earlier read may have been held
+			// below it: what that read showed past it is not shown again.
+			shown, err := i.readAhead(ctx)
+			if err != nil {
+				return nil, 0, 0, err
+			}
+			mine = dropShown(mine, shown)
+			break
+		}
+	}
+	return mine, newest, cursor, nil
 }
 
 // fetchSince is fetch from cursor, however it was come by.
@@ -1558,17 +1645,20 @@ func (i PosternInbox) fetchSince(ctx context.Context, cursor int64) (mine []Post
 		}
 		from, verified, signerChecked := posternVerifySender(envelopeFrom, r.From, r.Signer)
 		thread, display, threadIsBead, attachment, attachments := posternThreadAndText(r.Class, text)
+		split, part, parts := posternSplitOf(r.Class, text)
 		m := PosternInboxMessage{
 			Seq: r.Seq, Txid: r.Txid, Class: r.Class,
 			From: from, Verified: verified, SignerChecked: signerChecked,
 			Ts: r.Ts, Text: display, Thread: thread, ThreadIsBead: threadIsBead,
 			Attachment: attachment, Attachments: attachments, Re: posternReOf(text),
+			Split: split, Part: part, Parts: parts,
 		}
 		mine = append(mine, m)
 		if err := rememberChannelOf(i.Threads, m); err != nil {
 			i.printf("%v\n", err)
 		}
 	}
+	mine, _ = joinPosternParts(mine, i.now())
 	return mine, newest, nil
 }
 
@@ -2151,13 +2241,24 @@ func (r PosternSendRequest) plaintext(text string, attachment *PosternAttachment
 			Text:   text, Attachment: attachment, Re: strings.TrimSpace(r.Re), Role: r.Role,
 		}
 	default:
-		return text, nil
+		return tooLongForARecord(text)
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return "", fmt.Errorf("building the message's plaintext: %w", err)
 	}
-	return string(encoded), nil
+	return tooLongForARecord(string(encoded))
+}
+
+// tooLongForARecord is plaintext, or a plain refusal when it is over what one
+// record carries (PosternPlaintextMax). The phone sends such a message in
+// parts (docs/protocol.md section 8); mw postern send does not, so a long one
+// is refused rather than sent where the backend would turn it away.
+func tooLongForARecord(plaintext string) (string, error) {
+	if len(plaintext) > PosternPlaintextMax {
+		return "", fmt.Errorf("mw postern send: the message is too long for one record (%d bytes of the %d a record carries): send it in shorter messages", len(plaintext), PosternPlaintextMax)
+	}
+	return plaintext, nil
 }
 
 // upload encrypts file's bytes to the Governor, as a message's text is

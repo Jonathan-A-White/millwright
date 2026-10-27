@@ -259,7 +259,11 @@ func newPosternInboxCmd() *cobra.Command {
 			"once and never overwritten; a voice note's transcript is kept the same way as\n" +
 			"<txid>.transcript.txt. --show <txid> prints one kept message again, whole, from that file: it\n" +
 			"reads no backend, moves no cursor, sends nothing and writes nothing, and for a txid with\n" +
-			"nothing kept it says so and exits non-zero.",
+			"nothing kept it says so and exits non-zero.\n\n" +
+			"A message he sent in parts (one over 7,200 bytes goes as several records) is one message here:\n" +
+			"the parts' texts in order under part 1's txid, any part's txid for --show. While a part is\n" +
+			"missing it ends 'Missing part N of M.' and is neither marked read nor applied until the rest\n" +
+			"comes or 10 minutes have passed.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if cmd.Flags().Changed("show") {

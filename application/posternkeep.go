@@ -95,7 +95,8 @@ func (i PosternInbox) keepMessages(mine []PosternInboxMessage) {
 		return
 	}
 	for _, m := range mine {
-		if safeTxidFile(m.Txid) != "" {
+		// A message waiting for a part is kept once it is whole, or its wait is over.
+		if safeTxidFile(m.Txid) != "" || m.Waiting {
 			continue
 		}
 		raw, err := json.Marshal(keptMessage{
@@ -103,8 +104,16 @@ func (i PosternInbox) keepMessages(mine []PosternInboxMessage) {
 			SignerChecked: m.SignerChecked, Ts: m.Ts, Thread: m.Thread, ThreadIsBead: m.ThreadIsBead,
 			Re: m.Re, Text: m.Text,
 		})
-		if err == nil {
-			err = writeOnce(PosternKeptFile(i.AttachmentDir, m.Txid), raw)
+		// A message in parts is kept whole under the txid of each of its parts,
+		// so that --show of any of them prints it.
+		txids := m.PartTxids
+		if len(txids) == 0 {
+			txids = []string{m.Txid}
+		}
+		for _, txid := range txids {
+			if err == nil && safeTxidFile(txid) == "" {
+				err = writeOnce(PosternKeptFile(i.AttachmentDir, txid), raw)
+			}
 		}
 		if err != nil {
 			i.printf("could not keep the text of %s: %v\n", m.Txid, err)
