@@ -77,14 +77,21 @@ func (n Next) readLoad(ctx context.Context) (LoadReading, bool) {
 	return reading, err == nil
 }
 
+// calmedMinute is how often a wait that ends in a hand-back (Next.CalmHandBack)
+// says it is still going on.
+const calmedMinute = time.Minute
+
 // calmed waits, up to the bound, for the host to stop being busy, and says so as
 // it does. It returns the last reading it took, and whether the bound ran out
-// with the host still busy. The gate runs after it either way.
-func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what string) (reading LoadReading, gaveUp bool) {
+// with the host still busy. The gate runs after it either way, unless handBack
+// is asked for and Next.CalmHandBack is set: then a bound that ran out returns
+// that hook's error, and the gate does not run (mw-gq6.819).
+func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what string, handBack bool) (reading LoadReading, gaveUp bool, err error) {
 	reading, ok := n.readLoad(ctx)
 	if !ok || !reading.Busy() {
-		return reading, false
+		return reading, false, nil
 	}
+	handBack = handBack && n.CalmHandBack != nil
 	n.print(fmt.Sprintf("  wait    %s is at load %.1f of %d cores: waiting up to %s for it to calm before %s\n",
 		n.Host, reading.Load, reading.Cores, n.loadBound(), what))
 	// The close-out says it is waiting, and says it is running again once it stops.
@@ -93,27 +100,40 @@ func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what 
 	if n.SlotYield != nil {
 		defer n.SlotYield(ctx)()
 	}
-	var waited time.Duration
+	since := time.Now()
+	var waited, said time.Duration
 	for reading.Busy() {
 		if waited >= n.loadBound() {
+			if handBack {
+				return reading, true, n.CalmHandBack(ctx, reading, since, waited)
+			}
 			note := fmt.Sprintf("%s was still at load %.1f of %d cores after waiting %s, so %s ran anyway",
 				n.Host, reading.Load, reading.Cores, waited, what)
 			n.print("  wait    " + note + "\n")
 			report.Notes = append(report.Notes, note)
-			return reading, true
+			return reading, true, nil
 		}
-		if err := n.loadWait(ctx, n.loadPoll()); err != nil {
-			return reading, false
+		step := n.loadPoll()
+		if handBack {
+			step = min(step, n.loadBound()-waited)
 		}
-		waited += n.loadPoll()
+		if err := n.loadWait(ctx, step); err != nil {
+			return reading, false, nil
+		}
+		waited += step
 		next, ok := n.readLoad(ctx)
 		if !ok {
-			return reading, false
+			return reading, false, nil
 		}
 		reading = next
+		if handBack && reading.Busy() && waited-said >= calmedMinute {
+			said = waited
+			n.print(fmt.Sprintf("  wait    still waiting for %s to calm: at load %.1f of %d cores since %s (%s so far, up to %s)\n",
+				n.Host, reading.Load, reading.Cores, since.UTC().Format("15:04:05Z"), gateWaited(waited), gateWaited(n.loadBound())))
+		}
 	}
 	report.Notes = append(report.Notes, fmt.Sprintf("%s was busy: waited %s for it to calm before %s", n.Host, waited, what))
-	return reading, false
+	return reading, false, nil
 }
 
 // gated is one run of the rig's tests as the close-out treats it. Said, when it
@@ -366,7 +386,7 @@ func (n Next) waitForTheMergedGate(ctx context.Context, c *closeOut, report *Nex
 		m.asked, m.lock = true, n.waitForTheGateLock(ctx, c, report, m.what())
 	}
 	if !m.calmed {
-		m.before, m.gaveUp = n.calmed(ctx, report, c, m.what())
+		m.before, m.gaveUp, _ = n.calmed(ctx, report, c, m.what(), false)
 		m.calmed = true
 	}
 }
@@ -408,7 +428,10 @@ func gateWaited(d time.Duration) string {
 // second failure counts. A run that fails on a calm host counts at once. A
 // command that would not start is not a load fault and is never run again.
 func (n Next) gateOnACalmHost(ctx context.Context, c *closeOut, report *NextReport, dir, what string, span RelatedSpan) gated {
-	before, gaveUp := n.calmed(ctx, report, c, what)
+	before, gaveUp, handedBack := n.calmed(ctx, report, c, what, true)
+	if handedBack != nil {
+		return gated{Err: handedBack}
+	}
 	n.beginGate(ctx, c, before)
 	checked, err := n.timedChecks(ctx, c, report, dir, span)
 	if err != nil || checked.NotRun || checked.Passed {
@@ -427,7 +450,7 @@ func (n Next) gateOnACalmHost(ctx context.Context, c *closeOut, report *NextRepo
 	}
 	n.print(fmt.Sprintf("  retry   %s failed while %s was at load %.1f of %d cores: running them once more when it calms\n",
 		what, n.Host, busy.Load, busy.Cores))
-	n.calmed(ctx, report, c, what+" again")
+	n.calmed(ctx, report, c, what+" again", false)
 	again, err := n.timedChecks(ctx, c, report, dir, span)
 	c.gate.settle(again, err, busy)
 	said := ranTwice(what, n.Host, busy, checked, again, err)

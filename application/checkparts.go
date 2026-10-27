@@ -18,7 +18,8 @@ import (
 //
 // A whole check with no --part on a rig whose gate is not split waits the same
 // time for the same slot, for the same reason, and ends in the same kind of line
-// (mw-gq6.817).
+// (mw-gq6.817). Its wait for a calm host before the tests is bounded by the same
+// time, in a line of its own (mw-gq6.819).
 const CheckPartSlotWait = 9 * time.Minute
 
 // A rig's whole gate can outrun the 590 seconds a Builder's foreground tool call
@@ -292,6 +293,12 @@ func (k Check) slotRefusal(ctx context.Context, c *closeOut, try slotTry, err er
 // when. It returns when the part was first handed back if it had been
 // before, and "" otherwise, or when the record cannot be kept.
 func (k Check) noteSlotWait(ctx context.Context, storyID, name string, waited *SlotWaitError) string {
+	return k.noteWait(ctx, storyID, name, waited.Holder, waited.Since)
+}
+
+// noteWait is noteSlotWait for any wait a check is handed back on: holder says
+// what it waited on (who has the slot, the host's load), since when that began.
+func (k Check) noteWait(ctx context.Context, storyID, name, holder string, since time.Time) string {
 	if k.Records == nil {
 		return ""
 	}
@@ -300,11 +307,11 @@ func (k Check) noteSlotWait(ctx context.Context, storyID, name string, waited *S
 			return first
 		}
 	}
-	since := ""
-	if !waited.Since.IsZero() {
-		since = waited.Since.UTC().Format("15:04:05Z")
+	sinceAt := ""
+	if !since.IsZero() {
+		sinceAt = since.UTC().Format("15:04:05Z")
 	}
-	record := fmt.Sprintf("%s %s\nholder %s\nsince %s\n", slotWaitWord, time.Now().UTC().Format("15:04:05Z"), waited.Holder, since)
+	record := fmt.Sprintf("%s %s\nholder %s\nsince %s\n", slotWaitWord, time.Now().UTC().Format("15:04:05Z"), holder, sinceAt)
 	_, _ = k.Records.PutRunFile(ctx, storyID, name, record)
 	return ""
 }

@@ -280,14 +280,22 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	// other checks of the rig and apart from a landing's.
 	checks := k.Checks
 	load := k.Load
+	loadBound, handBack := k.LoadBound, func(ctx context.Context, reading LoadReading, since time.Time, waited time.Duration) error {
+		return k.calmRefusal(ctx, c, report.Attempt, reading, since, waited)
+	}
 	split := k.splitGate(path.Rig)
 	if split {
 		// A split gate runs nothing here: the parts were run, each in a call of
 		// its own, and this reads what they said at the tip. It takes no slot
 		// and waits for no calm host, so it finishes at once.
 		checks = recordedGate{records: k.Records, storyID: storyID, attempt: report.Attempt, parts: k.partsOf(path.Rig), tip: k.cleanTip(ctx, c)}
-		load = nil
-	} else if k.Slot != nil {
+		load, handBack = nil, nil
+	} else {
+		// A whole check waits for a calm host no longer than for the slot, and is
+		// handed back in one line when it is still busy (mw-gq6.819).
+		loadBound = k.partSlotWait()
+	}
+	if !split && k.Slot != nil {
 		checks = slottedChecks{
 			checks: k.Checks,
 			take: func(ctx context.Context) (Holding, error) {
@@ -317,22 +325,23 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	// close-out cannot come apart.
 	var read NextReport
 	report.Refusals = Next{
-		Tracker:     k.Tracker,
-		Landing:     k.Landing,
-		Checks:      checks,
-		SpecChecks:  specs,
-		NamedChecks: k.NamedChecks,
-		GateParts:   k.Parts,
-		GateRecords: k.Records,
-		Changes:     k.Changes,
-		Remote:      k.Remote,
-		Load:        load,
-		Modes:       k.Modes,
-		LoadPoll:    k.LoadPoll,
-		LoadBound:   k.LoadBound,
-		LoadWait:    k.LoadWait,
-		Host:        k.Host,
-		Out:         k.Out,
+		Tracker:      k.Tracker,
+		Landing:      k.Landing,
+		Checks:       checks,
+		SpecChecks:   specs,
+		NamedChecks:  k.NamedChecks,
+		GateParts:    k.Parts,
+		GateRecords:  k.Records,
+		Changes:      k.Changes,
+		Remote:       k.Remote,
+		Load:         load,
+		Modes:        k.Modes,
+		LoadPoll:     k.LoadPoll,
+		LoadBound:    loadBound,
+		CalmHandBack: handBack,
+		LoadWait:     k.LoadWait,
+		Host:         k.Host,
+		Out:          k.Out,
 	}.refusals(ctx, c, &read, true)
 	report.Commits, report.Notes = read.Commits, read.Notes
 	if split && report.Passed() {
