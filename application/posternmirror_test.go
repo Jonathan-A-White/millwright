@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +38,16 @@ func (r *retryMirrorer) LastGrindTime(context.Context, []string, string) (time.T
 }
 
 func (r *retryMirrorer) DirExists(context.Context, string) (bool, error) { return false, nil }
+
+func (r *retryMirrorer) ReadMillCursor(context.Context, string) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+
+func (r *retryMirrorer) WriteMillCursor(context.Context, string, time.Time) error { return nil }
+
+func (r *retryMirrorer) MillNames(context.Context, string, time.Time) ([]string, error) {
+	return []string{"."}, nil
+}
 
 func (r *retryMirrorer) Copy(context.Context, string, []string, []string, string) error {
 	r.copies++
@@ -156,5 +167,141 @@ func TestPosternMirrorStillFailsOnARsyncPartialTransfer(t *testing.T) {
 	out, _, err := runRetryMirror(t, m)
 	if err == nil || strings.Contains(out, "copied") {
 		t.Fatalf("err = %v, out = %q; want a failure and no copied line", err, out)
+	}
+}
+
+// millMirrorer is a boost with no mill record, and a mill state directory whose
+// run directories (runs) each have a change time; it keeps the copy cursor in
+// memory and logs each copy's names.
+type millMirrorer struct {
+	retryMirrorer
+	runs      map[string]time.Time
+	cursor    time.Time
+	hasCursor bool
+	copies    [][]string
+	failCopy  error
+	listed    []time.Time
+}
+
+func (m *millMirrorer) DirExists(context.Context, string) (bool, error) { return true, nil }
+
+func (m *millMirrorer) ReadMillCursor(context.Context, string) (time.Time, bool, error) {
+	return m.cursor, m.hasCursor, nil
+}
+
+func (m *millMirrorer) WriteMillCursor(_ context.Context, _ string, at time.Time) error {
+	m.cursor, m.hasCursor = at, true
+	return nil
+}
+
+func (m *millMirrorer) MillNames(_ context.Context, _ string, since time.Time) ([]string, error) {
+	m.listed = append(m.listed, since)
+	names := []string{"grinds.jsonl"}
+	if since.IsZero() {
+		return append(names, "runs"), nil
+	}
+	for run, at := range m.runs {
+		if at.After(since) {
+			names = append(names, "runs/"+run)
+		}
+	}
+	sort.Strings(names[1:])
+	return names, nil
+}
+
+func (m *millMirrorer) Copy(_ context.Context, dir string, names []string, _ []string, dest string) error {
+	if strings.HasPrefix(dest, "desktop:/mill") {
+		m.copies = append(m.copies, names)
+		return m.failCopy
+	}
+	return nil
+}
+
+func runMillMirror(t *testing.T, m *millMirrorer, now time.Time) (string, error) {
+	t.Helper()
+	out := &bytes.Buffer{}
+	err := application.PosternMirror{
+		Files:        &apptest.FakeHomeFile{Text: "laptop 2026-10-01T00:00:00Z mw@laptop\n"},
+		Mirrorer:     m,
+		Out:          out,
+		Host:         "laptop",
+		DataDir:      "/data",
+		MillStateDir: "/mill",
+		Reach:        map[string]string{"desktop": "ssh desktop"},
+		Now:          func() time.Time { return now },
+	}.Run(context.Background())
+	return out.String(), err
+}
+
+func TestPosternMirrorSecondMillCopyNamesOnlyTheRunsThatChangedSinceTheFirst(t *testing.T) {
+	t0 := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	m := &millMirrorer{runs: map[string]time.Time{"direct:old": t0.Add(-time.Hour)}}
+	if _, err := runMillMirror(t, m, t0); err != nil {
+		t.Fatal(err)
+	}
+	m.runs["direct:new"] = t0.Add(5 * time.Minute)
+	if _, err := runMillMirror(t, m, t0.Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.copies) != 2 {
+		t.Fatalf("copies = %v, want two", m.copies)
+	}
+	if got, want := strings.Join(m.copies[0], " "), "grinds.jsonl runs"; got != want {
+		t.Errorf("first copy named %q, want %q", got, want)
+	}
+	if got, want := strings.Join(m.copies[1], " "), "grinds.jsonl runs/direct:new"; got != want {
+		t.Errorf("second copy named %q, want %q", got, want)
+	}
+}
+
+func TestPosternMirrorCopiesAllTheMillStateWhenThereIsNoCursorOrItIsOlderThanSevenDays(t *testing.T) {
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	for name, cursor := range map[string]time.Time{"no cursor": {}, "eight days old": now.Add(-8 * 24 * time.Hour)} {
+		m := &millMirrorer{runs: map[string]time.Time{"direct:a": now.Add(-time.Hour)}}
+		m.cursor, m.hasCursor = cursor, !cursor.IsZero()
+		if _, err := runMillMirror(t, m, now); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(m.copies) != 1 || strings.Join(m.copies[0], " ") != "grinds.jsonl runs" {
+			t.Errorf("%s: copies = %v, want the whole of runs", name, m.copies)
+		}
+	}
+}
+
+func TestPosternMirrorCopiesOnlyTheChangesWhenTheCursorIsSixDaysOld(t *testing.T) {
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	m := &millMirrorer{runs: map[string]time.Time{"direct:a": now.Add(-time.Hour)}}
+	m.cursor, m.hasCursor = now.Add(-6*24*time.Hour), true
+	if _, err := runMillMirror(t, m, now); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.copies) != 1 || strings.Join(m.copies[0], " ") != "grinds.jsonl runs/direct:a" {
+		t.Errorf("copies = %v", m.copies)
+	}
+}
+
+func TestPosternMirrorFailedMillCopyLeavesTheCursorWhereItWas(t *testing.T) {
+	t0 := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	m := &millMirrorer{runs: map[string]time.Time{"direct:a": t0.Add(-time.Hour)}}
+	if _, err := runMillMirror(t, m, t0); err != nil {
+		t.Fatal(err)
+	}
+	first := m.cursor
+	m.runs["direct:b"] = t0.Add(time.Minute)
+	m.failCopy = errors.New("rsync to desktop:/mill/: signal: killed")
+	if _, err := runMillMirror(t, m, t0.Add(10*time.Minute)); err == nil {
+		t.Fatal("a failed copy returned no error")
+	}
+	if !m.cursor.Equal(first) {
+		t.Fatalf("cursor moved to %v from %v on a failed copy", m.cursor, first)
+	}
+	m.runs["direct:c"] = t0.Add(11 * time.Minute)
+	m.failCopy = nil
+	if _, err := runMillMirror(t, m, t0.Add(20*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	last := strings.Join(m.copies[len(m.copies)-1], " ")
+	if last != "grinds.jsonl runs/direct:b runs/direct:c" {
+		t.Errorf("the copy after the failure named %q, want the missed run too", last)
 	}
 }

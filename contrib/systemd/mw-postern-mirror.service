@@ -21,8 +21,11 @@ EnvironmentFile=-%h/.config/mw/dispatch.env
 ExecStart=/usr/bin/env mw postern mirror
 
 # Type=oneshot has no start timeout by default, and a hung ssh would then block
-# every later run.
-TimeoutStartSec=5min
+# every later run. Each copy of the mill's state sends only the run directories
+# that changed since the last good one, so a run is short; the one copy with no
+# cursor (the first, or after a week without a good one) sends all of it, and
+# the long limit is for that one.
+TimeoutStartSec=30min
 
 # A copy is meant to be cheap and to step aside for real work.
 Nice=19

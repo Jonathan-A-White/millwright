@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -133,4 +134,100 @@ func (Mirrorer) Copy(ctx context.Context, dir string, names []string, rsh []stri
 		return fmt.Errorf("rsync to %s: %w: %s", dest, err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// ReadMillCursor implements application.PosternMirrorer.
+func (Mirrorer) ReadMillCursor(_ context.Context, dir string) (time.Time, bool, error) {
+	text, err := os.ReadFile(filepath.Join(dir, application.MillCursorFile))
+	if os.IsNotExist(err) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(text)))
+	if err != nil {
+		// A cursor that cannot be read is no cursor: the next copy is whole.
+		return time.Time{}, false, nil
+	}
+	return at, true, nil
+}
+
+// WriteMillCursor implements application.PosternMirrorer. It writes beside the
+// file and renames, so that a reader never sees half of it.
+func (Mirrorer) WriteMillCursor(_ context.Context, dir string, at time.Time) error {
+	path := filepath.Join(dir, application.MillCursorFile)
+	if err := os.WriteFile(path+".tmp", []byte(at.UTC().Format(time.RFC3339Nano)+"\n"), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
+}
+
+// MillNames implements application.PosternMirrorer. It walks the run directories
+// here, on this host, and not over ssh: a stat a file is cheap where the files
+// are, and it is the walk of rsync's file list on a loaded far end that costs.
+func (Mirrorer) MillNames(ctx context.Context, dir string, since time.Time) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, entry := range entries {
+		switch name := entry.Name(); {
+		case name == application.MillCursorFile || name == application.MillCursorFile+".tmp":
+		case name == application.MillRunsDir && !since.IsZero() && entry.IsDir():
+		default:
+			names = append(names, name)
+		}
+	}
+	if since.IsZero() {
+		return names, nil
+	}
+	runs, err := os.ReadDir(filepath.Join(dir, application.MillRunsDir))
+	if os.IsNotExist(err) {
+		return names, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range runs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		changed, err := changedSince(filepath.Join(dir, application.MillRunsDir, run.Name()), since)
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			names = append(names, application.MillRunsDir+"/"+run.Name())
+		}
+	}
+	return names, nil
+}
+
+// changedSince reports whether path, or anything under it, changed after since.
+// A file that goes while it is walked is not an error.
+func changedSince(path string, since time.Time) (bool, error) {
+	changed := false
+	err := filepath.WalkDir(path, func(p string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		info, err := entry.Info()
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.ModTime().After(since) {
+			changed = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return changed, err
 }

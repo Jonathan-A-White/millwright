@@ -2594,7 +2594,11 @@ this host's is left alone, so an older index never overwrites a newer one: the
 run says so and leaves with 1, after it has made the watchdog's copy. The mill's
 state has the same rule, keyed on the `time` of the last line of `grinds.jsonl`:
 a boost whose last grind is newer is left alone, and the run says so. Nothing
-here writes to this host's own data. `$MW_POSTERN_DATA` and
+here writes to this host's own data. The mill's state is copied whole the first
+time, and again when the last good copy is over a week old; every other run
+sends only the run directories (`runs/<id>`) with a file changed since the
+last good copy began, which it keeps as a time in `postern-mirror-cursor` in
+that directory, and a failed copy leaves it where it was. `$MW_POSTERN_DATA` and
 `$MW_POSTERN_WATCHDOG_TARGET` say the two settings in place of the file.
 
 **Install**, once per host: `sh scripts/install-units.sh --enable
