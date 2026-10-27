@@ -51,9 +51,15 @@ type Check struct {
 	// live (mw-gq6.800). Nil looks at none, as Next's own.
 	Changes BranchChanges
 
-	// Slot is the merge slot of the rig, taken around the rig's tests so that
-	// one gate per rig runs at a time on this host. Nil takes no slot.
+	// Slot is the merge slot of the rig, taken around the rig's tests: shared
+	// with the other stories' checks when it can be (SharedMergeSlot), so that
+	// they run side by side, and apart from a landing, which holds it alone.
+	// Nil takes no slot.
 	Slot MergeSlot
+
+	// PartSlotWait is the most a --part waits for the slot; CheckPartSlotWait
+	// when zero.
+	PartSlotWait time.Duration
 
 	// Load is how busy this host is, read around the rig's tests as a
 	// close-out reads it (mw-gq6.379): the check waits, up to LoadBound, for a
@@ -270,8 +276,8 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	}
 	report.Branch, report.Target = c.branch, c.target
 
-	// The rig's tests are run holding the rig's merge slot, as a close-out's
-	// are, so that one gate per rig runs at a time on this host.
+	// The rig's tests are run holding the rig's merge slot, shared with the
+	// other checks of the rig and apart from a landing's.
 	checks := k.Checks
 	load := k.Load
 	split := k.splitGate(path.Rig)
@@ -316,6 +322,8 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		Checks:      checks,
 		SpecChecks:  specs,
 		NamedChecks: k.NamedChecks,
+		GateParts:   k.Parts,
+		GateRecords: k.Records,
 		Changes:     k.Changes,
 		Remote:      k.Remote,
 		Load:        load,
@@ -346,10 +354,14 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 // no uncommitted work, so that what the checks run on is that commit and
 // nothing else; empty when it holds some, or either cannot be read.
 func (k Check) cleanTip(ctx context.Context, c *closeOut) string {
-	if left, err := k.Landing.Uncommitted(ctx, c.worktree); err != nil || len(left) > 0 {
+	return cleanTipOf(ctx, k.Landing, c)
+}
+
+func cleanTipOf(ctx context.Context, landing Landing, c *closeOut) string {
+	if left, err := landing.Uncommitted(ctx, c.worktree); err != nil || len(left) > 0 {
 		return ""
 	}
-	tip, err := k.Landing.RefHead(ctx, c.rigDir, c.branch)
+	tip, err := landing.RefHead(ctx, c.rigDir, c.branch)
 	if err != nil {
 		return ""
 	}
@@ -382,7 +394,8 @@ func CheckedTip(log string) string {
 	return tip[1]
 }
 
-// slottedChecks runs the rig's tests while holding the rig's merge slot.
+// slottedChecks runs the rig's tests while holding the rig's merge slot, shared
+// with the other worktree checks of the rig.
 type slottedChecks struct {
 	checks Checks
 	slot   MergeSlot
@@ -391,7 +404,7 @@ type slottedChecks struct {
 }
 
 func (s slottedChecks) Run(ctx context.Context, rig, dir string) (Checked, error) {
-	holding, err := s.slot.Take(ctx, s.rigDir, s.holder)
+	holding, err := takeForCheck(ctx, s.slot, s.rigDir, s.holder)
 	if err != nil {
 		return Checked{}, fmt.Errorf("the merge slot of %s could not be taken: %w", rig, err)
 	}

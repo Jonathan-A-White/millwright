@@ -581,3 +581,142 @@ func TestAWaiterBehindALiveWaiterForTheMergeSlotNamesTheHeadOfTheQueue(t *testin
 		t.Errorf("expected only the head's ticket left, got %d entries", len(entries))
 	}
 }
+
+func TestWorktreeChecksOfOneRigShareTheMergeSlot(t *testing.T) {
+	ctx, dir := context.Background(), aRigDir(t)
+
+	first, err := impatient().TakeShared(ctx, dir, "builder@laptop checking mw-a.1")
+	if err != nil {
+		t.Fatalf("taking a free merge slot shared: %v", err)
+	}
+	second, err := impatient().TakeShared(ctx, dir, "builder@laptop checking mw-b.2")
+	if err != nil {
+		t.Fatalf("expected a second check to share the slot with the first, got %v", err)
+	}
+
+	// A landing takes the slot alone: it waits for both checks and names them.
+	_, err = impatient().Take(ctx, dir, "mw next landing mw-c.3")
+	if err == nil {
+		t.Fatal("expected a landing not to get the slot while checks hold it")
+	}
+	for _, who := range []string{"mw-a.1", "mw-b.2"} {
+		if !strings.Contains(err.Error(), who) {
+			t.Errorf("expected the failure to name the check of %s, got %q", who, err)
+		}
+	}
+
+	if err := first.Release(ctx); err != nil {
+		t.Fatalf("giving the first back: %v", err)
+	}
+	if _, err := impatient().Take(ctx, dir, "mw next landing mw-c.3"); err == nil {
+		t.Fatal("expected a landing to wait for the check still running")
+	}
+	if err := second.Release(ctx); err != nil {
+		t.Fatalf("giving the second back: %v", err)
+	}
+	landing, err := impatient().Take(ctx, dir, "mw next landing mw-c.3")
+	if err != nil {
+		t.Fatalf("expected the landing to get the slot once the checks were done: %v", err)
+	}
+
+	// And a check waits for the landing.
+	if _, err := impatient().TakeShared(ctx, dir, "builder@laptop checking mw-a.1"); err == nil {
+		t.Fatal("expected a check to wait for a landing")
+	} else if !strings.Contains(err.Error(), "mw-c.3") {
+		t.Errorf("expected the failure to name the landing, got %q", err)
+	}
+	if err := landing.Release(ctx); err != nil {
+		t.Fatalf("giving the landing back: %v", err)
+	}
+	if shared, err := impatient().TakeShared(ctx, dir, "builder@laptop checking mw-a.1"); err != nil {
+		t.Errorf("expected a check to get the slot after the landing: %v", err)
+	} else {
+		shared.Release(ctx)
+	}
+}
+
+func TestAWaitingLandingIsNotStarvedByChecksArrivingBehindIt(t *testing.T) {
+	ctx, dir := context.Background(), aRigDir(t)
+
+	running, err := impatient().TakeShared(ctx, dir, "builder@laptop checking mw-a.1")
+	if err != nil {
+		t.Fatalf("taking the slot shared: %v", err)
+	}
+	defer running.Release(ctx)
+
+	landing := make(chan error, 1)
+	go func() {
+		slots := rig.NewSlots(rig.WithSlotCap(5*time.Second), rig.WithSlotPoll(10*time.Millisecond))
+		held, err := slots.Take(ctx, dir, "mw next landing mw-c.3")
+		if err == nil {
+			held.Release(ctx)
+		}
+		landing <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	// A check arriving after the landing queued waits behind it.
+	patient := rig.NewSlots(rig.WithSlotPoll(10 * time.Millisecond))
+	brief, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer cancel()
+	if _, err := patient.TakeShared(brief, dir, "builder@laptop checking mw-b.2"); err == nil {
+		t.Fatal("expected a check that came after the landing to wait for its turn")
+	}
+	running.Release(ctx)
+	if err := <-landing; err != nil {
+		t.Fatalf("expected the landing to get its turn when the running check ended: %v", err)
+	}
+}
+
+func TestAWaitForTheSlotThatEndsWithTheContextNamesWhoHasItAndSince(t *testing.T) {
+	dir := aRigDir(t)
+
+	held, err := impatient().TakeShared(context.Background(), dir, "builder@laptop checking mw-a.1")
+	if err != nil {
+		t.Fatalf("taking the slot: %v", err)
+	}
+	defer held.Release(context.Background())
+	landing, err := impatient().Take(context.Background(), dir, "x")
+	if err == nil {
+		landing.Release(context.Background())
+		t.Fatal("expected the exclusive take to wait")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	slots := rig.NewSlots(rig.WithSlotPoll(10 * time.Millisecond))
+	_, err = slots.Take(ctx, dir, "mw next landing mw-c.3")
+	var waited *application.SlotWaitError
+	if !errors.As(err, &waited) {
+		t.Fatalf("expected a SlotWaitError, got %v", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("expected the wait to have ended with the context's deadline, got %v", err)
+	}
+	if waited.Holder != "builder@laptop checking mw-a.1" {
+		t.Errorf("expected the holder to be named, got %q", waited.Holder)
+	}
+	if waited.Since.IsZero() || time.Since(waited.Since) > time.Minute {
+		t.Errorf("expected the time the holder took the slot, got %v", waited.Since)
+	}
+}
+
+func TestAShareHolderThatDiedLeavesNoRecordBehind(t *testing.T) {
+	ctx, dir := context.Background(), aRigDir(t)
+	record := rig.SlotPath(dir) + rig.SlotSharedSuffix
+	if err := os.MkdirAll(record, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A holder whose process is gone: the kernel gave its lock back.
+	dead := exec.Command("true")
+	if err := dead.Run(); err != nil {
+		t.Fatal(err)
+	}
+	says := fmt.Sprintf("builder@laptop checking mw-gone\npid %d\ntaken %s\n", dead.Process.Pid, time.Now().UTC().Format(time.RFC3339))
+	if err := os.WriteFile(filepath.Join(record, "gone"), []byte(says), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := impatient().Take(ctx, dir, "mw next landing mw-c.3"); err != nil {
+		t.Fatalf("expected a dead check's record not to hold the slot: %v", err)
+	}
+}
