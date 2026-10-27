@@ -146,6 +146,9 @@ func (f *fakeRetryLanding) BumpVersion(context.Context, string, application.Vers
 	return application.Bumped{}, nil
 }
 func (f *fakeRetryLanding) Push(context.Context, string, string, string) error { return nil }
+func (f *fakeRetryLanding) KeepOrigin(context.Context, string, string, string) (application.KeptOrigin, error) {
+	return application.KeptOrigin{}, nil
+}
 func (f *fakeRetryLanding) CloseLanding(context.Context, string, string) error { return nil }
 
 func (f *fakeRetryLanding) Bundle(context.Context, string, string, string, string) (string, error) {

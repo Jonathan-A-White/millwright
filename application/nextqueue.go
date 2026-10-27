@@ -86,6 +86,47 @@ func (n Next) rereadLanding(ctx context.Context, c *closeOut, report *NextReport
 	n.markBatch(ctx, c)
 }
 
+// queuePushTries is how many times the queue's push is made when the remote
+// refuses it: once, and once more if origin's copy of the branch moved after it
+// was merged in.
+const queuePushTries = 2
+
+// pushQueued pushes the story's branch to the remote as itself, never forced.
+// The remote may already hold the branch at a commit this head does not contain
+// (an earlier attempt's push, the branch since rebuilt: mw-gq6.818), which git
+// refuses as not a fast-forward; so before each push origin's tip is merged in
+// keeping this branch's files, and the branch's tip, which is what is recorded
+// as queued, is the merge. A push still refused after that stops with both tips
+// and the one command a person can run to land the branch over origin's.
+func (n Next) pushQueued(ctx context.Context, c *closeOut, report *NextReport) error {
+	var (
+		kept    KeptOrigin
+		keepErr error
+		err     error
+	)
+	for try := 0; try < queuePushTries; try++ {
+		kept, keepErr = n.Landing.KeepOrigin(ctx, c.worktree, n.remote(), c.branch)
+		if keepErr != nil {
+			// The push says what is wrong if anything is.
+			report.Notes = append(report.Notes, fmt.Sprintf("origin's %s could not be read to merge it in: %s", c.branch, firstLine(keepErr.Error())))
+		} else if kept.Merged {
+			c.tip = kept.Head
+			report.Notes = append(report.Notes, fmt.Sprintf("%s at %s held %s, which the attempt's branch did not contain: merged it in keeping the attempt's files, so the branch is at %s",
+				c.branch, n.remote(), shortCommit(kept.Remote), shortCommit(kept.Head)))
+		}
+		if err = n.pushRetrying(ctx, report, c.worktree, c.branch); err == nil || !Rejected(err) {
+			return err
+		}
+	}
+	theirs := "(not read: " + firstLine(fmt.Sprint(keepErr)) + ")"
+	lease := ""
+	if keepErr == nil && kept.Remote != "" {
+		theirs, lease = shortCommit(kept.Remote), "="+c.branch+":"+kept.Remote
+	}
+	return failedFor(ReasonLandingFailed, fmt.Errorf("%s at %s is at %s and the branch here is at %s, and the push was refused even with origin's tip merged in (mw forces nothing); to put the branch here over origin's: git -C %s push --force-with-lease%s %s HEAD:refs/heads/%s: %w",
+		c.branch, n.remote(), theirs, shortCommit(c.tip), c.worktree, lease, n.remote(), c.branch, err))
+}
+
 // queue is what a close-out that passed does on a rig that lands in batches,
 // in place of the merge: the story's branch pushed to the remote as itself,
 // mw/<id>, never forced; run=queued recorded; one line in the seat's ledger
@@ -111,11 +152,7 @@ func (n Next) queue(ctx context.Context, c *closeOut, report *NextReport) (NextR
 		}
 		return n.stop(ctx, c, report, ReasonGitFailed, why, "")
 	}
-	if err := n.pushRetrying(ctx, report, c.worktree, c.branch); err != nil {
-		if Rejected(err) {
-			err = failedFor(ReasonLandingFailed, fmt.Errorf("%s at %s holds commits this branch does not (rebased since it was queued?), and mw forces nothing: %w",
-				c.branch, n.remote(), err))
-		}
+	if err := n.pushQueued(ctx, c, report); err != nil {
 		kept := n.keepLandingError(ctx, c, report, err)
 		return n.stop(ctx, c, report, reasonOf(err), firstLine(err.Error()), kept)
 	}

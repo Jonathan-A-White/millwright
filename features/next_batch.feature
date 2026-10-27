@@ -34,6 +34,16 @@ Feature: A rig that lands in batches queues each story that passes its close-out
     And the terminal holds no session of "mw-gq6.1"
     And a fresh session is running for "mw-gq6.2"
 
+  Scenario: A story whose branch was rebuilt since an earlier attempt pushed it is queued all the same
+    Given the rig lands its stories in batches
+    And the session of "mw-gq6.1" reported a plain success
+    And the rig's origin already holds "mw/mw-gq6.1" at a commit of an earlier attempt that the branch of "mw-gq6.1" does not contain
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is recorded as queued for batch landing
+    And the branch of "mw-gq6.1" is on the rig's origin as "mw/mw-gq6.1"
+    And the origin's "mw/mw-gq6.1" holds the earlier attempt's commit as well as the branch of "mw-gq6.1"
+    And nothing was landed on "main"
+
   Scenario: A rig that says landing = "each" lands the same story as today
     Given the rig lands its stories each by itself
     And the session of "mw-gq6.1" reported a plain success

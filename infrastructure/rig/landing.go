@@ -600,6 +600,62 @@ func (w *Worktrees) remoteTags(ctx context.Context, dir, remote string) (map[str
 	return tags, nil
 }
 
+// KeepOrigin implements application.Landing. The remote's tip is read with
+// ls-remote and its objects fetched by name into FETCH_HEAD, no ref of the rig
+// moved. A tip the head already contains needs nothing; any other is merged in
+// with the "ours" strategy, a merge commit that keeps every file of the head,
+// committed with the head's own date so the story's closing comment, written
+// after the head, is still after its newest commit.
+func (w *Worktrees) KeepOrigin(ctx context.Context, dir, remote, branch string) (application.KeptOrigin, error) {
+	var kept application.KeptOrigin
+	if remote == "" {
+		remote = w.remote
+	}
+	if branch == "" {
+		return kept, fmt.Errorf("reading origin's copy for %s: which branch?", dir)
+	}
+	head, err := w.git(ctx, dir, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return kept, err
+	}
+	kept.Head = strings.TrimSpace(head)
+	listed, err := w.git(ctx, dir, "ls-remote", remote, "refs/heads/"+branch)
+	if err != nil {
+		return kept, err
+	}
+	fields := strings.Fields(listed)
+	if len(fields) == 0 {
+		return kept, nil
+	}
+	kept.Remote = fields[0]
+	if _, err := w.git(ctx, dir, "fetch", "--quiet", "--no-tags", remote, "refs/heads/"+branch); err != nil {
+		return kept, err
+	}
+	unseen, err := w.git(ctx, dir, "rev-list", "--count", kept.Head+".."+kept.Remote)
+	if err != nil {
+		return kept, err
+	}
+	if strings.TrimSpace(unseen) == "0" {
+		return kept, nil
+	}
+	date, err := w.git(ctx, dir, "log", "-1", "--format=%cI", kept.Head)
+	if err != nil {
+		return kept, err
+	}
+	merge := gitcmd.Command(ctx, w.program, dir, "merge", "--no-ff", "--no-edit", "-s", "ours", "-m",
+		"Merge "+remote+"/"+branch+" ("+kept.Remote[:min(8, len(kept.Remote))]+") keeping this attempt's files", kept.Remote)
+	merge.Env = append(merge.Env, "GIT_COMMITTER_DATE="+strings.TrimSpace(date), "GIT_AUTHOR_DATE="+strings.TrimSpace(date))
+	if out, err := merge.CombinedOutput(); err != nil {
+		return kept, fmt.Errorf("merging %s (%s) into %s: %w: %s", branch, kept.Remote, dir, err, strings.TrimSpace(string(out)))
+	}
+	head, err = w.git(ctx, dir, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return kept, err
+	}
+	kept.Head, kept.Merged = strings.TrimSpace(head), true
+	return kept, nil
+}
+
 // CloseLanding implements application.Landing.
 func (w *Worktrees) CloseLanding(ctx context.Context, rigDir, landingDir string) error {
 	if landingDir == "" {

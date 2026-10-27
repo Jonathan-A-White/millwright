@@ -19,6 +19,8 @@ import (
 func registerNextBatchSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig lands its stories in batches$`, c.theRigLandsInBatches)
 	ctx.Given(`^the rig lands its stories each by itself$`, c.theRigLandsEach)
+	ctx.Given(`^the rig's origin already holds "([^"]*)" at a commit of an earlier attempt that the branch of "([^"]*)" does not contain$`, c.theOriginHoldsAnEarlierAttempt)
+	ctx.Then(`^the origin's "([^"]*)" holds the earlier attempt's commit as well as the branch of "([^"]*)"$`, c.theOriginKeepsTheEarlierAttempt)
 	ctx.Then(`^the story "([^"]*)" is recorded as queued for batch landing$`, c.theStoryIsRecordedAsQueued)
 	ctx.Then(`^the branch of "([^"]*)" is on the rig's origin as "([^"]*)"$`, c.theBranchIsOnTheOriginAs)
 	ctx.Then(`^the last ledger line says it was tested by mw check at the tip of "([^"]*)"$`, c.theLastLedgerLineTrustsTheCheck)
@@ -35,6 +37,31 @@ func (c *nextContext) theRigLandsInBatches() error {
 
 func (c *nextContext) theRigLandsEach() error {
 	return c.theRigFileHoldsTheLine(vault.LandingKey + ` = "each"`)
+}
+
+// theOriginHoldsAnEarlierAttempt puts a branch on the origin at a commit cut
+// from main that the story's own branch, worked since, does not contain: what an
+// earlier attempt's queue push left behind (mw-gq6.818).
+func (c *nextContext) theOriginHoldsAnEarlierAttempt(name, _ string) error {
+	commit, err := gitSay(c.origin(), "-c", "user.name=earlier attempt", "-c", "user.email=attempt@millwright.invalid",
+		"commit-tree", "main^{tree}", "-p", "main", "-m", "An earlier attempt of the story")
+	if err != nil {
+		return err
+	}
+	return gitRun(c.origin(), "git", "update-ref", "refs/heads/"+name, commit)
+}
+
+// theOriginKeepsTheEarlierAttempt is the queued branch a fast-forward of the
+// earlier attempt's push: its commit is an ancestor of the branch's tip.
+func (c *nextContext) theOriginKeepsTheEarlierAttempt(name, id string) error {
+	earlier, err := gitSay(c.origin(), "log", "-1", "--format=%H", "--grep=An earlier attempt of the story", "refs/heads/"+name)
+	if err != nil {
+		return err
+	}
+	if earlier == "" {
+		return fmt.Errorf("expected %s at the origin to hold the earlier attempt's commit", name)
+	}
+	return gitRun(c.origin(), "git", "merge-base", "--is-ancestor", earlier, "refs/heads/"+name)
 }
 
 func (c *nextContext) theStoryIsRecordedAsQueued(id string) error {

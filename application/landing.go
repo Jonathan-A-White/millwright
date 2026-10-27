@@ -226,6 +226,17 @@ type Landing interface {
 	// comes back as ErrPushTransient. Nothing is ever forced.
 	Push(ctx context.Context, landingDir, remote, branch string) error
 
+	// KeepOrigin makes the branch the worktree at dir has checked out one the
+	// remote's copy of branch can be fast-forwarded to, without changing a file
+	// of it: when the remote holds branch at a commit this one does not contain
+	// (an earlier attempt's push, the branch since rebuilt), that tip is merged
+	// in keeping this branch's tree, dated no later than the tip it merges onto
+	// so that a closing comment written after that tip is still after the
+	// newest commit. A branch the remote lacks, or holds at an ancestor, is left
+	// as it is. Remote is the remote's tip as read ("" when it has none), Head
+	// the worktree's commit afterwards. Nothing is pushed or forced.
+	KeepOrigin(ctx context.Context, dir, remote, branch string) (KeptOrigin, error)
+
 	// CloseLanding takes the throwaway worktree away again. Closing what is not
 	// there is not an error.
 	CloseLanding(ctx context.Context, rigDir, landingDir string) error
@@ -249,6 +260,15 @@ type Landing interface {
 	// anything else is left exactly as it was and Left says why. Nothing is ever
 	// merged or forced, and an error is git failing, not a checkout left alone.
 	Advance(ctx context.Context, rigDir, branch, commit string) (Advanced, error)
+}
+
+// KeptOrigin is what Landing.KeepOrigin found: Remote the tip the remote holds
+// the branch at (empty when it holds none), Head the commit the worktree is at
+// once it was done, and Merged whether that tip was merged in to make it so.
+type KeptOrigin struct {
+	Remote string
+	Head   string
+	Merged bool
 }
 
 // Advanced is what became of the rig's own checkout after a landing: Moved when
