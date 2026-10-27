@@ -62,7 +62,10 @@ func newCheckCmd() *cobra.Command {
 			"alone, with no wait for a calm host and no second run, and keeps what it said at the branch's tip;\n" +
 			"run it once for each part, each as a call of its own, and then mw check <story> with no --part: that\n" +
 			"runs none of the gate again, it reads the parts' records and reports the whole gate green, or names\n" +
-			"each part that failed or was not run at this commit, with the call that runs it.\n\n" +
+			"each part that failed or was not run at this commit, with the call that runs it. A part that only\n" +
+			"runs tools in the worktree (npm ci, npm run typecheck|lint|build, npx vitest, go build|vet|test)\n" +
+			"takes no merge slot; any other part waits up to nine minutes for it while a landing holds it, saying\n" +
+			"each minute who holds it and since when, and then says to run the same part again (mw-gq6.814).\n\n" +
 			"The formula's last step is normally still open when a session runs check, so a session runs it\n" +
 			"after committing and closes that step once nothing else is refused.",
 		Args: cobra.ExactArgs(1),

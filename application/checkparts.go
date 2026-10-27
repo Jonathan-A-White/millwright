@@ -9,11 +9,13 @@ import (
 )
 
 // CheckPartSlotWait is the most mw check --part N waits for the rig's merge
-// slot before it ends with a line saying who holds it: well under the 590
-// seconds a Builder's foreground tool call is given, so that the call ends in
-// words rather than in the tool's own silent timeout (mw-6zgnz5y). Worktree
-// checks share the slot, so only a landing in progress makes a part wait.
-const CheckPartSlotWait = 4 * time.Minute
+// slot before it ends with a line saying who holds it: under the 590 seconds a
+// Builder's foreground tool call is given, so that the call ends in words rather
+// than in the tool's own silent timeout (mw-6zgnz5y). It is nine minutes, since
+// a batch landing holds the slot 10 to 40 minutes and a shorter wait handed the
+// Builder back to a landing it had not caused (mw-gq6.814). Worktree checks
+// share the slot, so only a landing in progress makes a part wait.
+const CheckPartSlotWait = 9 * time.Minute
 
 // A rig's whole gate can outrun the 590 seconds a Builder's foreground tool call
 // is given, and waiting on one run in the background is a wait the auto-mode
@@ -66,6 +68,60 @@ const (
 	partFailed  = "failed"
 )
 
+// CheckPartHeldFileName is the name of the record of the waits of part n of a
+// story's attempt on the merge slot, in the story's run directory: one file for
+// the part and the attempt, written again by each wait, so that a part handed
+// back on the slot twice in one attempt is one wait on record (mw-gq6.814).
+func CheckPartHeldFileName(attempt, n int) string {
+	if attempt < 1 {
+		attempt = 1
+	}
+	return fmt.Sprintf("check-%d-part-%d.slot", attempt, n)
+}
+
+// slotFreeRunners are the commands a gate part may begin each of its steps with
+// and still run without the merge slot: tools that read and write the story's
+// worktree alone, at the branch's tip.
+var slotFreeRunners = []string{
+	"npm ci", "npm install", "npm test", "npm run test", "npm run typecheck", "npm run lint", "npm run build",
+	"npx vitest", "npx tsc", "npx eslint", "go build", "go vet", "go test", "cd",
+}
+
+// PartNeedsSlot says whether a part of a split gate takes the rig's merge slot
+// (mw-gq6.814). The slot is there so that a close-out's gate and a check's never
+// run on the merge target at once; a part runs in the story's own worktree, and
+// one that only installs, type-checks, lints, builds or tests there does not touch
+// the target, so it takes none and a landing holding the slot does not stop it.
+// Any part whose command this does not know to be so (a step that is not one of
+// slotFreeRunners, or a pipe, redirect, substitution or ';') keeps the slot. Of
+// the lampas gate, so, only a part running the screenshot gate needs it.
+func PartNeedsSlot(part GatePart) bool {
+	command := strings.TrimSpace(part.Command)
+	if command == "" || strings.ContainsAny(command, ";|<>`$(){}\n") {
+		return true
+	}
+	for _, step := range strings.Split(command, "&&") {
+		fields := strings.Fields(step)
+		// A leading VAR=value belongs to the command that follows.
+		for len(fields) > 0 && strings.Contains(fields[0], "=") && !strings.HasPrefix(fields[0], "-") {
+			fields = fields[1:]
+		}
+		if !slotFreeStep(strings.Join(fields, " ")) {
+			return true
+		}
+	}
+	return false
+}
+
+func slotFreeStep(step string) bool {
+	for _, runner := range slotFreeRunners {
+		if step == runner || strings.HasPrefix(step, runner+" ") {
+			return true
+		}
+	}
+	return false
+}
+
 func (k Check) partsOf(rig string) []GatePart {
 	if k.Parts == nil {
 		return nil
@@ -89,7 +145,8 @@ func partLabel(n, of int, part GatePart) string {
 // of the other checks, which that last call makes, and it waits for no calm
 // host and runs nothing twice, so that its time is the part's own. It takes the
 // rig's merge slot around the part, shared with the other stories' checks, as a
-// whole check does; a landing holds it alone, and a part that waits on one for
+// whole check does, unless the part only runs tools in the worktree
+// (PartNeedsSlot); a landing holds it alone, and a part that waits on one for
 // CheckPartSlotWait ends with a line naming the holder and the command to run
 // again.
 func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (CheckReport, error) {
@@ -105,12 +162,12 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	label := partLabel(k.Part, len(parts), part)
 	tip := k.cleanTip(ctx, c)
 
-	if k.Slot != nil {
+	if k.Slot != nil && PartNeedsSlot(part) {
 		waitCtx, cancel := context.WithTimeout(ctx, k.partSlotWait())
 		holding, err := takeForCheck(waitCtx, k.Slot, c.rigDir, fmt.Sprintf("%s checking %s", SeatIdentity("", k.Host), c.id))
 		cancel()
 		if err != nil {
-			return report, k.partSlotRefusal(ctx, c, label, err)
+			return report, k.partSlotRefusal(ctx, c, label, report.Attempt, err)
 		}
 		defer holding.Release(ctx)
 	}
@@ -177,18 +234,71 @@ func (k Check) partSlotWait() time.Duration {
 
 // partSlotRefusal is the one line a part ends with when the merge slot could not
 // be taken. A wait that ran out of its budget names who holds the slot, since
-// when, and the command to run next; any other trouble is told as it was.
-func (k Check) partSlotRefusal(ctx context.Context, c *closeOut, label string, err error) error {
+// when, and the command to run next, which is the same part again: the wait is
+// the landing's, not the part's failure, and a part handed back on the slot
+// again in the same attempt is counted as the one wait it is (mw-gq6.814). Any
+// other trouble is told as it was.
+func (k Check) partSlotRefusal(ctx context.Context, c *closeOut, label string, attempt int, err error) error {
 	var waited *SlotWaitError
-	if ctx.Err() == nil && errors.As(err, &waited) && errors.Is(err, context.DeadlineExceeded) {
-		since := "a moment ago"
-		if !waited.Since.IsZero() {
-			since = fmt.Sprintf("%s (%s ago)", waited.Since.UTC().Format("15:04:05Z"), time.Since(waited.Since).Round(time.Second))
-		}
-		return fmt.Errorf("checking %s: %s did not start: after %s the merge slot of %s is still held by %s, since %s, and nothing was run; run `mw check %s --part %d` again when it is free, and hand back naming this part if it is still held",
-			c.id, label, waited.Waited.Round(time.Second), c.path.Rig, waited.Holder, since, c.id, k.Part)
+	if ctx.Err() != nil || !errors.As(err, &waited) || !errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("checking %s: the merge slot of %s could not be taken: %w", c.id, c.path.Rig, err)
 	}
-	return fmt.Errorf("checking %s: the merge slot of %s could not be taken: %w", c.id, c.path.Rig, err)
+	since := "a moment ago"
+	if !waited.Since.IsZero() {
+		since = fmt.Sprintf("%s (%s ago)", waited.Since.UTC().Format("15:04:05Z"), time.Since(waited.Since).Round(time.Second))
+	}
+	again := fmt.Sprintf("run the same part again with `mw check %s --part %d`", c.id, k.Part)
+	earlier := k.noteSlotWait(ctx, c.id, attempt, waited)
+	if earlier != "" {
+		return fmt.Errorf("checking %s: %s did not start: after %s the merge slot of %s is still held by %s, since %s, and nothing was run; it was held when this part was tried at %s as well, which is counted once for this attempt and is not a failure of the part: %s, and if the slot is held again, comment on the story naming this part and who holds the slot, and hand back",
+			c.id, label, waited.Waited.Round(time.Second), c.path.Rig, waited.Holder, since, earlier, again)
+	}
+	return fmt.Errorf("checking %s: %s did not start: after %s the merge slot of %s is still held by %s, since %s, and nothing was run; that is the landing's wait and not a failure of the part: %s",
+		c.id, label, waited.Waited.Round(time.Second), c.path.Rig, waited.Holder, since, again)
+}
+
+// noteSlotWait keeps what part k.Part waited on in the attempt, once for the part
+// and the attempt: the first time it was handed back on the slot, who held it
+// and since when. It returns when the part was first handed back if it had been
+// before, and "" otherwise, or when the record cannot be kept.
+func (k Check) noteSlotWait(ctx context.Context, storyID string, attempt int, waited *SlotWaitError) string {
+	if k.Records == nil {
+		return ""
+	}
+	name := CheckPartHeldFileName(attempt, k.Part)
+	if text, err := k.Records.ReadRunFile(ctx, storyID, name); err == nil {
+		if first, _, _, ok := slotWaitOf(text); ok {
+			return first
+		}
+	}
+	since := ""
+	if !waited.Since.IsZero() {
+		since = waited.Since.UTC().Format("15:04:05Z")
+	}
+	record := fmt.Sprintf("%s %s\nholder %s\nsince %s\n", slotWaitWord, time.Now().UTC().Format("15:04:05Z"), waited.Holder, since)
+	_, _ = k.Records.PutRunFile(ctx, storyID, name, record)
+	return ""
+}
+
+// slotWaitWord begins the first line of a record of a part's wait on the slot,
+// followed by when the part was first handed back.
+const slotWaitWord = "held"
+
+// slotWaitOf reads a record of a part's wait: when it was first handed back, who
+// held the slot and since when.
+func slotWaitOf(text string) (first, holder, since string, ok bool) {
+	for _, line := range strings.Split(text, "\n") {
+		word, rest, _ := strings.Cut(strings.TrimSpace(line), " ")
+		switch word {
+		case slotWaitWord:
+			first, ok = rest, rest != ""
+		case "holder":
+			holder = rest
+		case "since":
+			since = rest
+		}
+	}
+	return first, holder, since, ok
 }
 
 // indented is text with four spaces before each line, ending in a newline.
@@ -227,7 +337,7 @@ func (g recordedGate) Run(ctx context.Context, _, _ string) (Checked, error) {
 		case partFailed:
 			found = append(found, fmt.Sprintf("part %d (%s) failed at this commit%s", i+1, part.Name, fix))
 		default:
-			found = append(found, fmt.Sprintf("part %d (%s) has not been run at this commit%s", i+1, part.Name, fix))
+			found = append(found, fmt.Sprintf("part %d (%s) has not been run at this commit%s%s", i+1, part.Name, fix, g.heldNote(ctx, i+1)))
 		}
 	}
 	return Checked{
@@ -235,6 +345,25 @@ func (g recordedGate) Run(ctx context.Context, _, _ string) (Checked, error) {
 		Passed:  len(found) == 0,
 		Output:  strings.Join(found, "\n"),
 	}, nil
+}
+
+// heldNote is what an unrun part's line adds when the part was handed back on the
+// merge slot in this attempt: who held it, so that whoever reads the refusal
+// knows the part never ran, rather than failed (mw-gq6.814).
+func (g recordedGate) heldNote(ctx context.Context, n int) string {
+	text, err := g.records.ReadRunFile(ctx, g.storyID, CheckPartHeldFileName(g.attempt, n))
+	if err != nil {
+		return ""
+	}
+	first, holder, since, ok := slotWaitOf(text)
+	if !ok {
+		return ""
+	}
+	said := fmt.Sprintf(" (it waited on the merge slot held by %s", holder)
+	if since != "" {
+		said += ", since " + since
+	}
+	return said + fmt.Sprintf(" when it was tried at %s: that is a wait, not a failure of the part)", first)
 }
 
 // stateOf is what part n's record says of the commit at the tip: partPassed,

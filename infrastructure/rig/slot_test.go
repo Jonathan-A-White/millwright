@@ -873,3 +873,22 @@ func TestASlotWaitSaysHowLongItHasWaitedWhileItGoesOn(t *testing.T) {
 		t.Errorf("expected the later notice to name the holder and the wait so far, got %q", said[1])
 	}
 }
+
+func TestTheFirstSayingOfASlotWaitNamesWhenTheHolderTookTheSlot(t *testing.T) {
+	ctx, dir := context.Background(), aRigDir(t)
+	landing, err := impatient().Take(ctx, dir, "mw land on laptop, landing a batch of millwright")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer landing.Release(ctx)
+
+	var said []string
+	slots := rig.NewSlots(rig.WithSlotWait(100*time.Millisecond), rig.WithSlotCap(100*time.Millisecond), rig.WithSlotPoll(10*time.Millisecond),
+		rig.WithSlotNotice(func(s string) { said = append(said, s) }))
+	if _, err := slots.TakeShared(ctx, dir, "builder@laptop checking mw-a.1"); err == nil {
+		t.Fatal("expected the wait to give up")
+	}
+	if len(said) == 0 || !strings.Contains(said[0], "landing a batch of millwright") || !strings.Contains(said[0], ", since ") {
+		t.Errorf("expected the first notice to name the holder and since when, got %q", said)
+	}
+}

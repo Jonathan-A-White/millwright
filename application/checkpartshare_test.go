@@ -230,3 +230,188 @@ func TestOpenStepsOfAStoryWithAnUnrunSplitGateNameTheUnrunPartsAndTheCommand(t *
 		t.Errorf("expected the part that passed not to be named, got:\n%s", open.Said)
 	}
 }
+
+// namedParts is a rig's gate in the parts a test names, run as heldParts' are.
+type namedParts struct {
+	*heldParts
+	parts []application.GatePart
+}
+
+func (n *namedParts) Parts(string) []application.GatePart { return n.parts }
+
+// checkWith is twoStoriesOnOneRig's check, for a rig whose parts the test names
+// and whose records the test reads.
+func checkWith(t *testing.T, parts *namedParts, wait time.Duration) (func(id string, part int) error, *rig.Slots, string, *mapRecords) {
+	t.Helper()
+	_, slots, rigDir := twoStoriesOnOneRig(t, parts.heldParts, wait)
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	records := &mapRecords{}
+	check := func(id string, part int) error {
+		_, err := application.Check{
+			Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: &scriptedChecks{passes: []bool{true}},
+			Slot: slots, Parts: parts, Records: records, Part: part, PartSlotWait: wait,
+			Host: "laptop", Remote: "origin",
+			Rigs: map[string]string{"millwright": rigDir},
+			Out:  io.Discard,
+		}.Run(context.Background(), id)
+		return err
+	}
+	return check, slots, rigDir, records
+}
+
+// The lampas gate as the home's config names it: every part but the shots runs
+// a tool in the story's worktree at the branch's tip and never touches the
+// merge target.
+func lampasParts() *namedParts {
+	return &namedParts{heldParts: newHeldParts(), parts: []application.GatePart{
+		{Name: "install", Command: "npm ci --no-audit --no-fund"},
+		{Name: "vitest 1/6", Command: "TZ=UTC npx vitest run --shard 1/6"},
+		{Name: "typecheck", Command: "npm run typecheck"},
+		{Name: "lint", Command: "npm run lint"},
+		{Name: "build", Command: "npm run build"},
+		{Name: "server", Command: "cd server && go build ./... && go test ./..."},
+		{Name: "shots", Command: "npm run gate:shots"},
+		{Name: "deploy", Command: "git merge origin/main && npm test"},
+	}}
+}
+
+func TestAPartThatOnlyRunsToolsInTheWorktreeTakesNoMergeSlotAndRunsWhileALandingHoldsIt(t *testing.T) {
+	parts := lampasParts()
+	close(parts.release)
+	check, slots, rigDir, _ := checkWith(t, parts, 100*time.Millisecond)
+	landing, err := slots.Take(context.Background(), rigDir, "mw land on laptop, landing a batch of millwright")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer landing.Release(context.Background())
+
+	for n := 1; n <= 6; n++ {
+		started := time.Now()
+		if err := check("mw-x.1", n); err != nil {
+			t.Errorf("expected part %d (%s) to run with a landing holding the slot, got %v", n, parts.parts[n-1].Name, err)
+		}
+		if time.Since(started) > 80*time.Millisecond {
+			t.Errorf("expected part %d to start at once, it waited %s", n, time.Since(started))
+		}
+	}
+}
+
+func TestAPartThatCouldTouchTheMergeTargetStillWaitsForALandingsSlot(t *testing.T) {
+	for _, n := range []int{7, 8} {
+		parts := lampasParts()
+		close(parts.release)
+		check, slots, rigDir, _ := checkWith(t, parts, 100*time.Millisecond)
+		landing, err := slots.Take(context.Background(), rigDir, "mw land on laptop, landing a batch of millwright")
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = check("mw-x.1", n)
+		landing.Release(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "merge slot") {
+			t.Errorf("expected part %d (%s) to wait on the landing's slot, got %v", n, parts.parts[n-1].Name, err)
+		}
+	}
+}
+
+func TestPartNeedsSlotListsTheLampasGateAsNeedingItForNoPartButTheShots(t *testing.T) {
+	needs := map[string]bool{}
+	for _, part := range lampasParts().parts {
+		needs[part.Name] = application.PartNeedsSlot(part)
+	}
+	want := map[string]bool{"install": false, "vitest 1/6": false, "typecheck": false, "lint": false, "build": false, "server": false, "shots": true, "deploy": true}
+	for name, wanted := range want {
+		if needs[name] != wanted {
+			t.Errorf("part %s: want needs-slot %v, got %v", name, wanted, needs[name])
+		}
+	}
+	for _, command := range []string{"npm run lint:fix", "npm run lint | tee x", "npm ci; rm -rf x", "npm test > /tmp/x", "TZ=UTC npx vitest $(ls)", "make test"} {
+		if !application.PartNeedsSlot(application.GatePart{Command: command}) {
+			t.Errorf("expected %q, a command this rule does not know to leave the target alone, to keep the slot", command)
+		}
+	}
+}
+
+func TestAPartWaitsAboutAsLongAsAForegroundCallAllowsAndEndsInWords(t *testing.T) {
+	if application.CheckPartSlotWait != 9*time.Minute {
+		t.Errorf("expected a part to wait 9 minutes for the slot, got %s", application.CheckPartSlotWait)
+	}
+	if application.CheckPartSlotWait >= 590*time.Second {
+		t.Errorf("expected the wait to end before a Builder's 590 second foreground call does, got %s", application.CheckPartSlotWait)
+	}
+}
+
+func TestAPartHandedBackTwiceOnTheSlotInOneAttemptIsOneWaitToldTheSameWayBothTimes(t *testing.T) {
+	parts := lampasParts()
+	close(parts.release)
+	check, slots, rigDir, records := checkWith(t, parts, 60*time.Millisecond)
+	landing, err := slots.Take(context.Background(), rigDir, "mw land on laptop, landing a batch of millwright")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer landing.Release(context.Background())
+
+	first := check("mw-x.1", 7)
+	second := check("mw-x.1", 7)
+	for i, err := range []error{first, second} {
+		if err == nil {
+			t.Fatalf("hand-back %d: expected the part not to run while a landing held the slot", i+1)
+		}
+		for _, want := range []string{"`mw check mw-x.1 --part 7`", "the same part", "not a failure of the part"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("hand-back %d: expected %q, got %q", i+1, want, err)
+			}
+		}
+	}
+	if !strings.Contains(second.Error(), "again") || !strings.Contains(second.Error(), "counted once") {
+		t.Errorf("expected the repeat to say it counts once, got %q", second)
+	}
+	// One record of the wait for the part of the attempt, however often it was told.
+	var held []string
+	for name := range records.files {
+		if strings.Contains(name, "part-7") {
+			held = append(held, name)
+		}
+	}
+	if len(held) != 1 {
+		t.Errorf("expected one record of part 7's waits in the attempt, got %v", held)
+	}
+}
+
+func TestAnOpenStepsRefusalNamesAPartThatWaitedOnTheSlotAsHeldNotFailed(t *testing.T) {
+	parts := lampasParts()
+	close(parts.release)
+	check, slots, rigDir, records := checkWith(t, parts, 60*time.Millisecond)
+	landing, err := slots.Take(context.Background(), rigDir, "mw land on laptop, landing a batch of millwright")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer landing.Release(context.Background())
+	_ = check("mw-x.1", 7)
+
+	tip := "abc1234abc1234abc1234abc1234abc1234abc12"
+	gate, _ := application.RecordedGateForTest(records, "mw-x.1", 1, parts.parts, tip).Run(context.Background(), "", "")
+	if gate.Passed {
+		t.Fatal("expected the gate not to pass with its parts unrun")
+	}
+	var waited, others []string
+	for _, line := range strings.Split(gate.Output, "\n") {
+		if strings.HasPrefix(line, "part 7 (shots)") {
+			waited = append(waited, line)
+		} else if strings.Contains(line, "waited on the merge slot") {
+			others = append(others, line)
+		}
+	}
+	if len(waited) != 1 {
+		t.Fatalf("expected one line for part 7, got:\n%s", gate.Output)
+	}
+	for _, want := range []string{"has not been run at this commit", "waited on the merge slot", "mw land on laptop", "not a failure", "mw check mw-x.1 --part 7"} {
+		if !strings.Contains(waited[0], want) {
+			t.Errorf("expected the unrun part to say %q, got %q", want, waited[0])
+		}
+	}
+	if len(others) != 0 {
+		t.Errorf("expected only the part that waited to say so, got %q", others)
+	}
+}
