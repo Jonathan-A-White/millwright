@@ -1331,6 +1331,19 @@ type posternQuestionNote struct {
 	Asked string `json:"asked,omitempty"`
 	Q     string `json:"q,omitempty"`
 	Rec   string `json:"rec,omitempty"`
+
+	// Earlier are the cards asked on this bead before this one and not yet
+	// cleared, oldest first, each without an Earlier of its own. A second
+	// card asked on a bead keeps the first here instead of overwriting it, so
+	// mw postern clear --txid can withdraw one card among several. Every
+	// other reader sees only the newest card, the note's own fields.
+	Earlier []posternQuestionNote `json:"earlier,omitempty"`
+}
+
+// withoutEarlier is n as one entry of another note's Earlier.
+func (n posternQuestionNote) withoutEarlier() posternQuestionNote {
+	n.Earlier = nil
+	return n
 }
 
 // posternQuestionOfferedRelease reports whether noteValue — a bead's
@@ -2503,10 +2516,18 @@ func (s PosternSend) recordQuestion(ctx context.Context, req PosternSendRequest,
 	if err := s.Tracker.CommentOnStory(ctx, req.Bead, comment); err != nil {
 		return fmt.Errorf("recording the question on %s: %w", req.Bead, err)
 	}
-	note, err := json.Marshal(posternQuestionNote{
+	asked := posternQuestionNote{
 		Txid: txid, Options: req.Options, Expect: expect,
 		Asked: s.now().UTC().Format(time.RFC3339), Q: req.Text, Rec: req.Recommend,
-	})
+	}
+	standing, err := s.Notes.Note(ctx, PosternQuestionKey(req.Bead))
+	if err != nil {
+		return fmt.Errorf("reading %s's question note before overwriting it: %w", req.Bead, err)
+	}
+	if older, ok := decisionCardOf(standing); ok && strings.TrimSpace(older.Txid) != "" && older.Txid != txid {
+		asked.Earlier = append(older.Earlier, older.withoutEarlier())
+	}
+	note, err := json.Marshal(asked)
 	if err != nil {
 		return fmt.Errorf("building %s's question note: %w", req.Bead, err)
 	}

@@ -258,3 +258,37 @@ func TestPosternSendRefusesAnAttachmentItCannotSendBeforeSendingAnything(t *test
 		}
 	}
 }
+
+// A second card asked on a bead that already has one keeps the first card's
+// txid in its note, so mw postern clear --txid can still find it.
+func TestPosternSendAKeepsTheOlderCardsWhenAskedAgainOnABead(t *testing.T) {
+	f := newSendFixture()
+	ask := func(text string) string {
+		txid, err := f.send("").Run(context.Background(), application.PosternSendRequest{
+			Class: "decision-needed", Text: text, Bead: "mw-a.1", Recommend: "A", Options: []string{"A", "B"},
+		})
+		if err != nil {
+			t.Fatalf("asking %q: %v", text, err)
+		}
+		return txid
+	}
+	first := ask("First?")
+	second := ask("Second?")
+	third := ask("Third?")
+
+	note, _ := f.tracker.Note(context.Background(), application.PosternQuestionKey("mw-a.1"))
+	var saved struct {
+		Txid    string
+		Q       string
+		Earlier []struct{ Txid, Q string }
+	}
+	if err := json.Unmarshal([]byte(note), &saved); err != nil {
+		t.Fatalf("reading the note %q: %v", note, err)
+	}
+	if saved.Txid != third || saved.Q != "Third?" {
+		t.Errorf("expected the newest card to lead the note, got %+v", saved)
+	}
+	if len(saved.Earlier) != 2 || saved.Earlier[0].Txid != first || saved.Earlier[1].Txid != second || saved.Earlier[1].Q != "Second?" {
+		t.Errorf("expected the first and second cards kept in order, got %+v", saved.Earlier)
+	}
+}

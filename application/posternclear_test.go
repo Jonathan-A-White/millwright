@@ -144,3 +144,110 @@ func TestPosternClearOfABareMarkSendsNoReply(t *testing.T) {
 		t.Errorf("got note %q, sent %+v, comments %q", note, sender.Sent(), tracker.Comments("t.1"))
 	}
 }
+
+// twoCards sets t.1's note to a newer card direct:new that overtook an older
+// card direct:old.
+func twoCards(t *testing.T, tracker *apptest.FakeTracker) {
+	t.Helper()
+	note, err := json.Marshal(map[string]any{
+		"txid": "direct:new", "q": "Newer?", "options": []string{"A: Go"},
+		"earlier": []map[string]any{{"txid": "direct:old", "q": "Older?", "options": []string{"A: Go"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetNote(context.Background(), application.PosternQuestionKey("t.1"), string(note)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// --txid of an overtaken card replies under THAT card, and the newer card and
+// its note are left alone.
+func TestPosternClearTxidClearsOnlyTheOlderCard(t *testing.T) {
+	ctx := context.Background()
+	tracker := clearFixture(t)
+	twoCards(t, tracker)
+	sender := &apptest.FakePosternSender{}
+
+	err := application.PosternClear{Beads: tracker, Notes: tracker, Sender: sender, Txid: "direct:old"}.Run(ctx, "t.1", "overtaken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent := sender.Sent()
+	if len(sent) != 1 || sent[0].Re != "direct:old" || sent[0].Thread != "t.1" || !strings.Contains(sent[0].Text, "overtaken") {
+		t.Errorf("expected one reply under direct:old, got %+v", sent)
+	}
+	note, _ := tracker.Note(ctx, application.PosternQuestionKey("t.1"))
+	var left struct {
+		Txid    string
+		Q       string
+		Earlier []struct{ Txid string }
+	}
+	if err := json.Unmarshal([]byte(note), &left); err != nil || left.Txid != "direct:new" || left.Q != "Newer?" || len(left.Earlier) != 0 {
+		t.Errorf("expected the newer card's note kept without the older card, got %q: %v", note, err)
+	}
+	if comments := tracker.Comments("t.1"); len(comments) != 1 || !strings.Contains(comments[0], "direct:old") || !strings.HasPrefix(comments[0], application.PosternClearComment+"overtaken") {
+		t.Errorf("got comments %q", comments)
+	}
+}
+
+// --txid of the newest card clears it and lets the card it overtook lead the
+// note again.
+func TestPosternClearTxidOfTheNewestCardRestoresTheOlder(t *testing.T) {
+	ctx := context.Background()
+	tracker := clearFixture(t)
+	twoCards(t, tracker)
+	sender := &apptest.FakePosternSender{}
+
+	if err := (application.PosternClear{Beads: tracker, Notes: tracker, Sender: sender, Txid: "direct:new"}).Run(ctx, "t.1", "wrong"); err != nil {
+		t.Fatal(err)
+	}
+	if sent := sender.Sent(); len(sent) != 1 || sent[0].Re != "direct:new" {
+		t.Errorf("expected one reply under direct:new, got %+v", sent)
+	}
+	note, _ := tracker.Note(ctx, application.PosternQuestionKey("t.1"))
+	var left struct{ Txid, Q string }
+	if err := json.Unmarshal([]byte(note), &left); err != nil || left.Txid != "direct:old" || left.Q != "Older?" {
+		t.Errorf("expected the older card to lead the note, got %q: %v", note, err)
+	}
+}
+
+// A --txid the note does not hold is refused, naming it, and nothing changes.
+func TestPosternClearTxidNotOnTheBeadIsRefused(t *testing.T) {
+	ctx := context.Background()
+	tracker := clearFixture(t)
+	twoCards(t, tracker)
+	before, _ := tracker.Note(ctx, application.PosternQuestionKey("t.1"))
+	sender := &apptest.FakePosternSender{}
+
+	err := application.PosternClear{Beads: tracker, Notes: tracker, Sender: sender, Txid: "direct:nope"}.Run(ctx, "t.1", "x")
+	if err == nil || !strings.Contains(err.Error(), "direct:nope") {
+		t.Fatalf("expected a refusal naming direct:nope, got %v", err)
+	}
+	after, _ := tracker.Note(ctx, application.PosternQuestionKey("t.1"))
+	if after != before || len(sender.Sent()) != 0 || len(tracker.Comments("t.1")) != 0 {
+		t.Errorf("expected nothing changed, got %q, %+v, %q", after, sender.Sent(), tracker.Comments("t.1"))
+	}
+}
+
+// Without --txid a bead with several cards clears as before: the whole note
+// goes and the reply is under the newest card.
+func TestPosternClearWithoutTxidClearsTheWholeNote(t *testing.T) {
+	ctx := context.Background()
+	tracker := clearFixture(t)
+	twoCards(t, tracker)
+	sender := &apptest.FakePosternSender{}
+
+	if err := (application.PosternClear{Beads: tracker, Notes: tracker, Sender: sender}).Run(ctx, "t.1", "done"); err != nil {
+		t.Fatal(err)
+	}
+	if note, _ := tracker.Note(ctx, application.PosternQuestionKey("t.1")); note != "" {
+		t.Errorf("expected the note cleared, got %q", note)
+	}
+	if sent := sender.Sent(); len(sent) != 1 || sent[0].Re != "direct:new" {
+		t.Errorf("expected one reply under the newest card, got %+v", sent)
+	}
+	if comments := tracker.Comments("t.1"); len(comments) != 1 || comments[0] != "Card cleared by mw postern clear: done" {
+		t.Errorf("got comments %q", comments)
+	}
+}

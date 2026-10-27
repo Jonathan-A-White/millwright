@@ -56,3 +56,9 @@ bead `Card cleared by mw postern clear: <why>`, and posts a short reply under
 the card's txid saying it is cleared and why, so his phone thread closes the
 loop. The bead's status and fields are never touched. A bead with no question
 note is refused, naming it. `--dry-run` prints the three acts and does none.
+
+A second card asked on a bead keeps the first in the note's `earlier` list rather
+than overwriting it. `--txid <txid>` withdraws only the card asked under that
+txid (the reply goes under that card; the bead's other cards and their note
+stay; withdrawing the newest lets the one it overtook lead the note again). A
+txid the note does not hold is refused, naming it.

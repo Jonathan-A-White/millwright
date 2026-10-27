@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -25,6 +26,11 @@ type PosternClear struct {
 	Beads  TidyBeads
 	Notes  PosternNotes
 	Sender PosternSender
+	// Txid, when set, withdraws only the card asked under that txid: the
+	// newest card of the bead's question note, or one of its Earlier. The
+	// other cards and their note stay. Unset, the whole note is cleared and the
+	// reply goes under the newest card.
+	Txid string
 	// DryRun prints the three acts and does none of them.
 	DryRun bool
 	// Out is where each act is said. A nil Out says nothing.
@@ -56,8 +62,24 @@ func (c PosternClear) Run(ctx context.Context, bead, why string) error {
 	comment := PosternClearComment + why
 	reply := PosternClearReply + why
 
+	// remaining is the note left after a --txid card goes: empty when the
+	// whole note is cleared.
+	remaining := ""
+	if want := strings.TrimSpace(c.Txid); want != "" {
+		var err error
+		if remaining, err = withdrawCard(card, want); err != nil {
+			return fmt.Errorf("mw postern clear: %s: %w", bead, err)
+		}
+		txid = want
+		comment += " (card " + want + ")"
+	}
+
 	if c.DryRun {
-		c.printf("would clear the question note of %s\n", bead)
+		if remaining != "" {
+			c.printf("would withdraw card %s from the question note of %s and keep the others\n", txid, bead)
+		} else {
+			c.printf("would clear the question note of %s\n", bead)
+		}
 		c.printf("would comment on %s: %s\n", bead, comment)
 		if txid == "" {
 			c.printf("would send no reply: the note records no txid\n")
@@ -66,10 +88,17 @@ func (c PosternClear) Run(ctx context.Context, bead, why string) error {
 		}
 		return nil
 	}
-	if err := c.Notes.ClearNote(ctx, PosternQuestionKey(bead)); err != nil {
-		return fmt.Errorf("mw postern clear: clearing %s's question note: %w", bead, err)
+	if remaining != "" {
+		if err := c.Notes.SetNote(ctx, PosternQuestionKey(bead), remaining); err != nil {
+			return fmt.Errorf("mw postern clear: withdrawing card %s from %s's question note: %w", txid, bead, err)
+		}
+		c.printf("withdrew card %s from the question note of %s\n", txid, bead)
+	} else {
+		if err := c.Notes.ClearNote(ctx, PosternQuestionKey(bead)); err != nil {
+			return fmt.Errorf("mw postern clear: clearing %s's question note: %w", bead, err)
+		}
+		c.printf("cleared the question note of %s\n", bead)
 	}
-	c.printf("cleared the question note of %s\n", bead)
 	if err := c.Beads.CommentOnStory(ctx, bead, comment); err != nil {
 		return fmt.Errorf("mw postern clear: %s's note is cleared, but commenting on it failed: %w", bead, err)
 	}
@@ -92,4 +121,37 @@ func (c PosternClear) printf(format string, args ...any) {
 	if c.Out != nil {
 		fmt.Fprintf(c.Out, format, args...)
 	}
+}
+
+// withdrawCard is the question note left once the card asked under txid goes,
+// as JSON, or "" when no card is left and the note is to be cleared. When the
+// newest card goes, the newest card it overtook leads the note again. A txid
+// no card of note holds is an error naming it.
+func withdrawCard(note posternQuestionNote, txid string) (string, error) {
+	cards := append(append([]posternQuestionNote{}, note.Earlier...), note.withoutEarlier())
+	kept := make([]posternQuestionNote, 0, len(cards))
+	found := false
+	for _, card := range cards {
+		if strings.TrimSpace(card.Txid) == txid {
+			found = true
+			continue
+		}
+		kept = append(kept, card)
+	}
+	if !found {
+		return "", fmt.Errorf("no card with txid %s is on its question note", txid)
+	}
+	if len(kept) == 0 {
+		return "", nil
+	}
+	newest := kept[len(kept)-1]
+	newest.Earlier = kept[:len(kept)-1]
+	if len(newest.Earlier) == 0 {
+		newest.Earlier = nil
+	}
+	encoded, err := json.Marshal(newest)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
