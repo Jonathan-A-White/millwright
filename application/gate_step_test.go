@@ -46,6 +46,34 @@ func TestTheGateStepOfEachFormulaNamesTheForegroundWay(t *testing.T) {
 	}
 }
 
+// A part that could not start for the merge slot is not waited on in a
+// background loop (mw-6zgnz5y): the gate step says to run it once more and then
+// hand back naming the unrun parts and the command that runs each.
+func TestTheGateStepSaysWhatToDoWhenAPartCannotGetTheMergeSlot(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "formulas", "tdd-feature.formula.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var formula struct {
+		Steps []formulaStep `json:"steps"`
+	}
+	if err := json.Unmarshal(raw, &formula); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range formula.Steps {
+		if s.ID != "verify" {
+			continue
+		}
+		for _, want := range []string{"the merge slot is held", "did not start", "do not start a background loop", "naming each part not yet run", "hand back"} {
+			if !strings.Contains(s.Description, want) {
+				t.Errorf("expected the gate step to contain %q, got: %s", want, s.Description)
+			}
+		}
+		return
+	}
+	t.Fatal("no verify step in tdd-feature")
+}
+
 // A Builder that met an 'under load' acceptance criterion started sixteen busy
 // loops on the home host and held dispatch, close-outs and a batch for calm
 // (mw-gq6.483): each formula that has a Builder or Tester check things names

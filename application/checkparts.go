@@ -2,9 +2,18 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
+
+// CheckPartSlotWait is the most mw check --part N waits for the rig's merge
+// slot before it ends with a line saying who holds it: well under the 590
+// seconds a Builder's foreground tool call is given, so that the call ends in
+// words rather than in the tool's own silent timeout (mw-6zgnz5y). Worktree
+// checks share the slot, so only a landing in progress makes a part wait.
+const CheckPartSlotWait = 4 * time.Minute
 
 // A rig's whole gate can outrun the 590 seconds a Builder's foreground tool call
 // is given, and waiting on one run in the background is a wait the auto-mode
@@ -79,7 +88,10 @@ func partLabel(n, of int, part GatePart) string {
 // in the story's worktree and its result kept for the last call. It makes none
 // of the other checks, which that last call makes, and it waits for no calm
 // host and runs nothing twice, so that its time is the part's own. It takes the
-// rig's merge slot around the part, as a whole check does.
+// rig's merge slot around the part, shared with the other stories' checks, as a
+// whole check does; a landing holds it alone, and a part that waits on one for
+// CheckPartSlotWait ends with a line naming the holder and the command to run
+// again.
 func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (CheckReport, error) {
 	parts := k.partsOf(c.path.Rig)
 	switch {
@@ -94,9 +106,11 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	tip := k.cleanTip(ctx, c)
 
 	if k.Slot != nil {
-		holding, err := k.Slot.Take(ctx, c.rigDir, fmt.Sprintf("%s checking %s", SeatIdentity("", k.Host), c.id))
+		waitCtx, cancel := context.WithTimeout(ctx, k.partSlotWait())
+		holding, err := takeForCheck(waitCtx, k.Slot, c.rigDir, fmt.Sprintf("%s checking %s", SeatIdentity("", k.Host), c.id))
+		cancel()
 		if err != nil {
-			return report, fmt.Errorf("checking %s: the merge slot of %s could not be taken: %w", c.id, c.path.Rig, err)
+			return report, k.partSlotRefusal(ctx, c, label, err)
 		}
 		defer holding.Release(ctx)
 	}
@@ -152,6 +166,29 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 		return report, fmt.Errorf("checking %s: %s did not pass, so mw next would not land it", c.id, label)
 	}
 	return report, nil
+}
+
+func (k Check) partSlotWait() time.Duration {
+	if k.PartSlotWait > 0 {
+		return k.PartSlotWait
+	}
+	return CheckPartSlotWait
+}
+
+// partSlotRefusal is the one line a part ends with when the merge slot could not
+// be taken. A wait that ran out of its budget names who holds the slot, since
+// when, and the command to run next; any other trouble is told as it was.
+func (k Check) partSlotRefusal(ctx context.Context, c *closeOut, label string, err error) error {
+	var waited *SlotWaitError
+	if ctx.Err() == nil && errors.As(err, &waited) && errors.Is(err, context.DeadlineExceeded) {
+		since := "a moment ago"
+		if !waited.Since.IsZero() {
+			since = fmt.Sprintf("%s (%s ago)", waited.Since.UTC().Format("15:04:05Z"), time.Since(waited.Since).Round(time.Second))
+		}
+		return fmt.Errorf("checking %s: %s did not start: after %s the merge slot of %s is still held by %s, since %s, and nothing was run; run `mw check %s --part %d` again when it is free, and hand back naming this part if it is still held",
+			c.id, label, waited.Waited.Round(time.Second), c.path.Rig, waited.Holder, since, c.id, k.Part)
+	}
+	return fmt.Errorf("checking %s: the merge slot of %s could not be taken: %w", c.id, c.path.Rig, err)
 }
 
 // indented is text with four spaces before each line, ending in a newline.

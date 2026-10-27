@@ -430,6 +430,47 @@ type MergeSlot interface {
 	Take(ctx context.Context, rigDir, holder string) (Holding, error)
 }
 
+// SharedMergeSlot is a MergeSlot that can also be held together with other
+// holders of the same kind: the rig's worktree checks (mw check, a part or the
+// whole of the gate) share it, so one story's gate never waits for a sibling
+// story's, while a landing, which Take gives the slot to alone, still waits for
+// every running check and they for it (mw-6zgnz5y). A shared hold and an
+// exclusive one never overlap; waiters take their turns in the order they came,
+// so a landing is not starved by checks arriving behind it.
+type SharedMergeSlot interface {
+	MergeSlot
+	// TakeShared waits for the rig's slot to be free of any exclusive hold
+	// and reports a holding that other shared holdings may sit beside.
+	TakeShared(ctx context.Context, rigDir, holder string) (Holding, error)
+}
+
+// takeForCheck takes the rig's slot for a worktree check: shared when the slot
+// can be, exclusive when it cannot.
+func takeForCheck(ctx context.Context, slot MergeSlot, rigDir, holder string) (Holding, error) {
+	if shared, ok := slot.(SharedMergeSlot); ok {
+		return shared.TakeShared(ctx, rigDir, holder)
+	}
+	return slot.Take(ctx, rigDir, holder)
+}
+
+// SlotWaitError is what a wait for the merge slot returns when its context gave
+// up while the slot was still held: who held it, since when, and how long the
+// wait had gone on. Err is why the wait ended (the context's error).
+type SlotWaitError struct {
+	Path   string
+	Holder string
+	// Since is when the holder took the slot, zero when the slot does not say.
+	Since  time.Time
+	Waited time.Duration
+	Err    error
+}
+
+func (e *SlotWaitError) Error() string {
+	return fmt.Sprintf("waiting for the merge slot %s, held by %q: %v", e.Path, e.Holder, e.Err)
+}
+
+func (e *SlotWaitError) Unwrap() error { return e.Err }
+
 // ErrSlotCap is what a MergeSlot's Take wraps when it waited the overall most a
 // close-out waits for the slot and it was still held (mw-gq6.467): the holder
 // was alive and still at its close-out, or the slot kept changing hands. The

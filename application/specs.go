@@ -60,7 +60,7 @@ type slottedSpecs struct {
 }
 
 func (s slottedSpecs) RunSpecs(ctx context.Context, rig, dir, base string) (SpecsChecked, error) {
-	holding, err := s.slot.Take(ctx, s.rigDir, s.holder)
+	holding, err := takeForCheck(ctx, s.slot, s.rigDir, s.holder)
 	if err != nil {
 		return SpecsChecked{}, fmt.Errorf("the merge slot of %s could not be taken: %w", rig, err)
 	}

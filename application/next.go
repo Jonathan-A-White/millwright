@@ -220,6 +220,13 @@ type Next struct {
 	// specs the story added or changed (mw-gq6.366). Nil runs none.
 	SpecChecks SpecChecks
 
+	// GateParts and GateRecords are how a rig's gate is split into parts on this
+	// host and what each part said: a story stopped with steps open is told which
+	// parts were not run at its tip and the command to run each (mw-6zgnz5y).
+	// Nil of either says nothing of the parts.
+	GateParts   GateParts
+	GateRecords CheckRecords
+
 	// RelatedChecks runs a rig's related-tests line at the landing gate, in
 	// place of the rig's whole tests, on the files the branch changed
 	// (mw-gq6.601). Nil runs the whole tests: mw check never sets it.
@@ -1989,9 +1996,29 @@ func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextRep
 			}
 		}
 		return Refusal{ReasonOpenSteps, fmt.Sprintf("%d formula step(s) of %s are still open, so the formula was not finished", len(open), root),
-			"Still open:\n" + stepList(open)}, true
+			"Still open:\n" + stepList(open) + n.unrunPartsSaid(ctx, c)}, true
 	}
 	return Refusal{}, false
+}
+
+// unrunPartsSaid is what an open-steps refusal adds when the rig's gate is split
+// into parts and some part has not passed at the branch's tip: each such part
+// with the command that runs it, so that whoever takes the story over runs
+// them rather than the whole gate. Empty when the gate is not split, every part
+// passed, or the parts cannot be read.
+func (n Next) unrunPartsSaid(ctx context.Context, c *closeOut) string {
+	if n.GateParts == nil || n.GateRecords == nil || n.Landing == nil {
+		return ""
+	}
+	parts := n.GateParts.Parts(c.path.Rig)
+	if len(parts) == 0 {
+		return ""
+	}
+	gate, _ := recordedGate{records: n.GateRecords, storyID: c.id, attempt: c.attempt(), parts: parts, tip: cleanTipOf(ctx, n.Landing, c)}.Run(ctx, "", "")
+	if gate.Passed {
+		return ""
+	}
+	return "\n\nThe rig's gate is split into " + fmt.Sprint(len(parts)) + " parts and these have not passed at the branch's tip:\n" + bulletList(strings.Split(gate.Output, "\n"))
 }
 
 // closingCommentRefusal is the refusal of a story whose formula is finished but

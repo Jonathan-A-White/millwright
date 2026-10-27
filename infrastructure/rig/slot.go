@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -28,8 +29,12 @@ const (
 )
 
 // SlotQueueSuffix is added to a slot's path for the directory where its waiters
-// keep their tickets (mw-gq6.586).
-const SlotQueueSuffix = ".queue"
+// keep their tickets (mw-gq6.586). SlotSharedSuffix is added to it for the
+// directory where the shared holders of the slot say who they are (mw-6zgnz5y).
+const (
+	SlotQueueSuffix  = ".queue"
+	SlotSharedSuffix = ".shared"
+)
 
 // AfterLandingSlotSuffix names the rig's after-landing lock, a slot of the same
 // kind as the merge slot but its own: it is held by whoever runs the rig's
@@ -72,7 +77,7 @@ type Slots struct {
 }
 
 // Slots satisfies the port.
-var _ application.MergeSlot = (*Slots)(nil)
+var _ application.SharedMergeSlot = (*Slots)(nil)
 
 // SlotOption is a setting of a Slots, given to NewSlots.
 type SlotOption func(*Slots)
@@ -150,8 +155,20 @@ func slotPath(rigDir, suffix string) string {
 	return filepath.Join(filepath.Dir(clean), application.WorktreesDir, filepath.Base(clean)+suffix)
 }
 
-// Take implements application.MergeSlot.
+// Take implements application.MergeSlot: the slot alone.
 func (s *Slots) Take(ctx context.Context, rigDir, holder string) (application.Holding, error) {
+	return s.take(ctx, rigDir, holder, false)
+}
+
+// TakeShared implements application.SharedMergeSlot: the slot together with any
+// number of other shared holders, but never with an exclusive one. The kernel's
+// shared flock is what lets them sit side by side, and an exclusive taker waits
+// for all of them (and they for it).
+func (s *Slots) TakeShared(ctx context.Context, rigDir, holder string) (application.Holding, error) {
+	return s.take(ctx, rigDir, holder, true)
+}
+
+func (s *Slots) take(ctx context.Context, rigDir, holder string, shared bool) (application.Holding, error) {
 	if rigDir == "" {
 		return nil, fmt.Errorf("taking a merge slot: which rig?")
 	}
@@ -164,11 +181,21 @@ func (s *Slots) Take(ctx context.Context, rigDir, holder string) (application.Ho
 		return nil, fmt.Errorf("opening the merge slot of %s: %w", rigDir, err)
 	}
 
-	if err := s.flock(ctx, file, rigDir, holder, path); err != nil {
+	if err := s.flock(ctx, file, rigDir, holder, path, shared); err != nil {
 		file.Close()
 		return nil, err
 	}
-	if err := write(file, fmt.Sprintf("%s\npid %d\ntaken %s\n", holder, os.Getpid(), time.Now().UTC().Format(time.RFC3339))); err != nil {
+	says := fmt.Sprintf("%s\npid %d\ntaken %s\n", holder, os.Getpid(), time.Now().UTC().Format(time.RFC3339))
+	if shared {
+		record, err := writeShared(path, says)
+		if err != nil {
+			unlock(file)
+			file.Close()
+			return nil, fmt.Errorf("writing who shares the merge slot of %s: %w", rigDir, err)
+		}
+		return &holding{file: file, holder: holder, record: record}, nil
+	}
+	if err := write(file, says); err != nil {
 		unlock(file)
 		file.Close()
 		return nil, fmt.Errorf("writing who has the merge slot of %s: %w", rigDir, err)
@@ -185,7 +212,7 @@ func (s *Slots) Take(ctx context.Context, rigDir, holder string) (application.Ho
 // or its merge, however slow a loaded host makes them, and giving up on it
 // costs a finished story a fresh attempt (mw-gq6.467). A live holder is waited
 // on up to the cap.
-func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path string) error {
+func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path string, shared bool) error {
 	started := s.now()
 	tickets := &ticketq.Queue{Dir: path + SlotQueueSuffix, Cap: s.cap, Now: s.now}
 	ticket, err := tickets.Join(holder, started)
@@ -194,13 +221,17 @@ func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path s
 	}
 	// Whatever way the wait ends, the ticket goes: the slot is taken, or the wait is over.
 	defer ticket.Drop()
-	since, said := started, readSlot(path)
+	since, said := started, slotSays(path)
 	told := ""
+	how := syscall.LOCK_EX
+	if shared {
+		how = syscall.LOCK_SH
+	}
 	wait, scaled := s.wait, false
 	for {
 		head, headHolder := tickets.Head(ticket.Name())
 		if head {
-			err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+			err := syscall.Flock(int(file.Fd()), how|syscall.LOCK_NB)
 			if err == nil {
 				return nil
 			}
@@ -219,7 +250,7 @@ func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path s
 		}
 
 		now := s.now()
-		if again := readSlot(path); again != said {
+		if again := slotSays(path); again != said {
 			since, said = now, again
 		}
 		if s.notice != nil {
@@ -243,7 +274,7 @@ func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path s
 		}
 
 		if err := s.sleep(ctx, s.poll); err != nil {
-			return fmt.Errorf("waiting for the merge slot %s, held by %q: %w", path, held(path), err)
+			return &application.SlotWaitError{Path: path, Holder: held(path), Since: slotTaken(slotSays(path)), Waited: now.Sub(started), Err: err}
 		}
 	}
 }
@@ -255,6 +286,9 @@ type holding struct {
 	file   *os.File
 	holder string
 	gone   bool
+	// record, for a shared holding, is the file in the slot's shared directory
+	// that says who holds it; an exclusive holding says so in the slot file.
+	record string
 }
 
 // Release implements application.Holding. Releasing twice is harmless.
@@ -263,6 +297,13 @@ func (h *holding) Release(_ context.Context) error {
 		return nil
 	}
 	h.gone = true
+	if h.record != "" {
+		removeErr := os.Remove(h.record)
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
+		}
+		return errors.Join(removeErr, unlock(h.file), h.file.Close())
+	}
 	// Emptied first, so that a slot nobody has does not name the last person to
 	// have had it.
 	writeErr := write(h.file, "")
@@ -294,7 +335,72 @@ func unlock(file *os.File) error {
 	return syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 }
 
-// readSlot is all the slot file says: who has it, which process, and since when,
+// writeShared keeps what a shared holder says in the slot's shared directory,
+// under a name of its own: made under a dot name and renamed, so that nobody
+// reads half of it. It returns the file's path.
+func writeShared(path, says string) (string, error) {
+	dir := path + SlotSharedSuffix
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	building, err := os.CreateTemp(dir, ".record-")
+	if err != nil {
+		return "", err
+	}
+	if _, err := building.WriteString(says); err != nil {
+		building.Close()
+		os.Remove(building.Name())
+		return "", err
+	}
+	if err := building.Close(); err != nil {
+		os.Remove(building.Name())
+		return "", err
+	}
+	final := filepath.Join(dir, strings.TrimPrefix(filepath.Base(building.Name()), "."))
+	if err := os.Rename(building.Name(), final); err != nil {
+		os.Remove(building.Name())
+		return "", err
+	}
+	return final, nil
+}
+
+// sharedSays is what each live shared holder of the slot says, oldest first. A
+// record whose process is gone is one a holder that died left behind (the kernel
+// gave its lock back): it is cleared on the way.
+func sharedSays(path string) []string {
+	dir := path + SlotSharedSuffix
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var says []string
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		file := filepath.Join(dir, entry.Name())
+		text, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+		if !holderAlive(string(text)) {
+			os.Remove(file)
+			continue
+		}
+		says = append(says, string(text))
+	}
+	sort.SliceStable(says, func(i, j int) bool { return slotTaken(says[i]).Before(slotTaken(says[j])) })
+	return says
+}
+
+// slotSays is all the slot says: what the exclusive holder wrote in the slot
+// file, then what each shared holder wrote in its record. It is empty when
+// nobody has the slot.
+func slotSays(path string) string {
+	return readSlot(path) + strings.Join(sharedSays(path), "")
+}
+
+// readSlot is what the slot file says: who has it, which process, and since when,
 // so that it differs from one holding to the next. It is empty when nobody has it
 // or the file cannot be read.
 func readSlot(path string) string {
@@ -305,11 +411,28 @@ func readSlot(path string) string {
 	return string(said)
 }
 
+// slotTaken is the earliest time the text says a holder took the slot (its
+// "taken T" lines); zero when it names none.
+func slotTaken(said string) time.Time {
+	var first time.Time
+	for _, line := range strings.Split(said, "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "taken ")
+		if !ok {
+			continue
+		}
+		if at, err := time.Parse(time.RFC3339, strings.TrimSpace(rest)); err == nil && (first.IsZero() || at.Before(first)) {
+			first = at
+		}
+	}
+	return first
+}
+
 // holderAlive says whether the process the slot names (its "pid N" line) is
 // still running on this host. A slot that names none, or one it cannot read, is
 // not alive: the per-holder wait is kept for it, as before mw-gq6.467. A process
 // this one may not signal (EPERM) is alive all the same.
 func holderAlive(said string) bool {
+	alive := false
 	for _, line := range strings.Split(said, "\n") {
 		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "pid ")
 		if !ok {
@@ -317,19 +440,30 @@ func holderAlive(said string) bool {
 		}
 		pid, err := strconv.Atoi(strings.TrimSpace(rest))
 		if err != nil || pid <= 0 {
-			return false
+			continue
 		}
-		err = syscall.Kill(pid, 0)
-		return err == nil || errors.Is(err, syscall.EPERM)
+		if err := syscall.Kill(pid, 0); err == nil || errors.Is(err, syscall.EPERM) {
+			alive = true
+		}
 	}
-	return false
+	return alive
 }
 
-// held is whoever the slot file says has it, for a message to somebody waiting.
-// It reads without taking anything, so it is a courtesy and never a decision.
+// held is whoever the slot says has it (every shared holder, when it is shared),
+// for a message to somebody waiting. It reads without taking anything, so it is
+// a courtesy and never a decision.
 func held(path string) string {
 	if first := strings.TrimSpace(strings.SplitN(readSlot(path), "\n", 2)[0]); first != "" {
 		return first
+	}
+	var by []string
+	for _, says := range sharedSays(path) {
+		if first := strings.TrimSpace(strings.SplitN(says, "\n", 2)[0]); first != "" {
+			by = append(by, first)
+		}
+	}
+	if len(by) > 0 {
+		return strings.Join(by, " and ")
 	}
 	return "somebody"
 }

@@ -234,7 +234,7 @@ func newNextCmd() *cobra.Command {
 				transcripts = claude.NewTranscripts(projects)
 				modes = claude.NewTranscripts(projects)
 			}
-			checks, err := landingChecks(dir, gateCommands{related: true})
+			checks, err := landingChecks(dir, gateCommands{related: true, parts: true})
 			if err != nil {
 				return err
 			}
@@ -251,6 +251,11 @@ func newNextCmd() *cobra.Command {
 				// The tests a merged result fails are run by name on the target
 				// branch alone, to tell main's red from the story's (mw-gq6.645).
 				NamedChecks: checks,
+
+				// A story stopped with steps open is told which parts of a split
+				// gate it left unrun (mw-6zgnz5y).
+				GateParts:   checks,
+				GateRecords: files,
 
 				// The landing gate runs the rig's related-tests line when it has
 				// one; mw check and mw suite are never given it (mw-gq6.601).
