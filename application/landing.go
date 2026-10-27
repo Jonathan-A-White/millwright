@@ -211,8 +211,11 @@ type Landing interface {
 	// BumpVersion raises the patch of the version in the first of bump.Files,
 	// writes it into all of them and commits that as "Version X.Y.Z (<story>)"
 	// in the landing worktree, unless the story's branch changed that version
-	// since it was cut: then the Builder raised it deliberately, and nothing is
-	// touched. The files keep every byte but the version fields. With bump.Changelog
+	// since it was cut and the target's version before the merge is below it: then
+	// the Builder raised it deliberately, and nothing is touched. When the target
+	// already holds that version or a higher one (another landing took the same
+	// number while the story waited), the version is raised once more from what
+	// the merge holds, so each landing has a version of its own (mw-vvrix1t). The files keep every byte but the version fields. With bump.Changelog
 	// the entry is written into those files in the same commit, or, for a story
 	// that raised the version itself, in a commit of its own.
 	BumpVersion(ctx context.Context, landingDir string, bump VersionBump) (Bumped, error)

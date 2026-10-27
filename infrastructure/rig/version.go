@@ -29,7 +29,13 @@ func (w *Worktrees) BumpVersion(ctx context.Context, landingDir string, bump app
 	was := w.versionAt(ctx, landingDir, strings.TrimSpace(fork), bump.Files[0])
 	now := w.versionAt(ctx, landingDir, bump.Branch, bump.Files[0])
 	if was != "" && was != now {
-		return w.noteUnderOwnVersion(ctx, landingDir, bump, now)
+		// The target may have come to that very version, or past it, while the
+		// story waited (mw-vvrix1t): then the number already names another
+		// build, and the landing raises it once more from what the merge holds.
+		// A story whose version is above the target's is left as it is.
+		if onTarget := w.versionAt(ctx, landingDir, bump.Before, bump.Files[0]); onTarget == "" || domain.VersionBelow(onTarget, now) {
+			return w.noteUnderOwnVersion(ctx, landingDir, bump, now)
+		}
 	}
 
 	first, err := os.ReadFile(filepath.Join(landingDir, filepath.FromSlash(bump.Files[0])))

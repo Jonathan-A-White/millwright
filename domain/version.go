@@ -25,6 +25,24 @@ func NextPatch(version string) (string, error) {
 	return fmt.Sprintf("%s.%s.%d", m[1], m[2], patch+1), nil
 }
 
+// VersionBelow reports whether plain X.Y.Z version a is lower than b. A version
+// that is not three plain numbers is below nothing and nothing is below it, so
+// the caller treats the two as unrelated.
+func VersionBelow(a, b string) bool {
+	x, y := plainVersion.FindStringSubmatch(a), plainVersion.FindStringSubmatch(b)
+	if x == nil || y == nil {
+		return false
+	}
+	for i := 1; i <= 3; i++ {
+		p, _ := strconv.Atoi(x[i])
+		q, _ := strconv.Atoi(y[i])
+		if p != q {
+			return p < q
+		}
+	}
+	return false
+}
+
 // NextMinor raises the minor of a plain X.Y.Z version and resets its patch:
 // 1.2.3 is 1.3.0. The same refusal as NextPatch for a version that is not three
 // plain numbers.
