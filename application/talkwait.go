@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -306,6 +307,9 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 		if run.partsTimer != nil {
 			run.partsTimer.Stop()
 		}
+		if run.postTimer != nil {
+			run.postTimer.Stop()
+		}
 	}()
 	run.ideasStart(ctx)
 	if run.ideasDue(ctx) && run.giveBackIdeas(false) {
@@ -320,6 +324,9 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 		if run.partsLate() && run.hearParts(w.now()) {
 			return run.finish(ctx)
 		}
+		if run.postsLate() && run.releasePosts() {
+			return run.finish(ctx)
+		}
 		streamCtx, endStream := context.WithCancelCause(ctx)
 		run.watchStream(endStream)
 		err := w.Stream.Events(streamCtx, run.onEvent)
@@ -327,6 +334,13 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 		if ctx.Err() == nil && !errors.Is(err, errTalkHeard) && !errors.Is(err, errIdeasEnded) && run.partsLate() {
 			// The rest of a turn sent in parts did not come in time.
 			if run.hearParts(w.now()) {
+				return run.finish(ctx)
+			}
+			continue
+		}
+		if ctx.Err() == nil && !errors.Is(err, errTalkHeard) && !errors.Is(err, errIdeasEnded) && run.postsLate() {
+			// The rest of a postern message sent in parts did not come in time.
+			if run.releasePosts() {
 				return run.finish(ctx)
 			}
 			continue
@@ -347,6 +361,12 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) && run.parts != nil && run.Ideas == nil {
 				// The limit came with a turn half heard: say what came.
 				if run.hearParts(w.now()) {
+					return run.finish(ctx)
+				}
+			}
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) && len(run.postParts) > 0 && run.Ideas == nil {
+				// The limit came with a message half heard: say what came.
+				if run.releasePosts() {
 					return run.finish(ctx)
 				}
 			}
@@ -461,6 +481,15 @@ type talkWaitRun struct {
 	partsMu    sync.Mutex
 	partsDue   bool
 	endStream  context.CancelCauseFunc
+
+	// postParts are the postern messages sent in parts whose rest the wait is
+	// still hearing, by sender and split, in the order their first part came;
+	// postTimer is the PartsWait that ends it, and postDue, under partsMu, is
+	// what it sets.
+	postParts map[string][]PosternInboxMessage
+	postOrder []string
+	postTimer *time.Timer
+	postDue   bool
 }
 
 // errTalkPartsDue ends the stream when the rest of a turn sent in parts did
@@ -473,7 +502,7 @@ func (r *talkWaitRun) watchStream(end context.CancelCauseFunc) {
 	r.partsMu.Lock()
 	defer r.partsMu.Unlock()
 	r.endStream = end
-	if r.partsDue {
+	if r.partsDue || r.postDue {
 		end(errTalkPartsDue)
 	}
 }
@@ -483,6 +512,84 @@ func (r *talkWaitRun) partsLate() bool {
 	r.partsMu.Lock()
 	defer r.partsMu.Unlock()
 	return r.parts != nil && r.partsDue
+}
+
+// postsLate reports whether the timer of the postern messages being heard in
+// parts has fired.
+func (r *talkWaitRun) postsLate() bool {
+	r.partsMu.Lock()
+	defer r.partsMu.Unlock()
+	return len(r.postParts) > 0 && r.postDue
+}
+
+// holdPost takes one part of a postern message sent in parts. Once every part
+// has come the message is joined and noted as any postern message is; until
+// then the wait goes on, for PartsWait from the first part of any.
+func (r *talkWaitRun) holdPost(message PosternInboxMessage) {
+	key := message.From + "\x00" + message.Split
+	if r.postParts == nil {
+		r.postParts = map[string][]PosternInboxMessage{}
+	}
+	if _, held := r.postParts[key]; !held {
+		r.postOrder = append(r.postOrder, key)
+	}
+	r.postParts[key] = append(r.postParts[key], message)
+	if len(r.postParts[key]) >= message.Parts {
+		if joined, _ := joinPosternParts(r.postParts[key], r.now()); len(joined) == 1 && joined[0].Missing == "" {
+			r.noteJoinedPost(key, joined[0])
+			return
+		}
+	}
+	r.partsMu.Lock()
+	defer r.partsMu.Unlock()
+	if r.postTimer != nil {
+		return
+	}
+	wait := r.PartsWait
+	if wait <= 0 {
+		wait = DefaultTalkWaitPartsWait
+	}
+	r.postTimer = time.AfterFunc(wait, func() {
+		r.partsMu.Lock()
+		defer r.partsMu.Unlock()
+		r.postDue = true
+		if r.endStream != nil {
+			r.endStream(errTalkPartsDue)
+		}
+	})
+}
+
+// noteJoinedPost drops the parts held under key and notes message, their join,
+// as any postern message for the Mayor that the wait ends on, unless it is the
+// Governor's and kept for Ideas only.
+func (r *talkWaitRun) noteJoinedPost(key string, message PosternInboxMessage) {
+	delete(r.postParts, key)
+	r.postOrder = slices.DeleteFunc(r.postOrder, func(k string) bool { return k == key })
+	if len(r.postParts) == 0 && r.postTimer != nil {
+		r.postTimer.Stop()
+		r.partsMu.Lock()
+		r.postTimer, r.postDue = nil, false
+		r.partsMu.Unlock()
+	}
+	if r.keepsMessage(message) {
+		return
+	}
+	r.posts = append(r.posts, message)
+	if err := rememberChannelOf(r.Threads, message); err != nil {
+		r.printf(r.Err, "mw talk wait: %v\n", err)
+	}
+}
+
+// releasePosts notes every message still held in parts as what came, naming
+// each part that did not, and reports whether the wait now ends on a postern
+// message.
+func (r *talkWaitRun) releasePosts() bool {
+	for _, key := range slices.Clone(r.postOrder) {
+		if joined, _ := joinPosternParts(r.postParts[key], r.now()); len(joined) == 1 {
+			r.noteJoinedPost(key, joined[0])
+		}
+	}
+	return len(r.posts) > 0
 }
 
 // armParts starts the wait for the rest of a turn whose first part has come.
@@ -627,7 +734,9 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 				}
 			}
 			if record.Seq > inboxCursor {
-				if message, ok := r.unreadMessage(record, privKey); ok && !r.keepsMessage(message) {
+				if message, ok := r.unreadMessage(record, privKey); ok && message.Split != "" {
+					r.holdPost(message)
+				} else if ok && !r.keepsMessage(message) {
 					r.posts = append(r.posts, message)
 					if err := rememberChannelOf(r.Threads, message); err != nil {
 						r.printf(r.Err, "mw talk wait: %v\n", err)
@@ -637,7 +746,7 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 		}
 		r.cursor = record.Seq
 	}
-	if len(r.posts) > 0 && r.parts == nil {
+	if len(r.posts) > 0 && r.parts == nil && len(r.postParts) == 0 {
 		r.heardAt = arrived
 		return errTalkHeard
 	}
@@ -682,7 +791,9 @@ func (r *talkWaitRun) unreadMessage(record PosternRecord, privKey string) (Poste
 	}
 	from, verified, signerChecked := posternVerifySender(envelopeFrom, record.From, record.Signer)
 	thread, display, threadIsBead, attachment, attachments := posternThreadAndText(record.Class, text)
+	split, part, parts := posternSplitOf(record.Class, text)
 	return PosternInboxMessage{
+		Split: split, Part: part, Parts: parts,
 		Seq: record.Seq, Txid: record.Txid, Class: record.Class,
 		From: from, Verified: verified, SignerChecked: signerChecked,
 		Ts: record.Ts, Text: display, Thread: thread, ThreadIsBead: threadIsBead,
@@ -763,6 +874,9 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 			return r.handedOver(h), nil
 		}
 	}
+	// A turn or a call the wait ends on does not wait for the rest of a
+	// message: what came of it is reported, naming what did not.
+	r.releasePosts()
 	report := TalkWaitReport{Turn: r.turn, Call: r.call, CallTxid: r.callTxid, Postern: r.posts}
 	r.settleRing(ctx, r.call != nil || r.turn != nil)
 	if r.call != nil {
@@ -806,6 +920,9 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 				re = ", " + label
 			}
 			r.printf(r.Out, "  %s, txid %s%s: %s\n", message.channelLabel(), message.Txid, re, r.postNotice(ctx, message))
+			if message.Missing != "" {
+				r.printf(r.Out, "    %s\n", strings.ReplaceAll(message.Missing, "\n", "\n    "))
+			}
 			if answer := message.answerLine(); answer != "" {
 				r.printf(r.Out, "    %s\n", answer)
 			}
