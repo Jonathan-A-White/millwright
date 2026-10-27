@@ -27,6 +27,7 @@ var DispatchGates = []DispatchGate{
 	{"other-host", "the path names another host"},
 	{"harness-hold", "the harness stopped a session here (usage limit, rate limit, overloaded or failing API) and the time it named has not come"},
 	{"no-room", "the host has no room: load, or a grist tutor in use"},
+	{"queued", "its work is done and it is labelled run:queued for its rig's batch, yet it is open: mw land takes it, a new attempt would redo done work"},
 	{"landed", "its last run landed it and only the close was lost"},
 	{"blocked", "it waits on a story that is not closed"},
 	{"rig-not-checked-out", "the rig is not under [rigs] in the config file"},

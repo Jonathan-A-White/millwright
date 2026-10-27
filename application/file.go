@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 
@@ -146,7 +147,15 @@ func (i InFlight) line() string {
 func inFlightFor(work WorkInHand, path domain.Path) []InFlight {
 	ours := domain.FileList(path.Files)
 	var found []InFlight
-	lists := [][]StoryDetail{work.Running, work.Ready}
+	// A story queued for its batch that is open and claimed has its branch yet
+	// to land, as one in progress has (mw-bo813m2).
+	running := slices.Clone(work.Running)
+	for _, detail := range work.OpenClaimed {
+		if QueuedForBatch(detail) {
+			running = append(running, detail)
+		}
+	}
+	lists := [][]StoryDetail{running, work.Ready}
 	if len(ours) == 0 {
 		lists = lists[:1]
 	}

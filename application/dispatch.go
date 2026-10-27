@@ -359,7 +359,8 @@ type Passed struct {
 	Why  string
 	// Waiting says the story waits on a time already known, which the
 	// starved-rig alarm does not call a starving: the host's hold for a usage
-	// limit, a real one or the one mw pause sets (mw-gq6.710).
+	// limit, a real one or the one mw pause sets (mw-gq6.710), or the batch a
+	// queued story waits for (mw-bo813m2).
 	Waiting bool
 }
 
@@ -995,6 +996,18 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// host it names (mw-t0z3fu.1). It stays ready, claimed by nobody.
 		if noRoom != "" {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "no-room", Why: fmt.Sprintf("%s has no room: %s", d.Host, noRoom)})
+			continue
+		}
+
+		// gate: queued
+		// A story queued for its batch has its work done and its gate passed.
+		// A hold and un-hold while it ran, or an open-steps give-back, left it
+		// open, and so ready or open and claimed: claiming it would start a
+		// second attempt at work that is done. mw land takes it (mw-bo813m2).
+		if QueuedForBatch(detail) {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "queued", Why: fmt.Sprintf(
+				"its work is done and it waits for its rig's batch (%s=%s): `mw land %s` takes it, and it is not claimed again",
+				RunState, RunQueued, path.Rig), Waiting: true})
 			continue
 		}
 
