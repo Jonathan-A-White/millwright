@@ -367,3 +367,82 @@ func TestADispatchDoesNotCloseAFlakeBugOnOnePassingEval(t *testing.T) {
 		})
 	}
 }
+
+// A bug filed from a grist smoke flake carries smoke_examples, and a 1-in-3 miss
+// passes one send two times in three: so it is a flake bug and is dispatched, while
+// the same bug without smoke_examples is still rechecked (mw-gq6.812).
+func TestADispatchDoesNotRecheckABugThatCarriesSmokeExamples(t *testing.T) {
+	line := "Check: mw grist eval lampas sentence-diagram --example col-3-1-greek\n"
+	for name, smoke := range map[string]bool{"with smoke_examples": true, "without smoke_examples": false} {
+		t.Run(name, func(t *testing.T) {
+			dispatch, tracker, _, _, _ := aFactory(t)
+			tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "[bug] Lampas sentence-diagram grind answers outside its schema on col-3-1-greek", Overrides: domain.Path{Files: "grinds/sentence-diagram.json"}})
+			tracker.SetDescription("mw-gq6.1", line)
+			if err := tracker.SetLabels("mw-gq6.1", application.LabelBug); err != nil {
+				t.Fatal(err)
+			}
+			if smoke {
+				if err := tracker.SetStoryMetadata(context.Background(), "mw-gq6.1", map[string]string{application.SmokeExamplesField: "lampas/sentence-diagram/col-3-1-greek"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			examples := &stubExamples{answer: application.SpecRecheck{Sha: "c0ffee1234567", Passed: true}}
+			dispatch.Rechecks, dispatch.ExampleRechecks = &stubRechecks{answer: application.SpecRecheck{Passed: true}}, examples
+
+			report, err := dispatch.Run(context.Background())
+			if err != nil {
+				t.Fatalf("dispatching: %v", err)
+			}
+			if smoke {
+				if len(examples.asked) != 0 || tracker.CloseReason("mw-gq6.1") != "" {
+					t.Errorf("a smoke flake bug was re-run (%v) or closed (%q)", examples.asked, tracker.CloseReason("mw-gq6.1"))
+				}
+				if ids := startedIDs(report); len(ids) != 1 {
+					t.Errorf("started %v, want the bug dispatched", ids)
+				}
+				return
+			}
+			if len(examples.asked) != 1 || tracker.CloseReason("mw-gq6.1") == "" {
+				t.Errorf("a plain bug should still be re-run and closed: asked %v, closed %q", examples.asked, tracker.CloseReason("mw-gq6.1"))
+			}
+		})
+	}
+}
+
+// "about 1 in 3" and "6 runs in 6" count runs like "3 of 3" does; a number in a
+// reference that is not a count of runs ("Psalm 23 in 3 John", "verse 3 in John")
+// does not (mw-gq6.812).
+func TestADispatchTakesNInNAsARunCount(t *testing.T) {
+	line := "Check: mw grist eval lampas sentence-diagram --example col-3-1-greek\n"
+	for name, bug := range map[string]struct {
+		title, acceptance string
+		flake             bool
+	}{
+		"about 1 in 3 in the title":     {"[bug] lampas: sentence-diagram answers outside its schema about 1 in 3", "", true},
+		"6 runs in 6 in the acceptance": {"[bug] lampas: sentence-diagram answers outside its schema", "1. It passes 6 runs in 6.", true},
+		"6 in 6 in the acceptance":      {"[bug] lampas: sentence-diagram answers outside its schema", "1. It passes 6 in 6.", true},
+		"a verse reference":             {"[bug] lampas: Psalm 23 in 3 John answers outside its schema", "", false},
+		"a chapter in a book":           {"[bug] lampas: verse 3 in John answers outside its schema", "1. It reads chapter 12 in John 3.", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dispatch, tracker, _, _, _ := aFactory(t)
+			tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: bug.title, Overrides: domain.Path{Files: "grinds/sentence-diagram.json"}})
+			tracker.SetDescription("mw-gq6.1", line)
+			if bug.acceptance != "" {
+				tracker.SetAcceptance("mw-gq6.1", bug.acceptance)
+			}
+			if err := tracker.SetLabels("mw-gq6.1", application.LabelBug); err != nil {
+				t.Fatal(err)
+			}
+			examples := &stubExamples{answer: application.SpecRecheck{Sha: "c0ffee1234567", Passed: true}}
+			dispatch.Rechecks, dispatch.ExampleRechecks = &stubRechecks{answer: application.SpecRecheck{Passed: true}}, examples
+
+			if _, err := dispatch.Run(context.Background()); err != nil {
+				t.Fatalf("dispatching: %v", err)
+			}
+			if asked := len(examples.asked) != 0; asked == bug.flake {
+				t.Errorf("flake bug %v but the example was re-run: %v", bug.flake, examples.asked)
+			}
+		})
+	}
+}
