@@ -216,6 +216,14 @@ type Next struct {
 	Checks    Checks
 	Slot      MergeSlot
 
+	// SlotYield, when set, is called when the close-out is about to wait on its
+	// own, for a gate lock another gate holds or for a busy host to calm, and
+	// it gives up the rig's merge slot to the waiters that can share it until
+	// the function it returns is called, which takes it back alone. A batch
+	// landing sets it, so that a Builder's check of the rig runs beside the
+	// wait (mw-4hqh0en); mw next leaves it nil and holds the slot throughout.
+	SlotYield func(ctx context.Context) (resume func())
+
 	// SpecChecks runs a rig's changed-specs command after the rig's gate, on the
 	// specs the story added or changed (mw-gq6.366). Nil runs none.
 	SpecChecks SpecChecks

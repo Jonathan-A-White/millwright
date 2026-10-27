@@ -26,6 +26,8 @@ const (
 	SlotWait   = 20 * time.Minute
 	SlotCap    = 2 * time.Hour
 	SlotPoll   = 2 * time.Second
+	// SlotNoticeEvery is how often a wait that goes on says again who it waits for.
+	SlotNoticeEvery = time.Minute
 )
 
 // SlotQueueSuffix is added to a slot's path for the directory where its waiters
@@ -72,8 +74,10 @@ type Slots struct {
 	sleep   func(ctx context.Context, d time.Duration) error
 
 	// notice is told, in a sentence, who has the slot when taking it has to
-	// wait, and again whenever it changes hands. Nil says nothing.
-	notice func(said string)
+	// wait, and again whenever it changes hands and every noticeEvery of a
+	// wait that goes on, with how long it has gone on. Nil says nothing.
+	notice      func(said string)
+	noticeEvery time.Duration
 }
 
 // Slots satisfies the port.
@@ -124,9 +128,15 @@ func WithSlotNotice(notice func(said string)) SlotOption {
 	return func(s *Slots) { s.notice = notice }
 }
 
+// WithSlotNoticeEvery sets how often a wait that goes on says again, with how
+// long it has gone on, who it is waiting for (SlotNoticeEvery when not set).
+func WithSlotNoticeEvery(every time.Duration) SlotOption {
+	return func(s *Slots) { s.noticeEvery = every }
+}
+
 // NewSlots returns the merge slots of this host's rigs.
 func NewSlots(opts ...SlotOption) *Slots {
-	s := &Slots{wait: SlotWait, cap: SlotCap, poll: SlotPoll, suffix: SlotSuffix, now: time.Now, sleep: sleepFor}
+	s := &Slots{wait: SlotWait, cap: SlotCap, poll: SlotPoll, suffix: SlotSuffix, now: time.Now, sleep: sleepFor, noticeEvery: SlotNoticeEvery}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -200,7 +210,7 @@ func (s *Slots) take(ctx context.Context, rigDir, holder string, shared bool) (a
 		file.Close()
 		return nil, fmt.Errorf("writing who has the merge slot of %s: %w", rigDir, err)
 	}
-	return &holding{file: file, holder: holder}, nil
+	return &holding{file: file, holder: holder, slots: s, rigDir: rigDir, path: path, says: says}, nil
 }
 
 // flock waits for the lock on the slot file, looking every poll until the cap
@@ -228,9 +238,12 @@ func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path s
 		how = syscall.LOCK_SH
 	}
 	wait, scaled := s.wait, false
+	lastTold := started
 	for {
 		head, headHolder := tickets.Head(ticket.Name())
-		if head {
+		// A check is not held up by the queue while the batch that has the slot
+		// is only waiting for its fixer or the host: it is shared with it.
+		if head || (shared && isYielded(path)) {
 			err := syscall.Flock(int(file.Fd()), how|syscall.LOCK_NB)
 			if err == nil {
 				return nil
@@ -260,8 +273,12 @@ func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path s
 				by = headHolder
 			}
 			if told != by {
-				told = by
+				told, lastTold = by, now
 				s.notice(fmt.Sprintf("waiting for the merge slot: held by %s\n", told))
+			} else if s.noticeEvery > 0 && now.Sub(lastTold) >= s.noticeEvery {
+				lastTold = now
+				s.notice(fmt.Sprintf("still waiting for the merge slot, %s so far: held by %s%s\n",
+					now.Sub(started).Round(time.Second), told, heldSince(said)))
 			}
 		}
 		if waited := now.Sub(started); waited >= s.cap {
@@ -289,6 +306,14 @@ type holding struct {
 	// record, for a shared holding, is the file in the slot's shared directory
 	// that says who holds it; an exclusive holding says so in the slot file.
 	record string
+
+	// What an exclusive holding needs to be yielded and resumed: the slots it
+	// came from, and what it says in the slot file.
+	slots   *Slots
+	rigDir  string
+	path    string
+	says    string
+	yielded bool
 }
 
 // Release implements application.Holding. Releasing twice is harmless.
@@ -310,6 +335,139 @@ func (h *holding) Release(_ context.Context) error {
 	unlockErr := unlock(h.file)
 	closeErr := h.file.Close()
 	return errors.Join(writeErr, unlockErr, closeErr)
+}
+
+// yieldedWord is the line a shared record carries while its holder is a batch
+// that has given up the slot's exclusive hold for a wait of its own, and takes
+// it back when the wait is over.
+const yieldedWord = "yielded"
+
+// Yield implements application.YieldingHolding: an exclusive holding becomes a
+// shared one (the kernel changes a flock from exclusive to shared in one step, so
+// nobody takes the slot between), which other checks may sit beside and a
+// landing still waits for. The record it leaves says "yielded", so that a check
+// is not held up by the queue of landings waiting behind the batch.
+func (h *holding) Yield(_ context.Context) error {
+	if h.gone || h.yielded || h.slots == nil {
+		return nil
+	}
+	record, err := writeShared(h.path, h.says+yieldedWord+"\n")
+	if err != nil {
+		return fmt.Errorf("writing that the merge slot of %s is yielded: %w", h.rigDir, err)
+	}
+	if err := syscall.Flock(int(h.file.Fd()), syscall.LOCK_SH); err != nil {
+		os.Remove(record)
+		return fmt.Errorf("sharing the merge slot of %s: %w", h.rigDir, err)
+	}
+	h.record, h.yielded = record, true
+	return write(h.file, "")
+}
+
+// Resume implements application.YieldingHolding: the shared holding becomes
+// exclusive again once every check sharing it has ended. It queues for the slot
+// while it waits, so that checks arriving now wait behind it and cannot keep it
+// from its turn. A flock cannot be made exclusive without a moment in which it is
+// not held at all when another shared holder is still there, so it is asked for
+// only when no other record is left; if it is refused anyway the wait goes on as
+// a take of the slot would.
+func (h *holding) Resume(ctx context.Context) error {
+	if h.gone || !h.yielded {
+		return nil
+	}
+	s := h.slots
+	// The record no longer says yielded.
+	if err := h.rewrite(h.says); err != nil {
+		return err
+	}
+	started := s.now()
+	tickets := &ticketq.Queue{Dir: h.path + SlotQueueSuffix, Cap: s.cap, Now: s.now}
+	ticket, err := tickets.Join(h.holder, started)
+	if err != nil {
+		return fmt.Errorf("queueing to take the merge slot of %s back: %w", h.rigDir, err)
+	}
+	defer ticket.Drop()
+	notShared := false
+	for {
+		if notShared || !otherShared(h.path, h.record) {
+			err := syscall.Flock(int(h.file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+			if err == nil {
+				break
+			}
+			if !errors.Is(err, syscall.EWOULDBLOCK) {
+				return fmt.Errorf("taking the merge slot %s back: %w", h.path, err)
+			}
+			// A check slipped in: the shared hold went with the refused
+			// conversion, so what is left is to wait for the slot.
+			notShared = true
+		}
+		if waited := s.now().Sub(started); waited >= s.cap {
+			return fmt.Errorf("the merge slot %s was still held by %q after %s, the overall most a close-out waits, when the batch took it back: %w",
+				h.path, held(h.path), waited.Round(time.Second), application.ErrSlotCap)
+		}
+		if err := s.sleep(ctx, s.poll); err != nil {
+			return &application.SlotWaitError{Path: h.path, Holder: held(h.path), Since: slotTaken(slotSays(h.path)), Waited: s.now().Sub(started), Err: err}
+		}
+	}
+	os.Remove(h.record)
+	h.record, h.yielded = "", false
+	return write(h.file, h.says)
+}
+
+// rewrite replaces what the holding's shared record says.
+func (h *holding) rewrite(says string) error {
+	record, err := writeShared(h.path, says)
+	if err != nil {
+		return fmt.Errorf("writing who shares the merge slot of %s: %w", h.rigDir, err)
+	}
+	os.Remove(h.record)
+	h.record = record
+	return nil
+}
+
+// isYielded says a batch holding the slot has yielded it and not taken it back.
+func isYielded(path string) bool {
+	for _, says := range sharedSays(path) {
+		for _, line := range strings.Split(says, "\n") {
+			if strings.TrimSpace(line) == yieldedWord {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// otherShared says a live shared holder other than the one whose record is mine
+// still has the slot.
+func otherShared(path, mine string) bool {
+	dir := path + SlotSharedSuffix
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") || filepath.Join(dir, entry.Name()) == mine {
+			continue
+		}
+		file := filepath.Join(dir, entry.Name())
+		text, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+		if !holderAlive(string(text)) {
+			os.Remove(file)
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// heldSince is ", since T" for the earliest time the slot's text says, or nothing.
+func heldSince(said string) string {
+	if at := slotTaken(said); !at.IsZero() {
+		return ", since " + at.UTC().Format("15:04:05Z")
+	}
+	return ""
 }
 
 // HeldBy implements application.Holding.

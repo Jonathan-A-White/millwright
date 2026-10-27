@@ -444,6 +444,21 @@ type SharedMergeSlot interface {
 	TakeShared(ctx context.Context, rigDir, holder string) (Holding, error)
 }
 
+// YieldingHolding is a Holding taken alone that can give up the exclusive hold
+// for a wait of its own without letting go of the slot: a batch landing waits
+// for its fixer and for a busy host to calm with the slot shared, so that the
+// rig's checks run beside the wait, and takes it alone again before its tests,
+// which no check may run beside (mw-4hqh0en). Yield makes the hold shared, at
+// once and with no moment in which the slot is free; Resume makes it exclusive
+// again, waiting for the checks that started in the meantime to end, and keeping
+// new ones out while it does. Both do nothing when the holding is not in the
+// state they change.
+type YieldingHolding interface {
+	Holding
+	Yield(ctx context.Context) error
+	Resume(ctx context.Context) error
+}
+
 // takeForCheck takes the rig's slot for a worktree check: shared when the slot
 // can be, exclusive when it cannot.
 func takeForCheck(ctx context.Context, slot MergeSlot, rigDir, holder string) (Holding, error) {

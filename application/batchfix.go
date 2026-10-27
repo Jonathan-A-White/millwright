@@ -155,7 +155,17 @@ func (b BatchLand) fix(ctx context.Context, dir, rigDir string, settings domain.
 	f.Started = true
 	n.print(fmt.Sprintf("land on %s: %s given its fixer %s (%s); waiting for it to end\n", n.Host, report.Label(), f.Name, why))
 
+	// The batch waits for its fixer with the merge slot shared, so that the
+	// rig's checks run meanwhile; it takes the slot alone again before it looks
+	// at what the fixer left.
+	resume := n.yieldSlot(ctx)
 	f.Ended, err = n.Runner.Wait(ctx, spec.Name)
+	resume()
+	if lost := b.slotLost(); lost != "" {
+		f.Trouble = lost
+		report.Held = fmt.Sprintf("its fixer %s ended, but %s", f.Name, lost)
+		return false
+	}
 	if err != nil {
 		f.Trouble = fmt.Sprintf("could not be waited on: %v", err)
 		report.Held = fmt.Sprintf("its fixer %s %s", f.Name, f.Trouble)

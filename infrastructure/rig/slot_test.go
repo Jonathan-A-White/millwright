@@ -720,3 +720,156 @@ func TestAShareHolderThatDiedLeavesNoRecordBehind(t *testing.T) {
 		t.Fatalf("expected a dead check's record not to hold the slot: %v", err)
 	}
 }
+
+// yielding takes the slot alone and asserts it can be yielded, as a landing's is.
+func yielding(t *testing.T, dir string) application.YieldingHolding {
+	t.Helper()
+	held, err := rig.NewSlots(rig.WithSlotPoll(10*time.Millisecond)).Take(context.Background(), dir, "mw land on laptop, landing a batch of millwright")
+	if err != nil {
+		t.Fatalf("taking the slot: %v", err)
+	}
+	y, ok := held.(application.YieldingHolding)
+	if !ok {
+		t.Fatal("expected a holding taken alone to be one that can be yielded")
+	}
+	return y
+}
+
+func TestALandingThatYieldsLetsAChecksPartShareTheSlotButNotALanding(t *testing.T) {
+	ctx, dir := context.Background(), aRigDir(t)
+	landing := yielding(t, dir)
+	defer landing.Release(ctx)
+
+	if _, err := impatient().TakeShared(ctx, dir, "builder@laptop checking mw-a.1"); err == nil {
+		t.Fatal("expected a check to wait while the landing holds the slot alone")
+	}
+	if err := landing.Yield(ctx); err != nil {
+		t.Fatalf("yielding: %v", err)
+	}
+
+	check, err := impatient().TakeShared(ctx, dir, "builder@laptop checking mw-a.1")
+	if err != nil {
+		t.Fatalf("expected a check to start while the landing waits for its fixer: %v", err)
+	}
+	defer check.Release(ctx)
+	// Another landing is still kept out: the batch holds the slot, shared.
+	other, err := impatient().Take(ctx, dir, "mw next landing mw-c.3")
+	if err == nil {
+		other.Release(ctx)
+		t.Fatal("expected another landing to wait while the batch waits for its fixer")
+	}
+	if !strings.Contains(err.Error(), "landing a batch of millwright") {
+		t.Errorf("expected the wait to name the batch, got %q", err)
+	}
+}
+
+func TestACheckQueuedBehindALandingStillStartsWhileTheBatchYields(t *testing.T) {
+	ctx, dir := context.Background(), aRigDir(t)
+	landing := yielding(t, dir)
+	defer landing.Release(ctx)
+	if err := landing.Yield(ctx); err != nil {
+		t.Fatalf("yielding: %v", err)
+	}
+
+	// A close-out waits for the slot, queued ahead of the check.
+	go func() {
+		slots := rig.NewSlots(rig.WithSlotCap(5*time.Second), rig.WithSlotPoll(10*time.Millisecond))
+		if held, err := slots.Take(ctx, dir, "mw next landing mw-c.3"); err == nil {
+			held.Release(ctx)
+		}
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	brief, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	check, err := rig.NewSlots(rig.WithSlotPoll(10*time.Millisecond)).TakeShared(brief, dir, "builder@laptop checking mw-a.1")
+	if err != nil {
+		t.Fatalf("expected a check to start beside the yielding batch, though a close-out is queued: %v", err)
+	}
+	check.Release(ctx)
+}
+
+func TestALandingThatResumesWaitsForTheRunningCheckAndKeepsNewOnesOut(t *testing.T) {
+	ctx, dir := context.Background(), aRigDir(t)
+	landing := yielding(t, dir)
+	defer landing.Release(ctx)
+	if err := landing.Yield(ctx); err != nil {
+		t.Fatalf("yielding: %v", err)
+	}
+	check, err := impatient().TakeShared(ctx, dir, "builder@laptop checking mw-a.1")
+	if err != nil {
+		t.Fatalf("taking the slot beside the batch: %v", err)
+	}
+
+	resumed := make(chan error, 1)
+	go func() { resumed <- landing.Resume(ctx) }()
+	select {
+	case err := <-resumed:
+		t.Fatalf("expected the batch to wait for the running check before its tests, got %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	// The batch is back at its tests: a check arriving now waits for it.
+	brief, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	if late, err := rig.NewSlots(rig.WithSlotPoll(10*time.Millisecond)).TakeShared(brief, dir, "builder@laptop checking mw-b.2"); err == nil {
+		late.Release(ctx)
+		t.Fatal("expected a check arriving as the batch resumes to wait for it")
+	}
+
+	check.Release(ctx)
+	select {
+	case err := <-resumed:
+		if err != nil {
+			t.Fatalf("resuming once the check ended: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected the batch to resume once the check ended")
+	}
+	if _, err := impatient().TakeShared(ctx, dir, "builder@laptop checking mw-b.2"); err == nil {
+		t.Fatal("expected a batch running its tests to keep a check out")
+	}
+	if err := landing.Release(ctx); err != nil {
+		t.Fatalf("giving the slot back: %v", err)
+	}
+	if free, err := impatient().Take(ctx, dir, "mw next landing mw-c.3"); err != nil {
+		t.Errorf("expected the slot to be free after the batch: %v", err)
+	} else {
+		free.Release(ctx)
+	}
+}
+
+func TestASlotWaitSaysHowLongItHasWaitedWhileItGoesOn(t *testing.T) {
+	ctx, dir := context.Background(), aRigDir(t)
+	landing, err := impatient().Take(ctx, dir, "mw land on laptop, landing a batch of millwright")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer landing.Release(ctx)
+
+	var said []string
+	var mu sync.Mutex
+	now := time.Now()
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	sleep := func(ctx context.Context, d time.Duration) error {
+		mu.Lock()
+		now = now.Add(d)
+		n := len(said)
+		mu.Unlock()
+		if n >= 3 {
+			return context.Canceled
+		}
+		return nil
+	}
+	slots := rig.NewSlots(rig.WithSlotClock(clock, sleep), rig.WithSlotPoll(30*time.Second), rig.WithSlotNoticeEvery(time.Minute),
+		rig.WithSlotNotice(func(s string) { mu.Lock(); said = append(said, s); mu.Unlock() }))
+	_, err = slots.TakeShared(ctx, dir, "builder@laptop checking mw-a.1")
+	if err == nil {
+		t.Fatal("expected the wait to end with the sleep's error")
+	}
+	if len(said) < 3 {
+		t.Fatalf("expected the wait to say again how long it had waited, got %q", said)
+	}
+	if !strings.Contains(said[1], "landing a batch of millwright") || !strings.Contains(said[1], "1m") {
+		t.Errorf("expected the later notice to name the holder and the wait so far, got %q", said[1])
+	}
+}

@@ -90,6 +90,9 @@ func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what 
 	// The close-out says it is waiting, and says it is running again once it stops.
 	n.markCloseOut(ctx, c.id, c.began, true)
 	defer n.markCloseOut(ctx, c.id, c.began, false)
+	if n.SlotYield != nil {
+		defer n.SlotYield(ctx)()
+	}
 	var waited time.Duration
 	for reading.Busy() {
 		if waited >= n.loadBound() {
@@ -187,12 +190,19 @@ func (n Next) waitForTheGateLock(ctx context.Context, c *closeOut, report *NextR
 	if n.GateLock == nil {
 		return nil
 	}
+	var resume func()
 	turn, err := n.GateLock.Take(ctx, c.id, func(by string) {
 		n.print(fmt.Sprintf("  wait    %s's gate lock is held by %s: waiting for it before %s\n", n.Host, by, what))
 		// The close-out says it is waiting, so that mw status and the quiet
 		// alarm do not take the story for quiet while it queues.
 		n.markCloseOut(ctx, c.id, c.began, true)
+		if n.SlotYield != nil && resume == nil {
+			resume = n.SlotYield(ctx)
+		}
 	})
+	if resume != nil {
+		resume()
+	}
 	if err != nil {
 		n.markCloseOut(ctx, c.id, c.began, false)
 		n.noteLocklessGate(report, err, what)
@@ -359,6 +369,15 @@ func (n Next) waitForTheMergedGate(ctx context.Context, c *closeOut, report *Nex
 		m.before, m.gaveUp = n.calmed(ctx, report, c, m.what())
 		m.calmed = true
 	}
+}
+
+// yieldSlot gives the rig's merge slot up for a wait of the close-out's own, when
+// it was set to (SlotYield); the function returned takes the slot back.
+func (n Next) yieldSlot(ctx context.Context) func() {
+	if n.SlotYield == nil {
+		return func() {}
+	}
+	return n.SlotYield(ctx)
 }
 
 // gateWaited is a wait as the report says it: "under a second", "40s", "7m",
