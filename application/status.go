@@ -924,6 +924,10 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 
 	var byKind []StoryDetail
 	for _, detail := range work.ReadyOn(s.Host) {
+		if QueuedForBatch(detail) {
+			// Its work is done: LAND RUSH counts it, and dispatch does not claim it.
+			continue
+		}
 		if detail.Hitl() {
 			// Listed below with every other bead for the Governor, whichever host
 			// its Path names. One marked only hitl:<kind> is not found by the
@@ -1230,7 +1234,11 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 	}
 
-	report.OpenButClaimed = work.OpenClaimed
+	for _, detail := range work.OpenClaimed {
+		if !QueuedForBatch(detail) {
+			report.OpenButClaimed = append(report.OpenButClaimed, detail)
+		}
+	}
 
 	if dampersRead != nil {
 		// An alarm that cannot be judged costs the report only its section.
