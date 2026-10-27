@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain/events"
@@ -26,6 +27,8 @@ const GristLevelJobName = "grist-level"
 // with the old grinds/, and the grist smoke of the landing ran only on the host
 // that landed it.
 //
+// A run levels the apps side by side, one level per checkout, so that a slow
+// app's smoke does not hold back the levelling of the apps after it (mw-gq6.816).
 // A run fetches each app's rig, fast-forwards its checkout onto origin's main
 // the way a landing does (Advance: only a clean checkout on the branch that is
 // behind, never merged, reset or forced) and, when it moved, makes the grist
@@ -91,16 +94,42 @@ func (g GristLevel) Run(ctx context.Context) error {
 	if g.Checkout == nil {
 		return fmt.Errorf("keeping the apps' checkouts level needs the host's checkouts")
 	}
-	var failed []string
-	done := map[string]bool{}
+	// A slow app's smoke (lampas's runs most of an hour) must not hold the
+	// levelling of the apps after it by name, so each distinct checkout is
+	// levelled on its own, as BatchLandings.run lands its rigs (mw-gq6.754). A
+	// checkout is levelled once in a pass, so one app's level never overlaps
+	// another's on the same directory; the host's gate lock is not in this path
+	// and stays one for every job that takes it.
+	g.Out = &lockedWriter{to: g.Out}
+	var (
+		wg   sync.WaitGroup
+		done = map[string]bool{}
+		errs = map[string]error{}
+		mu   sync.Mutex
+		ran  []string
+	)
 	for _, app := range g.appNames() {
 		dir, rigName := g.Apps[app], g.rigOf(app)
 		if dir == "" || rigName == FactoryRig || done[dir] {
 			continue
 		}
 		done[dir] = true
-		if err := g.level(ctx, app, rigName, dir); err != nil {
-			g.say("grist level: %s: %s", app, firstLine(err.Error()))
+		ran = append(ran, app)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := g.level(ctx, app, rigName, dir); err != nil {
+				g.say("grist level: %s: %s", app, firstLine(err.Error()))
+				mu.Lock()
+				errs[app] = err
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	var failed []string
+	for _, app := range ran {
+		if err := errs[app]; err != nil {
 			failed = append(failed, app+": "+firstLine(err.Error()))
 		}
 	}
@@ -203,6 +232,22 @@ func (g GristLevel) appNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// lockedWriter lets the levels that run side by side write one line at a time
+// to a writer that is not safe for several writers. A nil writer writes nowhere.
+type lockedWriter struct {
+	mu sync.Mutex
+	to io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.to == nil {
+		return len(p), nil
+	}
+	return l.to.Write(p)
 }
 
 func (g GristLevel) say(format string, args ...any) {
