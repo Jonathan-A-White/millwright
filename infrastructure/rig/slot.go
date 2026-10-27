@@ -274,7 +274,7 @@ func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path s
 			}
 			if told != by {
 				told, lastTold = by, now
-				s.notice(fmt.Sprintf("waiting for the merge slot: held by %s\n", told))
+				s.notice(fmt.Sprintf("waiting for the merge slot: held by %s%s\n", told, heldSince(said)))
 			} else if s.noticeEvery > 0 && now.Sub(lastTold) >= s.noticeEvery {
 				lastTold = now
 				s.notice(fmt.Sprintf("still waiting for the merge slot, %s so far: held by %s%s\n",
