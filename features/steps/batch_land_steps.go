@@ -39,6 +39,12 @@ type batchFixture struct {
 	// in the vault and looks at the vault each time a story is closed
 	// (features/batch_land.feature, mw-gq6.502).
 	ledgerWatch *ledgerWatch
+
+	// slotWatch, when set, looks at the rig's merge slot as a check would
+	// whenever the batch waits and when it runs the tests (mw-4hqh0en), and
+	// busyThenCalm has the host busy at the batch's first look and calm after.
+	slotWatch    *slotWatch
+	busyThenCalm bool
 }
 
 // registerBatchLandSteps registers the steps of features/batch_land.feature.
@@ -83,6 +89,7 @@ func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^mw land says "([^"]*)"$`, c.mwLandSays)
 	ctx.Then(`^"([^"]*)" on "([^"]*)" at the rig's origin has one "([^"]*)" heading and one date line under it$`, c.theMarkdownHasOneHeading)
 	registerBatchFixSteps(ctx, c)
+	registerBatchLandSlotSteps(ctx, c)
 	registerBatchLandSmokeSteps(ctx, c)
 }
 
@@ -247,10 +254,25 @@ func (c *nextContext) land(dryRun bool) error {
 		printedFrom:  c.printed.Len(),
 		fixer:        c.batch.fixer,
 		ledgerWatch:  c.batch.ledgerWatch,
+		slotWatch:    c.batch.slotWatch,
+		busyThenCalm: c.batch.busyThenCalm,
 	}
 	next := c.nextUseCase()
 	if c.batch.fixer != nil {
 		next.Runner = c.batch.fixer
+	}
+	if w := c.batch.slotWatch; w != nil {
+		next.Checks = probingChecks{Checks: next.Checks, w: w}
+		if c.batch.fixer != nil {
+			next.Runner = probingFixer{fakeFixer: c.batch.fixer, w: w}
+		}
+		if c.batch.busyThenCalm {
+			next.Load = busyThenCalmLoad()
+			next.LoadWait = func(context.Context, time.Duration) error {
+				w.probe("the batch waited for the host to calm")
+				return nil
+			}
+		}
 	}
 	ctx := context.Background()
 	if watch := c.batch.ledgerWatch; watch != nil {

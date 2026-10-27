@@ -119,6 +119,9 @@ type BatchLand struct {
 	// rig flipped back to landing = each lands what was left in its queue, one
 	// story at a time (the follower's batch-land job, Land Rush 4).
 	One bool
+
+	// slot is the merge slot Run holds, once it does.
+	slot *batchSlot
 }
 
 // BatchStory is one queued story as a batch took it, in the order it was
@@ -305,7 +308,10 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 		gather()
 		return report, fmt.Errorf("landing %s: the merge slot could not be taken: %w", rig, err)
 	}
+	b.slot = &batchSlot{holding: holding}
+	b.Next.SlotYield = b.slot.yield
 	release := func() {
+		report.Notes = append(report.Notes, b.slot.notes...)
 		if err := holding.Release(ctx); err != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf("the merge slot of %s could not be given back: %v", rig, err))
 		}
@@ -619,6 +625,9 @@ func (b BatchLand) runGate(ctx context.Context, dir, rigDir string, report *Batc
 	n := b.Next
 	began := n.now()
 	gate, log := n.gateWithSpecs(ctx, b.batchCloseOut(report, rigDir), nr, dir, gateOnTheBatch, RelatedSpan{Base: report.Base, Skip: report.versionCommit})
+	if lost := b.slotLost(); lost != "" {
+		gate = gated{Err: fmt.Errorf("%s", lost)}
+	}
 	report.Tested, report.Gate, report.GateLog = true, gate.Checked, log
 	report.GateRuns++
 	report.GateTook += n.now().Sub(began)

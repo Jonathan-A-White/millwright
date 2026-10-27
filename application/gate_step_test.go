@@ -2,11 +2,13 @@ package application_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/Jonathan-A-White/millwright/application"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A Builder that backgrounds its gate and waits on it with tail --pid is
@@ -64,7 +66,7 @@ func TestTheGateStepSaysWhatToDoWhenAPartCannotGetTheMergeSlot(t *testing.T) {
 		if s.ID != "verify" {
 			continue
 		}
-		for _, want := range []string{"the merge slot is held", "did not start", "do not start a background loop", "naming each part not yet run", "hand back"} {
+		for _, want := range []string{"the merge slot is held", "did not start", "do not start a background loop", "naming each part not yet run", "hand back", "Never stop with steps open and no comment", "waits up to " + gateStepMinutes(application.CheckPartSlotWait)} {
 			if !strings.Contains(s.Description, want) {
 				t.Errorf("expected the gate step to contain %q, got: %s", want, s.Description)
 			}
@@ -122,4 +124,10 @@ func TestTheBuilderKickoffNamesTheGateInPartsForASplitRig(t *testing.T) {
 			t.Errorf("expected the builder kickoff to contain %q, got: %s", want, kickoff)
 		}
 	}
+}
+
+// gateStepMinutes is a wait as the gate step says it, so that the step and the
+// bound it describes cannot drift apart.
+func gateStepMinutes(d time.Duration) string {
+	return fmt.Sprintf("%d minutes", int(d.Minutes()))
 }

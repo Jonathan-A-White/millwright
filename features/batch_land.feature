@@ -311,6 +311,20 @@ Feature: mw land lands a batch rig's queue under one gate run
       | mw-gq6.3 |
     And metrics/factory.jsonl holds a line for batch 1 of the rig: 3 stories, 2 gate runs, a fixer, outcome "fixed"
 
+  Scenario: A check of the rig starts while the batch waits for its fixer or for the host to calm, and not while it runs the tests (mw-4hqh0en)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the rig's tests fail on the batch, saying "the batch is red", until "FIXED" is committed
+    And mw land may start a fixer, which commits "FIXED" and says it touched "mw-gq6.2"
+    And the host is busy when the batch first looks, and calms while it waits
+    And a check of the rig tries to take the merge slot whenever the batch waits for its fixer or for the host, and when it runs the rig's tests
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And the check could take the merge slot while the batch waited for its fixer
+    And the check could take the merge slot while the batch waited for the host to calm
+    And the check could not take the merge slot while the batch ran the rig's tests
+
   Scenario: The fixer merges a branch that was set aside, keeping both sides, and mw's own run lands the whole batch
     Given these stories are queued for batch landing:
       | mw-gq6.1 |
