@@ -3,7 +3,10 @@ package application
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // DamperNeedsFilesKey is the principle of the DAMPERS line for a ready story
@@ -88,4 +91,50 @@ func (d Dispatch) refuseUnkeyed(ctx context.Context, detail StoryDetail, report 
 	}); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: the mail to %s about its missing files key could not be sent: %v", id, MayorMailbox, err))
 	}
+}
+
+// warnBeforeDispatch prints, for each story of details, the keys and lines mw
+// dispatch would refuse it for, at the moment the Mayor sets its path or shows
+// it, not after a Blocked mail from the dispatch that passed it over
+// (mw-oi2rkcb). It reads what dispatch reads, by the same functions, for the
+// refusals that hold on the story itself and on its rig's file:
+//
+//   - needs-files-key: no files key on a rig that expects one,
+//   - no-sweep: a bug filed after the sweep rule with no Sweep: line,
+//   - tester-no-landed-story: a Tester story with no Landed story: line.
+//
+// The other gates wait on the state of a host (load, a running story, a smoke,
+// the network), on a path still being written key by key (no-host), or are
+// refused where the path is written (formula-not-installed, a crowded files
+// key), so no check here could say them. A warning only: the
+// command writes and prints all the same. A nil out prints nothing.
+func warnBeforeDispatch(ctx context.Context, out io.Writer, rules EpicRules, details ...StoryDetail) {
+	if out == nil {
+		return
+	}
+	warnNoFilesKey(ctx, out, rules, details...)
+	for _, d := range details {
+		for _, line := range dispatchRefusals(d) {
+			fmt.Fprintln(out, line)
+		}
+	}
+}
+
+// dispatchRefusals are the lines for the gates among warnBeforeDispatch's that
+// need no rig file: an epic is never dispatched, so it has none.
+func dispatchRefusals(d StoryDetail) []string {
+	if d.IsEpic || d.Hitl() || StateOf(d.Status) == StateClosed {
+		return nil
+	}
+	id := d.Story.ID
+	var lines []string
+	if verdict := domain.SweepOfStory(d.Acceptance, d.Description); !verdict.Passes() &&
+		domain.OwesASweep(d.Type, d.Story.Title, d.Labels, d.Created) {
+		lines = append(lines, fmt.Sprintf("no sweep: %s is a bug and dispatch will not claim it: %s", id, verdict.Refusal()))
+	}
+	if NamesNoLandedStory(d) {
+		lines = append(lines, fmt.Sprintf("no landed story: %s is a Tester story with no %q line in its description, so dispatch will not claim it",
+			id, TesterLandedLine+"<id>"))
+	}
+	return lines
 }

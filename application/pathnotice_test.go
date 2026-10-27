@@ -149,3 +149,73 @@ func TestStatusDampersAreQuietWhenEveryStoryHasItsFilesKey(t *testing.T) {
 		}
 	}
 }
+
+// aStoryOnARigThatExpectsFiles is a story with the seven path keys and no files
+// key, as the Mayor files one, on a rig whose file says files_expected = true.
+func aStoryOnARigThatExpectsFiles(t *testing.T) *apptest.FakeTracker {
+	t.Helper()
+	tracker := aVaultWithTwoFormulas()
+	if err := tracker.SetCreated("mw-gq6.2", time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	return tracker
+}
+
+func TestPathSetSaysAtOnceThatTheStoryHasNoFilesKeyOnARigThatExpectsOne(t *testing.T) {
+	tracker := aStoryOnARigThatExpectsFiles(t)
+	out := &strings.Builder{}
+
+	_, err := application.PathSet{Tracker: tracker, Rules: everyRigExpectsFiles{}, Out: out}.
+		Run(context.Background(), "mw-gq6.2", "mw-gq6.1", []string{"model=sonnet"})
+	if err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	for _, want := range []string{"no files key: mw-gq6.2", "mw path set mw-gq6.2 files="} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("expected the set to say %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestPathSetOfAFilesKeyDoesNotWarnOfOne(t *testing.T) {
+	tracker := aStoryOnARigThatExpectsFiles(t)
+	out := &strings.Builder{}
+
+	_, err := application.PathSet{Tracker: tracker, Rules: everyRigExpectsFiles{}, Out: out}.
+		Run(context.Background(), "mw-gq6.2", "mw-gq6.1", []string{"files=application/pathset.go"})
+	if err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	if strings.Contains(out.String(), "no files key") {
+		t.Errorf("a story with a files key was told it has none:\n%s", out)
+	}
+}
+
+func TestPathShowNamesABugWithNoSweepAndATesterWithNoLandedStory(t *testing.T) {
+	tracker := aStoryOnARigThatExpectsFiles(t)
+	if err := tracker.SetType("mw-gq6.2", "bug"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetAcceptance("mw-gq6.2", "1. it works"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.AddLabel(context.Background(), "mw-gq6.1", "tester"); err != nil {
+		t.Fatal(err)
+	}
+
+	shown := &strings.Builder{}
+	if _, err := (application.PathShow{Tracker: tracker, Out: shown}).Run(context.Background(), "mw-gq6.2"); err != nil {
+		t.Fatalf("showing the path: %v", err)
+	}
+	if want := "no sweep: mw-gq6.2"; !strings.Contains(shown.String(), want) {
+		t.Errorf("expected path show to say %q, got:\n%s", want, shown)
+	}
+
+	shown.Reset()
+	if _, err := (application.PathShow{Tracker: tracker, Out: shown}).Run(context.Background(), "mw-gq6.1"); err != nil {
+		t.Fatalf("showing the path: %v", err)
+	}
+	if want := "no landed story: mw-gq6.1"; !strings.Contains(shown.String(), want) {
+		t.Errorf("expected path show to say %q, got:\n%s", want, shown)
+	}
+}
