@@ -1549,12 +1549,17 @@ on a loaded host. A host names such a rig's gate as parts in `[test_parts.<rig>]
 (each key a part's name, each value its command line, in the order written; the
 `[tests]` line stays the whole gate that `mw next` runs at close-out). The Builder then
 runs `mw check <story> --part N` once for each part, each as a call of its own: it runs
-part N alone in the worktree, takes the rig's merge slot around it, waits for no calm
+part N alone in the worktree, takes the rig's merge slot around it unless the part only
+runs tools in the worktree (`npm ci`, `npm run typecheck|lint|build`, `npx vitest`,
+`go build|vet|test`, steps joined by `&&`; anything else keeps the slot), waits for no calm
 host and runs nothing twice, and keeps what the part said, and the commit it ran at, in
 `runs/<story>/check-<attempt>-part-<N>.log`. A last `mw check <story>` with no `--part`
 runs none of the gate: it reads those records, passes when every part passed at the
 branch's tip, and otherwise names each part that failed or has not been run at this
-commit, with the `--part` call that runs it. A new commit makes the earlier records
+commit, with the `--part` call that runs it (a part that waited on the slot says by whom and
+since when: a wait, not a failure). A part waits nine minutes for the slot, saying every
+minute who holds it and since when, and then tells the Builder to run the same part again;
+the second such hand-back on one part in one attempt is counted once. A new commit makes the earlier records
 stale. A rig with no `[test_parts.<rig>]` table, or a host that cannot keep the records,
 checks as it always did.
 A rig `[after_landing]` does not name has nothing run after a
