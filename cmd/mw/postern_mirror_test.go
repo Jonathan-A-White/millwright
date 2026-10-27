@@ -8,6 +8,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Jonathan-A-White/millwright/application"
 )
 
 // mirrorWorld is a host that runs mw postern mirror against a stand-in rsync and
@@ -342,5 +345,56 @@ func TestPosternMirrorLeavesABoostAloneWhenThisHostHasNoMillRecord(t *testing.T)
 		if strings.Contains(r, w.state) {
 			t.Errorf("the mill's state must not be copied:\n%s", r)
 		}
+	}
+}
+
+func TestPosternMirrorSecondMillCopyCarriesOnlyTheRunsThatChanged(t *testing.T) {
+	w := mirrorHost(t, "laptop", "laptop", "", "")
+	w.withMillState(t, "2026-09-29T10:00:00Z", "2026-09-29T09:00:00Z")
+	old := filepath.Join(w.state, "runs", "direct:old")
+	if err := os.MkdirAll(old, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	longAgo := time.Now().Add(-48 * time.Hour)
+	if err := os.WriteFile(filepath.Join(old, "answer.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{filepath.Join(old, "answer.json"), old} {
+		if err := os.Chtimes(p, longAgo, longAgo); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if out, status := runMirror(t); status != 0 {
+		t.Fatalf("first run: status %d:\n%s", status, out)
+	}
+	fresh := filepath.Join(w.state, "runs", "direct:new")
+	if err := os.MkdirAll(fresh, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fresh, "answer.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, status := runMirror(t); status != 0 {
+		t.Fatalf("second run: status %d:\n%s", status, out)
+	}
+
+	var mill []string
+	for _, r := range w.rsyncs(t) {
+		if strings.Contains(r, "[desktop:"+w.state+"/]") {
+			mill = append(mill, r)
+		}
+	}
+	if len(mill) != 2 {
+		t.Fatalf("want two copies of the mill's state, got:\n%s", strings.Join(mill, "\n"))
+	}
+	if !strings.Contains(mill[0], "[runs]") {
+		t.Errorf("the first copy should carry all of runs:\n%s", mill[0])
+	}
+	if strings.Contains(mill[1], "direct:old") || !strings.Contains(mill[1], "[runs/direct:new]") || strings.Contains(mill[1], "[runs]") {
+		t.Errorf("the second copy should carry only the new run:\n%s", mill[1])
+	}
+	if strings.Contains(mill[0]+mill[1], application.MillCursorFile) {
+		t.Errorf("the cursor must not be copied:\n%s\n%s", mill[0], mill[1])
 	}
 }

@@ -20,6 +20,11 @@ const (
 	// GristRecordFile is the mill's record of every grist handled, in its state
 	// directory, one JSON line each with a time.
 	GristRecordFile = "grinds.jsonl"
+	// MillCursorFile is where the mirror keeps, in the mill's state directory, the
+	// time its last good copy of that directory began. It is never copied.
+	MillCursorFile = "postern-mirror-cursor"
+	// MillRunsDir is the mill's folder of one directory a run, which only grows.
+	MillRunsDir = "runs"
 )
 
 // PosternMirrorer is what mw postern mirror asks of the machines: when a data
@@ -41,6 +46,16 @@ type PosternMirrorer interface {
 	// skipped. A copy that lost only files that vanished from dir while it ran
 	// (rsync's exit 24) returns a *CopyVanished: the files are there next run.
 	Copy(ctx context.Context, dir string, names []string, rsh []string, dest string) error
+	// ReadMillCursor reports the time kept in dir's MillCursorFile; ok is false when
+	// there is none.
+	ReadMillCursor(ctx context.Context, dir string) (at time.Time, ok bool, err error)
+	// WriteMillCursor keeps at in dir's MillCursorFile.
+	WriteMillCursor(ctx context.Context, dir string, at time.Time) error
+	// MillNames lists what to copy of the mill's state directory dir, as names for
+	// Copy: when since is zero, every entry of it but the cursor, MillRunsDir whole;
+	// otherwise every entry but the cursor and MillRunsDir, and of MillRunsDir only
+	// the run directories (`runs/<id>`) with a file or directory changed after since.
+	MillNames(ctx context.Context, dir string, since time.Time) ([]string, error)
 }
 
 // CopyVanished is what PosternMirrorer.Copy returns when the copy finished but
@@ -88,7 +103,17 @@ type PosternMirror struct {
 	// Sleep waits d or until ctx ends, between a step that timed out reaching a
 	// host and its retry; nil really waits.
 	Sleep func(ctx context.Context, d time.Duration) error
+	// Now is the time now; nil is the clock.
+	Now func() time.Time
 }
+
+// MillCopyOverlap is how far before the last good copy's start the next copy
+// looks for changes, so that a file written while that copy ran is not missed.
+const MillCopyOverlap = time.Minute
+
+// MillCopyFullAfter is how old the copy cursor may be before the mill's state is
+// copied whole again.
+const MillCopyFullAfter = 7 * 24 * time.Hour
 
 // PosternMirrorRetryWait is how long a step waits before its one retry after ssh
 // timed out reaching a host.
@@ -255,14 +280,37 @@ func (m PosternMirror) millToBoost(ctx context.Context) error {
 			return &MirrorRefused{Host: boost, What: "mill record (" + GristRecordFile + ")", Theirs: theirs, Ours: ours, HasOurs: has}
 		}
 	}
+	// Only what changed since the last good copy goes, so a run costs what changed
+	// and not all the runs there have ever been; no cursor, or one a week old, goes
+	// whole. The cursor is the start of this copy, kept only once it is done.
+	now := time.Now
+	if m.Now != nil {
+		now = m.Now
+	}
+	started := now()
+	cursor, has, err := m.Mirrorer.ReadMillCursor(ctx, m.MillStateDir)
+	if err != nil {
+		return fmt.Errorf("reading the mill's copy cursor: %w", err)
+	}
+	var since time.Time
+	if has && started.Sub(cursor) < MillCopyFullAfter {
+		since = cursor.Add(-MillCopyOverlap)
+	}
+	names, err := m.Mirrorer.MillNames(ctx, m.MillStateDir, since)
+	if err != nil {
+		return fmt.Errorf("listing what changed in the mill's state: %w", err)
+	}
 	copyErr := m.retried(ctx, "copying the mill's state to "+boost, func() error {
-		return m.Mirrorer.Copy(ctx, m.MillStateDir, []string{"."}, rsh, host+":"+m.MillStateDir+"/")
+		return m.Mirrorer.Copy(ctx, m.MillStateDir, names, rsh, host+":"+m.MillStateDir+"/")
 	})
 	line, ok := copiedLine("the mill's state "+m.MillStateDir, boost, copyErr)
 	if !ok {
 		return fmt.Errorf("copying the mill's state to %s: %w", boost, copyErr)
 	}
-	fmt.Fprintln(m.Out, line)
+	if err := m.Mirrorer.WriteMillCursor(ctx, m.MillStateDir, started); err != nil {
+		return fmt.Errorf("keeping the mill's copy cursor: %w", err)
+	}
+	fmt.Fprintf(m.Out, "%s in %s\n", line, now().Sub(started).Round(time.Second))
 	return nil
 }
 

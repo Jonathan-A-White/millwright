@@ -21,7 +21,9 @@ func newPosternMirrorCmd() *cobra.Command {
 			"the other host's line of [hands_hosts] says (`desktop = \"ssh desktop\"`). When\n" +
 			"postern_watchdog_target is set, an rsync destination, it also copies the vapid keys and\n" +
 			"push subscriptions there: the VPS watchdog's copy. It also copies the mill's state\n" +
-			"directory (grist_state_dir) to the same path on the boost, when it exists on this host.\n\n" +
+			"directory (grist_state_dir) to the same path on the boost, when it exists on this host: all\n" +
+			"of it the first time and after a week without a good copy, then only the run directories\n" +
+			"that changed since the last good copy (kept in postern-mirror-cursor in that directory).\n\n" +
 			"A host that is not home does nothing, says so and leaves with 0. A boost whose index's\n" +
 			"last line is newer than this host's is left alone: the run says so and leaves with 1,\n" +
 			"once the other copies are done; the mill's state is kept the same way by the time of\n" +
