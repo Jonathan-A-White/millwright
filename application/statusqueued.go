@@ -66,12 +66,7 @@ func (w BatchWait) write(b *strings.Builder, pad string) {
 // is running, whether it has waited too long. A rig whose file cannot be read
 // is judged on its default batch_every; nothing here fails the report.
 func (s Status) batchWaits(ctx context.Context, work WorkInHand) map[string]BatchWait {
-	var queued []StoryDetail
-	for _, d := range work.Running {
-		if QueuedForBatch(d) {
-			queued = append(queued, d)
-		}
-	}
+	queued := work.Queued()
 	if len(queued) == 0 {
 		return nil
 	}

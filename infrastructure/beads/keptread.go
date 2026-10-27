@@ -298,7 +298,7 @@ const queuedStoriesQuery = "select i.id as id, i.metadata as metadata, p.metadat
 	" from issues i join labels l on l.issue_id = i.id" +
 	" left join dependencies d on d.issue_id = i.id and d.type = 'parent-child'" +
 	" left join issues p on p.id = d.depends_on_issue_id" +
-	" where l.label = 'run:queued' and i.status = 'in_progress' and i.issue_type <> 'epic'" +
+	" where l.label = 'run:queued' and i.status in ('in_progress', 'open') and i.issue_type <> 'epic'" +
 	" order by i.id"
 
 // QueuedStories implements application.QueuedStoryReader over the kept

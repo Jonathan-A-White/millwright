@@ -407,11 +407,13 @@ func (b BatchLand) queued(ctx context.Context, rig string, report *BatchReport) 
 	if err != nil {
 		return nil, fmt.Errorf("landing a batch of %s: the queued stories could not be read: %w", rig, err)
 	}
-	var queue []BatchStory
-	for _, detail := range work.Running {
-		if !QueuedForBatch(detail) {
-			continue
+	for _, detail := range work.QueuedHeld() {
+		if path, err := detail.Path(); err == nil && path.Rig == rig {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s is queued, but it is held, so it is left out: release it and the next batch takes it", detail.Story.ID))
 		}
+	}
+	var queue []BatchStory
+	for _, detail := range work.Queued() {
 		path, err := detail.Path()
 		if err != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf("%s is queued, but its path cannot be read, so it is left out: %v", detail.Story.ID, err))
@@ -1431,10 +1433,7 @@ func (b *BatchLandings) queues(ctx context.Context) (map[string]batchQueue, erro
 		return nil, fmt.Errorf("reading the queued stories: %w", err)
 	}
 	queues := map[string]batchQueue{}
-	for _, detail := range work.Running {
-		if !QueuedForBatch(detail) {
-			continue
-		}
+	for _, detail := range work.Queued() {
 		path, err := detail.Path()
 		if err != nil {
 			continue

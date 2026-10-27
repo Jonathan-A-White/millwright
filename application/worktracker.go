@@ -274,6 +274,36 @@ type WorkInHand struct {
 	Held []StoryDetail
 }
 
+// Queued is every story queued for its rig's batch (RunQueued) that the batch
+// takes, whether the tracker lists it in progress, open and claimed, or open
+// and unclaimed: a hold and un-hold while it ran, or an open-steps give-back,
+// leaves a queued story open, and a batch that read only the in-progress list
+// never landed it (mw-bo813m2). A held or closed story is not in it.
+func (w WorkInHand) Queued() []StoryDetail {
+	var queued []StoryDetail
+	for _, list := range [][]StoryDetail{w.Running, w.OpenClaimed, w.Ready} {
+		for _, detail := range list {
+			if QueuedForBatch(detail) {
+				queued = append(queued, detail)
+			}
+		}
+	}
+	return queued
+}
+
+// QueuedHeld is the stories labelled queued for batch landing that are held
+// (deferred): a batch leaves them out, and says so. Only the kept connection
+// fills Held, so a tracker read the other way names none.
+func (w WorkInHand) QueuedHeld() []StoryDetail {
+	var held []StoryDetail
+	for _, detail := range w.Held {
+		if QueuedForBatch(detail) {
+			held = append(held, detail)
+		}
+	}
+	return held
+}
+
 // ReadyOn is the ready stories whose Path names this host, or domain.HostAuto,
 // which any host may take. A story whose Path names no host is not offered to
 // any host.
