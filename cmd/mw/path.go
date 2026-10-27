@@ -50,6 +50,9 @@ func newPathSetCmd() *cobra.Command {
 			"L 35, XL 50. Over that, a WARN on stderr says to split the story or size it up; nothing is refused.\n" +
 			"callers_ok=\"<why>\" is the story's own reason the callers are fine (say, the change is additive): the count\n" +
 			"line still prints for it, the WARN does not, and --from does not copy it.\n\n" +
+			"After the write, a story that mw dispatch would pass over is named, before it is un-held: no files key on a\n" +
+			"rig whose file says files_expected = true, a bug with no Sweep: line, a Tester story with no Landed story:\n" +
+			"line. A warning only; nothing is refused for it.\n\n" +
 			"A path that pins a story to a home host (laptop or desktop) on a rig named under [heavy_net] gets a\n" +
 			"WARN on stderr naming host=auto: that rig installs dependencies, so its stories are not started while\n" +
 			"the host's network is metered, and a pin keeps any other host from taking them. It is set all the same.\n\n" +
@@ -81,7 +84,8 @@ func newPathShowCmd() *cobra.Command {
 		Short: "Print a story's ten path keys",
 		Long: "show prints the eleven path keys of a story as it is worked by them. On a rig whose file\n" +
 			"in the vault says files_expected = true, a story with no files key also gets one line\n" +
-			"saying so: a warning, and the keys are printed all the same.",
+			"saying so: a warning, and the keys are printed all the same. So does a bug with no Sweep: line and a\n" +
+			"Tester story with no Landed story: line: each is a story mw dispatch passes over.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, err := beads.FromConfig()

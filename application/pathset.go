@@ -137,6 +137,13 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 			fmt.Fprintln(s.Out, demoNoHitlLine(id))
 		}
 	}
+	// What dispatch would refuse the story for, said now and not by a Blocked
+	// mail after it is un-held (mw-oi2rkcb): the story as the write leaves it.
+	if s.Out != nil {
+		written := story
+		written.Story.Overrides = story.Story.Overrides.Overlay(path)
+		warnBeforeDispatch(ctx, s.Out, s.Rules, written)
+	}
 	// The test files that call the story's files are changed with them, so the
 	// size is judged by them too (mw-gq6.661). Only a files, size or callers_ok key
 	// being written is judged; a warning, never a refusal.
@@ -319,7 +326,7 @@ func (s PathShow) Run(ctx context.Context, id string) (domain.Path, error) {
 	path := story.Merged()
 	if s.Out != nil {
 		fmt.Fprint(s.Out, pathLines(path))
-		warnNoFilesKey(ctx, s.Out, s.Rules, story)
+		warnBeforeDispatch(ctx, s.Out, s.Rules, story)
 	}
 	return path, nil
 }
