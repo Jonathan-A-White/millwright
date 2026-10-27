@@ -53,9 +53,9 @@ landed or held. On a batch rig nothing but `mw land` pushes the target branch.
 
 ## The batch
 
-The follower's `batch-land` job (home only, one rig at a time, never on the
-Boost) runs `mw land <rig>` when a batch is due: `batch_min` queued and the
-oldest has waited `batch_every`, or `batch_max` queued. By hand:
+The follower's `batch-land` job (home only, never on the Boost) runs
+`mw land <rig>` when a batch is due: `batch_min` queued and the oldest has
+waited `batch_every`, or `batch_max` queued. By hand:
 
 ```sh
 mw land lampas --dry-run   # the batch it would make, oldest queued first; changes nothing
@@ -75,6 +75,17 @@ Green with nothing set aside lands the batch: each story is closed
 `run=landed` with a ledger line naming the batch, a chain stamp and a Landed
 mail; the after-landing command and the grist smoke run once. No fixer is
 started and no fuel is spent.
+
+### Rigs land side by side
+
+One rig has one landing at a time; different rigs do not wait for each other.
+Each due rig is landed on its own, and while any landing runs, the job looks
+again every minute for a rig that has fallen due and lands that one too. A slow
+rig's batch (lampas, whose grist smoke can run most of an hour) does not hold
+back a fast rig's: a rig that was queued and due during it is landed at once.
+What keeps them from colliding is the locks, not the order: the rig's merge
+slot is per rig, and the host's gate lock stays one for all rigs, so the rigs'
+tests still run one after another (and under `contrib/mw-heavy`, as always).
 
 ## The fixer
 

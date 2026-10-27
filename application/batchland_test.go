@@ -815,6 +815,35 @@ func TestARigsLandingStillRunningDoesNotHoldBackAnotherRigsLanding(t *testing.T)
 	}
 }
 
+func TestARigStillDueWhileItsOwnLandingRunsIsNotLandedAgainInThePass(t *testing.T) {
+	release := make(chan struct{})
+	var mu sync.Mutex
+	asked := map[string]int{}
+	land := func(ctx context.Context, rig string, _ bool) error {
+		mu.Lock()
+		asked[rig]++
+		mu.Unlock()
+		if rig == "lampas" {
+			<-release // lampas's batch goes on, and its queue is still due at every look
+		}
+		return nil
+	}
+	_, landings := twoRigLandings(t, land)
+	landings.Recheck = 5 * time.Millisecond
+	done := make(chan error, 1)
+	go func() { done <- landings.Job().Run(context.Background()) }()
+	time.Sleep(100 * time.Millisecond) // many rechecks while lampas lands
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("expected the pass to end well, got %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if want := (map[string]int{"lampas": 1, "millwright": 1}); !reflect.DeepEqual(asked, want) {
+		t.Fatalf("expected one landing for each rig in the pass, got %v", asked)
+	}
+}
+
 func TestARigThatFallsDueWhileAnotherLandingRunsIsLandedInThePass(t *testing.T) {
 	release := make(chan struct{})
 	millwrightAsked := make(chan struct{})

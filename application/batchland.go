@@ -1337,9 +1337,11 @@ type QueuedStoryReader interface {
 // A rig that lands in batches is due by BatchDue, under its own keys. A rig
 // whose file says landing = each is due as soon as a story is queued on it: it
 // was flipped back, and what it had queued is landed one story at a time, the
-// oldest first, until none remains. The passes run the due rigs one after the
-// other, so two landings never run together here, and the follower keeps the
-// job in flight at most once; mw land takes the rig's merge slot besides.
+// oldest first, until none remains. A pass lands each due rig on its own, so a
+// rig's long landing does not hold back another rig's (mw-gq6.754); a rig has
+// one landing at a time, the follower keeps the job in flight at most once, and
+// mw land takes the rig's merge slot besides. The host's gate lock stays one for
+// all rigs, so their tests still run one after another.
 //
 // A rig whose landing failed (a held batch, which the Mayor is mailed, or a
 // story landed that left the queue as it was) is not tried again until
