@@ -1561,7 +1561,9 @@ since when: a wait, not a failure). A part waits nine minutes for the slot, sayi
 minute who holds it and since when, and then tells the Builder to run the same part again;
 the second such hand-back on one part in one attempt is counted once. A new commit makes the earlier records
 stale. A rig with no `[test_parts.<rig>]` table, or a host that cannot keep the records,
-checks as it always did.
+runs its tests whole, and `mw check <story>` with no `--part` waits for the slot the same nine
+minutes, saying every minute who holds it, and ends in one line naming the holder and the
+command to run again (`mw check <story>`), counted once when repeated in one attempt (mw-gq6.817).
 A rig `[after_landing]` does not name has nothing run after a
 landing (but for `millwright`, below); the table is for a host whose timers run a binary built in a rig's
 checkout, which a landing leaves one commit stale until the command rebuilds it.

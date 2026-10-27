@@ -57,8 +57,8 @@ type Check struct {
 	// Nil takes no slot.
 	Slot MergeSlot
 
-	// PartSlotWait is the most a --part waits for the slot; CheckPartSlotWait
-	// when zero.
+	// PartSlotWait is the most a check waits for the slot, a --part or the whole
+	// of one (mw-gq6.817); CheckPartSlotWait when zero.
 	PartSlotWait time.Duration
 
 	// Load is how busy this host is, read around the rig's tests as a
@@ -290,9 +290,9 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	} else if k.Slot != nil {
 		checks = slottedChecks{
 			checks: k.Checks,
-			slot:   k.Slot,
-			rigDir: rigDir,
-			holder: fmt.Sprintf("%s checking %s", SeatIdentity("", k.Host), storyID),
+			take: func(ctx context.Context) (Holding, error) {
+				return k.takeSlotWithin(ctx, c, wholeTry(c, "the rig's tests", CheckWholeHeldFileName(report.Attempt)))
+			},
 		}
 	}
 
@@ -301,10 +301,10 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		specs = k.SpecChecks
 		if k.Slot != nil {
 			specs = slottedSpecs{
-				specs:  k.SpecChecks,
-				slot:   k.Slot,
-				rigDir: rigDir,
-				holder: fmt.Sprintf("%s checking %s", SeatIdentity("", k.Host), storyID),
+				specs: k.SpecChecks,
+				take: func(ctx context.Context) (Holding, error) {
+					return k.takeSlotWithin(ctx, c, wholeTry(c, "the rig's changed specs", CheckSpecsHeldFileName(report.Attempt)))
+				},
 			}
 		}
 	}
@@ -395,18 +395,17 @@ func CheckedTip(log string) string {
 }
 
 // slottedChecks runs the rig's tests while holding the rig's merge slot, shared
-// with the other worktree checks of the rig.
+// with the other worktree checks of the rig. take waits for the slot no longer
+// than a Builder's foreground call allows (mw-gq6.817).
 type slottedChecks struct {
 	checks Checks
-	slot   MergeSlot
-	rigDir string
-	holder string
+	take   func(ctx context.Context) (Holding, error)
 }
 
 func (s slottedChecks) Run(ctx context.Context, rig, dir string) (Checked, error) {
-	holding, err := takeForCheck(ctx, s.slot, s.rigDir, s.holder)
+	holding, err := s.take(ctx)
 	if err != nil {
-		return Checked{}, fmt.Errorf("the merge slot of %s could not be taken: %w", rig, err)
+		return Checked{}, err
 	}
 	defer holding.Release(ctx)
 	return s.checks.Run(ctx, rig, dir)

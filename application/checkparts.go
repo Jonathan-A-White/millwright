@@ -15,6 +15,10 @@ import (
 // a batch landing holds the slot 10 to 40 minutes and a shorter wait handed the
 // Builder back to a landing it had not caused (mw-gq6.814). Worktree checks
 // share the slot, so only a landing in progress makes a part wait.
+//
+// A whole check with no --part on a rig whose gate is not split waits the same
+// time for the same slot, for the same reason, and ends in the same kind of line
+// (mw-gq6.817).
 const CheckPartSlotWait = 9 * time.Minute
 
 // A rig's whole gate can outrun the 590 seconds a Builder's foreground tool call
@@ -163,11 +167,14 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	tip := k.cleanTip(ctx, c)
 
 	if k.Slot != nil && PartNeedsSlot(part) {
-		waitCtx, cancel := context.WithTimeout(ctx, k.partSlotWait())
-		holding, err := takeForCheck(waitCtx, k.Slot, c.rigDir, fmt.Sprintf("%s checking %s", SeatIdentity("", k.Host), c.id))
-		cancel()
+		holding, err := k.takeSlotWithin(ctx, c, slotTry{
+			label:  label,
+			noun:   "part",
+			record: CheckPartHeldFileName(report.Attempt, k.Part),
+			again:  fmt.Sprintf("run the same part again with `mw check %s --part %d`", c.id, k.Part),
+		})
 		if err != nil {
-			return report, k.partSlotRefusal(ctx, c, label, report.Attempt, err)
+			return report, fmt.Errorf("checking %s: %w", c.id, err)
 		}
 		defer holding.Release(ctx)
 	}
@@ -232,40 +239,62 @@ func (k Check) partSlotWait() time.Duration {
 	return CheckPartSlotWait
 }
 
-// partSlotRefusal is the one line a part ends with when the merge slot could not
-// be taken. A wait that ran out of its budget names who holds the slot, since
-// when, and the command to run next, which is the same part again: the wait is
-// the landing's, not the part's failure, and a part handed back on the slot
-// again in the same attempt is counted as the one wait it is (mw-gq6.814). Any
-// other trouble is told as it was.
-func (k Check) partSlotRefusal(ctx context.Context, c *closeOut, label string, attempt int, err error) error {
+// slotTry is what a check that waits for the merge slot is called in the line it
+// ends with: label names it, noun is what a repeat is not a failure of, record is
+// the run file that keeps its waits in the attempt (one per kind of try), and
+// again is the command to run next.
+type slotTry struct {
+	label  string
+	noun   string
+	record string
+	again  string
+}
+
+// takeSlotWithin takes the rig's slot for a worktree check, waiting no longer
+// than partSlotWait: under the 590 seconds a Builder's foreground call is given.
+// It ends a wait that ran out in one line (slotRefusal).
+func (k Check) takeSlotWithin(ctx context.Context, c *closeOut, try slotTry) (Holding, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, k.partSlotWait())
+	defer cancel()
+	holding, err := takeForCheck(waitCtx, k.Slot, c.rigDir, fmt.Sprintf("%s checking %s", SeatIdentity("", k.Host), c.id))
+	if err != nil {
+		return nil, k.slotRefusal(ctx, c, try, err)
+	}
+	return holding, nil
+}
+
+// slotRefusal is the one line a check ends with when the merge slot could not be
+// taken. A wait that ran out of its budget names who holds the slot, since
+// when, and the command to run next, which is the same check again: the wait is
+// the landing's, not the check's failure, and a check handed back on the slot
+// again in the same attempt is counted as the one wait it is (mw-gq6.814,
+// mw-gq6.817). Any other trouble is told as it was.
+func (k Check) slotRefusal(ctx context.Context, c *closeOut, try slotTry, err error) error {
 	var waited *SlotWaitError
 	if ctx.Err() != nil || !errors.As(err, &waited) || !errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("checking %s: the merge slot of %s could not be taken: %w", c.id, c.path.Rig, err)
+		return fmt.Errorf("the merge slot of %s could not be taken: %w", c.path.Rig, err)
 	}
 	since := "a moment ago"
 	if !waited.Since.IsZero() {
 		since = fmt.Sprintf("%s (%s ago)", waited.Since.UTC().Format("15:04:05Z"), time.Since(waited.Since).Round(time.Second))
 	}
-	again := fmt.Sprintf("run the same part again with `mw check %s --part %d`", c.id, k.Part)
-	earlier := k.noteSlotWait(ctx, c.id, attempt, waited)
+	earlier := k.noteSlotWait(ctx, c.id, try.record, waited)
 	if earlier != "" {
-		return fmt.Errorf("checking %s: %s did not start: after %s the merge slot of %s is still held by %s, since %s, and nothing was run; it was held when this part was tried at %s as well, which is counted once for this attempt and is not a failure of the part: %s, and if the slot is held again, comment on the story naming this part and who holds the slot, and hand back",
-			c.id, label, waited.Waited.Round(time.Second), c.path.Rig, waited.Holder, since, earlier, again)
+		return fmt.Errorf("%s did not start: after %s the merge slot of %s is still held by %s, since %s, and nothing was run; it was held when this %s was tried at %s as well, which is counted once for this attempt and is not a failure of the %s: %s, and if the slot is held again, comment on the story naming this %s and who holds the slot, and hand back",
+			try.label, waited.Waited.Round(time.Second), c.path.Rig, waited.Holder, since, try.noun, earlier, try.noun, try.again, try.noun)
 	}
-	return fmt.Errorf("checking %s: %s did not start: after %s the merge slot of %s is still held by %s, since %s, and nothing was run; that is the landing's wait and not a failure of the part: %s",
-		c.id, label, waited.Waited.Round(time.Second), c.path.Rig, waited.Holder, since, again)
+	return fmt.Errorf("%s did not start: after %s the merge slot of %s is still held by %s, since %s, and nothing was run; that is the landing's wait and not a failure of the %s: %s",
+		try.label, waited.Waited.Round(time.Second), c.path.Rig, waited.Holder, since, try.noun, try.again)
 }
 
-// noteSlotWait keeps what part k.Part waited on in the attempt, once for the part
-// and the attempt: the first time it was handed back on the slot, who held it
-// and since when. It returns when the part was first handed back if it had been
+// noteSlotWait keeps what a check waited on in the attempt, once for the record
+// named: the first time it was handed back on the slot, who held it and since
+// when. It returns when the part was first handed back if it had been
 // before, and "" otherwise, or when the record cannot be kept.
-func (k Check) noteSlotWait(ctx context.Context, storyID string, attempt int, waited *SlotWaitError) string {
+func (k Check) noteSlotWait(ctx context.Context, storyID, name string, waited *SlotWaitError) string {
 	if k.Records == nil {
 		return ""
 	}
-	name := CheckPartHeldFileName(attempt, k.Part)
 	if text, err := k.Records.ReadRunFile(ctx, storyID, name); err == nil {
 		if first, _, _, ok := slotWaitOf(text); ok {
 			return first
@@ -299,6 +328,34 @@ func slotWaitOf(text string) (first, holder, since string, ok bool) {
 		}
 	}
 	return first, holder, since, ok
+}
+
+// CheckWholeHeldFileName is the name of the record of the waits of a whole check's
+// tests (no --part) on the merge slot, in the story's run directory, one for the
+// attempt; CheckSpecsHeldFileName the same for its changed specs (mw-gq6.817).
+func CheckWholeHeldFileName(attempt int) string {
+	if attempt < 1 {
+		attempt = 1
+	}
+	return fmt.Sprintf("check-%d-whole.slot", attempt)
+}
+
+func CheckSpecsHeldFileName(attempt int) string {
+	if attempt < 1 {
+		attempt = 1
+	}
+	return fmt.Sprintf("check-%d-specs.slot", attempt)
+}
+
+// wholeTry is how a whole check's tests, or its changed specs, are named when they
+// are handed back on the merge slot.
+func wholeTry(c *closeOut, label, record string) slotTry {
+	return slotTry{
+		label:  label,
+		noun:   "check",
+		record: record,
+		again:  fmt.Sprintf("run the same check again with `mw check %s`", c.id),
+	}
 }
 
 // indented is text with four spaces before each line, ending in a newline.

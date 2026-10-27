@@ -53,16 +53,14 @@ func (n Next) specsFailReason(ctx context.Context, c *closeOut) Reason {
 // slottedSpecs runs the rig's changed-specs command while holding the rig's
 // merge slot, as slottedChecks does the rig's tests.
 type slottedSpecs struct {
-	specs  SpecChecks
-	slot   MergeSlot
-	rigDir string
-	holder string
+	specs SpecChecks
+	take  func(ctx context.Context) (Holding, error)
 }
 
 func (s slottedSpecs) RunSpecs(ctx context.Context, rig, dir, base string) (SpecsChecked, error) {
-	holding, err := takeForCheck(ctx, s.slot, s.rigDir, s.holder)
+	holding, err := s.take(ctx)
 	if err != nil {
-		return SpecsChecked{}, fmt.Errorf("the merge slot of %s could not be taken: %w", rig, err)
+		return SpecsChecked{}, err
 	}
 	defer holding.Release(ctx)
 	return s.specs.RunSpecs(ctx, rig, dir, base)
