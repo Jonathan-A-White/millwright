@@ -303,6 +303,10 @@ func (n Next) gristExampleRefusal(ctx context.Context, c *closeOut, report *Next
 		return Refusal{}, false
 	}
 	why := fmt.Sprintf("%s adds or changes %d grind example(s) the closing comment does not prove live: %s", c.branch, len(missing), strings.Join(missing, ", "))
+	if n.HasGristTestKey != nil && !n.HasGristTestKey() {
+		said, headline := n.unprovedFromAHostWithNoMill(ctx, c, report, missing)
+		return Refusal{ReasonGristExampleUnproved, why + "; " + headline, said}, true
+	}
 	said := fmt.Sprintf("A grind example that passes the fake mill can fail the live grist (mw-fu7dqf.12 landed one that failed 2 of 2). "+
 		"Run each on the branch against the real mill (add --ref %s) and write a line for it in the closing comment, "+
 		"%q, with the app, kind and example as run:\n\n%s\n\n"+
@@ -310,4 +314,43 @@ func (n Next) gristExampleRefusal(ctx context.Context, c *closeOut, report *Next
 		"An eval that does not pass is a criterion not met: say so, and the story is handed back.",
 		c.branch, GristEvalProofLine, strings.Join(lines, "\n"), c.id)
 	return Refusal{ReasonGristExampleUnproved, why, said}, true
+}
+
+// unprovedFromAHostWithNoMill is what the stop of a branch that adds a grind
+// example says when this host holds no grist test key, so cannot run the live
+// eval and never will (mw-1knt69p): it pushes the branch to the remote, where
+// the home's next attempt, which continues it, finds it, and names the evals to
+// run from the home. A push that fails is said, and the branch stays here.
+func (n Next) unprovedFromAHostWithNoMill(ctx context.Context, c *closeOut, report *NextReport, missing []string) (said, headline string) {
+	var evals, runs []string
+	for _, example := range missing {
+		kind, name, _ := strings.Cut(example, "/")
+		run := fmt.Sprintf("mw grist eval <app> %s --example %s --ref %s", kind, name, c.branch)
+		evals, runs = append(evals, "- "+run), append(runs, run)
+	}
+	where := "This host holds no grist test key, so it cannot run the live eval a grind example needs. "
+	if n.Host != "" {
+		where = fmt.Sprintf("%s holds no grist test key, so it cannot run the live eval a grind example needs. ", n.Host)
+	}
+	var pushed string
+	if n.Landing == nil {
+		pushed = "The branch was not pushed: this host has no way to push it."
+		headline = "this host holds no grist test key and could not push the branch"
+	} else if err := n.Landing.Push(ctx, c.worktree, n.remote(), c.branch); err != nil {
+		lost := fmt.Sprintf("%s could not be pushed to %s for the home to prove: %v", c.branch, n.remote(), err)
+		report.Notes = append(report.Notes, lost)
+		pushed = lost + ", so it stays on " + n.Host + "."
+		headline = lost
+	} else {
+		c.branchPushed = true
+		headline = fmt.Sprintf("Pushed %s to %s; from the home run %s", c.branch, n.remote(), strings.Join(runs, " and "))
+		pushed = fmt.Sprintf("Pushed %s to %s.", c.branch, n.remote())
+		if n.RetryFromBranch {
+			pushed += " The next attempt, on whichever host takes the story, continues it."
+		}
+	}
+	said = where + pushed + " From the home, run each against the real mill:\n\n" + strings.Join(evals, "\n") + "\n\n" +
+		"and write a line for each in the closing comment, " + fmt.Sprintf("%q", GristEvalProofLine) + ", then run `mw next " + c.id + "` again. " +
+		"Nothing was merged. An eval that does not pass is a criterion not met: say so, and the story is handed back."
+	return said, headline
 }

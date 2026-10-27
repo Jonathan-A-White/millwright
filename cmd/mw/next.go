@@ -215,6 +215,7 @@ func newNextCmd() *cobra.Command {
 
 					RetryFromBranch: fromBranch,
 					Rebases:         worktrees,
+					HasGristTestKey: hostHasGristTestKey,
 				}, dir)
 			}
 
@@ -304,6 +305,7 @@ func newNextCmd() *cobra.Command {
 				BenchFlags:   hostBenchFlags(),
 
 				RetryFromBranch: fromBranch,
+				HasGristTestKey: hostHasGristTestKey,
 			}.Run(cmd.Context(), args[0])
 			return err
 		},

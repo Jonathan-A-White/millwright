@@ -238,6 +238,7 @@ func newStatusCmd() *cobra.Command {
 				HeldHands:        mayor,
 				Icebox:           application.IceboxReader{Beads: tracker, Notes: tracker},
 				Host:             host,
+				HasGristTestKey:  hostHasGristTestKey,
 				Seat:             BuilderSeat,
 				Ticks:            hostTickLogs(),
 				Panes:            seatWindows(),

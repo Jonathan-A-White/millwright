@@ -1735,6 +1735,11 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		started.KeptBranch = kept
 	}
 
+	// An earlier attempt on another host left no branch here, only the one it
+	// pushed to the remote (mw-1knt69p): that is the branch to continue.
+	if started.KeptBranch == "" {
+		started.KeptBranch = d.pushedBranch(ctx, rigDir, started.Branch)
+	}
 	continuing, err := d.continuing(ctx, rigDir, id, started.KeptBranch, started.Start)
 	if err != nil {
 		return undo("reading whether "+id+" continues an earlier attempt's branch", err, false)
@@ -1742,6 +1747,8 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	cut := started.Start
 	if continuing > 0 {
 		cut = started.KeptBranch
+	} else if started.KeptBranch != "" && started.KeptBranch == StartPoint(d.remote(), started.Branch) {
+		started.KeptBranch = ""
 	}
 	if err := d.Worktrees.Add(ctx, rigDir, started.Worktree, started.Branch, cut); err != nil {
 		return undo("cutting the worktree", err, false)
@@ -1886,6 +1893,21 @@ func (d Dispatch) leftoverAt(ctx context.Context, rigDir string, started Started
 		return false, nil
 	}
 	return true, nil
+}
+
+// pushedBranch is the story's branch as the remote has it, when an earlier
+// attempt on another host pushed it there (mw-1knt69p): a stop that only the
+// home can finish pushes the branch, and the home has none of its own. Empty
+// when the remote holds none, or this dispatch does not continue branches.
+func (d Dispatch) pushedBranch(ctx context.Context, rigDir, branch string) string {
+	if !d.RetryFromBranch || d.Memory == nil || d.Rebases == nil || d.Landing == nil {
+		return ""
+	}
+	ref := StartPoint(d.remote(), branch)
+	if _, err := d.Landing.RefHead(ctx, rigDir, ref); err != nil {
+		return ""
+	}
+	return ref
 }
 
 // continuing is the earlier attempt whose kept branch the next attempt of id is

@@ -60,6 +60,9 @@ type nextContext struct {
 	// host that names no [grist-apps]; home is the vault's home file it reads.
 	smokeUnhosted bool
 	home          homeFile
+	// gristKey, when set, is whether this host holds the grist test key, as
+	// Next.HasGristTestKey asks (mw-1knt69p); nil is a host that is not asked.
+	gristKey *bool
 	// leftovers is the user's process table, for features/tester.feature's sweep
 	// of what a Tester's session left running (mw-gq6.409).
 	leftovers *apptest.FakeUserProcesses
@@ -235,6 +238,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerRelatedTestsSteps(ctx, c)
 	registerNextReattemptSteps(ctx, c)
 	registerRetryFromBranchSteps(ctx, c)
+	registerNextGristExampleSteps(ctx, c)
 	registerNextGiveBackSteps(ctx, c)
 	registerNextStampSteps(ctx, c)
 	registerNextVersionSteps(ctx, c)
@@ -1123,6 +1127,7 @@ func (c *nextContext) nextUseCase() application.Next {
 		Rigs: rigs,
 
 		RetryFromBranch: !c.fromMain,
+		HasGristTestKey: c.hostGristKey(),
 		Now:             func() time.Time { return time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC) },
 		Out:             &c.printed,
 		Err:             &c.stderr,

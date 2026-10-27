@@ -331,6 +331,13 @@ type Next struct {
 	// attempt is cut from it, rebased onto the target. Off, nothing is written.
 	RetryFromBranch bool
 
+	// HasGristTestKey says whether this host holds the factory's grist test key,
+	// and so can reach the live mill a grind example is proved on. A host that
+	// holds none and stops a branch grist-example-unproved pushes the branch to
+	// the remote for the home to prove and finish (mw-1knt69p). Nil is a host
+	// that can: nothing is pushed.
+	HasGristTestKey func() bool
+
 	// Sync brings the hosts level after the story is closed and before anything
 	// new is dispatched, so that the other host sees the closed story before it
 	// picks its own next work. A nil Sync skips it.
@@ -631,8 +638,11 @@ type closeOut struct {
 	rigDir   string
 	worktree string
 	branch   string
-	target   string
-	result   SessionResult
+	// branchPushed is set when the stop pushed the story's branch to the remote
+	// for the home to finish (unprovedFromAHostWithNoMill).
+	branchPushed bool
+	target       string
+	result       SessionResult
 
 	// cappedAfterClosing says the harness stopped the session at its turn cap
 	// after it wrote its closing comment, so the close-out judges it as a
@@ -3043,8 +3053,12 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 		claim = fmt.Sprintf("the claim was given back and it is open again: the next dispatch tick takes it as attempt %d "+
 			"and keeps the branch under another name before it cuts a fresh one", c.detail.Attempts+1)
 	}
+	nothingPushed := "nothing was pushed"
+	if c.branchPushed {
+		nothingPushed = "only the story's branch " + c.branch + " was pushed"
+	}
 	note := fmt.Sprintf("mw next on %s "+RefusedPhrase+"%s): %s\n\n"+
-		"Nothing was merged and nothing was pushed. The story is not closed and %s. "+
+		"Nothing was merged and "+nothingPushed+". The story is not closed and %s. "+
 		"The worktree %s and the branch %s are left as the session left them.",
 		n.Host, reason, why, claim, c.worktree, c.branch)
 	if continues {

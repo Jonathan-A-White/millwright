@@ -223,6 +223,11 @@ type Status struct {
 	// Host is which of the factory's hosts this report is for.
 	Host string
 
+	// HasGristTestKey says whether this host holds the grist test key, as
+	// Dispatch.HasGristTestKey does: a ready story that needs it is shown with
+	// the reason mw dispatch passes it by here. Nil says nothing.
+	HasGristTestKey func() bool
+
 	// Mayor is where the needs waiting on the Mayor are read from, for the
 	// WAITING ON THE MAYOR section, from the beads labelled hitl the report
 	// lists. A nil Mayor leaves the section out.
@@ -606,6 +611,10 @@ type StatusReport struct {
 	// step not yet run, by story id: dispatch does not wait on the step, so the
 	// child is shown with it beside it (mw-gq6.763).
 	UnderHandsStep map[string]string
+	// NoGristKey is the line for each ready story mw dispatch passes by on this
+	// host for want of a grist test key (gate no-grist-key), by story id: the
+	// home, which holds the key, takes it (mw-1knt69p).
+	NoGristKey map[string]string
 	// NoHostTakes are the ready stories every host that could take them has
 	// passed for a reason of the host's own (a rig not checked out there, a
 	// metered network), by story id, as the hosts' notes have it (mw-gq6.703).
@@ -943,6 +952,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report.TesterHolds = s.testerHolds(work, report.Ready)
 	report.HeldByFiles = s.heldByFiles(ctx, report.Ready)
 	report.UnderHandsStep = s.underHandsStep(ctx, report.Ready)
+	report.NoGristKey = s.noGristKey(report.Ready)
 	report.NoHostTakes = s.noHostTakes(ctx, report.Ready)
 
 	// A bead for the Governor may have no Path at all, so no listing keyed by
@@ -1327,6 +1337,25 @@ func (s Status) testerHolds(work WorkInHand, ready []StoryDetail) map[string]Tes
 		}
 	}
 	return holds
+}
+
+// noGristKey is the line for each ready story this host's dispatch passes by at
+// gate no-grist-key, by id; nil when this host holds the key, or is not asked.
+func (s Status) noGristKey(ready []StoryDetail) map[string]string {
+	if s.HasGristTestKey == nil || s.HasGristTestKey() {
+		return nil
+	}
+	var lines map[string]string
+	for _, detail := range ready {
+		if detail.IsEpic || !needsGristTestKey(detail) {
+			continue
+		}
+		if lines == nil {
+			lines = map[string]string{}
+		}
+		lines[detail.Story.ID] = fmt.Sprintf("passed by %s: no grist test key (its checks run mw grist eval or smoke, or its files key names grinds/); a host that has one takes it", s.Host)
+	}
+	return lines
 }
 
 // heldByFiles is the line for each ready story the host's dispatch has held for
@@ -1968,6 +1997,9 @@ func (r StatusReport) String() string {
 			wrapInto(&b, "    ", held)
 		}
 		if line := r.UnderHandsStep[d.Story.ID]; line != "" {
+			wrapInto(&b, "    ", line)
+		}
+		if line := r.NoGristKey[d.Story.ID]; line != "" {
 			wrapInto(&b, "    ", line)
 		}
 		if takes, passed := r.NoHostTakes[d.Story.ID]; passed {
