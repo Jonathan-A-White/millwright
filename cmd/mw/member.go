@@ -9,6 +9,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright"
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/member"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
@@ -38,6 +39,7 @@ func newMemberInitCmd() *cobra.Command {
 		host    string
 		prefix  string
 		dolt    string
+		harness string
 	)
 
 	cmd := &cobra.Command{
@@ -65,6 +67,12 @@ func newMemberInitCmd() *cobra.Command {
 			"  2. loginctl enable-linger <name> (as root), so the Dolt unit runs while the member is logged out.\n" +
 			"  3. claude login: the member logs in to Claude as themselves.\n" +
 			"  4. The git remote: make a private repository and git remote add origin, then git push, for the vault.\n\n" +
+			"--harness codex makes the factory for a member who runs on Codex: it also writes AGENTS.md at the\n" +
+			"vault's root (the starter kit's CLAUDE.md text, which boots the session from seats/mayor/charter.md;\n" +
+			"Codex has no system-prompt flag, so this is how the Mayor's seat reaches its charter), writes\n" +
+			"harness = \"codex\" under [next] in config.toml (which mw seat up, mw dispatch and mw next read), and\n" +
+			"adds a line to the Family section: every story has harness codex, model " + string(application.MemberCodexModel) + ", effort " + string(application.MemberCodexEffort) + ".\n" +
+			"The member then logs in with codex login, not claude.\n\n" +
 			"The way back is mw member remove, which stops and disables the unit and deletes nothing.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -90,6 +98,7 @@ func newMemberInitCmd() *cobra.Command {
 				Holder:   strings.TrimSpace(holder),
 				Backend:  strings.TrimSpace(backend),
 				Host:     strings.TrimSpace(host),
+				Harness:  domain.Harness(strings.TrimSpace(harness)),
 			})
 			if err != nil {
 				return err
@@ -106,6 +115,7 @@ func newMemberInitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&backend, "backend", "", "the URL of the Postern backend (required)")
 	cmd.Flags().StringVar(&host, "host", "laptop", "what the config file calls this host")
 	cmd.Flags().StringVar(&prefix, "prefix", "", "what the ids of the member's stories begin with (default: --name)")
+	cmd.Flags().StringVar(&harness, "harness", "", "what the member's sessions run on: claude or codex (default: claude)")
 	cmd.Flags().StringVar(&dolt, "dolt", "", "the dolt program the unit runs (default: dolt on the PATH)")
 	for _, required := range []string{"name", "vault", "dolt-port", "holder", "backend"} {
 		cmd.MarkFlagRequired(required)

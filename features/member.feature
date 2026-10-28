@@ -87,3 +87,28 @@ Feature: mw member init
     Then member remove succeeds
     And systemctl disabled and stopped the Dolt unit
     And the member's config file, beads.env, Dolt unit file and vault are all still there
+
+  Scenario: A member's factory on Codex has an AGENTS.md, a harness and a Family line
+    Given the member's factory is to run on "codex"
+    When mw member init makes "luke" with the vault "luke-vault", the Dolt port 3308, the holder "Jonathan (the Governor)" and the backend "http://10.88.0.2:8788"
+    Then member init succeeds
+    And the member's config file says the harness is "codex"
+    And the vault's AGENTS.md is the starter kit's CLAUDE.md, booting from seats/mayor/charter.md
+    And the Family section says every epic's stories run on harness codex, model gpt-6.1-sol, effort high
+    And the report names codex login and AGENTS.md
+    And the vault's first commit carries no attribution
+
+  Scenario: A member's factory on Claude has no AGENTS.md and no harness line
+    Given the member's factory is to run on "claude"
+    When mw member init makes "luke" with the vault "luke-vault", the Dolt port 3308, the holder "Jonathan (the Governor)" and the backend "http://10.88.0.2:8788"
+    Then member init succeeds
+    And the member's config file has no harness line
+    And the vault has no AGENTS.md
+    And the Family section has no harness line
+
+  Scenario: A harness that is neither is refused, and nothing is written
+    Given the member's factory is to run on "gemini"
+    When mw member init makes "luke" with the vault "luke-vault", the Dolt port 3308, the holder "Jonathan (the Governor)" and the backend "http://10.88.0.2:8788"
+    Then member init is refused, saying the harness will not do
+    And there is no member directory "luke-vault"
+    And no member config file, beads.env or Dolt unit was written
