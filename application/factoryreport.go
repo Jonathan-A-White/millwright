@@ -285,6 +285,9 @@ type FactoryReportResult struct {
 	ModelCompare *ModelCompare `json:"model_compare,omitempty"`
 	// Review is his time today, whole-factory; nil when the report counted none.
 	Review *ReviewTime `json:"his_time,omitempty"`
+	// EpicsMoved is how many epics had a story closed or claimed in the window;
+	// the parent's note says it in words. It is not in the JSON.
+	EpicsMoved int `json:"-"`
 }
 
 // reportEntry is one thing the window saw: a landing, a refusal, a bug filed
@@ -537,6 +540,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			DemosWaiting: counted.Counts.DemosWaiting, DemoDays: limits.DemoWaitingDays}
 	}
 	result.Changes = factoryChanges(all, kept, byID, escapedBy(escapes), now)
+	result.EpicsMoved = result.epicsMoved(stories)
 	if result.Landing != nil {
 		if d, known := byID[result.Landing.Story]; known && strings.TrimSpace(d.Story.Title) != "" {
 			result.Landing.Title = d.Story.Title

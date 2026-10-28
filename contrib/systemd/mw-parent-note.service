@@ -1,0 +1,23 @@
+# One `mw report send --class parent` run, as the member's user, then it exits:
+# no daemon. For `systemctl --user`; see docs/demo-family-member.md.
+#
+# Started by mw-parent-note.timer every hour. It builds the parent's note, a few
+# plain sentences with no bead id, story title or fuel figure, from the ledger and
+# the stories, and posts it to postern_governor_key on the member's own backend
+# only in the local hour of the config file's [report] parent_hour (7 unless set),
+# once a local day: at any other hour it says so and exits 0. It spends no fuel
+# and starts no session.
+[Unit]
+Description=Post the parent's daily note at its local hour (mw report send --class parent)
+OnFailure=mw-unit-failed@%n.service
+
+[Service]
+Type=oneshot
+
+# Like mw-report.service, it runs the one fixed binary rather than relying on
+# PATH; the bd it calls reaches the member's Dolt server through beads.env.
+EnvironmentFile=-%h/.config/mw/beads.env
+EnvironmentFile=-%h/.config/mw/dispatch.env
+ExecStart=/usr/bin/env %h/.local/bin/mw report send --class parent
+
+TimeoutStartSec=5min

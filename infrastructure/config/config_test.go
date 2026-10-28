@@ -2630,6 +2630,25 @@ func TestFactoryInvestShareIsOneInThreeUntilConfigSetChangesIt(t *testing.T) {
 	}
 }
 
+// [report] parent_hour and name (mw-9rp4hu.22) say when a member's parent's note
+// goes out and who it is about: 7 local and nobody until the table says.
+func TestReportParentIsSevenLocalUntilTheTableSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nparent_hour = 9\n")
+	if name, hour, err := config.ReportParent(); err != nil || name != "" || hour != 7 {
+		t.Fatalf("expected the default 7 and no name, not a root-table key, got %q, %d: %v", name, hour, err)
+	}
+	writeConfig(t, "[report]\nname = \"Luke\"\nparent_hour = 6\n")
+	if name, hour, err := config.ReportParent(); err != nil || name != "Luke" || hour != 6 {
+		t.Fatalf("expected the table's Luke at 6, got %q, %d: %v", name, hour, err)
+	}
+	for _, bad := range []string{"24", "-1", "\"early\""} {
+		writeConfig(t, "[report]\nparent_hour = "+bad+"\n")
+		if _, _, err := config.ReportParent(); err == nil || !strings.Contains(err.Error(), "parent_hour") {
+			t.Errorf("expected parent_hour = %s refused naming the key, got %v", bad, err)
+		}
+	}
+}
+
 // [factory] invest_share_min and invest_share_max (mw-gordcw.3) bound the
 // investment share: a tenth and a third until the table says otherwise, min
 // below max, and mw config set refuses a share outside them.

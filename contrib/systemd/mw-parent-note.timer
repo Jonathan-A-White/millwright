@@ -1,0 +1,19 @@
+# Runs mw-parent-note.service every hour. For `systemctl --user`; see
+# docs/demo-family-member.md.
+#
+# The hour the note goes out is not here but in the config file ([report]
+# parent_hour, local time, 7 unless set): the service posts in that hour and
+# exits at the others, so a change of hour needs no change to this file.
+[Unit]
+Description=Hourly, post the parent's note when it is the hour (mw report send --class parent)
+
+[Timer]
+OnCalendar=*:05:00
+# No catch-up: a host that was asleep at 07:05 does not post when it wakes, and
+# it is not woken to post. The next day's hour is the next note.
+Persistent=false
+WakeSystem=false
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

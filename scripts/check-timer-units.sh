@@ -32,7 +32,7 @@
 #    pair is a oneshot run straight from ~/.local/bin (not through `env`) on a timer
 #    at 2, 7, 12, ... that does not catch up. The report pair is a oneshot run straight from
 #    ~/.local/bin that runs `mw report send` on a timer at 12:00 UTC that does not catch
-#    up. The postern mirror pair is a
+#    up. The parent's note pair runs `mw report send --class parent` hourly; it posts only in its own hour. The postern mirror pair is a
 #    oneshot that runs `mw postern mirror` (through `env`) on a timer at 3, 13,
 #    23, ... that does not catch up. And the scripts those two run
 #    (contrib/mail-notify, contrib/health/mw-health.sh) are executable and parse.
@@ -93,6 +93,8 @@ MIRROR_SERVICE=$DIR/mw-postern-mirror.service
 MIRROR_TIMER=$DIR/mw-postern-mirror.timer
 REPORT_SERVICE=$DIR/mw-report.service
 REPORT_TIMER=$DIR/mw-report.timer
+PARENT_SERVICE=$DIR/mw-parent-note.service
+PARENT_TIMER=$DIR/mw-parent-note.timer
 FOLLOW_SERVICE=$DIR/mw-view-follow.service
 FAILED_TEMPLATE=$DIR/mw-unit-failed@.service
 SYS_FAILED_TEMPLATE=$DIR/system/mw-unit-failed@.service
@@ -125,6 +127,8 @@ fail() {
 [ -f "$MIRROR_TIMER" ] || fail "$MIRROR_TIMER does not exist"
 [ -f "$REPORT_SERVICE" ] || fail "$REPORT_SERVICE does not exist"
 [ -f "$REPORT_TIMER" ] || fail "$REPORT_TIMER does not exist"
+[ -f "$PARENT_SERVICE" ] || fail "$PARENT_SERVICE does not exist"
+[ -f "$PARENT_TIMER" ] || fail "$PARENT_TIMER does not exist"
 [ -f "$FOLLOW_SERVICE" ] || fail "$FOLLOW_SERVICE does not exist"
 [ -f "$FAILED_TEMPLATE" ] || fail "$FAILED_TEMPLATE does not exist"
 [ -f "$SYS_FAILED_TEMPLATE" ] || fail "$SYS_FAILED_TEMPLATE does not exist"
@@ -139,7 +143,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
 	# and complains about them (not the rig's to change): those lines are noted
 	# and do not fail. A line names a rig unit by its path or, as systemd does for
 	# some faults, by its file name alone.
-	UNITS="$SERVICE $TIMER $MAIL_SERVICE $MAIL_TIMER $HEALTH_SERVICE $HEALTH_TIMER $TICK_SERVICE $TICK_TIMER $REVIEW_SERVICE $REVIEW_TIMER $DOCTOR_SERVICE $DOCTOR_TIMER $MIRROR_SERVICE $MIRROR_TIMER $REPORT_SERVICE $REPORT_TIMER $FOLLOW_SERVICE $FAILED_TEMPLATE"
+	UNITS="$SERVICE $TIMER $MAIL_SERVICE $MAIL_TIMER $HEALTH_SERVICE $HEALTH_TIMER $TICK_SERVICE $TICK_TIMER $REVIEW_SERVICE $REVIEW_TIMER $DOCTOR_SERVICE $DOCTOR_TIMER $MIRROR_SERVICE $MIRROR_TIMER $REPORT_SERVICE $REPORT_TIMER $PARENT_SERVICE $PARENT_TIMER $FOLLOW_SERVICE $FAILED_TEMPLATE"
 	# shellcheck disable=SC2086 # the unit paths hold no spaces; word splitting is the point
 	out=$(systemd-analyze --user verify $UNITS 2>&1) || {
 		echo "$out" >&2
@@ -258,6 +262,12 @@ need "$REPORT_SERVICE" "Type=oneshot"
 need "$REPORT_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw report send"
 need "$REPORT_TIMER" "OnCalendar=*-*-* 12:00:00 UTC"
 need "$REPORT_TIMER" "Persistent=false"
+# The parent's note pair: `mw report send --class parent` every hour, which posts
+# only in its local hour, no catch-up.
+need "$PARENT_SERVICE" "Type=oneshot"
+need "$PARENT_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw report send --class parent"
+need "$PARENT_TIMER" "OnCalendar=*:05:00"
+need "$PARENT_TIMER" "Persistent=false"
 # The events follower (it republishes the view too), a daemon with no timer.
 need "$FOLLOW_SERVICE" "ExecStart=/usr/bin/env mw events follow"
 need "$FOLLOW_SERVICE" "Restart=on-failure"

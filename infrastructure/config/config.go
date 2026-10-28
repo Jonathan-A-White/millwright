@@ -1284,6 +1284,37 @@ func FactoryInvestShareBounds() (min, max float64, err error) {
 	return min, max, nil
 }
 
+// ReportTable is the table of the config file that says how a member's factory
+// reports to its parent.
+const ReportTable = "report"
+
+// DefaultReportParentHour is the local hour the parent's note goes out when the
+// [report] table says nothing; application.DefaultParentNoteHour is the same.
+const DefaultReportParentHour = 7
+
+// ReportParent reports who the parent's note is about and when it goes out:
+// the `name` key of the [report] table of ~/.config/mw/config.toml, as the
+// parent calls the member (empty when unset), and its `parent_hour` key, the
+// local hour from 0 to 23, DefaultReportParentHour when unset.
+func ReportParent() (name string, hour int, err error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", 0, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, ReportTable)
+	if err != nil {
+		return "", 0, err
+	}
+	hour = DefaultReportParentHour
+	if said := strings.TrimSpace(table["parent_hour"]); said != "" {
+		if hour, err = strconv.Atoi(said); err != nil || hour < 0 || hour > 23 {
+			return "", 0, fmt.Errorf("the [%s] table of %s says parent_hour = %q: it must be a local hour from 0 to 23, such as 7", ReportTable, path, said)
+		}
+	}
+	return strings.TrimSpace(table["name"]), hour, nil
+}
+
 // DispatchTable is the table of the config file that says how much room a host
 // must have before mw dispatch starts a story on it.
 const DispatchTable = "dispatch"
