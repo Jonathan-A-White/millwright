@@ -9,6 +9,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright"
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/member"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
@@ -72,9 +73,11 @@ func (h *memberHost) InitBeads(_ context.Context, dir, prefix string, port int, 
 }
 
 type memberContext struct {
-	home    string
-	host    *memberHost
-	linger  string
+	home   string
+	host   *memberHost
+	linger string
+	// harness is what --harness says; empty is the flag left out.
+	harness string
 	report  application.MemberReport
 	err     error
 	removed application.MemberRemoveReport
@@ -104,6 +107,7 @@ func InitializeMemberScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the Dolt port is taken$`, func() error { c.host.portTaken = true; return nil })
 	ctx.Given(`^loginctl says linger is not set$`, func() error { c.setLinger("no"); return nil })
 	ctx.Given(`^loginctl says linger is set$`, func() error { c.setLinger("yes"); return nil })
+	ctx.Given(`^the member's factory is to run on "([^"]*)"$`, func(harness string) error { c.harness = harness; return nil })
 	ctx.Given(`^a member directory "([^"]*)" holding the file "([^"]*)"$`, c.aDirectoryHolding)
 	ctx.Given(`^mw member init has made "([^"]*)" with the vault "([^"]*)"$`, c.hasMade)
 
@@ -132,6 +136,22 @@ func InitializeMemberScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the Mayor's charter has a Family section after Who you serve$`, c.familyAfterWhoYouServe)
 	ctx.Then(`^the Family section names "([^"]*)"$`, c.familyNames)
 	ctx.Then(`^the Family section says every epic is released only on the holder's approval, a decision card tapped from their account$`, c.familyApproval)
+	ctx.Then(`^the member's config file says the harness is "([^"]*)"$`, c.configHarness)
+	ctx.Then(`^the report names codex login and AGENTS\.md$`, func() error {
+		report := c.report.String()
+		for _, want := range []string{"codex login", c.path("luke-vault", "AGENTS.md")} {
+			if !strings.Contains(report, want) {
+				return fmt.Errorf("the report does not name %s:\n%s", want, report)
+			}
+		}
+		return nil
+	})
+	ctx.Then(`^the member's config file has no harness line$`, c.configNoHarness)
+	ctx.Then(`^the vault's AGENTS\.md is the starter kit's CLAUDE\.md, booting from seats/mayor/charter\.md$`, c.agentsIsTheKits)
+	ctx.Then(`^the vault has no AGENTS\.md$`, c.noAgents)
+	ctx.Then(`^the Family section says every epic's stories run on harness codex, model gpt-6\.1-sol, effort high$`, c.familyCodexPath)
+	ctx.Then(`^the Family section has no harness line$`, c.familyNoPath)
+	ctx.Then(`^member init is refused, saying the harness will not do$`, func() error { return c.refusedSaying("the harness") })
 	ctx.Then(`^the Family section says the holder's key has the cockpit role here$`, c.familyCockpit)
 	ctx.Then(`^there is no member directory "([^"]*)"$`, c.noDirectory)
 	ctx.Then(`^the report names each file it wrote$`, c.reportNamesFiles)
@@ -211,6 +231,7 @@ func (c *memberContext) request(name, vaultName string, port int, holder, backen
 		Holder:   holder,
 		Backend:  backend,
 		Host:     "laptop",
+		Harness:  domain.Harness(c.harness),
 	}
 }
 
@@ -525,6 +546,70 @@ func (c *memberContext) allStillThere() error {
 		if _, err := os.Stat(path); err != nil {
 			return fmt.Errorf("member remove deleted %s: %w", path, err)
 		}
+	}
+	return nil
+}
+
+func (c *memberContext) configHarness(harness string) error {
+	text, err := c.configFile()
+	if err != nil {
+		return err
+	}
+	// dispatch and seat up read the harness from the [next] table.
+	want := "[next]\nharness = " + fmt.Sprintf("%q", harness) + "\n"
+	if !strings.Contains(text, want) {
+		return fmt.Errorf("config.toml lacks %q:\n%s", want, text)
+	}
+	return nil
+}
+
+func (c *memberContext) configNoHarness() error {
+	text, err := c.configFile()
+	if err != nil {
+		return err
+	}
+	if strings.Contains(text, "harness") {
+		return fmt.Errorf("config.toml names a harness:\n%s", text)
+	}
+	return nil
+}
+
+func (c *memberContext) agentsIsTheKits() error {
+	agents, err := os.ReadFile(filepath.Join(c.vaultDir(), "AGENTS.md"))
+	if err != nil {
+		return fmt.Errorf("the vault has no AGENTS.md: %w", err)
+	}
+	kit, err := os.ReadFile(filepath.Join(c.vaultDir(), "CLAUDE.md"))
+	if err != nil {
+		return err
+	}
+	if string(agents) != string(kit) {
+		return fmt.Errorf("AGENTS.md is not the kit's CLAUDE.md:\n%s", agents)
+	}
+	if !strings.Contains(string(agents), "Boot from `seats/mayor/charter.md`") {
+		return fmt.Errorf("AGENTS.md does not send the session to seats/mayor/charter.md:\n%s", agents)
+	}
+	return nil
+}
+
+func (c *memberContext) noAgents() error {
+	if _, err := os.Stat(filepath.Join(c.vaultDir(), "AGENTS.md")); !os.IsNotExist(err) {
+		return fmt.Errorf("the vault has an AGENTS.md (err %v)", err)
+	}
+	return nil
+}
+
+func (c *memberContext) familyCodexPath() error {
+	return c.familyHas("harness codex, model gpt-6.1-sol, effort high")
+}
+
+func (c *memberContext) familyNoPath() error {
+	charter, err := os.ReadFile(filepath.Join(c.vaultDir(), "seats", "mayor", "charter.md"))
+	if err != nil {
+		return err
+	}
+	if strings.Contains(string(charter), "gpt-6.1-sol") {
+		return fmt.Errorf("the Mayor's charter names a Codex model")
 	}
 	return nil
 }

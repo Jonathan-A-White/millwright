@@ -56,6 +56,9 @@ claude
 The member's Mayor runs on this login. The holder's login is never copied here, and the member's
 never goes to the holder's user.
 
+A member who runs on Codex installs Codex instead and runs `codex login` as `luke`, and gives
+`--harness codex` in step 5.
+
 ## 5. Make the factory
 
 As `luke` (not as the holder, and not with `sudo`):
@@ -86,6 +89,16 @@ serve*: it names the licence holder, says that every epic is released only on th
 approval (a decision card they tap from their own account), and that the holder's key has the
 cockpit role here. The member may tweak the rest of the seat files; the Family section is the
 holder's line, and only the holder approves a change to a charter.
+
+With `--harness codex` (the default is `claude`) it also writes the Codex member's three
+differences: `AGENTS.md` at the vault's root, which is the kit's `CLAUDE.md` text (Codex has no
+system-prompt flag, so this is how the Mayor's seat reaches `seats/mayor/charter.md`);
+`harness = "codex"` under `[next]` in the config file, which `mw seat up`, `mw dispatch` and
+`mw next` read; and one more line in the Family section, that every story has harness `codex`,
+model `gpt-6.1-sol`, effort `high`. `mw seat up mayor` then opens `codex -m gpt-6.1-sol -c
+model_reasoning_effort=high --sandbox workspace-write -c
+sandbox_workspace_write.network_access=true -a never "<kickoff>"` in the vault (`-a on-request`
+with `--attended`).
 
 A second run is refused (`already a member factory at <file>`) and touches nothing.
 

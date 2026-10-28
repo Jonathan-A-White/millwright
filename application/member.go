@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // MemberHost is what Member asks of the machine a member's own Linux user is
@@ -94,6 +96,20 @@ var (
 	memberDoltData   = filepath.Join(".local", "share", "mw", "dolt-beads")
 )
 
+// MemberCodexModel and MemberCodexEffort are the path a Codex member's stories
+// run on, which the Family section tells the member's Mayor to put on every
+// story it files.
+const (
+	MemberCodexModel  domain.Model  = "gpt-6.1-sol"
+	MemberCodexEffort domain.Effort = domain.EffortHigh
+)
+
+// AgentsFileName is the file at a vault's root that Codex reads for the
+// standing instructions of a session started there: how a Codex seat is
+// reached by the starter kit's CLAUDE.md text, there being no system-prompt
+// flag to carry a charter.
+const AgentsFileName = "AGENTS.md"
+
 var validMemberName = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 // Member makes a member's own factory, run as that member's Linux user: their
@@ -130,6 +146,10 @@ type MemberRequest struct {
 	Backend string
 	// Host is the name the config file gives this host.
 	Host string
+	// Harness is what the member's sessions run on, claude or codex; claude
+	// when empty. On codex the vault also holds an AGENTS.md, the config file
+	// names the harness, and the Family section names the path of every story.
+	Harness domain.Harness
 }
 
 // MemberReport is what Member did and what is still owed.
@@ -143,6 +163,9 @@ type MemberReport struct {
 	UnitPath   string
 	DataDir    string
 	Dolt       string
+
+	// Harness is what the member's sessions run on.
+	Harness domain.Harness
 
 	// LingerSet is whether the user manager runs while the member is logged
 	// out; LingerKnown is whether loginctl could say.
@@ -168,6 +191,7 @@ func (m Member) Run(ctx context.Context, req MemberRequest) (MemberReport, error
 		EnvPath:    filepath.Join(req.Home, memberBeadsEnv),
 		UnitPath:   filepath.Join(req.Home, memberUnitFile),
 		DataDir:    filepath.Join(req.Home, memberDoltData),
+		Harness:    req.Harness,
 	}
 	for _, path := range []string{report.ConfigPath, report.EnvPath, report.UnitPath} {
 		if m.Host.Exists(path) {
@@ -241,7 +265,20 @@ func (m Member) layVault(ctx context.Context, req MemberRequest) error {
 	if err != nil {
 		return fmt.Errorf("%w: the starter kit is laid in %s but has no Mayor charter; remove the directory and run mw member init again", err, req.Dir)
 	}
-	withFamily, err := FamilySection(charter, req.Holder)
+	var extra []string
+	if req.Harness == domain.HarnessCodex {
+		extra = append(extra, req.codexPathLine())
+		// Codex reads AGENTS.md where Claude Code reads CLAUDE.md: the kit's
+		// own text, which boots the session from the Mayor's charter.
+		kit, err := m.Host.ReadFile(filepath.Join(req.Dir, "CLAUDE.md"))
+		if err != nil {
+			return fmt.Errorf("%w: the starter kit is laid in %s but has no CLAUDE.md to make the AGENTS.md from; remove the directory and run mw member init again", err, req.Dir)
+		}
+		if err := m.Host.WriteFile(filepath.Join(req.Dir, AgentsFileName), kit, 0o644); err != nil {
+			return err
+		}
+	}
+	withFamily, err := FamilySection(charter, req.Holder, extra...)
 	if err != nil {
 		return fmt.Errorf("%w: the starter kit is laid in %s; remove the directory and run mw member init again", err, req.Dir)
 	}
@@ -257,8 +294,8 @@ func (m Member) layVault(ctx context.Context, req MemberRequest) error {
 // FamilySection returns the Mayor's charter with a Family section after the
 // paragraph on whom the Mayor serves: who the licence holder is, that every
 // epic is released only on their approval, and that their key has the cockpit
-// role in this factory.
-func FamilySection(charter, holder string) (string, error) {
+// role in this factory, and then each of extra as a further line of the list.
+func FamilySection(charter, holder string, extra ...string) (string, error) {
 	const marker = "**Who you serve.**"
 	start := strings.Index(charter, marker)
 	if start < 0 {
@@ -273,7 +310,11 @@ func FamilySection(charter, holder string) (string, error) {
 	section := "## Family\n\n" +
 		"This factory belongs to a family. Its licence holder is " + holder + ".\n\n" +
 		"- Every epic is released only on the holder's approval (a decision card they tap from their own account); do not release one on anyone else's word.\n" +
-		"- The holder's key has the cockpit role here.\n\n"
+		"- The holder's key has the cockpit role here.\n"
+	for _, line := range extra {
+		section += "- " + line + "\n"
+	}
+	section += "\n"
 	return charter[:end] + section + charter[end:], nil
 }
 
@@ -291,6 +332,8 @@ func (r MemberRequest) validate() error {
 		return fmt.Errorf("the Dolt port %d will not do: choose one from 1024 to 65535 that nothing else uses (--dolt-port)", r.DoltPort)
 	case strings.TrimSpace(r.Holder) == "" || strings.ContainsAny(r.Holder, "\n\r"):
 		return fmt.Errorf("the holder %q will not do: --holder names the licence holder in one line", r.Holder)
+	case r.Harness != "" && r.Harness != domain.HarnessClaude && r.Harness != domain.HarnessCodex:
+		return fmt.Errorf("the harness %q will not do: --harness is %q or %q", r.Harness, domain.HarnessClaude, domain.HarnessCodex)
 	case strings.TrimSpace(r.Host) == "":
 		return fmt.Errorf("making a member's factory: it needs the name of this host")
 	}
@@ -313,9 +356,22 @@ func (r MemberRequest) prefix() string {
 }
 
 // configText is the member's config file: the vault, the host, one session at
-// a time and the Postern backend.
+// a time and the Postern backend, and for a Codex member the harness every
+// session of this host starts with (the [next] table, which mw next, dispatch
+// and mw seat up read).
 func (r MemberRequest) configText() string {
-	return fmt.Sprintf("vault = %q\nhost  = %q\ncap   = 1\npostern_backend = %q\n\n[rigs]\n", r.Dir, r.Host, r.Backend)
+	harness := ""
+	if r.Harness == domain.HarnessCodex {
+		harness = fmt.Sprintf("[next]\nharness = %q\n\n", domain.HarnessCodex)
+	}
+	return fmt.Sprintf("vault = %q\nhost  = %q\ncap   = 1\npostern_backend = %q\n\n%s[rigs]\n", r.Dir, r.Host, r.Backend, harness)
+}
+
+// codexPathLine is the Family section's line for a Codex member: the harness,
+// model and effort the Mayor gives the path of every story it files.
+func (r MemberRequest) codexPathLine() string {
+	return fmt.Sprintf("Every story you file has harness %s, model %s, effort %s, on every epic: that is the member's own Codex, and no other harness runs here.",
+		domain.HarnessCodex, MemberCodexModel, MemberCodexEffort)
 }
 
 // beadsEnv is the beads.env that points bd at the member's own Dolt server.
@@ -357,6 +413,9 @@ func (r MemberReport) String() string {
 	fmt.Fprintf(&out, "  %s  (bd's connection to port %d, with a generated password; readable by this user only)\n", r.EnvPath, r.Port)
 	fmt.Fprintf(&out, "  %s  (enabled and started: dolt serving %s)\n", r.UnitPath, r.DataDir)
 	fmt.Fprintf(&out, "  %s  (a git repository: the starter kit's seat files with a Family section naming %s, and the beads database)\n", r.Dir, r.Holder)
+	if r.Harness == domain.HarnessCodex {
+		fmt.Fprintf(&out, "  %s  (the starter kit's CLAUDE.md text: Codex reads this where Claude Code reads that, and boots from the Mayor's charter)\n", filepath.Join(r.Dir, AgentsFileName))
+	}
 
 	fmt.Fprintf(&out, "\nStill owed, by hand:\n")
 	n := 1
@@ -368,7 +427,11 @@ func (r MemberReport) String() string {
 		fmt.Fprintf(&out, "  %d. As root: loginctl enable-linger %s  (%s, so the Dolt unit stops when this user logs out)\n", n, r.Name, said)
 		n++
 	}
-	fmt.Fprintf(&out, "  %d. Log in to Claude as this user: claude\n", n)
+	if r.Harness == domain.HarnessCodex {
+		fmt.Fprintf(&out, "  %d. Log in to Codex as this user: codex login\n", n)
+	} else {
+		fmt.Fprintf(&out, "  %d. Log in to Claude as this user: claude\n", n)
+	}
 	n++
 	fmt.Fprintf(&out, "  %d. Make a private remote for the vault, then:\n", n)
 	fmt.Fprintf(&out, "       git -C %s remote add origin <url>\n", r.Dir)
