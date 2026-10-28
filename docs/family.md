@@ -121,6 +121,24 @@ certificate for the member's app, the holder's key with the cockpit role on that
 Family section already tells the member's Mayor to expect it), and the holder's dispatcher
 serving the member's vault so the Builders run on the holder's machinery and plan.
 
+## 9. The member's own dispatcher
+
+A dispatcher under the holder's user cannot use the member's Codex sign-in: credentials do not
+cross users. So the member runs their own. As `luke`, with the factory made and `codex`, `mw`,
+`bd`, `git` and `tmux` on the `PATH`:
+
+```sh
+mw member serve
+```
+
+It writes the holder's own `mw-dispatch.service` and `mw-dispatch.timer` (the files of
+`contrib/systemd/`, hourly) under `~/.config/systemd/user`, a `~/.config/mw/dispatch.env` with
+one `PATH=` line naming where those five tools are (left alone when the member already has one),
+and enables and starts the timer. It refuses, writing nothing, when there is no factory here, a
+tool is missing, the dispatcher is already installed, or `loginctl show-user` says linger is not
+set (step 2: it prints the root step). `mw member serve --way-back` prints the commands that remove
+it and runs none of them. `scripts/check-timer-units.sh` holds the member's copies to the holder's.
+
 ## The way back
 
 ```sh
@@ -140,4 +158,4 @@ not wanted. To make the factory again, remove `~/.config/mw/config.toml`,
 - Pick a port that no other user's Dolt uses (the holder's is 3307). `mw member init` refuses a
   port that already answers.
 
-See `features/member.feature`.
+See `features/member.feature` and `features/member_serve.feature`.

@@ -39,3 +39,15 @@ var SleepInstructions string
 //
 //go:embed scripts/trim-merge.sh
 var TrimMergeScript string
+
+// DispatchService and DispatchTimer are contrib/systemd/mw-dispatch.service and
+// .timer: the holder's own dispatch units, which mw member serve writes, as they
+// are, under a member's user so that the member's Builders run on the member's
+// own sign-in. Embedding the files keeps one copy of the shape for
+// scripts/check-timer-units.sh to hold to its directives.
+//
+//go:embed contrib/systemd/mw-dispatch.service
+var DispatchService string
+
+//go:embed contrib/systemd/mw-dispatch.timer
+var DispatchTimer string

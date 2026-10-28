@@ -25,6 +25,7 @@ type memberHost struct {
 
 	noDolt    bool
 	portTaken bool
+	noTool    map[string]bool
 
 	users []string
 	inits []memberBeadsInit
@@ -40,6 +41,15 @@ func (h *memberHost) DoltProgram(given string) (string, error) {
 		return "", fmt.Errorf("dolt was not found on the PATH: --dolt names it")
 	}
 	return "/opt/dolt/bin/dolt", nil
+}
+
+// Program finds a tool at a place of its own, /opt/<name>/bin/<name>, so a PATH
+// line built from them names five different directories.
+func (h *memberHost) Program(name string) (string, error) {
+	if h.noTool[name] {
+		return "", fmt.Errorf("%s was not found on the PATH", name)
+	}
+	return "/opt/" + name + "/bin/" + name, nil
 }
 
 func (h *memberHost) PortFree(_ context.Context, port int) error {
@@ -68,6 +78,9 @@ type memberContext struct {
 	report  application.MemberReport
 	err     error
 	removed application.MemberRemoveReport
+	served  application.MemberServeReport
+	// wayBack is what mw member serve --way-back printed.
+	wayBack string
 }
 
 // InitializeMemberScenario registers the steps of features/member.feature.
@@ -96,6 +109,7 @@ func InitializeMemberScenario(ctx *godog.ScenarioContext) {
 
 	ctx.When(`^mw member init makes "([^"]*)" with the vault "([^"]*)", the Dolt port (\d+), the holder "([^"]*)" and the backend "([^"]*)"$`, c.mwMemberInit)
 	ctx.When(`^mw member remove runs$`, c.mwMemberRemove)
+	c.registerServe(ctx)
 
 	ctx.Then(`^member init succeeds$`, c.initSucceeds)
 	ctx.Then(`^member init is refused, saying "([^"]*)"$`, c.refusedSaying)

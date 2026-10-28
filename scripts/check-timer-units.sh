@@ -62,6 +62,14 @@
 #    goes to the Mayor every time: mw doctor and mw watch leave with 6, mw
 #    deputy with 8, mw millhand --wake with 5, mw dispatch with 5 and 7
 #    (mw-gq6.532); a unit without its status is named.
+#
+# 7. A MEMBER'S DISPATCH UNITS. mw member serve writes the holder's
+#    mw-dispatch.service and .timer, as they are, under a member's own user
+#    (mw-9rp4hu.15). When MW_MEMBER_UNITS names the directory it wrote them to
+#    (the unit directory under a throwaway HOME), they must be byte for byte the
+#    pair this script holds to checks 1 to 6, and systemd-analyze must accept
+#    them where it exists. Unset, the check is not run: nothing here builds mw.
+#    cmd/mw/member_serve_test.go runs it after a real mw member serve.
 
 set -eu
 
@@ -456,5 +464,27 @@ run_seatcmd 0
 grep -qx 'tmux new-session -d -s 0' "$ST/calls" || fail "no session up: ExecStart did not start one with new-session -d -s 0"
 [ "$(grep -c '^tmux has-session -t =0$' "$ST/calls")" -ge 2 ] ||
 	fail "no session up: ExecStart did not settle into a loop watching has-session once it started one"
+
+# --- 7. a member's dispatch units -----------------------------------------
+if [ -n "${MW_MEMBER_UNITS:-}" ]; then
+	for unit in mw-dispatch.service mw-dispatch.timer; do
+		[ -f "$MW_MEMBER_UNITS/$unit" ] || fail "mw member serve wrote no $MW_MEMBER_UNITS/$unit"
+		cmp -s "$MW_MEMBER_UNITS/$unit" "$DIR/$unit" ||
+			fail "$MW_MEMBER_UNITS/$unit is not $DIR/$unit: a member's units must be the holder's, which checks 1 to 6 hold"
+	done
+	if command -v systemd-analyze >/dev/null 2>&1; then
+		# The service names the OnFailure= template, which is not in the member's
+		# directory, so verify is given the rig's copy to resolve it by; only
+		# lines naming the member's two units count against them.
+		mout=$(systemd-analyze --user verify "$MW_MEMBER_UNITS/mw-dispatch.service" "$MW_MEMBER_UNITS/mw-dispatch.timer" "$FAILED_TEMPLATE" 2>&1) || {
+			echo "$mout" >&2
+			fail "systemd-analyze rejected the member's dispatch units"
+		}
+		if printf '%s\n' "$mout" | grep -q 'mw-dispatch\.\(service\|timer\)'; then
+			echo "$mout" >&2
+			fail "systemd-analyze had something to say about the member's dispatch units"
+		fi
+	fi
+fi
 
 echo "OK: $DIR: $verified, names no host's directory, carries the directives the README describes, and mw-seat-tmux's ExecStart is a no-op that settles into watching has-session when session 0 is already up, and starts one and then watches it when not; $MAIL_SCRIPT and $HEALTH_SCRIPT are executable and parse"

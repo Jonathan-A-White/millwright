@@ -65,6 +65,10 @@ type MemberHost interface {
 	// environment and in no argument.
 	InitBeads(ctx context.Context, dir, prefix string, port int, user, password string) error
 
+	// Program is the full path of a tool on the PATH, and fails saying it was
+	// not found.
+	Program(name string) (string, error)
+
 	// LingerEnabled reports whether the user manager keeps running while the
 	// member is logged out, so the Dolt unit does too.
 	LingerEnabled(ctx context.Context) (bool, error)
