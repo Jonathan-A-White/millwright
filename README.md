@@ -5291,8 +5291,11 @@ all kept (mw-gq6.615); a sync whose collection or squash fails says so on its li
 **beads-churn** is for the host that runs the beads server (its `BEADS_DOLT_SERVER_HOST`
 is a loopback address): each run reads the server's own count of connections it has
 answered (`bd sql "show global status like 'Connections'"`) and judges the rate since
-the run before, faulty past 120 a minute. A quiet factory answers well under 60; the
-follower, when it started a `bd` for every read of the beads' head, brought the home
+the run before, faulty past 300 a minute (`[doctor] beads_churn_per_minute`). A quiet
+factory answers well under 60 and a busy host 200-280; the fault names the five
+commands whose children were most of the `bd` processes it sampled for ten seconds
+(`mw dispatch 66, mw postern bead 24, ...`), or says there is no single client
+(mw-gq6.825). The follower, when it started a `bd` for every read of the beads' head, brought the home
 to 514 a minute and Dolt to 1.6 cores all day (mw-gq6.596). The first run, one after
 a restart of the server and one more than an hour after the last only take a sample.
 There is no cure — a client that opens a connection per call is found with `ss -tnp`
