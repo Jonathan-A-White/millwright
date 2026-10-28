@@ -2858,3 +2858,22 @@ func TestTestPartsOfAHostWithNoConfigFileIsEmpty(t *testing.T) {
 		t.Fatalf("TestParts = %+v, %v; want none", parts, err)
 	}
 }
+
+func TestDoctorBeadsChurnPerMinuteIsTheShippedDefaultUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "")
+	if limit, err := config.DoctorBeadsChurnPerMinute(); err != nil || limit != 300 {
+		t.Fatalf("expected the default 300, got %d: %v", limit, err)
+	}
+
+	writeConfig(t, "[doctor]\nbeads_churn_per_minute = 450\n")
+	if limit, err := config.DoctorBeadsChurnPerMinute(); err != nil || limit != 450 {
+		t.Fatalf("expected the file's beads_churn_per_minute, got %d: %v", limit, err)
+	}
+
+	for _, bad := range []string{"0", "-5", `"many"`} {
+		writeConfig(t, "[doctor]\nbeads_churn_per_minute = "+bad+"\n")
+		if _, err := config.DoctorBeadsChurnPerMinute(); err == nil {
+			t.Errorf("expected beads_churn_per_minute = %s refused", bad)
+		}
+	}
+}

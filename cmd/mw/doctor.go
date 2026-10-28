@@ -387,7 +387,14 @@ func newDoctorCmd() *cobra.Command {
 			// reaches another's, or has none, leaves it to the host that runs it.
 			var churn application.DoctorChecks
 			if beadsServedHere() {
-				churn = application.DoctorChecks{doctor.NewBeadsChurn(mwGateway(vault, host).ServerConnections, store)}
+				churnLimit, limitErr := config.DoctorBeadsChurnPerMinute()
+				if limitErr != nil {
+					return limitErr
+				}
+				beadsChurn := doctor.NewBeadsChurn(mwGateway(vault, host).ServerConnections, store)
+				beadsChurn.Limit = float64(churnLimit)
+				beadsChurn.Clients = (&doctor.BdParents{}).Sample
+				churn = application.DoctorChecks{beadsChurn}
 			}
 			return runDoctor(cmd, application.Doctor{
 				Dampers: dampers,

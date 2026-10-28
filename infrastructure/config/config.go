@@ -102,6 +102,7 @@
 //	tunnel_probe   = "ss -ltn sport = :2222"
 //	doctor_wg_hub  = "10.88.0.1:22"
 //	doctor_wg_unit = "wg-quick@wg0"
+//	beads_churn_per_minute = 300
 //	tmp_leftovers_budget_bytes = 200000000
 //	go_build_budget_bytes = 2000000000
 //	root_disk_budget_bytes = 280000000000
@@ -3469,6 +3470,39 @@ func DoctorMayorStaleMinutes() (int, error) {
 		return 0, fmt.Errorf("the doctor's mayor_stale_minutes is %d, so a Mayor would be stale the moment it was looked at: set it to 1 or more", minutes)
 	}
 	return minutes, nil
+}
+
+// DefaultDoctorBeadsChurnPerMinute is how many new connections a minute the
+// beads server may answer before mw doctor's beads-churn check alarms, when the
+// [doctor] table says nothing. A busy host's normal is 200-280 (3 stories,
+// their checks, dispatch and the seats); the follower's runaway was 514
+// (mw-gq6.596, mw-gq6.825).
+const DefaultDoctorBeadsChurnPerMinute = 300
+
+// DoctorBeadsChurnPerMinute reports that limit: the `[doctor]` table's
+// `beads_churn_per_minute` key of ~/.config/mw/config.toml, and
+// DefaultDoctorBeadsChurnPerMinute when the table says nothing.
+func DoctorBeadsChurnPerMinute() (int, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), DoctorTable)
+	if err != nil {
+		return 0, err
+	}
+	said := strings.TrimSpace(table["beads_churn_per_minute"])
+	if said == "" {
+		return DefaultDoctorBeadsChurnPerMinute, nil
+	}
+	limit, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the doctor's beads_churn_per_minute is %q, which is not a whole number of connections: set `beads_churn_per_minute = <n>` in %s", said, File)
+	}
+	if limit < 1 {
+		return 0, fmt.Errorf("the doctor's beads_churn_per_minute is %d, so every connection would be a fault: set it to 1 or more", limit)
+	}
+	return limit, nil
 }
 
 // The percents mw doctor's battery check alarms at, when the [doctor] table

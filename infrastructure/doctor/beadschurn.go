@@ -3,7 +3,9 @@ package doctor
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -16,10 +18,15 @@ var _ application.DoctorCheck = (*BeadsChurn)(nil)
 const BeadsChurnName = "beads-churn"
 
 // BeadsChurnLimitPerMinute is how many new connections a minute the beads
-// server may answer before this check alarms. The follower alone, when it
+// server may answer before this check alarms, when the host does not say (the
+// [doctor] table's beads_churn_per_minute). The follower alone, when it
 // started a bd for every read, brought it to 514 a minute and Dolt to 1.6
-// cores all day (mw-gq6.596); a quiet factory answers under 60.
-const BeadsChurnLimitPerMinute = 120
+// cores all day (mw-gq6.596); a quiet factory answers under 60 and a busy one
+// 200-280 (mw-gq6.825). It is config.DefaultDoctorBeadsChurnPerMinute.
+const BeadsChurnLimitPerMinute = 300
+
+// beadsChurnTopClients is how many clients a fault names.
+const beadsChurnTopClients = 5
 
 // beadsChurnSampleName is the state file the check keeps its last sample in.
 const beadsChurnSampleName = "beads-churn-sample"
@@ -45,8 +52,18 @@ type BeadsChurn struct {
 	// Limit is the rate, a minute, past which the check is faulty; zero is
 	// BeadsChurnLimitPerMinute.
 	Limit float64
+	// Clients, when set, is asked at a fault for the commands whose bd processes
+	// it saw, most first; nil names none. BdParents.Sample is the one a host
+	// uses.
+	Clients func(ctx context.Context) ([]ChurnClient, error)
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+}
+
+// ChurnClient is a command whose children were bd processes, and how many.
+type ChurnClient struct {
+	Command string
+	Count   int
 }
 
 // NewBeadsChurn is the check over a counter, keeping its sample in state.
@@ -107,10 +124,45 @@ func (b *BeadsChurn) Probe(ctx context.Context) (application.Verdict, string) {
 	if rate > b.limit() {
 		return application.DoctorFaulty, fmt.Sprintf(
 			"the beads server answered %.0f new connections a minute over the last %.0f minutes, past %.0f: "+
-				"a client opens one per call (mw events follow, a seat loop, a timer); find it with ss -tnp on the server's port",
-			rate, elapsed.Minutes(), b.limit())
+				"a client opens one per call (mw events follow, a seat loop, a timer); %s",
+			rate, elapsed.Minutes(), b.limit(), b.whoSays(ctx))
 	}
 	return application.DoctorOK, ""
+}
+
+// whoSays is the sentence that names the clients: the top five parent
+// commands of the bd processes sampled, or that no single one leads (the
+// first holds under half of those seen, or none was seen), or why the sample
+// could not be taken.
+func (b *BeadsChurn) whoSays(ctx context.Context) string {
+	const fallback = "find it with ss -tnp on the server's port"
+	if b.Clients == nil {
+		return fallback
+	}
+	clients, err := b.Clients(ctx)
+	if err != nil {
+		return fmt.Sprintf("the bd processes could not be sampled (%v); %s", err, fallback)
+	}
+	sort.SliceStable(clients, func(i, j int) bool { return clients[i].Count > clients[j].Count })
+	total := 0
+	for _, c := range clients {
+		total += c.Count
+	}
+	if total == 0 {
+		return "no bd processes were seen in the sample: no single client; " + fallback
+	}
+	if len(clients) > beadsChurnTopClients {
+		clients = clients[:beadsChurnTopClients]
+	}
+	named := make([]string, len(clients))
+	for i, c := range clients {
+		named[i] = fmt.Sprintf("%s %d", c.Command, c.Count)
+	}
+	line := "top parents of the bd processes sampled: " + strings.Join(named, ", ")
+	if clients[0].Count*2 < total {
+		line += " (no single client)"
+	}
+	return line
 }
 
 // Cure implements application.DoctorCheck: there is none.
