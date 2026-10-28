@@ -146,3 +146,34 @@ func TestACloseOutStopsWaitingForAHeartbeatThatStaysAlive(t *testing.T) {
 		t.Errorf("expected no close-out mark, got %+v", marks.Writes)
 	}
 }
+
+// mw-gq6.820: a heartbeat that fails the same way every tick says so when it
+// first fails, and its repeats once, when the session is over.
+func TestTheHeartbeatSaysARepeatedFailureOnceAndItsRepeatsOnce(t *testing.T) {
+	tracker := apptest.NewFakeTracker() // no such story in progress: every renewal is refused alike
+	runner := apptest.NewFakeRunner()
+	if err := runner.Start(context.Background(), application.SessionSpec{Name: application.SessionName("mw-gq6.1"), Command: []string{"claude"}}); err != nil {
+		t.Fatal(err)
+	}
+	ticks := 0
+	var out strings.Builder
+	next := application.Next{
+		Tracker: tracker, Runner: runner, Out: &out,
+		HeartbeatWait: func(context.Context, time.Duration) error {
+			if ticks++; ticks > 5 {
+				return context.Canceled
+			}
+			return nil
+		},
+	}
+	if err := next.Heartbeat(context.Background(), "mw-gq6.1"); err != nil {
+		t.Fatalf("the heartbeat returned %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected the failure once and its repeats once, got %d lines:\n%s", len(lines), out.String())
+	}
+	if strings.Contains(lines[0], "times") || !strings.Contains(lines[1], "the same way 5 times from") {
+		t.Errorf("expected the first failure plain and then the repeats counted, got:\n%s", out.String())
+	}
+}

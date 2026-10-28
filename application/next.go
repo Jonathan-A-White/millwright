@@ -892,6 +892,16 @@ func (n Next) Heartbeat(ctx context.Context, storyID string) error {
 		return fmt.Errorf("heartbeating %s: it needs a work tracker and a runner to watch its session", storyID)
 	}
 	name := SessionName(storyID)
+	// A renewal that fails the same way tick after tick is said when it first
+	// fails, and its repeats once, when it ends (mw-gq6.820).
+	var repeat leaseRepeat
+	flush := func() {
+		if line := repeat.more(); line != "" {
+			n.print(fmt.Sprintf("mw next: the claim on %s could not be heartbeated, %s\n", storyID, line))
+		}
+		repeat = leaseRepeat{}
+	}
+	defer flush()
 	for {
 		if err := n.wait(ctx, HeartbeatInterval); err != nil {
 			return nil
@@ -904,7 +914,15 @@ func (n Next) Heartbeat(ctx context.Context, storyID string) error {
 			return nil
 		}
 		if err := n.Tracker.HeartbeatClaim(ctx, storyID); err != nil {
-			n.print(fmt.Sprintf("mw next: the claim on %s could not be heartbeated: %v\n", storyID, err))
+			if repeat.same(err) {
+				repeat.again(n.now())
+			} else {
+				flush()
+				repeat = leaseRepeat{err: err.Error(), count: 1, first: n.now(), last: n.now()}
+				n.print(fmt.Sprintf("mw next: the claim on %s could not be heartbeated: %v\n", storyID, err))
+			}
+		} else {
+			flush()
 		}
 		n.recordFilesChanged(ctx, storyID)
 	}
@@ -917,7 +935,10 @@ func (n Next) Heartbeat(ctx context.Context, storyID string) error {
 // lapse under a landing that is alive. The function it returns stops the loop,
 // waits for it to be gone — so that no renewal happens after it returns — and
 // gives back what could not be renewed, for the report. A renewal that fails
-// does not stop the loop, as in Heartbeat.
+// does not stop the loop, as in Heartbeat, and one that fails the same way again
+// is told once, with how many times and since when. A story that is not
+// claimable, one no longer in progress, cannot be renewed by trying again: that
+// is told once and the loop ends, the landing going on without it (mw-gq6.820).
 func (n Next) holdLease(ctx context.Context, storyID string) (release func() []string) {
 	if n.Tracker == nil || strings.TrimSpace(storyID) == "" {
 		return func() []string { return nil }
@@ -927,13 +948,35 @@ func (n Next) holdLease(ctx context.Context, storyID string) (release func() []s
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		var fails []*leaseRepeat
+		defer func() {
+			for _, f := range fails {
+				failed = append(failed, f.line(fmt.Sprintf("the claim on %s could not be heartbeated while it was landed", storyID)))
+			}
+		}()
 		for n.wait(ctx, HeartbeatInterval) == nil {
 			if ctx.Err() != nil {
 				return
 			}
-			if err := n.Tracker.HeartbeatClaim(ctx, storyID); err != nil && ctx.Err() == nil {
-				failed = append(failed, fmt.Sprintf("the claim on %s could not be heartbeated while it was landed: %v", storyID, err))
+			err := n.Tracker.HeartbeatClaim(ctx, storyID)
+			if err == nil || ctx.Err() != nil {
+				continue
 			}
+			if strings.Contains(err.Error(), notClaimable) {
+				failed = append(failed, fmt.Sprintf("the claim on %s is not in progress, so its lease is no longer renewed while it is landed: %v", storyID, err))
+				return
+			}
+			var seen *leaseRepeat
+			for _, f := range fails {
+				if f.same(err) {
+					seen = f
+				}
+			}
+			if seen == nil {
+				fails = append(fails, &leaseRepeat{err: err.Error(), count: 1, first: n.now(), last: n.now()})
+				continue
+			}
+			seen.again(n.now())
 		}
 	}()
 	return func() []string {
@@ -941,6 +984,52 @@ func (n Next) holdLease(ctx context.Context, storyID string) (release func() []s
 		<-done
 		return failed
 	}
+}
+
+// notClaimable is what bd says of a heartbeat on a story that is not in
+// progress, as after a hand-back.
+const notClaimable = "not claimable"
+
+// leaseRepeat is one way a lease renewal failed, how many times in a row it did
+// and between when and when, so that a loop tells it once.
+type leaseRepeat struct {
+	err         string
+	count       int
+	first, last time.Time
+}
+
+func (r leaseRepeat) same(err error) bool { return r.count > 0 && r.err == err.Error() }
+
+func (r *leaseRepeat) again(at time.Time) {
+	r.count++
+	r.last = at
+}
+
+// span is "24 times from 23:22 to 23:58", or "" for a failure that happened once.
+func (r leaseRepeat) span() string {
+	if r.count < 2 {
+		return ""
+	}
+	return fmt.Sprintf("%d times from %s to %s", r.count, r.first.UTC().Format("15:04"), r.last.UTC().Format("15:04"))
+}
+
+// line is the failure as a report line under what: "<what>: <err>", with the
+// count and the time between the what and the colon when it was repeated.
+func (r leaseRepeat) line(what string) string {
+	if span := r.span(); span != "" {
+		return fmt.Sprintf("%s (%s): %s", what, span, r.err)
+	}
+	return fmt.Sprintf("%s: %s", what, r.err)
+}
+
+// more is what Heartbeat adds once the failure it said when it first happened
+// has stopped happening, counting that first one too, or "" when it happened
+// only once.
+func (r leaseRepeat) more() string {
+	if span := r.span(); span != "" {
+		return fmt.Sprintf("the same way %s in all: %s", span, r.err)
+	}
+	return ""
 }
 
 // wait pauses for d, or until ctx ends, whichever is first — the real clock,
