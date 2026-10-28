@@ -839,6 +839,8 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	// Every other claim still held here, refused ones too, keeps its files from
 	// the stories ready beside it: its branch is yet to land (mw-gq6.349).
 	shares := fileShares{changes: d.Changes, rules: d.Rules, rigs: d.Rigs, remote: d.remote()}
+	reads := newCandidateReads(d.Tracker, d.Host, nil)
+	reads.takeClaims(running)
 	for _, detail := range running {
 		if detail.Hitl() {
 			continue
@@ -864,7 +866,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 		if !d.DryRun {
-			reclaimed, held, err := d.reclaimDeadPane(ctx, detail, &report)
+			reclaimed, held, err := d.reclaimDeadPane(ctx, detail, reads, &report)
 			if err != nil {
 				return report, fmt.Errorf("dispatching on %s: %w", d.Host, err)
 			}
@@ -882,7 +884,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			}
 		} else {
 			shares.add(detail)
-			if d.refusedWithoutSession(ctx, detail) {
+			if d.refusedWithoutSession(ctx, detail, reads) {
 				report.HeldRefused = append(report.HeldRefused, HeldRefused{StoryID: detail.Story.ID, Session: SessionName(detail.Story.ID)})
 				continue
 			}
@@ -936,7 +938,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		return report, fmt.Errorf("dispatching on %s: reading what is ready here: %w", d.Host, err)
 	}
 	ready = inStartOrder(ready)
-	reads := newCandidateReads(d.Tracker, d.Host, ready)
+	reads.takeCandidates(d.Host, ready)
 
 	// The formulas installed are read once, and only if a story names one. A
 	// dry run reads them too, so that it reports the same refusal a real run
@@ -1114,7 +1116,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "formula-not-installed", Why: fmt.Sprintf(
 					"its formula %s is not installed here, so it is not claimed", path.Formula)})
 				if !d.DryRun {
-					d.refuseUninstalledFormula(ctx, id, path.Formula, &report)
+					d.refuseUninstalledFormula(ctx, detail, path.Formula, reads, &report)
 				}
 				continue
 			}
@@ -1132,7 +1134,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			}
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "no-sweep", Why: why + ": it is not claimed"})
 			if !d.DryRun {
-				d.refuseSweepless(ctx, detail, verdict, &report)
+				d.refuseSweepless(ctx, detail, verdict, reads, &report)
 			}
 			continue
 		}
@@ -1145,7 +1147,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "tester-no-landed-story", Why: fmt.Sprintf(
 				"it is a Tester story and its description has no %q line: it is not claimed", TesterLandedLine+"<id>")})
 			if !d.DryRun {
-				d.refuseTesterWithNoLandedStory(ctx, detail, &report)
+				d.refuseTesterWithNoLandedStory(ctx, detail, reads, &report)
 			}
 			continue
 		}
@@ -1238,7 +1240,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
-		started, released, err := d.start(ctx, detail, path, rigDir, formulas, &report)
+		started, released, err := d.start(ctx, detail, path, rigDir, formulas, reads, &report)
 		started.Recheck = recheck
 		started.SmokeFix = smokeFix
 		if started.StoryID != "" {
@@ -1604,7 +1606,7 @@ func roomHeld(ctx context.Context, log EventLog, host string) (bool, error) {
 // nobody is working is left exactly as ready as it was found. Once the session
 // is running, nothing is undone: a claim given back under a live session is how
 // one story gets worked twice.
-func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Path, rigDir string, formulas map[string]bool, report *DispatchReport) (Started, bool, error) {
+func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Path, rigDir string, formulas map[string]bool, reads *candidateReads, report *DispatchReport) (Started, bool, error) {
 	id := detail.Story.ID
 	started := Started{
 		StoryID:  id,
@@ -1785,7 +1787,7 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	// is worked on rather than poured again: beads are never deleted, so a second
 	// pour would leave the first behind for good, with the steps it had closed.
 	if path.Formula != "" && detail.Molecule.RootID != "" {
-		open, err := d.Tracker.OpenMolecule(ctx, detail.Molecule.RootID)
+		open, err := reads.openMolecule(ctx, detail.Molecule.RootID)
 		if err != nil {
 			return undo("reading the molecule "+detail.Molecule.RootID, err, true)
 		}
@@ -2187,7 +2189,7 @@ func (d Dispatch) refusePour(ctx context.Context, id string, started Started, ri
 // dead, is closed, and the claim given back. What the story's worktree and
 // branch still hold from the attempt that died is left for the next attempt
 // to run into, or for a person to settle by hand with mw retry.
-func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, report *DispatchReport) (reclaimed, held bool, err error) {
+func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, reads *candidateReads, report *DispatchReport) (reclaimed, held bool, err error) {
 	id := detail.Story.ID
 	name := SessionName(id)
 	status, err := d.Runner.Status(ctx, name)
@@ -2235,7 +2237,7 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 
 	// Read before ReclaimStory, which gives the claim back as it answers. A
 	// state that cannot be read is no licence to give the claim back.
-	run, err := d.Tracker.StoryState(ctx, id, RunState)
+	run, err := reads.runState(ctx, id)
 	if err != nil {
 		if ended {
 			report.Notes = append(report.Notes, fmt.Sprintf(
@@ -2353,12 +2355,12 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 // (run=blocked) and its session is not alive, the read-only look a dry run
 // takes where a real one calls reclaimDeadPane. Anything it cannot read is not
 // refused: the claim is counted as running, as before.
-func (d Dispatch) refusedWithoutSession(ctx context.Context, detail StoryDetail) bool {
+func (d Dispatch) refusedWithoutSession(ctx context.Context, detail StoryDetail, reads *candidateReads) bool {
 	status, err := d.Runner.Status(ctx, SessionName(detail.Story.ID))
 	if err != nil || status.Running() {
 		return false
 	}
-	run, err := d.Tracker.StoryState(ctx, detail.Story.ID, RunState)
+	run, err := reads.runState(ctx, detail.Story.ID)
 	return err == nil && run == RunBlocked
 }
 
@@ -2621,8 +2623,9 @@ const ReasonFormulaNotInstalled = "formula-not-installed"
 // not installed here, once: a story left ready with a formula nobody has
 // installed would otherwise be found again on every dispatch and commented on
 // every time, drowning the one useful line in noise.
-func (d Dispatch) refuseUninstalledFormula(ctx context.Context, id, formula string, report *DispatchReport) {
-	comments, err := d.Tracker.StoryComments(ctx, id)
+func (d Dispatch) refuseUninstalledFormula(ctx context.Context, detail StoryDetail, formula string, reads *candidateReads, report *DispatchReport) {
+	id := detail.Story.ID
+	comments, err := reads.commentsOf(ctx, detail)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
 			"%s: whether it was already told its formula is not installed could not be read, so it may be told again: %v", id, err))
@@ -2652,9 +2655,9 @@ const ReasonNoSweep = domain.SweepRuleName
 // claimed for want of a Sweep: line. The comment is written first and is the
 // once: a comment that cannot be written or read means no mail, so that a
 // dispatch that cannot remember it has said it does not say it every tick.
-func (d Dispatch) refuseSweepless(ctx context.Context, detail StoryDetail, verdict domain.SweepVerdict, report *DispatchReport) {
+func (d Dispatch) refuseSweepless(ctx context.Context, detail StoryDetail, verdict domain.SweepVerdict, reads *candidateReads, report *DispatchReport) {
 	id := detail.Story.ID
-	comments, err := d.Tracker.StoryComments(ctx, id)
+	comments, err := reads.commentsOf(ctx, detail)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
 			"%s: whether it was already told it has no sweep could not be read, so nobody is told again: %v", id, err))
@@ -2705,9 +2708,9 @@ const ReasonTesterNoLandedStory = "tester-no-landed-story"
 // refuseTesterWithNoLandedStory tells the story, and the Mayor, once, that a
 // Tester story was not claimed for want of its landed-story line. The comment is
 // written first and is the once, as for refuseSweepless.
-func (d Dispatch) refuseTesterWithNoLandedStory(ctx context.Context, detail StoryDetail, report *DispatchReport) {
+func (d Dispatch) refuseTesterWithNoLandedStory(ctx context.Context, detail StoryDetail, reads *candidateReads, report *DispatchReport) {
 	id := detail.Story.ID
-	comments, err := d.Tracker.StoryComments(ctx, id)
+	comments, err := reads.commentsOf(ctx, detail)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
 			"%s: whether it was already told it names no landed story could not be read, so nobody is told again: %v", id, err))

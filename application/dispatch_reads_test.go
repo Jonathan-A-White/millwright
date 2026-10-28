@@ -2,9 +2,11 @@ package application_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -174,5 +176,261 @@ func TestADispatchTickReadsTheInProgressListOnce(t *testing.T) {
 	}
 	if got := tracker.InProgressReads(); got != 1 {
 		t.Errorf("expected the in-progress list read once in a tick, got %d: %v", got, tracker.Asked())
+	}
+}
+
+// mw-gq6.826: a pass with N candidates read each one's run state, comments and
+// open molecule with a bd of its own (about 50 one-shot calls at 15
+// candidates, on a host already at load 23-28). A tracker that can read them
+// together does so once for the whole pass: one read of the states, one of the
+// comments and one of the molecules, however many candidates there are.
+
+// onlyTheTracker is a tracker as it is without the reads it can make together:
+// the WorkTracker alone, none of what a tracker may offer besides.
+type onlyTheTracker struct{ application.WorkTracker }
+
+// perStory is how many reads of one story at a time the pass has made.
+func perStory(tracker *apptest.FakeTracker) int {
+	return tracker.Reads("StoryState") + tracker.Reads("StoryComments") + tracker.Reads("OpenMolecule")
+}
+
+// aPassOfDeadPanes puts n claimed stories here, each with a session that has
+// died, and returns the ids.
+func aPassOfDeadPanes(t *testing.T, tracker *apptest.FakeTracker, runner *apptest.FakeRunner, n int) []string {
+	t.Helper()
+	var ids []string
+	for i := 1; i <= n; i++ {
+		id := fmt.Sprintf("mw-gq6.%d", i)
+		claimedStory(t, tracker, id, 1)
+		runner.Exit(startOldSession(t, runner, id), 1)
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func TestADryRunReadsTheStatesOfWhatIsClaimedInOneRead(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	dispatch.DryRun = true
+	dispatch.Cap = 6
+	ids := aPassOfDeadPanes(t, tracker, runner, 5)
+	if err := tracker.SetStoryState(ctx, ids[1], application.RunState, application.RunBlocked, "(tests-fail) the tests fail"); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if got := tracker.Reads("StoryState"); got != 0 {
+		t.Errorf("expected no state read one story at a time, got %d", got)
+	}
+	if got := tracker.Reads("StoriesState"); got != 1 {
+		t.Errorf("expected the states of %d claims read in one read, got %d", len(ids), got)
+	}
+	if len(report.HeldRefused) != 1 || report.HeldRefused[0].StoryID != ids[1] || report.Running != 4 {
+		t.Errorf("expected only %s held refused and 4 running, got %+v", ids[1], report)
+	}
+}
+
+func TestAPassReadsTheStatesOfWhatIsClaimedInOneReadAndReclaimsTheDead(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	dispatch.Now = func() time.Time { return now }
+	tracker.Clock = func() time.Time { return now }
+	dispatch.Cap = 6
+	ids := aPassOfDeadPanes(t, tracker, runner, 5)
+	for _, id := range ids {
+		if err := tracker.SetLeaseExpires(id, now.Add(-time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tracker.SetStoryState(ctx, ids[1], application.RunState, application.RunBlocked, "(tests-fail) the tests fail"); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if got := tracker.Reads("StoryState"); got != 0 {
+		t.Errorf("expected no state read one story at a time, got %d", got)
+	}
+	if got := tracker.Reads("StoriesState"); got != 1 {
+		t.Errorf("expected the states read in one read, got %d", got)
+	}
+	if len(report.Reclaimed) != 4 || len(report.HeldRefused) != 1 {
+		t.Errorf("expected four reclaimed and %s held, got reclaimed %+v held %+v", ids[1], report.Reclaimed, report.HeldRefused)
+	}
+}
+
+func TestAPassReadsTheCommentsOfWhatItRefusesInOneRead(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, _, _ := aFactory(t)
+	tracker.AddEpic("mw-ghost", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude,
+		Model: domain.ModelOpus, Effort: domain.EffortHigh, Formula: "ghost-formula", Host: "vps"})
+	var ids []string
+	for i := 1; i <= 5; i++ {
+		id := fmt.Sprintf("mw-ghost.%d", i)
+		tracker.AddStory("mw-ghost", domain.Story{ID: id, Title: "The story " + id})
+		if err := tracker.CommentOnStory(ctx, id, "a word from the Mayor"); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	// One of them was told already, on an earlier pass.
+	if err := tracker.CommentOnStory(ctx, ids[2], "did not claim this story ("+application.ReasonFormulaNotInstalled+")"); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if got := tracker.Reads("StoryComments"); got != 0 {
+		t.Errorf("expected no comments read one story at a time, got %d", got)
+	}
+	if got := tracker.Reads("StoriesComments"); got != 1 {
+		t.Errorf("expected the comments of the %d refused read in one read, got %d", len(ids), got)
+	}
+	if len(report.Passed) != len(ids) {
+		t.Fatalf("expected all %d passed over, got %+v", len(ids), report.Passed)
+	}
+	for i, id := range ids {
+		told := 0
+		for _, c := range tracker.Comments(id) {
+			if strings.Contains(c, application.ReasonFormulaNotInstalled) {
+				told++
+			}
+		}
+		if told != 1 {
+			t.Errorf("expected %s (index %d) told once its formula is not installed, got %d times", id, i, told)
+		}
+	}
+}
+
+func TestAPassReadsTheOpenMoleculesOfWhatItClaimsInOneRead(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	dispatch.Cap = 4
+	tracker.AddFormula("tdd-feature", application.FormulaStep{Title: "One"}, application.FormulaStep{Title: "Two"})
+	for i := 1; i <= 4; i++ {
+		id := fmt.Sprintf("mw-gq6.%d", i)
+		tracker.AddStory("mw-gq6", domain.Story{ID: id, Title: "The story " + id})
+		poured, err := tracker.PourFormula(ctx, "tdd-feature", id, "The story "+id, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tracker.SetStoryMetadata(ctx, id, map[string]string{application.MoleculeField: poured.RootID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if len(report.Started) != 4 || len(runner.Started()) != 4 {
+		t.Fatalf("expected all four started, got %v", startedIDs(report))
+	}
+	if got := tracker.Reads("OpenMolecule"); got != 0 {
+		t.Errorf("expected no molecule read one at a time, got %d", got)
+	}
+	if got := tracker.Reads("OpenMolecules"); got != 1 {
+		t.Errorf("expected the four molecules read in one read, got %d", got)
+	}
+	if tracker.Molecules() != 4 {
+		t.Errorf("expected the four open molecules worked again and none poured, got %d molecules", tracker.Molecules())
+	}
+}
+
+// A tracker that cannot read them together is read a story at a time, as it was.
+func TestAPassOnATrackerThatCannotReadTogetherReadsAStoryAtATime(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	dispatch.Tracker = onlyTheTracker{tracker}
+	dispatch.DryRun = true
+	dispatch.Cap = 6
+	ids := aPassOfDeadPanes(t, tracker, runner, 3)
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if got := tracker.Reads("StoryState"); got != len(ids) {
+		t.Errorf("expected the state of each of %d claims read on its own, got %d", len(ids), got)
+	}
+	if got := tracker.Reads("StoriesState"); got != 0 {
+		t.Errorf("expected no read together on a tracker that offers none, got %d", got)
+	}
+	if report.Running != 3 {
+		t.Errorf("expected three running, got %+v", report)
+	}
+}
+
+// A read together that fails is no reason to read nothing: each story is read
+// on its own, and one story's fault fails no other.
+func TestAPassFallsBackToAStoryAtATimeWhenTheReadTogetherFails(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	tracker.AddFormula("tdd-feature", application.FormulaStep{Title: "One"})
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "The story"})
+	poured, err := tracker.PourFormula(ctx, "tdd-feature", "mw-gq6.1", "The story", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetStoryMetadata(ctx, "mw-gq6.1", map[string]string{application.MoleculeField: poured.RootID}); err != nil {
+		t.Fatal(err)
+	}
+	tracker.FailBatches(fmt.Errorf("the connection dropped"))
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if len(report.Started) != 1 || len(runner.Started()) != 1 {
+		t.Fatalf("expected the story started, got %+v", report)
+	}
+	if tracker.Reads("OpenMolecules") != 1 || tracker.Reads("OpenMolecule") != 1 {
+		t.Errorf("expected the batch tried once and the molecule then read alone, got %d and %d",
+			tracker.Reads("OpenMolecules"), tracker.Reads("OpenMolecule"))
+	}
+}
+
+// mw --dry-run says the same whether the pass read the candidates together or
+// a story at a time.
+func TestADryRunSaysTheSameWhetherTheReadsCameTogetherOrNot(t *testing.T) {
+	ctx := context.Background()
+	say := func(together bool) string {
+		dispatch, tracker, _, runner, _ := aFactory(t)
+		dispatch.DryRun = true
+		dispatch.Cap = 6
+		if !together {
+			dispatch.Tracker = onlyTheTracker{tracker}
+		}
+		ids := aPassOfDeadPanes(t, tracker, runner, 4)
+		if err := tracker.SetStoryState(ctx, ids[2], application.RunState, application.RunBlocked, "(tests-fail) the tests fail"); err != nil {
+			t.Fatal(err)
+		}
+		tracker.AddEpic("mw-ghost", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude,
+			Model: domain.ModelOpus, Effort: domain.EffortHigh, Formula: "ghost-formula", Host: "vps"})
+		tracker.AddStory("mw-ghost", domain.Story{ID: "mw-ghost.1", Title: "Wants a formula nobody installed"})
+		if err := tracker.CommentOnStory(ctx, "mw-ghost.1", "a word from the Mayor"); err != nil {
+			t.Fatal(err)
+		}
+		tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.20", Title: "Ready"})
+		report, err := dispatch.Run(ctx)
+		if err != nil {
+			t.Fatalf("dispatching (together %v): %v", together, err)
+		}
+		return report.String()
+	}
+	together, alone := say(true), say(false)
+	if together != alone {
+		t.Errorf("expected the same dry run either way.\ntogether:\n%s\nalone:\n%s", together, alone)
+	}
+	if !strings.Contains(together, "mw-ghost.1") || !strings.Contains(together, "mw-gq6.20") {
+		t.Errorf("expected the dry run to name what it passed over and what it would start, got:\n%s", together)
 	}
 }
