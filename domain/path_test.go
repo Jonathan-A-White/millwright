@@ -70,7 +70,10 @@ func TestValidateRejectsUnknownValues(t *testing.T) {
 		field  string
 		value  string
 	}{
-		{"unknown harness", func(p *domain.Path) { p.Harness = "codex" }, "harness", "codex"},
+		{"unknown harness", func(p *domain.Path) { p.Harness = "gemini" }, "harness", "gemini"},
+		{"claude model under codex", func(p *domain.Path) { p.Harness = domain.HarnessCodex; p.Model = "sonnet" }, "model", "sonnet"},
+		{"gpt model under claude", func(p *domain.Path) { p.Model = "gpt-6.1-sol" }, "model", "gpt-6.1-sol"},
+		{"bare gpt under codex", func(p *domain.Path) { p.Harness = domain.HarnessCodex; p.Model = "gpt" }, "model", "gpt"},
 		{"unknown model", func(p *domain.Path) { p.Model = "gpt" }, "model", "gpt"},
 		{"unknown effort", func(p *domain.Path) { p.Effort = "insane" }, "effort", "insane"},
 	}
@@ -87,6 +90,40 @@ func TestValidateRejectsUnknownValues(t *testing.T) {
 				t.Fatalf("expected unknown %s %q, got unknown %s %q", tt.field, tt.value, unknown.Field, unknown.Value)
 			}
 		})
+	}
+}
+
+func TestValidateAcceptsCodexWithGPTModels(t *testing.T) {
+	for _, m := range []domain.Model{"gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"} {
+		p := completePath()
+		p.Harness = domain.HarnessCodex
+		p.Model = m
+		if err := p.Validate(); err != nil {
+			t.Errorf("expected codex model %q to be known, got %v", m, err)
+		}
+		if got := domain.FullModelID(m); got != "" {
+			t.Errorf("FullModelID(%q) = %q, want empty: a codex model is passed through", m, got)
+		}
+	}
+}
+
+func TestKnownModelIsHarnessAware(t *testing.T) {
+	tests := []struct {
+		h    domain.Harness
+		m    domain.Model
+		want bool
+	}{
+		{domain.HarnessClaude, domain.ModelSonnet, true},
+		{domain.HarnessClaude, "gpt-6-luna", false},
+		{domain.HarnessCodex, "gpt-6-luna", true},
+		{domain.HarnessCodex, domain.ModelSonnet, false},
+		{domain.HarnessCodex, "", false},
+		{"", domain.ModelSonnet, false},
+	}
+	for _, tt := range tests {
+		if got := domain.KnownModel(tt.h, tt.m); got != tt.want {
+			t.Errorf("KnownModel(%q, %q) = %v, want %v", tt.h, tt.m, got, tt.want)
+		}
 	}
 }
 
@@ -117,7 +154,7 @@ func TestFullModelIDIsTheCurrentFamilysIdForEveryAlias(t *testing.T) {
 		domain.ModelHaiku:  "claude-haiku-5-5",
 	}
 	for _, m := range []domain.Model{domain.ModelFable, domain.ModelOpus, domain.ModelSonnet, domain.ModelHaiku} {
-		if !domain.KnownModel(m) {
+		if !domain.KnownModel(domain.HarnessClaude, m) {
 			t.Fatalf("expected %q to be a known model", m)
 		}
 		if got := domain.FullModelID(m); got != want[m] {
