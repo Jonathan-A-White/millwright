@@ -1320,6 +1320,27 @@ type QueuedStory struct {
 	ID       string
 	Rig      string
 	QueuedAt time.Time
+	// Status is the story's status in the tracker (StatusOpen, StatusInProgress);
+	// Claimed says an open story's assignee is a claim mw made; Blocked says an
+	// open story waits on a bead that is not closed, or hangs from an epic that
+	// does. They are what Taken judges by.
+	Status  string
+	Claimed bool
+	Blocked bool
+}
+
+// Taken says whether mw land takes the story into its batch: the stories
+// WorkInHand.Queued lists, which are those in progress, open and claimed by an
+// mw, and open, unclaimed and not blocked. An open story anyone else holds, or
+// one that waits, is left alone (mw-gq6.824). The follower's probe counts by it.
+func (s QueuedStory) Taken() bool {
+	switch s.Status {
+	case StatusInProgress:
+		return true
+	case StatusOpen:
+		return s.Claimed || !s.Blocked
+	}
+	return false
 }
 
 // QueuedStoryReader is a tracker that can read the stories queued for batch
@@ -1347,7 +1368,9 @@ type QueuedStoryReader interface {
 // story landed that left the queue as it was) is not tried again until
 // BatchEvery has passed, so a red batch is not run again every pass, nor while
 // the harness holds this host for a limit of the factory's: a batch held for
-// its fixer's harness stop waits for the stop's time (mw-gq6.472).
+// its fixer's harness stop waits for the stop's time (mw-gq6.472). A rig whose
+// landing ended clean with its queue as it was (mw land took nothing from it)
+// waits BatchEvery the same way, unless its queue changes first (mw-gq6.824).
 type BatchLandings struct {
 	// Rigs are the rigs checked out on this host, by name.
 	Rigs map[string]string
@@ -1376,6 +1399,14 @@ type BatchLandings struct {
 
 	mu     sync.Mutex
 	failed map[string]time.Time // rig -> when its landing last failed
+	// nothing is, for a rig whose last landing ended clean and left its queue
+	// as it was (mw land found nothing it takes), the queue then and when.
+	nothing map[string]landedNothing
+}
+
+type landedNothing struct {
+	at    time.Time
+	queue batchQueue
 }
 
 func (b *BatchLandings) now() time.Time {
@@ -1410,6 +1441,7 @@ type batchDue struct {
 	rig    string
 	each   bool
 	queued int
+	queue  batchQueue
 }
 
 func (d batchDue) String() string {
@@ -1423,6 +1455,14 @@ func (d batchDue) String() string {
 type batchQueue struct {
 	queued int
 	oldest time.Time
+	// ids are the queued stories' ids, in name order: what the queue is,
+	// to tell a queue that changed from one a land left as it was.
+	ids []string
+}
+
+// same says whether q holds the stories of other and no more.
+func (q batchQueue) same(other batchQueue) bool {
+	return slices.Equal(q.ids, other.ids)
 }
 
 // queues reads the queue of every rig of this host that has one: in one read
@@ -1434,9 +1474,11 @@ func (b *BatchLandings) queues(ctx context.Context) (map[string]batchQueue, erro
 		if stories, err := reader.QueuedStories(ctx); err == nil {
 			queues := map[string]batchQueue{}
 			for _, story := range stories {
-				b.addToQueue(queues, story.Rig, story.QueuedAt)
+				if story.Taken() {
+					b.addToQueue(queues, story.Rig, story.ID, story.QueuedAt)
+				}
 			}
-			return queues, nil
+			return finishQueues(queues), nil
 		}
 	}
 	work, err := b.Tracker.WorkInHand(ctx)
@@ -1449,14 +1491,23 @@ func (b *BatchLandings) queues(ctx context.Context) (map[string]batchQueue, erro
 		if err != nil {
 			continue
 		}
-		b.addToQueue(queues, path.Rig, detail.QueuedAt)
+		b.addToQueue(queues, path.Rig, detail.Story.ID, detail.QueuedAt)
 	}
-	return queues, nil
+	return finishQueues(queues), nil
+}
+
+// finishQueues puts each queue's ids in order, so two reads of one queue are
+// the same.
+func finishQueues(queues map[string]batchQueue) map[string]batchQueue {
+	for _, q := range queues {
+		sort.Strings(q.ids)
+	}
+	return queues
 }
 
 // addToQueue counts a story queued at queuedAt in the queue of its rig, if the
 // rig is checked out on this host.
-func (b *BatchLandings) addToQueue(queues map[string]batchQueue, rig string, queuedAt time.Time) {
+func (b *BatchLandings) addToQueue(queues map[string]batchQueue, rig, id string, queuedAt time.Time) {
 	if _, here := b.Rigs[rig]; !here {
 		return
 	}
@@ -1465,6 +1516,7 @@ func (b *BatchLandings) addToQueue(queues map[string]batchQueue, rig string, que
 		q.oldest = queuedAt
 	}
 	q.queued++
+	q.ids = append(q.ids, id)
 	queues[rig] = q
 }
 
@@ -1504,10 +1556,17 @@ func (b *BatchLandings) due(ctx context.Context) ([]batchDue, error) {
 			continue
 		}
 		q := queues[name]
+		if found, was := b.nothing[name]; was {
+			if !found.queue.same(q) {
+				delete(b.nothing, name) // the queue changed: land it
+			} else if now.Sub(found.at) < settings.BatchEvery {
+				continue
+			}
+		}
 		if settings.Mode == domain.LandingEach {
-			due = append(due, batchDue{rig: name, each: true, queued: q.queued})
+			due = append(due, batchDue{rig: name, each: true, queued: q.queued, queue: q})
 		} else if BatchDue(settings, q.queued, q.oldest, now) {
-			due = append(due, batchDue{rig: name, queued: q.queued})
+			due = append(due, batchDue{rig: name, queued: q.queued, queue: q})
 		}
 	}
 	return due, errors.Join(errs...)
@@ -1554,6 +1613,7 @@ func (b *BatchLandings) run(ctx context.Context) error {
 			defer func() { ended <- struct{}{} }()
 			err := b.landRig(ctx, d)
 			if err == nil {
+				b.noteNothingLanded(ctx, d)
 				return
 			}
 			// ErrLeftRunning: the landing goes on apart, and the follower that
@@ -1605,6 +1665,27 @@ func (b *BatchLandings) run(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// noteNothingLanded remembers a rig whose landing ended clean with its queue as
+// the follower saw it: mw land took nothing from it, and begun again it would
+// take nothing again. due leaves the rig be until BatchEvery has passed or the
+// queue changes (mw-gq6.824). A read that fails is not held against the rig.
+func (b *BatchLandings) noteNothingLanded(ctx context.Context, d batchDue) {
+	queues, err := b.queues(ctx)
+	if err != nil {
+		return
+	}
+	after, queued := queues[d.rig]
+	if !queued || !after.same(d.queue) {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.nothing == nil {
+		b.nothing = map[string]landedNothing{}
+	}
+	b.nothing[d.rig] = landedNothing{at: b.now(), queue: after}
 }
 
 // pending puts first in due each rig of this host whose landing is pending
