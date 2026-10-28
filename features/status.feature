@@ -1103,6 +1103,47 @@ Feature: mw status
     And the READY line of "mw-gq6.103" says every host has passed it, naming "laptop: the rig millwright installs dependencies" and "desktop: the rig millwright is not checked out on desktop"
     And the report has no DAMPERS section
 
+  # mw-gq6.822: a story pathed to another host that host's dispatch keeps passing
+  # for a reason of its own (no grist test key) showed as plain "ready" under
+  # OTHER HOSTS, so a misrouted story waited unseen. The host's note says why.
+
+  Scenario: A story another host's dispatch passed for want of a grist test key shows the reason, not ready
+    Given a status story "mw-gq6.120" filed under it, overriding "host" with "desktop"
+    And the host "desktop" last synced 1 hour ago
+    And the host "desktop" passed "mw-gq6.120" 50 minutes ago at the gate "no-grist-key" because "its checks run mw grist eval or mw grist smoke, and desktop has no grist test key"
+    When mw status reads the host
+    Then reading status succeeds
+    And under OTHER HOSTS the story "mw-gq6.120" says "passed: its checks run mw grist eval or mw grist smoke, and desktop has no grist test key"
+    And under OTHER HOSTS the story "mw-gq6.120" does not say "ready"
+
+  Scenario: A story another host passed only for its cap still shows ready
+    Given a status story "mw-gq6.121" filed under it, overriding "host" with "desktop"
+    And the host "desktop" last synced 1 hour ago
+    And the host "desktop" passed "mw-gq6.121" 50 minutes ago at the gate "cap" because "desktop runs as many sessions as it may"
+    When mw status reads the host
+    Then reading status succeeds
+    And under OTHER HOSTS the story "mw-gq6.121" says "ready"
+    And under OTHER HOSTS the story "mw-gq6.121" does not say "passed"
+
+  Scenario: A story passed on one host and since re-pathed to another no longer shows the old host's reason
+    Given a status story "mw-gq6.122" filed under it, overriding "host" with "laptop"
+    And the host "laptop" last synced 1 hour ago
+    And the host "desktop" passed "mw-gq6.122" 50 minutes ago at the gate "no-grist-key" because "its checks run mw grist eval or mw grist smoke, and desktop has no grist test key"
+    When mw status reads the host
+    Then reading status succeeds
+    And under OTHER HOSTS the story "mw-gq6.122" says "ready"
+    And under OTHER HOSTS the story "mw-gq6.122" does not say "passed"
+
+  Scenario: A story another host has since claimed shows claimed, not the reason it was once passed for
+    Given a status story "mw-gq6.123" filed under it, overriding "host" with "desktop"
+    And the host "desktop" last synced 1 hour ago
+    And the host "desktop" passed "mw-gq6.123" 50 minutes ago at the gate "no-grist-key" because "its checks run mw grist eval or mw grist smoke, and desktop has no grist test key"
+    And the status story "mw-gq6.123" is claimed with its session running
+    When mw status reads the host
+    Then reading status succeeds
+    And under OTHER HOSTS the story "mw-gq6.123" says "claimed"
+    And under OTHER HOSTS the story "mw-gq6.123" does not say "passed"
+
   Scenario: A Boost whose doctor left boost-config faulty shows the check and its reason under its host
     Given a status story "mw-gq6.110" filed under it, overriding "host" with "laptop"
     And the host "laptop" syncs

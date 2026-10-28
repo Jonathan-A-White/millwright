@@ -26,13 +26,14 @@ const DamperNoHost = "no host can take it"
 // hostPassedGates are the gates of Dispatch.run a story is passed at for a
 // reason of the host's own, one that holds until the host is changed and that
 // another host does not share: the rig is not checked out here, the network
-// here is metered. The others are the story's own (blocked, attempts-exhausted,
+// here is metered, the host has no grist test key (mw-gq6.822). The others are the story's own (blocked, attempts-exhausted,
 // no files key), the rig's or the vault's, which every host shares (smoke-hold,
 // formula-not-installed), or pass in a tick or two with no change made
 // (no-room, harness-hold, cap).
 var hostPassedGates = map[string]bool{
 	"rig-not-checked-out": true,
 	"metered-network":     true,
+	"no-grist-key":        true,
 }
 
 // HostPassedKey is the note a host's dispatch keeps of the ready stories it
@@ -161,6 +162,8 @@ func (p PassedByHost) fix(rig string) string {
 		return fmt.Sprintf("clone %s on %s and mw config set rigs.%s", rig, p.Host, rig)
 	case "metered-network":
 		return fmt.Sprintf("wait for an unmetered network on %s, or set the story's host to one the rig is checked out on", p.Host)
+	case "no-grist-key":
+		return fmt.Sprintf("set grist_test_key_file in the config file on %s, or set the story's host to one that has a grist test key", p.Host)
 	}
 	return ""
 }

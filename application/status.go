@@ -550,6 +550,10 @@ type HostWork struct {
 	// Ticks are the counts of that host's timers as it left them with its last
 	// sync: nothing known of a host that has left none.
 	Ticks HostTicks
+	// Passed is what that host's dispatch last noted of the stories it passed
+	// for a reason of its own that holds until the host is changed, by story id
+	// (mw-gq6.822): a story pathed to it that it keeps passing is not "ready".
+	Passed map[string]HostPassed
 	// DoctorSaid is the note that host's last whole doctor run left, exactly as
 	// the tracker held it ("" when it has left none); Doctor is that note read.
 	// DoctorUnreadable says it holds something that is not a verdict.
@@ -1664,14 +1668,14 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 	// another: all of them are started before the first is waited for.
 	now := s.now()
 	type noted struct {
-		synced, halted, ticks, mw, doctor func() (string, error)
+		synced, halted, ticks, mw, doctor, passed func() (string, error)
 	}
 	notes := make([]noted, len(hosts))
 	for i, host := range hosts {
 		read := func(key string) func() (string, error) {
 			return later(func() (string, error) { return s.Notes.Note(ctx, key) })
 		}
-		notes[i] = noted{read(LastSyncKey(host)), read(SyncHaltKey(host)), read(TicksKey(host)), read(MwCommitKey(host)), read(DoctorVerdictKey(host))}
+		notes[i] = noted{read(LastSyncKey(host)), read(SyncHaltKey(host)), read(TicksKey(host)), read(MwCommitKey(host)), read(DoctorVerdictKey(host)), read(HostPassedKey(host))}
 	}
 
 	work := make([]HostWork, 0, len(hosts))
@@ -1726,6 +1730,16 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 			var ok bool
 			if held.Doctor, ok = ParseDoctorVerdict(held.DoctorSaid); !ok {
 				held.DoctorUnreadable = true
+			}
+		}
+		passed, err := notes[i].passed()
+		if err != nil {
+			return nil, fmt.Errorf("reading what %s passed for a reason of its own: %w", host, err)
+		}
+		held.Passed = map[string]HostPassed{}
+		for _, p := range ParseHostPassed(passed) {
+			if hostPassedGates[p.Gate] {
+				held.Passed[p.Story] = p
 			}
 		}
 		work = append(work, held)
@@ -2385,7 +2399,7 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 		note = "stranded"
 	}
 	for _, d := range w.Stories {
-		writeStoryIn(b, "    ", d, strings.TrimPrefix(note+" · "+readyOrClaimed(d), " · "))
+		writeStoryIn(b, "    ", d, strings.TrimPrefix(note+" · "+w.readyOrClaimed(d), " · "))
 		if QueuedForBatch(d) {
 			wait := BatchWait{Since: d.QueuedAt}
 			if had, ok := w.Waits[d.Story.ID]; ok {
@@ -2577,6 +2591,18 @@ func readyOrClaimed(d StoryDetail) string {
 	return "ready"
 }
 
+// readyOrClaimed is readyOrClaimed for a story pathed to this host: one the
+// host's dispatch passed for a reason of its own says that reason, from the
+// host's note of its last tick, in place of "ready" (mw-gq6.822). A story
+// claimed, or since re-pathed to another host, is not under this note.
+func (w HostWork) readyOrClaimed(d StoryDetail) string {
+	note := readyOrClaimed(d)
+	if p, passed := w.Passed[d.Story.ID]; passed && note == "ready" && d.Merged().Host == w.Host {
+		return "passed: " + p.Why
+	}
+	return note
+}
+
 // write is one running story as the report shows it: the story, its session,
 // and whatever a person must not mistake it for — a session recorded stopped
 // or stuck rather than running, one stopped at the usage limit, a landing
@@ -2643,7 +2669,7 @@ func writeStoryIn(b *strings.Builder, pad string, d StoryDetail, note string) {
 	clip(b, head)
 	clip(b, pad+"  "+d.Story.Title)
 	if note != "" {
-		clip(b, pad+"  "+note)
+		wrapInto(b, pad+"  ", note)
 	}
 	// A story started once is the usual story; one started more than once is one
 	// that was refused or given back, and is running out of tries: only its own

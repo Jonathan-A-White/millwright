@@ -209,6 +209,8 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the DAMPERS section names "([^"]*)" as pinned to "([^"]*)", metered, its rig installs dependencies, saying: (.+)$`, c.theDampersNameThePinned)
 	ctx.Then(`^the DAMPERS section does not name "([^"]*)"$`, c.theDampersDoNotName)
 	ctx.Then(`^the report has no DAMPERS section$`, c.theReportHasNoDampers)
+	ctx.Then(`^under OTHER HOSTS the story "([^"]*)" says "([^"]*)"$`, c.otherHostStorySays)
+	ctx.Then(`^under OTHER HOSTS the story "([^"]*)" does not say "([^"]*)"$`, c.otherHostStoryDoesNotSay)
 	ctx.Given(`^the host "([^"]*)" passed "([^"]*)" (\d+) minutes ago at the gate "([^"]*)" because "([^"]*)"$`, c.theHostPassedTheStory)
 	ctx.Then(`^the READY line of "([^"]*)" says every host has passed it, naming "([^"]*)" and "([^"]*)"$`, c.theReadyLineSaysEveryHostPassed)
 	ctx.Then(`^the READY line of "([^"]*)" does not say every host has passed it$`, c.theReadyLineSaysNotEveryHostPassed)
@@ -1658,6 +1660,42 @@ func (c *statusContext) theHostPassedTheStory(host, id, minutesText, gate, why s
 	passed := append(application.ParseHostPassed(kept), application.HostPassed{
 		Story: id, Since: c.now.Add(-time.Duration(minutes) * time.Minute), Gate: gate, Why: why})
 	return c.tracker.SetNote(context.Background(), key, application.FormatHostPassed(passed))
+}
+
+// otherHostStory is the story's block under OTHER HOSTS, one line of words
+// whatever the wrapping.
+func (c *statusContext) otherHostStory(id string) (string, error) {
+	lines, err := c.printedLines()
+	if err != nil {
+		return "", err
+	}
+	block := blockAt(sectionOf(lines, "OTHER HOSTS"), "    "+id)
+	if block == nil {
+		return "", fmt.Errorf("expected %s to be listed under OTHER HOSTS, got:\n%s", id, c.report.String())
+	}
+	return strings.Join(strings.Fields(strings.Join(block, " ")), " "), nil
+}
+
+func (c *statusContext) otherHostStorySays(id, words string) error {
+	block, err := c.otherHostStory(id)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(block, words) {
+		return fmt.Errorf("expected %s under OTHER HOSTS to say %q, got:\n%s", id, words, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) otherHostStoryDoesNotSay(id, words string) error {
+	block, err := c.otherHostStory(id)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(block, words) {
+		return fmt.Errorf("expected %s under OTHER HOSTS not to say %q, got:\n%s", id, words, c.report.String())
+	}
+	return nil
 }
 
 // readyLineOf is the READY section's lines for one story, joined by single

@@ -82,3 +82,25 @@ func TestADryRunKeepsNoNoteOfWhatThisHostPassed(t *testing.T) {
 		t.Errorf("expected a dry run to write no note, got %d writes", writes)
 	}
 }
+
+func TestDispatchKeepsTheNoteOfAStoryPassedForWantOfAGristTestKey(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker := aGristKeyFactory(t, false)
+	dispatch.Memory = tracker
+	if err := tracker.SetAcceptance("mw-gq6.1", "1. `mw grist eval lampas` passes."); err != nil {
+		t.Fatal(err)
+	}
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	passed := passedFor(report, "mw-gq6.1")
+	if passed == nil {
+		t.Fatalf("expected mw-gq6.1 passed, got %+v", report.Passed)
+	}
+	kept, _ := tracker.Note(ctx, application.HostPassedKey("vps"))
+	notes := application.ParseHostPassed(kept)
+	if len(notes) != 1 || notes[0].Story != "mw-gq6.1" || notes[0].Gate != "no-grist-key" || notes[0].Why != passed.Why {
+		t.Fatalf("expected the note to hold mw-gq6.1 with the dispatch's own reason %q, got %q", passed.Why, kept)
+	}
+}
