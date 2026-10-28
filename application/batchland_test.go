@@ -673,7 +673,7 @@ func (q *queueReadingTracker) QueuedStories(ctx context.Context) ([]application.
 		if err != nil {
 			continue
 		}
-		queued = append(queued, application.QueuedStory{ID: d.Story.ID, Rig: path.Rig, QueuedAt: d.QueuedAt})
+		queued = append(queued, application.QueuedStory{ID: d.Story.ID, Rig: path.Rig, QueuedAt: d.QueuedAt, Status: application.StatusInProgress})
 	}
 	return queued, nil
 }
@@ -890,5 +890,93 @@ func TestARigThatFallsDueWhileAnotherLandingRunsIsLandedInThePass(t *testing.T) 
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatalf("expected the pass to end well, got %v", err)
+	}
+}
+
+// staticQueue is a tracker whose cheap queue read says what a test gives it.
+type staticQueue struct {
+	*apptest.FakeTracker
+	stories []application.QueuedStory
+	works   int
+}
+
+func (s *staticQueue) WorkInHand(ctx context.Context) (application.WorkInHand, error) {
+	s.works++
+	return s.FakeTracker.WorkInHand(ctx)
+}
+
+func (s *staticQueue) QueuedStories(context.Context) ([]application.QueuedStory, error) {
+	return s.stories, nil
+}
+
+// mw-gq6.824: the follower's probe counted every open or in-progress story
+// labelled queued, and mw land takes only those it can (WorkInHand.Queued): a
+// story open, unclaimed and blocked is left alone by mw land, which ended
+// "nothing is queued" at once, and the probe sprang the job again a few
+// seconds later, for ever. The two agree on what is queued now.
+func TestTheBatchLandProbeDoesNotCountAQueuedStoryMwLandWouldNotTake(t *testing.T) {
+	j := newLandingJob(t)
+	j.rule("lampas", domain.LandingEach)
+	reader := &staticQueue{FakeTracker: j.tracker, stories: []application.QueuedStory{
+		{ID: "lp-1", Rig: "lampas", Status: application.StatusOpen, Blocked: true},
+		{ID: "lp-2", Rig: "lampas", Status: application.StatusOpen, Blocked: true},
+	}}
+	job := j.landingsOn(reader).Job()
+	if reason, wanted := job.Probe(context.Background()); wanted {
+		t.Fatalf("the only queued stories are open, unclaimed and blocked, yet the job wants to run: %s", reason)
+	}
+	for name, taken := range map[string]application.QueuedStory{
+		"in progress":     {ID: "lp-3", Rig: "lampas", Status: application.StatusInProgress},
+		"open, claimed":   {ID: "lp-3", Rig: "lampas", Status: application.StatusOpen, Claimed: true, Blocked: true},
+		"open, unblocked": {ID: "lp-3", Rig: "lampas", Status: application.StatusOpen},
+	} {
+		reader.stories = []application.QueuedStory{reader.stories[0], taken}
+		if reason, wanted := job.Probe(context.Background()); !wanted || !strings.Contains(reason, "1 queued") {
+			t.Errorf("%s: expected the story counted, one queued, got %q, %v", name, reason, wanted)
+		}
+	}
+}
+
+// mw-gq6.824: a land that finds nothing to land ends clean, so it never
+// counted as failed, and the follower began it again at once. It waits
+// batch_every like a failed one, unless the queue changes.
+func TestARigWhoseLandFoundNothingIsNotLandedAgainBeforeBatchEveryUnlessItsQueueChanged(t *testing.T) {
+	j := newLandingJob(t)
+	j.rule("lampas", domain.LandingBatch)
+	j.queued("lampas", "lp-1", 600)
+	j.queued("lampas", "lp-2", 600)
+	asked := 0
+	landings := j.landingsOn(j.tracker)
+	landings.Land = func(context.Context, string, bool) error {
+		asked++
+		return nil // "queue: nothing is queued for batch landing"
+	}
+	job := landings.Job()
+	mustDo(t, job.Run(context.Background()))
+	if asked != 1 {
+		t.Fatalf("expected one land, got %d", asked)
+	}
+	if reason, wanted := job.Probe(context.Background()); wanted {
+		t.Fatalf("a land that found nothing was due again at once: %s", reason)
+	}
+	mustDo(t, job.Run(context.Background()))
+	if asked != 1 {
+		t.Fatalf("expected no second land before batch_every, got %d", asked)
+	}
+	j.now = j.now.Add(domain.DefaultBatchEvery / 2)
+	j.queued("lampas", "lp-3", 600)
+	if _, wanted := job.Probe(context.Background()); !wanted {
+		t.Fatal("a story joined the queue, but the rig was not due")
+	}
+	mustDo(t, job.Run(context.Background()))
+	if asked != 2 {
+		t.Fatalf("expected a land for the changed queue, got %d", asked)
+	}
+	if _, wanted := job.Probe(context.Background()); wanted {
+		t.Fatal("the land found nothing again, yet the rig was due at once")
+	}
+	j.now = j.now.Add(domain.DefaultBatchEvery)
+	if _, wanted := job.Probe(context.Background()); !wanted {
+		t.Fatal("batch_every has passed, but the rig was not due again")
 	}
 }

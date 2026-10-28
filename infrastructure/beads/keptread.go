@@ -291,15 +291,33 @@ func readListing(ctx context.Context, db *sql.DB, q listingQueries, targets map[
 }
 
 // queuedStoriesQuery is a row for each story in hand that carries the
-// run:queued label: its id, its own metadata, and the metadata of the epic it
-// hangs from, which hold the Path the batch is landed by. An epic is not a
-// story a batch lands.
-const queuedStoriesQuery = "select i.id as id, i.metadata as metadata, p.metadata as parent_metadata" +
+// run:queued label: its id, its own metadata, the metadata of the epic it
+// hangs from, which hold the Path the batch is landed by, its status, whether
+// an mw holds it, and whether it waits. An epic is not a story a batch lands.
+// A story that waits is one with a blocking edge (blockingKinds) to a bead not
+// closed, or to none, itself or its epic, as liveListing.blocked has it for
+// the epic's own edges; an epic that itself hangs from a waiting one is not
+// followed, which only counts such a story where mw land leaves it alone.
+var queuedStoriesQuery = "select i.id as id, i.metadata as metadata, p.metadata as parent_metadata," +
+	" i.status as status, coalesce(i.assignee, '') like 'mw@%' as claimed, " +
+	waitingSQL("i.id") + " or " + waitingSQL("p.id") + " as blocked" +
 	" from issues i join labels l on l.issue_id = i.id" +
 	" left join dependencies d on d.issue_id = i.id and d.type = 'parent-child'" +
 	" left join issues p on p.id = d.depends_on_issue_id" +
 	" where l.label = 'run:queued' and i.status in ('in_progress', 'open') and i.issue_type <> 'epic'" +
 	" order by i.id"
+
+// waitingSQL is a condition that holds when the bead whose id is the column id
+// has a blocking edge to a bead that is not closed or is no bead.
+func waitingSQL(id string) string {
+	kinds := make([]string, len(blockingKinds))
+	for i, kind := range blockingKinds {
+		kinds[i] = sqlQuoted(kind)
+	}
+	return "exists (select 1 from dependencies w left join issues t on t.id = w.depends_on_issue_id" +
+		" where w.issue_id = " + id + " and w.type in (" + strings.Join(kinds, ", ") + ")" +
+		" and (t.status is null or t.status <> 'closed'))"
+}
 
 // QueuedStories implements application.QueuedStoryReader over the kept
 // connection: one query in place of the listings of the work in hand. With no
@@ -332,7 +350,9 @@ func readQueuedStories(ctx context.Context, db *sql.DB) ([]application.QueuedSto
 	for rows.Next() {
 		var id string
 		var own, parent sql.NullString
-		if err := rows.Scan(&id, &own, &parent); err != nil {
+		var status string
+		var claimed, blocked bool
+		if err := rows.Scan(&id, &own, &parent, &status, &claimed, &blocked); err != nil {
 			return nil, err
 		}
 		story := bead{ID: id, Metadata: metadataOf(own)}
@@ -341,7 +361,9 @@ func readQueuedStories(ctx context.Context, db *sql.DB) ([]application.QueuedSto
 		if err != nil {
 			continue
 		}
-		stories = append(stories, application.QueuedStory{ID: id, Rig: path.Rig, QueuedAt: story.queuedAt()})
+		stories = append(stories, application.QueuedStory{
+			ID: id, Rig: path.Rig, QueuedAt: story.queuedAt(), Status: status, Claimed: claimed, Blocked: blocked,
+		})
 	}
 	return stories, rows.Err()
 }
