@@ -296,9 +296,11 @@ func readStates(ctx context.Context, db *sql.DB, query, prefix string, states ma
 
 // moleculesOverConnection is OpenMolecule for several roots from one read of the
 // live beads over the kept connection: a root that is open, with its steps not
-// closed in the order they are worked. A root the live beads lack is closed or
-// not there, and is no molecule. ok is false when there is no connection or it
-// failed, and the caller starts the bds.
+// closed in the order they are worked. A root the live beads lack is closed, a
+// wisp or not there, and is left out for the caller to ask OpenMolecule, which
+// can tell them apart: a pass that took a molecule for missing would pour a
+// second. ok is false when there is no connection or it failed, and the caller
+// starts the bds.
 func (g *Gateway) moleculesOverConnection(ctx context.Context, rootIDs []string) (open map[string]application.Molecule, ok bool) {
 	live, ok := g.liveOverConnection(ctx)
 	if !ok {
@@ -312,7 +314,6 @@ func (g *Gateway) moleculesOverConnection(ctx context.Context, rootIDs []string)
 	}
 	open = make(map[string]application.Molecule, len(rootIDs))
 	for _, rootID := range rootIDs {
-		open[rootID] = application.Molecule{}
 		if root, held := live.byID[rootID]; held && root.Status != StatusClosed {
 			open[rootID] = application.Molecule{RootID: rootID, Steps: inWorkedOrder(steps[rootID])}
 		}

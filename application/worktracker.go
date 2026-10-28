@@ -269,10 +269,9 @@ type StoriesState interface {
 }
 
 // OpenMolecules is a tracker that reads the open molecules of several roots in
-// one read, where OpenMolecule reads one. The answer holds the zero Molecule
-// for a root that is not open or not there, as OpenMolecule gives it; a root it
-// leaves out is one the tracker could not read with the rest, and the caller
-// reads it alone.
+// one read, where OpenMolecule reads one. The answer holds the molecule of each
+// root it found open; a root it leaves out is one it did not find open or could
+// not read with the rest, and the caller reads it alone.
 type OpenMolecules interface {
 	OpenMolecules(ctx context.Context, rootIDs []string) (map[string]Molecule, error)
 }

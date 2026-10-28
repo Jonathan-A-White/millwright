@@ -533,7 +533,8 @@ func (g *Gateway) StoriesState(ctx context.Context, ids []string, dimension stri
 
 // OpenMolecules implements application.OpenMolecules: OpenMolecule for several
 // roots. Over the kept connection it is one read of the live beads for all of
-// them; without it, or when it fails, each is read as OpenMolecule reads it, and
+// them, a root not found open in it left out for the caller to read alone;
+// without it, or when it fails, each is read as OpenMolecule reads it, and
 // one that cannot be read is left out for the caller to read alone, to fail as a
 // read of it alone does.
 func (g *Gateway) OpenMolecules(ctx context.Context, rootIDs []string) (map[string]application.Molecule, error) {

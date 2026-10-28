@@ -581,9 +581,11 @@ func TestTheOpenMoleculesOfSeveralRootsAreOneReadOverTheKeptConnection(t *testin
 	if b := got["mw-mol-b"]; b.RootID != "mw-mol-b" || stepIDs(b) != "mw-mol-b.1" {
 		t.Errorf("expected mw-mol-b open with its one step, got %+v", b)
 	}
+	// A root not found open may be closed, a wisp or missing: it is left out, for
+	// the caller to ask OpenMolecule, rather than taken for a molecule not there.
 	for _, id := range []string{"mw-mol-done", "mw-mol-nope"} {
-		if m, held := got[id]; !held || m.RootID != "" || m.Poured() {
-			t.Errorf("expected %s read as no open molecule (there: %v), got %+v", id, held, m)
+		if m, held := got[id]; held {
+			t.Errorf("expected %s left out, it being found open nowhere, got %+v", id, m)
 		}
 	}
 	if calls := bdCallsSince(t, asked, 0); len(calls) != 0 {
