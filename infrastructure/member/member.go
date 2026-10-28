@@ -98,6 +98,15 @@ func (*Host) DoltProgram(given string) (string, error) {
 	return filepath.Abs(path)
 }
 
+// Program implements application.MemberHost.
+func (*Host) Program(name string) (string, error) {
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return "", fmt.Errorf("%s was not found on the PATH", name)
+	}
+	return filepath.Abs(path)
+}
+
 // PortFree implements application.MemberHost: a port is taken when a dial of
 // it connects.
 func (*Host) PortFree(ctx context.Context, port int) error {
