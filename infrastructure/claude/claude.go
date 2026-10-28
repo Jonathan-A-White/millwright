@@ -15,6 +15,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/infrastructure/sessionshell"
 )
 
 // Program is the command this adapter builds a line for, and Shell is what
@@ -353,7 +354,7 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	// A close-out alone runs After in the environment it runs in after a
 	// harness, and nothing else (mw-gq6.467).
 	if l.CloseOutOnly {
-		return h.spec(l, afterLine(l)), nil
+		return h.spec(l, sessionshell.AfterLine(l)), nil
 	}
 	if !knownPermissionMode(h.permissionMode) {
 		return application.SessionSpec{}, fmt.Errorf("launching %s: %q is not a permission mode Claude Code takes", l.StoryID, h.permissionMode)
@@ -389,92 +390,14 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 		argv = append([]string{"nice", "-n", strconv.Itoa(h.nice)}, argv...)
 	}
 
-	// Only the result goes to the file. What Claude Code says on stderr stays
-	// in the session, where a person who attaches to it can read it.
-	//
-	// The redirect writes to a temp path beside the real one and is renamed
-	// into place only once the session has fully exited, rather than opening
-	// the real path directly: a plain `> l.ResultFile` opens (and truncates)
-	// that exact path the moment this line starts, and keeps the same file
-	// descriptor for the session's whole run however long that is — so
-	// anything else that replaces the path while the session is still going
-	// (a git operation elsewhere in the vault touched it, on the incident this
-	// guards against, mw-gq6.89) orphans that descriptor, and the session's
-	// own completed write lands nowhere anyone can read it. The rename is
-	// atomic on the same filesystem, so whatever the real path held meanwhile
-	// is replaced whole, never partially, by this session's own result.
-	tmp := l.ResultFile + ".tmp"
-	line := shellLine(argv) + " > " + shellQuote(tmp) + "; mv " + shellQuote(tmp) + " " + shellQuote(l.ResultFile)
-
-	// The session's bd retries a write that meets a passing fault of the beads
-	// server (mw-gq6.393): a script named bd, in a directory of its own put ahead
-	// of the real bd on the PATH of the harness alone, runs `mw bd`, and the real
-	// bd is named to it by MW_BD_REAL. A host with no bd, or no place to put the
-	// script, leaves the session the PATH it had.
-	if len(l.BdRetry) > 0 {
-		line = bdShimSetup(l.BdRetry) + bdShimEnv + line + "; " + bdShimCleanup
-	}
-
-	// Heartbeat runs beside the harness, not after it: started in the
-	// background before the harness's own command line and killed the moment
-	// that line finishes, so the lease it renews is never left running once
-	// nothing is left to renew it for. Heartbeat's own stop condition — the
-	// session no longer running — would settle it eventually even without the
-	// kill, but not until its next tick, and not at all if After never runs
-	// (mw-gq6.124). The kill is waited for: mw ends on TERM by cancelling what
-	// it was doing rather than at once, and the close-out chained on after it
-	// refuses a story whose heartbeat is still in the process table
-	// (mw-gq6.394), so After must not start until the heartbeat is gone
-	// (mw-gq6.487).
-	if len(l.Heartbeat) > 0 {
-		line = heartbeatLine(l) + line + "; kill $HB 2>/dev/null; wait $HB 2>/dev/null" + heartbeatEnd(l)
-	}
-
-	// Whatever comes after the session is chained with `;`, not `&&`: a session
-	// that failed, ran out of fuel or died is exactly the one whose closing out
-	// must still happen, and `&&` would skip it.
-	if len(l.After) > 0 {
-		line += "; " + afterLine(l)
-	}
+	// Only the result goes to the file, written beside and moved into place once
+	// the session has exited; the bd shim, the heartbeat and the close-out are
+	// the same for every harness (sessionshell).
+	line := sessionshell.ResultRedirect(argv, l.ResultFile)
+	line = sessionshell.WithBdShim(line, l.BdRetry)
+	line = sessionshell.WithHeartbeat(line, l)
+	line = sessionshell.WithAfter(line, l)
 	return h.spec(l, line), nil
-}
-
-// heartbeatLine starts the heartbeat in the background and leaves its pid in
-// $HB: bare, or with its stdout and stderr kept in HeartbeatLog as well as shown
-// in the pane (mw-gq6.494). The words are the one trace of why a lease lapsed,
-// and mw dispatch closes the pane when it reclaims the story. A pipe into tee
-// would make $! tee's pid and the kill would miss the heartbeat, so the
-// heartbeat writes to a fifo that a backgrounded tee reads: $HB stays the
-// heartbeat itself. tee appends, so a later attempt's heartbeat adds to it.
-func heartbeatLine(l application.Launch) string {
-	if l.HeartbeatLog == "" {
-		return shellLine(l.Heartbeat) + " & HB=$!; "
-	}
-	return `HBD=$(mktemp -d); mkfifo "$HBD/w"; tee -a ` + shellQuote(l.HeartbeatLog) + ` < "$HBD/w" & HBT=$!; ` +
-		shellLine(l.Heartbeat) + ` > "$HBD/w" 2>&1 & HB=$!; `
-}
-
-// heartbeatEnd is what settles the fifo heartbeatLine made, once the heartbeat
-// is gone: tee ends on its own as the fifo's last writer closes, so it is
-// waited for, and the fifo's directory removed.
-func heartbeatEnd(l application.Launch) string {
-	if l.HeartbeatLog == "" {
-		return ""
-	}
-	return `; wait $HBT 2>/dev/null; rm -rf "$HBD"`
-}
-
-// afterLine is After as the shell runs it: alone, or with its stdout and stderr
-// kept in AfterLog as well as shown in the pane (mw-gq6.487). A close-out that
-// dies says why in its pane and nowhere else, and mw dispatch closes that pane
-// when it reclaims the story: the log is what is left to read. tee appends, so
-// a close-out run again for the same attempt (RunCloseOutAgain) adds to it.
-func afterLine(l application.Launch) string {
-	after := shellLine(l.After)
-	if l.AfterLog == "" {
-		return after
-	}
-	return "{ " + after + "; } 2>&1 | tee -a " + shellQuote(l.AfterLog)
 }
 
 // spec is the session that runs line for the launch: the host's beads
@@ -482,20 +405,8 @@ func afterLine(l application.Launch) string {
 // environment.
 func (h *Harness) spec(l application.Launch, line string) application.SessionSpec {
 	// The host's beads environment is read first of all, ahead of the
-	// heartbeat and the harness, so that the close-out chained on after them
-	// inherits it too. Nothing reads the file here: the line holds only its
-	// path, and a file that is missing or unreadable is skipped (mw-43v9x.23).
-	if h.serverHost != "" {
-		line = "export BEADS_DOLT_SERVER_HOST=" + shellQuote(h.serverHost) + "; " + line
-	}
-	if c := h.claudeEnv(); c != "" {
-		q := shellQuote(c)
-		line = "if [ -r " + q + " ]; then set -a; . " + q + "; set +a; fi; " + line
-	}
-	if h.envFile != "" {
-		q := shellQuote(h.envFile)
-		line = "if [ -r " + q + " ]; then set -a; . " + q + "; set +a; fi; " + line
-	}
+	// heartbeat and the harness (sessionshell.Prelude).
+	line = sessionshell.Prelude(line, sessionshell.Env{File: h.envFile, HarnessFile: h.claudeEnv(), ServerHost: h.serverHost})
 
 	identity := application.SeatIdentity(l.Seat, l.Host)
 	env := map[string]string{
@@ -561,45 +472,11 @@ func knownPermissionMode(mode string) bool {
 	return false
 }
 
-// shellLine is an argv written as one line for a shell to read back as the
-// same argv.
-func shellLine(argv []string) string {
-	words := make([]string, 0, len(argv))
-	for _, word := range argv {
-		words = append(words, shellQuote(word))
-	}
-	return strings.Join(words, " ")
-}
+// shellLine and shellQuote are sessionshell's, under the names this package
+// has always used.
+func shellLine(argv []string) string { return sessionshell.ShellLine(argv) }
 
-// shellQuote is one word of a shell line. A word a shell would read back
-// unchanged is left alone, so that a person attached to the session can read
-// what is running; anything else is wrapped in single quotes, inside which
-// every character is literal — a quote, a colon, a newline, a dollar sign, a
-// backslash — with the one exception of a single quote itself, which is closed,
-// escaped and reopened.
-func shellQuote(word string) string {
-	if shellSafe(word) {
-		return word
-	}
-	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
-}
-
-// shellSafe reports whether a word means itself to a shell as it is written.
-// The list is deliberately short: everything not on it gets quoted.
-func shellSafe(word string) bool {
-	if word == "" {
-		return false
-	}
-	for _, r := range word {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-		case strings.ContainsRune("-_./:=@,+%", r):
-		default:
-			return false
-		}
-	}
-	return true
-}
+func shellQuote(word string) string { return sessionshell.ShellQuote(word) }
 
 // Harness is the adapter behind application.SeatHarness too: a seat's own
 // session, which is interactive.
@@ -687,20 +564,3 @@ func (h *Harness) withEnvFile(argv []string) []string {
 		`if [ -n "$h" ]; then export BEADS_DOLT_SERVER_HOST="$h"; fi; exec "$@"`
 	return append([]string{h.shell, "-c", script, "sh", h.envFile, h.serverHost, claudeEnv}, argv...)
 }
-
-// bdShimSetup is the shell that makes the directory holding the script that
-// stands in for bd, and names the real bd, leaving SHIM and REAL empty when
-// either cannot be had. The script is two fixed lines, written by printf from
-// words shellQuote has quoted, so nothing in them is read by a shell twice.
-func bdShimSetup(retry []string) string {
-	script := shellQuote("#!/bin/sh") + " " + shellQuote("exec "+shellLine(retry)+` "$@"`)
-	return `REAL=$(command -v bd); SHIM=$(mktemp -d); ` +
-		`if [ -z "$REAL" ] || [ -z "$SHIM" ] || ! { printf '%s\n' ` + script + ` > "$SHIM/bd" && chmod +x "$SHIM/bd"; }; then SHIM=; REAL=; fi; `
-}
-
-// bdShimEnv is what is put in front of the harness's command to give it the
-// script: assignments that last for that one command.
-const bdShimEnv = `MW_BD_REAL="$REAL" PATH="${SHIM:+$SHIM:}$PATH" `
-
-// bdShimCleanup takes the script's directory away once the session is over.
-const bdShimCleanup = `if [ -n "$SHIM" ]; then rm -rf "$SHIM"; fi`
