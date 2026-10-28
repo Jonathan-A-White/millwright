@@ -3,6 +3,8 @@ package application_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -154,5 +156,45 @@ func TestTextAboutAToDoThatWaitsOnAnUnfinishedStory(t *testing.T) {
 		if got, err := inbox.AboutAToDo(context.Background(), m); err != nil || !got {
 			t.Errorf("%q is about the waiting to-do mw-lst.1 but was not taken to be", text)
 		}
+	}
+}
+
+// A filler word of five letters or more in a to-do's title ties no message to
+// it: his 'bare claude workers' idea shared 'something' with the title of a
+// to-do and got through Ideas only, while a message naming the volume still
+// passes as about that to-do (mw-gq6.828).
+func TestIdeasOnlyHoldsAnIdeaThatSharesOnlyAFillerWordWithAToDoTitle(t *testing.T) {
+	f, inbox, files := ideasTodoFixture(t)
+	f.tracker.AddEpic("mw-hitl", domain.Path{})
+	f.tracker.AddStory("mw-hitl", domain.Story{ID: "mw-hitl.3", Title: "Governor: check the old TrueCrypt volume still unlocks, then move it to something modern"})
+	mustDo(t, f.tracker.SetLabels("mw-hitl.3", application.LabelHitl, application.LabelHitlTodo))
+	inbox.Sender = &application.PosternSend{
+		Postern: f.backend, Cipher: f.cipher, Keys: stubPosternKeys{pubKey: applyInboxKey},
+		GovernorKey: releaseTapGovernorKey,
+	}
+	idea := "At work, we've been using bare claude workers to save tokens.  Is something like that useful here (something like 1.3K context on start up). They are only given the exact context they are expected to need."
+	f.message(t, releaseTapGovernorKey, "tx-bare-workers", idea)
+
+	if _, err := inbox.Apply(context.Background()); err != nil {
+		t.Fatalf("applying: %v", err)
+	}
+	if len(files.held) != 1 || files.held[0].Txid != "tx-bare-workers" {
+		t.Fatalf("expected the idea held, got %+v", files.held)
+	}
+	delivered := f.backend.Delivered()
+	if len(delivered) != 1 {
+		t.Fatalf("expected one answer, got %d", len(delivered))
+	}
+	var payload application.PosternPayload
+	mustDo(t, json.Unmarshal(delivered[0], &payload))
+	plain, _, err := f.cipher.Decrypt("governor", payload.Ct)
+	mustDo(t, err)
+	if !strings.Contains(plain, "Recorded for after") {
+		t.Fatalf("expected the answer 'Recorded for after ...', got %q", plain)
+	}
+
+	about := application.PosternInboxMessage{Txid: "direct:2", Class: "message", Thread: application.PosternGeneralThread, Text: "did the TrueCrypt volume unlock?"}
+	if got, err := inbox.AboutAToDo(context.Background(), about); err != nil || !got {
+		t.Fatalf("expected a message naming the TrueCrypt volume to pass as about its to-do, got %v, %v", got, err)
 	}
 }

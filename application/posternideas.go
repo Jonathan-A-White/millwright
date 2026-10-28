@@ -239,6 +239,10 @@ var commonTitleWords = map[string]bool{
 	"which": true, "while": true, "would": true, "write": true, "watch": true, "start": true,
 	"story": true, "never": true, "again": true, "being": true, "where": true, "idea": true, "ideas": true,
 	"help": true, "week": true, "needs": true, "make": true, "send": true, "email": true,
+	"something": true, "anything": true, "everything": true, "nothing": true, "someone": true, "maybe": true,
+	"really": true, "still": true, "useful": true, "using": true, "given": true, "little": true, "great": true,
+	"right": true, "better": true, "finish": true, "through": true, "important": true, "remember": true,
+	"governor": true, "minutes": true, "words": true, "three": true,
 }
 
 // ideaWords is what the held line says of m, whose file was written to file: a tap as 'release mw-act.1', a
