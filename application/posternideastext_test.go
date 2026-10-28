@@ -77,22 +77,23 @@ func TestEveryIdeasOnlyHoldPathDecidesThroughAboutAToDo(t *testing.T) {
 		{"a reply on a to-do", general(`{"bead":"mw-lst.1","answer":"ok"}`), true},
 	}
 	for _, c := range cases {
-		if got := inbox.AboutAToDo(context.Background(), c.m); got != c.want {
-			t.Errorf("%s: aboutAToDo = %v, want %v", c.name, got, c.want)
+		if got, err := inbox.AboutAToDo(context.Background(), c.m); err != nil || got != c.want {
+			t.Errorf("%s: aboutAToDo = %v (%v), want %v", c.name, got, err, c.want)
 		}
 	}
 }
 
-// Ideas only holds a message when the tracker cannot say which to-dos there
-// are, unless the words say 'to do' themselves.
-func TestIdeasOnlyHoldsWhatItCannotTieToAToDo(t *testing.T) {
+// Ideas only does not decide a message when the tracker cannot say which
+// to-dos there are, unless the words say 'to do' themselves: the read's error
+// is returned and the message is weighed again on the next pass (mw-gq6.827).
+func TestIdeasOnlyDoesNotDecideWhatItCannotTieToAToDo(t *testing.T) {
 	inbox := toDoTextInbox(t)
 	inbox.Tracker.(*apptest.FakeTracker).Err = context.DeadlineExceeded
-	if inbox.AboutAToDo(context.Background(), application.PosternInboxMessage{Txid: "direct:1", Text: "my discipleship notes"}) {
-		t.Fatalf("expected a message held when the to-dos cannot be read")
+	if _, err := inbox.AboutAToDo(context.Background(), application.PosternInboxMessage{Txid: "direct:1", Text: "my discipleship notes"}); err == nil {
+		t.Fatalf("expected the error of a to-do read that failed")
 	}
-	if !inbox.AboutAToDo(context.Background(), application.PosternInboxMessage{Txid: "direct:2", Text: "my to do for Friday"}) {
-		t.Fatalf("expected a message that says 'to do' to pass whatever the tracker says")
+	if got, err := inbox.AboutAToDo(context.Background(), application.PosternInboxMessage{Txid: "direct:2", Text: "my to do for Friday"}); err != nil || !got {
+		t.Fatalf("expected a message that says 'to do' to pass whatever the tracker says, got %v, %v", got, err)
 	}
 }
 
@@ -123,14 +124,14 @@ func TestIdeasOnlyLetsAMessageBeginningTodoColonThrough(t *testing.T) {
 		{"as a Talk turn", application.PosternInboxMessage{Txid: "direct:1", Class: application.TalkRecordClass, Thread: application.TalkRecordClass, Text: "TODO: an app for the roof"}, true},
 	}
 	for _, c := range cases {
-		if got := inbox.AboutAToDo(context.Background(), c.m); got != c.want {
-			t.Errorf("%s: aboutAToDo = %v, want %v", c.name, got, c.want)
+		if got, err := inbox.AboutAToDo(context.Background(), c.m); err != nil || got != c.want {
+			t.Errorf("%s: aboutAToDo = %v (%v), want %v", c.name, got, err, c.want)
 		}
 	}
 	// With a tracker that cannot be read, the prefix still gets through.
 	inbox.Tracker.(*apptest.FakeTracker).Err = context.DeadlineExceeded
-	if !inbox.AboutAToDo(context.Background(), general("TODO: an app for the roof")) {
-		t.Fatalf("expected TODO: to pass whatever the tracker says")
+	if got, err := inbox.AboutAToDo(context.Background(), general("TODO: an app for the roof")); err != nil || !got {
+		t.Fatalf("expected TODO: to pass whatever the tracker says, got %v, %v", got, err)
 	}
 }
 
@@ -150,7 +151,7 @@ func TestTextAboutAToDoThatWaitsOnAnUnfinishedStory(t *testing.T) {
 	inbox := application.PosternInbox{Tracker: tracker, Graph: tracker, Out: &bytes.Buffer{}}
 	for _, text := range []string{"what is mw-lst.1 about", "remind me to choose soon"} {
 		m := application.PosternInboxMessage{Txid: "direct:1", Class: application.TalkRecordClass, Thread: application.TalkRecordClass, Text: text}
-		if !inbox.AboutAToDo(context.Background(), m) {
+		if got, err := inbox.AboutAToDo(context.Background(), m); err != nil || !got {
 			t.Errorf("%q is about the waiting to-do mw-lst.1 but was not taken to be", text)
 		}
 	}

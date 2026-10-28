@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -57,7 +58,14 @@ func (i PosternInbox) holdIdeaAnswering(ctx context.Context, m PosternInboxMessa
 	if line, ok := p.held[m.Txid]; ok {
 		return line, true, false, nil
 	}
-	if !p.state.OnAt(i.Ideas.now()) || i.aboutAToDo(ctx, m) {
+	if !p.state.OnAt(i.Ideas.now()) {
+		return "", false, false, nil
+	}
+	todo, err := i.aboutAToDo(ctx, m)
+	if err != nil {
+		return "", false, false, err
+	}
+	if todo {
 		return "", false, false, nil
 	}
 	file := i.ideaFiles(ctx, m)
@@ -87,11 +95,13 @@ func (i PosternInbox) holdIdeaAnswering(ctx context.Context, m PosternInboxMessa
 // 'TODO:' (beginsTodoColon), whatever its channel; an action or an
 // answer naming a bead, or a message in a bead's thread, where that bead is
 // labelled hitl:todo; or any other message or Talk turn whose words are about
-// a to-do (textAboutAToDo). A bead the tracker cannot read or find is not
-// known to be one, and its message is kept as an idea.
-func (i PosternInbox) aboutAToDo(ctx context.Context, m PosternInboxMessage) bool {
+// a to-do (textAboutAToDo). A bead the tracker cannot find is not known to be
+// one, and its message is kept as an idea; a tracker that cannot be read says
+// nothing of it, so the error is returned and the message is neither kept nor
+// answered on this pass but weighed again on the next (mw-gq6.827).
+func (i PosternInbox) aboutAToDo(ctx context.Context, m PosternInboxMessage) (bool, error) {
 	if beginsTodoColon(m.Text) {
-		return true
+		return true, nil
 	}
 	bead := ""
 	if reply, ok := decodePosternReply(m.Text); ok {
@@ -104,14 +114,13 @@ func (i PosternInbox) aboutAToDo(ctx context.Context, m PosternInboxMessage) boo
 		return i.textAboutAToDo(ctx, m)
 	}
 	if bead = strings.TrimSpace(bead); bead == "" || i.Tracker == nil {
-		return false
+		return false, nil
 	}
 	found, err := i.Tracker.ShowBeads(ctx, []string{bead})
 	if err != nil {
-		i.printf("reading %s to tell whether %s is about a to-do: %v; keeping it as an idea\n", bead, m.Txid, err)
-		return false
+		return false, fmt.Errorf("reading %s to tell whether %s is about a to-do: %w; weighing it again on the next pass", bead, m.Txid, err)
 	}
-	return len(found) > 0 && found[0].Todo()
+	return len(found) > 0 && found[0].Todo(), nil
 }
 
 // beginsTodoColon reports whether text begins with 'TODO:', in any case, after
@@ -126,24 +135,24 @@ func beginsTodoColon(text string) bool {
 // message, are about a to-do: they say 'to do', 'to-do' or 'todo', name the id
 // of an open hitl:todo bead, or share a distinctive word with the title of one
 // or of its list. The tracker is read only when the words do not say 'to do'
-// themselves; a tracker that cannot be read leaves the message an idea.
-func (i PosternInbox) textAboutAToDo(ctx context.Context, m PosternInboxMessage) bool {
+// themselves; a tracker that cannot be read is an error, and the message is
+// weighed again on the next pass (mw-gq6.827).
+func (i PosternInbox) textAboutAToDo(ctx context.Context, m PosternInboxMessage) (bool, error) {
 	words := todoWords(m.Text)
 	if len(words) == 0 {
-		return false
+		return false, nil
 	}
 	for n, w := range words {
 		if w == "todo" || w == "todos" || (w == "to" && n+1 < len(words) && (words[n+1] == "do" || words[n+1] == "dos")) {
-			return true
+			return true, nil
 		}
 	}
 	if i.Tracker == nil {
-		return false
+		return false, nil
 	}
 	cards, err := openTodoCards(ctx, i.Tracker, i.Graph)
 	if err != nil {
-		i.printf("reading the to-dos to tell whether %s is about one: %v; keeping it as an idea\n", m.Txid, err)
-		return false
+		return false, fmt.Errorf("reading the to-dos to tell whether %s is about one: %w; weighing it again on the next pass", m.Txid, err)
 	}
 	have := map[string]bool{}
 	for _, w := range words {
@@ -157,7 +166,7 @@ func (i PosternInbox) textAboutAToDo(ctx context.Context, m PosternInboxMessage)
 			continue
 		}
 		if namesBeadID(lower, strings.ToLower(card.Story.ID)) || titleSharesWord(have, card.Story.Title) {
-			return true
+			return true, nil
 		}
 		if card.EpicID != "" && !seen[card.EpicID] {
 			seen[card.EpicID] = true
@@ -165,19 +174,18 @@ func (i PosternInbox) textAboutAToDo(ctx context.Context, m PosternInboxMessage)
 		}
 	}
 	if len(epics) == 0 {
-		return false
+		return false, nil
 	}
 	lists, err := i.Tracker.ShowBeads(ctx, epics)
 	if err != nil {
-		i.printf("reading the lists of the to-dos to tell whether %s is about one: %v; keeping it as an idea\n", m.Txid, err)
-		return false
+		return false, fmt.Errorf("reading the lists of the to-dos to tell whether %s is about one: %w; weighing it again on the next pass", m.Txid, err)
 	}
 	for _, list := range lists {
 		if titleSharesWord(have, list.Story.Title) {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // todoWords is text in lower case, split at everything that is not a letter or
