@@ -149,9 +149,18 @@ type FakeTracker struct {
 	showEpicsCalls       int
 	storiesCommentsCalls int
 
+	// reads counts the per-story reads and their batches by method name
+	// (StoryState, StoriesState, StoryComments, StoriesComments, OpenMolecule,
+	// OpenMolecules), so that a test can say a pass read them together
+	// (Reads).
+	reads map[string]int
+
 	// inProgressReads counts each read of the in-progress list: RunningStories,
 	// RunningElsewhere and RunningEverywhere each cost the real tracker one.
 	inProgressReads int
+
+	// batchErr is what StoriesState and OpenMolecules fail with (FailBatches).
+	batchErr error
 
 	// failing is the methods FailOn makes fail, by the error each gives.
 	failing map[string]error
@@ -589,6 +598,12 @@ func (f *FakeTracker) Writes() int {
 func (f *FakeTracker) StoryComments(_ context.Context, id string) ([]application.Comment, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.count("StoryComments")
+	return f.commentsOf(id)
+}
+
+// commentsOf is StoryComments with the lock held by the caller.
+func (f *FakeTracker) commentsOf(id string) ([]application.Comment, error) {
 	if f.commentReads == nil {
 		f.commentReads = map[string]int{}
 	}
@@ -617,18 +632,19 @@ func (f *FakeTracker) StoryComments(_ context.Context, id string) ([]application
 	return comments, nil
 }
 
-// StoriesComments implements application.WorkTracker: StoryComments for each
-// id, keyed by id. Each call still goes through StoryComments, so
-// CommentReads keeps counting them the same way a test written against the
-// single-story call already does; the one call to StoriesComments itself is
-// counted separately, by StoriesCommentsCalls.
-func (f *FakeTracker) StoriesComments(ctx context.Context, ids []string) (map[string][]application.Comment, error) {
+// StoriesComments implements application.WorkTracker: the comments of each id,
+// keyed by id. Each one still counts in CommentReads, the way a test written
+// against the single-story call already counts them; the one call to
+// StoriesComments itself is counted by StoriesCommentsCalls and Reads, and adds
+// nothing to Reads of StoryComments.
+func (f *FakeTracker) StoriesComments(_ context.Context, ids []string) (map[string][]application.Comment, error) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.storiesCommentsCalls++
-	f.mu.Unlock()
+	f.count("StoriesComments")
 	out := make(map[string][]application.Comment, len(ids))
 	for _, id := range ids {
-		comments, err := f.StoryComments(ctx, id)
+		comments, err := f.commentsOf(id)
 		if err != nil {
 			return nil, err
 		}
@@ -1847,6 +1863,7 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 func (f *FakeTracker) StoryState(_ context.Context, id, dimension string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.count("StoryState")
 	if f.Err != nil {
 		return "", f.Err
 	}
@@ -1854,6 +1871,55 @@ func (f *FakeTracker) StoryState(_ context.Context, id, dimension string) (strin
 		return s.states[dimension], nil
 	}
 	return "", fmt.Errorf("no story %q", id)
+}
+
+// StoriesState implements application.StoriesState: StoryState for several
+// stories in one read.
+func (f *FakeTracker) StoriesState(_ context.Context, ids []string, dimension string) (map[string]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.count("StoriesState")
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	if f.batchErr != nil {
+		return nil, f.batchErr
+	}
+	states := make(map[string]string, len(ids))
+	for _, id := range ids {
+		s, ok := f.stories[id]
+		if !ok {
+			return nil, fmt.Errorf("no story %q", id)
+		}
+		states[id] = s.states[dimension]
+	}
+	return states, nil
+}
+
+// FailBatches makes the reads of several stories together, StoriesState and
+// OpenMolecules, fail with err, and leaves the reads of one story alone. A nil
+// err lets them work again.
+func (f *FakeTracker) FailBatches(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.batchErr = err
+}
+
+// Reads is how many times the method was called, by the name it bears
+// (StoryState, StoriesState, StoryComments, StoriesComments, OpenMolecule,
+// OpenMolecules). StoriesComments does not add to StoryComments.
+func (f *FakeTracker) Reads(method string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reads[method]
+}
+
+// count adds a call to Reads; the lock is held by the caller.
+func (f *FakeTracker) count(method string) {
+	if f.reads == nil {
+		f.reads = map[string]int{}
+	}
+	f.reads[method]++
 }
 
 // CloseStep closes one step of a poured molecule, as a session does as it works
@@ -1919,6 +1985,33 @@ func (f *FakeTracker) OpenMolecule(_ context.Context, rootID string) (applicatio
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.asked = append(f.asked, "OpenMolecule")
+	f.count("OpenMolecule")
+	return f.openMolecule(rootID)
+}
+
+// OpenMolecules implements application.OpenMolecules: OpenMolecule for several
+// roots in one read. One that fails for a root fails them all, as the batch of
+// a real tracker does.
+func (f *FakeTracker) OpenMolecules(_ context.Context, rootIDs []string) (map[string]application.Molecule, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.count("OpenMolecules")
+	if f.batchErr != nil {
+		return nil, f.batchErr
+	}
+	open := make(map[string]application.Molecule, len(rootIDs))
+	for _, rootID := range rootIDs {
+		molecule, err := f.openMolecule(rootID)
+		if err != nil {
+			return nil, err
+		}
+		open[rootID] = molecule
+	}
+	return open, nil
+}
+
+// openMolecule is OpenMolecule with the lock held by the caller.
+func (f *FakeTracker) openMolecule(rootID string) (application.Molecule, error) {
 	if f.Err != nil {
 		return application.Molecule{}, f.Err
 	}

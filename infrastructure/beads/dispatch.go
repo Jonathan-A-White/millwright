@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -499,6 +500,59 @@ func (g *Gateway) StoryState(ctx context.Context, id, dimension string) (string,
 		return "", nil
 	}
 	return said, nil
+}
+
+var _ application.StoriesState = (*Gateway)(nil)
+var _ application.OpenMolecules = (*Gateway)(nil)
+
+// StoriesState implements application.StoriesState: StoryState for several
+// stories. Over the kept connection it is one query for all of them; without it,
+// or when it fails, each is read as StoryState reads it, and one that cannot be
+// read is left out for the caller to read alone.
+func (g *Gateway) StoriesState(ctx context.Context, ids []string, dimension string) (map[string]string, error) {
+	if strings.TrimSpace(dimension) == "" {
+		return nil, fmt.Errorf("reading the states of %d stories: which dimension?", len(ids))
+	}
+	var wanted []string
+	for _, id := range ids {
+		if strings.TrimSpace(id) != "" && !slices.Contains(wanted, id) {
+			wanted = append(wanted, id)
+		}
+	}
+	if states, ok := g.statesOverConnection(ctx, wanted, dimension); ok {
+		return states, nil
+	}
+	states := make(map[string]string, len(wanted))
+	for _, id := range wanted {
+		if value, err := g.StoryState(ctx, id, dimension); err == nil {
+			states[id] = value
+		}
+	}
+	return states, nil
+}
+
+// OpenMolecules implements application.OpenMolecules: OpenMolecule for several
+// roots. Over the kept connection it is one read of the live beads for all of
+// them; without it, or when it fails, each is read as OpenMolecule reads it, and
+// one that cannot be read is left out for the caller to read alone, to fail as a
+// read of it alone does.
+func (g *Gateway) OpenMolecules(ctx context.Context, rootIDs []string) (map[string]application.Molecule, error) {
+	var wanted []string
+	for _, id := range rootIDs {
+		if strings.TrimSpace(id) != "" && !slices.Contains(wanted, id) {
+			wanted = append(wanted, id)
+		}
+	}
+	if open, ok := g.moleculesOverConnection(ctx, wanted); ok {
+		return open, nil
+	}
+	open := make(map[string]application.Molecule, len(wanted))
+	for _, id := range wanted {
+		if molecule, err := g.OpenMolecule(ctx, id); err == nil {
+			open[id] = molecule
+		}
+	}
+	return open, nil
 }
 
 // OpenMolecule implements application.WorkTracker: the root bead of a poured

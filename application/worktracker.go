@@ -258,6 +258,25 @@ type RunningEverywhere interface {
 	RunningEverywhere(ctx context.Context, host string) (here, away []StoryDetail, err error)
 }
 
+// StoriesState is a tracker that reads the state of several stories under one
+// dimension in one read, where StoryState reads one: a dispatch pass asks for
+// it, when the tracker offers it, for what is claimed here instead of a read
+// for each (mw-gq6.826). The answer holds "" for an id with no state, as
+// StoryState gives it; an id it leaves out is one the tracker could not read
+// with the rest, and the caller reads it alone.
+type StoriesState interface {
+	StoriesState(ctx context.Context, ids []string, dimension string) (map[string]string, error)
+}
+
+// OpenMolecules is a tracker that reads the open molecules of several roots in
+// one read, where OpenMolecule reads one. The answer holds the zero Molecule
+// for a root that is not open or not there, as OpenMolecule gives it; a root it
+// leaves out is one the tracker could not read with the rest, and the caller
+// reads it alone.
+type OpenMolecules interface {
+	OpenMolecules(ctx context.Context, rootIDs []string) (map[string]Molecule, error)
+}
+
 // WorkInHand is what the tracker has in hand across every host: the stories
 // ready to be taken and the stories already claimed, before either is narrowed
 // to a host. The tracker reads it once; each section of a report narrows it

@@ -95,6 +95,16 @@ func (c factoryConn) QueryContext(_ context.Context, query string, _ []driver.Na
 			}
 		}
 		return &keptRows{cols: []string{"label"}, rows: rows}, nil
+	case strings.Contains(q, "from labels where label like '"):
+		// The labels of a dimension on several beads, as a batch of states asks.
+		asked := regexp.MustCompile(`label like '([^']*)%' and issue_id in \(([^)]*)\)`).FindStringSubmatch(q)
+		rows := [][]driver.Value{}
+		for _, l := range s.labels {
+			if asked != nil && strings.HasPrefix(strings.ToLower(l[1]), asked[1]) && strings.Contains(asked[2], "'"+strings.ToLower(l[0])+"'") {
+				rows = append(rows, []driver.Value{l[0], l[1]})
+			}
+		}
+		return &keptRows{cols: []string{"issue_id", "label"}, rows: rows}, nil
 	case strings.Contains(q, "label from labels"):
 		rows := [][]driver.Value{}
 		for _, l := range s.labels {
@@ -500,4 +510,126 @@ func detailIDs(details []application.StoryDetail) []string {
 		ids = append(ids, d.Story.ID)
 	}
 	return ids
+}
+
+// mw-gq6.826: a pass asked bd for the run state, the comments and the open
+// molecule of each candidate, one by one. Over the kept connection the states
+// of all of them are one query, and the open molecules one read of the live
+// beads; neither starts a bd.
+func TestTheStatesOfSeveralStoriesAreOneReadOverTheKeptConnection(t *testing.T) {
+	ctx := context.Background()
+	program, asked := recordingBd(t)
+	server := aQuietFactory(asked)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(server.open(t)), beads.WithKeptSaid(io.Discard))
+
+	got, err := g.StoriesState(ctx, []string{"mw-e.1", "mw-e.2", "mw-e.5"}, application.RunState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"mw-e.1": "running", "mw-e.2": "", "mw-e.5": "running"}
+	if len(got) != len(want) {
+		t.Fatalf("expected a state for each of three stories, got %v", got)
+	}
+	for id, state := range want {
+		if value, held := got[id]; !held || value != state {
+			t.Errorf("expected %s to read %q, got %q (there: %v)", id, state, value, held)
+		}
+	}
+	if calls := bdCallsSince(t, asked, 0); len(calls) != 0 {
+		t.Errorf("expected no bd started, got %d:\n%s", len(calls), strings.Join(calls, "\n"))
+	}
+	if len(server.unknown) > 0 {
+		t.Errorf("the stand-in server was asked what it does not know:\n%s", strings.Join(server.unknown, "\n"))
+	}
+}
+
+func TestTheOpenMoleculesOfSeveralRootsAreOneReadOverTheKeptConnection(t *testing.T) {
+	ctx := context.Background()
+	program, asked := recordingBd(t)
+	server := aQuietFactory(asked)
+	at := "2026-10-18 10:00:00"
+	more := func(id, status, typ string) []driver.Value {
+		return []driver.Value{id, "The bead " + id, "", "", status, typ, nil, nil, at, nil, at, nil, int64(2), `{}`, nil, int64(0)}
+	}
+	server.beads = append(server.beads,
+		more("mw-mol-a", "open", "molecule"),
+		more("mw-mol-a.1", "open", "task"), more("mw-mol-a.2", "open", "task"), more("mw-mol-a.3", "closed", "task"),
+		more("mw-mol-b", "open", "molecule"), more("mw-mol-b.1", "open", "task"),
+		more("mw-mol-done", "closed", "molecule"), more("mw-mol-done.1", "closed", "task"),
+	)
+	server.edges = append(server.edges,
+		[3]string{"mw-mol-a.1", "mw-mol-a", "parent-child"}, [3]string{"mw-mol-a.2", "mw-mol-a", "parent-child"},
+		[3]string{"mw-mol-a.2", "mw-mol-a.1", "blocks"}, [3]string{"mw-mol-a.3", "mw-mol-a", "parent-child"},
+		[3]string{"mw-mol-b.1", "mw-mol-b", "parent-child"}, [3]string{"mw-mol-done.1", "mw-mol-done", "parent-child"},
+	)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(server.open(t)), beads.WithKeptSaid(io.Discard))
+
+	got, err := g.OpenMolecules(ctx, []string{"mw-mol-a", "mw-mol-b", "mw-mol-done", "mw-mol-nope"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepIDs := func(m application.Molecule) string {
+		var ids []string
+		for _, step := range m.Steps {
+			ids = append(ids, step.ID)
+		}
+		return strings.Join(ids, " ")
+	}
+	if a := got["mw-mol-a"]; a.RootID != "mw-mol-a" || stepIDs(a) != "mw-mol-a.1 mw-mol-a.2" {
+		t.Errorf("expected mw-mol-a open with its two steps not closed, in worked order, got %+v", a)
+	}
+	if b := got["mw-mol-b"]; b.RootID != "mw-mol-b" || stepIDs(b) != "mw-mol-b.1" {
+		t.Errorf("expected mw-mol-b open with its one step, got %+v", b)
+	}
+	for _, id := range []string{"mw-mol-done", "mw-mol-nope"} {
+		if m, held := got[id]; !held || m.RootID != "" || m.Poured() {
+			t.Errorf("expected %s read as no open molecule (there: %v), got %+v", id, held, m)
+		}
+	}
+	if calls := bdCallsSince(t, asked, 0); len(calls) != 0 {
+		t.Errorf("expected no bd started, got %d:\n%s", len(calls), strings.Join(calls, "\n"))
+	}
+}
+
+// With no kept connection, or one that fails, the reads together are the reads
+// one at a time that they stand in for, so that nothing is read otherwise than
+// before.
+func TestWithNoKeptConnectionTheReadsTogetherAreTheReadsOneAtATime(t *testing.T) {
+	ctx := context.Background()
+	program, asked := recordingBd(t)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithKeptSaid(io.Discard))
+
+	states, err := g.StoriesState(ctx, []string{"mw-e.1", "mw-e.2", "mw-e.5"}, application.RunState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 3 || states["mw-e.1"] != "" {
+		t.Errorf("expected a state, empty here, for each of three stories, got %v", states)
+	}
+	calls := bdCallsSince(t, asked, 0)
+	var stateCalls int
+	for _, call := range calls {
+		if strings.Contains(call, " state mw-e.") && strings.HasSuffix(call, " run") {
+			stateCalls++
+		}
+	}
+	if stateCalls != 3 {
+		t.Errorf("expected one bd state for each of three stories, got %d:\n%s", stateCalls, strings.Join(calls, "\n"))
+	}
+
+	from := len(calls)
+	// The stand-in bd shows nothing of them, so each is left out for the caller
+	// to read alone and to fail as a read of it alone does.
+	if open, err := g.OpenMolecules(ctx, []string{"mw-mol-a", "mw-mol-b"}); err != nil || len(open) != 0 {
+		t.Errorf("expected no molecule the stand-in bd cannot show, and no failure of the rest, got %v, %v", open, err)
+	}
+	var shows int
+	for _, call := range bdCallsSince(t, asked, from) {
+		if strings.Contains(call, " show mw-mol-") {
+			shows++
+		}
+	}
+	if shows == 0 {
+		t.Errorf("expected bd show asked for the molecule roots one at a time, got:\n%s", strings.Join(bdCallsSince(t, asked, from), "\n"))
+	}
 }

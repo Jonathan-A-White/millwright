@@ -240,6 +240,86 @@ func (g *Gateway) stateOverConnection(ctx context.Context, id, dimension string)
 	return "", true
 }
 
+// statesOverConnection is stateOverConnection for several beads at once, one
+// query for each commentsChunk of ids: the value each carries under dimension,
+// "" for one with none. ok is false when there is no connection or it failed,
+// and the caller starts a bd for each.
+func (g *Gateway) statesOverConnection(ctx context.Context, ids []string, dimension string) (states map[string]string, ok bool) {
+	db := g.keptDB()
+	if db == nil {
+		return nil, false
+	}
+	prefix := dimension + ":"
+	like := sqlQuoted(strings.NewReplacer("%", `\%`, "_", `\_`).Replace(prefix) + "%")
+	states = make(map[string]string, len(ids))
+	for _, id := range ids {
+		states[id] = ""
+	}
+	for chunk := range slices.Chunk(ids, commentsChunk) {
+		quoted := make([]string, 0, len(chunk))
+		for _, id := range chunk {
+			quoted = append(quoted, sqlQuoted(id))
+		}
+		query := "select issue_id, label from labels where label like " + like +
+			" and issue_id in (" + strings.Join(quoted, ", ") + ") order by issue_id, label"
+		if err := readStates(ctx, db, query, prefix, states); err != nil {
+			g.keptFailed(ctx, "the states of several stories", err)
+			return nil, false
+		}
+	}
+	return states, true
+}
+
+// readStates sets, in states, the first label of each bead query names that
+// carries prefix, to the rest of the label.
+func readStates(ctx context.Context, db *sql.DB, query, prefix string, states map[string]string) error {
+	bounded, cancel := context.WithTimeout(ctx, keptQueryBound)
+	defer cancel()
+	rows, err := db.QueryContext(bounded, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	for rows.Next() {
+		var id, label string
+		if err := rows.Scan(&id, &label); err != nil {
+			return err
+		}
+		if value, found := strings.CutPrefix(label, prefix); found && !seen[id] {
+			seen[id] = true
+			states[id] = value
+		}
+	}
+	return rows.Err()
+}
+
+// moleculesOverConnection is OpenMolecule for several roots from one read of the
+// live beads over the kept connection: a root that is open, with its steps not
+// closed in the order they are worked. A root the live beads lack is closed or
+// not there, and is no molecule. ok is false when there is no connection or it
+// failed, and the caller starts the bds.
+func (g *Gateway) moleculesOverConnection(ctx context.Context, rootIDs []string) (open map[string]application.Molecule, ok bool) {
+	live, ok := g.liveOverConnection(ctx)
+	if !ok {
+		return nil, false
+	}
+	steps := map[string][]bead{}
+	for _, b := range live.beads {
+		if b.Parent != "" {
+			steps[b.Parent] = append(steps[b.Parent], b)
+		}
+	}
+	open = make(map[string]application.Molecule, len(rootIDs))
+	for _, rootID := range rootIDs {
+		open[rootID] = application.Molecule{}
+		if root, held := live.byID[rootID]; held && root.Status != StatusClosed {
+			open[rootID] = application.Molecule{RootID: rootID, Steps: inWorkedOrder(steps[rootID])}
+		}
+	}
+	return open, true
+}
+
 // graphWhere is the beads BeadGraph reads, as its bd list leaves out mail,
 // events and molecules.
 const graphWhere = "i.issue_type not in ('mail', 'event', 'molecule')"
