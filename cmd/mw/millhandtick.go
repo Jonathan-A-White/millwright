@@ -160,7 +160,7 @@ func newMillhandTickCmd() *cobra.Command {
 				Millhand: application.Millhand{
 					Seats:    files,
 					Windows:  windows,
-					Harness:  sessionHarness(dir, host),
+					Harness:  claudeHarness(dir, host, sessionTuning{}),
 					Terminal: windows,
 					Armer:    reaper.New(exe),
 					Settle:   application.TypeSettle,

@@ -102,7 +102,7 @@ func newSeatUpCmd() *cobra.Command {
 			_, err = application.SeatUp{
 				Seats:   vault.New(dir),
 				Windows: windows,
-				Harness: sessionHarness(dir, host),
+				Harness: claudeHarness(dir, host, sessionTuning{}),
 				Seat:    args[0],
 				Host:    host,
 				Model:   domain.Model(model),

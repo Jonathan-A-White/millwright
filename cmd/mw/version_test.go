@@ -136,3 +136,20 @@ func TestRootCommandIsNamedMw(t *testing.T) {
 		t.Fatalf("expected the binary to be named mw, got %q", got)
 	}
 }
+
+func TestVersionPrintsCodexsVersionOnAHostThatChoseCodex(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "codex"), []byte("#!/bin/sh\necho \"codex-cli 0.9.1\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	harnessOnPath(t, `echo "9.8.7 (Claude Code)"`)
+	mwConfig(t, "[next]\nharness = \"codex\"\n")
+
+	stdout, _ := runSeparately(t, "version")
+
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(lines) != 3 || lines[1] != "claude 9.8.7 (Claude Code)" || lines[2] != "codex codex-cli 0.9.1" {
+		t.Fatalf("expected mw's line, claude's and codex's, got %q", stdout)
+	}
+}

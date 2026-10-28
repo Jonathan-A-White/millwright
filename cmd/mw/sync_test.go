@@ -13,6 +13,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
 // mw sync is never run against a real vault here: it would reach the factory's
@@ -265,5 +266,28 @@ func TestSessionHarnessFollowsTheHomeOnBothRoles(t *testing.T) {
 	}
 	if line := sessionLine(t, vaultDir); strings.Contains(line, "BEADS_DOLT_SERVER_HOST") {
 		t.Errorf("expected no host for a home with no .beads/dolt, got %q", line)
+	}
+}
+
+// next.harness (mw-9rp4hu.14) picks the adapter a Builder's session is started
+// with; a host with no key keeps Claude Code.
+func TestBuilderBootUsesTheHarnessTheHostChose(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config string
+		want   domain.Harness
+	}{
+		{"no key", "", domain.HarnessClaude},
+		{"claude said", "[next]\nharness = \"claude\"\n", domain.HarnessClaude},
+		{"codex said", "[next]\nharness = \"codex\"\n", domain.HarnessCodex},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MW_BEADS_SYNC", "")
+			mwConfig(t, tc.config)
+			boot := builderBoot(vault.New(t.TempDir()), "laptop", nil, 0, 0, 120)
+			if got := boot.Harness.Name(); got != tc.want {
+				t.Errorf("expected the %s harness, got %s", tc.want, got)
+			}
+		})
 	}
 }

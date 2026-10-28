@@ -1149,6 +1149,31 @@ func NextMaxTurns() (int, error) {
 	return turns, nil
 }
 
+// NextHarness reports `harness` of the `[next]` table of
+// ~/.config/mw/config.toml: the harness this host starts its sessions with,
+// "claude" or "codex" (mw-9rp4hu.14). domain.HarnessClaude when the table says
+// nothing, so that a host with no key starts what it always did.
+func NextHarness() (domain.Harness, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, NextTable)
+	if err != nil {
+		return "", err
+	}
+	said := strings.TrimSpace(table["harness"])
+	if said == "" {
+		return domain.HarnessClaude, nil
+	}
+	switch h := domain.Harness(said); h {
+	case domain.HarnessClaude, domain.HarnessCodex:
+		return h, nil
+	}
+	return "", fmt.Errorf("the [%s] table of %s says harness = %q: it must be %q or %q", NextTable, path, said, domain.HarnessClaude, domain.HarnessCodex)
+}
+
 // NextRetryFromBranch reports `retry_from_branch` of the `[next]` table of
 // ~/.config/mw/config.toml (mw-1ljpo9.7): whether the branch of an attempt
 // refused at close-out (by the gate or the merge) or stopped at its turn cap is

@@ -9,7 +9,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
+	"github.com/Jonathan-A-White/millwright/infrastructure/codex"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 )
 
 // version is the factory's version. Release builds override it with
@@ -104,7 +107,25 @@ func newVersionCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			fmt.Fprintln(out, versionLine(version, info))
 			fmt.Fprintln(out, harnessVersionLine(ctx, claude.New()))
+			// A host that chose codex (next.harness) starts its sessions with it,
+			// so its version is worth seeing too; a host that did not is as it was.
+			if name, err := config.NextHarness(); err == nil && name == domain.HarnessCodex {
+				fmt.Fprintln(out, codexVersionLine(ctx, codex.New()))
+			}
 			return nil
 		},
 	}
+}
+
+// codexVersionLine renders "codex <version>", as harnessVersionLine does for
+// claude.
+func codexVersionLine(ctx context.Context, harness *codex.Harness) string {
+	printed, err := harness.Version(ctx)
+	switch {
+	case errors.Is(err, codex.ErrNotInstalled):
+		return codex.Program + ": not installed"
+	case err != nil:
+		return codex.Program + ": version unknown (" + err.Error() + ")"
+	}
+	return codex.Program + " " + printed
 }

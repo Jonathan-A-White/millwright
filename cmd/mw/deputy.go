@@ -71,7 +71,7 @@ func bringUpDeputy(ctx context.Context, reason string, out io.Writer) (applicati
 	return application.Deputy{
 		Seats:    vault.New(dir),
 		Windows:  windows,
-		Harness:  sessionHarness(dir, host),
+		Harness:  claudeHarness(dir, host, sessionTuning{}),
 		Terminal: windows,
 		Armer:    reaper.New(exe),
 		Mail:     mwGateway(dir, host),

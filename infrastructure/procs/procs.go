@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -17,7 +18,9 @@ import (
 type Harness struct {
 	// Proc is the process table; empty is /proc.
 	Proc string
-	// Name is the process name counted; empty is claude, as `pgrep -c claude`.
+	// Name is the process name counted; empty is both harnesses' programs,
+	// claude and codex, as `pgrep -c 'claude|codex'`: the host cap counts a
+	// session of either (mw-9rp4hu.14).
 	Name string
 	// Uid is whose processes are counted; nil is os.Getuid, the user running mw.
 	Uid func() int
@@ -29,8 +32,9 @@ func (h Harness) Count(context.Context) (int, error) {
 	if proc == "" {
 		proc = "/proc"
 	}
-	if name == "" {
-		name = "claude"
+	names := []string{"claude", "codex"}
+	if name != "" {
+		names = []string{name}
 	}
 	uid := os.Getuid()
 	if h.Uid != nil {
@@ -47,7 +51,7 @@ func (h Harness) Count(context.Context) (int, error) {
 		}
 		// A process that ended between the listing and the read is not an error.
 		comm, err := os.ReadFile(filepath.Join(proc, e.Name(), "comm"))
-		if err == nil && strings.TrimSpace(string(comm)) == name && ownedBy(filepath.Join(proc, e.Name(), "status"), uid) {
+		if err == nil && slices.Contains(names, strings.TrimSpace(string(comm))) && ownedBy(filepath.Join(proc, e.Name(), "status"), uid) {
 			n++
 		}
 	}

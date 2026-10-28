@@ -9,10 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/domain/events"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -396,43 +398,55 @@ func newDoctorCmd() *cobra.Command {
 				beadsChurn.Clients = (&doctor.BdParents{}).Sample
 				churn = application.DoctorChecks{beadsChurn}
 			}
+			harness, err := config.NextHarness()
+			if err != nil {
+				return err
+			}
+			table := append(append(application.DoctorChecks{
+				doctor.NewDaemonReload(units),
+				doctor.NewWifi(reach, powershell, store),
+				doctor.NewTunnel(tunnelHost, reach, tunnelUnit, tunnelProbe),
+				wg,
+				doctor.NewVaultDirty(vault, host, store),
+				formulasCheck,
+				doctor.NewTimers(units),
+				&doctor.BeadsSize{Dir: vault, Budget: beadsBudget, Home: beadsServedHere(), Squash: beadsSquash},
+				doctor.NewBeadsStores(vault),
+				doctor.NewBeadsBatch(vault, mwGateway(vault, host).AutoCommit),
+				beadsFlushCheck,
+				tmpLeftovers,
+				rootDisk,
+				mayorStuck,
+				mayorStale,
+				mayorGone,
+				seatContext,
+				posternTranscribe,
+				dispatchWindows,
+				rigTests,
+				boostConfig,
+				beadsServerCheck,
+				posternChannel,
+				battery,
+				boostReach,
+				boostAsleep,
+				starvedRigs,
+				recheckSkips,
+				staleLandings,
+				ageKey,
+			}, churn...), checks...)
+			// Where Claude Code keeps its transcripts is the only place these
+			// two checks read; a host on codex has none, and says so once rather
+			// than twice as "cannot tell" (mw-9rp4hu.14).
+			if harness == domain.HarnessCodex {
+				table = withoutChecks(table, mayorStuck.Name(), seatContext.Name())
+				fmt.Fprintf(cmd.OutOrStdout(), "harness %s: skipping the transcript checks %s and %s, which read Claude Code's transcripts\n", harness, mayorStuck.Name(), seatContext.Name())
+			}
 			return runDoctor(cmd, application.Doctor{
 				Dampers: dampers,
-				Checks: append(append(application.DoctorChecks{
-					doctor.NewDaemonReload(units),
-					doctor.NewWifi(reach, powershell, store),
-					doctor.NewTunnel(tunnelHost, reach, tunnelUnit, tunnelProbe),
-					wg,
-					doctor.NewVaultDirty(vault, host, store),
-					formulasCheck,
-					doctor.NewTimers(units),
-					&doctor.BeadsSize{Dir: vault, Budget: beadsBudget, Home: beadsServedHere(), Squash: beadsSquash},
-					doctor.NewBeadsStores(vault),
-					doctor.NewBeadsBatch(vault, mwGateway(vault, host).AutoCommit),
-					beadsFlushCheck,
-					tmpLeftovers,
-					rootDisk,
-					mayorStuck,
-					mayorStale,
-					mayorGone,
-					seatContext,
-					posternTranscribe,
-					dispatchWindows,
-					rigTests,
-					boostConfig,
-					beadsServerCheck,
-					posternChannel,
-					battery,
-					boostReach,
-					boostAsleep,
-					starvedRigs,
-					recheckSkips,
-					staleLandings,
-					ageKey,
-				}, churn...), checks...),
-				State: store,
-				Log:   store,
-				Notes: mwGateway(vault, host),
+				Checks:  table,
+				State:   store,
+				Log:     store,
+				Notes:   mwGateway(vault, host),
 				// The verdict rides the same notes, so the home reads it with the
 				// rest of this host's (mw-gq6.705).
 				Verdicts: mwGateway(vault, host),
@@ -543,6 +557,17 @@ func readPosternRights(ctx context.Context, posternBin, envFile string) ([]appli
 
 // oneLine folds text onto a single line.
 func oneLine(text string) string { return strings.Join(strings.Fields(text), " ") }
+
+// withoutChecks is the table less the checks named.
+func withoutChecks(table application.DoctorChecks, names ...string) application.DoctorChecks {
+	kept := make(application.DoctorChecks, 0, len(table))
+	for _, check := range table {
+		if !slices.Contains(names, check.Name()) {
+			kept = append(kept, check)
+		}
+	}
+	return kept
+}
 
 // runDoctor runs the doctor. A check left faulty and uncured is an outcome
 // and not a failure: the report naming it has already been printed, so cobra

@@ -109,3 +109,18 @@ func TestBeatingIsTheUsersHeartbeatsOfThatStory(t *testing.T) {
 		t.Errorf("Beating(mw-x.3) = %v (%v), want none", got, err)
 	}
 }
+
+func TestCountOfNoNameIsClaudeAndCodexProcesses(t *testing.T) {
+	proc := t.TempDir()
+	fakeProc(t, proc, "301", "claude\n", os.Getuid())
+	fakeProc(t, proc, "302", "codex\n", os.Getuid())
+	fakeProc(t, proc, "303", "bash\n", os.Getuid())
+	got, err := procs.Harness{Proc: proc}.Count(context.Background())
+	if err != nil || got != 2 {
+		t.Fatalf("counted %d (%v), want 2", got, err)
+	}
+	got, err = procs.Harness{Proc: proc, Name: "codex"}.Count(context.Background())
+	if err != nil || got != 1 {
+		t.Fatalf("counted %d (%v) of codex alone, want 1", got, err)
+	}
+}

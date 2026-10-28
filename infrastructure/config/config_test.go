@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/configfile"
 )
@@ -2875,5 +2876,24 @@ func TestDoctorBeadsChurnPerMinuteIsTheShippedDefaultUntilAHostSaysOtherwise(t *
 		if _, err := config.DoctorBeadsChurnPerMinute(); err == nil {
 			t.Errorf("expected beads_churn_per_minute = %s refused", bad)
 		}
+	}
+}
+
+// next.harness (mw-9rp4hu.14) is the harness this host starts sessions with:
+// claude until the [next] table says codex.
+func TestNextHarnessIsClaudeUntilTheNextTableSaysCodex(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nharness = \"codex\"\n")
+	if got, err := config.NextHarness(); err != nil || got != domain.HarnessClaude {
+		t.Fatalf("expected claude, not a root-table key, got %q: %v", got, err)
+	}
+
+	writeConfig(t, "[next]\nharness = \"codex\"\n")
+	if got, err := config.NextHarness(); err != nil || got != domain.HarnessCodex {
+		t.Fatalf("expected the [next] table's codex, got %q: %v", got, err)
+	}
+
+	writeConfig(t, "[next]\nharness = \"gemini\"\n")
+	if _, err := config.NextHarness(); err == nil || !strings.Contains(err.Error(), "gemini") {
+		t.Fatalf("expected an error naming the value, got %v", err)
 	}
 }

@@ -377,3 +377,28 @@ func TestAlarmSeqKeepsTheEmergencyWhenOnlyThePushFailed(t *testing.T) {
 		t.Errorf("a push that worked: got %d, %v", seq, err)
 	}
 }
+
+// mw-9rp4hu.14: a host on codex has no Claude Code transcripts, so the two
+// checks that read them are left out of the table, and the doctor says so once.
+func TestDoctorOnCodexSkipsTheTranscriptChecksAndSaysSoOnce(t *testing.T) {
+	closed := closedDoctorPort(t)
+	vault := t.TempDir()
+	mwConfig(t, fmt.Sprintf("vault = %q\nhost = \"laptop\"\n\n[next]\nharness = \"codex\"\n\n[doctor]\nreach = [%q]\n", vault, closed))
+
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"doctor", "--dry-run", "mayor-stuck"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatalf("expected the skipped check to be unknown, got:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "mayor-stuck") {
+		t.Fatalf("expected the error to name the check left out, got %v", err)
+	}
+	report := out.String()
+	if n := strings.Count(report, "skipping the transcript checks"); n != 1 {
+		t.Fatalf("expected the skip said once, got %d times:\n%s", n, report)
+	}
+}

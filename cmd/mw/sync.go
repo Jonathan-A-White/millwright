@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
+	"github.com/Jonathan-A-White/millwright/infrastructure/codex"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/configfile"
 
@@ -151,30 +154,86 @@ func hostBeads(ctx context.Context, files application.HomeFile, host string) (ho
 	return setting, nil
 }
 
-// sessionHarness is the Claude Code harness for the sessions this host starts:
-// reading beads.env first, then pointing bd at the server host the home says
-// (application.SessionServerHost), so that a move of the home is followed by
-// every session without anyone rewriting the file. That host is also set in
-// this process's environment, where the bd that mw runs itself reads it. A host
-// that cannot be told — no beads_sync auto, no home file, a config error that
-// the commands around this one report on their own — leaves both as they were.
-func sessionHarness(vaultDir, host string, opts ...claude.Option) *claude.Harness {
-	opts = append(opts, claude.WithEnvFile(beadsEnvFile()), claude.WithClaudeEnvFile(claudeEnvFile()))
+// sessionTuning is what a Builder's session is given beyond its harness's own
+// settings: the rig's test commands, the nice level and job count it runs under,
+// and the timing tests it leaves out. Both harnesses take it; Codex ignores the
+// test commands, which it does not carry.
+type sessionTuning struct {
+	tests  map[string]string
+	nice   int
+	jobs   int
+	timing map[string][]string
+}
+
+// hostHarnessName is the harness this host starts its sessions with: next.harness
+// of config.toml, claude when it says nothing (mw-9rp4hu.14). A value that cannot
+// be read is said once on stderr and leaves the host on claude, since a session
+// start has nowhere to refuse; mw doctor reads the same key and reports it.
+func hostHarnessName() domain.Harness {
+	name, err := config.NextHarness()
+	if err != nil {
+		harnessConfigWarning.Do(func() { fmt.Fprintf(os.Stderr, "mw: %v; starting sessions with %s\n", err, domain.HarnessClaude) })
+		return domain.HarnessClaude
+	}
+	return name
+}
+
+var harnessConfigWarning sync.Once
+
+// sessionHarness is the harness for the sessions this host starts, Claude Code
+// or Codex as next.harness says: reading beads.env first, then pointing bd at
+// the server host the home says (application.SessionServerHost), so that a move
+// of the home is followed by every session without anyone rewriting the file.
+// That host is also set in this process's environment, where the bd that mw
+// runs itself reads it. A host that cannot be told — no beads_sync auto, no home
+// file, a config error that the commands around this one report on their own —
+// leaves both as they were.
+func sessionHarness(vaultDir, host string, tuning ...sessionTuning) application.Harness {
+	var t sessionTuning
+	if len(tuning) > 0 {
+		t = tuning[0]
+	}
+	if hostHarnessName() == domain.HarnessCodex {
+		server := sessionServerHost(vaultDir, host)
+		opts := []codex.Option{codex.WithEnvFile(beadsEnvFile()), codex.WithNice(t.nice), codex.WithJobs(t.jobs), codex.WithTimingTests(t.timing)}
+		if server != "" {
+			opts = append(opts, codex.WithBeadsServerHost(server))
+		}
+		return codex.New(opts...)
+	}
+	return claudeHarness(vaultDir, host, t)
+}
+
+// claudeHarness is the Claude Code harness, for the sessions that only it can
+// start: the interactive windows of the seats (SeatSession), which Codex has no
+// adapter for yet, and a Builder's session on a host that has not chosen codex.
+func claudeHarness(vaultDir, host string, t sessionTuning) *claude.Harness {
+	opts := []claude.Option{claude.WithEnvFile(beadsEnvFile()), claude.WithClaudeEnvFile(claudeEnvFile()),
+		claude.WithTests(t.tests), claude.WithNice(t.nice), claude.WithJobs(t.jobs), claude.WithTimingTests(t.timing)}
+	if server := sessionServerHost(vaultDir, host); server != "" {
+		opts = append(opts, claude.WithBeadsServerHost(server))
+	}
+	return claude.New(opts...)
+}
+
+// sessionServerHost is the host the sessions' bd reaches the beads database on,
+// "" when this host cannot be told; the host is also set in this process's
+// environment.
+func sessionServerHost(vaultDir, host string) string {
 	configured, err := hostBeadsSync()
 	if err != nil {
-		return claude.New(opts...)
+		return ""
 	}
 	override, err := config.BeadsServerHost()
 	if err != nil {
-		return claude.New(opts...)
+		return ""
 	}
 	info, statErr := os.Stat(filepath.Join(vaultDir, ".beads", "dolt"))
 	server := application.SessionServerHost(context.Background(), mwVault(vaultDir, host), host, configured, override, statErr == nil && info.IsDir())
 	if server != "" {
 		_ = os.Setenv(config.BeadsDoltServerHostEnv, server)
-		opts = append(opts, claude.WithBeadsServerHost(server))
 	}
-	return claude.New(opts...)
+	return server
 }
 
 // hostSync is sync with this host's beads_sync mode and backup interval set
