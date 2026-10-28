@@ -16,6 +16,7 @@ type Harness string
 // The harnesses the factory can run a session in.
 const (
 	HarnessClaude Harness = "claude"
+	HarnessCodex  Harness = "codex"
 )
 
 // Model is the model a session runs on.
@@ -402,7 +403,7 @@ func (p Path) Validate() error {
 	switch {
 	case p.Model == "":
 		return ErrModelRequired
-	case !KnownModel(p.Model):
+	case !KnownModel(p.Harness, p.Model):
 		return UnknownValueError{Field: "model", Value: string(p.Model)}
 	}
 	switch {
@@ -453,17 +454,27 @@ func (s Story) PathFrom(defaults Path) (Path, error) {
 
 func knownHarness(h Harness) bool {
 	switch h {
-	case HarnessClaude:
+	case HarnessClaude, HarnessCodex:
 		return true
 	}
 	return false
 }
 
-// KnownModel reports whether a model is one the factory runs on.
-func KnownModel(m Model) bool {
-	switch m {
-	case ModelFable, ModelOpus, ModelSonnet, ModelHaiku:
-		return true
+// CodexModelPrefix begins every model name Codex takes. Codex model ids have
+// no aliases and are passed through as written, so the factory keeps no list.
+const CodexModelPrefix = "gpt-"
+
+// KnownModel reports whether a model is one the harness runs on: a Claude
+// alias under claude, any gpt-* name under codex.
+func KnownModel(h Harness, m Model) bool {
+	switch h {
+	case HarnessClaude:
+		switch m {
+		case ModelFable, ModelOpus, ModelSonnet, ModelHaiku:
+			return true
+		}
+	case HarnessCodex:
+		return len(m) > len(CodexModelPrefix) && strings.HasPrefix(string(m), CodexModelPrefix)
 	}
 	return false
 }

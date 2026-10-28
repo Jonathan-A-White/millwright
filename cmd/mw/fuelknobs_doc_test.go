@@ -233,7 +233,7 @@ func checkMwCommand(args []string, code string) error {
 			if !slices.Contains(domain.Fields, field) {
 				return fmt.Errorf("a path has no key %s", field)
 			}
-			if field == "model" && !strings.HasPrefix(value, "<") && !domain.KnownModel(domain.Model(value)) {
+			if field == "model" && !strings.HasPrefix(value, "<") && !domain.KnownModel(domain.HarnessClaude, domain.Model(value)) {
 				return fmt.Errorf("the factory runs on no model %s", value)
 			}
 			if field == "effort" && !strings.HasPrefix(value, "<") && !domain.KnownEffort(domain.Effort(value)) {

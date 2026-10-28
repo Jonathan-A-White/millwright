@@ -626,7 +626,7 @@ func (h *Harness) SeatSession(l application.SeatLaunch) (application.WindowSpec,
 	if err := l.Validate(); err != nil {
 		return application.WindowSpec{}, err
 	}
-	if l.Model != "" && !domain.KnownModel(l.Model) {
+	if l.Model != "" && !domain.KnownModel(domain.HarnessClaude, l.Model) {
 		return application.WindowSpec{}, fmt.Errorf("starting the %s seat: %q is not a model the factory runs on", l.Seat, l.Model)
 	}
 	if l.Effort != "" && !domain.KnownEffort(l.Effort) {
