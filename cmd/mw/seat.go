@@ -11,6 +11,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
+	"github.com/Jonathan-A-White/millwright/infrastructure/codex"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/reaper"
@@ -81,7 +82,12 @@ func newSeatUpCmd() *cobra.Command {
 			"Nobody is assumed to be watching: the session is given a PermissionRequest hook that denies a\n" +
 			"permission it would otherwise ask for, so it never hangs on a prompt (the denial is in its\n" +
 			"transcript). --attended, for a seat brought up by hand to talk to, leaves the hook out and the\n" +
-			"session asks as Claude Code does.",
+			"session asks as Claude Code does.\n\n" +
+			"On a host whose config.toml says [next] harness = \"codex\" the session is an interactive Codex\n" +
+			"instead, in the vault, which reaches the charter by the AGENTS.md at its root (mw member init\n" +
+			"--harness codex lays it): codex -m <model> -c model_reasoning_effort=<effort> --sandbox\n" +
+			"workspace-write -c sandbox_workspace_write.network_access=true -a never, or -a on-request with\n" +
+			"--attended. With no --model or --effort it runs " + string(application.MemberCodexModel) + " at " + string(application.MemberCodexEffort) + ".",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := config.Vault()
@@ -98,15 +104,16 @@ func newSeatUpCmd() *cobra.Command {
 				return fmt.Errorf("finding the mw that is running, to arm a reaper with: %w", err)
 			}
 
+			harness, model, effort := seatHarness(dir, host, domain.Model(model), domain.Effort(effort))
 			windows := seatWindows()
 			_, err = application.SeatUp{
 				Seats:   vault.New(dir),
 				Windows: windows,
-				Harness: claudeHarness(dir, host, sessionTuning{}),
+				Harness: harness,
 				Seat:    args[0],
 				Host:    host,
-				Model:   domain.Model(model),
-				Effort:  domain.Effort(effort),
+				Model:   model,
+				Effort:  effort,
 				Reason:  reason,
 				Out:     cmd.OutOrStdout(),
 
@@ -124,6 +131,28 @@ func newSeatUpCmd() *cobra.Command {
 	cmd.Flags().StringVar(&effort, "effort", "", "how hard the session is asked to think (default: the harness's own)")
 	cmd.Flags().StringVar(&reason, "reason", "", "why the session is being started, told to it after the kickoff")
 	return cmd
+}
+
+// seatHarness is the harness a seat's own session is started with: Codex on a
+// host whose next.harness says codex, and Claude Code otherwise. A Codex seat
+// with no model or effort given runs the member's own (application.MemberCodexModel,
+// at MemberCodexEffort), since Codex has no alias of Claude's to leave to its
+// default; a model given is checked by the harness.
+func seatHarness(dir, host string, model domain.Model, effort domain.Effort) (application.SeatHarness, domain.Model, domain.Effort) {
+	if hostHarnessName() != domain.HarnessCodex {
+		return claudeHarness(dir, host, sessionTuning{}), model, effort
+	}
+	if model == "" {
+		model = application.MemberCodexModel
+	}
+	if effort == "" {
+		effort = application.MemberCodexEffort
+	}
+	opts := []codex.Option{codex.WithEnvFile(beadsEnvFile())}
+	if server := sessionServerHost(dir, host); server != "" {
+		opts = append(opts, codex.WithBeadsServerHost(server))
+	}
+	return codex.New(opts...), model, effort
 }
 
 // newSeatReapCmd builds `mw seat reap`: the watcher that closes a finished
