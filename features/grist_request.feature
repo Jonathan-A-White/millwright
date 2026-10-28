@@ -20,6 +20,18 @@ Feature: mw grist request links a bead to an app's request and tells the sender 
   adopted-as-setting when the Mayor marked it with mw grist request adopt. What
   was sent is kept in a state file for the bead, so a second pass sends nothing.
 
+  A request answered another way never sits at "filed". mw grist request
+  built-differently <bead> --note "<one sentence>" marks a linked request so the
+  next pass sends built-differently with the note as its reason (and, once the
+  bead is closed and its landing found, once more with the version, commit and
+  url as landed has them; a closed bead with no landing is told
+  built-differently without a version, with no note of each pass). mw grist
+  request <new-bead> <txid> on a request already linked to another bead moves
+  the link: the sender is sent moved with the new bead and its title as the
+  reason, the old bead is commented "request moved to <new>", and the new bead
+  is followed as a filed one (building, landed). mw fold supersede moves a
+  folded bead's request to the fold's story the same way. Each is sent once.
+
   Background:
     Given a mill on the host "laptop"
     And the app "cairn" is checked out here, its main at commit "0123456789abcdef0123456789abcdef01234567" with the grind "sweep"
@@ -262,3 +274,108 @@ Feature: mw grist request links a bead to an app's request and tells the sender 
     And the bead "mw-x.1" goes in progress
     And mw dispatch runs on "laptop" with a cap of 1 and the request status pass
     Then the status pass sent no status
+
+  Scenario: A request marked built-differently is told so with the note, and again with the version once its bead lands
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    And the rig "cairn" names the public url "https://github.com/Jonathan-A-White/cairn"
+    When mw grist request marks "mw-x.1" built differently with the note "The tutor already quizzes you on the words you tap."
+    Then mw grist request left without an error
+    And the bead "mw-x.1" is not closed
+    When the status pass runs
+    Then the status pass sent one "built-differently" status for that grist and "mw-x.1" carrying:
+      | field  | value                                              |
+      | reason | The tutor already quizzes you on the words you tap. |
+    When the status pass runs
+    Then the status pass sent no status
+    When the bead "mw-x.1" is closed after landing in version "0.1.86" at the commit "fedcba9876543210fedcba9876543210fedcba98"
+    And the status pass runs
+    Then the status pass sent one "built-differently" status for that grist and "mw-x.1" carrying:
+      | field   | value                                                                                    |
+      | reason  | The tutor already quizzes you on the words you tap.                                      |
+      | version | 0.1.86                                                                                   |
+      | commit  | fedcba9876543210fedcba9876543210fedcba98                                                 |
+      | url     | https://github.com/Jonathan-A-White/cairn/commit/fedcba9876543210fedcba9876543210fedcba98 |
+    When the status pass runs
+    Then the status pass sent no status
+
+  Scenario: A built-differently bead closed with no landing is told without a version and is not named each pass
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    And mw grist request marks "mw-x.1" built differently with the note "Already in the app."
+    And the bead "mw-x.1" is closed
+    And the status pass runs
+    Then the status pass sent one "built-differently" status for that grist and "mw-x.1" carrying:
+      | field  | value                |
+      | reason | Already in the app.  |
+    And the status pass noted nothing
+    When the status pass runs
+    Then the status pass sent no status
+    And the status pass noted nothing
+
+  Scenario: A built-differently mark needs a note and a linked bead
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    When mw grist request marks "mw-x.1" built differently with the note ""
+    Then mw grist request was refused saying "note"
+    When mw grist request marks "mw-x.9" built differently with the note "Already in the app."
+    Then mw grist request was refused saying "not linked"
+
+  Scenario: A request linked to a second bead is told moved with that bead and its title, and then follows the new bead
+    Given the bead "mw-x.2" is filed with the title "Quizzes on the words you tap"
+    And the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    And mw grist request links "mw-x.2" to that grist
+    Then mw grist request left without an error
+    And the bead "mw-x.2" has the metadata request as that grist's txid and request_app "cairn"
+    And the status pass sent one "moved" status for that grist and "mw-x.2" carrying:
+      | field  | value                         |
+      | reason | Quizzes on the words you tap  |
+    And the bead "mw-x.1" has the comment "request moved to mw-x.2"
+    When the status pass runs
+    Then the status pass sent no status
+    When the bead "mw-x.1" is closed
+    And the status pass runs
+    Then the status pass sent no status
+    And the status pass noted nothing
+    When the bead "mw-x.2" goes in progress
+    And the status pass runs
+    Then the status pass sent one "building" status for that grist and "mw-x.2"
+    When the bead "mw-x.2" is closed after landing in version "0.1.90" at the commit "fedcba9876543210fedcba9876543210fedcba98"
+    And the status pass runs
+    Then the status pass sent one "landed" status for that grist and "mw-x.2" carrying:
+      | field   | value                                    |
+      | version | 0.1.90                                   |
+      | commit  | fedcba9876543210fedcba9876543210fedcba98 |
+
+  Scenario: A move onto a bead that follows another request is refused and nothing is sent
+    Given the bead "mw-x.2" is filed with the title "Quizzes on the words you tap"
+    And the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a map." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.2" to that grist
+    And mw grist request links "mw-x.1" to that grist
+    Then mw grist request was refused saying "already follows"
+    And the mill sent no request status
+
+  Scenario: mw fold supersede moves a folded bead's request to the fold and tells its sender moved
+    Given the bead "mw-x.2" is filed with the title "[bug] cairn: Quiz fold: the quiz cards"
+    And the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    And the story "mw-x.2" is a fold of "mw-x.1"
+    When mw fold supersede runs on "mw-x.2" with the mill
+    Then the bead "mw-x.1" is closed as superseded by "mw-x.2"
+    And the fold supersede printed "request moved to mw-x.2"
+    And the status pass sent one "moved" status for that grist and "mw-x.2" carrying:
+      | field  | value                                 |
+      | reason | [bug] cairn: Quiz fold: the quiz cards |
+    When the status pass runs
+    Then the status pass sent no status
+    And the status pass noted nothing

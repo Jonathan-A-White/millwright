@@ -183,6 +183,40 @@ func newGristSendCmd() *cobra.Command {
 	return cmd
 }
 
+// newGristRequest is the link mw grist request makes, as this host is
+// configured; mw fold supersede moves a request through it too.
+func newGristRequest(out io.Writer) (application.GristRequest, error) {
+	host, err := config.Host()
+	if err != nil {
+		return application.GristRequest{}, err
+	}
+	vaultDir, err := config.Vault()
+	if err != nil {
+		return application.GristRequest{}, err
+	}
+	keys, err := gristKeys()
+	if err != nil {
+		return application.GristRequest{}, err
+	}
+	backend, err := posternBackend(keys)
+	if err != nil {
+		return application.GristRequest{}, err
+	}
+	stateDir, err := config.GristStateDir()
+	if err != nil {
+		return application.GristRequest{}, err
+	}
+	return application.GristRequest{
+		Postern:  backend,
+		Cipher:   postern.NewCipher(keys),
+		Keys:     keys,
+		Runs:     grist.NewRuns(stateDir),
+		Tracker:  mwGateway(vaultDir, host),
+		Requests: grist.NewRequests(stateDir),
+		Out:      out,
+	}, nil
+}
+
 // newGristRequestCmd builds `mw grist request`: a bead linked to the request a
 // forwarded grist carried, and the key that sent it told it was filed.
 func newGristRequestCmd() *cobra.Command {
@@ -196,41 +230,22 @@ func newGristRequestCmd() *cobra.Command {
 			"which the app pulls as it pulls an answer. A txid the mill did not forward, or a bead that is\n" +
 			"not there, is refused and nothing is sent. Run again, it sends the status again. The link is\n" +
 			"kept under the mill's state directory (requests/<bead>.json) for mw grist status to follow;\n" +
-			"decline and adopt mark it.",
+			"decline, adopt and built-differently mark it.\n\n" +
+			"On a request already linked to another bead, it moves the link instead: the sender is sent\n" +
+			"\"moved\" (bead: the new bead, reason: its title), the old bead is commented \"request moved to\n" +
+			"<new>\" and followed no more, and the new bead is followed as a filed one (building, landed).\n" +
+			"A bead that follows a different request already is refused. mw fold supersede moves a folded\n" +
+			"bead's request to the fold's story the same way.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			host, err := config.Host()
+			request, err := newGristRequest(cmd.OutOrStdout())
 			if err != nil {
 				return err
 			}
-			vaultDir, err := config.Vault()
-			if err != nil {
-				return err
-			}
-			keys, err := gristKeys()
-			if err != nil {
-				return err
-			}
-			backend, err := posternBackend(keys)
-			if err != nil {
-				return err
-			}
-			stateDir, err := config.GristStateDir()
-			if err != nil {
-				return err
-			}
-			return application.GristRequest{
-				Postern:  backend,
-				Cipher:   postern.NewCipher(keys),
-				Keys:     keys,
-				Runs:     grist.NewRuns(stateDir),
-				Tracker:  mwGateway(vaultDir, host),
-				Requests: grist.NewRequests(stateDir),
-				Out:      cmd.OutOrStdout(),
-			}.Run(cmd.Context(), args[0], args[1])
+			return request.Run(cmd.Context(), args[0], args[1])
 		},
 	}
-	cmd.AddCommand(newGristRequestDeclineCmd(), newGristRequestAdoptCmd())
+	cmd.AddCommand(newGristRequestDeclineCmd(), newGristRequestAdoptCmd(), newGristRequestBuiltCmd())
 	return cmd
 }
 
@@ -295,18 +310,50 @@ func newGristRequestAdoptCmd() *cobra.Command {
 	return cmd
 }
 
+// newGristRequestBuiltCmd builds `mw grist request built-differently`: a
+// linked request marked as answered another way.
+func newGristRequestBuiltCmd() *cobra.Command {
+	var note string
+	cmd := &cobra.Command{
+		Use:   "built-differently <bead> --note <sentence>",
+		Short: "Mark a linked request as answered another way, so it never sits at filed",
+		Long: "built-differently marks the request a bead was linked to as built a different way from the one\n" +
+			"asked for (or already there). It closes nothing and sends nothing: the next mw grist status\n" +
+			"tells the key that sent the request built-differently, with the note as its reason, and once\n" +
+			"the bead is closed and its landing found, once more with the version, commit and url as landed\n" +
+			"has them. A closed bead with no landing is told without a version, and is not named each pass.\n" +
+			"The note is one sentence the person reads; it is required.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			stateDir, err := config.GristStateDir()
+			if err != nil {
+				return err
+			}
+			return application.GristRequestBuilt{Requests: grist.NewRequests(stateDir), Out: cmd.OutOrStdout()}.
+				Run(cmd.Context(), args[0], note)
+		},
+	}
+	cmd.Flags().StringVar(&note, "note", "", "one sentence saying how the request was answered (required)")
+	_ = cmd.MarkFlagRequired("note")
+	return cmd
+}
+
 // newGristStatusCmd builds `mw grist status`: one pass that sends each linked
 // request's sender the change of its bead.
 func newGristStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Tell the senders of linked requests what became of them: building, landed, declined, adopted",
+		Short: "Tell the senders of linked requests what became of them: building, landed, declined, adopted, built differently, moved",
 		Long: "status is one pass over the requests mw grist request linked to beads. For each it sends\n" +
 			"the key that sent the request a sealed request-status record when its bead has changed since\n" +
 			"the last one sent (postern's docs/protocol.md section 19): building once the bead is in\n" +
 			"progress; landed, with the version and commit of the story's landing and a url when the rig's\n" +
 			"file in the vault names public_url, once it is closed; declined (mw grist request decline) or\n" +
-			"adopted-as-setting (mw grist request adopt) when it was marked so. Each change is sent once.\n" +
+			"adopted-as-setting (mw grist request adopt) or built-differently (mw grist request\n" +
+			"built-differently, with its note as the reason, and the version, commit and url once the bead\n" +
+			"landed) when it was marked so. A request moved to another bead (mw grist request <new-bead>\n" +
+			"<txid>, or mw fold supersede) was sent moved when it moved, and is followed on the new bead.\n" +
+			"Each change is sent once.\n" +
 			"mw dispatch runs it on the host that is home, after its grind pass.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

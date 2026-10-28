@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 
 	"github.com/spf13/cobra"
 )
@@ -47,15 +48,27 @@ func newFoldSupersedeCmd() *cobra.Command {
 			"already closed, and one whose id is not in the fold's acceptance criteria are left alone and said. For\n" +
 			"each other bug, every open story that waits on it now waits on the fold (a bug of the same fold: nothing;\n" +
 			"a bug of another fold: that fold waits on this one; an edge the tracker refuses as a cycle is left out and\n" +
-			"said), an open story held while it is moved; then the bug is closed as superseded by the fold. One line\n" +
-			"per bug. --dry-run writes nothing and prints the same plan.\n\n" + application.FoldRule,
+			"said), an open story held while it is moved; the request a bug is linked to (mw grist request), on a\n" +
+			"host that runs the mill, moves to the fold and its sender is sent \"moved\"; then the bug is closed as\n" +
+			"superseded by the fold. One line per bug. --dry-run writes nothing and prints the same plan.\n\n" + application.FoldRule,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, err := beads.FromConfig()
 			if err != nil {
 				return err
 			}
-			_, err = application.FoldSupersede{Tracker: gateway, Fold: args[0], DryRun: dryRun, Out: cmd.OutOrStdout()}.Run(cmd.Context())
+			supersede := application.FoldSupersede{Tracker: gateway, Fold: args[0], DryRun: dryRun, Out: cmd.OutOrStdout()}
+			// A host that runs the mill moves the requests it follows.
+			if configured, err := config.GristConfigured(); err != nil {
+				return err
+			} else if configured {
+				request, err := newGristRequest(nil)
+				if err != nil {
+					return err
+				}
+				supersede.Requests = request
+			}
+			_, err = supersede.Run(cmd.Context())
 			return err
 		},
 	}

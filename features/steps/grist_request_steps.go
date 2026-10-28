@@ -71,6 +71,13 @@ func registerGristRequest(ctx *godog.ScenarioContext, c *gristContext) {
 	})
 
 	ctx.Given(`^the bead "([^"]*)" is filed$`, r.beadIsFiled)
+	ctx.Given(`^the bead "([^"]*)" is filed with the title "([^"]*)"$`, r.beadIsFiledTitled)
+	ctx.Step(`^the story "([^"]*)" is a fold of "([^"]*)"$`, r.isAFoldOf)
+	ctx.When(`^mw grist request marks "([^"]*)" built differently with the note "([^"]*)"$`, r.marksBuiltDifferently)
+	ctx.When(`^mw fold supersede runs on "([^"]*)" with the mill$`, r.foldSupersedeRuns)
+	ctx.Then(`^the bead "([^"]*)" has the comment "([^"]*)"$`, r.beadHasComment)
+	ctx.Then(`^the bead "([^"]*)" is closed as superseded by "([^"]*)"$`, r.isSupersededBy)
+	ctx.Then(`^the fold supersede printed "([^"]*)"$`, r.foldPrinted)
 	ctx.When(`^mw grist request links "([^"]*)" to that grist$`, r.linksThatGrist)
 	ctx.When(`^mw grist request links "([^"]*)" to the txid "([^"]*)"$`, r.links)
 	ctx.Then(`^the forward mail's last line before the vision section is the command "([^"]*)" and the grist's txid$`, r.mailEndsWithCommand)
@@ -254,6 +261,10 @@ func (r *requestContext) sentOneCarrying(status, bead string, table *godog.Table
 }
 
 func (r *requestContext) beadIsFiled(bead string) error {
+	return r.beadIsFiledTitled(bead, "A request from the app")
+}
+
+func (r *requestContext) beadIsFiledTitled(bead, title string) error {
 	var path domain.Path
 	for field, value := range map[string]string{
 		"rig": "cairn", "branch": "main", "harness": "claude", "model": "sonnet", "effort": "high", "host": "laptop",
@@ -263,7 +274,63 @@ func (r *requestContext) beadIsFiled(bead string) error {
 		}
 	}
 	r.c.tracker.AddEpic("mw-x", path)
-	r.c.tracker.AddStory("mw-x", domain.Story{ID: bead, Title: "A request from the app"})
+	r.c.tracker.AddStory("mw-x", domain.Story{ID: bead, Title: title})
+	return nil
+}
+
+// isAFoldOf gives the story the description and acceptance criteria of a fold
+// that carries the bug, as mw fold supersede reads them.
+func (r *requestContext) isAFoldOf(fold, bug string) error {
+	if err := r.c.tracker.SetDescription(fold, "Folded bugs (each keeps its own check):\n\n• "+bug+": the bug\n"); err != nil {
+		return err
+	}
+	return r.c.tracker.SetAcceptance(fold, "1. Each folded bug's own check passes:\n• "+bug+": go test ./...\n")
+}
+
+func (r *requestContext) marksBuiltDifferently(bead, note string) error {
+	r.err = application.GristRequestBuilt{Requests: r.requests(), Out: &r.c.out}.Run(context.Background(), bead, note)
+	return nil
+}
+
+// foldSupersedeRuns is mw fold supersede with the mill configured, as cmd/mw
+// gives it the means to move a request.
+func (r *requestContext) foldSupersedeRuns(fold string) error {
+	r.before = len(r.c.backend.Delivered())
+	r.c.out.Reset()
+	_, r.err = application.FoldSupersede{Tracker: r.c.tracker, Requests: r.mover(), Fold: fold, Out: &r.c.out}.Run(context.Background())
+	if r.err != nil {
+		return fmt.Errorf("expected mw fold supersede to go well, it said: %v\n%s", r.err, r.c.out.String())
+	}
+	return nil
+}
+
+func (r *requestContext) mover() application.GristRequest {
+	return application.GristRequest{
+		Postern: r.c.backend, Cipher: &apptest.FakeCipher{From: r.c.millKey}, Keys: r.c.keys,
+		Runs: r.c.audio.runs(), Tracker: r.c.tracker, Requests: r.requests(), Now: r.c.audio.now, Out: &r.c.out,
+	}
+}
+
+func (r *requestContext) beadHasComment(bead, text string) error {
+	for _, comment := range r.c.tracker.Comments(bead) {
+		if strings.Contains(comment, text) {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected %s to be commented %q, its comments are %q", bead, text, r.c.tracker.Comments(bead))
+}
+
+func (r *requestContext) isSupersededBy(bead, fold string) error {
+	if got := r.c.tracker.SupersededBy(bead); got != fold {
+		return fmt.Errorf("expected %s superseded by %s, it is by %q", bead, fold, got)
+	}
+	return nil
+}
+
+func (r *requestContext) foldPrinted(text string) error {
+	if !strings.Contains(r.c.out.String(), text) {
+		return fmt.Errorf("expected mw fold supersede to print %q, it printed:\n%s", text, r.c.out.String())
+	}
 	return nil
 }
 
@@ -274,10 +341,7 @@ func (r *requestContext) linksThatGrist(bead string) error {
 func (r *requestContext) links(bead, txid string) error {
 	r.before = len(r.c.backend.Delivered())
 	r.c.out.Reset()
-	r.err = application.GristRequest{
-		Postern: r.c.backend, Cipher: &apptest.FakeCipher{From: r.c.millKey}, Keys: r.c.keys,
-		Runs: r.c.audio.runs(), Tracker: r.c.tracker, Requests: r.requests(), Now: r.c.audio.now, Out: &r.c.out,
-	}.Run(context.Background(), bead, txid)
+	r.err = r.mover().Run(context.Background(), bead, txid)
 	return nil
 }
 

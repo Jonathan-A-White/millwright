@@ -16,6 +16,12 @@ const (
 	GristRequestLanded   = "landed"
 	GristRequestDeclined = "declined"
 	GristRequestAdopted  = "adopted-as-setting"
+	// GristRequestBuiltDifferently says the request was answered another way
+	// (reason: the Mayor's note; version, commit and url once the bead landed);
+	// GristRequestMoved says it now belongs to another bead (bead: that bead,
+	// reason: its title).
+	GristRequestBuiltDifferently = "built-differently"
+	GristRequestMoved            = "moved"
 )
 
 // GristDeclineReason is one line of the menu a request is declined from: the
@@ -74,6 +80,17 @@ type GristRequestRecord struct {
 	Declined *GristDecline       `json:"declined,omitempty"`
 	// Setting is the setting the request was adopted as.
 	Setting string `json:"setting,omitempty"`
+	// Built is what the Mayor marked the request with when it was answered
+	// another way.
+	Built *GristBuilt `json:"built,omitempty"`
+	// MovedTo is the bead the request was moved to; a record that has it is
+	// no longer followed.
+	MovedTo string `json:"moved_to,omitempty"`
+}
+
+// GristBuilt is the sentence the Mayor marked a request built differently with.
+type GristBuilt struct {
+	Note string `json:"note"`
 }
 
 // GristRequestStore keeps the records of linked requests.
@@ -222,10 +239,46 @@ func (g GristRequestAdopt) Run(ctx context.Context, bead, setting string) error 
 	return nil
 }
 
+// GristRequestBuilt is `mw grist request built-differently <bead> --note
+// <line>`: it marks a linked request as answered another way. It closes nothing
+// and sends nothing: the next mw grist status sends built-differently.
+type GristRequestBuilt struct {
+	Requests GristRequestStore
+	Out      io.Writer
+}
+
+// Run marks bead built differently, with the note as the reason the person is
+// shown. A bead that was never linked, and an empty note, are refused.
+func (g GristRequestBuilt) Run(ctx context.Context, bead, note string) error {
+	bead, note = strings.TrimSpace(bead), strings.TrimSpace(note)
+	if bead == "" || g.Requests == nil {
+		return fmt.Errorf("mw grist request built-differently: give a bead and a note")
+	}
+	if note == "" {
+		return fmt.Errorf("mw grist request built-differently: give --note, one sentence saying how the request was answered")
+	}
+	record, ok, err := g.Requests.Get(ctx, bead)
+	if err != nil {
+		return fmt.Errorf("mw grist request built-differently: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("mw grist request built-differently: %s is not linked to a request here: run mw grist request %s <txid> first", bead, bead)
+	}
+	record.Built = &GristBuilt{Note: note}
+	if err := g.Requests.Keep(ctx, record); err != nil {
+		return fmt.Errorf("mw grist request built-differently: %w", err)
+	}
+	if g.Out != nil {
+		fmt.Fprintf(g.Out, "%s is marked built differently; its sender is told on the next pass\n", bead)
+	}
+	return nil
+}
+
 // GristStatus is `mw grist status`: one pass over the requests the mill linked
 // to beads, sending each sender the change of its bead since the status last
 // sent: building when the bead is claimed, landed when it is closed with a
-// landing, declined or adopted-as-setting when the Mayor marked it so. A
+// landing, declined, adopted-as-setting or built-differently when the Mayor
+// marked it so. A request moved to another bead is followed no more. A
 // change is sent once; a pass with nothing new sends nothing.
 type GristStatus struct {
 	Postern Postern
@@ -299,6 +352,10 @@ func (g GristStatus) Run(ctx context.Context) (GristStatusReport, error) {
 // one looks at one linked request and sends its change, returning the line
 // that says so, or "" when there is none.
 func (g GristStatus) one(ctx context.Context, record GristRequestRecord) (string, error) {
+	if record.MovedTo != "" {
+		// The request is followed on the bead it moved to.
+		return "", nil
+	}
 	detail, err := g.Tracker.ShowStory(ctx, record.Bead)
 	if err != nil {
 		return "", fmt.Errorf("reading the bead: %w", err)
@@ -307,6 +364,19 @@ func (g GristStatus) one(ctx context.Context, record GristRequestRecord) (string
 	switch {
 	case detail.Closed() && record.Declined != nil:
 		status.Status, status.Reason = GristRequestDeclined, record.Declined.reason()
+	case record.Built != nil:
+		// Told as soon as it is marked, and once more with the landing when the
+		// closed bead has one; a closed bead with none is not an error here.
+		status.Status, status.Reason = GristRequestBuiltDifferently, record.Built.Note
+		if detail.Closed() {
+			landing, found, err := g.landing(ctx, detail, record.Bead)
+			if err != nil {
+				return "", err
+			}
+			if found {
+				g.fillLanding(ctx, &status, detail, landing)
+			}
+		}
 	case detail.Closed():
 		landing, found, err := g.landing(ctx, detail, record.Bead)
 		if err != nil {
@@ -334,9 +404,9 @@ func (g GristStatus) one(ctx context.Context, record GristRequestRecord) (string
 	if record.Last != nil && sameStatus(*record.Last, status) {
 		return "", nil
 	}
-	// Building only follows filed: a bead that went back to work after it
-	// landed, or was declined, is not told it is being built.
-	if status.Status == GristRequestBuilding && record.Last != nil && record.Last.Status != GristRequestFiled {
+	// Building only follows filed, or moved: a bead that went back to work
+	// after it landed, or was declined, is not told it is being built.
+	if status.Status == GristRequestBuilding && record.Last != nil && record.Last.Status != GristRequestFiled && record.Last.Status != GristRequestMoved {
 		return "", nil
 	}
 	status.Ts = g.now().UnixMilli()

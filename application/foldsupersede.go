@@ -27,6 +27,15 @@ type FoldWriter interface {
 	SupersedeStory(ctx context.Context, id, with string) error
 }
 
+// RequestMover moves the request linked to a bead to another bead, telling its
+// sender (GristRequest is the one that does).
+type RequestMover interface {
+	// Linked reports whether the bead is linked to a request this host follows.
+	Linked(ctx context.Context, bead string) (bool, error)
+	// MoveRequest moves the request linked to from to to.
+	MoveRequest(ctx context.Context, from, to string) error
+}
+
 // FoldSupersede is `mw fold supersede <fold>`: each bug under 'Folded bugs' in
 // the fold's description is closed as superseded by the fold, after whatever
 // waited on it is moved to wait on the fold. A bug that a session works, one
@@ -35,9 +44,11 @@ type FoldWriter interface {
 // (mw-gq6.606).
 type FoldSupersede struct {
 	Tracker FoldWriter
-	Fold    string
-	DryRun  bool
-	Out     io.Writer
+	// Requests moves a folded bug's linked request to the fold; nil moves none.
+	Requests RequestMover
+	Fold     string
+	DryRun   bool
+	Out      io.Writer
 }
 
 // FoldSupersedeBug is what became of one folded bug.
@@ -50,6 +61,10 @@ type FoldSupersedeBug struct {
 	// ones whose edge would make a cycle and was not made.
 	Moved   []string `json:"moved,omitempty"`
 	LeftOut []string `json:"left_out,omitempty"`
+	// RequestMoved is true when the bug's linked request moved to the fold
+	// (would, in a dry run); RequestLeft says why one stayed on the bug.
+	RequestMoved bool   `json:"request_moved,omitempty"`
+	RequestLeft  string `json:"request_left,omitempty"`
 }
 
 // FoldSupersedeReport is what mw fold supersede did, or would do.
@@ -216,6 +231,22 @@ func (f FoldSupersede) supersede(ctx context.Context, bug *FoldSupersedeBug, byI
 		needs[waiter] = append(needs[waiter], f.Fold)
 		bug.Moved = append(bug.Moved, waiter)
 	}
+	if f.Requests != nil {
+		linked, err := f.Requests.Linked(ctx, bug.ID)
+		switch {
+		case err != nil:
+			bug.RequestLeft = err.Error()
+		case linked && f.DryRun:
+			bug.RequestMoved = true
+		case linked:
+			// Not fatal: a request that cannot move stays on the bug, said.
+			if err := f.Requests.MoveRequest(ctx, bug.ID, f.Fold); err != nil {
+				bug.RequestLeft = err.Error()
+			} else {
+				bug.RequestMoved = true
+			}
+		}
+	}
 	if f.DryRun {
 		return nil
 	}
@@ -281,6 +312,16 @@ func (f FoldSupersede) printBug(bug FoldSupersedeBug, failure error) {
 			moveVerb = "would move"
 		}
 		line += fmt.Sprintf("; %s %s to wait on %s", moveVerb, strings.Join(bug.Moved, ", "), f.Fold)
+	}
+	if bug.RequestMoved {
+		requestVerb := "request moved to"
+		if f.DryRun {
+			requestVerb = "request would move to"
+		}
+		line += fmt.Sprintf("; %s %s", requestVerb, f.Fold)
+	}
+	if bug.RequestLeft != "" {
+		line += fmt.Sprintf("; its request stays on it: %s", bug.RequestLeft)
 	}
 	if len(bug.LeftOut) > 0 {
 		line += fmt.Sprintf("; left out, it would make a cycle: %s waiting on %s", strings.Join(bug.LeftOut, ", "), f.Fold)
