@@ -130,6 +130,7 @@ type CrossHolding struct {
 	mu      sync.Mutex
 	lease   CrossSlotLease
 	trouble []string
+	fails   []*leaseRepeat // renewals that failed, each way once, with how often
 	lost    bool
 
 	cancel context.CancelFunc
@@ -332,7 +333,7 @@ func (h *CrossHolding) renew(ctx context.Context) bool {
 		if ctx.Err() != nil {
 			return false
 		}
-		h.trouble = append(h.trouble, fmt.Sprintf("the cross-host merge slot of %s could not be renewed: %v", h.rig, err))
+		h.failedRenewal(err)
 		return true
 	}
 	if read, ok := ReadCrossSlotLease(note); !ok || read.Token != h.lease.Token {
@@ -351,12 +352,25 @@ func (h *CrossHolding) renew(ctx context.Context) bool {
 	renewed.Expires = h.slot.now().Add(h.slot.ttl())
 	if err := h.slot.Notes.SetNote(ctx, h.key, renewed.Note()); err != nil {
 		if ctx.Err() == nil {
-			h.trouble = append(h.trouble, fmt.Sprintf("the cross-host merge slot of %s could not be renewed: %v", h.rig, err))
+			h.failedRenewal(err)
 		}
 		return true
 	}
 	h.lease = renewed
 	return true
+}
+
+// failedRenewal notes a renewal that failed, to be told once however often it
+// failed the same way (mw-gq6.821). The caller holds h.mu.
+func (h *CrossHolding) failedRenewal(err error) {
+	at := h.slot.now()
+	for _, f := range h.fails {
+		if f.same(err) {
+			f.again(at)
+			return
+		}
+	}
+	h.fails = append(h.fails, &leaseRepeat{err: err.Error(), count: 1, first: at, last: at})
 }
 
 // Release stops renewing the lease and gives the slot back, when it is still
@@ -373,6 +387,9 @@ func (h *CrossHolding) Release(ctx context.Context) []string {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		said = h.trouble
+		for _, f := range h.fails {
+			said = append(said, f.line(fmt.Sprintf("the cross-host merge slot of %s could not be renewed", h.rig)))
+		}
 		if h.lost {
 			return
 		}

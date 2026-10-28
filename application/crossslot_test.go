@@ -441,3 +441,76 @@ func TestACloseOutWaitingOnTheOtherHostTakesTheSlotAcrossHostsBeforeTheHoldersNe
 		t.Fatalf("expected W, waiting on the laptop, to land second, got %q", order)
 	}
 }
+
+// refusingRenewals writes the lease it is first asked to, and then refuses each
+// write with the error the test sets.
+type refusingRenewals struct {
+	*apptest.FakeTracker
+	mu  sync.Mutex
+	err error
+}
+
+func (r *refusingRenewals) refuse(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.err = err
+}
+
+func (r *refusingRenewals) SetNote(ctx context.Context, key, note string) error {
+	r.mu.Lock()
+	err := r.err
+	r.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return r.FakeTracker.SetNote(ctx, key, note)
+}
+
+// renewalsAt lets one renewal through after each of the given minutes of the
+// test's clock have passed since the last, refusing each with the next error.
+func renewalsAt(k *slotClock, notes *refusingRenewals, errs ...error) {
+	for _, err := range errs {
+		<-k.waiting
+		notes.refuse(err)
+		k.mu.Lock()
+		k.now = k.now.Add(slotTTL / 3)
+		k.mu.Unlock()
+		k.beat <- struct{}{}
+	}
+	<-k.waiting
+}
+
+func TestARenewalThatFailsTheSameWayAgainIsToldOnceWithHowManyTimesAndSinceWhen(t *testing.T) {
+	notes, k := &refusingRenewals{FakeTracker: apptest.NewFakeTracker()}, newSlotClock()
+	held, _ := testSlot(notes, k).Take(context.Background(), "lampas", "me")
+	if held == nil {
+		t.Fatal("expected the slot taken")
+	}
+	boom := errors.New("dolt server gone away")
+	renewalsAt(k, notes, boom, boom, boom)
+	notes.refuse(nil)
+	trouble := held.Release(context.Background())
+	want := "the cross-host merge slot of lampas could not be renewed (3 times from 23:03 to 23:09): dolt server gone away"
+	if len(trouble) != 1 || trouble[0] != want {
+		t.Fatalf("expected %q told once, got %q", want, trouble)
+	}
+}
+
+func TestRenewalsThatFailDifferentlyAndOneThatFailsAloneStayApart(t *testing.T) {
+	notes, k := &refusingRenewals{FakeTracker: apptest.NewFakeTracker()}, newSlotClock()
+	held, _ := testSlot(notes, k).Take(context.Background(), "lampas", "me")
+	if held == nil {
+		t.Fatal("expected the slot taken")
+	}
+	boom, gone := errors.New("dolt server gone away"), errors.New("timed out")
+	renewalsAt(k, notes, boom, gone, boom)
+	notes.refuse(nil)
+	trouble := held.Release(context.Background())
+	want := []string{
+		"the cross-host merge slot of lampas could not be renewed (2 times from 23:03 to 23:09): dolt server gone away",
+		"the cross-host merge slot of lampas could not be renewed: timed out",
+	}
+	if len(trouble) != len(want) || trouble[0] != want[0] || trouble[1] != want[1] {
+		t.Fatalf("expected %q, got %q", want, trouble)
+	}
+}
