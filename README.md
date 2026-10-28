@@ -2949,18 +2949,33 @@ and `mw dispatch` runs it on the host that is home, after its grind pass: `build
 once the bead is in progress; `landed` once it is closed, with the `version` and
 `commit` of the story's `Version <v> (<bead>)` commit on the rig's branch, and a
 `url` (the rig's `public_url` in `rigs/<rig>.toml`, then `/commit/<sha>`) only
-when the rig names one; `declined` and `adopted-as-setting` when the Mayor marked
-the request:
+when the rig names one; `declined`, `adopted-as-setting` and `built-differently`
+when the Mayor marked the request:
 
 ```sh
 mw grist request decline <bead> --reason outside|already-there|not-now [--note "<a line>"]
 mw grist request adopt <bead> --setting <name>
+mw grist request built-differently <bead> --note "<one sentence>"
 ```
 
-Neither closes the bead or sends anything itself. A declined request, once its
+None closes the bead or sends anything itself. A declined request, once its
 bead is closed, carries the reason's text (and the note after it); an adopted
 one, once closed with a landing, carries the setting and the landing. A reason
-that is not on the menu is refused with the menu.
+that is not on the menu is refused with the menu. A request marked
+`built-differently` (answered another way, so it never sits at `filed`) is sent
+that status at the next pass with the note as its `reason`, and once more with the
+`version`, `commit` and `url` as `landed` has them when its bead is closed and the
+landing found; a closed bead with no landing is told without a version, and is not
+named in a note each pass.
+
+A request can also move to another bead. `mw grist request <new-bead> <txid>` on a
+request already linked to another bead (it used to send `filed` again) moves the
+link: the sender is sent `moved` with `bead` the new bead and `reason` its title,
+the old bead is commented `request moved to <new>` and is followed no more, and the
+new bead is followed as a filed one (`building`, `landed`). A new bead that
+follows a different request already is refused. `mw fold supersede` does the same
+for each folded bug linked to a request, moving it to the fold's story (one `moved`
+each, on a host that runs the mill). Both are sent once.
 
 `mw grist send` is the terminal's sender: it sends a grist as a key it is
 given, as an app's phone would, and can wait for the answer.
