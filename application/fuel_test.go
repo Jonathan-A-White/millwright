@@ -301,3 +301,148 @@ func TestReadSessionResultNamesTheModelIDThatWroteTheMostOutput(t *testing.T) {
 		t.Errorf("expected no model id from a result with no modelUsage, got %q", none.ModelID)
 	}
 }
+
+const codexClean = `{"type":"thread.started","thread_id":"th-123"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"i0","type":"command_execution","command":"ls","exit_code":0}}
+{"type":"item.completed","item":{"id":"i1","type":"agent_message","text":"first thought"}}
+{"type":"item.completed","item":{"id":"i2","type":"file_change","changes":[]}}
+{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":10,"reasoning_output_tokens":4}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"i3","type":"agent_message","text":"all done"}}
+{"type":"turn.completed","usage":{"input_tokens":200,"cached_input_tokens":150,"output_tokens":20,"reasoning_output_tokens":8}}
+`
+
+func TestReadSessionResultFoldsACodexStreamIntoASessionResult(t *testing.T) {
+	result, err := application.ReadSessionResultWith(codexClean, application.ReadOptions{Model: "gpt-5-codex"})
+	if err != nil {
+		t.Fatalf("reading a Codex stream: %v", err)
+	}
+	if result.SessionID != "th-123" {
+		t.Errorf("SessionID = %q, want the thread id", result.SessionID)
+	}
+	if result.Said != "all done" {
+		t.Errorf("Said = %q, want the last agent message", result.Said)
+	}
+	if result.IsError || !result.Finished() {
+		t.Errorf("a stream that completed its turns is finished, got %+v", result)
+	}
+	want := application.Fuel{Input: 300, Output: 30, CacheRead: 210}
+	if result.Fuel != want {
+		t.Errorf("Fuel = %+v, want %+v", result.Fuel, want)
+	}
+	if !result.WholeSessionFuel {
+		t.Errorf("the turns' sum is the whole session's fuel")
+	}
+	if result.Turns != 4 {
+		t.Errorf("Turns = %d, want 4 item.completed", result.Turns)
+	}
+	if result.Model != "gpt-5-codex" {
+		t.Errorf("Model = %q, want the -m model", result.Model)
+	}
+	if result.CostUSD != 0 {
+		t.Errorf("CostUSD = %v, want 0", result.CostUSD)
+	}
+	if application.CappedAtTurns(result) {
+		t.Errorf("a finished stream is not capped")
+	}
+}
+
+func TestReadSessionResultReadsACodexStreamWithoutOptions(t *testing.T) {
+	result, err := application.ReadSessionResult(codexClean)
+	if err != nil || result.SessionID != "th-123" || result.Turns != 4 {
+		t.Fatalf("got %+v, %v", result, err)
+	}
+}
+
+func TestReadSessionResultMarksACodexStreamThatFailed(t *testing.T) {
+	cases := map[string]struct {
+		printed string
+		said    string
+	}{
+		"turn.failed": {
+			`{"type":"thread.started","thread_id":"t1"}
+{"type":"item.completed","item":{"type":"agent_message","text":"working"}}
+{"type":"turn.failed","error":{"message":"context window exceeded"}}
+`, "context window exceeded"},
+		"error event": {
+			`{"type":"thread.started","thread_id":"t1"}
+{"type":"error","message":"stream disconnected"}
+`, "stream disconnected"},
+		"no turn.completed": {
+			`{"type":"thread.started","thread_id":"t1"}
+{"type":"item.completed","item":{"type":"agent_message","text":"half way"}}
+`, "half way"},
+		"error after a completed turn": {
+			`{"type":"thread.started","thread_id":"t1"}
+{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":1}}
+{"type":"error","message":"late failure"}
+`, "late failure"},
+	}
+	for name, c := range cases {
+		result, err := application.ReadSessionResult(c.printed)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !result.IsError || result.Finished() {
+			t.Errorf("%s: expected an error that is not finished, got %+v", name, result)
+		}
+		if result.SessionID != "t1" {
+			t.Errorf("%s: SessionID = %q", name, result.SessionID)
+		}
+		if !strings.Contains(result.Said, c.said) {
+			t.Errorf("%s: Said = %q, want it to contain %q", name, result.Said, c.said)
+		}
+		if application.CappedAtTurns(result) {
+			t.Errorf("%s: a failure is not a turn cap", name)
+		}
+	}
+}
+
+func TestReadSessionResultSkipsLinesAStreamPrintedThatAreNotEvents(t *testing.T) {
+	result, err := application.ReadSessionResult("Reading prompt from stdin...\n" + codexClean + "not json\n")
+	if err != nil || result.SessionID != "th-123" || result.IsError {
+		t.Fatalf("got %+v, %v", result, err)
+	}
+}
+
+func TestAnEmptyResultAfterExit124IsACodexTimeout(t *testing.T) {
+	result, err := application.ReadSessionResultWith("", application.ReadOptions{ExitCode: 124, Model: "gpt-5-codex"})
+	if err != nil {
+		t.Fatalf("an empty file after a timeout is a result: %v", err)
+	}
+	if result.Subtype != "codex_timeout" {
+		t.Errorf("Subtype = %q", result.Subtype)
+	}
+	if !result.IsError || result.Finished() {
+		t.Errorf("a timeout is not finished: %+v", result)
+	}
+	if !application.CappedAtTurns(result) {
+		t.Errorf("a timeout counts as the turn cap")
+	}
+	if result.Model != "gpt-5-codex" {
+		t.Errorf("Model = %q", result.Model)
+	}
+
+	for _, code := range []int{0, 1} {
+		if _, err := application.ReadSessionResultWith("", application.ReadOptions{ExitCode: code}); err == nil {
+			t.Errorf("an empty file after exit %d is still refused", code)
+		}
+	}
+	if _, err := application.ReadSessionResult(""); err == nil {
+		t.Errorf("an empty file with no exit code is still refused")
+	}
+}
+
+func TestACodexTimeoutWithPartialStreamIsCapped(t *testing.T) {
+	partial := `{"type":"thread.started","thread_id":"t9"}
+{"type":"item.completed","item":{"type":"agent_message","text":"still going"}}
+`
+	result, err := application.ReadSessionResultWith(partial, application.ReadOptions{ExitCode: 124})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Subtype != application.CodexTimeoutSubtype || !application.CappedAtTurns(result) || result.SessionID != "t9" {
+		t.Errorf("got %+v", result)
+	}
+}

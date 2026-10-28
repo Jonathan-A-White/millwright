@@ -275,9 +275,40 @@ func (f resultFile) modelID() string {
 // all is an error: it is the difference between a session that failed and a
 // session that never ran, and a close-out must not mistake one for the other.
 func ReadSessionResult(printed string) (SessionResult, error) {
+	return ReadSessionResultWith(printed, ReadOptions{})
+}
+
+// ReadOptions is what a caller knows about the session that its result file
+// does not say: the model the harness was started with (a Codex stream names
+// none) and the exit status of the harness's process, where it kept one. The
+// zero value is a caller that knows neither.
+type ReadOptions struct {
+	Model    string
+	ExitCode int
+}
+
+// CodexTimeoutExit is the exit status timeout(1) leaves when it killed the
+// command, and CodexTimeoutSubtype is the Subtype of a Codex session that was
+// ended that way: Codex has no turn cap of its own, so the clock is its cap.
+const (
+	CodexTimeoutExit    = 124
+	CodexTimeoutSubtype = "codex_timeout"
+)
+
+// ReadSessionResultWith reads what a session reported, in either harness's
+// shape: Claude's one JSON object, or the JSONL stream `codex exec --json`
+// prints, folded into the same SessionResult.
+func ReadSessionResultWith(printed string, opts ReadOptions) (SessionResult, error) {
 	trimmed := strings.TrimSpace(printed)
 	if trimmed == "" {
+		if opts.ExitCode == CodexTimeoutExit {
+			return SessionResult{Subtype: CodexTimeoutSubtype, IsError: true, Model: opts.Model,
+				Said: "the Codex session was ended by its time limit before it printed anything"}, nil
+		}
 		return SessionResult{}, fmt.Errorf("the session's result is empty")
+	}
+	if events, ok := codexEvents(trimmed); ok {
+		return foldCodex(events, opts), nil
 	}
 
 	var file resultFile
@@ -358,4 +389,115 @@ func Clock(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	}
+}
+
+// codexEvent is one line of `codex exec --json`, read leniently like the
+// Claude result: only what the fold uses.
+type codexEvent struct {
+	Type     string `json:"type"`
+	ThreadID string `json:"thread_id"`
+	Message  string `json:"message"`
+	Error    *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+	Item struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"item"`
+	Usage struct {
+		Input     int `json:"input_tokens"`
+		CacheRead int `json:"cached_input_tokens"`
+		Output    int `json:"output_tokens"`
+	} `json:"usage"`
+}
+
+// codexEvents reads the lines of a Codex stream that are events and says
+// whether the text is one: some line is an object whose type is one a Codex
+// stream names. Lines that are not JSON objects (a banner on stdout, a
+// truncated last line) are skipped; a Claude result never matches, its type
+// being "result".
+func codexEvents(text string) ([]codexEvent, bool) {
+	var events []codexEvent
+	codex := false
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var event codexEvent
+		if json.Unmarshal([]byte(line), &event) != nil || event.Type == "" {
+			continue
+		}
+		events = append(events, event)
+		switch {
+		case strings.HasPrefix(event.Type, "thread."), strings.HasPrefix(event.Type, "turn."),
+			strings.HasPrefix(event.Type, "item."), event.Type == "error":
+			codex = true
+		}
+	}
+	return events, codex
+}
+
+// foldCodex folds a Codex stream into a SessionResult. The thread id is the
+// session id; the turns are the completed items; the fuel is summed over
+// turn.completed with the cached input as CacheRead (Codex reports input_tokens
+// whole, cached included, and Input here is that figure as reported). It is a
+// failure when a turn failed, an error was printed or no turn completed, and a
+// stream cut by the time limit (exit 124) is the turn cap's twin. Codex prices
+// nothing, so CostUSD stays 0.
+func foldCodex(events []codexEvent, opts ReadOptions) SessionResult {
+	result := SessionResult{Model: opts.Model, WholeSessionFuel: true}
+	var agent, failure, fallback string
+	completed := 0
+	for _, event := range events {
+		switch event.Type {
+		case "thread.started":
+			result.SessionID = event.ThreadID
+		case "item.completed":
+			result.Turns++
+			if event.Item.Type == "agent_message" {
+				agent = event.Item.Text
+			}
+		case "turn.completed":
+			completed++
+			result.Fuel.Input += event.Usage.Input
+			result.Fuel.Output += event.Usage.Output
+			result.Fuel.CacheRead += event.Usage.CacheRead
+			result.Usage = Fuel{Input: event.Usage.Input, Output: event.Usage.Output, CacheRead: event.Usage.CacheRead}
+		case "turn.failed":
+			failure = firstOf(codexErrorText(event), failure, "the Codex turn failed")
+			result.Subtype = "turn_failed"
+		case "error":
+			failure = firstOf(codexErrorText(event), failure, "Codex printed an error")
+			if result.Subtype == "" {
+				result.Subtype = "error"
+			}
+		}
+	}
+	switch {
+	case opts.ExitCode == CodexTimeoutExit:
+		result.Subtype, result.IsError = CodexTimeoutSubtype, true
+		fallback = "the Codex session was ended by its time limit"
+	case failure != "":
+		result.IsError = true
+	case completed == 0:
+		result.IsError, result.Subtype = true, "incomplete"
+		fallback = "the Codex stream ended without a completed turn"
+	default:
+		result.Subtype = "success"
+	}
+	if result.IsError {
+		result.Said = firstOf(failure, agent, fallback)
+	} else {
+		result.Said = firstOf(agent)
+	}
+	return result
+}
+
+// codexErrorText is the message of an error or turn.failed event.
+func codexErrorText(event codexEvent) string {
+	if event.Error != nil && strings.TrimSpace(event.Error.Message) != "" {
+		return event.Error.Message
+	}
+	return event.Message
 }

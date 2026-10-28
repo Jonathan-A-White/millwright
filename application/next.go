@@ -3293,7 +3293,12 @@ const MaxTurnsSubtype = "error_max_turns"
 
 // CappedAtTurns reports whether the harness stopped the session at its turn cap
 // (mw-1ljpo9.6).
-func CappedAtTurns(result SessionResult) bool { return result.Subtype == MaxTurnsSubtype }
+//
+// A Codex session ended by its time limit (CodexTimeoutSubtype) counts as one:
+// Codex has no turn cap, so its clock is the cap.
+func CappedAtTurns(result SessionResult) bool {
+	return result.Subtype == MaxTurnsSubtype || result.Subtype == CodexTimeoutSubtype
+}
 
 // LandedAfterTurnCap ends the outcome of a story whose session was cut at the
 // turn cap after its closing comment and which landed all the same (mw-gq6.595).
