@@ -224,3 +224,32 @@ func TestClaimStoryAsksBdToRemoveEveryRunLabel(t *testing.T) {
 		}
 	}
 }
+
+// ClearRunState is one update that removes every run:* label and does nothing
+// else, so a retry's give-back leaves no run:queued for dispatch to pass the
+// story over for (mw-gq6.823).
+func TestClearRunStateAsksBdToRemoveEveryRunLabelAndNothingElse(t *testing.T) {
+	gateway, log := leaseStandIn(t, map[string]string{
+		"update": `[{"id": "t-1"}]`,
+	})
+	if err := gateway.ClearRunState(context.Background(), "t-1"); err != nil {
+		t.Fatalf("clearing: %v", err)
+	}
+	asked, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("reading what bd was asked: %v", err)
+	}
+	if !strings.Contains(string(asked), "update t-1 --remove-label run:") {
+		t.Fatalf("expected one update removing labels from t-1, got %q", asked)
+	}
+	for _, run := range application.RunStates {
+		if want := "--remove-label run:" + run; !strings.Contains(string(asked), want) {
+			t.Errorf("expected bd to be asked %q, got %q", want, asked)
+		}
+	}
+	for _, not := range []string{"--claim", "--status", "--assignee"} {
+		if strings.Contains(string(asked), not) {
+			t.Errorf("expected only labels to change, bd was asked %q", asked)
+		}
+	}
+}

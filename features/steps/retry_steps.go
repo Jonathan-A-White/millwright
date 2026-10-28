@@ -98,6 +98,9 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the story "([^"]*)" is claimed by "([^"]*)"$`, c.theStoryIsClaimedBy)
 	ctx.Given(`^the story "([^"]*)" has had (\d+) dead-pane refunds?$`, c.theStoryHasHadRefunds)
 	ctx.Given(`^the vault cannot reach its origin$`, c.theVaultCannotReachItsOrigin)
+	ctx.Given(`^the story "([^"]*)" is queued for its rig's batch$`, c.theStoryIsQueuedForItsBatch)
+	ctx.Then(`^the story "([^"]*)" carries no run state label$`, c.theStoryCarriesNoRunStateLabel)
+	ctx.Then(`^the next dispatch tick does not pass "([^"]*)" as queued for its batch$`, c.dispatchDoesNotPassItAsQueued)
 
 	ctx.When(`^mw retries "([^"]*)"$`, c.mwRetries)
 	ctx.When(`^mw retries "([^"]*)" with --hold$`, c.mwRetriesHolding)
@@ -768,6 +771,44 @@ func (c *retryContext) retryTheWorktreeIsStillThere(id string) error {
 	dir := application.WorktreeDir(c.rig, id)
 	if _, err := os.Stat(dir); err != nil {
 		return fmt.Errorf("expected the worktree %s to be left where it was: %w", dir, err)
+	}
+	return nil
+}
+
+// theStoryIsQueuedForItsBatch is the state mw next leaves a story whose gate
+// passed on a rig that lands in batches: run:queued, the claim kept.
+func (c *retryContext) theStoryIsQueuedForItsBatch(id string) error {
+	return c.tracker.SetStoryState(context.Background(), id, application.RunState, application.RunQueued,
+		"queued for the rig's batch")
+}
+
+// theStoryCarriesNoRunStateLabel checks no run:* label is left on the story, as
+// a claim leaves none (ClaimStory), so that the next claim writes its own.
+func (c *retryContext) theStoryCarriesNoRunStateLabel(id string) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	for _, label := range detail.Labels {
+		if strings.HasPrefix(label, application.RunState+":") {
+			return fmt.Errorf("expected %s to carry no %s: label, got %v", id, application.RunState, detail.Labels)
+		}
+	}
+	if state, err := c.tracker.StoryState(context.Background(), id, application.RunState); err != nil || state != "" {
+		return fmt.Errorf("expected %s to have no run state, got %q (%v)", id, state, err)
+	}
+	return nil
+}
+
+// dispatchDoesNotPassItAsQueued asks the question dispatch's queued gate asks of
+// a story it reads off the listing (QueuedForBatch), of the story as it is now.
+func (c *retryContext) dispatchDoesNotPassItAsQueued(id string) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if application.QueuedForBatch(detail) {
+		return fmt.Errorf("dispatch would pass %s as queued for its batch: labels %v", id, detail.Labels)
 	}
 	return nil
 }

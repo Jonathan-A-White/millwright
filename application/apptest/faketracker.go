@@ -1720,17 +1720,31 @@ func (f *FakeTracker) ClaimStory(_ context.Context, id string) error {
 		s.detail.LeaseExpires = f.now().Add(LeaseTTL)
 		// A run state an earlier attempt left on the story is not this claim's:
 		// it would read as the claim being refused before anything started.
-		delete(s.states, application.RunState)
-		delete(s.reasons, application.RunState)
-		kept := s.detail.Labels[:0:0]
-		for _, label := range s.detail.Labels {
-			if !strings.HasPrefix(label, application.RunState+":") {
-				kept = append(kept, label)
-			}
-		}
-		s.detail.Labels = kept
+		s.clearRunState()
 		return nil
 	})
+}
+
+// ClearRunState implements application.WorkTracker: the run state and every
+// run:* label off the story, as ClaimStory leaves it.
+func (f *FakeTracker) ClearRunState(_ context.Context, id string) error {
+	f.note("ClearRunState")
+	return f.write(id, func(s *fakeStory) error {
+		s.clearRunState()
+		return nil
+	})
+}
+
+func (s *fakeStory) clearRunState() {
+	delete(s.states, application.RunState)
+	delete(s.reasons, application.RunState)
+	kept := s.detail.Labels[:0:0]
+	for _, label := range s.detail.Labels {
+		if !strings.HasPrefix(label, application.RunState+":") {
+			kept = append(kept, label)
+		}
+	}
+	s.detail.Labels = kept
 }
 
 // SetStoryMetadata implements application.WorkTracker.

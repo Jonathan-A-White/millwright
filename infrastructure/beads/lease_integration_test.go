@@ -203,6 +203,41 @@ func TestAClaimClearsTheRunStateAnEarlierAttemptLeft(t *testing.T) {
 	}
 }
 
+// A real bd's ClearRunState takes the run:queued a retried story would keep off
+// it and leaves its other labels alone (mw-gq6.823).
+func TestClearRunStateTakesRunQueuedOffAStoryInARealBd(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	epicID := bdRun(t, vault, beads.Program, "create", "A walking skeleton", "-t", "epic", "--silent")
+	storyID := bdRun(t, vault, beads.Program, "create", "A story queued for its batch",
+		"--parent", epicID, "--labels", "needs-governor", "--silent")
+
+	vps := beads.New(vault, beads.WithActor("mw@vps"))
+	if err := vps.SetStoryState(ctx, storyID, application.RunState, application.RunQueued, "queued"); err != nil {
+		t.Fatalf("recording run=queued on %s: %v", storyID, err)
+	}
+	if err := vps.ClearRunState(ctx, storyID); err != nil {
+		t.Fatalf("clearing the run state of %s: %v", storyID, err)
+	}
+	story, err := vps.ShowStory(ctx, storyID)
+	if err != nil {
+		t.Fatalf("showing %s: %v", storyID, err)
+	}
+	if application.QueuedForBatch(story) {
+		t.Errorf("expected run:%s cleared, labels are %v", application.RunQueued, story.Labels)
+	}
+	kept := false
+	for _, label := range story.Labels {
+		kept = kept || label == "needs-governor"
+	}
+	if !kept {
+		t.Errorf("expected the other labels left alone, labels are %v", story.Labels)
+	}
+}
+
 // mw-gq6.412: the beads that name failing smoke examples are found with one
 // list of a real bd, and a closed one names nothing.
 func TestAClosedBeadNamesNoSmokeExamplesInARealBd(t *testing.T) {

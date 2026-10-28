@@ -434,6 +434,18 @@ func (g *Gateway) HoldClaimHeldBy(ctx context.Context, id, holder string) error 
 	return g.giveClaimBack(ctx, id, holder, StatusDeferred)
 }
 
+// ClearRunState implements application.WorkTracker: the one `bd update` that
+// ClaimStory's run:* removal is, without the claim. bd takes a label the story
+// does not carry as nothing to do.
+func (g *Gateway) ClearRunState(ctx context.Context, id string) error {
+	args := []string{"update", id}
+	for _, run := range application.RunStates {
+		args = append(args, "--remove-label", application.RunState+":"+run)
+	}
+	_, err := g.call(ctx, args...)
+	return err
+}
+
 // giveClaimBack clears the assignee and sets status, guarded on holder.
 func (g *Gateway) giveClaimBack(ctx context.Context, id, holder, status string) error {
 	if holder == "" {

@@ -718,6 +718,14 @@ type WorkTracker interface {
 	// conditional on holder the same way.
 	HoldClaimHeldBy(ctx context.Context, id, holder string) error
 
+	// ClearRunState takes every run:* label (RunStates) and the run state they
+	// record off a story, in one write, as a claim does. A give-back keeps
+	// the label its caller set (a cancel's run:cancelled, a landed demo's
+	// run:landed), so a retry, which starts the story afresh, clears it itself:
+	// a run:queued left on a story given back is read by dispatch as a story
+	// waiting for its rig's batch, and attempt 2 never starts (mw-gq6.823).
+	ClearRunState(ctx context.Context, id string) error
+
 	// SetStoryState records one dimension of a story's operational state — what
 	// it is doing right now, as against what it is — with the reason it changed.
 	// A dispatched story is run=running.

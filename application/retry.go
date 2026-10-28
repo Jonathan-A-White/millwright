@@ -842,6 +842,13 @@ func (r Retry) closeFormula(ctx context.Context, report *RetryReport) {
 // the story. A story with no claim, open or held, has none to give back: it is
 // held again for --hold, and a held one is opened otherwise (mw-gq6.611).
 func (r Retry) release(ctx context.Context, report RetryReport) error {
+	// The run state first: the next attempt writes its own, and a run:queued
+	// left on a story given back is read by dispatch as a story waiting for its
+	// rig's batch, which no tick then claims (mw-gq6.823). Cleared before the
+	// give-back, so that no open story is ever seen carrying it.
+	if err := r.Tracker.ClearRunState(ctx, report.StoryID); err != nil {
+		return fmt.Errorf("the run state of %s could not be cleared: %w", report.StoryID, err)
+	}
 	if report.unclaimed {
 		if r.Hold {
 			return r.Tracker.HoldStory(ctx, report.StoryID)
