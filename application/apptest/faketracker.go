@@ -1821,6 +1821,9 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			if k == application.TodoRemindedField {
 				s.detail.TodoReminded = v
 			}
+			if k == application.AcceptanceAtClaimField {
+				s.detail.AcceptanceAtClaim = v
+			}
 			if k == application.ClaimedAtField {
 				s.detail.ClaimedAt, _ = time.Parse(time.RFC3339, v)
 			}

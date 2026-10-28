@@ -116,10 +116,15 @@ const (
 	// a landing, whatever the gate says. Its claim is kept, as for the tests
 	// failing: a new attempt would meet the same criterion, so the Mayor
 	// re-scopes or closes it.
-	ReasonUnmetCriterion  Reason = "unmet-criterion"
-	ReasonTestsFail       Reason = "tests-fail"
-	ReasonMergeConflict   Reason = "merge-conflict"
-	ReasonMergedTestsFail Reason = "merged-tests-fail"
+	ReasonUnmetCriterion Reason = "unmet-criterion"
+	// ReasonAcceptanceChanged is a story whose acceptance no longer reads as it
+	// did at its claim (mw-gq6.509): the session worked the text it read at
+	// boot. Like open steps, the claim is given back and the branch continued,
+	// for a session that reads the whole of it.
+	ReasonAcceptanceChanged Reason = "acceptance-changed"
+	ReasonTestsFail         Reason = "tests-fail"
+	ReasonMergeConflict     Reason = "merge-conflict"
+	ReasonMergedTestsFail   Reason = "merged-tests-fail"
 	// A Tester story's branch (mw-it6qk5.5): it committed something, or wrote
 	// no FINDINGS.
 	ReasonTesterCommitted Reason = "tester-committed"
@@ -1829,6 +1834,12 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 		return found
 	}
 
+	// What the story's acceptance reads now, against what the claim recorded: a
+	// criterion added since never reached the session (mw-gq6.509).
+	if refusal, changed := acceptanceChangedRefusal(c); changed && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+		return found
+	}
+
 	// What the commits say about who wrote them. This is asked before the
 	// formula, before the tests and before the merge slot, because a commit
 	// message is the one thing a landing makes permanent and cannot take back:
@@ -3138,7 +3149,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	// Mayor can bd close it. Every other stop keeps the claim, because the claim
 	// is the evidence.
 	given := false
-	if reason == ReasonOpenSteps || reason == ReasonNoClosingComment || reason == ReasonGristExampleUnproved || reason == ReasonTurnCap || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
+	if reason == ReasonOpenSteps || reason == ReasonAcceptanceChanged || reason == ReasonNoClosingComment || reason == ReasonGristExampleUnproved || reason == ReasonTurnCap || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
 		if err := n.releaseOnStop(ctx, c.id, report); err != nil {
 			trouble = append(trouble, fmt.Sprintf("the claim on %s could not be given back: %v", c.id, err))
 		} else {

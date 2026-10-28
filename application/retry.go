@@ -40,7 +40,7 @@ func ContinueKey(id string) string { return "continue." + id }
 // commits themselves (a signed commit) or for having none is not continued.
 func ContinuesFrom(reason Reason) bool {
 	switch reason {
-	case ReasonTestsFail, ReasonMergedTestsFail, ReasonMergeConflict, ReasonTurnCap, ReasonOpenSteps, ReasonNoClosingComment, ReasonLockfileSSH, ReasonGristExampleUnproved:
+	case ReasonTestsFail, ReasonMergedTestsFail, ReasonMergeConflict, ReasonTurnCap, ReasonOpenSteps, ReasonAcceptanceChanged, ReasonNoClosingComment, ReasonLockfileSSH, ReasonGristExampleUnproved:
 		return true
 	}
 	return false

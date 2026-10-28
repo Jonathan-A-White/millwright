@@ -1652,6 +1652,13 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	}
 	detail.Molecule = fresh.Molecule
 
+	// The acceptance the session is handed is recorded, so that mw next can tell
+	// at close-out whether it was amended since (mw-gq6.509).
+	if err := d.Tracker.SetStoryMetadata(ctx, id, map[string]string{AcceptanceAtClaimField: AcceptanceAtClaim(detail.Acceptance)}); err != nil {
+		released, relErr := d.release(ctx, id, fmt.Errorf("recording the acceptance %s was claimed with: %w", id, err))
+		return Started{}, released, relErr
+	}
+
 	// The claim is what makes the story this host's, so it is also what writes
 	// this host's name over "auto": mw status, the landing and the ledger all see
 	// a concrete host from here on. The one writer of that field is this line.

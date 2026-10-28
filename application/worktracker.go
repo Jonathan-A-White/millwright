@@ -116,6 +116,10 @@ type StoryDetail struct {
 	Labels      []string
 	Description string
 	Acceptance  string
+	// AcceptanceAtClaim is what the acceptance read when the latest claim was
+	// made, as AcceptanceAtClaimField records it; empty for a story claimed
+	// before that was recorded.
+	AcceptanceAtClaim string
 	// Guest is the owner of the story's rig when that rig is a guest repo, as
 	// mw status and mw brief mark it; the tracker never sets it.
 	Guest string
