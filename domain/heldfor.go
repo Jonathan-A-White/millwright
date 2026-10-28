@@ -59,3 +59,16 @@ func HeldForEvent(graph []GraphBead, event string) []string {
 	}
 	return nil
 }
+
+// HeldForLabel is the first held-for-<event> label among labels, lower-cased, or
+// "" when none is there: the label that says a bead waits for an event to end
+// and is not to be worked until whoever ends it releases the bead.
+func HeldForLabel(labels []string) string {
+	for _, label := range labels {
+		label = strings.ToLower(strings.TrimSpace(label))
+		if strings.HasPrefix(label, HeldForPrefix) && label != HeldForPrefix {
+			return label
+		}
+	}
+	return ""
+}

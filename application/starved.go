@@ -49,6 +49,7 @@ const LeftoverRefusedGate = "leftover-refused"
 // it does nothing at all.
 var StarvedHolds = map[string]string{
 	"hitl":                   "Governor's own story",
+	"held-for":               "held for an event",
 	"no-path":                "unreadable path",
 	"no-host":                "no host",
 	"other-host":             "another host (asleep?)",
@@ -134,7 +135,8 @@ func ParseStarved(value string) []StarvedRig {
 }
 
 // starvedPass reads the rigs a dispatch pass held back whole: each rig with a
-// ready story passed over, other than for the Governor's own, and no story
+// ready story passed over, other than for the Governor's own or a hold the Mayor
+// put on it (held-for), and no story
 // running or started in it. The hold named is the one most of its stories were
 // passed over for, the first of them winning a tie; the reason is the first
 // such story's own.
@@ -160,7 +162,7 @@ func starvedPass(ready []StoryDetail, passed []Passed, running []StoryDetail, st
 	var order = map[string][]string{}
 	for _, p := range passed {
 		rig, hold := rigOf[p.StoryID], StarvedHolds[p.Gate]
-		if rig == "" || hold == "" || p.Gate == "hitl" || p.Waiting || busy[rig] {
+		if rig == "" || hold == "" || p.Gate == "hitl" || p.Gate == "held-for" || p.Waiting || busy[rig] {
 			continue
 		}
 		if holds[rig] == nil {

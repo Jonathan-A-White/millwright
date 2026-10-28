@@ -22,6 +22,7 @@ type DispatchGate struct {
 var DispatchGates = []DispatchGate{
 	{"paused", "the host is paused by a pause-host event: nothing at all is done"},
 	{"hitl", "the story is labelled hitl, or demo with no files key (his own demo): the Governor must be present, the Mayor works it"},
+	{"held-for", "the story carries a held-for-<event> label: it is parked behind an event and is not claimed until the label is removed"},
 	{"no-path", "the story's path cannot be read"},
 	{"no-host", "the path names no host"},
 	{"other-host", "the path names another host"},

@@ -960,6 +960,16 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				"the Governor must be present for it (labelled %s): it is worked with the Mayor, never by a dispatched session", label)})
 			continue
 		}
+		// gate: held-for
+		// A story parked behind an event keeps its held-for-<event> label whatever
+		// its status says: a turn-cap hand-back reopens a story before the Mayor has
+		// parked it, and the next tick would take it again (mw-gq6.753). Whoever ends
+		// the event removes the label.
+		if label := domain.HeldForLabel(detail.Labels); label != "" {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "held-for", Why: fmt.Sprintf(
+				"it is held behind an event (labelled %s): it is not claimed until the label is removed", label)})
+			continue
+		}
 		// gate: no-path
 		path, err := detail.Path()
 		if err != nil {

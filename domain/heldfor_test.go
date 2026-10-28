@@ -40,3 +40,21 @@ func TestHeldForEventNamesTheOpenBeadsOfThatEventAndNoneForAnother(t *testing.T)
 		}
 	}
 }
+
+func TestHeldForLabelFindsTheLabelThatParksABead(t *testing.T) {
+	cases := []struct {
+		labels []string
+		want   string
+	}{
+		{nil, ""},
+		{[]string{"friction", "bug"}, ""},
+		{[]string{"held-for-"}, ""},
+		{[]string{"friction", "Held-For-Jonah"}, "held-for-jonah"},
+		{[]string{"held-for-mw-gq6.12", "held-for-jonah"}, "held-for-mw-gq6.12"},
+	}
+	for _, c := range cases {
+		if got := domain.HeldForLabel(c.labels); got != c.want {
+			t.Errorf("HeldForLabel(%v) = %q, want %q", c.labels, got, c.want)
+		}
+	}
+}

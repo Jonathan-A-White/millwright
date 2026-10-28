@@ -11,6 +11,7 @@ three.
 |-|-|
 | `paused` | the host is paused by a pause-host event: nothing at all is done |
 | `hitl` | the story is labelled hitl, or demo with no files key (his own demo): the Governor must be present, the Mayor works it |
+| `held-for` | the story carries a `held-for-<event>` label (say `held-for-jonah`): it is parked behind an event and is not claimed, however open or ready its status, until the label is removed (mw-gq6.753) |
 | `no-path` | the story's path cannot be read |
 | `no-host` | the path names no host |
 | `other-host` | the path names another host |
@@ -69,6 +70,16 @@ the same way. `mw retry <id> --repathed "<what changed>"` writes that comment an
 retries. `mw status` lists such stories under HANDED BACK with the date of the
 hand-back.
 
+## The held-for gate
+
+A story labelled `held-for-<event>` (`held-for-jonah`, or the id of the epic or demo
+whose close ends the event) is parked: it is not dispatched however its status reads.
+The label is the hold, not the status, because a turn-cap hand-back reopens a story
+at once and the next tick, a dozen seconds later, would take it again before the
+Mayor had parked it (mw-gq6.753). Whoever ends the event removes the label. The gate
+stops a new claim only: a session already running when the label is put on runs on.
+The starved-rig alarm does not count these stories.
+
 ## The harness-hold gate
 
 A session the harness stopped for something that is not the work's is held by
@@ -116,8 +127,8 @@ dispatch's, and no smoke touches it.
 
 ## The starved-rig alarm
 
-When a pass leaves a rig with ready stories passed over (the Governor's own
-excepted) and none running or started, the host's dispatch notes it in
+When a pass leaves a rig with ready stories passed over (the Governor's own and
+the `held-for` stories excepted) and none running or started, the host's dispatch notes it in
 `host.<host>.starved`: the rig, when it was first so held, the hold and why. A
 rig held that way for over an hour (`application.StarvedAfter`) with a story
 ready and none running is an alarm: `mw doctor` (check `starved-rig`) mails the
@@ -129,6 +140,7 @@ is mapped there too, and a test says so.
 | Gate | Hold name |
 |-|-|
 | `hitl` | Governor's own story |
+| `held-for` | held for an event |
 | `no-path` | unreadable path |
 | `no-host` | no host |
 | `other-host` | another host (asleep?) |
