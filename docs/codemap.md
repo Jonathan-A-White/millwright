@@ -10,7 +10,7 @@
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | beads/mail.go |
 | EpicRules (+LandingRules) | application/epicrules.go | vault/epicrules.go |
 | Pause{Fleet,Book,Timer,Git} | application/pause.go | pause, rig |
-| Vault, Harness, SeatBootFiles, RigDocs, BootCommands | seatboot.go, application/seatboot_manifest.go, application/harness.go | {vault,claude,sessionshell,shellcmd}, rig/rigfiles.go |
+| Vault, Harness, SeatBootFiles, RigDocs, BootCommands | seatboot.go, application/seatboot_manifest.go, application/harness.go | {vault,claude,shellcmd}, rig/rigfiles.go |
 | Runner, BdProgram | application/runner.go, application/bdretry.go | {tmux,bdprogram} |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go, application/seattake.go | {vault/{seat,reaplog},tmux/window,claude/claude}.go |
 | Transcript*, HostSigns, PeekRemote | application/seatcontext.go, application/peek.go, nudge.go | {claude,peekremote,vault/git.go} |
