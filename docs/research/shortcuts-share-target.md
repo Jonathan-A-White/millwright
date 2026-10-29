@@ -7,6 +7,16 @@ app. With a way of setting and learning what the shortcuts are (long presses, ..
 consider ergonomics because power users are most likely to get fatigue." Read-only research: no
 product code changed. Paths below are in the `postern` repo at `e7381cd`.
 
+<!-- toc -->
+
+- [What exists today](#what-exists-today)
+- [What the platform allows (Android Chrome, installed app)](#what-the-platform-allows-android-chrome-installed-app)
+- [Options](#options)
+- [Recommendation](#recommendation)
+- [Questions only the Governor can answer](#questions-only-the-governor-can-answer)
+
+<!-- /toc -->
+
 ## What exists today
 
 **A share target, but no shortcuts.** `pwa-manifest.ts:14-24` declares `share_target`: `POST

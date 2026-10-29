@@ -12,6 +12,45 @@
 > 5. **Not verified, treat as unknown:** the "~967K auto-compact threshold", the exact out-of-fuel stderr text and exit code, and Pro-plan model availability and allowances.
 
 
+<!-- toc -->
+
+- [What This Means for the Factory (10-line summary)](#what-this-means-for-the-factory-10-line-summary)
+- [1. Per-Launch Model & Effort Configuration](#1-per-launch-model--effort-configuration)
+  - [Flags & Environment Variables](#flags--environment-variables)
+- [2. Launch Styles & Trade-offs](#2-launch-styles--trade-offs)
+  - [Style 1: Headless with `-p/--print`](#style-1-headless-with--p--print)
+  - [Style 2: Background Sessions with `--bg/--background`](#style-2-background-sessions-with---bg--background)
+  - [Style 3: Interactive Session (Normal)](#style-3-interactive-session-normal)
+- [3. Hooks for External Tracking](#3-hooks-for-external-tracking)
+  - [Hook Events & Lifecycle](#hook-events--lifecycle)
+  - [Hook Input/Output Schema](#hook-inputoutput-schema)
+  - [Scope & Configuration](#scope--configuration)
+- [4. Reading Back Session Cost & Usage](#4-reading-back-session-cost--usage)
+  - [JSON Output Format (`--output-format json`)](#json-output-format---output-format-json)
+  - [Stream JSON Format (`--output-format stream-json`)](#stream-json-format---output-format-stream-json)
+  - [Transcript JSONL Format](#transcript-jsonl-format)
+  - [In-Session Usage Command](#in-session-usage-command)
+  - [Subscription Plan Metering](#subscription-plan-metering)
+- [5. Priming a Session Cheaply](#5-priming-a-session-cheaply)
+  - [What Costs Upfront (Paid Every Session)](#what-costs-upfront-paid-every-session)
+  - [What Loads on Demand (Lazy)](#what-loads-on-demand-lazy)
+  - [Prompt Caching Across Sessions](#prompt-caching-across-sessions)
+  - [Startup Token Estimates](#startup-token-estimates)
+- [6. Pro ($20) vs Max ($200) Subscription Plans](#6-pro-20-vs-max-200-subscription-plans)
+  - [Models Available](#models-available)
+  - [Usage Limits & Reset Windows](#usage-limits--reset-windows)
+  - [Features](#features)
+  - [How to Detect "Out of Fuel"](#how-to-detect-out-of-fuel)
+  - [When Usage Resets](#when-usage-resets)
+- [7. Context Window & Auto-Compaction](#7-context-window--auto-compaction)
+  - [Default Context Windows by Model](#default-context-windows-by-model)
+  - [Auto-Compaction Behavior](#auto-compaction-behavior)
+  - [Controls](#controls)
+- [Summary for Factory Implementation](#summary-for-factory-implementation)
+- [Document Metadata](#document-metadata)
+
+<!-- /toc -->
+
 ## What This Means for the Factory (10-line summary)
 
 1. **Per-launch control**: `--model` (aliases: fable, opus, sonnet, haiku) and `--effort` (low/medium/high/xhigh/max) apply per session without touching global settings; `--fallback-model` lists backups when primary is overloaded.

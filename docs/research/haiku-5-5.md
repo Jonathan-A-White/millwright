@@ -20,6 +20,22 @@ was stopped the moment the tally showed it. What that cost the research: the Son
 Clerk/triage/Deputy A/B (0 of 6 runs) and the second repetition of the Haiku side were never
 run. What it bought: two runs of most lampas examples, so flake can be told from deficit.
 
+<!-- toc -->
+
+- [The one-line answers](#the-one-line-answers)
+- [Sweep: every place a model is named today](#sweep-every-place-a-model-is-named-today)
+- [Prices (vendor, for reading the tables)](#prices-vendor-for-reading-the-tables)
+- [Method](#method)
+- [Grinds: pass rate, seconds and cost per answer](#grinds-pass-rate-seconds-and-cost-per-answer)
+- [Stories: three landed stories replayed on Haiku 5.5](#stories-three-landed-stories-replayed-on-haiku-55)
+- [Clerk, triage and Deputy dry run](#clerk-triage-and-deputy-dry-run)
+- [The step-up: how a Haiku answer is checked and handed to Sonnet](#the-step-up-how-a-haiku-answer-is-checked-and-handed-to-sonnet)
+- [Rollout: slices, one use at a time, each an A/B with a bar and a way back](#rollout-slices-one-use-at-a-time-each-an-ab-with-a-bar-and-a-way-back)
+- [Problems found (for the Mayor to file)](#problems-found-for-the-mayor-to-file)
+- [Files](#files)
+
+<!-- /toc -->
+
 ## The one-line answers
 
 | Candidate use | Verdict | Why (numbers below) |

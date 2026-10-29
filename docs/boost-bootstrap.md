@@ -19,6 +19,17 @@ a checkout of the rig it uses that checkout; run as a loose file it clones the
 rig to `$MW_HOME` (default `~/millwright`). It runs as the user the Boost will
 dispatch as, because the timer, the env files and the tokens are that user's.
 
+<!-- toc -->
+
+- [Inputs](#inputs)
+- [The thirteen steps](#the-thirteen-steps)
+  - [hosts/boost-config.toml](#hostsboost-configtoml)
+- [Where the secrets go](#where-the-secrets-go)
+- [What it does NOT do](#what-it-does-not-do)
+- [After it](#after-it)
+
+<!-- /toc -->
+
 ## Inputs
 
 Environment variables, or a small env file of `NAME=VALUE` lines

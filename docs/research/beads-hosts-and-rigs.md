@@ -7,6 +7,27 @@ small experiments in a scratch dir (git init + `bd init -p <prefix> --non-intera
 `CHANGELOG.md`. All experiments ran one `bd`/`dolt` process at a time; the lab dir has
 been deleted.
 
+<!-- toc -->
+
+- [What this means for the factory (read this, skip the rest if short on time)](#what-this-means-for-the-factory-read-this-skip-the-rest-if-short-on-time)
+- [1. Sync between two machines](#1-sync-between-two-machines)
+  - [Commands surveyed (`--help`)](#commands-surveyed---help)
+  - [Can the remote be a plain private GitHub repo?](#can-the-remote-be-a-plain-private-github-repo)
+  - [Experiment: `file://` remote as a stand-in for a private GitHub repo](#experiment-file-remote-as-a-stand-in-for-a-private-github-repo)
+- [2. Offline divergence: how conflicts merge, what claims guarantee](#2-offline-divergence-how-conflicts-merge-what-claims-guarantee)
+  - [Experiment A — non-conflicting divergence (should auto-merge)](#experiment-a--non-conflicting-divergence-should-auto-merge)
+  - [Experiment B — real conflict: both hosts claim the same issue offline](#experiment-b--real-conflict-both-hosts-claim-the-same-issue-offline)
+- [3. Many rigs: one database vs. one database per repo](#3-many-rigs-one-database-vs-one-database-per-repo)
+  - [What `bd repo` actually configures](#what-bd-repo-actually-configures)
+  - [`--repo` and "auto-routing" on `bd create`](#--repo-and-auto-routing-on-bd-create)
+  - [Model A (one shared database, `rig` as metadata) vs. Model B (one database per rig + `bd ship`/`external:`)](#model-a-one-shared-database-rig-as-metadata-vs-model-b-one-database-per-rig--bd-shipexternal)
+- [4. Per-story routing metadata: `rig`, `model`, `effort`](#4-per-story-routing-metadata-rig-model-effort)
+- [5. `--shared-server` / `--server` vs. embedded](#5---shared-server----server-vs-embedded)
+- [6. `bd worktree` and git worktrees](#6-bd-worktree-and-git-worktrees)
+- [Gaps / couldn't verify](#gaps--couldnt-verify)
+
+<!-- /toc -->
+
 ## What this means for the factory (read this, skip the rest if short on time)
 
 - **Use one Dolt database for the whole factory, not one per rig.** Put `.beads/` in a

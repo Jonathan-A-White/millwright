@@ -4,6 +4,18 @@ Answers mw-6ww.86. The Governor, 2026-10-03 12:46Z, on mw-6ww.60: "I need a way 
 thumbprint approve Windows activity on the desktop so that it can happen when I'm away but that it
 can't happen without me approving it." Read-only research: no product code changed.
 
+<!-- toc -->
+
+- [What already holds, and what is missing](#what-already-holds-and-what-is-missing)
+- [The Windows helper all three share](#the-windows-helper-all-three-share)
+- [Option A: Windows OpenSSH, a forced command to the helper](#option-a-windows-openssh-a-forced-command-to-the-helper)
+- [Option B: an unprivileged ingress and an elevated task watching a drop folder](#option-b-an-unprivileged-ingress-and-an-elevated-task-watching-a-drop-folder)
+- [Option C: WSL interop back on, plus an elevated task](#option-c-wsl-interop-back-on-plus-an-elevated-task)
+- [Recommendation: Option A](#recommendation-option-a)
+- [Questions only the Governor can answer](#questions-only-the-governor-can-answer)
+
+<!-- /toc -->
+
 ## What already holds, and what is missing
 
 A hands step tap in Postern makes a fresh passkey assertion, then signs §17's

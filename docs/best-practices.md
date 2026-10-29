@@ -12,6 +12,31 @@ one human the factory serves; at a company it may be a team lead or a small grou
 that speaks with one voice. To stand a factory up, follow
 [Setting up a vault](setting-up-a-vault.md); this page is the why behind it.
 
+<!-- toc -->
+
+- [Contents](#contents)
+- [1. Seats outlive sessions](#1-seats-outlive-sessions)
+- [2. One story, one fresh session](#2-one-story-one-fresh-session)
+- [3. What is read at every boot stays tiny](#3-what-is-read-at-every-boot-stays-tiny)
+- [4. The tracker is the only state](#4-the-tracker-is-the-only-state)
+- [5. Every story has a path before it starts](#5-every-story-has-a-path-before-it-starts)
+- [6. One writer per file or table](#6-one-writer-per-file-or-table)
+- [7. Holds and dependencies are the damper](#7-holds-and-dependencies-are-the-damper)
+- [8. Every automatic action has a damper and an off switch](#8-every-automatic-action-has-a-damper-and-an-off-switch)
+- [9. Spend fuel where judgement is](#9-spend-fuel-where-judgement-is)
+- [10. A deterministic tool for everything clerical](#10-a-deterministic-tool-for-everything-clerical)
+- [11. The tool carries the baton, not the session](#11-the-tool-carries-the-baton-not-the-session)
+- [12. An append-only event log, a follower, cursors and lanes](#12-an-append-only-event-log-a-follower-cursors-and-lanes)
+- [13. Hands steps are written with their way back before they run](#13-hands-steps-are-written-with-their-way-back-before-they-run)
+- [14. A doctor with probes, cures, dampers and ways back](#14-a-doctor-with-probes-cures-dampers-and-ways-back)
+- [15. Acceptance is run, not read](#15-acceptance-is-run-not-read)
+- [16. Verify every landing before the next release](#16-verify-every-landing-before-the-next-release)
+- [17. The Governor decides; the seat finds facts](#17-the-governor-decides-the-seat-finds-facts)
+- [18. Hand off early, at a seam, and never two at once](#18-hand-off-early-at-a-seam-and-never-two-at-once)
+- [19. No blame, and no record is ever rewritten](#19-no-blame-and-no-record-is-ever-rewritten)
+
+<!-- /toc -->
+
 ## Contents
 
 1. [Seats outlive sessions](#1-seats-outlive-sessions)

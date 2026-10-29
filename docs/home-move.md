@@ -12,6 +12,29 @@ and the old one hands off, flushes and stands down first, so that nothing is los
 onto a home that answers ssh, without `--planned`, is refused with `old home is up: use
 --planned`.
 
+<!-- toc -->
+
+- [The line](#the-line)
+- [What each host holds beforehand](#what-each-host-holds-beforehand)
+- [The six steps](#the-six-steps)
+  - [1. The old home](#1-the-old-home)
+  - [2. Beads, from GitHub](#2-beads-from-github)
+  - [3. The vault](#3-the-vault)
+  - [4. The Postern backend](#4-the-postern-backend)
+  - [5. The Mayor](#5-the-mayor)
+  - [6. What was lost](#6-what-was-lost)
+- [The planned path](#the-planned-path)
+  - [2. The old home stands down](#2-the-old-home-stands-down)
+  - [Steps 3 to 7: as in the dead path (its 2 to 6)](#steps-3-to-7-as-in-the-dead-path-its-2-to-6)
+- [When the old home comes back](#when-the-old-home-comes-back)
+- [The event log](#the-event-log)
+- [Finishing by hand](#finishing-by-hand)
+- [The tap in Postern](#the-tap-in-postern)
+- [What was checked, and what was not](#what-was-checked-and-what-was-not)
+- [Which server host a session's bd reaches](#which-server-host-a-sessions-bd-reaches)
+
+<!-- /toc -->
+
 ## The line
 
 ```sh

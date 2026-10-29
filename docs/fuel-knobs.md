@@ -19,6 +19,18 @@ a table is written dotted: `mw config set grist.daily_limit 250`. The one
 exception is a clock window, an array of tables, whose TOML the README shows
 to paste.
 
+<!-- toc -->
+
+- [Sessions at once](#sessions-at-once)
+- [Model and effort, per kind of story](#model-and-effort-per-kind-of-story)
+- [Grist: a tutor's answers](#grist-a-tutors-answers)
+- [Seats that can be parked](#seats-that-can-be-parked)
+- [Pausing the factory](#pausing-the-factory)
+- [Ideas only](#ideas-only)
+- [Seeing the burn](#seeing-the-burn)
+
+<!-- /toc -->
+
 ## Sessions at once
 
 | Dial | Turned by | Now, by host | Cheaper | What is lost |

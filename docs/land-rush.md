@@ -12,6 +12,19 @@ lock per host serialised them. A batch runs the merged result's tests once, and
 gives the conflicts and the "passes alone, fails together" cases one fixer
 instead of a fresh Builder session each.
 
+<!-- toc -->
+
+- [What a rig turns on](#what-a-rig-turns-on)
+- [Where a story waits](#where-a-story-waits)
+- [The batch](#the-batch)
+  - [Rigs land side by side](#rigs-land-side-by-side)
+- [The fixer](#the-fixer)
+- [Records](#records)
+- [The stop rule](#the-stop-rule)
+- [Rollback](#rollback)
+
+<!-- /toc -->
+
 ## What a rig turns on
 
 Seven keys in the rig's file, `rigs/<rig>.toml` in the vault. They are read

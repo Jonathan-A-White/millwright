@@ -8,6 +8,22 @@ with a free model: nothing leaves the host.
 It is one Python process (standard library HTTP, torch on CPU) listening on
 `127.0.0.1:8765` as the systemd user unit `mw-scorer.service`.
 
+<!-- toc -->
+
+- [Install](#install)
+- [Measuring, and the log](#measuring-and-the-log)
+- [The way back](#the-way-back)
+- [The contract](#the-contract)
+- [How it scores](#how-it-scores)
+- [Hebrew](#hebrew)
+- [Greek](#greek)
+- [A woven reading](#a-woven-reading)
+- [What it is tuned for](#what-it-is-tuned-for)
+- [Known limits](#known-limits)
+- [Tests](#tests)
+
+<!-- /toc -->
+
 ## Install
 
 1. **Hand step (root):** `sudo apt install espeak-ng`. The scorer reads the

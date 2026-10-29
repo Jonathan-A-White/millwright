@@ -13,6 +13,15 @@ this page runs it for him, and the elastic check never spends until the
 `[cloud]` table of the home's `~/.config/mw/config.toml` exists
 (`docs/vultr-boost.md`, "Elastic").
 
+<!-- toc -->
+
+- [Before the Governor starts (Mayor)](#before-the-governor-starts-mayor)
+- [The demo (Governor, on the phone)](#the-demo-governor-on-the-phone)
+- [After it (Mayor)](#after-it-mayor)
+- [If something is wrong](#if-something-is-wrong)
+
+<!-- /toc -->
+
 ## Before the Governor starts (Mayor)
 
 Do these on the home, in order. The first four are once; if they are done

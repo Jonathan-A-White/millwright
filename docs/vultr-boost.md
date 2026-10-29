@@ -34,6 +34,23 @@ account, `id<TAB>label<TAB>status<TAB>server status`.
 `--yes` on `up` or `down` passes `-auto-approve` to terraform, which otherwise
 asks. `--dry-run` prints the numbered steps and changes nothing.
 
+<!-- toc -->
+
+- [What it costs](#what-it-costs)
+- [Before the first `up`](#before-the-first-up)
+- [What `up` does](#what-up-does)
+- [What `down` does](#what-down-does)
+- [Where each secret is](#where-each-secret-is)
+- [Revoking the box's tokens](#revoking-the-boxs-tokens)
+- [Elastic: boxes made and destroyed by demand](#elastic-boxes-made-and-destroyed-by-demand)
+  - [A changed box_cap reaches the boxes already up](#a-changed-box_cap-reaches-the-boxes-already-up)
+  - [Stories pathed to a box that goes down](#stories-pathed-to-a-box-that-goes-down)
+  - [What Vultr can refuse](#what-vultr-can-refuse)
+  - [The ready-made image](#the-ready-made-image)
+- [What it does not do](#what-it-does-not-do)
+
+<!-- /toc -->
+
 ## What it costs
 
 High Performance 8 vCPU / 16 GB (plan `vhp-8c-16gb-amd`) is about **$96 a month,

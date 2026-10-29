@@ -10,6 +10,22 @@ Words with a fixed meaning here (Seat, Session, Story, Path, Formula, Rig, Host,
 Fuel, Governor, Mayor, Builder) are defined in [`CONTEXT.md`](../CONTEXT.md).
 You are the Governor of your own factory.
 
+<!-- toc -->
+
+- [What you get](#what-you-get)
+- [Prerequisites](#prerequisites)
+- [One host first](#one-host-first)
+  - [tmux and the user units](#tmux-and-the-user-units)
+  - [The first Mayor, by hand](#the-first-mayor-by-hand)
+- [Adding a rig](#adding-a-rig)
+- [A second host (the Boost)](#a-second-host-the-boost)
+  - [A small always-on server as the front door (optional)](#a-small-always-on-server-as-the-front-door-optional)
+- [Talking to the Mayor from a phone: Postern (optional)](#talking-to-the-mayor-from-a-phone-postern-optional)
+- [Stamps and the BSV chain (optional)](#stamps-and-the-bsv-chain-optional)
+- [Checklist](#checklist)
+
+<!-- /toc -->
+
 ## What you get
 
 A **vault** is one private git repository holding the factory's state: the seats'

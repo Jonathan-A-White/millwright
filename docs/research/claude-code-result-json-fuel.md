@@ -4,6 +4,19 @@ Researched for mw-gq6.41, 2026-09-19. Evidence: the two real run directories
 named below, plus Claude Code's own documentation. Nothing here is inferred
 from a single run.
 
+<!-- toc -->
+
+- [The question](#the-question)
+- [The answer, in one line](#the-answer-in-one-line)
+- [Why a `claude -p` run emits more than one result message](#why-a-claude--p-run-emits-more-than-one-result-message)
+- [The evidence from the two runs](#the-evidence-from-the-two-runs)
+  - [The cost proves which figure is the total](#the-cost-proves-which-figure-is-the-total)
+- [What mw does about it](#what-mw-does-about-it)
+- [What is still not known](#what-is-still-not-known)
+- [Sources](#sources)
+
+<!-- /toc -->
+
 ## The question
 
 The session for mw-gq6.33 ran on the VPS from 02:05Z to 02:20Z and made two

@@ -34,6 +34,18 @@ three.
 | `testers-per-rig` | it is a Tester story and its rig runs `testers_per_rig` (the `[dampers]` key, default 1) Tester stories already, on any host |
 | `cap` | the host runs as many sessions as it may |
 
+<!-- toc -->
+
+- [The sweep gate](#the-sweep-gate)
+- [The bug recheck](#the-bug-recheck)
+- [The handed-back gate](#the-handed-back-gate)
+- [The held-for gate](#the-held-for-gate)
+- [The harness-hold gate](#the-harness-hold-gate)
+- [The smoke-hold gate, and the gates that cannot hold their own fix](#the-smoke-hold-gate-and-the-gates-that-cannot-hold-their-own-fix)
+- [The starved-rig alarm](#the-starved-rig-alarm)
+
+<!-- /toc -->
+
 ## The sweep gate
 
 When a bug is seen, the story looks for the whole class, not only the case seen.

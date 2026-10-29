@@ -7,6 +7,20 @@ carries their recommendations to the Mayor's own seat, which is mw on the VPS, n
 Read-only research: no product code changed in either rig. Testnet only throughout; no real key,
 phrase or secret appears below, and none should ever be pasted into a bead or a commit either.
 
+<!-- toc -->
+
+- [Recommendation, up front](#recommendation-up-front)
+- [1. How the Mayor's mw reads and sends](#1-how-the-mayors-mw-reads-and-sends)
+- [2. The Mayor's key on the VPS: what it is, where it lives, what limits it](#2-the-mayors-key-on-the-vps-what-it-is-where-it-lives-what-limits-it)
+- [3. Waking the Mayor: extend `mw-mail-notify`, don't build a new timer](#3-waking-the-mayor-extend-mw-mail-notify-dont-build-a-new-timer)
+- [4. Classified grilling questions](#4-classified-grilling-questions)
+- [5. Options weighed](#5-options-weighed)
+- [6. Sources](#6-sources)
+- [PROPOSED STORY LIST for mw-f758y.10](#proposed-story-list-for-mw-f758y10)
+- [For the Governor to decide](#for-the-governor-to-decide)
+
+<!-- /toc -->
+
 ## Recommendation, up front
 
 - **mw talks to the desktop's Go backend over the VPN, never to WhatsOnChain directly.**

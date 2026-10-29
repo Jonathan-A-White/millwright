@@ -15,6 +15,22 @@ and defaults to `en`. The result is printed as JSON on standard output. An
 engine that is not configured is refused before anything is read or sent, and
 the refusal names the engines that are.
 
+<!-- toc -->
+
+- [The result](#the-result)
+- [The engines](#the-engines)
+  - [Audio](#audio)
+  - [The local scorer's request](#the-local-scorers-request)
+  - [The azure engine](#the-azure-engine)
+- [Measuring](#measuring)
+- [In a grist](#in-a-grist)
+  - [The language](#the-language)
+- [The reply](#the-reply)
+- [The run record](#the-run-record)
+- [Config](#config)
+
+<!-- /toc -->
+
 ## The result
 
 Every engine returns one `ReadingResult` (`application/scorer.go`), and an

@@ -8,6 +8,18 @@ copies. Nothing live was touched.
 growth to under a tenth of today's. No acknowledged write was lost in any mode when the Dolt server
 was killed with `kill -9`. Recommendation: adopt with conditions (end of file).**
 
+<!-- toc -->
+
+- [What was touched, and what was not](#what-was-touched-and-what-was-not)
+- [What bd 1.3.0 offers](#what-bd-130-offers)
+- [Method](#method)
+- [Results](#results)
+- [Things that decide how to adopt it](#things-that-decide-how-to-adopt-it)
+- [Estimate for the live store](#estimate-for-the-live-store)
+- [Recommendation: adopt with conditions](#recommendation-adopt-with-conditions)
+
+<!-- /toc -->
+
 ## What was touched, and what was not
 
 - Scratch directory: `/tmp/gq6508` (one subdirectory per run, each holding its own `data/` for the

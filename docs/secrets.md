@@ -11,6 +11,17 @@ lives on the home.
     mw secrets get <name>    # the value to stdout, only when stdout is not a terminal
     mw secrets list          # names only
 
+<!-- toc -->
+
+- [What is stored](#what-is-stored)
+- [Who holds the key](#who-holds-the-key)
+- [Setting it up, once](#setting-it-up-once)
+- [When the home moves](#when-the-home-moves)
+- [When the key may have leaked](#when-the-key-may-have-leaked)
+- [What mw never does with a value](#what-mw-never-does-with-a-value)
+
+<!-- /toc -->
+
 ## What is stored
 
 Only tokens a machine must be given to do factory work, one per name. Each row

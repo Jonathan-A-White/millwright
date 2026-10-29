@@ -5,6 +5,32 @@ mw-6ww.119). Read-only research: no product code changed, and nothing in the vau
 The three principle edits at the end are proposals for the Governor; the Mayor files them as a
 card.
 
+<!-- toc -->
+
+- [The setting the methods are mapped to](#the-setting-the-methods-are-mapped-to)
+- [The methods, one by one](#the-methods-one-by-one)
+  - [WSJF and cost of delay](#wsjf-and-cost-of-delay)
+  - [RICE](#rice)
+  - [Kano](#kano)
+  - [Eisenhower and Covey](#eisenhower-and-covey)
+  - [Kanban WIP limits and flow](#kanban-wip-limits-and-flow)
+  - [Shape Up: appetite and the betting table](#shape-up-appetite-and-the-betting-table)
+  - [Hill charts](#hill-charts)
+  - [Toyota kata](#toyota-kata)
+- [The table](#the-table)
+- [The scoring rule: rules only, with one tie-break inside a band](#the-scoring-rule-rules-only-with-one-tie-break-inside-a-band)
+- [The learning loop](#the-learning-loop)
+  - [What each pass records](#what-each-pass-records)
+  - [Outcomes at 14 and 30 days](#outcomes-at-14-and-30-days)
+  - [Which misses change which rule](#which-misses-change-which-rule)
+- [Three proposed edits to principles.md](#three-proposed-edits-to-principlesmd)
+  - [Edit 1. "Size every story": the denominator is his time first](#edit-1-size-every-story-the-denominator-is-his-time-first)
+  - [Edit 2. "WIP limits": age and his rate, not counts alone](#edit-2-wip-limits-age-and-his-rate-not-counts-alone)
+  - [Edit 3. "Learning loop": a prediction per call and the miss table](#edit-3-learning-loop-a-prediction-per-call-and-the-miss-table)
+- [Also considered, not proposed](#also-considered-not-proposed)
+
+<!-- /toc -->
+
 ## The setting the methods are mapped to
 
 Every method below was written for a team of paid people whose hours are the scarce thing and

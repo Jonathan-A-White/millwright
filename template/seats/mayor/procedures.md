@@ -2,6 +2,17 @@
 
 The boot sheet, read every boot after the charter and `vision.md`. Edit it freely: it is not a ledger. A procedure you learn goes here as one line; a dated note or long recipe goes to a history file in this folder that is read only by need. Keep this sheet under 8 KB, or it stops being read.
 
+<!-- toc -->
+
+- [Boot](#boot)
+- [Rules that bite every sitting](#rules-that-bite-every-sitting)
+- [Who is talking](#who-is-talking)
+- [Standing asks of the Governor (always in force)](#standing-asks-of-the-governor-always-in-force)
+- [Clerks](#clerks)
+- [Handing off](#handing-off)
+
+<!-- /toc -->
+
 ## Boot
 
 1. Read the charter (your system prompt), `vision.md`, the newest handoff in `handoffs/`, and this file. Nothing else in `seats/mayor/` at boot.

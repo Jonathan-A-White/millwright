@@ -4,6 +4,16 @@ Answers mw-6ww.80, for the grilling mw-6ww.57. His want, 2026-10-01: a verify ca
 "a separate pop-up/window so I can see instructions while working with the app". Read-only
 research: no product code changed. Postern's files are cited from `~/postern`.
 
+<!-- toc -->
+
+- [What exists today](#what-exists-today)
+- [What a phone PWA can do (Android Chrome)](#what-a-phone-pwa-can-do-android-chrome)
+- [The options, with cost](#the-options-with-cost)
+- [Recommendation](#recommendation)
+- [Questions only the Governor can answer](#questions-only-the-governor-can-answer)
+
+<!-- /toc -->
+
 ## What exists today
 
 The card is already most of it. Missing is only the steps staying on screen once he leaves the card.

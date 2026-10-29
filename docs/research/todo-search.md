@@ -7,6 +7,19 @@ about". Read at millwright `5a576af` and postern `b9bbbbf`. A docs-only story: n
 changed, the live beads database was only read, and the scripts that made every number below are
 beside this file in `docs/research/todo-search/` (`gen.py` makes the fixture, `bench.py` times it).
 
+<!-- toc -->
+
+- [Inventory](#inventory)
+- [Candidates](#candidates)
+  - [(a) Beads' own store](#a-beads-own-store)
+  - [(b) SQLite FTS5 kept by mw on the Home host](#b-sqlite-fts5-kept-by-mw-on-the-home-host)
+  - [(c) Postern's own view index, extended to closed cards](#c-posterns-own-view-index-extended-to-closed-cards)
+  - [Where the candidates stand](#where-the-candidates-stand)
+- [The phone's ask](#the-phones-ask)
+- [Recommendation and first slice](#recommendation-and-first-slice)
+
+<!-- /toc -->
+
 ## Inventory
 
 Where the words of a card live, and what Postern's Search tab reaches today. A card is an open bead

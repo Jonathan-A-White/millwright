@@ -18,6 +18,22 @@ Governor, Mayor, Builder) are defined in [`CONTEXT.md`](../CONTEXT.md). The star
 the member's seat files come from is `template/` ([setting-up-a-vault.md](setting-up-a-vault.md)
 is its guide).
 
+<!-- toc -->
+
+- [1. The Linux user — BY HAND](#1-the-linux-user--by-hand)
+- [2. Keep the user's units running — BY HAND](#2-keep-the-users-units-running--by-hand)
+- [3. The tools — BY HAND](#3-the-tools--by-hand)
+- [4. Claude, on the member's own login — BY HAND](#4-claude-on-the-members-own-login--by-hand)
+- [5. Make the factory](#5-make-the-factory)
+- [6. Let the member's shell find bd — BY HAND](#6-let-the-members-shell-find-bd--by-hand)
+- [7. A private remote for the vault — BY HAND](#7-a-private-remote-for-the-vault--by-hand)
+- [8. The member's backend, and the holder's cockpit key — the rest of the family plan](#8-the-members-backend-and-the-holders-cockpit-key--the-rest-of-the-family-plan)
+- [9. The member's own dispatcher](#9-the-members-own-dispatcher)
+- [The way back](#the-way-back)
+- [Limits](#limits)
+
+<!-- /toc -->
+
 ## 1. The Linux user — BY HAND
 
 As root on the machine:

@@ -7,6 +7,16 @@ Try the rig's test preset and fake timers first; a test that still cannot be
 made exact with them is a timing test. Such a test is slow or flaky under load,
 so a rig can keep it out of the landing gate and run it on its own schedule.
 
+<!-- toc -->
+
+- [How a rig tags one](#how-a-rig-tags-one)
+- [What mw does with the key](#what-mw-does-with-the-key)
+- [The nightly timing run](#the-nightly-timing-run)
+- [The rig's wiring](#the-rigs-wiring)
+- [When to set the key](#when-to-set-the-key)
+
+<!-- /toc -->
+
 ## How a rig tags one
 
 1. The test's file matches a glob in the rig's `timing_tests` key, in the rig's

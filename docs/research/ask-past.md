@@ -5,6 +5,16 @@ able to look at wherever Claude saves its session information if you ever need t
 happened previously… I used to have a command in my town… that had ask past as a command."
 Read-only research: no product code changed. Measured on the Laptop on 2026-10-03.
 
+<!-- toc -->
+
+- [What exists today](#what-exists-today)
+- [How big they are](#how-big-they-are)
+- [Options](#options)
+- [Recommendation](#recommendation)
+- [Questions only the Governor can answer](#questions-only-the-governor-can-answer)
+
+<!-- /toc -->
+
 ## What exists today
 
 - **Claude Code keeps every session.** `~/.claude/projects/<dir>/<session id>.jsonl`, one

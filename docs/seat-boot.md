@@ -10,6 +10,19 @@ nothing lost. The Governor asked for this on mw-266lp8 (2026-10-15): "ways of
 decreasing the boot cost without losing anything important ... a very simple
 instruction where you can find what you need easily and go from there".
 
+<!-- toc -->
+
+- [How it was measured](#how-it-was-measured)
+- [Before: what each seat reads, and what it costs](#before-what-each-seat-reads-and-what-it-costs)
+- [The cuts](#the-cuts)
+- [After: projected](#after-projected)
+- [The commands](#the-commands)
+- [Proposed manifests, for the Mayor to place](#proposed-manifests-for-the-mayor-to-place)
+- [What this story did not change](#what-this-story-did-not-change)
+- [The Mayor's boot under a ceiling (mw-gq6.755)](#the-mayors-boot-under-a-ceiling-mw-gq6755)
+
+<!-- /toc -->
+
 ## How it was measured
 
 Claude Code keeps a transcript of every session, one JSON line a turn, and each

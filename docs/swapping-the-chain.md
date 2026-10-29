@@ -5,6 +5,16 @@ where that is cut off from the rest of the code, what a replacement must do, and
 what to switch off if you want no chain at all. It describes what is in the code
 now.
 
+<!-- toc -->
+
+- [What mw uses the chain for](#what-mw-uses-the-chain-for)
+- [The seam](#the-seam)
+- [The chain files](#the-chain-files)
+- [Another chain](#another-chain)
+- [No chain](#no-chain)
+
+<!-- /toc -->
+
 ## What mw uses the chain for
 
 - **A public copy of a post.** `mw postern send --chain` (and a reply to a post that

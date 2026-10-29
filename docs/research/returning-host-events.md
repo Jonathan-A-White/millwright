@@ -4,6 +4,16 @@ Answers mw-6ww.83, for the parked grilling mw-6ww.70. The Governor, 2026-10-03: 
 communicate, so if a machine comes back on it's own or with a dr, it can see what happened and
 not get confused." Read-only research: no product code changed.
 
+<!-- toc -->
+
+- [What exists today](#what-exists-today)
+- [What is only in the log](#what-is-only-in-the-log)
+- [Options](#options)
+- [Recommendation](#recommendation)
+- [Questions only the Governor can answer](#questions-only-the-governor-can-answer)
+
+<!-- /toc -->
+
 ## What exists today
 
 - **One log, one file, one writer.** `~/.local/state/mw/events/log.jsonl` on the home, written

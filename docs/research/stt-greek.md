@@ -7,6 +7,21 @@ host turns it into text primed with the passage's Greek words, the phone's recog
 fallback. This note picks the model. Every number below was measured on the Laptop with
 `contrib/stt-bakeoff` (its README says how to run it again). No money was spent.
 
+<!-- toc -->
+
+- [Read this first](#read-this-first)
+- [1. The table](#1-the-table)
+- [2. The candidates, and where they came from](#2-the-candidates-and-where-they-came-from)
+- [3. How it was scored](#3-how-it-was-scored)
+- [4. The test set](#4-the-test-set)
+- [5. The winner on the Laptop: setup and the way back](#5-the-winner-on-the-laptop-setup-and-the-way-back)
+- [6. His real holds](#6-his-real-holds)
+- [7. What the record-and-transcribe build needs](#7-what-the-record-and-transcribe-build-needs)
+- [8. Paid services (described only; nothing was signed up for or spent)](#8-paid-services-described-only-nothing-was-signed-up-for-or-spent)
+- [Sources](#sources)
+
+<!-- /toc -->
+
 ## Read this first
 
 **Winner: Whisper small.en (faster-whisper, int8, on the CPU), primed with the Greek words of the verse

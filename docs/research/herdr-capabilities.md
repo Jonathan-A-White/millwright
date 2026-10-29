@@ -6,6 +6,24 @@ and https://herdr.dev/docs/ (read via the `docs/next/website/src/content/docs/*.
 the repo, which are the doc pages' source of truth). No Herdr binary was installed or executed;
 this is read-only source/doc research.
 
+<!-- toc -->
+
+- [What this means for the factory (read this first)](#what-this-means-for-the-factory-read-this-first)
+- [1. Core model: workspaces, panes, sessions, persistence, tmux relationship](#1-core-model-workspaces-panes-sessions-persistence-tmux-relationship)
+- [2. Agent awareness — how Claude Code state is detected](#2-agent-awareness--how-claude-code-state-is-detected)
+- [3. Control surface — CLI and Unix-socket API](#3-control-surface--cli-and-unix-socket-api)
+- [4. Worktree support](#4-worktree-support)
+- [5. Remote machines (`herdr --machine`, saved SSH) and phone access](#5-remote-machines-herdr---machine-saved-ssh-and-phone-access)
+- [6. WSL2 specifics, root, low-memory hosts](#6-wsl2-specifics-root-low-memory-hosts)
+- [7. Built-in orchestration features that overlap with what we'd build](#7-built-in-orchestration-features-that-overlap-with-what-wed-build)
+- [8. Maturity / risk](#8-maturity--risk)
+- [Note on untrusted content encountered](#note-on-untrusted-content-encountered)
+- [Herdr does this — don't build it vs. Still ours to build in Go](#herdr-does-this--dont-build-it-vs-still-ours-to-build-in-go)
+- [Recommendation: CLI vs. socket vs. runner-agnostic](#recommendation-cli-vs-socket-vs-runner-agnostic)
+- [Gaps / couldn't verify](#gaps--couldnt-verify)
+
+<!-- /toc -->
+
 ## What this means for the factory (read this first)
 
 Herdr is a legitimate, fast-moving, close match for the "runner" layer of the factory: it already

@@ -5,6 +5,16 @@ Answers mw-6ww.78, for the parked grilling mw-6ww.76. The Governor, 2026-10-03: 
 new promises late in a lightweight way", change a priority, and have it learn priority from his
 feedback. Read-only research: no product code changed.
 
+<!-- toc -->
+
+- [What exists today](#what-exists-today)
+- [What is missing](#what-is-missing)
+- [Options](#options)
+- [Recommendation](#recommendation)
+- [Questions only the Governor can answer](#questions-only-the-governor-can-answer)
+
+<!-- /toc -->
+
 ## What exists today
 
 - **Mail is the model for a new bead type.** `TypeMail = "mail"` is a custom type the vault

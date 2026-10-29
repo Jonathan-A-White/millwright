@@ -4,6 +4,17 @@ Answers mw-6ww.79, for the parked grilling mw-6ww.69. The Governor, 2026-10-03: 
 and pull stories over to where they can make progress after a reasonable timeout." Read-only
 research: no product code changed.
 
+<!-- toc -->
+
+- [What the two outages left behind](#what-the-two-outages-left-behind)
+- [What exists today](#what-exists-today)
+- [What the two signs miss](#what-the-two-signs-miss)
+- [Options](#options)
+- [Recommendation](#recommendation)
+- [Questions only the Governor can answer](#questions-only-the-governor-can-answer)
+
+<!-- /toc -->
+
 ## What the two outages left behind
 
 The events log starts 2026-10-01 13:59Z, nine minutes before the first WSL stall, so it holds the

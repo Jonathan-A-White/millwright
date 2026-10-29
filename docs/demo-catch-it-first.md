@@ -10,6 +10,15 @@ The trial runs from 2026-10-09 21:13Z to 2026-10-16 21:13Z (the `until` of the
 `[tester]` table in the home's `~/.config/mw/config.toml`; see README, *The
 Tester trial*). Do not run this demo before `until` has passed.
 
+<!-- toc -->
+
+- [Before the Governor starts (Mayor)](#before-the-governor-starts-mayor)
+- [The demo (Governor, on the phone)](#the-demo-governor-on-the-phone)
+- [Where the report is pasted](#where-the-report-is-pasted)
+- [If something is wrong](#if-something-is-wrong)
+
+<!-- /toc -->
+
 ## Before the Governor starts (Mayor)
 
 1. Once the week is over, run `mw tester report` on the home and paste its

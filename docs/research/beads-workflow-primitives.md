@@ -22,6 +22,33 @@ for a solo factory: it's easy to reach for `bd swarm`/`bd mol`/`bd mail`
 because they sound like exactly what you need, and end up rebuilding Gas
 Town's coordinator/multi-rig machinery one flag at a time.
 
+<!-- toc -->
+
+- [Verdict table](#verdict-table)
+- [What this means for the factory (≤10 lines)](#what-this-means-for-the-factory-10-lines)
+- [Primitive-by-primitive detail](#primitive-by-primitive-detail)
+  - [`bd formula` + `bd cook`](#bd-formula--bd-cook)
+  - [`bd mol` (molecules): `bond`, `squash`, `burn`](#bd-mol-molecules-bond-squash-burn)
+  - [Wisps (`--ephemeral`, `--wisp-type`, `bd promote`, `bd purge`)](#wisps---ephemeral---wisp-type-bd-promote-bd-purge)
+  - [`bd swarm` / `--mol-type swarm`](#bd-swarm----mol-type-swarm)
+  - [`bd gate` (+ `--waits-for`, `--waits-for-gate`, `bd ready --gated`)](#bd-gate----waits-for---waits-for-gate-bd-ready---gated)
+  - [`bd merge-slot`](#bd-merge-slot)
+  - [`bd set-state` / `bd state`](#bd-set-state--bd-state)
+  - [`bd audit`](#bd-audit)
+  - [`bd remember` / `bd memories` / `bd recall` / `bd kv`](#bd-remember--bd-memories--bd-recall--bd-kv)
+  - [`bd create --graph <json>` (schema)](#bd-create---graph-json-schema)
+  - [`bd create -f <markdown>`](#bd-create--f-markdown)
+  - [`bd epic` subcommands](#bd-epic-subcommands)
+  - [`bd prime`](#bd-prime)
+  - [`bd stale` / `bd blocked` / `bd ready --explain`](#bd-stale--bd-blocked--bd-ready---explain)
+  - [`bd mail`](#bd-mail)
+  - [`bd preflight`](#bd-preflight)
+  - [`bd lint` + `--validate`](#bd-lint----validate)
+  - [`--estimate`, `--skills`, `--acceptance`, `--design`, `--spec-id` on `create`](#--estimate---skills---acceptance---design---spec-id-on-create)
+- [Gaps / couldn't verify](#gaps--couldnt-verify)
+
+<!-- /toc -->
+
 ## Verdict table
 
 | Primitive | Verdict | One-line reason |

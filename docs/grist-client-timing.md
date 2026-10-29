@@ -6,6 +6,15 @@ trip, tap to shown, can be read. This is the millwright side of the grist
 protocol; the apps read postern's `docs/protocol.md`, section 18, which should
 carry the same field (a follow-up on postern's side).
 
+<!-- toc -->
+
+- [The request](#the-request)
+- [What the mill does](#what-the-mill-does)
+- [What mw grist timing shows](#what-mw-grist-timing-shows)
+- [mw grist timing --otlp: the same record as OpenTelemetry traces](#mw-grist-timing---otlp-the-same-record-as-opentelemetry-traces)
+
+<!-- /toc -->
+
 ## The request
 
 A grist's plaintext (the object sealed to the mill key) may carry one optional

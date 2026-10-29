@@ -6,6 +6,25 @@ a projector: events in, screens out. This page is the same tables in prose,
 and it is where the field names of the `events` record are agreed: postern's
 docs/protocol.md section 22 uses exactly these.
 
+<!-- toc -->
+
+- [An event](#an-event)
+- [The kinds](#the-kinds)
+- [The log](#the-log)
+- [Subscriptions](#subscriptions)
+- [A close-out that could not record](#a-close-out-that-could-not-record)
+- [Applying his taps](#applying-his-taps)
+- [Springing the jobs](#springing-the-jobs)
+- [Control](#control)
+- [The machines](#the-machines)
+  - [bead](#bead)
+  - [card](#card)
+  - [talk](#talk)
+  - [job](#job)
+- [The batch](#the-batch)
+
+<!-- /toc -->
+
 ## An event
 
 | Field | JSON | What it holds |

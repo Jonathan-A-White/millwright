@@ -12,6 +12,16 @@ model over one test set on this host's CPU and prints, per candidate:
 
 The results and the winner are in `docs/research/stt-greek.md`.
 
+<!-- toc -->
+
+- [The test set](#the-test-set)
+- [Run it](#run-it)
+- [The candidates](#the-candidates)
+- [Tests](#tests)
+- [The way back](#the-way-back)
+
+<!-- /toc -->
+
 ## The test set
 
 `testset/questions.json` holds 26 questions, 13 on 1 John 2 and 13 on Romans 8, each with one to three Greek

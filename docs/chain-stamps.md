@@ -8,6 +8,21 @@ and verified in code (`domain/stamp.go`, `application/stamp.go`); the queue, the
 job and `mw prove` are below. To use another chain, or none, see
 [Swapping the chain](swapping-the-chain.md).
 
+<!-- toc -->
+
+- [What gets stamped](#what-gets-stamped)
+- [The record](#the-record)
+- [The queue and the sent record](#the-queue-and-the-sent-record)
+- [The job](#the-job)
+- [Vault pushes](#vault-pushes)
+- [Stamping a head by hand](#stamping-a-head-by-hand)
+- [The git note](#the-git-note)
+- [Proving](#proving)
+- [Verifying](#verifying)
+- [Limits and what mainnet needs](#limits-and-what-mainnet-needs)
+
+<!-- /toc -->
+
 ## What gets stamped
 
 - Each commit `mw next` lands on a story's target branch: one stamp, queued after

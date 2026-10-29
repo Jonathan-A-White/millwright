@@ -4,6 +4,19 @@ Research date: 2026-09-23. Read-only: nothing installed, nothing downloaded, no 
 Resolves mw-6ww.41, parked from mw-6ww.40/mw-i80dx by the Governor's "yes to 41" (2026-09-23
 ~23:00Z) after asking whether his laptop's NPU/GPU are useful for the factory.
 
+<!-- toc -->
+
+- [What this means for the factory (read this first)](#what-this-means-for-the-factory-read-this-first)
+- [1. Hardware](#1-hardware)
+- [2. Runtimes](#2-runtimes)
+- [3. Models](#3-models)
+- [4. Wiring](#4-wiring)
+- [5. Which factory tasks fit, ranked](#5-which-factory-tasks-fit-ranked)
+- [6. Recommendation](#6-recommendation)
+- [Gaps / couldn't verify](#gaps--couldnt-verify)
+
+<!-- /toc -->
+
 ## What this means for the factory (read this first)
 
 The Laptop has one GPU (an integrated Radeon 890M, no discrete card, no dedicated VRAM — it shares
