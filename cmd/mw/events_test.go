@@ -241,6 +241,7 @@ func TestEventsTrimMovesOldEventsToTheArchiveAndTailReadsThemBack(t *testing.T) 
 // this window that the file does not stand at (the predecessor still acts)
 // is stale and does not end the wait (mw-gq6.767).
 func TestEventsWaitHandoverWithNoSinceIgnoresAStaleHandoverToItsWindow(t *testing.T) {
+	privateTmux(t, "mayor-592") // the predecessor still acts, so its window is open
 	eventsHome(t)
 	vaultDir := t.TempDir()
 	mwConfig(t, "vault = \""+vaultDir+"\"\nhost = \"laptop\"\n")
