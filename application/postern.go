@@ -1851,6 +1851,11 @@ type PosternSendRequest struct {
 	// request's class. Only the direct channel carries it.
 	Summary string
 
+	// New (mw postern send --new) sends a plain message top-level on purpose,
+	// past CheckAddressing's refusal of a flat one while the Governor's
+	// newest Factory post is unanswered.
+	New bool
+
 	// Chain (mw postern send --chain) also broadcasts the message on chain,
 	// beside the direct delivery, for a phone that cannot reach the backend.
 	// PosternSend adds it by itself when the post Re names came by chain, or
@@ -2211,7 +2216,8 @@ func (r PosternSendRequest) thread() PosternThread {
 // belongs under the root, never silently in Factory. A post mw has not seen
 // is refused, naming the flags that say where the reply goes. A request that
 // names a channel, asks a question, or says what its text is (Role: mw's own
-// transcripts), or a send with no Threads, is returned as it is.
+// transcripts), or a send with no Threads, is returned as it is (the command
+// line's CheckAddressing refuses a channel that is not the root's).
 func (s PosternSend) inRootsChannel(req PosternSendRequest) (PosternSendRequest, error) {
 	re := strings.TrimSpace(req.Re)
 	if re == "" || s.Threads == nil || req.setsThread() || req.asksQuestion() || req.Role != "" {
@@ -2226,6 +2232,19 @@ func (s PosternSend) inRootsChannel(req PosternSendRequest) (PosternSendRequest,
 	}
 	req.Thread, req.Topic = thread.Bead, thread.Topic
 	return req, nil
+}
+
+// describe says where t is, for a message a person reads: Factory, a bead's
+// channel or a named one.
+func (t PosternThread) describe() string {
+	bead, channel := t.clearNames()
+	switch {
+	case bead != "":
+		return "bead " + bead + "'s channel (--bead-channel " + bead + ")"
+	case channel != "":
+		return "channel " + channel + " (--channel " + channel + ")"
+	}
+	return "Factory (no channel flag)"
 }
 
 // rememberThread records thread under txid when there is somewhere to.

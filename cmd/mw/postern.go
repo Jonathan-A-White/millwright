@@ -547,7 +547,7 @@ func posternInboxLock(attachmentDir string) *hostlock.Lock {
 // postern_backend, by postern_channel.
 func newPosternSendCmd() *cobra.Command {
 	var class, bead, recommend, thread, topic, beadChannel, channelName, re string
-	var chain bool
+	var chain, newPost bool
 	var options, attach []string
 
 	cmd := &cobra.Command{
@@ -585,8 +585,13 @@ func newPosternSendCmd() *cobra.Command {
 			"(mw postern inbox and mw talk wait print it). With no channel flag the reply goes to the ROOT's\n" +
 			"channel, as mw postern send, mw postern inbox or mw talk wait saw it or a reply to it — never\n" +
 			"silently to Factory; a root mw has not seen is refused, saying to give --bead-channel <id>\n" +
-			"or --channel <name>. A channel flag given with --re wins. It is refused with --bead,\n" +
-			"which asks a question of its own.\n\n" +
+			"or --channel <name>. A channel flag given with --re must be the root's own channel, else it\n" +
+			"is refused, naming the root's: a reply under another channel's flag shows flat. It is refused\n" +
+			"with --bead, which asks a question of its own.\n\n" +
+			"A send with no --re and no channel flag is refused while the Governor's newest Factory post\n" +
+			"has no answer of ours after it, naming his txid and the --re line to use; --new posts\n" +
+			"top-level anyway. A card (--class decision-needed) and a send into a channel are not stopped.\n" +
+			"--channel general is a named channel, not Factory, and says so.\n\n" +
 			"--chain also broadcasts the message on chain, beside the direct delivery, for a phone that\n" +
 			"cannot reach the backend: the record has no summary, and the postern_float_sats cap applies.\n" +
 			"It is added without the flag when the post --re names came by chain (a bare txid, not\n" +
@@ -615,7 +620,7 @@ func newPosternSendCmd() *cobra.Command {
 			}
 			request := application.PosternSendRequest{
 				Class: class, Text: text, Bead: bead, Recommend: recommend, Options: options,
-				Thread: thread + beadChannel, Topic: topic + channelName, Re: re, Attachments: attach, Chain: chain,
+				Thread: thread + beadChannel, Topic: topic + channelName, Re: re, Attachments: attach, Chain: chain, New: newPost,
 			}
 			if err := request.ValidateReplyFlags(); err != nil {
 				return err
@@ -662,6 +667,9 @@ func newPosternSendCmd() *cobra.Command {
 				Now:         posternClock,
 				Out:         cmd.OutOrStdout(),
 			}
+			if err := send.CheckAddressing(cmd.Context(), request); err != nil {
+				return err
+			}
 			_, err = send.Run(cmd.Context(), request)
 			return err
 		},
@@ -678,6 +686,7 @@ func newPosternSendCmd() *cobra.Command {
 	for flag, use := range map[string]string{"thread": "use --bead-channel", "topic": "use --channel"} {
 		_ = cmd.Flags().MarkDeprecated(flag, use)
 	}
+	cmd.Flags().BoolVar(&newPost, "new", false, "post top-level in Factory on purpose, though the Governor's newest Factory post has no answer yet")
 	cmd.Flags().BoolVar(&chain, "chain", false, "also broadcast the message on chain, for a phone that cannot reach the backend")
 	cmd.Flags().StringVar(&re, "re", "", "the txid of the post whose thread this message answers in, printed form or bare; with no channel flag the reply goes to its channel (refused with --bead)")
 	return cmd
