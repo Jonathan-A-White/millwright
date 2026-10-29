@@ -159,6 +159,10 @@ type UsageReading struct {
 	Percent float64   `json:"percent"`
 	At      time.Time `json:"at"`
 	Resets  time.Time `json:"resets"`
+	// Fable is the Fable's own share of the week used, in percent, kept beside
+	// the reading for the Mayor's choice of model (mw-gq6.834); nil when the
+	// reading did not give one.
+	Fable *float64 `json:"fable,omitempty"`
 }
 
 // UsageReadings keeps the readings in a note of the tracker.
@@ -216,6 +220,8 @@ type UsageSet struct {
 	Zone *time.Location
 	// Pause runs the pause with the reason given; nil only reports.
 	Pause func(ctx context.Context, reason string) error
+	// Fable, when set, is the Fable's share of the week, kept with the reading.
+	Fable *float64
 	Now   func() time.Time
 	Out   io.Writer
 }
@@ -241,16 +247,24 @@ func (u UsageSet) Run(ctx context.Context, percent float64, resets time.Time) er
 	if !resets.After(now) {
 		return fmt.Errorf("the reset %s is not in the future", resets.UTC().Format(time.RFC3339))
 	}
-	reading := UsageReading{Percent: percent, At: now, Resets: resets.UTC()}
+	reading := UsageReading{Percent: percent, At: now, Resets: resets.UTC(), Fable: u.Fable}
 	if err := u.Readings.Add(ctx, reading); err != nil {
 		return err
 	}
-	fmt.Fprintf(u.Out, "usage %.1f%% kept at %s; the week resets %s\n", percent, now.Format(time.RFC3339), reading.Resets.Format(time.RFC3339))
+	fmt.Fprintf(u.Out, "usage %.1f%% kept at %s; the week resets %s%s\n", percent, now.Format(time.RFC3339), reading.Resets.Format(time.RFC3339), fableNote(reading))
 	floor, err := u.Floors.Get(ctx)
 	if err != nil {
 		return err
 	}
 	return UsageCheck{Reading: reading, Floor: floor, Pause: u.Pause, Out: u.Out}.Run(ctx, now)
+}
+
+// fableNote is the Fable's share beside a reading, or nothing.
+func fableNote(r UsageReading) string {
+	if r.Fable == nil {
+		return ""
+	}
+	return fmt.Sprintf("; Fable %.1f%%", *r.Fable)
 }
 
 // UsageCheck reads a reading against the reserve.
@@ -323,8 +337,8 @@ func (u UsageShow) Run(ctx context.Context) error {
 		return nil
 	}
 	last := all[len(all)-1]
-	fmt.Fprintf(u.Out, "last reading: %.1f%% at %s; the week resets %s\n",
-		last.Percent, last.At.UTC().Format(time.RFC3339), last.Resets.UTC().Format(time.RFC3339))
+	fmt.Fprintf(u.Out, "last reading: %.1f%% at %s; the week resets %s%s\n",
+		last.Percent, last.At.UTC().Format(time.RFC3339), last.Resets.UTC().Format(time.RFC3339), fableNote(last))
 	return UsageCheck{Reading: last, Floor: floor, Out: u.Out}.Run(ctx, now)
 }
 

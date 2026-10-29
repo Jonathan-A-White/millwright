@@ -3,11 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
+	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 
 	"github.com/spf13/cobra"
 )
@@ -21,9 +26,10 @@ func newUsageCmd() *cobra.Command {
 		Long: "The reserve R(t) is 10% of the quota with a whole week left, 0% with an hour left, and a straight\n" +
 			"line between. When the usage reported has reached 100% less R(t), mw pause runs by itself.\n" +
 			"A floor (mw usage floor) keeps the reserve at no less than a percent until a time, then R(t) alone.\n" +
-			"PROVISIONAL: the usage is what the Governor reports, from his screenshot, until a source exists.",
+			"The usage is read from Claude's /usage screen by mw usage read, which a user timer runs every 30\n" +
+			"minutes; mw usage set is the Governor's report by hand, for when the screen cannot be read.",
 	}
-	cmd.AddCommand(newUsageSetCmd(), newUsageShowCmd(), newUsageFloorCmd())
+	cmd.AddCommand(newUsageSetCmd(), newUsageReadCmd(), newUsageShowCmd(), newUsageFloorCmd())
 	return cmd
 }
 
@@ -64,14 +70,7 @@ func newUsageSetCmd() *cobra.Command {
 			return application.UsageSet{
 				Readings: application.UsageReadings{Notes: mwGateway(dir, host)}, Floors: application.UsageFloors{Notes: mwGateway(dir, host)},
 				Zone: zone, Out: out,
-				Pause: func(ctx context.Context, reason string) error {
-					p, err := pauseHome(ctx, dir, host, out, 0)
-					if err != nil {
-						return err
-					}
-					_, err = p.Run(ctx, application.PauseRequest{Reason: reason, Wait: application.PauseWait})
-					return err
-				},
+				Pause: usagePause(dir, host, out),
 			}.Run(cmd.Context(), percent, at)
 		},
 	}
@@ -139,4 +138,80 @@ func newUsageFloorCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&until, "until", "", "when the floor ends (RFC3339)")
 	return cmd
+}
+
+// UsageStateDir is where mw usage read keeps its lock and the last capture of
+// the /usage screen, under the home directory.
+var UsageStateDir = filepath.Join(".local", "state", "mw-usage")
+
+const (
+	usageReadLockFile    = "read.lock"
+	usageReadCaptureFile = "capture.txt"
+)
+
+func newUsageReadCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "read",
+		Short: "Read the quota used off Claude's /usage screen through tmux and set it, as mw usage set does",
+		Long: "read opens a throwaway tmux session of its own (named mw-usage-probe-<pid>-<time>, never a seat's),\n" +
+			"starts claude in the vault, types /usage, captures the screen and closes the session. From the\n" +
+			"'Current week (all models)' block it takes the percent used and when the week resets, and does what\n" +
+			"mw usage set <percent> --resets <time> does; it keeps the 'Current week (Fable)' percent beside\n" +
+			"the reading, and mw usage show prints it. /usage spends no tokens.\n" +
+			"On a screen it cannot read it changes nothing, says so, leaves non-zero and keeps the capture in\n" +
+			"~/.local/state/mw-usage/capture.txt. Two reads never run at once: a second says one is under way\n" +
+			"and does nothing. A user timer runs it every 30 minutes (docs/fuel-knobs.md). Run on the home.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			host, err := config.Host()
+			if err != nil {
+				return err
+			}
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			state := filepath.Join(home, UsageStateDir)
+			zone, err := time.LoadLocation("America/New_York")
+			if err != nil {
+				zone = time.UTC
+			}
+			out := cmd.OutOrStdout()
+			return application.UsageRead{
+				Terminal: tmux.NewTerminal(), Lock: hostlock.NewTry(state, usageReadLockFile),
+				Dir: dir, Zone: zone,
+				Set: application.UsageSet{
+					Readings: application.UsageReadings{Notes: mwGateway(dir, host)}, Floors: application.UsageFloors{Notes: mwGateway(dir, host)},
+					Zone: zone, Out: out,
+					Pause: usagePause(dir, host, out),
+				},
+				Keep: func(text string) (string, error) {
+					if err := os.MkdirAll(state, 0o700); err != nil {
+						return "", err
+					}
+					path := filepath.Join(state, usageReadCaptureFile)
+					return path, os.WriteFile(path, []byte(text), 0o600)
+				},
+				Name: func() string { return fmt.Sprintf("mw-usage-probe-%d-%d", os.Getpid(), time.Now().UnixNano()) },
+				Out:  out,
+			}.Run(cmd.Context())
+		},
+	}
+}
+
+// usagePause is the pause a reading that has reached the reserve runs, with the
+// reading as its reason.
+func usagePause(dir, host string, out io.Writer) func(ctx context.Context, reason string) error {
+	return func(ctx context.Context, reason string) error {
+		p, err := pauseHome(ctx, dir, host, out, 0)
+		if err != nil {
+			return err
+		}
+		_, err = p.Run(ctx, application.PauseRequest{Reason: reason, Wait: application.PauseWait})
+		return err
+	}
 }

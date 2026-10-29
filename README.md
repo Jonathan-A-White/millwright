@@ -2011,8 +2011,17 @@ there), each asked over ssh to run `mw pause --here`. No cap is set to 0 and no 
   still alive, runs `mw retry` for each story whose session is gone, puts `cloud.max_boxes` back, turns the
   night passes back on, cancels the timer and mails the Mayor.
 - A second `mw pause` or `mw resume` changes nothing and says so. Neither touches the `mw-seats` windows.
-- `mw usage set <percent> [--resets <RFC3339>]` keeps the Governor's reading of the quota used (a
-  PROVISIONAL source: his screenshot). The reserve R(t) is 10% of the quota with a week left and 0% with an
+- `mw usage read` reads the quota itself (mw-gq6.834): it opens a throwaway tmux session of its own
+  (`mw-usage-probe-<pid>-<time>`, never a seat's window), starts `claude` in the vault, types `/usage`,
+  captures the screen, closes the session, and from the "Current week (all models)" block does what
+  `mw usage set <percent> --resets <time>` does; the "Current week (Fable)" percent is kept beside the
+  reading and `mw usage show` prints it. `/usage` spends no tokens. On a screen it cannot read (no Usage
+  tab, no percent, no reset) it changes nothing, says so, exits non-zero and keeps the capture in
+  `~/.local/state/mw-usage/capture.txt`. A lock keeps two reads from running at once: a second says one
+  is under way. A user timer on the home runs it every 30 minutes; install it once with
+  `sh scripts/install-units.sh --enable mw-usage-read`.
+- `mw usage set <percent> [--resets <RFC3339>]` keeps the Governor's reading of the quota used by hand,
+  for when the screen cannot be read. The reserve R(t) is 10% of the quota with a week left and 0% with an
   hour left, a straight line between; when the reading has reached 100% less R(t), `mw pause` runs by
   itself. `mw usage show` prints the last reading against the reserve. `mw usage floor <percent> --until
   <RFC3339>` keeps a floor under the reserve (so that a tutor's answers keep their tokens): while now is
