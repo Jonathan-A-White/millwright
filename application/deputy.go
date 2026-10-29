@@ -268,6 +268,17 @@ func (d Deputy) closeHandedOff(ctx context.Context, name string) (bool, error) {
 		if state, err := d.Terminal.PaneState(ctx, window.ID); err != nil || (state != PaneIdle && state != PaneDraft) {
 			return false, nil
 		}
+		// A background agent still running is lost with the window: the Deputy
+		// is left up for it, until it has run for DefaultReapAgentWait after the
+		// handoff (mw-gq6.833).
+		handoff, _ := newestHandoffSince(start.Handoffs, opened)
+		agents, held := holdsBackgroundAgents(ctx, d.Terminal, window.ID, handoff, d.now())
+		if held {
+			return false, nil
+		}
+		if agents != "" && d.Out != nil {
+			fmt.Fprintf(d.Out, "closing the window %s over a background agent that has run since its handoff: %s\n", name, agents)
+		}
 		if err := d.Terminal.Close(ctx, window.ID); err != nil {
 			return false, fmt.Errorf("closing the window %s of the Deputy that has handed off: %w", name, err)
 		}

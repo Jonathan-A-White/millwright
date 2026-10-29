@@ -115,6 +115,23 @@ Feature: mw millhand tick
     And the reaper log holds one line saying "closed by the tick: finished at 2026-09-19T06:00:00Z, window left open"
     And the tick log holds that line
 
+  Scenario: A finished Millhand's window with a background agent still running is left open
+    Given the window "millhand-2026-09-19-04" was opened at "2026-09-19T05:00:00Z"
+    And the "millhand" seat's newest handoff was written at "2026-09-19T11:50:00Z"
+    And the pane of the window "millhand-2026-09-19-04" shows a background agent running
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And the window "millhand-2026-09-19-04" was not closed
+    And the reaper log holds no line
+
+  Scenario: An idle Millhand with no handoff and a background agent running is not stalled
+    Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    And the pane of the window "millhand-test" shows a background agent running
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And the window "millhand-test" was not closed
+    And the reaper log holds no line
+
   Scenario: A finished Millhand's window is closed, and with nothing waiting the tick says so
     Given the window "millhand-2026-09-19-04" was opened at "2026-09-19T05:00:00Z"
     When mw millhand tick is run

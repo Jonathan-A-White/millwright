@@ -842,7 +842,13 @@ func (t MillhandTick) stalled(ctx context.Context, rule SeatReap, window ReapWin
 	if _, since := newestHandoffSince(start.Handoffs, window.Opened); since {
 		return false
 	}
-	return rule.paneIdle(ctx, window.ID)
+	if !rule.paneIdle(ctx, window.ID) {
+		return false
+	}
+	// An idle pane that shows a background agent running is at work, not stalled
+	// (mw-gq6.833).
+	_, agents := holdsBackgroundAgents(ctx, rule.Terminal, window.ID, time.Time{}, rule.now())
+	return !agents
 }
 
 // reapRule is the rule of mw seat reap --when-idle, for this host's Millhand.
