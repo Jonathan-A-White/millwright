@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -128,6 +129,43 @@ func (w *Windows) UsageLimit(ctx context.Context, window string) (string, error)
 	}
 	shown, _ := application.PaneUsageLimit(application.StripEscapes(string(printed)))
 	return shown, nil
+}
+
+// NotLoggedInWindows names every window whose screen shows Claude Code's
+// login gone: a line with both "Not logged in" and "/login", as its status
+// line puts it. A line of a Builder's grep that quotes the words alone is not
+// one. A window that cannot be read is passed over, and a host with no tmux
+// has none.
+func (w *Windows) NotLoggedInWindows(ctx context.Context) ([]string, error) {
+	windows, err := w.OpenWindows(ctx)
+	if errors.Is(err, exec.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, window := range windows {
+		printed, err := w.call(ctx, "capture-pane", "-p", "-e", "-t", window.ID)
+		if err != nil {
+			continue
+		}
+		if screenNotLoggedIn(string(printed)) {
+			names = append(names, window.Name)
+		}
+	}
+	return names, nil
+}
+
+// screenNotLoggedIn reports whether a screen has a line saying Claude Code is
+// not logged in and to run /login.
+func screenNotLoggedIn(screen string) bool {
+	for _, line := range strings.Split(application.StripEscapes(screen), "\n") {
+		if strings.Contains(line, "Not logged in") && strings.Contains(line, "/login") {
+			return true
+		}
+	}
+	return false
 }
 
 // classifyPane says what a screen of Claude Code is doing. A session that says

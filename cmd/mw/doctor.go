@@ -281,6 +281,11 @@ func newDoctorCmd() *cobra.Command {
 			ageKeyFile, ageKeyErr := config.AgeKeyFile()
 			ageKey := doctor.NewAgeKey(mwVault(vault, host), host, vault, ageKeyFile)
 			ageKey.PathErr = ageKeyErr
+			// The token in claude.env ageing out, or the login gone (mw-gq6.830):
+			// the alarm to the Governor is the same push the other alarms use.
+			claudeLogin := doctor.NewClaudeLogin(claudeEnvFile())
+			claudeLogin.Alarm = alarm
+			claudeLogin.Screens = seatWindows().NotLoggedInWindows
 			checks := application.DoctorChecks{}
 			// The factory checkout the vault's formulas are judged against; none
 			// where this host checks the rig out nowhere.
@@ -433,6 +438,7 @@ func newDoctorCmd() *cobra.Command {
 				recheckSkips,
 				staleLandings,
 				ageKey,
+				claudeLogin,
 			}, churn...), checks...)
 			// Where Claude Code keeps its transcripts is the only place these
 			// two checks read; a host on codex has none, and says so once rather

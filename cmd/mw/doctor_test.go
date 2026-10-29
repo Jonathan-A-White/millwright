@@ -223,6 +223,27 @@ func TestDoctorTableHasTheBatteryCheck(t *testing.T) {
 	}
 }
 
+// The Claude login check is in the table: a host with no claude program and no
+// claude.env has nothing to judge, which reads ok, so this runs on any host.
+func TestDoctorTableHasTheClaudeLoginCheck(t *testing.T) {
+	closed := closedDoctorPort(t)
+	vault := t.TempDir()
+	mwConfig(t, fmt.Sprintf("vault = %q\nhost = \"laptop\"\n\n[doctor]\nreach = [%q]\n", vault, closed))
+	t.Setenv("PATH", t.TempDir())
+
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"doctor", "--dry-run", "claude-login"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("mw doctor claude-login: %v\n%s", err, out)
+	}
+	if report := out.String(); !strings.HasPrefix(report, "claude-login: ok") {
+		t.Fatalf("expected the claude-login check to run and read ok, got:\n%s", report)
+	}
+}
+
 // A Mayor stuck on API errors is in the table, ahead of mayor-stale: on a host
 // whose vault holds no .mayor-acting there is no seat held, which reads ok.
 func TestDoctorTableHasTheMayorStuckCheck(t *testing.T) {

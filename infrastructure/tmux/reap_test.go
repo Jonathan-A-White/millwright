@@ -232,3 +232,16 @@ func TestNextBelowFindsAMwNextInThePaneTree(t *testing.T) {
 		})
 	}
 }
+
+func TestScreenNotLoggedInWantsTheStatusLineNotAQuotation(t *testing.T) {
+	cases := map[string]bool{
+		"\x1b[2m  Not logged in · Run /login\x1b[0m\n> ": true,
+		"cmd/mw/doctor.go:12: \"Not logged in\"":         false,
+		"Welcome back":                                   false,
+	}
+	for screen, want := range cases {
+		if got := screenNotLoggedIn(screen); got != want {
+			t.Errorf("screenNotLoggedIn(%q) = %v, want %v", screen, got, want)
+		}
+	}
+}
