@@ -179,6 +179,64 @@ func TestADispatchTakesTheFirstCheckInTheOrderTheBugNamesThem(t *testing.T) {
 	}
 }
 
+// A test named in a title is often where the symptom shows, not the bug's check
+// (mw-gq6.841): when the acceptance's numbered criterion runs a command that is
+// not that spec, the bug is dispatched; one that runs only that spec, or names no
+// command, is still rechecked from the title.
+func TestADispatchLeavesTheTitleSpecAloneWhenTheAcceptanceNamesAnotherCheck(t *testing.T) {
+	const titleSpec = "tests/unit/x.test.ts"
+	title := "[bug] lampas: a grind is over " + titleSpec + "'s ceiling"
+	for name, bug := range map[string]struct {
+		acceptance string
+		rechecked  bool
+	}{
+		"a backticked command that is not the spec": {
+			acceptance: "1. `npx vitest related --run grinds/a.md` runs " + titleSpec + "\n2. go test ./... passes",
+		},
+		"a numbered line that begins with a runner": {
+			acceptance: "1. npx vitest related --run grinds/a.md prints a test file\n",
+		},
+		"a backticked command that runs the spec": {
+			acceptance: "1. `npx vitest --run " + titleSpec + "` passes", rechecked: true,
+		},
+		"no command at all": {
+			acceptance: "1. The grind stays under the ceiling.\n2. The spec " + titleSpec + " passes.", rechecked: true,
+		},
+		"a command in an unnumbered line": {
+			acceptance: "Run `npx vitest related --run grinds/a.md`.", rechecked: true,
+		},
+		"no acceptance": {rechecked: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dispatch, tracker, _, _, _ := aFactory(t)
+			tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: title, Overrides: domain.Path{Files: "src/a.ts"}})
+			tracker.SetAcceptance("mw-gq6.1", bug.acceptance)
+			if err := tracker.SetLabels("mw-gq6.1", application.LabelBug); err != nil {
+				t.Fatal(err)
+			}
+			recheck := &stubRechecks{answer: application.SpecRecheck{Spec: titleSpec, Sha: "9f3c2ab41d0e", Passed: true, Tests: 2}}
+			dispatch.Rechecks = recheck
+
+			report, err := dispatch.Run(context.Background())
+			if err != nil {
+				t.Fatalf("dispatching: %v", err)
+			}
+			if bug.rechecked {
+				if len(recheck.asked) != 1 || tracker.CloseReason("mw-gq6.1") == "" {
+					t.Errorf("asked %v, close %q: want the title spec rechecked and the bug closed", recheck.asked, tracker.CloseReason("mw-gq6.1"))
+				}
+				return
+			}
+			if len(recheck.asked) != 0 || tracker.CloseReason("mw-gq6.1") != "" {
+				t.Errorf("asked %v, close %q: want no recheck and the bug open", recheck.asked, tracker.CloseReason("mw-gq6.1"))
+			}
+			if ids := startedIDs(report); len(ids) != 1 || !strings.Contains(report.Started[0].Recheck, "no check named") {
+				t.Errorf("started %v, want the bug dispatched saying no check was named", ids)
+			}
+		})
+	}
+}
+
 // stubExamples is the ExampleRechecker a dispatch test gives: it answers what it
 // was told to and remembers what it was asked.
 type stubExamples struct {

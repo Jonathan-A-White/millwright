@@ -89,10 +89,47 @@ func bugCheck(detail StoryDetail, files string) (check BugCheck, found, asked bo
 			return one, true, true
 		}
 	}
-	if spec := testFileName.FindString(title); spec != "" {
+	if spec := testFileName.FindString(title); spec != "" && !acceptanceRunsAnother(detail.Acceptance, spec) {
 		return BugCheck{Source: CheckFromTitle, Spec: spec}, true, true
 	}
 	return BugCheck{}, false, true
+}
+
+// commandRunners are the first words of a command an acceptance criterion runs.
+var commandRunners = map[string]bool{
+	"npx": true, "npm": true, "pnpm": true, "yarn": true, "bun": true, "node": true,
+	"go": true, "mw": true, "make": true, "vitest": true, "playwright": true,
+}
+
+var (
+	numberedCriterion  = regexp.MustCompile(`^\s*\d+[.)]\s+`)
+	criterionBackticks = regexp.MustCompile("`([^`]+)`")
+)
+
+// acceptanceRunsAnother says a numbered criterion of the acceptance runs a command
+// that is not a run of spec: the bug's own check, so a test its title names is the
+// symptom's and not the check (mw-gq6.841). A command is a backticked span or the
+// rest of the line, beginning with a runner such as npx, npm, go, mw or make.
+func acceptanceRunsAnother(acceptance, spec string) bool {
+	for _, line := range strings.Split(acceptance, "\n") {
+		loc := numberedCriterion.FindStringIndex(line)
+		if loc == nil {
+			continue
+		}
+		rest := strings.TrimSpace(line[loc[1]:])
+		commands := []string{}
+		for _, m := range criterionBackticks.FindAllStringSubmatch(rest, -1) {
+			commands = append(commands, strings.TrimSpace(m[1]))
+		}
+		commands = append(commands, rest)
+		for _, command := range commands {
+			first, _, _ := strings.Cut(command, " ")
+			if commandRunners[first] && !strings.Contains(command, spec) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // flakeWords are the words that say a bug is about a flake; manyRuns are the ways
