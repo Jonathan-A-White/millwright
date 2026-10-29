@@ -237,6 +237,101 @@ func TestADispatchLeavesTheTitleSpecAloneWhenTheAcceptanceNamesAnotherCheck(t *t
 	}
 }
 
+// A criterion that runs the title's spec under an environment assignment
+// (NAME=value npx vitest run <spec>) is a different check from the bare run, which
+// on the home is the symptom's and may pass (mw-gq6.845); a command that begins
+// with an assignment is read past it to its runner.
+func TestADispatchDoesNotTakeTheBareTitleSpecForACheckThatRunsItUnderAnEnvironmentOverride(t *testing.T) {
+	const titleSpec = "tests/unit/x.test.ts"
+	title := "[bug] lampas: " + titleSpec + " fails without the vault file"
+	for name, bug := range map[string]struct {
+		acceptance, description string
+		rechecked               bool
+	}{
+		"the spec under an assignment in backticks": {
+			acceptance: "1. `FOO=/nonexistent npx vitest run " + titleSpec + "` exits 0",
+		},
+		"the spec under an assignment in the line": {
+			acceptance: "1. FOO=/nonexistent npx vitest run " + titleSpec + " exits 0",
+		},
+		"two assignments": {
+			acceptance: "1. `FOO=a BAR=b npx vitest run " + titleSpec + "` exits 0",
+		},
+		"another command under an assignment": {
+			acceptance: "1. `FOO=bar mw check` is green",
+		},
+		"the bare spec": {
+			acceptance: "1. `npx vitest run " + titleSpec + "` exits 0", rechecked: true,
+		},
+		"an assignment before no runner": {
+			acceptance: "1. `FOO=bar ls` lists " + titleSpec, rechecked: true,
+		},
+		"a Check line that runs the spec under an assignment": {
+			description: "Check: FOO=/nonexistent npx vitest run " + titleSpec + "\n",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dispatch, tracker, _, _, _ := aFactory(t)
+			tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: title, Overrides: domain.Path{Files: "src/a.ts"}})
+			tracker.SetDescription("mw-gq6.1", bug.description)
+			tracker.SetAcceptance("mw-gq6.1", bug.acceptance)
+			if err := tracker.SetLabels("mw-gq6.1", application.LabelBug); err != nil {
+				t.Fatal(err)
+			}
+			recheck := &stubRechecks{answer: application.SpecRecheck{Spec: titleSpec, Sha: "9f3c2ab41d0e", Passed: true, Tests: 2}}
+			dispatch.Rechecks = recheck
+
+			report, err := dispatch.Run(context.Background())
+			if err != nil {
+				t.Fatalf("dispatching: %v", err)
+			}
+			if bug.rechecked {
+				if len(recheck.asked) != 1 || tracker.CloseReason("mw-gq6.1") == "" {
+					t.Errorf("asked %v, close %q: want the title spec rechecked and the bug closed", recheck.asked, tracker.CloseReason("mw-gq6.1"))
+				}
+				return
+			}
+			if len(recheck.asked) != 0 || tracker.CloseReason("mw-gq6.1") != "" {
+				t.Errorf("asked %v, close %q: want no recheck and the bug open", recheck.asked, tracker.CloseReason("mw-gq6.1"))
+			}
+			if ids := startedIDs(report); len(ids) != 1 || !strings.Contains(report.Started[0].Recheck, "no check named") {
+				t.Errorf("started %v, want the bug dispatched saying no check was named", ids)
+			}
+		})
+	}
+}
+
+// A grist eval line run under an assignment is not the bare eval on main either.
+func TestADispatchDoesNotReadAGristEvalUnderAnEnvironmentOverrideAsACheckOfMain(t *testing.T) {
+	for name, description := range map[string]string{
+		"in a Check line": "Check: FOO=1 mw grist eval lampas teach --example a\n",
+		"in a plain line": "Run FOO=1 mw grist eval lampas teach --example a\n",
+		"in backticks":    "It fails: `FOO=1 mw grist eval lampas teach --example a`\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dispatch, tracker, _, _, _ := aFactory(t)
+			tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "[bug] lampas: a grind misses", Overrides: domain.Path{Files: "src/a.ts"}})
+			tracker.SetDescription("mw-gq6.1", description)
+			if err := tracker.SetLabels("mw-gq6.1", application.LabelBug); err != nil {
+				t.Fatal(err)
+			}
+			examples := &stubExamples{answer: application.SpecRecheck{Passed: true}}
+			dispatch.ExampleRechecks = examples
+
+			report, err := dispatch.Run(context.Background())
+			if err != nil {
+				t.Fatalf("dispatching: %v", err)
+			}
+			if len(examples.asked) != 0 || tracker.CloseReason("mw-gq6.1") != "" {
+				t.Errorf("asked %v, close %q: want no send and the bug open", examples.asked, tracker.CloseReason("mw-gq6.1"))
+			}
+			if ids := startedIDs(report); len(ids) != 1 {
+				t.Errorf("started %v, want the bug dispatched", ids)
+			}
+		})
+	}
+}
+
 // stubExamples is the ExampleRechecker a dispatch test gives: it answers what it
 // was told to and remembers what it was asked.
 type stubExamples struct {

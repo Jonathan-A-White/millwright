@@ -74,6 +74,11 @@ func bugCheck(detail StoryDetail, files string) (check BugCheck, found, asked bo
 				continue
 			}
 			rest := line[len(checkLinePrefix):]
+			if _, assigned := commandRunner(rest); assigned {
+				// The check runs under an environment the recheck cannot give it:
+				// the bare run on main is not it (mw-gq6.845).
+				return BugCheck{}, false, true
+			}
 			if one, ok := gristEvalCheck(rest); ok {
 				one.Source = CheckFromLine
 				return one, true, true
@@ -101,6 +106,21 @@ var commandRunners = map[string]bool{
 	"go": true, "mw": true, "make": true, "vitest": true, "playwright": true,
 }
 
+// envAssignment is a leading NAME=value word of a command.
+var envAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
+// commandRunner is the first word of command that is not a NAME=value
+// assignment, and whether any assignment came before it (mw-gq6.845).
+func commandRunner(command string) (runner string, assigned bool) {
+	for _, word := range strings.Fields(command) {
+		if !envAssignment.MatchString(word) {
+			return word, assigned
+		}
+		assigned = true
+	}
+	return "", assigned
+}
+
 var (
 	numberedCriterion  = regexp.MustCompile(`^\s*\d+[.)]\s+`)
 	criterionBackticks = regexp.MustCompile("`([^`]+)`")
@@ -109,7 +129,9 @@ var (
 // acceptanceRunsAnother says a numbered criterion of the acceptance runs a command
 // that is not a run of spec: the bug's own check, so a test its title names is the
 // symptom's and not the check (mw-gq6.841). A command is a backticked span or the
-// rest of the line, beginning with a runner such as npx, npm, go, mw or make.
+// rest of the line, beginning with a runner such as npx, npm, go, mw or make,
+// after any NAME=value assignments. A command that runs spec under such an
+// assignment is another check too: the bare run is not it (mw-gq6.845).
 func acceptanceRunsAnother(acceptance, spec string) bool {
 	for _, line := range strings.Split(acceptance, "\n") {
 		loc := numberedCriterion.FindStringIndex(line)
@@ -123,8 +145,8 @@ func acceptanceRunsAnother(acceptance, spec string) bool {
 		}
 		commands = append(commands, rest)
 		for _, command := range commands {
-			first, _, _ := strings.Cut(command, " ")
-			if commandRunners[first] && !strings.Contains(command, spec) {
+			runner, assigned := commandRunner(command)
+			if commandRunners[runner] && (assigned || !strings.Contains(command, spec)) {
 				return true
 			}
 		}
@@ -179,8 +201,11 @@ func flakeBug(detail StoryDetail) bool {
 // ref (--ref), which is no check of main, or names no example, is none.
 func gristEvalCheck(text string) (BugCheck, bool) {
 	for _, line := range strings.Split(text, "\n") {
-		_, rest, found := strings.Cut(line, "mw grist eval ")
+		before, rest, found := strings.Cut(line, "mw grist eval ")
 		if !found {
+			continue
+		}
+		if last := strings.Fields(before); len(last) > 0 && envAssignment.MatchString(strings.TrimLeft(last[len(last)-1], "`'\"(")) {
 			continue
 		}
 		var positional, examples []string
