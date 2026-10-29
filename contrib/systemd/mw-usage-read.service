@@ -1,0 +1,26 @@
+# One `mw usage read` run, as the user, then it exits: no daemon. For
+# `systemctl --user`; see docs/fuel-knobs.md.
+#
+# Started by mw-usage-read.timer every 30 minutes, on the home. It opens a
+# throwaway tmux session of its own, starts claude, types /usage and reads the
+# week's quota off the screen, then sets it as `mw usage set` does (and pauses
+# the factory when the reserve is reached). /usage spends no tokens. A screen it
+# cannot read changes nothing, leaves non-zero and keeps the capture in
+# ~/.local/state/mw-usage/capture.txt. Two runs never overlap: a lock.
+[Unit]
+Description=Read the quota off Claude's /usage screen and set it (mw usage read)
+OnFailure=mw-unit-failed@%n.service
+
+[Service]
+Type=oneshot
+
+# Like mw-report.service, it runs the one fixed binary rather than relying on
+# PATH; the bd it calls reaches the Dolt server through beads.env. claude and
+# tmux are found by the login shell the probe session runs, and by PATH from
+# dispatch.env.
+EnvironmentFile=-%h/.config/mw/beads.env
+EnvironmentFile=-%h/.config/mw/dispatch.env
+ExecStart=/usr/bin/env %h/.local/bin/mw usage read
+
+# ~10 s for claude to start, ~8 s for the screen, a few looks more.
+TimeoutStartSec=3min

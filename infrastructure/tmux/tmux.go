@@ -451,3 +451,60 @@ func sortedKeys(m map[string]string) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// Terminal is a throwaway terminal on one tmux server, typed into and read as
+// a person would: the adapter behind application.UsageTerminal. It starts a
+// session of the name it is given and touches no other.
+type Terminal struct{ server }
+
+// Terminal satisfies the port.
+var _ application.UsageTerminal = (*Terminal)(nil)
+
+// NewTerminal returns a Terminal on tmux's default server, unless an option
+// says otherwise.
+func NewTerminal(opts ...Option) *Terminal {
+	s := chosen(opts)
+	return &Terminal{server{program: s.program, socket: s.socket}}
+}
+
+// Open implements application.UsageTerminal: a detached session of the given
+// size running a login shell in dir.
+func (t *Terminal) Open(ctx context.Context, name, dir string, cols, rows int) error {
+	args := []string{"new-session", "-d", "-s", name, "-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows)}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
+	_, err := t.call(ctx, append(args, "bash -l")...)
+	return err
+}
+
+// Type implements application.UsageTerminal.
+func (t *Terminal) Type(ctx context.Context, name, text string) error {
+	_, err := t.call(ctx, "send-keys", "-t", target(name), "-l", "--", text)
+	return err
+}
+
+// Press implements application.UsageTerminal.
+func (t *Terminal) Press(ctx context.Context, name, key string) error {
+	_, err := t.call(ctx, "send-keys", "-t", target(name), key)
+	return err
+}
+
+// Capture implements application.UsageTerminal: the screen as printed, with no
+// history.
+func (t *Terminal) Capture(ctx context.Context, name string) (string, error) {
+	out, err := t.call(ctx, "capture-pane", "-p", "-t", target(name))
+	return string(out), err
+}
+
+// Close implements application.UsageTerminal. A session already gone is not a
+// failure.
+func (t *Terminal) Close(ctx context.Context, name string) error {
+	_, err := t.call(ctx, "kill-session", "-t", sessionTarget(name))
+	if err != nil {
+		if there, checked := (&Runner{server: t.server}).exists(ctx, name); checked == nil && !there {
+			return nil
+		}
+	}
+	return err
+}

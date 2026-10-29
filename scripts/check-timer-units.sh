@@ -32,7 +32,7 @@
 #    pair is a oneshot run straight from ~/.local/bin (not through `env`) on a timer
 #    at 2, 7, 12, ... that does not catch up. The report pair is a oneshot run straight from
 #    ~/.local/bin that runs `mw report send` on a timer at 12:00 UTC that does not catch
-#    up. The parent's note pair runs `mw report send --class parent` hourly; it posts only in its own hour. The postern mirror pair is a
+#    up. The parent's note pair runs `mw report send --class parent` hourly; it posts only in its own hour. The usage read pair runs `mw usage read` every 30 minutes on a timer that does not catch up. The postern mirror pair is a
 #    oneshot that runs `mw postern mirror` (through `env`) on a timer at 3, 13,
 #    23, ... that does not catch up. And the scripts those two run
 #    (contrib/mail-notify, contrib/health/mw-health.sh) are executable and parse.
@@ -95,6 +95,8 @@ REPORT_SERVICE=$DIR/mw-report.service
 REPORT_TIMER=$DIR/mw-report.timer
 PARENT_SERVICE=$DIR/mw-parent-note.service
 PARENT_TIMER=$DIR/mw-parent-note.timer
+USAGE_SERVICE=$DIR/mw-usage-read.service
+USAGE_TIMER=$DIR/mw-usage-read.timer
 FOLLOW_SERVICE=$DIR/mw-view-follow.service
 FAILED_TEMPLATE=$DIR/mw-unit-failed@.service
 SYS_FAILED_TEMPLATE=$DIR/system/mw-unit-failed@.service
@@ -268,6 +270,11 @@ need "$PARENT_SERVICE" "Type=oneshot"
 need "$PARENT_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw report send --class parent"
 need "$PARENT_TIMER" "OnCalendar=*:05:00"
 need "$PARENT_TIMER" "Persistent=false"
+# The usage read pair: `mw usage read` every 30 minutes, no catch-up.
+need "$USAGE_SERVICE" "Type=oneshot"
+need "$USAGE_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw usage read"
+need "$USAGE_TIMER" "OnCalendar=*:4/30"
+need "$USAGE_TIMER" "Persistent=false"
 # The events follower (it republishes the view too), a daemon with no timer.
 need "$FOLLOW_SERVICE" "ExecStart=/usr/bin/env mw events follow"
 need "$FOLLOW_SERVICE" "Restart=on-failure"
