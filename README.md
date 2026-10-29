@@ -5876,7 +5876,7 @@ only notes that it does not know the key, and sends the story back.
 The driver is `scripts/trim-merge.sh`, built into `mw`: where the two sides changed
 different lines it is git's own three-way merge; in a hunk both changed, a line the other
 side removed since the base stays removed, the lines either side added are kept, and a
-table row both edited takes ours. `git merge-file --union`, which keeps both sides of
+table row both edited takes ours. A prose line both sides edited differently, or a line both added at two places, is a conflict, not settled (mw-gq6.844). `git merge-file --union`, which keeps both sides of
 every hunk, brought back every line a trim took out whenever the other side had appended
 (mw-gq6.495, mw-gq6.499). Every merge and rebase `mw` makes, in a rig or in the vault,
 writes the driver to a temporary file and passes `-c merge.trimsafe.driver=sh <file> %O %A

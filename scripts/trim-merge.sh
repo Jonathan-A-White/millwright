@@ -17,6 +17,10 @@
 #   - a line theirs added is put after the line it follows in theirs, unless
 #     ours has a row with the same first cell (a row both sides edited takes
 #     ours) or the base had that row and ours removed it.
+# Two things are a conflict, never settled (mw-gq6.844): a prose line both sides
+# removed and each replaced with a different line (an edit of one line made on
+# both sides, which would leave two versions of it), and a line both sides added
+# that the merge holds twice (the same line added at two places).
 # Exit 0 with the merge written; any other status is a conflict git reports.
 set -eu
 
@@ -28,7 +32,28 @@ trap 'rm -f "$marked" "$merged"' EXIT
 status=0
 git merge-file -p --diff3 --marker-size=41 -L ours -L base -L theirs \
 	"$ours" "$base" "$theirs" >"$marked" || status=$?
+
+# twice refuses a merge holding a line twice that both sides added and the base
+# had not: git merges two hunks that do not overlap, each adding the line, into
+# two copies of it.
+twice() {
+	awk '
+	FNR == 1 { file++ }
+	{ n[file, $0]++; if (file == 4) seen[$0] = 1 }
+	END {
+		for (line in seen) {
+			if (n[1, line] > 0 || n[2, line] == 0 || n[3, line] == 0) continue
+			most = n[2, line] > n[3, line] ? n[2, line] : n[3, line]
+			if (n[4, line] > most && line !~ /^[ \t]*$/) {
+				print "trim-merge: both sides added " line " and the merge holds it twice" > "/dev/stderr"
+				exit 1
+			}
+		}
+	}' "$base" "$ours" "$theirs" "$1"
+}
+
 if [ "$status" -eq 0 ]; then
+	twice "$marked" || exit 1
 	cat "$marked" >"$ours"
 	exit 0
 fi
@@ -51,8 +76,23 @@ function key(line,   cell) {
 }
 # marker is a conflict marker of git, at the size this script asks for.
 function marker(c,   s) { s = sprintf("%41s", ""); gsub(/ /, c, s); return s }
+# prose is a line an edit of one line can be told in: not blank, not a table row.
+function prose(line) { return line !~ /^[ \t]*$/ && line !~ /^\|/ }
+# bothEdited is true when both sides removed a prose line of the base and each
+# put a prose line of its own in the hunk that the other side does not have.
+function bothEdited(   i, goneBoth, oursNew, theirsNew, inB, inO, inT) {
+	split("", inB); split("", inO); split("", inT)
+	for (i = 1; i <= nb; i++) inB[B[i]]++
+	for (i = 1; i <= no; i++) inO[O[i]]++
+	for (i = 1; i <= nt; i++) inT[T[i]]++
+	for (i = 1; i <= nb; i++) if (prose(B[i]) && !(B[i] in inO) && !(B[i] in inT)) goneBoth = 1
+	for (i = 1; i <= no; i++) if (prose(O[i]) && !(O[i] in inB) && !(O[i] in inT)) oursNew = 1
+	for (i = 1; i <= nt; i++) if (prose(T[i]) && !(T[i] in inB) && !(T[i] in inO)) theirsNew = 1
+	return goneBoth && oursNew && theirsNew
+}
 # settle prints the lines of one conflict, O ours, B the base and T theirs.
 function settle(   i, j, k, m, p, line, n, at, out, seen, removed, added, theirsBy, used, hasKey, baseKey, kept) {
+	if (bothEdited()) { edited = 1; return }
 	split("", removed); split("", added); split("", theirsBy); split("", used)
 	split("", hasKey); split("", baseKey); split("", out); split("", kept)
 	for (i = 1; i <= nb; i++) { removed[B[i]]++; baseKey[key(B[i])] = 1 }
@@ -110,9 +150,17 @@ part == "o" { O[++no] = $0; next }
 part == "b" { B[++nb] = $0; next }
 part == "t" { T[++nt] = $0; next }
 { print }
-END { if (part != "") exit 2 }
+END {
+	if (part != "") exit 2
+	if (edited) exit 3
+}
 ' "$marked" >"$merged" || {
-	echo "trim-merge: could not settle the conflicts git found" >&2
+	if [ "$?" -eq 3 ]; then
+		echo "trim-merge: both sides edited the same line differently; a conflict" >&2
+	else
+		echo "trim-merge: could not settle the conflicts git found" >&2
+	fi
 	exit 1
 }
+twice "$merged" || exit 1
 cat "$merged" >"$ours"

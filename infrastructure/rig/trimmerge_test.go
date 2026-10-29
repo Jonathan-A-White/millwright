@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Jonathan-A-White/millwright"
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 )
@@ -195,5 +196,82 @@ func TestATrimTheDriverCannotSettleIsSentBackNotMergedByUnion(t *testing.T) {
 				t.Errorf("expected main as it was, got:\n%s", got)
 			}
 		})
+	}
+}
+
+// runTrimDriver runs mw's trim-safe driver on the three versions as git would
+// (base, ours, theirs written to files, ours overwritten), and returns what it
+// left in ours and its exit status.
+func runTrimDriver(t *testing.T, base, ours, theirs string) (string, int) {
+	t.Helper()
+	dir := t.TempDir()
+	write(t, dir, "driver.sh", millwright.TrimMergeScript)
+	write(t, dir, "base", base)
+	write(t, dir, "ours", ours)
+	write(t, dir, "theirs", theirs)
+	cmd := exec.Command("sh", "driver.sh", "base", "ours", "theirs")
+	cmd.Dir = dir
+	status := 0
+	if out, err := cmd.CombinedOutput(); err != nil {
+		exit, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatalf("running the driver: %v\n%s", err, out)
+		}
+		status = exit.ExitCode()
+	}
+	left, err := os.ReadFile(filepath.Join(dir, "ours"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(left), status
+}
+
+// TestALineBothSidesEditedIsAConflictNotKeptTwice: the base has a prose line P
+// in a hunk git cannot merge; ours replaces it with P1 and theirs with P2. The
+// driver keeping both made two contradicting versions of one paragraph (Lampas
+// ATTRIBUTION.md, batch 292), so it refuses, and writes neither into ours.
+func TestALineBothSidesEditedIsAConflictNotKeptTwice(t *testing.T) {
+	const (
+		p  = "The text is public domain, edited from the 2000 transcription."
+		p1 = "The text is public domain, edited from the 2000 transcription by ours."
+		p2 = "The text is public domain, edited from the 2001 transcription by theirs."
+	)
+	frame := func(line string) string { return "# About\n\nintro\n\n" + line + "\n\nend\n" }
+	got, status := runTrimDriver(t, frame(p), frame(p1), frame(p2))
+	if status == 0 {
+		t.Errorf("expected a conflict (non-zero exit), the driver settled it as:\n%s", got)
+	}
+	if strings.Contains(got, p1) && strings.Contains(got, p2) {
+		t.Errorf("expected the two edits of one line not both written, got:\n%s", got)
+	}
+}
+
+// TestALineBothSidesAddedAtTwoPlacesIsAConflict: the same new line added at
+// two spots, which git merges cleanly into two copies of it, is refused.
+func TestALineBothSidesAddedAtTwoPlacesIsAConflict(t *testing.T) {
+	const toc = "<!-- toc: none -->"
+	base := "# About\n\nintro\n\nmiddle\n\nlast one\nold tail\n"
+	ours := "# About\n\n" + toc + "\n\nintro\n\nmiddle\n\nlast one\nold tail\n"
+	theirs := "# About\n\nintro\n\nmiddle\n\n" + toc + "\n\nlast one\nnew tail\n"
+	got, status := runTrimDriver(t, base, ours, theirs)
+	if status == 0 {
+		t.Errorf("expected a conflict, the driver settled it as:\n%s", got)
+	}
+}
+
+// TestWhatOneSideAloneChangedStillMerges: lines only one side added, a row both
+// sides edited (ours kept) and a line both sides added alike stay settled.
+func TestWhatOneSideAloneChangedStillMerges(t *testing.T) {
+	base := "# t\n\n| Port | Cell |\n| --- | --- |\n| `A` | one |\n| `B` | two |\n"
+	ours := base + "| `C` | ours |\n"
+	theirs := "# t\n\n| Port | Cell |\n| --- | --- |\n| `A` | one |\n| `B` | two |\n| `D` | theirs |\n"
+	got, status := runTrimDriver(t, base, ours, theirs)
+	if status != 0 || !strings.Contains(got, "| `C` | ours |\n") || !strings.Contains(got, "| `D` | theirs |\n") {
+		t.Errorf("expected both rows added by one side each, exit 0, got %d:\n%s", status, got)
+	}
+	sameAdded := "# t\n\nintro\n\nsame new line\n"
+	got, status = runTrimDriver(t, "# t\n\nintro\n", sameAdded, sameAdded)
+	if status != 0 || got != sameAdded {
+		t.Errorf("expected a line both sides added alike once, exit 0, got %d:\n%s", status, got)
 	}
 }
