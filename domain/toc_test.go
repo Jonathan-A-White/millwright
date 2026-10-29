@@ -7,7 +7,11 @@ import (
 
 func TestTocAnchor(t *testing.T) {
 	for title, want := range map[string]string{
-		"A & B":            "a-b",
+		"A & B":            "a--b",
+		"Plan / Notes":     "plan--notes",
+		"Ends - here":      "ends---here",
+		"my_var x":         "my_var-x",
+		"  Padded  ":       "padded",
 		"Ἕλληνες":          "ἕλληνες",
 		"Step 2: go":       "step-2-go",
 		"Hello, World!":    "hello-world",

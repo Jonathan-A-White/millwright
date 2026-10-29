@@ -40,11 +40,13 @@ func InitializeTocScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the toc doc "([^"]*)" has (\d+) "##" headings and (\d+) "###" headings and the line "([^"]*)"$`, c.hasLine)
 	ctx.Given(`^the toc doc "([^"]*)" has markers around an old list and (\d+) "##" headings$`, c.hasOldList)
 	ctx.Given(`^the toc doc "([^"]*)" has markers around a current list and (\d+) "##" headings$`, c.hasCurrentList)
+	ctx.Given(`^the toc doc "([^"]*)" has the "##" headings "([^"]*)", "([^"]*)", "([^"]*)" and "([^"]*)" and no markers$`, c.hasTitled)
 	ctx.When(`^mw toc fixes the docs$`, c.fixes)
 	ctx.When(`^mw toc checks the docs$`, func() error { return c.check(0) })
 	ctx.When(`^mw toc checks the docs with --min (\d+)$`, c.check)
 	ctx.Then(`^the toc doc "([^"]*)" has its table before the first "##" heading$`, c.tableBeforeFirst)
 	ctx.Then(`^the toc doc "([^"]*)" is byte-identical to what it was before that fix$`, c.unchanged)
+	ctx.Then(`^the toc doc "([^"]*)" has the table line "([^"]*)"$`, c.hasTableLine)
 	ctx.Then(`^toc printed "([^"]*)"$`, c.printedSays)
 	ctx.Then(`^toc printed nothing$`, c.printedNothing)
 	ctx.Then(`^toc passes, printing nothing$`, c.passesSilently)
@@ -79,6 +81,25 @@ func (c *tocContext) add(name, text string) {
 func (c *tocContext) hasNoMarkers(name string, twos, threes int) error {
 	c.add(name, tocDocument(twos, threes))
 	return nil
+}
+
+func (c *tocContext) hasTitled(name, a, b, d, e string) error {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\nIntro.\n\n")
+	for _, title := range []string{a, b, d, e} {
+		doc.WriteString("## " + title + "\n\ntext\n\n")
+	}
+	c.add(name, doc.String())
+	return nil
+}
+
+func (c *tocContext) hasTableLine(name, line string) error {
+	for _, got := range strings.Split(c.files.Docs[name], "\n") {
+		if got == line {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s has no line %q:\n%s", name, line, c.files.Docs[name])
 }
 
 func (c *tocContext) hasLine(name string, twos, threes int, line string) error {

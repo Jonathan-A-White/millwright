@@ -19,6 +19,15 @@ Feature: mw toc
     When mw toc checks the docs
     Then toc passes, printing nothing
 
+  Scenario: A heading with punctuation between spaces keeps both hyphens in its anchor
+    Given the toc doc "amp.md" has the "##" headings "A & B", "Plan / Notes", "Step 2: go" and "Last" and no markers
+    When mw toc fixes the docs
+    Then the toc doc "amp.md" has the table line "- [A & B](#a--b)"
+    And the toc doc "amp.md" has the table line "- [Plan / Notes](#plan--notes)"
+    And the toc doc "amp.md" has the table line "- [Step 2: go](#step-2-go)"
+    When mw toc fixes the docs
+    Then the toc doc "amp.md" is byte-identical to what it was before that fix
+
   Scenario: Check names the stale and the missing doc and cures them with one command
     Given the toc doc "stale.md" has markers around an old list and 2 "##" headings
     And the toc doc "missing.md" has 4 "##" headings and 0 "###" headings and no markers

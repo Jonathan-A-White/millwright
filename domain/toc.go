@@ -109,15 +109,19 @@ func headingOf(line string) (int, string) {
 
 // TocAnchor is the anchor GitHub gives a heading's title: lower case, every
 // rune that is not a letter, a number, an underscore or a hyphen dropped
-// (a space kept), and the words joined with hyphens.
+// (a space kept), and each space of the trimmed title turned into a hyphen, so
+// a dropped rune between two spaces leaves two hyphens, as GitHub's does.
 func TocAnchor(title string) string {
 	var kept strings.Builder
-	for _, r := range strings.ToLower(title) {
-		if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) || r == '_' || r == '-' || unicode.IsSpace(r) {
+	for _, r := range strings.ToLower(strings.TrimSpace(title)) {
+		switch {
+		case unicode.IsSpace(r):
+			kept.WriteByte('-')
+		case unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) || r == '_' || r == '-':
 			kept.WriteRune(r)
 		}
 	}
-	return strings.Join(strings.Fields(kept.String()), "-")
+	return kept.String()
 }
 
 // Headings are the "## " and "### " headings of doc, in order, with their
