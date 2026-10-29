@@ -109,7 +109,9 @@ func TestAMergedRunAfterAFailedWorktreeRunUsesTheTargetTheRemoteHasThen(t *testi
 }
 
 // aBatchRemoteThatMoves is the moving remote of a rig that lands in batches.
-type aBatchRemoteThatMoves struct{ aRemoteThatMovesWhileTheTestsRun }
+type aBatchRemoteThatMoves struct {
+	aRemoteThatMovesWhileTheTestsRun
+}
 
 func (*aBatchRemoteThatMoves) CloseLanding(context.Context, string, string) error { return nil }
 

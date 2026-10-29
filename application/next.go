@@ -103,8 +103,8 @@ const (
 	// ReasonTOCStale is a branch that changes a .md whose table of contents is
 	// stale or missing (mw-nft5a06.3): the cure is the one command mw toc fix,
 	// which the session runs in its own worktree, so the branch is continued.
-	ReasonTOCStale Reason = "toc-stale"
-	ReasonOpenSteps   Reason = "open-steps"
+	ReasonTOCStale  Reason = "toc-stale"
+	ReasonOpenSteps Reason = "open-steps"
 	// ReasonGristExampleUnproved is a branch that adds or changes a grind
 	// example (grinds/examples/<kind>/<name>.json) whose closing comment has no
 	// 'mw grist eval <app> <kind> --example <name>' line with PASS (mw-gq6.772):
