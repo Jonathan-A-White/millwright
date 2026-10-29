@@ -207,6 +207,50 @@ func (n Next) lockfileSSHRefusal(ctx context.Context, c *closeOut, report *NextR
 	return Refusal{ReasonLockfileSSH, why, said}, true
 }
 
+// tocRefusal is the refusal of a branch that changes a .md whose table of
+// contents is stale, or is wanted and missing (mw-nft5a06.3): every such doc is
+// named at once, with the one command that cures them. A doc the branch deletes,
+// a CHANGELOG*.md, a file under node_modules and a doc with the opt-out line are
+// not asked. A rig with no Changes, a Changes that cannot read a file of the
+// branch, or a file that cannot be read is not refused: the check is a net.
+func (n Next) tocRefusal(ctx context.Context, c *closeOut, report *NextReport) (Refusal, bool) {
+	if n.Changes == nil {
+		return Refusal{}, false
+	}
+	files, ok := n.Changes.(BranchFiles)
+	if !ok {
+		return Refusal{}, false
+	}
+	changed, err := n.Changes.ChangedFiles(ctx, c.rigDir, StartPoint(n.remote(), c.target), c.branch)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the files %s changed could not be read to look for stale tables of contents: %v", c.id, err))
+		return Refusal{}, false
+	}
+	var stale []string
+	for _, file := range changed {
+		if tocLeftAlone(file) {
+			continue
+		}
+		data, found, err := files.ReadBranchFile(ctx, c.rigDir, c.branch, file)
+		if err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s could not be read to look for a stale table of contents: %v", file, err))
+			continue
+		}
+		if found && domain.TocStateOf(string(data), domain.TocMinHeadings) != domain.TocFine {
+			stale = append(stale, file)
+		}
+	}
+	if len(stale) == 0 {
+		return Refusal{}, false
+	}
+	why := fmt.Sprintf("%s changes %d doc(s) with a stale or missing table of contents: %s", c.branch, len(stale), strings.Join(stale, ", "))
+	said := fmt.Sprintf("%d doc(s) with a stale or missing table of contents: %s. Run: mw toc fix %s, then commit. "+
+		"Nothing was merged: the branch is still the session's to amend. Add the commit (or amend the one that changed the doc) and run `mw next %s` again. "+
+		"A doc that wants no table says so with the line %s.",
+		len(stale), strings.Join(stale, ", "), strings.Join(stale, " "), c.id, domain.TocNone)
+	return Refusal{ReasonTOCStale, why, said}, true
+}
+
 // gristExampleExpr is a path of a grind example, grinds/examples/<kind>/<name>.json,
 // by kind and name; the README beside the kinds, a recording beside an example and
 // a grind file itself are not one.

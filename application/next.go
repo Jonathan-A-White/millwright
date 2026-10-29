@@ -100,6 +100,10 @@ const (
 	// npm ci it. The session mends it in its own worktree, so the branch is
 	// continued.
 	ReasonLockfileSSH Reason = "lockfile-ssh"
+	// ReasonTOCStale is a branch that changes a .md whose table of contents is
+	// stale or missing (mw-nft5a06.3): the cure is the one command mw toc fix,
+	// which the session runs in its own worktree, so the branch is continued.
+	ReasonTOCStale Reason = "toc-stale"
 	ReasonOpenSteps   Reason = "open-steps"
 	// ReasonGristExampleUnproved is a branch that adds or changes a grind
 	// example (grinds/examples/<kind>/<name>.json) whose closing comment has no
@@ -1861,6 +1865,13 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 	// next machine without a GitHub key cannot install, and the one sed that
 	// mends it is named while the branch is still the session's (mw-gq6.740).
 	if refusal, refused := n.lockfileSSHRefusal(ctx, c, report); refused && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+		return found
+	}
+
+	// What the commits do to a markdown doc's table of contents: a stale or
+	// missing one is mended by one mw toc fix, named while the branch is still
+	// the session's (mw-nft5a06.3).
+	if refusal, refused := n.tocRefusal(ctx, c, report); refused && refuse(refusal.Reason, refusal.Why, refusal.Said) {
 		return found
 	}
 
