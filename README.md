@@ -5498,6 +5498,14 @@ faults when a key is there at all: the key lives on the home only. It has no
 cure — the doctor never makes, moves or deletes a key — and names what it
 found and what a person does; `docs/secrets.md` says how.
 
+**claude-login** warns before the factory's Claude login dies (`~/.config/mw/claude.env`,
+see *Keeping the factory's tokens*). It faults when the token in that file is 335
+days old or more by the file's mtime, when `claude auth status` says the host is not
+logged in, or when a tmux pane shows "Not logged in". Its cure is one alarm push to the
+Governor a day, for up to thirty days; the text names `claude setup-token` and the
+`printf` line of `docs/secrets.md`. A host with no claude program or no env file has
+nothing to judge and reads ok.
+
 **Install**, once per host: `sh scripts/install-units.sh --enable mw-doctor`
 (see *Running a host on a timer*), which runs `mw-doctor.timer` at 2, 7, 12,
 ... past the hour — off the dispatch timer's own minutes, so the two never

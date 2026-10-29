@@ -32,6 +32,15 @@ with `claude setup-token`, then write the file on the host (`umask 077`, then
 `printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$token" > ~/.config/mw/claude.env`). The same token may serve
 both hosts. A host with no such file starts sessions as it always did.
 
+`mw doctor`'s **claude-login** check keeps this from dying unseen (mw-gq6.830). It
+reads the file's mtime as the day the token was made, so a rewrite of the file
+(the `printf` above) is what starts a new year; copying the file with `cp -p` or
+`touch`ing it would fool the check. It pushes an alarm to the Governor, daily
+for up to thirty days, when the token is 335 days old or more, when `claude auth
+status` (run with the file's token) says the host is not logged in, or when a
+seat's pane shows "Not logged in". The cure is a person's: `claude setup-token`,
+then the `printf` line above.
+
 Nothing else is kept here. The claude login, GitHub credentials, the Postern
 and mill keys and WireGuard keys are each where their own docs say, not in this
 file.
