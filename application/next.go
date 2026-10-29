@@ -1975,11 +1975,14 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 // the merge slot and the wait for a calm host all take their time, and another
 // host may land on the target meanwhile: whatever merges the target, or counts
 // what it has that the branch lacks, fetches first (mw-gq6.848). A fetch that
-// failed is told, and what the rig had stands.
+// failed is told, and what the rig had stands. A mw check has no Worktrees and
+// only reads, so it goes on what the rig has.
 func (n Next) freshTarget(ctx context.Context, c *closeOut, report *NextReport) string {
 	base := StartPoint(n.remote(), c.target)
-	if err := n.fetchRetrying(ctx, report, c.rigDir); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("the rig could not be brought up to date with %s before the merge, so %s is as the rig last saw it: %v", n.remote(), base, err))
+	if n.Worktrees != nil {
+		if err := n.fetchRetrying(ctx, report, c.rigDir); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("the rig could not be brought up to date with %s before the merge, so %s is as the rig last saw it: %v", n.remote(), base, err))
+		}
 	}
 	head, err := n.Landing.RefHead(ctx, c.rigDir, base)
 	if err != nil || head == "" {

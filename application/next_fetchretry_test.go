@@ -95,8 +95,10 @@ func TestAFetchThatMeetsAPassingDNSFaultTwiceIsRetriedAndTheStoryLands(t *testin
 	if run.err != nil || !run.report.Landed {
 		t.Fatalf("expected the story landed on the third fetch, got err %v and %+v", run.err, run.report)
 	}
-	if run.lands.fetches != 3 {
-		t.Fatalf("expected 3 fetches, got %d", run.lands.fetches)
+	// The three of the close-out's own, and the merge's, which fetches again
+	// whether or not the close-out holds the slot across hosts (mw-gq6.848).
+	if run.lands.fetches != 4 {
+		t.Fatalf("expected 4 fetches, got %d", run.lands.fetches)
 	}
 	if want := []time.Duration{10 * time.Second, 20 * time.Second}; fmt.Sprint(run.waits) != fmt.Sprint(want) {
 		t.Fatalf("expected the waits to grow, %v, got %v", want, run.waits)
@@ -186,8 +188,9 @@ func TestAFetchThatLostTheRefLockToAnotherFetchIsRetriedAndTheStoryLands(t *test
 	if run.err != nil || !run.report.Landed {
 		t.Fatalf("expected the story landed on the second fetch, got err %v and %+v", run.err, run.report)
 	}
-	if run.lands.fetches != 2 {
-		t.Fatalf("expected 2 fetches, got %d", run.lands.fetches)
+	// The two of the close-out's own, and the merge's (mw-gq6.848).
+	if run.lands.fetches != 3 {
+		t.Fatalf("expected 3 fetches, got %d", run.lands.fetches)
 	}
 	want := []string{"fetch failed (cannot lock ref), retried in 10s"}
 	if notes := notesNaming(run.report, "fetch failed"); fmt.Sprint(notes) != fmt.Sprint(want) {
