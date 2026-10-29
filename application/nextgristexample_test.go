@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -107,6 +108,9 @@ type forwardingStub struct {
 }
 
 func (f forwardingStub) ReadBranchFile(_ context.Context, _, _, file string) ([]byte, bool, error) {
+	if slices.Contains(f.branchChangesStub, file) && gristExampleExpr.MatchString(file) {
+		return []byte("{}"), true, nil
+	}
 	for kind, text := range f.grinds {
 		if file == "grinds/"+kind+".json" {
 			return []byte(text), true, nil
@@ -161,5 +165,51 @@ func TestAGrindFileSaysWhoItForwardsToThroughOneFunction(t *testing.T) {
 	}
 	if who, ok := (GrindFile{}).Forwards(); ok || who != "" {
 		t.Errorf("expected no forward, got %q, %v", who, ok)
+	}
+}
+
+// deletingStub is a BranchChanges that also reads the files of the branch: it
+// holds the files in held and no other, so a path that changed but is not held
+// was deleted by the branch.
+type deletingStub struct {
+	changedStub
+	held map[string]string
+}
+
+func (d deletingStub) ReadBranchFile(_ context.Context, _, _, file string) ([]byte, bool, error) {
+	text, found := d.held[file]
+	return []byte(text), found, nil
+}
+
+func TestAGrindExampleTheBranchDeletesIsNotRefusedAndTheReportSaysItWasDeleted(t *testing.T) {
+	changes := deletingStub{changedStub: changedStub{branchChangesStub: branchChangesStub{verseExample}}}
+	refusal, refused, report := gristExampleRefusal(t, changes, "Retired the grind.")
+	if refused {
+		t.Fatalf("expected no refusal for an example the branch deletes, got %+v", refusal)
+	}
+	if len(report.Notes) != 1 || !strings.Contains(report.Notes[0], "bible-talk/verse-text-ask deleted, not evaluated") {
+		t.Errorf("expected one note 'bible-talk/verse-text-ask deleted, not evaluated', got %q", report.Notes)
+	}
+}
+
+func TestABranchThatDeletesAWholeGrindIsNotRefused(t *testing.T) {
+	changes := deletingStub{changedStub: changedStub{branchChangesStub: branchChangesStub{
+		"grinds/bible-talk.json", verseExample, "grinds/examples/bible-talk/other.json"}}}
+	if refusal, refused, _ := gristExampleRefusal(t, changes, "Retired the grind."); refused {
+		t.Fatalf("expected no refusal for a grind the branch deletes with its examples, got %+v", refusal)
+	}
+}
+
+func TestAnExampleTheBranchChangesIsRefusedWhileAnotherItDeletesIsNot(t *testing.T) {
+	changes := deletingStub{
+		changedStub: changedStub{branchChangesStub: branchChangesStub{verseExample, "grinds/examples/bible-talk/gone.json"}},
+		held:        map[string]string{verseExample: "{}"},
+	}
+	refusal, refused, report := gristExampleRefusal(t, changes, "")
+	if !refused || !strings.Contains(refusal.Why, "bible-talk/verse-text-ask") || strings.Contains(refusal.Why, "gone") {
+		t.Fatalf("expected a refusal naming only bible-talk/verse-text-ask, got %+v, %v", refusal, refused)
+	}
+	if len(report.Notes) != 1 || !strings.Contains(report.Notes[0], "bible-talk/gone deleted") {
+		t.Errorf("expected a note that bible-talk/gone was deleted, got %q", report.Notes)
 	}
 }

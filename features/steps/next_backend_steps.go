@@ -36,6 +36,8 @@ func registerNextBackendSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^a commit on the branch of "([^"]*)" writes "([^"]*)" holding (\d+) git\+ssh lines$`, c.aCommitWritingALockfile)
 	ctx.Given(`^a commit on the branch of "([^"]*)" appends a line to "([^"]*)"$`, c.aCommitAppendingToAFile)
 	ctx.Given(`^a commit on the branch of "([^"]*)" adds the grind example "([^"]*)"$`, c.aCommitAddingAGrindExample)
+	ctx.Given(`^the target branch of the rig holds the grind example "([^"]*)", and the branch of "([^"]*)" is rebased onto it$`, c.theTargetHoldsAGrindExample)
+	ctx.Given(`^a commit on the branch of "([^"]*)" deletes the grind example "([^"]*)"$`, c.aCommitDeletingAGrindExample)
 	ctx.Given(`^the target branch of the rig holds "([^"]*)" with (\d+) git\+ssh lines, and the branch of "([^"]*)" is rebased onto it$`, c.theTargetHoldsALockfile)
 
 	ctx.Then(`^the backend was staged for the commit that landed on "([^"]*)", built from that commit$`, c.theBackendWasStaged)
@@ -231,6 +233,35 @@ func (c *nextContext) aCommitWritingALockfile(id, name string, ssh int) error {
 // story's branch.
 func (c *nextContext) aCommitAddingAGrindExample(id, name string) error {
 	return c.aCommitAdding(id, name, []byte("{\"description\": \"an example\"}\n"), 0o644)
+}
+
+// theTargetHoldsAGrindExample commits name, a grind example, to the rig's main,
+// pushes it to the origin and rebases the story's branch onto it.
+func (c *nextContext) theTargetHoldsAGrindExample(name, id string) error {
+	full := filepath.Join(c.rig, name)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(full, []byte("{\"description\": \"an example\"}\n"), 0o644); err != nil {
+		return err
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "A grind example on main"}, {"push", "-q", "origin", "main"}} {
+		if err := gitRun(c.rig, "git", args...); err != nil {
+			return err
+		}
+	}
+	return gitRun(application.WorktreeDir(c.rig, id), "git", "rebase", "-q", "origin/main")
+}
+
+// aCommitDeletingAGrindExample commits the removal of name from a story's branch.
+func (c *nextContext) aCommitDeletingAGrindExample(id, name string) error {
+	dir := application.WorktreeDir(c.rig, id)
+	for _, args := range [][]string{{"rm", "-q", name}, {"commit", "-qm", "Deletes " + name + " for " + id}} {
+		if err := gitRun(dir, "git", args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // aCommitAppendingToAFile commits one more line at the end of name in a story's

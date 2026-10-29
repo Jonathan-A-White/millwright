@@ -250,6 +250,20 @@ func provedGristExamples(comment string) map[string]bool {
 	return proved
 }
 
+// branchDeletesFile reports that the branch, which the diff from its target
+// lists as changing file, no longer has it: a grind example a branch deletes has
+// no grind left to evaluate it with (mw-gq6.838). A Changes port that cannot
+// read a file of the branch, or a read that fails, says nothing was deleted, so
+// the proof is still asked.
+func (n Next) branchDeletesFile(ctx context.Context, c *closeOut, file string) bool {
+	files, ok := n.Changes.(BranchFiles)
+	if !ok {
+		return false
+	}
+	_, found, err := files.ReadBranchFile(ctx, c.rigDir, c.branch, file)
+	return err == nil && !found
+}
+
 // branchGrindForwards reports who the branch's grinds/<kind>.json forwards its
 // grist to, through the one GrindFile.Forwards `mw grist eval` also decides by
 // (mw-gq6.801): such a grind is never evaluated, so no command can prove its
@@ -269,7 +283,8 @@ func (n Next) branchGrindForwards(ctx context.Context, c *closeOut, kind string)
 }
 
 // gristExampleRefusal is the refusal of a branch that adds or changes a grind
-// example (grinds/examples/<kind>/<name>.json) when the closing comment, text,
+// example (grinds/examples/<kind>/<name>.json; one it deletes is only noted,
+// mw-gq6.838) when the closing comment, text,
 // has no line 'mw grist eval <app> <kind> --example <name>' with PASS for it
 // (mw-gq6.772): mw-fu7dqf.12 landed an example that had passed only the fake
 // mill and failed live 2/2. The check is of the comment, as the rest of the
@@ -290,6 +305,10 @@ func (n Next) gristExampleRefusal(ctx context.Context, c *closeOut, report *Next
 	for _, file := range files {
 		match := gristExampleExpr.FindStringSubmatch(file)
 		if match == nil || proved[match[1]+"/"+match[2]] {
+			continue
+		}
+		if n.branchDeletesFile(ctx, c, file) {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s/%s deleted, not evaluated: the branch removes the example", match[1], match[2]))
 			continue
 		}
 		if who, forwards := n.branchGrindForwards(ctx, c, match[1]); forwards {

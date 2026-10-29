@@ -404,6 +404,18 @@ Feature: Closing out a finished story and carrying on
     When mw closes out "mw-gq6.1"
     Then the work of "mw-gq6.1" is on "main" at the rig's origin
 
+  # mw-gq6.838: an example the branch deletes has no grind to evaluate it with
+  # (the verse-ask grind's retirement), so it is not asked for a PASS line.
+  Scenario: A branch that deletes a grind example is not asked for a live eval line
+    Given the session of "mw-gq6.1" reported a plain success
+    And the target branch of the rig holds the grind example "grinds/examples/bible-talk/verse-text-ask.json", and the branch of "mw-gq6.1" is rebased onto it
+    And a commit on the branch of "mw-gq6.1" deletes the grind example "grinds/examples/bible-talk/verse-text-ask.json"
+    And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And the comment "Retired the grind. Internal: nothing for the Governor to look at. For the rig memory: nothing" was written on "mw-gq6.1" after its newest commit
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the printed report says "bible-talk/verse-text-ask deleted, not evaluated"
+
   # mw-gq6.740: `npm install github:<owner>/<repo>#<sha>` writes git+ssh:// into
   # package-lock.json, which a machine with no GitHub key cannot install. A branch
   # that adds such a line is turned away, naming the file, the count and the sed.
