@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Jonathan-A-White/millwright/application"
-	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/grist"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
@@ -487,7 +486,7 @@ func newGristEvalCmd() *cobra.Command {
 				out = filepath.Join(stateDir, "eval")
 			}
 			_, err = application.GristEval{
-				Grinder: claude.NewGrinder(),
+				Grinder: claudeGrinder(),
 				Ceilings: application.GristCeilings{
 					Models: ceilings.Models, Efforts: ceilings.Efforts, MaxAttachments: ceilings.MaxAttachments,
 					MaxAttachmentBytes: ceilings.MaxAttachmentBytes, DailyLimit: ceilings.DailyLimit,
@@ -794,7 +793,7 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		Visions:      grist.NewVisions(),
 		Grinds:       rig.NewGrinds(),
 		Refreshes:    application.NewGrindRefreshes(application.GrindRefreshEvery),
-		Grinder:      claude.NewGrinder(),
+		Grinder:      claudeGrinder(),
 		Credits:      newGristCredits(host, stateDir, ceilings),
 		Pass:         hostlock.NewTry(stateDir, hostlock.PassFile),
 		Grinding:     slots[0],

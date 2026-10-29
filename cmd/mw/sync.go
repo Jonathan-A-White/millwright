@@ -216,6 +216,15 @@ func claudeHarness(vaultDir, host string, t sessionTuning) *claude.Harness {
 	return claude.New(opts...)
 }
 
+// claudeGrinder is the Claude Code grinder for the sessions that run without a
+// seat or tmux (grist evals and smokes, the warm pool, the Clerk's todo, sleep
+// and verify passes): it reads the host's claude env file as a Builder's session
+// does, so the one-year token serves them and the login's expiry does not stop
+// them (mw-gq6.829). Every grinder cmd/mw makes comes from here.
+func claudeGrinder() *claude.Grinder {
+	return claude.NewGrinder(claude.WithGrindClaudeEnvFile(claudeEnvFile()))
+}
+
 // sessionServerHost is the host the sessions' bd reaches the beads database on,
 // "" when this host cannot be told; the host is also set in this process's
 // environment.

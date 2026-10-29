@@ -9,7 +9,6 @@ import (
 	millwright "github.com/Jonathan-A-White/millwright"
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
-	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 
 	"github.com/spf13/cobra"
@@ -171,7 +170,7 @@ func newTodoRankCmd() *cobra.Command {
 			}
 			gateway := mwGateway(dir, host)
 			pass := application.TodoRankPass{
-				Tracker: gateway, Closed: gateway, Graph: gateway, Grinder: claude.NewGrinder(), Runs: mwVault(dir, host),
+				Tracker: gateway, Closed: gateway, Graph: gateway, Grinder: claudeGrinder(), Runs: mwVault(dir, host),
 				Instructions: millwright.TodoRankInstructions, AboutFile: filepath.Join(dir, application.TodoAboutFile),
 				Model: settings.RankModel, Effort: settings.RankEffort, Zone: settings.Zone, Out: cmd.OutOrStdout(),
 			}
@@ -224,7 +223,7 @@ func todoRankSpringJob(host string, out io.Writer) (application.SpringJob, error
 	}
 	gateway := mwGateway(dir, host)
 	pass := application.TodoRankPass{
-		Tracker: gateway, Closed: gateway, Graph: gateway, Grinder: claude.NewGrinder(), Runs: mwVault(dir, host),
+		Tracker: gateway, Closed: gateway, Graph: gateway, Grinder: claudeGrinder(), Runs: mwVault(dir, host),
 		Instructions: millwright.TodoRankInstructions, AboutFile: filepath.Join(dir, application.TodoAboutFile),
 		Model: settings.RankModel, Effort: settings.RankEffort, Zone: settings.Zone, Out: out,
 	}

@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Jonathan-A-White/millwright/application"
-	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
@@ -163,7 +162,7 @@ func newVerifyMatch(out io.Writer) (application.VerifyMatch, config.VerifySettin
 	}
 	gateway := mwGateway(dir, host)
 	match := application.VerifyMatch{
-		Beads: gateway, Grinder: claude.NewGrinder(), Mailbox: gateway,
+		Beads: gateway, Grinder: claudeGrinder(), Mailbox: gateway,
 		Settings: application.VerifySettings{Model: settings.Model, Effort: settings.Effort, Confidence: settings.Confidence},
 		InboxDir: inbox, RunDir: runs, Host: host, Out: out,
 	}

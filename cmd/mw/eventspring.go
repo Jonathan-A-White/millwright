@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
-	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/grist"
@@ -176,7 +175,7 @@ func gristSpringJob(host string, out io.Writer) (application.SpringJob, bool, er
 	if err != nil {
 		return application.SpringJob{}, false, err
 	}
-	pool := &application.GristPool{Warmer: claude.NewGrinder(), Board: grist.New(stateDir), Err: out}
+	pool := &application.GristPool{Warmer: claudeGrinder(), Board: grist.New(stateDir), Err: out}
 	job := application.GristJob(watch, func(ctx context.Context) error {
 		if at, err := home(ctx); err != nil || !at {
 			return err

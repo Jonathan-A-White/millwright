@@ -19,7 +19,6 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
-	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/gitcmd"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ideasonly"
@@ -174,7 +173,7 @@ func newSleepPass(dir, host string, out io.Writer) (application.SleepPass, error
 			NeedsYou: needsYouSurvey(dir, gateway, files, rigs).Read,
 			Beads:    gateway, InboxDir: inbox,
 		},
-		Vault: files, Ledger: files, Grinder: claude.NewGrinder(), Mailbox: gateway,
+		Vault: files, Ledger: files, Grinder: claudeGrinder(), Mailbox: gateway,
 		Beads:  gateway,
 		Verify: application.VerifySettings{Model: verify.Model, Effort: verify.Effort, Confidence: verify.Confidence},
 		Settings: application.SleepSettings{

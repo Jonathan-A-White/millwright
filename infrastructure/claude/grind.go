@@ -37,7 +37,8 @@ const GrindTools = "Read"
 // CLAUDE.md or saved session, asks nobody anything, and answers only through a
 // structured output held to the grind's schema.
 type Grinder struct {
-	program string
+	program       string
+	claudeEnvFile string
 }
 
 // Grinder satisfies the ports.
@@ -52,6 +53,68 @@ type GrinderOption func(*Grinder)
 // WithGrindProgram names the claude command to run: a test's stand-in.
 func WithGrindProgram(program string) GrinderOption {
 	return func(g *Grinder) { g.program = program }
+}
+
+// WithGrindClaudeEnvFile names the host's claude env file, such as
+// ~/.config/mw/claude.env holding CLAUDE_CODE_OAUTH_TOKEN: a grind's session
+// starts with what it assigns in its environment, so a host with a long-lived
+// token keeps working after its login expires, as a Builder's and a seat's
+// sessions do (WithClaudeEnvFile). The token goes into the child's environment
+// and into no argument. A file that is missing, or an empty path, changes
+// nothing.
+func WithGrindClaudeEnvFile(path string) GrinderOption {
+	return func(g *Grinder) { g.claudeEnvFile = path }
+}
+
+// ClaudeEnv is what a claude env file assigns, as NAME=value entries: lines of
+// NAME=value, with an optional leading export and one pair of quotes around the
+// value, as the session's own shell would read them; blank lines, comments and
+// anything else are skipped. A missing or unreadable file, or an empty path,
+// gives nothing.
+func ClaudeEnv(path string) []string {
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var env []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		name, value, ok := strings.Cut(line, "=")
+		if !ok || !validEnvName(name) {
+			continue
+		}
+		if n := len(value); n >= 2 && (value[0] == '"' || value[0] == '\'') && value[n-1] == value[0] {
+			value = value[1 : n-1]
+		}
+		env = append(env, name+"="+value)
+	}
+	return env
+}
+
+// validEnvName reports whether name is a shell variable name.
+func validEnvName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// environ is the process environment with the claude env file's assignments on
+// top, later ones winning as they would in a shell.
+func (g *Grinder) environ() []string {
+	return append(os.Environ(), ClaudeEnv(g.claudeEnvFile)...)
 }
 
 // NewGrinder is the grinder that runs Program.
@@ -282,7 +345,7 @@ func (g *Grinder) Grind(ctx context.Context, call application.GrindCall) (applic
 
 	cmd := exec.CommandContext(ctx, g.program, args...)
 	cmd.Dir = call.Dir
-	cmd.Env = GrindEnv(os.Environ(), call)
+	cmd.Env = GrindEnv(g.environ(), call)
 	cmd.Stdin = null
 	if PromptOnStdin(call) {
 		cmd.Stdin = strings.NewReader(call.Prompt)
@@ -361,7 +424,7 @@ func (g *Grinder) Warm(call application.GrindCall) (application.WarmSession, err
 	}
 	cmd := exec.Command(g.program, args...)
 	cmd.Dir = call.Dir
-	cmd.Env = GrindEnv(os.Environ(), call)
+	cmd.Env = GrindEnv(g.environ(), call)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.WaitDelay = time.Second
 	stdin, err := cmd.StdinPipe()
