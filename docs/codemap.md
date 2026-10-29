@@ -5,7 +5,7 @@
 | Port | In application/ | Adapter (infra/) |
 |-|-|-|
 | `WorkTracker` | application/worktracker.go | beads |
-| TrackerNotes, SweepNotes, BeadGraph, IceNotes, IcedBeads (WithRunCache: one bead and kv list a read-only run) | application/{status,sweep,ice}.go | same, beads/runcache.go |
+| TrackerNotes, SweepNotes, BeadGraph, IceNotes, IcedBeads (WithRunCache) | application/{status,sweep,ice}.go | same, beads/runcache.go |
 | VaultFiles, Tracker{Sync,History,Flush}, SyncHaltMarker | application/sync.go | {vault/git,beads/sync}.go, synchalt, flushlog |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | beads/mail.go |
 | EpicRules (+LandingRules) | application/epicrules.go | vault/epicrules.go |
@@ -44,8 +44,8 @@ Each use case's application/ files: [docs/codemap-detail.md](codemap-detail.md),
 
 | Use case | Command | features/*.feature |
 |-|-|-|
-| File, Release, Ice, Thaw, Stuck (--inversions; inversions in DAMPERS), Retry, Cause, Note, Path* | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/ice.go, cmd/mw/stuck.go, application/dampers.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/note.go, cmd/mw/path.go | {file*,release,retry*,cause,note,path_set} |
-| Show, Peek, Prove, StampHead, Tester[File], FactoryReport[Send], Invest[Book], Loop (rank: application/looprank.go) | cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go, cmd/mw/invest.go, cmd/mw/loop.go | {show,peek,prove,stamp,tester,report*,invest} |
+| File, Release, Ice, Thaw, Stuck (--inversions; inversions in DAMPERS), Retry, Cause, Note, Path*, Toc (domain/toc.go, application/toc.go) | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/ice.go, cmd/mw/stuck.go, application/dampers.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/note.go, cmd/mw/path.go, cmd/mw/toc.go | {file*,release,retry*,cause,note,path_set,toc} |
+| Show, Peek, Prove, StampHead, Tester[File], FactoryReport[Send], Invest[Book], Loop | cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go, cmd/mw/invest.go, cmd/mw/loop.go | {show,peek,prove,stamp,tester,report*,invest} |
 | Dispatch, Next, BatchLand, AfterLandingRun, BdRetry | cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/land.go, cmd/mw/afterlanding.go, cmd/mw/bd.go | {dispatch,next,batch_land,after_*,bd_*} |
 | Check*, Status, CloudCheck, CloudMake, Brief | cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | {check,status,cloud,brief} |
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | {sweep,tidy,sync,mail,home} |

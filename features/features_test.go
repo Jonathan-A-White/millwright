@@ -153,6 +153,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeReleaseScenario(ctx)
 	steps.InitializeCauseScenario(ctx)
 	steps.InitializeNoteScenario(ctx)
+	steps.InitializeTocScenario(ctx)
 	steps.InitializeReportScenario(ctx)
 	steps.InitializeInvestScenario(ctx)
 	steps.InitializeReportSendScenario(ctx)

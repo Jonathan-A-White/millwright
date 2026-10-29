@@ -563,6 +563,33 @@ as `bd comment` would. `--file <path>` reads the text from a file, with the same
 replacement. A bead the tracker does not know, a file that cannot be read and an
 empty note are refused with nothing written. See `features/note.feature`.
 
+## Tables of contents
+
+```sh
+bin/mw toc check            # the tracked *.md whose table of contents is stale or missing
+bin/mw toc fix docs/x.md    # write the table of contents of the docs named, or of all that need one
+```
+
+A long doc is easier to use, for a person and for an agent, with a table of contents,
+and a table nobody keeps current misleads. `mw toc` keeps one between the lines
+`<!-- toc -->` and `<!-- /toc -->`, each on a line of its own, built from the doc's `##`
+and `###` headings (a `###` nested two spaces under its `##`) with GitHub's anchors:
+lower case, punctuation dropped, spaces to hyphens, a repeated heading `-1`, `-2`. The
+`#` title and headings inside fenced code are not listed. `mw toc fix` writes the table,
+before the first `##` when the doc has no markers yet; run twice it changes nothing.
+
+A doc wants a table at 4 or more `##` headings (`--min <n>` changes that); a doc that
+has the markers keeps a current table whatever its count; a doc with the line
+`<!-- toc: none -->` is left alone, as is every `CHANGELOG*.md`, anything under
+`node_modules` and a file git does not track. With no paths, both commands take the
+tracked `*.md` of the git repository at the working directory.
+
+`mw toc check` prints `<path>: TOC stale` or `<path>: TOC missing (N ## headings)` for each
+doc that needs its table, then one line, `mw toc fix <those paths>`, and exits 1; when every
+doc is current it prints nothing and exits 0. The gate (`mw check`, `mw next`) will refuse a
+changed `.md` whose table is stale or missing, naming that cure, once the toc-gate story
+lands; until then the command is run by hand. See `features/toc.feature`.
+
 ## How the factory is doing
 
 ```sh
