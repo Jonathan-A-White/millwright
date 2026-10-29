@@ -77,7 +77,7 @@ func newRetryCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			reach, err := config.HandsHosts()
+			reach, err := storyReach(cmd.Context(), cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
