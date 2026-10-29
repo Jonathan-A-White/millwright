@@ -40,11 +40,11 @@ Fakes: application/apptest/fake*.go.
 
 ## Use cases
 
-Each use case's application/ files: [docs/codemap-detail.md](codemap-detail.md), by need.
+Use cases' files: [docs/codemap-detail.md](codemap-detail.md), by need.
 
 | Use case | Command | features/*.feature |
 |-|-|-|
-| File, Release, Ice, Thaw, Stuck (--inversions; inversions in DAMPERS), Retry, Cause, Note, Path*, Toc (domain/toc.go, application/toc.go) | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/ice.go, cmd/mw/stuck.go, application/dampers.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/note.go, cmd/mw/path.go, cmd/mw/toc.go | {file*,release,retry*,cause,note,path_set,toc} |
+| File, Release, Ice, Thaw, Stuck (--inversions; inversions in DAMPERS), Retry, Cause, Note, Path*, Toc (domain/toc.go, application/toc.go, nextfiles.go: toc-stale) | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/ice.go, cmd/mw/stuck.go, application/dampers.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/note.go, cmd/mw/path.go, cmd/mw/toc.go | {file*,release,retry*,cause,note,path_set,toc} |
 | Show, Peek, Prove, StampHead, Tester[File], FactoryReport[Send], Invest[Book], Loop | cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go, cmd/mw/invest.go, cmd/mw/loop.go | {show,peek,prove,stamp,tester,report*,invest} |
 | Dispatch, Next, BatchLand, AfterLandingRun, BdRetry | cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/land.go, cmd/mw/afterlanding.go, cmd/mw/bd.go | {dispatch,next,batch_land,after_*,bd_*} |
 | Check*, Status, CloudCheck, CloudMake, Brief | cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | {check,status,cloud,brief} |

@@ -690,9 +690,11 @@ tracked `*.md` of the git repository at the working directory.
 
 `mw toc check` prints `<path>: TOC stale` or `<path>: TOC missing (N ## headings)` for each
 doc that needs its table, then one line, `mw toc fix <those paths>`, and exits 1; when every
-doc is current it prints nothing and exits 0. The gate (`mw check`, `mw next`) will refuse a
-changed `.md` whose table is stale or missing, naming that cure, once the toc-gate story
-lands; until then the command is run by hand. See `features/toc.feature`.
+doc is current it prints nothing and exits 0. The gate enforces it: `mw check` shows, and
+`mw next` refuses to land, a branch that changes a `.md` whose table is stale or missing
+(reason `toc-stale`, every such doc named at once), with the cure `mw toc fix <paths>`;
+run it in the worktree and commit. A deleted doc, a `CHANGELOG*.md` and a doc with the
+opt-out line are not asked. See `features/toc.feature`.
 
 ## How the factory is doing
 
