@@ -54,8 +54,9 @@ test:
 
 # go vet, then the code map check: docs/codemap.md must be under its size
 # limit, name only paths that exist, and leave out no port, use case or
-# cmd/mw command. Then the timer units: systemd-analyze must accept them where
-# it exists. Then the seat's tmux server unit against a real, throwaway
+# cmd/mw command. Then mw toc check: every long document's table of contents
+# must be current (mw toc fix writes them). Then the timer
+# units: systemd-analyze must accept them where it exists. Then the seat's tmux server unit against a real, throwaway
 # --user systemd unit on its own tmux socket (never the host's real session
 # "0"): killing its server must bring a new one up within RestartSec; it
 # skips this live proof, rather than failing, where no --user systemd or no
@@ -83,6 +84,7 @@ test:
 lint:
 	$(GO) vet -tags $(TAGS) $(PKG)
 	scripts/check-codemap.sh
+	$(GO) run ./cmd/mw toc check
 	scripts/check-timer-units.sh
 	scripts/check-seat-tmux-respawn.sh
 	scripts/check-seat-tmux-leak.sh

@@ -4,6 +4,8 @@ From: the Mayor after handoff <NN-1> (<model> at <effort>). Took the seat at <ti
 
 Keep a handoff to one screen's worth: the successor has read only the charter, the vision and the procedures sheet. A handoff carries what changes between sittings; a rule you learned goes into `procedures.md`, not here.
 
+<!-- toc: none -->
+
 ## FIRST
 
 The numbered things the successor does before anything else, most urgent first: what to arm, what waits on the Governor's answer (the bead, the card, what to do on each answer), what is half done and where it is written down. Each is an action, not a story.
