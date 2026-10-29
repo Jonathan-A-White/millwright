@@ -157,20 +157,10 @@ func pauseParts(ctx context.Context, dir, host string, out io.Writer) (pauseHome
 	if err != nil {
 		return pauseHomeParts{}, err
 	}
-	reach, err := config.HandsHosts()
-	if err != nil {
-		return pauseHomeParts{}, err
-	}
-	reach = copyReach(reach)
 	cloud := pauseCloud(ctx, out)
-	boxes, err := cloud.Boxes(ctx)
+	reach, err := storyReachOf(ctx, cloud)
 	if err != nil {
 		return pauseHomeParts{}, err
-	}
-	for _, box := range boxes {
-		if reach[box] == "" {
-			reach[box] = "ssh mw@" + box + ".mw"
-		}
 	}
 	cfgPath, err := config.FilePath()
 	if err != nil {
@@ -188,14 +178,6 @@ func pauseParts(ctx context.Context, dir, host string, out io.Writer) (pauseHome
 		host:   host,
 		gw:     gateway,
 	}, nil
-}
-
-func copyReach(in map[string]string) map[string]string {
-	out := map[string]string{}
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }
 
 func pauseHome(ctx context.Context, dir, host string, out io.Writer, rate float64) (application.Pause, error) {

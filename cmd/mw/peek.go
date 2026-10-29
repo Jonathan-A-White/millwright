@@ -22,7 +22,7 @@ func newPeekCmd() *cobra.Command {
 			"the story has no molecule), and the last 20 lines of what the harness has recorded of it,\n" +
 			"or of the session's pane when it has recorded none. It says when the session is gone or\n" +
 			"has exited, and when the story is closed. A story worked on another host is read there:\n" +
-			"mw runs `mw peek --here` on it over the ssh line [hands_hosts] gives. Nothing is written.\n\n" +
+			"mw runs `mw peek --here` on it over the ssh line [hands_hosts] gives (a cloud box without a line is reached at ssh mw@<box>.mw). Nothing is written.\n\n" +
 			"--here reads this host's session only, whoever the story is pathed to; it is what the\n" +
 			"far end of an ssh peek runs.",
 		Args: cobra.ExactArgs(1),
@@ -35,7 +35,7 @@ func newPeekCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			reach, err := config.HandsHosts()
+			reach, err := storyReach(cmd.Context(), cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
