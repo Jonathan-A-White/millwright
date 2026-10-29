@@ -46,7 +46,19 @@ type CloudProvider interface {
 	// sessions are not touched. An error is a box that could not be reached
 	// or written, which keeps the cap it had.
 	SetCap(ctx context.Context, name string, cap int) error
+	// Address is where the box is reached from the home: its WireGuard address
+	// read off the hub, and the user it dispatches as. The home resolves no
+	// name for a box. An error is a box with no address to read, with why.
+	Address(ctx context.Context, name string) (CloudAddress, error)
 }
+
+// CloudAddress is where a cloud box is reached over WireGuard.
+type CloudAddress struct {
+	User, Host string
+}
+
+// String is the address as ssh takes it: user@host.
+func (a CloudAddress) String() string { return a.User + "@" + a.Host }
 
 // CloudInstance is one box as the provider holds it: Status is Vultr's
 // status (active, pending, ...) and Server its server_status (ok, locked,

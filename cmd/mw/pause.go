@@ -37,7 +37,7 @@ func newPauseCmd() *cobra.Command {
 			"  1. every host gets the usage-limit hold note (host.<host>.harness_hold) until the time the\n" +
 			"     pause lasts, so it claims nothing new: no cap is set to 0 and no dispatch unit is masked,\n" +
 			"     and the hosts are the home, those of [hands_hosts] in the config file, and the cloud boxes up\n" +
-			"     (a box without a [hands_hosts] line is reached at ssh mw@<box>.mw), each asked by ssh to run\n" +
+			"     (a box without a [hands_hosts] line is reached at its WireGuard address, read off the hub), each asked by ssh to run\n" +
 			"     mw pause --here;\n" +
 			"  2. the PAUSE line is typed into every running Builder's session, and each host waits up to\n" +
 			"     --wait for its branch to be pushed and its story to say PAUSED; what a Builder did not do mw\n" +
@@ -158,7 +158,7 @@ func pauseParts(ctx context.Context, dir, host string, out io.Writer) (pauseHome
 		return pauseHomeParts{}, err
 	}
 	cloud := pauseCloud(ctx, out)
-	reach, err := storyReachOf(ctx, cloud)
+	reach, gaps, err := storyReachOf(ctx, cloud)
 	if err != nil {
 		return pauseHomeParts{}, err
 	}
@@ -170,7 +170,7 @@ func pauseParts(ctx context.Context, dir, host string, out io.Writer) (pauseHome
 	return pauseHomeParts{
 		files:  files,
 		book:   pause.Book{Root: dir, Files: files, Notes: gateway},
-		fleet:  pause.Fleet{Home: host, Local: local, Reach: reach},
+		fleet:  pause.Fleet{Home: host, Local: local, Reach: reach, Gaps: gaps},
 		cloud:  cloud,
 		config: pause.Config{Path: cfgPath, Out: out},
 		timer:  pause.Timer{Mw: self, Path: os.Getenv("PATH")},
@@ -199,7 +199,7 @@ func pauseHome(ctx context.Context, dir, host string, out io.Writer, rate float6
 
 // pauseCloud is the cloud as a pause sees it: the boxes the book holds, and
 // the cloud's own down. A home with no [cloud] table has none.
-func pauseCloud(ctx context.Context, out io.Writer) application.PauseCloud {
+func pauseCloud(ctx context.Context, out io.Writer) cloudOfPause {
 	check, ok, err := cloudCheck(ctx, out)
 	return cloudOfPause{check: check, ok: ok && err == nil}
 }
@@ -224,6 +224,13 @@ func (c cloudOfPause) Boxes(ctx context.Context) ([]string, error) {
 		}
 	}
 	return names, nil
+}
+
+func (c cloudOfPause) Address(ctx context.Context, box string) (application.CloudAddress, error) {
+	if !c.ok {
+		return application.CloudAddress{}, fmt.Errorf("no [cloud] table in the config, or its check could not be made: no address is read")
+	}
+	return c.check.Provider.Address(ctx, box)
 }
 
 func (c cloudOfPause) Down(ctx context.Context, box string) (string, error) {

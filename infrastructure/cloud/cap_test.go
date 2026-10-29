@@ -29,6 +29,43 @@ func TestSetCapNamesWhyTheBoxCouldNotBeReached(t *testing.T) {
 	}
 }
 
+func TestAddressRunsTheWrapperAndReadsTheAddressAndUser(t *testing.T) {
+	command, calls := standIn(t, "echo 10.88.0.21; echo bob")
+	got, err := (cloud.Vultr{Command: command}).Address(context.Background(), "cloud1")
+	if err != nil {
+		t.Fatalf("address: %v", err)
+	}
+	if got.User != "bob" || got.Host != "10.88.0.21" || got.String() != "bob@10.88.0.21" {
+		t.Errorf("expected bob at 10.88.0.21, got %+v", got)
+	}
+	if got, want := read(t, calls), "address --name cloud1\n"; got != want {
+		t.Errorf("expected the wrapper run as %q, got %q", want, got)
+	}
+}
+
+func TestAddressWithNoUserLineIsMw(t *testing.T) {
+	command, _ := standIn(t, "echo 10.88.0.21")
+	got, err := (cloud.Vultr{Command: command}).Address(context.Background(), "cloud1")
+	if err != nil || got.String() != "mw@10.88.0.21" {
+		t.Errorf("expected mw@10.88.0.21, got %+v, %v", got, err)
+	}
+}
+
+func TestAddressNamesWhyTheBoxHasNone(t *testing.T) {
+	command, _ := standIn(t, "echo 'vultr-boost: cloud2 is not a peer of the hub: it has no address' >&2; exit 1")
+	_, err := cloud.Vultr{Command: command}.Address(context.Background(), "cloud2")
+	if err == nil || !strings.Contains(err.Error(), "cloud2 is not a peer of the hub") {
+		t.Errorf("expected the wrapper's last line, got %v", err)
+	}
+}
+
+func TestAddressRefusesAnOutputThatIsNoAddress(t *testing.T) {
+	command, _ := standIn(t, "echo 'what?'")
+	if _, err := (cloud.Vultr{Command: command}).Address(context.Background(), "cloud1"); err == nil {
+		t.Error("expected a refusal of output that is no address")
+	}
+}
+
 // committer is a vault that holds the files in a directory and notes its commits.
 type committer struct {
 	dir     string

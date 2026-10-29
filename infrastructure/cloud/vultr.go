@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -214,6 +215,29 @@ func (v Vultr) Adopt(ctx context.Context, name string, instance application.Clou
 func (v Vultr) SetCap(ctx context.Context, name string, cap int) error {
 	_, err := v.run(ctx, setCapLimit, "set-cap", "--name", name, "--cap", strconv.Itoa(cap))
 	return err
+}
+
+// addressLimit is how long reading a box's address may take: one ssh to the hub,
+// with a connect timeout of 15 seconds.
+const addressLimit = time.Minute
+
+// Address implements application.CloudProvider: `address --name <box>`, which
+// reads the box's WireGuard address off the hub and prints it, and then the
+// user the box dispatches as (mw when it prints none).
+func (v Vultr) Address(ctx context.Context, name string) (application.CloudAddress, error) {
+	out, err := v.run(ctx, addressLimit, "address", "--name", name)
+	if err != nil {
+		return application.CloudAddress{}, err
+	}
+	lines := strings.Fields(out)
+	if len(lines) == 0 || net.ParseIP(lines[0]) == nil {
+		return application.CloudAddress{}, fmt.Errorf("%s address printed %q, not an address", v.Command, strings.TrimSpace(out))
+	}
+	user := "mw"
+	if len(lines) > 1 {
+		user = lines[1]
+	}
+	return application.CloudAddress{User: user, Host: lines[0]}, nil
 }
 
 // run runs the wrapper, copying its output to Out, and returns its standard

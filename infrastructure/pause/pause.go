@@ -83,8 +83,13 @@ type Fleet struct {
 	Local application.FleetHostPause
 	// Reach is how the home reaches each other host: an ssh prefix by host
 	// name (`ssh desktop`), the last word of it the host itself — config
-	// [hands_hosts], with a cloud box without one at `ssh mw@<box>.mw`.
+	// [hands_hosts], with a cloud box without one at `ssh <user>@<address>`,
+	// its WireGuard address.
 	Reach map[string]string
+	// Gaps are the hosts left out of Reach, each with why (a cloud box whose
+	// address could not be read): they are still hosts to pause, and the pause
+	// of one says why it was not reached.
+	Gaps map[string]string
 	// Run runs a program and returns its standard output; empty runs for
 	// real.
 	Run func(ctx context.Context, argv []string) (string, error)
@@ -98,6 +103,11 @@ func (f Fleet) Hosts(context.Context) ([]string, error) {
 	var others []string
 	for host := range f.Reach {
 		if host != f.Home {
+			others = append(others, host)
+		}
+	}
+	for host := range f.Gaps {
+		if _, reached := f.Reach[host]; host != f.Home && !reached {
 			others = append(others, host)
 		}
 	}
@@ -131,6 +141,9 @@ func (f Fleet) Resume(ctx context.Context, host string, order application.HostRe
 func (f Fleet) remote(ctx context.Context, host, verb string, order, into any) error {
 	prefix := strings.Fields(f.Reach[host])
 	if len(prefix) < 2 {
+		if why := f.Gaps[host]; why != "" {
+			return fmt.Errorf("no way to reach %s: %s", host, why)
+		}
 		return fmt.Errorf("no way to reach %s: set `%s = \"ssh <alias>\"` under [hands_hosts] in the config file", host, host)
 	}
 	text, err := json.Marshal(order)

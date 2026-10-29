@@ -48,6 +48,13 @@ func TestPeekSaysWhenAHostCannotBeReached(t *testing.T) {
 	}
 }
 
+func TestPeekNamesWhyABoxHasNoWayToBeReached(t *testing.T) {
+	_, err := Remote{Gaps: map[string]string{"cloud1": "cloud1 is not a peer of the hub: it has no address"}}.Peek(context.Background(), "cloud1", "mw-1")
+	if err == nil || !strings.Contains(err.Error(), "no way to reach cloud1: cloud1 is not a peer of the hub") {
+		t.Fatalf("expected the reason, got %v", err)
+	}
+}
+
 func TestWorktreeStateRunsMwRetryWorktreeStateOnTheHostAndReadsWhatItPrints(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "args")

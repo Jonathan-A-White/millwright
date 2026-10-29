@@ -3,6 +3,7 @@ package apptest
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -178,6 +179,17 @@ func (f *FakeCloud) SetCap(_ context.Context, name string, cap int) error {
 	}
 	f.Caps[name] = cap
 	return nil
+}
+
+// Address implements application.CloudProvider: a box is at 10.88.0.<n> for the
+// number n of its name, as the user mw, unless it is Unreachable.
+func (f *FakeCloud) Address(_ context.Context, name string) (application.CloudAddress, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Unreachable[name] {
+		return application.CloudAddress{}, fmt.Errorf("%s is not a peer of the hub: it has no address", name)
+	}
+	return application.CloudAddress{User: "mw", Host: "10.88.0." + strings.TrimLeft(name, "abcdefghijklmnopqrstuvwxyz-")}, nil
 }
 
 // CapCalls are the SetCaps asked for, in order, each "<box> <cap>".

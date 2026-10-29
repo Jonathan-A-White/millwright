@@ -88,6 +88,19 @@ func TestFleetRefusesAHostItHasNoWayToReach(t *testing.T) {
 	}
 }
 
+func TestFleetListsABoxItCannotReachAndSaysWhy(t *testing.T) {
+	fleet := Fleet{Home: "laptop", Reach: map[string]string{"desktop": "ssh desktop"},
+		Gaps: map[string]string{"cloud1": "cloud1 is not a peer of the hub: it has no address"}}
+	hosts, _ := fleet.Hosts(context.Background())
+	if strings.Join(hosts, ",") != "laptop,cloud1,desktop" {
+		t.Errorf("hosts = %v, want the box that cannot be reached among them", hosts)
+	}
+	_, err := fleet.Pause(context.Background(), "cloud1", application.HostPauseOrder{})
+	if err == nil || !strings.Contains(err.Error(), "no way to reach cloud1: cloud1 is not a peer of the hub") {
+		t.Fatalf("expected the reason, got %v", err)
+	}
+}
+
 func TestFleetRefusesWhatMwHereDidNotPrint(t *testing.T) {
 	fleet := Fleet{Home: "laptop", Reach: map[string]string{"desktop": "ssh desktop"},
 		Run: func(context.Context, []string) (string, error) { return "mw: command not found", nil }}

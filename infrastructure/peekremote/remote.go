@@ -19,6 +19,9 @@ type Remote struct {
 	// name (`ssh desktop`), the last word of it the host itself — config
 	// [hands_hosts].
 	Reach map[string]string
+	// Gaps are the hosts left out of Reach, each with why: a cloud box whose
+	// address could not be read.
+	Gaps map[string]string
 }
 
 var (
@@ -50,6 +53,9 @@ func (r Remote) WorktreeState(ctx context.Context, host, storyID string) (applic
 func (r Remote) run(ctx context.Context, host, command string) (string, error) {
 	prefix := strings.Fields(r.Reach[host])
 	if len(prefix) < 2 {
+		if why := r.Gaps[host]; why != "" {
+			return "", fmt.Errorf("no way to reach %s: %s", host, why)
+		}
 		return "", fmt.Errorf("no way to reach %s: set `%s = \"ssh <alias>\"` under [hands_hosts] in the config file", host, host)
 	}
 	args := append(append(append([]string{}, prefix[1:len(prefix)-1]...), unattendedSSH...), prefix[len(prefix)-1],

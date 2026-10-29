@@ -77,7 +77,7 @@ func newRetryCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			reach, err := storyReach(cmd.Context(), cmd.ErrOrStderr())
+			reach, gaps, err := storyReach(cmd.Context(), cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -122,7 +122,7 @@ func newRetryCmd() *cobra.Command {
 				RePathed:    repathed,
 				FromMain:    fromMain || !fromBranch,
 				Hold:        hold,
-				Reach:       peekremote.Remote{Reach: reach},
+				Reach:       peekremote.Remote{Reach: reach, Gaps: gaps},
 				Force:       force,
 				Err:         cmd.ErrOrStderr(),
 			}.Run(cmd.Context(), args[0])

@@ -2127,8 +2127,8 @@ sync. See *The factory on one host (the desktop)*, above, and
 
 `mw pause --reason "<his words>"` on the home stops the factory where it stands, and `mw resume` starts
 it again. The hold is the usage-limit hold note, `host.<host>.harness_hold`, set on every host (the
-home, the hosts of `[hands_hosts]`, and each cloud box up, reached at `ssh mw@<box>.mw` without a line
-there), each asked over ssh to run `mw pause --here`. No cap is set to 0 and no dispatch unit is masked.
+home, the hosts of `[hands_hosts]`, and each cloud box up, reached at its WireGuard address (read off the hub)
+without a line there), each asked over ssh to run `mw pause --here`. No cap is set to 0 and no dispatch unit is masked.
 
 - Every running Builder is typed the `PAUSE:` line and each host waits up to `--wait` (10 minutes) for its
   branch to be pushed and its story to carry a comment opening `PAUSED`. What a Builder did not do, mw does
