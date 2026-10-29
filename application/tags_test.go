@@ -92,3 +92,20 @@ func TestACVersionTagsAreTheVersionsTheCriteriaName(t *testing.T) {
 		t.Errorf("expected %v, got %v", want, got)
 	}
 }
+
+func TestACVersionTagsLeaveOutAnotherProjectsRef(t *testing.T) {
+	for name, acceptance := range map[string]string{
+		"at":       "1. linking that book's with-variants file at v3.3.2.",
+		"at tag":   "2. linking it at tag v3.3.2, e.g. REV.csv.",
+		"of repo":  "3. the v3.3.2 of github.com/byztxt/byzantine-majority-text is linked.",
+		"url path": "4. see https://github.com/byztxt/byzantine-majority-text/blob/v3.3.2/REV.csv.",
+		"module":   "5. require github.com/x/y@v3.3.2.",
+	} {
+		if got := application.ACVersionTags(acceptance); len(got) != 0 {
+			t.Errorf("%s: expected no tag of the rig, got %v", name, got)
+		}
+	}
+	if got, want := application.ACVersionTags("1. The release v1.2.3 is tagged; the file is at v3.3.2."), []string{"v1.2.3"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("expected %v, got %v", want, got)
+	}
+}

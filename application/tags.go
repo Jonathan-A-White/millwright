@@ -80,12 +80,32 @@ type TagPublisher interface {
 
 var versionTag = regexp.MustCompile(`\bv\d+\.\d+\.\d+\b`)
 
+// anotherProjectsRef finds the words before a version that make it a ref of
+// something else than the rig: a pin "at v1.2.3" or "at tag v1.2.3", a path or
+// module version after "/" or "@" (a URL, "x/y@v1.2.3").
+var anotherProjectsRef = regexp.MustCompile(`(?i)(?:\bat\s+(?:tag\s+)?|[/@])$`)
+
+// ofARepo finds the words after a version that name the repository it belongs
+// to: "v1.2.3 of github.com/owner/repo", "v1.2.3 of owner/repo".
+var ofARepo = regexp.MustCompile(`^\s+of\s+(?:\S+\.\S+/\S+|\S+/\S+)`)
+
 // ACVersionTags are the version tags (v<major>.<minor>.<patch>) the acceptance
-// criteria name, each once, in the order they are named.
+// criteria name as the rig's own, each once, in the order they are named.
+//
+// A version the criteria give as a ref of ANOTHER project is not one (a landing
+// warned of v3.3.2 of byzantine-majority-text, mw-gq6.837). The rule is by the
+// words around the version: it is left out when it follows "at" or "at tag"
+// (a file pinned at a version), when it follows "/" or "@" (inside a URL or a
+// module path), or when "of <owner/repo>" follows it. Any other mention counts
+// as the rig's own tag, as before, so a criterion that wants its tag warned of
+// should say "the release v1.2.3" rather than "at v1.2.3".
 func ACVersionTags(acceptance string) []string {
 	var tags []string
-	for _, tag := range versionTag.FindAllString(acceptance, -1) {
-		if !containsString(tags, tag) {
+	for _, at := range versionTag.FindAllStringIndex(acceptance, -1) {
+		if anotherProjectsRef.MatchString(acceptance[:at[0]]) || ofARepo.MatchString(acceptance[at[1]:]) {
+			continue
+		}
+		if tag := acceptance[at[0]:at[1]]; !containsString(tags, tag) {
 			tags = append(tags, tag)
 		}
 	}

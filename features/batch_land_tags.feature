@@ -45,3 +45,15 @@ Feature: A landing carries the release tags its stories made to the origin
     When mw lands the batch of the rig
     Then the batch landed on "main" in one push, forcing nothing
     And that mail's body says: WARN: tag v1.2.3 named in the AC is not on origin
+
+  Scenario: A version of another project's tag the criteria name gets no warning
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+    And the story "mw-gq6.1" has the acceptance:
+      """
+      1. The apparatus links that book's with-variants file at v3.3.2.
+      2. The link points at tag v3.3.2, e.g. REV.csv.
+      """
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And that mail's body does not say "named in the AC is not on origin"
