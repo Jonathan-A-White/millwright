@@ -141,3 +141,44 @@ func (v *Vault) handoffs(seat, dir string) ([]application.Handoff, error) {
 	sort.Slice(handoffs, func(i, j int) bool { return handoffs[i].Name < handoffs[j].Name })
 	return handoffs, nil
 }
+
+// ActingFrom is the seat files with the acting file read from name instead of
+// `.<seat>-acting`: a file of the vault, or a full path. An empty name leaves
+// them as they are. A name that climbs out of the vault by a relative path is
+// refused.
+func (v *Vault) ActingFrom(name string) (application.SeatFiles, error) {
+	if name == "" {
+		return v, nil
+	}
+	if !filepath.IsAbs(name) {
+		if err := safeName("acting file", name); err != nil {
+			return nil, err
+		}
+		name = filepath.Join(v.dir, name)
+	}
+	return actingFrom{Vault: v, path: name}, nil
+}
+
+type actingFrom struct {
+	*Vault
+	path string
+}
+
+// SeatStart implements application.SeatFiles: the seat's start, with what the
+// named acting file says in place of what the seat's own says.
+func (a actingFrom) SeatStart(ctx context.Context, seat, host string) (application.SeatStart, error) {
+	start, err := a.Vault.SeatStart(ctx, seat, host)
+	if err != nil {
+		return application.SeatStart{}, err
+	}
+	acting, err := os.ReadFile(a.path)
+	switch {
+	case err == nil:
+		start.Acting = string(acting)
+	case os.IsNotExist(err):
+		start.Acting = ""
+	default:
+		return application.SeatStart{}, fmt.Errorf("reading what the %s seat's acting file says: %w", seat, err)
+	}
+	return start, nil
+}

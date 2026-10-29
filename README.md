@@ -4572,7 +4572,10 @@ ever closes another's. `mw seat up` starts it, and it can be run by hand.
 
 - **Successor mode**, the default: it closes the window once the seat's acting
   file names someone else than it did when the watch was armed, the window that
-  someone is named after is open, and the pane is idle.
+  someone is named after is open, and the pane is idle. The acting file is
+  `.<seat>-acting` in the vault, `.millhand-<host>-acting` for the Millhand
+  (one per host), or the file `--acting` names, a file of the vault or a full
+  path.
 - **Idle mode**, `--when-idle`, for a session with nobody to hand over to: it
   closes the window once a handoff newer than the window exists and the pane is
   idle. A window nothing can date counts as opened when the watch was armed.

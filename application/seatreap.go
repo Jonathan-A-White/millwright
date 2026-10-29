@@ -15,6 +15,21 @@ func ReapLogFileName(seat string) string {
 	return "." + seat + "-reaper.log"
 }
 
+// ReapActingFile is the acting file a seat's reaper watches: the one it was
+// given, else the Millhand's per-host `.millhand-<host>-acting` (the Millhand
+// works one host at a time, and each host keeps its own), else the seat's
+// `.<seat>-acting`. Empty when it is the last, which is what the seat's files
+// read without being told.
+func ReapActingFile(seat, host, given string) string {
+	switch {
+	case given != "":
+		return given
+	case seat == MillhandSeat && host != "":
+		return "." + seat + "-" + host + "-acting"
+	}
+	return ""
+}
+
 // The pace a reaper works at. It looks every half minute, because a session's
 // window is not in a hurry to close and a look costs a process, and it gives
 // up after three hours, because a window nothing has closed by then is one a

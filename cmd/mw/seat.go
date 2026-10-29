@@ -159,7 +159,7 @@ func seatHarness(dir, host string, model domain.Model, effort domain.Effort) (ap
 // session's window. It is zero-token and meant to be started detached, by `mw
 // seat up`; it is a command of its own so that it can also be run by hand.
 func newSeatReapCmd() *cobra.Command {
-	var window string
+	var window, acting string
 	var whenIdle bool
 	var interval, limit time.Duration
 	cmd := &cobra.Command{
@@ -169,7 +169,8 @@ func newSeatReapCmd() *cobra.Command {
 			"own window, and no session ever closes another's. It costs no tokens and runs until the window is\n" +
 			"closed or the limit is up.\n\n" +
 			"In successor mode, the default, it closes the window once the seat's acting file (.<seat>-acting in\n" +
-			"the vault) names someone else than it did when the watch was armed, that someone's window is open,\n" +
+			"the vault; the Millhand's is .millhand-<host>-acting, one per host; --acting names another file) names\n" +
+			"someone else than it did when the watch was armed, that someone's window is open,\n" +
 			"and the window's pane is idle. With --when-idle, for a session with nobody to hand over to, it closes\n" +
 			"the window once a handoff newer than the window exists and its pane is idle. Idle means an empty\n" +
 			"input line with nothing running, or holding only unsent text with no turn running, on two looks in a\n" +
@@ -195,8 +196,12 @@ func newSeatReapCmd() *cobra.Command {
 			}
 
 			files := vault.New(dir)
+			seatFiles, err := seatReapFiles(dir, args[0], host, acting)
+			if err != nil {
+				return err
+			}
 			reap := application.SeatReap{
-				Seats:    files,
+				Seats:    seatFiles,
 				Terminal: seatWindows(),
 				Log:      files,
 				Events:   homeEventLog(),
@@ -219,10 +224,18 @@ func newSeatReapCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&window, "window", "", "the tmux window to close, by id (like @3)")
+	cmd.Flags().StringVar(&acting, "acting", "", "the acting file to watch, a file of the vault or a full path (default: .<seat>-acting, and .millhand-<host>-acting for the millhand)")
 	cmd.Flags().BoolVar(&whenIdle, "when-idle", false, "close once a handoff newer than the window exists and its pane is idle, with no successor needed")
 	cmd.Flags().DurationVar(&interval, "interval", application.DefaultReapInterval, "how long between looks")
 	cmd.Flags().DurationVar(&limit, "limit", application.DefaultReapLimit, "how long to keep looking before giving up")
 	return cmd
+}
+
+// seatReapFiles is the seat's files as a reaper reads them, with the acting
+// file it watches: --acting when given, the Millhand's per-host file for the
+// millhand seat, and .<seat>-acting for any other.
+func seatReapFiles(dir, seat, host, acting string) (application.SeatFiles, error) {
+	return vault.New(dir).ActingFrom(application.ReapActingFile(seat, host, acting))
 }
 
 // thisWindowName is the name of the tmux window the calling process runs in,
