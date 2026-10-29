@@ -12,6 +12,7 @@
 #   contrib/vultr-boost snapshot [--dry-run] [--name NAME]
 #   contrib/vultr-boost spend    [--name NAME]...
 #   contrib/vultr-boost set-cap  [--dry-run] --name NAME --cap N
+#   contrib/vultr-boost address  [--dry-run] --name NAME
 #   contrib/vultr-boost --help
 #
 # up      keys the box (hosts/vultr/wg.key.age, once), enrols its public key on the
@@ -43,6 +44,9 @@
 #         other lines stay as they were). The box's next dispatch reads it: no restart, and
 #         sessions running are not touched. mw's cloud check runs it when [cloud] box_cap
 #         changes (mw cloud cap N).
+# address prints a box's WireGuard address, read off the hub as set-cap reads it (nothing there
+#         changes), then the user the box dispatches as: two lines, the address and the user. mw
+#         peek, retry and pause reach a box at ssh <user>@<address>: the home resolves no name for it.
 # --name  the box: its host name, peer name and its own state and key in the vault
 #         (default: the tfvars name, else cloud1). mw names its boxes cloud1, cloud2.
 # --dry-run prints every step and what it would run, and changes nothing.
@@ -100,10 +104,12 @@ Usage: vultr-boost up       [--yes] [--dry-run] [--name NAME] [--snapshot ID]
        vultr-boost snapshot [--dry-run] [--name NAME]
        vultr-boost spend    [--name NAME]...
        vultr-boost set-cap  [--dry-run] --name NAME --cap N
+       vultr-boost address  [--dry-run] --name NAME
 
 up makes the Boost box on Vultr and enrols it on the WireGuard hub; down destroys
 it and removes the peer; set-cap sets how many sessions a box that is up runs at
-once, in its own config, over WireGuard; status prints its state and cost; snapshot makes a
+once, in its own config, over WireGuard; address prints a box's WireGuard address and user
+read off the hub; status prints its state and cost; snapshot makes a
 ready-made image of a bootstrapped box for up --snapshot; list prints every
 instance Vultr holds (id, label, status, server status); adopt imports a Vultr
 instance into a box's state; spend prints what the boxes named have
@@ -117,7 +123,7 @@ EOF
 
 while [ $# -gt 0 ]; do
 	case $1 in
-	up | down | list | adopt | status | snapshot | spend | set-cap)
+	up | down | list | adopt | status | snapshot | spend | set-cap | address)
 		[ -z "$CMD" ] || die "one command at a time: $CMD and $1"
 		CMD=$1
 		;;
@@ -296,6 +302,11 @@ if [ "$DRY" = 1 ]; then
 		echo "vultr-boost set-cap --dry-run: nothing below is run"
 		step "ssh $HUB_SSH: read $NAME's address off /etc/wireguard/wg0.conf (nothing there changes)"
 		step "ssh $(box_user)@<$NAME's address>: set cap = ${CAP:-<n>} in ~/.config/mw/config.toml (the first cap line of its root table, written whole and renamed into place)"
+		;;
+	address)
+		STEPS=1
+		echo "vultr-boost address --dry-run: nothing below is run"
+		step "ssh $HUB_SSH: read $NAME's address off /etc/wireguard/wg0.conf (nothing there changes), and print it with the user $(box_user)"
 		;;
 	list)
 		STEPS=1
@@ -762,21 +773,38 @@ awk -v n="$1" '"'"'
 '"'"' "$f" >"$t"
 mv "$t" "$f"; trap - EXIT; echo "cap = $1"'
 
+# box_address NAME: the WireGuard address of NAME off the hub's wg0.conf (nothing there
+# changes), in ADDR; dies when the hub cannot be read or NAME is no peer of it.
+box_address() {
+	local out
+	out=$(hubssh "sed -n '/^# peer $1 (enrolled/,/^AllowedIPs/ s#^AllowedIPs = \([0-9.]*\)/32.*#\1#p' /etc/wireguard/wg0.conf | head -n 1") || die "could not read $1's address off the hub ($HUB_SSH)"
+	ADDR=$(echo "$out" | head -n 1)
+	case $ADDR in
+	"" | *[!0-9.]*) die "$1 is not a peer of the hub: it has no address" ;;
+	esac
+}
+
 do_set_cap() {
 	need ssh
 	[ -n "$CAP" ] && [ "$CAP" -ge 1 ] || die "set-cap needs --cap N, a whole number of sessions, 1 or more"
 	[ -n "$NAME_ARG" ] || die "set-cap needs --name NAME: the box to set the cap on"
 	STEPS=2
-	local out addr
+	local out
 	step "hub: read $NAME's address off $HUB_SSH"
-	out=$(hubssh "sed -n '/^# peer $NAME (enrolled/,/^AllowedIPs/ s#^AllowedIPs = \([0-9.]*\)/32.*#\1#p' /etc/wireguard/wg0.conf | head -n 1") || die "could not read $NAME's address off the hub ($HUB_SSH)"
-	addr=$(echo "$out" | head -n 1)
-	case $addr in
-	"" | *[!0-9.]*) die "$NAME is not a peer of the hub: it has no address to set a cap on" ;;
-	esac
+	box_address "$NAME"
+	local addr=$ADDR
 	step "box: set cap = $CAP on $(box_user)@$addr"
 	out=$(ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new "$(box_user)@$addr" "sh -s -- $CAP" <<<"$BOX_SET_CAP") || die "could not set the cap on $NAME ($(box_user)@$addr)"
 	echo "    $NAME: $out in ~/.config/mw/config.toml; its next dispatch reads it, sessions running are not touched"
+}
+
+# address prints the address and then the user, nothing else on standard output.
+do_address() {
+	need ssh
+	[ -n "$NAME_ARG" ] || die "address needs --name NAME: the box to read the address of"
+	box_address "$NAME"
+	echo "$ADDR"
+	box_user
 }
 
 case $CMD in
@@ -788,4 +816,5 @@ status) do_status ;;
 snapshot) do_snapshot ;;
 spend) do_spend ;;
 set-cap) do_set_cap ;;
+address) do_address ;;
 esac

@@ -18,6 +18,7 @@ contrib/vultr-boost adopt          # --instance ID: import a restoring instance 
 contrib/vultr-boost snapshot       # a ready-made image of a bootstrapped box
 contrib/vultr-boost spend          # what Vultr's billing says the boxes cost this month
 contrib/vultr-boost set-cap        # --name NAME --cap N: set the sessions a box that is up runs at once
+contrib/vultr-boost address        # --name NAME: the box's WireGuard address, then its user, off the hub
 ```
 
 `--name NAME` picks the box (default the tfvars `name`, else `cloud1`). The
