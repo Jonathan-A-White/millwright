@@ -131,6 +131,21 @@ func (w *Windows) UsageLimit(ctx context.Context, window string) (string, error)
 	return shown, nil
 }
 
+// BackgroundAgents implements application.ReapTerminal: the line on the
+// window's screen that says a background agent still runs, read by
+// application.PaneBackgroundAgents.
+func (w *Windows) BackgroundAgents(ctx context.Context, window string) (string, error) {
+	if err := windowID(window); err != nil {
+		return "", err
+	}
+	printed, err := w.call(ctx, "capture-pane", "-p", "-e", "-t", window)
+	if err != nil {
+		return "", err
+	}
+	shown, _ := application.PaneBackgroundAgents(application.StripEscapes(string(printed)))
+	return shown, nil
+}
+
 // NotLoggedInWindows names every window whose screen shows Claude Code's
 // login gone: a line with both "Not logged in" and "/login", as its status
 // line puts it. A line of a Builder's grep that quotes the words alone is not

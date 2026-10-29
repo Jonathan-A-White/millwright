@@ -25,6 +25,12 @@ const (
 	DefaultReapLimit    = 3 * time.Hour
 )
 
+// DefaultReapAgentWait is how long a reaper holds off closing a window whose
+// pane shows a background agent still running, before it closes it all the
+// same: the agent's work is lost with the window, but one that has run longer
+// than this is stuck, and a window is not kept for it for ever (mw-gq6.833).
+const DefaultReapAgentWait = 30 * time.Minute
+
 // DefaultReapNextWait is how long a reaper holds off closing a window with a
 // running `mw next` in it, before it closes it all the same: a close-out killed
 // in the middle of the rig's tests costs a whole run, but a run that has gone
@@ -99,6 +105,11 @@ type ReapTerminal interface {
 	// UsageLimit reports what PaneUsageLimit reads on the window's pane: the
 	// harness's usage-limit notice and its menu, "" when it shows none.
 	UsageLimit(ctx context.Context, window string) (string, error)
+
+	// BackgroundAgents reports what PaneBackgroundAgents reads on the window's
+	// pane: the line that says a background agent still runs, "" when it shows
+	// none.
+	BackgroundAgents(ctx context.Context, window string) (string, error)
 
 	// Type sends text into the window's pane, literally, followed by the Enter
 	// key — the same way a person's line would reach it. It is how a tick tells
@@ -199,6 +210,12 @@ const (
 // looks again on its usual interval, and closes the window when the run has
 // ended, or after NextWait if it has not, saying that it gave up waiting.
 //
+// Nor is a window whose pane shows a background agent still running ("Waiting
+// for 1 background agent to finish", or the agent count of the status line):
+// the pane reads idle, but closing it kills the agent's work half done
+// (mw-gq6.833). The same rule holds: said once, looked at again, and the window
+// closed after AgentWait with the line that was cut in the log.
+//
 // It gives up after Limit, closing nothing. Arming, closing and giving up each
 // append one dated line to the seat's reaper log.
 type SeatReap struct {
@@ -241,6 +258,10 @@ type SeatReap struct {
 	// NextWait is how long a window with a running `mw next` in it is kept
 	// before it is closed over the run; zero is DefaultReapNextWait.
 	NextWait time.Duration
+
+	// AgentWait is how long a window showing a running background agent is
+	// kept before it is closed over the agent; zero is DefaultReapAgentWait.
+	AgentWait time.Duration
 
 	// Now is the clock; nil is time.Now. Sleep waits out an interval, or until
 	// ctx ends; nil sleeps for real.
@@ -318,6 +339,12 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 	if nextWait <= 0 {
 		nextWait = DefaultReapNextWait
 	}
+	agentWait := s.AgentWait
+	if agentWait <= 0 {
+		agentWait = DefaultReapAgentWait
+	}
+	var agentsSince time.Time
+	agentsWaitedOut := false
 	for s.now().Before(deadline) {
 		if err := s.wait(ctx, interval); err != nil {
 			return ReapReport{}, err
@@ -350,6 +377,30 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 		}
 		if idle++; idle < 2 {
 			continue
+		}
+
+		if !agentsWaitedOut {
+			agents, err := s.Terminal.BackgroundAgents(ctx, s.Window)
+			switch {
+			case err != nil:
+				// A pane that cannot be read for agents may have one: not closing.
+				continue
+			case agents == "":
+				agentsSince = time.Time{}
+			case agentsSince.IsZero():
+				agentsSince = s.now()
+				if _, err := s.say(ctx, fmt.Sprintf("waiting: a background agent runs in this window (%s)", agents)); err != nil {
+					return ReapReport{}, err
+				}
+				continue
+			case s.now().Sub(agentsSince) < agentWait:
+				continue
+			default:
+				agentsWaitedOut = true
+				if _, err := s.say(ctx, fmt.Sprintf("gave up waiting for the background agent after %s; closing over it (%s)", agentWait, agents)); err != nil {
+					return ReapReport{}, err
+				}
+			}
 		}
 
 		if !waitedOut {
@@ -490,6 +541,9 @@ func (s SeatReap) Finished(ctx context.Context, window ReapWindow) (handoff time
 	}
 	handoff, since := newestHandoffSince(start.Handoffs, openedOr(window, s.now()))
 	if !since || !s.paneIdle(ctx, window.ID) {
+		return time.Time{}, false
+	}
+	if _, held := holdsBackgroundAgents(ctx, s.Terminal, window.ID, handoff, s.now()); held {
 		return time.Time{}, false
 	}
 	return handoff, true
