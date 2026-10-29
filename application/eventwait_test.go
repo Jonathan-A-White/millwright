@@ -350,3 +350,79 @@ func TestWaitWithoutTheHandoverKindDoesNotLookBackForOne(t *testing.T) {
 		t.Fatalf("got %+v, %v; want it to wait out its limit", got, err)
 	}
 }
+
+// A Mayor started because its predecessor is gone waits for a handover that
+// can never come: the acting file names a window that is no longer open
+// (mw-gq6.831).
+func TestHandoverWaitEndsEarlyWhenTheActingFilesWindowIsGone(t *testing.T) {
+	const acting = "Mayor mayor-2026-10-28-659 (handed over at event 41), since 2026-10-28T21:00:00Z\n"
+	cases := []struct {
+		name   string
+		acting string
+		open   []string
+		err    error
+		gone   bool
+	}{
+		{"the named window is closed", acting, []string{"mayor-2026-10-29-662", "dispatch"}, nil, true},
+		{"no windows are open", acting, nil, nil, true},
+		{"the named window is open", acting, []string{"mayor-2026-10-28-659", "mayor-2026-10-29-662"}, nil, false},
+		{"it names a window by the old handoff form, open", "Mayor after handoff 592 (tmux window 0 'mayor-592', window id @3), since x\n", []string{"mayor-592"}, nil, false},
+		{"it names a window by the old handoff form, closed", "Mayor after handoff 592 (tmux window 0 'mayor-592', window id @3), since x\n", []string{"millhand"}, nil, true},
+		{"the file names this window itself", "Mayor mayor-2026-10-29-662 (taken by hand; window @4), since x\n", []string{"millhand"}, nil, false},
+		{"the file names no window", "Mayor after the handoff, since x\n", []string{"millhand"}, nil, false},
+		{"only a script is named, not a window", "Mayor started by bin/mayor-up, since x\n", []string{"millhand"}, nil, false},
+		{"no acting file", "", []string{"millhand"}, nil, false},
+		{"tmux cannot say", acting, nil, context.DeadlineExceeded, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var out bytes.Buffer
+			acting := c.acting
+			_, err := application.EventWait{
+				Log:          logWith(t, jobEvent),
+				Subscription: application.Subscription{Seat: "mayor", Kinds: []string{events.KindHandover}},
+				Self:         "mayor-2026-10-29-662",
+				Acting:       &acting,
+				OpenWindows:  func(context.Context) ([]string, error) { return c.open, c.err },
+				Limit:        20 * time.Millisecond,
+				Every:        time.Millisecond,
+				Out:          &out,
+			}.Run(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			ended := strings.Contains(out.String(), "no handover can come")
+			if ended != c.gone || ended == strings.Contains(out.String(), "No events for mayor by ") {
+				t.Fatalf("printed %q; want gone=%v", out.String(), c.gone)
+			}
+			if ended && !strings.Contains(out.String(), "mw seat take mayor") {
+				t.Fatalf("printed %q; want it to say how to take the seat", out.String())
+			}
+		})
+	}
+}
+
+func TestHandoverWaitFindsThePredecessorGoneWhileItWaits(t *testing.T) {
+	acting := "Mayor mayor-2026-10-28-659 (handed over at event 41), since x\n"
+	calls := 0
+	var out bytes.Buffer
+	_, err := application.EventWait{
+		Log:          logWith(t, jobEvent),
+		Subscription: application.Subscription{Seat: "mayor", Kinds: []string{events.KindHandover}},
+		Self:         "mayor-2026-10-29-662",
+		Acting:       &acting,
+		OpenWindows: func(context.Context) ([]string, error) {
+			calls++
+			if calls < 3 {
+				return []string{"mayor-2026-10-28-659"}, nil
+			}
+			return []string{"millhand"}, nil
+		},
+		Limit: 5 * time.Second,
+		Every: time.Millisecond,
+		Out:   &out,
+	}.Run(context.Background())
+	if err != nil || !strings.Contains(out.String(), "no handover can come") {
+		t.Fatalf("printed %q, %v; want the gone line once the window closed", out.String(), err)
+	}
+}

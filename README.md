@@ -2454,6 +2454,9 @@ a Talk turn that arrives after it is left unprinted and the talk cursor unmoved,
 successor to read. The successor's own `mw events wait` ends on the handover, saying it holds
 the seat from N, and a wait begun `--since N` ignores it. A wait tells which window it is in
 by `--as <window name>`, by default the tmux window it runs in; with none it is the old one.
+A successor's wait for a handover (no `--since`) also looks, at the start and every ten seconds, at the
+window `.mayor-acting` names: when none such is open (the predecessor is gone, so `bin/mayor-up` started this
+Mayor) it ends at once with `no handover can come` and the `mw seat take` to run, instead of its limit.
 
 The Mayor's commands on the log:
 

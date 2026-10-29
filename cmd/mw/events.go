@@ -463,7 +463,9 @@ func newEventsWaitCmd() *cobra.Command {
 			"it prints 'You hold the seat from event N' and exits 0 at once, the handover having landed before it\n" +
 			"was armed, if the seat's acting file names that window at the handover's event (a handover the file\n" +
 			"does not stand at, the old session still acting, is stale: mw-gq6.767); a newest handover to another\n" +
-			"window, or none, leaves it to wait as above.",
+			"window, or none, leaves it to wait as above. Such a wait also looks, at the start and every few seconds, at the\n" +
+			"window the acting file names (the predecessor's): when it is no longer open, no handover can come, so the wait\n" +
+			"ends at once with 'no handover can come' and the mw seat take command to run (mw-gq6.831).",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if seat == "" {
@@ -513,6 +515,7 @@ func newEventsWaitCmd() *cobra.Command {
 				text, _ := os.ReadFile(filepath.Join(dir, application.ActingFileName(seat)))
 				acting := string(text)
 				wait.Acting = &acting
+				wait.OpenWindows = openWindowNames
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, os.Interrupt)
 			defer stop()
@@ -553,4 +556,18 @@ func newEventsTrimCmd() *cobra.Command {
 	}
 	cmd.Flags().Uint64Var(&keep, "keep", application.DefaultEventKeep, "how many of the newest events stay in the log")
 	return cmd
+}
+
+// openWindowNames lists the names of the windows open in the seat terminal, for
+// a wait to tell whether the window the acting file names is still there.
+func openWindowNames(ctx context.Context) ([]string, error) {
+	open, err := seatWindows().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(open))
+	for _, w := range open {
+		names = append(names, w.Name)
+	}
+	return names, nil
 }

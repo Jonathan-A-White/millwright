@@ -7,6 +7,7 @@ import (
 	"io"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain/events"
@@ -61,6 +62,13 @@ type EventWait struct {
 	// old session still acting) is stale and the wait waits (mw-gq6.767). Nil
 	// leaves the look-back to the log alone.
 	Acting *string
+	// OpenWindows, when set, lists the names of the windows open in the
+	// terminal. A wait that listens for a handover, has no Since and has Acting
+	// looks with it, at the start and every few looks after, for the window the
+	// acting file names: when that window is no longer open, no handover can
+	// ever come and the wait ends saying so (mw-gq6.831). Nil, a listing that
+	// fails, or an acting file that names no window leaves the wait as it was.
+	OpenWindows func(ctx context.Context) ([]string, error)
 	// Self is the name of the window the wait runs in, empty when it is not
 	// known. It tells a handover of the seat to this window (the wait of the
 	// successor, woken to take the seat) from a handover to another (the old
@@ -135,7 +143,7 @@ func (w EventWait) Run(ctx context.Context) ([]events.Event, error) {
 	// ignores a handover that marked N or earlier.
 	atHead := w.Since == nil
 	watch := HandoverWatch{Seat: w.Subscription.Seat, Self: w.Self}
-	for {
+	for looks := 0; ; looks++ {
 		head, err := w.Log.Head(ctx)
 		if err == nil && head > cursor {
 			var evs []events.Event
@@ -174,6 +182,9 @@ func (w EventWait) Run(ctx context.Context) ([]events.Event, error) {
 		if err != nil && ctx.Err() == nil {
 			return nil, err
 		}
+		if looks%predecessorLooks == 0 && w.predecessorGone(ctx) {
+			return nil, nil
+		}
 		if sleep(ctx, every) != nil {
 			if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return nil, ctx.Err()
@@ -183,6 +194,63 @@ func (w EventWait) Run(ctx context.Context) ([]events.Event, error) {
 			return nil, nil
 		}
 	}
+}
+
+// predecessorLooks is how many looks at the log's head pass between two looks
+// at the terminal's windows.
+const predecessorLooks = 10
+
+// predecessorGone says, and prints, that the window the acting file names is
+// no longer open, so the handover this wait listens for can never come. It
+// holds only for a wait that listens for a handover, has no Since and knows
+// its acting file and its window, and only when the file names a window of the
+// seat other than Self's own and none of those named is open; any doubt (no
+// listing, a listing that fails, a file that names no window) is no.
+func (w EventWait) predecessorGone(ctx context.Context) bool {
+	if w.OpenWindows == nil || w.Acting == nil || w.Since != nil || w.Self == "" || !w.waitsFor(events.KindHandover) {
+		return false
+	}
+	seat := w.Subscription.Seat
+	named := actingWindowNames(*w.Acting, seat)
+	if len(named) == 0 {
+		return false
+	}
+	for _, n := range named {
+		if n == w.Self {
+			return false
+		}
+	}
+	open, err := w.OpenWindows(ctx)
+	if err != nil {
+		return false
+	}
+	for _, o := range open {
+		for _, n := range named {
+			if o == n {
+				return false
+			}
+		}
+	}
+	fmt.Fprintf(w.Out, "The %s seat's acting file names %s, and no such window is open: no handover can come. "+
+		"Take the seat at once with: mw seat take %s --as %s-<date>-<n> --note \"<why>\".\n",
+		seat, strings.Join(named, ", "), seat, seat)
+	return true
+}
+
+// actingWindowNames are the names of the seat's windows an acting file's text
+// holds: the seat's name, a hyphen and a number (mayor-2026-10-29-662,
+// mayor-592), so a script such as bin/mayor-up is not read as a window.
+func actingWindowNames(text, seat string) []string {
+	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(seat) + `-\d[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*`)
+	var names []string
+	seen := map[string]bool{}
+	for _, n := range re.FindAllString(text, -1) {
+		if !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	return names
 }
 
 // heldBeforeArming is the look-back of a wait that listens for a handover and
