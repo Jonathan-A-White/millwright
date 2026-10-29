@@ -88,6 +88,30 @@ func (s Size) CallersAllowed() int {
 	return 0
 }
 
+// FilesAllowed is the most files a story's files key may name before the story
+// is bigger than its size says (mw-gq6.839): XS 4, S 8, M 12, L 16, XL 24. Read
+// from the Builder ledger, 2026-10-15 to 2026-10-29: of size M stories naming 12
+// files or fewer 3 of 210 ran out of turns, of those naming more 10 of 57; S and
+// XS have no turn-cap on record, so theirs are where 94% and 91% of the stories
+// that landed first time stop; L and XL have too few to show a break and are
+// the next steps up. A size that is not one of Sizes allows none to be judged,
+// and is 0.
+func (s Size) FilesAllowed() int {
+	switch s {
+	case SizeXS:
+		return 4
+	case SizeS:
+		return 8
+	case SizeM:
+		return 12
+	case SizeL:
+		return 16
+	case SizeXL:
+		return 24
+	}
+	return 0
+}
+
 // Big says the size is L or XL: more than one session is likely to finish.
 func (s Size) Big() bool { return s == SizeL || s == SizeXL }
 

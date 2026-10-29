@@ -320,6 +320,7 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	f.print(sizeWarnings(filed.Stories, true, false))
 	// Warnings only here: it is mw file --check that fails for them.
 	f.testCallers(plan, func(key string) string { return ids[key] })
+	f.filesNamed(plan, func(key string) string { return ids[key] })
 	f.warnSmokeWithoutRef(plan, func(key string) string { return ids[key] })
 	f.warnRemoteShell(plan, func(key string) string { return ids[key] })
 	for _, id := range ownDemos {
@@ -374,6 +375,7 @@ func (f File) Check(ctx context.Context, plan domain.Plan) error {
 	}
 	f.warnSmokeWithoutRef(plan, func(key string) string { return key })
 	f.warnRemoteShell(plan, func(key string) string { return key })
+	f.filesNamed(plan, func(key string) string { return key })
 	if over := f.testCallers(plan, func(key string) string { return key }); len(over) > 0 {
 		return fmt.Errorf("%s: more test callers than the size allows: split the story, size it up, or say why not with \"callers_ok\" (mw-gq6.661)",
 			strings.Join(over, ", "))
@@ -402,6 +404,21 @@ func (f File) testCallers(plan domain.Plan, label func(key string) string) []str
 		}
 	}
 	return over
+}
+
+// filesNamed counts the files each story of the plan that names files and a size
+// names, and warns of the ones over their size's allowance (see FilesNamed). A
+// warning only, in Run and in Check. label names a story by its plan key.
+func (f File) filesNamed(plan domain.Plan, label func(key string) string) {
+	for _, story := range plan.Stories {
+		path, err := story.PathFrom(plan.Epic.Defaults)
+		if err != nil {
+			continue
+		}
+		if named, ok := filesNamedOf(f.Rigs, f.RigFiles, label(story.Key), path); ok {
+			filesNamedNote(f.Err, named)
+		}
+	}
 }
 
 // refusals is every reason the plan cannot be filed, one check after another and

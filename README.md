@@ -819,6 +819,14 @@ it unless the plan's story carries `"callers_ok": "<why>"`. Filing and
 `mw path set` only warn. A story with no size, no plain file in its files key,
 or a rig not checked out here is not counted. See `features/file_callers.feature`.
 
+**Files named (mw-gq6.839).** A story that names many files is often several
+surfaces at once and runs out of turns whatever its tests are. `mw path set`,
+`mw file` and `mw file --check` also count the files the key names (a glob or a
+directory counts as the files it matches in the rig's checkout here) and, over
+what the size allows (XS 4, S 8, M 12, L 16, XL 24), say on stderr `WARN: files
+named: N for size S (allows M); split the story or size it up`. Never a refusal,
+and a story within its allowance hears nothing. See `features/file_callers.feature`.
+
 The eighth key, `files`, is the comma-separated repo paths or globs (`*` within a
 directory, `**` across them; a directory covers what is under it) the story
 expects to change. It is the story's own, so `--from` never copies it. `mw

@@ -151,6 +151,11 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		if callers, ok := testCallersOf(s.Rigs, s.RigFiles, id, story.Merged().Overlay(path)); ok {
 			callerNotes(s.Out, s.Err, callers)
 		}
+		// Likewise the files the key names: a story wide in itself runs out of
+		// turns whatever its tests are (mw-gq6.839).
+		if named, ok := filesNamedOf(s.Rigs, s.RigFiles, id, story.Merged().Overlay(path)); ok {
+			filesNamedNote(s.Err, named)
+		}
 	}
 	// Only a path written with a host or a rig (--from writes both) is judged: a
 	// model= set on a story already pinned is not this warning's to repeat.

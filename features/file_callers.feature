@@ -115,3 +115,22 @@ Feature: A story is sized by the tests that call its files
     When the callers path of "B" is copied from "A" with files=src/screens/Settings.tsx size=XS
     Then the callers story "B" has no metadata callers_ok
     And the callers warning has the line: WARN: 12 test callers for size XS
+
+  Scenario: A story naming more files than its size allows is warned of and the check still passes
+    Given the callers story "pages" is sized M
+    And the callers story "pages" names the files "src/screens/Settings.tsx,src/a.ts,src/b.ts,src/c.ts,src/d.ts,src/e.ts,src/f.ts,src/g.ts,src/h.ts,src/i.ts,src/j.ts,src/k.ts,src/l.ts"
+    When the callers plan is checked
+    Then the callers check passes
+    And the callers warning has the line: WARN: files named: 13 for size M (allows 12)
+
+  Scenario: A story naming as many files as its size allows is not warned of
+    Given the callers story "pages" is sized M
+    And the callers story "pages" names the files "src/screens/Settings.tsx,src/a.ts,src/b.ts,src/c.ts,src/d.ts,src/e.ts,src/f.ts,src/g.ts,src/h.ts,src/i.ts,src/j.ts,src/k.ts"
+    When the callers plan is checked
+    Then the callers check passes
+    And the callers warning is empty
+
+  Scenario: Setting a story's files and size warns of the files it names
+    Given the callers story "B" is open on the rig "lampas"
+    When the callers path of "B" is set with files=src/a.ts,src/b.ts,src/c.ts,src/d.ts,src/e.ts size=XS
+    Then the callers warning has the line: WARN: files named: 5 for size XS (allows 4)

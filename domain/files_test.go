@@ -88,3 +88,11 @@ func TestEachSizeAllowsItsTestCallers(t *testing.T) {
 		}
 	}
 }
+
+func TestEachSizeAllowsItsFilesNamed(t *testing.T) {
+	for size, want := range map[domain.Size]int{domain.SizeXS: 4, domain.SizeS: 8, domain.SizeM: 12, domain.SizeL: 16, domain.SizeXL: 24, "": 0} {
+		if got := size.FilesAllowed(); got != want {
+			t.Errorf("%q allows %d files, want %d", size, got, want)
+		}
+	}
+}
