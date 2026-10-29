@@ -225,6 +225,8 @@ const addressLimit = time.Minute
 // reads the box's WireGuard address off the hub and prints it, and then the
 // user the box dispatches as (mw when it prints none).
 func (v Vultr) Address(ctx context.Context, name string) (application.CloudAddress, error) {
+	// What it prints is the answer, not progress to be copied to Out.
+	v.Out = nil
 	out, err := v.run(ctx, addressLimit, "address", "--name", name)
 	if err != nil {
 		return application.CloudAddress{}, err
