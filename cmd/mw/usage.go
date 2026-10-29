@@ -20,9 +20,10 @@ func newUsageCmd() *cobra.Command {
 		Short: "The quota used, as the Governor reports it, and the reserve that pauses the factory",
 		Long: "The reserve R(t) is 10% of the quota with a whole week left, 0% with an hour left, and a straight\n" +
 			"line between. When the usage reported has reached 100% less R(t), mw pause runs by itself.\n" +
+			"A floor (mw usage floor) keeps the reserve at no less than a percent until a time, then R(t) alone.\n" +
 			"PROVISIONAL: the usage is what the Governor reports, from his screenshot, until a source exists.",
 	}
-	cmd.AddCommand(newUsageSetCmd(), newUsageShowCmd())
+	cmd.AddCommand(newUsageSetCmd(), newUsageShowCmd(), newUsageFloorCmd())
 	return cmd
 }
 
@@ -61,7 +62,8 @@ func newUsageSetCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			return application.UsageSet{
-				Readings: application.UsageReadings{Notes: mwGateway(dir, host)}, Zone: zone, Out: out,
+				Readings: application.UsageReadings{Notes: mwGateway(dir, host)}, Floors: application.UsageFloors{Notes: mwGateway(dir, host)},
+				Zone: zone, Out: out,
 				Pause: func(ctx context.Context, reason string) error {
 					p, err := pauseHome(ctx, dir, host, out, 0)
 					if err != nil {
@@ -91,18 +93,50 @@ func newUsageShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			all, err := application.UsageReadings{Notes: mwGateway(dir, host)}.All(cmd.Context())
+			gw := mwGateway(dir, host)
+			return application.UsageShow{
+				Readings: application.UsageReadings{Notes: gw}, Floors: application.UsageFloors{Notes: gw}, Out: cmd.OutOrStdout(),
+			}.Run(cmd.Context())
+		},
+	}
+}
+
+func newUsageFloorCmd() *cobra.Command {
+	var until string
+	cmd := &cobra.Command{
+		Use:   "floor <percent> --until <RFC3339> | off",
+		Short: "Keep the reserve at no less than a percent until a time, then R(t) alone; off clears it",
+		Long: "floor keeps the reserve at max(R(t), percent) while now is before --until, so that a tutor's answers\n" +
+			"are not starved of tokens before the reset; from --until on the reserve is R(t) alone, down to 0%\n" +
+			"in the last hour. mw usage set and mw usage show read it. floor off clears it. Run on the home.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, err := config.Vault()
 			if err != nil {
 				return err
 			}
-			if len(all) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "no usage was reported: mw usage set <percent>")
-				return nil
+			host, err := config.Host()
+			if err != nil {
+				return err
 			}
-			last := all[len(all)-1]
-			fmt.Fprintf(cmd.OutOrStdout(), "last reading: %.1f%% at %s; the week resets %s\n",
-				last.Percent, last.At.UTC().Format(time.RFC3339), last.Resets.UTC().Format(time.RFC3339))
-			return application.UsageCheck{Reading: last, Out: cmd.OutOrStdout()}.Run(cmd.Context(), time.Now().UTC())
+			use := application.UsageFloorSet{Floors: application.UsageFloors{Notes: mwGateway(dir, host)}, Out: cmd.OutOrStdout()}
+			if args[0] == "off" {
+				return use.Off(cmd.Context())
+			}
+			percent, err := strconv.ParseFloat(args[0], 64)
+			if err != nil {
+				return fmt.Errorf("%q is not a percent or off: %w", args[0], err)
+			}
+			if until == "" {
+				return fmt.Errorf("--until is needed: when the floor ends, like 2026-10-30T11:00:00Z")
+			}
+			at, err := time.Parse(time.RFC3339, until)
+			if err != nil {
+				return fmt.Errorf("--until %q is not a time like 2026-10-30T11:00:00Z: %w", until, err)
+			}
+			return use.Run(cmd.Context(), percent, at)
 		},
 	}
+	cmd.Flags().StringVar(&until, "until", "", "when the floor ends (RFC3339)")
+	return cmd
 }

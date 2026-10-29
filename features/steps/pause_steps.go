@@ -130,6 +130,19 @@ func InitializePauseScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the paused set records the night passes "([^"]*)" and "([^"]*)" as off$`, c.setRecordsNightPasses)
 	ctx.Then(`^the sleep pass is (not )?due on "([^"]*)"$`, func(not, host string) error { return c.passDue(application.SleepJobName, not == "", host) })
 	ctx.Then(`^the To do rank is (not )?due on "([^"]*)"$`, func(not, host string) error { return c.passDue(application.TodoRankJobName, not == "", host) })
+	ctx.Given(`^the Governor set a usage floor of ([0-9.]+) percent until "([^"]*)"$`, func(p, until string) error { return c.setFloor(p, until) })
+	ctx.When(`^the Governor tries to set a usage floor of ([0-9.]+) percent until "([^"]*)"$`, func(p, until string) error {
+		c.failed = c.setFloor(p, until)
+		return nil
+	})
+	ctx.Given(`^the Governor cleared the usage floor$`, func() error {
+		return application.UsageFloorSet{Floors: application.UsageFloors{Notes: c.tracker}, Out: &c.out}.Off(context.Background())
+	})
+	ctx.Given(`^the clock moves on (\d+) minutes$`, func(n int) error {
+		c.now = c.now.Add(time.Duration(n) * time.Minute)
+		return nil
+	})
+	ctx.When(`^the Governor runs mw usage show$`, c.usageShow)
 	ctx.Then(`^with ([0-9.]+) hours left the reserve is ([0-9.]+) percent$`, c.reserveIs)
 }
 
@@ -352,12 +365,33 @@ func (c *pauseContext) reportsUsage(percent, resets string) error {
 	}
 	pause := c.pauseUseCase()
 	return application.UsageSet{
-		Readings: application.UsageReadings{Notes: c.tracker}, Zone: time.UTC, Now: c.clock, Out: &c.out,
+		Readings: application.UsageReadings{Notes: c.tracker}, Floors: application.UsageFloors{Notes: c.tracker},
+		Zone: time.UTC, Now: c.clock, Out: &c.out,
 		Pause: func(ctx context.Context, reason string) error {
 			_, err := pause.Run(ctx, application.PauseRequest{Reason: reason, Wait: application.PauseWait})
 			return err
 		},
 	}.Run(context.Background(), p, reset)
+}
+
+func (c *pauseContext) setFloor(percent, until string) error {
+	p, err := strconv.ParseFloat(percent, 64)
+	if err != nil {
+		return err
+	}
+	at, err := time.Parse(time.RFC3339, until)
+	if err != nil {
+		return err
+	}
+	c.out.Reset()
+	return application.UsageFloorSet{Floors: application.UsageFloors{Notes: c.tracker}, Now: c.clock, Out: &c.out}.Run(context.Background(), p, at)
+}
+
+func (c *pauseContext) usageShow() error {
+	c.out.Reset()
+	return application.UsageShow{
+		Readings: application.UsageReadings{Notes: c.tracker}, Floors: application.UsageFloors{Notes: c.tracker}, Now: c.clock, Out: &c.out,
+	}.Run(context.Background())
 }
 
 func (c *pauseContext) holdNote(host string) (until, reason string, held bool) {

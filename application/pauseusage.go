@@ -27,6 +27,8 @@ const (
 	UsageResumeMargin = 15 * time.Minute
 	// UsageReadingsKey is the note the readings are kept in.
 	UsageReadingsKey = "usage.readings"
+	// UsageFloorKey is the note the floor is kept in.
+	UsageFloorKey = "usage.floor"
 	// usageReadingsKept is how many readings the note keeps.
 	usageReadingsKept = 20
 	// usageFullThrottleDays is how many of the busiest recent days the full
@@ -48,11 +50,108 @@ func UsageReserve(left time.Duration) float64 {
 	return UsageReserveMax * float64(left-UsageReserveEnds) / float64(UsageWeek-UsageReserveEnds)
 }
 
-// UsageTripped reports whether a usage of percent has reached 100% less the
-// reserve, with resets as far off as it is from now, and the reserve it read.
-func UsageTripped(percent float64, resets, now time.Time) (tripped bool, reserve float64) {
+// UsageFloor is a floor under the reserve, in percent of the quota, kept until
+// a time (mw-gq6.832): while now is before Until, the reserve read is the
+// larger of R(t) and Percent; from Until on, R(t) alone. The zero value is no
+// floor.
+type UsageFloor struct {
+	Percent float64   `json:"percent"`
+	Until   time.Time `json:"until"`
+}
+
+// Active reports whether the floor holds at now.
+func (f UsageFloor) Active(now time.Time) bool {
+	return f.Percent > 0 && now.Before(f.Until)
+}
+
+// Reserve is the reserve in force at now: R(t) for the time left until resets,
+// or the floor when it is active and higher. The second value says the floor
+// is what set it.
+func (f UsageFloor) Reserve(resets, now time.Time) (reserve float64, byFloor bool) {
 	reserve = UsageReserve(resets.Sub(now))
+	if f.Active(now) && f.Percent > reserve {
+		return f.Percent, true
+	}
+	return reserve, false
+}
+
+// UsageTripped reports whether a usage of percent has reached 100% less the
+// reserve, with resets as far off as it is from now and floor under the
+// reserve, and the reserve it read.
+func UsageTripped(percent float64, resets, now time.Time, floor UsageFloor) (tripped bool, reserve float64) {
+	reserve, _ = floor.Reserve(resets, now)
 	return percent >= 100-reserve, reserve
+}
+
+// UsageFloors keeps the floor in a note of the tracker.
+type UsageFloors struct{ Notes SweepNotes }
+
+// Get is the floor kept; the zero floor when none is, or when no notes are
+// given.
+func (u UsageFloors) Get(ctx context.Context) (UsageFloor, error) {
+	if u.Notes == nil {
+		return UsageFloor{}, nil
+	}
+	text, err := u.Notes.Note(ctx, UsageFloorKey)
+	if err != nil || strings.TrimSpace(text) == "" {
+		return UsageFloor{}, err
+	}
+	var f UsageFloor
+	if err := json.Unmarshal([]byte(text), &f); err != nil {
+		return UsageFloor{}, fmt.Errorf("the note %s does not read: %w", UsageFloorKey, err)
+	}
+	return f, nil
+}
+
+// Set keeps floor in place of any earlier one.
+func (u UsageFloors) Set(ctx context.Context, floor UsageFloor) error {
+	text, err := json.Marshal(floor)
+	if err != nil {
+		return err
+	}
+	return u.Notes.SetNote(ctx, UsageFloorKey, string(text))
+}
+
+// Clear takes the floor away.
+func (u UsageFloors) Clear(ctx context.Context) error {
+	return u.Notes.ClearNote(ctx, UsageFloorKey)
+}
+
+// UsageFloorSet is mw usage floor <percent> --until <time>, and mw usage floor
+// off.
+type UsageFloorSet struct {
+	Floors UsageFloors
+	Now    func() time.Time
+	Out    io.Writer
+}
+
+// Run keeps a floor of percent until the given time.
+func (u UsageFloorSet) Run(ctx context.Context, percent float64, until time.Time) error {
+	if percent <= 0 || percent >= 100 {
+		return fmt.Errorf("a floor of %v%% is not between 0 and 100", percent)
+	}
+	now := time.Now()
+	if u.Now != nil {
+		now = u.Now()
+	}
+	if !until.After(now) {
+		return fmt.Errorf("the end of the floor, %s, is not in the future", until.UTC().Format(time.RFC3339))
+	}
+	floor := UsageFloor{Percent: percent, Until: until.UTC()}
+	if err := u.Floors.Set(ctx, floor); err != nil {
+		return err
+	}
+	fmt.Fprintf(u.Out, "floor %.1f%% kept until %s; after that the reserve is R(t) alone\n", floor.Percent, floor.Until.Format(time.RFC3339))
+	return nil
+}
+
+// Off clears the floor.
+func (u UsageFloorSet) Off(ctx context.Context) error {
+	if err := u.Floors.Clear(ctx); err != nil {
+		return err
+	}
+	fmt.Fprintln(u.Out, "floor cleared; the reserve is R(t) alone")
+	return nil
 }
 
 // UsageReading is one report of the quota used, and when the week resets.
@@ -111,6 +210,8 @@ func NextWeeklyReset(now time.Time, zone *time.Location) time.Time {
 // reading has reached 100% less the reserve, runs the pause.
 type UsageSet struct {
 	Readings UsageReadings
+	// Floors is the floor under the reserve; no Notes, no floor.
+	Floors UsageFloors
 	// Zone is where the weekly reset is read in when none is named.
 	Zone *time.Location
 	// Pause runs the pause with the reason given; nil only reports.
@@ -145,22 +246,34 @@ func (u UsageSet) Run(ctx context.Context, percent float64, resets time.Time) er
 		return err
 	}
 	fmt.Fprintf(u.Out, "usage %.1f%% kept at %s; the week resets %s\n", percent, now.Format(time.RFC3339), reading.Resets.Format(time.RFC3339))
-	return UsageCheck{Reading: reading, Pause: u.Pause, Out: u.Out}.Run(ctx, now)
+	floor, err := u.Floors.Get(ctx)
+	if err != nil {
+		return err
+	}
+	return UsageCheck{Reading: reading, Floor: floor, Pause: u.Pause, Out: u.Out}.Run(ctx, now)
 }
 
 // UsageCheck reads a reading against the reserve.
 type UsageCheck struct {
 	Reading UsageReading
-	Pause   func(ctx context.Context, reason string) error
-	Out     io.Writer
+	// Floor is the floor under the reserve; the zero value is none.
+	Floor UsageFloor
+	Pause func(ctx context.Context, reason string) error
+	Out   io.Writer
 }
 
 // Run says where the usage stands against 100% less the reserve and, when it
 // has reached it, pauses the factory.
 func (c UsageCheck) Run(ctx context.Context, now time.Time) error {
-	tripped, reserve := UsageTripped(c.Reading.Percent, c.Reading.Resets, now)
-	line := fmt.Sprintf("reserve R(t) %.2f%% with %s left: the pause trips at %.2f%%", reserve,
+	tripped, reserve := UsageTripped(c.Reading.Percent, c.Reading.Resets, now, c.Floor)
+	_, byFloor := c.Floor.Reserve(c.Reading.Resets, now)
+	line := fmt.Sprintf("reserve R(t) %.2f%% with %s left: the pause trips at %.2f%%", UsageReserve(c.Reading.Resets.Sub(now)),
 		c.Reading.Resets.Sub(now).Round(time.Minute), 100-reserve)
+	if byFloor {
+		line = fmt.Sprintf("reserve R(t) %.2f%% with %s left, held up by the floor %.2f%% until %s: the pause trips at %.2f%%",
+			UsageReserve(c.Reading.Resets.Sub(now)), c.Reading.Resets.Sub(now).Round(time.Minute), reserve,
+			c.Floor.Until.UTC().Format(time.RFC3339), 100-reserve)
+	}
 	if !tripped {
 		fmt.Fprintf(c.Out, "%s; usage %.1f%% is under it\n", line, c.Reading.Percent)
 		return nil
@@ -171,6 +284,48 @@ func (c UsageCheck) Run(ctx context.Context, now time.Time) error {
 	}
 	return c.Pause(ctx, fmt.Sprintf("usage %.1f%% reached 100%% less the reserve (%.2f%%, %s before the reset)",
 		c.Reading.Percent, reserve, c.Reading.Resets.Sub(now).Round(time.Minute)))
+}
+
+// UsageShow is mw usage show: the last reading and the floor, against the
+// reserve; it changes nothing.
+type UsageShow struct {
+	Readings UsageReadings
+	Floors   UsageFloors
+	Now      func() time.Time
+	Out      io.Writer
+}
+
+// Run prints the floor, the last reading and where it stands.
+func (u UsageShow) Run(ctx context.Context) error {
+	now := time.Now()
+	if u.Now != nil {
+		now = u.Now()
+	}
+	now = now.UTC()
+	floor, err := u.Floors.Get(ctx)
+	if err != nil {
+		return err
+	}
+	switch {
+	case floor.Active(now):
+		fmt.Fprintf(u.Out, "floor %.1f%% until %s\n", floor.Percent, floor.Until.UTC().Format(time.RFC3339))
+	case floor.Percent > 0:
+		fmt.Fprintf(u.Out, "no floor in force (floor %.1f%% ended %s)\n", floor.Percent, floor.Until.UTC().Format(time.RFC3339))
+	default:
+		fmt.Fprintln(u.Out, "no floor kept")
+	}
+	all, err := u.Readings.All(ctx)
+	if err != nil {
+		return err
+	}
+	if len(all) == 0 {
+		fmt.Fprintln(u.Out, "no usage was reported: mw usage set <percent>")
+		return nil
+	}
+	last := all[len(all)-1]
+	fmt.Fprintf(u.Out, "last reading: %.1f%% at %s; the week resets %s\n",
+		last.Percent, last.At.UTC().Format(time.RFC3339), last.Resets.UTC().Format(time.RFC3339))
+	return UsageCheck{Reading: last, Floor: floor, Out: u.Out}.Run(ctx, now)
 }
 
 // Burn is where the tokens the factory spent each day are read.

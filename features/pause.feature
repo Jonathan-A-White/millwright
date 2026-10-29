@@ -156,6 +156,39 @@ Feature: mw pause and mw resume
     Then the output says "is under it"
     And the hold note of "laptop" is clear
 
+  Scenario: A floor keeps the reserve up for the tutor until its time, then all out
+    Given the Governor set a usage floor of 3 percent until "2026-10-22T12:20:00Z"
+    When the Governor reports a usage of 98 percent with the week resetting at "2026-10-22T12:30:00Z"
+    Then the output says "has reached it"
+    And the output says "floor 3.00%"
+    And the hold note of "laptop" is until "2026-10-29T12:00:00Z" and says "usage-limit"
+
+  Scenario: After the floor's time the reserve is R(t) alone
+    Given the Governor set a usage floor of 3 percent until "2026-10-22T12:20:00Z"
+    And the clock moves on 30 minutes
+    When the Governor reports a usage of 98 percent with the week resetting at "2026-10-22T13:00:00Z"
+    Then the output says "is under it"
+    And the output does not say "floor"
+    And the hold note of "laptop" is clear
+
+  Scenario: Floor off clears the floor
+    Given the Governor set a usage floor of 3 percent until "2026-10-22T12:20:00Z"
+    And the Governor cleared the usage floor
+    When the Governor reports a usage of 98 percent with the week resetting at "2026-10-22T12:30:00Z"
+    Then the output says "is under it"
+    And the hold note of "laptop" is clear
+
+  Scenario: Usage show prints the floor and its end beside R(t)
+    Given the Governor set a usage floor of 3 percent until "2026-10-22T12:20:00Z"
+    And the Governor reported 91 percent at "2026-10-22T11:40:00Z" with the week resetting at "2026-10-22T12:30:00Z"
+    When the Governor runs mw usage show
+    Then the output says "floor 3.0% until 2026-10-22T12:20:00Z"
+    And the output says "reserve R(t) 0.00%"
+
+  Scenario: A floor that is not in the future is refused
+    When the Governor tries to set a usage floor of 3 percent until "2026-10-22T11:00:00Z"
+    Then mw refuses, saying "not in the future"
+
   Scenario: The resume time is the moment the quota left runs out 15 minutes before the reset
     Given the Governor reported 91 percent at "2026-10-21T12:00:00Z" with the week resetting at "2026-10-23T13:00:00Z"
     And the Governor reported 97 percent at "2026-10-22T11:40:00Z" with the week resetting at "2026-10-23T13:00:00Z"

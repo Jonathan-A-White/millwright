@@ -2014,7 +2014,10 @@ there), each asked over ssh to run `mw pause --here`. No cap is set to 0 and no 
 - `mw usage set <percent> [--resets <RFC3339>]` keeps the Governor's reading of the quota used (a
   PROVISIONAL source: his screenshot). The reserve R(t) is 10% of the quota with a week left and 0% with an
   hour left, a straight line between; when the reading has reached 100% less R(t), `mw pause` runs by
-  itself. `mw usage show` prints the last reading against the reserve.
+  itself. `mw usage show` prints the last reading against the reserve. `mw usage floor <percent> --until
+  <RFC3339>` keeps a floor under the reserve (so that a tutor's answers keep their tokens): while now is
+  before `--until` the reserve read is max(R(t), floor), after it R(t) alone; `mw usage floor off` clears it,
+  and `mw usage show` prints the floor and its end beside R(t).
 
 See `features/pause.feature`.
 
