@@ -86,3 +86,39 @@ func TestSeatHandoverWithNoSuccessorUpIsRefused(t *testing.T) {
 		t.Error("an acting file was written")
 	}
 }
+
+// A Mayor started because its predecessor is gone does not wait out the
+// handover wait: the window the acting file names is closed (mw-gq6.831).
+func TestHandoverWaitEndsEarlyWhenTheWindowTheActingFileNamesIsClosed(t *testing.T) {
+	const gone, mine = "mayor-2026-10-28-659", "mayor-2026-10-29-662"
+	socket := privateTmux(t, mine)
+	if out, err := exec.Command("tmux", "-L", socket, "new-window", "-d", "-n", "mayor-2026-10-28-660", "sleep 60").CombinedOutput(); err != nil {
+		t.Fatalf("opening the live window: %v: %s", err, out)
+	}
+	vaultDir := t.TempDir()
+	eventsHome(t)
+	mwConfig(t, "vault = \""+vaultDir+"\"\nhost = \"laptop\"\n")
+	acting := filepath.Join(vaultDir, ".mayor-acting")
+	wait := func(window string) string {
+		t.Helper()
+		out, err := runEvents(t, "wait", "--for", "mayor", "--kinds", "handover", "--as", window, "--limit", "1500ms")
+		if err != nil {
+			t.Fatalf("mw events wait: %v\n%s", err, out)
+		}
+		return out
+	}
+
+	if err := os.WriteFile(acting, []byte("Mayor "+gone+" (handed over at event 3), since 2026-10-28T21:00:00Z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := wait(mine); !strings.Contains(out, "no handover can come") || !strings.Contains(out, gone) || !strings.Contains(out, "mw seat take mayor") {
+		t.Errorf("a predecessor whose window is closed: printed %q", out)
+	}
+
+	if err := os.WriteFile(acting, []byte("Mayor mayor-2026-10-28-660 (handed over at event 3), since 2026-10-28T21:00:00Z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := wait(mine); strings.Contains(out, "no handover can come") || !strings.Contains(out, "No events") {
+		t.Errorf("a predecessor whose window is open: printed %q", out)
+	}
+}
