@@ -1969,6 +1969,25 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 	return found
 }
 
+// freshTarget brings the rig's view of the remote up to date again and names the
+// target commit it now has, as a note-ready "origin/main at abc1234". A close-out
+// fetches once on its way in, but the rig's tests in the worktree, the wait for
+// the merge slot and the wait for a calm host all take their time, and another
+// host may land on the target meanwhile: whatever merges the target, or counts
+// what it has that the branch lacks, fetches first (mw-gq6.848). A fetch that
+// failed is told, and what the rig had stands.
+func (n Next) freshTarget(ctx context.Context, c *closeOut, report *NextReport) string {
+	base := StartPoint(n.remote(), c.target)
+	if err := n.fetchRetrying(ctx, report, c.rigDir); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the rig could not be brought up to date with %s before the merge, so %s is as the rig last saw it: %v", n.remote(), base, err))
+	}
+	head, err := n.Landing.RefHead(ctx, c.rigDir, base)
+	if err != nil || head == "" {
+		return base
+	}
+	return base + " at " + shortSHA(head)
+}
+
 // commitsBehind is how many commits the target branch, as this rig last saw the
 // remote's, has that the story's branch was cut before; zero when it cannot be
 // told.
@@ -1990,6 +2009,7 @@ func (n Next) commitsBehind(ctx context.Context, c *closeOut, base string) int {
 // so batchRunOnTheMerge tests the merge in a landing worktree instead, as a
 // check does, which only reads.
 func (n Next) failureGoesOnToTheMerge(ctx context.Context, c *closeOut, report *NextReport, checked Checked, base string) bool {
+	n.freshTarget(ctx, c, report)
 	behind := n.commitsBehind(ctx, c, base)
 	if behind == 0 {
 		return false
@@ -2015,6 +2035,7 @@ func (n Next) failureGoesOnToTheMerge(ctx context.Context, c *closeOut, report *
 // A story that really breaks a test fails there too, so it never reaches a
 // batch untested on the merged code.
 func (n Next) batchRunOnTheMerge(ctx context.Context, c *closeOut, report *NextReport, failed Checked, base string) (merged gated, dir string, ok bool) {
+	target := n.freshTarget(ctx, c, report)
 	behind := n.commitsBehind(ctx, c, base)
 	if behind == 0 {
 		return gated{}, "", false
@@ -2037,7 +2058,7 @@ func (n Next) batchRunOnTheMerge(ctx context.Context, c *closeOut, report *NextR
 	if failing := FailingTestsShort(failed.Output); failing != "" {
 		note += ": " + failing
 	}
-	note += fmt.Sprintf("), but %s has %d commits this branch was cut before, so they are run once more with %s merged in", c.target, behind, c.target)
+	note += fmt.Sprintf("), but %s has %d commits this branch was cut before, so they are run once more with %s merged in", c.target, behind, target)
 	report.Notes = append(report.Notes, note)
 	n.print("  note    " + note + "\n")
 	return n.gate(ctx, c, report, dir, "the rig's tests with the target merged in", RelatedSpan{Base: base}), dir, true
@@ -2547,9 +2568,11 @@ func (n Next) ledgered(ctx context.Context, id string) (bool, error) {
 // remote itself, worth trying again, is retried in place by push, below,
 // without a fresh fetch or merge, since nothing upstream has changed; a push
 // the remote refuses for a stated reason is landing-failed at once, exactly as
-// before either kind of retry existed. A close-out holding its rig's slot
-// across hosts fetches on the first try too: the other host may have landed
-// while it waited for the slot. A try whose gate on the merged result would
+// before either kind of retry existed. The first try fetches too, whether or
+// not the close-out holds its rig's slot across hosts: the fetch on the way
+// in came before the rig's tests and the waits for the slots, and the other
+// host may have landed since (mw-gq6.848), so each try says the target commit
+// it merged into. A try whose gate on the merged result would
 // wait for this host gives that slot back while it waits, and is done again
 // from a fresh fetch without being counted (waitOffTheSlot).
 func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Landed, error) {
@@ -2590,14 +2613,16 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 		}
 	}
 	var firstLost, lost error
-	fetch := c.cross != nil
 	for try := 1; try <= n.tries(); {
-		if fetch {
-			if err := n.fetchRetrying(ctx, report, c.rigDir); err != nil {
-				return Landed{}, failedFor(ReasonGitFailed, fmt.Errorf("the rig could not be brought up to date with %s: %w", n.remote(), err))
-			}
+		// Every try fetches: the close-out's own fetch came before the rig's
+		// tests in the worktree and before the waits for the slots, and the
+		// target is merged as the remote has it now (mw-gq6.848).
+		if err := n.fetchRetrying(ctx, report, c.rigDir); err != nil {
+			return Landed{}, failedFor(ReasonGitFailed, fmt.Errorf("the rig could not be brought up to date with %s: %w", n.remote(), err))
 		}
-		fetch = true
+		if head, err := n.Landing.RefHead(ctx, c.rigDir, base); err == nil && head != "" {
+			report.Notes = append(report.Notes, fmt.Sprintf("merging into %s at %s", base, shortSHA(head)))
+		}
 		dir, err := n.Landing.OpenLanding(ctx, c.rigDir, base)
 		if err != nil {
 			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("a landing of %s at %s could not be opened: %w", c.path.Rig, base, err))
