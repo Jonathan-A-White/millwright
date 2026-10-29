@@ -99,6 +99,24 @@ func (f *FakeWindows) UsageLimit(_ context.Context, id string) (string, error) {
 	return shown, nil
 }
 
+// BackgroundAgents implements application.ReapTerminal: the background-agent
+// line on the screen Shows put on the pane, "" for a pane given none.
+func (f *FakeWindows) BackgroundAgents(_ context.Context, id string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", f.Err
+	}
+	if f.PaneErr != nil {
+		return "", f.PaneErr
+	}
+	if f.index(id) < 0 {
+		return "", fmt.Errorf("no window %s is open", id)
+	}
+	shown, _ := application.PaneBackgroundAgents(f.screens[id])
+	return shown, nil
+}
+
 // RunsIn says which window the process under test is running in.
 func (f *FakeWindows) RunsIn(id string) {
 	f.mu.Lock()

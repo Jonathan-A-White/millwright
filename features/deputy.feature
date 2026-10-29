@@ -165,6 +165,15 @@ Feature: mw deputy
     And exactly one window was opened
     And seat up says it started the seat in the window "deputy-2026-09-30-02"
 
+  Scenario: A Deputy that has handed off with a background agent still running is not closed
+    Given the window "deputy-2026-09-29-02" was opened at "2026-09-29T08:00:00Z"
+    And the "deputy" seat's newest handoff was written at "2026-09-30T11:50:00Z"
+    And the pane of the window "deputy-2026-09-29-02" shows a background agent running
+    And the Deputy's box holds 2 unread messages
+    When mw deputy is run
+    Then the window "deputy-2026-09-29-02" was not closed
+    And no window was opened
+
   Scenario: A Deputy that has handed off and still has a turn running is busy, and mw says a turn is running
     Given the window "deputy-2026-09-29-02" was opened at "2026-09-29T08:00:00Z"
     And the "deputy" seat's newest handoff was written at "2026-09-29T09:00:00Z"

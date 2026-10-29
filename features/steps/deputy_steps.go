@@ -26,6 +26,7 @@ func registerDeputySteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Given(`^the Deputy's box holds (\d+) unread messages$`, c.theDeputysBoxHolds)
 	ctx.Given(`^the pane of the window "([^"]*)" is busy$`, c.thePaneIsBusy)
 	ctx.Given(`^the pane of the window "([^"]*)" holds only unsent text$`, c.thePaneHoldsOnlyUnsentText)
+	ctx.Given(`^the pane of the window "([^"]*)" shows a background agent running$`, c.thePaneShowsABackgroundAgent)
 	ctx.Given(`^the pane of the window "([^"]*)" shows the usage limit "([^"]*)"$`, c.thePaneShowsTheUsageLimit)
 	ctx.Given(`^the window "([^"]*)" loses the first Enter key it is sent$`, c.theWindowLosesTheFirstEnter)
 	ctx.Given(`^the window "([^"]*)" loses every Enter key it is sent$`, c.theWindowLosesEveryEnter)
@@ -128,6 +129,19 @@ func (c *seatUpContext) thePaneIsBusy(window string) error {
 func usageLimitScreen(notice string) string {
 	const rule = "────────────────────────────────────────\n"
 	return "● Working the mail.\n\n  ⎿  " + notice + "\n\n" + rule + "❯\u00a0\n" + rule + "  ? for shortcuts\n"
+}
+
+// backgroundAgentScreen is a Claude Code screen at an empty input line whose
+// turn has ended with an agent still running (mw-gq6.833).
+const backgroundAgentScreen = "● Handed over.\n\n  ⎿  Waiting for 1 background agent to finish\n\n" +
+	"────────────────────────────────────────\n❯\u00a0\n────────────────────────────────────────\n  ? for shortcuts\n"
+
+func (c *seatUpContext) thePaneShowsABackgroundAgent(window string) error {
+	id, open := c.windows.IDOf(window)
+	if !open {
+		return fmt.Errorf("the window %s is not open", window)
+	}
+	return c.windows.Shows(id, backgroundAgentScreen)
 }
 
 func (c *seatUpContext) thePaneShowsTheUsageLimit(window, notice string) error {

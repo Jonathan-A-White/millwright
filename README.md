@@ -4597,6 +4597,17 @@ reaper logs `waiting: mw next <id> runs in this window` once, looks again every
 interval, and closes the window when the run has ended; after 90 minutes it logs
 `gave up waiting for mw next <id> after 1h30m0s; closing` and closes as always.
 
+A window whose pane shows a background agent still running is not closed
+either: the pane reads idle at an empty input line, but closing it kills the
+agent's work half done (mw-gq6.833). The reaper reads `Waiting for N background
+agent(s) to finish` or the agent count of the status line
+(`application.PaneBackgroundAgents`, in the foot of the screen only), logs
+`waiting: a background agent runs in this window (<the line>)` once, looks again
+every interval, and after 30 minutes logs `gave up waiting for the background
+agent after 30m0s; closing over it (<the line>)` and closes. The Deputy's start
+and the Millhand tick hold the same way, counting the 30 minutes from the
+session's handoff.
+
 It gives up after `--limit` (3 hours), closing nothing and saying so, and
 exits non-zero. Arming, closing, giving up, and finding the window already gone
 each append one dated line to `.<seat>-reaper.log` in the vault:

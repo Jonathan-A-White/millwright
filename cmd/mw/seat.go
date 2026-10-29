@@ -176,6 +176,9 @@ func newSeatReapCmd() *cobra.Command {
 			"row, in either mode. The Deputy's window, with --when-idle, is not closed over unread mail in the\n" +
 			"Deputy's box: the reaper types the mail nudge into the idle pane, logs it, and waits for a handoff\n" +
 			"written after it; a mail count that fails closes nothing.\n\n" +
+			"A pane that shows a background agent still running (\"Waiting for 1 background agent to finish\") is\n" +
+			"kept for up to 30 minutes, the reaper saying that it waits, and closed after that with the line it\n" +
+			"cut in the log.\n\n" +
 			"It looks every --interval (30s) and gives up after --limit (3h), closing nothing and saying so. Arming,\n" +
 			"closing and giving up each append one dated line to .<seat>-reaper.log in the vault. It works on\n" +
 			"tmux's default server unless $" + TmuxSocketEnv + " names another.\n\n" +
