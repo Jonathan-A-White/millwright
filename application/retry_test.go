@@ -911,3 +911,90 @@ func TestRetryFromMainRefusedLeavesTheNote(t *testing.T) {
 		t.Errorf("expected the note left as it was by a refusal, got %q", note)
 	}
 }
+
+// closesAfterFirstRead is a tracker whose story is closed once the retry has
+// read it, as the Mayor's bd close would between the retry's reading of the
+// story and its giving the claim back (mw-gq6.854).
+type closesAfterFirstRead struct {
+	*apptest.FakeTracker
+	shown int
+}
+
+func (c *closesAfterFirstRead) ShowStory(ctx context.Context, id string) (application.StoryDetail, error) {
+	detail, err := c.FakeTracker.ShowStory(ctx, id)
+	if c.shown++; c.shown == 1 && err == nil {
+		err = c.FakeTracker.CloseStory(ctx, id, "Superseded: split by the Mayor")
+	}
+	return detail, err
+}
+
+// TestRetryOfAStoryClosedWhileItRunsLeavesItClosedAndSaysSo pins mw-gq6.854:
+// the give-back sets a story open, so a story closed after the retry read it
+// was reopened, and its comment said the next dispatch tick takes it again.
+// Whichever way the retry reads the worktree, a closed story stays closed, with
+// no claim given back and a comment that says so.
+func TestRetryOfAStoryClosedWhileItRunsLeavesItClosedAndSaysSo(t *testing.T) {
+	cases := []struct {
+		name  string
+		hold  bool
+		where string // the host the story was worked on, "" for this one
+		land  *fakeRetryLanding
+	}{
+		{name: "no worktree", land: &fakeRetryLanding{NoWorktree: true}},
+		{name: "no worktree, held", hold: true, land: &fakeRetryLanding{NoWorktree: true}},
+		{name: "nothing ahead", land: &fakeRetryLanding{}},
+		{name: "another host", where: "desktop", land: &fakeRetryLanding{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := apptest.NewFakeTracker()
+			holder := ""
+			if tc.where != "" {
+				// The holder's own close, the only one bd lets through.
+				holder = "mw@" + tc.where
+				fake.ActAs(holder)
+				aClaimedRetryStory(t, fake, "mw-gq6.1", holder, "laptop")
+			} else {
+				aRetryStory(t, fake, "mw-gq6.1")
+			}
+			tracker := &closesAfterFirstRead{FakeTracker: fake}
+			var out strings.Builder
+			retry := aRetry(fake, tc.land, &apptest.FakeVaultFiles{}, &out)
+			retry.Tracker = tracker
+			retry.Hold = tc.hold
+			if tc.where != "" {
+				retry.Host = "laptop"
+				retry.Reach = aCleanRemote(tc.where)
+			}
+
+			report, err := retry.Run(context.Background(), "mw-gq6.1")
+			if err != nil {
+				t.Fatalf("expected the retry to succeed, got: %v\n%s", err, out.String())
+			}
+			if !report.Closed || report.ClaimReleased {
+				t.Errorf("expected Closed and no claim given back, got %+v", report)
+			}
+			detail, err := fake.ShowStory(context.Background(), "mw-gq6.1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !detail.Closed() {
+				t.Errorf("expected the story closed still, got %q", detail.Status)
+			}
+			comments := fake.Comments("mw-gq6.1")
+			if len(comments) != 1 {
+				t.Fatalf("expected one comment, got %q", comments)
+			}
+			for _, text := range []string{out.String(), comments[0]} {
+				if !strings.Contains(text, "stays closed") || !strings.Contains(text, "no dispatch tick takes it") {
+					t.Errorf("expected it to say the story stays closed and is not dispatched, got %q", text)
+				}
+				for _, wrong := range []string{"open again", "takes it as", "held, not open"} {
+					if strings.Contains(text, wrong) {
+						t.Errorf("expected no %q for a closed story, got %q", wrong, text)
+					}
+				}
+			}
+		})
+	}
+}

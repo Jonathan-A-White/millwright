@@ -42,6 +42,10 @@ type retryContext struct {
 	printed bytes.Buffer
 	stderr  bytes.Buffer
 
+	// closeWhileRetrying is a story the Mayor closes after the retry has read
+	// it and before it gives the claim back (mw-gq6.854).
+	closeWhileRetrying string
+
 	// reach says what each other host's worktree of a story holds (mw-gq6.774).
 	reach *apptest.FakeWorktreeRemote
 }
@@ -149,6 +153,25 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 		}
 		return fmt.Errorf("expected the retry's comment on %s to say %q, got %q", id, text, comments)
 	})
+	ctx.Then(`^the retry comment on "([^"]*)" does not say "([^"]*)"$`, func(id, text string) error {
+		for _, comment := range c.tracker.Comments(id) {
+			if strings.HasPrefix(comment, "mw retry on ") && strings.Contains(comment, text) {
+				return fmt.Errorf("the retry's comment on %s says %q: %q", id, text, comment)
+			}
+		}
+		return nil
+	})
+	ctx.Then(`^the printed retry report does not say "([^"]*)"$`, func(text string) error {
+		if strings.Contains(c.printed.String(), text) {
+			return fmt.Errorf("the printed report says %q:\n%s", text, c.printed.String())
+		}
+		return nil
+	})
+	ctx.Given(`^the story "([^"]*)" is closed while its retry runs$`, func(id string) error {
+		c.closeWhileRetrying = id
+		return nil
+	})
+	ctx.Then(`^the story "([^"]*)" is still closed$`, c.theStoryIsStillClosed)
 	ctx.Then(`^the retry succeeds$`, c.theRetrySucceeds)
 	ctx.Then(`^the retry refuses, saying: (.+)$`, c.theRetryRefusesSaying)
 	ctx.Then(`^the retry fails, saying: (.+)$`, c.theRetryFailsSaying)
@@ -523,7 +546,7 @@ func (c *retryContext) retries(id string, hold, force bool) error {
 		Tracker:   c.tracker,
 		Worktrees: worktrees,
 		Landing:   worktrees,
-		Runner:    c.runner,
+		Runner:    c.runnerFor(),
 		Files:     files,
 		Vault:     files,
 		Host:      retryHost,
@@ -537,6 +560,35 @@ func (c *retryContext) retries(id string, hold, force bool) error {
 		Err:       &c.stderr,
 	}.Run(context.Background(), id)
 	return nil
+}
+
+// runnerFor is the runner the retry asks about its session: the fake, or one
+// that closes the story as the retry asks, after the retry has read it.
+func (c *retryContext) runnerFor() application.Runner {
+	if c.closeWhileRetrying == "" {
+		return c.runner
+	}
+	return &closingRunner{FakeRunner: c.runner, tracker: c.tracker, id: c.closeWhileRetrying}
+}
+
+// closingRunner closes its story the first time the retry asks whether the
+// story's session still runs, as the Mayor's bd close would between the retry's
+// reading of the story and its giving the claim back.
+type closingRunner struct {
+	*apptest.FakeRunner
+	tracker *apptest.FakeTracker
+	id      string
+	closed  bool
+}
+
+func (r *closingRunner) Status(ctx context.Context, name string) (application.SessionStatus, error) {
+	if !r.closed {
+		r.closed = true
+		if err := r.tracker.CloseStory(ctx, r.id, "Superseded: split by the Mayor"); err != nil {
+			return application.SessionStatus{}, err
+		}
+	}
+	return r.FakeRunner.Status(ctx, name)
 }
 
 // clock is the time the scenario set for the retry, nil when it set none.
@@ -823,6 +875,18 @@ func (c *retryContext) theStoryIsOpenAndUnassigned(id string) error {
 	}
 	if detail.Assignee != "" {
 		return fmt.Errorf("expected %s to be unassigned, got %q", id, detail.Assignee)
+	}
+	return nil
+}
+
+// theStoryIsStillClosed checks the retry left a closed story closed.
+func (c *retryContext) theStoryIsStillClosed(id string) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if !detail.Closed() {
+		return fmt.Errorf("expected %s to be closed still, got %q", id, detail.Status)
 	}
 	return nil
 }

@@ -355,3 +355,24 @@ Feature: mw retry
     And the retry refuses, saying: not counted: attempt 1 (tooling), attempt 3 (process)
     And the worktree of "mw-gq6.1" was left untouched
     And the story "mw-gq6.1" still records 5 attempts
+
+  # mw-gq6.854: a story the Mayor closed (superseded) while its claim was held
+  # and its retry ran was given back open, and the retry told its thread the
+  # story was open again and would run as attempt 2. A closed story stays
+  # closed: the retry cleans up and says so.
+
+  Scenario: A story closed while its retry runs stays closed, and the retry says so
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the session of "mw-gq6.1" has ended
+    And the story "mw-gq6.1" is closed while its retry runs
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And the worktree and branch of "mw-gq6.1" are both gone
+    And the story "mw-gq6.1" is still closed
+    And the retry comment on "mw-gq6.1" says "the story stays closed"
+    And the retry comment on "mw-gq6.1" says "no dispatch tick takes it"
+    And the retry comment on "mw-gq6.1" does not say "open again"
+    And the retry comment on "mw-gq6.1" does not say "attempt 2"
+    And the printed retry report says "closed"
+    And the printed retry report does not say "open    the claim was given back"
+    And the printed retry report does not say "takes it as"

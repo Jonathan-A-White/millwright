@@ -1629,7 +1629,9 @@ func (f *FakeTracker) release(_ context.Context, id, holder, noted string) error
 		}
 		if noted == "HoldClaimHeldBy" {
 			s.detail.Status = StatusDeferred
-		} else if s.detail.Status == StatusInProgress {
+		} else {
+			// bd update --status open sets a story open whatever it was, a
+			// closed one too (mw-gq6.854).
 			s.detail.Status = StatusOpen
 		}
 		s.detail.Assignee = ""
