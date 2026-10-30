@@ -143,6 +143,7 @@ func InitializePauseScenario(ctx *godog.ScenarioContext) {
 		return nil
 	})
 	ctx.When(`^the Governor runs mw usage show$`, c.usageShow)
+	ctx.When(`^the Governor runs mw status$`, c.statusShown)
 	ctx.Then(`^with ([0-9.]+) hours left the reserve is ([0-9.]+) percent$`, c.reserveIs)
 }
 
@@ -392,6 +393,21 @@ func (c *pauseContext) usageShow() error {
 	return application.UsageShow{
 		Readings: application.UsageReadings{Notes: c.tracker}, Floors: application.UsageFloors{Notes: c.tracker}, Now: c.clock, Out: &c.out,
 	}.Run(context.Background())
+}
+
+// statusShown is mw status over the scenario's tracker, whose report is read
+// for its USAGE lines.
+func (c *pauseContext) statusShown() error {
+	c.out.Reset()
+	report, err := application.Status{
+		Tracker: c.tracker, Notes: c.tracker, Host: c.home, Seat: "builder", Now: c.clock,
+		Usage: &application.UsageReadings{Notes: c.tracker},
+	}.Run(context.Background())
+	if err != nil {
+		return err
+	}
+	c.out.WriteString(report.String())
+	return nil
 }
 
 func (c *pauseContext) holdNote(host string) (until, reason string, held bool) {
