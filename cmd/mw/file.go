@@ -58,8 +58,8 @@ func newFileCmd() *cobra.Command {
 			"written, unless the owner asked: --guest-ask \"<their words>\", which are written on the\n" +
 			"epic. mw status and mw brief show 'guest: <owner>' beside such a rig's stories.\n\n" +
 			"A story that names files and a size is told 'test callers: N for size S (allows M)': N is the\n" +
-			"rig's test files (features/, tests/, *_test.go) that name any of its files by base name\n" +
-			"without extension, counted in the checkout on this host. XS allows 5, S 10, M 20, L 35, XL 50.\n" +
+			"rig's test files (features/, tests/, *_test.go) that call something its files declare (a Go\n" +
+			"file's exported names, a TS file's exports or import path), counted in the checkout on this host. XS allows 5, S 10, M 20, L 35, XL 50.\n" +
 			"Over that, 'WARN: N test callers for size S; split ... or size up' goes to stderr, and --check\n" +
 			"fails, unless the story says why not as \"callers_ok\": \"<why>\", which is also written to the filed\n" +
 			"story's metadata, so that mw path set on it is quiet too.\n\n" +
