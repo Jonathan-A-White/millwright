@@ -196,3 +196,23 @@ func TestConfigReadsAndSetsMaxBoxesWithTheWayBack(t *testing.T) {
 		t.Fatalf("setting what it already holds is no fault: %v", err)
 	}
 }
+
+func TestRetryAddsForceOnlyWhenAsked(t *testing.T) {
+	var got [][]string
+	r := Retry{Mw: "/bin/mw", Run: func(_ context.Context, argv []string) (string, error) {
+		got = append(got, argv)
+		return "", nil
+	}}
+	if _, err := r.Retry(context.Background(), "mw-a.1", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Retry(context.Background(), "mw-b.2", true); err != nil {
+		t.Fatal(err)
+	}
+	if want := "/bin/mw retry mw-a.1"; strings.Join(got[0], " ") != want {
+		t.Fatalf("got %v, want %s", got[0], want)
+	}
+	if want := "/bin/mw retry mw-b.2 --force"; strings.Join(got[1], " ") != want {
+		t.Fatalf("got %v, want %s", got[1], want)
+	}
+}

@@ -568,9 +568,11 @@ type PauseTimer interface {
 	Cancel(ctx context.Context, unit string) error
 }
 
-// PauseRetry is `mw retry` for one story.
+// PauseRetry is `mw retry` for one story. Force is mw retry --force: Resume
+// asks it only for a story the paused set records as pushed, whose box is down
+// and so cannot be asked what its worktree holds.
 type PauseRetry interface {
-	Retry(ctx context.Context, story string) (string, error)
+	Retry(ctx context.Context, story string, force bool) (string, error)
 }
 
 // PauseRequest is what mw pause was asked.
@@ -865,19 +867,28 @@ func (r Resume) Run(ctx context.Context, dryRun bool) error {
 	if len(set.NightPasses) > 0 {
 		notes = append(notes, "night passes back on: "+strings.Join(set.NightPasses, ", "))
 	}
-	var retry []string
+	var retry []PausedStory
 	for _, ps := range set.Stories {
 		if gone[ps.Story] {
-			retry = append(retry, ps.Story)
+			retry = append(retry, ps)
 		}
 	}
-	for _, id := range retry {
-		said, err := r.Retry.Retry(ctx, id)
+	for _, ps := range retry {
+		// A downed box cannot be asked what its worktree holds, but the pause
+		// pushed the branch before the box went down (bringDown waits for it),
+		// so the claim is given back without --force; a story the set does not
+		// record as pushed still needs it (mw-gq6.850).
+		pushedAtDownBox := ps.Pushed && contains(set.Boxes, ps.Host)
+		said, err := r.Retry.Retry(ctx, ps.Story, pushedAtDownBox)
 		if err != nil {
-			notes = append(notes, fmt.Sprintf("mw retry %s: %v", id, err))
+			notes = append(notes, fmt.Sprintf("mw retry %s: %v", ps.Story, err))
 			continue
 		}
-		notes = append(notes, "mw retry "+id+": "+pauseOneLine(said))
+		line := "mw retry " + ps.Story + ": " + pauseOneLine(said)
+		if pushedAtDownBox {
+			line += " (branch pushed at the pause, claim given back)"
+		}
+		notes = append(notes, line)
 	}
 	if set.Timer != "" && r.Timer != nil {
 		if err := r.Timer.Cancel(ctx, set.Timer); err != nil {

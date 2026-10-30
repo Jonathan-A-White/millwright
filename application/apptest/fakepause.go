@@ -333,17 +333,23 @@ func (t *FakePauseTimer) Cancel(_ context.Context, unit string) error {
 }
 
 // FakePauseRetry is an application.PauseRetry that remembers what it retried.
+// A story named in Unaskable is on a host that cannot be asked what its
+// worktree holds, so, as mw retry does, it is refused unless forced.
 type FakePauseRetry struct {
-	mu      sync.Mutex
-	Retried []string
+	mu        sync.Mutex
+	Retried   []string
+	Unaskable map[string]bool
 }
 
 var _ application.PauseRetry = (*FakePauseRetry)(nil)
 
 // Retry implements application.PauseRetry.
-func (r *FakePauseRetry) Retry(_ context.Context, story string) (string, error) {
+func (r *FakePauseRetry) Retry(_ context.Context, story string, force bool) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.Unaskable[story] && !force {
+		return "", fmt.Errorf("retrying %s: its host could not be asked whether its worktree there holds uncommitted work: add --force to give the claim back without knowing", story)
+	}
 	r.Retried = append(r.Retried, story)
 	return story + " is open again", nil
 }
