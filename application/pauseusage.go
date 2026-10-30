@@ -436,7 +436,8 @@ type ResumePlanner struct {
 }
 
 // Plan reads the newest reading and the burn. It fails, saying what is
-// missing, when it cannot measure the rate; the caller then has no time.
+// missing, when it cannot measure the rate or when the newest reading is stale
+// (UsageReading.Stale); the caller then has no time.
 func (p ResumePlanner) Plan(ctx context.Context) (ResumePlan, error) {
 	now := time.Now()
 	if p.Now != nil {
@@ -453,6 +454,9 @@ func (p ResumePlanner) Plan(ctx context.Context) (ResumePlan, error) {
 	last := all[len(all)-1]
 	if !last.Resets.After(now) {
 		return ResumePlan{}, fmt.Errorf("the reset of the last reading, %s, has passed: report the usage again", last.Resets.Format(time.RFC3339))
+	}
+	if why := last.Stale(now); why != "" {
+		return ResumePlan{}, fmt.Errorf("%s: mw usage read", why)
 	}
 	rate, how, err := p.rate(ctx, all)
 	if err != nil {

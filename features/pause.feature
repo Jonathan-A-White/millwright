@@ -253,6 +253,14 @@ Feature: mw pause and mw resume
     Then the output says "the pause is open-ended"
     And no resume timer is scheduled
 
+  Scenario: A same-week reading that is hours old gives no resume time and the reason is said
+    Given the Governor reported 95 percent at "2026-10-22T09:00:00Z" with the week resetting at "2026-10-23T13:00:00Z"
+    And the burn at full throttle is given as 0.5 percent an hour
+    When the Governor runs mw pause with the reason "so we're at 100% usage"
+    Then the output says "the newest reading is 3h old: mw usage read"
+    And the output says "the pause is open-ended"
+    And no resume timer is scheduled
+
   Scenario: A computed resume time that is already now pauses nothing
     Given the Governor reported 99 percent at "2026-10-22T11:40:00Z" with the week resetting at "2026-10-22T14:00:00Z"
     And the burn at full throttle is given as 0.1 percent an hour

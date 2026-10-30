@@ -184,3 +184,53 @@ func TestAReadingWhoseResetHasPassedIsStaleHoweverYoung(t *testing.T) {
 		t.Errorf("a reading taken before a reset that has passed: %q", why)
 	}
 }
+
+func planFrom(t *testing.T, reading application.UsageReading, now time.Time) (application.ResumePlan, error) {
+	t.Helper()
+	notes := apptest.NewFakeTracker()
+	if err := (application.UsageReadings{Notes: notes}).Add(context.Background(), reading); err != nil {
+		t.Fatal(err)
+	}
+	return application.ResumePlanner{
+		Readings: application.UsageReadings{Notes: notes}, Rate: 0.5, Now: func() time.Time { return now },
+	}.Plan(context.Background())
+}
+
+// His report (mw-gq6.855): a same-week 95% reading hours old, while the week
+// stood at 100%, gave a resume time too early.
+func TestThePlanRefusesAReadingPastSeventyMinutesAndPlansOneWithin(t *testing.T) {
+	taken := time.Date(2026, 10, 29, 11, 34, 0, 0, time.UTC)
+	reading := application.UsageReading{Percent: 95, At: taken, Resets: taken.Add(30 * time.Hour)}
+
+	_, err := planFrom(t, reading, taken.Add(71*time.Minute))
+	if err == nil {
+		t.Fatal("a reading 71 minutes old was planned from")
+	}
+	if want := "the newest reading is 1h11m old: mw usage read"; !strings.Contains(err.Error(), want) {
+		t.Errorf("the refusal is %q, want it to say %q", err, want)
+	}
+
+	plan, err := planFrom(t, reading, taken.Add(69*time.Minute))
+	if err != nil {
+		t.Fatalf("a reading 69 minutes old was refused: %v", err)
+	}
+	if plan.At.IsZero() {
+		t.Error("a fresh reading gave no resume time")
+	}
+}
+
+func TestThePlanPlansAReadingExactlySeventyMinutesOld(t *testing.T) {
+	taken := time.Date(2026, 10, 29, 11, 34, 0, 0, time.UTC)
+	reading := application.UsageReading{Percent: 95, At: taken, Resets: taken.Add(30 * time.Hour)}
+	if _, err := planFrom(t, reading, taken.Add(70*time.Minute)); err != nil {
+		t.Errorf("a reading exactly 70 minutes old was refused: %v", err)
+	}
+}
+
+func TestThePlanStillRefusesAReadingWhoseResetHasPassed(t *testing.T) {
+	taken := time.Date(2026, 10, 29, 11, 34, 0, 0, time.UTC)
+	reading := application.UsageReading{Percent: 95, At: taken, Resets: taken.Add(10 * time.Minute)}
+	if _, err := planFrom(t, reading, taken.Add(20*time.Minute)); err == nil {
+		t.Error("a reading whose reset has passed was planned from")
+	}
+}
