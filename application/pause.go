@@ -451,13 +451,40 @@ type PausedSet struct {
 	Hosts []PausedSetHost `json:"hosts"`
 	// NightPasses are the follower's night jobs the pause turned off (the sleep
 	// pass, the To do rank); the resume turns them back on.
-	NightPasses []string      `json:"night_passes,omitempty"`
-	Unreached   []string      `json:"unreached,omitempty"`
-	Boxes       []string      `json:"boxes_down,omitempty"`
-	Stories     []PausedStory `json:"stories"`
-	Bead        string        `json:"bead,omitempty"`
-	Notes       []string      `json:"notes,omitempty"`
-	ResumedAt   time.Time     `json:"resumed_at,omitzero"`
+	NightPasses []string `json:"night_passes,omitempty"`
+	Unreached   []string `json:"unreached,omitempty"`
+	// NoMw are the hosts that run no mw (the VPS), which the pause did not ask.
+	NoMw      []string      `json:"no_mw,omitempty"`
+	Boxes     []string      `json:"boxes_down,omitempty"`
+	Stories   []PausedStory `json:"stories"`
+	Bead      string        `json:"bead,omitempty"`
+	Notes     []string      `json:"notes,omitempty"`
+	ResumedAt time.Time     `json:"resumed_at,omitzero"`
+}
+
+// NoMwHost is the VPS: a checkout only, it runs no mw and no bd, so a pause
+// and a resume have nothing to ask it (mw-gq6.851).
+const NoMwHost = "vps"
+
+// RunsNoMw says host is one that runs no mw, which mw pause and mw resume do
+// not ask.
+func RunsNoMw(host string) bool { return strings.EqualFold(host, NoMwHost) }
+
+// unreached are the hosts the pause failed to reach, the ones that run no mw
+// left out: a set an earlier mw pause wrote counted the VPS among them.
+func (s PausedSet) unreached() []string {
+	return slices.DeleteFunc(slices.Clone(s.Unreached), RunsNoMw)
+}
+
+// noMw are the hosts of the set that run no mw, as the set records them.
+func (s PausedSet) noMw() []string {
+	var hosts []string
+	for _, h := range append(slices.Clone(s.NoMw), s.Unreached...) {
+		if RunsNoMw(h) && !contains(hosts, h) {
+			hosts = append(hosts, h)
+		}
+	}
+	return hosts
 }
 
 // PausedSetHost is one host of the paused set.
@@ -493,7 +520,10 @@ func (s PausedSet) String() string {
 	for _, box := range s.Boxes {
 		fmt.Fprintf(&b, "box %s brought down\n", box)
 	}
-	for _, host := range s.Unreached {
+	for _, host := range s.noMw() {
+		fmt.Fprintf(&b, "%s: no mw, skipped\n", host)
+	}
+	for _, host := range s.unreached() {
 		fmt.Fprintf(&b, "NOT REACHED: %s\n", host)
 	}
 	if len(s.Stories) == 0 {
@@ -627,7 +657,7 @@ func (p Pause) Run(ctx context.Context, req PauseRequest) (PausedSet, error) {
 		if err != nil {
 			return PausedSet{}, fmt.Errorf("the pause in force (%s) could not be read: %w", dir, err)
 		}
-		if len(set.Unreached) == 0 {
+		if len(set.unreached()) == 0 {
 			fmt.Fprintf(p.Out, "already paused since %s: nothing changed\n%s", set.PausedAt.UTC().Format(time.RFC3339), set)
 			return set, nil
 		}
@@ -671,12 +701,21 @@ func (p Pause) Run(ctx context.Context, req PauseRequest) (PausedSet, error) {
 			hosts = append(hosts, b)
 		}
 	}
+	// The VPS runs no mw: it is named, not asked.
+	var noMw []string
+	hosts = slices.DeleteFunc(hosts, func(host string) bool {
+		if RunsNoMw(host) {
+			noMw = append(noMw, host)
+			return true
+		}
+		return false
+	})
 	if req.DryRun {
 		fmt.Fprintf(p.Out, "dry run: would pause %s until %s, nothing was changed\n", strings.Join(hosts, ", "), until.UTC().Format(time.RFC3339))
 		return PausedSet{}, nil
 	}
 	if paused {
-		hosts = set.Unreached
+		hosts = set.unreached()
 	} else {
 		set = PausedSet{Date: now.Format("2006-01-02"), Reason: req.Reason, PausedAt: now, Until: until, Bead: req.Bead,
 			NightPasses: slices.Clone(PauseNightPasses)}
@@ -687,7 +726,7 @@ func (p Pause) Run(ctx context.Context, req PauseRequest) (PausedSet, error) {
 		set.MaxBoxes, set.MaxBoxesSet = value, isSet
 		dir = PauseDir(now)
 	}
-	set.Unreached = nil
+	set.Unreached, set.NoMw = nil, noMw
 
 	wait := req.Wait
 	results := make([]HostPaused, len(hosts))
@@ -854,7 +893,10 @@ func (r Resume) Run(ctx context.Context, dryRun bool) error {
 			gone[id] = true
 		}
 	}
-	for _, host := range set.Unreached {
+	for _, host := range set.noMw() {
+		notes = append(notes, host+": no mw, skipped")
+	}
+	for _, host := range set.unreached() {
 		notes = append(notes, fmt.Sprintf("%s was not reached by the pause, so it was not reached now", host))
 	}
 	if set.MaxBoxesSet && r.Config != nil {
