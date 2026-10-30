@@ -185,6 +185,39 @@ Feature: mw pause and mw resume
     Then the output says "floor 3.0% until 2026-10-22T12:20:00Z"
     And the output says "reserve R(t) 0.00%"
 
+  Scenario: Usage show says STALE when the newest reading is old
+    Given the Governor reported 95 percent at "2026-10-22T09:00:00Z" with the week resetting at "2026-10-23T13:00:00Z"
+    When the Governor runs mw usage show
+    Then the output says "STALE: the newest reading is 3h old"
+
+  Scenario: Usage show says nothing of staleness when the newest reading is fresh
+    Given the Governor reported 95 percent at "2026-10-22T11:40:00Z" with the week resetting at "2026-10-23T13:00:00Z"
+    When the Governor runs mw usage show
+    Then the output does not say "STALE"
+
+  Scenario: A reading taken before a reset that has passed is stale and never trips
+    Given the Governor reported 100 percent at "2026-10-22T11:00:00Z" with the week resetting at "2026-10-22T11:30:00Z"
+    When the Governor runs mw usage show
+    Then the output says "STALE: taken before the week reset at 2026-10-22T11:30:00Z"
+    And the output does not say "has reached it"
+
+  Scenario: Status shows the STALE line beside the usage when the newest reading is old
+    Given the Governor reported 95 percent at "2026-10-22T09:00:00Z" with the week resetting at "2026-10-23T13:00:00Z"
+    When the Governor runs mw status
+    Then the output says "USAGE 95.0%"
+    And the output says "STALE: the newest reading is 3h old"
+
+  Scenario: Status shows no STALE line when the newest reading is fresh
+    Given the Governor reported 95 percent at "2026-10-22T11:40:00Z" with the week resetting at "2026-10-23T13:00:00Z"
+    When the Governor runs mw status
+    Then the output says "USAGE 95.0%"
+    And the output does not say "STALE"
+
+  Scenario: Status says STALE for a reading taken before a reset that has passed
+    Given the Governor reported 100 percent at "2026-10-22T11:00:00Z" with the week resetting at "2026-10-22T11:30:00Z"
+    When the Governor runs mw status
+    Then the output says "STALE: taken before the week reset at 2026-10-22T11:30:00Z"
+
   Scenario: A floor that is not in the future is refused
     When the Governor tries to set a usage floor of 3 percent until "2026-10-22T11:00:00Z"
     Then mw refuses, saying "not in the future"

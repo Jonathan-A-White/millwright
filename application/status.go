@@ -357,6 +357,11 @@ type Status struct {
 	// Network, when set, is asked for the NETWORK line: metered or not.
 	Network NetworkReader
 
+	// Usage, when set, is where the newest quota reading is read for the USAGE
+	// line, with STALE beside it when it is old or from before the week's reset
+	// (mw-gq6.855). Nil leaves the line out.
+	Usage *UsageReadings
+
 	// HeavyNet names the rigs that install dependencies ([heavy_net]): while the
 	// network is metered, a ready story pinned to this host on one of them is
 	// named under DAMPERS, since dispatch passes it (mw-gq6.702).
@@ -725,6 +730,9 @@ type StatusReport struct {
 	HarnessKnown bool
 	// Network is whether the network is metered; nil when not asked.
 	Network *NetworkReading
+	// UsageLines are the USAGE line, and the STALE line under it when the
+	// newest reading is stale; empty when not asked.
+	UsageLines []string
 	// VPSNginx is what the VPS's nginx upstream was found to be; nil when
 	// not asked.
 	VPSNginx *VPSNginxReading
@@ -1113,6 +1121,9 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	if s.Network != nil {
 		reading := s.Network.Read(ctx)
 		report.Network = &reading
+	}
+	if s.Usage != nil {
+		report.UsageLines = s.usageLines(ctx)
 	}
 	if s.Cloud != nil {
 		if reading, err := ReadCloud(ctx, s.Cloud, s.CloudPlan, s.now()); err == nil {
@@ -1818,6 +1829,25 @@ func (s Status) hostSilence() time.Duration {
 // fuelToday sums the tokens of the seat's ledger lines dated today. A seat
 // with no ledger yet, or a report with no vault to read one from, sums to
 // zero rather than failing: there is nothing to add up.
+// usageLines are the USAGE line: the newest quota reading and when the week
+// resets, and under it STALE with the reason when the reading is stale. A
+// readings note that cannot be read is said on the line, not left out.
+func (s Status) usageLines(ctx context.Context) []string {
+	all, err := s.Usage.All(ctx)
+	switch {
+	case err != nil:
+		return []string{"USAGE unreadable: " + err.Error()}
+	case len(all) == 0:
+		return []string{"USAGE no reading yet: mw usage read"}
+	}
+	last := all[len(all)-1]
+	lines := []string{fmt.Sprintf("USAGE %.1f%% read %s · resets %s", last.Percent, last.At.UTC().Format("01-02 15:04Z"), last.Resets.UTC().Format("01-02 15:04Z"))}
+	if why := last.Stale(s.now()); why != "" {
+		lines = append(lines, "  STALE: "+why)
+	}
+	return lines
+}
+
 func (s Status) fuelToday(ctx context.Context) (int, error) {
 	if s.Vault == nil {
 		return 0, nil
@@ -2325,6 +2355,13 @@ func (r StatusReport) String() string {
 
 	if r.Network != nil {
 		clip(&b, r.Network.Line())
+		b.WriteString("\n")
+	}
+
+	if len(r.UsageLines) > 0 {
+		for _, line := range r.UsageLines {
+			clip(&b, line)
+		}
 		b.WriteString("\n")
 	}
 

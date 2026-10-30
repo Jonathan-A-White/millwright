@@ -29,6 +29,10 @@ const (
 	UsageReadingsKey = "usage.readings"
 	// UsageFloorKey is the note the floor is kept in.
 	UsageFloorKey = "usage.floor"
+	// UsageStaleAfter is how old the newest reading may be before it is called
+	// stale: two missed :04/:34 runs of the mw usage read timer, and a margin
+	// (mw-gq6.855).
+	UsageStaleAfter = 70 * time.Minute
 	// usageReadingsKept is how many readings the note keeps.
 	usageReadingsKept = 20
 	// usageFullThrottleDays is how many of the busiest recent days the full
@@ -77,8 +81,13 @@ func (f UsageFloor) Reserve(resets, now time.Time) (reserve float64, byFloor boo
 
 // UsageTripped reports whether a usage of percent has reached 100% less the
 // reserve, with resets as far off as it is from now and floor under the
-// reserve, and the reserve it read.
+// reserve, and the reserve it read. A reset that has passed leaves the percent
+// belonging to a finished week: it never trips (mw-gq6.855).
 func UsageTripped(percent float64, resets, now time.Time, floor UsageFloor) (tripped bool, reserve float64) {
+	if !resets.After(now) {
+		// The week the percent was read in is over, and so is what it says.
+		return false, 0
+	}
 	reserve, _ = floor.Reserve(resets, now)
 	return percent >= 100-reserve, reserve
 }
@@ -163,6 +172,36 @@ type UsageReading struct {
 	// the reading for the Mayor's choice of model (mw-gq6.834); nil when the
 	// reading did not give one.
 	Fable *float64 `json:"fable,omitempty"`
+}
+
+// Stale says why the reading is no longer the current usage at now, and is
+// empty when it is current (mw-gq6.855). A reading is stale when the week it
+// was taken in has reset since (what it says belongs to the week before), or
+// when it is older than UsageStaleAfter.
+func (r UsageReading) Stale(now time.Time) string {
+	if r.BeforeReset(now) {
+		return "taken before the week reset at " + r.Resets.UTC().Format(time.RFC3339)
+	}
+	if age := now.Sub(r.At); age > UsageStaleAfter {
+		return "the newest reading is " + usageAge(age) + " old"
+	}
+	return ""
+}
+
+// usageAge is d in whole minutes as a person says it: 11h2m, 3h, 5m.
+func usageAge(d time.Duration) string {
+	text := d.Round(time.Minute).String()
+	text = strings.TrimSuffix(text, "m0s") + "m"
+	if strings.HasSuffix(text, "h0m") {
+		return strings.TrimSuffix(text, "0m")
+	}
+	return text
+}
+
+// BeforeReset is whether the reading was taken before a reset that has since
+// passed: it says nothing of the week now running.
+func (r UsageReading) BeforeReset(now time.Time) bool {
+	return !r.Resets.After(now)
 }
 
 // UsageReadings keeps the readings in a note of the tracker.
@@ -279,6 +318,10 @@ type UsageCheck struct {
 // Run says where the usage stands against 100% less the reserve and, when it
 // has reached it, pauses the factory.
 func (c UsageCheck) Run(ctx context.Context, now time.Time) error {
+	if c.Reading.BeforeReset(now) {
+		fmt.Fprintf(c.Out, "usage %.1f%% was read before the week reset at %s and is not counted\n", c.Reading.Percent, c.Reading.Resets.UTC().Format(time.RFC3339))
+		return nil
+	}
 	tripped, reserve := UsageTripped(c.Reading.Percent, c.Reading.Resets, now, c.Floor)
 	_, byFloor := c.Floor.Reserve(c.Reading.Resets, now)
 	line := fmt.Sprintf("reserve R(t) %.2f%% with %s left: the pause trips at %.2f%%", UsageReserve(c.Reading.Resets.Sub(now)),
@@ -339,6 +382,9 @@ func (u UsageShow) Run(ctx context.Context) error {
 	last := all[len(all)-1]
 	fmt.Fprintf(u.Out, "last reading: %.1f%% at %s; the week resets %s%s\n",
 		last.Percent, last.At.UTC().Format(time.RFC3339), last.Resets.UTC().Format(time.RFC3339), fableNote(last))
+	if why := last.Stale(now); why != "" {
+		fmt.Fprintf(u.Out, "STALE: %s\n", why)
+	}
 	return UsageCheck{Reading: last, Floor: floor, Out: u.Out}.Run(ctx, now)
 }
 

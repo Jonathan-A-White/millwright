@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,5 +112,75 @@ func TestTheFloorIsKeptAndClearedInANote(t *testing.T) {
 	}
 	if got, _ := floors.Get(context.Background()); got != (application.UsageFloor{}) {
 		t.Errorf("a floor after off: %+v", got)
+	}
+}
+
+// usageShown is mw usage show over one reading, at now.
+func usageShown(t *testing.T, reading application.UsageReading, now time.Time) string {
+	t.Helper()
+	notes := apptest.NewFakeTracker()
+	if err := (application.UsageReadings{Notes: notes}).Add(context.Background(), reading); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	err := application.UsageShow{
+		Readings: application.UsageReadings{Notes: notes}, Floors: application.UsageFloors{Notes: notes},
+		Now: func() time.Time { return now }, Out: &out,
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
+}
+
+// His report (2026-10-30): a 100% reading taken before the week's reset still
+// said "has reached it" a day on.
+func TestAReadingTakenBeforeAResetThatHasPassedIsNotTheCurrentUsage(t *testing.T) {
+	taken := time.Date(2026, 10, 29, 22, 45, 0, 0, time.UTC)
+	reading := application.UsageReading{Percent: 100, At: taken, Resets: taken.Add(time.Hour)}
+	if tripped, _ := application.UsageTripped(100, reading.Resets, taken.Add(2*time.Hour), application.UsageFloor{}); tripped {
+		t.Error("a 100% reading whose week reset an hour ago still trips")
+	}
+	shown := usageShown(t, reading, taken.Add(2*time.Hour))
+	if strings.Contains(shown, "has reached it") {
+		t.Errorf("mw usage show says a pre-reset 100%% has reached the reserve:\n%s", shown)
+	}
+	if !strings.Contains(shown, "STALE: taken before the week reset at 2026-10-29T23:45:00Z") {
+		t.Errorf("mw usage show does not say the reading is stale:\n%s", shown)
+	}
+}
+
+// His report: the newest reading was 95% at 11:34Z and stood 11 h.
+func TestUsageShowSaysSTALEForAnOldReadingAndNothingForAFreshOne(t *testing.T) {
+	taken := time.Date(2026, 10, 29, 11, 34, 0, 0, time.UTC)
+	reading := application.UsageReading{Percent: 95, At: taken, Resets: taken.Add(30 * time.Hour)}
+	shown := usageShown(t, reading, taken.Add(11*time.Hour+2*time.Minute))
+	if !strings.Contains(shown, "STALE: the newest reading is 11h2m old") {
+		t.Errorf("an 11 hour old reading is not called stale:\n%s", shown)
+	}
+	if fresh := usageShown(t, reading, taken.Add(10*time.Minute)); strings.Contains(fresh, "STALE") {
+		t.Errorf("a reading 10 minutes old is called stale:\n%s", fresh)
+	}
+}
+
+func TestAReadingIsStaleOnlyPastSeventyMinutes(t *testing.T) {
+	taken := time.Date(2026, 10, 29, 11, 34, 0, 0, time.UTC)
+	reading := application.UsageReading{Percent: 50, At: taken, Resets: taken.Add(30 * time.Hour)}
+	if why := reading.Stale(taken.Add(70 * time.Minute)); why != "" {
+		t.Errorf("a reading exactly 70 minutes old is stale: %q", why)
+	}
+	if why := reading.Stale(taken.Add(70*time.Minute + time.Second)); why != "the newest reading is 1h10m old" {
+		t.Errorf("a reading 70 minutes and a second old: %q", why)
+	}
+	if why := reading.Stale(taken.Add(time.Minute)); why != "" {
+		t.Errorf("a reading a minute old is stale: %q", why)
+	}
+}
+
+func TestAReadingWhoseResetHasPassedIsStaleHoweverYoung(t *testing.T) {
+	taken := time.Date(2026, 10, 29, 11, 34, 0, 0, time.UTC)
+	reading := application.UsageReading{Percent: 100, At: taken, Resets: taken.Add(5 * time.Minute)}
+	if why := reading.Stale(taken.Add(10 * time.Minute)); why != "taken before the week reset at 2026-10-29T11:39:00Z" {
+		t.Errorf("a reading taken before a reset that has passed: %q", why)
 	}
 }

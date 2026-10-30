@@ -263,6 +263,7 @@ func newStatusCmd() *cobra.Command {
 				SyncMode:         setting.Configured,
 				Home:             files,
 				Network:          net,
+				Usage:            &application.UsageReadings{Notes: tracker},
 				Cap:              atOnce,
 				CapWhy:           capWhy,
 				Load:             hostload.Proc{},
