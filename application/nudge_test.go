@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -552,5 +553,31 @@ func TestNudgeJudgesByMailAloneWhereTheRigIsNotCheckedOutHere(t *testing.T) {
 
 	if len(clauses) != 1 || clauses[0].Text != "mw-gq6.30 in progress 73 min, no mail" {
 		t.Fatalf("expected the old clause where no transcript can be found, got %+v", clauses)
+	}
+}
+
+// boxesDown is application.DownHosts over the names it holds.
+type boxesDown []string
+
+func (d boxesDown) Down(_ context.Context, host string) (bool, error) {
+	return slices.Contains(d, host), nil
+}
+
+// A cloud box that mw cloud (or the pause) brought down still holds the claims
+// of its stories until a resume gives them back, and its sync note stops: that
+// is no quiet host (mw-gq6.851).
+func TestNudgeSkipsABoxThatWasBroughtDownButNamesALiveOne(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "On the box brought down", "cloud1")
+	claim(t, tracker, "mw-gq6.30", 3*time.Hour)
+	syncedAt(t, tracker, "cloud1", 38*time.Minute)
+	storyOn(t, tracker, "mw-gq6.31", "On the box still up", "cloud2")
+	claim(t, tracker, "mw-gq6.31", 3*time.Hour)
+	syncedAt(t, tracker, "cloud2", 41*time.Minute)
+
+	clauses := nudgeReport(t, tracker, application.Nudge{Down: boxesDown{"cloud1"}})
+
+	if len(clauses) != 1 || clauses[0].Key != "host:cloud2" || clauses[0].Text != "cloud2 last synced 41 min ago" {
+		t.Fatalf("expected only the clause for the live box, got %+v", clauses)
 	}
 }

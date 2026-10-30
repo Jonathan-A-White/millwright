@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/pause"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
 )
@@ -93,6 +98,7 @@ func newNudgeCmd() *cobra.Command {
 				CloseOuts:   hostCloseOuts(),
 				Transcripts: transcripts,
 				Rigs:        rigs,
+				Down:        boxesDown{files: mwVault(dir, host), book: pause.Book{Root: dir, Files: mwVault(dir, host), Notes: tracker}},
 				SyncMode:    setting.Mode(),
 				NudgeAfter:  time.Duration(after) * time.Minute,
 				SyncStale:   time.Duration(stale) * time.Minute,
@@ -106,4 +112,38 @@ func newNudgeCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// boxesDown is application.DownHosts: a host is a down box when the pause in
+// force brought it down, or when its name is one the cloud gives a box and the
+// cloud book holds no such box up or being made (mw cloud down destroyed it).
+type boxesDown struct {
+	files *vault.Vault
+	book  pause.Book
+}
+
+func (d boxesDown) Down(ctx context.Context, host string) (bool, error) {
+	if dir, paused, err := d.book.Current(ctx); err == nil && paused {
+		if set, err := d.book.Read(ctx, dir); err == nil && slices.Contains(set.Boxes, host) {
+			return true, nil
+		}
+	}
+	_, ok, err := config.Cloud()
+	if err != nil || !ok {
+		return false, err
+	}
+	number, found := strings.CutPrefix(host, application.DefaultCloudPrefix)
+	if !found || number == "" || strings.Trim(number, "0123456789") != "" {
+		return false, nil
+	}
+	state, err := (vault.CloudBook{Vault: d.files}).Read(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, box := range state.Boxes {
+		if box.Name == host {
+			return false, nil
+		}
+	}
+	return true, nil
 }

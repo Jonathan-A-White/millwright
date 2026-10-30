@@ -146,6 +146,12 @@ type Nudge struct {
 	// read, judge a host by its sync and its claims alone.
 	Signs HostSigns
 
+	// Down says which hosts are cloud boxes that are down, by mw cloud or by
+	// the pause: a box that is down has no sync to be quiet about, whatever claims its
+	// stories still hold until a resume gives them back (mw-gq6.851). A nil
+	// Down, or one that cannot be read, leaves every host judged by its sync.
+	Down DownHosts
+
 	// NudgeAfter is how long a claimed story may run with nothing mailed about
 	// it before it is named. Zero reads DefaultNudgeAfter.
 	NudgeAfter time.Duration
@@ -156,6 +162,12 @@ type Nudge struct {
 	// Now is the clock elapsed time is measured against. The zero value reads
 	// the real one.
 	Now func() time.Time
+}
+
+// DownHosts says whether a host is a cloud box that is down, whether mw cloud
+// brought it down or the pause did.
+type DownHosts interface {
+	Down(ctx context.Context, host string) (bool, error)
 }
 
 // Run reads the clauses currently true, this host's claimed stories first,
@@ -284,6 +296,9 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 		return nil, err
 	}
 	for _, w := range others {
+		if n.isDown(ctx, w.Host) {
+			continue
+		}
 		if w.LastSync.IsZero() || w.Silent <= n.syncStale() || !w.holdsClaim() {
 			continue
 		}
@@ -302,6 +317,16 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 	}
 
 	return clauses, nil
+}
+
+// isDown says host is a box that is down; a host that cannot be told is judged
+// by its sync, as it was.
+func (n Nudge) isDown(ctx context.Context, host string) bool {
+	if n.Down == nil {
+		return false
+	}
+	down, err := n.Down.Down(ctx, host)
+	return err == nil && down
 }
 
 // hitlBeads are the beads labelled hitl that are open and ready anywhere or
