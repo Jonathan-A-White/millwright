@@ -321,6 +321,7 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	// Warnings only here: it is mw file --check that fails for them.
 	f.testCallers(plan, func(key string) string { return ids[key] })
 	f.filesNamed(plan, func(key string) string { return ids[key] })
+	f.mechanisms(plan, func(key string) string { return ids[key] })
 	f.warnSmokeWithoutRef(plan, func(key string) string { return ids[key] })
 	f.warnRemoteShell(plan, func(key string) string { return ids[key] })
 	for _, id := range ownDemos {
@@ -376,6 +377,7 @@ func (f File) Check(ctx context.Context, plan domain.Plan) error {
 	f.warnSmokeWithoutRef(plan, func(key string) string { return key })
 	f.warnRemoteShell(plan, func(key string) string { return key })
 	f.filesNamed(plan, func(key string) string { return key })
+	f.mechanisms(plan, func(key string) string { return key })
 	if over := f.testCallers(plan, func(key string) string { return key }); len(over) > 0 {
 		return fmt.Errorf("%s: more test callers than the size allows: split the story, size it up, or say why not with \"callers_ok\" (mw-gq6.661)",
 			strings.Join(over, ", "))
@@ -417,6 +419,24 @@ func (f File) filesNamed(plan domain.Plan, label func(key string) string) {
 		}
 		if named, ok := filesNamedOf(f.Rigs, f.RigFiles, label(story.Key), path); ok {
 			filesNamedNote(f.Err, named)
+		}
+	}
+}
+
+// mechanisms warns of each L or XL story of the plan whose acceptance criteria
+// touch more than one mechanism, naming the criteria (see
+// domain.MechanismWarning). A warning only, in Run and in Check.
+func (f File) mechanisms(plan domain.Plan, label func(key string) string) {
+	if f.Err == nil {
+		return
+	}
+	for _, story := range plan.Stories {
+		path, err := story.PathFrom(plan.Epic.Defaults)
+		if err != nil {
+			continue
+		}
+		if line := domain.MechanismWarning(label(story.Key), path.Size, story.Acceptance); line != "" {
+			fmt.Fprintln(f.Err, line)
 		}
 	}
 }

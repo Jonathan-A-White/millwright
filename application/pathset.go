@@ -157,6 +157,13 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 			filesNamedNote(s.Err, named)
 		}
 	}
+	// An L or XL story whose criteria ask for more than one kind of change is more
+	// than one session finishes (mw-gq6.852); judged when the size is written.
+	if named.Size != "" && s.Err != nil {
+		if line := domain.MechanismWarning(id, story.Merged().Overlay(path).Size, story.Acceptance); line != "" {
+			fmt.Fprintln(s.Err, line)
+		}
+	}
 	// Only a path written with a host or a rig (--from writes both) is judged: a
 	// model= set on a story already pinned is not this warning's to repeat.
 	if s.Err != nil && (from != "" || named.Host != "" || named.Rig != "") {
