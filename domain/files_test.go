@@ -73,11 +73,11 @@ func TestGlobsReadsEachNameNarrowerThanAWholeDirectory(t *testing.T) {
 	}
 }
 
-func TestCallerStemsAreTheBaseNamesOfThePlainFilesOnce(t *testing.T) {
-	got := domain.CallerStems("src/screens/Settings.tsx, ./src/Settings.test.tsx, src/a/, src/**/*.ts, Makefile, .gitignore, src/screens/Settings.css")
-	want := []string{"Settings", "Settings.test", "Makefile"}
+func TestCallerFilesAreThePlainFilesNamedOnce(t *testing.T) {
+	got := domain.CallerFiles("src/screens/Settings.tsx, ./src/Settings.test.tsx, src/a/, src/**/*.ts, Makefile, src/screens/Settings.tsx, .")
+	want := []string{"src/screens/Settings.tsx", "src/Settings.test.tsx", "Makefile"}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("CallerStems = %q, want %q", got, want)
+		t.Errorf("CallerFiles = %q, want %q", got, want)
 	}
 }
 

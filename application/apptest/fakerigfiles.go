@@ -85,7 +85,7 @@ func (f *FakeRigFiles) Matching(rigDir, pattern string, most int) int {
 }
 
 // SetTestCallers says how many test files the checkout at rigDir has that name
-// any stem asked for.
+// anything the files asked for declare.
 func (f *FakeRigFiles) SetTestCallers(rigDir string, n int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -95,17 +95,17 @@ func (f *FakeRigFiles) SetTestCallers(rigDir string, n int) {
 	f.callers[rigDir] = n
 }
 
-// AskedStems are the stems the last TestCallers was asked for.
-func (f *FakeRigFiles) AskedStems() []string {
+// AskedFiles are the files the last TestCallers was asked for.
+func (f *FakeRigFiles) AskedFiles() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.asked...)
 }
 
 // TestCallers implements application.RigFiles.
-func (f *FakeRigFiles) TestCallers(rigDir string, stems []string) (int, error) {
+func (f *FakeRigFiles) TestCallers(rigDir string, files []string) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.asked = append([]string(nil), stems...)
+	f.asked = append([]string(nil), files...)
 	return f.callers[rigDir], nil
 }

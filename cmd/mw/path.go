@@ -46,7 +46,7 @@ func newPathSetCmd() *cobra.Command {
 			"a whole directory (src/, src/**) or a glob ending in a wildcard (tests/e2e/*.ts) where the rig is not\n" +
 			"checked out to count it.\n\n" +
 			"A story with files and a size is told 'test callers: N for size S (allows M)': the rig's test\n" +
-			"files (features/, tests/, *_test.go) naming its files by base name, against XS 5, S 10, M 20,\n" +
+			"files (features/, tests/, *_test.go) calling what its files declare, against XS 5, S 10, M 20,\n" +
 			"L 35, XL 50. Over that, a WARN on stderr says to split the story or size it up; nothing is refused.\n" +
 			"callers_ok=\"<why>\" is the story's own reason the callers are fine (say, the change is additive): the count\n" +
 			"line still prints for it, the WARN does not, and --from does not copy it.\n\n" +

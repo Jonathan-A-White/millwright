@@ -942,9 +942,11 @@ no value for. See `features/path_set.feature`.
 **Test callers (mw-gq6.661).** A story is sized by the screens it names, but the
 tests that call those screens change with them. When a story names files and a
 size, `mw path set` and `mw file` (and `mw file --check`) count the rig's test
-files (those under `features/` or `tests/`, and any `*_test.go`) that name any
-of its files by base name without extension, in one `git grep -l -F` of the
-rig's checkout on this host, and say `<story>: test callers: N for size S
+files (those under `features/` or `tests/`, and any `*_test.go`) that call
+something its files declare, in the rig's checkout on this host (a Go file's
+exported names, said as `pkg.Name` or, in its own directory, bare; a TS or JS
+file's exports or import path; never the file's base name as a word, which a
+name like `status` would find in prose), and say `<story>: test callers: N for size S
 (allows M)`. The size allows, in all: XS 5, S 10, M 20, L 35, XL 50. Over that,
 `WARN: N test callers for size S; split (a first story moving the callers onto
 one helper) or size up` goes to stderr, and `mw file --check` exits non-zero for

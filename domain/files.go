@@ -155,25 +155,24 @@ func Globs(files string) []NamedGlob {
 	return found
 }
 
-// CallerStems are the base names, without extension, of the plain files a
-// files key names, once each and in order: what a test that calls the story's
-// files is looked for by (mw-gq6.661). A directory, a glob and a dotfile with
-// no name before its extension have none.
-func CallerStems(files string) []string {
-	var stems []string
+// CallerFiles are the plain files a files key names, as paths in the rig
+// without a leading ./, once each and in order: what a test that calls the
+// story's files is looked for by, through what each declares (mw-gq6.661,
+// mw-gq6.856). A directory and a glob are none.
+func CallerFiles(files string) []string {
+	var named []string
 	seen := map[string]bool{}
 	for _, written := range strings.Split(files, ",") {
 		name := strings.TrimPrefix(strings.TrimSpace(written), "./")
 		if name == "" || name == "." || strings.HasSuffix(name, "/") || strings.ContainsAny(name, "*?[") {
 			continue
 		}
-		base := path.Base(name)
-		stem := strings.TrimSuffix(base, path.Ext(base))
-		if stem == "" || seen[stem] {
+		name = path.Clean(name)
+		if seen[name] {
 			continue
 		}
-		seen[stem] = true
-		stems = append(stems, stem)
+		seen[name] = true
+		named = append(named, name)
 	}
-	return stems
+	return named
 }

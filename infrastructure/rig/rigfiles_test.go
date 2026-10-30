@@ -1,6 +1,7 @@
 package rig_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,16 +99,11 @@ func TestAGlobsFilesAreCountedUpToOnePastTheMost(t *testing.T) {
 	}
 }
 
-func TestTestCallersAreTheTrackedTestFilesThatNameAStem(t *testing.T) {
+// trackedRepo is a temp git repo holding the files, all added.
+func trackedRepo(t *testing.T, files map[string]string) string {
+	t.Helper()
 	dir := t.TempDir()
-	for name, text := range map[string]string{
-		"features/a.feature":      "open Settings\n",
-		"tests/b.test.ts":         "import Settings\n",
-		"src/c_test.go":           "// Settings\n",
-		"src/screens/Settings.go": "Settings itself\n",
-		"tests/other.test.ts":     "Reader only\n",
-		"docs/notes.md":           "Settings in prose\n",
-	} {
+	for name, text := range files {
 		path := filepath.Join(dir, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -121,21 +117,80 @@ func TestTestCallersAreTheTrackedTestFilesThatNameAStem(t *testing.T) {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
 	}
+	return dir
+}
+
+func TestTestCallersAreTheTrackedTestFilesThatNameWhatAFileDeclares(t *testing.T) {
+	dir := trackedRepo(t, map[string]string{
+		"src/screens/Settings.tsx": "export function Settings() {}\nexport const Panel = 1\nfunction hidden() {}\n",
+		"src/reader.go":            "package src\n\nfunc Reader() {}\n\nfunc (r T) Method() {}\n\nfunc unexported() {}\n",
+		"features/a.feature":       "open Settings\n",
+		"tests/b.test.ts":          "import { x } from './screens/Settings'\n",
+		"tests/c.test.ts":          "import Panel from 'nowhere'\n",
+		"src/c_test.go":            "// Reader\n",
+		"src/d_test.go":            "// Method and unexported\n",
+		"tests/other.test.ts":      "settings in lower case, Settingsy and hidden\n",
+		"docs/notes.md":            "Settings and Reader in prose\n",
+	})
 	files := rig.Files{}
 	for _, c := range []struct {
-		stems []string
+		named []string
 		want  int
 	}{
-		{[]string{"Settings"}, 3},
-		{[]string{"Settings", "Reader"}, 4},
-		{[]string{"Nowhere"}, 0},
+		{[]string{"src/screens/Settings.tsx"}, 3},
+		{[]string{"src/reader.go"}, 1},
+		{[]string{"src/screens/Settings.tsx", "src/reader.go"}, 4},
+		{[]string{"./src/reader.go", "src/reader.go"}, 1},
+		{[]string{"src/gone.go"}, 0},
 	} {
-		got, err := files.TestCallers(dir, c.stems)
+		got, err := files.TestCallers(dir, c.named)
 		if err != nil || got != c.want {
-			t.Errorf("TestCallers(%q) = %d, %v; want %d", c.stems, got, err, c.want)
+			t.Errorf("TestCallers(%q) = %d, %v; want %d", c.named, got, err, c.want)
 		}
 	}
-	if _, err := files.TestCallers(t.TempDir(), []string{"Settings"}); err == nil {
+	if _, err := files.TestCallers(t.TempDir(), []string{"src/reader.go"}); err == nil {
 		t.Error("a directory that is no checkout was searched without an error")
+	}
+}
+
+func TestACommonWordInTestsIsNotACallerOfAFileNamedByIt(t *testing.T) {
+	tests := map[string]string{"application/status.go": "package application\n\nfunc Uptime() {}\n"}
+	for i := 0; i < 10; i++ {
+		tests[fmt.Sprintf("application/say%d_test.go", i)] = "package application\n\n// the status line\nvar _ = \"status\"\n"
+	}
+	for i := 0; i < 2; i++ {
+		tests[fmt.Sprintf("application/call%d_test.go", i)] = "package application\n\nvar _ = Uptime()\n"
+	}
+	dir := trackedRepo(t, tests)
+	got, err := rig.Files{}.TestCallers(dir, []string{"application/status.go"})
+	if err != nil || got != 2 {
+		t.Errorf("TestCallers = %d, %v; want 2 (the twelve test files that say status are not callers)", got, err)
+	}
+}
+
+func TestTwentyStepFilesCallingAHelperAreTwentyCallers(t *testing.T) {
+	steps := map[string]string{"features/steps/helper.go": "package steps\n\nfunc SharedHelper() {}\n"}
+	for i := 0; i < 20; i++ {
+		steps[fmt.Sprintf("features/steps/step%d_test.go", i)] = "package steps\n\nvar _ = SharedHelper\n"
+	}
+	dir := trackedRepo(t, steps)
+	got, err := rig.Files{}.TestCallers(dir, []string{"features/steps/helper.go"})
+	if err != nil || got != 20 {
+		t.Errorf("TestCallers = %d, %v; want 20", got, err)
+	}
+}
+
+func TestAFieldWithTheNameOfATypeIsNotACallOfTheType(t *testing.T) {
+	dir := trackedRepo(t, map[string]string{
+		"application/status.go":        "package application\n\ntype Status struct{}\n",
+		"application/field_test.go":    "package application\n\nvar _ = story.Status\nvar _ = map[string]int{Status: 1}\nvar _ = row{Status: \"open\"}\n",
+		"application/literal_test.go":  "package application\n\nvar _ = Status{}\n",
+		"application/declared_test.go": "package application\n\nvar s Status\n",
+		"cmd/mw/qualified_test.go":     "package main\n\nvar _ = application.Status{}\n",
+		"cmd/mw/field_test.go":         "package main\n\nvar _ = story.Status\n",
+	})
+	got, err := rig.Files{}.TestCallers(dir, []string{"application/status.go"})
+	if err != nil || got != 3 {
+		t.Errorf("TestCallers = %d, %v; want 3 (the literal, the variable and the qualified use)", got, err)
 	}
 }
