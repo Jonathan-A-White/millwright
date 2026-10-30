@@ -242,10 +242,14 @@ type Retry struct {
 var _ application.PauseRetry = Retry{}
 
 // Retry implements application.PauseRetry.
-func (r Retry) Retry(ctx context.Context, story string) (string, error) {
+func (r Retry) Retry(ctx context.Context, story string, force bool) (string, error) {
 	run := r.Run
 	if run == nil {
 		run = execute
 	}
-	return run(ctx, []string{r.Mw, "retry", story})
+	argv := []string{r.Mw, "retry", story}
+	if force {
+		argv = append(argv, "--force")
+	}
+	return run(ctx, argv)
 }
