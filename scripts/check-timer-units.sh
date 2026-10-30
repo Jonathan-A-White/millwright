@@ -338,6 +338,16 @@ BE=$(mktemp -d)
 grep -v 'beads\.env' "$REPORT_SERVICE" >"$BE/mw-report.service"
 beads_env_missing "$BE/mw-report.service" || fail "the beads.env check passed a mw-report.service with the line removed"
 rm -rf "$BE"
+# A unit mw writes at run time is outside the files above: the transient one
+# `mw pause` makes with systemd-run to run `mw resume` failed for want of
+# beads.env (mw-gq6.849). Its command line has to carry the file; a transient
+# unit takes no %h there, so the path is the home's, joined in the code.
+PAUSE_GO=infrastructure/pause/pause.go
+[ -f "$PAUSE_GO" ] || fail "$PAUSE_GO does not exist"
+grep -q -- '--property=EnvironmentFile=-"' "$PAUSE_GO" ||
+	fail "$PAUSE_GO: the systemd-run that mw pause makes carries no --property=EnvironmentFile=-<home>/.config/mw/beads.env (bd needs BEADS_DOLT_SERVER_HOST)"
+grep -q '"\.config", "mw", "beads\.env"' "$PAUSE_GO" ||
+	fail "$PAUSE_GO: the EnvironmentFile that mw pause's unit reads is not ~/.config/mw/beads.env"
 
 # The failure mail: every service names the template in OnFailure=, and the
 # templates, which are what it starts, name nothing (no loop). The template is

@@ -156,7 +156,8 @@ func copyTree(t *testing.T, src, dst string) {
 	}
 }
 
-// runTimerUnitsOnCopy runs the check from a copy of contrib/ and scripts/ made
+// runTimerUnitsOnCopy runs the check from a copy of contrib/, scripts/ and
+// infrastructure/pause/ (the check reads the systemd-run mw pause makes) made
 // in a temporary directory, after change has edited the copy, with a
 // systemd-analyze that finds nothing to say, so only the rules of the check
 // itself speak. It returns what the check printed and
@@ -164,7 +165,7 @@ func copyTree(t *testing.T, src, dst string) {
 func runTimerUnitsOnCopy(t *testing.T, change func(root string)) (string, bool) {
 	t.Helper()
 	root := t.TempDir()
-	for _, d := range []string{"contrib", "scripts"} {
+	for _, d := range []string{"contrib", "scripts", "infrastructure/pause"} {
 		src, err := filepath.Abs(filepath.Join("..", d))
 		if err != nil {
 			t.Fatal(err)
@@ -361,4 +362,29 @@ func TestCheckTimerUnitsSuccessExitStatus(t *testing.T) {
 			t.Errorf("the check failed a mw watch unit that has SuccessExitStatus=6:\n%s", out)
 		}
 	})
+}
+
+// The transient unit mw pause makes to run mw resume reads beads.env like the
+// installed units do, or its bd cannot reach the served beads (mw-gq6.849).
+func TestCheckTimerUnitsPauseTimerCarriesBeadsEnv(t *testing.T) {
+	out, passed := runTimerUnitsOnCopy(t, func(root string) {
+		path := filepath.Join(root, "infrastructure", "pause", "pause.go")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		changed := strings.ReplaceAll(string(data), "--property=EnvironmentFile=-", "--property=Nothing=-")
+		if changed == string(data) {
+			t.Fatal("pause.go has no --property=EnvironmentFile=- to take out")
+		}
+		if err := os.WriteFile(path, []byte(changed), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if passed {
+		t.Fatalf("the check passed a mw pause whose unit reads no beads.env:\n%s", out)
+	}
+	if !strings.Contains(out, "pause.go") || !strings.Contains(out, "beads.env") {
+		t.Errorf("the check did not name pause.go and beads.env; it printed:\n%s", out)
+	}
 }

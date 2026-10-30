@@ -124,6 +124,36 @@ func TestTimerSchedulesAOneShotUserTimerAtTheTimeInUTC(t *testing.T) {
 	}
 }
 
+// The unit that mw resume runs in reaches the Laptop's served beads only through
+// BEADS_DOLT_* in ~/.config/mw/beads.env: without the file bd said "a beads
+// server-mode vault" and mw-resume-2026-10-29.service failed (mw-gq6.849). A
+// transient unit's EnvironmentFile must be an absolute path, so the home is read
+// here, not left as %h.
+func TestTimerUnitReadsTheBeadsEnvFile(t *testing.T) {
+	t.Setenv("HOME", "/home/someone")
+	var got []string
+	timer := Timer{Mw: "/usr/local/bin/mw", Path: "/usr/bin", Run: func(_ context.Context, argv []string) (string, error) { got = argv; return "", nil }}
+	if _, err := timer.Schedule(context.Background(), time.Date(2026, 10, 23, 9, 30, 0, 0, time.UTC), "mw-resume-2026-10-22"); err != nil {
+		t.Fatal(err)
+	}
+	want := "--property=EnvironmentFile=-/home/someone/.config/mw/beads.env"
+	at, mwAt := -1, -1
+	for i, arg := range got {
+		switch arg {
+		case want:
+			at = i
+		case "/usr/local/bin/mw":
+			mwAt = i
+		}
+	}
+	if at < 0 {
+		t.Fatalf("%q is not in %q", want, strings.Join(got, " "))
+	}
+	if at > mwAt {
+		t.Errorf("the property is after the command, where systemd-run takes it for the command's own argument: %q", strings.Join(got, " "))
+	}
+}
+
 func TestTimerCancelIgnoresATimerThatIsGone(t *testing.T) {
 	timer := Timer{Run: func(context.Context, []string) (string, error) {
 		return "", os.ErrNotExist

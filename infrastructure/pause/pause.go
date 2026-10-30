@@ -206,6 +206,13 @@ func (t Timer) Schedule(ctx context.Context, at time.Time, unit string) (string,
 	if t.Path != "" {
 		argv = append(argv, "--setenv=PATH="+t.Path)
 	}
+	// mw resume reads the pause note through bd, which reaches the home's served
+	// beads only by BEADS_DOLT_* in beads.env, as the installed units' files say.
+	// A transient unit takes no %h in EnvironmentFile (the path must be absolute),
+	// so the home is read here; the "-" lets a host without the file go on.
+	if home, err := os.UserHomeDir(); err == nil {
+		argv = append(argv, "--property=EnvironmentFile=-"+filepath.Join(home, ".config", "mw", "beads.env"))
+	}
 	argv = append(argv, t.Mw, "resume")
 	if _, err := run(ctx, argv); err != nil {
 		return "", err
