@@ -286,6 +286,11 @@ func newDoctorCmd() *cobra.Command {
 			claudeLogin := doctor.NewClaudeLogin(claudeEnvFile())
 			claudeLogin.Alarm = alarm
 			claudeLogin.Screens = seatWindows().NotLoggedInWindows
+			// A quota reading nobody has taken lately, or taken before the week's
+			// reset: the usage the pause reads would be a day-old guess (mw-gq6.855).
+			usageFresh := doctor.NewUsageFresh(application.UsageReadings{Notes: mwGateway(vault, host)})
+			usageFresh.Home, usageFresh.Host = mwVault(vault, host), host
+			usageFresh.Alarm = alarm
 			// A user unit that runs mw with no beads.env cannot reach the served
 			// beads (mw-gq6.849); the unit is the Mayor's to fix, so the cure is one mail
 			// to the Mayor, not the alarm (mw-gq6.853).
@@ -448,6 +453,7 @@ func newDoctorCmd() *cobra.Command {
 				staleLandings,
 				ageKey,
 				claudeLogin,
+				usageFresh,
 				unitEnv,
 			}, churn...), checks...)
 			// Where Claude Code keeps its transcripts is the only place these

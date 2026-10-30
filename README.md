@@ -5691,6 +5691,14 @@ Governor a day, for up to thirty days; the text names `claude setup-token` and t
 `printf` line of `docs/secrets.md`. A host with no claude program or no env file has
 nothing to judge and reads ok.
 
+**usage-fresh** faults when the newest quota reading (`mw usage show`) is stale: older
+than 70 minutes, or taken before the week's reset, which has since passed (mw-gq6.855).
+A stale reading is also marked `STALE` in `mw usage show` and in the USAGE line of
+`mw status`, and a reading from before a passed reset is never counted against the
+reserve. The fault names the age and the fix (the mw-usage-read timer has not run;
+`systemctl --user list-timers | grep usage`). Its cure is one alarm push to the Governor,
+every three hours, up to eight times. Only the home takes readings; other hosts read ok.
+
 **unit-env** faults when a `mw-*.service` user unit systemd has loaded or installed here,
 a transient one such as `mw pause`'s `mw-resume-<date>.service` included, runs `mw`, `bd`
 or an `mw-<name>` program and reads no `~/.config/mw/beads.env`: without it bd cannot reach
