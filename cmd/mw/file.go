@@ -63,6 +63,9 @@ func newFileCmd() *cobra.Command {
 			"Over that, 'WARN: N test callers for size S; split ... or size up' goes to stderr, and --check\n" +
 			"fails, unless the story says why not as \"callers_ok\": \"<why>\", which is also written to the filed\n" +
 			"story's metadata, so that mw path set on it is quiet too.\n\n" +
+			"A story of size L or XL whose acceptance criteria ask for more than one of a new setting, a new\n" +
+			"component and a removal is warned of on stderr, naming the criteria of each (mw-gq6.852): it is\n" +
+			"more than one session finishes. Never a refusal.\n\n" +
 			"--check runs every one of these checks and files nothing: it prints every refusal across\n" +
 			"every story of the plan at once, exits non-zero if there is any, and otherwise prints\n" +
 			"'ok: <n> stories would be filed'. --waive and --guest-ask count as they do when filing.",

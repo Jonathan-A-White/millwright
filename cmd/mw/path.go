@@ -50,6 +50,9 @@ func newPathSetCmd() *cobra.Command {
 			"L 35, XL 50. Over that, a WARN on stderr says to split the story or size it up; nothing is refused.\n" +
 			"callers_ok=\"<why>\" is the story's own reason the callers are fine (say, the change is additive): the count\n" +
 			"line still prints for it, the WARN does not, and --from does not copy it.\n\n" +
+			"Writing a size L or XL on a story whose acceptance criteria ask for more than one of a new\n" +
+			"setting, a new component and a removal says so on stderr, naming the criteria (mw-gq6.852).\n" +
+			"The size is also the story's turn cap: XS 60, S 90, M 120, L 160, XL 200, unless max_turns is set.\n\n" +
 			"After the write, a story that mw dispatch would pass over is named, before it is un-held: no files key on a\n" +
 			"rig whose file says files_expected = true, a bug with no Sweep: line, a Tester story with no Landed story:\n" +
 			"line. A warning only; nothing is refused for it.\n\n" +

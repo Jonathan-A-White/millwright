@@ -960,6 +960,21 @@ what the size allows (XS 4, S 8, M 12, L 16, XL 24), say on stderr `WARN: files
 named: N for size S (allows M); split the story or size it up`. Never a refusal,
 and a story within its allowance hears nothing. See `features/file_callers.feature`.
 
+**Turn cap by size, and mechanisms (mw-gq6.852).** A Builder's session is capped
+at the turns its story's size gives: XS 60, S 90, M 120, L 160, XL 200. The
+story's own `max_turns` wins; a story with no size takes the host's
+`[next] max_turns` (default 120); and a host that says `[next] max_turns` makes
+it the ceiling of every size, 0 there being no cap. The session is told to wrap
+up at 80% of its cap, and `mw status` names one running past that turn with its
+cap. A story of size L or XL whose acceptance criteria ask for more than one of
+a new setting, a new component and a removal (read from the words of each
+numbered criterion; `Sweep:` and `Expect:` lines are not criteria) is warned of
+by `mw path set` (when it writes the size), `mw file` and `mw file --check`:
+`WARN: size L with 3 mechanisms in its acceptance criteria: a new setting (1), a
+new component (2), a removal (3); split it into one story per mechanism`. Never a
+refusal. `mw report` shows the change under FACTORY CHANGES from this story's
+`Expect:` line, the seven days before and after.
+
 The eighth key, `files`, is the comma-separated repo paths or globs (`*` within a
 directory, `**` across them; a directory covers what is under it) the story
 expects to change. It is the story's own, so `--from` never copies it. `mw
