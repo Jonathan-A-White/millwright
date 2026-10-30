@@ -212,7 +212,13 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			maxTurns, maxTurnsSaid, err := config.NextMaxTurnsSaid()
+			if err != nil {
+				return err
+			}
 			_, err = application.Status{
+				MaxTurns:         maxTurns,
+				MaxTurnsSaid:     maxTurnsSaid,
 				HeavyNet:         heavy,
 				Tracker:          tracker,
 				Dampers:          dampers,

@@ -343,6 +343,11 @@ type Status struct {
 	// taken so far, in its worktree beside its rig's checkout in Rigs, so that
 	// one past TurnsNamedPast is named (mw-1ljpo9.6). Nil names none.
 	Turns TranscriptTurns
+	// MaxTurns is the host's next.max_turns, and MaxTurnsSaid whether its config
+	// says it, so that a session's turn cap is read as a Builder's boot reads it:
+	// by the story's size (mw-gq6.852). MaxTurns 0 and not said is the default.
+	MaxTurns     int
+	MaxTurnsSaid bool
 
 	// CloseOuts, when set, is where the close-outs running on this host are
 	// read from, so that a story being closed out says so beside it. Nil
@@ -461,6 +466,9 @@ type RunningStory struct {
 	// Turns is how many turns the story's session has taken so far, 0 when it
 	// was not read (mw-1ljpo9.6).
 	Turns int
+	// TurnCap is the most turns the story's session may take, as its Builder was
+	// booted with it (mw-gq6.852); 0 for none or not known.
+	TurnCap int
 	// CloseOut is the close-out running on this host for the story, nil when
 	// none is. Now is when it was read, to say how long it has run.
 	CloseOut *CloseOutMark
@@ -1532,6 +1540,7 @@ func (s Status) running(ctx context.Context, detail StoryDetail) (RunningStory, 
 	}
 	rs.UsageLimit = s.usageLimit(ctx, detail)
 	rs.Turns = s.turns(ctx, rs)
+	rs.TurnCap = s.turnCap(detail)
 	if !rs.Refused() && !rs.Queued() && !rs.HandedBack() {
 		rs.Stranded = lapsedLease(detail, s.now())
 	}
@@ -1595,14 +1604,38 @@ func lapsedLease(detail StoryDetail, now time.Time) time.Time {
 	return time.Time{}
 }
 
+// turnsNamedPast is the turns past which the report names the session: the turn
+// it is told to wrap up at, of its story's cap, else TurnsNamedPast.
+func (r RunningStory) turnsNamedPast() int {
+	if r.TurnCap > 0 {
+		return TurnCapWrapUp(r.TurnCap)
+	}
+	return TurnsNamedPast
+}
+
 // strandedLine is what the report says of a claim whose lease has lapsed.
 func strandedLine(since time.Time) string {
 	return fmt.Sprintf("STRANDED: lease ran out %s with no heartbeat since, so no session is working it; the host that holds it gives the claim back on its next dispatch tick", since.UTC().Format(LastSyncFormat))
 }
 
 // TurnsNamedPast is how many turns a running session may take before mw status
-// names it (mw-1ljpo9.6): the cap, next.max_turns, is 120 by default.
+// names it (mw-1ljpo9.6) when its story has no cap to name it by: with a cap it
+// is named past the turn it is told to wrap up at (TurnCapWrapUp).
 const TurnsNamedPast = 100
+
+// turnCap is the cap of the session working detail on this host: the story's own
+// max_turns, else its size's, else the host's next.max_turns (mw-gq6.852).
+func (s Status) turnCap(detail StoryDetail) int {
+	path := detail.Merged()
+	if s.MaxTurnsSaid {
+		return path.TurnCapUnder(s.MaxTurns)
+	}
+	hostCap := s.MaxTurns
+	if hostCap == 0 {
+		hostCap = DefaultMaxTurns
+	}
+	return path.TurnCap(hostCap)
+}
 
 // turns is how many turns the story's session has taken so far, read from its
 // worktree on this host, and 0 when there is no reader, no checkout of its rig
@@ -2625,8 +2658,12 @@ func (r RunningStory) write(b *strings.Builder) {
 	if r.UsageLimit != "" {
 		clip(b, "    stopped at the usage limit: "+r.UsageLimit)
 	}
-	if r.Turns > TurnsNamedPast {
-		clip(b, fmt.Sprintf("    past %d turns: %d so far", TurnsNamedPast, r.Turns))
+	if past := r.turnsNamedPast(); r.Turns > past {
+		line := fmt.Sprintf("    past %d turns: %d so far", past, r.Turns)
+		if r.TurnCap > 0 {
+			line += fmt.Sprintf(" (capped at %d)", r.TurnCap)
+		}
+		clip(b, line)
 	}
 	if r.Refused() {
 		clip(b, "    refused, waiting on the Mayor (mw retry or a hold)")

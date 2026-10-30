@@ -230,18 +230,32 @@ Feature: mw status
     Then reading status succeeds
     And the report shows "mw-gq6.10" as stopped at the usage limit
 
-  # mw-1ljpo9.6: a Builder's session is capped at next.max_turns (120); one
-  # past 100 turns is named while it runs, read from its transcript.
-  Scenario: A running session past 100 turns is named with its turns so far
+  # mw-1ljpo9.6: a Builder's session is capped (120 turns for a story with no
+  # size); one past the turn it is told to wrap up at, 80% of its cap, is named
+  # while it runs, read from its transcript. mw-gq6.852: the cap is its size's.
+  Scenario: A running session past its wrap-up turn is named with its turns so far
     Given a status story "mw-gq6.10" filed under it
     And the status story "mw-gq6.10" is claimed with its session running
     And a status story "mw-gq6.11" filed under it
     And the status story "mw-gq6.11" is claimed with its session running
     And the session of "mw-gq6.10" has taken 130 turns so far
+    And the session of "mw-gq6.11" has taken 96 turns so far
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "past 96 turns: 130 so far (capped at 120)"
+    And the report does not say "96 so far"
+    And every line of the report is at most 60 columns wide
+
+  Scenario: A session is named by its story's size: a small story sooner, a large one later
+    Given a status story "mw-gq6.10" filed under it, overriding "size" with "XS"
+    And the status story "mw-gq6.10" is claimed with its session running
+    And a status story "mw-gq6.11" filed under it, overriding "size" with "L"
+    And the status story "mw-gq6.11" is claimed with its session running
+    And the session of "mw-gq6.10" has taken 50 turns so far
     And the session of "mw-gq6.11" has taken 100 turns so far
     When mw status reads the host
     Then reading status succeeds
-    And the report says "past 100 turns: 130 so far"
+    And the report says "past 48 turns: 50 so far (capped at 60)"
     And the report does not say "100 so far"
     And every line of the report is at most 60 columns wide
 
