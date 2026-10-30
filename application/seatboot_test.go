@@ -551,6 +551,46 @@ func TestBootCapsTheSessionAndToldItToWrapUpAt80Percent(t *testing.T) {
 	}
 }
 
+// mw-gq6.852: the cap is read from the story's size; the host's next.max_turns
+// is the default of an unsized story and, when the host says it, the ceiling.
+func TestBootCapsTheSessionByTheStorysSize(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		size  domain.Size
+		host  int
+		said  bool
+		path  string
+		turns int
+	}{
+		{"XS", domain.SizeXS, 120, false, "", 60},
+		{"S", domain.SizeS, 120, false, "", 90},
+		{"M", domain.SizeM, 120, false, "", 120},
+		{"L", domain.SizeL, 120, false, "", 160},
+		{"XL", domain.SizeXL, 120, false, "", 200},
+		{"unsized takes the host's", "", 120, false, "", 120},
+		{"the host's said cap is the ceiling", domain.SizeL, 100, true, "", 100},
+		{"the story's own cap wins", domain.SizeL, 100, true, "45", 45},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, h := newFakeVault(), &fakeHarness{}
+			boot := aSeatBoot(v, h)
+			boot.MaxTurns, boot.MaxTurnsSaid = tc.host, tc.said
+			story := aStory(func(d *application.StoryDetail) {
+				d.Story.Overrides.Size, d.Story.Overrides.MaxTurns = tc.size, tc.path
+			})
+			if _, err := boot.Boot(context.Background(), story, "/root/.mw-worktrees/mw-gq6.6"); err != nil {
+				t.Fatalf("booting the story: %v", err)
+			}
+			if h.launch.MaxTurns != tc.turns {
+				t.Fatalf("expected the session capped at %d turns, got %d", tc.turns, h.launch.MaxTurns)
+			}
+			if want := fmt.Sprintf("capped at %d turns", tc.turns); !strings.Contains(h.launch.Kickoff, want) {
+				t.Errorf("expected the kickoff to say %q, got %q", want, h.launch.Kickoff)
+			}
+		})
+	}
+}
+
 // A Tester commits nothing, so its cap tells it to write its FINDINGS instead.
 func TestBootTellsACappedTesterToWriteItsFindingsNotToCommit(t *testing.T) {
 	v, h := newFakeVault(), &fakeHarness{}

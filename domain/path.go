@@ -112,6 +112,27 @@ func (s Size) FilesAllowed() int {
 	return 0
 }
 
+// TurnCap is the most turns a Builder's session may take on a story of this
+// size (mw-gq6.852): a small story that runs on is a runaway, and a big one is
+// cut before it can finish. The turn-cap refusals of 2026-10 were M and L
+// stories handed back at one number for every size. A size that is not one of
+// Sizes has no turn cap of its own, and is 0.
+func (s Size) TurnCap() int {
+	switch s {
+	case SizeXS:
+		return 60
+	case SizeS:
+		return 90
+	case SizeM:
+		return 120
+	case SizeL:
+		return 160
+	case SizeXL:
+		return 200
+	}
+	return 0
+}
+
 // Big says the size is L or XL: more than one session is likely to finish.
 func (s Size) Big() bool { return s == SizeL || s == SizeXL }
 
@@ -138,8 +159,8 @@ type Path struct {
 	// for it (mw-gq6.349). They are the story's own, never a sibling's.
 	Files string `json:"files,omitempty"`
 	// MaxTurns is the most turns the story's session may take, a whole number:
-	// 0 sets no cap, and empty leaves it to the host's next.max_turns
-	// (mw-1ljpo9.6). See TurnCap.
+	// 0 sets no cap, and empty leaves it to the story's size and the host's
+	// next.max_turns (mw-1ljpo9.6, mw-gq6.852). See TurnCap.
 	MaxTurns string `json:"max_turns,omitempty"`
 	// Size is how big the story is judged to be: XS, S, M, L or XL, or empty
 	// when nobody has (mw-1ljpo9.3). A story's own, like Files.
@@ -384,14 +405,36 @@ func (p Path) Overlay(override Path) Path {
 	return p
 }
 
-// TurnCap is the most turns the session working p may take: p's own max_turns
-// when it sets one, else hostCap, the host's next.max_turns. 0 is no cap. A
-// max_turns that is not a whole number, which Validate refuses, is hostCap.
+// TurnCap is the most turns the session working p may take on a host whose
+// next.max_turns says nothing, hostCap being the default it is read as: p's own
+// max_turns when it sets one, else the table of its size (Size.TurnCap), else,
+// for a story with no size, hostCap. 0 is no cap. A max_turns that is not a
+// whole number, which Validate refuses, is not read.
 func (p Path) TurnCap(hostCap int) int {
 	if turns, ok := p.turns(); ok {
 		return turns
 	}
+	if turns := p.Size.TurnCap(); turns > 0 {
+		return turns
+	}
 	return hostCap
+}
+
+// TurnCapUnder is TurnCap on a host that says its next.max_turns, ceiling: the
+// table of p's size never takes more than it, and a story with no size takes it.
+// A ceiling of 0 sets no cap for any size, the rollback. A story's own
+// max_turns still wins.
+func (p Path) TurnCapUnder(ceiling int) int {
+	if turns, ok := p.turns(); ok {
+		return turns
+	}
+	if ceiling <= 0 {
+		return 0
+	}
+	if turns := p.Size.TurnCap(); turns > 0 && turns < ceiling {
+		return turns
+	}
+	return ceiling
 }
 
 // turns is p's max_turns read as a whole number, and false when it sets none or

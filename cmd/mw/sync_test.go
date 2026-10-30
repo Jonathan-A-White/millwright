@@ -284,7 +284,7 @@ func TestBuilderBootUsesTheHarnessTheHostChose(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("MW_BEADS_SYNC", "")
 			mwConfig(t, tc.config)
-			boot := builderBoot(vault.New(t.TempDir()), "laptop", nil, 0, 0, 120)
+			boot := builderBoot(vault.New(t.TempDir()), "laptop", nil, 0, 0, 120, false)
 			if got := boot.Harness.Name(); got != tc.want {
 				t.Errorf("expected the %s harness, got %s", tc.want, got)
 			}

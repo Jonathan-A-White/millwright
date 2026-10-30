@@ -29,6 +29,8 @@ type seatBootContext struct {
 	// maxTurns is the host's next.max_turns the session is assembled with
 	// (mw-1ljpo9.6).
 	maxTurns int
+	// maxTurnsSaid is whether the host's config says it (mw-gq6.852).
+	maxTurnsSaid bool
 }
 
 // InitializeSeatBootScenario registers the steps of features/seat_boot.feature.
@@ -67,6 +69,8 @@ func InitializeSeatBootScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the command line does not carry "([^"]*)"$`, c.theCommandLineDoesNotCarry)
 	ctx.Given(`^this host caps a Builder's session at (\d+) turns$`, c.thisHostCapsASessionAt)
 	ctx.Given(`^the story's own path sets max_turns to "([^"]*)"$`, c.theStorysOwnPathSetsMaxTurns)
+	ctx.Given(`^the story's own path sets size to "([^"]*)"$`, c.theStorysOwnPathSetsSize)
+	ctx.Given(`^this host says it caps a Builder's session at (\d+) turns, as the ceiling of every size$`, c.thisHostSaysItCapsASessionAt)
 	ctx.Then(`^the settings on the command line are one JSON document that signs nothing and allows bd$`, c.theSettingsAreOneJSONDocument)
 	ctx.Then(`^the command line primes the session from the vault's "([^"]*)"$`, c.theCommandLinePrimesFrom)
 	ctx.Then(`^the command line writes the result to the vault's "([^"]*)"$`, c.theCommandLineWritesTheResultTo)
@@ -201,7 +205,7 @@ func (c *seatBootContext) theSessionIsAssembled(seat string) error {
 		Seat:    seat,
 		Host:    "vps",
 		// MaxTurns: mw-1ljpo9.6.
-		MaxTurns: c.maxTurns,
+		MaxTurns: c.maxTurns, MaxTurnsSaid: c.maxTurnsSaid,
 	}
 	c.spec, c.err = boot.Boot(context.Background(), c.detail, c.worktree)
 	return nil
@@ -296,6 +300,17 @@ func (c *seatBootContext) theCommandLineDoesNotCarry(never string) error {
 func (c *seatBootContext) thisHostCapsASessionAt(turns int) error {
 	c.maxTurns = turns
 	return nil
+}
+
+// thisHostSaysItCapsASessionAt is a host whose config says next.max_turns, which
+// is then the ceiling of the cap of every size (mw-gq6.852).
+func (c *seatBootContext) thisHostSaysItCapsASessionAt(turns int) error {
+	c.maxTurns, c.maxTurnsSaid = turns, true
+	return nil
+}
+
+func (c *seatBootContext) theStorysOwnPathSetsSize(size string) error {
+	return c.detail.Story.Overrides.Set("size", size)
 }
 
 func (c *seatBootContext) theStorysOwnPathSetsMaxTurns(turns string) error {
@@ -424,7 +439,7 @@ func (c *seatBootContext) memoryAccess() *application.RigMemoryAccess {
 // its turn cap, when it has one (mw-1ljpo9.6).
 func (c *seatBootContext) kickoff() string {
 	path, _ := c.detail.Path()
-	return application.KickoffPrompt(c.seat, c.detail.Story.ID, c.dir, c.memoryAccess()) + application.TurnCapAdvice(path.TurnCap(c.maxTurns))
+	return application.KickoffPrompt(c.seat, c.detail.Story.ID, c.dir, c.memoryAccess()) + application.TurnCapAdvice(c.turnCap(path))
 }
 
 func (c *seatBootContext) theKickoffPromptHoldsNoneOf(table *godog.Table) error {
@@ -480,4 +495,13 @@ func (c *seatBootContext) theCommandLineHoldsNoNewline() error {
 		return fmt.Errorf("expected one line, got %q", line)
 	}
 	return nil
+}
+
+// turnCap is the cap the story's path gives on this host, as a Builder's boot
+// reads it.
+func (c *seatBootContext) turnCap(path domain.Path) int {
+	if c.maxTurnsSaid {
+		return path.TurnCapUnder(c.maxTurns)
+	}
+	return path.TurnCap(c.maxTurns)
 }

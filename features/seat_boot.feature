@@ -78,6 +78,29 @@ Feature: Booting a session into a seat
       | capped at 60 turns |
       | by turn 48         |
 
+  # mw-gq6.852: with a size, the cap is its size's: XS 60, S 90, M 120, L 160,
+  # XL 200; the host's next.max_turns, when it says one, is the ceiling.
+  Scenario: A large story is capped at its size's turns, more than an unsized one
+    Given this host caps a Builder's session at 120 turns
+    And the story's own path sets size to "L"
+    When the session that works the story is assembled for the "builder" seat
+    Then the command line carries "--max-turns 160"
+    And the kickoff prompt holds:
+      | capped at 160 turns           |
+      | by turn 128 commit what passes |
+
+  Scenario: A small story is capped at its size's turns
+    Given this host caps a Builder's session at 120 turns
+    And the story's own path sets size to "XS"
+    When the session that works the story is assembled for the "builder" seat
+    Then the command line carries "--max-turns 60"
+
+  Scenario: A host that says its cap makes it the ceiling of every size
+    Given this host says it caps a Builder's session at 100 turns, as the ceiling of every size
+    And the story's own path sets size to "XL"
+    When the session that works the story is assembled for the "builder" seat
+    Then the command line carries "--max-turns 100"
+
   Scenario: A cap of 0 sets no cap and says nothing of one
     Given this host caps a Builder's session at 0 turns
     When the session that works the story is assembled for the "builder" seat

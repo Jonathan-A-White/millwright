@@ -324,6 +324,66 @@ func TestTurnCapIsThePathsOwnOrTheHostsWhenThePathSaysNothing(t *testing.T) {
 	}
 }
 
+// mw-gq6.852: the cap is read by the story's size, from one table, and a story
+// with no size takes the host's.
+func TestTurnCapByEachSize(t *testing.T) {
+	for _, tc := range []struct {
+		size  domain.Size
+		turns int
+	}{
+		{domain.SizeXS, 60}, {domain.SizeS, 90}, {domain.SizeM, 120}, {domain.SizeL, 160}, {domain.SizeXL, 200},
+	} {
+		p := completePath()
+		p.MaxTurns, p.Size = "", tc.size
+		if got := p.TurnCap(120); got != tc.turns {
+			t.Errorf("size %s: expected %d turns, got %d", tc.size, tc.turns, got)
+		}
+		if got := tc.size.TurnCap(); got != tc.turns {
+			t.Errorf("size %s: the table says %d, expected %d", tc.size, got, tc.turns)
+		}
+	}
+	p := completePath()
+	p.MaxTurns, p.Size = "", ""
+	if got := p.TurnCap(120); got != 120 {
+		t.Errorf("an unsized story takes the host's 120, got %d", got)
+	}
+}
+
+func TestAStorysOwnMaxTurnsWinsOverItsSize(t *testing.T) {
+	p := completePath()
+	p.Size, p.MaxTurns = domain.SizeXL, "70"
+	if got := p.TurnCap(120); got != 70 {
+		t.Errorf("expected the story's own 70 over its size, got %d", got)
+	}
+	if got := p.TurnCapUnder(50); got != 70 {
+		t.Errorf("expected the story's own 70 over a host's ceiling of 50, got %d", got)
+	}
+	p.MaxTurns = "0"
+	if got := p.TurnCap(120); got != 0 {
+		t.Errorf("expected the story's own 0 to set no cap, got %d", got)
+	}
+}
+
+func TestAHostsSaidCapIsTheCeilingOfEverySize(t *testing.T) {
+	p := completePath()
+	p.MaxTurns, p.Size = "", domain.SizeL
+	if got := p.TurnCapUnder(100); got != 100 {
+		t.Errorf("expected L (160) held to the host's 100, got %d", got)
+	}
+	p.Size = domain.SizeXS
+	if got := p.TurnCapUnder(100); got != 60 {
+		t.Errorf("expected XS (60) kept under a ceiling of 100, got %d", got)
+	}
+	p.Size = ""
+	if got := p.TurnCapUnder(100); got != 100 {
+		t.Errorf("expected an unsized story to take the host's 100, got %d", got)
+	}
+	p.Size = domain.SizeL
+	if got := p.TurnCapUnder(0); got != 0 {
+		t.Errorf("expected the host's 0 (the rollback) to set no cap for any size, got %d", got)
+	}
+}
+
 // size (mw-1ljpo9.3) is how big the Mayor judged a story: XS, S, M, L or XL, or
 // empty when nobody has.
 func TestSizeIsOneOfTheFiveOrEmpty(t *testing.T) {

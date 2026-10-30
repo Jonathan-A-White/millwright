@@ -339,11 +339,23 @@ type SeatBoot struct {
 	// next.max_turns, unless the story's own path sets max_turns (mw-1ljpo9.6).
 	// The session is told to wrap up at TurnCapWrapUp of them, and at the cap
 	// its harness stops it and mw next gives the story back. 0 sets no cap.
-	MaxTurns int
+	// A story with a size is capped by it (domain.Size.TurnCap, mw-gq6.852), and
+	// MaxTurns is then its ceiling when MaxTurnsSaid, else only the cap of a story
+	// with no size.
+	MaxTurns     int
+	MaxTurnsSaid bool
 
 	// Errors is the common-errors register a bug's Builder is shown the classes
 	// of its rig's kinds from, after its ask (mw-gq6.683); nil shows none.
 	Errors ErrorFiles
+}
+
+// turnCap is the turns a session working path may take on this host.
+func (b SeatBoot) turnCap(path domain.Path) int {
+	if b.MaxTurnsSaid {
+		return path.TurnCapUnder(b.MaxTurns)
+	}
+	return path.TurnCap(b.MaxTurns)
 }
 
 // DefaultMaxTurns is the most turns a Builder's session takes when the host's
@@ -574,7 +586,7 @@ func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kick
 	// refusing every dispatch and sync until somebody committed the empty file
 	// by hand.
 	attempt := detail.Attempts + 1
-	turns := path.TurnCap(b.MaxTurns)
+	turns := b.turnCap(path)
 	advice := TurnCapAdvice(turns)
 	if IsTesterStory(detail) {
 		advice = TesterTurnCapAdvice(turns)

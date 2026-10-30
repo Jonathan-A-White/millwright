@@ -2509,6 +2509,23 @@ func TestNextMaxTurnsIs120UntilTheNextTableSaysOtherwise(t *testing.T) {
 	}
 }
 
+// mw-gq6.852: a host that says next.max_turns makes it the ceiling of every
+// size's cap; one that says nothing leaves each size its own.
+func TestNextMaxTurnsSaidTellsAHostThatSetItFromOneThatDidNot(t *testing.T) {
+	writeConfig(t, "[next]\nretry_from_branch = true\n")
+	if turns, said, err := config.NextMaxTurnsSaid(); err != nil || said || turns != 120 {
+		t.Fatalf("expected the default 120 unsaid, got %d, %v: %v", turns, said, err)
+	}
+	writeConfig(t, "[next]\nmax_turns = 90\n")
+	if turns, said, err := config.NextMaxTurnsSaid(); err != nil || !said || turns != 90 {
+		t.Fatalf("expected 90 said, got %d, %v: %v", turns, said, err)
+	}
+	writeConfig(t, "[next]\nmax_turns = 0\n")
+	if turns, said, err := config.NextMaxTurnsSaid(); err != nil || !said || turns != 0 {
+		t.Fatalf("expected 0 said, got %d, %v: %v", turns, said, err)
+	}
+}
+
 // next.retry_from_branch (mw-1ljpo9.7) is on until the [next] table turns it
 // off, the rollback; anything but true or false is refused.
 func TestNextRetryFromBranchIsOnUntilTheNextTableTurnsItOff(t *testing.T) {

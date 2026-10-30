@@ -1129,24 +1129,32 @@ const DefaultNextMaxTurns = 120
 // story's own path says otherwise. A whole number; 0 sets no cap, the rollback;
 // DefaultNextMaxTurns when the table says nothing.
 func NextMaxTurns() (int, error) {
+	turns, _, err := NextMaxTurnsSaid()
+	return turns, err
+}
+
+// NextMaxTurnsSaid is NextMaxTurns and whether the table said it. A host that
+// says it makes it the ceiling of the cap of every story size; one that does not
+// leaves each size its own (mw-gq6.852).
+func NextMaxTurnsSaid() (turns int, said bool, err error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return 0, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+		return 0, false, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
 	}
 	path := filepath.Join(home, File)
 	table, err := tableIn(path, NextTable)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	said := strings.TrimSpace(table["max_turns"])
-	if said == "" {
-		return DefaultNextMaxTurns, nil
+	word := strings.TrimSpace(table["max_turns"])
+	if word == "" {
+		return DefaultNextMaxTurns, false, nil
 	}
-	turns, err := strconv.Atoi(said)
+	turns, err = strconv.Atoi(word)
 	if err != nil || turns < 0 {
-		return 0, fmt.Errorf("the [%s] table of %s says max_turns = %q: it must be a whole number of turns, 0 for no cap", NextTable, path, said)
+		return 0, false, fmt.Errorf("the [%s] table of %s says max_turns = %q: it must be a whole number of turns, 0 for no cap", NextTable, path, word)
 	}
-	return turns, nil
+	return turns, true, nil
 }
 
 // NextHarness reports `harness` of the `[next]` table of

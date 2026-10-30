@@ -284,7 +284,7 @@ func newDispatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			turns, err := config.NextMaxTurns()
+			turns, turnsSaid, err := config.NextMaxTurnsSaid()
 			if err != nil {
 				return err
 			}
@@ -340,7 +340,7 @@ func newDispatchCmd() *cobra.Command {
 				Worktrees:     worktrees,
 				Landing:       worktrees,
 				Runner:        tmux.New(),
-				Boot:          builderBoot(files, host, tests, nice, jobs, turns),
+				Boot:          builderBoot(files, host, tests, nice, jobs, turns, turnsSaid),
 				Memory:        gateway,
 				Sync:          sync,
 				SyncTries:     tries,
