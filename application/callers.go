@@ -12,7 +12,9 @@ import (
 // (mw-gq6.661). A story is sized by the screens it names, but the tests that
 // call those screens are changed with them, so two Lampas stories ran out of
 // turns at 70 and 135 changed files. The count is the rig's test files that name
-// any file of the story's files key by its base name without extension.
+// something a file of the story's files key declares (RigFiles.TestCallers),
+// not the file's base name, which a common word like status would match in
+// hundreds of tests that never call it (mw-gq6.856).
 type TestCallers struct {
 	// Label is how the story is named: its plan key, or its id.
 	Label string
@@ -54,11 +56,11 @@ func testCallersOf(rigs map[string]string, files RigFiles, label string, path do
 		return TestCallers{}, false
 	}
 	dir, here := rigs[strings.TrimSpace(path.Rig)]
-	stems := domain.CallerStems(path.Files)
-	if !here || dir == "" || len(stems) == 0 {
+	named := domain.CallerFiles(path.Files)
+	if !here || dir == "" || len(named) == 0 {
 		return TestCallers{}, false
 	}
-	n, err := files.TestCallers(dir, stems)
+	n, err := files.TestCallers(dir, named)
 	if err != nil {
 		return TestCallers{}, false
 	}

@@ -1,8 +1,10 @@
 Feature: A story is sized by the tests that call its files
   Two Lampas stories hit the turn cap because they were sized by the screens
   they name, not by the tests that call those screens. When a story names files,
-  `mw file` and `mw path set` count the rig's test files that name them (by
-  base name without extension), say it as 'test callers: N for size S (allows
+  `mw file` and `mw path set` count the rig's test files that name something
+  the files declare (a Go file's exported functions, types, variables and
+  constants; a TS file's exports and import path), not the base name of the file
+  as a word, which a name like status would find in prose, say it as 'test callers: N for size S (allows
   M)', and warn when N is more than the size allows: XS 5, S 10, M 20, L 35,
   XL 50. `mw file --check` then fails, unless the story says why not, as
   "callers_ok".
@@ -62,6 +64,14 @@ Feature: A story is sized by the tests that call its files
     When the callers plan is checked
     Then the callers check passes
     And the callers output has the line: pages: test callers: 0 for size S (allows 10)
+
+  Scenario: A common word in a file's name does not make the tests that say it callers
+    Given the callers rig also has "src/status.go" declaring "Uptime", 2 test files calling it and 10 test files saying "status"
+    And the callers story "pages" names the files "src/status.go"
+    When the callers plan is checked
+    Then the callers check passes
+    And the callers output has the line: pages: test callers: 2 for size S (allows 10)
+    And the callers warning is empty
 
   Scenario: Filing warns of the callers and files the plan all the same
     When the callers plan is filed

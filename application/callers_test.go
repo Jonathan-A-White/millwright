@@ -23,8 +23,8 @@ func TestPathSetCountsTestCallersOfTheFilesNamed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(files.AskedStems(), ","); got != "Settings,Settings.test" {
-		t.Errorf("asked for the stems %q", got)
+	if got := strings.Join(files.AskedFiles(), ","); got != "src/Settings.tsx,src/Settings.test.tsx" {
+		t.Errorf("asked for the files %q", got)
 	}
 	if !strings.Contains(out.String(), "B: test callers: 11 for size S (allows 10)\n") {
 		t.Errorf("stdout lacks the count:\n%s", out.String())

@@ -2,13 +2,16 @@ package rig
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -108,34 +111,186 @@ func (Files) Matching(rigDir, pattern string, most int) int {
 	return n
 }
 
-// callerSearchLimit is how long the search for test callers may take.
+// callerSearchLimit is how long listing the rig's tracked files may take.
 const callerSearchLimit = 20 * time.Second
 
 // TestCallers implements application.RigFiles: the tracked test files of the
 // checkout at rigDir (those under features/ or tests/, and any *_test.go) that
-// name any of the stems, in one git grep (mw-gq6.661). The config's [tests] is a
-// command, not a list of globs, so those three are the test files of every rig.
-func (Files) TestCallers(rigDir string, stems []string) (int, error) {
-	args := []string{"-C", rigDir, "grep", "-l", "-F", "--no-color"}
-	for _, stem := range stems {
-		args = append(args, "-e", stem)
-	}
-	args = append(args, "--", "features", "tests", ":(glob)**/*_test.go")
+// name something the named files declare (mw-gq6.661, mw-gq6.856). The config's
+// [tests] is a command, not a list of globs, so those three are the test files
+// of every rig.
+//
+// What a file declares is, for a Go file, its top-level exported identifiers
+// (func, type, var and const; a method is reached through its type), and for a
+// TS or JS file its exported names and its import path, the path without
+// extension. A test file counts when it calls one of them:
+//   - Go: it says pkg.Name, pkg being the declaring file's package, or it is in
+//     the same directory (the same package) and says Name not after a dot, so
+//     that a field called Status is not a call of a type called Status;
+//   - TS or JS: it says an exported name as a whole word, or imports the path
+//     (from, require or import() of '.../<stem>').
+//
+// The file's base name as a word is not looked for: a stem like status or
+// doctor is in hundreds of tests that never call the file. A named file that is
+// itself a test declares nothing others call, one that is not there declares
+// nothing, and a named file is never its own caller.
+func (Files) TestCallers(rigDir string, named []string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), callerSearchLimit)
 	defer cancel()
+	args := []string{"-C", rigDir, "ls-files", "-z", "--", "features", "tests", ":(glob)**/*_test.go"}
 	out, err := exec.CommandContext(ctx, "git", args...).Output()
-	if err == nil && len(out) == 0 {
-		return 0, nil
-	}
 	if err != nil {
-		// git grep says no match with status 1 and nothing printed.
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && exit.ExitCode() == 1 && len(out) == 0 {
-			return 0, nil
-		}
 		return 0, fmt.Errorf("counting the test callers in %s: %w", rigDir, err)
 	}
-	return len(strings.Split(strings.TrimSpace(string(out)), "\n")), nil
+	matcher := newCallerMatcher(rigDir, named)
+	own := map[string]bool{}
+	for _, file := range named {
+		own[path.Clean(file)] = true
+	}
+	var n int
+	for _, test := range strings.Split(string(out), "\x00") {
+		if test == "" || own[test] {
+			continue
+		}
+		text, err := os.ReadFile(filepath.Join(rigDir, filepath.FromSlash(test)))
+		if err == nil && matcher.calls(path.Dir(test), text) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// callerMatcher says whether a test file calls what a story's files declare.
+type callerMatcher struct {
+	// anywhere matches in any test file: a TS or JS name or import, and a Go
+	// name qualified by its package.
+	anywhere *regexp.Regexp
+	// sameDir matches in the test files of one directory: the bare Go names of
+	// the files declared there.
+	sameDir map[string]*regexp.Regexp
+}
+
+func newCallerMatcher(rigDir string, named []string) callerMatcher {
+	var anywhere []string
+	bare := map[string][]string{}
+	for _, file := range named {
+		d := declaredIn(rigDir, file)
+		if len(d.names) == 0 && d.importStem == "" {
+			continue
+		}
+		quoted := make([]string, len(d.names))
+		for i, name := range d.names {
+			quoted[i] = regexp.QuoteMeta(name)
+		}
+		names := strings.Join(quoted, "|")
+		switch {
+		case d.pkg != "" && names != "":
+			anywhere = append(anywhere, `\b`+regexp.QuoteMeta(d.pkg)+`\.(?:`+names+`)\b`)
+			bare[path.Dir(file)] = append(bare[path.Dir(file)], names)
+		case names != "":
+			anywhere = append(anywhere, `\b(?:`+names+`)\b`)
+		}
+		if d.importStem != "" {
+			anywhere = append(anywhere, `(?:from|require\(|import\()\s*['"](?:[^'"\n]*/)?`+regexp.QuoteMeta(d.importStem)+`(?:\.[A-Za-z]+)?['"]`)
+		}
+	}
+	m := callerMatcher{sameDir: map[string]*regexp.Regexp{}}
+	if len(anywhere) > 0 {
+		m.anywhere = regexp.MustCompile(strings.Join(anywhere, "|"))
+	}
+	for dir, names := range bare {
+		m.sameDir[dir] = regexp.MustCompile(`(?:^|[^.\w])(?:` + strings.Join(names, "|") + `)(?:[^:\w]|:=|$)`)
+	}
+	return m
+}
+
+func (m callerMatcher) calls(dir string, text []byte) bool {
+	if m.anywhere != nil && m.anywhere.Match(text) {
+		return true
+	}
+	same := m.sameDir[dir]
+	return same != nil && same.Match(text)
+}
+
+// What a TS or JS file exports: export function, class, const, let, var, type,
+// interface and enum, and the names in export { ... }.
+var (
+	exportedDeclaration = regexp.MustCompile(`(?m)^\s*export\s+(?:declare\s+)?(?:default\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\*?|class|const|let|var|type|interface|enum)\s+([A-Za-z_$][\w$]*)`)
+	exportedList        = regexp.MustCompile(`(?m)^\s*export\s*(?:type\s*)?\{([^}]*)\}`)
+)
+
+// declared is what a file offers its callers: its exported names, the package
+// they are qualified by (a Go file) and the stem it is imported by (a TS or JS
+// file).
+type declared struct {
+	names      []string
+	pkg        string
+	importStem string
+}
+
+// declaredIn reads what the file at rel in the checkout declares for others to
+// use; a file of another kind, or one that is not there, declares nothing.
+func declaredIn(rigDir, rel string) declared {
+	file := filepath.Join(rigDir, filepath.FromSlash(rel))
+	base := path.Base(rel)
+	switch ext := path.Ext(rel); ext {
+	case ".go":
+		if strings.HasSuffix(base, "_test.go") {
+			return declared{}
+		}
+		parsed, _ := parser.ParseFile(token.NewFileSet(), file, nil, parser.SkipObjectResolution)
+		if parsed == nil {
+			return declared{}
+		}
+		d := declared{pkg: parsed.Name.Name}
+		for _, decl := range parsed.Decls {
+			switch x := decl.(type) {
+			case *ast.FuncDecl:
+				if x.Recv == nil && x.Name.IsExported() {
+					d.names = append(d.names, x.Name.Name)
+				}
+			case *ast.GenDecl:
+				for _, spec := range x.Specs {
+					switch sp := spec.(type) {
+					case *ast.TypeSpec:
+						if sp.Name.IsExported() {
+							d.names = append(d.names, sp.Name.Name)
+						}
+					case *ast.ValueSpec:
+						for _, id := range sp.Names {
+							if id.IsExported() {
+								d.names = append(d.names, id.Name)
+							}
+						}
+					}
+				}
+			}
+		}
+		return d
+	case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs":
+		stem := strings.TrimSuffix(base, ext)
+		if strings.HasSuffix(stem, ".test") || strings.HasSuffix(stem, ".spec") {
+			return declared{}
+		}
+		text, err := os.ReadFile(file)
+		if err != nil {
+			return declared{}
+		}
+		d := declared{importStem: stem}
+		for _, m := range exportedDeclaration.FindAllSubmatch(text, -1) {
+			d.names = append(d.names, string(m[1]))
+		}
+		for _, m := range exportedList.FindAllSubmatch(text, -1) {
+			for _, item := range strings.Split(string(m[1]), ",") {
+				fields := strings.Fields(strings.TrimPrefix(strings.TrimSpace(item), "type "))
+				if len(fields) > 0 {
+					d.names = append(d.names, fields[len(fields)-1])
+				}
+			}
+		}
+		return d
+	}
+	return declared{}
 }
 
 // Docs reads one file of a rig's checkout on this host, for a seat's boot

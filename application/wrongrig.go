@@ -26,9 +26,10 @@ type RigFiles interface {
 	Matching(rigDir, pattern string, most int) int
 
 	// TestCallers is how many of the rig's test files (those under features/ or
-	// tests/, and any *_test.go) name any of the stems, which are base names
-	// without extension, in the checkout at rigDir (mw-gq6.661).
-	TestCallers(rigDir string, stems []string) (int, error)
+	// tests/, and any *_test.go) name something the named files declare, in the
+	// checkout at rigDir; the named files are paths in the rig (mw-gq6.661,
+	// mw-gq6.856).
+	TestCallers(rigDir string, files []string) (int, error)
 }
 
 // WrongRig is a story whose files key names paths that exist in none of its

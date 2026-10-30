@@ -49,6 +49,7 @@ func InitializeFileCallersScenario(ctx *godog.ScenarioContext) {
 	})
 
 	ctx.Given(`^the callers rig "([^"]*)" is a git checkout whose (\d+) test files name "([^"]*)" and (\d+) do not$`, c.theRigIsACheckout)
+	ctx.Given(`^the callers rig also has "([^"]*)" declaring "([^"]*)", (\d+) test files calling it and (\d+) test files saying "([^"]*)"$`, c.theRigAlsoHasAFile)
 	ctx.Given(`^the callers plan:$`, c.thePlan)
 	ctx.Given(`^the callers story "([^"]*)" is sized (\S+)$`, c.theStoryIsSized)
 	ctx.Given(`^the callers story "([^"]*)" says callers_ok "([^"]*)"$`, c.theStorySaysCallersOK)
@@ -84,8 +85,8 @@ func (c *callersContext) theRigIsACheckout(name string, calling int, word string
 		}
 		return os.WriteFile(path, []byte(text), 0o644)
 	}
-	// Half the callers are Gherkin, half unit tests; the other test files and a
-	// source file that names the word are not callers.
+	// Half the callers are Gherkin, half unit tests; the other test files are not
+	// callers. The source file declares the word, which is what its callers name.
 	for i := 0; i < calling; i++ {
 		rel, text := fmt.Sprintf("features/caller%d.feature", i), "open the "+word+" page\n"
 		if i%2 == 1 {
@@ -100,7 +101,7 @@ func (c *callersContext) theRigIsACheckout(name string, calling int, word string
 			return err
 		}
 	}
-	if err := write("src/screens/"+word+".tsx", "// "+word+" itself is not a test\n"); err != nil {
+	if err := write("src/screens/"+word+".tsx", "export function "+word+"() {}\n"); err != nil {
 		return err
 	}
 	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}} {
@@ -108,6 +109,35 @@ func (c *callersContext) theRigIsACheckout(name string, calling int, word string
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, out)
 		}
+	}
+	return nil
+}
+
+// theRigAlsoHasAFile adds to the checkout a Go file that declares one function,
+// test files that call it, and test files that only say the file's base name.
+func (c *callersContext) theRigAlsoHasAFile(rel, function string, calling, saying int, word string) error {
+	write := func(rel, text string) error {
+		path := filepath.Join(c.rigDir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(path, []byte(text), 0o644)
+	}
+	if err := write(rel, "package src\n\nfunc "+function+"() {}\n"); err != nil {
+		return err
+	}
+	for i := 0; i < calling; i++ {
+		if err := write(fmt.Sprintf("src/calls%d_test.go", i), "package src\n\nvar _ = "+function+"()\n"); err != nil {
+			return err
+		}
+	}
+	for i := 0; i < saying; i++ {
+		if err := write(fmt.Sprintf("src/says%d_test.go", i), "package src\n\n// the "+word+" line\nvar _ = \""+word+"\"\n"); err != nil {
+			return err
+		}
+	}
+	if out, err := exec.Command("git", "-C", c.rigDir, "add", "-A").CombinedOutput(); err != nil {
+		return fmt.Errorf("git add: %v: %s", err, out)
 	}
 	return nil
 }
