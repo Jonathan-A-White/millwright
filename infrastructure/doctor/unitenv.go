@@ -18,17 +18,21 @@ var _ application.DoctorCheck = (*UnitEnv)(nil)
 // as `mw doctor unit-env`.
 const UnitEnvName = "unit-env"
 
-// The unit-env check's damper: the alarm is sent again after a day, three times.
+// MailUnitEnv starts the subject of the mail that tells the Mayor a user unit
+// runs mw without beads.env.
+const MailUnitEnv = "Unit without beads.env"
+
+// The unit-env check's damper: one mail an episode, as the starved-rig check's.
 const (
-	UnitEnvDamperWait = 24 * time.Hour
-	UnitEnvDamperCap  = 3
+	UnitEnvDamperWait = 0
+	UnitEnvDamperCap  = 1
 )
 
 // beadsEnvTail ends the path of ~/.config/mw/beads.env as `systemctl show` prints
 // it, home expanded.
 const beadsEnvTail = "/.config/mw/beads.env"
 
-// unitEnvFix is the cure the alarm names, a person's to do.
+// unitEnvFix is the cure the mail names, the Mayor's to do.
 const unitEnvFix = "Add `EnvironmentFile=-%h/.config/mw/beads.env` to the unit's file " +
 	"(or `--property=EnvironmentFile=-<home>/.config/mw/beads.env` to the systemd-run that made it), then `systemctl --user daemon-reload`"
 
@@ -43,16 +47,18 @@ var UnitEnvLetOff = []string{"mw-postern-mirror.service"}
 // scripts/check-timer-units.sh holds the installed unit files to it; this holds
 // the units systemd has loaded or installed on this host, transient ones
 // included. It is faulty naming each unit whose ExecStart runs mw, mw-<name> or
-// bd and whose EnvironmentFiles name no beads.env. Its cure is the alarm to the
-// Governor: the unit's file is a person's to edit.
+// bd and whose EnvironmentFiles name no beads.env. Its cure is one mail to the
+// Mayor an episode: the unit's file is the Mayor's to edit, so the Governor's
+// phone is not pushed and no emergency event is written (mw-gq6.853).
 type UnitEnv struct {
 	// Program is the program run for systemctl. Empty reads "systemctl".
 	Program string
 	// LetOff are the units not asked; nil reads UnitEnvLetOff.
 	LetOff []string
-	// Alarm sends the Governor the text and gives the seq of the emergency
-	// event it was written as, 0 for none. A nil Alarm cannot cure.
-	Alarm func(ctx context.Context, text string) (uint64, error)
+	// Host is the host the check runs on, named in the mail's sender.
+	Host string
+	// Mail sends the Mayor a message. A nil Mail cannot cure.
+	Mail func(ctx context.Context, message application.NewMessage) error
 }
 
 // NewUnitEnv is the check run through the real systemctl.
@@ -200,25 +206,32 @@ func alarmUnitEnv(missing []string) string {
 	return "Unit without beads.env: " + strings.Join(missing, ", ") + " runs mw and reads no ~/.config/mw/beads.env, so its bd cannot reach the served beads. " + unitEnvFix
 }
 
-// Cure implements application.DoctorCheck: send the alarm.
+// Cure implements application.DoctorCheck: mail the Mayor.
 func (u *UnitEnv) Cure(ctx context.Context) error {
 	missing, _ := u.missing(ctx)
 	if len(missing) == 0 {
 		return nil
 	}
-	if u.Alarm == nil {
-		return fmt.Errorf("there is no way to send the unit-env alarm")
+	if u.Mail == nil {
+		return fmt.Errorf("there is no way to mail the Mayor the unit-env finding")
 	}
-	if _, err := u.Alarm(ctx, alarmUnitEnv(missing)); err != nil {
-		return fmt.Errorf("the unit-env alarm could not be sent: %w", err)
+	err := u.Mail(ctx, application.NewMessage{
+		From:    application.SeatIdentity(application.MwSeat, u.Host),
+		To:      application.MayorMailbox,
+		Subject: MailUnitEnv + ": " + strings.Join(missing, ", "),
+		Body: alarmUnitEnv(missing) + "\n\n" +
+			"`mw doctor unit-env` on the host reads the same finding; the mail comes once an episode, and the episode ends when every unit carries the file.",
+	})
+	if err != nil {
+		return fmt.Errorf("the unit-env mail could not be sent: %w", err)
 	}
 	return nil
 }
 
-// Damper implements application.DoctorCheck.
+// Damper implements application.DoctorCheck: one mail an episode.
 func (u *UnitEnv) Damper() (time.Duration, int) { return UnitEnvDamperWait, UnitEnvDamperCap }
 
 // WayBack implements application.DoctorCheck.
 func (u *UnitEnv) WayBack() string {
-	return "none needed: the alarm only tells the Governor; add the EnvironmentFile line to the unit"
+	return "none needed: the cure only mails the Mayor; add the EnvironmentFile line to the unit"
 }

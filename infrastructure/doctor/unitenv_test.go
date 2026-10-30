@@ -8,8 +8,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 )
 
@@ -94,16 +96,63 @@ func TestUnitEnvIsCleanWhenEveryUnitThatRunsMwCarriesIt(t *testing.T) {
 	}
 }
 
-func TestUnitEnvAlarmsTheGovernorNamingTheUnit(t *testing.T) {
+func TestUnitEnvMailsTheMayorNamingTheUnitAndTheFixAndSendsNoAlarm(t *testing.T) {
 	program := fakeUnitSystemctl(t, map[string]userUnit{
 		"mw-resume-2026-10-29.service": {argv: "/home/someone/bin/mw resume"},
 	})
-	var sent string
-	check := &doctor.UnitEnv{Program: program, Alarm: func(_ context.Context, text string) (uint64, error) { sent = text; return 0, nil }}
+	mailbox := apptest.NewFakeMailbox()
+	check := &doctor.UnitEnv{Program: program, Host: "laptop", Mail: func(ctx context.Context, m application.NewMessage) error {
+		_, err := mailbox.Send(ctx, m)
+		return err
+	}}
 	if err := check.Cure(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(sent, "mw-resume-2026-10-29.service") || !strings.Contains(sent, "beads.env") {
-		t.Errorf("alarm %q does not name the unit and the file", sent)
+	inbox, err := mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if err != nil || len(inbox) != 1 {
+		t.Fatalf("the Mayor's inbox holds %d messages (err %v), want 1", len(inbox), err)
+	}
+	mail := inbox[0]
+	if !strings.HasPrefix(mail.Subject, doctor.MailUnitEnv) || !strings.Contains(mail.Subject, "mw-resume-2026-10-29.service") {
+		t.Errorf("subject %q should start %q and name the unit", mail.Subject, doctor.MailUnitEnv)
+	}
+	if !strings.Contains(mail.Body, "mw-resume-2026-10-29.service") || !strings.Contains(mail.Body, "EnvironmentFile=-%h/.config/mw/beads.env") || !strings.Contains(mail.Body, "daemon-reload") {
+		t.Errorf("body %q does not name the unit and the fix", mail.Body)
+	}
+}
+
+// The check has no way to push the Governor's phone or write an emergency
+// event: its whole cure is the mail (mw-gq6.853).
+func TestUnitEnvCannotCureWithoutAMailbox(t *testing.T) {
+	program := fakeUnitSystemctl(t, map[string]userUnit{
+		"mw-resume-2026-10-29.service": {argv: "/home/someone/bin/mw resume"},
+	})
+	if err := (&doctor.UnitEnv{Program: program}).Cure(context.Background()); err == nil {
+		t.Fatal("a cure with no way to mail the Mayor said it succeeded")
+	}
+}
+
+func TestUnitEnvMailsOnceAnEpisode(t *testing.T) {
+	program := fakeUnitSystemctl(t, map[string]userUnit{
+		"mw-resume-2026-10-29.service": {argv: "/home/someone/bin/mw resume"},
+	})
+	mailbox := apptest.NewFakeMailbox()
+	check := &doctor.UnitEnv{Program: program, Host: "laptop", Mail: func(ctx context.Context, m application.NewMessage) error {
+		_, err := mailbox.Send(ctx, m)
+		return err
+	}}
+	now := time.Date(2026, 10, 30, 14, 0, 0, 0, time.UTC)
+	runner := application.Doctor{
+		Checks: application.DoctorChecks{check},
+		State:  apptest.NewFakeDoctorState(),
+		Log:    &apptest.FakeDoctorLog{},
+		Now:    func() time.Time { return now },
+	}
+	for i := 0; i < 3; i++ {
+		_, _ = runner.Run(context.Background(), "", false)
+		now = now.Add(48 * time.Hour)
+	}
+	if got := mailbox.Writes(); got != 1 {
+		t.Errorf("the Mayor was mailed %d times over three ticks of one episode, want 1", got)
 	}
 }

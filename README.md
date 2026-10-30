@@ -5695,8 +5695,8 @@ nothing to judge and reads ok.
 a transient one such as `mw pause`'s `mw-resume-<date>.service` included, runs `mw`, `bd`
 or an `mw-<name>` program and reads no `~/.config/mw/beads.env`: without it bd cannot reach
 the home's served beads (mw-gq6.849). `mw-postern-mirror.service` touches no tracker and is
-let off. Its cure is one alarm push to the Governor a day, up to three; the unit's file is
-a person's to edit.
+let off. Its cure is one mail to the Mayor an episode, naming the unit and the fix, with no
+push to the Governor's phone and no emergency event: the unit's file is the Mayor's to edit.
 
 **Install**, once per host: `sh scripts/install-units.sh --enable mw-doctor`
 (see *Running a host on a timer*), which runs `mw-doctor.timer` at 2, 7, 12,
