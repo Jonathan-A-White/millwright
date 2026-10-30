@@ -287,9 +287,14 @@ func newDoctorCmd() *cobra.Command {
 			claudeLogin.Alarm = alarm
 			claudeLogin.Screens = seatWindows().NotLoggedInWindows
 			// A user unit that runs mw with no beads.env cannot reach the served
-			// beads (mw-gq6.849); the alarm is the same push.
+			// beads (mw-gq6.849); the unit is the Mayor's to fix, so the cure is one mail
+			// to the Mayor, not the alarm (mw-gq6.853).
 			unitEnv := doctor.NewUnitEnv()
-			unitEnv.Alarm = alarm
+			unitEnv.Host = host
+			unitEnv.Mail = func(ctx context.Context, message application.NewMessage) error {
+				_, err := mwGateway(vault, host).Send(ctx, message)
+				return err
+			}
 			checks := application.DoctorChecks{}
 			// The factory checkout the vault's formulas are judged against; none
 			// where this host checks the rig out nowhere.
