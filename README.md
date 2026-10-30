@@ -5676,6 +5676,13 @@ Governor a day, for up to thirty days; the text names `claude setup-token` and t
 `printf` line of `docs/secrets.md`. A host with no claude program or no env file has
 nothing to judge and reads ok.
 
+**unit-env** faults when a `mw-*.service` user unit systemd has loaded or installed here,
+a transient one such as `mw pause`'s `mw-resume-<date>.service` included, runs `mw`, `bd`
+or an `mw-<name>` program and reads no `~/.config/mw/beads.env`: without it bd cannot reach
+the home's served beads (mw-gq6.849). `mw-postern-mirror.service` touches no tracker and is
+let off. Its cure is one alarm push to the Governor a day, up to three; the unit's file is
+a person's to edit.
+
 **Install**, once per host: `sh scripts/install-units.sh --enable mw-doctor`
 (see *Running a host on a timer*), which runs `mw-doctor.timer` at 2, 7, 12,
 ... past the hour — off the dispatch timer's own minutes, so the two never

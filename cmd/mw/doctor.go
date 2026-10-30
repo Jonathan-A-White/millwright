@@ -286,6 +286,10 @@ func newDoctorCmd() *cobra.Command {
 			claudeLogin := doctor.NewClaudeLogin(claudeEnvFile())
 			claudeLogin.Alarm = alarm
 			claudeLogin.Screens = seatWindows().NotLoggedInWindows
+			// A user unit that runs mw with no beads.env cannot reach the served
+			// beads (mw-gq6.849); the alarm is the same push.
+			unitEnv := doctor.NewUnitEnv()
+			unitEnv.Alarm = alarm
 			checks := application.DoctorChecks{}
 			// The factory checkout the vault's formulas are judged against; none
 			// where this host checks the rig out nowhere.
@@ -439,6 +443,7 @@ func newDoctorCmd() *cobra.Command {
 				staleLandings,
 				ageKey,
 				claudeLogin,
+				unitEnv,
 			}, churn...), checks...)
 			// Where Claude Code keeps its transcripts is the only place these
 			// two checks read; a host on codex has none, and says so once rather
