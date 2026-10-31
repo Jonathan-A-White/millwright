@@ -35,3 +35,26 @@ Feature: One rig gate runs at a time on a host
     When mw closes out "mw-gq6.1"
     Then the story "mw-gq6.1" is not closed
     And this host's gate lock is free again
+
+  # mw-gq6.872: the target is fetched after the wait for the gate lock, not before.
+  Scenario: A merged result whose red the target fixed while the gate waited is tested on the target as it is then
+    Given the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And the rig's tests fail, saying "--- FAIL: TestTogether (0.01s)", with the other host's work merged in unless the target holds the fix
+    And the rig has a named-tests command that fails on main alone unless the target holds the fix, saying "--- FAIL: TestTogether"
+    And "main" at the origin gets the fix while the gate lock is asked for the 2nd time and found held
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And "main" at the origin holds the fix
+    And the story "mw-gq6.1" is closed
+    And the named-tests command was not run
+
+  Scenario: Main alone is checked on the target as it is after the wait for the gate lock, and passes what the fix mended
+    Given the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And the rig's tests fail, saying "--- FAIL: TestTogether (0.01s)", with the other host's work merged in unless the target holds the fix
+    And the rig has a named-tests command that fails on main alone unless the target holds the fix, saying "--- FAIL: TestTogether"
+    And "main" at the origin gets the fix while the gate lock is asked for the 3rd time and found held
+    When mw closes out "mw-gq6.1"
+    Then the named-tests command was run once, given: TestTogether
+    And the last ledger line holds:
+      | main alone passes TestTogether (checked in |
+    And the last ledger line does not say "main is red"

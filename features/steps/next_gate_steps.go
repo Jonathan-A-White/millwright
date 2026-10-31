@@ -48,6 +48,9 @@ func (c *nextContext) quickGate() *hostlock.Gate {
 // other gate ends the moment this one is seen waiting, which is how two gates
 // that would overlap are made to overlap on purpose.
 func (c *nextContext) gateLock() application.GateLock {
+	if c.moveAt > 0 {
+		return movingGate{inner: c.quickGate(), c: c}
+	}
 	if c.otherGate == nil {
 		return c.quickGate()
 	}
