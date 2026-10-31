@@ -43,6 +43,10 @@ func newRetryCmd() *cobra.Command {
 			"the story. Where a story was worked\n" +
 			"is read from its claim (mw@<host>) first, and only without one from the host key of its path,\n" +
 			"so changing the host key of a story in progress moves neither its worktree nor its retry.\n\n" +
+			"A story queued for its rig's batch landing (run=queued: its work is done and its branch pushed for\n" +
+			"the batch to land) is refused, with --force or without it, naming the batch, because a second attempt\n" +
+			"would run while the batch lands the first; retry it once the batch has landed it, or its queued state\n" +
+			"is gone.\n\n" +
 			"It never resets a story's attempts, and a story already started max_attempts times is refused\n" +
 			"with \"attempts exhausted\" rather than retried — resetting the counter by hand is what allows\n" +
 			"another attempt.\n\n" +
@@ -124,6 +128,7 @@ func newRetryCmd() *cobra.Command {
 				Hold:        hold,
 				Reach:       peekremote.Remote{Reach: reach, Gaps: gaps},
 				Force:       force,
+				Log:         homeEventLog(),
 				Err:         cmd.ErrOrStderr(),
 			}.Run(cmd.Context(), args[0])
 			return err

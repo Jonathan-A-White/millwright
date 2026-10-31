@@ -106,10 +106,16 @@ var batchRigNamed = regexp.MustCompile(`([^\s,]+) \(\d+ queued`)
 // what the pass is for: a pass the restarted follower runs again is scheduled
 // with a reason that names no rig (mw-gq6.727).
 func (s Status) batchJobsRunning(ctx context.Context) map[string]time.Time {
-	if s.Log == nil {
+	return batchJobsRunning(ctx, s.Log)
+}
+
+// batchJobsRunning is Status.batchJobsRunning for any log, which mw retry reads
+// too (mw-gq6.862).
+func batchJobsRunning(ctx context.Context, log EventLog) map[string]time.Time {
+	if log == nil {
 		return nil
 	}
-	newest, err := NewestOf(ctx, s.Log)
+	newest, err := NewestOf(ctx, log)
 	if err != nil {
 		return nil
 	}
