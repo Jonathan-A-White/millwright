@@ -103,6 +103,7 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the story "([^"]*)" has had (\d+) dead-pane refunds?$`, c.theStoryHasHadRefunds)
 	ctx.Given(`^the vault cannot reach its origin$`, c.theVaultCannotReachItsOrigin)
 	ctx.Given(`^the story "([^"]*)" is queued for its rig's batch$`, c.theStoryIsQueuedForItsBatch)
+	ctx.Given(`^the story "([^"]*)" was refused by mw next and left blocked$`, c.theStoryWasLeftBlocked)
 	ctx.Then(`^the story "([^"]*)" carries no run state label$`, c.theStoryCarriesNoRunStateLabel)
 	ctx.Then(`^the next dispatch tick does not pass "([^"]*)" as queued for its batch$`, c.dispatchDoesNotPassItAsQueued)
 
@@ -832,6 +833,13 @@ func (c *retryContext) retryTheWorktreeIsStillThere(id string) error {
 func (c *retryContext) theStoryIsQueuedForItsBatch(id string) error {
 	return c.tracker.SetStoryState(context.Background(), id, application.RunState, application.RunQueued,
 		"queued for the rig's batch")
+}
+
+// theStoryWasLeftBlocked records the run state mw next leaves a story whose
+// landing it refused, which a retry clears.
+func (c *retryContext) theStoryWasLeftBlocked(id string) error {
+	return c.tracker.SetStoryState(context.Background(), id, application.RunState, application.RunBlocked,
+		"(tests-fail) the rig's tests failed")
 }
 
 // theStoryCarriesNoRunStateLabel checks no run:* label is left on the story, as

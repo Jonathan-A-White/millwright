@@ -37,19 +37,32 @@ Feature: mw retry
     And the worktree of "mw-gq6.1" is gone but its branch is kept
     And the story "mw-gq6.1" is open and unassigned
 
-  # mw-gq6.823: a story queued for its rig's batch carries run:queued, which
-  # dispatch passes as "waiting for its batch"; a retry that left the label on
-  # gave the claim back and the next attempt never started.
+  # mw-gq6.823: a story carries a run state (run:blocked, run:stopped, ...) that
+  # a retry that left on gave the claim back with, and the next attempt never
+  # started; run:queued is the one a retry no longer gives back at all (below).
 
   Scenario: A retried story carries no run state, so dispatch does not pass it as queued
     Given the story "mw-gq6.1" was dispatched and worked in its own worktree
-    And the story "mw-gq6.1" is queued for its rig's batch
+    And the story "mw-gq6.1" was refused by mw next and left blocked
     And the session of "mw-gq6.1" has ended
     When mw retries "mw-gq6.1"
     Then the retry succeeds
     And the story "mw-gq6.1" is open and unassigned
     And the story "mw-gq6.1" carries no run state label
     And the next dispatch tick does not pass "mw-gq6.1" as queued for its batch
+
+  # mw-gq6.862: a story queued for its rig's batch has its work done and is
+  # landed by that batch; giving it back would run a second attempt beside it.
+
+  Scenario: A story queued for its rig's batch is not retried, with --force or without
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the story "mw-gq6.1" is queued for its rig's batch
+    And the session of "mw-gq6.1" has ended
+    When mw retries "mw-gq6.1"
+    Then the retry refuses, saying: queued for batch landing
+    And the worktree of "mw-gq6.1" was left untouched
+    And the story "mw-gq6.1" is still claimed
+    And the story "mw-gq6.1" carries no new comment
 
   # mw-gq6.344: a retried story has its dead-pane refunds again.
 
