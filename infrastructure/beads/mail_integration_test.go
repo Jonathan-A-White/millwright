@@ -3,7 +3,6 @@
 package beads_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -42,7 +41,7 @@ func showMail(t *testing.T, vault, id string) shownMail {
 func TestGatewaySendsMailAsTheStandInDidAndReadsMailTheStandInSent(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	// The vault declares the custom type, as the factory's own does.
@@ -130,7 +129,7 @@ func TestGatewaySendsMailAsTheStandInDidAndReadsMailTheStandInSent(t *testing.T)
 func TestGatewayLinksAReplyToTheMessageItAnswersAsTheStandInDid(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	bdRun(t, vault, beads.Program, "config", "set", "types.custom", "mail")
@@ -192,7 +191,7 @@ func TestGatewayLinksAReplyToTheMessageItAnswersAsTheStandInDid(t *testing.T) {
 func TestGatewayClosesMailForTidyAndNothingElse(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	bdRun(t, vault, beads.Program, "config", "set", "types.custom", "mail")
@@ -256,7 +255,7 @@ func TestGatewayClosesMailForTidyAndNothingElse(t *testing.T) {
 func TestGatewayReadsAnInboxOfMoreThanAThousandWhole(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	bdRun(t, vault, beads.Program, "config", "set", "types.custom", "mail")

@@ -3,7 +3,6 @@
 package beads_test
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -21,7 +20,7 @@ import (
 func TestAClaimIsALeaseInARealBd(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	epicID := bdRun(t, vault, beads.Program, "create", "A walking skeleton", "-t", "epic",
@@ -110,7 +109,7 @@ func TestAClaimIsALeaseInARealBd(t *testing.T) {
 func TestReleaseClaimByAnotherActorLeavesTheClaimUntouched(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	epicID := bdRun(t, vault, beads.Program, "create", "A walking skeleton", "-t", "epic",
@@ -162,7 +161,7 @@ func TestReleaseClaimByAnotherActorLeavesTheClaimUntouched(t *testing.T) {
 func TestAClaimClearsTheRunStateAnEarlierAttemptLeft(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	epicID := bdRun(t, vault, beads.Program, "create", "A walking skeleton", "-t", "epic", "--silent")
@@ -208,7 +207,7 @@ func TestAClaimClearsTheRunStateAnEarlierAttemptLeft(t *testing.T) {
 func TestClearRunStateTakesRunQueuedOffAStoryInARealBd(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	epicID := bdRun(t, vault, beads.Program, "create", "A walking skeleton", "-t", "epic", "--silent")
@@ -243,7 +242,7 @@ func TestClearRunStateTakesRunQueuedOffAStoryInARealBd(t *testing.T) {
 func TestAClosedBeadNamesNoSmokeExamplesInARealBd(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	epicID := bdRun(t, vault, beads.Program, "create", "A walking skeleton", "-t", "epic", "--silent")
@@ -271,7 +270,7 @@ func TestAClosedBeadNamesNoSmokeExamplesInARealBd(t *testing.T) {
 func TestAStoryAnotherHostClaimedIsTakenOverAndClosedInARealBd(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	storyID := bdRun(t, vault, beads.Program, "create", "A story claimed on a cloud host", "--silent")

@@ -3,9 +3,7 @@
 package beads_test
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
@@ -18,7 +16,7 @@ import (
 func TestOpenFormulasReadsAPouredFormulasStoryAndClosesIt(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 	installFormula(t, vault, "tdd-feature")
 	gateway := beads.New(vault)
