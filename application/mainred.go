@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 )
@@ -68,6 +69,50 @@ func TestNamesOf(output string) []string {
 	return names
 }
 
+// FailingPackages is the Go packages a run's output says failed, each once, in
+// order: the import path of each `FAIL<tab><package>` line go test prints.
+func FailingPackages(output string) []string {
+	var packages []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.HasPrefix(line, "FAIL\t") {
+			continue
+		}
+		if fields := strings.Fields(line); len(fields) > 1 && !seen[fields[1]] {
+			seen[fields[1]] = true
+			packages = append(packages, fields[1])
+		}
+	}
+	return packages
+}
+
+// PackagesOutsideTheStory is the failing packages of a run's output when none of
+// them holds a file the story changed (mw-gq6.861: the mail-notify tests failed
+// the gate of stories that touched nothing under contrib/). It is nil when the
+// output names no package, when a changed file lies in one of them, or when a
+// changed file is one a build of every package reads (a Go file or module file
+// at the root, the Makefile): the failure may be the story's then. A package is
+// the directory a changed file is in, the tail of its import path.
+func PackagesOutsideTheStory(output string, changed []string) []string {
+	failing := FailingPackages(output)
+	for _, file := range changed {
+		dir := path.Dir(file)
+		if dir == "." {
+			switch base := path.Base(file); {
+			case base == "go.mod", base == "go.sum", base == "go.work", base == "Makefile", strings.HasSuffix(base, ".go"):
+				return nil
+			}
+			continue
+		}
+		for _, pkg := range failing {
+			if pkg == dir || strings.HasSuffix(pkg, "/"+dir) {
+				return nil
+			}
+		}
+	}
+	return failing
+}
+
 // MainRed is what a close-out found out about main: the tests it fails too, how
 // long the finding took, and the bead that carries its fix.
 type MainRed struct {
@@ -117,7 +162,7 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	case !run.Ran || run.NotRun:
 		return nil
 	case run.Passed:
-		report.Notes = append(report.Notes, fmt.Sprintf("main alone passes %s (checked in %s): the failure is the story's", strings.Join(tests, ", "), took.Round(time.Second)))
+		report.Notes = append(report.Notes, fmt.Sprintf("main alone passes %s (checked in %s): %s", strings.Join(tests, ", "), took.Round(time.Second), n.whoseFailure(ctx, c, report, failed, base)))
 		return nil
 	}
 	onMain := map[string]bool{}
@@ -126,13 +171,34 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	}
 	for _, name := range tests {
 		if !onMain[name] {
-			report.Notes = append(report.Notes, fmt.Sprintf("main alone fails other tests than %s (checked in %s): the failure is the story's", strings.Join(tests, ", "), took.Round(time.Second)))
+			report.Notes = append(report.Notes, fmt.Sprintf("main alone fails other tests than %s (checked in %s): %s", strings.Join(tests, ", "), took.Round(time.Second), n.whoseFailure(ctx, c, report, failed, base)))
 			return nil
 		}
 	}
 	red := &MainRed{Tests: tests, Command: run.Command, Took: took}
 	report.Notes = append(report.Notes, fmt.Sprintf("main alone fails %s too (checked in %s): main is red", red.tests(), took.Round(time.Second)))
 	return red
+}
+
+// whoseFailure is the end of the note a check of main alone leaves when main did
+// not fail the story's tests the same way: "the failure is the story's", unless
+// the packages that failed hold none of the files the story changed, which it
+// says instead, so a flaky test in a package the story never touched is not put
+// down to the story (mw-gq6.861).
+func (n Next) whoseFailure(ctx context.Context, c *closeOut, report *NextReport, failed Checked, base string) string {
+	const story = "the failure is the story's"
+	if n.Changes == nil {
+		return story
+	}
+	changed, err := n.Changes.ChangedFiles(ctx, c.rigDir, base, c.branch)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the files %s changed could not be read to tell whether the failing tests are outside them: %v", c.id, err))
+		return story
+	}
+	if outside := PackagesOutsideTheStory(failed.Output, changed); len(outside) > 0 {
+		return fmt.Sprintf("the failing tests are outside the story's files (%s holds none of the %d files it changed), so the failure may not be the story's", strings.Join(outside, ", "), len(changed))
+	}
+	return story
 }
 
 // carriedBy finds the open bug whose description names every failing test, or
