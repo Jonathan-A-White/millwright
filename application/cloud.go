@@ -118,6 +118,8 @@ type CloudWork interface {
 type CloudStories interface {
 	StoriesSince(ctx context.Context, since time.Time) ([]StoryDetail, error)
 	SetStoryMetadata(ctx context.Context, id string, fields map[string]string) error
+	// ReleaseClaimHeldBy gives back a claim a box's dispatch made.
+	ReleaseClaimHeldBy(ctx context.Context, id, holder string) error
 }
 
 // CloudNotes is what the cloud check reads of the tracker's notes: a box's
@@ -328,7 +330,9 @@ func (p CloudPlan) boxCap() int {
 //     up, not dispatching, with why, when none has CloudDispatchWait after it
 //     was made;
 //   - marks each box idle from the first check that finds no story claimed on
-//     it, and busy again once one is;
+//     it that a session works, and busy again once one is: a story queued for
+//     its rig's batch is claimed on the box but has no session, so it does not
+//     keep the box busy;
 //   - sets the plan's BoxCap on each box that has dispatched and runs another
 //     (a changed box_cap reaches the boxes already up, raised or lowered:
 //     running sessions finish, no new ones start above the cap); a box that
@@ -879,11 +883,13 @@ func (p *cloudPass) demand(work WorkInHand) (waiting, free int) {
 	return waiting, free
 }
 
-// sessions counts the stories claimed on host that a session works.
+// sessions counts the stories claimed on host that a session works. A story
+// queued for its batch keeps its claim, worktree and branch but its session is
+// gone by design, so it is not one (mw-gq6.859).
 func sessions(work WorkInHand, host string) int {
 	n := 0
 	for _, d := range work.RunningOn(host) {
-		if !d.Hitl() {
+		if !d.Hitl() && !QueuedForBatch(d) {
 			n++
 		}
 	}
@@ -987,7 +993,43 @@ func (p *cloudPass) repath(ctx context.Context, name string) {
 	if !ok {
 		return
 	}
+	p.handBack(ctx, stories, name)
 	p.repathFrom(ctx, stories, name)
+}
+
+// handBack gives back every claim on a box that is gone with no session to its
+// name: a story queued for its rig's batch, whose branch is pushed and whose
+// batch lands it, but whose claim, host=<box> and worktree were left on the
+// box. It is released and re-pathed to host=auto, keeping its queued run state,
+// so that mw land takes it and no dispatch works it again. A claim with a
+// session running or ended is left to its claim. It says each story handed
+// back, as a cloud event; one that cannot be handed back fails the check with
+// its id.
+func (p *cloudPass) handBack(ctx context.Context, stories []StoryDetail, name string) {
+	var back, stuck []string
+	for _, story := range stories {
+		if story.IsEpic || ClaimHost(story.Assignee) != name || !QueuedForBatch(story) {
+			continue
+		}
+		id := story.Story.ID
+		if err := p.check.Stories.ReleaseClaimHeldBy(ctx, id, story.Assignee); err != nil {
+			stuck = append(stuck, id)
+			continue
+		}
+		if story.Merged().Host != domain.HostAuto {
+			if err := p.check.Stories.SetStoryMetadata(ctx, id, map[string]string{"host": domain.HostAuto}); err != nil {
+				stuck = append(stuck, id)
+				continue
+			}
+		}
+		back = append(back, id)
+	}
+	if len(back) > 0 {
+		p.move(ctx, fmt.Sprintf("handed back %s from %s, queued for its batch with no session on the box, and re-pathed it to host=auto", strings.Join(back, ", "), name))
+	}
+	if len(stuck) > 0 {
+		p.fail(fmt.Errorf("could not hand back %s from %s: release the claim by hand and set host=auto with %sauto", strings.Join(stuck, ", "), name, RepathHint))
+	}
 }
 
 // pathedStories is every story the tracker holds, to find those pathed to a

@@ -38,7 +38,8 @@ func newCloudCmd() *cobra.Command {
 		Long: "check is one look at the cloud, which the home's follower makes every minute: when more\n" +
 			"stories wait for any host than there are sessions free across the hosts of [cloud.caps]\n" +
 			"and the boxes, it makes one box with contrib/vultr-boost; a box with no story for\n" +
-			"idle_minutes is destroyed; and no box is made, or kept, past monthly_cap_usd. Each move\n" +
+			"idle_minutes is destroyed (a story queued for its rig's batch has no session, so it does\n" +
+			"not keep a box busy); and no box is made, or kept, past monthly_cap_usd. Each move\n" +
 			"is a cloud event and a line of mw status. It runs on the home only.\n\n" +
 			"A box is not waited for: the check writes it into the book as being made and starts\n" +
 			"the make in a session of its own, which a stopped caller does not stop; the book says\n" +
@@ -77,7 +78,9 @@ func newCloudDownCmd() *cobra.Command {
 		Long: "down destroys the box (cloud1, cloud2, ...) as the cloud check does an idle one, and takes it\n" +
 			"out of the book. Every open or deferred story whose path names the box is set to host=auto,\n" +
 			"so that it is not left waiting for a host that is gone; a story on another host is left alone,\n" +
-			"and so is a claimed one. It says which stories it moved. The cloud check does the same for a\n" +
+			"and so is a claimed one with a session, running or ended. A claim queued for its rig's batch\n" +
+			"has no session: it is given back and set to host=auto, keeping its queued state so that\n" +
+			"mw land takes it. It says which stories it moved. The cloud check does the same for a\n" +
 			"box it destroys itself. It runs on the home only.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

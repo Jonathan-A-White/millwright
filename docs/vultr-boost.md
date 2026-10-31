@@ -303,7 +303,11 @@ A story pathed to a host that is gone is never dispatched. Whenever a box is des
 month's cap, a make that did not come up, or `mw cloud down <box>`, the home only), the cloud sets
 `host=auto` on every open or deferred story whose path names it, and says so as a `cloud` event
 (`re-pathed mw-x.1, mw-x.2 from cloud2 to host=auto`). A story on another host is left alone, and
-so is a claimed one. `mw cloud down <box>` takes only a box's name (`cloud` and a number) and
+so is a claimed one with a session, running or ended. A claim queued for its rig's batch has no
+session (its branch is pushed, and its batch lands it): it does not keep a box busy, and when the
+box goes down the claim is given back and set to `host=auto`, still queued, and said as a `cloud`
+event (`handed back mw-x.1 from cloud2, queued for its batch with no session on the box, and
+re-pathed it to host=auto`). `mw cloud down <box>` takes only a box's name (`cloud` and a number) and
 runs under the cloud lock. `contrib/vultr-boost down`, run by hand, is a shell wrapper that
 re-paths nothing: use `mw cloud down`.
 

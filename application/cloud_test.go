@@ -272,3 +272,147 @@ func TestAStoryPathedToABoxThatIsUpIsLeftAlone(t *testing.T) {
 		}
 	}
 }
+
+// queuedOnBox files an epic with three stories claimed on cloud1: mw-q.1 is
+// queued for its batch (its session gone by design), mw-q.2 is running, and
+// mw-q.3 is claimed with its session ended and the Mayor to look at it
+// (run:blocked). A fourth, mw-q.4, is open and pathed to cloud1.
+func queuedOnBox(t *testing.T) *apptest.FakeTracker {
+	t.Helper()
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-q", domain.Path{Rig: "millwright", Branch: "main", Host: domain.HostAuto})
+	for _, id := range []string{"mw-q.1", "mw-q.2", "mw-q.3", "mw-q.4"} {
+		tracker.AddStory("mw-q", domain.Story{ID: id, Title: "story " + id})
+		if err := tracker.SetStoryMetadata(ctx, id, map[string]string{"host": "cloud1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for id, run := range map[string]string{"mw-q.1": application.RunQueued, "mw-q.2": application.RunRunning, "mw-q.3": application.RunBlocked} {
+		if err := tracker.ClaimAs(id, "mw@cloud1", time.Time{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := tracker.SetStoryState(ctx, id, application.RunState, run, "the test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return tracker
+}
+
+// claimOf is the assignee and the status a story has now.
+func claimOf(t *testing.T, tracker *apptest.FakeTracker, id string) (assignee, status string) {
+	t.Helper()
+	d, err := tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d.Assignee, d.Status
+}
+
+func TestABoxWhoseOnlyClaimIsQueuedForABatchGoesIdleAndIsDestroyed(t *testing.T) {
+	now := time.Date(2026, 10, 30, 23, 30, 0, 0, time.UTC)
+	tracker := queuedOnBox(t)
+	for _, id := range []string{"mw-q.2", "mw-q.3"} {
+		if err := tracker.ReleaseClaimHeldBy(context.Background(), id, "mw@cloud1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-10", Boxes: []application.CloudBox{{Name: "cloud1", Up: now.Add(-30 * time.Minute)}}}}
+	provider := &apptest.FakeCloud{}
+	check := func(at time.Time) {
+		t.Helper()
+		_, err := application.CloudCheck{
+			Work: tracker, Stories: tracker, Provider: provider, Book: book, Host: "desktop",
+			Plan: cloudPlan, Now: func() time.Time { return at },
+		}.Run(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	check(now)
+	if len(book.State.Boxes) != 1 || book.State.Boxes[0].IdleSince.IsZero() {
+		t.Fatalf("expected cloud1 marked idle: its only claim waits for a batch and runs no session, got %+v", book.State.Boxes)
+	}
+	check(now.Add(cloudPlan.Idle))
+	if len(book.State.Boxes) != 0 {
+		t.Errorf("expected cloud1 destroyed after %s idle, got %+v", cloudPlan.Idle, book.State.Boxes)
+	}
+}
+
+func TestABoxWithARunningSessionBesideAQueuedClaimStaysBusy(t *testing.T) {
+	now := time.Date(2026, 10, 30, 23, 30, 0, 0, time.UTC)
+	tracker := queuedOnBox(t)
+	idleSince := now.Add(-time.Hour)
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-10", Boxes: []application.CloudBox{{Name: "cloud1", Up: now.Add(-2 * time.Hour), IdleSince: idleSince}}}}
+	_, err := application.CloudCheck{
+		Work: tracker, Stories: tracker, Provider: &apptest.FakeCloud{}, Book: book, Host: "desktop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(book.State.Boxes) != 1 || !book.State.Boxes[0].IdleSince.IsZero() {
+		t.Errorf("expected cloud1 busy and up while mw-q.2 runs on it, got %+v", book.State.Boxes)
+	}
+}
+
+// checkHandedBack asserts what destroying cloud1 did to the stories of
+// queuedOnBox, and that the text says so.
+func checkHandedBack(t *testing.T, tracker *apptest.FakeTracker, text string) {
+	t.Helper()
+	assignee, status := claimOf(t, tracker, "mw-q.1")
+	if assignee != "" || status != apptest.StatusOpen {
+		t.Errorf("expected the queued mw-q.1 handed back (open, unassigned), got %q %q", assignee, status)
+	}
+	if got := hostOf(t, tracker, "mw-q.1"); got != domain.HostAuto {
+		t.Errorf("expected mw-q.1 re-pathed to host auto, got %s", got)
+	}
+	if got := tracker.State("mw-q.1", application.RunState); got != application.RunQueued {
+		t.Errorf("expected mw-q.1 still %s=%s, so that its batch lands it and nobody works it again, got %q", application.RunState, application.RunQueued, got)
+	}
+	for _, id := range []string{"mw-q.2", "mw-q.3"} {
+		if assignee, _ := claimOf(t, tracker, id); assignee != "mw@cloud1" {
+			t.Errorf("expected %s left to its claim on cloud1, got %q", id, assignee)
+		}
+		if got := hostOf(t, tracker, id); got != "cloud1" {
+			t.Errorf("expected %s left on cloud1, got %s", id, got)
+		}
+	}
+	if got := hostOf(t, tracker, "mw-q.4"); got != domain.HostAuto {
+		t.Errorf("expected the open mw-q.4 re-pathed as before, got %s", got)
+	}
+	if !strings.Contains(text, "mw-q.1") || !strings.Contains(text, "queued") || strings.Contains(text, "mw-q.2") || strings.Contains(text, "mw-q.3") {
+		t.Errorf("expected the output to name the queued mw-q.1 handed back, and not the stories left:\n%s", text)
+	}
+}
+
+func TestMwCloudDownHandsBackAClaimQueuedForABatch(t *testing.T) {
+	now := time.Date(2026, 10, 31, 2, 5, 0, 0, time.UTC)
+	tracker := queuedOnBox(t)
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-10", Boxes: []application.CloudBox{{Name: "cloud1", Up: now.Add(-3 * time.Hour)}}}}
+	text, err := application.CloudCheck{
+		Work: tracker, Stories: tracker, Provider: &apptest.FakeCloud{}, Book: book, Host: "desktop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}.Down(context.Background(), "cloud1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkHandedBack(t, tracker, text)
+}
+
+func TestTheChecksDestroyHandsBackAClaimQueuedForABatch(t *testing.T) {
+	now := time.Date(2026, 10, 31, 2, 5, 0, 0, time.UTC)
+	tracker := queuedOnBox(t)
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-10", Hours: 600, Boxes: []application.CloudBox{{Name: "cloud1", Up: now.Add(-3 * time.Hour)}}}}
+	report, err := application.CloudCheck{
+		Work: tracker, Stories: tracker, Provider: &apptest.FakeCloud{}, Book: book, Host: "desktop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(book.State.Boxes) != 0 {
+		t.Fatalf("expected the month's cap to destroy cloud1, got %+v", book.State.Boxes)
+	}
+	checkHandedBack(t, tracker, report.String())
+}
