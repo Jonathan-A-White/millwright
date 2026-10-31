@@ -276,3 +276,110 @@ func TestAGrindFromTheTestKeyIsKeptAsTheFactorys(t *testing.T) {
 		})
 	}
 }
+
+// newKindMill is overrideMill for a kind main does not have: the grist names
+// the kind "sorter", main holds only the tutor grind, and the grist brings the
+// grind text of a ref: none, the instructions and schema alone, or those with
+// the grind file too.
+type bring int
+
+const (
+	bringNothing bring = iota
+	bringText
+	bringGrind
+)
+
+func newKindMill(t *testing.T, from, talk string, brings bring) (application.GristGrind, *apptest.FakePostern, *apptest.FakeGrinder) {
+	t.Helper()
+	mill, _, grinder := overrideMill(t, from, talk)
+	const factory = "03aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const phone = "02466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27"
+	sender := phone
+	if from == "factory" {
+		sender = factory
+	}
+	keys := &fakeMillKey{made: true}
+	millKey, _, _ := keys.PublicKey()
+	var override *application.GristGrindOverride
+	if brings != bringNothing {
+		override = &application.GristGrindOverride{Instructions: "SAY REF", Schema: `{"type": "object", "required": ["answer"]}`}
+	}
+	if brings == bringGrind {
+		override.Grind = json.RawMessage(`{"grind":1,"app":"lampas","kind":"sorter","versions":["1"],
+			"model":"sonnet","effort":"low","instructions":"grinds/sorter.md","answerSchema":"schemas/sorter.json","attachments":{"min":0,"max":0}}`)
+	}
+	plain, _ := json.Marshal(application.GristPlaintext{
+		Grist: application.GristName{App: "lampas", Kind: "sorter", V: "1", Talk: talk}, Input: json.RawMessage(`{"question":"hi"}`),
+		GrindOverride: override,
+	})
+	ct, _ := (&apptest.FakeCipher{From: sender}).Encrypt(millKey, string(plain))
+	fresh := apptest.NewFakePostern()
+	fresh.AddRecord(application.PosternRecord{Txid: "direct:g3", Class: application.GristClass, From: sender, To: millKey,
+		Signer: sender, SignerApps: []string{"lampas"}, Ciphertext: ct})
+	mill.Postern = fresh
+	return mill, fresh, grinder
+}
+
+// A kind new to main is proved on its branch: an eval send brings the grind
+// file with its text, and the mill grinds with it instead of refusing the kind
+// (mw-gq6.860).
+func TestTheMillGrindsAKindNewToMainWithTheGrindAnEvalBrings(t *testing.T) {
+	for _, talk := range []string{"eval:greets:ab12cd34", "smoke:sorter/greets:ab12cd34"} {
+		mill, backend, grinder := newKindMill(t, "factory", talk, bringGrind)
+		if _, err := mill.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		answer := openFakeAnswer(t, backend.Delivered()[0])
+		if answer.Status != application.GristAnswered || !answer.Grind.Override {
+			t.Fatalf("%s: expected the new kind answered with the text it brought, got %+v", talk, answer)
+		}
+		calls := grinder.Calls()
+		if len(calls) != 1 || !strings.HasSuffix(calls[0].Call.System, "SAY REF") {
+			t.Fatalf("%s: expected one grind with the brought instructions, got %+v", talk, calls)
+		}
+	}
+}
+
+// An ordinary send of a kind main lacks is refused as before, whoever sends it
+// and whatever it brings: only the factory's test key in an eval or smoke talk
+// is ground with the grind it brings.
+func TestAKindMainLacksIsStillRefusedForAnOrdinarySend(t *testing.T) {
+	for name, tc := range map[string]struct {
+		from, talk, reason string
+		brings             bring
+	}{
+		"an app's key, nothing brought":       {"phone", "", application.GristReasonNoGrind, bringNothing},
+		"the test key, nothing brought":       {"factory", "chat:1", application.GristReasonNoGrind, bringNothing},
+		"the test key, an eval talk, nothing": {"factory", "eval:greets:ab12cd34", application.GristReasonNoGrind, bringNothing},
+		"an eval talk, text but no grind":     {"factory", "eval:greets:ab12cd34", application.GristReasonNoGrind, bringText},
+		"an app's key bringing a grind":       {"phone", "", application.GristReasonOverride, bringGrind},
+		"the test key, ordinary talk":         {"factory", "chat:1", application.GristReasonOverride, bringGrind},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mill, backend, grinder := newKindMill(t, tc.from, tc.talk, tc.brings)
+			if _, err := mill.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			answer := openFakeAnswer(t, backend.Delivered()[0])
+			if answer.Status != application.GristRefused || answer.Reason != tc.reason {
+				t.Errorf("expected the grist refused with %q, got %+v", tc.reason, answer)
+			}
+			if len(grinder.Calls()) != 0 {
+				t.Errorf("expected nothing ground, got %d grinds", len(grinder.Calls()))
+			}
+		})
+	}
+}
+
+// With --ref the eval sends the grind file at the ref along with its text, so a
+// kind main lacks can be ground.
+func TestEvalWithARefSendsTheGrindFileAtTheRef(t *testing.T) {
+	sender := &textSender{}
+	smoke, _ := evalRig(t, sender)
+	if err := (application.GristEvalExamples{Smoke: smoke, Ref: "mw/story"}).Run(context.Background(), "lampas", "tutor", []string{"greets"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sender.sent) != 1 || sender.sent[0].GrindOverride == nil || !strings.Contains(string(sender.sent[0].GrindOverride.Grind), `"kind": "tutor"`) {
+		t.Fatalf("expected the grind file of the ref on the send, got %+v", sender.sent)
+	}
+}

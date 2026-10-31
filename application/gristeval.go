@@ -613,7 +613,8 @@ type GristEvalExamples struct {
 	// grind, its instructions, its schema and its examples are read there and
 	// not at main, and every send carries the instructions and schema for the
 	// mill to grind with (GristGrindOverride), so a change to them is proved
-	// before it lands. The grind file's own model and effort stay main's.
+	// before it lands. The grind file's own model and effort stay main's; the
+	// grind file is sent too, which the mill uses only for a kind main lacks.
 	Ref string
 	// Out is where the report is printed; nil prints nothing.
 	Out io.Writer
@@ -665,7 +666,11 @@ func (e GristEvalExamples) Run(ctx context.Context, app, kind string, names []st
 		if err != nil || !found || strings.TrimSpace(string(text)) == "" || !rigPath(grind.Instructions) {
 			return fmt.Errorf("mw grist eval: the instructions %s of %s/%s could not be read at %s", grind.Instructions, app, kind, where)
 		}
-		s.Override = &GristGrindOverride{Instructions: string(text), Schema: schema}
+		file, _, err := s.Grinds.ReadAt(ctx, checkout, commit, path.Join(GristSmokeDir, kind+".json"))
+		if err != nil || len(file) == 0 {
+			return fmt.Errorf("mw grist eval: the grind file grinds/%s.json of %s could not be read at %s", kind, app, where)
+		}
+		s.Override = &GristGrindOverride{Instructions: string(text), Schema: schema, Grind: json.RawMessage(file)}
 	}
 	have := map[string]string{}
 	var all []string

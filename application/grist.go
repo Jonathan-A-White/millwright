@@ -88,6 +88,11 @@ const GristOverrideMime = "application/json"
 type GristGrindOverride struct {
 	Instructions string `json:"instructions"`
 	Schema       string `json:"schema"`
+	// Grind is the grind file itself (grinds/<kind>.json) at the ref. The mill
+	// grinds with it only for a kind its main does not have yet, so that a new
+	// kind is proved live on its branch before it lands; a kind main has keeps
+	// main's grind file.
+	Grind json.RawMessage `json:"grind,omitempty"`
 }
 
 // GristAnswerGrind is which grind answered a grist, and the commit of the

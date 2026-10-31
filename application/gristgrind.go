@@ -681,6 +681,11 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 	case err != nil:
 		w.settle(GristFailed, GristReasonUnread)
 		return
+	case !found && w.plain.GrindOverride != nil && len(w.plain.GrindOverride.Grind) > 0:
+		// A kind new to main, proved on its branch: judgeOverride has let only the
+		// factory's test key bring text, in an eval or smoke talk, so the grind
+		// file it brings stands in for the one main lacks (mw-gq6.860).
+		raw = w.plain.GrindOverride.Grind
 	case !found:
 		w.settle(GristRefused, GristReasonNoGrind)
 		return
@@ -728,11 +733,14 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		w.settle(GristRefused, reason)
 		return
 	}
-	w.system, w.schema = g.readGrindText(ctx, w, checkout)
-	if w.plain.GrindOverride != nil && w.status == "" {
+	if w.plain.GrindOverride != nil {
+		// The text it brings is what runs, so main's copy is not read: a kind new
+		// to main has none.
 		w.override = true
 		w.system, w.schema = overrideText(w)
+		return
 	}
+	w.system, w.schema = g.readGrindText(ctx, w, checkout)
 }
 
 // judgeOverride is why the grind text a grist brings is not taken, or "": a
