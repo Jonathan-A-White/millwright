@@ -11,6 +11,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // fakeRetryLanding is an in-memory application.Worktrees and application.Landing:
@@ -48,6 +49,10 @@ type fakeRetryLanding struct {
 
 	// NoWorktree makes Exists say neither the worktree nor the branch is there.
 	NoWorktree bool
+
+	// OriginTip is the commit RefHead reports for the story's branch at the
+	// remote (origin/mw/<id>); empty means the remote does not have it.
+	OriginTip string
 
 	bundled, removed, branchDeleted bool
 }
@@ -134,8 +139,13 @@ func (f *fakeRetryLanding) Commits(context.Context, string, string, string) ([]a
 func (f *fakeRetryLanding) OpenLanding(context.Context, string, string) (string, error) {
 	return "", nil
 }
-func (f *fakeRetryLanding) RefHead(context.Context, string, string) (string, error) { return "", nil }
-func (f *fakeRetryLanding) UnionNotes(context.Context, string) error                { return nil }
+func (f *fakeRetryLanding) RefHead(_ context.Context, _, ref string) (string, error) {
+	if strings.HasPrefix(ref, application.DefaultRemote+"/"+application.BranchPrefix) {
+		return f.OriginTip, nil
+	}
+	return "", nil
+}
+func (f *fakeRetryLanding) UnionNotes(context.Context, string) error { return nil }
 func (f *fakeRetryLanding) Merge(context.Context, string, string) (application.Landed, error) {
 	return application.Landed{}, nil
 }
@@ -996,5 +1006,151 @@ func TestRetryOfAStoryClosedWhileItRunsLeavesItClosedAndSaysSo(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// aQueuedRetryStory leaves the story as mw next leaves one whose close-out passed
+// on a rig that lands in batches: its work done, its branch pushed, run=queued.
+func aQueuedRetryStory(t *testing.T, tracker *apptest.FakeTracker, id string, queuedAt time.Time) {
+	t.Helper()
+	aRetryStory(t, tracker, id)
+	if err := tracker.SetStoryState(context.Background(), id, application.RunState, application.RunQueued, "queued for batch landing"); err != nil {
+		t.Fatalf("queueing %s: %v", id, err)
+	}
+	if err := tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.QueuedAtField: queuedAt.UTC().Format(time.RFC3339)}); err != nil {
+		t.Fatalf("recording when %s was queued: %v", id, err)
+	}
+}
+
+// aBatchLandJobRunning is the log of a follower whose batch-land job for rig
+// began running at at, as mw land's pass leaves it.
+func aBatchLandJobRunning(t *testing.T, rig string, at time.Time) *apptest.FakeEventLog {
+	t.Helper()
+	log := &apptest.FakeEventLog{}
+	actor := application.BatchLandJobName + "@vps"
+	if _, err := log.Append(context.Background(), []events.Event{
+		{Ts: at, Kind: events.KindJob, Lane: events.LaneNormal, Actor: actor, To: events.JobScheduled, Detail: "landing of " + rig + " (3 queued)"},
+		{Ts: at, Kind: events.KindJob, Lane: events.LaneNormal, Actor: actor, From: events.JobScheduled, To: events.JobRunning},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return log
+}
+
+// TestRetryRefusesAStoryQueuedForABatchLandingAndChangesNothing pins mw-gq6.862:
+// a story whose work is done and queued for its rig's batch is not given back,
+// with --force or without it, or a second attempt is dispatched while the batch
+// lands the first.
+func TestRetryRefusesAStoryQueuedForABatchLandingAndChangesNothing(t *testing.T) {
+	queuedAt := time.Date(2026, 10, 30, 23, 33, 0, 0, time.UTC)
+	batchAt := time.Date(2026, 10, 31, 2, 4, 0, 0, time.UTC)
+	cases := []struct {
+		name  string
+		force bool
+		log   func(*testing.T) application.EventLog
+		names string // what the refusal must name of the batch
+	}{
+		{name: "waiting for its batch", names: "queued for batch landing since 2026-10-30 23:33Z"},
+		{name: "waiting for its batch, forced", force: true, names: "queued for batch landing since 2026-10-30 23:33Z"},
+		{name: "inside the running batch", log: func(t *testing.T) application.EventLog { return aBatchLandJobRunning(t, "millwright", batchAt) },
+			names: "in the batch running since 2026-10-31 02:04Z"},
+		{name: "inside the running batch, forced", force: true, log: func(t *testing.T) application.EventLog { return aBatchLandJobRunning(t, "millwright", batchAt) },
+			names: "in the batch running since 2026-10-31 02:04Z"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tracker := apptest.NewFakeTracker()
+			aQueuedRetryStory(t, tracker, "mw-gq6.1", queuedAt)
+			before, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			landing := &fakeRetryLanding{AheadCount: 2, BundleSHA: "bbb", OriginTip: "4656ca5d"}
+			files := &apptest.FakeVaultFiles{}
+			var out strings.Builder
+			retry := aRetry(tracker, landing, files, &out)
+			retry.Force = tc.force
+			if tc.log != nil {
+				retry.Log = tc.log(t)
+			}
+
+			report, err := retry.Run(context.Background(), "mw-gq6.1")
+			if err == nil || !report.Refused {
+				t.Fatalf("expected the retry to be refused, got report %+v, err %v", report, err)
+			}
+			for _, want := range []string{"millwright", tc.names, "mw/mw-gq6.1"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("expected the refusal to name %q, got %q", want, err)
+				}
+			}
+			after, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.Status != before.Status || after.Assignee != before.Assignee || strings.Join(after.Labels, ",") != strings.Join(before.Labels, ",") ||
+				after.Attempts != before.Attempts || after.QueuedAt != before.QueuedAt {
+				t.Errorf("expected the story unchanged, was %+v now %+v", before, after)
+			}
+			if comments := tracker.Comments("mw-gq6.1"); len(comments) != 0 {
+				t.Errorf("expected no comment, got %q", comments)
+			}
+			if landing.bundled || landing.removed || landing.branchDeleted {
+				t.Errorf("expected nothing bundled, removed or deleted, got %+v", landing)
+			}
+		})
+	}
+}
+
+// TestRetryOfAStoryOfAnotherHostQueuedForABatchIsRefusedToo is the incident of
+// mw-gq6.862: the story was queued from cloud1, and the retry ran on the laptop.
+func TestRetryOfAStoryOfAnotherHostQueuedForABatchIsRefusedToo(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.ActAs("mw@cloud1")
+	aClaimedRetryStory(t, tracker, "mw-gq6.1", "mw@cloud1", "cloud1")
+	if err := tracker.SetStoryState(context.Background(), "mw-gq6.1", application.RunState, application.RunQueued, "queued"); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	retry := aRetry(tracker, &fakeRetryLanding{}, &apptest.FakeVaultFiles{}, &out)
+	retry.Host = "laptop"
+	retry.Reach = aCleanRemote("cloud1")
+	retry.Force = true
+
+	report, err := retry.Run(context.Background(), "mw-gq6.1")
+	if err == nil || !report.Refused || !strings.Contains(err.Error(), "batch landing") {
+		t.Fatalf("expected the retry refused for the batch, got %+v, %v", report, err)
+	}
+	after, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Assignee != "mw@cloud1" || after.Status != application.StatusInProgress {
+		t.Errorf("expected the claim kept, got %q, %q", after.Assignee, after.Status)
+	}
+}
+
+// TestRetryOfAStoryWhoseBranchWasPushedDoesNotSayItWasNeverMade pins the second
+// half of mw-gq6.862: a story with no worktree here but its branch at the remote
+// was run, so the comment does not call it a story that never ran.
+func TestRetryOfAStoryWhoseBranchWasPushedDoesNotSayItWasNeverMade(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	aRetryStory(t, tracker, "mw-gq6.1")
+	var out strings.Builder
+	retry := aRetry(tracker, &fakeRetryLanding{NoWorktree: true, OriginTip: "4656ca5d1111"}, &apptest.FakeVaultFiles{}, &out)
+
+	if _, err := retry.Run(context.Background(), "mw-gq6.1"); err != nil {
+		t.Fatalf("expected the retry to go on, got %v\n%s", err, out.String())
+	}
+	comments := tracker.Comments("mw-gq6.1")
+	if len(comments) != 1 {
+		t.Fatalf("expected one comment, got %q", comments)
+	}
+	for _, text := range []string{out.String(), comments[0]} {
+		if strings.Contains(text, "ever made") || strings.Contains(text, "never") {
+			t.Errorf("expected no word that the story never ran, got %q", text)
+		}
+		if !strings.Contains(text, "mw/mw-gq6.1") || !strings.Contains(text, "4656ca5d") {
+			t.Errorf("expected the pushed branch and its commit named, got %q", text)
+		}
 	}
 }

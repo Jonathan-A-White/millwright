@@ -183,7 +183,10 @@ func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, fi
 // the hand recovery that used to take a person several steps and a round trip
 // through the Millhand, run as one command (friction: mw-gq6.92).
 //
-// In order, refusing at the first that does not hold: the session named on
+// In order, refusing at the first that does not hold: a story queued for its
+// rig's batch landing (run=queued) is not retried at all, --force or not, for
+// the batch lands the attempt it has while a second would be dispatched
+// (mw-gq6.862); the session named on
 // the story must not still be running; the branch's own worktree, fetched
 // fresh, is committed clean if a session left it dirty; the branch's commits
 // ahead of the target, if there are any, are bundled into the vault and the
@@ -277,6 +280,11 @@ type Retry struct {
 	// that work is left unsaved there.
 	Force bool
 
+	// Log is the event log the batch-land job's running is read from, to name
+	// the batch a queued story is inside (mw-gq6.862). A nil Log names the rig's
+	// batch without saying whether it is running.
+	Log EventLog
+
 	// Err is where a work-left-unsaved warning is also printed. A nil Err prints
 	// it nowhere but the report and the story's comment.
 	Err io.Writer
@@ -360,6 +368,11 @@ type RetryReport struct {
 	// here — a story refused at pour never got that far — so there was nothing
 	// to read or bundle, and the retry went straight on to giving the claim back.
 	NoWorktree bool
+
+	// OriginTip is the commit the story's branch is at on the remote when the
+	// story had no worktree or branch here: it was pushed, so it ran, and the
+	// retry leaves it there (mw-gq6.862).
+	OriginTip string
 
 	// Bundled says the branch's commits were captured into a bundle that
 	// verified. BranchCommit and BundlePath are only meaningful when this is
@@ -498,6 +511,13 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 		attempt = 1
 	}
 	report.Attempt, report.Target = attempt, path.Branch
+
+	// A story queued for its rig's batch has its work done and its branch
+	// pushed for the batch to land: giving it back, --force or not, would have
+	// a second attempt dispatched while the batch lands the first (mw-gq6.862).
+	if QueuedForBatch(detail) {
+		return r.refuse(report, r.queuedWhy(ctx, detail, path.Rig))
+	}
 	report.NextAttempt = detail.Attempts + 1
 	report.Hitl = detail.Hitl()
 	report.NoCause = detail.Cause == ""
@@ -614,6 +634,13 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	}
 	if !there {
 		report.NoWorktree = true
+		// A branch at the remote is a story that ran, here or on another host, and
+		// the retry leaves it there: only a story with none was never made.
+		if tip, err := r.Landing.RefHead(ctx, rigDir, StartPoint(r.remote(), report.Branch)); err == nil && tip != "" {
+			report.OriginTip = tip
+			return r.giveBack(ctx, report, fmt.Sprintf("there was no worktree or branch of it on %s to keep, but %s is at %s (%s), which this retry leaves there",
+				r.Host, report.Branch, r.remote(), shortCommit(tip)))
+		}
 		return r.giveBack(ctx, report, "there was no worktree or branch of it on "+r.Host+" to keep: none was ever made")
 	}
 
@@ -634,6 +661,18 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	report.handOn = salvaged.Kept && !keepBranch
 
 	return r.giveBack(ctx, report, "")
+}
+
+// queuedWhy is why a retry of a story queued for batch landing is refused: the
+// batch it waits for or is inside, named as mw status names it, and the way out
+// when no batch will take it.
+func (r Retry) queuedWhy(ctx context.Context, detail StoryDetail, rig string) string {
+	id := detail.Story.ID
+	wait := BatchWait{Since: detail.QueuedAt, InBatchSince: batchJobsRunning(ctx, r.Log)[rig]}
+	return fmt.Sprintf("its work is done and it is %s (the batch of %s lands %s from origin): "+
+		"retrying it, with --force or without, would run a second attempt while the batch lands the first, so nothing was touched. "+
+		"Retry it once the batch has landed it or its queued state is gone; if no batch will take it, clear that first: bd update %s --remove-label %s:%s",
+		wait.Lines()[0], rig, StoryBranch(id), id, RunState, RunQueued)
 }
 
 // nextSaid is the attempt the next dispatch tick takes the story as, out of
@@ -1127,7 +1166,11 @@ func (r RetryReport) String() string {
 		r.writeEnd(&b)
 		return b.String()
 	}
-	if r.NoWorktree {
+	switch {
+	case r.NoWorktree && r.OriginTip != "":
+		fmt.Fprintf(&b, "  bundle  nothing to keep here: no worktree or branch of the story is on %s, but %s is at the remote (%s) and stays there\n",
+			r.Host, r.Branch, shortCommit(r.OriginTip))
+	case r.NoWorktree:
 		fmt.Fprintf(&b, "  bundle  nothing to keep: no worktree or branch of the story was ever made here\n")
 	}
 	if r.CommittedLeftovers {
