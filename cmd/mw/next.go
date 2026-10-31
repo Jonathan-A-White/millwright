@@ -192,9 +192,14 @@ func newNextCmd() *cobra.Command {
 			// The dispatch that follows does not sync for itself: the close-out
 			// syncs once, after the story is closed, so that the other host sees
 			// a closed story rather than a claimed one.
+			changedSpecs, err := config.ChangedSpecs()
+			if err != nil {
+				return err
+			}
+			recheckSuite := hostRecheckSuite(cmd.Context(), worktrees, files, rigs, tests, changedSpecs, nice, jobs)
 			var dispatcher application.Dispatcher
 			if !noDispatch {
-				dispatcher = withHostDispatchLocks(application.Dispatch{
+				dispatcher = withHostDispatchLocks(withHostRechecks(application.Dispatch{
 					Tracker:       gateway,
 					Worktrees:     worktrees,
 					Landing:       worktrees,
@@ -216,7 +221,7 @@ func newNextCmd() *cobra.Command {
 					RetryFromBranch: fromBranch,
 					Rebases:         worktrees,
 					HasGristTestKey: hostHasGristTestKey,
-				}, dir)
+				}, recheckSuite), dir)
 			}
 
 			// A stamp queue that cannot be placed is said, and queues nothing: no
@@ -266,6 +271,7 @@ func newNextCmd() *cobra.Command {
 				Slot:        rig.NewSlots(gateScaledSlotWait(vault.Benchmarks{Vault: files}, rigs, host, benchmarkLimits(bench))),
 				CrossSlot:   application.CrossSlot{Notes: gateway, Host: host},
 				GateLock:    hostGateLock(),
+				Rechecks:    recheckSuite,
 				Vault:       files,
 				Rules:       files,
 				Files:       files,

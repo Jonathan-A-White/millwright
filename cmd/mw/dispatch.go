@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -103,6 +104,28 @@ func hostGateLock() application.GateLock {
 		return nil
 	}
 	return hostlock.NewGate(filepath.Join(home, SyncHaltStateDir))
+}
+
+// hostRecheckSuite is the suite that re-runs one spec alone on a rig's main: the
+// dispatch re-runs a bug's spec with it before it claims the bug (mw-gq6.414), and
+// mw next re-runs it for a bug whose Builder found it fixed already (mw-gq6.869).
+func hostRecheckSuite(ctx context.Context, worktrees *rig.Worktrees, files *vault.Vault, rigs, tests, changedSpecs map[string]string, nice, jobs int) application.Suite {
+	return application.Suite{
+		Trees: worktrees, Heads: worktrees, Runner: rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs), rig.WithTimingTests(files.TimingTests(ctx))),
+		Rigs: rigs, Tests: tests, ChangedSpecs: changedSpecs,
+	}
+}
+
+// withHostRechecks gives a dispatch what it re-runs a bug's check with before it
+// claims the bug, under the host's gate lock: every dispatch cmd/mw builds has it,
+// the timer's and the one that ends a close-out alike (mw-gq6.869;
+// TestEveryDispatchCmdMwBuildsRechecksABugOnMainFirst). A nightly-suite bug whose
+// spec passes on main is closed with no session, whichever dispatch finds it.
+func withHostRechecks(d application.Dispatch, suite application.Suite) application.Dispatch {
+	d.Rechecks = suite
+	d.ExampleRechecks = hostExampleRecheck{}
+	d.GateLock = hostGateLock()
+	return d
 }
 
 // hostGateHolder is whose gate holds this host's gate lock now, "" for nobody:
@@ -362,7 +385,8 @@ func newDispatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			dispatch := application.Dispatch{
+			recheckSuite := hostRecheckSuite(cmd.Context(), worktrees, files, rigs, tests, changedSpecs, nice, jobs)
+			dispatch := withHostRechecks(application.Dispatch{
 				Tracker:       gateway,
 				Worktrees:     worktrees,
 				Landing:       worktrees,
@@ -391,20 +415,14 @@ func newDispatchCmd() *cobra.Command {
 				Events:        homeEventLog(),
 				SmokeHolds:    gristSmokeBook(gateway, host),
 				Home:          files,
-				GateLock:      hostGateLock(),
-				Rechecks: application.Suite{
-					Trees: worktrees, Heads: worktrees, Runner: rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs), rig.WithTimingTests(files.TimingTests(cmd.Context()))),
-					Rigs: rigs, Tests: tests, ChangedSpecs: changedSpecs,
-				},
-				ExampleRechecks: hostExampleRecheck{},
-				DryRun:          dryRun,
-				Out:             cmd.OutOrStdout(),
+				DryRun:        dryRun,
+				Out:           cmd.OutOrStdout(),
 
 				RetryFromBranch: fromBranch,
 				Rebases:         worktrees,
 
 				HasGristTestKey: hostHasGristTestKey,
-			}
+			}, recheckSuite)
 			// The mill answers what it left waiting, on the host that is home and
 			// where a [grist] table says so. A mill that cannot be set up costs
 			// the tick its grist pass and nothing else.

@@ -1370,17 +1370,27 @@ func (g gateBusy) Error() string { return g.why }
 // to be had by then is a gateBusy, and the re-run is not made. The lock is given
 // back however the re-run ends. A nil GateLock re-runs without one.
 func (d Dispatch) recheckUnderGate(ctx context.Context, id, rig, spec string, report *DispatchReport) (SpecRecheck, error) {
-	if d.GateLock == nil {
-		return d.Rechecks.Recheck(ctx, rig, spec)
+	return rerunUnderGate(ctx, d.Rechecks, d.GateLock, d.GateWait, d.Host, id, rig, spec, func(note string) {
+		report.Notes = append(report.Notes, note)
+	})
+}
+
+// rerunUnderGate is recheckUnderGate for whoever re-runs a spec on a rig's main:
+// the dispatch before it claims a bug, and mw next for a bug whose Builder found it
+// fixed already (mw-gq6.869). What is not a failure of the re-run, a lock that
+// could not be given back, goes to note.
+func rerunUnderGate(ctx context.Context, rechecks SpecRechecker, lock GateLock, gateWait time.Duration, host, id, rig, spec string, note func(string)) (SpecRecheck, error) {
+	if lock == nil {
+		return rechecks.Recheck(ctx, rig, spec)
 	}
-	wait := d.GateWait
+	wait := gateWait
 	if wait <= 0 {
 		wait = DispatchGateWait
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	var heldBy string
-	turn, err := d.GateLock.Take(waitCtx, id, func(by string) { heldBy = by })
+	turn, err := lock.Take(waitCtx, id, func(by string) { heldBy = by })
 	if err != nil {
 		if heldBy != "" || errors.Is(err, context.DeadlineExceeded) {
 			return SpecRecheck{}, gateBusy{"not re-checked: the gate is busy"}
@@ -1389,10 +1399,10 @@ func (d Dispatch) recheckUnderGate(ctx context.Context, id, rig, spec string, re
 	}
 	defer func() {
 		if err := turn.Holding.Release(context.Background()); err != nil {
-			report.Notes = append(report.Notes, fmt.Sprintf("%s's gate lock could not be given back: %v", d.Host, err))
+			note(fmt.Sprintf("%s's gate lock could not be given back: %v", host, err))
 		}
 	}()
-	return d.Rechecks.Recheck(ctx, rig, spec)
+	return rechecks.Recheck(ctx, rig, spec)
 }
 
 // answerWaitingGrist runs one pass of the mill after the claims, on the host
