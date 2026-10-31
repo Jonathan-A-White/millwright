@@ -81,6 +81,21 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// realBdDeadline is how long a case that runs a real bd waits for it before it
+// gives up. It is there to end a hung bd, not to judge a slow one: the cases of
+// this package run in parallel, each starting a bd per call, and under load one
+// of them has taken more than ninety seconds and been right (mw-gq6.863). Every
+// case takes it from realBdContext, so none has a shorter deadline of its own
+// (TestNoRealBdCaseSetsItsOwnDeadline).
+const realBdDeadline = 5 * time.Minute
+
+// realBdContext is the context for one case that runs a real bd, ended by
+// realBdDeadline; the case defers the cancel it returns.
+func realBdContext(t *testing.T) (context.Context, context.CancelFunc) {
+	t.Helper()
+	return context.WithTimeout(context.Background(), realBdDeadline)
+}
+
 // throwawayVault makes an empty beads database in a temp directory, a copy of
 // the template, and returns the directory it is in.
 func throwawayVault(t *testing.T) string {
@@ -160,7 +175,7 @@ func installFormula(t *testing.T, vault, name string) {
 func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	epicID := bdRun(t, vault, beads.Program, "create", "A walking skeleton", "-t", "epic",
@@ -522,7 +537,7 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 func TestGatewayKeepsWhatSweepSawWithoutFilingEvents(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	epicID := bdRun(t, vault, beads.Program, "create", "A walking skeleton", "-t", "epic",
@@ -595,7 +610,7 @@ func TestGatewayKeepsWhatSweepSawWithoutFilingEvents(t *testing.T) {
 func TestGatewayNotesWithPrefixFindsTheDoctorsNotes(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	gateway := beads.New(vault)
@@ -642,7 +657,7 @@ func TestGatewayNotesWithPrefixFindsTheDoctorsNotes(t *testing.T) {
 func TestGatewayFilesAStandaloneStoryOnlyWhenItSaysSo(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	gateway := beads.New(vault)
@@ -670,7 +685,7 @@ func TestGatewayFilesAStandaloneStoryOnlyWhenItSaysSo(t *testing.T) {
 func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	gateway := beads.New(vault)
@@ -907,7 +922,7 @@ func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
 // and this test runs both halves the way Dispatch and Next run them.
 func TestAStoryClaimedTheWayDispatchDoesIsClosedTheWayNextDoes(t *testing.T) {
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	// The environment of a Builder session: its own name, which is not the name
@@ -967,7 +982,7 @@ func TestAStoryClaimedTheWayDispatchDoesIsClosedTheWayNextDoes(t *testing.T) {
 func TestGatewayTellsAStorysLabels(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	epicID := bdRun(t, vault, beads.Program, "create", "An epic", "-t", "epic",
@@ -1033,7 +1048,7 @@ func TestGatewayTellsAStorysLabels(t *testing.T) {
 func TestGatewayOffersAnAutoStoryToEveryHost(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	epicID := bdRun(t, vault, beads.Program, "create", "An epic", "-t", "epic",
@@ -1081,7 +1096,7 @@ func TestGatewayOffersAnAutoStoryToEveryHost(t *testing.T) {
 func TestGatewayListsWhatIsReadyUnderALabelWhateverItsPath(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	epicID := bdRun(t, vault, beads.Program, "create", "An epic", "-t", "epic",
@@ -1133,7 +1148,7 @@ func TestGatewayListsWhatIsReadyUnderALabelWhateverItsPath(t *testing.T) {
 func TestGatewayReadsSeveralEpicsAndStoriesCommentsInOneCallEach(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	firstEpic := bdRun(t, vault, beads.Program, "create", "First epic", "-t", "epic", "-p", "1", "--silent")
@@ -1190,7 +1205,7 @@ func TestGatewayReadsSeveralEpicsAndStoriesCommentsInOneCallEach(t *testing.T) {
 func TestGatewayReadsABeadPageAsTheSeparateReadsDo(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	epic := bdRun(t, vault, beads.Program, "create", "The epic", "-t", "epic", "--silent",
@@ -1303,7 +1318,7 @@ func hitlIDs(stories []application.StoryDetail) []string {
 func TestGatewayReportsWhatBeadsRefused(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	_, err := beads.New(vault).ShowStory(ctx, "t-nope")
@@ -1320,7 +1335,7 @@ func TestGatewayReportsWhatBeadsRefused(t *testing.T) {
 func TestGatewayReadsAnEpicsStatusPriorityAndComments(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	epicID := bdRun(t, vault, beads.Program, "create", "A map", "-t", "epic", "-p", "1", "--silent")
@@ -1377,7 +1392,7 @@ func countingProgram(t *testing.T) (program, log string) {
 func TestGatewaySnapshotBuildsTheViewTheSeparateReadsBuild(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 	create := func(args ...string) string {
 		return bdRun(t, vault, beads.Program, append([]string{"create"}, append(args, "--silent")...)...)
@@ -1465,7 +1480,7 @@ func mustJSON(t *testing.T, v any) []byte {
 func TestPouringTddFeatureForABugAsksForTheRegressionTestAndTheSweep(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 	installFormula(t, vault, "tdd-feature")
 	gateway := beads.New(vault)
@@ -1507,7 +1522,7 @@ func TestPouringTddFeatureForABugAsksForTheRegressionTestAndTheSweep(t *testing.
 func TestPouringTheTesterFormulaDrivesTheLandedAppAndCommitsNothing(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 	installFormula(t, vault, "tester")
 	gateway := beads.New(vault)
@@ -1552,7 +1567,7 @@ func TestPouringTheTesterFormulaDrivesTheLandedAppAndCommitsNothing(t *testing.T
 func TestGatewayListsTheStoriesTouchedSinceAMoment(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 	gateway := beads.New(vault)
 
@@ -1601,7 +1616,7 @@ func apptestIDs(stories []application.StoryDetail) []string {
 func TestGatewayEditsAndMovesACardAndReadsItsRank(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	errands := bdRun(t, vault, beads.Program, "create", "Errands", "-t", "epic", "--silent")
@@ -1636,7 +1651,7 @@ func TestGatewayEditsAndMovesACardAndReadsItsRank(t *testing.T) {
 func TestGatewayReadsAndClearsACardsDueTime(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	errands := bdRun(t, vault, beads.Program, "create", "Errands", "-t", "epic", "--silent")
@@ -1686,7 +1701,7 @@ func TestGatewayReadsAndClearsACardsDueTime(t *testing.T) {
 func TestGatewayListsTheClosedStoriesWithTheirReasonAndSupersedes(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	epic := bdRun(t, vault, beads.Program, "create", "An epic", "-t", "epic", "--silent")
@@ -1724,7 +1739,7 @@ func TestGatewayListsTheClosedStoriesWithTheirReasonAndSupersedes(t *testing.T) 
 func TestGatewayListsOneRigsNewestClosedStoriesWithTheirHost(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	var ids []string
@@ -1752,7 +1767,7 @@ func TestGatewayListsOneRigsNewestClosedStoriesWithTheirHost(t *testing.T) {
 func TestGatewayListsTheCardsClosedSinceATimeAndReadsTheirRow(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := realBdContext(t)
 	defer cancel()
 
 	errands := bdRun(t, vault, beads.Program, "create", "Errands", "-t", "epic", "--silent")
