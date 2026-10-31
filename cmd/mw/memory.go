@@ -93,7 +93,7 @@ func newMemoryAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&subject, "subject", "", "what the fact is about; facts are grouped by it")
 	cmd.Flags().StringVar(&source, "source", "", "a bead, rig@sha or mayor:<date>")
 	cmd.Flags().StringVar(&slug, "slug", "", "the file's name; default the sentence's first five words")
-	cmd.Flags().BoolVar(&makeRoom, "make-room", false, "first demote old gotchas to make room in the boot render for this line (see make-room)")
+	cmd.Flags().BoolVar(&makeRoom, "make-room", false, "first demote old gotchas, then decisions over 14 days old, to make room in the boot render for this line (see make-room)")
 	_ = cmd.MarkFlagRequired("kind")
 	_ = cmd.MarkFlagRequired("subject")
 	_ = cmd.MarkFlagRequired("source")
@@ -396,13 +396,15 @@ func newMemoryMakeRoomCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "make-room <rig> --bytes N [--dry-run]",
-		Short: "Demote the oldest eligible boot gotchas until the render has N bytes free under the budget",
-		Long: "make-room chooses by a fixed rule, at no cost in tokens: only a current gotcha in the boot\n" +
-			"render, never a decision, never a sentence beginning 'His ' or 'Decided by the Governor', never\n" +
-			"one whose since is within the last 2 days; the oldest since first (the subject `mw memory stats`\n" +
-			"shows least queried among equals, then slug order). Each goes through demote with the first eight\n" +
-			"words of its own sentence as the question; one that question would not put in the top 3 of eval is\n" +
-			"skipped (named 'skipped <slug>') for the next. It prints the render before, each demotion and the\n" +
+		Short: "Demote the oldest eligible boot gotchas, then decisions over 14 days old, until the render has N bytes free under the budget",
+		Long: "make-room chooses by a fixed rule, at no cost in tokens: a current gotcha in the boot render,\n" +
+			"then, only when no gotcha is left to take, a current decision with a since over 14 days ago; never\n" +
+			"a sentence beginning 'His ' or 'Decided by the Governor', never one whose since is within the last\n" +
+			"2 days; the oldest since first (the subject `mw memory stats` shows least queried among equals,\n" +
+			"then slug order). Each goes through demote with the first eight words of its own sentence as the\n" +
+			"question; one that question would not put in the top 3 of eval is skipped (named 'skipped <slug>')\n" +
+			"for the next, but a decision first gets a second question, its subject's words plus those first\n" +
+			"eight words. It prints the render before, each demotion and the\n" +
 			"render after. When the facts that qualify cannot free N bytes it changes nothing and exits 1.\n" +
 			"--bytes 0 gets the render under the budget. --dry-run prints 'would demote <slug>' for each\n" +
 			"and the render before and after, and writes nothing.",

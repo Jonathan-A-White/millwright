@@ -3280,11 +3280,13 @@ to `rig_memory_bytes`.
 
 `make-room` demotes current boot facts until the render has N bytes free under the
 budget (`--bytes 0`: just under it), choosing by a fixed rule at no cost in tokens: a
-gotcha only (never a decision), never a sentence beginning `His ` or `Decided by the
-Governor`, never one whose since is within the last 2 days, the oldest since first, then
-the subject `mw memory stats` shows least queried, then slug order. Each goes through
-`demote` with the first eight words of its own sentence as the question; one that question
-would not put in the top 3 of `eval` is skipped (`skipped <slug>`) for the next. It prints the
+gotcha first and, only when none is left to take, a decision whose since is over 14 days
+ago; never a sentence beginning `His ` or `Decided by the Governor`, never one whose since
+is within the last 2 days, the oldest since first, then the subject `mw memory stats` shows
+least queried, then slug order. Each goes through `demote` with the first eight words of its
+own sentence as the question; one that question would not put in the top 3 of `eval` is
+skipped (`skipped <slug>`) for the next, a decision after a second question, its subject's
+words plus those first eight (mw-gq6.867). It prints the
 render before, each demotion and the render after; when the facts that qualify cannot free N
 bytes it changes nothing and exits 1. `--dry-run` prints `would demote <slug>` for each and
 the render before and after, and writes nothing. `add --make-room` makes room for the new

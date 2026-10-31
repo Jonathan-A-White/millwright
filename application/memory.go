@@ -1342,6 +1342,10 @@ func (m Memory) Stats(ctx context.Context, req MemoryStats) error {
 // in the boot render: a fact placed within this many days is not demoted.
 const MakeRoomKeepDays = 2
 
+// MakeRoomDecisionDays is how old a decision's since must be for make-room to
+// take it, once no gotcha qualifies: a Builder in flight still relies on a newer one.
+const MakeRoomDecisionDays = 14
+
 // makeRoomQuestionWords is how many words of a fact's sentence make the eval
 // question that finds it once it is demoted.
 const makeRoomQuestionWords = 8
@@ -1362,12 +1366,14 @@ type roomMove struct {
 }
 
 // MakeRoom demotes current boot facts, one by one, until the render has Bytes
-// free under the budget. It chooses by a fixed rule: a gotcha, never a decision;
-// never a sentence beginning 'His ' or 'Decided by the Governor'; never one with
+// free under the budget. It chooses by a fixed rule: the gotchas first, then, only
+// when they do not free enough, the decisions with a since over
+// MakeRoomDecisionDays days old; never a sentence beginning 'His ' or 'Decided by the Governor'; never one with
 // a since within MakeRoomKeepDays days; the oldest since first, then the subject
 // least queried (as stats counts), then by slug. Each goes through Demote with
 // the first words of its own sentence as the question; a fact that question
-// would not put in the top EvalTop results is skipped for the next. When the
+// would not put in the top EvalTop results is skipped for the next (a decision
+// gets a second question first: its subject's words plus those first words). When the
 // facts that qualify cannot free enough, nothing is changed and it is an error.
 func (m Memory) MakeRoom(ctx context.Context, req MemoryMakeRoom) error {
 	if req.Bytes < 0 {
@@ -1392,13 +1398,23 @@ func (m Memory) makeRoom(ctx context.Context, rig string, bytes int, extra *RigF
 		fmt.Fprintf(m.Out, "render %d/%d bytes, %d free: nothing to demote\n", size, m.Budget, m.Budget-size)
 		return nil
 	}
-	moves, skipped, after := m.planRoom(ctx, rig, about, all, facts, extra, bytes)
-	for _, slug := range skipped {
-		fmt.Fprintf(m.Out, "skipped %s: the first %d words of its sentence do not put it in the top %d of an eval question\n", slug, makeRoomQuestionWords, EvalTop)
+	moves, skipped, held, after := m.planRoom(ctx, rig, about, all, facts, extra, bytes)
+	decisionsSkipped := held
+	for _, fact := range skipped {
+		if fact.Kind == FactDecision {
+			decisionsSkipped++
+			fmt.Fprintf(m.Out, "skipped %s: neither the first %d words of its sentence nor its subject with them put it in the top %d of an eval question\n", fact.Slug, makeRoomQuestionWords, EvalTop)
+			continue
+		}
+		fmt.Fprintf(m.Out, "skipped %s: the first %d words of its sentence do not put it in the top %d of an eval question\n", fact.Slug, makeRoomQuestionWords, EvalTop)
 	}
 	if m.Budget-after < bytes {
-		return fmt.Errorf("make-room can leave %d bytes free at most, not the %d asked (render %d/%d now): no more gotcha qualifies to demote; nothing was changed",
-			m.Budget-after, bytes, size, m.Budget)
+		noun := "decisions"
+		if decisionsSkipped == 1 {
+			noun = "decision"
+		}
+		return fmt.Errorf("make-room can leave %d bytes free at most, not the %d asked (render %d/%d now): no gotcha or decision over %d days qualifies to demote (%d %s skipped for their age or their question); nothing was changed",
+			m.Budget-after, bytes, size, m.Budget, MakeRoomDecisionDays, decisionsSkipped, noun)
 	}
 	fmt.Fprintf(m.Out, "render before: %d/%d bytes\n", size, m.Budget)
 	for _, move := range moves {
@@ -1415,9 +1431,10 @@ func (m Memory) makeRoom(ctx context.Context, rig string, bytes int, extra *RigF
 }
 
 // planRoom chooses the demotions that free bytes, without writing anything, and
-// returns them, the facts it passed over because their own question would not
-// find them, and the render size once the demotions are made.
-func (m Memory) planRoom(ctx context.Context, rig, about string, all []RigFact, facts map[string]RigFact, extra *RigFact, bytes int) (moves []roomMove, skipped []string, size int) {
+// returns them, the facts it passed over because no question of its own would
+// find them, how many decisions it held back for being too new, and the render
+// size once the demotions are made.
+func (m Memory) planRoom(ctx context.Context, rig, about string, all []RigFact, facts map[string]RigFact, extra *RigFact, bytes int) (moves []roomMove, skipped []RigFact, held, size int) {
 	counts := map[string]int{}
 	if m.Queries != nil {
 		if records, err := m.Queries.ReadMemoryQueries(ctx); err == nil {
@@ -1434,13 +1451,18 @@ func (m Memory) planRoom(ctx context.Context, rig, about string, all []RigFact, 
 
 	var candidates []RigFact
 	for _, fact := range all {
-		if m.roomEligible(fact) {
+		switch {
+		case m.roomEligible(fact):
 			candidates = append(candidates, fact)
+		case m.roomDecisionTooNew(fact):
+			held++
 		}
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
 		a, b := candidates[i], candidates[j]
 		switch {
+		case a.Kind != b.Kind:
+			return a.Kind == FactGotcha
 		case a.Since != b.Since:
 			return a.Since < b.Since
 		case counts[a.Subject] != counts[b.Subject]:
@@ -1458,8 +1480,17 @@ func (m Memory) planRoom(ctx context.Context, rig, about string, all []RigFact, 
 		question := firstWords(fact.Sentence, makeRoomQuestionWords)
 		q := EvalQuestion{Question: question}
 		if len(q.Terms()) == 0 || !q.finds(queried, fact.Slug) {
-			skipped = append(skipped, fact.Slug)
-			continue
+			question = ""
+			if fact.Kind == FactDecision {
+				second := fact.Subject + " " + firstWords(fact.Sentence, makeRoomQuestionWords)
+				if (EvalQuestion{Question: second}).finds(queried, fact.Slug) {
+					question = second
+				}
+			}
+			if question == "" {
+				skipped = append(skipped, fact)
+				continue
+			}
 		}
 		for i := range working {
 			if working[i].Slug == fact.Slug {
@@ -1469,23 +1500,43 @@ func (m Memory) planRoom(ctx context.Context, rig, about string, all []RigFact, 
 		size = len(RenderRigMemory(about, working))
 		moves = append(moves, roomMove{slug: fact.Slug, question: question})
 	}
-	return moves, skipped, size
+	return moves, skipped, held, size
 }
 
 // roomEligible reports whether make-room may demote a fact: a current gotcha in
-// the boot render that is not the Governor's own word and was not placed within
-// MakeRoomKeepDays days.
+// the boot render, or a decision there over MakeRoomDecisionDays days old, that
+// is not the Governor's own word and was not placed within MakeRoomKeepDays days.
 func (m Memory) roomEligible(fact RigFact) bool {
-	if fact.Status != FactCurrent || fact.Unbooted || fact.Kind != FactGotcha {
+	if !m.roomBase(fact) {
 		return false
 	}
-	if strings.HasPrefix(fact.Sentence, "His ") || strings.HasPrefix(fact.Sentence, "Decided by the Governor") {
+	if fact.Kind == FactDecision {
+		return m.sinceBefore(fact, MakeRoomDecisionDays)
+	}
+	return fact.Kind == FactGotcha && m.sinceBefore(fact, MakeRoomKeepDays)
+}
+
+// roomDecisionTooNew reports whether a fact is a decision make-room would take
+// but for its age.
+func (m Memory) roomDecisionTooNew(fact RigFact) bool {
+	return m.roomBase(fact) && fact.Kind == FactDecision && !m.sinceBefore(fact, MakeRoomDecisionDays)
+}
+
+// roomBase is what any fact make-room takes must be: current, in the boot
+// render, and not the Governor's own word.
+func (m Memory) roomBase(fact RigFact) bool {
+	if fact.Status != FactCurrent || fact.Unbooted {
 		return false
 	}
+	return !strings.HasPrefix(fact.Sentence, "His ") && !strings.HasPrefix(fact.Sentence, "Decided by the Governor")
+}
+
+// sinceBefore reports whether a fact's since is more than days days ago.
+func (m Memory) sinceBefore(fact RigFact, days int) bool {
 	placed, err := time.Parse(FactDateLayout, fact.Since)
 	if err != nil {
 		return false
 	}
-	newest := m.clock().UTC().AddDate(0, 0, -MakeRoomKeepDays).Format(FactDateLayout)
+	newest := m.clock().UTC().AddDate(0, 0, -days).Format(FactDateLayout)
 	return placed.Format(FactDateLayout) < newest
 }

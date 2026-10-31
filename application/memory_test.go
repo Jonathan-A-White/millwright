@@ -1165,3 +1165,157 @@ func TestSupersedeByRefusesANewSentenceSlugOrSourceAlongsideIt(t *testing.T) {
 		t.Errorf("expected a refusal naming --by, got %v", err)
 	}
 }
+
+// aDecisionRig is a rig whose gotchas are all too new to take (the clock says
+// 2026-10-18), so make-room has only decisions to look at: 'His' and 'Decided by
+// the Governor' decisions and a plain one, each over 14 days old, a plain one of
+// 15 days and one of 13. The budget is the render's size.
+func aDecisionRig() (*editableFiles, application.Memory, *bytes.Buffer) {
+	files := &editableFiles{files: map[string]string{
+		"his.md":      roomFact("rules", "decision", "2026-06-01", "His rule is that a story never touches the target branch."),
+		"gov.md":      roomFact("rules", "decision", "2026-06-02", "Decided by the Governor: a charter changes only on his word."),
+		"fifteen.md":  roomFact("fifteen", "decision", "2026-10-03", "The fifteen daemon logs every claim into its own journal file."),
+		"thirteen.md": roomFact("thirteen", "decision", "2026-10-05", "The thirteen planner keeps one branch for each story it takes."),
+		"new.md":      roomFact("fresh", "gotcha", "2026-10-17", "The fresh gateway drops a message whose body is larger than the cap."),
+	}}
+	var out bytes.Buffer
+	m := anEditableMemory(files, &recordingVault{}, &out)
+	m.Vault = &recordingVault{}
+	list, _ := application.LoadRigFacts(files.files)
+	m.Budget = len(application.RenderRigMemory("About.", list))
+	return files, m, &out
+}
+
+func TestMakeRoomGoesOnToDecisionsOver14DaysWhenNoGotchaQualifies(t *testing.T) {
+	files, m, out := aDecisionRig()
+	want := roomLine("fifteen", "The fifteen daemon logs every claim into its own journal file.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for slug, isDemoted := range map[string]bool{
+		"fifteen": true, "thirteen": false, "his": false, "gov": false, "new": false,
+	} {
+		if demoted(files, slug) != isDemoted {
+			t.Errorf("%s demoted = %v, want %v\n%s", slug, demoted(files, slug), isDemoted, out)
+		}
+	}
+	var evalOut bytes.Buffer
+	m.Out = &evalOut
+	if err := m.Eval(context.Background(), "kiln"); err != nil {
+		t.Fatalf("eval fails after make-room: %v\n%s", err, evalOut.String())
+	}
+}
+
+func TestMakeRoomTakesGotchasBeforeDecisionsOfAnyAge(t *testing.T) {
+	files, m, out, _ := aFullRig()
+	// dec.md is a decision of 2026-07-01, older than every gotcha: it still waits.
+	want := roomLine("alpha", "The alpha service restarts only after its socket file is removed by hand.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !demoted(files, "alpha") || demoted(files, "dec") {
+		t.Errorf("gotchas go first:\n%s", out)
+	}
+}
+
+func TestMakeRoomTakesOldDecisionsAfterTheGotchasAreUsedUp(t *testing.T) {
+	files, m, out, _ := aFullRig()
+	// Every plain gotcha plus the decision are needed: dec is taken last.
+	var gotchas int
+	for _, s := range []struct{ subject, sentence string }{
+		{"alpha", "The alpha service restarts only after its socket file is removed by hand."},
+		{"bravo", "The bravo ledger keeps one line a landing and never rewrites an old line."},
+		{"charly", "The charly fixture builds its vault in a temporary directory every run."},
+		{"rules", "Landings always go through the merge slot of the host."},
+	} {
+		gotchas += roomLine(s.subject, s.sentence)
+	}
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: gotchas}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, slug := range []string{"alpha", "bravo", "charly", "dec"} {
+		if !demoted(files, slug) {
+			t.Errorf("%s was not demoted:\n%s", slug, out)
+		}
+	}
+	for _, slug := range []string{"his", "gov", "two", "one"} {
+		if demoted(files, slug) {
+			t.Errorf("%s was demoted:\n%s", slug, out)
+		}
+	}
+}
+
+func TestMakeRoomNeverTakesAHisOrGovernorDecisionOrOneOf14DaysOrLess(t *testing.T) {
+	files, m, out := aDecisionRig()
+	err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: 5000})
+	if err == nil {
+		t.Fatalf("want a refusal\n%s", out)
+	}
+	for _, slug := range []string{"his", "gov", "thirteen", "new", "fifteen"} {
+		if demoted(files, slug) {
+			t.Errorf("%s was demoted though the make-room refused", slug)
+		}
+	}
+	// A decision of exactly 14 days is not older than 14 days.
+	files.files["fourteen.md"] = roomFact("fourteen", "decision", "2026-10-04", "The fourteen relay forwards each mail to the mayor at once.")
+	list, _ := application.LoadRigFacts(files.files)
+	m.Budget = len(application.RenderRigMemory("About.", list))
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: roomLine("fourteen", "The fourteen relay forwards each mail to the mayor at once.") + roomLine("fifteen", "The fifteen daemon logs every claim into its own journal file.")}); err == nil {
+		t.Errorf("want a refusal: only fifteen qualifies")
+	}
+	if demoted(files, "fourteen") {
+		t.Errorf("a decision of exactly 14 days was demoted")
+	}
+}
+
+func TestMakeRoomTriesTheSubjectPlusFirstWordsBeforeSkippingADecision(t *testing.T) {
+	files, m, out := aDecisionRig()
+	// Four decisions open with the same eight words; zed is oldest but sorts last
+	// by subject among them, so its first words rank it fourth. Its subject plus
+	// the first words finds it.
+	same := "Always run the gate before landing any change, said "
+	files.files["zed.md"] = roomFact("zed", "decision", "2026-06-01", same+"zed.")
+	for _, s := range []string{"a", "b", "c"} {
+		files.files[s+"-same.md"] = roomFact(s, "decision", "2026-06-02", same+s+".")
+	}
+	list, _ := application.LoadRigFacts(files.files)
+	m.Budget = len(application.RenderRigMemory("About.", list))
+	want := roomLine("zed", same+"zed.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want, DryRun: true}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out.String(), "would demote zed  (Q: zed Always run the gate before landing any change,") {
+		t.Errorf("zed should be taken with its subject in the question:\n%s", out)
+	}
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !demoted(files, "zed") || !strings.Contains(files.eval, "Q: zed Always run the gate") {
+		t.Errorf("zed is not demoted with that question:\n%s", files.eval)
+	}
+	var evalOut bytes.Buffer
+	m.Out = &evalOut
+	if err := m.Eval(context.Background(), "kiln"); err != nil {
+		t.Fatalf("eval fails after make-room: %v\n%s", err, evalOut.String())
+	}
+}
+
+func TestMakeRoomRefusalNamesBothCategoriesAndTheDecisionsSkipped(t *testing.T) {
+	files, m, out := aDecisionRig()
+	err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: 5000})
+	if err == nil {
+		t.Fatalf("want a refusal\n%s", out)
+	}
+	for _, want := range []string{
+		"no gotcha or decision over 14 days qualifies to demote",
+		"1 decision skipped",
+		"nothing was changed",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal lacks %q: %v", want, err)
+		}
+	}
+	if len(files.wrote) != 0 {
+		t.Errorf("wrote %v", files.wrote)
+	}
+}
