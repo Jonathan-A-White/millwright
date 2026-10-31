@@ -228,8 +228,9 @@ func (d Dispatch) keepStarved(ctx context.Context, ready []StoryDetail, running 
 
 // StarvedAlarms judges the rigs the hosts' notes say are held back whole
 // against the work in hand: a rig is starved when it was first so held more than
-// StarvedAfter ago and it has a ready story and none running now. A story of it
-// that starts clears the alarm at once. Two hosts' notes of one rig count the
+// StarvedAfter ago and it has a ready story and none running now (a story
+// queued for its batch has no session, so it is not running). A story of it that
+// starts clears the alarm at once. Two hosts' notes of one rig count the
 // earlier. One alarm a rig, its line naming the rig, how many are ready, for how
 // long none ran, and the hold with its reason.
 func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAlarm {
@@ -248,7 +249,7 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 		running := false
 		for _, list := range [][]StoryDetail{work.Running, work.OpenClaimed} {
 			for _, d := range list {
-				running = running || !d.IsEpic && !d.Hitl() && d.Merged().Rig == rig
+				running = running || !d.IsEpic && !d.Hitl() && !QueuedForBatch(d) && d.Merged().Rig == rig
 			}
 		}
 		var ready []string

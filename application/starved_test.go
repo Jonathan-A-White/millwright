@@ -614,3 +614,17 @@ func TestAHeldHarnessAlarmReadsOnlyTheHeldRigsNewestClosedStories(t *testing.T) 
 		t.Errorf("expected one bounded list of the held rig, got limits %v", asked)
 	}
 }
+
+func TestAStarvedRigStaysAnAlarmWhenItsOnlyClaimedStoryIsQueuedForItsBatch(t *testing.T) {
+	tracker := starvedFixture(t, 4*time.Hour)
+	ctx := context.Background()
+	if err := tracker.ClaimStory(ctx, "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetStoryState(ctx, "mw-gq6.1", application.RunState, application.RunQueued, "the test"); err != nil {
+		t.Fatal(err)
+	}
+	if alarms := starvedAlarms(t, tracker); len(alarms) != 1 {
+		t.Errorf("expected the alarm kept: a story queued for its batch has no session, got %+v", alarms)
+	}
+}
