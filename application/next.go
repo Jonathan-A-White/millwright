@@ -397,6 +397,12 @@ type Next struct {
 	// nil GateLock takes none.
 	GateLock GateLock
 
+	// Rechecks re-runs a bug's spec on the rig's main when its Builder ended with
+	// no commits saying the bug is fixed on main already: a spec that passes
+	// closes the story as fixed, with no person (mw-gq6.869). A nil Rechecks
+	// re-runs nothing, and the story is refused as no-commits.
+	Rechecks SpecRechecker
+
 	// Benchmarks is where the benchmarks of past close-outs are read from, for a
 	// landed story's par and the calibration printed with the report, and Bench
 	// the thresholds of both (mw-t0z3fu.2). Every close-out that ran the rig's
@@ -511,6 +517,10 @@ type NextReport struct {
 	StoryID string
 	Title   string
 	Host    string
+	// FixedOnMain is set when the story was closed because its Builder found the
+	// bug fixed on main already and its check passes there (mw-gq6.869): nothing
+	// was landed.
+	FixedOnMain *FixedOnMain
 	// Landed says the story's work is on its target branch at the remote, and
 	// How is the way it got there. LandedEarlier says an earlier run of mw next
 	// landed it and this one only closed it out, so How is empty and nothing
@@ -1214,6 +1224,9 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	}
 	n.readLanding(ctx, c, report)
 	if found := n.refusals(ctx, c, report, false); len(found) > 0 {
+		if rep, closed, err := n.closeAsFixedOnMain(ctx, c, report, found[0]); closed {
+			return rep, err
+		}
 		if c.cappedAfterClosing {
 			// Cut at the cap and not done: given back as any capped session is,
 			// with what the close-out found said beside it (mw-gq6.595).
@@ -3940,6 +3953,8 @@ func (r NextReport) String() string {
 		if r.Trusted != "" {
 			fmt.Fprintf(&b, "          tested by mw check at %s: the rig's tests were not run again\n", shortCommit(r.Trusted))
 		}
+	case r.FixedOnMain != nil:
+		fmt.Fprintf(&b, "  fixed   %s: nothing to land; the story is closed, its worktree and branch taken away\n", r.FixedOnMain.reason())
 	case r.Landed:
 		fmt.Fprintf(&b, "  landed  %s on %s (%d commits, %d push(es))\n", r.How.LandedAs(r.Target), r.Target, r.Commits, r.Pushes)
 		if len(r.How.Unioned) > 0 {
