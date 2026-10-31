@@ -35,7 +35,7 @@ func (g *Gateway) ReadyForHost(ctx context.Context, host string) ([]application.
 	if live, ok := g.liveOverConnection(ctx); ok {
 		return onHost(live.ready(), host, true), nil
 	}
-	out, err := g.call(ctx, "ready", "--unassigned", "--exclude-type", "epic", "--json")
+	out, err := g.call(ctx, "ready", "--unassigned", "--exclude-type", "epic", "--limit", "0", "--json")
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +254,7 @@ func (g *Gateway) WorkInHand(ctx context.Context) (application.WorkInHand, error
 	if live, ok := g.liveOverConnection(ctx); ok {
 		return live.workInHand(), nil
 	}
-	out, err := g.call(ctx, "ready", "--unassigned", "--exclude-type", "epic", "--json")
+	out, err := g.call(ctx, "ready", "--unassigned", "--exclude-type", "epic", "--limit", "0", "--json")
 	if err != nil {
 		return application.WorkInHand{}, err
 	}
