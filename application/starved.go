@@ -268,7 +268,10 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 		if way := harnessWayOut(r, work); way != "" {
 			text += ". " + way
 		}
-		alarms = append(alarms, DamperAlarm{Principle: StarvedPrinciple, Text: text, Beads: ready})
+		// The rig, its hold and the stories ready are the alarm; how long it has
+		// lasted, and the reason's words, differ from one host's reading to the next.
+		identity := strings.Join(append([]string{rig, r.Hold}, slices.Sorted(slices.Values(ready))...), "\t")
+		alarms = append(alarms, DamperAlarm{Principle: StarvedPrinciple, Text: text, Beads: ready, Identity: identity})
 	}
 	return alarms
 }
@@ -398,6 +401,30 @@ func (s DamperSurvey) readStarved(ctx context.Context, now time.Time) ([]Starved
 	return rigs, nil
 }
 
+// StarvedMailedKey is the note, shared by every host, that holds what the Mayor
+// was last mailed of the starved rigs (mw-gq6.868): the alarms' identities. It
+// is not under "host.", which is where each host keeps its own.
+const StarvedMailedKey = "starved.mailed"
+
+// StarvedMailNotes is the part of the tracker's notes StarvedRigCheck keeps what
+// was mailed in.
+type StarvedMailNotes interface {
+	Note(ctx context.Context, key string) (string, error)
+	SetNote(ctx context.Context, key, value string) error
+	ClearNote(ctx context.Context, key string) error
+}
+
+// starvedMailed is the value StarvedMailedKey holds for these alarms: their
+// identities, in order, one a line.
+func starvedMailed(alarms []DamperAlarm) string {
+	identities := make([]string, len(alarms))
+	for i, a := range alarms {
+		identities[i] = a.Identity
+	}
+	slices.Sort(identities)
+	return strings.Join(identities, "\n")
+}
+
 // Starved reads the starved-rig alarms alone, at now: what mw doctor judges.
 func (s DamperSurvey) Starved(ctx context.Context, now time.Time) ([]DamperAlarm, error) {
 	rigs, err := s.readStarved(ctx, now)
@@ -427,6 +454,9 @@ type StarvedRigCheck struct {
 	Alarms func(ctx context.Context) ([]DamperAlarm, error)
 	// Mail sends the Mayor the message.
 	Mail func(ctx context.Context, message NewMessage) error
+	// Mailed, shared by every host, keeps what the Mayor was last mailed so that
+	// two hosts raising one alarm mail it once (mw-gq6.868); nil mails every time.
+	Mailed StarvedMailNotes
 
 	found []DamperAlarm
 }
@@ -445,6 +475,13 @@ func (c *StarvedRigCheck) Probe(ctx context.Context) (Verdict, string) {
 		return DoctorCannotTell, err.Error()
 	}
 	if len(alarms) == 0 {
+		// The alarm has cleared: the next one is news again, to whichever host sees
+		// it first. A dry run changes nothing.
+		if c.Mailed != nil && !DoctorDryRun(ctx) {
+			if kept, _ := c.Mailed.Note(ctx, StarvedMailedKey); kept != "" {
+				_ = c.Mailed.ClearNote(ctx, StarvedMailedKey)
+			}
+		}
 		return DoctorOK, ""
 	}
 	c.found = alarms
@@ -466,12 +503,27 @@ func (c *StarvedRigCheck) Cure(ctx context.Context) error {
 		body = append(body, a.Line())
 	}
 	body = append(body, "", "`mw dispatch --dry-run` on a host says why it passes each ready story over, and `mw status` shows the same lines under DAMPERS. The alarm clears when a story of the rig starts.")
-	return c.Mail(ctx, NewMessage{
+	// Another host that raised this very alarm may have mailed it already; the
+	// claim is written before the mail so that one a few seconds behind sees it.
+	mailed := starvedMailed(c.found)
+	if c.Mailed != nil {
+		if kept, err := c.Mailed.Note(ctx, StarvedMailedKey); err == nil && kept == mailed {
+			return nil
+		}
+		if err := c.Mailed.SetNote(ctx, StarvedMailedKey, mailed); err != nil {
+			return fmt.Errorf("what the Mayor is mailed of the starved rigs could not be kept: %w", err)
+		}
+	}
+	err := c.Mail(ctx, NewMessage{
 		From:    SeatIdentity(MwSeat, c.Host),
 		To:      MayorMailbox,
 		Subject: fmt.Sprintf("%s: %s has ready stories and none running for over %s", MailStarved, strings.Join(rigs, ", "), elapsed(StarvedAfter)),
 		Body:    strings.Join(body, "\n"),
 	})
+	if err != nil && c.Mailed != nil {
+		_ = c.Mailed.ClearNote(ctx, StarvedMailedKey)
+	}
+	return err
 }
 
 // Damper implements DoctorCheck: one mail an episode.

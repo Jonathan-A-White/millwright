@@ -60,6 +60,9 @@ type DamperAlarm struct {
 	Principle string
 	Text      string
 	Beads     []string
+	// Identity, when set, is what the alarm is, apart from the words that age (a
+	// duration): two hosts that raise alarms of one Identity raise one alarm.
+	Identity string
 }
 
 // DampersReport is what the alarms found, with the counts mw doctor repeats.

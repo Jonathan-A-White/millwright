@@ -628,3 +628,104 @@ func TestAStarvedRigStaysAnAlarmWhenItsOnlyClaimedStoryIsQueuedForItsBatch(t *te
 		t.Errorf("expected the alarm kept: a story queued for its batch has no session, got %+v", alarms)
 	}
 }
+
+// mw-gq6.868: the alarm is one fact whichever host sees it. Two hosts' doctors
+// read the same notes and work, so they raise the same alarm seconds apart; the
+// Mayor is mailed once, and again only when the alarm changes or has cleared.
+func aStarvedRigCheckOnHost(host string, at time.Time, tracker *apptest.FakeTracker, mailbox *apptest.FakeMailbox) *application.StarvedRigCheck {
+	survey := application.DamperSurvey{Tracker: tracker, Notes: tracker}
+	return &application.StarvedRigCheck{
+		Host:   host,
+		Alarms: func(ctx context.Context) ([]application.DamperAlarm, error) { return survey.Starved(ctx, at) },
+		Mail:   func(ctx context.Context, m application.NewMessage) error { _, err := mailbox.Send(ctx, m); return err },
+		Mailed: tracker,
+	}
+}
+
+func runDoctorsOfTwoHosts(t *testing.T, tracker *apptest.FakeTracker, mailbox *apptest.FakeMailbox) {
+	t.Helper()
+	ctx := context.Background()
+	for i, host := range []string{"laptop", "desktop"} {
+		now := doctorNow
+		doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now,
+			aStarvedRigCheckOnHost(host, statusNow.Add(time.Duration(7*i)*time.Second), tracker, mailbox))
+		if _, err := doctor.Run(ctx, "", false); err != nil {
+			t.Fatalf("%s: %v", host, err)
+		}
+	}
+}
+
+func TestTwoHostsRaisingTheSameStarvedAlarmMailTheMayorOnce(t *testing.T) {
+	tracker := starvedFixture(t, 4*time.Hour)
+	mailbox := apptest.NewFakeMailbox()
+	runDoctorsOfTwoHosts(t, tracker, mailbox)
+	inbox, _ := mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if len(inbox) != 1 {
+		t.Fatalf("expected one mail for the one alarm two hosts raised, got %d: %+v", len(inbox), inbox)
+	}
+}
+
+func TestAChangedStarvedAlarmIsMailedAgain(t *testing.T) {
+	ctx := context.Background()
+	tracker := starvedFixture(t, 4*time.Hour)
+	mailbox := apptest.NewFakeMailbox()
+	runDoctorsOfTwoHosts(t, tracker, mailbox)
+
+	// Another story of the rig is ready: a different alarm.
+	storyOn(t, tracker, "mw-gq6.3", "Three", "vps")
+	runDoctorsOfTwoHosts(t, tracker, mailbox)
+	if inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox); len(inbox) != 2 {
+		t.Fatalf("expected a second mail for another ready story, got %d", len(inbox))
+	}
+
+	// Another hold: a different alarm again.
+	note := application.StarvedRig{Rig: "millwright", Since: statusNow.Add(-4 * time.Hour), Hold: "no room", Reason: "load 23.9 of 20"}
+	if err := tracker.SetNote(ctx, application.StarvedKey("vps"), application.FormatStarved([]application.StarvedRig{note})); err != nil {
+		t.Fatal(err)
+	}
+	runDoctorsOfTwoHosts(t, tracker, mailbox)
+	if inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox); len(inbox) != 3 {
+		t.Fatalf("expected a third mail for another hold, got %d", len(inbox))
+	}
+}
+
+func TestAStarvedAlarmClearedAndRaisedAgainIsMailedAgain(t *testing.T) {
+	ctx := context.Background()
+	tracker := starvedFixture(t, 4*time.Hour)
+	mailbox := apptest.NewFakeMailbox()
+	runDoctorsOfTwoHosts(t, tracker, mailbox)
+
+	if err := tracker.ClaimStory(ctx, "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	runDoctorsOfTwoHosts(t, tracker, mailbox) // cleared: a story of the rig runs
+	if err := tracker.ReleaseClaim(ctx, "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	runDoctorsOfTwoHosts(t, tracker, mailbox) // raised again, the same rig, stories and hold
+	if inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox); len(inbox) != 2 {
+		t.Fatalf("expected one mail for each time the alarm was raised, got %d", len(inbox))
+	}
+}
+
+func TestADryRunOfTheStarvedCheckClearsNothingForTheOtherHosts(t *testing.T) {
+	ctx := context.Background()
+	tracker := starvedFixture(t, 4*time.Hour)
+	mailbox := apptest.NewFakeMailbox()
+	runDoctorsOfTwoHosts(t, tracker, mailbox)
+	if err := tracker.ClaimStory(ctx, "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	now := doctorNow
+	doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now, aStarvedRigCheckOnHost("laptop", statusNow, tracker, mailbox))
+	if _, err := doctor.Run(ctx, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.ReleaseClaim(ctx, "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	runDoctorsOfTwoHosts(t, tracker, mailbox)
+	if inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox); len(inbox) != 1 {
+		t.Fatalf("expected a dry run to leave what was mailed as it was, got %d mails", len(inbox))
+	}
+}

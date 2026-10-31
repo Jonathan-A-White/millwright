@@ -376,8 +376,11 @@ func newDoctorCmd() *cobra.Command {
 			}
 			// A rig with ready stories and none running for over an hour, named with
 			// what holds it; the cure is the one mail to the Mayor of its episode.
+			// Both hosts see the one alarm, so what was mailed is kept in a note they
+			// share, and the second host to find it faulty says nothing (mw-gq6.868).
 			starvedRigs := &application.StarvedRigCheck{
 				Host:   host,
+				Mailed: mwGateway(vault, host),
 				Alarms: func(ctx context.Context) ([]application.DamperAlarm, error) { return dampers.Starved(ctx, time.Now()) },
 				Mail: func(ctx context.Context, message application.NewMessage) error {
 					_, err := mwGateway(vault, host).Send(ctx, message)
