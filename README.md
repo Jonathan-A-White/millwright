@@ -1606,6 +1606,9 @@ lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"  
 [related_tests]
 lampas = "npm ci --no-audit --no-fund && TZ=UTC npx vitest related --run --passWithNoTests {files} && npm run typecheck && npm run lint && npm run build"  # the landing gate runs this in place of [tests], on the files a story changed (default: the whole [tests] line)
 
+[always_run]
+lampas = ["tests/unit/open-tutor-only.test.ts"]  # test files the related-tests line is given besides the changed ones, whatever changed (default: none)
+
 [named_tests]
 millwright = "go test -tags beads_integration -run \"^($(echo {tests} | tr ' ' '|'))$\" ./..."  # run on the target branch alone, with {tests} the names of the tests a merged result failed (default: nothing, and a failure is always the story's)
 
@@ -1681,7 +1684,12 @@ after its fixer. A branch that only deleted files leaves nothing to name: the
 rig the table does not name run the whole `[tests]` line, so the nightly suite
 (`mw suite <rig>`) still runs everything once a day. For vitest, end the line's test
 command with `--passWithNoTests`, so a story whose files no test is related to does
-not fail the gate for it. The way back is to delete the line. A Boost does not copy
+not fail the gate for it. A test that finds its files by scanning folders (`readdirSync`) is imported by none of
+them, so a line that follows imports never selects it, and a story that breaks the rule it
+guards lands green. `[always_run]` names such tests, a list or one string with commas, by rig
+(mw-gq6.871): the gate gives the line those that the checked-out tree holds after the changed
+files, each once, and a failing one refuses the gate like any other. A branch that changed no
+file still runs the whole `[tests]` line. The way back is to delete the line. A Boost does not copy
 `[related_tests]` from `hosts/boost-config.toml`: it gates with `[tests]` unless its own
 config.toml names the line.
 

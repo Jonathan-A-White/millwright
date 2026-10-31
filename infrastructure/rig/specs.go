@@ -96,6 +96,21 @@ func WithRelatedCommands(commands map[string]string) CheckOption {
 	}
 }
 
+// WithAlwaysRun names, by rig name, the test files a rig's related-tests line is
+// always given besides the changed ones, as the [always_run] table of the config
+// file has it (mw-gq6.871): a guard test that finds its files by scanning
+// folders is imported by no file it checks, so a line that follows imports would
+// never run it. A rig the table does not name adds none.
+func WithAlwaysRun(files map[string][]string) CheckOption {
+	return func(c *Checks) {
+		for rig, list := range files {
+			if len(list) > 0 {
+				c.always[rig] = list
+			}
+		}
+	}
+}
+
 // RunRelated implements application.RelatedChecks: the files dir has added,
 // copied, modified or renamed since its merge-base with base, put into the
 // rig's related-tests line where it says {files} and run as the rig's tests
@@ -114,11 +129,20 @@ func (c *Checks) RunRelated(ctx context.Context, rig, dir string, span applicati
 	if len(files) == 0 {
 		return application.RelatedRun{NoFiles: true}, nil
 	}
+	files = c.withAlwaysRun(rig, dir, files)
 	checked, err := c.RunLine(ctx, rig, dir, strings.ReplaceAll(template, FilesPlaceholder, shellWords(files)))
 	if err != nil {
 		return application.RelatedRun{}, err
 	}
 	return application.RelatedRun{Checked: checked, Files: files, Ran: true}, nil
+}
+
+// withAlwaysRun is files and, after them, the rig's always-run tests that dir
+// holds, sorted and each once (mw-gq6.871). One the tree lacks is left out, and
+// a timing test is left out as in every other run.
+func (c *Checks) withAlwaysRun(rig, dir string, files []string) []string {
+	always, _ := c.leavingOutTiming(rig, c.always[rig])
+	return withFailedTests(dir, files, always)
 }
 
 // withFailedTests is the changed files and, after them, the test files an own

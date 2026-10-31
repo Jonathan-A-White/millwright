@@ -2933,3 +2933,35 @@ func TestNextHarnessIsClaudeUntilTheNextTableSaysCodex(t *testing.T) {
 		t.Fatalf("expected an error naming the value, got %v", err)
 	}
 }
+
+func TestAlwaysRunSaysWhichTestsEachRigsRelatedGateRunsWhateverFilesChanged(t *testing.T) {
+	writeConfig(t, `host = "laptop"
+
+[related_tests]
+lampas = "npx vitest related --run {files}"
+
+[always_run]
+lampas = ["tests/unit/open-tutor-only.test.ts", "tests/unit/b.test.ts"]
+postern = "tests/guard.test.ts"
+`)
+
+	always, err := config.AlwaysRun()
+	if err != nil {
+		t.Fatalf("reading the always-run tests: %v", err)
+	}
+	if got := always["lampas"]; !reflect.DeepEqual(got, []string{"tests/unit/open-tutor-only.test.ts", "tests/unit/b.test.ts"}) {
+		t.Errorf("lampas always-run = %v", got)
+	}
+	if got := always["postern"]; !reflect.DeepEqual(got, []string{"tests/guard.test.ts"}) {
+		t.Errorf("postern always-run = %v", got)
+	}
+}
+
+func TestAlwaysRunIsEmptyOnAHostWithNoSuchTable(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+
+	always, err := config.AlwaysRun()
+	if err != nil || len(always) != 0 {
+		t.Errorf("expected no always-run tests, got %+v (error: %v)", always, err)
+	}
+}
