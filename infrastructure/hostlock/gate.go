@@ -144,6 +144,22 @@ func (g *Gate) Take(ctx context.Context, holder string, held func(by string)) (a
 	}, nil
 }
 
+// Holder says whose gate holds the lock now, read without taking it: empty when
+// nobody holds it, even if a holder that died left its name in the file, and
+// "somebody" when it is held and the file names no one (mw-gq6.858).
+func (g *Gate) Holder() string {
+	file, err := os.Open(g.path())
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err == nil {
+		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		return ""
+	}
+	return gateHolder(g.path())
+}
+
 // gateHolding is a gate lock somebody has: the open file whose flock it is.
 type gateHolding struct {
 	file   *os.File

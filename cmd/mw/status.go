@@ -251,6 +251,8 @@ func newStatusCmd() *cobra.Command {
 				Sessions:         tmux.New(),
 				Events:           events,
 				Log:              idleLog,
+				Landings:         hostLandings(),
+				GateHolder:       hostGateHolder(),
 				IdleAfter:        idleAfter,
 				Harness:          procs.Harness{},
 				Control:          homeEventLog(),

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/apartproc"
@@ -39,7 +38,7 @@ func batchLandSpringJob(host string, out io.Writer) (application.SpringJob, erro
 	if err != nil {
 		return application.SpringJob{}, fmt.Errorf("finding the home directory to keep the landings' state in: %w", err)
 	}
-	detached := batchLandApart(self, filepath.Join(home, ".local", "state", "mw", "land"), "")
+	detached := batchLandApart(self, landStateDir(home), "")
 	landings := &application.BatchLandings{
 		Rigs:    rigs,
 		Rules:   mwVault(dir, host),

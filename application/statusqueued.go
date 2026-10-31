@@ -29,8 +29,15 @@ type BatchWait struct {
 	// InBatchSince is when the batch-land job for the story's rig began
 	// running, zero when none is running.
 	InBatchSince time.Time
+	// Landing says an `mw land` of the story's rig is alive on this host, though
+	// no batch-land job event names the rig: the job names the rigs it was
+	// scheduled for, and a pass lands a rig that fell due after (mw-gq6.858).
+	Landing bool
+	// GateHeldBy is whose gate holds the host's gate lock while the rig's lander
+	// waits for it, empty when it does not wait.
+	GateHeldBy string
 	// TooLong says the story has waited past QueuedTooLongFactor times its
-	// rig's batch_every with no batch running.
+	// rig's batch_every with no batch running or landing.
 	TooLong bool
 	// Every is the rig's batch_every, the clock TooLong is judged by.
 	Every time.Duration
@@ -43,8 +50,12 @@ func (w BatchWait) Lines() []string {
 		since += " since " + w.Since.UTC().Format(QueuedClock)
 	}
 	switch {
+	case w.GateHeldBy != "":
+		return []string{since + ", its batch waiting for the gate held by " + w.GateHeldBy}
 	case !w.InBatchSince.IsZero():
 		return []string{since + ", in the batch running since " + w.InBatchSince.UTC().Format(QueuedClock)}
+	case w.Landing:
+		return []string{since + ", its batch is landing now"}
 	case w.TooLong:
 		return []string{
 			fmt.Sprintf("QUEUED TOO LONG: waiting past twice batch_every (%s) with no batch running", Clock(w.Every)),
@@ -71,6 +82,11 @@ func (s Status) batchWaits(ctx context.Context, work WorkInHand) map[string]Batc
 		return nil
 	}
 	jobs := s.batchJobsRunning(ctx)
+	landing := s.landingRigs(ctx)
+	holder := ""
+	if s.GateHolder != nil && len(landing) > 0 {
+		holder = s.GateHolder()
+	}
 	every := map[string]time.Duration{}
 	now := s.now()
 	waits := make(map[string]BatchWait, len(queued))
@@ -84,11 +100,38 @@ func (s Status) batchWaits(ctx context.Context, work WorkInHand) map[string]Batc
 				}
 			}
 		}
-		w := BatchWait{Since: d.QueuedAt, InBatchSince: jobs[rig], Every: every[rig]}
-		w.TooLong = w.InBatchSince.IsZero() && !w.Since.IsZero() && now.Sub(w.Since) > QueuedTooLongFactor*w.Every
+		w := BatchWait{Since: d.QueuedAt, InBatchSince: jobs[rig], Landing: landing[rig], Every: every[rig]}
+		if w.Landing && holder != "" && !ownBatch(holder, rig) {
+			w.GateHeldBy = holder
+		}
+		w.TooLong = w.InBatchSince.IsZero() && !w.Landing && !w.Since.IsZero() && now.Sub(w.Since) > QueuedTooLongFactor*w.Every
 		waits[d.Story.ID] = w
 	}
 	return waits
+}
+
+// landingRigs are the rigs with an `mw land` alive on this host: the landing
+// itself is the sign the rig's queue is being landed, whatever the job's events
+// name. A Landings that cannot be read names none.
+func (s Status) landingRigs(ctx context.Context) map[string]bool {
+	if s.Landings == nil {
+		return nil
+	}
+	names, err := s.Landings.Pending(ctx)
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]bool, len(names))
+	for _, name := range names {
+		out[name] = true
+	}
+	return out
+}
+
+// ownBatch says the gate lock's holder is a batch of rig itself, the gate its
+// own lander is running in (BatchLabel), not another gate it waits behind.
+func ownBatch(holder, rig string) bool {
+	return strings.HasPrefix(holder, "batch ") && strings.HasSuffix(holder, " of "+rig)
 }
 
 // batchRigNamed picks the rigs out of the reason a batch-land job was

@@ -30,6 +30,10 @@ func registerStatusQueuedSteps(ctx *godog.ScenarioContext, c *statusContext) {
 	ctx.Then(`^reading status scanned fewer than (\d+) events of the log$`, c.statusScannedFewerThan)
 	ctx.Then(`^the report says "([^"]*)" is queued for batch landing since (\d+) minutes ago$`, c.theReportSaysQueuedSince)
 	ctx.Then(`^the report says "([^"]*)" is in the batch running since (\d+) minutes ago$`, c.theReportSaysInTheBatchSince)
+	ctx.Given(`^a landing of the rig "([^"]*)" is running$`, c.aLandingIsRunning)
+	ctx.Given(`^the host's gate lock is held by "([^"]*)"$`, c.theGateLockIsHeldBy)
+	ctx.Then(`^the report says "([^"]*)" is waiting for the gate held by "([^"]*)"$`, c.theReportSaysWaitingForTheGate)
+	ctx.Then(`^the report says "([^"]*)" is landing in a batch now$`, c.theReportSaysLandingNow)
 	ctx.Then(`^the report says "([^"]*)" is queued too long$`, c.theReportSaysQueuedTooLong)
 	ctx.Then(`^the report does not say any story is queued too long$`, c.theReportSaysNoQueuedTooLong)
 	ctx.Then(`^the report does not call any story stranded$`, c.theReportCallsNoneStranded)
@@ -193,4 +197,27 @@ func (c *statusContext) statusScannedFewerThan(n int) error {
 		return fmt.Errorf("reading status scanned %d events of the log, want fewer than %d", got, n)
 	}
 	return nil
+}
+
+// aLandingIsRunning leaves an `mw land <rig>` process alive on this host, as the
+// follower's batch-land job begins one for each rig it lands.
+func (c *statusContext) aLandingIsRunning(rig string) error {
+	if c.landings == nil {
+		c.landings = &apptest.FakeLandProcesses{}
+	}
+	return c.landings.Begin(context.Background(), rig, false)
+}
+
+// theGateLockIsHeldBy leaves the host's gate lock held by the gate holder names.
+func (c *statusContext) theGateLockIsHeldBy(holder string) error {
+	c.gateHolder = holder
+	return nil
+}
+
+func (c *statusContext) theReportSaysWaitingForTheGate(id, holder string) error {
+	return c.reportSaysOf(id, "its batch waiting for the gate held by "+holder)
+}
+
+func (c *statusContext) theReportSaysLandingNow(id string) error {
+	return c.reportSaysOf(id, "its batch is landing now")
 }

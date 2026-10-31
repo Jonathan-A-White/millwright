@@ -242,3 +242,31 @@ func TestAWaiterBehindALiveWaiterNamesTheHeadOfTheQueue(t *testing.T) {
 		t.Errorf("expected only the head's ticket left, got %d entries", len(entries))
 	}
 }
+
+func TestAGateLocksHolderIsNamedWhileItIsHeldAndNotAfter(t *testing.T) {
+	gate := hostlock.NewGate(t.TempDir())
+	if got := gate.Holder(); got != "" {
+		t.Fatalf("holder of a lock nobody took = %q, want none", got)
+	}
+	turn, err := gate.Take(context.Background(), "batch 307 of lampas", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gate.Holder(); got != "batch 307 of lampas" {
+		t.Errorf("holder of a held lock = %q, want batch 307 of lampas", got)
+	}
+	turn.Holding.Release(context.Background())
+	if got := gate.Holder(); got != "" {
+		t.Errorf("holder of a released lock = %q, want none", got)
+	}
+}
+
+func TestAGateLockWhoseHolderDiedLeavingItsNameHasNoHolder(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, hostlock.GateFile), []byte("mw-dead\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := hostlock.NewGate(dir).Holder(); got != "" {
+		t.Errorf("holder of a lock only a name is left in = %q, want none", got)
+	}
+}

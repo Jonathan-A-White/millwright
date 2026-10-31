@@ -183,6 +183,12 @@ type TrackerNotes interface {
 	Size(ctx context.Context) (int64, error)
 }
 
+// LandingsInFlight names the rigs with an `mw land` alive on this host, or ended
+// with no follower told how: LandProcesses.Pending.
+type LandingsInFlight interface {
+	Pending(ctx context.Context) ([]string, error)
+}
+
 // Status reads, for one host, what is running there, what is ready to be
 // taken, what waits for the Governor, what is blocked, today's fuel from a
 // seat's ledger, and what every other host has in hand and when it last synced. It is the read-only,
@@ -251,6 +257,14 @@ type Status struct {
 	// read from, for the SUITE section; with Rigs and Rules, which say which
 	// rigs run it. Nil leaves the section out.
 	Suites SuiteHistory
+
+	// Landings, when set, names the rigs with an `mw land` alive on this host
+	// (LandProcesses.Pending), and GateHolder whose gate holds the host's gate
+	// lock, "" for nobody: a queued story whose rig's lander is alive is not
+	// stuck, and one whose lander waits for another rig's gate says so
+	// (mw-gq6.858). Nil says neither.
+	Landings   LandingsInFlight
+	GateHolder func() string
 
 	// Batches, when set, is where the batch lines of metrics/factory.jsonl are
 	// read from, for the last batch of each rig under LAND RUSH; which rigs

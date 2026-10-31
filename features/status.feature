@@ -1003,6 +1003,49 @@ Feature: mw status
     And the report says "mw-gq6.67" is in the batch running since 20 minutes ago
     And reading status scanned fewer than 1000 events of the log
 
+  # mw-gq6.858: a rig's lander that began while another rig's batch was running
+  # is not named by the job's event, which says what the pass was scheduled
+  # for; it waits for the host's one gate, and that is no stuck queue.
+  Scenario: A queued story whose lander waits for another rig's batch is waiting for the gate
+    Given the rig "millwright" lands in batches every 30 minutes
+    And a status story "mw-gq6.71" filed under it
+    And the status story "mw-gq6.71" is claimed with its session running
+    And the claim on "mw-gq6.71" was last renewed 3 hours ago
+    And the status story "mw-gq6.71" was queued for batch landing 150 minutes ago
+    And a batch-land job for the rig "lampas" began running 40 minutes ago
+    And a landing of the rig "millwright" is running
+    And the host's gate lock is held by "batch 307 of lampas"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.71" is queued for batch landing since 150 minutes ago
+    And the report says "mw-gq6.71" is waiting for the gate held by "batch 307 of lampas"
+    And the report does not say any story is queued too long
+    And every line of the report is at most 60 columns wide
+
+  Scenario: A queued story whose lander is running and holds no gate is in its batch
+    Given the rig "millwright" lands in batches every 30 minutes
+    And a status story "mw-gq6.72" filed under it
+    And the status story "mw-gq6.72" is claimed with its session running
+    And the claim on "mw-gq6.72" was last renewed 3 hours ago
+    And the status story "mw-gq6.72" was queued for batch landing 150 minutes ago
+    And a landing of the rig "millwright" is running
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.72" is landing in a batch now
+    And the report does not say any story is queued too long
+
+  Scenario: A lander for another rig does not clear a queued story of this rig
+    Given the rig "millwright" lands in batches every 30 minutes
+    And a status story "mw-gq6.73" filed under it
+    And the status story "mw-gq6.73" is claimed with its session running
+    And the claim on "mw-gq6.73" was last renewed 3 hours ago
+    And the status story "mw-gq6.73" was queued for batch landing 150 minutes ago
+    And a landing of the rig "lampas" is running
+    And the host's gate lock is held by "batch 307 of lampas"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.73" is queued too long
+
   Scenario: A story queued past twice its rig's batch_every with no batch running is the alarm
     Given the rig "millwright" lands in batches every 30 minutes
     And a status story "mw-gq6.62" filed under it

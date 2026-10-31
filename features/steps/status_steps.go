@@ -47,6 +47,11 @@ type statusContext struct {
 	// log is the event log the follower's jobs wrote to, nil until a
 	// scenario puts a job in it.
 	log *apptest.FakeEventLog
+	// landings are the `mw land` processes alive on this host, nil for none,
+	// and gateHolder whose gate holds the host's gate lock, "" for nobody
+	// (mw-gq6.858).
+	landings   *apptest.FakeLandProcesses
+	gateHolder string
 
 	// network is the reading a scenario gave, nil for none, and heavy the rigs it
 	// named as installing dependencies (mw-gq6.702).
@@ -734,6 +739,13 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 	}
 	if c.log != nil {
 		status.Log = c.log
+	}
+	if c.landings != nil {
+		status.Landings = c.landings
+	}
+	if c.gateHolder != "" {
+		holder := c.gateHolder
+		status.GateHolder = func() string { return holder }
 	}
 	if c.gristRuns != nil {
 		status.Grist = application.GristRoom{Runs: c.gristRuns, Now: func() time.Time { return c.now }}

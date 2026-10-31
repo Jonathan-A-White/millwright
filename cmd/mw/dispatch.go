@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/apartproc"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/benchflag"
 	"github.com/Jonathan-A-White/millwright/infrastructure/closeout"
@@ -102,6 +103,32 @@ func hostGateLock() application.GateLock {
 		return nil
 	}
 	return hostlock.NewGate(filepath.Join(home, SyncHaltStateDir))
+}
+
+// hostGateHolder is whose gate holds this host's gate lock now, "" for nobody:
+// what mw status names a lander that waits for the gate. A host with no home
+// directory has none.
+func hostGateHolder() func() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	return hostlock.NewGate(filepath.Join(home, SyncHaltStateDir)).Holder
+}
+
+// hostLandings are the landings alive on this host, as the batch-land job
+// begins them (batchLandSpringJob). A host with no home directory has none.
+func hostLandings() application.LandingsInFlight {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	return &apartproc.Landings{Dir: landStateDir(home)}
+}
+
+// landStateDir is where the landings the follower begins keep their state.
+func landStateDir(home string) string {
+	return filepath.Join(home, ".local", "state", "mw", "land")
 }
 
 // hostSyncHalt is this host's own mark of a halted sync, kept in
