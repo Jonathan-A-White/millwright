@@ -970,6 +970,20 @@ Feature: Closing out a finished story and carrying on
       | main alone passes TestTogether (checked in |
     And the attempts counted on "mw-gq6.1" come to 2
 
+  Scenario: A merged result that fails a test in a package the story did not touch is not put down to the story (mw-gq6.861)
+    Given the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And the rig's tests fail, saying "--- FAIL: TestTogether (0.01s)\nFAIL\texample.com/rig/contrib", only once "main" is merged in
+    And the rig has a named-tests command that passes on main alone
+    And the session of "mw-gq6.1" was the first that dispatch started for it
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the last ledger line holds:
+      | main alone passes TestTogether (checked in |
+      | the failing tests are outside the story's files (example.com/rig/contrib |
+    And the last ledger line does not say "the failure is the story's"
+
   Scenario: A push the origin refuses with a many-line error keeps the whole error beside the run
     Given the session of "mw-gq6.1" reported a plain success
     And the origin refuses every push, saying:
