@@ -120,6 +120,24 @@ type fakeUsageTerminal struct {
 	closed  []string
 	taken   int
 	openErr error
+	// failAt names the call that fails: type, press, capture.
+	failAt string
+	// probes are the sessions the server has that the sweep may see.
+	probes   []application.UsageProbe
+	probeErr error
+	// onCapture, when set, runs on each capture (a cancel, say).
+	onCapture func()
+}
+
+func (f *fakeUsageTerminal) fails(call string) error {
+	if f.failAt == call {
+		return errors.New(call + " failed")
+	}
+	return nil
+}
+
+func (f *fakeUsageTerminal) Probes(context.Context) ([]application.UsageProbe, error) {
+	return f.probes, f.probeErr
 }
 
 func (f *fakeUsageTerminal) Open(_ context.Context, name, dir string, cols, rows int) error {
@@ -128,11 +146,11 @@ func (f *fakeUsageTerminal) Open(_ context.Context, name, dir string, cols, rows
 }
 func (f *fakeUsageTerminal) Type(_ context.Context, name, text string) error {
 	f.typed = append(f.typed, text)
-	return nil
+	return f.fails("type")
 }
 func (f *fakeUsageTerminal) Press(_ context.Context, name, key string) error {
 	f.pressed = append(f.pressed, key)
-	return nil
+	return f.fails("press")
 }
 func (f *fakeUsageTerminal) Capture(context.Context, string) (string, error) {
 	i := f.taken
@@ -140,9 +158,15 @@ func (f *fakeUsageTerminal) Capture(context.Context, string) (string, error) {
 		i = len(f.screens) - 1
 	}
 	f.taken++
-	return f.screens[i], nil
+	if f.onCapture != nil {
+		f.onCapture()
+	}
+	return f.screens[i], f.fails("capture")
 }
-func (f *fakeUsageTerminal) Close(_ context.Context, name string) error {
+func (f *fakeUsageTerminal) Close(ctx context.Context, name string) error {
+	if ctx.Err() != nil {
+		return ctx.Err() // a close under a cancelled context does nothing
+	}
 	f.closed = append(f.closed, name)
 	return nil
 }
@@ -305,4 +329,131 @@ func TestUsageReadClosesTheSessionWhenItCannotBeDriven(t *testing.T) {
 	if len(r.term.closed) != 1 {
 		t.Errorf("closed %v, want a close even so", r.term.closed)
 	}
+}
+
+// requireProbeClosed fails unless the run left exactly its own probe closed.
+func requireProbeClosed(t *testing.T, r *usageReadRig) {
+	t.Helper()
+	if len(r.term.opened) != 1 {
+		t.Fatalf("opened %v, want one probe", r.term.opened)
+	}
+	if len(r.term.closed) != 1 || r.term.closed[0] != "mw-usage-probe-1" {
+		t.Errorf("closed %v, want the probe mw-usage-probe-1 killed before read returned", r.term.closed)
+	}
+}
+
+func TestUsageReadKillsTheProbeOnEveryWayOut(t *testing.T) {
+	cases := []struct {
+		name    string
+		failAt  string
+		screens []string
+		wantErr bool
+		cancel  bool
+	}{
+		{name: "success", screens: []string{usageScreen}},
+		{name: "unreadable screen", screens: []string{noUsageTab}, wantErr: true},
+		{name: "typing fails", failAt: "type", screens: []string{usageScreen}, wantErr: true},
+		{name: "a key press fails", failAt: "press", screens: []string{usageScreen}, wantErr: true},
+		{name: "capture fails", failAt: "capture", screens: []string{usageScreen}, wantErr: true},
+		{name: "context cancelled", screens: []string{"Loading..."}, wantErr: true, cancel: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := newUsageReadRig(t, c.screens...)
+			r.term.failAt = c.failAt
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if c.cancel {
+				r.read.Wait = func(ctx context.Context, _ time.Duration) error {
+					cancel()
+					return ctx.Err()
+				}
+				r.term.onCapture = nil
+			}
+			err := r.read.Run(ctx)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, c.wantErr)
+			}
+			requireProbeClosed(t, r)
+		})
+	}
+}
+
+func TestUsageReadKillsTheProbeOnATimeout(t *testing.T) {
+	r := newUsageReadRig(t, usageScreen)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	r.read.Wait = func(ctx context.Context, _ time.Duration) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	if err := r.read.Run(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the deadline", err)
+	}
+	requireProbeClosed(t, r)
+}
+
+// The pause a full reading runs can wait for minutes, and a kill in that wait
+// skips every defer: the probe must be gone before the reading is set.
+func TestUsageReadKillsTheProbeBeforeItSetsTheUsage(t *testing.T) {
+	r := newUsageReadRig(t, usageScreen)
+	var closedWhenSet []string
+	now := time.Date(2026, 10, 29, 1, 2, 0, 0, time.UTC)
+	r.read.Set.Now = func() time.Time {
+		closedWhenSet = append([]string(nil), r.term.closed...)
+		return now
+	}
+	if err := r.read.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(closedWhenSet) != 1 {
+		t.Errorf("the probe was closed %v at the time the usage was set, want it closed already", closedWhenSet)
+	}
+	requireProbeClosed(t, r)
+}
+
+var errNoSweep = errors.New("no server running")
+
+func TestUsageReadClosesStaleProbesBeforeOpeningItsOwn(t *testing.T) {
+	r := newUsageReadRig(t, usageScreen)
+	now := time.Date(2026, 10, 29, 1, 2, 0, 0, time.UTC)
+	r.read.Alive = func(pid int) bool { return pid == 200 }
+	r.term.probes = []application.UsageProbe{
+		{Name: "mw-usage-probe-100-1", Created: now.Add(-3 * time.Hour)},     // dead pid, old: closed
+		{Name: "mw-usage-probe-200-2", Created: now.Add(-3 * time.Hour)},     // live mw: kept
+		{Name: "mw-usage-probe-300-3", Created: now.Add(-2 * time.Minute)},   // dead pid but young: kept
+		{Name: "mw-usage-probe-400-4", Created: now.Add(-11 * time.Minute)},  // dead pid, over 10 minutes: closed
+		{Name: "mw-seat-mayor", Created: now.Add(-9 * time.Hour)},            // not a probe: kept
+		{Name: "mw-usage-probe-notapid-5", Created: now.Add(-9 * time.Hour)}, // no pid in the name: kept
+	}
+	if err := r.read.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"mw-usage-probe-100-1", "mw-usage-probe-400-4", "mw-usage-probe-1"}
+	if strings.Join(r.term.closed, ",") != strings.Join(want, ",") {
+		t.Errorf("closed %v, want %v", r.term.closed, want)
+	}
+	if !strings.Contains(r.out.String(), "closed 2 stale usage probes") {
+		t.Errorf("did not say how many it closed:\n%s", r.out.String())
+	}
+}
+
+func TestUsageReadSaysNothingWhenNoProbeIsStale(t *testing.T) {
+	r := newUsageReadRig(t, usageScreen)
+	r.read.Alive = func(int) bool { return false }
+	if err := r.read.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(r.out.String(), "stale") {
+		t.Errorf("said something of stale probes when there were none:\n%s", r.out.String())
+	}
+}
+
+func TestUsageReadGoesOnWhenTheSweepCannotListTheProbes(t *testing.T) {
+	r := newUsageReadRig(t, usageScreen)
+	r.term.probeErr = errNoSweep
+	if err := r.read.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	requireProbeClosed(t, r)
 }

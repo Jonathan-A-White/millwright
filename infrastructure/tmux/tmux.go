@@ -508,3 +508,29 @@ func (t *Terminal) Close(ctx context.Context, name string) error {
 	}
 	return err
 }
+
+// Probes implements application.UsageTerminal: the sessions whose names start
+// with application.UsageProbePrefix. A server that is not running has none.
+func (t *Terminal) Probes(ctx context.Context) ([]application.UsageProbe, error) {
+	out, err := t.call(ctx, "list-sessions", "-F", "#{session_created} #{session_name}")
+	if err != nil {
+		// tmux says so in words when there is no server to ask.
+		if said := err.Error(); strings.Contains(said, "no server running") || strings.Contains(said, "error connecting to") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var probes []application.UsageProbe
+	for _, line := range strings.Split(string(out), "\n") {
+		stamp, name, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok || !strings.HasPrefix(name, application.UsageProbePrefix) {
+			continue
+		}
+		secs, err := strconv.ParseInt(stamp, 10, 64)
+		if err != nil {
+			continue
+		}
+		probes = append(probes, application.UsageProbe{Name: name, Created: time.Unix(secs, 0)})
+	}
+	return probes, nil
+}

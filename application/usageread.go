@@ -171,6 +171,18 @@ type UsageTerminal interface {
 	Capture(ctx context.Context, name string) (string, error)
 	// Close ends the terminal; one already gone is not an error.
 	Close(ctx context.Context, name string) error
+	// Probes lists the terminals on the server whose names start with
+	// UsageProbePrefix, with when each was created; no server running is none.
+	Probes(ctx context.Context) ([]UsageProbe, error)
+}
+
+// UsageProbePrefix starts the name of every probe terminal mw usage read opens.
+const UsageProbePrefix = "mw-usage-probe-"
+
+// UsageProbe is one probe terminal found on the server.
+type UsageProbe struct {
+	Name    string
+	Created time.Time
 }
 
 // UsageRead is mw usage read: it reads the week's quota off Claude's /usage
@@ -191,8 +203,11 @@ type UsageRead struct {
 	// Name is the probe terminal's name, unique to a run and apart from every
 	// seat's.
 	Name func() string
-	Now  func() time.Time
-	Out  io.Writer
+	// Alive says whether a process with that pid is a live mw; nil takes none
+	// to be, so a stale probe is closed on its age alone.
+	Alive func(pid int) bool
+	Now   func() time.Time
+	Out   io.Writer
 }
 
 // Run reads the screen and sets the usage; on a screen it cannot read it
@@ -208,9 +223,22 @@ func (u UsageRead) Run(ctx context.Context) error {
 	}
 	defer release()
 
+	u.sweep(ctx)
+
 	name := u.Name()
-	// The terminal is closed even when the run is cancelled.
-	defer u.Terminal.Close(context.WithoutCancel(ctx), name)
+	// The terminal is closed on every way out, even a cancelled run, and
+	// closed once; closeProbe below does it early, before the reading is set.
+	closed := false
+	closeProbe := func() {
+		if closed {
+			return
+		}
+		closed = true
+		if err := u.Terminal.Close(context.WithoutCancel(ctx), name); err != nil {
+			fmt.Fprintf(u.Out, "the probe terminal %s could not be closed: %v\n", name, err)
+		}
+	}
+	defer closeProbe()
 	if err := u.Terminal.Open(ctx, name, u.Dir, usageProbeCols, usageProbeRows); err != nil {
 		return fmt.Errorf("opening the probe terminal: %w", err)
 	}
@@ -245,6 +273,10 @@ func (u UsageRead) Run(ctx context.Context) error {
 	}
 	// Leave the Usage tab and the program before the terminal is closed.
 	u.Terminal.Press(ctx, name, "Escape")
+	// The probe has done its work: end it now, because setting the usage may
+	// pause the factory, which waits, and a run killed in that wait skips the
+	// close below.
+	closeProbe()
 	where, keepErr := u.Keep(text)
 	if err != nil {
 		note := "the capture is at " + where
@@ -256,6 +288,59 @@ func (u UsageRead) Run(ctx context.Context) error {
 	set := u.Set
 	set.Fable = screen.Fable
 	return set.Run(ctx, screen.Percent, screen.Resets)
+}
+
+// UsageProbeStaleAfter is how old a probe terminal must be before a later read
+// takes it for left behind: a read that is still under way is younger.
+const UsageProbeStaleAfter = 10 * time.Minute
+
+// sweep closes every probe terminal older than UsageProbeStaleAfter whose pid,
+// in its name, is not a live mw, and says how many it closed. A run killed
+// outright (SIGKILL after the unit's timeout, say) cannot close its own probe;
+// this is what ends the claude left running in it. It never fails the read.
+func (u UsageRead) sweep(ctx context.Context) {
+	probes, err := u.Terminal.Probes(ctx)
+	if err != nil {
+		fmt.Fprintf(u.Out, "could not look for stale usage probes: %v\n", err)
+		return
+	}
+	now := time.Now()
+	if u.Now != nil {
+		now = u.Now()
+	}
+	closed := 0
+	for _, p := range probes {
+		pid, ok := usageProbePid(p.Name)
+		if !ok || now.Sub(p.Created) <= UsageProbeStaleAfter {
+			continue
+		}
+		if u.Alive != nil && u.Alive(pid) {
+			continue
+		}
+		if err := u.Terminal.Close(context.WithoutCancel(ctx), p.Name); err != nil {
+			fmt.Fprintf(u.Out, "the stale usage probe %s could not be closed: %v\n", p.Name, err)
+			continue
+		}
+		closed++
+	}
+	if closed > 0 {
+		plural := "s"
+		if closed == 1 {
+			plural = ""
+		}
+		fmt.Fprintf(u.Out, "closed %d stale usage probe%s\n", closed, plural)
+	}
+}
+
+// usageProbePid is the pid in a probe's name, mw-usage-probe-<pid>-<time>.
+func usageProbePid(name string) (int, bool) {
+	rest, ok := strings.CutPrefix(name, UsageProbePrefix)
+	if !ok {
+		return 0, false
+	}
+	field, _, _ := strings.Cut(rest, "-")
+	pid, err := strconv.Atoi(field)
+	return pid, err == nil && pid > 0
 }
 
 func (u UsageRead) wait(ctx context.Context, d time.Duration) error {

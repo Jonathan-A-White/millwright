@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -154,7 +155,9 @@ func newUsageReadCmd() *cobra.Command {
 		Use:   "read",
 		Short: "Read the quota used off Claude's /usage screen through tmux and set it, as mw usage set does",
 		Long: "read opens a throwaway tmux session of its own (named mw-usage-probe-<pid>-<time>, never a seat's),\n" +
-			"starts claude in the vault, types /usage, captures the screen and closes the session. From the\n" +
+			"starts claude in the vault, types /usage, captures the screen and closes the session (on every way\n" +
+			"out, and before it sets the reading). Before it opens its own it closes every mw-usage-probe-* session\n" +
+			"older than 10 minutes whose pid is not a live mw, and says how many. From the\n" +
 			"'Current week (all models)' block it takes the percent used and when the week resets, and does what\n" +
 			"mw usage set <percent> --resets <time> does; it keeps the 'Current week (Fable)' percent beside\n" +
 			"the reading, and mw usage show prints it. /usage spends no tokens.\n" +
@@ -196,11 +199,22 @@ func newUsageReadCmd() *cobra.Command {
 					path := filepath.Join(state, usageReadCaptureFile)
 					return path, os.WriteFile(path, []byte(text), 0o600)
 				},
-				Name: func() string { return fmt.Sprintf("mw-usage-probe-%d-%d", os.Getpid(), time.Now().UnixNano()) },
-				Out:  out,
+				Name: func() string {
+					return fmt.Sprintf("%s%d-%d", application.UsageProbePrefix, os.Getpid(), time.Now().UnixNano())
+				},
+				Alive: liveMw,
+				Out:   out,
 			}.Run(cmd.Context())
 		},
 	}
+}
+
+// liveMw says whether pid is a running mw process: /proc/<pid>/comm reads mw.
+// A pid reused by some other program is not one. Where /proc is missing, no
+// pid is taken to be live, so the sweep goes by age alone.
+func liveMw(pid int) bool {
+	comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+	return err == nil && strings.TrimSpace(string(comm)) == "mw"
 }
 
 // usagePause is the pause a reading that has reached the reserve runs, with the

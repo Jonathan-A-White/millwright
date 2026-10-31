@@ -26,8 +26,15 @@ func TestATerminalIsTypedIntoReadAndClosed(t *testing.T) {
 	term := tmux.NewTerminal(tmux.WithSocket(socket))
 	ctx := t.Context()
 	name := "mw-usage-probe-test"
+	if probes, err := term.Probes(ctx); err != nil || len(probes) != 0 {
+		t.Fatalf("probes before any server = %v, %v; want none", probes, err)
+	}
 	if err := term.Open(ctx, name, t.TempDir(), 120, 40); err != nil {
 		t.Fatal(err)
+	}
+	probes, err := term.Probes(ctx)
+	if err != nil || len(probes) != 1 || probes[0].Name != name || time.Since(probes[0].Created) > time.Minute {
+		t.Fatalf("probes = %v, %v; want the one just opened", probes, err)
 	}
 	if err := term.Type(ctx, name, "echo usage-probe-$((6*7))"); err != nil {
 		t.Fatal(err)
