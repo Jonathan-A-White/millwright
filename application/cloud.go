@@ -1008,7 +1008,8 @@ func (p *cloudPass) repath(ctx context.Context, name string) {
 func (p *cloudPass) handBack(ctx context.Context, stories []StoryDetail, name string) {
 	var back, stuck []string
 	for _, story := range stories {
-		if story.IsEpic || ClaimHost(story.Assignee) != name || !QueuedForBatch(story) {
+		status := strings.ToLower(strings.TrimSpace(story.Status))
+		if story.IsEpic || ClaimHost(story.Assignee) != name || !QueuedForBatch(story) || status != StatusInProgress && status != StatusOpen {
 			continue
 		}
 		id := story.Story.ID
