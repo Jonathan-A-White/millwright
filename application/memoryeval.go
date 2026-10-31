@@ -35,14 +35,58 @@ type EvalQuestion struct {
 func (q EvalQuestion) Terms() []string {
 	var terms []string
 	for _, word := range strings.Fields(q.Question) {
-		word = strings.ToLower(strings.TrimFunc(word, func(r rune) bool {
-			return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-		}))
-		if word != "" && !evalStopWords[word] {
-			terms = append(terms, word)
+		if term := queryTerm(word); term != "" {
+			terms = append(terms, term)
 		}
 	}
 	return terms
+}
+
+// queryTerm is a word of a question as a query term, or "" for a stop word.
+func queryTerm(word string) string {
+	word = strings.ToLower(strings.TrimFunc(word, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}))
+	if evalStopWords[word] {
+		return ""
+	}
+	return word
+}
+
+// without is the question with each word that is one of the terms taken out.
+func (q EvalQuestion) without(terms []string) EvalQuestion {
+	var kept []string
+	for _, word := range strings.Fields(q.Question) {
+		if indexOf(terms, queryTerm(word)) < 0 || queryTerm(word) == "" {
+			kept = append(kept, word)
+		}
+	}
+	q.Question = strings.Join(kept, " ")
+	return q
+}
+
+// unfound are the slugs the question expects that are not among the first
+// EvalTop results of the question run as a query over all.
+func (q EvalQuestion) unfound(all []RigFact) []string {
+	var out []string
+	for _, slug := range q.Expect {
+		if !q.finds(all, slug) {
+			out = append(out, slug)
+		}
+	}
+	return out
+}
+
+// missingFrom are the terms of the question that no field of the fact holds: the
+// words that keep a query, which needs every term, from finding it.
+func (q EvalQuestion) missingFrom(fact RigFact) []string {
+	var out []string
+	for _, term := range q.Terms() {
+		if !fact.matches([]string{term}) {
+			out = append(out, term)
+		}
+	}
+	return out
 }
 
 // expects reports whether the question names the slug among its expected facts.
@@ -348,7 +392,24 @@ func (r EvalReport) err() error {
 // with no expect is removed whole. Everything else in the text is kept as it
 // is. It prints one line for each change, then what still fails the eval, and
 // is an error when something does.
+//
+// A question that has a slug replaced is run again over the facts. One that
+// the new fact does not put in its top EvalTop is named in a 'REWORD <slug>  Q
+// (missing from the fact: <terms>)' line, the terms being the question's words
+// the fact lacks, since a query needs every term.
 func (m Memory) EvalFix(ctx context.Context, rig string) error {
+	return m.evalFix(ctx, rig, false)
+}
+
+// EvalFixReword is EvalFix that also drops those missing words from a rewritten
+// question, keeping the change only when the question then finds its facts in
+// its top EvalTop; otherwise it names the question in a REWORD line as EvalFix
+// does and leaves its words as they were.
+func (m Memory) EvalFixReword(ctx context.Context, rig string) error {
+	return m.evalFix(ctx, rig, true)
+}
+
+func (m Memory) evalFix(ctx context.Context, rig string, reword bool) error {
 	_, _, bySlug, err := m.load(ctx, rig)
 	if err != nil {
 		return err
@@ -368,8 +429,13 @@ func (m Memory) EvalFix(ctx context.Context, rig string) error {
 	type edit struct {
 		q      EvalQuestion
 		expect []string
+		// question is the Q to write, "" to keep the one there.
+		question string
 	}
 	var edits []edit
+	all := orderedFacts(bySlug)
+	// rewords are the REWORD lines, by the FAIL line each stands in for.
+	rewords := map[string]string{}
 	for _, q := range questions {
 		expect := append([]string(nil), q.Expect...)
 		changed := false
@@ -399,11 +465,19 @@ func (m Memory) EvalFix(ctx context.Context, rig string) error {
 			// One line for the block, not one for each slug it loses.
 			said = []string{fmt.Sprintf("removed the question at line %d (%s): no expect left (%s)", q.Line, q.Question, strings.Join(gone, "; "))}
 		}
+		e := edit{q: q, expect: expect}
+		if changed && len(expect) > 0 {
+			var note string
+			e.question, note = rewordNote(q, expect, bySlug, all, reword, rewords)
+			if note != "" {
+				said = append(said, note)
+			}
+		}
 		for _, line := range said {
 			fmt.Fprintln(m.Out, line)
 		}
 		if changed {
-			edits = append(edits, edit{q, expect})
+			edits = append(edits, e)
 		}
 	}
 	if len(edits) == 0 {
@@ -416,6 +490,9 @@ func (m Memory) EvalFix(ctx context.Context, rig string) error {
 				text = removeBlock(text, edits[i].q)
 			} else {
 				text = setExpect(text, edits[i].q, edits[i].expect)
+				if edits[i].question != "" {
+					text = setQuestion(text, edits[i].q, edits[i].question)
+				}
 			}
 		}
 		if _, err := m.Files.WriteRigEval(ctx, m.Seat, rig, text); err != nil {
@@ -431,11 +508,53 @@ func (m Memory) EvalFix(ctx context.Context, rig string) error {
 		return err
 	}
 	for _, line := range report.Lines {
+		if reworded, ok := rewords[line]; ok {
+			line = reworded
+		}
 		if !strings.HasPrefix(line, "PASS ") {
 			fmt.Fprintln(m.Out, line)
 		}
 	}
 	return report.err()
+}
+
+// rewordNote runs a question again with the expect a fix gave it, over all the
+// facts. For each expected fact it does not find in its top EvalTop that lacks
+// words of the question, it records the REWORD line that stands in for the FAIL
+// line the final run prints. With reword set it first drops those words from
+// the question, and when the question then finds every fact it returns the
+// question to write and a line saying so, and records no REWORD line.
+func rewordNote(q EvalQuestion, expect []string, bySlug map[string]RigFact, all []RigFact, reword bool, rewords map[string]string) (question, note string) {
+	fixed := q
+	fixed.Expect = expect
+	lines := map[string]string{}
+	var union []string
+	for _, slug := range fixed.unfound(all) {
+		missing := fixed.missingFrom(bySlug[slug])
+		if len(missing) == 0 {
+			continue
+		}
+		for _, term := range missing {
+			if indexOf(union, term) < 0 {
+				union = append(union, term)
+			}
+		}
+		fail := fmt.Sprintf("FAIL %s not in top %d  %s", slug, EvalTop, q.Question)
+		lines[fail] = fmt.Sprintf("REWORD %s  %s  (missing from the fact: %s)", slug, q.Question, strings.Join(missing, ", "))
+	}
+	if len(lines) == 0 {
+		return "", ""
+	}
+	if reword {
+		trimmed := fixed.without(union)
+		if len(trimmed.Terms()) > 0 && len(trimmed.unfound(all)) == 0 {
+			return trimmed.Question, fmt.Sprintf("reworded the question at line %d (%s): dropped %s, which the fact lacks; now %s", q.Line, q.Question, strings.Join(union, ", "), trimmed.Question)
+		}
+	}
+	for fail, line := range lines {
+		rewords[fail] = line
+	}
+	return "", ""
 }
 
 func indexOf(slugs []string, slug string) int {
@@ -457,6 +576,22 @@ func setExpect(text string, q EvalQuestion, slugs []string) string {
 		}
 		if strings.HasPrefix(strings.TrimSpace(lines[i]), "expect:") {
 			lines[i] = "expect: " + strings.Join(slugs, ", ")
+			break
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// setQuestion puts a question on the Q line of a question's block in an eval.md
+// text.
+func setQuestion(text string, q EvalQuestion, question string) string {
+	lines := strings.Split(text, "\n")
+	for i := q.Line - 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "" {
+			break
+		}
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "Q:") {
+			lines[i] = "Q: " + question
 			break
 		}
 	}

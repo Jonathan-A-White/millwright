@@ -277,9 +277,9 @@ func newMemoryQueryCmd() *cobra.Command {
 }
 
 func newMemoryEvalCmd() *cobra.Command {
-	var fix bool
+	var fix, reword bool
 	cmd := &cobra.Command{
-		Use:   "eval <rig> [--fix]",
+		Use:   "eval <rig> [--fix [--reword]]",
 		Short: "Run a rig's scripted questions against its facts: the pass bar for its memory",
 		Long: "eval reads seats/builder/rigs/<rig>/eval.md, blocks of 'Q: <what a Builder would ask>' and\n" +
 			"'expect: <slug>[, <slug>...]' separated by blank lines ('#' lines are comments), and runs\n" +
@@ -297,12 +297,24 @@ func newMemoryEvalCmd() *cobra.Command {
 			"question already expects that fact; it is dropped when there is none, when that fact is\n" +
 			"itself retired or when the question already expects it; a question left with no expect is\n" +
 			"removed whole. It prints one line for each change and leaves the rest of eval.md as it was.\n" +
-			"A FAIL that is not stale is not touched: it is printed, and the command exits 1.",
+			"A FAIL that is not stale is not touched: it is printed, and the command exits 1.\n\n" +
+			"--fix runs again each question it gave a new expect. One the new fact does not put in the top\n" +
+			"three prints 'REWORD <slug>  Q  (missing from the fact: <terms>)', naming the words of the\n" +
+			"question the fact lacks (a query needs every term), and the command exits 1. --reword, with\n" +
+			"--fix, drops those words from the question and runs it again, keeping the change (committed\n" +
+			"with the rest of the fix) only when the question then finds its facts in the top three; else\n" +
+			"it prints REWORD as above and leaves the question's words as they were.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			memory, err := memoryFor(cmd)
 			if err != nil {
 				return err
+			}
+			if reword && !fix {
+				return fmt.Errorf("--reword goes with --fix")
+			}
+			if reword {
+				return memory.EvalFixReword(cmd.Context(), args[0])
 			}
 			if fix {
 				return memory.EvalFix(cmd.Context(), args[0])
@@ -311,6 +323,7 @@ func newMemoryEvalCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&fix, "fix", false, "rewrite eval.md so that no expect names a superseded or retired fact")
+	cmd.Flags().BoolVar(&reword, "reword", false, "with --fix, drop from a rewritten question the words its new fact lacks, if it then passes")
 	return cmd
 }
 

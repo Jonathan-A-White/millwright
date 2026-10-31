@@ -220,3 +220,110 @@ func TestEvalFixDropsTheStaleOneOfThreeThatShareAChain(t *testing.T) {
 		t.Errorf("got %q, want %q", files.eval, want)
 	}
 }
+
+// rewordMemory is a rig whose zebra fact was superseded by a head that says
+// less than the old one did: the head holds the words zebra and stripes only.
+func rewordMemory(eval string, out *bytes.Buffer) (application.Memory, *editableFiles, *recordingVault) {
+	files := &editableFiles{
+		files: map[string]string{
+			"old-a.md":  staleFact("superseded", "superseded-by: head-a\n", "A zebra has stripes and 5,700 entries."),
+			"head-a.md": staleFact("current", "supersedes: old-a\n", "A zebra has stripes."),
+		},
+		eval: eval,
+	}
+	vault := &recordingVault{}
+	return anEditableMemory(files, vault, out), files, vault
+}
+
+func TestEvalFixRerunsARewrittenQuestionAndSaysNothingWhenItPasses(t *testing.T) {
+	var out bytes.Buffer
+	m, files, _ := rewordMemory("Q: zebra stripes\nexpect: old-a\n", &out)
+	if err := m.EvalFix(context.Background(), "zoo"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "REWORD") || strings.Contains(out.String(), "FAIL") {
+		t.Errorf("printed:\n%s", out.String())
+	}
+	if want := "Q: zebra stripes\nexpect: head-a\n"; files.eval != want {
+		t.Errorf("got %q, want %q", files.eval, want)
+	}
+}
+
+func TestEvalFixNamesTheWordsOfARewrittenQuestionThatTheNewFactLacks(t *testing.T) {
+	var out bytes.Buffer
+	m, files, _ := rewordMemory("Q: zebra ATTRIBUTION.md 5,700 entries\nexpect: old-a\n", &out)
+	err := m.EvalFix(context.Background(), "zoo")
+	if err == nil || !strings.Contains(err.Error(), "eval failing: 1 of 1") {
+		t.Fatalf("got %v, want eval failing: 1 of 1", err)
+	}
+	want := "replaced old-a with head-a at line 1 (zebra ATTRIBUTION.md 5,700 entries)\n" +
+		"REWORD head-a  zebra ATTRIBUTION.md 5,700 entries  (missing from the fact: attribution.md, 5,700, entries)\n"
+	if out.String() != want {
+		t.Errorf("printed:\n%s\nwant:\n%s", out.String(), want)
+	}
+	if want := "Q: zebra ATTRIBUTION.md 5,700 entries\nexpect: head-a\n"; files.eval != want {
+		t.Errorf("eval.md: got %q, want %q", files.eval, want)
+	}
+}
+
+func TestEvalFixRewordDropsTheMissingWordsWhenTheQuestionThenPasses(t *testing.T) {
+	var out bytes.Buffer
+	m, files, vault := rewordMemory("Q: zebra ATTRIBUTION.md 5,700 entries stripes\nexpect: old-a\n", &out)
+	if err := m.EvalFixReword(context.Background(), "zoo"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "REWORD") || strings.Contains(out.String(), "FAIL") {
+		t.Errorf("printed:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "reworded") {
+		t.Errorf("want a line saying the question was reworded, printed:\n%s", out.String())
+	}
+	if want := "Q: zebra stripes\nexpect: head-a\n"; files.eval != want {
+		t.Errorf("got %q, want %q", files.eval, want)
+	}
+	if len(vault.messages) != 1 {
+		t.Errorf("want one commit holding the rewording with the fix, got %v", vault.messages)
+	}
+}
+
+func TestEvalFixRewordKeepsTheQuestionWhenDroppingWordsCannotRescueIt(t *testing.T) {
+	var out bytes.Buffer
+	// Every word of the question is one the head lacks: nothing is left to ask.
+	m, files, _ := rewordMemory("Q: attribution entries\nexpect: old-a\n", &out)
+	err := m.EvalFixReword(context.Background(), "zoo")
+	if err == nil || !strings.Contains(err.Error(), "eval failing: 1 of 1") {
+		t.Fatalf("got %v, want eval failing: 1 of 1", err)
+	}
+	if !strings.Contains(out.String(), "REWORD head-a  attribution entries  (missing from the fact: attribution, entries)") {
+		t.Errorf("printed:\n%s", out.String())
+	}
+	if want := "Q: attribution entries\nexpect: head-a\n"; files.eval != want {
+		t.Errorf("got %q, want %q", files.eval, want)
+	}
+}
+
+func TestEvalFixRewordKeepsTheQuestionWhenTheFewerWordsStillMissTheTop(t *testing.T) {
+	var out bytes.Buffer
+	// With 'entries' dropped the question finds four other zebra facts ahead of head-a.
+	files := &editableFiles{
+		files: map[string]string{
+			"old-a.md":   staleFact("superseded", "superseded-by: zz-head\n", "A zebra has stripes and entries."),
+			"zz-head.md": staleFact("current", "supersedes: old-a\n", "A zebra."),
+			"z1.md":      staleFact("current", "", "A zebra one."),
+			"z2.md":      staleFact("current", "", "A zebra two."),
+			"z3.md":      staleFact("current", "", "A zebra three."),
+		},
+		eval: "Q: zebra entries\nexpect: old-a\n",
+	}
+	m := anEditableMemory(files, &recordingVault{}, &out)
+	err := m.EvalFixReword(context.Background(), "zoo")
+	if err == nil {
+		t.Fatalf("want a failing eval, printed:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "REWORD zz-head  zebra entries  (missing from the fact: entries)") {
+		t.Errorf("printed:\n%s", out.String())
+	}
+	if want := "Q: zebra entries\nexpect: zz-head\n"; files.eval != want {
+		t.Errorf("got %q, want %q", files.eval, want)
+	}
+}
