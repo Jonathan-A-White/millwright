@@ -422,6 +422,27 @@ Feature: mw land lands a batch rig's queue under one gate run
       | mw-gq6.2 |
     And the batch is held, and the Mayor's mail names every story in it and says "the batch is still red"
     And the Mayor's mail about the batch says the fixer was given it and no second fixer was started
+
+  Scenario: A batch held after its fixer committed keeps those commits in a bundle in its records, and the outcome and the Held mail name them (mw-gq6.865)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the rig's tests fail, saying "the batch is still red"
+    And mw land may start a fixer, which commits "TRIED" and says it touched "mw-gq6.1"
+    When mw lands the batch of the rig
+    Then the batch is held, and the Mayor's mail names every story in it and says "the batch is still red"
+    And the records of batch 1 hold fixer.bundle, which verifies, and the outcome and the Held mail name it and the fixer's commit "Mend the batch: TRIED"
+    And the vault committed the fixer bundle of batch 1
+
+  Scenario: A batch held after a fixer that committed nothing writes no bundle, and the outcome says so (mw-gq6.865)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the rig's tests fail, saying "the batch is still red"
+    And mw land may start a fixer, which commits nothing and says it touched "mw-gq6.1"
+    When mw lands the batch of the rig
+    Then the batch is held, and the Mayor's mail names every story in it and says "the batch is still red"
+    And the records of batch 1 hold no fixer.bundle, and the outcome says its fixer left no commits
     And metrics/factory.jsonl holds a line for batch 1 of the rig: 2 stories, 2 gate runs, a fixer, outcome "held"
 
   # mw next refuses a branch whose commits sign the work as a machine's

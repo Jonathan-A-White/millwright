@@ -59,8 +59,10 @@ func (f *fakeFixer) Start(ctx context.Context, spec application.SessionSpec) err
 
 	result := fmt.Sprintf(`{"type":"result","subtype":"success","is_error":true,"num_turns":1,"result":%q}`, f.stopped)
 	if f.stopped == "" {
-		if err := f.fix(spec.Dir); err != nil && f.err == nil {
-			f.err = fmt.Errorf("the fake fixer: %w", err)
+		if f.fix != nil {
+			if err := f.fix(spec.Dir); err != nil && f.err == nil {
+				f.err = fmt.Errorf("the fake fixer: %w", err)
+			}
 		}
 		result = fmt.Sprintf(`{"type":"result","subtype":"success","is_error":false,"num_turns":7,`+
 			`"result":"Mended the batch.\nTOUCHED %[1]s: the files it named\nCAUSE %[1]s: its change and another's did not agree",`+
@@ -82,6 +84,13 @@ func registerBatchFixSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the batch's hold names the fixer's signed commit$`, c.theHoldNamesTheFixersSignedCommit)
 	ctx.Given(`^mw land may start a fixer, which merges "([^"]*)" keeping both sides and says it touched "([^"]*)"$`, c.aFixerThatMerges)
 	ctx.Given(`^mw land may start a fixer, which merges "([^"]*)" and "([^"]*)" keeping both sides and says it touched "([^"]*)"$`, c.aFixerThatMergesBoth)
+	ctx.Given(`^mw land may start a fixer, which commits nothing and says it touched "([^"]*)"$`, func(touched string) error {
+		c.newFixer(touched, nil)
+		return nil
+	})
+	ctx.Then(`^the records of batch (\d+) hold fixer.bundle, which verifies, and the outcome and the Held mail name it and the fixer's commit "([^"]*)"$`, c.theRecordsHoldTheFixerBundle)
+	ctx.Then(`^the vault committed the fixer bundle of batch (\d+)$`, c.theVaultCommittedTheFixerBundle)
+	ctx.Then(`^the records of batch (\d+) hold no fixer.bundle, and the outcome says its fixer left no commits$`, c.theRecordsHoldNoFixerBundle)
 	ctx.Then(`^no fixer was started$`, c.noFixerWasStarted)
 	ctx.Then(`^exactly one fixer was started, for batch (\d+), in a landing worktree holding the work of every story in it$`, c.exactlyOneFixerWasStarted)
 	ctx.Then(`^the fixer was started on the model "([^"]*)" with at most (\d+) turns$`, c.theFixerWasStartedOn)
@@ -469,6 +478,74 @@ func (c *nextContext) theFixerWasStartedOnlyOnce() error {
 	}
 	if len(f.started) != 1 {
 		return fmt.Errorf("expected the fixer started once, before the limit, got %d: %+v\n%s", len(f.started), f.started, c.said())
+	}
+	return nil
+}
+
+// theRecordsHoldTheFixerBundle checks the bundle the held batch kept of its
+// fixer's commits: it is there, it verifies, it holds the fixer's commit, and
+// the outcome and the Held mail name its path and that commit (mw-gq6.865).
+func (c *nextContext) theRecordsHoldTheFixerBundle(number int, subject string) error {
+	rel := fmt.Sprintf("%s/%s/%d/%s", application.BatchDir, c.rigKey(), number, application.BatchFixerBundleFile)
+	abs := filepath.Join(c.vault, filepath.FromSlash(rel))
+	if _, err := os.Stat(abs); err != nil {
+		return fmt.Errorf("expected a bundle at %s: %w\n%s", rel, err, c.said())
+	}
+	if _, err := gitSay(c.rig, "bundle", "verify", abs); err != nil {
+		return fmt.Errorf("the bundle at %s does not verify: %w", rel, err)
+	}
+	heads, err := gitSay(c.rig, "bundle", "list-heads", abs)
+	if err != nil {
+		return err
+	}
+	sha, _, _ := strings.Cut(strings.TrimSpace(heads), " ")
+	if len(sha) < 7 {
+		return fmt.Errorf("expected the bundle to hold the fixer's work, it lists %q", heads)
+	}
+	short := sha[:7]
+	said, err := os.ReadFile(filepath.Join(c.batchDir(number), application.BatchOutcomeFile))
+	if err != nil {
+		return err
+	}
+	mail, err := c.batchMail()
+	if err != nil {
+		return err
+	}
+	if len(mail) != 1 {
+		return fmt.Errorf("expected one mail about the batch, got %+v", mail)
+	}
+	for where, text := range map[string]string{"outcome.txt": string(said), "the Held mail": mail[0].Body} {
+		for _, want := range []string{rel, short, subject} {
+			if !strings.Contains(text, want) {
+				return fmt.Errorf("expected %s to name %q, got:\n%s", where, want, text)
+			}
+		}
+	}
+	return nil
+}
+
+func (c *nextContext) theVaultCommittedTheFixerBundle(number int) error {
+	rel := fmt.Sprintf("%s/%s/%d/%s", application.BatchDir, c.rigKey(), number, application.BatchFixerBundleFile)
+	for _, commit := range c.files.Commits() {
+		for _, p := range commit.Paths {
+			if p == rel {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("expected the vault to commit %s with the batch's records, it committed %+v", rel, c.files.Commits())
+}
+
+func (c *nextContext) theRecordsHoldNoFixerBundle(number int) error {
+	if _, err := os.Stat(filepath.Join(c.batchDir(number), application.BatchFixerBundleFile)); err == nil {
+		return fmt.Errorf("expected no fixer bundle in batch %d", number)
+	}
+	said, err := os.ReadFile(filepath.Join(c.batchDir(number), application.BatchOutcomeFile))
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(string(said), "no bundle was written") {
+		return fmt.Errorf("expected the outcome to say its fixer left no commits and no bundle was written, got:\n%s", said)
 	}
 	return nil
 }

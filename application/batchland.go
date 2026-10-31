@@ -29,6 +29,10 @@ const (
 	// BatchFixerFile is what became of the batch's fixer, when it had one:
 	// why it was started, how it ended, and its word on what it touched.
 	BatchFixerFile = "fixer.txt"
+	// BatchFixerBundleFile is a git bundle of the commits the batch's fixer
+	// left ahead of the batch it was given, kept when the batch is held so that
+	// its work is not lost with the landing worktree (mw-gq6.865).
+	BatchFixerBundleFile = "fixer.bundle"
 )
 
 // The subjects of mw land's mail to the Mayor about a batch that did not land
@@ -56,6 +60,11 @@ type BatchRecords interface {
 	// PutBatchFile writes one file of a batch's records and reports its path
 	// from the vault's root.
 	PutBatchFile(ctx context.Context, rig string, number int, name, contents string) (string, error)
+
+	// BatchFilePath is where a file of a batch's records is, or is to be, on
+	// disk: for a file git makes (a bundle) rather than one PutBatchFile writes.
+	// Empty for a name or a batch that has no place.
+	BatchFilePath(rig string, number int, name string) string
 }
 
 // BatchHistory reads the batch lines back, oldest first; none and no error when
@@ -349,6 +358,9 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 		report.Held = fmt.Sprintf("a landing of %s at %s could not be opened: %v", rig, shortCommit(report.Base), err)
 	} else {
 		b.landIn(ctx, dir, rigDir, rules, &report, &nr)
+		if report.Held != "" {
+			b.bundleFixer(ctx, dir, &report)
+		}
 		if err := n.Landing.CloseLanding(ctx, rigDir, dir); err != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf("the landing worktree %s could not be taken away: %v", dir, err))
 		}
@@ -972,6 +984,9 @@ func (b BatchLand) keepRecords(ctx context.Context, report *BatchReport) {
 	outcome := fmt.Sprintf("landed %s on %s, %d stories: %s\n", report.Commit, report.Target, len(report.Merged), strings.Join(storyIDs(report.Merged), ", "))
 	if !report.Landed {
 		outcome = fmt.Sprintf("held: %s\nnothing was pushed; %s stays at %s, and every story in the batch stays queued\n", report.Held, report.Target, report.Base)
+	}
+	if !report.Landed {
+		outcome += report.fixerBundleLines()
 	}
 	if len(report.SetAside) > 0 {
 		outcome += fmt.Sprintf("set aside, still queued: %s\n", strings.Join(storyIDs(report.SetAside), ", "))

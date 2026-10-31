@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"fmt"
+	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +32,16 @@ type BatchFixing struct {
 	ResultRead bool
 	// Commit is where it left the batch.
 	Commit string
+	// From is the batch as the fixer was given it: what its commits are ahead of.
+	From string
+
+	// Bundle is where a held batch kept the fixer's commits, by path from the
+	// vault's root, and Bundled what they were, oldest first; BundleSaid is
+	// the one line a held batch's records say of them when there is no bundle,
+	// or it could not be made (mw-gq6.865).
+	Bundle     string
+	Bundled    []Commit
+	BundleSaid string
 
 	// Touched are the stories it said it touched, with the files it named;
 	// Causes are what it said made the batch red. Both are its word,
@@ -141,6 +153,10 @@ func (b BatchLand) fix(ctx context.Context, dir, rigDir string, settings domain.
 		f.Stopped = &hold
 		return notStarted(fmt.Sprintf("was not started: the harness holds %s for a limit of the factory's, %s, and no fixer is spent on it before then", n.Host, hold))
 	}
+
+	// Where the batch stands as the fixer is given it, so that what it commits
+	// can be told from the batch (bundleFixer).
+	f.From, _ = n.Landing.RefHead(ctx, dir, "HEAD")
 
 	spec, err := n.Boot.BatchFix(ctx, BatchFixBrief{
 		Rig: report.Rig, Target: report.Target, Number: report.Number, Base: report.Base,
@@ -368,7 +384,12 @@ func (r BatchReport) fixerMail() string {
 	} else {
 		b.WriteString(". mw looked at the batch it left and ran the rig's tests on it again itself, and the batch is held: no second fixer is started.\n")
 	}
-	if f.Commit != "" {
+	if f.Bundle != "" {
+		fmt.Fprintf(&b, "Its commits are kept in the vault, in a bundle: %s\n%s", f.Bundle, f.bundledList())
+	} else if f.BundleSaid != "" {
+		fmt.Fprintf(&b, "%s\n", f.BundleSaid)
+	}
+	if f.Commit != "" && f.Bundle == "" {
 		fmt.Fprintf(&b, "Its work is at commit %s in the rig, on no branch.\n", f.Commit)
 	}
 	for _, word := range f.Causes {
@@ -384,4 +405,74 @@ func (f BatchFixing) gateLog() string {
 		return f.GateLog
 	}
 	return gateLogOf(f.Gate)
+}
+
+// bundledList names each commit of the fixer's bundle, a short hash and the
+// subject on a line each, oldest first.
+func (f BatchFixing) bundledList() string {
+	var b strings.Builder
+	for _, c := range f.Bundled {
+		subject, _, _ := strings.Cut(strings.TrimSpace(c.Message), "\n")
+		fmt.Fprintf(&b, "  %s %s\n", c.Hash, subject)
+	}
+	return b.String()
+}
+
+// bundleFixer keeps, in the held batch's records, the commits the fixer made:
+// the landing worktree is cleared once the batch is held, and they are on no
+// branch, so a batch landed again would lose them. It bundles them (the batch
+// as the fixer was given it, up to where the worktree stands) into
+// fixer.bundle and checks the bundle verifies. A fixer that left no commits
+// writes none, and the records say so. Trouble is a note on the batch and a
+// line of its records, never another hold (mw-gq6.865).
+func (b BatchLand) bundleFixer(ctx context.Context, dir string, report *BatchReport) {
+	f := report.Fixer
+	if f == nil || !f.Started || f.Stopped != nil || f.From == "" || b.Records == nil {
+		return
+	}
+	n := b.Next
+	trouble := func(err error) {
+		f.BundleSaid = fmt.Sprintf("the fixer's commits could not be kept in a bundle: %v", err)
+		report.Notes = append(report.Notes, f.BundleSaid)
+	}
+	commits, err := n.Landing.Commits(ctx, dir, "HEAD", f.From)
+	if err != nil {
+		trouble(err)
+		return
+	}
+	if len(commits) == 0 {
+		f.BundleSaid = "its fixer " + f.Name + " left no commits ahead of the batch it was given, so no bundle was written"
+		return
+	}
+	dest := b.Records.BatchFilePath(report.Rig, report.Number, BatchFixerBundleFile)
+	if dest == "" {
+		trouble(fmt.Errorf("the batch's records have no place for it"))
+		return
+	}
+	if _, err := n.Landing.Bundle(ctx, dir, "HEAD", f.From, dest); err != nil {
+		trouble(err)
+		return
+	}
+	if err := n.Landing.VerifyBundle(ctx, dir, dest); err != nil {
+		trouble(fmt.Errorf("the bundle does not verify: %w", err))
+		return
+	}
+	f.Bundle = path.Join(BatchDir, report.Rig, strconv.Itoa(report.Number), BatchFixerBundleFile)
+	f.Bundled = commits
+	report.Records = append(report.Records, f.Bundle)
+}
+
+// fixerBundleLines are the lines of a held batch's outcome.txt about its
+// fixer's commits: the bundle and each commit in it, or why there is none.
+func (r BatchReport) fixerBundleLines() string {
+	f := r.Fixer
+	switch {
+	case f == nil:
+		return ""
+	case f.Bundle != "":
+		return fmt.Sprintf("the fixer %s's commits are kept in %s:\n%s", f.Name, f.Bundle, f.bundledList())
+	case f.BundleSaid != "":
+		return f.BundleSaid + "\n"
+	}
+	return ""
 }

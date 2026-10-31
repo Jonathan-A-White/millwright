@@ -143,6 +143,8 @@ func (r noRecords) PutBatchFile(context.Context, string, int, string, string) (s
 	return "", nil
 }
 
+func (r noRecords) BatchFilePath(string, int, string) string { return "" }
+
 func TestADryRunTakesOnlyTheRigsQueuedStoriesOldestFirstAndChangesNothing(t *testing.T) {
 	land, tracker, out := aBatchRig(t)
 	asked := len(tracker.Asked())

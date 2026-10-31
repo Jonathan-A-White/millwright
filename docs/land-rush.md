@@ -126,7 +126,8 @@ has passed.
 ## Records
 
 - `runs/batch/<rig>/<n>/` in the vault keeps the batch: merge order, gate log,
-  fixer result.
+  fixer result, and, for a held batch, the commits its fixer left
+  (`fixer.bundle`).
 - `metrics/factory.jsonl` gets one batch line for each batch: stories, gate
   runs and minutes, the fixer and its tokens, the outcome, red minutes.
 - A ledger line for each story, naming the batch.

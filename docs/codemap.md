@@ -5,7 +5,7 @@
 | Port | In application/ | Adapter (infra/) |
 |-|-|-|
 | `WorkTracker` | application/worktracker.go | beads |
-| TrackerNotes, SweepNotes, BeadGraph, IceNotes, IcedBeads (WithRunCache) | application/{status,sweep,ice}.go | same, beads/runcache.go |
+| TrackerNotes, SweepNotes, BeadGraph, IceNotes, IcedBeads | application/{status,sweep,ice}.go | same, beads/runcache.go |
 | VaultFiles, Tracker{Sync,History,Flush}, SyncHaltMarker | application/sync.go | {vault/git,beads/sync}.go, synchalt, flushlog |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | beads/mail.go |
 | EpicRules (+LandingRules) | application/epicrules.go | vault/epicrules.go |
@@ -24,7 +24,7 @@
 | HostLoad, GateLock, Cloud*, BenchmarkBook | application/hostload.go, application/gate.go, application/benchmark.go | {hostload,hostlock/gate.go,ticketq,cloud,vault/{cloudbook,benchmarks}.go} |
 | MemberHost | application/member.go | member |
 | TickLog, Notifier, HomeMoveHost, OldHome, {Vault,Tracker}Birth | application/{millhandtick,homemove,init}.go | {ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go |
-| Landing, Checks, SpecChecks, RelatedChecks, NamedChecks (main's red), MergeSlot, Batch*, LandProcesses | application/landing.go, application/mainred.go, application/batchland.go | rig/{landing,checks,specs,slot}.go (specs, related leave out timing_tests), vault/batch.go, apartproc |
+| Landing, Checks, SpecChecks, RelatedChecks, NamedChecks (main's red), MergeSlot, Batch*, LandProcesses | application/landing.go, application/mainred.go, application/batchland.go | rig/{landing,checks,specs,slot}.go (specs, related leave out timing_tests), vault/batch.go (fixer.bundle), apartproc |
 | AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter, FormulaInstaller | application/afterlanding.go, application/selfupdate.go, application/backendstage.go, application/formulainstall.go | {rig/{afterlanding,built,backend},userunits,vault/formulas}.go |
 | EventLog (EventNewestLog, NewestOf), BeadFeed, {Follow,Nudge}Cursors, ShipStates, SubscribeFiles, EventSpringer, EventController, HarnessCount | application/event*.go, application/eventnewest.go, status.go | {eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go |
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | {postern,hands*,homemove} |

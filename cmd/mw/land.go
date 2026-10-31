@@ -47,7 +47,8 @@ func newLandCmd() *cobra.Command {
 			"green lands the batch, red holds it, and no second fixer is started. A batch with nothing queued,\n" +
 			"with only branches missing from the origin, or whose push the origin refuses is given none.\n\n" +
 			"What the batch did is kept in the vault under runs/batch/<rig>/<n>/: merge-order.txt, gate.log\n" +
-			"and outcome.txt, committed with the ledger.\n\n" +
+			"and outcome.txt, committed with the ledger; a held batch keeps the commits its fixer left in\n" +
+			"fixer.bundle there, named in outcome.txt and the Held mail.\n\n" +
 			"--one takes only the oldest queued story, whatever else is queued, and lands it by itself.\n\n" +
 			"--dry-run prints the batch it would make and does nothing else: nothing is merged, tested,\n" +
 			"pushed, recorded or mailed.",

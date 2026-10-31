@@ -73,6 +73,15 @@ func (v *Vault) PutBatchFile(_ context.Context, rig string, number int, name, co
 	return rel, nil
 }
 
+// BatchFilePath implements application.BatchRecords: the file's place on disk,
+// empty for a name or a batch that has none.
+func (v *Vault) BatchFilePath(rig string, number int, name string) string {
+	if safeName("rig", rig) != nil || safeName("batch file", name) != nil || number < 1 {
+		return ""
+	}
+	return filepath.Join(v.dir, filepath.FromSlash(path.Join(application.BatchDir, rig, strconv.Itoa(number), name)))
+}
+
 var _ application.GristBatches = (*Vault)(nil)
 
 // BatchOf implements application.GristBatches: the highest batch of the rig
