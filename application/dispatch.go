@@ -891,6 +891,9 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 		report.Running++
 	}
+	// A claim no host's Path names is on neither list above: its lapsed lease
+	// is all that says nothing is working it (mw-gq6.877).
+	d.reclaimNoSessionClaims(ctx, reads, &report)
 	// A harness stop holds every new claim here until the time it names: a
 	// session started before then stops on its first turn (mw-gq6.434).
 	d.readHarnessHoldNote(ctx, &report)

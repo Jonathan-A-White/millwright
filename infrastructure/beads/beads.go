@@ -981,6 +981,17 @@ func (g *Gateway) TakeOverClaim(ctx context.Context, id, holder string) error {
 // kept leases, or — bd's heartbeat help calls leases node-local — one made on
 // the other host. This host cannot say when that one was last heard from.
 func (g *Gateway) StaleClaims(ctx context.Context, now time.Time) ([]application.StoryDetail, error) {
+	// Read over the kept connection when there is one, so that the pass of a
+	// dispatch that looks for the claims no host names (mw-gq6.877) starts no bd.
+	if live, ok := g.liveOverConnection(ctx); ok {
+		var lapsed []application.StoryDetail
+		for _, detail := range live.details(live.withStatus(StatusInProgress)) {
+			if !detail.LeaseExpires.IsZero() && now.After(detail.LeaseExpires) {
+				lapsed = append(lapsed, detail)
+			}
+		}
+		return lapsed, nil
+	}
 	out, err := g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
 	if err != nil {
 		return nil, err
