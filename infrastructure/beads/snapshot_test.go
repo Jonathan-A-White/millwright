@@ -327,3 +327,31 @@ esac
 		t.Errorf("expected the list to end once the sql had run: %v", err)
 	}
 }
+
+// mw-gq6.879: the open stories of a host that still hold a claim whose lease is
+// live are the ones a session works though a hold and un-hold left them open;
+// one whose lease has run out, one no host claimed and one of another host are
+// not, and the whole is one list of the open stories.
+func TestGatewayListsTheOpenStoriesOfAHostWhoseClaimLeaseIsLive(t *testing.T) {
+	now := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	live, lapsed := now.Add(time.Hour).Format(time.RFC3339), now.Add(-time.Hour).Format(time.RFC3339)
+	listing := fmt.Sprintf(`[
+	 {"id":"t-1","title":"Live","status":"open","assignee":"mw@vps","issue_type":"task","lease_expires_at":%q,"metadata":{"host":"vps"}},
+	 {"id":"t-2","title":"Lapsed","status":"open","assignee":"mw@vps","issue_type":"task","lease_expires_at":%q,"metadata":{"host":"vps"}},
+	 {"id":"t-3","title":"Free","status":"open","issue_type":"task","metadata":{"host":"vps"}},
+	 {"id":"t-4","title":"There","status":"open","assignee":"mw@desktop","issue_type":"task","lease_expires_at":%q,"metadata":{"host":"desktop"}}
+	]`, live, lapsed, live)
+	gateway, asked := standInSnapshot(t, listing, `[]`)
+
+	found, err := gateway.LiveClaims(context.Background(), "vps", now)
+	if err != nil {
+		t.Fatalf("reading the live claims: %v", err)
+	}
+	if len(found) != 1 || found[0].Story.ID != "t-1" {
+		t.Errorf("expected t-1 alone, got %+v", found)
+	}
+	log, _ := os.ReadFile(asked)
+	if calls := strings.Split(strings.TrimSpace(string(log)), "\n"); len(calls) != 1 || !strings.Contains(calls[0], "--status open") {
+		t.Errorf("expected one list of the open stories, bd was asked:\n%s", log)
+	}
+}

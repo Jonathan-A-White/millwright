@@ -348,17 +348,43 @@ func (w WorkInHand) RunningOn(host string) []StoryDetail { return pathedTo(w.Run
 // session ran leaves the story open or held, still assigned to the host that
 // claimed it, and mw status that read only the in-progress list lost it from
 // RUNNING (mw-gq6.878). A story queued for its batch holds no session, so it is
-// not one.
+// not one. It is the one reader of what runs on a host: every count of sessions
+// reads it, or RunningLive for the hosts together (mw-gq6.879).
 func (w WorkInHand) RunningOnLive(host string, now time.Time) []StoryDetail {
-	running := w.RunningOn(host)
-	for _, list := range [][]StoryDetail{w.OpenClaimed, w.Held} {
-		for _, detail := range pathedTo(list, host) {
+	return pathedTo(w.RunningLive(now), host)
+}
+
+// RunningLive is Running and then, on any host, the open and held stories that
+// still hold a live claim lease (LiveOpenClaims).
+func (w WorkInHand) RunningLive(now time.Time) []StoryDetail {
+	running := slices.Clone(w.Running)
+	return append(running, LiveOpenClaims(now, w.OpenClaimed, w.Held)...)
+}
+
+// LiveOpenClaims is the stories among the lists, which hold the stories whose
+// status is not in progress, that a session works all the same: assigned to a
+// host (mw@<host>) with a claim lease that has not run out, and not queued for
+// their batch, which holds no session. The tracker's dispatch reads it for the
+// cap (LiveClaims) as RunningLive does for a report.
+func LiveOpenClaims(now time.Time, lists ...[]StoryDetail) []StoryDetail {
+	var live []StoryDetail
+	for _, list := range lists {
+		for _, detail := range list {
 			if ClaimHost(detail.Assignee) != "" && now.Before(detail.LeaseExpires) && !QueuedForBatch(detail) {
-				running = append(running, detail)
+				live = append(live, detail)
 			}
 		}
 	}
-	return running
+	return live
+}
+
+// LiveClaims is a tracker that lists the open and held stories whose Path names
+// a host and that hold a live claim lease (LiveOpenClaims), where RunningStories
+// lists the in-progress ones only: a dispatch pass asks for it, when the tracker
+// offers it, so that the cap counts a session whose story was set back to open
+// under it (mw-gq6.879). A tracker that cannot say counts none.
+type LiveClaims interface {
+	LiveClaims(ctx context.Context, host string, now time.Time) ([]StoryDetail, error)
 }
 
 // Elsewhere is every story, ready and then claimed, whose Path names some host

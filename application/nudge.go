@@ -200,7 +200,7 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 	var clauses []NudgeClause
 	now := s.now()
 	closing := closingOut(ctx, n.CloseOuts)
-	for _, detail := range work.RunningOn(n.Host) {
+	for _, detail := range work.RunningOnLive(n.Host, now) {
 		since := detail.QuietSince()
 		if detail.Hitl() || since.IsZero() {
 			continue

@@ -275,7 +275,7 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 	}
 
 	testers := map[string][]string{}
-	for _, d := range facts.Work.Running {
+	for _, d := range facts.Work.RunningLive(facts.Now) {
 		if IsTesterStory(d) {
 			rig := d.Merged().Rig
 			testers[rig] = append(testers[rig], d.Story.ID)

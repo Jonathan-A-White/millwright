@@ -242,6 +242,40 @@ func (g *Gateway) RunningEverywhere(ctx context.Context, host string) (here, awa
 	return here, away, nil
 }
 
+// LiveClaims implements application.LiveClaims: the open and held stories
+// pathed to host whose claim lease is live, which a session works though a hold
+// and un-hold made them something other than in progress (mw-gq6.879). Over the
+// kept connection it is read from the one listing the pass already holds; without
+// one it lists the open stories, one bd, and the held ones are left out as
+// WorkInHand leaves them.
+func (g *Gateway) LiveClaims(ctx context.Context, host string, now time.Time) ([]application.StoryDetail, error) {
+	if host == "" {
+		return nil, fmt.Errorf("which host's live claims?")
+	}
+	if live, ok := g.liveOverConnection(ctx); ok {
+		return application.LiveOpenClaims(now, onHost(live.details(append(live.withStatus(StatusOpen), live.withStatus(StatusDeferred)...)), host, false)), nil
+	}
+	out, err := g.call(ctx, "list", "--status", StatusOpen, "--exclude-type", "epic", "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	open, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading what is open on %s: %w", host, err)
+	}
+	var claimed []bead
+	for _, story := range open {
+		if application.ClaimHost(story.Assignee) != "" {
+			claimed = append(claimed, story)
+		}
+	}
+	details, err := g.onHost(ctx, claimed, host, false)
+	if err != nil {
+		return nil, err
+	}
+	return application.LiveOpenClaims(now, details), nil
+}
+
 // WorkInHand implements application.WorkTracker: everything ready and
 // unclaimed, and everything claimed and unfinished, on every host. It is the
 // two listings a dispatcher makes, read once each with every distinct epic's

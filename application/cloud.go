@@ -803,7 +803,7 @@ func (p *cloudPass) markIdle(work WorkInHand) {
 		if box.Making || box.Restoring {
 			continue
 		}
-		busy := sessions(work, box.Name) > 0
+		busy := sessions(work, box.Name, p.now) > 0
 		switch {
 		case busy && !box.IdleSince.IsZero():
 			box.IdleSince = time.Time{}
@@ -875,20 +875,21 @@ func (p *cloudPass) demand(work WorkInHand) (waiting, free int) {
 		}
 	}
 	for host, limit := range p.check.Plan.HostCaps {
-		free += max(0, limit-sessions(work, host))
+		free += max(0, limit-sessions(work, host, p.now))
 	}
 	for _, box := range p.state.Boxes {
-		free += max(0, box.boxCap(p.check.Plan)-sessions(work, box.Name))
+		free += max(0, box.boxCap(p.check.Plan)-sessions(work, box.Name, p.now))
 	}
 	return waiting, free
 }
 
 // sessions counts the stories claimed on host that a session works. A story
 // queued for its batch keeps its claim, worktree and branch but its session is
-// gone by design, so it is not one (mw-gq6.859).
-func sessions(work WorkInHand, host string) int {
+// gone by design, so it is not one (mw-gq6.859). One set back to open, or held,
+// under a session that still heartbeats is (mw-gq6.879).
+func sessions(work WorkInHand, host string, now time.Time) int {
 	n := 0
-	for _, d := range work.RunningOn(host) {
+	for _, d := range work.RunningOnLive(host, now) {
 		if !d.Hitl() && !QueuedForBatch(d) {
 			n++
 		}

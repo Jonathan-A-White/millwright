@@ -995,7 +995,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		report.Ready = append(report.Ready, detail)
 	}
 	report.Sharing = s.sharing(ctx, report.Running, report.Ready)
-	report.TesterHolds = s.testerHolds(work, report.Ready)
+	report.TesterHolds = s.testerHolds(work, report.Ready, s.now())
 	report.HeldByFiles = s.heldByFiles(ctx, report.Ready)
 	report.UnderHandsStep = s.underHandsStep(ctx, report.Ready)
 	report.NoGristKey = s.noGristKey(report.Ready)
@@ -1370,9 +1370,9 @@ func (s Status) sharing(ctx context.Context, running []RunningStory, ready []Sto
 
 // testerHolds is each ready Tester story whose rig runs testers_per_rig Tester
 // stories already, on any host, by id; nil when none is.
-func (s Status) testerHolds(work WorkInHand, ready []StoryDetail) map[string]TesterHold {
+func (s Status) testerHolds(work WorkInHand, ready []StoryDetail, now time.Time) map[string]TesterHold {
 	var running []StoryDetail
-	for _, detail := range work.Running {
+	for _, detail := range work.RunningLive(now) {
 		if !detail.Hitl() {
 			running = append(running, detail)
 		}

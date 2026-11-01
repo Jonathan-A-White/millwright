@@ -1444,6 +1444,25 @@ func (f *FakeTracker) RunningEverywhere(_ context.Context, host string) (here, a
 	return here, away, nil
 }
 
+// LiveClaims implements application.LiveClaims: the open and held stories
+// pathed to host that hold a live claim lease. It is no read of the in-progress
+// list and is not recorded as one.
+func (f *FakeTracker) LiveClaims(_ context.Context, host string, now time.Time) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	var others []application.StoryDetail
+	for _, id := range f.order {
+		s := f.stories[id]
+		if !s.detail.IsEpic && s.detail.Merged().Host == host && (s.detail.Status == StatusOpen || s.detail.Status == StatusDeferred) {
+			others = append(others, s.detail)
+		}
+	}
+	return application.LiveOpenClaims(now, others), nil
+}
+
 // BlockedForHost implements application.WorkTracker.
 func (f *FakeTracker) BlockedForHost(_ context.Context, host string) ([]application.StoryDetail, error) {
 	f.mu.Lock()

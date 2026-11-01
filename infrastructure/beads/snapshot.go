@@ -16,6 +16,7 @@ import (
 // Gateway satisfies the port.
 var _ application.TrackerSnapshot = (*Gateway)(nil)
 var _ application.RunningEverywhere = (*Gateway)(nil)
+var _ application.LiveClaims = (*Gateway)(nil)
 
 // Snapshot implements application.TrackerSnapshot: one bd list reads every bead,
 // closed ones included, and the snapshot answers LiveEpics, ShowEpics and

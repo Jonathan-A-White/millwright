@@ -891,6 +891,22 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 		report.Running++
 	}
+	// A story set back to open, or held, under a session that still heartbeats
+	// is on neither list above, and its session is as much one of the cap's as
+	// any listed: it is counted and keeps its files, never reclaimed as a dead
+	// pane, which only its lease running out says (mw-gq6.879).
+	if lister, ok := d.Tracker.(LiveClaims); ok {
+		live, liveErr := lister.LiveClaims(ctx, d.Host, d.now())
+		if liveErr != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("the stories held or set back to open under a live claim could not be read, so the cap does not count them: %v", liveErr))
+		}
+		for _, detail := range live {
+			if !detail.Hitl() {
+				shares.add(detail)
+				report.Running++
+			}
+		}
+	}
 	// A claim no host's Path names is on neither list above: its lapsed lease
 	// is all that says nothing is working it (mw-gq6.877).
 	d.reclaimNoSessionClaims(ctx, reads, &report)
