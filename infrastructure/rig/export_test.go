@@ -13,3 +13,11 @@ func SetTermGraceForTest(t *testing.T, d time.Duration) {
 	termGrace = d
 	t.Cleanup(func() { termGrace = old })
 }
+
+// LeaveWritersAloneForTest makes w find the processes holding a worktree but
+// end none of them, as on a host where they would not die: for the test of what
+// a refusal says about them.
+func LeaveWritersAloneForTest(w *Worktrees) {
+	w.endProcess = func(int) error { return nil }
+	w.writersWait = 100 * time.Millisecond
+}

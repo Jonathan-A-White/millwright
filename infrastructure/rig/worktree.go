@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -40,6 +41,10 @@ type Worktrees struct {
 	// refreshLimit is the longest a grind refresh's fetch may run (mw-gq6.647).
 	refreshLimit time.Duration
 	mergeScript  string
+	// endProcess ends one process found holding a worktree (mw-gq6.876).
+	endProcess func(pid int) error
+	// writersWait is how long endWriters tries (mw-gq6.876).
+	writersWait time.Duration
 }
 
 // Worktrees satisfies the port.
@@ -86,7 +91,9 @@ func WithMergeScript(script string) Option {
 
 // New returns a Worktrees that runs git as this host has it.
 func New(opts ...Option) *Worktrees {
-	w := &Worktrees{program: Program, remote: DefaultRemote, raceWait: DefaultRaceWait, refreshLimit: GrindRefreshLimit}
+	w := &Worktrees{program: Program, remote: DefaultRemote, raceWait: DefaultRaceWait, refreshLimit: GrindRefreshLimit,
+		writersWait: writersWait,
+		endProcess:  func(pid int) error { return syscall.Kill(pid, syscall.SIGKILL) }}
 	for _, opt := range opts {
 		opt(w)
 	}
@@ -215,7 +222,7 @@ func (w *Worktrees) Remove(ctx context.Context, rigDir, dir, branch string) erro
 			// Force, because a dispatch that failed may have left a file in it,
 			// and a worktree nobody could start work in holds nothing worth
 			// keeping.
-			if _, err := w.git(ctx, rigDir, "worktree", "remove", "--force", dir); err != nil {
+			if err := w.takeAway(ctx, rigDir, dir, true); err != nil {
 				return err
 			}
 		}
@@ -239,7 +246,7 @@ func (w *Worktrees) Remove(ctx context.Context, rigDir, dir, branch string) erro
 func (w *Worktrees) RemoveWithoutForce(ctx context.Context, rigDir, dir string) error {
 	if dir != "" {
 		if _, err := os.Stat(dir); err == nil {
-			if _, err := w.git(ctx, rigDir, "worktree", "remove", dir); err != nil {
+			if err := w.takeAway(ctx, rigDir, dir, false); err != nil {
 				return err
 			}
 		}

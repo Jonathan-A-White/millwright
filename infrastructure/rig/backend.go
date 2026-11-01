@@ -70,7 +70,9 @@ func (w *Worktrees) Build(ctx context.Context, rigDir, commit, subdir, command, 
 	}
 	// Taken away even when the build outlived the context that asked for it.
 	defer func() {
-		_, _ = w.git(context.WithoutCancel(ctx), rigDir, "worktree", "remove", "--force", dir)
+		// takeAway ends what the build left running in the directory first
+		// (mw-gq6.876); the RemoveAll is for what git no longer knows.
+		_ = w.takeAway(context.WithoutCancel(ctx), rigDir, dir, true)
 		_ = os.RemoveAll(dir)
 	}()
 
