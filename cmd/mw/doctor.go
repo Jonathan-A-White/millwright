@@ -376,6 +376,8 @@ func newDoctorCmd() *cobra.Command {
 			}
 			// A rig with ready stories and none running for over an hour, named with
 			// what holds it; the cure is the one mail to the Mayor of its episode.
+			// One held only by load is a wait, mailed to the Mayor and never a fault
+			// (mw-gq6.870).
 			// Both hosts see the one alarm, so what was mailed is kept in a note they
 			// share, and the second host to find it faulty says nothing (mw-gq6.868).
 			starvedRigs := &application.StarvedRigCheck{

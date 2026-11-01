@@ -271,7 +271,7 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 		// The rig, its hold and the stories ready are the alarm; how long it has
 		// lasted, and the reason's words, differ from one host's reading to the next.
 		identity := strings.Join(append([]string{rig, r.Hold}, slices.Sorted(slices.Values(ready))...), "\t")
-		alarms = append(alarms, DamperAlarm{Principle: StarvedPrinciple, Text: text, Beads: ready, Identity: identity})
+		alarms = append(alarms, DamperAlarm{Principle: StarvedPrinciple, Text: text, Beads: ready, Identity: identity, Wait: r.Hold == StarvedHolds["no-room"]})
 	}
 	return alarms
 }
@@ -447,6 +447,9 @@ const StarvedRigName = "starved-rig"
 // named (mw-gq6.580). Its cure is the mail to the Mayor, once a fault episode: the
 // episode ends when the probe next finds nothing starved, as when a story of
 // the rig starts, and a later starving is mailed again. It changes nothing else.
+// A rig held only by load is a wait for the host's room, not a fault: it is
+// mailed once and the check stays ok (mw-gq6.870), so it never reaches the
+// Governor as a faulty verdict, a note or a failed unit.
 type StarvedRigCheck struct {
 	// Host is this host, named in the mail.
 	Host string
@@ -466,15 +469,34 @@ var _ DoctorCheck = (*StarvedRigCheck)(nil)
 // Name implements DoctorCheck.
 func (c *StarvedRigCheck) Name() string { return StarvedRigName }
 
-// Probe implements DoctorCheck: faulty, one clause for each starved rig, when any
-// is; cannot-tell when the notes or the work cannot be read; ok otherwise.
+// StarvedWaitMailedKey is the note, shared by every host, that holds what the
+// Mayor was last mailed of the rigs that only wait for room (mw-gq6.870), as
+// StarvedMailedKey does for the faults.
+const StarvedWaitMailedKey = "starved.wait-mailed"
+
+// Probe implements DoctorCheck: faulty, one clause for each rig starved by a
+// fault, when any is; cannot-tell when the notes or the work cannot be read; ok
+// otherwise. A rig held only by load (no room on the host) is a wait, not a
+// fault, and is the Mayor's alone: the probe mails him of it once, as a dry run
+// does not, and the check stays ok, so no faulty verdict, note or exit status
+// carries it further (mw-gq6.870). With no Mailed to keep what was mailed, a
+// wait is not mailed, rather than mailed on every tick.
 func (c *StarvedRigCheck) Probe(ctx context.Context) (Verdict, string) {
 	c.found = nil
 	alarms, err := c.Alarms(ctx)
 	if err != nil {
 		return DoctorCannotTell, err.Error()
 	}
-	if len(alarms) == 0 {
+	var faults, waits []DamperAlarm
+	for _, a := range alarms {
+		if a.Wait {
+			waits = append(waits, a)
+		} else {
+			faults = append(faults, a)
+		}
+	}
+	waitErr := c.tellOfWaits(ctx, waits)
+	if len(faults) == 0 {
 		// The alarm has cleared: the next one is news again, to whichever host sees
 		// it first. A dry run changes nothing.
 		if c.Mailed != nil && !DoctorDryRun(ctx) {
@@ -482,14 +504,75 @@ func (c *StarvedRigCheck) Probe(ctx context.Context) (Verdict, string) {
 				_ = c.Mailed.ClearNote(ctx, StarvedMailedKey)
 			}
 		}
+		switch {
+		case waitErr != nil:
+			return DoctorCannotTell, waitErr.Error()
+		case len(waits) > 0:
+			return DoctorOK, fmt.Sprintf("%s waits for room on the host, not a fault; the Mayor is told", strings.Join(rigNames(waits), ", "))
+		}
 		return DoctorOK, ""
 	}
-	c.found = alarms
-	lines := make([]string, len(alarms))
-	for i, a := range alarms {
+	c.found = faults
+	lines := make([]string, len(faults))
+	for i, a := range faults {
 		lines[i] = a.Text
 	}
 	return DoctorFaulty, strings.Join(lines, "; ")
+}
+
+// rigNames is the rig each alarm's text begins with.
+func rigNames(alarms []DamperAlarm) []string {
+	rigs := make([]string, len(alarms))
+	for i, a := range alarms {
+		rigs[i] = strings.SplitN(a.Text, ":", 2)[0]
+	}
+	return rigs
+}
+
+// tellOfWaits mails the Mayor of the rigs waiting for room, once for these
+// alarms whichever host sees them first, and clears what it kept when none
+// waits, so a wait raised again is news again. A dry run, or no Mailed, mails
+// nothing and changes nothing.
+func (c *StarvedRigCheck) tellOfWaits(ctx context.Context, waits []DamperAlarm) error {
+	if c.Mailed == nil || DoctorDryRun(ctx) {
+		return nil
+	}
+	if len(waits) == 0 {
+		if kept, _ := c.Mailed.Note(ctx, StarvedWaitMailedKey); kept != "" {
+			_ = c.Mailed.ClearNote(ctx, StarvedWaitMailedKey)
+		}
+		return nil
+	}
+	mailed := starvedMailed(waits)
+	if kept, err := c.Mailed.Note(ctx, StarvedWaitMailedKey); err == nil && kept == mailed {
+		return nil
+	}
+	if err := c.Mailed.SetNote(ctx, StarvedWaitMailedKey, mailed); err != nil {
+		return fmt.Errorf("what the Mayor is mailed of the rigs waiting for room could not be kept: %w", err)
+	}
+	err := c.mailMayor(ctx, waits, "Waiting for room on the host, not a fault: the host has no room for a Builder while its load is over its cores, and a story starts when it falls.")
+	if err != nil {
+		_ = c.Mailed.ClearNote(ctx, StarvedWaitMailedKey)
+	}
+	return err
+}
+
+// mailMayor sends the Mayor one mail of these alarms, one line each, after lead.
+func (c *StarvedRigCheck) mailMayor(ctx context.Context, alarms []DamperAlarm, lead string) error {
+	body := []string{}
+	if lead != "" {
+		body = append(body, lead, "")
+	}
+	for _, a := range alarms {
+		body = append(body, a.Line())
+	}
+	body = append(body, "", "`mw dispatch --dry-run` on a host says why it passes each ready story over, and `mw status` shows the same lines under DAMPERS. The alarm clears when a story of the rig starts.")
+	return c.Mail(ctx, NewMessage{
+		From:    SeatIdentity(MwSeat, c.Host),
+		To:      MayorMailbox,
+		Subject: fmt.Sprintf("%s: %s has ready stories and none running for over %s", MailStarved, strings.Join(rigNames(alarms), ", "), elapsed(StarvedAfter)),
+		Body:    strings.Join(body, "\n"),
+	})
 }
 
 // Cure implements DoctorCheck: it mails the Mayor, the starved rigs one line each.
@@ -497,12 +580,6 @@ func (c *StarvedRigCheck) Cure(ctx context.Context) error {
 	if len(c.found) == 0 {
 		return fmt.Errorf("no starved rig was found to tell the Mayor of")
 	}
-	var rigs, body []string
-	for _, a := range c.found {
-		rigs = append(rigs, strings.SplitN(a.Text, ":", 2)[0])
-		body = append(body, a.Line())
-	}
-	body = append(body, "", "`mw dispatch --dry-run` on a host says why it passes each ready story over, and `mw status` shows the same lines under DAMPERS. The alarm clears when a story of the rig starts.")
 	// Another host that raised this very alarm may have mailed it already; the
 	// claim is written before the mail so that one a few seconds behind sees it.
 	mailed := starvedMailed(c.found)
@@ -514,12 +591,7 @@ func (c *StarvedRigCheck) Cure(ctx context.Context) error {
 			return fmt.Errorf("what the Mayor is mailed of the starved rigs could not be kept: %w", err)
 		}
 	}
-	err := c.Mail(ctx, NewMessage{
-		From:    SeatIdentity(MwSeat, c.Host),
-		To:      MayorMailbox,
-		Subject: fmt.Sprintf("%s: %s has ready stories and none running for over %s", MailStarved, strings.Join(rigs, ", "), elapsed(StarvedAfter)),
-		Body:    strings.Join(body, "\n"),
-	})
+	err := c.mailMayor(ctx, c.found, "")
 	if err != nil && c.Mailed != nil {
 		_ = c.Mailed.ClearNote(ctx, StarvedMailedKey)
 	}
