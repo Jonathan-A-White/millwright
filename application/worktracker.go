@@ -342,6 +342,25 @@ func (w WorkInHand) ReadyOn(host string) []StoryDetail {
 // RunningOn is the claimed stories whose Path names this host.
 func (w WorkInHand) RunningOn(host string) []StoryDetail { return pathedTo(w.Running, host) }
 
+// RunningOnLive is RunningOn and then the stories pathed to this host that are
+// not in progress by status but whose claim still has a live lease: a heartbeat
+// renewed it, so a session works the story. A hold and un-hold made while the
+// session ran leaves the story open or held, still assigned to the host that
+// claimed it, and mw status that read only the in-progress list lost it from
+// RUNNING (mw-gq6.878). A story queued for its batch holds no session, so it is
+// not one.
+func (w WorkInHand) RunningOnLive(host string, now time.Time) []StoryDetail {
+	running := w.RunningOn(host)
+	for _, list := range [][]StoryDetail{w.OpenClaimed, w.Held} {
+		for _, detail := range pathedTo(list, host) {
+			if ClaimHost(detail.Assignee) != "" && now.Before(detail.LeaseExpires) && !QueuedForBatch(detail) {
+				running = append(running, detail)
+			}
+		}
+	}
+	return running
+}
+
 // Elsewhere is every story, ready and then claimed, whose Path names some host
 // other than this one. A story whose Path names no host is nobody's, and one
 // that names domain.HostAuto is not elsewhere: any host may take it.

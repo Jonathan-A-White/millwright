@@ -926,7 +926,9 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 	waits := s.batchWaits(ctx, work)
 	runningRead := map[string]func() (RunningStory, error){}
-	for _, detail := range work.RunningOn(s.Host) {
+	// A story with a live lease runs whatever its status says (mw-gq6.878).
+	runningHere := work.RunningOnLive(s.Host, s.now())
+	for _, detail := range runningHere {
 		if !detail.Hitl() {
 			runningRead[detail.Story.ID] = later(func() (RunningStory, error) { return s.running(ctx, detail) })
 		}
@@ -938,7 +940,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 
 	closing := closingOut(ctx, s.CloseOuts)
-	for _, detail := range work.RunningOn(s.Host) {
+	for _, detail := range runningHere {
 		if detail.Hitl() {
 			// The Mayor works it beside the Governor: there is no session of its
 			// own to judge, only a story to be found waiting.
@@ -1292,7 +1294,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 
 	for _, detail := range work.OpenClaimed {
-		if !QueuedForBatch(detail) {
+		if !QueuedForBatch(detail) && !slices.ContainsFunc(runningHere, func(r StoryDetail) bool { return r.Story.ID == detail.Story.ID }) {
 			report.OpenButClaimed = append(report.OpenButClaimed, detail)
 		}
 	}
