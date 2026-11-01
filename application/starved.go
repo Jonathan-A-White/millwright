@@ -42,6 +42,11 @@ const ClaimLostGate = "claim-lost"
 // story is in it or its uncommitted work could not be committed (mw-gq6.669).
 const LeftoverRefusedGate = "leftover-refused"
 
+// HeldAfterClaimGate stands for a fourth: the Mayor held the story after this
+// dispatch claimed it, so the claim was given back and no session was started
+// (mw-gq6.878).
+const HeldAfterClaimGate = "held-after-claim"
+
 // StarvedHolds maps every reason mw dispatch passes a ready story over for, by
 // the gate's name in DispatchGates (and PourRefusedGate), to the hold name the
 // starved-rig alarm gives it. A gate added to Dispatch.run is mapped here too:
@@ -74,6 +79,7 @@ var StarvedHolds = map[string]string{
 	PourRefusedGate:          "pour refused",
 	ClaimLostGate:            "claim lost",
 	LeftoverRefusedGate:      "earlier attempt in the way",
+	HeldAfterClaimGate:       "held after the claim",
 }
 
 // StarvedKey is the note a host's dispatch keeps of the rigs it holds back

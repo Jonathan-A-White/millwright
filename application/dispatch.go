@@ -1267,7 +1267,12 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			var pour *pourRefusal
 			var refused *leftoverRefusal
 			var lost *claimLost
-			if errors.As(err, &lost) {
+			var heldSince *heldAfterClaim
+			if errors.As(err, &heldSince) {
+				// The Mayor held it after the claim: nothing is wrong, and the
+				// claim has gone back with the hold standing (mw-gq6.878).
+				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: HeldAfterClaimGate, Why: heldSince.Error()})
+			} else if errors.As(err, &lost) {
 				// Another host's dispatcher claimed it first: the story is theirs
 				// and nothing here is wrong. It takes none of the cap, and the
 				// stories after it are still worked (mw-gq6.569).
@@ -1676,6 +1681,12 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		return Started{}, released, relErr
 	}
 	detail.Molecule = fresh.Molecule
+	// The Mayor may have held the story since the claim: a hold is the Mayor's
+	// word that nothing works it, and a claim made before it is not a reason to
+	// start (mw-gq6.878).
+	if fresh.Held() {
+		return d.stepAsideForHold(ctx, id, started.Auto)
+	}
 
 	// The acceptance the session is handed is recorded, so that mw next can tell
 	// at close-out whether it was amended since (mw-gq6.509).
@@ -1707,8 +1718,10 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	// so whether the next dispatch will find it.
 	var recorded bool
 
-	// undo gives back everything this dispatch took, and says what it could not.
-	undo := func(what string, why error, worktree bool) (Started, bool, error) {
+	// undoAs gives back everything this dispatch took, and says what it could not;
+	// giveBack is how the claim goes back: release for a story to stay ready,
+	// releaseHeld for one the Mayor has held since.
+	undoAs := func(what string, why error, worktree bool, giveBack func(context.Context, string, error) (bool, error)) (Started, bool, error) {
 		failed := fmt.Errorf("%s of %s: %w", what, id, why)
 		if worktree {
 			// A session of the story's name running now is another dispatcher's, who
@@ -1733,9 +1746,12 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 					failed, started.Molecule.RootID)
 			}
 		}
-		released, err := d.release(ctx, id, failed)
+		released, err := giveBack(ctx, id, failed)
 		handedBack(released)
 		return Started{}, released, err
+	}
+	undo := func(what string, why error, worktree bool) (Started, bool, error) {
+		return undoAs(what, why, worktree, d.release)
 	}
 
 	// The target branch as the rig's origin has it now, not as this host saw it
@@ -1836,6 +1852,16 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	spec, err := d.Boot.Boot(ctx, detail, started.Worktree)
 	if err != nil {
 		return undo("assembling the session", err, true)
+	}
+	// The worktree, the pour and the boot took their time, and the Mayor may have
+	// held the story in it: read the hold again as late as it can be, right
+	// before the session starts (mw-gq6.878).
+	again, err := d.Tracker.ShowStory(ctx, id)
+	if err != nil {
+		return undo("reading the story again before starting its session", err, true)
+	}
+	if again.Held() {
+		return undoAs("starting the session", errHeldAfterClaim, true, d.releaseHeld)
 	}
 	// Only now, with everything else in place, is the dead session cleared away:
 	// its output is all that is left of the run before, and a dispatch that fails
@@ -2589,6 +2615,48 @@ func (d Dispatch) release(ctx context.Context, id string, why error) (bool, erro
 		return true, fmt.Errorf("%w (the claim was given back, but the failure could not be written on the story: %v)", why, err)
 	}
 	return true, why
+}
+
+// errHeldAfterClaim is why a claimed story is given back without a session: the
+// Mayor held it after the claim was made.
+var errHeldAfterClaim = errors.New("the story was held after it was claimed, so no session is started for it")
+
+// heldAfterClaim is the refusal start returns for a story held after its claim;
+// Run passes the story over for it as it does for a claim lost, and the story is
+// not a failed start.
+type heldAfterClaim struct{ err error }
+
+func (h *heldAfterClaim) Error() string { return h.err.Error() }
+func (h *heldAfterClaim) Unwrap() error { return h.err }
+
+// stepAsideForHold gives back the claim of a story the Mayor held since it was
+// claimed, before anything else was done for it (mw-gq6.878).
+func (d Dispatch) stepAsideForHold(ctx context.Context, id string, auto bool) (Started, bool, error) {
+	released, err := d.releaseHeld(ctx, id, fmt.Errorf("reading %s after claiming it: %w", id, errHeldAfterClaim))
+	if released && auto {
+		_ = d.Tracker.SetStoryMetadata(context.WithoutCancel(ctx), id, map[string]string{"host": domain.HostAuto})
+	}
+	return Started{}, released, err
+}
+
+// releaseHeld is release for a story the Mayor held after it was claimed: the
+// claim is given back and the hold stands, so the story is held and nobody's,
+// as the Mayor left it, and it is ready again when the Mayor releases it. A
+// session of the story's name that is running keeps the claim, as in release.
+func (d Dispatch) releaseHeld(ctx context.Context, id string, why error) (bool, error) {
+	giveBack := context.WithoutCancel(ctx)
+	if status, err := d.Runner.Status(giveBack, SessionName(id)); err == nil && status.Running() {
+		return d.release(ctx, id, why)
+	}
+	if err := d.Tracker.HoldClaimHeldBy(giveBack, id, ""); err != nil {
+		return false, fmt.Errorf("%w (and the claim could not be given back either: %v — %s is claimed, held, with no session, and needs releasing by hand)", why, err, id)
+	}
+	d.print(fmt.Sprintf("  gave back %s, held: %v\n", id, why))
+	said := fmt.Sprintf(HeldCommentPrefix+" mw dispatch on %s claimed this story, found it held, and gave the claim back without starting a session; it stays held until it is released: %v", d.Host, why)
+	if err := d.Tracker.CommentOnStory(giveBack, id, said); err != nil {
+		return true, &heldAfterClaim{err: fmt.Errorf("%w (the claim was given back, but that could not be written on the story: %v)", why, err)}
+	}
+	return true, &heldAfterClaim{err: why}
 }
 
 // blockedBy is the first of a candidate's needs that is not yet finished, and

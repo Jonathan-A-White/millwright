@@ -60,6 +60,7 @@ func TestStuckDoesNotListAHoldTheHoldHelpersWroteAReasonFor(t *testing.T) {
 //	filed: a story filed held, awaiting its release; mw stuck rightly lists it when live beads wait behind it with no reason
 var holdSites = map[string]string{
 	"application/ice.go:HoldStory":                    "refuses",
+	"application/dispatch.go:HoldClaimHeldBy":         "reason",
 	"application/retry.go:HoldStory":                  "reason",
 	"application/retry.go:HoldClaimHeldBy":            "reason",
 	"application/postern.go:HoldStory":                "reason",
