@@ -257,3 +257,55 @@ func TestARelatedTestsRunWithNoFailedFileIsGivenTheChangedFilesOnly(t *testing.T
 		t.Fatalf("expected the changed file only, got %+v (error: %v)", run, err)
 	}
 }
+
+func TestAnAlwaysRunTestIsGivenToTheRelatedTestsLineWhenNoChangedFileImportsIt(t *testing.T) {
+	dir := specsRepo(t, "src/x.ts")
+	log := filepath.Join(t.TempDir(), "log")
+	checks := rig.NewChecks(
+		rig.WithRelatedCommands(map[string]string{"lampas": "printf '%s\\n' {files} > " + log}),
+		rig.WithAlwaysRun(map[string][]string{"lampas": {"tests/e2e/old.spec.ts", "tests/gone.test.ts"}, "other": {"src/x.ts"}}))
+
+	run, err := checks.RunRelated(context.Background(), "lampas", dir, application.RelatedSpan{Base: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"src/x.ts", "tests/e2e/old.spec.ts"}; !run.Ran || !reflect.DeepEqual(run.Files, want) {
+		t.Errorf("expected the line run on %v (the always-run test the branch did not touch, and not the one the tree lacks), got %+v", want, run)
+	}
+	if got, _ := os.ReadFile(log); string(got) != "src/x.ts\ntests/e2e/old.spec.ts\n" {
+		t.Errorf("expected the line to be given the changed file and the always-run test, got %q", got)
+	}
+}
+
+func TestTheRelatedTestsLineFailingOnAnAlwaysRunTestRefusesTheGate(t *testing.T) {
+	dir := specsRepo(t, "src/x.ts")
+	checks := rig.NewChecks(
+		rig.WithRelatedCommands(map[string]string{"lampas": `for f in {files}; do test "$f" != tests/e2e/old.spec.ts || exit 1; done`}),
+		rig.WithAlwaysRun(map[string][]string{"lampas": {"tests/e2e/old.spec.ts"}}))
+
+	run, err := checks.RunRelated(context.Background(), "lampas", dir, application.RelatedSpan{Base: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !run.Ran || run.Passed {
+		t.Errorf("expected the gate to run and fail on the always-run test, got %+v", run)
+	}
+
+	without := rig.NewChecks(rig.WithRelatedCommands(map[string]string{"lampas": `for f in {files}; do test "$f" != tests/e2e/old.spec.ts || exit 1; done`}))
+	run, err = without.RunRelated(context.Background(), "lampas", dir, application.RelatedSpan{Base: "main"})
+	if err != nil || !run.Ran || !run.Passed {
+		t.Errorf("expected a rig with no always-run list to pass as before, got %+v (error: %v)", run, err)
+	}
+}
+
+func TestABranchThatChangedNoFileLeavesTheWholeTestsToRunDespiteAnAlwaysRunList(t *testing.T) {
+	dir := specsRepo(t)
+	checks := rig.NewChecks(
+		rig.WithRelatedCommands(map[string]string{"lampas": "true {files}"}),
+		rig.WithAlwaysRun(map[string][]string{"lampas": {"tests/e2e/old.spec.ts"}}))
+
+	run, err := checks.RunRelated(context.Background(), "lampas", dir, application.RelatedSpan{Base: "main"})
+	if err != nil || run.Ran || !run.NoFiles {
+		t.Errorf("expected nothing run and NoFiles, so the caller runs the whole tests, got %+v (error: %v)", run, err)
+	}
+}

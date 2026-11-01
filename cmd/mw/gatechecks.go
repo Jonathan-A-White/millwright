@@ -50,7 +50,11 @@ func landingChecks(vaultDir string, which gateCommands) (*rig.Checks, error) {
 		if err != nil {
 			return nil, err
 		}
-		options = append(options, rig.WithRelatedCommands(related))
+		always, err := config.AlwaysRun()
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, rig.WithRelatedCommands(related), rig.WithAlwaysRun(always))
 	}
 	if which.parts {
 		configured, err := config.TestParts()

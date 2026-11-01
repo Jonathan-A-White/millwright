@@ -2632,6 +2632,35 @@ func RelatedTests() (map[string]string, error) {
 	return tableIn(filepath.Join(home, File), RelatedTestsTable)
 }
 
+// AlwaysRunTable is the table of tests a rig's related-tests line runs whatever
+// files a story changed.
+const AlwaysRunTable = "always_run"
+
+// AlwaysRun reports the test files each rig's related-tests line is always
+// given besides the changed ones, by rig name, read from the `[always_run]`
+// table of ~/.config/mw/config.toml (mw-gq6.871): `lampas =
+// ["tests/unit/open-tutor-only.test.ts"]`, or one string with commas. A guard
+// test that finds its files by scanning folders is imported by none of them, so
+// `vitest related` never selects it. A rig that says nothing adds none, and a
+// machine with no such table is not an error.
+func AlwaysRun() (map[string][]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), AlwaysRunTable)
+	if err != nil {
+		return nil, err
+	}
+	files := map[string][]string{}
+	for rig, value := range table {
+		if items := list(value); len(items) > 0 {
+			files[rig] = items
+		}
+	}
+	return files, nil
+}
+
 // NamedTests reports the line each rig runs just the tests that failed by name,
 // by rig name, read from the `[named_tests]` table of ~/.config/mw/config.toml
 // (mw-gq6.645): `millwright = "go test -tags beads_integration -run \"^($(echo
