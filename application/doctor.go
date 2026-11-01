@@ -1044,3 +1044,58 @@ func (c *StaleLandingsCheck) Damper() (time.Duration, int) { return time.Hour, 1
 
 // WayBack implements DoctorCheck.
 func (c *StaleLandingsCheck) WayBack() string { return "nothing was changed" }
+
+// NoSessionClaimsCheck is the mw doctor check that names the in-progress
+// stories NoSessionClaim finds, each as STUCK with its id, who holds it and
+// when its lease ran out (mw-gq6.877). Every host's dispatch gives such a claim
+// back on its next tick, so one still here says dispatch is not running or
+// could not reach the beads; the check changes nothing, and says the one
+// command that frees the story at once.
+type NoSessionClaimsCheck struct {
+	// Claims lists the claims whose lease had run out by the time given: the
+	// tracker's StaleClaims.
+	Claims func(ctx context.Context, now time.Time) ([]StoryDetail, error)
+	// Now is the clock; nil reads time.Now.
+	Now func() time.Time
+}
+
+var _ DoctorCheck = (*NoSessionClaimsCheck)(nil)
+
+// Name implements DoctorCheck.
+func (c *NoSessionClaimsCheck) Name() string { return "stuck-claims" }
+
+// Probe implements DoctorCheck: cannot-tell, naming each stuck claim, when there
+// are any; ok otherwise. A claim that cannot be read is cannot-tell too. The
+// reason holds no age, so that the same claims said again read the same.
+func (c *NoSessionClaimsCheck) Probe(ctx context.Context) (Verdict, string) {
+	now := time.Now()
+	if c.Now != nil {
+		now = c.Now()
+	}
+	stale, err := c.Claims(ctx, now)
+	if err != nil {
+		return DoctorCannotTell, fmt.Sprintf("the claims with no session could not be read: %v", err)
+	}
+	var stuck []string
+	for _, detail := range stale {
+		if NoSessionClaim(detail, now) {
+			stuck = append(stuck, fmt.Sprintf("%s (held by %s, lease ran out %s; mw retry %s)",
+				detail.Story.ID, detail.Assignee, detail.LeaseExpires.UTC().Format(LastSyncFormat), detail.Story.ID))
+		}
+	}
+	if len(stuck) == 0 {
+		return DoctorOK, ""
+	}
+	sort.Strings(stuck)
+	return DoctorCannotTell, fmt.Sprintf("STUCK: %d in progress with an expired lease and no host or session named: %s",
+		len(stuck), strings.Join(stuck, ", "))
+}
+
+// Cure implements DoctorCheck. Nothing is cured: Probe never says faulty.
+func (c *NoSessionClaimsCheck) Cure(context.Context) error { return nil }
+
+// Damper implements DoctorCheck.
+func (c *NoSessionClaimsCheck) Damper() (time.Duration, int) { return time.Hour, 1 }
+
+// WayBack implements DoctorCheck.
+func (c *NoSessionClaimsCheck) WayBack() string { return "nothing was changed" }

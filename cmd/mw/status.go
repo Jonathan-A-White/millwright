@@ -41,6 +41,9 @@ func newStatusCmd() *cobra.Command {
 			"person's act: status only says which stories are waiting for one.\n\n" +
 			"A DAMPERS section line 'stuck: N live beads behind M held roots: <ids>' names the held beads that\n" +
 			"live beads wait behind and that cannot move on their own (mw stuck lists them with what is behind).\n\n" +
+			"A STUCK CLAIMS section lists a story in progress whose lease ran out, held by a dispatch (mw@<host>)\n" +
+			"and pathed to no host, so that no host's running list shows it; any host's next mw dispatch tick\n" +
+			"gives it back, and mw retry does at once. mw doctor names the same stories as STUCK.\n\n" +
 			"A WAITING ON THE MAYOR section lists each hands bead (hitl) with no step filed yet, which\n" +
 			"the postern view says waits on the Mayor, with its bead, its age and what it waits on. It\n" +
 			"costs one read of the notes, and builds and keeps nothing of the view.\n\n" +

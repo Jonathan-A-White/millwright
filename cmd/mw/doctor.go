@@ -409,6 +409,8 @@ func newDoctorCmd() *cobra.Command {
 				landingDirs = append(landingDirs, filepath.Dir(filepath.Clean(rigDir)))
 			}
 			staleLandings := &application.StaleLandingsCheck{Dirs: landingDirs}
+			// Claims no host names, held by a dispatch that died, with no session.
+			stuckClaims := &application.NoSessionClaimsCheck{Claims: mwGateway(vault, host).StaleClaims}
 			// The connection rate of a beads server this host runs; a host that
 			// reaches another's, or has none, leaves it to the host that runs it.
 			var churn application.DoctorChecks
@@ -456,6 +458,7 @@ func newDoctorCmd() *cobra.Command {
 				starvedRigs,
 				recheckSkips,
 				staleLandings,
+				stuckClaims,
 				ageKey,
 				claudeLogin,
 				usageFresh,

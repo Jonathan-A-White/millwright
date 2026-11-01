@@ -68,6 +68,12 @@ const HeldHandsHeading = "HELD, WITH A HANDS STEP"
 // none.
 const OpenButClaimedHeading = "OPEN BUT CLAIMED"
 
+// StuckClaimsHeading is what heads the section for in-progress stories held by a
+// dispatch whose lease ran out and whose Path names no host (NoSessionClaim):
+// they are on no host's list of what is running, so nothing else says them
+// (mw-gq6.877). The report leaves it out when there are none.
+const StuckClaimsHeading = "STUCK CLAIMS"
+
 // HeldForHeading is what heads the section naming the beads still open behind a
 // held-for-<event> label, so that the work an event held is not forgotten once
 // the event ends (mw-gq6.766).
@@ -682,7 +688,11 @@ type StatusReport struct {
 	// (mw@<host>): no session runs them and dispatch will not take them, in
 	// the order the tracker listed them.
 	OpenButClaimed []StoryDetail
-	Blocked        []StoryDetail
+	// NoSessionClaims are the in-progress stories NoSessionClaim names: claimed
+	// by a dispatch, lease run out, and no host or session to look for them
+	// (mw-gq6.877).
+	NoSessionClaims []StoryDetail
+	Blocked         []StoryDetail
 	// Others is what every other host named in a story's Path has in hand, one
 	// entry per host, in host order.
 	Others []HostWork
@@ -1286,6 +1296,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			report.OpenButClaimed = append(report.OpenButClaimed, detail)
 		}
 	}
+	report.NoSessionClaims = work.NoSessionClaims(s.now())
 
 	if dampersRead != nil {
 		// An alarm that cannot be judged costs the report only its section.
@@ -1461,7 +1472,7 @@ func (r *StatusReport) markGuests(ctx context.Context, rules EpicRules) error {
 	for i := range r.Running {
 		all = append(all, &r.Running[i].Detail)
 	}
-	for _, list := range [][]StoryDetail{r.Ready, r.Waiting, r.HeldHands, r.OpenButClaimed, r.Blocked} {
+	for _, list := range [][]StoryDetail{r.Ready, r.Waiting, r.HeldHands, r.OpenButClaimed, r.NoSessionClaims, r.Blocked} {
 		for i := range list {
 			all = append(all, &list[i])
 		}
@@ -2172,6 +2183,16 @@ func (r StatusReport) String() string {
 		for _, d := range r.OpenButClaimed {
 			writeStory(&b, d, "claimed by "+d.Assignee+", no session")
 			clip(&b, "    frees it: mw retry "+d.Story.ID)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(r.NoSessionClaims) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", StuckClaimsHeading, len(r.NoSessionClaims)))
+		for _, d := range r.NoSessionClaims {
+			writeStory(&b, d, "STUCK: claimed by "+d.Assignee+", lease ran out "+
+				d.LeaseExpires.UTC().Format(LastSyncFormat)+", no host or session names it; any host's next mw dispatch tick gives it back")
+			clip(&b, "    or now: mw retry "+d.Story.ID)
 		}
 		b.WriteString("\n")
 	}
