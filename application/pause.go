@@ -249,9 +249,14 @@ func (h FleetHostPause) Pause(ctx context.Context, order HostPauseOrder) (HostPa
 		out.HoldUntil = kept.Until
 	}
 
-	running, err := h.Stories.RunningStories(ctx, h.Host)
+	// A story set back to open under its session still has the session: it is
+	// typed to as the in-progress ones are (mw-gq6.880).
+	running, liveErr, err := RunningWithLive(ctx, h.Stories, h.Host, h.now())
 	if err != nil {
 		return out, fmt.Errorf("%s: the stories in hand could not be read: %w", h.Host, err)
+	}
+	if liveErr != nil {
+		out.Notes = append(out.Notes, fmt.Sprintf("the stories held or set back to open under a live claim could not be read, so they were not typed to: %v", liveErr))
 	}
 	var live []*PausedStory
 	for _, detail := range running {

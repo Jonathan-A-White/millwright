@@ -146,6 +146,8 @@ type EventControl struct {
 	Notes SweepNotes
 	// Err is where what is left or failed is said, each once while it repeats.
 	Err io.Writer
+	// Now is the clock; the zero value is the real one.
+	Now func() time.Time
 
 	mu   sync.Mutex
 	said map[string]string
@@ -246,7 +248,9 @@ func (c *EventControl) cancel(ctx context.Context, ev events.Event) bool {
 		c.say("cancel:"+id, fmt.Errorf("the cancel of %s was left: reading it failed: %w", id, err))
 		return true
 	}
-	if detail.Status != StatusInProgress {
+	// A story set back to open under its session is as much claimed as one in
+	// progress: its live lease says the session is still there (mw-gq6.880).
+	if detail.Status != StatusInProgress && !LiveClaim(c.now(), detail) {
 		c.say("cancel:"+id, fmt.Errorf("the cancel of %s was left: it is %s, not claimed", id, detail.Status))
 		return true
 	}
@@ -292,6 +296,13 @@ func (c *EventControl) cancel(ctx context.Context, ev events.Event) bool {
 		c.say("comment:"+id, fmt.Errorf("%s could not be commented on: %w", id, err))
 	}
 	return true
+}
+
+func (c *EventControl) now() time.Time {
+	if c.Now != nil {
+		return c.Now()
+	}
+	return time.Now()
 }
 
 func (c *EventControl) say(what string, err error) {

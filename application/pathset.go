@@ -6,6 +6,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -27,6 +28,8 @@ const PathUnset = "(unset)"
 // changes nothing.
 type PathSet struct {
 	Tracker WorkTracker
+	// Now is the clock; the zero value is the real one.
+	Now func() time.Time
 
 	// Rigs are the rigs checked out on this host, by name, and RigFiles counts
 	// the files of a directory in one: a files key that names a directory of
@@ -82,6 +85,12 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 	}
 	if status := strings.ToLower(strings.TrimSpace(story.Status)); status == StatusInProgress || status == StatusClosed {
 		return domain.Path{}, fmt.Errorf("the story %s is %s, and a path is adjusted only before a story starts: nothing was written", id, status)
+	}
+	// A story set back to open or held under its session still has the session,
+	// and its claim lease is what says so (mw-gq6.880).
+	if LiveClaim(s.now(), story) {
+		return domain.Path{}, fmt.Errorf("the story %s is %s but holds a live claim (%s until %s), so a session works it, and a path is adjusted only before a story starts: nothing was written",
+			id, strings.ToLower(strings.TrimSpace(story.Status)), story.Assignee, story.LeaseExpires.UTC().Format(time.RFC3339))
 	}
 
 	if from != "" {
@@ -341,4 +350,12 @@ func (s PathShow) Run(ctx context.Context, id string) (domain.Path, error) {
 		warnBeforeDispatch(ctx, s.Out, s.Rules, story)
 	}
 	return path, nil
+}
+
+// now is the clock this path set reads.
+func (s PathSet) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }

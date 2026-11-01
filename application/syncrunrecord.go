@@ -42,7 +42,12 @@ func (s Sync) commitRunRecords(ctx context.Context, dirty []string, report *Sync
 	if len(records) == 0 || !ok {
 		return dirty
 	}
-	running, err := reader.RunningStories(ctx, s.Host)
+	// A story set back to open under its session is as much running here, and
+	// its run record as much in the way (mw-gq6.880).
+	running, liveErr, err := RunningWithLive(ctx, reader, s.Host, s.now())
+	if err == nil && liveErr != nil {
+		report.RunRecordNote = fmt.Sprintf("could not read which stories hold a live claim here, so those run records are not committed: %s", firstLine(liveErr.Error()))
+	}
 	if err != nil {
 		report.RunRecordNote = fmt.Sprintf("could not read which stories are in progress here: %s", firstLine(err.Error()))
 		return dirty

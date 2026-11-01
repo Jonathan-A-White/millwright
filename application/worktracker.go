@@ -362,20 +362,53 @@ func (w WorkInHand) RunningLive(now time.Time) []StoryDetail {
 }
 
 // LiveOpenClaims is the stories among the lists, which hold the stories whose
-// status is not in progress, that a session works all the same: assigned to a
-// host (mw@<host>) with a claim lease that has not run out, and not queued for
-// their batch, which holds no session. The tracker's dispatch reads it for the
-// cap (LiveClaims) as RunningLive does for a report.
+// status is not in progress, that a session works all the same (LiveClaim). The
+// tracker's dispatch reads it for the cap (LiveClaims) as RunningLive does for a
+// report.
 func LiveOpenClaims(now time.Time, lists ...[]StoryDetail) []StoryDetail {
 	var live []StoryDetail
 	for _, list := range lists {
 		for _, detail := range list {
-			if ClaimHost(detail.Assignee) != "" && now.Before(detail.LeaseExpires) && !QueuedForBatch(detail) {
+			if LiveClaim(now, detail) {
 				live = append(live, detail)
 			}
 		}
 	}
 	return live
+}
+
+// LiveClaim is whether a session works the story whatever its status says:
+// assigned to a host (mw@<host>) with a claim lease that has not run out, and
+// not queued for its batch, which holds no session. It is the one test of a live
+// claim: the counts, mw pause, mw path set, a cancel and mw sync's run-record
+// commit all ask it, never a reading of the lease of their own (mw-gq6.880).
+func LiveClaim(now time.Time, detail StoryDetail) bool {
+	return ClaimHost(detail.Assignee) != "" && now.Before(detail.LeaseExpires) && !QueuedForBatch(detail)
+}
+
+// RunningWithLive is the stories in progress on host and then, when the tracker
+// can say (LiveClaims), the open and held ones that hold a live claim lease: the
+// stories whose sessions an action on what runs must reach. A tracker that
+// cannot say, or whose read failed, adds none; liveErr is why in the second case,
+// and err is a failure to read the in-progress list, which leaves nothing.
+func RunningWithLive(ctx context.Context, tracker interface {
+	RunningStories(ctx context.Context, host string) ([]StoryDetail, error)
+}, host string, now time.Time) (stories []StoryDetail, liveErr, err error) {
+	stories, err = tracker.RunningStories(ctx, host)
+	if err != nil {
+		return nil, nil, err
+	}
+	lister, ok := tracker.(LiveClaims)
+	if !ok {
+		return stories, nil, nil
+	}
+	live, liveErr := lister.LiveClaims(ctx, host, now)
+	for _, detail := range live {
+		if !slices.ContainsFunc(stories, func(d StoryDetail) bool { return d.Story.ID == detail.Story.ID }) {
+			stories = append(stories, detail)
+		}
+	}
+	return stories, liveErr, nil
 }
 
 // LiveClaims is a tracker that lists the open and held stories whose Path names
