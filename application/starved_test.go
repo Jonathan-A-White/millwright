@@ -729,3 +729,108 @@ func TestADryRunOfTheStarvedCheckClearsNothingForTheOtherHosts(t *testing.T) {
 		t.Fatalf("expected a dry run to leave what was mailed as it was, got %d mails", len(inbox))
 	}
 }
+
+// mw-gq6.870: a rig held only by load (no room on the host) waits on the host,
+// which is the Mayor's to know and never the Governor's to be paged for. It is
+// mailed to the Mayor once and the check stays ok, so no faulty verdict, no
+// damped note and no failed unit goes beyond the Mayor; a rig held by a fault
+// is a fault still.
+func aLoadHeldRig(t *testing.T) *apptest.FakeTracker {
+	t.Helper()
+	tracker := starvedFixture(t, 4*time.Hour)
+	note := application.StarvedRig{Rig: "millwright", Since: statusNow.Add(-4 * time.Hour), Hold: application.StarvedHolds["no-room"], Reason: "laptop has no room: load 34.3 of 20 cores"}
+	if err := tracker.SetNote(context.Background(), application.StarvedKey("vps"), application.FormatStarved([]application.StarvedRig{note})); err != nil {
+		t.Fatal(err)
+	}
+	return tracker
+}
+
+func TestAStarvedAlarmHeldOnlyByLoadIsAWaitAndAFaultIsNot(t *testing.T) {
+	load := starvedAlarms(t, aLoadHeldRig(t))
+	if len(load) != 1 || !load[0].Wait {
+		t.Errorf("expected one alarm that is a wait for room, got %+v", load)
+	}
+	fault := starvedAlarms(t, starvedFixture(t, 4*time.Hour))
+	if len(fault) != 1 || fault[0].Wait {
+		t.Errorf("expected a smoke hold to be no wait, got %+v", fault)
+	}
+}
+
+func TestAStarvedAlarmHeldOnlyByLoadMailsTheMayorAndIsNeverAFault(t *testing.T) {
+	ctx := context.Background()
+	tracker := aLoadHeldRig(t)
+	mailbox := apptest.NewFakeMailbox()
+	for i, host := range []string{"laptop", "desktop"} {
+		now := doctorNow
+		doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now,
+			aStarvedRigCheckOnHost(host, statusNow.Add(time.Duration(7*i)*time.Second), tracker, mailbox))
+		// Ticks later it is the same wait: never faulty, never damped.
+		for tick := range 4 {
+			report, err := doctor.Run(ctx, "", false)
+			if err != nil || report.Faulty() || report.Results[0].Verdict != "ok" {
+				t.Fatalf("%s tick %d: expected a wait for room to leave the check ok, got %+v %v", host, tick, report.Results, err)
+			}
+			now = now.Add(5 * time.Minute)
+		}
+	}
+	inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox)
+	if len(inbox) != 1 || !strings.Contains(inbox[0].Body, "load 34.3 of 20 cores") || !strings.Contains(inbox[0].Body, "no room") {
+		t.Fatalf("expected the Mayor mailed once of the wait for room, got %+v", inbox)
+	}
+}
+
+func TestAStarvedAlarmHeldByLoadIsMailedAgainOnceItClearedAndIsRaisedAgain(t *testing.T) {
+	ctx := context.Background()
+	tracker := aLoadHeldRig(t)
+	mailbox := apptest.NewFakeMailbox()
+	now := doctorNow
+	doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now, aStarvedRigCheckOnHost("laptop", statusNow, tracker, mailbox))
+	run := func() {
+		t.Helper()
+		if _, err := doctor.Run(ctx, "", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run()
+	run()
+	if err := tracker.ClaimStory(ctx, "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	run() // cleared: a story of the rig runs
+	if err := tracker.ReleaseClaim(ctx, "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	run()
+	if inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox); len(inbox) != 2 {
+		t.Fatalf("expected one mail for each time the wait was raised, got %d", len(inbox))
+	}
+}
+
+func TestADryRunOfAWaitForRoomMailsNothing(t *testing.T) {
+	ctx := context.Background()
+	tracker := aLoadHeldRig(t)
+	mailbox := apptest.NewFakeMailbox()
+	now := doctorNow
+	doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now, aStarvedRigCheckOnHost("laptop", statusNow, tracker, mailbox))
+	if _, err := doctor.Run(ctx, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox); len(inbox) != 0 {
+		t.Fatalf("expected a dry run to mail nothing, got %d", len(inbox))
+	}
+}
+
+func TestAStarvedAlarmHeldByAFaultStaysAFaultOnceTheMayorIsMailed(t *testing.T) {
+	ctx := context.Background()
+	tracker := starvedFixture(t, 4*time.Hour)
+	mailbox := apptest.NewFakeMailbox()
+	now := doctorNow
+	doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now, aStarvedRigCheckOnHost("laptop", statusNow, tracker, mailbox))
+	if _, err := doctor.Run(ctx, "", false); err != nil {
+		t.Fatalf("expected the first tick to cure by mailing, got %v", err)
+	}
+	report, err := doctor.Run(ctx, "", false)
+	if err == nil || !report.Faulty() {
+		t.Fatalf("expected the fault to be left faulty after its one mail, got %+v %v", report.Results, err)
+	}
+}

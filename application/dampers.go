@@ -63,6 +63,9 @@ type DamperAlarm struct {
 	// Identity, when set, is what the alarm is, apart from the words that age (a
 	// duration): two hosts that raise alarms of one Identity raise one alarm.
 	Identity string
+	// Wait marks an alarm that is a wait on a host's room (load), not a fault:
+	// the Mayor's to know and nobody's to be paged for (mw-gq6.870).
+	Wait bool
 }
 
 // DampersReport is what the alarms found, with the counts mw doctor repeats.
