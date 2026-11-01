@@ -288,25 +288,19 @@ func (m mergedGate) what() string {
 }
 
 // mergedResultGate runs the rig's tests on a merged result in dir as gate runs
-// them in a worktree, but it never waits for this host while the close-out
-// holds its rig's merge slot across hosts (mw-gq6.422): the other host's
-// close-out of the rig would wait for this host's whole queue of gates, any
-// rig's, and for its calm. When the gate lock is another gate's, or the host
-// is busy before a run, it runs nothing and returns what it would wait for;
-// merge gives the slot back while it waits (waitForTheMergedGate), takes it
-// again, and tries again from a fresh fetch. A close-out that holds no slot
-// across hosts waits where it is.
+// them in a worktree, but it never waits for this host where the merge is: the
+// landing in dir was cut from a target that moves while a gate queues, and the
+// other host's close-out of the rig would wait for this host's whole queue of
+// gates, any rig's, and for its calm, if the close-out held the rig's merge
+// slot across hosts (mw-gq6.422). When the gate lock is another gate's, or the
+// host is busy before a run, it runs nothing and returns what it would wait
+// for; merge gives the slot back if it holds it, waits (waitForTheMergedGate),
+// takes it again, and tries again from a fresh fetch, so the merged result
+// that is tested is the target as it is after the wait (mw-gq6.872).
 func (n Next) mergedResultGate(ctx context.Context, c *closeOut, report *NextReport, dir string, span RelatedSpan) (gated, string) {
 	m := &c.merged
-	for {
-		waits := n.mergedGateWaits(ctx, c, report)
-		if waits == "" {
-			break
-		}
-		if c.cross != nil {
-			return gated{}, waits
-		}
-		n.waitForTheMergedGate(ctx, c, report)
+	if waits := n.mergedGateWaits(ctx, c, report); waits != "" {
+		return gated{}, waits
 	}
 
 	if m.failed {

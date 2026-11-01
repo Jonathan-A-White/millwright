@@ -1362,10 +1362,12 @@ func (n Next) takeCrossSlot(ctx context.Context, c *closeOut, report *NextReport
 // pushed, and it cannot come round for ever: the gate lock, once had, is kept,
 // and the host is let calm once before each run.
 func (n Next) waitOffTheSlot(ctx context.Context, c *closeOut, report *NextReport, waits string) {
+	if c.cross != nil {
+		report.CrossSlot = append(report.CrossSlot, fmt.Sprintf("gave the cross-host merge slot of %s back while it waited for %s before %s",
+			c.path.Rig, waits, c.merged.what()))
+	}
 	report.Notes = append(report.Notes, c.cross.Release(ctx)...)
 	c.cross = nil
-	report.CrossSlot = append(report.CrossSlot, fmt.Sprintf("gave the cross-host merge slot of %s back while it waited for %s before %s",
-		c.path.Rig, waits, c.merged.what()))
 	n.waitForTheMergedGate(ctx, c, report)
 	n.takeCrossSlot(ctx, c, report)
 }
@@ -2051,11 +2053,18 @@ func (n Next) failureGoesOnToTheMerge(ctx context.Context, c *closeOut, report *
 // A story that really breaks a test fails there too, so it never reaches a
 // batch untested on the merged code.
 func (n Next) batchRunOnTheMerge(ctx context.Context, c *closeOut, report *NextReport, failed Checked, base string) (merged gated, dir string, ok bool) {
-	target := n.freshTarget(ctx, c, report)
-	behind := n.commitsBehind(ctx, c, base)
-	if behind == 0 {
+	n.freshTarget(ctx, c, report)
+	if n.commitsBehind(ctx, c, base) == 0 {
 		return gated{}, "", false
 	}
+	// The gate lock is waited for before the target is merged: the wait can be
+	// an hour long and the target moves meanwhile (mw-gq6.872).
+	const what = "the rig's tests with the target merged in"
+	if lock := n.waitForTheGateLock(ctx, c, report, what); lock != nil {
+		defer n.giveTheGateLockBack(report, lock)
+	}
+	target := n.freshTarget(ctx, c, report)
+	behind := n.commitsBehind(ctx, c, base)
 	dir, err := n.Landing.OpenLanding(ctx, c.rigDir, base)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("a landing of %s at %s could not be opened to test the merged code: %v", c.path.Rig, base, err))
@@ -2077,7 +2086,7 @@ func (n Next) batchRunOnTheMerge(ctx context.Context, c *closeOut, report *NextR
 	note += fmt.Sprintf("), but %s has %d commits this branch was cut before, so they are run once more with %s merged in", c.target, behind, target)
 	report.Notes = append(report.Notes, note)
 	n.print("  note    " + note + "\n")
-	return n.gate(ctx, c, report, dir, "the rig's tests with the target merged in", RelatedSpan{Base: base}), dir, true
+	return n.gateOnACalmHost(ctx, c, report, dir, what, RelatedSpan{Base: base}), dir, true
 }
 
 // ExpectedPermissionMode is the permission mode a story's session is launched

@@ -140,6 +140,16 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 		return nil
 	}
 	began := n.now()
+	// The gate lock is waited for first, and the landing opened after: a host's
+	// gate can queue for an hour, and the target moves meanwhile (mw-gq6.872).
+	if lock := n.waitForTheGateLock(ctx, c, report, "the failing tests on main alone"); lock != nil {
+		defer n.giveTheGateLockBack(report, lock)
+	}
+	if base == StartPoint(n.remote(), c.target) {
+		// The target as the remote has it now; a batch's base is a commit and
+		// stays the commit its gate ran on.
+		n.freshTarget(ctx, c, report)
+	}
 	dir, err := n.Landing.OpenLanding(ctx, c.rigDir, base)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("main alone was not checked for %s: a landing of %s at %s could not be opened: %v", strings.Join(tests, ", "), c.path.Rig, base, err))
@@ -150,9 +160,6 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 			report.Notes = append(report.Notes, fmt.Sprintf("the landing worktree %s could not be taken away: %v", dir, closeErr))
 		}
 	}()
-	if lock := n.waitForTheGateLock(ctx, c, report, "the failing tests on main alone"); lock != nil {
-		defer n.giveTheGateLockBack(report, lock)
-	}
 	run, err := n.NamedChecks.RunNamed(ctx, c.path.Rig, dir, tests)
 	took := n.now().Sub(began)
 	switch {

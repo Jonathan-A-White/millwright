@@ -110,6 +110,8 @@ type nextContext struct {
 
 	otherGate      application.Holding // the gate lock another close-out holds, in features/next_gate_lock.feature
 	otherGateStory string
+	moveAt         int // the gate-lock ask that finds the target moved (features/next_gate_lock.feature)
+	takes          int // how often the gate lock was asked for
 
 	afterCommands map[string]string // the [after_landing] table this scenario's rig host has
 	afterLimit    time.Duration     // how long an after-landing command may run; zero is the adapter's own
@@ -249,6 +251,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerTesterSteps(ctx, c)
 	registerNextCrossSlotSteps(ctx, c)
 	registerNextGateSteps(ctx, c)
+	registerNextMovingTargetSteps(ctx, c)
 	registerNextBatchSteps(ctx, c)
 	registerNextSlotCapSteps(ctx, c)
 	registerBatchLandSteps(ctx, c)
