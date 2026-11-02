@@ -1744,10 +1744,21 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 			// won the race for the story: the worktree and branch are its, and
 			// removing them would pull the ground from under a live session
 			// (mw-gq6.140). release, below, keeps the claim for the same reason.
-			if status, err := d.Runner.Status(context.WithoutCancel(ctx), SessionName(id)); err == nil && status.Running() {
+			//
+			// Every tmux command runs under a 5 s deadline (mw-gq6.884), so on a
+			// loaded host a look that fails is an ordinary event, and a session that
+			// could not be asked about is not known to be gone: nothing is removed
+			// for it either (mw-gq6.886).
+			status, serr := d.Runner.Status(context.WithoutCancel(ctx), SessionName(id))
+			switch {
+			case serr != nil:
+				failed = fmt.Errorf("%w (the session %s of %s could not be asked about, so no worktree or branch was removed: %v)", failed, SessionName(id), id, serr)
+			case status.Running():
 				failed = fmt.Errorf("%w (the session %s of %s is running here, so no worktree or branch was removed)", failed, status.Name, id)
-			} else if err := d.Worktrees.Remove(ctx, rigDir, started.Worktree, started.Branch); err != nil {
-				failed = fmt.Errorf("%w (and the worktree %s is still there: %v)", failed, started.Worktree, err)
+			default:
+				if err := d.Worktrees.Remove(ctx, rigDir, started.Worktree, started.Branch); err != nil {
+					failed = fmt.Errorf("%w (and the worktree %s is still there: %v)", failed, started.Worktree, err)
+				}
 			}
 		}
 		// Beads are never deleted here, so a formula poured before the failure
@@ -1780,7 +1791,12 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 
 	leftover, err := d.leftoverAt(ctx, rigDir, started)
 	if err != nil {
-		return undo("checking whether an earlier attempt left a worktree or branch of "+id, err, false)
+		gone, released, undone := undo("checking whether an earlier attempt left a worktree or branch of "+id, err, false)
+		var refusal *leftoverRefusal
+		if errors.As(err, &refusal) {
+			undone = &leftoverRefusal{err: undone}
+		}
+		return gone, released, undone
 	}
 	if leftover {
 		leftoverAttempt := detail.Attempts
@@ -1963,10 +1979,16 @@ func (d Dispatch) leftoverAt(ctx context.Context, rigDir string, started Started
 	if err != nil || !exists {
 		return false, err
 	}
-	if status, err := d.Runner.Status(ctx, started.Session); err == nil && status.Running() {
-		return false, nil
+	status, err := d.Runner.Status(ctx, started.Session)
+	if err != nil {
+		// A session that could not be asked about is not known to be over, and
+		// what an earlier attempt left is cleared away only when it is
+		// (mw-gq6.886): this story is passed over for the tick, as keepLeftover's
+		// refusals are, and the next tick looks again.
+		return false, &leftoverRefusal{err: fmt.Errorf("the session %s could not be asked about, so the worktree %s and its branch %s were left as they were: %w",
+			started.Session, started.Worktree, started.Branch, err)}
 	}
-	return true, nil
+	return !status.Running(), nil
 }
 
 // pushedBranch is the story's branch as the remote has it, when an earlier
@@ -2075,7 +2097,15 @@ func (d Dispatch) keepLeftover(ctx context.Context, rigDir, id string, started S
 		if len(left) > 0 {
 			// A session that began since leftoverAt looked is working in this
 			// worktree right now: its files are not leftovers.
-			if status, err := d.Runner.Status(ctx, started.Session); err == nil && status.Running() {
+			//
+			// A session that could not be asked about is not known to be over either
+			// (mw-gq6.886): its files are not committed as leftovers on this tick.
+			status, serr := d.Runner.Status(ctx, started.Session)
+			if serr != nil {
+				return "", &leftoverRefusal{err: fmt.Errorf("the session %s of %s could not be asked about, and the worktree %s holds uncommitted work (%s), so it and its branch %s were left as they were: %w",
+					started.Session, id, started.Worktree, strings.Join(left, ", "), started.Branch, serr)}
+			}
+			if status.Running() {
 				return "", &leftoverRefusal{err: fmt.Errorf("the session %s of %s is running, and the worktree %s holds uncommitted work (%s), so it and its branch %s were left as they were",
 					started.Session, id, started.Worktree, strings.Join(left, ", "), started.Branch)}
 			}
@@ -2605,7 +2635,11 @@ func (d Dispatch) release(ctx context.Context, id string, why error) (bool, erro
 	// a claim back is owed to the story whatever became of the tick that took
 	// it.
 	giveBack := context.WithoutCancel(ctx)
-	if status, err := d.Runner.Status(giveBack, SessionName(id)); err == nil && status.Running() {
+	status, serr := d.Runner.Status(giveBack, SessionName(id))
+	if serr != nil {
+		return d.keepClaimUnasked(giveBack, id, why, serr, keptUntilTheLeaseRunsOut)
+	}
+	if status.Running() {
 		said := fmt.Sprintf("mw dispatch on %s could not start this story, but the session %s of %s is running here now, so the claim stays with it: %v", d.Host, status.Name, id, why)
 		if err := d.Tracker.CommentOnStory(giveBack, id, said); err != nil {
 			return false, fmt.Errorf("%w (the session %s of %s is running here now, so the claim was left alone, but that could not be written on the story: %v)", why, status.Name, id, err)
@@ -2632,6 +2666,32 @@ func (d Dispatch) release(ctx context.Context, id string, why error) (bool, erro
 	}
 	return true, why
 }
+
+// keepClaimUnasked is a claim kept because the session of its story could not be
+// asked about (mw-gq6.886): every tmux command runs under a 5 s deadline
+// (mw-gq6.884), so on a loaded host a slow answer is an ordinary event and is not
+// a session that is gone. The claim stays as it is and the story says so.
+// settles is what the story says happens to it next: for release, the lease
+// settles it (a session that is there renews it, and one that is not lets it run
+// out, and the next tick's reclaim, with a Status that answers, gives the claim
+// back); for releaseHeld there is no such tick, a held story is on no host's list
+// of what runs, and the claim is given back by hand.
+func (d Dispatch) keepClaimUnasked(ctx context.Context, id string, why, asked error, settles string) (bool, error) {
+	name := SessionName(id)
+	said := fmt.Sprintf("mw dispatch on %s could not start this story, and the session %s of %s could not be asked about (%v), so the claim was kept rather than given back; %s: %v", d.Host, name, id, asked, settles, why)
+	if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {
+		return false, fmt.Errorf("%w (the session %s of %s could not be asked about, so the claim was kept, but that could not be written on the story: %v)", why, name, id, err)
+	}
+	return false, fmt.Errorf("%w (the session %s of %s could not be asked about, so the claim was kept rather than given back)", why, name, id)
+}
+
+const (
+	// keptUntilTheLeaseRunsOut is what release says of a claim it kept.
+	keptUntilTheLeaseRunsOut = "if no session is running, its lease runs out and a later dispatch gives the claim back"
+	// keptUntilGivenBackByHand is what releaseHeld says of one: a held story is on
+	// no host's list of what runs, so no later dispatch looks at its claim.
+	keptUntilGivenBackByHand = "the story stays held, and if no session is running the claim has to be given back by hand"
+)
 
 // errHeldAfterClaim is why a claimed story is given back without a session: the
 // Mayor held it after the claim was made.
@@ -2661,7 +2721,13 @@ func (d Dispatch) stepAsideForHold(ctx context.Context, id string, auto bool) (S
 // session of the story's name that is running keeps the claim, as in release.
 func (d Dispatch) releaseHeld(ctx context.Context, id string, why error) (bool, error) {
 	giveBack := context.WithoutCancel(ctx)
-	if status, err := d.Runner.Status(giveBack, SessionName(id)); err == nil && status.Running() {
+	status, serr := d.Runner.Status(giveBack, SessionName(id))
+	if serr != nil {
+		// Not release: it looks again, and a look that answers "gone" now would
+		// write open over the Mayor's hold.
+		return d.keepClaimUnasked(giveBack, id, why, serr, keptUntilGivenBackByHand)
+	}
+	if status.Running() {
 		return d.release(ctx, id, why)
 	}
 	if err := d.Tracker.HoldClaimHeldBy(giveBack, id, ""); err != nil {
