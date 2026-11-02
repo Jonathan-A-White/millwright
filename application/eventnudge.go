@@ -74,7 +74,10 @@ type EventNudger interface {
 //
 // A seat with no cursor yet starts at the log's head: history is not told.
 // A seat's file that cannot be read is said on Err and the seat left out; a
-// failure to type or spring is said and retried on the next Nudge.
+// failure to type or spring is said and retried on the next Nudge. A tmux that
+// does not answer fails a call at its deadline (tmux.CallDeadline), so a stuck
+// pane holds the follower's loop for seconds, not minutes (mw-gq6.884); the
+// seat's cursor stays put and the mail stays unread, told again next pass.
 type EventNudge struct {
 	Log      EventLog
 	Subs     SubscribeFiles

@@ -12,6 +12,7 @@ docs/protocol.md section 22 uses exactly these.
 - [The kinds](#the-kinds)
 - [The log](#the-log)
 - [Subscriptions](#subscriptions)
+  - [A call the follower waits on has a deadline](#a-call-the-follower-waits-on-has-a-deadline)
 - [A close-out that could not record](#a-close-out-that-could-not-record)
 - [Applying his taps](#applying-his-taps)
 - [Springing the jobs](#springing-the-jobs)
@@ -139,6 +140,20 @@ later ignores it. A wait with `handover` among its kinds and no `--since` looks 
 seat's newest handover is to its own window and the seat's acting file names that window at that handover's
 event, it says "you hold the seat from N" and ends at once, the handover having landed before it was armed
 (mw-gq6.668); a handover the file does not stand at, the old session still acting, is stale and the wait waits (mw-gq6.767). The old session reads and answers up to N, the successor from N on.
+
+### A call the follower waits on has a deadline
+
+The follower makes its calls one after another in one loop, so one that never returns holds
+back everything after it: on 2026-11-02 a `tmux send-keys` into the Mayor's pane sat in
+poll for 32 minutes and, with it, the beads' events, the mail events, the nudges and the
+phone's view (mw-gq6.884). The rule is that every child process the loop waits on in-line
+runs under a deadline and ends at it with an error the follower says on its log and goes on.
+Every tmux command, and the `ps` beside it, is run by `runBounded` in `infrastructure/tmux`
+under `tmux.CallDeadline` (5 s); the command is killed at it and the call says it "did not
+finish in 5s and was stopped". A nudge that ends so is said once ("typing the nudge into
+<window>: ..."), the seat's cursor stays where it was, and the next pass tells it again; the
+mail is still unread and no event is lost. A new in-line call on a child process (tmux, ssh,
+bd, systemctl) is run under a deadline of its own, or off the loop.
 
 ## A close-out that could not record
 
