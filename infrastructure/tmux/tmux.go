@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -43,6 +44,14 @@ const (
 // how it ended, whose status never comes.
 const defaultReapGrace = 5 * time.Second
 
+// CallDeadline is how long one tmux command (or the ps beside it) is given
+// before it is killed and its call returns an error. tmux answers in
+// milliseconds; a client that has not by now is waiting on a server that is
+// stopped or stuck, and the follower, which makes these calls in-line, would
+// wait with it: on 2026-11-02 one `send-keys` sat in poll for 32 minutes
+// (mw-gq6.884). WithCallDeadline sets another.
+const CallDeadline = 5 * time.Second
+
 // The longest Status sleeps between looks at a pane that is dead with no status.
 const maxReapPoll = 100 * time.Millisecond
 
@@ -52,6 +61,8 @@ const maxReapPoll = 100 * time.Millisecond
 type server struct {
 	program string
 	socket  string
+	// deadline is how long one tmux command is given; zero is CallDeadline.
+	deadline time.Duration
 }
 
 // Runner starts and watches sessions on one tmux server.
@@ -67,11 +78,12 @@ var _ application.Runner = (*Runner)(nil)
 // settings are what a Runner or a Windows is built from. One Option sets any
 // of them, so that both are pointed at a server, and at a tmux, the same way.
 type settings struct {
-	program string
-	socket  string
-	poll    time.Duration
-	grace   time.Duration
-	session string
+	program  string
+	socket   string
+	poll     time.Duration
+	grace    time.Duration
+	session  string
+	deadline time.Duration
 }
 
 // Option is a setting of a Runner or a Windows, given to New or NewWindows.
@@ -110,6 +122,12 @@ func WithSession(name string) Option {
 	return func(s *settings) { s.session = name }
 }
 
+// WithCallDeadline sets how long one tmux command is given before it is
+// stopped and its call returns an error. The default is CallDeadline.
+func WithCallDeadline(d time.Duration) Option {
+	return func(s *settings) { s.deadline = d }
+}
+
 // chosen is the settings the options add up to, over this package's defaults.
 func chosen(opts []Option) settings {
 	s := settings{program: Program, poll: defaultPollInterval, grace: defaultReapGrace}
@@ -129,7 +147,7 @@ func chosen(opts []Option) settings {
 // otherwise.
 func New(opts ...Option) *Runner {
 	s := chosen(opts)
-	return &Runner{server: server{program: s.program, socket: s.socket}, poll: s.poll, grace: s.grace}
+	return &Runner{server: server{program: s.program, socket: s.socket, deadline: s.deadline}, poll: s.poll, grace: s.grace}
 }
 
 // Socket reports the tmux server this Runner works on, empty for the default.
@@ -300,7 +318,7 @@ func (r *Runner) Close(ctx context.Context, name string) error {
 // return is the reason it could not be asked — tmux missing, say — which is not
 // the same as an answer of no.
 func (r *Runner) exists(ctx context.Context, name string) (bool, error) {
-	err := exec.CommandContext(ctx, r.program, r.commandArgs("has-session", "-t", sessionTarget(name))...).Run()
+	err := r.run(ctx, "has-session", "-t", sessionTarget(name))
 	if err == nil {
 		return true, nil
 	}
@@ -427,18 +445,48 @@ func parseStatus(name string, printed []byte) (application.SessionStatus, error)
 
 // call runs one tmux command and returns its standard output.
 func (s server) call(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, s.program, s.commandArgs(args...)...)
 	var out, errs bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errs
-
-	if err := cmd.Run(); err != nil {
+	if err := s.runTo(ctx, &out, &errs, args...); err != nil {
 		if said := strings.TrimSpace(errs.String()); said != "" {
 			return nil, fmt.Errorf("%s %s: %w: %s", s.program, strings.Join(args, " "), err, said)
 		}
 		return nil, fmt.Errorf("%s %s: %w", s.program, strings.Join(args, " "), err)
 	}
 	return out.Bytes(), nil
+}
+
+// run runs one tmux command for its exit status alone.
+func (s server) run(ctx context.Context, args ...string) error {
+	return s.runTo(ctx, nil, nil, args...)
+}
+
+// runTo runs one tmux command under the call deadline and ends it there. The
+// deadline is the one place a tmux command is started, so that none of them can
+// outlast it; TestEveryTmuxCommandIsStartedUnderTheDeadline holds it to that.
+func (s server) runTo(ctx context.Context, out, errs io.Writer, args ...string) error {
+	return runBounded(ctx, s.deadline, out, errs, s.program, s.commandArgs(args...)...)
+}
+
+// runBounded runs program for at most deadline (CallDeadline when zero). A
+// command that has not ended by then is killed, and Run is given a second more
+// to let go of its pipes should a process of its own be holding them; the error
+// says the deadline was what ended it, and is not the *exec.ExitError of the
+// kill, which callers read as tmux saying no. A ctx that ends first is the caller
+// stopping, and is reported as it is.
+func runBounded(ctx context.Context, deadline time.Duration, out, errs io.Writer, program string, args ...string) error {
+	if deadline <= 0 {
+		deadline = CallDeadline
+	}
+	bounded, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
+	cmd := exec.CommandContext(bounded, program, args...)
+	cmd.Stdout, cmd.Stderr = out, errs
+	cmd.WaitDelay = time.Second
+	err := cmd.Run()
+	if err != nil && ctx.Err() == nil && errors.Is(bounded.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("did not finish in %s and was stopped (a tmux server that is stopped or stuck does not answer): %w", deadline, bounded.Err())
+	}
+	return err
 }
 
 // sortedKeys is a map's keys in order, so that a tmux command line is the same
@@ -464,7 +512,7 @@ var _ application.UsageTerminal = (*Terminal)(nil)
 // says otherwise.
 func NewTerminal(opts ...Option) *Terminal {
 	s := chosen(opts)
-	return &Terminal{server{program: s.program, socket: s.socket}}
+	return &Terminal{server{program: s.program, socket: s.socket, deadline: s.deadline}}
 }
 
 // Open implements application.UsageTerminal: a detached session of the given

@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -53,7 +54,7 @@ var _ application.Windows = (*Windows)(nil)
 // ones a person is working in.
 func NewWindows(opts ...Option) *Windows {
 	s := chosen(opts)
-	return &Windows{server: server{program: s.program, socket: s.socket}, session: s.session}
+	return &Windows{server: server{program: s.program, socket: s.socket, deadline: s.deadline}, session: s.session}
 }
 
 // Session reports the tmux session this Windows opens seats in, empty for
@@ -147,7 +148,7 @@ func (w *Windows) List(ctx context.Context) ([]application.Window, error) {
 		}
 	}
 
-	for pid, started := range startTimes(ctx, pids) {
+	for pid, started := range startTimes(ctx, w.deadline, pids) {
 		open[at[pid]].Opened = started
 	}
 	return open, nil
@@ -179,7 +180,7 @@ func (w *Windows) sessionName(ctx context.Context) (string, error) {
 // with a non-zero status — no such session, or no server running at all — is
 // an answer, not a failure.
 func (w *Windows) sessionThere(ctx context.Context, session string) (bool, error) {
-	err := exec.CommandContext(ctx, w.program, w.commandArgs("has-session", "-t", sessionTarget(session))...).Run()
+	err := w.run(ctx, "has-session", "-t", sessionTarget(session))
 	if err == nil {
 		return true, nil
 	}
@@ -195,18 +196,18 @@ func (w *Windows) sessionThere(ctx context.Context, session string) (bool, error
 // out, and a ps that fails leaves them all out — a window that cannot be dated
 // is reported as not dated rather than as an error, because being unable to
 // say how old a window is must not stop mw reporting that it is open.
-func startTimes(ctx context.Context, pids []string) map[string]time.Time {
+func startTimes(ctx context.Context, deadline time.Duration, pids []string) map[string]time.Time {
 	started := map[string]time.Time{}
 	if len(pids) == 0 {
 		return started
 	}
-	printed, err := exec.CommandContext(ctx, psProgram, "-o", "pid=,etimes=", "-p", strings.Join(pids, ",")).Output()
-	if err != nil {
+	var printed bytes.Buffer
+	if err := runBounded(ctx, deadline, &printed, nil, psProgram, "-o", "pid=,etimes=", "-p", strings.Join(pids, ",")); err != nil {
 		return started
 	}
 
 	now := time.Now()
-	for _, line := range strings.Split(string(printed), "\n") {
+	for _, line := range strings.Split(printed.String(), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) != 2 {
 			continue

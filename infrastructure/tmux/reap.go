@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -86,7 +87,7 @@ func (w *Windows) reapWindows(ctx context.Context, printed string) []application
 			at[fields[1]] = len(windows) - 1
 		}
 	}
-	for pid, started := range startTimes(ctx, pids) {
+	for pid, started := range startTimes(ctx, w.deadline, pids) {
 		windows[at[pid]].Opened = started
 	}
 	return windows
@@ -281,11 +282,11 @@ func (w *Windows) NextRunning(ctx context.Context, window string) (string, bool,
 		}
 		return "", false, err
 	}
-	processes, err := exec.CommandContext(ctx, psProgram, "-e", "-o", "pid=,ppid=,args=").Output()
-	if err != nil {
+	var processes bytes.Buffer
+	if err := runBounded(ctx, w.deadline, &processes, nil, psProgram, "-e", "-o", "pid=,ppid=,args="); err != nil {
 		return "", false, fmt.Errorf("listing processes: %w", err)
 	}
-	story, running := nextBelow(strings.Fields(string(panes)), string(processes))
+	story, running := nextBelow(strings.Fields(string(panes)), processes.String())
 	return story, running, nil
 }
 
