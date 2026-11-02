@@ -3,6 +3,7 @@ package steps
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +22,12 @@ func registerNextLeaseSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig's tests take a while$`, c.theRigsTestsTakeAWhile)
 	ctx.Given(`^every wait for a heartbeat passes (\d+) minutes of the claim's clock$`, c.everyWaitPassesMinutes)
 
+	ctx.Given(`^tmux is too slow to answer (\d+) times about the session of "([^"]*)", which then runs for (\d+) looks and ends$`, c.tmuxIsTooSlow)
+	ctx.When(`^mw heartbeats "([^"]*)"$`, c.mwHeartbeats)
+
+	ctx.Then(`^the heartbeat ends without a failure$`, c.theHeartbeatEndsWithoutFailure)
+	ctx.Then(`^the claim on "([^"]*)" was heartbeaten (\d+) times$`, c.theClaimWasHeartbeatenTimes)
+	ctx.Then(`^the heartbeat said once that the session could not be asked about, and counted (\d+) in all$`, c.theHeartbeatSaidOnceItCouldNotAsk)
 	ctx.Then(`^the claim on "([^"]*)" was heartbeaten while it was landed$`, c.theClaimWasHeartbeatenWhileLanded)
 	ctx.Then(`^the claim on "([^"]*)" was never among the stale claims while it was landed$`, c.theClaimWasNeverStaleWhileLanded)
 	ctx.Then(`^the claim on "([^"]*)" is not heartbeaten once the close-out has returned$`, c.theClaimIsNotHeartbeatenAfterwards)
@@ -133,6 +140,68 @@ func (c *nextContext) theClaimIsNotHeartbeatenAfterwards(id string) error {
 	time.Sleep(200 * time.Millisecond)
 	if after, _ := c.lease.counts(); after != before {
 		return fmt.Errorf("expected no heartbeat of %s once the close-out returned, and %d more were made", id, after-before)
+	}
+	return nil
+}
+
+// slowTmux is a runner whose Status answers from a script: an error for the
+// first slow looks, running for the next running, gone after (mw-gq6.885).
+type slowTmux struct {
+	*apptest.FakeRunner
+	mu            sync.Mutex
+	slow, running int
+	looks         int
+}
+
+func (s *slowTmux) Status(_ context.Context, name string) (application.SessionStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.looks++
+	switch {
+	case s.looks <= s.slow:
+		return application.SessionStatus{}, fmt.Errorf("tmux list-panes -t =%s: did not finish in 5s and was stopped: context deadline exceeded", name)
+	case s.looks <= s.slow+s.running:
+		return application.SessionStatus{Name: name, State: application.StateRunning}, nil
+	}
+	return application.SessionStatus{Name: name, State: application.StateGone}, nil
+}
+
+func (c *nextContext) tmuxIsTooSlow(slow int, _ string, running int) error {
+	c.slowTmux = &slowTmux{FakeRunner: apptest.NewFakeRunner(), slow: slow, running: running}
+	return nil
+}
+
+func (c *nextContext) mwHeartbeats(id string) error {
+	if c.slowTmux == nil {
+		return fmt.Errorf("the scenario gave tmux no script to answer by")
+	}
+	next := c.nextUseCase()
+	next.Runner = c.slowTmux
+	c.err = next.Heartbeat(context.Background(), id)
+	return nil
+}
+
+func (c *nextContext) theHeartbeatEndsWithoutFailure() error {
+	if c.err != nil {
+		return fmt.Errorf("expected the heartbeat to end quietly once the session was gone, it failed: %v", c.err)
+	}
+	return nil
+}
+
+func (c *nextContext) theClaimWasHeartbeatenTimes(id string, want int) error {
+	if beats, _ := c.lease.counts(); beats != want {
+		return fmt.Errorf("expected the claim on %s to be heartbeaten %d times, it was %d", id, want, beats)
+	}
+	return nil
+}
+
+func (c *nextContext) theHeartbeatSaidOnceItCouldNotAsk(count int) error {
+	said := c.printed.String()
+	if n := strings.Count(said, "could not be asked about, and its claim is renewed all the same"); n != 1 {
+		return fmt.Errorf("expected the failed look said once, said %d times:\n%s", n, said)
+	}
+	if want := fmt.Sprintf("the same way %d times", count); !strings.Contains(said, want) {
+		return fmt.Errorf("expected the count %q told, got:\n%s", want, said)
 	}
 	return nil
 }

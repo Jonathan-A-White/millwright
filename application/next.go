@@ -906,6 +906,12 @@ func (n Next) refusedWithLogKept(ctx context.Context, storyID string) bool {
 // ordinary way this loop ends. A heartbeat that fails is a note on Out, and
 // does not stop the loop: the very next tick may renew the lease, and one
 // truly lost is StaleClaims's and ReclaimStory's to settle, not this loop's.
+// So is a look at the session that fails: every tmux command runs under a 5 s
+// deadline (mw-gq6.884), so on a loaded host a slow answer is an ordinary
+// event, and a session that could not be asked about is not known to be over.
+// It is said once on Out, as a failed renewal is, and the lease is renewed on
+// that tick all the same; only a Status that says the session is not running
+// ends the loop (mw-gq6.885).
 func (n Next) Heartbeat(ctx context.Context, storyID string) error {
 	if n.Tracker == nil || n.Runner == nil {
 		return fmt.Errorf("heartbeating %s: it needs a work tracker and a runner to watch its session", storyID)
@@ -921,16 +927,36 @@ func (n Next) Heartbeat(ctx context.Context, storyID string) error {
 		repeat = leaseRepeat{}
 	}
 	defer flush()
+	// The same for a look at the session that fails (mw-gq6.885).
+	var look leaseRepeat
+	flushLook := func() {
+		if line := look.more(); line != "" {
+			n.print(fmt.Sprintf("mw next: the session %s of %s could not be asked about, %s\n", name, storyID, line))
+		}
+		look = leaseRepeat{}
+	}
+	defer flushLook()
 	for {
 		if err := n.wait(ctx, HeartbeatInterval); err != nil {
 			return nil
 		}
 		status, err := n.Runner.Status(ctx, name)
-		if err != nil {
-			return fmt.Errorf("heartbeating %s: its session %s could not be asked about: %w", storyID, name, err)
-		}
-		if !status.Running() {
+		switch {
+		case err != nil && ctx.Err() != nil:
 			return nil
+		case err != nil:
+			// Not known to be over: say so once and renew the lease on this tick.
+			if look.same(err) {
+				look.again(n.now())
+			} else {
+				flushLook()
+				look = leaseRepeat{err: err.Error(), count: 1, first: n.now(), last: n.now()}
+				n.print(fmt.Sprintf("mw next: the session %s of %s could not be asked about, and its claim is renewed all the same: %v\n", name, storyID, err))
+			}
+		case !status.Running():
+			return nil
+		default:
+			flushLook()
 		}
 		if err := n.Tracker.HeartbeatClaim(ctx, storyID); err != nil {
 			if repeat.same(err) {

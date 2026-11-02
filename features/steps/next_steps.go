@@ -104,9 +104,10 @@ type nextContext struct {
 	signed       string         // the short hash of the commit a scenario signed
 	commentsWere map[string]int // how many comments a story held before the close-out ran
 
-	lease *landingLease // the lease watch of features/next_lease.feature, when a scenario asks for one
-	cross *crossFixture // the merge slot across hosts of features/next_cross_slot.feature, when a scenario has one
-	batch batchFixture  // what mw land did, in features/batch_land.feature
+	slowTmux *slowTmux     // the scripted tmux of features/next_lease.feature's slow-answer scenario
+	lease    *landingLease // the lease watch of features/next_lease.feature, when a scenario asks for one
+	cross    *crossFixture // the merge slot across hosts of features/next_cross_slot.feature, when a scenario has one
+	batch    batchFixture  // what mw land did, in features/batch_land.feature
 
 	otherGate      application.Holding // the gate lock another close-out holds, in features/next_gate_lock.feature
 	otherGateStory string

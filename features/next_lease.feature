@@ -20,3 +20,12 @@ Feature: A landing in progress keeps its claim's lease alive
     And the claim on "mw-gq6.1" was heartbeaten while it was landed
     And the claim on "mw-gq6.1" was never among the stale claims while it was landed
     And the claim on "mw-gq6.1" is not heartbeaten once the close-out has returned
+
+  Scenario: A session tmux is too slow to answer about keeps its lease
+    Given every wait for a heartbeat passes 2 minutes of the claim's clock
+    And tmux is too slow to answer 3 times about the session of "mw-gq6.1", which then runs for 2 looks and ends
+    When mw heartbeats "mw-gq6.1"
+    Then the heartbeat ends without a failure
+    And the claim on "mw-gq6.1" was heartbeaten 5 times
+    And the claim on "mw-gq6.1" was never among the stale claims while it was landed
+    And the heartbeat said once that the session could not be asked about, and counted 3 in all

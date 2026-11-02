@@ -10,6 +10,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // mw-gq6.394: a by-hand mw next on a story whose session is still running
@@ -176,4 +177,100 @@ func TestTheHeartbeatSaysARepeatedFailureOnceAndItsRepeatsOnce(t *testing.T) {
 	if strings.Contains(lines[0], "times") || !strings.Contains(lines[1], "the same way 5 times from") {
 		t.Errorf("expected the first failure plain and then the repeats counted, got:\n%s", out.String())
 	}
+}
+
+// scriptedStatus is a runner whose Status answers from a script: an error for
+// each of the first slow looks, then running for some looks, then gone.
+type scriptedStatus struct {
+	*apptest.FakeRunner
+	slow    int
+	running int
+	looks   int
+}
+
+func (s *scriptedStatus) Status(ctx context.Context, name string) (application.SessionStatus, error) {
+	s.looks++
+	switch {
+	case s.looks <= s.slow:
+		return application.SessionStatus{}, errors.New("tmux list-panes -t =" + name + ": did not finish in 5s and was stopped: context deadline exceeded")
+	case s.looks <= s.slow+s.running:
+		return application.SessionStatus{Name: name, State: application.StateRunning}, nil
+	}
+	return application.SessionStatus{Name: name, State: application.StateGone}, nil
+}
+
+// mw-gq6.885: a session tmux is too slow to answer about is not known to be
+// over, so its lease is renewed on that tick, the failure is told once with its
+// count, and the loop ends only when the session is gone.
+func TestTheHeartbeatGoesOnWhenTheSessionCannotBeAskedAbout(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-gq6", domain.Path{})
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	if err := tracker.ClaimStory(context.Background(), "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	runner := &scriptedStatus{FakeRunner: apptest.NewFakeRunner(), slow: 3, running: 2}
+	ticks := 0
+	var out strings.Builder
+	next := application.Next{
+		Tracker: &beatCounter{WorkTracker: tracker}, Runner: runner, Out: &out,
+		HeartbeatWait: func(context.Context, time.Duration) error { ticks++; return nil },
+	}
+	counter := next.Tracker.(*beatCounter)
+	if err := next.Heartbeat(context.Background(), "mw-gq6.1"); err != nil {
+		t.Fatalf("the heartbeat returned %v, and a session that could not be asked about is not an error", err)
+	}
+	if runner.looks != 6 || ticks != 6 {
+		t.Errorf("expected 6 looks (3 slow, 2 running, 1 gone) in 6 ticks, got %d looks in %d ticks", runner.looks, ticks)
+	}
+	if counter.beats != 5 {
+		t.Errorf("expected the claim renewed on each of the 5 ticks before the session was gone, renewed %d times", counter.beats)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected the failed look once and its repeats once, got %d lines:\n%s", len(lines), out.String())
+	}
+	if strings.Contains(lines[0], "times") || !strings.Contains(lines[1], "the same way 3 times from") {
+		t.Errorf("expected the first failure plain and then the 3 counted, got:\n%s", out.String())
+	}
+}
+
+// A look that fails when the loop is being ended is the end, not a failure to
+// tell, and a session that is gone ends the loop on the very first look.
+func TestTheHeartbeatEndsOnGoneAndOnCancelWithoutNoteOrRenewal(t *testing.T) {
+	tracker := &beatCounter{WorkTracker: apptest.NewFakeTracker()}
+	var out strings.Builder
+	gone := application.Next{Tracker: tracker, Runner: &scriptedStatus{FakeRunner: apptest.NewFakeRunner()}, Out: &out,
+		HeartbeatWait: func(context.Context, time.Duration) error { return nil }}
+	if err := gone.Heartbeat(context.Background(), "mw-gq6.1"); err != nil || tracker.beats != 0 || out.Len() != 0 {
+		t.Errorf("expected a gone session to end it quietly, got err %v, %d renewals, %q", err, tracker.beats, out.String())
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancelling := application.Next{Tracker: tracker, Runner: &cancelsOnLook{FakeRunner: apptest.NewFakeRunner(), cancel: cancel}, Out: &out,
+		HeartbeatWait: func(context.Context, time.Duration) error { return nil }}
+	if err := cancelling.Heartbeat(ctx, "mw-gq6.1"); err != nil || tracker.beats != 0 || out.Len() != 0 {
+		t.Errorf("expected a cancelled loop to end it quietly, got err %v, %d renewals, %q", err, tracker.beats, out.String())
+	}
+}
+
+// cancelsOnLook cancels its context and fails the look, as a stopped mw next does.
+type cancelsOnLook struct {
+	*apptest.FakeRunner
+	cancel context.CancelFunc
+}
+
+func (c *cancelsOnLook) Status(context.Context, string) (application.SessionStatus, error) {
+	c.cancel()
+	return application.SessionStatus{}, context.Canceled
+}
+
+// beatCounter counts the renewals made through it.
+type beatCounter struct {
+	application.WorkTracker
+	beats int
+}
+
+func (b *beatCounter) HeartbeatClaim(ctx context.Context, id string) error {
+	b.beats++
+	return b.WorkTracker.HeartbeatClaim(ctx, id)
 }
