@@ -854,6 +854,16 @@ Feature: Dispatching the stories this host is ready to work
     And the story "mw-gq6.1" carries a comment saying the dispatch failed
     And there is no worktree for "mw-gq6.1"
 
+  Scenario: A slow terminal never costs a working story its claim or its worktree
+    Given a ready story "mw-gq6.1" of that epic
+    And the runner refuses to start anything
+    And the terminal is too slow to say whether any session is running
+    When dispatch runs on "vps" with a cap of 1
+    Then no session was started
+    And the story "mw-gq6.1" is claimed by this host
+    And there is still a worktree for "mw-gq6.1"
+    And the story "mw-gq6.1" says its claim was kept because its session could not be asked about
+
   Scenario: A claim a failed start gave back leaves no run state behind
     Given a ready story "mw-gq6.1" of that epic
     And the story "mw-gq6.1" still carries the run state "blocked" from an earlier host

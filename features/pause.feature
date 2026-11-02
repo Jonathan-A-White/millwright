@@ -283,3 +283,13 @@ Feature: mw pause and mw resume
     Then the output says "night passes back on: sleep, todo-rank"
     And the sleep pass is due on "laptop"
     And the To do rank is due on "laptop"
+
+  Scenario: A slow terminal never costs a working story its pause or its resume
+    Given the Builder of "mw-fff.6" is running on "laptop" with work committed, and answers the PAUSE line
+    And the terminal of "laptop" is too slow to say whether any session is running
+    When the Governor runs mw pause with the reason "reset tomorrow"
+    Then the session of "mw-fff.6" on "laptop" was told "PAUSE:"
+    And the branch of "mw-fff.6" is pushed
+    When the Governor runs mw resume
+    Then the session of "mw-fff.6" on "laptop" was told "RESUME:"
+    And mw retry was not run for "mw-fff.6"

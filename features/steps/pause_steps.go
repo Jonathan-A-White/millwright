@@ -79,6 +79,7 @@ func InitializePauseScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the story "([^"]*)" is claimed on "([^"]*)" but its session is gone, with work committed and not pushed$`, c.aGoneStory)
 	ctx.Given(`^the story "([^"]*)" is claimed on "([^"]*)" but its session is gone, with no worktree$`, c.aGoneStoryWithNoWorktree)
 	ctx.Given(`^the host "([^"]*)" cannot be reached$`, c.cannotBeReached)
+	ctx.Given(`^the terminal of "([^"]*)" is too slow to say whether any session is running$`, c.theTerminalIsTooSlow)
 	ctx.When(`^the host "([^"]*)" can be reached again$`, c.canBeReached)
 	ctx.Given(`^the Governor ran mw pause with the reason "([^"]*)"$`, func(reason string) error { return c.pause(reason, "", "", false) })
 	ctx.Given(`^the Governor ran mw pause with the reason "([^"]*)" until "([^"]*)"$`, func(reason, until string) error { return c.pause(reason, until, "", false) })
@@ -259,6 +260,14 @@ func (c *pauseContext) aGoneStory(id, host string) error {
 }
 
 func (c *pauseContext) aGoneStoryWithNoWorktree(id, host string) error { return c.addStory(id, host) }
+
+// theTerminalIsTooSlow is a tmux under load: every look at a session on the host
+// fails with the 5 s deadline of mw-gq6.884, while what is typed to one still
+// goes through (mw-gq6.886).
+func (c *pauseContext) theTerminalIsTooSlow(host string) error {
+	c.runners[host].StatusErr = fmt.Errorf("tmux list-panes: did not finish in 5s and was stopped: context deadline exceeded")
+	return nil
+}
 
 func (c *pauseContext) cannotBeReached(host string) error {
 	c.assemble()
