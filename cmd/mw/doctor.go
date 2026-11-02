@@ -290,7 +290,9 @@ func newDoctorCmd() *cobra.Command {
 			// reset: the usage the pause reads would be a day-old guess (mw-gq6.855).
 			usageFresh := doctor.NewUsageFresh(application.UsageReadings{Notes: mwGateway(vault, host)})
 			usageFresh.Home, usageFresh.Host = mwVault(vault, host), host
-			usageFresh.Alarm = alarm
+			usageFresh.Alarm, usageFresh.Clear, usageFresh.State = alarm, clear, store
+			usageFresh.Floors = application.UsageFloors{Notes: mwGateway(vault, host)}
+			usageFresh.Timer = doctor.SystemctlUsageTimer
 			// A user unit that runs mw with no beads.env cannot reach the served
 			// beads (mw-gq6.849); the unit is the Mayor's to fix, so the cure is one mail
 			// to the Mayor, not the alarm (mw-gq6.853).
