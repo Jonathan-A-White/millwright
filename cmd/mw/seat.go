@@ -60,9 +60,9 @@ func newSeatUpCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "up <seat>",
 		Short: "Start a seat's next session in a window of its own",
-		Long: "up starts one interactive Claude Code session for the seat, in a new window of the tmux\n" +
-			"session mw is running in — or of a detached session named " + tmux.SeatsSession + ", when mw is running\n" +
-			"outside tmux. The window is named <seat>-<UTC date>-<nn>, with nn one past the highest\n" +
+		Long: "up starts one interactive Claude Code session for the seat, in a new window of the\n" +
+			"detached tmux session named " + tmux.SeatsSession + ", wherever mw is run from; a seat's window in any other\n" +
+			"session is seen too. The window is named <seat>-<UTC date>-<nn>, with nn one past the highest\n" +
 			"number the seat has used for a handoff or a window.\n\n" +
 			"The session is primed with the seat's charter and told the seat's own kickoff text\n" +
 			"(seats/<seat>/kickoff.md), or a default when it keeps none, ending with the newest handoff\n" +

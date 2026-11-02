@@ -4625,8 +4625,9 @@ bin/mw seat up mayor --effort high --reason "the handoff is written"
 ```
 
 `mw seat up <seat>` starts one interactive Claude Code session for the seat, in
-a new tmux window of the session `mw` is running in — or of a detached session
-named `mw-seats`, when `mw` is running outside tmux. The window is named
+a new tmux window of the detached session named `mw-seats`, wherever `mw` is
+run from; a seat's window open in any other tmux session is seen too, so a
+second is not started beside it. The window is named
 `<seat>-<UTC date>-<nn>`, with `nn` one past the highest number the seat has
 used for a handoff or for a window already open, and the line it prints names
 it:

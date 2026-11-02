@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -14,10 +13,12 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-// SeatsSession is the tmux session a seat's window is opened in when mw is not
-// itself running inside tmux: there is no session to add a window to, so the
-// factory keeps one of its own, detached, and the person attaches to it when
-// they want to see a seat.
+// SeatsSession is the tmux session every seat's window is opened in, whoever
+// opens it and wherever from: the factory keeps one of its own, detached, and
+// the person attaches to it when they want to see a seat. It is never the
+// session mw happens to be running in, which differs by caller: on 2026-11-02
+// a Deputy opened from the Mayor's pane in session 0 was out of sight of the
+// spring's look in mw-seats, and a second was opened (mw-gq6.891).
 const SeatsSession = "mw-seats"
 
 // TmuxEnv is what tmux sets in every process it starts, and so how mw tells
@@ -38,32 +39,31 @@ const psProgram = "ps"
 // reap.go, for a window a reaper was armed on and no other.
 type Windows struct {
 	server
-	// session is the tmux session windows are opened in, empty for the one mw
-	// is itself running in (or SeatsSession, when it is running in none).
+	// session is the tmux session windows are opened in, empty for SeatsSession.
 	session string
 }
 
 // Windows satisfies the port.
 var _ application.Windows = (*Windows)(nil)
 
-// NewWindows returns a Windows on tmux's default server, opening seats in the
-// tmux session mw is itself running in — and, when mw is running outside tmux,
-// in a detached session of the factory's own, SeatsSession. WithSession names
-// one instead, and WithSocket says which tmux server to work on: tests must
-// name a server of their own, so that no test ever opens a window among the
-// ones a person is working in.
+// NewWindows returns a Windows on tmux's default server, opening seats in a
+// detached session of the factory's own, SeatsSession, and listing the windows
+// of every session on the server. WithSession names another session to open in,
+// and WithSocket says which tmux server to work on: tests must name a server of
+// their own, so that no test ever opens a window among the ones a person is
+// working in.
 func NewWindows(opts ...Option) *Windows {
 	s := chosen(opts)
 	return &Windows{server: server{program: s.program, socket: s.socket, deadline: s.deadline}, session: s.session}
 }
 
 // Session reports the tmux session this Windows opens seats in, empty for
-// whichever one mw is running in.
+// SeatsSession.
 func (w *Windows) Session() string { return w.session }
 
-// Open implements application.Windows: a new window of the seats' session,
-// running the command with a terminal attached to it, left running when mw
-// exits. The session itself is made, detached, when it is not there yet.
+// Open implements application.Windows: a new window of the seats' session
+// (SeatsSession, wherever mw is running), running the command with a terminal
+// attached to it, left running when mw exits. The session itself is made, detached, when it is not there yet.
 //
 // The command is given to tmux as an argv, so no shell reads it: a kickoff
 // prompt holding quotes, newlines or a dollar sign reaches the session exactly
@@ -80,10 +80,7 @@ func (w *Windows) Open(ctx context.Context, spec application.WindowSpec) error {
 		}
 	}
 
-	session, err := w.sessionName(ctx)
-	if err != nil {
-		return err
-	}
+	session := w.sessionName()
 	there, err := w.sessionThere(ctx, session)
 	if err != nil {
 		return err
@@ -106,8 +103,10 @@ func (w *Windows) Open(ctx context.Context, spec application.WindowSpec) error {
 	return err
 }
 
-// List implements application.Windows: every window of the seats' session,
-// each with when it was opened.
+// List implements application.Windows: every window of every session on the
+// server, each with when it was opened. It is not the seats' session alone: a
+// seat's window opened by hand, or by a mw older than this, in another session
+// is still the seat's, and a second must not be started beside it.
 //
 // tmux keeps no record of when a window was opened — window_activity is the
 // last time it printed anything, which for a live session is always now — so
@@ -115,19 +114,13 @@ func (w *Windows) Open(ctx context.Context, spec application.WindowSpec) error {
 // A window whose process cannot be dated comes back with a zero time, which is
 // what "not known" is: the caller must not read it as "opened just now".
 func (w *Windows) List(ctx context.Context) ([]application.Window, error) {
-	session, err := w.sessionName(ctx)
+	printed, err := w.call(ctx, "list-windows", "-a", "-F", "#{window_name}|#{pane_pid}")
 	if err != nil {
-		return nil, err
-	}
-	there, err := w.sessionThere(ctx, session)
-	if err != nil || !there {
-		// A session that is not there holds no windows, which is not a failure:
-		// nothing of this host's seats is running yet.
-		return nil, err
-	}
-
-	printed, err := w.call(ctx, "list-windows", "-t", target(session), "-F", "#{window_name}|#{pane_pid}")
-	if err != nil {
+		if noServer(err) {
+			// No server holds no windows, which is not a failure: nothing of
+			// this host's seats is running yet.
+			return nil, nil
+		}
 		return nil, err
 	}
 
@@ -155,25 +148,12 @@ func (w *Windows) List(ctx context.Context) ([]application.Window, error) {
 }
 
 // sessionName is the tmux session a seat's window belongs in: the one named by
-// WithSession, else the one mw is itself running in, else the factory's own.
-func (w *Windows) sessionName(ctx context.Context) (string, error) {
+// WithSession, else SeatsSession. It does not depend on where mw is running.
+func (w *Windows) sessionName() string {
 	if w.session != "" {
-		return w.session, nil
+		return w.session
 	}
-	if os.Getenv(TmuxEnv) == "" {
-		return SeatsSession, nil
-	}
-	// display-message with no target names the session of the client mw is
-	// running in, which is the one the person is looking at.
-	printed, err := w.call(ctx, "display-message", "-p", "#S")
-	if err != nil {
-		return "", fmt.Errorf("asking tmux which session this is: %w", err)
-	}
-	session := strings.TrimSpace(string(printed))
-	if session == "" {
-		return SeatsSession, nil
-	}
-	return session, nil
+	return SeatsSession
 }
 
 // sessionThere reports whether the server has that session. tmux saying no
