@@ -408,7 +408,7 @@ func newDoctorCmd() *cobra.Command {
 			for _, rigDir := range rigsAt {
 				landingDirs = append(landingDirs, filepath.Dir(filepath.Clean(rigDir)))
 			}
-			staleLandings := &application.StaleLandingsCheck{Dirs: landingDirs}
+			staleLandings := &application.StaleLandingsCheck{Dirs: landingDirs, Trees: doctor.LandingTrees{}}
 			// Claims no host names, held by a dispatch that died, with no session.
 			stuckClaims := &application.NoSessionClaimsCheck{Claims: mwGateway(vault, host).StaleClaims}
 			// The connection rate of a beads server this host runs; a host that

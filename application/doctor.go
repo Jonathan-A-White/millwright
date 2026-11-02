@@ -980,35 +980,62 @@ func licenceList(value string) []string {
 // long, so one a day old was left behind (mw-gq6.698).
 const StaleLandingsAge = 24 * time.Hour
 
-// StaleLandingsCheck is the mw doctor check that names the throwaway landing
-// directories (LandingPrefix) older than StaleLandingsAge, each with its id,
-// the part of the name after the prefix. A landing closes its own directory;
-// one still here is one a close-out could not take away. It removes nothing:
-// git may still hold a record of the worktree, so a person runs `git worktree
-// remove --force <dir>` in the rig, and the check says so.
+// LandingTrees is what StaleLandingsCheck asks of git and of the host to tell
+// a landing worktree nothing is lost by removing from one that may hold
+// someone's work.
+type LandingTrees interface {
+	// Spare says whether dir is a landing worktree whose removal loses nothing:
+	// clean, its HEAD already on the rig's main, and no process running in it.
+	// When it is not, why says which.
+	Spare(ctx context.Context, dir string) (spare bool, why string)
+	// Remove takes the worktree dir away and tidies git's record of it.
+	Remove(ctx context.Context, dir string) error
+}
+
+// StaleLandingsCheck is the mw doctor check for the throwaway landing
+// directories (LandingPrefix) older than StaleLandingsAge. A landing closes its
+// own directory; one still here is one a close-out could not take away.
+//
+// A directory that Trees finds spare (clean, HEAD on main, no process in it)
+// makes the probe faulty and the cure removes it, saying each path in the way
+// back (mw-gq6.882). Any other is left alone and the probe is cannot-tell,
+// naming each with its id and path and why it was left: git may still hold a
+// record of it, so a person runs `git worktree remove --force <dir>` in the
+// rig. With no Trees nothing is judged spare and nothing is removed.
 type StaleLandingsCheck struct {
 	// Dirs are the directories landings are made in: the home directory and the
 	// directory each rig lives in. A directory that is not there, or named
 	// twice, is read once or not at all.
 	Dirs []string
+	// Trees judges and removes a landing; nil removes nothing.
+	Trees LandingTrees
 	// Now is the clock; nil reads time.Now.
 	Now func() time.Time
+
+	removed []string
 }
 
 var _ DoctorCheck = (*StaleLandingsCheck)(nil)
+var _ DoctorCoolingQuiet = (*StaleLandingsCheck)(nil)
+var _ DoctorCureEndsEpisode = (*StaleLandingsCheck)(nil)
 
 // Name implements DoctorCheck.
 func (c *StaleLandingsCheck) Name() string { return "stale-landings" }
 
-// Probe implements DoctorCheck: cannot-tell, naming the stale directories,
-// when there are any; ok otherwise. The reason holds no age, so that the same
-// directories said again read the same and are said once.
-func (c *StaleLandingsCheck) Probe(context.Context) (Verdict, string) {
+// staleLanding is one landing directory older than a day.
+type staleLanding struct {
+	id, path string
+	spare    bool
+	why      string
+}
+
+// find lists the landing directories older than a day, each judged by Trees.
+func (c *StaleLandingsCheck) find(ctx context.Context) []staleLanding {
 	now := time.Now()
 	if c.Now != nil {
 		now = c.Now()
 	}
-	var stale []string
+	var found []staleLanding
 	seen := map[string]bool{}
 	for _, dir := range c.Dirs {
 		entries, err := os.ReadDir(dir)
@@ -1025,25 +1052,90 @@ func (c *StaleLandingsCheck) Probe(context.Context) (Verdict, string) {
 				continue
 			}
 			seen[path] = true
-			stale = append(stale, fmt.Sprintf("%s (%s)", strings.TrimPrefix(entry.Name(), LandingPrefix), path))
+			landing := staleLanding{id: strings.TrimPrefix(entry.Name(), LandingPrefix), path: path}
+			if c.Trees != nil {
+				landing.spare, landing.why = c.Trees.Spare(ctx, path)
+			}
+			found = append(found, landing)
 		}
 	}
-	if len(stale) == 0 {
-		return DoctorOK, ""
-	}
-	sort.Strings(stale)
-	return DoctorCannotTell, fmt.Sprintf("%d landing directories older than a day, left by a close-out that could not take them away (id, path): %s; remove one with `git worktree remove --force <path>` in its rig, then `git worktree prune`",
-		len(stale), strings.Join(stale, ", "))
+	sort.Slice(found, func(i, j int) bool { return found[i].path < found[j].path })
+	return found
 }
 
-// Cure implements DoctorCheck. Nothing is cured: Probe never says faulty.
-func (c *StaleLandingsCheck) Cure(context.Context) error { return nil }
+// Probe implements DoctorCheck: faulty, naming the directories the cure
+// removes, when Trees finds any spare; cannot-tell, naming the rest, when
+// there are any; ok otherwise. The reason holds no age, so that the same
+// directories said again read the same and are said once.
+func (c *StaleLandingsCheck) Probe(ctx context.Context) (Verdict, string) {
+	var spare, kept []string
+	for _, landing := range c.find(ctx) {
+		if landing.spare {
+			spare = append(spare, fmt.Sprintf("%s (%s)", landing.id, landing.path))
+			continue
+		}
+		left := fmt.Sprintf("%s (%s)", landing.id, landing.path)
+		if landing.why != "" {
+			left = fmt.Sprintf("%s (%s, left in place: %s)", landing.id, landing.path, landing.why)
+		}
+		kept = append(kept, left)
+	}
+	if len(spare) > 0 {
+		reason := fmt.Sprintf("%d landing directories older than a day, clean, on main and with no process in them, left by a close-out that could not take them away (id, path): %s",
+			len(spare), strings.Join(spare, ", "))
+		if len(kept) > 0 {
+			reason += fmt.Sprintf("; %d more are left for a person: %s", len(kept), strings.Join(kept, ", "))
+		}
+		return DoctorFaulty, reason
+	}
+	if len(kept) == 0 {
+		return DoctorOK, ""
+	}
+	return DoctorCannotTell, fmt.Sprintf("%d landing directories older than a day, left by a close-out that could not take them away (id, path): %s; remove one with `git worktree remove --force <path>` in its rig, then `git worktree prune`",
+		len(kept), strings.Join(kept, ", "))
+}
+
+// Cure implements DoctorCheck: it takes away each landing directory Trees finds
+// spare, and remembers each path for WayBack. A directory it cannot remove is
+// named in the error; the rest are still removed.
+func (c *StaleLandingsCheck) Cure(ctx context.Context) error {
+	c.removed = nil
+	var failed []string
+	for _, landing := range c.find(ctx) {
+		if !landing.spare {
+			continue
+		}
+		if err := c.Trees.Remove(ctx, landing.path); err != nil {
+			failed = append(failed, fmt.Sprintf("%s: %v", landing.path, err))
+			continue
+		}
+		c.removed = append(c.removed, landing.path)
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("could not remove %s", strings.Join(failed, "; "))
+	}
+	return nil
+}
 
 // Damper implements DoctorCheck.
-func (c *StaleLandingsCheck) Damper() (time.Duration, int) { return time.Hour, 1 }
+func (c *StaleLandingsCheck) Damper() (time.Duration, int) { return 10 * time.Minute, 5 }
 
-// WayBack implements DoctorCheck.
-func (c *StaleLandingsCheck) WayBack() string { return "nothing was changed" }
+// QuietWhileCooling implements DoctorCoolingQuiet: a landing found stale again
+// soon after a good cure is the next close-out's, not news.
+func (c *StaleLandingsCheck) QuietWhileCooling() bool { return true }
+
+// CureEndedEpisode implements DoctorCureEndsEpisode.
+func (c *StaleLandingsCheck) CureEndedEpisode() bool { return true }
+
+// WayBack implements DoctorCheck: what the last cure removed, by path. A
+// landing is a detached copy of main's own commits, so nothing is lost; a
+// person can make another with `git worktree add --detach <path> <commit>`.
+func (c *StaleLandingsCheck) WayBack() string {
+	if len(c.removed) == 0 {
+		return "nothing was changed"
+	}
+	return fmt.Sprintf("removed %s (clean, on main: nothing in them was not already in the rig)", strings.Join(c.removed, ", "))
+}
 
 // NoSessionClaimsCheck is the mw doctor check that names the in-progress
 // stories NoSessionClaim finds, each as STUCK with its id, who holds it and
