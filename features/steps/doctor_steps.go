@@ -60,6 +60,11 @@ type doctorContext struct {
 	tmpLeftoversProc      string
 	tmpLeftoversFDCounter int
 
+	// landingsDir is the temp dir a stale-landings scenario made, removed by the
+	// After hook; empty in any other.
+	landingsDir  string
+	landingHours int
+
 	// boost is the fixture of the boost-reach scenarios; nil in any other.
 	boost *boostReachFixture
 
@@ -100,6 +105,9 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 		if c.boostConfigDir != "" {
 			os.RemoveAll(c.boostConfigDir)
 		}
+		if c.landingsDir != "" {
+			os.RemoveAll(c.landingsDir)
+		}
 		return ctx, nil
 	})
 
@@ -109,6 +117,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	c.registerMayorStaleSteps(ctx)
 	c.registerAgeKeySteps(ctx)
 	c.registerBoostConfigSteps(ctx)
+	c.registerStaleLandingsSteps(ctx)
 
 	ctx.Given(`^a doctor check "([^"]*)" whose probe says ok$`, c.aCheckWhoseProbeSaysOK)
 	ctx.Given(`^a doctor check "([^"]*)" whose probe says faulty "([^"]*)"$`, c.aCheckWhoseProbeSaysFaulty)

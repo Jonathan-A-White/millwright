@@ -5532,13 +5532,18 @@ refused a lampas story that way, mw-gq6.453). There is no cure: a person adds th
 home's line for the rig, and `contrib/boost-bootstrap.sh` does it when it makes the
 config, from the vault's `hosts/boost-config.toml`.
 
-**stale-landings** names every `.mw-landing-<id>` directory, in the home directory
-and beside each rig, older than 24 hours, each with its id: a landing is made and
-taken away inside one close-out, so one that old was left behind. It is
-cannot-tell, said once for the same set, and changes nothing; the reason says to
-remove one with `git worktree remove --force <path>` in its rig, then `git worktree
-prune`. (A landing now removes its own directory even when git has lost its record
-of it or the close-out was cancelled.)
+**stale-landings** looks in the home directory and beside each rig for every
+`.mw-landing-<id>` directory older than 24 hours: a landing is made and taken away
+inside one close-out, so one that old was left behind. One that is clean, whose HEAD
+is already an ancestor of the rig's main, and with no process running in it (by
+working directory) holds nothing the rig does not, so the check is faulty and its
+cure runs `git worktree remove` (no force) and `git worktree prune`, naming each
+removed path in the report and the log (mw-gq6.882). Any other — uncommitted changes,
+a commit not on main, a process in it, or git unable to read it — is left in place:
+the check is cannot-tell, said once for the same set, naming each with its id, path
+and why it was left, and a person removes one with `git worktree remove --force
+<path>` in its rig, then `git worktree prune`. (A landing now removes its own
+directory even when git has lost its record of it or the close-out was cancelled.)
 
 **tmp-leftovers** cures the fault behind the VPS reaching 94% disk on
 2026-09-25 from the factory's own dead leftovers: a killed bd's dolt spool
