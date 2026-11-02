@@ -268,7 +268,21 @@ func (h FleetHostPause) Pause(ctx context.Context, order HostPauseOrder) (HostPa
 		}
 		status, serr := h.Runner.Status(ctx, ps.Window)
 		ps.Alive = serr == nil && status.Running()
-		if ps.Alive {
+		switch {
+		case serr != nil:
+			// Every tmux command runs under a 5 s deadline (mw-gq6.884), so on a
+			// loaded host a look that fails is an ordinary event, and a session that
+			// could not be asked about is not known to be gone (mw-gq6.886). The line
+			// is typed all the same, as a session that is there takes it and one that
+			// is not refuses it; the story is recorded as alive only when it was
+			// taken, and as one that could not be asked about when it was not.
+			if err := h.Runner.Send(ctx, ps.Window, PauseLine(id, order.Reason)); err != nil {
+				ps.Note = fmt.Sprintf("its session could not be asked about (%v) and the PAUSE line could not be typed (%v), so it is not known whether it was running", serr, err)
+			} else {
+				ps.Alive = true
+				ps.Note = fmt.Sprintf("its session could not be asked about (%v), so the PAUSE line was typed without asking", serr)
+			}
+		case ps.Alive:
 			if err := h.Runner.Send(ctx, ps.Window, PauseLine(id, order.Reason)); err != nil {
 				ps.Note = fmt.Sprintf("the PAUSE line could not be typed: %v", err)
 			}
@@ -424,7 +438,20 @@ func (h FleetHostPause) Resume(ctx context.Context, order HostResumeOrder) (Host
 			continue
 		}
 		status, err := h.Runner.Status(ctx, ps.Window)
-		if err == nil && status.Running() {
+		if err != nil {
+			// A session that could not be asked about is not known to be gone
+			// (mw-gq6.886), and listing it Gone would have mw retry give its claim
+			// back under a live session. RESUME is typed all the same, as in Pause;
+			// when that is refused too the story is said to be not known, left out of
+			// Gone and for a person to look at, as there is no later pass.
+			if serr := h.Runner.Send(ctx, ps.Window, ResumeLine(ps.Story)); serr != nil {
+				out.Notes = append(out.Notes, fmt.Sprintf("%s: its session could not be asked about (%v) and the RESUME line could not be typed (%v), so it is not known whether it is running: look at it, and type RESUME or mw retry %s by hand", ps.Story, err, serr, ps.Story))
+				continue
+			}
+			out.Told = append(out.Told, ps.Story)
+			continue
+		}
+		if status.Running() {
 			if err := h.Runner.Send(ctx, ps.Window, ResumeLine(ps.Story)); err != nil {
 				out.Notes = append(out.Notes, fmt.Sprintf("%s: the RESUME line could not be typed: %v", ps.Story, err))
 				continue
