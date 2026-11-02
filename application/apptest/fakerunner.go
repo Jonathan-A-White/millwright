@@ -21,6 +21,11 @@ type FakeRunner struct {
 
 	// Err, when set, is returned by every method instead of doing the work.
 	Err error
+	// StartErr, when set, is returned by Start alone, and StatusErr by Status
+	// alone: a runner that cannot start a session but can say what runs, and a
+	// tmux too slow to say what runs (mw-gq6.886), which Err, failing every
+	// method, cannot stand for.
+	StartErr, StatusErr error
 }
 
 // fakeSession is one session as the fake remembers it.
@@ -51,6 +56,9 @@ func (f *FakeRunner) Start(_ context.Context, spec application.SessionSpec) erro
 	defer f.mu.Unlock()
 	if f.Err != nil {
 		return f.Err
+	}
+	if f.StartErr != nil {
+		return f.StartErr
 	}
 	if _, running := f.sessions[spec.Name]; running {
 		return fmt.Errorf("session %q is already running", spec.Name)
@@ -103,6 +111,9 @@ func (f *FakeRunner) Status(_ context.Context, name string) (application.Session
 	defer f.mu.Unlock()
 	if f.Err != nil {
 		return application.SessionStatus{}, f.Err
+	}
+	if f.StatusErr != nil {
+		return application.SessionStatus{}, f.StatusErr
 	}
 	return f.status(name), nil
 }

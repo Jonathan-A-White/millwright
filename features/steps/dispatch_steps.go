@@ -167,6 +167,9 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times, its attempt causes being "([^"]*)"$`, c.theStoryHasBeenTriedWithCauses)
 	ctx.Given(`^the story "([^"]*)" carries the comment "([^"]*)"$`, c.theStoryCarriesTheComment)
 	ctx.Given(`^the runner refuses to start anything$`, c.theRunnerRefuses)
+	ctx.Given(`^the terminal is too slow to say whether any session is running$`, c.theTerminalIsTooSlow)
+	ctx.Then(`^the story "([^"]*)" says its claim was kept because its session could not be asked about$`, c.theStorySaysTheClaimWasKept)
+	ctx.Then(`^there is still a worktree for "([^"]*)"$`, c.thereIsStillAWorktreeFor)
 	ctx.Given(`^the runner refuses to start anything, saying "([^"]*)"$`, c.theRunnerRefusesSaying)
 	ctx.Given(`^an earlier session for "([^"]*)" lies dead$`, c.anEarlierSessionLiesDead)
 	ctx.Given(`^a session for "([^"]*)" is still running in its worktree$`, c.aSessionIsRunningInItsWorktree)
@@ -858,17 +861,42 @@ func (c *dispatchContext) theConfigSaysTheSyncKnobs(tries int, wait string) erro
 }
 
 func (c *dispatchContext) theRunnerRefuses() error {
-	c.runner.Err = fmt.Errorf("this runner starts nothing")
+	c.runner.StartErr = fmt.Errorf("this runner starts nothing")
+	return nil
+}
+
+// theTerminalIsTooSlow is a tmux under load: every look at a session fails with
+// the 5 s deadline of mw-gq6.884, and starting one still works or not as the
+// scenario says (mw-gq6.886).
+func (c *dispatchContext) theTerminalIsTooSlow() error {
+	c.runner.StatusErr = errors.New("tmux list-panes: did not finish in 5s and was stopped: context deadline exceeded")
+	return nil
+}
+
+func (c *dispatchContext) theStorySaysTheClaimWasKept(id string) error {
+	for _, comment := range c.tracker.Comments(id) {
+		if strings.Contains(comment, "could not be asked about") && strings.Contains(comment, "the claim was kept") {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected a comment on %s saying its claim was kept for a session that could not be asked about, got %q", id, c.tracker.Comments(id))
+}
+
+func (c *dispatchContext) thereIsStillAWorktreeFor(id string) error {
+	dir := c.worktreeOf(id)
+	if _, err := os.Stat(dir); err != nil {
+		return fmt.Errorf("expected the worktree at %s to stay, but %v", dir, err)
+	}
 	return nil
 }
 
 func (c *dispatchContext) theRunnerRefusesSaying(words string) error {
-	c.runner.Err = errors.New(words)
+	c.runner.StartErr = errors.New(words)
 	return nil
 }
 
 func (c *dispatchContext) theRunnerStartsAgain() error {
-	c.runner.Err = nil
+	c.runner.StartErr = nil
 	return nil
 }
 
