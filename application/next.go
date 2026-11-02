@@ -1448,7 +1448,11 @@ func (n Next) emptyResult(ctx context.Context, c *closeOut, resultName, resultPa
 	} else {
 		said = fmt.Sprintf("%s is %d byte(s), last modified %s", resultPath, info.Size, info.ModTime.UTC().Format(time.RFC3339))
 	}
-	if tail := n.paneTail(ctx, c); tail != "" {
+	tail, lookErr := n.paneTail(ctx, c)
+	switch {
+	case lookErr != nil:
+		said += "\n\n" + paneUnreadable(lookErr)
+	case tail != "":
 		said += "\n\nThe last lines of the session's pane:\n\n```\n" + tail + "\n```"
 	}
 	return why, said
@@ -1478,8 +1482,16 @@ func (n Next) harnessStopWhy(stop HarnessStop) string {
 // pane is gone; one that cannot be kept is a note, and the stop stands.
 func (n Next) harnessStopWithoutResult(ctx context.Context, c *closeOut, report *NextReport, printed string) (HarnessStop, bool) {
 	ended := n.now()
-	stop, stopped := HarnessStopOfWords(printed+"\n"+n.paneTail(ctx, c), ended)
+	tail, lookErr := n.paneTail(ctx, c)
+	stop, stopped := HarnessStopOfWords(printed+"\n"+tail, ended)
 	if !stopped {
+		// A pane that could not be asked about is not one that said nothing
+		// (mw-gq6.887): a stop shown only there may have been missed. An empty
+		// result's own record says so (emptyResult), so only the other cases are
+		// noted here.
+		if lookErr != nil && strings.TrimSpace(printed) != "" {
+			report.Notes = append(report.Notes, paneUnreadable(lookErr)+", so a harness stop shown only there was not looked for")
+		}
 		return HarnessStop{}, false
 	}
 	name := HarnessStopFileNameForAttempt(c.attempt())
@@ -1491,17 +1503,24 @@ func (n Next) harnessStopWithoutResult(ctx context.Context, c *closeOut, report 
 	return stop, true
 }
 
-// paneTail is the tail of what a story's session last printed, empty when
-// there is no runner to ask or no session left for it to answer about.
-func (n Next) paneTail(ctx context.Context, c *closeOut) string {
+// paneTail is the tail of what a story's session last printed: empty with no
+// error when there is no runner to ask or the session printed nothing. An error
+// is a look that failed (tmux too slow to answer, or the session gone), which is
+// not the same as a pane with nothing in it (mw-gq6.887).
+func (n Next) paneTail(ctx context.Context, c *closeOut) (string, error) {
 	if n.Runner == nil {
-		return ""
+		return "", nil
 	}
 	out, err := n.Runner.Output(ctx, SessionName(c.id), PaneTailLines)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return out
+	return out, nil
+}
+
+// paneUnreadable says that the session's pane could not be read, and why.
+func paneUnreadable(err error) string {
+	return fmt.Sprintf("The session's pane could not be read (tmux did not answer, or the session is gone): %s", firstLine(err.Error()))
 }
 
 // asideSuffix is added to the name of the session a close-out ran in when a
