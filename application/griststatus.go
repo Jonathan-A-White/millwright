@@ -330,7 +330,7 @@ func (g GristStatus) Run(ctx context.Context) (GristStatusReport, error) {
 		return report, fmt.Errorf("mw grist status: %w", err)
 	}
 	for _, record := range records {
-		line, err := g.one(ctx, record)
+		line, err := g.one(ctx, record, records)
 		switch {
 		case err != nil:
 			report.Notes = append(report.Notes, fmt.Sprintf("%s: %v", record.Bead, err))
@@ -351,7 +351,7 @@ func (g GristStatus) Run(ctx context.Context) (GristStatusReport, error) {
 
 // one looks at one linked request and sends its change, returning the line
 // that says so, or "" when there is none.
-func (g GristStatus) one(ctx context.Context, record GristRequestRecord) (string, error) {
+func (g GristStatus) one(ctx context.Context, record GristRequestRecord, all []GristRequestRecord) (string, error) {
 	if record.MovedTo != "" {
 		// The request is followed on the bead it moved to.
 		return "", nil
@@ -389,6 +389,20 @@ func (g GristStatus) one(ctx context.Context, record GristRequestRecord) (string
 			if record.Last != nil && (record.Last.Status == GristRequestLanded || record.Last.Status == GristRequestAdopted) {
 				return "", nil
 			}
+			// A request linked again to a newer bead by hand (not by mw grist
+			// request or mw fold supersede) leaves this record unmarked: it is
+			// followed on the newer bead, so mark this one moved and let it go.
+			if to := movedOn(record, all); to != "" {
+				record.MovedTo = to
+				if err := g.Requests.Keep(ctx, record); err != nil {
+					return "", fmt.Errorf("its request is followed on %s, but the record could not be marked moved: %w", to, err)
+				}
+				return "", nil
+			}
+			// A bead with no rig lands nowhere: there is no landing to look for.
+			if detail.Merged().Rig == "" {
+				return "", nil
+			}
 			return "", fmt.Errorf("closed, but no landing of it was found in %s on %s (neither its own commit nor a batch that carried it)", detail.Merged().Rig, detail.Merged().Branch)
 		}
 		status.Status = GristRequestLanded
@@ -418,6 +432,25 @@ func (g GristStatus) one(ctx context.Context, record GristRequestRecord) (string
 		return "", fmt.Errorf("the %s status was sent but could not be kept, so the next pass sends it again: %w", status.Status, err)
 	}
 	return fmt.Sprintf("%s: %s (request %s of %s)", record.Bead, status.Status, record.Request, record.App), nil
+}
+
+// movedOn is the bead a record's request is followed on now, "" when there is
+// none: the bead of another record of the same request that is not marked
+// moved and was last told something later than this one.
+func movedOn(record GristRequestRecord, all []GristRequestRecord) string {
+	told := func(r GristRequestRecord) int64 {
+		if r.Last == nil {
+			return 0
+		}
+		return r.Last.Ts
+	}
+	to, at := "", told(record)
+	for _, other := range all {
+		if other.Request == record.Request && other.Bead != record.Bead && other.MovedTo == "" && told(other) > at {
+			to, at = other.Bead, told(other)
+		}
+	}
+	return to
 }
 
 // landing finds where the closed bead landed in its rig, if it did: by the
