@@ -238,11 +238,23 @@ func TestATimeoutIsOnlyUnderLoadWhenTheHostWasBusy(t *testing.T) {
 		want    bool
 	}{
 		{"--- FAIL: TestX\n    Test timed out after 30s\n", busy, true},
-		{"waitFor: condition never held", busy, true},
+		{"--- FAIL: TestX (1.00s)\n    waitFor: condition never held\n", busy, true},
 		{"panic: test Timeout exceeded", busy, true},
+		{"panic: test timed out after 10m0s\nFAIL\tgithub.com/x/y\t600.001s\n", busy, true},
+		{" FAIL  src/a.test.ts > a thing\nError: Test timed out in 5000ms.\n", busy, true},
 		{"Test timed out after 30s", calm, false},
 		{"--- FAIL: TestX\n    got 3, want 4\n", busy, false},
 		{"", busy, false},
+		// mw-gq6.923: the ETXTBSY failure of mw-gq6.920's gate. The path of the
+		// stand-in is named timeout, and a passing line and an ok line say it too.
+		{"=== RUN   TestTimeoutIsOnlyUnderLoad\n--- PASS: TestTimeoutIsOnlyUnderLoad (0.00s)\n" +
+			"--- FAIL: TestAHungBdEndsTheCallAndNamesTheStep (0.02s)\n" +
+			"    beads_integration_test.go:171: fork/exec /tmp/TestAHungBd123/001/timeout: text file busy\n" +
+			"FAIL\nFAIL\tgithub.com/Jonathan-A-White/millwright/infrastructure/beads\t3.2s\n" +
+			"ok  \tgithub.com/Jonathan-A-White/millwright/infrastructure/timeoutlog\t0.5s\n", busy, false},
+		{"--- FAIL: TestTimeoutNamedButNotTheFailure (0.01s)\n    got 3, want 4\n", busy, false},
+		{"--- FAIL: TestX (0.01s)\n    got 3, want 4\n--- PASS: TestY (0.00s)\n    a timeout of 5s was set\n", busy, false},
+		{"flag --timeout=30s\nok  \tgithub.com/x/y\t0.1s\n", busy, false},
 	}
 	for _, c := range cases {
 		if got := application.TimeoutUnderLoad(c.output, c.reading); got != c.want {
