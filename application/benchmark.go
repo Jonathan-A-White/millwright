@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // Benchmark is what one close-out measured of the host it ran on and of the
@@ -513,23 +516,45 @@ func Calibrate(history []Benchmark, s BenchmarkSettings) []KindCalibration {
 	return out
 }
 
-// timeoutMarkers are what a rig's tests print when they gave up waiting.
-var timeoutMarkers = []string{"test timed out", "waitfor", "timeout"}
+// timeoutMarker is what a rig's tests print when they gave up waiting. The word
+// timeout counts only as a word of its own: not a path or a command that holds it
+// ("fork/exec /tmp/x/timeout: text file busy", "--timeout=30s").
+var timeoutMarker = regexp.MustCompile(`test timed out|waitfor|(^|[^\w/.=-])timeout($|[^\w/.=-])`)
+
+// endsFailure is a line of a test run that is no part of the failed test above
+// it: the next test's start or result, a passing test, a package's verdict.
+var endsFailure = regexp.MustCompile(`^(=== |--- PASS|--- SKIP|\s*(✓|✔|ok\b|PASS\b)|FAIL\t|FAIL$)`)
+
+// failureLines is the lines of a run's output that belong to a test that failed:
+// what follows each failing-test line (see failingTest) up to the line that ends
+// it, and the `panic:` lines (go test's `panic: test timed out`). The failing-test
+// line itself is left out, because it holds the test's name, which says nothing
+// of how it failed.
+func failureLines(output string) []string {
+	var lines []string
+	inFailure := false
+	for _, line := range strings.Split(strings.ReplaceAll(domain.StripANSI(output), "\r\n", "\n"), "\n") {
+		switch {
+		case failingTest.MatchString(line):
+			inFailure = true
+		case endsFailure.MatchString(line):
+			inFailure = false
+		case inFailure || strings.HasPrefix(line, "panic: "):
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
 
 // TimeoutUnderLoad says a rig's failed tests failed on a timeout while the host
 // was at or above its core count: not the story's fault, and worth a second look
-// before the code is blamed.
+// before the code is blamed. Only what a failed test printed is read (mw-gq6.923:
+// a path named timeout in an ETXTBSY failure said "timeout under load").
 func TimeoutUnderLoad(output string, at LoadReading) bool {
 	if !at.Busy() {
 		return false
 	}
-	lower := strings.ToLower(output)
-	for _, marker := range timeoutMarkers {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-	return false
+	return timeoutMarker.MatchString(strings.ToLower(strings.Join(failureLines(output), "\n")))
 }
 
 // TimeoutUnderLoadNote is the words a refusal for such a failure carries, so

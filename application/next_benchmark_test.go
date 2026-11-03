@@ -145,6 +145,29 @@ func TestAFailureThatIsNotATimeoutIsNotNamedOne(t *testing.T) {
 	}
 }
 
+// mw-gq6.923: mw-gq6.920's gate failed on 'text file busy' at 0.02 s, in a run
+// whose lines named a stand-in called timeout, and the mail said timeout.
+func TestATextFileBusyFailureNamingAPathCalledTimeoutIsNotNamedATimeout(t *testing.T) {
+	busy := application.LoadReading{Load: 9, Cores: 8}
+	output := "--- FAIL: TestAHungBdEndsTheCallAndNamesTheStep (0.02s)\n" +
+		"    beads_integration_test.go:171: fork/exec /tmp/TestAHungBd1/001/timeout: text file busy\n" +
+		"FAIL\nFAIL\tgithub.com/Jonathan-A-White/millwright/infrastructure/beads\t3.2s\n"
+	run, vault := aBenchmarkedCloseOut(t, false, output, busy, nil)
+	if run.err == nil || run.report.Reason != application.ReasonTestsFail {
+		t.Fatalf("expected a tests-fail refusal, got err %v and %+v", run.err, run.report)
+	}
+	if strings.Contains(run.report.Why, "timeout under load") {
+		t.Errorf("expected no timeout named, got %q", run.report.Why)
+	}
+	mail, _ := run.mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if len(mail) != 1 || strings.Contains(mail[0].Body, "timeout under load") {
+		t.Errorf("expected a mail that does not say timeout under load, got %+v", mail)
+	}
+	if result := vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)]; strings.Contains(result, `"timeout_under_load":true`) {
+		t.Errorf("expected the refusal not recorded as a timeout under load, got %s", result)
+	}
+}
+
 func TestATimeoutOnACalmHostIsNotNamedUnderLoad(t *testing.T) {
 	run, _ := aBenchmarkedCloseOut(t, false, "Test timed out after 30s\n", application.LoadReading{Load: 2, Cores: 20}, nil)
 	if run.err == nil || strings.Contains(run.report.Why, "timeout under load") {
