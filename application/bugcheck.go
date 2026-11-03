@@ -196,9 +196,19 @@ func flakeBug(detail StoryDetail) bool {
 	return asksManyRuns(detail.Story.Title) || asksManyRuns(detail.Description) || asksManyRuns(detail.Acceptance)
 }
 
+// appendExample adds name to examples unless it is a placeholder (`<name>`): a
+// bug's text that shows the shape of the command names no example by it.
+func appendExample(examples []string, name string) []string {
+	if strings.HasPrefix(name, "<") {
+		return examples
+	}
+	return append(examples, name)
+}
+
 // gristEvalCheck reads the first `mw grist eval <app> <kind> --example <name>`
 // in text: the app and the kind, then every example named. A line that reads a
-// ref (--ref), which is no check of main, or names no example, is none.
+// ref (--ref), which is no check of main, or names no example (a placeholder
+// such as <name> names none), is none.
 func gristEvalCheck(text string) (BugCheck, bool) {
 	for _, line := range strings.Split(text, "\n") {
 		before, rest, found := strings.Cut(line, "mw grist eval ")
@@ -216,9 +226,9 @@ func gristEvalCheck(text string) (BugCheck, bool) {
 			switch {
 			case field == "--example" && i+1 < len(fields):
 				i++
-				examples = append(examples, strings.TrimRight(fields[i], ".,;:)"))
+				examples = appendExample(examples, strings.TrimRight(fields[i], ".,;:)"))
 			case strings.HasPrefix(field, "--example="):
-				examples = append(examples, strings.TrimPrefix(field, "--example="))
+				examples = appendExample(examples, strings.TrimPrefix(field, "--example="))
 			case field == "--ref" || strings.HasPrefix(field, "--ref="):
 				ref = true
 			case field == "--wait" && i+1 < len(fields):

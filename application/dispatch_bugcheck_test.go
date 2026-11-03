@@ -435,6 +435,10 @@ func TestADispatchReadsAGristEvalLineForItsAppKindAndEveryExample(t *testing.T) 
 		"mw grist eval lampas tutor --example greets --ref mw/story":          "",
 		"mw grist eval --grind rigs/lampas/grinds/tutor.json --photos /tmp/p": "",
 		"mw grist eval lampas tutor":                                          "",
+		"mw grist eval lampas tutor --example <name> or an app test":          "",
+		"mw grist eval lampas tutor --example=<name>.":                        "",
+		"mw grist eval lampas tutor --example greets --example <name>":        "lampas tutor greets",
+		"mw grist eval lampas tutor --example <name> --example greets":        "lampas tutor greets",
 	} {
 		dispatch, tracker, _, _, _ := aFactory(t)
 		aGristBug(t, &dispatch, tracker, "", line+"\n")
