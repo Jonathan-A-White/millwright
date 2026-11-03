@@ -7,9 +7,11 @@ package ticketq
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -33,6 +35,7 @@ type Ticket struct {
 	path string
 	name string
 	file *os.File
+	kept bool
 }
 
 // Name is the ticket's file name, which orders the queue.
@@ -46,6 +49,10 @@ var seq atomic.Uint64
 // that nobody finds it unlocked and takes it for a dead waiter's. holder, a
 // courtesy, is written in it for whoever waits behind.
 func (q *Queue) Join(holder string, started time.Time) (*Ticket, error) {
+	return q.join(holder, "", started)
+}
+
+func (q *Queue) join(holder, key string, started time.Time) (*Ticket, error) {
 	if err := os.MkdirAll(q.Dir, 0o755); err != nil {
 		return nil, fmt.Errorf("making the ticket queue %s: %w", q.Dir, err)
 	}
@@ -62,7 +69,7 @@ func (q *Queue) Join(holder string, started time.Time) (*Ticket, error) {
 	if err := syscall.Flock(int(building.Fd()), syscall.LOCK_EX); err != nil {
 		return fail(err)
 	}
-	if _, err := building.WriteString(holder + "\n"); err != nil {
+	if _, err := building.WriteString(ticketText(holder, key, time.Time{})); err != nil {
 		return fail(err)
 	}
 	final := filepath.Join(q.Dir, name)
@@ -72,10 +79,187 @@ func (q *Queue) Join(holder string, started time.Time) (*Ticket, error) {
 	return &Ticket{path: final, name: name, file: building}, nil
 }
 
-// Drop gives the ticket back.
+// Drop gives the ticket back. A ticket that was kept (Keep) is not given back: it
+// stands until its keep time passes or its key takes it up again.
 func (t *Ticket) Drop() {
+	if t.kept {
+		return
+	}
 	os.Remove(t.path)
 	t.file.Close()
+}
+
+// ticketText is what a ticket says: its holder, a courtesy for whoever waits
+// behind, then the key its owner takes it up again by and, for a ticket kept
+// after its owner, until when it is kept.
+func ticketText(holder, key string, keepUntil time.Time) string {
+	text := holder + "\n"
+	if key != "" {
+		text += keyWord + " " + key + "\n"
+	}
+	if !keepUntil.IsZero() {
+		text += keepWord + " " + strconv.FormatInt(keepUntil.UnixNano(), 10) + "\n"
+	}
+	return text
+}
+
+const (
+	keyWord  = "key"
+	keepWord = "keep"
+)
+
+// ticketRead is what a ticket's file says.
+type ticketRead struct {
+	holder    string
+	key       string
+	keepUntil time.Time
+}
+
+func readTicket(file *os.File) ticketRead {
+	var read ticketRead
+	said, err := io.ReadAll(io.NewSectionReader(file, 0, 4096))
+	if err != nil {
+		return read
+	}
+	for i, line := range strings.Split(string(said), "\n") {
+		line = strings.TrimSpace(line)
+		word, rest, _ := strings.Cut(line, " ")
+		switch {
+		case i == 0:
+			read.holder = line
+		case word == keyWord:
+			read.key = rest
+		case word == keepWord:
+			if nanos, err := strconv.ParseInt(rest, 10, 64); err == nil {
+				read.keepUntil = time.Unix(0, nanos)
+			}
+		}
+	}
+	return read
+}
+
+// JoinAs is Join for a waiter that may come back for its place: key names the
+// waiter (the same on every call that is the same wait), and a ticket an earlier
+// call of that waiter kept (Keep), not yet past its keep time, is taken up again
+// in place of a new one: the same name, so the same place in the queue, not the
+// back of it.
+func (q *Queue) JoinAs(key, holder string, started time.Time) (*Ticket, error) {
+	if ticket := q.takeUp(key); ticket != nil {
+		return ticket, nil
+	}
+	return q.join(holder, key, started)
+}
+
+// takeUp finds the ticket kept under key and holds it again, or returns nil.
+func (q *Queue) takeUp(key string) *Ticket {
+	entries, err := os.ReadDir(q.Dir)
+	if err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		path := filepath.Join(q.Dir, entry.Name())
+		if began, ok := began(entry.Name()); ok && q.Now().Sub(began) >= q.Cap {
+			continue
+		}
+		file, err := os.OpenFile(path, os.O_RDWR, 0)
+		if err != nil {
+			continue
+		}
+		// Looked at before it is locked, so that a waiter polling the queue (which
+		// takes each unheld ticket's flock for a moment) is the only thing in the way
+		// of a ticket that is ours, and then only for a moment.
+		if read := readTicket(file); read.key != key || read.keepUntil.IsZero() {
+			file.Close()
+			continue
+		}
+		locked := false
+		for try := 0; try < 40 && !locked; try++ {
+			if locked = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil; !locked {
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+		if !locked {
+			file.Close()
+			continue
+		}
+		read := readTicket(file)
+		if read.key != key || read.keepUntil.IsZero() || !q.Now().Before(read.keepUntil) {
+			syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+			file.Close()
+			continue
+		}
+		// Held again, and no longer kept.
+		if err := rewrite(file, ticketText(read.holder, key, time.Time{})); err != nil {
+			syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+			file.Close()
+			continue
+		}
+		return &Ticket{path: path, name: entry.Name(), file: file}
+	}
+	return nil
+}
+
+// Keep ends the wait the ticket stands for without giving up its place: the
+// ticket stays in the queue after its owner, and counts as live until, so that
+// its owner, run again, takes it up again by its key (JoinAs). The queue walk
+// treats it as it does a live waiter. A ticket made with Join has no key and is
+// kept as an owner nobody can take up, which still holds its place until then.
+func (t *Ticket) Keep(until time.Time) {
+	if t.kept {
+		return
+	}
+	read := readTicket(t.file)
+	// Written before the flock goes, so that nobody who finds the ticket unheld
+	// finds it unkept.
+	if rewrite(t.file, ticketText(read.holder, read.key, until)) != nil {
+		return
+	}
+	t.kept = true
+	syscall.Flock(int(t.file.Fd()), syscall.LOCK_UN)
+	t.file.Close()
+}
+
+// rewrite replaces what the file says.
+func rewrite(file *os.File, text string) error {
+	if err := file.Truncate(0); err != nil {
+		return err
+	}
+	_, err := file.WriteAt([]byte(text), 0)
+	return err
+}
+
+// Place says where the ticket named mine stands among the live tickets: its
+// place, counting from one, and how many live tickets there are in all, its own
+// included. Tickets of waiters that are gone are cleared on the way, as Head does.
+func (q *Queue) Place(mine string) (place, of int) {
+	entries, err := os.ReadDir(q.Dir)
+	if err != nil {
+		return 1, 1
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if name != mine && q.skipped(name) {
+			continue
+		}
+		of++
+		if name == mine {
+			place = of
+		}
+	}
+	if place == 0 {
+		place, of = of+1, of+1
+	}
+	return place, of
 }
 
 // Head says whether the ticket named mine is the first live one in the queue, and
@@ -123,8 +307,12 @@ func (q *Queue) skipped(name string) bool {
 	}
 	defer file.Close()
 	if syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil {
+		defer syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		// Nobody holds it, but its owner may have kept it to come back for it.
+		if until := readTicket(file).keepUntil; !until.IsZero() && q.Now().Before(until) {
+			return false
+		}
 		os.Remove(path)
-		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 		return true
 	}
 	return false

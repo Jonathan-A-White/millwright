@@ -80,3 +80,108 @@ func TestATicketOlderThanTheCapIsSkippedWhileItsOwnerLives(t *testing.T) {
 		t.Error("expected an over-age ticket not to stand before me")
 	}
 }
+
+// A ticket its owner kept (Keep) outlives the owner: nobody holds its flock, and
+// it still stands in its place until its keep time has passed (mw-gq6.939).
+func TestAKeptTicketWhoseOwnerIsGoneStillStandsInItsPlaceUntilItsKeepTimePasses(t *testing.T) {
+	now := time.Now()
+	clock := &now
+	q := aQueue(t)
+	q.Now = func() time.Time { return *clock }
+	kept, err := q.JoinAs("check mw-a", "laptop checking mw-a", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, err := q.Join("mw-b", now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mine.Drop()
+
+	kept.Keep(now.Add(10 * time.Minute))
+	if head, by := q.Head(mine.Name()); head || by != "laptop checking mw-a" {
+		t.Errorf("expected the kept ticket to stand before mine, got %v and %q", head, by)
+	}
+	if place, of := q.Place(mine.Name()); place != 2 || of != 2 {
+		t.Errorf("expected mine to be 2 of 2 behind the kept ticket, got %d of %d", place, of)
+	}
+	later := now.Add(11 * time.Minute)
+	clock = &later
+	if head, _ := q.Head(mine.Name()); !head {
+		t.Error("expected a kept ticket past its keep time not to stand before mine")
+	}
+	if entries, _ := os.ReadDir(q.Dir); len(entries) != 1 {
+		t.Errorf("expected the lapsed ticket cleared, %d tickets left", len(entries))
+	}
+}
+
+// The same key takes the kept ticket up again: the same name, so the same place,
+// not the back of the queue; another key does not take it.
+func TestTheSameKeyTakesAKeptTicketUpAgainAndAnotherKeyDoesNot(t *testing.T) {
+	now := time.Now()
+	q := aQueue(t)
+	q.Now = func() time.Time { return now }
+	kept, err := q.JoinAs("check mw-a", "laptop checking mw-a", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := kept.Name()
+	kept.Keep(now.Add(10 * time.Minute))
+	between, err := q.Join("mw-b", now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer between.Drop()
+
+	other, err := q.JoinAs("check mw-c", "laptop checking mw-c", now.Add(2*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Drop()
+	if other.Name() == name {
+		t.Fatal("expected another key to take a ticket of its own")
+	}
+
+	again, err := q.JoinAs("check mw-a", "laptop checking mw-a", now.Add(3*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Name() != name {
+		t.Errorf("expected the kept ticket %s to be taken up again, got %s", name, again.Name())
+	}
+	if head, _ := q.Head(again.Name()); !head {
+		t.Error("expected the ticket taken up again to be the head, ahead of the one taken in between")
+	}
+	// Taken up, it is held again and no longer kept: a lapse of its old keep time
+	// changes nothing while its owner lives.
+	now = now.Add(30 * time.Minute)
+	if head, _ := q.Head(between.Name()); head {
+		t.Error("expected the ticket taken up to stand before mine while its owner lives")
+	}
+	again.Drop()
+	if head, _ := q.Head(between.Name()); !head {
+		t.Error("expected the ticket dropped to stand before none")
+	}
+}
+
+// A kept ticket past its keep time is not taken up: the place was given up.
+func TestAKeptTicketPastItsKeepTimeIsNotTakenUpAgain(t *testing.T) {
+	now := time.Now()
+	q := aQueue(t)
+	q.Now = func() time.Time { return now }
+	kept, err := q.JoinAs("check mw-a", "x", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := kept.Name()
+	kept.Keep(now.Add(time.Minute))
+	now = now.Add(2 * time.Minute)
+	again, err := q.JoinAs("check mw-a", "x", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Drop()
+	if again.Name() == name {
+		t.Error("expected a lapsed place not to be taken up again")
+	}
+}
