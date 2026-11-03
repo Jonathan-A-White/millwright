@@ -50,8 +50,15 @@ type ShipRange struct {
 type ShipState struct {
 	// Shipped is the last seq sent in a batch; the next batch starts after it.
 	Shipped uint64 `json:"shipped"`
-	// Pending are the fallback batches, oldest first, not yet on chain.
+	// Pending are the fallback batches, oldest first, not yet on chain. A range
+	// the shipper made after Joinable came in may hold more than one batch.
 	Pending []ShipRange `json:"pending"`
+	// Joinable says the last of Pending was begun by a pass that kept its batch
+	// for the chain, so the next such batch that starts where it ends joins it
+	// rather than becoming a range of its own. A state without it (every range
+	// pending before mw-gq6.895) has none to join: those are never changed
+	// except by going on chain.
+	Joinable bool `json:"joinable,omitempty"`
 	// Day is the UTC day (2006-01-02) Chain and Alarmed count, and Chain how
 	// many records were put on chain in it.
 	Day   string `json:"day"`
@@ -102,6 +109,14 @@ type ShipStates interface {
 // older one on chain and a long backlog never holds the new events back. Each
 // call to the backend or the chain is given up after ShipCallTimeout.
 //
+// A batch kept for the chain, as the cap or the budget or the chain's failing
+// makes it, joins the last pending range when that range ends right before it
+// and was begun by such a batch (ShipState.Joinable), so a day at the cap adds
+// one range, not one a pass. A retry puts a range on chain in records of the
+// batch's size (ShipMaxEvents events, shipMaxPlain bytes), oldest events first,
+// and keeps the shipper's state once a pass, not after every send: a pass that
+// dies between a send and the end of the pass sends those records again.
+//
 // A batch no road took is not sent: the next pass builds it again.
 type EventShip struct {
 	Log     EventLog
@@ -127,17 +142,26 @@ type EventShip struct {
 	// Err is where a failure of one road is said, once for each word of it.
 	Err io.Writer
 
-	mu       sync.Mutex
-	state    *ShipState
+	mu    sync.Mutex
+	state *ShipState
+	// unsaved says state holds what a retry put on chain that is not kept yet.
+	unsaved  bool
 	lastSent time.Time
 	said     map[string]string
 }
 
 // Ship runs one pass. It returns an error only when a batch was built and no
 // road took it, or the state could not be read or kept.
-func (s *EventShip) Ship(ctx context.Context) error {
+func (s *EventShip) Ship(ctx context.Context) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer func() {
+		if s.unsaved {
+			if saveErr := s.save(ctx, s.state); err == nil {
+				err = saveErr
+			}
+		}
+	}()
 	if s.state == nil {
 		st, err := s.State.Load(ctx)
 		if err != nil {
@@ -216,7 +240,7 @@ func (s *EventShip) Ship(ctx context.Context) error {
 	st.Shipped = r.To
 	stepOver(st)
 	if !onChain && s.Chain {
-		st.Pending = append(st.Pending, r)
+		st.keepForChain(r)
 	}
 	s.lastSent = now
 	if overCap && !st.Alarmed {
@@ -272,6 +296,7 @@ func (s *EventShip) sendEmergencies(ctx context.Context, st *ShipState, unsent [
 		}
 		if !onChain && s.Chain && !overAllowance {
 			st.Pending = append(st.Pending, ShipRange{From: e.Seq, To: e.Seq})
+			st.Joinable = false // the emergency's range ends the run a batch joins
 		}
 		if err := s.save(ctx, st); err != nil {
 			return chainDown, err
@@ -314,24 +339,42 @@ func stepOver(st *ShipState) {
 	st.Urgent = slices.DeleteFunc(st.Urgent, func(n uint64) bool { return n <= st.Shipped })
 }
 
+// keepForChain keeps batch r for the chain: it joins the last pending range
+// when that was begun by a batch kept this way and ends right before r,
+// otherwise r is a range of its own and the one a later batch may join.
+func (st *ShipState) keepForChain(r ShipRange) {
+	if n := len(st.Pending); st.Joinable && n > 0 && st.Pending[n-1].To+1 == r.From {
+		st.Pending[n-1].To = r.To
+		return
+	}
+	st.Pending = append(st.Pending, r)
+	st.Joinable = true
+}
+
 // retryPending puts the pending batches on chain, oldest first, while the
-// chain answers, the day's cap allows and ShipRetryBudget is not spent. It
-// reports whether the pass's new batch is to leave the chain alone: the chain
-// failed it, or the budget ran out with batches still pending, which a newer
-// batch must not pass on chain.
+// chain answers, the day's cap allows and ShipRetryBudget is not spent. A range
+// that holds more than one batch goes in records cut as a batch is, the
+// range's From moving up past each one sent. It reports whether the pass's new
+// batch is to leave the chain alone: the chain failed it, or the budget ran
+// out with batches still pending, which a newer batch must not pass on chain.
+// It keeps nothing: Ship keeps the state once, when the pass ends.
 func (s *EventShip) retryPending(ctx context.Context, st *ShipState) (chainDown bool) {
 	began := s.now()
+	var evs []events.Event // what is left of Pending[0], read once
 	for tried := 0; s.Chain && len(st.Pending) > 0 && st.Chain < s.DailyCap; tried++ {
 		if tried > 0 && s.now().Sub(began) >= ShipRetryBudget {
 			return true
 		}
 		r := st.Pending[0]
-		evs, err := s.eventsIn(ctx, r)
-		if err != nil {
-			s.say("reading a pending batch", err)
-			return false
+		if len(evs) == 0 {
+			var err error
+			if evs, err = s.eventsIn(ctx, r); err != nil {
+				s.say("reading a pending batch", err)
+				return false
+			}
 		}
-		payload, err := s.seal(evs, events.LaneNormal, s.now())
+		record := cutBatch(evs)
+		payload, err := s.seal(record, events.LaneNormal, s.now())
 		if err != nil {
 			s.say("sealing a pending batch", err)
 			return false
@@ -341,11 +384,14 @@ func (s *EventShip) retryPending(ctx context.Context, st *ShipState) (chainDown 
 			return true
 		}
 		s.quiet("putting a pending batch on chain")
-		st.Pending = st.Pending[1:]
-		st.Chain++
-		if err := s.save(ctx, st); err != nil {
-			s.say("keeping the shipper's state", err)
+		evs = evs[len(record):]
+		if last := record[len(record)-1].Seq; last < r.To {
+			st.Pending[0].From = last + 1
+		} else {
+			st.Pending = st.Pending[1:]
 		}
+		st.Chain++
+		s.unsaved = true
 	}
 	return false
 }
@@ -472,6 +518,7 @@ func (s *EventShip) save(ctx context.Context, st *ShipState) error {
 	if err := s.State.Save(ctx, *st); err != nil {
 		return fmt.Errorf("saving the shipper's state: %w", err)
 	}
+	s.unsaved = false
 	return nil
 }
 
