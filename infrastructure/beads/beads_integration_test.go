@@ -62,6 +62,29 @@ func TestMain(m *testing.M) {
 				templateSkip = "git is not on PATH"
 				break
 			}
+			realBd, err := exec.LookPath(beads.Program)
+			if err != nil {
+				templateSkip = beads.Program + " is not on PATH"
+				break
+			}
+			if _, err := exec.LookPath("timeout"); err != nil {
+				templateSkip = "timeout is not on PATH"
+				break
+			}
+			// The wrapper is outside root: root is the template database, copied
+			// into every case's vault.
+			tools, err := os.MkdirTemp("", "mw-beads-bd-")
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "making the bd with a deadline per call:", err)
+				return 1
+			}
+			defer os.RemoveAll(tools)
+			wrapped, err := bdWithCallDeadline(tools, realBd, realBdCallDeadline)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "making the bd with a deadline per call:", err)
+				return 1
+			}
+			os.Setenv("PATH", wrapped+string(os.PathListSeparator)+os.Getenv("PATH"))
 			templateVault = root
 			for _, args := range [][]string{
 				{"git", "init", "-q"},
@@ -81,19 +104,83 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// realBdDeadline is how long a case that runs a real bd waits for it before it
-// gives up. It is there to end a hung bd, not to judge a slow one: the cases of
-// this package run in parallel, each starting a bd per call, and under load one
-// of them has taken more than ninety seconds and been right (mw-gq6.863). Every
-// case takes it from realBdContext, so none has a shorter deadline of its own
-// (TestNoRealBdCaseSetsItsOwnDeadline).
-const realBdDeadline = 5 * time.Minute
+// realBdCallDeadline is how long one real bd call is waited for before it is
+// ended as hung. It is there to end a hung bd, not to judge a slow one: the
+// cases of this package run in parallel, each starting a bd per call, and under
+// load one call has taken more than ten seconds and a whole case more than ninety
+// and been right (mw-gq6.863). The wait is per call, never over a case: a case
+// is some forty calls, and any one deadline over their sum is passed by a host
+// busy enough (mw-gq6.900; load 42 of 16). It is kept by the bd on the test's
+// PATH (bdWithCallDeadline), so every call of every case has it, a setup
+// bdRun as much as a Gateway call.
+const realBdCallDeadline = 5 * time.Minute
 
-// realBdContext is the context for one case that runs a real bd, ended by
-// realBdDeadline; the case defers the cancel it returns.
+// realBdContext is the context for one case that runs a real bd; the case defers
+// the cancel it returns. It has no deadline (TestNoRealBdCaseSetsAWholeCase-
+// Deadline): what ends a hung bd is realBdCallDeadline, per call, and what a
+// stopped test ends is the cancel.
 func realBdContext(t *testing.T) (context.Context, context.CancelFunc) {
 	t.Helper()
-	return context.WithTimeout(context.Background(), realBdDeadline)
+	return context.WithCancel(context.Background())
+}
+
+// bdWithCallDeadline writes into a new directory under root a bd that runs the
+// bd at program with a deadline of its own, d, and returns the directory. A bd that
+// has not ended by then is killed, and says on standard error which call it was
+// and how long it waited, so that the step that hung is in the message the test
+// fails with; the exit status is timeout's, 124. `timeout` is run --foreground
+// so bd stays in the process group the Gateway made for it and the Gateway can
+// still end the whole group.
+func bdWithCallDeadline(root, program string, d time.Duration) (string, error) {
+	dir, err := os.MkdirTemp(root, "bd-")
+	if err != nil {
+		return "", err
+	}
+	seconds := int(d.Seconds())
+	script := fmt.Sprintf(`#!/bin/sh
+timeout --foreground --kill-after=10 %d %s "$@"
+status=$?
+if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+	echo "bd $*: no end to it after %d seconds, killed as hung (exit $status)" >&2
+fi
+exit "$status"
+`, seconds, program, seconds)
+	return dir, os.WriteFile(filepath.Join(dir, beads.Program), []byte(script), 0o755)
+}
+
+// mw-gq6.900: a bd that hangs still ends a case, and the message names the
+// call. The stand-in below never answers; the bd with a deadline per call, the
+// one every case runs, is given two seconds for it.
+func TestAHungBdEndsTheCallAndNamesTheStep(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := realBdContext(t)
+	defer cancel()
+
+	dir := t.TempDir()
+	hung := filepath.Join(dir, "hung")
+	if err := os.MkdirAll(hung, 0o755); err != nil {
+		t.Fatalf("making %s: %v", hung, err)
+	}
+	standIn := filepath.Join(hung, "hung-bd")
+	if err := os.WriteFile(standIn, []byte("#!/bin/sh\nexec sleep 300\n"), 0o755); err != nil {
+		t.Fatalf("writing the stand-in: %v", err)
+	}
+	wrapped, err := bdWithCallDeadline(dir, standIn, 2*time.Second)
+	if err != nil {
+		t.Fatalf("making the bd with a deadline per call: %v", err)
+	}
+
+	gateway := beads.New(vault, beads.WithProgram(filepath.Join(wrapped, beads.Program)))
+	_, err = gateway.ShowStory(ctx, "mw-nothing-hangs-here")
+	if err == nil {
+		t.Fatalf("expected a bd that never answers to end in an error")
+	}
+	for _, want := range []string{"show", "mw-nothing-hangs-here", "killed as hung"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the error to name the call and say it hung (%q), got %v", want, err)
+		}
+	}
 }
 
 // throwawayVault makes an empty beads database in a temp directory, a copy of
@@ -363,8 +450,10 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 		t.Errorf("expected a claimed story, got status %q assignee %q", detail.Status, detail.Assignee)
 	}
 
-	// A claim made a moment ago is not stale.
-	stale, err := gateway.StaleClaims(ctx, time.Now())
+	// A claim whose lease has not run out is not stale. The lease is the claim's
+	// own, read back, not the host's clock: a host that takes minutes over the
+	// calls since the claim must not make a lease of five minutes lapse.
+	stale, err := gateway.StaleClaims(ctx, detail.LeaseExpires.Add(-time.Second))
 	if err != nil {
 		t.Fatalf("listing the stale claims: %v", err)
 	}
