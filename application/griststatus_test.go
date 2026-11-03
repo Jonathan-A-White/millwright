@@ -153,3 +153,60 @@ func TestARequestWhoseNewBeadHasNoLandingYetIsNamedOnTheNewBeadOnly(t *testing.T
 		t.Fatalf("expected one note, on mw-new, got %v", report.Notes)
 	}
 }
+
+// A record moved on by hand (no MovedTo, a later record of the same request on
+// a newer bead) is not told anything for the old bead, whatever state that
+// bead is in: open and marked built differently, in progress, or closed with a
+// landing. The request is followed on the newer bead.
+func TestARecordMovedOnByHandIsToldNothingForTheOldBead(t *testing.T) {
+	const request = "direct:aa"
+	cases := []struct {
+		name  string
+		setup func(s *statusPass)
+	}{
+		{"open and marked built differently", func(s *statusPass) {
+			s.tracker.AddStory("mw-app", domain.Story{ID: "mw-old", Title: "mw-old"})
+			rec := s.requests.records["mw-old"]
+			rec.Built = &application.GristBuilt{Note: "done another way"}
+			s.requests.records["mw-old"] = rec
+		}},
+		{"in progress", func(s *statusPass) {
+			s.tracker.AddStory("mw-app", domain.Story{ID: "mw-old", Title: "mw-old"})
+			_ = s.tracker.SetStatus("mw-old", application.StatusInProgress)
+		}},
+		{"closed with a landing", func(s *statusPass) {
+			s.closed("mw-app", "mw-old")
+			s.landings.Land("mw-old", "0.4.0", "1111111")
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStatusPass(filedRecord("mw-old", request, 1), filedRecord("mw-new", request, 2))
+			tc.setup(s)
+			s.tracker.AddStory("mw-app", domain.Story{ID: "mw-new", Title: "mw-new"})
+
+			report := s.run(t)
+
+			if len(report.Sent) != 0 || len(report.Notes) != 0 {
+				t.Fatalf("expected nothing sent or noted for the old bead, got sent %v, notes %v", report.Sent, report.Notes)
+			}
+			if got := s.requests.records["mw-old"].MovedTo; got != "mw-new" {
+				t.Errorf("expected mw-old's record marked moved to mw-new, it says %q", got)
+			}
+		})
+	}
+}
+
+// A record that still follows its request (no later record of it elsewhere) is
+// told its statuses as before.
+func TestARecordThatStillFollowsItsRequestIsToldItsStatus(t *testing.T) {
+	s := newStatusPass(filedRecord("mw-story", "direct:aa", 1))
+	s.tracker.AddStory("mw-app", domain.Story{ID: "mw-story", Title: "mw-story"})
+	_ = s.tracker.SetStatus("mw-story", application.StatusInProgress)
+
+	report := s.run(t)
+
+	if len(report.Sent) != 1 || !strings.HasPrefix(report.Sent[0], "mw-story: building (request direct:aa of lampas)") {
+		t.Fatalf("expected mw-story told building, got sent %v, notes %v", report.Sent, report.Notes)
+	}
+}

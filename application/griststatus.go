@@ -356,6 +356,17 @@ func (g GristStatus) one(ctx context.Context, record GristRequestRecord, all []G
 		// The request is followed on the bead it moved to.
 		return "", nil
 	}
+	// A request linked again to a newer bead by hand (not by mw grist request
+	// or mw fold supersede) leaves this record unmarked: it is followed on the
+	// newer bead, whatever state this one is in, so mark this one moved and let
+	// it go.
+	if to := movedOn(record, all); to != "" {
+		record.MovedTo = to
+		if err := g.Requests.Keep(ctx, record); err != nil {
+			return "", fmt.Errorf("its request is followed on %s, but the record could not be marked moved: %w", to, err)
+		}
+		return "", nil
+	}
 	detail, err := g.Tracker.ShowStory(ctx, record.Bead)
 	if err != nil {
 		return "", fmt.Errorf("reading the bead: %w", err)
@@ -387,16 +398,6 @@ func (g GristStatus) one(ctx context.Context, record GristRequestRecord, all []G
 			// nothing to look for; any other is named, each pass, until its
 			// landing is found or the Mayor marks it declined.
 			if record.Last != nil && (record.Last.Status == GristRequestLanded || record.Last.Status == GristRequestAdopted) {
-				return "", nil
-			}
-			// A request linked again to a newer bead by hand (not by mw grist
-			// request or mw fold supersede) leaves this record unmarked: it is
-			// followed on the newer bead, so mark this one moved and let it go.
-			if to := movedOn(record, all); to != "" {
-				record.MovedTo = to
-				if err := g.Requests.Keep(ctx, record); err != nil {
-					return "", fmt.Errorf("its request is followed on %s, but the record could not be marked moved: %w", to, err)
-				}
 				return "", nil
 			}
 			// A bead with no rig lands nowhere: there is no landing to look for.
