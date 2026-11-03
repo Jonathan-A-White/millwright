@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -47,5 +48,36 @@ func TestEndsWithinStartsAtTheEventNotAtTheArming(t *testing.T) {
 	c.lastEvent = c.run.armedAt
 	if err := c.endsWithin(1); err == nil {
 		t.Fatal("a wait that ended 2 s after the bound's start passed a 1 s bound")
+	}
+}
+
+// The scenario about the ideas' time judges that the wait ended on the event, not
+// how long after it: a host at load 38 of 16 ended a wait 12 s after the event
+// (mw-gq6.913), and the wait was still right.
+func TestEndsOnTheEventPassesAWaitThatEndedLateOnALoadedHost(t *testing.T) {
+	event := time.Now().Add(-time.Minute)
+	c := &talkWaitContext{lastEvent: event, run: endedRun(event, 4*time.Second, 12*time.Second)}
+	if err := c.endsOnTheEvent(); err != nil {
+		t.Fatalf("a wait that ended 12 s after the event, on a loaded host, failed: %v", err)
+	}
+}
+
+// A wait that counts the ideas' time ends on that time, before the event comes.
+func TestEndsOnTheEventFailsAWaitThatEndedBeforeTheEvent(t *testing.T) {
+	event := time.Now().Add(-time.Minute)
+	c := &talkWaitContext{lastEvent: event, run: endedRun(event, 4*time.Second, -time.Second)}
+	err := c.endsOnTheEvent()
+	if err == nil || !strings.Contains(err.Error(), "before the event") {
+		t.Fatalf("a wait that ended 1 s before the event passed: %v", err)
+	}
+}
+
+func TestEndsOnTheEventFailsAWaitThatFailed(t *testing.T) {
+	event := time.Now().Add(-time.Minute)
+	run := endedRun(event, 0, time.Second)
+	run.err = errors.New("stream gone")
+	c := &talkWaitContext{lastEvent: event, run: run}
+	if err := c.endsOnTheEvent(); err == nil {
+		t.Fatal("a wait that failed passed")
 	}
 }
