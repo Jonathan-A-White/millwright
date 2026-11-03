@@ -135,6 +135,14 @@ const calmedMinute = time.Minute
 // with the host far over its cores returns a HostBusyError either way, and the
 // gate does not run (mw-gq6.903).
 func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what string, handBack, again bool) (reading LoadReading, gaveUp bool, err error) {
+	return n.calmedThen(ctx, report, c, what, "ran anyway", handBack, again)
+}
+
+// calmedThen is calmed, with the end of the note a bound that ran out leaves
+// when the host is busy but not far over: then says what became of the run, "ran
+// anyway" for a run that is made, so that a run that is not made can say so
+// (mw-gq6.930).
+func (n Next) calmedThen(ctx context.Context, report *NextReport, c *closeOut, what, then string, handBack, again bool) (reading LoadReading, gaveUp bool, err error) {
 	reading, ok := n.readLoad(ctx)
 	if !ok || !reading.Busy() {
 		return reading, false, nil
@@ -166,8 +174,8 @@ func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what 
 				n.print("  wait    " + busy.Error() + "\n")
 				return reading, true, busy
 			}
-			note := fmt.Sprintf("%s was still at load %.1f of %d cores after waiting %s, so %s ran anyway",
-				n.Host, reading.Load, reading.Cores, waited, what)
+			note := fmt.Sprintf("%s was still at load %.1f of %d cores after waiting %s, so %s %s",
+				n.Host, reading.Load, reading.Cores, waited, what, then)
 			n.print("  wait    " + note + "\n")
 			report.Notes = append(report.Notes, note)
 			return reading, true, nil

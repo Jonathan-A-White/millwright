@@ -181,6 +181,32 @@ func mainNotRunNote(tests []string, why string) string {
 	return labelNote(tests, "main", func(string) string { return NotRunPrefix + why })
 }
 
+// waitForRoom says why the host has no room for the run on main alone, or "" when
+// it has. A host over its cores is waited on first, with the gate's own wait for
+// a calm host (Next.calmed, up to Next.loadBound), because main's red holds a
+// story and a host that is busy by day would otherwise charge the story an
+// attempt for it (mw-gq6.930); the wait says so in the output and the notes. A
+// host whose load or memory cannot be read has room.
+func (n Next) waitForRoom(ctx context.Context, c *closeOut, report *NextReport) string {
+	reading, ok := n.readLoad(ctx)
+	if !ok {
+		return ""
+	}
+	if reading.NoRoom(RoomLimits{}) == "" {
+		return ""
+	}
+	const what = "the run of the failing tests on main alone"
+	if reading.Busy() {
+		var err error
+		if reading, _, err = n.calmedThen(ctx, report, c, what, "it was not made", false, false); err != nil {
+			// Far over its cores at the end of the bound: the host's own error
+			// is the note of why, and the reading is the one it ended on.
+			report.Notes = append(report.Notes, err.Error())
+		}
+	}
+	return reading.NoRoom(RoomLimits{})
+}
+
 // mainAlone runs the tests failed (a failed run of the rig's tests) names, by
 // name, on the target branch alone, in a throwaway landing worktree at base, and
 // reports main's red when it fails every one of them too. Nil when it cannot be
@@ -207,11 +233,9 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	if lock := n.waitForTheGateLock(ctx, c, report, "the failing tests on main alone"); lock != nil {
 		defer n.giveTheGateLockBack(report, lock)
 	}
-	if reading, ok := n.readLoad(ctx); ok {
-		if why := reading.NoRoom(RoomLimits{}); why != "" {
-			labelMain(report, mainNotRunNote(tests, n.Host+" has no room: "+why))
-			return nil
-		}
+	if why := n.waitForRoom(ctx, c, report); why != "" {
+		labelMain(report, mainNotRunNote(tests, n.Host+" has no room: "+why))
+		return nil
 	}
 	at := base
 	if base == StartPoint(n.remote(), c.target) {

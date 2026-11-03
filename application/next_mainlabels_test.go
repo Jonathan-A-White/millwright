@@ -77,6 +77,11 @@ type closeOutOnMain struct {
 
 func aTestsFailStop(t *testing.T, named application.NamedChecks, load application.HostLoad, bound time.Duration, afterwards func()) closeOutOnMain {
 	t.Helper()
+	return aTestsFailStopWaiting(t, named, load, bound, afterwards, func(context.Context, time.Duration) error { return nil })
+}
+
+func aTestsFailStopWaiting(t *testing.T, named application.NamedChecks, load application.HostLoad, bound time.Duration, afterwards func(), loadWait func(context.Context, time.Duration) error) closeOutOnMain {
+	t.Helper()
 	tracker := apptest.NewFakeTracker()
 	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
 	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
@@ -89,7 +94,7 @@ func aTestsFailStop(t *testing.T, named application.NamedChecks, load applicatio
 		Tracker: tracker, Vault: vault, Worktrees: landing, Landing: landing,
 		Checks: twoFailingTests{afterwards: afterwards}, Slot: aSlot{}, Mailbox: mailbox,
 		NamedChecks: named, Load: load, MainAloneBound: bound,
-		LoadWait: func(context.Context, time.Duration) error { return nil },
+		LoadWait: loadWait,
 		Seat:     "builder", Host: "laptop",
 		Rigs: map[string]string{"millwright": "/rigs/millwright"},
 		Out:  io.Discard, Err: io.Discard,
@@ -156,6 +161,84 @@ func TestAStopLabelsTestsAsNotRunWhenTheHostHasNoRoom(t *testing.T) {
 	}
 	if got.landing.opened != 0 {
 		t.Errorf("expected no worktree opened for a run that is not made, got %d", got.landing.opened)
+	}
+}
+
+// aHostThatCalmsAfter is a host at load 2 of 8 cores while the story's own run
+// is made, then at load 12 until it has been waited on calmsAfter times, and at
+// load 2 after: busy for the run on main alone, and for it only.
+type aHostThatCalmsAfter struct {
+	mu         sync.Mutex
+	waits      int
+	busy       bool
+	calmsAfter int
+}
+
+// busyNow is what the story's run does when it ends: the host fills.
+func (h *aHostThatCalmsAfter) busyNow() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.busy, h.waits = true, 0
+}
+
+func (h *aHostThatCalmsAfter) Load(context.Context) (application.LoadReading, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.busy || h.waits >= h.calmsAfter {
+		return application.LoadReading{Load: 2, Cores: 8}, nil
+	}
+	return application.LoadReading{Load: 12, Cores: 8}, nil
+}
+
+func (h *aHostThatCalmsAfter) wait(context.Context, time.Duration) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.waits++
+	return nil
+}
+
+// mw-gq6.930: a host over its cores is waited on, up to a bound, before the
+// run on main is given up for no room; main's red then holds the story as it
+// did before mw-gq6.929.
+func TestAStopOnAHostThatCalmsWithinTheBoundIsHeldOnMainsRed(t *testing.T) {
+	named := &namedTestsThat{run: failingOnMain("--- FAIL: TestA (0.01s)\n--- FAIL: TestB (0.01s)\nFAIL\n")}
+	host := &aHostThatCalmsAfter{calmsAfter: 3}
+	got := aTestsFailStopWaiting(t, named, host, 0, host.busyNow, host.wait)
+	if got.report.Reason != application.ReasonMainRed {
+		t.Fatalf("expected the story held on main's red once the host calmed, got %q (%v)", got.report.Reason, got.err)
+	}
+	if len(named.asked) != 1 {
+		t.Errorf("expected one run on main once the host calmed, got %q", named.asked)
+	}
+	if !strings.Contains(strings.Join(got.report.Notes, "\n"), "was busy: waited") {
+		t.Errorf("expected a note that the host was waited on, got %q", got.report.Notes)
+	}
+	if !strings.Contains(got.mail, "TestA: fails on main too") {
+		t.Errorf("expected the mail to say TestA fails on main too, got:\n%s", got.mail)
+	}
+}
+
+func TestAStopOnAHostThatNeverCalmsLabelsTestsAsNotRunAfterABoundedWait(t *testing.T) {
+	named := &namedTestsThat{run: failingOnMain("--- FAIL: TestA\n")}
+	host := &aHostThatCalmsAfter{calmsAfter: 1 << 30}
+	got := aTestsFailStopWaiting(t, named, host, 0, host.busyNow, host.wait)
+	if got.report.Reason != application.ReasonTestsFail {
+		t.Fatalf("expected tests-fail as before, got %q (%v)", got.report.Reason, got.err)
+	}
+	if len(named.asked) != 0 || got.landing.opened != 0 {
+		t.Errorf("expected no run and no worktree on a host that never calmed, got %q and %d opened", named.asked, got.landing.opened)
+	}
+	if host.waits == 0 || time.Duration(host.waits)*application.GateLoadPoll > application.GateLoadBound+application.GateLoadPoll {
+		t.Errorf("expected a bounded wait, got %d polls", host.waits)
+	}
+	for _, want := range []string{"TestA: not run: ", "TestB: not run: ", "load 12.0 of 8 cores"} {
+		if !strings.Contains(got.mail, want) {
+			t.Errorf("expected the refused mail to say %q, got:\n%s", want, got.mail)
+		}
+	}
+	notes := strings.Join(got.report.Notes, "\n")
+	if !strings.Contains(notes, "after waiting") || strings.Contains(notes, "ran anyway") {
+		t.Errorf("expected a note that the wait ran out and nothing ran anyway, got %q", got.report.Notes)
 	}
 }
 
