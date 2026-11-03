@@ -35,8 +35,13 @@ func newSuiteCmd() *cobra.Command {
 			"load under the core count), for at most --calm-bound (default 2h); a host that never calms is\n" +
 			"run on anyway, and the result says so.\n\n" +
 			"Each test file that failed is then run once more alone: for a failure of [tests], the\n" +
-			"command with the file added to it; for a spec, the [changed_specs] command with just that\n" +
-			"spec. A file that fails twice is a failure; one that passes alone is marked flaky.\n\n" +
+			"one step of the [tests] line that runs unit tests (npm test, pnpm or yarn test, vitest,\n" +
+			"jest) with the file given to it, and none of the line's other steps (so `npm test -- <file>`,\n" +
+			"not the install, type check, lint and build again); for a spec, the [changed_specs] command\n" +
+			"with just that spec. A [tests] line with no such step has its failing file marked recheck\n" +
+			"void, with the reason, and it is not run again and not filed; so is a re-run whose output\n" +
+			"says it ran more than one test file. A file that fails twice is a failure; one that passes\n" +
+			"alone is marked flaky.\n\n" +
 			"The whole output is written to runs/suite/<rig>/<UTC date>.log in the vault (each run's\n" +
 			"output capped as a gate log is), and a summary to runs/suite/<rig>/<UTC date>.json: main's\n" +
 			"sha, when it started, how long it took, the load it started at, whether it gave up waiting,\n" +

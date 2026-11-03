@@ -269,7 +269,7 @@ and hand back if the lock is held a third time. So a line of up to 27 minutes is
 out within one check's three calls, and a longer one ends with the Builder's comment, not
 with turns spent. The result file's `gate_waited_seconds` is the part of `duration_seconds`
 the suite spent waiting to take the lock again, and its `lines` are the command lines run, in
-order (the tests, the changed specs, each re-run alone), each with its `command` and
+order (the tests, each re-run alone, the changed specs, each re-run alone), each with its `command` and
 `seconds` run, not counting the wait for the lock: the longest of them is what a close-out
 can wait behind, and the figures above that rest on vitest's and Playwright's own counts can
 be checked against it from the nights kept after 2026-11-04 (a result kept before has no
@@ -278,6 +278,20 @@ host first and then takes the lock in the same way (the suite's lock is given ba
 its lines, so timing can run between them), and runs only after the suite's result of the
 day is kept when the rig asks for both. `Suite.Recheck` (the bug recheck) takes no lock
 itself: its callers hold it (`rerunUnderGate`).
+
+What a re-run alone runs (mw-gq6.924): for a failing file of the `[tests]` line, the one step
+of that line that runs unit tests (`npm test`, `pnpm test`, `yarn test`, `vitest`, `jest`,
+with any `VAR=value` before it) with the file given to it (`TZ=UTC npm test -- <file>`), in
+the tree the whole run installed in, and none of the line's other steps. Before it, the file
+was added to the end of the whole line, so it landed on the last step (`npm run build <file>`)
+and `npm test` ran every file again: Lampas's suite of 2026-11-03 ran its 828 files four
+times, 3.9 of 5.5 hours, and its 'failed alone' was another whole run under load. A rig
+whose `[tests]` line has no such step (a make target, a wrapper script) has its failing
+file marked `recheck void`, with the reason, run again by nothing and filed as nothing; a
+re-run whose output says it ran more than one test file (vitest's `Test Files ... (N)`,
+jest's `Test Suites: ... N total`) is `recheck void` too, so that `alone` is said only of a
+run that was alone. A failing spec of `[changed_specs]` is run with that command and just
+the spec, as before.
 
 `mw check --part N` does not follow the rule. Its parts are named by a host for a rig
 whose whole gate outruns a foreground call, each sized to fit one; a part that only

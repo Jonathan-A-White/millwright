@@ -180,3 +180,102 @@ func TestACappedSuiteLogKeepsItsTail(t *testing.T) {
 		}
 	}
 }
+
+// lampasChain is Lampas's [tests] line: the file a failed run names lands on the
+// end of it when it is appended, as an argument to the build.
+const lampasChain = "npm ci --no-audit --no-fund && TZ=UTC npm test && npm run typecheck && npm run lint && npm run build"
+
+// TestAFailingUnitFileIsRunAloneByTheUnitRunnerAndNotByTheWholeChain: the Lampas
+// suite of 2026-11-03 re-ran three files by appending each to the whole [tests]
+// chain, so npm test ran all 828 files again, an hour each, and the 'alone' was
+// another whole run under load (mw-gq6.924). The re-run is the chain's unit
+// runner step with the file, and no other step of the chain.
+func TestAFailingUnitFileIsRunAloneByTheUnitRunnerAndNotByTheWholeChain(t *testing.T) {
+	whole := " FAIL  tests/unit/variant-render.test.ts > renders\nAssertionError: expected 1 to be 2\n Test Files  1 failed | 827 passed (828)\n"
+	alone := " FAIL  tests/unit/variant-render.test.ts > renders\nAssertionError: expected 1 to be 2\n Test Files  1 failed (1)\n"
+	suite, _, _, _ := lampasSuite(t, map[string]application.Checked{
+		lampasChain: {Output: whole},
+		"TZ=UTC npm test -- tests/unit/variant-render.test.ts": {Output: alone},
+		"npx playwright test ":                                 {Passed: true, Output: "ok\n"},
+	})
+	suite.Tests = map[string]string{"lampas": lampasChain}
+	suite.Filer = nil
+
+	report, err := suite.Run(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	var ran []string
+	for _, one := range suite.Runner.(*apptest.FakeSuiteRunner).Ran() {
+		ran = append(ran, one.Command)
+	}
+	want := []string{lampasChain, "TZ=UTC npm test -- tests/unit/variant-render.test.ts", "npx playwright test "}
+	if !reflect.DeepEqual(ran, want) {
+		t.Fatalf("the commands run: got\n%q\nwant\n%q", ran, want)
+	}
+	if len(report.Result.Failing) != 1 || report.Result.Failing[0].Alone != "failed" || report.Result.Failing[0].Void {
+		t.Errorf("expected the file to have failed twice, got %+v", report.Result.Failing)
+	}
+}
+
+// TestARerunThatRanMoreThanTheFileIsVoidAndNotCalledAlone: a runner that is given
+// a file and runs the rig's other files too has not run the file alone, and its
+// failure says nothing of the file by itself.
+func TestARerunThatRanMoreThanTheFileIsVoidAndNotCalledAlone(t *testing.T) {
+	whole := " FAIL  tests/unit/a.test.ts > renders\nError: x\n Test Files  1 failed | 827 passed (828)\n"
+	suite, _, _, _ := lampasSuite(t, map[string]application.Checked{
+		lampasChain: {Output: whole},
+		"TZ=UTC npm test -- tests/unit/a.test.ts": {Output: whole},
+		"npx playwright test ":                    {Passed: true, Output: "ok\n"},
+	})
+	suite.Tests = map[string]string{"lampas": lampasChain}
+
+	report, err := suite.Run(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	file := report.Result.Failing[0]
+	if !file.Void || !strings.Contains(file.Alone, "828") || strings.Contains(file.Alone, "failed twice") {
+		t.Errorf("expected a void recheck that says it ran 828 files, got %+v", file)
+	}
+}
+
+// TestARigWithNoUnitRunnerStepHasItsFailingFileMarkedVoidAndRunsNoChainAgain: a
+// [tests] line with no step that takes a file to run alone (a make target) is
+// not run again with the file added; the file is recheck void with the reason,
+// and filed as no bug that 'failed twice' (mw-gq6.924).
+func TestARigWithNoUnitRunnerStepHasItsFailingFileMarkedVoidAndRunsNoChainAgain(t *testing.T) {
+	const makeLine = "make test && scripts/check-codemap.sh"
+	whole := "--- FAIL: TestX (0.00s)\nFAIL\tgithub.com/x/y/application\n FAIL  application/x_test.go > TestX\nError: boom\n"
+	suite, _, tracker, mailbox := lampasSuite(t, map[string]application.Checked{
+		makeLine: {Output: whole},
+	})
+	suite.Tests = map[string]string{"lampas": makeLine}
+	suite.ChangedSpecs = nil
+	suite.Runner.(*apptest.FakeSuiteRunner).Respond = func(_, command string) (application.Checked, error) {
+		if command != makeLine {
+			t.Errorf("the suite ran %q: the chain's other steps and the file must not be run again", command)
+		}
+		return application.Checked{Output: whole}, nil
+	}
+
+	report, err := suite.Run(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	for _, file := range report.Result.Failing {
+		if !file.Void || !strings.Contains(file.Alone, "no unit runner step") || file.Flaky {
+			t.Errorf("expected %s to be recheck void with its reason, got %+v", file.File, file)
+		}
+	}
+	if len(report.Result.Failing) == 0 {
+		t.Fatalf("the test's output names no failing file: %q", whole)
+	}
+	if stories := tracker.Stories(); len(stories) != 0 {
+		t.Errorf("expected no bug filed for a void recheck, got %v", stories)
+	}
+	mail, _ := mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if len(mail) != 1 || strings.Contains(mail[0].Body, "failed twice") {
+		t.Errorf("expected one mail that does not say failed twice, got %+v", mail)
+	}
+}
