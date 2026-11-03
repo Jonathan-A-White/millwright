@@ -75,12 +75,14 @@ type otherLander struct {
 	slot  application.CrossSlot
 	gates string // the file this host's merged-result tests write a line in each time they begin
 
-	mu      sync.Mutex
-	holding *application.CrossHolding // the landing in progress when this host's close-out began
-	served  int                       // how many of this host's merged-result test runs it has landed a story during
-	landed  int
-	busy    bool
-	err     error
+	mu       sync.Mutex
+	holding  *application.CrossHolding // the landing in progress when this host's close-out began
+	served   int                       // how many of this host's merged-result test runs it has landed a story during
+	landed   int
+	busy     bool
+	err      error
+	progress int           // counts each step the other host takes (taking the slot, a landing begun, a landing done), so idle can tell slow from stuck
+	stall    time.Duration // how long idle waits with the other host making no progress; otherHostStall when zero
 
 	seen     chan struct{} // closed once this host has read the slot and found it held by this one
 	seenOnce sync.Once
@@ -177,6 +179,7 @@ func (l *otherLander) run(ctx context.Context) {
 		case pending:
 			l.mu.Lock()
 			l.busy = true
+			l.progress++
 			l.mu.Unlock()
 			taken, _ := l.slot.Take(ctx, l.c.rigKey(), application.Holders(nextSeat, l.host, fmt.Sprintf("mw-other.%d", l.count()+1)))
 			if taken == nil {
@@ -198,6 +201,9 @@ func (l *otherLander) run(ctx context.Context) {
 // land pushes one story of the other host's to the origin, gives its slot back,
 // and, when it landed during this host's merged-result tests, lets them finish.
 func (l *otherLander) land(ctx context.Context, holding *application.CrossHolding, duringGate bool) {
+	l.mu.Lock()
+	l.progress++
+	l.mu.Unlock()
 	err := l.push()
 	holding.Release(context.Background())
 	l.mu.Lock()
@@ -206,6 +212,7 @@ func (l *otherLander) land(ctx context.Context, holding *application.CrossHoldin
 		l.holding = nil
 	}
 	l.busy = false
+	l.progress++
 	if err != nil {
 		l.err = errors.Join(l.err, err)
 		return
@@ -246,13 +253,21 @@ func (l *otherLander) push() error {
 }
 
 // idle waits for the other host to have nothing left to do: no landing in
-// progress and none owed to a run of this host's tests.
+// progress and none owed to a run of this host's tests. It waits as long as
+// the other host keeps making progress, and fails it only when it has made none
+// for the stall limit: how long a landing takes depends on the host's load, so
+// a deadline from when idle began failed the scenario on a busy host
+// (mw-gq6.907), where the stall of a stuck landing does not depend on it.
 func (l *otherLander) idle() error {
-	deadline := time.Now().Add(15 * time.Second)
+	l.mu.Lock()
+	last := l.progress
+	l.mu.Unlock()
+	deadline := time.Now().Add(l.stallLimit())
 	for time.Now().Before(deadline) {
 		l.mu.Lock()
 		quiet := l.holding == nil && !l.busy && countLines(l.gates) <= l.served
 		err := l.err
+		now := l.progress
 		l.mu.Unlock()
 		if err != nil {
 			return fmt.Errorf("the other host could not land: %w", err)
@@ -260,10 +275,25 @@ func (l *otherLander) idle() error {
 		if quiet {
 			return nil
 		}
+		if now != last {
+			last = now
+			deadline = time.Now().Add(l.stallLimit())
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	return fmt.Errorf("the other host was still landing after 15s")
+	return fmt.Errorf("the other host was still landing after %s with no progress", l.stallLimit())
 }
+
+func (l *otherLander) stallLimit() time.Duration {
+	if l.stall > 0 {
+		return l.stall
+	}
+	return otherHostStall
+}
+
+// otherHostStall is how long the other host may go without a step before it is
+// called stuck; far over what any landing costs a loaded host.
+const otherHostStall = 3 * time.Minute
 
 // countLines is how many lines a file holds; none when it is not there.
 func countLines(path string) int {
