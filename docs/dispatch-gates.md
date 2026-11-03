@@ -253,7 +253,12 @@ run again; the second hand-back in an attempt says the same and to comment on th
 and hand back if the lock is held a third time. So a line of up to 27 minutes is waited
 out within one check's three calls, and a longer one ends with the Builder's comment, not
 with turns spent. The result file's `gate_waited_seconds` is the part of `duration_seconds`
-the suite spent waiting to take the lock again. The nightly `mw timing` waits for a calm
+the suite spent waiting to take the lock again, and its `lines` are the command lines run, in
+order (the tests, the changed specs, each re-run alone), each with its `command` and
+`seconds` run, not counting the wait for the lock: the longest of them is what a close-out
+can wait behind, and the figures above that rest on vitest's and Playwright's own counts can
+be checked against it from the nights kept after 2026-11-04 (a result kept before has no
+`lines`, and is read as one with none). The nightly `mw timing` waits for a calm
 host first and then takes the lock in the same way (the suite's lock is given back between
 its lines, so timing can run between them), and runs only after the suite's result of the
 day is kept when the rig asks for both. `Suite.Recheck` (the bug recheck) takes no lock
