@@ -388,18 +388,21 @@ type Next struct {
 	LoadBound time.Duration
 	LoadWait  func(ctx context.Context, d time.Duration) error
 
-	// CalmHandBack, when it is set, changes what the first wait for a calm host
-	// does at LoadBound with the host still busy: it says again every minute that
-	// it is waiting, and instead of running the tests anyway it ends the gate with
-	// the error CalmHandBack returns, the load being the reading taken last and
-	// since when the wait began. mw check sets it (mw-gq6.819); a close-out does
-	// not, and runs the tests anyway unless the host is far over its cores.
-	CalmHandBack func(ctx context.Context, reading LoadReading, since time.Time, waited time.Duration) error
+	// CalmHandBack, when it is set, changes what the waits for a calm host do at
+	// LoadBound with the host still busy: the first, and the second before the
+	// rerun of a run that failed while the host was busy, again being true for it
+	// (mw-gq6.918). It says again every minute that it is waiting, and instead of
+	// running the tests anyway it ends the gate with the error CalmHandBack
+	// returns, the load being the reading taken last and since when the wait
+	// began. mw check sets it (mw-gq6.819); a close-out does not, and runs the
+	// tests anyway unless the host is far over its cores.
+	CalmHandBack func(ctx context.Context, reading LoadReading, since time.Time, waited time.Duration, again bool) error
 
 	// LoadBoundLeft, when it is set, is how long the wait that CalmHandBack ends
 	// may still go on, read when the wait begins, instead of LoadBound: mw check
 	// sets it to what its one deadline has left after the waits for the merge slot
-	// and the gate lock (mw-gq6.915).
+	// and the gate lock (mw-gq6.915), and after the tests for the second wait
+	// (mw-gq6.918).
 	LoadBoundLeft func() time.Duration
 
 	// GateLock keeps this host to one rig gate at a time, whatever rig: a

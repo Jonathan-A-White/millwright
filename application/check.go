@@ -291,36 +291,52 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	report.Branch, report.Target = c.branch, c.target
 
 	// The rig's tests are run holding the rig's merge slot, shared with the
-	// other checks of the rig and apart from a landing's. The waits for the slot,
-	// the gate lock and a calm host are one deadline from here (mw-gq6.915).
+	// other checks of the rig and apart from a landing's. Every wait of the check
+	// is one deadline from here (mw-gq6.915): the slot, the gate lock and a calm
+	// host before the tests, and after them the slot and gate lock of the changed
+	// specs and the wait for a calm host before a run again (mw-gq6.918).
 	began := time.Now()
-	checks := k.Checks
+	left := func() time.Duration { return max((k.partSlotWait() - time.Since(began)).Round(time.Millisecond), 0) }
+	// The commit the checks are run at, when the worktree holds nothing else.
+	tip := k.cleanTip(ctx, c)
+	tests := &lastChecks{inner: k.Checks}
+	checks := Checks(tests)
 	load := k.Load
-	loadBound, handBack := k.LoadBound, func(ctx context.Context, reading LoadReading, since time.Time, waited time.Duration) error {
-		return k.calmRefusal(ctx, c, report.Attempt, reading, since, waited)
+	loadBound, handBack := k.LoadBound, func(ctx context.Context, reading LoadReading, since time.Time, waited time.Duration, again bool) error {
+		return k.calmRefusal(ctx, c, report.Attempt, reading, since, waited, again)
 	}
 	split := k.splitGate(path.Rig)
+	var kept, keptNote string
 	if split {
 		// A split gate runs nothing here: the parts were run, each in a call of
-		// its own, and this reads what they said at the tip. It takes no slot
-		// and waits for no calm host, so it finishes at once.
-		checks = recordedGate{records: k.Records, storyID: storyID, attempt: report.Attempt, parts: k.partsOf(path.Rig), tip: k.cleanTip(ctx, c)}
+		// its own, and this reads what they said at the tip. It takes no slot and
+		// waits for no calm host, so it finishes at once.
+		checks = recordedGate{records: k.Records, storyID: storyID, attempt: report.Attempt, parts: k.partsOf(path.Rig), tip: tip}
 		load, handBack = nil, nil
 	} else {
 		// A whole check waits for a calm host no longer than for the slot, and is
 		// handed back in one line when it is still busy (mw-gq6.819).
 		loadBound = k.partSlotWait()
+		kept = k.keptTests(ctx, storyID, report.Attempt, tip)
 	}
 	var gateLock GateLock
-	if !split && k.Slot != nil && k.GateLock != nil {
+	switch {
+	case kept != "":
+		// The tests passed at this very commit in an earlier call of this check, which
+		// was handed back on the changed specs' slot or gate lock: they are not run
+		// again, and so need no slot, gate lock or calm host (mw-gq6.918).
+		checks = keptChecks{command: kept}
+		load, handBack = nil, nil
+		keptNote = fmt.Sprintf("the rig's tests passed at %s in an earlier call of this check, which the changed specs' slot or gate lock handed back, and were not run again", shortCommit(tip))
+	case !split && k.Slot != nil && k.GateLock != nil:
 		// Slot, then gate lock, taken before the wait for a calm host so that the
 		// load waited on is not another gate's: a close-out does the same.
-		gateLock = checkGateLock{k: k, c: c, attempt: report.Attempt}
-	} else if !split && k.Slot != nil {
+		gateLock = checkGateLock{k: k, c: c, attempt: report.Attempt, left: left}
+	case !split && k.Slot != nil:
 		checks = slottedChecks{
-			checks: k.Checks,
+			checks: tests,
 			take: func(ctx context.Context) (Holding, error) {
-				return k.takeSlotWithin(ctx, c, wholeTry(c, "the rig's tests", CheckWholeHeldFileName(report.Attempt)))
+				return k.takeSlotFor(ctx, c, wholeTry(c, "the rig's tests", CheckWholeHeldFileName(report.Attempt)), left())
 			},
 		}
 	}
@@ -332,18 +348,24 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 			specs = slottedSpecs{
 				specs: k.SpecChecks,
 				take: func(ctx context.Context) (Holding, error) {
+					try := wholeTry(c, "the rig's changed specs", CheckSpecsHeldFileName(report.Attempt))
+					var holding Holding
+					var err error
 					if k.GateLock == nil {
-						return k.takeSlotWithin(ctx, c, wholeTry(c, "the rig's changed specs", CheckSpecsHeldFileName(report.Attempt)))
+						holding, err = k.takeSlotFor(ctx, c, try, left())
+					} else {
+						var turn GateTurn
+						turn, err = k.takeForTests(ctx, c, try, left(), nil)
+						holding = turn.Holding
 					}
-					turn, err := k.takeForTests(ctx, c, wholeTry(c, "the rig's changed specs", CheckSpecsHeldFileName(report.Attempt)), nil)
-					return turn.Holding, err
+					if err != nil && !split {
+						k.keepTests(ctx, c, report.Attempt, tip, tests.last())
+					}
+					return holding, err
 				},
 			}
 		}
 	}
-
-	// The commit the checks are run at, when the worktree holds nothing else.
-	tip := k.cleanTip(ctx, c)
 
 	// The checks are mw next's own, run by the part of it that reads and never
 	// writes, so that what a session is told here and what it is told at
@@ -365,12 +387,15 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		LoadPoll:      k.LoadPoll,
 		LoadBound:     loadBound,
 		CalmHandBack:  handBack,
-		LoadBoundLeft: func() time.Duration { return (k.partSlotWait() - time.Since(began)).Round(time.Millisecond) },
+		LoadBoundLeft: left,
 		LoadWait:      k.LoadWait,
 		Host:          k.Host,
 		Out:           k.Out,
 	}.refusals(ctx, c, &read, true)
 	report.Commits, report.Notes = read.Commits, read.Notes
+	if keptNote != "" {
+		report.Notes = append(report.Notes, keptNote)
+	}
 	if split && report.Passed() {
 		report.Notes = append(report.Notes, fmt.Sprintf("the gate ran as %d parts and every part passed at the tip", len(k.partsOf(path.Rig))))
 	}
