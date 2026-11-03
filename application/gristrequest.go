@@ -187,16 +187,17 @@ func (g GristRequest) MoveRequest(ctx context.Context, from, to string) error {
 // metadata, sends the sender moved (bead: to, reason: its title), keeps a
 // record for to that follows it as a filed request, marks the old record moved
 // so it is followed no more, and comments the old bead. A bead that follows a
-// different request already is refused, before anything is written or sent.
+// different request already (followed: not one that moved on, by its MovedTo or
+// by hand) is refused, before anything is written or sent.
 func (g GristRequest) moveTo(ctx context.Context, old GristRequestRecord, to string) error {
 	if to == old.Bead {
 		return nil
 	}
-	current, ok, err := g.Requests.Get(ctx, to)
+	current, ok, err := g.followed(ctx, to)
 	if err != nil {
 		return fmt.Errorf("mw grist request: %w", err)
 	}
-	if ok && current.MovedTo == "" && current.Request != old.Request {
+	if ok && current.Request != old.Request {
 		return fmt.Errorf("mw grist request: %s already follows the request %s, so %s's request %s is not moved there: nothing was sent", to, current.Request, old.Bead, old.Request)
 	}
 	detail, err := g.Tracker.ShowStory(ctx, to)
