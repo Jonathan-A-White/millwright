@@ -413,6 +413,13 @@ func newDoctorCmd() *cobra.Command {
 			staleLandings := &application.StaleLandingsCheck{Dirs: landingDirs, Trees: doctor.LandingTrees{}}
 			// Claims no host names, held by a dispatch that died, with no session.
 			stuckClaims := &application.NoSessionClaimsCheck{Claims: mwGateway(vault, host).StaleClaims}
+			// The follower alive and writing nothing: no bead or mail event for
+			// minutes after the beads' last change, or a view older than them
+			// (mw-gq6.893).
+			followerStalled, err := followerStallCheck(mwGateway(vault, host))
+			if err != nil {
+				return err
+			}
 			// The connection rate of a beads server this host runs; a host that
 			// reaches another's, or has none, leaves it to the host that runs it.
 			var churn application.DoctorChecks
@@ -461,6 +468,7 @@ func newDoctorCmd() *cobra.Command {
 				recheckSkips,
 				staleLandings,
 				stuckClaims,
+				followerStalled,
 				ageKey,
 				claudeLogin,
 				usageFresh,
