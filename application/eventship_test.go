@@ -217,8 +217,8 @@ func TestShipRetriesPendingBatchesOldestFirstBeforeSendingTheNewOne(t *testing.T
 	f.add(t, 2)
 	f.run(t)
 	st, _ := f.state.Load(context.Background())
-	if len(st.Pending) != 2 {
-		t.Fatalf("pending is %+v, want two batches", st.Pending)
+	if len(st.Pending) != 1 || st.Pending[0] != (application.ShipRange{From: 1, To: 3}) {
+		t.Fatalf("pending is %+v, want the two batches kept as one range, 1 to 3", st.Pending)
 	}
 
 	f.backend.ChainErr = nil
@@ -230,8 +230,8 @@ func TestShipRetriesPendingBatchesOldestFirstBeforeSendingTheNewOne(t *testing.T
 		_, b := f.open(t, p)
 		seen = append(seen, b.From)
 	}
-	if len(seen) != 3 || seen[0] != 1 || seen[1] != 2 || seen[2] != 4 {
-		t.Fatalf("the chain got batches starting at %v, want 1, 2, then the new 4", seen)
+	if len(seen) != 2 || seen[0] != 1 || seen[1] != 4 {
+		t.Fatalf("the chain got batches starting at %v, want 1 (the range, in one record), then the new 4", seen)
 	}
 }
 
@@ -293,14 +293,16 @@ func TestShipPastTheDailyCapGoesFallbackAndSaysSoOnce(t *testing.T) {
 		t.Fatalf("state is %+v, want 2 on chain and the over-cap batches pending", st)
 	}
 
-	// The next UTC day the count starts again: the oldest pending batches go
-	// on chain, up to the cap again.
-	before := len(st.Pending)
+	// The three over-cap batches are one range, which goes on chain the next
+	// UTC day, when the count starts again.
+	if len(st.Pending) != 1 {
+		t.Fatalf("pending is %v, want the three over-cap batches as one range", st.Pending)
+	}
 	f.at = f.at.Add(24 * time.Hour)
 	f.run(t)
 	st, _ = f.state.Load(context.Background())
-	if len(st.Pending) != before-2 || st.Chain != 2 || len(f.backend.Broadcasts()) != 4 {
-		t.Fatalf("state is %+v after the day turned, want %d pending, 2 on chain today and 4 in all", st, before-2)
+	if len(st.Pending) != 0 || st.Chain != 1 || len(f.backend.Broadcasts()) != 3 {
+		t.Fatalf("state is %+v after the day turned, want nothing pending, 1 on chain today and 3 in all", st)
 	}
 }
 
@@ -874,4 +876,247 @@ func TestShipSpendsABudgetOnTheBacklogAndSendsTheNewEventsDirectAllTheSame(t *te
 			t.Fatalf("record %d on chain is events %d to %d, want %d to %d (oldest first, none twice)", i, got[i].From, got[i].To, want[i].From, want[i].To)
 		}
 	}
+}
+
+// countingStates is the fixture's state with every Save counted.
+type countingStates struct {
+	application.ShipStates
+	saves int
+}
+
+func (c *countingStates) Save(ctx context.Context, s application.ShipState) error {
+	c.saves++
+	return c.ShipStates.Save(ctx, s)
+}
+
+// addBig appends n events of about size bytes of detail each.
+func (f *shipFixture) addBig(t *testing.T, n, size int) {
+	t.Helper()
+	big := strings.Repeat("x", size)
+	var evs []events.Event
+	for i := 0; i < n; i++ {
+		evs = append(evs, events.Event{Ts: f.at, Kind: events.KindBeadChanged, Bead: "b", Actor: "a", From: "open", To: "open", Detail: big, Lane: events.LaneNormal})
+	}
+	if _, err := f.log.Append(context.Background(), evs); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// restart is a follower that has just started over the same log, backend and
+// state, with the cap the test had set.
+func (f *shipFixture) restart() {
+	cap := f.ship.DailyCap
+	f.ship = f.newShip()
+	f.ship.DailyCap = cap
+}
+
+// A pass over the cap puts its batch in the last pending range when that range
+// ends where the batch starts, so the backlog does not grow by a range a pass
+// (mw-gq6.895); the ranges pending before the change are left as they are.
+func TestShipPassOverTheCapJoinsItsBatchToTheLastPendingRangeAndLeavesOldRangesAlone(t *testing.T) {
+	f := newShipFixture(t)
+	f.ship.DailyCap = 0
+	f.add(t, 2)
+	old := []application.ShipRange{{From: 1, To: 1}, {From: 2, To: 2}}
+	if err := f.state.Save(context.Background(), application.ShipState{Shipped: 2, Day: "2026-10-01", Pending: old}); err != nil {
+		t.Fatal(err)
+	}
+	f.restart()
+	for i := 0; i < 4; i++ {
+		f.at = f.at.Add(3 * time.Second)
+		f.add(t, 1)
+		f.run(t)
+	}
+	st, _ := f.state.Load(context.Background())
+	// the cap alarm is an event of the log too: seqs 3, 5, 6, 7 are the new ones
+	want := []application.ShipRange{{From: 1, To: 1}, {From: 2, To: 2}, {From: 3, To: 7}}
+	if len(st.Pending) != len(want) {
+		t.Fatalf("pending is %v after four passes over the cap, want %v", st.Pending, want)
+	}
+	for i := range want {
+		if st.Pending[i] != want[i] {
+			t.Fatalf("pending is %v after four passes over the cap, want %v", st.Pending, want)
+		}
+	}
+	if st.Shipped != 7 || len(f.backend.Delivered()) != 4 {
+		t.Fatalf("state %+v and %d records direct: each pass still sends its batch direct", st, len(f.backend.Delivered()))
+	}
+}
+
+// A range that holds more than one batch goes on chain in records of at most
+// the record's size, every event once and in order.
+func TestShipRetryPutsAJoinedRangeOnChainInRecordsUnderTheSizeCap(t *testing.T) {
+	f := newShipFixture(t)
+	f.ship.DailyCap = 0
+	for i := 0; i < 8; i++ {
+		f.at = f.at.Add(3 * time.Second)
+		f.addBig(t, 5, 900)
+		f.run(t)
+	}
+	if st, _ := f.state.Load(context.Background()); len(st.Pending) != 1 || st.Pending[0] != (application.ShipRange{From: 1, To: 41}) {
+		t.Fatalf("pending is %v, want one range 1 to 41 (the cap alarm is event 6)", st.Pending)
+	}
+
+	f.ship.DailyCap = 500
+	f.at = f.at.Add(3 * time.Second)
+	f.run(t)
+	next := uint64(1)
+	for _, payload := range f.chainPayloads(t) {
+		_, b := f.open(t, payload)
+		plain, _ := json.Marshal(b)
+		if len(plain) > 7200+200 || len(payload) > 10240 {
+			t.Fatalf("a record of events %d to %d is %d bytes of text and %d on the wire, past the cap", b.From, b.To, len(plain), len(payload))
+		}
+		if b.From != next || b.Lane != events.LaneNormal {
+			t.Fatalf("a record starts at %d in lane %s, want %d in normal", b.From, b.Lane, next)
+		}
+		next = b.To + 1
+	}
+	if next != 42 {
+		t.Fatalf("the records on chain end at %d, want every event to 41", next-1)
+	}
+	if n := len(f.chainPayloads(t)); n < 5 {
+		t.Fatalf("%d records for 41 events of 900 bytes, want the size cap to cut them in 5 or more", n)
+	}
+	if st, _ := f.state.Load(context.Background()); len(st.Pending) != 0 {
+		t.Fatalf("pending is %v after the range went on chain", st.Pending)
+	}
+}
+
+// A retry over a long backlog keeps the state once, not after every send.
+func TestShipRetryOverALongBacklogKeepsTheStateOnceNotAfterEverySend(t *testing.T) {
+	f := newShipFixture(t)
+	f.add(t, 200)
+	var pending []application.ShipRange
+	for n := uint64(1); n <= 200; n++ {
+		pending = append(pending, application.ShipRange{From: n, To: n})
+	}
+	if err := f.state.Save(context.Background(), application.ShipState{Shipped: 200, Day: "2026-10-01", Pending: pending}); err != nil {
+		t.Fatal(err)
+	}
+	counting := &countingStates{ShipStates: f.state}
+	f.ship.State = counting
+	f.run(t)
+	if got := len(f.backend.Broadcasts()); got != 200 {
+		t.Fatalf("%d records on chain, want all 200", got)
+	}
+	if counting.saves > 1 {
+		t.Fatalf("the state was written %d times in one pass over 200 sends, want once", counting.saves)
+	}
+	if st, _ := f.state.Load(context.Background()); len(st.Pending) != 0 || st.Chain != 200 {
+		t.Fatalf("state is %+v, want nothing pending and 200 on chain, kept", st)
+	}
+}
+
+// A pass that only retried (no new events) still keeps what it put on chain.
+func TestShipRetryWithNoNewEventsStillKeepsWhatItSent(t *testing.T) {
+	f := newShipFixture(t)
+	f.add(t, 3)
+	pending := []application.ShipRange{{From: 1, To: 1}, {From: 2, To: 2}, {From: 3, To: 3}}
+	if err := f.state.Save(context.Background(), application.ShipState{Shipped: 3, Day: "2026-10-01", Pending: pending}); err != nil {
+		t.Fatal(err)
+	}
+	f.run(t)
+	f.restart()
+	f.run(t)
+	if got := f.seqRangesOnChain(t); len(got) != 3 {
+		t.Fatalf("%d records on chain across a restart, want 3, each once: %v", len(got), got)
+	}
+}
+
+// Across restarts after every pass, over several days of the cap, every event
+// goes direct once and on chain once, oldest first.
+func TestShipLosesNoEventAndSendsNoneTwiceAcrossRestartsAndDaysOfTheCap(t *testing.T) {
+	f := newShipFixture(t)
+	f.ship.DailyCap = 2
+	for i := 0; i < 12; i++ {
+		f.at = f.at.Add(3 * time.Second)
+		f.addBig(t, 4, 700)
+		f.restart()
+		f.run(t)
+	}
+	for day := 0; day < 30; day++ {
+		f.at = f.at.Add(24 * time.Hour)
+		f.restart()
+		f.run(t)
+		f.restart()
+		f.run(t)
+	}
+	var direct, chain []uint64
+	for _, p := range f.backend.Delivered() {
+		_, b := f.open(t, p)
+		for _, e := range b.Events {
+			direct = append(direct, e.Seq)
+		}
+	}
+	for _, p := range f.chainPayloads(t) {
+		_, b := f.open(t, p)
+		for _, e := range b.Events {
+			chain = append(chain, e.Seq)
+		}
+	}
+	total, _ := f.log.Head(context.Background()) // the cap alarms are events of the log too
+	for name, got := range map[string][]uint64{"direct": direct, "chain": chain} {
+		if uint64(len(got)) != total || total < 48 {
+			t.Fatalf("%d events %s, want %d, each once: %v", len(got), name, total, got)
+		}
+		for i, seq := range got {
+			if seq != uint64(i+1) {
+				t.Fatalf("event %d is number %d on the %s road, want %d (in order, none twice)", i, seq, name, i+1)
+			}
+		}
+	}
+	if st, _ := f.state.Load(context.Background()); len(st.Pending) != 0 {
+		t.Fatalf("pending is %v, want it cleared", st.Pending)
+	}
+}
+
+// The chain failing in the middle of a joined range leaves the rest of it
+// pending, from the first event not on chain.
+func TestShipRetryThatFailsInTheMiddleOfAJoinedRangeResumesAtTheFirstEventNotOnChain(t *testing.T) {
+	f := newShipFixture(t)
+	f.ship.DailyCap = 0
+	for i := 0; i < 6; i++ {
+		f.at = f.at.Add(3 * time.Second)
+		f.addBig(t, 5, 900)
+		f.run(t)
+	}
+	f.ship.DailyCap = 500
+	f.at = f.at.Add(3 * time.Second)
+	f.ship.ChainRoad = &failAfter{Chain: f.ship.ChainRoad, n: 2}
+	f.run(t)
+	sent := f.seqRangesOnChain(t)
+	if len(sent) != 2 {
+		t.Fatalf("%d records on chain, want 2 before the chain failed", len(sent))
+	}
+	st, _ := f.state.Load(context.Background())
+	if len(st.Pending) != 1 || st.Pending[0] != (application.ShipRange{From: sent[1].To + 1, To: 31}) {
+		t.Fatalf("pending is %v, want one range from %d to 31", st.Pending, sent[1].To+1)
+	}
+	f.restart()
+	f.at = f.at.Add(3 * time.Second)
+	f.run(t)
+	next := uint64(1)
+	for _, r := range f.seqRangesOnChain(t) {
+		if r.From != next {
+			t.Fatalf("a record starts at %d, want %d: %v", r.From, next, f.seqRangesOnChain(t))
+		}
+		next = r.To + 1
+	}
+	if next != 32 {
+		t.Fatalf("the chain holds events up to %d, want 31", next-1)
+	}
+}
+
+// failAfter lets n sends through and fails the rest.
+type failAfter struct {
+	application.Chain
+	n int
+}
+
+func (c *failAfter) Send(ctx context.Context, payload []byte) (string, error) {
+	if c.n--; c.n < 0 {
+		return "", errors.New("the chain went down")
+	}
+	return c.Chain.Send(ctx, payload)
 }
