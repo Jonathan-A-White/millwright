@@ -34,9 +34,12 @@ func newCheckCmd() *cobra.Command {
 			"at once rather than the first only, and check exits non-zero when there is any.\n\n" +
 			"check is read-only: it writes no comment, run state or ledger line, commits nothing in the vault\n" +
 			"(bar the story's check log, below),\n" +
-			"and does not fetch, merge or push. The one thing it takes is the rig's merge slot, around the\n" +
+			"and does not fetch, merge or push. The two things it takes are the rig's merge slot, around the\n" +
 			"rig's tests, so that a close-out's tests and a check's on one rig do not run at once and starve\n" +
-			"each other: it waits for the slot, saying who holds it, and --no-slot skips the wait.\n\n" +
+			"each other, and then this host's gate lock, the one a close-out's gate takes, so that one gate-weight\n" +
+			"run goes at a time on the host whoever asked for it (mw-gq6.906). It waits for both together, nine\n" +
+			"minutes at most, saying who holds each and since when, and ends with one line giving the command\n" +
+			"to run again; --no-slot skips both waits. mw check --part N does not take the gate lock.\n\n" +
 			"check treats a busy host as the close-out does (mw-gq6.228): it waits, up to the close-out's bound,\n" +
 			"for the host to calm before the tests, and runs tests that failed while it was busy once more when\n" +
 			"it has calmed, reporting only a second failure and saying it ran twice.\n\n" +
@@ -95,7 +98,9 @@ func newCheckCmd() *cobra.Command {
 			}
 
 			var slot application.MergeSlot
+			var gateLock application.GateLock
 			if !noSlot {
+				gateLock = hostGateLock()
 				bench, err := config.Benchmark()
 				if err != nil {
 					return err
@@ -121,6 +126,7 @@ func newCheckCmd() *cobra.Command {
 				NamedChecks: checks,
 				Changes:     worktrees,
 				Slot:        slot,
+				GateLock:    gateLock,
 				Parts:       checks,
 				Records:     mwVault(dir, host),
 				Part:        part,

@@ -160,6 +160,21 @@ func (g *Gate) Holder() string {
 	return gateHolder(g.path())
 }
 
+// HeldSince says when the lock was taken by whoever holds it now, read without
+// taking it: the time the file was last written, which is when its holder
+// named itself in it. It is zero when nobody holds the lock or the time cannot
+// be read (mw-gq6.906).
+func (g *Gate) HeldSince() time.Time {
+	if g.Holder() == "" {
+		return time.Time{}
+	}
+	info, err := os.Stat(g.path())
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
+}
+
 // gateHolding is a gate lock somebody has: the open file whose flock it is.
 type gateHolding struct {
 	file   *os.File

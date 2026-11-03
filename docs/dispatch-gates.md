@@ -43,6 +43,7 @@ three.
 - [The harness-hold gate](#the-harness-hold-gate)
 - [The smoke-hold gate, and the gates that cannot hold their own fix](#the-smoke-hold-gate-and-the-gates-that-cannot-hold-their-own-fix)
 - [The starved-rig alarm](#the-starved-rig-alarm)
+- [Who runs the rig's tests, and under which lock](#who-runs-the-rigs-tests-and-under-which-lock)
 
 <!-- /toc -->
 
@@ -176,3 +177,61 @@ is mapped there too, and a test says so.
 | `cap` | cap |
 | `pour-refused` | pour refused |
 | `claim-lost` | claim lost |
+
+## Who runs the rig's tests, and under which lock
+
+One gate-weight run goes at a time on a host, whoever asked for it: the host's gate
+lock (`application.GateLock`, `hostlock.Gate`, mw-gq6.388). A Builder's whole
+`mw check` takes it too (`Check.GateLock`, mw-gq6.906).
+
+The numbers that decided it, from the vault's bench lines (`runs/*/result.json`,
+`gate_seconds`, `running_count`) and the Builders' check logs (`runs/*/check-N.log`)
+of the 7 days to 2026-11-03, desktop, 43 gates: the 38 gates no Builder's check
+finished inside took 419 s on average (median 223 s); the 5 gates a Builder's check
+finished inside took 1,472 s (median 1,140 s). A check that finished inside a gate
+is a floor of the checks that overlapped one, since a check's log is written when it
+ends. By stories running when the gate began, the 3 and 4 running gates average
+744 s and 750 s against 203 s for 1 running (mw-gq6.903); the two with a check
+inside average 1,746 to 1,890 s. The sample is small; the direction is the same in
+every row.
+
+A whole check takes, in this order, the rig's merge slot (shared with the other
+checks, alone for a landing) and then the gate lock, for the rig's tests and again
+for the changed specs, and gives both back when they end. The order is the
+close-out's: `mw next` holds the slot alone while it waits for the lock, so a check
+that held the lock and waited for the slot would wait for a close-out that waits for
+it. The two waits are one budget, `CheckPartSlotWait` (9 minutes), under the 590
+seconds a Builder's foreground call is given. A wait that runs out ends the check in
+one line: the rig's tests did not start, who holds the gate lock, since when, that
+nothing was run, and the command to run again (`mw check <story>`); a hand-back
+repeated in one attempt is counted once (`runs/<story>/check-N-whole-gate.slot`).
+While it waits it says every minute who holds the lock now and since when. It is a
+wait inside one call, not a loop that spends the Builder's turns. The wait for a
+calm host that follows (mw-gq6.819) is its own, up to the same nine minutes, taken
+only once the lock is held, so the load waited on is not another gate's.
+`mw check --no-slot` takes neither.
+
+`mw check --part N` does not follow the rule. Its parts are named by a host for a rig
+whose whole gate outruns a foreground call, each sized to fit one; a part that only
+runs tools in the worktree takes no merge slot at all (`PartNeedsSlot`, mw-gq6.814),
+so that a landing does not hold it back, and putting it behind a gate that holds the
+lock for 9 to 25 minutes would reverse that with no measurement of parts to say it
+should: the bench above is of the whole check of an unsplit rig, and the parts' records
+keep no times. Measuring parts is reported to the Mayor to file as a follow-up.
+
+Every place mw runs the rig's tests, and what it takes:
+
+| Where | Merge slot | Gate lock | Follows the rule |
+|-|-|-|-|
+| `mw next` close-out, gate in the worktree | no (taken after it) | yes | yes |
+| `mw next` close-out, gate on the merged result | yes, alone | yes, kept to the end of the landing | yes |
+| `mw land` batch gate (and its changed specs) | yes, alone, yielded while it waits for the lock or calm | yes | yes |
+| `mw check`, whole, rig not split | yes, shared | yes (after the slot) | yes |
+| `mw check`, changed specs | yes, shared | yes | yes |
+| `mw check --part N` | only a part that is not slot-free | no | no, see above |
+| `mw check --no-slot` | no | no | no, the escape hatch |
+| `mw dispatch` bug recheck and `mw next` fixed-on-main recheck (`rerunUnderGate`) | no | yes, a short wait, else "not re-checked" | yes |
+| nightly `mw timing` | no | yes | yes |
+| `mw suite` and the nightly suite it is started by | no | no, it waits for a calm host (`--calm-bound`) and runs anyway | no, reported for the Mayor to file |
+| a landing's after-landing command (deploy, shots) | its own after-landing slot | no | no: it is not the rig's tests; the shots run after the landing's gate has ended |
+| `mw grist eval` and `mw grist smoke` | no | no | not the rig's tests: they run the mill, under its own grind slots (`hostlock.GrindSlots`) |
