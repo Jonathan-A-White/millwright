@@ -73,6 +73,7 @@ type closeOutOnMain struct {
 	err     error
 	landing *aMainLanding
 	mail    string
+	vault   *fakeVault
 }
 
 func aTestsFailStop(t *testing.T, named application.NamedChecks, load application.HostLoad, bound time.Duration, afterwards func()) closeOutOnMain {
@@ -89,7 +90,7 @@ func aTestsFailStopWaiting(t *testing.T, named application.NamedChecks, load app
 	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
 	landing := &aMainLanding{fakeRetryLanding: fakeRetryLanding{AheadCount: 1}}
 	mailbox := apptest.NewFakeMailbox()
-	got := closeOutOnMain{landing: landing}
+	got := closeOutOnMain{landing: landing, vault: vault}
 	got.report, got.err = application.Next{
 		Tracker: tracker, Vault: vault, Worktrees: landing, Landing: landing,
 		Checks: twoFailingTests{afterwards: afterwards}, Slot: aSlot{}, Mailbox: mailbox,
@@ -285,5 +286,65 @@ func TestAStopHeldOnMainsRedStillSaysEachTestFailsOnMain(t *testing.T) {
 	}
 	if !strings.Contains(got.mail, "TestA: fails on main too") || !strings.Contains(got.mail, "TestB: fails on main too") {
 		t.Errorf("expected both tests labelled in the mail, got:\n%s", got.mail)
+	}
+}
+
+// mw-gq6.937: a run on main that failed and named no test used to say only
+// "`<command, cut>` failed without naming a test", which says nothing of why.
+func TestAFailedRunOnMainThatNamesNoTestSaysWhatItPrintedAndKeepsItAll(t *testing.T) {
+	printed := "npm ci\nnpm error code EUSAGE\nError: listen EADDRINUSE: address already in use :::4173\n"
+	named := &namedTestsThat{run: func(context.Context, []string) (application.NamedRun, error) {
+		return application.NamedRun{Checked: application.Checked{Command: "npm ci --no-audit --no-fund || exit 1; set -- ...; for t in \\", Output: printed}, Ran: true}, nil
+	}}
+	got := aTestsFailStop(t, named, nil, 0, nil)
+	if got.report.Reason != application.ReasonTestsFail {
+		t.Fatalf("expected tests-fail as before, got %q (%v)", got.report.Reason, got.err)
+	}
+	for _, want := range []string{"TestA: not run: ", "EADDRINUSE", "failed without naming a test", "main-alone.log"} {
+		if !strings.Contains(got.mail, want) {
+			t.Errorf("expected the refused mail to say %q, got:\n%s", want, got.mail)
+		}
+	}
+	if strings.Contains(got.mail, "npm ci --no-audit") {
+		t.Errorf("expected the mail to give what the run printed, not its command, got:\n%s", got.mail)
+	}
+	if kept := got.vault.written["mw-x.1/main-alone.log"]; kept != printed {
+		t.Errorf("expected the whole output kept in runs/mw-x.1/main-alone.log, got %q (files %v)", kept, got.vault.written)
+	}
+}
+
+func TestAnErroredRunOnMainKeepsNothingButNamesTheError(t *testing.T) {
+	named := &namedTestsThat{run: func(context.Context, []string) (application.NamedRun, error) {
+		return application.NamedRun{}, errors.New("sh: go: not found")
+	}}
+	got := aTestsFailStop(t, named, nil, 0, nil)
+	if !strings.Contains(got.mail, "sh: go: not found") {
+		t.Errorf("expected the error in the mail, got:\n%s", got.mail)
+	}
+	if _, kept := got.vault.written["mw-x.1/main-alone.log"]; kept {
+		t.Errorf("expected no log for a run that had no output")
+	}
+}
+
+func TestARunOnMainThatDidNotStartSaysWhatTheShellPrintedNotTheCommand(t *testing.T) {
+	named := &namedTestsThat{run: func(context.Context, []string) (application.NamedRun, error) {
+		return application.NamedRun{Checked: application.Checked{Command: "npx playwright test --reporter=list -g 'a long line'", Output: "sh: 1: npx: not found\n", NotRun: true}, Ran: true}, nil
+	}}
+	got := aTestsFailStop(t, named, nil, 0, nil)
+	if !strings.Contains(got.mail, "npx: not found") || strings.Contains(got.mail, "playwright test --reporter") {
+		t.Errorf("expected what the shell printed and not the command, got:\n%s", got.mail)
+	}
+}
+
+func TestLastMeaningfulLinesSkipsRulesAndBareFailAndBoundsWhatItQuotes(t *testing.T) {
+	out := "first\nsecond error\n\x1b[31mthird: boom\x1b[0m\n-----\n}\nexit status 1\nFAIL\n\n"
+	if got := application.LastMeaningfulLines(out, 2, 100); got != "second error / third: boom" {
+		t.Errorf("got %q", got)
+	}
+	if got := application.LastMeaningfulLines(strings.Repeat("x", 50), 2, 10); got != strings.Repeat("x", 10)+"..." {
+		t.Errorf("a long line is cut, got %q", got)
+	}
+	if got := application.LastMeaningfulLines("\n---\n", 3, 10); got != "" {
+		t.Errorf("expected nothing, got %q", got)
 	}
 }

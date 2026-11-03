@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -276,7 +277,7 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	dir, err := n.Landing.OpenLanding(ctx, c.rigDir, base)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("main alone was not checked for %s: a landing of %s at %s could not be opened: %v", strings.Join(tests, ", "), c.path.Rig, base, err))
-		labelMain(report, mainNotRunNote(tests, fmt.Sprintf("a worktree of %s could not be opened", base)))
+		labelMain(report, mainNotRunNote(tests, fmt.Sprintf("a worktree of %s could not be opened: %s", base, firstLine(err.Error()))))
 		return nil
 	}
 	defer func() {
@@ -307,7 +308,7 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 		labelMain(report, mainNotRunNote(tests, "the rig names no command to run tests by name"))
 		return nil
 	case run.NotRun:
-		labelMain(report, mainNotRunNote(tests, fmt.Sprintf("`%s` did not start", run.Command)))
+		labelMain(report, mainNotRunNote(tests, n.namedWhy(ctx, "the command to run them by name did not start", c, report, run.Output)))
 		return nil
 	case run.Passed:
 		report.Notes = append(report.Notes, fmt.Sprintf("main alone passes %s (checked in %s): %s", strings.Join(tests, ", "), took.Round(time.Second), n.whoseFailure(ctx, c, report, failed, base)))
@@ -321,7 +322,7 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	if len(onMain) == 0 {
 		// Failed, and named no test: a build that broke, say. Nothing is said of
 		// any one test.
-		labelMain(report, mainNotRunNote(tests, fmt.Sprintf("`%s` failed without naming a test", run.Command)))
+		labelMain(report, mainNotRunNote(tests, n.namedWhy(ctx, "the run on main failed without naming a test", c, report, run.Output)))
 		return nil
 	}
 	labelMain(report, labelNote(tests, at, func(test string) string {
@@ -339,6 +340,79 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	red := &MainRed{Tests: tests, Command: run.Command, Took: took}
 	report.Notes = append(report.Notes, fmt.Sprintf("main alone fails %s too (checked in %s): main is red", red.tests(), took.Round(time.Second)))
 	return red
+}
+
+// MainAloneLogFileName is the file in a story's run that holds the whole output
+// of a run on main alone that failed and named no test (mw-gq6.937).
+const MainAloneLogFileName = "main-alone.log"
+
+// The bounds of what a not-run label quotes of a run's output: this many of its
+// last meaningful lines, each cut to this many characters.
+const (
+	notRunLines    = 3
+	notRunLineLong = 120
+)
+
+// LastMeaningfulLines is the last lines of output that say something, up to
+// lines of them, joined by " / ", each cut to long characters: a line with no
+// letter or digit (a rule, a bare brace) says nothing, and nor does go test's
+// bare FAIL or exit status line.
+func LastMeaningfulLines(output string, lines, long int) string {
+	all := strings.Split(strings.ReplaceAll(domain.StripANSI(output), "\r\n", "\n"), "\n")
+	var kept []string
+	for i := len(all) - 1; i >= 0 && len(kept) < lines; i-- {
+		line := strings.TrimSpace(all[i])
+		if !strings.ContainsFunc(line, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) {
+			continue
+		}
+		if line == "FAIL" || strings.HasPrefix(line, "exit status ") {
+			continue
+		}
+		if r := []rune(line); len(r) > long {
+			line = string(r[:long]) + "..."
+		}
+		kept = append([]string{line}, kept...)
+	}
+	return strings.Join(kept, " / ")
+}
+
+// namedWhy is the label's reason for a run on main that did not give a name: a
+// build that broke, a taken port, a hang, a name the parser missed. It says what
+// the run printed last and keeps all of it beside the gate logs
+// (runs/<story>/main-alone.log), naming the file, so that nobody has to guess
+// from the command, which says nothing (mw-gq6.937).
+func (n Next) namedWhy(ctx context.Context, what string, c *closeOut, report *NextReport, output string) string {
+	why := what
+	if last := LastMeaningfulLines(output, notRunLines, notRunLineLong); last != "" {
+		why += ", it ended: " + last
+	} else {
+		why += " and printed nothing to say why"
+	}
+	if kept := n.keepMainAloneLog(ctx, c, report, output); kept != "" {
+		why += " (all of it in " + kept + ")"
+	}
+	return why
+}
+
+// keepMainAloneLog writes the whole output of a run on main alone beside the
+// story's gate logs, capped, and returns its path from the vault's root, empty
+// when there is nothing to keep, no vault (mw check writes nothing anywhere) or
+// the write failed, which is a note and not a reason to say less.
+func (n Next) keepMainAloneLog(ctx context.Context, c *closeOut, report *NextReport, output string) string {
+	if n.Vault == nil || strings.TrimSpace(output) == "" {
+		return ""
+	}
+	name := attemptRunFileName(MainAloneLogFileName, c.attempt())
+	record := runFilePath(c.id, name)
+	if record == "" {
+		return ""
+	}
+	if _, err := n.Vault.PutRunFile(ctx, c.id, name, capRunLog(name, output)); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the whole output of the run on main alone could not be kept in the run of %s: %v", c.id, err))
+		return ""
+	}
+	c.mainLog = name
+	return record
 }
 
 // whoseFailure is the end of the note a check of main alone leaves when main did

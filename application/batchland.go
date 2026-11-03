@@ -566,6 +566,9 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 		bc := b.batchCloseOut(report, rigDir)
 		red := n.mainAlone(ctx, bc, nr, gate.Checked, report.Base)
 		report.MainLabels = nr.MainLabels
+		if record := runFilePath(bc.id, bc.mainLog); bc.mainLog != "" && record != "" {
+			report.Records = append(report.Records, record)
+		}
 		if red != nil {
 			if n.holdBatchOnMainRed(ctx, bc, nr, red) {
 				report.Held = fmt.Sprintf("main is red: %s, carried by %s; no fixer was started and the stories stay queued", red.tests(), red.Bug)

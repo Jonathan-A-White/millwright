@@ -776,6 +776,11 @@ type closeOut struct {
 	// a failed test run, empty when none was kept; the close-out commits it.
 	gateLog string
 
+	// mainLog is the name of the file in the run that holds the whole output of
+	// a run on main alone that named no test (MainAloneLogFileName), empty when
+	// none was kept; the close-out commits it.
+	mainLog string
+
 	// harnessStop is the name of the file in the run that keeps a harness stop
 	// read from words that are not a result (HarnessStopFileName), empty when
 	// none was kept; the close-out commits it.
@@ -3738,6 +3743,12 @@ func (n Next) commit(ctx context.Context, c *closeOut, report *NextReport) {
 
 	if c.gateLog != "" {
 		if record := runFilePath(c.id, c.gateLog); record != "" {
+			paths = append(paths, record)
+		}
+	}
+
+	if c.mainLog != "" {
+		if record := runFilePath(c.id, c.mainLog); record != "" {
 			paths = append(paths, record)
 		}
 	}
