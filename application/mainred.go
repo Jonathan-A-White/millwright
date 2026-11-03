@@ -125,12 +125,74 @@ type MainRed struct {
 
 func (m MainRed) tests() string { return strings.Join(m.Tests, ", ") }
 
+// DefaultMainAloneBound is how long the run of the failing tests on the target
+// branch may take (mw-gq6.929): the Clerk it stands in for took 27 minutes, and
+// a close-out that waits as long has told the Mayor nothing sooner.
+const DefaultMainAloneBound = 10 * time.Minute
+
+// The labels a failing test is given in the note of a check of main alone
+// (mw-gq6.929), one per test: it fails on main too, it fails only on the
+// branch, or main was not asked, and why.
+const (
+	FailsOnMainToo = "fails on main too"
+	BranchOnly     = "branch only"
+	NotRunPrefix   = "not run: "
+)
+
+// maxLabelled is how many failing tests a note of labels lists one by one; the
+// rest are counted by label.
+const maxLabelled = 20
+
+// labelNote is the note that says, of each of tests, whether it fails on main,
+// by what it was checked at ("origin/main at abc1234"); label gives each test
+// its label.
+func labelNote(tests []string, at string, label func(test string) string) string {
+	var lines []string
+	counted := map[string]int{}
+	var order []string
+	for i, test := range tests {
+		l := label(test)
+		if i < maxLabelled {
+			lines = append(lines, test+": "+l)
+			continue
+		}
+		if counted[l] == 0 {
+			order = append(order, l)
+		}
+		counted[l]++
+	}
+	for _, l := range order {
+		lines = append(lines, fmt.Sprintf("and %d more: %s", counted[l], l))
+	}
+	return fmt.Sprintf("of the failing tests, run alone on %s: %s", at, strings.Join(lines, "; "))
+}
+
+// labelMain keeps note, the labels of a check of main alone, on the report: as a
+// note, which the close-out's mail and ledger line carry, and as MainLabels,
+// which a batch's mail has no notes to carry it by.
+func labelMain(report *NextReport, note string) {
+	report.Notes = append(report.Notes, note)
+	report.MainLabels = note
+}
+
+// mainNotRunNote labels every test of tests "not run: <why>"; the story stops as it
+// would have, since main was not asked.
+func mainNotRunNote(tests []string, why string) string {
+	return labelNote(tests, "main", func(string) string { return NotRunPrefix + why })
+}
+
 // mainAlone runs the tests failed (a failed run of the rig's tests) names, by
 // name, on the target branch alone, in a throwaway landing worktree at base, and
 // reports main's red when it fails every one of them too. Nil when it cannot be
 // told, when main passes, or when main fails other tests than the story's: today's
 // blame of the story then stands. The time the check took is a note of the run,
 // and so on the ledger line.
+//
+// Whatever came of it, a note says of each failing test whether it fails on main
+// too, fails on the branch only, or was not run and why (mw-gq6.929), so that the
+// Mayor reads it in the mail and sends no Clerk to find out. The run is made
+// only when the host has room, is cut at Next.MainAloneBound, and its worktree is
+// always taken away; none of that changes what the story's stop is.
 func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, failed Checked, base string) *MainRed {
 	if n.NamedChecks == nil {
 		return nil
@@ -145,14 +207,22 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	if lock := n.waitForTheGateLock(ctx, c, report, "the failing tests on main alone"); lock != nil {
 		defer n.giveTheGateLockBack(report, lock)
 	}
+	if reading, ok := n.readLoad(ctx); ok {
+		if why := reading.NoRoom(RoomLimits{}); why != "" {
+			labelMain(report, mainNotRunNote(tests, n.Host+" has no room: "+why))
+			return nil
+		}
+	}
+	at := base
 	if base == StartPoint(n.remote(), c.target) {
 		// The target as the remote has it now; a batch's base is a commit and
 		// stays the commit its gate ran on.
-		n.freshTarget(ctx, c, report)
+		at = n.freshTarget(ctx, c, report)
 	}
 	dir, err := n.Landing.OpenLanding(ctx, c.rigDir, base)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("main alone was not checked for %s: a landing of %s at %s could not be opened: %v", strings.Join(tests, ", "), c.path.Rig, base, err))
+		labelMain(report, mainNotRunNote(tests, fmt.Sprintf("a worktree of %s could not be opened", base)))
 		return nil
 	}
 	defer func() {
@@ -160,22 +230,52 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 			report.Notes = append(report.Notes, fmt.Sprintf("the landing worktree %s could not be taken away: %v", dir, closeErr))
 		}
 	}()
-	run, err := n.NamedChecks.RunNamed(ctx, c.path.Rig, dir, tests)
+	bound := n.MainAloneBound
+	if bound <= 0 {
+		bound = DefaultMainAloneBound
+	}
+	bounded, cancel := context.WithTimeout(ctx, bound)
+	defer cancel()
+	run, err := n.NamedChecks.RunNamed(bounded, c.path.Rig, dir, tests)
 	took := n.now().Sub(began)
+	if ctx.Err() == nil && bounded.Err() != nil {
+		// Cut at its bound: what it printed so far is not an answer.
+		report.Notes = append(report.Notes, fmt.Sprintf("main alone was not checked for %s: the run did not end in %s", strings.Join(tests, ", "), bound))
+		labelMain(report, mainNotRunNote(tests, fmt.Sprintf("the run did not end in %s", bound)))
+		return nil
+	}
 	switch {
 	case err != nil:
 		report.Notes = append(report.Notes, fmt.Sprintf("main alone was not checked for %s: %v", strings.Join(tests, ", "), err))
+		labelMain(report, mainNotRunNote(tests, firstLine(err.Error())))
 		return nil
-	case !run.Ran || run.NotRun:
+	case !run.Ran:
+		labelMain(report, mainNotRunNote(tests, "the rig names no command to run tests by name"))
+		return nil
+	case run.NotRun:
+		labelMain(report, mainNotRunNote(tests, fmt.Sprintf("`%s` did not start", run.Command)))
 		return nil
 	case run.Passed:
 		report.Notes = append(report.Notes, fmt.Sprintf("main alone passes %s (checked in %s): %s", strings.Join(tests, ", "), took.Round(time.Second), n.whoseFailure(ctx, c, report, failed, base)))
+		labelMain(report, labelNote(tests, at, func(string) string { return BranchOnly }))
 		return nil
 	}
 	onMain := map[string]bool{}
 	for _, name := range TestNamesOf(run.Output) {
 		onMain[name] = true
 	}
+	if len(onMain) == 0 {
+		// Failed, and named no test: a build that broke, say. Nothing is said of
+		// any one test.
+		labelMain(report, mainNotRunNote(tests, fmt.Sprintf("`%s` failed without naming a test", run.Command)))
+		return nil
+	}
+	labelMain(report, labelNote(tests, at, func(test string) string {
+		if onMain[test] {
+			return FailsOnMainToo
+		}
+		return BranchOnly
+	}))
 	for _, name := range tests {
 		if !onMain[name] {
 			report.Notes = append(report.Notes, fmt.Sprintf("main alone fails other tests than %s (checked in %s): %s", strings.Join(tests, ", "), took.Round(time.Second), n.whoseFailure(ctx, c, report, failed, base)))

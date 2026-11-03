@@ -400,6 +400,7 @@ Feature: mw land lands a batch rig's queue under one gate run
     Then no fixer was started
     And the named-tests command was run once, given: TestTogether
     And the batch is held, and the Mayor's mail names every story in it and says "main is red: TestTogether, carried by"
+    And the batch is held, and the Mayor's mail names every story in it and says "TestTogether: fails on main too"
     And "main" at the rig's origin is where it was before the batch
 
   Scenario: A rig with nothing queued is given no fixer (mw-gq6.503)

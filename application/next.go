@@ -261,6 +261,11 @@ type Next struct {
 	// before.
 	NamedChecks NamedChecks
 
+	// MainAloneBound is how long that run on the target branch may take before
+	// it is cut and its tests are labelled "not run" (mw-gq6.929). Zero is
+	// DefaultMainAloneBound.
+	MainAloneBound time.Duration
+
 	// CrossSlot is the rig's merge slot across hosts, on the beads server both
 	// hosts share, taken inside Slot so that the other host's close-outs wait
 	// their turn rather than race this one to the remote (mw-gq6.359). The zero
@@ -558,6 +563,9 @@ type NextReport struct {
 	// held on the bead that carries main's fix, not sent back or refused
 	// (mw-gq6.645). Nil when it did not.
 	MainRed *MainRed
+	// MainLabels is the note that says of each failing test whether it fails on
+	// main too (mw-gq6.929); empty when no check of main alone was made.
+	MainLabels string
 	// HandedBack says the merge slot was still held at the overall most a
 	// close-out waits, and the story was handed back for its close-out alone
 	// (RunCloseOutAgain), its claim, worktree and branch kept (mw-gq6.467).
