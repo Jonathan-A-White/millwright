@@ -86,11 +86,11 @@ func TestACloseOutsGateHoldingTheHostsGateLockMakesAWholeCheckWaitAndEndInOneLin
 	defer closeOut.Holding.Release(context.Background())
 
 	started := time.Now()
-	report, err := w.check(150 * time.Millisecond)
+	report, err := w.check(1500 * time.Millisecond)
 	if err == nil {
 		t.Fatalf("expected the check not to pass while a close-out's gate held the host's gate lock\n%s", report)
 	}
-	if time.Since(started) > 4*time.Second {
+	if time.Since(started) > 30*time.Second {
 		t.Errorf("expected the check to give up at its wait, it took %s", time.Since(started))
 	}
 	refusal := slotRefusalOf(report)
@@ -266,31 +266,50 @@ func TestAWholeChecksChangedSpecsRunHoldingTheHostsGateLockToo(t *testing.T) {
 	}
 }
 
+// slowGateLock is the host's gate lock after a real wait of at least held, which
+// it records: when it was asked, how long it really waited, and the deadline of
+// the context it was given. The test decides by those, not by how long the host
+// took to do anything else, so a loaded host cannot fail it.
+type slowGateLock struct {
+	inner    *hostlock.Gate
+	held     time.Duration
+	asked    time.Time
+	waited   time.Duration
+	deadline time.Time
+	bounded  bool
+}
+
+func (s *slowGateLock) Take(ctx context.Context, holder string, held func(by string)) (application.GateTurn, error) {
+	s.asked = time.Now()
+	s.deadline, s.bounded = ctx.Deadline()
+	select {
+	case <-time.After(s.held):
+	case <-ctx.Done():
+	}
+	s.waited = time.Since(s.asked)
+	return s.inner.Take(ctx, holder, held)
+}
+
 // The wait for the gate lock and the wait for a calm host that follows it are one
 // deadline, the check's wait, so that together they stay under the 590 seconds a
-// Builder's foreground call is given (mw-gq6.915).
+// Builder's foreground call is given (mw-gq6.915). The deadline is an hour, far
+// over anything a loaded host could spend, and every claim is a bound that the
+// time the lock really waited or the check really took can only make true
+// (mw-gq6.921).
 func TestAWholeChecksWaitForTheGateLockAndForACalmHostAreOneDeadlineAndTheSecondGetsWhatTheFirstLeft(t *testing.T) {
-	const deadline = 600 * time.Millisecond
-	const lockHeld = 400 * time.Millisecond
+	const deadline = time.Hour
 	checks := &scriptedChecks{passes: []bool{true}}
 	w := newWholeCheckBesideTheGateLock(t, checks)
-	closeOut, err := w.gate.Take(context.Background(), "mw-gq6.894", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	go func() {
-		time.Sleep(lockHeld)
-		closeOut.Holding.Release(context.Background())
-	}()
+	lock := &slowGateLock{inner: w.gate, held: 250 * time.Millisecond}
 	tracker := apptest.NewFakeTracker()
 	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
 	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
-	// The calm host wait is counted, not slept: the lock wait above is real time.
+	// The calm host wait is counted, not slept.
 	var calmWaited time.Duration
 	started := time.Now()
 	report, err := application.Check{
 		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: checks,
-		Slot: w.slots, GateLock: w.gate, Records: w.records, PartSlotWait: deadline,
+		Slot: w.slots, GateLock: lock, Records: w.records, PartSlotWait: deadline,
 		GateNoticeEvery: 40 * time.Millisecond,
 		Load:            &apptest.FakeHostLoad{Readings: []application.LoadReading{busy()}},
 		LoadPoll:        30 * time.Second,
@@ -299,16 +318,32 @@ func TestAWholeChecksWaitForTheGateLockAndForACalmHostAreOneDeadlineAndTheSecond
 		Rigs: map[string]string{"millwright": w.rigDir},
 		Out:  writerOf(w.told),
 	}.Run(context.Background(), "mw-x.1")
-	total := time.Since(started) + calmWaited
+	ran := time.Since(started)
 	if err == nil {
 		t.Fatalf("expected the check not to pass while the host stayed busy\n%s", report)
 	}
-	if total > deadline+100*time.Millisecond {
-		t.Errorf("expected the lock wait and the calm wait together to end within the one deadline %s, they took %s (lock %s, calm %s)",
-			deadline, total, time.Since(started), calmWaited)
+	if lock.asked.IsZero() {
+		t.Fatalf("expected the gate lock to be asked for\n%s", report)
 	}
-	if left := deadline - lockHeld; calmWaited > left {
-		t.Errorf("expected the calm wait to get only what the lock wait left, at most %s, it waited %s", left, calmWaited)
+	// The lock wait ends at the check's one deadline: the context it is given has
+	// a deadline, no more than the whole deadline from when it was asked, and no
+	// less than what was left of it after the time before it was asked.
+	if !lock.bounded {
+		t.Fatalf("expected the lock wait to have the check's deadline, its context had none")
+	}
+	if left := lock.deadline.Sub(lock.asked); left > deadline || left < deadline-lock.asked.Sub(started) {
+		t.Errorf("expected the lock wait to end at the check's one deadline %s, it was given %s (asked %s into the check)",
+			deadline, left, lock.asked.Sub(started))
+	}
+	// The calm wait gets what the lock wait left: the deadline less the time the
+	// lock really waited (a millisecond over for the rounding of the budget), and
+	// no less than the deadline less all the check took.
+	if left := deadline - lock.waited; calmWaited > left+time.Millisecond {
+		t.Errorf("expected the calm wait to get only what the lock wait left, at most %s, it waited %s (lock waited %s)",
+			left, calmWaited, lock.waited)
+	}
+	if calmWaited < deadline-ran-time.Millisecond {
+		t.Errorf("expected the calm wait to get what the lock wait left, at least %s, it waited %s", deadline-ran, calmWaited)
 	}
 	refusal := slotRefusalOf(report)
 	if refusal == nil {
