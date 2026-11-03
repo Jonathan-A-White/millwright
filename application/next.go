@@ -396,6 +396,12 @@ type Next struct {
 	// not, and runs the tests anyway unless the host is far over its cores.
 	CalmHandBack func(ctx context.Context, reading LoadReading, since time.Time, waited time.Duration) error
 
+	// LoadBoundLeft, when it is set, is how long the wait that CalmHandBack ends
+	// may still go on, read when the wait begins, instead of LoadBound: mw check
+	// sets it to what its one deadline has left after the waits for the merge slot
+	// and the gate lock (mw-gq6.915).
+	LoadBoundLeft func() time.Duration
+
 	// GateLock keeps this host to one rig gate at a time, whatever rig: a
 	// close-out takes it before the rig's tests, in the worktree and again on the
 	// merged result, and waits for the load to calm only once it has it

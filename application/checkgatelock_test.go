@@ -265,3 +265,64 @@ func TestAWholeChecksChangedSpecsRunHoldingTheHostsGateLockToo(t *testing.T) {
 		t.Errorf("expected the lock to be given back, %q holds it", holder)
 	}
 }
+
+// The wait for the gate lock and the wait for a calm host that follows it are one
+// deadline, the check's wait, so that together they stay under the 590 seconds a
+// Builder's foreground call is given (mw-gq6.915).
+func TestAWholeChecksWaitForTheGateLockAndForACalmHostAreOneDeadlineAndTheSecondGetsWhatTheFirstLeft(t *testing.T) {
+	const deadline = 600 * time.Millisecond
+	const lockHeld = 400 * time.Millisecond
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	closeOut, err := w.gate.Take(context.Background(), "mw-gq6.894", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(lockHeld)
+		closeOut.Holding.Release(context.Background())
+	}()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	// The calm host wait is counted, not slept: the lock wait above is real time.
+	var calmWaited time.Duration
+	started := time.Now()
+	report, err := application.Check{
+		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: checks,
+		Slot: w.slots, GateLock: w.gate, Records: w.records, PartSlotWait: deadline,
+		GateNoticeEvery: 40 * time.Millisecond,
+		Load:            &apptest.FakeHostLoad{Readings: []application.LoadReading{busy()}},
+		LoadPoll:        30 * time.Second,
+		LoadWait:        func(_ context.Context, d time.Duration) error { calmWaited += d; return nil },
+		Host:            "laptop", Remote: "origin",
+		Rigs: map[string]string{"millwright": w.rigDir},
+		Out:  writerOf(w.told),
+	}.Run(context.Background(), "mw-x.1")
+	total := time.Since(started) + calmWaited
+	if err == nil {
+		t.Fatalf("expected the check not to pass while the host stayed busy\n%s", report)
+	}
+	if total > deadline+100*time.Millisecond {
+		t.Errorf("expected the lock wait and the calm wait together to end within the one deadline %s, they took %s (lock %s, calm %s)",
+			deadline, total, time.Since(started), calmWaited)
+	}
+	if left := deadline - lockHeld; calmWaited > left {
+		t.Errorf("expected the calm wait to get only what the lock wait left, at most %s, it waited %s", left, calmWaited)
+	}
+	refusal := slotRefusalOf(report)
+	if refusal == nil {
+		t.Fatalf("expected a refusal that the tests were not run, got %+v", report.Refusals)
+	}
+	for _, want := range []string{"did not start", "load 39.0 of 20 cores", "since ", "nothing was run", "`mw check mw-x.1`"} {
+		if !strings.Contains(refusal.Why, want) {
+			t.Errorf("expected the line to say %q, got %q", want, refusal.Why)
+		}
+	}
+	if strings.Contains(refusal.Why, "\n") {
+		t.Errorf("expected one line, got %q", refusal.Why)
+	}
+	if checks.runs != 0 {
+		t.Errorf("expected the tests not to have run, they ran %d time(s)", checks.runs)
+	}
+}

@@ -200,15 +200,20 @@ checks, alone for a landing) and then the gate lock, for the rig's tests and aga
 for the changed specs, and gives both back when they end. The order is the
 close-out's: `mw next` holds the slot alone while it waits for the lock, so a check
 that held the lock and waited for the slot would wait for a close-out that waits for
-it. The two waits are one budget, `CheckPartSlotWait` (9 minutes), under the 590
-seconds a Builder's foreground call is given. A wait that runs out ends the check in
+it. The waits for the slot, the lock and a calm host are one deadline,
+`CheckPartSlotWait` (9 minutes), counted from the start of the check, under the 590
+seconds a Builder's foreground call is given: the wait for a calm host gets only
+what the first two left (mw-gq6.915). A wait that runs out ends the check in
 one line: the rig's tests did not start, who holds the gate lock, since when, that
 nothing was run, and the command to run again (`mw check <story>`); a hand-back
 repeated in one attempt is counted once (`runs/<story>/check-N-whole-gate.slot`).
 While it waits it says every minute who holds the lock now and since when. It is a
 wait inside one call, not a loop that spends the Builder's turns. The wait for a
-calm host that follows (mw-gq6.819) is its own, up to the same nine minutes, taken
-only once the lock is held, so the load waited on is not another gate's.
+calm host that follows (mw-gq6.819) is taken only once the lock is held, so the
+load waited on is not another gate's, and ends in the same kind of one line naming
+the load. The run of the rig's tests itself, and the wait for the slot and the lock
+before the changed specs that follow it, are not under that deadline: they come
+after the tests, which take as long as they take.
 `mw check --no-slot` takes neither.
 
 `mw suite` and so the nightly suite (which starts it) takes the gate lock too, first,
