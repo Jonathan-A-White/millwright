@@ -46,10 +46,11 @@ func TestAClaimIsALeaseInARealBd(t *testing.T) {
 
 	// bd prints the lease to the second, and under load a heartbeat can land in
 	// the same printed second as the claim: heartbeat again, a second apart,
-	// until the printed lease moves, for up to ten seconds.
+	// until the printed lease moves, for up to ten tries. The tries are counted,
+	// not timed: each is a sleep and two bd calls, and a host whose calls are slow
+	// has moved the printed lease the first time.
 	var beaten application.StoryDetail
-	deadline := time.Now().Add(10 * time.Second)
-	for {
+	for try := 1; ; try++ {
 		time.Sleep(1100 * time.Millisecond)
 		if err := vps.HeartbeatClaim(ctx, storyID); err != nil {
 			t.Fatalf("heartbeating %s: %v", storyID, err)
@@ -61,8 +62,8 @@ func TestAClaimIsALeaseInARealBd(t *testing.T) {
 		if beaten.LeaseExpires.After(first.LeaseExpires) {
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("expected the heartbeat to push the lease past %v within ten seconds, got %v", first.LeaseExpires, beaten.LeaseExpires)
+		if try == 10 {
+			t.Fatalf("expected the heartbeat to push the lease past %v within ten tries, got %v", first.LeaseExpires, beaten.LeaseExpires)
 		}
 	}
 
@@ -83,7 +84,7 @@ func TestAClaimIsALeaseInARealBd(t *testing.T) {
 		t.Fatalf("expected the refused claim to write nothing, got %q until %v", after.Assignee, after.LeaseExpires)
 	}
 
-	if stale, err := vps.StaleClaims(ctx, time.Now()); err != nil || len(stale) != 0 {
+	if stale, err := vps.StaleClaims(ctx, beaten.LeaseExpires.Add(-time.Second)); err != nil || len(stale) != 0 {
 		t.Fatalf("expected a lease that still holds not to be stale, got %+v: %v", stale, err)
 	}
 	stale, err := vps.StaleClaims(ctx, beaten.LeaseExpires.Add(time.Minute))
