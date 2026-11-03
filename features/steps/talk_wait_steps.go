@@ -525,6 +525,7 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 	})
 
 	ctx.Then(`^mw talk wait ends within (\d+) seconds?$`, c.endsWithin)
+	ctx.Then(`^mw talk wait ends on the event$`, c.endsOnTheEvent)
 	ctx.Then(`^mw talk wait is still waiting$`, c.stillWaiting)
 	ctx.Then(`^the wait printed the notice "([^"]*)"$`, func(notice string) error {
 		for _, line := range strings.Split(c.run.out.String(), "\n") {
@@ -696,6 +697,28 @@ func (c *talkWaitContext) endsWithin(seconds int) error {
 	if took := c.run.endedAt.Sub(base); took > bound {
 		return fmt.Errorf("mw talk wait ended %s after the event, past the %d s it is held to; it printed:\n%s%s",
 			took.Round(time.Millisecond), seconds, c.run.out.String(), c.run.errOut.String())
+	}
+	return nil
+}
+
+// endsOnTheEvent judges that the wait ended because of the last event sent, with
+// no wall-clock bound: it ended, did not fail, and did not end before the event
+// (a wait that counted the time before it, such as the ideas', would end on that
+// time). How long after the event it ended is the host's load, not the subject,
+// so a loaded host fails nothing that ended on the event.
+func (c *talkWaitContext) endsOnTheEvent() error {
+	select {
+	case <-c.run.done:
+	case <-time.After(talkWaitBudget):
+		return fmt.Errorf("mw talk wait had not ended %s after the event; so far it printed:\n%s%s",
+			talkWaitBudget, c.run.out.String(), c.run.errOut.String())
+	}
+	if c.run.err != nil {
+		return fmt.Errorf("mw talk wait failed: %w\n%s", c.run.err, c.run.errOut.String())
+	}
+	if early := c.lastEvent.Sub(c.run.endedAt); early > 0 {
+		return fmt.Errorf("mw talk wait ended %s before the event, so something else ended it; it printed:\n%s%s",
+			early.Round(time.Millisecond), c.run.out.String(), c.run.errOut.String())
 	}
 	return nil
 }

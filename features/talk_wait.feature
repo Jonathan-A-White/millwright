@@ -405,7 +405,7 @@ Feature: mw talk wait
     And the wait has answered the Governor 1 time
     When 4000 milliseconds go by on the host running mw talk wait
     And the backend says the Governor's Ideas only has ended
-    Then mw talk wait ends within 3 seconds
+    Then mw talk wait ends on the event
     And the wait printed "Ideas only ended"
 
   Scenario: The clock passing the end of Ideas only ends the wait the same way, with no event
