@@ -127,3 +127,63 @@ func sha256Sum(b []byte) []byte {
 	sum := sha256.Sum256(b)
 	return sum[:]
 }
+
+// --file sends the file's bytes as the text, so a dollar sign or a backtick a
+// shell would have eaten in a quoted argument arrives as written
+// (mw-gq6.928).
+func TestPosternSendFileSendsTheFilesBytesExactly(t *testing.T) {
+	text := "$0.92 spent, `ticks`, \"quotes\", $HOME and \\n stay as written\nsecond line"
+	file := filepath.Join(t.TempDir(), "post.txt")
+	if err := os.WriteFile(file, []byte(text+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plaintexts, _, out, err := channelSend(t, "--file", file)
+	if err != nil {
+		t.Fatalf("mw postern send --file failed: %v\n%s", err, out)
+	}
+	if len(plaintexts) != 1 {
+		t.Fatalf("expected one message, got %v", plaintexts)
+	}
+	if plaintexts[0] != text {
+		t.Fatalf("expected the file's text\n%q\ngot\n%q", text, plaintexts[0])
+	}
+}
+
+// --file and a text argument are two texts: refused, and nothing is sent.
+func TestPosternSendRefusesFileTogetherWithATextArgument(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "post.txt")
+	if err := os.WriteFile(file, []byte("from the file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plaintexts, _, out, err := channelSend(t, "--file", file, "from the argument")
+	if err == nil {
+		t.Fatalf("expected --file with a text argument to be refused, got:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "--file") || !strings.Contains(err.Error(), "text") || strings.Contains(err.Error(), "unknown flag") {
+		t.Fatalf("expected the refusal to say --file and the text argument are two texts, got: %v", err)
+	}
+	if len(plaintexts) != 0 {
+		t.Fatalf("expected nothing sent, got %v", plaintexts)
+	}
+}
+
+// A file that cannot be read, or holds nothing, is refused and nothing is sent.
+func TestPosternSendRefusesAFileItCannotReadOrThatIsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty.txt")
+	if err := os.WriteFile(empty, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{filepath.Join(dir, "missing.txt"): "reading", empty: "nothing"} {
+		plaintexts, _, out, err := channelSend(t, "--file", path)
+		if err == nil {
+			t.Fatalf("expected --file %s to be refused, got:\n%s", path, out)
+		}
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("--file %s: expected the refusal to say %q, got: %v", path, want, err)
+		}
+		if len(plaintexts) != 0 {
+			t.Fatalf("--file %s: expected nothing sent, got %v", path, plaintexts)
+		}
+	}
+}
