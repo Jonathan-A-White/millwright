@@ -38,7 +38,7 @@ func newEventsCmd() *cobra.Command {
 			"`mw events emit` adds a job's own, `mw events tail` reads it, `mw events wait` blocks on it\n" +
 			"until a seat's subscribed event comes, and `mw events trim` moves the old events to the archive.",
 	}
-	cmd.AddCommand(newEventsFollowCmd(), newEventsEmitCmd(), newEventsTailCmd(), newEventsWaitCmd(), newEventsTrimCmd(), newEventsJobsCmd())
+	cmd.AddCommand(newEventsFollowCmd(), newEventsEmitCmd(), newEventsTailCmd(), newEventsWaitCmd(), newEventsTrimCmd(), newEventsJobsCmd(), newEventsRetireCmd())
 	return cmd
 }
 
@@ -556,6 +556,35 @@ func newEventsTrimCmd() *cobra.Command {
 	}
 	cmd.Flags().Uint64Var(&keep, "keep", application.DefaultEventKeep, "how many of the newest events stay in the log")
 	return cmd
+}
+
+// newEventsRetireCmd builds `mw events retire`: give up the chain copy of the
+// old backlog, once, on the Governor's word (mw-gq6.927).
+func newEventsRetireCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "retire",
+		Short: "Give up the chain copy of every batch pending now: move them to a dated archive file",
+		Long: "retire moves every range in ship.json's pending list (the batches that went direct as fallback and wait\n" +
+			"to go on chain) to ship-retired-<UTC date>.json beside it, and stops re-sending them. Every event of\n" +
+			"them already reached the Governor direct; only the chain copy is given up, and the event log is not\n" +
+			"touched. The archive is written first and the list emptied after, so a crash between the two leaves the\n" +
+			"ranges in both and a run again keeps each once; run twice, it moves nothing further. It prints how many\n" +
+			"ranges it moved and the archive path. mw status then shows 'retired N' beside 'pending'.\n\n" +
+			"To send them again, put the archive's \"pending\" list back in ship.json's.\n\n" +
+			"Stop the follower while it runs (systemctl --user stop mw-view-follow.service) and start it after:\n" +
+			"it holds ship.json in memory and would save its pending list over the empty one.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			path, err := config.EventsLogPath()
+			if err != nil {
+				return err
+			}
+			_, err = application.EventShipRetire{
+				State: eventlog.NewShipStates(path), Archive: eventlog.NewShipArchive(path), Out: cmd.OutOrStdout(),
+			}.Run(cmd.Context())
+			return err
+		},
+	}
 }
 
 // openWindowNames lists the names of the windows open in the seat terminal, for

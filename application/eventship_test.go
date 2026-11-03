@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1119,4 +1120,185 @@ func (c *failAfter) Send(ctx context.Context, payload []byte) (string, error) {
 		return "", errors.New("the chain went down")
 	}
 	return c.Chain.Send(ctx, payload)
+}
+
+// retireWorld is a shipper with a backlog of pending ranges, and the command
+// that retires them (mw-gq6.927).
+type retireWorld struct {
+	*shipFixture
+	archive *apptest.FakeShipArchive
+	retire  application.EventShipRetire
+	out     bytes.Buffer
+}
+
+func newRetireWorld(t *testing.T) *retireWorld {
+	t.Helper()
+	w := &retireWorld{shipFixture: newShipFixture(t), archive: &apptest.FakeShipArchive{}}
+	w.retire = application.EventShipRetire{
+		State: w.state, Archive: w.archive, Out: &w.out,
+		Now: func() time.Time { return w.at },
+	}
+	return w
+}
+
+// backlog leaves n batches pending: the chain is down for n passes.
+func (w *retireWorld) backlog(t *testing.T, n int) {
+	t.Helper()
+	w.backend.ChainErr = errors.New("down")
+	for i := 0; i < n; i++ {
+		w.at = w.at.Add(3 * time.Second)
+		w.add(t, 1)
+		w.run(t)
+	}
+	w.backend.ChainErr = nil
+}
+
+func TestRetireMovesEveryPendingRangeToTheArchiveAndAFollowingRetrySendsNothingFromIt(t *testing.T) {
+	w := newRetireWorld(t)
+	w.backlog(t, 3)
+	before, _ := w.state.Load(context.Background())
+	if len(before.Pending) == 0 {
+		t.Fatal("the fixture left nothing pending")
+	}
+	headBefore, _ := w.log.Head(context.Background())
+	sent := len(w.chainPayloads(t))
+
+	got, err := w.retire.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Moved != len(before.Pending) {
+		t.Fatalf("moved %d ranges, want %d", got.Moved, len(before.Pending))
+	}
+	after, _ := w.state.Load(context.Background())
+	if len(after.Pending) != 0 || after.Joinable {
+		t.Fatalf("pending after the retire is %+v, joinable %v", after.Pending, after.Joinable)
+	}
+	if after.Shipped != before.Shipped || after.Chain != before.Chain || after.Day != before.Day {
+		t.Fatalf("the retire changed more than the pending list: %+v from %+v", after, before)
+	}
+	if kept := w.archive.Ranges(got.Path); len(kept) != len(before.Pending) || kept[0] != before.Pending[0] {
+		t.Fatalf("the archive %s holds %v, want %v", got.Path, kept, before.Pending)
+	}
+	if got.Path == "" || !strings.Contains(w.out.String(), got.Path) || !strings.Contains(w.out.String(), fmt.Sprintf("Retired %d ", got.Moved)) {
+		t.Fatalf("the command printed %q, want the count and the path %q", w.out.String(), got.Path)
+	}
+
+	// A fresh follower's next pass has nothing pending to put on chain.
+	w.at = w.at.Add(3 * time.Second)
+	w.newShip().Ship(context.Background())
+	if n := len(w.chainPayloads(t)); n != sent {
+		t.Fatalf("a pass after the retire put %d records on chain, want none", n-sent)
+	}
+	// The event log is untouched.
+	if head, _ := w.log.Head(context.Background()); head != headBefore {
+		t.Fatalf("the log's head moved from %d to %d", headBefore, head)
+	}
+	if all, _ := w.log.Since(context.Background(), 0); uint64(len(all)) != headBefore {
+		t.Fatalf("the log holds %d events, want %d", len(all), headBefore)
+	}
+}
+
+func TestRetireTwiceMovesNothingFurtherAndLosesNothing(t *testing.T) {
+	w := newRetireWorld(t)
+	w.backlog(t, 2)
+	first, err := w.retire.Run(context.Background())
+	if err != nil || first.Moved == 0 {
+		t.Fatalf("first retire: %+v, %v", first, err)
+	}
+	kept := w.archive.Ranges(first.Path)
+	w.out.Reset()
+	second, err := w.retire.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Moved != 0 {
+		t.Fatalf("the second retire moved %d", second.Moved)
+	}
+	if again := w.archive.Ranges(first.Path); len(again) != len(kept) {
+		t.Fatalf("the second retire changed the archive from %v to %v", kept, again)
+	}
+	if !strings.Contains(w.out.String(), "0") || !strings.Contains(w.out.String(), second.Path) {
+		t.Fatalf("the second retire printed %q", w.out.String())
+	}
+}
+
+func TestRetireWritesTheArchiveBeforeTheListSoACrashLosesNothing(t *testing.T) {
+	w := newRetireWorld(t)
+	w.backlog(t, 2)
+	before, _ := w.state.Load(context.Background())
+
+	// The archive cannot be written: ship.json is not touched.
+	w.archive.Err = errors.New("disk full")
+	if _, err := w.retire.Run(context.Background()); err == nil {
+		t.Fatal("a retire whose archive failed reported success")
+	}
+	if now, _ := w.state.Load(context.Background()); len(now.Pending) != len(before.Pending) {
+		t.Fatalf("a failed archive still emptied the list: %v", now.Pending)
+	}
+
+	// The list cannot be saved after the archive was: the ranges are in both,
+	// and a run again does not write them into the archive twice.
+	w.archive.Err = nil
+	w.state.SaveErr = errors.New("killed")
+	got, err := w.retire.Run(context.Background())
+	if err == nil {
+		t.Fatal("a retire whose save failed reported success")
+	}
+	if kept := w.archive.Ranges(got.Path); len(kept) != len(before.Pending) {
+		t.Fatalf("the archive holds %v before the list is emptied, want %v", kept, before.Pending)
+	}
+	w.state.SaveErr = nil
+	again, err := w.retire.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept := w.archive.Ranges(again.Path); len(kept) != len(before.Pending) {
+		t.Fatalf("after the crash and a rerun the archive holds %v, want each range once", kept)
+	}
+	if now, _ := w.state.Load(context.Background()); len(now.Pending) != 0 {
+		t.Fatalf("pending after the rerun is %v", now.Pending)
+	}
+}
+
+func TestRangesQueuedAfterARetireStillSendAndTheStatusSaysHowManyWereRetired(t *testing.T) {
+	w := newRetireWorld(t)
+	w.backlog(t, 2)
+	retired, err := w.retire.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, _ := w.ship.Status(context.Background())
+	if !strings.Contains(st.Line(), "pending 0") || !strings.Contains(st.Line(), "retired") || strings.Contains(strings.ToLower(st.Line()), "fail") {
+		t.Fatalf("after a retire the status line is %q", st.Line())
+	}
+	if len(st.Line()) > application.Width {
+		t.Fatalf("the status line is %d wide", len(st.Line()))
+	}
+
+	// The chain goes down again: a new range queues, and sends once it is up.
+	// A shipper that has just started reads the state the retire left.
+	ship := w.newShip()
+	w.backend.ChainErr = errors.New("down")
+	w.at = w.at.Add(3 * time.Second)
+	w.add(t, 1)
+	if err := ship.Ship(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	queued, _ := w.state.Load(context.Background())
+	if len(queued.Pending) != 1 {
+		t.Fatalf("pending after the retire and a new batch is %v", queued.Pending)
+	}
+	w.backend.ChainErr = nil
+	sent := len(w.chainPayloads(t))
+	w.at = w.at.Add(3 * time.Second)
+	if err := ship.Ship(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.chainPayloads(t)) != sent+1 {
+		t.Fatalf("the range queued after the retire was not put on chain")
+	}
+	if kept := w.archive.Ranges(retired.Path); len(kept) != retired.Moved {
+		t.Fatalf("the archive changed: %v", kept)
+	}
 }

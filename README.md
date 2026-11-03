@@ -2535,7 +2535,11 @@ The first event after a quiet spell goes at once; a burst goes as one batch per
 road fails (no UTXOs, the block explorer or `/api/broadcast` down) the batch goes
 direct only, in the `fallback` lane, and is kept pending in `ship.json` beside
 the log; every later pass puts the pending batches on chain first, oldest first,
-in the `normal` lane with the same seq range, until they clear. The app dedupes
+in the `normal` lane with the same seq range, until they clear. `mw events retire`
+gives up the chain copy of every batch pending at that moment, once and on the
+Governor's word: it moves them to `ship-retired-<date>.json` beside `ship.json` and
+stops re-sending them (stop the follower while it runs; putting the archive's
+`pending` list back in `ship.json` sends them again). The app dedupes
 by seq. Two knobs in the `[events]` table of `~/.config/mw/config.toml` guard the
 satoshis:
 

@@ -54,3 +54,63 @@ func (s *ShipStates) Save(_ context.Context, state application.ShipState) error 
 	}
 	return writeSynced(s.Path, data)
 }
+
+// ShipArchive keeps the ranges mw events retire gives up in a file for each
+// UTC day beside ShipFile: ship-retired-<date>.json, whose "pending" list is in
+// the shape of ship.json's, so putting it back there sends them again.
+type ShipArchive struct {
+	Dir string
+}
+
+// ShipArchive satisfies the port.
+var _ application.ShipArchive = (*ShipArchive)(nil)
+
+// NewShipArchive is the archive kept beside the log in the file logPath.
+func NewShipArchive(logPath string) *ShipArchive {
+	return &ShipArchive{Dir: filepath.Dir(logPath)}
+}
+
+// retiredFile is the archive file of one day's retire.
+type retiredFile struct {
+	Pending []application.ShipRange `json:"pending"`
+}
+
+// Path implements application.ShipArchive.
+func (a *ShipArchive) Path(day string) string {
+	return filepath.Join(a.Dir, "ship-retired-"+day+".json")
+}
+
+// Keep implements application.ShipArchive: the file's ranges, then those of
+// ranges it does not hold, written to a synced file renamed over it.
+func (a *ShipArchive) Keep(_ context.Context, ranges []application.ShipRange, day string) (string, error) {
+	path := a.Path(day)
+	var file retiredFile
+	data, err := os.ReadFile(path)
+	if err == nil {
+		if err := json.Unmarshal(data, &file); err != nil {
+			return "", fmt.Errorf("reading the archive %s: %w", path, err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	held := make(map[application.ShipRange]bool, len(file.Pending)+len(ranges))
+	for _, r := range file.Pending {
+		held[r] = true
+	}
+	for _, r := range ranges {
+		if !held[r] {
+			held[r] = true
+			file.Pending = append(file.Pending, r)
+		}
+	}
+	if data, err = json.Marshal(file); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(a.Dir, 0o700); err != nil {
+		return "", err
+	}
+	if err := writeSynced(path, data); err != nil {
+		return "", err
+	}
+	return path, nil
+}

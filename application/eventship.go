@@ -71,6 +71,10 @@ type ShipState struct {
 	Urgent []uint64 `json:"urgent,omitempty"`
 	// Emergency is how many emergency records were sent in Day.
 	Emergency int `json:"emergency"`
+	// Retired is how many pending ranges mw events retire has moved to the
+	// archive, never to go on chain from here: the Governor gave up their chain
+	// copy (mw-gq6.927). Every event of them reached him direct.
+	Retired int `json:"retired,omitempty"`
 }
 
 // ShipStates keeps EventShip's state between runs.
@@ -548,6 +552,8 @@ type ShipStatus struct {
 	Head, Shipped uint64
 	// Pending are the fallback batches still to go on chain.
 	Pending []ShipRange
+	// Retired are the ranges given up for the chain, kept in the archive.
+	Retired int
 	// ChainToday is the records put on chain today (UTC), of Cap; Chain says
 	// whether the chain is used at all.
 	ChainToday, Cap int
@@ -567,7 +573,7 @@ func (s *EventShip) Status(ctx context.Context) (ShipStatus, error) {
 		return ShipStatus{}, fmt.Errorf("reading the event log's head: %w", err)
 	}
 	s.rollDay(&st, s.now().UTC())
-	return ShipStatus{Head: head, Shipped: st.Shipped, Pending: st.Pending, ChainToday: st.Chain, Cap: s.DailyCap, Chain: s.Chain, EmergencyToday: st.Emergency}, nil
+	return ShipStatus{Head: head, Shipped: st.Shipped, Pending: st.Pending, ChainToday: st.Chain, Cap: s.DailyCap, Chain: s.Chain, EmergencyToday: st.Emergency, Retired: st.Retired}, nil
 }
 
 // Line is the status on one line of the phone-width report.
@@ -580,5 +586,91 @@ func (t ShipStatus) Line() string {
 	if t.EmergencyToday > 0 {
 		line += fmt.Sprintf(" emergency %d", t.EmergencyToday)
 	}
+	if t.Retired > 0 {
+		line += fmt.Sprintf(" retired %d", t.Retired)
+	}
 	return line
+}
+
+// ShipArchive is where the ranges a retire gives up are kept, one file for each
+// UTC day beside ship.json, so that putting them back in its pending list
+// sends them again.
+type ShipArchive interface {
+	// Keep adds ranges to the archive file of day (2006-01-02), leaving out
+	// those the file holds already, and reports the file's path. The file is
+	// replaced whole, so a crash leaves the old one or the new.
+	Keep(ctx context.Context, ranges []ShipRange, day string) (path string, err error)
+	// Path is where the archive file of day is, whether or not it exists.
+	Path(day string) string
+}
+
+// EventShipRetire gives up the chain copy of every range pending in ship.json,
+// once and on the Governor's word (mw-gq6.927): the ranges go to the day's
+// archive file, then the pending list is emptied, in that order, so a crash
+// between the two leaves them in both and a run again keeps each once. It
+// touches nothing else: the event log, what was shipped and the day's counts
+// stay as they were, and a range queued afterwards is sent as ever.
+//
+// The follower keeps the state in memory, so it must be stopped while this runs
+// and started after: it would otherwise save its pending list over the empty
+// one.
+type EventShipRetire struct {
+	State   ShipStates
+	Archive ShipArchive
+	// Now dates the archive file; nil is time.Now.
+	Now func() time.Time
+	// Out, when set, is told how many ranges were moved and where.
+	Out io.Writer
+}
+
+// RetireResult is what a retire did.
+type RetireResult struct {
+	// Moved is how many pending ranges went to the archive, Path the archive
+	// file of the day.
+	Moved int
+	Path  string
+}
+
+// Run retires every range pending now.
+func (r EventShipRetire) Run(ctx context.Context) (RetireResult, error) {
+	if r.State == nil || r.Archive == nil {
+		return RetireResult{}, fmt.Errorf("retiring the pending ranges needs the shipper's state and an archive")
+	}
+	now := time.Now
+	if r.Now != nil {
+		now = r.Now
+	}
+	day := now().UTC().Format("2006-01-02")
+	st, err := r.State.Load(ctx)
+	if err != nil {
+		return RetireResult{}, fmt.Errorf("loading the shipper's state: %w", err)
+	}
+	if len(st.Pending) == 0 {
+		res := RetireResult{Path: r.Archive.Path(day)}
+		return res, r.say(res, "Nothing pending: retired 0 ranges. The day's archive file is %s.")
+	}
+	path, err := r.Archive.Keep(ctx, st.Pending, day)
+	if err != nil {
+		return RetireResult{}, fmt.Errorf("keeping the pending ranges in the archive: %w", err)
+	}
+	res := RetireResult{Moved: len(st.Pending), Path: path}
+	st.Retired += res.Moved
+	st.Pending, st.Joinable = nil, false
+	if err := r.State.Save(ctx, st); err != nil {
+		return res, fmt.Errorf("saving the shipper's state, the ranges are in %s and still pending: %w", path, err)
+	}
+	return res, r.say(res, "Retired %d pending ranges to the archive %s. To send them again, put its ranges back in ship.json's pending list.")
+}
+
+func (r EventShipRetire) say(res RetireResult, format string) error {
+	if r.Out == nil {
+		return nil
+	}
+	var err error
+	if res.Moved == 0 {
+		_, err = fmt.Fprintf(r.Out, format+"\n", res.Path)
+	} else {
+		_, err = fmt.Fprintf(r.Out, format+"\n", res.Moved, res.Path)
+	}
+	return err
 }
