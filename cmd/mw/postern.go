@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -549,9 +550,10 @@ func newPosternSendCmd() *cobra.Command {
 	var class, bead, recommend, thread, topic, beadChannel, channelName, re string
 	var chain, newPost bool
 	var options, attach []string
+	var file string
 
 	cmd := &cobra.Command{
-		Use:   "send [<text>]",
+		Use:   "send [<text> | --file <path>]",
 		Short: "Send a message to the Governor over the postern",
 		Long: "send builds a message record, classed --class (default message), and sends it by\n" +
 			"postern_channel, printing the txid. The direct channel (the default) hands the record\n" +
@@ -602,15 +604,33 @@ func newPosternSendCmd() *cobra.Command {
 			"most 8 MiB, sent under its base name and typed by its extension (.png .jpg .webp .ogg\n" +
 			".m4a .mp3 .pdf .txt .md .log ...), else application/octet-stream. Several files are\n" +
 			"several messages, <text> the caption on the last.\n" +
-			"Refused with --bead. <text> may be left out when a file is attached.",
+			"Refused with --bead. <text> may be left out when a file is attached.\n\n" +
+			"--file <path> reads the text from a file instead of the command line, byte for byte,\n" +
+			"less the newlines that end it: the shell never sees it, so a dollar sign, a backtick or a\n" +
+			"quote in a long or odd post arrives as written, where \"$0.92 spent\" in double quotes\n" +
+			"reaches him as \".92 spent\". Write the post to a file with a quoted heredoc\n" +
+			"(cat > post.txt <<'EOF') and send that. It is refused with a text argument, with a\n" +
+			"file that cannot be read and with one that holds nothing.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := ""
 			if len(args) == 1 {
 				text = args[0]
 			}
-			if len(args) == 0 && len(attach) == 0 {
-				return fmt.Errorf("mw postern send: what should it say? give the text, or --attach a file")
+			if file != "" {
+				if len(args) == 1 {
+					return fmt.Errorf("mw postern send: give the text as an argument or with --file, not both: they are two texts")
+				}
+				body, err := os.ReadFile(file)
+				if err != nil {
+					return fmt.Errorf("mw postern send: reading the text of --file: %w", err)
+				}
+				text = strings.TrimRight(string(body), "\r\n")
+				if text == "" {
+					return fmt.Errorf("mw postern send: --file %s holds nothing to send", file)
+				}
+			} else if len(args) == 0 && len(attach) == 0 {
+				return fmt.Errorf("mw postern send: what should it say? give the text, --file <path>, or --attach a file")
 			}
 			if thread != "" && beadChannel != "" {
 				return fmt.Errorf("mw postern send: --thread is the old name of --bead-channel: give only --bead-channel")
@@ -675,6 +695,7 @@ func newPosternSendCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringArrayVar(&attach, "attach", nil, "a file to send with the message, encrypted to the Governor (repeatable)")
+	cmd.Flags().StringVar(&file, "file", "", "read the text of the message from this file, byte for byte, so the shell cannot eat a $ or a backtick (refused with a text argument)")
 	cmd.Flags().StringVar(&class, "class", "", "the message's class: message, decision-needed, landing or alarm (default message)")
 	cmd.Flags().StringVar(&bead, "bead", "", "the bead a decision-needed question is about")
 	cmd.Flags().StringVar(&recommend, "recommend", "", "the option a decision-needed question recommends")
