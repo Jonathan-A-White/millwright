@@ -120,7 +120,10 @@ remove_hosts_line() {
 	[ -f "$WG_HOSTS" ] || return 0
 	tmp=$(mktemp)
 	grep -vF "$1.mw # mw-wg" "$WG_HOSTS" >"$tmp" || true
-	mv "$tmp" "$WG_HOSTS"
+	# Write through the file, not mv over it: mktemp's mode 600 would replace
+	# the hosts file's own, and a service user could no longer resolve a .mw name.
+	cat "$tmp" >"$WG_HOSTS"
+	rm -f "$tmp"
 }
 
 sync_tunnel() {
@@ -194,7 +197,8 @@ remove() {
 
 	tmp=$(mktemp)
 	awk -v start="$ln" 'NR >= start && NR < start + 5 { next } { print }' "$WG_CONF" >"$tmp"
-	mv "$tmp" "$WG_CONF"
+	cat "$tmp" >"$WG_CONF"
+	rm -f "$tmp"
 	remove_hosts_line "$name"
 	sync_tunnel
 	echo "removed $name"
