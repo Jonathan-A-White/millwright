@@ -399,7 +399,8 @@ func (c *nextContext) theCheckWroteNothing() error {
 }
 
 // theHostsLoadReads says what the host's load reads, one reading at a time and
-// the last again after: "calm" is load 3 of 20 cores and "busy" is 39 of 20.
+// the last again after: "calm" is load 3 of 20 cores, "busy" is 39 of 20 and "far
+// over" is 45 of 20, past twice the cores (mw-gq6.903).
 func (c *nextContext) theHostsLoadReads(words string) error {
 	var readings []application.LoadReading
 	for _, word := range strings.Split(words, ",") {
@@ -408,8 +409,10 @@ func (c *nextContext) theHostsLoadReads(words string) error {
 			readings = append(readings, application.LoadReading{Load: 3, Cores: 20})
 		case "busy":
 			readings = append(readings, application.LoadReading{Load: 39, Cores: 20})
+		case "far over":
+			readings = append(readings, application.LoadReading{Load: 45, Cores: 20})
 		default:
-			return fmt.Errorf("a reading is calm or busy, not %q", word)
+			return fmt.Errorf("a reading is calm, busy or far over, not %q", word)
 		}
 	}
 	c.checkLoad = &apptest.FakeHostLoad{Readings: readings}

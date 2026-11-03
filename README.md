@@ -1446,11 +1446,16 @@ pays for the tests each time.
 
 It treats a busy host as the close-out does (mw-gq6.379): it waits, up to the
 close-out's bound, for the host's load to fall below its core count before the
-tests, and tests that fail while the host was busy are run once more when it has
-calmed. Only a second failure is reported, and the report says the tests ran
-twice and the load the first run failed at, so a session does not spend turns, or
-a second full suite, proving a failure was the host's load. A failure on a calm
-host is reported at once, with no second run.
+tests, and tests that fail while the host was far over its cores (twice them or
+more, mw-gq6.903) are run once more when it has calmed. Only a second failure is
+reported, and the report says the tests ran twice and the load the first run
+failed at, so a session does not spend turns, or a second full suite, proving a
+failure was the host's load. A failure on a calm host, or on one busy but under
+twice its cores, is reported at once, with no second run: of the desktop's 11
+gates run twice, the 8 first failures under twice the cores all failed again. A
+wait that ends with the host still far over its cores runs nothing, and a second
+run that fails with the host far over again is not counted: a close-out hands the
+story back for its close-out alone (`host-busy`), with no attempt spent.
 
 Every check also writes its whole output to `runs/<story-id>/check-<attempt>.log`
 in the vault (mw-gq6.380), a log named for its story that no other story's check
