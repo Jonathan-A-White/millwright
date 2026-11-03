@@ -717,3 +717,161 @@ func TestShipEmergenciesPastTheOrdinaryCapDoNotStarveTheOrdinaryRetries(t *testi
 		t.Fatalf("%d ordinary chain records counted, want only the retried batch", st.Chain)
 	}
 }
+
+// hangingChain is a chain road that never answers: every Send waits until the
+// caller gives up, as a Postern backend does at a load of 37 on 20 cores
+// (2026-11-02, mw-gq6.893).
+type hangingChain struct {
+	application.Chain
+	entered chan struct{}
+}
+
+func (h hangingChain) Send(ctx context.Context, _ []byte) (string, error) {
+	select {
+	case h.entered <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+// hangingPostern is a backend whose direct line never answers either.
+type hangingPostern struct{ application.Postern }
+
+func (hangingPostern) Deliver(ctx context.Context, _ []byte) (string, error) {
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+// A follower whose shipper is stuck on a pending batch (the first 40 to 120
+// minutes of every UTC day, 2026-11-02) still writes the beads' events, nudges
+// the seats and springs the jobs within one normal cycle.
+func TestFollowKeepsWritingEventsNudgingAndSpringingWhileTheShipperHangsOnAPendingBatch(t *testing.T) {
+	f := newShipFixture(t)
+	f.add(t, 3)
+	if err := f.state.Save(context.Background(), application.ShipState{
+		Shipped: 3, Day: "2026-10-01",
+		Pending: []application.ShipRange{{From: 1, To: 1}, {From: 2, To: 3}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{}, 1)
+	f.ship.ChainRoad = hangingChain{entered: entered}
+	f.ship.Postern = hangingPostern{f.backend}
+
+	w := newEventsWorld()
+	w.log = f.log
+	nudger, springer := &countingNudger{}, &countingSpringer{}
+	ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stop()
+	head := &apptest.FakeHead{Heads: []string{"a", "b"}}
+	var sent bool
+	follow := application.EventFollow{
+		Head: head, Feed: w.tracker, Log: f.log, Cursors: w.cursors, Now: w.now,
+		Shipper: f.ship, Nudger: nudger, Springer: springer, Aside: true,
+		Publish: func(context.Context) error { return nil },
+		Sleep: func(context.Context, time.Duration) error {
+			if !sent {
+				select {
+				case <-entered: // the shipper is now stuck in the chain
+				case <-ctx.Done():
+				}
+				w.tracker.AddBeadChange(application.BeadChange{
+					Key: "e1", At: w.at(1), Actor: "mw@laptop", What: "closed",
+					Bead: application.BeadNow{ID: "mw-1", Type: "task", Status: application.StatusClosed},
+				})
+				sent = true
+			}
+			if strings.Contains(kindsOf(f.log.All()), "mw-1:open->closed") && nudger.calls >= 3 && springer.calls >= 3 {
+				stop()
+				return ctx.Err()
+			}
+			time.Sleep(time.Millisecond)
+			return ctx.Err()
+		},
+	}
+	if err := follow.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := kindsOf(f.log.All()); !strings.Contains(got, "mw-1:open->closed") {
+		t.Fatalf("with the shipper stuck on a pending batch the log holds %q: the bead's event was never written", got)
+	}
+	if nudger.calls < 3 || springer.calls < 3 {
+		t.Fatalf("with the shipper stuck the loop nudged %d and sprung %d times, want 3 or more of each", nudger.calls, springer.calls)
+	}
+}
+
+// slowChain spends d of the fixture's clock on every send, as a chain road
+// answering at 4 to 13 sends a minute does.
+type slowChain struct {
+	application.Chain
+	f *shipFixture
+	d time.Duration
+}
+
+func (c slowChain) Send(ctx context.Context, payload []byte) (string, error) {
+	c.f.at = c.f.at.Add(c.d)
+	return c.Chain.Send(ctx, payload)
+}
+
+// seqRangesOf are the seq ranges of the records on chain, in the order they
+// were put there.
+func (f *shipFixture) seqRangesOnChain(t *testing.T) []application.ShipRange {
+	t.Helper()
+	var out []application.ShipRange
+	for _, payload := range f.chainPayloads(t) {
+		_, b := f.open(t, payload)
+		out = append(out, application.ShipRange{From: b.From, To: b.To})
+	}
+	return out
+}
+
+// A long backlog does not hold a pass: it puts what its budget allows on
+// chain, sends the new events direct all the same, and the next passes, over a
+// restart too, put every pending batch on chain once and in order.
+func TestShipSpendsABudgetOnTheBacklogAndSendsTheNewEventsDirectAllTheSame(t *testing.T) {
+	f := newShipFixture(t)
+	f.add(t, 40)
+	var pending []application.ShipRange
+	for n := uint64(1); n <= 40; n++ {
+		pending = append(pending, application.ShipRange{From: n, To: n})
+	}
+	if err := f.state.Save(context.Background(), application.ShipState{Shipped: 40, Day: "2026-10-01", Pending: pending}); err != nil {
+		t.Fatal(err)
+	}
+	f.ship.ChainRoad = slowChain{Chain: f.ship.ChainRoad, f: f, d: 6 * time.Second}
+
+	f.add(t, 1) // seq 41, new
+	f.run(t)
+	onChain := f.seqRangesOnChain(t)
+	if len(onChain) == 0 || len(onChain) >= 40 {
+		t.Fatalf("one pass put %d of 40 pending batches on chain, want some but not all: %v", len(onChain), onChain)
+	}
+	if delivered := f.backend.Delivered(); len(delivered) != 1 {
+		t.Fatalf("the new event was delivered %d times in the pass, want once, direct", len(delivered))
+	} else if _, b := f.open(t, delivered[0]); b.From != 41 || b.Lane != events.LaneFallback {
+		t.Fatalf("the pass delivered events %d to %d in lane %s, want 41 to 41 in the fallback lane", b.From, b.To, b.Lane)
+	}
+
+	for pass := 0; pass < 40; pass++ {
+		if pass == 1 {
+			f.ship = f.newShip() // a restart
+			f.ship.ChainRoad = slowChain{Chain: f.ship.ChainRoad, f: f, d: 6 * time.Second}
+		}
+		f.at = f.at.Add(3 * time.Second)
+		f.run(t)
+	}
+	var want []application.ShipRange
+	for n := uint64(1); n <= 41; n++ {
+		want = append(want, application.ShipRange{From: n, To: n})
+	}
+	got := f.seqRangesOnChain(t)
+	if len(got) != len(want) {
+		t.Fatalf("%d records reached the chain, want %d, each once: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("record %d on chain is events %d to %d, want %d to %d (oldest first, none twice)", i, got[i].From, got[i].To, want[i].From, want[i].To)
+		}
+	}
+}

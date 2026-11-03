@@ -25,6 +25,19 @@ const (
 	shipMaxPlain  = 7200
 )
 
+// ShipRetryBudget is the longest one pass spends putting pending batches on
+// chain, by the shipper's clock: when it is spent the pass sends its new
+// batch direct, as it does over the cap, and leaves the rest of the pending
+// batches to the next. At 4 to 13 sends a minute a quarter of a million pending
+// batches held a pass for hours, and with them the new events (mw-gq6.893). At
+// least one pending batch is tried every pass.
+const ShipRetryBudget = 15 * time.Second
+
+// ShipCallTimeout is the longest one call to the backend or the chain may
+// take for the shipper: past it the call is given up, said once, and tried
+// again on a later pass.
+const ShipCallTimeout = 30 * time.Second
+
 // ShipRange is the seq range of one batch: From to To, inclusive.
 type ShipRange struct {
 	From uint64 `json:"from"`
@@ -82,6 +95,12 @@ type ShipStates interface {
 // Err and is not kept for the chain. With the chain unreachable it goes direct
 // and is kept pending, to be put on chain later in the normal lane. The
 // batches that follow leave it out.
+//
+// A pass spends at most ShipRetryBudget on the pending batches (at least one is
+// tried). When it is spent with batches still pending, the pass's new batch goes
+// direct as fallback and is kept pending behind them, so that no batch passes an
+// older one on chain and a long backlog never holds the new events back. Each
+// call to the backend or the chain is given up after ShipCallTimeout.
 //
 // A batch no road took is not sent: the next pass builds it again.
 type EventShip struct {
@@ -185,7 +204,7 @@ func (s *EventShip) Ship(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.Postern.Deliver(ctx, payload); err != nil {
+	if _, err := s.deliver(ctx, payload); err != nil {
 		if !onChain {
 			s.keep(ctx, st)
 			return fmt.Errorf("delivering events %d to %d: %w", r.From, r.To, err)
@@ -235,7 +254,7 @@ func (s *EventShip) sendEmergencies(ctx context.Context, st *ShipState, unsent [
 				s.quiet("putting an emergency on chain")
 			}
 		}
-		if _, err := s.Postern.Deliver(ctx, payload); err != nil {
+		if _, err := s.deliver(ctx, payload); err != nil {
 			if !onChain {
 				s.keep(ctx, st)
 				return chainDown, fmt.Errorf("delivering emergency event %d: %w", e.Seq, err)
@@ -296,10 +315,16 @@ func stepOver(st *ShipState) {
 }
 
 // retryPending puts the pending batches on chain, oldest first, while the
-// chain answers and the day's cap allows. It reports whether the chain failed
-// it, so the pass's new batch does not try the same dead road.
+// chain answers, the day's cap allows and ShipRetryBudget is not spent. It
+// reports whether the pass's new batch is to leave the chain alone: the chain
+// failed it, or the budget ran out with batches still pending, which a newer
+// batch must not pass on chain.
 func (s *EventShip) retryPending(ctx context.Context, st *ShipState) (chainDown bool) {
-	for s.Chain && len(st.Pending) > 0 && st.Chain < s.DailyCap {
+	began := s.now()
+	for tried := 0; s.Chain && len(st.Pending) > 0 && st.Chain < s.DailyCap; tried++ {
+		if tried > 0 && s.now().Sub(began) >= ShipRetryBudget {
+			return true
+		}
 		r := st.Pending[0]
 		evs, err := s.eventsIn(ctx, r)
 		if err != nil {
@@ -404,7 +429,16 @@ func (s *EventShip) putOnChain(ctx context.Context, payload []byte) (string, err
 	if s.ChainRoad == nil {
 		return "", fmt.Errorf("no chain is configured")
 	}
+	ctx, cancel := context.WithTimeout(ctx, ShipCallTimeout)
+	defer cancel()
 	return s.ChainRoad.Send(ctx, payload)
+}
+
+// deliver hands payload to the backend direct, given up after ShipCallTimeout.
+func (s *EventShip) deliver(ctx context.Context, payload []byte) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, ShipCallTimeout)
+	defer cancel()
+	return s.Postern.Deliver(ctx, payload)
 }
 
 // alarm appends the event that says the day's cap is reached, once a day.

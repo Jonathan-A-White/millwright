@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain/events"
@@ -138,7 +139,9 @@ type EventFollow struct {
 	// Publish builds the view and writes it where the backend serves it.
 	Publish func(ctx context.Context) error
 	// Shipper, when set, is called at the end of each pass, after the
-	// Springer, so a slow send holds nothing else back.
+	// Springer, so a slow send holds nothing else back. With Aside it is run
+	// in a goroutine of its own, one send at a time: a pass that finds the
+	// last one still running leaves it be (mw-gq6.893).
 	Shipper EventShipper
 	// Nudger, when set, is called each pass, before the Springer: it tells
 	// the seats of their events.
@@ -153,10 +156,13 @@ type EventFollow struct {
 	// Tapper, when set, is called each pass, after the Watcher and before the
 	// Shipper: it applies the Governor's one-tap actions the backend holds
 	// (PosternTaps), so a tap is applied within seconds with no seat running
-	// anything.
+	// anything. With Aside it is run in a goroutine of its own, one at a time,
+	// for it reads the backend too.
 	Tapper EventTapper
 	// Trimmer, when set, is called at the end of the first pass of each UTC
-	// day, after the Shipper, to move old events out of the log (EventTrim).
+	// day, after the Shipper, to move old events out of the log (EventTrim);
+	// with Aside, in the goroutine of the Shipper, after its send, so the two
+	// never touch the shipper's state at once.
 	Trimmer EventTrimmer
 	// Controller, when set, is called each pass once the beads' events are
 	// written and before anything is nudged, sprung or sent: it acts on the cancel events in the
@@ -164,8 +170,12 @@ type EventFollow struct {
 	Controller EventController
 	// Aside publishes in a goroutine of its own, one publish at a time and
 	// the newest head next, so a view that takes longer than a pass (25 s on
-	// the Laptop on 2026-10-01) never holds up the events. Without it each
-	// pass publishes in turn.
+	// the Laptop on 2026-10-01) never holds up the events. It does the same
+	// for the Tapper and the Shipper, the two calls that wait on the postern
+	// backend: on 2026-11-02 the Shipper, retrying a quarter of a million
+	// pending batches one chain send after another, held the loop for 20
+	// minutes and no mail event, spring or view came (mw-gq6.893). Without it
+	// each pass does all of them in turn.
 	Aside bool
 	// PublishEvery is the least time between the views of two different heads,
 	// so that a beads busy with writes (a head that moves every few seconds)
@@ -239,8 +249,9 @@ func (f EventFollow) Run(ctx context.Context) error {
 		quiet("publishing the view")
 	}
 	kick := make(chan string, 1)
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	if f.Aside {
-		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -253,8 +264,26 @@ func (f EventFollow) Run(ctx context.Context) error {
 				}
 			}
 		}()
-		defer wg.Wait()
 	}
+	// aside runs do in a goroutine of its own when f.Aside, unless the last
+	// call with the same busy is still running, in which case this pass leaves
+	// it be; without Aside it runs do here and now.
+	aside := func(busy *atomic.Bool, do func()) {
+		if !f.Aside {
+			do()
+			return
+		}
+		if !busy.CompareAndSwap(false, true) {
+			return
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer busy.Store(false)
+			do()
+		}()
+	}
+	var tapping, shipping atomic.Bool
 	var read, trimmedDay string
 	var cursor *FollowCursor
 	// letThrough is the head last let through to the view and when: a new head
@@ -347,40 +376,47 @@ func (f EventFollow) Run(ctx context.Context) error {
 			}
 		}
 		if f.Tapper != nil && ctx.Err() == nil {
-			if err := f.Tapper.Tap(ctx); err != nil {
-				if ctx.Err() == nil {
-					say("applying the Governor's taps", err)
-				}
-			} else {
-				quiet("applying the Governor's taps")
-			}
-		}
-		// Ship goes last: a send that hangs or fails slowly (a 502 took ~26 s
-		// on 2026-10-07) must not hold back a nudge or a spring.
-		if f.Shipper != nil && ctx.Err() == nil {
-			if err := f.Shipper.Ship(ctx); err != nil {
-				if ctx.Err() == nil {
-					say("sending events", err)
-				}
-			} else {
-				quiet("sending events")
-			}
-		}
-		if f.Trimmer != nil && ctx.Err() == nil {
-			now := time.Now
-			if f.Now != nil {
-				now = f.Now
-			}
-			if day := now().UTC().Format("2006-01-02"); day != trimmedDay {
-				if err := f.Trimmer.Trim(ctx); err != nil {
+			aside(&tapping, func() {
+				if err := f.Tapper.Tap(ctx); err != nil {
 					if ctx.Err() == nil {
-						say("trimming the log", err)
+						say("applying the Governor's taps", err)
 					}
 				} else {
-					trimmedDay = day
-					quiet("trimming the log")
+					quiet("applying the Governor's taps")
 				}
-			}
+			})
+		}
+		// Ship goes last, and aside: a send that hangs or fails slowly (a 502 took
+		// ~26 s on 2026-10-07; the backlog's retries held the loop for 20 minutes
+		// on 2026-11-02) must not hold back an event, a nudge or a spring.
+		if (f.Shipper != nil || f.Trimmer != nil) && ctx.Err() == nil {
+			aside(&shipping, func() {
+				if f.Shipper != nil && ctx.Err() == nil {
+					if err := f.Shipper.Ship(ctx); err != nil {
+						if ctx.Err() == nil {
+							say("sending events", err)
+						}
+					} else {
+						quiet("sending events")
+					}
+				}
+				if f.Trimmer != nil && ctx.Err() == nil {
+					now := time.Now
+					if f.Now != nil {
+						now = f.Now
+					}
+					if day := now().UTC().Format("2006-01-02"); day != trimmedDay {
+						if err := f.Trimmer.Trim(ctx); err != nil {
+							if ctx.Err() == nil {
+								say("trimming the log", err)
+							}
+						} else {
+							trimmedDay = day
+							quiet("trimming the log")
+						}
+					}
+				}
+			})
 		}
 		if sleep(ctx, every) != nil {
 			break
