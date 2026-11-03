@@ -135,3 +135,47 @@ func TestFoldSupersedeDoesNotMoveARequestThatMovedOnByHand(t *testing.T) {
 		t.Errorf("expected the sender told nothing, got %d statuses", got)
 	}
 }
+
+// A request is moved to a bead whose own record was moved on by hand (no
+// MovedTo, a later record of that request on a newer bead): that bead follows
+// nothing, so it is not refused.
+func TestARequestIsMovedToABeadWhoseOwnRecordMovedOnByHand(t *testing.T) {
+	other := "direct:bb"
+	rig := newRequestMoveRig(
+		filedRecord("mw-a", movedOnRequest, 1),
+		filedRecord("mw-d", other, 1), filedRecord("mw-b", other, 2),
+	)
+
+	if err := rig.mover.MoveRequest(context.Background(), "mw-a", "mw-d"); err != nil {
+		t.Fatalf("expected mw-d, whose request is followed on mw-b, not to refuse the move, got %v", err)
+	}
+
+	if got := rig.requests.records["mw-a"].MovedTo; got != "mw-d" {
+		t.Errorf("expected mw-a marked moved to mw-d, it says %q", got)
+	}
+	if got := rig.requests.records["mw-d"].Request; got != movedOnRequest {
+		t.Errorf("expected mw-d to follow %s, it follows %q", movedOnRequest, got)
+	}
+	if got := len(rig.postern.Delivered()); got != 1 {
+		t.Errorf("expected the sender told once, got %d", got)
+	}
+}
+
+// A bead still following another request refuses the move, and nothing is
+// sent or written.
+func TestARequestIsNotMovedToABeadThatFollowsAnother(t *testing.T) {
+	other := "direct:bb"
+	rig := newRequestMoveRig(filedRecord("mw-a", movedOnRequest, 1), filedRecord("mw-d", other, 1))
+
+	err := rig.mover.MoveRequest(context.Background(), "mw-a", "mw-d")
+
+	if err == nil || !strings.Contains(err.Error(), "already follows the request "+other) {
+		t.Fatalf("expected mw-d refused for following %s, got %v", other, err)
+	}
+	if got := len(rig.postern.Delivered()); got != 0 {
+		t.Errorf("expected the sender told nothing, got %d statuses", got)
+	}
+	if rig.requests.records["mw-a"].MovedTo != "" || rig.requests.records["mw-d"].Request != other {
+		t.Errorf("expected the records left as they were, got %+v", rig.requests.records)
+	}
+}
