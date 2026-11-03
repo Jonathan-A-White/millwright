@@ -2,6 +2,8 @@ package application_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +17,7 @@ import (
 // a close-out's gate may hold (mw-gq6.914).
 type aSuiteBesideTheHostsGateLock struct {
 	gate   *hostlock.Gate
+	dir    string
 	runner *apptest.FakeSuiteRunner
 	trees  *apptest.FakeSuiteTrees
 	told   *lockedBuffer
@@ -22,12 +25,32 @@ type aSuiteBesideTheHostsGateLock struct {
 
 func newSuiteBesideTheGateLock(t *testing.T, respond func(dir, command string) (application.Checked, error)) *aSuiteBesideTheHostsGateLock {
 	t.Helper()
+	dir := t.TempDir()
 	return &aSuiteBesideTheHostsGateLock{
-		gate:   hostlock.NewGate(t.TempDir(), hostlock.WithGatePoll(5*time.Millisecond)),
+		gate:   hostlock.NewGate(dir, hostlock.WithGatePoll(5*time.Millisecond)),
+		dir:    dir,
 		runner: &apptest.FakeSuiteRunner{Respond: respond},
 		trees:  &apptest.FakeSuiteTrees{},
 		told:   &lockedBuffer{},
 	}
+}
+
+// queued waits until a gate is waiting in the gate lock's queue behind the
+// holder, so that what follows is decided by who is queued and not by a sleep
+// that a loaded host can outrun (mw-gq6.921).
+func (w *aSuiteBesideTheHostsGateLock) queued(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		entries, _ := os.ReadDir(filepath.Join(w.dir, hostlock.GateQueueDir))
+		for _, entry := range entries {
+			if !strings.HasPrefix(entry.Name(), ".") {
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Error("expected a gate to be queued for the host's gate lock")
 }
 
 func (w *aSuiteBesideTheHostsGateLock) run(ctx context.Context) (application.SuiteReport, error) {
@@ -140,8 +163,10 @@ func TestAMwSuiteThatCannotTakeTheHostsGateLockRunsNothingAndSaysWhoHoldsIt(t *t
 	}
 	defer gate.Holding.Release(context.Background())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
+	// A wait that has been given up by the time it is made: the lock is held, so
+	// it cannot be taken, however long the host takes to get there.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 	_, err = w.run(ctx)
 	if err == nil {
 		t.Fatal("expected a suite that could not take the gate lock to end in an error, not to run beside the gate")
@@ -238,7 +263,7 @@ func TestAMwSuiteGivesTheHostsGateLockBackBetweenItsPhasesSoACloseOutWaitsForOne
 		}
 		took <- turn
 	}()
-	time.Sleep(100 * time.Millisecond)
+	w.queued(t)
 	close(finishTests)
 
 	// It is next: the suite's changed specs wait behind it, though the suite had
@@ -301,15 +326,17 @@ func TestAMwSuiteHoldsTheHostsGateLockForEachOfItsCommandLines(t *testing.T) {
 func TestAMwSuiteThatCannotTakeTheLockBackBetweenPhasesEndsSayingWhatRanAndWhoHoldsIt(t *testing.T) {
 	var w *aSuiteBesideTheHostsGateLock
 	blocked := make(chan application.GateTurn, 1)
-	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	w = newSuiteBesideTheGateLock(t, func(_, command string) (application.Checked, error) {
-		// A close-out's gate queues and, the suite having given the lock back, holds it.
+		// A close-out's gate queues and, the suite having given the lock back, holds
+		// it; the suite's wait for it again is given up once it does.
 		go func() {
 			turn, _ := w.gate.Take(context.Background(), "mw-gq6.894", nil)
 			blocked <- turn
+			cancel()
 		}()
-		time.Sleep(100 * time.Millisecond)
+		w.queued(t)
 		return application.Checked{Passed: true}, nil
 	})
 	_, err := aSuiteOfTwoPhases(w).Run(ctx, "lampas")
