@@ -958,6 +958,19 @@ func BootPrompt(seat Seat, detail StoryDetail) string {
 		section(&b, title)
 	}
 
+	// What the Mayor has said to the Builder of this story since it was written
+	// comes first: a withdrawal must be read before the work it withdraws is
+	// begun (mw-gq6.892).
+	if len(detail.BuilderNotes) > 0 {
+		b.WriteString("## Notes to you from the Mayor\n\n")
+		section(&b, "Written after this story was filed. They win over the description and the acceptance criteria below where they differ. "+
+			"Read them before anything else, and answer them in your closing comment.")
+		for _, note := range detail.BuilderNotes {
+			fmt.Fprintf(&b, "- %s\n", strings.Join(strings.Fields(note), " "))
+		}
+		b.WriteString("\n")
+	}
+
 	b.WriteString("## Path\n\n")
 	path := detail.Merged()
 	for _, field := range domain.Fields {

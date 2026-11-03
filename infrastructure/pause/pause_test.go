@@ -216,3 +216,25 @@ func TestRetryAddsForceOnlyWhenAsked(t *testing.T) {
 		t.Fatalf("got %v, want %s", got[1], want)
 	}
 }
+
+func TestBuilderReachTypesOverSshAsAQuotedWord(t *testing.T) {
+	var got []string
+	reach := BuilderReach{
+		Reach: map[string]string{"desktop": "ssh desktop"},
+		Run:   func(_ context.Context, argv []string) (string, error) { got = argv; return "", nil },
+	}
+	if err := reach.Type(context.Background(), "desktop", "mw-gq6.30", "NOTE it's here\n"); err != nil {
+		t.Fatalf("typing: %v", err)
+	}
+	if len(got) < 2 || got[0] != "ssh" || got[len(got)-2] != "desktop" {
+		t.Fatalf("expected ssh to desktop, got %q", got)
+	}
+	command := got[len(got)-1]
+	if !strings.Contains(command, "mw note") || !strings.Contains(command, "--type-here") {
+		t.Fatalf("expected the line as one quoted word of the command, got %q", command)
+	}
+
+	if err := (BuilderReach{Gaps: map[string]string{"box": "no address"}}).Type(context.Background(), "box", "x", "y"); err == nil || !strings.Contains(err.Error(), "no address") {
+		t.Fatalf("expected a gap to say why, got %v", err)
+	}
+}

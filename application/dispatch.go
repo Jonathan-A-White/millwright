@@ -1881,6 +1881,14 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		recorded = true
 	}
 
+	// The notes the Mayor wrote to this story's Builder lead its boot, so that a
+	// note that found no session to be typed into is read by this one (mw-gq6.892).
+	comments, err := reads.commentsOf(ctx, detail)
+	if err != nil {
+		return undo("reading the notes to the Builder", err, true)
+	}
+	detail.BuilderNotes = BuilderNotesIn(comments)
+
 	spec, err := d.Boot.Boot(ctx, detail, started.Worktree)
 	if err != nil {
 		return undo("assembling the session", err, true)

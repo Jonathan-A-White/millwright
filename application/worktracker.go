@@ -210,6 +210,11 @@ type StoryDetail struct {
 	// filled in by the dispatch that cuts the worktree, not by reading the
 	// story; empty when the attempt starts from the target as any first does.
 	Continues string
+	// BuilderNotes are the notes the Mayor wrote to the Builder of this story
+	// (mw note --to-builder), oldest first. They are filled in by the dispatch
+	// that starts the session, and the boot leads the story with them, so a note
+	// that could not be typed into a live session is read by the next attempt.
+	BuilderNotes []string
 	// LeaseExpires is when the tracker's own lease on this story's claim runs
 	// out unless a heartbeat renews it first; zero when the story is not
 	// claimed or the tracker does not say. A claim found past this with its

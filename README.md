@@ -667,6 +667,15 @@ as `bd comment` would. `--file <path>` reads the text from a file, with the same
 replacement. A bead the tracker does not know, a file that cannot be read and an
 empty note are refused with nothing written. See `features/note.feature`.
 
+A comment is read by nobody while a story runs, so a note that withdraws or
+changes something on a running story is `mw note <bead> --to-builder "<text>"`.
+It is written as a comment that opens `NOTE TO THE BUILDER:` and, when a session
+works the story, typed into that session as one line (on this host, or over ssh
+on the host the story's claim names, reached as `mw pause` reaches it), asking
+for a reply comment that opens `NOTE REPLY:`. A second comment on the bead
+records whether it was typed. With no live session the note leads the boot of
+the story's next attempt, under "Notes to you from the Mayor".
+
 ## Tables of contents
 
 ```sh
