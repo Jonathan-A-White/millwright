@@ -25,6 +25,25 @@ import (
 // errors.Is, with its own words.
 var ErrPosternUnreachable = errors.New("the postern backend could not be reached")
 
+// PosternReadCut is the error of a Messages read that failed after it had read
+// some pages: the pages it read, and the cursor to ask from again, so a caller
+// that has a use for them keeps its place instead of starting the read over
+// from where it began (a cold read of a long index never finishes if every cut
+// restarts it). Its words, and what errors.Is and errors.As find, are those of
+// Err, the failure itself. A read that failed on its first page is Err alone.
+type PosternReadCut struct {
+	// Records are the records of the pages read, oldest first.
+	Records []PosternRecord
+	// Next is the cursor after the last page read, which a page filtered to no
+	// records moves on too: Messages again from it reads what was not read.
+	Next int64
+	Err  error
+}
+
+func (c *PosternReadCut) Error() string { return c.Err.Error() }
+
+func (c *PosternReadCut) Unwrap() error { return c.Err }
+
 // PosternRefusal is an error of a postern backend that answered outside 2xx:
 // it carries the HTTP status, so that a use case can tell the backend's own
 // trouble (429, 502, 503, 504) from a refusal of the request.
@@ -197,7 +216,9 @@ type PosternUtxo struct {
 // (docs/api.md, github.com/Jonathan-A-White/postern).
 type Postern interface {
 	// Messages reports every indexed record after sequence number since,
-	// oldest first.
+	// oldest first. A read cut after some pages fails with a *PosternReadCut
+	// holding the pages it read; a caller that does not want them reads err as
+	// any other.
 	Messages(ctx context.Context, since int64) ([]PosternRecord, error)
 	// RecordSeq reports the sequence number of the record named txid, or the
 	// index head when the backend holds none of that name, in one request and
