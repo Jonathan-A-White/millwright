@@ -18,6 +18,7 @@ package beads_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -26,6 +27,8 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -148,6 +151,70 @@ exit "$status"
 	return dir, os.WriteFile(filepath.Join(dir, beads.Program), []byte(script), 0o755)
 }
 
+// settleExecutable returns once path can be started. A script this test has just
+// written is "text file busy" (ETXTBSY) to exec for as long as any process still
+// has its write descriptor: the cases of this package run in parallel and each
+// starts bd and git, so a fork made between the write's open and its close holds
+// that descriptor until the child's own exec. The wait is for that to be over,
+// not a guess at how long it takes: the file is started (under a process group of
+// its own, ended at once) until the start is not refused with ETXTBSY. Any other
+// start error is returned. It fails the case once, after a minute, and not
+// before (mw-gq6.920 saw TestAHungBdEndsTheCallAndNamesTheStep fail on it).
+func settleExecutable(path string) error {
+	deadline := time.Now().Add(time.Minute)
+	for {
+		cmd := exec.Command(path)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		err := cmd.Start()
+		if err == nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = cmd.Wait()
+			return nil
+		}
+		if !errors.Is(err, syscall.ETXTBSY) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s is still text file busy after a minute: %w", path, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// mw-gq6.920: TestAHungBdEndsTheCallAndNamesTheStep failed at 0.02 s with "fork/exec
+// ...: text file busy", the stand-in written a moment before another case's fork
+// held its descriptor. A held write descriptor is made here on purpose, released
+// after a while, and settleExecutable must wait for that release and not fail.
+func TestASettledScriptIsNotStartedWhileSomeoneStillHasItOpenForWriting(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "script")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("writing the script: %v", err)
+	}
+	holder, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("opening the script for writing: %v", err)
+	}
+	probe := exec.Command(path)
+	if err := probe.Run(); !errors.Is(err, syscall.ETXTBSY) {
+		holder.Close()
+		t.Skipf("this host starts a file held open for writing (got %v), nothing to settle", err)
+	}
+
+	var released atomic.Bool
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		released.Store(true)
+		holder.Close()
+	}()
+	if err := settleExecutable(path); err != nil {
+		t.Fatalf("expected the wait to end when the write descriptor was closed, got %v", err)
+	}
+	if !released.Load() {
+		t.Errorf("expected settleExecutable to return only after the write descriptor was closed")
+	}
+}
+
 // mw-gq6.900: a bd that hangs still ends a case, and the message names the
 // call. The stand-in below never answers; the bd with a deadline per call, the
 // one every case runs, is given two seconds for it.
@@ -169,6 +236,15 @@ func TestAHungBdEndsTheCallAndNamesTheStep(t *testing.T) {
 	wrapped, err := bdWithCallDeadline(dir, standIn, 2*time.Second)
 	if err != nil {
 		t.Fatalf("making the bd with a deadline per call: %v", err)
+	}
+	// Both scripts were written a moment ago, beside cases that fork: neither
+	// is started until no one has it open for writing (settleExecutable). The
+	// 2 s is not a margin load can fail: the stand-in sleeps 300 s, so the
+	// call ends at the deadline whatever the host does, only later.
+	for _, script := range []string{standIn, filepath.Join(wrapped, beads.Program)} {
+		if err := settleExecutable(script); err != nil {
+			t.Fatalf("settling %s: %v", script, err)
+		}
 	}
 
 	gateway := beads.New(vault, beads.WithProgram(filepath.Join(wrapped, beads.Program)))
