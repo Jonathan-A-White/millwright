@@ -28,9 +28,12 @@ func newSuiteCmd() *cobra.Command {
 			"after. What runs is the rig's [tests] command from the config file, then, if the rig has a\n" +
 			"[changed_specs] command, that command with {specs} replaced by nothing, so every spec runs.\n" +
 			"A rig with no [tests] entry is refused.\n\n" +
-			"It first waits for the host to be calm, by the rule a close-out's gate uses (the load under\n" +
-			"the core count), for at most --calm-bound (default 2h); a host that never calms is run on\n" +
-			"anyway, and the result says so.\n\n" +
+			"It first takes the host's gate lock, the one a close-out's gate and a whole mw check take, so\n" +
+			"that it never runs beside a gate: it says every minute whom it waits for and since when, and a\n" +
+			"lock that cannot be taken ends the suite with nothing run. It holds the lock until its tests\n" +
+			"have ended. Then it waits for the host to be calm, by the rule a close-out's gate uses (the\n" +
+			"load under the core count), for at most --calm-bound (default 2h); a host that never calms is\n" +
+			"run on anyway, and the result says so.\n\n" +
 			"Each test file that failed is then run once more alone: for a failure of [tests], the\n" +
 			"command with the file added to it; for a spec, the [changed_specs] command with just that\n" +
 			"spec. A file that fails twice is a failure; one that passes alone is marked flaky.\n\n" +
@@ -94,6 +97,7 @@ func newSuiteCmd() *cobra.Command {
 				Files:        files,
 				Filer:        filer,
 				Load:         hostload.Proc{},
+				GateLock:     hostGateLock(),
 				LoadBound:    calmBound,
 				Host:         host,
 				Rigs:         rigs,

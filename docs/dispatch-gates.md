@@ -211,6 +211,22 @@ calm host that follows (mw-gq6.819) is its own, up to the same nine minutes, tak
 only once the lock is held, so the load waited on is not another gate's.
 `mw check --no-slot` takes neither.
 
+`mw suite` and so the nightly suite (which starts it) takes the gate lock too, first,
+before its wait for a calm host, and holds it until the rig's tests and the re-runs
+of failing files have ended (`Suite.GateLock`, mw-gq6.914). It takes no merge slot:
+it runs on a throwaway worktree and touches no target branch. It waits as long as
+the lock's own cap, `hostlock.GateCap` (3 hours), saying every minute whom it waits
+for and since when, and ends with nothing run if the lock is still not its: it does
+not run beside a gate. Before this the suite waited only for a calm host
+(`--calm-bound`) and ran anyway, and the nightly Lampas suite was among the load
+sources of the Laptop at 40 to 80 of 20 cores (handoff 726). The numbers above are
+its reason: a gate with another run beside it takes three to four times as long.
+The suite is long, so a close-out that comes while it runs waits behind it, up to
+its own cap, as it would behind any gate; the nightly runs from 08:00 UTC, when no
+story is worked. The suite's `--calm-bound` wait is spent holding the lock, so that
+the load waited on is not another gate's. `Suite.Recheck` (the bug recheck) takes no
+lock itself: its callers hold it (`rerunUnderGate`).
+
 `mw check --part N` does not follow the rule. Its parts are named by a host for a rig
 whose whole gate outruns a foreground call, each sized to fit one; a part that only
 runs tools in the worktree takes no merge slot at all (`PartNeedsSlot`, mw-gq6.814),
@@ -232,6 +248,6 @@ Every place mw runs the rig's tests, and what it takes:
 | `mw check --no-slot` | no | no | no, the escape hatch |
 | `mw dispatch` bug recheck and `mw next` fixed-on-main recheck (`rerunUnderGate`) | no | yes, a short wait, else "not re-checked" | yes |
 | nightly `mw timing` | no | yes | yes |
-| `mw suite` and the nightly suite it is started by | no | no, it waits for a calm host (`--calm-bound`) and runs anyway | no, reported for the Mayor to file |
+| `mw suite` and the nightly suite it is started by | no (it runs on a throwaway worktree of the rig's origin) | yes, taken first, held until its tests have ended; a lock it cannot take ends the suite with nothing run (`Suite.GateLock`, mw-gq6.914) | yes |
 | a landing's after-landing command (deploy, shots) | its own after-landing slot | no | no: it is not the rig's tests; the shots run after the landing's gate has ended |
 | `mw grist eval` and `mw grist smoke` | no | no | not the rig's tests: they run the mill, under its own grind slots (`hostlock.GrindSlots`) |
