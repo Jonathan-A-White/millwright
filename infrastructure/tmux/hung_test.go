@@ -26,6 +26,10 @@ import (
 const (
 	hangDeadline = 200 * time.Millisecond
 	longWait     = 5 * time.Second
+	// slowHangDeadline is for a test whose calls that answer must not be read as
+	// hung on a loaded host: a fake tmux is a shell script, and a host running
+	// other gates can take more than hangDeadline to start one.
+	slowHangDeadline = 2 * time.Second
 )
 
 // fakeTmux writes a stand-in for tmux that answers list-windows with one idle
@@ -95,7 +99,7 @@ func TestEveryTmuxCallEndsAtItsDeadlineWhenTmuxNeverAnswers(t *testing.T) {
 // reads the beads' head again and publishes the view.
 func TestTheFollowerReadsTheBeadsAgainAfterANudgeWhoseTmuxHangs(t *testing.T) {
 	program := fakeTmux(t, "exec sleep 60")
-	w := newNudgeWorld(program)
+	w := newNudgeWorld(program, hangDeadline)
 	appendEvents(t, w.log, events.Event{Kind: events.KindMail, Bead: "mw-m1", Detail: "deputy"})
 	if err := w.nudge.Nudge(context.Background()); err != nil { // the seat starts at the head
 		t.Fatal(err)
@@ -142,7 +146,7 @@ func TestTheFollowerReadsTheBeadsAgainAfterANudgeWhoseTmuxHangs(t *testing.T) {
 func TestANudgeThatTimedOutIsSaidAndRetriedAtTheNextNudge(t *testing.T) {
 	// The first send-keys hangs, the ones after it work.
 	program := fakeTmux(t, `if [ -e "$dir/hung-once" ]; then echo "$@" >> "$dir/typed"; else touch "$dir/hung-once"; exec sleep 60; fi`)
-	w := newNudgeWorld(program)
+	w := newNudgeWorld(program, slowHangDeadline)
 	ctx := context.Background()
 	appendEvents(t, w.log, events.Event{Kind: events.KindMail, Bead: "mw-m1", Detail: "deputy"})
 	if err := w.nudge.Nudge(ctx); err != nil {
@@ -185,7 +189,7 @@ type nudgeWorldT struct {
 
 // newNudgeWorld is an EventNudge for the deputy over the real Windows adapter
 // run on program, in place of tmux.
-func newNudgeWorld(program string) *nudgeWorldT {
+func newNudgeWorld(program string, deadline time.Duration) *nudgeWorldT {
 	w := &nudgeWorldT{log: &apptest.FakeEventLog{}, cursors: &apptest.FakeNudgeCursors{}}
 	subs := &apptest.FakeSubscribeFiles{}
 	subs.Set("deputy", `kinds = ["mail"]`)
@@ -193,7 +197,7 @@ func newNudgeWorld(program string) *nudgeWorldT {
 		Log:      w.log,
 		Subs:     subs,
 		Cursors:  w.cursors,
-		Terminal: tmux.NewWindows(tmux.WithProgram(program), tmux.WithCallDeadline(hangDeadline)),
+		Terminal: tmux.NewWindows(tmux.WithProgram(program), tmux.WithCallDeadline(deadline)),
 		Err:      &w.err,
 	}
 	return w
