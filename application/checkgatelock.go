@@ -193,6 +193,9 @@ func (k Check) gateLockRefusal(ctx, waitCtx context.Context, c *closeOut, try sl
 	}
 	holder, since := k.gateHolderNow(by, time.Now().Add(-waited))
 	sinceAt := fmt.Sprintf("%s (%s ago)", since.UTC().Format("15:04:05Z"), time.Since(since).Round(time.Second))
+	if k.HandBackAtOnce {
+		return GateLockHandBack{Why: k.limitReached(try.label, waited, fmt.Sprintf("%s's gate lock is still held by %s, since %s", k.Host, holder, sinceAt), holder)}
+	}
 	record := strings.TrimSuffix(try.record, ".slot") + "-gate.slot"
 	if earlier := k.noteWait(ctx, c.id, record, holder, since); earlier != "" {
 		return GateLockHandBack{Why: fmt.Sprintf("%s did not start: after %s %s's gate lock is still held by %s, since %s, and nothing was run; it was held when this %s was tried at %s as well, which is counted once for this attempt and is not a failure of the %s: %s, and if the lock is held again, comment on the story naming this %s and who holds the lock, and hand back",
@@ -225,4 +228,14 @@ func (b bothHoldings) HeldBy() string {
 		return b.slot.HeldBy()
 	}
 	return ""
+}
+
+// limitReached is the one line a check with HandBackAtOnce ends with when a wait
+// ran out of its limit (mw-gq6.938): what did not start, that the limit was
+// reached, how long it waited, what still held it and who, that nothing was run,
+// and that the Builder hands back at once; it is not told to run the check
+// again, which would only queue again behind the same holder.
+func (k Check) limitReached(label string, waited time.Duration, still, holder string) string {
+	return fmt.Sprintf("%s did not start: the wait limit of %s was reached after %s and %s, and nothing was run; that is the holder's wait and not a failure of the check, so do not run it again: comment on the story naming %s and hand back at once",
+		label, gateWaited(k.partSlotWait()), gateWaited(waited), still, holder)
 }

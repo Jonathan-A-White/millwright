@@ -75,6 +75,12 @@ type Check struct {
 	// once across the slot, the gate lock and the calm host (mw-gq6.915).
 	PartSlotWait time.Duration
 
+	// HandBackAtOnce is set for a whole check whose wait limit (PartSlotWait) is
+	// the Builder's to set and long enough to outwait a gate (mw-gq6.938): a wait
+	// that runs out then says that the limit was reached and tells the Builder to
+	// hand back at once, not to run the check again, which would only queue again.
+	HandBackAtOnce bool
+
 	// Load is how busy this host is, read around the rig's tests as a
 	// close-out reads it (mw-gq6.379): the check waits, up to LoadBound, for a
 	// busy host to calm before the tests, and runs them once more when they fail

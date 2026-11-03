@@ -26,6 +26,8 @@ type aWholeCheckBesideTheHostsGateLock struct {
 	checks  application.Checks
 	records *mapRecords
 	told    *lockedBuffer
+	// handBackAtOnce is Check.HandBackAtOnce.
+	handBackAtOnce bool
 }
 
 func newWholeCheckBesideTheGateLock(t *testing.T, checks application.Checks) *aWholeCheckBesideTheHostsGateLock {
@@ -51,8 +53,8 @@ func (w *aWholeCheckBesideTheHostsGateLock) check(wait time.Duration) (applicati
 	return application.Check{
 		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: w.checks,
 		Slot: w.slots, GateLock: w.gate, Records: w.records, PartSlotWait: wait,
-		GateNoticeEvery: 40 * time.Millisecond,
-		Host:            "laptop", Remote: "origin",
+		GateNoticeEvery: 40 * time.Millisecond, HandBackAtOnce: w.handBackAtOnce,
+		Host: "laptop", Remote: "origin",
 		Rigs: map[string]string{"millwright": w.rigDir},
 		Out:  writerOf(w.told),
 	}.Run(context.Background(), "mw-x.1")
@@ -359,5 +361,68 @@ func TestAWholeChecksWaitForTheGateLockAndForACalmHostAreOneDeadlineAndTheSecond
 	}
 	if checks.runs != 0 {
 		t.Errorf("expected the tests not to have run, they ran %d time(s)", checks.runs)
+	}
+}
+
+// A check queued behind a long gate waits on, as long as its limit allows, and
+// says how long it waited and for whom (mw-gq6.938).
+func TestAWholeCheckQueuedBehindALongGateRunsOnceItFreesAndSaysHowLongItWaitedAndForWhom(t *testing.T) {
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	closeOut, err := w.gate.Take(context.Background(), "mw-5r3p30.1028", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		closeOut.Holding.Release(context.Background())
+	}()
+	report, err := w.check(10 * time.Second)
+	if err != nil {
+		t.Fatalf("expected the check to wait for the gate lock and pass, got %v\n%s", err, report)
+	}
+	if checks.runs != 1 {
+		t.Errorf("expected the tests to run once, they ran %d time(s)", checks.runs)
+	}
+	noted := strings.Join(report.Notes, "\n")
+	for _, want := range []string{"waited", "mw-5r3p30.1028"} {
+		if !strings.Contains(noted, want) {
+			t.Errorf("expected the report to say it waited for the holder (%q), got notes %q", want, noted)
+		}
+	}
+}
+
+// When its limit is reached a check with HandBackAtOnce says so in one line
+// naming the holder, and tells the Builder to hand back, not to run it again.
+func TestAWholeCheckThatReachesItsWaitLimitSaysSoAndTellsTheBuilderToHandBackAtOnce(t *testing.T) {
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	w.handBackAtOnce = true
+	closeOut, err := w.gate.Take(context.Background(), "mw-5r3p30.1028", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeOut.Holding.Release(context.Background())
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		report, err := w.check(100 * time.Millisecond)
+		if err == nil {
+			t.Fatalf("expected the check not to pass, got\n%s", report)
+		}
+		refusal := slotRefusalOf(report)
+		if refusal == nil {
+			t.Fatalf("expected a refusal that the tests were not run, got %+v", report.Refusals)
+		}
+		for _, want := range []string{"wait limit", "mw-5r3p30.1028", "nothing was run", "hand back", "do not run"} {
+			if !strings.Contains(refusal.Why, want) {
+				t.Errorf("attempt %d: expected the line to say %q, got %q", attempt, want, refusal.Why)
+			}
+		}
+		if strings.Contains(refusal.Why, "\n") {
+			t.Errorf("attempt %d: expected one line, got %q", attempt, refusal.Why)
+		}
+		if strings.Contains(refusal.Why, "run the same check again") {
+			t.Errorf("attempt %d: expected no advice to run the check again, got %q", attempt, refusal.Why)
+		}
 	}
 }

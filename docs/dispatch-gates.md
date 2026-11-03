@@ -200,24 +200,30 @@ checks, alone for a landing) and then the gate lock, for the rig's tests and aga
 for the changed specs, and gives both back when they end. The order is the
 close-out's: `mw next` holds the slot alone while it waits for the lock, so a check
 that held the lock and waited for the slot would wait for a close-out that waits for
-it. Every wait of a whole check is one deadline, `CheckPartSlotWait` (9 minutes), counted
-from the start of the check, under the 590 seconds a Builder's foreground call is
-given: the slot, the lock and a calm host before the tests, and after them the slot
+it. Every wait of a whole check is one deadline, `mw check --wait` (40 minutes by
+default, mw-gq6.938: nine minutes handed a Builder back three times in 45 minutes
+behind two long gates, each try joining the queue again at its back), counted
+from the start of the check: the slot, the lock and a calm host before the tests, and after them the slot
 and lock the changed specs take again and the second wait for a calm host (the run
 again of tests that failed while the host was busy). Each gets what the earlier ones
 left (mw-gq6.915, mw-gq6.918); a deadline the tests have spent leaves a wait of
 nothing, which is one try, not a wait. The tests themselves take as long as they
 take, and are not under it. A wait that runs out ends the check in one line: what did
 not start, who holds the gate lock (or the load of the host), since when, that
-nothing was run, and the command to run again (`mw check <story>`); a hand-back
-repeated in one attempt is counted once (`runs/<story>/check-N-whole-gate.slot`,
-`-specs.slot`, `-calm.slot`, `-calm-again.slot`). While it waits it says every minute
+nothing was run, that the limit was reached, and that the Builder hands back at once and
+does not run it again (`Check.HandBackAtOnce`). A foreground tool call is cut off at 590
+seconds, so a Builder that expects a queue longer than that starts the check with
+`--background` (the log is the story's `check-N.log`). `mw check --part N` is run one
+call per part to fit that 590 seconds and keeps `CheckPartSlotWait` (9 minutes) and
+its run-again line unless `--wait` is given. While it waits it says every minute
 who holds the lock now and since when. It is a wait inside one call, not a loop that
 spends the Builder's turns. The wait for a calm host that follows the lock
 (mw-gq6.819) is taken only once the lock is held, so the load waited on is not another
 gate's. `mw check --no-slot` takes neither the slot nor the lock.
 
-What the Builder does when handed back is the same in every case: run `mw check
+What the Builder does when a `--part` is handed back is to run it again; a whole
+check that reached its `--wait` limit is not run again. When a wait ended a check
+by another route (an older mw, `HandBackAtOnce` unset): run `mw check
 <story>` again; if the same wait ends it again, comment on the story naming the
 holder or the load and hand back. What the run again does with the tests depends on
 where the hand-back came:

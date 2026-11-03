@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
@@ -37,9 +38,12 @@ func newCheckCmd() *cobra.Command {
 			"and does not fetch, merge or push. The two things it takes are the rig's merge slot, around the\n" +
 			"rig's tests, so that a close-out's tests and a check's on one rig do not run at once and starve\n" +
 			"each other, and then this host's gate lock, the one a close-out's gate takes, so that one gate-weight\n" +
-			"run goes at a time on the host whoever asked for it (mw-gq6.906). It waits for both together, nine\n" +
-			"minutes at most, saying who holds each and since when, and ends with one line giving the command\n" +
-			"to run again; --no-slot skips both waits. mw check --part N does not take the gate lock.\n\n" +
+			"run goes at a time on the host whoever asked for it (mw-gq6.906). It waits for both together, 40\n" +
+			"minutes at most (--wait), saying every minute who holds each and since when, and how long it waited\n" +
+			"when it has the lock. A wait that runs out ends with one line naming the holder and saying to hand\n" +
+			"back at once, not to run the check again: a repeat only queues again behind the same gate.\n" +
+			"A foreground tool call is cut off at 590 seconds, so a Builder that expects a longer queue starts the\n" +
+			"check with --background. --no-slot skips both waits. mw check --part N does not take the gate lock.\n\n" +
 			"check treats a busy host as the close-out does (mw-gq6.228): it waits, up to the close-out's bound,\n" +
 			"for the host to calm before the tests, and runs tests that failed while it was busy once more when\n" +
 			"it has calmed, reporting only a second failure and saying it ran twice.\n\n" +
@@ -87,7 +91,7 @@ func newCheckCmd() *cobra.Command {
 				_, err := application.CheckBackground{
 					Tracker: mwGateway(dir, host),
 					Logs:    mwVault(dir, host),
-					Starter: checkStarter{noSlot: noSlot},
+					Starter: checkStarter{noSlot: noSlot, wait: checkWaitGiven(cmd)},
 					Out:     cmd.OutOrStdout(),
 				}.Run(cmd.Context(), args[0])
 				return err
@@ -118,23 +122,26 @@ func newCheckCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			waitLimit, handBackAtOnce := checkWaitLimit(cmd, part)
 			k := application.Check{
-				Tracker:     mwGateway(dir, host),
-				Landing:     worktrees,
-				Checks:      checks,
-				SpecChecks:  checks,
-				NamedChecks: checks,
-				Changes:     worktrees,
-				Slot:        slot,
-				GateLock:    gateLock,
-				Parts:       checks,
-				Records:     mwVault(dir, host),
-				Part:        part,
-				Load:        hostload.Proc{},
-				Modes:       modes,
-				Host:        host,
-				Rigs:        rigs,
-				Out:         cmd.OutOrStdout(),
+				Tracker:        mwGateway(dir, host),
+				Landing:        worktrees,
+				Checks:         checks,
+				SpecChecks:     checks,
+				NamedChecks:    checks,
+				Changes:        worktrees,
+				Slot:           slot,
+				GateLock:       gateLock,
+				Parts:          checks,
+				Records:        mwVault(dir, host),
+				Part:           part,
+				PartSlotWait:   waitLimit,
+				HandBackAtOnce: handBackAtOnce,
+				Load:           hostload.Proc{},
+				Modes:          modes,
+				Host:           host,
+				Rigs:           rigs,
+				Out:            cmd.OutOrStdout(),
 			}
 			if !logIsStdout {
 				k.Logs = mwVault(dir, host)
@@ -147,14 +154,51 @@ func newCheckCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&logIsStdout, "log-is-stdout", false, "the output of this check is already being written to the story's log (set by --background)")
 	_ = cmd.Flags().MarkHidden("log-is-stdout")
 	cmd.Flags().IntVar(&part, "part", 0, "run part N of the rig's gate alone, for a rig whose host names its gate as parts, and keep what it said; a check with no --part then reports the whole gate from the parts' records")
+	cmd.Flags().Duration("wait", CheckWait, "the most a whole check queues for the rig's merge slot, this host's gate lock and a calm host together, before it says the limit was reached and to hand back; a --part N keeps its nine minutes unless this is given")
 	cmd.Flags().BoolVar(&noSlot, "no-slot", false, "run the rig's tests without taking the rig's merge slot, so without waiting for a close-out's gate")
 	return cmd
+}
+
+// CheckWait is how long a whole mw check queues for the host's gate lock, the
+// rig's merge slot and a calm host together, unless --wait says another: past the
+// longest gate a Builder is likely to queue behind (mw-gq6.938), where nine
+// minutes handed the check back to be tried again at the back of the queue.
+const CheckWait = 40 * time.Minute
+
+// checkWaitLimit is the limit of the check's waits and whether a wait that runs
+// out tells the Builder to hand back at once. A whole check takes --wait (40
+// minutes by default) and ends in that line; a --part N is run one call at a time
+// to fit a foreground call's 590 seconds, so it keeps the nine minutes it has
+// always had unless --wait is given, and still says to run the part again.
+func checkWaitLimit(cmd *cobra.Command, part int) (limit time.Duration, handBackAtOnce bool) {
+	limit, _ = cmd.Flags().GetDuration("wait")
+	if part != 0 {
+		if !cmd.Flags().Changed("wait") {
+			limit = application.CheckPartSlotWait
+		}
+		return limit, false
+	}
+	return limit, true
+}
+
+// checkWaitGiven is --wait when the Builder gave it, else zero, for a check
+// started in the background to be given the same.
+func checkWaitGiven(cmd *cobra.Command) time.Duration {
+	if !cmd.Flags().Changed("wait") {
+		return 0
+	}
+	wait, _ := cmd.Flags().GetDuration("wait")
+	return wait
 }
 
 // checkStarter implements application.CheckStarter: it runs this same mw as
 // `mw check <story>` in a session and process group of its own, so that it
 // outlives the tool call that asked, with its output appended to the story's log.
-type checkStarter struct{ noSlot bool }
+type checkStarter struct {
+	noSlot bool
+	// wait is --wait as the Builder gave it, zero when it did not.
+	wait time.Duration
+}
 
 func (s checkStarter) Start(_ context.Context, storyID, logPath string) error {
 	self, err := os.Executable()
@@ -169,6 +213,9 @@ func (s checkStarter) Start(_ context.Context, storyID, logPath string) error {
 	args := []string{"check", storyID, "--log-is-stdout"}
 	if s.noSlot {
 		args = append(args, "--no-slot")
+	}
+	if s.wait > 0 {
+		args = append(args, "--wait", s.wait.String())
 	}
 	// Not exec.CommandContext: the check is meant to outlive the context it was
 	// started in.

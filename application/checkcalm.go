@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -35,6 +36,9 @@ func (k Check) calmRefusal(ctx context.Context, c *closeOut, attempt int, readin
 	if rerun {
 		return k.calmRerunRefusal(ctx, c, attempt, load, again, since, waited)
 	}
+	if k.HandBackAtOnce {
+		return errors.New(k.limitReached("the rig's tests", waited, fmt.Sprintf("%s is still at %s, since %s", k.Host, load, since.UTC().Format("15:04:05Z")), "the load"))
+	}
 	earlier := k.noteWait(ctx, c.id, CheckWholeCalmFileName(attempt), k.Host+" at "+load, since)
 	if earlier != "" {
 		return fmt.Errorf("the rig's tests did not start: after %s %s is still at %s, since %s, and nothing was run; it was busy when this check was tried at %s as well, which is counted once for this attempt and is not a failure of the check: %s, and if the host is busy again, comment on the story naming the load and hand back",
@@ -60,6 +64,9 @@ func CheckWholeCalmAgainFileName(attempt int) string {
 // The first failure is the host's and is not counted; nothing of it is kept,
 // because the run again is what the next call makes first.
 func (k Check) calmRerunRefusal(ctx context.Context, c *closeOut, attempt int, load, again string, since time.Time, waited time.Duration) error {
+	if k.HandBackAtOnce {
+		return errors.New(k.limitReached("the run again of the rig's tests, which failed once while "+k.Host+" was busy,", waited, fmt.Sprintf("%s is still at %s, since %s", k.Host, load, since.UTC().Format("15:04:05Z")), "the load"))
+	}
 	earlier := k.noteWait(ctx, c.id, CheckWholeCalmAgainFileName(attempt), k.Host+" at "+load, since)
 	if earlier != "" {
 		return fmt.Errorf("the rig's tests failed once while %s was busy, and the run again that a failure on a busy host gets did not start: after %s %s is still at %s, since %s; it was busy when this check was tried at %s as well, which is counted once for this attempt and is not a failure of the check: %s, and if the host is busy again, comment on the story naming the load and hand back",
