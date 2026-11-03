@@ -120,6 +120,8 @@ func InitializeSuiteScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the suite's worktree is gone$`, c.theWorktreeIsGone)
 	ctx.Then(`^the suite prints: (.+)$`, c.theSuitePrints)
 	ctx.Then(`^the suite ran "([^"]*)" alone$`, c.theSuiteRanAlone)
+	ctx.Then(`^the suite never ran "([^"]*)"$`, c.theSuiteNeverRan)
+	ctx.Then(`^the suite result lists "([^"]*)" as recheck void, saying "([^"]*)"$`, c.theResultListsVoid)
 	ctx.Then(`^the suite result lists "([^"]*)" as failed twice$`, c.theResultListsFailedTwice)
 	ctx.Then(`^the suite result lists "([^"]*)" as flaky$`, c.theResultListsFlaky)
 	ctx.Then(`^the suite result names "([^"]*)" as the first failing test of "([^"]*)"$`, c.theResultNamesTheFirstTest)
@@ -218,12 +220,12 @@ func (c *suiteContext) respond(rig string) func(dir, command string) (applicatio
 			c.readsAt1 = c.load.Reads
 		}
 		for file, out := range c.rerun {
-			if command == c.tests[rig]+" "+file || (c.specs[rig] != "" && command == strings.ReplaceAll(c.specs[rig], application.SpecsPlaceholder, file)) {
+			if c.unitRerun(command, file) || (c.specs[rig] != "" && command == strings.ReplaceAll(c.specs[rig], application.SpecsPlaceholder, file)) {
 				return application.Checked{Passed: true, Output: out + "\n"}, nil
 			}
 		}
 		for file, fails := range c.alone {
-			if command == c.tests[rig]+" "+file || (c.specs[rig] != "" && command == strings.ReplaceAll(c.specs[rig], application.SpecsPlaceholder, file)) {
+			if c.unitRerun(command, file) || (c.specs[rig] != "" && command == strings.ReplaceAll(c.specs[rig], application.SpecsPlaceholder, file)) {
 				out := "alone: " + file + "\n"
 				if fails {
 					out += "FAIL  " + file + " > again\n"
@@ -239,6 +241,12 @@ func (c *suiteContext) respond(rig string) func(dir, command string) (applicatio
 		}
 		return application.Checked{}, fmt.Errorf("the fake runner was not told of %q", command)
 	}
+}
+
+// unitRerun is whether command is the rig's unit runner step run on file alone:
+// one step, npm test with the file after --, and no other step of the chain.
+func (c *suiteContext) unitRerun(command, file string) bool {
+	return strings.HasSuffix(command, "npm test -- "+file) && !strings.Contains(command, "&&")
 }
 
 func (c *suiteContext) mwSuiteRuns(rig string) error {
@@ -399,6 +407,26 @@ func (c *suiteContext) theSuiteRanAlone(command string) error {
 		}
 	}
 	return fmt.Errorf("expected %q to be run, ran %+v", command, c.runner.Ran())
+}
+
+func (c *suiteContext) theSuiteNeverRan(command string) error {
+	for _, ran := range c.runner.Ran() {
+		if ran.Command == command {
+			return fmt.Errorf("expected %q never to be run, ran %+v", command, c.runner.Ran())
+		}
+	}
+	return nil
+}
+
+func (c *suiteContext) theResultListsVoid(file, said string) error {
+	failing, err := c.file(file)
+	if err != nil {
+		return err
+	}
+	if !failing.Void || failing.Flaky || !strings.Contains(failing.Alone, said) {
+		return fmt.Errorf("expected %s to be recheck void saying %q, got %+v", file, said, failing)
+	}
+	return nil
 }
 
 func (c *suiteContext) file(file string) (application.SuiteFile, error) {

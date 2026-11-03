@@ -35,8 +35,8 @@ Feature: Running a rig's whole test suite on its main
     And alone, "src/config.test.ts" passes
     When mw suite runs "lampas"
     Then the suite exits 1
-    And the suite ran "npm test src/dates.test.ts" alone
-    And the suite ran "npm test src/config.test.ts" alone
+    And the suite ran "npm test -- src/dates.test.ts" alone
+    And the suite ran "npm test -- src/config.test.ts" alone
     And the suite result lists "src/dates.test.ts" as failed twice
     And the suite result lists "src/config.test.ts" as flaky
     And the suite result names "parses dates" as the first failing test of "src/dates.test.ts"
@@ -66,6 +66,34 @@ Feature: Running a rig's whole test suite on its main
     When mw suite runs "lampas"
     Then the suite exits 0
     And the suite ran "npm run build && npx playwright test --project=shots " after "npm test"
+
+  Scenario: A unit file that fails is run again by the unit runner step alone, not by the whole chain
+    Given the suite rig "lampas" whose tests are "npm ci && TZ=UTC npm test && npm run typecheck && npm run build"
+    And the whole run of the tests prints:
+      """
+      FAIL  src/dates.test.ts > parses dates
+      AssertionError: expected 1 to be 2
+      """
+    And the tests fail
+    And alone, "src/dates.test.ts" fails again
+    When mw suite runs "lampas"
+    Then the suite exits 1
+    And the suite ran "TZ=UTC npm test -- src/dates.test.ts" alone
+    And the suite never ran "npm ci && TZ=UTC npm test && npm run typecheck && npm run build src/dates.test.ts"
+    And the suite result lists "src/dates.test.ts" as failed twice
+
+  Scenario: A rig with no unit runner step has its failing file marked recheck void and not run again
+    Given the suite rig "lampas" whose tests are "make test && scripts/check-codemap.sh"
+    And the whole run of the tests prints:
+      """
+      FAIL  src/dates.test.ts > parses dates
+      AssertionError: expected 1 to be 2
+      """
+    And the tests fail
+    When mw suite runs "lampas"
+    Then the suite exits 1
+    And the suite ran exactly 1 command
+    And the suite result lists "src/dates.test.ts" as recheck void, saying "no unit runner step"
 
   Scenario: A spec file that fails is run again alone with only that spec
     Given the suite rig "lampas" has the changed-specs command "npx playwright test {specs}"

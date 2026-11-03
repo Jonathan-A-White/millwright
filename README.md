@@ -1985,8 +1985,10 @@ tokens and refuses a rig with no `[tests]` entry.
 It waits first, up to `--calm-bound` (default 2h), for the host to be calm by
 the rule the close-out's gate uses (load under the core count), and runs
 anyway when it never is, saying so. Each test file that failed is run once more
-alone: the `[tests]` command with the file added, or the `[changed_specs]`
-command with just that spec. A file that fails twice is a failure; one that
+alone: the one unit runner step of the `[tests]` line (`npm test -- <file>`,
+vitest, jest) with the file, not the line's other steps, or the `[changed_specs]`
+command with just that spec; a `[tests]` line with no such step has the file marked
+recheck void, not run again and not filed. A file that fails twice is a failure; one that
 passes alone is flaky. The whole output goes to
 `runs/suite/<rig>/<UTC date>.log` in the vault and a summary (main's sha, start,
 duration, load at start, each failing file with its first failing test and

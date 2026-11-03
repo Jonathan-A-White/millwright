@@ -385,10 +385,11 @@ func (l *suiteLog) section(title, output string) {
 
 // suitePhase is one command line of the whole run: the rig's tests, then its
 // changed-specs command with every spec. alone is the command that runs one
-// failing file by itself.
+// failing file by itself, or why there is none: a re-run that is not alone is
+// no re-run (mw-gq6.924).
 type suitePhase struct {
 	name, command string
-	alone         func(file string) string
+	alone         func(file string) (command, void string)
 }
 
 // cutTree cuts the throwaway worktree a run is made in: detached at the head of
@@ -435,12 +436,24 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 			return SuiteReport{}, err
 		}
 	}
-	phases := []suitePhase{{name: "tests", command: tests, alone: func(file string) string { return tests + " " + shellWord(file) }}}
+	// A file of the [tests] line is run alone by that line's unit runner step and
+	// by no other step: the file added to the whole line lands on its last step and
+	// runs every file again (Lampas, 2026-11-03: 828 files, four times). The tree
+	// is the one the whole run installed in, so the install step is not run again.
+	phases := []suitePhase{{name: "tests", command: tests, alone: func(file string) (string, string) {
+		step := unitStepFor(tests, file)
+		if step == "" {
+			return "", "the rig's [tests] command has no unit runner step (npm test, vitest, jest) to run " + file + " alone with, so it was not run again"
+		}
+		return step, ""
+	}}}
 	if specs := strings.TrimSpace(s.ChangedSpecs[rig]); specs != "" {
 		phases = append(phases, suitePhase{
 			name:    "changed_specs",
 			command: strings.ReplaceAll(specs, SpecsPlaceholder, ""),
-			alone:   func(file string) string { return strings.ReplaceAll(specs, SpecsPlaceholder, shellWord(file)) },
+			alone: func(file string) (string, string) {
+				return strings.ReplaceAll(specs, SpecsPlaceholder, shellWord(file)), ""
+			},
 		})
 	}
 
@@ -548,7 +561,12 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		}
 		for _, failed := range files {
 			file := SuiteFile{File: failed.File, Phase: phase.name, Test: failed.Test, Error: failed.Error}
-			again := phase.alone(failed.File)
+			again, noWay := phase.alone(failed.File)
+			if noWay != "" {
+				file.Alone, file.Void = "recheck void: "+noWay, true
+				result.Failing = append(result.Failing, file)
+				continue
+			}
 			if err := turn("the re-run of " + failed.File); err != nil {
 				return SuiteReport{}, err
 			}
@@ -561,7 +579,9 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 			default:
 				log.section(again, alone.Output)
 				file.Alone, file.Flaky = "failed", false
-				if alone.Passed {
+				if n := testFilesRun(alone.Output); n > 1 {
+					file.Alone, file.Void = fmt.Sprintf("recheck void: the runner ran %d test files, not %s alone", n, failed.File), true
+				} else if alone.Passed {
 					file.Alone, file.Flaky = "passed", true
 				} else if why := voidRecheck(failed.File, alone); why != "" {
 					file.Alone, file.Void = "recheck void: "+why, true
@@ -615,6 +635,22 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 // because something already listens where it would: Playwright's webServer, or
 // a server's own EADDRINUSE.
 var portInUse = regexp.MustCompile(`(?i)is already used|address already in use|EADDRINUSE`)
+
+// testFilesCount is how many test files a run says it ran: vitest's `Test Files
+// 1 failed | 827 passed (828)` and jest's `Test Suites: 1 failed, 828 total`.
+var testFilesCount = regexp.MustCompile(`Test Files\s.*\((\d+)\)|Test Suites:.*?(\d+) total`)
+
+// testFilesRun is the number of test files output says the run ran, or 0 when it
+// does not say. A re-run that says more than one was not run alone.
+func testFilesRun(output string) int {
+	found := testFilesCount.FindAllStringSubmatch(domain.StripANSI(output), -1)
+	if len(found) == 0 {
+		return 0
+	}
+	last := found[len(found)-1]
+	n, _ := strconv.Atoi(last[1] + last[2])
+	return n
+}
 
 // voidRecheck says why a run of file alone that failed says nothing of the file,
 // or "" when it is the file failing again: a run whose server could not start,
