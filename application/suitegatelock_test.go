@@ -31,6 +31,10 @@ func newSuiteBesideTheGateLock(t *testing.T, respond func(dir, command string) (
 }
 
 func (w *aSuiteBesideTheHostsGateLock) run(ctx context.Context) (application.SuiteReport, error) {
+	return w.suite().Run(ctx, "lampas")
+}
+
+func (w *aSuiteBesideTheHostsGateLock) suite() application.Suite {
 	heads := apptest.NewFakeRigHeads()
 	heads.SetHead("/rigs/lampas", "11541bc0d")
 	return application.Suite{
@@ -41,7 +45,7 @@ func (w *aSuiteBesideTheHostsGateLock) run(ctx context.Context) (application.Sui
 		Rigs:  map[string]string{"lampas": "/rigs/lampas"},
 		Tests: map[string]string{"lampas": "npm test"},
 		Out:   writerOf(w.told),
-	}.Run(ctx, "lampas")
+	}
 }
 
 func TestACloseOutsGateHoldingTheHostsGateLockMakesMwSuiteWaitAndRunOnceItIsGivenBack(t *testing.T) {
@@ -159,5 +163,168 @@ func TestAMwSuiteThatFailsGivesTheHostsGateLockBack(t *testing.T) {
 	}
 	if holder := w.gate.Holder(); holder != "" {
 		t.Errorf("expected the gate lock to be given back when the suite ended, %q still holds it", holder)
+	}
+}
+
+func TestAMwSuiteWaitingForACalmHostDoesNotHoldTheHostsGateLock(t *testing.T) {
+	w := newSuiteBesideTheGateLock(t, nil)
+	suite := w.suite()
+	suite.Load = &apptest.FakeHostLoad{Readings: []application.LoadReading{
+		{Load: 40, Cores: 20}, {Load: 30, Cores: 20}, {Load: 3, Cores: 20},
+	}}
+	suite.LoadPoll = time.Second
+	var heldWhileWaiting []string
+	waits := 0
+	suite.LoadWait = func(context.Context, time.Duration) error {
+		waits++
+		heldWhileWaiting = append(heldWhileWaiting, w.gate.Holder())
+		return nil
+	}
+	if _, err := suite.Run(context.Background(), "lampas"); err != nil {
+		t.Fatal(err)
+	}
+	if waits != 2 {
+		t.Fatalf("expected the suite to wait twice for the host to calm, it waited %d times", waits)
+	}
+	for i, holder := range heldWhileWaiting {
+		if holder != "" {
+			t.Errorf("expected the suite to wait for a calm host without the gate lock, wait %d found %q holding it", i+1, holder)
+		}
+	}
+	if ran := w.runner.Ran(); len(ran) != 1 {
+		t.Errorf("expected the suite to run once the host was calm, it ran %+v", ran)
+	}
+}
+
+// aSuiteOfTwoPhases is a suite that runs the rig's tests and then its changed
+// specs, the second held back by held until it is released.
+func aSuiteOfTwoPhases(w *aSuiteBesideTheHostsGateLock) application.Suite {
+	suite := w.suite()
+	suite.ChangedSpecs = map[string]string{"lampas": "npx playwright test {specs}"}
+	return suite
+}
+
+func TestAMwSuiteGivesTheHostsGateLockBackBetweenItsPhasesSoACloseOutWaitsForOneStepAndNotTheWholeSuite(t *testing.T) {
+	testsRunning, finishTests := make(chan struct{}), make(chan struct{})
+	specsRunning := make(chan struct{})
+	var holderAtSpecs string
+	w := newSuiteBesideTheGateLock(t, func(_, command string) (application.Checked, error) {
+		if command == "npm test" {
+			close(testsRunning)
+			<-finishTests
+		} else {
+			holderAtSpecs = "run"
+			close(specsRunning)
+		}
+		return application.Checked{Passed: true}, nil
+	})
+	done := make(chan error, 1)
+	go func() {
+		_, err := aSuiteOfTwoPhases(w).Run(context.Background(), "lampas")
+		done <- err
+	}()
+	select {
+	case <-testsRunning:
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected the suite to start the rig's tests")
+	}
+
+	// A close-out's gate comes while the tests run and waits for them.
+	took := make(chan application.GateTurn, 1)
+	go func() {
+		turn, err := w.gate.Take(context.Background(), "mw-gq6.894", nil)
+		if err != nil {
+			t.Error(err)
+		}
+		took <- turn
+	}()
+	time.Sleep(100 * time.Millisecond)
+	close(finishTests)
+
+	// It is next: the suite's changed specs wait behind it, though the suite had
+	// the lock a moment before.
+	var turn application.GateTurn
+	select {
+	case turn = <-took:
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected the close-out's gate to take the lock once the suite's tests had ended, not to wait for the changed specs")
+	}
+	select {
+	case <-specsRunning:
+		t.Fatal("expected the suite's changed specs not to run beside the close-out's gate")
+	case <-time.After(150 * time.Millisecond):
+	}
+	if holder := w.gate.Holder(); holder != "mw-gq6.894" {
+		t.Errorf("expected the close-out's gate to hold the lock, %q does", holder)
+	}
+
+	turn.Holding.Release(context.Background())
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected the suite to pass once the close-out's gate gave the lock back, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected the suite to run its changed specs once the close-out's gate gave the lock back")
+	}
+	if holderAtSpecs == "" {
+		t.Error("expected the suite to run its changed specs")
+	}
+	if holder := w.gate.Holder(); holder != "" {
+		t.Errorf("expected the gate lock to be free once the suite ended, %q holds it", holder)
+	}
+}
+
+func TestAMwSuiteHoldsTheHostsGateLockForEachOfItsCommandLines(t *testing.T) {
+	var held []string
+	var w *aSuiteBesideTheHostsGateLock
+	w = newSuiteBesideTheGateLock(t, func(_, command string) (application.Checked, error) {
+		held = append(held, command+" under "+w.gate.Holder())
+		if command == "npm test" {
+			return application.Checked{Passed: false, Output: "FAIL tests/a.test.ts > a\n"}, nil
+		}
+		return application.Checked{Passed: true}, nil
+	})
+	if _, err := aSuiteOfTwoPhases(w).Run(context.Background(), "lampas"); err != nil {
+		t.Fatal(err)
+	}
+	if len(held) < 3 {
+		t.Fatalf("expected the tests, the changed specs and the re-run of the failing file, got %v", held)
+	}
+	for _, line := range held {
+		if !strings.HasSuffix(line, " under suite lampas") {
+			t.Errorf("expected every command line to be run holding the gate lock, got %q", line)
+		}
+	}
+}
+
+func TestAMwSuiteThatCannotTakeTheLockBackBetweenPhasesEndsSayingWhatRanAndWhoHoldsIt(t *testing.T) {
+	var w *aSuiteBesideTheHostsGateLock
+	blocked := make(chan application.GateTurn, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+	w = newSuiteBesideTheGateLock(t, func(_, command string) (application.Checked, error) {
+		// A close-out's gate queues and, the suite having given the lock back, holds it.
+		go func() {
+			turn, _ := w.gate.Take(context.Background(), "mw-gq6.894", nil)
+			blocked <- turn
+		}()
+		time.Sleep(100 * time.Millisecond)
+		return application.Checked{Passed: true}, nil
+	})
+	_, err := aSuiteOfTwoPhases(w).Run(ctx, "lampas")
+	if blocker := <-blocked; blocker.Holding != nil {
+		defer blocker.Holding.Release(context.Background())
+	}
+	if err == nil {
+		t.Fatal("expected a suite that could not take the gate lock back to end in an error")
+	}
+	for _, want := range []string{"gate lock", "mw-gq6.894", "npm test", "changed specs"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the error to say %q, got %q", want, err)
+		}
+	}
+	if ran := w.runner.Ran(); len(ran) != 1 {
+		t.Errorf("expected the suite to run its tests and no more, it ran %+v", ran)
 	}
 }

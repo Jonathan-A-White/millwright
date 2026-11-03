@@ -216,21 +216,48 @@ before the changed specs that follow it, are not under that deadline: they come
 after the tests, which take as long as they take.
 `mw check --no-slot` takes neither.
 
-`mw suite` and so the nightly suite (which starts it) takes the gate lock too, first,
-before its wait for a calm host, and holds it until the rig's tests and the re-runs
-of failing files have ended (`Suite.GateLock`, mw-gq6.914). It takes no merge slot:
-it runs on a throwaway worktree and touches no target branch. It waits as long as
-the lock's own cap, `hostlock.GateCap` (3 hours), saying every minute whom it waits
-for and since when, and ends with nothing run if the lock is still not its: it does
-not run beside a gate. Before this the suite waited only for a calm host
-(`--calm-bound`) and ran anyway, and the nightly Lampas suite was among the load
-sources of the Laptop at 40 to 80 of 20 cores (handoff 726). The numbers above are
-its reason: a gate with another run beside it takes three to four times as long.
-The suite is long, so a close-out that comes while it runs waits behind it, up to
-its own cap, as it would behind any gate; the nightly runs from 08:00 UTC, when no
-story is worked. The suite's `--calm-bound` wait is spent holding the lock, so that
-the load waited on is not another gate's. `Suite.Recheck` (the bug recheck) takes no
-lock itself: its callers hold it (`rerunUnderGate`).
+`mw suite` and so the nightly suite (which starts it) takes the gate lock too, for each
+command line it runs, and not before its wait for a calm host (`Suite.GateLock`,
+mw-gq6.914 and mw-gq6.917). It takes no merge slot: it runs on a throwaway worktree and
+touches no target branch. Its order is: the wait for a calm host (`--calm-bound`, up to
+2 hours) without the lock; then the lock, held while the worktree is cut and the rig's
+tests run, and given back; then the lock again for the changed specs, given back; then
+the lock again for each re-run of a failing file. A close-out's gate or a Builder's check
+that comes while the suite runs therefore waits behind the one command line in hand, not
+behind the suite: the lock is first come first served, so when the line ends the gate
+that waited has the lock and the suite's next line waits behind it. A suite waits for the
+lock as long as the lock's own cap, `hostlock.GateCap` (3 hours), saying every minute
+whom it waits for and since when, and if it cannot take it again it ends with nothing
+kept, naming the command lines it had run and who holds the lock: it does not run beside
+a gate. Before mw-gq6.914 the suite waited only for a calm host and ran anyway, and the
+nightly Lampas suite was among the load sources of the Laptop at 40 to 80 of 20 cores
+(handoff 726). The numbers above are its reason: a gate with another run beside it takes
+three to four times as long.
+
+The numbers behind the order and the rule, from the vault's `runs/suite/lampas` of the 21
+nights 2026-10-13 to 2026-11-02: the whole suite ran 16 to 131 minutes (median 36), from
+08:00 to 09:44 UTC. Taking the lock before the calm wait made a close-out wait for that and
+for the wait too (up to 2 hours more); 7 of the Laptop's 111 gates of the 7 days to
+2026-11-03 fell in 08:00 to 12:00 UTC, and stories are worked there then, so the nightly
+suite has the Laptop's gates and Builders to share it with. The wait for a calm host is made without
+the lock, which means the load it sees may be a gate's; that is the lesser cost, for a
+gate runs 3 to 25 minutes, the suite takes the lock only after it, and the lock is not
+the suite's before that gate has ended. The rig's runner takes one shell line, so the
+suite cannot yield inside a line: the longest a close-out waits behind a suite is the
+longest single line, the rig's tests (its vitest run alone was 9 to 45 minutes in the 10
+nights 10/20 to 11/02, inside a line that also installs, type-checks, lints and builds) or
+its changed specs (Playwright's own count 9 to 33 minutes), and not the 36 minute median
+or 131 minute longest of the whole suite. A Builder's whole `mw check` hands back after
+9 minutes with one line naming the holder (`suite lampas`), since when, and the command to
+run again; the second hand-back in an attempt says the same and to comment on the story
+and hand back if the lock is held a third time. So a line of up to 27 minutes is waited
+out within one check's three calls, and a longer one ends with the Builder's comment, not
+with turns spent. The result file's `gate_waited_seconds` is the part of `duration_seconds`
+the suite spent waiting to take the lock again. The nightly `mw timing` waits for a calm
+host first and then takes the lock in the same way (the suite's lock is given back between
+its lines, so timing can run between them), and runs only after the suite's result of the
+day is kept when the rig asks for both. `Suite.Recheck` (the bug recheck) takes no lock
+itself: its callers hold it (`rerunUnderGate`).
 
 `mw check --part N` does not follow the rule. Its parts are named by a host for a rig
 whose whole gate outruns a foreground call, each sized to fit one; a part that only
@@ -253,6 +280,6 @@ Every place mw runs the rig's tests, and what it takes:
 | `mw check --no-slot` | no | no | no, the escape hatch |
 | `mw dispatch` bug recheck and `mw next` fixed-on-main recheck (`rerunUnderGate`) | no | yes, a short wait, else "not re-checked" | yes |
 | nightly `mw timing` | no | yes | yes |
-| `mw suite` and the nightly suite it is started by | no (it runs on a throwaway worktree of the rig's origin) | yes, taken first, held until its tests have ended; a lock it cannot take ends the suite with nothing run (`Suite.GateLock`, mw-gq6.914) | yes |
+| `mw suite` and the nightly suite it is started by | no (it runs on a throwaway worktree of the rig's origin) | yes, taken after the wait for a calm host, for one command line at a time (the tests, the changed specs, each re-run of a failing file) and given back between them; a lock it cannot take ends the suite with nothing kept (`Suite.GateLock`, mw-gq6.914, mw-gq6.917) | yes |
 | a landing's after-landing command (deploy, shots) | its own after-landing slot | no | no: it is not the rig's tests; the shots run after the landing's gate has ended |
 | `mw grist eval` and `mw grist smoke` | no | no | not the rig's tests: they run the mill, under its own grind slots (`hostlock.GrindSlots`) |

@@ -642,6 +642,11 @@ func (n *NightlyTiming) runRig(ctx context.Context, due TimingDue) (skipped stri
 			n.say("  wait    %s's gate lock is held by %s: waiting for it before the timing run\n", n.Host, by)
 		})
 		if err != nil {
+			// Left as it is (mw-gq6.917): the run is 81 to 388 s against the suite's 16 to
+			// 131 minutes, it waits for the suite's result of the day first, and the
+			// suite gives the lock back between its command lines, so the 3 hour cap
+			// is reached only by gates that queue for hours; a night skipped is not
+			// tried again that day.
 			n.say("  wait    %s's gate lock could not be taken (%v), so the timing run is made without it\n", n.Host, err)
 		} else if turn.Holding != nil {
 			defer turn.Holding.Release(context.WithoutCancel(ctx))
