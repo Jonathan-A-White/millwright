@@ -255,7 +255,12 @@ type slotTry struct {
 // than partSlotWait: under the 590 seconds a Builder's foreground call is given.
 // It ends a wait that ran out in one line (slotRefusal).
 func (k Check) takeSlotWithin(ctx context.Context, c *closeOut, try slotTry) (Holding, error) {
-	waitCtx, cancel := context.WithTimeout(ctx, k.partSlotWait())
+	return k.takeSlotFor(ctx, c, try, k.partSlotWait())
+}
+
+// takeSlotFor is takeSlotWithin for a wait of within.
+func (k Check) takeSlotFor(ctx context.Context, c *closeOut, try slotTry, within time.Duration) (Holding, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, within)
 	defer cancel()
 	holding, err := takeForCheck(waitCtx, k.Slot, c.rigDir, fmt.Sprintf("%s checking %s", SeatIdentity("", k.Host), c.id))
 	if err != nil {

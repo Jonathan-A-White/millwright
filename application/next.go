@@ -2121,7 +2121,11 @@ func (n Next) batchRunOnTheMerge(ctx context.Context, c *closeOut, report *NextR
 	// The gate lock is waited for before the target is merged: the wait can be
 	// an hour long and the target moves meanwhile (mw-gq6.872).
 	const what = "the rig's tests with the target merged in"
-	if lock := n.waitForTheGateLock(ctx, c, report, what); lock != nil {
+	lock, handBack := n.takeTheGateLock(ctx, c, report, what)
+	if handBack != nil {
+		return gated{Err: handBack}, "", true
+	}
+	if lock != nil {
 		defer n.giveTheGateLockBack(report, lock)
 	}
 	target := n.freshTarget(ctx, c, report)

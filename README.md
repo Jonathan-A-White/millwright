@@ -1472,11 +1472,16 @@ can still be stopped by a conflict or by the other host's work. The last formula
 step is normally still open when a session runs it; the session's kickoff prompt
 names the command and says so. See `features/check.feature`.
 
-The one thing it takes is the rig's merge slot, around the rig's tests only: a
-close-out's gate holds that slot, so a check on the same rig waits for it
-(`waiting for the merge slot: held by ...` on stderr) rather than running its
-whole gate on top of the close-out's, where both fail from load. `--no-slot`
-skips the wait.
+The two things it takes are the rig's merge slot and then the host's gate lock, around
+the rig's tests only: a close-out's gate holds that slot, so a check on the same rig
+waits for it (`waiting for the merge slot: held by ...` on stderr), and a close-out's
+gate, of any rig, holds the host's gate lock, so a check waits for that too (`still
+waiting for <host>'s gate lock, held by ... since ...` every minute), rather than running
+its whole gate on top of the close-out's, where both fail from load (mw-gq6.906). Both
+waits share nine minutes, under a Builder's 590 s foreground call, and end in one line
+naming the holder and the command to run again. `--no-slot` skips both waits;
+`--part N` takes the merge slot as below and not the gate lock (see
+`docs/dispatch-gates.md`).
 
 ### What a session may run without asking
 

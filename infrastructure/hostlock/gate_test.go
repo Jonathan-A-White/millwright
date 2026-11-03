@@ -270,3 +270,23 @@ func TestAGateLockWhoseHolderDiedLeavingItsNameHasNoHolder(t *testing.T) {
 		t.Errorf("holder of a lock only a name is left in = %q, want none", got)
 	}
 }
+
+func TestAGateLockSaysSinceWhenItsHolderTookIt(t *testing.T) {
+	gate := hostlock.NewGate(t.TempDir(), hostlock.WithGatePoll(5*time.Millisecond))
+	if got := gate.HeldSince(); !got.IsZero() {
+		t.Errorf("expected a free lock to be held since no time, got %s", got)
+	}
+	before := time.Now().Add(-time.Second)
+	turn, err := gate.Take(context.Background(), "mw-gq6.894", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	since := gate.HeldSince()
+	if since.Before(before) || since.After(time.Now().Add(time.Second)) {
+		t.Errorf("expected the lock to be held since about now, got %s", since)
+	}
+	turn.Holding.Release(context.Background())
+	if got := gate.HeldSince(); !got.IsZero() {
+		t.Errorf("expected a lock given back to be held since no time, got %s", got)
+	}
+}

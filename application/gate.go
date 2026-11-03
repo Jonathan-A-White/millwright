@@ -38,6 +38,16 @@ type GateLock interface {
 	Take(ctx context.Context, holder string, held func(by string)) (GateTurn, error)
 }
 
+// GateLockHandBack is what a GateLock's Take returns to end the gate it was
+// asked for, in place of letting the tests run without the lock: a mw check
+// whose wait for the lock ran out in its foreground budget (mw-gq6.906). A
+// close-out's lock is never one that hands back, so its gate goes on without a
+// lock it could not take, as before (mw-gq6.388). Why is one line, and is what
+// the refusal says.
+type GateLockHandBack struct{ Why string }
+
+func (e GateLockHandBack) Error() string { return e.Why }
+
 // GateTurn is a gate lock somebody has, and what its taking waited for. Waited
 // is zero and For empty when the lock was free.
 type GateTurn struct {
@@ -194,7 +204,11 @@ type gated struct {
 // the retry included, however it ends (mw-gq6.388). A lock that cannot be taken
 // is said, and the tests run without it.
 func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, what string, span RelatedSpan) gated {
-	if lock := n.waitForTheGateLock(ctx, c, report, what); lock != nil {
+	lock, err := n.takeTheGateLock(ctx, c, report, what)
+	if err != nil {
+		return gated{Err: err}
+	}
+	if lock != nil {
 		defer n.giveTheGateLockBack(report, lock)
 	}
 	return n.gateOnACalmHost(ctx, c, report, dir, what, span)
@@ -250,8 +264,16 @@ func gateLogOf(c Checked) string {
 // waiting for another gate to end, and says so. A lock that cannot be taken is
 // said, and nil returned: the tests run without it. A nil GateLock takes none.
 func (n Next) waitForTheGateLock(ctx context.Context, c *closeOut, report *NextReport, what string) Holding {
+	lock, _ := n.takeTheGateLock(ctx, c, report, what)
+	return lock
+}
+
+// takeTheGateLock is waitForTheGateLock for a gate that must not run without
+// the lock when the lock says to hand it back (GateLockHandBack): then the lock
+// is nil and the error is the hand-back, which ends the gate.
+func (n Next) takeTheGateLock(ctx context.Context, c *closeOut, report *NextReport, what string) (Holding, error) {
 	if n.GateLock == nil {
-		return nil
+		return nil, nil
 	}
 	var resume func()
 	turn, err := n.GateLock.Take(ctx, c.id, func(by string) {
@@ -268,14 +290,18 @@ func (n Next) waitForTheGateLock(ctx context.Context, c *closeOut, report *NextR
 	}
 	if err != nil {
 		n.markCloseOut(ctx, c.id, c.began, false)
+		var handBack GateLockHandBack
+		if errors.As(err, &handBack) {
+			return nil, handBack
+		}
 		n.noteLocklessGate(report, err, what)
-		return nil
+		return nil, nil
 	}
 	if turn.For != "" {
 		n.markCloseOut(ctx, c.id, c.began, false)
 		report.Notes = append(report.Notes, fmt.Sprintf("gate waited %s for %s before %s", gateWaited(turn.Waited), turn.For, what))
 	}
-	return turn.Holding
+	return turn.Holding, nil
 }
 
 // noteLocklessGate says the gate lock could not be taken, and that the tests

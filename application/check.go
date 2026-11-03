@@ -20,10 +20,11 @@ import (
 // the tests fail in the worktree and the target has commits the branch was cut
 // before, it merges the target in a throwaway landing worktree, taken away
 // again, and runs them there once more, as mw next would: mw-gq6.553.) The
-// one thing it takes is the rig's merge slot, around the rig's tests only, so
-// that a close-out's gate and a check's gate on one rig never run at once and
-// starve each other; it waits for the slot, and the slot is given back when the
-// tests are done. It does not fetch, so the commits are counted against the target
+// two things it takes are the rig's merge slot and then the host's gate lock,
+// around the rig's tests only, so that a close-out's gate and a check's gate on
+// one rig, or on any rig of a host, never run at once and starve each other; it
+// waits for both within one nine-minute budget, and gives both back when the
+// tests are done (mw-gq6.906). It does not fetch, so the commits are counted against the target
 // branch as the rig last saw the remote's; it does not read the session's
 // result, which does not exist until the session ends; and it does not try the
 // merge, so a branch it passes can still be stopped by a conflict.
@@ -56,6 +57,17 @@ type Check struct {
 	// they run side by side, and apart from a landing, which holds it alone.
 	// Nil takes no slot.
 	Slot MergeSlot
+
+	// GateLock is the host's gate lock, the one a close-out's gate takes
+	// (mw-gq6.388). A whole check takes it after the slot, around the rig's tests
+	// and the changed specs, so that one gate-weight run goes at a time on the
+	// host (mw-gq6.906); it shares PartSlotWait with the slot. A --part does not
+	// take it. Nil takes none, as does a check with no Slot (--no-slot).
+	GateLock GateLock
+
+	// GateNoticeEvery is how often a check waiting for the gate lock says so
+	// again; CheckGateNoticeEvery when zero.
+	GateNoticeEvery time.Duration
 
 	// PartSlotWait is the most a check waits for the slot, a --part or the whole
 	// of one (mw-gq6.817); CheckPartSlotWait when zero.
@@ -295,7 +307,12 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		// handed back in one line when it is still busy (mw-gq6.819).
 		loadBound = k.partSlotWait()
 	}
-	if !split && k.Slot != nil {
+	var gateLock GateLock
+	if !split && k.Slot != nil && k.GateLock != nil {
+		// Slot, then gate lock, taken before the wait for a calm host so that the
+		// load waited on is not another gate's: a close-out does the same.
+		gateLock = checkGateLock{k: k, c: c, attempt: report.Attempt}
+	} else if !split && k.Slot != nil {
 		checks = slottedChecks{
 			checks: k.Checks,
 			take: func(ctx context.Context) (Holding, error) {
@@ -311,7 +328,11 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 			specs = slottedSpecs{
 				specs: k.SpecChecks,
 				take: func(ctx context.Context) (Holding, error) {
-					return k.takeSlotWithin(ctx, c, wholeTry(c, "the rig's changed specs", CheckSpecsHeldFileName(report.Attempt)))
+					if k.GateLock == nil {
+						return k.takeSlotWithin(ctx, c, wholeTry(c, "the rig's changed specs", CheckSpecsHeldFileName(report.Attempt)))
+					}
+					turn, err := k.takeForTests(ctx, c, wholeTry(c, "the rig's changed specs", CheckSpecsHeldFileName(report.Attempt)), nil)
+					return turn.Holding, err
 				},
 			}
 		}
@@ -328,6 +349,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		Tracker:      k.Tracker,
 		Landing:      k.Landing,
 		Checks:       checks,
+		GateLock:     gateLock,
 		SpecChecks:   specs,
 		NamedChecks:  k.NamedChecks,
 		GateParts:    k.Parts,
