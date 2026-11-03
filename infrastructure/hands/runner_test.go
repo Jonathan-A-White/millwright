@@ -49,7 +49,9 @@ func TestRunnerRunsAUserStepHere(t *testing.T) {
 // A step past its limit is stopped, everything it started with it.
 func TestRunnerStopsAStepAtItsLimit(t *testing.T) {
 	runner := hands.NewRunner("/usr/local/sbin/mw-hands-root")
-	runner.UserLimit = 300 * time.Millisecond
+	// Two seconds: the output must hold "begun", which a loaded host can take
+	// more than a fraction of a second to start the step and print (mw-gq6.922).
+	runner.UserLimit = 2 * time.Second
 
 	started := time.Now()
 	outcome, err := runner.Run(context.Background(), userJob("echo begun; sleep 30"))

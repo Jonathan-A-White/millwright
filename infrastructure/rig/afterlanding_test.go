@@ -73,8 +73,12 @@ func TestACommandThatOutlivesItsLimitIsStoppedAndReportedAsAFailure(t *testing.T
 	marker := filepath.Join(t.TempDir(), "finished")
 	// The shell starts sleep as a child and does not exec it, as a make would
 	// start a compiler: stopping the shell alone would leave the sleep running.
+	//
+	// The limit is two seconds, not a fraction of one: the output must hold what
+	// the command printed before it was stopped, and a loaded host can take more
+	// than 200 ms to start the shell that prints it (mw-gq6.922).
 	after := rig.NewAfterLanding(
-		rig.WithAfterLimit(200*time.Millisecond),
+		rig.WithAfterLimit(2*time.Second),
 		rig.WithAfterCommands(map[string]string{"millwright": "echo started; sleep 30; touch " + marker}),
 	)
 
@@ -88,10 +92,10 @@ func TestACommandThatOutlivesItsLimitIsStoppedAndReportedAsAFailure(t *testing.T
 	if took > 10*time.Second {
 		t.Errorf("expected the command to be stopped at its limit, it ran for %s", took)
 	}
-	if ran.Succeeded() || ran.TimedOut != 200*time.Millisecond || !strings.Contains(ran.Output, "started") {
+	if ran.Succeeded() || ran.TimedOut != 2*time.Second || !strings.Contains(ran.Output, "started") {
 		t.Errorf("expected a stopped run that says its limit and keeps what it printed, got %+v", ran)
 	}
-	if line := ran.Line(); !strings.Contains(line, "stopped after 200ms, still running") {
+	if line := ran.Line(); !strings.Contains(line, "stopped after 2s, still running") {
 		t.Errorf("expected the line to say it was stopped, got %q", line)
 	}
 	if _, err := os.Stat(marker); err == nil {
