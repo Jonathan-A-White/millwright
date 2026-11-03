@@ -23,7 +23,9 @@ import (
 // can then never wait for a check that waits for the slot. Both waits are one
 // budget, partSlotWait: under the 590 seconds a Builder's foreground call is
 // given, ending in one line that names the holder, since when, and the command
-// to run again, not in a loop that spends the Builder's turns. mw check --part
+// to run again, not in a loop that spends the Builder's turns. The wait for a
+// calm host that follows (checkcalm.go) is the same deadline, not another: it
+// gets what these waits left (Next.LoadBoundLeft, mw-gq6.915). mw check --part
 // does not take it (docs/dispatch-gates.md says why).
 
 // CheckGateNoticeEvery is how often a check that waits for the host's gate lock

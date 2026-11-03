@@ -138,8 +138,12 @@ func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what 
 		return reading, false, nil
 	}
 	handBack = handBack && n.CalmHandBack != nil
+	bound := n.loadBound()
+	if handBack && n.LoadBoundLeft != nil {
+		bound = max(n.LoadBoundLeft(), 0)
+	}
 	n.print(fmt.Sprintf("  wait    %s is at load %.1f of %d cores: waiting up to %s for it to calm before %s\n",
-		n.Host, reading.Load, reading.Cores, n.loadBound(), what))
+		n.Host, reading.Load, reading.Cores, bound, what))
 	// The close-out says it is waiting, and says it is running again once it stops.
 	n.markCloseOut(ctx, c.id, c.began, true)
 	defer n.markCloseOut(ctx, c.id, c.began, false)
@@ -149,7 +153,7 @@ func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what 
 	since := time.Now()
 	var waited, said time.Duration
 	for reading.Busy() {
-		if waited >= n.loadBound() {
+		if waited >= bound {
 			if handBack {
 				return reading, true, n.CalmHandBack(ctx, reading, since, waited)
 			}
@@ -168,7 +172,7 @@ func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what 
 		}
 		step := n.loadPoll()
 		if handBack {
-			step = min(step, n.loadBound()-waited)
+			step = min(step, bound-waited)
 		}
 		if err := n.loadWait(ctx, step); err != nil {
 			return reading, false, nil
@@ -182,7 +186,7 @@ func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what 
 		if handBack && reading.Busy() && waited-said >= calmedMinute {
 			said = waited
 			n.print(fmt.Sprintf("  wait    still waiting for %s to calm: at load %.1f of %d cores since %s (%s so far, up to %s)\n",
-				n.Host, reading.Load, reading.Cores, since.UTC().Format("15:04:05Z"), gateWaited(waited), gateWaited(n.loadBound())))
+				n.Host, reading.Load, reading.Cores, since.UTC().Format("15:04:05Z"), gateWaited(waited), gateWaited(bound)))
 		}
 	}
 	report.Notes = append(report.Notes, fmt.Sprintf("%s was busy: waited %s for it to calm before %s", n.Host, waited, what))

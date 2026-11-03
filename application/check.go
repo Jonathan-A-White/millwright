@@ -61,7 +61,8 @@ type Check struct {
 	// GateLock is the host's gate lock, the one a close-out's gate takes
 	// (mw-gq6.388). A whole check takes it after the slot, around the rig's tests
 	// and the changed specs, so that one gate-weight run goes at a time on the
-	// host (mw-gq6.906); it shares PartSlotWait with the slot. A --part does not
+	// host (mw-gq6.906); it shares PartSlotWait with the slot and the wait for a
+	// calm host. A --part does not
 	// take it. Nil takes none, as does a check with no Slot (--no-slot).
 	GateLock GateLock
 
@@ -70,7 +71,8 @@ type Check struct {
 	GateNoticeEvery time.Duration
 
 	// PartSlotWait is the most a check waits for the slot, a --part or the whole
-	// of one (mw-gq6.817); CheckPartSlotWait when zero.
+	// of one (mw-gq6.817); CheckPartSlotWait when zero. A whole check spends it
+	// once across the slot, the gate lock and the calm host (mw-gq6.915).
 	PartSlotWait time.Duration
 
 	// Load is how busy this host is, read around the rig's tests as a
@@ -289,7 +291,9 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	report.Branch, report.Target = c.branch, c.target
 
 	// The rig's tests are run holding the rig's merge slot, shared with the
-	// other checks of the rig and apart from a landing's.
+	// other checks of the rig and apart from a landing's. The waits for the slot,
+	// the gate lock and a calm host are one deadline from here (mw-gq6.915).
+	began := time.Now()
 	checks := k.Checks
 	load := k.Load
 	loadBound, handBack := k.LoadBound, func(ctx context.Context, reading LoadReading, since time.Time, waited time.Duration) error {
@@ -346,24 +350,25 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	// close-out cannot come apart.
 	var read NextReport
 	report.Refusals = Next{
-		Tracker:      k.Tracker,
-		Landing:      k.Landing,
-		Checks:       checks,
-		GateLock:     gateLock,
-		SpecChecks:   specs,
-		NamedChecks:  k.NamedChecks,
-		GateParts:    k.Parts,
-		GateRecords:  k.Records,
-		Changes:      k.Changes,
-		Remote:       k.Remote,
-		Load:         load,
-		Modes:        k.Modes,
-		LoadPoll:     k.LoadPoll,
-		LoadBound:    loadBound,
-		CalmHandBack: handBack,
-		LoadWait:     k.LoadWait,
-		Host:         k.Host,
-		Out:          k.Out,
+		Tracker:       k.Tracker,
+		Landing:       k.Landing,
+		Checks:        checks,
+		GateLock:      gateLock,
+		SpecChecks:    specs,
+		NamedChecks:   k.NamedChecks,
+		GateParts:     k.Parts,
+		GateRecords:   k.Records,
+		Changes:       k.Changes,
+		Remote:        k.Remote,
+		Load:          load,
+		Modes:         k.Modes,
+		LoadPoll:      k.LoadPoll,
+		LoadBound:     loadBound,
+		CalmHandBack:  handBack,
+		LoadBoundLeft: func() time.Duration { return (k.partSlotWait() - time.Since(began)).Round(time.Millisecond) },
+		LoadWait:      k.LoadWait,
+		Host:          k.Host,
+		Out:           k.Out,
 	}.refusals(ctx, c, &read, true)
 	report.Commits, report.Notes = read.Commits, read.Notes
 	if split && report.Passed() {

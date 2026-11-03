@@ -72,6 +72,18 @@ type Suite struct {
 	Files   VaultFiles
 	Load    HostLoad
 
+	// GateLock, when it is set, is the host's gate lock, the one a close-out's
+	// gate and a whole mw check take: the suite takes it for each command line it
+	// runs, after the wait for a calm host and not during it, and gives it back
+	// between them, so it never runs beside a gate (mw-gq6.914) and a gate waits
+	// behind one command line of it, not the whole suite (mw-gq6.917). nil takes
+	// none. Only Run takes it: Recheck is run by callers that hold it already
+	// (rerunUnderGate).
+	GateLock GateLock
+	// GateNoticeEvery is how often a suite that waits for the gate lock says
+	// again that it is waiting; zero reads CheckGateNoticeEvery.
+	GateNoticeEvery time.Duration
+
 	// LoadPoll, LoadBound and LoadWait are Next's own: how often a busy host is
 	// looked at again, how long it is waited for, and how the wait is made. Zero
 	// reads GateLoadPoll and SuiteCalmBound.
@@ -132,6 +144,9 @@ type SuiteResult struct {
 	Passed          bool        `json:"passed"`
 	Failing         []SuiteFile `json:"failing_files"`
 	Unnamed         []string    `json:"failed_without_a_file,omitempty"`
+	// GateWaitedSeconds is the part of the duration spent waiting to take the gate
+	// lock again between command lines (mw-gq6.917), not running them.
+	GateWaitedSeconds float64 `json:"gate_waited_seconds,omitempty"`
 }
 
 // SuiteReport is what a suite did: its result, where the two files are kept
@@ -268,6 +283,84 @@ func (s Suite) calmed(ctx context.Context, before string) (reading LoadReading, 
 	return reading, read, waited, false, nil
 }
 
+// takeGateLock takes the host's gate lock for the suite of rig before the command
+// line it names, waiting for the gate that holds it and saying so every
+// GateNoticeEvery, and returns what gives it back (safe to call twice). A lock
+// that cannot be taken ends the suite: before anything ran when ran is empty,
+// else after the command lines it names.
+func (s Suite) takeGateLock(ctx context.Context, rig, before string, ran []string) (func(), error) {
+	if s.GateLock == nil {
+		return func() {}, nil
+	}
+	every := s.GateNoticeEvery
+	if every <= 0 {
+		every = CheckGateNoticeEvery
+	}
+	began := time.Now()
+	var by string
+	quit, done := make(chan struct{}), make(chan struct{})
+	noticing := false
+	stop := func() {
+		if noticing {
+			noticing = false
+			close(quit)
+			<-done
+		}
+	}
+	defer stop()
+	turn, err := s.GateLock.Take(ctx, "suite "+rig, func(who string) {
+		by = who
+		s.say("  wait    %s's gate lock is held by %s: waiting for it before %s\n", s.Host, who, before)
+		noticing = true
+		go func() {
+			defer close(done)
+			tick := time.NewTicker(every)
+			defer tick.Stop()
+			for {
+				select {
+				case <-quit:
+					return
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+					holder := by
+					if reader, ok := s.GateLock.(gateLockReader); ok {
+						if now := reader.Holder(); now != "" {
+							holder = now
+						}
+					}
+					s.say("  wait    still waiting for %s's gate lock, held by %s (waited %s so far)\n", s.Host, holder, gateWaited(time.Since(began)))
+				}
+			}
+		}()
+	})
+	stop()
+	if err != nil {
+		var why, ended string
+		if len(ran) == 0 {
+			why = fmt.Sprintf("the suite of %s did not start: %s's gate lock could not be taken after %s", rig, s.Host, gateWaited(time.Since(began)))
+			ended = ", and nothing was run"
+		} else {
+			why = fmt.Sprintf("the suite of %s stopped before %s: %s's gate lock, given back after each command line so that a gate need not wait for the whole suite, could not be taken again after %s", rig, before, s.Host, gateWaited(time.Since(began)))
+			ended = fmt.Sprintf(", and only `%s` had been run, so no result was kept", strings.Join(ran, "`, `"))
+		}
+		if by != "" {
+			why += ", it is held by " + by
+		}
+		return nil, fmt.Errorf("%s%s: %w", why, ended, err)
+	}
+	if turn.For != "" {
+		s.say("  wait    waited %s for %s's gate lock, held by %s\n", gateWaited(turn.Waited), s.Host, turn.For)
+	}
+	holding := turn.Holding
+	return func() {
+		if holding != nil {
+			holding.Release(context.WithoutCancel(ctx))
+			holding = nil
+		}
+	}, nil
+}
+
 // suiteLog is the whole output of a suite, section by section.
 type suiteLog struct{ b strings.Builder }
 
@@ -340,11 +433,53 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		})
 	}
 
+	// The wait for a calm host first and the gate lock after it, so that the wait,
+	// which may take up to the bound, keeps no close-out's gate and no Builder's
+	// check waiting behind the suite. The load waited on may then be another
+	// gate's, which is the lesser cost: a gate is 3 to 25 minutes, and the lock
+	// that follows is not ours before it has ended (mw-gq6.917).
 	reading, read, waited, gaveUp, err := s.calmed(ctx, "the suite")
 	if err != nil {
 		return SuiteReport{}, fmt.Errorf("waiting for %s to calm: %w", s.Host, err)
 	}
 
+	// The gate lock is held for one command line at a time and given back between
+	// them, so that a gate that comes while the suite runs waits for the line in
+	// hand and not for the whole suite; it is the next to take the lock, for the
+	// suite asks again behind it. A suite that cannot take it again ends with the
+	// result unkept, saying what it had run.
+	var ran []string
+	var gateWaited time.Duration
+	giveBack, held := func() {}, false
+	defer func() { giveBack() }()
+	take := func(before string) error {
+		asked := time.Now()
+		given, err := s.takeGateLock(ctx, rig, before, ran)
+		gateWaited += time.Since(asked)
+		if err != nil {
+			return err
+		}
+		giveBack, held = given, true
+		return nil
+	}
+	// turn is the lock for the command line that follows, unless the one taken
+	// for the worktree is still held; runLine runs it and gives the lock back.
+	turn := func(before string) error {
+		if held {
+			return nil
+		}
+		return take(before)
+	}
+	runLine := func(dir, command string) (Checked, error) {
+		held = false
+		defer giveBack()
+		ran = append(ran, command)
+		return s.Runner.RunLine(ctx, rig, dir, command)
+	}
+
+	if err := take("the suite"); err != nil {
+		return SuiteReport{}, err
+	}
 	dir, head, release, err := s.cutTree(ctx, rig, rigDir, SuiteTreePrefix)
 	if err != nil {
 		return SuiteReport{}, err
@@ -352,6 +487,7 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 	defer release()
 
 	started := s.now().UTC()
+	gateWaited = 0 // what is waited from here on is inside the duration
 	result := SuiteResult{
 		Rig: rig, Host: s.Host, Sha: head.Commit, Branch: head.Branch,
 		Started: started.Format(time.RFC3339), WaitedSeconds: waited.Seconds(), GaveUpWaiting: gaveUp,
@@ -373,7 +509,10 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 	s.say("  run     %s at %s on %s\n", rig, short(head.Commit), head.Branch)
 	for _, phase := range phases {
 		result.Commands = append(result.Commands, phase.command)
-		checked, err := s.Runner.RunLine(ctx, rig, dir, phase.command)
+		if err := turn("the " + strings.ReplaceAll(phase.name, "_", " ")); err != nil {
+			return SuiteReport{}, err
+		}
+		checked, err := runLine(dir, phase.command)
 		if err != nil {
 			return SuiteReport{}, fmt.Errorf("running `%s` in %s: %w", phase.command, dir, err)
 		}
@@ -395,7 +534,10 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		for _, failed := range files {
 			file := SuiteFile{File: failed.File, Phase: phase.name, Test: failed.Test, Error: failed.Error}
 			again := phase.alone(failed.File)
-			alone, err := s.Runner.RunLine(ctx, rig, dir, again)
+			if err := turn("the re-run of " + failed.File); err != nil {
+				return SuiteReport{}, err
+			}
+			alone, err := runLine(dir, again)
 			switch {
 			case err != nil:
 				file.Alone, file.Void = "recheck void: could not be run: "+err.Error(), true
@@ -414,6 +556,7 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		}
 	}
 	result.DurationSeconds = math.Round(s.now().UTC().Sub(started).Seconds()*1000) / 1000
+	result.GateWaitedSeconds = math.Round(gateWaited.Seconds()*1000) / 1000
 	result.Passed = len(result.Failing) == 0 && len(result.Unnamed) == 0
 
 	day := started.Format("2006-01-02")
