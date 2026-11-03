@@ -61,7 +61,16 @@ func TestRemovingAWorktreeEndsTheTestRunStillWritingInIt(t *testing.T) {
 	// A run that went on after its session was turn-capped: it writes
 	// test-results all the while, and a sleeping child sits in the worktree.
 	pid, gone := startIn(t, dir, `mkdir -p test-results; sleep 300 & while :; do : > test-results/f$RANDOM; done`)
-	time.Sleep(200 * time.Millisecond)
+	// It is writing once test-results holds a file: waited for, not a fixed
+	// 200 ms a loaded host can spend before bash has got that far.
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		if entries, err := os.ReadDir(filepath.Join(dir, "test-results")); err == nil && len(entries) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the run never began writing in the worktree")
+		}
+	}
 
 	if err := rig.New().Remove(context.Background(), here, dir, branch); err != nil {
 		t.Fatalf("removing a worktree a run still writes in: %v", err)

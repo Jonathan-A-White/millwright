@@ -135,6 +135,14 @@ func TestHoldLeaseStopsRenewingAClaimThatIsNotClaimable(t *testing.T) {
 	n := Next{Tracker: tracker, HeartbeatWait: wait, Now: now}
 
 	release := n.holdLease(context.Background(), "mw-gq6.1")
+	// The first try is the refusal this test is about: it is waited for, not
+	// guessed at, since a loaded host can take longer than any moment to start
+	// the loop's goroutine, and a release before it would count no try at all.
+	for deadline := time.Now().Add(30 * time.Second); tracker.count() == 0; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the lease was never tried")
+		}
+	}
 	// A loop that went on renewing would reach its twenty-fifth wait at once;
 	// one that stopped never does, so give it a moment to stop.
 	select {
