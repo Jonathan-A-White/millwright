@@ -411,6 +411,23 @@ func newDoctorCmd() *cobra.Command {
 				landingDirs = append(landingDirs, filepath.Dir(filepath.Clean(rigDir)))
 			}
 			staleLandings := &application.StaleLandingsCheck{Dirs: landingDirs, Trees: doctor.LandingTrees{}}
+			// A preview server a Builder's run left behind, in the worktree of a story
+			// that closed or in one since deleted (mw-i80dx.12).
+			var worktreeDirs []string
+			for _, rigDir := range rigsAt {
+				worktreeDirs = append(worktreeDirs, filepath.Join(filepath.Dir(filepath.Clean(rigDir)), application.WorktreesDir))
+			}
+			strayPreviews := &application.StrayPreviewsCheck{
+				WorktreeDirs: worktreeDirs,
+				Servers:      doctor.PreviewServers{},
+				StoryClosed: func(ctx context.Context, id string) (bool, error) {
+					detail, err := mwGateway(vault, host).ShowStory(ctx, id)
+					if err != nil {
+						return false, err
+					}
+					return detail.Status == application.StateClosed, nil
+				},
+			}
 			// Claims no host names, held by a dispatch that died, with no session.
 			stuckClaims := &application.NoSessionClaimsCheck{Claims: mwGateway(vault, host).StaleClaims}
 			// The follower alive and writing nothing: no bead or mail event for
@@ -467,6 +484,7 @@ func newDoctorCmd() *cobra.Command {
 				starvedRigs,
 				recheckSkips,
 				staleLandings,
+				strayPreviews,
 				stuckClaims,
 				followerStalled,
 				ageKey,
