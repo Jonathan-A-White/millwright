@@ -200,30 +200,57 @@ checks, alone for a landing) and then the gate lock, for the rig's tests and aga
 for the changed specs, and gives both back when they end. The order is the
 close-out's: `mw next` holds the slot alone while it waits for the lock, so a check
 that held the lock and waited for the slot would wait for a close-out that waits for
-it. Every wait of a whole check is one deadline, `mw check --wait` (40 minutes by
-default, mw-gq6.938: nine minutes handed a Builder back three times in 45 minutes
-behind two long gates, each try joining the queue again at its back), counted
-from the start of the check: the slot, the lock and a calm host before the tests, and after them the slot
-and lock the changed specs take again and the second wait for a calm host (the run
-again of tests that failed while the host was busy). Each gets what the earlier ones
-left (mw-gq6.915, mw-gq6.918); a deadline the tests have spent leaves a wait of
-nothing, which is one try, not a wait. The tests themselves take as long as they
-take, and are not under it. A wait that runs out ends the check in one line: what did
-not start, who holds the gate lock (or the load of the host), since when, that
-nothing was run, that the limit was reached, and that the Builder hands back at once and
-does not run it again (`Check.HandBackAtOnce`). A foreground tool call is cut off at 590
-seconds, so a Builder that expects a queue longer than that starts the check with
-`--background` (the log is the story's `check-N.log`). `mw check --part N` is run one
-call per part to fit that 590 seconds and keeps `CheckPartSlotWait` (9 minutes) and
-its run-again line unless `--wait` is given. While it waits it says every minute
-who holds the lock now and since when. It is a wait inside one call, not a loop that
-spends the Builder's turns. The wait for a calm host that follows the lock
-(mw-gq6.819) is taken only once the lock is held, so the load waited on is not another
-gate's. `mw check --no-slot` takes neither the slot nor the lock.
+it. Every wait of a whole check is one deadline, counted from the start of the check:
+the slot, the lock and a calm host before the tests, and after them the slot and lock
+the changed specs take again and the second wait for a calm host (the run again of
+tests that failed while the host was busy). Each gets what the earlier ones left
+(mw-gq6.915, mw-gq6.918); a deadline the tests have spent leaves a wait of nothing,
+which is one try, not a wait. The tests themselves take as long as they take, and are
+not under it.
 
-What the Builder does when a `--part` is handed back is to run it again; a whole
-check that reached its `--wait` limit is not run again. When a wait ended a check
-by another route (an older mw, `HandBackAtOnce` unset): run `mw check
+How long the deadline is depends on whether the call can outlast a Builder's tool
+call, which is cut off at 590 seconds with no words (mw-gq6.939):
+
+- **Foreground, no `--wait`** (what the formulas tell a Builder to run): the deadline is
+  `CheckPartSlotWait`, 9 minutes. A wait that runs out keeps the check's place in the
+  queue for `CheckKeepPlace`, 10 minutes, and ends the check in one line with exit 0
+  and nothing run: what is still held, by whom and since when, *your place N of M in
+  the queue is kept for 10 minutes: run the same command again to go on waiting*
+  (`Check.KeepPlace`, `CheckReport.Waiting`). A busy host has no queue, so its line
+  says no place is kept. The Builder runs the same command again in a fresh Bash call,
+  as many times as the session's time allows, and hands back (a comment naming the
+  holder) only when the session's turn cap nears.
+- **`--wait` or `--background`**: the deadline is `mw check --wait` (40 minutes by
+  default; mw-gq6.938: nine minutes handed a Builder back three times in 45 minutes
+  behind two long gates). A wait that outlasts it ends in one line saying the wait
+  limit was reached, naming the holder, and that the Builder hands back at once and
+  does not run it again (`Check.HandBackAtOnce`): no place is kept. `--background`
+  detaches the check with `--wait` 40m (the log is the story's `check-N.log`).
+- **`mw check --part N`** is run one call per part to fit the 590 seconds and keeps
+  `CheckPartSlotWait` and the kept place whether or not `--wait` is given; its line is
+  that part's name, *did not start*, and the same words.
+
+A place is kept by the queue itself (`infrastructure/ticketq`): the ticket of a waiter
+that asked (`application.QueuePlace`, put on the wait's context) is not removed when
+its wait ends at the deadline, but marked `keep <until>`. A ticket whose process is
+gone is otherwise cleared by the next walk of the queue; a kept one counts as live
+until its keep time passes, for the holder of the lock and for `mw next`'s own walk, so
+it stands in front of the tickets taken after it and a close-out behind it waits for it,
+for up to 10 minutes. The same story's next call (key `check <story>`) takes it up again:
+the same ticket, so the same place, not the back of the queue. A place not taken up is
+dropped when its keep time passes. The calm host is not queued for: the lock a check
+waited for is held while it waits for a calm host, and given back when that wait runs
+out, so the next call queues for the lock again at the back.
+
+While it waits it says every minute who holds the lock now and since when. It is a wait
+inside one call, not a loop that spends the Builder's turns. The wait for a calm host
+that follows the lock (mw-gq6.819) is taken only once the lock is held, so the load
+waited on is not another gate's. `mw check --no-slot` takes neither the slot nor the
+lock.
+
+What the Builder does when a foreground check ends in that line is to run the same
+command again; a check that reached its `--wait` limit is not run again. When a wait
+ended a check by another route (an older mw, `KeepPlace` unset): run `mw check
 <story>` again; if the same wait ends it again, comment on the story naming the
 holder or the load and hand back. What the run again does with the tests depends on
 where the hand-back came:

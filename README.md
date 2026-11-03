@@ -1478,8 +1478,12 @@ waits for it (`waiting for the merge slot: held by ...` on stderr), and a close-
 gate, of any rig, holds the host's gate lock, so a check waits for that too (`still
 waiting for <host>'s gate lock, held by ... since ...` every minute), rather than running
 its whole gate on top of the close-out's, where both fail from load (mw-gq6.906). Both
-waits share nine minutes, under a Builder's 590 s foreground call, and end in one line
-naming the holder and the command to run again. `--no-slot` skips both waits;
+waits share nine minutes in the foreground, under a Builder's 590 s tool call, and end in one
+line (exit 0, nothing run) naming the holder, *your place N of M in the queue is kept for 10
+minutes* and *run the same command again to go on waiting*: the check's ticket outlives the call
+and the same command run again takes the same place, not the back of the queue (mw-gq6.939).
+`--wait 40m` (and `--background`) is the long wait, ending in a wait-limit line to hand back
+on. `--no-slot` skips both waits;
 `--part N` takes the merge slot as below and not the gate lock (see
 `docs/dispatch-gates.md`).
 

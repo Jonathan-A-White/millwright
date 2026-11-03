@@ -38,12 +38,16 @@ func newCheckCmd() *cobra.Command {
 			"and does not fetch, merge or push. The two things it takes are the rig's merge slot, around the\n" +
 			"rig's tests, so that a close-out's tests and a check's on one rig do not run at once and starve\n" +
 			"each other, and then this host's gate lock, the one a close-out's gate takes, so that one gate-weight\n" +
-			"run goes at a time on the host whoever asked for it (mw-gq6.906). It waits for both together, 40\n" +
-			"minutes at most (--wait), saying every minute who holds each and since when, and how long it waited\n" +
-			"when it has the lock. A wait that runs out ends with one line naming the holder and saying to hand\n" +
-			"back at once, not to run the check again: a repeat only queues again behind the same gate.\n" +
-			"A foreground tool call is cut off at 590 seconds, so a Builder that expects a longer queue starts the\n" +
-			"check with --background. --no-slot skips both waits. mw check --part N does not take the gate lock.\n\n" +
+			"run goes at a time on the host whoever asked for it (mw-gq6.906). In the foreground it waits for both\n" +
+			"together, nine minutes at most, under the 590 seconds a tool call is given, saying every minute who\n" +
+			"holds each and since when. A wait that runs out keeps this check's place in the queue for ten\n" +
+			"minutes and ends with one line (exit 0, nothing run): what is still held, by whom and since when,\n" +
+			"'your place N of M in the queue is kept for 10 minutes: run the same command again to go on\n" +
+			"waiting'. Run the same command again, in a fresh call, as often as the session allows: it takes up\n" +
+			"the same place, not the back of the queue (mw-gq6.939). --wait 40m (or --background, which gives it\n" +
+			"40 minutes) is the long wait for a call that is not cut off: a wait that outlasts it ends with one\n" +
+			"line saying the wait limit was reached and to hand back at once, with no place kept.\n" +
+			"--no-slot skips both waits. mw check --part N does not take the gate lock.\n\n" +
 			"check treats a busy host as the close-out does (mw-gq6.228): it waits, up to the close-out's bound,\n" +
 			"for the host to calm before the tests, and runs tests that failed while it was busy once more when\n" +
 			"it has calmed, reporting only a second failure and saying it ran twice.\n\n" +
@@ -72,9 +76,8 @@ func newCheckCmd() *cobra.Command {
 			"each part that failed or was not run at this commit, with the call that runs it. A part that only\n" +
 			"runs tools in the worktree (npm ci, npm run typecheck|lint|build, npx vitest, go build|vet|test)\n" +
 			"takes no merge slot; any other part waits up to nine minutes for it while a landing holds it, saying\n" +
-			"each minute who holds it and since when, and then says to run the same part again (mw-gq6.814). A check\n" +
-			"with no --part on a rig whose gate is not split waits for the slot the same nine minutes and then says\n" +
-			"to run mw check again (mw-gq6.817).\n\n" +
+			"each minute who holds it and since when, and then says to run the same part again, with its place in\n" +
+			"the queue kept for ten minutes (mw-gq6.814, mw-gq6.939).\n\n" +
 			"The formula's last step is normally still open when a session runs check, so a session runs it\n" +
 			"after committing and closes that step once nothing else is refused.",
 		Args: cobra.ExactArgs(1),
@@ -91,7 +94,7 @@ func newCheckCmd() *cobra.Command {
 				_, err := application.CheckBackground{
 					Tracker: mwGateway(dir, host),
 					Logs:    mwVault(dir, host),
-					Starter: checkStarter{noSlot: noSlot, wait: checkWaitGiven(cmd)},
+					Starter: checkStarter{noSlot: noSlot, wait: checkBackgroundWait(cmd)},
 					Out:     cmd.OutOrStdout(),
 				}.Run(cmd.Context(), args[0])
 				return err
@@ -122,7 +125,7 @@ func newCheckCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			waitLimit, handBackAtOnce := checkWaitLimit(cmd, part)
+			waitLimit, handBackAtOnce, keepPlace := checkWaitLimit(cmd, part)
 			k := application.Check{
 				Tracker:        mwGateway(dir, host),
 				Landing:        worktrees,
@@ -137,6 +140,7 @@ func newCheckCmd() *cobra.Command {
 				Part:           part,
 				PartSlotWait:   waitLimit,
 				HandBackAtOnce: handBackAtOnce,
+				KeepPlace:      keepPlace,
 				Load:           hostload.Proc{},
 				Modes:          modes,
 				Host:           host,
@@ -154,39 +158,45 @@ func newCheckCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&logIsStdout, "log-is-stdout", false, "the output of this check is already being written to the story's log (set by --background)")
 	_ = cmd.Flags().MarkHidden("log-is-stdout")
 	cmd.Flags().IntVar(&part, "part", 0, "run part N of the rig's gate alone, for a rig whose host names its gate as parts, and keep what it said; a check with no --part then reports the whole gate from the parts' records")
-	cmd.Flags().Duration("wait", CheckWait, "the most a whole check queues for the rig's merge slot, this host's gate lock and a calm host together, before it says the limit was reached and to hand back; a --part N keeps its nine minutes unless this is given")
+	cmd.Flags().Duration("wait", CheckWait, "the most a check queues for the rig's merge slot, this host's gate lock and a calm host together: nine minutes in the foreground, ending with the place kept and a line to run it again; a whole check given this (or --background, 40m) ends with the wait limit reached and a line to hand back")
 	cmd.Flags().BoolVar(&noSlot, "no-slot", false, "run the rig's tests without taking the rig's merge slot, so without waiting for a close-out's gate")
 	return cmd
 }
 
 // CheckWait is how long a whole mw check queues for the host's gate lock, the
-// rig's merge slot and a calm host together, unless --wait says another: past the
-// longest gate a Builder is likely to queue behind (mw-gq6.938), where nine
-// minutes handed the check back to be tried again at the back of the queue.
+// rig's merge slot and a calm host together when it is given --wait or started
+// with --background: past the longest gate a Builder is likely to queue behind
+// (mw-gq6.938), where nine minutes handed the check back to be tried again at the
+// back of the queue. A foreground call is not given it (mw-gq6.939): the tool that
+// runs it is cut off at 590 seconds with no words.
 const CheckWait = 40 * time.Minute
 
-// checkWaitLimit is the limit of the check's waits and whether a wait that runs
-// out tells the Builder to hand back at once. A whole check takes --wait (40
-// minutes by default) and ends in that line; a --part N is run one call at a time
-// to fit a foreground call's 590 seconds, so it keeps the nine minutes it has
-// always had unless --wait is given, and still says to run the part again.
-func checkWaitLimit(cmd *cobra.Command, part int) (limit time.Duration, handBackAtOnce bool) {
+// checkWaitLimit is the limit of the check's waits, whether a wait that runs out
+// tells the Builder to hand back at once, and how long its place in the queue is
+// kept when it does not.
+//
+// A foreground check, whole or a --part N, waits the nine minutes it has always
+// had, under the 590 seconds of the Builder's tool call; a wait that runs out
+// keeps the check's place in the queue for ten minutes and ends in one line saying
+// to run the same command again (mw-gq6.939). A whole check given --wait is the
+// long wait: it takes that limit and, when it runs out, says the limit was reached
+// and to hand back, with no place kept.
+func checkWaitLimit(cmd *cobra.Command, part int) (limit time.Duration, handBackAtOnce bool, keep time.Duration) {
+	given := cmd.Flags().Changed("wait")
 	limit, _ = cmd.Flags().GetDuration("wait")
-	if part != 0 {
-		if !cmd.Flags().Changed("wait") {
-			limit = application.CheckPartSlotWait
-		}
-		return limit, false
+	if !given {
+		limit = application.CheckPartSlotWait
 	}
-	return limit, true
+	if part == 0 && given {
+		return limit, true, 0
+	}
+	return limit, false, application.CheckKeepPlace
 }
 
-// checkWaitGiven is --wait when the Builder gave it, else zero, for a check
-// started in the background to be given the same.
-func checkWaitGiven(cmd *cobra.Command) time.Duration {
-	if !cmd.Flags().Changed("wait") {
-		return 0
-	}
+// checkBackgroundWait is how long a check started with --background waits: --wait
+// when the Builder gave it, else the long forty minutes, since the detached check
+// has no tool call to fit.
+func checkBackgroundWait(cmd *cobra.Command) time.Duration {
 	wait, _ := cmd.Flags().GetDuration("wait")
 	return wait
 }
@@ -196,7 +206,7 @@ func checkWaitGiven(cmd *cobra.Command) time.Duration {
 // outlives the tool call that asked, with its output appended to the story's log.
 type checkStarter struct {
 	noSlot bool
-	// wait is --wait as the Builder gave it, zero when it did not.
+	// wait is --wait for the detached check: the Builder's, else CheckWait.
 	wait time.Duration
 }
 

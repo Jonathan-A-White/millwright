@@ -47,17 +47,19 @@ func TestCheckOfAStoryTheTrackerDoesNotHoldFails(t *testing.T) {
 	}
 }
 
-// mw check --wait is the limit of a whole check's queue for the gate lock: forty
-// minutes unless the Builder passes another, so a check queued behind a long
-// gate is not handed back after nine minutes (mw-gq6.938).
-func TestCheckWaitsFortyMinutesForAWholeCheckUnlessGivenAnotherLimit(t *testing.T) {
+// A foreground whole check waits nine minutes for the gate lock, the merge slot
+// and a calm host, under the 590 seconds of a Builder's tool call, and keeps its
+// place in the queue for ten minutes, so that the same command run again goes on
+// waiting where it was; --wait (forty minutes by default, mw-gq6.938) and
+// --background are the long wait, which ends in the hand-back line (mw-gq6.939).
+func TestCheckWaitsNineMinutesInTheForegroundAndKeepsItsPlaceAndFortyMinutesWithWait(t *testing.T) {
 	cmd := newCheckCmd()
 	flag := cmd.Flags().Lookup("wait")
 	if flag == nil {
 		t.Fatal("expected mw check to take --wait")
 	}
 	if flag.DefValue != "40m0s" {
-		t.Errorf("expected --wait to default to 40m, got %s", flag.DefValue)
+		t.Errorf("expected --wait to default to 40m for --background, got %s", flag.DefValue)
 	}
 
 	for _, c := range []struct {
@@ -66,11 +68,12 @@ func TestCheckWaitsFortyMinutesForAWholeCheckUnlessGivenAnotherLimit(t *testing.
 		given     string
 		wantLimit time.Duration
 		wantOnce  bool
+		wantKeep  time.Duration
 	}{
-		{"a whole check", 0, "", 40 * time.Minute, true},
-		{"a whole check given a limit", 0, "15m", 15 * time.Minute, true},
-		{"a part keeps the nine minutes of a foreground call", 1, "", application.CheckPartSlotWait, false},
-		{"a part given a limit", 1, "20m", 20 * time.Minute, false},
+		{"a whole check in the foreground", 0, "", application.CheckPartSlotWait, false, application.CheckKeepPlace},
+		{"a whole check given a limit", 0, "15m", 15 * time.Minute, true, 0},
+		{"a part keeps the nine minutes of a foreground call", 1, "", application.CheckPartSlotWait, false, application.CheckKeepPlace},
+		{"a part given a limit", 1, "20m", 20 * time.Minute, false, application.CheckKeepPlace},
 	} {
 		cmd := newCheckCmd()
 		if c.given != "" {
@@ -78,9 +81,26 @@ func TestCheckWaitsFortyMinutesForAWholeCheckUnlessGivenAnotherLimit(t *testing.
 				t.Fatal(err)
 			}
 		}
-		limit, once := checkWaitLimit(cmd, c.part)
-		if limit != c.wantLimit || once != c.wantOnce {
-			t.Errorf("%s: expected a limit of %s and hand back at once %v, got %s and %v", c.name, c.wantLimit, c.wantOnce, limit, once)
+		limit, once, keep := checkWaitLimit(cmd, c.part)
+		if limit != c.wantLimit || once != c.wantOnce || keep != c.wantKeep {
+			t.Errorf("%s: expected a limit of %s, hand back at once %v and a place kept %s, got %s, %v and %s", c.name, c.wantLimit, c.wantOnce, c.wantKeep, limit, once, keep)
+		}
+	}
+	if application.CheckKeepPlace != 10*time.Minute {
+		t.Errorf("expected a place to be kept for 10 minutes, got %s", application.CheckKeepPlace)
+	}
+
+	// A check started in the background has no tool call to fit: it waits the long
+	// forty minutes unless given another.
+	for given, want := range map[string]time.Duration{"": CheckWait, "15m": 15 * time.Minute} {
+		cmd := newCheckCmd()
+		if given != "" {
+			if err := cmd.Flags().Set("wait", given); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := checkBackgroundWait(cmd); got != want {
+			t.Errorf("expected a background check given %q to wait %s, got %s", given, want, got)
 		}
 	}
 }
