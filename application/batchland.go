@@ -230,6 +230,9 @@ type BatchReport struct {
 	Committed []string
 	Mailed    []string
 	Notes     []string
+	// MainLabels says of each failing test of the batch's gate whether it fails
+	// on main too (mw-gq6.929).
+	MainLabels string
 
 	// versionCommit is the commit that raised the batch's version: no work of
 	// any story's, and so left out of the files the rig's related-tests line is
@@ -561,7 +564,9 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 	// carries main's red (mw-gq6.645).
 	if gate.Err == nil && !gate.Checked.NotRun && !gate.Checked.Passed && report.Fixer == nil {
 		bc := b.batchCloseOut(report, rigDir)
-		if red := n.mainAlone(ctx, bc, nr, gate.Checked, report.Base); red != nil {
+		red := n.mainAlone(ctx, bc, nr, gate.Checked, report.Base)
+		report.MainLabels = nr.MainLabels
+		if red != nil {
 			if n.holdBatchOnMainRed(ctx, bc, nr, red) {
 				report.Held = fmt.Sprintf("main is red: %s, carried by %s; no fixer was started and the stories stay queued", red.tests(), red.Bug)
 				return
@@ -1112,6 +1117,9 @@ func (b BatchLand) mailTheMayor(ctx context.Context, report *BatchReport, nr *Ne
 	}
 	if f := report.Fixer; f != nil && !report.Landed {
 		fmt.Fprintf(&body, "\n%s", report.fixerMail())
+	}
+	if !report.Landed && report.MainLabels != "" {
+		fmt.Fprintf(&body, "\nOn main: %s\n", report.MainLabels)
 	}
 	if !report.Landed && report.Tested && !report.Gate.Passed {
 		fmt.Fprintf(&body, "\n%s, `%s`, ended:\n\n```\n%s\n```\n", gateOnTheBatch, report.Gate.Command, report.Gate.Tail(CheckLines))

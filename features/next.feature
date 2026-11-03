@@ -932,6 +932,7 @@ Feature: Closing out a finished story and carrying on
     And the last ledger line holds:
       | not landed (main-red): |
       | main alone fails TestTogether too (checked in |
+      | TestTogether: fails on main too |
     And the story "mw-gq6.1" carries a comment quoting: Main is red
     And the worktree of "mw-gq6.1" is still there
     And 1 sessions were ever started for "mw-gq6.1"
@@ -968,6 +969,7 @@ Feature: Closing out a finished story and carrying on
     And the last ledger line holds:
       | not landed (merged-tests-fail): |
       | main alone passes TestTogether (checked in |
+      | TestTogether: branch only |
     And the attempts counted on "mw-gq6.1" come to 2
 
   Scenario: A merged result that fails a test in a package the story did not touch is not put down to the story (mw-gq6.861)
