@@ -5567,6 +5567,18 @@ and why it was left, and a person removes one with `git worktree remove --force
 <path>` in its rig, then `git worktree prune`. (A landing now removes its own
 directory even when git has lost its record of it or the close-out was cancelled.)
 
+**stray-previews** looks for a preview server (`vite preview`, `npm run preview`) a
+Builder's gate or spec run left behind (Playwright's web server, started from the
+story's worktree; the session ended with it running, its parent gone to init). It
+names, by pid, port and story, each one whose working directory is inside a
+`.mw-worktrees` directory beside a rig and whose worktree is deleted or whose story
+is closed; the check is then faulty and its cure stops exactly those pids (SIGTERM,
+then SIGKILL after three seconds), idempotently. A preview of an open story, or one
+outside the worktree directories (postern's, the Governor's own), is never named and
+never touched; a story the tracker cannot be asked about is left alone and said so
+(cannot-tell). Without it such a server holds its port until a later gate that hashes
+to the same port refuses to start (mw-i80dx.12).
+
 **tmp-leftovers** cures the fault behind the VPS reaching 94% disk on
 2026-09-25 from the factory's own dead leftovers: a killed bd's dolt spool
 files (`/tmp/nbs-spool-*`), `/tmp/bd`, and a stale Claude Code session

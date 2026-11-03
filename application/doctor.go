@@ -1191,3 +1191,209 @@ func (c *NoSessionClaimsCheck) Damper() (time.Duration, int) { return time.Hour,
 
 // WayBack implements DoctorCheck.
 func (c *NoSessionClaimsCheck) WayBack() string { return "nothing was changed" }
+
+// PreviewServer is one preview server (`vite preview`, `npm run preview`) a
+// host is running, as StrayPreviewsCheck is told of it.
+type PreviewServer struct {
+	Pid int
+	// Port is the port it was told to serve on (--port); 0 when its command
+	// line names none.
+	Port int
+	// Cwd is its working directory; CwdDeleted says the directory no longer
+	// exists, so Cwd is where it was.
+	Cwd        string
+	CwdDeleted bool
+	// Cmd is its command line, for the way back.
+	Cmd string
+}
+
+// PreviewServers is what StrayPreviewsCheck asks of the host: which preview
+// servers run, and to stop one.
+type PreviewServers interface {
+	// List says every preview server running on the host, whoever started it.
+	List(ctx context.Context) ([]PreviewServer, error)
+	// Stop ends the one process. A process already gone, or whose pid now
+	// belongs to something that is not that preview server, is no error and is
+	// left alone.
+	Stop(ctx context.Context, server PreviewServer) error
+}
+
+// StrayPreviewsCheck is the mw doctor check for a preview server left running
+// by a story that is over: one under a worktree directory (WorktreesDir) whose
+// own directory is deleted, or whose story is closed. It holds its port until
+// a later run, which hashes to the same port, cannot start (mw-i80dx.12).
+//
+// Two such servers were found on 2026-11-03, up since 11-01, and the run
+// folders say how: each Builder's gate or spec run (Playwright's web server)
+// started one from the worktree, its own command to stop it was refused, and
+// the session ended (one at its turn cap) with it running, the process left to
+// init. The landing then removed the worktree, or the story closed, and nothing
+// ever stopped it.
+//
+// Only a server whose working directory is inside a worktree directory is
+// ever named, and of those only one whose directory is deleted or whose story
+// the tracker reads as closed: a preview of an open story, or of anything
+// outside the worktree directories (the Governor's own, postern's), is not
+// named and is never stopped. A story that cannot be read is left alone and
+// said so. The cure stops each named pid, and no other; it reads the host
+// afresh, so a second cure has nothing left to do.
+type StrayPreviewsCheck struct {
+	// WorktreeDirs are the directories story worktrees are made in, one per rig
+	// (the WorktreesDir beside each). A directory named twice is read once.
+	WorktreeDirs []string
+	// Servers lists and stops the host's preview servers.
+	Servers PreviewServers
+	// StoryClosed says whether the story is closed in the tracker.
+	StoryClosed func(ctx context.Context, id string) (bool, error)
+
+	stopped []string
+}
+
+var _ DoctorCheck = (*StrayPreviewsCheck)(nil)
+var _ DoctorCureEndsEpisode = (*StrayPreviewsCheck)(nil)
+
+// Name implements DoctorCheck.
+func (c *StrayPreviewsCheck) Name() string { return "stray-previews" }
+
+// strayPreview is a preview server StrayPreviewsCheck names, with its story.
+type strayPreview struct {
+	server PreviewServer
+	story  string
+	why    string
+}
+
+// storyOf says which story's worktree the directory dir is, or is inside:
+// the first element beneath a worktree directory. ok is false for a directory
+// outside them all, or the worktree directory itself.
+func (c *StrayPreviewsCheck) storyOf(dir string) (string, bool) {
+	dir = filepath.Clean(dir)
+	for _, root := range c.WorktreeDirs {
+		rel, err := filepath.Rel(filepath.Clean(root), dir)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		return strings.SplitN(rel, string(filepath.Separator), 2)[0], true
+	}
+	return "", false
+}
+
+// find reads the host's preview servers and judges each: the strays, and the
+// stories that had to be left because the tracker could not be read.
+func (c *StrayPreviewsCheck) find(ctx context.Context) (strays []strayPreview, unread []string, err error) {
+	servers, err := c.Servers.List(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	closed := map[string]bool{}
+	failed := map[string]bool{}
+	for _, server := range servers {
+		story, ok := c.storyOf(server.Cwd)
+		if !ok {
+			continue
+		}
+		if server.CwdDeleted {
+			strays = append(strays, strayPreview{server: server, story: story, why: "worktree deleted"})
+			continue
+		}
+		if failed[story] {
+			continue
+		}
+		isClosed, seen := closed[story]
+		if !seen {
+			var readErr error
+			if c.StoryClosed != nil {
+				isClosed, readErr = c.StoryClosed(ctx, story)
+			} else {
+				readErr = errors.New("no way to read the story")
+			}
+			if readErr != nil {
+				failed[story] = true
+				unread = append(unread, fmt.Sprintf("%s (%v)", story, readErr))
+				continue
+			}
+			closed[story] = isClosed
+		}
+		if isClosed {
+			strays = append(strays, strayPreview{server: server, story: story, why: "story closed"})
+		}
+	}
+	sort.Slice(strays, func(i, j int) bool { return strays[i].server.Pid < strays[j].server.Pid })
+	sort.Strings(unread)
+	return strays, unread, nil
+}
+
+// label says one stray as pid, port, story and why.
+func (s strayPreview) label() string {
+	port := "no port named"
+	if s.server.Port > 0 {
+		port = fmt.Sprintf("port %d", s.server.Port)
+	}
+	return fmt.Sprintf("pid %d (%s, story %s, %s)", s.server.Pid, port, s.story, s.why)
+}
+
+// Probe implements DoctorCheck: faulty, naming each stray with its pid, port
+// and story, when there are any; cannot-tell when the servers or a story could
+// not be read and nothing else is stray; ok otherwise. The reason holds no age,
+// so that the same servers said again read the same.
+func (c *StrayPreviewsCheck) Probe(ctx context.Context) (Verdict, string) {
+	strays, unread, err := c.find(ctx)
+	if err != nil {
+		return DoctorCannotTell, fmt.Sprintf("the host's preview servers could not be read: %v", err)
+	}
+	if len(strays) > 0 {
+		labels := make([]string, len(strays))
+		for i, stray := range strays {
+			labels[i] = stray.label()
+		}
+		reason := fmt.Sprintf("%d preview servers left running by a closed story or a deleted worktree, each holding its port: %s",
+			len(strays), strings.Join(labels, ", "))
+		if len(unread) > 0 {
+			reason += fmt.Sprintf("; left alone, story not read: %s", strings.Join(unread, ", "))
+		}
+		return DoctorFaulty, reason
+	}
+	if len(unread) > 0 {
+		return DoctorCannotTell, fmt.Sprintf("preview servers run under worktrees of stories that could not be read, so none is judged: %s", strings.Join(unread, ", "))
+	}
+	return DoctorOK, ""
+}
+
+// Cure implements DoctorCheck: it stops each stray preview server found now,
+// by pid, and remembers each for WayBack. One it cannot stop is named in the
+// error; the rest are still stopped.
+func (c *StrayPreviewsCheck) Cure(ctx context.Context) error {
+	c.stopped = nil
+	strays, _, err := c.find(ctx)
+	if err != nil {
+		return err
+	}
+	var failed []string
+	for _, stray := range strays {
+		if err := c.Servers.Stop(ctx, stray.server); err != nil {
+			failed = append(failed, fmt.Sprintf("pid %d: %v", stray.server.Pid, err))
+			continue
+		}
+		c.stopped = append(c.stopped, fmt.Sprintf("%s: %s", stray.label(), stray.server.Cmd))
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("could not stop %s", strings.Join(failed, "; "))
+	}
+	return nil
+}
+
+// Damper implements DoctorCheck.
+func (c *StrayPreviewsCheck) Damper() (time.Duration, int) { return 10 * time.Minute, 5 }
+
+// CureEndedEpisode implements DoctorCureEndsEpisode: a stop that returned no
+// error put the fault right, and the next Builder's leftover is a new one.
+func (c *StrayPreviewsCheck) CureEndedEpisode() bool { return true }
+
+// WayBack implements DoctorCheck: what the last cure stopped, with each
+// command line. A preview server holds nothing but a port and is made again
+// by its command, run in the story's worktree when there is one.
+func (c *StrayPreviewsCheck) WayBack() string {
+	if len(c.stopped) == 0 {
+		return "nothing was changed"
+	}
+	return fmt.Sprintf("stopped %s (a preview server keeps no state; run the command again in the worktree if one is wanted)", strings.Join(c.stopped, "; "))
+}
