@@ -2,6 +2,7 @@ package eventlog_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -442,5 +443,37 @@ func TestTheLastLineIsFoundAtLengthsAroundTheChunkSize(t *testing.T) {
 				t.Fatalf("detail %d bytes, torn %v: the log reads %v, %v", n, torn, seqs(evs), err)
 			}
 		}
+	}
+}
+
+func TestShipArchiveKeepsEachRetiredRangeOnceInADatedFileShapedLikeShipJSON(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "events", "log.jsonl")
+	archive := eventlog.NewShipArchive(logPath)
+	ctx := context.Background()
+	a, b, c := application.ShipRange{From: 1, To: 2}, application.ShipRange{From: 3, To: 3}, application.ShipRange{From: 4, To: 9}
+	path, err := archive.Keep(ctx, []application.ShipRange{a, b}, "2026-11-03")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(filepath.Dir(logPath), "ship-retired-2026-11-03.json"); path != want || archive.Path("2026-11-03") != want {
+		t.Fatalf("the archive is at %s, want %s", path, want)
+	}
+	if _, err := archive.Keep(ctx, []application.ShipRange{b, c}, "2026-11-03"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ship.json's own reader takes the archive's list as its pending list.
+	var got application.ShipState
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Pending) != 3 || got.Pending[0] != a || got.Pending[1] != b || got.Pending[2] != c {
+		t.Fatalf("the archive holds %v, want each range once: %v %v %v", got.Pending, a, b, c)
+	}
+	if other, _ := archive.Keep(ctx, []application.ShipRange{a}, "2026-11-04"); other == path {
+		t.Fatal("a later day wrote the same file")
 	}
 }

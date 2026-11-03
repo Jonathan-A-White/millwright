@@ -269,3 +269,36 @@ func TestEventsWaitHandoverWithNoSinceIgnoresAStaleHandoverToItsWindow(t *testin
 		t.Fatalf("the file names this window at the handover, yet the wait printed %q", out)
 	}
 }
+
+func TestEventsRetireMovesThePendingRangesToTheArchiveAndSaysSo(t *testing.T) {
+	path := eventsHome(t)
+	ship := filepath.Join(filepath.Dir(path), "ship.json")
+	if err := os.MkdirAll(filepath.Dir(ship), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ship, []byte(`{"shipped":9,"pending":[{"from":1,"to":3},{"from":4,"to":9}],"day":"2026-11-03","chain":7,"alarmed":false,"emergency":0}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runEvents(t, "retire")
+	if err != nil {
+		t.Fatalf("mw events retire: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Retired 2 pending ranges") || !strings.Contains(out, filepath.Dir(path)) || !strings.Contains(out, "ship-retired-") {
+		t.Fatalf("it printed %q, want the count and the archive path", out)
+	}
+	state, _ := os.ReadFile(ship)
+	if strings.Contains(string(state), `"from":1`) || !strings.Contains(string(state), `"shipped":9`) || !strings.Contains(string(state), `"retired":2`) {
+		t.Fatalf("ship.json is %s", state)
+	}
+	archives, _ := filepath.Glob(filepath.Join(filepath.Dir(path), "ship-retired-*.json"))
+	if len(archives) != 1 {
+		t.Fatalf("archives are %v", archives)
+	}
+	if data, _ := os.ReadFile(archives[0]); !strings.Contains(string(data), `"from":4,"to":9`) {
+		t.Fatalf("the archive holds %s", data)
+	}
+	again, err := runEvents(t, "retire")
+	if err != nil || !strings.Contains(again, "retired 0 ranges") {
+		t.Fatalf("a second retire printed %q, %v", again, err)
+	}
+}

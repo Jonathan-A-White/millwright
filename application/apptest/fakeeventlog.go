@@ -2,6 +2,7 @@ package apptest
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"sync"
 
@@ -223,6 +224,8 @@ func copyCursor(c application.FollowCursor) application.FollowCursor {
 type FakeShipStates struct {
 	mu    sync.Mutex
 	saved application.ShipState
+	// SaveErr, when set, is what Save returns, keeping nothing.
+	SaveErr error
 }
 
 var _ application.ShipStates = (*FakeShipStates)(nil)
@@ -240,9 +243,53 @@ func (f *FakeShipStates) Load(context.Context) (application.ShipState, error) {
 func (f *FakeShipStates) Save(_ context.Context, s application.ShipState) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.SaveErr != nil {
+		return f.SaveErr
+	}
 	f.saved = s
 	f.saved.Pending = append([]application.ShipRange(nil), s.Pending...)
 	return nil
+}
+
+// FakeShipArchive is an in-memory application.ShipArchive: the ranges kept for
+// each day's archive file.
+type FakeShipArchive struct {
+	mu    sync.Mutex
+	files map[string][]application.ShipRange
+	// Err, when set, is what Keep returns, keeping nothing.
+	Err error
+}
+
+var _ application.ShipArchive = (*FakeShipArchive)(nil)
+
+// Keep implements application.ShipArchive: ranges the day's file already holds
+// are not added again.
+func (f *FakeShipArchive) Keep(_ context.Context, ranges []application.ShipRange, day string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", f.Err
+	}
+	if f.files == nil {
+		f.files = map[string][]application.ShipRange{}
+	}
+	path := "ship-retired-" + day + ".json"
+	for _, r := range ranges {
+		if !slices.Contains(f.files[path], r) {
+			f.files[path] = append(f.files[path], r)
+		}
+	}
+	return path, nil
+}
+
+// Path implements application.ShipArchive.
+func (f *FakeShipArchive) Path(day string) string { return "ship-retired-" + day + ".json" }
+
+// Ranges is what the archive file at path holds, oldest first.
+func (f *FakeShipArchive) Ranges(path string) []application.ShipRange {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]application.ShipRange(nil), f.files[path]...)
 }
 
 // FakeSubscribeFiles is an in-memory application.SubscribeFiles: the text of
