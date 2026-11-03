@@ -28,6 +28,9 @@ type aWholeCheckBesideTheHostsGateLock struct {
 	told    *lockedBuffer
 	// handBackAtOnce is Check.HandBackAtOnce.
 	handBackAtOnce bool
+	// keep is Check.KeepPlace: how long a wait that runs out keeps the check's
+	// place in the queue (mw-gq6.939).
+	keep time.Duration
 }
 
 func newWholeCheckBesideTheGateLock(t *testing.T, checks application.Checks) *aWholeCheckBesideTheHostsGateLock {
@@ -53,7 +56,7 @@ func (w *aWholeCheckBesideTheHostsGateLock) check(wait time.Duration) (applicati
 	return application.Check{
 		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: w.checks,
 		Slot: w.slots, GateLock: w.gate, Records: w.records, PartSlotWait: wait,
-		GateNoticeEvery: 40 * time.Millisecond, HandBackAtOnce: w.handBackAtOnce,
+		GateNoticeEvery: 40 * time.Millisecond, HandBackAtOnce: w.handBackAtOnce, KeepPlace: w.keep,
 		Host: "laptop", Remote: "origin",
 		Rigs: map[string]string{"millwright": w.rigDir},
 		Out:  writerOf(w.told),
@@ -424,5 +427,209 @@ func TestAWholeCheckThatReachesItsWaitLimitSaysSoAndTellsTheBuilderToHandBackAtO
 		if strings.Contains(refusal.Why, "run the same check again") {
 			t.Errorf("attempt %d: expected no advice to run the check again, got %q", attempt, refusal.Why)
 		}
+	}
+}
+
+// queuedGate counts the tickets in the gate lock's queue directory.
+func (w *aWholeCheckBesideTheHostsGateLock) queuedGate() int {
+	entries, _ := os.ReadDir(filepath.Join(w.gate.Dir, hostlock.GateQueueDir))
+	return len(entries)
+}
+
+// A Builder's foreground call is cut off at 590 seconds with no words, so a
+// foreground check ends before that, in one line, with exit 0 and nothing run,
+// and keeps its place in the queue for the next call (mw-gq6.939).
+func TestAForegroundWholeCheckThatCannotGetTheGateLockInItsWaitEndsInOneLineKeepingItsPlaceAndSaysToRunItAgain(t *testing.T) {
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	w.keep = 10 * time.Minute
+	closeOut, err := w.gate.Take(context.Background(), "mw-5r3p30.1028", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeOut.Holding.Release(context.Background())
+
+	report, err := w.check(150 * time.Millisecond)
+	if err != nil {
+		t.Fatalf("expected a check that kept its place to end without an error, got %v\n%s", err, report)
+	}
+	if len(report.Refusals) != 0 {
+		t.Errorf("expected no refusal, a kept place is not a failure, got %+v", report.Refusals)
+	}
+	for _, want := range []string{"gate lock is still held by mw-5r3p30.1028, since ", "your place 1 of 1 in the queue is kept for 10 minutes", "run the same command again to go on waiting"} {
+		if !strings.Contains(report.Waiting, want) {
+			t.Errorf("expected the line to say %q, got %q", want, report.Waiting)
+		}
+	}
+	if strings.Contains(report.Waiting, "\n") {
+		t.Errorf("expected one line, got %q", report.Waiting)
+	}
+	if !strings.Contains(w.told.String(), report.Waiting) {
+		t.Errorf("expected the line to be printed, got %q", w.told.String())
+	}
+	if strings.Contains(w.told.String(), "REFUSED") || strings.Contains(w.told.String(), "failed") {
+		t.Errorf("expected no refusal or failure to be printed, got %q", w.told.String())
+	}
+	if checks.runs != 0 {
+		t.Errorf("expected nothing to be run, the tests ran %d time(s)", checks.runs)
+	}
+	if got := w.queuedGate(); got != 1 {
+		t.Errorf("expected the check's ticket to outlive the call, the queue holds %d", got)
+	}
+}
+
+// ranAt is the rig's tests, noting when they were run.
+type ranAt struct {
+	at chan time.Time
+}
+
+func (r *ranAt) Run(context.Context, string, string) (application.Checked, error) {
+	r.at <- time.Now()
+	return application.Checked{Command: "make test", Passed: true, Output: "ok\n"}, nil
+}
+
+// A check that returned and is run again within its keep time goes on with the
+// place it had: ahead of a ticket taken in between, though the lock is free when
+// that waiter arrives (mw-gq6.939).
+func TestACheckRunAgainWithinItsKeepTimeHasItsPlaceAheadOfATicketTakenInBetween(t *testing.T) {
+	checks := &ranAt{at: make(chan time.Time, 4)}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	w.keep = 10 * time.Minute
+	closeOut, err := w.gate.Take(context.Background(), "mw-5r3p30.1028", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report, err := w.check(100 * time.Millisecond); err != nil || report.Waiting == "" {
+		t.Fatalf("expected the first call to keep its place, got %v and %q", err, report.Waiting)
+	}
+
+	// Somebody joins the queue after the check went, and the holder lets go.
+	gotAt := make(chan time.Time, 1)
+	go func() {
+		turn, err := w.gate.Take(context.Background(), "a close-out", nil)
+		if err == nil {
+			gotAt <- time.Now()
+			time.Sleep(50 * time.Millisecond)
+			turn.Holding.Release(context.Background())
+		}
+	}()
+	for deadline := time.Now().Add(5 * time.Second); w.queuedGate() < 2 && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := w.queuedGate(); got != 2 {
+		t.Fatalf("expected the kept ticket and the new one in the queue, got %d", got)
+	}
+	closeOut.Holding.Release(context.Background())
+	// The lock is free, and the ticket in between does not take it: the check's
+	// is the head though nobody is at it.
+	select {
+	case <-gotAt:
+		t.Fatal("expected the ticket taken in between to wait behind the kept place")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	report, err := w.check(10 * time.Second)
+	if err != nil {
+		t.Fatalf("expected the second call to take its place and run, got %v\n%s", err, report)
+	}
+	ran := <-checks.at
+	select {
+	case got := <-gotAt:
+		if got.Before(ran) {
+			t.Errorf("expected the check to run before the ticket taken in between had the lock")
+		}
+	case <-time.After(10 * time.Second):
+		t.Error("expected the ticket taken in between to have the lock once the check was done")
+	}
+	if got := w.queuedGate(); got != 0 {
+		t.Errorf("expected no ticket left once both are done, got %d", got)
+	}
+}
+
+// A place that is not run again is given up when its keep time has passed.
+func TestAKeptPlaceIsGivenUpWhenItsKeepTimeHasPassed(t *testing.T) {
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	w.keep = 150 * time.Millisecond
+	closeOut, err := w.gate.Take(context.Background(), "mw-5r3p30.1028", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.check(100 * time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	closeOut.Holding.Release(context.Background())
+	time.Sleep(300 * time.Millisecond)
+	// Nobody comes back for it: a close-out's gate takes the lock at once.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	turn, err := w.gate.Take(ctx, "a close-out", nil)
+	if err != nil {
+		t.Fatalf("expected a kept place past its time not to hold the queue, got %v", err)
+	}
+	turn.Holding.Release(context.Background())
+}
+
+// The merge slot a landing holds ends a foreground check the same way: one line,
+// the place kept, exit 0 (mw-gq6.939).
+func TestAForegroundWholeCheckThatCannotGetTheMergeSlotKeepsItsPlaceAndSaysToRunItAgain(t *testing.T) {
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	landing, err := w.slots.Take(context.Background(), w.rigDir, "mw land on laptop, landing mw-y")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer landing.Release(context.Background())
+
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	report, err := application.Check{
+		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: checks,
+		Slot: w.slots, GateLock: w.gate, Records: w.records, PartSlotWait: 150 * time.Millisecond,
+		KeepPlace: 10 * time.Minute, Host: "laptop", Remote: "origin",
+		Rigs: map[string]string{"millwright": w.rigDir}, Out: writerOf(w.told),
+	}.Run(context.Background(), "mw-x.1")
+	if err != nil || len(report.Refusals) != 0 {
+		t.Fatalf("expected the check to end without a refusal or an error, got %v and %+v", err, report.Refusals)
+	}
+	for _, want := range []string{"the merge slot of millwright is still held by mw land on laptop, landing mw-y, since ", "your place 1 of 1 in the queue is kept for 10 minutes", "run the same command again to go on waiting"} {
+		if !strings.Contains(report.Waiting, want) {
+			t.Errorf("expected the line to say %q, got %q", want, report.Waiting)
+		}
+	}
+	if checks.runs != 0 {
+		t.Errorf("expected nothing to be run, the tests ran %d time(s)", checks.runs)
+	}
+}
+
+// A host that stays busy ends the check the same way, with no place to keep: no
+// queue stands behind a busy host (mw-gq6.939).
+func TestAForegroundWholeCheckOnAHostThatStaysBusyEndsInOneLineToRunItAgain(t *testing.T) {
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	report, err := application.Check{
+		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: checks,
+		Slot: w.slots, GateLock: w.gate, Records: w.records, PartSlotWait: 3 * time.Minute,
+		KeepPlace: 10 * time.Minute,
+		Load:      &apptest.FakeHostLoad{Readings: []application.LoadReading{busy()}},
+		LoadPoll:  30 * time.Second,
+		LoadWait:  func(context.Context, time.Duration) error { return nil },
+		Host:      "laptop", Remote: "origin",
+		Rigs: map[string]string{"millwright": w.rigDir}, Out: writerOf(w.told),
+	}.Run(context.Background(), "mw-x.1")
+	if err != nil || len(report.Refusals) != 0 {
+		t.Fatalf("expected the check to end without a refusal or an error, got %v and %+v", err, report.Refusals)
+	}
+	for _, want := range []string{"laptop is still at load 39.0 of 20 cores, since ", "run the same command again to go on waiting"} {
+		if !strings.Contains(report.Waiting, want) {
+			t.Errorf("expected the line to say %q, got %q", want, report.Waiting)
+		}
+	}
+	if checks.runs != 0 {
+		t.Errorf("expected nothing to be run, the tests ran %d time(s)", checks.runs)
 	}
 }

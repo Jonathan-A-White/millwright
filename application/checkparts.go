@@ -22,6 +22,13 @@ import (
 // time, in a line of its own (mw-gq6.819).
 const CheckPartSlotWait = 9 * time.Minute
 
+// CheckKeepPlace is how long a foreground check's place in the queue for the merge
+// slot or the host's gate lock is kept after the call that waited for it ended
+// (mw-gq6.939): long enough for the Builder to read the line and run the same
+// command again in a fresh tool call, and short enough that a Builder that never
+// comes back does not hold up the queue for long.
+const CheckKeepPlace = 10 * time.Minute
+
 // A rig's whole gate can outrun the 590 seconds a Builder's foreground tool call
 // is given, and waiting on one run in the background is a wait the auto-mode
 // classifier refuses (mw-gq6.567). A host can therefore name a rig's gate as
@@ -262,9 +269,10 @@ func (k Check) takeSlotWithin(ctx context.Context, c *closeOut, try slotTry) (Ho
 func (k Check) takeSlotFor(ctx context.Context, c *closeOut, try slotTry, within time.Duration) (Holding, error) {
 	waitCtx, cancel := context.WithTimeout(ctx, within)
 	defer cancel()
+	waitCtx, ask := k.askToKeep(waitCtx, c)
 	holding, err := takeForCheck(waitCtx, k.Slot, c.rigDir, fmt.Sprintf("%s checking %s", SeatIdentity("", k.Host), c.id))
 	if err != nil {
-		return nil, k.slotRefusal(ctx, c, try, err)
+		return nil, k.slotRefusal(ctx, c, try, err, ask)
 	}
 	return holding, nil
 }
@@ -275,7 +283,7 @@ func (k Check) takeSlotFor(ctx context.Context, c *closeOut, try slotTry, within
 // the landing's, not the check's failure, and a check handed back on the slot
 // again in the same attempt is counted as the one wait it is (mw-gq6.814,
 // mw-gq6.817). Any other trouble is told as it was.
-func (k Check) slotRefusal(ctx context.Context, c *closeOut, try slotTry, err error) error {
+func (k Check) slotRefusal(ctx context.Context, c *closeOut, try slotTry, err error, ask *QueuePlace) error {
 	var waited *SlotWaitError
 	if ctx.Err() != nil || !errors.As(err, &waited) || !errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("the merge slot of %s could not be taken: %w", c.path.Rig, err)
@@ -283,6 +291,9 @@ func (k Check) slotRefusal(ctx context.Context, c *closeOut, try slotTry, err er
 	since := "a moment ago"
 	if !waited.Since.IsZero() {
 		since = fmt.Sprintf("%s (%s ago)", waited.Since.UTC().Format("15:04:05Z"), time.Since(waited.Since).Round(time.Second))
+	}
+	if line, ok := k.placeKept(try, fmt.Sprintf("the merge slot of %s", c.path.Rig), waited.Holder, since, ask); ok {
+		return errors.New(line)
 	}
 	if k.HandBackAtOnce {
 		return errors.New(k.limitReached(try.label, waited.Waited, fmt.Sprintf("the merge slot of %s is still held by %s, since %s", c.path.Rig, waited.Holder, since), waited.Holder))

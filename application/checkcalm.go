@@ -36,6 +36,9 @@ func (k Check) calmRefusal(ctx context.Context, c *closeOut, attempt int, readin
 	if rerun {
 		return k.calmRerunRefusal(ctx, c, attempt, load, again, since, waited)
 	}
+	if line := k.calmKept(fmt.Sprintf("%s is still at %s, since %s", k.Host, load, since.UTC().Format("15:04:05Z"))); line != "" {
+		return errors.New(line)
+	}
 	if k.HandBackAtOnce {
 		return errors.New(k.limitReached("the rig's tests", waited, fmt.Sprintf("%s is still at %s, since %s", k.Host, load, since.UTC().Format("15:04:05Z")), "the load"))
 	}
@@ -64,6 +67,9 @@ func CheckWholeCalmAgainFileName(attempt int) string {
 // The first failure is the host's and is not counted; nothing of it is kept,
 // because the run again is what the next call makes first.
 func (k Check) calmRerunRefusal(ctx context.Context, c *closeOut, attempt int, load, again string, since time.Time, waited time.Duration) error {
+	if line := k.calmKept(fmt.Sprintf("%s is still at %s, since %s, and the run again of the rig's tests, which failed once while it was busy, did not start", k.Host, load, since.UTC().Format("15:04:05Z"))); line != "" {
+		return errors.New(line)
+	}
 	if k.HandBackAtOnce {
 		return errors.New(k.limitReached("the run again of the rig's tests, which failed once while "+k.Host+" was busy,", waited, fmt.Sprintf("%s is still at %s, since %s", k.Host, load, since.UTC().Format("15:04:05Z")), "the load"))
 	}
@@ -74,4 +80,18 @@ func (k Check) calmRerunRefusal(ctx context.Context, c *closeOut, attempt int, l
 	}
 	return fmt.Errorf("the rig's tests failed once while %s was busy, and the run again that a failure on a busy host gets did not start: after %s %s is still at %s, since %s; the first failure is not counted and nothing has been run since, and that is the host's load and not a failure of the check: %s",
 		k.Host, gateWaited(waited), k.Host, load, since.UTC().Format("15:04:05Z"), again)
+}
+
+// calmKept is the line a foreground check (Check.KeepPlace) ends with when the
+// host was still busy at the end of its wait: no queue stands behind a busy host,
+// so no place is kept, and the same command run again waits for it once more
+// (mw-gq6.939). Empty when places are not kept, and then the check ends as it
+// always has.
+func (k Check) calmKept(still string) string {
+	if k.KeepPlace <= 0 {
+		return ""
+	}
+	line := still + "; no place is kept for a busy host: run the same command again to go on waiting"
+	k.waiting.set(line)
+	return line
 }

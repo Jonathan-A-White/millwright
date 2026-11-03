@@ -33,6 +33,11 @@ import (
 // that fails, because a session that fixes one and runs it again pays for the
 // tests each time.
 type Check struct {
+	// waiting is the one line a foreground check ended with, set when a wait ran
+	// out and its place was kept; shared by every copy of the Check one check()
+	// makes.
+	waiting *waitingLine
+
 	Tracker WorkTracker
 	Landing Landing
 	Checks  Checks
@@ -80,6 +85,11 @@ type Check struct {
 	// that runs out then says that the limit was reached and tells the Builder to
 	// hand back at once, not to run the check again, which would only queue again.
 	HandBackAtOnce bool
+
+	// KeepPlace, when it is set, is how long a foreground check's place in the
+	// queue for the merge slot or the host's gate lock outlives the call that
+	// waited for it (mw-gq6.939).
+	KeepPlace time.Duration
 
 	// Load is how busy this host is, read around the rig's tests as a
 	// close-out reads it (mw-gq6.379): the check waits, up to LoadBound, for a
@@ -201,6 +211,9 @@ type CheckReport struct {
 	Refusals []Refusal
 	// Notes are the things that went sideways without changing the outcome.
 	Notes []string
+	// Waiting is the one line a foreground check ends with when a wait ran out
+	// and its place in the queue was kept (mw-gq6.939).
+	Waiting string
 	// Tip is the commit the checks were run at: the branch's tip, read before
 	// and after them, with a clean worktree before. Empty when the worktree held
 	// uncommitted work, the tip moved while the checks ran, or it could not be
@@ -210,7 +223,7 @@ type CheckReport struct {
 }
 
 // Passed reports whether every check passed.
-func (r CheckReport) Passed() bool { return len(r.Refusals) == 0 }
+func (r CheckReport) Passed() bool { return len(r.Refusals) == 0 && r.Waiting == "" }
 
 // Run checks one story's branch and reports what it found. The error it
 // returns is what makes mw check exit non-zero: any check that failed, and
@@ -295,6 +308,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		return k.checkPart(ctx, report, c)
 	}
 	report.Branch, report.Target = c.branch, c.target
+	k.waiting = &waitingLine{}
 
 	// The rig's tests are run holding the rig's merge slot, shared with the
 	// other checks of the rig and apart from a landing's. Every wait of the check
@@ -399,6 +413,18 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		Out:           k.Out,
 	}.refusals(ctx, c, &read, true)
 	report.Commits, report.Notes = read.Commits, read.Notes
+	// A wait that ran out with the check's place kept is no refusal: nothing was
+	// run, and the line says to run the check again (mw-gq6.939).
+	if line := k.waiting.get(); line != "" {
+		report.Waiting = line
+		kept := report.Refusals[:0]
+		for _, refusal := range report.Refusals {
+			if !strings.Contains(refusal.Why, line) {
+				kept = append(kept, refusal)
+			}
+		}
+		report.Refusals = kept
+	}
 	if keptNote != "" {
 		report.Notes = append(report.Notes, keptNote)
 	}
@@ -411,6 +437,9 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		}
 	}
 
+	if report.Waiting != "" && len(report.Refusals) == 0 {
+		return report, nil
+	}
 	if !report.Passed() {
 		return report, fmt.Errorf("checking %s: %d check(s) failed, so mw next would not land it", storyID, len(report.Refusals))
 	}
@@ -493,7 +522,12 @@ func (r CheckReport) String() string {
 	for _, note := range r.Notes {
 		fmt.Fprintf(&b, "  note    %s\n", note)
 	}
+	if r.Waiting != "" {
+		fmt.Fprintf(&b, "  wait    %s\n", r.Waiting)
+	}
 	switch {
+	case r.Waiting != "" && len(r.Refusals) == 0:
+		// Nothing was run: the line above is all there is to say.
 	case r.Passed():
 		// Just before the verdict, which stays the last two lines; CheckedTip
 		// reads all three.

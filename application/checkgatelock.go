@@ -101,6 +101,7 @@ func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, withi
 
 	waitCtx, cancel := context.WithTimeout(ctx, max(within-time.Since(began), 0))
 	defer cancel()
+	waitCtx, ask := k.askToKeep(waitCtx, c)
 	notices := &gateNotices{k: k, ctx: waitCtx}
 	defer notices.stop()
 	holder := k.checkHolder(c)
@@ -114,7 +115,7 @@ func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, withi
 		if slot != nil {
 			slot.Release(context.Background())
 		}
-		return GateTurn{}, k.gateLockRefusal(ctx, waitCtx, c, try, notices.by, time.Since(began), err)
+		return GateTurn{}, k.gateLockRefusal(ctx, waitCtx, c, try, notices.by, time.Since(began), err, ask)
 	}
 	return GateTurn{Holding: bothHoldings{slot: slot, lock: turn.Holding}, Waited: turn.Waited, For: turn.For}, nil
 }
@@ -187,12 +188,15 @@ func (k Check) gateHolderNow(by string, began time.Time) (holder string, since t
 // the wait is the other gate's, not the check's failure, and a check handed back
 // again in the same attempt is counted as the one wait it is. Any other trouble
 // is told as it was.
-func (k Check) gateLockRefusal(ctx, waitCtx context.Context, c *closeOut, try slotTry, by string, waited time.Duration, err error) error {
+func (k Check) gateLockRefusal(ctx, waitCtx context.Context, c *closeOut, try slotTry, by string, waited time.Duration, err error, ask *QueuePlace) error {
 	if ctx.Err() != nil || waitCtx.Err() == nil || !errors.Is(err, context.DeadlineExceeded) {
 		return GateLockHandBack{Why: fmt.Sprintf("%s's gate lock could not be taken: %v", k.Host, err)}
 	}
 	holder, since := k.gateHolderNow(by, time.Now().Add(-waited))
 	sinceAt := fmt.Sprintf("%s (%s ago)", since.UTC().Format("15:04:05Z"), time.Since(since).Round(time.Second))
+	if line, ok := k.placeKept(try, fmt.Sprintf("%s's gate lock", k.Host), holder, sinceAt, ask); ok {
+		return GateLockHandBack{Why: line}
+	}
 	if k.HandBackAtOnce {
 		return GateLockHandBack{Why: k.limitReached(try.label, waited, fmt.Sprintf("%s's gate lock is still held by %s, since %s", k.Host, holder, sinceAt), holder)}
 	}
@@ -203,6 +207,81 @@ func (k Check) gateLockRefusal(ctx, waitCtx context.Context, c *closeOut, try sl
 	}
 	return GateLockHandBack{Why: fmt.Sprintf("%s did not start: after %s %s's gate lock is still held by %s, since %s, and nothing was run; that is the other gate's wait and not a failure of the %s: %s",
 		try.label, waited.Round(time.Second), k.Host, holder, sinceAt, try.noun, try.again)}
+}
+
+// waitingLine is the one line a foreground check ends with when a wait ran out
+// and its place was kept (mw-gq6.939). Every copy of a Check made in one check()
+// shares it, as it shares the check's one deadline.
+type waitingLine struct {
+	mu   sync.Mutex
+	line string
+}
+
+func (w *waitingLine) set(line string) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.line == "" {
+		w.line = line
+	}
+}
+
+func (w *waitingLine) get() string {
+	if w == nil {
+		return ""
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.line
+}
+
+// askToKeep asks the queue the check is about to wait in to keep its place when
+// the wait runs out (Check.KeepPlace), under a key that is the same on every call
+// of the check of this story, so that the check run again takes the same place
+// up. It returns the context to wait under and the ask, nil when places are not
+// kept.
+func (k Check) askToKeep(ctx context.Context, c *closeOut) (context.Context, *QueuePlace) {
+	if k.KeepPlace <= 0 {
+		return ctx, nil
+	}
+	ask := &QueuePlace{Key: "check " + c.id, For: k.KeepPlace}
+	return WithQueuePlace(ctx, ask), ask
+}
+
+// placeKept is the line a foreground check ends with when a wait for a queue ran
+// out and the queue kept its place: what is still held, by whom and since when,
+// where the check stands, how long the place is kept, and that running the same
+// command again goes on waiting (mw-gq6.939). ok is false when no place was kept
+// (places are not asked for, or the queue kept none), and then the caller ends
+// the check as it always has.
+func (k Check) placeKept(try slotTry, what, holder, since string, ask *QueuePlace) (line string, ok bool) {
+	if ask == nil {
+		return "", false
+	}
+	kept, place, of := ask.Result()
+	if !kept {
+		return "", false
+	}
+	line = fmt.Sprintf("%s is still held by %s, since %s; your place %d of %d in the queue is kept for %s: run the same command again to go on waiting",
+		what, holder, since, place, of, keptFor(k.KeepPlace))
+	if try.noun == "part" {
+		line = try.label + " did not start: " + line
+	}
+	k.waiting.set(line)
+	return line, true
+}
+
+// keptFor is how long a place is kept, in minutes when it is a whole number.
+func keptFor(d time.Duration) string {
+	if d >= time.Minute && d%time.Minute == 0 {
+		if d == time.Minute {
+			return "1 minute"
+		}
+		return fmt.Sprintf("%d minutes", d/time.Minute)
+	}
+	return d.Round(time.Second).String()
 }
 
 // bothHoldings is the merge slot and the gate lock a check holds around the

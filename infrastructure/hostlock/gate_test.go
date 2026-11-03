@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
 )
 
@@ -288,5 +289,49 @@ func TestAGateLockSaysSinceWhenItsHolderTookIt(t *testing.T) {
 	turn.Holding.Release(context.Background())
 	if got := gate.HeldSince(); !got.IsZero() {
 		t.Errorf("expected a lock given back to be held since no time, got %s", got)
+	}
+}
+
+// A wait for the gate lock that asks for its place to be kept leaves its ticket
+// when its deadline passes, and a close-out's own wait (no ask), which is what mw
+// next makes, treats that ticket as a live waiter's until its keep time has passed
+// (mw-gq6.939).
+func TestACloseOutsWaitStandsBehindAPlaceAnotherWaitKeptUntilItsKeepTimePasses(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	clock := &now
+	gate := hostlock.NewGate(dir, hostlock.WithGatePoll(2*time.Millisecond), hostlock.WithGateCap(time.Hour), hostlock.WithGateClock(func() time.Time { return *clock }))
+	holder, err := gate.Take(context.Background(), "mw-holder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ask := &application.QueuePlace{Key: "check mw-x", For: 10 * time.Minute}
+	expired, cancel := context.WithTimeout(application.WithQueuePlace(context.Background(), ask), 50*time.Millisecond)
+	defer cancel()
+	if _, err := gate.Take(expired, "laptop checking mw-x", nil); err == nil {
+		t.Fatal("expected the wait to end at its deadline")
+	}
+	if kept, place, of := ask.Result(); !kept || place != 1 || of != 1 {
+		t.Fatalf("expected place 1 of 1 to be kept, got %v %d %d", kept, place, of)
+	}
+	holder.Holding.Release(context.Background())
+
+	closeOut := func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+		defer cancel()
+		turn, err := gate.Take(ctx, "mw-close-out", nil)
+		if err == nil {
+			turn.Holding.Release(context.Background())
+		}
+		return err
+	}
+	if err := closeOut(); err == nil {
+		t.Fatal("expected the close-out to wait behind the place that was kept")
+	}
+	later := now.Add(11 * time.Minute)
+	clock = &later
+	if err := closeOut(); err != nil {
+		t.Fatalf("expected the close-out to take the lock once the keep time had passed, got %v", err)
 	}
 }

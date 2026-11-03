@@ -57,6 +57,10 @@ func WithGateCap(cap time.Duration) GateOption { return func(g *Gate) { g.cap = 
 // WithGatePoll sets how often Take looks again while it waits.
 func WithGatePoll(poll time.Duration) GateOption { return func(g *Gate) { g.poll = poll } }
 
+// WithGateClock sets the clock the age and keep time of the tickets in the queue are
+// judged by, and how long Take has waited, for a test that cannot wait ten minutes.
+func WithGateClock(now func() time.Time) GateOption { return func(g *Gate) { g.now = now } }
+
 // NewGate is this host's gate lock, kept in dir.
 func NewGate(dir string, opts ...GateOption) *Gate {
 	g := &Gate{Dir: dir, cap: GateCap, poll: GatePoll, now: time.Now}
@@ -82,7 +86,15 @@ func (g *Gate) Take(ctx context.Context, holder string, held func(by string)) (a
 
 	started := g.now()
 	tickets := &ticketq.Queue{Dir: queue, Cap: g.cap, Now: g.now}
-	ticket, err := tickets.Join(holder, started)
+	// A waiter that asks it comes back for its place: a ticket kept for it by an
+	// earlier call is its own again, and one left at the end of this wait is kept.
+	asked := application.QueuePlaceOf(ctx)
+	var ticket *ticketq.Ticket
+	if asked != nil && asked.Key != "" {
+		ticket, err = tickets.JoinAs(asked.Key, holder, started)
+	} else {
+		ticket, err = tickets.Join(holder, started)
+	}
 	if err != nil {
 		file.Close()
 		return application.GateTurn{}, err
@@ -127,6 +139,11 @@ func (g *Gate) Take(ctx context.Context, holder string, held func(by string)) (a
 		select {
 		case <-ctx.Done():
 			file.Close()
+			if asked != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				place, of := tickets.Place(ticket.Name())
+				ticket.Keep(g.now().Add(asked.For))
+				asked.Kept(place, of)
+			}
 			return application.GateTurn{}, fmt.Errorf("waiting for this host's gate lock %s: %w", path, ctx.Err())
 		case <-time.After(g.poll):
 		}

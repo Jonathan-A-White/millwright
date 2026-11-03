@@ -915,3 +915,60 @@ func TestTheFirstSayingOfASlotWaitNamesWhenTheHolderTookTheSlot(t *testing.T) {
 		t.Errorf("expected the first notice to name the holder and since when, got %q", said)
 	}
 }
+
+// A check that waits for the slot under a deadline, asking for its place to be
+// kept, leaves its ticket in the queue when the deadline passes; the same check
+// run again takes the same place, ahead of a waiter that came in between, and a
+// landing's own wait for the slot walks past neither (mw-gq6.939).
+func TestACheckWaitingForTheSlotKeepsItsPlaceWhenItsDeadlinePassesAndTakesItUpAgain(t *testing.T) {
+	ctx, dir := context.Background(), aRigDir(t)
+	slots := rig.NewSlots(rig.WithSlotPoll(5 * time.Millisecond))
+	landing, err := slots.Take(ctx, dir, "mw-landing")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ask := &application.QueuePlace{Key: "check mw-x", For: 10 * time.Minute}
+	expired, cancel := context.WithTimeout(application.WithQueuePlace(ctx, ask), 100*time.Millisecond)
+	defer cancel()
+	_, err = slots.TakeShared(expired, dir, "laptop checking mw-x")
+	var waited *application.SlotWaitError
+	if !errors.As(err, &waited) {
+		t.Fatalf("expected the wait to end at its deadline, got %v", err)
+	}
+	if kept, place, of := ask.Result(); !kept || place != 1 || of != 1 {
+		t.Fatalf("expected place 1 of 1 to be kept, got %v %d %d", kept, place, of)
+	}
+
+	// A landing comes in after the check went, and the first landing lets go.
+	won := make(chan time.Time, 1)
+	go func() {
+		holding, err := slots.Take(ctx, dir, "mw-landing-2")
+		if err == nil {
+			won <- time.Now()
+			holding.Release(ctx)
+		}
+	}()
+	waitForQueued(t, dir, 2)
+	landing.Release(ctx)
+	select {
+	case <-won:
+		t.Fatal("expected the landing that came after to wait behind the kept place")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	again, err := slots.TakeShared(application.WithQueuePlace(ctx, &application.QueuePlace{Key: "check mw-x", For: 10 * time.Minute}), dir, "laptop checking mw-x")
+	if err != nil {
+		t.Fatalf("expected the check run again to take its place and the slot, got %v", err)
+	}
+	took := time.Now()
+	again.Release(ctx)
+	select {
+	case got := <-won:
+		if got.Before(took) {
+			t.Error("expected the landing to take the slot after the check")
+		}
+	case <-time.After(10 * time.Second):
+		t.Error("expected the landing to take the slot once the check was done")
+	}
+}

@@ -415,3 +415,40 @@ func TestAnOpenStepsRefusalNamesAPartThatWaitedOnTheSlotAsHeldNotFailed(t *testi
 		t.Errorf("expected only the part that waited to say so, got %q", others)
 	}
 }
+
+// A part that cannot get the slot in its nine minutes keeps its place in the queue
+// too, and its line says to run the same command again (mw-gq6.939).
+func TestAPartThatCannotGetTheSlotKeepsItsPlaceAndSaysToRunItAgain(t *testing.T) {
+	parts := newHeldParts()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	rigDir := filepath.Join(t.TempDir(), "rigs", "millwright")
+	if err := os.MkdirAll(rigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	slots := rig.NewSlots(rig.WithSlotPoll(5 * time.Millisecond))
+	landing, err := slots.Take(context.Background(), rigDir, "mw land on laptop, landing a batch of millwright")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer landing.Release(context.Background())
+
+	_, err = application.Check{
+		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: &scriptedChecks{passes: []bool{true}},
+		Slot: slots, Parts: parts, Records: &mapRecords{}, Part: 2, PartSlotWait: 150 * time.Millisecond,
+		KeepPlace: 10 * time.Minute, Host: "laptop", Remote: "origin",
+		Rigs: map[string]string{"millwright": rigDir}, Out: io.Discard,
+	}.Run(context.Background(), "mw-x.1")
+	if err == nil {
+		t.Fatal("expected the part not to run while a landing held the slot")
+	}
+	for _, want := range []string{"part 2 of 2 (unit) did not start", "the merge slot of millwright is still held by mw land on laptop", "your place 1 of 1 in the queue is kept for 10 minutes", "run the same command again to go on waiting"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the line to say %q, got %q", want, err.Error())
+		}
+	}
+	if strings.Contains(err.Error(), "\n") {
+		t.Errorf("expected one line, got %q", err.Error())
+	}
+}

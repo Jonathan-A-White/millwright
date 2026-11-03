@@ -225,7 +225,17 @@ func (s *Slots) take(ctx context.Context, rigDir, holder string, shared bool) (a
 func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path string, shared bool) error {
 	started := s.now()
 	tickets := &ticketq.Queue{Dir: path + SlotQueueSuffix, Cap: s.cap, Now: s.now}
-	ticket, err := tickets.Join(holder, started)
+	// A waiter that asks it comes back for its place: a ticket kept for it by an
+	// earlier call is its own again, and one left at the end of this wait is kept
+	// (mw-gq6.939).
+	asked := application.QueuePlaceOf(ctx)
+	var ticket *ticketq.Ticket
+	var err error
+	if asked != nil && asked.Key != "" {
+		ticket, err = tickets.JoinAs(asked.Key, holder, started)
+	} else {
+		ticket, err = tickets.Join(holder, started)
+	}
 	if err != nil {
 		return fmt.Errorf("queueing for the merge slot of %s: %w", rigDir, err)
 	}
@@ -291,6 +301,11 @@ func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path s
 		}
 
 		if err := s.sleep(ctx, s.poll); err != nil {
+			if asked != nil && errors.Is(err, context.DeadlineExceeded) {
+				place, of := tickets.Place(ticket.Name())
+				ticket.Keep(s.now().Add(asked.For))
+				asked.Kept(place, of)
+			}
 			return &application.SlotWaitError{Path: path, Holder: held(path), Since: slotTaken(slotSays(path)), Waited: now.Sub(started), Err: err}
 		}
 	}
