@@ -198,7 +198,7 @@ func (n Next) waitForRoom(ctx context.Context, c *closeOut, report *NextReport) 
 	const what = "the run of the failing tests on main alone"
 	if reading.Busy() {
 		var err error
-		if reading, _, err = n.calmedThen(ctx, report, c, what, "it was not made", false, false); err != nil {
+		if reading, _, err = n.calmedThen(ctx, report, c, what, "was not made", false, false); err != nil {
 			// Far over its cores at the end of the bound: the host's own error
 			// is the note of why, and the reading is the one it ended on.
 			report.Notes = append(report.Notes, err.Error())
