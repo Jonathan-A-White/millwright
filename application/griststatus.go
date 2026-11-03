@@ -434,9 +434,11 @@ func (g GristStatus) one(ctx context.Context, record GristRequestRecord, all []G
 	return fmt.Sprintf("%s: %s (request %s of %s)", record.Bead, status.Status, record.Request, record.App), nil
 }
 
-// movedOn is the bead a record's request is followed on now, "" when there is
-// none: the bead of another record of the same request that is not marked
-// moved and was last told something later than this one.
+// movedOn is the one rule for 'this record's request was moved on': the bead a
+// record's request is followed on now, "" when there is none. It is the bead of
+// another record of the same request that is not marked moved and was last
+// told something later than this one. GristStatus, GristRequest.heldBy,
+// Linked and MoveRequest all ask it, besides the record's own MovedTo.
 func movedOn(record GristRequestRecord, all []GristRequestRecord) string {
 	told := func(r GristRequestRecord) int64 {
 		if r.Last == nil {

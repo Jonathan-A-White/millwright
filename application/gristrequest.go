@@ -135,11 +135,26 @@ func (g GristRequest) heldBy(ctx context.Context, txid, bead string) (*GristRequ
 		return nil, err
 	}
 	for _, record := range records {
-		if record.Request == txid && record.Bead != bead && record.MovedTo == "" {
+		if record.Request == txid && record.Bead != bead && record.MovedTo == "" && movedOn(record, records) == "" {
 			return &record, nil
 		}
 	}
 	return nil, nil
+}
+
+// followed is the bead's record when its request is followed on it: it is
+// linked here and nothing says the request moved on, neither its MovedTo nor
+// a later record of the same request (movedOn).
+func (g GristRequest) followed(ctx context.Context, bead string) (GristRequestRecord, bool, error) {
+	record, ok, err := g.Requests.Get(ctx, bead)
+	if err != nil || !ok || record.MovedTo != "" {
+		return record, false, err
+	}
+	records, err := g.Requests.List(ctx)
+	if err != nil {
+		return record, false, err
+	}
+	return record, movedOn(record, records) == "", nil
 }
 
 // Linked reports whether the bead is linked to a request this host follows.
@@ -147,8 +162,8 @@ func (g GristRequest) Linked(ctx context.Context, bead string) (bool, error) {
 	if g.Requests == nil {
 		return false, nil
 	}
-	record, ok, err := g.Requests.Get(ctx, bead)
-	return ok && record.MovedTo == "", err
+	_, ok, err := g.followed(ctx, bead)
+	return ok, err
 }
 
 // MoveRequest moves the request linked to from to the bead to, and tells its
@@ -158,11 +173,11 @@ func (g GristRequest) MoveRequest(ctx context.Context, from, to string) error {
 	if g.Requests == nil || g.Postern == nil || g.Cipher == nil || g.Keys == nil || g.Tracker == nil {
 		return fmt.Errorf("mw grist request: no postern backend, cipher, key file, request store or tracker is configured")
 	}
-	old, ok, err := g.Requests.Get(ctx, from)
+	old, ok, err := g.followed(ctx, from)
 	if err != nil {
 		return fmt.Errorf("mw grist request: %w", err)
 	}
-	if !ok || old.MovedTo != "" {
+	if !ok {
 		return nil
 	}
 	return g.moveTo(ctx, old, to)
