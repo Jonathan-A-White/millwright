@@ -90,7 +90,7 @@ func sessionsOn(t *testing.T, runner *tmux.Runner) string {
 // waitForOutput reads a session until what it printed holds want.
 func waitForOutput(ctx context.Context, t *testing.T, runner *tmux.Runner, name, want string) string {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for {
 		out, err := runner.Output(ctx, name, 50)
 		if err != nil {

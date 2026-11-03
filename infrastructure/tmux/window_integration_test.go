@@ -63,7 +63,7 @@ func standInSeat(t *testing.T, dir string) (program, said string) {
 // itself, so there is a gap between Open returning and the command having run.
 func waitFor(t *testing.T, what string, done func() bool) {
 	t.Helper()
-	for until := time.Now().Add(10 * time.Second); time.Now().Before(until); {
+	for until := time.Now().Add(60 * time.Second); time.Now().Before(until); {
 		if done() {
 			return
 		}

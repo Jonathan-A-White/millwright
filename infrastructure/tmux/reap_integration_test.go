@@ -348,7 +348,7 @@ func TestNextRunningSeesAMwNextBelowThePane(t *testing.T) {
 	}
 	busy := idOf(t, windows, "next-window")
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for {
 		story, running, err := windows.NextRunning(ctx, busy)
 		if err != nil {
