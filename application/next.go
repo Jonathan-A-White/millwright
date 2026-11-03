@@ -144,6 +144,11 @@ const (
 	ReasonGitFailed     Reason = "git-failed"
 	ReasonTrackerFailed Reason = "tracker-failed"
 	ReasonMergeSlot     Reason = "merge-slot"
+	// ReasonHostBusy is a close-out handed back because its host was far over
+	// its cores (HostBusyError, mw-gq6.903): the rig's tests were not run, or a
+	// failure was the host's. Handed back as ReasonMergeSlot is, and no attempt
+	// is spent.
+	ReasonHostBusy      Reason = "host-busy"
 	ReasonPushLost      Reason = "push-lost"
 	ReasonLandingFailed Reason = "landing-failed"
 )
@@ -371,8 +376,10 @@ type Next struct {
 
 	// Load is how busy this host is, read around the rig's tests: a close-out
 	// waits, up to LoadBound, for a busy host to calm before them, and runs them
-	// once more when they fail while it was busy (mw-gq6.228). A nil Load, or a
-	// load that cannot be read, does neither. LoadPoll is how often the wait looks
+	// once more when they fail while it was far over its cores (mw-gq6.228,
+	// mw-gq6.903: GateFarOver); a wait that ends with it still far over runs
+	// nothing, and the story is handed back with no attempt spent. A nil Load, or
+	// a load that cannot be read, does none of it. LoadPoll is how often the wait looks
 	// again and LoadBound how long it waits in all; zero is GateLoadPoll and
 	// GateLoadBound. LoadWait is how it waits, the real clock unless a test
 	// replaces it.
@@ -386,7 +393,7 @@ type Next struct {
 	// it is waiting, and instead of running the tests anyway it ends the gate with
 	// the error CalmHandBack returns, the load being the reading taken last and
 	// since when the wait began. mw check sets it (mw-gq6.819); a close-out does
-	// not, and runs the tests anyway.
+	// not, and runs the tests anyway unless the host is far over its cores.
 	CalmHandBack func(ctx context.Context, reading LoadReading, since time.Time, waited time.Duration) error
 
 	// GateLock keeps this host to one rig gate at a time, whatever rig: a
@@ -1264,6 +1271,9 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 				return rep, nil
 			}
 		}
+		if found[0].Reason == ReasonHostBusy {
+			return n.handBack(ctx, c, report, ReasonHostBusy, found[0].Why)
+		}
 		report.Refused = true
 		return n.stop(ctx, c, report, found[0].Reason, found[0].Why, found[0].Said)
 	}
@@ -1294,7 +1304,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	if errors.Is(err, ErrSlotCap) {
 		// Waited the overall most, on a live holder or a queue of them: the
 		// work is not at fault, so only the close-out is run again (mw-gq6.467).
-		return n.handBack(ctx, c, report, fmt.Sprintf("the merge slot of %s could not be taken: %v", c.path.Rig, err))
+		return n.handBack(ctx, c, report, ReasonMergeSlot, fmt.Sprintf("the merge slot of %s could not be taken: %v", c.path.Rig, err))
 	}
 	if err != nil {
 		return n.stop(ctx, c, report, ReasonMergeSlot, fmt.Sprintf("the merge slot of %s could not be taken: %v", c.path.Rig, err), "")
@@ -1314,6 +1324,10 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		// story: it is neither sent back nor stopped (mw-gq6.441).
 		if ctx.Err() != nil {
 			return n.interrupted(ctx, c, report)
+		}
+		if reasonOf(landErr) == ReasonHostBusy {
+			// The host's load, not the story: only the close-out is run again.
+			return n.handBack(ctx, c, report, ReasonHostBusy, firstLine(landErr.Error()))
 		}
 		kept := n.keepLandingError(ctx, c, report, landErr)
 		switch {
@@ -1972,6 +1986,8 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 	}
 	checked, err := gate.Checked, gate.Err
 	switch {
+	case isHostBusy(err):
+		refuse(ReasonHostBusy, fmt.Sprintf("the rig's tests were not counted in %s: %v", c.worktree, err), "")
 	case err != nil:
 		refuse(ReasonTestsNotRun, fmt.Sprintf("the rig's tests could not be run in %s: %v", c.worktree, err), "")
 	case checked.NotRun:
@@ -2790,6 +2806,9 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 			return Landed{}, offTheSlot{waits}
 		}
 		checked, err := gate.Checked, gate.Err
+		if isHostBusy(err) {
+			return Landed{}, failedFor(ReasonHostBusy, fmt.Errorf("the rig's tests on the merged result in %s were not counted: %w", dir, err))
+		}
 		if err != nil {
 			return Landed{}, failedFor(ReasonTestsNotRun, fmt.Errorf("the rig's tests could not be run on the merged result in %s: %w", dir, err))
 		}

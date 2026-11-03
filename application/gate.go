@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -45,6 +46,39 @@ type GateTurn struct {
 	For     string
 }
 
+// HostBusyError is why the rig's tests were not run, or not counted, on a host
+// far over its cores (LoadReading.FarOver, mw-gq6.903): the wait for it to calm
+// ran out with it still there, or a run failed and the host was far over when it
+// ended. It is the host's, not the story's: a close-out hands the story back for
+// its close-out alone, and no attempt is spent.
+type HostBusyError struct {
+	Host    string
+	Reading LoadReading
+	// Waited is how long the wait for the host to calm went on, zero when the
+	// error is of a run that failed far over.
+	Waited time.Duration
+	// What names the run that was not made or not counted.
+	What string
+	// After says a run was made and failed, with the host far over after it.
+	After bool
+}
+
+func (e HostBusyError) Error() string {
+	load := fmt.Sprintf("load %.1f of %d cores, at least %.0f times them", e.Reading.Load, e.Reading.Cores, GateFarOver)
+	if e.After {
+		return fmt.Sprintf("%s failed and %s was at %s when it ended, so the failure is the host's and not the story's: nothing is counted against the story",
+			e.What, e.Host, load)
+	}
+	return fmt.Sprintf("%s was still at %s after waiting %s, so %s was not run: that is the host's load and not a failure of the story",
+		e.Host, load, gateWaited(e.Waited), e.What)
+}
+
+// isHostBusy reports whether err is a HostBusyError.
+func isHostBusy(err error) bool {
+	var busy HostBusyError
+	return errors.As(err, &busy)
+}
+
 func (n Next) loadPoll() time.Duration {
 	if n.LoadPoll <= 0 {
 		return GateLoadPoll
@@ -85,7 +119,9 @@ const calmedMinute = time.Minute
 // it does. It returns the last reading it took, and whether the bound ran out
 // with the host still busy. The gate runs after it either way, unless handBack
 // is asked for and Next.CalmHandBack is set: then a bound that ran out returns
-// that hook's error, and the gate does not run (mw-gq6.819).
+// that hook's error, and the gate does not run (mw-gq6.819). A bound that ran out
+// with the host far over its cores returns a HostBusyError either way, and the
+// gate does not run (mw-gq6.903).
 func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what string, handBack bool) (reading LoadReading, gaveUp bool, err error) {
 	reading, ok := n.readLoad(ctx)
 	if !ok || !reading.Busy() {
@@ -106,6 +142,13 @@ func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what 
 		if waited >= n.loadBound() {
 			if handBack {
 				return reading, true, n.CalmHandBack(ctx, reading, since, waited)
+			}
+			if reading.FarOver() {
+				// Far over the cores a run only fails for the host, and
+				// takes the host's other work down with it.
+				busy := HostBusyError{Host: n.Host, Reading: reading, Waited: waited, What: what}
+				n.print("  wait    " + busy.Error() + "\n")
+				return reading, true, busy
 			}
 			note := fmt.Sprintf("%s was still at load %.1f of %d cores after waiting %s, so %s ran anyway",
 				n.Host, reading.Load, reading.Cores, waited, what)
@@ -269,6 +312,9 @@ type mergedGate struct {
 	calmed bool
 	before LoadReading
 	gaveUp bool
+	// hostBusy is the wait for calm that ended with the host far over its cores:
+	// the next run is not made, and it is what that run returns (mw-gq6.903).
+	hostBusy error
 
 	// failed says the first run failed with the host busy, at the reading
 	// busy: the next run is the second, made once it calms, and only its
@@ -302,13 +348,21 @@ func (n Next) mergedResultGate(ctx context.Context, c *closeOut, report *NextRep
 	if waits := n.mergedGateWaits(ctx, c, report); waits != "" {
 		return gated{}, waits
 	}
+	if m.hostBusy != nil {
+		over := m.hostBusy
+		m.hostBusy, m.calmed, m.failed = nil, false, false
+		return gated{Err: over}, ""
+	}
 
 	if m.failed {
 		again, err := n.timedChecks(ctx, c, report, dir, span)
 		c.gate.settle(again, err, m.busy)
+		m.calmed, m.failed = false, false
+		if over := n.failedFarOver(ctx, onMerged, again, err); over != nil {
+			return gated{Err: over}, ""
+		}
 		said := ranTwice(onMerged, n.Host, m.busy, m.first, again, err)
 		report.Notes = append(report.Notes, said)
-		m.calmed, m.failed = false, false
 		return gated{Checked: again, Err: err, Said: said}, ""
 	}
 
@@ -322,12 +376,16 @@ func (n Next) mergedResultGate(ctx context.Context, c *closeOut, report *NextRep
 	}
 	busy := before
 	if !m.gaveUp {
-		after, ok := n.readLoad(ctx)
-		if !ok || !after.Busy() {
-			c.gate.settle(checked, nil, before)
-			return gated{Checked: checked}, ""
+		if after, ok := n.readLoad(ctx); ok && after.Busy() {
+			busy = after
 		}
-		busy = after
+	}
+	if !busy.FarOver() {
+		c.gate.settle(checked, nil, busy)
+		if busy.Busy() {
+			n.noteCountedAtOnce(report, onMerged, busy)
+		}
+		return gated{Checked: checked}, ""
 	}
 	n.print(fmt.Sprintf("  retry   %s failed while %s was at load %.1f of %d cores: running them once more when it calms\n",
 		onMerged, n.Host, busy.Load, busy.Cores))
@@ -380,7 +438,7 @@ func (n Next) waitForTheMergedGate(ctx context.Context, c *closeOut, report *Nex
 		m.asked, m.lock = true, n.waitForTheGateLock(ctx, c, report, m.what())
 	}
 	if !m.calmed {
-		m.before, m.gaveUp, _ = n.calmed(ctx, report, c, m.what(), false)
+		m.before, m.gaveUp, m.hostBusy = n.calmed(ctx, report, c, m.what(), false)
 		m.calmed = true
 	}
 }
@@ -416,11 +474,15 @@ func gateWaited(d time.Duration) string {
 
 // gateOnACalmHost runs the rig's tests in dir the way a close-out must on a
 // host that may be busy: it waits, bounded, for the load to drop below the core
-// count first;
-// and a run that fails while the host was busy at a reading it took — before the
-// run, or after it — is run once more when the host has calmed, and only a
-// second failure counts. A run that fails on a calm host counts at once. A
-// command that would not start is not a load fault and is never run again.
+// count first, and does not run them at all if the wait ends with the host far
+// over its cores (HostBusyError). A run that fails with the host far over its
+// cores at a reading it took — before the run, or after it — is run once more
+// when the host has calmed, and only a second failure counts; one that fails with
+// the host between its cores and twice them counts at once, as a rerun there has
+// not passed (GateFarOver). A second run that fails with the host far over again
+// after it is the host's, not the story's (HostBusyError). A run that fails on a
+// calm host counts at once. A command that would not start is not a load fault
+// and is never run again.
 func (n Next) gateOnACalmHost(ctx context.Context, c *closeOut, report *NextReport, dir, what string, span RelatedSpan) gated {
 	before, gaveUp, handedBack := n.calmed(ctx, report, c, what, true)
 	if handedBack != nil {
@@ -436,20 +498,53 @@ func (n Next) gateOnACalmHost(ctx context.Context, c *closeOut, report *NextRepo
 	busy := before
 	if !gaveUp {
 		after, ok := n.readLoad(ctx)
-		if !ok || !after.Busy() {
-			c.gate.settle(checked, nil, before)
-			return gated{Checked: checked}
+		if ok && after.Busy() {
+			busy = after
 		}
-		busy = after
+	}
+	if !busy.FarOver() {
+		c.gate.settle(checked, nil, busy)
+		if busy.Busy() {
+			n.noteCountedAtOnce(report, what, busy)
+		}
+		return gated{Checked: checked}
 	}
 	n.print(fmt.Sprintf("  retry   %s failed while %s was at load %.1f of %d cores: running them once more when it calms\n",
 		what, n.Host, busy.Load, busy.Cores))
-	n.calmed(ctx, report, c, what+" again", false)
+	if _, _, err := n.calmed(ctx, report, c, what+" again", false); err != nil {
+		return gated{Err: err}
+	}
 	again, err := n.timedChecks(ctx, c, report, dir, span)
 	c.gate.settle(again, err, busy)
+	if over := n.failedFarOver(ctx, what, again, err); over != nil {
+		return gated{Err: over}
+	}
 	said := ranTwice(what, n.Host, busy, checked, again, err)
 	report.Notes = append(report.Notes, said)
 	return gated{Checked: again, Err: err, Said: said}
+}
+
+// failedFarOver says a run that was made, and failed, ended with the host far
+// over its cores: the failure is the host's, and the HostBusyError says so. It
+// is nil for a run that passed, did not start, or ended with the host not far
+// over, or whose load cannot be read.
+func (n Next) failedFarOver(ctx context.Context, what string, run Checked, err error) error {
+	if err != nil || run.NotRun || run.Passed {
+		return nil
+	}
+	if after, ok := n.readLoad(ctx); ok && after.FarOver() {
+		return HostBusyError{Host: n.Host, Reading: after, What: what, After: true}
+	}
+	return nil
+}
+
+// noteCountedAtOnce says a failure read with the host busy, but not far over its
+// cores, counts at once and is not run again.
+func (n Next) noteCountedAtOnce(report *NextReport, what string, busy LoadReading) {
+	note := fmt.Sprintf("%s failed while %s was at load %.1f of %d cores, under %.0f times them, so the failure counts and they were not run again",
+		what, n.Host, busy.Load, busy.Cores, GateFarOver)
+	n.print("  note    " + note + "\n")
+	report.Notes = append(report.Notes, note)
 }
 
 // ranTwice says how a gate that was run twice went. A first run whose tests

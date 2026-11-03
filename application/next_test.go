@@ -387,7 +387,7 @@ type aLoadThatWaitingCalms struct{ busy bool }
 
 func (l *aLoadThatWaitingCalms) Load(context.Context) (application.LoadReading, error) {
 	if l.busy {
-		return busy(), nil
+		return farOver(), nil
 	}
 	return calm(), nil
 }

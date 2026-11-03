@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -150,5 +151,103 @@ func TestABatchesRelatedGateIsGivenTheTestFilesEveryMembersOwnCheckFailed(t *tes
 	}
 	if gate.Passed {
 		t.Errorf("expected the batch's gate to fail on the source-scanning test, got %+v", gate)
+	}
+}
+
+// The rule of mw-gq6.903, from the desktop's close-outs of 2026-10-26 to 11-03:
+// a gate is run again only when its failure was read far over the cores (twice
+// them), a gate is not run while the host stays far over after the wait, and a
+// failure that ends with the host far over is the host's, handed back without an
+// attempt.
+
+func halfOver() application.LoadReading { return application.LoadReading{Load: 30, Cores: 20} }
+
+func TestALoadOfTwiceTheCoresIsFarOverAndOneJustUnderItIsNot(t *testing.T) {
+	for _, c := range []struct {
+		reading application.LoadReading
+		want    bool
+	}{
+		{application.LoadReading{Load: 40, Cores: 20}, true},
+		{application.LoadReading{Load: 39.9, Cores: 20}, false},
+		{application.LoadReading{Load: 20, Cores: 20}, false},
+		{application.LoadReading{Load: 90, Cores: 0}, false},
+	} {
+		if got := c.reading.FarOver(); got != c.want {
+			t.Errorf("load %.1f of %d cores: expected FarOver %v, got %v", c.reading.Load, c.reading.Cores, c.want, got)
+		}
+	}
+}
+
+func TestAGateThatFailsBetweenOnceAndTwiceTheCoresCountsAtOnceAndIsNotRunAgain(t *testing.T) {
+	run, checks := aCloseOutWhoseTestsGo(t, []bool{false, true}, []application.LoadReading{calm(), halfOver(), calm()}, 15*time.Minute)
+
+	if run.err == nil || run.report.Landed || run.report.Reason != application.ReasonTestsFail {
+		t.Fatalf("expected a tests-fail refusal, got err %v and %+v", run.err, run.report)
+	}
+	if checks.runs != 1 {
+		t.Errorf("expected one run, as the failure was not read far over the cores, got %d", checks.runs)
+	}
+	if strings.Contains(run.report.Why, "twice") {
+		t.Errorf("expected no second run to be named, got %q", run.report.Why)
+	}
+}
+
+func TestAGateWhoseWaitEndsFarOverTheCoresRunsNothingAndIsHandedBackWithNoAttempt(t *testing.T) {
+	run, checks := aCloseOutWhoseTestsGo(t, []bool{true}, []application.LoadReading{farOver()}, 2*time.Minute)
+
+	if checks.runs != 0 {
+		t.Errorf("expected no run of the gate far over the cores, got %d", checks.runs)
+	}
+	assertHandedBackForTheHost(t, run)
+	if !strings.Contains(run.err.Error(), "load 45.0 of 20 cores") {
+		t.Errorf("expected the hand-back to name the load, got %q", run.err)
+	}
+}
+
+func TestAGateWhoseRetryWaitEndsFarOverTheCoresIsNotRunAgainAndIsHandedBack(t *testing.T) {
+	// calm before the first run, far over after it and for every read after.
+	run, checks := aCloseOutWhoseTestsGo(t, []bool{false, true}, []application.LoadReading{calm(), farOver()}, 2*time.Minute)
+
+	if checks.runs != 1 {
+		t.Errorf("expected the one run made at a calm host, and none far over, got %d", checks.runs)
+	}
+	assertHandedBackForTheHost(t, run)
+}
+
+func TestASecondRunThatFailsWithTheHostFarOverAfterItIsTheHostsAndIsHandedBack(t *testing.T) {
+	// calm, failed far over, calm for the second run, far over again after it.
+	run, checks := aCloseOutWhoseTestsGo(t, []bool{false}, []application.LoadReading{calm(), farOver(), calm(), farOver()}, 15*time.Minute)
+
+	if checks.runs != 2 {
+		t.Errorf("expected the gate run twice, got %d", checks.runs)
+	}
+	assertHandedBackForTheHost(t, run)
+}
+
+func TestASecondRunThatFailsOnACalmHostIsTheStorysAndRefuses(t *testing.T) {
+	run, checks := aCloseOutWhoseTestsGo(t, []bool{false}, []application.LoadReading{calm(), farOver(), calm()}, 15*time.Minute)
+
+	if checks.runs != 2 || run.report.Reason != application.ReasonTestsFail || run.report.HandedBack {
+		t.Fatalf("expected a tests-fail refusal after two runs, got %d runs and %+v", checks.runs, run.report)
+	}
+}
+
+// assertHandedBackForTheHost says the close-out was handed back for the host's
+// load: its close-out is to be run again alone, nothing is refused, mailed as a
+// failure or counted as an attempt.
+func assertHandedBackForTheHost(t *testing.T, run *gateRun) {
+	t.Helper()
+	if run.err == nil || run.report.Landed || run.report.Refused || !run.report.HandedBack || run.report.Reason != application.ReasonHostBusy {
+		t.Fatalf("expected a hand-back for %s, got err %v and %+v", application.ReasonHostBusy, run.err, run.report)
+	}
+	state, err := run.tracker.StoryState(context.Background(), "mw-x.1", application.RunState)
+	if err != nil || state != application.RunCloseOutAgain {
+		t.Errorf("expected the run state %q, got %q (%v)", application.RunCloseOutAgain, state, err)
+	}
+	if d, _ := run.tracker.ShowStory(context.Background(), "mw-x.1"); d.Attempts > 1 {
+		t.Errorf("expected no attempt spent, got %d", d.Attempts)
+	}
+	if len(run.vault.ledger) != 1 || !strings.Contains(run.vault.ledger[0], "host-busy") {
+		t.Errorf("expected one ledger line naming host-busy, got %q", run.vault.ledger)
 	}
 }

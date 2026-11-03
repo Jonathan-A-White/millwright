@@ -37,6 +37,20 @@ type LoadReading struct {
 // something waiting its turn.
 func (r LoadReading) Busy() bool { return r.Cores > 0 && r.Load >= float64(r.Cores) }
 
+// GateFarOver is how many times the core count a load must reach to be far over
+// it (mw-gq6.903). It is where the desktop's 11 gates run twice (2026-10-16 to
+// 11-03) told the host's failures from the story's: the 3 whose first failure
+// was read at twice the cores or more (32.3, 40.0 and 49.1 of 16) all passed on
+// the run made once the host calmed, and the 8 read under twice (16.6 to 30.0 of
+// 16) all failed again, each a second whole gate for nothing. A gate starts with
+// the host below its cores (55 of 55 on the desktop in the 7 days to 11-03), so
+// the load a failure is read at is the load the run rose to.
+const GateFarOver = 2.0
+
+// FarOver reports whether the load has reached GateFarOver times the core count:
+// a gate run here fails for the host, and one is not started or run again here.
+func (r LoadReading) FarOver() bool { return r.Cores > 0 && r.Load >= GateFarOver*float64(r.Cores) }
+
 // The room a host must have to take on another story (mw-t0z3fu.1): its
 // 1-minute load under DefaultRoomLoadPerCore of a core each, and at least
 // DefaultRoomMinFreeMB of memory available. Both are the config file's

@@ -53,7 +53,11 @@ func (*aLandingLanding) Merge(context.Context, string, string) (application.Land
 }
 
 func busy() application.LoadReading { return application.LoadReading{Load: 39, Cores: 20} }
-func calm() application.LoadReading { return application.LoadReading{Load: 3, Cores: 20} }
+
+// farOver is a host at more than twice its cores (mw-gq6.903): a failure here is
+// the host's and is run again, and a wait that ends here runs nothing.
+func farOver() application.LoadReading { return application.LoadReading{Load: 45, Cores: 20} }
+func calm() application.LoadReading    { return application.LoadReading{Load: 3, Cores: 20} }
 
 type gateRun struct {
 	report  application.NextReport
@@ -62,6 +66,7 @@ type gateRun struct {
 	waits   int
 	out     *strings.Builder
 	mailbox *apptest.FakeMailbox
+	tracker *apptest.FakeTracker
 }
 
 // aCloseOutWhoseTestsGo closes out a finished story whose tests give passes, on
@@ -82,7 +87,7 @@ func aCloseOutWhoseTestsPrint(t *testing.T, checks *scriptedChecks, readings []a
 	vault := newFakeVault()
 	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
 	lands := &aLandingLanding{fakeRetryLanding{AheadCount: 1}}
-	run := &gateRun{vault: vault, out: &strings.Builder{}, mailbox: apptest.NewFakeMailbox()}
+	run := &gateRun{vault: vault, out: &strings.Builder{}, mailbox: apptest.NewFakeMailbox(), tracker: tracker}
 	run.report, run.err = application.Next{
 		Tracker: tracker, Vault: vault, Worktrees: lands, Landing: lands,
 		Checks: checks, Slot: aSlot{}, Mailbox: run.mailbox,
@@ -100,7 +105,7 @@ func aCloseOutWhoseTestsPrint(t *testing.T, checks *scriptedChecks, readings []a
 func TestAGateThatFailsOnABusyHostRunsOnceMoreWhenItCalmsAndLandsWhenThatPasses(t *testing.T) {
 	// Read before the gate: calm. The gate fails. Read after it: busy. Read
 	// before the second run: calm.
-	run, checks := aCloseOutWhoseTestsGo(t, []bool{false, true}, []application.LoadReading{calm(), busy(), calm()}, 15*time.Minute)
+	run, checks := aCloseOutWhoseTestsGo(t, []bool{false, true}, []application.LoadReading{calm(), farOver(), calm()}, 15*time.Minute)
 
 	if run.err != nil || !run.report.Landed {
 		t.Fatalf("expected the story landed on the second run, got err %v and %+v", run.err, run.report)
@@ -111,7 +116,7 @@ func TestAGateThatFailsOnABusyHostRunsOnceMoreWhenItCalmsAndLandsWhenThatPasses(
 	if len(run.vault.ledger) != 1 {
 		t.Fatalf("expected one ledger line, got %q", run.vault.ledger)
 	}
-	for _, want := range []string{"ran twice", "first run failed", "load 39.0 of 20 cores", "second run passed"} {
+	for _, want := range []string{"ran twice", "first run failed", "load 45.0 of 20 cores", "second run passed"} {
 		if !strings.Contains(run.vault.ledger[0], want) {
 			t.Errorf("expected the ledger line to say %q, got %q", want, run.vault.ledger[0])
 		}
@@ -124,7 +129,7 @@ func TestAGateThatFailsOnABusyHostRunsOnceMoreWhenItCalmsAndLandsWhenThatPasses(
 func TestAGateThatFlakedAndPassedOnRetryNamesTheTestInTheMailAndTheLedger(t *testing.T) {
 	first := "--- FAIL: TestSlowThing (0.31s)\n    slow_test.go:42: timed out\nFAIL\nFAIL\tgithub.com/x/y\t0.4s\n"
 	checks := &scriptedChecks{passes: []bool{false, true}, outputs: []string{first, "ok\n"}}
-	run, _ := aCloseOutWhoseTestsPrint(t, checks, []application.LoadReading{calm(), busy(), calm()}, 15*time.Minute)
+	run, _ := aCloseOutWhoseTestsPrint(t, checks, []application.LoadReading{calm(), farOver(), calm()}, 15*time.Minute)
 
 	if run.err != nil || !run.report.Landed {
 		t.Fatalf("expected the story landed on the second run, got err %v and %+v", run.err, run.report)
@@ -154,7 +159,7 @@ func TestFlakedTestsAreNamedAsFileAndCaseForGoAndVitestOutput(t *testing.T) {
 }
 
 func TestAGateThatFailsTwiceOnABusyHostRefuses(t *testing.T) {
-	run, checks := aCloseOutWhoseTestsGo(t, []bool{false}, []application.LoadReading{calm(), busy(), calm()}, 15*time.Minute)
+	run, checks := aCloseOutWhoseTestsGo(t, []bool{false}, []application.LoadReading{calm(), farOver(), calm()}, 15*time.Minute)
 
 	if run.err == nil || run.report.Landed || !run.report.Refused || run.report.Reason != application.ReasonTestsFail {
 		t.Fatalf("expected a tests-fail refusal, got err %v and %+v", run.err, run.report)
