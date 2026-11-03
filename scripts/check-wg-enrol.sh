@@ -13,6 +13,8 @@
 #      the same config again
 #   c. a bad name, a bad key and a taken name are refused, unchanged
 #   d. --remove deletes the peer block and its hosts line
+#   f. --remove keeps the hosts file's and the config's own mode, drops only
+#      the peer's hosts line, and an absent line is no change
 #   e. with WG_SYNC unset, wg syncconf wg0 <(wg-quick strip wg0) runs after
 #      every change
 
@@ -151,6 +153,38 @@ RC=0
 ERR=$(run --remove pi 2>&1) || RC=$?
 [ "$RC" != 0 ] || fail "$NAME: removing an absent peer exited 0"
 echo "ok: removing an already-removed peer is refused"
+
+# --- f. --remove keeps the hosts file's and the config's own mode ------------
+# A service user resolves .mw names through /etc/hosts, so a remove that left
+# it mode 600 (mktemp's mode, kept by mv) cut every one of them off.
+NAME="--remove keeps the hosts file's mode and the other lines"
+new_files f
+run laptop "$KEY1" >/dev/null 2>&1 || fail "$NAME: laptop enrol failed"
+run pi "$KEY3" >/dev/null 2>&1 || fail "$NAME: pi enrol failed"
+chmod 644 "$HOSTS"
+chmod 640 "$CONF"
+RC=0
+OUT=$(run --remove pi 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
+[ "$(stat -c %a "$HOSTS")" = 644 ] || fail "$NAME: hosts file is mode $(stat -c %a "$HOSTS"), wanted 644"
+[ "$(stat -c %a "$CONF")" = 640 ] || fail "$NAME: config is mode $(stat -c %a "$CONF"), wanted 640"
+grep -Fq 'pi.mw' "$HOSTS" && fail "$NAME: pi's hosts line still present: $(cat "$HOSTS")"
+grep -Fxq '127.0.0.1 localhost' "$HOSTS" || fail "$NAME: localhost line lost: $(cat "$HOSTS")"
+grep -Fxq '10.88.0.1 vps.mw # mw-wg' "$HOSTS" || fail "$NAME: vps line lost: $(cat "$HOSTS")"
+grep -Fxq '10.88.0.2 laptop.mw # mw-wg' "$HOSTS" || fail "$NAME: laptop line lost: $(cat "$HOSTS")"
+echo "ok: $NAME"
+
+NAME="--remove of a peer whose hosts line is already absent leaves the hosts file as it was"
+run pi "$KEY3" >/dev/null 2>&1 || fail "$NAME: pi enrol failed"
+grep -vF 'pi.mw # mw-wg' "$HOSTS" >"$T/hosts-f.new"
+cat "$T/hosts-f.new" >"$HOSTS"
+before_hosts=$(cat "$HOSTS")
+RC=0
+OUT=$(run --remove pi 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
+[ "$(cat "$HOSTS")" = "$before_hosts" ] || fail "$NAME: hosts file changed"
+[ "$(stat -c %a "$HOSTS")" = 644 ] || fail "$NAME: hosts file is mode $(stat -c %a "$HOSTS"), wanted 644"
+echo "ok: $NAME"
 
 # --- e. wg syncconf runs after every change, unless WG_SYNC=0 ----------------
 NAME="wg syncconf wg0 <(wg-quick strip wg0) runs after every change"
