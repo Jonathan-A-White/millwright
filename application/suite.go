@@ -128,6 +128,14 @@ type SuiteFile struct {
 	Alone string `json:"alone"`
 }
 
+// SuiteLine is one command line a suite ran and the seconds it ran, not
+// counting the wait for the gate lock before it (mw-gq6.920): what the rule that
+// a close-out waits behind one command line (mw-gq6.917) is read from.
+type SuiteLine struct {
+	Command string  `json:"command"`
+	Seconds float64 `json:"seconds"`
+}
+
 // SuiteResult is the summary a suite writes beside its log.
 type SuiteResult struct {
 	Rig             string      `json:"rig"`
@@ -147,6 +155,9 @@ type SuiteResult struct {
 	// GateWaitedSeconds is the part of the duration spent waiting to take the gate
 	// lock again between command lines (mw-gq6.917), not running them.
 	GateWaitedSeconds float64 `json:"gate_waited_seconds,omitempty"`
+	// Lines are the command lines run, in order, each with its seconds. A result
+	// kept before mw-gq6.920 has none, and one with none writes no key.
+	Lines []SuiteLine `json:"lines,omitempty"`
 }
 
 // SuiteReport is what a suite did: its result, where the two files are kept
@@ -470,11 +481,15 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		}
 		return take(before)
 	}
+	var lines []SuiteLine
 	runLine := func(dir, command string) (Checked, error) {
 		held = false
 		defer giveBack()
 		ran = append(ran, command)
-		return s.Runner.RunLine(ctx, rig, dir, command)
+		began := s.now()
+		checked, err := s.Runner.RunLine(ctx, rig, dir, command)
+		lines = append(lines, SuiteLine{Command: command, Seconds: math.Round(s.now().Sub(began).Seconds()*1000) / 1000})
+		return checked, err
 	}
 
 	if err := take("the suite"); err != nil {
@@ -557,6 +572,7 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 	}
 	result.DurationSeconds = math.Round(s.now().UTC().Sub(started).Seconds()*1000) / 1000
 	result.GateWaitedSeconds = math.Round(gateWaited.Seconds()*1000) / 1000
+	result.Lines = lines
 	result.Passed = len(result.Failing) == 0 && len(result.Unnamed) == 0
 
 	day := started.Format("2006-01-02")
