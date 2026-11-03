@@ -442,6 +442,25 @@ func TestALiveHolderThatNeverLetsGoStopsTheWaiterAtTheCap(t *testing.T) {
 	}
 }
 
+// waitForQueued returns once n waiters have a ticket in the rig's merge slot
+// queue, so that what a test does next comes after they queued and not after a
+// guess at how long a loaded host takes to start them (mw-gq6.922). It gives up
+// after thirty seconds: a waiter that never queues is a hang, not a slow host.
+func waitForQueued(t *testing.T, dir string, n int) {
+	t.Helper()
+	queue := rig.SlotPath(dir) + rig.SlotQueueSuffix
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if entries, err := os.ReadDir(queue); err == nil && len(entries) >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected %d waiters to have queued in %s", n, queue)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // takeSlotInTheBackground starts a Take for holder, polling every poll, and
 // returns once it has found the slot held, so that waiters started one after
 // another begin waiting in that order (mw-gq6.586). Each winner is noted in
@@ -653,7 +672,7 @@ func TestAWaitingLandingIsNotStarvedByChecksArrivingBehindIt(t *testing.T) {
 		}
 		landing <- err
 	}()
-	time.Sleep(100 * time.Millisecond)
+	waitForQueued(t, dir, 1)
 
 	// A check arriving after the landing queued waits behind it.
 	patient := rig.NewSlots(rig.WithSlotPoll(10 * time.Millisecond))
@@ -778,7 +797,7 @@ func TestACheckQueuedBehindALandingStillStartsWhileTheBatchYields(t *testing.T) 
 			held.Release(ctx)
 		}
 	}()
-	time.Sleep(100 * time.Millisecond)
+	waitForQueued(t, dir, 1)
 
 	brief, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
@@ -803,6 +822,10 @@ func TestALandingThatResumesWaitsForTheRunningCheckAndKeepsNewOnesOut(t *testing
 
 	resumed := make(chan error, 1)
 	go func() { resumed <- landing.Resume(ctx) }()
+	// The batch has asked for its slot back once its ticket is in the queue; a
+	// check arriving after that waits behind it (not after a fixed 200 ms, which a
+	// loaded host can spend before the batch has asked).
+	waitForQueued(t, dir, 1)
 	select {
 	case err := <-resumed:
 		t.Fatalf("expected the batch to wait for the running check before its tests, got %v", err)
