@@ -16,8 +16,12 @@ import (
 const NightlySuiteJobName = "suite"
 
 // DefaultNightlySuiteHour is the UTC hour from which the nightly suite is run
-// when nothing says otherwise: about three or four in the morning in the US,
-// when nobody is working a story.
+// when nothing says otherwise: about three or four in the morning in the US.
+// Stories are worked then all the same: the suite ran 16 to 131 minutes (median
+// 36) from 08:00 to 09:44 UTC over the 21 nights 2026-10-13 to 2026-11-02, and 7
+// of the Laptop's 111 gates of the 7 days to 2026-11-03 fell in 08:00 to 12:00
+// UTC. So the suite shares the host with gates and Builders; see
+// docs/dispatch-gates.md.
 const DefaultNightlySuiteHour = 8
 
 // SuiteRecord is the newest result a rig's suite has kept: the UTC day of the
