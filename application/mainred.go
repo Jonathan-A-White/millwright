@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // A story whose merged tests fail only because the target branch itself is red
@@ -45,11 +48,33 @@ const (
 	ReasonMainRed Reason = "main-red"
 )
 
+// playwrightFailure is a Playwright line that names a failed test: the list
+// reporter's `✘  1 [shots] › tests/e2e/x.spec.ts:106:7 › title (31.0s)` and the
+// numbered header of a failure's detail, which the dot and line reporters print,
+// `1) [shots] › tests/e2e/x.spec.ts:106:7 › title ───`. The project in brackets
+// is optional; the file and the line are kept, the column is not.
+var playwrightFailure = regexp.MustCompile(`^\s*(?:✘\s+\d+|\d+\))\s+(?:\[[^\]]*\]\s+›\s+)?(\S+\.spec\.[cm]?[jt]sx?):(\d+):\d+\s+›`)
+
+// vitestFailure is vitest's `FAIL  src/a.test.ts > title`: the file it names.
+var vitestFailure = regexp.MustCompile(`^FAIL\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\s+>`)
+
 // TestNamesOf is the failing tests of a run's output as a rig's named-tests line
-// takes them: go test's `--- FAIL: TestX/sub` as TestX, vitest's `FAIL file >
-// test` as `file > test`, any other line as it is; each once, in order.
+// takes them, each once, in order: go test's `--- FAIL: TestX/sub` as TestX,
+// Playwright's `[shots] › tests/e2e/x.spec.ts:106:7 › title` as
+// `tests/e2e/x.spec.ts:106` (a retry is the same test), vitest's `FAIL file >
+// test` as the file, which `vitest run <file>` runs alone; any other line as it
+// is. A name the line can run alone on the target is what lets main's own red
+// be found (mw-gq6.934). One function names the tests of the story's run and of
+// the run on the target, so the two are compared by one name.
 func TestNamesOf(output string) []string {
 	failing, _ := FailingTests(output, 1<<30)
+	for _, line := range strings.Split(strings.ReplaceAll(domain.StripANSI(output), "\r\n", "\n"), "\n") {
+		// The detail header of a failure, which the dot and line reporters print
+		// in place of a ✘ line.
+		if playwrightFailure.MatchString(line) {
+			failing = append(failing, strings.TrimSpace(line))
+		}
+	}
 	var names []string
 	seen := map[string]bool{}
 	for _, line := range failing {
@@ -58,6 +83,11 @@ func TestNamesOf(output string) []string {
 		case strings.HasPrefix(name, "--- FAIL: "):
 			name = strings.Fields(strings.TrimPrefix(name, "--- FAIL: "))[0]
 			name, _, _ = strings.Cut(name, "/")
+		case vitestFailure.MatchString(name):
+			name = vitestFailure.FindStringSubmatch(name)[1]
+		case playwrightFailure.MatchString(name):
+			m := playwrightFailure.FindStringSubmatch(name)
+			name = m[1] + ":" + m[2]
 		case strings.HasPrefix(name, "FAIL "):
 			name = strings.TrimSpace(strings.TrimPrefix(name, "FAIL "))
 		}

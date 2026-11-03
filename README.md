@@ -1725,8 +1725,23 @@ runs the story's close-out alone again, with no new Builder session. A batch tha
 red on main's red starts no fixer and is held. If the target passes them, the story
 is blamed exactly as before. A rig the table does not name is never asked. `mw check`
 makes the same run, to say the failure is main's. The test names are those the
-failed run printed (go test's `--- FAIL: TestX`, vitest's `FAIL file > test`), each
-once, given to the line quoted.
+failed run printed, each once, given to the line quoted, in a form the line can run alone
+(mw-gq6.934): go test's `--- FAIL: TestX/sub` is `TestX`; Playwright's
+`[shots] › tests/e2e/x.spec.ts:106:7 › title` (the list reporter's `✘` line, or the `1)`
+header of a failure's detail, a retry the same test) is `tests/e2e/x.spec.ts:106`, which
+`playwright test --project=shots tests/e2e/x.spec.ts:106` runs by itself; vitest's
+`FAIL src/a.test.ts > title` is the file, `src/a.test.ts`, which `vitest run` runs whole. A
+rig whose tests are of more than one kind sorts the names in the line itself, by what they
+look like (a `.spec.` file is Playwright's, a `Test…` name is go test's, any other is
+vitest's). A Playwright and vitest rig, as a line of `[named_tests]`:
+
+```toml
+lampas = 'npm ci --no-audit --no-fund || exit 1; set -- {tests}; v=; p=; for t in "$@"; do case "$t" in *.spec.*) p="$p $t";; *) v="$v $t";; esac; done; r=0; [ -z "$v" ] || TZ=UTC npx vitest run $v || r=1; [ -z "$p" ] || { npm run build && TZ=UTC npx playwright test --project=shots $p; } || r=1; exit $r'
+```
+
+A rig with a Go server too (postern) adds a third kind to the same line: `Test*) g="$g $t";;`
+in the `case`, and `[ -z "$g" ] || { cd server && go test -run "^($(echo $g | tr " " "|"))$" ./...; } || r=1;`
+before `exit $r`. The way back for any rig is to delete its line from the table.
 
 A gate in parts (mw-gq6.567). A Builder's tool call is cut off after 590 seconds, and
 `mw check`'s whole-gate run, or a gate waited on in the background, can outrun that

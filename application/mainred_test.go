@@ -16,8 +16,20 @@ func TestTestNamesOfNamesTheTopLevelTestsThatFailed(t *testing.T) {
 			"--- FAIL: TestScorerScoresTheFixtureClips (21.93s)\n    --- FAIL: TestScorerScoresTheFixtureClips/clip_1 (1.00s)\n--- FAIL: TestOther (0.00s)\nFAIL\tgithub.com/x/contrib\t64.042s\n",
 			[]string{"TestScorerScoresTheFixtureClips", "TestOther"},
 		},
-		"vitest": {"FAIL  src/a.test.ts > does a thing\n", []string{"src/a.test.ts > does a thing"}},
-		"none":   {"ok  \tgithub.com/x/y\t1.2s\n", nil},
+		"none": {"ok  \tgithub.com/x/y\t1.2s\n", nil},
+		// mw-gq6.934: a name the rig's line can run alone on the target.
+		"playwright list reporter, project and column left out": {
+			"  \u2718  1 [shots] \u203a tests/e2e/keyboard-composer.spec.ts:106:7 \u203a composer keeps focus (31.0s)\n",
+			[]string{"tests/e2e/keyboard-composer.spec.ts:106"},
+		},
+		"playwright retries and the summary name a test once": {
+			"  \u2718  1 [shots] \u203a tests/e2e/a.spec.ts:12:5 \u203a one (1.0s)\n  \u2718  2 [shots] \u203a tests/e2e/a.spec.ts:12:5 \u203a one (retry #1) (1.0s)\n  \u2718  3 [shots] \u203a tests/e2e/b.spec.ts:7:3 \u203a two (2.0s)\n",
+			[]string{"tests/e2e/a.spec.ts:12", "tests/e2e/b.spec.ts:7"},
+		},
+		"vitest, two tests of one file run as the file": {
+			"FAIL  src/a.test.ts > does a thing\nFAIL  src/a.test.ts > another > nested\nFAIL  src/b.test.tsx > b\n",
+			[]string{"src/a.test.ts", "src/b.test.tsx"},
+		},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
