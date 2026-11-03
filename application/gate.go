@@ -129,10 +129,12 @@ const calmedMinute = time.Minute
 // it does. It returns the last reading it took, and whether the bound ran out
 // with the host still busy. The gate runs after it either way, unless handBack
 // is asked for and Next.CalmHandBack is set: then a bound that ran out returns
-// that hook's error, and the gate does not run (mw-gq6.819). A bound that ran out
+// that hook's error, and the gate does not run (mw-gq6.819); again says the wait
+// is the second one, before the rerun of a run that failed while the host was
+// busy, which is under the same deadline (mw-gq6.918). A bound that ran out
 // with the host far over its cores returns a HostBusyError either way, and the
 // gate does not run (mw-gq6.903).
-func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what string, handBack bool) (reading LoadReading, gaveUp bool, err error) {
+func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what string, handBack, again bool) (reading LoadReading, gaveUp bool, err error) {
 	reading, ok := n.readLoad(ctx)
 	if !ok || !reading.Busy() {
 		return reading, false, nil
@@ -155,7 +157,7 @@ func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what 
 	for reading.Busy() {
 		if waited >= bound {
 			if handBack {
-				return reading, true, n.CalmHandBack(ctx, reading, since, waited)
+				return reading, true, n.CalmHandBack(ctx, reading, since, waited, again)
 			}
 			if reading.FarOver() {
 				// Far over the cores a run only fails for the host, and
@@ -468,7 +470,7 @@ func (n Next) waitForTheMergedGate(ctx context.Context, c *closeOut, report *Nex
 		m.asked, m.lock = true, n.waitForTheGateLock(ctx, c, report, m.what())
 	}
 	if !m.calmed {
-		m.before, m.gaveUp, m.hostBusy = n.calmed(ctx, report, c, m.what(), false)
+		m.before, m.gaveUp, m.hostBusy = n.calmed(ctx, report, c, m.what(), false, false)
 		m.calmed = true
 	}
 }
@@ -514,7 +516,7 @@ func gateWaited(d time.Duration) string {
 // calm host counts at once. A command that would not start is not a load fault
 // and is never run again.
 func (n Next) gateOnACalmHost(ctx context.Context, c *closeOut, report *NextReport, dir, what string, span RelatedSpan) gated {
-	before, gaveUp, handedBack := n.calmed(ctx, report, c, what, true)
+	before, gaveUp, handedBack := n.calmed(ctx, report, c, what, true, false)
 	if handedBack != nil {
 		return gated{Err: handedBack}
 	}
@@ -541,7 +543,7 @@ func (n Next) gateOnACalmHost(ctx context.Context, c *closeOut, report *NextRepo
 	}
 	n.print(fmt.Sprintf("  retry   %s failed while %s was at load %.1f of %d cores: running them once more when it calms\n",
 		what, n.Host, busy.Load, busy.Cores))
-	if _, _, err := n.calmed(ctx, report, c, what+" again", false); err != nil {
+	if _, _, err := n.calmed(ctx, report, c, what+" again", true, true); err != nil {
 		return gated{Err: err}
 	}
 	again, err := n.timedChecks(ctx, c, report, dir, span)

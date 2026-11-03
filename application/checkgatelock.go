@@ -68,24 +68,28 @@ type checkGateLock struct {
 	k       Check
 	c       *closeOut
 	attempt int
+	// left is what the check's one deadline has left (the closure Check.check makes).
+	left func() time.Duration
 }
 
 // Take implements GateLock. A wait that ran out is a GateLockHandBack, which
 // ends the gate in one line; the holder name it is given is the check's own.
 func (g checkGateLock) Take(ctx context.Context, _ string, held func(by string)) (GateTurn, error) {
-	return g.k.takeForTests(ctx, g.c, wholeTry(g.c, "the rig's tests", CheckWholeHeldFileName(g.attempt)), held)
+	return g.k.takeForTests(ctx, g.c, wholeTry(g.c, "the rig's tests", CheckWholeHeldFileName(g.attempt)), g.left(), held)
 }
 
 // takeForTests takes what a run of the rig's tests holds in a worktree check:
 // the rig's merge slot, when it has one, shared with the other checks, and then
 // the host's gate lock, when it has one. The wait for both is no longer than
-// partSlotWait. held is told who has the gate lock the first time it is found
-// held. The holdings are given back together.
-func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, held func(by string)) (GateTurn, error) {
+// within, which is what the check's one deadline has left: none at all when the
+// tests before these have spent it, and then each is tried once and the check is
+// handed back if either is held (mw-gq6.918). held is told who has the gate lock
+// the first time it is found held. The holdings are given back together.
+func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, within time.Duration, held func(by string)) (GateTurn, error) {
 	began := time.Now()
 	var slot Holding
 	if k.Slot != nil {
-		taken, err := k.takeSlotFor(ctx, c, try, k.partSlotWait())
+		taken, err := k.takeSlotFor(ctx, c, try, within)
 		if err != nil {
 			return GateTurn{}, GateLockHandBack{Why: err.Error()}
 		}
@@ -95,7 +99,7 @@ func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, held 
 		return GateTurn{Holding: bothHoldings{slot: slot}}, nil
 	}
 
-	waitCtx, cancel := context.WithTimeout(ctx, max(k.partSlotWait()-time.Since(began), 0))
+	waitCtx, cancel := context.WithTimeout(ctx, max(within-time.Since(began), 0))
 	defer cancel()
 	notices := &gateNotices{k: k, ctx: waitCtx}
 	defer notices.stop()
