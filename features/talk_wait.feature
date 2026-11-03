@@ -388,8 +388,9 @@ Feature: mw talk wait
     And the wait has answered the Governor 1 time
     When the backend says the Governor's Ideas only has ended
     # Only the event can end this wait (the clock stays inside the mode), so
-    # the bound is room for a loaded host, not a measure.
-    Then mw talk wait ends within 5 seconds
+    # what is judged is that it ended on the event, not how soon: a host at load
+    # 30 of 16 ended it 14 s after (mw-gq6.913).
+    Then mw talk wait ends on the event
     And the wait printed "Ideas only ended"
     And the wait printed "2 ideas"
     And the wait printed "An idea: a quieter dashboard"
@@ -413,7 +414,7 @@ Feature: mw talk wait
     And the hook has already kept "direct:9"
     And mw talk wait is armed
     When the clock of Ideas only passes 9 hours and 1 second on for mw talk wait
-    Then mw talk wait ends within 2 seconds
+    Then mw talk wait ends on the event
     And the wait printed "Ideas only ended"
     And the wait printed "1 idea"
     And the wait printed "direct:9"
@@ -434,6 +435,6 @@ Feature: mw talk wait
     Given Ideas only is off for mw talk wait
     And the hook has already kept "direct:9"
     And mw talk wait is armed
-    Then mw talk wait ends within 2 seconds
+    Then mw talk wait ends on the event
     And the wait printed "Ideas only ended"
     And one card titled "Your ideas from Ideas only (1)" was sent to the Governor by the wait
