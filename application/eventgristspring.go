@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -197,16 +198,28 @@ func (w *GristWatch) poll(ctx context.Context, force bool) (found string, ok, fa
 	ctx, cancel := context.WithTimeout(ctx, gristWatchTimeout)
 	defer cancel()
 	records, err := w.Postern.Messages(ctx, w.newest)
+	// A read cut after some pages keeps them: the records are looked at as any
+	// are, and the next read asks from the cursor they reached, not from where
+	// this one began, so a cold read of a long index gets further each time.
+	var cut *PosternReadCut
+	if errors.As(err, &cut) {
+		records = cut.Records
+		w.newest = max(w.newest, cut.Next)
+	}
 	if err != nil {
 		if heard {
 			w.heard.Store(true)
 		}
 		w.say(fmt.Errorf("reading the postern backend for grist: %w", err))
-		return "", false, true
+	} else {
+		w.said = ""
 	}
-	w.said = ""
+	// first stays true until a read gets to the end: what a cut read found is
+	// still what was waiting before the watch began.
 	first := !w.taken
-	w.taken = true
+	if err == nil {
+		w.taken = true
+	}
 	seen := now()
 	for _, r := range records {
 		w.newest = max(w.newest, r.Seq)
@@ -218,10 +231,10 @@ func (w *GristWatch) poll(ctx context.Context, force bool) (found string, ok, fa
 			found = "grist " + r.Txid + " arrived"
 		}
 	}
-	if found != "" || seen.Sub(began) >= gristWatchSlowRead {
+	if found != "" || err == nil && seen.Sub(began) >= gristWatchSlowRead {
 		w.timed(began, seen, previous, found)
 	}
-	return found, found != "", false
+	return found, found != "", err != nil
 }
 
 // timed says one read: when it began, how long it took, and how long after the

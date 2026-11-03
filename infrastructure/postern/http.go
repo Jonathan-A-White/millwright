@@ -106,12 +106,16 @@ const messagesPageLimit = 200
 // drained page by page — each page asked from the previous page's next, until
 // the backend says more is false — so a caller keeps one call and its
 // signature. A page filtered to no records still moves the cursor on, to its
-// next. A backend that answers with no more (an old one) is one page. A record
+// next. A backend that answers with no more (an old one) is one page. A read
+// that fails after some pages does not lose them: the error is an
+// application.PosternReadCut holding the records read and the cursor after
+// them, so the caller carries on from there rather than from since. A record
 // that is not a postern message (another kind, or not a version-1 record at
 // all) comes back with only its Seq and Txid, addressed to nobody, so the
 // inbox's cursor still moves past it.
 func (h *HTTP) Messages(ctx context.Context, since int64) ([]application.PosternRecord, error) {
 	records := []application.PosternRecord{}
+	from := since
 	for {
 		var body struct {
 			Records []apiRecord `json:"records"`
@@ -120,6 +124,9 @@ func (h *HTTP) Messages(ctx context.Context, since int64) ([]application.Postern
 		}
 		path := "/api/messages?since=" + strconv.FormatInt(since, 10) + "&limit=" + strconv.Itoa(messagesPageLimit)
 		if err := h.authDo(ctx, http.MethodGet, path, nil, &body); err != nil {
+			if since != from {
+				return nil, &application.PosternReadCut{Records: records, Next: since, Err: err}
+			}
 			return nil, err
 		}
 		for _, r := range body.Records {

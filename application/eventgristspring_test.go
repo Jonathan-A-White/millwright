@@ -231,6 +231,59 @@ func TestGristWatchSaysAFailedReadOnceAndTriesAgain(t *testing.T) {
 	}
 }
 
+// A cold read of a long index is cut part-way (a timeout after some pages): the
+// pages read are not thrown away, the next read carries on from them rather than
+// from the start, and every grist is reported once across the cut.
+func TestGristWatchCarriesOnFromTheRecordsAColdReadGotBeforeItWasCut(t *testing.T) {
+	postern := apptest.NewFakePostern()
+	for i, txid := range []string{"direct:a", "direct:b", "direct:c", "direct:d"} {
+		to := "02bb"
+		if i == 1 || i == 3 {
+			to = "02aa"
+		}
+		postern.AddRecord(application.PosternRecord{Txid: txid, Class: application.GristClass, To: to})
+	}
+	postern.CutNextRead(3, errors.New("timed out"))
+	var said bytes.Buffer
+	now := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	watch := &application.GristWatch{Postern: postern, Keys: watchKey{}, Every: time.Second, Now: func() time.Time { return now }, Err: &said}
+
+	var reports []string
+	if reason, ok := watch.Waiting(context.Background()); ok {
+		reports = append(reports, reason)
+	}
+	now = now.Add(time.Second)
+	if reason, ok := watch.Waiting(context.Background()); ok {
+		reports = append(reports, reason)
+	}
+	now = now.Add(time.Second)
+	if reason, ok := watch.Waiting(context.Background()); ok {
+		reports = append(reports, reason)
+	}
+
+	if got, want := postern.Sinces(), []int64{0, 3, 4}; !equalInts(got, want) {
+		t.Fatalf("the reads asked from %v, want %v: the read after the cut carries on, and does not start again from 0", got, want)
+	}
+	if len(reports) != 2 || !strings.Contains(reports[0], "direct:b") || !strings.Contains(reports[1], "direct:d") {
+		t.Fatalf("the grists reported were %q, want direct:b once (from the cut read) and direct:d once", reports)
+	}
+	if strings.Count(said.String(), "timed out") != 1 {
+		t.Fatalf("said %q, want the cut said once", said.String())
+	}
+}
+
+func equalInts(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestGristWatchNotesWhenItNoticedEachNewGristAndNotTheOnesAlreadyWaiting(t *testing.T) {
 	postern := apptest.NewFakePostern()
 	postern.AddRecord(application.PosternRecord{Txid: "direct:old", Class: application.GristClass, To: "02aa"})

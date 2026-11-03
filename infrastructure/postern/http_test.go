@@ -258,6 +258,71 @@ func TestMessagesStopsWhenAPageDoesNotAdvance(t *testing.T) {
 	}
 }
 
+// A read cut part-way (the backend fails a later page) reports the pages it
+// had read and the cursor after them, so the next read carries on from there
+// and no page is read twice.
+func TestMessagesCutAfterSomePagesReportsThePagesReadAndWhereToCarryOn(t *testing.T) {
+	b, backend := serve(t, map[string]answer{
+		"GET /api/messages?since=0&limit=200": pageOf([]int64{1, 2}, 2, true),
+		"GET /api/messages?since=2&limit=200": pageOf([]int64{3, 4}, 4, true),
+		"GET /api/messages?since=4&limit=200": {503, `{"error":"busy"}`},
+	})
+
+	got, err := backend.Messages(context.Background(), 0)
+	var cut *application.PosternReadCut
+	if !errors.As(err, &cut) {
+		t.Fatalf("expected a cut read to say the pages it read, got %+v, %v", got, err)
+	}
+	var seqs []int64
+	for _, r := range cut.Records {
+		seqs = append(seqs, r.Seq)
+	}
+	if !reflect.DeepEqual(seqs, []int64{1, 2, 3, 4}) || cut.Next != 4 {
+		t.Fatalf("expected the four records read and the cursor 4, got %v and %d", seqs, cut.Next)
+	}
+	if !strings.Contains(err.Error(), "503") {
+		t.Fatalf("expected the cut to say the backend's 503, got %v", err)
+	}
+
+	b.answers["GET /api/messages?since=4&limit=200"] = pageOf([]int64{5}, 5, false)
+	rest, err := backend.Messages(context.Background(), cut.Next)
+	if err != nil || len(rest) != 1 || rest[0].Seq != 5 {
+		t.Fatalf("expected the read to carry on with record 5, got %+v, %v", rest, err)
+	}
+	if reqs := requestsFor(b, "/api/messages"); reqs[len(reqs)-1] != "/api/messages?since=4&limit=200" {
+		t.Fatalf("expected the second read to ask from 4, got %v", reqs)
+	}
+}
+
+// A page filtered to no records still moves the cursor, so a cut after only
+// such pages is a cut that has a place to carry on from, with no records.
+func TestMessagesCutAfterOnlyFilteredPagesStillReportsTheCursor(t *testing.T) {
+	_, backend := serve(t, map[string]answer{
+		"GET /api/messages?since=0&limit=200":   pageOf(nil, 200, true),
+		"GET /api/messages?since=200&limit=200": {503, `{"error":"busy"}`},
+	})
+
+	_, err := backend.Messages(context.Background(), 0)
+	var cut *application.PosternReadCut
+	if !errors.As(err, &cut) || len(cut.Records) != 0 || cut.Next != 200 {
+		t.Fatalf("expected a cut at the cursor 200 with no records, got %v", err)
+	}
+}
+
+// A read whose first page fails has read nothing: a plain error, and the
+// caller asks from where it did.
+func TestMessagesFailingOnItsFirstPageIsNotACut(t *testing.T) {
+	_, backend := serve(t, map[string]answer{
+		"GET /api/messages?since=0&limit=200": {503, `{"error":"busy"}`},
+	})
+
+	_, err := backend.Messages(context.Background(), 0)
+	var cut *application.PosternReadCut
+	if err == nil || errors.As(err, &cut) {
+		t.Fatalf("expected a plain error from a first page that failed, got %v", err)
+	}
+}
+
 func TestMessagesWithNothingNewIsEmpty(t *testing.T) {
 	_, backend := serve(t, map[string]answer{"GET /api/messages?since=0&limit=200": {200, `{"records":null,"next":0}`}})
 

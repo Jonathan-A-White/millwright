@@ -28,6 +28,9 @@ type FakePostern struct {
 	deleted    []string
 	reads      int
 	served     int
+	sinces     []int64
+	cutAfter   int
+	cutErr     error
 	onDeliver  []application.PosternRecord
 	sentAt     map[string]int64
 	streams    []*fakeStream
@@ -247,6 +250,7 @@ func (f *FakePostern) Messages(_ context.Context, since int64) ([]application.Po
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reads++
+	f.sinces = append(f.sinces, since)
 	if f.Err != nil {
 		return nil, f.Err
 	}
@@ -257,8 +261,37 @@ func (f *FakePostern) Messages(_ context.Context, since int64) ([]application.Po
 		}
 	}
 	sort.Slice(found, func(i, j int) bool { return found[i].Seq < found[j].Seq })
+	if f.cutErr != nil {
+		cut := f.cutErr
+		f.cutErr = nil
+		if len(found) > f.cutAfter {
+			found = found[:f.cutAfter]
+		}
+		f.served += len(found)
+		if len(found) == 0 {
+			return nil, cut
+		}
+		return nil, &application.PosternReadCut{Records: found, Next: found[len(found)-1].Seq, Err: cut}
+	}
 	f.served += len(found)
 	return found, nil
+}
+
+// CutNextRead makes the next Messages call fail with err after it has read its
+// first n records, as a read of a long index does when it times out after some
+// pages: the error is a *application.PosternReadCut holding those n records,
+// or err alone when it read none. The read after it is whole again.
+func (f *FakePostern) CutNextRead(n int, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cutAfter, f.cutErr = n, err
+}
+
+// Sinces are the cursors Messages was asked from, in order.
+func (f *FakePostern) Sinces() []int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]int64(nil), f.sinces...)
 }
 
 // Utxos reports address's unspent outputs: the coin call FakeChain spends
