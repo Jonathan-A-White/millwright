@@ -291,7 +291,7 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 		}
 	}
 
-	others, err := s.elsewhere(ctx, work)
+	others, err := s.elsewhere(ctx, work, nil)
 	if err != nil {
 		return nil, err
 	}

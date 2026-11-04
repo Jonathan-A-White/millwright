@@ -109,6 +109,10 @@ const (
 	// that installs dependencies, while the network is metered: dispatch passes
 	// them, and only host=auto lets another host take them (mw-gq6.702).
 	DamperMetered = "metered"
+	// DamperRefusedHold is the alarm for a refused claim that keeps its files from
+	// a ready story: the fix it waits for, or a story passed over behind it for
+	// RefusedHoldTooLong (mw-gq6.941).
+	DamperRefusedHold = "refused claim"
 	// DamperDoctor is the alarm for a check another host's doctor left faulty:
 	// its report reaches the home as a note, since nobody reads that host's log.
 	DamperDoctor = "doctor"
@@ -137,7 +141,7 @@ func (l DamperLimits) orDefaults() DamperLimits {
 // to five beads, then how many more.
 func (a DamperAlarm) Line() string {
 	line := a.Principle + " · " + a.Text
-	if a.Principle == DamperStuck || a.Principle == DamperInversion || a.Principle == DamperMetered || a.Principle == DamperNoHost || a.Principle == DamperDoctor || a.Principle == DamperNeedsFilesKey {
+	if a.Principle == DamperStuck || a.Principle == DamperInversion || a.Principle == DamperMetered || a.Principle == DamperNoHost || a.Principle == DamperDoctor || a.Principle == DamperNeedsFilesKey || a.Principle == DamperRefusedHold {
 		line = a.Principle + ": " + a.Text
 	}
 	if len(a.Beads) == 0 {
@@ -208,6 +212,56 @@ func MeteredPinned(work WorkInHand, host string, heavy map[string]bool) (DamperA
 		Text:      fmt.Sprintf("pinned to %s, metered, its rig installs dependencies: set host=auto", host),
 		Beads:     stuck,
 	}, true
+}
+
+// RefusedHoldTooLong is how long a ready story may have been passed over for a
+// file a refused claim holds before mw status names it under DAMPERS: a refused
+// claim keeps its files until a retry or a hold, so the wait does not end.
+const RefusedHoldTooLong = time.Hour
+
+// RefusedHold is a ready story that mw dispatch passes over for a file a
+// refused claim holds. The claim is kept, with its worktree and branch, so the
+// next attempt continues its branch and a story released beside it does not land
+// on a file that branch must rebase over; the cure is the Mayor's, run where the
+// claim is: mw retry <id> --hold.
+type RefusedHold struct {
+	// Refused is the claim, and Host the host that holds it.
+	Refused StoryDetail
+	Host    string
+	// Ready is the story passed over, and File the file it shares with Refused.
+	Ready StoryDetail
+	File  string
+	// Since is when a dispatch first held Ready for its files, as the hosts' notes
+	// say; zero when none noted it.
+	Since time.Time
+}
+
+// Cycle says the story passed over is the fix the refused claim waits for
+// (cause_fix): each waits on the other, and nothing ends it by itself.
+func (h RefusedHold) Cycle() bool {
+	return h.Refused.CauseFix != "" && h.Refused.CauseFix == h.Ready.Story.ID
+}
+
+// Alarm is the DAMPERS line for a cycle, whenever it began, and for a story
+// held longer than RefusedHoldTooLong; false for any other.
+func (h RefusedHold) Alarm(now time.Time) (DamperAlarm, bool) {
+	refused, ready := h.Refused.Story.ID, h.Ready.Story.ID
+	cure := fmt.Sprintf("cure, run on %s: mw retry %s --hold", h.Host, refused)
+	switch {
+	case h.Cycle():
+		return DamperAlarm{
+			Principle: DamperRefusedHold,
+			Text: fmt.Sprintf("cycle: %s mends refused %s and shares %s with it, so the fix waits behind the story it fixes; %s",
+				ready, refused, h.File, cure),
+		}, true
+	case !h.Since.IsZero() && now.Sub(h.Since) > RefusedHoldTooLong:
+		return DamperAlarm{
+			Principle: DamperRefusedHold,
+			Text: fmt.Sprintf("%s passed over %s behind refused %s (shares %s); %s",
+				ready, elapsed(now.Sub(h.Since)), refused, h.File, cure),
+		}, true
+	}
+	return DamperAlarm{}, false
 }
 
 // Write writes the DAMPERS section, with a blank line after it, or nothing

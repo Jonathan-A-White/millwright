@@ -38,6 +38,7 @@ func registerStatusQueuedSteps(ctx *godog.ScenarioContext, c *statusContext) {
 	ctx.Then(`^the report does not say any story is queued too long$`, c.theReportSaysNoQueuedTooLong)
 	ctx.Then(`^the report does not call any story stranded$`, c.theReportCallsNoneStranded)
 	ctx.Then(`^the report calls "([^"]*)" stranded$`, c.theReportCallsStranded)
+	ctx.Then(`^the report says "([^"]*)" is refused and kept, waiting on the Mayor$`, c.theReportSaysKeptRefused)
 }
 
 func (c *statusContext) theRigLandsInBatchesEvery(rig, minutes string) error {
@@ -184,6 +185,10 @@ func (c *statusContext) theReportCallsNoneStranded() error {
 		return fmt.Errorf("expected no story called stranded, got:\n%s", c.report.String())
 	}
 	return nil
+}
+
+func (c *statusContext) theReportSaysKeptRefused(id string) error {
+	return c.reportSaysOf(id, refusedWords)
 }
 
 func (c *statusContext) theReportCallsStranded(id string) error {

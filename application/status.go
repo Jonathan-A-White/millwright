@@ -575,6 +575,12 @@ type HostWork struct {
 	// Waits is what each of its stories queued for batch landing waits for,
 	// by story id: such a story is never stranded by its lease (mw-gq6.604).
 	Waits map[string]BatchWait
+	// Runs is the run state of each of its stories in progress, by story id, as
+	// the tracker has it: a refused claim is kept waiting on the Mayor and a
+	// handed-back one runs its close-out again, and neither is given back by the
+	// host's next dispatch tick as a stranded one is (mw-gq6.941). A story whose
+	// state could not be read has none.
+	Runs map[string]string
 	// Asleep says this host has been silent for longer than the threshold — or
 	// has never synced, or left a note that is not a time. Its stories are
 	// stranded: nothing here will move them, and no other host will take them
@@ -692,7 +698,10 @@ type StatusReport struct {
 	// by a dispatch, lease run out, and no host or session to look for them
 	// (mw-gq6.877).
 	NoSessionClaims []StoryDetail
-	Blocked         []StoryDetail
+	// NoSessionRuns is the run state of each of them, by story id: dispatch gives
+	// back only a claim whose run state is empty or running (mw-gq6.941).
+	NoSessionRuns map[string]string
+	Blocked       []StoryDetail
 	// Others is what every other host named in a story's Path has in hand, one
 	// entry per host, in host order.
 	Others []HostWork
@@ -933,7 +942,12 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			runningRead[detail.Story.ID] = later(func() (RunningStory, error) { return s.running(ctx, detail) })
 		}
 	}
-	elsewhereRead := later(func() ([]HostWork, error) { return s.elsewhere(ctx, work) })
+	away := work.ClaimsAway(s.Host)
+	awayRunsRead := later(func() (map[string]string, error) { return s.runStates(ctx, away), nil })
+	elsewhereRead := later(func() ([]HostWork, error) {
+		runs, _ := awayRunsRead()
+		return s.elsewhere(ctx, work, runs)
+	})
 	var dampersRead func() (DampersReport, error)
 	if s.Dampers != nil {
 		dampersRead = later(func() (DampersReport, error) { return s.Dampers.Dampers(ctx, work, s.now()) })
@@ -994,7 +1008,8 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 		report.Ready = append(report.Ready, detail)
 	}
-	report.Sharing = s.sharing(ctx, report.Running, report.Ready)
+	awayRuns, _ := awayRunsRead()
+	report.Sharing = s.sharing(ctx, report.Running, report.Ready, away, awayRuns)
 	report.TesterHolds = s.testerHolds(work, report.Ready, s.now())
 	report.HeldByFiles = s.heldByFiles(ctx, report.Ready)
 	report.UnderHandsStep = s.underHandsStep(ctx, report.Ready)
@@ -1299,6 +1314,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 	}
 	report.NoSessionClaims = work.NoSessionClaims(s.now())
+	report.NoSessionRuns = s.runStates(ctx, report.NoSessionClaims)
 
 	if dampersRead != nil {
 		// An alarm that cannot be judged costs the report only its section.
@@ -1326,6 +1342,12 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 	}
 
+	for _, hold := range s.refusedHolds(ctx, work, report.Running, away, awayRuns) {
+		if alarm, found := hold.Alarm(s.now()); found {
+			report.Dampers.Alarms = append(report.Dampers.Alarms, alarm)
+		}
+	}
+
 	if alarm, found := needsFilesKeyAlarm(report.Ready, report.NoFilesKey); found {
 		report.Dampers.Alarms = append(report.Dampers.Alarms, alarm)
 	}
@@ -1348,14 +1370,23 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 // sharing is each ready story that shares a file with one running here, as mw
 // dispatch finds it, by id; nil when none does. A branch whose changes cannot
 // be read is said, and holds nothing back.
-func (s Status) sharing(ctx context.Context, running []RunningStory, ready []StoryDetail) map[string]FileShare {
+func (s Status) sharing(ctx context.Context, running []RunningStory, ready, away []StoryDetail, awayRuns map[string]string) map[string]FileShare {
 	shares := fileShares{changes: s.Changes, rules: s.Rules, rigs: s.Rigs}
+	refused := map[string]bool{}
 	for _, rs := range running {
 		shares.add(rs.Detail)
+		refused[rs.Detail.Story.ID] = rs.Refused()
+	}
+	// What the other hosts hold keeps its files from the stories ready here, as
+	// in mw dispatch (mw-gq6.941).
+	for _, detail := range away {
+		shares.addAway(detail, detail.Merged().Host)
+		refused[detail.Story.ID] = awayRuns[detail.Story.ID] == RunBlocked
 	}
 	var sharing map[string]FileShare
 	for _, detail := range ready {
 		if share, ok := shares.shared(ctx, detail); ok {
+			share.Refused = refused[share.With]
 			if sharing == nil {
 				sharing = map[string]FileShare{}
 			}
@@ -1366,6 +1397,113 @@ func (s Status) sharing(ctx context.Context, running []RunningStory, ready []Sto
 		s.print("mw status: " + note + "\n")
 	}
 	return sharing
+}
+
+// runStates is the run state of each of the claimed stories, by id, read in one
+// StoriesState where the tracker offers it and a story at a time where it does
+// not or that read failed. A story whose state cannot be read is left out: it is
+// not called refused on a guess, and the report is not failed for it.
+func (s Status) runStates(ctx context.Context, claims []StoryDetail) map[string]string {
+	if len(claims) == 0 {
+		return nil
+	}
+	ids := make([]string, len(claims))
+	for i, detail := range claims {
+		ids[i] = detail.Story.ID
+	}
+	if batch, offered := s.Tracker.(StoriesState); offered {
+		if states, err := batch.StoriesState(ctx, ids, RunState); err == nil {
+			return states
+		}
+	}
+	states := map[string]string{}
+	for _, id := range ids {
+		if run, err := s.Tracker.StoryState(ctx, id, RunState); err == nil {
+			states[id] = run
+		}
+	}
+	return states
+}
+
+// refusedHolds are the ready stories that share a file with a refused claim, on
+// this host or another, as mw dispatch finds it, each with the claim, the
+// file and when a dispatch first held it for its files (mw-gq6.941). A branch
+// whose changes cannot be read is said, as in sharing, and holds nothing back.
+func (s Status) refusedHolds(ctx context.Context, work WorkInHand, running []RunningStory, away []StoryDetail, awayRuns map[string]string) []RefusedHold {
+	type claim struct {
+		detail StoryDetail
+		host   string
+		here   bool
+	}
+	var refused []claim
+	for _, rs := range running {
+		if rs.Refused() {
+			refused = append(refused, claim{rs.Detail, s.Host, true})
+		}
+	}
+	for _, detail := range away {
+		if awayRuns[detail.Story.ID] == RunBlocked {
+			refused = append(refused, claim{detail, detail.Merged().Host, false})
+		}
+	}
+	if len(refused) == 0 {
+		return nil
+	}
+	since := s.filesHeldSince(ctx)
+	var holds []RefusedHold
+	for _, c := range refused {
+		shares := fileShares{changes: s.Changes, rules: s.Rules, rigs: s.Rigs}
+		if c.here {
+			shares.add(c.detail)
+		} else {
+			shares.addAway(c.detail, c.host)
+		}
+		for _, ready := range work.Ready {
+			if ready.IsEpic || ready.Hitl() {
+				continue
+			}
+			share, ok := shares.shared(ctx, ready)
+			if !ok || share.Unkeyed == NeedsFilesKey {
+				continue
+			}
+			holds = append(holds, RefusedHold{Refused: c.detail, Host: c.host, Ready: ready, File: share.File, Since: since(ready)})
+		}
+		for _, note := range shares.notes {
+			s.print("mw status: " + note + "\n")
+		}
+	}
+	return holds
+}
+
+// filesHeldSince is, for a ready story, when a dispatch first held it for its
+// files: the note of the host its Path names, or the earliest of any host's for
+// a story any host may take; zero when no note names it or the notes cannot be
+// read.
+func (s Status) filesHeldSince(ctx context.Context) func(StoryDetail) time.Time {
+	byHost := map[string]filesHeld{}
+	if notes, ok := s.Notes.(DamperNotes); ok {
+		if kept, err := notes.NotesWithPrefix(ctx, "host."); err == nil {
+			for key, value := range kept {
+				host, found := strings.CutPrefix(key, "host.")
+				if host, found = strings.CutSuffix(host, ".files_held"); found && host != "" {
+					byHost[host] = parseFilesHeld(value)
+				}
+			}
+		}
+	}
+	return func(ready StoryDetail) time.Time {
+		pinned := ready.Merged().Host
+		var earliest time.Time
+		for host, held := range byHost {
+			if pinned != "" && pinned != domain.HostAuto && pinned != host {
+				continue
+			}
+			if at, ok := held[ready.Story.ID]; ok && (earliest.IsZero() || at.Before(earliest)) {
+				earliest = at
+			}
+		}
+		return earliest
+	}
 }
 
 // testerHolds is each ready Tester story whose rig runs testers_per_rig Tester
@@ -1651,6 +1789,14 @@ func (r RunningStory) turnsNamedPast() int {
 	return TurnsNamedPast
 }
 
+// refusedLine is what the report says of a claim whose landing was refused: it
+// is kept, with its worktree and branch, and no dispatch tick gives it back.
+const refusedLine = "refused, waiting on the Mayor (mw retry or a hold)"
+
+// handedBackLine is what the report says of a claim handed back at the merge
+// slot's overall most.
+const handedBackLine = "handed back at the merge slot's overall most: the next dispatch tick runs its close-out alone again"
+
 // strandedLine is what the report says of a claim whose lease has lapsed.
 func strandedLine(since time.Time) string {
 	return fmt.Sprintf("STRANDED: lease ran out %s with no heartbeat since, so no session is working it; the host that holds it gives the claim back on its next dispatch tick", since.UTC().Format(LastSyncFormat))
@@ -1719,7 +1865,7 @@ func (s Status) usageLimit(ctx context.Context, detail StoryDetail) string {
 // the threshold, when it has never recorded one, or when what it recorded is
 // not a time. None of those is an error: a host that cannot say when it was
 // last level is exactly the host whose work a person must look at.
-func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, error) {
+func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[string]string) ([]HostWork, error) {
 	if s.Notes == nil {
 		return nil, nil
 	}
@@ -1757,6 +1903,14 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 		}
 
 		held := HostWork{Host: host, Said: strings.TrimSpace(said), Stories: byHost[host], Now: now}
+		for _, d := range held.Stories {
+			if run, read := runs[d.Story.ID]; read && run != "" {
+				if held.Runs == nil {
+					held.Runs = map[string]string{}
+				}
+				held.Runs[d.Story.ID] = run
+			}
+		}
 		if held.Said != "" {
 			if at, err := time.Parse(LastSyncFormat, held.Said); err == nil {
 				held.LastSync = at
@@ -2192,9 +2346,20 @@ func (r StatusReport) String() string {
 	if len(r.NoSessionClaims) > 0 {
 		clip(&b, fmt.Sprintf("%s (%d)", StuckClaimsHeading, len(r.NoSessionClaims)))
 		for _, d := range r.NoSessionClaims {
-			writeStory(&b, d, "STUCK: claimed by "+d.Assignee+", lease ran out "+
-				d.LeaseExpires.UTC().Format(LastSyncFormat)+", no host or session names it; any host's next mw dispatch tick gives it back")
-			clip(&b, "    or now: mw retry "+d.Story.ID)
+			since := d.LeaseExpires.UTC().Format(LastSyncFormat)
+			switch run := r.NoSessionRuns[d.Story.ID]; run {
+			case "", RunRunning:
+				writeStory(&b, d, "STUCK: claimed by "+d.Assignee+", lease ran out "+since+", no host or session names it; any host's next mw dispatch tick gives it back")
+				clip(&b, "    or now: mw retry "+d.Story.ID)
+			case RunBlocked:
+				// Dispatch keeps a refused claim: no tick gives it back (mw-gq6.941).
+				writeStory(&b, d, "STUCK: claimed by "+d.Assignee+", lease ran out "+since+", no host or session names it")
+				wrapInto(&b, "    ", refusedLine)
+				clip(&b, "    mw retry "+d.Story.ID+" --hold")
+			default:
+				writeStory(&b, d, "STUCK: claimed by "+d.Assignee+", lease ran out "+since+", no host or session names it; its run state is "+run+", which no dispatch tick gives back")
+				clip(&b, "    mw retry "+d.Story.ID)
+			}
 		}
 		b.WriteString("\n")
 	}
@@ -2513,6 +2678,10 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 				wait = had
 			}
 			wait.write(b, "      ")
+		} else if w.Runs[d.Story.ID] == RunBlocked {
+			wrapInto(b, "      ", refusedLine)
+		} else if w.Runs[d.Story.ID] == RunCloseOutAgain {
+			wrapInto(b, "      ", handedBackLine)
 		} else if since := lapsedLease(d, w.Now); !d.Hitl() && !since.IsZero() {
 			wrapInto(b, "      ", strandedLine(since))
 		}
@@ -2740,7 +2909,7 @@ func (r RunningStory) write(b *strings.Builder) {
 		clip(b, line)
 	}
 	if r.Refused() {
-		clip(b, "    refused, waiting on the Mayor (mw retry or a hold)")
+		clip(b, "    "+refusedLine)
 	}
 	if r.Queued() {
 		wait := BatchWait{Since: r.Detail.QueuedAt}
@@ -2750,7 +2919,7 @@ func (r RunningStory) write(b *strings.Builder) {
 		wait.write(b, "    ")
 	}
 	if r.HandedBack() {
-		clip(b, "    handed back at the merge slot's overall most: the next dispatch tick runs its close-out alone again")
+		clip(b, "    "+handedBackLine)
 	}
 	if r.FormulaOpen() {
 		clip(b, fmt.Sprintf("    close blocked: %d formula step(s) open", r.FormulaSteps))

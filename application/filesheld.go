@@ -29,14 +29,20 @@ type filesHeld map[string]time.Time
 func readFilesHeld(ctx context.Context, notes interface {
 	Note(ctx context.Context, key string) (string, error)
 }, host string) filesHeld {
-	held := filesHeld{}
 	if notes == nil {
-		return held
+		return filesHeld{}
 	}
 	value, err := notes.Note(ctx, FilesHeldKey(host))
 	if err != nil {
-		return held
+		return filesHeld{}
 	}
+	return parseFilesHeld(value)
+}
+
+// parseFilesHeld reads the note's value. A line that does not parse is passed
+// over.
+func parseFilesHeld(value string) filesHeld {
+	held := filesHeld{}
 	for _, line := range strings.Split(value, "\n") {
 		id, at, ok := strings.Cut(strings.TrimSpace(line), " ")
 		if !ok {
