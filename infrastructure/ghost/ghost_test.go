@@ -499,3 +499,17 @@ func TestTheKeyAndTheTokenAreNowhereInWhatIsSaidWhenTheUploadFails(t *testing.T)
 		}
 	}
 }
+
+func TestAJpegNamedPngIsUploadedUnderTheNameAndKindOfWhatItIs(t *testing.T) {
+	b, srv := newBlog(t)
+	jpeg := application.GhostImage{Name: "lighthouse.png", Data: []byte("\xff\xd8\xff\xe0\x00\x10JFIF fake picture")}
+	if _, err := runWith(t, srv, fixture(t), jpeg); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.uploads) != 1 {
+		t.Fatalf("%d uploads, want one", len(b.uploads))
+	}
+	if up := b.uploads[0]; up.name != "lighthouse.jpg" || up.kind != "image/jpeg" || !bytes.Equal(up.data, jpeg.Data) {
+		t.Errorf("upload = %+v, want the name and kind of a jpeg, as the blog checks the bytes against the extension", up)
+	}
+}

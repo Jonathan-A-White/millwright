@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -253,10 +254,17 @@ func (b *Blog) UploadImage(ctx context.Context, image application.GhostImage) (s
 	if kind == "" {
 		return "", fmt.Errorf("the feature image %q is not a picture the blog takes", image.Name)
 	}
+	name := image.Name
+	// The blog checks the bytes against the extension, so a picture the file
+	// name misnames (a JPEG a model sent for a .png) goes up as what it is.
+	if sniffed, ext := sniffedImage(image.Data); sniffed != "" && sniffed != kind {
+		name = strings.TrimSuffix(name, filepath.Ext(name)) + ext
+		kind = sniffed
+	}
 	var form bytes.Buffer
 	writer := multipart.NewWriter(&form)
 	header := textproto.MIMEHeader{}
-	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, quoteFilename(image.Name)))
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, quoteFilename(name)))
 	header.Set("Content-Type", kind)
 	part, err := writer.CreatePart(header)
 	if err != nil {
@@ -284,6 +292,22 @@ func (b *Blog) UploadImage(ctx context.Context, image application.GhostImage) (s
 		return "", errors.New("the blog's reply to the image upload was not one image address")
 	}
 	return answer.Images[0].URL, nil
+}
+
+// sniffedImage is the media type and the extension of a picture by its bytes,
+// both "" when they are not a kind the blog takes that the bytes can show.
+func sniffedImage(data []byte) (kind, ext string) {
+	switch kind = http.DetectContentType(data); kind {
+	case "image/png":
+		return kind, ".png"
+	case "image/jpeg":
+		return kind, ".jpg"
+	case "image/gif":
+		return kind, ".gif"
+	case "image/webp":
+		return kind, ".webp"
+	}
+	return "", ""
 }
 
 // quoteFilename is a file's name safe inside the quotes of a header.

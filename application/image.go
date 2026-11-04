@@ -43,6 +43,18 @@ var imageExtensions = map[string]string{
 	".webp": "image/webp",
 }
 
+// extensionOf is the extension a picture of kind mime should have, out's own
+// basename with the right one, or ".<kind>" when the kind is not one of the
+// files mw image writes.
+func extensionOf(mime, out string) string {
+	for ext, kind := range imageExtensions {
+		if kind == mime && ext != ".jpeg" {
+			return strings.TrimSuffix(filepath.Base(out), filepath.Ext(out)) + ext
+		}
+	}
+	return "." + strings.TrimPrefix(mime, "image/")
+}
+
 // Image is mw image: it makes one picture from a prompt with the Gemini API
 // and writes it to a file. One request a run, no retry, no batch.
 type Image struct {
@@ -91,7 +103,7 @@ func (i Image) Run(ctx context.Context, prompt, out string) error {
 	if i.Out != nil {
 		fmt.Fprintf(i.Out, "wrote %s (%d bytes, %s)\n", out, len(made.Data), made.MimeType)
 		if made.MimeType != "" && made.MimeType != want {
-			fmt.Fprintf(i.Out, "note: the file is named for %s but the picture is %s\n", want, made.MimeType)
+			fmt.Fprintf(i.Out, "note: the file is named for %s but the picture is %s: name it %s to match\n", want, made.MimeType, extensionOf(made.MimeType, out))
 		}
 	}
 	return nil

@@ -121,3 +121,17 @@ func TestImageSaysWhenThePictureIsNotTheKindTheFileNameSays(t *testing.T) {
 		t.Errorf("files = %v, out = %q: it should still keep the paid picture and say what kind it is", files, out)
 	}
 }
+
+func TestImageNamesTheRightExtensionWhenThePictureIsNotTheKindTheFileNameSays(t *testing.T) {
+	maker := &apptest.FakeImageMaker{Image: application.MadeImage{Data: []byte("J"), MimeType: "image/jpeg"}}
+	out, files, _, err := imageRun(imageKeyKept(), maker, "p", "a.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].path != "a.png" {
+		t.Errorf("files = %v, want the file written as asked", files)
+	}
+	if !strings.Contains(out, ".jpg") {
+		t.Errorf("out = %q, want it to say the right extension, .jpg", out)
+	}
+}

@@ -182,7 +182,7 @@ func TestNewRefusesAModelThatCouldChangeThePathAndAnEmptyKey(t *testing.T) {
 			t.Errorf("model %q: no error", model)
 		}
 	}
-	if _, err := gemini.New("https://x.test", "gemini-2.5-flash-image", "  "); err == nil {
+	if _, err := gemini.New("https://x.test", "gemini-3.1-flash-lite-image", "  "); err == nil {
 		t.Error("an empty key: no error")
 	}
 }
