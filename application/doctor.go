@@ -1278,6 +1278,20 @@ func (c *StrayPreviewsCheck) storyOf(dir string) (string, bool) {
 	return "", false
 }
 
+// isRunTree says whether name, the first element beneath a worktree directory,
+// is the throwaway worktree of a suite, a spec recheck or a timing run (named
+// for the kind of run and the rig, SuiteTreePrefix and the like) and so no
+// story's. The merge slot and its queue sit there too but are files, which no
+// server runs in; a landing is made beside the rig, not here.
+func isRunTree(name string) bool {
+	for _, prefix := range []string{SuiteTreePrefix, RecheckTreePrefix, TimingTreePrefix} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // find reads the host's preview servers and judges each: the strays, and the
 // stories that had to be left because the tracker could not be read.
 func (c *StrayPreviewsCheck) find(ctx context.Context) (strays []strayPreview, unread []string, err error) {
@@ -1294,6 +1308,11 @@ func (c *StrayPreviewsCheck) find(ctx context.Context) (strays []strayPreview, u
 		}
 		if server.CwdDeleted {
 			strays = append(strays, strayPreview{server: server, story: story, why: "worktree deleted"})
+			continue
+		}
+		if isRunTree(story) {
+			// A suite's, a recheck's or a timing run's own worktree: no story, so
+			// nothing for the tracker to say; its preview is the run's.
 			continue
 		}
 		if failed[story] {

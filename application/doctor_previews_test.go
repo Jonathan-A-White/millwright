@@ -184,3 +184,88 @@ func TestMwDoctorCannotTellWhenTheHostsPreviewServersCannotBeListed(t *testing.T
 		t.Errorf("expected cannot-tell with the cause, got %v %q", verdict, reason)
 	}
 }
+
+// askedStoryStates is previewStoryStates that remembers every id it was asked.
+type askedStoryStates struct {
+	states map[string]string
+	asked  []string
+}
+
+func (a *askedStoryStates) closed(ctx context.Context, id string) (bool, error) {
+	a.asked = append(a.asked, id)
+	return previewStoryStates(a.states)(ctx, id)
+}
+
+func TestMwDoctorTakesAGateSuitesOwnPreviewForNoStoryAndAsksNoTrackerAboutIt(t *testing.T) {
+	// The throwaway worktrees a suite, a spec recheck and a timing run are made
+	// in are named for a kind of run and a rig, not a story: the tracker has no
+	// issue by those names, and the preview inside one is the run's own.
+	servers := &fakePreviewServers{running: []application.PreviewServer{
+		aPreviewIn(51, 5401, filepath.Join(previewWorktrees, application.SuiteTreePrefix+"lampas"), false),
+		aPreviewIn(52, 5402, filepath.Join(previewWorktrees, application.SuiteTreePrefix+"lampas", "web"), false),
+		aPreviewIn(53, 5403, filepath.Join(previewWorktrees, application.RecheckTreePrefix+"lampas"), false),
+		aPreviewIn(54, 5404, filepath.Join(previewWorktrees, application.TimingTreePrefix+"lampas", "src"), false),
+	}}
+	asked := &askedStoryStates{states: map[string]string{}}
+	check := strayPreviewCheck(servers, nil)
+	check.StoryClosed = asked.closed
+
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK || reason != "" {
+		t.Errorf("expected a plain ok, got %v %q", verdict, reason)
+	}
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("cure: %v", err)
+	}
+	if len(servers.stopped) != 0 {
+		t.Errorf("expected the runs' own previews left running, got pids %v stopped", servers.stopped)
+	}
+	if len(asked.asked) != 0 {
+		t.Errorf("expected the tracker not asked about a run's worktree, asked %v", asked.asked)
+	}
+}
+
+func TestMwDoctorStillStopsAGateSuitesPreviewWhoseWorktreeIsDeleted(t *testing.T) {
+	servers := &fakePreviewServers{running: []application.PreviewServer{
+		aPreviewIn(61, 5501, filepath.Join(previewWorktrees, application.SuiteTreePrefix+"lampas"), true),
+		aPreviewIn(62, 5502, filepath.Join(previewWorktrees, application.RecheckTreePrefix+"lampas", "web"), true),
+		aPreviewIn(63, 5503, filepath.Join(previewWorktrees, application.SuiteTreePrefix+"millwright"), false),
+	}}
+	check := strayPreviewCheck(servers, map[string]string{})
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorFaulty || !strings.Contains(reason, "61") || !strings.Contains(reason, "62") || strings.Contains(reason, "63") {
+		t.Errorf("expected faulty naming pids 61 and 62 only, got %v %q", verdict, reason)
+	}
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("cure: %v", err)
+	}
+	if got := fmt.Sprint(servers.stopped); got != "[61 62]" {
+		t.Errorf("expected only pids 61 and 62 stopped, got %s", got)
+	}
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK || reason != "" {
+		t.Errorf("expected ok after the cure, got %v %q", verdict, reason)
+	}
+}
+
+func TestMwDoctorStillJudgesAStoryWorktreeBesideARunsWorktree(t *testing.T) {
+	servers := &fakePreviewServers{running: []application.PreviewServer{
+		aPreviewIn(71, 5601, filepath.Join(previewWorktrees, application.SuiteTreePrefix+"lampas"), false),
+		aPreviewIn(72, 5602, filepath.Join(previewWorktrees, "mw-closed.1"), false),
+		aPreviewIn(73, 5603, filepath.Join(previewWorktrees, "mw-unreadable.2"), false),
+	}}
+	check := strayPreviewCheck(servers, map[string]string{"mw-closed.1": "closed"})
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorFaulty || !strings.Contains(reason, "72") || strings.Contains(reason, "71") {
+		t.Errorf("expected faulty naming the closed story's pid 72 only, got %v %q", verdict, reason)
+	}
+	if !strings.Contains(reason, "mw-unreadable.2") {
+		t.Errorf("expected the unreadable story still left alone by name, got %q", reason)
+	}
+	servers2 := &fakePreviewServers{running: []application.PreviewServer{
+		aPreviewIn(81, 5701, filepath.Join(previewWorktrees, "mw-unreadable.2"), false),
+	}}
+	if verdict, _ := strayPreviewCheck(servers2, nil).Probe(context.Background()); verdict != application.DoctorCannotTell {
+		t.Errorf("expected cannot-tell for an unreadable story, got %v", verdict)
+	}
+}
