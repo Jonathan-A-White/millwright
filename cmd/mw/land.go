@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -156,14 +157,7 @@ func newLandCmd() *cobra.Command {
 				Units:        userunits.Systemctl{},
 				Stamps:       stamps,
 			}
-			_, err = application.BatchLand{
-				Next:    withVaultPorts(next, files),
-				Records: files,
-				Metrics: files,
-				Fix:     true,
-				DryRun:  dryRun,
-				One:     one,
-			}.Run(cmd.Context(), args[0])
+			_, err = batchLandFor(next, files, dryRun, one, cmd.ErrOrStderr()).Run(cmd.Context(), args[0])
 			return err
 		},
 	}
@@ -173,6 +167,21 @@ func newLandCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&one, "one", false,
 		"take only the oldest queued story: how the follower lands what a rig flipped back to landing = each had queued")
 	return cmd
+}
+
+// batchLandFor is the BatchLand mw land runs for the Next it built: the vault's
+// ports on it (withVaultPorts), and the Tester trial of the [tester] table, as
+// mw next gives its Next (mw-gq6.962). A table that cannot be read springs no
+// Tester story and never stops a landing: it is said on errw, and it goes on.
+func batchLandFor(next application.Next, files *vault.Vault, dryRun, one bool, errw io.Writer) application.BatchLand {
+	return application.BatchLand{
+		Next:    withTesterTrial(withVaultPorts(next, files), "mw land", errw),
+		Records: files,
+		Metrics: files,
+		Fix:     true,
+		DryRun:  dryRun,
+		One:     one,
+	}
 }
 
 // withVaultPorts gives a landing's Next the ports that are the vault, which a
