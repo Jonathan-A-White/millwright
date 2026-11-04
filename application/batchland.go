@@ -575,12 +575,7 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 	// stories' to fix: no fixer is started, and the batch is held on the bead that
 	// carries main's red (mw-gq6.645).
 	if gate.Err == nil && !gate.Checked.NotRun && !gate.Checked.Passed && report.Fixer == nil {
-		bc := b.batchCloseOut(report, rigDir)
-		red := n.mainAlone(ctx, bc, nr, gate.Checked, report.Base)
-		report.MainLabels = nr.MainLabels
-		if record := runFilePath(bc.id, bc.mainLog); bc.mainLog != "" && record != "" {
-			report.Records = append(report.Records, record)
-		}
+		bc, red := b.mainAlone(ctx, rigDir, report, nr, gate.Checked)
 		if red != nil {
 			if n.holdBatchOnMainRed(ctx, bc, nr, red) {
 				report.Held = fmt.Sprintf("main is red: %s, carried by %s; no fixer was started and the stories stay queued", red.tests(), red.Bug)
@@ -1023,6 +1018,18 @@ func (b BatchLand) storyCloseOut(s BatchStory, rigDir string) *closeOut {
 	}
 }
 
+// mainAlone runs the batch's failing tests on the target branch alone, and
+// keeps what it printed with the batch's records, naming it on the report.
+func (b BatchLand) mainAlone(ctx context.Context, rigDir string, report *BatchReport, nr *NextReport, failed Checked) (*closeOut, *MainRed) {
+	bc := b.batchCloseOut(report, rigDir)
+	red := b.Next.mainAlone(ctx, bc, nr, failed, report.Base)
+	report.MainLabels = nr.MainLabels
+	if record := bc.recordPath(bc.mainLog); bc.mainLog != "" && record != "" {
+		report.Records = append(report.Records, record)
+	}
+	return bc, red
+}
+
 // batchCloseOut is the batch itself as the gate takes it: named for the
 // batch, in the rig, on its target.
 func (b BatchLand) batchCloseOut(report *BatchReport, rigDir string) *closeOut {
@@ -1030,10 +1037,50 @@ func (b BatchLand) batchCloseOut(report *BatchReport, rigDir string) *closeOut {
 	for _, s := range report.Merged {
 		own = append(own, ownCheck{id: s.ID, attempt: max(1, s.detail.Attempts)})
 	}
-	return &closeOut{
+	bc := &closeOut{
 		id: report.Label(), path: domain.Path{Rig: report.Rig, Branch: report.Target}, rigDir: rigDir,
 		target: report.Target, began: b.Next.now(), own: own,
 	}
+	if b.Records != nil {
+		bc.place = &batchPlace{records: b.Records, rig: report.Rig, number: report.Number}
+	}
+	return bc
+}
+
+// batchPlace is where a batch's close-out keeps the files it writes: with the
+// batch's other records under BatchDir, never in runs/<label>/, for the label,
+// 'batch 3 of lampas', is a sentence and not a directory's name (mw-gq6.969).
+type batchPlace struct {
+	records BatchRecords
+	rig     string
+	number  int
+}
+
+// putRunFile keeps one file of the close-out c's run: in runs/<story>/ for a
+// story, in the batch's own directory for a batch. It reports the file's path
+// from the vault's root, empty with no error for a story whose id is no name
+// for a directory, where nothing is written.
+func (n Next) putRunFile(ctx context.Context, c *closeOut, name, contents string) (string, error) {
+	if c.place != nil {
+		return c.place.records.PutBatchFile(ctx, c.place.rig, c.place.number, name, contents)
+	}
+	record := runFilePath(c.id, name)
+	if record == "" {
+		return "", nil
+	}
+	if _, err := n.Vault.PutRunFile(ctx, c.id, name, contents); err != nil {
+		return "", err
+	}
+	return record, nil
+}
+
+// recordPath is the path from the vault's root of the file name in the
+// close-out's run, empty when it has none.
+func (c *closeOut) recordPath(name string) string {
+	if c.place != nil {
+		return path.Join(BatchDir, c.place.rig, strconv.Itoa(c.place.number), name)
+	}
+	return runFilePath(c.id, name)
 }
 
 // gateLog is the last gate run as gate.log holds it.

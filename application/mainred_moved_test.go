@@ -2,9 +2,11 @@ package application_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -206,5 +208,58 @@ func TestLineOfTestTitledIsThatOfTheTestCallNearestTheOldLine(t *testing.T) {
 		if got, found := application.LineOfTestTitled(source, c.title, c.near); got != c.want || found != c.found {
 			t.Errorf("LineOfTestTitled(%q, near %d) = %d, %v; want %d, %v", c.title, c.near, got, found, c.want, c.found)
 		}
+	}
+}
+
+// A batch's records, as the vault keeps them: by rig, number and file name.
+type batchFilesKept struct{ put map[string]string }
+
+func (r *batchFilesKept) NewBatch(context.Context, string) (int, error) { return 0, nil }
+
+func (r *batchFilesKept) PutBatchFile(_ context.Context, rig string, number int, name, contents string) (string, error) {
+	where := fmt.Sprintf("%s/%s/%d/%s", application.BatchDir, rig, number, name)
+	r.put[where] = contents
+	return where, nil
+}
+
+func (r *batchFilesKept) BatchFilePath(string, int, string) string { return "" }
+
+// mw-gq6.969: the main-alone log of a batch went to runs/<label>/, the label
+// being 'batch 380 of lampas', a directory named with spaces. It goes with the
+// batch's other records, and the report names that path.
+func TestABatchsMainAloneLogIsKeptWithTheBatchsRecordsAndNotUnderItsLabel(t *testing.T) {
+	printed := "npm ci\nError: listen EADDRINUSE: address already in use :::4173\n"
+	named := &namedTestsThat{run: func(context.Context, []string) (application.NamedRun, error) {
+		return application.NamedRun{Checked: application.Checked{Command: "npm test", Output: printed}, Ran: true}, nil
+	}}
+	vault := newFakeVault()
+	records := &batchFilesKept{put: map[string]string{}}
+	landing := &aMainLanding{}
+	land := application.BatchLand{
+		Next: application.Next{
+			Vault: vault, Worktrees: landing, Landing: landing, Slot: aSlot{}, NamedChecks: named,
+			Seat: "builder", Host: "laptop", Rigs: map[string]string{"lampas": "/rigs/lampas"},
+			Out: io.Discard, Err: io.Discard,
+		},
+		Records: records,
+	}
+	report := &application.BatchReport{Rig: "lampas", Number: 380, Target: "main", Base: "abc123"}
+
+	land.MainAloneOfTheBatch(context.Background(), "/rigs/lampas", report, application.Checked{Command: "make test", Output: "--- FAIL: TestA (0.01s)\nFAIL\n"})
+
+	want := "runs/batch/lampas/380/main-alone.log"
+	if records.put[want] != printed {
+		t.Errorf("expected the whole output kept in %s, got files %v", want, records.put)
+	}
+	if !slices.Contains(report.Records, want) {
+		t.Errorf("expected the report's records to name %s, got %v", want, report.Records)
+	}
+	for file := range vault.written {
+		if strings.ContainsAny(file, " ") {
+			t.Errorf("expected no run directory named with spaces, got %q", file)
+		}
+	}
+	if len(vault.written) != 0 {
+		t.Errorf("expected nothing of the batch kept in runs/<label>/, got %v", vault.written)
 	}
 }

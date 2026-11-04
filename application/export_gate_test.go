@@ -27,3 +27,9 @@ func (b BatchLand) RecordLanded(ctx context.Context, rigDir string, report *Batc
 func MergedStory(id, merge string, detail StoryDetail, path domain.Path) BatchStory {
 	return BatchStory{ID: id, Title: detail.Story.Title, Merge: merge, Commits: 1, detail: detail, path: path, Branch: "origin/" + StoryBranch(id)}
 }
+
+// MainAloneOfTheBatch lets the tests of package application_test run the batch's
+// failing tests on main alone, as the batch landing does after its gate.
+func (b BatchLand) MainAloneOfTheBatch(ctx context.Context, rigDir string, report *BatchReport, failed Checked) {
+	b.mainAlone(ctx, rigDir, report, &NextReport{}, failed)
+}

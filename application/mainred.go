@@ -531,12 +531,12 @@ func (n Next) keepMainAloneLog(ctx context.Context, c *closeOut, report *NextRep
 		return ""
 	}
 	name := attemptRunFileName(MainAloneLogFileName, c.attempt())
-	record := runFilePath(c.id, name)
-	if record == "" {
+	record, err := n.putRunFile(ctx, c, name, capRunLog(name, output))
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the whole output of the run on main alone could not be kept in the run of %s: %v", c.id, err))
 		return ""
 	}
-	if _, err := n.Vault.PutRunFile(ctx, c.id, name, capRunLog(name, output)); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("the whole output of the run on main alone could not be kept in the run of %s: %v", c.id, err))
+	if record == "" {
 		return ""
 	}
 	c.mainLog = name
