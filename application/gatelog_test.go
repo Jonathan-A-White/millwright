@@ -76,3 +76,39 @@ func TestAGateLogOverTheCapKeepsItsHeadAndItsTail(t *testing.T) {
 		t.Errorf("the head, the tail and the note were not all kept")
 	}
 }
+
+// mw-gq6.970: a Playwright test is one test by its file and title, whatever its
+// ✘ index, its line or its retry mark.
+func TestAPlaywrightTestWithARetryAndAMovedLineIsOneFailingTest(t *testing.T) {
+	output := strings.Join([]string{
+		"  ✘  1 [shots] › tests/e2e/home.spec.ts:296:5 › opens the home (1.2s)",
+		"  ✘  2 [shots] › tests/e2e/home.spec.ts:296:5 › opens the home (retry #1) (1.3s)",
+		"  ✘  3 [shots] › tests/e2e/home.spec.ts:299:5 › opens the home (retry #2) (1.1s)",
+		"  ✘  4 [shots] › tests/e2e/home.spec.ts:310:5 › shows the count (0.9s)",
+		"  ✘  5 [shots] › tests/e2e/other.spec.ts:10:5 › opens the home (0.9s)",
+	}, "\n")
+	names, more := application.FailingTests(output, 20)
+	want := []string{
+		"✘ 1 [shots] › tests/e2e/home.spec.ts:296:5 › opens the home",
+		"✘ 4 [shots] › tests/e2e/home.spec.ts:310:5 › shows the count",
+		"✘ 5 [shots] › tests/e2e/other.spec.ts:10:5 › opens the home",
+	}
+	if more != 0 || strings.Join(names, "\n") != strings.Join(want, "\n") {
+		t.Errorf("FailingTests = %q (+%d more), want %q", names, more, want)
+	}
+	if block := application.FailingTestsBlock(output); !strings.HasPrefix(block, "Failing tests (3):\n") {
+		t.Errorf("block = %q, want a count of 3", block)
+	}
+	if short := application.FailingTestsShort(output); short != "failing: "+strings.Join(want, "; ") {
+		t.Errorf("short = %q", short)
+	}
+	// The sentence a flake is folded by keeps the first line's words, as old
+	// ledger lines (which named each ✘ line whole) did.
+	flaked := application.FlakedTests(output)
+	if flaked != strings.Join(want, "; ") {
+		t.Errorf("FlakedTests = %q, want %q", flaked, strings.Join(want, "; "))
+	}
+	if one := application.FlakedTests(want[0]); one != want[0] {
+		t.Errorf("a single ✘ line is named %q, want it as it was", one)
+	}
+}

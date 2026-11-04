@@ -53,6 +53,9 @@ var (
 	// header (`1) ...`) of a failure's detail, or of a line under `N failed` or
 	// `N flaky`, which have no number.
 	playwrightTestWords = regexp.MustCompile(`^\s*(?:\d+\)\s+)?(\[[^\]]*\]\s+›\s+\S+\.spec\.[cm]?[jt]sx?:\d+:\d+\s+›.*)$`)
+	// playwrightFileAndTitle splits a test's words into its spec file and its
+	// title (the words after `file:line:col ›`).
+	playwrightFileAndTitle = regexp.MustCompile(`\s(\S+\.spec\.[cm]?[jt]sx?):\d+:\d+\s+›\s*(.*)$`)
 	// playwrightRetry is the `(retry #1)` Playwright adds to a test's retries.
 	playwrightRetry = regexp.MustCompile(`\s*\(retry #\d+\)`)
 )
@@ -64,6 +67,21 @@ func playwrightTestKey(words string) string {
 	words = trailingTime.ReplaceAllString(strings.TrimSpace(words), "")
 	words = playwrightRetry.ReplaceAllString(words, "")
 	return strings.Join(strings.Fields(strings.TrimRight(strings.TrimSpace(words), "─ ")), " ")
+}
+
+// playwrightFailureKey is what a failing-test line is told apart by: for a
+// Playwright ✘ line the test file and title, without the ✘ index, the project,
+// the line and column, the duration or the retry mark; any other line as it is.
+func playwrightFailureKey(name string) string {
+	m := playwrightListFailure.FindStringSubmatch(name)
+	if m == nil {
+		return name
+	}
+	words := playwrightTestKey(m[1])
+	if f := playwrightFileAndTitle.FindStringSubmatch(words); f != nil {
+		return "✘ " + f[1] + " › " + strings.TrimSpace(f[2])
+	}
+	return name
 }
 
 // WithoutExpectedFailures is a run's output with the ✘ lines of Playwright's
@@ -142,10 +160,14 @@ func FailingTests(output string, limit int) (names []string, more int) {
 			continue
 		}
 		name := strings.Join(strings.Fields(trailingTime.ReplaceAllString(strings.TrimSpace(line), "")), " ")
-		if seen[name] {
+		// A Playwright test is one test by its file and title: its ✘ index, its
+		// line and its retry mark differ between the lines that name it
+		// (mw-gq6.970). The line shown stays the first one, as it always was.
+		key := playwrightFailureKey(name)
+		if seen[key] {
 			continue
 		}
-		seen[name] = true
+		seen[key] = true
 		if len(names) < limit {
 			names = append(names, name)
 		} else {
