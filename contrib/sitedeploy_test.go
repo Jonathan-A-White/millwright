@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // site is a throwaway deploy: a build to ship, the tree being served, and a
@@ -146,6 +147,18 @@ func TestOnlyWhatChangedTravelsAFileThatDidNotIsLinkedToTheLiveOne(t *testing.T)
 	s := newSite(t)
 	s.oldLive()
 	s.newBuild()
+	// rsync takes a file for unchanged when its size and its modify time to the
+	// second are the same. The two copies of the stylesheet are written a moment
+	// apart, and when that moment crosses a whole second (a loaded host makes it
+	// long) rsync copies the file instead of linking it. So the test says what a
+	// real unchanged file is: one with the same modify time on both sides
+	// (mw-gq6.948: failed at load 37 of 20).
+	unchanged := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	for _, dir := range []string{s.live, s.dist} {
+		if err := os.Chtimes(filepath.Join(dir, "assets", "app-OLD.css"), unchanged, unchanged); err != nil {
+			t.Fatal(err)
+		}
+	}
 	before, err := os.Stat(filepath.Join(s.live, "assets", "app-OLD.css"))
 	if err != nil {
 		t.Fatal(err)

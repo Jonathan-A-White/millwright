@@ -451,7 +451,7 @@ func waitForQueued(t *testing.T, dir string, n int) {
 	queue := rig.SlotPath(dir) + rig.SlotQueueSuffix
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		if entries, err := os.ReadDir(queue); err == nil && len(entries) >= n {
+		if queuedTickets(queue) >= n {
 			return
 		}
 		if time.Now().After(deadline) {
@@ -459,6 +459,22 @@ func waitForQueued(t *testing.T, dir string, n int) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+// queuedTickets counts the tickets in place in a slot's queue directory: not one
+// still being made, which is under a dot name until it is locked and renamed.
+func queuedTickets(queue string) int {
+	entries, err := os.ReadDir(queue)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), ".") {
+			n++
+		}
+	}
+	return n
 }
 
 // takeSlotInTheBackground starts a Take for holder, polling every poll, and
@@ -651,6 +667,34 @@ func TestWorktreeChecksOfOneRigShareTheMergeSlot(t *testing.T) {
 		t.Errorf("expected a check to get the slot after the landing: %v", err)
 	} else {
 		shared.Release(ctx)
+	}
+}
+
+// A ticket is made under a dot name and renamed into place once it is locked
+// (ticketq.Join), and the queue does not list it until then: a check that
+// joins while a landing's ticket is still being made finds nothing ahead of it
+// and takes the slot beside the running check. So a test that waits for a
+// landing to be queued must not count a ticket still being made, or the check
+// it starts "behind" the landing is not behind it (mw-gq6.948: slot_test.go:682
+// failed once in several hundred runs, in 0.01 s, with the check holding the
+// slot at once).
+func TestATicketStillBeingMadeIsNotAWaiterQueued(t *testing.T) {
+	queue := filepath.Join(t.TempDir(), "slot.queue")
+	if err := os.MkdirAll(queue, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(queue, ".ticket-123456"), []byte("mw next landing mw-c.3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := queuedTickets(queue); got != 0 {
+		t.Errorf("expected a ticket still being made not to count as queued, got %d", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(queue, "00000000000000000001-0000000001-1"), []byte("mw next landing mw-c.3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := queuedTickets(queue); got != 1 {
+		t.Errorf("expected the ticket in place to count as queued, got %d", got)
 	}
 }
 
