@@ -61,6 +61,40 @@ func TestStatusStillCallsAnUnrefusedClaimWithALapsedLeaseStrandedOnAnotherHost(t
 	}
 }
 
+// mw-gq6.950: a claim whose last run is recorded landed is never given back by
+// dispatch: once its lease lapsed the host closes it (closeLanded).
+func TestStatusSaysALandedClaimOnAnotherHostIsClosedNotGivenBack(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	aClaimOn(t, tracker, "mw-gq6.931", "laptop", "playwright.config.ts", false)
+	if err := tracker.SetStoryState(context.Background(), "mw-gq6.931", application.RunState, application.RunLanded, "landed on main"); err != nil {
+		t.Fatalf("recording the landing: %v", err)
+	}
+	syncedAt(t, tracker, "laptop", 5*time.Minute)
+
+	block := flat(section(otherHostStatus(t, tracker)))
+	if strings.Contains(block, "gives the claim back") {
+		t.Fatalf("expected a landed claim not to be promised given back, got:\n%s", block)
+	}
+	if !strings.Contains(block, "closes the story on its next dispatch tick") {
+		t.Fatalf("expected the line to say dispatch closes the landed claim, got:\n%s", block)
+	}
+}
+
+// On this host too, a landed claim with a lapsed lease is closed by the next
+// dispatch tick, never given back.
+func TestStatusSaysALandedClaimWithALapsedLeaseOnThisHostIsClosedNotGivenBack(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	aClaimOn(t, tracker, "mw-gq6.931", "vps", "playwright.config.ts", false)
+	if err := tracker.SetStoryState(context.Background(), "mw-gq6.931", application.RunState, application.RunLanded, "landed on main"); err != nil {
+		t.Fatalf("recording the landing: %v", err)
+	}
+
+	printed := flat(otherHostStatus(t, tracker).String())
+	if strings.Contains(printed, "gives the claim back") || !strings.Contains(printed, "closes the story on its next dispatch tick") {
+		t.Fatalf("expected the landed claim to be closed, not given back, got:\n%s", printed)
+	}
+}
+
 func TestStatusSaysAHandedBackClaimOnAnotherHostRunsItsCloseOutAgain(t *testing.T) {
 	tracker := aTrackerPathedToVPS(t)
 	aClaimOn(t, tracker, "mw-gq6.931", "laptop", "playwright.config.ts", false)

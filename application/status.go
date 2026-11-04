@@ -1797,8 +1797,14 @@ const refusedLine = "refused, waiting on the Mayor (mw retry or a hold)"
 // slot's overall most.
 const handedBackLine = "handed back at the merge slot's overall most: the next dispatch tick runs its close-out alone again"
 
-// strandedLine is what the report says of a claim whose lease has lapsed.
-func strandedLine(since time.Time) string {
+// strandedLine is what the report says of a claim whose lease has lapsed, and
+// what the host's next dispatch tick does with it for the run state it is in:
+// a landed one is closed, never given back (mw-gq6.950); any other is given
+// back (a refused, queued or handed-back claim has a line of its own).
+func strandedLine(since time.Time, run string) string {
+	if run == RunLanded {
+		return fmt.Sprintf("STRANDED: lease ran out %s with no heartbeat since, so no session is working it, and its last run landed; the host that holds it closes the story on its next dispatch tick", since.UTC().Format(LastSyncFormat))
+	}
 	return fmt.Sprintf("STRANDED: lease ran out %s with no heartbeat since, so no session is working it; the host that holds it gives the claim back on its next dispatch tick", since.UTC().Format(LastSyncFormat))
 }
 
@@ -2683,7 +2689,7 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 		} else if w.Runs[d.Story.ID] == RunCloseOutAgain {
 			wrapInto(b, "      ", handedBackLine)
 		} else if since := lapsedLease(d, w.Now); !d.Hitl() && !since.IsZero() {
-			wrapInto(b, "      ", strandedLine(since))
+			wrapInto(b, "      ", strandedLine(since, w.Runs[d.Story.ID]))
 		}
 	}
 }
@@ -2893,7 +2899,7 @@ func (r RunningStory) write(b *strings.Builder) {
 		clip(b, fmt.Sprintf("    NOT RUNNING: run=%s", r.Run))
 	}
 	if !r.Stranded.IsZero() {
-		wrapInto(b, "    ", strandedLine(r.Stranded))
+		wrapInto(b, "    ", strandedLine(r.Stranded, r.Run))
 	}
 	if !r.NoSession.IsZero() {
 		clip(b, "    "+r.noSessionLine())
