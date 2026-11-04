@@ -1314,12 +1314,13 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		return n.queue(ctx, c, report)
 	}
 
-	n.readBackend(ctx, c, report)
+	base := StartPoint(n.remote(), c.target)
+	n.readBackend(ctx, c, report, base, c.branch)
 	var smokeNotes []string
-	c.smokeApps, smokeNotes = n.Smoke.Wants(ctx, c.path.Rig, c.rigDir, StartPoint(n.remote(), c.target), c.branch)
+	c.smokeApps, smokeNotes = n.Smoke.Wants(ctx, c.path.Rig, c.rigDir, base, c.branch)
 	report.Notes = append(report.Notes, smokeNotes...)
-	n.readSmokeElsewhere(ctx, c, StartPoint(n.remote(), c.target), c.branch)
-	n.readFilesOutsideTheKey(ctx, c, report)
+	n.readSmokeElsewhere(ctx, c, base, c.branch)
+	n.readFilesOutsideTheKey(ctx, c, report, base, c.branch)
 
 	// Only one close-out at a time may touch a rig's target branch: this host's
 	// own slot keeps this host's out, and inside it the rig's slot across hosts
@@ -1411,7 +1412,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// with the session it runs in leaves a story a later run can tell is landed.
 	n.afterLanding(ctx, c, report)
 	n.smoke(ctx, c, report)
-	n.stageBackend(ctx, c, report)
+	n.stageBackend(ctx, c, report, report.How.Commit)
 	n.springTester(ctx, c, report, landed)
 	return n.finish(ctx, c, report, outcome, false)
 }

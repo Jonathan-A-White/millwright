@@ -801,6 +801,11 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 		smokeApps = appendNew(smokeApps, apps...)
 		n.readSmokeElsewhere(ctx, c, report.Base, s.Branch)
 		unhosted = unhosted || c.smokeUnhosted
+		// Read against the batch's base, as the smoke is: the target now holds
+		// the story, and the story's own changes are no longer a difference from
+		// it. A step Next.land takes after its push is taken below (mw-gq6.963).
+		n.readBackend(ctx, c, nr, report.Base, s.Branch)
+		n.readFilesOutsideTheKey(ctx, c, nr, report.Base, s.Branch)
 
 		how := "its merge"
 		if s.FastForward {
@@ -818,6 +823,7 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 		n.writeOrSay(ctx, c, nr, "the run state", fmt.Sprintf("%s could not be recorded as %s=%s", s.ID, RunState, RunLanded),
 			func() error { return n.Tracker.SetStoryState(ctx, s.ID, RunState, RunLanded, outcome) })
 		n.queueStamp(ctx, c, nr, Landed{Commit: s.Merge})
+		n.sayFilesOutsideTheKey(ctx, c, nr)
 
 		line := LedgerLine{
 			When: n.now(), StoryID: s.ID, Title: s.Title, Outcome: outcome, Path: s.path,
@@ -900,6 +906,19 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 	}
 	b.say("after landing done: the rig's checkout is brought up and its command run or skipped")
 	nr.Notes = append(nr.Notes, once.Notes...)
+
+	// The backend each story changed, staged at the batch's commit, which is what
+	// the target branch holds: as a story is staged after its after-landing
+	// command. Two stories that changed it are one swap, the commit being one
+	// (BackendStage.stage files one bead for a step already filed).
+	for _, m := range mails {
+		var staged NextReport
+		n.stageBackend(ctx, m.c, &staged, report.Commit)
+		for _, note := range staged.Notes {
+			b.say("%s", note)
+		}
+		nr.Notes = append(nr.Notes, staged.Notes...)
+	}
 
 	// The mails go before the smoke, which is minutes for each example of each
 	// app: the Mayor is told of a landing when it is made (mw-gq6.626).

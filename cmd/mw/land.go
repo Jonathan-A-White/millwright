@@ -154,6 +154,7 @@ func newLandCmd() *cobra.Command {
 				DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 				Deployed:     hostDeployedMarks(),
 				Smoke:        hostGristSmoke(gateway, host, rigs, worktrees, cmd.OutOrStdout(), application.BatchLogPrefix+"grist smoke: "),
+				Backend:      hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr()), // staged as after a single landing (mw-gq6.963)
 				Units:        userunits.Systemctl{},
 				Stamps:       stamps,
 			}

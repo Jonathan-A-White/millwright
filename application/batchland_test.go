@@ -1141,3 +1141,121 @@ func TestABatchLandingThatMergedADemoFilesNoTesterForIt(t *testing.T) {
 		t.Errorf("expected no Tester for a demo, got %+v", filed)
 	}
 }
+
+// A batch landing says what a single landing says of each story it lands
+// (mw-gq6.963): the files the story's branch changed that its files key does not
+// name, as a comment, and the backend the story changed, staged with its hands
+// step. Both are read against the batch's base, since by the time the batch is
+// recorded the target branch holds the stories.
+
+// batchChanges is the files each branch of a batch changed, by branch, and the
+// ranges ChangedFiles was asked about.
+type batchChanges struct {
+	files map[string][]string
+	asked *[]string
+}
+
+func (b batchChanges) ChangedFiles(_ context.Context, _, base, branch string) ([]string, error) {
+	*b.asked = append(*b.asked, base+".."+branch)
+	return b.files[branch], nil
+}
+
+func (batchChanges) AddedFiles(context.Context, string, string, string) ([]application.AddedFile, error) {
+	return nil, nil
+}
+
+func (batchChanges) DiffLines(context.Context, string, string, string, string) ([]application.DiffLine, error) {
+	return nil, nil
+}
+
+// aBatchLandedOnPostern records as landed a batch of two stories of the postern
+// rig of epic mw-j0f2d, mw-j0f2d.28 (files key server/a.go) and mw-j0f2d.29
+// (files key server/b.go), each branch having changed what changes says, and
+// returns the rig as the backend tests build it and what the record said.
+func aBatchLandedOnPostern(t *testing.T, changes map[string][]string, backendChanged bool) (backendRig, *application.NextReport, []string) {
+	t.Helper()
+	ctx := context.Background()
+	r := aBackendRig(t, "laptop", "laptop")
+	r.builds.Changes = backendChanged
+	r.tracker.AddStory("mw-j0f2d", domain.Story{ID: "mw-j0f2d.29", Title: "Show the Governor's presence"})
+	report := &application.BatchReport{Rig: "postern", Number: 7, Target: "main", Base: "origin/main", Commit: landedCommit}
+	for id, key := range map[string]string{"mw-j0f2d.28": "server/a.go", "mw-j0f2d.29": "server/b.go"} {
+		mustDo(t, r.tracker.ClaimStory(ctx, id))
+		detail, err := r.tracker.ShowStory(ctx, id)
+		mustDo(t, err)
+		path := domain.Path{Rig: "postern", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelOpus, Effort: domain.EffortHigh, Files: key}
+		report.Merged = append(report.Merged, application.MergedStory(id, "merge"+id, detail, path))
+	}
+	slices.SortFunc(report.Merged, func(a, b application.BatchStory) int { return strings.Compare(a.ID, b.ID) })
+	lands := &fakeRetryLanding{}
+	var out bytes.Buffer
+	var asked []string
+	land := application.BatchLand{Next: application.Next{
+		Tracker: r.tracker, Vault: newFakeVault(), Worktrees: lands, Landing: lands,
+		Rules:   apptest.NewFakeEpicRules(),
+		Changes: batchChanges{files: changes, asked: &asked},
+		Backend: r.stage,
+		Now:     func() time.Time { return time.Date(2026, 11, 4, 16, 0, 0, 0, time.UTC) },
+		Seat:    "builder", Host: "laptop", Out: &out, Err: &out,
+		Rigs: map[string]string{"postern": "/rigs/postern"},
+	}}
+	nr := &application.NextReport{}
+	land.RecordLanded(ctx, "/rigs/postern", report, nr)
+	return r, nr, asked
+}
+
+// swapBeadsFiled is the beads filed under the epic besides the batch's two stories.
+func swapBeadsFiled(t *testing.T, r backendRig) []application.StoryDetail {
+	t.Helper()
+	var filed []application.StoryDetail
+	for _, s := range filedUnder(t, r, "mw-j0f2d") {
+		if s.Story.ID != "mw-j0f2d.29" {
+			filed = append(filed, s)
+		}
+	}
+	return filed
+}
+
+func TestABatchLandingCommentsOnEachStoryTheFilesItsBranchChangedOutsideItsKey(t *testing.T) {
+	r, _, asked := aBatchLandedOnPostern(t, map[string][]string{
+		"origin/mw/mw-j0f2d.28": {"server/a.go", "docs/notes.md"},
+		"origin/mw/mw-j0f2d.29": {"server/b.go"},
+	}, false)
+
+	said := strings.Join(r.tracker.Comments("mw-j0f2d.28"), "\n")
+	if !strings.Contains(said, application.FilesOutsideTheKey+" docs/notes.md") || strings.Contains(said, "server/a.go,") {
+		t.Errorf("expected mw-j0f2d.28 to be told of docs/notes.md alone as outside its key, got %q", said)
+	}
+	if said := strings.Join(r.tracker.Comments("mw-j0f2d.29"), "\n"); strings.Contains(said, application.FilesOutsideTheKey) {
+		t.Errorf("expected nothing said of mw-j0f2d.29, whose branch kept to its key, got %q", said)
+	}
+	if !slices.Contains(asked, "origin/main..origin/mw/mw-j0f2d.28") {
+		t.Errorf("expected the branch read against the batch's base, not the target it now holds, got %q", asked)
+	}
+}
+
+func TestABatchLandingStagesTheBackendAStoryChangedAtTheBatchCommitWithItsHandsStep(t *testing.T) {
+	r, nr, _ := aBatchLandedOnPostern(t, nil, true)
+
+	if len(r.builds.Built) == 0 || r.builds.Built[0].Commit != landedCommit {
+		t.Fatalf("expected the backend built at the batch's commit, got %+v (notes %q)", r.builds.Built, nr.Notes)
+	}
+	if !slices.ContainsFunc(r.builds.Asked, func(a string) bool { return strings.Contains(a, "origin/main...origin/mw/mw-j0f2d.28 server") }) {
+		t.Errorf("expected the story's own changes under server asked against the batch's base, got %q", r.builds.Asked)
+	}
+	filed := swapBeadsFiled(t, r)
+	if len(filed) != 1 {
+		t.Fatalf("expected one swap bead for the one commit, though two stories changed the backend, got %+v", filed)
+	}
+	steps := handsSteps(t, r.tracker, filed[0].Story.ID)
+	if len(steps) != 1 || steps[0].ID != "backend-4c9db71" {
+		t.Fatalf("expected the hands step backend-4c9db71 on %s, got %+v", filed[0].Story.ID, steps)
+	}
+}
+
+func TestABatchLandingThatChangedNoBackendStagesNothing(t *testing.T) {
+	r, _, _ := aBatchLandedOnPostern(t, nil, false)
+	if len(r.builds.Built) != 0 || len(swapBeadsFiled(t, r)) != 0 {
+		t.Errorf("expected nothing built or filed, got %+v", r.builds.Built)
+	}
+}

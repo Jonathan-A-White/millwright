@@ -51,14 +51,15 @@ func (n Next) recordFilesChanged(ctx context.Context, storyID string) {
 
 // readFilesOutsideTheKey is what the story's branch changes that its files key
 // does not name, read before the landing moves the target branch: afterwards the
-// branch is part of it and changes nothing. A story with no files key names
-// nothing to be outside of, and a branch that cannot be read is a note.
-func (n Next) readFilesOutsideTheKey(ctx context.Context, c *closeOut, report *NextReport) {
+// branch is part of it and changes nothing (a batch reads it against the base it
+// merged on, for the same reason). A story with no files key names nothing to be
+// outside of, and a branch that cannot be read is a note.
+func (n Next) readFilesOutsideTheKey(ctx context.Context, c *closeOut, report *NextReport, base, branch string) {
 	key := domain.FileList(c.path.Files)
 	if n.Changes == nil || len(key) == 0 {
 		return
 	}
-	files, err := n.Changes.ChangedFiles(ctx, c.rigDir, StartPoint(n.remote(), c.target), c.branch)
+	files, err := n.Changes.ChangedFiles(ctx, c.rigDir, base, branch)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the files %s changed could not be read to compare with its files key: %v", c.id, err))
 		return

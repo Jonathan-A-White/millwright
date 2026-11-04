@@ -553,12 +553,14 @@ func (n Next) restartUnits(ctx context.Context, c *closeOut, report *NextReport)
 // changed what the rig's backend is built from: afterwards the commits are on the
 // target branch and no longer the story's alone. A look that fails counts as a
 // change, because a backend half wrongly staged costs one card, and one left
-// undeployed is what this exists to prevent.
-func (n Next) readBackend(ctx context.Context, c *closeOut, report *NextReport) {
+// undeployed is what this exists to prevent. The commits are those branch has
+// beyond base: a single landing reads them before it merges, against the target
+// branch, and a batch against the base it merged on, after.
+func (n Next) readBackend(ctx context.Context, c *closeOut, report *NextReport, base, branch string) {
 	if !n.Backend.Wants(c.path.Rig) {
 		return
 	}
-	changed, err := n.Backend.Touches(ctx, c.path.Rig, StartPoint(n.remote(), c.target), c.branch)
+	changed, err := n.Backend.Touches(ctx, c.path.Rig, base, branch)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("backend: whether %s changed the backend of %s could not be read, so it is staged to be safe: %s", c.id, c.path.Rig, firstLine(err.Error())))
 		changed = true
@@ -569,8 +571,9 @@ func (n Next) readBackend(ctx context.Context, c *closeOut, report *NextReport) 
 // stageBackend, once the story is landed, builds the backend the landing changed
 // on the home and writes its swap as a hands step, or leaves a note for the
 // home's next tick when this host is not home. It restarts nothing: the swap
-// runs when the Governor approves the step.
-func (n Next) stageBackend(ctx context.Context, c *closeOut, report *NextReport) {
+// runs when the Governor approves the step. commit is the one the landing put on
+// the target branch.
+func (n Next) stageBackend(ctx context.Context, c *closeOut, report *NextReport, commit string) {
 	if !c.backendChanged {
 		return
 	}
@@ -579,6 +582,6 @@ func (n Next) stageBackend(ctx context.Context, c *closeOut, report *NextReport)
 		Story:  c.id,
 		Title:  c.detail.Story.Title,
 		Epic:   c.detail.EpicID,
-		Commit: report.How.Commit,
+		Commit: commit,
 	})...)
 }

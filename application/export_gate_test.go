@@ -25,5 +25,5 @@ func (b BatchLand) RecordLanded(ctx context.Context, rigDir string, report *Batc
 // MergedStory is a story of a batch as the batch merged it, with the detail and
 // path the batch read of it, for the tests of package application_test.
 func MergedStory(id, merge string, detail StoryDetail, path domain.Path) BatchStory {
-	return BatchStory{ID: id, Title: detail.Story.Title, Merge: merge, Commits: 1, detail: detail, path: path}
+	return BatchStory{ID: id, Title: detail.Story.Title, Merge: merge, Commits: 1, detail: detail, path: path, Branch: "origin/" + StoryBranch(id)}
 }
