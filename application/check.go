@@ -100,6 +100,12 @@ type Check struct {
 	CallBudget   time.Duration
 	GateExpected func(ctx context.Context, rig string) time.Duration
 
+	// PartExpected is the same for part n of a split gate: how long it usually
+	// takes on this host, 0 when no figure is known. A foreground --part that wins
+	// the merge slot when the part would not end inside what is left of the call
+	// does not start it (mw-gq6.944).
+	PartExpected func(ctx context.Context, rig string, part int) time.Duration
+
 	// Load is how busy this host is, read around the rig's tests as a
 	// close-out reads it (mw-gq6.379): the check waits, up to LoadBound, for a
 	// busy host to calm before the tests, and runs them once more when they fail

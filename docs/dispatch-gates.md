@@ -241,7 +241,20 @@ call, which is cut off at 590 seconds with no words (mw-gq6.939):
   detaches the check with `--wait` 40m (the log is the story's `check-N.log`).
 - **`mw check --part N`** is run one call per part to fit the 590 seconds and keeps
   `CheckPartSlotWait` and the kept place whether or not `--wait` is given; its line is
-  that part's name, *did not start*, and the same words.
+  that part's name, *did not start*, and the same words. A part that passed keeps how
+  long it took, by part number and host, in the story's run
+  (`runs/<story>/check-<attempt>-part-<n>.took`, `application.PartTime`, read back from
+  every story's run by `vault.PartTimes`). A part that needs the merge slot and wins it
+  with less of `CheckCallBudget` left than its usual time on this host (the median of
+  its last ten passing runs, `GatePartExpectedFor`, `Check.PartExpected`) is not
+  started, as a whole check's gate is not: it gives the slot back (`QueuePlace.Late`,
+  honoured by `rig.Slots` as by `hostlock.Gate`), keeps its place and ends in one line,
+  *part N of M (name) did not start: the merge slot of <rig> is free, but the part needs
+  about P and only R is left in this call; your place ... is kept for 10 minutes: run the
+  same command again to start it* (an error, like the part's other did-not-start lines,
+  with nothing run). A part with no figure yet, one whose time is longer than a whole
+  call, or one that needs no merge slot (nothing to wait for, so the whole call is left),
+  is started as it always was (mw-gq6.944).
 
 A place is kept by the queue itself (`infrastructure/ticketq`): the ticket of a waiter
 that asked (`application.QueuePlace`, put on the wait's context) is not removed when

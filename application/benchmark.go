@@ -319,6 +319,102 @@ func GateExpectedFor(history []Benchmark, rig, host string, s BenchmarkSettings)
 	return 0
 }
 
+// PartTime is how long one passing run of part Part of a rig's split gate took
+// on a host (mw-gq6.944): kept in the story's run directory, one file for the
+// part and the attempt, and read back from there on every host, as a Benchmark is.
+type PartTime struct {
+	Story   string
+	Rig     string
+	Host    string
+	Part    int
+	At      time.Time
+	Seconds float64
+}
+
+// PartTimeBook is where the times of past parts are read from, every host's
+// together: the adapter is the story run records in the vault.
+type PartTimeBook interface {
+	// RecentParts is every part time the vault holds, oldest first.
+	RecentParts(ctx context.Context) ([]PartTime, error)
+}
+
+// partTimeWords are the lines of a part's time record, in order.
+const (
+	partTimeHost    = "host"
+	partTimeRig     = "rig"
+	partTimePart    = "part"
+	partTimeAt      = "at"
+	partTimeSeconds = "seconds"
+)
+
+// CheckPartTimeFileName is the name of the record of how long part n of a story's
+// attempt took, in the story's run directory. It is not the part's own record
+// (CheckPartFileName), which the last call of mw check reads.
+func CheckPartTimeFileName(attempt, n int) string {
+	if attempt < 1 {
+		attempt = 1
+	}
+	return fmt.Sprintf("check-%d-part-%d.took", attempt, n)
+}
+
+// PartTimeFileSuffix ends the name of every such record.
+const PartTimeFileSuffix = ".took"
+
+// String is the record: one word and its value a line.
+func (p PartTime) String() string {
+	return fmt.Sprintf("%s %s\n%s %s\n%s %d\n%s %s\n%s %g\n",
+		partTimeHost, p.Host, partTimeRig, p.Rig, partTimePart, p.Part,
+		partTimeAt, p.At.UTC().Format(time.RFC3339), partTimeSeconds, p.Seconds)
+}
+
+// ReadPartTime reads a record written by PartTime.String, and whether it was one.
+func ReadPartTime(storyID, text string) (PartTime, bool) {
+	p := PartTime{Story: storyID}
+	var seen int
+	for _, line := range strings.Split(text, "\n") {
+		word, rest, _ := strings.Cut(strings.TrimSpace(line), " ")
+		switch word {
+		case partTimeHost:
+			p.Host = rest
+			seen++
+		case partTimeRig:
+			p.Rig = rest
+			seen++
+		case partTimePart:
+			if _, err := fmt.Sscanf(rest, "%d", &p.Part); err == nil {
+				seen++
+			}
+		case partTimeAt:
+			if at, err := time.Parse(time.RFC3339, rest); err == nil {
+				p.At = at
+				seen++
+			}
+		case partTimeSeconds:
+			if _, err := fmt.Sscanf(rest, "%g", &p.Seconds); err == nil {
+				seen++
+			}
+		}
+	}
+	return p, seen == 5 && p.Host != "" && p.Rig != "" && p.Part > 0 && p.Seconds > 0
+}
+
+// GatePartExpectedFor is how long part n of a rig's split gate usually takes on a
+// host: the median of its last UsualGates passing runs there, 0 when none is
+// recorded. A foreground mw check --part reads it as a whole check reads
+// GateExpectedFor (mw-gq6.944).
+func GatePartExpectedFor(history []PartTime, rig, host string, part int, s BenchmarkSettings) time.Duration {
+	var secs []float64
+	for _, p := range slices.SortedStableFunc(slices.Values(history), func(a, b PartTime) int { return a.At.Compare(b.At) }) {
+		if p.Rig == rig && p.Host == host && p.Part == part && p.Seconds > 0 {
+			secs = append(secs, p.Seconds)
+		}
+	}
+	if len(secs) > s.usualGates() {
+		secs = secs[len(secs)-s.usualGates():]
+	}
+	return seconds(median(secs))
+}
+
 // GateLines is, for each rig on each host that has recorded a gate, the median
 // of its last UsualGates gates against the latest, in rig then host order.
 func GateLines(history []Benchmark, s BenchmarkSettings) []GateLine {

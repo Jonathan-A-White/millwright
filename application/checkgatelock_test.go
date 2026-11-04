@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -764,5 +765,209 @@ func TestAForegroundWholeCheckWhoseGateIsLongerThanAWholeCallStartsItAsBefore(t 
 				t.Errorf("expected the tests to run once, ran %d", checks.runs)
 			}
 		})
+	}
+}
+
+// quickParts is a rig's gate in two parts that each pass at once, noting which
+// ran. Neither is a slot-free runner, so both take the rig's merge slot.
+type quickParts struct {
+	mu  sync.Mutex
+	ran []string
+}
+
+func (q *quickParts) Parts(string) []application.GatePart {
+	return []application.GatePart{{Name: "lint", Command: "lint"}, {Name: "unit", Command: "unit"}}
+}
+
+func (q *quickParts) RunLine(_ context.Context, _, _, command string) (application.Checked, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.ran = append(q.ran, command)
+	return application.Checked{Command: command, Passed: true}, nil
+}
+
+func (q *quickParts) ranCount() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.ran)
+}
+
+// aPartBesideTheMergeSlot is mw check --part N in a foreground call of budget,
+// on a rig whose merge slot a landing may hold (mw-gq6.944).
+type aPartBesideTheMergeSlot struct {
+	slots   *rig.Slots
+	rigDir  string
+	parts   *quickParts
+	records *mapRecords
+	told    *lockedBuffer
+}
+
+func newPartBesideTheMergeSlot(t *testing.T) *aPartBesideTheMergeSlot {
+	t.Helper()
+	rigDir := filepath.Join(t.TempDir(), "rigs", "millwright")
+	if err := os.MkdirAll(rigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return &aPartBesideTheMergeSlot{
+		slots:   rig.NewSlots(rig.WithSlotPoll(5 * time.Millisecond)),
+		rigDir:  rigDir,
+		parts:   &quickParts{},
+		records: &mapRecords{},
+		told:    &lockedBuffer{},
+	}
+}
+
+func (p *aPartBesideTheMergeSlot) checkPart(n int, wait, budget time.Duration, expected func(part int) time.Duration) (application.CheckReport, error) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	return application.Check{
+		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: &scriptedChecks{passes: []bool{true}},
+		Slot: p.slots, Parts: p.parts, Records: p.records, Part: n, PartSlotWait: wait,
+		KeepPlace:  10 * time.Minute,
+		CallBudget: budget,
+		PartExpected: func(_ context.Context, _ string, part int) time.Duration {
+			if expected == nil {
+				return 0
+			}
+			return expected(part)
+		},
+		Host: "laptop", Remote: "origin",
+		Rigs: map[string]string{"millwright": p.rigDir},
+		Out:  writerOf(p.told),
+	}.Run(context.Background(), "mw-x.1")
+}
+
+func (p *aPartBesideTheMergeSlot) queued() int {
+	entries, _ := os.ReadDir(rig.SlotPath(p.rigDir) + rig.SlotQueueSuffix)
+	return len(entries)
+}
+
+// A part that waited for the merge slot and won it too late to end inside the
+// Builder's call does not start: the call would cut it off silently with the slot
+// held. It gives the slot back, keeps its place and says what is left (mw-gq6.944).
+// Run again at once, it takes the place up and runs.
+//
+// The times are real: the landing holds the slot for 3 s, the part is expected
+// to take 10 s of a 12 s call, so it is late whatever else the host took time over,
+// and the second call, which starts at once, fits unless the host took two seconds.
+func TestAForegroundPartThatGetsTheMergeSlotTooLateForItKeepsItsPlaceAndSaysToRunItAgain(t *testing.T) {
+	p := newPartBesideTheMergeSlot(t)
+	landing, err := p.slots.Take(context.Background(), p.rigDir, "mw land on laptop, landing a batch of millwright")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for deadline := time.Now().Add(5 * time.Second); p.queued() < 1 && time.Now().Before(deadline); {
+			time.Sleep(5 * time.Millisecond)
+		}
+		time.Sleep(3 * time.Second)
+		landing.Release(context.Background())
+	}()
+
+	expected := func(part int) time.Duration {
+		if part == 2 {
+			return 10 * time.Second
+		}
+		return 0
+	}
+	_, err = p.checkPart(2, time.Minute, 12*time.Second, expected)
+	if err == nil {
+		t.Fatal("expected a part that did not start to say so")
+	}
+	for _, want := range []string{"part 2 of 2 (unit) did not start", "needs about 10s and only ", " left in this call", "your place 1 of 1 in the queue is kept for 10 minutes", "run the same command again"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the line to say %q, got %q", want, err.Error())
+		}
+	}
+	if strings.Contains(err.Error(), "\n") {
+		t.Errorf("expected one line, got %q", err.Error())
+	}
+	if p.parts.ranCount() != 0 {
+		t.Errorf("expected the part not to be started, it ran %d time(s)", p.parts.ranCount())
+	}
+	if got := p.queued(); got != 1 {
+		t.Errorf("expected the part's ticket to outlive the call, the queue holds %d", got)
+	}
+	if _, err := p.checkPart(2, time.Minute, 12*time.Second, expected); err != nil {
+		t.Fatalf("expected the second call to run the part, got %v", err)
+	}
+	if p.parts.ranCount() != 1 {
+		t.Errorf("expected the part to run once, it ran %d time(s)", p.parts.ranCount())
+	}
+	if got := p.queued(); got != 0 {
+		t.Errorf("expected the place to be used up by the run, the queue holds %d", got)
+	}
+}
+
+// A part that fits what is left of the call, or has no figure, or whose time is
+// longer than a whole call, is started as it always was.
+func TestAForegroundPartThatFitsOrHasNoFigureIsStarted(t *testing.T) {
+	for name, expected := range map[string]time.Duration{
+		"fits":                 2 * time.Second,
+		"no figure":            0,
+		"figure past the call": time.Hour,
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPartBesideTheMergeSlot(t)
+			_, err := p.checkPart(1, time.Minute, 10*time.Second, func(int) time.Duration { return expected })
+			if err != nil {
+				t.Fatalf("expected the part to be started, got %v", err)
+			}
+			if p.parts.ranCount() != 1 {
+				t.Errorf("expected the part to run once, it ran %d time(s)", p.parts.ranCount())
+			}
+			if expected > 0 && expected < 10*time.Second && !strings.Contains(p.told.String(), "expected about 2s, ") {
+				t.Errorf("expected the figures to be said when the part starts, got %q", p.told.String())
+			}
+		})
+	}
+}
+
+// A part's time is kept, by part number and host, for the next fit test to read
+// (mw-gq6.944): not for a part that failed, whose time says nothing of a good run.
+func TestAPartThatPassedKeepsItsTimeByPartNumberAndHost(t *testing.T) {
+	p := newPartBesideTheMergeSlot(t)
+	if _, err := p.checkPart(2, time.Minute, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	text, err := p.records.ReadRunFile(context.Background(), "mw-x.1", application.CheckPartTimeFileName(1, 2))
+	if err != nil {
+		t.Fatalf("expected the part's time to be kept: %v", err)
+	}
+	got, ok := application.ReadPartTime("mw-x.1", text)
+	if !ok {
+		t.Fatalf("expected the record to be read back, got %q", text)
+	}
+	if got.Part != 2 || got.Host != "laptop" || got.Rig != "millwright" || got.Story != "mw-x.1" || got.At.IsZero() {
+		t.Errorf("expected part 2 of millwright on laptop with a time, got %+v", got)
+	}
+}
+
+func TestAPartsExpectedTimeIsTheMedianOfItsLastRunsOnTheHostAlone(t *testing.T) {
+	at := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
+	run := func(host string, part int, secs float64, mins int) application.PartTime {
+		return application.PartTime{Story: "mw-x", Rig: "millwright", Host: host, Part: part, At: at.Add(time.Duration(mins) * time.Minute), Seconds: secs}
+	}
+	history := []application.PartTime{
+		run("desktop", 2, 100, 1), run("desktop", 2, 300, 2), run("desktop", 2, 200, 3),
+		run("desktop", 1, 10, 4), run("laptop", 2, 999, 5),
+	}
+	s := application.BenchmarkSettings{}
+	if got := application.GatePartExpectedFor(history, "millwright", "desktop", 2, s); got != 200*time.Second {
+		t.Errorf("expected the median of part 2's three runs on the desktop, 200s, got %s", got)
+	}
+	if got := application.GatePartExpectedFor(history, "millwright", "desktop", 1, s); got != 10*time.Second {
+		t.Errorf("expected part 1's own time, got %s", got)
+	}
+	if got := application.GatePartExpectedFor(history, "millwright", "desktop", 3, s); got != 0 {
+		t.Errorf("expected no figure for a part never run, got %s", got)
+	}
+	if got := application.GatePartExpectedFor(history, "other", "desktop", 2, s); got != 0 {
+		t.Errorf("expected no figure for another rig, got %s", got)
+	}
+	// Only the last UsualGates runs count.
+	if got := application.GatePartExpectedFor(history, "millwright", "desktop", 2, application.BenchmarkSettings{UsualGates: 2}); got != 250*time.Second {
+		t.Errorf("expected the median of the last two runs, 250s, got %s", got)
 	}
 }

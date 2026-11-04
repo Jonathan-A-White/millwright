@@ -179,9 +179,11 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	part := parts[k.Part-1]
 	label := partLabel(k.Part, len(parts), part)
 	tip := k.cleanTip(ctx, c)
+	began := time.Now()
+	fit := k.partFitOf(ctx, c.path.Rig, k.Part, began)
 
 	if k.Slot != nil && PartNeedsSlot(part) {
-		holding, err := k.takeSlotWithin(ctx, c, slotTry{
+		holding, err := k.takeSlotFit(ctx, c, fit, k.partSlotWait(), slotTry{
 			label:  label,
 			noun:   "part",
 			record: CheckPartHeldFileName(report.Attempt, k.Part),
@@ -192,6 +194,10 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 		}
 		defer holding.Release(ctx)
 	}
+	if fit != nil && k.Out != nil {
+		fmt.Fprintf(k.Out, "  part    expected about %s, %s left in this call\n", gateWaited(fit.expected), gateWaited(fit.left()))
+	}
+	ranFrom := time.Now()
 	checked, err := k.Parts.RunLine(ctx, c.path.Rig, c.worktree, part.Command)
 	if err != nil {
 		return report, fmt.Errorf("checking %s: %s could not be run: %w", c.id, label, err)
@@ -213,6 +219,13 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	record := fmt.Sprintf("%s %s\n%s\n%s\n", partTipWord, recordedTip, result, checked.Tail(CheckLines))
 	if _, err := k.Records.PutRunFile(ctx, c.id, CheckPartFileName(report.Attempt, k.Part), record); err != nil {
 		return report, fmt.Errorf("checking %s: what %s said could not be kept in the run: %w", c.id, label, err)
+	}
+
+	// How long a part that passed took is kept, by part number and host, for the
+	// fit test of the next foreground call (mw-gq6.944).
+	if checked.Passed && !checked.NotRun {
+		taken := PartTime{Story: c.id, Rig: c.path.Rig, Host: k.Host, Part: k.Part, At: time.Now(), Seconds: time.Since(ranFrom).Seconds()}
+		_, _ = k.Records.PutRunFile(ctx, c.id, CheckPartTimeFileName(report.Attempt, k.Part), taken.String())
 	}
 
 	var said strings.Builder
@@ -273,14 +286,42 @@ func (k Check) takeSlotWithin(ctx context.Context, c *closeOut, try slotTry) (Ho
 
 // takeSlotFor is takeSlotWithin for a wait of within.
 func (k Check) takeSlotFor(ctx context.Context, c *closeOut, try slotTry, within time.Duration) (Holding, error) {
+	return k.takeSlotFit(ctx, c, nil, within, try)
+}
+
+// takeSlotFit is takeSlotFor for a part that must fit the rest of its call: fit,
+// when it is not nil, is asked once the slot is won, and a part that would not
+// end inside what is left of the call is not started, the slot is given back and
+// the place kept (mw-gq6.944).
+func (k Check) takeSlotFit(ctx context.Context, c *closeOut, fit *callFit, within time.Duration, try slotTry) (Holding, error) {
 	waitCtx, cancel := context.WithTimeout(ctx, within)
 	defer cancel()
 	waitCtx, ask := k.askToKeep(waitCtx, c)
+	if ask != nil && fit != nil {
+		ask.Late = fit.late
+	}
 	holding, err := takeForCheck(waitCtx, k.Slot, c.rigDir, fmt.Sprintf("%s checking %s", SeatIdentity("", k.Host), c.id))
 	if err != nil {
+		if errors.Is(err, ErrPlaceKeptLate) {
+			return nil, errors.New(k.tooLatePartLine(try, c.path.Rig, fit, ask))
+		}
 		return nil, k.slotRefusal(ctx, c, try, err, ask)
 	}
 	return holding, nil
+}
+
+// partFitOf is the fit of part n of the rig's gate to the call this check began,
+// nil when the check is not asked to keep to a call (no CallBudget) or no figure
+// for the part is known (mw-gq6.944).
+func (k Check) partFitOf(ctx context.Context, rig string, n int, began time.Time) *callFit {
+	if k.CallBudget <= 0 || k.PartExpected == nil {
+		return nil
+	}
+	expected := k.PartExpected(ctx, rig, n)
+	if expected <= 0 {
+		return nil
+	}
+	return &callFit{began: began, budget: k.CallBudget, expected: expected}
 }
 
 // slotRefusal is the one line a check ends with when the merge slot could not be

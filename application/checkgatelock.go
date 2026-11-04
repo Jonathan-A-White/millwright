@@ -177,6 +177,15 @@ func (k Check) tooLateLine(f *callFit, ask *QueuePlace) string {
 	k.waiting.set(line)
 	return line
 }
+
+// tooLatePartLine is the same for a part that won the rig's merge slot too late
+// to end inside its call (mw-gq6.944).
+func (k Check) tooLatePartLine(try slotTry, rig string, f *callFit, ask *QueuePlace) string {
+	_, place, of := ask.Result()
+	return fmt.Sprintf("%s did not start: the merge slot of %s is free, but the part needs about %s and only %s is left in this call; your place %d of %d in the queue is kept for %s: run the same command again to start it",
+		try.label, rig, gateWaited(f.expected), gateWaited(f.left()), place, of, keptFor(k.KeepPlace))
+}
+
 // gateNotices says every CheckGateNoticeEvery, while a check waits for the gate
 // lock, that it is still waiting and who holds the lock now.
 type gateNotices struct {

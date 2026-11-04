@@ -256,6 +256,15 @@ func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path s
 		if head || (shared && isYielded(path)) {
 			err := syscall.Flock(int(file.Fd()), how|syscall.LOCK_NB)
 			if err == nil {
+				// Won, but the waiter would not use it now: give it back and keep
+				// the place (mw-gq6.944).
+				if asked != nil && asked.Late != nil && asked.Late() {
+					unlock(file)
+					place, of := tickets.Place(ticket.Name())
+					ticket.Keep(s.now().Add(asked.For))
+					asked.Kept(place, of)
+					return application.ErrPlaceKeptLate
+				}
 				return nil
 			}
 			if !errors.Is(err, syscall.EWOULDBLOCK) {
