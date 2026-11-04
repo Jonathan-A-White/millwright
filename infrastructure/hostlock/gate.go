@@ -149,6 +149,16 @@ func (g *Gate) Take(ctx context.Context, holder string, held func(by string)) (a
 		}
 	}
 
+	// Won, but the waiter would not use it now: give it back and keep the place.
+	if asked != nil && asked.Late != nil && asked.Late() {
+		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		file.Close()
+		place, of := tickets.Place(ticket.Name())
+		ticket.Keep(g.now().Add(asked.For))
+		asked.Kept(place, of)
+		return application.GateTurn{}, application.ErrPlaceKeptLate
+	}
+
 	if err := writeGate(file, holder); err != nil {
 		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 		file.Close()

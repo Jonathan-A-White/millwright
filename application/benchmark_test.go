@@ -321,3 +321,19 @@ func TestTheSlotWaitIsTwiceTheRigsSlowerGateOnTheHostAndNeverUnderTheFloor(t *te
 		}
 	}
 }
+
+func TestGateExpectedForIsTheRigsUsualGateOnTheHostAndNothingWithoutOne(t *testing.T) {
+	at := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	history := []application.Benchmark{
+		{At: at, Rig: "lampas", Host: "laptop", GateSeconds: 200},
+		{At: at.Add(time.Hour), Rig: "lampas", Host: "laptop", GateSeconds: 400},
+		{At: at.Add(2 * time.Hour), Rig: "lampas", Host: "laptop", GateSeconds: 300},
+		{At: at, Rig: "lampas", Host: "desktop", GateSeconds: 900},
+	}
+	if got := application.GateExpectedFor(history, "lampas", "laptop", application.BenchmarkSettings{}); got != 300*time.Second {
+		t.Errorf("expected the median of the laptop's gates, 5m, got %s", got)
+	}
+	if got := application.GateExpectedFor(history, "other", "laptop", application.BenchmarkSettings{}); got != 0 {
+		t.Errorf("expected no figure for a rig with no gate recorded, got %s", got)
+	}
+}

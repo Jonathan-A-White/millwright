@@ -70,12 +70,15 @@ type checkGateLock struct {
 	attempt int
 	// left is what the check's one deadline has left (the closure Check.check makes).
 	left func() time.Duration
+	// fit is whether the rig's gate fits what is left of the Builder's call, nil
+	// when the check does not ask (mw-gq6.940).
+	fit *callFit
 }
 
 // Take implements GateLock. A wait that ran out is a GateLockHandBack, which
 // ends the gate in one line; the holder name it is given is the check's own.
 func (g checkGateLock) Take(ctx context.Context, _ string, held func(by string)) (GateTurn, error) {
-	return g.k.takeForTests(ctx, g.c, wholeTry(g.c, "the rig's tests", CheckWholeHeldFileName(g.attempt)), g.left(), held)
+	return g.k.takeForTests(ctx, g.c, wholeTry(g.c, "the rig's tests", CheckWholeHeldFileName(g.attempt)), g.left(), g.fit, held)
 }
 
 // takeForTests takes what a run of the rig's tests holds in a worktree check:
@@ -85,7 +88,12 @@ func (g checkGateLock) Take(ctx context.Context, _ string, held func(by string))
 // tests before these have spent it, and then each is tried once and the check is
 // handed back if either is held (mw-gq6.918). held is told who has the gate lock
 // the first time it is found held. The holdings are given back together.
-func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, within time.Duration, held func(by string)) (GateTurn, error) {
+//
+// fit, when it is not nil, is asked once the gate lock is won: a gate that would
+// not end inside what is left of the Builder's call is not started, the lock is
+// given back and the check's place in its queue is kept, with one line saying so
+// (mw-gq6.940); a gate that does start says how much of the call is left.
+func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, within time.Duration, fit *callFit, held func(by string)) (GateTurn, error) {
 	began := time.Now()
 	var slot Holding
 	if k.Slot != nil {
@@ -102,6 +110,9 @@ func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, withi
 	waitCtx, cancel := context.WithTimeout(ctx, max(within-time.Since(began), 0))
 	defer cancel()
 	waitCtx, ask := k.askToKeep(waitCtx, c)
+	if ask != nil && fit != nil {
+		ask.Late = fit.late
+	}
 	notices := &gateNotices{k: k, ctx: waitCtx}
 	defer notices.stop()
 	holder := k.checkHolder(c)
@@ -115,11 +126,57 @@ func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, withi
 		if slot != nil {
 			slot.Release(context.Background())
 		}
+		if errors.Is(err, ErrPlaceKeptLate) {
+			return GateTurn{}, GateLockHandBack{Why: k.tooLateLine(fit, ask)}
+		}
 		return GateTurn{}, k.gateLockRefusal(ctx, waitCtx, c, try, notices.by, time.Since(began), err, ask)
+	}
+	if fit != nil && k.Out != nil {
+		fmt.Fprintf(k.Out, "  gate    expected about %s, %s left in this call\n", gateWaited(fit.expected), gateWaited(fit.left()))
 	}
 	return GateTurn{Holding: bothHoldings{slot: slot, lock: turn.Holding}, Waited: turn.Waited, For: turn.For}, nil
 }
 
+// callFit is whether the rig's gate fits what is left of a Builder's foreground
+// call: the call began at began, may spend budget of it, and the gate usually
+// takes expected on this host (mw-gq6.940).
+type callFit struct {
+	began    time.Time
+	budget   time.Duration
+	expected time.Duration
+}
+
+// callFitOf is the fit of the rig's gate to the call this check began, nil when
+// the check is not asked to keep to a call (no CallBudget) or no figure for the
+// rig's gate is known.
+func (k Check) callFitOf(ctx context.Context, rig string, began time.Time) *callFit {
+	if k.CallBudget <= 0 || k.GateExpected == nil {
+		return nil
+	}
+	expected := k.GateExpected(ctx, rig)
+	if expected <= 0 {
+		return nil
+	}
+	return &callFit{began: began, budget: k.CallBudget, expected: expected}
+}
+
+// left is what is left of the call's budget.
+func (f *callFit) left() time.Duration { return max(f.budget-time.Since(f.began), 0) }
+
+// late is whether the gate would not end inside what is left of the call. A gate
+// longer than a whole call is never late: no fresh call would fit it either, and
+// it is started as it always was.
+func (f *callFit) late() bool { return f.expected < f.budget && f.expected > f.left() }
+
+// tooLateLine is the one line a foreground check ends with when it won the gate
+// lock too late for the gate to end inside its call and kept its place instead.
+func (k Check) tooLateLine(f *callFit, ask *QueuePlace) string {
+	_, place, of := ask.Result()
+	line := fmt.Sprintf("%s's gate lock is free, but the gate needs about %s and only %s is left in this call; your place %d of %d in the queue is kept for %s: run the same command again to start it",
+		k.Host, gateWaited(f.expected), gateWaited(f.left()), place, of, keptFor(k.KeepPlace))
+	k.waiting.set(line)
+	return line
+}
 // gateNotices says every CheckGateNoticeEvery, while a check waits for the gate
 // lock, that it is still waiting and who holds the lock now.
 type gateNotices struct {
