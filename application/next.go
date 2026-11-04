@@ -2060,7 +2060,7 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 	// The specs the story added or changed, which the rig's gate does not run
 	// (mw-gq6.366), once the gate itself has passed.
 	if err == nil && checked.Passed {
-		if refusal, stop := n.specsRefusal(ctx, c, report, c.worktree, base, "in the worktree", n.specsFailReason(ctx, c)); stop {
+		if refusal, stop := n.specsRefusal(ctx, c, report, c.worktree, base, "in the worktree", n.specsFailReason(ctx, c), true); stop {
 			refuse(refusal.Reason, refusal.Why, refusal.Said)
 		}
 	}
@@ -2856,7 +2856,7 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 	// The story's changed specs again on a merged result, from the commit the
 	// merge started from.
 	if !landed.FastForward {
-		if refusal, stop := n.specsRefusal(ctx, c, report, dir, landed.Before, "on the merged result", ReasonMergedTestsFail); stop {
+		if refusal, stop := n.specsRefusal(ctx, c, report, dir, landed.Before, "on the merged result", ReasonMergedTestsFail, false); stop {
 			return Landed{}, failedFor(refusal.Reason, fmt.Errorf("%s and %s do not pass together: %s, so nothing was pushed\n\n%s",
 				c.branch, c.target, refusal.Why, refusal.Said))
 		}
@@ -3342,6 +3342,11 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	}
 	if said != "" {
 		note += "\n\n" + said
+	}
+	if report.MainLabels != "" {
+		// Which failing tests fail on main too (mw-gq6.929, mw-gq6.943), where the
+		// Mayor reads the stop, as the mail and the ledger line already say.
+		note += "\n\nOn main: " + report.MainLabels
 	}
 
 	// Each write that meets a passing fault of the network is tried again; one

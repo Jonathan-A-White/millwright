@@ -12,7 +12,12 @@ import (
 // the rig names no command, the story changed no spec, or the run passed. It
 // is asked after the rig's gate has passed, on the worktree and again on a merged
 // result; fail is the reason a failed run is refused as.
-func (n Next) specsRefusal(ctx context.Context, c *closeOut, report *NextReport, dir, base, where string, fail Reason) (Refusal, bool) {
+//
+// With labelMain, a failed run that names failing tests also checks them on the
+// target branch alone, as the gate's own failure does (mw-gq6.943): the notes
+// say of each whether it fails on main too, on the branch only, or was not run.
+// The check only labels; the stop is the same whatever it finds.
+func (n Next) specsRefusal(ctx context.Context, c *closeOut, report *NextReport, dir, base, where string, fail Reason, labelMain bool) (Refusal, bool) {
 	if n.SpecChecks == nil {
 		return Refusal{}, false
 	}
@@ -31,7 +36,13 @@ func (n Next) specsRefusal(ctx context.Context, c *closeOut, report *NextReport,
 			"The last lines of `" + run.Command + "` in " + dir + ":\n\n" + fenced(run.Tail(CheckLines))}, true
 	}
 	why := fmt.Sprintf("the rig's changed specs fail %s: `%s` did not pass [%s]", where, run.Command, named)
-	return Refusal{fail, why, n.failedTestsDetail(ctx, c, report, run.Checked, dir)}, true
+	detail := n.failedTestsDetail(ctx, c, report, run.Checked, dir)
+	if labelMain {
+		// Its answer, main's red, is not acted on: a changed spec that fails on
+		// main too is still a stop, with the labels to say so.
+		n.mainAlone(ctx, c, report, run.Checked, base)
+	}
+	return Refusal{fail, why, detail}, true
 }
 
 // LeftOutTimingSpecs says which changed specs the changed-specs command was not

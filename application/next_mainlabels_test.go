@@ -348,3 +348,84 @@ func TestLastMeaningfulLinesSkipsRulesAndBareFailAndBoundsWhatItQuotes(t *testin
 		t.Errorf("expected nothing, got %q", got)
 	}
 }
+
+// mw-gq6.943: the changed-specs stop is labelled as the gate's is.
+
+// failingSpecs is a rig's changed-specs command that fails TestA and TestB.
+type failingSpecs struct{}
+
+func (failingSpecs) RunSpecs(context.Context, string, string, string) (application.SpecsChecked, error) {
+	return application.SpecsChecked{
+		Checked: application.Checked{Command: "npx playwright test", Output: "--- FAIL: TestA (0.01s)\n--- FAIL: TestB (0.01s)\nFAIL\n"},
+		Specs:   []string{"tests/e2e/a.spec.ts"},
+	}, nil
+}
+
+// passingGate is the rig's tests passing.
+type gatePasses struct{}
+
+func (gatePasses) Run(context.Context, string, string) (application.Checked, error) {
+	return application.Checked{Command: "make test", Passed: true}, nil
+}
+
+func aChangedSpecsStop(t *testing.T, named application.NamedChecks) closeOutOnMain {
+	t.Helper()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
+	vault := newFakeVault()
+	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
+	landing := &aMainLanding{fakeRetryLanding: fakeRetryLanding{AheadCount: 1}}
+	mailbox := apptest.NewFakeMailbox()
+	got := closeOutOnMain{landing: landing, vault: vault}
+	got.report, got.err = application.Next{
+		Tracker: tracker, Vault: vault, Worktrees: landing, Landing: landing,
+		Checks: gatePasses{}, SpecChecks: failingSpecs{}, Slot: aSlot{}, Mailbox: mailbox,
+		NamedChecks: named,
+		Seat:        "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(context.Background(), "mw-x.1")
+	inbox, err := mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range inbox {
+		got.mail += m.Body + "\n"
+	}
+	return got
+}
+
+func TestAChangedSpecsStopLabelsEachFailingTestAndStaysTestsFailEvenWhenMainFailsAll(t *testing.T) {
+	named := &namedTestsThat{run: failingOnMain("--- FAIL: TestA (0.01s)\n--- FAIL: TestB (0.01s)\nFAIL\n")}
+	got := aChangedSpecsStop(t, named)
+	if got.report.Reason != application.ReasonTestsFail || got.report.MainRed != nil {
+		t.Fatalf("expected the same tests-fail stop, not a hold on main's red, got %q red=%v (%v)", got.report.Reason, got.report.MainRed, got.err)
+	}
+	if len(named.asked) != 1 || strings.Join(named.asked[0], ",") != "TestA,TestB" {
+		t.Fatalf("expected one run of TestA and TestB on main, got %q", named.asked)
+	}
+	for _, want := range []string{"TestA: fails on main too", "TestB: fails on main too"} {
+		if !strings.Contains(got.mail, want) {
+			t.Errorf("expected the refused mail to say %q, got:\n%s", want, got.mail)
+		}
+	}
+	if got.landing.opened != 1 || got.landing.closed != 1 {
+		t.Errorf("expected the temporary worktree opened and taken away once, got %d and %d", got.landing.opened, got.landing.closed)
+	}
+}
+
+func TestAChangedSpecsStopWhoseCheckOfMainFailsIsStillTheSameStop(t *testing.T) {
+	named := &namedTestsThat{run: func(context.Context, []string) (application.NamedRun, error) {
+		return application.NamedRun{}, errors.New("no checkout")
+	}}
+	got := aChangedSpecsStop(t, named)
+	if got.report.Reason != application.ReasonTestsFail {
+		t.Fatalf("expected tests-fail, got %q (%v)", got.report.Reason, got.err)
+	}
+	for _, want := range []string{"TestA: not run: no checkout", "TestB: not run: no checkout"} {
+		if !strings.Contains(got.mail, want) {
+			t.Errorf("expected the refused mail to say %q, got:\n%s", want, got.mail)
+		}
+	}
+}

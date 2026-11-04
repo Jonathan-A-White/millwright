@@ -20,6 +20,7 @@ import (
 func registerNextSpecsSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig has a changed-specs command that logs the specs it is given$`, c.theRigLogsChangedSpecs)
 	ctx.Given(`^the rig has a changed-specs command that fails, saying "([^"]*)"$`, c.theRigsChangedSpecsFail)
+	ctx.Given(`^the rig has a changed-specs command that fails, naming the tests "([^"]*)" and "([^"]*)"$`, c.theRigsChangedSpecsFailNaming)
 	ctx.Given(`^the rig has a changed-specs command that fails only once "([^"]*)" is merged in$`, c.theRigsChangedSpecsFailOnlyWhenMerged)
 	ctx.Given(`^the rig's timing_tests name the spec "([^"]*)"$`, c.theRigsTimingTestsNameTheSpec)
 	ctx.Given(`^the story "([^"]*)" also added the spec "([^"]*)"$`, c.theStoryAddedAFile)
@@ -56,6 +57,11 @@ func (c *nextContext) theRigLogsChangedSpecs() error {
 
 func (c *nextContext) theRigsChangedSpecsFail(saying string) error {
 	c.setSpecCommand(fmt.Sprintf("printf 'run %%s\\n' {specs} >> %s; echo '%s'; exit 1", c.specLog(), saying))
+	return nil
+}
+
+func (c *nextContext) theRigsChangedSpecsFailNaming(first, second string) error {
+	c.setSpecCommand(fmt.Sprintf("printf 'run %%s\\n' {specs} >> %s; printf '%%s\\n' '%s' '%s'; exit 1", c.specLog(), first, second))
 	return nil
 }
 

@@ -1934,6 +1934,26 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" carries a comment quoting: tests/e2e/talk-fit.spec.ts
     And the story "mw-gq6.1" carries a comment quoting: 1 failed: talk-fit.spec.ts:26
 
+  # mw-gq6.943: a changed-specs stop that names failing tests says, as the gate's
+  # stop does (mw-gq6.929), which of them fail on main too.
+  Scenario: A failing changed spec is labelled as failing on main too or on the branch only, and the stop is the same
+    Given the rig has a changed-specs command that fails, naming the tests "--- FAIL: TestA" and "--- FAIL: TestB"
+    And the rig has a named-tests command that fails on main alone, saying "--- FAIL: TestA"
+    And the story "mw-gq6.1" also added the spec "tests/e2e/talk-fit.spec.ts"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" is held blocked
+    And the report says it stopped for "tests-fail"
+    And the named-tests command was run once, given: TestA TestB
+    And the story "mw-gq6.1" carries a comment quoting: TestA: fails on main too
+    And the story "mw-gq6.1" carries a comment quoting: TestB: branch only
+    And the last ledger line holds:
+      | not landed (tests-fail): |
+      | TestA: fails on main too |
+      | TestB: branch only       |
+
   Scenario: A changed spec that fails only on the merged result refuses that landing
     Given the other host landed its own work on "main" while "mw-gq6.1" was worked
     And the rig has a changed-specs command that fails only once "main" is merged in
