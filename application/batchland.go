@@ -216,6 +216,10 @@ type BatchReport struct {
 	// RedAt is when the rig's tests first failed on the batch; zero when they
 	// never did.
 	RedAt time.Time
+	// gate is what the batch's gate runs measured of the rig's tests and the
+	// host, as a close-out's does: each story the batch lands has it written
+	// into its result file as its benchmark (mw-gq6.966).
+	gate gateRecord
 	// Fixer is the one fixer the batch was given (Land Rush 5), nil when it
 	// was given none.
 	Fixer *BatchFixing
@@ -652,7 +656,13 @@ func (r BatchReport) allOnTarget() bool {
 func (b BatchLand) runGate(ctx context.Context, dir, rigDir string, report *BatchReport, nr *NextReport) gated {
 	n := b.Next
 	began := n.now()
-	gate, log := n.gateWithSpecs(ctx, b.batchCloseOut(report, rigDir), nr, dir, gateOnTheBatch, RelatedSpan{Base: report.Base, Skip: report.versionCommit})
+	// Each run of the gate is taken with a close-out of its own; what it
+	// measured is kept on the report, the first run's reading of the host and
+	// the time of every run added.
+	bc := b.batchCloseOut(report, rigDir)
+	bc.gate = report.gate
+	gate, log := n.gateWithSpecs(ctx, bc, nr, dir, gateOnTheBatch, RelatedSpan{Base: report.Base, Skip: report.versionCommit})
+	report.gate = bc.gate
 	if lost := b.slotLost(); lost != "" {
 		gate = gated{Err: fmt.Errorf("%s", lost)}
 	}
@@ -806,6 +816,9 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 		// it. A step Next.land takes after its push is taken below (mw-gq6.963).
 		n.readBackend(ctx, c, nr, report.Base, s.Branch)
 		n.readFilesOutsideTheKey(ctx, c, nr, report.Base, s.Branch)
+		// The story landed under the batch's gate, so that is the gate its
+		// benchmark records, as finish records a story's own (mw-gq6.966).
+		c.gate = report.gate
 
 		how := "its merge"
 		if s.FastForward {
@@ -824,6 +837,17 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 			func() error { return n.Tracker.SetStoryState(ctx, s.ID, RunState, RunLanded, outcome) })
 		n.queueStamp(ctx, c, nr, Landed{Commit: s.Merge})
 		n.sayFilesOutsideTheKey(ctx, c, nr)
+		// Before the ledger line, as Next.finish writes it: the result file
+		// carries the gate and the story's time against its par, and is
+		// committed with the batch's records.
+		var benched NextReport
+		written := n.recordBenchmark(ctx, c, &benched, true)
+		nr.Notes = append(nr.Notes, benched.Notes...)
+		if written {
+			if record := RunRecordForAttempt(c.id, c.attempt()); record != "" {
+				report.Records = append(report.Records, record)
+			}
+		}
 
 		line := LedgerLine{
 			When: n.now(), StoryID: s.ID, Title: s.Title, Outcome: outcome, Path: s.path,
@@ -859,6 +883,11 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 			} else {
 				closed = true
 				report.Closed = append(report.Closed, s.ID)
+				// What the story's session left open of its formula, as finish
+				// closes it once the story is closed (mw-gq6.966).
+				var shut NextReport
+				n.closeFormula(ctx, c, &shut, "landed")
+				nr.Notes = append(nr.Notes, shut.Notes...)
 			}
 		}
 		if closed || heldDemo {

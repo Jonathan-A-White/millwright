@@ -1259,3 +1259,69 @@ func TestABatchLandingThatChangedNoBackendStagesNothing(t *testing.T) {
 		t.Errorf("expected nothing built or filed, got %+v", r.builds.Built)
 	}
 }
+
+// A story a batch landing lands is given what a single landing gives it after
+// the push (mw-gq6.966): the benchmark of the gate it landed under, in its result
+// file, and its formula closed, root and steps, with nothing left open.
+
+// aBatchLandedAfterItsGate runs the batch's gate, which takes five minutes and
+// ten seconds on the close-out's clock, and then records as landed the story
+// mw-x.1, claimed and given a poured formula whose steps are all still open and
+// a result file; it returns the vault, the tracker and the formula's root.
+func aBatchLandedAfterItsGate(t *testing.T) (*fakeVault, *apptest.FakeTracker, string) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Date(2026, 11, 4, 16, 0, 0, 0, time.UTC)
+	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature", application.FormulaStep{Title: "Understand {{story}}"}, application.FormulaStep{Title: "Commit"})
+	tracker.AddEpic("mw-x", domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelSonnet, Effort: domain.EffortHigh})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
+	mustDo(t, tracker.ClaimAs("mw-x.1", "mw@laptop", now.Add(time.Hour)))
+	mustDo(t, tracker.SetStarted("mw-x.1", now.Add(-30*time.Minute)))
+	poured, err := tracker.PourFormula(ctx, "tdd-feature", "mw-x.1", "A story", false)
+	mustDo(t, err)
+	mustDo(t, tracker.SetStoryMetadata(ctx, "mw-x.1", map[string]string{application.MoleculeField: poured.RootID}))
+	detail, err := tracker.ShowStory(ctx, "mw-x.1")
+	mustDo(t, err)
+
+	vault := newFakeVault()
+	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success","session_id":"s1"}`
+	lands := &fakeRetryLanding{}
+	var out bytes.Buffer
+	land := application.BatchLand{Next: application.Next{
+		Tracker: tracker, Vault: vault, Worktrees: lands, Landing: lands,
+		Checks: &timedChecks{passed: true, output: "ok\n", took: 310 * time.Second, clock: &now},
+		Load:   &apptest.FakeHostLoad{Reading: application.LoadReading{Load: 3.5, Cores: 20}},
+		Now:    func() time.Time { return now },
+		Seat:   "builder", Host: "laptop", Out: &out, Err: &out,
+		Rigs: map[string]string{"lampas": "/rigs/lampas"},
+	}}
+	path := domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelSonnet, Effort: domain.EffortHigh}
+	report := &application.BatchReport{Rig: "lampas", Number: 380, Target: "main", Base: "origin/main", Commit: "abc1234def5678",
+		Merged: []application.BatchStory{application.MergedStory("mw-x.1", "merge1", detail, path)}}
+	if gate := land.GateTheBatch(ctx, t.TempDir(), report); !gate.Passed {
+		t.Fatalf("expected the batch's gate to pass, got %+v", gate)
+	}
+	land.RecordLanded(ctx, "/rigs/lampas", report, &application.NextReport{})
+	return vault, tracker, poured.RootID
+}
+
+func TestAStoryABatchLandsHasTheBenchmarkOfTheBatchesGateInItsResultFile(t *testing.T) {
+	vault, _, _ := aBatchLandedAfterItsGate(t)
+	result := vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)]
+	for _, want := range []string{`"gate_seconds":310`, `"load_at_gate":3.5`, `"cores":20`, `"landed":true`,
+		`"kind":"lampas/feature/sonnet"`, `"session_id":"s1"`} {
+		if !strings.Contains(result, want) {
+			t.Errorf("expected the result of a batch-landed story to carry %s, got %s", want, result)
+		}
+	}
+}
+
+func TestAStoryABatchLandsHasItsFormulaClosedRootAndSteps(t *testing.T) {
+	_, tracker, root := aBatchLandedAfterItsGate(t)
+	open, err := tracker.OpenMolecule(context.Background(), root)
+	mustDo(t, err)
+	if open.RootID != "" || len(open.Steps) != 0 {
+		t.Errorf("expected the formula %s of a batch-landed story closed, got %d steps open and root %q", root, len(open.Steps), open.RootID)
+	}
+}

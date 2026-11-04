@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,5 +61,18 @@ func TestAnUnreadableTesterTableIsSaidAndStopsNoBatchLanding(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "no Tester story will be sprung") || !strings.Contains(stderr.String(), "until") {
 		t.Errorf("the unreadable table was not said on stderr: %q", stderr.String())
+	}
+}
+
+// mw-gq6.966: the batch lander's Next reads the past benchmarks, so that a story
+// it lands is given its par as a story mw next lands is.
+func TestTheBatchLandersNextReadsThePastBenchmarks(t *testing.T) {
+	writeTesterConfig(t, "")
+	dir := t.TempDir()
+
+	batch := batchLandFor(application.Next{}, mwVault(dir, "laptop"), false, false, io.Discard)
+
+	if batch.Next.Benchmarks == nil {
+		t.Fatal("the batch lander's Next has no book of past benchmarks")
 	}
 }

@@ -86,18 +86,19 @@ func (g *gateRecord) settle(checked Checked, err error, reading LoadReading) {
 // recordBenchmark writes the close-out's benchmark into the story's result file
 // and, when it has a book of past ones, says in the report what it came to. It
 // never fails the close-out: a result that cannot be read or written is a note.
-func (n Next) recordBenchmark(ctx context.Context, c *closeOut, report *NextReport, landed bool) {
+// It says whether the result file was written.
+func (n Next) recordBenchmark(ctx context.Context, c *closeOut, report *NextReport, landed bool) bool {
 	if !c.gate.ran {
-		return
+		return false
 	}
 	name := ResultFileNameForAttempt(c.attempt())
 	printed, err := n.Vault.ReadRunFile(ctx, c.id, name)
 	if errors.Is(err, fs.ErrNotExist) {
-		return
+		return false
 	}
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the benchmark of %s could not be recorded: %v", c.id, err))
-		return
+		return false
 	}
 	bug := domain.IsBugStory(c.detail.Type, c.detail.Story.Title) || slices.Contains(c.detail.Labels, "bug")
 	b := Benchmark{
@@ -134,15 +135,16 @@ func (n Next) recordBenchmark(ctx context.Context, c *closeOut, report *NextRepo
 	merged, err := MergeBenchmark(printed, b)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the benchmark of %s could not be recorded: %v", c.id, err))
-		return
+		return false
 	}
 	if _, err := n.Vault.PutRunFile(ctx, c.id, name, merged); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the benchmark of %s could not be recorded: %v", c.id, err))
-		return
+		return false
 	}
 	if n.Benchmarks != nil {
 		report.Bench = benchmarkSummary(b, append(history, b), n.Bench, n.flagToPrint(ctx))
 	}
+	return true
 }
 
 // benchmarkSummary is the lines the report prints of a benchmark: the gate, the
