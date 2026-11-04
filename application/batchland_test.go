@@ -1013,7 +1013,7 @@ func aBatchLandedWithTesters(t *testing.T, trial application.TesterTrial, tracke
 		Rigs: map[string]string{"lampas": "/rigs/lampas"},
 	}}
 	nr := &application.NextReport{}
-	land.RecordLanded(ctx, "/rigs/lampas", report, nr)
+	land.RecordLanded(ctx, "/rigs/lampas", report, nr, func() {})
 	return nr
 }
 
@@ -1200,7 +1200,7 @@ func aBatchLandedOnPostern(t *testing.T, changes map[string][]string, backendCha
 		Rigs: map[string]string{"postern": "/rigs/postern"},
 	}}
 	nr := &application.NextReport{}
-	land.RecordLanded(ctx, "/rigs/postern", report, nr)
+	land.RecordLanded(ctx, "/rigs/postern", report, nr, func() {})
 	return r, nr, asked
 }
 
@@ -1302,7 +1302,7 @@ func aBatchLandedAfterItsGate(t *testing.T) (*fakeVault, *apptest.FakeTracker, s
 	if gate := land.GateTheBatch(ctx, t.TempDir(), report); !gate.Passed {
 		t.Fatalf("expected the batch's gate to pass, got %+v", gate)
 	}
-	land.RecordLanded(ctx, "/rigs/lampas", report, &application.NextReport{})
+	land.RecordLanded(ctx, "/rigs/lampas", report, &application.NextReport{}, func() {})
 	return vault, tracker, poured.RootID
 }
 

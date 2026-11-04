@@ -17,9 +17,36 @@ func (b BatchLand) GateTheBatch(ctx context.Context, dir string, report *BatchRe
 }
 
 // RecordLanded lets the tests of package application_test run what follows a
-// batch's push, for the stories its report holds as merged.
-func (b BatchLand) RecordLanded(ctx context.Context, rigDir string, report *BatchReport, nr *NextReport) {
-	b.recordLanded(ctx, rigDir, report, nr)
+// batch's push, for the stories its report holds as merged; release stands for
+// letting the rig's merge slot go.
+func (b BatchLand) RecordLanded(ctx context.Context, rigDir string, report *BatchReport, nr *NextReport, release func()) {
+	b.recordLanded(ctx, rigDir, report, nr, release)
+}
+
+// WithTailTrace is n telling trace the name of each step of the landed tail as
+// it is taken, followed by the story's id for a step taken for each story.
+func (n Next) WithTailTrace(trace func(step string)) Next {
+	n.tailTrace = trace
+	return n
+}
+
+// LandedTailStep is a row of the landed tail as the tests of package
+// application_test read it.
+type LandedTailStep struct {
+	Name         string
+	OnceForBatch bool
+	// Only is "single" or "batch" for a step one path alone takes, else empty.
+	Only, Why string
+}
+
+// LandedTail is the rows of the landed tail, and the orders the two paths walk
+// it in: the single landing's, and the batch's in groups.
+func LandedTail() (steps []LandedTailStep, single []string, batch [][]string) {
+	for _, step := range landedTail {
+		steps = append(steps, LandedTailStep{Name: step.name, OnceForBatch: step.scope == onceForBatch, Only: string(step.only), Why: step.why})
+	}
+	single = append(append(append(single, singleReads...), singleAfterPush...), singleFinish...)
+	return steps, single, batchOrder
 }
 
 // MergedStory is a story of a batch as the batch merged it, with the detail and

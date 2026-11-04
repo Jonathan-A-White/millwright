@@ -538,6 +538,10 @@ type Next struct {
 	// Err is where what could not be done, and changes nothing about the outcome,
 	// is said: a mail that could not be sent. A nil Err says nothing.
 	Err io.Writer
+
+	// tailTrace, when set, is told the name of each step of the landed tail as
+	// it is taken (landedtail.go): a seam for the tests.
+	tailTrace func(step string)
 }
 
 // NextReport is what one close-out did.
@@ -1318,13 +1322,11 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		return n.queue(ctx, c, report)
 	}
 
-	base := StartPoint(n.remote(), c.target)
-	n.readBackend(ctx, c, report, base, c.branch)
-	var smokeNotes []string
-	c.smokeApps, smokeNotes = n.Smoke.Wants(ctx, c.path.Rig, c.rigDir, base, c.branch)
-	report.Notes = append(report.Notes, smokeNotes...)
-	n.readSmokeElsewhere(ctx, c, base, c.branch)
-	n.readFilesOutsideTheKey(ctx, c, report, base, c.branch)
+	// The landed tail's reads of the story's branch, before the landing moves
+	// the target (landedtail.go).
+	t, s := n.singleTail(ctx, c, report)
+	s.base, s.branch = StartPoint(n.remote(), c.target), c.branch
+	t.walk(singleReads, s)
 
 	// Only one close-out at a time may touch a rig's target branch: this host's
 	// own slot keeps this host's out, and inside it the rig's slot across hosts
@@ -1393,32 +1395,21 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		return n.stop(ctx, c, report, reasonOf(landErr), firstLine(landErr.Error()), kept)
 	}
 	report.Landed, report.How = true, landed
-	n.advanceRig(ctx, c, report)
 
 	// The work is on the target branch at the remote from here: nothing below
-	// is undone, and nothing below stops the story being closed.
-	outcome := fmt.Sprintf("%s, %d commits, mw next re-ran the rig's tests: pass", landed.LandedAs(c.target), report.Commits)
+	// is undone, and nothing below stops the story being closed. The steps are
+	// the landed tail's, which a batch landing walks too (landedtail.go): the
+	// run state is written before anything that can fail, because it is what
+	// tells a later run that this story is landed — the close did fail, on the
+	// run it was written for — and a run that cannot tell a landed story from
+	// an unlanded one would merge it all over again.
+	s.outcome = fmt.Sprintf("%s, %d commits, mw next re-ran the rig's tests: pass", landed.LandedAs(c.target), report.Commits)
 	if c.cappedAfterClosing {
-		outcome += "; " + LandedAfterTurnCap
+		s.outcome += "; " + LandedAfterTurnCap
 	}
-
-	// Written before anything else, because it is what tells a later run that
-	// this story is landed. Everything after the push can fail — the close did,
-	// on the run this was written for — and a run that cannot tell a landed
-	// story from an unlanded one would merge it all over again.
-	n.writeOrSay(ctx, c, report, "the run state", fmt.Sprintf("%s could not be recorded as %s=%s", c.id, RunState, RunLanded),
-		func() error { return n.Tracker.SetStoryState(ctx, c.id, RunState, RunLanded, outcome) })
-	// Before the after-landing command, which may be killed with the session it
-	// runs in: the stamp is queued as soon as the work is known to be landed.
-	n.queueStamp(ctx, c, report, landed)
-	n.sayFilesOutsideTheKey(ctx, c, report)
-	// After the story is recorded as landed, so that a command that is killed
-	// with the session it runs in leaves a story a later run can tell is landed.
-	n.afterLanding(ctx, c, report)
-	n.smoke(ctx, c, report)
-	n.stageBackend(ctx, c, report, report.How.Commit)
-	n.springTester(ctx, c, report, landed)
-	return n.finish(ctx, c, report, outcome, false)
+	s.merge, s.atTarget = landed.Commit, landed.Commit
+	t.walk(singleAfterPush, s)
+	return t.walkFinish(s)
 }
 
 // takeCrossSlot waits for the rig's merge slot across hosts and takes it, and
@@ -2510,68 +2501,12 @@ func (n Next) closeALanding(ctx context.Context, c *closeOut, report *NextReport
 // run by the close-out that landed the story and, when that one could not close
 // it, again by the next — so every step of it can be run twice. The worktree
 // port takes removing what is not there; the ledger is append-only, so a line
-// already written is the one that stands, and `again` is what asks.
+// already written is the one that stands, and `again` is what asks. Its steps
+// are the landed tail's, in singleFinish (landedtail.go).
 func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outcome string, again bool) (NextReport, error) {
-	if err := n.Worktrees.Remove(ctx, c.rigDir, c.worktree, c.branch); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("the worktree %s could not be taken away: %v", c.worktree, err))
-	}
-
-	written := false
-	if again {
-		held, err := n.ledgered(ctx, c.id)
-		if err != nil {
-			report.Notes = append(report.Notes, err.Error())
-		}
-		written = held
-	}
-	if !written {
-		n.recordBenchmark(ctx, c, report, true)
-		if err := n.ledger(ctx, c, report, outcome); err != nil {
-			report.Notes = append(report.Notes, err.Error())
-		}
-	}
-	// Committed whether this run wrote the line or an earlier one did: a line
-	// written by a run that could not commit it is still standing in the way of
-	// every sync until somebody commits it, and this is the run that can.
-	n.commit(ctx, c, report)
-
-	var closeErr error
-	if isDemo(c.detail) {
-		closeErr = n.holdDemo(ctx, c, report, outcome)
-	} else {
-		var notes []string
-		notes, closeErr = n.closeStory(ctx, c.id, outcome)
-		report.Notes = append(report.Notes, notes...)
-	}
-	if closeErr == nil {
-		what := "landed"
-		if c.tested != "" {
-			what = "was tested"
-		}
-		n.closeFormula(ctx, c, report, what)
-	}
-	switch {
-	case closeErr != nil:
-		report.NotClosed = closeErr.Error()
-	case isDemo(c.detail):
-		report.DemoHeld = true
-	default:
-		report.Closed = true
-	}
-	// Told once: the run that landed the story says so, and a later run that
-	// only closes it has nothing new for the Mayor (it files only the bug an
-	// earlier one could not).
-	verdict, said := n.closingMail(ctx, c, report, again)
-	if !again {
-		n.mailTheMayor(ctx, c, report, verdict, said)
-	}
-	if closeErr != nil {
-		return *report, fmt.Errorf("closing out %s: it %s, but the story could not be closed, so it is landed and still open: %w",
-			c.id, outcome, closeErr)
-	}
-
-	report.Abandoned = n.abandoned(ctx, c.id, report)
-	return n.carryOn(ctx, c, report)
+	t, s := n.singleTail(ctx, c, report)
+	s.outcome, s.again = outcome, again
+	return t.walkFinish(s)
 }
 
 // holdDemo is what landing does in place of closeStory for a demo, which only

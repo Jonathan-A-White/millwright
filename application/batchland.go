@@ -380,16 +380,14 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 		}
 	}
 
-	var smoke *landedSmoke
-	if report.Landed {
-		smoke = b.recordLanded(ctx, rigDir, &report, &nr)
-	}
-	release()
 	// The grist smoke sends every example of every app the batch touched, and
-	// nothing it does needs the rig's merge slot or holds back a mail: the next
-	// landing of the rig goes ahead meanwhile (mw-gq6.626).
-	if smoke != nil {
-		b.smoke(ctx, smoke, &report, &nr)
+	// nothing it does needs the rig's merge slot or holds back a mail: the
+	// landed tail lets the slot go before it, and the next landing of the rig
+	// goes ahead meanwhile (mw-gq6.626).
+	if report.Landed {
+		b.recordLanded(ctx, rigDir, &report, &nr, release)
+	} else {
+		release()
 	}
 	b.keepRecords(ctx, &report)
 	b.keepMetric(ctx, &report)
@@ -767,196 +765,19 @@ func (b BatchLand) say(format string, args ...any) {
 	b.Next.print(BatchLogPrefix + fmt.Sprintf(format, args...) + "\n")
 }
 
-// landedSmoke is the grist smoke a landed batch still has to make, which is
-// made after the rig's merge slot is let go.
-type landedSmoke struct {
-	last *closeOut
-	once NextReport
-	// noted is how many of once's notes the report already holds.
-	noted int
-}
-
 // recordLanded is everything that follows the push, for each story of the
-// batch and then once: none of it undoes the landing or stops the rest. The
-// merge slot is held through the rig's checkout, its after-landing command and
-// the Landed mails, and not through the grist smoke, which it hands back for the
-// caller to make once the slot is let go; nil when there is none to make.
-func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *BatchReport, nr *NextReport) *landedSmoke {
-	n := b.Next
+// batch and then once: none of it undoes the landing or stops the rest. It
+// walks the landed tail in the batch's order (batchOrder), which holds the merge
+// slot through the rig's checkout, its after-landing command and the Landed
+// mails, and calls release to let it go before the grist smoke.
+func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *BatchReport, nr *NextReport, release func()) {
 	b.say("landed %s on %s at %s, %d stories", report.Label(), report.Target, shortCommit(report.Commit), len(report.Merged))
 	together := make([]string, len(report.Merged))
 	for i, s := range report.Merged {
 		together[i] = s.ID
 	}
-	var smokeApps []string
-	// unhosted says some story changed grist this host cannot smoke, because it
-	// names no [grist-apps]: the batch says who smokes it, as a story does.
-	unhosted := false
-	// A story's mail is sent once the after-landing command has run or been
-	// skipped, so that it can say first that the deploy did not happen.
-	type mail struct {
-		c    *closeOut
-		sent *NextReport
-	}
-	var mails []mail
-	for _, s := range report.Merged {
-		c := b.storyCloseOut(s, rigDir)
-		apps, notes := n.Smoke.Wants(ctx, report.Rig, rigDir, report.Base, s.Branch)
-		nr.Notes = append(nr.Notes, notes...)
-		smokeApps = appendNew(smokeApps, apps...)
-		n.readSmokeElsewhere(ctx, c, report.Base, s.Branch)
-		unhosted = unhosted || c.smokeUnhosted
-		// Read against the batch's base, as the smoke is: the target now holds
-		// the story, and the story's own changes are no longer a difference from
-		// it. A step Next.land takes after its push is taken below (mw-gq6.963).
-		n.readBackend(ctx, c, nr, report.Base, s.Branch)
-		n.readFilesOutsideTheKey(ctx, c, nr, report.Base, s.Branch)
-		// The story landed under the batch's gate, so that is the gate its
-		// benchmark records, as finish records a story's own (mw-gq6.966).
-		c.gate = report.gate
-
-		how := "its merge"
-		if s.FastForward {
-			how = "its fast-forward"
-		}
-		version := ""
-		if report.Version != "" {
-			version = ", version " + report.Version
-		}
-		outcome := fmt.Sprintf("landed on %s in %s (batch commit %s, %s %s%s), %d commits, the rig's tests on the batch: pass",
-			report.Target, report.Label(), shortCommit(report.Commit), how, shortCommit(s.Merge), version, s.Commits)
-
-		// Written first, as mw next writes it first: it is what tells a later
-		// run that the story is landed.
-		n.writeOrSay(ctx, c, nr, "the run state", fmt.Sprintf("%s could not be recorded as %s=%s", s.ID, RunState, RunLanded),
-			func() error { return n.Tracker.SetStoryState(ctx, s.ID, RunState, RunLanded, outcome) })
-		n.queueStamp(ctx, c, nr, Landed{Commit: s.Merge})
-		n.sayFilesOutsideTheKey(ctx, c, nr)
-		// Before the ledger line, as Next.finish writes it: the result file
-		// carries the gate and the story's time against its par, and is
-		// committed with the batch's records.
-		var benched NextReport
-		var written []string
-		if n.recordBenchmark(ctx, c, &benched, true) {
-			if record := RunRecordForAttempt(c.id, c.attempt()); record != "" {
-				written = append(written, record)
-			}
-		}
-		nr.Notes = append(nr.Notes, benched.Notes...)
-
-		line := LedgerLine{
-			When: n.now(), StoryID: s.ID, Title: s.Title, Outcome: outcome, Path: s.path,
-			// The session's fuel was charged by the line that queued it.
-			FuelCharged: true,
-			Notes:       append([]string{"landed by mw land on " + n.Host, report.Label() + ": " + strings.Join(together, ", ")}, report.fixerNotes(s.ID)...),
-		}.String()
-		if err := n.Vault.AppendToLedger(ctx, n.Seat, line); err != nil {
-			nr.Notes = append(nr.Notes, fmt.Sprintf("the line for %s could not be appended to the %s seat's ledger: %v", s.ID, n.Seat, err))
-		}
-		// Committed as soon as it is written, before the worktree comes away,
-		// the story is closed and the mail goes: a stop anywhere after leaves
-		// the vault clean (mw-gq6.502).
-		b.commitLedger(ctx, report, written...)
-		if err := n.Worktrees.Remove(ctx, rigDir, c.worktree, c.branch); err != nil {
-			nr.Notes = append(nr.Notes, fmt.Sprintf("the worktree %s could not be taken away: %v", c.worktree, err))
-		}
-		closed, heldDemo := false, false
-		if isDemo(s.detail) {
-			// A demo closes on the Governor's "Looks good" alone: it is left
-			// open for him, not closed (mw-gq6.616).
-			if err := n.holdDemo(ctx, c, nr, outcome); err != nil {
-				nr.Notes = append(nr.Notes, fmt.Sprintf("%s is landed but the demo could not be left waiting for the Governor: %v", s.ID, err))
-			} else {
-				heldDemo = true
-				report.DemoHeld = append(report.DemoHeld, s.ID)
-			}
-		} else {
-			notes, err := n.closeStory(ctx, s.ID, outcome)
-			nr.Notes = append(nr.Notes, notes...)
-			if err != nil {
-				nr.Notes = append(nr.Notes, fmt.Sprintf("%s is landed but could not be closed: %v", s.ID, err))
-			} else {
-				closed = true
-				report.Closed = append(report.Closed, s.ID)
-				// What the story's session left open of its formula, as finish
-				// closes it once the story is closed (mw-gq6.966).
-				var shut NextReport
-				n.closeFormula(ctx, c, &shut, "landed")
-				nr.Notes = append(nr.Notes, shut.Notes...)
-			}
-		}
-		if closed || heldDemo {
-			b.say("closed %s", s.ID)
-		}
-		// The Tester trial's filing, as Next.land makes it after a single
-		// landing, at the batch's commit: what the Tester drives is the batch's
-		// result. A failure is a note, here as there (mw-gq6.961).
-		var springed NextReport
-		n.springTester(ctx, c, &springed, Landed{Commit: report.Commit})
-		nr.Notes = append(nr.Notes, springed.Notes...)
-		if springed.TesterFiled != "" {
-			b.say("filed the Tester story %s for %s", springed.TesterFiled, s.ID)
-		}
-
-		mailed := NextReport{
-			StoryID: s.ID, Host: n.Host, Title: s.Title, Target: report.Target, Commits: s.Commits, Pushes: 1,
-			Tags:   report.tags.ForStory(s.detail.Acceptance),
-			Landed: true, How: Landed{Commit: s.Merge, FastForward: s.FastForward, Version: report.Version, Unioned: s.Unioned},
-			TesterFiled: springed.TesterFiled,
-			Ledger:      line, Closed: closed, DemoHeld: heldDemo, NotClosed: "see the batch's report",
-			Notes: append([]string{fmt.Sprintf("landed by mw land in %s (%s), whose commit %s is on %s", report.Label(), strings.Join(together, ", "),
-				shortCommit(report.Commit), report.Target)}, report.fixerNotes(s.ID)...),
-		}
-		mails = append(mails, mail{c: c, sent: &mailed})
-	}
-
-	// The ledger lines were committed as each was written, so that the vault is
-	// not left dirty while the checkout, the after-landing command and the
-	// smoke run for many minutes (mw-gq6.493, mw-gq6.502). The batch's records
-	// are written and committed after.
-
-	// Once for the batch: the rig's checkout and the after-landing command, as
-	// the newest story's. Both move or build what the rig's checkout holds, which
-	// another landing of the rig would move under them, so the merge slot is held
-	// through them; and the Landed mail says first that the command did not run.
-	last := b.storyCloseOut(report.Merged[len(report.Merged)-1], rigDir)
-	last.smokeApps, last.smokeUnhosted = smokeApps, unhosted
-	once := NextReport{StoryID: report.Label(), Host: n.Host, Target: report.Target, How: Landed{Commit: report.Commit}}
-	n.advanceRig(ctx, last, &once)
-	report.Checkout = once.Rig
-	n.afterLanding(ctx, last, &once)
-	if record := runFilePath(last.id, last.afterLog); last.afterLog != "" && record != "" {
-		report.Records = append(report.Records, record)
-	}
-	b.say("after landing done: the rig's checkout is brought up and its command run or skipped")
-	nr.Notes = append(nr.Notes, once.Notes...)
-
-	// The backend each story changed, staged at the batch's commit, which is what
-	// the target branch holds: as a story is staged after its after-landing
-	// command. Two stories that changed it are one swap, the commit being one
-	// (BackendStage.stage files one bead for a step already filed).
-	for _, m := range mails {
-		var staged NextReport
-		n.stageBackend(ctx, m.c, &staged, report.Commit)
-		for _, note := range staged.Notes {
-			b.say("%s", note)
-		}
-		nr.Notes = append(nr.Notes, staged.Notes...)
-	}
-
-	// The mails go before the smoke, which is minutes for each example of each
-	// app: the Mayor is told of a landing when it is made (mw-gq6.626).
-	for _, m := range mails {
-		m.sent.AfterLandingSkipped = once.AfterLandingSkipped
-		verdict, said := n.closingMail(ctx, m.c, m.sent, false)
-		n.mailTheMayor(ctx, m.c, m.sent, verdict, said)
-		report.Mailed = append(report.Mailed, MailLanded+": "+m.c.id)
-		b.say("mailed %s: %s", MailLanded, m.c.id)
-	}
-	if len(smokeApps) == 0 && !unhosted {
-		return nil
-	}
-	return &landedSmoke{last: last, once: once, noted: len(once.Notes)}
+	t := &tail{n: b.Next, ctx: ctx, batch: &batchTail{land: b, report: report, nr: nr, rigDir: rigDir, together: together, release: release}}
+	t.walkBatch()
 }
 
 // smoke makes the grist smoke of the apps a landed batch changed the grist of,
@@ -964,16 +785,17 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 // lines are notes of the report. A smoke that fails mails the Mayor, naming the
 // batch, besides what it always does: the comment on the story, the alarm event
 // and the hold on the rig's open stories (GristSmokeBook). It undoes nothing.
-func (b BatchLand) smoke(ctx context.Context, s *landedSmoke, report *BatchReport, nr *NextReport) {
+func (b BatchLand) smoke(ctx context.Context, last *closeOut, once *NextReport, report *BatchReport, nr *NextReport) {
 	n := b.Next
-	if len(s.last.smokeApps) > 0 {
-		b.say("the merge slot of %s is let go; starting the grist smoke of %s", report.Rig, strings.Join(s.last.smokeApps, ", "))
+	if len(last.smokeApps) > 0 {
+		b.say("the merge slot of %s is let go; starting the grist smoke of %s", report.Rig, strings.Join(last.smokeApps, ", "))
 	}
-	failed := n.smoke(ctx, s.last, &s.once)
-	for _, note := range s.once.Notes[s.noted:] {
+	noted := len(once.Notes)
+	failed := n.smoke(ctx, last, once)
+	for _, note := range once.Notes[noted:] {
 		b.say("%s", note)
 	}
-	nr.Notes = append(nr.Notes, s.once.Notes[s.noted:]...)
+	nr.Notes = append(nr.Notes, once.Notes[noted:]...)
 	if len(failed) == 0 {
 		return
 	}
@@ -985,7 +807,7 @@ func (b BatchLand) smoke(ctx context.Context, s *landedSmoke, report *BatchRepor
 			"The landing is not undone; the open stories of %s are held until a smoke passes.\n\n%s\n",
 			n.Host, report.Label(), report.Target, shortCommit(report.Commit), report.Rig, strings.Join(failed, "\n")),
 	}
-	if err := n.sendMayorMail(ctx, s.last, &s.once, mail, MailSmokeFailed); err != nil {
+	if err := n.sendMayorMail(ctx, last, once, mail, MailSmokeFailed); err != nil {
 		nr.Notes = append(nr.Notes, fmt.Sprintf("the mail to %s about the grist smoke of %s could not be sent: %v", MayorMailbox, report.Label(), err))
 		return
 	}
