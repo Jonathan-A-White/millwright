@@ -841,13 +841,13 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 		// carries the gate and the story's time against its par, and is
 		// committed with the batch's records.
 		var benched NextReport
-		written := n.recordBenchmark(ctx, c, &benched, true)
-		nr.Notes = append(nr.Notes, benched.Notes...)
-		if written {
+		var written []string
+		if n.recordBenchmark(ctx, c, &benched, true) {
 			if record := RunRecordForAttempt(c.id, c.attempt()); record != "" {
-				report.Records = append(report.Records, record)
+				written = append(written, record)
 			}
 		}
+		nr.Notes = append(nr.Notes, benched.Notes...)
 
 		line := LedgerLine{
 			When: n.now(), StoryID: s.ID, Title: s.Title, Outcome: outcome, Path: s.path,
@@ -861,7 +861,7 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 		// Committed as soon as it is written, before the worktree comes away,
 		// the story is closed and the mail goes: a stop anywhere after leaves
 		// the vault clean (mw-gq6.502).
-		b.commitLedger(ctx, report)
+		b.commitLedger(ctx, report, written...)
 		if err := n.Worktrees.Remove(ctx, rigDir, c.worktree, c.branch); err != nil {
 			nr.Notes = append(nr.Notes, fmt.Sprintf("the worktree %s could not be taken away: %v", c.worktree, err))
 		}
@@ -1232,11 +1232,13 @@ func countStories(count int) string {
 }
 
 // commitLedger commits the seat's ledger on its own, right after a landed
-// story's line is appended to it: it is the one tracked file the batch has
-// written by the time its long steps begin. A commit that cannot be made is a
-// note, as it is for the commit that ends the batch.
-func (b BatchLand) commitLedger(ctx context.Context, report *BatchReport) {
-	b.commitPaths(ctx, report, []string{path.Join(SeatsDir, b.Next.Seat, LedgerFileName)})
+// story's line is appended to it: it and the story's result file are the only
+// tracked files the batch has written by the time its long steps begin. A commit that cannot be made is a
+// note, as it is for the commit that ends the batch. The result file the story's
+// benchmark was written into goes in the same commit, so that nothing tracked is
+// left modified while the long steps run (mw-gq6.966).
+func (b BatchLand) commitLedger(ctx context.Context, report *BatchReport, also ...string) {
+	b.commitPaths(ctx, report, append([]string{path.Join(SeatsDir, b.Next.Seat, LedgerFileName)}, also...))
 }
 
 // commit records in the vault exactly what the batch wrote there: the seat's
