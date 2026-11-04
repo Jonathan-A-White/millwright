@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -980,5 +981,163 @@ func TestARigWhoseLandFoundNothingIsNotLandedAgainBeforeBatchEveryUnlessItsQueue
 	j.now = j.now.Add(domain.DefaultBatchEvery)
 	if _, wanted := job.Probe(context.Background()); !wanted {
 		t.Fatal("batch_every has passed, but the rig was not due again")
+	}
+}
+
+// A batch landing springs the Tester as a single landing does (mw-gq6.961): one
+// Tester story for each landed story of a rig the trial names whose closing
+// comment tells the Governor how to check it, at the batch's commit.
+
+const aBatchTesterSteps = "HOW TO CHECK IT, for the Governor:\n1. Open the page.\n2. Press \"Save\". It reads \"Saved\".\n"
+
+// aBatchLandedWithTesters records as landed the stories of lampas epic mw-e a
+// batch merged, and returns what it said.
+func aBatchLandedWithTesters(t *testing.T, trial application.TesterTrial, tracker application.WorkTracker, rules application.EpicRules, landed ...string) *application.NextReport {
+	t.Helper()
+	ctx := context.Background()
+	at := time.Date(2026, 11, 4, 16, 0, 0, 0, time.UTC)
+	path := domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelOpus, Effort: domain.EffortHigh}
+	report := &application.BatchReport{Rig: "lampas", Number: 379, Target: "main", Base: "origin/main", Commit: "abc1234def5678"}
+	for _, id := range landed {
+		mustDo(t, tracker.ClaimStory(ctx, id))
+		detail, err := tracker.ShowStory(ctx, id)
+		mustDo(t, err)
+		report.Merged = append(report.Merged, application.MergedStory(id, "merge"+id, detail, path))
+	}
+	lands := &fakeRetryLanding{}
+	var out bytes.Buffer
+	land := application.BatchLand{Next: application.Next{
+		Tracker: tracker, Vault: newFakeVault(), Worktrees: lands, Landing: lands, Rules: rules,
+		Tester: trial, Now: func() time.Time { return at },
+		Seat: "builder", Host: "laptop", Out: &out, Err: &out,
+		Rigs: map[string]string{"lampas": "/rigs/lampas"},
+	}}
+	nr := &application.NextReport{}
+	land.RecordLanded(ctx, "/rigs/lampas", report, nr)
+	return nr
+}
+
+func aBatchEpicToTest(t *testing.T) (*apptest.FakeTracker, *apptest.FakeEpicRules) {
+	t.Helper()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-e", domain.Path{Rig: "lampas", Branch: "main"})
+	tracker.AddStory("mw-e", domain.Story{ID: "mw-e.1", Title: "Build the page"})
+	tracker.AddStory("mw-e", domain.Story{ID: "mw-e.2", Title: "Tidy the code"})
+	tracker.AddStory("mw-e", domain.Story{ID: "mw-e.3", Title: "Test: Earlier page"})
+	mustDo(t, tracker.SetLabels("mw-e.3", application.LabelTester))
+	tracker.AddStory("mw-e", domain.Story{ID: "mw-e.4", Title: "Demo: the page"})
+	mustDo(t, tracker.SetLabels("mw-e.4", application.LabelDemo))
+	tracker.AddStory("mw-e", domain.Story{ID: "mw-e.5", Title: "Build the other page"})
+	ctx := context.Background()
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-e.1", "Done.\n"+aBatchTesterSteps))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-e.2", "Done.\nHOW TO CHECK IT, for the Governor:\nInternal: nothing for the Governor to look at.\n"))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-e.3", "Done.\n"+aBatchTesterSteps))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-e.4", "Done.\n"+aBatchTesterSteps))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-e.5", "Done.\n"+aBatchTesterSteps))
+	rules := apptest.NewFakeEpicRules()
+	rules.Require("lampas", domain.EpicRequirements{LastStoryLabels: []string{"demo"}})
+	return tracker, rules
+}
+
+func theTestersFiled(t *testing.T, tracker *apptest.FakeTracker, before []string) []application.StoryDetail {
+	t.Helper()
+	var filed []application.StoryDetail
+	for _, id := range tracker.Stories() {
+		if slices.Contains(before, id) {
+			continue
+		}
+		detail, err := tracker.ShowStory(context.Background(), id)
+		mustDo(t, err)
+		filed = append(filed, detail)
+	}
+	return filed
+}
+
+func TestABatchLandingOnATrialRigFilesOneTesterForEachStoryWithStepsAtTheBatchCommit(t *testing.T) {
+	tracker, rules := aBatchEpicToTest(t)
+	before := tracker.Stories()
+	trial := application.TesterTrial{Rigs: []string{"lampas"}, Until: time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC),
+		Model: domain.ModelSonnet, Effort: domain.EffortHigh}
+
+	aBatchLandedWithTesters(t, trial, tracker, rules, "mw-e.1", "mw-e.2", "mw-e.3", "mw-e.5")
+
+	filed := theTestersFiled(t, tracker, before)
+	if len(filed) != 2 {
+		t.Fatalf("expected a Tester for mw-e.1 and mw-e.5 only (not an internal, Tester or demo story), got %d: %+v", len(filed), filed)
+	}
+	for i, id := range []string{"mw-e.1", "mw-e.5"} {
+		d := filed[i]
+		if !application.IsTesterStory(d) || application.TesterLanded(d) != id {
+			t.Errorf("expected a Tester story for %s, got %q: %s", id, d.Story.Title, d.Description)
+		}
+		if !strings.Contains(d.Description, "abc1234") {
+			t.Errorf("expected the Tester to drive the batch's commit abc1234, got %s", d.Description)
+		}
+		if d.Story.Overrides.Model != domain.ModelSonnet || d.Story.Overrides.Formula != application.TesterFormula {
+			t.Errorf("expected the trial's model and the tester formula, got %+v", d.Story.Overrides)
+		}
+		if d.Status != apptest.StatusOpen {
+			t.Errorf("expected the Tester story released, got status %q", d.Status)
+		}
+	}
+	// The epic's demo waits on the Testers, as after a single landing.
+	if needs := needsOf(t, tracker, "mw-e.4"); !slices.Contains(needs, filed[0].Story.ID) {
+		t.Errorf("expected the demo to wait on the Tester %s, got %q", filed[0].Story.ID, needs)
+	}
+}
+
+func TestABatchLandingOutsideTheTrialOrWithTheTrialOverFilesNoTester(t *testing.T) {
+	until := time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)
+	for name, trial := range map[string]application.TesterTrial{
+		"no trial":       {},
+		"another rig":    {Rigs: []string{"millwright"}, Until: until},
+		"the trial over": {Rigs: []string{"lampas"}, Until: time.Date(2026, 11, 4, 16, 0, 0, 0, time.UTC)},
+	} {
+		tracker, rules := aBatchEpicToTest(t)
+		before := tracker.Stories()
+		aBatchLandedWithTesters(t, trial, tracker, rules, "mw-e.1", "mw-e.5")
+		if filed := theTestersFiled(t, tracker, before); len(filed) != 0 {
+			t.Errorf("%s: expected no Tester, got %+v", name, filed)
+		}
+	}
+}
+
+// failingToFile is a tracker that cannot file a story.
+type failingToFile struct{ *apptest.FakeTracker }
+
+func (failingToFile) CreateStory(context.Context, application.NewStory) (string, error) {
+	return "", errors.New("the tracker is away")
+}
+
+func TestATesterThatCannotBeFiledForABatchIsANoteAndTheStoriesAreStillClosed(t *testing.T) {
+	tracker, rules := aBatchEpicToTest(t)
+	before := tracker.Stories()
+	trial := application.TesterTrial{Rigs: []string{"lampas"}, Until: time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)}
+
+	nr := aBatchLandedWithTesters(t, trial, failingToFile{tracker}, rules, "mw-e.1", "mw-e.2", "mw-e.5")
+
+	notes := strings.Join(nr.Notes, "\n")
+	if !strings.Contains(notes, "no Tester story was filed for mw-e.1") || !strings.Contains(notes, "mw-e.5") {
+		t.Errorf("expected a note for each Tester that could not be filed, got %q", notes)
+	}
+	if filed := theTestersFiled(t, tracker, before); len(filed) != 0 {
+		t.Errorf("expected nothing filed, got %+v", filed)
+	}
+	for _, id := range []string{"mw-e.1", "mw-e.2", "mw-e.5"} {
+		if d, _ := tracker.ShowStory(context.Background(), id); d.Status != apptest.StatusClosed {
+			t.Errorf("expected %s closed in spite of the Tester, got %q", id, d.Status)
+		}
+	}
+}
+
+func TestABatchLandingThatMergedADemoFilesNoTesterForIt(t *testing.T) {
+	tracker, rules := aBatchEpicToTest(t)
+	before := tracker.Stories()
+	trial := application.TesterTrial{Rigs: []string{"lampas"}, Until: time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)}
+
+	aBatchLandedWithTesters(t, trial, tracker, rules, "mw-e.4")
+
+	if filed := theTestersFiled(t, tracker, before); len(filed) != 0 {
+		t.Errorf("expected no Tester for a demo, got %+v", filed)
 	}
 }

@@ -858,12 +858,22 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 		if closed || heldDemo {
 			b.say("closed %s", s.ID)
 		}
+		// The Tester trial's filing, as Next.land makes it after a single
+		// landing, at the batch's commit: what the Tester drives is the batch's
+		// result. A failure is a note, here as there (mw-gq6.961).
+		var springed NextReport
+		n.springTester(ctx, c, &springed, Landed{Commit: report.Commit})
+		nr.Notes = append(nr.Notes, springed.Notes...)
+		if springed.TesterFiled != "" {
+			b.say("filed the Tester story %s for %s", springed.TesterFiled, s.ID)
+		}
 
 		mailed := NextReport{
 			StoryID: s.ID, Host: n.Host, Title: s.Title, Target: report.Target, Commits: s.Commits, Pushes: 1,
 			Tags:   report.tags.ForStory(s.detail.Acceptance),
 			Landed: true, How: Landed{Commit: s.Merge, FastForward: s.FastForward, Version: report.Version, Unioned: s.Unioned},
-			Ledger: line, Closed: closed, DemoHeld: heldDemo, NotClosed: "see the batch's report",
+			TesterFiled: springed.TesterFiled,
+			Ledger:      line, Closed: closed, DemoHeld: heldDemo, NotClosed: "see the batch's report",
 			Notes: append([]string{fmt.Sprintf("landed by mw land in %s (%s), whose commit %s is on %s", report.Label(), strings.Join(together, ", "),
 				shortCommit(report.Commit), report.Target)}, report.fixerNotes(s.ID)...),
 		}
