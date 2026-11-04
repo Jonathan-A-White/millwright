@@ -21,6 +21,10 @@ type FileShare struct {
 	// Unkeyed says why the ready story waits when it is not for a file a
 	// running story shares: NeedsFilesKey, and File and Host are empty then.
 	Unkeyed Unkeyed
+	// Refused says the story waited for is a claim whose landing was refused and
+	// waits on the Mayor (mw-gq6.941): it keeps its files until a retry or a
+	// hold, so the wait does not end by itself. Only mw status knows it.
+	Refused bool
 }
 
 // Unkeyed is what a share is for. A ready story that names no files key on a
@@ -44,6 +48,9 @@ func (s FileShare) String() string {
 	line := fmt.Sprintf("waiting: shares %s with %s", s.File, s.With)
 	if s.Host != "" {
 		line += fmt.Sprintf(" (running on %s)", s.Host)
+	}
+	if s.Refused {
+		line += fmt.Sprintf("; %s is refused, waiting on the Mayor", s.With)
 	}
 	return line
 }

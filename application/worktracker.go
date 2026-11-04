@@ -440,6 +440,20 @@ func (w WorkInHand) Elsewhere(host string) []StoryDetail {
 	return away
 }
 
+// ClaimsAway are the claimed stories, in progress and not for the Governor,
+// whose Path names a host other than this one: what mw dispatch here counts as
+// running elsewhere (RunningElsewhere), which keeps their files from the
+// stories ready here.
+func (w WorkInHand) ClaimsAway(host string) []StoryDetail {
+	var away []StoryDetail
+	for _, detail := range w.Running {
+		if on := detail.Merged().Host; on != "" && on != host && on != domain.HostAuto && !detail.Hitl() {
+			away = append(away, detail)
+		}
+	}
+	return away
+}
+
 // PathedTo is every story, ready and then claimed, whose Path names this host.
 func (w WorkInHand) PathedTo(host string) []StoryDetail {
 	return append(pathedTo(w.Ready, host), pathedTo(w.Running, host)...)

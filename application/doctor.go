@@ -1140,8 +1140,9 @@ func (c *StaleLandingsCheck) WayBack() string {
 // NoSessionClaimsCheck is the mw doctor check that names the in-progress
 // stories NoSessionClaim finds, each as STUCK with its id, who holds it and
 // when its lease ran out (mw-gq6.877). Every host's dispatch gives such a claim
-// back on its next tick, so one still here says dispatch is not running or
-// could not reach the beads; the check changes nothing, and says the one
+// back on its next tick unless its run state is a refusal or another that
+// dispatch keeps (mw-gq6.941), so one still here says dispatch is not running,
+// could not reach the beads, or is a kept claim; the check changes nothing, and says the one
 // command that frees the story at once.
 type NoSessionClaimsCheck struct {
 	// Claims lists the claims whose lease had run out by the time given: the

@@ -1080,6 +1080,20 @@ Feature: mw status
     And the report calls "mw-gq6.64" stranded
     And the report does not say any story is queued too long
 
+  # mw-gq6.941: a refused claim on another host is kept waiting on the Mayor, not
+  # given back by that host's next dispatch tick, and keeps its files.
+
+  Scenario: A refused claim on another host whose lease ran out is not called stranded
+    Given a status story "mw-gq6.65" filed under it, overriding "host" with "laptop"
+    And the status story "mw-gq6.65" is claimed with its session running
+    And the claim on "mw-gq6.65" was last renewed 3 hours ago
+    And the status story "mw-gq6.65" is marked run=blocked
+    And the host "laptop" last synced 1 hour ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.65" is refused and kept, waiting on the Mayor
+    And the report does not call any story stranded
+
   # mw-gq6.702: dispatch passes every story of a rig that installs dependencies
   # while the network is metered, and nothing said so. A story pinned to this
   # host is named under DAMPERS with the cure.

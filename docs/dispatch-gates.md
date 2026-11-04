@@ -34,6 +34,8 @@ three.
 | `testers-per-rig` | it is a Tester story and its rig runs `testers_per_rig` (the `[dampers]` key, default 1) Tester stories already, on any host |
 | `cap` | the host runs as many sessions as it may |
 
+A refused story's kept claim (`run=blocked`) holds its files at `shared-files` until a retry or a hold, so a ready story that names one waits for as long as the refusal does, and a refused story whose `cause_fix` is that story waits on it in a cycle. `mw status` says so (READY, OTHER HOSTS, and a DAMPERS line for a cycle or a wait over an hour, mw-gq6.941); the cure is `mw retry <id> --hold`, run on the host that holds the claim.
+
 <!-- toc -->
 
 - [The sweep gate](#the-sweep-gate)
