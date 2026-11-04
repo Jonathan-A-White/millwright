@@ -307,6 +307,18 @@ func SlotWaitFor(history []Benchmark, rig, host string, s BenchmarkSettings, flo
 	return wait
 }
 
+// GateExpectedFor is how long a rig's gate usually takes on a host: the median of
+// its last gates there, 0 when none is recorded. A foreground mw check reads it
+// to know whether the gate fits what is left of a Builder's tool call (mw-gq6.940).
+func GateExpectedFor(history []Benchmark, rig, host string, s BenchmarkSettings) time.Duration {
+	for _, line := range GateLines(history, s) {
+		if line.Rig == rig && line.Host == host {
+			return line.Usual
+		}
+	}
+	return 0
+}
+
 // GateLines is, for each rig on each host that has recorded a gate, the median
 // of its last UsualGates gates against the latest, in rig then host order.
 func GateLines(history []Benchmark, s BenchmarkSettings) []GateLine {

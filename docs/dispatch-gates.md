@@ -219,7 +219,18 @@ call, which is cut off at 590 seconds with no words (mw-gq6.939):
   (`Check.KeepPlace`, `CheckReport.Waiting`). A busy host has no queue, so its line
   says no place is kept. The Builder runs the same command again in a fresh Bash call,
   as many times as the session's time allows, and hands back (a comment naming the
-  holder) only when the session's turn cap nears.
+  holder) only when the session's turn cap nears. The gate itself is not under the
+  deadline, so a check that won the gate lock after a long wait could start a gate
+  the call cannot finish: it is then cut off at 590 seconds with the lock held
+  (mw-gq6.940). So when the lock is won and the rig's usual gate on this host (the
+  median of the last gates in the vault's bench lines, `GateExpectedFor`) is more than
+  what is left of `CheckCallBudget`, 540 seconds from the check's start, the check
+  gives the lock back, keeps its place and ends in one line, exit 0: *the gate needs
+  about G and only R is left in this call; your place N of M in the queue is kept for
+  10 minutes: run the same command again to start it* (`Check.CallBudget`,
+  `QueuePlace.Late`); run at once it takes the place up and starts the gate, saying
+  *gate expected about G, R left in this call*. A rig with no figure, or a gate longer
+  than a whole call, is started as it always was.
 - **`--wait` or `--background`**: the deadline is `mw check --wait` (40 minutes by
   default; mw-gq6.938: nine minutes handed a Builder back three times in 45 minutes
   behind two long gates). A wait that outlasts it ends in one line saying the wait

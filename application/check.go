@@ -91,6 +91,15 @@ type Check struct {
 	// waited for it (mw-gq6.939).
 	KeepPlace time.Duration
 
+	// CallBudget is how much of one foreground tool call a Builder's whole check
+	// may spend (CheckCallBudget), and GateExpected is how long the rig's gate
+	// usually takes on this host, 0 when no figure is known. A check that gets the
+	// host's gate lock when the gate would not end inside what is left of the call
+	// does not start it (mw-gq6.940). Zero CallBudget, or no figure, starts the gate
+	// whenever the lock is had.
+	CallBudget   time.Duration
+	GateExpected func(ctx context.Context, rig string) time.Duration
+
 	// Load is how busy this host is, read around the rig's tests as a
 	// close-out reads it (mw-gq6.379): the check waits, up to LoadBound, for a
 	// busy host to calm before the tests, and runs them once more when they fail
@@ -351,7 +360,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	case !split && k.Slot != nil && k.GateLock != nil:
 		// Slot, then gate lock, taken before the wait for a calm host so that the
 		// load waited on is not another gate's: a close-out does the same.
-		gateLock = checkGateLock{k: k, c: c, attempt: report.Attempt, left: left}
+		gateLock = checkGateLock{k: k, c: c, attempt: report.Attempt, left: left, fit: k.callFitOf(ctx, path.Rig, began)}
 	case !split && k.Slot != nil:
 		checks = slottedChecks{
 			checks: tests,
@@ -375,7 +384,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 						holding, err = k.takeSlotFor(ctx, c, try, left())
 					} else {
 						var turn GateTurn
-						turn, err = k.takeForTests(ctx, c, try, left(), nil)
+						turn, err = k.takeForTests(ctx, c, try, left(), nil, nil)
 						holding = turn.Holding
 					}
 					if err != nil && !split {
