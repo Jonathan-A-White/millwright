@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -253,5 +254,134 @@ func TestStatusSaysARefusedUnhostedClaimIsKeptNotGivenBack(t *testing.T) {
 	}
 	if !strings.Contains(printed, "refused, waiting on the Mayor (mw retry or a hold) mw retry mw-gq6.50 --hold") {
 		t.Fatalf("expected the refused claim said kept, with its cure, got:\n%s", printed)
+	}
+}
+
+// mw-gq6.954: a claim no host names whose last run landed was offered `mw retry`
+// in the STUCK section, which works the story a second time on top of its own
+// landed commits. A landed claim wants closing, and `mw next <id>` closes it.
+
+// aLandedUnhostedClaim is a claim no host's Path names, lease lapsed seven
+// hours ago, whose last run is recorded landed.
+func aLandedUnhostedClaim(t *testing.T, tracker *apptest.FakeTracker, id string) {
+	t.Helper()
+	anUnhostedClaim(t, tracker, id, "mw@desktop", statusNow, 7*time.Hour)
+	if err := tracker.SetStoryState(context.Background(), id, application.RunState, application.RunLanded, "landed on main"); err != nil {
+		t.Fatalf("recording the landing of %s: %v", id, err)
+	}
+}
+
+func TestStatusStuckLandedClaimOffersNoRetryAndNamesWhatClosesIt(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	aLandedUnhostedClaim(t, tracker, "mw-gq6.50")
+
+	printed := flat(otherHostStatus(t, tracker).String())
+	if !strings.Contains(printed, "STUCK: claimed by mw@desktop") {
+		t.Fatalf("expected the claim named STUCK, got:\n%s", printed)
+	}
+	if strings.Contains(printed, "mw retry") || strings.Contains(printed, "no dispatch tick gives back") {
+		t.Fatalf("expected a landed claim offered no mw retry, got:\n%s", printed)
+	}
+	if !strings.Contains(printed, "mw next mw-gq6.50") {
+		t.Fatalf("expected the line to name mw next as what closes it, got:\n%s", printed)
+	}
+}
+
+// What the STUCK line names is run here against the same state: mw next closes
+// the landed claim, without landing anything a second time.
+func TestMwNextClosesAStuckLandedClaim(t *testing.T) {
+	ctx := context.Background()
+	tracker := aTrackerPathedToVPS(t)
+	aLandedUnhostedClaim(t, tracker, "mw-gq6.50")
+	lands := &fakeRetryLanding{}
+	next := application.Next{
+		Tracker: tracker, Vault: newFakeVault(), Worktrees: lands, Landing: lands,
+		Checks: checkStub{}, Slot: slotStub{},
+		Seat: "builder", Host: "vps",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}
+
+	report, err := next.Run(ctx, "mw-gq6.50")
+	if err != nil || !report.Closed {
+		t.Fatalf("expected mw next to close the landed claim, got %+v, %v", report, err)
+	}
+	if detail, _ := tracker.ShowStory(ctx, "mw-gq6.50"); detail.Status != apptest.StatusClosed {
+		t.Fatalf("expected the story closed, got %q", detail.Status)
+	}
+}
+
+// What mw retry did on a landed run: it gave the claim back, so the story was
+// dispatched and worked again. It is refused now, with a line saying why.
+func TestRetryRefusesAStoryWhoseLastRunLandedAndChangesNothing(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		tracker := apptest.NewFakeTracker()
+		aRetryStory(t, tracker, "mw-gq6.1")
+		if err := tracker.SetStoryState(context.Background(), "mw-gq6.1", application.RunState, application.RunLanded, "landed on main"); err != nil {
+			t.Fatal(err)
+		}
+		before, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		landing := &fakeRetryLanding{AheadCount: 2, BundleSHA: "bbb", OriginTip: "4656ca5d"}
+		var out strings.Builder
+		retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out)
+		retry.Force = force
+
+		report, err := retry.Run(context.Background(), "mw-gq6.1")
+		if err == nil || !report.Refused {
+			t.Fatalf("force=%v: expected the retry refused, got %+v, %v", force, report, err)
+		}
+		for _, want := range []string{"landed", "mw next mw-gq6.1", "second time"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("force=%v: expected the refusal to say %q, got %q", force, want, err)
+			}
+		}
+		after, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if after.Status != before.Status || after.Assignee != before.Assignee || after.Attempts != before.Attempts {
+			t.Errorf("force=%v: expected the claim kept, was %+v now %+v", force, before, after)
+		}
+		if comments := tracker.Comments("mw-gq6.1"); len(comments) != 0 {
+			t.Errorf("force=%v: expected no comment, got %q", force, comments)
+		}
+		if landing.bundled || landing.removed || landing.branchDeleted {
+			t.Errorf("force=%v: expected nothing bundled, removed or deleted, got %+v", force, landing)
+		}
+	}
+}
+
+// The other run states' STUCK lines are as before: mw retry is the cure, and no
+// dispatch tick gives the claim back.
+func TestStatusStuckClaimInAnyOtherRunStateStillOffersRetry(t *testing.T) {
+	for _, run := range []string{application.RunStopped, application.RunStuck, application.RunCancelled} {
+		tracker := aTrackerPathedToVPS(t)
+		anUnhostedClaim(t, tracker, "mw-gq6.50", "mw@desktop", statusNow, 7*time.Hour)
+		if err := tracker.SetStoryState(context.Background(), "mw-gq6.50", application.RunState, run, "x"); err != nil {
+			t.Fatal(err)
+		}
+		printed := flat(otherHostStatus(t, tracker).String())
+		want := "its run state is " + run + ", which no dispatch tick gives back mw retry mw-gq6.50"
+		if !strings.Contains(printed, want) {
+			t.Errorf("run=%s: expected %q, got:\n%s", run, want, printed)
+		}
+	}
+}
+
+// The same sweep for OPEN BUT CLAIMED: a story open under a host's claim whose
+// last run landed is closed by mw next; mw retry is refused for it.
+func TestStatusOpenButClaimedLandedStoryOffersNoRetry(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	openButClaimed(t, tracker, "mw-gq6.50", "mw@laptop")
+	if err := tracker.SetStoryState(context.Background(), "mw-gq6.50", application.RunState, application.RunLanded, "landed on main"); err != nil {
+		t.Fatal(err)
+	}
+
+	printed := flat(otherHostStatus(t, tracker).String())
+	if strings.Contains(printed, "mw retry mw-gq6.50") || !strings.Contains(printed, "mw next mw-gq6.50") {
+		t.Fatalf("expected mw next and no mw retry, got:\n%s", printed)
 	}
 }

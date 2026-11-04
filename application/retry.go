@@ -518,6 +518,15 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	if QueuedForBatch(detail) {
 		return r.refuse(report, r.queuedWhy(ctx, detail, path.Rig))
 	}
+	// A story whose last run landed is finished but for its close: giving its
+	// claim back, --force or not, has the next dispatch tick work it a second
+	// time on top of its own landed commits (mw-gq6.954). A state that cannot be
+	// read is no licence to refuse.
+	if run, err := r.Tracker.StoryState(ctx, storyID, RunState); err == nil && run == RunLanded {
+		return r.refuse(report, fmt.Sprintf(
+			"its last run landed (%s=%s), so a retry would work it a second time on top of its own landed commits: "+
+				"`mw next %s` closes it, and more work on it is a new story", RunState, RunLanded, storyID))
+	}
 	report.NextAttempt = detail.Attempts + 1
 	report.Hitl = detail.Hitl()
 	report.NoCause = detail.Cause == ""

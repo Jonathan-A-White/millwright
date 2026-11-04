@@ -2344,7 +2344,12 @@ func (r StatusReport) String() string {
 		clip(&b, fmt.Sprintf("%s (%d)", OpenButClaimedHeading, len(r.OpenButClaimed)))
 		for _, d := range r.OpenButClaimed {
 			writeStory(&b, d, "claimed by "+d.Assignee+", no session")
-			clip(&b, "    frees it: mw retry "+d.Story.ID)
+			if hasLabel(d.Labels, RunState+":"+RunLanded) {
+				// Its last run landed: a retry is refused, it wants closing (mw-gq6.954).
+				clip(&b, "    its last run landed; closes it: mw next "+d.Story.ID)
+			} else {
+				clip(&b, "    frees it: mw retry "+d.Story.ID)
+			}
 		}
 		b.WriteString("\n")
 	}
@@ -2362,6 +2367,12 @@ func (r StatusReport) String() string {
 				writeStory(&b, d, "STUCK: claimed by "+d.Assignee+", lease ran out "+since+", no host or session names it")
 				wrapInto(&b, "    ", refusedLine)
 				clip(&b, "    mw retry "+d.Story.ID+" --hold")
+			case RunLanded:
+				// Landed already: mw retry would work it a second time. It wants
+				// closing, which mw next does without landing anything again
+				// (mw-gq6.954).
+				writeStory(&b, d, "STUCK: claimed by "+d.Assignee+", lease ran out "+since+", no host or session names it; its last run landed, so it only wants closing")
+				clip(&b, "    mw next "+d.Story.ID)
 			default:
 				writeStory(&b, d, "STUCK: claimed by "+d.Assignee+", lease ran out "+since+", no host or session names it; its run state is "+run+", which no dispatch tick gives back")
 				clip(&b, "    mw retry "+d.Story.ID)
