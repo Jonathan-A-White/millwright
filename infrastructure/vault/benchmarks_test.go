@@ -37,3 +37,31 @@ func TestBenchmarksAreReadFromEveryResultFileThatHoldsOne(t *testing.T) {
 		t.Errorf("expected none from a vault with no runs, got %+v, %v", none, err)
 	}
 }
+
+func TestPartTimesAreReadFromEveryPartTimeRecordUnderRuns(t *testing.T) {
+	dir := t.TempDir()
+	write := func(story, name, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(dir, "runs", story), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "runs", story, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("mw-a.1", "check-1-part-2.took", "host laptop\nrig lampas\npart 2\nat 2026-11-04T12:00:00Z\nseconds 300\n")
+	write("mw-a.2", "check-2-part-1.took", "host desktop\nrig lampas\npart 1\nat 2026-11-03T12:00:00Z\nseconds 42.5\n")
+	write("mw-a.3", "check-1-part-1.log", "tip abc\npassed\n")
+	write("mw-a.4", "check-1-part-1.took", "garbled")
+
+	got, err := vault.PartTimes{Vault: vault.New(dir)}.RecentParts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Host != "desktop" || got[0].Part != 1 || got[0].Seconds != 42.5 || got[1].Host != "laptop" || got[1].Part != 2 || got[1].Story != "mw-a.1" {
+		t.Errorf("expected two part times, oldest first, got %+v", got)
+	}
+	if none, err := (vault.PartTimes{Vault: vault.New(t.TempDir())}).RecentParts(context.Background()); err != nil || len(none) != 0 {
+		t.Errorf("expected none from a vault with no runs, got %+v, %v", none, err)
+	}
+}
