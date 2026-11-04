@@ -1270,15 +1270,23 @@ func TestABatchLandingThatChangedNoBackendStagesNothing(t *testing.T) {
 // a result file; it returns the vault, the tracker and the formula's root.
 func aBatchLandedAfterItsGate(t *testing.T) (*fakeVault, *apptest.FakeTracker, string) {
 	t.Helper()
+	return aBatchLandedStoryAfterItsGate(t, "A story")
+}
+
+// aBatchLandedStoryAfterItsGate is aBatchLandedAfterItsGate for a story of the
+// title given: a title that begins "Demo" is a demo, which landing leaves open
+// for the Governor.
+func aBatchLandedStoryAfterItsGate(t *testing.T, title string) (*fakeVault, *apptest.FakeTracker, string) {
+	t.Helper()
 	ctx := context.Background()
 	now := time.Date(2026, 11, 4, 16, 0, 0, 0, time.UTC)
 	tracker := apptest.NewFakeTracker()
 	tracker.AddFormula("tdd-feature", application.FormulaStep{Title: "Understand {{story}}"}, application.FormulaStep{Title: "Commit"})
 	tracker.AddEpic("mw-x", domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelSonnet, Effort: domain.EffortHigh})
-	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: title})
 	mustDo(t, tracker.ClaimAs("mw-x.1", "mw@laptop", now.Add(time.Hour)))
 	mustDo(t, tracker.SetStarted("mw-x.1", now.Add(-30*time.Minute)))
-	poured, err := tracker.PourFormula(ctx, "tdd-feature", "mw-x.1", "A story", false)
+	poured, err := tracker.PourFormula(ctx, "tdd-feature", "mw-x.1", title, false)
 	mustDo(t, err)
 	mustDo(t, tracker.SetStoryMetadata(ctx, "mw-x.1", map[string]string{application.MoleculeField: poured.RootID}))
 	detail, err := tracker.ShowStory(ctx, "mw-x.1")
@@ -1323,5 +1331,21 @@ func TestAStoryABatchLandsHasItsFormulaClosedRootAndSteps(t *testing.T) {
 	mustDo(t, err)
 	if open.RootID != "" || len(open.Steps) != 0 {
 		t.Errorf("expected the formula %s of a batch-landed story closed, got %d steps open and root %q", root, len(open.Steps), open.RootID)
+	}
+}
+
+// A demo a batch lands is left open for the Governor, and its formula is closed
+// as a single landing closes it (mw-gq6.972).
+func TestADemoABatchLandsHasItsFormulaClosedRootAndSteps(t *testing.T) {
+	_, tracker, root := aBatchLandedStoryAfterItsGate(t, "Demo: the page")
+	open, err := tracker.OpenMolecule(context.Background(), root)
+	mustDo(t, err)
+	if open.RootID != "" || len(open.Steps) != 0 {
+		t.Errorf("expected the formula %s of a batch-landed demo closed, got %d steps open and root %q", root, len(open.Steps), open.RootID)
+	}
+	detail, err := tracker.ShowStory(context.Background(), "mw-x.1")
+	mustDo(t, err)
+	if detail.Closed() || detail.Assignee != "" {
+		t.Errorf("expected the demo to be left open for the Governor, got %+v", detail)
 	}
 }

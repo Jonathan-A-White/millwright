@@ -273,8 +273,8 @@ var landedTail = []tailStep{
 			}
 		}},
 	{name: stepCloseFormula, scope: perStory,
-		why: "A single landing closes the formula of a demo it left waiting for the Governor; a batch closes only the formula " +
-			"of a story it closed (mw-gq6.966). Kept as main had it; mw-gq6.971 names it for the Mayor to judge.",
+		why: "Both close the formula of a story closed and of a demo left waiting for the Governor (mw-gq6.972); " +
+			"only the reason differs: a single landing's says \"was tested\" for a story the Tester tested, a batch's says \"landed\".",
 		run: func(t *tail, s *tailStory) {
 			if t.batch == nil {
 				if s.closeErr == nil {
@@ -286,7 +286,7 @@ var landedTail = []tailStep{
 				}
 				return
 			}
-			if s.closed {
+			if s.closed || s.heldDemo {
 				var shut NextReport
 				t.n.closeFormula(t.ctx, s.c, &shut, "landed")
 				s.report.Notes = append(s.report.Notes, shut.Notes...)
