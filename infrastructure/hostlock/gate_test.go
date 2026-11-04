@@ -335,3 +335,38 @@ func TestACloseOutsWaitStandsBehindAPlaceAnotherWaitKeptUntilItsKeepTimePasses(t
 		t.Fatalf("expected the close-out to take the lock once the keep time had passed, got %v", err)
 	}
 }
+
+// A wait that wins the lock but whose waiter says it is late for it gives the lock
+// back at once and keeps the waiter's place, which the same waiter's next wait
+// takes up and uses (mw-gq6.940).
+func TestAWaitThatWinsTheLockButIsLateGivesItBackAndKeepsThePlaceForTheNextCall(t *testing.T) {
+	gate := hostlock.NewGate(t.TempDir(), hostlock.WithGatePoll(2*time.Millisecond))
+	late := true
+	ask := &application.QueuePlace{Key: "check mw-x", For: 10 * time.Minute, Late: func() bool { return late }}
+	_, err := gate.Take(application.WithQueuePlace(context.Background(), ask), "laptop checking mw-x", nil)
+	if err != application.ErrPlaceKeptLate {
+		t.Fatalf("expected the place to be kept late, got %v", err)
+	}
+	if kept, place, of := ask.Result(); !kept || place != 1 || of != 1 {
+		t.Errorf("expected place 1 of 1 to be kept, got %v %d %d", kept, place, of)
+	}
+	if holder := gate.Holder(); holder != "" {
+		t.Errorf("expected the lock to be given back, %q holds it", holder)
+	}
+	entries, _ := os.ReadDir(filepath.Join(gate.Dir, hostlock.GateQueueDir))
+	if len(entries) != 1 {
+		t.Fatalf("expected the kept ticket to stay, the queue holds %d", len(entries))
+	}
+
+	late = false
+	again := &application.QueuePlace{Key: "check mw-x", For: 10 * time.Minute, Late: func() bool { return late }}
+	turn, err := gate.Take(application.WithQueuePlace(context.Background(), again), "laptop checking mw-x", nil)
+	if err != nil {
+		t.Fatalf("expected the same waiter to take its place up and the lock, got %v", err)
+	}
+	turn.Holding.Release(context.Background())
+	entries, _ = os.ReadDir(filepath.Join(gate.Dir, hostlock.GateQueueDir))
+	if len(entries) != 0 {
+		t.Errorf("expected no ticket once the lock was taken, the queue holds %d", len(entries))
+	}
+}

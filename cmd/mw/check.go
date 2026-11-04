@@ -47,6 +47,10 @@ func newCheckCmd() *cobra.Command {
 			"the same place, not the back of the queue (mw-gq6.939). --wait 40m (or --background, which gives it\n" +
 			"40 minutes) is the long wait for a call that is not cut off: a wait that outlasts it ends with one\n" +
 			"line saying the wait limit was reached and to hand back at once, with no place kept.\n" +
+			"A foreground check that gets the gate lock when the rig's usual gate on this host (the vault's gate\n" +
+			"times) would not end inside 540 seconds of the call does not start the gate: it gives the lock back,\n" +
+			"keeps its place for ten minutes and says the gate needs about so long and only so long is left in\n" +
+			"this call, to run the same command again (mw-gq6.940); a gate longer than a whole call is started.\n" +
 			"--no-slot skips both waits. mw check --part N does not take the gate lock.\n\n" +
 			"check treats a busy host as the close-out does (mw-gq6.228): it waits, up to the close-out's bound,\n" +
 			"for the host to calm before the tests, and runs tests that failed while it was busy once more when\n" +
@@ -106,11 +110,20 @@ func newCheckCmd() *cobra.Command {
 
 			var slot application.MergeSlot
 			var gateLock application.GateLock
+			var gateExpected func(ctx context.Context, rigName string) time.Duration
 			if !noSlot {
 				gateLock = hostGateLock()
 				bench, err := config.Benchmark()
 				if err != nil {
 					return err
+				}
+				book := vault.Benchmarks{Vault: mwVault(dir, host)}
+				gateExpected = func(ctx context.Context, rigName string) time.Duration {
+					history, err := book.Recent(ctx)
+					if err != nil {
+						return 0
+					}
+					return application.GateExpectedFor(history, rigName, host, benchmarkLimits(bench))
 				}
 				slot = rig.NewSlots(
 					gateScaledSlotWait(vault.Benchmarks{Vault: mwVault(dir, host)}, rigs, host, benchmarkLimits(bench)),
@@ -126,6 +139,12 @@ func newCheckCmd() *cobra.Command {
 				return err
 			}
 			waitLimit, handBackAtOnce, keepPlace := checkWaitLimit(cmd, part)
+			// Only a foreground whole check is cut off with its call: --wait and
+			// --background are the long wait of a call that is not (mw-gq6.940).
+			var callBudget time.Duration
+			if part == 0 && keepPlace > 0 {
+				callBudget = application.CheckCallBudget
+			}
 			k := application.Check{
 				Tracker:        mwGateway(dir, host),
 				Landing:        worktrees,
@@ -141,6 +160,8 @@ func newCheckCmd() *cobra.Command {
 				PartSlotWait:   waitLimit,
 				HandBackAtOnce: handBackAtOnce,
 				KeepPlace:      keepPlace,
+				CallBudget:     callBudget,
+				GateExpected:   gateExpected,
 				Load:           hostload.Proc{},
 				Modes:          modes,
 				Host:           host,

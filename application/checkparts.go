@@ -29,6 +29,12 @@ const CheckPartSlotWait = 9 * time.Minute
 // comes back does not hold up the queue for long.
 const CheckKeepPlace = 10 * time.Minute
 
+// CheckCallBudget is how much of the 590 seconds a Builder's foreground tool call
+// is given a whole mw check may spend before it must not start the rig's gate: the
+// call is cut off at 590 s with no words and the gate lock held, so the gate is
+// started only when it is expected to end inside this (mw-gq6.940).
+const CheckCallBudget = 540 * time.Second
+
 // A rig's whole gate can outrun the 590 seconds a Builder's foreground tool call
 // is given, and waiting on one run in the background is a wait the auto-mode
 // classifier refuses (mw-gq6.567). A host can therefore name a rig's gate as
