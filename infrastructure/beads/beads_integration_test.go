@@ -1907,23 +1907,49 @@ func TestGatewayListsOneRigsNewestClosedStoriesWithTheirHost(t *testing.T) {
 	ctx, cancel := realBdContext(t)
 	defer cancel()
 
+	// The sleep keeps two closes apart by more than the whole second bd stamps
+	// them to, so the order is the closing order; yet twice a gate saw two of
+	// them stamped alike (mw-gq6.955), a tie `--sort closed` has no order for. The
+	// test therefore holds what the gateway owes, not an order bd does not give:
+	// the rig's two stories and no other, each with its own host, non-increasing
+	// in closed time, and the limit keeping the newest closed time. A tie is
+	// logged with the wall clock of each close, so the next sighting explains itself.
 	var ids []string
+	var closedAround []string
 	for _, c := range []struct{ title, rig, host string }{
 		{"First", "millwright", "desktop"}, {"Second", "millwright", "laptop"}, {"Third", "lampas", "desktop"},
 	} {
 		id := bdRun(t, vault, beads.Program, "create", c.title, "--silent", "--metadata", `{"rig":"`+c.rig+`","host":"`+c.host+`"}`)
+		before := time.Now().UTC()
 		bdRun(t, vault, beads.Program, "close", id, "--reason", "landed")
+		closedAround = append(closedAround, fmt.Sprintf("%s closed between %s and %s", c.title, before.Format("15:04:05.000"), time.Now().UTC().Format("15:04:05.000")))
 		ids = append(ids, id)
 		time.Sleep(1100 * time.Millisecond)
 	}
 	gateway := beads.New(vault)
 
 	got, err := gateway.ClosedStoriesOfRig(ctx, "millwright", time.Now().Add(-time.Hour), 10)
-	if err != nil || len(got) != 2 || got[0].ID != ids[1] || got[0].Host != "laptop" || got[0].Rig != "millwright" || got[1].Host != "desktop" {
-		t.Fatalf("expected the rig's two stories newest first with their hosts, got %v: %+v", err, got)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("expected the rig's two stories, got %v: %+v", err, got)
 	}
-	if got, err = gateway.ClosedStoriesOfRig(ctx, "millwright", time.Now().Add(-time.Hour), 1); err != nil || len(got) != 1 || got[0].ID != ids[1] {
-		t.Fatalf("expected the limit to keep the newest only, got %v: %+v", err, got)
+	hostOf := map[string]string{ids[0]: "desktop", ids[1]: "laptop"}
+	for _, s := range got {
+		if want, ok := hostOf[s.ID]; !ok || s.Host != want || s.Rig != "millwright" {
+			t.Errorf("expected only the rig's own stories, each with its host, got %+v", s)
+		}
+	}
+	if got[0].ID == got[1].ID {
+		t.Fatalf("expected two different stories, got %+v", got)
+	}
+	if got[0].ClosedAt.Before(got[1].ClosedAt) {
+		t.Fatalf("expected the newest closed first, got %+v then %+v (%v)", got[0], got[1], closedAround)
+	}
+	if got[0].ClosedAt.Equal(got[1].ClosedAt) {
+		t.Logf("both stories read closed at %s, which `--sort closed` has no order for: %v", got[0].ClosedAt, closedAround)
+	}
+	limited, err := gateway.ClosedStoriesOfRig(ctx, "millwright", time.Now().Add(-time.Hour), 1)
+	if err != nil || len(limited) != 1 || !limited[0].ClosedAt.Equal(got[0].ClosedAt) {
+		t.Fatalf("expected the limit to keep the newest only, got %v: %+v", err, limited)
 	}
 }
 
