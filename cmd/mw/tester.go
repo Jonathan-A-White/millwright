@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -75,6 +76,26 @@ func newTesterReportCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&since, "since", "", "where the report starts: a day or a UTC time; a week before [tester] until by default")
 	return cmd
+}
+
+// withTesterTrial gives a Next the Tester trial of the [tester] table, which
+// the spring of a landing reads (mw-gq6.962): mw next and mw land both build
+// their Next with it.
+func withTesterTrial(n application.Next, who string, errw io.Writer) application.Next {
+	n.Tester = testerTrialSaid(who, errw)
+	return n
+}
+
+// testerTrialSaid reads the [tester] table. A table that cannot be read springs
+// no Tester story and never stops a landing: it is said on errw as
+// "<who>: no Tester story will be sprung: <why>", and there is no trial.
+func testerTrialSaid(who string, errw io.Writer) application.TesterTrial {
+	trial, err := testerTrial()
+	if err != nil {
+		fmt.Fprintf(errw, "%s: no Tester story will be sprung: %v\n", who, err)
+		return application.TesterTrial{}
+	}
+	return trial
 }
 
 // testerTrial is the [tester] table as the use cases take it, its model and
