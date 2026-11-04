@@ -112,6 +112,10 @@ func newLandCmd() *cobra.Command {
 
 			gateway := mwGateway(dir, host)
 			files := mwVault(dir, host)
+			bench, err := config.Benchmark()
+			if err != nil {
+				return err
+			}
 			worktrees := rig.New()
 			checks, err := landingChecks(dir, gateCommands{related: true, parts: true})
 			if err != nil {
@@ -135,6 +139,7 @@ func newLandCmd() *cobra.Command {
 				GateRecords:   files,
 
 				Load:      hostload.Proc{SwapSample: benchmarkSwapSample},
+				Bench:     benchmarkLimits(bench), // the par of a landed story, from the past benchmarks withVaultPorts reads (mw-gq6.966)
 				Slot:      rig.NewSlots(),
 				GateLock:  hostGateLock(),
 				Mailbox:   gateway,
@@ -195,5 +200,6 @@ func withVaultPorts(n application.Next, files *vault.Vault) application.Next {
 	n.Errors = files
 	n.RigFacts = files
 	n.Home = files
+	n.Benchmarks = vault.Benchmarks{Vault: files}
 	return n
 }
