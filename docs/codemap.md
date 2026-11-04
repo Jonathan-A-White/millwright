@@ -34,8 +34,7 @@
 | GristCredits, GristCredit{Key,State}, GristCreditsAdmin | application/gristcredits.go | {grist/credits,claude/grind}.go, cmd/mw/grist_credits.go |
 | IdeasOnlyReader, IdeasOnlyFiles | ideasonly.go | {postern/http.go,ideasonly} |
 | Suite*, Timing* | application/suite.go, application/suitenightly.go, application/timingnightly.go | {rig/{worktree,checks,timing}.go,vault/{vault,timing}.go,apartproc} |
-| Scorer, ScoreTimeout, SecretStore, Google*, ContactBook | application/scorer.go, secrets.go, application/google.go, application/contacts.go | {scorer,sops,google} |
-| GhostBlog (drafts only: Find, Create, Update) | application/ghost.go | ghost/ghost.go, FakeGhostBlog |
+| Scorer, SecretStore, Google*, ContactBook, GhostBlog | application/scorer.go, secrets.go, application/google.go, application/contacts.go | {scorer,sops,google} |
 
 Fakes: application/apptest/fake*.go.
 
@@ -58,7 +57,6 @@ Use cases' files: [docs/codemap-detail.md](codemap-detail.md), by need.
 | Seat* | cmd/mw/seat.go | seat_* |
 | Talk*, TalkShow | cmd/mw/talk.go | talk_* |
 | Millhand, Deputy, MillhandTick | cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | {millhand*,deputy} |
-| GhostDraft (`mw ghost draft`) | cmd/mw/ghost.go | ghost_test (httptest) |
 | Secrets*, Google*, Contacts, Hands*, Ask, Watch, Doctor | cmd/mw/secrets.go, cmd/mw/google.go, cmd/mw/contacts.go, cmd/mw/hands.go, cmd/mw/ask.go, cmd/mw/watch.go, cmd/mw/doctor.go | {secrets,hands,ask,watch,doctor} |
 | SeatBoot{,Set}, SeatRead, Memory[Log], Errors, Init | cmd/mw/init.go, cmd/mw/memory.go, cmd/mw/errors.go, infra/memoryqueries | {seat_boot,init,memory,errors} |
 | Postern* (+clear), Digest + Factory loop (LoopSource) | cmd/mw/postern.go, cmd/mw/posternview.go, cmd/mw/posternbead.go, cmd/mw/posternmirror.go, cmd/mw/digest.go | postern_* |
