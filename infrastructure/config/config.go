@@ -21,6 +21,7 @@
 //	grist_test_key_file = "/home/jwhite/.config/mw/grist-test.key"   # what mw grist smoke sends as
 //	google_client_file = "/home/jwhite/.config/mw/google-client.json" # the Desktop OAuth client mw google link signs in with
 //	ghost_url = "https://allmymind.org"  # the blog mw ghost draft pushes drafts to
+//	gemini_model = "gemini-2.5-flash-image"  # the Nano Banana model mw image makes pictures with
 //	beads_sync = "remote"
 //	beads_backup_minutes = 30
 //	beads_server_host = "laptop.mw"    # only for beads_sync = "auto" on a boost
@@ -199,7 +200,9 @@ const (
 	// client's JSON mw google link signs in with.
 	GoogleClientFileEnv = "MW_GOOGLE_CLIENT_FILE"
 	// GhostURLEnv replaces ghost_url, the blog mw ghost draft pushes drafts to.
-	GhostURLEnv      = "MW_GHOST_URL"
+	GhostURLEnv = "MW_GHOST_URL"
+	// GeminiModelEnv replaces gemini_model, the model mw image makes pictures with.
+	GeminiModelEnv   = "MW_GEMINI_MODEL"
 	GristStateDirEnv = "MW_GRIST_STATE_DIR"
 
 	BeadsSyncEnv          = "MW_BEADS_SYNC"
@@ -810,6 +813,20 @@ func GristTestKeyFile() (string, error) {
 // Google Cloud console downloads it, is kept under the home directory when
 // nothing says otherwise. He makes it; mw only reads it.
 var DefaultGoogleClientFile = filepath.Join(".config", "mw", "google-client.json")
+
+// DefaultGeminiModel is the model mw image uses when nothing says another:
+// Nano Banana, Google's gemini-2.5-flash-image, the one its generateContent
+// call is documented for. The newer ones (gemini-3.1-flash-image, "Nano
+// Banana 2"; gemini-3-pro-image, "Nano Banana Pro") are a gemini_model away.
+// Models: https://aistudio.google.com/docs/models
+const DefaultGeminiModel = "gemini-2.5-flash-image"
+
+// GeminiModel reports the model mw image makes pictures with: $MW_GEMINI_MODEL
+// if it is set, otherwise the root-table `gemini_model` key of
+// ~/.config/mw/config.toml, and DefaultGeminiModel when neither says.
+func GeminiModel() (string, error) {
+	return optionalSetting("gemini_model", GeminiModelEnv, DefaultGeminiModel)
+}
 
 // DefaultGhostURL is the blog's address when nothing says another.
 const DefaultGhostURL = "https://allmymind.org"
