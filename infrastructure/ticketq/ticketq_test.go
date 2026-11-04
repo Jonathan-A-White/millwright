@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -219,5 +220,105 @@ func TestALeftTicketStandsInThePlaceOfTheOneItReplacesAndIsTakenUpByItsKey(t *te
 	}
 	if again.Name() != name {
 		t.Errorf("expected the key to take the left ticket %s up, got %s", name, again.Name())
+	}
+}
+
+// A clock that stepped back between two joins must not put the later waiter
+// ahead of the earlier one (mw-gq6.976).
+func TestAWaiterThatJoinsLaterIsBehindEvenWhenTheClockSteppedBack(t *testing.T) {
+	q := aQueue(t)
+	now := time.Now()
+	first, err := q.Join("mw-a", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Drop()
+	second, err := q.Join("mw-b", now.Add(-time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Drop()
+	if head, by := q.Head(second.Name()); head || by != "mw-a" {
+		t.Errorf("expected the later waiter to wait behind mw-a, got %v and %q", head, by)
+	}
+	if head, _ := q.Head(first.Name()); !head {
+		t.Error("expected the earlier waiter to be the head")
+	}
+	if place, of := q.Place(second.Name()); place != 2 || of != 2 {
+		t.Errorf("expected place 2 of 2, got %d of %d", place, of)
+	}
+}
+
+// Tickets named by two clocks a long way apart (two hosts, or one host before and
+// after a step) still order by when they joined as the queue saw it.
+func TestTicketsNamedByTwoClocksApartOrderByWhenTheyJoined(t *testing.T) {
+	q := aQueue(t)
+	now := time.Now()
+	var tickets []*ticketq.Ticket
+	for i, offset := range []time.Duration{0, -10 * time.Minute, 5 * time.Minute, -time.Hour + time.Second} {
+		ticket, err := q.Join(fmt.Sprintf("mw-%d", i), now.Add(offset))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ticket.Drop()
+		tickets = append(tickets, ticket)
+	}
+	for i, ticket := range tickets {
+		head, by := q.Head(ticket.Name())
+		if i == 0 && !head {
+			t.Errorf("expected the first to be the head, behind %q", by)
+		}
+		if i > 0 && (head || by != "mw-0") {
+			t.Errorf("expected ticket %d to wait behind mw-0, got %v and %q", i, head, by)
+		}
+		if place, _ := q.Place(ticket.Name()); place != i+1 {
+			t.Errorf("expected ticket %d in place %d, got %d", i, i+1, place)
+		}
+	}
+	// Dropping from the front passes the head along in join order.
+	for i := 0; i < len(tickets)-1; i++ {
+		tickets[i].Drop()
+		if head, _ := q.Head(tickets[i+1].Name()); !head {
+			t.Errorf("expected ticket %d the head once %d dropped", i+1, i)
+		}
+	}
+}
+
+// A queue directory with tickets named by an earlier version (the plain wall-clock
+// stamp) is read as before: ordered, aged and cleared.
+func TestTicketsNamedInTheOldFormAreStillReadAgedAndCleared(t *testing.T) {
+	q := aQueue(t)
+	if err := os.MkdirAll(q.Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Held by this process, so alive: one recent, one past the cap.
+	hold := func(name string) *os.File {
+		f, err := os.OpenFile(filepath.Join(q.Dir, name), os.O_CREATE|os.O_RDWR, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+			t.Fatal(err)
+		}
+		f.WriteString("mw-old\n")
+		return f
+	}
+	oldName := fmt.Sprintf("%020d-%010d-1", time.Now().Add(-2*time.Hour).UnixNano(), 1)
+	recentName := fmt.Sprintf("%020d-%010d-1", time.Now().Add(-time.Minute).UnixNano(), 2)
+	defer hold(oldName).Close()
+	defer hold(recentName).Close()
+	mine, err := q.Join("mw-b", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mine.Drop()
+	if head, by := q.Head(mine.Name()); head || by != "mw-old" {
+		t.Errorf("expected to wait behind the recent old-form ticket, got %v and %q", head, by)
+	}
+	if _, err := os.Stat(filepath.Join(q.Dir, oldName)); !os.IsNotExist(err) {
+		t.Errorf("expected the ticket past the cap cleared, stat gave %v", err)
+	}
+	if mine.Name() <= recentName {
+		t.Errorf("expected my ticket %s to sort after %s", mine.Name(), recentName)
 	}
 }
