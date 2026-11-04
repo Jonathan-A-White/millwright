@@ -848,9 +848,9 @@ func (p *aPartBesideTheMergeSlot) queued() int {
 // held. It gives the slot back, keeps its place and says what is left (mw-gq6.944).
 // Run again at once, it takes the place up and runs.
 //
-// The times are real: the landing holds the slot for 1.5 s, the part is expected
-// to take 9 s of a 10 s call, so it is late whatever else the host took time over,
-// and the second call, which starts at once, fits unless the host took a second.
+// The times are real: the landing holds the slot for 3 s, the part is expected
+// to take 10 s of a 12 s call, so it is late whatever else the host took time over,
+// and the second call, which starts at once, fits unless the host took two seconds.
 func TestAForegroundPartThatGetsTheMergeSlotTooLateForItKeepsItsPlaceAndSaysToRunItAgain(t *testing.T) {
 	p := newPartBesideTheMergeSlot(t)
 	landing, err := p.slots.Take(context.Background(), p.rigDir, "mw land on laptop, landing a batch of millwright")
@@ -861,21 +861,21 @@ func TestAForegroundPartThatGetsTheMergeSlotTooLateForItKeepsItsPlaceAndSaysToRu
 		for deadline := time.Now().Add(5 * time.Second); p.queued() < 1 && time.Now().Before(deadline); {
 			time.Sleep(5 * time.Millisecond)
 		}
-		time.Sleep(1500 * time.Millisecond)
+		time.Sleep(3 * time.Second)
 		landing.Release(context.Background())
 	}()
 
 	expected := func(part int) time.Duration {
 		if part == 2 {
-			return 9 * time.Second
+			return 10 * time.Second
 		}
 		return 0
 	}
-	_, err = p.checkPart(2, time.Minute, 10*time.Second, expected)
+	_, err = p.checkPart(2, time.Minute, 12*time.Second, expected)
 	if err == nil {
 		t.Fatal("expected a part that did not start to say so")
 	}
-	for _, want := range []string{"part 2 of 2 (unit) did not start", "needs about 9s and only ", " left in this call", "your place 1 of 1 in the queue is kept for 10 minutes", "run the same command again"} {
+	for _, want := range []string{"part 2 of 2 (unit) did not start", "needs about 10s and only ", " left in this call", "your place 1 of 1 in the queue is kept for 10 minutes", "run the same command again"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("expected the line to say %q, got %q", want, err.Error())
 		}
@@ -889,7 +889,7 @@ func TestAForegroundPartThatGetsTheMergeSlotTooLateForItKeepsItsPlaceAndSaysToRu
 	if got := p.queued(); got != 1 {
 		t.Errorf("expected the part's ticket to outlive the call, the queue holds %d", got)
 	}
-	if _, err := p.checkPart(2, time.Minute, 10*time.Second, expected); err != nil {
+	if _, err := p.checkPart(2, time.Minute, 12*time.Second, expected); err != nil {
 		t.Fatalf("expected the second call to run the part, got %v", err)
 	}
 	if p.parts.ranCount() != 1 {
