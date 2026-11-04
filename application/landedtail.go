@@ -103,7 +103,8 @@ var landedTail = []tailStep{
 				func() error { return t.n.Tracker.SetStoryState(t.ctx, s.c.id, RunState, RunLanded, s.outcome) })
 		}},
 	{name: stepChainStamp, scope: perStory,
-		why: "A batch stamps each story at its own merge into the batch, a single landing at the commit it pushed.",
+		why: "A batch stamps each story at its own merge into the batch, a single landing at the commit it pushed, and " +
+			"before the after-landing command, which may be killed with the session it runs in.",
 		run: func(t *tail, s *tailStory) { t.n.queueStamp(t.ctx, s.c, s.report, Landed{Commit: s.merge}) }},
 	{name: stepSayFiles, scope: perStory,
 		run: func(t *tail, s *tailStory) { t.n.sayFilesOutsideTheKey(t.ctx, s.c, s.report) }},
@@ -226,6 +227,10 @@ var landedTail = []tailStep{
 			"closed and the mail goes, so that a stop anywhere after leaves the vault clean (mw-gq6.502); its records are committed after.",
 		run: func(t *tail, s *tailStory) {
 			if t.batch == nil {
+				// Committed whether this run wrote the line or an earlier one did:
+				// a line written by a run that could not commit it is still standing
+				// in the way of every sync until somebody commits it, and this is
+				// the run that can.
 				t.n.commit(t.ctx, s.c, s.report)
 				return
 			}
