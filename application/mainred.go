@@ -3,8 +3,11 @@ package application
 import (
 	"context"
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -54,7 +57,7 @@ const (
 // numbered header of a failure's detail, which the dot and line reporters print,
 // `1) [shots] › tests/e2e/x.spec.ts:106:7 › title ───`. The project in brackets
 // is optional; the file and the line are kept, the column is not.
-var playwrightFailure = regexp.MustCompile(`^\s*(?:✘\s+\d+|\d+\))\s+(?:\[[^\]]*\]\s+›\s+)?(\S+\.spec\.[cm]?[jt]sx?):(\d+):\d+\s+›`)
+var playwrightFailure = regexp.MustCompile(`^\s*(?:✘\s+\d+|\d+\))\s+(?:\[[^\]]*\]\s+›\s+)?(\S+\.spec\.[cm]?[jt]sx?):(\d+):\d+\s+›(.*)$`)
 
 // vitestFailure is vitest's `FAIL  src/a.test.ts > title`: the file it names.
 var vitestFailure = regexp.MustCompile(`^FAIL\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\s+>`)
@@ -98,6 +101,67 @@ func TestNamesOf(output string) []string {
 		}
 	}
 	return names
+}
+
+// PlaywrightTitles is the title of each Playwright test a run's output says
+// failed, by the name TestNamesOf gives it (`tests/e2e/x.spec.ts:106`): the last
+// of the `›`-separated words of its line, without the duration or retry mark.
+// A line's number changes when a branch adds a line above the test; its title
+// does not (mw-gq6.967).
+func PlaywrightTitles(output string) map[string]string {
+	titles := map[string]string{}
+	for _, line := range strings.Split(strings.ReplaceAll(domain.StripANSI(WithoutExpectedFailures(output)), "\r\n", "\n"), "\n") {
+		m := playwrightFailure.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		words := strings.Split(playwrightTestKey(m[3]), " › ")
+		if title := strings.TrimSpace(words[len(words)-1]); title != "" {
+			if name := m[1] + ":" + m[2]; titles[name] == "" {
+				titles[name] = title
+			}
+		}
+	}
+	return titles
+}
+
+// playwrightTestCall is a line that calls a Playwright test (`test(`,
+// `test.only(`, `it.skip(`); test.describe( is a group, not a test.
+var playwrightTestCall = regexp.MustCompile(`\b(?:test|it)(?:\.(?:only|skip|fixme|fail|slow))*\s*\(`)
+
+// testCallLookback is how many lines above its title a test's call may start.
+const testCallLookback = 5
+
+// LineOfTestTitled is the line of the test titled title in a spec file's text:
+// the line of its test( call, which is the line Playwright names it by, found
+// from the line that holds the title. When the title is on several, the one
+// nearest near; false when none holds it as a test's title.
+func LineOfTestTitled(source, title string, near int) (int, bool) {
+	lines := strings.Split(source, "\n")
+	found, best := false, 0
+	for i, text := range lines {
+		if !strings.Contains(text, title) {
+			continue
+		}
+		for j := i; j >= 0 && j >= i-testCallLookback; j-- {
+			if !playwrightTestCall.MatchString(lines[j]) {
+				continue
+			}
+			line := j + 1
+			if !found || abs(line-near) < abs(best-near) {
+				found, best = true, line
+			}
+			break
+		}
+	}
+	return best, found
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 // FailingPackages is the Go packages a run's output says failed, each once, in
@@ -167,7 +231,10 @@ const DefaultMainAloneBound = 10 * time.Minute
 const (
 	FailsOnMainToo = "fails on main too"
 	BranchOnly     = "branch only"
-	NotRunPrefix   = "not run: "
+	// NotOnMain is a Playwright test whose title the target's spec file does not
+	// hold: the branch added it (mw-gq6.967).
+	NotOnMain    = "not on main: the branch added it"
+	NotRunPrefix = "not run: "
 )
 
 // maxLabelled is how many failing tests a note of labels lists one by one; the
@@ -285,13 +352,34 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 			report.Notes = append(report.Notes, fmt.Sprintf("the landing worktree %s could not be taken away: %v", dir, closeErr))
 		}
 	}()
+	// A Playwright test is asked for on main at the line main has it at, which
+	// a branch that added a line above it has moved (mw-gq6.967).
+	onTarget, added := namesOnTarget(dir, tests, PlaywrightTitles(failed.Output))
+	label := func(test, label string) string {
+		if added[test] {
+			return NotOnMain
+		}
+		return label
+	}
+	var asked []string
+	askedSeen := map[string]bool{}
+	for _, test := range tests {
+		if name := onTarget[test]; !added[test] && !askedSeen[name] {
+			askedSeen[name] = true
+			asked = append(asked, name)
+		}
+	}
+	if len(asked) == 0 {
+		labelMain(report, labelNote(tests, at, func(string) string { return NotOnMain }))
+		return nil
+	}
 	bound := n.MainAloneBound
 	if bound <= 0 {
 		bound = DefaultMainAloneBound
 	}
 	bounded, cancel := context.WithTimeout(ctx, bound)
 	defer cancel()
-	run, err := n.NamedChecks.RunNamed(bounded, c.path.Rig, dir, tests)
+	run, err := n.NamedChecks.RunNamed(bounded, c.path.Rig, dir, asked)
 	took := n.now().Sub(began)
 	if ctx.Err() == nil && bounded.Err() != nil {
 		// Cut at its bound: what it printed so far is not an answer.
@@ -312,12 +400,18 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 		return nil
 	case run.Passed:
 		report.Notes = append(report.Notes, fmt.Sprintf("main alone passes %s (checked in %s): %s", strings.Join(tests, ", "), took.Round(time.Second), n.whoseFailure(ctx, c, report, failed, base)))
-		labelMain(report, labelNote(tests, at, func(string) string { return BranchOnly }))
+		labelMain(report, labelNote(tests, at, func(test string) string { return label(test, BranchOnly) }))
 		return nil
 	}
 	onMain := map[string]bool{}
 	for _, name := range TestNamesOf(run.Output) {
 		onMain[name] = true
+	}
+	// Each test is told by the name main knows it by.
+	for _, test := range tests {
+		if !added[test] && onMain[onTarget[test]] {
+			onMain[test] = true
+		}
 	}
 	if len(onMain) == 0 {
 		// Failed, and named no test: a build that broke, say. Nothing is said of
@@ -329,7 +423,7 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 		if onMain[test] {
 			return FailsOnMainToo
 		}
-		return BranchOnly
+		return label(test, BranchOnly)
 	}))
 	for _, name := range tests {
 		if !onMain[name] {
@@ -337,9 +431,43 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 			return nil
 		}
 	}
-	red := &MainRed{Tests: tests, Command: run.Command, Took: took}
+	// The bug that carries main's red names the tests by main's own lines, which
+	// a branch that moved a test does not change: a later story that fails the
+	// same test at another line finds the same bug (mw-gq6.967).
+	onMainNames := make([]string, len(tests))
+	for i, test := range tests {
+		onMainNames[i] = onTarget[test]
+	}
+	red := &MainRed{Tests: onMainNames, Command: run.Command, Took: took}
 	report.Notes = append(report.Notes, fmt.Sprintf("main alone fails %s too (checked in %s): main is red", red.tests(), took.Round(time.Second)))
 	return red
+}
+
+// namesOnTarget says how each failing test is asked for on the target, in dir,
+// a worktree of it: a Playwright test (one titles names) by the line its title
+// is at in the target's spec file, every other name as it is. added is the
+// tests whose title the target does not hold: the branch added them.
+func namesOnTarget(dir string, tests []string, titles map[string]string) (names map[string]string, added map[string]bool) {
+	names, added = map[string]string{}, map[string]bool{}
+	for _, test := range tests {
+		title := titles[test]
+		file, lineText, found := strings.Cut(test, ":")
+		line, err := strconv.Atoi(lineText)
+		if title == "" || !found || err != nil {
+			names[test] = test
+			continue
+		}
+		var source []byte
+		if filepath.IsLocal(filepath.FromSlash(file)) {
+			source, _ = os.ReadFile(filepath.Join(dir, filepath.FromSlash(file)))
+		}
+		if mainLine, there := LineOfTestTitled(string(source), title, line); there {
+			names[test] = file + ":" + strconv.Itoa(mainLine)
+		} else {
+			names[test], added[test] = test, true
+		}
+	}
+	return names, added
 }
 
 // MainAloneLogFileName is the file in a story's run that holds the whole output
