@@ -1039,12 +1039,14 @@ func isGristReasonDaily(reason string) bool {
 // key on its own, a person's together) have sent today, by the record. A grist the
 // harness would not grind for a limit of the factory's is not counted: its
 // sender is told to send it again, and the factory's limit is no use of the
-// key's day (mw-gq6.474).
+// key's day (mw-gq6.474). Nor is a grist the mill itself failed with a
+// send-it-again reason (isGristReasonMillFault): the fault is the mill's, not
+// the sender's (mw-gq6.550).
 func sentToday(lines []GrindLine, senders []string, now time.Time) int {
 	y, m, d := now.UTC().Date()
 	sent := 0
 	for _, line := range lines {
-		if !slices.Contains(senders, line.Sender) || IsGristReasonLimited(line.Reason) {
+		if !slices.Contains(senders, line.Sender) || IsGristReasonLimited(line.Reason) || isGristReasonMillFault(line.Reason) {
 			continue
 		}
 		if ly, lm, ld := line.Time.UTC().Date(); ly == y && lm == m && ld == d {
@@ -1052,6 +1054,19 @@ func sentToday(lines []GrindLine, senders []string, now time.Time) int {
 		}
 	}
 	return sent
+}
+
+// isGristReasonMillFault says reason is one the mill answers a grist failed
+// for its own fault, not the sender's or the grind's: a photo it could not
+// fetch, a session that did not finish or ran out of time, a grind it could
+// not read, an answer it could not pass on. The sender is told to send it
+// again, and it is no use of the key's day.
+func isGristReasonMillFault(reason string) bool {
+	switch reason {
+	case GristReasonPhotoLost, GristReasonSessionEnd, GristReasonTimedOut, GristReasonNotSent, GristReasonUnread:
+		return true
+	}
+	return false
 }
 
 // slots is the host's grind slots, the first first.

@@ -153,6 +153,38 @@ Feature: mw grist grind, the mill
     When the mill grinds
     Then the mill answered 1, refused 0, failed 0, and left 0 waiting
 
+  Scenario Outline: A grist the mill itself failed with a send-it-again reason does not count toward the sender's day
+    Given the factory allows 2 grist a day from one key
+    And the phone has already sent 1 grist today
+    And the phone has already sent 1 grist today that the mill answered failed because "<reason>"
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    And the grind answers with a sweep result
+    When the mill grinds
+    Then the mill answered 1, refused 0, failed 0, and left 0 waiting
+
+    Examples:
+      | reason                                                  |
+      | A photo in this grist could not be fetched; send it again. |
+      | The grind's session did not finish; send it again.      |
+      | The grind ran out of time; send it again.               |
+      | The factory could not pass this on; send it again.      |
+      | The factory could not read the app's grind; send it again. |
+
+  Scenario Outline: A grist the sender caused still counts toward the sender's day
+    Given the factory allows 2 grist a day from one key
+    And the phone has already sent 1 grist today
+    And the phone has already sent 1 grist today that the mill answered <status> because "<reason>"
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    When the mill grinds
+    Then the answer says "refused" because "This key has sent its 2 grist for today; send it again tomorrow."
+    And no grind was run
+
+    Examples:
+      | status  | reason                                                         |
+      | refused | This grist is not in a shape the factory reads.                |
+      | refused | The grind text this grist brings is empty or its schema is not JSON. |
+      | failed  | The grind's answer did not match its schema; send it again.    |
+
   Scenario: The factory's own test key at the daily limit is still ground
     Given the factory allows 2 grist a day from one key
     And the phone is the key of the grist smoke
