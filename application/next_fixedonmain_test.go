@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -112,5 +113,27 @@ func TestNextLeavesANoCommitsBugAloneWhenTheSpecFailsOrTheBuilderDidNotSayFixed(
 				t.Errorf("expected the worktree and branch kept, removed %q", lands.removed)
 			}
 		})
+	}
+}
+
+// mw-gq6.973: the close-out of a bug fixed on main takes the steps of the landed
+// tail that a story landed with nothing to land takes, by their names in the
+// table (landedtail.go), not a copy of them: the worktree, the ledger line, the
+// vault commit, the close, the formula and the baton. It reads nothing of the
+// branch, mails nothing, and records no benchmark, for no test of its own was run.
+func TestNextClosesABugFixedOnMainWithTheLandedTailsStepsAndNoOthers(t *testing.T) {
+	next, _, _, _ := aBuilderThatFoundTheBugFixed(t, alreadyFixedComment)
+	trace := &tailTrace{}
+	next = next.WithTailTrace(trace.add)
+
+	if _, err := next.Run(context.Background(), "mw-x.2"); err != nil {
+		t.Fatalf("expected the story closed as fixed on main, got %v", err)
+	}
+	want := []string{
+		"take the worktree away mw-x.2", "write the ledger line mw-x.2", "commit the vault mw-x.2",
+		"close the story mw-x.2", "close the formula mw-x.2", "carry on mw-x.2",
+	}
+	if got := trace.taken(); !reflect.DeepEqual(got, want) {
+		t.Errorf("a bug closed as fixed on main took\n  %s\nexpected\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
 	}
 }

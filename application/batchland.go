@@ -629,6 +629,7 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 			}
 		}
 	}
+	// Outside the landed tail, and why (outsideTheTail, landedtail.go).
 	report.tags = n.publishTags(ctx, nr, dir, report.Base, named)
 	report.Commit, report.Landed = commit, true
 }

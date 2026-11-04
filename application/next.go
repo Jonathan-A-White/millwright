@@ -2812,6 +2812,7 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 	if err := n.pushRetrying(ctx, report, dir, c.target); err != nil {
 		return Landed{}, err
 	}
+	// Outside the landed tail, and why (outsideTheTail, landedtail.go).
 	report.Tags = n.publishTags(ctx, report, dir, landed.Before, ACVersionTags(c.detail.Acceptance))
 	n.fileCodemapTrim(ctx, c, report)
 	return landed, nil

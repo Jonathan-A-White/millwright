@@ -97,21 +97,12 @@ func (n Next) closeAsFixedOnMain(ctx context.Context, c *closeOut, report *NextR
 		n.Host, check, check.Source, c.path.Rig, c.target, found.Sha, c.worktree, c.branch, strings.TrimSpace(found.Tail))
 	n.writeOrSay(ctx, c, report, "the fixed-on-main comment", fmt.Sprintf("the comment could not be written on %s", c.id),
 		func() error { return n.Tracker.CommentOnStory(ctx, c.id, comment) })
-	if err := n.Worktrees.Remove(ctx, c.rigDir, c.worktree, c.branch); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("the worktree %s could not be taken away: %v", c.worktree, err))
+	// The steps after the comment are the landed tail's (landedtail.go).
+	t, s := n.singleTail(ctx, c, report)
+	s.outcome, s.formulaWhat = outcome, "fixed on "+c.target
+	t.walk(fixedOnMainFinish, s)
+	if s.closeErr != nil {
+		return *report, true, fmt.Errorf("closing out %s: %s passes on %s, but the story could not be closed, so it is still open: %w", c.id, check, c.target, s.closeErr)
 	}
-	if err := n.ledger(ctx, c, report, outcome); err != nil {
-		report.Notes = append(report.Notes, err.Error())
-	}
-	n.commit(ctx, c, report)
-	notes, closeErr := n.closeStory(ctx, c.id, outcome)
-	report.Notes = append(report.Notes, notes...)
-	if closeErr != nil {
-		report.NotClosed = closeErr.Error()
-		return *report, true, fmt.Errorf("closing out %s: %s passes on %s, but the story could not be closed, so it is still open: %w", c.id, check, c.target, closeErr)
-	}
-	n.closeFormula(ctx, c, report, "fixed on "+c.target)
-	report.Closed = true
-	rep, err := n.carryOn(ctx, c, report)
-	return rep, true, err
+	return *report, true, s.err
 }

@@ -430,3 +430,27 @@ func TestABatchHoldsTheMergeSlotThroughTheCheckoutTheAfterLandingCommandAndTheMa
 			strings.Join(got, "\n  "))
 	}
 }
+
+// publishTags is taken straight after the push, in the directory the landing
+// was made in, which the batch's landing takes away before its tail is walked:
+// it is no row of the table, and the table says why (mw-gq6.973).
+func TestTheTableSaysWhyPublishingTheTagsIsNoRowOfTheTail(t *testing.T) {
+	steps, _, _ := application.LandedTail()
+	rows := map[string]bool{}
+	for _, step := range steps {
+		rows[step.Name] = true
+	}
+	var found bool
+	for _, outside := range application.OutsideTheTail() {
+		if rows[outside.Name] {
+			t.Errorf("the step %q is both a row of the tail and said to be outside it", outside.Name)
+		}
+		if strings.TrimSpace(outside.Why) == "" {
+			t.Errorf("the step %q is outside the tail and the table does not say why", outside.Name)
+		}
+		found = found || outside.Name == "publish the release tags"
+	}
+	if !found {
+		t.Errorf("the table does not name the step that publishes the release tags as outside the tail")
+	}
+}

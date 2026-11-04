@@ -49,6 +49,19 @@ func LandedTail() (steps []LandedTailStep, single []string, batch [][]string) {
 	return steps, single, batchOrder
 }
 
+// OutsideTheTailStep is a step of a landing that is no row of the landed tail,
+// and why, as the tests of package application_test read it.
+type OutsideTheTailStep struct{ Name, Why string }
+
+// OutsideTheTail is the steps of a landing after its push that the landed tail
+// does not hold, each with the reason the table gives.
+func OutsideTheTail() (steps []OutsideTheTailStep) {
+	for _, step := range outsideTheTail {
+		steps = append(steps, OutsideTheTailStep{Name: step.name, Why: step.why})
+	}
+	return steps
+}
+
 // MergedStory is a story of a batch as the batch merged it, with the detail and
 // path the batch read of it, for the tests of package application_test.
 func MergedStory(id, merge string, detail StoryDetail, path domain.Path) BatchStory {

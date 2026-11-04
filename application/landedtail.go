@@ -274,12 +274,16 @@ var landedTail = []tailStep{
 		}},
 	{name: stepCloseFormula, scope: perStory,
 		why: "Both close the formula of a story closed and of a demo left waiting for the Governor (mw-gq6.972); " +
-			"only the reason differs: a single landing's says \"was tested\" for a story the Tester tested, a batch's says \"landed\".",
+			"only the reason differs: a single landing's says \"was tested\" for a story the Tester tested, a batch's says \"landed\", " +
+			"and a bug closed as fixed on the target branch says so (mw-gq6.973).",
 		run: func(t *tail, s *tailStory) {
 			if t.batch == nil {
 				if s.closeErr == nil {
 					what := "landed"
-					if s.c.tested != "" {
+					switch {
+					case s.formulaWhat != "":
+						what = s.formulaWhat
+					case s.c.tested != "":
 						what = "was tested"
 					}
 					t.n.closeFormula(t.ctx, s.c, s.report, what)
@@ -334,7 +338,12 @@ var landedTail = []tailStep{
 		}},
 	{name: stepCarryOn, scope: perStory, only: singleLanding,
 		why: "Per landing: mw next brings the hosts level and dispatches once its story is closed; mw land's caller does that for a batch.",
-		run: func(t *tail, s *tailStory) { _, s.err = t.n.carryOn(t.ctx, s.c, s.report) }},
+		run: func(t *tail, s *tailStory) {
+			if s.closeErr != nil {
+				return
+			}
+			_, s.err = t.n.carryOn(t.ctx, s.c, s.report)
+		}},
 }
 
 // singleReads, singleAfterPush and singleFinish are the order a single landing
@@ -351,6 +360,14 @@ var (
 	singleAfterPush = []string{stepAdvanceRig, stepRunState, stepChainStamp, stepSayFiles, stepAfterLanding, stepGristSmoke, stepStageBackend, stepSpringTester}
 	singleFinish    = []string{stepRemoveWorktree, stepBenchmark, stepLedger, stepCommit, stepClose, stepCloseFormula, stepLandedMail, stepAbandoned, stepCarryOn}
 )
+
+// fixedOnMainFinish is the order a bug closed as fixed on the target branch
+// walks the tail in (Next.closeAsFixedOnMain): the part of singleFinish that
+// follows a close-out with nothing to land. It records no benchmark, for no test
+// of its own was run, mails nobody, for the Mayor is told by the story's closing
+// comment and its close reason, and looks for no abandoned stories, as it never
+// did.
+var fixedOnMainFinish = []string{stepRemoveWorktree, stepLedger, stepCommit, stepClose, stepCloseFormula, stepCarryOn}
 
 // batchOrder is the order a batch landing walks the tail in, each group taken
 // for each story in turn, or once for the batch. Each story is recorded, its
@@ -415,6 +432,9 @@ type tailStory struct {
 	closeErr         error
 	closed, heldDemo bool
 	testerFiled      string
+	// formulaWhat is what the formula's close reason says the story did, when it
+	// is neither "landed" nor "was tested".
+	formulaWhat string
 	// err ends the walk: a story that could not be closed, or carryOn's.
 	err error
 
@@ -532,4 +552,20 @@ func (t *tail) onceForBatch() {
 	t.last = b.land.storyCloseOut(b.report.Merged[len(b.report.Merged)-1], b.rigDir)
 	t.last.smokeApps, t.last.smokeUnhosted = b.smokeApps, b.unhosted
 	t.once = &NextReport{StoryID: b.report.Label(), Host: t.n.Host, Target: b.report.Target, How: Landed{Commit: b.report.Commit}}
+}
+
+// outsideTheTailStep is a step of a landing after its push that is no row of the
+// tail, and why.
+type outsideTheTailStep struct{ name, why string }
+
+// outsideTheTail is every step a landing takes after its push that the tail does
+// not hold. A step is here, not a row, when it cannot be taken from where the
+// tail is walked (mw-gq6.973).
+var outsideTheTail = []outsideTheTailStep{
+	{name: "publish the release tags",
+		why: "Next.merge and BatchLand.landIn publish the tags of the range just pushed at once, from the directory the landing was " +
+			"made in and against the commit it started from: the batch's landing worktree is taken away before recordLanded walks " +
+			"the tail, and a single landing has given its merge slot back by the time its tail is walked. A step taken there " +
+			"would push tags from a directory that is gone, or from outside the slot; the tags it publishes (report.Tags, " +
+			"BatchReport.tags) are what the Landed mails and the tail's \"mail the Mayor\" row read."},
 }
