@@ -1734,7 +1734,10 @@ failed run printed, each once, given to the line quoted, in a form the line can 
 `[shots] › tests/e2e/x.spec.ts:106:7 › title` (the list reporter's `✘` line, or the `1)`
 header of a failure's detail, a retry the same test) is `tests/e2e/x.spec.ts:106`, which
 `playwright test --project=shots tests/e2e/x.spec.ts:106` runs by itself; vitest's
-`FAIL src/a.test.ts > title` is the file, `src/a.test.ts`, which `vitest run` runs whole. A
+`FAIL src/a.test.ts > title` is the file, `src/a.test.ts`, which `vitest run` runs whole. On the
+target a Playwright test is asked for at the line its title is at in the target's spec file, not the
+branch's line, which a branch that added a line above it has moved (mw-gq6.967); a test whose title
+the target's file does not hold is labelled `not on main: the branch added it` and not asked. A
 rig whose tests are of more than one kind sorts the names in the line itself, by what they
 look like (a `.spec.` file is Playwright's, a `Test…` name is go test's, any other is
 vitest's). A Playwright and vitest rig, as a line of `[named_tests]`:
