@@ -278,10 +278,10 @@ func (c *ConfigTOML) Set(table, key, literal string) string {
 // KnownRootConfigKeys are the keys of the config file's root table that mw
 // reads, which `mw config get` and `mw config set` take without a table.
 var KnownRootConfigKeys = []string{
-	"age_key_file", "beads_backup_minutes", "beads_budget_bytes", "beads_server_host", "beads_sync",
+	"age_key_file", "beads_backup_minutes", "beads_budget_bytes", "beads_flush_file", "beads_server_host", "beads_sync",
 	"builder_jobs", "builder_nice", "cap", "deputy_model", "dispatch_sync_tries", "dispatch_sync_wait",
-	"events_log_path", "grist_key_file", "grist_state_dir", "grist_test_key_file", "handoff_at",
-	"hands_root_helper", "home_move_bead", "host", "host_silent_hours", "max_attempts", "metered",
+	"events_log_path", "gemini_model", "ghost_url", "google_client_file", "grist_key_file", "grist_state_dir",
+	"grist_test_key_file", "handoff_at", "hands_root_helper", "home_move_bead", "host", "host_silent_hours", "max_attempts", "metered",
 	"millhand_review_model", "millhand_routine_model", "nudge_after_minutes", "nudge_sync_stale_minutes",
 	"postern_backend", "postern_channel", "postern_data", "postern_float_sats", "postern_governor_key",
 	"postern_key_file", "postern_local_url", "postern_snapshot_path", "postern_transcribe_cmd",

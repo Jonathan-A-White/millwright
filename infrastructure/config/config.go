@@ -21,7 +21,7 @@
 //	grist_test_key_file = "/home/jwhite/.config/mw/grist-test.key"   # what mw grist smoke sends as
 //	google_client_file = "/home/jwhite/.config/mw/google-client.json" # the Desktop OAuth client mw google link signs in with
 //	ghost_url = "https://allmymind.org"  # the blog mw ghost draft pushes drafts to
-//	gemini_model = "gemini-2.5-flash-image"  # the Nano Banana model mw image makes pictures with
+//	gemini_model = "gemini-3.1-flash-lite-image"  # the Nano Banana model mw image makes pictures with
 //	beads_sync = "remote"
 //	beads_backup_minutes = 30
 //	beads_server_host = "laptop.mw"    # only for beads_sync = "auto" on a boost
@@ -815,11 +815,12 @@ func GristTestKeyFile() (string, error) {
 var DefaultGoogleClientFile = filepath.Join(".config", "mw", "google-client.json")
 
 // DefaultGeminiModel is the model mw image uses when nothing says another:
-// Nano Banana, Google's gemini-2.5-flash-image, the one its generateContent
-// call is documented for. The newer ones (gemini-3.1-flash-image, "Nano
-// Banana 2"; gemini-3-pro-image, "Nano Banana Pro") are a gemini_model away.
+// gemini-3.1-flash-lite-image. The model it used before, gemini-2.5-flash-image,
+// is deprecated and shuts down on 2027-03-15 (Google AI Studio's pricing page,
+// https://aistudio.google.com/docs/pricing, read by the Mayor on 2026-11-04
+// for mw-6ww.153). Another is a gemini_model away.
 // Models: https://aistudio.google.com/docs/models
-const DefaultGeminiModel = "gemini-2.5-flash-image"
+const DefaultGeminiModel = "gemini-3.1-flash-lite-image"
 
 // GeminiModel reports the model mw image makes pictures with: $MW_GEMINI_MODEL
 // if it is set, otherwise the root-table `gemini_model` key of

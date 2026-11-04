@@ -237,3 +237,11 @@ file = "seats/mayor/procedures.md"
 		t.Errorf("an array the file lacks reads %v, want nil", none)
 	}
 }
+
+func TestSplitConfigKeyAcceptsTheImageAndBlogKeys(t *testing.T) {
+	for _, key := range []string{"gemini_model", "ghost_url"} {
+		if table, got, err := SplitConfigKey(key); err != nil || table != "" || got != key {
+			t.Errorf("%s: got %q %q %v, want a root key", key, table, got, err)
+		}
+	}
+}
