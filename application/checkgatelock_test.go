@@ -433,8 +433,55 @@ func TestAWholeCheckThatReachesItsWaitLimitSaysSoAndTellsTheBuilderToHandBackAtO
 
 // queuedGate counts the tickets in the gate lock's queue directory.
 func (w *aWholeCheckBesideTheHostsGateLock) queuedGate() int {
-	entries, _ := os.ReadDir(filepath.Join(w.gate.Dir, hostlock.GateQueueDir))
-	return len(entries)
+	return ticketsInPlace(filepath.Join(w.gate.Dir, hostlock.GateQueueDir))
+}
+
+// ticketsInPlace counts the tickets in place in a queue directory: not one still
+// being made, which is under a dot name until it is locked and renamed.
+func ticketsInPlace(queue string) int {
+	entries, _ := os.ReadDir(queue)
+	n := 0
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), ".") {
+			n++
+		}
+	}
+	return n
+}
+
+// A ticket still being made is under a dot name until it is locked and renamed,
+// and the queue lists no dot names, so a wait for tickets to be queued must not
+// count it (mw-gq6.951).
+func TestAWaitForQueuedTicketsDoesNotCountATicketStillBeingMade(t *testing.T) {
+	w := newWholeCheckBesideTheGateLock(t, &scriptedChecks{passes: []bool{true}})
+	gateQueue := filepath.Join(w.gate.Dir, hostlock.GateQueueDir)
+	if err := os.MkdirAll(gateQueue, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gateQueue, ".being-made"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.queuedGate(); got != 0 {
+		t.Errorf("expected a gate ticket still being made not to be counted, got %d", got)
+	}
+	if err := os.WriteFile(filepath.Join(gateQueue, "in-place"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.queuedGate(); got != 1 {
+		t.Errorf("expected only the ticket in place to be counted, got %d", got)
+	}
+
+	p := newPartBesideTheMergeSlot(t)
+	slotQueue := rig.SlotPath(p.rigDir) + rig.SlotQueueSuffix
+	if err := os.MkdirAll(slotQueue, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(slotQueue, ".being-made"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.queued(); got != 0 {
+		t.Errorf("expected a slot ticket still being made not to be counted, got %d", got)
+	}
 }
 
 // A Builder's foreground call is cut off at 590 seconds with no words, so a
@@ -956,8 +1003,7 @@ func (p *aPartBesideTheMergeSlot) checkPart(n int, wait, budget time.Duration, e
 }
 
 func (p *aPartBesideTheMergeSlot) queued() int {
-	entries, _ := os.ReadDir(rig.SlotPath(p.rigDir) + rig.SlotQueueSuffix)
-	return len(entries)
+	return ticketsInPlace(rig.SlotPath(p.rigDir) + rig.SlotQueueSuffix)
 }
 
 // A part that waited for the merge slot and won it too late to end inside the
