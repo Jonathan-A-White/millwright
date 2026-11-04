@@ -106,7 +106,14 @@ A batch with a branch set aside, or whose tests are red, is given one fixer: a
 Builder session (`SeatBoot.BatchFix`) in the batch's landing worktree, named
 `batch-<rig>-<n>`, on the rig's fixer model, effort and turn cap. Its boot file
 names every branch, which merged, git's conflict list and the tests' last
-lines.
+lines. When the rig raises a version (`version_files`) and keeps a changelog
+(`changelog_files`), it also names, for each story, the What's new line mw writes
+into those files at landing (the same reading `mw next` makes: the story's
+newest `What's new:` comment, else its title), and says that the line and the
+version land after the fixer exits, so a test that reads those files meets them
+and a `What's new:` comment on the story changes the line. The Held mail of a
+batch whose failing tests name a changelog file says mw wrote that line itself,
+and prints it.
 
 It may merge the branches that were set aside, resolve conflicts keeping both
 stories' intents, fix code or tests, and run the suite.

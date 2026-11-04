@@ -61,6 +61,79 @@ type BatchFixing struct {
 	Stopped *HarnessStop
 }
 
+// WhatsNewLine is the What's new line mw writes into the rig's changelog files
+// for one story of a batch, once the batch's fixer has ended (mw-gq6.942). Text
+// is empty when the story says "What's new: none". FromTitle says the sentence
+// is the story's title, used as the note because no comment gave one.
+type WhatsNewLine struct {
+	Story     string
+	Kind      string
+	Text      string
+	FromTitle bool
+}
+
+// whatsNewLines are the lines mw will write at landing for the stories of the
+// batch, read with the function a landing reads them with (Next.changelogNote),
+// so that the fixer is told what the tests will meet. A rig that raises no
+// version or keeps no changelog has none; one that cannot be read is a note.
+func (b BatchLand) whatsNewLines(ctx context.Context, rigDir string, rules domain.EpicRequirements, report *BatchReport, nr *NextReport) []WhatsNewLine {
+	if len(rules.VersionFiles) == 0 || len(rules.ChangelogFiles) == 0 {
+		return nil
+	}
+	var lines []WhatsNewLine
+	for _, s := range report.storiesInOrder() {
+		if s.OnTarget {
+			continue
+		}
+		entry, fromTitle, err := b.Next.changelogNote(ctx, b.storyCloseOut(s, rigDir), nr)
+		if err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("the What's new line of %s could not be told to the fixer: %v", s.ID, err))
+			continue
+		}
+		lines = append(lines, WhatsNewLine{Story: s.ID, Kind: entry.Kind, Text: entry.Text, FromTitle: fromTitle})
+	}
+	return lines
+}
+
+// whatsNewSection is the part of a fixer's boot file about what mw writes into
+// the batch itself: the version and the What's new lines. It is empty for a rig
+// that raises no version. A test that reads those files meets what mw wrote,
+// not what the fixer left, which is how batch 37 of spell-forge went red on a
+// title (mw-gq6.942).
+func (f BatchFixBrief) whatsNewSection() string {
+	if len(f.VersionFiles) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## What mw writes into the batch itself\n\n")
+	when := "after you end, and before it runs the rig's tests on the batch again"
+	if f.Tested {
+		when = "before the rig's tests ran on the batch, and it is already in the tree you are in"
+	}
+	fmt.Fprintf(&b, "mw raises the version in the rig's version_files (%s) %s. ", strings.Join(f.VersionFiles, ", "), when)
+	if len(f.ChangelogFiles) == 0 {
+		b.WriteString("A test that reads the version meets the number mw wrote, not the one it finds now.\n\n")
+		return b.String()
+	}
+	fmt.Fprintf(&b, "It also writes one What's new line for each story into the rig's changelog_files (%s), %s, "+
+		"so a test that reads those files meets them, and a story's own words in them (its title, say) can fail a test "+
+		"that bans them. The lines:\n\n", strings.Join(f.ChangelogFiles, ", "), when)
+	for _, line := range f.WhatsNew {
+		if line.Text == "" {
+			fmt.Fprintf(&b, "- %s: no line (its What's new: none)\n", line.Story)
+			continue
+		}
+		fmt.Fprintf(&b, "- %s: %s: %s", line.Story, line.Kind, line.Text)
+		if line.FromTitle {
+			b.WriteString(" (the story's title, used as the note because it has no What's new: comment)")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\nA `What's new:` comment on the story changes its line (`What's new: none` writes none): " +
+		"put one on a story whose line a test refuses, and say so in your last message.\n\n")
+	return b.String()
+}
+
 // FixerWord is one line of a fixer's word about one story.
 type FixerWord struct {
 	Story string
@@ -133,7 +206,7 @@ func (r BatchReport) storiesInOrder() []BatchStory {
 // merged. It reports whether the batch may go on to be tested; when it may not
 // the batch is held and Held says why. A fixer that could not be started holds
 // a red batch, and leaves one with branches set aside to land the rest.
-func (b BatchLand) fix(ctx context.Context, dir, rigDir string, settings domain.LandingSettings, report *BatchReport, why string) bool {
+func (b BatchLand) fix(ctx context.Context, dir, rigDir string, rules domain.EpicRequirements, report *BatchReport, why string, nr *NextReport) bool {
 	n := b.Next
 	f := &BatchFixing{Name: BatchFixerName(report.Rig, report.Number), Why: why, Tested: report.Tested, Gate: report.Gate, GateLog: report.GateLog}
 	report.Fixer = f
@@ -160,7 +233,9 @@ func (b BatchLand) fix(ctx context.Context, dir, rigDir string, settings domain.
 
 	spec, err := n.Boot.BatchFix(ctx, BatchFixBrief{
 		Rig: report.Rig, Target: report.Target, Number: report.Number, Base: report.Base,
-		Stories: report.storiesInOrder(), Tested: report.Tested, Gate: report.Gate, Settings: settings,
+		Stories: report.storiesInOrder(), Tested: report.Tested, Gate: report.Gate, Settings: rules.LandingSettings(),
+		VersionFiles: rules.VersionFiles, ChangelogFiles: rules.ChangelogFiles,
+		WhatsNew: b.whatsNewLines(ctx, rigDir, rules, report, nr),
 	}, dir)
 	if err != nil {
 		return notStarted(fmt.Sprintf("could not be assembled: %v", err))
@@ -358,6 +433,37 @@ func (r BatchReport) fixerRecord() string {
 		}
 		fmt.Fprintf(&b, "mw's own run of the rig's tests after it: %s\n", verdict)
 	}
+	return b.String()
+}
+
+// changelogMail is the part of the Held mail about the What's new lines mw
+// wrote into the batch: for a batch whose tests failed with the output naming
+// one of the rig's changelog files, that mw wrote the line itself, and the line
+// (mw-gq6.942). It is empty when the failure names none, or mw wrote none.
+func (r BatchReport) changelogMail() string {
+	if !r.Tested || r.Gate.Passed || len(r.changelogWritten) == 0 {
+		return ""
+	}
+	var named string
+	for _, file := range r.changelogFiles {
+		if strings.Contains(r.Gate.Output, file) || strings.Contains(r.Gate.Output, path.Base(file)) {
+			named = file
+			break
+		}
+	}
+	if named == "" {
+		return ""
+	}
+	var b strings.Builder
+	when := "when it made the batch, before the tests ran"
+	if r.writtenAfterFixer {
+		when = "after the fixer exited"
+	}
+	fmt.Fprintf(&b, "The failing tests name %s: mw wrote its What's new line itself %s; it is on no story's branch, and a story's own words (its title, when it has no What's new: comment) can be what a test refuses. The lines:\n", named, when)
+	for _, entry := range r.changelogWritten {
+		fmt.Fprintf(&b, "  %s: %s: %s\n", entry.Story, entry.Kind, entry.Text)
+	}
+	b.WriteString("A `What's new:` comment on the story changes its line.\n")
 	return b.String()
 }
 

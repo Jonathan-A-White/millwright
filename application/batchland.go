@@ -195,6 +195,13 @@ type BatchReport struct {
 
 	Version string
 	Tested  bool
+	// changelogFiles and changelogWritten are the What's new lines mw wrote
+	// into the batch at its version bump, and writtenAfterFixer says its fixer
+	// had ended by then: the Held mail names them when a failing test names
+	// the file (mw-gq6.942).
+	changelogFiles    []string
+	changelogWritten  []domain.ChangelogEntry
+	writtenAfterFixer bool
 	// Gate is the last run of the rig's tests on the batch: the one, or the
 	// one mw made once the fixer had ended.
 	Gate Checked
@@ -506,10 +513,9 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 	// changelog entry, and the batch is tested once, after it. A batch of which
 	// every branch was set aside for its conflicts is given it too: only when
 	// nothing is left for the fixer to merge, or none can start, is it held.
-	settings := rules.LandingSettings()
 	if b.mayFix() && report.conflicted() {
 		why := fmt.Sprintf("%s set aside for conflicts", strings.Join(storyIDs(report.SetAside), ", "))
-		if !b.fix(ctx, dir, rigDir, settings, report, why) {
+		if !b.fix(ctx, dir, rigDir, rules, report, why, nr) {
 			return
 		}
 	}
@@ -555,6 +561,8 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 		}
 		report.Version = bumped.Version
 		report.versionCommit = bumped.Commit
+		report.changelogFiles, report.changelogWritten = bump.Changelog, bump.Notes()
+		report.writtenAfterFixer = report.Fixer != nil && report.Fixer.Started
 		report.Notes = append(report.Notes, bumped.Tidied...)
 	}
 
@@ -579,7 +587,7 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 	// A red batch is given its one fixer, unless it had it already; once the
 	// fixer has ended mw runs the tests again itself: its word is not the gate.
 	if gate.Err == nil && !gate.Checked.NotRun && !gate.Checked.Passed && b.mayFix() && report.Fixer == nil {
-		if !b.fix(ctx, dir, rigDir, settings, report, fmt.Sprintf("%s failed: `%s`", gateOnTheBatch, gate.Checked.Command)) {
+		if !b.fix(ctx, dir, rigDir, rules, report, fmt.Sprintf("%s failed: `%s`", gateOnTheBatch, gate.Checked.Command), nr) {
 			return
 		}
 		gate = b.runGate(ctx, dir, rigDir, report, nr)
@@ -1120,6 +1128,11 @@ func (b BatchLand) mailTheMayor(ctx context.Context, report *BatchReport, nr *Ne
 	}
 	if f := report.Fixer; f != nil && !report.Landed {
 		fmt.Fprintf(&body, "\n%s", report.fixerMail())
+	}
+	if !report.Landed {
+		if said := report.changelogMail(); said != "" {
+			fmt.Fprintf(&body, "\n%s", said)
+		}
 	}
 	if !report.Landed && report.MainLabels != "" {
 		fmt.Fprintf(&body, "\nOn main: %s\n", report.MainLabels)

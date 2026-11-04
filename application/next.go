@@ -3022,9 +3022,17 @@ func (n Next) fileCodemapTrim(ctx context.Context, c *closeOut, report *NextRepo
 // today's date (UTC). Its Text is empty when the story says "What's new: none".
 // The version is the landing's to fill in.
 func (n Next) changelogEntry(ctx context.Context, c *closeOut, report *NextReport) (domain.ChangelogEntry, error) {
+	entry, _, err := n.changelogNote(ctx, c, report)
+	return entry, err
+}
+
+// changelogNote is changelogEntry, and says whether the sentence is the
+// story's title for want of a What's new: line, which a batch's fixer is told
+// (mw-gq6.942).
+func (n Next) changelogNote(ctx context.Context, c *closeOut, report *NextReport) (entry domain.ChangelogEntry, fromTitle bool, err error) {
 	comments, err := readRetrying(ctx, n, report, "the comments", func() ([]Comment, error) { return n.Tracker.StoryComments(ctx, c.id) })
 	if err != nil {
-		return domain.ChangelogEntry{}, fmt.Errorf("the comments on %s could not be read for its What's new line: %w", c.id, err)
+		return domain.ChangelogEntry{}, false, fmt.Errorf("the comments on %s could not be read for its What's new line: %w", c.id, err)
 	}
 	texts := make([]string, len(comments))
 	for i, comment := range comments {
@@ -3038,15 +3046,15 @@ func (n Next) changelogEntry(ctx context.Context, c *closeOut, report *NextRepor
 	note, found := domain.NewestWhatsNew(texts)
 	switch {
 	case found && note.None:
-		return domain.ChangelogEntry{}, nil
+		return domain.ChangelogEntry{}, false, nil
 	case found:
 		if note.Kind != "" {
 			kind = note.Kind
 		}
 	default:
-		note.Text = domain.NoteFromTitle(c.detail.Story.Title, c.path.Rig)
+		note.Text, fromTitle = domain.NoteFromTitle(c.detail.Story.Title, c.path.Rig), true
 	}
-	return domain.ChangelogEntry{Date: n.now().UTC().Format("2006-01-02"), Story: c.id, Kind: kind, Text: note.Text}, nil
+	return domain.ChangelogEntry{Date: n.now().UTC().Format("2006-01-02"), Story: c.id, Kind: kind, Text: note.Text}, fromTitle, nil
 }
 
 // closingMail is the verdict a landing's mail goes under and the block it

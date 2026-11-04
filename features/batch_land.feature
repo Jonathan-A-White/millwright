@@ -424,6 +424,18 @@ Feature: mw land lands a batch rig's queue under one gate run
     And the batch is held, and the Mayor's mail names every story in it and says "the batch is still red"
     And the Mayor's mail about the batch says the fixer was given it and no second fixer was started
 
+  Scenario: A held batch whose failing test names the changelog says mw wrote the What's new line itself (mw-gq6.942)
+    Given the rig's main holds a package.json and a package-lock.json at version "1.4.2"
+    And the rig's file in the vault also holds the line "version_files = ['package.json', 'package-lock.json']"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the rig's tests fail, saying "changelog_test.go: public/changelog.json says maths"
+    And mw land may start a fixer, which commits "TRIED" and says it touched "mw-gq6.1"
+    When mw lands the batch of the rig
+    Then the batch is held, and the Mayor's mail names every story in it and says "The failing tests name public/changelog.json: mw wrote its What's new line itself"
+
   Scenario: A batch held after its fixer committed keeps those commits in a bundle in its records, and the outcome and the Held mail name them (mw-gq6.865)
     Given these stories are queued for batch landing:
       | mw-gq6.1 |

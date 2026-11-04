@@ -479,6 +479,12 @@ type BatchFixBrief struct {
 	Gate   Checked
 	// Settings are the rig's landing keys: the fixer's model, effort and turns.
 	Settings domain.LandingSettings
+	// VersionFiles and ChangelogFiles are the rig's, and WhatsNew the line mw
+	// writes into the latter for each story once the fixer has ended
+	// (mw-gq6.942).
+	VersionFiles   []string
+	ChangelogFiles []string
+	WhatsNew       []WhatsNewLine
 }
 
 // Label names the batch in a sentence: "batch 3 of lampas".
@@ -896,6 +902,8 @@ func BatchFixBootPrompt(seat Seat, brief BatchFixBrief) string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\nEach story's own description and acceptance criteria are on its bead: `bd show <story>`.\n\n")
+
+	b.WriteString(brief.whatsNewSection())
 
 	b.WriteString("## The rig's tests on the batch\n\n")
 	if brief.Tested {
