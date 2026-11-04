@@ -1,0 +1,76 @@
+go test -tags beads_integration -timeout 20m  ./...
+ok  	github.com/Jonathan-A-White/millwright	0.051s
+ok  	github.com/Jonathan-A-White/millwright/application	81.457s
+ok  	github.com/Jonathan-A-White/millwright/application/apptest	0.173s
+ok  	github.com/Jonathan-A-White/millwright/cmd/mw	204.684s
+?   	github.com/Jonathan-A-White/millwright/cmd/mw-hands-root	[no test files]
+--- FAIL: TestOnlyWhatChangedTravelsAFileThatDidNotIsLinkedToTheLiveOne (0.34s)
+    sitedeploy_test.go:163: expected the unchanged asset to be a hard link to the one that was live, not a new copy
+mw-under-load: load 1.00 of 16 cores; running the command beside 4 busy loop(s), each ending within 1800 s
+mw-under-load: load 4.50 of 6 cores; running the command beside 1 busy loop(s), each ending within 1800 s
+mw-under-load: load 1.00 of 8 cores; running the command beside 2 busy loop(s), each ending within 1800 s
+mw-under-load: load 1.00 of 8 cores; running the command beside 2 busy loop(s), each ending within 1800 s
+mw-under-load: load 1.00 of 8 cores; running the command beside 2 busy loop(s), each ending within 300 s
+mw-under-load: load 1.00 of 8 cores; running the command beside 1 busy loop(s), each ending within 1800 s
+mw-under-load: load 1.00 of 8 cores; running the command beside 2 busy loop(s), each ending within 1 s
+FAIL
+FAIL	github.com/Jonathan-A-White/millwright/contrib	267.926s
+ok  	github.com/Jonathan-A-White/millwright/docs	0.035s
+ok  	github.com/Jonathan-A-White/millwright/domain	0.065s
+ok  	github.com/Jonathan-A-White/millwright/domain/events	0.048s
+ok  	github.com/Jonathan-A-White/millwright/features	284.236s
+ok  	github.com/Jonathan-A-White/millwright/features/steps	0.896s
+?   	github.com/Jonathan-A-White/millwright/infrastructure	[no test files]
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/apartproc	2.297s
+?   	github.com/Jonathan-A-White/millwright/infrastructure/bdprogram	[no test files]
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/beads	280.328s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/benchflag	0.294s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/bsv	0.312s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/cardlog	0.117s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/chainlookup	0.131s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/claude	10.535s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/closeout	0.293s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/cloud	4.278s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/codex	2.253s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/config	24.059s
+?   	github.com/Jonathan-A-White/millwright/infrastructure/configfile	[no test files]
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/doctor	40.372s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/eventlog	17.938s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/flushlog	0.144s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/gitcmd	0.226s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/google	2.483s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/grist	3.792s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/hands	3.633s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/handsroot	4.806s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/homemove	16.587s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/hostload	1.594s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/hostlock	4.798s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/ideasonly	1.661s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/member	3.243s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/memoryqueries	0.040s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/netfault	0.025s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/network	0.081s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/notify	0.406s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/pause	0.932s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/peekremote	0.428s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/postern	13.451s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/procs	0.721s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/reaper	0.919s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/reportlog	0.819s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/rig	189.234s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/scorer	14.002s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/sessionshell	0.032s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/shellcmd	2.060s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/sops	0.825s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/stampqueue	1.466s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/synchalt	0.138s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/ticketq	0.400s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/ticklog	1.178s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/tmux	51.333s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/todoindex	0.487s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/userunits	1.175s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/vault	101.620s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/vpsnginx	0.211s
+ok  	github.com/Jonathan-A-White/millwright/infrastructure/watch	1.147s
+FAIL
+make: *** [Makefile:52: test] Error 1

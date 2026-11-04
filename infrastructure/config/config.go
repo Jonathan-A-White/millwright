@@ -3831,21 +3831,58 @@ func tableIn(path, table string) (map[string]string, error) {
 	return values, nil
 }
 
-// unquote trims a TOML value down to the string it holds: a quoted value keeps
-// everything between the quotes, a bare one loses any trailing comment.
+// unquote trims a TOML value down to the string it holds: a single-quoted value
+// keeps everything between the quotes, a double-quoted one reads the escapes of
+// a TOML basic string (\" \\ \n \t \r), so a line with quotes inside it ends at
+// its own last quote and not at the first (mw-gq6.947); a bare value loses any
+// trailing comment.
 func unquote(value string) string {
 	value = strings.TrimSpace(value)
-	for _, quote := range []string{`"`, `'`} {
-		if strings.HasPrefix(value, quote) {
-			if end := strings.Index(value[1:], quote); end >= 0 {
-				return value[1 : end+1]
-			}
+	if strings.HasPrefix(value, `'`) {
+		if end := strings.Index(value[1:], `'`); end >= 0 {
+			return value[1 : end+1]
+		}
+	}
+	if strings.HasPrefix(value, `"`) {
+		if text, ok := basicString(value[1:]); ok {
+			return text
 		}
 	}
 	if comment := strings.Index(value, "#"); comment >= 0 {
 		value = value[:comment]
 	}
 	return strings.TrimSpace(value)
+}
+
+// basicString is the text of a TOML basic string up to its closing quote, given
+// what follows the opening one, and whether it had a closing quote. A backslash
+// before a character other than the escapes unquote knows is kept as written.
+func basicString(rest string) (string, bool) {
+	var text strings.Builder
+	for i := 0; i < len(rest); i++ {
+		switch c := rest[i]; {
+		case c == '"':
+			return text.String(), true
+		case c == '\\' && i+1 < len(rest):
+			i++
+			switch rest[i] {
+			case '"', '\\':
+				text.WriteByte(rest[i])
+			case 'n':
+				text.WriteByte('\n')
+			case 't':
+				text.WriteByte('\t')
+			case 'r':
+				text.WriteByte('\r')
+			default:
+				text.WriteByte('\\')
+				text.WriteByte(rest[i])
+			}
+		default:
+			text.WriteByte(c)
+		}
+	}
+	return "", false
 }
 
 // ScorerSettings are the `[scorers]` table of ~/.config/mw/config.toml.

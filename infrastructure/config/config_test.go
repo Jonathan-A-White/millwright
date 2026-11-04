@@ -2965,3 +2965,28 @@ func TestAlwaysRunIsEmptyOnAHostWithNoSuchTable(t *testing.T) {
 		t.Errorf("expected no always-run tests, got %+v (error: %v)", always, err)
 	}
 }
+
+// The named-tests line of the millwright rig has double quotes inside it, which
+// a TOML basic string writes as \" (mw-gq6.947): a value read up to the first
+// quote of any kind ended the line at `-run \`, and go test was given a pattern
+// of one backslash.
+func TestNamedTestsReadsAQuotedLineWithEscapedQuotesInIt(t *testing.T) {
+	writeConfig(t, "[named_tests]\n"+
+		`millwright = "go test -tags beads_integration -run \"^($(echo {tests} | tr ' ' '|'))$\" ./..."`+"\n"+
+		`postern = "for t in \"$@\"; do echo \"$t\"; done # not a comment"`+"\n"+
+		`literal = 'echo "{tests}" \n'`+"\n"+
+		`windows = "dir C:\\temp\tx"`+"\n")
+	got, err := config.NamedTests()
+	if err != nil {
+		t.Fatalf("NamedTests: %v", err)
+	}
+	want := map[string]string{
+		"millwright": `go test -tags beads_integration -run "^($(echo {tests} | tr ' ' '|'))$" ./...`,
+		"postern":    `for t in "$@"; do echo "$t"; done # not a comment`,
+		"literal":    `echo "{tests}" \n`,
+		"windows":    "dir C:\\temp\tx",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("NamedTests = %q, want %q", got, want)
+	}
+}
