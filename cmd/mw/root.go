@@ -27,6 +27,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newFileCmd())
 	root.AddCommand(newFuelCmd())
 	root.AddCommand(newGristCmd())
+	root.AddCommand(newGhostCmd())
 	root.AddCommand(newGoogleCmd())
 	root.AddCommand(newGrillCmd())
 	root.AddCommand(newContactsCmd())

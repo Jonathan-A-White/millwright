@@ -20,6 +20,7 @@
 //	deputy_model = "sonnet"
 //	grist_test_key_file = "/home/jwhite/.config/mw/grist-test.key"   # what mw grist smoke sends as
 //	google_client_file = "/home/jwhite/.config/mw/google-client.json" # the Desktop OAuth client mw google link signs in with
+//	ghost_url = "https://allmymind.org"  # the blog mw ghost draft pushes drafts to
 //	beads_sync = "remote"
 //	beads_backup_minutes = 30
 //	beads_server_host = "laptop.mw"    # only for beads_sync = "auto" on a boost
@@ -133,6 +134,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -196,7 +198,9 @@ const (
 	// GoogleClientFileEnv replaces google_client_file, the Desktop OAuth
 	// client's JSON mw google link signs in with.
 	GoogleClientFileEnv = "MW_GOOGLE_CLIENT_FILE"
-	GristStateDirEnv    = "MW_GRIST_STATE_DIR"
+	// GhostURLEnv replaces ghost_url, the blog mw ghost draft pushes drafts to.
+	GhostURLEnv      = "MW_GHOST_URL"
+	GristStateDirEnv = "MW_GRIST_STATE_DIR"
 
 	BeadsSyncEnv          = "MW_BEADS_SYNC"
 	BeadsBackupMinutesEnv = "MW_BEADS_BACKUP_MINUTES"
@@ -806,6 +810,30 @@ func GristTestKeyFile() (string, error) {
 // Google Cloud console downloads it, is kept under the home directory when
 // nothing says otherwise. He makes it; mw only reads it.
 var DefaultGoogleClientFile = filepath.Join(".config", "mw", "google-client.json")
+
+// DefaultGhostURL is the blog's address when nothing says another.
+const DefaultGhostURL = "https://allmymind.org"
+
+// GhostURL reports the blog mw ghost draft pushes drafts to: $MW_GHOST_URL if
+// it is set, otherwise the root-table `ghost_url` key of ~/.config/mw/config.toml,
+// and DefaultGhostURL when neither says. It is the address without a path, and
+// https: a token is not sent over plain http, except to this machine itself.
+func GhostURL() (string, error) {
+	said, err := optionalSetting("ghost_url", GhostURLEnv, DefaultGhostURL)
+	if err != nil {
+		return "", err
+	}
+	said = strings.TrimRight(said, "/")
+	u, err := url.Parse(said)
+	if err != nil || u.Host == "" || (u.Path != "" && u.Path != "/") {
+		return "", fmt.Errorf("ghost_url is %q: it must be the blog's address with no path, like %s", said, DefaultGhostURL)
+	}
+	loopback := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
+	if u.Scheme != "https" && !(u.Scheme == "http" && loopback) {
+		return "", fmt.Errorf("ghost_url is %q: it must be an https address", said)
+	}
+	return said, nil
+}
 
 // DefaultGoogleTokenFile is where mw google link keeps the refresh token, mode
 // 0600, under the home directory. It is not a setting: the token is never
