@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path"
@@ -125,7 +126,10 @@ func (u *UnitEnv) missing(ctx context.Context) (missing []string, cannotTell err
 		}
 		out, err := u.run(ctx, "show", "-p", "ExecStart", "-p", "EnvironmentFiles", name)
 		if err != nil {
-			cannotTell = fmt.Errorf("%s: %w", name, err)
+			if u.goneSince(ctx, name) {
+				continue
+			}
+			cannotTell = fmt.Errorf("%s: %w%s", name, err, stderrOf(err))
 			continue
 		}
 		if runsMw(out) && !carriesBeadsEnv(out) {
@@ -133,6 +137,29 @@ func (u *UnitEnv) missing(ctx context.Context) (missing []string, cannotTell err
 		}
 	}
 	return missing, cannotTell
+}
+
+// goneSince reports whether the unit, listed a moment ago, is no longer on the
+// host's lists: an instance of a template such as mw-unit-failed@ lives while
+// its handler runs and is gone when show asks (mw-gq6.952), so a failed show is
+// no fault. It keys on a second listing, not on the unit's name: a unit still
+// listed whose show fails, or a listing that itself fails, is not gone.
+func (u *UnitEnv) goneSince(ctx context.Context, name string) bool {
+	names, err := u.units(ctx)
+	return err == nil && !containsString(names, name)
+}
+
+// stderrOf is what systemctl said on stderr, as ": <text>", for an error that
+// carries it, so a cannot-tell says why and not only "exit status 1".
+func stderrOf(err error) string {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return ""
+	}
+	if text := strings.TrimSpace(string(exitErr.Stderr)); text != "" {
+		return ": " + text
+	}
+	return ""
 }
 
 func containsString(list []string, s string) bool {

@@ -20,6 +20,12 @@ import (
 type userUnit struct {
 	argv  string
 	files []string
+	// vanishes is a unit that is listed, then gone when show asks: show exits 1
+	// and every list after that one leaves it out (an instance of
+	// mw-unit-failed@ whose handler has finished).
+	vanishes bool
+	// broken is a unit that stays listed but whose show exits 1.
+	broken bool
 }
 
 // fakeUnitSystemctl writes a stand-in for systemctl that lists the units
@@ -31,9 +37,21 @@ func fakeUnitSystemctl(t *testing.T, units map[string]userUnit) string {
 		t.Skip("the stand-in for systemctl is a shell script")
 	}
 	dir := t.TempDir()
-	var list, show strings.Builder
+	var list, listAfter, show strings.Builder
 	for name, u := range units {
-		fmt.Fprintf(&list, "%s loaded inactive dead A description\n", name)
+		line := fmt.Sprintf("%s loaded inactive dead A description\n", name)
+		list.WriteString(line)
+		if !u.vanishes {
+			listAfter.WriteString(line)
+		}
+		if u.vanishes || u.broken {
+			gone := ""
+			if u.vanishes {
+				gone = fmt.Sprintf("touch %q; ", filepath.Join(dir, "gone"))
+			}
+			fmt.Fprintf(&show, "  %q)\n    %secho 'Failed to get properties' >&2; exit 1\n    ;;\n", name, gone)
+			continue
+		}
 		fmt.Fprintf(&show, "  %q)\n    echo 'ExecStart={ path=%s ; argv[]=%s ; ignore_errors=no ; code=exited ; status=0 }'\n", name, strings.Fields(u.argv)[0], u.argv)
 		for _, f := range u.files {
 			fmt.Fprintf(&show, "    echo 'EnvironmentFiles=%s (ignore_errors=yes)'\n", f)
@@ -43,10 +61,13 @@ func fakeUnitSystemctl(t *testing.T, units map[string]userUnit) string {
 	if err := os.WriteFile(filepath.Join(dir, "list"), []byte(list.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "list-after"), []byte(listAfter.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	program := filepath.Join(dir, "systemctl-stand-in")
 	script := fmt.Sprintf(`#!/bin/sh
 if [ "$1 $2" = "--user list-units" ] || [ "$1 $2" = "--user list-unit-files" ]; then
-  cat %q
+  if [ -e %q ]; then cat %q; else cat %q; fi
   exit 0
 fi
 if [ "$1 $2" = "--user show" ]; then
@@ -55,7 +76,7 @@ if [ "$1 $2" = "--user show" ]; then
   exit 0
 fi
 exit 1
-`, filepath.Join(dir, "list"), show.String())
+`, filepath.Join(dir, "gone"), filepath.Join(dir, "list-after"), filepath.Join(dir, "list"), show.String())
 	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -154,5 +175,49 @@ func TestUnitEnvMailsOnceAnEpisode(t *testing.T) {
 	}
 	if got := mailbox.Writes(); got != 1 {
 		t.Errorf("the Mayor was mailed %d times over three ticks of one episode, want 1", got)
+	}
+}
+
+// An instance of the template mw-unit-failed@ exists while its handler runs and
+// is gone when show asks (mw-gq6.952): show fails, and a second list no longer
+// has the unit. That is no unit to read, not a unit the check cannot read.
+func TestUnitEnvIsCleanWhenAListedUnitIsGoneByTheTimeShowAsks(t *testing.T) {
+	program := fakeUnitSystemctl(t, map[string]userUnit{
+		"mw-unit-failed@mw-millhand-tick.service.service": {argv: "/home/someone/bin/mw", vanishes: true},
+		"mw-dispatch.service":                             {argv: "/usr/bin/env mw dispatch", files: []string{beadsEnv}},
+	})
+	check := &doctor.UnitEnv{Program: program}
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("verdict %v (%q), want ok", verdict, reason)
+	}
+}
+
+// A vanished unit is not read as clean for the others: a unit that runs mw
+// without beads.env still alarms beside it.
+func TestUnitEnvStillFlagsAUnitWithoutBeadsEnvBesideOneThatVanished(t *testing.T) {
+	program := fakeUnitSystemctl(t, map[string]userUnit{
+		"mw-unit-failed@mw-millhand-tick.service.service": {argv: "/home/someone/bin/mw", vanishes: true},
+		"mw-resume-2026-10-29.service":                    {argv: "/home/someone/bin/mw resume"},
+	})
+	check := &doctor.UnitEnv{Program: program}
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorFaulty || !strings.Contains(reason, "mw-resume-2026-10-29.service") || strings.Contains(reason, "mw-unit-failed@") {
+		t.Fatalf("verdict %v (%q), want faulty naming only the resume unit", verdict, reason)
+	}
+}
+
+// A unit that is still listed after show fails is one the check cannot read:
+// it says cannot-tell, naming the unit and what systemctl said.
+func TestUnitEnvCannotTellWhenAStillListedUnitCannotBeShown(t *testing.T) {
+	program := fakeUnitSystemctl(t, map[string]userUnit{
+		"mw-health.service": {argv: "/home/someone/bin/mw-health", broken: true},
+	})
+	check := &doctor.UnitEnv{Program: program}
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorCannotTell {
+		t.Fatalf("verdict %v (%q), want cannot-tell", verdict, reason)
+	}
+	if !strings.Contains(reason, "mw-health.service") || !strings.Contains(reason, "Failed to get properties") {
+		t.Errorf("reason %q should name the unit and say what systemctl said", reason)
 	}
 }
