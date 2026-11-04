@@ -42,7 +42,7 @@ type FailedFile struct {
 // name a test file; a failure whose output names none (go test's, which names
 // packages) comes back as no file.
 func FailingFiles(output string) []FailedFile {
-	lines := strings.Split(strings.ReplaceAll(domain.StripANSI(output), "\r\n", "\n"), "\n")
+	lines := strings.Split(strings.ReplaceAll(domain.StripANSI(WithoutExpectedFailures(output)), "\r\n", "\n"), "\n")
 	var files []FailedFile
 	seen := map[string]bool{}
 	for _, line := range lines {

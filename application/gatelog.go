@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -36,12 +37,107 @@ var (
 	trailingTime = regexp.MustCompile(`\s+(\(\d+(\.\d+)?m?s\)|\d+(\.\d+)?m?s)$`)
 )
 
+var (
+	// playwrightRunBoundary is a line that starts a Playwright run in a log, or a
+	// run of the log's own (mw's `=== <command> ===` header): the lines up to the
+	// next one are one run's.
+	playwrightRunBoundary = regexp.MustCompile(`^(\s*Running \d+ tests? using \d+ workers?|=== )`)
+	// playwrightSummary is a count line of a finished run: `5 passed (44.6s)`,
+	// `1 failed`, `2 flaky`, `1 skipped`. A run killed before it has none.
+	playwrightSummary = regexp.MustCompile(`^\s*\d+ (passed|failed|flaky|skipped|did not run|interrupted)\b`)
+	// playwrightListFailure is a list reporter's ✘ line: the test after the
+	// number, the same words the numbered header of its detail and the list under
+	// `N failed` hold.
+	playwrightListFailure = regexp.MustCompile(`^\s*✘\s+\d+\s+(\[.*)$`)
+	// playwrightTestWords is the `[project] › file:line:col › title` of a numbered
+	// header (`1) ...`) of a failure's detail, or of a line under `N failed` or
+	// `N flaky`, which have no number.
+	playwrightTestWords = regexp.MustCompile(`^\s*(?:\d+\)\s+)?(\[[^\]]*\]\s+›\s+\S+\.spec\.[cm]?[jt]sx?:\d+:\d+\s+›.*)$`)
+	// playwrightRetry is the `(retry #1)` Playwright adds to a test's retries.
+	playwrightRetry = regexp.MustCompile(`\s*\(retry #\d+\)`)
+)
+
+// playwrightTestKey is the words that say which test a Playwright line is
+// about, without the duration, the retry mark or the rule of box characters a
+// header is padded with.
+func playwrightTestKey(words string) string {
+	words = trailingTime.ReplaceAllString(strings.TrimSpace(words), "")
+	words = playwrightRetry.ReplaceAllString(words, "")
+	return strings.Join(strings.Fields(strings.TrimRight(strings.TrimSpace(words), "─ ")), " ")
+}
+
+// WithoutExpectedFailures is a run's output with the ✘ lines of Playwright's
+// expected failures taken out (mw-gq6.958). A test marked test.fail() that fails
+// as it should is drawn by the list reporter with a ✘, though the run counts it
+// passed and exits 0; mw read every ✘ as a failing test, and named the file
+// failing in a whole run that passed alone. What tells the two apart is the
+// rest of a finished run: a test that failed has its numbered detail and a line
+// under `N failed` (`N flaky` for one that passed on a retry), and an expected
+// failure has neither. A ✘ line stays when its run has no summary (it was cut
+// off, and cannot be told), and one that the detail or the failed list names.
+func WithoutExpectedFailures(output string) string {
+	if !strings.Contains(output, "✘") {
+		return output
+	}
+	lines := strings.Split(strings.ReplaceAll(domain.StripANSI(output), "\r\n", "\n"), "\n")
+	drop := make([]bool, len(lines))
+	for start := 0; start < len(lines); {
+		end := start + 1
+		for end < len(lines) && !playwrightRunBoundary.MatchString(lines[end]) {
+			end++
+		}
+		dropExpectedFailures(lines[start:end], drop[start:end])
+		start = end
+	}
+	var kept []string
+	for i, line := range lines {
+		if !drop[i] {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
+// dropExpectedFailures marks, in the lines of one run, the ✘ lines that a
+// finished run does not name as failed.
+func dropExpectedFailures(lines []string, drop []bool) {
+	finished, saysFailed := false, false
+	var failed []string
+	for _, line := range lines {
+		if m := playwrightSummary.FindStringSubmatch(line); m != nil {
+			finished = true
+			saysFailed = saysFailed || m[1] == "failed"
+		}
+		if strings.HasPrefix(line, "[... ") && strings.Contains(line, "left out by mw") {
+			return // the middle of the log was cut: what is left cannot be told apart
+		}
+		if m := playwrightTestWords.FindStringSubmatch(line); m != nil {
+			failed = append(failed, playwrightTestKey(m[1]))
+		}
+	}
+	// A run that says some failed, and names none of them, is a log whose detail
+	// is not here: every ✘ stands.
+	if !finished || (saysFailed && len(failed) == 0) {
+		return
+	}
+	for i, line := range lines {
+		m := playwrightListFailure.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		key := playwrightTestKey(m[1])
+		drop[i] = !slices.ContainsFunc(failed, func(f string) bool {
+			return strings.HasPrefix(f, key) || strings.HasPrefix(key, f)
+		})
+	}
+}
+
 // FailingTests is the tests a run's output says failed, in the order it said
 // them, each once, at most limit of them; more is how many past the limit
 // there were.
 func FailingTests(output string, limit int) (names []string, more int) {
 	seen := map[string]bool{}
-	for _, line := range strings.Split(strings.ReplaceAll(domain.StripANSI(output), "\r\n", "\n"), "\n") {
+	for _, line := range strings.Split(strings.ReplaceAll(domain.StripANSI(WithoutExpectedFailures(output)), "\r\n", "\n"), "\n") {
 		if !failingTest.MatchString(line) {
 			continue
 		}

@@ -69,7 +69,7 @@ var vitestFailure = regexp.MustCompile(`^FAIL\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx
 // the run on the target, so the two are compared by one name.
 func TestNamesOf(output string) []string {
 	failing, _ := FailingTests(output, 1<<30)
-	for _, line := range strings.Split(strings.ReplaceAll(domain.StripANSI(output), "\r\n", "\n"), "\n") {
+	for _, line := range strings.Split(strings.ReplaceAll(domain.StripANSI(WithoutExpectedFailures(output)), "\r\n", "\n"), "\n") {
 		// The detail header of a failure, which the dot and line reporters print
 		// in place of a ✘ line.
 		if playwrightFailure.MatchString(line) {

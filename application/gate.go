@@ -720,7 +720,7 @@ var (
 // failing test, each once, in the order it named them (mw-gq6.808).
 func failingTestFiles(output string) []string {
 	var files []string
-	for _, line := range strings.Split(strings.ReplaceAll(domain.StripANSI(output), "\r\n", "\n"), "\n") {
+	for _, line := range strings.Split(strings.ReplaceAll(domain.StripANSI(WithoutExpectedFailures(output)), "\r\n", "\n"), "\n") {
 		if !failingTestFile.MatchString(line) {
 			continue
 		}

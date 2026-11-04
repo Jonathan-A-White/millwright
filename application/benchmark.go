@@ -641,7 +641,7 @@ var endsFailure = regexp.MustCompile(`^(=== |--- PASS|--- SKIP|\s*(✓|✔|ok\b|
 func failureLines(output string) []string {
 	var lines []string
 	inFailure := false
-	for _, line := range strings.Split(strings.ReplaceAll(domain.StripANSI(output), "\r\n", "\n"), "\n") {
+	for _, line := range strings.Split(strings.ReplaceAll(domain.StripANSI(WithoutExpectedFailures(output)), "\r\n", "\n"), "\n") {
 		switch {
 		case failingTest.MatchString(line):
 			inFailure = true
