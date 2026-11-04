@@ -23,13 +23,19 @@ func ghostFixture(t *testing.T) []byte {
 
 func ghostRun(t *testing.T, store application.SecretStore, blog *apptest.FakeGhostBlog, text []byte) (string, error) {
 	t.Helper()
+	return ghostRunWith(t, store, blog, text, application.GhostImage{})
+}
+
+func ghostRunWith(t *testing.T, store application.SecretStore, blog *apptest.FakeGhostBlog, text []byte, image application.GhostImage) (string, error) {
+	t.Helper()
 	var out bytes.Buffer
 	err := application.GhostDraft{
 		Secrets: store,
 		Open: func(key string) (application.GhostBlog, error) {
 			return blog, nil
 		},
-		Out: &out,
+		Image: image,
+		Out:   &out,
 	}.Run(context.Background(), text)
 	return out.String(), err
 }
@@ -160,5 +166,63 @@ func TestGhostDraftCutsTheKeyOutOfAnErrorTheBlogGives(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "5e17f00dcafe") || strings.Contains(err.Error(), "sentinelid") {
 		t.Errorf("the key is in the error: %v", err)
+	}
+}
+
+var ghostPic = application.GhostImage{Name: "lighthouse.png", Data: []byte("\x89PNGfake")}
+
+func TestGhostDraftUploadsTheFeatureImageAndSetsItOnTheDraft(t *testing.T) {
+	blog := &apptest.FakeGhostBlog{}
+	if _, err := ghostRunWith(t, ghostKeyKept(), blog, ghostFixture(t), ghostPic); err != nil {
+		t.Fatal(err)
+	}
+	if len(blog.Uploaded) != 1 || blog.Uploaded[0].Name != "lighthouse.png" {
+		t.Fatalf("uploaded = %v", blog.Uploaded)
+	}
+	if len(blog.Created) != 1 || blog.Created[0].FeatureImage != blog.UploadedURL("lighthouse.png") || blog.Created[0].FeatureImage == "" {
+		t.Errorf("created = %+v, want the uploaded address as the feature image", blog.Created)
+	}
+}
+
+func TestGhostDraftWithNoImageUploadsNothingAndSetsNoFeatureImage(t *testing.T) {
+	blog := &apptest.FakeGhostBlog{}
+	if _, err := ghostRun(t, ghostKeyKept(), blog, ghostFixture(t)); err != nil {
+		t.Fatal(err)
+	}
+	if len(blog.Uploaded) != 0 || blog.Created[0].FeatureImage != "" {
+		t.Errorf("uploaded %v, created %+v", blog.Uploaded, blog.Created)
+	}
+}
+
+func TestGhostDraftUploadsNothingForAPostThatIsNotADraft(t *testing.T) {
+	for _, status := range []string{"published", "scheduled", "sent"} {
+		blog := &apptest.FakeGhostBlog{Posts: map[string]application.GhostPost{
+			"who-are-the-dead-who-hear-john-5-25": {ID: "p9", Slug: "who-are-the-dead-who-hear-john-5-25", Title: "Who Are", Status: status},
+		}}
+		if _, err := ghostRunWith(t, ghostKeyKept(), blog, ghostFixture(t), ghostPic); err == nil {
+			t.Fatalf("%s: no refusal", status)
+		}
+		if len(blog.Uploaded)+len(blog.Created)+len(blog.Updated) != 0 {
+			t.Errorf("%s: the blog was changed", status)
+		}
+	}
+}
+
+func TestGhostDraftRefusesAFeatureImageThatIsNotAPictureBeforeAskingTheBlogAnything(t *testing.T) {
+	big := make([]byte, application.GhostImageMaxBytes+1)
+	for name, image := range map[string]application.GhostImage{
+		"text file": {Name: "notes.txt", Data: []byte("hi")},
+		"empty":     {Name: "a.png", Data: nil},
+		"too big":   {Name: "a.png", Data: big},
+		"no name":   {Name: "", Data: []byte("x")},
+	} {
+		blog := &apptest.FakeGhostBlog{}
+		_, err := ghostRunWith(t, ghostKeyKept(), blog, ghostFixture(t), image)
+		if err == nil {
+			t.Errorf("%s: no refusal", name)
+		}
+		if len(blog.Uploaded)+len(blog.Created) != 0 {
+			t.Errorf("%s: the blog was changed", name)
+		}
 	}
 }

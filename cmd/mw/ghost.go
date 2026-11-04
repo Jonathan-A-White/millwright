@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -27,7 +28,8 @@ func newGhostCmd() *cobra.Command {
 }
 
 func newGhostDraftCmd() *cobra.Command {
-	return &cobra.Command{
+	var featureImage string
+	cmd := &cobra.Command{
 		Use:   "draft <post.md>",
 		Short: "Create or update the Ghost draft of a markdown post, and print its editor address",
 		Long: "draft reads a post's markdown file: its frontmatter gives the title, the slug and the excerpt\n" +
@@ -35,12 +37,24 @@ func newGhostDraftCmd() *cobra.Command {
 			"[^1] footnotes render. It makes a draft, whatever the frontmatter's status says. A second run\n" +
 			"with the same slug updates that draft; a post of that slug that is not a draft is refused and\n" +
 			"left as it is. It prints the draft's editor address.\n\n" +
-			"  mw ghost draft posts/who-are-the-dead-who-hear-john-5-25.md",
+			"--feature-image <file> uploads a picture (.png, .jpg, .jpeg, .gif, .webp or .svg, 5 MB at most;\n" +
+			"mw image makes one) through the blog's image upload and sets it as the draft's feature image,\n" +
+			"only once the post is known to be a draft or new.\n\n" +
+			"  mw ghost draft posts/who-are-the-dead-who-hear-john-5-25.md\n" +
+			"  mw ghost draft posts/who-are-the-dead-who-hear-john-5-25.md --feature-image lighthouse.png",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text, err := os.ReadFile(args[0])
 			if err != nil {
 				return err
+			}
+			var image application.GhostImage
+			if cmd.Flags().Changed("feature-image") {
+				data, err := os.ReadFile(featureImage)
+				if err != nil {
+					return err
+				}
+				image = application.GhostImage{Name: filepath.Base(featureImage), Data: data}
 			}
 			base, err := config.GhostURL()
 			if err != nil {
@@ -55,8 +69,11 @@ func newGhostDraftCmd() *cobra.Command {
 				Open: func(key string) (application.GhostBlog, error) {
 					return ghost.New(base, key)
 				},
-				Out: cmd.OutOrStdout(),
+				Image: image,
+				Out:   cmd.OutOrStdout(),
 			}.Run(cmd.Context(), text)
 		},
 	}
+	cmd.Flags().StringVar(&featureImage, "feature-image", "", "a picture file to upload and set as the draft's feature image")
+	return cmd
 }

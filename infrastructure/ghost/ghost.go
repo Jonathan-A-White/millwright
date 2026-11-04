@@ -1,7 +1,8 @@
 // Package ghost is the blog's Ghost Admin API, narrowed to drafts: it finds a
-// post by slug, creates a draft and updates a draft, and has no other call.
-// Nothing here sends a status but "draft", and no request is made with any
-// method but GET, POST or PUT, on /ghost/api/admin/posts/ alone.
+// post by slug, creates a draft, updates a draft and uploads an image for a
+// draft's feature image, and has no other call. Nothing here sends a status
+// but "draft", and no request is made with any method but GET, POST or PUT, on
+// /ghost/api/admin/posts/, or POST on /ghost/api/admin/images/upload/.
 package ghost
 
 import (
@@ -15,7 +16,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strconv"
 	"strings"
@@ -91,25 +94,46 @@ type apiPost struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-// call is the one place a request is made. It allows GET, POST and PUT on the
-// posts, and nothing else, and it keeps the key and the token out of anything
-// it returns. A 404 is returned as (nil, 404, nil).
+// call makes a request on the posts and reads one post from the reply.
 func (b *Blog) call(ctx context.Context, method, path string, body any) (*apiPost, int, error) {
-	switch method {
-	case http.MethodGet, http.MethodPost, http.MethodPut:
-	default:
-		return nil, 0, fmt.Errorf("the %s method is not one mw ghost draft makes", method)
-	}
-	if !strings.HasPrefix(path, "posts/") {
-		return nil, 0, errors.New("mw ghost draft touches the posts and nothing else")
-	}
 	var payload io.Reader
+	contentType := ""
 	if body != nil {
 		raw, err := json.Marshal(body)
 		if err != nil {
 			return nil, 0, err
 		}
 		payload = bytes.NewReader(raw)
+		contentType = "application/json"
+	}
+	reply, status, err := b.send(ctx, method, path, contentType, payload)
+	if err != nil || (status == http.StatusNotFound && method == http.MethodGet) {
+		return nil, status, err
+	}
+	var answer struct {
+		Posts []apiPost `json:"posts"`
+	}
+	if err := json.Unmarshal(reply, &answer); err != nil || len(answer.Posts) != 1 {
+		return nil, status, fmt.Errorf("the blog's reply to %s /%s was not one post (HTTP %d)", method, path, status)
+	}
+	return &answer.Posts[0], status, nil
+}
+
+// uploadPath is the one path off the posts a request is made on.
+const uploadPath = "images/upload/"
+
+// send is the one place a request is made. It allows GET, POST and PUT on the
+// posts, and POST on the image upload, and nothing else, and it keeps the key
+// and the token out of anything it returns. A 404 to a GET is returned as
+// (nil, 404, nil).
+func (b *Blog) send(ctx context.Context, method, path, contentType string, payload io.Reader) ([]byte, int, error) {
+	switch {
+	case path == uploadPath && method == http.MethodPost:
+	case strings.HasPrefix(path, "posts/") && (method == http.MethodGet || method == http.MethodPost || method == http.MethodPut):
+	case strings.HasPrefix(path, "posts/"):
+		return nil, 0, fmt.Errorf("the %s method is not one mw ghost draft makes", method)
+	default:
+		return nil, 0, errors.New("mw ghost draft touches the posts and the image upload and nothing else")
 	}
 	req, err := http.NewRequestWithContext(ctx, method, b.URL+"/ghost/api/admin/"+path, payload)
 	if err != nil {
@@ -118,8 +142,8 @@ func (b *Blog) call(ctx context.Context, method, path string, body any) (*apiPos
 	token := b.token()
 	req.Header.Set("Authorization", "Ghost "+token)
 	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	client := b.Client
 	if client == nil {
@@ -143,13 +167,7 @@ func (b *Blog) call(ctx context.Context, method, path string, body any) (*apiPos
 	if resp.StatusCode/100 != 2 {
 		return nil, resp.StatusCode, b.clean(fmt.Errorf("the blog refused %s %s (HTTP %d): %s", method, "/"+path, resp.StatusCode, apiMessage(reply)), token)
 	}
-	var answer struct {
-		Posts []apiPost `json:"posts"`
-	}
-	if err := json.Unmarshal(reply, &answer); err != nil || len(answer.Posts) != 1 {
-		return nil, resp.StatusCode, fmt.Errorf("the blog's reply to %s /%s was not one post (HTTP %d)", method, path, resp.StatusCode)
-	}
-	return &answer.Posts[0], resp.StatusCode, nil
+	return reply, resp.StatusCode, nil
 }
 
 // lexicalFrom reads a Content-Version like v5.0 or v4.48: lexical from major
@@ -227,6 +245,52 @@ func (b *Blog) Update(ctx context.Context, post application.GhostPost, draft app
 	return b.known(*updated), nil
 }
 
+// UploadImage implements application.GhostBlog: one multipart POST to the
+// Admin images endpoint, purpose image, and the address the blog gives back.
+// It changes no post.
+func (b *Blog) UploadImage(ctx context.Context, image application.GhostImage) (string, error) {
+	kind := application.GhostImageKind(image.Name)
+	if kind == "" {
+		return "", fmt.Errorf("the feature image %q is not a picture the blog takes", image.Name)
+	}
+	var form bytes.Buffer
+	writer := multipart.NewWriter(&form)
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, quoteFilename(image.Name)))
+	header.Set("Content-Type", kind)
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		return "", err
+	}
+	if _, err := part.Write(image.Data); err != nil {
+		return "", err
+	}
+	if err := writer.WriteField("purpose", "image"); err != nil {
+		return "", err
+	}
+	if err := writer.Close(); err != nil {
+		return "", err
+	}
+	reply, _, err := b.send(ctx, http.MethodPost, uploadPath, writer.FormDataContentType(), &form)
+	if err != nil {
+		return "", err
+	}
+	var answer struct {
+		Images []struct {
+			URL string `json:"url"`
+		} `json:"images"`
+	}
+	if err := json.Unmarshal(reply, &answer); err != nil || len(answer.Images) != 1 || !strings.HasPrefix(answer.Images[0].URL, "http") {
+		return "", errors.New("the blog's reply to the image upload was not one image address")
+	}
+	return answer.Images[0].URL, nil
+}
+
+// quoteFilename is a file's name safe inside the quotes of a header.
+func quoteFilename(name string) string {
+	return strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\r", "", "\n", "").Replace(name)
+}
+
 func (b *Blog) known(p apiPost) application.GhostPost {
 	return application.GhostPost{
 		ID: p.ID, Slug: p.Slug, Title: p.Title, Status: p.Status, UpdatedAt: p.UpdatedAt,
@@ -250,6 +314,9 @@ func (b *Blog) body(draft application.GhostDraftPost, updatedAt string) map[stri
 	}
 	if updatedAt != "" {
 		post["updated_at"] = updatedAt
+	}
+	if draft.FeatureImage != "" {
+		post["feature_image"] = draft.FeatureImage
 	}
 	if b.lexical {
 		doc, _ := json.Marshal(map[string]any{"root": map[string]any{

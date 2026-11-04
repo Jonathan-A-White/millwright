@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -41,7 +42,56 @@ type GhostDraftPost struct {
 	Slug     string
 	Excerpt  string
 	Markdown string
+	// FeatureImage is the blog's address of an uploaded picture to set as the
+	// draft's feature image; empty leaves the feature image as the draft has it.
+	FeatureImage string
 }
+
+// GhostImage is a picture file to hang on a draft.
+type GhostImage struct {
+	// Name is the file's name, as the blog is sent it.
+	Name string
+	Data []byte
+}
+
+// GhostImageMaxBytes is the most a feature image may be: Ghost's own limit
+// for an uploaded image is 5 MB.
+const GhostImageMaxBytes = 5 << 20
+
+// ghostImageKinds is the picture files the blog takes as an image, and what
+// each is called in an upload.
+var ghostImageKinds = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".svg":  "image/svg+xml",
+}
+
+// GhostImageKind is the media type of a picture file by its name, "" for a
+// file that is not one the blog takes.
+func GhostImageKind(name string) string {
+	return ghostImageKinds[strings.ToLower(filepath.Ext(name))]
+}
+
+// Check refuses a picture the blog would not take, before anything is sent.
+func (g GhostImage) Check() error {
+	switch {
+	case g.Name == "":
+		return errors.New("the feature image has no file name")
+	case GhostImageKind(g.Name) == "":
+		return fmt.Errorf("the feature image %q is not a picture the blog takes: use .png, .jpg, .jpeg, .gif, .webp or .svg", g.Name)
+	case len(g.Data) == 0:
+		return fmt.Errorf("the feature image %q is empty", g.Name)
+	case len(g.Data) > GhostImageMaxBytes:
+		return fmt.Errorf("the feature image %q is %d bytes: the blog takes %d at most", g.Name, len(g.Data), GhostImageMaxBytes)
+	}
+	return nil
+}
+
+// present is whether a feature image was asked for at all.
+func (g GhostImage) present() bool { return g.Name != "" || g.Data != nil }
 
 // GhostBlog is the blog's Admin API, narrowed to a post's draft. It has no
 // way to publish, schedule, send or delete: whatever it creates or updates is
@@ -54,6 +104,9 @@ type GhostBlog interface {
 	Create(ctx context.Context, draft GhostDraftPost) (GhostPost, error)
 	// Update replaces what the draft post holds, and leaves it a draft.
 	Update(ctx context.Context, post GhostPost, draft GhostDraftPost) (GhostPost, error)
+	// UploadImage puts a picture on the blog's image store and gives its
+	// address. It changes no post.
+	UploadImage(ctx context.Context, image GhostImage) (string, error)
 }
 
 // ghostSlug is what a slug may be: it ends up in a request path.
@@ -134,7 +187,10 @@ type GhostDraft struct {
 	Secrets SecretStore
 	// Open is the blog for a key; the error it gives never quotes the key.
 	Open func(key string) (GhostBlog, error)
-	Out  io.Writer
+	// Image, when it is present, is uploaded and set as the draft's feature
+	// image; the zero value is no image.
+	Image GhostImage
+	Out   io.Writer
 }
 
 // Run implements mw ghost draft, over the text of the post's file.
@@ -142,6 +198,11 @@ func (g GhostDraft) Run(ctx context.Context, text []byte) error {
 	draft, err := ParseGhostPost(text)
 	if err != nil {
 		return err
+	}
+	if g.Image.present() {
+		if err := g.Image.Check(); err != nil {
+			return err
+		}
 	}
 	raw, err := g.Secrets.Get(ctx, GhostKeyName)
 	if errors.Is(err, ErrNoSecret) {
@@ -172,18 +233,25 @@ type pushed struct {
 }
 
 // push finds the draft by slug and updates it, or makes a new one; a post of
-// the slug that is anything but a draft is refused before anything is sent.
+// the slug that is anything but a draft is refused before anything is sent,
+// the feature image included: it is uploaded only once the post is known to
+// be a draft or to be new.
 func (g GhostDraft) push(ctx context.Context, blog GhostBlog, draft GhostDraftPost) (pushed, error) {
 	existing, found, err := blog.Find(ctx, draft.Slug)
 	if err != nil {
 		return pushed{}, err
 	}
+	if found && existing.Status != GhostStatusDraft {
+		return pushed{}, fmt.Errorf("the post %q (%s, id %s) is %s, not a draft: mw ghost draft changes drafts only, so a published, scheduled or sent post is left as it is", draft.Slug, existing.Title, existing.ID, existing.Status)
+	}
+	if g.Image.present() {
+		if draft.FeatureImage, err = blog.UploadImage(ctx, g.Image); err != nil {
+			return pushed{}, err
+		}
+	}
 	if !found {
 		post, err := blog.Create(ctx, draft)
 		return pushed{post, "created"}, err
-	}
-	if existing.Status != GhostStatusDraft {
-		return pushed{}, fmt.Errorf("the post %q (%s, id %s) is %s, not a draft: mw ghost draft changes drafts only, so a published, scheduled or sent post is left as it is", draft.Slug, existing.Title, existing.ID, existing.Status)
 	}
 	post, err := blog.Update(ctx, existing, draft)
 	return pushed{post, "updated"}, err

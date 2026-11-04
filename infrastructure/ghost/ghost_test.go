@@ -42,6 +42,9 @@ type blog struct {
 	seen     []string
 	bodies   []map[string]any
 	failWith int // when set, every request is answered with this status
+
+	uploads     []upload
+	uploadFails bool // when set, an image upload is refused
 }
 
 func newBlog(t *testing.T) (*blog, *httptest.Server) {
@@ -65,6 +68,10 @@ func (b *blog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if b.failWith != 0 {
 		w.WriteHeader(b.failWith)
 		io.WriteString(w, `{"errors":[{"message":"nope, got `+r.Header.Get("Authorization")+` for `+sentinelKey+`"}]}`)
+		return
+	}
+	if r.URL.Path == "/ghost/api/admin/images/upload/" && r.Method == http.MethodPost {
+		b.upload(w, r)
 		return
 	}
 	const prefix = "/ghost/api/admin/posts/"
@@ -121,6 +128,38 @@ func (b *blog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// upload answers the one image upload mw ghost draft may make: a multipart
+// body with a file and purpose=image. It keeps what it was sent.
+func (b *blog) upload(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		b.t.Errorf("an upload that is not multipart: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		b.t.Errorf("an upload with no file part: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	data, _ := io.ReadAll(file)
+	b.uploads = append(b.uploads, upload{name: header.Filename, kind: header.Header.Get("Content-Type"), purpose: r.FormValue("purpose"), data: data})
+	if b.uploadFails {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		io.WriteString(w, `{"errors":[{"message":"unsupported file, token `+r.Header.Get("Authorization")+`"}]}`)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]any{"images": []any{map[string]any{"url": "https://blog.test/content/images/2026/11/" + header.Filename, "ref": nil}}})
+}
+
+// upload is what the blog was sent as an image.
+type upload struct {
+	name, kind, purpose string
+	data                []byte
+}
+
 // sent is the one post of a request's body.
 func (b *blog) sent(body map[string]any) map[string]any {
 	posts, _ := body["posts"].([]any)
@@ -175,13 +214,20 @@ func fixture(t *testing.T) []byte {
 // that it says, on stdout or in its error, joined.
 func run(t *testing.T, srv *httptest.Server, text []byte) (string, error) {
 	t.Helper()
+	return runWith(t, srv, text, application.GhostImage{})
+}
+
+// runWith is run with a feature image.
+func runWith(t *testing.T, srv *httptest.Server, text []byte, image application.GhostImage) (string, error) {
+	t.Helper()
 	var out bytes.Buffer
 	err := application.GhostDraft{
 		Secrets: &apptest.FakeSecretStore{Values: map[string][]byte{application.GhostKeyName: []byte(sentinelKey)}},
 		Open: func(key string) (application.GhostBlog, error) {
 			return ghost.New(srv.URL, key)
 		},
-		Out: &out,
+		Image: image,
+		Out:   &out,
 	}.Run(context.Background(), text)
 	said := out.String()
 	if err != nil {
@@ -316,8 +362,8 @@ func TestNoRequestButGetPostAndPutOnPostsIsMadeAndNoSourceHasADeletePath(t *test
 		if method != http.MethodGet && method != http.MethodPost && method != http.MethodPut {
 			t.Errorf("a %s request was made: %s", method, line)
 		}
-		if !strings.HasPrefix(path, "/ghost/api/admin/posts/") {
-			t.Errorf("a request off the posts: %s", line)
+		if !strings.HasPrefix(path, "/ghost/api/admin/posts/") && line != "POST /ghost/api/admin/images/upload/" {
+			t.Errorf("a request off the posts and the one image upload: %s", line)
 		}
 	}
 	for _, path := range []string{"ghost.go", "../../application/ghost.go", "../../cmd/mw/ghost.go"} {
@@ -367,6 +413,89 @@ func TestAMalformedKeyIsRefusedWithoutSayingIt(t *testing.T) {
 		}
 		if strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "mw secrets put ghost_admin_key") {
 			t.Errorf("%q: the error %q should not quote the key and should name the put", key, err)
+		}
+	}
+}
+
+var pic = application.GhostImage{Name: "lighthouse.png", Data: []byte("\x89PNG\r\n\x1a\nfake picture")}
+
+func TestAFeatureImageIsUploadedAsAnImageThenSetOnTheNewDraft(t *testing.T) {
+	b, srv := newBlog(t)
+	out, err := runWith(t, srv, fixture(t), pic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.uploads) != 1 {
+		t.Fatalf("%d uploads, want one", len(b.uploads))
+	}
+	up := b.uploads[0]
+	if up.name != "lighthouse.png" || up.purpose != "image" || up.kind != "image/png" || !bytes.Equal(up.data, pic.Data) {
+		t.Errorf("upload = %+v", up)
+	}
+	post := b.sent(b.bodies[len(b.bodies)-1])
+	if post["feature_image"] != "https://blog.test/content/images/2026/11/lighthouse.png" || post["status"] != "draft" {
+		t.Errorf("the draft = %v, want feature_image set and status draft", post)
+	}
+	if want := []string{"GET /ghost/api/admin/posts/slug/" + slug + "/", "POST /ghost/api/admin/images/upload/", "POST /ghost/api/admin/posts/"}; strings.Join(b.seen, "|") != strings.Join(want, "|") {
+		t.Errorf("requests = %v, want %v: the lookup first, so nothing is uploaded for a post that is refused", b.seen, want)
+	}
+	if !strings.Contains(out, "newid1") {
+		t.Errorf("out = %s", out)
+	}
+}
+
+func TestAFeatureImageIsSetOnTheDraftOfASecondRunToo(t *testing.T) {
+	b, srv := newBlog(t)
+	b.posts[slug] = map[string]any{"id": "d1", "slug": slug, "title": "T", "status": "draft", "updated_at": "2026-11-01T00:00:00.000Z"}
+	if _, err := runWith(t, srv, fixture(t), pic); err != nil {
+		t.Fatal(err)
+	}
+	if post := b.sent(b.bodies[len(b.bodies)-1]); post["feature_image"] == nil || post["status"] != "draft" {
+		t.Errorf("the update = %v", post)
+	}
+}
+
+func TestADraftWithNoFeatureImageSendsNoFeatureImageKeyAndNoUpload(t *testing.T) {
+	b, srv := newBlog(t)
+	if _, err := run(t, srv, fixture(t)); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.uploads) != 0 {
+		t.Error("an upload with no image")
+	}
+	if _, has := b.sent(b.bodies[len(b.bodies)-1])["feature_image"]; has {
+		t.Error("a feature_image key with no image: an update would clear the one the draft has")
+	}
+}
+
+func TestAPostThatIsNotADraftIsRefusedWithAFeatureImageAndNothingIsUploaded(t *testing.T) {
+	for _, status := range []string{"published", "scheduled", "sent"} {
+		b, srv := newBlog(t)
+		b.posts[slug] = map[string]any{"id": "live42", "slug": slug, "title": "Who Are", "status": status, "updated_at": "2026-11-01T00:00:00.000Z"}
+		if _, err := runWith(t, srv, fixture(t), pic); err == nil {
+			t.Fatalf("%s: no refusal", status)
+		}
+		if len(b.uploads) != 0 || len(b.seen) != 1 {
+			t.Errorf("%s: uploads %d, requests %v, want the one lookup", status, len(b.uploads), b.seen)
+		}
+	}
+}
+
+func TestTheKeyAndTheTokenAreNowhereInWhatIsSaidWhenTheUploadFails(t *testing.T) {
+	b, srv := newBlog(t)
+	b.uploadFails = true
+	out, err := runWith(t, srv, fixture(t), pic)
+	if err == nil || !strings.Contains(out, "HTTP 422") {
+		t.Fatalf("err = %v, out = %s, want a refusal saying the status", err, out)
+	}
+	for _, secret := range []string{sentinelKey, sentinelSecret, sentinelID, "eyJ"} {
+		if strings.Contains(out, secret) {
+			t.Errorf("%q is in what was said: %s", secret, out)
+		}
+	}
+	for _, line := range b.seen {
+		if strings.HasPrefix(line, "POST /ghost/api/admin/posts/") {
+			t.Error("a draft was made after the upload failed")
 		}
 	}
 }

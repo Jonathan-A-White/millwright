@@ -15,7 +15,24 @@ type FakeGhostBlog struct {
 	Posts   map[string]application.GhostPost
 	Created []application.GhostDraftPost
 	Updated []application.GhostDraftPost
-	Err     error
+	// Uploaded is each image UploadImage was given, in order.
+	Uploaded []application.GhostImage
+	Err      error
+}
+
+// UploadedURL is the address the fake blog gives an uploaded image of this
+// name.
+func (f *FakeGhostBlog) UploadedURL(name string) string {
+	return "https://blog.test/content/images/" + name
+}
+
+// UploadImage implements application.GhostBlog.
+func (f *FakeGhostBlog) UploadImage(_ context.Context, image application.GhostImage) (string, error) {
+	if f.Err != nil {
+		return "", f.Err
+	}
+	f.Uploaded = append(f.Uploaded, image)
+	return f.UploadedURL(image.Name), nil
 }
 
 // Find implements application.GhostBlog.
