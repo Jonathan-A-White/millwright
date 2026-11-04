@@ -10,6 +10,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
+	"github.com/Jonathan-A-White/millwright/infrastructure/grist"
 	"github.com/Jonathan-A-White/millwright/infrastructure/notify"
 	"github.com/Jonathan-A-White/millwright/infrastructure/reaper"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
@@ -198,6 +199,16 @@ func newMillhandTickCmd() *cobra.Command {
 					Notes:    gateway,
 					Settings: watching,
 				}
+			}
+			// The host that runs the mill sweeps what it kept past 30 days.
+			if mill, err := config.GristConfigured(); err != nil {
+				return err
+			} else if mill {
+				stateDir, err := config.GristStateDir()
+				if err != nil {
+					return err
+				}
+				tick.GristTidy = application.GristTidy{Runs: grist.NewRuns(stateDir), Forwards: grist.NewForwards(stateDir)}
 			}
 			// A rehearsal is not a tick: it leaves nothing in the log.
 			if !dryRun {

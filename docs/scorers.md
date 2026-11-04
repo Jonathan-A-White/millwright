@@ -349,13 +349,14 @@ show each engine's word table. A grind that scored nothing replies without eithe
 ## The run record
 
 Every grind that ran keeps its raw record under the state directory
-(`grist_state_dir`, default `~/.local/state/mw/grist`), `runs/<txid>/`, 0700, files 0600,
-and `mw` never deletes it:
+(`grist_state_dir`, default `~/.local/state/mw/grist`), `runs/<txid>/`, 0700, files 0600.
+`mw grist tidy` deletes the `attachment-N.<ext>` files 30 days after the run and nothing else of
+it (docs/grist-tidy.md):
 
 | File | Holds |
 | --- | --- |
 | `input.json` | the app's request as the session was given it, with `reading_result` |
-| `attachment-N.<ext>` | each attachment as it was opened, in order (photos too) |
+| `attachment-N.<ext>` | each attachment as it was opened, in order (photos too); deleted 30 days after the run by `mw grist tidy` |
 | `scorers.json` | a list, one entry for each recording: `attachment`, `mime`, `target_text`, `lang`, `segments` (only for a woven reading), `reading_result` by engine; `[]` when nothing was scored |
 | `answer.json` | `status` (answered, refused or failed), `reason`, `answer`, `said`, `turns`, `total_cost_usd` |
 | `timing.json` | `txid`, `app`, `kind`, `model`, `effort`; `sent` (the grist record's time; `received` minus it is the queue wait), `received`, `scored_at`, `harness_started`, `answered`; `scoring_seconds`, `scorers` (each engine's seconds), `harness_seconds`, `seconds` (received to answered); `sent` and `scorers` are left out when unknown |

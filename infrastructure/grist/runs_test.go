@@ -167,3 +167,76 @@ func TestARunWithNoModelIDStillLists(t *testing.T) {
 		t.Fatalf("expected the old timing read with no model id, got %+v %v", timings, err)
 	}
 }
+
+// mw-gq6.692: the sweep reads a run's attachments and drops them, and nothing
+// else of the run.
+func TestDroppingARunsMediaKeepsItsRecord(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	runs := grist.NewRuns(dir)
+	received := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	if err := runs.Keep(ctx, aRun("direct:old", received, "answered")); err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.Keep(ctx, aRun("direct:newer", received.Add(time.Hour), "answered")); err != nil {
+		t.Fatal(err)
+	}
+	media, err := runs.RunMedia(ctx)
+	if err != nil || len(media) != 2 || media[0].Txid != "direct:old" || media[0].Files != 1 || media[0].Bytes != 5 || !media[0].Received.Equal(received) {
+		t.Fatalf("expected the two runs' media, oldest first, got %+v %v", media, err)
+	}
+	if err := runs.DropMedia(ctx, media[0].Name); err != nil {
+		t.Fatal(err)
+	}
+	run := filepath.Join(dir, "runs", "direct:old")
+	if _, err := os.Stat(filepath.Join(run, "attachment-1.webm")); !os.IsNotExist(err) {
+		t.Fatalf("expected the attachment gone, got %v", err)
+	}
+	for _, name := range []string{"input.json", "scorers.json", "answer.json", "timing.json"} {
+		if _, err := os.Stat(filepath.Join(run, name)); err != nil {
+			t.Fatalf("expected %s kept: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "runs", "direct:newer", "attachment-1.webm")); err != nil {
+		t.Fatalf("expected the other run's attachment kept: %v", err)
+	}
+	// The record still lists, and a run with no media is not listed again.
+	if lines, err := runs.List(ctx, time.Time{}); err != nil || len(lines) != 2 {
+		t.Fatalf("expected both runs still listed, got %v %v", lines, err)
+	}
+	if media, _ := runs.RunMedia(ctx); len(media) != 1 || media[0].Txid != "direct:newer" {
+		t.Fatalf("expected one run with media left, got %+v", media)
+	}
+}
+
+func TestAMediaNameThatClimbsIsRefused(t *testing.T) {
+	runs := grist.NewRuns(t.TempDir())
+	for _, name := range []string{"", ".", "..", "../x", "a/b"} {
+		if err := runs.DropMedia(context.Background(), name); err == nil {
+			t.Fatalf("expected %q refused", name)
+		}
+	}
+}
+
+// mw-gq6.692, end to end on real directories: a run 30 days old loses its
+// media, one a second younger does not.
+func TestTheThirtyDayBoundaryOnRealRuns(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	runs := grist.NewRuns(dir)
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	if err := runs.Keep(ctx, aRun("direct:thirty", now.Add(-application.GristKeepAge), "answered")); err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.Keep(ctx, aRun("direct:young", now.Add(-application.GristKeepAge+time.Second), "answered")); err != nil {
+		t.Fatal(err)
+	}
+	report, err := application.GristTidy{Runs: runs, Now: func() time.Time { return now }}.Run(ctx)
+	if err != nil || len(report.Acts) != 1 || report.Acts[0].Txid != "direct:thirty" {
+		t.Fatalf("expected the 30-day run alone swept, got %+v %v", report, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "runs", "direct:thirty", "attachment-1.webm")); !os.IsNotExist(err) {
+		t.Fatalf("expected the 30-day run's media gone, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "runs", "direct:young", "attachment-1.webm")); err != nil {
+		t.Fatalf("expected the younger run's media kept: %v", err)
+	}
+}

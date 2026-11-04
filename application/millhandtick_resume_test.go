@@ -51,6 +51,10 @@ type resumeTick struct {
 	// watching is the [watch] table wired into the tick, empty until a test
 	// asks for one with watchSaysUnwell.
 	watching application.Watch
+
+	// gristTidy is the sweep of the mill's state wired into the tick, empty
+	// until a test asks for one.
+	gristTidy application.GristTidy
 }
 
 func newResumeTick() *resumeTick {
@@ -108,6 +112,7 @@ func (r *resumeTick) run(t *testing.T) application.MillhandTickReport {
 		Sweep:       application.Sweep{Tracker: apptest.NewFakeTracker(), Host: "laptop", Now: now},
 		Reach:       r.reach,
 		Watch:       r.watching,
+		GristTidy:   r.gristTidy,
 		Log:         r.log,
 		Host:        "laptop",
 		Now:         now,
