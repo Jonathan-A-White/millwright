@@ -36,6 +36,73 @@ func impatient() *rig.Slots {
 	return rig.NewSlots(rig.WithSlotWait(150*time.Millisecond), rig.WithSlotCap(150*time.Millisecond), rig.WithSlotPoll(10*time.Millisecond))
 }
 
+// steady is a slots whose clock is the process's monotonic one (a start time
+// plus the time since), so that tickets made by different steady slots in the
+// process are queued in the order they were made, whatever the wall clock does
+// between them. A ticket is named for the wall-clock time its wait began, and a
+// host whose clock steps back (this laptop's does, under load: the journal says
+// "Time jumped backwards") would otherwise let a ticket made later sort ahead of
+// one made earlier and a waiter pass the queue (mw-gq6.974).
+func steady(opts ...rig.SlotOption) *rig.Slots {
+	now := func() time.Time { return steadyStart.Add(time.Since(steadyBegan)) }
+	sleep := func(ctx context.Context, d time.Duration) error {
+		timer := time.NewTimer(d)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return nil
+		}
+	}
+	return rig.NewSlots(append([]rig.SlotOption{rig.WithSlotClock(now, sleep)}, opts...)...)
+}
+
+// steadyStart and steadyBegan are the one clock every steady slots of the process
+// shares: the wall time at the start, and the monotonic reading taken with it.
+var steadyStart, steadyBegan = time.Now(), time.Now()
+
+// refusedWhileQueued starts a shared take of the slot for holder behind whoever is
+// queued, waits until it has looked at the slot and been told to wait (it says so
+// when it does: the notice a waiter gives), and then ends its wait. It fails if
+// the take wins the slot, which it can only do before it has said it waits. It
+// waits on that event, not on a clock: a fixed time decides nothing about whether
+// the waiter has yet looked at the slot (mw-gq6.974).
+func refusedWhileQueued(t *testing.T, dir, holder string) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	waiting := make(chan string, 1)
+	taken := make(chan error, 1)
+	go func() {
+		slots := steady(rig.WithSlotPoll(10*time.Millisecond), rig.WithSlotNotice(func(said string) {
+			select {
+			case waiting <- said:
+			default:
+			}
+		}))
+		held, err := slots.TakeShared(ctx, dir, holder)
+		if err == nil {
+			held.Release(context.Background())
+		}
+		taken <- err
+	}()
+	select {
+	case <-waiting:
+	case err := <-taken:
+		if err == nil {
+			t.Fatalf("expected %s to wait for the queue ahead of it, but it took the slot", holder)
+		}
+		t.Fatalf("expected %s to wait for the slot, got %v", holder, err)
+	case <-time.After(30 * time.Second):
+		t.Fatalf("expected %s to say it waits for the slot", holder)
+	}
+	cancel()
+	if err := <-taken; err == nil {
+		t.Fatalf("expected %s, told to wait, not to have taken the slot", holder)
+	}
+}
+
 func TestOnlyOneCloseOutHoldsARigsMergeSlot(t *testing.T) {
 	ctx, dir := context.Background(), aRigDir(t)
 
@@ -709,7 +776,7 @@ func TestAWaitingLandingIsNotStarvedByChecksArrivingBehindIt(t *testing.T) {
 
 	landing := make(chan error, 1)
 	go func() {
-		slots := rig.NewSlots(rig.WithSlotCap(5*time.Second), rig.WithSlotPoll(10*time.Millisecond))
+		slots := steady(rig.WithSlotCap(5*time.Second), rig.WithSlotPoll(10*time.Millisecond))
 		held, err := slots.Take(ctx, dir, "mw next landing mw-c.3")
 		if err == nil {
 			held.Release(ctx)
@@ -719,12 +786,7 @@ func TestAWaitingLandingIsNotStarvedByChecksArrivingBehindIt(t *testing.T) {
 	waitForQueued(t, dir, 1)
 
 	// A check arriving after the landing queued waits behind it.
-	patient := rig.NewSlots(rig.WithSlotPoll(10 * time.Millisecond))
-	brief, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
-	defer cancel()
-	if _, err := patient.TakeShared(brief, dir, "builder@laptop checking mw-b.2"); err == nil {
-		t.Fatal("expected a check that came after the landing to wait for its turn")
-	}
+	refusedWhileQueued(t, dir, "builder@laptop checking mw-b.2")
 	running.Release(ctx)
 	if err := <-landing; err != nil {
 		t.Fatalf("expected the landing to get its turn when the running check ended: %v", err)
@@ -787,7 +849,7 @@ func TestAShareHolderThatDiedLeavesNoRecordBehind(t *testing.T) {
 // yielding takes the slot alone and asserts it can be yielded, as a landing's is.
 func yielding(t *testing.T, dir string) application.YieldingHolding {
 	t.Helper()
-	held, err := rig.NewSlots(rig.WithSlotPoll(10*time.Millisecond)).Take(context.Background(), dir, "mw land on laptop, landing a batch of millwright")
+	held, err := steady(rig.WithSlotPoll(10*time.Millisecond)).Take(context.Background(), dir, "mw land on laptop, landing a batch of millwright")
 	if err != nil {
 		t.Fatalf("taking the slot: %v", err)
 	}
@@ -867,20 +929,14 @@ func TestALandingThatResumesWaitsForTheRunningCheckAndKeepsNewOnesOut(t *testing
 	resumed := make(chan error, 1)
 	go func() { resumed <- landing.Resume(ctx) }()
 	// The batch has asked for its slot back once its ticket is in the queue; a
-	// check arriving after that waits behind it (not after a fixed 200 ms, which a
-	// loaded host can spend before the batch has asked).
+	// check arriving after that waits behind it. Nothing here waits on a clock: the
+	// late check is judged once it has looked at the slot and been told to wait.
 	waitForQueued(t, dir, 1)
+	refusedWhileQueued(t, dir, "builder@laptop checking mw-b.2")
 	select {
 	case err := <-resumed:
 		t.Fatalf("expected the batch to wait for the running check before its tests, got %v", err)
-	case <-time.After(200 * time.Millisecond):
-	}
-	// The batch is back at its tests: a check arriving now waits for it.
-	brief, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
-	defer cancel()
-	if late, err := rig.NewSlots(rig.WithSlotPoll(10*time.Millisecond)).TakeShared(brief, dir, "builder@laptop checking mw-b.2"); err == nil {
-		late.Release(ctx)
-		t.Fatal("expected a check arriving as the batch resumes to wait for it")
+	default:
 	}
 
 	check.Release(ctx)
@@ -966,7 +1022,7 @@ func TestTheFirstSayingOfASlotWaitNamesWhenTheHolderTookTheSlot(t *testing.T) {
 // landing's own wait for the slot walks past neither (mw-gq6.939).
 func TestACheckWaitingForTheSlotKeepsItsPlaceWhenItsDeadlinePassesAndTakesItUpAgain(t *testing.T) {
 	ctx, dir := context.Background(), aRigDir(t)
-	slots := rig.NewSlots(rig.WithSlotPoll(5 * time.Millisecond))
+	slots := steady(rig.WithSlotPoll(5 * time.Millisecond))
 	landing, err := slots.Take(ctx, dir, "mw-landing")
 	if err != nil {
 		t.Fatal(err)
@@ -995,6 +1051,9 @@ func TestACheckWaitingForTheSlotKeepsItsPlaceWhenItsDeadlinePassesAndTakesItUpAg
 	}()
 	waitForQueued(t, dir, 2)
 	landing.Release(ctx)
+	// This one watches for a win that should not come, so it can only watch for a
+	// while; a slow host makes the watch shorter in effect and so can let a fault
+	// pass, never fail a good run. The order of the tickets is steady (mw-gq6.974).
 	select {
 	case <-won:
 		t.Fatal("expected the landing that came after to wait behind the kept place")
