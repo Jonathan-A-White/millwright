@@ -202,6 +202,11 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Transcripts: claude.NewTranscripts(projects),
 		Terminal:    terminal,
 		Marks:       eventlog.NewContextMarks(path),
+		Mail:        gateway,
+		Events:      eventlog.New(path),
+		Host:        host,
+		Spring:      springSeat,
+		Springs:     []string{application.DeputySeat, application.MillhandSeat},
 		Settle:      application.TypeSettle,
 		Err:         cmd.ErrOrStderr(),
 	}

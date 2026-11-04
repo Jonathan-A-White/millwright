@@ -218,6 +218,7 @@ func newSeatReapCmd() *cobra.Command {
 			if args[0] == application.DeputySeat {
 				reap.Mail = mwGateway(dir, host)
 				reap.Mailbox = application.DeputyMailbox
+				reap.Line = seatLineOf(args[0])
 			}
 			_, err = reap.Run(cmd.Context())
 			return err
@@ -475,4 +476,23 @@ func seatBootPorts() (*vault.Vault, rig.Docs, string, error) {
 		return nil, rig.Docs{}, "", err
 	}
 	return vault.New(dir), rig.Docs{Rigs: rigs}, host, nil
+}
+
+// seatLineOf is the context size at which the seat's session must hand off,
+// read from its transcripts. A seat the config does not watch, or a transcript
+// root that cannot be found, has no line: nothing is read as past it.
+func seatLineOf(seat string) application.SeatLine {
+	limits, err := config.SeatHandoffs()
+	if err != nil || limits[seat] < 1 {
+		return application.SeatLine{}
+	}
+	projects, err := claude.DefaultProjectsRoot()
+	if err != nil {
+		return application.SeatLine{}
+	}
+	dir, err := config.Vault()
+	if err != nil {
+		return application.SeatLine{}
+	}
+	return application.SeatLine{Transcripts: claude.NewTranscripts(projects), Dir: dir, HandoffAt: limits[seat]}
 }

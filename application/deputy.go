@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // DeputySeat is the seat `mw deputy` brings up, and the prefix of the name of
@@ -96,6 +97,12 @@ type Deputy struct {
 	// limit is told in, once for the limit (TellSeatLimited).
 	Events EventLog
 
+	// Line, when set, is the context size at which the Deputy's session must
+	// hand off, read from its transcript: a window whose session is past it,
+	// idle, with unread mail, is closed and a fresh Deputy started
+	// (mw-gq6.975).
+	Line SeatLine
+
 	// Host is the host the Deputy is brought up on.
 	Host string
 
@@ -139,6 +146,12 @@ func (d Deputy) Run(ctx context.Context) (SeatUpReport, error) {
 		}
 		if !closed {
 			closed, err = d.closeHandedOff(ctx, up)
+			if err != nil {
+				return SeatUpReport{}, err
+			}
+		}
+		if !closed {
+			closed, err = d.closePastLine(ctx, up)
 			if err != nil {
 				return SeatUpReport{}, err
 			}
@@ -202,6 +215,42 @@ func (d Deputy) closeAtLimit(ctx context.Context, name string) (bool, error) {
 	}
 	if d.Out != nil {
 		fmt.Fprintf(d.Out, "closed the window %s: its Deputy was %s\n", name, limit.resetLine())
+	}
+	return true, nil
+}
+
+// closePastLine is what Run does with a Deputy whose session is past its
+// context line, sits idle and leaves mail unread: it was told to hand off and
+// stopped without, and the nudge wakeIdle would type only asks a seat that has
+// refused to work. The window is closed, a seat_past_line event naming the
+// seat, its tokens and the unread mail is written, and Run starts a fresh
+// Deputy to read the mail (mw-gq6.975). Anything else, or a look that cannot
+// be made, is left to the rules after it.
+func (d Deputy) closePastLine(ctx context.Context, name string) (bool, error) {
+	if d.Terminal == nil || d.Mail == nil {
+		return false, nil
+	}
+	window, there := d.openWindow(ctx, name)
+	if !there {
+		return false, nil
+	}
+	tokens, past := d.Line.PastBy(ctx, window)
+	if !past {
+		return false, nil
+	}
+	unread, stopped, err := stoppedPastLine(ctx, d.Terminal, d.Mail, SeatMailboxes(DeputySeat, d.Host), window)
+	if err != nil || !stopped {
+		return false, nil
+	}
+	if err := d.Terminal.Close(ctx, window.ID); err != nil {
+		return false, fmt.Errorf("closing the window %s of the Deputy stopped past its context line: %w", name, err)
+	}
+	line := events.SeatPastLine{Seat: DeputySeat, Window: name, Tokens: tokens, HandoffAt: d.Line.HandoffAt, Unread: unread}
+	if err := TellSeatPastLine(ctx, d.Events, d.now, d.Host, line); err != nil && d.Out != nil {
+		fmt.Fprintf(d.Out, "could not write the seat_past_line event: %s\n", oneLine(err.Error()))
+	}
+	if d.Out != nil {
+		fmt.Fprintf(d.Out, "closed the window %s: its Deputy stopped at context %d, past %d, with %d unread mail(s)\n", name, tokens, d.Line.HandoffAt, unread)
 	}
 	return true, nil
 }

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // SessionIDShown is how much of a session's id `mw seat context` prints: enough
@@ -210,6 +212,19 @@ type SeatContextWatch struct {
 	Terminal    ReapTerminal
 	Marks       ContextMarks
 
+	// Mail, Events, Host and Spring make the watch act on a session that was
+	// told to hand off and stopped without it, with mail unread (mw-gq6.975):
+	// nudging it again only asks a seat that has refused to work. Such a
+	// window, its pane idle, is closed, a seat_past_line event is written for
+	// it, and Spring starts a successor for the seat. Without Mail the watch
+	// only tells. Springs names the seats that Spring can bring up again: the
+	// window of any other seat is left open.
+	Mail    Mailbox
+	Events  EventLog
+	Host    string
+	Spring  func(ctx context.Context, seat, reason string) error
+	Springs []string
+
 	// Every is the wait between two readings; zero means DefaultSeatContextEvery.
 	Every time.Duration
 	// Settle is how long after typing the input line is read, to see that
@@ -261,6 +276,9 @@ func (w *SeatContextWatch) Watch(ctx context.Context) error {
 		switch {
 		case !r.Past():
 			// Under the limit: the next crossing is a new one.
+		case has && w.retire(ctx, r):
+			// Stopped past its line with mail unread: its window is closed and
+			// a successor sprung, so there is no mark to keep.
 		case has && r.Tokens < told+SeatContextRetell:
 			next[r.Window.Name] = told
 		default:
@@ -323,6 +341,47 @@ func (w *SeatContextWatch) Readings(ctx context.Context) ([]SeatWindowContext, e
 	return out, nil
 }
 
+// retire closes the window of a session that was told to hand off, is past its
+// line still, sits idle and leaves mail unread, tells the log, and springs a
+// successor for the seat. It reports whether it closed the window. A seat that
+// cannot be sprung, a box that cannot be counted or a pane at work is left as
+// it is.
+func (w *SeatContextWatch) retire(ctx context.Context, r SeatWindowContext) bool {
+	if w.Mail == nil || w.Spring == nil || !containsSeat(w.Springs, r.Seat) {
+		return false
+	}
+	unread, stopped, err := stoppedPastLine(ctx, w.Terminal, w.Mail, SeatMailboxes(r.Seat, w.Host), r.Window)
+	if err != nil {
+		w.say("retire:"+r.Window.Name, err)
+		return false
+	}
+	w.quiet("retire:" + r.Window.Name)
+	if !stopped {
+		return false
+	}
+	if err := w.Terminal.Close(ctx, r.Window.ID); err != nil {
+		w.say("retire:"+r.Window.Name, fmt.Errorf("closing the window of a session stopped past its line: %w", err))
+		return false
+	}
+	past := events.SeatPastLine{Seat: r.Seat, Window: r.Window.Name, Tokens: r.Tokens, HandoffAt: r.HandoffAt, Unread: unread}
+	if err := TellSeatPastLine(ctx, w.Events, w.Now, w.Host, past); err != nil {
+		w.say("retire:"+r.Window.Name, err)
+	}
+	if err := w.Spring(ctx, r.Seat, PastLineReason(past)); err != nil {
+		w.say("retire:"+r.Window.Name, fmt.Errorf("springing a successor for %s: %w", r.Seat, err))
+	}
+	return true
+}
+
+func containsSeat(seats []string, seat string) bool {
+	for _, s := range seats {
+		if s == seat {
+			return true
+		}
+	}
+	return false
+}
+
 // tell types the line into the window when its pane is idle, and reports
 // whether it did. A pane at work is left alone and is not a failure: it is
 // told on a later reading.
@@ -366,7 +425,7 @@ func (w *SeatContextWatch) say(what string, err error) {
 		w.said = map[string]string{}
 	}
 	if w.Err != nil && w.said[what] != err.Error() {
-		fmt.Fprintf(w.Err, "mw events follow: watching the context of %s: %v\n", strings.TrimPrefix(strings.TrimPrefix(what, "read:"), "tell:"), err)
+		fmt.Fprintf(w.Err, "mw events follow: watching the context of %s: %v\n", strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(what, "read:"), "tell:"), "retire:"), err)
 	}
 	w.said[what] = err.Error()
 }
@@ -375,4 +434,102 @@ func (w *SeatContextWatch) quiet(what string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	delete(w.said, what)
+}
+
+// SeatLine is the context size at which one seat's session must hand off,
+// read against the transcript of a window: what lets a use case that is not
+// the context watch know a session is past its line. A zero SeatLine reads no
+// window as past it.
+type SeatLine struct {
+	Transcripts TitledTranscripts
+	Dir         string
+	HandoffAt   int
+}
+
+// PastBy reports the context of the session in window and whether it has
+// reached the line. A transcript that cannot be read is not past it.
+func (l SeatLine) PastBy(ctx context.Context, window ReapWindow) (tokens int, past bool) {
+	if l.Transcripts == nil || l.HandoffAt < 1 || window.Name == "" {
+		return 0, false
+	}
+	live, err := l.Transcripts.TitledContext(ctx, l.Dir, window.Name)
+	if err != nil {
+		return 0, false
+	}
+	return live.Tokens, live.Tokens >= l.HandoffAt
+}
+
+// SeatMailboxes is every mailbox a seat's session reads on host: the
+// Millhand's host-qualified box, its plain box and the host's own, any other
+// seat's own.
+func SeatMailboxes(seat, host string) []string {
+	if seat == MillhandSeat {
+		return []string{SeatIdentity(MillhandSeat, host), MillhandSeat, host}
+	}
+	return []string{seat}
+}
+
+// unreadIn is how many distinct unread mails wait in the boxes. The mail is
+// not read.
+func unreadIn(ctx context.Context, mail Mailbox, boxes []string) (int, error) {
+	seen := map[string]bool{}
+	for _, box := range boxes {
+		inbox, err := mail.Inbox(ctx, box)
+		if err != nil {
+			return 0, fmt.Errorf("counting the unread mail for %s: %w", box, err)
+		}
+		for _, message := range inbox {
+			seen[message.ID] = true
+		}
+	}
+	return len(seen), nil
+}
+
+// stoppedPastLine reports whether the session in window, known to be past its
+// line, has stopped with mail unread: its pane is idle at an empty input line,
+// no background agent runs in it, no `mw next` runs in it, and its boxes hold
+// unread mail, which it counts. A pane or a look that cannot be made is a
+// session that has not stopped, and closing is the one thing that cannot be
+// undone.
+func stoppedPastLine(ctx context.Context, term ReapTerminal, mail Mailbox, boxes []string, window ReapWindow) (unread int, stopped bool, err error) {
+	state, perr := term.PaneState(ctx, window.ID)
+	if perr != nil || state != PaneIdle {
+		return 0, false, nil
+	}
+	if agents, aerr := term.BackgroundAgents(ctx, window.ID); aerr != nil || agents != "" {
+		return 0, false, nil
+	}
+	if _, running, nerr := term.NextRunning(ctx, window.ID); nerr != nil || running {
+		return 0, false, nil
+	}
+	unread, err = unreadIn(ctx, mail, boxes)
+	if err != nil || unread == 0 {
+		return 0, false, err
+	}
+	return unread, true, nil
+}
+
+// TellSeatPastLine writes the seat_past_line event for a window closed over a
+// session stopped past its line. A nil log writes nothing.
+func TellSeatPastLine(ctx context.Context, log EventLog, now func() time.Time, host string, past events.SeatPastLine) error {
+	if log == nil {
+		return nil
+	}
+	if now == nil {
+		now = time.Now
+	}
+	actor := past.Seat
+	if host != "" {
+		actor += "@" + host
+	}
+	if _, err := (EventEmit{Log: log, Now: now, Event: events.Event{Kind: events.KindSeatPastLine, Actor: actor, Detail: past.Detail()}}).Run(ctx); err != nil {
+		return fmt.Errorf("telling the event log %s stopped past its context line: %w", past.Seat, err)
+	}
+	return nil
+}
+
+// PastLineReason is why a successor is sprung for a seat whose session stopped
+// past its line.
+func PastLineReason(past events.SeatPastLine) string {
+	return fmt.Sprintf("the session before you stopped at context %d, past its line of %d, with %d unread mail(s) for the seat: read your mail", past.Tokens, past.HandoffAt, past.Unread)
 }
