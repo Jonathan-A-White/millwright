@@ -748,6 +748,123 @@ func TestAForegroundWholeCheckThatGetsTheLockTooLateForTheGateKeepsItsPlaceAndSa
 	}
 }
 
+// checkInACallAfterACalmWait is checkInACall on a host that is busy at the first
+// reading and calm at the next, the wait between them taking calmFor of real time
+// (mw-gq6.945).
+func (w *aWholeCheckBesideTheHostsGateLock) checkInACallAfterACalmWait(wait, budget, expected, calmFor time.Duration) (application.CheckReport, error) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	return application.Check{
+		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: w.checks,
+		Slot: w.slots, GateLock: w.gate, Records: w.records, PartSlotWait: wait,
+		GateNoticeEvery: 40 * time.Millisecond, KeepPlace: w.keep,
+		CallBudget:   budget,
+		GateExpected: func(_ context.Context, rig string) time.Duration { return expected },
+		Load:         &apptest.FakeHostLoad{Readings: []application.LoadReading{busy(), calm()}},
+		LoadPoll:     time.Second,
+		LoadWait:     func(_ context.Context, d time.Duration) error { time.Sleep(calmFor); return nil },
+		Host:         "laptop", Remote: "origin",
+		Rigs: map[string]string{"millwright": w.rigDir},
+		Out:  writerOf(w.told),
+	}.Run(context.Background(), "mw-x.1")
+}
+
+// The fit is decided when the gate truly starts: a check that won the gate lock
+// with time to spare, and then waited for a calm host so long that the gate no
+// longer ends inside the call, does not start the gate either. It gives the lock
+// back, keeps its place and says to run the same command again (mw-gq6.945).
+// Run again on a calm host, it takes its place up and starts the gate.
+//
+// The times are real: the gate is expected to take 9 s of a 10 s call, the calm
+// wait takes 1.5 s, so the lock is won in time and the gate is late after the
+// wait whatever else the host took time over.
+func TestAForegroundWholeCheckWhoseCalmWaitEatsTheFitKeepsItsPlaceAndSaysToRunItAgain(t *testing.T) {
+	checks := &ranAt{at: make(chan time.Time, 4)}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	w.keep = 10 * time.Minute
+
+	report, err := w.checkInACallAfterACalmWait(time.Minute, 10*time.Second, 9*time.Second, 1500*time.Millisecond)
+	if err != nil {
+		t.Fatalf("expected a check that kept its place to end without an error, got %v\n%s", err, report)
+	}
+	if len(report.Refusals) != 0 {
+		t.Errorf("expected no refusal, got %+v", report.Refusals)
+	}
+	for _, want := range []string{"the gate needs about 9s and only ", " left in this call", "your place 1 of 1 in the queue is kept for 10 minutes", "run the same command again"} {
+		if !strings.Contains(report.Waiting, want) {
+			t.Errorf("expected the line to say %q, got %q", want, report.Waiting)
+		}
+	}
+	if strings.Contains(report.Waiting, "\n") {
+		t.Errorf("expected one line, got %q", report.Waiting)
+	}
+	if !strings.Contains(w.told.String(), report.Waiting) {
+		t.Errorf("expected the line to be printed, got %q", w.told.String())
+	}
+	select {
+	case <-checks.at:
+		t.Fatal("expected the gate not to be started")
+	default:
+	}
+	if got := w.queuedGate(); got != 1 {
+		t.Errorf("expected the check's ticket to outlive the call, the queue holds %d", got)
+	}
+	if holder := w.gate.Holder(); holder != "" {
+		t.Errorf("expected the gate lock to be given back, %q holds it", holder)
+	}
+
+	// A close-out's gate joins behind the kept place; the check run again on a calm
+	// host takes its place up and runs ahead of it.
+	gotAt := make(chan time.Time, 1)
+	go func() {
+		turn, err := w.gate.Take(context.Background(), "a close-out", nil)
+		if err == nil {
+			gotAt <- time.Now()
+			turn.Holding.Release(context.Background())
+		}
+	}()
+	for deadline := time.Now().Add(5 * time.Second); w.queuedGate() < 2 && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+	}
+	select {
+	case <-gotAt:
+		t.Fatal("expected the close-out to wait behind the kept place")
+	case <-time.After(200 * time.Millisecond):
+	}
+	report, err = w.checkInACall(time.Minute, 10*time.Second, 9*time.Second)
+	if err != nil || report.Waiting != "" {
+		t.Fatalf("expected the second call to start the gate, got %v and %q\n%s", err, report.Waiting, report)
+	}
+	ran := <-checks.at
+	select {
+	case got := <-gotAt:
+		if got.Before(ran) {
+			t.Errorf("expected the check to run before the close-out had the lock")
+		}
+	case <-time.After(10 * time.Second):
+		t.Error("expected the close-out to have the lock once the check was done")
+	}
+}
+
+// A calm wait that leaves the gate room inside the call changes nothing: the gate
+// is started, with the figures said (mw-gq6.945).
+func TestAForegroundWholeCheckWhoseCalmWaitLeavesTheFitStartsTheGate(t *testing.T) {
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	w.keep = 10 * time.Minute
+	report, err := w.checkInACallAfterACalmWait(time.Minute, 10*time.Second, 3*time.Second, 1500*time.Millisecond)
+	if err != nil || report.Waiting != "" {
+		t.Fatalf("expected the gate to be started, got %v and %q\n%s", err, report.Waiting, report)
+	}
+	if checks.runs != 1 {
+		t.Errorf("expected the tests to run once, ran %d", checks.runs)
+	}
+	if !strings.Contains(w.told.String(), "expected about 3s, ") {
+		t.Errorf("expected the figures to be said when the gate starts, got %q", w.told.String())
+	}
+}
+
 // A gate that cannot end inside even a whole call is started whatever time is
 // left: refusing it would refuse it for ever (a rig with no figure, or a figure
 // past the call, is run as before).

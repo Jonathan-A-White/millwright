@@ -410,6 +410,13 @@ type Next struct {
 	// (mw-gq6.918).
 	LoadBoundLeft func() time.Duration
 
+	// AfterCalm, when it is set, is asked by a gate that holds the host's gate lock
+	// once its wait for a calm host is over, before the tests are run, with that
+	// holding: an error ends the gate, and the lock is given back. A mw check
+	// uses it to decide, with the time truly left in the Builder's call, whether
+	// the gate fits it (mw-gq6.945).
+	AfterCalm func(held Holding) error
+
 	// GateLock keeps this host to one rig gate at a time, whatever rig: a
 	// close-out takes it before the rig's tests, in the worktree and again on the
 	// merged result, and waits for the load to calm only once it has it

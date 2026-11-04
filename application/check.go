@@ -355,6 +355,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		kept = k.keptTests(ctx, storyID, report.Attempt, tip)
 	}
 	var gateLock GateLock
+	var afterCalm func(held Holding) error
 	switch {
 	case kept != "":
 		// The tests passed at this very commit in an earlier call of this check, which
@@ -366,7 +367,8 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	case !split && k.Slot != nil && k.GateLock != nil:
 		// Slot, then gate lock, taken before the wait for a calm host so that the
 		// load waited on is not another gate's: a close-out does the same.
-		gateLock = checkGateLock{k: k, c: c, attempt: report.Attempt, left: left, fit: k.callFitOf(ctx, path.Rig, began)}
+		held := checkGateLock{k: k, c: c, attempt: report.Attempt, left: left, fit: k.callFitOf(ctx, path.Rig, began)}
+		gateLock, afterCalm = held, held.afterCalm
 	case !split && k.Slot != nil:
 		checks = slottedChecks{
 			checks: tests,
@@ -411,6 +413,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		Landing:       k.Landing,
 		Checks:        checks,
 		GateLock:      gateLock,
+		AfterCalm:     afterCalm,
 		SpecChecks:    specs,
 		NamedChecks:   k.NamedChecks,
 		GateParts:     k.Parts,

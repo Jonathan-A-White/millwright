@@ -165,7 +165,7 @@ func (g *Gate) Take(ctx context.Context, holder string, held func(by string)) (a
 		return application.GateTurn{}, fmt.Errorf("writing whose gate holds this host's gate lock: %w", err)
 	}
 	return application.GateTurn{
-		Holding: &gateHolding{file: file, holder: holder},
+		Holding: &gateHolding{file: file, holder: holder, tickets: tickets, ticket: ticket.Name(), key: askedKey(asked), now: g.now},
 		Waited:  g.now().Sub(started),
 		For:     waitedFor,
 	}, nil
@@ -207,6 +207,33 @@ type gateHolding struct {
 	file   *os.File
 	holder string
 	gone   bool
+
+	// What puts the waiter's place back in its queue (KeepPlace): the queue, the
+	// key the waiter asked to be known by, and the name of the ticket it won with.
+	tickets *ticketq.Queue
+	ticket  string
+	key     string
+	now     func() time.Time
+}
+
+func askedKey(asked *application.QueuePlace) string {
+	if asked == nil {
+		return ""
+	}
+	return asked.Key
+}
+
+// KeepPlace puts the waiter's place back in the queue, kept for the time given
+// (application.PlaceKeeper): the lock was won, its ticket dropped, and the
+// waiter finds it cannot use the turn after all (mw-gq6.945). It says where the
+// place stands; ok is false when the waiter did not ask for a place to be kept
+// or the queue could not keep it.
+func (h *gateHolding) KeepPlace(kept time.Duration) (place, of int, ok bool) {
+	if h.key == "" || h.tickets == nil {
+		return 0, 0, false
+	}
+	place, of, err := h.tickets.Leave(h.ticket, h.key, h.holder, h.now().Add(kept))
+	return place, of, err == nil
 }
 
 // Release implements application.Holding. Releasing twice is harmless.

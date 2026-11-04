@@ -53,10 +53,13 @@ func (q *Queue) Join(holder string, started time.Time) (*Ticket, error) {
 }
 
 func (q *Queue) join(holder, key string, started time.Time) (*Ticket, error) {
+	return q.joinNamed(holder, key, fmt.Sprintf("%020d-%010d-%d", started.UnixNano(), seq.Add(1), os.Getpid()))
+}
+
+func (q *Queue) joinNamed(holder, key, name string) (*Ticket, error) {
 	if err := os.MkdirAll(q.Dir, 0o755); err != nil {
 		return nil, fmt.Errorf("making the ticket queue %s: %w", q.Dir, err)
 	}
-	name := fmt.Sprintf("%020d-%010d-%d", started.UnixNano(), seq.Add(1), os.Getpid())
 	building, err := os.CreateTemp(q.Dir, ".ticket-")
 	if err != nil {
 		return nil, fmt.Errorf("making a ticket in the queue %s: %w", q.Dir, err)
@@ -220,6 +223,21 @@ func (t *Ticket) Keep(until time.Time) {
 	t.kept = true
 	syscall.Flock(int(t.file.Fd()), syscall.LOCK_UN)
 	t.file.Close()
+}
+
+// Leave puts a ticket back in the queue after its owner, for a waiter that won
+// its turn, had its ticket (called name) dropped, and finds it cannot use the
+// turn: a ticket of the same name, so the same place, under key, kept until
+// until, for the waiter run again to take up (JoinAs). It says where the place
+// stands among the live tickets.
+func (q *Queue) Leave(name, key, holder string, until time.Time) (place, of int, err error) {
+	ticket, err := q.joinNamed(holder, key, name)
+	if err != nil {
+		return 0, 0, err
+	}
+	place, of = q.Place(ticket.Name())
+	ticket.Keep(until)
+	return place, of, nil
 }
 
 // rewrite replaces what the file says.

@@ -370,3 +370,41 @@ func TestAWaitThatWinsTheLockButIsLateGivesItBackAndKeepsThePlaceForTheNextCall(
 		t.Errorf("expected no ticket once the lock was taken, the queue holds %d", len(entries))
 	}
 }
+
+// A holder that asked for its place to be kept can put it back after it won the
+// lock, when it finds it cannot use the turn (mw-gq6.945): the lock is given back
+// and the place stands for the next call; a holder that asked for nothing keeps
+// none.
+func TestAHoldingThatWasAskedToKeepAPlaceKeepsItAfterTheLockWasWon(t *testing.T) {
+	gate := hostlock.NewGate(t.TempDir(), hostlock.WithGatePoll(2*time.Millisecond))
+	ask := &application.QueuePlace{Key: "check mw-x", For: 10 * time.Minute}
+	turn, err := gate.Take(application.WithQueuePlace(context.Background(), ask), "laptop checking mw-x", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keeper, ok := turn.Holding.(application.PlaceKeeper)
+	if !ok {
+		t.Fatalf("expected the holding to keep a place, it is %T", turn.Holding)
+	}
+	place, of, kept := keeper.KeepPlace(10 * time.Minute)
+	if !kept || place != 1 || of != 1 {
+		t.Errorf("expected place 1 of 1 kept, got %v %d %d", kept, place, of)
+	}
+	turn.Holding.Release(context.Background())
+	if holder := gate.Holder(); holder != "" {
+		t.Errorf("expected the lock to be given back, %q holds it", holder)
+	}
+	entries, _ := os.ReadDir(filepath.Join(gate.Dir, hostlock.GateQueueDir))
+	if len(entries) != 1 {
+		t.Fatalf("expected the kept ticket to stay, the queue holds %d", len(entries))
+	}
+
+	plain, err := hostlock.NewGate(t.TempDir(), hostlock.WithGatePoll(2*time.Millisecond)).Take(context.Background(), "a close-out", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, kept := plain.Holding.(application.PlaceKeeper).KeepPlace(time.Minute); kept {
+		t.Error("expected a holding that asked for no place to keep none")
+	}
+	plain.Holding.Release(context.Background())
+}

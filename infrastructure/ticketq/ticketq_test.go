@@ -185,3 +185,39 @@ func TestAKeptTicketPastItsKeepTimeIsNotTakenUpAgain(t *testing.T) {
 		t.Error("expected a lapsed place not to be taken up again")
 	}
 }
+
+// A waiter that won its turn and dropped its ticket can put the place back under
+// the ticket's own name, so that it stands where it stood and the same key takes
+// it up again (mw-gq6.945).
+func TestALeftTicketStandsInThePlaceOfTheOneItReplacesAndIsTakenUpByItsKey(t *testing.T) {
+	q := aQueue(t)
+	now := time.Now()
+	mine, err := q.JoinAs("check x", "mw-a", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	behind, err := q.Join("mw-b", now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := mine.Name()
+	mine.Drop()
+
+	place, of, err := q.Leave(name, "check x", "mw-a", now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if place != 1 || of != 2 {
+		t.Errorf("expected place 1 of 2, got %d of %d", place, of)
+	}
+	if head, by := q.Head(behind.Name()); head || by != "mw-a" {
+		t.Errorf("expected the waiter behind to stand behind mw-a, got %v and %q", head, by)
+	}
+	again, err := q.JoinAs("check x", "mw-a", now.Add(10*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Name() != name {
+		t.Errorf("expected the key to take the left ticket %s up, got %s", name, again.Name())
+	}
+}

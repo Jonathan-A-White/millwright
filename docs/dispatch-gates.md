@@ -232,7 +232,13 @@ call, which is cut off at 590 seconds with no words (mw-gq6.939):
   10 minutes: run the same command again to start it* (`Check.CallBudget`,
   `QueuePlace.Late`); run at once it takes the place up and starts the gate, saying
   *gate expected about G, R left in this call*. A rig with no figure, or a gate longer
-  than a whole call, is started as it always was.
+  than a whole call, is started as it always was. The same test is made again once the
+  wait for a calm host that follows the lock is over (mw-gq6.945), with the time left
+  then, since a calm wait of several minutes can eat the fit the lock's win had: a
+  gate that no longer fits is not started, the lock is given back, the place is put
+  back in the queue (`PlaceKeeper`, `Next.AfterCalm`) and the same line is said. The
+  changed specs' run after the gate and the rerun after a failure on a far-over host
+  are not under this test: neither has a figure of its own to compare.
 - **`--wait` or `--background`**: the deadline is `mw check --wait` (40 minutes by
   default; mw-gq6.938: nine minutes handed a Builder back three times in 45 minutes
   behind two long gates). A wait that outlasts it ends in one line saying the wait

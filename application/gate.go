@@ -225,7 +225,7 @@ func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, wh
 	if lock != nil {
 		defer n.giveTheGateLockBack(report, lock)
 	}
-	return n.gateOnACalmHost(ctx, c, report, dir, what, span)
+	return n.gateOnACalmHostHolding(ctx, c, report, dir, what, span, lock)
 }
 
 // gateWithSpecs is gate for a landing that has no close-out of its own to run
@@ -524,9 +524,21 @@ func gateWaited(d time.Duration) string {
 // calm host counts at once. A command that would not start is not a load fault
 // and is never run again.
 func (n Next) gateOnACalmHost(ctx context.Context, c *closeOut, report *NextReport, dir, what string, span RelatedSpan) gated {
+	return n.gateOnACalmHostHolding(ctx, c, report, dir, what, span, nil)
+}
+
+// gateOnACalmHostHolding is gateOnACalmHost for a gate that holds the host's gate
+// lock, lock, and may be told by Next.AfterCalm, once the wait for the host is
+// over, that it is too late to start (mw-gq6.945).
+func (n Next) gateOnACalmHostHolding(ctx context.Context, c *closeOut, report *NextReport, dir, what string, span RelatedSpan, lock Holding) gated {
 	before, gaveUp, handedBack := n.calmed(ctx, report, c, what, true, false)
 	if handedBack != nil {
 		return gated{Err: handedBack}
+	}
+	if lock != nil && n.AfterCalm != nil {
+		if err := n.AfterCalm(lock); err != nil {
+			return gated{Err: err}
+		}
 	}
 	n.beginGate(ctx, c, before)
 	checked, err := n.timedChecks(ctx, c, report, dir, span)

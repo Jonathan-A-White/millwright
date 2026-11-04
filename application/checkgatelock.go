@@ -172,10 +172,35 @@ func (f *callFit) late() bool { return f.expected < f.budget && f.expected > f.l
 // lock too late for the gate to end inside its call and kept its place instead.
 func (k Check) tooLateLine(f *callFit, ask *QueuePlace) string {
 	_, place, of := ask.Result()
+	return k.tooLateAt(f, place, of)
+}
+
+func (k Check) tooLateAt(f *callFit, place, of int) string {
 	line := fmt.Sprintf("%s's gate lock is free, but the gate needs about %s and only %s is left in this call; your place %d of %d in the queue is kept for %s: run the same command again to start it",
 		k.Host, gateWaited(f.expected), gateWaited(f.left()), place, of, keptFor(k.KeepPlace))
 	k.waiting.set(line)
 	return line
+}
+
+// afterCalm is the fit asked again once the wait for a calm host is over, with the
+// gate lock held: what is left of the call then is what the gate truly has, and a
+// calm wait of minutes can have eaten it (mw-gq6.945). A gate that no longer fits
+// is not started: the place is put back in the queue and the lock, which the
+// caller gives back, ends the gate with the same one line a late win of the lock
+// does.
+func (g checkGateLock) afterCalm(held Holding) error {
+	if g.fit == nil || !g.fit.late() {
+		return nil
+	}
+	if keeper, ok := held.(PlaceKeeper); ok && g.k.KeepPlace > 0 {
+		if place, of, kept := keeper.KeepPlace(g.k.KeepPlace); kept {
+			return GateLockHandBack{Why: g.k.tooLateAt(g.fit, place, of)}
+		}
+	}
+	line := fmt.Sprintf("the gate needs about %s and only %s is left in this call, after waiting for %s to calm; the gate lock is given back and nothing was run: run the same command again",
+		gateWaited(g.fit.expected), gateWaited(g.fit.left()), g.k.Host)
+	g.k.waiting.set(line)
+	return GateLockHandBack{Why: line}
 }
 
 // tooLatePartLine is the same for a part that won the rig's merge slot too late
@@ -363,6 +388,22 @@ func (b bothHoldings) Release(ctx context.Context) error {
 		errs = append(errs, b.slot.Release(ctx))
 	}
 	return errors.Join(errs...)
+}
+
+// PlaceKeeper is what a Holding of a queue may also do: put its holder's place
+// in the queue back, kept for the time given, when the holder has won its turn
+// and finds it cannot use it (mw-gq6.945). ok is false when no place was kept.
+type PlaceKeeper interface {
+	KeepPlace(kept time.Duration) (place, of int, ok bool)
+}
+
+// KeepPlace implements PlaceKeeper by the gate lock, the queue a check's place is
+// kept in.
+func (b bothHoldings) KeepPlace(kept time.Duration) (place, of int, ok bool) {
+	if keeper, is := b.lock.(PlaceKeeper); is {
+		return keeper.KeepPlace(kept)
+	}
+	return 0, 0, false
 }
 
 func (b bothHoldings) HeldBy() string {
