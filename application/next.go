@@ -698,7 +698,11 @@ type NextReport struct {
 // closeOut is the one story being closed out, as the steps of a close-out pass
 // it between themselves.
 type closeOut struct {
-	id       string
+	id string
+	// place is where a batch's close-out keeps its files, runs/batch/<rig>/<n>/;
+	// nil for a story, whose files go in runs/<id>/. A batch's id is its label,
+	// 'batch 3 of lampas', which is no name for a directory (mw-gq6.969).
+	place    *batchPlace
 	detail   StoryDetail
 	path     domain.Path
 	rigDir   string
@@ -3763,13 +3767,13 @@ func (n Next) commit(ctx context.Context, c *closeOut, report *NextReport) {
 	}
 
 	if c.gateLog != "" {
-		if record := runFilePath(c.id, c.gateLog); record != "" {
+		if record := c.recordPath(c.gateLog); record != "" {
 			paths = append(paths, record)
 		}
 	}
 
 	if c.mainLog != "" {
-		if record := runFilePath(c.id, c.mainLog); record != "" {
+		if record := c.recordPath(c.mainLog); record != "" {
 			paths = append(paths, record)
 		}
 	}

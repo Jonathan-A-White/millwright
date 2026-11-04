@@ -239,11 +239,15 @@ func (n Next) keepGateLog(ctx context.Context, c *closeOut, report *NextReport, 
 		return ""
 	}
 	name := GateLogFileNameForAttempt(c.attempt())
-	if _, err := n.Vault.PutRunFile(ctx, c.id, name, CapGateLog(checked.Output)); err != nil {
+	kept, err := n.putRunFile(ctx, c, name, CapGateLog(checked.Output))
+	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the whole output of the tests could not be kept in the run of %s: %v", c.id, err))
 		return ""
 	}
 	c.gateLog = name
+	if c.place != nil {
+		return "The whole output of the tests is kept at " + kept + "."
+	}
 	return "The whole output of the tests is kept at " + n.Vault.RunFile(c.id, name) + "."
 }
 
