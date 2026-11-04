@@ -62,6 +62,7 @@ left out of an event that ends no emergency, so an event without it reads as it 
 | `control` | none | the bead for `cancel` and `priority`, else empty | the word and what it takes: `cancel`, `pause-host <host>`, `resume-host <host>`, `cap <host> <n>`, `priority <n>` |
 | `verify_folded` | none | the landing | `folded`: the landing's verify need stayed in Needs you for `[postern] verify_days` (default 4) after it closed and is now published folded; one event per bead, the first view that folds it, so the Mayor verifies it from the Governor's use |
 | `seat_limited` | none | empty | `<seat> in <window> until <reset time>`, then `: ` and the harness's own words when it said any: a seat's pane found stopped at the usage limit; one event for each seat and reset time, the first look that finds it, so `mw events wait` and the digest see the stop |
+| `seat_past_line` | none | empty | `<seat> in <window>: context <tokens> past <line>, <n> unread`: a seat's session was told to hand off at its context line, stopped, and left mail unread; its window was closed and the seat sprung afresh to read it (or, for `mw deputy`, started afresh). One event for each window, so `mw events wait` and the digest see it |
 | `cloud` | none | empty | a cloud box begun (`making cloud1: ...`) and made (`up cloud1: made in 6m`), destroyed (`down cloud1: idle 30m`), one that did not come up (`failed cloud1: ...`), or the month's cap reached (`cap reached: ...`) |
 
 A `bead_changed` event whose from and to are the same state is a change that

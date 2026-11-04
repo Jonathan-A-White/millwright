@@ -261,6 +261,13 @@ type SeatReap struct {
 	Mail    Mailbox
 	Mailbox string
 
+	// Line, when set, is the context size at which the seat's session must
+	// hand off. A session found past it with mail unread is not nudged: it
+	// was told to stop, and a nudge only asks a seat that has refused to work.
+	// The window is left to the follower's context watch, which closes it and
+	// springs a successor (mw-gq6.975).
+	Line SeatLine
+
 	// Settle is how long after the mail nudge is typed the input line is read,
 	// to see that Enter took it (TypeConfirmed). Zero reads it at once.
 	Settle time.Duration
@@ -350,6 +357,7 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 	var waitingSince time.Time
 	waitedOut := false
 	toldLimit := false
+	toldPast := false
 	nextWait := s.NextWait
 	if nextWait <= 0 {
 		nextWait = DefaultReapNextWait
@@ -460,6 +468,15 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 			unknown = false
 			if len(waiting) > 0 {
 				idle = 0
+				if tokens, past := s.Line.PastBy(ctx, window); past {
+					if !toldPast {
+						toldPast = true
+						if _, err := s.say(ctx, fmt.Sprintf("not nudging: the session is at context %d, past its line of %d, with %d unread mail(s) for %s; the context watch closes this window and springs a successor", tokens, s.Line.HandoffAt, len(waiting), s.Mailbox)); err != nil {
+							return ReapReport{}, err
+						}
+					}
+					continue
+				}
 				text := s.nudge(waiting)
 				outcome, err := TypeConfirmed(ctx, s.Terminal, ReapWindow{ID: s.Window, Name: s.Window}, text, s.Settle)
 				if err != nil {

@@ -76,6 +76,7 @@ func bringUpDeputy(ctx context.Context, reason string, out io.Writer) (applicati
 		Armer:    reaper.New(exe),
 		Mail:     mwGateway(dir, host),
 		Events:   homeEventLog(),
+		Line:     seatLineOf(application.DeputySeat),
 		Settle:   application.TypeSettle,
 
 		Host:   host,
