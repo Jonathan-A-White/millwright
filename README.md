@@ -3131,7 +3131,8 @@ A grind may say `"forward": "mayor"` instead of naming a model, for a grist that
 for a person to read, such as an app's feedback. The mill then runs no session
 and burns no Fuel: it opens the grist's text and pictures as for any grind,
 keeps the pictures under `forwarded/<txid>/` of `grist_state_dir`
-(`picture-1.jpg`, `picture-2.png`, ...), sends one mail to the mayor titled
+(`picture-1.jpg`, `picture-2.png`, ...; the directory is deleted 30 days after the
+forward by `mw grist tidy`), sends one mail to the mayor titled
 `Feedback from <app>: ` and the first 80 characters of the text, whose body is the
 full text, the sender's key and fingerprint, the grist's id and the pictures'
 full paths, and answers the app `{"status":"sent"}` so it can say Sent. The text is
@@ -3286,8 +3287,9 @@ session's directory or its prompt. The answer carries the same `reading_result` 
 answers without them. A grind file may set `maxTurns` (default: the
 harness's own). Every grind that ran is kept under `grist_state_dir`'s
 `runs/<txid>/`: `input.json` (the request as the session was given it),
-`attachment-N.<ext>`, `scorers.json`, `answer.json` and `timing.json`, 0600, never
-deleted by `mw`; `mw grist runs [--since 24h|2026-10-07]` lists them (txid, kind, model,
+`attachment-N.<ext>`, `scorers.json`, `answer.json` and `timing.json`, 0600; the
+attachments (photos and recordings) are deleted 30 days after the run, the rest never
+(`mw grist tidy`, docs/grist-tidy.md); `mw grist runs [--since 24h|2026-10-07]` lists them (txid, kind, model,
 seconds, answered|refused|failed). `timing.json` also keeps `sent` (the grist
 record's own time, so `received` minus `sent` is the queue wait) and `scorers` (each
 engine's seconds), each left out when not known; `mw grist stats --kind tutor-turn

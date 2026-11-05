@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -34,15 +35,19 @@ type runSender struct {
 }
 
 // Runs keeps every grind's raw record under Dir/runs/<txid>/ (application's
-// GristRunStore). Nothing it writes is ever deleted by mw. It holds the
+// GristRunStore). mw grist tidy deletes a run's photos and recordings once
+// GristKeepAge has passed; the rest of a run is never deleted. It holds the
 // grist's photos and recordings as they were opened, so it is private: 0700
 // directories, 0600 files.
 type Runs struct {
 	Dir string
 }
 
-// Runs satisfies the port.
-var _ application.GristRunStore = (*Runs)(nil)
+// Runs satisfies the ports.
+var (
+	_ application.GristRunStore = (*Runs)(nil)
+	_ application.GristRunMedia = (*Runs)(nil)
+)
 
 // NewRuns is the record of runs kept under the state directory dir.
 func NewRuns(dir string) *Runs { return &Runs{Dir: dir} }
@@ -188,6 +193,91 @@ func (r *Runs) Forwarded(_ context.Context, txid string) (application.GristForwa
 		return application.GristForwarded{}, false, nil
 	}
 	return application.GristForwarded{Txid: txid, App: timing.App, Sender: sender.Key}, true, nil
+}
+
+// attachmentPrefix starts the name of every attachment file of a run.
+const attachmentPrefix = "attachment-"
+
+// RunMedia implements application.GristRunMedia: the runs that still hold an
+// attachment-N.<ext>, oldest first, by the time the mill received the grist. A
+// directory with no timing.json is not a run and is skipped; a timing.json
+// that does not read is an error.
+func (r *Runs) RunMedia(_ context.Context) ([]application.GristMedia, error) {
+	root := filepath.Join(r.Dir, RunsDir)
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the mill's runs: %w", err)
+	}
+	var media []application.GristMedia
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(root, e.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", filepath.Join(root, e.Name()), err)
+		}
+		held := application.GristMedia{Name: e.Name()}
+		for _, f := range files {
+			if f.IsDir() || !strings.HasPrefix(f.Name(), attachmentPrefix) {
+				continue
+			}
+			info, err := f.Info()
+			if err != nil {
+				return nil, fmt.Errorf("reading %s: %w", filepath.Join(root, e.Name(), f.Name()), err)
+			}
+			held.Files++
+			held.Bytes += info.Size()
+		}
+		if held.Files == 0 {
+			continue
+		}
+		var timing application.GristRunTiming
+		if err := readJSON(filepath.Join(root, e.Name(), RunTimingFile), &timing); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		held.Txid, held.Received = timing.Txid, timing.Received
+		if held.Txid == "" {
+			held.Txid = e.Name()
+		}
+		media = append(media, held)
+	}
+	sort.SliceStable(media, func(i, j int) bool { return media[i].Received.Before(media[j].Received) })
+	return media, nil
+}
+
+// DropMedia implements application.GristRunMedia: it removes the run's
+// attachment-N.<ext> files and nothing else. A name that is not one directory
+// of runs/ is refused.
+func (r *Runs) DropMedia(_ context.Context, name string) error {
+	if !singleSegment(name) {
+		return fmt.Errorf("%q is not the name of a run", name)
+	}
+	dir := filepath.Join(r.Dir, RunsDir, name)
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", dir, err)
+	}
+	var faults []error
+	for _, f := range files {
+		if f.IsDir() || !strings.HasPrefix(f.Name(), attachmentPrefix) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, f.Name())); err != nil {
+			faults = append(faults, err)
+		}
+	}
+	return errors.Join(faults...)
+}
+
+// singleSegment reports whether name is one path segment that climbs nowhere.
+func singleSegment(name string) bool {
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\`)
 }
 
 func readJSON(path string, into any) error {

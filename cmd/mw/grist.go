@@ -18,6 +18,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/scorer"
+	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
@@ -42,6 +43,7 @@ func newGristCmd() *cobra.Command {
 	root.AddCommand(newGristTimingCmd())
 	root.AddCommand(newGristSmokeCmd())
 	root.AddCommand(newGristTalksCmd())
+	root.AddCommand(newGristTidyCmd())
 	return root
 }
 
@@ -562,7 +564,7 @@ func newGristRunsCmd() *cobra.Command {
 			"the model, the seconds it took from the grist taken up to the answer, and whether it was\n" +
 			"answered, refused or failed. Each is a directory runs/<txid>/ of grist_state_dir holding the\n" +
 			"request the session was given, the attachments, what the scorers said, the answer and the\n" +
-			"timing; mw never deletes them. --since is how far back to look: a duration (24h), a date\n" +
+			"timing; mw grist tidy deletes the attachments after 30 days. --since is how far back to look: a duration (24h), a date\n" +
 			"(2026-10-07) or a time (2026-10-07T09:00:00Z).",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -579,6 +581,49 @@ func newGristRunsCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&since, "since", "", "list only the runs since this: a duration such as 24h, a date, or an RFC 3339 time (default: all)")
+	return cmd
+}
+
+// newGristTidyCmd builds `mw grist tidy`: delete the photos and recordings the
+// mill kept more than 30 days ago, and the forwarded pictures of that age.
+func newGristTidyCmd() *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "tidy",
+		Short: "Delete the mill's photos and recordings kept 30 days or more, and forwarded pictures of that age",
+		Long: "tidy does two things and nothing else (docs/grist-tidy.md):\n" +
+			"  1. deletes the attachments (photos and recordings) of a run in runs/<txid>/ received 30 days\n" +
+			"     ago or more; its small record (input.json, scorers.json, answer.json, timing.json and\n" +
+			"     sender.json: the request, the answer, the timings, the ids) stays;\n" +
+			"  2. deletes the whole directory forwarded/<txid>/ of a grist forwarded 30 days ago or more.\n\n" +
+			"Nothing younger than 30 days is touched. It prints what it deleted and how big it was. The\n" +
+			"Millhand's tick runs the same sweep on the host that runs the mill. --dry-run lists what it\n" +
+			"would delete and deletes nothing.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			stateDir, err := config.GristStateDir()
+			if err != nil {
+				return err
+			}
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("there is no home directory to keep the tick log in: %w", err)
+			}
+			tidy := application.GristTidy{
+				Runs:     grist.NewRuns(stateDir),
+				Forwards: grist.NewForwards(stateDir),
+				DryRun:   dryRun,
+				Out:      cmd.OutOrStdout(),
+			}
+			// A rehearsal is not a run: it leaves nothing in the log.
+			if !dryRun {
+				tidy.Log = ticklog.New(filepath.Join(home, MillhandTickStateDir))
+			}
+			_, err = tidy.Run(cmd.Context())
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "list what would be deleted, and delete nothing")
 	return cmd
 }
 

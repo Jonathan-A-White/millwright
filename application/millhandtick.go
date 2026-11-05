@@ -166,6 +166,12 @@ type MillhandTick struct {
 	// its own in the log.
 	Tidy Tidy
 
+	// GristTidy deletes what the mill kept past GristKeepAge (mw-gq6.692); it
+	// runs after Tidy on the host that runs the mill. Its Log, DryRun and Now
+	// are the tick's own and it prints nothing of its own; a tick with neither
+	// Runs nor Forwards wired does not sweep.
+	GristTidy GristTidy
+
 	// SelfUpdate keeps this host's mw level with the factory rig's main: it
 	// is looked at first on every tick, and a tick with none wired does not.
 	SelfUpdate SelfUpdate
@@ -382,6 +388,7 @@ func (t MillhandTick) lookAround(ctx context.Context) (line string, woke bool, e
 		notes = append(notes, sweepNotes...)
 	}
 	notes = append(notes, t.tidy(ctx)...)
+	notes = append(notes, t.gristTidy(ctx)...)
 
 	var doctor []string
 	pending := 0
@@ -459,6 +466,26 @@ func (t MillhandTick) tidy(ctx context.Context) []string {
 	}
 	if err != nil {
 		notes = append(notes, "tidy failed: "+oneLine(err.Error()))
+	}
+	return notes
+}
+
+// gristTidy runs mw grist tidy once, after Tidy, and says in words for the line
+// what it did, when it did anything or could not. Like Tidy it is housekeeping:
+// a fault of its own is a note.
+func (t MillhandTick) gristTidy(ctx context.Context) []string {
+	if t.GristTidy.Runs == nil && t.GristTidy.Forwards == nil {
+		return nil
+	}
+	tidy := t.GristTidy
+	tidy.Log, tidy.DryRun, tidy.Now, tidy.Out = t.Log, t.DryRun, t.Now, nil
+	report, err := tidy.Run(ctx)
+	var notes []string
+	if len(report.Acts) > 0 {
+		notes = append(notes, report.Summary())
+	}
+	if err != nil {
+		notes = append(notes, "grist tidy failed: "+oneLine(err.Error()))
 	}
 	return notes
 }
