@@ -38,7 +38,9 @@ type Ticket struct {
 	kept bool
 }
 
-// Name is the ticket's file name, which orders the queue.
+// Name is the ticket's file name, which orders the queue. Its first field is
+// the time the wait began as the queue saw it: the owner's clock, raised past the
+// newest ticket already queued (stamp), so that names order by join.
 func (t *Ticket) Name() string { return t.name }
 
 // seq tells apart the tickets one process makes in the same instant.
@@ -53,7 +55,40 @@ func (q *Queue) Join(holder string, started time.Time) (*Ticket, error) {
 }
 
 func (q *Queue) join(holder, key string, started time.Time) (*Ticket, error) {
-	return q.joinNamed(holder, key, fmt.Sprintf("%020d-%010d-%d", started.UnixNano(), seq.Add(1), os.Getpid()))
+	return q.joinNamed(holder, key, fmt.Sprintf("%020d-%010d-%d", q.stamp(started), seq.Add(1), os.Getpid()))
+}
+
+// stamp is the number a new ticket is named by: the time the wait began, in
+// nanoseconds, but never at or below the newest ticket already in the queue, so
+// that a waiter joining later is never ahead of one that joined earlier, whatever
+// the clock that named them says (mw-gq6.976). A wall clock that steps back, or
+// another host's clock that runs behind, would otherwise sort a later join first
+// and let it pass the queue. The raise is a nanosecond past the newest name, so
+// the age of a ticket against the cap is out by no more than the step. A name
+// further ahead than the cap is not a clock but a stale ticket's, and is not
+// followed; it would age the new ticket out of the cap's reach.
+func (q *Queue) stamp(started time.Time) int64 {
+	stamp := started.UnixNano()
+	entries, err := os.ReadDir(q.Dir)
+	if err != nil {
+		return stamp
+	}
+	limit := q.Now().Add(q.Cap)
+	var newest int64
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		when, ok := began(entry.Name())
+		if !ok || !when.Before(limit) {
+			continue
+		}
+		newest = max(newest, when.UnixNano())
+	}
+	if newest >= stamp {
+		stamp = newest + 1
+	}
+	return stamp
 }
 
 func (q *Queue) joinNamed(holder, key, name string) (*Ticket, error) {

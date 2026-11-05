@@ -37,12 +37,10 @@ func impatient() *rig.Slots {
 }
 
 // steady is a slots whose clock is the process's monotonic one (a start time
-// plus the time since), so that tickets made by different steady slots in the
-// process are queued in the order they were made, whatever the wall clock does
-// between them. A ticket is named for the wall-clock time its wait began, and a
-// host whose clock steps back (this laptop's does, under load: the journal says
-// "Time jumped backwards") would otherwise let a ticket made later sort ahead of
-// one made earlier and a waiter pass the queue (mw-gq6.974).
+// plus the time since), so that the tests judge the queue by a clock that does not
+// step. It is no longer what keeps the tickets in order: a ticket is named past the
+// newest already queued, so a clock stepping back cannot put a later join ahead
+// (mw-gq6.976; the plain wall clock passes these tests too).
 func steady(opts ...rig.SlotOption) *rig.Slots {
 	now := func() time.Time { return steadyStart.Add(time.Since(steadyBegan)) }
 	sleep := func(ctx context.Context, d time.Duration) error {
@@ -959,6 +957,71 @@ func TestALandingThatResumesWaitsForTheRunningCheckAndKeepsNewOnesOut(t *testing
 	} else {
 		free.Release(ctx)
 	}
+}
+
+// behind is a slots whose clock reads a fixed time before the process's steady
+// one: a host whose wall clock stepped back after the first waiter joined.
+func behind(by time.Duration, opts ...rig.SlotOption) *rig.Slots {
+	now := func() time.Time { return steadyStart.Add(time.Since(steadyBegan) - by) }
+	sleep := func(ctx context.Context, d time.Duration) error {
+		timer := time.NewTimer(d)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return nil
+		}
+	}
+	return rig.NewSlots(append([]rig.SlotOption{rig.WithSlotClock(now, sleep)}, opts...)...)
+}
+
+// A wall clock that steps back between two waiters' joins must not put the later
+// one ahead of the earlier (mw-gq6.976). The late check's clock reads a second
+// behind the batch's, as it would after a step back, and it must still wait.
+func TestACheckJoiningAfterTheClockSteppedBackStillWaitsBehindTheBatchThatResumed(t *testing.T) {
+	ctx, dir := context.Background(), aRigDir(t)
+	landing := yielding(t, dir)
+	defer landing.Release(ctx)
+	if err := landing.Yield(ctx); err != nil {
+		t.Fatalf("yielding: %v", err)
+	}
+	check, err := impatient().TakeShared(ctx, dir, "builder@laptop checking mw-a.1")
+	if err != nil {
+		t.Fatalf("taking the slot beside the batch: %v", err)
+	}
+	defer check.Release(ctx)
+
+	resumed := make(chan error, 1)
+	go func() { resumed <- landing.Resume(ctx) }()
+	waitForQueued(t, dir, 1)
+
+	lctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	waiting := make(chan string, 1)
+	taken := make(chan error, 1)
+	go func() {
+		slots := behind(time.Second, rig.WithSlotPoll(10*time.Millisecond), rig.WithSlotNotice(func(said string) {
+			select {
+			case waiting <- said:
+			default:
+			}
+		}))
+		held, err := slots.TakeShared(lctx, dir, "builder@laptop checking mw-b.2")
+		if err == nil {
+			held.Release(ctx)
+		}
+		taken <- err
+	}()
+	select {
+	case <-waiting:
+	case err := <-taken:
+		t.Fatalf("expected a check arriving as the batch resumes to wait for it, got %v", err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("expected the late check to say it waits for the slot")
+	}
+	cancel()
+	<-taken
 }
 
 func TestASlotWaitSaysHowLongItHasWaitedWhileItGoesOn(t *testing.T) {
