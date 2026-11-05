@@ -1142,56 +1142,184 @@ func (c *StaleLandingsCheck) WayBack() string {
 // when its lease ran out (mw-gq6.877). Every host's dispatch gives such a claim
 // back on its next tick unless its run state is a refusal or another that
 // dispatch keeps (mw-gq6.941), so one still here says dispatch is not running,
-// could not reach the beads, or is a kept claim; the check changes nothing, and says the one
-// command that frees the story at once.
+// could not reach the beads, or is a kept claim.
+//
+// A claim this host holds itself, with no session of its name running here and
+// its lease run out, is faulty and Cure gives it back at once, saying so on the
+// story (mw-gq6.998): it was made outside a dispatch tick and never launched, so
+// no later tick of this host is sure to look at it soon. A claim another host
+// holds is only named, with the one command that frees the story at once. A
+// claim whose run state says the work is done or refused (run=landed,
+// run=blocked), or whose session could not be asked about, is left as it is.
 type NoSessionClaimsCheck struct {
 	// Claims lists the claims whose lease had run out by the time given: the
 	// tracker's StaleClaims.
 	Claims func(ctx context.Context, now time.Time) ([]StoryDetail, error)
 	// Now is the clock; nil reads time.Now.
 	Now func() time.Time
+	// Host is this host; Sessions asks whether a session of a story's name runs
+	// here, and Tracker is what a claim is read and given back with. Without
+	// them nothing is ever cured and every stuck claim is only named.
+	Host     string
+	Sessions SessionStatuser
+	Tracker  StuckClaimTracker
+
+	given []string
+}
+
+// StuckClaimTracker is the part of the tracker NoSessionClaimsCheck gives a
+// claim back with.
+type StuckClaimTracker interface {
+	ReclaimStory(ctx context.Context, id string) (bool, error)
+	StoryState(ctx context.Context, id, dimension string) (string, error)
+	CommentOnStory(ctx context.Context, id, text string) error
 }
 
 var _ DoctorCheck = (*NoSessionClaimsCheck)(nil)
+var _ DoctorCureEndsEpisode = (*NoSessionClaimsCheck)(nil)
 
 // Name implements DoctorCheck.
 func (c *NoSessionClaimsCheck) Name() string { return "stuck-claims" }
 
-// Probe implements DoctorCheck: cannot-tell, naming each stuck claim, when there
-// are any; ok otherwise. A claim that cannot be read is cannot-tell too. The
-// reason holds no age, so that the same claims said again read the same.
-func (c *NoSessionClaimsCheck) Probe(ctx context.Context) (Verdict, string) {
-	now := time.Now()
+// stuckClaim is a claim NoSessionClaimOf names, and whether this host gives it
+// back itself.
+type stuckClaim struct {
+	detail StoryDetail
+	own    bool
+}
+
+func (c *NoSessionClaimsCheck) now() time.Time {
 	if c.Now != nil {
-		now = c.Now()
+		return c.Now()
 	}
+	return time.Now()
+}
+
+// find reads the stuck claims, each marked own when this host holds it with no
+// session of its name here and no run state that keeps it.
+func (c *NoSessionClaimsCheck) find(ctx context.Context) ([]stuckClaim, error) {
+	now := c.now()
 	stale, err := c.Claims(ctx, now)
+	if err != nil {
+		return nil, err
+	}
+	var found []stuckClaim
+	for _, detail := range stale {
+		if !NoSessionClaimOf(detail, now, c.Host) {
+			continue
+		}
+		found = append(found, stuckClaim{detail: detail, own: c.givesBack(ctx, detail)})
+	}
+	return found, nil
+}
+
+// givesBack says whether the claim is this host's own and nothing keeps it:
+// no session of its name running here (one that cannot be asked about is not
+// known to be gone), and a run state that is empty or running.
+func (c *NoSessionClaimsCheck) givesBack(ctx context.Context, detail StoryDetail) bool {
+	if c.Sessions == nil || c.Tracker == nil || !OwnNoSessionClaim(detail, c.Host) {
+		return false
+	}
+	id := detail.Story.ID
+	if status, err := c.Sessions.Status(ctx, SessionName(id)); err != nil || status.Running() {
+		return false
+	}
+	run, err := c.Tracker.StoryState(ctx, id, RunState)
+	return err == nil && (run == "" || run == RunRunning)
+}
+
+// Probe implements DoctorCheck: faulty, naming each, for a claim this host
+// holds itself with no session; otherwise cannot-tell, naming each stuck claim,
+// when there are any; ok otherwise. A claim that cannot be read is cannot-tell
+// too. The reason holds no age, so that the same claims said again read the
+// same.
+func (c *NoSessionClaimsCheck) Probe(ctx context.Context) (Verdict, string) {
+	found, err := c.find(ctx)
 	if err != nil {
 		return DoctorCannotTell, fmt.Sprintf("the claims with no session could not be read: %v", err)
 	}
-	var stuck []string
-	for _, detail := range stale {
-		if NoSessionClaim(detail, now) {
-			stuck = append(stuck, fmt.Sprintf("%s (held by %s, lease ran out %s; mw retry %s)",
-				detail.Story.ID, detail.Assignee, detail.LeaseExpires.UTC().Format(LastSyncFormat), detail.Story.ID))
+	var own, others []string
+	for _, claim := range found {
+		detail := claim.detail
+		if claim.own {
+			own = append(own, fmt.Sprintf("%s (held by %s, lease ran out %s)",
+				detail.Story.ID, detail.Assignee, detail.LeaseExpires.UTC().Format(LastSyncFormat)))
+			continue
 		}
+		others = append(others, fmt.Sprintf("%s (held by %s, lease ran out %s; mw retry %s)",
+			detail.Story.ID, detail.Assignee, detail.LeaseExpires.UTC().Format(LastSyncFormat), detail.Story.ID))
 	}
-	if len(stuck) == 0 {
+	sort.Strings(own)
+	sort.Strings(others)
+	if len(own) > 0 {
+		reason := fmt.Sprintf("%d in progress under this host's own claim with its lease run out and no session of its name here: %s",
+			len(own), strings.Join(own, ", "))
+		if len(others) > 0 {
+			reason += fmt.Sprintf("; %d more are another host's or kept: %s", len(others), strings.Join(others, ", "))
+		}
+		return DoctorFaulty, reason
+	}
+	if len(others) == 0 {
 		return DoctorOK, ""
 	}
-	sort.Strings(stuck)
 	return DoctorCannotTell, fmt.Sprintf("STUCK: %d in progress with an expired lease and no host or session named: %s",
-		len(stuck), strings.Join(stuck, ", "))
+		len(others), strings.Join(others, ", "))
 }
 
-// Cure implements DoctorCheck. Nothing is cured: Probe never says faulty.
-func (c *NoSessionClaimsCheck) Cure(context.Context) error { return nil }
+// Cure implements DoctorCheck: it gives back each claim Probe calls this
+// host's own, as the tracker's ReclaimStory does (which reads the lease itself,
+// so a claim renewed since is kept), and comments on the story that it did and
+// why. A claim that cannot be given back is named in the error; the rest are
+// still given back.
+func (c *NoSessionClaimsCheck) Cure(ctx context.Context) error {
+	c.given = nil
+	found, err := c.find(ctx)
+	if err != nil {
+		return err
+	}
+	var failed []string
+	for _, claim := range found {
+		if !claim.own {
+			continue
+		}
+		id := claim.detail.Story.ID
+		reclaimed, err := c.Tracker.ReclaimStory(ctx, id)
+		if err != nil {
+			failed = append(failed, fmt.Sprintf("%s: %v", id, err))
+			continue
+		}
+		if !reclaimed {
+			continue
+		}
+		c.given = append(c.given, id)
+		why := fmt.Sprintf("mw doctor on %s found %s claimed by %s, this host itself, with no session of its name here and its lease run out at %s with no heartbeat since "+
+			"(a claim made outside a dispatch tick that never launched): the claim was given back so it is dispatched again.",
+			c.Host, id, claim.detail.Assignee, claim.detail.LeaseExpires.UTC().Format(time.RFC3339))
+		if err := c.Tracker.CommentOnStory(ctx, id, why); err != nil {
+			failed = append(failed, fmt.Sprintf("%s: given back, but not commented on: %v", id, err))
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("could not give back %s", strings.Join(failed, "; "))
+	}
+	return nil
+}
 
 // Damper implements DoctorCheck.
 func (c *NoSessionClaimsCheck) Damper() (time.Duration, int) { return time.Hour, 1 }
 
-// WayBack implements DoctorCheck.
-func (c *NoSessionClaimsCheck) WayBack() string { return "nothing was changed" }
+// CureEndedEpisode implements DoctorCureEndsEpisode: a claim given back is put
+// right, and the next stuck claim is a new episode, not this one's second cure.
+func (c *NoSessionClaimsCheck) CureEndedEpisode() bool { return len(c.given) > 0 }
+
+// WayBack implements DoctorCheck: what the last cure gave back. A story given
+// back is open and ready, and the next dispatch starts it as a fresh attempt.
+func (c *NoSessionClaimsCheck) WayBack() string {
+	if len(c.given) == 0 {
+		return "nothing was changed"
+	}
+	return fmt.Sprintf("gave back the claim on %s (its lease had run out and no session was working it; it is open and the next dispatch takes it)", strings.Join(c.given, ", "))
+}
 
 // PreviewServer is one preview server (`vite preview`, `npm run preview`) a
 // host is running, as StrayPreviewsCheck is told of it.

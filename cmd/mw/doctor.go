@@ -22,6 +22,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/flushlog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	vaultpkg "github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -429,7 +430,13 @@ func newDoctorCmd() *cobra.Command {
 				},
 			}
 			// Claims no host names, held by a dispatch that died, with no session.
-			stuckClaims := &application.NoSessionClaimsCheck{Claims: mwGateway(vault, host).StaleClaims}
+			stuckGateway := mwGateway(vault, host)
+			stuckClaims := &application.NoSessionClaimsCheck{
+				Claims:   stuckGateway.StaleClaims,
+				Host:     host,
+				Sessions: tmux.New(),
+				Tracker:  stuckGateway,
+			}
 			// The follower alive and writing nothing: no bead or mail event for
 			// minutes after the beads' last change, or a view older than them
 			// (mw-gq6.893).

@@ -49,3 +49,39 @@ func TestNoSessionClaim(t *testing.T) {
 		})
 	}
 }
+
+// mw-gq6.998: the grace is for a claim another host's dispatch may be starting
+// right now. A claim held by this very host is not being started by anyone: its
+// own dispatch holds the host's lock, so the claim's lease having run out is
+// all that says nothing works it.
+func TestNoSessionClaimOfHost(t *testing.T) {
+	now := time.Date(2026, 11, 5, 20, 15, 0, 0, time.UTC)
+	claimed := func(holder string, ago time.Duration) application.StoryDetail {
+		detail := application.StoryDetail{
+			Story:        domain.Story{ID: "mw-hmnm2xi.2"},
+			Status:       application.StatusInProgress,
+			Assignee:     holder,
+			LeaseExpires: now.Add(-ago),
+		}
+		detail.Story.Overrides.Host = domain.HostAuto
+		return detail
+	}
+	cases := []struct {
+		name   string
+		detail application.StoryDetail
+		want   bool
+	}{
+		{"this host's claim, lease ran out a minute ago", claimed("mw@cloud2", time.Minute), true},
+		{"this host's claim, lease still holds", claimed("mw@cloud2", -time.Minute), false},
+		{"another host's claim, lease ran out a minute ago", claimed("mw@cloud1", time.Minute), false},
+		{"another host's claim, lease ran out long ago", claimed("mw@cloud1", time.Hour), true},
+		{"the Mayor's claim, lease ran out long ago", claimed("mayor", time.Hour), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := application.NoSessionClaimOf(c.detail, now, "cloud2"); got != c.want {
+				t.Fatalf("NoSessionClaimOf = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
