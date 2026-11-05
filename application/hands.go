@@ -517,6 +517,90 @@ func (h HandsRetire) Run(ctx context.Context, req HandsRetireRequest) error {
 	return nil
 }
 
+// HandsRanMyselfReason is why a step the Governor said he ran himself is retired.
+const HandsRanMyselfReason = "run by the Governor himself"
+
+// ranItMyself reads the words the Governor says of a step he took by hand,
+// 'I ran step <id> myself.': the step's id, or false for any other words. The
+// case, the spacing and a closing '.' or '!' do not matter; anything else in the
+// message does, so that a longer report of what the step printed is only a
+// comment.
+var ranItMyself = regexp.MustCompile(`(?i)^i ran step ([a-z0-9][a-z0-9._-]*?) myself[.!]?$`)
+
+func ranItMyselfStep(text string) (string, bool) {
+	match := ranItMyself.FindStringSubmatch(strings.Join(strings.Fields(text), " "))
+	if match == nil {
+		return "", false
+	}
+	return match[1], true
+}
+
+// applyRanItMyself retires the hands step the Governor says, in the bead's thread,
+// that he ran himself (mw-gq6.744): the words are commented on the bead as any
+// thread comment is, the step is retired for HandsRanMyselfReason as mw hands
+// retire does — so mw hands list shows it done and Needs you drops it — the live
+// view is published, and the Mayor is mailed. A message that is not those words,
+// a bead with no such step, or a step already retired or already run clean is not
+// its: the first two report false and take the ordinary path, a comment, and the
+// last two keep what the step already says.
+func (i PosternInbox) applyRanItMyself(ctx context.Context, m PosternInboxMessage) (posternApplied, bool, error) {
+	id, ok := ranItMyselfStep(m.Text)
+	if !ok || i.Tracker == nil || i.Memory == nil {
+		return posternApplied{}, false, nil
+	}
+	raw, err := i.Memory.Note(ctx, HandsStepsKey(m.Thread))
+	if err != nil {
+		return posternApplied{}, false, err
+	}
+	steps, err := parseHandsSteps(raw)
+	if err != nil {
+		return posternApplied{}, false, nil
+	}
+	known := false
+	for _, step := range steps {
+		known = known || step.ID == id
+	}
+	if !known {
+		return posternApplied{}, false, nil
+	}
+	recorded, fresh, err := i.recordThreadCommentOnce(ctx, m, nil)
+	if err != nil || !recorded {
+		return posternApplied{}, false, err
+	}
+	result := posternApplied{Kind: "ran-myself", Bead: m.Thread, Txid: m.Txid}
+	retired, err := i.Memory.Note(ctx, HandsRetiredKey(m.Thread, id))
+	if err != nil {
+		return posternApplied{}, false, err
+	}
+	ranRaw, err := i.Memory.Note(ctx, HandsRanKey(m.Thread, id))
+	if err != nil {
+		return posternApplied{}, false, err
+	}
+	if ran, ok := parseHandsRan(ranRaw); ok && ran.Exit == 0 {
+		result.Detail = fmt.Sprintf("step %s already ran OK at %s on %s; left as it is", id, ran.At, ran.Host)
+	} else if strings.TrimSpace(retired) != "" {
+		result.Detail = fmt.Sprintf("step %s was already retired; left as it is", id)
+	} else if err := (HandsRetire{
+		Tracker: i.Tracker, Notes: i.Memory, Out: nil,
+		View: i.View, ViewLock: i.ViewLock, Err: i.Out,
+	}).Run(ctx, HandsRetireRequest{Bead: m.Thread, ID: id, Reason: HandsRanMyselfReason}); err != nil {
+		return posternApplied{}, false, err
+	}
+	if fresh {
+		subject := fmt.Sprintf("Governor ran step %s of %s himself", id, m.Thread)
+		body := fmt.Sprintf("The Governor by postern %s, txid %s, on %s:\n\n%s", sentInFull(m.Ts), m.Txid, m.Thread, m.Text)
+		if result.Detail == "" {
+			body += "\n\nThe step is retired: " + HandsRanMyselfReason + "."
+		} else {
+			body += "\n\n" + result.Detail + "."
+		}
+		if err := i.mail(ctx, subject, body); err != nil {
+			return posternApplied{}, false, err
+		}
+	}
+	return result, true, nil
+}
+
 // HandsList prints every hands step of a bead: where and as whom it runs,
 // its §17 sha256, whether it has run, its text and its way back. With no
 // bead it prints one line for each step not yet run on every open bead. It

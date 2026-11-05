@@ -384,6 +384,8 @@ func newPosternInbox(out io.Writer) (application.PosternInbox, posternWiring, er
 		Mailbox:       gateway,
 		Contacts:      contactBook(),
 		Events:        homeEventLog(),
+		View:          newHandsView(gateway, host),
+		ViewLock:      newHandsViewLock(),
 		Host:          host,
 		GovernorKey:   governorKey,
 		AttachmentDir: attachmentDir,

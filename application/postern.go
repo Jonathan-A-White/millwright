@@ -812,6 +812,12 @@ type PosternInbox struct {
 	// also applies his picture messages on the general thread or a channel.
 	Pictures PicturesHook
 
+	// View, when set, publishes the live view once the Governor's word that he ran
+	// a hands step himself has retired it, under ViewLock (a nil ViewLock takes
+	// none), so his phone drops the step at once. Nil publishes none.
+	View     PosternViewPublisher
+	ViewLock ViewLock
+
 	// Now is the clock an approval's age is read by. The zero value reads
 	// the real one.
 	Now func() time.Time
