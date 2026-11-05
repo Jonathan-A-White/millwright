@@ -99,6 +99,11 @@ type Check struct {
 	// whenever the lock is had.
 	CallBudget   time.Duration
 	GateExpected func(ctx context.Context, rig string) time.Duration
+	// CallNow, when it is set, is the clock the fit of the gate to the call is
+	// read by (when the call began, what is left of it): the real clock when it
+	// is nil. A test of the fit moves it by hand instead of sleeping and hoping
+	// the host does not take longer than its margin (mw-gq6.983).
+	CallNow func() time.Time
 
 	// PartExpected is the same for part n of a split gate: how long it usually
 	// takes on this host, 0 when no figure is known. A foreground --part that wins
@@ -367,7 +372,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	case !split && k.Slot != nil && k.GateLock != nil:
 		// Slot, then gate lock, taken before the wait for a calm host so that the
 		// load waited on is not another gate's: a close-out does the same.
-		held := checkGateLock{k: k, c: c, attempt: report.Attempt, left: left, fit: k.callFitOf(ctx, path.Rig, began)}
+		held := checkGateLock{k: k, c: c, attempt: report.Attempt, left: left, fit: k.callFitOf(ctx, path.Rig, k.callNow())}
 		gateLock, afterCalm = held, held.afterCalm
 	case !split && k.Slot != nil:
 		checks = slottedChecks{

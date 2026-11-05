@@ -144,6 +144,16 @@ type callFit struct {
 	began    time.Time
 	budget   time.Duration
 	expected time.Duration
+	// now is the clock the fit is read by, the real one when it is nil.
+	now func() time.Time
+}
+
+// callNow is the time the call is said to begin at, by Check.CallNow.
+func (k Check) callNow() time.Time {
+	if k.CallNow != nil {
+		return k.CallNow()
+	}
+	return time.Now()
 }
 
 // callFitOf is the fit of the rig's gate to the call this check began, nil when
@@ -157,11 +167,17 @@ func (k Check) callFitOf(ctx context.Context, rig string, began time.Time) *call
 	if expected <= 0 {
 		return nil
 	}
-	return &callFit{began: began, budget: k.CallBudget, expected: expected}
+	return &callFit{began: began, budget: k.CallBudget, expected: expected, now: k.CallNow}
 }
 
 // left is what is left of the call's budget.
-func (f *callFit) left() time.Duration { return max(f.budget-time.Since(f.began), 0) }
+func (f *callFit) left() time.Duration {
+	now := time.Now
+	if f.now != nil {
+		now = f.now
+	}
+	return max(f.budget-now().Sub(f.began), 0)
+}
 
 // late is whether the gate would not end inside what is left of the call. A gate
 // longer than a whole call is never late: no fresh call would fit it either, and

@@ -32,6 +32,57 @@ type aWholeCheckBesideTheHostsGateLock struct {
 	// keep is Check.KeepPlace: how long a wait that runs out keeps the check's
 	// place in the queue (mw-gq6.939).
 	keep time.Duration
+	// clock is what Check.CallNow reads: the fit of the gate to the Builder's call
+	// is judged by it, moved by hand, never by how long the host took (mw-gq6.983).
+	clock *callClock
+}
+
+// callClock is the clock the fit of a gate or a part to a Builder's call is read
+// by in these tests. It stands still until a test moves it, so that a test says
+// "the wait took 1.5 s of the call" without sleeping 1.5 s and without a loaded
+// host being able to eat the margin the test leaves (mw-gq6.983). Each read can
+// also step it, to stand for a host that is slow to start.
+type callClock struct {
+	mu    sync.Mutex
+	at    time.Time
+	step  time.Duration
+	reads int
+}
+
+func newCallClock() *callClock {
+	return &callClock{at: time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC)}
+}
+
+// Now is Check.CallNow.
+func (c *callClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.at
+	c.at = c.at.Add(c.step)
+	c.reads++
+	return now
+}
+
+// PassOnceRead moves the clock on by d once a call has read it, which is to say
+// once the call has begun, and the call's own waiting is under way: a wait that
+// the clock is moved by must not be over before the call began.
+func (c *callClock) PassOnceRead(d time.Duration) {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		c.mu.Lock()
+		read := c.reads > 0
+		c.mu.Unlock()
+		if read {
+			break
+		}
+	}
+	c.Pass(d)
+}
+
+// Pass moves the clock on by d.
+func (c *callClock) Pass(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.at = c.at.Add(d)
 }
 
 func newWholeCheckBesideTheGateLock(t *testing.T, checks application.Checks) *aWholeCheckBesideTheHostsGateLock {
@@ -47,6 +98,7 @@ func newWholeCheckBesideTheGateLock(t *testing.T, checks application.Checks) *aW
 		checks:  checks,
 		records: &mapRecords{},
 		told:    &lockedBuffer{},
+		clock:   newCallClock(),
 	}
 }
 
@@ -692,7 +744,7 @@ func (w *aWholeCheckBesideTheHostsGateLock) checkInACall(wait, budget, expected 
 		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: w.checks,
 		Slot: w.slots, GateLock: w.gate, Records: w.records, PartSlotWait: wait,
 		GateNoticeEvery: 40 * time.Millisecond, KeepPlace: w.keep,
-		CallBudget:   budget,
+		CallBudget: budget, CallNow: w.clock.Now,
 		GateExpected: func(_ context.Context, rig string) time.Duration { return expected },
 		Host:         "laptop", Remote: "origin",
 		Rigs: map[string]string{"millwright": w.rigDir},
@@ -706,9 +758,10 @@ func (w *aWholeCheckBesideTheHostsGateLock) checkInACall(wait, budget, expected 
 // the gate needs and what is left, and ends exit 0 (mw-gq6.940). Run again at
 // once, the same command takes the place up and starts the gate.
 //
-// The times are real: the lock is held for 1.5 s, the gate expected is 9 s of a
-// 10 s call, so the check is late whatever else the host took time over, and the
-// second call, which starts at once, fits unless the host took a second to start it.
+// The call's clock is moved by hand (callClock): the lock is held for 1.5 s of
+// it, the gate expected is 9 s of a 10 s call, so the check is late and the
+// second call, which starts with all its budget, fits, whatever the host took
+// time over (mw-gq6.983).
 func TestAForegroundWholeCheckThatGetsTheLockTooLateForTheGateKeepsItsPlaceAndSaysToRunItAgain(t *testing.T) {
 	checks := &ranAt{at: make(chan time.Time, 4)}
 	w := newWholeCheckBesideTheGateLock(t, checks)
@@ -718,10 +771,7 @@ func TestAForegroundWholeCheckThatGetsTheLockTooLateForTheGateKeepsItsPlaceAndSa
 		t.Fatal(err)
 	}
 	go func() {
-		for deadline := time.Now().Add(5 * time.Second); w.queuedGate() < 1 && time.Now().Before(deadline); {
-			time.Sleep(5 * time.Millisecond)
-		}
-		time.Sleep(1500 * time.Millisecond)
+		w.clock.PassOnceRead(1500 * time.Millisecond)
 		closeOut.Holding.Release(context.Background())
 	}()
 
@@ -806,11 +856,11 @@ func (w *aWholeCheckBesideTheHostsGateLock) checkInACallAfterACalmWait(wait, bud
 		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: w.checks,
 		Slot: w.slots, GateLock: w.gate, Records: w.records, PartSlotWait: wait,
 		GateNoticeEvery: 40 * time.Millisecond, KeepPlace: w.keep,
-		CallBudget:   budget,
+		CallBudget: budget, CallNow: w.clock.Now,
 		GateExpected: func(_ context.Context, rig string) time.Duration { return expected },
 		Load:         &apptest.FakeHostLoad{Readings: []application.LoadReading{busy(), calm()}},
 		LoadPoll:     time.Second,
-		LoadWait:     func(_ context.Context, d time.Duration) error { time.Sleep(calmFor); return nil },
+		LoadWait:     func(_ context.Context, d time.Duration) error { w.clock.Pass(calmFor); return nil },
 		Host:         "laptop", Remote: "origin",
 		Rigs: map[string]string{"millwright": w.rigDir},
 		Out:  writerOf(w.told),
@@ -823,9 +873,11 @@ func (w *aWholeCheckBesideTheHostsGateLock) checkInACallAfterACalmWait(wait, bud
 // back, keeps its place and says to run the same command again (mw-gq6.945).
 // Run again on a calm host, it takes its place up and starts the gate.
 //
-// The times are real: the gate is expected to take 9 s of a 10 s call, the calm
-// wait takes 1.5 s, so the lock is won in time and the gate is late after the
-// wait whatever else the host took time over.
+// The call's clock is moved by hand (callClock): the gate is expected to take
+// 9 s of a 10 s call and the calm wait takes 1.5 s of it, so the lock is won in
+// time and the gate is late after the wait, and the second call fits, whatever
+// the host took time over. Before mw-gq6.983 the times were real, and a host
+// that took a second to start the second call made it late.
 func TestAForegroundWholeCheckWhoseCalmWaitEatsTheFitKeepsItsPlaceAndSaysToRunItAgain(t *testing.T) {
 	checks := &ranAt{at: make(chan time.Time, 4)}
 	w := newWholeCheckBesideTheGateLock(t, checks)
@@ -892,6 +944,50 @@ func TestAForegroundWholeCheckWhoseCalmWaitEatsTheFitKeepsItsPlaceAndSaysToRunIt
 	case <-time.After(10 * time.Second):
 		t.Error("expected the close-out to have the lock once the check was done")
 	}
+}
+
+// The fit is judged by the call's clock (Check.CallNow) and by nothing else: a
+// call whose clock runs 2 s on at each reading is late for a 9 s gate in a 10 s
+// call, with the gate lock free and no wait at all, and a call whose clock does
+// not move is never late however long the host takes (mw-gq6.983). This is how
+// the tests above stand for a wait without sleeping through it: a loaded host
+// that took a second over the second call of one of them made it late, and the
+// test failed (seen once, on mw-gq6.692's landing).
+func TestAForegroundWholeCheckIsLateByTheCallsClockAndNotByTheTimeTheHostTook(t *testing.T) {
+	checks := &ranAt{at: make(chan time.Time, 4)}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	w.keep = 10 * time.Minute
+	w.clock.step = 2 * time.Second
+
+	report, err := w.checkInACall(time.Minute, 10*time.Second, 9*time.Second)
+	if err != nil {
+		t.Fatalf("expected a check that kept its place to end without an error, got %v\n%s", err, report)
+	}
+	if !strings.Contains(report.Waiting, "the gate needs about 9s and only ") || !strings.Contains(report.Waiting, "your place 1 of 1 in the queue is kept for 10 minutes") {
+		t.Errorf("expected the line to say the gate is late and the place is kept, got %q", report.Waiting)
+	}
+	select {
+	case <-checks.at:
+		t.Fatal("expected the gate not to be started")
+	default:
+	}
+
+	// The same call on a clock that stands still, with the host taking a real
+	// second over the gate lock first, is on time.
+	w2 := newWholeCheckBesideTheGateLock(t, checks)
+	holder, err := w2.gate.Take(context.Background(), "a close-out", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(1100 * time.Millisecond)
+		holder.Holding.Release(context.Background())
+	}()
+	report, err = w2.checkInACall(time.Minute, 10*time.Second, 9*time.Second)
+	if err != nil || report.Waiting != "" {
+		t.Fatalf("expected a call whose clock stood still to start the gate, got %v and %q\n%s", err, report.Waiting, report)
+	}
+	<-checks.at
 }
 
 // A calm wait that leaves the gate room inside the call changes nothing: the gate
@@ -964,6 +1060,8 @@ type aPartBesideTheMergeSlot struct {
 	parts   *quickParts
 	records *mapRecords
 	told    *lockedBuffer
+	// clock is what Check.CallNow reads (mw-gq6.983).
+	clock *callClock
 }
 
 func newPartBesideTheMergeSlot(t *testing.T) *aPartBesideTheMergeSlot {
@@ -978,6 +1076,7 @@ func newPartBesideTheMergeSlot(t *testing.T) *aPartBesideTheMergeSlot {
 		parts:   &quickParts{},
 		records: &mapRecords{},
 		told:    &lockedBuffer{},
+		clock:   newCallClock(),
 	}
 }
 
@@ -989,7 +1088,7 @@ func (p *aPartBesideTheMergeSlot) checkPart(n int, wait, budget time.Duration, e
 		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: &scriptedChecks{passes: []bool{true}},
 		Slot: p.slots, Parts: p.parts, Records: p.records, Part: n, PartSlotWait: wait,
 		KeepPlace:  10 * time.Minute,
-		CallBudget: budget,
+		CallBudget: budget, CallNow: p.clock.Now,
 		PartExpected: func(_ context.Context, _ string, part int) time.Duration {
 			if expected == nil {
 				return 0
@@ -1011,9 +1110,10 @@ func (p *aPartBesideTheMergeSlot) queued() int {
 // held. It gives the slot back, keeps its place and says what is left (mw-gq6.944).
 // Run again at once, it takes the place up and runs.
 //
-// The times are real: the landing holds the slot for 3 s, the part is expected
-// to take 10 s of a 12 s call, so it is late whatever else the host took time over,
-// and the second call, which starts at once, fits unless the host took two seconds.
+// The call's clock is moved by hand (callClock): the landing holds the slot for
+// 3 s of it, the part is expected to take 10 s of a 12 s call, so it is late, and
+// the second call, which starts with all its budget, fits, whatever the host took
+// time over (mw-gq6.983).
 func TestAForegroundPartThatGetsTheMergeSlotTooLateForItKeepsItsPlaceAndSaysToRunItAgain(t *testing.T) {
 	p := newPartBesideTheMergeSlot(t)
 	landing, err := p.slots.Take(context.Background(), p.rigDir, "mw land on laptop, landing a batch of millwright")
@@ -1021,10 +1121,7 @@ func TestAForegroundPartThatGetsTheMergeSlotTooLateForItKeepsItsPlaceAndSaysToRu
 		t.Fatal(err)
 	}
 	go func() {
-		for deadline := time.Now().Add(5 * time.Second); p.queued() < 1 && time.Now().Before(deadline); {
-			time.Sleep(5 * time.Millisecond)
-		}
-		time.Sleep(3 * time.Second)
+		p.clock.PassOnceRead(3 * time.Second)
 		landing.Release(context.Background())
 	}()
 

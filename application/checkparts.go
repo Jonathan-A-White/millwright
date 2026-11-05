@@ -179,8 +179,7 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	part := parts[k.Part-1]
 	label := partLabel(k.Part, len(parts), part)
 	tip := k.cleanTip(ctx, c)
-	began := time.Now()
-	fit := k.partFitOf(ctx, c.path.Rig, k.Part, began)
+	fit := k.partFitOf(ctx, c.path.Rig, k.Part, k.callNow())
 
 	if k.Slot != nil && PartNeedsSlot(part) {
 		holding, err := k.takeSlotFit(ctx, c, fit, k.partSlotWait(), slotTry{
@@ -321,7 +320,7 @@ func (k Check) partFitOf(ctx context.Context, rig string, n int, began time.Time
 	if expected <= 0 {
 		return nil
 	}
-	return &callFit{began: began, budget: k.CallBudget, expected: expected}
+	return &callFit{began: began, budget: k.CallBudget, expected: expected, now: k.CallNow}
 }
 
 // slotRefusal is the one line a check ends with when the merge slot could not be
