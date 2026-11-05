@@ -72,6 +72,24 @@ type BeadBrief struct {
 	CommentsTotal int
 }
 
+// Frontier is the open children of the bead that wait on nothing unfinished: what
+// `bd ready --parent <bead> --unassigned` lists, read from the one listing of
+// children the brief already made. A boot sheet takes the frontier of a big
+// parent from here: `bd ready --parent` asks Dolt for every descendant of the
+// parent and then for each one's blockers, and on an epic with over a thousand
+// children (mw-5r3p30, mw-6ww) it runs past Dolt's 20 s read timeout with 'get
+// parent descendants: descendant rows: invalid connection', where `bd list
+// --parent` (the brief's read) answers in about a second (mw-gq6.994).
+func (o BeadBrief) Frontier() []BriefLine {
+	var ready []BriefLine
+	for _, line := range o.Open {
+		if len(line.Waits) == 0 {
+			ready = append(ready, line)
+		}
+	}
+	return ready
+}
+
 // BriefLine is one unfinished child of a bead, with the titles of the stories
 // it is still waiting on.
 type BriefLine struct {

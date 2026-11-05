@@ -8,7 +8,7 @@ How the [wayfinder](https://github.com/mattpocock/skills/blob/main/skills/engine
 | A ticket | A child bead of the map (`--parent <map>`), labelled `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling` or `wayfinder:task`. Its description is `## Question`. |
 | HITL / AFK | Label `hitl` or `afk`. |
 | Blocking | `bd dep add <blocked> <blocker>`. Create all tickets first, wire in a second pass. |
-| Frontier | `bd ready --parent <map> --unassigned` |
+| Frontier | `mw brief <map>`: the Open lines that say no `waits on`. On a map of a few dozen children `bd ready --parent <map> --unassigned` gives the same; on a big one (over a thousand children) it asks Dolt for every descendant and runs past its 20 s read timeout ("get parent descendants: descendant rows: invalid connection"), where `mw brief` (one `bd list --parent`) answers in seconds (mw-gq6.994). |
 | Claim | `bd update <id> --claim`, first, before any work. |
 | Resolution | `bd comment <id> "<answer>"`, then `bd close <id> --reason "<one-line gist>"`, then add the gist line to the map's **Decisions so far**. |
 | Assets | Files in the rig (`docs/research/`, `docs/adr/`, prototypes), named in the resolution comment. Never pasted into the bead. |
