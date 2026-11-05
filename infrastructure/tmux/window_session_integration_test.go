@@ -53,7 +53,7 @@ func TestOpenFromInsideAnotherTmuxSessionOpensInTheSeatsSession(t *testing.T) {
 	tmuxOn(t, socket, "new-session", "-d", "-s", "0", "sleep", "60")
 	t.Setenv(tmux.TmuxEnv, tmuxOn(t, socket, "display-message", "-p", "-t", "0", "#{socket_path},#{pid},0"))
 
-	windows := tmux.NewWindows(tmux.WithSocket(socket))
+	windows := tmux.NewWindows(tmux.WithSocket(socket), tmux.WithCallDeadline(integrationCallDeadline))
 	spec := application.WindowSpec{
 		Name:    "deputy-2026-11-02-888",
 		Dir:     t.TempDir(),
@@ -78,14 +78,14 @@ func TestASecondDeputyIsNotOpenedWhereTheFirstWasNotLooked(t *testing.T) {
 	ctx := context.Background()
 	tmuxOn(t, socket, "new-session", "-d", "-s", "0", "sleep", "60")
 	t.Setenv(tmux.TmuxEnv, tmuxOn(t, socket, "display-message", "-p", "-t", "0", "#{socket_path},#{pid},0"))
-	inside := tmux.NewWindows(tmux.WithSocket(socket))
+	inside := tmux.NewWindows(tmux.WithSocket(socket), tmux.WithCallDeadline(integrationCallDeadline))
 	if err := inside.Open(ctx, application.WindowSpec{Name: "deputy-2026-11-02-888", Dir: t.TempDir(), Command: []string{"sleep", "60"}}); err != nil {
 		t.Fatalf("opening the window: %v", err)
 	}
 
 	t.Setenv(tmux.TmuxEnv, "")
 	_ = os.Unsetenv(tmux.TmuxEnv)
-	outside := tmux.NewWindows(tmux.WithSocket(socket))
+	outside := tmux.NewWindows(tmux.WithSocket(socket), tmux.WithCallDeadline(integrationCallDeadline))
 	open, err := outside.List(ctx)
 	if err != nil {
 		t.Fatalf("listing the windows: %v", err)

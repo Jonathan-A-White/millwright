@@ -22,6 +22,13 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 )
 
+// integrationCallDeadline is how long one tmux command is given in the cases
+// that run a real tmux: not tmux.CallDeadline (5 s), which is how production finds
+// a tmux server that is stuck, and which a host at load 12 to 19 of 16 cores took
+// longer than over a list-windows (mw-gq6.983). The cases that are about a hung
+// tmux set their own deadline (hung_test.go).
+const integrationCallDeadline = 2 * time.Minute
+
 // privateWindows returns a Windows onto a tmux server and a session of this
 // test's own, and kills that server when the test ends.
 func privateWindows(t *testing.T) (*tmux.Windows, string) {
@@ -40,7 +47,7 @@ func privateWindows(t *testing.T) (*tmux.Windows, string) {
 		}
 		_ = os.Remove(socketPath(socket))
 	})
-	return tmux.NewWindows(tmux.WithSocket(socket), tmux.WithSession("mw-test-seats")), socket
+	return tmux.NewWindows(tmux.WithSocket(socket), tmux.WithSession("mw-test-seats"), tmux.WithCallDeadline(integrationCallDeadline)), socket
 }
 
 // standInSeat writes a script that stands in for claude: it records the seat,
@@ -175,4 +182,16 @@ func windowNamed(open []application.Window, name string) (application.Window, bo
 		}
 	}
 	return application.Window{}, false
+}
+
+// A case that runs a real tmux must be given longer than production gives a tmux
+// command, which is how a stuck server is found and is not lengthened for a loaded
+// host's sake (mw-gq6.983).
+func TestTheCasesThatRunARealTmuxAreGivenLongerThanProductionGivesIt(t *testing.T) {
+	if tmux.CallDeadline != 5*time.Second {
+		t.Errorf("expected production to give a tmux command 5 s, it gives %s", tmux.CallDeadline)
+	}
+	if integrationCallDeadline <= 10*tmux.CallDeadline {
+		t.Errorf("expected a case on a real tmux to be given far longer than %s, got %s", tmux.CallDeadline, integrationCallDeadline)
+	}
 }

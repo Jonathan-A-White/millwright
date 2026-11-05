@@ -62,7 +62,7 @@ func openTerminal(t *testing.T) (*tmux.Terminal, string) {
 		_ = exec.Command(tmux.Program, "-L", socket, "kill-server").Run()
 		_ = os.Remove(socketPath(socket))
 	})
-	term := tmux.NewTerminal(tmux.WithSocket(socket))
+	term := tmux.NewTerminal(tmux.WithSocket(socket), tmux.WithCallDeadline(integrationCallDeadline))
 	name := "mw-usage-probe-test"
 	if err := term.Open(t.Context(), name, t.TempDir(), 120, 40); err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestATerminalIsTypedIntoReadAndClosed(t *testing.T) {
 		_ = exec.Command(tmux.Program, "-L", socket, "kill-server").Run()
 		_ = os.Remove(socketPath(socket))
 	})
-	term := tmux.NewTerminal(tmux.WithSocket(socket))
+	term := tmux.NewTerminal(tmux.WithSocket(socket), tmux.WithCallDeadline(integrationCallDeadline))
 	ctx := t.Context()
 	name := "mw-usage-probe-test"
 	if probes, err := term.Probes(ctx); err != nil || len(probes) != 0 {

@@ -44,7 +44,7 @@ func privateRunner(t *testing.T, extra ...tmux.Option) *tmux.Runner {
 		}
 		_ = os.Remove(socketPath(socket))
 	})
-	return tmux.New(append([]tmux.Option{tmux.WithSocket(socket), tmux.WithPollInterval(20 * time.Millisecond)}, extra...)...)
+	return tmux.New(append([]tmux.Option{tmux.WithSocket(socket), tmux.WithPollInterval(20 * time.Millisecond), tmux.WithCallDeadline(integrationCallDeadline)}, extra...)...)
 }
 
 // expectExit checks how a command that has ended is reported: with the status it
