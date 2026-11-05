@@ -42,8 +42,13 @@ func memoryFor(cmd *cobra.Command) (application.Memory, error) {
 		return application.Memory{}, err
 	}
 	files := recordingVault(dir)
+	rigs, err := config.Rigs()
+	if err != nil {
+		return application.Memory{}, err
+	}
 	return application.Memory{
-		Files: files, Vault: files, Legacy: files, Head: files.Head, Seat: BuilderSeat, Budget: budget, Out: cmd.OutOrStdout(),
+		Configured: func(rig string) bool { _, ok := rigs[rig]; return ok },
+		Files:      files, Vault: files, Legacy: files, Head: files.Head, Seat: BuilderSeat, Budget: budget, Out: cmd.OutOrStdout(),
 		Queries: memoryQueryLog(), Story: os.Getenv("MW_STORY"), Warn: cmd.ErrOrStderr(),
 	}, nil
 }
@@ -70,7 +75,8 @@ func newMemoryAddCmd() *cobra.Command {
 			"mayor:<date>. After writing it prints 'near: <slug> <first words>' for each current fact of the\n" +
 			"same subject, or sharing four long words with the sentence, so a repeated rule is seen, then says\n" +
 			"'added <slug>' (with '(near: <slug>)' when it named near facts). A refusal prints 'not added: <why>' and\n" +
-			"exits non-zero. It refuses a rig the seat has no folder for, a slug that already has a file\n" +
+			"exits non-zero. It makes the folder of a rig the config names that the seat keeps nothing of; it refuses\n" +
+			"a rig the config does not name and has no folder, a slug that already has a file\n" +
 			"(one flagged recheck is to be superseded or retired), a sentence with a newline and a kind\n" +
 			"that is not gotcha or decision. An add that takes the boot render over its budget still writes the\n" +
 			"fact, then WARNs with the overage and the command `mw memory make-room <rig> --bytes 0`;\n" +

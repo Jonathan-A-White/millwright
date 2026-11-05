@@ -1319,3 +1319,94 @@ func TestMakeRoomRefusalNamesBothCategoriesAndTheDecisionsSkipped(t *testing.T) 
 		t.Errorf("wrote %v", files.wrote)
 	}
 }
+
+// folderFiles is a seat's rigs directory in memory that, unlike queryFiles,
+// has a folder only for the rigs written to.
+type folderFiles struct{ rigs map[string]map[string]string }
+
+func (f folderFiles) ReadRigFacts(_ context.Context, _, rig string) (string, map[string]string, bool, error) {
+	files, ok := f.rigs[rig]
+	return "", files, ok, nil
+}
+func (f folderFiles) WriteRigFact(_ context.Context, _, rig, slug, text string) (string, error) {
+	if f.rigs[rig] == nil {
+		f.rigs[rig] = map[string]string{}
+	}
+	f.rigs[rig][slug+".md"] = text
+	return slug, nil
+}
+func (f folderFiles) ReadRigEval(context.Context, string, string) (string, bool, error) {
+	return "", false, nil
+}
+func (f folderFiles) WriteRigEval(context.Context, string, string, string) (string, error) {
+	return "", nil
+}
+
+// flatOnly says a rig keeps a flat memory file and no facts folder.
+type flatOnly map[string]bool
+
+func (f flatOnly) ReadRigMemoryFiles(_ context.Context, _, rig string) (application.RigMemoryFiles, error) {
+	return application.RigMemoryFiles{HasMemory: f[rig]}, nil
+}
+func (flatOnly) WriteRigAbout(context.Context, string, string, string) (string, error) {
+	return "", nil
+}
+func (flatOnly) RemoveRigMemoryFiles(context.Context, string, string) error { return nil }
+
+func aNewRigMemory(files folderFiles, out *bytes.Buffer) application.Memory {
+	return application.Memory{
+		Files: files, Legacy: flatOnly{"flatrig": true}, Seat: "builder", Out: out,
+		Configured: func(rig string) bool { return rig == "newrig" || rig == "flatrig" },
+		Now:        func() time.Time { return time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC) },
+	}
+}
+
+func TestARigInTheConfigWithNoFolderTakesItsFirstAddAndListsEmptyBefore(t *testing.T) {
+	ctx := context.Background()
+	files := folderFiles{rigs: map[string]map[string]string{}}
+	var out bytes.Buffer
+	memory := aNewRigMemory(files, &out)
+
+	if err := memory.List(ctx, application.MemoryList{Rig: "newrig"}); err != nil {
+		t.Fatalf("list of a configured rig with no folder: %v", err)
+	}
+	if err := memory.Add(ctx, application.MemoryAdd{
+		Rig: "newrig", Subject: "bd", Source: "mw-1", Kind: application.FactGotcha, Sentence: "Use -C with bd.",
+	}); err != nil {
+		t.Fatalf("first add: %v", err)
+	}
+	if _, ok := files.rigs["newrig"]["use-c-with-bd.md"]; !ok {
+		t.Errorf("the fact was not written: %v", files.rigs)
+	}
+	if !strings.Contains(out.String(), "added use-c-with-bd") {
+		t.Errorf("output %q", out.String())
+	}
+}
+
+func TestARigTheConfigDoesNotNameIsStillRefused(t *testing.T) {
+	ctx := context.Background()
+	files := folderFiles{rigs: map[string]map[string]string{}}
+	memory := aNewRigMemory(files, &bytes.Buffer{})
+
+	err := memory.Add(ctx, application.MemoryAdd{
+		Rig: "stranger", Subject: "bd", Source: "mw-1", Kind: application.FactGotcha, Sentence: "Use -C with bd.",
+	})
+	if err == nil || !strings.Contains(err.Error(), `no rig "stranger"`) {
+		t.Errorf("add to a rig the config does not name: %v", err)
+	}
+	if len(files.rigs) != 0 {
+		t.Errorf("a folder was made: %v", files.rigs)
+	}
+	if err := memory.List(ctx, application.MemoryList{Rig: "stranger"}); err == nil {
+		t.Errorf("list of a rig the config does not name did not refuse")
+	}
+}
+
+func TestAConfiguredRigThatKeepsAFlatMemoryFileIsNotGivenAFolderBesideIt(t *testing.T) {
+	files := folderFiles{rigs: map[string]map[string]string{}}
+	memory := aNewRigMemory(files, &bytes.Buffer{})
+	err := memory.List(context.Background(), application.MemoryList{Rig: "flatrig"})
+	if err == nil || !strings.Contains(err.Error(), `no rig "flatrig"`) {
+		t.Errorf("list of a flat-file rig: %v", err)
+	}
+}

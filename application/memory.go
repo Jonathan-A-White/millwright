@@ -75,6 +75,11 @@ type Memory struct {
 	Legacy RigLegacyFiles
 	Head   func(context.Context) (string, error)
 	Seat   string
+	// Configured says whether the config names the rig. A configured rig the
+	// seat has no folder for, and no flat memory file, is read as a facts rig
+	// with no facts yet, and its first add makes the folder; nil reads every
+	// rig the seat has no folder for as unknown.
+	Configured func(rig string) bool
 	// Budget is what a Builder may read of a rig at boot, in bytes.
 	Budget int
 	Now    func() time.Time
@@ -175,6 +180,10 @@ func FlatRigFile(seat, rig string) string {
 // refused with why.
 func (m Memory) load(ctx context.Context, rig string) (about string, files map[string]string, facts map[string]RigFact, err error) {
 	about, files, err = readFactsFolder(ctx, m.Files, m.Seat, rig)
+	var none NoFactsFolder
+	if errors.As(err, &none) && m.configuredWithNoMemory(ctx, rig) {
+		about, files, err = "", map[string]string{}, nil
+	}
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -184,6 +193,21 @@ func (m Memory) load(ctx context.Context, rig string) (about string, files map[s
 		facts[fact.Slug] = fact
 	}
 	return about, files, facts, nil
+}
+
+// configuredWithNoMemory is true when the config names the rig and the seat
+// keeps nothing of it, neither a facts folder nor a flat memory file: a rig new
+// to the seat, whose folder the first fact written makes.
+func (m Memory) configuredWithNoMemory(ctx context.Context, rig string) bool {
+	if m.Configured == nil || !m.Configured(rig) {
+		return false
+	}
+	if m.Legacy != nil {
+		if kept, err := m.Legacy.ReadRigMemoryFiles(ctx, m.Seat, rig); err != nil || kept.HasMemory || kept.HasArchive {
+			return false
+		}
+	}
+	return true
 }
 
 // existing finds the fact a verb acts on, refusing a slug that is not there.
