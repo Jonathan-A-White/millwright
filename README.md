@@ -879,6 +879,13 @@ smallest size, then the ledger's own order. An idea missing a field, or whose Ex
 listed last as `unscored` with the field named. The sleep pass writes each idea with these fields in the `ideas` of its
 `recommendations.json`. `--top N` prints the first N; `--json` prints a list.
 
+```sh
+bin/mw loop done [--day YYYY-MM-DD]
+```
+Records that the weekly loop sitting was held: the day (today, UTC, by default) is kept in the note
+`loop.sitting`. With no sitting kept in the last 8 days, `mw status` and `mw stuck --dampers` print an
+`ageing` DAMPERS line naming the last sitting's date (docs/events.md, mw-gq6.997).
+
 ## The factory's investments
 
 ```sh

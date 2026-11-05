@@ -1,12 +1,14 @@
 package application_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
 )
 
@@ -192,5 +194,104 @@ func TestLoopBriefNoErrorsOmitsTheRegister(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"errors":[]`) {
 		t.Errorf("the errors key is not an empty list: %s", raw)
+	}
+}
+
+func TestTheDampersNameAWeeklyLoopSittingMoreThanEightDaysOld(t *testing.T) {
+	facts := aCleanDamperFixture() // now is 2026-09-18
+	facts.LoopSitting = application.ParseLoopSitting("2026-09-09")
+	var b strings.Builder
+	application.ReadDampers(facts, application.DamperLimits{}).Write(&b)
+	if !strings.Contains(b.String(), "2026-09-09") || !strings.Contains(b.String(), "loop sitting") {
+		t.Errorf("expected a DAMPERS line naming the last sitting's date, got:\n%s", b.String())
+	}
+}
+
+func TestTheDampersSayNothingOfASittingRecordedInTheLastEightDays(t *testing.T) {
+	for _, day := range []string{"2026-09-10", "2026-09-18"} {
+		facts := aCleanDamperFixture()
+		facts.LoopSitting = application.ParseLoopSitting(day)
+		var b strings.Builder
+		application.ReadDampers(facts, application.DamperLimits{}).Write(&b)
+		if strings.Contains(b.String(), "loop sitting") {
+			t.Errorf("a sitting of %s is in time, got:\n%s", day, b.String())
+		}
+	}
+}
+
+func TestTheDampersSayNoSittingIsRecordedWhenNoneIs(t *testing.T) {
+	facts := aCleanDamperFixture()
+	facts.LoopSitting = application.ParseLoopSitting("")
+	var b strings.Builder
+	application.ReadDampers(facts, application.DamperLimits{}).Write(&b)
+	if !strings.Contains(b.String(), "no weekly loop sitting recorded") {
+		t.Errorf("expected the line for no sitting, got:\n%s", b.String())
+	}
+}
+
+func TestTheDampersJudgeNoSittingWhereTheNotesWereNotRead(t *testing.T) {
+	var b strings.Builder
+	application.ReadDampers(aCleanDamperFixture(), application.DamperLimits{}).Write(&b)
+	if strings.Contains(b.String(), "loop sitting") {
+		t.Errorf("a reader with no notes says nothing of the sitting, got:\n%s", b.String())
+	}
+}
+
+func TestTheSurveyReadsTheSittingFromTheNoteMwLoopDoneWrites(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	survey := application.DamperSurvey{Tracker: tracker, Notes: tracker}
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	read := func() string {
+		report, err := survey.Dampers(ctx, application.WorkInHand{}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var b strings.Builder
+		for _, a := range report.Alarms {
+			b.WriteString(a.Line() + "\n")
+		}
+		return b.String()
+	}
+	if got := read(); !strings.Contains(got, "no weekly loop sitting recorded") {
+		t.Errorf("before any sitting expected the line, got %q", got)
+	}
+	var out strings.Builder
+	done := application.LoopDone{Notes: tracker, Now: func() time.Time { return now }, Day: "2026-10-25", Out: &out}
+	if err := done.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); !strings.Contains(got, "2026-10-25") {
+		t.Errorf("a sitting of 10-25 is 11 days old: expected the line naming it, got %q", got)
+	}
+	done.Day = ""
+	if err := done.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); strings.Contains(got, "loop sitting") {
+		t.Errorf("a sitting of today leaves no line, got %q", got)
+	}
+}
+
+func TestMwLoopDoneKeepsTheLaterDayAndRefusesAFutureOrBadOne(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	run := func(day string) error {
+		return application.LoopDone{Notes: tracker, Now: func() time.Time { return now }, Day: day}.Run(ctx)
+	}
+	if err := run("2026-11-01"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("2026-10-25"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := tracker.Note(ctx, application.LoopSittingKey); got != "2026-11-01" {
+		t.Errorf("an earlier day must not replace a later one, the note is %q", got)
+	}
+	for _, bad := range []string{"2026-11-09", "last sunday"} {
+		if err := run(bad); err == nil {
+			t.Errorf("--day %q should be refused", bad)
+		}
 	}
 }

@@ -52,6 +52,9 @@ type DamperFacts struct {
 	Starved []StarvedRig
 	// Stuck are the held roots that live beads wait behind (mw stuck).
 	Stuck StuckReport
+	// LoopSitting is the weekly loop sitting as the notes keep it; the alarm is
+	// judged only when it was read (mw-gq6.997).
+	LoopSitting LoopSitting
 }
 
 // DamperAlarm is one tripped alarm: the principle in a word (WIP, ageing,
@@ -368,6 +371,9 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 		report.Counts.Inversions = len(inverted)
 		add(DamperInversion, InversionSummary(inverted), nil)
 	}
+	if alarm, overdue := facts.LoopSitting.Alarm(facts.Now); overdue {
+		report.Alarms = append(report.Alarms, alarm)
+	}
 	if len(readyP1) > limits.ReadyP1 {
 		add(DamperWIP, fmt.Sprintf("%d ready P1 stories (limit %d)", len(readyP1), limits.ReadyP1), readyP1)
 	}
@@ -546,7 +552,7 @@ type DamperSurvey struct {
 func (s DamperSurvey) Dampers(ctx context.Context, work WorkInHand, now time.Time) (DampersReport, error) {
 	facts := DamperFacts{Now: now, Work: work, Notes: map[string]string{}}
 	if s.Notes != nil {
-		for _, prefix := range []string{PosternQuestionKey(""), HandsStepsKey("")} {
+		for _, prefix := range []string{PosternQuestionKey(""), HandsStepsKey(""), LoopSittingKey} {
 			kept, err := s.Notes.NotesWithPrefix(ctx, prefix)
 			if err != nil {
 				return DampersReport{}, fmt.Errorf("reading the notes under %s: %w", prefix, err)
@@ -555,6 +561,8 @@ func (s DamperSurvey) Dampers(ctx context.Context, work WorkInHand, now time.Tim
 				facts.Notes[key] = value
 			}
 		}
+		facts.LoopSitting = ParseLoopSitting(facts.Notes[LoopSittingKey])
+		delete(facts.Notes, LoopSittingKey)
 	}
 	starved, err := s.readStarved(ctx, now)
 	if err != nil {

@@ -40,7 +40,9 @@ func newStatusCmd() *cobra.Command {
 			"is listed as stranded, with the one line that re-paths a story here. Re-pathing is a\n" +
 			"person's act: status only says which stories are waiting for one.\n\n" +
 			"A DAMPERS section line 'stuck: N live beads behind M held roots: <ids>' names the held beads that\n" +
-			"live beads wait behind and that cannot move on their own (mw stuck lists them with what is behind).\n\n" +
+			"live beads wait behind and that cannot move on their own (mw stuck lists them with what is behind).\n" +
+			"A DAMPERS 'ageing' line 'weekly loop sitting overdue: the last was <day>' appears when no sitting is\n" +
+			"recorded in the last 8 days; the Mayor runs mw loop done at the sitting's end to record it.\n\n" +
 			"A STUCK CLAIMS section lists a story in progress whose lease ran out, held by a dispatch (mw@<host>)\n" +
 			"and pathed to no host, so that no host's running list shows it; any host's next mw dispatch tick\n" +
 			"gives it back, and mw retry does at once. mw doctor names the same stories as STUCK.\n\n" +

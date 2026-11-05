@@ -18,7 +18,7 @@ func newLoopCmd() *cobra.Command {
 		Short: "The weekly improvement loop's reads",
 		Args:  cobra.NoArgs,
 	}
-	cmd.AddCommand(newLoopBriefCmd(), newLoopRankCmd())
+	cmd.AddCommand(newLoopBriefCmd(), newLoopRankCmd(), newLoopDoneCmd())
 	return cmd
 }
 
@@ -71,6 +71,34 @@ func newLoopBriefCmd() *cobra.Command {
 	cmd.Flags().StringVar(&since, "since", "", "where the window starts: 7d, a day (2026-10-09) or a UTC time; 7d by default")
 	cmd.Flags().BoolVar(&noErrors, "no-errors", false, "leave the ERRORS list out, keeping the count of classes")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the six parts as one JSON object")
+	return cmd
+}
+
+// newLoopDoneCmd builds `mw loop done`: the record that a weekly loop sitting was held.
+func newLoopDoneCmd() *cobra.Command {
+	var day string
+	cmd := &cobra.Command{
+		Use:   "done [--day YYYY-MM-DD]",
+		Short: "Record that the weekly loop sitting was held",
+		Long: "done is run by the Mayor at the end of the weekly loop sitting. It keeps the sitting's day (today, UTC,\n" +
+			"or --day) in the tracker's note loop.sitting, and writes nothing else. mw status and mw stuck --dampers\n" +
+			"then raise an 'ageing' line, 'weekly loop sitting overdue: the last was <day>', when no sitting is\n" +
+			"recorded in the last 8 days, and a line saying none is recorded while the note is empty. A day earlier\n" +
+			"than the one already recorded changes nothing; a day in the future is refused.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			here, err := config.Host()
+			if err != nil {
+				return err
+			}
+			return application.LoopDone{Notes: mwGateway(dir, here), Day: day, Out: cmd.OutOrStdout()}.Run(cmd.Context())
+		},
+	}
+	cmd.Flags().StringVar(&day, "day", "", "the day of the sitting, YYYY-MM-DD; today (UTC) by default")
 	return cmd
 }
 

@@ -312,6 +312,13 @@ follower itself, every minute, reason `clock`, on a host whose config has a `[cl
 only while it is home. A pass that makes or destroys a box writes a `cloud` event, actor
 `cloud@<host>`, for each move; a pass that finds nothing to do writes none.
 
+The weekly loop sitting (mw-gq6.997) is not a job: the Mayor holds it, and at its end runs `mw loop done`
+(`--day YYYY-MM-DD` for a sitting held on another day; a day earlier than the one kept, or in the future,
+changes nothing). It writes the day to the kv note `loop.sitting`, and no event. `mw status` and
+`mw stuck --dampers` read that note: with no sitting kept in the last 8 days they print the DAMPERS line
+`ageing · weekly loop sitting overdue: the last was <day>, N days ago`, and with no sitting kept at all,
+`no weekly loop sitting recorded`. No hand edit of a ledger marks a sitting done.
+
 ## Control
 
 A `control` event is a word to the factory (mw-jrx0s.16), not a thing that happened:
