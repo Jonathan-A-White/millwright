@@ -405,7 +405,8 @@ func newMemoryMakeRoomCmd() *cobra.Command {
 		Short: "Demote the oldest eligible boot gotchas, then decisions over 14 days old, until the render has N bytes free under the budget",
 		Long: "make-room chooses by a fixed rule, at no cost in tokens: a current gotcha in the boot render,\n" +
 			"then, only when no gotcha is left to take, a current decision with a since over 14 days ago; never\n" +
-			"a sentence beginning 'His ' or 'Decided by the Governor', never one whose since is within the last\n" +
+			"a sentence beginning 'His ' or holding 'the Governor', \"Governor's\" or 'his words' anywhere (printed\n" +
+			"'skipped <slug> (the Governor's)'), never one whose since is within the last\n" +
 			"2 days; the oldest since first (the subject `mw memory stats` shows least queried among equals,\n" +
 			"then slug order). Each goes through demote with the first eight words of its own sentence as the\n" +
 			"question; one that question would not put in the top 3 of eval is skipped (named 'skipped <slug>')\n" +

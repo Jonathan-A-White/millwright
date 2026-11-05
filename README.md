@@ -3345,7 +3345,7 @@ to `rig_memory_bytes`.
 `make-room` demotes current boot facts until the render has N bytes free under the
 budget (`--bytes 0`: just under it), choosing by a fixed rule at no cost in tokens: a
 gotcha first and, only when none is left to take, a decision whose since is over 14 days
-ago; never a sentence beginning `His ` or `Decided by the Governor`, never one whose since
+ago; never a sentence beginning `His ` or holding `the Governor`, `Governor's` or `his words` anywhere in it (printed `skipped <slug> (the Governor's)`; mw-gq6.1000), never one whose since
 is within the last 2 days, the oldest since first, then the subject `mw memory stats` shows
 least queried, then slug order. Each goes through `demote` with the first eight words of its
 own sentence as the question; one that question would not put in the top 3 of `eval` is

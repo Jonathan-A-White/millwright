@@ -1392,7 +1392,7 @@ type roomMove struct {
 // MakeRoom demotes current boot facts, one by one, until the render has Bytes
 // free under the budget. It chooses by a fixed rule: the gotchas first, then, only
 // when they do not free enough, the decisions with a since over
-// MakeRoomDecisionDays days old; never a sentence beginning 'His ' or 'Decided by the Governor'; never one with
+// MakeRoomDecisionDays days old; never a sentence beginning 'His ' or holding 'the Governor', "Governor's" or 'his words'; never one with
 // a since within MakeRoomKeepDays days; the oldest since first, then the subject
 // least queried (as stats counts), then by slug. Each goes through Demote with
 // the first words of its own sentence as the question; a fact that question
@@ -1424,6 +1424,11 @@ func (m Memory) makeRoom(ctx context.Context, rig string, bytes int, extra *RigF
 	}
 	moves, skipped, held, after := m.planRoom(ctx, rig, about, all, facts, extra, bytes)
 	decisionsSkipped := held
+	for _, fact := range all {
+		if fact.Status == FactCurrent && !fact.Unbooted && (fact.Kind == FactGotcha || fact.Kind == FactDecision) && namesTheGovernor(fact) {
+			fmt.Fprintf(m.Out, "skipped %s (the Governor's)\n", fact.Slug)
+		}
+	}
 	for _, fact := range skipped {
 		if fact.Kind == FactDecision {
 			decisionsSkipped++
@@ -1552,7 +1557,22 @@ func (m Memory) roomBase(fact RigFact) bool {
 	if fact.Status != FactCurrent || fact.Unbooted {
 		return false
 	}
-	return !strings.HasPrefix(fact.Sentence, "His ") && !strings.HasPrefix(fact.Sentence, "Decided by the Governor")
+	return !namesTheGovernor(fact)
+}
+
+// namesTheGovernor reports whether a fact's sentence is the Governor's own
+// word, by any of its phrases anywhere in it, as written: 'the Governor',
+// "Governor's" or 'his words', or an opening 'His ' (mw-gq6.1000).
+func namesTheGovernor(fact RigFact) bool {
+	if strings.HasPrefix(fact.Sentence, "His ") {
+		return true
+	}
+	for _, phrase := range []string{"the Governor", "Governor's", "his words"} {
+		if strings.Contains(fact.Sentence, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // sinceBefore reports whether a fact's since is more than days days ago.

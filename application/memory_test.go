@@ -1206,6 +1206,38 @@ func TestMakeRoomGoesOnToDecisionsOver14DaysWhenNoGotchaQualifies(t *testing.T) 
 	}
 }
 
+// The Governor's own rule is never offered for demotion, wherever in its
+// sentence it names him (mw-gq6.1000).
+func TestMakeRoomNeverTakesASentenceThatNamesTheGovernorAnywhere(t *testing.T) {
+	for name, sentence := range map[string]string{
+		"in brackets":    "TDD and BDD, as normal (the Governor, 2026-09-24): every story test-first and green.",
+		"later":          "Every story goes test-first, as the Governor ruled on the second of September.",
+		"possessive":     "Every story goes test-first, by the Governor's standing rule for this rig.",
+		"his words":      "Every story goes test-first, and a charter changes only on his words.",
+		"opens with His": "His rule is that every story goes test-first.",
+	} {
+		t.Run(name, func(t *testing.T) {
+			files, m, out := aDecisionRig()
+			files.files["named.md"] = roomFact("named", "decision", "2026-05-01", sentence)
+			list, _ := application.LoadRigFacts(files.files)
+			m.Budget = len(application.RenderRigMemory("About.", list))
+			want := roomLine("fifteen", "The fifteen daemon logs every claim into its own journal file.")
+			if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if demoted(files, "named") {
+				t.Errorf("a sentence naming the Governor was demoted:\n%s", out)
+			}
+			if !demoted(files, "fifteen") {
+				t.Errorf("the plain decision was not demoted:\n%s", out)
+			}
+			if !strings.Contains(out.String(), "skipped named (the Governor's)") {
+				t.Errorf("no 'skipped named (the Governor's)' line:\n%s", out)
+			}
+		})
+	}
+}
+
 func TestMakeRoomTakesGotchasBeforeDecisionsOfAnyAge(t *testing.T) {
 	files, m, out, _ := aFullRig()
 	// dec.md is a decision of 2026-07-01, older than every gotcha: it still waits.
