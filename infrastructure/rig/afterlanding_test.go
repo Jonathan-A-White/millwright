@@ -168,3 +168,62 @@ func TestTheLineAboutARunQuotesTheTailOfItsOutputOnOneLine(t *testing.T) {
 		t.Errorf("expected a long output to be cut to a line, got %d bytes", len(line))
 	}
 }
+
+// A line written to the config while a batch runs is the one that runs
+// (mw-gq6.1001): the command is read when the step runs, not when the batch began.
+func TestTheAfterLandingCommandIsReadWhenTheStepRunsAndNotWhenTheBatchBegan(t *testing.T) {
+	line := "echo old"
+	read := func() (map[string]string, error) { return map[string]string{"lampas": line}, nil }
+	at := time.Date(2026, 11, 5, 23, 28, 0, 0, time.UTC)
+	after := rig.NewAfterLanding(
+		rig.WithAfterCommands(map[string]string{"lampas": "echo old"}),
+		rig.WithAfterCommandsFrom(read, func() time.Time { return at }),
+	)
+
+	line = "echo new"
+	ran, err := after.Run(context.Background(), "lampas", t.TempDir())
+	if err != nil {
+		t.Fatalf("running the command: %v", err)
+	}
+	if ran.Command != "echo new" || !strings.Contains(ran.Output, "new") {
+		t.Errorf("expected the line written during the batch to run, got %+v", ran)
+	}
+	if !ran.Changed || ran.ReadAt != at {
+		t.Errorf("expected the run to say it was read at %s and differs from the batch's line, got changed=%v at=%s", at, ran.Changed, ran.ReadAt)
+	}
+	if got := after.Command("lampas"); got != "echo new" {
+		t.Errorf("expected Command to read the config afresh, got %q", got)
+	}
+}
+
+func TestARunWhoseLineIsTheOneTheBatchBeganWithIsNotChanged(t *testing.T) {
+	read := func() (map[string]string, error) { return map[string]string{"lampas": "echo same"}, nil }
+	after := rig.NewAfterLanding(
+		rig.WithAfterCommands(map[string]string{"lampas": "echo same"}),
+		rig.WithAfterCommandsFrom(read, time.Now),
+	)
+
+	ran, err := after.Run(context.Background(), "lampas", t.TempDir())
+	if err != nil {
+		t.Fatalf("running the command: %v", err)
+	}
+	if ran.Changed || ran.ReadAt.IsZero() {
+		t.Errorf("expected an unchanged line read just now, got changed=%v at=%s", ran.Changed, ran.ReadAt)
+	}
+}
+
+func TestAConfigThatCannotBeReadAtTheStepRunsTheLineTheBatchBeganWithAndSaysSo(t *testing.T) {
+	read := func() (map[string]string, error) { return nil, os.ErrPermission }
+	after := rig.NewAfterLanding(
+		rig.WithAfterCommands(map[string]string{"lampas": "echo began"}),
+		rig.WithAfterCommandsFrom(read, time.Now),
+	)
+
+	ran, err := after.Run(context.Background(), "lampas", t.TempDir())
+	if err != nil {
+		t.Fatalf("running the command: %v", err)
+	}
+	if ran.Command != "echo began" || ran.ReadFailed == "" || ran.Changed {
+		t.Errorf("expected the batch's own line and the failure of the read said, got %+v", ran)
+	}
+}

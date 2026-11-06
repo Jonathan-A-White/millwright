@@ -19,6 +19,8 @@ import (
 // the rig's own directory, so that a host says what it means in its own words.
 type AfterLanding struct {
 	commands map[string]string
+	read     func() (map[string]string, error)
+	now      func() time.Time
 	limit    time.Duration
 	limits   map[string]time.Duration
 	shell    string
@@ -39,6 +41,22 @@ func WithAfterCommands(commands map[string]string) AfterLandingOption {
 			if strings.TrimSpace(command) != "" {
 				a.commands[rig] = command
 			}
+		}
+	}
+}
+
+// WithAfterCommandsFrom makes the command of a rig be read afresh from the config
+// each time it is asked for, through read, instead of kept as it was when the
+// batch began: a line written to [after_landing] while a landing runs is the one
+// its step runs (mw-gq6.1001). The commands WithAfterCommands names stay as the
+// line the batch began with, which a run says it differs from; a config that
+// cannot be read at the step runs that line. now is when the read is said to have
+// been made.
+func WithAfterCommandsFrom(read func() (map[string]string, error), now func() time.Time) AfterLandingOption {
+	return func(a *AfterLanding) {
+		a.read = read
+		if now != nil {
+			a.now = now
 		}
 	}
 }
@@ -77,15 +95,40 @@ func WithAfterShell(path string) AfterLandingOption {
 // NewAfterLanding returns an AfterLanding that runs nothing until it is told
 // which rigs have a command.
 func NewAfterLanding(opts ...AfterLandingOption) *AfterLanding {
-	a := &AfterLanding{commands: map[string]string{}, limits: map[string]time.Duration{}, limit: application.AfterLandingLimit, shell: Shell}
+	a := &AfterLanding{commands: map[string]string{}, limits: map[string]time.Duration{}, limit: application.AfterLandingLimit, shell: Shell, now: time.Now}
 	for _, opt := range opts {
 		opt(a)
 	}
 	return a
 }
 
-// Command implements application.AfterLanding.
-func (a *AfterLanding) Command(rig string) string { return a.commands[rig] }
+// Command implements application.AfterLanding: the line the config has now when
+// the adapter reads it afresh, else the one it was given.
+func (a *AfterLanding) Command(rig string) string {
+	command, _, _, _ := a.readCommand(rig)
+	return command
+}
+
+// readCommand is the command line of rig, when it was read, whether it differs
+// from the line the batch began with, and why the config could not be read again
+// (then the line is the one the batch began with). A blank line is no command, as
+// WithAfterCommands has it.
+func (a *AfterLanding) readCommand(rig string) (command string, at time.Time, changed bool, failed string) {
+	began := a.commands[rig]
+	if a.read == nil {
+		return began, time.Time{}, false, ""
+	}
+	at = a.now()
+	commands, err := a.read()
+	if err != nil {
+		return began, time.Time{}, false, strings.TrimSpace(strings.Join(strings.Fields(err.Error()), " "))
+	}
+	command = commands[rig]
+	if strings.TrimSpace(command) == "" {
+		command = ""
+	}
+	return command, at, command != began, ""
+}
 
 // Limit is how long the rig's command may run: the limit the host names for it,
 // else the default.
@@ -98,7 +141,7 @@ func (a *AfterLanding) Limit(rig string) time.Duration {
 
 // Run implements application.AfterLanding.
 func (a *AfterLanding) Run(ctx context.Context, rig, dir string) (application.Ran, error) {
-	command := a.Command(rig)
+	command, readAt, changed, readFailed := a.readCommand(rig)
 	if command == "" {
 		return application.Ran{}, fmt.Errorf("the rig %s has no command to run after a landing", rig)
 	}
@@ -118,7 +161,7 @@ func (a *AfterLanding) Run(ctx context.Context, rig, dir string) (application.Ra
 	limited, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	output, err := runLine(limited, a.shell, line, dir, 0, freePortEnv())
-	ran := application.Ran{Command: command, Output: output, Steps: steps, Step: stepEndedIn(output, steps)}
+	ran := application.Ran{Command: command, Output: output, Steps: steps, Step: stepEndedIn(output, steps), ReadAt: readAt, Changed: changed, ReadFailed: readFailed}
 	if err == nil {
 		return ran, nil
 	}

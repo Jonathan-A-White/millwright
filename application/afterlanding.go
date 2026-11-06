@@ -126,6 +126,36 @@ type Ran struct {
 	Steps    []string
 	Step     int
 	Earlier  string
+
+	// ReadAt is when the command line was read from the host's config, which is
+	// when the step ran and not when the batch began (mw-gq6.1001); zero when the
+	// port does not read it again. Changed says the line differs from the one the
+	// batch began with, and ReadFailed that the config could not be read again, so
+	// that the line the batch began with was the one run.
+	ReadAt     time.Time
+	Changed    bool
+	ReadFailed string
+}
+
+// AfterLandingChangedLine is said when the command a step runs is not the one
+// its batch began with: a line written to the config during the batch is run.
+const AfterLandingChangedLine = "after_landing changed during the batch: running the new line"
+
+// ReadLines are the lines that say which line of the config ran: when it was
+// read, and that it is not the one the batch began with. None when the run's
+// port did not read the config again.
+func (r Ran) ReadLines() []string {
+	var lines []string
+	if r.ReadFailed != "" {
+		lines = append(lines, afterLandingLine(r.Command, "could not be read again from the config, so the line the batch began with ran: "+r.ReadFailed))
+	}
+	if !r.ReadAt.IsZero() {
+		lines = append(lines, afterLandingLine(r.Command, "read at "+r.ReadAt.UTC().Format(time.RFC3339)))
+	}
+	if r.Changed {
+		lines = append(lines, AfterLandingChangedLine)
+	}
+	return lines
 }
 
 // afterLandingStepWords open the line an after-landing command of several steps
@@ -378,6 +408,7 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 	}
 
 	ran, retried, err := n.deploy(ctx, c, report)
+	report.Notes = append(report.Notes, ran.ReadLines()...)
 	line := ran.Line()
 	if err != nil {
 		line = afterLandingLine(command, "could not be run: "+firstLine(err.Error()))
@@ -446,6 +477,9 @@ func (n Next) keepAfterLandingLog(ctx context.Context, c *closeOut, report *Next
 	}
 	var log strings.Builder
 	fmt.Fprintf(&log, "$ %s\n", command)
+	for _, said := range ran.ReadLines() {
+		fmt.Fprintf(&log, "# %s\n", said)
+	}
 	if retried != "" {
 		fmt.Fprintf(&log, "%s\n# %s\n$ %s\n", strings.TrimRight(ran.Earlier, "\n"), retried, command)
 	}
