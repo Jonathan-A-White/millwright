@@ -1545,3 +1545,64 @@ func (c *StrayPreviewsCheck) WayBack() string {
 	}
 	return fmt.Sprintf("stopped %s (a preview server keeps no state; run the command again in the worktree if one is wanted)", strings.Join(c.stopped, "; "))
 }
+
+// RigKindsName is what the check is called: in the log, and on the command line
+// as `mw doctor rig-kinds`.
+const RigKindsName = "rig-kinds"
+
+// RigKindsCheck is the mw doctor check that every rig of the vault's rigs list
+// has kinds in the common-errors register's kinds file (mw-gq6.751). A rig with
+// none is checked against no class, and `mw errors add` for a find in it needs
+// --kinds by hand. It only warns (cannot-tell): it has nothing to cure, since
+// what a rig is is a person's to say with `mw errors kinds <rig> <kind>...`.
+type RigKindsCheck struct {
+	// Register is the common-errors register, read as Errors reads it, of Seat.
+	Register ErrorFiles
+	Seat     string
+	// Rigs lists the rigs of the vault, by name.
+	Rigs func(ctx context.Context) ([]string, error)
+}
+
+var _ DoctorCheck = (*RigKindsCheck)(nil)
+
+// Name implements DoctorCheck.
+func (c *RigKindsCheck) Name() string { return RigKindsName }
+
+// Probe implements DoctorCheck: ok when every rig has at least one kind;
+// cannot-tell naming each rig that has none, or when the rigs or the kinds
+// file cannot be read.
+func (c *RigKindsCheck) Probe(ctx context.Context) (Verdict, string) {
+	rigs, err := c.Rigs(ctx)
+	if err != nil {
+		return DoctorCannotTell, fmt.Sprintf("the vault's rigs could not be listed: %v", err)
+	}
+	_, text, err := c.Register.ReadErrorRegister(ctx, c.Seat)
+	if err != nil {
+		return DoctorCannotTell, fmt.Sprintf("the common-errors register could not be read: %v", err)
+	}
+	kinds, err := ParseRigKinds(text)
+	if err != nil {
+		return DoctorCannotTell, fmt.Sprintf("the register's %s could not be read: %v", ErrorKindsFile, err)
+	}
+	var lacking []string
+	for _, rig := range rigs {
+		if len(kinds[rig]) == 0 {
+			lacking = append(lacking, rig)
+		}
+	}
+	if len(lacking) == 0 {
+		return DoctorOK, ""
+	}
+	sort.Strings(lacking)
+	return DoctorCannotTell, fmt.Sprintf("%d rigs have no kinds in the common-errors register's %s, so no class is checked in them and mw errors add needs --kinds by hand: %s; give one its kinds with `mw errors kinds <rig> <kind>...`",
+		len(lacking), ErrorKindsFile, strings.Join(lacking, ", "))
+}
+
+// Cure implements DoctorCheck: there is none, since Probe never says faulty.
+func (c *RigKindsCheck) Cure(context.Context) error { return nil }
+
+// Damper implements DoctorCheck.
+func (c *RigKindsCheck) Damper() (time.Duration, int) { return time.Hour, 1 }
+
+// WayBack implements DoctorCheck.
+func (c *RigKindsCheck) WayBack() string { return "nothing was changed" }

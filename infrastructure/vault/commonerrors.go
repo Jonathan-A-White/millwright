@@ -79,3 +79,19 @@ func (v *Vault) writeErrorFile(seat, name, text string) (string, error) {
 	}
 	return path, nil
 }
+
+// RigNames lists the rigs of the vault: a file <rig>.toml in its rigs
+// directory each, by name, in order.
+func (v *Vault) RigNames(_ context.Context) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(v.dir, application.RigsDir))
+	if err != nil {
+		return nil, err
+	}
+	var rigs []string
+	for _, entry := range entries {
+		if rig, isRigFile := strings.CutSuffix(entry.Name(), RigFileExt); isRigFile && !entry.IsDir() {
+			rigs = append(rigs, rig)
+		}
+	}
+	return rigs, nil
+}

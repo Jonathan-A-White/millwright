@@ -448,3 +448,51 @@ func TestTheTemplateSeedsTheFirstThreeLampasClasses(t *testing.T) {
 		}
 	}
 }
+
+func rigKindsCheck(files *apptest.FakeErrorFiles, rigs ...string) *application.RigKindsCheck {
+	return &application.RigKindsCheck{
+		Register: files, Seat: "builder",
+		Rigs: func(context.Context) ([]string, error) { return rigs, nil },
+	}
+}
+
+func TestDoctorWarnsOfEachRigWithNoKindsInTheRegister(t *testing.T) {
+	files := &apptest.FakeErrorFiles{Kinds: "argus = [\"pwa\"]\nmillwright = [\"go-cli\"]\n"}
+	verdict, reason := rigKindsCheck(files, "argus", "leaderboard", "millwright", "bsv-kit").Probe(context.Background())
+	if verdict != application.DoctorCannotTell {
+		t.Fatalf("a rig with no kinds is a warning (cannot-tell), got %v: %s", verdict, reason)
+	}
+	for _, want := range []string{"bsv-kit", "leaderboard", "mw errors kinds <rig>"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("the warning should say %q, got: %s", want, reason)
+		}
+	}
+	for _, not := range []string{"argus", "millwright"} {
+		if strings.Contains(reason, not) {
+			t.Errorf("the warning names %s, which has kinds: %s", not, reason)
+		}
+	}
+}
+
+func TestDoctorSaysOkWhenEveryRigHasKinds(t *testing.T) {
+	files := &apptest.FakeErrorFiles{Kinds: "argus = [\"pwa\"]\nleaderboard = [\"service\", \"pwa\", \"go-cli\"]\n"}
+	if verdict, reason := rigKindsCheck(files, "argus", "leaderboard").Probe(context.Background()); verdict != application.DoctorOK {
+		t.Errorf("every rig has kinds, got %v: %s", verdict, reason)
+	}
+}
+
+func TestDoctorCannotTellWhenTheRegisterOrTheRigsCannotBeRead(t *testing.T) {
+	bad := &apptest.FakeErrorFiles{Kinds: "not a line"}
+	if verdict, _ := rigKindsCheck(bad, "argus").Probe(context.Background()); verdict != application.DoctorCannotTell {
+		t.Errorf("an unreadable kinds file is cannot-tell, got %v", verdict)
+	}
+	files := &apptest.FakeErrorFiles{ReadErr: fs.ErrPermission}
+	if verdict, _ := rigKindsCheck(files, "argus").Probe(context.Background()); verdict != application.DoctorCannotTell {
+		t.Errorf("an unreadable register is cannot-tell, got %v", verdict)
+	}
+	check := rigKindsCheck(&apptest.FakeErrorFiles{}, "argus")
+	check.Rigs = func(context.Context) ([]string, error) { return nil, fs.ErrNotExist }
+	if verdict, _ := check.Probe(context.Background()); verdict != application.DoctorCannotTell {
+		t.Errorf("an unreadable rigs list is cannot-tell, got %v", verdict)
+	}
+}

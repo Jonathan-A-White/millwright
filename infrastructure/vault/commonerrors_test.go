@@ -67,3 +67,20 @@ func TestTheErrorRegisterIsNeverReadAtABuildersBoot(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTheVaultListsItsRigsByTheTomlFilesOfItsRigsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	rigs := filepath.Join(dir, "rigs")
+	if err := os.MkdirAll(filepath.Join(rigs, "a-folder.toml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"lampas.toml", "argus.toml", "notes.md"} {
+		if err := os.WriteFile(filepath.Join(rigs, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := vault.New(dir).RigNames(context.Background())
+	if err != nil || strings.Join(got, ",") != "argus,lampas" {
+		t.Errorf("rigs = %v, %v; want argus, lampas", got, err)
+	}
+}

@@ -5622,6 +5622,11 @@ refused a lampas story that way, mw-gq6.453). There is no cure: a person adds th
 home's line for the rig, and `contrib/boost-bootstrap.sh` does it when it makes the
 config, from the vault's `hosts/boost-config.toml`.
 
+**rig-kinds** warns (cannot-tell, never faulty) naming every rig of the vault's
+`rigs/` list that has no kinds in the common-errors register's `kinds.toml`: a class
+is checked in no such rig, and `mw errors add` for a find in it needs `--kinds` by hand
+(mw-gq6.751). There is no cure: `mw errors kinds <rig> <kind>...` gives the rig its kinds.
+
 **stale-landings** looks in the home directory and beside each rig for every
 `.mw-landing-<id>` directory older than 24 hours: a landing is made and taken away
 inside one close-out, so one that old was left behind. One that is clean, whose HEAD

@@ -437,6 +437,11 @@ func newDoctorCmd() *cobra.Command {
 				Sessions: tmux.New(),
 				Tracker:  stuckGateway,
 			}
+			// A rig of the vault with no kinds in the common-errors register; a
+			// warning only (mw-gq6.751).
+			rigKinds := &application.RigKindsCheck{
+				Register: mwVault(vault, host), Seat: BuilderSeat, Rigs: mwVault(vault, host).RigNames,
+			}
 			// The follower alive and writing nothing: no bead or mail event for
 			// minutes after the beads' last change, or a view older than them
 			// (mw-gq6.893).
@@ -493,6 +498,7 @@ func newDoctorCmd() *cobra.Command {
 				staleLandings,
 				strayPreviews,
 				stuckClaims,
+				rigKinds,
 				followerStalled,
 				ageKey,
 				claudeLogin,
