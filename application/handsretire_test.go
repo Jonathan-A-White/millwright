@@ -189,3 +189,108 @@ func TestPosternViewAClosedBeadShowsNoHandsNeed(t *testing.T) {
 		}
 	}
 }
+
+func hasHitl(t *testing.T, tracker interface {
+	ShowStory(ctx context.Context, id string) (application.StoryDetail, error)
+}, bead string) bool {
+	t.Helper()
+	detail, err := tracker.ShowStory(context.Background(), bead)
+	mustDo(t, err)
+	for _, l := range detail.Labels {
+		if l == application.LabelHitl {
+			return true
+		}
+	}
+	return false
+}
+
+func secondStep() domain.HandsStep {
+	return domain.HandsStep{ID: "second", Host: "desktop", As: "user", Run: "true"}
+}
+
+// Retiring the only live step takes hitl off the bead, so a child filed by
+// copying the bead's labels does not come up parked on a human step
+// (mw-gq6.750).
+func TestHandsRetireOfTheOnlyStepDropsHitl(t *testing.T) {
+	tracker := handsTracker()
+	if _, err := addHands(tracker, &bytes.Buffer{}, application.HandsAddRequest{Bead: "mw-f758y.8", Step: lingerStep()}); err != nil {
+		t.Fatal(err)
+	}
+	if !hasHitl(t, tracker, "mw-f758y.8") {
+		t.Fatal("expected hands add to have labelled the bead hitl")
+	}
+
+	mustDo(t, retireHands(tracker, &bytes.Buffer{}, "mw-f758y.8", "linger", "done by hand"))
+
+	if hasHitl(t, tracker, "mw-f758y.8") {
+		t.Fatal("expected hitl dropped once no live step remained")
+	}
+}
+
+// Retiring one of two live steps leaves hitl: the other still waits for him.
+func TestHandsRetireOfOneOfTwoLiveStepsKeepsHitl(t *testing.T) {
+	tracker := handsTracker()
+	for _, step := range []domain.HandsStep{lingerStep(), secondStep()} {
+		if _, err := addHands(tracker, &bytes.Buffer{}, application.HandsAddRequest{Bead: "mw-f758y.8", Step: step}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mustDo(t, retireHands(tracker, &bytes.Buffer{}, "mw-f758y.8", "linger", "done by hand"))
+	if !hasHitl(t, tracker, "mw-f758y.8") {
+		t.Fatal("expected hitl kept while a step is still live")
+	}
+
+	mustDo(t, retireHands(tracker, &bytes.Buffer{}, "mw-f758y.8", "second", "done by hand"))
+	if hasHitl(t, tracker, "mw-f758y.8") {
+		t.Fatal("expected hitl dropped once the last live step was retired")
+	}
+}
+
+// A step that ran clean or was superseded is not live, so retiring the one
+// that was left drops hitl; one that ran and failed is still live.
+func TestHandsRetireCountsOnlyUnrunUnsupersededUnretiredStepsAsLive(t *testing.T) {
+	ctx := context.Background()
+	for name, c := range map[string]struct {
+		note, value string
+		wantHitl    bool
+	}{
+		"ran clean":  {application.HandsRanKey("mw-f758y.8", "second"), `{"at":"2026-09-28T12:03:00Z","exit":0,"host":"desktop"}`, false},
+		"superseded": {application.HandsSupersededKey("mw-f758y.8", "second"), "mw-other", false},
+		"ran failed": {application.HandsRanKey("mw-f758y.8", "second"), `{"at":"2026-09-28T12:03:00Z","exit":1,"host":"desktop"}`, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tracker := handsTracker()
+			for _, step := range []domain.HandsStep{lingerStep(), secondStep()} {
+				if _, err := addHands(tracker, &bytes.Buffer{}, application.HandsAddRequest{Bead: "mw-f758y.8", Step: step}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			mustDo(t, tracker.SetNote(ctx, c.note, c.value))
+			mustDo(t, retireHands(tracker, &bytes.Buffer{}, "mw-f758y.8", "linger", "done by hand"))
+			if got := hasHitl(t, tracker, "mw-f758y.8"); got != c.wantHitl {
+				t.Fatalf("expected hitl=%v, got %v", c.wantHitl, got)
+			}
+		})
+	}
+}
+
+// The Governor's 'I ran step <id> myself.' retires the step through
+// HandsRetire, so it drops hitl the same way once it was the last live step.
+func TestRanItMyselfDropsHitlWhenItWasTheLastLiveStep(t *testing.T) {
+	ctx := context.Background()
+	f := newRunFixture(t)
+	mustDo(t, f.tracker.SetLabels("mw-e.3", application.LabelHitl))
+	for _, id := range []string{"linger", "far", "nowhere"} {
+		mustDo(t, f.tracker.SetNote(ctx, application.HandsRetiredKey("mw-e.3", id), "moot"))
+	}
+	f.say(t, "tx-ran", "mw-e.3", "I ran step echo myself.")
+
+	if _, err := f.inbox().Apply(ctx); err != nil {
+		t.Fatalf("applying: %v", err)
+	}
+
+	if hasHitl(t, f.tracker, "mw-e.3") {
+		t.Fatal("expected hitl dropped once his word retired the last live step")
+	}
+}

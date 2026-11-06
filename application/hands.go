@@ -448,8 +448,11 @@ type HandsRetireRequest struct {
 
 // HandsRetire marks a step retired: it leaves Needs you, its hash can no longer
 // be approved or run, and the bead says why. The step stays kept, so the record
-// of what it was does not go; mw hands add --replace brings an id back. Once it
-// is marked the live view is published, so his phone drops the step at once.
+// of what it was does not go; mw hands add --replace brings an id back. When no
+// live step is left on the bead (none unrun, unsuperseded and unretired) the
+// hitl label comes off it too, so a child filed by copying its labels is not
+// parked on a human step (mw-gq6.750). Once it is marked the live view is
+// published, so his phone drops the step at once.
 type HandsRetire struct {
 	Tracker WorkTracker
 	Notes   PosternNotes
@@ -509,12 +512,55 @@ func (h HandsRetire) Run(ctx context.Context, req HandsRetireRequest) error {
 	if h.Out != nil {
 		fmt.Fprintf(h.Out, "retired step %s of %s: %s\n", req.ID, req.Bead, reason)
 	}
+	if hasLabel(found[0].Labels, LabelHitl) {
+		live, err := handsLiveSteps(ctx, h.Notes, req.Bead, steps)
+		if err != nil {
+			return fmt.Errorf("mw hands retire: reading the steps left on %s: %w", req.Bead, err)
+		}
+		if live == 0 {
+			if err := h.Tracker.RemoveLabel(ctx, req.Bead, LabelHitl); err != nil {
+				return fmt.Errorf("mw hands retire: the step is retired, but taking %s off %s failed: %w", LabelHitl, req.Bead, err)
+			}
+			if h.Out != nil {
+				fmt.Fprintf(h.Out, "no live step is left on %s: %s dropped\n", req.Bead, LabelHitl)
+			}
+		}
+	}
 	publishHandsView(ctx, h.View, h.ViewLock, h.NoView, func(format string, args ...any) {
 		if h.Err != nil {
 			fmt.Fprintf(h.Err, "mw hands retire: "+format+"\n", args...)
 		}
 	}, "the step is retired")
 	return nil
+}
+
+// handsLiveSteps counts the steps of bead still for the Governor's hands: not
+// run clean, not superseded and not retired. A step that ran and failed, or was
+// begun and not recorded finished, is live.
+func handsLiveSteps(ctx context.Context, notes PosternNotes, bead string, steps []HandsStepRecord) (int, error) {
+	live := 0
+	for _, step := range steps {
+		ranRaw, err := notes.Note(ctx, HandsRanKey(bead, step.ID))
+		if err != nil {
+			return 0, err
+		}
+		if ran, ok := parseHandsRan(ranRaw); ok && ran.Exit == 0 {
+			continue
+		}
+		superseded, err := notes.Note(ctx, HandsSupersededKey(bead, step.ID))
+		if err != nil {
+			return 0, err
+		}
+		retired, err := notes.Note(ctx, HandsRetiredKey(bead, step.ID))
+		if err != nil {
+			return 0, err
+		}
+		if strings.TrimSpace(superseded) != "" || strings.TrimSpace(retired) != "" {
+			continue
+		}
+		live++
+	}
+	return live, nil
 }
 
 // HandsRanMyselfReason is why a step the Governor said he ran himself is retired.
