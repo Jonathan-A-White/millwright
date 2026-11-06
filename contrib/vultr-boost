@@ -12,6 +12,7 @@
 #   contrib/vultr-boost snapshot [--dry-run] [--name NAME]
 #   contrib/vultr-boost spend    [--name NAME]...
 #   contrib/vultr-boost set-cap  [--dry-run] --name NAME --cap N
+#   contrib/vultr-boost set-pace [--dry-run] --name NAME
 #   contrib/vultr-boost address  [--dry-run] --name NAME
 #   contrib/vultr-boost --help
 #
@@ -44,6 +45,13 @@
 #         other lines stay as they were). The box's next dispatch reads it: no restart, and
 #         sessions running are not touched. mw's cloud check runs it when [cloud] box_cap
 #         changes (mw cloud cap N).
+# set-pace makes the dispatch timer of a box that is up tick every five minutes, over WireGuard as
+#         set-cap does: ssh to the box's user writes the timer drop-in boost-pace.conf
+#         (OnCalendar= then OnCalendar=*:0/5, as boost-bootstrap.sh writes it) when it is not as
+#         that, reloads systemd, restarts the timer and starts one dispatch now, then prints the
+#         OnCalendar the timer has, on a "pace = " line. A box made from the snapshot carries the
+#         home's hourly timer, and a box has no event follower to spring its dispatch. mw's cloud
+#         check runs it on each box it does not know to be at the pace (mw-gq6.1004).
 # address prints a box's WireGuard address, read off the hub as set-cap reads it (nothing there
 #         changes), then the user the box dispatches as: two lines, the address and the user. mw
 #         peek, retry and pause reach a box at ssh <user>@<address>: the home resolves no name for it.
@@ -104,11 +112,13 @@ Usage: vultr-boost up       [--yes] [--dry-run] [--name NAME] [--snapshot ID]
        vultr-boost snapshot [--dry-run] [--name NAME]
        vultr-boost spend    [--name NAME]...
        vultr-boost set-cap  [--dry-run] --name NAME --cap N
+       vultr-boost set-pace [--dry-run] --name NAME
        vultr-boost address  [--dry-run] --name NAME
 
 up makes the Boost box on Vultr and enrols it on the WireGuard hub; down destroys
 it and removes the peer; set-cap sets how many sessions a box that is up runs at
-once, in its own config, over WireGuard; address prints a box's WireGuard address and user
+once, in its own config, over WireGuard; set-pace has a box's dispatch timer tick every
+five minutes; address prints a box's WireGuard address and user
 read off the hub; status prints its state and cost; snapshot makes a
 ready-made image of a bootstrapped box for up --snapshot; list prints every
 instance Vultr holds (id, label, status, server status); adopt imports a Vultr
@@ -123,7 +133,7 @@ EOF
 
 while [ $# -gt 0 ]; do
 	case $1 in
-	up | down | list | adopt | status | snapshot | spend | set-cap | address)
+	up | down | list | adopt | status | snapshot | spend | set-cap | set-pace | address)
 		[ -z "$CMD" ] || die "one command at a time: $CMD and $1"
 		CMD=$1
 		;;
@@ -296,6 +306,12 @@ if [ "$DRY" = 1 ]; then
 		echo "vultr-boost snapshot --dry-run: nothing below is run"
 		step "state: open $STATE_AGE with age (read only) and read $NAME's id from it"
 		step "curl -X POST $API/snapshots with the token on stdin: a snapshot of $NAME, whose id is printed for [cloud] snapshot"
+		;;
+	set-pace)
+		STEPS=2
+		echo "vultr-boost set-pace --dry-run: nothing below is run"
+		step "ssh $HUB_SSH: read $NAME's address off /etc/wireguard/wg0.conf (nothing there changes)"
+		step "ssh $(box_user)@<$NAME's address>: write ~/.config/systemd/user/mw-dispatch.timer.d/boost-pace.conf (OnCalendar= then OnCalendar=*:0/5) unless it is so, reload, restart mw-dispatch.timer and start one dispatch, then print the timer's OnCalendar"
 		;;
 	set-cap)
 		STEPS=2
@@ -798,6 +814,38 @@ do_set_cap() {
 	echo "    $NAME: $out in ~/.config/mw/config.toml; its next dispatch reads it, sessions running are not touched"
 }
 
+# --- set-pace -------------------------------------------------------------------
+# The run on the box: the timer drop-in of boost-bootstrap.sh's step 13, written when the
+# box's is not that text (then systemd reloaded, the timer restarted and one dispatch started,
+# as the bootstrap does), and the OnCalendar the timer ends with: the last one after the last
+# empty OnCalendar= that clears those before it.
+BOX_SET_PACE='set -e; export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+d=$HOME/.config/systemd/user/mw-dispatch.timer.d; f=$d/boost-pace.conf
+want="[Timer]
+OnCalendar=
+OnCalendar=*:0/5"
+if [ "$(cat "$f" 2>/dev/null)" != "$want" ]; then
+	mkdir -p "$d"; t=$f.new.$$; trap "rm -f $t" EXIT
+	printf "%s\n" "$want" >"$t"; chmod 644 "$t"; mv "$t" "$f"; trap - EXIT
+	systemctl --user daemon-reload
+	systemctl --user restart mw-dispatch.timer
+	systemctl --user start --no-block mw-dispatch.service
+fi
+systemctl --user cat mw-dispatch.timer | awk -F= '"'"'/^OnCalendar=/ { last = $2 } END { print "pace = " last }'"'"
+
+do_set_pace() {
+	need ssh
+	[ -n "$NAME_ARG" ] || die "set-pace needs --name NAME: the box to set the dispatch timer of"
+	STEPS=2
+	local out
+	step "hub: read $NAME's address off $HUB_SSH"
+	box_address "$NAME"
+	local addr=$ADDR
+	step "box: dispatch timer every five minutes on $(box_user)@$addr"
+	out=$(ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new "$(box_user)@$addr" "sh -s" <<<"$BOX_SET_PACE") || die "could not set the dispatch timer on $NAME ($(box_user)@$addr)"
+	echo "$out"
+}
+
 # address prints the address and then the user, nothing else on standard output.
 do_address() {
 	need ssh
@@ -816,5 +864,6 @@ status) do_status ;;
 snapshot) do_snapshot ;;
 spend) do_spend ;;
 set-cap) do_set_cap ;;
+set-pace) do_set_pace ;;
 address) do_address ;;
 esac

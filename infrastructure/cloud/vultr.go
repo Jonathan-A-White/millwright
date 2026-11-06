@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -215,6 +216,25 @@ func (v Vultr) Adopt(ctx context.Context, name string, instance application.Clou
 func (v Vultr) SetCap(ctx context.Context, name string, cap int) error {
 	_, err := v.run(ctx, setCapLimit, "set-cap", "--name", name, "--cap", strconv.Itoa(cap))
 	return err
+}
+
+// SetPace implements application.CloudProvider: `set-pace --name <box>`, which
+// reads the box's WireGuard address off the hub and has the box's dispatch
+// timer tick every five minutes over ssh, then prints the OnCalendar the timer
+// has on its "pace = " line.
+func (v Vultr) SetPace(ctx context.Context, name string) (string, error) {
+	out, err := v.run(ctx, setCapLimit, "set-pace", "--name", name)
+	if err != nil {
+		return "", err
+	}
+	// The wrapper's steps are on standard output too: the pace is its "pace = "
+	// line.
+	for _, line := range slices.Backward(strings.Split(out, "\n")) {
+		if pace, found := strings.CutPrefix(strings.TrimSpace(line), "pace = "); found && pace != "" {
+			return pace, nil
+		}
+	}
+	return "", fmt.Errorf("%s set-pace printed no pace: the box's timer pace is not known", v.Command)
 }
 
 // addressLimit is how long reading a box's address may take: one ssh to the hub,

@@ -416,3 +416,73 @@ func TestTheChecksDestroyHandsBackAClaimQueuedForABatch(t *testing.T) {
 	}
 	checkHandedBack(t, tracker, report.String())
 }
+
+// A box restored from the snapshot carries its units: the timer is hourly,
+// and a box has no event follower to spring its dispatch (mw-gq6.1004).
+func paceCheck(t *testing.T, cloud *apptest.FakeCloud, box application.CloudBox) (application.CloudReport, *apptest.FakeCloudBook) {
+	t.Helper()
+	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	box.Up, box.Made, box.Dispatched = now.Add(-30*time.Minute), now.Add(-30*time.Minute), now.Add(-20*time.Minute)
+	box.Cap = 2
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: []application.CloudBox{box}}}
+	report, err := application.CloudCheck{
+		Work: apptest.NewFakeTracker(), Provider: cloud, Book: book, Host: "desktop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return report, book
+}
+
+func TestABoxOnTheSnapshotsHourlyTimerIsSetToTheFiveMinutePaceAndTheReportSaysSo(t *testing.T) {
+	cloud := &apptest.FakeCloud{Paces: map[string]string{"cloud1": "hourly"}}
+	report, book := paceCheck(t, cloud, application.CloudBox{Name: "cloud1"})
+	if got := cloud.Paces["cloud1"]; got != application.CloudPaceFive {
+		t.Errorf("expected the box's timer set to OnCalendar %s, got %q", application.CloudPaceFive, got)
+	}
+	if got := book.State.Boxes[0].Pace; got != application.CloudPaceFive {
+		t.Errorf("expected the book to keep the pace %s, got %q", application.CloudPaceFive, got)
+	}
+	if text := report.String(); !strings.Contains(text, "cloud1: dispatch timer every 5 minutes") {
+		t.Errorf("expected the report to name the pace, got:\n%s", text)
+	}
+}
+
+func TestABoxAlreadyAtTheFiveMinutePaceIsNotReachedAgain(t *testing.T) {
+	cloud := &apptest.FakeCloud{}
+	report, _ := paceCheck(t, cloud, application.CloudBox{Name: "cloud1", Pace: application.CloudPaceFive})
+	if calls := cloud.PaceCalls(); len(calls) != 0 {
+		t.Errorf("expected no ssh to a box known to be at the pace, got %v", calls)
+	}
+	if text := report.String(); !strings.Contains(text, "cloud1: dispatch timer every 5 minutes") {
+		t.Errorf("expected the report to name the pace, got:\n%s", text)
+	}
+}
+
+func TestABoxWhoseTimerStaysHourlyIsSaidHourlyInTheReport(t *testing.T) {
+	cloud := &apptest.FakeCloud{Paces: map[string]string{"cloud1": "hourly"}, PaceStuck: map[string]bool{"cloud1": true}}
+	report, book := paceCheck(t, cloud, application.CloudBox{Name: "cloud1"})
+	if text := report.String(); !strings.Contains(text, "cloud1: dispatch timer hourly") {
+		t.Errorf("expected the report to say the timer is hourly, got:\n%s", text)
+	}
+	if got := book.State.Boxes[0].Pace; got != "hourly" {
+		t.Errorf("expected the book to keep the pace it is at, hourly, got %q", got)
+	}
+}
+
+func TestABoxThatCannotBeReachedForItsPaceIsSaidSoAndTriedAgain(t *testing.T) {
+	cloud := &apptest.FakeCloud{Unreachable: map[string]bool{"cloud1": true}}
+	report, book := paceCheck(t, cloud, application.CloudBox{Name: "cloud1"})
+	if text := report.String(); !strings.Contains(text, "cloud1: dispatch timer pace not known") {
+		t.Errorf("expected the report to say the pace is not known, got:\n%s", text)
+	}
+	if got := book.State.Boxes[0].PaceFault; got == "" {
+		t.Errorf("expected the book to keep why the pace is not known")
+	}
+	// The next check asks again.
+	paceCheck(t, cloud, book.State.Boxes[0])
+	if calls := cloud.PaceCalls(); len(calls) != 2 {
+		t.Errorf("expected the box tried at each check, got %v", calls)
+	}
+}

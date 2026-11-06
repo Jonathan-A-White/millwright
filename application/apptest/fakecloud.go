@@ -45,6 +45,13 @@ type FakeCloud struct {
 	Unreachable map[string]bool
 	Caps        map[string]int
 	capCalls    []string
+	// Paces is the OnCalendar each box's dispatch timer has, by name (a box
+	// made from the snapshot has "hourly"; none named is "hourly" too), and
+	// PaceStuck the boxes whose timer SetPace cannot change. PaceCalls are
+	// the SetPaces asked, by box name.
+	Paces       map[string]string
+	PaceStuck   map[string]bool
+	paceCalls   []string
 	BilledUSD   float64
 	BilledKnown bool
 	begun       []string
@@ -179,6 +186,34 @@ func (f *FakeCloud) SetCap(_ context.Context, name string, cap int) error {
 	}
 	f.Caps[name] = cap
 	return nil
+}
+
+// SetPace implements application.CloudProvider: the box's timer is set to the
+// five-minute pace, unless it is Unreachable or PaceStuck.
+func (f *FakeCloud) SetPace(_ context.Context, name string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.paceCalls = append(f.paceCalls, name)
+	if f.Unreachable[name] {
+		return "", fmt.Errorf("ssh %s: no route to the box", name)
+	}
+	if f.Paces == nil {
+		f.Paces = map[string]string{}
+	}
+	if f.Paces[name] == "" {
+		f.Paces[name] = "hourly"
+	}
+	if !f.PaceStuck[name] {
+		f.Paces[name] = application.CloudPaceFive
+	}
+	return f.Paces[name], nil
+}
+
+// PaceCalls are the SetPaces asked for, in order, each a box's name.
+func (f *FakeCloud) PaceCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.paceCalls...)
 }
 
 // Address implements application.CloudProvider: a box is at 10.88.0.<n> for the
