@@ -45,6 +45,7 @@ asks. `--dry-run` prints the numbered steps and changes nothing.
 - [Where each secret is](#where-each-secret-is)
 - [Revoking the box's tokens](#revoking-the-boxs-tokens)
 - [Elastic: boxes made and destroyed by demand](#elastic-boxes-made-and-destroyed-by-demand)
+  - [A box dispatches every five minutes, not hourly](#a-box-dispatches-every-five-minutes-not-hourly)
   - [A changed box_cap reaches the boxes already up](#a-changed-box_cap-reaches-the-boxes-already-up)
   - [Stories pathed to a box that goes down](#stories-pathed-to-a-box-that-goes-down)
   - [What Vultr can refuse](#what-vultr-can-refuse)
