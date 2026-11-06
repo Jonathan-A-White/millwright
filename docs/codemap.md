@@ -6,7 +6,6 @@
 |-|-|-|
 | `WorkTracker` | application/worktracker.go | beads |
 | TrackerNotes, SweepNotes, BeadGraph, IceNotes, IcedBeads | application/{status,sweep,ice}.go | same, beads/runcache.go |
-| SweepSessions (idle sessions of closed stories) | application/sweepsessions.go | tmux/tmux.go (Runner.Sessions, Close) |
 | VaultFiles, Tracker{Sync,History,Flush}, SyncHaltMarker | application/sync.go | {vault/git,beads/sync}.go, synchalt, flushlog |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | beads/mail.go |
 | EpicRules (+LandingRules) | application/epicrules.go | vault/epicrules.go |
