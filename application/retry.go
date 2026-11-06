@@ -186,7 +186,7 @@ func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, fi
 // In order, refusing at the first that does not hold: a story queued for its
 // rig's batch landing (run=queued) is not retried at all, --force or not, for
 // the batch lands the attempt it has while a second would be dispatched
-// (mw-gq6.862); the session named on
+// (mw-gq6.862), unless it is held, which no batch lands (mw-gq6.1028); the session named on
 // the story must not still be running; the branch's own worktree, fetched
 // fresh, is committed clean if a session left it dirty; the branch's commits
 // ahead of the target, if there are any, are bundled into the vault and the
@@ -515,7 +515,9 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	// A story queued for its rig's batch has its work done and its branch
 	// pushed for the batch to land: giving it back, --force or not, would have
 	// a second attempt dispatched while the batch lands the first (mw-gq6.862).
-	if QueuedForBatch(detail) {
+	// A held story is in no batch, whatever label it carries: a batch lands the
+	// open and in-progress stories only, so it is retried (mw-gq6.1028).
+	if QueuedForBatch(detail) && !detail.Held() {
 		return r.refuse(report, r.queuedWhy(ctx, detail, path.Rig))
 	}
 	// A story whose last run landed is finished but for its close: giving its

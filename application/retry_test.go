@@ -1160,3 +1160,41 @@ func TestRetryOfAStoryWhoseBranchWasPushedDoesNotSayItWasNeverMade(t *testing.T)
 		}
 	}
 }
+
+// TestRetryOfAHeldStoryCarryingQueuedGoesOnWhileABatchOfItsRigRuns pins
+// mw-gq6.1028: a story held on purpose out of a batch's re-land still carries
+// run:queued, but a batch lands only open and in-progress stories, so the batch
+// running never has it and refusing the retry for that batch never lifts. The
+// story that is in the batch (the open, queued one) is still refused.
+func TestRetryOfAHeldStoryCarryingQueuedGoesOnWhileABatchOfItsRigRuns(t *testing.T) {
+	queuedAt := time.Date(2026, 11, 5, 12, 7, 0, 0, time.UTC)
+	batchAt := time.Date(2026, 11, 5, 20, 30, 0, 0, time.UTC)
+	cases := []struct {
+		name  string
+		hold  bool
+		force bool
+	}{
+		{name: "held, retried with --hold", hold: true},
+		{name: "held, retried to open"},
+		{name: "held, forced", force: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tracker := apptest.NewFakeTracker()
+			aQueuedRetryStory(t, tracker, "mw-gq6.1", queuedAt)
+			if err := tracker.HoldClaimHeldBy(context.Background(), "mw-gq6.1", ""); err != nil {
+				t.Fatalf("holding the story: %v", err)
+			}
+			landing := &fakeRetryLanding{NoWorktree: true}
+			var out strings.Builder
+			retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out)
+			retry.Log = aBatchLandJobRunning(t, "millwright", batchAt)
+			retry.Hold, retry.Force = tc.hold, tc.force
+
+			report, err := retry.Run(context.Background(), "mw-gq6.1")
+			if err != nil || report.Refused {
+				t.Fatalf("expected the retry of a held story to go on while a batch runs, got report %+v, err %v\n%s", report, err, out.String())
+			}
+		})
+	}
+}
