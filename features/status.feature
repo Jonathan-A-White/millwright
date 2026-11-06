@@ -188,6 +188,20 @@ Feature: mw status
     Then reading status succeeds
     And the report says the close-out of "mw-gq6.5" is blocked by an open formula step
 
+  # mw-gq6.758: a story queued for batch landing has passed its close-out; the
+  # step it still has open is the landing, which its batch does.
+  Scenario: A queued story with a formula step open is not called close-blocked
+    Given the rig "millwright" lands in batches every 30 minutes
+    And a status story "mw-gq6.58" filed under it
+    And the status story "mw-gq6.58" is claimed with its session running
+    And the formula poured for "mw-gq6.58" has a step still open
+    And the status story "mw-gq6.58" was queued for batch landing 40 minutes ago
+    And a batch-land job for the rig "millwright" began running 1 minutes ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.58" is in the batch running since 1 minutes ago
+    And the report does not say the close-out of "mw-gq6.58" is blocked
+
   Scenario: A story marked run=stopped is shown as stopped, not running
     Given a status story "mw-gq6.6" filed under it
     And the status story "mw-gq6.6" is claimed with its session running

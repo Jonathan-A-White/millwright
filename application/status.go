@@ -538,6 +538,12 @@ func (r RunningStory) Refused() bool { return r.Run == RunBlocked }
 // step of its poured formula is still open.
 func (r RunningStory) FormulaOpen() bool { return r.FormulaSteps > 0 }
 
+// CloseBlocked reports whether an open formula step is what keeps this story
+// from closing out. A story queued for batch landing has passed its close-out
+// already, and the step it has open is the landing its batch does, so a wait
+// line says where it is and nothing is blocked (mw-gq6.758).
+func (r RunningStory) CloseBlocked() bool { return r.FormulaOpen() && !r.Queued() }
+
 // HostWork is what one other host has in hand, as this host can see it: when
 // that host last recorded itself level, whether that is recent enough to
 // believe it is awake, and the stories pathed to it.
@@ -2938,7 +2944,7 @@ func (r RunningStory) write(b *strings.Builder) {
 	if r.HandedBack() {
 		clip(b, "    "+handedBackLine)
 	}
-	if r.FormulaOpen() {
+	if r.CloseBlocked() {
 		clip(b, fmt.Sprintf("    close blocked: %d formula step(s) open", r.FormulaSteps))
 	}
 }

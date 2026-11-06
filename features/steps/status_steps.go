@@ -249,6 +249,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report shows "([^"]*)" on the rig "([^"]*)"$`, c.theReportShowsOnTheRig)
 	ctx.Then(`^the report says the close-out of "([^"]*)" is blocked by an open formula step$`,
 		c.theReportSaysCloseOutBlockedByFormula)
+	ctx.Then(`^the report does not say the close-out of "([^"]*)" is blocked$`, c.theReportDoesNotSayCloseOutBlocked)
 	ctx.Then(`^the report shows "([^"]*)" as run=(\S+), not running$`, c.theReportShowsRunState)
 	ctx.Then(`^the report shows "([^"]*)" as refused, waiting on the Mayor$`, c.theReportShowsRefused)
 	ctx.Then(`^the report shows "([^"]*)" as stopped at the usage limit$`, c.theReportShowsAtTheUsageLimit)
@@ -1103,11 +1104,21 @@ func (c *statusContext) theReportSaysCloseOutBlockedByFormula(id string) error {
 	if !ok {
 		return fmt.Errorf("%s is not listed as running:\n%s", id, c.report.String())
 	}
-	if !rs.FormulaOpen() {
+	if !rs.CloseBlocked() {
 		return fmt.Errorf("expected %s to show an open formula step, got %+v", id, rs)
 	}
 	if !strings.Contains(c.report.String(), "formula") {
 		return fmt.Errorf("expected the printed report to say the formula is open, got:\n%s", c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportDoesNotSayCloseOutBlocked(id string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if strings.Contains(c.report.String(), "close blocked") {
+		return fmt.Errorf("expected no close blocked line for %s, got:\n%s", id, c.report.String())
 	}
 	return nil
 }
