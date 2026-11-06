@@ -99,33 +99,33 @@ func workflowScopeWhy(host, branch string, files []string, how string) string {
 // merged or pushed, rather than after the gate and a refusal (mw-gq6.999). A
 // branch that changes no workflow file asks nothing; a credential that cannot
 // be read does not stop a landing, the push is the net.
-func (n Next) workflowScopeGuard(ctx context.Context, c *closeOut, report *NextReport) (NextReport, bool) {
+func (n Next) workflowScopeGuard(ctx context.Context, c *closeOut, report *NextReport) (NextReport, bool, error) {
 	if n.PushScope == nil || n.Changes == nil {
-		return NextReport{}, false
+		return NextReport{}, false, nil
 	}
 	changed, err := n.Changes.ChangedFiles(ctx, c.rigDir, StartPoint(n.remote(), c.target), c.branch)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the files %s changed could not be read to look for workflow files: %v", c.id, err))
-		return NextReport{}, false
+		return NextReport{}, false, nil
 	}
 	files := WorkflowFiles(changed)
 	if len(files) == 0 {
-		return NextReport{}, false
+		return NextReport{}, false, nil
 	}
 	reading, err := n.PushScope.ReadWorkflowScope(ctx)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the push credential on %s could not be read for the workflow scope: %v", n.Host, err))
-		return NextReport{}, false
+		return NextReport{}, false, nil
 	}
 	if reading.Scope != WorkflowScopeLacks {
-		return NextReport{}, false
+		return NextReport{}, false, nil
 	}
 	how := ""
 	if reading.Said != "" {
 		how = " (" + reading.Said + ")"
 	}
-	rep, _ := n.stop(ctx, c, report, ReasonWorkflowScope, workflowScopeWhy(n.Host, c.branch, files, how), "")
-	return rep, true
+	rep, err := n.stop(ctx, c, report, ReasonWorkflowScope, workflowScopeWhy(n.Host, c.branch, files, how), "")
+	return rep, true, err
 }
 
 // workflowScopeHandOver is what a close-out that stopped for the workflow scope

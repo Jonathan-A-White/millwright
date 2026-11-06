@@ -1326,8 +1326,8 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	if IsTesterStory(c.detail) {
 		return n.closeTested(ctx, c, report)
 	}
-	if rep, stopped := n.workflowScopeGuard(ctx, c, report); stopped {
-		return rep, fmt.Errorf("closing out %s: %s", c.id, rep.Why)
+	if rep, stopped, err := n.workflowScopeGuard(ctx, c, report); stopped {
+		return rep, err
 	}
 	n.rereadLanding(ctx, c, report)
 	if c.batch {
