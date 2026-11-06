@@ -26,12 +26,19 @@ type SweepNotes interface {
 // Sweep finds, for one host, the claimed stories whose lease has run out with
 // no heartbeat since — StaleClaims's own definition, and the only one — and
 // marks each one run=stuck, once. It is the zero-token, read-mostly twin of a
-// person watching tmux: it never kills or restarts a session, never gives a
-// claim back, and never touches a worktree or the ledger. Settling a stuck
-// claim (what becomes of the worktree, giving the claim back) is a separate
-// story.
+// person watching tmux. Of a session it kills one kind and no other: the idle
+// session of a story the tracker holds closed (landed and verified), which a
+// close-out can leave behind; never a session of a story still open, claimed
+// or running, never one whose pane is at work, never one that is no story's.
+// It never restarts a session, never gives a claim back, and never touches a
+// worktree or the ledger. Settling a stuck claim (what becomes of the
+// worktree, giving the claim back) is a separate story.
 type Sweep struct {
 	Tracker WorkTracker
+
+	// Sessions is the host's tmux sessions, for closing the finished stories'.
+	// Nil leaves every session alone.
+	Sessions SweepSessions
 
 	// Host is which of the factory's hosts this sweep is for.
 	Host string
@@ -63,6 +70,17 @@ type SweepReport struct {
 	// handed them back for their close-out alone (RunCloseOutAgain,
 	// mw-gq6.467): the next dispatch tick runs it again.
 	HandedBack []string
+	// SessionsSeen is how many tmux sessions this host held when the sweep
+	// looked; zero when Sweep.Sessions is nil or there was no tmux or none.
+	SessionsSeen int
+	// SessionsClosed is the idle sessions of closed stories this pass killed.
+	SessionsClosed []string
+	// SessionsKept is the sessions of closed stories left alone because their
+	// pane is not idle.
+	SessionsKept []string
+	// sessionsAsked is that the host's sessions were listed, so that a host
+	// with none can say so.
+	sessionsAsked bool
 	// Notes are the things that went sideways without stopping the sweep: one
 	// story's trouble is never a reason to leave the rest unexamined.
 	Notes []string
@@ -101,6 +119,8 @@ func (s Sweep) Run(ctx context.Context) (SweepReport, error) {
 			s.one(ctx, detail, &report)
 		}
 	}
+
+	s.sessions(ctx, &report)
 
 	s.print(report.String())
 	return report, nil
@@ -180,6 +200,15 @@ func (r SweepReport) String() string {
 	}
 	if len(r.HandedBack) > 0 {
 		clip(&b, "  handed back for its close-out alone, not stuck: "+strings.Join(r.HandedBack, ", "))
+	}
+	if len(r.SessionsClosed) > 0 {
+		clip(&b, "  closed the idle session of a closed story: "+strings.Join(r.SessionsClosed, ", "))
+	}
+	if len(r.SessionsKept) > 0 {
+		clip(&b, "  kept, the pane of a closed story is at work: "+strings.Join(r.SessionsKept, ", "))
+	}
+	if r.SessionsSeen == 0 && r.sessionsAsked {
+		clip(&b, "  sessions: none on this host (no tmux, or no sessions)")
 	}
 	for _, note := range r.Notes {
 		clip(&b, "  ! "+note)
