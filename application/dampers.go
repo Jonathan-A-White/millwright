@@ -92,6 +92,9 @@ type DamperCounts struct {
 	StuckRoots int
 	// Inversions are the beads below the priority of what waits on them.
 	Inversions int
+	// OpenRefused are the open stories a run state has kept from dispatch for over
+	// OpenRefusedAge (mw-gq6.1026).
+	OpenRefused int
 }
 
 // DampersHeading heads the section naming the alarms that are tripped: the
@@ -116,6 +119,10 @@ const (
 	// a ready story: the fix it waits for, or a story passed over behind it for
 	// RefusedHoldTooLong (mw-gq6.941).
 	DamperRefusedHold = "refused claim"
+	// DamperOpenRefused is the alarm for an open story that a run state keeps from
+	// being dispatched (run:blocked, stopped, stuck, landed) for over
+	// OpenRefusedAge: no tick takes it and nothing else says it (mw-gq6.1026).
+	DamperOpenRefused = "refused open"
 	// DamperDoctor is the alarm for a check another host's doctor left faulty:
 	// its report reaches the home as a note, since nobody reads that host's log.
 	DamperDoctor = "doctor"
@@ -144,7 +151,7 @@ func (l DamperLimits) orDefaults() DamperLimits {
 // to five beads, then how many more.
 func (a DamperAlarm) Line() string {
 	line := a.Principle + " · " + a.Text
-	if a.Principle == DamperStuck || a.Principle == DamperInversion || a.Principle == DamperMetered || a.Principle == DamperNoHost || a.Principle == DamperDoctor || a.Principle == DamperNeedsFilesKey || a.Principle == DamperRefusedHold {
+	if a.Principle == DamperStuck || a.Principle == DamperInversion || a.Principle == DamperMetered || a.Principle == DamperNoHost || a.Principle == DamperDoctor || a.Principle == DamperNeedsFilesKey || a.Principle == DamperRefusedHold || a.Principle == DamperOpenRefused {
 		line = a.Principle + ": " + a.Text
 	}
 	if len(a.Beads) == 0 {
@@ -366,6 +373,10 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 		}
 		report.Counts.StuckLive, report.Counts.StuckRoots = live, len(roots)
 		add(DamperStuck, facts.Stuck.Summary(), roots)
+	}
+	for _, o := range OpenRefusedStories(facts.Work, facts.Now) {
+		report.Counts.OpenRefused++
+		report.Alarms = append(report.Alarms, o.Alarm())
 	}
 	if inverted := InversionsOf(facts.Graph); len(inverted) > 0 {
 		report.Counts.Inversions = len(inverted)

@@ -246,6 +246,7 @@ func (f NeedsYouFacts) items() []needsYouItem {
 		}
 	}
 	items = append(items, f.staleIdeas()...)
+	items = append(items, f.openRefused()...)
 	sort.SliceStable(items, func(a, b int) bool {
 		if items[a].Filed.IsZero() != items[b].Filed.IsZero() {
 			return !items[a].Filed.IsZero()
@@ -350,6 +351,27 @@ func (f NeedsYouFacts) replacements(byID map[string]domain.GraphBead, bead strin
 		}
 	}
 	return found
+}
+
+// openRefused are the open stories a run state has kept from dispatch for over
+// OpenRefusedAge, each a stale candidate with its age and the command that goes
+// on: they are in no queue of his and nothing else sweeps them (mw-gq6.1026).
+func (f NeedsYouFacts) openRefused() []needsYouItem {
+	var items []needsYouItem
+	for _, o := range OpenRefusedStories(f.Work, f.Now) {
+		id := o.Story.Story.ID
+		title := o.Story.Story.Title
+		if title == "" {
+			title = id
+		}
+		items = append(items, needsYouItem{
+			Bead: id, Kind: "open, refused", Title: title,
+			Filed:    firstKnown(o.Story.Updated, o.Story.Created),
+			Evidence: []string{fmt.Sprintf("open with %s:%s for %s, and no dispatch tick takes it", RunState, o.Run, elapsed(o.Idle))},
+			Action:   o.Command(),
+		})
+	}
+	return items
 }
 
 // staleIdeas are the unticked items of the live Ideas only cards whose idea the
