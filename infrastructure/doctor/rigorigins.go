@@ -18,6 +18,8 @@ type RigOrigins struct {
 
 // Origins lists the origin url of each rig that has one; a rig whose checkout
 // is missing or has no origin is left out, since it has no scheme to differ.
+// It reads the url the checkout stores, not "git remote get-url", which a
+// host's url.<base>.insteadOf would rewrite (mw-gq6.1016).
 func (r RigOrigins) Origins(ctx context.Context) (map[string]string, error) {
 	program := r.Program
 	if program == "" {
@@ -25,7 +27,7 @@ func (r RigOrigins) Origins(ctx context.Context) (map[string]string, error) {
 	}
 	origins := map[string]string{}
 	for rig, dir := range r.Rigs {
-		out, err := gitcmd.Command(ctx, program, dir, "remote", "get-url", "origin").Output()
+		out, err := gitcmd.Command(ctx, program, dir, "config", "--get", "remote.origin.url").Output()
 		if err != nil {
 			continue
 		}
