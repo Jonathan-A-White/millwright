@@ -496,6 +496,7 @@ func newDoctorCmd() *cobra.Command {
 				followerStalled,
 				ageKey,
 				claudeLogin,
+				doctor.NewWorkflowScope(doctor.GhScopes{}, host),
 				usageFresh,
 				unitEnv,
 			}, churn...), checks...)

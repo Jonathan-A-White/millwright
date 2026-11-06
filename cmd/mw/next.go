@@ -10,6 +10,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/procs"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
@@ -296,6 +297,7 @@ func newNextCmd() *cobra.Command {
 				DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 				Deployed:     hostDeployedMarks(),
 				Home:         files,
+				PushScope:    doctor.GhScopes{},
 				Backend:      hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr()),
 				Smoke:        hostGristSmoke(gateway, host, rigs, worktrees, nil, ""),
 				Units:        userunits.Systemctl{},

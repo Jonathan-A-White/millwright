@@ -282,6 +282,11 @@ type Next struct {
 	// from the rig by itself. A nil AfterLanding runs nothing.
 	AfterLanding AfterLanding
 
+	// PushScope reads this host's push credential for the workflow scope, asked
+	// of a branch that changes a file under .github/workflows/ before it is
+	// landed (mw-gq6.999). A nil PushScope asks nothing: the push itself is
+	// the net.
+	PushScope WorkflowScopeReader
 	// Home is the vault's home file, read to say, when this host names no
 	// command for a rig, which host deploys it instead (mw-gq6.562). A nil Home
 	// says nothing of the home.
@@ -1320,6 +1325,9 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	}
 	if IsTesterStory(c.detail) {
 		return n.closeTested(ctx, c, report)
+	}
+	if rep, stopped := n.workflowScopeGuard(ctx, c, report); stopped {
+		return rep, fmt.Errorf("closing out %s: %s", c.id, rep.Why)
 	}
 	n.rereadLanding(ctx, c, report)
 	if c.batch {
@@ -3112,6 +3120,14 @@ func (n Next) pushRetrying(ctx context.Context, report *NextReport, dir, branch 
 		if err == nil {
 			return nil
 		}
+		if WorkflowScopeRefused(err) {
+			// Never retried: only another host's credential changes it.
+			return failedFor(ReasonWorkflowScope, workflowScopeStop{
+				why: fmt.Sprintf("GitHub refused the push to %s: it creates or updates workflow files and the credential %s pushes with lacks the workflow scope, so %s cannot make it",
+					branch, n.Host, n.Host),
+				err: err,
+			})
+		}
 		if !Transient(err) {
 			return err
 		}
@@ -3240,6 +3256,17 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	}
 	report.Why, report.Reason = why, reason
 	n.recordBenchmark(ctx, c, report, false)
+	giveBack := false
+	if reason == ReasonWorkflowScope {
+		// Before the story is commented on and its claim given back: the
+		// attempt is tooling's and the story goes where the scope is held.
+		handed, repathed := n.workflowScopeHandOver(ctx, c, report, why)
+		giveBack = repathed
+		if said != "" {
+			handed += "\n\n" + said
+		}
+		said = handed
+	}
 
 	// The formula is closed before the claim can be given back, so that a
 	// dispatch that takes the story again pours it a fresh one rather than
@@ -3260,7 +3287,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	// Mayor can bd close it. Every other stop keeps the claim, because the claim
 	// is the evidence.
 	given := false
-	if reason == ReasonOpenSteps || reason == ReasonAcceptanceChanged || reason == ReasonNoClosingComment || reason == ReasonGristExampleUnproved || reason == ReasonTurnCap || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
+	if reason == ReasonOpenSteps || reason == ReasonAcceptanceChanged || reason == ReasonNoClosingComment || reason == ReasonGristExampleUnproved || reason == ReasonTurnCap || (reason == ReasonWorkflowScope && giveBack) || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
 		if err := n.releaseOnStop(ctx, c.id, report); err != nil {
 			trouble = append(trouble, fmt.Sprintf("the claim on %s could not be given back: %v", c.id, err))
 		} else {

@@ -504,6 +504,8 @@ func (w *Worktrees) Push(ctx context.Context, landingDir, remote, branch string)
 	}
 	if _, err := w.git(ctx, landingDir, "push", remote, "HEAD:refs/heads/"+branch); err != nil {
 		switch {
+		case workflowScopeRefused(err):
+			return fmt.Errorf("%w: %v", application.ErrPushWorkflowScope, err)
 		case rejected(err):
 			return fmt.Errorf("%w: %v", application.ErrPushRejected, err)
 		default:
@@ -697,6 +699,19 @@ func rejected(err error) bool {
 		return true
 	}
 	return false
+}
+
+// workflowScopeRefused reports whether git's refusal of a push is GitHub's for a
+// credential that may not create or update a workflow file: "refusing to allow
+// a Personal Access Token to create or update workflow `.github/workflows/x.yml`
+// without `workflow` scope" (or an OAuth App, in the same words). It is a
+// refusal for a reason of the credential, which only another host's can answer
+// (mw-gq6.999).
+func workflowScopeRefused(err error) bool {
+	said := strings.ToLower(err.Error())
+	return strings.Contains(said, "refusing to allow") &&
+		strings.Contains(said, "to create or update workflow") &&
+		strings.Contains(said, "without `workflow` scope")
 }
 
 // refusedPushFaults are the words of a push failure that say the remote is
