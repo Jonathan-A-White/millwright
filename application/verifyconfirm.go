@@ -112,6 +112,29 @@ func ownWordOf(ctx context.Context, beads VerifyConfirmBeads, demo StoryDetail, 
 	return asksHisOwnWord(texts...), nil
 }
 
+// answerCommentLine reads an ANSWER comment the postern inbox writes when a reply
+// to a card is recorded on its bead (recordAnswer, recordActedAnswer):
+// ANSWER [(by his acts) ]<time> from <key>[, answers card <short txid>], txid <txid>: <answer>
+var answerCommentLine = regexp.MustCompile(`(?s)^ANSWER (?:\(by his acts\) )?[^ ]* ?from ([^\s,]+)(?:, answers card \S+)?, txid (\S+): `)
+
+// hisTapOnItsOwnCard reports whether txid is his own answer on a card whose bead
+// is this one: an ANSWER comment on the bead's own record, from governorKey, for
+// that txid. It reads the record the postern inbox keeps of his answers, never
+// what a seat says the txid shows; a post of a seat's, a card on another bead
+// and a txid with no recorded answer are not his tap. With no governorKey no
+// answer is his.
+func hisTapOnItsOwnCard(comments []Comment, governorKey, txid string) bool {
+	if governorKey == "" || txid == "" {
+		return false
+	}
+	for _, c := range comments {
+		if m := answerCommentLine.FindStringSubmatch(c.Text); m != nil && m[1] == governorKey && m[2] == txid {
+			return true
+		}
+	}
+	return false
+}
+
 func ownWordRefusal(bead, word string) string {
 	return fmt.Sprintf("%s asks his own word (it touches %q: money, keys or a charter), so it is listed and never confirmed by a seat; put it on a card to him", bead, word)
 }
@@ -137,6 +160,10 @@ type VerifyConfirm struct {
 	Beads  VerifyConfirmBeads
 	Notes  PosternNotes
 	Sender PosternSender
+	// GovernorKey is his key, as the postern inbox writes it into the ANSWER
+	// comment of his reply. A demo that asks his own word is confirmed on his tap
+	// on its own card, and only when it is set.
+	GovernorKey string
 	// InboxDir is where the inbox pass saved his messages and pictures; it dates
 	// the txid of a confirm by hand. Empty dates it only by a PROPOSED comment.
 	InboxDir string
@@ -166,8 +193,9 @@ func verifyAs(as string) (string, error) {
 // Run confirms the bead. It is refused, writing nothing, when the bead is
 // unknown or already carries a VERIFIED comment, when no PROPOSED comment names
 // the txid and no --shows is given, and when the bead is a demo whose epic asks
-// his own word. A demo that is open or deferred is closed on the comment and
-// its card cleared; any other bead gets the comment only.
+// his own word and whose txid is not his tap on its own card. A demo that is
+// open or deferred is closed on the comment and its card cleared; any other
+// bead gets the comment only.
 func (c VerifyConfirm) Run(ctx context.Context, req VerifyConfirmRequest) error {
 	by, err := verifyAs(req.As)
 	if err != nil {
@@ -213,7 +241,12 @@ func (c VerifyConfirm) Run(ctx context.Context, req VerifyConfirmRequest) error 
 		if err != nil {
 			return fmt.Errorf("mw verify confirm: %w", err)
 		}
-		if word != "" {
+		switch {
+		case word == "":
+		case hisTapOnItsOwnCard(comments, c.GovernorKey, req.Txid):
+			// His own answer on the demo's own card is his word.
+			how += "; passed on his tap on its own card, " + req.Txid
+		default:
 			return fmt.Errorf("mw verify confirm: %s", ownWordRefusal(req.Bead, word))
 		}
 	}
@@ -325,6 +358,9 @@ type VerifyWaiting struct {
 // has confirmed. No agent is called.
 type VerifyList struct {
 	Beads VerifyConfirmBeads
+	// GovernorKey is his key: a proposal whose txid is his tap on the demo's own
+	// card is not marked as needing his word.
+	GovernorKey string
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 	// Out is where the list is printed. A nil Out prints nothing.
@@ -374,7 +410,11 @@ func (l VerifyList) Run(ctx context.Context) ([]VerifyWaiting, error) {
 			return
 		}
 		for _, p := range proposalsIn(comments[bead]) {
-			waiting = append(waiting, VerifyWaiting{Bead: bead, Kind: kind, Title: title, Txid: p.Txid, At: p.At, Shows: p.Shows, Confidence: p.Confidence, NeedsHisWord: refusal})
+			why := refusal
+			if hisTapOnItsOwnCard(comments[bead], l.GovernorKey, p.Txid) {
+				why = ""
+			}
+			waiting = append(waiting, VerifyWaiting{Bead: bead, Kind: kind, Title: title, Txid: p.Txid, At: p.At, Shows: p.Shows, Confidence: p.Confidence, NeedsHisWord: why})
 		}
 	}
 	epics := map[string]string{}

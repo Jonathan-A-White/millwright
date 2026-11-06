@@ -224,3 +224,105 @@ func TestVerifyConfirmByHandDatesTheTxidByTheInboxAndRefusesOneBeforeTheLanding(
 		t.Fatalf("evidence after the landing confirms: %v", err)
 	}
 }
+
+const governorKey = "02governor"
+
+// moneyEpic makes e-1, the epic of d-1, one that touches money.
+func (r *confirmRig) moneyEpic() {
+	r.beads.Details = map[string]application.StoryDetail{
+		"e-1": {Story: domain.Story{ID: "e-1", Title: "Spend money on the box"}, IsEpic: true, Status: application.StatusOpen},
+	}
+}
+
+// answer adds the comment the postern inbox writes for a reply on a card.
+func (r *confirmRig) answer(bead, from, txid string) {
+	r.beads.Comments[bead] = append(r.beads.Comments[bead], application.Comment{
+		Text: "ANSWER 2026-10-21T17:00:00Z from " + from + ", answers card 1a2b3c, txid " + txid + ": A: Yes, it works",
+	})
+}
+
+func (r *confirmRig) confirmAs(governor string) application.VerifyConfirm {
+	c := r.confirm()
+	c.GovernorKey = governor
+	return c
+}
+
+func TestVerifyConfirmTakesHisTapOnTheDemosOwnCardWhereItsEpicAsksHisWord(t *testing.T) {
+	ctx := context.Background()
+	r := newConfirmRig(t)
+	r.moneyEpic()
+	r.answer("d-1", governorKey, "direct:tap")
+	err := r.confirmAs(governorKey).Run(ctx, application.VerifyConfirmRequest{Bead: "d-1", Txid: "direct:tap", Shows: "his tap on the card"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) < 1 || firstWordOf(r.beads.Written[0].Text) != "VERIFIED" ||
+		!strings.Contains(r.beads.Written[0].Text, "his tap on its own card") || !strings.Contains(r.beads.Written[0].Text, "direct:tap") {
+		t.Fatalf("expected a VERIFIED comment saying it passed on his tap on its own card, got %+v", r.beads.Written)
+	}
+	if len(r.beads.Shut) != 1 || r.beads.Shut[0].ID != "d-1" {
+		t.Fatalf("expected d-1 closed, got %+v", r.beads.Shut)
+	}
+}
+
+func TestVerifyConfirmStillRefusesWhatIsNotHisTapOnTheDemosOwnCard(t *testing.T) {
+	ctx := context.Background()
+	wantRefusal := application.OwnWordRefusalFor("d-1", "money")
+	cases := map[string]func(r *confirmRig){
+		"a card on another bead": func(r *confirmRig) { r.answer("d-2", governorKey, "direct:tap") },
+		"a post of a seat's":     func(r *confirmRig) { r.answer("d-1", "02someseat", "direct:tap") },
+		"no recorded answer":     func(r *confirmRig) {},
+		"a QUESTION comment that is no answer": func(r *confirmRig) {
+			r.beads.Comments["d-1"] = append(r.beads.Comments["d-1"], application.Comment{Text: "QUESTION direct:tap A: Yes (from 02governor)"})
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			r := newConfirmRig(t)
+			r.moneyEpic()
+			setup(r)
+			err := r.confirmAs(governorKey).Run(ctx, application.VerifyConfirmRequest{Bead: "d-1", Txid: "direct:tap", Shows: "he tapped yes on the card, honest"})
+			if err == nil || !strings.Contains(err.Error(), wantRefusal) {
+				t.Fatalf("expected today's refusal %q, got %v", wantRefusal, err)
+			}
+			if len(r.beads.Written) != 0 || len(r.beads.Shut) != 0 {
+				t.Fatalf("a refusal changes nothing: %+v %+v", r.beads.Written, r.beads.Shut)
+			}
+		})
+	}
+}
+
+func TestVerifyConfirmWithNoGovernorKeyTakesNoTapAsHis(t *testing.T) {
+	r := newConfirmRig(t)
+	r.moneyEpic()
+	r.answer("d-1", governorKey, "direct:tap")
+	err := r.confirmAs("").Run(context.Background(), application.VerifyConfirmRequest{Bead: "d-1", Txid: "direct:tap", Shows: "his tap"})
+	if err == nil || !strings.Contains(err.Error(), "his own word") {
+		t.Fatalf("expected the refusal, got %v", err)
+	}
+}
+
+func TestVerifyConfirmTakesHisActedAnswerOnTheDemosOwnCard(t *testing.T) {
+	r := newConfirmRig(t)
+	r.moneyEpic()
+	r.beads.Comments["d-1"] = append(r.beads.Comments["d-1"], application.Comment{
+		Text: "ANSWER (by his acts) 2026-10-21T17:00:00Z from " + governorKey + ", answers card 1a2b3c, txid direct:act: A: Yes",
+	})
+	if err := r.confirmAs(governorKey).Run(context.Background(), application.VerifyConfirmRequest{Bead: "d-1", Txid: "direct:act", Shows: "his acts"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVerifyListDoesNotMarkADemoWhoseProposalIsHisTapOnItsOwnCard(t *testing.T) {
+	r := newConfirmRig(t)
+	r.moneyEpic()
+	r.answer("d-1", governorKey, "direct:aaa")
+	var out bytes.Buffer
+	waiting, err := application.VerifyList{Beads: r.beads, GovernorKey: governorKey, Now: func() time.Time { return verifyNow }, Out: &out}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(waiting) != 1 || waiting[0].NeedsHisWord != "" {
+		t.Fatalf("expected d-1 listed with a confirm line, got %+v:\n%s", waiting, out.String())
+	}
+}

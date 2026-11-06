@@ -205,7 +205,9 @@ func newVerifyConfirmCmd() *cobra.Command {
 			"closed, gets the comment only and keeps its status. No agent is called.\n\n" +
 			"A bead with no PROPOSED comment for the txid is refused, unless --shows \"<text>\" says what shows it: the\n" +
 			"comment then ends (by hand). A demo whose title, description or epic touches money, keys, secrets or a\n" +
-			"charter is refused: it is his word to give, not a seat's. A bead already carrying a VERIFIED comment is refused.\n\n" +
+			"charter is refused: it is his word to give, not a seat's, unless the txid is his own answer on that demo's own\n" +
+			"card (an ANSWER comment on the demo from the Governor's key), which is his word; the VERIFIED comment then says\n" +
+			"it passed on his tap on its own card. A bead already carrying a VERIFIED comment is refused.\n\n" +
 			"A txid written before the bead landed (a landing's close, an open demo's newest epic story's close) cannot show\n" +
 			"it working, and is refused unless --force \"<reason>\" says why; the reason stands in the VERIFIED comment.",
 		Args: cobra.ExactArgs(1),
@@ -218,8 +220,12 @@ func newVerifyConfirmCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			governorKey, err := config.PosternGovernorKey()
+			if err != nil {
+				return err
+			}
 			return application.VerifyConfirm{
-				Beads: gateway, Notes: gateway, Sender: newHandsPush(gateway), InboxDir: inbox, Out: cmd.OutOrStdout(),
+				Beads: gateway, Notes: gateway, Sender: newHandsPush(gateway), GovernorKey: governorKey, InboxDir: inbox, Out: cmd.OutOrStdout(),
 			}.Run(cmd.Context(), application.VerifyConfirmRequest{Bead: args[0], Txid: txid, As: as, Shows: shows, Force: force})
 		},
 	}
@@ -245,7 +251,11 @@ func newVerifyListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = application.VerifyList{Beads: gateway, Out: cmd.OutOrStdout()}.Run(cmd.Context())
+			governorKey, err := config.PosternGovernorKey()
+			if err != nil {
+				return err
+			}
+			_, err = application.VerifyList{Beads: gateway, GovernorKey: governorKey, Out: cmd.OutOrStdout()}.Run(cmd.Context())
 			return err
 		},
 	}
