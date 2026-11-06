@@ -676,7 +676,9 @@ func pidWhenWritten(t *testing.T, path string) int {
 func aGitThatSays(t *testing.T, what string) *rig.Worktrees {
 	t.Helper()
 	program := filepath.Join(t.TempDir(), "git")
-	script := fmt.Sprintf("#!/bin/sh\necho %q >&2\nexit 128\n", what)
+	// A quoted heredoc, so that backticks and quotes in git's words are not the
+	// shell's.
+	script := fmt.Sprintf("#!/bin/sh\ncat >&2 <<'MW_GIT_SAYS'\n%s\nMW_GIT_SAYS\nexit 128\n", what)
 	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
 		t.Fatalf("writing the stand-in for git: %v", err)
 	}
@@ -1113,6 +1115,7 @@ func TestAPushIsReadByEachOfTheWordsGitSaysItBy(t *testing.T) {
 		{refusal, "remote: Permission to x/y.git denied to someone."},
 		{refusal, "remote: error: not authorized"},
 		{refusal, " ! [remote rejected] main -> main (some other reason)"},
+		{refusal, " ! [remote rejected] main -> main (refusing to allow a Personal Access Token to create or update workflow `.github/workflows/x.yml` without `workflow` scope)"},
 
 		{transient, "remote: fatal error in commit_refs"},
 		{transient, "fatal: Connection reset by peer"},
@@ -1140,6 +1143,41 @@ func TestAPushIsReadByEachOfTheWordsGitSaysItBy(t *testing.T) {
 		}
 		if err == nil || got != tc.kind {
 			t.Errorf("%q: expected a %s, got a %s (%v)", tc.said, tc.kind, got, err)
+		}
+	}
+}
+
+// The refusal GitHub gives a push whose credential lacks the workflow scope
+// while the push creates or updates a file under .github/workflows/ is neither
+// a race nor a fault worth trying again: it is read as a refusal of its own
+// kind, the words git said kept (mw-gq6.999).
+func TestAPushRefusedForTheWorkflowScopeIsTold(t *testing.T) {
+	for _, said := range []string{
+		" ! [remote rejected] main -> main (refusing to allow a Personal Access Token to create or update workflow `.github/workflows/deploy.yml` without `workflow` scope)",
+		"remote: error: refusing to allow an OAuth App to create or update workflow `.github/workflows/ci.yml` without `workflow` scope",
+	} {
+		err := aGitThatSays(t, said).Push(context.Background(), t.TempDir(), "origin", "main")
+		if !application.WorkflowScopeRefused(err) {
+			t.Errorf("%q: expected a refusal for the workflow scope, got %v", said, err)
+		}
+		if application.Rejected(err) || application.Transient(err) {
+			t.Errorf("%q: expected neither a rejection nor a transient fault, got %v", said, err)
+		}
+		if err != nil && !strings.Contains(err.Error(), "without `workflow` scope") {
+			t.Errorf("%q: expected git's own words kept, got %v", said, err)
+		}
+	}
+}
+
+// A refusal that merely mentions a workflow in another way is a plain refusal.
+func TestAPushRefusedForAnotherReasonIsNotTheWorkflowScope(t *testing.T) {
+	for _, said := range []string{
+		" ! [remote rejected] main -> main (pre-receive hook declined)",
+		"remote: Permission to x/y.git denied to someone.",
+	} {
+		err := aGitThatSays(t, said).Push(context.Background(), t.TempDir(), "origin", "main")
+		if err == nil || application.WorkflowScopeRefused(err) {
+			t.Errorf("%q: expected a plain refusal, got %v", said, err)
 		}
 	}
 }

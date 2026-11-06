@@ -5786,6 +5786,18 @@ Governor a day, for up to thirty days; the text names `claude setup-token` and t
 `printf` line of `docs/secrets.md`. A host with no claude program or no env file has
 nothing to judge and reads ok.
 
+**workflow-scope** says, per host, whether the credential the host pushes with may
+write workflow files (mw-gq6.999): it reads the scopes `gh api -i user` shows. It
+reads ok either way, with the reading as its reason, because the scope is the
+Governor's to give; it reads cannot-tell when gh is missing or lists no scopes. The
+reading is also what `mw next` asks before it lands a branch that changes a file
+under `.github/workflows/`: a host that lacks the scope does not land it, names the
+attempt tooling (`mw cause`, not counted against max_attempts), re-paths the story
+to the home host and gives the claim back. A push GitHub refuses for the workflow
+scope in spite of that is stopped the same way (reason `workflow-scope`). On the home
+itself, or when the home cannot be told, the claim is kept and the mail says no other
+host can take it.
+
 **usage-fresh** faults when the newest quota reading (`mw usage show`) is stale and
 worth his phone (mw-gq6.855, mw-gq6.883). A reading older than 70 minutes, or taken before
 the week's reset, which has since passed, is marked `STALE` in `mw usage show` and in the
