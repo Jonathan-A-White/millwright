@@ -177,6 +177,13 @@ func (s SelfUpdate) runFactory(ctx context.Context) ([]string, *SelfUpdateFailur
 	// unbuilt, and only a tree that is exactly a commit.
 	if !advanced.Moved {
 		if built, err := s.Built.Built(ctx, FactoryRig); err != nil || built == head {
+			// Built at head, so deployed at head: a mark left behind by builds
+			// made before the build set it is caught up (mw-gq6.1009).
+			if err == nil {
+				if deployed, _ := s.Built.Built(ctx, deployedMark(FactoryRig)); deployed != head {
+					return with(nonEmpty(markDeployedAt(ctx, s.Built, FactoryRig, head)))
+				}
+			}
 			return with(nil)
 		}
 		if dirty, err := s.Checkout.Uncommitted(ctx, dir); err != nil || len(dirty) > 0 {
@@ -204,6 +211,12 @@ func (s SelfUpdate) runFactory(ctx context.Context) ([]string, *SelfUpdateFailur
 	}
 	if err := s.Built.MarkBuilt(ctx, FactoryRig, head); err != nil {
 		notes = append(notes, "the build could not be remembered: "+firstLine(err.Error()))
+	}
+	// A passing build of the factory rig is its deploy on this host (mw-gq6.1009):
+	// mw verify reads the deployed mark, which only an after-landing run on the
+	// host that landed a story otherwise sets.
+	if note := markDeployedAt(ctx, s.Built, FactoryRig, head); note != "" {
+		notes = append(notes, note)
 	}
 	said, _ := RestartFactoryUnits(ctx, s.Units, FactoryRig)
 	return with(append(notes, said...))
