@@ -57,6 +57,16 @@ type BdRetry struct {
 	Limit time.Duration
 	// Out and Err are bd's own two streams, as a caller sees them.
 	Out, Err io.Writer
+
+	// Turn and Quiet make bd wait before its first try (mw-gq6.568): for this
+	// host's turn to run a bd, and for no other bd and no mw sync to be running
+	// (only List of Quiet is used). Either may be nil. QuietWait is how long to
+	// wait for both: zero is BdQuietLimit, a negative number is not to wait at
+	// all. Poll is how often to look again; zero is half a second.
+	Turn      BdTurn
+	Quiet     UserProcesses
+	QuietWait time.Duration
+	Poll      time.Duration
 }
 
 // bdPassingFaults are the words a bd prints for a server it could not reach or
@@ -182,6 +192,11 @@ func (c bdCall) kind() bdKind {
 // limit. It returns the status the last run left with; an error only when bd
 // could not be started or the context ended.
 func (r BdRetry) Run(ctx context.Context, args []string) (int, error) {
+	release, err := r.take(ctx)
+	if err != nil {
+		return 1, err
+	}
+	defer release()
 	call := parseBdCall(args)
 	kind := call.kind()
 	began := r.now()
