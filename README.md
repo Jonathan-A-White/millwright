@@ -1550,6 +1550,20 @@ bd's own status after saying `giving up` and the fault it met. A host with no
 `bd` on its PATH keeps the PATH it had. `mw next` also tries the claim give-back
 of an open-steps stop again on the same faults.
 
+`mw bd` also waits before it runs `bd` (mw-gq6.568): the beads database takes
+one writer, and a seat told by its prompt to run one `bd` at a time still ran two
+side by side. It takes this host's turn (a flock on `bd.lock` in
+`~/.local/state/mw/`, so two `mw bd` at once run one after the other) and waits
+until no other `bd` and no `mw sync` is running (a `bd` working in the temporary
+directory, a test suite's throwaway vault, is not counted), for up to two
+minutes. A leading `--mw-wait <duration>` (or `MW_BD_WAIT`) changes the limit and
+`0` waits for nothing; every other argument, bd's environment and its exit status
+are the caller's. When the limit passes it runs no `bd`, exits 1 and names the
+process it waited for, or the `mw bd` that held the turn. Seats and Clerks run
+`mw bd <arguments>` where they would have waited for `pgrep -c -x bd` to read 0,
+which the factory's own timers keep from ever passing. Feature:
+`features/bd_retry.feature`.
+
 ### Who mw writes as
 
 `mw` names itself on **every** `bd` it runs: `--actor mw@<host>`, from the

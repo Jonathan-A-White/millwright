@@ -51,3 +51,37 @@ Feature: A Builder session's bd writes ride out a passing fault of the beads ser
     When the session runs bd close "mw-mol-1"
     Then bd left with a status that is not 0
     And bd was run 1 time
+
+  # mw-gq6.568: a prompt's word did not keep a Clerk's bd from running beside
+  # another bd; mw bd waits for the host to be quiet before it runs bd.
+  Scenario: A bd waits while another bd runs, then runs
+    Given a bd with the open steps "mw-mol-1" and "mw-mol-2"
+    And another bd, process 4242, runs and ends after 3 looks of mw bd
+    When the session runs bd close "mw-mol-1"
+    Then bd left with status 0
+    And the step "mw-mol-1" is closed
+    And mw bd waited for the other bd before it ran bd
+    And bd's standard error says "waited"
+
+  Scenario: A bd waits while a mw sync runs
+    Given a bd with the open steps "mw-mol-1" and "mw-mol-2"
+    And a mw sync, process 4343, runs and ends after 2 looks of mw bd
+    When the session runs bd close "mw-mol-1"
+    Then bd left with status 0
+    And mw bd waited for the other bd before it ran bd
+
+  Scenario: A bd that never gets a quiet host runs no bd and names what it waited for
+    Given a bd with the open steps "mw-mol-1" and "mw-mol-2"
+    And another bd, process 4242, runs and never ends
+    When the session runs bd close "mw-mol-1"
+    Then bd left with a status that is not 0
+    And the step "mw-mol-1" is open
+    And mw bd's failure names "4242"
+    And bd was run 0 times
+    And bd waited about 2 minutes
+
+  Scenario: Two mw bd commands at once run one after the other
+    Given a bd with the open steps "mw-mol-1" and "mw-mol-2"
+    When two sessions run bd at once
+    Then both bd commands left with status 0
+    And no two bd ran together
