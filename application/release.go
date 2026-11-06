@@ -7,6 +7,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // OverHoldMarker opens the comment Release writes on a story it releases over a
@@ -431,4 +432,198 @@ func (p FiledPlan) released(count int) string {
 		return did + " Nothing is ready: every story left waits on another, or is already taken.\n"
 	}
 	return fmt.Sprintf("%s Ready now: %s.\n", did, strings.Join(ready, ", "))
+}
+
+// The pace of a paced release (mw-u2w5klk, "The model stories and the pace"): at
+// most ReleasePacedMax stories of a list running or open at once, and none
+// released while the week's usage reads over ReleasePacedUsageLine percent. They
+// are the epic's numbers, kept here and nowhere else; they are no config keys.
+const (
+	ReleasePacedMax       = 3
+	ReleasePacedUsageLine = 60.0
+)
+
+// ReleasePaced un-holds the next stories of a list, in the order the list gives,
+// at the pace of the epic that filed them (ReleasePacedMax, ReleasePacedUsageLine),
+// so that nobody reads the usage and counts what runs by hand at each sitting.
+// A story of the list that is open or running counts against the pace and is
+// left as it is; one that is closed, not in the tracker, iced, or held on the
+// Governor's word is skipped and named. It says plainly why it released none.
+type ReleasePaced struct {
+	Tracker WorkTracker
+	// Readings are the usage readings mw usage read keeps.
+	Readings UsageReadings
+	Now      func() time.Time
+	// DryRun releases nothing and writes nothing, and prints what it would.
+	DryRun bool
+	Out    io.Writer
+}
+
+// Run releases the next stories of ids the pace allows and reports their ids.
+func (r ReleasePaced) Run(ctx context.Context, ids []string) ([]string, error) {
+	if r.Tracker == nil || r.Readings.Notes == nil {
+		return nil, fmt.Errorf("releasing a list: there is no work tracker to release it in")
+	}
+	ids = listIDs(ids)
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("releasing a list: the list has no story ids")
+	}
+	now := time.Now()
+	if r.Now != nil {
+		now = r.Now()
+	}
+	now = now.UTC()
+
+	reading, ok, err := r.usage(ctx, now)
+	if err != nil || !ok {
+		return nil, err
+	}
+
+	details, err := r.Tracker.ShowBeads(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("reading the stories of the list: %w", err)
+	}
+	byID := make(map[string]StoryDetail, len(details))
+	for _, detail := range details {
+		byID[detail.Story.ID] = detail
+	}
+	var active int
+	var held, closed, missing, iced []string
+	for _, id := range ids {
+		detail, found := byID[id]
+		switch {
+		case !found:
+			missing = append(missing, id)
+		case detail.Closed():
+			closed = append(closed, id)
+		case detail.Held() && detail.Iced():
+			iced = append(iced, id)
+		case detail.Held():
+			held = append(held, id)
+		default:
+			// Open or in progress: running or about to be, so it counts.
+			active++
+		}
+	}
+	r.printSkipped("closed, skipped", closed)
+	r.printSkipped("not in the tracker, skipped", missing)
+	r.printSkipped("iced, skipped (mw thaw first)", iced)
+
+	room := ReleasePacedMax - active
+	switch {
+	case room <= 0:
+		r.print(fmt.Sprintf("%d of the list running or open, at most %d at once: nothing released\n", active, ReleasePacedMax))
+		return nil, nil
+	case len(held) == 0:
+		r.print("no story of the list is held: nothing released\n")
+		return nil, nil
+	}
+
+	chosen, err := r.choose(ctx, held, room)
+	if err != nil {
+		return nil, err
+	}
+	if len(chosen) == 0 {
+		r.print("nothing released\n")
+		return nil, nil
+	}
+	if r.DryRun {
+		r.print(fmt.Sprintf("would release %d: %s (usage %.1f%% of the week, %d of the list running or open)\n",
+			len(chosen), strings.Join(chosen, ", "), reading.Percent, active))
+		return nil, nil
+	}
+	note := fmt.Sprintf("RELEASED by mw release-paced: usage %.1f%% of the week (read %s, the week resets %s), not over %.0f%%; "+
+		"%d of the list running or open, so room for %d (at most %d at once)",
+		reading.Percent, reading.At.UTC().Format(time.RFC3339), reading.Resets.UTC().Format(time.RFC3339),
+		ReleasePacedUsageLine, active, room, ReleasePacedMax)
+	var released []string
+	for _, id := range chosen {
+		if err := r.Tracker.ReleaseStory(ctx, id); err != nil {
+			return released, fmt.Errorf("releasing story %s: %w", id, err)
+		}
+		released = append(released, id)
+		if err := r.Tracker.CommentOnStory(ctx, id, note); err != nil {
+			return released, fmt.Errorf("%s was released; writing its comment failed: %w", id, err)
+		}
+	}
+	r.print(fmt.Sprintf("released %d: %s (usage %.1f%% of the week, %d of the list running or open)\n",
+		len(released), strings.Join(released, ", "), reading.Percent, active))
+	return released, nil
+}
+
+// usage reads the newest reading and says whether it lets a release go on. When
+// it does not, the reason is printed and ok is false with no error: the pace
+// held the release back, which is no failure.
+func (r ReleasePaced) usage(ctx context.Context, now time.Time) (reading UsageReading, ok bool, err error) {
+	all, err := r.Readings.All(ctx)
+	if err != nil {
+		return UsageReading{}, false, fmt.Errorf("reading the usage: %w", err)
+	}
+	if len(all) == 0 {
+		r.print("no usage was reported (mw usage read, or mw usage set <percent>): nothing released\n")
+		return UsageReading{}, false, nil
+	}
+	reading = all[len(all)-1]
+	if why := reading.Stale(now); why != "" {
+		r.print(fmt.Sprintf("usage %.1f%% is STALE (%s): nothing released; run mw usage read\n", reading.Percent, why))
+		return reading, false, nil
+	}
+	if reading.Percent > ReleasePacedUsageLine {
+		r.print(fmt.Sprintf("usage %.1f%% of the week (read %s) is over %.0f%%: nothing released\n",
+			reading.Percent, reading.At.UTC().Format(time.RFC3339), ReleasePacedUsageLine))
+		return reading, false, nil
+	}
+	return reading, true, nil
+}
+
+// choose is the first room of the held stories, in order, that no comment holds
+// on the Governor's word; one that does is skipped and named. It reads comments
+// only for as many stories as it needs.
+func (r ReleasePaced) choose(ctx context.Context, held []string, room int) ([]string, error) {
+	var chosen []string
+	for from := 0; from < len(held) && len(chosen) < room; {
+		to := min(from+room-len(chosen), len(held))
+		batch := held[from:to]
+		from = to
+		comments, err := r.Tracker.StoriesComments(ctx, batch)
+		if err != nil {
+			return nil, fmt.Errorf("reading the comments of %s to look for a hold on the Governor's word: %w",
+				strings.Join(batch, ", "), err)
+		}
+		for _, id := range batch {
+			if _, _, word := wordHold(id, comments[id], nil, ""); word {
+				r.print(fmt.Sprintf("%s is held on the Governor's word, skipped (mw release --over-hold \"<why>\" %s to release it)\n", id, id))
+				continue
+			}
+			chosen = append(chosen, id)
+		}
+	}
+	return chosen, nil
+}
+
+func (r ReleasePaced) printSkipped(what string, ids []string) {
+	if len(ids) > 0 {
+		r.print(fmt.Sprintf("%s: %s\n", what, strings.Join(ids, ", ")))
+	}
+}
+
+func (r ReleasePaced) print(line string) {
+	if r.Out != nil {
+		fmt.Fprint(r.Out, line)
+	}
+}
+
+// listIDs is the ids of a list in order, each once, with blank ones left out.
+func listIDs(ids []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
 }

@@ -1,6 +1,10 @@
 package main
 
 import (
+	"fmt"
+	"os"
+	"strings"
+
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -70,4 +74,58 @@ func rigRulesIfKnown() application.EpicRules {
 		return nil
 	}
 	return vault.New(dir)
+}
+
+// newReleasePacedCmd builds `mw release-paced`: how the next stories of a long
+// list filed held are un-held at the epic's pace, in place of by hand at each
+// sitting.
+func newReleasePacedCmd() *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "release-paced <list-file>",
+		Short: "Un-hold the next stories of a list file at the pace of the epic: at most 3 at once, none over 60% of the week",
+		Long: "release-paced reads a list file of story ids, one a line, in release order (blank lines and\n" +
+			"lines starting # are left out), and un-holds the next ones that are held.\n\n" +
+			"The pace is the epic's: never more than 3 stories of the list running or open at once, and\n" +
+			"none while mw usage show reads over 60% of the week. A story of the list that is open or\n" +
+			"running counts against the 3 and is left as it is; one that is closed, not in the tracker,\n" +
+			"iced, or held on the Governor's word is skipped and named. When it releases none it says why:\n" +
+			"the usage reading, the count, or that the reading is missing or stale (mw usage read).\n\n" +
+			"Each story released gets a comment quoting the usage reading and the count it acted on.\n" +
+			"--dry-run releases nothing, writes nothing, and prints what it would.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			text, err := os.ReadFile(args[0])
+			if err != nil {
+				return fmt.Errorf("reading the list: %w", err)
+			}
+			var ids []string
+			for _, line := range strings.Split(string(text), "\n") {
+				if line, _, _ = strings.Cut(line, "#"); strings.TrimSpace(line) != "" {
+					ids = append(ids, strings.TrimSpace(line))
+				}
+			}
+			gateway, err := beads.FromConfig()
+			if err != nil {
+				return err
+			}
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			host, err := config.Host()
+			if err != nil {
+				return err
+			}
+			_, err = application.ReleasePaced{
+				Tracker:  gateway,
+				Readings: application.UsageReadings{Notes: mwGateway(dir, host)},
+				DryRun:   dryRun,
+				Out:      cmd.OutOrStdout(),
+			}.Run(cmd.Context(), ids)
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "release nothing; print what would be released")
+	return cmd
 }
