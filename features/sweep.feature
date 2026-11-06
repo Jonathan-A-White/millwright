@@ -1,9 +1,10 @@
 Feature: mw sweep
   mw sweep finds, for this host, the claimed stories whose lease has run out
   with no heartbeat since — StaleClaims's own definition of a stuck claim, and
-  the only one — and marks each one run=stuck, once. It never kills or
-  restarts a session, never gives a claim back, and never touches a worktree,
-  git or the ledger.
+  the only one — and marks each one run=stuck, once. It closes the idle tmux
+  session of a story the tracker holds closed, and no other; it never restarts
+  a session, never gives a claim back, and never touches a worktree, git or the
+  ledger.
 
   Background:
     Given the sweep epic "mw-swp" on the default path:

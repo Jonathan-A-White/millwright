@@ -204,3 +204,17 @@ func TestStatusStopsLookingWhenTheCallerDoes(t *testing.T) {
 		t.Errorf("expected Status to return when its context ran out, took %s", took)
 	}
 }
+
+func TestParseSessionsCallsASessionIdleOnlyWhenEveryPaneIsDeadOrAtAShell(t *testing.T) {
+	printed := []byte("mw-a_1|0|bash\nmw-a_2|0|claude\nmw-a_3|1|claude\nmw-a_4|0|-zsh\nmw-a_4|0|node\nmw-a_5|0|bash\nmw-a_5|1|sleep\n\n")
+	want := map[string]bool{"mw-a_1": true, "mw-a_2": false, "mw-a_3": true, "mw-a_4": false, "mw-a_5": true}
+	got := parseSessions(printed)
+	if len(got) != len(want) {
+		t.Fatalf("parseSessions: %+v", got)
+	}
+	for _, session := range got {
+		if idle, named := want[session.Name]; !named || idle != session.Idle {
+			t.Errorf("%s: idle %v, want %v", session.Name, session.Idle, idle)
+		}
+	}
+}

@@ -314,6 +314,51 @@ func (r *Runner) Close(ctx context.Context, name string) error {
 	return nil
 }
 
+// shells are the foreground commands that mean a pane is only a prompt.
+var shells = map[string]bool{"bash": true, "sh": true, "zsh": true, "fish": true, "dash": true, "ksh": true}
+
+// Sessions implements application.SweepSessions: every session on the server,
+// idle when each of its panes is dead (the command ended; remain-on-exit keeps
+// the pane) or has only a shell in the foreground. A session whose pane runs
+// anything else is at work. No server, or no tmux program, holds no sessions.
+func (r *Runner) Sessions(ctx context.Context) ([]application.HostSession, error) {
+	if !Available() {
+		return nil, nil
+	}
+	out, err := r.call(ctx, "list-panes", "-a", "-F", "#{session_name}|#{pane_dead}|#{pane_current_command}")
+	if err != nil {
+		if noServer(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return parseSessions(out), nil
+}
+
+// parseSessions reads list-panes output, one pane a line, into sessions in the
+// order they first appear.
+func parseSessions(printed []byte) []application.HostSession {
+	var (
+		sessions []application.HostSession
+		at       = map[string]int{}
+	)
+	for _, line := range strings.Split(string(printed), "\n") {
+		fields := strings.SplitN(strings.TrimSpace(line), "|", 3)
+		if len(fields) != 3 || fields[0] == "" {
+			continue
+		}
+		idle := fields[1] == "1" || shells[strings.TrimPrefix(fields[2], "-")]
+		i, seen := at[fields[0]]
+		if !seen {
+			at[fields[0]] = len(sessions)
+			sessions = append(sessions, application.HostSession{Name: fields[0], Idle: idle})
+			continue
+		}
+		sessions[i].Idle = sessions[i].Idle && idle
+	}
+	return sessions
+}
+
 // exists reports whether the server has a session of that name. The second
 // return is the reason it could not be asked — tmux missing, say — which is not
 // the same as an answer of no.

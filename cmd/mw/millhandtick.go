@@ -15,6 +15,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/reaper"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/userunits"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 	"github.com/Jonathan-A-White/millwright/infrastructure/watch"
@@ -174,8 +175,9 @@ func newMillhandTickCmd() *cobra.Command {
 				Mail:        gateway,
 				DoctorNotes: gateway,
 				Sweep: application.Sweep{
-					Tracker: gateway,
-					Host:    host,
+					Tracker:  gateway,
+					Host:     host,
+					Sessions: tmux.New(),
 				},
 				SelfUpdate: hostSelfUpdate(rigs, afterLanding, afterLimits, home, mwVault(dir, host), host),
 				Backend:    hostBackend(gateway, mwVault(dir, host), host, rigs, cmd.ErrOrStderr()),

@@ -4504,10 +4504,17 @@ stale; StaleClaims is left to report only a session that really has gone
 away. Along with `vault` and `host`, that is all `mw sweep` reads from the
 config.
 
-The only things sweep writes are those comments and `run=stuck` on the
-story's own bead. Sweep never kills or restarts a session, never gives a
-claim back, and never touches a worktree, git or the ledger: settling a stuck
-claim is a separate command. One story's trouble — a write that fails — is
+The only things sweep writes to the tracker are those comments and `run=stuck`
+on the story's own bead. Of a tmux session it closes one kind: the session
+`mw-<id>` of a story the tracker holds closed (landed and verified), when its
+pane is idle (its command ended, or only a shell is in the foreground) — the
+session a close-out can leave behind, a session left over from a story sent
+back (`-sent-back`) included. A session of a story still open, claimed or
+running, a pane at work, and a session that is no story's (a seat's, a
+tester's, `whisper-server`) are never touched; a host with no tmux or no
+sessions says so and sweep exits 0. Sweep never restarts a session, never
+gives a claim back, and never touches a worktree, git or the ledger: settling
+a stuck claim is a separate command. One story's trouble — a write that fails — is
 reported on a `!` line and the rest are still examined. See
 `features/sweep.feature`.
 
