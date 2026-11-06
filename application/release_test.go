@@ -3,8 +3,10 @@ package application_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -398,6 +400,264 @@ func TestProseThatOnlyMentionsHeldAndTheGovernorDoesNotHoldTheStory(t *testing.T
 			if _, err := (application.Release{Tracker: tracker}).Run(context.Background(), module); err != nil {
 				t.Errorf("comment %q on %s: expected %s to release: %v", prose, bead, module, err)
 			}
+		}
+	}
+}
+
+// pacedNow is the moment the paced-release tests read the usage at.
+var pacedNow = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+
+// pacedList is a list of stories p-1, p-2, ... in the statuses given, in order,
+// and the usage a reading of percent was kept at ten minutes before pacedNow
+// with the week resetting three days after it.
+func pacedList(t *testing.T, percent float64, statuses ...string) (*apptest.FakeTracker, []string) {
+	t.Helper()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("p-epic", domain.Path{Rig: "septuagint", Branch: "main"})
+	var ids []string
+	for i, status := range statuses {
+		id := fmt.Sprintf("p-%d", i+1)
+		ids = append(ids, id)
+		if status == "missing" {
+			continue
+		}
+		tracker.AddStory("p-epic", domain.Story{ID: id, Title: "Batch " + id})
+		if status == application.StatusInProgress {
+			if err := tracker.ClaimAs(id, "mw@cloud3", pacedNow.Add(time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err := tracker.SetStatus(id, status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if percent >= 0 {
+		reading := application.UsageReading{Percent: percent, At: pacedNow.Add(-10 * time.Minute), Resets: pacedNow.Add(72 * time.Hour)}
+		if err := (application.UsageReadings{Notes: tracker}).Add(context.Background(), reading); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return tracker, ids
+}
+
+// pacedRelease runs the paced release over ids and returns what it released and
+// what it printed.
+func pacedRelease(t *testing.T, tracker *apptest.FakeTracker, ids []string, dryRun bool) ([]string, string) {
+	t.Helper()
+	var out strings.Builder
+	released, err := application.ReleasePaced{
+		Tracker:  tracker,
+		Readings: application.UsageReadings{Notes: tracker},
+		Now:      func() time.Time { return pacedNow },
+		DryRun:   dryRun,
+		Out:      &out,
+	}.Run(context.Background(), ids)
+	if err != nil {
+		t.Fatalf("releasing the list: %v\n%s", err, out.String())
+	}
+	return released, out.String()
+}
+
+func statusOf(t *testing.T, tracker *apptest.FakeTracker, id string) string {
+	t.Helper()
+	detail, err := tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		t.Fatalf("reading %s: %v", id, err)
+	}
+	return detail.Status
+}
+
+func TestThePaceIsThreeStoriesAndSixtyPercent(t *testing.T) {
+	if application.ReleasePacedMax != 3 || application.ReleasePacedUsageLine != 60 {
+		t.Errorf("the epic's pace is 3 at once and 60%% of the week, got %d and %v",
+			application.ReleasePacedMax, application.ReleasePacedUsageLine)
+	}
+}
+
+func TestPacedReleaseWithUsageOverTheLineReleasesNoneAndSaysSo(t *testing.T) {
+	held := application.StatusHeld
+	tracker, ids := pacedList(t, 74, held, held, held)
+
+	released, out := pacedRelease(t, tracker, ids, false)
+
+	if len(released) != 0 {
+		t.Errorf("expected none released with the usage at 74%%, got %v", released)
+	}
+	for _, want := range []string{"74.0%", "over 60%", "nothing released"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected the output to say %q, got:\n%s", want, out)
+		}
+	}
+	for _, id := range ids {
+		if got := statusOf(t, tracker, id); got != held {
+			t.Errorf("expected %s to stay held, it is %s", id, got)
+		}
+		if comments := tracker.Comments(id); len(comments) != 0 {
+			t.Errorf("expected no comment on %s, got %v", id, comments)
+		}
+	}
+}
+
+func TestPacedReleaseAtExactlyTheLineReleases(t *testing.T) {
+	held := application.StatusHeld
+	tracker, ids := pacedList(t, 60, held, held)
+
+	released, _ := pacedRelease(t, tracker, ids, false)
+
+	if strings.Join(released, ",") != "p-1,p-2" {
+		t.Errorf("expected 60%% to be under the line (only over 60%% stops it), got %v", released)
+	}
+}
+
+func TestPacedReleaseWithNoFreshReadingReleasesNone(t *testing.T) {
+	held := application.StatusHeld
+	stale := application.UsageReading{Percent: 10, At: pacedNow.Add(-5 * time.Hour), Resets: pacedNow.Add(72 * time.Hour)}
+	week := application.UsageReading{Percent: 10, At: pacedNow.Add(-5 * 24 * time.Hour), Resets: pacedNow.Add(-time.Hour)}
+	for name, c := range map[string]struct {
+		reading *application.UsageReading
+		want    string
+	}{
+		"no reading":                 {nil, "no usage was reported"},
+		"reading hours old":          {&stale, "STALE"},
+		"reading of the week before": {&week, "STALE"},
+	} {
+		tracker, ids := pacedList(t, -1, held)
+		if c.reading != nil {
+			if err := (application.UsageReadings{Notes: tracker}).Add(context.Background(), *c.reading); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		released, out := pacedRelease(t, tracker, ids, false)
+
+		if len(released) != 0 || statusOf(t, tracker, "p-1") != held {
+			t.Errorf("%s: expected nothing released, got %v", name, released)
+		}
+		if !strings.Contains(out, c.want) || !strings.Contains(out, "nothing released") {
+			t.Errorf("%s: expected the output to say %q and that nothing was released, got:\n%s", name, c.want, out)
+		}
+	}
+}
+
+func TestPacedReleaseWithThreeOfTheListRunningReleasesNone(t *testing.T) {
+	held, running := application.StatusHeld, application.StatusInProgress
+	tracker, ids := pacedList(t, 30, running, running, running, held, held)
+
+	released, out := pacedRelease(t, tracker, ids, false)
+
+	if len(released) != 0 {
+		t.Errorf("expected none released with 3 running, got %v", released)
+	}
+	for _, want := range []string{"3 of the list", "at most 3", "nothing released"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected the output to say %q, got:\n%s", want, out)
+		}
+	}
+	if got := statusOf(t, tracker, "p-4"); got != held {
+		t.Errorf("expected p-4 to stay held, it is %s", got)
+	}
+}
+
+func TestPacedReleaseWithOneRunningReleasesTheNextTwoInOrder(t *testing.T) {
+	held, running := application.StatusHeld, application.StatusInProgress
+	tracker, ids := pacedList(t, 52.5, held, running, held, held, held)
+
+	released, out := pacedRelease(t, tracker, ids, false)
+
+	if strings.Join(released, ",") != "p-1,p-3" {
+		t.Fatalf("expected the next two in the list, p-1 and p-3, got %v\n%s", released, out)
+	}
+	for id, want := range map[string]string{"p-1": application.StatusOpen, "p-3": application.StatusOpen, "p-4": application.StatusHeld, "p-5": application.StatusHeld} {
+		if got := statusOf(t, tracker, id); got != want {
+			t.Errorf("expected %s to be %s, it is %s", id, want, got)
+		}
+	}
+	// Each bead released says what it acted on.
+	for _, id := range released {
+		comments := tracker.Comments(id)
+		if len(comments) != 1 {
+			t.Fatalf("expected one comment on %s, got %v", id, comments)
+		}
+		for _, want := range []string{"RELEASED", "52.5%", "1 of the list running or open", "at most 3"} {
+			if !strings.Contains(comments[0], want) {
+				t.Errorf("expected the comment on %s to quote %q, got %q", id, want, comments[0])
+			}
+		}
+	}
+	if comments := tracker.Comments("p-4"); len(comments) != 0 {
+		t.Errorf("expected no comment on p-4, got %v", comments)
+	}
+	if !strings.Contains(out, "released 2: p-1, p-3") {
+		t.Errorf("expected the output to name what it released, got:\n%s", out)
+	}
+}
+
+func TestPacedReleaseCountsAnOpenStoryOfTheListAgainstThePace(t *testing.T) {
+	held, open := application.StatusHeld, application.StatusOpen
+	tracker, ids := pacedList(t, 30, open, open, held, held)
+
+	released, _ := pacedRelease(t, tracker, ids, false)
+
+	if strings.Join(released, ",") != "p-3" {
+		t.Errorf("expected two open to leave room for one, got %v", released)
+	}
+}
+
+func TestPacedReleaseSkipsAndNamesAClosedAMissingAndAnIcedStory(t *testing.T) {
+	held, closed := application.StatusHeld, application.StatusClosed
+	tracker, ids := pacedList(t, 30, closed, "missing", held, held, held, held)
+	if err := tracker.AddLabel(context.Background(), "p-3", application.LabelIcebox); err != nil {
+		t.Fatal(err)
+	}
+
+	released, out := pacedRelease(t, tracker, ids, false)
+
+	if strings.Join(released, ",") != "p-4,p-5,p-6" {
+		t.Errorf("expected the held, un-iced stories after the skipped ones, got %v", released)
+	}
+	for _, want := range []string{"closed, skipped: p-1", "not in the tracker, skipped: p-2", "iced, skipped (mw thaw first): p-3"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected the output to say %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestPacedReleaseLeavesAStoryHeldOnTheGovernorsWord(t *testing.T) {
+	held := application.StatusHeld
+	tracker, ids := pacedList(t, 30, held, held)
+	if err := tracker.CommentOnStory(context.Background(), "p-1", "HELD: waits for the Governor's word"); err != nil {
+		t.Fatal(err)
+	}
+
+	released, out := pacedRelease(t, tracker, ids, false)
+
+	if strings.Join(released, ",") != "p-2" {
+		t.Errorf("expected only p-2 released, got %v", released)
+	}
+	if !strings.Contains(out, "p-1 is held on the Governor's word") {
+		t.Errorf("expected the output to name p-1, got:\n%s", out)
+	}
+}
+
+func TestPacedReleaseDryRunReleasesNothingAndPrintsWhatItWould(t *testing.T) {
+	held := application.StatusHeld
+	tracker, ids := pacedList(t, 30, held, held, held, held)
+
+	released, out := pacedRelease(t, tracker, ids, true)
+
+	if len(released) != 0 {
+		t.Errorf("expected a dry run to release none, got %v", released)
+	}
+	if !strings.Contains(out, "would release 3: p-1, p-2, p-3") {
+		t.Errorf("expected the output to say what it would release, got:\n%s", out)
+	}
+	for _, id := range ids {
+		if got := statusOf(t, tracker, id); got != held {
+			t.Errorf("expected %s to stay held, it is %s", id, got)
+		}
+		if comments := tracker.Comments(id); len(comments) != 0 {
+			t.Errorf("expected no comment on %s, got %v", id, comments)
 		}
 	}
 }
