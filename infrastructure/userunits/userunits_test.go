@@ -88,3 +88,75 @@ func TestTryRestartReportsAFailedRestartWithWhatSystemctlSaid(t *testing.T) {
 		t.Fatalf("expected the failure with what systemctl said, got %v", err)
 	}
 }
+
+// reloadStandIn is a systemctl that lists mw-dispatch.service and
+// mw-health.timer as loaded and answers `show` for them from needs (unit ->
+// yes/no), logging every call. A `daemon-reload` fails when reloadFails.
+func reloadStandIn(t *testing.T, needs map[string]string, reloadFails bool) (userunits.Systemctl, string) {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	var show strings.Builder
+	for _, unit := range []string{"mw-dispatch.service", "mw-health.timer"} {
+		show.WriteString("echo Id=" + unit + "; echo NeedDaemonReload=" + needs[unit] + "; echo;")
+	}
+	fail := "exit 0"
+	if reloadFails {
+		fail = "echo 'Access denied' >&2; exit 1"
+	}
+	script := "#!/bin/sh\necho \"$*\" >> " + log + "\n" +
+		"case \"$*\" in\n" +
+		"*list-units*) echo 'mw-dispatch.service loaded active running Dispatch'; echo 'mw-health.timer loaded active waiting Health';;\n" +
+		"*show*) " + show.String() + " true;;\n" +
+		"*daemon-reload*) " + fail + ";;\n" +
+		"esac\n"
+	bin := filepath.Join(dir, "systemctl")
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return userunits.Systemctl{Bin: bin}, log
+}
+
+func TestStaleUnitsNamesEveryLoadedMwUnitThatNeedsADaemonReload(t *testing.T) {
+	sc, _ := reloadStandIn(t, map[string]string{"mw-dispatch.service": "yes", "mw-health.timer": "no"}, false)
+
+	stale, err := sc.StaleUnits(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stale) != 1 || stale[0] != "mw-dispatch.service" {
+		t.Fatalf("expected only mw-dispatch.service stale, got %q", stale)
+	}
+}
+
+func TestReloadStaleRunsDaemonReloadWhenAUnitFileChangedAndNotOtherwise(t *testing.T) {
+	sc, log := reloadStandIn(t, map[string]string{"mw-dispatch.service": "no", "mw-health.timer": "no"}, false)
+	stale, err := sc.ReloadStale(context.Background())
+	if err != nil || len(stale) != 0 {
+		t.Fatalf("expected nothing stale and no error, got %q, %v", stale, err)
+	}
+	if got, _ := os.ReadFile(log); strings.Contains(string(got), "daemon-reload") {
+		t.Fatalf("expected no daemon-reload when no unit changed, calls were:\n%s", got)
+	}
+
+	sc, log = reloadStandIn(t, map[string]string{"mw-dispatch.service": "yes", "mw-health.timer": "yes"}, false)
+	stale, err = sc.ReloadStale(context.Background())
+	if err != nil || len(stale) != 2 {
+		t.Fatalf("expected both units named stale, got %q, %v", stale, err)
+	}
+	if got, _ := os.ReadFile(log); !strings.Contains(string(got), "--user daemon-reload\n") {
+		t.Fatalf("expected systemctl --user daemon-reload to have run, calls were:\n%s", got)
+	}
+}
+
+func TestReloadStaleSaysWhatSystemctlSaidWhenTheReloadFails(t *testing.T) {
+	sc, _ := reloadStandIn(t, map[string]string{"mw-dispatch.service": "yes"}, true)
+
+	stale, err := sc.ReloadStale(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "Access denied") {
+		t.Fatalf("expected the failure with what systemctl said, got %v", err)
+	}
+	if len(stale) != 1 {
+		t.Errorf("expected the unit still named, got %q", stale)
+	}
+}

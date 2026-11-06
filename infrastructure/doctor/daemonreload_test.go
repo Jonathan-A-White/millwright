@@ -205,3 +205,77 @@ func TestTheDaemonReloadDamperIsTenMinutesCapThree(t *testing.T) {
 		t.Fatalf("expected %s/%d, got %s/%d", doctor.DaemonReloadWait, doctor.DaemonReloadCap, wait, capPerEpisode)
 	}
 }
+
+// listingSystemctl is a stand-in for a systemctl whose user manager has
+// loaded the units in loaded (unit -> yes/no for NeedDaemonReload), so that
+// `list-units` names them and a `show` of several answers each; a `show` of
+// one unit with -p LoadState or -p NeedDaemonReload says loaded and no.
+func listingSystemctl(t *testing.T, loaded map[string]string) (program, callLog string) {
+	t.Helper()
+	dir := t.TempDir()
+	program = filepath.Join(dir, "systemctl-stand-in")
+	callLog = filepath.Join(dir, "calls")
+	var list, blocks strings.Builder
+	for unit, value := range loaded {
+		fmt.Fprintf(&list, "echo '%s loaded active running x'\n", unit)
+		fmt.Fprintf(&blocks, "echo Id=%s\necho NeedDaemonReload=%s\necho\n", unit, value)
+	}
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$*" >>%q
+case "$*" in
+*daemon-reload*) exit 0 ;;
+*list-units*)
+%s exit 0 ;;
+*"-p Id"*)
+%s exit 0 ;;
+*LoadState*) echo LoadState=loaded; exit 0 ;;
+*NeedDaemonReload*) echo NeedDaemonReload=no; exit 0 ;;
+esac
+exit 1
+`, callLog, list.String(), blocks.String())
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in: %v", err)
+	}
+	return program, callLog
+}
+
+func TestTheDaemonReloadProbeAlarmsOnAnyMwUnitThatNeedsAReloadEvenOneNotInTheList(t *testing.T) {
+	program, _ := listingSystemctl(t, map[string]string{"mw-postern-mirror.service": "yes", "mw-health.timer": "no"})
+	check := &doctor.DaemonReload{Units: []string{"mw-dispatch.service"}, Program: program}
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty, got %s (%s)", verdict, reason)
+	}
+	if !strings.Contains(reason, "mw-postern-mirror.service") {
+		t.Errorf("expected the reason to name the unit, got %q", reason)
+	}
+	if strings.Contains(reason, "mw-health.timer") {
+		t.Errorf("expected only the unit needing a reload named, got %q", reason)
+	}
+	if !strings.Contains(reason, "systemctl --user daemon-reload") {
+		t.Errorf("expected the reason to say the one fix line, got %q", reason)
+	}
+}
+
+func TestTheDaemonReloadProbeNamesAUnitInTheListAndOneBeyondItOnce(t *testing.T) {
+	program, _ := listingSystemctl(t, map[string]string{"mw-dispatch.service": "yes", "mw-health.timer": "yes"})
+	check := &doctor.DaemonReload{Units: []string{"mw-dispatch.service"}, Program: program}
+
+	_, reason := check.Probe(context.Background())
+	if n := strings.Count(reason, "mw-dispatch.service"); n != 1 {
+		t.Errorf("expected mw-dispatch.service named once, got %d in %q", n, reason)
+	}
+	if !strings.Contains(reason, "mw-health.timer") {
+		t.Errorf("expected mw-health.timer named too, got %q", reason)
+	}
+}
+
+func TestTheDaemonReloadProbeIsOKWhenEveryMwUnitIsCurrent(t *testing.T) {
+	program, _ := listingSystemctl(t, map[string]string{"mw-postern-mirror.service": "no"})
+	check := &doctor.DaemonReload{Units: []string{"mw-dispatch.service"}, Program: program}
+
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected ok, got %s (%s)", verdict, reason)
+	}
+}

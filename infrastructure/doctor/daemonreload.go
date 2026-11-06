@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/userunits"
 )
 
 var _ application.DoctorCheck = (*DaemonReload)(nil)
@@ -24,10 +25,14 @@ const (
 	DaemonReloadCap  = 3
 )
 
+// DaemonReloadFix is the one line that mends a unit file changed on disk and
+// not yet read by the user manager: the reason of a faulty probe ends with it.
+const DaemonReloadFix = "fix: systemctl --user daemon-reload"
+
 // DaemonReload is the check that keeps systemd --user's view of this rig's
-// unit files current: it asks systemctl whether any of Units needs a reload,
-// and, if so, runs one. Nothing it does ever starts, stops or restarts a
-// unit.
+// unit files current: it asks systemctl whether any of Units, or any other
+// mw-* user unit the manager has loaded (mw-gq6.565), needs a reload, and, if
+// so, runs one. Nothing it does ever starts, stops or restarts a unit.
 type DaemonReload struct {
 	// Units are the user units this check asks systemctl about.
 	Units []string
@@ -82,8 +87,9 @@ func (d *DaemonReload) Probe(ctx context.Context) (application.Verdict, string) 
 			unclear = append(unclear, unit)
 		}
 	}
+	needing = d.withLoadedMwUnits(ctx, needing)
 	if len(needing) > 0 {
-		return application.DoctorFaulty, "needs a reload: " + strings.Join(needing, ", ")
+		return application.DoctorFaulty, "needs a reload: " + strings.Join(needing, ", ") + "; " + DaemonReloadFix
 	}
 	if len(unclear) > 0 {
 		return application.DoctorCannotTell, "systemctl did not say: " + strings.Join(unclear, ", ")
@@ -92,6 +98,27 @@ func (d *DaemonReload) Probe(ctx context.Context) (application.Verdict, string) 
 		return application.DoctorOK, notInstalledReason
 	}
 	return application.DoctorOK, ""
+}
+
+// withLoadedMwUnits adds to needing every other mw-* user unit the manager has
+// loaded that needs a reload, so a unit file the [doctor] table does not list
+// (a timer, the mirror, a newly shipped service) is alarmed on all the same. A
+// listing that fails adds none: the units asked about one by one have spoken.
+func (d *DaemonReload) withLoadedMwUnits(ctx context.Context, needing []string) []string {
+	stale, err := userunits.Systemctl{Bin: d.Program}.StaleUnits(ctx)
+	if err != nil {
+		return needing
+	}
+	for _, unit := range stale {
+		seen := false
+		for _, have := range needing {
+			seen = seen || have == unit
+		}
+		if !seen {
+			needing = append(needing, unit)
+		}
+	}
+	return needing
 }
 
 // notInstalled reports whether unit has no unit file on this host at all:

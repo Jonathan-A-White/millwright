@@ -65,3 +65,64 @@ func (s Systemctl) TryRestart(ctx context.Context, unit string) (bool, error) {
 	}
 	return true, nil
 }
+
+// StaleUnits names every mw-* user unit the user manager has loaded whose file
+// has changed on disk since (`NeedDaemonReload=yes`): the installed units are
+// links into the rig's checkout, so a landing that edits one changes the file
+// the manager still holds the old reading of (mw-gq6.565). A host with no such
+// unit, or none loaded, has none.
+func (s Systemctl) StaleUnits(ctx context.Context) ([]string, error) {
+	listed, err := s.run(ctx, "list-units", "--all", "--plain", "--no-legend", "--full", "mw-*")
+	if err != nil {
+		return nil, fmt.Errorf("listing the mw user units: %w", err)
+	}
+	var names []string
+	for _, line := range strings.Split(string(listed), "\n") {
+		if fields := strings.Fields(line); len(fields) > 0 && strings.HasPrefix(fields[0], "mw-") {
+			names = append(names, fields[0])
+		}
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	shown, err := s.run(ctx, append([]string{"show", "-p", "Id", "-p", "NeedDaemonReload"}, names...)...)
+	if err != nil {
+		return nil, fmt.Errorf("asking whether the mw user units need a reload: %w", err)
+	}
+	var stale []string
+	for _, block := range strings.Split(string(shown), "\n\n") {
+		var id, need string
+		for _, line := range strings.Split(block, "\n") {
+			key, value, found := strings.Cut(strings.TrimSpace(line), "=")
+			switch {
+			case !found:
+			case key == "Id":
+				id = strings.TrimSpace(value)
+			case key == "NeedDaemonReload":
+				need = strings.TrimSpace(value)
+			}
+		}
+		if id != "" && need == "yes" {
+			stale = append(stale, id)
+		}
+	}
+	return stale, nil
+}
+
+// ReloadStale runs `systemctl --user daemon-reload` when StaleUnits names any
+// unit, and not otherwise, and returns the units it found stale. A reload that
+// fails is an error carrying what systemctl said, with the units still named.
+func (s Systemctl) ReloadStale(ctx context.Context) ([]string, error) {
+	stale, err := s.StaleUnits(ctx)
+	if err != nil || len(stale) == 0 {
+		return nil, err
+	}
+	out, err := s.run(ctx, "daemon-reload")
+	if err != nil {
+		if said := strings.Join(strings.Fields(string(out)), " "); said != "" {
+			return stale, fmt.Errorf("daemon-reload: %v: %s", err, said)
+		}
+		return stale, fmt.Errorf("daemon-reload: %w", err)
+	}
+	return stale, nil
+}
