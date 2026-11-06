@@ -32,6 +32,9 @@ type LandRushStatus struct {
 	Last       BatchMetric
 	Kept       bool
 	HeldInARow int
+	// Unwatched says the rig is not among this host's rigs, so that no follower
+	// here lands its queue (mw-gq6.748).
+	Unwatched bool
 	// Today says Last was made on the report's day, so that its time is told
 	// without a date.
 	Today bool
@@ -45,6 +48,12 @@ func (l LandRushStatus) Lines() []string {
 		queued += ", oldest " + Clock(l.Oldest)
 	}
 	lines := []string{queued}
+	if l.Unwatched {
+		lines = append(lines,
+			"  queue not watched: this host lacks the rig",
+			"  added after the follower started?",
+			"  restart mw-view-follow")
+	}
 	for _, out := range l.LeftOut {
 		lines = append(lines, "  left out: "+out)
 	}
@@ -68,12 +77,23 @@ func (l LandRushStatus) Lines() []string {
 // be read: neither is a reason to refuse the rest of the report. Nothing is
 // written.
 func (s Status) landRushStatuses(ctx context.Context, work WorkInHand) []LandRushStatus {
-	if s.Rules == nil || len(s.Rigs) == 0 {
+	if s.Rules == nil {
 		return nil
 	}
+	// A rig with stories queued that this host does not have is listed too,
+	// as unwatched: the follower lands only the rigs it has (mw-gq6.748).
 	names := make([]string, 0, len(s.Rigs))
 	for name := range s.Rigs {
 		names = append(names, name)
+	}
+	unwatched := map[string]bool{}
+	for _, detail := range work.Queued() {
+		if path, err := detail.Path(); err == nil {
+			if _, here := s.Rigs[path.Rig]; !here && !unwatched[path.Rig] {
+				unwatched[path.Rig] = true
+				names = append(names, path.Rig)
+			}
+		}
 	}
 	sort.Strings(names)
 	now := s.now()
@@ -85,7 +105,7 @@ func (s Status) landRushStatuses(ctx context.Context, work WorkInHand) []LandRus
 		if err != nil || rules.LandingSettings().Mode != domain.LandingBatch {
 			continue
 		}
-		one := LandRushStatus{Rig: name}
+		one := LandRushStatus{Rig: name, Unwatched: unwatched[name]}
 		for _, detail := range work.QueuedHeld() {
 			if path, err := detail.Path(); err == nil && path.Rig == name {
 				one.LeftOut = append(one.LeftOut, detail.Story.ID+" is held, so the batch leaves it out")

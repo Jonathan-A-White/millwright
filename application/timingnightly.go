@@ -342,9 +342,13 @@ func timingComment(result TimingResult, failure TimingFailure, logPath string) s
 type NightlyTiming struct {
 	// Hour is the UTC hour of the day from which the run is due: the suite's.
 	Hour int
-	// Rigs and Tests are the config file's tables, by rig name.
-	Rigs  map[string]string
-	Tests map[string]string
+	// Rigs and Tests are the config file's tables, by rig name, as the follower
+	// started; ReadConfig, when set, is asked on every pass for them as they are
+	// now, so that a rig added while the follower runs has its timing run too
+	// (mw-gq6.748). A read that fails leaves Rigs and Tests.
+	Rigs       map[string]string
+	Tests      map[string]string
+	ReadConfig func() (rigs, tests map[string]string, err error)
 	// Rules is where each rig's timing_tests, nightly_suite and suite_epic are read from.
 	Rules EpicRules
 	// Suites is where the day's result of the whole suite is looked for.
@@ -376,6 +380,16 @@ type NightlyTiming struct {
 
 	mu    sync.Mutex
 	tried map[string]string // rig -> the day it was last looked at
+}
+
+// config is the rigs and tests tables as they are now.
+func (n *NightlyTiming) config() (rigs, tests map[string]string) {
+	if n.ReadConfig != nil {
+		if rigs, tests, err := n.ReadConfig(); err == nil {
+			return rigs, tests
+		}
+	}
+	return n.Rigs, n.Tests
 }
 
 func (n *NightlyTiming) now() time.Time {
@@ -440,8 +454,9 @@ func (n *NightlyTiming) Due(ctx context.Context) ([]TimingDue, error) {
 		return nil, nil
 	}
 	day := now.Format("2006-01-02")
-	names := make([]string, 0, len(n.Rigs))
-	for name := range n.Rigs {
+	rigs, _ := n.config()
+	names := make([]string, 0, len(rigs))
+	for name := range rigs {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -502,7 +517,7 @@ func (n *NightlyTiming) Due(ctx context.Context) ([]TimingDue, error) {
 
 	var due []TimingDue
 	for _, c := range candidates {
-		found, why, err := n.assess(ctx, c.rig, c.globs)
+		found, why, err := n.assess(ctx, rigs[c.rig], c.rig, c.globs)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("the timing run of %s: %w", c.rig, err))
 			continue
@@ -526,8 +541,7 @@ func (n *NightlyTiming) markTried(rig, day string) {
 
 // assess says whether the timing run of rig is due, from what origin's head
 // and the last passing night say. When it is not, why says so.
-func (n *NightlyTiming) assess(ctx context.Context, rig string, globs []string) (due *TimingDue, why string, err error) {
-	rigDir := n.Rigs[rig]
+func (n *NightlyTiming) assess(ctx context.Context, rigDir, rig string, globs []string) (due *TimingDue, why string, err error) {
 	head, err := n.Heads.Resolve(ctx, rigDir, "")
 	if err != nil {
 		return nil, "", fmt.Errorf("reading %s's origin: %w", rig, err)
@@ -615,7 +629,8 @@ func (n *NightlyTiming) run(ctx context.Context) error {
 // is no error: the night is skipped, and skipped says so, naming the load.
 func (n *NightlyTiming) runRig(ctx context.Context, due TimingDue) (skipped string, err error) {
 	rig := due.Rig
-	tests := strings.TrimSpace(n.Tests[rig])
+	_, allTests := n.config()
+	tests := strings.TrimSpace(allTests[rig])
 	if tests == "" {
 		return "", fmt.Errorf("the rig %s has no [tests] entry in the config file: a timing run needs to be told what the tests are", rig)
 	}

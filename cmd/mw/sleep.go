@@ -302,14 +302,19 @@ func sleepSpringJob(host string, hour, minute int, out io.Writer) (application.S
 	if err != nil {
 		return application.SpringJob{}, err
 	}
-	pass, err := newSleepPass(dir, host, out)
-	if err != nil {
+	if _, err := newSleepPass(dir, host, out); err != nil {
 		return application.SpringJob{}, err
 	}
 	nightly := &application.SleepNightly{
 		Hour: hour, Minute: minute, Notes: mwGateway(dir, host),
 		Run: func(ctx context.Context) error {
-			_, err := pass.Run(ctx, application.SleepOptions{})
+			// Made anew for each night, so a rig added while the follower
+			// runs is in the pass's bundle (mw-gq6.748).
+			pass, err := newSleepPass(dir, host, out)
+			if err != nil {
+				return err
+			}
+			_, err = pass.Run(ctx, application.SleepOptions{})
 			return err
 		},
 		Home: func(ctx context.Context) (bool, error) {

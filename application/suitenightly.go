@@ -59,8 +59,12 @@ func ParseSuiteRecord(day, contents string) (SuiteRecord, error) {
 type NightlySuite struct {
 	// Hour is the UTC hour of the day from which the suite is due.
 	Hour int
-	// Rigs are the rigs checked out on this host, by name.
-	Rigs map[string]string
+	// Rigs are the rigs checked out on this host, by name, as the follower
+	// started; ReadRigs, when set, is asked on every pass for the rigs as they
+	// are now, so that a rig added while the follower runs has its night's
+	// suite too (mw-gq6.748). A read that fails leaves Rigs.
+	Rigs     map[string]string
+	ReadRigs func() (map[string]string, error)
 	// Rules is where each rig's nightly_suite is read from.
 	Rules EpicRules
 	// History is where a day's kept result is looked for.
@@ -110,8 +114,14 @@ func (n *NightlySuite) due(ctx context.Context) ([]string, error) {
 		return nil, nil
 	}
 	day := now.Format("2006-01-02")
-	names := make([]string, 0, len(n.Rigs))
-	for name := range n.Rigs {
+	rigs := n.Rigs
+	if n.ReadRigs != nil {
+		if now, err := n.ReadRigs(); err == nil {
+			rigs = now
+		}
+	}
+	names := make([]string, 0, len(rigs))
+	for name := range rigs {
 		names = append(names, name)
 	}
 	sort.Strings(names)

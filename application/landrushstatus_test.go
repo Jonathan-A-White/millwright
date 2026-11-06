@@ -91,3 +91,32 @@ func TestStatusHasNoLandRushLineForARigThatLandsEach(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusSaysTheQueueIsNotWatchedForAQueuedStoryOnARigThisHostDoesNotHave(t *testing.T) {
+	ctx := context.Background()
+	now, _ := time.Parse("2006-01-02 15:04", landRushNow)
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("lb-1", domain.Path{Rig: "leaderboard", Branch: "main", Harness: domain.HarnessClaude,
+		Model: domain.ModelOpus, Effort: domain.EffortHigh, Host: "laptop"})
+	tracker.AddStory("lb-1", domain.Story{ID: "lb-1.1", Title: "The story"})
+	mustDo(t, tracker.ClaimStory(ctx, "lb-1.1"))
+	queue(t, tracker, "lb-1.1")
+	mustDo(t, tracker.SetStoryMetadata(ctx, "lb-1.1", map[string]string{application.QueuedAtField: now.Add(-20 * time.Minute).Format(time.RFC3339)}))
+	rules := apptest.NewFakeEpicRules()
+	rules.Require("leaderboard", domain.EpicRequirements{Landing: domain.LandingSettings{Mode: domain.LandingBatch}})
+	rules.Require("lampas", domain.EpicRequirements{Landing: domain.LandingSettings{Mode: domain.LandingBatch}})
+	report, err := application.Status{
+		Tracker: tracker, Notes: tracker, Host: "laptop", Seat: "builder",
+		Rigs:  map[string]string{"lampas": "/rigs/lampas"},
+		Rules: rules, Now: func() time.Time { return now },
+	}.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := report.String()
+	for _, want := range []string{"LAND RUSH\n", "leaderboard: 1 queued", "queue not watched", "restart mw-view-follow"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in:\n%s", want, out)
+		}
+	}
+}

@@ -1347,8 +1347,12 @@ type QueuedStoryReader interface {
 // landing ended clean with its queue as it was (mw land took nothing from it)
 // waits BatchEvery the same way, unless its queue changes first (mw-gq6.824).
 type BatchLandings struct {
-	// Rigs are the rigs checked out on this host, by name.
-	Rigs map[string]string
+	// Rigs are the rigs checked out on this host, by name, as the follower
+	// started; ReadRigs, when set, is asked on every pass for the rigs as they
+	// are now, so that a rig added to the host's config while the follower runs
+	// is landed too (mw-gq6.748). A read that fails leaves the rigs last known.
+	Rigs     map[string]string
+	ReadRigs func() (map[string]string, error)
 	// Rules is where each rig's landing keys are read from.
 	Rules EpicRules
 	// Tracker is where the queued stories are read from.
@@ -1372,6 +1376,8 @@ type BatchLandings struct {
 	// for a rig that has fallen due; zero is DefaultBatchRecheck.
 	Recheck time.Duration
 
+	rigsMu sync.Mutex // guards Rigs once ReadRigs has replaced it
+
 	mu     sync.Mutex
 	failed map[string]time.Time // rig -> when its landing last failed
 	// nothing is, for a rig whose last landing ended clean and left its queue
@@ -1382,6 +1388,19 @@ type BatchLandings struct {
 type landedNothing struct {
 	at    time.Time
 	queue batchQueue
+}
+
+// rigs is the rigs checked out on this host now: ReadRigs' answer, kept for the
+// next pass if a later read fails, else Rigs as made.
+func (b *BatchLandings) rigs() map[string]string {
+	b.rigsMu.Lock()
+	defer b.rigsMu.Unlock()
+	if b.ReadRigs != nil {
+		if rigs, err := b.ReadRigs(); err == nil {
+			b.Rigs = rigs
+		}
+	}
+	return b.Rigs
 }
 
 func (b *BatchLandings) now() time.Time {
@@ -1445,12 +1464,13 @@ func (q batchQueue) same(other batchQueue) bool {
 // in the follower's log when it fails), else, or when that read fails, from the
 // work in hand.
 func (b *BatchLandings) queues(ctx context.Context) (map[string]batchQueue, error) {
+	rigs := b.rigs()
 	if reader, ok := b.Tracker.(QueuedStoryReader); ok {
 		if stories, err := reader.QueuedStories(ctx); err == nil {
 			queues := map[string]batchQueue{}
 			for _, story := range stories {
 				if story.Taken() {
-					b.addToQueue(queues, story.Rig, story.ID, story.QueuedAt)
+					b.addToQueue(queues, rigs, story.Rig, story.ID, story.QueuedAt)
 				}
 			}
 			return finishQueues(queues), nil
@@ -1466,7 +1486,7 @@ func (b *BatchLandings) queues(ctx context.Context) (map[string]batchQueue, erro
 		if err != nil {
 			continue
 		}
-		b.addToQueue(queues, path.Rig, detail.Story.ID, detail.QueuedAt)
+		b.addToQueue(queues, rigs, path.Rig, detail.Story.ID, detail.QueuedAt)
 	}
 	return finishQueues(queues), nil
 }
@@ -1482,8 +1502,8 @@ func finishQueues(queues map[string]batchQueue) map[string]batchQueue {
 
 // addToQueue counts a story queued at queuedAt in the queue of its rig, if the
 // rig is checked out on this host.
-func (b *BatchLandings) addToQueue(queues map[string]batchQueue, rig, id string, queuedAt time.Time) {
-	if _, here := b.Rigs[rig]; !here {
+func (b *BatchLandings) addToQueue(queues map[string]batchQueue, rigs map[string]string, rig, id string, queuedAt time.Time) {
+	if _, here := rigs[rig]; !here {
 		return
 	}
 	q := queues[rig]
@@ -1579,7 +1599,7 @@ func (b *BatchLandings) run(ctx context.Context) error {
 		errs    = []error{err, perr}
 		started = map[string]bool{}
 		running int
-		ended   = make(chan struct{}, len(b.Rigs))
+		ended   = make(chan struct{}, len(due))
 	)
 	start := func(d batchDue) {
 		started[d.rig] = true
@@ -1675,8 +1695,9 @@ func (b *BatchLandings) pending(ctx context.Context, due []batchDue) ([]batchDue
 		return due, fmt.Errorf("reading the landings in flight: %w", err)
 	}
 	var adopt []batchDue
+	rigs := b.rigs()
 	for _, name := range names {
-		if _, here := b.Rigs[name]; !here || slices.ContainsFunc(due, func(d batchDue) bool { return d.rig == name }) {
+		if _, here := rigs[name]; !here || slices.ContainsFunc(due, func(d batchDue) bool { return d.rig == name }) {
 			continue
 		}
 		adopt = append(adopt, batchDue{rig: name})

@@ -40,9 +40,10 @@ func batchLandSpringJob(host string, out io.Writer) (application.SpringJob, erro
 	}
 	detached := batchLandApart(self, landStateDir(home), "")
 	landings := &application.BatchLandings{
-		Rigs:    rigs,
-		Rules:   mwVault(dir, host),
-		Tracker: mwGateway(dir, host),
+		Rigs:     rigs,
+		ReadRigs: config.Rigs, // each pass: a rig added while the follower runs is landed (mw-gq6.748)
+		Rules:    mwVault(dir, host),
+		Tracker:  mwGateway(dir, host),
 		Home: func(ctx context.Context) (bool, error) {
 			return application.IsHome(ctx, mwVault(dir, host), host)
 		},

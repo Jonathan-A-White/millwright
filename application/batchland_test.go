@@ -1349,3 +1349,62 @@ func TestADemoABatchLandsHasItsFormulaClosedRootAndSteps(t *testing.T) {
 		t.Errorf("expected the demo to be left open for the Governor, got %+v", detail)
 	}
 }
+
+func TestTheBatchLandJobLandsARigAddedToTheRigsAfterItWasMade(t *testing.T) {
+	j := newLandingJob(t)
+	rigs := map[string]string{"lampas": "/rigs/lampas"}
+	landings := &application.BatchLandings{
+		Rigs: map[string]string{"lampas": "/rigs/lampas"}, // as the follower started
+		ReadRigs: func() (map[string]string, error) {
+			now := map[string]string{}
+			for name, dir := range rigs {
+				now[name] = dir
+			}
+			return now, nil
+		},
+		Rules:   j.rules,
+		Tracker: j.tracker,
+		Home:    func(context.Context) (bool, error) { return true, nil },
+		Land:    j.land,
+		Notes:   j.tracker,
+		Host:    "desktop",
+		Now:     func() time.Time { return j.now },
+	}
+	job := landings.Job()
+	j.rule("millwright", domain.LandingBatch)
+	j.queued("millwright", "mw-1", 40)
+	j.queued("millwright", "mw-2", 40)
+	if reason, ok := job.Probe(context.Background()); ok {
+		t.Fatalf("millwright is not among the rigs yet, but the job was sprung: %q", reason)
+	}
+	rigs["millwright"] = "/rigs/millwright" // added to config.toml while the follower runs
+	reason, ok := job.Probe(context.Background())
+	if !ok || !strings.Contains(reason, "millwright (2 queued)") {
+		t.Fatalf("expected the rig added later to be due on the next pass, got %q, %v", reason, ok)
+	}
+	mustDo(t, job.Run(context.Background()))
+	if got, want := j.asked, []string{"millwright one=false"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected the added rig's queue landed, got %v", got)
+	}
+}
+
+func TestTheBatchLandJobKeepsTheRigsItHasWhenTheyCannotBeReadAgain(t *testing.T) {
+	j := newLandingJob(t)
+	landings := &application.BatchLandings{
+		Rigs:     map[string]string{"lampas": "/rigs/lampas"},
+		ReadRigs: func() (map[string]string, error) { return nil, errors.New("config.toml unreadable") },
+		Rules:    j.rules,
+		Tracker:  j.tracker,
+		Home:     func(context.Context) (bool, error) { return true, nil },
+		Land:     j.land,
+		Notes:    j.tracker,
+		Host:     "desktop",
+		Now:      func() time.Time { return j.now },
+	}
+	j.rule("lampas", domain.LandingBatch)
+	j.queued("lampas", "lp-1", 40)
+	j.queued("lampas", "lp-2", 40)
+	if _, ok := landings.Job().Probe(context.Background()); !ok {
+		t.Fatal("a rigs file that cannot be read now must not make the follower forget the rigs it had")
+	}
+}

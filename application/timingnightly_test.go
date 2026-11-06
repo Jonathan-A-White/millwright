@@ -379,3 +379,17 @@ func slicesHas(list []string, want string) bool {
 	}
 	return false
 }
+
+func TestARigAddedToTheConfigAfterTheNightWasMadeIsDue(t *testing.T) {
+	f := newTimingNight(t)
+	f.night.Rigs, f.night.Tests = map[string]string{}, map[string]string{} // as the follower started
+	if got := f.due(t); len(got) != 0 {
+		t.Fatalf("a rig the follower does not have was due: %v", got)
+	}
+	f.night.ReadConfig = func() (map[string]string, map[string]string, error) {
+		return map[string]string{"lampas": "/rigs/lampas"}, map[string]string{"lampas": "npm test"}, nil
+	}
+	if got := f.due(t); !reflect.DeepEqual(got, []string{"lampas"}) {
+		t.Errorf("due = %v, want lampas", got)
+	}
+}

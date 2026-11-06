@@ -43,7 +43,7 @@ func nightlySuiteSpringJob(host string, suiteHour int, out io.Writer) (applicati
 	}}
 	files := vault.New(dir)
 	suite := &application.NightlySuite{
-		Hour: suiteHour, Rigs: rigs, Rules: files, History: files,
+		Hour: suiteHour, Rigs: rigs, ReadRigs: config.Rigs, Rules: files, History: files,
 		Home: func(ctx context.Context) (bool, error) {
 			return application.IsHome(ctx, mwVault(dir, host), host)
 		},
