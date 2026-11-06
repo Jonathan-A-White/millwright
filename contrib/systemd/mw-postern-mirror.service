@@ -5,7 +5,9 @@
 # once. On the home it copies the postern backend's data to the boost with rsync
 # over ssh, and the watchdog's two files to the VPS when postern_watchdog_target
 # is set; anywhere else it says so and does nothing. It never writes to this
-# host's own data.
+# host's own data. A boost that cannot be reached (ssh refused, no route) is down,
+# which mw status shows: the run says so, still feeds the watchdog and exits 0, so
+# this unit does not fail (and the doctor does not mail) for every run of an outage.
 [Unit]
 Description=Copy the postern's data to the boost, and the watchdog's files to the VPS (mw postern mirror)
 OnFailure=mw-unit-failed@%n.service

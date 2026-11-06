@@ -127,7 +127,6 @@ func TestPosternMirrorFailsWhenTheSSHTimesOutTwice(t *testing.T) {
 func TestPosternMirrorFailsAtOnceOnAnyOtherSSHFailure(t *testing.T) {
 	for _, text := range []string{
 		"ssh desktop: exit status 255: Permission denied (publickey).",
-		"ssh desktop: exit status 255: ssh: connect to host 10.88.0.3 port 22: Connection refused",
 		"ssh desktop: exit status 1: tail: cannot open: timed out",
 		"rsync to desktop:/data/: exit status 23: some files vanished",
 	} {
@@ -135,6 +134,101 @@ func TestPosternMirrorFailsAtOnceOnAnyOtherSSHFailure(t *testing.T) {
 		out, waits, err := runRetryMirror(t, m)
 		if err == nil || m.indexCalls != 1 || len(waits) != 0 || strings.Contains(out, "retried") {
 			t.Fatalf("%q: err = %v, asked %d times, waits %v, out %q; want an immediate failure", text, err, m.indexCalls, waits, out)
+		}
+	}
+}
+
+const connectRefused = "ssh desktop: exit status 255: ssh: connect to host 10.88.0.3 port 22: Connection refused"
+
+// runDownBoostMirror runs the mirror with a watchdog target and a mill state
+// directory, over m, and returns what it said and every destination copied to.
+func runDownBoostMirror(t *testing.T, m *downBoostMirrorer) (string, error) {
+	t.Helper()
+	out := &bytes.Buffer{}
+	err := application.PosternMirror{
+		Files:          &apptest.FakeHomeFile{Text: "laptop 2026-10-01T00:00:00Z mw@laptop\n"},
+		Mirrorer:       m,
+		Out:            out,
+		Host:           "laptop",
+		DataDir:        "/data",
+		MillStateDir:   "/state",
+		Reach:          map[string]string{"desktop": "ssh desktop"},
+		WatchdogTarget: "root@vps:/var/lib/postern-watchdog/",
+		Sleep:          func(context.Context, time.Duration) error { return nil },
+	}.Run(context.Background())
+	return out.String(), err
+}
+
+// downBoostMirrorer answers every ask of the boost with askErr and records the
+// destinations copied to.
+type downBoostMirrorer struct {
+	retryMirrorer
+	askErr error
+	dests  []string
+}
+
+func (d *downBoostMirrorer) LastIndexTime(ctx context.Context, ssh []string, dir string) (time.Time, bool, error) {
+	if len(ssh) > 0 {
+		d.indexCalls++
+		return time.Time{}, false, d.askErr
+	}
+	return d.retryMirrorer.LastIndexTime(ctx, ssh, dir)
+}
+
+func (d *downBoostMirrorer) LastGrindTime(_ context.Context, ssh []string, _ string) (time.Time, bool, error) {
+	if len(ssh) > 0 {
+		d.indexCalls++
+		return time.Time{}, false, d.askErr
+	}
+	return time.Time{}, false, nil
+}
+
+func (d *downBoostMirrorer) DirExists(context.Context, string) (bool, error) { return true, nil }
+
+func (d *downBoostMirrorer) Copy(_ context.Context, _ string, _ []string, _ []string, dest string) error {
+	d.dests = append(d.dests, dest)
+	return nil
+}
+
+// A boost that refuses the connection is down, not a fault of the run: the
+// watchdog's files still go, one line says so, and the unit does not fail, so
+// the doctor has nothing to mail every ten minutes (mw status shows the host).
+func TestPosternMirrorWithTheBoostRefusingSSHStillFeedsTheWatchdogSaysSoOnceAndSucceeds(t *testing.T) {
+	for _, text := range []string{
+		connectRefused,
+		"ssh desktop: exit status 255: ssh: connect to host 10.88.0.3 port 22: No route to host",
+		"ssh desktop: exit status 255: ssh: connect to host 10.88.0.3 port 22: Network is unreachable",
+	} {
+		m := &downBoostMirrorer{askErr: errors.New(text)}
+		out, err := runDownBoostMirror(t, m)
+		if err != nil {
+			t.Fatalf("%q: a down boost failed the run: %v", text, err)
+		}
+		if len(m.dests) != 1 || m.dests[0] != "root@vps:/var/lib/postern-watchdog/" {
+			t.Fatalf("%q: copied to %v, want only the watchdog", text, m.dests)
+		}
+		if n := strings.Count(strings.TrimSpace(out), "desktop"); n != 1 || !strings.Contains(out, "unreachable") {
+			t.Fatalf("%q: want one line saying desktop is unreachable, got:\n%s", text, out)
+		}
+		if m.indexCalls != 1 {
+			t.Fatalf("%q: the boost was asked %d times, want 1", text, m.indexCalls)
+		}
+	}
+}
+
+// A boost that is up and fails otherwise still fails the unit.
+func TestPosternMirrorWithTheBoostUpStillFailsOnItsOtherFaults(t *testing.T) {
+	for _, text := range []string{
+		"ssh desktop: exit status 255: Permission denied (publickey).",
+		"ssh desktop: exit status 1: tail: cannot open",
+	} {
+		m := &downBoostMirrorer{askErr: errors.New(text)}
+		_, err := runDownBoostMirror(t, m)
+		if err == nil || !strings.Contains(err.Error(), "asking desktop for its index") {
+			t.Fatalf("%q: err = %v, want the index failure", text, err)
+		}
+		if len(m.dests) != 1 {
+			t.Fatalf("%q: the watchdog was not still fed: %v", text, m.dests)
 		}
 	}
 }

@@ -130,6 +130,39 @@ func SSHConnectTimedOut(err error) bool {
 	return strings.Contains(text, "exit status 255") && strings.Contains(text, "timed out")
 }
 
+// SSHBoostDown reports whether err is ssh failing with exit 255 because the
+// host cannot be reached at all: the connection refused, no route to it, its
+// network unreachable. That host is down, which mw status shows; it is no fault
+// of the run that asked.
+func SSHBoostDown(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := err.Error()
+	if !strings.Contains(text, "exit status 255") {
+		return false
+	}
+	for _, down := range []string{"Connection refused", "No route to host", "Network is unreachable"} {
+		if strings.Contains(text, down) {
+			return true
+		}
+	}
+	return false
+}
+
+// BoostDown is the finding that the boost could not be reached to ask it
+// anything: it is down, and nothing can be copied to it.
+type BoostDown struct {
+	Boost string
+	Err   error
+}
+
+func (d *BoostDown) Error() string {
+	return fmt.Sprintf("%s is unreachable, so nothing was copied to it: %v", d.Boost, d.Err)
+}
+
+func (d *BoostDown) Unwrap() error { return d.Err }
+
 // retried runs step, and when it fails by ssh timing out, says so, waits, and
 // runs it once more. what names the step in the line.
 func (m PosternMirror) retried(ctx context.Context, what string, step func() error) error {
@@ -174,7 +207,10 @@ func (r *MirrorRefused) Error() string {
 // Run mirrors, once. A host that is not home does nothing and says so, and a home
 // that cannot be told is a *HomeUnknown. A boost whose index is newer is left
 // alone and the run says so in its error, and so is a boost whose mill record is
-// newer; each copy is tried all the same.
+// newer; each copy is tried all the same. A boost that cannot be reached (ssh
+// refused, no route) is down, which mw status shows: the run says so in one line,
+// copies the watchdog's files, and succeeds, so the unit does not fail and the
+// doctor does not mail every ten minutes of an outage.
 func (m PosternMirror) Run(ctx context.Context) error {
 	record, err := WhereIsHome(ctx, m.Files)
 	if err != nil {
@@ -185,7 +221,28 @@ func (m PosternMirror) Run(ctx context.Context) error {
 		return nil
 	}
 
-	return errors.Join(m.toBoost(ctx), m.millToBoost(ctx), m.toWatchdog(ctx))
+	boostErr := m.toBoost(ctx)
+	var millErr error
+	// A boost that did not answer is not asked again for the mill.
+	var down *BoostDown
+	if !errors.As(boostErr, &down) {
+		millErr = m.millToBoost(ctx)
+		errors.As(millErr, &down)
+	}
+	if down != nil {
+		fmt.Fprintf(m.Out, "%s is unreachable (%s): nothing copied to it this run; the watchdog's files still go\n", down.Boost, sshReason(down.Err))
+		boostErr, millErr = nil, nil
+	}
+	return errors.Join(boostErr, millErr, m.toWatchdog(ctx))
+}
+
+// sshReason is the last line of an ssh error: why it could not connect.
+func sshReason(err error) string {
+	text := strings.TrimSpace(err.Error())
+	if i := strings.LastIndex(text, ": "); i >= 0 {
+		return text[i+2:]
+	}
+	return text
 }
 
 // boost is the other host that can be home.
@@ -214,6 +271,9 @@ func (m PosternMirror) toBoost(ctx context.Context) error {
 		theirs, there, err = m.Mirrorer.LastIndexTime(ctx, prefix, m.DataDir)
 		return err
 	})
+	if SSHBoostDown(err) {
+		return &BoostDown{Boost: boost, Err: err}
+	}
 	if err != nil {
 		return fmt.Errorf("asking %s for its index: %w", boost, err)
 	}
@@ -268,6 +328,9 @@ func (m PosternMirror) millToBoost(ctx context.Context) error {
 		theirs, there, err = m.Mirrorer.LastGrindTime(ctx, prefix, m.MillStateDir)
 		return err
 	})
+	if SSHBoostDown(err) {
+		return &BoostDown{Boost: boost, Err: err}
+	}
 	if err != nil {
 		return fmt.Errorf("asking %s for the mill's record: %w", boost, err)
 	}

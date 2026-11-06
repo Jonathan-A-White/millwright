@@ -26,7 +26,9 @@ func newPosternMirrorCmd() *cobra.Command {
 			"that changed since the last good copy (kept in postern-mirror-cursor in that directory).\n\n" +
 			"A host that is not home does nothing, says so and leaves with 0. A boost whose index's\n" +
 			"last line is newer than this host's is left alone: the run says so and leaves with 1,\n" +
-			"once the other copies are done; the mill's state is kept the same way by the time of\n" +
+			"once the other copies are done; a boost that cannot be reached (ssh refused, no route) is down:\n" +
+			"the run says so in one line, still copies the watchdog's files and leaves with 0, so the\n" +
+			"unit does not fail every ten minutes of an outage; the mill's state is kept the same way by the time of\n" +
 			"the last line of its grinds.jsonl. It never writes to this host's own data.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
