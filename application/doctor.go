@@ -1622,6 +1622,11 @@ type RigOriginsCheck struct {
 	// Origins lists the origin url of each rig checkout on this host, by rig
 	// name; a rig with no origin is left out.
 	Origins func(ctx context.Context) (map[string]string, error)
+	// Rewritten, when set, lists the url a checkout stores for each rig whose
+	// host rewrites it to another (url.<base>.insteadOf); Origins holds the
+	// effective url, which is the one judged. A report line names the stored
+	// url only for such a rig. Nil reads none.
+	Rewritten func(ctx context.Context) (map[string]string, error)
 }
 
 var _ DoctorCheck = (*RigOriginsCheck)(nil)
@@ -1698,6 +1703,12 @@ func (c *RigOriginsCheck) Probe(ctx context.Context) (Verdict, string) {
 		return DoctorFaulty, fmt.Sprintf("the rigs reach their origins in different ways and none is the host's: %s; set each one's origin to the one way this host can reach github.com with `git -C <rig's checkout> remote set-url origin <url>`",
 			strings.Join(parts, "; "))
 	}
+	rewritten := map[string]string{}
+	if c.Rewritten != nil {
+		if got, err := c.Rewritten(ctx); err == nil {
+			rewritten = got
+		}
+	}
 	var odd []string
 	for _, scheme := range schemes {
 		if scheme == host {
@@ -1705,6 +1716,9 @@ func (c *RigOriginsCheck) Probe(ctx context.Context) (Verdict, string) {
 		}
 		for _, rig := range bySchemes[scheme] {
 			line := fmt.Sprintf("%s (%s, origin %s)", rig, scheme, origins[rig])
+			if stored, ok := rewritten[rig]; ok && stored != origins[rig] {
+				line = fmt.Sprintf("%s (%s, origin %s, stored as %s)", rig, scheme, origins[rig], stored)
+			}
 			if https, ok := HTTPSOrigin(origins[rig]); ok && host == "https" {
 				line += fmt.Sprintf(": run `git -C <%s's checkout> remote set-url origin %s`", rig, https)
 			}
