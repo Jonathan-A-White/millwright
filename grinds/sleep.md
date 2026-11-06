@@ -124,11 +124,18 @@ full dump only to place what moved.
    is stale. You clear nothing: the Mayor clears what is plainly moot at the next
    sitting.
 7. **proposals** (optional): the candidates the evidence shows met, as a list of
-   `{"bead", "txid", "shows", "confidence"}`: `bead` is a candidate of `candidates.txt`,
-   `txid` the txid of one message or picture of `evidence.txt` that shows its change working
-   as the candidate's text describes, in his own use of it (a screenshot of the new screen, a
-   message saying he used the new thing), `shows` the one thing in it that proves the check,
-   `confidence` from 0 to 1. Evidence that only mentions the work, asks for it or shows
+   `{"bead", "txid", "picture", "sees", "shows", "confidence"}`: `bead` is a candidate of
+   `candidates.txt`, `txid` the txid of one message or picture of `evidence.txt` that shows its
+   change working as the candidate's text describes, in his own use of it (a screenshot of the
+   new screen, a message saying he used the new thing), `shows` the one thing in it that proves
+   the check, `confidence` from 0 to 1. When the proof is a picture, `picture` is its file name
+   (`direct-<hash>.jpg`) and `sees` is what that picture itself shows, written from the picture
+   alone before you look back at the candidate, naming its screen with the words and labels
+   on it; the `txid` is that picture's own, never a neighbour's in the thread. mw takes the txid
+   from the picture, and drops a proposal whose `sees` shares no word with the candidate's title
+   or check text (a photo of a terminal window for a Reader story), listing it in
+   `proposals.md` as dropped. A proposal from his words alone leaves `picture` and `sees` empty;
+   a picture with no words of his needs a `picture`. Evidence that only mentions the work, asks for it or shows
    something else is no match; leave out what you doubt. mw writes a PROPOSED comment on the
    bead for each proposal at or over its confidence (0.8 unless `[verify]` says otherwise), and
    `proposals.md`; nothing is closed, and the Mayor confirms with `mw verify confirm`. A demo

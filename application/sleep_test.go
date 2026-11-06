@@ -794,3 +794,96 @@ func (v *sleepVault) ReadImprovements(context.Context) (string, error) {
 	defer v.mu.Unlock()
 	return v.files[application.SleepLedgerDir+"/"+application.SleepLedgerFile], nil
 }
+
+// pictureProposalFixture is a pass whose evidence holds two pictures in one
+// thread, each under its own txid: direct:aaa (a Reader screen) and direct:bbb
+// (a PowerShell window), against a Reader demo d-1 (mw-gq6.1008).
+func pictureProposalFixture(t *testing.T, proposals string) (*sleepFixture, *apptest.FakeVerifyBeads) {
+	t.Helper()
+	f := newSleepFixture()
+	beads := &apptest.FakeVerifyBeads{Now: time.Date(2026, 10, 16, 7, 30, 0, 0, time.UTC)}
+	dir := t.TempDir()
+	reader, shell := filepath.Join(dir, "direct-aaa.jpg"), filepath.Join(dir, "direct-bbb.jpg")
+	for _, p := range []string{reader, shell} {
+		if err := os.WriteFile(p, []byte("JPEGBYTES"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.gatherer.bundle = append(fixtureBundle(),
+		application.SleepPart{
+			Name: "evidence", File: application.SleepEvidenceFile, Text: "## direct:aaa\npicture: direct-aaa.jpg\n## direct:bbb\npicture: direct-bbb.jpg\n", Budget: application.SleepBudgetOf(application.SleepEvidenceFile),
+			Attach: []application.SleepAttachment{{Name: "direct-aaa.jpg", Path: reader, Size: 9}, {Name: "direct-bbb.jpg", Path: shell, Size: 9}},
+			Verify: &application.SleepVerify{
+				Candidates: []application.VerifyCandidate{{Bead: "d-1", Kind: application.VerifyKindDemo, Title: "The Septuagint verse tag over the first words", Check: "Open the Reader on Psalms 24 and see the Greek verse tag (23:1) drawn over the first words"}},
+				Evidence: []application.VerifyEvidence{
+					{Txid: "direct:aaa", At: time.Date(2026, 10, 16, 6, 30, 0, 0, time.UTC), Files: []string{reader}},
+					{Txid: "direct:bbb", At: time.Date(2026, 10, 16, 5, 30, 0, 0, time.UTC), Files: []string{shell}},
+				},
+			},
+		},
+		application.SleepPart{Name: "candidates", File: application.SleepCandidatesFile, Text: "d-1 demo\n", Budget: application.SleepBudgetOf(application.SleepCandidatesFile)},
+	)
+	f.grinder.Result.Answer = json.RawMessage(strings.Replace(fixtureAnswer, `"summary"`, `"proposals": `+proposals+`, "summary"`, 1))
+	f.pass.Beads = beads
+	f.pass.Verify = application.VerifySettings{Confidence: 0.8}
+	return f, beads
+}
+
+func TestAProposalNamesTheTxidOfThePictureItsDescriptionCameFromNotANeighbours(t *testing.T) {
+	// The agent wrote the neighbour's txid (direct:bbb) beside a description it
+	// read from direct-aaa.jpg.
+	f, beads := pictureProposalFixture(t, `[{"bead":"d-1","txid":"direct:bbb","picture":"direct-aaa.jpg","sees":"The Reader showing Psalms 24 with the Greek verse tag (23:1) over the first words","shows":"the verse tag stands clear","confidence":0.9}]`)
+	result, err := f.pass.Run(context.Background(), application.SleepOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Proposed != 1 || len(beads.Written) != 1 || !strings.Contains(beads.Written[0].Text, "from direct:aaa (") || strings.Contains(beads.Written[0].Text, "direct:bbb") {
+		t.Fatalf("the comment does not name the txid of the picture it was read from: %+v", beads.Written)
+	}
+	if md := f.vault.files["sleep-2026-10-16/proposals.md"]; !strings.Contains(md, "mw verify confirm d-1 --txid direct:aaa") || strings.Contains(md, "direct:bbb") {
+		t.Errorf("proposals.md names a neighbour's txid:\n%s", md)
+	}
+}
+
+func TestAProposalWhosePicturesOwnDescriptionDoesNotNameTheStorysScreenIsDroppedAndListed(t *testing.T) {
+	// mw-u2w5klk.279: a photo of a PowerShell error offered as the Reader's verse tag.
+	f, beads := pictureProposalFixture(t, `[{"bead":"d-1","txid":"direct:bbb","picture":"direct-bbb.jpg","sees":"A monitor with a Windows PowerShell window: Wsl/Service/CreateInstance/E_FAIL, Catastrophic failure","shows":"each Greek verse tag (23:1) stands clear","confidence":0.8}]`)
+	result, err := f.pass.Run(context.Background(), application.SleepOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Proposed != 0 || len(beads.Written) != 0 {
+		t.Fatalf("a picture of a PowerShell window was proposed for a Reader story: %+v", beads.Written)
+	}
+	md := f.vault.files["sleep-2026-10-16/proposals.md"]
+	for _, want := range []string{"d-1", "direct:bbb", "dropped", "PowerShell", "screen"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("proposals.md does not list the dropped proposal with its reason, lacks %q:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "mw verify confirm") {
+		t.Errorf("proposals.md offers to confirm a dropped proposal:\n%s", md)
+	}
+}
+
+func TestAProposalWhosePictureNamesNoPictureOfItsEvidenceOrNoneAtAllIsDropped(t *testing.T) {
+	for name, proposal := range map[string]string{
+		"a picture that is nobody's":           `{"bead":"d-1","txid":"direct:aaa","picture":"direct-zzz.jpg","sees":"The Reader with the Greek verse tag","shows":"x","confidence":0.9}`,
+		"no picture for picture-only evidence": `{"bead":"d-1","txid":"direct:aaa","shows":"the Reader's verse tag","confidence":0.9}`,
+		"an empty description":                 `{"bead":"d-1","txid":"direct:aaa","picture":"direct-aaa.jpg","sees":" ","shows":"x","confidence":0.9}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, beads := pictureProposalFixture(t, "["+proposal+"]")
+			result, err := f.pass.Run(context.Background(), application.SleepOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Proposed != 0 || len(beads.Written) != 0 {
+				t.Fatalf("proposed: %+v", beads.Written)
+			}
+			if md := f.vault.files["sleep-2026-10-16/proposals.md"]; !strings.Contains(md, "dropped") {
+				t.Errorf("proposals.md does not list it as dropped:\n%s", md)
+			}
+		})
+	}
+}
