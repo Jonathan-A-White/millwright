@@ -1259,6 +1259,18 @@ the mail to the Mayor, and the landing still counts. A failed build restarts
 nothing, and no other rig restarts anything. The self-update tick below does the
 same after its own successful build.
 
+Before it restarts anything, that same step asks the user manager whether any
+`mw-*` unit it has loaded reads `NeedDaemonReload=yes` (the installed units are
+links into the checkout, so a landing that edits a file under `contrib/systemd/`
+changes what systemd has not yet read, mw-gq6.565); if one does, it runs
+`systemctl --user daemon-reload` and says `ran systemctl --user daemon-reload:
+<units> had changed on disk and are loaded now`, and if none does, it runs and
+says nothing. A reload that fails is said (`systemctl --user daemon-reload could
+not be run, so <units> still run the old unit files`) and is not a failed
+restart. `mw doctor daemon-reload` also asks about every loaded `mw-*` unit, not
+only the `[doctor]` table's `units`, and its reason ends with
+`fix: systemctl --user daemon-reload`.
+
 A rig whose backend is a program the home runs (postern's `server/`) names it in a
 `[backend.<rig>]` table, and a landing that changed it is not left half deployed
 (mw-gq6.185). `mw next` asks, before it merges, whether the story's own commits

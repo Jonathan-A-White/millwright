@@ -55,6 +55,13 @@ type UnitRestarter interface {
 	// installed here is left as it is, with no error. An error is a unit that was
 	// running and could not be restarted.
 	TryRestart(ctx context.Context, unit string) (restarted bool, err error)
+
+	// ReloadStale runs `systemctl --user daemon-reload` when any mw-* user unit's
+	// file has changed since the user manager read it, and returns the units that
+	// had; it runs nothing, and returns none, when no unit has. An error is a
+	// reload that was needed and failed, with the units still returned
+	// (mw-gq6.565).
+	ReloadStale(ctx context.Context) (units []string, err error)
 }
 
 // RestartFactoryUnits restarts the long-running mw units of this host once a
@@ -63,9 +70,23 @@ type UnitRestarter interface {
 // not be, which are also returned in failed. Nothing is done for a rig that is
 // not the factory rig, whose build changes no binary these units run, nor for a
 // nil units.
+//
+// The user manager is told to reload first when a unit file changed on disk, so
+// that a landing which edits one under contrib/systemd is live: the installed
+// units are links into the checkout, and systemd keeps the old reading of them
+// until a daemon-reload (mw-gq6.565). A reload that fails is said and is not a
+// failed restart; mw doctor's daemon-reload check says it again.
 func RestartFactoryUnits(ctx context.Context, units UnitRestarter, rig string) (notes, failed []string) {
 	if units == nil || rig != FactoryRig {
 		return nil, nil
+	}
+	stale, err := units.ReloadStale(ctx)
+	switch {
+	case err != nil:
+		notes = append(notes, fmt.Sprintf("systemctl --user daemon-reload could not be run, so %s still run the old unit files: %s; run it by hand",
+			strings.Join(stale, ", "), firstLine(err.Error())))
+	case len(stale) > 0:
+		notes = append(notes, fmt.Sprintf("ran systemctl --user daemon-reload: %s had changed on disk and are loaded now", strings.Join(stale, ", ")))
 	}
 	for _, unit := range FactoryUnits {
 		restarted, err := units.TryRestart(ctx, unit)
