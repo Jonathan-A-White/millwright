@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,7 +26,7 @@ import (
 // it writes nothing to the tracker, the ledger, the vault or git — and it exits
 // non-zero when any check fails.
 func newCheckCmd() *cobra.Command {
-	var noSlot, background, logIsStdout bool
+	var noSlot, background, logIsStdout, partWorker bool
 	var part int
 	cmd := &cobra.Command{
 		Use:   "check <story-id>",
@@ -86,7 +89,11 @@ func newCheckCmd() *cobra.Command {
 			"by part number and host, in the story's run (check-<attempt>-part-<n>.took); a part that waited for\n" +
 			"the slot and wins it with less of the 540 seconds of the call left than that part's usual time on\n" +
 			"this host (the median of its last ten runs) is not started: it gives the slot back, keeps its place\n" +
-			"and says what it needs and what is left, to run the same part again (mw-gq6.944).\n\n" +
+			"and says what it needs and what is left, to run the same part again (mw-gq6.944).\n" +
+			"A part that takes no merge slot is run by a process of its own that outlives the call (mw-gq6.1029):\n" +
+			"the call waits for it for what is left of its 540 seconds, then ends with one line saying the part is\n" +
+			"still running and that `mw check <story> --part N` waits for it, which finds the process and does not\n" +
+			"start the part again; when the part is done that call says what it said and exits non-zero if it failed.\n\n" +
 			"The formula's last step is normally still open when a session runs check, so a session runs it\n" +
 			"after committing and closes that step once nothing else is refused.",
 		Args: cobra.ExactArgs(1),
@@ -111,6 +118,9 @@ func newCheckCmd() *cobra.Command {
 			rigs, err := config.Rigs()
 			if err != nil {
 				return err
+			}
+			if partWorker && part < 1 {
+				return fmt.Errorf("--part-worker runs a part, so it needs --part N")
 			}
 
 			var slot application.MergeSlot
@@ -186,6 +196,12 @@ func newCheckCmd() *cobra.Command {
 			if !logIsStdout {
 				k.Logs = mwVault(dir, host)
 			}
+			// A --part that takes no merge slot is run by a process of its own, so a
+			// part that outruns this call goes on (mw-gq6.1029).
+			k.PartWorker = partWorker
+			if part > 0 && !partWorker {
+				k.PartStarter = partProcess{}
+			}
 			_, err = k.Run(cmd.Context(), args[0])
 			return err
 		},
@@ -193,6 +209,8 @@ func newCheckCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&background, "background", false, "start the check detached, writing its whole output to runs/<story>/check-<attempt>.log in the vault, print that log's path and return at once")
 	cmd.Flags().BoolVar(&logIsStdout, "log-is-stdout", false, "the output of this check is already being written to the story's log (set by --background)")
 	_ = cmd.Flags().MarkHidden("log-is-stdout")
+	cmd.Flags().BoolVar(&partWorker, "part-worker", false, "run part N alone as the process a --part call started for it: no wait for a calm host or the slot (set by mw check --part)")
+	_ = cmd.Flags().MarkHidden("part-worker")
 	cmd.Flags().IntVar(&part, "part", 0, "run part N of the rig's gate alone, for a rig whose host names its gate as parts, and keep what it said; a check with no --part then reports the whole gate from the parts' records")
 	cmd.Flags().Duration("wait", CheckWait, "the most a check queues for the rig's merge slot, this host's gate lock and a calm host together: nine minutes in the foreground, ending with the place kept and a line to run it again; a whole check given this (or --background, 40m) ends with the wait limit reached and a line to hand back")
 	cmd.Flags().BoolVar(&noSlot, "no-slot", false, "run the rig's tests without taking the rig's merge slot, so without waiting for a close-out's gate")
@@ -273,4 +291,45 @@ func (s checkStarter) Start(_ context.Context, storyID, logPath string) error {
 	}
 	// Nobody waits for it: let go of it rather than leave a zombie of this process.
 	return cmd.Process.Release()
+}
+
+// partProcess implements application.PartStarter: it runs this same mw as
+// `mw check <story> --part N --part-worker` in a session of its own, so that it
+// outlives the tool call that asked, with its output appended to the file named.
+type partProcess struct{}
+
+func (partProcess) Start(_ context.Context, storyID string, part int, logPath string) (int, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return 0, fmt.Errorf("finding mw to run the part with: %w", err)
+	}
+	log, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		return 0, fmt.Errorf("opening %s: %w", logPath, err)
+	}
+	defer log.Close()
+	// Not exec.CommandContext: the part is meant to outlive the context it was
+	// started in.
+	cmd := exec.Command(self, "check", storyID, "--part", strconv.Itoa(part), "--part-worker", "--no-slot")
+	cmd.Stdout, cmd.Stderr = log, log
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return 0, fmt.Errorf("starting the part: %w", err)
+	}
+	// While this call lives, wait for the process so that it does not stay a
+	// zombie that still looks alive; once this call is gone init does.
+	go func() { _ = cmd.Wait() }()
+	return cmd.Process.Pid, nil
+}
+
+// Alive says whether the process Start returned is still running: not ended, and
+// not a pid some other process has since been given.
+func (partProcess) Alive(pid int) bool {
+	if err := syscall.Kill(pid, 0); err != nil && !errors.Is(err, syscall.EPERM) {
+		return false
+	}
+	if args, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil {
+		return strings.Contains(string(args), "--part-worker")
+	}
+	return true
 }

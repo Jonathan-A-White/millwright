@@ -66,6 +66,18 @@ type CheckRecords interface {
 	ReadRunFile(ctx context.Context, storyID, name string) (string, error)
 }
 
+// PartStarter runs part n of a story's gate as a process of its own, in a session
+// of its own so that it outlives the tool call that asked, with everything it
+// prints appended to the file at logPath, and says whether such a process is
+// still running. Start returns once the part has started, not when it is done.
+type PartStarter interface {
+	Start(ctx context.Context, storyID string, part int, logPath string) (pid int, err error)
+	Alive(pid int) bool
+}
+
+// CheckPartPoll is how often a call that waits for a detached part looks at it.
+const CheckPartPoll = 2 * time.Second
+
 // CheckPartFileName is the name of the record of part n of a story's attempt, in
 // the story's run directory. Like the check's log it begins with check- and ends
 // .log, and mw next's trust of a check reads the log alone, never this.
@@ -179,6 +191,14 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	part := parts[k.Part-1]
 	label := partLabel(k.Part, len(parts), part)
 	tip := k.cleanTip(ctx, c)
+	switch {
+	case k.PartWorker:
+		// The process a call started for the part: it waits for neither a calm host
+		// nor the slot, which the call that started it did.
+		return k.runPart(ctx, report, c, label, part, tip, nil)
+	case k.detachesPart(part):
+		return k.checkPartDetached(ctx, report, c, label, part, tip)
+	}
 	fit := k.partFitOf(ctx, c.path.Rig, k.Part, k.callNow())
 
 	// The part waits for a calm host, as a whole check does, before anything else
@@ -208,6 +228,12 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 		return report, fmt.Errorf("checking %s: %s did not start: the part needs about %s and only %s is left in this call, after waiting for %s to calm; nothing was run: run the same part again with `mw check %s --part %d`",
 			c.id, label, gateWaited(fit.expected), gateWaited(fit.left()), k.Host, c.id, k.Part)
 	}
+	return k.runPart(ctx, report, c, label, part, tip, fit)
+}
+
+// runPart runs part n of the gate in the story's worktree and keeps what it said:
+// checkPart's last step, and the whole of a part worker's.
+func (k Check) runPart(ctx context.Context, report CheckReport, c *closeOut, label string, part GatePart, tip string, fit *callFit) (CheckReport, error) {
 	if fit != nil && k.Out != nil {
 		fmt.Fprintf(k.Out, "  part    expected about %s, %s left in this call\n", gateWaited(fit.expected), gateWaited(fit.left()))
 	}
