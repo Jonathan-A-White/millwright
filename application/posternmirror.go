@@ -131,9 +131,10 @@ func SSHConnectTimedOut(err error) bool {
 }
 
 // SSHBoostDown reports whether err is ssh failing with exit 255 because the
-// host cannot be reached at all: the connection refused, no route to it, its
-// network unreachable. That host is down, which mw status shows; it is no fault
-// of the run that asked.
+// host cannot be reached at all: the connection refused or timed out, no route
+// to it, its network unreachable (a reboot, a sleeping host). That host is down,
+// which mw status shows; it is no fault of the run that asked. A timeout is
+// only asked about after the step's one retry (see retried).
 func SSHBoostDown(err error) bool {
 	if err == nil {
 		return false
@@ -142,7 +143,7 @@ func SSHBoostDown(err error) bool {
 	if !strings.Contains(text, "exit status 255") {
 		return false
 	}
-	for _, down := range []string{"Connection refused", "No route to host", "Network is unreachable"} {
+	for _, down := range []string{"Connection refused", "Connection timed out", "No route to host", "Network is unreachable"} {
 		if strings.Contains(text, down) {
 			return true
 		}
@@ -208,7 +209,7 @@ func (r *MirrorRefused) Error() string {
 // that cannot be told is a *HomeUnknown. A boost whose index is newer is left
 // alone and the run says so in its error, and so is a boost whose mill record is
 // newer; each copy is tried all the same. A boost that cannot be reached (ssh
-// refused, no route) is down, which mw status shows: the run says so in one line,
+// refused, timed out twice, no route) is down, which mw status shows: the run says so in one line,
 // copies the watchdog's files, and succeeds, so the unit does not fail and the
 // doctor does not mail every ten minutes of an outage.
 func (m PosternMirror) Run(ctx context.Context) error {

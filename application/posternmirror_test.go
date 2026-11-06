@@ -113,11 +113,13 @@ func TestPosternMirrorRetriesTheCopyToTheBoostToo(t *testing.T) {
 	}
 }
 
-func TestPosternMirrorFailsWhenTheSSHTimesOutTwice(t *testing.T) {
+// A connect that times out twice is a boost that is down (a reboot, a sleeping
+// host): the run says so and succeeds.
+func TestPosternMirrorTakesAConnectThatTimesOutTwiceForABoostDown(t *testing.T) {
 	m := &retryMirrorer{indexErrs: []error{errors.New(connectTimedOut), errors.New(connectTimedOut)}}
-	_, waits, err := runRetryMirror(t, m)
-	if err == nil || !strings.Contains(err.Error(), "Connection timed out") {
-		t.Fatalf("err = %v, want the second timeout", err)
+	out, waits, err := runRetryMirror(t, m)
+	if err != nil || !strings.Contains(out, "unreachable") {
+		t.Fatalf("err = %v, out %q; want success saying the boost is unreachable", err, out)
 	}
 	if m.indexCalls != 2 || len(waits) != 1 {
 		t.Fatalf("index asked %d times with %d waits; want 2 and 1", m.indexCalls, len(waits))
@@ -198,6 +200,7 @@ func TestPosternMirrorWithTheBoostRefusingSSHStillFeedsTheWatchdogSaysSoOnceAndS
 		connectRefused,
 		"ssh desktop: exit status 255: ssh: connect to host 10.88.0.3 port 22: No route to host",
 		"ssh desktop: exit status 255: ssh: connect to host 10.88.0.3 port 22: Network is unreachable",
+		connectTimedOut,
 	} {
 		m := &downBoostMirrorer{askErr: errors.New(text)}
 		out, err := runDownBoostMirror(t, m)
@@ -207,11 +210,16 @@ func TestPosternMirrorWithTheBoostRefusingSSHStillFeedsTheWatchdogSaysSoOnceAndS
 		if len(m.dests) != 1 || m.dests[0] != "root@vps:/var/lib/postern-watchdog/" {
 			t.Fatalf("%q: copied to %v, want only the watchdog", text, m.dests)
 		}
-		if n := strings.Count(strings.TrimSpace(out), "desktop"); n != 1 || !strings.Contains(out, "unreachable") {
+		if n := strings.Count(out, "desktop is unreachable ("); n != 1 || !strings.Contains(out, "unreachable") {
 			t.Fatalf("%q: want one line saying desktop is unreachable, got:\n%s", text, out)
 		}
-		if m.indexCalls != 1 {
-			t.Fatalf("%q: the boost was asked %d times, want 1", text, m.indexCalls)
+		// A timeout is asked once more after the wait; a refusal is not.
+		want := 1
+		if application.SSHConnectTimedOut(errors.New(text)) {
+			want = 2
+		}
+		if m.indexCalls != want {
+			t.Fatalf("%q: the boost was asked %d times, want %d", text, m.indexCalls, want)
 		}
 	}
 }
@@ -220,6 +228,7 @@ func TestPosternMirrorWithTheBoostRefusingSSHStillFeedsTheWatchdogSaysSoOnceAndS
 func TestPosternMirrorWithTheBoostUpStillFailsOnItsOtherFaults(t *testing.T) {
 	for _, text := range []string{
 		"ssh desktop: exit status 255: Permission denied (publickey).",
+		"ssh desktop: exit status 255: Host key verification failed.",
 		"ssh desktop: exit status 1: tail: cannot open",
 	} {
 		m := &downBoostMirrorer{askErr: errors.New(text)}
