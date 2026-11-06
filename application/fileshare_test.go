@@ -53,6 +53,39 @@ func TestARunningStoryWithNoFilesKeyHoldsBackOnlyWhatItsBranchChanged(t *testing
 	}
 }
 
+// A claim is made before dispatch writes the host over "auto", so for that
+// moment another host's story names no host and its claim alone says where it
+// runs (mw-gq6.1015): the files it names are still kept from a ready story.
+func TestAStoryAnotherHostClaimedWhileItsPathNamesAutoKeepsItsFiles(t *testing.T) {
+	running := openStory("mw-t.1", "feature", "src/ui/List.tsx")
+	running.Status, running.Assignee = "in_progress", "mw@cloud2"
+	running.Defaults.Host = "auto"
+	if on := running.ClaimedAwayFrom("cloud1"); on != "cloud2" {
+		t.Fatalf("expected the claim to place the story on cloud2, got %q", on)
+	}
+	if on := running.ClaimedAwayFrom("cloud2"); on != "" {
+		t.Fatalf("a story claimed by this host is not away, got %q", on)
+	}
+	shares := &fileShares{rules: filesRules()}
+	shares.addAway(running, running.ClaimedHost())
+	got, waits := shares.shared(context.Background(), openStory("mw-t.2", "feature", "src/a.go,src/ui/List.tsx"))
+	if !waits || got.File != "src/ui/List.tsx" || got.With != "mw-t.1" || got.Host != "cloud2" {
+		t.Fatalf("expected the story to wait for mw-t.1 on cloud2, got %+v, %v", got, waits)
+	}
+}
+
+func TestAStoryWithNeitherAHostNorAClaimIsWorkedOnNoHost(t *testing.T) {
+	story := openStory("mw-t.1", "feature", "a.go")
+	story.Defaults.Host = "auto"
+	if on := story.ClaimedHost(); on != "" {
+		t.Fatalf("expected no host, got %q", on)
+	}
+	story.Assignee = "someone"
+	if on := story.ClaimedHost(); on != "" {
+		t.Fatalf("a claim not made by mw names no host, got %q", on)
+	}
+}
+
 // branchChangesStub says every branch has changed the files it holds.
 type branchChangesStub []string
 

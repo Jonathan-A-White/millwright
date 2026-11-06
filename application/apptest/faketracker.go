@@ -1411,7 +1411,7 @@ func (f *FakeTracker) RunningElsewhere(_ context.Context, host string) ([]applic
 	var running []application.StoryDetail
 	for _, id := range f.order {
 		s := f.stories[id]
-		if merged := s.detail.Merged().Host; s.detail.Status == StatusInProgress && merged != "" && merged != host && merged != domain.HostAuto {
+		if s.detail.Status == StatusInProgress && s.detail.ClaimedAwayFrom(host) != "" {
 			running = append(running, s.detail)
 		}
 	}
@@ -1434,10 +1434,10 @@ func (f *FakeTracker) RunningEverywhere(_ context.Context, host string) (here, a
 		if s.detail.Status != StatusInProgress {
 			continue
 		}
-		switch merged := s.detail.Merged().Host; {
-		case merged == host:
+		switch {
+		case s.detail.Merged().Host == host:
 			here = append(here, s.detail)
-		case merged != "" && merged != domain.HostAuto:
+		case s.detail.ClaimedAwayFrom(host) != "":
 			away = append(away, s.detail)
 		}
 	}

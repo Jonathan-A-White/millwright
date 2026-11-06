@@ -472,6 +472,42 @@ func TestTheWorkIsReadOverTheKeptConnectionAsBdListsIt(t *testing.T) {
 	}
 }
 
+// A story another host has claimed is that host's from the claim, though its
+// path names "auto" until dispatch writes the host a moment after: the stories
+// ready here keep its files meanwhile (mw-gq6.1015).
+func TestAStoryAnotherHostClaimedWhileItsPathNamesAutoIsAway(t *testing.T) {
+	ctx := context.Background()
+	program, asked := recordingBd(t)
+	server := aQuietFactory(asked)
+	at := "2026-10-18 10:00:00"
+	server.beads = append(server.beads,
+		[]driver.Value{"mw-e.8", "The bead mw-e.8", "", "", "in_progress", "task", "mw@cloud2", nil, at, nil, at, nil, int64(1),
+			`{"host":"auto","rig":"millwright","branch":"main"}`, nil, int64(0)})
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(server.open(t)), beads.WithKeptSaid(io.Discard))
+
+	_, away, err := g.RunningEverywhere(ctx, "cloud1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(" "+strings.Join(detailIDs(away), " ")+" ", " mw-e.8 ") {
+		t.Errorf("expected mw-e.8 away from cloud1, got %v", detailIDs(away))
+	}
+	elsewhere, err := g.RunningElsewhere(ctx, "cloud1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(" "+strings.Join(detailIDs(elsewhere), " ")+" ", " mw-e.8 ") {
+		t.Errorf("expected RunningElsewhere to list mw-e.8, got %v", detailIDs(elsewhere))
+	}
+	here, _, err := g.RunningEverywhere(ctx, "cloud2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(" "+strings.Join(detailIDs(here), " ")+" ", " mw-e.8 ") {
+		t.Errorf("a claim read as the host's own still reads as before: mw-e.8 is not listed here, got %v", detailIDs(here))
+	}
+}
+
 // A note already holding what is to be written is not written again, nor is a
 // note not there cleared: each would be a bd for nothing. A note that changes,
 // and one that is there to clear, is a bd as ever.

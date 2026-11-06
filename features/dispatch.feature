@@ -1271,6 +1271,17 @@ Feature: Dispatching the stories this host is ready to work
     And the story "mw-gq6.2" is not claimed
     And dispatch passed over "mw-gq6.2", saying: waiting: shares src/Reader.tsx with mw-gq6.1 (running on laptop)
 
+  # A claim stamps the host over "auto" a moment after it is made (mw-gq6.1015):
+  # in that moment the claim is the host's own word of where the story runs.
+
+  Scenario: A story waits for a story the other host has claimed whose path still names host auto
+    Given a story "mw-gq6.1" of that epic is claimed by "laptop" while its path still names host auto, expecting to change "src/Reader.tsx"
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Preface.tsx,src/Reader.tsx"
+    When dispatch runs on "vps" with a cap of 3
+    Then no session was started
+    And the story "mw-gq6.2" is not claimed
+    And dispatch passed over "mw-gq6.2", saying: waiting: shares src/Reader.tsx with mw-gq6.1 (running on laptop)
+
   Scenario: A story that names no file the other host's story names starts beside it
     Given a story "mw-gq6.1" of that epic is running on "laptop", expecting to change "src/Reader.tsx"
     And a ready story "mw-gq6.2" of that epic expecting to change "src/Preface.tsx"

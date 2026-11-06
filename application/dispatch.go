@@ -926,7 +926,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	}
 	for _, detail := range away {
 		if !detail.Hitl() {
-			shares.addAway(detail, detail.Merged().Host)
+			shares.addAway(detail, detail.ClaimedHost())
 		}
 	}
 

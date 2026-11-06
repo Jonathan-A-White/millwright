@@ -24,6 +24,7 @@ func (c *dispatchContext) registerFileSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a ready story "([^"]*)" of that epic labelled "([^"]*)" expecting to change "([^"]*)"$`, c.aReadyStoryLabelledExpectingToChange)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here, expecting to change "([^"]*)"$`, c.aStoryRunningExpectingToChange)
 	ctx.Given(`^a story "([^"]*)" of that epic is running on "([^"]*)", expecting to change "([^"]*)"$`, c.aStoryRunningOnAnotherHostExpectingToChange)
+	ctx.Given(`^a story "([^"]*)" of that epic is claimed by "([^"]*)" while its path still names host auto, expecting to change "([^"]*)"$`, c.aStoryClaimedWhileItsHostIsAuto)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here, its branch changing "([^"]*)"$`, c.aStoryRunningWithItsBranchChanging)
 	ctx.Given(`^the branch of "([^"]*)" has a commit changing "([^"]*)"$`, c.theBranchHasACommitChanging)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here under the formula "([^"]*)"$`, c.aStoryRunningUnderTheFormula)
@@ -88,6 +89,21 @@ func (c *dispatchContext) aStoryRunningOnAnotherHostExpectingToChange(id, host, 
 		return err
 	}
 	if err := story.Overrides.Set("host", host); err != nil {
+		return err
+	}
+	c.tracker.AddStory(c.lastEpic, story)
+	return c.tracker.ClaimAs(id, "mw@"+host, dispatchNow.Add(5*time.Minute))
+}
+
+// aStoryClaimedWhileItsHostIsAuto is a story free to run on any host that host
+// has claimed, and whose path still says auto: dispatch writes the host a moment
+// after the claim (mw-gq6.1015).
+func (c *dispatchContext) aStoryClaimedWhileItsHostIsAuto(id, host, files string) error {
+	story := domain.Story{ID: id, Title: "The story " + id}
+	if err := story.Overrides.Set("files", files); err != nil {
+		return err
+	}
+	if err := story.Overrides.Set("host", domain.HostAuto); err != nil {
 		return err
 	}
 	c.tracker.AddStory(c.lastEpic, story)

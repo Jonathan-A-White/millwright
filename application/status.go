@@ -1386,7 +1386,7 @@ func (s Status) sharing(ctx context.Context, running []RunningStory, ready, away
 	// What the other hosts hold keeps its files from the stories ready here, as
 	// in mw dispatch (mw-gq6.941).
 	for _, detail := range away {
-		shares.addAway(detail, detail.Merged().Host)
+		shares.addAway(detail, detail.ClaimedHost())
 		refused[detail.Story.ID] = awayRuns[detail.Story.ID] == RunBlocked
 	}
 	var sharing map[string]FileShare
@@ -1449,7 +1449,7 @@ func (s Status) refusedHolds(ctx context.Context, work WorkInHand, running []Run
 	}
 	for _, detail := range away {
 		if awayRuns[detail.Story.ID] == RunBlocked {
-			refused = append(refused, claim{detail, detail.Merged().Host, false})
+			refused = append(refused, claim{detail, detail.ClaimedHost(), false})
 		}
 	}
 	if len(refused) == 0 {

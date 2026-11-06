@@ -232,10 +232,10 @@ func (g *Gateway) RunningEverywhere(ctx context.Context, host string) (here, awa
 		return nil, nil, err
 	}
 	for _, detail := range details {
-		switch merged := detail.Merged().Host; {
-		case merged == host:
+		switch {
+		case detail.Merged().Host == host:
 			here = append(here, detail)
-		case merged != "" && merged != domain.HostAuto:
+		case detail.ClaimedAwayFrom(host) != "":
 			away = append(away, detail)
 		}
 	}

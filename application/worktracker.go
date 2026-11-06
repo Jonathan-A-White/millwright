@@ -441,13 +441,14 @@ func (w WorkInHand) Elsewhere(host string) []StoryDetail {
 }
 
 // ClaimsAway are the claimed stories, in progress and not for the Governor,
-// whose Path names a host other than this one: what mw dispatch here counts as
+// whose Path, or while that still says auto their claim, names a host other than
+// this one: what mw dispatch here counts as
 // running elsewhere (RunningElsewhere), which keeps their files from the
 // stories ready here.
 func (w WorkInHand) ClaimsAway(host string) []StoryDetail {
 	var away []StoryDetail
 	for _, detail := range w.Running {
-		if on := detail.Merged().Host; on != "" && on != host && on != domain.HostAuto && !detail.Hitl() {
+		if detail.ClaimedAwayFrom(host) != "" && !detail.Hitl() {
 			away = append(away, detail)
 		}
 	}
@@ -585,6 +586,27 @@ func (d StoryDetail) HitlKinds() []string {
 // of a story that may not be fully planned yet; use Path before working it.
 func (d StoryDetail) Merged() domain.Path {
 	return d.Defaults.Overlay(d.Story.Overrides)
+}
+
+// ClaimedHost is the host the story is worked on: the host its Path names, and
+// while that is still domain.HostAuto (or none) the host its claim names
+// (mw@<host>). A claim is made first and dispatch writes the host over "auto" a
+// moment after, so for that moment only the claim says where the story runs
+// (mw-gq6.1015). Empty when neither does.
+func (d StoryDetail) ClaimedHost() string {
+	if merged := d.Merged().Host; merged != "" && merged != domain.HostAuto {
+		return merged
+	}
+	return ClaimHost(d.Assignee)
+}
+
+// ClaimedAwayFrom is the host other than host the story is worked on
+// (ClaimedHost), empty when it is worked on host or on none.
+func (d StoryDetail) ClaimedAwayFrom(host string) string {
+	if on := d.ClaimedHost(); on != host {
+		return on
+	}
+	return ""
 }
 
 // Path is the Path this story is worked by, or the reason it has none.

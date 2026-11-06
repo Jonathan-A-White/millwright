@@ -196,7 +196,7 @@ func onHost(details []application.StoryDetail, host string, anyHost bool) []appl
 func elsewhere(details []application.StoryDetail, host string) []application.StoryDetail {
 	var away []application.StoryDetail
 	for _, detail := range details {
-		if merged := detail.Merged().Host; merged != "" && merged != host && merged != domain.HostAuto {
+		if detail.ClaimedAwayFrom(host) != "" {
 			away = append(away, detail)
 		}
 	}

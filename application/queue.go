@@ -93,7 +93,7 @@ func (q Queue) Run(ctx context.Context) (QueueReport, error) {
 	}
 	for _, detail := range away {
 		if !detail.Hitl() {
-			shares.addAway(detail, detail.Merged().Host)
+			shares.addAway(detail, detail.ClaimedHost())
 		}
 	}
 
