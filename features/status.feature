@@ -683,7 +683,7 @@ Feature: mw status
     When mw status reads the host
     Then reading status succeeds
     And the report says "grist: slow (5 in 10 min), median 30 s (par 10 s)"
-    And the report says the host is held back: "slow grist (reader): tutor-turn 30 s, par 10 s"
+    And the report says the host is held back: "slow grist (reader): tutor-turn 30 s"
 
   Scenario: The report says grist is quiet when none ran lately
     Given this host runs at most 4 sessions at once
