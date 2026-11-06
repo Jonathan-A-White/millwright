@@ -160,9 +160,9 @@ func partLabel(n, of int, part GatePart) string {
 
 // checkPart is mw check <story> --part N: part N of the rig's gate, run alone
 // in the story's worktree and its result kept for the last call. It makes none
-// of the other checks, which that last call makes, and it waits for no calm
-// host and runs nothing twice, so that its time is the part's own. It takes the
-// rig's merge slot around the part, shared with the other stories' checks, as a
+// of the other checks, which that last call makes, and it runs nothing twice.
+// It waits for a calm host before it starts, as a whole check does
+// (calmForPart, mw-gq6.987). It takes the rig's merge slot around the part, shared with the other stories' checks, as a
 // whole check does, unless the part only runs tools in the worktree
 // (PartNeedsSlot); a landing holds it alone, and a part that waits on one for
 // CheckPartSlotWait ends with a line naming the holder and the command to run
@@ -181,8 +181,17 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	tip := k.cleanTip(ctx, c)
 	fit := k.partFitOf(ctx, c.path.Rig, k.Part, k.callNow())
 
+	// The part waits for a calm host, as a whole check does, before anything else
+	// of it, and what the wait leaves is what the merge slot is waited for in
+	// (mw-gq6.987).
+	began := time.Now()
+	left := func() time.Duration { return max((k.partSlotWait() - time.Since(began)).Round(time.Millisecond), 0) }
+	if err := k.calmForPart(ctx, c, report.Attempt, k.Part, label, left); err != nil {
+		return report, fmt.Errorf("checking %s: %w", c.id, err)
+	}
+
 	if k.Slot != nil && PartNeedsSlot(part) {
-		holding, err := k.takeSlotFit(ctx, c, fit, k.partSlotWait(), slotTry{
+		holding, err := k.takeSlotFit(ctx, c, fit, left(), slotTry{
 			label:  label,
 			noun:   "part",
 			record: CheckPartHeldFileName(report.Attempt, k.Part),
@@ -192,6 +201,12 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 			return report, fmt.Errorf("checking %s: %w", c.id, err)
 		}
 		defer holding.Release(ctx)
+	}
+	if fit != nil && fit.late() {
+		// A wait for a calm host of minutes can have eaten the call (a part that
+		// took the slot was asked this when it won it).
+		return report, fmt.Errorf("checking %s: %s did not start: the part needs about %s and only %s is left in this call, after waiting for %s to calm; nothing was run: run the same part again with `mw check %s --part %d`",
+			c.id, label, gateWaited(fit.expected), gateWaited(fit.left()), k.Host, c.id, k.Part)
 	}
 	if fit != nil && k.Out != nil {
 		fmt.Fprintf(k.Out, "  part    expected about %s, %s left in this call\n", gateWaited(fit.expected), gateWaited(fit.left()))

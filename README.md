@@ -1765,8 +1765,8 @@ on a loaded host. A host names such a rig's gate as parts in `[test_parts.<rig>]
 runs `mw check <story> --part N` once for each part, each as a call of its own: it runs
 part N alone in the worktree, takes the rig's merge slot around it unless the part only
 runs tools in the worktree (`npm ci`, `npm run typecheck|lint|build`, `npx vitest`,
-`go build|vet|test`, steps joined by `&&`; anything else keeps the slot), waits for no calm
-host and runs nothing twice, and keeps what the part said, and the commit it ran at, in
+`go build|vet|test`, steps joined by `&&`; anything else keeps the slot), waits for a calm host
+first (up to nine minutes, as a whole check does) and runs nothing twice, and keeps what the part said, and the commit it ran at, in
 `runs/<story>/check-<attempt>-part-<N>.log`. A last `mw check <story>` with no `--part`
 runs none of the gate: it reads those records, passes when every part passed at the
 branch's tip, and otherwise names each part that failed or has not been run at this

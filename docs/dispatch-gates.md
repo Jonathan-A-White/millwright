@@ -366,6 +366,15 @@ lock for 9 to 25 minutes would reverse that with no measurement of parts to say 
 should: the bench above is of the whole check of an unsplit rig, and the parts' records
 keep no times. Measuring parts is reported to the Mayor to file as a follow-up.
 
+A part does wait for a calm host, as a whole check does (`Check.calmForPart`,
+mw-gq6.987): before it starts, and before its slot, up to the same nine minutes (what
+the wait leaves is what the slot is waited for in), saying every minute that it is
+waiting. A host still busy at the end of it hands the part back in one line naming the
+load and `mw check <story> --part N`, counted once for the attempt when repeated
+(`check-<attempt>-part-<n>-calm.slot`); a part that then no longer fits what is left of
+its call is not started either. Before this a part started at any load, and on the
+desktop's three or four suites at once (load 25 to 30 of 16 cores) outran the call.
+
 Every place mw runs the rig's tests, and what it takes:
 
 | Where | Merge slot | Gate lock | Follows the rule |
@@ -375,7 +384,7 @@ Every place mw runs the rig's tests, and what it takes:
 | `mw land` batch gate (and its changed specs) | yes, alone, yielded while it waits for the lock or calm | yes | yes |
 | `mw check`, whole, rig not split | yes, shared | yes (after the slot) | yes |
 | `mw check`, changed specs | yes, shared | yes | yes |
-| `mw check --part N` | only a part that is not slot-free | no | no, see above |
+| `mw check --part N` | only a part that is not slot-free, taken after the calm wait | no | yes, before the part and before its slot, within the same 9 minutes, ending in one line naming the load and `--part N` (mw-gq6.987) |
 | `mw check --no-slot` | no | no | no, the escape hatch |
 | `mw dispatch` bug recheck and `mw next` fixed-on-main recheck (`rerunUnderGate`) | no | yes, a short wait, else "not re-checked" | yes |
 | nightly `mw timing` | no | yes | yes |

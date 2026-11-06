@@ -25,6 +25,22 @@ Feature: Checking a rig whose gate is split into parts
     And the rig's tests were run 0 times
     And the check prints: part 2 of 3 (unit 1/2) passed
 
+  Scenario: A part waits for a busy host to calm, and runs once it has (mw-gq6.987)
+    Given the host's load reads in turn: busy, far over, calm
+    When a session checks "mw-gq6.1" part 2
+    Then the check part passes
+    And the parts that ran, in order, were: unit-1
+    And the check prints: waiting up to
+
+  Scenario: A part is not started on a host that stays busy, and says the load and the part to run again (mw-gq6.987)
+    Given the host's load reads in turn: busy
+    When a session checks "mw-gq6.1" part 2
+    Then the check part fails
+    And the check part error says: part 2 of 3 (unit 1/2) did not start
+    And the check part error says: load 39.0 of 20 cores
+    And the check part error says: mw check mw-gq6.1 --part 2
+    And the check part error says: nothing was run
+
   Scenario: A part that fails is named with what it printed, and fails the call
     Given the part "unit 2/2" fails, saying "FAIL src/review.test.ts"
     When a session checks "mw-gq6.1" part 3
@@ -75,13 +91,13 @@ Feature: Checking a rig whose gate is split into parts
     Then the check fails
     And the check prints: part 1 (lint) has not been run at this commit: mw check mw-gq6.1 --part 1
 
-  Scenario: A part is run at once on a busy host, with no wait for it to calm and no second run
-    Given the host's load reads in turn: busy
+  Scenario: A part that fails once the host has calmed is not run a second time
+    Given the host's load reads in turn: busy, calm
     And the part "lint" fails, saying "timeout"
     When a session checks "mw-gq6.1" part 1
     Then the check part fails
     And the parts that ran, in order, were: lint
-    And the check does not print: wait
+    And the check prints: waiting up to
 
   Scenario: A rig whose gate is not split refuses --part
     Given the rig's gate is not split into parts
