@@ -1,6 +1,7 @@
 package features
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -18,13 +19,51 @@ import (
 // on a host whose bd runs in server mode carries them (beads.env), and the real
 // `bd init` some scenarios run would then make its throwaway database on the
 // host's shared server instead of in the scenario's temp directory.
+//
+// It also puts the real bd first on PATH (realBdFirst), for the scenarios that
+// run one and for every feature's child process, which inherits it.
 func TestMain(m *testing.M) {
 	for _, kv := range os.Environ() {
 		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "BEADS_DOLT_") {
 			os.Unsetenv(name)
 		}
 	}
-	os.Exit(m.Run())
+	dir, err := realBdFirst(os.Getenv("MW_BD_REAL"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "putting the real bd first on PATH:", err)
+		os.Exit(1)
+	}
+	code := m.Run()
+	if dir != "" {
+		os.RemoveAll(dir)
+	}
+	os.Exit(code)
+}
+
+// realBdFirst puts the bd that real names first on PATH, through a link in a
+// new directory it returns, and does nothing when real is "". A Builder's
+// session names the real bd in MW_BD_REAL because the bd first on its PATH is a
+// script that runs mw bd, and through mw bd a scenario's bd waits its turn on
+// the host's one bd turn behind the factory's own bd calls: under load that
+// wait outran the 1m30s a mail send is given (mw-gq6.1023). The scenarios test
+// bd, not mw bd.
+func realBdFirst(real string) (string, error) {
+	if real == "" {
+		return "", nil
+	}
+	path, err := exec.LookPath(real)
+	if err != nil {
+		return "", err
+	}
+	dir, err := os.MkdirTemp("", "mw-features-bd-")
+	if err != nil {
+		return "", err
+	}
+	if err := os.Symlink(path, filepath.Join(dir, "bd")); err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	return dir, os.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // MW_FEATURE narrows a run to one feature file, or one scenario within it,
