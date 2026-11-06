@@ -198,3 +198,113 @@ func TestTheDampersSurveyReadsTheStuckRootsItIsGiven(t *testing.T) {
 		t.Errorf("the DAMPERS section = %q", b.String())
 	}
 }
+
+// refusedOpen is a story that is open, not running, with run set to run, last
+// touched idle ago: what a retry-less hold looks like (mw-gq6.1026).
+func refusedOpen(id, run string, idle time.Duration, labels ...string) application.StoryDetail {
+	d := damperStory(id, 2, idle, append(labels, application.RunState+":"+run)...)
+	d.Updated = stuckNow.Add(-idle)
+	return d
+}
+
+func openRefusedAlarms(work application.WorkInHand) []application.DamperAlarm {
+	report := application.ReadDampers(application.DamperFacts{Now: stuckNow, Work: work}, application.DamperLimits{})
+	var found []application.DamperAlarm
+	for _, a := range report.Alarms {
+		if a.Principle == application.DamperOpenRefused {
+			found = append(found, a)
+		}
+	}
+	return found
+}
+
+func TestTheDampersNameAnOpenStoryLeftRefusedForOverTwoHoursWithItsAgeAndTheCommandToGoOn(t *testing.T) {
+	for name, work := range map[string]application.WorkInHand{
+		"unclaimed, in ready": {Ready: []application.StoryDetail{refusedOpen("mw-q.3", application.RunBlocked, 3*time.Hour)}},
+		"claimed, no session": {OpenClaimed: []application.StoryDetail{refusedOpen("mw-q.3", application.RunBlocked, 3*time.Hour)}},
+	} {
+		alarms := openRefusedAlarms(work)
+		if len(alarms) != 1 {
+			t.Fatalf("%s: %d open-refused alarms, want 1: %+v", name, len(alarms), alarms)
+		}
+		line := alarms[0].Line()
+		for _, want := range []string{"mw-q.3", "run:blocked", "3h00m", "mw retry mw-q.3"} {
+			if !strings.Contains(line, want) {
+				t.Errorf("%s: the alarm %q lacks %q", name, line, want)
+			}
+		}
+	}
+}
+
+func TestTheDampersLeaveAnOpenRefusedStoryAloneUntilItIsOverTwoHoursOld(t *testing.T) {
+	young := application.WorkInHand{Ready: []application.StoryDetail{refusedOpen("mw-q.3", application.RunBlocked, 90*time.Minute)}}
+	if got := openRefusedAlarms(young); len(got) != 0 {
+		t.Errorf("a story refused 90 minutes ago raised %+v", got)
+	}
+}
+
+func TestTheDampersLeaveAlone(t *testing.T) {
+	epic := refusedOpen("mw-q.1", application.RunBlocked, 5*time.Hour)
+	epic.IsEpic = true
+	running := refusedOpen("mw-q.2", application.RunBlocked, 5*time.Hour)
+	running.Status = "in_progress"
+	hitl := refusedOpen("mw-q.4", application.RunBlocked, 5*time.Hour, application.LabelHitl)
+	queued := refusedOpen("mw-q.5", application.RunQueued, 5*time.Hour)
+	ran := refusedOpen("mw-q.6", application.RunRunning, 5*time.Hour)
+	unknownAge := refusedOpen("mw-q.7", application.RunBlocked, 5*time.Hour)
+	unknownAge.Updated, unknownAge.Created = time.Time{}, time.Time{}
+	for name, d := range map[string]application.StoryDetail{
+		"an epic": epic, "a story in progress": running, "a hands-on story for him": hitl,
+		"a story queued for its batch": queued, "a story that is running": ran, "a story whose age is unknown": unknownAge,
+	} {
+		if got := openRefusedAlarms(application.WorkInHand{Ready: []application.StoryDetail{d}}); len(got) != 0 {
+			t.Errorf("%s raised %+v", name, got)
+		}
+	}
+}
+
+func TestTheDampersNameEveryRunStateThatStopsDispatchOnAnOpenStory(t *testing.T) {
+	for run, command := range map[string]string{
+		application.RunBlocked: "mw retry mw-q.9", application.RunStopped: "mw retry mw-q.9",
+		application.RunStuck: "mw retry mw-q.9", application.RunLanded: "mw next mw-q.9",
+	} {
+		alarms := openRefusedAlarms(application.WorkInHand{Ready: []application.StoryDetail{refusedOpen("mw-q.9", run, 4*time.Hour)}})
+		if len(alarms) != 1 || !strings.Contains(alarms[0].Line(), "run:"+run) || !strings.Contains(alarms[0].Line(), command) {
+			t.Errorf("run:%s open for 4h: alarms %+v, want one naming run:%s and %q", run, alarms, run, command)
+		}
+	}
+}
+
+func TestTheStatusDampersSectionNamesAnOpenRefusedStory(t *testing.T) {
+	facts := aCleanDamperFixture()
+	facts.Now = stuckNow
+	facts.Work.Ready = append(facts.Work.Ready, refusedOpen("mw-q.3", application.RunBlocked, 3*time.Hour))
+	var b strings.Builder
+	application.ReadDampers(facts, application.DamperLimits{}).Write(&b)
+	if got := b.String(); !strings.Contains(got, "mw retry mw-q.3") || !strings.Contains(got, application.DampersHeading) {
+		t.Errorf("the DAMPERS section = %q", got)
+	}
+}
+
+func TestTheNeedsYouStaleListHoldsAnOpenRefusedStoryWithItsAgeAndCommand(t *testing.T) {
+	facts := needsYouFixture()
+	facts.Now = stuckNow
+	facts.Work.Ready = append(facts.Work.Ready, refusedOpen("mw-q.3", application.RunBlocked, 3*time.Hour))
+	facts.Graph = append(facts.Graph, domain.GraphBead{ID: "mw-q.3", Title: "Sermons B3", Status: "open"})
+	text := facts.Text(application.SleepBudgetOf(application.SleepNeedsYouFile))
+	stale, rest, ok := strings.Cut(text, "OTHER ITEMS")
+	if !ok {
+		t.Fatalf("needs-you.txt has no OTHER ITEMS section:\n%s", text)
+	}
+	for _, want := range []string{"mw-q.3", "run:blocked", "3h00m", "mw retry mw-q.3"} {
+		if !strings.Contains(stale, want) {
+			t.Errorf("the stale candidates lack %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(rest, "mw-q.3") {
+		t.Errorf("the refused story is also among the other items:\n%s", text)
+	}
+	if got := facts.QueueSize(); got != needsYouFixture().QueueSize() {
+		t.Errorf("a refused story changed his review queue size to %d", got)
+	}
+}
