@@ -83,6 +83,25 @@ func (e HostBusyError) Error() string {
 		e.Host, load, gateWaited(e.Waited), e.What)
 }
 
+// HostStillBusyError is why a batch's tests were not run: the wait for the host
+// to calm ran out with it over its cores, though not far over (a host far over
+// is a HostBusyError). A run at that load times out jsdom tests of a good batch
+// (batch 410 of lampas, 30.4 of 20 cores, mw-gq6.1007), so the batch is left
+// queued for the next landing and no fixer is started.
+type HostStillBusyError struct {
+	Reading LoadReading
+}
+
+func (e HostStillBusyError) Error() string {
+	return fmt.Sprintf("host still at load %.1f of %d: the batch waits for the next landing", e.Reading.Load, e.Reading.Cores)
+}
+
+// isHostStillBusy reports whether err is a HostStillBusyError.
+func isHostStillBusy(err error) bool {
+	var busy HostStillBusyError
+	return errors.As(err, &busy)
+}
+
 // isHostBusy reports whether err is a HostBusyError.
 func isHostBusy(err error) bool {
 	var busy HostBusyError
@@ -133,7 +152,8 @@ const calmedMinute = time.Minute
 // is the second one, before the rerun of a run that failed while the host was
 // busy, which is under the same deadline (mw-gq6.918). A bound that ran out
 // with the host far over its cores returns a HostBusyError either way, and the
-// gate does not run (mw-gq6.903).
+// gate does not run (mw-gq6.903); a batch's gate (closeOut.waitsWhenBusy) does
+// not run with the host busy at all, and returns a HostStillBusyError (mw-gq6.1007).
 func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what string, handBack, again bool) (reading LoadReading, gaveUp bool, err error) {
 	return n.calmedThen(ctx, report, c, what, "ran anyway", handBack, again)
 }
@@ -173,6 +193,11 @@ func (n Next) calmedThen(ctx context.Context, report *NextReport, c *closeOut, w
 				busy := HostBusyError{Host: n.Host, Reading: reading, Waited: waited, What: what}
 				n.print("  wait    " + busy.Error() + "\n")
 				return reading, true, busy
+			}
+			if c.waitsWhenBusy {
+				still := HostStillBusyError{Reading: reading}
+				n.print("  wait    " + still.Error() + "\n")
+				return reading, true, still
 			}
 			note := fmt.Sprintf("%s was still at load %.1f of %d cores after waiting %s, so %s %s",
 				n.Host, reading.Load, reading.Cores, waited, what, then)

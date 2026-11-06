@@ -706,12 +706,16 @@ type closeOut struct {
 	// place is where a batch's close-out keeps its files, runs/batch/<rig>/<n>/;
 	// nil for a story, whose files go in runs/<id>/. A batch's id is its label,
 	// 'batch 3 of lampas', which is no name for a directory (mw-gq6.969).
-	place    *batchPlace
-	detail   StoryDetail
-	path     domain.Path
-	rigDir   string
-	worktree string
-	branch   string
+	place *batchPlace
+	// waitsWhenBusy is set on a batch's gate: a wait for the host to calm that
+	// ends with it over its cores runs no tests, however far over, and the batch
+	// waits for the next landing (HostStillBusyError, mw-gq6.1007).
+	waitsWhenBusy bool
+	detail        StoryDetail
+	path          domain.Path
+	rigDir        string
+	worktree      string
+	branch        string
 	// branchPushed is set when the stop pushed the story's branch to the remote
 	// for the home to finish (unprovedFromAHostWithNoMill).
 	branchPushed bool

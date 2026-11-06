@@ -376,6 +376,38 @@ Feature: mw land lands a batch rig's queue under one gate run
       | mw-gq6.2 |
     And the batch is held, and the Mayor's mail names every story in it and says "no branch of the batch merged onto main, even after its fixer"
 
+  Scenario: A host still over its cores after the wait to calm runs no tests: the batch waits for the next landing, which lands it (mw-gq6.1007)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the rig's tests fail, saying "the batch is red"
+    And mw land may start a fixer, which commits "FIXED" and says it touched "mw-gq6.2"
+    And the host stays at a load of 30 on 20 cores through the wait for it to calm
+    When mw lands the batch of the rig
+    Then the rig's tests were not run on the batch
+    And no fixer was started
+    And mw land says "host still at load 30.0 of 20: the batch waits for the next landing"
+    And "main" at the rig's origin is where it was before the batch
+    And these stories are still queued for batch landing, none of them closed:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the batch is held, and the Mayor's mail names every story in it and says "host still at load 30.0 of 20: the batch waits for the next landing"
+    And the batch records of batch 1 hold the merge order, the gate log and the outcome "held"
+
+  Scenario: The next landing takes the stories a busy host left queued, once the host has calmed (mw-gq6.1007)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the host stays at a load of 30 on 20 cores through the wait for it to calm
+    When mw lands the batch of the rig
+    Then the rig's tests were not run on the batch
+    When the host calms and mw lands the batch of the rig again
+    Then the batch landed on "main" in one push, forcing nothing
+    And the rig's tests were run once on the batch
+    And these stories are on "main" at the rig's origin, closed and recorded as landed, each with a ledger line naming batch 2:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+
   Scenario: A push the origin refuses holds the batch without a fixer, though one may be started (mw-gq6.503)
     Given these stories are queued for batch landing:
       | mw-gq6.1 |

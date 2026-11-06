@@ -73,3 +73,11 @@ func MergedStory(id, merge string, detail StoryDetail, path domain.Path) BatchSt
 func (b BatchLand) MainAloneOfTheBatch(ctx context.Context, rigDir string, report *BatchReport, failed Checked) {
 	b.mainAlone(ctx, rigDir, report, &NextReport{}, failed)
 }
+
+// GateTheBatchRun is GateTheBatch with what else the gate said: the error that
+// kept the tests from running, and the notes the close-out helpers made.
+func (b BatchLand) GateTheBatchRun(ctx context.Context, dir string, report *BatchReport) (Checked, error, []string) {
+	var nr NextReport
+	gate := b.runGate(ctx, dir, dir, report, &nr)
+	return gate.Checked, gate.Err, nr.Notes
+}

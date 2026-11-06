@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
@@ -45,6 +46,10 @@ type batchFixture struct {
 	// busyThenCalm has the host busy at the batch's first look and calm after.
 	slotWatch    *slotWatch
 	busyThenCalm bool
+
+	// load, when set, is the host's load for the batch's gate: a host that
+	// stays busy through the wait for it to calm (mw-gq6.1007).
+	load *apptest.FakeHostLoad
 }
 
 // registerBatchLandSteps registers the steps of features/batch_land.feature.
@@ -63,6 +68,8 @@ func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the gate log of batch (\d+) shows the tests' command, then the changed-specs command, with the text "([^"]*)"$`, c.theGateLogShowsTheSpecs)
 	ctx.Then(`^the gate log of batch (\d+) says "([^"]*)"$`, c.theGateLogSays)
 	ctx.When(`^mw lands the batch of the rig$`, c.mwLandsTheBatch)
+	ctx.Given(`^the host stays at a load of (\d+) on (\d+) cores through the wait for it to calm$`, c.theHostStaysBusy)
+	ctx.When(`^the host calms and mw lands the batch of the rig again$`, c.theHostCalmsAndMwLandsAgain)
 	registerLedgerWatchSteps(ctx, c)
 	ctx.Then(`^the story "([^"]*)" is recorded as landed and is still open$`, c.landedAndStillOpen)
 	ctx.When(`^mw lands the batch of the rig with --dry-run$`, c.mwLandsTheBatchDryRun)
@@ -239,6 +246,19 @@ func (c *nextContext) landedAndStillOpen(id string) error {
 
 func (c *nextContext) mwLandsTheBatch() error { return c.land(false) }
 
+func (c *nextContext) theHostStaysBusy(load, cores int) error {
+	c.batch.load = &apptest.FakeHostLoad{Reading: application.LoadReading{Load: float64(load), Cores: cores}}
+	return nil
+}
+
+func (c *nextContext) theHostCalmsAndMwLandsAgain() error {
+	if c.batch.load == nil {
+		return fmt.Errorf("the scenario never made the host busy")
+	}
+	c.batch.load.Reading = application.LoadReading{Load: 3, Cores: c.batch.load.Reading.Cores}
+	return c.land(false)
+}
+
 func (c *nextContext) mwLandsTheBatchDryRun() error { return c.land(true) }
 
 // land runs mw land on the scenario's rig, built on the close-out's own ports.
@@ -256,8 +276,13 @@ func (c *nextContext) land(dryRun bool) error {
 		ledgerWatch:  c.batch.ledgerWatch,
 		slotWatch:    c.batch.slotWatch,
 		busyThenCalm: c.batch.busyThenCalm,
+		load:         c.batch.load,
 	}
 	next := c.nextUseCase()
+	if c.batch.load != nil {
+		next.Load = c.batch.load
+		next.LoadWait = func(context.Context, time.Duration) error { return nil }
+	}
 	if c.batch.fixer != nil {
 		next.Runner = c.batch.fixer
 	}

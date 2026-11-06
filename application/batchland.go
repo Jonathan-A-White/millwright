@@ -594,6 +594,11 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 		after = ", after its fixer " + report.Fixer.Name + " had ended, and no second fixer is started"
 	}
 	switch {
+	case isHostStillBusy(gate.Err):
+		// The host's load and not the stories': nothing ran, no fixer was
+		// started, and the stories stay queued for the next landing.
+		report.Held = gate.Err.Error()
+		return
 	case gate.Err != nil:
 		report.Held = fmt.Sprintf("%s could not be run%s: %v", gateOnTheBatch, after, gate.Err)
 		return
@@ -654,6 +659,7 @@ func (b BatchLand) runGate(ctx context.Context, dir, rigDir string, report *Batc
 	// measured is kept on the report, the first run's reading of the host and
 	// the time of every run added.
 	bc := b.batchCloseOut(report, rigDir)
+	bc.waitsWhenBusy = true
 	bc.gate = report.gate
 	gate, log := n.gateWithSpecs(ctx, bc, nr, dir, gateOnTheBatch, RelatedSpan{Base: report.Base, Skip: report.versionCommit})
 	report.gate = bc.gate
@@ -1065,7 +1071,7 @@ func (b BatchLand) mailTheMayor(ctx context.Context, report *BatchReport, nr *Ne
 	if !report.Landed && report.MainLabels != "" {
 		fmt.Fprintf(&body, "\nOn main: %s\n", report.MainLabels)
 	}
-	if !report.Landed && report.Tested && !report.Gate.Passed {
+	if !report.Landed && report.Tested && !report.Gate.Passed && report.Gate.Command != "" {
 		fmt.Fprintf(&body, "\n%s, `%s`, ended:\n\n```\n%s\n```\n", gateOnTheBatch, report.Gate.Command, report.Gate.Tail(CheckLines))
 	}
 	fmt.Fprintf(&body, "\nThe batch's records: %s/%s/%d/\n", BatchDir, report.Rig, report.Number)
