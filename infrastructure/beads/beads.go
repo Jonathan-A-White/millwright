@@ -247,7 +247,10 @@ func (g *Gateway) CreateStory(ctx context.Context, story application.NewStory) (
 	}
 	args := []string{"create", story.Title, "--status", StatusDeferred}
 	if epic := strings.TrimSpace(story.EpicID); epic != "" {
-		args = append(args, "--parent", epic)
+		// bd copies the parent's labels onto a child unless told not to, which
+		// put the Governor's his-priority on stories he never prioritised
+		// (mw-gq6.757): a story carries the labels it is given, below.
+		args = append(args, "--parent", epic, "--no-inherit-labels")
 	}
 
 	if description := strings.TrimSpace(story.Description); description != "" {

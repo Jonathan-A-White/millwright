@@ -77,3 +77,44 @@ func TestBdIsGivenNoStandardInputToWaitOn(t *testing.T) {
 		t.Fatalf("expected story t-1, got %q, %v", id, err)
 	}
 }
+
+// bd create --parent copies the parent's labels onto the child, so a story the
+// Deputy or mw files under an epic the Governor prioritised came out labelled
+// his-priority, which is the Governor's word and nobody else's (mw-gq6.757).
+// A story carries the labels it was given and no others.
+func TestAStoryFiledUnderAnEpicDoesNotInheritItsLabels(t *testing.T) {
+	record := filepath.Join(t.TempDir(), "args")
+	program := standInBd(t, "echo \"$@\" > "+record+"\necho t-1\n")
+	gateway := beads.New(t.TempDir(), beads.WithProgram(program))
+
+	if _, err := gateway.CreateStory(context.Background(), application.NewStory{Title: "x", EpicID: "mw-x", Description: "d"}); err != nil {
+		t.Fatalf("filing the story: %v", err)
+	}
+	args, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "--parent mw-x") || !strings.Contains(string(args), "--no-inherit-labels") {
+		t.Errorf("expected the create to name its parent and refuse its labels, got: %s", args)
+	}
+}
+
+func TestALabelNamedForAStoryIsStillGivenWhenItDoesNotInherit(t *testing.T) {
+	record := filepath.Join(t.TempDir(), "args")
+	program := standInBd(t, "echo \"$@\" > "+record+"\necho t-1\n")
+	gateway := beads.New(t.TempDir(), beads.WithProgram(program))
+
+	_, err := gateway.CreateStory(context.Background(), application.NewStory{
+		Title: "x", EpicID: "mw-x", Labels: []string{application.HisPriorityLabel},
+	})
+	if err != nil {
+		t.Fatalf("filing the story: %v", err)
+	}
+	args, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "--labels his-priority") {
+		t.Errorf("expected the label the story names to be given, got: %s", args)
+	}
+}
