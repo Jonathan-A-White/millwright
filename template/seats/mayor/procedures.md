@@ -5,6 +5,7 @@ The boot sheet, read every boot after the charter and `vision.md`. Edit it freel
 <!-- toc -->
 
 - [Boot](#boot)
+- [Onboarding (the first sitting)](#onboarding-the-first-sitting)
 - [Rules that bite every sitting](#rules-that-bite-every-sitting)
 - [Who is talking](#who-is-talking)
 - [Standing asks of the Governor (always in force)](#standing-asks-of-the-governor-always-in-force)
@@ -15,6 +16,7 @@ The boot sheet, read every boot after the charter and `vision.md`. Edit it freel
 
 ## Boot
 
+0. When the vault has no git remote or no rig (`git remote` prints nothing; no `[rigs]` entry in `~/.config/mw/config.toml`), run [Onboarding](#onboarding-the-first-sitting) before anything else, then carry on from step 1.
 1. Read the charter (your system prompt), `vision.md`, the newest handoff in `handoffs/`, and this file. Nothing else in `seats/mayor/` at boot.
 2. Read the rig's `CONTEXT.md` (the vocabulary) and its codemap. Read the Millhand's charter when dealing with another host.
 3. Get the picture with `mw brief <epic>...` and `mw status`; `bd show <id>` only for a bead you must act on.
@@ -22,6 +24,16 @@ The boot sheet, read every boot after the charter and `vision.md`. Edit it freel
 5. Your predecessor's window closes itself shortly after the handover. Close it by hand only when its pane is idle and its input line empty.
 6. Run one `mw sync`. Read mail by subject, not sender: the subject says whether a story landed or was refused.
 7. Check the size of every rig memory file (`wc -c seats/builder/rigs/*.md`): over its budget means prune before the next release.
+
+## Onboarding (the first sitting)
+
+The member signs in to everything themself (device flow: you give the code and URL, they approve in their own browser). You never see or type a password, and a token or key is never printed, pasted into chat, or written into the vault. Ask one question at a time, with your recommendation; send one Postern card per step below, so the member can answer from a phone. Skip a step already done, and keep going after a "later".
+
+1. GitHub: the member runs `gh auth login` as themself (device flow). Check with `gh auth status`.
+2. Rigs: show `gh repo list` and ask which repos become rigs, one repo per question, recommending the ones they work on most. Clone each chosen one, then name it under `[rigs]` (`mw config set rigs.<name> <path>`) with its `[tests]` line; see `docs/setting-up-a-vault.md`, Adding a rig.
+3. The vault's backup: `gh repo create <member>/<vault-name> --private`, then `git remote add origin <url>` and `git push -u origin main` in the vault. Private only; confirm it with `gh repo view --json isPrivate`.
+4. Other tools: ask which other AI tools they use (an image model, say). For each, the member puts its key into their own `~/.config/mw/` secrets file (`chmod 0600`; they type it, it is never printed or read back, and never goes in the vault). Record the tool's name, not its key.
+5. Close: add one line to the vault's first handoff saying which steps are done and which are owed.
 
 ## Rules that bite every sitting
 

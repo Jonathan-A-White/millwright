@@ -433,9 +433,8 @@ func (r MemberReport) String() string {
 		fmt.Fprintf(&out, "  %d. Log in to Claude as this user: claude\n", n)
 	}
 	n++
-	fmt.Fprintf(&out, "  %d. Make a private remote for the vault, then:\n", n)
-	fmt.Fprintf(&out, "       git -C %s remote add origin <url>\n", r.Dir)
-	fmt.Fprintf(&out, "       git -C %s push -u origin main\n", r.Dir)
+	fmt.Fprintf(&out, "  %d. Onboarding, with the Mayor, in the first sitting: the member's own GitHub, their rigs, the vault's private\n", n)
+	fmt.Fprintf(&out, "     remote (seats/mayor/procedures.md, Onboarding) and their other tools' keys. The Mayor runs it on boot.\n")
 
 	fmt.Fprintf(&out, "\nThe way back: mw member remove stops and disables %s and deletes nothing; the files above stay where they are.\n", MemberUnit)
 	return out.String()
