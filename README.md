@@ -5498,7 +5498,7 @@ doctor_wg_hub  = "10.88.0.1:22"                   # default; the hub's ssh host:
 doctor_wg_unit = "wg-quick@wg0"                   # default; the unit wg restarts
 tmp_leftovers_budget_bytes = 200000000            # default (200 MB); tmp-leftovers' budget for dead leftovers
 go_build_budget_bytes      = 2000000000           # default (2 GB); tmp-leftovers' own budget for ~/.cache/go-build
-root_disk_budget_bytes     = 0                    # default 0 = root-disk-budget is inert; else the Windows drive's free bytes when the WSL vhdx was put there
+root_disk_budget_bytes     = 0                    # per host, set at install; default 0 = inert off WSL, a doctor warning on WSL; else the Windows drive's free bytes when the WSL vhdx was put there
 root_disk_margin_bytes     = 10000000000          # default (10 GB); headroom kept under that budget
 battery_low_percent        = 25                   # default; battery alarms on a fall to this, discharging
 battery_critical_percent   = 10                   # default; and again on a fall to this
@@ -5711,8 +5711,16 @@ used bytes (`statfs` of `/`), a lower bound of the vhdx's size, since files
 deleted inside WSL do not shrink the vhdx and compaction is a hands step.
 `root_disk_budget_bytes` is the drive's free space at the time the vhdx was
 placed there; the check is faulty once used bytes pass that budget less
-`root_disk_margin_bytes`. With the budget at 0, the default, it is inert: it
-says ok, "n/a: no root_disk_budget_bytes set", and writes nothing. It changes
+`root_disk_margin_bytes`. The budget is per host and is set at install,
+in that host's own `[doctor]`: the desktop's is its drive's free bytes when the
+vhdx was put there. With the budget at 0, the default, a host that is not WSL
+(its `/proc/version` names no Microsoft kernel) has no vhdx to watch, and the
+check is inert: it says ok, "n/a: no root_disk_budget_bytes set", and writes
+nothing. A WSL host with no budget is not inert: the check says cannot-tell,
+which the doctor shows as a warning, naming the key to set, because the
+desktop's guard sat unset for a month and its drive filled (WSL would not
+start). The used bytes it reads are a lower bound of the vhdx, which never
+shrinks, so a budget is best set with a wide `root_disk_margin_bytes`. It changes
 nothing on the host: its cure is one note to the Mayor naming the figures and
 the hands step (free space on that drive, compact the vhdx with
 `Optimize-VHD`, or move it); its damper is 6 hours with no cap, so the Mayor

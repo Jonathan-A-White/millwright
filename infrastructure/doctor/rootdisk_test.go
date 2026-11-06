@@ -16,11 +16,56 @@ func rootDiskUsed(n int64) func() (int64, error) {
 	return func() (int64, error) { return n, nil }
 }
 
+const (
+	wslProcVersion   = "Linux version 6.18.33.2-microsoft-standard-WSL2 (root@build) (gcc 13.2.0) #1 SMP"
+	plainProcVersion = "Linux version 6.8.0-45-generic (buildd@lcy02) (gcc 13.2.0) #45-Ubuntu SMP"
+)
+
+func procVersion(text string) func() (string, error) {
+	return func() (string, error) { return text, nil }
+}
+
 func TestRootDiskBudgetIsInertWithNoBudget(t *testing.T) {
-	check := &doctor.RootDiskBudget{UsedBytes: rootDiskUsed(500 * gb)}
+	check := &doctor.RootDiskBudget{UsedBytes: rootDiskUsed(500 * gb), ProcVersion: procVersion(plainProcVersion)}
 	verdict, reason := check.Probe(context.Background())
 	if verdict != application.DoctorOK || reason != "n/a: no root_disk_budget_bytes set" {
 		t.Fatalf("expected an ok saying no root_disk_budget_bytes is set; got %v %q", verdict, reason)
+	}
+}
+
+func TestRootDiskBudgetWarnsOnAWSLHostWithNoBudgetNamingTheConfigKey(t *testing.T) {
+	check := &doctor.RootDiskBudget{UsedBytes: rootDiskUsed(300 * gb), ProcVersion: procVersion(wslProcVersion)}
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorCannotTell {
+		t.Fatalf("expected a warning (cannot-tell) on a WSL host with no budget, got %v %q", verdict, reason)
+	}
+	for _, want := range []string{"root_disk_budget_bytes", "[doctor]", "this host", "lower bound"} {
+		if !strings.Contains(reason, want) {
+			t.Fatalf("expected the warning to name %q, got %q", want, reason)
+		}
+	}
+}
+
+func TestRootDiskBudgetWithABudgetOnWSLIsJudgedNotWarned(t *testing.T) {
+	check := &doctor.RootDiskBudget{Budget: 100 * gb, UsedBytes: rootDiskUsed(20 * gb), ProcVersion: procVersion(wslProcVersion)}
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK || strings.Contains(reason, "n/a") {
+		t.Fatalf("expected an ok carrying the figures, got %v %q", verdict, reason)
+	}
+}
+
+func TestRootDiskBudgetIsInertWhenProcVersionCannotBeRead(t *testing.T) {
+	check := &doctor.RootDiskBudget{ProcVersion: func() (string, error) { return "", errors.New("no /proc") }}
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK || !strings.HasPrefix(reason, "n/a") {
+		t.Fatalf("expected n/a when the host cannot be told to be WSL, got %v %q", verdict, reason)
+	}
+}
+
+func TestIsWSLVersion(t *testing.T) {
+	if !doctor.IsWSLVersion(wslProcVersion) || !doctor.IsWSLVersion("Linux version 4.4.0-19041-Microsoft") {
+		t.Fatal("expected WSL2 and WSL1 /proc/version lines to read as WSL")
+	}
+	if doctor.IsWSLVersion(plainProcVersion) {
+		t.Fatal("expected a plain Linux /proc/version not to read as WSL")
 	}
 }
 
