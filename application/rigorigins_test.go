@@ -90,3 +90,23 @@ func TestOriginSchemeNamesHowAnOriginIsReached(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorNamesAStoredUrlOnlyForARigWhoseHostRewritesIt(t *testing.T) {
+	check := rigOriginsCheck(map[string]string{
+		"argus":  "https://github.com/o/argus.git",
+		"legend": "https://github.com/o/legend.git",
+		"voice":  "https://github.com/o/voice.git",
+		"lampas": "git@github.com:o/lampas.git",
+		"pwa":    "git@github.com:o/pwa.git",
+	})
+	check.Rewritten = func(context.Context) (map[string]string, error) {
+		return map[string]string{"pwa": "git@github.com:o/pwa-stored.git"}, nil
+	}
+	_, reason := check.Probe(context.Background())
+	if !strings.Contains(reason, "pwa (ssh, origin git@github.com:o/pwa.git, stored as git@github.com:o/pwa-stored.git)") {
+		t.Errorf("a rewritten rig names its stored url: %s", reason)
+	}
+	if !strings.Contains(reason, "lampas (ssh, origin git@github.com:o/lampas.git)") || strings.Contains(reason, "lampas (ssh, origin git@github.com:o/lampas.git, stored") {
+		t.Errorf("an unrewritten rig names no stored url: %s", reason)
+	}
+}
