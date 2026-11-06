@@ -479,6 +479,32 @@ Feature: mw land lands a batch rig's queue under one gate run
     And the records of batch 1 hold fixer.bundle, which verifies, and the outcome and the Held mail name it and the fixer's commit "Mend the batch: TRIED"
     And the vault committed the fixer bundle of batch 1
 
+  Scenario: A held batch's fixer commit that touches one story's files only is pushed to that story's branch, and the Held mail says where (mw-gq6.1014)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the rig's tests fail, saying "the batch is still red"
+    And mw land may start a fixer, which commits "mw-gq6.1.md" and says it touched "mw-gq6.1"
+    When mw lands the batch of the rig
+    Then the batch is held, and the Mayor's mail names every story in it and says "the batch is still red"
+    And the branch of "mw-gq6.1" at the rig's origin holds the fixer's commit "Mend the batch: mw-gq6.1.md"
+    And the branch of "mw-gq6.2" at the rig's origin holds no commit of the fixer's
+    And the outcome and the Held mail of batch 1 say the fixer's commit was pushed to "mw/mw-gq6.1"
+    And the records of batch 1 hold fixer.bundle, which verifies, and the outcome and the Held mail name it and the fixer's commit "Mend the batch: mw-gq6.1.md"
+
+  Scenario: A held batch's fixer commit that spans two stories' files stays in the bundle, named in the Held mail, and no story's branch gets it (mw-gq6.1014)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the rig's tests fail, saying "the batch is still red"
+    And mw land may start a fixer, which commits one change to "mw-gq6.1.md" and "mw-gq6.2.md" and says it touched "mw-gq6.1"
+    When mw lands the batch of the rig
+    Then the batch is held, and the Mayor's mail names every story in it and says "the batch is still red"
+    And the branch of "mw-gq6.1" at the rig's origin holds no commit of the fixer's
+    And the branch of "mw-gq6.2" at the rig's origin holds no commit of the fixer's
+    And the records of batch 1 hold fixer.bundle, which verifies, and the outcome and the Held mail name it and the fixer's commit "Mend the batch: both"
+    And the outcome and the Held mail of batch 1 say no commit of the fixer's was pushed to a story's branch
+
   Scenario: A batch held after a fixer that committed nothing writes no bundle, and the outcome says so (mw-gq6.865)
     Given these stories are queued for batch landing:
       | mw-gq6.1 |

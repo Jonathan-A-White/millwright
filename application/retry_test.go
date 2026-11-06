@@ -159,6 +159,12 @@ func (f *fakeRetryLanding) Push(context.Context, string, string, string) error {
 func (f *fakeRetryLanding) KeepOrigin(context.Context, string, string, string) (application.KeptOrigin, error) {
 	return application.KeptOrigin{}, nil
 }
+func (f *fakeRetryLanding) FilesBetween(context.Context, string, string, string) ([]string, error) {
+	return nil, nil
+}
+func (f *fakeRetryLanding) Carry(context.Context, string, string, []string, string, string) (string, error) {
+	return "", nil
+}
 func (f *fakeRetryLanding) CloseLanding(context.Context, string, string) error { return nil }
 
 func (f *fakeRetryLanding) Bundle(context.Context, string, string, string, string) (string, error) {

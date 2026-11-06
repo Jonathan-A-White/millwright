@@ -518,6 +518,62 @@ func (w *Worktrees) Push(ctx context.Context, landingDir, remote, branch string)
 	return nil
 }
 
+// FilesBetween implements application.Landing: `git diff --name-only` from the
+// merge base of from and to, three dots.
+func (w *Worktrees) FilesBetween(ctx context.Context, dir, from, to string) ([]string, error) {
+	out, err := w.git(ctx, dir, "diff", "--name-only", "-z", from+"..."+to, "--")
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, file := range strings.Split(out, "\x00") {
+		if file != "" {
+			files = append(files, file)
+		}
+	}
+	return files, nil
+}
+
+// Carry implements application.Landing: the worktree is detached onto onto,
+// each commit is cherry-picked, the head is pushed as branch by Push (no
+// force), and the worktree is detached back onto where it stood. A pick that
+// conflicts is aborted before the error comes back.
+func (w *Worktrees) Carry(ctx context.Context, dir, remote string, commits []string, onto, branch string) (string, error) {
+	switch {
+	case len(commits) == 0:
+		return "", fmt.Errorf("carrying commits onto %s: which?", branch)
+	case onto == "":
+		return "", fmt.Errorf("carrying commits in %s: onto what?", dir)
+	}
+	stood, err := w.git(ctx, dir, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	stood = strings.TrimSpace(stood)
+	// The worktree goes back even when the context that failed us is done.
+	restore := func() {
+		_, _ = w.git(context.WithoutCancel(ctx), dir, "cherry-pick", "--abort")
+		_, _ = w.git(context.WithoutCancel(ctx), dir, "checkout", "-q", "--detach", stood)
+	}
+	defer restore()
+	if _, err := w.git(ctx, dir, "checkout", "-q", "--detach", onto); err != nil {
+		return "", err
+	}
+	for _, commit := range commits {
+		if _, err := w.git(ctx, dir, "cherry-pick", commit); err != nil {
+			return "", err
+		}
+	}
+	if err := w.Push(ctx, dir, remote, branch); err != nil {
+		return "", err
+	}
+	tip, err := w.git(ctx, dir, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(tip), nil
+}
+
 var _ application.TagPublisher = (*Worktrees)(nil)
 
 // PublishTags implements application.TagPublisher: each tag of the repository

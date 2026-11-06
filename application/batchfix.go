@@ -43,6 +43,13 @@ type BatchFixing struct {
 	Bundled    []Commit
 	BundleSaid string
 
+	// Carried are the commits that touched one story's files only and were
+	// pushed to that story's branch, so that the next batch merges them, and
+	// CarryTrouble why a story's could not be (mw-gq6.1014). The rest stay
+	// only in the bundle.
+	Carried      []FixerCarried
+	CarryTrouble []string
+
 	// Touched are the stories it said it touched, with the files it named;
 	// Causes are what it said made the batch red. Both are its word,
 	// recorded as it gave it and never bisected.
@@ -59,6 +66,17 @@ type BatchFixing struct {
 	// was to be started (mw-gq6.472): nil when none. It says nothing of the
 	// batch, so the batch is held until the stop's time, not judged after it.
 	Stopped *HarnessStop
+}
+
+// FixerCarried is one of the fixer's commits pushed to a story's branch: Hash
+// and Subject as the bundle names it, Story and Branch where it went, and Tip the
+// commit the branch is at now, at the rig's origin.
+type FixerCarried struct {
+	Hash    string
+	Subject string
+	Story   string
+	Branch  string
+	Tip     string
 }
 
 // WhatsNewLine is the What's new line mw writes into the rig's changelog files
@@ -495,6 +513,7 @@ func (r BatchReport) fixerMail() string {
 	} else if f.BundleSaid != "" {
 		fmt.Fprintf(&b, "%s\n", f.BundleSaid)
 	}
+	b.WriteString(f.carriedLines())
 	if f.Commit != "" && f.Bundle == "" {
 		fmt.Fprintf(&b, "Its work is at commit %s in the rig, on no branch.\n", f.Commit)
 	}
@@ -524,6 +543,124 @@ func (f BatchFixing) bundledList() string {
 	return b.String()
 }
 
+// carriedLines say which of the fixer's commits were pushed to a story's branch
+// and where, and what stays only in the bundle; empty when the fixer left none.
+func (f BatchFixing) carriedLines() string {
+	var b strings.Builder
+	for _, c := range f.Carried {
+		if b.Len() == 0 {
+			b.WriteString("Its commits that touched one story's files only were pushed to that story's branch at the rig's origin, so the batch landed again merges them:\n")
+		}
+		fmt.Fprintf(&b, "  %s %s: pushed to %s (the branch is at %s)\n", c.Hash, c.Subject, c.Branch, shortCommit(c.Tip))
+	}
+	for _, trouble := range f.CarryTrouble {
+		fmt.Fprintf(&b, "%s\n", trouble)
+	}
+	switch {
+	case f.Bundle == "":
+	case len(f.Carried) == 0:
+		b.WriteString("No commit of its touched one story's files only, so each stays only in the bundle.\n")
+	case len(f.Carried) < len(f.Bundled):
+		b.WriteString("The others touched more than one story's files, or could not be pushed, and stay only in the bundle.\n")
+	}
+	return b.String()
+}
+
+// carryFixer pushes the fixer's commits that touch one story's files only to
+// that story's branch at the origin, where the next batch merges them: they are
+// on no branch, and a batch landed again would meet the red the fixer mended. A
+// commit belongs to a story when the files of the story's branch (against the
+// batch's base) hold every file it touches and no other story's do; one that
+// belongs to none or to two, or a merge of the fixer's, stays in the bundle
+// alone. A story's commits go together, in order, or not at all: trouble is a
+// line of the records, never another hold (mw-gq6.1014).
+func (b BatchLand) carryFixer(ctx context.Context, dir string, report *BatchReport, commits []Commit) {
+	f := report.Fixer
+	n := b.Next
+	said := func(format string, args ...any) {
+		line := fmt.Sprintf(format, args...)
+		f.CarryTrouble = append(f.CarryTrouble, line)
+		report.Notes = append(report.Notes, line)
+	}
+	owned := map[string][]string{}
+	for _, s := range report.Merged {
+		if s.OnTarget {
+			continue
+		}
+		files, err := n.Landing.FilesBetween(ctx, dir, report.Base, s.Branch)
+		if err != nil {
+			said("the files of %s could not be read, so no commit of the fixer's was pushed to its branch: %v", s.ID, err)
+			continue
+		}
+		owned[s.ID] = files
+	}
+	if len(owned) == 0 {
+		return
+	}
+	byStory := map[string][]Commit{}
+	var stories []string
+	for _, c := range commits {
+		files, err := n.Landing.FilesBetween(ctx, dir, c.Hash+"^", c.Hash)
+		if err != nil || len(files) == 0 {
+			continue
+		}
+		var owner string
+		owners := 0
+		for _, s := range report.Merged {
+			if holdsAll(owned[s.ID], files) {
+				owner = s.ID
+				owners++
+			}
+		}
+		if owners != 1 {
+			continue
+		}
+		if len(byStory[owner]) == 0 {
+			stories = append(stories, owner)
+		}
+		byStory[owner] = append(byStory[owner], c)
+	}
+	for _, id := range stories {
+		var story BatchStory
+		for _, s := range report.Merged {
+			if s.ID == id {
+				story = s
+			}
+		}
+		var hashes []string
+		for _, c := range byStory[id] {
+			hashes = append(hashes, c.Hash)
+		}
+		branch := StoryBranch(id)
+		tip, err := n.Landing.Carry(ctx, dir, n.remote(), hashes, story.Branch, branch)
+		if err != nil {
+			said("the fixer's commits for %s (%s) could not be pushed to its branch %s: %v", id, strings.Join(hashes, ", "), branch, err)
+			continue
+		}
+		for _, c := range byStory[id] {
+			subject, _, _ := strings.Cut(strings.TrimSpace(c.Message), "\n")
+			f.Carried = append(f.Carried, FixerCarried{Hash: c.Hash, Subject: subject, Story: id, Branch: branch, Tip: tip})
+		}
+	}
+}
+
+// holdsAll says every file of want is in have.
+func holdsAll(have, want []string) bool {
+	if len(have) == 0 {
+		return false
+	}
+	held := make(map[string]bool, len(have))
+	for _, file := range have {
+		held[file] = true
+	}
+	for _, file := range want {
+		if !held[file] {
+			return false
+		}
+	}
+	return true
+}
+
 // bundleFixer keeps, in the held batch's records, the commits the fixer made:
 // the landing worktree is cleared once the batch is held, and they are on no
 // branch, so a batch landed again would lose them. It bundles them (the batch
@@ -550,6 +687,7 @@ func (b BatchLand) bundleFixer(ctx context.Context, dir string, report *BatchRep
 		f.BundleSaid = "its fixer " + f.Name + " left no commits ahead of the batch it was given, so no bundle was written"
 		return
 	}
+	b.carryFixer(ctx, dir, report, commits)
 	dest := b.Records.BatchFilePath(report.Rig, report.Number, BatchFixerBundleFile)
 	if dest == "" {
 		trouble(fmt.Errorf("the batch's records have no place for it"))
@@ -576,9 +714,9 @@ func (r BatchReport) fixerBundleLines() string {
 	case f == nil:
 		return ""
 	case f.Bundle != "":
-		return fmt.Sprintf("the fixer %s's commits are kept in %s:\n%s", f.Name, f.Bundle, f.bundledList())
+		return fmt.Sprintf("the fixer %s's commits are kept in %s:\n%s", f.Name, f.Bundle, f.bundledList()) + f.carriedLines()
 	case f.BundleSaid != "":
-		return f.BundleSaid + "\n"
+		return f.BundleSaid + "\n" + f.carriedLines()
 	}
 	return ""
 }

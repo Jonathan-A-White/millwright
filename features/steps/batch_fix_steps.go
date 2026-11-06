@@ -89,6 +89,11 @@ func registerBatchFixSteps(ctx *godog.ScenarioContext, c *nextContext) {
 		return nil
 	})
 	ctx.Then(`^the records of batch (\d+) hold fixer.bundle, which verifies, and the outcome and the Held mail name it and the fixer's commit "([^"]*)"$`, c.theRecordsHoldTheFixerBundle)
+	ctx.Given(`^mw land may start a fixer, which commits one change to "([^"]*)" and "([^"]*)" and says it touched "([^"]*)"$`, c.aFixerThatCommitsTwoFiles)
+	ctx.Then(`^the branch of "([^"]*)" at the rig's origin holds the fixer's commit "([^"]*)"$`, c.theStoryBranchHoldsTheFixersCommit)
+	ctx.Then(`^the branch of "([^"]*)" at the rig's origin holds no commit of the fixer's$`, c.theStoryBranchHoldsNoFixerCommit)
+	ctx.Then(`^the outcome and the Held mail of batch (\d+) say the fixer's commit was pushed to "([^"]*)"$`, c.theRecordsSayThePushWentTo)
+	ctx.Then(`^the outcome and the Held mail of batch (\d+) say no commit of the fixer's was pushed to a story's branch$`, c.theRecordsSayNothingWasPushed)
 	ctx.Then(`^the vault committed the fixer bundle of batch (\d+)$`, c.theVaultCommittedTheFixerBundle)
 	ctx.Then(`^the records of batch (\d+) hold no fixer.bundle, and the outcome says its fixer left no commits$`, c.theRecordsHoldNoFixerBundle)
 	ctx.Then(`^no fixer was started$`, c.noFixerWasStarted)
@@ -546,6 +551,90 @@ func (c *nextContext) theRecordsHoldNoFixerBundle(number int) error {
 	}
 	if !strings.Contains(string(said), "no bundle was written") {
 		return fmt.Errorf("expected the outcome to say its fixer left no commits and no bundle was written, got:\n%s", said)
+	}
+	return nil
+}
+
+// aFixerThatCommitsTwoFiles commits a change to both files in one commit, which
+// spans the two stories whose work they are.
+func (c *nextContext) aFixerThatCommitsTwoFiles(a, b, touched string) error {
+	c.newFixer(touched, func(dir string) error {
+		for _, file := range []string{a, b} {
+			if err := os.WriteFile(filepath.Join(dir, file), []byte("the fixer's mend\n"), 0o644); err != nil {
+				return err
+			}
+		}
+		return commitIn(dir, "Mend the batch: both")
+	})
+	return nil
+}
+
+// theStoryBranchHoldsTheFixersCommit checks the story's branch at the origin
+// carries a commit with the fixer's subject (mw-gq6.1014).
+func (c *nextContext) theStoryBranchHoldsTheFixersCommit(id, subject string) error {
+	subjects, err := gitSay(c.origin(), "log", "--format=%s", application.StoryBranch(id))
+	if err != nil {
+		return err
+	}
+	if !strings.Contains("\n"+subjects+"\n", "\n"+subject+"\n") {
+		return fmt.Errorf("expected the branch of %s at the origin to hold %q, it holds:\n%s\n%s", id, subject, subjects, c.said())
+	}
+	return nil
+}
+
+func (c *nextContext) theStoryBranchHoldsNoFixerCommit(id string) error {
+	subjects, err := gitSay(c.origin(), "log", "--format=%s", application.StoryBranch(id))
+	if err != nil {
+		return err
+	}
+	if strings.Contains(subjects, "Mend the batch") {
+		return fmt.Errorf("expected the branch of %s at the origin to hold none of the fixer's commits, it holds:\n%s", id, subjects)
+	}
+	return nil
+}
+
+// recordsAndMail is outcome.txt of the batch and the body of its one Held mail,
+// by where each is read from.
+func (c *nextContext) recordsAndMail(number int) (map[string]string, error) {
+	said, err := os.ReadFile(filepath.Join(c.batchDir(number), application.BatchOutcomeFile))
+	if err != nil {
+		return nil, err
+	}
+	mail, err := c.batchMail()
+	if err != nil {
+		return nil, err
+	}
+	if len(mail) != 1 {
+		return nil, fmt.Errorf("expected one mail about the batch, got %+v", mail)
+	}
+	return map[string]string{"outcome.txt": string(said), "the Held mail": mail[0].Body}, nil
+}
+
+func (c *nextContext) theRecordsSayThePushWentTo(number int, branch string) error {
+	texts, err := c.recordsAndMail(number)
+	if err != nil {
+		return err
+	}
+	for where, text := range texts {
+		if !strings.Contains(text, "pushed to "+branch) {
+			return fmt.Errorf("expected %s to say a commit was pushed to %s, got:\n%s", where, branch, text)
+		}
+	}
+	return nil
+}
+
+func (c *nextContext) theRecordsSayNothingWasPushed(number int) error {
+	texts, err := c.recordsAndMail(number)
+	if err != nil {
+		return err
+	}
+	for where, text := range texts {
+		if strings.Contains(text, "pushed to") {
+			return fmt.Errorf("expected %s to push nothing to a story's branch, got:\n%s", where, text)
+		}
+		if !strings.Contains(text, "only in the bundle") {
+			return fmt.Errorf("expected %s to say what stays only in the bundle, got:\n%s", where, text)
+		}
 	}
 	return nil
 }

@@ -134,7 +134,9 @@ has passed.
 
 - `runs/batch/<rig>/<n>/` in the vault keeps the batch: merge order, gate log,
   fixer result, and, for a held batch, the commits its fixer left
-  (`fixer.bundle`).
+  (`fixer.bundle`). A fixer commit that touches one story's files only is also
+  pushed to that story's branch at the origin, so the next batch merges it; the
+  Held mail says where. One that spans stories stays in the bundle alone.
 - `metrics/factory.jsonl` gets one batch line for each batch: stories, gate
   runs and minutes, the fixer and its tokens, the outcome, red minutes.
 - A ledger line for each story, naming the batch.

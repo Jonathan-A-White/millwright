@@ -253,6 +253,20 @@ type Landing interface {
 	// an error: nothing may rely on one that does not verify.
 	VerifyBundle(ctx context.Context, rigDir, dest string) error
 
+	// FilesBetween lists the files `git diff --name-only from...to` names in the
+	// worktree at dir: what to changed since its merge base with from. A fixer's
+	// commit is asked as hash^ to hash, a story's branch as the batch's base to
+	// the branch (mw-gq6.1014).
+	FilesBetween(ctx context.Context, dir, from, to string) ([]string, error)
+
+	// Carry cherry-picks commits, in order, onto onto in the worktree at dir,
+	// pushes the result as branch on the remote (never forced), and puts the
+	// worktree back where it stood, whatever came of it. It reports the commit
+	// pushed. A pick that conflicts, or a push the remote refuses, is an error
+	// and nothing is pushed: it is how a held batch's fixer's commits for one
+	// story reach that story's branch (mw-gq6.1014).
+	Carry(ctx context.Context, dir, remote string, commits []string, onto, branch string) (string, error)
+
 	// Advance fast-forwards the rig's own checkout onto commit, the one a landing
 	// has just put on branch at the remote. The landing was made in a worktree of
 	// its own, so this checkout is behind it until it is moved. It is moved only
