@@ -239,6 +239,10 @@ func TestAnotherBdRunningMakesBdWaitUntilItEnds(t *testing.T) {
 	if !strings.Contains(run.errs.String(), "waited") {
 		t.Errorf("a wait should be said on standard error, it said %q", run.errs.String())
 	}
+	// mw-gq6.1023: standard output is bd's alone, which callers read ids from.
+	if strings.Contains(run.out.String(), "waited") {
+		t.Errorf("the wait was said on standard output, which is bd's alone: %q", run.out.String())
+	}
 }
 
 func bd1Status(run *bdQuietRun) string { return run.bd.Status("step-1") }

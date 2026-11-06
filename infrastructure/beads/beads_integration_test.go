@@ -65,9 +65,9 @@ func TestMain(m *testing.M) {
 				templateSkip = "git is not on PATH"
 				break
 			}
-			realBd, err := exec.LookPath(beads.Program)
+			realBd, err := realBdFor(os.Getenv, exec.LookPath)
 			if err != nil {
-				templateSkip = beads.Program + " is not on PATH"
+				templateSkip = "no real bd to run: " + err.Error()
 				break
 			}
 			if _, err := exec.LookPath("timeout"); err != nil {
@@ -306,16 +306,41 @@ func copyTree(src, dst string) error {
 }
 
 // bdRun runs one setup command in the throwaway vault and fails the test if it
-// does not succeed. It returns the trimmed standard output.
+// does not succeed. It returns the trimmed standard output, and only that: what
+// is said on standard error (a wrapper's notice, a bd warning) is no part of an
+// id, and is shown only when the command fails (mw-gq6.1023).
 func bdRun(t *testing.T, vault, program string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(program, args...)
 	cmd.Dir = vault
-	out, err := cmd.CombinedOutput()
+	var errs strings.Builder
+	cmd.Stderr = &errs
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("%s %s: %v\n%s", program, strings.Join(args, " "), err, out)
+		t.Fatalf("%s %s: %v\n%s%s", program, strings.Join(args, " "), err, out, errs.String())
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// mw-gq6.1023: on the Laptop the bd on a Builder's PATH is a script that runs
+// mw bd, and mw bd says on standard error how long it waited for the host to be
+// quiet. bdRun read standard output and standard error as one, so the id a
+// create printed came back with that line ahead of it and 22 real-bd cases
+// failed on a parent or bead "not found". bdRun reads standard output only.
+func TestBdRunReadsOnlyWhatBdWritesToStandardOutput(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "bd")
+	body := "#!/bin/sh\necho 'mw bd: waited 1.5s for the host to be quiet' >&2\necho t-mnc\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := settleExecutable(script); err != nil {
+		t.Fatalf("starting %s: %v", script, err)
+	}
+	if got := bdRun(t, dir, script, "create", "A story", "--silent"); got != "t-mnc" {
+		t.Errorf("bdRun read %q, want the id bd printed, %q, and nothing of its standard error", got, "t-mnc")
+	}
 }
 
 // installFormula copies one of the rig's formulas into a throwaway database's
