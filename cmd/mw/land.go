@@ -117,7 +117,10 @@ func newLandCmd() *cobra.Command {
 				return err
 			}
 			worktrees := rig.New()
-			checks, err := landingChecks(dir, gateCommands{related: true, parts: true})
+			// The gate commands are read when the gate runs, not now (mw-gq6.1006);
+			// what the builder's boot, the turn cap, the after-landing limits and
+			// the push tries are is read once, here.
+			checks, err := landingChecks(dir, gateCommands{related: true, parts: true, reread: true})
 			if err != nil {
 				return err
 			}

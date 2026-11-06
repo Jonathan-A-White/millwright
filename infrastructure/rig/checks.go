@@ -51,6 +51,8 @@ type Checks struct {
 	shell    string
 	nice     int
 	jobs     int
+	read     func() (GateLines, error)
+	now      func() time.Time
 }
 
 // Checks satisfies the port.
@@ -133,7 +135,7 @@ func WithTimingTests(timing map[string][]string) CheckOption {
 // NewChecks returns the checks of a rig whose tests are DefaultCommand, unless
 // an option says otherwise.
 func NewChecks(opts ...CheckOption) *Checks {
-	c := &Checks{commands: map[string]string{}, command: DefaultCommand, parts: map[string][]application.GatePart{}, specs: map[string]string{}, related: map[string]string{}, always: map[string][]string{}, named: map[string]string{}, timing: map[string][]string{}, git: Program, shell: Shell}
+	c := &Checks{commands: map[string]string{}, command: DefaultCommand, parts: map[string][]application.GatePart{}, specs: map[string]string{}, related: map[string]string{}, always: map[string][]string{}, named: map[string]string{}, timing: map[string][]string{}, git: Program, shell: Shell, now: time.Now}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -154,23 +156,22 @@ func (c *Checks) commandEnv(rig string) []string {
 }
 
 // Command reports the command line a rig's tests are run by.
-func (c *Checks) Command(rig string) string {
-	if command, named := c.commands[rig]; named {
-		return command
-	}
-	return c.command
-}
+func (c *Checks) Command(rig string) string { return c.testsOf(c.view(), rig) }
 
 // Parts implements application.GateParts: the parts a rig's gate is named as, in
 // the order they are run; none when its tests run whole.
-func (c *Checks) Parts(rig string) []application.GatePart { return c.parts[rig] }
+func (c *Checks) Parts(rig string) []application.GatePart { return c.view().parts[rig] }
 
 // Checks satisfies the port a split gate is read and run through.
 var _ application.GateParts = (*Checks)(nil)
 
 // Run implements application.Checks.
 func (c *Checks) Run(ctx context.Context, rig, dir string) (application.Checked, error) {
-	return c.RunLine(ctx, rig, dir, c.Command(rig))
+	v := c.view()
+	command := c.testsOf(v, rig)
+	checked, err := c.RunLine(ctx, rig, dir, command)
+	checked.Read = c.readOf(v, "tests", command, c.testsOf(gateView{tests: c.commands}, rig))
+	return checked, err
 }
 
 // Checks satisfies the port a suite's command lines are run through.

@@ -249,6 +249,7 @@ func (n Next) gateWithSpecs(ctx context.Context, c *closeOut, report *NextReport
 	if err != nil {
 		return gated{Err: fmt.Errorf("the rig's changed specs could not be run in %s: %w", dir, err)}, log
 	}
+	n.sayGateRead(run.Checked)
 	if len(run.LeftOut) > 0 {
 		if !strings.HasSuffix(log, "\n") {
 			log += "\n"
@@ -271,7 +272,21 @@ func (n Next) gateWithSpecs(ctx context.Context, c *closeOut, report *NextReport
 
 // gateLogOf is one command of a gate as a gate log holds it.
 func gateLogOf(c Checked) string {
-	return fmt.Sprintf("$ %s\n%s", c.Command, c.Output)
+	var read strings.Builder
+	for _, said := range c.Read.Lines(c.Command) {
+		fmt.Fprintf(&read, "# %s\n", said)
+	}
+	return fmt.Sprintf("$ %s\n%s%s", c.Command, read.String(), c.Output)
+}
+
+// sayGateRead prints, as a gate command runs, when its line was read from the
+// host's config and that it differs from the line the batch began with
+// (mw-gq6.1006). Only a port that reads the line afresh (mw land's) has anything
+// to say; the lines open as the rest of mw land's log do.
+func (n Next) sayGateRead(c Checked) {
+	for _, said := range c.Read.Lines(c.Command) {
+		n.print(BatchLogPrefix + said + "\n")
+	}
 }
 
 // waitForTheGateLock takes this host's gate lock for the tests what names,

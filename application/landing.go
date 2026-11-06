@@ -363,6 +363,10 @@ type Checked struct {
 	Passed  bool
 	NotRun  bool
 	Output  string
+
+	// Read says how the command line was read when the port reads it afresh for
+	// each run of the gate (mw-gq6.1006); zero when it does not.
+	Read GateRead
 }
 
 // Tail is the last lines of what the tests printed, for a comment on a story.

@@ -48,7 +48,8 @@ func WithSpecCommands(commands map[string]string) CheckOption {
 // left out and named in LeftOut (mw-gq6.682). A rig with no command, and a branch
 // that changed no spec to run, run nothing.
 func (c *Checks) RunSpecs(ctx context.Context, rig, dir, base string) (application.SpecsChecked, error) {
-	template, named := c.specs[rig]
+	v := c.view()
+	template, named := v.specs[rig]
 	if !named {
 		return application.SpecsChecked{}, nil
 	}
@@ -63,7 +64,7 @@ func (c *Checks) RunSpecs(ctx context.Context, rig, dir, base string) (applicati
 	command := strings.ReplaceAll(template, SpecsPlaceholder, shellWords(specs))
 
 	output, err := runLine(ctx, c.shell, command, dir, c.nice, c.commandEnv(rig))
-	run := application.SpecsChecked{Checked: application.Checked{Command: command, Output: output, Passed: err == nil}, Specs: specs, LeftOut: leftOut}
+	run := application.SpecsChecked{Checked: application.Checked{Command: command, Output: output, Passed: err == nil, Read: c.readOf(v, "changed_specs", template, c.specs[rig])}, Specs: specs, LeftOut: leftOut}
 	if err == nil {
 		return run, nil
 	}
@@ -117,7 +118,8 @@ func WithAlwaysRun(files map[string][]string) CheckOption {
 // are. A rig with no line runs nothing, and a branch that left no file (it only
 // deleted some) runs nothing and says so, for the caller to run the whole tests.
 func (c *Checks) RunRelated(ctx context.Context, rig, dir string, span application.RelatedSpan) (application.RelatedRun, error) {
-	template, named := c.related[rig]
+	v := c.view()
+	template, named := v.related[rig]
 	if !named {
 		return application.RelatedRun{}, nil
 	}
@@ -134,6 +136,7 @@ func (c *Checks) RunRelated(ctx context.Context, rig, dir string, span applicati
 	if err != nil {
 		return application.RelatedRun{}, err
 	}
+	checked.Read = c.readOf(v, "related_tests", template, c.related[rig])
 	return application.RelatedRun{Checked: checked, Files: files, Ran: true}, nil
 }
 

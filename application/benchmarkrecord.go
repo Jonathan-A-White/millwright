@@ -62,6 +62,7 @@ func (n Next) timedChecks(ctx context.Context, c *closeOut, report *NextReport, 
 		case err != nil:
 			return Checked{}, err
 		case run.Ran:
+			n.sayGateRead(run.Checked)
 			return run.Checked, nil
 		case run.NoFiles:
 			note := fmt.Sprintf("the rig %s names a related-tests line, but the branch left no file to run the related-tests line on, so its whole tests are run", c.path.Rig)
@@ -71,7 +72,9 @@ func (n Next) timedChecks(ctx context.Context, c *closeOut, report *NextReport, 
 			report.Notes = appendNew(report.Notes, note)
 		}
 	}
-	return n.Checks.Run(ctx, c.path.Rig, dir)
+	checked, err := n.Checks.Run(ctx, c.path.Rig, dir)
+	n.sayGateRead(checked)
+	return checked, err
 }
 
 // settle says what the last run of the gate came to, with the reading it was

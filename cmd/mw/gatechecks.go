@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -16,6 +17,49 @@ import (
 type gateCommands struct {
 	related bool
 	parts   bool
+
+	// reread makes the commands be read from the config file again each time the
+	// gate asks for one, not once when the batch began (mw-gq6.1006): mw land's.
+	// [always_run], [named_tests], builder_nice, builder_jobs and the vault's
+	// timing tests stay as the batch began with them.
+	reread bool
+}
+
+// gateLinesNow reads the gate's commands from the config file as which asks for
+// them: the lines landingChecks gives a Checks, again.
+func gateLinesNow(which gateCommands) (rig.GateLines, error) {
+	var lines rig.GateLines
+	var err error
+	if lines.Tests, err = config.Tests(); err != nil {
+		return lines, err
+	}
+	if lines.Specs, err = config.ChangedSpecs(); err != nil {
+		return lines, err
+	}
+	if which.related {
+		if lines.Related, err = config.RelatedTests(); err != nil {
+			return lines, err
+		}
+	}
+	if which.parts {
+		configured, err := config.TestParts()
+		if err != nil {
+			return lines, err
+		}
+		lines.Parts = gateParts(configured)
+	}
+	return lines, nil
+}
+
+// gateParts is the parts of the config file as the application names them.
+func gateParts(configured map[string][]config.TestPart) map[string][]application.GatePart {
+	parts := map[string][]application.GatePart{}
+	for rigName, named := range configured {
+		for _, p := range named {
+			parts[rigName] = append(parts[rigName], application.GatePart{Name: p.Name, Command: p.Command})
+		}
+	}
+	return parts
 }
 
 // landingChecks (vaultDir is where the rigs' files are) is the one place the gate's commands are read from the config
@@ -61,13 +105,10 @@ func landingChecks(vaultDir string, which gateCommands) (*rig.Checks, error) {
 		if err != nil {
 			return nil, err
 		}
-		parts := map[string][]application.GatePart{}
-		for rigName, named := range configured {
-			for _, p := range named {
-				parts[rigName] = append(parts[rigName], application.GatePart{Name: p.Name, Command: p.Command})
-			}
-		}
-		options = append(options, rig.WithParts(parts))
+		options = append(options, rig.WithParts(gateParts(configured)))
+	}
+	if which.reread {
+		options = append(options, rig.WithGateLinesFrom(func() (rig.GateLines, error) { return gateLinesNow(which) }, time.Now))
 	}
 	return rig.NewChecks(options...), nil
 }
