@@ -13,6 +13,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
@@ -25,8 +26,11 @@ func newVerifyCmd() *cobra.Command {
 		Long: "mw verify <bead> runs the half of verifying a landing that needs no judgment, at no cost in tokens, and\n" +
 			"writes nothing on the bead. Three checks:\n" +
 			"  deploy   this host's deployed mark of the bead's rig (~/.local/state/mw/built-<rig>.deployed) is the commit the\n" +
-			"           bead says it landed at (its close reason: the batch commit of a batch landing); a standing\n" +
-			"           built-<rig>.deploy-failed mark is said, and fails when it is at that commit.\n" +
+			"           bead says it landed at (its close reason: the batch commit of a batch landing), or a later commit\n" +
+			"           that holds it (said as contained in the deployed commit); a commit this host's checkout lacks is\n" +
+			"           'could not tell', never OK. A rig this host names no after-landing command for keeps no mark:\n" +
+			"           'deploy not tracked here', which fails nothing. A standing built-<rig>.deploy-failed mark is\n" +
+			"           said, and fails when it is at that commit.\n" +
 			"  healthz  a GET of healthz_url from the rig's file in the vault (rigs/<rig>.toml) answers 2xx; its body is\n" +
 			"           printed. A rig with no healthz_url prints 'no healthz for <rig>' and fails nothing.\n" +
 			"  strings  the rig's page (site_url in the same file) is fetched, its hashed bundle (assets/index-<hash>.js)\n" +
@@ -39,7 +43,7 @@ func newVerifyCmd() *cobra.Command {
 			"  Vote for tonight's best trunk\n" +
 			"  $150 Amazon gift card\n" +
 			"A bead that names none prints 'no strings named on the bead' and the other two checks still run.\n\n" +
-			"It ends with one line, 'verify <bead>: deploy OK|MISMATCH, healthz OK|FAIL|none, strings N/M found', and\n" +
+			"It ends with one line, 'verify <bead>: deploy OK|MISMATCH|UNKNOWN|not tracked, healthz OK|FAIL|none, strings N/M found', and\n" +
 			"exits non-zero when a check failed. The Mayor's VERIFIED comment stays a judgment: this writes none.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -54,8 +58,18 @@ func newVerifyCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			rigs, err := config.Rigs()
+			if err != nil {
+				return err
+			}
+			afterLanding, err := config.AfterLanding()
+			if err != nil {
+				return err
+			}
 			result, err := application.VerifyDeploy{
-				Beads: gateway, Rules: vault.New(dir), Marks: hostDeployedMarks(), Web: verifyWeb{}, Out: cmd.OutOrStdout(),
+				Beads: gateway, Rules: vault.New(dir), Marks: hostDeployedMarks(),
+				History: rig.New(), After: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding)), Dirs: rigs,
+				Web: verifyWeb{}, Out: cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args[0])
 			if err != nil {
 				return err

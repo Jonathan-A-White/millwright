@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -439,8 +440,25 @@ type VerifyDeploy struct {
 	Rules EpicRules
 	// Marks holds the host's deployed and deploy-failed marks; nil holds none.
 	Marks BuiltMarks
-	Web   VerifyWeb
-	Out   io.Writer
+	// History says whether one commit holds another in its history; nil tells
+	// nothing, so a deployed commit other than the landing's cannot be judged.
+	History CommitHistory
+	// After names the command this host runs after a landing for a rig; a rig
+	// it names none for keeps no deployed mark here. Nil knows nothing of that.
+	After AfterLanding
+	// Dirs is each rig's checkout on this host, where History looks.
+	Dirs map[string]string
+	Web  VerifyWeb
+	Out  io.Writer
+}
+
+// CommitHistory is the port that says whether a commit is part of another's
+// history, in a rig's checkout.
+type CommitHistory interface {
+	// Contains says whether the commit outer has the commit inner in its history,
+	// itself included. An error is a commit the checkout does not hold, or a
+	// checkout that could not be asked: the answer is then not known.
+	Contains(ctx context.Context, dir, outer, inner string) (bool, error)
 }
 
 // VerifyDeployResult is how the three checks came out.
@@ -458,13 +476,19 @@ const (
 	VerifyOK       VerifyCheckOutcome = "OK"
 	VerifyMismatch VerifyCheckOutcome = "MISMATCH"
 	VerifyFail     VerifyCheckOutcome = "FAIL"
+	// VerifyUnknown is a deploy check that could not tell whether the landing is
+	// in the deployed commit: a commit the checkout lacks, or no checkout.
+	VerifyUnknown VerifyCheckOutcome = "UNKNOWN"
+	// VerifyUntracked is a deploy check for a rig that keeps no deployed mark on
+	// this host: its deploy is not tracked here, which is no mismatch.
+	VerifyUntracked VerifyCheckOutcome = "not tracked"
 	// VerifyNone is a check the rig has nothing to run for: no healthz key.
 	VerifyNone VerifyCheckOutcome = "none"
 )
 
 // Failed is whether any check failed; a check with nothing to run did not.
 func (r VerifyDeployResult) Failed() bool {
-	return r.Deploy != VerifyOK || r.Healthz == VerifyFail || r.Found < r.Named
+	return (r.Deploy != VerifyOK && r.Deploy != VerifyUntracked) || r.Healthz == VerifyFail || r.Found < r.Named
 }
 
 // Line is the one summary line.
@@ -545,10 +569,25 @@ func (v VerifyDeploy) checkDeploy(ctx context.Context, rig, closeReason string) 
 	switch {
 	case landed == "":
 		fmt.Fprintf(v.Out, "deploy MISMATCH: no landing commit on the bead (close reason: %q)\n", closeReason)
+	case deployed == "" && v.After != nil && v.After.Command(rig) == "":
+		fmt.Fprintf(v.Out, "deploy not tracked here: %s keeps no deployed mark on this host (no after-landing command); the bead landed at %s\n", rig, landed)
+		return VerifyUntracked
 	case deployed == "":
 		fmt.Fprintf(v.Out, "deploy MISMATCH: %s has no deployed mark on this host; the bead landed at %s\n", rig, landed)
 	case !sameCommit(deployed, landed):
-		fmt.Fprintf(v.Out, "deploy MISMATCH: %s is deployed at %s, the bead landed at %s\n", rig, deployed, landed)
+		contained, err := v.contains(ctx, rig, deployed, landed)
+		switch {
+		case err != nil:
+			fmt.Fprintf(v.Out, "deploy could not tell: %s is deployed at %s, the bead landed at %s, and whether the one holds the other is not known here: %v\n", rig, deployed, landed, err)
+			return VerifyUnknown
+		case !contained:
+			fmt.Fprintf(v.Out, "deploy MISMATCH: %s is deployed at %s, the bead landed at %s\n", rig, deployed, landed)
+		case failed != "" && sameCommit(failedAt, deployed):
+			fmt.Fprintf(v.Out, "deploy MISMATCH: %s is marked deployed at %s, yet a deploy-failed mark stands at that commit\n", rig, deployed)
+		default:
+			fmt.Fprintf(v.Out, "deploy OK: %s is deployed at %s, and the commit the bead landed at (%s) is contained in the deployed commit\n", rig, deployed, landed)
+			return VerifyOK
+		}
 	case failed != "" && sameCommit(failedAt, landed):
 		fmt.Fprintf(v.Out, "deploy MISMATCH: %s is marked deployed at %s, yet a deploy-failed mark stands at that commit\n", rig, deployed)
 	default:
@@ -556,6 +595,19 @@ func (v VerifyDeploy) checkDeploy(ctx context.Context, rig, closeReason string) 
 		return VerifyOK
 	}
 	return VerifyMismatch
+}
+
+// contains says whether the deployed commit holds the landed one in its history,
+// in the rig's checkout on this host; an error is that it could not be told.
+func (v VerifyDeploy) contains(ctx context.Context, rig, deployed, landed string) (bool, error) {
+	dir := v.Dirs[rig]
+	switch {
+	case v.History == nil:
+		return false, errors.New("no checkout to ask")
+	case dir == "":
+		return false, fmt.Errorf("this host names no checkout of %s", rig)
+	}
+	return v.History.Contains(ctx, dir, deployed, landed)
 }
 
 func (v VerifyDeploy) checkHealthz(ctx context.Context, rig, healthz string) VerifyCheckOutcome {

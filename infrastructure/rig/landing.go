@@ -953,6 +953,14 @@ func (w *Worktrees) contains(ctx context.Context, dir, outer, inner string) (boo
 	return false, err
 }
 
+// Contains implements application.CommitHistory: whether outer has inner in its
+// history, in the checkout at dir. A commit the checkout lacks is an error, not no.
+func (w *Worktrees) Contains(ctx context.Context, dir, outer, inner string) (bool, error) {
+	return w.contains(ctx, dir, outer, inner)
+}
+
+var _ application.CommitHistory = (*Worktrees)(nil)
+
 // shortCommit is a commit as a person names it, in a sentence.
 func shortCommit(commit string) string {
 	if len(commit) > 12 {

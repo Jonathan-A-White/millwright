@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -196,19 +197,42 @@ func boardServer(t *testing.T, health string, healthStatus int, bundleText strin
 	return server
 }
 
+// deployHistory is a CommitHistory that knows only the answers it was given,
+// keyed "<outer> <inner>"; any other pair is a commit the checkout lacks.
+type deployHistory map[string]bool
+
+func (h deployHistory) Contains(_ context.Context, _, outer, inner string) (bool, error) {
+	if held, ok := h[outer+" "+inner]; ok {
+		return held, nil
+	}
+	return false, errors.New("fatal: Not a valid commit name " + inner)
+}
+
+// deployAfter is an AfterLanding that names a command only for the rigs it holds.
+type deployAfter map[string]string
+
+func (a deployAfter) Command(rig string) string { return a[rig] }
+func (deployAfter) Run(context.Context, string, string) (application.Ran, error) {
+	return application.Ran{}, nil
+}
+
 type deployFixture struct {
-	beads *apptest.FakeVerifyBeads
-	rules *apptest.FakeEpicRules
-	marks deployMarks
-	out   *strings.Builder
+	beads   *apptest.FakeVerifyBeads
+	rules   *apptest.FakeEpicRules
+	marks   deployMarks
+	history deployHistory
+	after   deployAfter
+	out     *strings.Builder
 }
 
 func newDeployFixture(server *httptest.Server, healthz bool, description string, comments ...string) deployFixture {
 	f := deployFixture{
-		beads: &apptest.FakeVerifyBeads{Details: map[string]application.StoryDetail{}, Comments: map[string][]application.Comment{}},
-		rules: apptest.NewFakeEpicRules(),
-		marks: deployMarks{"leaderboard.deployed": deployedCommit},
-		out:   &strings.Builder{},
+		beads:   &apptest.FakeVerifyBeads{Details: map[string]application.StoryDetail{}, Comments: map[string][]application.Comment{}},
+		rules:   apptest.NewFakeEpicRules(),
+		marks:   deployMarks{"leaderboard.deployed": deployedCommit},
+		history: deployHistory{},
+		after:   deployAfter{"leaderboard": "make deploy"},
+		out:     &strings.Builder{},
 	}
 	f.beads.Details["lb-1"] = application.StoryDetail{
 		Story:       domain.Story{ID: "lb-1", Title: "vote link", Overrides: domain.Path{Rig: "leaderboard"}},
@@ -234,6 +258,7 @@ func (f deployFixture) run(t *testing.T) (application.VerifyDeployResult, string
 	t.Helper()
 	result, err := application.VerifyDeploy{
 		Beads: f.beads, Rules: f.rules, Marks: f.marks, Web: httpWeb{}, Out: f.out,
+		History: f.history, After: f.after, Dirs: map[string]string{"leaderboard": "/rigs/leaderboard"},
 	}.Run(context.Background(), "lb-1")
 	if err != nil {
 		t.Fatal(err)
@@ -292,11 +317,69 @@ func TestVerifyDeployFailsOnAMarkerThatIsNotTheLandingCommit(t *testing.T) {
 	server := boardServer(t, "ok", http.StatusOK, "")
 	f := newDeployFixture(server, true, "")
 	f.marks["leaderboard.deployed"] = "1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	f.history["1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 8fde6ab55a1d"] = false
 
 	result, out := f.run(t)
 
-	if !result.Failed() || !strings.Contains(out, "deploy MISMATCH") || !strings.Contains(out, "1111111") || !strings.Contains(out, "8fde6ab55a1d") {
-		t.Fatalf("expected a MISMATCH naming both commits, got %+v\n%s", result, out)
+	if result.Deploy != application.VerifyMismatch || !result.Failed() || !strings.Contains(out, "deploy MISMATCH") || !strings.Contains(out, "1111111") || !strings.Contains(out, "8fde6ab55a1d") {
+		t.Fatalf("expected a MISMATCH naming both commits for a landing the deployed commit lacks, got %+v\n%s", result, out)
+	}
+}
+
+func TestVerifyDeployPassesWhenTheLandingIsContainedInALaterDeployedCommit(t *testing.T) {
+	server := boardServer(t, "ok", http.StatusOK, "")
+	f := newDeployFixture(server, true, "")
+	later := "e67ce02156e0534021d0e9ec601a4b9f666e8721"
+	f.marks["leaderboard.deployed"] = later
+	f.history[later+" 8fde6ab55a1d"] = true
+
+	result, out := f.run(t)
+
+	if result.Deploy != application.VerifyOK || result.Failed() || !strings.Contains(out, "deploy OK") || !strings.Contains(out, "contained in the deployed commit") || strings.Contains(out, "MISMATCH") {
+		t.Fatalf("expected deploy OK saying the landing is contained, got %+v\n%s", result, out)
+	}
+}
+
+func TestVerifyDeploySaysItCouldNotTellForACommitTheCheckoutDoesNotKnow(t *testing.T) {
+	server := boardServer(t, "ok", http.StatusOK, "")
+	f := newDeployFixture(server, true, "")
+	f.marks["leaderboard.deployed"] = "e67ce02156e0534021d0e9ec601a4b9f666e8721"
+
+	result, out := f.run(t)
+
+	if result.Deploy == application.VerifyOK || result.Deploy == application.VerifyMismatch || !result.Failed() || !strings.Contains(out, "could not tell") || strings.Contains(out, "deploy OK") {
+		t.Fatalf("expected a could-not-tell that is never OK, got %+v\n%s", result, out)
+	}
+}
+
+func TestVerifyDeploySaysTheDeployIsNotTrackedForARigThatKeepsNoDeployMark(t *testing.T) {
+	server := boardServer(t, "ok", http.StatusOK, "")
+	f := newDeployFixture(server, true, "")
+	delete(f.marks, "leaderboard.deployed")
+	delete(f.after, "leaderboard")
+
+	result, out := f.run(t)
+
+	if result.Deploy == application.VerifyMismatch || !strings.Contains(out, "not tracked here") || strings.Contains(out, "deploy MISMATCH") {
+		t.Fatalf("expected the deploy to be called not tracked, not a MISMATCH, got %+v\n%s", result, out)
+	}
+	if result.Failed() {
+		t.Fatalf("a rig that keeps no deploy tracking must not fail the verify, got %+v\n%s", result, out)
+	}
+	if line := result.Line("lb-1"); !strings.Contains(line, "deploy not tracked") {
+		t.Fatalf("expected the summary line to say not tracked, got %q", line)
+	}
+}
+
+func TestVerifyDeployStillCallsAMissingMarkOfARigThatDeploysAMismatch(t *testing.T) {
+	server := boardServer(t, "ok", http.StatusOK, "")
+	f := newDeployFixture(server, true, "")
+	delete(f.marks, "leaderboard.deployed")
+
+	result, out := f.run(t)
+
+	if result.Deploy != application.VerifyMismatch || !strings.Contains(out, "deploy MISMATCH") || !strings.Contains(out, "no deployed mark") {
+		t.Fatalf("expected a MISMATCH for a rig with a deploy command and no mark, got %+v\n%s", result, out)
 	}
 }
 
