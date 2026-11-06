@@ -442,6 +442,9 @@ func newDoctorCmd() *cobra.Command {
 			rigKinds := &application.RigKindsCheck{
 				Register: mwVault(vault, host), Seat: BuilderSeat, Rigs: mwVault(vault, host).RigNames,
 			}
+			// A rig whose origin is reached another way than the host's other rigs'
+			// (a git@github.com origin among https ones, mw-gq6.746).
+			rigOrigins := &application.RigOriginsCheck{Origins: doctor.RigOrigins{Rigs: rigsAt}.Origins}
 			// The follower alive and writing nothing: no bead or mail event for
 			// minutes after the beads' last change, or a view older than them
 			// (mw-gq6.893).
@@ -499,6 +502,7 @@ func newDoctorCmd() *cobra.Command {
 				strayPreviews,
 				stuckClaims,
 				rigKinds,
+				rigOrigins,
 				followerStalled,
 				ageKey,
 				claudeLogin,

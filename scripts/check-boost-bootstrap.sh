@@ -44,6 +44,8 @@
 #      a second run changes nothing; and config.toml says [after_landing] millwright = "make build",
 #      written when a config is made and added to one that lacks it, never over a line it has,
 #      so a landing of a millwright story rebuilds the box's mw (mw-gq6.632)
+#   l. a rig named in BOOST_RIGS by a git@github.com: or ssh://git@github.com/ url is cloned from
+#      the https url of the same repository, so every rig's origin is https (mw-gq6.746)
 # The shell linter is run over the script when it is installed, and skipped when not.
 
 set -eu
@@ -869,6 +871,22 @@ postern = "deploy"' ] || fail "$NAME: the table is not the box's line and the ho
 sed -i 's/^millwright = "make build"$/millwright = ""/' "$CONF"
 OUT=$(boost --env-file "$T/cloud2.env" 2>&1) || fail "$NAME: exited non-zero: $OUT"
 grep -Fxq 'millwright = ""' "$CONF" || fail "$NAME: a host's own millwright line was overwritten: $(cat "$CONF")"
+echo "ok: $NAME"
+
+# l. a rig given by an ssh url is cloned from its https url, so its origin is https
+NAME="a rig named by a git@ or ssh url is cloned from the https url of the same repository"
+rm -rf "$HOME_DIR" "$STATE" "$BOOT"
+mkdir -p "$HOME_DIR" "$STATE" "$BOOT/etc"
+sed 's#^BOOST_RIGS=.*#BOOST_RIGS="argus=git@github.com:Jonathan-A-White/argus.git postern=ssh://git@github.com/Jonathan-A-White/postern.git leaderboard=https://github.com/Jonathan-A-White/leaderboard.git"#' "$ENVFILE" >"$T/ssh-rigs.env"
+chmod 600 "$T/ssh-rigs.env"
+: >"$CALLS"
+RC=0
+OUT=$(boost --env-file "$T/ssh-rigs.env" 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
+for rn in argus postern leaderboard; do
+	grep -Fxq "git clone https://github.com/Jonathan-A-White/$rn.git $HOME_DIR/$rn" "$CALLS" || fail "$NAME: $rn was not cloned from its https url: $(grep 'git clone' "$CALLS")"
+done
+grep -F 'git clone' "$CALLS" | grep -Eq 'git@|ssh://' && fail "$NAME: a clone used an ssh url: $(grep 'git clone' "$CALLS")"
 echo "ok: $NAME"
 
 echo "OK: contrib/boost-bootstrap.sh prints and runs every step in order, checks before it acts so a second run changes nothing, writes tokens only to mode 600 files, and refuses bad input"

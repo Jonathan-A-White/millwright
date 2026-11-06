@@ -1606,3 +1606,124 @@ func (c *RigKindsCheck) Damper() (time.Duration, int) { return time.Hour, 1 }
 
 // WayBack implements DoctorCheck.
 func (c *RigKindsCheck) WayBack() string { return "nothing was changed" }
+
+// RigOriginsName is what the check is called: in the log, and on the command
+// line as `mw doctor rig-origins`.
+const RigOriginsName = "rig-origins"
+
+// RigOriginsCheck is the mw doctor check that every rig checkout on this host
+// reaches its origin the same way (mw-gq6.746): a rig seeded with a git@github.com
+// origin on a host whose rigs all use https has no access there, and its landings
+// and fetches fail. It is faulty naming each rig whose origin's scheme is not the
+// one most of the host's rigs use, or every scheme when none holds a majority.
+// It has no cure: the origin is what a person says it is, so Cure only says
+// what to run.
+type RigOriginsCheck struct {
+	// Origins lists the origin url of each rig checkout on this host, by rig
+	// name; a rig with no origin is left out.
+	Origins func(ctx context.Context) (map[string]string, error)
+}
+
+var _ DoctorCheck = (*RigOriginsCheck)(nil)
+
+// Name implements DoctorCheck.
+func (c *RigOriginsCheck) Name() string { return RigOriginsName }
+
+// OriginScheme is how a git origin url is reached: "https", "http", "git",
+// "file" (a path or file:// url), "ssh" (git@host:path or ssh://), or the
+// url's own scheme.
+func OriginScheme(url string) string {
+	url = strings.TrimSpace(url)
+	if i := strings.Index(url, "://"); i > 0 {
+		return strings.ToLower(url[:i])
+	}
+	if strings.HasPrefix(url, "/") || strings.HasPrefix(url, ".") {
+		return "file"
+	}
+	if strings.Contains(url, "@") && strings.Contains(url, ":") {
+		return "ssh"
+	}
+	return "file"
+}
+
+// HTTPSOrigin is the https url of the same github.com repository as an ssh
+// one (git@github.com:o/r.git or ssh://git@github.com/o/r.git), and false for
+// any other url.
+func HTTPSOrigin(url string) (string, bool) {
+	url = strings.TrimSpace(url)
+	for _, prefix := range []string{"git@github.com:", "ssh://git@github.com/", "ssh://github.com/"} {
+		if path, ok := strings.CutPrefix(url, prefix); ok && strings.Count(path, "/") == 1 {
+			if !strings.HasSuffix(path, ".git") {
+				path += ".git"
+			}
+			return "https://github.com/" + path, true
+		}
+	}
+	return "", false
+}
+
+// Probe implements DoctorCheck: ok when every rig's origin has one scheme (or
+// there is at most one rig); faulty naming the rigs off the host's scheme;
+// cannot-tell when the origins cannot be read.
+func (c *RigOriginsCheck) Probe(ctx context.Context) (Verdict, string) {
+	origins, err := c.Origins(ctx)
+	if err != nil {
+		return DoctorCannotTell, fmt.Sprintf("the rigs' origins could not be read: %v", err)
+	}
+	bySchemes := map[string][]string{}
+	for rig, url := range origins {
+		scheme := OriginScheme(url)
+		bySchemes[scheme] = append(bySchemes[scheme], rig)
+	}
+	if len(bySchemes) <= 1 {
+		return DoctorOK, ""
+	}
+	schemes := make([]string, 0, len(bySchemes))
+	for scheme, rigs := range bySchemes {
+		sort.Strings(rigs)
+		schemes = append(schemes, scheme)
+	}
+	sort.Strings(schemes)
+	host := ""
+	for _, scheme := range schemes {
+		if len(bySchemes[scheme])*2 > len(origins) {
+			host = scheme
+		}
+	}
+	if host == "" {
+		var parts []string
+		for _, scheme := range schemes {
+			parts = append(parts, fmt.Sprintf("%s: %s", scheme, strings.Join(bySchemes[scheme], ", ")))
+		}
+		return DoctorFaulty, fmt.Sprintf("the rigs reach their origins in different ways and none is the host's: %s; set each one's origin to the one way this host can reach github.com with `git -C <rig's checkout> remote set-url origin <url>`",
+			strings.Join(parts, "; "))
+	}
+	var odd []string
+	for _, scheme := range schemes {
+		if scheme == host {
+			continue
+		}
+		for _, rig := range bySchemes[scheme] {
+			line := fmt.Sprintf("%s (%s, origin %s)", rig, scheme, origins[rig])
+			if https, ok := HTTPSOrigin(origins[rig]); ok && host == "https" {
+				line += fmt.Sprintf(": run `git -C <%s's checkout> remote set-url origin %s`", rig, https)
+			}
+			odd = append(odd, line)
+		}
+	}
+	sort.Strings(odd)
+	return DoctorFaulty, fmt.Sprintf("%d of this host's rigs do not reach their origin over %s as the rest do, and may have no access to it: %s",
+		len(odd), host, strings.Join(odd, "; "))
+}
+
+// Cure implements DoctorCheck: there is none; a rig's origin is a person's to
+// set, so the cure fails, and its reason is the Probe's.
+func (c *RigOriginsCheck) Cure(context.Context) error {
+	return fmt.Errorf("a rig's origin is not changed by doctor: set it with git remote set-url origin, as the finding says")
+}
+
+// Damper implements DoctorCheck.
+func (c *RigOriginsCheck) Damper() (time.Duration, int) { return time.Hour, 1 }
+
+// WayBack implements DoctorCheck.
+func (c *RigOriginsCheck) WayBack() string { return "nothing was changed" }

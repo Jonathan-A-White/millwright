@@ -5627,6 +5627,14 @@ config, from the vault's `hosts/boost-config.toml`.
 is checked in no such rig, and `mw errors add` for a find in it needs `--kinds` by hand
 (mw-gq6.751). There is no cure: `mw errors kinds <rig> <kind>...` gives the rig its kinds.
 
+**rig-origins** is faulty when the rig checkouts of this host (`[rigs]`) do not all reach
+their `origin` the same way: it names each rig whose scheme is not the one most of the
+rigs use (a `git@github.com:` origin among `https` ones has no access on a host that has
+only the token, mw-gq6.746), with the `git -C <checkout> remote set-url origin <https url>`
+that mends it, or every scheme when none holds a majority. A rig with no origin is left
+out. There is no cure: a person sets the origin. `contrib/boost-bootstrap.sh` clones a
+rig named by an ssh url from its https url, so a box it makes starts right.
+
 **stale-landings** looks in the home directory and beside each rig for every
 `.mw-landing-<id>` directory older than 24 hours: a landing is made and taken away
 inside one close-out, so one that old was left behind. One that is clean, whose HEAD

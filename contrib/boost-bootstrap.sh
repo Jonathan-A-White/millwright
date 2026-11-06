@@ -20,7 +20,8 @@
 #                 snapshot builds main's mw and not the snapshot's (mw-gq6.632)
 #   6  claude     Claude Code (npm, into ~/.local) and ~/.config/mw/claude.env (CLAUDE_CODE_OAUTH_TOKEN=...)
 #   7  vault      the vault cloned to BOOST_VAULT, its .beads made mode 700 (bd warns at any other)
-#   8  rigs       every rig in BOOST_RIGS cloned beside it
+#   8  rigs       every rig in BOOST_RIGS cloned beside it, from its https url (a git@github.com: or ssh://
+#                 url is turned into the https one: a box has the token and no ssh key, mw-gq6.746)
 #                 A checkout already there (5, 7, 8: a box made from a snapshot has them all) is checked
 #                 with git status and git fsck --connectivity-only, and for empty object files; a broken
 #                 one is repaired (its empty objects removed, fetched, reset to origin) or, when that does
@@ -209,7 +210,26 @@ case "$BOOST_GIT_NAME$BOOST_GIT_EMAIL" in *'"'*) die "BOOST_GIT_NAME and BOOST_G
 case $BOOST_VAULT_REPO in https://* | ssh://* | git@*) ;; *) die "BOOST_VAULT_REPO must be an https, ssh or git@ url" ;; esac
 case $BOOST_VAULT_REPO in https://*@*) die "BOOST_VAULT_REPO may not carry a login: put the token in BOOST_GITHUB_TOKEN" ;; esac
 
+# https_of <url>: the https url of the same github.com repository when <url> is an ssh one
+# (git@github.com:o/r.git, ssh://git@github.com/o/r.git); any other url as it is. A box has
+# the token for https and no ssh key for github.com, and every rig's origin is https
+# (mw doctor rig-origins says one that is not, mw-gq6.746).
+https_of() {
+	local path
+	case $1 in
+	git@github.com:*) path=${1#git@github.com:} ;;
+	ssh://git@github.com/*) path=${1#ssh://git@github.com/} ;;
+	ssh://github.com/*) path=${1#ssh://github.com/} ;;
+	*)
+		printf '%s' "$1"
+		return 0
+		;;
+	esac
+	printf 'https://github.com/%s.git' "${path%.git}"
+}
+
 RIG_NAMES=""
+RIG_ENTRIES=""
 for entry in $BOOST_RIGS; do
 	rn=${entry%%=*}
 	ru=${entry#*=}
@@ -219,7 +239,9 @@ for entry in $BOOST_RIGS; do
 	case $ru in https://*@*) die "BOOST_RIGS: the url of $rn may not carry a login: put the token in BOOST_GITHUB_TOKEN" ;; esac
 	case $ru in *[!A-Za-z0-9._/:@~+-]*) die "BOOST_RIGS: the url of $rn has a character a url here may not" ;; esac
 	RIG_NAMES="${RIG_NAMES:+$RIG_NAMES }$rn"
+	RIG_ENTRIES="${RIG_ENTRIES:+$RIG_ENTRIES }$rn=$(https_of "$ru")"
 done
+BOOST_RIGS=$RIG_ENTRIES
 
 # --- the system -------------------------------------------------------------------
 OS_RELEASE=${BOOST_OS_RELEASE:-/etc/os-release}
