@@ -811,15 +811,26 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			d.print("  " + note + "\n")
 			return report, nil
 		}
-		if err != nil {
+		if blocked, ok := Blocked(err); ok && VaultFilesDispatchDoesNotRead(blocked.Files) {
+			// Only helper scripts are uncommitted: the beads half ran, the vault
+			// half was left alone, and nothing dispatch reads is stale. The Mayor
+			// is told, and the tick goes on to claim (mw-gq6.1018).
+			note := fmt.Sprintf("the vault holds uncommitted changes to %s, which no dispatch reads, so it was left alone and the claims go on", strings.Join(blocked.Files, ", "))
+			report.Notes = append(report.Notes, note)
+			d.print("  " + note + "\n")
+			d.tellVaultBlocked(ctx, err, &report)
+			report.Sync = synced
+			err = nil
+		} else if err != nil {
 			RecordSyncHalt(ctx, d.SyncHalts, err, d.now())
 			d.tellVaultBlocked(ctx, err, &report)
 			return report, fmt.Errorf("dispatching on %s: the hosts could not be brought level, so nothing was claimed: %w", d.Host, err)
+		} else {
+			KeepSyncHalt(ctx, d.SyncHalts, synced, nil, d.now())
+			d.clearVaultBlocked(ctx)
+			report.Sync, report.Synced = synced, true
+			d.print(fmt.Sprintf("  synced  %s\n", synced))
 		}
-		KeepSyncHalt(ctx, d.SyncHalts, synced, nil, d.now())
-		d.clearVaultBlocked(ctx)
-		report.Sync, report.Synced = synced, true
-		d.print(fmt.Sprintf("  synced  %s\n", synced))
 	}
 
 	// What runs here and what runs elsewhere are one list of the tracker's

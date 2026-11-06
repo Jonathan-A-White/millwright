@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 )
@@ -53,11 +54,17 @@ func (d Dispatch) tellVaultBlocked(ctx context.Context, err error, report *Dispa
 	if told, perr := time.Parse(time.RFC3339, stamp); perr == nil && d.now().Sub(told) < VaultBlockedMailEvery {
 		return
 	}
+	subject := fmt.Sprintf("%s: dispatch on %s is refused, the vault holds uncommitted changes", MailBlocked, d.Host)
+	body := vaultBlockedBody(d.Host, d.VaultDir, blocked.Files)
+	if VaultFilesDispatchDoesNotRead(blocked.Files) {
+		subject = fmt.Sprintf("Note: dispatch on %s went on, the vault holds uncommitted helper scripts", d.Host)
+		body = vaultWentOnBody(d.Host, d.VaultDir, blocked.Files)
+	}
 	if _, serr := d.Mailbox.Send(ctx, NewMessage{
 		From:    SeatIdentity(MwSeat, d.Host),
 		To:      MayorMailbox,
-		Subject: fmt.Sprintf("%s: dispatch on %s is refused, the vault holds uncommitted changes", MailBlocked, d.Host),
-		Body:    vaultBlockedBody(d.Host, d.VaultDir, blocked.Files),
+		Subject: subject,
+		Body:    body,
 	}); serr != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the mail to %s about the dirty vault could not be sent: %v", MayorMailbox, serr))
 		return
@@ -65,6 +72,37 @@ func (d Dispatch) tellVaultBlocked(ctx context.Context, err error, report *Dispa
 	if nerr := d.Memory.SetNote(ctx, key, d.now().UTC().Format(time.RFC3339)+"|"+reason); nerr != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the dirty-vault mail was sent, but that could not be remembered: %v", nerr))
 	}
+}
+
+// VaultHelperDir is the vault directory that holds helper scripts a Clerk or the
+// Mayor writes by hand; no rig's dispatch, claim or boot reads anything in it.
+const VaultHelperDir = "bin"
+
+// VaultFilesDispatchDoesNotRead says whether every one of files lies under the
+// vault's bin/, so that a dispatch refused only on them may go on and claim
+// (mw-gq6.1018). Anything else (seats/, the beads, plans, a stray file) is read
+// by a boot or a sync and still refuses. No files is not such a case.
+func VaultFilesDispatchDoesNotRead(files []string) bool {
+	if len(files) == 0 {
+		return false
+	}
+	for _, file := range files {
+		if !strings.HasPrefix(path.Clean(file), VaultHelperDir+"/") {
+			return false
+		}
+	}
+	return true
+}
+
+// vaultWentOnBody is the mail for a dispatch that went on past uncommitted
+// helper scripts: nothing was refused, but the vault half of the sync was left
+// alone, so this host is not level with the others until they are committed.
+func vaultWentOnBody(host, dir string, files []string) string {
+	return fmt.Sprintf("mw dispatch on %s went on and claimed what was ready: the vault holds uncommitted changes to %s, "+
+		"helper scripts that no dispatch reads. Until they are committed the vault is not pulled or pushed on this host "+
+		"(mw commits nobody's work for them); this is mailed once an hour for the same files.\n"+
+		"\nCommit them as found once their author is done,\n  %s\n",
+		host, strings.Join(files, ", "), VaultBlockedFix(dir, host, files))
 }
 
 // vaultFileWriters says, for a vault file mw writes and commits itself, who

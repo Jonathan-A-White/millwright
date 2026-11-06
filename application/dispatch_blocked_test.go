@@ -203,3 +203,63 @@ func TestDispatchStillFailsOnAVaultPushRefusedForAnotherReason(t *testing.T) {
 		t.Fatal("expected an authentication failure to fail the tick")
 	}
 }
+
+// mw-gq6.1018: a helper script a Clerk edits under the vault's bin/ is read by
+// no rig dispatch, so a vault dirty in nothing else does not stop the claim.
+func TestDispatchClaimsAReadyStoryWhenOnlyAFileUnderBinIsUncommitted(t *testing.T) {
+	ctx := context.Background()
+	dispatch, mailbox, now := aBlockedDispatch(t, "bin/logos-sermons-parse.mjs")
+	tracker := dispatch.Tracker.(*apptest.FakeTracker)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("expected a vault dirty only under bin/ not to refuse the tick, got %v", err)
+	}
+	if len(report.Started) != 1 {
+		t.Fatalf("expected the ready story claimed, got %v", startedIDs(report))
+	}
+	noted := strings.Join(report.Notes, "\n")
+	if !strings.Contains(noted, "bin/logos-sermons-parse.mjs") {
+		t.Errorf("expected a note naming the uncommitted file, got %q", noted)
+	}
+
+	// The Mayor is still told, once the same file is met a second time, that
+	// the vault was not brought level; the mail says dispatch went on.
+	*now = now.Add(time.Minute)
+	if _, err := dispatch.Run(ctx); err != nil {
+		t.Fatalf("expected the second tick not to be refused, got %v", err)
+	}
+	inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox)
+	if len(inbox) != 1 {
+		t.Fatalf("expected one mail to the mayor, got %d", len(inbox))
+	}
+	if strings.HasPrefix(inbox[0].Subject, application.MailBlocked) || !strings.Contains(inbox[0].Body, "bin/logos-sermons-parse.mjs") {
+		t.Errorf("expected a mail that is no refusal and names the file, got %q / %q", inbox[0].Subject, inbox[0].Body)
+	}
+}
+
+func TestDispatchStillRefusesWhenAFileUnderSeatsIsUncommittedBesideOneUnderBin(t *testing.T) {
+	ctx := context.Background()
+	for _, files := range [][]string{
+		{"seats/mayor/ledger.md"},
+		{"bin/logos-sermons-parse.mjs", "seats/mayor/ledger.md"},
+		{".beads/issues.jsonl"},
+		{"binary-notes.md"},
+	} {
+		dispatch, mailbox, now := aBlockedDispatch(t, files...)
+		tracker := dispatch.Tracker.(*apptest.FakeTracker)
+		tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+
+		report, err := dispatch.Run(ctx)
+		if err == nil || len(report.Started) != 0 {
+			t.Fatalf("%v: expected the dispatch refused, got err %v and started %v", files, err, startedIDs(report))
+		}
+		*now = now.Add(time.Minute)
+		_, _ = dispatch.Run(ctx)
+		inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox)
+		if len(inbox) != 1 || !strings.HasPrefix(inbox[0].Subject, application.MailBlocked) {
+			t.Errorf("%v: expected the Blocked mail as before, got %+v", files, inbox)
+		}
+	}
+}
