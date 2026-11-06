@@ -18,6 +18,7 @@ contrib/vultr-boost adopt          # --instance ID: import a restoring instance 
 contrib/vultr-boost snapshot       # a ready-made image of a bootstrapped box
 contrib/vultr-boost spend          # what Vultr's billing says the boxes cost this month
 contrib/vultr-boost set-cap        # --name NAME --cap N: set the sessions a box that is up runs at once
+contrib/vultr-boost set-pace       # --name NAME: make the box's dispatch timer tick every five minutes
 contrib/vultr-boost address        # --name NAME: the box's WireGuard address, then its user, off the hub
 ```
 
@@ -264,6 +265,21 @@ Each check:
    same; until then it shows `waiting for its first dispatch`. Two boxes from cloud1's
    snapshot once both ran as cloud1 with a broken vault, and claimed nothing for an hour
    while the book said they were up (mw-5gr3k0.8).
+
+### A box dispatches every five minutes, not hourly
+
+`mw-dispatch.timer` as the snapshot carries it is the home's hourly one (the home's event follower
+springs its dispatch the moment a bead changes; a box has no follower). `boost-bootstrap.sh` writes the
+drop-in `mw-dispatch.timer.d/boost-pace.conf` (`OnCalendar=` then `OnCalendar=*:0/5`), but a box restored
+from a snapshot may not have run it again, and cloud1 waited up to an hour for each dispatch
+(mw-gq6.1004). So each cloud check runs `contrib/vultr-boost set-pace --name cloudN` on every box up
+whose book entry does not say `pace` is `*:0/5`: over ssh as the box's user it writes that drop-in
+when the box's is not so, reloads systemd, restarts the timer and starts one dispatch, then prints the
+`OnCalendar` the timer ends with. A box that took it is not reached again; one that could not be is
+tried at each check, and says so once as a `cloud` event. It does not wait for the box's first
+dispatch, which an hourly box may be an hour in making. `mw cloud check` ends with a line for each
+box, `cloud1: dispatch timer every 5 minutes`, or `hourly, not every 5 minutes` when it is not,
+or `pace not known` with why.
 
 ### A changed box_cap reaches the boxes already up
 

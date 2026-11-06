@@ -151,3 +151,24 @@ func TestAFailedVaultCommitLeavesTheHomesConfigAsItWas(t *testing.T) {
 		t.Errorf("expected the home's config untouched, got %q", got)
 	}
 }
+
+func TestSetPaceRunsTheWrapperAndReadsThePaceTheTimerHas(t *testing.T) {
+	command, calls := standIn(t, "echo '[2/2] box: dispatch timer every five minutes'; echo 'pace = *:0/5'")
+	pace, err := (cloud.Vultr{Command: command}).SetPace(context.Background(), "cloud2")
+	if err != nil {
+		t.Fatalf("set pace: %v", err)
+	}
+	if got, want := read(t, calls), "set-pace --name cloud2\n"; got != want {
+		t.Errorf("expected the wrapper run as %q, got %q", want, got)
+	}
+	if pace != "*:0/5" {
+		t.Errorf("expected the pace the wrapper printed, got %q", pace)
+	}
+}
+
+func TestSetPaceWithNoPaceLineIsAnErrorNotAGuess(t *testing.T) {
+	command, _ := standIn(t, "echo done")
+	if _, err := (cloud.Vultr{Command: command}).SetPace(context.Background(), "cloud2"); err == nil || !strings.Contains(err.Error(), "printed no pace") {
+		t.Errorf("expected an error saying no pace was printed, got %v", err)
+	}
+}

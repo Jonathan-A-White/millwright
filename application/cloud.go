@@ -46,6 +46,12 @@ type CloudProvider interface {
 	// sessions are not touched. An error is a box that could not be reached
 	// or written, which keeps the cap it had.
 	SetCap(ctx context.Context, name string, cap int) error
+	// SetPace makes sure the box's dispatch timer ticks every five minutes
+	// (the timer drop-in boost-pace.conf, as boost-bootstrap.sh writes it) and
+	// returns the OnCalendar the timer has after: a box made from the snapshot
+	// carries the home's hourly timer, and has no event follower to spring its
+	// dispatch. An error is a box that could not be reached or written.
+	SetPace(ctx context.Context, name string) (pace string, err error)
 	// Address is where the box is reached from the home: its WireGuard address
 	// read off the hub, and the user it dispatches as. The home resolves no
 	// name for a box. An error is a box with no address to read, with why.
@@ -192,6 +198,33 @@ type CloudBox struct {
 	// counting at Cap meanwhile.
 	Cap      int    `json:"cap,omitempty"`
 	CapFault string `json:"cap_fault,omitempty"`
+	// Pace is the OnCalendar of the box's mw-dispatch.timer as the check last
+	// read it back from the box ("" when it has not), CloudPaceFive being the
+	// one a box needs; PaceFault is why the check could not set or read it.
+	Pace      string `json:"pace,omitempty"`
+	PaceFault string `json:"pace_fault,omitempty"`
+}
+
+// CloudPaceFive is the OnCalendar of a dispatch timer at the pace a box needs:
+// every five minutes, on the clock.
+const CloudPaceFive = "*:0/5"
+
+// paceText is how a box's dispatch timer pace is said: the OnCalendar in force
+// as the pace it is.
+func (b CloudBox) paceText() string {
+	switch b.Pace {
+	case CloudPaceFive:
+		return "every 5 minutes"
+	case "":
+		text := "pace not known"
+		if b.PaceFault != "" {
+			text += ": " + b.PaceFault
+		}
+		return text
+	case "hourly":
+		return "hourly, not every 5 minutes: a box has no follower, so its dispatch waits up to an hour"
+	}
+	return "at OnCalendar " + b.Pace + ", not every 5 minutes"
 }
 
 // boxCap is how many sessions the box is counted to run at once: the cap the
@@ -394,6 +427,8 @@ type CloudReport struct {
 	Moves []string
 	// Making are the boxes the check began, still being made.
 	Making []string
+	// Paces say, for each box up, the pace of its dispatch timer.
+	Paces []string
 }
 
 // String is the report in one line.
@@ -404,6 +439,9 @@ func (r CloudReport) String() string {
 	}
 	for _, name := range r.Making {
 		line += "\n  making " + name + " in the background; the book says when it is up"
+	}
+	for _, pace := range r.Paces {
+		line += "\n  " + pace
 	}
 	return line
 }
@@ -434,6 +472,7 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 	p.seeDispatch(ctx)
 	p.markIdle(work)
 	p.setCaps(ctx)
+	p.setPaces(ctx)
 
 	if n := len(p.state.Boxes); n > 0 && p.spent()+c.Plan.HourlyUSD*float64(n) > c.Plan.MonthlyCapUSD {
 		p.capReached(ctx, "destroying every box")
@@ -457,6 +496,11 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 		p.keep(ctx, p.dirty)
 	}
 	p.report.Boxes, p.report.SpentUSD = len(p.state.Boxes), p.spent()
+	for _, box := range p.state.Boxes {
+		if !box.Making && !box.Restoring {
+			p.report.Paces = append(p.report.Paces, fmt.Sprintf("%s: dispatch timer %s", box.Name, box.paceText()))
+		}
+	}
 	return p.report, p.err
 }
 
@@ -863,6 +907,48 @@ func (p *cloudPass) setCaps(ctx context.Context) {
 	}
 	if len(set) > 0 {
 		p.emit(ctx, fmt.Sprintf("box_cap %d set on %s: sessions a box runs at once", want, strings.Join(set, ", ")))
+	}
+}
+
+// setPaces makes each box up run its dispatch timer every five minutes. A box
+// made from the snapshot carries the hourly timer of the home, which an event
+// follower springs; a box has none, so it would wait up to an hour for each
+// dispatch (mw-gq6.1004). Unlike the cap it does not wait for the box's first
+// dispatch, which an hourly box may be a long time making. A box known to be at
+// the pace is not reached again; one that could not be is a move the first time
+// for that fault, and tried at the next check.
+func (p *cloudPass) setPaces(ctx context.Context) {
+	for i := range p.state.Boxes {
+		box := &p.state.Boxes[i]
+		if box.Making || box.Restoring || box.Pace == CloudPaceFive {
+			continue
+		}
+		pace, err := p.check.Provider.SetPace(ctx, box.Name)
+		if err != nil {
+			text := fmt.Sprintf("could not set the dispatch timer of %s to every 5 minutes: %v", box.Name, oneLine(err.Error()))
+			if box.PaceFault != text {
+				box.PaceFault = text
+				p.move(ctx, text)
+				p.dirty = box.Name + " pace"
+			} else {
+				p.check.say("%s", text)
+			}
+			continue
+		}
+		pace = strings.TrimSpace(pace)
+		if pace == box.Pace && box.PaceFault == "" {
+			continue
+		}
+		was := box.Pace
+		box.Pace, box.PaceFault = pace, ""
+		p.dirty = box.Name + " pace"
+		what := fmt.Sprintf("%s: dispatch timer set, now %s", box.Name, box.paceText())
+		if was != "" {
+			what += " (was " + was + ")"
+		}
+		p.check.say("%s", what)
+		p.report.Moves = append(p.report.Moves, what)
+		p.state.Moves = p.addMove(CloudMove{At: p.now, What: what})
 	}
 }
 
