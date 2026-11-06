@@ -703,8 +703,8 @@ Feature: Dispatching the stories this host is ready to work
     When dispatch runs on "vps" with a cap of 4
     Then no session was started
     And the story "mw-gq6.1" is not claimed
-    And dispatch passed over "mw-gq6.1", saying: vps has no room: slow grist: tutor-turn 30 s, par 10 s
-    And the event log holds 1 room event, the last saying the host has no room: slow grist: tutor-turn 30 s, par 10 s
+    And dispatch passed over "mw-gq6.1", saying: vps has no room: slow grist (reader): tutor-turn 30 s, par 10 s
+    And the event log holds 1 room event, the last saying the host has no room: slow grist (reader): tutor-turn 30 s, par 10 s
 
   Scenario: Tutor answers back near their par lift the block
     Given a ready story "mw-gq6.1" of that epic

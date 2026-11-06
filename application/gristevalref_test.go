@@ -383,3 +383,50 @@ func TestEvalWithARefSendsTheGrindFileAtTheRef(t *testing.T) {
 		t.Fatalf("expected the grind file of the ref on the send, got %+v", sender.sent)
 	}
 }
+
+// A smoke or eval talk marks its grist as the factory's even when the mill does
+// not hold the test key that sealed it (a host whose grist_test_key_file is
+// unset), so a machine burst never counts toward the slow-grist hold
+// (mw-gq6.752). The run keeps which kind of talk it was.
+func TestAGristInASmokeOrEvalTalkIsKeptAsTheFactorysWhoeverSealedIt(t *testing.T) {
+	for name, tc := range map[string]struct {
+		from, talk string
+		factory    bool
+		class      string
+	}{
+		"an app key in a smoke talk":    {"phone", "smoke:tutor/greets:ab12cd34", true, "smoke"},
+		"an app key in an eval talk":    {"phone", "eval:greets:ab12cd34", true, "eval"},
+		"the test key in a smoke talk":  {"factory", "smoke:tutor/greets:ab12cd34", true, "smoke"},
+		"the test key in an eval talk":  {"factory", "eval:greets:ab12cd34", true, "eval"},
+		"an app key in a reader's talk": {"phone", "chat:1", false, "reader"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mill, _, _ := overrideMill(t, tc.from, tc.talk)
+			if tc.from != "factory" {
+				// An app key may not bring grind text: seal the grist again without it,
+				// and let the mill not know the test key.
+				const phone = "02466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27"
+				keys := &fakeMillKey{made: true}
+				millKey, _, _ := keys.PublicKey()
+				plain, _ := json.Marshal(application.GristPlaintext{Grist: application.GristName{App: "lampas", Kind: "tutor", V: "1", Talk: tc.talk}, Input: json.RawMessage(`{"question":"hi"}`)})
+				ct, _ := (&apptest.FakeCipher{From: phone}).Encrypt(millKey, string(plain))
+				fresh := apptest.NewFakePostern()
+				fresh.AddRecord(application.PosternRecord{Txid: "direct:g2", Class: application.GristClass, From: phone, To: millKey, Signer: phone, SignerApps: []string{"lampas"}, Ciphertext: ct})
+				mill.Postern = fresh
+				mill.TestKey = ""
+			}
+			runs := &apptest.FakeGristRuns{}
+			mill.Runs = runs
+			if _, err := mill.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if len(runs.Kept) != 1 {
+				t.Fatalf("expected one run kept, got %+v", runs.Kept)
+			}
+			got := runs.Kept[0]
+			if got.Factory != tc.factory || got.SenderClass() != tc.class {
+				t.Errorf("expected Factory = %v and class %q, got Factory = %v and class %q", tc.factory, tc.class, got.Factory, got.SenderClass())
+			}
+		})
+	}
+}

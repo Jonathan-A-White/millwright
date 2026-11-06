@@ -284,3 +284,43 @@ func TestStatusAndDispatchReadTheSamePulseWithFactoryRuns(t *testing.T) {
 		t.Errorf("status and dispatch should both see no tutor in use: line %q, cap line %q, cap %d", pulse.Line(), pulse.CapLine(), pulse.Cap)
 	}
 }
+
+func TestTheSlowGristReasonNamesTheSenderClassThatHoldsIt(t *testing.T) {
+	old := steady("tutor-turn", 45, 100*time.Minute, 10)
+	slow := steady("tutor-turn", 5, 9*time.Minute, 300)
+	pulse := pulseOf(t, roomOf(roomRuns{append(old, slow...)}), 6)
+	if want := "slow grist (reader): tutor-turn 300 s, par 10 s"; pulse.Slow != want {
+		t.Errorf("slow = %q, want %q", pulse.Slow, want)
+	}
+}
+
+func TestAMachineBurstAmongReadersIsNotWhatHoldsTheHost(t *testing.T) {
+	// Twelve smoke grists, slow, from an app's burst, marked by their talk; the
+	// readers' own answers are quick, so nothing is slow.
+	old := steady("bible-talk", 45, 100*time.Minute, 10)
+	burst := factoryRuns("bible-talk", 12, 9*time.Minute, 400)
+	for i := range burst {
+		burst[i].Class = "smoke"
+	}
+	quick := steady("bible-talk", 3, 5*time.Minute, 10)
+	pulse := pulseOf(t, roomOf(roomRuns{append(append(old, burst...), quick...)}), 6)
+	if pulse.Slow != "" || !pulse.Active || pulse.Recent != 3 {
+		t.Errorf("a smoke burst holds no host: %+v", pulse)
+	}
+}
+
+func TestSenderClassOfARun(t *testing.T) {
+	for _, tc := range []struct {
+		timing application.GristRunTiming
+		want   string
+	}{
+		{application.GristRunTiming{}, "reader"},
+		{application.GristRunTiming{Factory: true}, "factory"},
+		{application.GristRunTiming{Factory: true, Class: "smoke"}, "smoke"},
+		{application.GristRunTiming{Factory: true, Class: "eval"}, "eval"},
+	} {
+		if got := tc.timing.SenderClass(); got != tc.want {
+			t.Errorf("%+v: class = %q, want %q", tc.timing, got, tc.want)
+		}
+	}
+}

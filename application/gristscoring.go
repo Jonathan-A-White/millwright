@@ -287,7 +287,7 @@ func (g GristGrind) keepRun(ctx context.Context, w *gristWork) {
 		}.withWaits(),
 	}
 	run.Timing.RefreshTimedOut = w.refreshTimedOut
-	run.Timing.Factory = w.factory
+	run.Timing.Factory, run.Timing.Class = w.factory, w.class
 	for _, clip := range w.clips {
 		run.Attachments = append(run.Attachments, GristRunAttachment{Ext: posternAttachmentExtension(clip.mime), Data: clip.data})
 	}

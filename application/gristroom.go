@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -99,7 +100,8 @@ type GristPulse struct {
 	HostCap int
 	Cap     int
 	// Slow is why the host starts no story: the kind whose last answers took
-	// over the factor times their par. Empty when none is slow, and always empty
+	// over the factor times their par, and the sender class of its recent
+	// grists in brackets ("reader", as the factory's own are left out). Empty when none is slow, and always empty
 	// while grist is not Active.
 	Slow string
 	// Kind, Median and Par are what the status line speaks of: the slowest kind
@@ -215,6 +217,7 @@ func (g GristRoom) Pulse(ctx context.Context, hostCap int) (GristPulse, error) {
 
 	since := now().Add(-pulse.Window)
 	var recentKinds []string
+	recentClass := map[string]string{} // a kind's sender class among the recent runs
 	for _, t := range timings {
 		if t.endedAt().Before(since) {
 			continue
@@ -222,6 +225,7 @@ func (g GristRoom) Pulse(ctx context.Context, hostCap int) (GristPulse, error) {
 		pulse.Recent++
 		pulse.Kind = t.Kind
 		recentKinds = append(recentKinds, t.Kind)
+		recentClass[t.Kind] = classJoin(recentClass[t.Kind], t.SenderClass())
 	}
 	pulse.Active = pulse.InFlight || pulse.Recent > 0
 	if !pulse.Active {
@@ -250,10 +254,32 @@ func (g GristRoom) Pulse(ctx context.Context, hostCap int) (GristPulse, error) {
 		if par > 0 && median > g.Limits.factor()*par && median/par > worst {
 			worst = median / par
 			pulse.Kind, pulse.Median, pulse.Par = kind, median, par
-			pulse.Slow = fmt.Sprintf("slow grist: %s %.0f s, par %.0f s", kind, median, par)
+			pulse.Slow = fmt.Sprintf("slow grist (%s): %s %.0f s, par %.0f s", recentClass[kind], kind, median, par)
 		}
 	}
 	return pulse, nil
+}
+
+// classJoin is the sender class of runs of one kind that held so far (have)
+// and of one more (next): the same class, or "mixed" when they differ.
+func classJoin(have, next string) string {
+	switch {
+	case have == "" || have == next:
+		return next
+	}
+	return "mixed"
+}
+
+func (w *gristWork) markMachine() {
+	talk := w.plain.Grist.Talk
+	switch {
+	case strings.HasPrefix(talk, GristSmokeTalkPrefix+":"):
+		w.factory, w.class = true, GristSmokeTalkPrefix
+	case strings.HasPrefix(talk, GristEvalTalkPrefix+":"):
+		w.factory, w.class = true, GristEvalTalkPrefix
+	case w.factory:
+		w.class = GristClassFactory
+	}
 }
 
 func (t GristRunTiming) endedAt() time.Time {

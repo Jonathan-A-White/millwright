@@ -252,8 +252,13 @@ type gristWork struct {
 	commit       string
 	// refreshTimedOut is set when the fetch before this grind ran past its limit.
 	refreshTimedOut bool
-	// factory is set when the grist was sealed by the mill's test key.
+	// factory is set when the grist was sealed by the mill's test key or named a
+	// smoke or eval talk, and class says which (GristRunTiming.Class).
 	factory bool
+	class   string
+	// testKey is set when the grist was sealed by the mill's test key alone; the
+	// daily limit is lifted for it and for no one who merely names a smoke talk.
+	testKey bool
 	// model and effort are what the grind runs on: the grist's own when it
 	// asks, else the grind file's; modelFrom and effortFrom say which.
 	model, effort         string
@@ -608,7 +613,8 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 	}
 	// The answer goes to whoever sealed the grist: only they can read it.
 	w.to, w.sender = envelopeFrom, KeyFingerprint(envelopeFrom)
-	w.factory = g.TestKey != "" && envelopeFrom == g.TestKey
+	w.testKey = g.TestKey != "" && envelopeFrom == g.TestKey
+	w.factory = w.testKey
 	_, w.verified, _ = posternVerifySender(envelopeFrom, r.From, r.Signer)
 	if !w.verified {
 		w.settle(GristRefused, GristReasonUnproven)
@@ -620,6 +626,9 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		w.settle(GristRefused, GristReasonMalformed)
 		return
 	}
+	// A smoke or eval talk is a machine's whoever sealed it (mw-gq6.752): the
+	// mill may not hold the test key, and no one waits on such an answer.
+	w.markMachine()
 	for _, a := range w.plain.Attachments {
 		if !gristBlobHash.MatchString(a.Hash) {
 			w.settle(GristRefused, GristReasonMalformed)
@@ -648,7 +657,7 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 	ceilings := g.Ceilings.filled()
 	// The daily limit guards fuel against an app's keys; the smoke's own key is
 	// the factory's, sent by every smoke of every app (mw-gq6.340).
-	if !w.factory {
+	if !w.testKey {
 		// A self-registered person's device keys share one day at the person's
 		// own cap; the Governor's keys keep the home's setting (mw-cvwm1u.6).
 		limit, senders := ceilings.DailyLimit, []string{w.sender}

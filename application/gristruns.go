@@ -127,6 +127,29 @@ type GristRunTiming struct {
 	// leaves such runs out of what it reads as grist in use (mw-gq6.804). Runs
 	// kept before it was written read as not the factory's.
 	Factory bool `json:"factory,omitempty"`
+	// Class says which machine sent it when Factory is set: "smoke" or "eval"
+	// by the talk it named, "factory" for the test key in no such talk. Left out
+	// for a reader and by runs kept before it was written (mw-gq6.752).
+	Class string `json:"class,omitempty"`
+}
+
+// Sender classes of a kept run, as SenderClass names them.
+const (
+	GristClassReader  = "reader"
+	GristClassFactory = "factory"
+)
+
+// SenderClass is who the run was for: "smoke" or "eval" for a talk of the
+// factory's own tests, "factory" for the test key otherwise, and "reader" for
+// anyone else, which is every run kept before the class was.
+func (t GristRunTiming) SenderClass() string {
+	switch {
+	case t.Class != "":
+		return t.Class
+	case t.Factory:
+		return GristClassFactory
+	}
+	return GristClassReader
 }
 
 // withWaits fills QueuedSeconds and RunSeconds from the times already in t.
