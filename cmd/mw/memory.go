@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,10 +48,31 @@ func memoryFor(cmd *cobra.Command) (application.Memory, error) {
 		return application.Memory{}, err
 	}
 	return application.Memory{
+		Landed:     landedStories(dir),
 		Configured: func(rig string) bool { _, ok := rigs[rig]; return ok },
 		Files:      files, Vault: files, Legacy: files, Head: files.Head, Seat: BuilderSeat, Budget: budget, Out: cmd.OutOrStdout(),
 		Queries: memoryQueryLog(), Story: os.Getenv("MW_STORY"), Warn: cmd.ErrOrStderr(),
 	}, nil
+}
+
+// landedStories reads which of the stories ids names are closed and landed from
+// the tracker; the host and the tracker are only asked for when make-room needs it.
+func landedStories(dir string) func(context.Context, []string) (map[string]bool, error) {
+	return func(ctx context.Context, ids []string) (map[string]bool, error) {
+		host, err := config.Host()
+		if err != nil {
+			return nil, err
+		}
+		details, err := mwGateway(dir, host).ShowBeads(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		landed := map[string]bool{}
+		for _, d := range details {
+			landed[d.Story.ID] = application.StoryLanded(d)
+		}
+		return landed, nil
+	}
 }
 
 // memoryQueryLog is this host's log of memory queries, ~/.local/state/mw/
@@ -65,10 +87,10 @@ func memoryQueryLog() application.MemoryQueryLog {
 }
 
 func newMemoryAddCmd() *cobra.Command {
-	var kind, subject, source, slug string
+	var kind, subject, source, slug, boot, question string
 	var makeRoom bool
 	cmd := &cobra.Command{
-		Use:   "add <rig> --kind gotcha|decision --subject <s> --source <src> [--slug <slug>] [--make-room] \"<sentence>\"",
+		Use:   "add <rig> --kind gotcha|decision --subject <s> --source <src> [--slug <slug>] [--make-room] [--boot no --question \"<terms>\"] \"<sentence>\"",
 		Short: "Write a new current fact for a rig",
 		Long: "add writes facts/<slug>.md with status current and since today (UTC). The slug defaults to the\n" +
 			"sentence's first five words, lower-case and hyphenated. The source is a bead, rig@sha or\n" +
@@ -82,9 +104,16 @@ func newMemoryAddCmd() *cobra.Command {
 			"fact, then WARNs with the overage and the command `mw memory make-room <rig> --bytes 0`;\n" +
 			"--make-room runs that first, for the new line's own size (see make-room), and adds only if it made the room.\n" +
 			"A new fact that ranks ahead of an expected fact and pushes it out of the top 3 of an eval.md question is\n" +
-			"named in a 'WARN: eval question at line N' line.",
+			"named in a 'WARN: eval question at line N' line.\n" +
+			"--boot no writes the fact demoted (boot: no), for a line the rig's own test enforces: it needs --question,\n" +
+			"which is appended to eval.md with the fact as its expect after it is checked to put the fact in the top 3\n" +
+			"(one term per word of the question; else nothing is written), and the fact and eval.md are committed together.\n" +
+			"--question goes only with --boot no.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if boot != "yes" && boot != "no" {
+				return fmt.Errorf("--boot is yes or no, not %q", boot)
+			}
 			memory, err := memoryFor(cmd)
 			if err != nil {
 				return err
@@ -92,6 +121,7 @@ func newMemoryAddCmd() *cobra.Command {
 			return memory.Add(cmd.Context(), application.MemoryAdd{
 				Rig: args[0], Slug: slug, Subject: subject, Source: source,
 				Kind: application.FactKind(kind), Sentence: args[1], MakeRoom: makeRoom,
+				NoBoot: boot == "no", Question: question,
 			})
 		},
 	}
@@ -100,6 +130,8 @@ func newMemoryAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&source, "source", "", "a bead, rig@sha or mayor:<date>")
 	cmd.Flags().StringVar(&slug, "slug", "", "the file's name; default the sentence's first five words")
 	cmd.Flags().BoolVar(&makeRoom, "make-room", false, "first demote old gotchas, then decisions over 14 days old, to make room in the boot render for this line (see make-room)")
+	cmd.Flags().StringVar(&boot, "boot", "yes", "yes, or no to write the fact demoted (needs --question)")
+	cmd.Flags().StringVar(&question, "question", "", "with --boot no: the eval question that finds the fact, terms separated by spaces")
 	_ = cmd.MarkFlagRequired("kind")
 	_ = cmd.MarkFlagRequired("subject")
 	_ = cmd.MarkFlagRequired("source")
@@ -270,7 +302,9 @@ func newMemoryQueryCmd() *cobra.Command {
 			"hit's subject and those along a hit's supersedes chain, each marked 'related'. It is how a\n" +
 			"Builder finds what boot does not show. Each run is logged (rig, terms, hits, the story from\n" +
 			"$MW_STORY) to ~/.local/state/mw/memory-queries.jsonl, host state and not the vault: see\n" +
-			"stats. It reads files and runs no git command, so it may be run from a worktree. Exit 1, saying 'no fact matches', when nothing hits.",
+			"stats. It reads files and runs no git command, so it may be run from a worktree. Exit 1, saying 'no fact matches', when nothing hits.\n" +
+			"One term per argument: mw memory query kiln gate lint has two terms; \"gate lint\" in quotes is one term,\n" +
+			"which hits only a word that starts with all of it.",
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			memory, err := memoryFor(cmd)
@@ -335,8 +369,9 @@ func newMemoryEvalCmd() *cobra.Command {
 
 func newMemoryDemoteCmd() *cobra.Command {
 	var question string
+	var auto bool
 	cmd := &cobra.Command{
-		Use:   "demote <rig> <slug> [--question \"<terms>\"]",
+		Use:   "demote <rig> <slug> [--question \"<terms>\" | --auto-question]",
 		Short: "Keep a current fact out of the boot render, as long as the rig's eval still finds it",
 		Long: "demote sets boot: no on a current fact, so that boot does not show it. The fact stays\n" +
 			"current, and query shows it and list marks it 'boot:no'. It is refused, saying 'no eval\n" +
@@ -344,16 +379,28 @@ func newMemoryDemoteCmd() *cobra.Command {
 			"has the slug in its expect and that question passes (see eval). It also refuses a slug that\n" +
 			"is unknown, not current or already demoted. --question appends 'Q: <terms>' and\n" +
 			"'expect: <slug>' to eval.md first, checks that the question passes (else nothing is\n" +
-			"written), demotes the fact, and commits eval.md and the fact in one commit.",
+			"written), demotes the fact, and commits eval.md and the fact in one commit.\n" +
+			"One term per argument, as in query: the words of --question are separate terms, each of which must start a\n" +
+			"word of the fact's slug, subject, sentence or source, and the fact must rank in the top 3 of them.\n" +
+			"--auto-question makes the question itself, as make-room does: the fact's slug's words, else the first eight\n" +
+			"words of its sentence, else its subject with them; the first that puts the fact in the top 3 is used\n" +
+			"(else nothing is changed). It cannot be combined with --question.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if auto && question != "" {
+				return fmt.Errorf("--auto-question cannot be combined with --question")
+			}
 			memory, err := memoryFor(cmd)
 			if err != nil {
 				return err
 			}
+			if auto {
+				return memory.DemoteAuto(cmd.Context(), args[0], args[1])
+			}
 			return memory.Demote(cmd.Context(), args[0], args[1], question)
 		},
 	}
+	cmd.Flags().BoolVar(&auto, "auto-question", false, "make the question from the fact's slug, sentence and subject, and use the first that finds it in the top 3")
 	cmd.Flags().StringVar(&question, "question", "", "a question that should find the fact; appended to eval.md with the fact as its expect")
 	return cmd
 }
@@ -402,7 +449,7 @@ func newMemoryMakeRoomCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "make-room <rig> --bytes N [--dry-run]",
-		Short: "Demote the oldest eligible boot gotchas, then decisions over 14 days old, until the render has N bytes free under the budget",
+		Short: "Demote the oldest eligible boot gotchas, then decisions, then facts of landed stories, until the render has N bytes free under the budget",
 		Long: "make-room chooses by a fixed rule, at no cost in tokens: a current gotcha in the boot render,\n" +
 			"then, only when no gotcha is left to take, a current decision with a since over 14 days ago; never\n" +
 			"a sentence beginning 'His ' or holding 'the Governor', \"Governor's\" or 'his words' anywhere (printed\n" +
@@ -411,7 +458,9 @@ func newMemoryMakeRoomCmd() *cobra.Command {
 			"then slug order). Each goes through demote with the first eight words of its own sentence as the\n" +
 			"question; one that question would not put in the top 3 of eval is skipped (named 'skipped <slug>')\n" +
 			"for the next, but a decision first gets a second question, its subject's words plus those first\n" +
-			"eight words. It prints the render before, each demotion and the\n" +
+			"eight words. After those, a decision whose subject is one file (not 'general') with a since over 2 days ago\n" +
+			"and then, for a rig too young for those rules, a gotcha or decision of any age whose source is a story that is\n" +
+			"closed and landed, oldest first, each asked by its slug's words first. It prints the render before, each demotion and the\n" +
 			"render after. When the facts that qualify cannot free N bytes it changes nothing and exits 1.\n" +
 			"--bytes 0 gets the render under the budget. --dry-run prints 'would demote <slug>' for each\n" +
 			"and the render before and after, and writes nothing.",

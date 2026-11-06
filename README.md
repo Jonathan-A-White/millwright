@@ -3326,15 +3326,15 @@ home's dispatch never finds the vault dirty (mw-gq6.501). None deletes a fact; `
 Builder:
 
 ```sh
-mw memory add <rig> --kind gotcha|decision --subject <s> --source <bead|rig@sha|mayor:<date>> [--slug <slug>] [--make-room] "<sentence>"
+mw memory add <rig> --kind gotcha|decision --subject <s> --source <bead|rig@sha|mayor:<date>> [--slug <slug>] [--make-room] [--boot no --question "<terms>"] "<sentence>"
 mw memory supersede <rig> <slug> --source <...> [--slug <new>] "<sentence>"
 mw memory retire <rig> <slug> --reason "<why>"
 mw memory recheck <rig> <slug> [--why "<text>"]
 mw memory list <rig> [--current | --status current|recheck|superseded|retired] [--oldest]
 mw memory migrate <rig> [--dry-run]
-mw memory query <rig> <term>...
+mw memory query <rig> <term>...   # one term per argument
 mw memory eval <rig> [--fix]
-mw memory demote <rig> <slug> [--question "<terms>"]
+mw memory demote <rig> <slug> [--question "<terms>" | --auto-question]
 mw memory promote <rig> <slug>
 mw memory make-room <rig> --bytes N [--dry-run]
 ```
@@ -3363,13 +3363,24 @@ is within the last 2 days, the oldest since first, then the subject `mw memory s
 least queried, then slug order. Each goes through `demote` with the first eight words of its
 own sentence as the question; one that question would not put in the top 3 of `eval` is
 skipped (`skipped <slug>`) for the next, a decision after a second question, its subject's
-words plus those first eight (mw-gq6.867). It prints the
+words plus those first eight (mw-gq6.867). After those it takes a decision whose subject is one
+file (not `general`) with a since over 2 days ago, and then, for a rig too young for the age
+rules, a gotcha or decision of any age whose source is a story closed and landed, oldest first,
+each asked by its slug's words first (mw-gq6.756). It prints the
 render before, each demotion and the render after; when the facts that qualify cannot free N
 bytes it changes nothing and exits 1. `--dry-run` prints `would demote <slug>` for each and
 the render before and after, and writes nothing. `add --make-room` makes room for the new
 line's own render cost first, then adds; an `add` without it that takes the render over the
 budget still writes the fact, then prints the overage and `mw memory make-room <rig> --bytes 0`
 (mw-gq6.738).
+
+`demote --auto-question` makes the question itself, as `make-room` does: the fact's slug's
+words, else the first eight words of its sentence, else its subject with them, the first that
+puts the fact in the top 3 (else nothing is changed). `add --boot no --question "<terms>"`
+writes a fact demoted at once, for a line the rig's own test enforces: the question is checked
+to find the fact in the top 3 and appended to eval.md, and both are committed together.
+`query` and `demote` take one term per argument: `"gate lint"` in quotes is one term, which
+hits only a word starting with all of it.
 
 `migrate` moves a rig kept as one memory file to facts in one run. It reads
 `seats/builder/rigs/<rig>.md` and `<rig>-archive.md`: the head (before the first

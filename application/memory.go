@@ -91,6 +91,12 @@ type Memory struct {
 	Queries MemoryQueryLog
 	Story   string
 	Warn    io.Writer
+
+	// Landed says which of the stories ids names are closed and landed (a
+	// story id that is missing from the answer, or false in it, is not); make-room
+	// reads it to take the facts of landed stories on a rig too young for its
+	// age rules. nil knows none landed.
+	Landed func(ctx context.Context, ids []string) (map[string]bool, error)
 }
 
 // MemoryAdd is the request mw memory add makes.
@@ -100,6 +106,11 @@ type MemoryAdd struct {
 	// MakeRoom demotes old gotchas first (MakeRoom, below) when the new line
 	// would take the boot render over its budget.
 	MakeRoom bool
+	// NoBoot writes the fact demoted (boot: no), for a line the rig's own test
+	// enforces; Question is then required: it is appended to eval.md with the
+	// fact as its expect, and must put the fact in the top EvalTop results.
+	NoBoot   bool
+	Question string
 }
 
 // MemorySupersede is the request mw memory supersede makes. The new fact keeps
@@ -304,11 +315,33 @@ func (m Memory) putAndRecord(ctx context.Context, rig string, fact RigFact, subj
 // "added <slug>" (with the near facts named), or "not added: <why>" with the
 // error returned, so the exit code matches the sentence.
 func (m Memory) Add(ctx context.Context, req MemoryAdd) error {
+	if !req.NoBoot && strings.TrimSpace(req.Question) != "" {
+		return m.notAdded(fmt.Errorf("--question goes with --boot no"))
+	}
+	if req.NoBoot && strings.TrimSpace(req.Question) == "" {
+		return m.notAdded(fmt.Errorf("--boot no needs --question: a question that puts the fact in the top %d of the eval, so a Builder who needs it can still find it", EvalTop))
+	}
 	fact, near, err := m.newFact(ctx, req)
 	if err != nil {
 		return m.notAdded(err)
 	}
-	if req.MakeRoom {
+	var written []string
+	if req.NoBoot {
+		_, _, facts, err := m.load(ctx, req.Rig)
+		if err != nil {
+			return m.notAdded(err)
+		}
+		text, err := m.questionFinding(ctx, req.Rig, withFact(facts, fact), fact.Slug, req.Question)
+		if err != nil {
+			return m.notAdded(err)
+		}
+		if _, err := m.Files.WriteRigEval(ctx, m.Seat, req.Rig, text); err != nil {
+			return m.notAdded(err)
+		}
+		written = append(written, pathpkg.Join(SeatsDir, m.Seat, RigsDir, req.Rig, EvalFile))
+		fact.Unbooted = true
+	}
+	if req.MakeRoom && !req.NoBoot {
 		cost, free, err := m.renderCost(ctx, req.Rig, fact)
 		if err != nil {
 			return m.notAdded(err)
@@ -324,7 +357,7 @@ func (m Memory) Add(ctx context.Context, req MemoryAdd) error {
 		return m.notAdded(err)
 	}
 	// A fact written but not committed is not "not added": record's error says so.
-	if err := m.record(ctx, "add "+req.Rig+" "+fact.Slug, path); err != nil {
+	if err := m.record(ctx, "add "+req.Rig+" "+fact.Slug, append(written, path)...); err != nil {
 		return err
 	}
 	said := "added " + fact.Slug
@@ -889,40 +922,23 @@ func (m Memory) Demote(ctx context.Context, rig, slug, question string) error {
 	if fact.Unbooted {
 		return fmt.Errorf("the fact %q of the rig %s is already demoted", slug, rig)
 	}
-	text, _, err := m.Files.ReadRigEval(ctx, m.Seat, rig)
-	if err != nil {
-		return err
-	}
+	var text string
 	asked := strings.TrimSpace(question) != ""
 	if asked {
-		if err := factLine("the question", question); err != nil {
+		if text, err = m.questionFinding(ctx, rig, facts, slug, question); err != nil {
 			return err
 		}
-		text = appendEvalQuestion(text, strings.TrimSpace(question), slug)
-	}
-	report, err := evalText(text, facts)
-	if err != nil {
-		return err
-	}
-	// A question given is the one that must find the fact: it is the last
-	// appended, so no earlier question may stand in for it.
-	checked := report.Questions
-	if asked && len(checked) > 0 {
-		checked = checked[len(checked)-1:]
-	}
-	found := false
-	for _, q := range checked {
-		for _, expected := range q.Expect {
-			if expected == slug && !q.Failed {
-				found = true
-			}
+	} else {
+		if text, _, err = m.Files.ReadRigEval(ctx, m.Seat, rig); err != nil {
+			return err
 		}
-	}
-	if !found {
-		if asked {
-			return fmt.Errorf("no eval question finds %s: the question %q does not put it in the top %d; nothing was changed", slug, strings.TrimSpace(question), EvalTop)
+		report, err := evalText(text, facts)
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("no eval question finds %s; add one to eval.md first (or give --question)", slug)
+		if !reportFinds(report.Questions, slug) {
+			return fmt.Errorf("no eval question finds %s; add one to eval.md first (or give --question or --auto-question)", slug)
+		}
 	}
 	fact.Unbooted = true
 	var written []string
@@ -941,6 +957,59 @@ func (m Memory) Demote(ctx context.Context, rig, slug, question string) error {
 	}
 	fmt.Fprintf(m.Out, "demoted %s out of the boot render\n", slug)
 	return nil
+}
+
+// DemoteAuto is Demote with the question made for it: the first of the fact's
+// slug's words, the first words of its sentence and its subject with them that
+// puts the fact in the top EvalTop results. When none does nothing is changed
+// and it is an error.
+func (m Memory) DemoteAuto(ctx context.Context, rig, slug string) error {
+	_, files, facts, err := m.load(ctx, rig)
+	if err != nil {
+		return err
+	}
+	fact, err := existing(rig, slug, files, facts)
+	if err != nil {
+		return err
+	}
+	question := roomQuestion(fact, orderedFacts(facts), roomLanded)
+	if question == "" {
+		return fmt.Errorf("no question built from the words of %s, the first words of its sentence or its subject puts it in the top %d; nothing was changed (give --question)", slug, EvalTop)
+	}
+	return m.Demote(ctx, rig, slug, question)
+}
+
+// reportFinds reports whether some question that expects slug passed.
+func reportFinds(questions []EvalResult, slug string) bool {
+	for _, q := range questions {
+		if q.expects(slug) && !q.Failed {
+			return true
+		}
+	}
+	return false
+}
+
+// questionFinding is eval.md with question appended, expecting slug, after
+// checking over facts that this question itself (no earlier one stands in for
+// it) puts the fact in the top EvalTop results. Nothing is written.
+func (m Memory) questionFinding(ctx context.Context, rig string, facts map[string]RigFact, slug, question string) (string, error) {
+	question = strings.TrimSpace(question)
+	if err := factLine("the question", question); err != nil {
+		return "", err
+	}
+	text, _, err := m.Files.ReadRigEval(ctx, m.Seat, rig)
+	if err != nil {
+		return "", err
+	}
+	text = appendEvalQuestion(text, question, slug)
+	report, err := evalText(text, facts)
+	if err != nil {
+		return "", err
+	}
+	if n := len(report.Questions); n == 0 || !reportFinds(report.Questions[n-1:], slug) {
+		return "", fmt.Errorf("no eval question finds %s: the question %q does not put it in the top %d; nothing was changed", slug, question, EvalTop)
+	}
+	return text, nil
 }
 
 // appendEvalQuestion adds a Q and its expect to an eval.md text, a blank line
@@ -1392,13 +1461,19 @@ type roomMove struct {
 // MakeRoom demotes current boot facts, one by one, until the render has Bytes
 // free under the budget. It chooses by a fixed rule: the gotchas first, then, only
 // when they do not free enough, the decisions with a since over
-// MakeRoomDecisionDays days old; never a sentence beginning 'His ' or holding 'the Governor', "Governor's" or 'his words'; never one with
+// MakeRoomDecisionDays days old, then a decision whose subject is one file, not
+// 'general', placed over MakeRoomKeepDays days ago, then, for a rig too young for
+// those rules, a gotcha or decision of any age whose source is a story that is
+// closed and landed (Landed); never a sentence beginning 'His ' or holding 'the
+// Governor', "Governor's" or 'his words'; never an aged one with
 // a since within MakeRoomKeepDays days; the oldest since first, then the subject
 // least queried (as stats counts), then by slug. Each goes through Demote with
-// the first words of its own sentence as the question; a fact that question
-// would not put in the top EvalTop results is skipped for the next (a decision
-// gets a second question first: its subject's words plus those first words). When the
-// facts that qualify cannot free enough, nothing is changed and it is an error.
+// a question that is checked to put it in the top EvalTop results: the first
+// words of its own sentence (a decision gets a second question first: its
+// subject's words plus those first words); a file's decision or a landed
+// story's fact is asked by its slug's words first. A fact no question finds is
+// skipped for the next. When the facts that qualify cannot free enough, nothing
+// is changed and it is an error.
 func (m Memory) MakeRoom(ctx context.Context, req MemoryMakeRoom) error {
 	if req.Bytes < 0 {
 		return fmt.Errorf("--bytes must be 0 or more")
@@ -1429,13 +1504,20 @@ func (m Memory) makeRoom(ctx context.Context, rig string, bytes int, extra *RigF
 			fmt.Fprintf(m.Out, "skipped %s (the Governor's)\n", fact.Slug)
 		}
 	}
-	for _, fact := range skipped {
-		if fact.Kind == FactDecision {
+	for _, c := range skipped {
+		fact := c.fact
+		switch {
+		case c.tier >= roomFileDecision:
+			if fact.Kind == FactDecision {
+				decisionsSkipped++
+			}
+			fmt.Fprintf(m.Out, "skipped %s: no question from its slug's words, the first %d words of its sentence or its subject with them puts it in the top %d of an eval question\n", fact.Slug, makeRoomQuestionWords, EvalTop)
+		case fact.Kind == FactDecision:
 			decisionsSkipped++
 			fmt.Fprintf(m.Out, "skipped %s: neither the first %d words of its sentence nor its subject with them put it in the top %d of an eval question\n", fact.Slug, makeRoomQuestionWords, EvalTop)
-			continue
+		default:
+			fmt.Fprintf(m.Out, "skipped %s: the first %d words of its sentence do not put it in the top %d of an eval question\n", fact.Slug, makeRoomQuestionWords, EvalTop)
 		}
-		fmt.Fprintf(m.Out, "skipped %s: the first %d words of its sentence do not put it in the top %d of an eval question\n", fact.Slug, makeRoomQuestionWords, EvalTop)
 	}
 	if m.Budget-after < bytes {
 		noun := "decisions"
@@ -1459,11 +1541,31 @@ func (m Memory) makeRoom(ctx context.Context, rig string, bytes int, extra *RigF
 	return nil
 }
 
+// The tiers of facts make-room takes, in the order it takes them.
+const (
+	// roomGotcha is a gotcha placed over MakeRoomKeepDays days ago.
+	roomGotcha = iota
+	// roomOldDecision is a decision placed over MakeRoomDecisionDays days ago.
+	roomOldDecision
+	// roomFileDecision is a decision whose subject is one file, placed over
+	// MakeRoomKeepDays days ago.
+	roomFileDecision
+	// roomLanded is a gotcha or decision of any age whose source is a story that
+	// is closed and landed: the one way a rig of a day or two has anything to take.
+	roomLanded
+)
+
+// roomCandidate is a fact make-room may take and the tier it falls in.
+type roomCandidate struct {
+	fact RigFact
+	tier int
+}
+
 // planRoom chooses the demotions that free bytes, without writing anything, and
 // returns them, the facts it passed over because no question of its own would
 // find them, how many decisions it held back for being too new, and the render
 // size once the demotions are made.
-func (m Memory) planRoom(ctx context.Context, rig, about string, all []RigFact, facts map[string]RigFact, extra *RigFact, bytes int) (moves []roomMove, skipped []RigFact, held, size int) {
+func (m Memory) planRoom(ctx context.Context, rig, about string, all []RigFact, facts map[string]RigFact, extra *RigFact, bytes int) (moves []roomMove, skipped []roomCandidate, held, size int) {
 	counts := map[string]int{}
 	if m.Queries != nil {
 		if records, err := m.Queries.ReadMemoryQueries(ctx); err == nil {
@@ -1478,48 +1580,39 @@ func (m Memory) planRoom(ctx context.Context, rig, about string, all []RigFact, 
 	}
 	queried := orderedFacts(known)
 
-	var candidates []RigFact
+	landed := m.landedStories(ctx, all)
+	var candidates []roomCandidate
 	for _, fact := range all {
-		switch {
-		case m.roomEligible(fact):
-			candidates = append(candidates, fact)
-		case m.roomDecisionTooNew(fact):
+		if tier, ok := m.roomTier(fact, landed); ok {
+			candidates = append(candidates, roomCandidate{fact, tier})
+		} else if m.roomDecisionTooNew(fact) {
 			held++
 		}
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
 		a, b := candidates[i], candidates[j]
 		switch {
-		case a.Kind != b.Kind:
-			return a.Kind == FactGotcha
-		case a.Since != b.Since:
-			return a.Since < b.Since
-		case counts[a.Subject] != counts[b.Subject]:
-			return counts[a.Subject] < counts[b.Subject]
+		case a.tier != b.tier:
+			return a.tier < b.tier
+		case a.fact.Since != b.fact.Since:
+			return a.fact.Since < b.fact.Since
+		case counts[a.fact.Subject] != counts[b.fact.Subject]:
+			return counts[a.fact.Subject] < counts[b.fact.Subject]
 		}
-		return a.Slug < b.Slug
+		return a.fact.Slug < b.fact.Slug
 	})
 
 	working := append([]RigFact(nil), all...)
 	size = len(RenderRigMemory(about, working))
-	for _, fact := range candidates {
+	for _, c := range candidates {
 		if m.Budget-size >= bytes {
 			break
 		}
-		question := firstWords(fact.Sentence, makeRoomQuestionWords)
-		q := EvalQuestion{Question: question}
-		if len(q.Terms()) == 0 || !q.finds(queried, fact.Slug) {
-			question = ""
-			if fact.Kind == FactDecision {
-				second := fact.Subject + " " + firstWords(fact.Sentence, makeRoomQuestionWords)
-				if (EvalQuestion{Question: second}).finds(queried, fact.Slug) {
-					question = second
-				}
-			}
-			if question == "" {
-				skipped = append(skipped, fact)
-				continue
-			}
+		fact := c.fact
+		question := roomQuestion(fact, queried, c.tier)
+		if question == "" {
+			skipped = append(skipped, c)
+			continue
 		}
 		for i := range working {
 			if working[i].Slug == fact.Slug {
@@ -1532,17 +1625,98 @@ func (m Memory) planRoom(ctx context.Context, rig, about string, all []RigFact, 
 	return moves, skipped, held, size
 }
 
-// roomEligible reports whether make-room may demote a fact: a current gotcha in
-// the boot render, or a decision there over MakeRoomDecisionDays days old, that
-// is not the Governor's own word and was not placed within MakeRoomKeepDays days.
-func (m Memory) roomEligible(fact RigFact) bool {
+// roomQuestion is the first question that puts fact in the top EvalTop results
+// over queried, or "". A gotcha or decision taken for its age is asked by the
+// first words of its sentence (a decision then by its subject with them); one
+// taken as a file's decision or for its landed story is asked by its slug's
+// words first, then by those.
+func roomQuestion(fact RigFact, queried []RigFact, tier int) string {
+	sentence := firstWords(fact.Sentence, makeRoomQuestionWords)
+	var tries []string
+	switch {
+	case tier >= roomFileDecision:
+		tries = []string{slugQuestion(fact.Slug), sentence, fact.Subject + " " + sentence}
+	case fact.Kind == FactDecision:
+		tries = []string{sentence, fact.Subject + " " + sentence}
+	default:
+		tries = []string{sentence}
+	}
+	for _, question := range tries {
+		q := EvalQuestion{Question: question}
+		if len(q.Terms()) > 0 && q.finds(queried, fact.Slug) {
+			return question
+		}
+	}
+	return ""
+}
+
+// slugQuestion is a slug's words as an eval question: each starts a word of the
+// slug, so every one of them matches the fact itself.
+func slugQuestion(slug string) string {
+	return strings.ReplaceAll(slug, "-", " ")
+}
+
+// roomTier is the tier a fact falls in, false when make-room may not take it.
+// landed says which story ids are closed and landed.
+func (m Memory) roomTier(fact RigFact, landed map[string]bool) (int, bool) {
 	if !m.roomBase(fact) {
+		return 0, false
+	}
+	switch {
+	case fact.Kind == FactGotcha && m.sinceBefore(fact, MakeRoomKeepDays):
+		return roomGotcha, true
+	case fact.Kind == FactDecision && m.sinceBefore(fact, MakeRoomDecisionDays):
+		return roomOldDecision, true
+	case fact.Kind == FactDecision && namesOneFile(fact.Subject) && m.sinceBefore(fact, MakeRoomKeepDays):
+		return roomFileDecision, true
+	case landed[fact.Source]:
+		return roomLanded, true
+	}
+	return 0, false
+}
+
+// namesOneFile reports whether a subject is one file: a path or a file name
+// (application/note.go, README.md), not a word such as 'general'.
+func namesOneFile(subject string) bool {
+	return subject != "general" && strings.ContainsAny(subject, "/.")
+}
+
+// StoryLanded reports whether a story is closed and landed: closed, and not
+// closed as superseded or as never released.
+func StoryLanded(d StoryDetail) bool {
+	if d.Status != StatusClosed {
 		return false
 	}
-	if fact.Kind == FactDecision {
-		return m.sinceBefore(fact, MakeRoomDecisionDays)
+	reason := strings.ToLower(strings.TrimSpace(d.CloseReason))
+	return !strings.HasPrefix(reason, "superseded") && !strings.Contains(reason, "never released")
+}
+
+// landedStories asks Landed which of the stories the boot facts cite are closed
+// and landed. A source that is not a story id (rig@sha, mayor:<date>) is not
+// asked about. nil, with a word on Warn, when it cannot be read.
+func (m Memory) landedStories(ctx context.Context, all []RigFact) map[string]bool {
+	if m.Landed == nil {
+		return nil
 	}
-	return fact.Kind == FactGotcha && m.sinceBefore(fact, MakeRoomKeepDays)
+	var ids []string
+	seen := map[string]bool{}
+	for _, fact := range all {
+		if m.roomBase(fact) && !seen[fact.Source] && !strings.ContainsAny(fact.Source, "@: ") {
+			seen[fact.Source] = true
+			ids = append(ids, fact.Source)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	landed, err := m.Landed(ctx, ids)
+	if err != nil {
+		if m.Warn != nil {
+			fmt.Fprintf(m.Warn, "WARN: could not read which stories landed, so make-room takes none for that: %v\n", err)
+		}
+		return nil
+	}
+	return landed
 }
 
 // roomDecisionTooNew reports whether a fact is a decision make-room would take

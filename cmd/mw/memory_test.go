@@ -141,3 +141,28 @@ func TestMemorySupersedeByRetiresTheFactAndAddsNoFact(t *testing.T) {
 		t.Errorf("a fact was added: %v", entries)
 	}
 }
+
+func TestTheHelpOfQueryAndDemoteSaysOneTermPerArgument(t *testing.T) {
+	memory := newMemoryCmd()
+	for _, name := range []string{"query", "demote"} {
+		sub, _, err := memory.Find([]string{name})
+		if err != nil || sub.Name() != name {
+			t.Fatalf("no %s command: %v", name, err)
+		}
+		if !strings.Contains(sub.Long, "One term per argument") {
+			t.Errorf("the help of %s lacks 'One term per argument':\n%s", name, sub.Long)
+		}
+	}
+}
+
+func TestDemoteHasAnAutoQuestionAndAddABootAndAQuestion(t *testing.T) {
+	memory := newMemoryCmd()
+	for name, flags := range map[string][]string{"demote": {"auto-question"}, "add": {"boot", "question"}} {
+		sub, _, _ := memory.Find([]string{name})
+		for _, flag := range flags {
+			if sub.Flags().Lookup(flag) == nil {
+				t.Errorf("%s has no --%s", name, flag)
+			}
+		}
+	}
+}

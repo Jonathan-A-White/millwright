@@ -1442,3 +1442,200 @@ func TestAConfiguredRigThatKeepsAFlatMemoryFileIsNotGivenAFolderBesideIt(t *test
 		t.Errorf("list of a flat-file rig: %v", err)
 	}
 }
+
+// aYoungRig is a rig of one day: every fact is of yesterday or today (the clock
+// says 2026-10-18), so the age rules of make-room take none of them. Two of its
+// facts cite a story that has landed, one a story still open. The budget is the
+// render's size.
+func aYoungRig() (*editableFiles, application.Memory, *bytes.Buffer) {
+	fact := func(subject, kind, since, source, sentence string) string {
+		return "---\nsubject: " + subject + "\nkind: " + kind + "\nstatus: current\nsource: " + source + "\nsince: " + since + "\n---\n\n" + sentence + "\n"
+	}
+	files := &editableFiles{files: map[string]string{
+		"zulu-socket-path.md": fact("zulu", "gotcha", "2026-10-17", "mw-10", "The zulu socket lives under the run directory of the host."),
+		"yankee-lease-ttl.md": fact("yankee", "decision", "2026-10-16", "mw-11", "The yankee lease is renewed by every heartbeat of the session."),
+		"xray-open-story.md":  fact("xray", "gotcha", "2026-10-17", "mw-12", "The xray probe is still being built by a running story."),
+		"whiskey-by-hand.md":  fact("whiskey", "gotcha", "2026-10-17", "mayor:2026-10-17", "The whiskey cache is emptied by hand before each restart."),
+	}}
+	var out bytes.Buffer
+	m := anEditableMemory(files, &recordingVault{}, &out)
+	m.Landed = func(_ context.Context, ids []string) (map[string]bool, error) {
+		landed := map[string]bool{}
+		for _, id := range ids {
+			landed[id] = id == "mw-10" || id == "mw-11"
+		}
+		return landed, nil
+	}
+	list, _ := application.LoadRigFacts(files.files)
+	m.Budget = len(application.RenderRigMemory("About.", list))
+	return files, m, &out
+}
+
+func TestMakeRoomOnAYoungRigListsTheFactsOfLandedStoriesOldestFirstEachWithAQuestionFromItsSlug(t *testing.T) {
+	files, m, out := aYoungRig()
+	want := roomLine("zulu", "The zulu socket lives under the run directory of the host.") +
+		roomLine("yankee", "The yankee lease is renewed by every heartbeat of the session.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want, DryRun: true}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	got := out.String()
+	yankee, zulu := strings.Index(got, "would demote yankee-lease-ttl  (Q: yankee lease ttl)"), strings.Index(got, "would demote zulu-socket-path  (Q: zulu socket path)")
+	if yankee < 0 || zulu < 0 || yankee > zulu {
+		t.Errorf("want both landed facts, the older yankee first:\n%s", got)
+	}
+	if strings.Contains(got, "xray") || strings.Contains(got, "whiskey") {
+		t.Errorf("a fact of an open story or of no story was listed:\n%s", got)
+	}
+	if len(files.wrote) != 0 {
+		t.Errorf("a dry run wrote %v", files.wrote)
+	}
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !demoted(files, "zulu-socket-path") || !demoted(files, "yankee-lease-ttl") || demoted(files, "xray-open-story") {
+		t.Errorf("the wrong facts were demoted:\n%s", out)
+	}
+	if !strings.Contains(files.eval, "Q: yankee lease ttl\nexpect: yankee-lease-ttl") {
+		t.Errorf("eval.md lacks the slug question:\n%s", files.eval)
+	}
+	var evalOut bytes.Buffer
+	m.Out = &evalOut
+	if err := m.Eval(context.Background(), "kiln"); err != nil {
+		t.Fatalf("eval fails after make-room: %v\n%s", err, evalOut.String())
+	}
+}
+
+func TestMakeRoomOnAYoungRigWithNoLandingsReaderTakesNothingYoung(t *testing.T) {
+	files, m, out := aYoungRig()
+	m.Landed = nil
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: 10}); err == nil {
+		t.Fatalf("want a refusal\n%s", out)
+	}
+	if len(files.wrote) != 0 {
+		t.Errorf("wrote %v", files.wrote)
+	}
+}
+
+func TestMakeRoomTakesADecisionOfOneFileYoungerThan14DaysOldestFirst(t *testing.T) {
+	files, m, out := aDecisionRig()
+	files.files["file-new.md"] = roomFact("application/mainred.go", "decision", "2026-10-10", "The main red run keeps its log beside the run record of the story.")
+	files.files["file-newer.md"] = roomFact("application/note.go", "decision", "2026-10-12", "The note to a builder is typed into its live session by the runner.")
+	files.files["file-today.md"] = roomFact("application/check.go", "decision", "2026-10-17", "The check deadline is set by its wait flag alone for a whole check.")
+	files.files["general-new.md"] = roomFact("general", "decision", "2026-10-09", "The general rule of the rig is to keep every commit small and plain.")
+	list, _ := application.LoadRigFacts(files.files)
+	m.Budget = len(application.RenderRigMemory("About.", list))
+	want := roomLine("application/mainred.go", "The main red run keeps its log beside the run record of the story.") +
+		roomLine("application/note.go", "The note to a builder is typed into its live session by the runner.")
+	// fifteen (over 14 days, any subject) goes first, then the file decisions oldest first.
+	want += roomLine("fifteen", "The fifteen daemon logs every claim into its own journal file.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for slug, isDemoted := range map[string]bool{
+		"fifteen": true, "file-new": true, "file-newer": true,
+		"file-today": false, "general-new": false, "thirteen": false, "new": false,
+	} {
+		if demoted(files, slug) != isDemoted {
+			t.Errorf("%s demoted = %v, want %v\n%s", slug, demoted(files, slug), isDemoted, out)
+		}
+	}
+}
+
+func TestDemoteAutoQuestionBuildsAQuestionFromTheSlugAndChecksItPasses(t *testing.T) {
+	files, vault := demotable(), &recordingVault{}
+	var out bytes.Buffer
+	m := anEditableMemory(files, vault, &out)
+	if err := m.DemoteAuto(context.Background(), "kiln", "gate"); err != nil {
+		t.Fatal(err)
+	}
+	if want := "Q: where is the tmux socket\nexpect: other\n\nQ: gate\nexpect: gate\n"; files.eval != want {
+		t.Errorf("eval.md:\n%q\nwant\n%q", files.eval, want)
+	}
+	if !demoted(files, "gate") {
+		t.Errorf("the fact is not demoted")
+	}
+}
+
+func TestDemoteAutoQuestionRefusesAndChangesNothingWhenNoQuestionPutsTheFactInTheTop3(t *testing.T) {
+	files := &editableFiles{files: map[string]string{
+		"gate.md": queryFact("gate", "The gate runs make test then make lint."),
+		"g1.md":   queryFact("gate", "The gate runs make test then make lint, first."),
+		"g2.md":   queryFact("gate", "The gate runs make test then make lint, second."),
+		"g3.md":   queryFact("gate", "The gate runs make test then make lint, third."),
+	}}
+	vault := &recordingVault{}
+	err := anEditableMemory(files, vault, &bytes.Buffer{}).DemoteAuto(context.Background(), "kiln", "gate")
+	if err == nil || !strings.Contains(err.Error(), "nothing was changed") {
+		t.Fatalf("want a refusal, got %v", err)
+	}
+	if len(files.wrote) != 0 || len(vault.messages) != 0 {
+		t.Errorf("wrote %v, committed %v", files.wrote, vault.messages)
+	}
+}
+
+func TestAddBootNoWithAQuestionWritesTheFactDemotedAndTheQuestionToTheEval(t *testing.T) {
+	files, vault := demotable(), &recordingVault{}
+	var out bytes.Buffer
+	err := anEditableMemory(files, vault, &out).Add(context.Background(), application.MemoryAdd{
+		Rig: "kiln", Subject: "lint", Source: "mw-5", Kind: application.FactDecision, Slug: "lint-vet",
+		Sentence: "The lint target is go vet over every package.", NoBoot: true, Question: "lint vet",
+	})
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !demoted(files, "lint-vet") || !strings.Contains(files.files["lint-vet.md"], "status: current") {
+		t.Errorf("the fact is not written demoted:\n%s", files.files["lint-vet.md"])
+	}
+	if want := "Q: where is the tmux socket\nexpect: other\n\nQ: lint vet\nexpect: lint-vet\n"; files.eval != want {
+		t.Errorf("eval.md:\n%q\nwant\n%q", files.eval, want)
+	}
+	if len(vault.paths) != 1 || len(vault.paths[0]) != 2 {
+		t.Errorf("want one commit of the eval and the fact, got %v", vault.paths)
+	}
+}
+
+func TestAddBootNoRefusesWithoutAQuestionOrWithOneThatDoesNotFindTheFact(t *testing.T) {
+	for name, question := range map[string]string{"no question": "", "a question that misses": "unrelated words"} {
+		files, vault := demotable(), &recordingVault{}
+		err := anEditableMemory(files, vault, &bytes.Buffer{}).Add(context.Background(), application.MemoryAdd{
+			Rig: "kiln", Subject: "lint", Source: "mw-5", Kind: application.FactDecision, Slug: "lint-vet",
+			Sentence: "The lint target is go vet over every package.", NoBoot: true, Question: question,
+		})
+		if err == nil {
+			t.Errorf("%s: want a refusal", name)
+		}
+		if _, ok := files.files["lint-vet.md"]; ok || len(files.wrote) != 0 || len(vault.messages) != 0 {
+			t.Errorf("%s: wrote %v, committed %v", name, files.wrote, vault.messages)
+		}
+	}
+}
+
+func TestAQuestionWithoutBootNoIsRefused(t *testing.T) {
+	files := demotable()
+	err := anEditableMemory(files, &recordingVault{}, &bytes.Buffer{}).Add(context.Background(), application.MemoryAdd{
+		Rig: "kiln", Subject: "lint", Source: "mw-5", Kind: application.FactDecision, Slug: "lint-vet",
+		Sentence: "The lint target is go vet over every package.", Question: "lint vet",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--boot no") {
+		t.Errorf("got %v", err)
+	}
+}
+
+func TestAStoryLandedIsClosedAndNotSupersededOrNeverReleased(t *testing.T) {
+	for _, c := range []struct {
+		status, reason string
+		want           bool
+	}{
+		{application.StatusClosed, "Closed", true},
+		{application.StatusClosed, "", true},
+		{application.StatusClosed, "Superseded by mw-9", false},
+		{application.StatusClosed, "never released", false},
+		{"open", "", false},
+		{"in_progress", "", false},
+	} {
+		got := application.StoryLanded(application.StoryDetail{Status: c.status, CloseReason: c.reason})
+		if got != c.want {
+			t.Errorf("%s %q: got %v, want %v", c.status, c.reason, got, c.want)
+		}
+	}
+}
