@@ -124,3 +124,156 @@ func TestACheckWithNoPartRunsTheTestsOnceTheHostCalmsWithinItsWait(t *testing.T)
 		t.Errorf("expected two polls of 30s before the host calmed, it waited %s", *waited)
 	}
 }
+
+// toolParts is a rig's gate in two parts that only run tools in the worktree, as the
+// lampas gate's parts do, so that neither takes the merge slot; it notes which ran.
+type toolParts struct{ ran []string }
+
+func (p *toolParts) Parts(string) []application.GatePart {
+	return []application.GatePart{{Name: "install", Command: "npm ci"}, {Name: "vitest 1/6", Command: "npx vitest run --shard 1/6"}}
+}
+
+func (p *toolParts) RunLine(_ context.Context, _, _, command string) (application.Checked, error) {
+	p.ran = append(p.ran, command)
+	return application.Checked{Command: command, Passed: true}, nil
+}
+
+// partOnABusyHost is mw check --part 2 of a rig whose gate is split, on a host
+// whose load reads as readings (the last again for every read after), with a wait
+// for a calm host that is counted and not slept (mw-gq6.987). A foreground part
+// keeps its place, as the command line gives it.
+func partOnABusyHost(t *testing.T, readings []application.LoadReading, wait time.Duration) (check func() (application.CheckReport, error), parts *toolParts, said *strings.Builder, waited *time.Duration, records *mapRecords) {
+	t.Helper()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	rigDir := filepath.Join(t.TempDir(), "rigs", "millwright")
+	if err := os.MkdirAll(rigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parts, records = &toolParts{}, &mapRecords{}
+	said, waited = &strings.Builder{}, new(time.Duration)
+	check = func() (application.CheckReport, error) {
+		return application.Check{
+			Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: &scriptedChecks{passes: []bool{true}},
+			Slot: aSlot{}, Parts: parts, Records: records, Part: 2, PartSlotWait: wait, KeepPlace: application.CheckKeepPlace,
+			Load:     &apptest.FakeHostLoad{Readings: readings},
+			LoadPoll: 30 * time.Second,
+			LoadWait: func(_ context.Context, d time.Duration) error { *waited += d; return nil },
+			Host:     "laptop", Remote: "origin",
+			Rigs: map[string]string{"millwright": rigDir},
+			Out:  said,
+		}.Run(context.Background(), "mw-x.1")
+	}
+	return check, parts, said, waited, records
+}
+
+func TestAPartOnAHostThatStaysBusyWaitsForItToCalmThenStartsNothingAndEndsInOneLine(t *testing.T) {
+	check, parts, said, waited, records := partOnABusyHost(t, []application.LoadReading{busy()}, 3*time.Minute)
+
+	_, err := check()
+
+	if err == nil {
+		t.Fatal("expected the part not to pass while the host stayed busy")
+	}
+	if len(parts.ran) != 0 {
+		t.Errorf("expected the part not to start on a busy host, it ran %v", parts.ran)
+	}
+	if *waited != 3*time.Minute {
+		t.Errorf("expected a wait of the whole 3m, it waited %s", *waited)
+	}
+	line := err.Error()
+	for _, want := range []string{"load 39.0 of 20 cores", "since ", "`mw check mw-x.1 --part 2`", "part 2 of 2 (vitest 1/6)"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("expected the line to say %q, got %q", want, line)
+		}
+	}
+	if strings.Contains(line, "\n") {
+		t.Errorf("expected one line, got %q", line)
+	}
+	if n := strings.Count(said.String(), "still waiting for laptop to calm"); n != 3 {
+		t.Errorf("expected a notice every minute of a 3m wait (3 of them), got %d in %q", n, said.String())
+	}
+	if _, rerr := records.ReadRunFile(context.Background(), "mw-x.1", application.CheckPartFileName(1, 2)); rerr == nil {
+		t.Error("expected a part that did not start to leave no record of a run")
+	}
+}
+
+func TestAPartRunsOnceTheHostCalmsWithinItsWaitAndNotBefore(t *testing.T) {
+	check, parts, _, waited, _ := partOnABusyHost(t, []application.LoadReading{farOver(), busy(), calm()}, 5*time.Minute)
+
+	_, err := check()
+
+	if err != nil {
+		t.Fatalf("expected the part to pass once the host calmed, got %v", err)
+	}
+	if *waited != time.Minute {
+		t.Errorf("expected two polls of 30s before the host calmed, it waited %s", *waited)
+	}
+	if len(parts.ran) != 1 || parts.ran[0] != "npx vitest run --shard 1/6" {
+		t.Errorf("expected part 2 to run once, ran %v", parts.ran)
+	}
+}
+
+func TestAPartOnACalmHostRunsAtOnceWithNoWait(t *testing.T) {
+	check, parts, _, waited, _ := partOnABusyHost(t, []application.LoadReading{calm()}, 5*time.Minute)
+
+	if _, err := check(); err != nil {
+		t.Fatalf("expected the part to pass, got %v", err)
+	}
+	if *waited != 0 || len(parts.ran) != 1 {
+		t.Errorf("expected no wait and one run, waited %s and ran %v", *waited, parts.ran)
+	}
+}
+
+func TestAPartHandedBackOnTheHostsLoadTwiceInOneAttemptCountsTheSecondOnce(t *testing.T) {
+	check, _, _, _, _ := partOnABusyHost(t, []application.LoadReading{busy()}, time.Minute)
+
+	_, _ = check()
+	_, err := check()
+
+	if err == nil {
+		t.Fatal("expected the second try to be handed back too")
+	}
+	for _, want := range []string{"counted once for this attempt", "not a failure", "`mw check mw-x.1 --part 2`"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the repeat to say %q, got %q", want, err)
+		}
+	}
+}
+
+func TestAPartThatTheCalmWaitLeftNoRoomForInItsCallIsNotStartedAndSaysSo(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	rigDir := filepath.Join(t.TempDir(), "rigs", "millwright")
+	if err := os.MkdirAll(rigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	parts := &toolParts{}
+	_, err := application.Check{
+		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: &scriptedChecks{passes: []bool{true}},
+		Parts: parts, Records: &mapRecords{}, Part: 2, PartSlotWait: 9 * time.Minute, KeepPlace: application.CheckKeepPlace,
+		CallBudget: application.CheckCallBudget, CallNow: func() time.Time { return now },
+		PartExpected: func(context.Context, string, int) time.Duration { return 4 * time.Minute },
+		Load:         &apptest.FakeHostLoad{Readings: []application.LoadReading{busy(), busy(), calm()}},
+		LoadPoll:     3 * time.Minute,
+		LoadWait:     func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil },
+		Host:         "laptop", Remote: "origin",
+		Rigs: map[string]string{"millwright": rigDir},
+		Out:  &strings.Builder{},
+	}.Run(context.Background(), "mw-x.1")
+
+	if err == nil {
+		t.Fatal("expected the part not to start with 3m left of its call and 4m needed")
+	}
+	for _, want := range []string{"did not start", "needs about 4m", "to calm", "`mw check mw-x.1 --part 2`"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the line to say %q, got %q", want, err)
+		}
+	}
+	if len(parts.ran) != 0 {
+		t.Errorf("expected nothing to run, ran %v", parts.ran)
+	}
+}

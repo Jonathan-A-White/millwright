@@ -95,3 +95,55 @@ func (k Check) calmKept(still string) string {
 	k.waiting.set(line)
 	return line
 }
+
+// CheckPartCalmFileName is the name of the record of the waits of part n of a
+// story's attempt for a calm host, in the story's run directory, one file for the
+// part and the attempt (mw-gq6.987).
+func CheckPartCalmFileName(attempt, n int) string {
+	if attempt < 1 {
+		attempt = 1
+	}
+	return fmt.Sprintf("check-%d-part-%d-calm.slot", attempt, n)
+}
+
+// calmForPart is the wait mw check --part N makes for a calm host before the part
+// starts, as a whole check's is (mw-gq6.987): Next.calmed with its hand-back set,
+// no longer than what is left of the check's one deadline (left), saying every
+// minute that it is waiting. A host busy at the end of it hands the part back in
+// one line naming the load and the command to run again, and the part is not
+// started. A part that finds the host calm, or whose load cannot be read, waits
+// for nothing.
+func (k Check) calmForPart(ctx context.Context, c *closeOut, attempt, n int, label string, left func() time.Duration) error {
+	if k.Load == nil {
+		return nil
+	}
+	_, _, err := Next{
+		Load:          k.Load,
+		LoadPoll:      k.LoadPoll,
+		LoadBound:     k.partSlotWait(),
+		LoadBoundLeft: left,
+		LoadWait:      k.LoadWait,
+		CalmHandBack: func(ctx context.Context, reading LoadReading, since time.Time, waited time.Duration, _ bool) error {
+			return k.calmPartRefusal(ctx, c, attempt, n, label, reading, since, waited)
+		},
+		Host: k.Host,
+		Out:  k.Out,
+	}.calmed(ctx, &NextReport{}, c, label, true, false)
+	return err
+}
+
+// calmPartRefusal is calmRefusal for a part: the load, since when, and the part
+// to run again. A part handed back on the load again in the same attempt is
+// counted as the one wait it is.
+func (k Check) calmPartRefusal(ctx context.Context, c *closeOut, attempt, n int, label string, reading LoadReading, since time.Time, waited time.Duration) error {
+	load := fmt.Sprintf("load %.1f of %d cores", reading.Load, reading.Cores)
+	again := fmt.Sprintf("run the same part again with `mw check %s --part %d`", c.id, n)
+	at := since.UTC().Format("15:04:05Z")
+	earlier := k.noteWait(ctx, c.id, CheckPartCalmFileName(attempt, n), k.Host+" at "+load, since)
+	if earlier != "" {
+		return fmt.Errorf("%s did not start: after %s %s is still at %s, since %s, and nothing was run; it was busy when this part was tried at %s as well, which is counted once for this attempt and is not a failure of the part: %s, and if the host is busy again, comment on the story naming the load and hand back",
+			label, gateWaited(waited), k.Host, load, at, earlier, again)
+	}
+	return fmt.Errorf("%s did not start: after %s %s is still at %s, since %s, and nothing was run; that is the host's load and not a failure of the part: %s",
+		label, gateWaited(waited), k.Host, load, at, again)
+}
