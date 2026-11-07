@@ -79,8 +79,9 @@ func TestDispatchStopsWhenNoRigIsCheckedOutHere(t *testing.T) {
 	}
 }
 
-func TestDispatchStopsOnACapThatWouldStartNothing(t *testing.T) {
-	mwConfig(t, "vault = \"/nowhere/vault\"\nhost = \"vps\"\ncap = 0\n\n[rigs]\nmillwright = \"/nowhere/millwright\"\n")
+// A cap of 0 is a drained host, which dispatch runs; only a cap under 0 stops it.
+func TestDispatchStopsOnACapUnderZero(t *testing.T) {
+	mwConfig(t, "vault = \"/nowhere/vault\"\nhost = \"vps\"\ncap = -1\n\n[rigs]\nmillwright = \"/nowhere/millwright\"\n")
 
 	if err := dispatchFails(t, "--dry-run"); !strings.Contains(err.Error(), "cap") {
 		t.Fatalf("expected the reason to be the cap, got %q", err)
