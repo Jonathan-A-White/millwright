@@ -13,8 +13,16 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
+
+// TestMain keeps the host's git config out of every git this binary runs
+// (mw-gq6.1025).
+func TestMain(m *testing.M) {
+	gittest.Isolate()
+	os.Exit(m.Run())
+}
 
 // These tests drive real git against throwaway clones in a temp directory:
 // a bare repository standing in for the remote both hosts share, and two
@@ -60,7 +68,7 @@ func identify(t *testing.T, dir string) {
 // succeed.
 func run(t *testing.T, dir, program string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command(program, args...)
+	cmd := gittest.Command(program, args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {

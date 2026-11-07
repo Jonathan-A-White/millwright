@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 )
 
 // remoteCacheFixture makes a bare repo at the path a Dolt git-remote-cache
@@ -424,7 +425,7 @@ func looseRemoteCacheFixture(t *testing.T, vault, store string, blobs, bytesPerB
 		}
 		fmt.Fprintf(&tree, "100644 blob %s\tfile%d\n", strings.TrimSpace(string(sha)), i)
 	}
-	mktree := exec.CommandContext(ctx, "git", "mktree")
+	mktree := gittest.CommandContext(ctx, "git", "mktree")
 	mktree.Dir = repo
 	mktree.Stdin = strings.NewReader(tree.String())
 	treeSHA, err := mktree.Output()

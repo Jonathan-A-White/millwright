@@ -35,6 +35,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 )
 
 // templateVault is an empty beads database, made once for the whole binary and
@@ -49,6 +50,7 @@ func TestMain(m *testing.M) {
 	// A session that carries bd's database and Dolt server settings must not
 	// point a test at its own vault or server (see clearHostBeadsEnv).
 	clearHostBeadsEnv()
+	gittest.Isolate()
 
 	root, err := os.MkdirTemp("", "mw-beads-template-")
 	if err != nil {
@@ -94,7 +96,7 @@ func TestMain(m *testing.M) {
 				{beads.Program, "init", "-p", "t", "--non-interactive",
 					"--role", "maintainer", "--skip-agents", "--skip-hooks", "-q"},
 			} {
-				cmd := exec.Command(args[0], args[1:]...)
+				cmd := gittest.Command(args[0], args[1:]...)
 				cmd.Dir = root
 				if out, err := cmd.CombinedOutput(); err != nil {
 					fmt.Fprintf(os.Stderr, "%s: %v\n%s", strings.Join(args, " "), err, out)

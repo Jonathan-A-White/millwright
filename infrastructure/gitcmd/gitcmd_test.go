@@ -11,7 +11,15 @@ import (
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/infrastructure/gitcmd"
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 )
+
+// TestMain keeps the host's git config out of every git this binary runs
+// (mw-gq6.1025).
+func TestMain(m *testing.M) {
+	gittest.Isolate()
+	os.Exit(m.Run())
+}
 
 // A stand-in git writes what it was given to a file, so the test can check the
 // command without a real stalled connection.

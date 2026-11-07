@@ -5,12 +5,15 @@ package beads_test
 import (
 	"os"
 	"testing"
+
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 )
 
 // TestMain clears the shell's bd settings, as the tagged one does (see
 // clearHostBeadsEnv), so the stand-in cases pass in any shell.
 func TestMain(m *testing.M) {
 	clearHostBeadsEnv()
+	gittest.Isolate()
 	os.Exit(m.Run())
 }
 

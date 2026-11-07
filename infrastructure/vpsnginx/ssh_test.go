@@ -3,12 +3,20 @@ package vpsnginx_test
 import (
 	"context"
 	"errors"
-	"os/exec"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vpsnginx"
 )
+
+// TestMain keeps the host's git config out of every git this binary runs
+// (mw-gq6.1025).
+func TestMain(m *testing.M) {
+	gittest.Isolate()
+	os.Exit(m.Run())
+}
 
 func TestTheSiteFileIsReadWithOneBatchModeCat(t *testing.T) {
 	var asked []string
@@ -47,7 +55,7 @@ func TestTheRevisionIsReadOutOfMwVersion(t *testing.T) {
 func TestTheBinaryLacksACommitItsRevisionDoesNotHold(t *testing.T) {
 	git := func(args ...string) string {
 		t.Helper()
-		out, err := exec.Command("git", args...).CombinedOutput()
+		out, err := gittest.Command("git", args...).CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -65,7 +73,7 @@ func TestTheBinaryLacksACommitItsRevisionDoesNotHold(t *testing.T) {
 	says := func(revision string) {
 		vps.Run = func(_ context.Context, argv []string) ([]byte, error) {
 			if argv[0] == "git" {
-				return exec.Command(argv[0], argv[1:]...).CombinedOutput()
+				return gittest.Command(argv[0], argv[1:]...).CombinedOutput()
 			}
 			return []byte("mw 0.1.0-dev (" + revision + ")\n"), nil
 		}
