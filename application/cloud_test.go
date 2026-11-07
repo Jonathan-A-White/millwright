@@ -745,3 +745,113 @@ func TestACloudBoxIsNeverAskedForWorktreesWhenItDidNotComeUp(t *testing.T) {
 		t.Errorf("expected a box still being made destroyed without asking it anything, calls %v", r.provider.Calls())
 	}
 }
+
+// atTheCap is a box whose month is spent: the cloud check finds one more hour
+// of it past the cap.
+func atTheCap(trees ...application.CloudKeptWorktree) *boxWorkRig {
+	r := aBoxWithWork(trees...)
+	r.book.State.Boxes[0].IdleSince = time.Time{}
+	r.book.State.Hours = 600
+	r.check.Notice = &apptest.FakeCloudNotice{}
+	return r
+}
+
+func TestAtTheMonthsCapABoxWhoseSalvageFailsIsDestroyedAfterOneTryAndTheMoveSaysWhatWasNotSaved(t *testing.T) {
+	r := atTheCap(aheadTree)
+	r.box.bundleErr = errors.New("disk full")
+	if _, err := r.check.Run(context.Background()); err != nil {
+		t.Fatalf("expected the cap to win without a failed check, got %v", err)
+	}
+	if n := strings.Count(strings.Join(r.provider.Calls(), "\n"), "down cloud1"); n != 1 {
+		t.Errorf("expected Provider.Down once after the one salvage try, calls %v", r.provider.Calls())
+	}
+	if len(r.book.State.Boxes) != 0 {
+		t.Errorf("expected the box out of the book, got %+v", r.book.State.Boxes)
+	}
+	got := r.moves(t)
+	for _, want := range []string{"cloud1", "mw-5r3p30.754", "mw/mw-5r3p30.754", "abc123", "not saved", "disk full"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected the moves to say %q, got:\n%s", want, got)
+		}
+	}
+	cards := r.check.Notice.(*apptest.FakeCloudNotice).Cards
+	if len(cards) != 1 || !strings.Contains(cards[0], "cloud1") || !strings.Contains(cards[0], "mw-5r3p30.754") {
+		t.Errorf("expected one alert naming the box and the story, got %v", cards)
+	}
+}
+
+func TestAtTheMonthsCapABoxThatCannotBeReachedIsDestroyedAnyway(t *testing.T) {
+	r := atTheCap(aheadTree)
+	r.box.listErr = errors.New("ssh: Connection timed out")
+	if _, err := r.check.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(r.provider.Calls(), "down cloud1") {
+		t.Errorf("expected the box destroyed at the cap, calls %v", r.provider.Calls())
+	}
+	if got := r.moves(t); !strings.Contains(got, "Connection timed out") || !strings.Contains(got, "not saved") {
+		t.Errorf("expected a move saying why nothing was saved, got:\n%s", got)
+	}
+}
+
+func TestAtTheMonthsCapABoxWhoseWorkIsSavedIsDestroyedWithNoAlert(t *testing.T) {
+	r := atTheCap(aheadTree)
+	if _, err := r.check.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if cards := r.check.Notice.(*apptest.FakeCloudNotice).Cards; len(cards) != 0 {
+		t.Errorf("expected no alert when everything was saved, got %v", cards)
+	}
+}
+
+func TestBelowTheCapARefusedTeardownAlertsTheGovernorOnce(t *testing.T) {
+	r := aBoxWithWork(aheadTree)
+	notice := &apptest.FakeCloudNotice{}
+	r.check.Notice = notice
+	r.box.bundleErr = errors.New("disk full")
+	now := r.check.Now()
+	for i := range 3 {
+		r.check.Now = func() time.Time { return now.Add(time.Duration(i) * time.Minute) }
+		if _, err := r.check.Run(context.Background()); err == nil {
+			t.Fatal("expected each check to fail")
+		}
+		if i == 0 {
+			if len(notice.Cards) != 1 {
+				t.Fatalf("expected one alert at the first refusal, got %v", notice.Cards)
+			}
+			for _, want := range []string{"cloud1", "mw-5r3p30.754", "disk full", "0.13", "mw cloud down --force cloud1"} {
+				if !strings.Contains(notice.Cards[0], want) {
+					t.Errorf("expected the alert to say %q, got %q", want, notice.Cards[0])
+				}
+			}
+		}
+	}
+	if len(notice.Cards) != 1 {
+		t.Errorf("expected the later refused checks to send none, got %v", notice.Cards)
+	}
+}
+
+func TestMwCloudDownForceDestroysWithoutSalvageAndSaysTheWorkWasNotSaved(t *testing.T) {
+	r := aBoxWithWork(aheadTree)
+	r.box.bundleErr = errors.New("disk full")
+	r.book.State.Boxes[0].Refused = ": mw-5r3p30.754: disk full"
+	text, err := r.check.DownForce(context.Background(), "cloud1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(r.provider.Calls(), "down cloud1") {
+		t.Errorf("expected Provider.Down, calls %v", r.provider.Calls())
+	}
+	if len(r.box.bundled) != 0 || r.box.verified != nil {
+		t.Errorf("expected no salvage, bundled %v", r.box.bundled)
+	}
+	if !strings.Contains(text, "not saved") || !strings.Contains(text, "--force") {
+		t.Errorf("expected the output to say the work was not saved, got %q", text)
+	}
+	if got := r.moves(t); !strings.Contains(got, "not saved") {
+		t.Errorf("expected the move to say so, got:\n%s", got)
+	}
+	if len(r.book.State.Boxes) != 0 {
+		t.Errorf("expected the box out of the book, got %+v", r.book.State.Boxes)
+	}
+}

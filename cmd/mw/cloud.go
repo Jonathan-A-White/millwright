@@ -72,7 +72,8 @@ func newCloudCmd() *cobra.Command {
 // newCloudDownCmd builds `mw cloud down <box>`: a box destroyed by hand, and
 // its stories taken off it.
 func newCloudDownCmd() *cobra.Command {
-	return &cobra.Command{
+	var force bool
+	cmd := &cobra.Command{
 		Use:   "down <box>",
 		Short: "Destroy a cloud box and re-path its open and deferred stories to host=auto",
 		Long: "down destroys the box (cloud1, cloud2, ...) as the cloud check does an idle one, and takes it\n" +
@@ -81,7 +82,9 @@ func newCloudDownCmd() *cobra.Command {
 			"and so is a claimed one with a session, running or ended. A claim queued for its rig's batch\n" +
 			"has no session: it is given back and set to host=auto, keeping its queued state so that\n" +
 			"mw land takes it. It says which stories it moved. The cloud check does the same for a\n" +
-			"box it destroys itself. It runs on the home only.",
+			"box it destroys itself. It runs on the home only.\n\n" +
+			"A box's unpushed work is saved into the vault first, and a box whose work cannot be saved stays\n" +
+			"up and billed. --force destroys it without saving anything, and says the work was not saved.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			check, ok, err := cloudCheck(cmd.Context(), cmd.ErrOrStderr())
@@ -91,23 +94,28 @@ func newCloudDownCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("no [cloud] table in the config, or this host is not home: no box is destroyed")
 			}
-			report, err := downCloudBox(cmd.Context(), check, args[0])
+			report, err := downCloudBox(cmd.Context(), check, args[0], force)
 			if report != "" {
 				fmt.Fprintln(cmd.OutOrStdout(), report)
 			}
 			return err
 		},
 	}
+	cmd.Flags().BoolVar(&force, "force", false, "destroy the box without saving its kept worktrees: the work not yet in the vault is lost")
+	return cmd
 }
 
 // downCloudBox destroys one box under the cloud lock, so that it does not run
-// beside a check.
-func downCloudBox(ctx context.Context, check application.CloudCheck, name string) (string, error) {
+// beside a check. force destroys it without the salvage of its work.
+func downCloudBox(ctx context.Context, check application.CloudCheck, name string, force bool) (string, error) {
 	release, err := waitForCloudLock(ctx)
 	if err != nil {
 		return "", err
 	}
 	defer release()
+	if force {
+		return check.DownForce(ctx, name)
+	}
 	return check.Down(ctx, name)
 }
 

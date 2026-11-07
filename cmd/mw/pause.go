@@ -237,5 +237,5 @@ func (c cloudOfPause) Down(ctx context.Context, box string) (string, error) {
 	if !c.ok {
 		return "", fmt.Errorf("no [cloud] table in the config, or its check could not be made: no box is destroyed")
 	}
-	return downCloudBox(ctx, c.check, box)
+	return downCloudBox(ctx, c.check, box, false)
 }

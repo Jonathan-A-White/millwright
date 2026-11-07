@@ -248,6 +248,9 @@ type CloudBox struct {
 	// a refusal is a move once, not at every check.
 	Saved   []string `json:"saved,omitempty"`
 	Refused string   `json:"refused,omitempty"`
+	// Alerted is that the Governor was told of this spell of refusals, so that
+	// the checks after it do not tell him again; a saved box clears it.
+	Alerted bool `json:"alerted,omitempty"`
 }
 
 // CloudPaceFive is the OnCalendar of a dispatch timer at the pace a box needs:
@@ -419,7 +422,9 @@ func (p CloudPlan) boxCap() int {
 //   - gives up a box begun the plan's MakeStale ago and not yet up (the process
 //     making it died) and destroys it;
 //   - destroys every box up when one more hour of them would pass the
-//     month's cap;
+//     month's cap, whether or not its work could be saved: the cap wins, the
+//     salvage is tried once, and what it could not save is a move and an
+//     alert to the Governor;
 //   - destroys each box idle for Plan.Idle;
 //   - makes one box when more stories wait for any host than there are
 //     sessions free across the hosts and the boxes, while there are fewer
@@ -531,7 +536,7 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 	if n := len(p.state.Boxes); n > 0 && p.spent()+c.Plan.HourlyUSD*float64(n) > c.Plan.MonthlyCapUSD {
 		p.capReached(ctx, "destroying every box")
 		for _, box := range append([]CloudBox(nil), p.state.Boxes...) {
-			if !box.Making && !p.down(ctx, box.Name, "the month's cap") {
+			if !box.Making && !p.down(ctx, box.Name, cloudCapWhy) {
 				break
 			}
 		}
@@ -563,6 +568,18 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 // not a cloud box is refused, so that no desktop's stories are re-pathed. A
 // box the book does not hold is not an error, its stories are still re-pathed.
 func (c CloudCheck) Down(ctx context.Context, name string) (string, error) {
+	return c.down(ctx, name, false)
+}
+
+// DownForce is `mw cloud down --force <box>`: Down without the salvage. The
+// box's kept worktrees are not looked at or saved, and the output and the
+// move say the work was not saved. It ends a box whose teardown the salvage
+// keeps refusing (mw-gq6.1043).
+func (c CloudCheck) DownForce(ctx context.Context, name string) (string, error) {
+	return c.down(ctx, name, true)
+}
+
+func (c CloudCheck) down(ctx context.Context, name string, force bool) (string, error) {
 	if c.Provider == nil || c.Book == nil {
 		return "", fmt.Errorf("mw cloud down needs a provider and the book")
 	}
@@ -576,9 +593,13 @@ func (c CloudCheck) Down(ctx context.Context, name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("reading the cloud's book: %w", err)
 	}
-	p := cloudPass{check: c, now: c.now(), state: state}
+	p := cloudPass{check: c, now: c.now(), state: state, force: force}
 	p.roll()
-	ok := p.down(ctx, name, "mw cloud down")
+	why := "mw cloud down"
+	if force {
+		why = cloudForceWhy
+	}
+	ok := p.down(ctx, name, why)
 	if p.dirty != "" {
 		p.keep(ctx, p.dirty)
 	}
@@ -605,6 +626,13 @@ func (c CloudCheck) say(format string, args ...any) {
 	}
 }
 
+// cloudCapWhy is why down is told when the month's cap destroys a box, and
+// cloudForceWhy when mw cloud down --force does.
+const (
+	cloudCapWhy   = "the month's cap"
+	cloudForceWhy = "mw cloud down --force: its work was not saved"
+)
+
 // cloudPass is one check's working state.
 type cloudPass struct {
 	check  CloudCheck
@@ -615,6 +643,8 @@ type cloudPass struct {
 	dirty  string
 	report CloudReport
 	err    error
+	// force destroys without salvage (mw cloud down --force).
+	force bool
 	// repathed are the boxes whose stories the down pass re-pathed this check.
 	repathed map[string]bool
 }
@@ -1136,29 +1166,62 @@ func (p *cloudPass) down(ctx context.Context, name, why string) bool {
 // story's holds, so that earlier evidence is never written over. A bundle that
 // fails, one that does not verify, a vault that will not take it, or a box that
 // cannot be reached refuses the teardown: the box stays up, billed, and the
-// refusal names the story and why. A box with no worktree, or whose worktrees
+// refusal names the story and why, and tells the Governor once, with the
+// command that ends it (mw cloud down --force). At the month's cap it does not
+// refuse: see cloudCapWhy. A box with no worktree, or whose worktrees
 // have nothing ahead and nothing uncommitted, is destroyed as before.
 func (p *cloudPass) salvage(ctx context.Context, box CloudBox, why string) bool {
 	// A box being made or restored has run nothing, and one that did not come
-	// up has no worktree to ask for.
-	if p.check.Box == nil || box.Making || box.Restoring || why == "it did not come up" {
+	// up has no worktree to ask for. --force looks at nothing.
+	if p.force || p.check.Box == nil || box.Making || box.Restoring || why == "it did not come up" {
 		return true
 	}
+	atCap := why == cloudCapWhy
+	var lost []string
 	worktrees, err := p.check.Box.Worktrees(ctx, box.Name)
 	if err != nil {
-		return p.refuse(ctx, box, why, "", fmt.Errorf("it could not be asked what worktrees it keeps: %w", err))
+		err = fmt.Errorf("it could not be asked what worktrees it keeps: %w", err)
+		if !atCap {
+			return p.refuse(ctx, box, why, "", err)
+		}
+		lost = append(lost, "whatever its worktrees hold: "+oneLine(err.Error()))
 	}
 	for _, wt := range worktrees {
 		if !wt.Holds() {
 			continue
 		}
 		if err := p.saveWorktree(ctx, box, wt); err != nil {
-			return p.refuse(ctx, box, why, wt.Story, err)
+			if !atCap {
+				return p.refuse(ctx, box, why, wt.Story, err)
+			}
+			// The month's cap wins: one try, then the box is destroyed.
+			lost = append(lost, fmt.Sprintf("story %s, branch %s at %s (%d commits never pushed, %d uncommitted paths): %s",
+				wt.Story, wt.Branch, wt.Head, wt.Ahead, len(wt.Uncommitted), oneLine(err.Error())))
 		}
 	}
+	if len(lost) > 0 {
+		text := fmt.Sprintf("destroying %s anyway: the month's cap is reached and its work could not be saved; not saved: %s", box.Name, strings.Join(lost, "; "))
+		p.move(ctx, text)
+		p.alert(ctx, box, "Cloud box "+box.Name+" destroyed at the month's cap with work not saved", text)
+		return true
+	}
 	if box.Refused != "" {
-		p.setBox(box.Name, func(b *CloudBox) { b.Refused = "" })
+		p.setBox(box.Name, func(b *CloudBox) { b.Refused, b.Alerted = "", false })
 		p.dirty = "saved " + box.Name
+	}
+	return true
+}
+
+// alert tells the Governor what only he can mend, when the check has a notice
+// to tell him by, and reports whether it did. A notice that fails is said, so
+// that the caller can try again at the next check.
+func (p *cloudPass) alert(ctx context.Context, box CloudBox, title, text string) bool {
+	if p.check.Notice == nil {
+		return false
+	}
+	if err := p.check.Notice.Tell(ctx, title, text); err != nil {
+		p.check.say("the Governor could not be told of %s: %v", box.Name, err)
+		return false
 	}
 	return true
 }
@@ -1270,6 +1333,16 @@ func (p *cloudPass) refuse(ctx context.Context, box CloudBox, why, story string,
 		p.setBox(box.Name, func(b *CloudBox) { b.Refused = said })
 		p.dirty = "refused " + box.Name
 		p.move(ctx, text)
+	}
+	// The Governor is told once for a spell of refusals, not at each check; a
+	// refusal of mw cloud down is already in front of the one who ran it.
+	if !box.Alerted && why != "mw cloud down" {
+		alert := fmt.Sprintf("%s stays up and billed at $%.2f an hour%s: its work could not be saved into the vault: %s. To destroy it without saving the work: mw cloud down --force %s",
+			box.Name, p.check.Plan.HourlyUSD, of, oneLine(err.Error()), box.Name)
+		if p.alert(ctx, box, "Cloud box "+box.Name+" cannot be destroyed: its work cannot be saved", alert) {
+			p.setBox(box.Name, func(b *CloudBox) { b.Alerted = true })
+			p.dirty = "refused " + box.Name
+		}
 	}
 	p.fail(fmt.Errorf("not destroying %s%s: %w", box.Name, of, err))
 	return false
