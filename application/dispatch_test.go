@@ -240,8 +240,8 @@ func TestDispatchRefusesWhatItCannotDo(t *testing.T) {
 		{"no host", application.Dispatch{
 			Tracker: whole.Tracker, Worktrees: whole.Worktrees, Runner: whole.Runner, Cap: 1,
 		}, "MW_HOST"},
-		{"a cap of nothing", application.Dispatch{
-			Tracker: whole.Tracker, Worktrees: whole.Worktrees, Runner: whole.Runner, Host: "vps",
+		{"a cap under nothing", application.Dispatch{
+			Tracker: whole.Tracker, Worktrees: whole.Worktrees, Runner: whole.Runner, Host: "vps", Cap: -1,
 		}, "cap"},
 	} {
 		if _, err := refused.dispatch.Run(ctx); err == nil {

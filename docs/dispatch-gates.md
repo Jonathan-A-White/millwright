@@ -32,6 +32,7 @@ three.
 | `needs-files-key` | it names no files key and its rig's file says `files_expected = true`: `mw path set <id> files=<csv>` ends it, and it holds no other story back (mw-gq6.599); the first pass to meet it comments on the story and mails the Mayor that command, once, and `mw status` DAMPERS names it from the moment it is open (mw-gq6.795, application/pathnotice.go) |
 | `shared-files` | it names a file a running story of the rig names or has changed; since when is kept in the note `host.<host>.files_held`. A files key naming a directory or a glob over more than 20 files is refused by `mw path set` and `mw file` (globs are counted too, mw-gq6.633), so none is held behind a crowd |
 | `testers-per-rig` | it is a Tester story and its rig runs `testers_per_rig` (the `[dampers]` key, default 1) Tester stories already, on any host |
+| `drained` | the host's cap is 0, a host drained for a restart: the pass still syncs and closes out, logs `ok: capped at 0`, and starts nothing; every ready story it would take is passed over under this gate, not `cap` (mw-gq6.1044) |
 | `cap` | the host runs as many sessions as it may |
 
 A refused story's kept claim (`run=blocked`) holds its files at `shared-files` until a retry or a hold, so a ready story that names one waits for as long as the refusal does, and a refused story whose `cause_fix` is that story waits on it in a cycle. `mw status` says so (READY, OTHER HOSTS, and a DAMPERS line for a cycle or a wait over an hour, mw-gq6.941); the cure is `mw retry <id> --hold`, run on the host that holds the claim.
@@ -176,6 +177,7 @@ is mapped there too, and a test says so.
 | `needs-files-key` | needs files key |
 | `shared-files` | files overlap |
 | `testers-per-rig` | damper |
+| `drained` | the host's cap is 0, a host drained for a restart: the pass still syncs and closes out, logs `ok: capped at 0`, and starts nothing; every ready story it would take is passed over under this gate, not `cap` (mw-gq6.1044) |
 | `cap` | cap |
 | `pour-refused` | pour refused |
 | `claim-lost` | claim lost |

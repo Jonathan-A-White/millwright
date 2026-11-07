@@ -274,6 +274,7 @@ func newStatusCmd() *cobra.Command {
 				Network:          net,
 				Usage:            &application.UsageReadings{Notes: tracker},
 				Cap:              atOnce,
+				Drained:          atOnce == 0,
 				CapWhy:           capWhy,
 				Load:             hostload.Proc{},
 				Room:             application.RoomLimits{LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB},

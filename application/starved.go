@@ -75,6 +75,7 @@ var StarvedHolds = map[string]string{
 	"needs-files-key":        "needs files key",
 	"shared-files":           "files overlap",
 	"testers-per-rig":        "damper",
+	"drained":                "drained",
 	"cap":                    "cap",
 	PourRefusedGate:          "pour refused",
 	ClaimLostGate:            "claim lost",

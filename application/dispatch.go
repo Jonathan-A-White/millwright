@@ -651,6 +651,7 @@ const (
 	DispatchLogOK           = "ok: "
 	DispatchLogNothingReady = DispatchLogOK + "nothing ready"
 	DispatchLogPaused       = DispatchLogOK + "paused"
+	DispatchLogDrained      = DispatchLogOK + "capped at 0"
 	DispatchLogFault        = "local network fault"
 	DispatchLogSkipped      = "skipped: "
 	DispatchLogFailed       = "failed: "
@@ -688,6 +689,8 @@ func dispatchLogWords(report DispatchReport, err error) string {
 		return DispatchLogFailed + clippedTo(oneLine(err.Error()), DispatchLogReasonLimit)
 	case report.Paused != nil:
 		return DispatchLogPaused + " by " + report.Paused.Actor
+	case report.Drained():
+		return DispatchLogDrained
 	case len(report.Started) == 0 && len(report.Passed) == 0 && len(report.FixedOnMain) == 0:
 		return DispatchLogNothingReady
 	}
@@ -759,8 +762,8 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		return DispatchReport{}, fmt.Errorf("dispatching: a dispatch needs a work tracker, worktrees and a runner")
 	case d.Host == "":
 		return DispatchReport{}, fmt.Errorf("dispatching: which host is this? set MW_HOST, or host in the config file")
-	case d.Cap < 1:
-		return DispatchReport{}, fmt.Errorf("dispatching on %s: the cap on sessions running at once is %d, so nothing could be started; set cap in the config file", d.Host, d.Cap)
+	case d.Cap < 0:
+		return DispatchReport{}, fmt.Errorf("dispatching on %s: the cap on sessions running at once is %d; set cap in the config file to 0 (start nothing) or more", d.Host, d.Cap)
 	}
 	report := DispatchReport{Host: d.Host, Cap: d.Cap, DryRun: d.DryRun}
 
@@ -1249,6 +1252,15 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// the damper is a limit and not only an alarm (mw-gq6.546).
 		if hold, holding := testerHold(shares.running, detail, d.TestersPerRig); holding {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "testers-per-rig", Why: hold.String()})
+			continue
+		}
+
+		// gate: drained
+		// A host at cap 0 is drained for a restart: it starts nothing, and the
+		// pass has synced and closed out as ever (mw-gq6.1044).
+		if report.Drained() {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "drained", Why: fmt.Sprintf(
+				"%s is drained (cap 0): it starts nothing until its cap is raised", d.Host)})
 			continue
 		}
 
@@ -2974,6 +2986,10 @@ func (d Dispatch) print(text string) {
 	fmt.Fprint(d.Out, text)
 }
 
+// Drained is whether the host this report is of was held at cap 0: it starts
+// nothing, and its pass still syncs and closes out (mw-gq6.1044).
+func (r DispatchReport) Drained() bool { return r.Host != "" && r.Cap == 0 }
+
 // String is the report as a person reads it: what was already in flight, what
 // was started, what was passed over and what failed.
 func (r DispatchReport) String() string {
@@ -2984,6 +3000,9 @@ func (r DispatchReport) String() string {
 		what = "dispatch (dry run: nothing was synced, claimed or started)"
 	}
 	fmt.Fprintf(&b, "%s on %s: %d of %d sessions were already running\n", what, r.Host, r.Running, r.Cap)
+	if r.Drained() {
+		fmt.Fprintf(&b, "  %s is drained: its cap is 0, so it starts nothing, and still syncs and closes out\n", r.Host)
+	}
 	if r.Synced {
 		fmt.Fprintf(&b, "  synced  %s\n", r.Sync)
 	}

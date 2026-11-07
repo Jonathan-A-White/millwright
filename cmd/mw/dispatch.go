@@ -224,7 +224,9 @@ func newDispatchCmd() *cobra.Command {
 		Long: "dispatch brings this host level with the other one, asks beads what is ready here, and for\n" +
 			"each story it may take: claims it, cuts a worktree of its rig on branch mw/<story> from the\n" +
 			"freshly fetched target branch, pours its formula into step beads, writes the boot file, and\n" +
-			"starts the session. It never takes more than the cap allows, never takes a story whose path\n" +
+			"starts the session. It never takes more than the cap allows (a cap of 0 drains the host for a\n" +
+			"restart: it still syncs and closes out, starts nothing, and passes every ready story under the\n" +
+			"gate \"drained\"), never takes a story whose path\n" +
 			"names another host or no host at all, and gives the claim back if anything fails before the\n" +
 			"session starts.\n\n" +
 			"A story is started at most max_attempts times in all (3 unless the config file says\n" +

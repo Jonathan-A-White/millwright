@@ -43,6 +43,7 @@ var DispatchGates = []DispatchGate{
 	{"needs-files-key", "it names no files key and its rig's file says files_expected = true: mw path set <id> files=<csv> ends it, and it holds no other story back"},
 	{"shared-files", "it names a file a running story of the rig names or has changed"},
 	{"testers-per-rig", "it is a Tester story and its rig runs testers_per_rig Tester stories already, on any host"},
+	{"drained", "the host is held at cap 0, drained for a restart: it starts nothing, and still syncs and closes out"},
 	{"cap", "the host runs as many sessions as it may"},
 }
 

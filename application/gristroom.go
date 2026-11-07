@@ -52,8 +52,12 @@ func (l GristRoomLimits) factor() float64 {
 }
 
 // capFor is the sessions a host with hostCap runs at once while grist is in
-// use: the grist cap, never above the host's own and never under one.
+// use: the grist cap, never above the host's own and never under one, except
+// that a host drained at 0 stays at 0 (mw-gq6.1044).
 func (l GristRoomLimits) capFor(hostCap int) int {
+	if hostCap < 1 {
+		return 0
+	}
 	n := l.Cap
 	if n <= 0 {
 		n = hostCap - gristCapLess

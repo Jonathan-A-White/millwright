@@ -115,10 +115,24 @@ func TestCapIsOneUntilAHostSaysOtherwise(t *testing.T) {
 	}
 }
 
-func TestCapRefusesWhatWouldStartNothingOrIsNotANumber(t *testing.T) {
+// A cap of 0 is a host drained for a restart: it starts nothing and goes on
+// syncing and closing out (mw-gq6.1044).
+func TestCapOfZeroIsAHostDrainedNotAnError(t *testing.T) {
 	writeConfig(t, "cap = 0\n")
+	if atOnce, err := config.Cap(); err != nil || atOnce != 0 {
+		t.Fatalf("expected a cap of 0 to be read as 0, got %d: %v", atOnce, err)
+	}
+	writeConfig(t, "cap = 3\n")
+	t.Setenv("MW_CAP", "0")
+	if atOnce, err := config.Cap(); err != nil || atOnce != 0 {
+		t.Fatalf("expected MW_CAP=0 to win with 0, got %d: %v", atOnce, err)
+	}
+}
+
+func TestCapRefusesANegativeNumberOrOneThatIsNotANumber(t *testing.T) {
+	writeConfig(t, "cap = -1\n")
 	if _, err := config.Cap(); err == nil {
-		t.Fatal("expected a cap of 0 to be refused")
+		t.Fatal("expected a cap of -1 to be refused")
 	}
 
 	writeConfig(t, "cap = \"lots\"\n")

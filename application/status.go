@@ -393,6 +393,9 @@ type Status struct {
 	// mw dispatch holds a story back. A zero Cap leaves the line out; a nil Load,
 	// or a load that cannot be read, says nothing of room.
 	Cap int
+	// Drained says the host is held at cap 0, drained for a restart: the HOST
+	// line says so, since a zero Cap leaves the line out (mw-gq6.1044).
+	Drained bool
 	// CapWhy names the dispatch window that sets Cap now, like "night window to
 	// 06:00 America/New_York"; "" when the cap is the host's own (mw-gq6.429).
 	CapWhy string
@@ -642,6 +645,8 @@ type StatusReport struct {
 	CapWhy string
 	InUse  int
 	NoRoom string
+	// Drained is the host held at cap 0 (mw-gq6.1044).
+	Drained bool
 	// Grist is what the mill is doing, zero (Known false) when this host has none.
 	Grist GristPulse
 	Ready []StoryDetail
@@ -985,6 +990,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			report.InUse++
 		}
 	}
+	report.Drained = s.Drained
 	if s.Cap > 0 {
 		report.Cap = s.Cap
 		report.CapWhy = s.CapWhy
@@ -2196,6 +2202,12 @@ func (r StatusReport) String() string {
 
 	r.Dampers.Write(&b)
 
+	if r.Drained {
+		clip(&b, fmt.Sprintf("host: drained (cap 0), %d running: it starts nothing, and still syncs and closes out", r.InUse))
+		if r.CapWhy != "" {
+			clip(&b, "  cap 0: "+r.CapWhy)
+		}
+	}
 	if r.Cap > 0 {
 		clip(&b, fmt.Sprintf("host: %d of cap %d", r.InUse, r.Cap))
 		if r.CapWhy != "" {

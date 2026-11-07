@@ -5,7 +5,7 @@
 //
 //	vault = "/root/millwright-vault"
 //	host  = "vps"
-//	cap   = 1
+//	cap   = 1                          # sessions at once; 0 drains the host: it starts nothing, and still syncs and closes out
 //	host_silent_hours = 2
 //	handoff_at = 180000
 //	rig_memory_bytes = 8000
@@ -2004,8 +2004,10 @@ func CapInForce(now time.Time) (atOnce int, why string, err error) {
 	if err != nil {
 		return 0, "", fmt.Errorf("the cap on sessions running at once is %q, which is not a whole number: set %s=<n>, or `cap = <n>` in %s", said, CapEnv, File)
 	}
-	if atOnce < 1 {
-		return 0, "", fmt.Errorf("the cap on sessions running at once is %d, so nothing could ever be started: set it to 1 or more", atOnce)
+	// 0 is valid: a host drained for a restart starts nothing, and goes on
+	// syncing and closing out (mw-gq6.1044).
+	if atOnce < 0 {
+		return 0, "", fmt.Errorf("the cap on sessions running at once is %d: set it to 0 (start nothing) or more", atOnce)
 	}
 	return atOnce, why, nil
 }
