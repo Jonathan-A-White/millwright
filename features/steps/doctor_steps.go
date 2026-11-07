@@ -1232,9 +1232,10 @@ func (c *doctorContext) rootDiskBudgetCheck(budget, margin int64, usedText strin
 		return fmt.Errorf("parsing %q as a byte count: %w", usedText, err)
 	}
 	c.real = &doctor.RootDiskBudget{
-		Budget:    budget,
-		Margin:    margin,
-		UsedBytes: func() (int64, error) { return used, nil },
+		Budget:      budget,
+		Margin:      margin,
+		ProcVersion: func() (string, error) { return "Linux version 6.8.0-generic", nil },
+		UsedBytes:   func() (int64, error) { return used, nil },
 		Note: func(ctx context.Context, text string) error {
 			return c.notes.SetNote(ctx, application.DoctorNoteKey(seatUpHost, doctor.RootDiskBudgetName), text)
 		},

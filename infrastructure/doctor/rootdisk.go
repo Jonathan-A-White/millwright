@@ -3,6 +3,8 @@ package doctor
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -39,7 +41,9 @@ const (
 // the vhdx's size. Budget is the drive's free space at the time the vhdx was
 // placed there; faulty once used bytes pass Budget less Margin. It changes
 // nothing on the host: its cure is one note to the Mayor, a person's to act on.
-// With no Budget set it is inert.
+// With no Budget set it is inert on a host that is not WSL; on a WSL host it
+// warns, as cannot-tell, naming the key to set (mw-gq6.1019): the guard sat
+// unset on the desktop for a month and its Windows drive filled.
 type RootDiskBudget struct {
 	// Budget is the bytes the Windows drive had free when the vhdx was put on
 	// it. Zero is inert: the check can say nothing.
@@ -47,6 +51,9 @@ type RootDiskBudget struct {
 	// Margin is the headroom kept under Budget. Zero reads
 	// DefaultRootDiskMarginBytes.
 	Margin int64
+	// ProcVersion reads /proc/version, which says whether this host is WSL. Nil
+	// reads the real file.
+	ProcVersion func() (string, error)
 	// UsedBytes reads the root filesystem's used bytes. Nil reads the real /.
 	UsedBytes func() (int64, error)
 	// Note puts text in the Mayor's way: mw doctor sets it to this check's own
@@ -62,12 +69,18 @@ func NewRootDiskBudget() *RootDiskBudget { return &RootDiskBudget{} }
 func (r *RootDiskBudget) Name() string { return RootDiskBudgetName }
 
 // Probe implements application.DoctorCheck: used bytes of the root against
-// Budget less Margin. Inert with no budget set, and reported as an ok that
-// says so rather than cannot-tell: mw doctor writes a note, and so wakes the
-// Millhand, for every cannot-tell, and a host with no vhdx to watch has
-// nothing to tell. Cannot-tell when the root's usage cannot be read.
+// Budget less Margin. With no budget set, a host that is not WSL has no vhdx
+// to watch and gets an ok that says so (mw doctor writes a note, and so wakes
+// the Millhand, for every cannot-tell); a WSL host gets cannot-tell, the
+// doctor's warning, naming the key to set. Cannot-tell too when the root's
+// usage cannot be read.
 func (r *RootDiskBudget) Probe(context.Context) (application.Verdict, string) {
 	if r.Budget <= 0 {
+		if r.isWSL() {
+			return application.DoctorCannotTell, "this host is WSL and root_disk_budget_bytes is not set, so nothing watches the Windows drive that holds its vhdx; " +
+				"set root_disk_budget_bytes in [doctor] of this host's config.toml to that drive's free bytes when the vhdx was placed there (the budget is per host, set at install). " +
+				"The root's used bytes this check reads is only a lower bound of the vhdx, which never shrinks, so keep root_disk_margin_bytes wide"
+		}
 		return application.DoctorOK, "n/a: no root_disk_budget_bytes set"
 	}
 	used, err := r.used()
@@ -111,6 +124,28 @@ func (r *RootDiskBudget) WayBack() string {
 
 func (r *RootDiskBudget) figures(used int64) string {
 	return fmt.Sprintf("the WSL root uses %s of a %s budget, %s margin", gb(used), gb(r.Budget), gb(r.margin()))
+}
+
+// isWSL is whether /proc/version says this host is WSL. A host whose
+// /proc/version cannot be read is taken not to be: the check cannot warn about
+// a vhdx it cannot tell is there.
+func (r *RootDiskBudget) isWSL() bool {
+	read := r.ProcVersion
+	if read == nil {
+		read = func() (string, error) {
+			data, err := os.ReadFile("/proc/version")
+			return string(data), err
+		}
+	}
+	text, err := read()
+	return err == nil && IsWSLVersion(text)
+}
+
+// IsWSLVersion is whether a /proc/version line is a WSL kernel's: WSL2 kernels
+// say "microsoft-standard-WSL2", WSL1 says "Microsoft".
+func IsWSLVersion(procVersion string) bool {
+	lower := strings.ToLower(procVersion)
+	return strings.Contains(lower, "microsoft") || strings.Contains(lower, "wsl")
 }
 
 func (r *RootDiskBudget) used() (int64, error) {
