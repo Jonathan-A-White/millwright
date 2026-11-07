@@ -8,13 +8,28 @@ package userunits
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
 
 // Systemctl runs the user manager's systemctl: Bin, or systemctl on the PATH.
+// With SystemScope it runs the system manager's instead (no --user), which is
+// where a root-seat host's units live (mw-gq6.1035).
 type Systemctl struct {
 	Bin string
+	// SystemScope asks the system manager, not the user manager.
+	SystemScope bool
+	// Root says whether this process runs as root, for ReloadStaleSystem. Nil
+	// reads the effective user id.
+	Root func() bool
+}
+
+func (s Systemctl) isRoot() bool {
+	if s.Root != nil {
+		return s.Root()
+	}
+	return os.Geteuid() == 0
 }
 
 func (s Systemctl) run(ctx context.Context, args ...string) ([]byte, error) {
@@ -22,7 +37,10 @@ func (s Systemctl) run(ctx context.Context, args ...string) ([]byte, error) {
 	if bin == "" {
 		bin = "systemctl"
 	}
-	return exec.CommandContext(ctx, bin, append([]string{"--user"}, args...)...).CombinedOutput()
+	if !s.SystemScope {
+		args = append([]string{"--user"}, args...)
+	}
+	return exec.CommandContext(ctx, bin, args...).CombinedOutput()
 }
 
 // Installed is whether the user manager knows unit.
@@ -109,7 +127,7 @@ func (s Systemctl) StaleUnits(ctx context.Context) ([]string, error) {
 	return stale, nil
 }
 
-// ReloadStale runs `systemctl --user daemon-reload` when StaleUnits names any
+// ReloadStale runs `systemctl --user daemon-reload` (no --user for SystemScope) when StaleUnits names any
 // unit, and not otherwise, and returns the units it found stale. A reload that
 // fails is an error carrying what systemctl said, with the units still named.
 func (s Systemctl) ReloadStale(ctx context.Context) ([]string, error) {
@@ -125,4 +143,18 @@ func (s Systemctl) ReloadStale(ctx context.Context) ([]string, error) {
 		return stale, fmt.Errorf("daemon-reload: %w", err)
 	}
 	return stale, nil
+}
+
+// ReloadStaleSystem is ReloadStale for the system manager, and only when this
+// process runs as root: a root-seat host's mw-* system units (mw-seat-tmux.service,
+// mw-doctor.*) are links into the checkout like the user units, and a landing
+// that edits one leaves the system manager on the old reading until a
+// `systemctl daemon-reload` (mw-gq6.1035). A non-root process asks nothing and
+// returns none.
+func (s Systemctl) ReloadStaleSystem(ctx context.Context) ([]string, error) {
+	if !s.isRoot() {
+		return nil, nil
+	}
+	s.SystemScope = true
+	return s.ReloadStale(ctx)
 }

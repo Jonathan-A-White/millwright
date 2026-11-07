@@ -156,3 +156,58 @@ func TestASelfUpdateThatBuildsReloadsStaleUnitsAndSaysSoInTheLine(t *testing.T) 
 		t.Fatalf("expected one reload said in the line, reloaded %d, line %q", units.Reloaded, report.Line)
 	}
 }
+
+func TestARootHostsChangedSystemUnitIsReloadedBeforeTheRestartAndTheNoteSaysSo(t *testing.T) {
+	units := &apptest.FakeUnitRestarter{SystemStale: []string{"mw-seat-tmux.service"}}
+
+	notes, failed := application.RestartFactoryUnits(context.Background(), units, "millwright")
+
+	if len(failed) != 0 {
+		t.Errorf("expected no failure, got %q", failed)
+	}
+	if units.SystemReloaded != 1 {
+		t.Errorf("expected one system daemon-reload, got %d", units.SystemReloaded)
+	}
+	if len(units.Events) < 2 || units.Events[0] != "reload system" || units.Events[1] != "restart mw-view-follow.service" {
+		t.Errorf("expected the system reload before the restart, events were %q", units.Events)
+	}
+	found := false
+	for _, note := range notes {
+		found = found || (strings.Contains(note, "ran systemctl daemon-reload") && strings.Contains(note, "mw-seat-tmux.service") && !strings.Contains(note, "--user"))
+	}
+	if !found {
+		t.Errorf("expected a note saying systemctl daemon-reload ran for mw-seat-tmux.service, got %q", notes)
+	}
+}
+
+func TestNoSystemReloadIsRunOrSaidWhenNoSystemUnitChanged(t *testing.T) {
+	units := &apptest.FakeUnitRestarter{}
+
+	notes, _ := application.RestartFactoryUnits(context.Background(), units, "millwright")
+
+	if units.SystemReloaded != 0 {
+		t.Errorf("expected no system daemon-reload, got %d", units.SystemReloaded)
+	}
+	for _, note := range notes {
+		if strings.Contains(note, "daemon-reload") {
+			t.Errorf("expected no note of a reload, got %q", note)
+		}
+	}
+}
+
+func TestASystemReloadThatFailsIsSaidWithTheUnitsAndTheHandFix(t *testing.T) {
+	units := &apptest.FakeUnitRestarter{SystemStale: []string{"mw-doctor.timer"}, SystemReloadErr: errors.New("Access denied\nmore")}
+
+	notes, failed := application.RestartFactoryUnits(context.Background(), units, "millwright")
+
+	if len(failed) != 0 {
+		t.Errorf("a failed reload is not a failed restart, got %q", failed)
+	}
+	found := false
+	for _, note := range notes {
+		found = found || (strings.Contains(note, "systemctl daemon-reload could not be run") && strings.Contains(note, "mw-doctor.timer") && strings.Contains(note, "Access denied"))
+	}
+	if !found {
+		t.Errorf("expected a note of the failed system reload, got %q", notes)
+	}
+}

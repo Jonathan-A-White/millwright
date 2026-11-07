@@ -62,6 +62,12 @@ type UnitRestarter interface {
 	// reload that was needed and failed, with the units still returned
 	// (mw-gq6.565).
 	ReloadStale(ctx context.Context) (units []string, err error)
+
+	// ReloadStaleSystem is ReloadStale for the system manager, `systemctl
+	// daemon-reload` with no --user, and only when mw runs as root, as on a
+	// root-seat host whose mw-seat-tmux.service and mw-doctor.* are system units;
+	// a non-root process runs nothing and returns none (mw-gq6.1035).
+	ReloadStaleSystem(ctx context.Context) (units []string, err error)
 }
 
 // RestartFactoryUnits restarts the long-running mw units of this host once a
@@ -75,7 +81,10 @@ type UnitRestarter interface {
 // that a landing which edits one under contrib/systemd is live: the installed
 // units are links into the checkout, and systemd keeps the old reading of them
 // until a daemon-reload (mw-gq6.565). A reload that fails is said and is not a
-// failed restart; mw doctor's daemon-reload check says it again.
+// failed restart; mw doctor's daemon-reload check says it again. On a root host
+// the system manager is told the same, without --user, when a mw-* system unit
+// changed (mw-gq6.1035); it is not asked about, and nothing is said, when it
+// could not be listed.
 func RestartFactoryUnits(ctx context.Context, units UnitRestarter, rig string) (notes, failed []string) {
 	if units == nil || rig != FactoryRig {
 		return nil, nil
@@ -87,6 +96,14 @@ func RestartFactoryUnits(ctx context.Context, units UnitRestarter, rig string) (
 			strings.Join(stale, ", "), firstLine(err.Error())))
 	case len(stale) > 0:
 		notes = append(notes, fmt.Sprintf("ran systemctl --user daemon-reload: %s had changed on disk and are loaded now", strings.Join(stale, ", ")))
+	}
+	sysStale, err := units.ReloadStaleSystem(ctx)
+	switch {
+	case err != nil && len(sysStale) > 0:
+		notes = append(notes, fmt.Sprintf("systemctl daemon-reload could not be run, so %s still run the old unit files: %s; run it by hand",
+			strings.Join(sysStale, ", "), firstLine(err.Error())))
+	case err == nil && len(sysStale) > 0:
+		notes = append(notes, fmt.Sprintf("ran systemctl daemon-reload: %s had changed on disk and are loaded now", strings.Join(sysStale, ", ")))
 	}
 	for _, unit := range FactoryUnits {
 		restarted, err := units.TryRestart(ctx, unit)

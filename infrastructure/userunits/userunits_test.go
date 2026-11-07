@@ -160,3 +160,79 @@ func TestReloadStaleSaysWhatSystemctlSaidWhenTheReloadFails(t *testing.T) {
 		t.Errorf("expected the unit still named, got %q", stale)
 	}
 }
+
+// systemStandIn is a systemctl whose system manager has loaded
+// mw-seat-tmux.service and mw-doctor.timer (needs: unit -> yes/no); a call with
+// --user fails, as it does on a host with no user manager, and every call is
+// logged.
+func systemStandIn(t *testing.T, needs map[string]string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	var show strings.Builder
+	for _, unit := range []string{"mw-seat-tmux.service", "mw-doctor.timer"} {
+		show.WriteString("echo Id=" + unit + "; echo NeedDaemonReload=" + needs[unit] + "; echo;")
+	}
+	script := "#!/bin/sh\necho \"$*\" >> " + log + "\n" +
+		"case \"$1\" in --user) echo 'Failed to connect to bus' >&2; exit 1;; esac\n" +
+		"case \"$*\" in\n" +
+		"*list-units*) echo 'mw-seat-tmux.service loaded active running Seat'; echo 'mw-doctor.timer loaded active waiting Doctor';;\n" +
+		"*show*) " + show.String() + " true;;\n" +
+		"esac\n"
+	bin := filepath.Join(dir, "systemctl")
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, log
+}
+
+func TestReloadStaleSystemRunsADaemonReloadWithoutUserWhenARootHostsSystemUnitChanged(t *testing.T) {
+	bin, log := systemStandIn(t, map[string]string{"mw-seat-tmux.service": "yes", "mw-doctor.timer": "no"})
+	sc := userunits.Systemctl{Bin: bin, Root: func() bool { return true }}
+
+	stale, err := sc.ReloadStaleSystem(context.Background())
+	if err != nil || len(stale) != 1 || stale[0] != "mw-seat-tmux.service" {
+		t.Fatalf("expected mw-seat-tmux.service named stale, got %q, %v", stale, err)
+	}
+	got, _ := os.ReadFile(log)
+	if !strings.Contains(string(got), "daemon-reload\n") || strings.Contains(string(got), "--user") {
+		t.Fatalf("expected a daemon-reload with no --user, calls were:\n%s", got)
+	}
+}
+
+func TestReloadStaleSystemRunsNothingWhenNoSystemUnitChanged(t *testing.T) {
+	bin, log := systemStandIn(t, map[string]string{"mw-seat-tmux.service": "no", "mw-doctor.timer": "no"})
+	sc := userunits.Systemctl{Bin: bin, Root: func() bool { return true }}
+
+	stale, err := sc.ReloadStaleSystem(context.Background())
+	if err != nil || len(stale) != 0 {
+		t.Fatalf("expected nothing stale, got %q, %v", stale, err)
+	}
+	if got, _ := os.ReadFile(log); strings.Contains(string(got), "daemon-reload") {
+		t.Fatalf("expected no daemon-reload, calls were:\n%s", got)
+	}
+}
+
+func TestReloadStaleSystemAsksNothingWhenNotRoot(t *testing.T) {
+	bin, log := systemStandIn(t, map[string]string{"mw-seat-tmux.service": "yes"})
+	sc := userunits.Systemctl{Bin: bin, Root: func() bool { return false }}
+
+	stale, err := sc.ReloadStaleSystem(context.Background())
+	if err != nil || len(stale) != 0 {
+		t.Fatalf("expected nothing for a non-root host, got %q, %v", stale, err)
+	}
+	if got, _ := os.ReadFile(log); len(got) != 0 {
+		t.Fatalf("expected systemctl not to be run, calls were:\n%s", got)
+	}
+}
+
+func TestStaleSystemUnitsListsTheSystemUnitsWithoutUserForTheDoctor(t *testing.T) {
+	bin, log := systemStandIn(t, map[string]string{"mw-seat-tmux.service": "yes", "mw-doctor.timer": "yes"})
+	stale, err := userunits.Systemctl{Bin: bin, SystemScope: true}.StaleUnits(context.Background())
+	if err != nil || len(stale) != 2 {
+		t.Fatalf("expected both system units stale, got %q, %v", stale, err)
+	}
+	if got, _ := os.ReadFile(log); strings.Contains(string(got), "--user") {
+		t.Fatalf("expected no --user, calls were:\n%s", got)
+	}
+}
