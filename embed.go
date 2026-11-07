@@ -51,3 +51,11 @@ var DispatchService string
 
 //go:embed contrib/systemd/mw-dispatch.timer
 var DispatchTimer string
+
+// WSLFlagWatch is contrib/windows/wsl-flag-watch.ps1: the Windows scheduled
+// task's script that restarts or compacts a sealed WSL host when a flag file
+// appears inside it. mw host wsl-flag --install-line carries it in the one
+// PowerShell line it prints, so installing it needs no checkout on Windows.
+//
+//go:embed contrib/windows/wsl-flag-watch.ps1
+var WSLFlagWatch string

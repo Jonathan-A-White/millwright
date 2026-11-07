@@ -62,6 +62,7 @@ func newHostCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 	}
 	root.AddCommand(newHostTrimSetupCmd())
+	root.AddCommand(newHostWSLFlagCmd())
 	return root
 }
 
