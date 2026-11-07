@@ -189,3 +189,18 @@ func TestAnAfterLandingCommandOfStepsSaysWhichStepWasRunningWhenItEnded(t *testi
 		t.Errorf("expected a chain that passed to have run to its last step, got %+v, %v", ran, err)
 	}
 }
+
+func TestADeployStepPastTheLastStepOfTheCommandIsRefusedByRigAndValue(t *testing.T) {
+	commands := map[string]string{"postern": "npm ci && npm run build && rsync dist/ host:/www/"}
+
+	if err := CheckDeploySteps(commands, map[string]int{"postern": 3}); err != nil {
+		t.Errorf("expected the last step to be allowed, got %v", err)
+	}
+	err := CheckDeploySteps(commands, map[string]int{"postern": 4})
+	if err == nil || !strings.Contains(err.Error(), "postern") || !strings.Contains(err.Error(), "4") {
+		t.Errorf("expected an error naming the rig and the value, got %v", err)
+	}
+	if err := CheckDeploySteps(commands, map[string]int{"elsewhere": 9}); err != nil {
+		t.Errorf("expected a rig with no command not to be checked, got %v", err)
+	}
+}

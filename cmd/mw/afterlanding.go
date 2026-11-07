@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
@@ -42,8 +44,12 @@ func newAfterLandingCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			deploySteps, err := afterLandingDeploySteps(afterLanding)
+			if err != nil {
+				return err
+			}
 			return application.AfterLandingRun{
-				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
+				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits), deploySteps),
 				Slot: rig.NewSlots(
 					rig.WithSlotSuffix(rig.AfterLandingSlotSuffix),
 					rig.WithSlotNotice(func(said string) { cmd.ErrOrStderr().Write([]byte(said)) }),
@@ -57,4 +63,18 @@ func newAfterLandingCmd() *cobra.Command {
 			}.Run(cmd.Context(), args[0])
 		},
 	}
+}
+
+// afterLandingDeploySteps reads the host's [after_landing_deploy_step] table as the
+// option that gives it to the after-landing adapter, and refuses a step that is
+// past the last one of its rig's command (mw-gq6.866).
+func afterLandingDeploySteps(afterLanding map[string]string) (rig.AfterLandingOption, error) {
+	steps, err := config.AfterLandingDeploySteps()
+	if err != nil {
+		return nil, err
+	}
+	if err := rig.CheckDeploySteps(afterLanding, steps); err != nil {
+		return nil, fmt.Errorf("%s: %w", config.File, err)
+	}
+	return rig.WithAfterDeploySteps(steps), nil
 }

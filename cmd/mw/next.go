@@ -136,6 +136,10 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			deploySteps, err := afterLandingDeploySteps(afterLanding)
+			if err != nil {
+				return err
+			}
 			maxAttempts, err := config.MaxAttempts()
 			if err != nil {
 				return err
@@ -293,7 +297,7 @@ func newNextCmd() *cobra.Command {
 
 				HeartbeatGrace: application.DefaultHeartbeatGrace,
 
-				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterCommandsFrom(config.AfterLanding, time.Now), rig.WithAfterLimits(afterLimits)),
+				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterCommandsFrom(config.AfterLanding, time.Now), rig.WithAfterLimits(afterLimits), deploySteps),
 				DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 				Deployed:     hostDeployedMarks(),
 				Home:         files,

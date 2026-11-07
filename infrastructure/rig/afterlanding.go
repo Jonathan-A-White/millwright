@@ -23,11 +23,13 @@ type AfterLanding struct {
 	now      func() time.Time
 	limit    time.Duration
 	limits   map[string]time.Duration
+	deploys  map[string]int
 	shell    string
 }
 
 // AfterLanding satisfies the port.
 var _ application.AfterLanding = (*AfterLanding)(nil)
+var _ application.DeployStepper = (*AfterLanding)(nil)
 
 // AfterLandingOption is a setting of an AfterLanding, given to NewAfterLanding.
 type AfterLandingOption func(*AfterLanding)
@@ -75,6 +77,39 @@ func WithAfterLimits(limits map[string]time.Duration) AfterLandingOption {
 	}
 }
 
+// WithAfterDeploySteps names, by rig name, the step of its command, counted from
+// 1, after which the rig is deployed, as the [after_landing_deploy_step] table of
+// the config file has it. A rig the table does not name is deployed when its
+// whole command passes.
+func WithAfterDeploySteps(steps map[string]int) AfterLandingOption {
+	return func(a *AfterLanding) {
+		for rig, step := range steps {
+			if step > 0 {
+				a.deploys[rig] = step
+			}
+		}
+	}
+}
+
+// CheckDeploySteps refuses a deploy step that is past the last step of its rig's
+// command, naming the rig and the value. A rig with no command is not checked:
+// no command runs for it.
+func CheckDeploySteps(commands map[string]string, steps map[string]int) error {
+	for rig, step := range steps {
+		command := strings.TrimSpace(commands[rig])
+		if command == "" {
+			continue
+		}
+		if have := len(commandSteps(command)); step > have {
+			return fmt.Errorf("[after_landing_deploy_step] %s = %d: the command of %s has only %d step(s)", rig, step, rig, have)
+		}
+	}
+	return nil
+}
+
+// DeployStep implements application.DeployStepper.
+func (a *AfterLanding) DeployStep(rig string) int { return a.deploys[rig] }
+
 // WithAfterLimit is how long a command may run before it is stopped, instead of
 // application.AfterLandingLimit, for every rig whose own limit is not named. It
 // is how a test makes a command that outlives its limit without waiting minutes
@@ -95,7 +130,7 @@ func WithAfterShell(path string) AfterLandingOption {
 // NewAfterLanding returns an AfterLanding that runs nothing until it is told
 // which rigs have a command.
 func NewAfterLanding(opts ...AfterLandingOption) *AfterLanding {
-	a := &AfterLanding{commands: map[string]string{}, limits: map[string]time.Duration{}, limit: application.AfterLandingLimit, shell: Shell, now: time.Now}
+	a := &AfterLanding{commands: map[string]string{}, limits: map[string]time.Duration{}, deploys: map[string]int{}, limit: application.AfterLandingLimit, shell: Shell, now: time.Now}
 	for _, opt := range opts {
 		opt(a)
 	}

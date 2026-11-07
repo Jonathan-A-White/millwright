@@ -391,6 +391,13 @@ func (s SelfUpdate) deployRig(ctx context.Context, rig, dir string) []string {
 		moved = fmt.Sprintf("%s at %s, not yet deployed", words, updatedRevision(head))
 	}
 	said := strings.TrimSpace(out.String())
+	if standing, _ := s.Built.Built(ctx, deployedMark(rig)); runErr != nil && standing == head {
+		// The run passed the step the host names as the deploy and failed a later
+		// one, and set the deployed mark: the commit is live, so this is no failed
+		// deploy to count and try again (mw-gq6.866).
+		return []string{fmt.Sprintf("%s, deployed by the home, but the command failed after the deploy: %s; run mw after-landing %s by hand if the later step matters",
+			moved, firstLine(runErr.Error()), rig)}
+	}
 	if runErr != nil {
 		tries++
 		kept := ""
