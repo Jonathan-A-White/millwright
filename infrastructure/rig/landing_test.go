@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 )
 
@@ -946,7 +946,7 @@ func TestALandingMergesTheCodemapByItsDriverWithNoGitConfig(t *testing.T) {
 	if got != want {
 		t.Errorf("expected the trim with main's row, got:\n%s", got)
 	}
-	if said, err := exec.Command("git", "-C", here, "config", "--get-regexp", `^merge\.`).CombinedOutput(); err == nil {
+	if said, err := gittest.Command("git", "-C", here, "config", "--get-regexp", `^merge\.`).CombinedOutput(); err == nil {
 		t.Errorf("expected no merge driver in the rig's git config, got %s", said)
 	}
 }
