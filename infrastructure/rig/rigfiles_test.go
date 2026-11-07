@@ -3,10 +3,10 @@ package rig_test
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 )
 
@@ -113,7 +113,7 @@ func trackedRepo(t *testing.T, files map[string]string) string {
 		}
 	}
 	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}} {
-		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+		if out, err := gittest.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
 	}

@@ -3,7 +3,6 @@ package rig_test
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 )
 
@@ -47,7 +47,7 @@ func aRig(t *testing.T) (here, other string) {
 
 func run(t *testing.T, dir, program string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command(program, args...)
+	cmd := gittest.Command(program, args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -230,9 +230,9 @@ func TestCommitOfReadsACommitAsTheCheckoutHasItWithWhenItWasCommitted(t *testing
 	here, _ := aRig(t)
 	write(t, here, "NOTES.md", "a note\n")
 	run(t, here, "git", "add", "-A")
-	cmd := exec.Command("git", "commit", "-qm", "Merge branch 'mw/mw-x.1' into HEAD")
+	cmd := gittest.Command("git", "commit", "-qm", "Merge branch 'mw/mw-x.1' into HEAD")
 	cmd.Dir = here
-	cmd.Env = append(os.Environ(), "GIT_COMMITTER_DATE=2026-09-20T15:04:00Z")
+	cmd.Env = append(gittest.Env(), "GIT_COMMITTER_DATE=2026-09-20T15:04:00Z")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("committing: %v: %s", err, out)
 	}

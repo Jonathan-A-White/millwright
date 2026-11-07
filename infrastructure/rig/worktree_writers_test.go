@@ -3,7 +3,6 @@ package rig_test
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 )
 
@@ -37,7 +37,7 @@ func aStoryWorktree(t *testing.T, id string) (here, dir, branch string) {
 // for it to have been reaped, and kills it if it is still there at the end.
 func startIn(t *testing.T, dir, script string) (pid int, gone func() bool) {
 	t.Helper()
-	cmd := exec.Command("bash", "-c", script)
+	cmd := gittest.Command("bash", "-c", script)
 	cmd.Dir = dir
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("starting %q: %v", script, err)

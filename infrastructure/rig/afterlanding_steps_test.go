@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 )
 
 // holdPortEnv, when set, turns the test binary into a stand-in for a shots
@@ -22,7 +24,10 @@ const (
 	holdPortFallback = "MW_TEST_HOLD_PORT_FALLBACK"
 )
 
+// TestMain keeps the host's git config out of every git this binary runs, the
+// fixtures' and the adapters' alike (mw-gq6.1027).
 func TestMain(m *testing.M) {
+	gittest.Isolate()
 	if dir := os.Getenv(holdPortEnv); dir != "" {
 		os.Exit(holdPort(dir))
 	}

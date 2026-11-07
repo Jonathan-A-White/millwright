@@ -17,6 +17,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright"
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 )
 
@@ -112,7 +113,7 @@ func TestATrimLandsWithMainsAppendedLineAndWithoutTheTrimmedOnes(t *testing.T) {
 					t.Errorf("expected %q to stay trimmed, got:\n%s", gone, got)
 				}
 			}
-			if said, err := exec.Command("git", "-C", here, "config", "--get-regexp", `^merge\.`).CombinedOutput(); err == nil {
+			if said, err := gittest.Command("git", "-C", here, "config", "--get-regexp", `^merge\.`).CombinedOutput(); err == nil {
 				t.Errorf("expected no merge driver in any git config, got %s", said)
 			}
 		})
@@ -209,7 +210,7 @@ func runTrimDriver(t *testing.T, base, ours, theirs string) (string, int) {
 	write(t, dir, "base", base)
 	write(t, dir, "ours", ours)
 	write(t, dir, "theirs", theirs)
-	cmd := exec.Command("sh", "driver.sh", "base", "ours", "theirs")
+	cmd := gittest.Command("sh", "driver.sh", "base", "ours", "theirs")
 	cmd.Dir = dir
 	status := 0
 	if out, err := cmd.CombinedOutput(); err != nil {
