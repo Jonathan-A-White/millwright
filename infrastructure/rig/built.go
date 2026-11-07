@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/atomicfile"
 )
 
 // BuiltMarks is the commit a host last built for each rig, kept as one file a
@@ -44,29 +45,8 @@ func (b *BuiltMarks) MarkBuilt(_ context.Context, rig, commit string) error {
 	if err := os.MkdirAll(b.Dir, 0o755); err != nil {
 		return fmt.Errorf("making %s: %w", b.Dir, err)
 	}
-	f, err := os.CreateTemp(b.Dir, "built-"+rig+".*.new")
-	if err != nil {
-		return fmt.Errorf("making a file beside %s: %w", b.path(rig), err)
-	}
-	next := f.Name()
-	fail := func(format string, err error) error {
-		_ = f.Close()
-		_ = os.Remove(next)
-		return fmt.Errorf(format, next, err)
-	}
-	if _, err := f.WriteString(commit + "\n"); err != nil {
-		return fail("writing %s: %w", err)
-	}
-	if err := f.Chmod(0o644); err != nil {
-		return fail("setting the mode of %s: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(next)
-		return fmt.Errorf("closing %s: %w", next, err)
-	}
-	if err := os.Rename(next, b.path(rig)); err != nil {
-		_ = os.Remove(next)
-		return fmt.Errorf("replacing %s: %w", b.path(rig), err)
+	if err := atomicfile.Write(b.path(rig), []byte(commit+"\n"), 0o644); err != nil {
+		return fmt.Errorf("marking %s built: %w", rig, err)
 	}
 	return nil
 }
