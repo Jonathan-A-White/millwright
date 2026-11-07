@@ -81,5 +81,5 @@ Feature: A session mw starts reads the host's beads environment first
   Scenario: The close-out's words are kept in the run as well as shown in the pane
     Given a home directory with no beads.env
     When the story session's line runs, with a close-out that says "read of the story failed (i/o timeout), retried in 20s" and then "Error: closing out mw-gq6.1: bd show: i/o timeout" on stderr
-    Then the run's close-out log ends with "read of the story failed (i/o timeout), retried in 20s" and "Error: closing out mw-gq6.1: bd show: i/o timeout"
+    Then the run's close-out log holds "read of the story failed (i/o timeout), retried in 20s" and "Error: closing out mw-gq6.1: bd show: i/o timeout" between its start line and its end line
     And the pane showed "Error: closing out mw-gq6.1: bd show: i/o timeout" too

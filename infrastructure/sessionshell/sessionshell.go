@@ -165,12 +165,23 @@ func WithAfter(line string, l application.Launch) string {
 // dies says why in its pane and nowhere else, and mw dispatch closes that pane
 // when it reclaims the story: the log is what is left to read. tee appends, so
 // a close-out run again for the same attempt (RunCloseOutAgain) adds to it.
+//
+// The close-out is set between two lines of the log's own (mw-gq6.1038): a start
+// line written before it runs, and an end line with its exit status, and the
+// signal when the status says one. A close-out says nothing until it ends, so a
+// pane killed under it (the desktop's WSL shut down at 05:04Z on 2026-11-07, with
+// mw-5r3p30.1107's close-out running) left next-1.log empty and the mail printed
+// no last words; now such a log holds at least its start line, and one with no
+// end line is a close-out that never ended.
 func AfterLine(l application.Launch) string {
 	after := ShellLine(l.After)
 	if l.AfterLog == "" {
 		return after
 	}
-	return "{ " + after + "; } 2>&1 | tee -a " + ShellQuote(l.AfterLog)
+	start := `printf '%s\n' "` + application.CloseOutStarted + ` $(date -u +%Y-%m-%dT%H:%M:%SZ)"; `
+	end := `; s=$?; if [ "$s" -gt 128 ]; then printf '` + application.CloseOutEnded + `: exit %s (signal %s)\n' "$s" "$((s-128))"; ` +
+		`else printf '` + application.CloseOutEnded + `: exit %s\n' "$s"; fi`
+	return "{ " + start + after + end + "; } 2>&1 | tee -a " + ShellQuote(l.AfterLog)
 }
 
 // Env is what a host gives a session ahead of its line, each part left out when

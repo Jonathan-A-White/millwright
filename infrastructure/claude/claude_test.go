@@ -1210,8 +1210,8 @@ func TestTheCloseOutsWordsAreKeptInTheRunAsWellAsThePane(t *testing.T) {
 		t.Fatalf("assembling the session: %v", err)
 	}
 	line := spec.Command[2]
-	want := "; { " + closeOut + "; } 2>&1 | tee -a " + log
-	if !strings.HasSuffix(line, want) {
+	want := "; " + closeOut + "; s=$?; "
+	if !strings.Contains(line, want) || !strings.HasSuffix(line, "; } 2>&1 | tee -a "+log) {
 		t.Errorf("expected the close-out's words teed to the log, got %q", line)
 	}
 
@@ -1223,8 +1223,9 @@ func TestTheCloseOutsWordsAreKeptInTheRunAsWellAsThePane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the log: %v", err)
 	}
-	if got, want := string(kept), "landed\nError: closing out mw-gq6.6: i/o timeout\n"; got != want {
-		t.Errorf("expected the log to hold the close-out's words, got %q", got)
+	if got, want := string(kept), "landed\nError: closing out mw-gq6.6: i/o timeout\n"; !strings.Contains(got, want) ||
+		!strings.HasPrefix(got, application.CloseOutStarted) || !strings.HasSuffix(got, application.CloseOutEnded+": exit 1\n") {
+		t.Errorf("expected the log to hold the close-out's words between its start and end lines, got %q", got)
 	}
 	if !strings.Contains(string(printed), "Error: closing out mw-gq6.6: i/o timeout") {
 		t.Errorf("expected the pane to show the close-out's words too, got %q", printed)
@@ -1242,8 +1243,8 @@ func TestACloseOutAloneKeepsItsWordsToo(t *testing.T) {
 		t.Fatalf("assembling the session: %v", err)
 	}
 	line := spec.Command[2]
-	want := "{ /root/millwright/bin/mw next mw-gq6.6; } 2>&1 | tee -a /root/millwright-vault/runs/mw-gq6.6/next-2.log"
-	if !strings.HasSuffix(line, want) {
+	want := "/root/millwright/bin/mw next mw-gq6.6; s=$?; "
+	if !strings.Contains(line, want) || !strings.HasSuffix(line, "; } 2>&1 | tee -a /root/millwright-vault/runs/mw-gq6.6/next-2.log") {
 		t.Errorf("expected the close-out alone teed to its log, got %q", line)
 	}
 }

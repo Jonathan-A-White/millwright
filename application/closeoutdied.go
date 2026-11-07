@@ -17,6 +17,17 @@ func CloseOutDiedSubject(id string) string { return "Close-out died: " + id }
 // the comment on the story carry.
 const CloseOutLogTail = 20
 
+// CloseOutStarted and CloseOutEnded open the two lines the session's command
+// line writes into next-<attempt>.log around the close-out (mw-gq6.1038): the
+// first before the close-out runs, so a close-out killed with its pane (the
+// host shut down under it) still leaves a log that is not empty, and the second
+// when it ends, with its exit status. A log with the first and not the second
+// is a close-out that never ended.
+const (
+	CloseOutStarted = "close-out started"
+	CloseOutEnded   = "close-out ended"
+)
+
 // HeartbeatLogTail is how many of the heartbeat log's last lines the same
 // mail and comment carry, when the log exists (mw-gq6.494).
 const HeartbeatLogTail = 5
@@ -132,7 +143,10 @@ func (d Dispatch) mailCloseOutDied(ctx context.Context, detail StoryDetail, why,
 }
 
 // closeOutLogTail is the last CloseOutLogTail lines of the close-out's log in
-// the story's run, or one line saying why there are none.
+// the story's run, or one line saying why there are none. A log with nothing in
+// it says plainly that the close-out wrote nothing, and one that holds its start
+// line and no end line says it never ended (mw-gq6.1038): either is a close-out
+// killed with its pane, as a host that shut down does, not one that ran out of words.
 func (d Dispatch) closeOutLogTail(ctx context.Context, id, logName string) string {
 	kept, err := d.Boot.Vault.ReadRunFile(ctx, id, logName)
 	switch {
@@ -140,12 +154,22 @@ func (d Dispatch) closeOutLogTail(ctx context.Context, id, logName string) strin
 		return fmt.Sprintf("(none: no %s was kept, so the close-out's pane was the only place its words were)", logName)
 	case err != nil:
 		return fmt.Sprintf("(%s could not be read: %v)", logName, err)
+	case strings.TrimSpace(kept) == "":
+		return fmt.Sprintf("(%s is empty: the close-out wrote nothing (exit unknown: its pane was gone, killed before it could say; "+
+			"a host that shut down or restarted under it does this))", logName)
 	}
 	lines := strings.Split(strings.TrimRight(kept, "\n"), "\n")
 	if len(lines) > CloseOutLogTail {
 		lines = lines[len(lines)-CloseOutLogTail:]
 	}
-	return strings.Join(lines, "\n")
+	tail := strings.Join(lines, "\n")
+	// A close-out run again for the attempt appends to the log, so it is the last start line
+	// that must have no end line after it.
+	if strings.LastIndex(kept, CloseOutStarted) > strings.LastIndex(kept, CloseOutEnded) {
+		tail += fmt.Sprintf("\n(%s has no end line: the close-out never ended — its pane was killed under it, "+
+			"as a host that shut down or restarted does)", logName)
+	}
+	return tail
 }
 
 // heartbeatLogTail is the last HeartbeatLogTail lines of the heartbeat's log in
