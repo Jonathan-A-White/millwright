@@ -4073,6 +4073,22 @@ them; a host it cannot ask is said and skipped. The `wsl-trim` check of `mw
 doctor` is faulty on a WSL host whose `fstrim.timer` never ran or last ran over
 8 days ago, and names this command.
 
+**Restart or compact WSL with no visit to the desk (mw-gq6.1039).** WSL on the
+desktop is sealed from Windows, so nothing inside it can start a Windows program;
+a Windows scheduled task (`contrib/windows/wsl-flag-watch.ps1`, run as the Windows
+user that owns the distro) reads the flag file `~/.local/state/mw/wsl-flag` inside
+WSL every 2 minutes and does one of a fixed set of things: `restart` is `wsl
+--shutdown` then the `Start WSL (millwright)` task; `compact` is `fstrim -av`, a
+shutdown, a diskpart compact of the vhdx and the start task. WSL can ask, never
+command: any other content is ignored and logged. `mw host wsl-flag
+restart|compact [--host <host>] [--limit <duration>]` writes the flag on the host
+and waits for `wsl-flag.result` beside it (the task writes it after WSL is back),
+printing it; the wait is asked again while the host is down, and a result that
+says `failed` or `ignored` fails the command. `mw host wsl-flag --install-line`
+prints the one admin-PowerShell line, fenced, that installs the task (the script
+travels in the line) and the line that takes it away. Test: `go test ./cmd/mw -run
+WSLFlag`.
+
 **Compact, monthly.** Trimming only marks the freed blocks; the vhdx file shrinks
 when Windows compacts it. About monthly, and whenever the drive runs low, in an
 admin Windows PowerShell with nothing running in WSL (it stops WSL; the last
