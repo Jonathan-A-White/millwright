@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -611,19 +610,13 @@ func (c *doctorContext) aFakePowershellThatExists() error {
 }
 
 // theInternetIsUnreachable points the scenario's wifi check at a closed
-// local port, refusing every connection at once, standing in for the
+// address no test can bind (port 0), refusing every connection at once, standing in for the
 // internet being down without a real network call.
 func (c *doctorContext) theInternetIsUnreachable() error {
 	if c.wifi == nil {
 		return fmt.Errorf("no fake netsh was set up in this scenario")
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return fmt.Errorf("finding a closed port: %w", err)
-	}
-	addr := ln.Addr().String()
-	ln.Close()
-	c.wifi.Reach = []string{addr}
+	c.wifi.Reach = []string{deadAddress}
 	return nil
 }
 

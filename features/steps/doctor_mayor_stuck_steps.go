@@ -257,15 +257,16 @@ func (c *doctorContext) thisHostIsNotHome() error {
 	return nil
 }
 
-// refusedProxy is the address of a port nothing listens on: one that was
-// listening a moment ago.
+// deadAddress is a host:port that refuses every connection and that no other
+// test can bind: port 0 is the "pick one" request to bind, never a port a
+// listener holds, so a dial to it is refused at once. A port picked by closing
+// a listener on :0 can be taken again by a test running in parallel, and then
+// answers (mw-gq6.1031).
+const deadAddress = "127.0.0.1:0"
+
+// refusedProxy is the address of a proxy nothing can listen on.
 func refusedProxy() (string, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return "", err
-	}
-	addr := l.Addr().String()
-	return "http://" + addr, l.Close()
+	return "http://" + deadAddress, nil
 }
 
 func (c *doctorContext) theEnvironmentSetsADeadProxy() error {
