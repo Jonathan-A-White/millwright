@@ -22,6 +22,11 @@ Feature: mw deputy
   Deputy, which reads the mail from its handoff. A handed-off Deputy that is
   still busy is left alone, as any busy Deputy is.
 
+  The follower does not type the mail nudge into a window whose session has
+  handed off, which only draws one more turn from it; it runs mw deputy. A
+  handed-off Deputy found busy is left alone, and replaced by the run after its
+  turn has ended.
+
   A Deputy whose session handed off and stopped with only unsent text on its
   input line, with no turn running, is done as well: mw closes that window and
   starts a fresh Deputy, as for an idle one. The same pane with a turn running
@@ -119,6 +124,21 @@ Feature: mw deputy
     And exactly one window was opened
     And seat up says it started the seat in the window "deputy-2026-09-30-02"
     And a reaper was armed on the window "deputy-2026-09-30-02" in when-idle mode for the "deputy" seat
+
+  Scenario: A Deputy that has handed off and is busy is replaced by the run after its turn has ended
+    Given the window "deputy-2026-09-29-02" was opened at "2026-09-29T08:00:00Z"
+    And the "deputy" seat's newest handoff was written at "2026-09-29T09:00:00Z"
+    And the pane of the window "deputy-2026-09-29-02" is busy
+    And the Deputy's box holds 2 unread messages
+    When mw deputy is run
+    Then mw deputy is refused saying "the Deputy is busy in window deputy-2026-09-29-02: a turn is running; the mail waits"
+    And the window "deputy-2026-09-29-02" was not closed
+    When the turn in the window "deputy-2026-09-29-02" ends
+    And mw deputy is run
+    Then mw deputy succeeds
+    And the window "deputy-2026-09-29-02" was closed
+    And exactly one window was opened
+    And seat up says it started the seat in the window "deputy-2026-09-30-02"
 
   Scenario: A Deputy stopped at the usage limit is typed nothing and told the mail waits for the reset
     Given the window "deputy-2026-09-30-02" was opened at "2026-09-30T08:00:00Z"

@@ -25,6 +25,7 @@ import (
 func registerDeputySteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Given(`^the Deputy's box holds (\d+) unread messages$`, c.theDeputysBoxHolds)
 	ctx.Given(`^the pane of the window "([^"]*)" is busy$`, c.thePaneIsBusy)
+	ctx.When(`^the turn in the window "([^"]*)" ends$`, c.theTurnEnds)
 	ctx.Given(`^the pane of the window "([^"]*)" holds only unsent text$`, c.thePaneHoldsOnlyUnsentText)
 	ctx.Given(`^the pane of the window "([^"]*)" shows a background agent running$`, c.thePaneShowsABackgroundAgent)
 	ctx.Given(`^the pane of the window "([^"]*)" shows the usage limit "([^"]*)"$`, c.thePaneShowsTheUsageLimit)
@@ -122,6 +123,14 @@ func (c *seatUpContext) thePaneIsBusy(window string) error {
 		return fmt.Errorf("the window %s is not open", window)
 	}
 	return c.windows.Pane(id, application.PaneWorking)
+}
+
+func (c *seatUpContext) theTurnEnds(window string) error {
+	id, open := c.windows.IDOf(window)
+	if !open {
+		return fmt.Errorf("the window %s is not open", window)
+	}
+	return c.windows.Pane(id, application.PaneIdle)
 }
 
 // usageLimitScreen is a Claude Code screen that chose "Stop and wait" at the

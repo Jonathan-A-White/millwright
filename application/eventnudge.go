@@ -66,6 +66,9 @@ type EventNudger interface {
 //     the line is still on it, Enter is pressed once more, and the log says so
 //     (and says if the line is on it still). The pane is then not typed into
 //     again until the line is empty. A line a busy pane queued is delivered.
+//   - a window that is up and idle, of a seat marked spring whose session has
+//     written a handoff since the window opened, is not typed: the seat is
+//     sprung, which replaces the window (mw-gq6.1036);
 //   - a window that is up and not idle is left alone: the events are told
 //     again on the next Nudge;
 //   - a window that is down is brought up with Spring when the seat is marked
@@ -215,6 +218,18 @@ func (n *EventNudge) Nudge(ctx context.Context) error {
 		}
 		line := EventsNudgeLine(seat, len(matched), matched[0].Seq-1)
 		switch {
+		case found && sub.Spring && n.Spring != nil && n.handedOff(ctx, seat, window):
+			// The session in this window wrote its handoff and will only answer
+			// a nudge with a turn saying it is done, which keeps the pane from
+			// ever being idle for the replacement: the seat's up command closes
+			// the window and starts a fresh session, or nudges it when it
+			// cannot yet (mw-gq6.1036).
+			if err := n.Spring(ctx, seat, line); err != nil {
+				n.say("spring:"+seat, fmt.Errorf("replacing the %s that has handed off in %s: %w", seat, window.Name, err))
+				continue
+			}
+			n.quiet("spring:" + seat)
+			set(seat, last)
 		case found:
 			typed := line
 			if mail == len(matched) {
@@ -322,6 +337,20 @@ func (n *EventNudge) listing(ctx context.Context, box string, head uint64) (map[
 	}
 	n.listings[box] = inboxListing{at: now(), head: head, unread: ids}
 	return ids, nil
+}
+
+// handedOff says whether the session in the window has written a handoff since
+// the window was opened. A window nothing can date, or files that cannot be
+// read, are a session that has not.
+func (n *EventNudge) handedOff(ctx context.Context, seat string, window ReapWindow) bool {
+	if n.Seats == nil || window.Opened.IsZero() {
+		return false
+	}
+	start, err := n.Seats.SeatStart(ctx, seat, n.Host)
+	if err != nil {
+		return false
+	}
+	return handedOffSince(start.Handoffs, window.Opened)
 }
 
 // idle says whether the window's pane can be typed into. A pane at work, or

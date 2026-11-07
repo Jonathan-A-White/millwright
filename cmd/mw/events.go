@@ -427,7 +427,12 @@ func springSeat(ctx context.Context, seat, reason string) error {
 	default:
 		return fmt.Errorf("the %s seat has no up command to spring it with", seat)
 	}
-	if _, up := application.DeputyIsUp(err); up {
+	// A Deputy found busy or at its usage limit was not replaced or told of
+	// its mail: that is said and tried again, not taken for done.
+	if up, is := application.DeputyIsUp(err); is {
+		if up.Busy || up.Limit != nil {
+			return err
+		}
 		return nil
 	}
 	if _, up := application.MillhandIsUp(err); up {
