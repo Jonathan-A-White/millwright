@@ -1261,7 +1261,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			why := fmt.Sprintf("%s has taken %d of the %d sessions it may run at once", d.Host,
 				report.Running+len(report.Started)+len(report.Failed), limit)
 			if pulse.Lowered() {
-				why += " while a tutor is in use (grist first)"
+				why += GristFirstWords
 			}
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "cap", Why: why})
 			continue

@@ -276,10 +276,31 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 		}
 		// The rig, its hold and the stories ready are the alarm; how long it has
 		// lasted, and the reason's words, differ from one host's reading to the next.
-		identity := strings.Join(append([]string{rig, r.Hold}, slices.Sorted(slices.Values(ready))...), "\t")
-		alarms = append(alarms, DamperAlarm{Principle: StarvedPrinciple, Text: text, Beads: ready, Identity: identity, Wait: r.Hold == StarvedHolds["no-room"]})
+		// A wait is one fact whichever of the waiting holds it is held by, so its
+		// identity leaves the hold out: the hold flipping from no room to the cap and
+		// back is not news (mw-gq6.984).
+		wait := holdIsAWait(r)
+		parts := []string{rig, r.Hold}
+		if wait {
+			parts = []string{rig}
+		}
+		identity := strings.Join(append(parts, slices.Sorted(slices.Values(ready))...), "\t")
+		alarms = append(alarms, DamperAlarm{Principle: StarvedPrinciple, Text: text, Beads: ready, Identity: identity, Wait: wait})
 	}
 	return alarms
+}
+
+// GristFirstWords end the reason dispatch gives for the cap while a tutor is in
+// use: the host's sessions are cut to leave room for it (grist first).
+const GristFirstWords = " while a tutor is in use (grist first)"
+
+// holdIsAWait says a rig's hold is the host's room and nothing else: no room (the
+// load is over the cores) or the cap a tutor in use puts on the sessions, both of
+// which ease by themselves. A cap with no tutor in use is the same cap the
+// host's other rigs hold, and stays a fault as any other hold does (mw-gq6.984).
+func holdIsAWait(r StarvedRig) bool {
+	return r.Hold == StarvedHolds["no-room"] ||
+		r.Hold == StarvedHolds["cap"] && strings.HasSuffix(strings.TrimSpace(r.Reason), strings.TrimSpace(GristFirstWords))
 }
 
 // harnessWayOut is the sentence a rig held by a host's harness stop carries
@@ -453,8 +474,9 @@ const StarvedRigName = "starved-rig"
 // named (mw-gq6.580). Its cure is the mail to the Mayor, once a fault episode: the
 // episode ends when the probe next finds nothing starved, as when a story of
 // the rig starts, and a later starving is mailed again. It changes nothing else.
-// A rig held only by load is a wait for the host's room, not a fault: it is
-// mailed once and the check stays ok (mw-gq6.870), so it never reaches the
+// A rig held only by load, or by the cap a tutor in use puts on the host, is a
+// wait for the host's room, not a fault: it is mailed once for a starving,
+// whichever of the two holds it, and the check stays ok (mw-gq6.870, mw-gq6.984), so it never reaches the
 // Governor as a faulty verdict, a note or a failed unit.
 type StarvedRigCheck struct {
 	// Host is this host, named in the mail.
@@ -556,7 +578,7 @@ func (c *StarvedRigCheck) tellOfWaits(ctx context.Context, waits []DamperAlarm) 
 	if err := c.Mailed.SetNote(ctx, StarvedWaitMailedKey, mailed); err != nil {
 		return fmt.Errorf("what the Mayor is mailed of the rigs waiting for room could not be kept: %w", err)
 	}
-	err := c.mailMayor(ctx, waits, "Waiting for room on the host, not a fault: the host has no room for a Builder while its load is over its cores, and a story starts when it falls.")
+	err := c.mailMayor(ctx, waits, "Waiting for room on the host, not a fault: the host has no room for a Builder (its load is over its cores, or its sessions are taken while a tutor is in use), and a story starts when that eases.")
 	if err != nil {
 		_ = c.Mailed.ClearNote(ctx, StarvedWaitMailedKey)
 	}

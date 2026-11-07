@@ -834,3 +834,138 @@ func TestAStarvedAlarmHeldByAFaultStaysAFaultOnceTheMayorIsMailed(t *testing.T) 
 		t.Fatalf("expected the fault to be left faulty after its one mail, got %+v %v", report.Results, err)
 	}
 }
+
+// mw-gq6.984: one starving of a rig is one mail while it only waits. A hold that
+// flips between no room and the cap a tutor in use puts on the host (both waits
+// for the host) is the same wait; a cap with no tutor in use, or any other hold,
+// is a fault as it was.
+const (
+	tutorCapReason = "laptop has taken 4 of the 3 sessions it may run at once while a tutor is in use (grist first)"
+	plainCapReason = "laptop has taken 3 of the 3 sessions it may run at once"
+)
+
+func holdRigBy(t *testing.T, tracker *apptest.FakeTracker, rig, hold, reason string) {
+	t.Helper()
+	note := application.StarvedRig{Rig: rig, Since: statusNow.Add(-4 * time.Hour), Hold: hold, Reason: reason}
+	if err := tracker.SetNote(context.Background(), application.StarvedKey("vps"), application.FormatStarved([]application.StarvedRig{note})); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func aWaitingRigCheck(t *testing.T) (*apptest.FakeTracker, *apptest.FakeMailbox, func()) {
+	t.Helper()
+	ctx := context.Background()
+	tracker := starvedFixture(t, 4*time.Hour)
+	mailbox := apptest.NewFakeMailbox()
+	now := doctorNow
+	doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now, aStarvedRigCheckOnHost("laptop", statusNow, tracker, mailbox))
+	return tracker, mailbox, func() {
+		t.Helper()
+		if _, err := doctor.Run(ctx, "", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func mailsToTheMayor(t *testing.T, mailbox *apptest.FakeMailbox) []application.Message {
+	t.Helper()
+	inbox, err := mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return inbox
+}
+
+func TestACapHeldByATutorInUseIsAWaitAndAPlainCapIsAFault(t *testing.T) {
+	tracker := starvedFixture(t, 4*time.Hour)
+	holdRigBy(t, tracker, "millwright", "cap", tutorCapReason)
+	if alarms := starvedAlarms(t, tracker); len(alarms) != 1 || !alarms[0].Wait {
+		t.Errorf("expected the cap a tutor in use puts on the host to be a wait, got %+v", alarms)
+	}
+	holdRigBy(t, tracker, "millwright", "cap", plainCapReason)
+	if alarms := starvedAlarms(t, tracker); len(alarms) != 1 || alarms[0].Wait {
+		t.Errorf("expected a cap with no tutor in use to be a fault, got %+v", alarms)
+	}
+}
+
+func TestAHoldFlippingBetweenNoRoomAndTheTutorCapMailsTheMayorOnce(t *testing.T) {
+	tracker, mailbox, run := aWaitingRigCheck(t)
+	for _, step := range []struct{ hold, reason string }{
+		{"no room", "laptop has no room: load 34.3 of 20 cores"},
+		{"cap", tutorCapReason},
+		{"no room", "laptop has no room: load 34.3 of 20 cores"},
+		{"no room", "laptop has no room: load 21.0 of 20 cores"},
+	} {
+		holdRigBy(t, tracker, "millwright", step.hold, step.reason)
+		run()
+	}
+	if inbox := mailsToTheMayor(t, mailbox); len(inbox) != 1 {
+		t.Fatalf("expected one mail for one starving of one rig, got %d: %+v", len(inbox), inbox)
+	}
+}
+
+func TestAFlippingWaitIsMailedAgainOnceAStoryOfTheRigStartedAndItStarvesAgain(t *testing.T) {
+	ctx := context.Background()
+	tracker, mailbox, run := aWaitingRigCheck(t)
+	holdRigBy(t, tracker, "millwright", "no room", "laptop has no room: load 34.3 of 20 cores")
+	run()
+	holdRigBy(t, tracker, "millwright", "cap", tutorCapReason)
+	run()
+	if err := tracker.ClaimStory(ctx, "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	run() // cleared: a story of the rig runs
+	if err := tracker.ReleaseClaim(ctx, "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	holdRigBy(t, tracker, "millwright", "cap", tutorCapReason)
+	run()
+	if inbox := mailsToTheMayor(t, mailbox); len(inbox) != 2 {
+		t.Fatalf("expected one mail for each starving, got %d", len(inbox))
+	}
+}
+
+func TestASecondRigStarvingWhileTheFirstWaitsIsMailed(t *testing.T) {
+	tracker, mailbox, run := aWaitingRigCheck(t)
+	holdRigBy(t, tracker, "millwright", "no room", "laptop has no room: load 34.3 of 20 cores")
+	run()
+	other := domain.Story{ID: "mw-gq6.7", Title: "Other rig"}
+	if err := other.Overrides.Set("host", "vps"); err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Overrides.Set("rig", "leaderboard"); err != nil {
+		t.Fatal(err)
+	}
+	tracker.AddStory("mw-gq6", other)
+	notes := []application.StarvedRig{
+		{Rig: "millwright", Since: statusNow.Add(-4 * time.Hour), Hold: "cap", Reason: tutorCapReason},
+		{Rig: "leaderboard", Since: statusNow.Add(-4 * time.Hour), Hold: "no room", Reason: "laptop has no room: load 34.3 of 20 cores"},
+	}
+	if err := tracker.SetNote(context.Background(), application.StarvedKey("vps"), application.FormatStarved(notes)); err != nil {
+		t.Fatal(err)
+	}
+	run()
+	inbox := mailsToTheMayor(t, mailbox)
+	if len(inbox) != 2 || !strings.Contains(inbox[1].Body, "leaderboard") {
+		t.Fatalf("expected a second mail naming the second rig, got %+v", inbox)
+	}
+}
+
+func TestAFlipFromAWaitToAFaultStillMailsAndTheFaultStaysAFault(t *testing.T) {
+	ctx := context.Background()
+	tracker, mailbox, run := aWaitingRigCheck(t)
+	holdRigBy(t, tracker, "millwright", "cap", tutorCapReason)
+	run()
+	holdRigBy(t, tracker, "millwright", "cap", plainCapReason)
+	now := doctorNow
+	doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now, aStarvedRigCheckOnHost("laptop", statusNow, tracker, mailbox))
+	if _, err := doctor.Run(ctx, "", false); err != nil {
+		t.Fatal(err)
+	}
+	if report, err := doctor.Run(ctx, "", false); err == nil || !report.Faulty() {
+		t.Fatalf("expected the fault to stay faulty after its mail, got %+v %v", report.Results, err)
+	}
+	if inbox := mailsToTheMayor(t, mailbox); len(inbox) != 2 {
+		t.Fatalf("expected a mail for the wait and one for the fault, got %d", len(inbox))
+	}
+}
