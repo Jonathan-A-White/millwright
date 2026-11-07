@@ -61,6 +61,7 @@ func TestStuckDoesNotListAHoldTheHoldHelpersWroteAReasonFor(t *testing.T) {
 var holdSites = map[string]string{
 	"application/ice.go:HoldStory":                    "refuses",
 	"application/dispatch.go:HoldClaimHeldBy":         "reason",
+	"application/next.go:HoldClaimHeldBy":             "reason",
 	"application/retry.go:HoldStory":                  "reason",
 	"application/retry.go:HoldClaimHeldBy":            "reason",
 	"application/postern.go:HoldStory":                "reason",

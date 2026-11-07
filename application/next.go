@@ -115,6 +115,12 @@ const (
 	// branch is not: no closing comment was written after its newest commit
 	// (mw-gq6.630). Like open steps, it is the Builder's to mend.
 	ReasonNoClosingComment Reason = "no-closing-comment"
+	// ReasonStubClosingComment is a story whose formula is finished and whose
+	// only comment after its newest commit is a stub (mw-gq6.1045): a '-' that
+	// 'bd comments add <id> - <<EOF' posts, bd having no stdin dash. Its work is
+	// done, so another attempt would redo it: the claim is given back and the
+	// story held for the Mayor, with the reason.
+	ReasonStubClosingComment Reason = "closing-comment-stub"
 	// ReasonUnmetCriterion is a story whose closing comment says an acceptance
 	// criterion holds only in part, is not met or was not run (mw-gq6.711): not
 	// a landing, whatever the gate says. Its claim is kept, as for the tests
@@ -2330,9 +2336,69 @@ func (n Next) closingCommentRefusal(ctx context.Context, c *closeOut, report *Ne
 	if written {
 		return n.gristExampleRefusal(ctx, c, report, text)
 	}
+	if stub, found := n.stubCommentOnStory(ctx, c, base); found {
+		return Refusal{ReasonStubClosingComment, fmt.Sprintf("the formula of %s is finished, but the newest comment is %s (%s): %s", c.id, quoteStub(stub), byteCount(len(stub)), StubCommentCure),
+			"The work of the story is done and committed, so a new attempt would build it again: the story is held for the Mayor, who writes the closing comment from the session's log or has it written, and lets the story through.\n\n" +
+				"A closing comment has HOW TO CHECK IT, for the Governor (or the line 'Internal: nothing for the Governor to look at') and 'For the rig memory:'."}, true
+	}
 	return Refusal{ReasonNoClosingComment, fmt.Sprintf("the formula of %s is finished, but the story has no closing comment written after its newest commit", c.id),
 		"A closing comment has HOW TO CHECK IT, for the Governor (or the line 'Internal: nothing for the Governor to look at') and 'For the rig memory:'. " +
 			"A closed 'Write the closing comment' step is not one: write the comment on the story, after the last commit, and run mw next again."}, true
+}
+
+// StubCommentBytes is the size under which a comment after a story's newest
+// commit is a stub, not a closing comment (mw-gq6.1045).
+const StubCommentBytes = 40
+
+// StubCommentCure is what a stub closing comment is told: bd 1.3.0 reads no
+// stdin dash, so 'bd comments add <id> -' posts the text '-'.
+const StubCommentCure = "bd comments add takes -f <file>, not -"
+
+// StubHeldSaid is what the HELD: comment of a story held for a stub closing
+// comment adds to why it is held.
+const StubHeldSaid = "Its work is done and committed; the Mayor writes the closing comment and releases it."
+
+// quoteStub is a stub comment between single quotes, as the refusal quotes it.
+func quoteStub(text string) string { return "'" + strings.TrimSpace(text) + "'" }
+
+// byteCount is n with its unit: '1 byte', '3 bytes'.
+func byteCount(n int) string {
+	if n == 1 {
+		return "1 byte"
+	}
+	return fmt.Sprintf("%d bytes", n)
+}
+
+// stubCommentOnStory is the newest comment written after the newest commit of
+// the story's branch when it is under StubCommentBytes, and whether there is
+// one. Anything it cannot read counts as no.
+func (n Next) stubCommentOnStory(ctx context.Context, c *closeOut, base string) (string, bool) {
+	commits, err := n.Landing.Commits(ctx, c.rigDir, c.branch, base)
+	if err != nil {
+		return "", false
+	}
+	var committed time.Time
+	for _, commit := range commits {
+		if commit.Committed.After(committed) {
+			committed = commit.Committed
+		}
+	}
+	comments, err := n.Tracker.StoryComments(ctx, c.id)
+	if err != nil {
+		return "", false
+	}
+	var newest time.Time
+	var text string
+	found := false
+	for _, comment := range comments {
+		if comment.Created.After(committed) && !comment.Created.Before(newest) {
+			newest, text, found = comment.Created, strings.TrimSpace(comment.Text), true
+		}
+	}
+	if !found || len(text) >= StubCommentBytes {
+		return "", false
+	}
+	return text, true
 }
 
 // bulletList is lines, one to a line, each after a '- '.
@@ -3287,7 +3353,20 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	// Mayor can bd close it. Every other stop keeps the claim, because the claim
 	// is the evidence.
 	given := false
-	if reason == ReasonOpenSteps || reason == ReasonAcceptanceChanged || reason == ReasonNoClosingComment || reason == ReasonGristExampleUnproved || reason == ReasonTurnCap || (reason == ReasonWorkflowScope && giveBack) || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
+	if reason == ReasonStubClosingComment {
+		// Its work is done, so another attempt would redo it: the claim is
+		// given back and the story held for the Mayor (mw-gq6.1045).
+		if err := n.holdOnStop(ctx, c.id, c.detail.Assignee, report); err != nil {
+			trouble = append(trouble, fmt.Sprintf("%s could not be held: %v", c.id, err))
+		} else {
+			given = true
+			// The reason the story is held, in the words mw stuck and mw release read.
+			held := HeldCommentPrefix + " " + why + ". " + StubHeldSaid
+			if err := writeRetrying(ctx, n, report, "the reason it is held", func() error { return n.Tracker.CommentOnStory(ctx, c.id, held) }); err != nil {
+				trouble = append(trouble, fmt.Sprintf("the reason %s is held could not be written on it: %v", c.id, err))
+			}
+		}
+	} else if reason == ReasonOpenSteps || reason == ReasonAcceptanceChanged || reason == ReasonNoClosingComment || reason == ReasonGristExampleUnproved || reason == ReasonTurnCap || (reason == ReasonWorkflowScope && giveBack) || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
 		if err := n.releaseOnStop(ctx, c.id, report); err != nil {
 			trouble = append(trouble, fmt.Sprintf("the claim on %s could not be given back: %v", c.id, err))
 		} else {
@@ -3300,6 +3379,8 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 		// A Tester story that left nothing to land (mw-gq6.594): its claim is not
 		// the evidence, so it is given back and the Mayor can bd close it.
 		claim = "the claim was given back and it is open again, so it can be closed with a plain bd close"
+	} else if given && reason == ReasonStubClosingComment {
+		claim = "the claim was given back and it is held, not open: no dispatch tick takes it until mw release lets it through"
 	} else if given && continues {
 		claim = fmt.Sprintf("the claim was given back and it is open again: the next dispatch tick takes it as attempt %d "+
 			"and keeps the branch under another name to cut its own from", c.detail.Attempts+1)
@@ -3978,6 +4059,25 @@ func (n Next) releaseOnStop(ctx context.Context, id string, report *NextReport) 
 			return err
 		}
 		if detail, readErr := n.Tracker.ShowStory(ctx, id); readErr == nil && detail.Status == StatusOpen && detail.Assignee == "" {
+			return nil
+		}
+		return err
+	})
+}
+
+// holdOnStop gives back the claim of a story stopped for a stub closing comment
+// and leaves it held, trying again as releaseOnStop does; a story the fault
+// left held and unclaimed is held all the same.
+func (n Next) holdOnStop(ctx context.Context, id, holder string, report *NextReport) error {
+	return writeRetrying(ctx, n, report, "the hold of "+id, func() error {
+		err := n.Tracker.HoldClaimHeldBy(ctx, id, holder)
+		if err == nil {
+			return nil
+		}
+		if _, passing := Faulted(err); passing {
+			return err
+		}
+		if detail, readErr := n.Tracker.ShowStory(ctx, id); readErr == nil && detail.Status == StatusHeld && detail.Assignee == "" {
 			return nil
 		}
 		return err

@@ -487,10 +487,11 @@ Feature: Closing out a finished story and carrying on
   # mw-gq6.630: a Builder can close the closing-comment step and leave a comment
   # that is not one ('•', mw-5r3p30.634): the close-out asks for the comment
   # itself, not for the step to be closed, and hands the story back to be mended.
-  Scenario: A story whose closing-comment step is closed but whose only comment after its newest commit is a bullet is handed back
+  # A comment that long is not a stub; a stub is held (mw-gq6.1045, below).
+  Scenario: A story whose closing-comment step is closed but whose only comment after its newest commit is not a closing comment is handed back
     Given the session of "mw-gq6.1" reported a plain success
     And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
-    And the comment "•" was written on "mw-gq6.1" after its newest commit
+    And the comment "Built it, and the tests pass, but I forgot the closing sections." was written on "mw-gq6.1" after its newest commit
     When mw closes out "mw-gq6.1"
     Then nothing was landed on "main"
     And the story "mw-gq6.1" is not closed
@@ -498,6 +499,31 @@ Feature: Closing out a finished story and carrying on
     And the printed report says "no closing comment"
     And the story "mw-gq6.1" carries a comment quoting: takes it as attempt 1
     And the worktree of "mw-gq6.1" is still there
+
+  # mw-gq6.1045: 'bd comments add <id> - <<EOF' posts a literal '-' (bd has no
+  # stdin dash). The session ended believing it had closed; a new attempt would
+  # redo finished work, so the story is held for the Mayor, with the reason.
+  Scenario: A story whose only comment after its newest commit is a one-byte stub is held, not given another attempt
+    Given the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And the comment "-" was written on "mw-gq6.1" after its newest commit
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" is held, not open
+    And the report says it stopped for "closing-comment-stub"
+    And the printed report says "the newest comment is '-' (1 byte): bd comments add takes -f <file>, not -"
+    And the story "mw-gq6.1" carries a comment quoting: bd comments add takes -f <file>, not -
+    And the story "mw-gq6.1" carries a comment quoting: HELD: the formula of mw-gq6.1 is finished
+    And the worktree of "mw-gq6.1" is still there
+
+  Scenario: A bullet left as the closing comment is a stub too
+    Given the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And the comment "•" was written on "mw-gq6.1" after its newest commit
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is held, not open
+    And the report says it stopped for "closing-comment-stub"
 
   Scenario: A story with no comment at all and every step closed is handed back for its closing comment
     Given the session of "mw-gq6.1" reported a plain success

@@ -104,12 +104,21 @@ Feature: Checking a branch before its session ends
 
   # mw-gq6.630: the check says before mw next does that a closed closing-comment
   # step is not a closing comment.
-  Scenario: A closed closing-comment step with only a bullet on the story fails the check
+  Scenario: A closed closing-comment step with only a comment that is not a closing comment on the story fails the check
+    Given a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And the comment "Built it, and the tests pass, but I forgot the closing sections." was written on "mw-gq6.1" after its newest commit
+    When a session checks "mw-gq6.1"
+    Then the check fails
+    And the check prints: no closing comment
+    And the check wrote nothing to the tracker, the ledger, the vault or git
+
+  # mw-gq6.1045: a stub ('-', or the bullet it renders as) is named, with its cure.
+  Scenario: A closed closing-comment step with only a bullet on the story fails the check, naming the stub
     Given a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
     And the comment "•" was written on "mw-gq6.1" after its newest commit
     When a session checks "mw-gq6.1"
     Then the check fails
-    And the check prints: no closing comment
+    And the check prints: bd comments add takes -f <file>, not -
     And the check wrote nothing to the tracker, the ledger, the vault or git
 
   Scenario: Every check that fails is printed at once, not only the first
