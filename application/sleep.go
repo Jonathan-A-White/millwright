@@ -223,6 +223,9 @@ type SleepResult struct {
 	Stale int
 	// Proposed is how many PROPOSED comments the pass wrote (proposals.md).
 	Proposed int
+	// OldHolds is how many held beads stale.md names for being held SleepHoldDays
+	// or more (mw-gq6.978).
+	OldHolds int
 	Summary  string
 	Fuel     Fuel
 }
@@ -342,6 +345,9 @@ type SleepPass struct {
 	// plans/improvements/ledger.jsonl, read through it and written through
 	// Vault; without it none is (mw-gq6.776).
 	Ledger SleepLedgerVault
+	// Holds is where the held beads are read from, to name the old ones in
+	// stale.md; without it none is named (mw-gq6.978).
+	Holds SleepHolds
 	// Instructions is grinds/sleep.md, the rule the agent is given.
 	Instructions string
 	// Host signs the summary: sleep@<host>.
@@ -478,6 +484,16 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 	}
 	stale := staleItems(staleText)
 	result.Stale = stale
+	// The holds the pass names go after the agent's lines, which are kept as
+	// they are; reading them is not the agent's and a failure costs only them.
+	holds, holdsErr := p.oldHolds(ctx, now)
+	result.OldHolds = len(holds)
+	if len(holds) > 0 {
+		if strings.TrimSpace(staleText) != "" {
+			staleText = withNewline(staleText) + "\n"
+		}
+		staleText += oldHoldsText(holds)
+	}
 	if strings.TrimSpace(staleText) != "" {
 		files = append(files, struct{ name, text string }{"stale.md", staleText})
 	}
@@ -522,6 +538,9 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 		staleLine = fmt.Sprintf("Stale in Needs you: %d (stale.md).", stale)
 	}
 	counts := foldLine + " " + staleLine + " " + proposedLine
+	if len(holds) > 0 {
+		counts += fmt.Sprintf(" Holds over %d days old: %d (stale.md).", SleepHoldDays, len(holds))
+	}
 	result.Summary = trimWords(answer.Summary, sleepSummaryWords-len(strings.Fields(pointer))-len(strings.Fields(counts))) + "\n\n" + counts
 	var mailErr error
 	if p.Mailbox != nil {
@@ -535,7 +554,20 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 		}
 	}
 	p.say("mw sleep pass: %d files written to %s (%s/%s, %s tokens)\n", len(result.Files), result.Dir, model, effort, Thousands(log.Tokens.Total))
-	return result, errors.Join(proposeErr, ledgerErr, logErr, commitErr, mailErr)
+	return result, errors.Join(proposeErr, holdsErr, ledgerErr, logErr, commitErr, mailErr)
+}
+
+// oldHolds are the held beads past SleepHoldDays, read from Holds; none, and no
+// error, without it. It changes no bead.
+func (p SleepPass) oldHolds(ctx context.Context, now time.Time) ([]OldHold, error) {
+	if p.Holds == nil {
+		return nil, nil
+	}
+	holds, err := OldHolds(ctx, p.Holds, now)
+	if err != nil {
+		return nil, fmt.Errorf("the old holds were not named in stale.md: %w", err)
+	}
+	return holds, nil
 }
 
 // appendIdeas appends a line to plans/improvements/ledger.jsonl for each idea of

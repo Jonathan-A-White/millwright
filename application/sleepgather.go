@@ -709,3 +709,96 @@ func AggregateSleepSessions(sessions []SleepSession, days int) string {
 	out.WriteString("The gate's seconds, what landed and the refusal causes are in the report.\n")
 	return out.String()
 }
+
+// SleepHoldDays is how old a hold must be for the sleep pass to name it in
+// stale.md: a hold of a week or more. A constant, not a setting: no key of the
+// config fits, and a new one is the Governor's to allow (mw-gq6.978).
+const SleepHoldDays = 7
+
+// sleepHoldReasonRunes is the most of a hold's reason the line of stale.md holds.
+const sleepHoldReasonRunes = 200
+
+// sleepNoHoldReason is the reason of a hold that no comment opening
+// HeldCommentPrefix gives.
+const sleepNoHoldReason = "no reason on the bead"
+
+// SleepHolds is what the old-holds sweep reads: every bead, and the comments of
+// some. The infrastructure/beads Gateway is one.
+type SleepHolds interface {
+	TriageBeads(ctx context.Context) ([]TriageBead, error)
+	StoriesComments(ctx context.Context, ids []string) (map[string][]Comment, error)
+}
+
+// OldHold is a held bead that has been held for SleepHoldDays or more.
+type OldHold struct {
+	ID, Title string
+	// Days is how long it has been held, in whole days.
+	Days int
+	// Reason is the first line of the last comment opening HeldCommentPrefix, or
+	// sleepNoHoldReason.
+	Reason string
+}
+
+// OldHolds are the held work beads that have been held for SleepHoldDays or
+// more as of now, oldest first. A bead is held since its last comment opening
+// HeldCommentPrefix, else since it was last updated: a later remark on it does
+// not make the hold young. It reads and changes nothing.
+func OldHolds(ctx context.Context, source SleepHolds, now time.Time) ([]OldHold, error) {
+	beads, err := source.TriageBeads(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading the beads for the old holds: %w", err)
+	}
+	var held []TriageBead
+	var ids []string
+	for _, b := range beads {
+		if isWork(b) && strings.EqualFold(strings.TrimSpace(b.Status), StatusHeld) {
+			held = append(held, b)
+			ids = append(ids, b.ID)
+		}
+	}
+	if len(held) == 0 {
+		return nil, nil
+	}
+	said, err := source.StoriesComments(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("reading the comments of the held beads: %w", err)
+	}
+	var found []OldHold
+	for _, b := range held {
+		since, reason := b.Updated, sleepNoHoldReason
+		if since.IsZero() {
+			since = b.Created
+		}
+		for _, c := range said[b.ID] { // oldest first: the last hold comment wins
+			text := strings.TrimSpace(c.Text)
+			if !strings.HasPrefix(strings.ToUpper(text), HeldCommentPrefix) {
+				continue
+			}
+			if !c.Created.IsZero() {
+				since = c.Created
+			}
+			first, _, _ := strings.Cut(text, "\n")
+			reason = clipRunes(oneLine(first), sleepHoldReasonRunes)
+		}
+		if days := wholeDays(now, since); days >= SleepHoldDays {
+			found = append(found, OldHold{ID: b.ID, Title: oneLine(b.Title), Days: days, Reason: reason})
+		}
+	}
+	sort.Slice(found, func(a, b int) bool {
+		if found[a].Days != found[b].Days {
+			return found[a].Days > found[b].Days
+		}
+		return found[a].ID < found[b].ID
+	})
+	return found, nil
+}
+
+// oldHoldsText is the section of stale.md that names the old holds, a line each.
+func oldHoldsText(holds []OldHold) string {
+	var out strings.Builder
+	fmt.Fprintf(&out, "## Holds of %d days or more (named, not released: the Mayor or he decides)\n", SleepHoldDays)
+	for _, h := range holds {
+		fmt.Fprintf(&out, "- %s %q: held %d %s. Reason: %s\n", h.ID, h.Title, h.Days, plural(h.Days, "day", "days"), h.Reason)
+	}
+	return out.String()
+}

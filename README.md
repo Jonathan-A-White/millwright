@@ -3690,7 +3690,9 @@ the next sitting, and the mail says how many are stale), `proposals.md` (when th
 candidates his evidence of the day shows met, each with its txid, what it shows and its confidence; mw writes the
 PROPOSED comment on the bead for those at or over `[verify] confidence`, through the writer `mw verify match` uses, none
 for a bead already PROPOSED for that txid or already VERIFIED, and nothing closes; `mw verify confirm` is the Mayor's.
-A demo met is a proposal and never also in `stale.md`: mw drops a stale line that names a proposed bead), `summary.md`
+A demo met is a proposal and never also in `stale.md`: mw drops a stale line that names a proposed bead. After the
+agent's lines, mw adds a section naming each held bead held for 7 days or more (`SleepHoldDays`), oldest first, with its
+id, title, days held and its reason, the last `HELD:` comment, else `no reason on the bead`; it only names them), `summary.md`
 (which counts them, as the mail does), and the dump as `triage.jsonl` (tomorrow's diff starts
 from it), and commits them with the run log `runs/sleep/<date>.json`. It mails the Mayor the summary, at most
 150 words. An answer that misses a part, or whose recommendations are not JSON, is refused: no plan is
