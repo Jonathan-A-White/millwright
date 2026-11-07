@@ -85,7 +85,7 @@ func InitializeSessionEnvScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story line holds the path of beads\.env and no value from it$`, c.theStoryLineHoldsPathOnly)
 	ctx.Then(`^the seat window's command holds the path of beads\.env and no value from it$`, c.theSeatCommandHoldsPathOnly)
 	ctx.Then(`^the stand-ins all ran$`, c.theStandInsRan)
-	ctx.Then(`^the run's close-out log ends with "([^"]*)" and "([^"]*)"$`, c.theCloseOutLogEndsWith)
+	ctx.Then(`^the run's close-out log holds "([^"]*)" and "([^"]*)" between its start line and its end line$`, c.theCloseOutLogEndsWith)
 	ctx.Then(`^the pane showed "([^"]*)" too$`, c.thePaneShowed)
 	ctx.Then(`^no name starting BEADS_DOLT_ was recorded$`, c.noBeadsNameRecorded)
 }
@@ -232,8 +232,9 @@ func (c *sessionEnvContext) theCloseOutLogEndsWith(first, last string) error {
 		return fmt.Errorf("reading the close-out's log: %w (the line was %q)", err, c.line)
 	}
 	lines := strings.Split(strings.TrimRight(string(held), "\n"), "\n")
-	if len(lines) < 2 || lines[len(lines)-2] != first || lines[len(lines)-1] != last {
-		return fmt.Errorf("expected the close-out's log to end with %q and %q, got:\n%s", first, last, held)
+	if len(lines) != 4 || !strings.HasPrefix(lines[0], application.CloseOutStarted+" ") || lines[1] != first || lines[2] != last ||
+		!strings.HasPrefix(lines[3], application.CloseOutEnded+": exit ") {
+		return fmt.Errorf("expected the close-out's log to hold its start line, %q, %q and its end line, got:\n%s", first, last, held)
 	}
 	return nil
 }
