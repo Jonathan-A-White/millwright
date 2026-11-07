@@ -246,15 +246,21 @@ func cloudCheck(ctx context.Context, out io.Writer) (application.CloudCheck, boo
 		return application.CloudCheck{}, false, err
 	}
 	gateway := mwGateway(dir, host)
+	provider := cloud.Vultr{
+		Command: settings.Command, Snapshot: settings.Snapshot, Out: out,
+		UpLimit: time.Duration(settings.UpMinutes) * time.Minute,
+		Self:    self, MakeLog: filepath.Join(home, DispatchStateDir, cloudMakeLog),
+	}
 	return application.CloudCheck{
-		Work:    gateway,
-		Stories: gateway,
-		Notes:   gateway,
-		Provider: cloud.Vultr{
-			Command: settings.Command, Snapshot: settings.Snapshot, Out: out,
-			UpLimit: time.Duration(settings.UpMinutes) * time.Minute,
-			Self:    self, MakeLog: filepath.Join(home, DispatchStateDir, cloudMakeLog),
-		},
+		Work:     gateway,
+		Stories:  gateway,
+		Notes:    gateway,
+		Provider: provider,
+		// A box's kept worktrees are bundled into the vault over ssh before the
+		// box is destroyed (mw-gq6.1012).
+		Box:    cloud.BoxWork{Address: provider.Address},
+		Vault:  files,
+		Files:  files,
 		Book:   vault.CloudBook{Vault: files},
 		Log:    homeEventLog(),
 		Notice: governorNotice{},
