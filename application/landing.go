@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -348,7 +350,10 @@ const (
 // AIAttribution is the line of a commit message that signs the work as a
 // machine's, or the empty string when the message carries none. A line is one
 // when, ignoring case and surrounding space, it begins with a Co-Authored-By
-// trailer or holds the words "generated with" anywhere in it.
+// trailer or holds the words "generated with" anywhere in it, provided
+// "generated" begins a word: a word boundary (the start of the line or any
+// character that is not a letter or digit) must come before it, so "Data
+// regenerated with --infer-text" passes and "Generated with Claude Code" does not.
 //
 // This is the whole rule, and it is deliberately blunt: a seat outlives every
 // session that occupies it, so the seat signs the work and the model never
@@ -357,11 +362,32 @@ const (
 func AIAttribution(message string) string {
 	for _, line := range strings.Split(message, "\n") {
 		said := strings.ToLower(strings.TrimSpace(line))
-		if strings.HasPrefix(said, coAuthoredBy) || strings.Contains(said, generatedWith) {
+		if strings.HasPrefix(said, coAuthoredBy) || startsAWord(said, generatedWith) {
 			return strings.TrimSpace(line)
 		}
 	}
 	return ""
+}
+
+// startsAWord reports whether phrase occurs in said with a word boundary before
+// it: at the start of said, or after a character that is neither a letter nor a
+// digit.
+func startsAWord(said, phrase string) bool {
+	for from := 0; ; {
+		at := strings.Index(said[from:], phrase)
+		if at < 0 {
+			return false
+		}
+		at += from
+		if at == 0 {
+			return true
+		}
+		before, _ := utf8.DecodeLastRuneInString(said[:at])
+		if !unicode.IsLetter(before) && !unicode.IsDigit(before) {
+			return true
+		}
+		from = at + 1
+	}
 }
 
 // Checked is one run of a rig's own tests: whether they passed, what they

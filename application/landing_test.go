@@ -49,3 +49,32 @@ func TestAIAttributionSaysWhichLine(t *testing.T) {
 		t.Errorf("expected %q, got %q", want, got)
 	}
 }
+
+// TestAIAttributionMatchesGeneratedWithOnlyAtAWordStart pins the word-boundary
+// rule: "generated with" signs the work only where "generated" begins a word, so
+// a message that says data was "regenerated with" a flag is not refused as a
+// machine's signature (mw-gq6.1040).
+func TestAIAttributionMatchesGeneratedWithOnlyAtAWordStart(t *testing.T) {
+	cases := []struct {
+		name    string
+		message string
+		refused bool
+	}{
+		{"regenerated with is a word that merely holds it", "Data regenerated with --infer-text", false},
+		{"degenerated with likewise", "The index degenerated with every pass", false},
+		{"the pull request line", "Generated with [Claude Code](https://claude.com/claude-code)", true},
+		{"that line behind the robot emoji", "\U0001F916 Generated with Claude Code", true},
+		{"the words after punctuation", "Done (generated with a model)", true},
+		{"the words with nothing before them", "generated with claude code", true},
+		{"a Co-Authored-By trailer", "Do the thing\n\nCo-Authored-By: Claude <noreply@anthropic.com>", true},
+	}
+	for _, c := range cases {
+		line := application.AIAttribution(c.message)
+		if c.refused && line == "" {
+			t.Errorf("%s: expected the message to be refused, it was not:\n%s", c.name, c.message)
+		}
+		if !c.refused && line != "" {
+			t.Errorf("%s: expected the message to pass, it was refused for %q", c.name, line)
+		}
+	}
+}
