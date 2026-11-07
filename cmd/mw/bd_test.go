@@ -126,4 +126,11 @@ func TestMwBdThatCannotGetQuietExitsNonZeroNamingTheBlocker(t *testing.T) {
 	if _, statErr := os.Stat(log); statErr == nil {
 		t.Errorf("bd was run beside the sync")
 	}
+	// mw-gq6.1021: it says which command to run again, and leaves with 1.
+	if !strings.Contains(out, "run again: mw bd list") {
+		t.Errorf("the failure should say which command to run again, it said %q", out)
+	}
+	if exit, ok := err.(*handedOffExit); !ok || exit.code != 1 {
+		t.Errorf("want exit status 1, got %v", err)
+	}
 }

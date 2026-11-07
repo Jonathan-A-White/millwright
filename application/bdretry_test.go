@@ -200,6 +200,18 @@ type bdQuietRun struct {
 // before the processes of the table end, 0 for never.
 func runBdQuiet(t *testing.T, procs *apptest.FakeUserProcesses, turn *apptest.FakeBdTurn, limit time.Duration, leave int, args ...string) *bdQuietRun {
 	t.Helper()
+	return runBdQuietDir(t, procs, turn, limit, leave, "", args...)
+}
+
+// runBdQuietIn is runBdQuiet for a caller whose beads directory is dir, with the
+// default limit and no process leaving.
+func runBdQuietIn(t *testing.T, procs *apptest.FakeUserProcesses, dir string, args ...string) *bdQuietRun {
+	t.Helper()
+	return runBdQuietDir(t, procs, apptest.NewFakeBdTurn(), 0, 0, dir, args...)
+}
+
+func runBdQuietDir(t *testing.T, procs *apptest.FakeUserProcesses, turn *apptest.FakeBdTurn, limit time.Duration, leave int, dir string, args ...string) *bdQuietRun {
+	t.Helper()
 	bd := apptest.NewFakeBd("step-1")
 	run := &bdQuietRun{bdRetryRun: &bdRetryRun{bd: bd}, procs: procs, turn: turn}
 	pauses := 0
@@ -207,6 +219,7 @@ func runBdQuiet(t *testing.T, procs *apptest.FakeUserProcesses, turn *apptest.Fa
 		Program: bd,
 		Quiet:   procs,
 		Turn:    turn,
+		Dir:     dir,
 		Wait: func(_ context.Context, d time.Duration) error {
 			run.waited += d
 			pauses++

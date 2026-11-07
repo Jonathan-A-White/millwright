@@ -67,6 +67,12 @@ type BdRetry struct {
 	Quiet     UserProcesses
 	QuietWait time.Duration
 	Poll      time.Duration
+	// Dir is the beads directory this bd works on (its -C, else where it runs):
+	// a bd of another one is not waited for. Empty counts every bd.
+	Dir string
+	// args is the command line Run was given, for the line that says what to run
+	// again.
+	args []string
 }
 
 // bdPassingFaults are the words a bd prints for a server it could not reach or
@@ -192,6 +198,7 @@ func (c bdCall) kind() bdKind {
 // limit. It returns the status the last run left with; an error only when bd
 // could not be started or the context ended.
 func (r BdRetry) Run(ctx context.Context, args []string) (int, error) {
+	r.args = args
 	release, err := r.take(ctx)
 	if err != nil {
 		return 1, err

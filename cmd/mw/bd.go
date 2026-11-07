@@ -60,6 +60,16 @@ func bdWaitFrom(args []string, env string) (time.Duration, []string, error) {
 // a test replaces it so that no bd of the machine it runs on is waited for.
 var newBdQuiet = func() application.UserProcesses { return procs.Table{} }
 
+// bdOwnDir is the beads directory this mw bd works on: the -C of its arguments,
+// else the directory it runs in; "" when that cannot be told.
+func bdOwnDir(args []string) string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return application.BdBeadsDir(args, cwd)
+}
+
 // bdTurn is this host's turn to run a bd in, kept beside the sync lock. A host
 // with no home directory keeps none, and bd waits only for quiet.
 func bdTurn(args []string) application.BdTurn {
@@ -85,9 +95,9 @@ func newBdCmd() *cobra.Command {
 			"is named in " + bdRealEnv + ", or is the first bd on PATH.\n\n" +
 			"Before it runs bd it waits for this host's turn (one mw bd at a time) and for quiet: no other bd\n" +
 			"and no mw sync running (a bd of a test suite's throwaway vault in the temporary directory is not\n" +
-			"counted). It waits for up to two minutes; a leading " + bdWaitFlag + " <duration> (or " + bdWaitEnv + ")\n" +
+			"counted, nor is a bd of another beads directory, by its -C or where it runs). It waits for up to two minutes; a leading " + bdWaitFlag + " <duration> (or " + bdWaitEnv + ")\n" +
 			"changes that, 0 waits for nothing. When the limit passes it runs no bd, exits 1 and names the process\n" +
-			"it waited for. bd's own environment and exit status are the caller's.",
+			"it waited for and the mw bd command to run again. bd's own environment and exit status are the caller's.",
 		DisableFlagParsing: true,
 		SilenceUsage:       true,
 		SilenceErrors:      true,
@@ -111,6 +121,7 @@ func newBdCmd() *cobra.Command {
 				Turn:      bdTurn(args),
 				Quiet:     newBdQuiet(),
 				QuietWait: wait,
+				Dir:       bdOwnDir(args),
 				Out:       cmd.OutOrStdout(),
 				Err:       cmd.ErrOrStderr(),
 			}.Run(cmd.Context(), args)
