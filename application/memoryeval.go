@@ -404,7 +404,8 @@ func (m Memory) EvalFix(ctx context.Context, rig string) error {
 // EvalFixReword is EvalFix that also drops those missing words from a rewritten
 // question, keeping the change only when the question then finds its facts in
 // its top EvalTop; otherwise it names the question in a REWORD line as EvalFix
-// does and leaves its words as they were.
+// does and leaves its words as they were. It does the same for a question that
+// is not stale but fails, such as one an earlier EvalFix rewrote.
 func (m Memory) EvalFixReword(ctx context.Context, rig string) error {
 	return m.evalFix(ctx, rig, true)
 }
@@ -478,6 +479,15 @@ func (m Memory) evalFix(ctx context.Context, rig string, reword bool) error {
 		}
 		if changed {
 			edits = append(edits, e)
+		} else if reword {
+			// Not stale, but a first --fix may have rewritten it and left it
+			// failing: look at it too.
+			question, note := rewordNote(q, expect, bySlug, all, true, rewords)
+			if question != "" {
+				fmt.Fprintln(m.Out, note)
+				e.question = question
+				edits = append(edits, e)
+			}
 		}
 	}
 	if len(edits) == 0 {
