@@ -273,6 +273,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the rig's tests were run (\d+) times$`, c.theRigsTestsWereRun)
 	ctx.Then(`^the story "([^"]*)" is closed$`, c.theStoryIsClosed)
 	ctx.Then(`^the story "([^"]*)" is not closed$`, c.theStoryIsNotClosed)
+	ctx.Then(`^the story "([^"]*)" is held, not open$`, c.theStoryIsHeldNotOpen)
 	ctx.Then(`^the demo "([^"]*)" waits for the Governor, though it landed$`, c.theDemoWaitsForTheGovernor)
 	ctx.Then(`^the session of "([^"]*)" is closed$`, c.theSessionIsClosed)
 	ctx.Then(`^the story "([^"]*)" is held blocked$`, c.theStoryIsHeldBlocked)
@@ -1252,6 +1253,19 @@ func (c *nextContext) theStoryIsClosed(id string) error {
 	}
 	if !c.report.Closed {
 		return fmt.Errorf("expected the report to say %s was closed, got %+v", id, c.report)
+	}
+	return nil
+}
+
+// theStoryIsHeldNotOpen is a story the tracker has deferred and nobody holds:
+// no dispatch tick takes it until the Mayor lets it through.
+func (c *nextContext) theStoryIsHeldNotOpen(id string) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if detail.Status != apptest.StatusDeferred || detail.Assignee != "" {
+		return fmt.Errorf("expected %s to be held (%s) with no claim, got status %q, assignee %q", id, apptest.StatusDeferred, detail.Status, detail.Assignee)
 	}
 	return nil
 }
