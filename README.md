@@ -70,6 +70,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
 - [Joining an existing vault](#joining-an-existing-vault)
 - [A member's own factory](#a-members-own-factory)
 - [Running a host on a timer](#running-a-host-on-a-timer)
+- [WSL host upkeep](#wsl-host-upkeep)
 - [The seat's tmux server on the VPS](#the-seats-tmux-server-on-the-vps)
 - [Mail](#mail)
 - [Telling the Mayor's window when mail arrives](#telling-the-mayors-window-when-mail-arrives)
@@ -4044,6 +4045,46 @@ verifies the two unit files with `systemd-analyze` and starts nothing; it fails
 only on what `systemd-analyze` says about the rig's own unit files, and prints
 what it says about the host's own user units as ignored.
 
+## WSL host upkeep
+
+A host that runs under WSL (the Laptop and the desktop) needs two things a plain
+Linux host does not, both because its disk is an `ext4.vhdx` file on a Windows
+drive that only ever grows.
+
+**Trim setup, once per host.** systemd skips `fstrim.timer` and
+`fstrim.service` on WSL (both carry `ConditionVirtualization=!container`, and
+`systemd-detect-virt` says `wsl`), so the weekly trim never runs, the blocks of
+every deleted file stay in the vhdx, and the Windows drive fills: the desktop's
+`D:` held a 305 GB vhdx around 131 GB of files (mw-6ww.156, 2026-11-06). `mw host
+trim-setup` prints the one Windows PowerShell line that fixes it:
+
+```
+wsl -d Ubuntu-24.04 -u root -- sh -c '<writes /etc/systemd/system/fstrim.timer.d/wsl.conf and fstrim.service.d/wsl.conf, each "[Unit]" then an empty "ConditionVirtualization=", then systemctl daemon-reload and systemctl restart fstrim.timer>'
+```
+
+Paste the printed line, not this one. It needs root, which a Builder does not have,
+so it is the Governor's hands. `mw host trim-setup --bead <bead>` also asks this
+host and each host of `[hands_hosts]` (over its ssh line; `--host <name>` limits
+it) whether it is WSL and has both drop-ins, and files one `mw hands add` step as
+root (`wsl-fstrim-<host>`, with its way back) on the bead for each that lacks
+them; a host it cannot ask is said and skipped. The `wsl-trim` check of `mw
+doctor` is faulty on a WSL host whose `fstrim.timer` never ran or last ran over
+8 days ago, and names this command.
+
+**Compact, monthly.** Trimming only marks the freed blocks; the vhdx file shrinks
+when Windows compacts it. About monthly, and whenever the drive runs low, in an
+admin Windows PowerShell with nothing running in WSL (it stops WSL; the last
+command brings it back):
+
+```
+wsl -d Ubuntu-24.04 -u root -- fstrim -av; wsl --shutdown; "select vdisk file=D:\wsl\Ubuntu-24.04\ext4.vhdx`nattach vdisk readonly`ncompact vdisk`ndetach vdisk" | Out-File -Encoding ascii "$env:TEMP\compact.txt"; diskpart /s "$env:TEMP\compact.txt"; [math]::Round((Get-PSDrive D).Free/1GB, 1); Start-Process wsl -ArgumentList '-d','Ubuntu-24.04','--','sleep','infinity' -WindowStyle Hidden
+```
+
+The vhdx path is the desktop's; use the path of the host's own (`hosts/<host>.md`
+in the vault names it). The first run after a long time without a trim frees
+the most (841 GiB trimmed and `D:` from 0.5 GB to 107.5 GB free on 2026-11-06).
+The compact takes 10 to 30 minutes; do not close the window while it runs.
+
 ## The seat's tmux server on the VPS
 
 A host whose seats run as root (the VPS) needs its tmux server itself kept up
@@ -5750,6 +5791,15 @@ the hands step (free space on that drive, compact the vhdx with
 hears again no more often than that, and its way back is "set
 `root_disk_budget_bytes = 0` in `[doctor]`". The check stays faulty until the
 budget is raised or the drive has room.
+
+**wsl-trim** is the check that a WSL host trims its disk (mw-gq6.1020; see *WSL host
+upkeep*). On a host whose `systemd-detect-virt` says `wsl`, it asks `systemctl show
+fstrim.timer` when the timer last triggered: faulty when it never did or did over 8 days
+ago, naming `mw host trim-setup`; cannot-tell when the timer has no unit file; inert
+(`n/a`) on a host that is not WSL. It changes nothing on the host, since the cure needs
+root: its cure is one note to the Mayor, its damper is 24 hours with no cap, and its way
+back says how to undo the step it names. The root-disk-budget check above reads ext4
+used bytes, which trimming does not change, so it cannot see this.
 
 **mayor-gone** respawns the Mayor when the window its own vault-local
 `.mayor-acting` names is gone, or is open but its pane holds nothing but a

@@ -34,6 +34,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newContactsCmd())
 	root.AddCommand(newHandsCmd())
 	root.AddCommand(newHomeCmd())
+	root.AddCommand(newHostCmd())
 	root.AddCommand(newIceCmd())
 	root.AddCommand(newStuckCmd())
 	root.AddCommand(newVerifyCmd())
