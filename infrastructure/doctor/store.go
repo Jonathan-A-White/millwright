@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/atomicfile"
 )
 
 var (
@@ -98,14 +99,10 @@ func (s *Store) Save(_ context.Context, check string, episode application.Doctor
 		return fmt.Errorf("making %s: %w", s.Dir, err)
 	}
 	path := s.stateFile(check)
-	whole := path + ".new"
 	body := fmt.Sprintf("firstFaulty=%s\ncures=%d\nlastCure=%s\nlastCureFailed=%t\nlastOKReason=%s\nlastCannotTellReason=%s\ndampedNoted=%t\nseenPaths=%s\n",
 		formatTime(episode.FirstFaulty), episode.Cures, formatTime(episode.LastCure), episode.LastCureFailed, episode.LastOKReason, episode.LastCannotTellReason, episode.DampedNoted, strings.Join(episode.SeenPaths, "\t"))
-	if err := os.WriteFile(whole, []byte(body), 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", whole, err)
-	}
-	if err := os.Rename(whole, path); err != nil {
-		return fmt.Errorf("moving %s into place: %w", whole, err)
+	if err := atomicfile.Write(path, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("saving %s's doctor state: %w", check, err)
 	}
 	return nil
 }

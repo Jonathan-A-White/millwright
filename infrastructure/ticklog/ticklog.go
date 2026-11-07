@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/atomicfile"
 )
 
 // File is the log's name inside its directory.
@@ -50,14 +51,7 @@ func (l *Log) Append(_ context.Context, line string) error {
 		lines = lines[len(lines)-keep:]
 	}
 
-	next := path + ".new"
-	if err := os.WriteFile(next, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", next, err)
-	}
-	if err := os.Rename(next, path); err != nil {
-		return fmt.Errorf("replacing %s: %w", path, err)
-	}
-	return nil
+	return atomicfile.Write(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
 }
 
 // Read implements application.TickLog: the lines the log holds, oldest first. A
