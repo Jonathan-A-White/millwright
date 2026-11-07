@@ -75,7 +75,7 @@ func InitializeBackendSwapScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the Governor was told once, on the swap bead's channel, "([^"]*)"$`, c.toldOnce)
 	ctx.Then(`^the Governor was told once, on the swap bead's channel, that the swap failed and the old backend was put back$`, c.toldOfTheFailure)
 	ctx.Then(`^the swap bead is filed with no epic and its swap is written$`, c.theSwapIsFiledWithNoEpic)
-	ctx.Then(`^the swap bead is closed$`, c.theSwapBeadIsClosed)
+	ctx.Then(`^the swap bead is closed and no longer hitl$`, c.theSwapBeadIsClosed)
 	ctx.Then(`^the swap bead is open, hitl, and carries the output as a comment$`, c.openHitlWithOutput)
 	ctx.Then(`^the swap bead is open, hitl, and carries no output$`, c.openHitlWithoutOutput)
 }
@@ -149,9 +149,6 @@ func (c *backendSwapContext) theSwapIsFiledWithNoEpic() error {
 	if d.EpicID != "" {
 		return fmt.Errorf("expected %s filed under no epic, it is under %q", c.bead, d.EpicID)
 	}
-	if !d.Hitl() {
-		return fmt.Errorf("expected %s hitl, got labels %v", c.bead, d.Labels)
-	}
 	key := "hands." + c.bead
 	if text, _ := c.tracker.Note(context.Background(), key); !strings.Contains(text, "backend-4c9db71") {
 		return fmt.Errorf("expected the swap step written on %s, note %s is %q", c.bead, key, text)
@@ -223,6 +220,9 @@ func (c *backendSwapContext) theSwapBeadIsClosed() error {
 	}
 	if d.Status != application.StatusClosed {
 		return fmt.Errorf("expected %s closed, it is %q", c.bead, d.Status)
+	}
+	if d.Hitl() {
+		return fmt.Errorf("expected %s without hitl once its only step ran clean, got labels %v", c.bead, d.Labels)
 	}
 	return nil
 }

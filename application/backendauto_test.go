@@ -9,6 +9,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // autoSwapNow is the clock of the automatic swap's tests.
@@ -355,5 +356,45 @@ func TestTalkWaitKeepsTheGovernorsLastTalkRecord(t *testing.T) {
 	var last application.TalkLast
 	if err := json.Unmarshal([]byte(raw), &last); err != nil || last.ID != "talk-7" || last.Role != application.TalkRoleTurn || last.At == 0 {
 		t.Fatalf("expected talk-7's turn kept with its time, got %q (%v)", raw, err)
+	}
+}
+
+// A swap that goes right is the only live step of its bead: hitl comes off it
+// (mw-gq6.1011).
+func TestAGoodSwapDropsHitlWhenItWasTheOnlyLiveStep(t *testing.T) {
+	a := anAutoRig(t, application.HandsOutcome{Exit: 0, Output: swapAnswered})
+	a.stage.Landed(context.Background(), presenceLanding())
+	bead := a.stagedBead(t)
+	if !a.bead(t, bead).Hitl() {
+		t.Fatalf("expected %s filed hitl", bead)
+	}
+
+	a.stage.Pending(context.Background())
+
+	if hasHitl(t, a.tracker, bead) {
+		t.Errorf("expected hitl dropped once the swap ran clean")
+	}
+}
+
+// With a second live step on the bead, the swap leaves hitl on it.
+func TestAGoodSwapKeepsHitlWhileAnotherStepIsLive(t *testing.T) {
+	a := anAutoRig(t, application.HandsOutcome{Exit: 0, Output: swapAnswered})
+	a.stage.Landed(context.Background(), presenceLanding())
+	bead := a.stagedBead(t)
+	steps := handsSteps(t, a.tracker, bead)
+	steps = append(steps, application.HandsStepRecord{
+		HandsStep: domain.HandsStep{ID: "other", Host: "laptop", As: "user", Run: "true"}, AddedAt: "2026-10-05T20:00:00Z",
+	})
+	raw, err := json.Marshal(steps)
+	mustDo(t, err)
+	mustDo(t, a.tracker.SetNote(context.Background(), application.HandsStepsKey(bead), string(raw)))
+
+	a.stage.Pending(context.Background())
+
+	if len(a.runner.Jobs()) != 1 {
+		t.Fatalf("expected the swap run, got %d jobs", len(a.runner.Jobs()))
+	}
+	if !hasHitl(t, a.tracker, bead) {
+		t.Errorf("expected hitl kept while another step is live")
 	}
 }

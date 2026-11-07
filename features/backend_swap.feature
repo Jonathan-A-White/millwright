@@ -14,7 +14,7 @@ Feature: The home swaps a staged backend itself
     When the home's tick runs
     Then the swap ran once
     And the Governor was told once, on the swap bead's channel, "backend 4c9db71 is live and answering"
-    And the swap bead is closed
+    And the swap bead is closed and no longer hitl
 
   Scenario: With a Talk open the swap waits for the first tick after it
     Given the Governor is in a Talk
@@ -50,4 +50,4 @@ Feature: The home swaps a staged backend itself
     Then the swap bead is filed with no epic and its swap is written
     And the swap ran once
     And the Governor was told once, on the swap bead's channel, "backend 4c9db71 is live and answering"
-    And the swap bead is closed
+    And the swap bead is closed and no longer hitl
