@@ -327,3 +327,69 @@ func TestEvalFixRewordKeepsTheQuestionWhenTheFewerWordsStillMissTheTop(t *testin
 		t.Errorf("got %q, want %q", files.eval, want)
 	}
 }
+
+// The bug of mw-gq6.977: --fix rewrote the question and left it failing; a
+// --fix --reword after it found nothing stale and never looked at the failure.
+func TestEvalFixRewordAfterAFixRewordsTheQuestionTheFixLeftFailing(t *testing.T) {
+	var out bytes.Buffer
+	m, files, vault := rewordMemory("Q: zebra ATTRIBUTION.md 5,700 entries stripes\nexpect: old-a\n", &out)
+	if err := m.EvalFix(context.Background(), "zoo"); err == nil {
+		t.Fatalf("want the first run to leave the question failing, printed:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "REWORD head-a") {
+		t.Fatalf("want the first run to print REWORD, printed:\n%s", out.String())
+	}
+	out.Reset()
+	if err := m.EvalFixReword(context.Background(), "zoo"); err != nil {
+		t.Fatalf("second run: %v\nprinted:\n%s", err, out.String())
+	}
+	if strings.Contains(out.String(), "nothing stale") || strings.Contains(out.String(), "REWORD") || strings.Contains(out.String(), "FAIL") {
+		t.Errorf("printed:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "reworded") {
+		t.Errorf("want a line saying the question was reworded, printed:\n%s", out.String())
+	}
+	if want := "Q: zebra stripes\nexpect: head-a\n"; files.eval != want {
+		t.Errorf("got %q, want %q", files.eval, want)
+	}
+	if len(vault.messages) != 2 {
+		t.Errorf("want a commit for each run, got %v", vault.messages)
+	}
+}
+
+func TestEvalFixRewordWithNothingStaleAndNothingFailingChangesNothing(t *testing.T) {
+	var out bytes.Buffer
+	m, files, vault := staleMemory("Q: stoat\nexpect: cur-g\n", &out)
+	if err := m.EvalFixReword(context.Background(), "zoo"); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "nothing stale\n" || len(files.wrote) != 0 || len(vault.messages) != 0 {
+		t.Errorf("printed %q, wrote %v, committed %v", out.String(), files.wrote, vault.messages)
+	}
+}
+
+func TestEvalFixRewordLeavesAFailingQuestionDroppingWordsCannotRescueAndSaysSo(t *testing.T) {
+	var out bytes.Buffer
+	m, files, vault := rewordMemory("Q: attribution entries\nexpect: head-a\n", &out)
+	err := m.EvalFixReword(context.Background(), "zoo")
+	if err == nil || !strings.Contains(err.Error(), "eval failing: 1 of 1") {
+		t.Fatalf("got %v, want eval failing: 1 of 1", err)
+	}
+	if !strings.Contains(out.String(), "REWORD head-a  attribution entries  (missing from the fact: attribution, entries)") {
+		t.Errorf("printed:\n%s", out.String())
+	}
+	if want := "Q: attribution entries\nexpect: head-a\n"; files.eval != want || len(files.wrote) != 0 || len(vault.messages) != 0 {
+		t.Errorf("eval %q, wrote %v, committed %v", files.eval, files.wrote, vault.messages)
+	}
+}
+
+func TestEvalFixAloneDoesNotRewordAFailingQuestionThatIsNotStale(t *testing.T) {
+	var out bytes.Buffer
+	m, files, _ := rewordMemory("Q: zebra entries stripes\nexpect: head-a\n", &out)
+	if err := m.EvalFix(context.Background(), "zoo"); err == nil {
+		t.Fatal("want a failing eval")
+	}
+	if !strings.HasPrefix(out.String(), "nothing stale\n") || files.eval != "Q: zebra entries stripes\nexpect: head-a\n" {
+		t.Errorf("printed %q, eval %q", out.String(), files.eval)
+	}
+}

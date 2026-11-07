@@ -343,7 +343,10 @@ func newMemoryEvalCmd() *cobra.Command {
 			"question the fact lacks (a query needs every term), and the command exits 1. --reword, with\n" +
 			"--fix, drops those words from the question and runs it again, keeping the change (committed\n" +
 			"with the rest of the fix) only when the question then finds its facts in the top three; else\n" +
-			"it prints REWORD as above and leaves the question's words as they were.",
+			"it prints REWORD as above and leaves the question's words as they were. --reword also looks\n" +
+				"at a question that is not stale but fails (one an earlier --fix rewrote and left failing), and\n" +
+				"drops the words its fact lacks in the same way; with nothing stale and nothing it can mend\n" +
+				"it prints 'nothing stale' and changes nothing.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			memory, err := memoryFor(cmd)
