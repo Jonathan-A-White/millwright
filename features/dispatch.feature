@@ -431,6 +431,33 @@ Feature: Dispatching the stories this host is ready to work
     And the mail to the Mayor says "older heartbeat line 2"
     And the mail to the Mayor does not say "older heartbeat line 1"
 
+  # mw-gq6.1038: the desktop's WSL was shut down under a running close-out
+  # (mw-5r3p30.1107), the pane died with it, and next-1.log was empty: the mail
+  # printed an empty block for the last words. A log with nothing in it, or only
+  # the line the close-out wrote as it started, now says so plainly.
+
+  Scenario: A close-out that died having written nothing is mailed with a plain line, not an empty block
+    Given a story "mw-gq6.9" of that epic is already running here
+    And the story "mw-gq6.9" has been tried 2 times
+    And the session of "mw-gq6.9" finished, leaving its result for attempt 2 and no ledger line
+    And the close-out log of "mw-gq6.9" for attempt 2 is empty
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    When dispatch runs on "vps" with a cap of 1
+    Then the story "mw-gq6.9" names the cause of attempt 2 as tooling
+    And the subject of the mail to the Mayor is "Close-out died: mw-gq6.9"
+    And the mail to the Mayor says "next-2.log is empty: the close-out wrote nothing (exit unknown: its pane was gone"
+
+  Scenario: A close-out that died after its start line says it never ended
+    Given a story "mw-gq6.9" of that epic is already running here
+    And the story "mw-gq6.9" has been tried 2 times
+    And the session of "mw-gq6.9" finished, leaving its result for attempt 2 and no ledger line
+    And the close-out log of "mw-gq6.9" for attempt 2 holds only its start line
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    When dispatch runs on "vps" with a cap of 1
+    Then the subject of the mail to the Mayor is "Close-out died: mw-gq6.9"
+    And the mail to the Mayor says "close-out started 2026-11-07T04:45:03Z"
+    And the mail to the Mayor says "next-2.log has no end line: the close-out never ended"
+
   # mw-gq6.182: a story its close-out refused is evidence, not a dead session.
   # The claim, the worktree and the branch stay as the session left them until
   # a person acts (mw retry, a hold, a give-back by hand).

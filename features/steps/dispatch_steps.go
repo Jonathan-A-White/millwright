@@ -141,6 +141,8 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the session of "([^"]*)" finished, leaving its result for attempt (\d+) and no ledger line$`, c.theSessionFinishedLeavingItsResult)
 	ctx.Given(`^the heartbeat log of "([^"]*)" for attempt (\d+) holds (\d+) earlier lines and ends with:$`, c.theHeartbeatLogEndsWith)
 	ctx.Given(`^the close-out log of "([^"]*)" for attempt (\d+) holds (\d+) earlier lines and ends with:$`, c.theCloseOutLogEndsWith)
+	ctx.Given(`^the close-out log of "([^"]*)" for attempt (\d+) is empty$`, c.theCloseOutLogIsEmpty)
+	ctx.Given(`^the close-out log of "([^"]*)" for attempt (\d+) holds only its start line$`, c.theCloseOutLogHoldsOnlyItsStartLine)
 	ctx.Given(`^the session of "([^"]*)" has a dead pane but its lease has not expired$`, c.theSessionHasADeadPaneButLeaseNotExpired)
 	ctx.When(`^the session of "([^"]*)" dies again with its lease expired$`, c.theSessionDiesAgainWithLeaseExpired)
 	ctx.Given(`^a story "([^"]*)" of that epic labelled "([^"]*)" is already running here$`, c.aLabelledStoryAlreadyRunningHere)
@@ -532,6 +534,18 @@ func (c *dispatchContext) theCloseOutLogEndsWith(id string, attempt, earlier int
 	}
 	lines = append(lines, strings.Split(strings.TrimRight(tail.Content, "\n"), "\n")...)
 	return c.putRunFile(id, application.NextLogNameForAttempt(attempt), strings.Join(lines, "\n")+"\n")
+}
+
+// theCloseOutLogIsEmpty is a close-out whose pane died before it said a word
+// and before the line that now opens its log was written (mw-gq6.1038).
+func (c *dispatchContext) theCloseOutLogIsEmpty(id string, attempt int) error {
+	return c.putRunFile(id, application.NextLogNameForAttempt(attempt), "")
+}
+
+// theCloseOutLogHoldsOnlyItsStartLine is a close-out that began, wrote its
+// start line, and was killed with its pane (mw-gq6.1038).
+func (c *dispatchContext) theCloseOutLogHoldsOnlyItsStartLine(id string, attempt int) error {
+	return c.putRunFile(id, application.NextLogNameForAttempt(attempt), application.CloseOutStarted+" 2026-11-07T04:45:03Z\n")
 }
 
 func (c *dispatchContext) putRunFile(id, name, contents string) error {

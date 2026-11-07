@@ -1,6 +1,9 @@
 package sessionshell
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -71,8 +74,14 @@ func TestAfterIsChainedWithASemicolonAndKeptInItsLog(t *testing.T) {
 		t.Errorf("expected %q, got %q", want, got)
 	}
 	l.AfterLog = "/v/next.log"
-	if got, want := AfterLine(l), "{ mw next mw-1; } 2>&1 | tee -a /v/next.log"; got != want {
-		t.Errorf("expected %q, got %q", want, got)
+	got := AfterLine(l)
+	for _, want := range []string{"{ printf ", application.CloseOutStarted, "; mw next mw-1; s=$?; ", application.CloseOutEnded} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in %q", want, got)
+		}
+	}
+	if want := "; } 2>&1 | tee -a /v/next.log"; !strings.HasSuffix(got, want) {
+		t.Errorf("expected the line to end %q, got %q", want, got)
 	}
 	l.After = nil
 	if got := WithAfter("agent go", l); got != "agent go" {
@@ -102,5 +111,56 @@ func TestPreludeReadsEachEnvFileThenSetsTheServerHost(t *testing.T) {
 	}
 	if got := Prelude("agent go", Env{}); got != "agent go" {
 		t.Errorf("expected an empty Env to add nothing, got %q", got)
+	}
+}
+
+// runAfter runs the close-out as the session's line would, returning what the
+// log kept. The close-out is a script that does what the test says.
+func runAfter(t *testing.T, script string) string {
+	t.Helper()
+	dir := t.TempDir()
+	closeOut := filepath.Join(dir, "closeout")
+	if err := os.WriteFile(closeOut, []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(dir, "next-1.log")
+	l := launch()
+	l.After = []string{closeOut}
+	l.AfterLog = log
+	_ = exec.Command("sh", "-c", AfterLine(l)).Run()
+	kept, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("expected the log to exist: %v", err)
+	}
+	return string(kept)
+}
+
+// mw-gq6.1038: a close-out that says nothing still leaves its start line and
+// how it ended, so an empty log no longer hides that it ran at all.
+func TestACloseOutThatSaysNothingStillLeavesItsStartAndItsExitStatus(t *testing.T) {
+	kept := runAfter(t, "exit 3")
+	lines := strings.Split(strings.TrimRight(kept, "\n"), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], application.CloseOutStarted+" 20") || !strings.HasSuffix(lines[0], "Z") {
+		t.Errorf("expected a start line with a UTC time, then an end line, got %q", kept)
+	}
+	if len(lines) == 2 && lines[1] != application.CloseOutEnded+": exit 3" {
+		t.Errorf("expected the end line to carry exit 3, got %q", lines[1])
+	}
+}
+
+// A close-out killed by a signal is named by it.
+func TestACloseOutKilledBySignalIsEndedWithTheSignalNamed(t *testing.T) {
+	kept := runAfter(t, "kill -TERM $$")
+	if want := application.CloseOutEnded + ": exit 143 (signal 15)"; !strings.Contains(kept, want) {
+		t.Errorf("expected %q in %q", want, kept)
+	}
+}
+
+// A close-out whose whole pane is killed (the host shut down under it) cannot
+// write an end line; the start line it wrote first is what is left.
+func TestACloseOutKilledWithItsShellLeavesOnlyItsStartLine(t *testing.T) {
+	kept := runAfter(t, "kill -KILL $PPID")
+	if !strings.HasPrefix(kept, application.CloseOutStarted+" 20") || strings.Contains(kept, application.CloseOutEnded) {
+		t.Errorf("expected only the start line, got %q", kept)
 	}
 }
