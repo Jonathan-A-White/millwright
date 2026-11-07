@@ -654,7 +654,10 @@ func TestABoxThatCannotBeReachedForItsWorktreesIsNotDestroyed(t *testing.T) {
 func TestARefusedTeardownIsAMoveOnceAndNotAtEveryCheck(t *testing.T) {
 	r := aBoxWithWork(aheadTree)
 	r.box.bundleErr = errors.New("disk full")
-	for range 3 {
+	now := r.check.Now()
+	for i := range 3 {
+		// The idle time in the line grows at each check.
+		r.check.Now = func() time.Time { return now.Add(time.Duration(i) * time.Minute) }
 		if _, err := r.check.Run(context.Background()); err == nil {
 			t.Fatal("expected each check to fail")
 		}

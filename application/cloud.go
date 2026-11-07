@@ -1261,10 +1261,13 @@ func (p *cloudPass) refuse(ctx context.Context, box CloudBox, why, story string,
 		of = " (story " + story + ")"
 	}
 	text := fmt.Sprintf("not destroying %s (%s)%s: its work could not be saved into the vault, so it stays up and billed: %v", box.Name, why, of, oneLine(err.Error()))
-	if box.Refused == text && why != "mw cloud down" {
+	// The reason is what is compared, not the text: an idle box's why grows by
+	// a minute at each check.
+	said := of + ": " + oneLine(err.Error())
+	if box.Refused == said && why != "mw cloud down" {
 		p.check.say("%s", text)
 	} else {
-		p.setBox(box.Name, func(b *CloudBox) { b.Refused = text })
+		p.setBox(box.Name, func(b *CloudBox) { b.Refused = said })
 		p.dirty = "refused " + box.Name
 		p.move(ctx, text)
 	}
