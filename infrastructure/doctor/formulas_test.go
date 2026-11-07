@@ -3,7 +3,6 @@ package doctor_test
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +10,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
@@ -38,7 +38,7 @@ func newFormulasWorld(t *testing.T, home string) *formulasWorld {
 
 func (w *formulasWorld) git(t *testing.T, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", w.factory}, args...)...)
+	cmd := gittest.Command("git", append([]string{"-C", w.factory}, args...)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
 	}

@@ -9,11 +9,11 @@ package vault_test
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
@@ -70,7 +70,7 @@ func TestASyncKeepsAPruneAndTheOtherHostsAppendedFact(t *testing.T) {
 				t.Errorf("expected %q to stay pruned in %s, got:\n%s", gone, filepath.Base(dir), got)
 			}
 		}
-		if said, err := exec.Command("git", "-C", dir, "config", "--get-regexp", `^merge\.`).CombinedOutput(); err == nil {
+		if said, err := gittest.Command("git", "-C", dir, "config", "--get-regexp", `^merge\.`).CombinedOutput(); err == nil {
 			t.Errorf("expected no merge driver in %s's git config, got %s", filepath.Base(dir), said)
 		}
 	}

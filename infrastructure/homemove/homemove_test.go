@@ -6,13 +6,21 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/infrastructure/gittest"
 )
+
+// TestMain keeps the host's git config out of every git this binary runs
+// (mw-gq6.1025).
+func TestMain(m *testing.M) {
+	gittest.Isolate()
+	os.Exit(m.Run())
+}
 
 // onPath puts stand-in programs first on PATH and returns the directory they
 // write their arguments to, in a file named for each: `<name>.log`.
@@ -113,9 +121,9 @@ func TestOldHomeWithNoSSHProgramIsAnErrorNotAnAbsence(t *testing.T) {
 // git runs git for a test fixture.
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}, args...)...)
+	cmd := gittest.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}, args...)...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE=2026-09-29T09:37:19-04:00", "GIT_COMMITTER_DATE=2026-09-29T09:37:19-04:00")
+	cmd.Env = append(gittest.Env(), "GIT_AUTHOR_DATE=2026-09-29T09:37:19-04:00", "GIT_COMMITTER_DATE=2026-09-29T09:37:19-04:00")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
