@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 // SleepJobName is the name of the follower's job that makes the sleep pass:
@@ -278,6 +279,8 @@ const SleepSchema = `{
         "properties": {
           "bead": {"type": "string"},
           "txid": {"type": "string"},
+          "picture": {"type": "string"},
+          "sees": {"type": "string"},
           "shows": {"type": "string", "minLength": 1},
           "confidence": {"type": "number", "minimum": 0, "maximum": 1}
         }
@@ -302,8 +305,22 @@ type sleepAnswer struct {
 	// Proposals are the candidates the day's evidence shows met, in the form of
 	// mw verify match's matches (mw-4xdnis.5); an answer without them proposes
 	// nothing.
-	Proposals []verifyMatchLine `json:"proposals"`
-	Summary   string            `json:"summary"`
+	Proposals []sleepProposal `json:"proposals"`
+	Summary   string          `json:"summary"`
+}
+
+// sleepProposal is one proposal of the agent: a match of mw verify match's form,
+// and, when it rests on a picture of his, the picture's file name and what the
+// picture itself shows, written from the picture alone (mw-gq6.1008). mw ties
+// the txid to the picture and the description to the story's screen; the
+// agent's own txid and shows are not taken on trust.
+type sleepProposal struct {
+	verifyMatchLine
+	// Picture is the file name in the agent's directory the description was read
+	// from; empty for a proposal that rests on his words.
+	Picture string `json:"picture"`
+	// Sees is what that picture shows, in the agent's words, naming its screen.
+	Sees string `json:"sees"`
 }
 
 // SleepPass is mw sleep pass: one fresh agent given the principles and the
@@ -555,8 +572,8 @@ func (p SleepPass) appendIdeas(ctx context.Context, date, recommendations string
 // evidence the bundle was made from. It reports the proposals made and the text
 // of proposals.md, which names every proposal with what became of it; ""
 // when the agent made none. A comment that cannot be written is the error.
-func (p SleepPass) propose(ctx context.Context, model, date string, bundle SleepBundle, matches []verifyMatchLine) ([]VerifyProposal, string, error) {
-	if len(matches) == 0 {
+func (p SleepPass) propose(ctx context.Context, model, date string, bundle SleepBundle, answered []sleepProposal) ([]VerifyProposal, string, error) {
+	if len(answered) == 0 {
 		return nil, "", nil
 	}
 	var from SleepVerify
@@ -565,6 +582,19 @@ func (p SleepPass) propose(ctx context.Context, model, date string, bundle Sleep
 			from = *part.Verify
 		}
 	}
+	// A proposal is tied to its picture and the story's screen before it is
+	// written; one that fails the tie is dropped, listed with why.
+	var matches []verifyMatchLine
+	var dropped []verifyMatchRecord
+	for _, one := range answered {
+		line, why := tiedToItsPicture(one, from)
+		if why != "" {
+			dropped = append(dropped, verifyMatchRecord{verifyMatchLine: line, Outcome: sleepDroppedOutcome + why})
+			p.say("mw sleep pass: proposal %s from %s dropped: %s\n", line.Bead, line.Txid, why)
+			continue
+		}
+		matches = append(matches, line)
+	}
 	var made []VerifyProposal
 	var records []verifyMatchRecord
 	var err error
@@ -572,10 +602,11 @@ func (p SleepPass) propose(ctx context.Context, model, date string, bundle Sleep
 		for _, m := range matches {
 			records = append(records, verifyMatchRecord{verifyMatchLine: m, Outcome: "left out: no tracker to write the comment to"})
 		}
-	} else {
+	} else if len(matches) > 0 {
 		writer := verifyProposer{Beads: p.Beads, Confidence: p.Verify.orDefaults().Confidence, Model: model, Run: SleepPlansPrefix + date}
 		made, records, err = writer.propose(ctx, from.Candidates, from.Evidence, matches)
 	}
+	records = append(records, dropped...)
 	var text strings.Builder
 	fmt.Fprintf(&text, "# Proposed as verified by his use, %s\n\n", date)
 	text.WriteString("Each is a PROPOSED comment on its bead; nothing is closed. The first word VERIFIED is the Mayor's or the Deputy's to write.\n\n")
@@ -586,6 +617,122 @@ func (p SleepPass) propose(ctx context.Context, model, date string, bundle Sleep
 		}
 	}
 	return made, text.String(), err
+}
+
+// sleepDroppedOutcome opens the outcome of a proposal mw dropped for what its
+// picture does not show; the reason follows.
+const sleepDroppedOutcome = "dropped: "
+
+// tiedToItsPicture is the proposal as a match, its txid the one of the evidence
+// that holds the picture it names, never the agent's own; or why the proposal is
+// dropped. A proposal that names a picture is kept only when that picture is a
+// file of some evidence and the picture's own description (Sees) shares a
+// distinctive word with the candidate's title or check text, which is how the
+// story's screen is named. One that names no picture is kept as it is, unless
+// its evidence is only pictures with no words of his: nothing but a picture could
+// have shown the change. A proposal for an unknown candidate or txid is left to
+// the writer, which says so (mw-gq6.1008).
+func tiedToItsPicture(one sleepProposal, from SleepVerify) (verifyMatchLine, string) {
+	line := one.verifyMatchLine
+	picture := filepath.Base(strings.TrimSpace(one.Picture))
+	if strings.TrimSpace(one.Picture) == "" {
+		for _, e := range from.Evidence {
+			if e.Txid == line.Txid && !evidenceHasWords(e) && evidenceHasPicture(e) {
+				return line, "it names no picture, and the evidence of " + e.Txid + " is a picture with no words of his"
+			}
+		}
+		return line, ""
+	}
+	var held *VerifyEvidence
+	for i, e := range from.Evidence {
+		for _, path := range e.Files {
+			if filepath.Base(path) == picture {
+				held = &from.Evidence[i]
+			}
+		}
+	}
+	if held == nil {
+		return line, "the picture " + picture + " is no picture of the evidence"
+	}
+	line.Txid = held.Txid
+	var candidate *VerifyCandidate
+	for i, c := range from.Candidates {
+		if c.Bead == line.Bead {
+			candidate = &from.Candidates[i]
+		}
+	}
+	if candidate == nil {
+		return line, ""
+	}
+	sees := strings.Join(strings.Fields(one.Sees), " ")
+	if sees == "" {
+		return line, "the picture " + picture + " has no description of its own"
+	}
+	if !namesScreenOf(*candidate, sees) {
+		return line, fmt.Sprintf("the picture %s shows %q, which does not name the screen of %s", picture, cutBytes(sees, 160), candidate.Title)
+	}
+	return line, ""
+}
+
+// evidenceHasPicture reports whether e holds a file that is not a .txt.
+func evidenceHasPicture(e VerifyEvidence) bool {
+	for _, path := range e.Files {
+		if !strings.EqualFold(filepath.Ext(path), ".txt") {
+			return true
+		}
+	}
+	return false
+}
+
+// evidenceHasWords reports whether e holds words of his: a .txt, or the text
+// the inbox kept with a picture.
+func evidenceHasWords(e VerifyEvidence) bool {
+	for _, path := range e.Files {
+		if strings.EqualFold(filepath.Ext(path), ".txt") {
+			return true
+		}
+	}
+	_, ok := evidenceWords(e)
+	return ok
+}
+
+// namesScreenOf reports whether the description of a picture shares a
+// distinctive word with the candidate's title or check text: the words that
+// name the story's screen, such as a label, a book or a verse tag.
+func namesScreenOf(c VerifyCandidate, sees string) bool {
+	screen := screenWords(c.Title + " " + c.Check)
+	for word := range screenWords(sees) {
+		if screen[word] {
+			return true
+		}
+	}
+	return false
+}
+
+// screenStopWords are the words of a check text that name no screen in
+// particular.
+var screenStopWords = map[string]bool{
+	"this": true, "that": true, "with": true, "from": true, "then": true, "when": true, "there": true, "their": true,
+	"your": true, "have": true, "will": true, "should": true, "shows": true, "show": true, "shown": true, "showing": true,
+	"screen": true, "page": true, "click": true, "tap": true, "open": true, "step": true, "steps": true, "look": true,
+	"window": true, "into": true, "over": true, "under": true, "after": true, "before": true, "each": true, "what": true,
+	"which": true, "where": true, "about": true, "also": true, "only": true, "than": true, "them": true, "does": true,
+	"picture": true, "photo": true, "image": true, "check": true, "story": true, "change": true, "working": true,
+}
+
+// screenWords are the distinctive words of text, lower-case: letters and digits
+// runs of four or more with a letter in them, the stop words left out.
+func screenWords(text string) map[string]bool {
+	words := map[string]bool{}
+	for _, w := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if len([]rune(w)) < 4 || screenStopWords[w] || !strings.ContainsFunc(w, unicode.IsLetter) {
+			continue
+		}
+		words[w] = true
+	}
+	return words
 }
 
 // withoutLinesNaming is text without the lines that name the bead id.
