@@ -2,6 +2,9 @@ package rig_test
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"sync"
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
@@ -58,5 +61,58 @@ func TestTipAndHeadReadTheRemoteBranchAndTheCheckout(t *testing.T) {
 	}
 	if _, err := worktrees.Tip(ctx, here, "origin", "no-such-branch"); err == nil {
 		t.Error("expected an error for a branch the remote does not have")
+	}
+}
+
+func TestMarkBuiltFromManyWritersAtOnceNeverFailsAndLeavesNoTempFile(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir() + "/state"
+	marks := rig.NewBuiltMarks(dir)
+
+	const writers = 20
+	commits := make([]string, writers)
+	for i := range commits {
+		commits[i] = fmt.Sprintf("%040d", i+1)
+	}
+	start := make(chan struct{})
+	errs := make([]error, writers)
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			errs[i] = marks.MarkBuilt(ctx, "millwright", commits[i])
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("writer %d: %v", i, err)
+		}
+	}
+	got, err := marks.Built(ctx, "millwright")
+	if err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	found := false
+	for _, c := range commits {
+		if got == c {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected the mark to hold one written commit whole, got %q", got)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("listing: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name() != "built-millwright" {
+			t.Errorf("left a stray file %q", e.Name())
+		}
 	}
 }
