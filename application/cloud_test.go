@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -484,5 +485,260 @@ func TestABoxThatCannotBeReachedForItsPaceIsSaidSoAndTriedAgain(t *testing.T) {
 	paceCheck(t, cloud, book.State.Boxes[0])
 	if calls := cloud.PaceCalls(); len(calls) != 2 {
 		t.Errorf("expected the box tried at each check, got %v", calls)
+	}
+}
+
+// fakeBoxWork is the worktrees a cloud box keeps, as the home asks over ssh: it
+// writes a bundle into the fake vault as the adapter writes one into the real
+// one, and notes whether the provider had destroyed the box by then.
+type fakeBoxWork struct {
+	vault    *fakeVault
+	provider *apptest.FakeCloud
+	trees    map[string][]application.CloudKeptWorktree
+	diff     string
+
+	listErr, bundleErr, verifyErr, diffErr error
+
+	bundled, verified []string
+	downBeforeBundle  bool
+}
+
+func (f *fakeBoxWork) Worktrees(_ context.Context, box string) ([]application.CloudKeptWorktree, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.trees[box], nil
+}
+
+func (f *fakeBoxWork) Bundle(_ context.Context, box string, wt application.CloudKeptWorktree, dest string) error {
+	if slices.Contains(f.provider.Calls(), "down "+box) {
+		f.downBeforeBundle = true
+	}
+	if f.bundleErr != nil {
+		return f.bundleErr
+	}
+	name := dest[strings.LastIndex(dest, "/")+1:]
+	f.vault.written[wt.Story+"/"+name] = "bundle of " + wt.Branch
+	f.bundled = append(f.bundled, wt.Story+"/"+name)
+	return nil
+}
+
+func (f *fakeBoxWork) VerifyBundle(_ context.Context, _ string, wt application.CloudKeptWorktree, dest string) error {
+	f.verified = append(f.verified, dest)
+	return f.verifyErr
+}
+
+func (f *fakeBoxWork) UncommittedDiff(context.Context, string, application.CloudKeptWorktree) (string, error) {
+	return f.diff, f.diffErr
+}
+
+// aBoxWithWork is a check of cloud1, idle since long before, whose box keeps
+// the worktrees given, wired to fakes that save into a fake vault.
+type boxWorkRig struct {
+	check    application.CloudCheck
+	book     *apptest.FakeCloudBook
+	provider *apptest.FakeCloud
+	box      *fakeBoxWork
+	vault    *fakeVault
+	files    *apptest.FakeVaultFiles
+	log      *apptest.FakeEventLog
+}
+
+func aBoxWithWork(trees ...application.CloudKeptWorktree) *boxWorkRig {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	up := now.Add(-2 * time.Hour)
+	r := &boxWorkRig{
+		book:     &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-10", Boxes: []application.CloudBox{{Name: "cloud1", Up: up, IdleSince: up}}}},
+		provider: &apptest.FakeCloud{},
+		vault:    newFakeVault(),
+		files:    &apptest.FakeVaultFiles{},
+		log:      &apptest.FakeEventLog{},
+	}
+	r.box = &fakeBoxWork{vault: r.vault, provider: r.provider, trees: map[string][]application.CloudKeptWorktree{"cloud1": trees}}
+	r.check = application.CloudCheck{
+		Work: apptest.NewFakeTracker(), Provider: r.provider, Book: r.book, Log: r.log, Host: "desktop",
+		Box: r.box, Vault: r.vault, Files: r.files,
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}
+	return r
+}
+
+var aheadTree = application.CloudKeptWorktree{
+	Story: "mw-5r3p30.754", Branch: "mw/mw-5r3p30.754", Dir: "/home/mw/.mw-worktrees/mw-5r3p30.754", Head: "abc123", Ahead: 3,
+}
+
+func (r *boxWorkRig) moves(t *testing.T) string {
+	t.Helper()
+	var all []string
+	for _, m := range r.book.State.Moves {
+		all = append(all, m.What)
+	}
+	return strings.Join(all, "\n")
+}
+
+func TestAnIdleBoxHasItsKeptBranchBundledAndVerifiedBeforeItIsDestroyed(t *testing.T) {
+	tree := aheadTree
+	tree.Uncommitted = []string{"application/x.go"}
+	r := aBoxWithWork(tree)
+	r.box.diff = "diff --git a/application/x.go b/application/x.go\n"
+	if _, err := r.check.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if r.box.downBeforeBundle {
+		t.Error("the box was destroyed before its branch was bundled")
+	}
+	if !slices.Contains(r.provider.Calls(), "down cloud1") {
+		t.Fatalf("expected cloud1 destroyed once its work was saved, calls %v", r.provider.Calls())
+	}
+	if want := []string{"mw-5r3p30.754/" + application.BundleFileName(1)}; !slices.Equal(r.box.bundled, want) {
+		t.Errorf("expected the bundle %v, got %v", want, r.box.bundled)
+	}
+	if len(r.box.verified) != 1 || !strings.HasSuffix(r.box.verified[0], "/"+application.BundleFileName(1)) {
+		t.Errorf("expected the bundle verified, got %v", r.box.verified)
+	}
+	if got := r.vault.written["mw-5r3p30.754/"+application.PatchFileName(1)]; got != r.box.diff {
+		t.Errorf("expected the uncommitted diff kept as %s, got %q", application.PatchFileName(1), got)
+	}
+	commits := r.files.Commits()
+	if len(commits) != 1 || !slices.Equal(commits[0].Paths, []string{application.BundleRecord("mw-5r3p30.754", 1), application.PatchRecord("mw-5r3p30.754", 1)}) {
+		t.Errorf("expected one vault commit of the bundle and the patch, got %+v", commits)
+	}
+	if _, _, pushes := r.files.Moves(); pushes == 0 {
+		t.Error("expected the vault commit pushed")
+	}
+	if !strings.Contains(r.moves(t), "saved mw-5r3p30.754 from cloud1") {
+		t.Errorf("expected a move saying what was saved:\n%s", r.moves(t))
+	}
+}
+
+func TestABoxWhoseBundleFailsIsNotDestroyedAndTheReportNamesTheStory(t *testing.T) {
+	for name, set := range map[string]func(*fakeBoxWork){
+		"the bundle fails":           func(b *fakeBoxWork) { b.bundleErr = errors.New("git bundle: fatal: Refusing to create empty bundle") },
+		"the bundle will not verify": func(b *fakeBoxWork) { b.verifyErr = errors.New("the bundle requires this ref: deadbeef") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := aBoxWithWork(aheadTree)
+			set(r.box)
+			_, err := r.check.Run(context.Background())
+			if err == nil || !strings.Contains(err.Error(), "mw-5r3p30.754") || !strings.Contains(err.Error(), "cloud1") {
+				t.Errorf("expected the check to fail naming cloud1 and the story, got %v", err)
+			}
+			if slices.Contains(r.provider.Calls(), "down cloud1") {
+				t.Errorf("expected the box not destroyed, calls %v", r.provider.Calls())
+			}
+			if len(r.book.State.Boxes) != 1 {
+				t.Errorf("expected the box still in the book, got %+v", r.book.State.Boxes)
+			}
+			if got := r.moves(t); !strings.Contains(got, "not destroying cloud1") || !strings.Contains(got, "mw-5r3p30.754") || !strings.Contains(got, "stays up") {
+				t.Errorf("expected a move naming the story and why the box stays, got:\n%s", got)
+			}
+			if len(r.files.Commits()) != 0 {
+				t.Errorf("expected nothing committed to the vault, got %+v", r.files.Commits())
+			}
+		})
+	}
+}
+
+func TestABoxThatCannotBeReachedForItsWorktreesIsNotDestroyed(t *testing.T) {
+	r := aBoxWithWork(aheadTree)
+	r.box.listErr = errors.New("ssh: connect to host 10.88.0.8 port 22: Connection timed out")
+	_, err := r.check.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "cloud1") || !strings.Contains(err.Error(), "Connection timed out") {
+		t.Errorf("expected the check to fail saying why, got %v", err)
+	}
+	if slices.Contains(r.provider.Calls(), "down cloud1") || len(r.book.State.Boxes) != 1 {
+		t.Errorf("expected the box kept, calls %v, book %+v", r.provider.Calls(), r.book.State.Boxes)
+	}
+}
+
+func TestARefusedTeardownIsAMoveOnceAndNotAtEveryCheck(t *testing.T) {
+	r := aBoxWithWork(aheadTree)
+	r.box.bundleErr = errors.New("disk full")
+	for range 3 {
+		if _, err := r.check.Run(context.Background()); err == nil {
+			t.Fatal("expected each check to fail")
+		}
+	}
+	if n := strings.Count(r.moves(t), "not destroying cloud1"); n != 1 {
+		t.Errorf("expected the refusal a move once, got %d times:\n%s", n, r.moves(t))
+	}
+}
+
+func TestMwCloudDownSavesTheKeptWorktreesFirstAndRefusesWhenItCannot(t *testing.T) {
+	r := aBoxWithWork(aheadTree)
+	text, err := r.check.Down(context.Background(), "cloud1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.box.downBeforeBundle || len(r.box.bundled) != 1 || !slices.Contains(r.provider.Calls(), "down cloud1") {
+		t.Errorf("expected the work bundled and then the box destroyed, bundled %v, calls %v", r.box.bundled, r.provider.Calls())
+	}
+	if !strings.Contains(text, "saved mw-5r3p30.754") || !strings.Contains(text, "down cloud1") {
+		t.Errorf("expected the report to say both, got:\n%s", text)
+	}
+
+	r = aBoxWithWork(aheadTree)
+	r.box.bundleErr = errors.New("disk full")
+	text, err = r.check.Down(context.Background(), "cloud1")
+	if err == nil || !strings.Contains(err.Error(), "mw-5r3p30.754") || slices.Contains(r.provider.Calls(), "down cloud1") {
+		t.Errorf("expected mw cloud down refused naming the story, got %v, calls %v", err, r.provider.Calls())
+	}
+	if !strings.Contains(text, "not destroying cloud1") || len(r.book.State.Boxes) != 1 {
+		t.Errorf("expected the line and the box kept, got %q, %+v", text, r.book.State.Boxes)
+	}
+}
+
+func TestABoxWithNothingToSaveIsDestroyedAsBefore(t *testing.T) {
+	clean := aheadTree
+	clean.Ahead = 0
+	for name, trees := range map[string][]application.CloudKeptWorktree{"no worktree": nil, "a worktree with nothing ahead and nothing uncommitted": {clean}} {
+		t.Run(name, func(t *testing.T) {
+			r := aBoxWithWork(trees...)
+			if _, err := r.check.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(r.provider.Calls(), "down cloud1") || len(r.box.bundled) != 0 || len(r.files.Commits()) != 0 {
+				t.Errorf("expected the box destroyed with nothing bundled, calls %v, bundled %v", r.provider.Calls(), r.box.bundled)
+			}
+		})
+	}
+}
+
+func TestAStoryBundledBeforeKeepsEveryEarlierAttemptsFile(t *testing.T) {
+	r := aBoxWithWork(aheadTree)
+	r.vault.written["mw-5r3p30.754/"+application.BundleFileName(1)] = "the first attempt's bundle"
+	r.vault.written["mw-5r3p30.754/"+application.BundleFileName(2)] = "the second attempt's bundle"
+	if _, err := r.check.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"mw-5r3p30.754/" + application.BundleFileName(3)}; !slices.Equal(r.box.bundled, want) {
+		t.Errorf("expected the new bundle beside the two earlier ones as %v, got %v", want, r.box.bundled)
+	}
+	if r.vault.written["mw-5r3p30.754/"+application.BundleFileName(1)] != "the first attempt's bundle" {
+		t.Error("expected the first attempt's bundle untouched")
+	}
+}
+
+func TestABoxWhoseWorkIsSavedIsNotBundledAgainWhenTheDestroyingFailsAndIsTriedAgain(t *testing.T) {
+	r := aBoxWithWork(aheadTree)
+	r.check.Provider = &stuckCloud{}
+	for range 2 {
+		_, _ = r.check.Run(context.Background())
+	}
+	if len(r.box.bundled) != 1 {
+		t.Errorf("expected the branch bundled once, got %v", r.box.bundled)
+	}
+}
+
+func TestACloudBoxIsNeverAskedForWorktreesWhenItDidNotComeUp(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	r := aBoxWithWork(aheadTree)
+	r.book.State.Boxes = []application.CloudBox{{Name: "cloud1", Up: now.Add(-time.Hour), Making: true}}
+	r.box.listErr = errors.New("unreachable")
+	if _, err := r.check.Down(context.Background(), "cloud1"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(r.provider.Calls(), "down cloud1") {
+		t.Errorf("expected a box still being made destroyed without asking it anything, calls %v", r.provider.Calls())
 	}
 }

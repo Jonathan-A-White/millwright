@@ -2,9 +2,12 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"slices"
 	"strings"
@@ -96,6 +99,41 @@ var (
 	// the box is Vultr's to say, not the wrapper's exit status.
 	ErrCloudUpDeadline = errors.New("the make ran past its deadline")
 )
+
+// CloudKeptWorktree is one worktree a cloud box keeps: a Builder's checkout of
+// a story, which a turn cap, a refused landing or a stopped session leaves on
+// the box, unpushed (a box has no GitHub credentials) and so held nowhere else.
+type CloudKeptWorktree struct {
+	// Story is the story the worktree is for, Branch its branch, Dir where it
+	// is on the box and Head the commit the branch is at.
+	Story, Branch, Dir, Head string
+	// Ahead counts the commits the branch has that the rig's target does not,
+	// and Uncommitted lists the paths the worktree has changed or added and
+	// not committed (untracked ones included).
+	Ahead       int
+	Uncommitted []string
+}
+
+// Holds reports whether the worktree has anything the vault could lack.
+func (w CloudKeptWorktree) Holds() bool { return w.Ahead > 0 || len(w.Uncommitted) > 0 }
+
+// CloudBoxWork is what the cloud asks of a box's kept worktrees before the box
+// is destroyed, over ssh: the adapter reaches the box at the address the
+// provider gives. A box destroyed on a timer and made from a snapshot is given
+// no secret to push with, so the home brings the work back instead.
+type CloudBoxWork interface {
+	// Worktrees lists the worktrees the box keeps, each with what it holds. An
+	// error is a box that could not be reached or read: it is not "none".
+	Worktrees(ctx context.Context, box string) ([]CloudKeptWorktree, error)
+	// Bundle writes the commits of the worktree's branch ahead of the rig's
+	// target into the file dest on this host, making its directory.
+	Bundle(ctx context.Context, box string, wt CloudKeptWorktree, dest string) error
+	// VerifyBundle checks the bundle at dest holds what the branch has ahead.
+	VerifyBundle(ctx context.Context, box string, wt CloudKeptWorktree, dest string) error
+	// UncommittedDiff is a patch of everything the worktree has changed or
+	// added and not committed, untracked files included, against its head.
+	UncommittedDiff(ctx context.Context, box string, wt CloudKeptWorktree) (string, error)
+}
 
 // CloudNotice tells the Governor what only he can mend: a card to him.
 type CloudNotice interface {
@@ -203,6 +241,13 @@ type CloudBox struct {
 	// one a box needs; PaceFault is why the check could not set or read it.
 	Pace      string `json:"pace,omitempty"`
 	PaceFault string `json:"pace_fault,omitempty"`
+	// Saved are the worktrees of the box whose work the vault already holds,
+	// each as "<story> <head> <hash of the uncommitted patch>", so that a
+	// teardown refused later does not bundle the same work again at every
+	// check. Refused is what the last refusal to destroy the box said, so that
+	// a refusal is a move once, not at every check.
+	Saved   []string `json:"saved,omitempty"`
+	Refused string   `json:"refused,omitempty"`
 }
 
 // CloudPaceFive is the OnCalendar of a dispatch timer at the pace a box needs:
@@ -404,7 +449,14 @@ type CloudCheck struct {
 	Stories  CloudStories
 	Provider CloudProvider
 	Book     CloudBook
-	Log      EventLog
+	// Box, Vault and Files are what a box's kept worktrees are saved with
+	// before the box is destroyed: Box brings the work back, Vault says where
+	// it belongs and Files commits and pushes it. A nil Box saves none (and
+	// destroys a box as before); with a Box, Vault and Files are needed.
+	Box   CloudBoxWork
+	Vault Vault
+	Files VaultFiles
+	Log   EventLog
 	// Notice tells the Governor what only he can mend. Nil tells no one.
 	Notice CloudNotice
 	// Host is the host the check runs on: its events' actor is cloud@Host.
@@ -454,6 +506,8 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 		return CloudReport{}, fmt.Errorf("the cloud check needs the tracker, a provider and the book")
 	case c.Plan.MaxBoxes < 0 || c.Plan.MonthlyCapUSD <= 0 || c.Plan.HourlyUSD <= 0 || c.Plan.Idle <= 0:
 		return CloudReport{}, fmt.Errorf("the cloud check needs a cap, an hourly price and an idle time above zero")
+	case c.Box != nil && (c.Vault == nil || c.Files == nil):
+		return CloudReport{}, fmt.Errorf("the cloud check saves a box's worktrees into the vault: it needs the vault and its files")
 	}
 	now := c.now()
 	state, err := c.Book.Read(ctx)
@@ -511,6 +565,9 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 func (c CloudCheck) Down(ctx context.Context, name string) (string, error) {
 	if c.Provider == nil || c.Book == nil {
 		return "", fmt.Errorf("mw cloud down needs a provider and the book")
+	}
+	if c.Box != nil && (c.Vault == nil || c.Files == nil) {
+		return "", fmt.Errorf("mw cloud down saves a box's worktrees into the vault: it needs the vault and its files")
 	}
 	if !c.Plan.isBox(name) {
 		return "", fmt.Errorf("%q is not a cloud box: a box is named %s and a number", name, c.Plan.prefix())
@@ -1041,6 +1098,9 @@ func (p *cloudPass) down(ctx context.Context, name, why string) bool {
 			return false
 		}
 	} else {
+		if !p.salvage(ctx, box, why) {
+			return false
+		}
 		if err := p.check.Provider.Down(ctx, name); err != nil {
 			p.move(ctx, fmt.Sprintf("failed to destroy %s (%s): %v", name, why, oneLine(err.Error())))
 			p.fail(fmt.Errorf("destroying %s: %w", name, err))
@@ -1064,6 +1124,152 @@ func (p *cloudPass) down(ctx context.Context, name, why string) bool {
 	p.keep(ctx, "down "+name)
 	p.repath(ctx, name)
 	return true
+}
+
+// salvage saves what a box's kept worktrees hold before the box is destroyed,
+// and reports whether the box may be: a box has no GitHub credentials, so a
+// Builder's unpushed commits and uncommitted changes are held nowhere else.
+// For each worktree with a branch ahead of its rig's target it bundles the
+// commits into the vault's runs/<story>/ and verifies the bundle, and it keeps
+// the uncommitted changes as a patch beside it, under the names mw retry uses
+// (BundleFileName, PatchFileName), at the first attempt number no file of the
+// story's holds, so that earlier evidence is never written over. A bundle that
+// fails, one that does not verify, a vault that will not take it, or a box that
+// cannot be reached refuses the teardown: the box stays up, billed, and the
+// refusal names the story and why. A box with no worktree, or whose worktrees
+// have nothing ahead and nothing uncommitted, is destroyed as before.
+func (p *cloudPass) salvage(ctx context.Context, box CloudBox, why string) bool {
+	// A box being made or restored has run nothing, and one that did not come
+	// up has no worktree to ask for.
+	if p.check.Box == nil || box.Making || box.Restoring || why == "it did not come up" {
+		return true
+	}
+	worktrees, err := p.check.Box.Worktrees(ctx, box.Name)
+	if err != nil {
+		return p.refuse(ctx, box, why, "", fmt.Errorf("it could not be asked what worktrees it keeps: %w", err))
+	}
+	for _, wt := range worktrees {
+		if !wt.Holds() {
+			continue
+		}
+		if err := p.saveWorktree(ctx, box, wt); err != nil {
+			return p.refuse(ctx, box, why, wt.Story, err)
+		}
+	}
+	if box.Refused != "" {
+		p.setBox(box.Name, func(b *CloudBox) { b.Refused = "" })
+		p.dirty = "saved " + box.Name
+	}
+	return true
+}
+
+// saveWorktree brings one worktree's work into the vault, committed and
+// pushed, unless the box's book says the vault already holds it.
+func (p *cloudPass) saveWorktree(ctx context.Context, box CloudBox, wt CloudKeptWorktree) error {
+	if runFilePath(wt.Story, "x") == "" {
+		return fmt.Errorf("the worktree %s names no story the vault can keep a run for", wt.Dir)
+	}
+	var patch string
+	if len(wt.Uncommitted) > 0 {
+		var err error
+		if patch, err = p.check.Box.UncommittedDiff(ctx, box.Name, wt); err != nil {
+			return fmt.Errorf("reading what %s left uncommitted: %w", wt.Dir, err)
+		}
+	}
+	key := wt.Story + " " + wt.Head
+	if patch != "" {
+		sum := sha256.Sum256([]byte(patch))
+		key += " " + hex.EncodeToString(sum[:6])
+	}
+	if slices.Contains(box.Saved, key) {
+		return nil
+	}
+	attempt, err := p.freeAttempt(ctx, wt.Story, wt.Ahead > 0, patch != "")
+	if err != nil {
+		return err
+	}
+	var paths []string
+	if wt.Ahead > 0 {
+		dest := p.check.Vault.RunFile(wt.Story, BundleFileName(attempt))
+		if err := p.check.Box.Bundle(ctx, box.Name, wt, dest); err != nil {
+			return fmt.Errorf("bundling %s into %s: %w", wt.Branch, dest, err)
+		}
+		if err := p.check.Box.VerifyBundle(ctx, box.Name, wt, dest); err != nil {
+			return fmt.Errorf("the bundle %s does not verify: %w", dest, err)
+		}
+		paths = append(paths, BundleRecord(wt.Story, attempt))
+	}
+	if patch != "" {
+		if _, err := p.check.Vault.PutRunFile(ctx, wt.Story, PatchFileName(attempt), patch); err != nil {
+			return fmt.Errorf("keeping the uncommitted changes of %s in the vault: %w", wt.Dir, err)
+		}
+		paths = append(paths, PatchRecord(wt.Story, attempt))
+	}
+	message := fmt.Sprintf("%s: attempt %d work of %s kept from cloud box %s before it was destroyed", wt.Story, attempt, wt.Branch, box.Name)
+	if _, err := commitWritten(ctx, p.check.Files, message, paths); err != nil {
+		return fmt.Errorf("committing %s in the vault: %w", strings.Join(paths, ", "), err)
+	}
+	if _, err := retryPastASiblingsWrite(ctx, sleepFor, p.check.Files.Push); err != nil {
+		return fmt.Errorf("%s is committed in the vault but could not be pushed: %w", strings.Join(paths, ", "), err)
+	}
+	p.setBox(box.Name, func(b *CloudBox) { b.Saved = append(b.Saved, key) })
+	p.dirty = "saved " + box.Name
+	p.move(ctx, fmt.Sprintf("saved %s from %s before it is destroyed: %s", wt.Story, box.Name, strings.Join(paths, ", ")))
+	return nil
+}
+
+// freeAttempt is the first attempt number, from the story's own attempts on,
+// that has no bundle (when one is wanted) and no patch (likewise) in the
+// story's run directory: a story saved before keeps every earlier file.
+func (p *cloudPass) freeAttempt(ctx context.Context, story string, bundle, patch bool) (int, error) {
+	attempt := 1
+	if p.check.Stories != nil {
+		if stories, err := p.check.Stories.StoriesSince(ctx, time.Time{}); err == nil {
+			for _, s := range stories {
+				if s.Story.ID == story && s.Attempts > attempt {
+					attempt = s.Attempts
+				}
+			}
+		}
+	}
+	for ; attempt < 1000; attempt++ {
+		taken := false
+		for name, wanted := range map[string]bool{BundleFileName(attempt): bundle, PatchFileName(attempt): patch} {
+			if !wanted {
+				continue
+			}
+			_, err := p.check.Vault.StatRunFile(ctx, story, name)
+			switch {
+			case err == nil:
+				taken = true
+			case !errors.Is(err, fs.ErrNotExist):
+				return 0, fmt.Errorf("looking for %s in the vault: %w", name, err)
+			}
+		}
+		if !taken {
+			return attempt, nil
+		}
+	}
+	return 0, fmt.Errorf("every attempt number of %s up to 999 has a file in the vault already", story)
+}
+
+// refuse leaves the box up because its work could not be saved, says so (a
+// move the first time, a quiet line at the checks after), and fails the check.
+func (p *cloudPass) refuse(ctx context.Context, box CloudBox, why, story string, err error) bool {
+	of := ""
+	if story != "" {
+		of = " (story " + story + ")"
+	}
+	text := fmt.Sprintf("not destroying %s (%s)%s: its work could not be saved into the vault, so it stays up and billed: %v", box.Name, why, of, oneLine(err.Error()))
+	if box.Refused == text && why != "mw cloud down" {
+		p.check.say("%s", text)
+	} else {
+		p.setBox(box.Name, func(b *CloudBox) { b.Refused = text })
+		p.dirty = "refused " + box.Name
+		p.move(ctx, text)
+	}
+	p.fail(fmt.Errorf("not destroying %s%s: %w", box.Name, of, err))
+	return false
 }
 
 // repath sets host=auto on every open and deferred story whose path names the

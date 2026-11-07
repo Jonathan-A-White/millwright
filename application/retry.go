@@ -26,6 +26,18 @@ func BundleRecord(storyID string, attempt int) string {
 	return runFilePath(storyID, BundleFileName(attempt))
 }
 
+// PatchFileName is the name the uncommitted changes of one attempt's worktree
+// are kept under beside its bundle, when the worktree could not be committed
+// where it stood: a cloud box's, saved before the box is destroyed.
+func PatchFileName(attempt int) string {
+	return fmt.Sprintf("attempt-%d.patch", attempt)
+}
+
+// PatchRecord is where that patch belongs, by path from the vault's root.
+func PatchRecord(storyID string, attempt int) string {
+	return runFilePath(storyID, PatchFileName(attempt))
+}
+
 // ContinueKey is the note that says the next attempt of a story continues the
 // branch its last attempt left (mw-1ljpo9.7): mw next writes it when an attempt
 // is refused at close-out by the gate or the merge, or stopped at its turn cap,
