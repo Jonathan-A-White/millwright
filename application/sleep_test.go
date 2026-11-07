@@ -887,3 +887,167 @@ func TestAProposalWhosePictureNamesNoPictureOfItsEvidenceOrNoneAtAllIsDropped(t 
 		})
 	}
 }
+
+// heldBeads is the tracker as the old-holds sweep reads it: the beads and
+// their comments.
+type heldBeads struct {
+	beads    []application.TriageBead
+	comments map[string][]application.Comment
+	err      error
+	asked    []string
+}
+
+func (h *heldBeads) TriageBeads(context.Context) ([]application.TriageBead, error) {
+	return h.beads, h.err
+}
+
+func (h *heldBeads) StoriesComments(_ context.Context, ids []string) (map[string][]application.Comment, error) {
+	h.asked = append(h.asked, ids...)
+	return h.comments, h.err
+}
+
+// holdsFixture is a tracker with held beads of several ages at the pass's
+// 2026-10-16 07:30Z.
+func holdsFixture() *heldBeads {
+	now := time.Date(2026, 10, 16, 7, 30, 0, 0, time.UTC)
+	ago := func(days int, extra time.Duration) time.Time {
+		return now.Add(-time.Duration(days)*24*time.Hour - extra)
+	}
+	return &heldBeads{
+		beads: []application.TriageBead{
+			{ID: "h-old", Title: "Old hold", Status: application.StatusHeld, Updated: ago(30, 0)},
+			{ID: "h-noreason", Title: "Held with no words", Status: application.StatusHeld, Updated: ago(12, 0)},
+			{ID: "h-edge", Title: "Exactly a week", Status: application.StatusHeld, Updated: ago(7, 0)},
+			{ID: "h-young", Title: "Held yesterday", Status: application.StatusHeld, Updated: ago(1, 0)},
+			{ID: "h-justunder", Title: "Just under a week", Status: application.StatusHeld, Updated: ago(6, 23*time.Hour)},
+			{ID: "h-touched", Title: "Touched lately, held long ago", Status: application.StatusHeld, Updated: ago(1, 0)},
+			{ID: "o-open", Title: "Open and old", Status: application.StatusOpen, Updated: ago(90, 0)},
+			{ID: "h-mol-step", Title: "A formula step", Status: application.StatusHeld, Updated: ago(90, 0)},
+		},
+		comments: map[string][]application.Comment{
+			"h-old": {
+				{Text: "HELD: first reason", Created: ago(40, 0)},
+				{Text: "A remark in passing", Created: ago(35, 0)},
+				{Text: "HELD: nothing but Jonah today\nsecond line", Created: ago(30, 0)},
+				{Text: "a later remark", Created: ago(2, 0)},
+			},
+			"h-noreason":  {{Text: "just a remark", Created: ago(12, 0)}},
+			"h-touched":   {{Text: "HELD: waiting on the new rig", Created: ago(20, 0)}, {Text: "still waiting", Created: ago(1, 0)}},
+			"h-young":     {{Text: "HELD: for a day", Created: ago(1, 0)}},
+			"h-edge":      {{Text: "HELD: edge", Created: ago(7, 0)}},
+			"h-justunder": {{Text: "HELD: edge", Created: ago(6, 23*time.Hour)}},
+		},
+	}
+}
+
+func TestTheSleepPassNamesEachHoldPastTheAgeLimitInStaleMdKeepingTheAgentsLines(t *testing.T) {
+	f := newSleepFixture()
+	f.grinder.Result.Answer = json.RawMessage(answerWithStale(t))
+	tracker := holdsFixture()
+	f.pass.Holds = tracker
+	result, err := f.pass.Run(context.Background(), application.SleepOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := f.vault.files["sleep-2026-10-16/stale.md"]
+	if !strings.HasPrefix(stale, fixtureStale) {
+		t.Errorf("stale.md = %q, want the agent's lines kept first, as they were", stale)
+	}
+	section := strings.TrimPrefix(stale, fixtureStale)
+	lines := map[string]string{}
+	for _, line := range strings.Split(section, "\n") {
+		for _, id := range []string{"h-old", "h-noreason", "h-edge", "h-young", "h-justunder", "h-touched", "o-open", "h-mol-step"} {
+			if strings.Contains(line, id+" ") {
+				lines[id] = line
+			}
+		}
+	}
+	for id, want := range map[string][]string{
+		"h-old":      {"Old hold", "30 days", "HELD: nothing but Jonah today"},
+		"h-noreason": {"Held with no words", "12 days", "no reason on the bead"},
+		"h-edge":     {"Exactly a week", "7 days", "HELD: edge"},
+		"h-touched":  {"Touched lately", "20 days", "waiting on the new rig"},
+	} {
+		line, ok := lines[id]
+		if !ok {
+			t.Errorf("stale.md has no line for %s:\n%s", id, stale)
+			continue
+		}
+		for _, w := range want {
+			if !strings.Contains(line, w) {
+				t.Errorf("the line for %s = %q, lacks %q", id, line, w)
+			}
+		}
+	}
+	for _, id := range []string{"h-young", "h-justunder", "o-open", "h-mol-step"} {
+		if line, ok := lines[id]; ok {
+			t.Errorf("stale.md names %s, which is not a hold past the limit: %q", id, line)
+		}
+	}
+	if strings.Contains(lines["h-old"], "second line") || strings.Contains(lines["h-old"], "first reason") {
+		t.Errorf("the line for h-old = %q, want the last hold comment's first line only", lines["h-old"])
+	}
+	// the oldest hold first
+	if strings.Index(stale, "h-old ") > strings.Index(stale, "h-noreason ") || strings.Index(stale, "h-touched ") > strings.Index(stale, "h-noreason ") {
+		t.Errorf("stale.md is not oldest first:\n%s", stale)
+	}
+	if result.Stale != 2 {
+		t.Errorf("Stale = %d, want 2: the items of his Needs you, not the holds", result.Stale)
+	}
+	if result.OldHolds != 4 || !strings.Contains(result.Summary, "Holds over 7 days old: 4 (stale.md)") {
+		t.Errorf("OldHolds = %d, summary = %q, want 4 and the count in the summary", result.OldHolds, result.Summary)
+	}
+	if got := len(strings.Fields(result.Summary)) + 4; got > 150 {
+		t.Errorf("the summary and pointer come to %d words, over 150", got)
+	}
+}
+
+func TestOldHoldsAreWrittenToStaleMdWhenTheAgentJudgedNothingStale(t *testing.T) {
+	f := newSleepFixture()
+	f.pass.Holds = holdsFixture()
+	result, err := f.pass.Run(context.Background(), application.SleepOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := f.vault.files["sleep-2026-10-16/stale.md"]
+	if !strings.Contains(stale, "h-old ") || !slices.Contains(result.Files, "stale.md") {
+		t.Errorf("stale.md = %q, files %v, want the holds named", stale, result.Files)
+	}
+	if result.Stale != 0 || !strings.Contains(result.Summary, "Stale in Needs you: none reported") {
+		t.Errorf("Stale = %d, summary = %q", result.Stale, result.Summary)
+	}
+}
+
+func TestAHoldsReadThatFailsLosesOnlyThatSectionAndIsReported(t *testing.T) {
+	f := newSleepFixture()
+	tracker := holdsFixture()
+	tracker.err = errors.New("bd is down")
+	f.pass.Holds = tracker
+	result, err := f.pass.Run(context.Background(), application.SleepOptions{})
+	if err == nil || !strings.Contains(err.Error(), "bd is down") {
+		t.Errorf("err = %v, want the failed read said", err)
+	}
+	if !slices.Contains(result.Files, "summary.md") {
+		t.Errorf("files = %v, want the rest of the pass written", result.Files)
+	}
+	if _, ok := f.vault.files["sleep-2026-10-16/stale.md"]; ok {
+		t.Error("a stale.md was written with nothing to put in it")
+	}
+}
+
+func TestNoOldHoldWritesNoSectionAndChangesNoBead(t *testing.T) {
+	f := newSleepFixture()
+	tracker := holdsFixture()
+	tracker.beads = tracker.beads[3:5] // held yesterday, held just under a week
+	f.pass.Holds = tracker
+	result, err := f.pass.Run(context.Background(), application.SleepOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.vault.files["sleep-2026-10-16/stale.md"]; ok || result.OldHolds != 0 {
+		t.Errorf("stale.md written or holds counted for holds under the limit: %+v", result)
+	}
+	if strings.Contains(result.Summary, "Holds over") {
+		t.Errorf("summary = %q, want no line about holds when none is old", result.Summary)
+	}
+}

@@ -57,7 +57,8 @@ func newSleepPassCmd() *cobra.Command {
 			"mw fuel counts under the kind sleep. It also appends a line to plans/improvements/ledger.jsonl for\n" +
 			"each idea in the recommendations, so mw loop rank sees them. An answer may add stale.md: a line for each item of his Needs\n" +
 			"you judged stale, with its evidence and an action (clear-card, retire-step, close-superseded,\n" +
-			"tick-item or ask-him); the Mayor clears them at the next sitting. It mails the Mayor the summary,\n" +
+			"tick-item or ask-him); the Mayor clears them at the next sitting. mw adds to stale.md a line for each\n" +
+			"held bead held 7 days or more, with its reason, and releases none. It mails the Mayor the summary,\n" +
 			"under 150 words, with how many are stale. It files no bead and clears nothing.\n\n" +
 			"The model and effort are [sleep] nightly_model and nightly_effort (opus and medium), and on\n" +
 			"Sundays, UTC, sunday_model and sunday_effort (fable and xhigh); --model and --effort replace\n" +
@@ -175,6 +176,7 @@ func newSleepPass(dir, host string, out io.Writer) (application.SleepPass, error
 		},
 		Vault: files, Ledger: files, Grinder: claudeGrinder(), Mailbox: gateway,
 		Beads:  gateway,
+		Holds:  gateway,
 		Verify: application.VerifySettings{Model: verify.Model, Effort: verify.Effort, Confidence: verify.Confidence},
 		Settings: application.SleepSettings{
 			NightlyModel: settings.NightlyModel, NightlyEffort: settings.NightlyEffort,
