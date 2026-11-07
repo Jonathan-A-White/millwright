@@ -120,6 +120,76 @@ func TestNudgeLeavesABusyPaneAndTellsItOnceIdle(t *testing.T) {
 	}
 }
 
+// A Deputy that has written its handoff and is found idle with mail is not
+// nudged, which only draws one more turn saying a fresh Deputy is needed: the
+// seat is sprung, and the seat's up command replaces the window (mw-gq6.1036).
+func handedOffWorld(t *testing.T, handedOff bool) *nudgeWorld {
+	t.Helper()
+	w := newNudgeWorld(t)
+	opened := time.Date(2026, 11, 6, 8, 0, 0, 0, time.UTC)
+	written := opened.Add(time.Hour)
+	if !handedOff {
+		written = opened.Add(-time.Hour)
+	}
+	w.nudge.Seats = &fakeSeatFiles{start: application.SeatStart{
+		Handoffs: []application.Handoff{{Name: "2026-11-06-927", Written: written}},
+	}}
+	w.subs.Set("deputy", "kinds = [\"mail\"]\nspring = true\n")
+	w.windows.HoldsWithID("@7", "deputy-2026-11-06-01", opened)
+	w.pass(t)
+	appendAll(t, w.log, events.Event{Kind: events.KindMail, Bead: "mw-m1", Detail: "deputy"})
+	return w
+}
+
+func TestNudgeSpringsAnIdleSeatWhoseWindowHasHandedOffInsteadOfTypingIt(t *testing.T) {
+	w := handedOffWorld(t, true)
+	w.pass(t)
+	if len(w.sprung) != 1 || w.sprung[0] != "deputy: New events for deputy: 1. Run mw events tail --since 0." {
+		t.Fatalf("sprung %q, want the Deputy once", w.sprung)
+	}
+	if got := w.windows.Typed("@7"); len(got) != 0 {
+		t.Fatalf("typed %q into a window that has handed off", got)
+	}
+	w.pass(t)
+	if len(w.sprung) != 1 {
+		t.Fatalf("a second pass sprung again: %q", w.sprung)
+	}
+}
+
+func TestNudgeSpringsAHandedOffSeatOnceItsTurnHasEnded(t *testing.T) {
+	w := handedOffWorld(t, true)
+	_ = w.windows.Pane("@7", application.PaneWorking)
+	w.pass(t)
+	w.pass(t)
+	if len(w.sprung) != 0 || len(w.windows.Typed("@7")) != 0 {
+		t.Fatalf("a busy pane was sprung %q or typed %q", w.sprung, w.windows.Typed("@7"))
+	}
+	_ = w.windows.Pane("@7", application.PaneIdle)
+	w.pass(t)
+	if len(w.sprung) != 1 || len(w.windows.Typed("@7")) != 0 {
+		t.Fatalf("sprung %q, typed %q; want the seat sprung and nothing typed", w.sprung, w.windows.Typed("@7"))
+	}
+}
+
+func TestNudgeRetriesTheSpringOfAHandedOffSeatThatFailed(t *testing.T) {
+	w := handedOffWorld(t, true)
+	w.springBy = func(string, string) error { return errors.New("still up") }
+	w.pass(t)
+	w.springBy = nil
+	w.pass(t)
+	if len(w.sprung) != 2 {
+		t.Fatalf("sprung %d times, want a retry after the failure", len(w.sprung))
+	}
+}
+
+func TestNudgeTypesASeatThatHasNotHandedOff(t *testing.T) {
+	w := handedOffWorld(t, false)
+	w.pass(t)
+	if len(w.sprung) != 0 || len(w.windows.Typed("@7")) != 1 {
+		t.Fatalf("sprung %q, typed %q; want the nudge typed and no spring", w.sprung, w.windows.Typed("@7"))
+	}
+}
+
 func TestNudgeSpringsADownSeatMarkedSpring(t *testing.T) {
 	w := newNudgeWorld(t)
 	w.subs.Set("deputy", "kinds = [\"mail\"]\nspring = true\n")
