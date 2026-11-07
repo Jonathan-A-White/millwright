@@ -148,10 +148,10 @@ func (v handsView) Run(ctx context.Context) (application.PosternViewDoc, error) 
 func newHandsAddCmd() *cobra.Command {
 	var id, host, as, wayBack string
 	var after []string
-	var replace, noPush, noView bool
+	var replace, noPush, noView, heldOK bool
 
 	cmd := &cobra.Command{
-		Use:   "add <bead> --id <id> --host <host> --as user|root [--way-back '<commands>'] [--replace] [--after <bead>]... -- '<commands>'",
+		Use:   "add <bead> --id <id> --host <host> --as user|root [--way-back '<commands>'] [--replace] [--after <bead>]... [--held-ok] -- '<commands>'",
 		Short: "Add a step for the Governor's hands to a bead",
 		Long: "add writes down one step only the Governor's hands could take — what a `!` line used to\n" +
 			"ask him to type — on <bead>: kept in the bead's hands note (hands.<bead>), commented on\n" +
@@ -176,7 +176,12 @@ func newHandsAddCmd() *cobra.Command {
 			"step, or a replaced step's new hash, at once. It takes the mail notifier's lock\n" +
 			"(~/.local/state/mw-mail-notify/lock) without waiting: while the notifier's tick holds it,\n" +
 			"the view is skipped with a warning on stderr, and its next tick shows the step. A view\n" +
-			"that fails is said on stderr too, and the step stays. --no-view publishes none.",
+			"that fails is said on stderr too, and the step stays. --no-view publishes none.\n\n" +
+			"A held bead shows the Governor no Run until it is open, so the step is kept but no push\n" +
+			"is sent for it (the view is still published). mw hands add then ends on the warning\n" +
+			"\"<bead> is held: the Governor sees no Run until it is open\" as its last line and exits\n" +
+			"non-zero, unless the bead is open or --held-ok says the hold is meant: then it exits 0\n" +
+			"and the warning is still the last line.",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
 				return fmt.Errorf("mw hands add takes the bead and then, after --, the commands as one quoted argument; got %d argument(s)", len(args))
@@ -201,6 +206,8 @@ func newHandsAddCmd() *cobra.Command {
 				ViewLock: newHandsViewLock(),
 				NoView:   noView,
 
+				HeldFails: !heldOK,
+
 				Here:    viewHost,
 				Finds:   hands.NewRunner("").Finds,
 				Reaches: handsReaches(viewHost),
@@ -220,6 +227,7 @@ func newHandsAddCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&replace, "replace", false, "replace the bead's step of this id, voiding any approval of it")
 	cmd.Flags().BoolVar(&noPush, "no-push", false, "do not send the Governor a Postern push about the step")
 	cmd.Flags().BoolVar(&noView, "no-view", false, "do not publish the live view once the step is kept")
+	cmd.Flags().BoolVar(&heldOK, "held-ok", false, "the bead is held on purpose: the Governor sees no Run until it is open, so exit 0 (the warning is still said last)")
 	cmd.Flags().StringArrayVar(&after, "after", nil, "a bead that must finish first; it blocks this bead (repeatable)")
 	for _, name := range []string{"id", "host", "as"} {
 		_ = cmd.MarkFlagRequired(name)

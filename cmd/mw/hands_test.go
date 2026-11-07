@@ -271,3 +271,70 @@ func TestHandsRetireNeedsAReasonAndAStepTheBeadHas(t *testing.T) {
 		t.Fatalf("expected nothing written, got:\n%s", calls)
 	}
 }
+
+const handsHeldBead = `[{"id": "mw-f758y.8", "title": "Linger", "status": "deferred", "issue_type": "task"}]`
+
+func lastLine(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	return lines[len(lines)-1]
+}
+
+// mw hands add on a held bead keeps the step but the Governor sees no Run: the
+// warning is the last line printed and the command leaves non-zero, unless
+// --held-ok says the hold is meant, which leaves 0 with the warning still last.
+// The Governor is sent no push for it, since he has nothing to tap on; the view
+// still goes (mw-gq6.979).
+func TestHandsAddOnAHeldBeadEndsOnTheWarningAndFailsUnlessHeldOK(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		args     []string
+		bead     string
+		wantFail bool
+		wantWarn bool
+		wantPush int
+	}{
+		{"held, no flag", nil, handsHeldBead, true, true, 0},
+		{"held, --held-ok", []string{"--held-ok"}, handsHeldBead, false, true, 0},
+		{"held, --replace", []string{"--replace"}, handsHeldBead, true, true, 0},
+		{"open", nil, handsAddBead, false, false, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			posternHome(t, "http://unused", "", "")
+			push := fakeHandsPush(t, nil)
+			view := swapHandsView(t)
+			log := bdRecording(t, c.bead)
+
+			out, err := runMw(t, handsAddArgs(c.args...)...)
+			if (err != nil) != c.wantFail {
+				t.Fatalf("expected failure=%v, got err %v\n%s", c.wantFail, err, out)
+			}
+			warned := strings.Contains(lastLine(out), "is held: the Governor sees no Run until it is open (the step is kept)")
+			if warned != c.wantWarn {
+				t.Fatalf("expected the warning last=%v, got last line %q in:\n%s", c.wantWarn, lastLine(out), out)
+			}
+			if c.wantWarn && strings.Count(out, "no Run until it is open") != 1 {
+				t.Errorf("expected the warning said once, got:\n%s", out)
+			}
+			calls, _ := os.ReadFile(log)
+			if !strings.Contains(string(calls), "kv set hands.mw-f758y.8 ") {
+				t.Errorf("expected the step kept, got:\n%s", calls)
+			}
+			if sent := push.Sent(); len(sent) != c.wantPush {
+				t.Errorf("expected %d push(es), got %+v", c.wantPush, sent)
+			}
+			if view.runs != 1 {
+				t.Errorf("expected the view published once, got %d", view.runs)
+			}
+		})
+	}
+}
+
+func TestHandsAddHelpSaysWhatHeldOKMeans(t *testing.T) {
+	out, err := runMw(t, "hands", "add", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "--held-ok") || !strings.Contains(out, "sees no Run") {
+		t.Errorf("expected mw hands add --help to say what --held-ok means, got:\n%s", out)
+	}
+}
