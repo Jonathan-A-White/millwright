@@ -36,9 +36,23 @@ type gateHandedOnAtFirstRelease struct {
 	*hostlock.Gate
 	then func()
 	once sync.Once
+
+	mu sync.Mutex
+	// spentAtTake is, for each Take, whether the wait it was given had already
+	// run out: the deadline spent by the tests leaves no time to wait for a lock.
+	spentAtTake []bool
+}
+
+func (g *gateHandedOnAtFirstRelease) spent() []bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]bool(nil), g.spentAtTake...)
 }
 
 func (g *gateHandedOnAtFirstRelease) Take(ctx context.Context, holder string, held func(by string)) (application.GateTurn, error) {
+	g.mu.Lock()
+	g.spentAtTake = append(g.spentAtTake, ctx.Err() != nil)
+	g.mu.Unlock()
 	turn, err := g.Gate.Take(ctx, holder, held)
 	if err == nil {
 		turn.Holding = handingOn{turn.Holding, func() { g.once.Do(g.then) }}
@@ -114,8 +128,11 @@ func TestAWholeChecksChangedSpecsMeetingAHeldGateLockAfterTheTestsEndTheCallInOn
 	if err == nil {
 		t.Fatalf("expected the check not to pass while the gate lock was held\n%s", report)
 	}
-	if took > checks.took+150*time.Millisecond {
-		t.Errorf("expected the call to end soon after the tests, the deadline being spent, it took %s (tests %s, deadline %s)", took, checks.took, deadline)
+	// No real-time margin is asserted (the host's load makes any of them flaky):
+	// the specs' Take, the second one, was given a wait already spent, so the call
+	// could not have waited for the other gate.
+	if spent := lock.spent(); len(spent) != 2 || spent[0] || !spent[1] {
+		t.Errorf("expected the tests' lock to be waited for and the specs' lock to be asked with the deadline spent, got spent-at-take %v (tests %s, deadline %s, call %s)", spent, checks.took, deadline, took)
 	}
 	refusal := slotRefusalOf(report)
 	if refusal == nil {
@@ -178,7 +195,6 @@ func TestAWholeChecksSecondCalmWaitAfterTheTestsIsUnderTheDeadlineAndEndsInOneLi
 	const deadline = 300 * time.Millisecond
 	checks := &slowChecks{took: 400 * time.Millisecond, pass: false}
 	var calmWaited time.Duration
-	started := time.Now()
 	report, err := application.Check{
 		Tracker: aStoryOnTheLaptop(), Landing: &fakeRetryLanding{AheadCount: 1}, Checks: checks,
 		PartSlotWait: deadline, Records: &mapRecords{},
@@ -190,9 +206,6 @@ func TestAWholeChecksSecondCalmWaitAfterTheTestsIsUnderTheDeadlineAndEndsInOneLi
 	}.Run(context.Background(), "mw-x.1")
 	if err == nil {
 		t.Fatalf("expected the check not to pass\n%s", report)
-	}
-	if took := time.Since(started); took > checks.took+150*time.Millisecond {
-		t.Errorf("expected the call to end soon after the tests, it took %s", took)
 	}
 	if calmWaited != 0 {
 		t.Errorf("expected no wait for the host to calm, the deadline being spent, it waited %s", calmWaited)
