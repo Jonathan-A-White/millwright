@@ -95,6 +95,21 @@ func (a AfterLandingRun) Run(ctx context.Context, rigName string) error {
 		return errors.New(afterLandingLine(command, "could not be run: "+firstLine(runErr.Error())))
 	}
 	if !ran.Succeeded() {
+		// The step the host names as the deploy passed and a later one failed: the
+		// rig is deployed, whatever the later step says (mw-gq6.866).
+		if step := deployStepOf(a.AfterLanding, rigName); ran.PassedStep(step) && a.Built != nil && a.Checkout != nil {
+			head, err := a.Checkout.Head(ctx, dir)
+			switch {
+			case err != nil || head == "":
+				a.say("the deployed mark of %s could not be set: the checkout's commit could not be read", rigName)
+			default:
+				if note := markDeployedAt(ctx, a.Built, rigName, head); note != "" {
+					a.say("%s", note)
+				} else {
+					ran.DeployStep, ran.DeployedAt = step, head
+				}
+			}
+		}
 		return errors.New(ran.Line())
 	}
 	a.say("%s", ran.Line())

@@ -34,14 +34,14 @@ var MillhandTickStateDir = filepath.Join(".local", "state", "mw-millhand-tick")
 //
 // The home's tick also installs a changed formulas/ into the vault's
 // .beads/formulas (mw-gq6.314), as the vault's own commit.
-func hostSelfUpdate(rigs, afterLanding map[string]string, afterLimits map[string]time.Duration, home string, files *vault.Vault, host string) application.SelfUpdate {
+func hostSelfUpdate(rigs, afterLanding map[string]string, afterLimits map[string]time.Duration, deploySteps rig.AfterLandingOption, home string, files *vault.Vault, host string) application.SelfUpdate {
 	return application.SelfUpdate{
 		Formulas: vault.NewFormulas(files),
 		Home:     files,
 		Host:     host,
 		Rigs:     rigs,
 		Checkout: rig.New(),
-		After:    rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
+		After:    rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits), deploySteps),
 		Built:    rig.NewBuiltMarks(filepath.Join(home, SyncHaltStateDir)),
 		Units:    userunits.Systemctl{},
 		Slot:     rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
@@ -142,6 +142,10 @@ func newMillhandTickCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			deploySteps, err := afterLandingDeploySteps(afterLanding)
+			if err != nil {
+				return err
+			}
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("there is no home directory to keep the tick log in: %w", err)
@@ -179,7 +183,7 @@ func newMillhandTickCmd() *cobra.Command {
 					Host:     host,
 					Sessions: tmux.New(),
 				},
-				SelfUpdate: hostSelfUpdate(rigs, afterLanding, afterLimits, home, mwVault(dir, host), host),
+				SelfUpdate: hostSelfUpdate(rigs, afterLanding, afterLimits, deploySteps, home, mwVault(dir, host), host),
 				Backend:    hostBackend(gateway, mwVault(dir, host), host, rigs, cmd.ErrOrStderr()),
 				Tidy:       application.Tidy{Mail: gateway, Notes: gateway, Beads: gateway, Formulas: gateway, Host: host},
 				Reach:      doctor.NetReach{Hosts: reach},

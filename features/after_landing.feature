@@ -47,6 +47,39 @@ Feature: mw after-landing runs a rig's after-landing command again by hand
     Then the command did not run
     And mw after-landing failed, saying: this host names no after-landing command for millwright
 
+  Scenario: mw after-landing marks the rig deployed only when the whole command passed, when the host names no deploy step
+    Given a rig "postern" whose after-landing command has 3 steps, of which step 3 fails
+    And the rig is remembered as deployed at an older commit and as having failed to deploy
+    When mw after-landing is run for "postern"
+    Then mw after-landing failed, saying: step 3 of 3, false: exit status 1
+    And the rig "postern" is remembered as deployed at the older commit still
+    And the rig "postern" is remembered as having failed to deploy
+
+  Scenario: a step after the host's deploy step fails, and the deploy stands
+    Given a rig "postern" whose after-landing command has 3 steps, of which step 3 fails
+    And the host names step 2 as the one after which the rig is deployed
+    And the rig is remembered as deployed at an older commit and as having failed to deploy
+    When mw after-landing is run for "postern"
+    Then mw after-landing failed, saying: deployed at abc1234 (step 2 of 3); step 3 of 3 failed: false: exit status 1
+    And the rig "postern" is remembered as deployed at the checkout's commit
+    And the rig "postern" is not remembered as having failed to deploy
+
+  Scenario: the host's deploy step itself fails, and nothing is marked deployed
+    Given a rig "postern" whose after-landing command has 3 steps, of which step 2 fails
+    And the host names step 2 as the one after which the rig is deployed
+    And the rig is remembered as deployed at an older commit and as having failed to deploy
+    When mw after-landing is run for "postern"
+    Then mw after-landing failed, saying: step 2 of 3, false: exit status 1
+    And the rig "postern" is remembered as deployed at the older commit still
+    And the rig "postern" is remembered as having failed to deploy
+
+  Scenario: a command that passes with a deploy step named is marked deployed
+    Given a rig "postern" whose after-landing command has 3 steps, all of which pass
+    And the host names step 2 as the one after which the rig is deployed
+    When mw after-landing is run for "postern"
+    Then mw after-landing succeeded
+    And the rig "postern" is remembered as deployed at the checkout's commit
+
   Scenario: a millwright landing's grist smoke is made by the mw the landing built, not by the mw the landing runs in
     Given a rig "millwright" whose landing changes how the grist smoke judges the app "cairn"
     When the landing of "millwright" makes its grist smoke of "cairn"

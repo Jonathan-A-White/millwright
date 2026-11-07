@@ -148,6 +148,13 @@ type Ran struct {
 	Step     int
 	Earlier  string
 
+	// DeployStep and DeployedAt say that the host's knob names the step after
+	// which the rig is deployed, that this run passed it and failed a later step,
+	// and that the deployed mark was set at DeployedAt for it: Line then says the
+	// deploy stood (mw-gq6.866). Both are zero for every other run.
+	DeployStep int
+	DeployedAt string
+
 	// ReadAt is when the command line was read from the host's config, which is
 	// when the step ran and not when the batch began (mw-gq6.1001); zero when the
 	// port does not read it again. Changed says the line differs from the one the
@@ -192,6 +199,29 @@ func AfterLandingStepMark(step, steps int, text string) string {
 
 // Succeeded says the command ran to the end and exited with status zero.
 func (r Ran) Succeeded() bool { return r.Status == 0 && r.TimedOut == 0 }
+
+// DeployStepper is the part of an AfterLanding port that names, for a rig, the
+// step of its command after which the rig is deployed, counted from 1; zero when
+// the host names none. A port without it names none.
+type DeployStepper interface {
+	DeployStep(rig string) int
+}
+
+func deployStepOf(port AfterLanding, rig string) int {
+	if stepper, ok := port.(DeployStepper); ok {
+		return stepper.DeployStep(rig)
+	}
+	return 0
+}
+
+// PassedStep says step n of the command, counted from 1, ran to its end and
+// passed: the run succeeded, or it ended in a step after n.
+func (r Ran) PassedStep(n int) bool {
+	if n < 1 || len(r.Steps) < n {
+		return false
+	}
+	return r.Succeeded() || r.Step > n
+}
 
 // Deployed says a step that ships the rig — one that names rsync or scp, or a
 // deploy — ran to its end before the step the run ended in, or in a run that
@@ -255,6 +285,9 @@ func (r Ran) Line() string {
 		withTail += ": " + tail
 	}
 	switch {
+	case r.DeployStep > 0 && r.DeployedAt != "" && r.Step > r.DeployStep && r.Step <= len(r.Steps):
+		return afterLandingLine(r.Command, fmt.Sprintf("deployed at %s (step %d of %d); step %d of %d failed: %s: %s",
+			updatedRevision(r.DeployedAt), r.DeployStep, len(r.Steps), r.Step, len(r.Steps), r.Steps[r.Step-1], withTail))
 	case r.ShotsNotPublished():
 		return afterLandingLine(r.Command, "deployed; shots not published: "+shotsReason(how, withTail, output))
 	case len(r.Steps) > 1 && r.Step > 0 && r.Step <= len(r.Steps):
@@ -433,6 +466,18 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 	line := ran.Line()
 	if err != nil {
 		line = afterLandingLine(command, "could not be run: "+firstLine(err.Error()))
+	}
+	if err == nil && !ran.Succeeded() {
+		// The step the host names as the deploy passed and a later one failed: the
+		// rig is deployed, whatever the later step says (mw-gq6.866).
+		if step := deployStepOf(n.AfterLanding, c.path.Rig); ran.PassedStep(step) && report.How.Commit != "" {
+			if note := markDeployedAt(ctx, n.Deployed, c.path.Rig, report.How.Commit); note != "" {
+				report.Notes = append(report.Notes, note)
+			} else if n.Deployed != nil {
+				ran.DeployStep, ran.DeployedAt = step, report.How.Commit
+				line = ran.Line()
+			}
+		}
 	}
 	kept := n.keepAfterLandingLog(ctx, c, report, command, ran, retried, line)
 	if retried != "" {

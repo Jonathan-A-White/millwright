@@ -2990,3 +2990,35 @@ func TestNamedTestsReadsAQuotedLineWithEscapedQuotesInIt(t *testing.T) {
 		t.Errorf("NamedTests = %q, want %q", got, want)
 	}
 }
+
+func TestTheAfterLandingDeployStepIsReadPerRig(t *testing.T) {
+	writeConfig(t, "[after_landing_deploy_step]\npostern = 4\n")
+
+	steps, err := config.AfterLandingDeploySteps()
+	if err != nil {
+		t.Fatalf("reading the after-landing deploy steps: %v", err)
+	}
+	if len(steps) != 1 || steps["postern"] != 4 {
+		t.Errorf("expected postern deployed after step 4, got %+v", steps)
+	}
+}
+
+func TestAHostThatNamesNoAfterLandingDeployStepHasNone(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	steps, err := config.AfterLandingDeploySteps()
+	if err != nil || len(steps) != 0 {
+		t.Errorf("expected no deploy step and no error, got %+v, %v", steps, err)
+	}
+}
+
+func TestAnAfterLandingDeployStepThatIsNotAStepNumberIsRefusedByRigAndValue(t *testing.T) {
+	for _, value := range []string{"0", "-1", "four", "2.5", `""`} {
+		writeConfig(t, "[after_landing_deploy_step]\npostern = "+value+"\n")
+
+		_, err := config.AfterLandingDeploySteps()
+		if err == nil || !strings.Contains(err.Error(), "postern") || !strings.Contains(err.Error(), strings.Trim(value, `"`)) {
+			t.Errorf("value %s: expected an error naming the rig and the value, got %v", value, err)
+		}
+	}
+}

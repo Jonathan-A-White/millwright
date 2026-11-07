@@ -240,6 +240,9 @@ const (
 	RelatedTestsTable      = "related_tests"
 	NamedTestsTable        = "named_tests"
 	AfterLandingLimitTable = "after_landing_limit"
+	// AfterLandingDeployStepTable names, per rig, the step of its [after_landing]
+	// command (split on &&, counted from 1) after which the rig is deployed.
+	AfterLandingDeployStepTable = "after_landing_deploy_step"
 	// HeavyNetTable names the rigs whose gate or close-out installs dependencies
 	// (npm ci, go mod download): `postern = true`. A story on one waits while the
 	// network is metered.
@@ -2793,6 +2796,34 @@ func AfterLandingLimits() (map[string]time.Duration, error) {
 		limits[rig] = limit
 	}
 	return limits, nil
+}
+
+// AfterLandingDeploySteps reports, by rig name, the step of its after-landing
+// command after which the rig counts as deployed, read from the
+// `[after_landing_deploy_step]` table of ~/.config/mw/config.toml: `postern = 4`
+// for a command whose fourth step ships the site and whose later ones only take
+// and publish shots. A rig that is not named is deployed when its whole command
+// passes, and a machine with no such table is not an error. A value that is not a
+// whole number of at least 1 is an error naming the rig and the value; that it
+// is past the last step is for rig.CheckDeploySteps, which knows the command.
+func AfterLandingDeploySteps() (map[string]int, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), AfterLandingDeployStepTable)
+	if err != nil {
+		return nil, err
+	}
+	steps := make(map[string]int, len(table))
+	for rig, value := range table {
+		step, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || step < 1 {
+			return nil, fmt.Errorf("%s: [%s] %s = %q is not a step number, counted from 1", File, AfterLandingDeployStepTable, rig, value)
+		}
+		steps[rig] = step
+	}
+	return steps, nil
 }
 
 // Metered reports config `metered`: "auto" (ask Windows, from WSL), "yes" or

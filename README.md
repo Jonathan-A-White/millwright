@@ -1691,6 +1691,9 @@ millwright = "make build"          # run in this rig's checkout once a landing h
 [after_landing_limit]
 postern = "20m"                    # how long that command may run before it is stopped, per rig (default 5m); see docs/site-deploy.md
 
+[after_landing_deploy_step]
+postern = 4                        # the step of that command (split on &&, counted from 1) after which the rig is deployed; later steps may fail and the deploy stands (default: the whole command)
+
 [backend.postern]                  # a rig whose backend the home runs; leave it out for none (see mw next)
 dir = "server"                     # a landing that changed anything here stages the backend (default server)
 build = "go build -o {out} ./cmd/postern"  # run in dir of a throwaway worktree; {out} is where the binary goes
@@ -1822,7 +1825,15 @@ landing (but for `millwright`, below); the table is for a host whose timers run 
 checkout, which a landing leaves one commit stale until the command rebuilds it.
 The command is one line, read by `/bin/sh` in the rig's checkout like a `[tests]`
 line, and is stopped after five minutes, or after the time the rig has in
-`[after_landing_limit]`.
+`[after_landing_limit]`. `[after_landing_deploy_step]` names, per rig, the step of
+that command (its `&&`-joined steps, counted from 1; `postern = 4`) after which the
+rig is deployed: when that step has passed, the rig's deployed mark is set at the
+checkout's commit and any failed-deploy mark is cleared, even if a later step (shots,
+say) fails. The after-landing still fails, its line saying `deployed at 027f977 (step 4
+of 6); step 5 of 6 failed: npm run shots: ...`, and `mw verify` says `deploy OK`.
+A value that is not a step number from 1, or that is past the command's last step, is
+refused with a line naming the rig and the value; a rig the table does not name is
+marked only when its whole command passes (mw-gq6.866).
 
 That same command keeps the host's mw level without a landing of its own
 (mw-gq6.183): on a host that names one for `millwright`, every `mw millhand

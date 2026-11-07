@@ -93,6 +93,10 @@ func newLandCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			deploySteps, err := afterLandingDeploySteps(afterLanding)
+			if err != nil {
+				return err
+			}
 			pushTries, err := config.PushTries()
 			if err != nil {
 				return err
@@ -160,7 +164,7 @@ func newLandCmd() *cobra.Command {
 				Out:       cmd.OutOrStdout(),
 				Err:       cmd.ErrOrStderr(),
 
-				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterCommandsFrom(config.AfterLanding, time.Now), rig.WithAfterLimits(afterLimits)),
+				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterCommandsFrom(config.AfterLanding, time.Now), rig.WithAfterLimits(afterLimits), deploySteps),
 				DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 				Deployed:     hostDeployedMarks(),
 				Smoke:        hostGristSmoke(gateway, host, rigs, worktrees, cmd.OutOrStdout(), application.BatchLogPrefix+"grist smoke: "),
