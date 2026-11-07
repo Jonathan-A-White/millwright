@@ -3,6 +3,7 @@ package doctor
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -38,6 +39,20 @@ type DaemonReload struct {
 	Units []string
 	// Program is the program run for systemctl. Empty reads "systemctl".
 	Program string
+	// Root says whether mw runs as root, in which case the system manager's
+	// mw-* units are checked too (mw-gq6.1035). Nil reads the effective user id.
+	Root func() bool
+}
+
+// DaemonReloadSystemFix is the one line that mends a system unit file changed on
+// disk and not yet read by the system manager, on a root host.
+const DaemonReloadSystemFix = "fix: systemctl daemon-reload"
+
+func (d *DaemonReload) isRoot() bool {
+	if d.Root != nil {
+		return d.Root()
+	}
+	return os.Geteuid() == 0
 }
 
 // NewDaemonReload is the check over the given units, run through the real
@@ -60,6 +75,24 @@ func (d *DaemonReload) Name() string { return DaemonReloadName }
 // install rather than a fault — since nothing it might otherwise have said
 // about any other unit can be trusted either.
 func (d *DaemonReload) Probe(ctx context.Context) (application.Verdict, string) {
+	verdict, reason := d.probeUser(ctx)
+	if !d.isRoot() {
+		return verdict, reason
+	}
+	// A root host's units are system units: the user manager's answer (usually
+	// n/a, no user manager) says nothing of them.
+	stale, err := userunits.Systemctl{Bin: d.Program, SystemScope: true}.StaleUnits(ctx)
+	if err != nil || len(stale) == 0 {
+		return verdict, reason
+	}
+	system := "system units need a reload: " + strings.Join(stale, ", ") + "; " + DaemonReloadSystemFix
+	if verdict == application.DoctorFaulty {
+		return verdict, reason + "; " + system
+	}
+	return application.DoctorFaulty, system
+}
+
+func (d *DaemonReload) probeUser(ctx context.Context) (application.Verdict, string) {
 	var needing, unclear []string
 	skipped := 0
 	for _, unit := range d.Units {
@@ -139,10 +172,21 @@ func (d *DaemonReload) notInstalled(ctx context.Context, unit string) (skip bool
 	return loadStateValue(out) == "not-found", ""
 }
 
-// Cure implements application.DoctorCheck: `systemctl --user daemon-reload`.
+// Cure implements application.DoctorCheck: `systemctl --user daemon-reload`,
+// and on a root host `systemctl daemon-reload` too, a missing user manager
+// there being no failure.
 func (d *DaemonReload) Cure(ctx context.Context) error {
-	_, err := d.run(ctx, "daemon-reload")
-	return err
+	_, userErr := d.run(ctx, "daemon-reload")
+	if !d.isRoot() {
+		return userErr
+	}
+	if _, err := exec.CommandContext(ctx, d.program(), "daemon-reload").Output(); err != nil {
+		return err
+	}
+	if userErr != nil && !noUserManager(userErr) {
+		return userErr
+	}
+	return nil
 }
 
 // Damper implements application.DoctorCheck.
@@ -153,12 +197,15 @@ func (d *DaemonReload) Damper() (time.Duration, int) { return DaemonReloadWait, 
 // costs nothing.
 func (d *DaemonReload) WayBack() string { return "none needed: daemon-reload is idempotent" }
 
-func (d *DaemonReload) run(ctx context.Context, args ...string) (string, error) {
-	program := d.Program
-	if program == "" {
-		program = "systemctl"
+func (d *DaemonReload) program() string {
+	if d.Program == "" {
+		return "systemctl"
 	}
-	out, err := exec.CommandContext(ctx, program, append([]string{"--user"}, args...)...).Output()
+	return d.Program
+}
+
+func (d *DaemonReload) run(ctx context.Context, args ...string) (string, error) {
+	out, err := exec.CommandContext(ctx, d.program(), append([]string{"--user"}, args...)...).Output()
 	return string(out), err
 }
 

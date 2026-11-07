@@ -20,12 +20,19 @@ type FakeUnitRestarter struct {
 	Stale []string
 	// ReloadErr is what a ReloadStale that has units to reload fails with.
 	ReloadErr error
+	// SystemStale names the system units whose files changed on disk and that the
+	// system manager has not reloaded, as Stale does for the user manager.
+	SystemStale []string
+	// SystemReloadErr is what a ReloadStaleSystem that has units to reload fails with.
+	SystemReloadErr error
+	// SystemReloaded is how many times a system daemon-reload was run.
+	SystemReloaded int
 	// Asked is every unit a try-restart was asked for, in order.
 	Asked []string
 	// Reloaded is how many times a daemon-reload was run.
 	Reloaded int
-	// Events is every reload and restart asked, in order: "reload" and
-	// "restart <unit>".
+	// Events is every reload and restart asked, in order: "reload", "reload
+	// system" and "restart <unit>".
 	Events []string
 }
 
@@ -53,5 +60,20 @@ func (f *FakeUnitRestarter) ReloadStale(_ context.Context) ([]string, error) {
 		return stale, f.ReloadErr
 	}
 	f.Stale = nil
+	return stale, nil
+}
+
+// ReloadStaleSystem implements application.UnitRestarter.
+func (f *FakeUnitRestarter) ReloadStaleSystem(_ context.Context) ([]string, error) {
+	stale := f.SystemStale
+	if len(stale) == 0 {
+		return nil, nil
+	}
+	f.SystemReloaded++
+	f.Events = append(f.Events, "reload system")
+	if f.SystemReloadErr != nil {
+		return stale, f.SystemReloadErr
+	}
+	f.SystemStale = nil
 	return stale, nil
 }

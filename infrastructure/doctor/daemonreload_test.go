@@ -279,3 +279,85 @@ func TestTheDaemonReloadProbeIsOKWhenEveryMwUnitIsCurrent(t *testing.T) {
 		t.Fatalf("expected ok, got %s (%s)", verdict, reason)
 	}
 }
+
+// rootHostSystemctl is a stand-in for a root-seat host: a call with --user
+// fails the way it does with no user manager, and the system manager has
+// loaded the units in loaded (unit -> yes/no for NeedDaemonReload).
+func rootHostSystemctl(t *testing.T, loaded map[string]string) (program, callLog string) {
+	t.Helper()
+	dir := t.TempDir()
+	program = filepath.Join(dir, "systemctl-stand-in")
+	callLog = filepath.Join(dir, "calls")
+	var list, blocks strings.Builder
+	for unit, value := range loaded {
+		fmt.Fprintf(&list, "echo '%s loaded active running x'\n", unit)
+		fmt.Fprintf(&blocks, "echo Id=%s\necho NeedDaemonReload=%s\necho\n", unit, value)
+	}
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$*" >>%q
+if [ "$1" = --user ]; then echo "Failed to connect to bus: No medium found" 1>&2; exit 1; fi
+case "$*" in
+*daemon-reload*) exit 0 ;;
+*list-units*)
+%s exit 0 ;;
+*"-p Id"*)
+%s exit 0 ;;
+esac
+exit 1
+`, callLog, list.String(), blocks.String())
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in: %v", err)
+	}
+	return program, callLog
+}
+
+func TestTheDaemonReloadProbeAlarmsOnARootHostsSystemUnitThatNeedsAReload(t *testing.T) {
+	program, _ := rootHostSystemctl(t, map[string]string{"mw-seat-tmux.service": "yes", "mw-doctor.timer": "no"})
+	check := &doctor.DaemonReload{Units: []string{"mw-dispatch.service"}, Program: program, Root: func() bool { return true }}
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty, got %s (%s)", verdict, reason)
+	}
+	if !strings.Contains(reason, "mw-seat-tmux.service") || strings.Contains(reason, "mw-doctor.timer") {
+		t.Errorf("expected only mw-seat-tmux.service named, got %q", reason)
+	}
+	if !strings.Contains(reason, "fix: systemctl daemon-reload") || strings.Contains(reason, "--user") {
+		t.Errorf("expected the system fix line, got %q", reason)
+	}
+}
+
+func TestTheDaemonReloadProbeOnARootHostIsOKWhenEverySystemUnitIsCurrent(t *testing.T) {
+	program, _ := rootHostSystemctl(t, map[string]string{"mw-seat-tmux.service": "no"})
+	check := &doctor.DaemonReload{Units: []string{"mw-dispatch.service"}, Program: program, Root: func() bool { return true }}
+
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected ok, got %s (%s)", verdict, reason)
+	}
+}
+
+func TestTheDaemonReloadProbeOnANonRootHostStillAnswersNoUserManager(t *testing.T) {
+	program, calls := rootHostSystemctl(t, map[string]string{"mw-seat-tmux.service": "yes"})
+	check := &doctor.DaemonReload{Units: []string{"mw-dispatch.service"}, Program: program, Root: func() bool { return false }}
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorOK || !strings.Contains(reason, "no user manager") {
+		t.Fatalf("expected ok, n/a: no user manager, got %s (%s)", verdict, reason)
+	}
+	if data, _ := os.ReadFile(calls); strings.Contains(string(data), "list-units") && !strings.Contains(string(data), "--user list-units") {
+		t.Errorf("expected the system manager not asked on a non-root host, calls were:\n%s", data)
+	}
+}
+
+func TestTheDaemonReloadCureOnARootHostRunsASystemDaemonReload(t *testing.T) {
+	program, calls := rootHostSystemctl(t, map[string]string{"mw-seat-tmux.service": "yes"})
+	check := &doctor.DaemonReload{Units: []string{"mw-dispatch.service"}, Program: program, Root: func() bool { return true }}
+
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("curing: %v", err)
+	}
+	data, _ := os.ReadFile(calls)
+	if !strings.HasPrefix(string(data), "daemon-reload\n") && !strings.Contains(string(data), "\ndaemon-reload\n") {
+		t.Errorf("expected a systemctl daemon-reload with no --user, calls were:\n%s", data)
+	}
+}
