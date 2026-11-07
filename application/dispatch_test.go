@@ -1140,8 +1140,11 @@ func TestDispatchKeepsALeftoverBranchWhoseWorktreeIsAlreadyGone(t *testing.T) {
 	if got := worktrees.renames(); len(got) != 1 {
 		t.Errorf("expected the old branch kept, got %q", got)
 	}
-	if _, removed := worktrees.was(); len(removed) != 0 {
-		t.Errorf("expected no worktree to remove, got %q", removed)
+	// git refuses a cut at a path it still has a record of, however long gone
+	// the directory: the record is cleared through the same call that removes a
+	// worktree, which has nothing to take away here (mw-gq6.1037).
+	if _, removed := worktrees.was(); len(removed) != 1 || removed[0] != application.WorktreeDir("/rigs/millwright", "mw-gq6.1") {
+		t.Errorf("expected git's record of the gone worktree cleared, got %q", removed)
 	}
 }
 

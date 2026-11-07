@@ -26,11 +26,15 @@ func registerRetryFromBranchSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the config file says next\.retry_from_branch is false$`, c.theConfigTurnsRetryFromBranchOff)
 	ctx.Given(`^the other host landed its own version of the work of "([^"]*)" on "([^"]*)"$`, c.theOtherHostLandedAConflictingVersion)
 
+	ctx.Given(`^the worktree of "([^"]*)" was removed by hand, its branch kept$`, c.theWorktreeWasRemovedByHand)
+
 	ctx.When(`^mw retry runs for "([^"]*)"$`, func(id string) error { return c.mwRetryRuns(id, false) })
 	ctx.When(`^mw retry --from-main runs for "([^"]*)"$`, func(id string) error { return c.mwRetryRuns(id, true) })
 
 	ctx.Then(`^the worktree of "([^"]*)" holds its first attempt's work, rebased onto "([^"]*)"$`, c.theWorktreeHoldsTheFirstAttemptRebased)
 	ctx.Then(`^the worktree of "([^"]*)" holds the committed leftover "([^"]*)", rebased onto "([^"]*)"$`, c.theWorktreeHoldsTheCommittedLeftover)
+	ctx.Then(`^the worktree of "([^"]*)" is there, on its branch holding its first attempt's work$`, c.theWorktreeIsThereOnItsBranch)
+	ctx.Then(`^the session of "([^"]*)" was started in its worktree$`, c.theSessionWasStartedInItsWorktree)
 	ctx.Then(`^the worktree of "([^"]*)" starts clean from "([^"]*)"$`, c.theWorktreeStartsCleanFrom)
 	ctx.Then(`^the boot of attempt (\d+) of "([^"]*)" says "([^"]*)"$`, c.theBootOfAttemptSays)
 	ctx.Then(`^the boot of attempt (\d+) of "([^"]*)" does not say "([^"]*)"$`, c.theBootOfAttemptDoesNotSay)
@@ -190,6 +194,50 @@ func (c *nextContext) theBootOfAttemptDoesNotSay(attempt int, id, unwanted strin
 	}
 	if strings.Contains(boot, unwanted) {
 		return fmt.Errorf("expected the boot of attempt %d of %s not to say %q, got:\n%s", attempt, id, unwanted, boot)
+	}
+	return nil
+}
+
+// theWorktreeWasRemovedByHand deletes the story's worktree directory the way a
+// person or a clean-up does, leaving git's record of it and the branch as they
+// were (mw-gq6.1037).
+func (c *nextContext) theWorktreeWasRemovedByHand(id string) error {
+	return os.RemoveAll(application.WorktreeDir(c.rig, id))
+}
+
+// theWorktreeIsThereOnItsBranch checks that the next attempt's worktree exists,
+// is checked out on the story's own branch, and holds the first attempt's work.
+func (c *nextContext) theWorktreeIsThereOnItsBranch(id string) error {
+	dir := application.WorktreeDir(c.rig, id)
+	if _, err := os.Stat(dir); err != nil {
+		return fmt.Errorf("expected the worktree of %s to be there (dispatch said: %v): %w", id, c.err, err)
+	}
+	branch, err := gitSay(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return err
+	}
+	if want := application.StoryBranch(id); branch != want {
+		return fmt.Errorf("expected the worktree of %s on %s, got %s", id, want, branch)
+	}
+	held, err := os.ReadFile(filepath.Join(dir, id+".md"))
+	if err != nil || !strings.Contains(string(held), "the work of "+id) {
+		return fmt.Errorf("expected the worktree of %s to hold the first attempt's work: %v %q", id, err, held)
+	}
+	return nil
+}
+
+// theSessionWasStartedInItsWorktree checks the session's working directory is
+// the story's worktree, and that it exists.
+func (c *nextContext) theSessionWasStartedInItsWorktree(id string) error {
+	spec, ok := c.runner.Spec(application.SessionName(id))
+	if !ok {
+		return fmt.Errorf("expected a session for %s (dispatch said: %v)", id, c.err)
+	}
+	if want := application.WorktreeDir(c.rig, id); spec.Dir != want {
+		return fmt.Errorf("expected the session of %s to start in %s, got %q", id, want, spec.Dir)
+	}
+	if _, err := os.Stat(spec.Dir); err != nil {
+		return fmt.Errorf("the session of %s was started in %s, which is not there: %w", id, spec.Dir, err)
 	}
 	return nil
 }

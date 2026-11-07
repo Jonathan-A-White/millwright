@@ -122,10 +122,19 @@ func commitLeftovers(ctx context.Context, landing Landing, dir, storyID string, 
 func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, files VaultFiles, vlt Vault, rigDir, storyID, dir, branch, base string, attempt int, keepBranch, keepWork bool) (salvagedBranch, error) {
 	var s salvagedBranch
 
-	committed, err := commitLeftovers(ctx, landing, dir, storyID, attempt)
-	s.CommittedLeftovers = committed
+	// A worktree removed since the attempt (by hand, or a clean-up) leaves its
+	// branch and nothing to read: there are no leftovers to commit, and the
+	// branch's own commits are still bundled below (mw-gq6.1037).
+	hasDir, err := worktrees.Exists(ctx, rigDir, dir, "")
 	if err != nil {
-		return s, err
+		return s, fmt.Errorf("checking whether the worktree %s is there: %w", dir, err)
+	}
+	if hasDir {
+		committed, err := commitLeftovers(ctx, landing, dir, storyID, attempt)
+		s.CommittedLeftovers = committed
+		if err != nil {
+			return s, err
+		}
 	}
 
 	ahead, err := landing.Ahead(ctx, rigDir, branch, base)
