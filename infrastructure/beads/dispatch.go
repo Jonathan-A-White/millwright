@@ -536,7 +536,47 @@ func (g *Gateway) SetStoryState(ctx context.Context, id, dimension, value, reaso
 		args = append(args, "--reason", reason)
 	}
 	_, err := g.call(ctx, args...)
+	if err != nil && eventUnfileable(err.Error()) {
+		return g.stateAsLabelAlone(ctx, id, dimension, value, err)
+	}
 	return err
+}
+
+// eventUnfileable reports whether what bd said is the failure of set-state's
+// event child under load: the dependency cycle check meets bd's fixed 10 s pool
+// deadline and reports "invalid connection" or "i/o timeout" (mw-gq6.1046,
+// docs/bd-timeouts.md). Nothing else is a reason to skip the event.
+func eventUnfileable(said string) bool {
+	said = strings.ToLower(said)
+	return strings.Contains(said, "invalid connection") || strings.Contains(said, "i/o timeout")
+}
+
+// stateAsLabelAlone is SetStoryState's fall-back for a set-state whose event
+// could not be filed: one bd update that swaps the story's `<dimension>:*` label
+// for the new value, which files no event and checks no dependency, and a note on
+// the story saying the event was skipped and why. When the story cannot be read
+// or the label cannot be written either, the set-state's own failure is the one
+// returned, so a caller that retries sees what it saw before.
+func (g *Gateway) stateAsLabelAlone(ctx context.Context, id, dimension, value string, failure error) error {
+	story, err := g.showOne(ctx, id)
+	if err != nil {
+		return failure
+	}
+	args := []string{"update", id}
+	for _, label := range story.Labels {
+		if strings.HasPrefix(label, dimension+":") && label != dimension+":"+value {
+			args = append(args, "--remove-label", label)
+		}
+	}
+	args = append(args, "--add-label", dimension+":"+value)
+	if _, err := g.call(ctx, args...); err != nil {
+		return failure
+	}
+	note := fmt.Sprintf("%s=%s recorded without its event: bd set-state could not file the event (%s). Only the label %s:%s was written.",
+		dimension, value, firstLine(failure.Error()), dimension, value)
+	// The label is the state; a note that cannot be written does not undo it.
+	_ = g.CommentOnStory(ctx, id, note)
+	return nil
 }
 
 // StoryState implements application.WorkTracker. A dimension nobody has ever
