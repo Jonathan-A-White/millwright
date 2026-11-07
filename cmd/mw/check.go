@@ -26,7 +26,7 @@ import (
 // it writes nothing to the tracker, the ledger, the vault or git — and it exits
 // non-zero when any check fails.
 func newCheckCmd() *cobra.Command {
-	var noSlot, background, logIsStdout, partWorker bool
+	var noSlot, background, logIsStdout, partWorker, specsWorker bool
 	var part int
 	cmd := &cobra.Command{
 		Use:   "check <story-id>",
@@ -93,7 +93,11 @@ func newCheckCmd() *cobra.Command {
 			"A part that takes no merge slot is run by a process of its own that outlives the call (mw-gq6.1029):\n" +
 			"the call waits for it for what is left of its 540 seconds, then ends with one line saying the part is\n" +
 			"still running and that `mw check <story> --part N` waits for it, which finds the process and does not\n" +
-			"start the part again; when the part is done that call says what it said and exits non-zero if it failed.\n\n" +
+			"start the part again; when the part is done that call says what it said and exits non-zero if it failed.\n" +
+			"The changed specs of a whole check kept to a call are run the same way (mw-gq6.988): by a process of\n" +
+			"its own, which takes the merge slot and gate lock itself and keeps what the specs said in\n" +
+			"check-<attempt>-specs.result. A call that ends before the specs do says where that verdict will be, and\n" +
+			"`mw check <story>`, run again, reads it without running the rig's tests or the specs again.\n\n" +
 			"The formula's last step is normally still open when a session runs check, so a session runs it\n" +
 			"after committing and closes that step once nothing else is refused.",
 		Args: cobra.ExactArgs(1),
@@ -121,6 +125,9 @@ func newCheckCmd() *cobra.Command {
 			}
 			if partWorker && part < 1 {
 				return fmt.Errorf("--part-worker runs a part, so it needs --part N")
+			}
+			if specsWorker && (part > 0 || partWorker) {
+				return fmt.Errorf("--specs-worker runs the changed specs of a whole check, so it takes no --part")
 			}
 
 			var slot application.MergeSlot
@@ -202,6 +209,13 @@ func newCheckCmd() *cobra.Command {
 			if part > 0 && !partWorker {
 				k.PartStarter = partProcess{}
 			}
+			// The changed specs of a whole check kept to this call are run by a process
+			// of its own too, so that specs that outrun the call keep their verdict
+			// (mw-gq6.988).
+			k.SpecsWorker = specsWorker
+			if part == 0 && !specsWorker && callBudget > 0 {
+				k.SpecsStarter = specsProcess{noSlot: noSlot}
+			}
 			_, err = k.Run(cmd.Context(), args[0])
 			return err
 		},
@@ -211,6 +225,8 @@ func newCheckCmd() *cobra.Command {
 	_ = cmd.Flags().MarkHidden("log-is-stdout")
 	cmd.Flags().BoolVar(&partWorker, "part-worker", false, "run part N alone as the process a --part call started for it: no wait for a calm host or the slot (set by mw check --part)")
 	_ = cmd.Flags().MarkHidden("part-worker")
+	cmd.Flags().BoolVar(&specsWorker, "specs-worker", false, "run the rig's changed specs alone as the process a whole check started for them: waits for the merge slot and gate lock itself, and keeps what the specs said (set by mw check)")
+	_ = cmd.Flags().MarkHidden("specs-worker")
 	cmd.Flags().IntVar(&part, "part", 0, "run part N of the rig's gate alone, for a rig whose host names its gate as parts, and keep what it said; a check with no --part then reports the whole gate from the parts' records")
 	cmd.Flags().Duration("wait", CheckWait, "the most a check queues for the rig's merge slot, this host's gate lock and a calm host together: nine minutes in the foreground, ending with the place kept and a line to run it again; a whole check given this (or --background, 40m) ends with the wait limit reached and a line to hand back")
 	cmd.Flags().BoolVar(&noSlot, "no-slot", false, "run the rig's tests without taking the rig's merge slot, so without waiting for a close-out's gate")
@@ -293,6 +309,42 @@ func (s checkStarter) Start(_ context.Context, storyID, logPath string) error {
 	return cmd.Process.Release()
 }
 
+// specsProcess implements application.SpecsStarter: it runs this same mw as
+// `mw check <story> --specs-worker` in a session of its own, so that it outlives
+// the tool call that asked, with its output appended to the file named. The
+// process waits for the slot and gate lock as long as a --wait check does.
+type specsProcess struct{ noSlot bool }
+
+func (s specsProcess) Start(_ context.Context, storyID, logPath string) (int, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return 0, fmt.Errorf("finding mw to run the changed specs with: %w", err)
+	}
+	log, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		return 0, fmt.Errorf("opening %s: %w", logPath, err)
+	}
+	defer log.Close()
+	args := []string{"check", storyID, "--specs-worker", "--wait", CheckWait.String()}
+	if s.noSlot {
+		args = append(args, "--no-slot")
+	}
+	// Not exec.CommandContext: the specs are meant to outlive the context they were
+	// started in.
+	cmd := exec.Command(self, args...)
+	cmd.Stdout, cmd.Stderr = log, log
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return 0, fmt.Errorf("starting the changed specs: %w", err)
+	}
+	go func() { _ = cmd.Wait() }()
+	return cmd.Process.Pid, nil
+}
+
+// Alive says whether the process Start returned is still running: not ended, and
+// not a pid some other process has since been given.
+func (specsProcess) Alive(pid int) bool { return processAlive(pid, "--specs-worker") }
+
 // partProcess implements application.PartStarter: it runs this same mw as
 // `mw check <story> --part N --part-worker` in a session of its own, so that it
 // outlives the tool call that asked, with its output appended to the file named.
@@ -324,12 +376,16 @@ func (partProcess) Start(_ context.Context, storyID string, part int, logPath st
 
 // Alive says whether the process Start returned is still running: not ended, and
 // not a pid some other process has since been given.
-func (partProcess) Alive(pid int) bool {
+func (partProcess) Alive(pid int) bool { return processAlive(pid, "--part-worker") }
+
+// processAlive says whether pid is running and, where /proc says, still the mw
+// that was given flag.
+func processAlive(pid int, flag string) bool {
 	if err := syscall.Kill(pid, 0); err != nil && !errors.Is(err, syscall.EPERM) {
 		return false
 	}
 	if args, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil {
-		return strings.Contains(string(args), "--part-worker")
+		return strings.Contains(string(args), flag)
 	}
 	return true
 }

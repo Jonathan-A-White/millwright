@@ -155,6 +155,17 @@ type Check struct {
 	PartWorker  bool
 	PartPoll    time.Duration
 
+	// SpecsStarter, when it is set, runs the changed specs of a whole check that is
+	// kept to a Builder's call (CallBudget) as a process of its own that outlives the
+	// call (mw-gq6.988): the call waits for it for what is left of the call, and
+	// specs still running then are read by the same command run again. SpecsWorker
+	// is that process: the specs run and kept, with the slot and gate lock taken as
+	// the check would take them. SpecsPoll is how often a call looks at the process;
+	// CheckSpecsPoll when zero.
+	SpecsStarter SpecsStarter
+	SpecsWorker  bool
+	SpecsPoll    time.Duration
+
 	// Modes is the harness's record of the permission mode the story's session
 	// ran in (mw-gq6.545); Next's own. Nil reads none.
 	Modes TranscriptModes
@@ -276,7 +287,7 @@ func (k Check) Run(ctx context.Context, storyID string) (CheckReport, error) {
 		fmt.Fprintf(&kept, "mw check: %v\n", err)
 	}
 	// A part has its own record; the log is the whole check's verdict.
-	if k.Logs != nil && report.Attempt > 0 && k.Part == 0 {
+	if k.Logs != nil && report.Attempt > 0 && k.Part == 0 && !k.SpecsWorker {
 		name := CheckLogFileName(report.Attempt)
 		if _, werr := k.Logs.PutRunFile(ctx, storyID, name, kept.String()); werr != nil && shown != nil {
 			fmt.Fprintf(shown, "  note    the log of this check could not be kept in the run of %s: %v\n", storyID, werr)
@@ -337,8 +348,16 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	if k.Part != 0 {
 		return k.checkPart(ctx, report, c)
 	}
+	// The process a call started for the changed specs runs them and nothing else.
+	if k.SpecsWorker {
+		return k.checkSpecsWorker(ctx, report, c)
+	}
 	report.Branch, report.Target = c.branch, c.target
 	k.waiting = &waitingLine{}
+	var callBegan time.Time
+	if k.detachesSpecs() {
+		callBegan = k.callNow()
+	}
 
 	// The rig's tests are run holding the rig's merge slot, shared with the
 	// other checks of the rig and apart from a landing's. Every wait of the check
@@ -396,7 +415,16 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	var specs SpecChecks
 	if k.SpecChecks != nil {
 		specs = k.SpecChecks
-		if k.Slot != nil {
+		if k.detachesSpecs() {
+			// The specs may outrun the call: a process of its own runs them, taking
+			// the slot and gate lock itself, and the call reads what it kept
+			// (mw-gq6.988).
+			specs = detachedSpecs{k: k, c: c, attempt: report.Attempt, tip: tip, began: callBegan, handedBack: func() {
+				if !split {
+					k.keepTests(ctx, c, report.Attempt, tip, tests.last())
+				}
+			}}
+		} else if k.Slot != nil {
 			specs = slottedSpecs{
 				specs: k.SpecChecks,
 				take: func(ctx context.Context) (Holding, error) {
