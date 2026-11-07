@@ -536,19 +536,12 @@ func (h HandsRetire) Run(ctx context.Context, req HandsRetireRequest) error {
 	if h.Out != nil {
 		fmt.Fprintf(h.Out, "retired step %s of %s: %s\n", req.ID, req.Bead, reason)
 	}
-	if hasLabel(found[0].Labels, LabelHitl) {
-		live, err := handsLiveSteps(ctx, h.Notes, req.Bead, steps)
-		if err != nil {
-			return fmt.Errorf("mw hands retire: reading the steps left on %s: %w", req.Bead, err)
-		}
-		if live == 0 {
-			if err := h.Tracker.RemoveLabel(ctx, req.Bead, LabelHitl); err != nil {
-				return fmt.Errorf("mw hands retire: the step is retired, but taking %s off %s failed: %w", LabelHitl, req.Bead, err)
-			}
-			if h.Out != nil {
-				fmt.Fprintf(h.Out, "no live step is left on %s: %s dropped\n", req.Bead, LabelHitl)
-			}
-		}
+	dropped, err := dropHitlWhenNoLiveStep(ctx, h.Tracker, h.Notes, req.Bead, found[0].Labels, steps)
+	if err != nil {
+		return fmt.Errorf("mw hands retire: the step is retired, but %w", err)
+	}
+	if dropped && h.Out != nil {
+		fmt.Fprintf(h.Out, "no live step is left on %s: %s dropped\n", req.Bead, LabelHitl)
 	}
 	publishHandsView(ctx, h.View, h.ViewLock, h.NoView, func(format string, args ...any) {
 		if h.Err != nil {
@@ -556,6 +549,29 @@ func (h HandsRetire) Run(ctx context.Context, req HandsRetireRequest) error {
 		}
 	}, "the step is retired")
 	return nil
+}
+
+// dropHitlWhenNoLiveStep takes the hitl label off bead, which carries labels and
+// keeps steps, when no live step is left on it (handsLiveSteps is 0), and says
+// whether it did. Every path that finishes a hands step (mw hands retire, a
+// Postern Run tap, a backend swap) calls it, so a child filed by copying the
+// bead's labels is not parked on a human step (mw-gq6.750, mw-gq6.1011). A bead
+// without the label, or with a live step left, is not touched.
+func dropHitlWhenNoLiveStep(ctx context.Context, tracker WorkTracker, notes PosternNotes, bead string, labels []string, steps []HandsStepRecord) (bool, error) {
+	if !hasLabel(labels, LabelHitl) {
+		return false, nil
+	}
+	live, err := handsLiveSteps(ctx, notes, bead, steps)
+	if err != nil {
+		return false, fmt.Errorf("reading the steps left on %s: %w", bead, err)
+	}
+	if live > 0 {
+		return false, nil
+	}
+	if err := tracker.RemoveLabel(ctx, bead, LabelHitl); err != nil {
+		return false, fmt.Errorf("taking %s off %s failed: %w", LabelHitl, bead, err)
+	}
+	return true, nil
 }
 
 // handsLiveSteps counts the steps of bead still for the Governor's hands: not

@@ -35,6 +35,7 @@ func (i PosternInbox) runsHands() bool {
 // marked spent before the step starts, so a crash cannot run it twice. How
 // it ran — or why it did not — is commented on the bead, sent back to him in
 // the bead's thread, re the approval's txid, and mailed to the Mayor.
+// When the run leaves no live step on the bead its hitl label comes off (mw-gq6.1011).
 func (i PosternInbox) applyRun(ctx context.Context, m PosternInboxMessage, action PosternAction) (posternApplied, error) {
 	result := posternApplied{Kind: PosternActionRun, Bead: action.Bead, Txid: m.Txid}
 	refuseTelling := func(why, told string) (posternApplied, error) {
@@ -173,6 +174,14 @@ func (i PosternInbox) applyRun(ctx context.Context, m PosternInboxMessage, actio
 	result.Detail = fmt.Sprintf("exit %d", outcome.Exit)
 	text := fmt.Sprintf("RAN step %s on %s as %s, exit %d (approved by the Governor via postern, txid %s)\n\n%s",
 		step.ID, step.Host, step.As, outcome.Exit, m.Txid, handsOutputBlock(outcome.Output))
+	// The run is recorded, so the bead may have no live step left: hitl comes off
+	// it then, as mw hands retire does (mw-gq6.1011). A failure is said with the
+	// outcome, which is already true and goes out all the same.
+	if len(beads) > 0 && beads[0].Story.ID == action.Bead {
+		if _, err := dropHitlWhenNoLiveStep(ctx, i.Tracker, i.Memory, action.Bead, beads[0].Labels, steps); err != nil {
+			text += fmt.Sprintf("\n\nBut %s was not taken off %s: %v", LabelHitl, action.Bead, err)
+		}
+	}
 	return result, i.reportRun(ctx, action.Bead, m.Txid, text, "", fmt.Sprintf("Ran: %s %s, exit %d", action.Bead, step.ID, outcome.Exit))
 }
 

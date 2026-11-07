@@ -201,12 +201,35 @@ func (b BackendStage) swapResult(ctx context.Context, swap stagedSwap, step doma
 			problem("telling the Governor", err)
 		}
 	}
+	// The run is recorded, so the bead may have no live step left: hitl comes off
+	// it then, as mw hands retire does (mw-gq6.1011).
+	if err := b.dropHitl(ctx, swap.Bead); err != nil {
+		problem("taking "+LabelHitl+" off "+swap.Bead, err)
+	}
 	if outcome.Exit == 0 {
 		if err := b.Tracker.CloseStory(ctx, swap.Bead, said); err != nil {
 			problem("closing "+swap.Bead, err)
 		}
 	}
 	return append([]string{"backend: " + said}, lines...)
+}
+
+// dropHitl takes hitl off bead when none of its hands steps is live.
+func (b BackendStage) dropHitl(ctx context.Context, bead string) error {
+	detail, err := b.Tracker.ShowStory(ctx, bead)
+	if err != nil {
+		return err
+	}
+	raw, err := b.Notes.Note(ctx, HandsStepsKey(bead))
+	if err != nil {
+		return err
+	}
+	steps, err := parseHandsSteps(raw)
+	if err != nil {
+		return err
+	}
+	_, err = dropHitlWhenNoLiveStep(ctx, b.Tracker, b.Notes, bead, detail.Labels, steps)
+	return err
 }
 
 // swapSaid is the result of a swap as the Governor is told it, from what the step

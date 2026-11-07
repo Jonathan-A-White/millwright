@@ -461,3 +461,57 @@ func TestApplyAnswersATapOnASupersededStepNamingTheBeadWhenItHoldsNoOpenStep(t *
 		t.Fatalf("expected the reply to name the bead, got %q", back.Text)
 	}
 }
+
+// A step the Governor's Run tap finishes clean, and the only live one on its
+// bead, takes the hitl label off it (mw-gq6.1011).
+func TestApplyRunDropsHitlWhenTheStepRunWasTheOnlyLiveOne(t *testing.T) {
+	f := newRunFixture(t)
+	// Only the echo step is live: the other three are retired.
+	for _, id := range []string{"linger", "far", "nowhere"} {
+		mustDo(t, f.tracker.SetNote(context.Background(), application.HandsRetiredKey("mw-e.3", id), "moot"))
+	}
+	mustDo(t, f.tracker.AddLabel(context.Background(), "mw-e.3", application.LabelHitl))
+	f.approve(t, "tx-run", "echo", runNow.Add(-2*time.Minute), "")
+
+	f.apply(t)
+
+	if len(f.runner.Jobs()) != 1 {
+		t.Fatalf("expected the step run, got %+v", f.runner.Jobs())
+	}
+	if hasHitl(t, f.tracker, "mw-e.3") {
+		t.Errorf("expected hitl dropped once no live step is left")
+	}
+}
+
+// With another live step on the bead, the label stays.
+func TestApplyRunKeepsHitlWhileAnotherStepIsLive(t *testing.T) {
+	f := newRunFixture(t)
+	mustDo(t, f.tracker.AddLabel(context.Background(), "mw-e.3", application.LabelHitl))
+	f.approve(t, "tx-run", "echo", runNow.Add(-2*time.Minute), "")
+
+	f.apply(t)
+
+	if len(f.runner.Jobs()) != 1 {
+		t.Fatalf("expected the step run, got %+v", f.runner.Jobs())
+	}
+	if !hasHitl(t, f.tracker, "mw-e.3") {
+		t.Errorf("expected hitl kept while other steps are live")
+	}
+}
+
+// A step that ran and failed is still live, so the label stays.
+func TestApplyRunKeepsHitlWhenTheOnlyStepFailed(t *testing.T) {
+	f := newRunFixture(t)
+	f.runner.Outcome = application.HandsOutcome{Exit: 3, Output: "boom\n"}
+	for _, id := range []string{"linger", "far", "nowhere"} {
+		mustDo(t, f.tracker.SetNote(context.Background(), application.HandsRetiredKey("mw-e.3", id), "moot"))
+	}
+	mustDo(t, f.tracker.AddLabel(context.Background(), "mw-e.3", application.LabelHitl))
+	f.approve(t, "tx-run", "echo", runNow.Add(-2*time.Minute), "")
+
+	f.apply(t)
+
+	if !hasHitl(t, f.tracker, "mw-e.3") {
+		t.Errorf("expected hitl kept after a failed step")
+	}
+}
