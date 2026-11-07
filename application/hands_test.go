@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -358,5 +359,78 @@ func TestHandsAddWarnsWhenNoRouteReachesTheStepsHost(t *testing.T) {
 				t.Fatal("expected the step kept either way")
 			}
 		})
+	}
+}
+
+// With HeldFails, a step added to a held bead is kept (and replaced) all the same,
+// the Governor is sent no push for it, and Run returns a HandsHeld error whose text is
+// the warning, so that it is what the command ends on; without HeldFails the warning
+// is the last thing said on Err and Run returns nil (mw-gq6.979).
+func TestHandsAddOnAHeldBeadReturnsTheWarningOrSaysItLast(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		heldFails bool
+	}{{"held fails", true}, {"held is meant", false}} {
+		t.Run(c.name, func(t *testing.T) {
+			tracker := handsTracker()
+			mustDo(t, tracker.HoldStory(context.Background(), "mw-f758y.8"))
+			push := &apptest.FakePosternSender{}
+			var errs bytes.Buffer
+			add := func(req application.HandsAddRequest) error {
+				_, err := application.HandsAdd{Tracker: tracker, Notes: tracker, Push: push, Err: &errs, HeldFails: c.heldFails,
+					Now: func() time.Time { return handsNow }}.Run(context.Background(), req)
+				return err
+			}
+			mustDo(t, tracker.SetNote(context.Background(), application.HandsRanKey("mw-f758y.8", "linger"), `{"at":"x","exit":1,"host":"desktop","why":"no"}`))
+			changed := lingerStep()
+			changed.Run = "loginctl enable-linger jwhite2"
+			for _, req := range []application.HandsAddRequest{
+				{Bead: "mw-f758y.8", Step: lingerStep()},
+				{Bead: "mw-f758y.8", Step: changed, Replace: true},
+			} {
+				errs.Reset()
+				err := add(req)
+				var held *application.HandsHeld
+				if got := errors.As(err, &held); got != c.heldFails {
+					t.Fatalf("expected a HandsHeld error=%v, got %v", c.heldFails, err)
+				}
+				warning := "mw-f758y.8 is held: the Governor sees no Run until it is open (the step is kept)"
+				if c.heldFails {
+					if !strings.Contains(err.Error(), warning) || strings.Contains(errs.String(), "no Run") {
+						t.Fatalf("expected the warning only in the error, got %v and %q", err, errs.String())
+					}
+				} else {
+					lines := strings.Split(strings.TrimSpace(errs.String()), "\n")
+					if last := lines[len(lines)-1]; !strings.HasSuffix(last, warning) {
+						t.Fatalf("expected the warning last on Err, got %q", errs.String())
+					}
+				}
+			}
+			if sent := push.Sent(); len(sent) != 0 {
+				t.Fatalf("expected no push for a held bead, got %+v", sent)
+			}
+			if steps := handsSteps(t, tracker, "mw-f758y.8"); len(steps) != 1 || steps[0].Run != "loginctl enable-linger jwhite2" {
+				t.Fatalf("expected the step kept and replaced, got %+v", steps)
+			}
+		})
+	}
+}
+
+// The warning about a held bead is the last thing said even when other
+// warnings were.
+func TestHandsAddSaysTheHeldWarningAfterTheOthers(t *testing.T) {
+	tracker := handsTracker()
+	mustDo(t, tracker.HoldStory(context.Background(), "mw-f758y.8"))
+	var errs bytes.Buffer
+	_, err := application.HandsAdd{Tracker: tracker, Notes: tracker, Now: func() time.Time { return handsNow }, Err: &errs,
+		Here: "laptop", Reaches: application.HandsReaches("laptop", nil),
+	}.Run(context.Background(), application.HandsAddRequest{Bead: "mw-f758y.8",
+		Step: domain.HandsStep{ID: "s", Host: "cloud1", As: "user", Run: "echo hi"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(errs.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], "no [hands_hosts] entry") || !strings.Contains(lines[1], "is held") {
+		t.Fatalf("expected the route warning then the held one, got %q", errs.String())
 	}
 }

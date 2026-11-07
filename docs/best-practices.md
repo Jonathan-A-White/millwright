@@ -332,6 +332,7 @@ the step runs only if it still hashes to what was signed, the approval is fresh 
 has not run before, and on the host named. A root step goes through a small helper
 that trusts only a key installed by hand. Every run is recorded and reported
 ([*Steps for his hands*](../README.md#steps-for-his-hands)).
+A step on a held bead is kept but shows him no Run (and sends no push) until the bead is open: `mw hands add` ends on that warning and exits non-zero unless `--held-ok` says the hold is meant.
 
 **If you have less.** No phone app and no signing: a comment on the story with the
 command in a code block and a "way back:" line, which the person runs by hand and

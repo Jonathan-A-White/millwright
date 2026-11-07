@@ -171,6 +171,11 @@ type HandsAdd struct {
 	View     PosternViewPublisher
 	ViewLock ViewLock
 	NoView   bool
+	// HeldFails makes Run return a HandsHeld error, with the step kept all the
+	// same, for a held bead, in the place of the warning on Err: the command
+	// that prints the error ends on it and leaves non-zero. A held bead is
+	// sent no push. The zero value only warns.
+	HeldFails bool
 	// Err is where a failed push or view is reported. A nil Err reports a push on the
 	// bead only.
 	Err io.Writer
@@ -286,15 +291,34 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 	if h.Reaches != nil && !h.Reaches(req.Step.Host) {
 		h.report("warning: step %s is for %s, but there is no [hands_hosts] entry for %s in this host's config, so the factory cannot run it and the Governor sees no Approve (the step is kept): add %s = \"ssh <how to reach it>\" to [hands_hosts], or he runs it by hand", req.Step.ID, req.Step.Host, req.Step.Host, req.Step.Host)
 	}
-	if found[0].Held() {
-		h.report("warning: %s is held: the Governor sees no Run until it is open (the step is kept)", req.Bead)
-	}
+	held := found[0].Held()
 	h.publish(ctx)
-	if !replaced || approved {
+	// A held bead shows him no Run, so a push would send him to a card he
+	// cannot act on: none is sent. The view is the whole mill's, and still goes.
+	if (!replaced || approved) && !held {
 		h.push(ctx, req.Bead, found[0].Story.Title, waits, replaced)
+	}
+	if held {
+		// Said last, after everything else, so that it is what he reads; with
+		// HeldFails it is the error, which the command prints last.
+		warning := &HandsHeld{Bead: req.Bead}
+		if h.HeldFails {
+			return record, warning
+		}
+		h.report("warning: %s", warning.warning())
 	}
 	return record, nil
 }
+
+// HandsHeld is what HandsAdd.Run returns, with the kept step, when HeldFails
+// is set and the bead is held: the Governor sees no Run until it is open.
+type HandsHeld struct{ Bead string }
+
+func (e *HandsHeld) warning() string {
+	return fmt.Sprintf("%s is held: the Governor sees no Run until it is open (the step is kept)", e.Bead)
+}
+
+func (e *HandsHeld) Error() string { return "mw hands add: warning: " + e.warning() }
 
 // namesMw matches a step's text that names mw: mw as a word of
 // its own, as a command or an argument (a cheap check, not a shell parse).
