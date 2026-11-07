@@ -168,8 +168,8 @@ type MillhandTick struct {
 
 	// GristTidy deletes what the mill kept past GristKeepAge (mw-gq6.692); it
 	// runs after Tidy on the host that runs the mill. Its Log, DryRun and Now
-	// are the tick's own and it prints nothing of its own; a tick with neither
-	// Runs nor Forwards wired does not sweep.
+	// are the tick's own and it prints nothing of its own; a tick with nothing
+	// wired does not sweep.
 	GristTidy GristTidy
 
 	// SelfUpdate keeps this host's mw level with the factory rig's main: it
@@ -474,7 +474,7 @@ func (t MillhandTick) tidy(ctx context.Context) []string {
 // what it did, when it did anything or could not. Like Tidy it is housekeeping:
 // a fault of its own is a note.
 func (t MillhandTick) gristTidy(ctx context.Context) []string {
-	if t.GristTidy.Runs == nil && t.GristTidy.Forwards == nil {
+	if t.GristTidy.Idle() {
 		return nil
 	}
 	tidy := t.GristTidy

@@ -151,3 +151,86 @@ func TestTheMillhandTickSweepsTheMillAndSaysSo(t *testing.T) {
 		t.Fatalf("expected an act line in the tick log, got %v", lines)
 	}
 }
+
+type cwdStore struct {
+	kept    []application.GristCwdItem
+	dropped []string
+}
+
+func (c *cwdStore) Kept(context.Context) ([]application.GristCwdItem, error) { return c.kept, nil }
+func (c *cwdStore) DropKept(_ context.Context, name string) error {
+	c.dropped = append(c.dropped, name)
+	return nil
+}
+
+type recordStore struct {
+	old     application.GristRecordOld
+	cutoffs []time.Time
+	dropped bool
+}
+
+func (r *recordStore) OldRecord(_ context.Context, cutoff time.Time) (application.GristRecordOld, error) {
+	r.cutoffs = append(r.cutoffs, cutoff)
+	return r.old, nil
+}
+func (r *recordStore) DropOldRecord(context.Context, time.Time) error {
+	r.dropped = true
+	return nil
+}
+
+// mw-gq6.982: a talk directory's instructions file or scratch directory goes
+// 30 days after it was last written, to the second, and not before.
+func TestATalkDirectoryItemIsDeletedThirtyDaysAfterItWasWrittenAndNotBefore(t *testing.T) {
+	cwd := &cwdStore{kept: []application.GristCwdItem{
+		{Name: "lampas/system-prompt-old.md", Modified: tidyNow.Add(-application.GristKeepAge), Files: 1, Bytes: 100 << 10},
+		{Name: "lampas/system-prompt-almost.md", Modified: tidyNow.Add(-application.GristKeepAge + time.Second), Files: 1},
+		{Name: "lampas/grist-1", Modified: tidyNow.Add(-31 * 24 * time.Hour), Files: 2},
+		{Name: "lampas/grist-2", Modified: tidyNow.Add(-time.Hour)},
+	}}
+	log := &tidyLog{}
+	report, err := application.GristTidy{Cwd: cwd, Log: log, Now: func() time.Time { return tidyNow }}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(cwd.dropped, ","); got != "lampas/system-prompt-old.md,lampas/grist-1" {
+		t.Fatalf("expected the two old ones dropped, got %q", got)
+	}
+	if len(report.Acts) != 2 || len(log.lines) != 2 || !strings.Contains(log.lines[0], application.GristTidyLogPrefix) {
+		t.Fatalf("expected two acts and a log line each, got %v %v", report.Acts, log.lines)
+	}
+}
+
+// mw-gq6.982: the record is cut at GristKeepAge before now: a line 30 days old
+// goes, one a second younger stays, which the adapter decides from the cutoff
+// handed to it (at or before it goes).
+func TestTheRecordIsCutThirtyDaysBeforeNow(t *testing.T) {
+	record := &recordStore{old: application.GristRecordOld{Lines: 3, Bytes: 2048}}
+	log := &tidyLog{}
+	report, err := application.GristTidy{Record: record, Log: log, Now: func() time.Time { return tidyNow }}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := tidyNow.Add(-application.GristKeepAge); len(record.cutoffs) != 1 || !record.cutoffs[0].Equal(want) {
+		t.Fatalf("expected the cutoff %v, got %v", want, record.cutoffs)
+	}
+	if !record.dropped || len(report.Acts) != 1 || !strings.Contains(report.String(), "3 lines") || len(log.lines) != 1 {
+		t.Fatalf("expected the record cut and said, got %v %+v", record.dropped, report)
+	}
+}
+
+func TestARecordWithNothingOldIsLeftAlone(t *testing.T) {
+	record := &recordStore{}
+	report, err := application.GristTidy{Record: record, Now: func() time.Time { return tidyNow }}.Run(context.Background())
+	if err != nil || record.dropped || len(report.Acts) != 0 {
+		t.Fatalf("expected nothing done, got %v %v %+v", err, record.dropped, report)
+	}
+}
+
+func TestADryRunCutsNoRecordAndDeletesNoTalkItem(t *testing.T) {
+	record := &recordStore{old: application.GristRecordOld{Lines: 1, Bytes: 10}}
+	cwd := &cwdStore{kept: []application.GristCwdItem{{Name: "a/grist-1", Modified: tidyNow.Add(-40 * 24 * time.Hour)}}}
+	report, err := application.GristTidy{Record: record, Cwd: cwd, DryRun: true, Now: func() time.Time { return tidyNow }}.Run(context.Background())
+	if err != nil || record.dropped || len(cwd.dropped) != 0 || len(report.Acts) != 2 {
+		t.Fatalf("expected two acts, none done, got %v %v %v %+v", err, record.dropped, cwd.dropped, report)
+	}
+}

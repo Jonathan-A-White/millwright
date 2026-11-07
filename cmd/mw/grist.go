@@ -590,12 +590,15 @@ func newGristTidyCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "tidy",
-		Short: "Delete the mill's photos and recordings kept 30 days or more, and forwarded pictures of that age",
-		Long: "tidy does two things and nothing else (docs/grist-tidy.md):\n" +
+		Short: "Delete the mill's photos and recordings kept 30 days or more, forwarded pictures, talk directory leftovers and record lines of that age",
+		Long: "tidy does four things and nothing else (docs/grist-tidy.md):\n" +
 			"  1. deletes the attachments (photos and recordings) of a run in runs/<txid>/ received 30 days\n" +
 			"     ago or more; its small record (input.json, scorers.json, answer.json, timing.json and\n" +
 			"     sender.json: the request, the answer, the timings, the ids) stays;\n" +
-			"  2. deletes the whole directory forwarded/<txid>/ of a grist forwarded 30 days ago or more.\n\n" +
+			"  2. deletes the whole directory forwarded/<txid>/ of a grist forwarded 30 days ago or more;\n" +
+			"  3. deletes the system-prompt-<digest>.md files and grist-<n> scratch directories of cwd/<app>\n" +
+			"     last written 30 days ago or more;\n" +
+			"  4. drops the lines of grinds.jsonl whose time is 30 days ago or more.\n\n" +
 			"Nothing younger than 30 days is touched. It prints what it deleted and how big it was. The\n" +
 			"Millhand's tick runs the same sweep on the host that runs the mill. --dry-run lists what it\n" +
 			"would delete and deletes nothing.",
@@ -612,6 +615,8 @@ func newGristTidyCmd() *cobra.Command {
 			tidy := application.GristTidy{
 				Runs:     grist.NewRuns(stateDir),
 				Forwards: grist.NewForwards(stateDir),
+				Cwd:      grist.NewTalks(stateDir),
+				Record:   grist.New(stateDir),
 				DryRun:   dryRun,
 				Out:      cmd.OutOrStdout(),
 			}

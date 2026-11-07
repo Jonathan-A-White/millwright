@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -154,6 +156,11 @@ func (s *State) appendLine(name string, v any) error {
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return fmt.Errorf("making the mill's state directory: %w", err)
 	}
+	unlock, err := s.lock(name)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	file, err := os.OpenFile(filepath.Join(s.Dir, name), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening the mill's %s: %w", name, err)
@@ -163,6 +170,94 @@ func (s *State) appendLine(name string, v any) error {
 		return fmt.Errorf("appending to the mill's %s: %w", name, err)
 	}
 	return file.Close()
+}
+
+// lock takes the exclusive lock of the file named in the state directory, a
+// file of its own beside it (name+".lock"), so that an append never lands in a
+// file DropOldRecord has just replaced. The lock is on a file that is never
+// replaced.
+func (s *State) lock(name string) (func(), error) {
+	file, err := os.OpenFile(filepath.Join(s.Dir, name+".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("locking the mill's %s: %w", name, err)
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("locking the mill's %s: %w", name, err)
+	}
+	return func() {
+		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		file.Close()
+	}, nil
+}
+
+// recordLineTime is the time a line of the record carries, and whether it
+// carries one that can be read: a line that is not one of the record's, or has
+// no time, is never old.
+func recordLineTime(line []byte) (time.Time, bool) {
+	var probe struct {
+		Time time.Time `json:"time"`
+	}
+	if json.Unmarshal(line, &probe) != nil || probe.Time.IsZero() {
+		return time.Time{}, false
+	}
+	return probe.Time, true
+}
+
+// OldRecord implements application.GristRecordTrim: the lines of the record
+// whose time is at or before cutoff, and their size.
+func (s *State) OldRecord(_ context.Context, cutoff time.Time) (application.GristRecordOld, error) {
+	var old application.GristRecordOld
+	return old, s.cutRecord(cutoff, false, &old)
+}
+
+// DropOldRecord implements application.GristRecordTrim: the record is written
+// again without those lines, through a temporary file renamed into place, under
+// the record's lock so no appended line is lost. Every line kept is kept byte
+// for byte.
+func (s *State) DropOldRecord(_ context.Context, cutoff time.Time) error {
+	var old application.GristRecordOld
+	return s.cutRecord(cutoff, true, &old)
+}
+
+// cutRecord counts the old lines into old and, if write, writes the record
+// again without them.
+func (s *State) cutRecord(cutoff time.Time, write bool, old *application.GristRecordOld) error {
+	path := filepath.Join(s.Dir, RecordFile)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	unlock, err := s.lock(RecordFile)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reading the mill's record: %w", err)
+	}
+	var kept bytes.Buffer
+	for rest := raw; len(rest) > 0; {
+		line := rest
+		if i := bytes.IndexByte(rest, '\n'); i >= 0 {
+			line, rest = rest[:i+1], rest[i+1:]
+		} else {
+			rest = nil
+		}
+		if at, ok := recordLineTime(bytes.TrimSpace(line)); ok && !at.After(cutoff) {
+			old.Lines++
+			old.Bytes += int64(len(line))
+			continue
+		}
+		kept.Write(line)
+	}
+	if !write || old.Lines == 0 {
+		return nil
+	}
+	return s.writeWhole(path, kept.Bytes())
 }
 
 // KeepUndelivered implements application.GristState: one file per answer,

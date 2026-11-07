@@ -214,7 +214,7 @@ func newMillhandTickCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				tick.GristTidy = application.GristTidy{Runs: grist.NewRuns(stateDir), Forwards: grist.NewForwards(stateDir)}
+				tick.GristTidy = application.GristTidy{Runs: grist.NewRuns(stateDir), Forwards: grist.NewForwards(stateDir), Cwd: grist.NewTalks(stateDir), Record: grist.New(stateDir)}
 			}
 			// A rehearsal is not a tick: it leaves nothing in the log.
 			if !dryRun {

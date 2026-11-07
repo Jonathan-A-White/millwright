@@ -63,10 +63,51 @@ type GristForwardShelf interface {
 	DropShelved(ctx context.Context, name string) error
 }
 
+// GristCwdItem is one thing a talk's directory under cwd/<app> holds that the
+// sweep may delete: a system-prompt-<digest>.md file of instructions, or a
+// grist-<n> scratch directory.
+type GristCwdItem struct {
+	// Name is the item's place under cwd/, <app>/<entry>.
+	Name string
+	// Modified is when the item, or anything in it, was last written.
+	Modified time.Time
+	Files    int
+	Bytes    int64
+}
+
+// GristCwdShelf is the part of the talk directories the sweep reads and
+// deletes from. The real adapter is infrastructure/grist's Talks.
+type GristCwdShelf interface {
+	// Kept lists the instructions files and scratch directories of every
+	// app's talk directory, oldest first. Nothing else in them is listed.
+	Kept(ctx context.Context) ([]GristCwdItem, error)
+	// DropKept deletes the item named, whole.
+	DropKept(ctx context.Context, name string) error
+}
+
+// GristRecordOld is the lines of the mill's record (grinds.jsonl) the sweep
+// would drop.
+type GristRecordOld struct {
+	Lines int
+	Bytes int64
+}
+
+// GristRecordTrim is the part of the mill's record the sweep reads and cuts.
+// The real adapter is infrastructure/grist's State.
+type GristRecordTrim interface {
+	// OldRecord counts the lines whose time is at or before cutoff.
+	OldRecord(ctx context.Context, cutoff time.Time) (GristRecordOld, error)
+	// DropOldRecord rewrites the record without those lines; every other
+	// line stays as it was, in its order, and so does a line it cannot read.
+	DropOldRecord(ctx context.Context, cutoff time.Time) error
+}
+
 // GristTidyAct is one thing mw grist tidy did, or in a dry run would do.
 type GristTidyAct struct {
-	// Kind is "media" (a run's attachments) or "forward" (a forwarded grist's
-	// directory).
+	// Kind is "media" (a run's attachments), "forward" (a forwarded grist's
+	// directory), "talk" (an instructions file or scratch directory of a talk
+	// directory; Txid is its name) or "record" (the old lines of the mill's
+	// record; Files is the lines).
 	Kind  string
 	Txid  string
 	Files int
@@ -78,8 +119,14 @@ type GristTidyAct struct {
 // String is the act as a line of the log and the report.
 func (a GristTidyAct) String() string {
 	what := "attachments of run"
-	if a.Kind == "forward" {
+	switch a.Kind {
+	case "forward":
 		what = "forwarded pictures of"
+	case "talk":
+		what = "talk directory item"
+	case "record":
+		return fmt.Sprintf("grinds record: %s older than %d days, %s",
+			counted(a.Files, "line", "lines"), int(GristKeepAge/(24*time.Hour)), humanBytes(a.Bytes))
 	}
 	return fmt.Sprintf("%s %s: %s, %s, %d days old", what, a.Txid,
 		counted(a.Files, "file", "files"), humanBytes(a.Bytes), int(a.Age/(24*time.Hour)))
@@ -132,12 +179,18 @@ func (r GristTidyReport) String() string {
 
 // GristTidy deletes what the mill kept past GristKeepAge: the photos and
 // recordings of a run received that long ago (the run's small record stays),
-// and the whole directory of pictures of a grist forwarded that long ago.
-// Nothing younger is touched. A look or an act that fails is a note and the
+// the whole directory of pictures of a grist forwarded that long ago, the
+// instructions files and scratch directories of the talk directories last
+// written that long ago, and the lines of the mill's record (grinds.jsonl)
+// that old. Nothing younger is touched. A look or an act that fails is a note and the
 // pass goes on; Run returns an error when any did.
 type GristTidy struct {
 	Runs     GristRunMedia
 	Forwards GristForwardShelf
+	// Cwd and Record are the talk directories and the mill's record; nil
+	// leaves them alone.
+	Cwd    GristCwdShelf
+	Record GristRecordTrim
 
 	// Log is the tick log each act adds a line to; nil writes none.
 	Log TickLog
@@ -154,8 +207,8 @@ type GristTidy struct {
 // Run makes one pass.
 func (g GristTidy) Run(ctx context.Context) (GristTidyReport, error) {
 	report := GristTidyReport{DryRun: g.DryRun}
-	if g.Runs == nil && g.Forwards == nil {
-		return report, fmt.Errorf("grist tidy: there is no run store or forward shelf to tidy")
+	if g.Idle() {
+		return report, fmt.Errorf("grist tidy: there is nothing wired to tidy")
 	}
 	now := time.Now()
 	if g.Now != nil {
@@ -206,10 +259,51 @@ func (g GristTidy) Run(ctx context.Context) (GristTidyReport, error) {
 			g.record(ctx, now, act, &report)
 		}
 	}
+	if g.Cwd != nil {
+		kept, err := g.Cwd.Kept(ctx)
+		if err != nil {
+			fault(fmt.Errorf("reading the talk directories: %w", err))
+		}
+		for _, k := range kept {
+			age := now.Sub(k.Modified)
+			if age < GristKeepAge {
+				continue
+			}
+			act := GristTidyAct{Kind: "talk", Txid: k.Name, Files: k.Files, Bytes: k.Bytes, Age: age}
+			if !g.DryRun {
+				if err := g.Cwd.DropKept(ctx, k.Name); err != nil {
+					fault(fmt.Errorf("deleting %s from the talk directories: %w", k.Name, err))
+					continue
+				}
+			}
+			g.record(ctx, now, act, &report)
+		}
+	}
+	if g.Record != nil {
+		cutoff := now.Add(-GristKeepAge)
+		old, err := g.Record.OldRecord(ctx, cutoff)
+		if err != nil {
+			fault(fmt.Errorf("reading the mill's record: %w", err))
+		} else if old.Lines > 0 {
+			act := GristTidyAct{Kind: "record", Txid: "grinds.jsonl", Files: old.Lines, Bytes: old.Bytes}
+			if g.DryRun {
+				g.record(ctx, now, act, &report)
+			} else if err := g.Record.DropOldRecord(ctx, cutoff); err != nil {
+				fault(fmt.Errorf("trimming the mill's record: %w", err))
+			} else {
+				g.record(ctx, now, act, &report)
+			}
+		}
+	}
 	if g.Out != nil {
 		fmt.Fprint(g.Out, report.String())
 	}
 	return report, errors.Join(faults...)
+}
+
+// Idle says nothing is wired to tidy.
+func (g GristTidy) Idle() bool {
+	return g.Runs == nil && g.Forwards == nil && g.Cwd == nil && g.Record == nil
 }
 
 // record adds the act to the report and, when it was done, to the tick log. A

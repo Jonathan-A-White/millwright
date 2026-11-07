@@ -96,3 +96,51 @@ func TestAppendAddsOneLineAtATime(t *testing.T) {
 		t.Fatalf("expected %q, got %q", want, string(data))
 	}
 }
+
+// mw-gq6.982: the log is rotated once it passes its size: the full one becomes
+// log.1 (the one before it is gone), Read still gives both oldest first, and
+// the two never hold more than a rotation's worth each.
+func TestTheLogIsRotatedOnceItPassesItsSize(t *testing.T) {
+	dir := t.TempDir()
+	store := doctor.New(dir)
+	store.MaxLogBytes = 40
+	ctx := context.Background()
+	var written []string
+	for i := 0; i < 12; i++ {
+		line := "2026-11-07T00:00:00Z check-" + string(rune('a'+i)) + " ok"
+		written = append(written, line)
+		if err := store.Append(ctx, line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{doctor.LogFile, doctor.LogFile + ".1"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil || info.Size() > 40+int64(len(written[0]))+1 {
+			t.Fatalf("expected %s kept within its size, got %v %v", name, info, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, doctor.LogFile+".2")); !os.IsNotExist(err) {
+		t.Fatalf("expected no third log, got %v", err)
+	}
+	got, err := store.Read(ctx)
+	if err != nil || len(got) == 0 || len(got) >= len(written) {
+		t.Fatalf("expected some of the oldest lines gone, got %d of %d, %v", len(got), len(written), err)
+	}
+	if !slices.Equal(got, written[len(written)-len(got):]) {
+		t.Fatalf("expected the newest lines in order, got %v", got)
+	}
+}
+
+// A log under its size is never rotated.
+func TestALogUnderItsSizeIsNotRotated(t *testing.T) {
+	dir := t.TempDir()
+	store := doctor.New(dir)
+	for i := 0; i < 5; i++ {
+		if err := store.Append(context.Background(), "a line"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, doctor.LogFile+".1")); !os.IsNotExist(err) {
+		t.Fatalf("expected no rotated log, got %v", err)
+	}
+}

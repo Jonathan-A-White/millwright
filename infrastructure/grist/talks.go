@@ -31,8 +31,11 @@ type Talks struct {
 	Projects string
 }
 
-// Talks satisfies the port.
-var _ application.GristTalkStore = (*Talks)(nil)
+// Talks satisfies the ports.
+var (
+	_ application.GristTalkStore = (*Talks)(nil)
+	_ application.GristCwdShelf  = (*Talks)(nil)
+)
 
 // NewTalks is the talks kept under the state directory dir, their transcripts
 // under the user's own ~/.claude/projects.
@@ -171,4 +174,95 @@ func TranscriptPath(projects, cwd, session string) string {
 		}
 	}
 	return filepath.Join(projects, string(slug), session+".jsonl")
+}
+
+// keptInCwd says whether name is a file or directory of a talk directory that
+// mw grist tidy may delete: an instructions file system-prompt-<digest>.md
+// (or the temporary one WriteSystemPrompt makes before it renames it), or a
+// grist-<n> scratch directory.
+func keptInCwd(name string, dir bool) bool {
+	if dir {
+		return strings.HasPrefix(name, "grist-")
+	}
+	return strings.HasSuffix(name, ".md") && (strings.HasPrefix(name, "system-prompt-") || strings.HasPrefix(name, ".system-prompt-"))
+}
+
+// Kept implements application.GristCwdShelf: the instructions files and
+// scratch directories of cwd/<app>/, oldest first, each with the newest time
+// of itself and what is in it. Nothing else of a talk directory is listed.
+func (t *Talks) Kept(context.Context) ([]application.GristCwdItem, error) {
+	root := filepath.Join(t.Dir, TalkCwdDir)
+	apps, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the talk directories: %w", err)
+	}
+	var kept []application.GristCwdItem
+	for _, app := range apps {
+		if !app.IsDir() {
+			continue
+		}
+		entries, err := os.ReadDir(filepath.Join(root, app.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", filepath.Join(root, app.Name()), err)
+		}
+		for _, e := range entries {
+			if !keptInCwd(e.Name(), e.IsDir()) {
+				continue
+			}
+			item := application.GristCwdItem{Name: app.Name() + "/" + e.Name()}
+			err := filepath.WalkDir(filepath.Join(root, app.Name(), e.Name()), func(path string, d os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				info, err := d.Info()
+				if err != nil {
+					return err
+				}
+				if info.ModTime().After(item.Modified) {
+					item.Modified = info.ModTime()
+				}
+				if !d.IsDir() {
+					item.Files++
+					item.Bytes += info.Size()
+				}
+				return nil
+			})
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("reading %s: %w", filepath.Join(root, item.Name), err)
+			}
+			kept = append(kept, item)
+		}
+	}
+	sort.SliceStable(kept, func(i, j int) bool { return kept[i].Modified.Before(kept[j].Modified) })
+	return kept, nil
+}
+
+// DropKept implements application.GristCwdShelf. A name that is not
+// <app>/<item> of a talk directory, with the item one Kept lists, is refused.
+func (t *Talks) DropKept(_ context.Context, name string) error {
+	app, item, found := strings.Cut(name, "/")
+	if !found || !singleSegment(app) || !singleSegment(item) {
+		return fmt.Errorf("%q is not an item of a talk directory", name)
+	}
+	if !keptInCwd(item, true) && !keptInCwd(item, false) {
+		return fmt.Errorf("%q is not an instructions file or a scratch directory of a talk directory", name)
+	}
+	path := filepath.Join(t.Dir, TalkCwdDir, app, item)
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !keptInCwd(item, info.IsDir()) {
+		return fmt.Errorf("%q is not an instructions file or a scratch directory of a talk directory", name)
+	}
+	return os.RemoveAll(path)
 }

@@ -11,6 +11,8 @@ to that file and to this page together.
 | --- | --- | --- | --- |
 | 1 | The `attachment-N.<ext>` files of a run in `runs/<txid>/` | The run's `received` time in `timing.json` is 30 days ago or more | Delete those files |
 | 2 | A grist's directory `forwarded/<txid>/` (the pictures of a forward) | 30 days or more since the forward: the newest time of the directory and its pictures | Delete the directory, whole |
+| 3 | In `cwd/<app>/`, a `system-prompt-<digest>.md` file and a `grist-<n>` scratch directory (mw-gq6.982) | 30 days or more since it, or anything in it, was last written | Delete it, whole |
+| 4 | The lines of `grinds.jsonl` (mw-gq6.982) | The line's `time` is 30 days ago or more | Rewrite the file without them, under a lock beside it (`grinds.jsonl.lock`) that every append takes; a line that is not JSON, or has no time, stays |
 
 Row 1 keeps the run's small record: `input.json` (the request), `scorers.json`,
 `answer.json` (the answer text), `timing.json` (the timings and ids) and
@@ -19,6 +21,9 @@ Row 1 keeps the run's small record: `input.json` (the request), `scorers.json`,
 not changed by the sweep. A run whose attachments are already gone is not
 listed again. A directory of `runs/` with no `timing.json` is not a run and is
 left alone.
+
+Row 4 drops only the lines: the cursor, `client_timing.jsonl`, `talks/`,
+`undelivered/` and `runs/` are not changed by it.
 
 Nothing younger than 30 days is touched: a run exactly 30 days old goes, one a
 second younger stays.
@@ -31,5 +36,9 @@ The Millhand's tick runs it after `mw tidy` on a host with a `[grist]` table
 (the host that runs the mill) and says `grist tidy deleted N items (size)` in
 its line.
 
-It never deletes anything outside `runs/<txid>/attachment-*` and
-`forwarded/<txid>/`, and refuses a name that is not one path segment.
+It never deletes anything outside `runs/<txid>/attachment-*`,
+`forwarded/<txid>/`, those two kinds of item in `cwd/<app>/` and the old lines
+of `grinds.jsonl`, and refuses a name that is not one path segment.
+
+The doctor's log (`~/.local/state/mw-doctor/log`) is not part of this sweep: the
+doctor rotates it itself, to `log.1`, once it passes 1 MiB (`LogRotateBytes`).
