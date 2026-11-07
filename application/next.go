@@ -2354,6 +2354,10 @@ const StubCommentBytes = 40
 // stdin dash, so 'bd comments add <id> -' posts the text '-'.
 const StubCommentCure = "bd comments add takes -f <file>, not -"
 
+// StubHeldSaid is what the HELD: comment of a story held for a stub closing
+// comment adds to why it is held.
+const StubHeldSaid = "Its work is done and committed; the Mayor writes the closing comment and releases it."
+
 // quoteStub is a stub comment between single quotes, as the refusal quotes it.
 func quoteStub(text string) string { return "'" + strings.TrimSpace(text) + "'" }
 
@@ -3356,6 +3360,11 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 			trouble = append(trouble, fmt.Sprintf("%s could not be held: %v", c.id, err))
 		} else {
 			given = true
+			// The reason the story is held, in the words mw stuck and mw release read.
+			held := HeldCommentPrefix + " " + why + ". " + StubHeldSaid
+			if err := writeRetrying(ctx, n, report, "the reason it is held", func() error { return n.Tracker.CommentOnStory(ctx, c.id, held) }); err != nil {
+				trouble = append(trouble, fmt.Sprintf("the reason %s is held could not be written on it: %v", c.id, err))
+			}
 		}
 	} else if reason == ReasonOpenSteps || reason == ReasonAcceptanceChanged || reason == ReasonNoClosingComment || reason == ReasonGristExampleUnproved || reason == ReasonTurnCap || (reason == ReasonWorkflowScope && giveBack) || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
 		if err := n.releaseOnStop(ctx, c.id, report); err != nil {

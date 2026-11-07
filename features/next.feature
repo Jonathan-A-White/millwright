@@ -514,6 +514,7 @@ Feature: Closing out a finished story and carrying on
     And the report says it stopped for "closing-comment-stub"
     And the printed report says "the newest comment is '-' (1 byte): bd comments add takes -f <file>, not -"
     And the story "mw-gq6.1" carries a comment quoting: bd comments add takes -f <file>, not -
+    And the story "mw-gq6.1" carries a comment quoting: HELD: the formula of mw-gq6.1 is finished
     And the worktree of "mw-gq6.1" is still there
 
   Scenario: A bullet left as the closing comment is a stub too
