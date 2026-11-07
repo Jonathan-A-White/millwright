@@ -33,17 +33,51 @@ type BdTurn interface {
 type BdBusyError struct {
 	Blocker string
 	Waited  time.Duration
+	// Rerun is the command to run again, as a shell line; "" says none.
+	Rerun string
 }
 
 func (e *BdBusyError) Error() string {
-	return fmt.Sprintf("waited %s for the host to be quiet and bd was not run: %s is still running", e.Waited, e.Blocker)
+	msg := fmt.Sprintf("waited %s for the host to be quiet and bd was not run: %s is still running", e.Waited, e.Blocker)
+	if e.Rerun != "" {
+		msg += "; run again: " + e.Rerun
+	}
+	return msg
+}
+
+// bdRerunLine is the mw bd command line that runs args again, quoted for a shell.
+func bdRerunLine(args []string) string {
+	words := []string{"mw", "bd"}
+	for _, arg := range args {
+		words = append(words, bdShellWord(arg))
+	}
+	return strings.Join(words, " ")
+}
+
+// bdShellWord quotes arg for a shell when it holds anything but plain characters.
+func bdShellWord(arg string) string {
+	plain := arg != ""
+	for _, r := range arg {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./:=@%+,", r)) {
+			plain = false
+			break
+		}
+	}
+	if plain {
+		return arg
+	}
+	return "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
 }
 
 // BdBlocker names the first of procs that a bd must not run beside: another bd,
 // or a mw sync, which writes the same database. "" is a quiet host. A bd whose
 // working directory is under tmp is a test suite's, in a throwaway vault, and
-// not the factory's.
-func BdBlocker(procs []Process, tmp string) string {
+// not the factory's. dir is the caller's beads directory ("" when not known):
+// a bd that works on another one (its -C, else its working directory) holds no
+// lock on this one, as a Go test's child with -C at its own temporary vault
+// does not, whatever directory it runs from (mw-gq6.1021). The environment of a
+// process is not read, so a BEADS_DOLT_* target is not told apart.
+func BdBlocker(procs []Process, tmp, dir string) string {
 	for _, p := range procs {
 		if len(p.Argv) == 0 {
 			continue
@@ -54,6 +88,9 @@ func BdBlocker(procs []Process, tmp string) string {
 			if tmp != "" && bdUnderDir(p.Cwd, tmp) {
 				continue
 			}
+			if dir != "" && !bdSameDir(BdBeadsDir(p.Argv[1:], p.Cwd), dir) {
+				continue
+			}
 		case program == "mw" && bdFirstWord(p.Argv[1:]) == "sync":
 		default:
 			continue
@@ -61,6 +98,38 @@ func BdBlocker(procs []Process, tmp string) string {
 		return fmt.Sprintf("%s (pid %d: %s)", program, p.Pid, strings.Join(append([]string{program}, p.Argv[1:]...), " "))
 	}
 	return ""
+}
+
+// BdBeadsDir is the directory a bd works on: the value of its -C (or
+// --directory) flag, taken from cwd when relative, else cwd.
+func BdBeadsDir(args []string, cwd string) string {
+	dir := ""
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--":
+			i = len(args)
+		case (arg == "-C" || arg == "--directory") && i+1 < len(args):
+			i++
+			dir = args[i]
+		case strings.HasPrefix(arg, "--directory="):
+			dir = strings.TrimPrefix(arg, "--directory=")
+		case strings.HasPrefix(arg, "-C") && !strings.HasPrefix(arg, "--") && len(arg) > 2:
+			dir = strings.TrimPrefix(strings.TrimPrefix(arg, "-C"), "=")
+		}
+	}
+	if dir == "" {
+		return cwd
+	}
+	if !path.IsAbs(dir) {
+		dir = path.Join(cwd, dir)
+	}
+	return dir
+}
+
+// bdSameDir reports whether two directories are the same place by name.
+func bdSameDir(a, b string) bool {
+	return path.Clean(a) == path.Clean(b)
 }
 
 // bdFirstWord is the first argument that is not a flag.
@@ -106,7 +175,7 @@ func (r BdRetry) take(ctx context.Context) (func(), error) {
 			return release, nil
 		}
 		if waited+poll > limit {
-			return nil, &BdBusyError{Blocker: blocker, Waited: waited}
+			return nil, &BdBusyError{Blocker: blocker, Waited: waited, Rerun: bdRerunLine(r.args)}
 		}
 		if err := r.pause(ctx, poll); err != nil {
 			return nil, err
@@ -137,7 +206,7 @@ func (r BdRetry) tryTurn(ctx context.Context) (func(), string, error) {
 			release()
 			return nil, "", fmt.Errorf("looking at the host's processes: %w", err)
 		}
-		if blocker := BdBlocker(procs, os.TempDir()); blocker != "" {
+		if blocker := BdBlocker(procs, os.TempDir(), r.Dir); blocker != "" {
 			release()
 			return nil, blocker, nil
 		}
