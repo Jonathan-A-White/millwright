@@ -276,6 +276,35 @@ func (g *Gateway) LiveClaims(ctx context.Context, host string, now time.Time) ([
 	return application.LiveOpenClaims(now, details), nil
 }
 
+// HeldStories implements application.HeldStories: the held beads, epics and the
+// iced left out. Over the kept connection it is read from the listing the pass
+// already holds; without one, one bd list.
+func (g *Gateway) HeldStories(ctx context.Context) ([]application.StoryDetail, error) {
+	var details []application.StoryDetail
+	if live, ok := g.liveOverConnection(ctx); ok {
+		details = live.details(live.withStatus(StatusDeferred))
+	} else {
+		out, err := g.call(ctx, "list", "--status", StatusDeferred, "--exclude-type", "epic", "--limit", "0", "--json")
+		if err != nil {
+			return nil, err
+		}
+		beads, err := decodeBeads(out)
+		if err != nil {
+			return nil, fmt.Errorf("reading the held stories: %w", err)
+		}
+		if details, err = g.overlaid(ctx, beads); err != nil {
+			return nil, err
+		}
+	}
+	var held []application.StoryDetail
+	for _, detail := range details {
+		if !detail.Iced() {
+			held = append(held, detail)
+		}
+	}
+	return held, nil
+}
+
 // WorkInHand implements application.WorkTracker: everything ready and
 // unclaimed, and everything claimed and unfinished, on every host. It is the
 // two listings a dispatcher makes, read once each with every distinct epic's

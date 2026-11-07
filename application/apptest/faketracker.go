@@ -1463,6 +1463,24 @@ func (f *FakeTracker) LiveClaims(_ context.Context, host string, now time.Time) 
 	return application.LiveOpenClaims(now, others), nil
 }
 
+// HeldStories implements application.HeldStories: the held stories that are no
+// epic and not iced.
+func (f *FakeTracker) HeldStories(_ context.Context) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	var held []application.StoryDetail
+	for _, id := range f.order {
+		s := f.stories[id]
+		if !s.detail.IsEpic && s.detail.Status == StatusDeferred && !s.detail.Iced() {
+			held = append(held, s.detail)
+		}
+	}
+	return held, nil
+}
+
 // BlockedForHost implements application.WorkTracker.
 func (f *FakeTracker) BlockedForHost(_ context.Context, host string) ([]application.StoryDetail, error) {
 	f.mu.Lock()

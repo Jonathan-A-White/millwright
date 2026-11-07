@@ -109,3 +109,36 @@ func TestATesterStoryThatNamesFilesIsComparedAsBefore(t *testing.T) {
 		t.Fatalf("expected the keyed Tester story to wait for a.go, got %+v, %v", got, waits)
 	}
 }
+
+// A held story keeps the work its kept branch carries, so it keeps its files
+// from a ready story while that branch is ahead of its target (mw-gq6.881).
+func TestAHeldStoryWithItsBranchAheadKeepsItsFiles(t *testing.T) {
+	shares := &fileShares{
+		rules:   filesRules(),
+		changes: branchChangesStub{"docs/verse-view.md"},
+		rigs:    map[string]string{"lampas": "/rig"},
+	}
+	shares.addKept(openStory("mw-t.1", "feature", "src/a.go"))
+	got, waits := shares.shared(context.Background(), openStory("mw-t.2", "feature", "docs/verse-view.md"))
+	if !waits || !got.Kept || got.File != "docs/verse-view.md" || got.With != "mw-t.1" {
+		t.Fatalf("expected the story to wait for the held mw-t.1, got %+v, %v", got, waits)
+	}
+	if want := "waiting: shares docs/verse-view.md with mw-t.1; mw-t.1 is held, its kept branch carries work"; got.String() != want {
+		t.Errorf("expected %q, got %q", want, got.String())
+	}
+	if got, waits := shares.shared(context.Background(), openStory("mw-t.3", "feature", "src/b.go")); waits {
+		t.Fatalf("a story naming no file the held one has changed or names waits: %+v", got)
+	}
+}
+
+func TestAHeldStoryWithItsBranchNotAheadHoldsNothingBack(t *testing.T) {
+	shares := &fileShares{
+		rules:   filesRules(),
+		changes: branchChangesStub{},
+		rigs:    map[string]string{"lampas": "/rig"},
+	}
+	shares.addKept(openStory("mw-t.1", "feature", "src/a.go"))
+	if got, waits := shares.shared(context.Background(), openStory("mw-t.2", "feature", "src/a.go")); waits {
+		t.Fatalf("a held story with nothing on its branch holds back a story: %+v", got)
+	}
+}
