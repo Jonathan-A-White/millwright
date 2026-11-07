@@ -425,6 +425,14 @@ type LiveClaims interface {
 	LiveClaims(ctx context.Context, host string, now time.Time) ([]StoryDetail, error)
 }
 
+// HeldStories is a tracker that lists the held stories, epics and the iced
+// ideas left out, on any host: a dispatch pass asks for it so that a held story
+// whose kept branch carries work still keeps its files from the stories ready
+// beside it (mw-gq6.881). A tracker that cannot say holds nothing back.
+type HeldStories interface {
+	HeldStories(ctx context.Context) ([]StoryDetail, error)
+}
+
 // Elsewhere is every story, ready and then claimed, whose Path names some host
 // other than this one. A story whose Path names no host is nobody's, and one
 // that names domain.HostAuto is not elsewhere: any host may take it.

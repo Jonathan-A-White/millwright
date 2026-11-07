@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -940,6 +941,11 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			shares.addAway(detail, detail.ClaimedHost())
 		}
 	}
+
+	// A held story keeps its branch for the next attempt to be cut from, and
+	// with work on it keeps its files from the stories ready here too
+	// (mw-gq6.881). A tracker that cannot say holds nothing back.
+	d.addKeptStories(ctx, &shares, &report)
 
 	// The room is read once a pass. A pass that is only looking leaves no word of
 	// it in the log.
@@ -2049,6 +2055,26 @@ func (d Dispatch) continuing(ctx context.Context, rigDir, id, kept, start string
 		return 0, nil
 	}
 	return attempt, nil
+}
+
+// addKeptStories counts each held story as one that keeps its files while its
+// kept branch is ahead of its target (fileShares.addKept). A story that holds a
+// live claim is counted as running already.
+func (d Dispatch) addKeptStories(ctx context.Context, shares *fileShares, report *DispatchReport) {
+	lister, ok := d.Tracker.(HeldStories)
+	if !ok {
+		return
+	}
+	held, err := lister.HeldStories(ctx)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the held stories could not be read, so none keeps its files: %v", err))
+		return
+	}
+	for _, detail := range held {
+		if !slices.ContainsFunc(shares.running, func(r StoryDetail) bool { return r.Story.ID == detail.Story.ID }) {
+			shares.addKept(detail)
+		}
+	}
 }
 
 // rebaseOrStartAfresh rebases the worktree just cut from an earlier attempt's

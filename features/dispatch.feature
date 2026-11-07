@@ -1318,6 +1318,56 @@ Feature: Dispatching the stories this host is ready to work
     Then no session was started
     And dispatch passed over "mw-gq6.2", saying: waiting: shares src/Preface.tsx with mw-gq6.1
 
+  # A story the Mayor holds keeps the work its kept branch carries (mw-gq6.881):
+  # its next attempt is cut from that branch, and a story that lands on the same
+  # file meanwhile turns it into a merge conflict. A held story whose branch is
+  # not ahead of its target has nothing to lose and holds nothing back.
+
+  Scenario: A held story whose kept branch is ahead of main keeps its files from a ready story
+    Given a ready story "mw-gq6.1" of that epic expecting to change "src/Reader.tsx"
+    And the branch of "mw-gq6.1" has a commit changing "src/Reader.tsx"
+    And the story "mw-gq6.1" is held by the Mayor with its branch kept
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Reader.tsx"
+    And a ready story "mw-gq6.3" of that epic expecting to change "src/Preface.tsx"
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.3"
+    And the story "mw-gq6.2" is not claimed
+    And dispatch passed over "mw-gq6.2", saying: waiting: shares src/Reader.tsx with mw-gq6.1
+
+  Scenario: A held story whose kept branch is not ahead of main holds nothing back
+    Given a ready story "mw-gq6.1" of that epic expecting to change "src/Reader.tsx"
+    And the story "mw-gq6.1" is held by the Mayor with its branch kept
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Reader.tsx"
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.2"
+
+  Scenario: A held story with a kept branch ahead of main holds back a story that names the file only through its branch
+    Given the rig "millwright" expects a files key
+    And a ready story "mw-gq6.1" of that epic expecting to change "src/Other.tsx"
+    And the branch of "mw-gq6.1" has a commit changing "src/Reader.tsx"
+    And the story "mw-gq6.1" is held by the Mayor with its branch kept
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Reader.tsx"
+    When dispatch runs on "vps" with a cap of 3
+    Then no session was started
+    And dispatch passed over "mw-gq6.2", saying: waiting: shares src/Reader.tsx with mw-gq6.1
+
+  Scenario: mw status shows a story waiting on a held story whose kept branch is ahead
+    Given a ready story "mw-gq6.1" of that epic expecting to change "src/Reader.tsx"
+    And the branch of "mw-gq6.1" has a commit changing "src/Reader.tsx"
+    And the story "mw-gq6.1" is held by the Mayor with its branch kept
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Reader.tsx"
+    When mw status is read on "vps"
+    Then mw status lists "mw-gq6.2" as ready, saying "waiting: shares src/Reader.tsx with mw-gq6.1"
+
+  Scenario: mw status shows no wait once the held story's branch is no longer ahead
+    Given a ready story "mw-gq6.1" of that epic expecting to change "src/Reader.tsx"
+    And the branch of "mw-gq6.1" has a commit changing "src/Reader.tsx"
+    And the story "mw-gq6.1" is held by the Mayor with its branch kept
+    And the branch of "mw-gq6.1" is merged into main
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Reader.tsx"
+    When mw status is read on "vps"
+    Then mw status lists "mw-gq6.2" as ready, saying nothing of waiting
+
   # A ready story with no files key on a rig that expects one (files_expected =
   # true in its file in the vault) is held at the needs-files-key gate and holds
   # nothing else back (mw-gq6.599): the Mayor un-holds a story without mw release,

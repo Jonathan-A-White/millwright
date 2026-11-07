@@ -27,6 +27,8 @@ func (c *dispatchContext) registerFileSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a story "([^"]*)" of that epic is claimed by "([^"]*)" while its path still names host auto, expecting to change "([^"]*)"$`, c.aStoryClaimedWhileItsHostIsAuto)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here, its branch changing "([^"]*)"$`, c.aStoryRunningWithItsBranchChanging)
 	ctx.Given(`^the branch of "([^"]*)" has a commit changing "([^"]*)"$`, c.theBranchHasACommitChanging)
+	ctx.Given(`^the story "([^"]*)" is held by the Mayor with its branch kept$`, c.theStoryIsHeldWithItsBranchKept)
+	ctx.Given(`^the branch of "([^"]*)" is merged into main$`, c.theBranchIsMergedIntoMain)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here under the formula "([^"]*)"$`, c.aStoryRunningUnderTheFormula)
 	ctx.Given(`^the rig "([^"]*)" expects a files key$`, c.theRigExpectsAFilesKey)
 	ctx.When(`^the story "([^"]*)" is pathed with files "([^"]*)"$`, c.theStoryIsPathedWithFiles)
@@ -222,4 +224,16 @@ func (c *dispatchContext) mwStatusListsAsReadyNotWaiting(id string) error {
 // branch changes (mw-gq6.406): the files changed so far, in its metadata.
 func (c *dispatchContext) theStoryHasRecordedAsChanged(id, files string) error {
 	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.FilesChangedField: files})
+}
+
+// theStoryIsHeldWithItsBranchKept is the Mayor's mw hold: the story leaves in progress for held
+// and its worktree and branch stay (mw-gq6.881).
+func (c *dispatchContext) theStoryIsHeldWithItsBranchKept(id string) error {
+	return c.tracker.HoldStory(context.Background(), id)
+}
+
+// theBranchIsMergedIntoMain lands the story's kept branch on the rig's origin,
+// so that it is no longer ahead of its target.
+func (c *dispatchContext) theBranchIsMergedIntoMain(id string) error {
+	return gitRun(c.rig, "git", "push", "-q", application.DefaultRemote, application.StoryBranch(id)+":main")
 }

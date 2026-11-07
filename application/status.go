@@ -1015,7 +1015,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		report.Ready = append(report.Ready, detail)
 	}
 	awayRuns, _ := awayRunsRead()
-	report.Sharing = s.sharing(ctx, report.Running, report.Ready, away, awayRuns)
+	report.Sharing = s.sharing(ctx, report.Running, report.Ready, away, work.Held, awayRuns)
 	report.TesterHolds = s.testerHolds(work, report.Ready, s.now())
 	report.HeldByFiles = s.heldByFiles(ctx, report.Ready)
 	report.UnderHandsStep = s.underHandsStep(ctx, report.Ready)
@@ -1376,7 +1376,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 // sharing is each ready story that shares a file with one running here, as mw
 // dispatch finds it, by id; nil when none does. A branch whose changes cannot
 // be read is said, and holds nothing back.
-func (s Status) sharing(ctx context.Context, running []RunningStory, ready, away []StoryDetail, awayRuns map[string]string) map[string]FileShare {
+func (s Status) sharing(ctx context.Context, running []RunningStory, ready, away, held []StoryDetail, awayRuns map[string]string) map[string]FileShare {
 	shares := fileShares{changes: s.Changes, rules: s.Rules, rigs: s.Rigs}
 	refused := map[string]bool{}
 	for _, rs := range running {
@@ -1388,6 +1388,13 @@ func (s Status) sharing(ctx context.Context, running []RunningStory, ready, away
 	for _, detail := range away {
 		shares.addAway(detail, detail.ClaimedHost())
 		refused[detail.Story.ID] = awayRuns[detail.Story.ID] == RunBlocked
+	}
+	// A held story whose kept branch is ahead of its target keeps its files as
+	// well (mw-gq6.881).
+	for _, detail := range held {
+		if !detail.Iced() && !slices.ContainsFunc(shares.running, func(r StoryDetail) bool { return r.Story.ID == detail.Story.ID }) {
+			shares.addKept(detail)
+		}
 	}
 	var sharing map[string]FileShare
 	for _, detail := range ready {

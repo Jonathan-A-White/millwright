@@ -25,6 +25,11 @@ type FileShare struct {
 	// waits on the Mayor (mw-gq6.941): it keeps its files until a retry or a
 	// hold, so the wait does not end by itself. Only mw status knows it.
 	Refused bool
+	// Kept says the story waited for is held, not running, and its kept branch
+	// carries work ahead of its target: a hold leaves that branch for the next
+	// attempt to be cut from, and a story landing on the same file meanwhile
+	// turns it into a merge conflict (mw-gq6.881).
+	Kept bool
 }
 
 // Unkeyed is what a share is for. A ready story that names no files key on a
@@ -52,6 +57,9 @@ func (s FileShare) String() string {
 	if s.Refused {
 		line += fmt.Sprintf("; %s is refused, waiting on the Mayor", s.With)
 	}
+	if s.Kept {
+		line += fmt.Sprintf("; %s is held, its kept branch carries work", s.With)
+	}
 	return line
 }
 
@@ -75,7 +83,10 @@ type fileShares struct {
 	// away is the host each story of running that another host claimed was
 	// claimed on: only its files key is read, for its branch is on that host
 	// (mw-gq6.389).
-	away    map[string]string
+	away map[string]string
+	// kept are the held stories on the rigs: each keeps its files from a ready
+	// story while its kept branch is ahead of its target (mw-gq6.881).
+	kept    []StoryDetail
 	changed map[string][]string
 	// notes are what could not be read, one line each: a branch whose changes
 	// cannot be read holds nothing back.
@@ -85,6 +96,14 @@ type fileShares struct {
 // add counts a story as running, as one this pass started is from then on.
 func (f *fileShares) add(detail StoryDetail) {
 	f.running = append(f.running, detail)
+}
+
+// addKept counts a held story as holding its files for as long as its kept
+// branch is ahead of its target: a hold gives up the session and leaves the
+// branch, from which the next attempt is cut (mw-gq6.881). It is no running
+// story and counts for nothing else.
+func (f *fileShares) addKept(detail StoryDetail) {
+	f.kept = append(f.kept, detail)
 }
 
 // addAway counts a story another host has claimed as running there: it keeps
@@ -131,6 +150,28 @@ func (f *fileShares) shared(ctx context.Context, ready StoryDetail) (FileShare, 
 		}
 		if file, ok := domain.SharedFile(ours, f.branchChanged(ctx, running)); ok {
 			return FileShare{File: file, With: running.Story.ID}, true
+		}
+	}
+	return f.sharedWithKept(ctx, ours, path.Rig, ready.Story.ID)
+}
+
+// sharedWithKept is the first held story on the rig whose kept branch is ahead
+// of its target and that names or has changed a file of ours (mw-gq6.881). A held
+// story whose branch is not there, has been merged or has no commits beyond its
+// target has nothing to lose, and holds nothing back. A story held on another
+// host has its branch there, which this host cannot read: it holds nothing back.
+func (f *fileShares) sharedWithKept(ctx context.Context, ours []string, rig, readyID string) (FileShare, bool) {
+	for _, held := range f.kept {
+		theirs := held.Merged()
+		if held.Story.ID == readyID || theirs.Rig != rig || claimsNoFiles(theirs) {
+			continue
+		}
+		branch := f.branchChanged(ctx, held)
+		if len(branch) == 0 {
+			continue
+		}
+		if file, ok := domain.SharedFile(ours, append(append(domain.FileList(theirs.Files), held.FilesChanged...), branch...)); ok {
+			return FileShare{File: file, With: held.Story.ID, Kept: true}, true
 		}
 	}
 	return FileShare{}, false
