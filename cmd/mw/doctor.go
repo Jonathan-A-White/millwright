@@ -373,6 +373,10 @@ func newDoctorCmd() *cobra.Command {
 			rootDisk.Note = func(ctx context.Context, text string) error {
 				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.RootDiskBudgetName), text)
 			}
+			wslTrim := doctor.NewWSLTrim()
+			wslTrim.Note = func(ctx context.Context, text string) error {
+				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.WSLTrimName), text)
+			}
 			dampers, err := damperSurvey(mwGateway(vault, host))
 			if err != nil {
 				return err
@@ -483,6 +487,7 @@ func newDoctorCmd() *cobra.Command {
 				beadsFlushCheck,
 				tmpLeftovers,
 				rootDisk,
+				wslTrim,
 				mayorStuck,
 				mayorStale,
 				mayorGone,
