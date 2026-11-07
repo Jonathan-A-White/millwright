@@ -71,3 +71,14 @@ Feature: A refused or capped attempt's branch is handed to the next attempt
     Then one session was started again, for "mw-gq6.1"
     And the worktree of "mw-gq6.1" starts clean from "main"
     And the boot of attempt 2 of "mw-gq6.1" does not say "You continue attempt"
+
+  Scenario: A story retried after its worktree was removed starts in a worktree on its kept branch
+    Given the rig's tests fail, saying "undefined: Ledger"
+    When mw closes out "mw-gq6.1"
+    Then the report says it stopped for "tests-fail"
+    Given the worktree of "mw-gq6.1" was removed by hand, its branch kept
+    When mw retry runs for "mw-gq6.1"
+    And the next dispatch tick runs with the leftovers kept
+    Then one session was started again, for "mw-gq6.1"
+    And the worktree of "mw-gq6.1" is there, on its branch holding its first attempt's work
+    And the session of "mw-gq6.1" was started in its worktree

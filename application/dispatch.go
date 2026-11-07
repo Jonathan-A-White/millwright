@@ -2133,9 +2133,12 @@ func (d Dispatch) keepLeftover(ctx context.Context, rigDir, id string, started S
 					err, started.Worktree, started.Branch, id)}
 			}
 		}
-		if err := d.Worktrees.RemoveWithoutForce(ctx, rigDir, started.Worktree); err != nil {
-			return "", fmt.Errorf("the worktree %s of an earlier attempt could not be removed: %w", started.Worktree, err)
-		}
+	}
+	// Also when the directory is already gone: git keeps its record of a
+	// worktree removed by hand and refuses a cut at that path until it is
+	// pruned, which this does (mw-gq6.1037).
+	if err := d.Worktrees.RemoveWithoutForce(ctx, rigDir, started.Worktree); err != nil {
+		return "", fmt.Errorf("the worktree %s of an earlier attempt could not be removed: %w", started.Worktree, err)
 	}
 	if !hasBranch {
 		return "", nil
