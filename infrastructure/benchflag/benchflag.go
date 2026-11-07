@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/atomicfile"
 )
 
 // Dir is the directory of flag files inside the state directory.
@@ -47,18 +48,11 @@ func (m *Memory) Said(_ context.Context, kind string) (string, time.Time, bool, 
 }
 
 // Say implements application.BenchFlagMemory. The file is replaced whole, by
-// renaming a new one over it.
+// atomicfile.Write.
 func (m *Memory) Say(_ context.Context, kind, text string, at time.Time) error {
 	if err := os.MkdirAll(m.Dir, 0o755); err != nil {
 		return fmt.Errorf("making %s: %w", m.Dir, err)
 	}
 	path := m.path(kind)
-	next := path + ".new"
-	if err := os.WriteFile(next, []byte(at.UTC().Format(time.RFC3339)+"\n"+text+"\n"), 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", next, err)
-	}
-	if err := os.Rename(next, path); err != nil {
-		return fmt.Errorf("replacing %s: %w", path, err)
-	}
-	return nil
+	return atomicfile.Write(path, []byte(at.UTC().Format(time.RFC3339)+"\n"+text+"\n"), 0o644)
 }

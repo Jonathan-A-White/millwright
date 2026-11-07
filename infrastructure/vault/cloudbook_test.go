@@ -2,6 +2,8 @@ package vault_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -87,5 +89,22 @@ func TestTheDirtyVaultMailsFixCommitsTheBookAsFound(t *testing.T) {
 	}
 	if got, err := book.Read(context.Background()); err != nil || got.Hours != 4 {
 		t.Errorf("expected the book committed as found, got %+v, %v", got, err)
+	}
+}
+
+// A write names its temp file for itself alone: something already sitting at
+// the old fixed '<book>.new' name is no obstacle (mw-gq6.1042).
+func TestTheCloudBookIsWrittenWithAnythingAtTheOldFixedTempName(t *testing.T) {
+	t.Parallel()
+	here, _ := twoHosts(t)
+	if err := os.MkdirAll(filepath.Join(here, vault.CloudBookPath+".new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	book := vault.CloudBook{Vault: vault.New(here)}
+	if err := book.Write(context.Background(), application.CloudState{Month: "2026-11", Hours: 2}, "up cloud1"); err != nil {
+		t.Fatalf("writing with the old temp name taken: %v", err)
+	}
+	if got, err := book.Read(context.Background()); err != nil || got.Hours != 2 {
+		t.Errorf("got %+v, %v", got, err)
 	}
 }

@@ -35,8 +35,14 @@ func (i Index) Rebuild(ctx context.Context, docs []application.TodoDoc) error {
 	if err := os.MkdirAll(filepath.Dir(i.Path), 0o755); err != nil {
 		return fmt.Errorf("making the directory of the To do index: %w", err)
 	}
-	next := fmt.Sprintf("%s.%d.new", i.Path, os.Getpid())
-	_ = os.Remove(next)
+	// A temp file of this call's own, so two rebuilds at once (in one process
+	// or two) never share one; SQLite takes the empty file as a new database.
+	temp, err := os.CreateTemp(filepath.Dir(i.Path), filepath.Base(i.Path)+".*.new")
+	if err != nil {
+		return fmt.Errorf("making a file for the new To do index: %w", err)
+	}
+	next := temp.Name()
+	_ = temp.Close()
 	defer os.Remove(next)
 	if err := fill(ctx, next, docs); err != nil {
 		return err

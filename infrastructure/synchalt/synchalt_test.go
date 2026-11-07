@@ -90,3 +90,20 @@ func TestAMarkThatCannotBeParsedReadsAsNone(t *testing.T) {
 		t.Fatalf("expected garbage to read as no mark, there=%v, err=%v", there, err)
 	}
 }
+
+// A write names its temp file for itself alone: something already sitting at
+// the old fixed '<mark>.new' name is no obstacle (mw-gq6.1042).
+func TestWriteIsNotBlockedByAnythingAtTheOldFixedTempName(t *testing.T) {
+	dir := t.TempDir()
+	marker := New(dir)
+	if err := os.Mkdir(marker.path()+".new", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	info := application.SyncHaltInfo{At: time.Date(2026, 11, 7, 1, 0, 0, 0, time.UTC), Said: "x"}
+	if err := marker.Write(context.Background(), info); err != nil {
+		t.Fatalf("writing with the old temp name taken: %v", err)
+	}
+	if got, there, err := marker.Read(context.Background()); err != nil || !there || got.Said != "x" {
+		t.Fatalf("got %+v there=%v err=%v", got, there, err)
+	}
+}

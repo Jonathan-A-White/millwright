@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/atomicfile"
 )
 
 // Dir is the directory of marks inside the state directory.
@@ -52,7 +53,7 @@ func (m *Marks) proc() string {
 }
 
 // Write implements application.CloseOutMarks. The file is replaced whole, by
-// renaming a new one over it. It holds the writer's pid, when the close-out
+// atomicfile.Write. It holds the writer's pid, when the close-out
 // began (RFC 3339) and whether it waits for calm, one per line.
 func (m *Marks) Write(_ context.Context, mark application.CloseOutMark) error {
 	if err := os.MkdirAll(m.Dir, 0o755); err != nil {
@@ -60,14 +61,7 @@ func (m *Marks) Write(_ context.Context, mark application.CloseOutMark) error {
 	}
 	body := fmt.Sprintf("%d\n%s\n%t\n", m.pid(), mark.Since.UTC().Format(time.RFC3339), mark.Calming)
 	path := m.path(mark.Story)
-	next := path + ".new"
-	if err := os.WriteFile(next, []byte(body), 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", next, err)
-	}
-	if err := os.Rename(next, path); err != nil {
-		return fmt.Errorf("replacing %s: %w", path, err)
-	}
-	return nil
+	return atomicfile.Write(path, []byte(body), 0o644)
 }
 
 // Read implements application.CloseOutMarks. A mark that cannot be parsed, or

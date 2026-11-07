@@ -2,6 +2,7 @@ package todoindex
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -60,5 +61,22 @@ func TestRebuildReplacesWhatWasThereAndLeavesNoTempFile(t *testing.T) {
 func TestSearchOfAMissingFileSaysSo(t *testing.T) {
 	if _, err := (Index{Path: filepath.Join(t.TempDir(), "none.db")}).Search(context.Background(), []string{"a"}, 1); err == nil {
 		t.Fatal("no error")
+	}
+}
+
+// Two rebuilds in one process at once share a pid; each still has a temp file
+// of its own (mw-gq6.1042).
+func TestRebuildIsNotBlockedByAnythingAtThePidNamedTempName(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	idx := Index{Path: filepath.Join(dir, "i.db")}
+	if err := os.Mkdir(fmt.Sprintf("%s.%d.new", idx.Path, os.Getpid()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Rebuild(ctx, docs()); err != nil {
+		t.Fatalf("rebuilding with the pid-named temp name taken: %v", err)
+	}
+	if hits, err := idx.Search(ctx, []string{"harbor"}, 10); err != nil || len(hits) == 0 {
+		t.Fatalf("expected a hit, got %v, %v", hits, err)
 	}
 }

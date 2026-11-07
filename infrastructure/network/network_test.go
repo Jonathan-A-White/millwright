@@ -3,6 +3,8 @@ package network_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -87,5 +89,21 @@ func TestTheStoreKeepsTheMemoryBetweenRuns(t *testing.T) {
 	got, err := store.Load(ctx)
 	if err != nil || got.Reading.Profile != "Whitehouse" || !got.Reading.At.Equal(want.Reading.At) || !got.Told || !got.ToldMetered || got.Alert != 7 {
 		t.Fatalf("loaded %+v, %v; want %+v", got, err, want)
+	}
+}
+
+// A save names its temp file for itself alone: something already sitting at
+// the old fixed '<file>.new' name is no obstacle (mw-gq6.1042).
+func TestSaveIsNotBlockedByAnythingAtTheOldFixedTempName(t *testing.T) {
+	dir := t.TempDir() + "/state"
+	store := network.NewStore(dir)
+	if err := os.MkdirAll(filepath.Join(dir, network.File+".new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(context.Background(), application.NetworkMemory{Told: true, Alert: 3}); err != nil {
+		t.Fatalf("saving with the old temp name taken: %v", err)
+	}
+	if got, err := store.Load(context.Background()); err != nil || !got.Told || got.Alert != 3 {
+		t.Fatalf("loaded %+v, %v", got, err)
 	}
 }

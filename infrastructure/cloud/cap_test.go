@@ -172,3 +172,21 @@ func TestSetPaceWithNoPaceLineIsAnErrorNotAGuess(t *testing.T) {
 		t.Errorf("expected an error saying no pace was printed, got %v", err)
 	}
 }
+
+// An edit names its temp file for itself alone: something already sitting at
+// the old fixed '<file>.new' name is no obstacle (mw-gq6.1042).
+func TestSetBoxCapIsNotBlockedByAnythingAtTheOldFixedTempName(t *testing.T) {
+	files, _, dir := capFiles(t,
+		"vault = \"/v\"\n\n[cloud]\nbox_cap = 2\n",
+		"[cloud]\nbox_cap = 2\n",
+		"cap = \"2\"\n")
+	if err := os.Mkdir(filepath.Join(dir, "config.toml.new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := files.SetBoxCap(context.Background(), 3); err != nil {
+		t.Fatalf("setting the cap with the old temp name taken: %v", err)
+	}
+	if got, err := files.BoxCap(context.Background()); err != nil || got != 3 {
+		t.Errorf("expected box_cap 3, got %d, %v", got, err)
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/atomicfile"
 )
 
 var _ application.WatchProbes = (*Probes)(nil)
@@ -135,16 +136,8 @@ func (p *Probes) SaveMemory(_ context.Context, memory application.WatchMemory) e
 	if err := os.MkdirAll(p.Dir, 0o755); err != nil {
 		return fmt.Errorf("making %s: %w", p.Dir, err)
 	}
-	// Made whole under another name and moved into place, so that a reader never
-	// sees half a time.
-	whole := path + ".new"
-	if err := os.WriteFile(whole, []byte(memory.FirstFailure.UTC().Format(time.RFC3339)+"\n"), 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", whole, err)
-	}
-	if err := os.Rename(whole, path); err != nil {
-		return fmt.Errorf("moving %s into place: %w", whole, err)
-	}
-	return nil
+	// Replaced whole, so that a reader never sees half a time.
+	return atomicfile.Write(path, []byte(memory.FirstFailure.UTC().Format(time.RFC3339)+"\n"), 0o644)
 }
 
 // AppendLog implements application.WatchProbes: one line, added to the end.

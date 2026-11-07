@@ -164,3 +164,20 @@ func TestTheLogGrowsOneLineAtATime(t *testing.T) {
 		t.Errorf("expected %q, got %q", want, strings.TrimSpace(string(got)))
 	}
 }
+
+// A save names its temp file for itself alone: something already sitting at
+// the old fixed '<file>.new' name is no obstacle (mw-gq6.1042).
+func TestSaveMemoryIsNotBlockedByAnythingAtTheOldFixedTempName(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	p := New(dir)
+	if err := os.MkdirAll(filepath.Join(dir, MemoryFile+".new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	first := time.Date(2026, 11, 7, 1, 0, 0, 0, time.UTC)
+	if err := p.SaveMemory(context.Background(), application.WatchMemory{FirstFailure: first}); err != nil {
+		t.Fatalf("saving with the old temp name taken: %v", err)
+	}
+	if got, err := p.LoadMemory(context.Background()); err != nil || !got.FirstFailure.Equal(first) {
+		t.Errorf("got %v, %v", got, err)
+	}
+}

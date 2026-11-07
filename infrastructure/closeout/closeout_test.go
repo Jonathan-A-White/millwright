@@ -80,3 +80,32 @@ func TestAMarkWhoseProcessIsGoneIsNoMark(t *testing.T) {
 		t.Fatalf("expected the dead mark removed, stat err %v", err)
 	}
 }
+
+// A write names its temp file for itself alone: something already sitting at
+// the old fixed '<mark>.new' name is no obstacle (mw-gq6.1042).
+func TestWriteIsNotBlockedByAnythingAtTheOldFixedTempName(t *testing.T) {
+	dir := t.TempDir()
+	marks := &Marks{Dir: dir, Proc: aHostWithProcesses(t, 4242), Pid: 4242}
+	if err := os.Mkdir(filepath.Join(dir, "mw-1.new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := marks.Write(context.Background(), application.CloseOutMark{Story: "mw-1", Since: time.Date(2026, 11, 7, 1, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatalf("writing with the old temp name taken: %v", err)
+	}
+	got, err := marks.Read(context.Background())
+	if err != nil || len(got) != 1 || got[0].Story != "mw-1" {
+		t.Fatalf("expected the mark back, got %+v, %v", got, err)
+	}
+}
+
+// A temp file a killed writer left is not read as a mark.
+func TestAWriterKilledHalfWayLeavesNoMarkToRead(t *testing.T) {
+	dir := t.TempDir()
+	marks := &Marks{Dir: dir}
+	if err := os.WriteFile(filepath.Join(dir, "mw-2.123456.new"), []byte("1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := marks.Read(context.Background()); err != nil || len(got) != 0 {
+		t.Fatalf("expected a leftover temp file to read as no mark, got %+v, %v", got, err)
+	}
+}

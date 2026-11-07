@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/atomicfile"
 )
 
 // File is the memory's name inside its directory.
@@ -51,12 +52,5 @@ func (s Store) Save(_ context.Context, memory application.NetworkMemory) error {
 		return err
 	}
 	path := filepath.Join(s.Dir, File)
-	next := path + ".new"
-	if err := os.WriteFile(next, body, 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", next, err)
-	}
-	if err := os.Rename(next, path); err != nil {
-		return fmt.Errorf("replacing %s: %w", path, err)
-	}
-	return nil
+	return atomicfile.Write(path, body, 0o644)
 }

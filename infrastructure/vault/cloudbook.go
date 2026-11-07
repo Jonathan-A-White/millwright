@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/atomicfile"
 )
 
 // CloudBookPath is where the cloud's book is kept in the vault, beside the
@@ -62,11 +63,7 @@ func (b CloudBook) Write(ctx context.Context, state application.CloudState, why 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".new"
-	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := atomicfile.Write(path, append(raw, '\n'), 0o644); err != nil {
 		return err
 	}
 	commit, cancel := context.WithTimeout(context.WithoutCancel(ctx), cloudBookCommitWait)

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/atomicfile"
 )
 
 // File is the mark's name inside its directory.
@@ -30,21 +31,14 @@ func New(dir string) *Marker { return &Marker{Dir: dir} }
 func (m *Marker) path() string { return filepath.Join(m.Dir, File) }
 
 // Write implements application.SyncHaltMarker. The file is replaced whole, by
-// renaming a new one over it, so that a write killed half way leaves the old
+// atomicfile.Write, so that a write killed half way leaves the old
 // mark, or none, and never half of a new one.
 func (m *Marker) Write(_ context.Context, info application.SyncHaltInfo) error {
 	if err := os.MkdirAll(m.Dir, 0o755); err != nil {
 		return fmt.Errorf("making %s: %w", m.Dir, err)
 	}
 	path := m.path()
-	next := path + ".new"
-	if err := os.WriteFile(next, []byte(application.FormatSyncHalt(info)), 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", next, err)
-	}
-	if err := os.Rename(next, path); err != nil {
-		return fmt.Errorf("replacing %s: %w", path, err)
-	}
-	return nil
+	return atomicfile.Write(path, []byte(application.FormatSyncHalt(info)), 0o644)
 }
 
 // Read implements application.SyncHaltMarker. A mark that cannot be parsed

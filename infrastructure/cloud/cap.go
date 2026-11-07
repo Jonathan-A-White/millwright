@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/atomicfile"
 )
 
 // The files box_cap is kept in, in the vault.
@@ -86,11 +87,7 @@ func (f CapFiles) edit(path, table, key string, n int, quoted bool) error {
 			return fmt.Errorf("%s has no [%s] table to put %s in", path, table, key)
 		}
 	}
-	tmp := path + ".new"
-	if err := os.WriteFile(tmp, []byte(text), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.Write(path, []byte(text), 0o644)
 }
 
 func keyLine(key string, n int, quoted bool) string {
