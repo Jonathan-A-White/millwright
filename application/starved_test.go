@@ -532,8 +532,10 @@ func TestAHeldHarnessAlarmNamesTheHostThatRanTheRigThroughAStoryNowClosed(t *tes
 
 func TestAHeldHarnessAlarmWithNoOtherHostSaysSoAndStatesTheWindow(t *testing.T) {
 	tracker := aHeldHostFixture(t)
-	// A story of the held host itself, and one closed before the window.
-	mine := aClosedStoryOn(t, tracker, "mw-gq6.8", "desktop", time.Hour)
+	// A story of the held host itself, closed before the note's Since (a story
+	// closed after it is a landing that clears the alarm), and one closed before
+	// the window.
+	mine := aClosedStoryOn(t, tracker, "mw-gq6.8", "desktop", 3*time.Hour)
 	old := aClosedStoryOn(t, tracker, "mw-gq6.9", "laptop", application.StarvedRanWindow+time.Hour)
 	text := heldAlarmText(t, closedTracker{FakeTracker: tracker, closed: []application.ClosedStory{mine, old}}, tracker)
 	if !strings.Contains(text, "no other host has run millwright in the last 14 days") {
@@ -592,15 +594,16 @@ func TestAHeldHarnessAlarmReadsOnlyTheHeldRigsNewestClosedStories(t *testing.T) 
 		})
 	}
 	// The held rig's newest hundred ran on desktop, then one on the laptop, then
-	// thousands more on desktop.
+	// thousands more on desktop; all of them before the note's Since (2h ago), as a
+	// story closed after it would clear the alarm.
 	for i := 0; i < 5100; i++ {
-		ago := time.Duration(i+1) * 30 * time.Second
+		ago := 2*time.Hour + time.Duration(i+1)*30*time.Second
 		if i >= 100 {
 			ago += time.Hour
 		}
 		closed = append(closed, application.ClosedStory{ID: fmt.Sprintf("mw-old.%d", i), Rig: "millwright", Host: "desktop", ClosedAt: statusNow.Add(-ago)})
 	}
-	closed = append(closed, application.ClosedStory{ID: "mw-gq6.9", Rig: "millwright", Host: "laptop", ClosedAt: statusNow.Add(-time.Hour)})
+	closed = append(closed, application.ClosedStory{ID: "mw-gq6.9", Rig: "millwright", Host: "laptop", ClosedAt: statusNow.Add(-3 * time.Hour)})
 	var shown []string
 	var asked []int
 	text := heldAlarmText(t, closedTracker{FakeTracker: tracker, closed: closed, shown: &shown, asked: &asked}, tracker)
@@ -967,5 +970,105 @@ func TestAFlipFromAWaitToAFaultStillMailsAndTheFaultStaysAFault(t *testing.T) {
 	}
 	if inbox := mailsToTheMayor(t, mailbox); len(inbox) != 2 {
 		t.Fatalf("expected a mail for the wait and one for the fault, got %d", len(inbox))
+	}
+}
+
+// aLoadHeldFixture is the rig of mw-gq6.1049: millwright's two stories ready, and
+// the note desktop left of the rig held by load since ago.
+func aLoadHeldFixture(t *testing.T, ago time.Duration) *apptest.FakeTracker {
+	t.Helper()
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.1", "One", "desktop")
+	storyOn(t, tracker, "mw-gq6.2", "Two", "desktop")
+	note := application.StarvedRig{
+		Rig: "millwright", Since: statusNow.Add(-ago), Hold: application.StarvedHolds["no-room"],
+		Reason: "desktop has no room: load 28.2 of 16 cores",
+	}
+	if err := tracker.SetNote(context.Background(), application.StarvedKey("desktop"), application.FormatStarved([]application.StarvedRig{note})); err != nil {
+		t.Fatal(err)
+	}
+	return tracker
+}
+
+// desktopDispatchedAgo leaves the ticks note desktop's sync writes, its last good
+// dispatch run ago before statusNow.
+func desktopDispatchedAgo(t *testing.T, tracker *apptest.FakeTracker, ago time.Duration) {
+	t.Helper()
+	held := application.HostTicks{Dispatch: application.TickCount{Known: true, LastGood: statusNow.Add(-ago)}}
+	if err := tracker.SetNote(context.Background(), application.TicksKey("desktop"), held.Note()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// mw-gq6.1049, 2026-11-07: the desktop at cap 0 kept a note of millwright held by
+// load since 2h21m before, and the alarm mailed it while millwright stories
+// landed on the laptop.
+func TestARigWithAStoryLandedOnAnyHostSinceTheNotesSinceIsNotStarved(t *testing.T) {
+	tracker := aLoadHeldFixture(t, 2*time.Hour)
+	landed := aClosedStoryOn(t, tracker, "mw-gq6.9", "laptop", 10*time.Minute)
+	alarms, err := application.DamperSurvey{Tracker: closedTracker{FakeTracker: tracker, closed: []application.ClosedStory{landed}}, Notes: tracker}.Starved(context.Background(), statusNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(alarms) != 0 {
+		t.Errorf("expected no alarm for a rig that landed a story on the laptop 10m ago, got %+v", alarms)
+	}
+}
+
+func TestARigThatLandedAStoryBeforeTheNotesSinceIsStillStarved(t *testing.T) {
+	tracker := aLoadHeldFixture(t, 2*time.Hour)
+	landed := aClosedStoryOn(t, tracker, "mw-gq6.9", "laptop", 3*time.Hour)
+	alarms, err := application.DamperSurvey{Tracker: closedTracker{FakeTracker: tracker, closed: []application.ClosedStory{landed}}, Notes: tracker}.Starved(context.Background(), statusNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(alarms) != 1 {
+		t.Errorf("expected the alarm for a rig whose last landing was before it was held, got %+v", alarms)
+	}
+}
+
+func TestARigHeldByAHostThatHasMadeNoPassForOverTheTimerPeriodIsNotAlarmed(t *testing.T) {
+	stale := application.StarvedPassStale
+	if stale <= application.DispatchTimerPeriod {
+		t.Fatalf("expected the stale limit %s to be over the dispatch timer's period %s", stale, application.DispatchTimerPeriod)
+	}
+	tracker := aLoadHeldFixture(t, 2*time.Hour)
+	desktopDispatchedAgo(t, tracker, stale+time.Minute)
+	if alarms := starvedAlarms(t, tracker); len(alarms) != 0 {
+		t.Errorf("expected no alarm from a note of a host not passing, got %+v", alarms)
+	}
+}
+
+func TestARigHeldByAHostThatPassedWithinTheTimerPeriodIsStillAlarmed(t *testing.T) {
+	tracker := aLoadHeldFixture(t, 2*time.Hour)
+	desktopDispatchedAgo(t, tracker, application.StarvedPassStale-time.Minute)
+	if alarms := starvedAlarms(t, tracker); len(alarms) != 1 {
+		t.Errorf("expected the alarm from a host that is passing, got %+v", alarms)
+	}
+}
+
+func TestAHostWithNoGoodDispatchRunInItsTicksNoteIsNotPassing(t *testing.T) {
+	tracker := aLoadHeldFixture(t, 2*time.Hour)
+	held := application.HostTicks{Dispatch: application.TickCount{Known: true, Failed: 3}}
+	if err := tracker.SetNote(context.Background(), application.TicksKey("desktop"), held.Note()); err != nil {
+		t.Fatal(err)
+	}
+	if alarms := starvedAlarms(t, tracker); len(alarms) != 0 {
+		t.Errorf("expected no alarm from a host whose dispatch never ran well, got %+v", alarms)
+	}
+}
+
+// A host's other note being fresh does not keep a dead host's note alive: the
+// fresh host's own hold is judged, the dead host's is not.
+func TestAStaleHostsNoteDoesNotHideAnotherHostsFreshHold(t *testing.T) {
+	tracker := aLoadHeldFixture(t, 3*time.Hour)
+	desktopDispatchedAgo(t, tracker, 5*time.Hour)
+	note := application.StarvedRig{Rig: "millwright", Since: statusNow.Add(-90 * time.Minute), Hold: "smoke hold", Reason: "the smoke failed"}
+	if err := tracker.SetNote(context.Background(), application.StarvedKey("vps"), application.FormatStarved([]application.StarvedRig{note})); err != nil {
+		t.Fatal(err)
+	}
+	alarms := starvedAlarms(t, tracker)
+	if len(alarms) != 1 || !strings.Contains(alarms[0].Text, "smoke hold") || !strings.Contains(alarms[0].Text, "1h30m") {
+		t.Errorf("expected the vps's own hold, held 1h30m, got %+v", alarms)
 	}
 }

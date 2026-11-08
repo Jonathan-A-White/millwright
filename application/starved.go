@@ -18,6 +18,18 @@ import (
 // that also held its own fix, and nothing said so but the Governor's eyes.
 const StarvedAfter = time.Hour
 
+// DispatchTimerPeriod is how often mw-dispatch.timer runs a host's dispatch
+// (contrib/systemd/mw-dispatch.timer, OnCalendar=hourly); a host with an event
+// follower or a faster drop-in runs it sooner, never later.
+const DispatchTimerPeriod = time.Hour
+
+// StarvedPassStale is how long a host's last good dispatch run may be behind
+// before its note of the rigs it holds back is no longer a current hold
+// (mw-gq6.1049): the timer's period, the TicksNoteSlack its ticks note may lag,
+// and five minutes for the run itself. The desktop at cap 0 stops before its pass
+// and left a note of load 28.2 for 2h21m while it had a load of 0.1.
+const StarvedPassStale = DispatchTimerPeriod + TicksNoteSlack + 5*time.Minute
+
 // StarvedRanWindow is how far back the closed stories are read for the hosts
 // that ran a rig (mw-gq6.786); the alarm states it in days when no host did.
 const StarvedRanWindow = 14 * 24 * time.Hour
@@ -106,6 +118,34 @@ type StarvedRig struct {
 	// read, for a rig held by a harness stop; not kept in the note.
 	Ran     []string
 	RanRead bool
+	// Landed is when the newest story of the rig, closed on any host within
+	// StarvedRanWindow, was closed; zero when none was or the closed stories were
+	// not read. A rig that landed a story since Since is not starved (mw-gq6.1049).
+	// Set when the notes are read, for a note held over StarvedAfter; not kept in
+	// the note.
+	Landed time.Time
+	// PassAt is the time of Host's last good dispatch run as its ticks note has it,
+	// zero for none, and PassKnown whether the host's ticks note said anything of
+	// dispatch at all. Set when the notes are read; not kept in the note.
+	PassAt    time.Time
+	PassKnown bool
+}
+
+// current says whether the note still holds at now: no story of the rig closed
+// on any host since it was first held, and the host that wrote it is making
+// passes. A host that stops before its pass (the cap at 0, a host down or
+// paused, a crashed dispatch) leaves its note as it was, and a note nobody has
+// rewritten is not a hold now (mw-gq6.1049). A host whose ticks note says nothing
+// of dispatch is given the benefit of the doubt: it may be a host that keeps no
+// log.
+func (r StarvedRig) current(now time.Time) bool {
+	if !r.Landed.IsZero() && !r.Landed.Before(r.Since) {
+		return false
+	}
+	if r.PassKnown && (r.PassAt.IsZero() || now.Sub(r.PassAt) > StarvedPassStale) {
+		return false
+	}
+	return true
 }
 
 // FormatStarved is the note's value, its lines in rig order.
@@ -234,7 +274,9 @@ func (d Dispatch) keepStarved(ctx context.Context, ready []StoryDetail, running 
 }
 
 // StarvedAlarms judges the rigs the hosts' notes say are held back whole
-// against the work in hand: a rig is starved when it was first so held more than
+// against the work in hand. A note that is not current (a story of the rig
+// closed on any host since it was first held, or its host has made no pass for
+// StarvedPassStale) is passed over before the rest: a rig is starved when it was first so held more than
 // StarvedAfter ago and it has a ready story and none running now (a story
 // queued for its batch has no session, so it is not running). A story of it that
 // starts clears the alarm at once. Two hosts' notes of one rig count the
@@ -243,6 +285,9 @@ func (d Dispatch) keepStarved(ctx context.Context, ready []StoryDetail, running 
 func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAlarm {
 	oldest := map[string]StarvedRig{}
 	for _, r := range rigs {
+		if !r.current(now) {
+			continue
+		}
 		if held, ok := oldest[r.Rig]; !ok || r.Since.Before(held.Since) {
 			oldest[r.Rig] = r
 		}
@@ -370,11 +415,10 @@ type rigClosedLister interface {
 	ClosedStoriesOfRig(ctx context.Context, rig string, since time.Time, limit int) ([]ClosedStory, error)
 }
 
-// ranHosts reads the hosts the newest StarvedRanLimit stories of rig, closed
-// within StarvedRanWindow of now, were routed to: one list filtered by rig and
-// bounded, whose rows carry the host, so no story is shown. ok is false when
-// the read is not to be had.
-func (s DamperSurvey) ranHosts(ctx context.Context, rig string, now time.Time) (ran []string, ok bool) {
+// closedOfRig reads the newest StarvedRanLimit stories of rig closed within
+// StarvedRanWindow of now: one list filtered by rig and bounded, whose rows carry
+// the host, so no story is shown. ok is false when the read is not to be had.
+func (s DamperSurvey) closedOfRig(ctx context.Context, rig string, now time.Time) (closed []ClosedStory, ok bool) {
 	lister, can := s.Tracker.(rigClosedLister)
 	if !can {
 		return nil, false
@@ -383,6 +427,12 @@ func (s DamperSurvey) ranHosts(ctx context.Context, rig string, now time.Time) (
 	if err != nil {
 		return nil, false
 	}
+	return closed, true
+}
+
+// ranHosts is the hosts the closed stories of rig were routed to, in the order
+// they first appear.
+func ranHosts(closed []ClosedStory, rig string) (ran []string) {
 	seen := map[string]bool{}
 	for _, c := range closed {
 		if c.Rig != rig || c.Host == "" || c.Host == domain.HostAuto || seen[c.Host] {
@@ -391,7 +441,19 @@ func (s DamperSurvey) ranHosts(ctx context.Context, rig string, now time.Time) (
 		seen[c.Host] = true
 		ran = append(ran, c.Host)
 	}
-	return ran, true
+	return ran
+}
+
+// landedOfRig is when the newest of the closed stories of rig that landed work
+// was closed: a story another one superseded landed nothing.
+func landedOfRig(closed []ClosedStory, rig string) time.Time {
+	var newest time.Time
+	for _, c := range closed {
+		if c.Rig == rig && !c.Superseded && c.ClosedAt.After(newest) {
+			newest = c.ClosedAt
+		}
+	}
+	return newest
 }
 
 // readStarved reads every host's note of the rigs it holds back whole.
@@ -404,23 +466,34 @@ func (s DamperSurvey) readStarved(ctx context.Context, now time.Time) ([]Starved
 		return nil, fmt.Errorf("reading the hosts' notes of the rigs held back: %w", err)
 	}
 	var rigs []StarvedRig
-	type ranRead struct {
-		hosts []string
-		ok    bool
+	type closedRead struct {
+		closed []ClosedStory
+		ok     bool
 	}
-	readRan := map[string]ranRead{}
+	readClosed := map[string]closedRead{}
 	for _, key := range slices.Sorted(maps.Keys(notes)) {
 		if strings.HasPrefix(key, "host.") && strings.HasSuffix(key, ".starved") {
 			host := strings.TrimSuffix(strings.TrimPrefix(key, "host."), ".starved")
+			dispatch := ParseHostTicks(notes[TicksKey(host)]).Dispatch
 			for _, r := range ParseStarved(notes[key]) {
 				r.Host = host
-				if r.Hold == StarvedHolds["harness-hold"] && s.Tracker != nil {
-					got, tried := readRan[r.Rig]
+				r.PassKnown, r.PassAt = dispatch.Known, dispatch.LastGood
+				// The closed stories are read for a note old enough to be an alarm
+				// (the landing that clears it) and for a harness stop (the hosts
+				// that ran the rig), once a rig.
+				young := now.Sub(r.Since) <= StarvedAfter
+				if s.Tracker != nil && (!young || r.Hold == StarvedHolds["harness-hold"]) {
+					got, tried := readClosed[r.Rig]
 					if !tried {
-						got.hosts, got.ok = s.ranHosts(ctx, r.Rig, now)
-						readRan[r.Rig] = got
+						got.closed, got.ok = s.closedOfRig(ctx, r.Rig, now)
+						readClosed[r.Rig] = got
 					}
-					r.Ran, r.RanRead = got.hosts, got.ok
+					if got.ok {
+						r.Landed = landedOfRig(got.closed, r.Rig)
+					}
+					if r.Hold == StarvedHolds["harness-hold"] {
+						r.Ran, r.RanRead = ranHosts(got.closed, r.Rig), got.ok
+					}
 				}
 				rigs = append(rigs, r)
 			}
