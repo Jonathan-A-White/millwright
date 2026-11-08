@@ -4085,8 +4085,14 @@ restart|compact [--host <host>] [--limit <duration>]` writes the flag on the hos
 and waits for `wsl-flag.result` beside it (the task writes it after WSL is back),
 printing it; the wait is asked again while the host is down, and a result that
 says `failed` or `ignored` fails the command. `mw host wsl-flag --install-line`
-prints the one admin-PowerShell line, fenced, that installs the task (the script
-travels in the line) and the line that takes it away. Test: `go test ./cmd/mw -run
+prints the one admin-PowerShell line, fenced, that installs the task and the line
+that takes it away. The install line is under 2000 bytes, short enough to send to
+a phone: it downloads `wsl-flag-watch.ps1` from the public repo pinned at the
+commit the binary was built from, installs it only if its SHA-256 is that of the
+script the binary carries, then registers the task. `--inline` prints the old long
+form instead (the script in the line as base64, over 8000 bytes, for a host that
+cannot reach GitHub); a binary built with no commit refuses the short form and
+names `--inline`. Test: `go test ./cmd/mw -run
 WSLFlag`.
 
 **Compact, monthly.** Trimming only marks the freed blocks; the vhdx file shrinks

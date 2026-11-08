@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -207,7 +209,19 @@ func TestWSLFlagRefusesAHostItCannotReach(t *testing.T) {
 	}
 }
 
+const wslFlagTestCommit = "5a476507f4c1d2e3a4b5c6d7e8f90123456789ab"
+
+// wslFlagPinned makes this build know the commit it was built from, as a
+// release build does and a test binary does not.
+func wslFlagPinned(t *testing.T, commit string) {
+	t.Helper()
+	real := wslFlagCommit
+	wslFlagCommit = func() string { return commit }
+	t.Cleanup(func() { wslFlagCommit = real })
+}
+
 func TestWSLFlagInstallLinePrintsTheFencedLineAndItsWayBack(t *testing.T) {
+	wslFlagPinned(t, wslFlagTestCommit)
 	out, err := runMw(t, "host", "wsl-flag", "--install-line")
 	if err != nil {
 		t.Fatalf("mw host wsl-flag --install-line failed: %v\n%s", err, out)
@@ -218,6 +232,71 @@ func TestWSLFlagInstallLinePrintsTheFencedLineAndItsWayBack(t *testing.T) {
 			t.Errorf("expected %q in the install output:\n%s", want, out)
 		}
 	}
+	// the install line is one line
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "Register-ScheduledTask") && !strings.Contains(l, "-Force") {
+			t.Errorf("the Register-ScheduledTask line must be whole on one line: %.80q", l)
+		}
+	}
+}
+
+// The short line downloads the script pinned at the build's commit, refuses it
+// unless its SHA-256 is that of the embedded script, and stays under 2000
+// bytes so that Postern can carry it to a phone.
+func TestWSLFlagInstallLineDownloadsPinnedChecksAHashAndIsShort(t *testing.T) {
+	wslFlagPinned(t, wslFlagTestCommit)
+	line, err := WSLFlagInstallLine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(line) >= 2000 {
+		t.Errorf("the install line must be under 2000 bytes, got %d", len(line))
+	}
+	if strings.Contains(line, "\n") {
+		t.Errorf("the install line must be one line")
+	}
+	url := "https://raw.githubusercontent.com/Jonathan-A-White/millwright/" + wslFlagTestCommit + "/contrib/windows/wsl-flag-watch.ps1"
+	if !strings.Contains(line, "Invoke-WebRequest") || !strings.Contains(line, "'"+url+"'") {
+		t.Errorf("expected a download of %s pinned at the commit:\n%s", url, line)
+	}
+	sum := sha256.Sum256([]byte(millwright.WSLFlagWatch))
+	want := strings.ToUpper(hex.EncodeToString(sum[:]))
+	check := "(Get-FileHash -Algorithm SHA256 $t).Hash -ne '" + want + "'"
+	if !strings.Contains(line, check) {
+		t.Errorf("expected the SHA-256 of the embedded script checked (%s):\n%s", check, line)
+	}
+	// the check comes before the script is put in place and the task registered
+	chk, mv, reg := strings.Index(line, "Get-FileHash"), strings.Index(line, "Move-Item"), strings.Index(line, "Register-ScheduledTask")
+	if chk < 0 || mv < chk || reg < mv {
+		t.Errorf("the hash must be checked (%d) before the script is moved in (%d) and the task registered (%d)", chk, mv, reg)
+	}
+	if strings.Contains(line, "FromBase64String") {
+		t.Errorf("the short line must not carry the script in itself")
+	}
+	// the task is registered exactly as the inline form registers it
+	reg1 := line[strings.Index(line, "Register-ScheduledTask"):]
+	inline := WSLFlagInstallLineInline()
+	if reg2 := inline[strings.Index(inline, "Register-ScheduledTask"):]; reg1 != reg2 {
+		t.Errorf("the task must be registered as the inline form does:\n%s\n%s", reg1, reg2)
+	}
+}
+
+func TestWSLFlagInstallLineRefusesWithNoCommitToPinAt(t *testing.T) {
+	wslFlagPinned(t, "")
+	out, err := runMw(t, "host", "wsl-flag", "--install-line")
+	if err == nil || !strings.Contains(err.Error(), "--inline") {
+		t.Errorf("expected a refusal naming --inline, got %v\n%s", err, out)
+	}
+	if out, err = runMw(t, "host", "wsl-flag", "--install-line", "--inline"); err != nil {
+		t.Errorf("--inline needs no commit: %v\n%s", err, out)
+	}
+}
+
+func TestWSLFlagInstallLineInlineCarriesTheScript(t *testing.T) {
+	out, err := runMw(t, "host", "wsl-flag", "--install-line", "--inline")
+	if err != nil {
+		t.Fatalf("mw host wsl-flag --install-line --inline failed: %v\n%s", err, out)
+	}
 	m := regexp.MustCompile(`FromBase64String\('([^']+)'\)`).FindStringSubmatch(out)
 	if m == nil {
 		t.Fatalf("expected the script carried in the line:\n%s", out)
@@ -226,11 +305,20 @@ func TestWSLFlagInstallLinePrintsTheFencedLineAndItsWayBack(t *testing.T) {
 	if err != nil || string(script) != millwright.WSLFlagWatch {
 		t.Errorf("the line must carry contrib/windows/wsl-flag-watch.ps1 as it is (err %v)", err)
 	}
-	// the install line is one line
 	for _, l := range strings.Split(out, "\n") {
 		if strings.Contains(l, "Register-ScheduledTask") && !strings.Contains(l, "-Force") {
 			t.Errorf("the Register-ScheduledTask line must be whole on one line: %.80q", l)
 		}
+	}
+}
+
+func TestWSLFlagInlineGoesWithInstallLine(t *testing.T) {
+	dir := wslFlagHere(t, nil)
+	if out, err := runMw(t, "host", "wsl-flag", "restart", "--inline"); err == nil {
+		t.Errorf("expected --inline alone to be refused, got:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "wsl-flag")); err == nil {
+		t.Errorf("a refused request must write no flag")
 	}
 }
 
