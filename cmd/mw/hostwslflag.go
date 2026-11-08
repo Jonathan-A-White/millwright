@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os/exec"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -73,19 +76,63 @@ func wslFlagPendingScript() string {
 	return "[ -e " + wslFlagPath(wslFlagFile) + " ] && echo pending; true"
 }
 
-// WSLFlagInstallLine is the one line of admin PowerShell that writes the
-// watcher script (carried in the line, base64) under ProgramData and registers
-// the scheduled task that runs it every 2 minutes and at logon, as the Windows
-// user who ran the line.
-func WSLFlagInstallLine() string {
-	enc := base64.StdEncoding.EncodeToString([]byte(millwright.WSLFlagWatch))
-	return `$d="$env:ProgramData\millwright"; New-Item -ItemType Directory -Force $d | Out-Null; ` +
-		`[IO.File]::WriteAllBytes("$d\wsl-flag-watch.ps1",[Convert]::FromBase64String('` + enc + `')); ` +
-		`Register-ScheduledTask -TaskName '` + wslFlagTask + `' ` +
+// wslFlagRepoRaw is where the public millwright repo serves a file at a commit.
+const wslFlagRepoRaw = "https://raw.githubusercontent.com/Jonathan-A-White/millwright/"
+
+// wslFlagScriptPath is the watcher script's path in the repo.
+const wslFlagScriptPath = "contrib/windows/wsl-flag-watch.ps1"
+
+// wslFlagCommit is the full commit this binary was built from, "" when the
+// toolchain embedded none. A test swaps it.
+var wslFlagCommit = func() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" {
+			return setting.Value
+		}
+	}
+	return ""
+}
+
+// wslFlagRegister is the part of the install line that registers the task
+// with the script already under $d.
+func wslFlagRegister() string {
+	return `Register-ScheduledTask -TaskName '` + wslFlagTask + `' ` +
 		"-Action (New-ScheduledTaskAction -Execute powershell.exe -Argument \"-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `\"$d\\wsl-flag-watch.ps1`\"\") " +
 		`-Trigger @((New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2)),(New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME)) ` +
 		`-Principal (New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest) ` +
 		`-Settings (New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 3) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries) -Force`
+}
+
+// WSLFlagInstallLine is the one line of admin PowerShell that downloads the
+// watcher script from the public repo, pinned at the commit this binary was
+// built from, refuses it unless its SHA-256 is that of the script this binary
+// carries, puts it under ProgramData and registers the scheduled task that
+// runs it every 2 minutes and at logon, as the Windows user who ran the line.
+// It is short enough (well under 2000 bytes) to be sent to a phone.
+func WSLFlagInstallLine() (string, error) {
+	commit := wslFlagCommit()
+	if len(commit) != 40 {
+		return "", fmt.Errorf("this mw was built with no commit to pin the download at (rebuild from the checkout with make build); `--inline` prints the line that carries the script in itself instead")
+	}
+	sum := sha256.Sum256([]byte(millwright.WSLFlagWatch))
+	return `$d="$env:ProgramData\millwright"; New-Item -ItemType Directory -Force $d | Out-Null; ` +
+		`[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $t="$d\wsl-flag-watch.ps1.new"; ` +
+		`Invoke-WebRequest -UseBasicParsing -Uri '` + wslFlagRepoRaw + commit + "/" + wslFlagScriptPath + `' -OutFile $t; ` +
+		`if ((Get-FileHash -Algorithm SHA256 $t).Hash -ne '` + strings.ToUpper(hex.EncodeToString(sum[:])) + `') { Remove-Item $t; throw 'wsl-flag-watch.ps1 does not match its expected SHA-256: nothing installed' }; ` +
+		`Move-Item -Force $t "$d\wsl-flag-watch.ps1"; ` + wslFlagRegister(), nil
+}
+
+// WSLFlagInstallLineInline is the same line with the watcher script carried in
+// it (base64), for a host that cannot reach the repo. It is over 8000 bytes,
+// too long for Postern.
+func WSLFlagInstallLineInline() string {
+	enc := base64.StdEncoding.EncodeToString([]byte(millwright.WSLFlagWatch))
+	return `$d="$env:ProgramData\millwright"; New-Item -ItemType Directory -Force $d | Out-Null; ` +
+		`[IO.File]::WriteAllBytes("$d\wsl-flag-watch.ps1",[Convert]::FromBase64String('` + enc + `')); ` + wslFlagRegister()
 }
 
 // WSLFlagWayBack is the one line that takes the task and its script away. It
@@ -98,7 +145,7 @@ func WSLFlagWayBack() string {
 func newHostWSLFlagCmd() *cobra.Command {
 	var host string
 	var limit time.Duration
-	var installLine bool
+	var installLine, inline bool
 	cmd := &cobra.Command{
 		Use:   "wsl-flag restart|compact [--host <host>] [--limit <duration>] | --install-line",
 		Short: "Ask a WSL host's Windows side to restart WSL, or to trim and compact its disk, with no visit to the desk",
@@ -112,8 +159,13 @@ func newHostWSLFlagCmd() *cobra.Command {
 			"[hands_hosts]) and waits, up to --limit, for the task to write " + wslFlagResult + " beside it after WSL is\n" +
 			"back, and prints it. The wait outlives the restart: a host that does not answer meanwhile is asked again.\n\n" +
 			"`mw host wsl-flag --install-line` prints the one line of admin PowerShell, run once at the desk, that\n" +
-			"installs the task, and the line that takes it away.",
+			"installs the task, and the line that takes it away. The line downloads the script from the public repo\n" +
+			"pinned at the commit this mw was built from and installs it only if its SHA-256 is the one mw carries;\n" +
+			"it is short enough to send to a phone. `--inline` prints the long form that carries the script in itself.",
 		Args: func(cmd *cobra.Command, args []string) error {
+			if inline && !installLine {
+				return fmt.Errorf("--inline goes with --install-line")
+			}
 			if installLine {
 				return cobra.NoArgs(cmd, args)
 			}
@@ -130,10 +182,17 @@ func newHostWSLFlagCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 			if installLine {
+				line := WSLFlagInstallLineInline()
+				if !inline {
+					var err error
+					if line, err = WSLFlagInstallLine(); err != nil {
+						return err
+					}
+				}
 				fmt.Fprintf(out, "Once, in an admin Windows PowerShell on the host, as the Windows user that owns the WSL distro:\n\n"+
 					"```\nPS C:\\WINDOWS\\system32> %s\n```\n\n"+
 					"Way back (changes nothing inside WSL):\n\n```\nPS C:\\WINDOWS\\system32> %s\n```\n",
-					WSLFlagInstallLine(), WSLFlagWayBack())
+					line, WSLFlagWayBack())
 				return nil
 			}
 			here, reach, err := hostTrimHostsFn()
@@ -156,6 +215,7 @@ func newHostWSLFlagCmd() *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "", "the host whose WSL to ask about (default: this host)")
 	cmd.Flags().DurationVar(&limit, "limit", wslFlagLimit, "how long to wait for the result")
 	cmd.Flags().BoolVar(&installLine, "install-line", false, "print the one admin-PowerShell line that installs the Windows task, and its way back")
+	cmd.Flags().BoolVar(&inline, "inline", false, "with --install-line: carry the script in the line (base64, over 8000 bytes) instead of downloading it pinned at this build's commit")
 	return cmd
 }
 
