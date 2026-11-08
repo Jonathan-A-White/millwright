@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
 )
 
@@ -103,5 +104,42 @@ func TestDispatchFileForIsStablePerVaultAndDiffersBetweenVaults(t *testing.T) {
 	}
 	if _, taken, _ := hostlock.NewTry(dir, hostlock.DispatchFileFor(a)).TryTake(ctx); taken {
 		t.Error("expected vault a's dispatch lock held")
+	}
+}
+
+// mw-gq6.1051: a grind slot says whose grind holds it, for as long as it is held.
+func TestTryMarkedLockSaysWhoseGrindHoldsItAndForgetsWhenLetGo(t *testing.T) {
+	ctx, dir := context.Background(), filepath.Join(t.TempDir(), "grist")
+	lock := hostlock.NewTry(dir, hostlock.GrindFile(0))
+	release, taken, err := lock.TryTakeMarked(ctx, application.GristMarkFactory)
+	if err != nil || !taken {
+		t.Fatalf("expected a free lock taken, got %v %v", taken, err)
+	}
+	if mark, err := hostlock.NewTry(dir, hostlock.GrindFile(0)).Mark(ctx); err != nil || mark != application.GristMarkFactory {
+		t.Fatalf("expected another reader to read the mark, got %q %v", mark, err)
+	}
+	release()
+	if mark, _ := lock.Mark(ctx); mark != "" {
+		t.Fatalf("expected the mark gone with the lock, got %q", mark)
+	}
+
+	// A mark a dead holder left behind is not the next holder's.
+	if err := os.WriteFile(filepath.Join(dir, hostlock.GrindFile(0)), []byte(application.GristMarkFactory), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	release, taken, err = lock.TryTakeMarked(ctx, application.GristMarkTutor)
+	if err != nil || !taken {
+		t.Fatalf("expected the lock taken, got %v %v", taken, err)
+	}
+	defer release()
+	if mark, _ := lock.Mark(ctx); mark != application.GristMarkTutor {
+		t.Fatalf("expected the new holder's mark over the dead one's, got %q", mark)
+	}
+	// A plain take on a held, marked lock is refused and leaves the mark be.
+	if _, taken, _ := hostlock.NewTry(dir, hostlock.GrindFile(0)).TryTakeMarked(ctx, application.GristMarkFactory); taken {
+		t.Fatal("expected a held lock not taken")
+	}
+	if mark, _ := lock.Mark(ctx); mark != application.GristMarkTutor {
+		t.Fatalf("expected a refused take to leave the holder's mark, got %q", mark)
 	}
 }

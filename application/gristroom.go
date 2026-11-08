@@ -93,7 +93,8 @@ type GristPulse struct {
 	// Known is whether the mill has a grind in flight or has ever kept a run;
 	// a host without one says nothing of grist.
 	Known bool
-	// InFlight is whether a grind is running now, Recent how many tutor grinds
+	// InFlight is whether a tutor's grind is running now (the factory's own
+	// smoke or eval is not), Recent how many tutor grinds
 	// ended within Window, and Active whether either is so.
 	InFlight bool
 	Recent   int
@@ -180,6 +181,7 @@ func (g GristRoom) Pulse(ctx context.Context, hostCap int) (GristPulse, error) {
 		now = g.Now
 	}
 	pulse := GristPulse{Window: g.Limits.recent(), HostCap: hostCap, Cap: hostCap}
+	anyHeld := false
 	for _, lock := range g.Grinding {
 		if lock == nil {
 			continue
@@ -188,7 +190,16 @@ func (g GristRoom) Pulse(ctx context.Context, hostCap int) (GristPulse, error) {
 		if err != nil {
 			return pulse, fmt.Errorf("asking whether a grind is running: %w", err)
 		}
-		pulse.InFlight = pulse.InFlight || held
+		if !held {
+			continue
+		}
+		anyHeld = true
+		// A grind the factory's own test key sent (a smoke, an eval) is no one
+		// waiting with an app open: it leaves grist quiet as its ended runs do.
+		// A lock that cannot say whose grind holds it is a tutor's.
+		if !factoryGrind(ctx, lock) {
+			pulse.InFlight = true
+		}
 	}
 	var timings []GristRunTiming
 	kept := false
@@ -211,7 +222,7 @@ func (g GristRoom) Pulse(ctx context.Context, hostCap int) (GristPulse, error) {
 		}
 	}
 	sort.SliceStable(timings, func(i, j int) bool { return timings[i].endedAt().Before(timings[j].endedAt()) })
-	pulse.Known = pulse.InFlight || kept
+	pulse.Known = anyHeld || kept
 	// A board that cannot be read only leaves the pool's line out.
 	if g.Pool != nil {
 		if view, err := g.Pool.Pool(ctx); err == nil && !view.At.IsZero() && now().Sub(view.At) < GristPoolStale {
@@ -262,6 +273,18 @@ func (g GristRoom) Pulse(ctx context.Context, hostCap int) (GristPulse, error) {
 		}
 	}
 	return pulse, nil
+}
+
+// factoryGrind is whether the grind holding lock, which is held, is marked as
+// the factory's own. A lock that keeps no mark, a mark that cannot be read and
+// any other mark are not: they fail toward his tutor.
+func factoryGrind(ctx context.Context, lock GristLock) bool {
+	marked, ok := lock.(GristMarkedLock)
+	if !ok {
+		return false
+	}
+	mark, err := marked.Mark(ctx)
+	return err == nil && mark == GristMarkFactory
 }
 
 // classJoin is the sender class of runs of one kind that held so far (have)

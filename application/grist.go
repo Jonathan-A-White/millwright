@@ -430,6 +430,28 @@ type GristLock interface {
 	Held(ctx context.Context) (bool, error)
 }
 
+// The marks a grind writes beside its slot's lock, so a reader of the lock can
+// tell whose grind holds it (mw-gq6.1051).
+const (
+	// GristMarkFactory is the mark of a grind the factory sent itself: a smoke
+	// or an eval, from its test key. No one waits on it.
+	GristMarkFactory = "factory"
+	// GristMarkTutor is the mark of every other grind.
+	GristMarkTutor = "tutor"
+)
+
+// GristMarkedLock is a grind slot's lock that also says whose grind holds it.
+// The real adapter is infrastructure/hostlock's Try. A lock that is not one,
+// or whose mark cannot be read, is a tutor's: the room fails toward his tutor.
+type GristMarkedLock interface {
+	GristLock
+	// TryTakeMarked is TryTake, writing mark where Mark reads it for as long as
+	// the lock is held.
+	TryTakeMarked(ctx context.Context, mark string) (release func(), taken bool, err error)
+	// Mark is what the holder wrote, "" when it wrote none.
+	Mark(ctx context.Context) (string, error)
+}
+
 // GristMill is one pass of the mill: what mw grist grind runs, and what the
 // dispatch tick runs after its own claims (GristGrind is the use case).
 type GristMill interface {
