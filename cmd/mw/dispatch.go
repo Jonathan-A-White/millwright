@@ -273,7 +273,8 @@ func newDispatchCmd() *cobra.Command {
 			"that has it back, are each one event, and mw status says why. A load or memory that cannot be read\n" +
 			"holds nothing back.\n\n" +
 			"Grist comes first (mw-t0z3fu.4): on the host where the mill runs, while a tutor is in use (a grind\n" +
-			"running, or one answered within grist_recent_s, default 600) it starts no more stories than grist_cap\n" +
+			"running, or one answered within grist_recent_s, default 600; the factory's own smokes and evals,\n" +
+			"running or ended, are not a tutor) it starts no more stories than grist_cap\n" +
 			"(default: the cap less 2, never under 1), and while the last 5 answers of a kind take over\n" +
 			"grist_slow_factor (default 1.5) times that kind's par (its median over the last 50) it starts none,\n" +
 			"until they recover; the reason is the room event's. Stories already running are never stopped, and\n" +

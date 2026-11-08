@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -54,7 +55,10 @@ type Try struct {
 }
 
 // Try satisfies the port.
-var _ application.GristLock = (*Try)(nil)
+var (
+	_ application.GristLock       = (*Try)(nil)
+	_ application.GristMarkedLock = (*Try)(nil)
+)
 
 // NewTry is the lock file name in dir.
 func NewTry(dir, name string) *Try {
@@ -71,6 +75,33 @@ func (t *Try) path() string { return filepath.Join(t.Dir, t.Name) }
 // by release alone, and the garbage collector closes a file nothing refers to,
 // which lets go of the lock. Keep release and always defer it.
 func (t *Try) TryTake(ctx context.Context) (func(), bool, error) {
+	return t.take(ctx, "", false)
+}
+
+// TryTakeMarked implements application.GristMarkedLock: TryTake, with mark
+// written into the lock file the moment the lock is taken and wiped before it is
+// let go, so Mark reads what the holder of the moment wrote and nothing a dead
+// holder left. A mark that cannot be written leaves the file empty, which
+// Mark reads as none.
+func (t *Try) TryTakeMarked(ctx context.Context, mark string) (func(), bool, error) {
+	return t.take(ctx, mark, true)
+}
+
+// Mark implements application.GristMarkedLock: the lock file's text, "" when
+// there is none or the file is not there. It takes no lock, so it is only
+// meant for a lock Held says is held.
+func (t *Try) Mark(context.Context) (string, error) {
+	text, err := os.ReadFile(t.path())
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading the mark of the lock %s: %w", t.path(), err)
+	}
+	return strings.TrimSpace(string(text)), nil
+}
+
+func (t *Try) take(ctx context.Context, mark string, marked bool) (func(), bool, error) {
 	if err := os.MkdirAll(t.Dir, 0o700); err != nil {
 		return nil, false, fmt.Errorf("making the directory the lock %s belongs in: %w", t.path(), err)
 	}
@@ -82,7 +113,16 @@ func (t *Try) TryTake(ctx context.Context) (func(), bool, error) {
 	for {
 		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
+			if marked {
+				file.Truncate(0)
+				if mark != "" {
+					file.WriteAt([]byte(mark), 0)
+				}
+			}
 			return func() {
+				if marked {
+					file.Truncate(0)
+				}
 				syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 				file.Close()
 			}, true, nil

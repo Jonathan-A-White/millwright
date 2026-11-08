@@ -395,45 +395,69 @@ func (f *FakeGristState) Delivered(_ context.Context, txid string) error {
 	return nil
 }
 
-// FakeGristLock is an in-memory application.GristLock.
+// FakeGristLock is an in-memory application.GristMarkedLock.
 type FakeGristLock struct {
 	mu   sync.Mutex
 	held bool
+	mark string
 	// Taken counts the times it was taken.
 	Taken int
+	// Marks are the marks it was taken with, in order.
+	Marks []string
+	// MarkErr, when set, is what Mark fails with, as a mark that cannot be read.
+	MarkErr error
 }
 
-// FakeGristLock satisfies the port.
-var _ application.GristLock = (*FakeGristLock)(nil)
+// FakeGristLock satisfies the ports.
+var (
+	_ application.GristLock       = (*FakeGristLock)(nil)
+	_ application.GristMarkedLock = (*FakeGristLock)(nil)
+)
 
-// Hold holds the lock, as another pass or grind would.
-func (f *FakeGristLock) Hold() {
+// Hold holds the lock, as another pass or grind would, leaving no mark.
+func (f *FakeGristLock) Hold() { f.HoldMarked("") }
+
+// HoldMarked holds the lock as a grind that wrote mark beside it would.
+func (f *FakeGristLock) HoldMarked(mark string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.held = true
+	f.held, f.mark = true, mark
 }
 
 // Free lets go of a lock that Hold held, as the other pass or grind ending would.
 func (f *FakeGristLock) Free() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.held = false
+	f.held, f.mark = false, ""
 }
 
 // TryTake implements application.GristLock.
-func (f *FakeGristLock) TryTake(context.Context) (func(), bool, error) {
+func (f *FakeGristLock) TryTake(ctx context.Context) (func(), bool, error) {
+	return f.TryTakeMarked(ctx, "")
+}
+
+// TryTakeMarked implements application.GristMarkedLock.
+func (f *FakeGristLock) TryTakeMarked(_ context.Context, mark string) (func(), bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.held {
 		return nil, false, nil
 	}
-	f.held = true
+	f.held, f.mark = true, mark
 	f.Taken++
+	f.Marks = append(f.Marks, mark)
 	return func() {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		f.held = false
+		f.held, f.mark = false, ""
 	}, true, nil
+}
+
+// Mark implements application.GristMarkedLock.
+func (f *FakeGristLock) Mark(context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.mark, f.MarkErr
 }
 
 // Held implements application.GristLock.

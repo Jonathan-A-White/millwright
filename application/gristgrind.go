@@ -555,7 +555,7 @@ func (p *gristPass) process() {
 			continue
 		}
 		w.slotAsked = g.now()
-		slot, why := p.slot()
+		slot, why := p.slot(w.factory)
 		if slot < 0 && p.err != nil {
 			break
 		}
@@ -582,9 +582,9 @@ func (p *gristPass) noticedAt(txid string) time.Time {
 // slot takes a slot for the next grind, waiting for one of this pass's own
 // grinds to end when it is they that fill them. It reports the slot's number,
 // or -1 and why there is none.
-func (p *gristPass) slot() (int, string) {
+func (p *gristPass) slot(factory bool) (int, string) {
 	for {
-		n, release, why, err := p.g.slot(p.ctx, p.held)
+		n, release, why, err := p.g.slot(p.ctx, p.held, factory)
 		if err != nil {
 			p.err = err
 			return -1, ""
@@ -1156,13 +1156,26 @@ func (g GristGrind) slots() []GristLock {
 // slot takes one of the mill's grind slots for a grind. held says which locks
 // this pass's own grinds hold; they are not tried again. It reports the lock's
 // number and its release, or number -1, and why, when there is none to take.
-func (g GristGrind) slot(ctx context.Context, held []func()) (int, func(), string, error) {
+func (g GristGrind) slot(ctx context.Context, held []func(), factory bool) (int, func(), string, error) {
 	slots := g.slots()
 	for n, lock := range slots {
 		if held[n] != nil {
 			continue
 		}
-		release, taken, err := lock.TryTake(ctx)
+		var release func()
+		var taken bool
+		var err error
+		if marked, ok := lock.(GristMarkedLock); ok {
+			// The mark says whose grind holds the slot, so the room check does
+			// not take a smoke for a tutor in use (mw-gq6.1051).
+			mark := GristMarkTutor
+			if factory {
+				mark = GristMarkFactory
+			}
+			release, taken, err = marked.TryTakeMarked(ctx, mark)
+		} else {
+			release, taken, err = lock.TryTake(ctx)
+		}
 		if err != nil {
 			return -1, nil, "", fmt.Errorf("mw grist grind: %w", err)
 		}

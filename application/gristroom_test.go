@@ -2,6 +2,8 @@ package application_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -322,5 +324,89 @@ func TestSenderClassOfARun(t *testing.T) {
 		if got := tc.timing.SenderClass(); got != tc.want {
 			t.Errorf("%+v: class = %q, want %q", tc.timing, got, tc.want)
 		}
+	}
+}
+
+// mw-gq6.1051: a grind running for the factory's test key (a smoke, an eval) is
+// no tutor in use, as one of its ended runs is not (mw-gq6.804).
+func TestAGrindInFlightFromTheTestKeyDoesNotMakeGristActiveOrLowerTheCap(t *testing.T) {
+	lock := &apptest.FakeGristLock{}
+	lock.HoldMarked(application.GristMarkFactory)
+	pulse := pulseOf(t, roomOf(roomRuns{}, lock), 6)
+	if pulse.Active || pulse.InFlight || pulse.Cap != 6 || pulse.Lowered() {
+		t.Fatalf("a smoke grinding is not grist in use, and the cap stays the host's 6: %+v", pulse)
+	}
+	if !pulse.Known || strings.Contains(pulse.Line(), "grinding now") || pulse.CapLine() != "" {
+		t.Errorf("the mill is known, but says nothing of a tutor: %q %q", pulse.Line(), pulse.CapLine())
+	}
+}
+
+func TestAGrindInFlightFromAnotherKeyStillMakesGristActiveAtOnce(t *testing.T) {
+	lock := &apptest.FakeGristLock{}
+	lock.HoldMarked(application.GristMarkTutor)
+	pulse := pulseOf(t, roomOf(roomRuns{}, lock), 6)
+	if !pulse.Active || !pulse.InFlight || pulse.Cap != 4 || !pulse.Lowered() {
+		t.Fatalf("a tutor's grind is grist in use, and the cap is the grist cap 4: %+v", pulse)
+	}
+}
+
+func TestATutorsGrindBesideTheFactorysStillMakesGristActive(t *testing.T) {
+	smoke, tutor := &apptest.FakeGristLock{}, &apptest.FakeGristLock{}
+	smoke.HoldMarked(application.GristMarkFactory)
+	tutor.HoldMarked(application.GristMarkTutor)
+	if pulse := pulseOf(t, roomOf(roomRuns{}, smoke, tutor), 6); !pulse.Active || pulse.Cap != 4 {
+		t.Fatalf("one tutor among the grinds is enough: %+v", pulse)
+	}
+}
+
+func TestAGrindWhoseMarkCannotBeReadCountsAsATutors(t *testing.T) {
+	for name, lock := range map[string]*apptest.FakeGristLock{
+		"no mark":      {},
+		"unknown mark": {},
+		"unreadable":   {MarkErr: errors.New("permission denied")},
+	} {
+		lock.HoldMarked(map[string]string{"unknown mark": "who knows"}[name])
+		if pulse := pulseOf(t, roomOf(roomRuns{}, lock), 6); !pulse.Active || pulse.Cap != 4 {
+			t.Errorf("%s: failing toward his tutor, grist is active at the grist cap: %+v", name, pulse)
+		}
+	}
+}
+
+// A grind marks its slot for whose it is when it takes it, and lets the mark go
+// with the slot.
+func TestTheMillMarksASlotByWhoseGrindHoldsIt(t *testing.T) {
+	small := func(t *testing.T) application.GristGrind {
+		mill, _, grinder := aSmallMill(t)
+		grinder.Result = application.SessionResult{Subtype: "success", Answer: json.RawMessage(`{"items":[],"placeName":"Top drawer"}`), StopReason: "end_turn"}
+		return mill
+	}
+	overridden := func(talk string) func(t *testing.T) application.GristGrind {
+		return func(t *testing.T) application.GristGrind {
+			mill, _, _ := overrideMill(t, "factory", talk)
+			return mill
+		}
+	}
+	for name, tc := range map[string]struct {
+		mill func(t *testing.T) application.GristGrind
+		want string
+	}{
+		"the test key's smoke": {overridden("smoke:tutor/greets:ab12cd34"), application.GristMarkFactory},
+		"the test key's eval":  {overridden("eval:greets:ab12cd34"), application.GristMarkFactory},
+		"another key":          {small, application.GristMarkTutor},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mill := tc.mill(t)
+			slot := &apptest.FakeGristLock{}
+			mill.Grinding = slot
+			if _, err := mill.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if len(slot.Marks) != 1 || slot.Marks[0] != tc.want {
+				t.Errorf("expected the slot taken once, marked %q, got %q", tc.want, slot.Marks)
+			}
+			if mark, _ := slot.Mark(context.Background()); mark != "" {
+				t.Errorf("expected the mark gone with the slot, got %q", mark)
+			}
+		})
 	}
 }
