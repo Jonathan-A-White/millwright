@@ -345,6 +345,11 @@ type SeatBoot struct {
 	MaxTurns     int
 	MaxTurnsSaid bool
 
+	// Gate names the rigs' gates that are split into parts, so that a Builder of
+	// such a rig is told how not to lose its turns to the parts (SplitGateAdvice,
+	// mw-gq6.1052); nil tells no one.
+	Gate GatePartNamer
+
 	// Errors is the common-errors register a bug's Builder is shown the classes
 	// of its rig's kinds from, after its ask (mw-gq6.683); nil shows none.
 	Errors ErrorFiles
@@ -372,6 +377,29 @@ func TurnCapWrapUp(turns int) int { return turns * 4 / 5 }
 func TurnCapAdvice(turns int) string {
 	return turnCapAdvice(turns, "commit what passes, close the steps you finished "+
 		"and write your closing comment, saying plainly what is left undone")
+}
+
+// GatePartNamer is the part of a host's gate table the boot reads: the parts a
+// rig's gate is named as, none when it is not split.
+type GatePartNamer interface {
+	Parts(rig string) []GatePart
+}
+
+// SplitGateAdvice is what a Builder, capped at turns, of a rig whose gate is
+// split into parts is told besides its cap (mw-gq6.1052). A part's pass counts at
+// the commit it ran at alone, so a commit made after it, a doc or a wording
+// too, makes every part run again; B5 and B6 of Sermons ran out of turns re-running
+// parts of a gate on work that was done. The Builder is told to make its last
+// edit by a turn that leaves a call for each part, one for the whole check and
+// one to commit, before the wrap-up turn, and to run each part once after it.
+func SplitGateAdvice(turns, parts int, story string) string {
+	if turns <= 0 || parts <= 0 {
+		return ""
+	}
+	stop := max(TurnCapWrapUp(turns)-parts-2, 1)
+	return fmt.Sprintf(" The gate of this rig is split into %d parts, and a part's pass counts only at the commit it ran at: "+
+		"a later commit, a doc or a wording too, makes every part run again. So by turn %d stop editing, commit, and run each part once "+
+		"(`mw check %s --part N`, one part to a call), then `mw check %s`; do not edit and run the parts again.", parts, stop, story, story)
 }
 
 // TesterTurnCapAdvice is TurnCapAdvice for a Tester, who commits nothing: it
@@ -596,6 +624,8 @@ func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kick
 	advice := TurnCapAdvice(turns)
 	if IsTesterStory(detail) {
 		advice = TesterTurnCapAdvice(turns)
+	} else if b.Gate != nil {
+		advice += SplitGateAdvice(turns, len(b.Gate.Parts(path.Rig)), id)
 	}
 	bootFile, err := b.Vault.PutRunFile(ctx, id, BootFileNameForAttempt(attempt), BootPrompt(seat, detail))
 	if err != nil {

@@ -386,9 +386,26 @@ func builderBoot(files *vault.Vault, host string, tests map[string]string, nice,
 		MaxTurns:     turns,
 		MaxTurnsSaid: turnsSaid,
 		Queries:      memoryQueryLog(),
+		Gate:         splitGateOfHost(),
 		Errors:       files,
 	}
 }
+
+// splitGateOfHost is the rigs' gates this host names as parts, as the boot tells
+// a Builder of such a rig (mw-gq6.1052); none when the config cannot be read.
+func splitGateOfHost() application.GatePartNamer {
+	configured, err := config.TestParts()
+	if err != nil {
+		return nil
+	}
+	return partTable(gateParts(configured))
+}
+
+// partTable is a gate table that names the parts of a rig.
+type partTable map[string][]application.GatePart
+
+// Parts implements application.GatePartNamer.
+func (t partTable) Parts(rig string) []application.GatePart { return t[rig] }
 
 // afterSession is the command a dispatched session ends with: this same mw,
 // closing the story out. It is found by asking the running program where it is,
