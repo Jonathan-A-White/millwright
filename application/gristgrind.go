@@ -159,7 +159,15 @@ type GristGrind struct {
 	Now func() time.Time
 	// Out is where the report is printed; nil prints nothing.
 	Out io.Writer
+	// PollEvery is how often a pass with grinds running reads the index again
+	// for grists that came since it began; zero is DefaultGristPollEvery.
+	PollEvery time.Duration
 }
+
+// DefaultGristPollEvery is how often a pass looks for new grists while its
+// grinds run: a grist then waits at most this long, not for the pass's slowest
+// grind, before it is taken up.
+const DefaultGristPollEvery = 2 * time.Second
 
 // GristReport is what one pass did.
 type GristReport struct {
@@ -433,8 +441,11 @@ type gristPass struct {
 	// moves past a record only when it and every record before it has.
 	ended []bool
 	next  int64
-	// front is the first record not yet past the cursor.
-	front int
+	// front is the first record not yet past the cursor; seen is the first the
+	// pass has not yet taken up; stopped is set once a grist found no slot.
+	front   int
+	seen    int
+	stopped bool
 
 	ground   chan gristGround
 	held     []func() // each slot's release while a grind of this pass holds it
@@ -445,12 +456,74 @@ type gristPass struct {
 }
 
 // work runs the pass over its records, and returns once every grind it
-// started has ended and been answered.
+// started has ended and been answered. While grinds run it reads the index
+// again every PollEvery, and takes up any grist that has come since, so a
+// grist never waits for the pass's slowest call before it is picked up while
+// a slot is free.
 func (p *gristPass) work() {
+	p.process()
+	var tick <-chan time.Time
+	if p.grinding > 0 {
+		t := time.NewTicker(p.g.pollEvery())
+		defer t.Stop()
+		tick = t.C
+	}
+	for p.grinding > 0 {
+		select {
+		case done := <-p.ground:
+			p.settle(done)
+		case <-tick:
+			if p.err == nil && !p.stopped && p.more() {
+				p.process()
+			}
+		}
+	}
+}
+
+// pollEvery is how often a pass with grinds running looks for new grists.
+func (g GristGrind) pollEvery() time.Duration {
+	if g.PollEvery > 0 {
+		return g.PollEvery
+	}
+	return DefaultGristPollEvery
+}
+
+// more reads the index past the last record the pass holds and adds what has
+// come to the pass's records. A failed read is left for the next tick, or the
+// next pass: the cursor does not move past a record the pass has not held.
+func (p *gristPass) more() bool {
+	since := p.next
+	if n := len(p.records); n > 0 {
+		since = max(since, p.records[n-1].Seq)
+	}
+	found, err := p.g.Postern.Messages(p.ctx, since)
+	var cut *PosternReadCut
+	if errors.As(err, &cut) {
+		found = cut.Records
+	} else if err != nil {
+		return false
+	}
+	added := false
+	for _, r := range found {
+		if r.Seq <= since {
+			continue
+		}
+		p.records = append(p.records, r)
+		p.ended = append(p.ended, false)
+		added = true
+	}
+	return added
+}
+
+// process takes up each record the pass has not yet looked at, oldest first:
+// it answers those that need no session, and starts a grind for those it has a
+// slot for. A grist with no slot to be had stops the pass taking up more; it
+// and every one after it wait for the next pass.
+func (p *gristPass) process() {
 	g := p.g
 	millKey := p.millKey
-	stopped := false
-	for i, r := range p.records {
+	for ; p.seen < len(p.records); p.seen++ {
+		i, r := p.seen, p.records[p.seen]
 		if p.err != nil {
 			break
 		}
@@ -459,7 +532,7 @@ func (p *gristPass) work() {
 			p.end(i)
 			continue
 		}
-		if stopped {
+		if p.stopped {
 			p.report.Waiting++
 			continue
 		}
@@ -488,15 +561,12 @@ func (p *gristPass) work() {
 		}
 		if slot < 0 {
 			p.report.WaitingWhy = why
-			stopped = true
+			p.stopped = true
 			p.report.Waiting++
 			continue
 		}
 		p.answered[r.Txid] = true
 		p.grind(i, w, slot)
-	}
-	for p.grinding > 0 {
-		p.settle(<-p.ground)
 	}
 }
 
@@ -1199,6 +1269,11 @@ func (g GristGrind) billed(ctx context.Context, w *gristWork, call GrindCall, bi
 // and message.
 func (w *gristWork) warmSpec(timeout time.Duration) gristWarmSpec {
 	name := w.plain.Grist
+	// The kind may cut its call sooner than the factory's ceiling: a person
+	// waiting on it will not wait the ceiling out.
+	if secs := w.grind.TimeoutSeconds; secs > 0 {
+		timeout = min(timeout, time.Duration(secs)*time.Second)
+	}
 	return gristWarmSpec{
 		app: name.App, kind: name.Kind, v: name.V,
 		model: w.model, effort: w.effort, instructions: w.system, schema: w.schema,

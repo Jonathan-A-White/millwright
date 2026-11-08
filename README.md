@@ -3343,7 +3343,8 @@ adds `reading_result` to the request as text: `{<engine>: <ReadingResult> | {"er
 session's directory or its prompt. The answer carries the same `reading_result` (and
 `reading_results` for several recordings) beside `answer`; a grind that scored nothing
 answers without them. A grind file may set `maxTurns` (default: the
-harness's own). Every grind that ran is kept under `grist_state_dir`'s
+harness's own) and `timeoutSeconds` (how long its call may run before it is cut and
+the request answered failed; default and most: `[grist] timeout`). Every grind that ran is kept under `grist_state_dir`'s
 `runs/<txid>/`: `input.json` (the request as the session was given it),
 `attachment-N.<ext>`, `scorers.json`, `answer.json` and `timing.json`, 0600; the
 attachments (photos and recordings) are deleted 30 days after the run, the rest never

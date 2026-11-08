@@ -145,6 +145,11 @@ type GrindFile struct {
 	// MaxTurns is the most turns the grind's session may take; 0 leaves it to
 	// the harness's own limit.
 	MaxTurns int `json:"maxTurns"`
+	// TimeoutSeconds is how long the kind's call may run before it is cut and
+	// its request answered failed: what a person waiting on it will wait. 0
+	// leaves it to the factory's ceiling (config [grist] timeout), which it
+	// can only shorten.
+	TimeoutSeconds int `json:"timeoutSeconds,omitempty"`
 	// Forward, when set, makes the grind no session at all: the mill mails the
 	// grist to this seat and answers it sent. GristForwardMayor is the only
 	// value the mill reads; model, effort, instructions and answerSchema are
