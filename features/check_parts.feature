@@ -90,6 +90,7 @@ Feature: Checking a rig whose gate is split into parts
     And a session checks "mw-gq6.1"
     Then the check fails
     And the check prints: part 1 (lint) has not been run at this commit: mw check mw-gq6.1 --part 1
+    And the check prints: an earlier commit; any commit since, a doc too, makes it run again
 
   Scenario: A part that fails once the host has calmed is not run a second time
     Given the host's load reads in turn: busy, calm

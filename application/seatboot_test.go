@@ -775,3 +775,62 @@ func TestBootCapsTheClassListAndSaysHowManyMore(t *testing.T) {
 		}
 	}
 }
+
+// splitParts names n parts of the gate of every rig it is asked of, as a host's
+// [test_parts] table does.
+type splitParts map[string]int
+
+func (s splitParts) Parts(rig string) []application.GatePart {
+	var parts []application.GatePart
+	for i := 0; i < s[rig]; i++ {
+		parts = append(parts, application.GatePart{Name: fmt.Sprintf("part %d", i+1), Command: "true"})
+	}
+	return parts
+}
+
+// mw-gq6.1052: a part of a split gate passes at one commit, so an edit made after
+// it (a doc, a wording) makes the part run again, and a Builder out of turns
+// re-running ten parts is a story whose work was done lost to its cap. A Builder
+// of a rig whose gate is split is told so at boot, with the turn by which to stop
+// editing and run the whole gate once; a rig whose gate is not split is told
+// nothing of it, and neither is a Tester.
+func TestBootTellsASplitGatesBuilderToStopEditingAndRunTheGateOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		parts  application.GatePartNamer
+		turns  int
+		story  func(*application.StoryDetail)
+		stopBy string // empty: the kickoff says nothing of the split gate
+	}{
+		{"a rig with ten parts, capped at 120", splitParts{"millwright": 10}, 120, nil, "by turn 84 stop editing"},
+		{"a rig with three parts, capped at 160", splitParts{"millwright": 3}, 160, nil, "by turn 123 stop editing"},
+		{"another rig's split gate is not this rig's", splitParts{"lampas": 10}, 120, nil, ""},
+		{"a rig with no table", nil, 120, nil, ""},
+		{"a Tester commits nothing", splitParts{"millwright": 10}, 120, func(d *application.StoryDetail) { d.Story.Overrides.Formula = "tester" }, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, h := newFakeVault(), &fakeHarness{}
+			boot := aSeatBoot(v, h)
+			boot.MaxTurns = tc.turns
+			boot.Gate = tc.parts
+			if _, err := boot.Boot(context.Background(), aStory(tc.story), "/root/.mw-worktrees/mw-gq6.6"); err != nil {
+				t.Fatalf("booting the story: %v", err)
+			}
+			kickoff := h.launch.Kickoff
+			if tc.stopBy == "" {
+				if strings.Contains(kickoff, "stop editing") {
+					t.Fatalf("expected the kickoff to say nothing of a split gate, got %q", kickoff)
+				}
+				return
+			}
+			for _, want := range []string{
+				tc.stopBy, "The gate of this rig is split into", "a later commit, a doc or a wording too, makes every part run again",
+				"run each part once", "mw check mw-gq6.6 --part N",
+			} {
+				if !strings.Contains(kickoff, want) {
+					t.Errorf("expected the kickoff to say %q, got %q", want, kickoff)
+				}
+			}
+		})
+	}
+}

@@ -507,7 +507,7 @@ func (g recordedGate) Run(ctx context.Context, _, _ string) (Checked, error) {
 		case partFailed:
 			found = append(found, fmt.Sprintf("part %d (%s) failed at this commit%s", i+1, part.Name, fix))
 		default:
-			found = append(found, fmt.Sprintf("part %d (%s) has not been run at this commit%s%s", i+1, part.Name, fix, g.heldNote(ctx, i+1)))
+			found = append(found, fmt.Sprintf("part %d (%s) has not been run at this commit%s%s%s", i+1, part.Name, fix, g.heldNote(ctx, i+1), g.staleNote(ctx, i+1)))
 		}
 	}
 	return Checked{
@@ -534,6 +534,29 @@ func (g recordedGate) heldNote(ctx context.Context, n int) string {
 		said += ", since " + since
 	}
 	return said + fmt.Sprintf(" when it was tried at %s: that is a wait, not a failure of the part)", first)
+}
+
+// staleNote is what an unrun part's line adds when the part's record is of a pass
+// at an earlier commit: that commit, and that a commit since, a doc or a wording
+// too, makes the part run again (mw-gq6.1052). Without it the part reads as never
+// run, and a Builder that edited after the parts passed does not see why.
+func (g recordedGate) staleNote(ctx context.Context, n int) string {
+	if g.tip == "" {
+		return ""
+	}
+	text, err := g.records.ReadRunFile(ctx, g.storyID, CheckPartFileName(g.attempt, n))
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) < 2 || strings.TrimSpace(lines[1]) != partPassed {
+		return ""
+	}
+	tip := strings.Fields(lines[0])
+	if len(tip) != 2 || tip[0] != partTipWord || tip[1] == partNoTip || tip[1] == g.tip {
+		return ""
+	}
+	return fmt.Sprintf(" (it passed at %s, an earlier commit; any commit since, a doc too, makes it run again)", shortCommit(tip[1]))
 }
 
 // stateOf is what part n's record says of the commit at the tip: partPassed,
