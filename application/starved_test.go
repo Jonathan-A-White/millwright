@@ -845,6 +845,8 @@ func TestAStarvedAlarmHeldByAFaultStaysAFaultOnceTheMayorIsMailed(t *testing.T) 
 const (
 	tutorCapReason = "laptop has taken 4 of the 3 sessions it may run at once while a tutor is in use (grist first)"
 	plainCapReason = "laptop has taken 3 of the 3 sessions it may run at once"
+	// zeroCapReason is a cap of 0, which no running Builder ends: mw-gq6.1050.
+	zeroCapReason = "laptop has taken 0 of the 0 sessions it may run at once"
 )
 
 func holdRigBy(t *testing.T, tracker *apptest.FakeTracker, rig, hold, reason string) {
@@ -879,15 +881,53 @@ func mailsToTheMayor(t *testing.T, mailbox *apptest.FakeMailbox) []application.M
 	return inbox
 }
 
-func TestACapHeldByATutorInUseIsAWaitAndAPlainCapIsAFault(t *testing.T) {
+func TestACapHeldByATutorInUseOrBuildersAloneIsAWaitAndACapOfZeroIsAFault(t *testing.T) {
 	tracker := starvedFixture(t, 4*time.Hour)
 	holdRigBy(t, tracker, "millwright", "cap", tutorCapReason)
 	if alarms := starvedAlarms(t, tracker); len(alarms) != 1 || !alarms[0].Wait {
 		t.Errorf("expected the cap a tutor in use puts on the host to be a wait, got %+v", alarms)
 	}
 	holdRigBy(t, tracker, "millwright", "cap", plainCapReason)
+	if alarms := starvedAlarms(t, tracker); len(alarms) != 1 || !alarms[0].Wait || !strings.Contains(alarms[0].Text, "held by cap") {
+		t.Errorf("expected a full cap of running Builders to be a wait still named as the hold, got %+v", alarms)
+	}
+	holdRigBy(t, tracker, "millwright", "cap", zeroCapReason)
 	if alarms := starvedAlarms(t, tracker); len(alarms) != 1 || alarms[0].Wait {
-		t.Errorf("expected a cap with no tutor in use to be a fault, got %+v", alarms)
+		t.Errorf("expected a cap of 0 to be a fault, got %+v", alarms)
+	}
+}
+
+// mw-gq6.1050: the Laptop at its cap of 3 with Builders, then no room, then the
+// cap again, was three mails in 45 minutes.
+func TestAHoldFlippingBetweenTheCapAndNoRoomMailsTheMayorOnce(t *testing.T) {
+	tracker, mailbox, run := aWaitingRigCheck(t)
+	for _, step := range []struct{ hold, reason string }{
+		{"cap", plainCapReason},
+		{"no room", "laptop has no room: load 24.3 of 20 cores"},
+		{"cap", plainCapReason},
+	} {
+		holdRigBy(t, tracker, "millwright", step.hold, step.reason)
+		run()
+	}
+	inbox := mailsToTheMayor(t, mailbox)
+	if len(inbox) != 1 || !strings.Contains(inbox[0].Body, "held by cap") {
+		t.Fatalf("expected one mail naming the cap for the episode, got %d: %+v", len(inbox), inbox)
+	}
+}
+
+func TestACapOfZeroIsAFaultWithItsOwnIdentity(t *testing.T) {
+	tracker, mailbox, run := aWaitingRigCheck(t)
+	holdRigBy(t, tracker, "millwright", "no room", "laptop has no room: load 24.3 of 20 cores")
+	run()
+	holdRigBy(t, tracker, "millwright", "cap", zeroCapReason)
+	run()
+	if inbox := mailsToTheMayor(t, mailbox); len(inbox) != 2 {
+		t.Fatalf("expected a mail for the wait and another for the cap of 0, got %d", len(inbox))
+	}
+	wait := starvedAlarms(t, tracker)
+	holdRigBy(t, tracker, "millwright", "cap", plainCapReason)
+	if now := starvedAlarms(t, tracker); len(wait) != 1 || len(now) != 1 || wait[0].Identity == now[0].Identity {
+		t.Errorf("expected a cap of 0 to differ in identity from a cap of Builders, got %+v and %+v", wait, now)
 	}
 }
 
@@ -959,7 +999,7 @@ func TestAFlipFromAWaitToAFaultStillMailsAndTheFaultStaysAFault(t *testing.T) {
 	tracker, mailbox, run := aWaitingRigCheck(t)
 	holdRigBy(t, tracker, "millwright", "cap", tutorCapReason)
 	run()
-	holdRigBy(t, tracker, "millwright", "cap", plainCapReason)
+	holdRigBy(t, tracker, "millwright", "cap", zeroCapReason)
 	now := doctorNow
 	doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now, aStarvedRigCheckOnHost("laptop", statusNow, tracker, mailbox))
 	if _, err := doctor.Run(ctx, "", false); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -341,13 +342,29 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 const GristFirstWords = " while a tutor is in use (grist first)"
 
 // holdIsAWait says a rig's hold is the host's room and nothing else: no room (the
-// load is over the cores) or the cap a tutor in use puts on the sessions, both of
-// which ease by themselves. A cap with no tutor in use is the same cap the
-// host's other rigs hold, and stays a fault as any other hold does (mw-gq6.984).
+// load is over the cores) or the cap on its sessions, which eases by itself when a
+// running session ends. A cap is a wait while the host may run some sessions at
+// all (a limit over 0, read from the reason's "of the N sessions") or a tutor in
+// use cut them; a drained host (cap 0) is held by "drained", not the cap, and stays
+// a fault as every other hold does (mw-gq6.984, mw-gq6.1050).
 func holdIsAWait(r StarvedRig) bool {
-	return r.Hold == StarvedHolds["no-room"] ||
-		r.Hold == StarvedHolds["cap"] && strings.HasSuffix(strings.TrimSpace(r.Reason), strings.TrimSpace(GristFirstWords))
+	if r.Hold == StarvedHolds["no-room"] {
+		return true
+	}
+	if r.Hold != StarvedHolds["cap"] {
+		return false
+	}
+	reason := strings.TrimSpace(r.Reason)
+	if strings.HasSuffix(reason, strings.TrimSpace(GristFirstWords)) {
+		return true
+	}
+	m := capLimitWords.FindStringSubmatch(reason)
+	return m != nil && strings.Trim(m[1], "0") != ""
 }
+
+// capLimitWords picks the limit out of the reason dispatch gives for the cap:
+// "<host> has taken N of the L sessions it may run at once".
+var capLimitWords = regexp.MustCompile(`\bof the (\d+) sessions\b`)
 
 // harnessWayOut is the sentence a rig held by a host's harness stop carries
 // (mw-gq6.785): each ready story of the rig routed to that host, with the one
@@ -652,7 +669,7 @@ func (c *StarvedRigCheck) tellOfWaits(ctx context.Context, waits []DamperAlarm) 
 	if err := c.Mailed.SetNote(ctx, StarvedWaitMailedKey, mailed); err != nil {
 		return fmt.Errorf("what the Mayor is mailed of the rigs waiting for room could not be kept: %w", err)
 	}
-	err := c.mailMayor(ctx, waits, "Waiting for room on the host, not a fault: the host has no room for a Builder (its load is over its cores, or its sessions are taken while a tutor is in use), and a story starts when that eases.")
+	err := c.mailMayor(ctx, waits, "Waiting for room on the host, not a fault: the host has no room for a Builder (its load is over its cores, or its sessions are all taken by running Builders or cut while a tutor is in use), and a story starts when that eases.")
 	if err != nil {
 		_ = c.Mailed.ClearNote(ctx, StarvedWaitMailedKey)
 	}
