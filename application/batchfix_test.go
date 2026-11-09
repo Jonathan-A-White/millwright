@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -103,5 +104,82 @@ func TestTheHeldMailDoesNotSayAfterTheFixerWhenTheLineWasWrittenBeforeIt(t *test
 	got := report.changelogMail()
 	if got == "" || strings.Contains(got, "after the fixer exited") {
 		t.Errorf("expected the mail to name the line without saying it came after the fixer, got %q", got)
+	}
+}
+
+// carryLanding is the Landing carryFixer asks: which files a range touches,
+// which commits a branch already holds, and what Carry was given.
+type carryLanding struct {
+	Landing
+	files   map[string][]string
+	onBr    map[string]bool
+	carried [][]string
+	err     error
+}
+
+func (l *carryLanding) FilesBetween(_ context.Context, _, from, to string) ([]string, error) {
+	return l.files[from+".."+to], nil
+}
+
+func (l *carryLanding) OnBranch(_ context.Context, _, commit, _ string) (bool, error) {
+	return l.onBr[commit], nil
+}
+
+func (l *carryLanding) Carry(_ context.Context, _, _ string, commits []string, _, _ string) (string, error) {
+	l.carried = append(l.carried, commits)
+	return "tip9999", l.err
+}
+
+func aFixedBatch(landing *carryLanding, hashes ...string) (BatchLand, *BatchReport, []Commit) {
+	report := &BatchReport{
+		Base:   "base0123",
+		Fixer:  &BatchFixing{},
+		Merged: []BatchStory{{ID: "mw-1", Branch: "origin/mw/mw-1"}, {ID: "mw-2", Branch: "origin/mw/mw-2"}},
+	}
+	landing.files["base0123..origin/mw/mw-1"] = []string{"a.go", "b.go"}
+	landing.files["base0123..origin/mw/mw-2"] = []string{"c.go"}
+	var commits []Commit
+	for _, h := range hashes {
+		landing.files[h+"^.."+h] = []string{"a.go"}
+		commits = append(commits, Commit{Hash: h, Message: "change " + h})
+	}
+	return BatchLand{Next: Next{Landing: landing}}, report, commits
+}
+
+// batch 468 of lampas: the fixer merged a story's branch, so its commits
+// included the branch's own tip, and the cherry-pick of it stopped as empty
+// (mw-gq6.1055).
+func TestCarryFixerSkipsACommitAlreadyOnTheStorysBranchAndPushesTheRest(t *testing.T) {
+	landing := &carryLanding{files: map[string][]string{}, onBr: map[string]bool{"c9dd888": true}}
+	b, report, commits := aFixedBatch(landing, "c9dd888", "f1x3d00")
+
+	b.carryFixer(context.Background(), "dir", report, commits)
+
+	if len(landing.carried) != 1 || strings.Join(landing.carried[0], ",") != "f1x3d00" {
+		t.Fatalf("expected only the commit the branch lacks to be carried, got %v", landing.carried)
+	}
+	if len(report.Fixer.CarryTrouble) != 0 || len(report.Notes) != 0 {
+		t.Fatalf("expected no trouble, got %v / %v", report.Fixer.CarryTrouble, report.Notes)
+	}
+	if len(report.Fixer.Carried) != 2 {
+		t.Fatalf("expected both commits among the carried, got %+v", report.Fixer.Carried)
+	}
+}
+
+func TestCarryFixerCarriesNothingWhenTheBranchHoldsEveryCommit(t *testing.T) {
+	landing := &carryLanding{files: map[string][]string{}, onBr: map[string]bool{"c9dd888": true}}
+	b, report, commits := aFixedBatch(landing, "c9dd888")
+
+	b.carryFixer(context.Background(), "dir", report, commits)
+
+	if len(landing.carried) != 0 {
+		t.Fatalf("expected no cherry-pick of a commit the branch holds, got %v", landing.carried)
+	}
+	if len(report.Fixer.CarryTrouble) != 0 || strings.Contains(strings.Join(report.Notes, "\n"), "could not be pushed") {
+		t.Fatalf("expected no 'could not be pushed' line, got %v / %v", report.Fixer.CarryTrouble, report.Notes)
+	}
+	lines := report.Fixer.carriedLines()
+	if !strings.Contains(lines, "already on") || strings.Contains(lines, "No commit of its touched") {
+		t.Fatalf("expected the mail to say the commit is already on the branch, got:\n%s", lines)
 	}
 }

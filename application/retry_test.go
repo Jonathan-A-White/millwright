@@ -162,6 +162,9 @@ func (f *fakeRetryLanding) KeepOrigin(context.Context, string, string, string) (
 func (f *fakeRetryLanding) FilesBetween(context.Context, string, string, string) ([]string, error) {
 	return nil, nil
 }
+func (f *fakeRetryLanding) OnBranch(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
 func (f *fakeRetryLanding) Carry(context.Context, string, string, []string, string, string) (string, error) {
 	return "", nil
 }

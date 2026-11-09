@@ -261,12 +261,19 @@ type Landing interface {
 	// the branch (mw-gq6.1014).
 	FilesBetween(ctx context.Context, dir, from, to string) ([]string, error)
 
+	// OnBranch says whether commit is reachable from ref in the worktree at
+	// dir: a fixer's commit the story's branch already holds needs no pick
+	// (mw-gq6.1055).
+	OnBranch(ctx context.Context, dir, commit, ref string) (bool, error)
+
 	// Carry cherry-picks commits, in order, onto onto in the worktree at dir,
 	// pushes the result as branch on the remote (never forced), and puts the
 	// worktree back where it stood, whatever came of it. It reports the commit
 	// pushed. A pick that conflicts, or a push the remote refuses, is an error
-	// and nothing is pushed: it is how a held batch's fixer's commits for one
-	// story reach that story's branch (mw-gq6.1014).
+	// and nothing is pushed; a commit onto already holds, or whose pick comes
+	// out empty, is skipped as nothing to do (mw-gq6.1055). It is how a held
+	// batch's fixer's commits for one story reach that story's branch
+	// (mw-gq6.1014).
 	Carry(ctx context.Context, dir, remote string, commits []string, onto, branch string) (string, error)
 
 	// Advance fast-forwards the rig's own checkout onto commit, the one a landing

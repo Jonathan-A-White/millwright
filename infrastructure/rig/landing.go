@@ -534,10 +534,24 @@ func (w *Worktrees) FilesBetween(ctx context.Context, dir, from, to string) ([]s
 	return files, nil
 }
 
+// OnBranch implements application.Landing: `git merge-base --is-ancestor`.
+func (w *Worktrees) OnBranch(ctx context.Context, dir, commit, ref string) (bool, error) {
+	_, err := w.git(ctx, dir, "merge-base", "--is-ancestor", commit, ref)
+	if err == nil {
+		return true, nil
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
+}
+
 // Carry implements application.Landing: the worktree is detached onto onto,
 // each commit is cherry-picked, the head is pushed as branch by Push (no
 // force), and the worktree is detached back onto where it stood. A pick that
-// conflicts is aborted before the error comes back.
+// conflicts is aborted before the error comes back; a commit onto holds
+// already, or whose pick comes out empty, is skipped (mw-gq6.1055).
 func (w *Worktrees) Carry(ctx context.Context, dir, remote string, commits []string, onto, branch string) (string, error) {
 	switch {
 	case len(commits) == 0:
@@ -560,8 +574,18 @@ func (w *Worktrees) Carry(ctx context.Context, dir, remote string, commits []str
 		return "", err
 	}
 	for _, commit := range commits {
-		if _, err := w.git(ctx, dir, "cherry-pick", commit); err != nil {
+		if held, err := w.OnBranch(ctx, dir, commit, "HEAD"); err != nil {
 			return "", err
+		} else if held {
+			continue
+		}
+		if _, err := w.git(ctx, dir, "cherry-pick", commit); err != nil {
+			if !w.pickIsEmpty(ctx, dir) {
+				return "", err
+			}
+			if _, err := w.git(ctx, dir, "cherry-pick", "--skip"); err != nil {
+				return "", err
+			}
 		}
 	}
 	if err := w.Push(ctx, dir, remote, branch); err != nil {
@@ -572,6 +596,17 @@ func (w *Worktrees) Carry(ctx context.Context, dir, remote string, commits []str
 		return "", err
 	}
 	return strings.TrimSpace(tip), nil
+}
+
+// pickIsEmpty says a cherry-pick that stopped has nothing left to apply: no
+// conflicted file and nothing staged, which git reports as 'previous
+// cherry-pick is now empty'.
+func (w *Worktrees) pickIsEmpty(ctx context.Context, dir string) bool {
+	if _, err := w.git(ctx, dir, "rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD"); err != nil {
+		return false
+	}
+	status, err := w.git(ctx, dir, "status", "--porcelain", "--untracked-files=no")
+	return err == nil && strings.TrimSpace(status) == ""
 }
 
 var _ application.TagPublisher = (*Worktrees)(nil)

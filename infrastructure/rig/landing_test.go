@@ -1181,3 +1181,77 @@ func TestAPushRefusedForAnotherReasonIsNotTheWorkflowScope(t *testing.T) {
 		}
 	}
 }
+
+// aStoryAndItsFixer pushes mw/story (one commit) to the origin, then builds on
+// a detached head the batch the fixer left: the story's commit, then a commit
+// of the fixer's own. It reports the story's tip and the fixer's commit.
+func aStoryAndItsFixer(t *testing.T, here string) (storyTip, fixerCommit string) {
+	t.Helper()
+	run(t, here, "git", "checkout", "-q", "-b", "mw/story", "main")
+	write(t, here, "story.md", "the story's work\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "The story's work")
+	run(t, here, "git", "push", "-q", "origin", "mw/story")
+	storyTip = run(t, here, "git", "rev-parse", "HEAD")
+	run(t, here, "git", "checkout", "-q", "--detach", "main")
+	run(t, here, "git", "merge", "-q", "--no-ff", "-m", "Batch merges the story", "mw/story")
+	write(t, here, "fix.md", "the fixer's mend\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "The fixer's mend")
+	fixerCommit = run(t, here, "git", "rev-parse", "HEAD")
+	return storyTip, fixerCommit
+}
+
+// batch 468 of lampas: the fixer's commits included the story branch's own
+// tip, and cherry-picking it onto the branch stopped as empty (mw-gq6.1055).
+func TestCarrySkipsACommitTheBranchHoldsAndPushesTheRest(t *testing.T) {
+	here, _ := aRig(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+	storyTip, fixer := aStoryAndItsFixer(t, here)
+
+	if held, err := worktrees.OnBranch(ctx, here, storyTip, "origin/mw/story"); err != nil || !held {
+		t.Fatalf("expected the story's tip on its branch, got %v, %v", held, err)
+	}
+	if held, err := worktrees.OnBranch(ctx, here, fixer, "origin/mw/story"); err != nil || held {
+		t.Fatalf("expected the fixer's commit not on the branch, got %v, %v", held, err)
+	}
+
+	run(t, here, "git", "fetch", "-q", "origin")
+	tip, err := worktrees.Carry(ctx, here, "origin", []string{storyTip, fixer}, "origin/mw/story", "mw/story")
+	if err != nil {
+		t.Fatalf("expected the commit the branch holds to be skipped, got %v", err)
+	}
+	run(t, here, "git", "fetch", "-q", "origin")
+	if at := run(t, here, "git", "rev-parse", "origin/mw/story"); at != tip || tip == storyTip {
+		t.Errorf("expected the branch moved to the fixer's pick %s, got %s (story tip %s)", tip, at, storyTip)
+	}
+	if got := run(t, here, "git", "show", tip+":fix.md"); got != "the fixer's mend" {
+		t.Errorf("expected the fixer's change on the branch, got %q", got)
+	}
+}
+
+func TestCarryCallsACommitWhoseChangeTheBranchHasAlreadyNothingToDo(t *testing.T) {
+	here, _ := aRig(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+	storyTip, fixer := aStoryAndItsFixer(t, here)
+	// the fixer's change, made again on the branch under another hash
+	run(t, here, "git", "checkout", "-q", "mw/story")
+	run(t, here, "git", "cherry-pick", fixer)
+	branchTip := run(t, here, "git", "rev-parse", "HEAD")
+	run(t, here, "git", "push", "-q", "origin", "mw/story")
+	run(t, here, "git", "checkout", "-q", "--detach", fixer)
+	run(t, here, "git", "fetch", "-q", "origin")
+
+	tip, err := worktrees.Carry(ctx, here, "origin", []string{storyTip, fixer}, "origin/mw/story", "mw/story")
+	if err != nil {
+		t.Fatalf("expected an empty pick to be nothing to do, got %v", err)
+	}
+	if tip != branchTip {
+		t.Errorf("expected the branch left at %s, got %s", branchTip, tip)
+	}
+	if got := run(t, here, "git", "rev-parse", "HEAD"); got != fixer {
+		t.Errorf("expected the worktree put back at %s, got %s", fixer, got)
+	}
+}

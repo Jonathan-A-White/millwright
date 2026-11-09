@@ -77,6 +77,9 @@ type FixerCarried struct {
 	Story   string
 	Branch  string
 	Tip     string
+	// Already says the branch held the commit already, so none was pushed for
+	// it (mw-gq6.1055).
+	Already bool
 }
 
 // WhatsNewLine is the What's new line mw writes into the rig's changelog files
@@ -551,6 +554,10 @@ func (f BatchFixing) carriedLines() string {
 		if b.Len() == 0 {
 			b.WriteString("Its commits that touched one story's files only were pushed to that story's branch at the rig's origin, so the batch landed again merges them:\n")
 		}
+		if c.Already {
+			fmt.Fprintf(&b, "  %s %s: already on %s\n", c.Hash, c.Subject, c.Branch)
+			continue
+		}
 		fmt.Fprintf(&b, "  %s %s: pushed to %s (the branch is at %s)\n", c.Hash, c.Subject, c.Branch, shortCommit(c.Tip))
 	}
 	for _, trouble := range f.CarryTrouble {
@@ -627,19 +634,41 @@ func (b BatchLand) carryFixer(ctx context.Context, dir string, report *BatchRepo
 				story = s
 			}
 		}
+		branch := StoryBranch(id)
+		// A commit the story's branch holds already (the fixer merged the
+		// branch, so its own tip is among the fixer's commits) is nothing to
+		// push (mw-gq6.1055).
 		var hashes []string
+		have := map[string]bool{}
+		checked := true
 		for _, c := range byStory[id] {
+			on, err := n.Landing.OnBranch(ctx, dir, c.Hash, story.Branch)
+			if err != nil {
+				said("the fixer's commit %s for %s could not be checked against its branch %s: %v", c.Hash, id, branch, err)
+				checked = false
+				break
+			}
+			if on {
+				have[c.Hash] = true
+				continue
+			}
 			hashes = append(hashes, c.Hash)
 		}
-		branch := StoryBranch(id)
-		tip, err := n.Landing.Carry(ctx, dir, n.remote(), hashes, story.Branch, branch)
-		if err != nil {
-			said("the fixer's commits for %s (%s) could not be pushed to its branch %s: %v", id, strings.Join(hashes, ", "), branch, err)
+		if !checked {
 			continue
+		}
+		var tip string
+		if len(hashes) > 0 {
+			var err error
+			tip, err = n.Landing.Carry(ctx, dir, n.remote(), hashes, story.Branch, branch)
+			if err != nil {
+				said("the fixer's commits for %s (%s) could not be pushed to its branch %s: %v", id, strings.Join(hashes, ", "), branch, err)
+				continue
+			}
 		}
 		for _, c := range byStory[id] {
 			subject, _, _ := strings.Cut(strings.TrimSpace(c.Message), "\n")
-			f.Carried = append(f.Carried, FixerCarried{Hash: c.Hash, Subject: subject, Story: id, Branch: branch, Tip: tip})
+			f.Carried = append(f.Carried, FixerCarried{Hash: c.Hash, Subject: subject, Story: id, Branch: branch, Tip: tip, Already: have[c.Hash]})
 		}
 	}
 }
