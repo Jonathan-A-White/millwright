@@ -450,7 +450,7 @@ func judgeVerifyAnswer(grind SessionResult) (verifyAnswer, string) {
 
 // propose writes the PROPOSED comments of an answer (verifyProposer).
 func (p VerifyMatch) propose(ctx context.Context, settings VerifySettings, run string, candidates []VerifyCandidate, evidence []VerifyEvidence, answer verifyAnswer) ([]VerifyProposal, []verifyMatchRecord, error) {
-	writer := verifyProposer{Beads: p.Beads, Confidence: settings.Confidence, Model: settings.Model, Run: run}
+	writer := verifyProposer{Beads: p.Beads, Confidence: settings.Confidence, Model: settings.Model, Run: run, HoldShowsToScreen: true}
 	return writer.propose(ctx, candidates, evidence, answer.Matches)
 }
 
@@ -462,6 +462,11 @@ type verifyProposer struct {
 	Confidence float64
 	// Model and Run say in the comment who matched and in which run.
 	Model, Run string
+	// HoldShowsToScreen leaves out a match whose evidence holds a picture unless
+	// the match's own account of what it shows names the candidate's screen: for
+	// a caller whose matches carry no description apart from Shows (mw verify
+	// match). The sleep pass ties its pictures first (tiedToItsPicture).
+	HoldShowsToScreen bool
 }
 
 // propose writes a PROPOSED comment for each match at or over the confidence
@@ -472,15 +477,23 @@ type verifyProposer struct {
 func (w verifyProposer) propose(ctx context.Context, candidates []VerifyCandidate, evidence []VerifyEvidence, matches []verifyMatchLine) ([]VerifyProposal, []verifyMatchRecord, error) {
 	known := map[string]bool{}
 	landedAt := map[string]time.Time{}
+	byBead := map[string]VerifyCandidate{}
 	var ids []string
 	for _, c := range candidates {
 		known[c.Bead] = true
+		byBead[c.Bead] = c
 		landedAt[c.Bead] = c.LandedAt
 		ids = append(ids, c.Bead)
 	}
 	at := map[string]time.Time{}
+	pictures := map[string]string{}
 	for _, e := range evidence {
 		at[e.Txid] = e.At
+		for _, path := range e.Files {
+			if !strings.EqualFold(filepath.Ext(path), ".txt") {
+				pictures[e.Txid] = filepath.Base(path)
+			}
+		}
 	}
 	comments, err := w.Beads.StoriesComments(ctx, ids)
 	if err != nil {
@@ -493,6 +506,10 @@ func (w verifyProposer) propose(ctx context.Context, candidates []VerifyCandidat
 	for _, m := range matches {
 		m.Shows = strings.Join(strings.Fields(m.Shows), " ")
 		record := verifyMatchRecord{verifyMatchLine: m}
+		notOfScreen := ""
+		if picture, ok := pictures[m.Txid]; ok && w.HoldShowsToScreen && known[m.Bead] {
+			notOfScreen = pictureNotOfScreen(byBead[m.Bead], picture, m.Shows)
+		}
 		switch {
 		case !known[m.Bead]:
 			record.Outcome = "left out: no such candidate"
@@ -502,6 +519,8 @@ func (w verifyProposer) propose(ctx context.Context, candidates []VerifyCandidat
 			record.Outcome = fmt.Sprintf("left out: confidence under %.2f", w.Confidence)
 		case at[m.Txid].Before(landedAt[m.Bead]):
 			record.Outcome = verifyOlderOutcome
+		case notOfScreen != "":
+			record.Outcome = "left out: " + notOfScreen
 		case verifiedIn(comments[m.Bead]):
 			record.Outcome = "left out: already verified"
 		case done[m.Bead+" "+m.Txid] || proposedFor(comments[m.Bead], m.Txid):

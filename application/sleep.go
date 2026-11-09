@@ -696,14 +696,21 @@ func tiedToItsPicture(one sleepProposal, from SleepVerify) (verifyMatchLine, str
 	if candidate == nil {
 		return line, ""
 	}
-	sees := strings.Join(strings.Fields(one.Sees), " ")
+	return line, pictureNotOfScreen(*candidate, picture, one.Sees)
+}
+
+// pictureNotOfScreen is why a picture's description is no proof of the
+// candidate's change, or "" when it names the candidate's screen: the one check
+// the sleep pass (tiedToItsPicture) and mw verify match (verifyProposer) share.
+func pictureNotOfScreen(c VerifyCandidate, picture, description string) string {
+	sees := strings.Join(strings.Fields(description), " ")
 	if sees == "" {
-		return line, "the picture " + picture + " has no description of its own"
+		return "the picture " + picture + " has no description of its own"
 	}
-	if !namesScreenOf(*candidate, sees) {
-		return line, fmt.Sprintf("the picture %s shows %q, which does not name the screen of %s", picture, cutBytes(sees, 160), candidate.Title)
+	if !namesScreenOf(c, sees) {
+		return fmt.Sprintf("the picture %s shows %q, which does not name the screen of %s", picture, cutBytes(sees, 160), c.Title)
 	}
-	return line, ""
+	return ""
 }
 
 // evidenceHasPicture reports whether e holds a file that is not a .txt.

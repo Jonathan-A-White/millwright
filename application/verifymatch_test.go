@@ -338,3 +338,54 @@ func TestVerifyMatchSaysSoWhenNoWordsAreSavedWithAPicture(t *testing.T) {
 		t.Fatalf("a picture with no saved words still gets a words file that says so: %v", r.grinder.Calls()[0].Files)
 	}
 }
+
+// A picture whose description does not name the story's screen is no match for
+// it, whatever the agent says it shows (mw-gq6.1034, as mw-gq6.1008 for the sleep
+// pass): a photo of a PowerShell error was proposed for a Reader story.
+func TestVerifyMatchLeavesOutAPictureThatDoesNotShowTheStorysScreen(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[
+	 {"bead":"d-reader","txid":"direct:bbb","shows":"a PowerShell error about the WSL distribution","confidence":0.95}]}`)
+	r.beads.Work.Ready = append(r.beads.Work.Ready, verifyDemo("d-reader", "e-3", "Open the Reader screen and see the chapter heading."))
+	result, err := r.match().Run(context.Background(), application.VerifyOptions{Since: 7 * 24 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) != 0 || len(result.Proposed) != 0 {
+		t.Fatalf("a picture of a PowerShell error is no proof of a Reader story: %+v", r.beads.Written)
+	}
+	if got := r.mail.Writes(); got != 0 {
+		t.Fatalf("nothing proposed, nothing mailed, got %d mails", got)
+	}
+	raw, err := os.ReadFile(filepath.Join(r.runs, result.Run+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "does not name the screen") {
+		t.Fatalf("the run's record does not say why the match was left out: %s", raw)
+	}
+}
+
+func TestVerifyMatchProposesAPictureThatShowsTheStorysScreen(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[
+	 {"bead":"d-reader","txid":"direct:bbb","shows":"the Reader screen with the chapter heading","confidence":0.95}]}`)
+	r.beads.Work.Ready = append(r.beads.Work.Ready, verifyDemo("d-reader", "e-3", "Open the Reader screen and see the chapter heading."))
+	if _, err := r.match().Run(context.Background(), application.VerifyOptions{Since: 7 * 24 * time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) != 1 || r.beads.Written[0].ID != "d-reader" || !strings.Contains(r.beads.Written[0].Text, "direct:bbb") {
+		t.Fatalf("a picture of the Reader screen is proposed as before: %+v", r.beads.Written)
+	}
+}
+
+// What a message of his says is not held to a screen: only a picture is.
+func TestVerifyMatchDoesNotHoldAMessageToAScreenName(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[
+	 {"bead":"d-reader","txid":"direct:aaa","shows":"he says it works","confidence":0.95}]}`)
+	r.beads.Work.Ready = append(r.beads.Work.Ready, verifyDemo("d-reader", "e-3", "Open the Reader screen and see the chapter heading."))
+	if _, err := r.match().Run(context.Background(), application.VerifyOptions{Since: 7 * 24 * time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) != 1 {
+		t.Fatalf("a message of his is proposed as before: %+v", r.beads.Written)
+	}
+}
