@@ -20,7 +20,7 @@ var BoostTableNames = []string{"tests", "changed_specs"}
 const BoostPartsPrefix = "test_parts."
 
 // BoostTablesHeader opens the vault's hosts/boost-config.toml.
-const BoostTablesHeader = `# The [tests], [changed_specs] and [test_parts.<rig>] tables a Boost copies (contrib/boost-bootstrap.sh step 9).
+const BoostTablesHeader = `# The [tests], [changed_specs], [test_parts.<rig>] and [session] tables a Boost copies (contrib/boost-bootstrap.sh step 9).
 # Written by mw config export-boost from the home's ~/.config/mw/config.toml: change a line
 # there and run it again, never here. mw doctor's boost-config check says when they differ.
 `
@@ -30,15 +30,19 @@ const BoostTablesHeader = `# The [tests], [changed_specs] and [test_parts.<rig>]
 type BoostPart struct{ Name, Command string }
 
 // BoostTables is what a Boost copies of a config file: Lines is each of
-// BoostTableNames' lines, the command a rig's line holds by table and rig, and
-// Parts is each rig's [test_parts.<rig>] lines, in the order the file has them.
+// BoostTableNames' lines, the command a rig's line holds by table and rig,
+// Parts is each rig's [test_parts.<rig>] lines, in the order the file has them,
+// and SessionDeny is the rules of [session] deny, in order, when HasSessionDeny
+// (a file with no such key has none, which is not an empty list; mw-t5shinh.33).
 type BoostTables struct {
-	Lines map[string]map[string]string
-	Parts map[string][]BoostPart
+	Lines          map[string]map[string]string
+	Parts          map[string][]BoostPart
+	SessionDeny    []string
+	HasSessionDeny bool
 }
 
-// BoostTablesOf reads BoostTableNames and the [test_parts.<rig>] tables out of
-// a config file, and nothing else of it. A line whose value is not a string is
+// BoostTablesOf reads BoostTableNames, the [test_parts.<rig>] tables and
+// [session] deny out of a config file, and nothing else of it. A line whose value is not a string is
 // refused, naming it: what a rig runs is a command line.
 func BoostTablesOf(c *ConfigTOML) (BoostTables, error) {
 	tables := BoostTables{Lines: map[string]map[string]string{}, Parts: map[string][]BoostPart{}}
@@ -66,6 +70,13 @@ func BoostTablesOf(c *ConfigTOML) (BoostTables, error) {
 			tables.Parts[rig] = append(tables.Parts[rig], BoostPart{Name: entry.Key, Command: command})
 		}
 	}
+	if literal, ok := c.Lookup(SessionTable, SessionDenyKey); ok {
+		rules, err := SessionDenyRules(literal)
+		if err != nil {
+			return BoostTables{}, err
+		}
+		tables.SessionDeny, tables.HasSessionDeny = rules, true
+	}
 	return tables, nil
 }
 
@@ -74,7 +85,9 @@ func BoostTablesOf(c *ConfigTOML) (BoostTables, error) {
 // each command a one-line basic string, which is what the bootstrap's
 // table_line copies whole into a Boost's config.toml; then each rig's
 // [test_parts.<rig>] table in rig order, its lines in the order they were read,
-// which the bootstrap's parts_table copies whole.
+// which the bootstrap's parts_table copies whole; then [session] with its deny
+// rules on one line, when the home has them, which the bootstrap's session_table
+// copies whole.
 func (b BoostTables) Text() string {
 	var text strings.Builder
 	text.WriteString(BoostTablesHeader)
@@ -93,6 +106,9 @@ func (b BoostTables) Text() string {
 			fmt.Fprintf(&text, "%s = %s\n", tomlBasicString(part.Name), tomlBasicString(part.Command))
 		}
 	}
+	if b.HasSessionDeny {
+		fmt.Fprintf(&text, "\n[%s]\n%s = %s\n", SessionTable, SessionDenyKey, SessionDenyLiteral(b.SessionDeny))
+	}
 	return text.String()
 }
 
@@ -108,7 +124,8 @@ func boostKey(rig string) string {
 // alike, as "[table] rig: missing" (home has it, vault does not), "differs"
 // or "not on the home" (vault has it, home does not), in table and then rig
 // order, then the same for each rig's whole [test_parts.<rig>] table (its parts
-// and their order); none when the two are level.
+// and their order), then "[session] deny: missing", "differs" or "not on the
+// home" for the deny rules (their order counts); none when the two are level.
 func BoostTablesDrift(home, vault BoostTables) []string {
 	var drift []string
 	for _, name := range BoostTableNames {
@@ -151,6 +168,15 @@ func BoostTablesDrift(home, vault BoostTables) []string {
 		case !slices.Equal(got, want):
 			drift = append(drift, fmt.Sprintf("[%s]: differs", table))
 		}
+	}
+	session := fmt.Sprintf("[%s] %s", SessionTable, SessionDenyKey)
+	switch {
+	case home.HasSessionDeny && !vault.HasSessionDeny:
+		drift = append(drift, session+": missing")
+	case !home.HasSessionDeny && vault.HasSessionDeny:
+		drift = append(drift, session+": not on the home")
+	case home.HasSessionDeny && !slices.Equal(home.SessionDeny, vault.SessionDeny):
+		drift = append(drift, session+": differs")
 	}
 	return drift
 }

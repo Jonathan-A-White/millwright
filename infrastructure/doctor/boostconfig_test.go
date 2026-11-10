@@ -106,6 +106,28 @@ func TestBoostConfigOnABoostIsFaultyForADifferingChangedSpecsLine(t *testing.T) 
 	}
 }
 
+func TestBoostConfigOnTheHomeCountsTheSessionDenyList(t *testing.T) {
+	home := "[session]\ndeny = [\"Bash(scp *)\", \"Read(~/.ssh/**)\"]\n"
+	for name, c := range map[string]struct{ target, want string }{
+		"missing":       {"[tests]\n", "[session] deny: missing"},
+		"differs":       {"[session]\ndeny = [\"Bash(scp *)\"]\n", "[session] deny: differs"},
+		"order matters": {"[session]\ndeny = [\"Read(~/.ssh/**)\", \"Bash(scp *)\"]\n", "[session] deny: differs"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			verdict, reason := boostConfigOnTheHome(t, home, c.target).Probe(context.Background())
+			if verdict != application.DoctorFaulty || !strings.Contains(reason, c.want) {
+				t.Fatalf("expected faulty naming %q, got %s (%s)", c.want, verdict, reason)
+			}
+		})
+	}
+	if verdict, reason := boostConfigOnTheHome(t, home, home).Probe(context.Background()); verdict != application.DoctorOK {
+		t.Errorf("a level deny list should be ok, got %s (%s)", verdict, reason)
+	}
+	if verdict, reason := boostConfigOnTheHome(t, "[session]\ndeny = 5\n", home).Probe(context.Background()); verdict != application.DoctorCannotTell {
+		t.Errorf("a deny that is not an array should be cannot-tell, got %s (%s)", verdict, reason)
+	}
+}
+
 func TestBoostConfigOnABoostIsFaultyForADifferingTestPartsTable(t *testing.T) {
 	check := boostConfigOnABoost(t,
 		"[test_parts.lampas]\n\"install\" = \"npm ci\"\n\"vitest 1/2\" = \"npx vitest run --shard 1/2\"\n",

@@ -14,6 +14,7 @@
 #   contrib/vultr-boost set-cap  [--dry-run] --name NAME --cap N
 #   contrib/vultr-boost set-pace [--dry-run] --name NAME
 #   contrib/vultr-boost set-harness [--dry-run] --name NAME --version VERSION
+#   contrib/vultr-boost set-session-deny [--dry-run] --name NAME --deny '["rule", ...]'
 #   contrib/vultr-boost address  [--dry-run] --name NAME
 #   contrib/vultr-boost --help
 #
@@ -61,6 +62,14 @@
 #         failed install is a "stays" line with exit 0, never a box that cannot start a session. A box
 #         made from the snapshot comes up at the snapshot's version; mw's cloud check runs it before it
 #         sets the box's dispatch timer (mw-gq6.1059).
+# set-session-deny makes the [session] table of a box's config.toml hold `deny = DENY` (the home's
+#         list of permission rules every story session is refused, a one-line TOML array of strings),
+#         over WireGuard as set-cap does: the box's `deny` line is replaced (a multi-line one too), or
+#         added to its [session] table, or a [session] table is added at the end of the file; every
+#         other line stays as it was, and a file that would not change is not written. It prints one
+#         last line, "session.deny = set" or "session.deny = level". The box's next dispatch reads
+#         it; sessions running are not touched. mw's cloud check runs it on each box whose kept list
+#         is not the home's (mw-t5shinh.33).
 # address prints a box's WireGuard address, read off the hub as set-cap reads it (nothing there
 #         changes), then the user the box dispatches as: two lines, the address and the user. mw
 #         peek, retry and pause reach a box at ssh <user>@<address>: the home resolves no name for it.
@@ -104,6 +113,7 @@ INSTANCE=""
 SNAPSHOT=""
 CAP=""
 VERSION=""
+DENY=""
 STEPS=0
 N=0
 
@@ -124,12 +134,13 @@ Usage: vultr-boost up       [--yes] [--dry-run] [--name NAME] [--snapshot ID]
        vultr-boost set-cap  [--dry-run] --name NAME --cap N
        vultr-boost set-pace [--dry-run] --name NAME
        vultr-boost set-harness [--dry-run] --name NAME --version VERSION
+       vultr-boost set-session-deny [--dry-run] --name NAME --deny '["rule", ...]'
        vultr-boost address  [--dry-run] --name NAME
 
 up makes the Boost box on Vultr and enrols it on the WireGuard hub; down destroys
 it and removes the peer; set-cap sets how many sessions a box that is up runs at
 once, in its own config, over WireGuard; set-pace has a box's dispatch timer tick every
-five minutes; set-harness brings a box's Claude Code up to the home's VERSION; address prints a box's WireGuard address and user
+five minutes; set-harness brings a box's Claude Code up to the home's VERSION; set-session-deny sets the [session] deny list of a box's config; address prints a box's WireGuard address and user
 read off the hub; status prints its state and cost; snapshot makes a
 ready-made image of a bootstrapped box for up --snapshot; list prints every
 instance Vultr holds (id, label, status, server status); adopt imports a Vultr
@@ -144,7 +155,7 @@ EOF
 
 while [ $# -gt 0 ]; do
 	case $1 in
-	up | down | list | adopt | status | snapshot | spend | set-cap | set-pace | set-harness | address)
+	up | down | list | adopt | status | snapshot | spend | set-cap | set-pace | set-harness | set-session-deny | address)
 		[ -z "$CMD" ] || die "one command at a time: $CMD and $1"
 		CMD=$1
 		;;
@@ -162,6 +173,11 @@ while [ $# -gt 0 ]; do
 	--version)
 		[ $# -gt 1 ] || die "--version needs a Claude Code version"
 		VERSION=$2
+		shift
+		;;
+	--deny)
+		[ $# -gt 1 ] || die "--deny needs the rules as a one-line TOML array of strings"
+		DENY=$2
 		shift
 		;;
 	--instance)
@@ -334,6 +350,12 @@ if [ "$DRY" = 1 ]; then
 		echo "vultr-boost set-harness --dry-run: nothing below is run"
 		step "ssh $HUB_SSH: read $NAME's address off /etc/wireguard/wg0.conf (nothing there changes)"
 		step "ssh $(box_user)@<$NAME's address>: read claude --version; when it is behind ${VERSION:-<version>}, run npm install -g --prefix ~/.local @anthropic-ai/claude-code@${VERSION:-<version>} once and read claude --version again; print harness = <before> -> <after>, level, or stays: <why> (a failed install leaves the box up as it was)"
+		;;
+	set-session-deny)
+		STEPS=2
+		echo "vultr-boost set-session-deny --dry-run: nothing below is run"
+		step "ssh $HUB_SSH: read $NAME's address off /etc/wireguard/wg0.conf (nothing there changes)"
+		step "ssh $(box_user)@<$NAME's address>: set deny = ${DENY:-<rules>} in the [session] table of ~/.config/mw/config.toml (written whole and renamed into place, only if it changes); print session.deny = set or level"
 		;;
 	set-cap)
 		STEPS=2
@@ -903,6 +925,62 @@ do_set_harness() {
 	echo "$out"
 }
 
+# --- set-session-deny -----------------------------------------------------------
+# The rewrite run on the box: $1 is the rules as a base64 of the one-line array (so that no quote
+# or backslash of a rule meets a shell on the way). The `deny` line of the config's [session]
+# table is replaced (its continuation lines, if it was written over several, dropped), or added to
+# that table, or a [session] table is added at the end; every other line as it was. The line is
+# handed to awk in the environment, which awk does not read escapes in. A file that would not change
+# is left alone.
+BOX_SET_SESSION_DENY='set -e; f=$HOME/.config/mw/config.toml; [ -f "$f" ] || { echo "no $f on this box" >&2; exit 3; }
+LINE="deny = $(printf "%s" "$1" | base64 -d)"; export LINE
+t=$f.new.$$; trap "rm -f $t" EXIT
+awk '"'"'
+	function closed(s) { sub(/[[:space:]]*#[^"]*$/, "", s); return s ~ /\][[:space:]]*$/ }
+	function blanks_out() { while (blanks > 0) { print ""; blanks-- } }
+	function end_session() { if (in_session && !set) { print ENVIRON["LINE"]; set = 1 } blanks_out() }
+	skip { if (closed($0)) skip = 0; next }
+	/^[[:space:]]*\[/ {
+		end_session()
+		in_session = ($0 ~ /^[[:space:]]*\[session\][[:space:]]*(#.*)?$/); if (in_session) seen = 1
+		print; next
+	}
+	in_session && /^[[:space:]]*$/ { blanks++; next }
+	in_session && /^[[:space:]]*deny[[:space:]]*=/ {
+		blanks_out()
+		if (!set) print ENVIRON["LINE"]
+		set = 1
+		v = $0; sub(/^[^=]*=/, "", v); if (!closed(v)) skip = 1
+		next
+	}
+	{ blanks_out(); print }
+	END {
+		end_session()
+		if (!seen) { print ""; print "[session]"; print ENVIRON["LINE"] }
+	}
+'"'"' "$f" >"$t"
+if cmp -s "$f" "$t"; then rm -f "$t"; trap - EXIT; echo "session.deny = level"; exit 0; fi
+chmod --reference="$f" "$t"; mv "$t" "$f"; trap - EXIT; echo "session.deny = set"'
+
+do_set_session_deny() {
+	need ssh
+	[ -n "$NAME_ARG" ] || die "set-session-deny needs --name NAME: the box to set the session deny list of"
+	case $DENY in
+	"["*"]") ;;
+	*) die "set-session-deny needs --deny '[\"rule\", ...]', a one-line TOML array of strings, not '$DENY'" ;;
+	esac
+	case $DENY in *$'\n'*) die "set-session-deny needs --deny on one line" ;; esac
+	STEPS=2
+	local out b64
+	b64=$(printf '%s' "$DENY" | base64 -w0)
+	step "hub: read $NAME's address off $HUB_SSH"
+	box_address "$NAME"
+	local addr=$ADDR
+	step "box: session deny list on $(box_user)@$addr"
+	out=$(ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new "$(box_user)@$addr" "sh -s -- '$b64'" <<<"$BOX_SET_SESSION_DENY") || die "could not set the session deny list on $NAME ($(box_user)@$addr)"
+	echo "$out"
+}
+
 # address prints the address and then the user, nothing else on standard output.
 do_address() {
 	need ssh
@@ -923,5 +1001,6 @@ spend) do_spend ;;
 set-cap) do_set_cap ;;
 set-pace) do_set_pace ;;
 set-harness) do_set_harness ;;
+set-session-deny) do_set_session_deny ;;
 address) do_address ;;
 esac

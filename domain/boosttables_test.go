@@ -2,6 +2,7 @@ package domain
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -276,5 +277,66 @@ func TestLevelBoostConfigTakesOnlyTheRigsTheBoostHas(t *testing.T) {
 	out, appended, _, err := LevelBoostConfig(config, levelVault(t))
 	if err != nil || out != config || len(appended) != 0 {
 		t.Errorf("a Boost with no lampas or postern took %q, %v (err %v)", out, appended, err)
+	}
+}
+
+const homeWithSession = "[tests]\nargus = \"npm test\"\n\n[session]\ndeny = [\"Bash(scp *)\", 'Read(~/.ssh/**)']\n"
+
+func TestBoostTablesOfReadsTheSessionDenyRulesInOrder(t *testing.T) {
+	got, err := BoostTablesOf(mustParse(t, homeWithSession))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.HasSessionDeny || !reflect.DeepEqual(got.SessionDeny, []string{"Bash(scp *)", "Read(~/.ssh/**)"}) {
+		t.Errorf("got %+v", got)
+	}
+	none, err := BoostTablesOf(mustParse(t, "[tests]\nargus = \"npm test\"\n"))
+	if err != nil || none.HasSessionDeny {
+		t.Errorf("a config with no [session] deny should hold none, got %+v, %v", none, err)
+	}
+	if _, err := BoostTablesOf(mustParse(t, "[session]\ndeny = 5\n")); err == nil || !strings.Contains(err.Error(), "session.deny") {
+		t.Errorf("a deny that is not an array of strings should be refused naming it, got %v", err)
+	}
+}
+
+func TestBoostTablesTextWritesTheSessionDenyOnOneLineAndReadsBack(t *testing.T) {
+	tables, err := BoostTablesOf(mustParse(t, homeWithSession))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := tables.Text()
+	if want := "\n[session]\ndeny = [\"Bash(scp *)\", \"Read(~/.ssh/**)\"]\n"; !strings.HasSuffix(text, want) {
+		t.Errorf("expected the text to end with %q, got:\n%s", want, text)
+	}
+	back, err := BoostTablesOf(mustParse(t, text))
+	if err != nil || !reflect.DeepEqual(back, tables) {
+		t.Errorf("the text did not read back as the tables: %+v vs %+v (%v)", back, tables, err)
+	}
+	// A home with no deny writes no [session] table at all.
+	none, _ := BoostTablesOf(mustParse(t, "[tests]\nargus = \"npm test\"\n"))
+	if strings.Contains(none.Text(), "\n[session]\n") {
+		t.Errorf("expected no [session] table, got:\n%s", none.Text())
+	}
+}
+
+func TestBoostTablesDriftNamesTheSessionDenyMissingDifferentOrGone(t *testing.T) {
+	home, _ := BoostTablesOf(mustParse(t, homeWithSession))
+	other, _ := BoostTablesOf(mustParse(t, "[session]\ndeny = [\"Bash(scp *)\"]\n"))
+	reordered, _ := BoostTablesOf(mustParse(t, "[session]\ndeny = [\"Read(~/.ssh/**)\", \"Bash(scp *)\"]\n"))
+	for name, c := range map[string]struct {
+		home, vault BoostTables
+		want        string
+	}{
+		"missing":   {home, BoostTables{}, "[session] deny: missing"},
+		"differs":   {home, other, "[session] deny: differs"},
+		"order":     {home, reordered, "[session] deny: differs"},
+		"not there": {BoostTables{}, home, "[session] deny: not on the home"},
+	} {
+		if got := BoostTablesDrift(c.home, c.vault); !slices.Contains(got, c.want) {
+			t.Errorf("%s: expected %q in %v", name, c.want, got)
+		}
+	}
+	if got := BoostTablesDrift(home, home); len(got) != 0 {
+		t.Errorf("a level deny should be no drift, got %v", got)
 	}
 }

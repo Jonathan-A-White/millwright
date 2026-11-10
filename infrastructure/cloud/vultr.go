@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // downLimit is how long one down or reap may run before it is stopped. The
@@ -264,6 +265,27 @@ func (v Vultr) SetHarness(ctx context.Context, name, version string) (applicatio
 		}
 	}
 	return application.CloudHarness{}, fmt.Errorf("%s set-harness printed no harness line: the box's Claude Code is not known", v.Command)
+}
+
+// SetSessionDeny implements application.CloudProvider: `set-session-deny --name
+// <box> --deny <rules>`, which writes the rules into the [session] table of the
+// box's config over ssh. The wrapper's last "session.deny = " line is the
+// answer: "set" (the file changed) or "level" (it already held them); no such
+// line is an error, because what the box holds is not known.
+func (v Vultr) SetSessionDeny(ctx context.Context, name string, rules []string) (bool, error) {
+	out, err := v.run(ctx, setCapLimit, "set-session-deny", "--name", name, "--deny", domain.SessionDenyLiteral(rules))
+	if err != nil {
+		return false, err
+	}
+	for _, line := range slices.Backward(strings.Split(out, "\n")) {
+		switch strings.TrimSpace(line) {
+		case "session.deny = set":
+			return true, nil
+		case "session.deny = level":
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("%s set-session-deny printed no session.deny line: the box's deny list is not known", v.Command)
 }
 
 // setHarnessLimit is how long bringing a box's Claude Code level may take: an

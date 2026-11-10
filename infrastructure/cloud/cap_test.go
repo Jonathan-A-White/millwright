@@ -204,6 +204,30 @@ func TestSetHarnessWithNoHarnessLineIsAnErrorNotAGuess(t *testing.T) {
 	}
 }
 
+func TestSetSessionDenyRunsTheWrapperWithTheHomesRulesAndReadsWhatItSaid(t *testing.T) {
+	rules := []string{"Bash(scp *)", "Read(~/.ssh/**)"}
+	for say, want := range map[string]bool{"session.deny = set": true, "session.deny = level": false} {
+		command, calls := standIn(t, "echo '[2/2] box: session deny list'; echo '"+say+"'")
+		got, err := (cloud.Vultr{Command: command}).SetSessionDeny(context.Background(), "cloud2", rules)
+		if err != nil {
+			t.Fatalf("%s: %v", say, err)
+		}
+		if wantCall := "set-session-deny --name cloud2 --deny [\"Bash(scp *)\", \"Read(~/.ssh/**)\"]\n"; read(t, calls) != wantCall {
+			t.Errorf("expected the wrapper run as %q, got %q", wantCall, read(t, calls))
+		}
+		if got != want {
+			t.Errorf("%s: got changed=%v, want %v", say, got, want)
+		}
+	}
+}
+
+func TestSetSessionDenyWithNoAnswerLineIsAnErrorNotAGuess(t *testing.T) {
+	command, _ := standIn(t, "echo done")
+	if _, err := (cloud.Vultr{Command: command}).SetSessionDeny(context.Background(), "cloud2", []string{"Bash(scp *)"}); err == nil || !strings.Contains(err.Error(), "printed no session.deny line") {
+		t.Errorf("expected an error saying no session.deny line was printed, got %v", err)
+	}
+}
+
 // An edit names its temp file for itself alone: something already sitting at
 // the old fixed '<file>.new' name is no obstacle (mw-gq6.1042).
 func TestSetBoxCapIsNotBlockedByAnythingAtTheOldFixedTempName(t *testing.T) {

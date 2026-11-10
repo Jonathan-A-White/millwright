@@ -718,7 +718,10 @@ s_rigs() {
 # (a [tests] and a [changed_specs] table of one-line `rig = "command"` entries, and a
 # [test_parts.<rig>] table of one-line `"part" = "command"` entries for a rig whose gate
 # is run in parts, written from the home's config.toml by `mw config export-boost`,
-# mw-gq6.456, mw-gq6.592), and this step copies the lines and tables of the rigs it cloned.
+# mw-gq6.456, mw-gq6.592), and this step copies the lines and tables of the rigs it cloned. The
+# file's [session] table (deny = [...], the permission rules every story session is refused,
+# mw-t5shinh.22) is copied whole into a config that is written, when the file has one; a Boost
+# already up gets it from mw's cloud check (mw-t5shinh.33).
 TABLES_FILE=$BOOST_VAULT/hosts/boost-config.toml
 rig_list() { # millwright first, then BOOST_RIGS in order, one per line
 	echo millwright
@@ -757,6 +760,18 @@ config_parts() { # the [test_parts.<rig>] tables of the rigs this Boost has, eac
 		[ -z "$table" ] || printf '\n%s\n' "$table"
 	done
 }
+session_table() { # the vault file's [session] table as written (header, then its one-line deny rules), empty if it has none
+	[ -f "$TABLES_FILE" ] || return 0
+	awk '
+		/^[[:space:]]*\[/ { if (on) exit; on = ($0 == "[session]"); if (on) print; next }
+		on && !/^[[:space:]]*(#.*)?$/ { print }
+	' "$TABLES_FILE"
+}
+config_session() { # the [session] table (the deny rules a story session is given), after a blank line, or nothing
+	local table
+	table=$(session_table)
+	[ -z "$table" ] || printf '\n%s\n' "$table"
+}
 config_lines() { # the lines a config for this Boost holds, one per line: [rigs], then the tables
 	printf 'vault = "%s"\n' "$BOOST_VAULT"
 	printf 'host = "%s"\n' "$BOOST_HOST"
@@ -771,6 +786,7 @@ config_lines() { # the lines a config for this Boost holds, one per line: [rigs]
 	config_table tests
 	config_table changed_specs
 	config_parts
+	config_session
 	printf '\n[after_landing]\nmillwright = "%s"\n' "$MW_AFTER_LANDING"
 }
 # A landing of a millwright story, and mw's own self-update, run this in the rig: it keeps the
@@ -851,7 +867,7 @@ $missing_parts"
 		done <<EOF
 $want
 EOF
-	elif act "write $MW_DIR/config.toml (host $BOOST_HOST, cap $BOOST_CAP, beads_sync auto, $(echo "$want" | grep -c ' = "' || true) settings, [tests] and [changed_specs] lines and [test_parts.<rig>] tables from $TABLES_FILE, [after_landing] millwright = \"$MW_AFTER_LANDING\")"; then
+	elif act "write $MW_DIR/config.toml (host $BOOST_HOST, cap $BOOST_CAP, beads_sync auto, $(echo "$want" | grep -c ' = "' || true) settings, [tests] and [changed_specs] lines, [test_parts.<rig>] tables and the [session] deny table from $TABLES_FILE, [after_landing] millwright = \"$MW_AFTER_LANDING\")"; then
 		ensure_mw_dir
 		put 644 "$MW_DIR/config.toml" "$want"
 	fi

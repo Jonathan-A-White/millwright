@@ -25,13 +25,13 @@ func newConfigExportBoostCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "export-boost",
-		Short: "Rewrite the vault's hosts/boost-config.toml from this home's [tests], [changed_specs] and [test_parts]",
+		Short: "Rewrite the vault's hosts/boost-config.toml from this home's [tests], [changed_specs], [test_parts] and [session]",
 		Long: "export-boost rewrites the vault's " + application.BoostConfigFile + " from the [tests],\n" +
-			"[changed_specs] and [test_parts.<rig>] tables of ~/.config/mw/config.toml, and nothing else of it, then commits that\n" +
+			"[changed_specs], [test_parts.<rig>] and [session] deny tables of ~/.config/mw/config.toml, and nothing else of it, then commits that\n" +
 			"one file in the vault; the next mw sync carries it. contrib/boost-bootstrap.sh gives a new\n" +
 			"Boost the lines of the rigs it clones from that file, so a rig's line added or changed here\n" +
 			"and not exported gates that rig wrong on the next Boost. mw doctor's boost-config check says\n" +
-			"when the two differ.\n\n" +
+			"when the two differ. The cloud check sets the [session] deny list on a box already up.\n\n" +
 			"It prints each line it brings level ([tests] argus: missing, differs, or not on the home)\n" +
 			"and writes nothing when the file is already as it would write it. It runs on the home only:\n" +
 			"a Boost's tables are a part of the home's. --dry-run prints the same and writes nothing.",

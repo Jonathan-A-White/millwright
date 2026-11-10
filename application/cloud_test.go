@@ -674,6 +674,111 @@ func TestTheHomesHarnessIsReadOncePerPass(t *testing.T) {
 	}
 }
 
+// denyCheck is paceCheck with the home's [session] deny rules as given.
+func denyCheck(t *testing.T, cloud *apptest.FakeCloud, home []string, box application.CloudBox) (application.CloudReport, *apptest.FakeCloudBook) {
+	t.Helper()
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	box.Up, box.Made, box.Dispatched = now.Add(-30*time.Minute), now.Add(-30*time.Minute), now.Add(-20*time.Minute)
+	box.Cap, box.Pace = 2, application.CloudPaceFive
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: []application.CloudBox{box}}}
+	report, err := application.CloudCheck{
+		Work: apptest.NewFakeTracker(), Provider: cloud, Book: book, Host: "desktop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+		SessionDeny: func(context.Context) ([]string, error) { return home, nil },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return report, book
+}
+
+var homeDeny = []string{"Bash(mw config set *)", "Bash(scp *)", "Read(~/.ssh/**)"}
+
+func TestABoxWhoseSessionDenyDiffersFromTheHomesIsBroughtLevelOnceAndItIsAMove(t *testing.T) {
+	cloud := &apptest.FakeCloud{SessionDenies: map[string]string{"cloud1": `["Bash(scp *)"]`}}
+	report, book := denyCheck(t, cloud, homeDeny, application.CloudBox{Name: "cloud1"})
+	if got := cloud.SessionDenyCalls(); len(got) != 1 || got[0] != "cloud1 "+domain.SessionDenyLiteral(homeDeny) {
+		t.Errorf("expected exactly one set, of the home's list, got %v", got)
+	}
+	if got := cloud.SessionDenies["cloud1"]; got != domain.SessionDenyLiteral(homeDeny) {
+		t.Errorf("expected the box to hold the home's list, got %q", got)
+	}
+	want := "cloud1: session.deny set to the home's 3 rules"
+	if !slices.ContainsFunc(report.Moves, func(m string) bool { return strings.Contains(m, want) }) {
+		t.Errorf("expected a move %q, got %q", want, report.Moves)
+	}
+	if !slices.ContainsFunc(book.State.Moves, func(m application.CloudMove) bool { return strings.Contains(m.What, want) }) {
+		t.Errorf("expected the book to keep the move %q, got %+v", want, book.State.Moves)
+	}
+	if got := book.State.Boxes[0].SessionDeny; got != domain.SessionDenyLiteral(homeDeny) {
+		t.Errorf("expected the book to keep the list the box was brought to, got %q", got)
+	}
+	// The next pass, with the book kept, does not reach the box again.
+	denyCheck(t, cloud, homeDeny, book.State.Boxes[0])
+	if got := cloud.SessionDenyCalls(); len(got) != 1 {
+		t.Errorf("expected the box set once, got %v", got)
+	}
+}
+
+func TestABoxLevelWithTheHomesSessionDenyGetsNoSshAndNoMove(t *testing.T) {
+	cloud := &apptest.FakeCloud{}
+	report, _ := denyCheck(t, cloud, homeDeny, application.CloudBox{Name: "cloud1", SessionDeny: domain.SessionDenyLiteral(homeDeny)})
+	if got := cloud.SessionDenyCalls(); len(got) != 0 {
+		t.Errorf("expected no set to a level box, got %v", got)
+	}
+	for _, m := range report.Moves {
+		if strings.Contains(m, "session.deny") {
+			t.Errorf("expected no move for a level box, got %q", m)
+		}
+	}
+}
+
+func TestABoxThatAlreadyHoldsTheHomesSessionDenyIsRecordedLevelWithNoMove(t *testing.T) {
+	cloud := &apptest.FakeCloud{SessionDenies: map[string]string{"cloud1": domain.SessionDenyLiteral(homeDeny)}}
+	report, book := denyCheck(t, cloud, homeDeny, application.CloudBox{Name: "cloud1"})
+	if got := book.State.Boxes[0].SessionDeny; got != domain.SessionDenyLiteral(homeDeny) {
+		t.Errorf("expected the box recorded level, got %q", got)
+	}
+	for _, m := range report.Moves {
+		if strings.Contains(m, "session.deny") {
+			t.Errorf("expected no move for a box already level, got %q", m)
+		}
+	}
+}
+
+func TestABoxThatCannotBeReachedForItsSessionDenyIsTriedAgainAndNothingIsRecorded(t *testing.T) {
+	cloud := &apptest.FakeCloud{Unreachable: map[string]bool{"cloud1": true}}
+	_, book := denyCheck(t, cloud, homeDeny, application.CloudBox{Name: "cloud1"})
+	if got := book.State.Boxes[0].SessionDeny; got != "" {
+		t.Errorf("expected nothing recorded for a box not reached, got %q", got)
+	}
+	denyCheck(t, cloud, homeDeny, book.State.Boxes[0])
+	if got := cloud.SessionDenyCalls(); len(got) != 2 {
+		t.Errorf("expected the box tried at each pass, got %v", got)
+	}
+}
+
+func TestAHomeWithNoSessionDenyOrOneThatCannotBeReadSetsNoBox(t *testing.T) {
+	for name, home := range map[string]func(context.Context) ([]string, error){
+		"unset":      func(context.Context) ([]string, error) { return nil, nil },
+		"unreadable": func(context.Context) ([]string, error) { return nil, errors.New("config.toml does not parse") },
+	} {
+		cloud := &apptest.FakeCloud{}
+		now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+		box := application.CloudBox{Name: "cloud1", Pace: application.CloudPaceFive, Cap: 2, Up: now.Add(-30 * time.Minute), Made: now.Add(-30 * time.Minute), Dispatched: now.Add(-20 * time.Minute)}
+		book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: []application.CloudBox{box}}}
+		if _, err := (application.CloudCheck{
+			Work: apptest.NewFakeTracker(), Provider: cloud, Book: book, Host: "desktop",
+			Plan: cloudPlan, Now: func() time.Time { return now }, SessionDeny: home,
+		}).Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if got := cloud.SessionDenyCalls(); len(got) != 0 {
+			t.Errorf("%s: expected no box set, got %v", name, got)
+		}
+	}
+}
+
 func TestHarnessBehindComparesVersionsAsNumbers(t *testing.T) {
 	for _, c := range []struct {
 		have, want string

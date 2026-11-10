@@ -62,6 +62,13 @@ type CloudProvider interface {
 	// cannot start a session is worse than one on an older Claude Code. An error
 	// is a box that could not be reached.
 	SetHarness(ctx context.Context, name, version string) (CloudHarness, error)
+	// SetSessionDeny makes the box's own config hold [session] deny = rules
+	// (the home's list of permission rules every story session is refused), over
+	// WireGuard as SetPace does, and says whether it had to change a byte: false
+	// is a box that already held exactly that list. Its next dispatch reads it;
+	// sessions running are not touched. An error is a box that could not be
+	// reached or written (mw-t5shinh.33).
+	SetSessionDeny(ctx context.Context, name string, rules []string) (changed bool, err error)
 	// Address is where the box is reached from the home: its WireGuard address
 	// read off the hub, and the user it dispatches as. The home resolves no
 	// name for a box. An error is a box with no address to read, with why.
@@ -261,6 +268,11 @@ type CloudBox struct {
 	// HarnessFault is why the last install did not take, said as a move once.
 	Harness      string `json:"harness,omitempty"`
 	HarnessFault string `json:"harness_fault,omitempty"`
+	// SessionDeny is the home's [session] deny list, as domain.SessionDenyLiteral
+	// spells it, that the box was last brought level to ("" in a book written
+	// before it was kept, or a box never brought level), so that a pass reaches a
+	// box again only when the home's list has moved (mw-t5shinh.33).
+	SessionDeny string `json:"session_deny,omitempty"`
 	// Saved are the worktrees of the box whose work the vault already holds,
 	// each as "<story> <head> <hash of the uncommitted patch>", so that a
 	// teardown refused later does not bundle the same work again at every
@@ -492,6 +504,10 @@ type CloudCheck struct {
 	// a box is brought to before its dispatch timer is set. Nil, or one that
 	// says nothing, brings no box to any.
 	HarnessVersion func(ctx context.Context) (string, error)
+	// SessionDeny is the home's [session] deny rules (its config.toml), which a
+	// box is brought level to once, as with the harness. Nil, one that errs, or
+	// one that says no rules, sets no box: a box is never emptied.
+	SessionDeny func(ctx context.Context) ([]string, error)
 	// Out is where what the check did and could not do is said. Nil says
 	// nothing.
 	Out io.Writer
@@ -556,6 +572,7 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 	p.markIdle(work)
 	p.setCaps(ctx)
 	p.setPaces(ctx)
+	p.setSessionDenies(ctx)
 
 	if n := len(p.state.Boxes); n > 0 && p.spent()+c.Plan.HourlyUSD*float64(n) > c.Plan.MonthlyCapUSD {
 		p.capReached(ctx, "destroying every box")
@@ -1116,6 +1133,58 @@ func (p *cloudPass) setHarness(ctx context.Context, box *CloudBox, version strin
 	p.check.say("%s", what)
 	p.report.Moves = append(p.report.Moves, what)
 	p.state.Moves = p.addMove(CloudMove{At: p.now, What: what})
+}
+
+// setSessionDenies brings each box up to the home's [session] deny list
+// (mw-t5shinh.33), as setHarness does for Claude Code: a box whose kept list is
+// the home's is not reached; one that is not is set over ssh, once, a move when
+// the box's file had to change, and kept so that the next pass leaves it alone.
+// A box that could not be reached is said and tried at the next pass. The home's
+// list is read once a pass; an unreadable or empty one sets no box.
+func (p *cloudPass) setSessionDenies(ctx context.Context) {
+	if p.check.SessionDeny == nil {
+		return
+	}
+	var rules []string
+	var home string
+	read := false
+	for i := range p.state.Boxes {
+		box := &p.state.Boxes[i]
+		if box.Making || box.Restoring {
+			continue
+		}
+		if !read {
+			read = true
+			var err error
+			rules, err = p.check.SessionDeny(ctx)
+			if err != nil {
+				p.check.say("the home's [session] deny list cannot be read (%v): no box is brought level to it", oneLine(err.Error()))
+				return
+			}
+			if len(rules) == 0 {
+				return
+			}
+			home = domain.SessionDenyLiteral(rules)
+		}
+		if box.SessionDeny == home {
+			continue
+		}
+		changed, err := p.check.Provider.SetSessionDeny(ctx, box.Name, rules)
+		if err != nil {
+			p.check.say("could not set session.deny on %s: %v", box.Name, oneLine(err.Error()))
+			continue
+		}
+		box.SessionDeny = home
+		p.dirty = box.Name + " session deny"
+		if !changed {
+			p.check.say("%s: session.deny is level with the home's", box.Name)
+			continue
+		}
+		what := fmt.Sprintf("%s: session.deny set to the home's %d rules", box.Name, len(rules))
+		p.check.say("%s", what)
+		p.report.Moves = append(p.report.Moves, what)
+		p.state.Moves = p.addMove(CloudMove{At: p.now, What: what})
+	}
 }
 
 // demand counts the stories that wait for any host, and the sessions free
