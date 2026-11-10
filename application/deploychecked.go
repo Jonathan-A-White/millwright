@@ -40,6 +40,9 @@ type liveRead struct {
 	// Backend is the commit of a backend swap, looked for in the healthz's answer;
 	// empty for any other deploy.
 	Backend string
+	// AfterFailure is where the rig's after-landing command failed once its
+	// deploy step had passed (Ran.FailedAfterDeploy); empty for a whole pass.
+	AfterFailure string
 }
 
 // versionOnPage says whether text holds version as a whole version: not as the
@@ -191,14 +194,21 @@ func (r liveRead) Note(version string) string {
 // names, if any. The word VERIFIED is nowhere in it.
 func (r liveRead) Comment(host, commit, version string, wanted []string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s by mw on %s at %s. No seat has read this: mw fetched the rig's live site itself once the after-landing command had passed, "+
+	passed := "the after-landing command had passed"
+	if r.AfterFailure != "" {
+		passed = "the deploy step of the after-landing command had passed"
+	}
+	fmt.Fprintf(&b, "%s by mw on %s at %s. No seat has read this: mw fetched the rig's live site itself once %s, "+
 		"and what follows is what it found, as it came out. It undoes nothing and stands for no one's look at the change working.\n",
-		DeployedCheckedWord, host, r.At.UTC().Format(time.RFC3339))
+		DeployedCheckedWord, host, r.At.UTC().Format(time.RFC3339), passed)
 	landed := "commit " + shortCommit(commit)
 	if version != "" {
 		landed += ", version " + version
 	}
 	fmt.Fprintf(&b, "\nLanded: %s.\n", landed)
+	if r.AfterFailure != "" {
+		fmt.Fprintf(&b, "After-landing: %s\n", r.AfterFailure)
+	}
 	if r.Site != "" {
 		fmt.Fprintf(&b, "Page: %s, fetched at %s.\n", r.pageLine(), r.At.UTC().Format(time.RFC3339))
 	}
@@ -245,10 +255,13 @@ type DeployCheck struct {
 // Deployed is what a passing deploy put live: the rig, the commit and the version
 // it landed (empty when the rig keeps none) and the stories it carried. Backend
 // says the deploy is a backend swap, which raises no version: the commit is then
-// looked for in what the rig's healthz answers.
+// looked for in what the rig's healthz answers. AfterFailure is set when the
+// rig's command failed after its deploy step had passed (mw-t5shinh.45): the
+// build is live all the same, and each comment says where the command failed.
 type Deployed struct {
 	Rig, Commit, Version string
 	Backend              bool
+	AfterFailure         string
 	Stories              []liveStory
 }
 
@@ -279,7 +292,8 @@ func (d DeployCheck) readLiveSite(ctx context.Context, rig, site, healthz string
 	return read
 }
 
-// Write, once the rig's deploy has passed whole (passed), reads the rig's live
+// Write, once the rig's deploy has passed (passed: the whole command, or dep's
+// AfterFailure when only its deploy step did), reads the rig's live
 // site once and writes a DEPLOYED-CHECKED comment on each story of dep, saying
 // what it found. It changes nothing about the deploy: a page that does not hold
 // the landed version, or does not answer, is written as it came out. A rig whose
@@ -290,7 +304,7 @@ func (d DeployCheck) readLiveSite(ctx context.Context, rig, site, healthz string
 // The commit and version are what the deploy put live, not what a close reason
 // says: the stories are not closed yet when a single landing gets here.
 func (d DeployCheck) Write(ctx context.Context, passed bool, dep Deployed) []string {
-	if d.Web == nil || d.Rules == nil || d.Tracker == nil || !passed || len(dep.Stories) == 0 {
+	if d.Web == nil || d.Rules == nil || d.Tracker == nil || (!passed && dep.AfterFailure == "") || len(dep.Stories) == 0 {
 		return nil
 	}
 	rules, _, err := landingRequirementsFrom(ctx, d.Rules, dep.Rig)
@@ -304,6 +318,7 @@ func (d DeployCheck) Write(ctx context.Context, passed bool, dep Deployed) []str
 	if dep.Backend {
 		read.Backend = dep.Commit
 	}
+	read.AfterFailure = dep.AfterFailure
 	notes := []string{read.Note(dep.Version)}
 	for _, story := range dep.Stories {
 		texts := append([]string(nil), story.texts...)
@@ -326,11 +341,12 @@ func (n Next) deployCheck() DeployCheck {
 }
 
 // deployedChecked is a landing's live check: DeployCheck.Write once the rig's
-// after-landing command has passed on this host (once.AfterLandingPassed), its
-// notes added to the landing report.
+// after-landing command has passed on this host (once.AfterLandingPassed), or
+// failed after its deploy step had passed and set the deployed mark
+// (once.AfterLandingFailure), its notes added to the landing report.
 func (n Next) deployedChecked(ctx context.Context, rig string, once *NextReport, commit, version string, stories []liveStory) {
 	if n.Tracker == nil {
 		return
 	}
-	once.Notes = append(once.Notes, n.deployCheck().Write(ctx, once.AfterLandingPassed, Deployed{Rig: rig, Commit: commit, Version: version, Stories: stories})...)
+	once.Notes = append(once.Notes, n.deployCheck().Write(ctx, once.AfterLandingPassed, Deployed{Rig: rig, Commit: commit, Version: version, AfterFailure: once.AfterLandingFailure, Stories: stories})...)
 }

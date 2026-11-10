@@ -240,6 +240,17 @@ func (r Ran) PassedStep(n int) bool {
 	return r.Succeeded() || r.Step > n
 }
 
+// FailedAfterDeploy is where the command failed when it passed step n, the one
+// the host names as the deploy, and a later step failed: "failed after the
+// deploy, at step N: <the step's line>". It is empty for a run that succeeded,
+// that failed at or before step n, or whose failing step is not known.
+func (r Ran) FailedAfterDeploy(n int) string {
+	if r.Succeeded() || !r.PassedStep(n) || r.Step <= n || r.Step > len(r.Steps) {
+		return ""
+	}
+	return fmt.Sprintf("failed after the deploy, at step %d: %s", r.Step, r.Steps[r.Step-1])
+}
+
 // Deployed says a step that ships the rig — one that names rsync or scp, or a
 // deploy — ran to its end before the step the run ended in, or in a run that
 // succeeded at all: what the host serves is the landed commit, whatever came
@@ -493,6 +504,7 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 			} else if n.Deployed != nil {
 				ran.DeployStep, ran.DeployedAt = step, report.How.Commit
 				line = ran.Line()
+				report.AfterLandingFailure = ran.FailedAfterDeploy(step)
 			}
 		}
 	}
