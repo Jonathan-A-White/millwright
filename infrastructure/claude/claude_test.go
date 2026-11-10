@@ -8,6 +8,7 @@ package claude
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -329,6 +330,107 @@ func TestTheTestsRuleIsTakenVerbatim(t *testing.T) {
 		if _, err := h.Session(launch(func(l *application.Launch) { l.Path.Rig = "spell-forge" })); err == nil {
 			t.Errorf("expected a tests command holding %s to be refused at launch, got no error", name)
 		}
+	}
+}
+
+// TestTheSessionIsGivenTheDenyRulesOfTheConfig: the deny rules mw is given are
+// the permissions.deny of a story's --settings, exactly, and nothing else of the
+// document moves (mw-t5shinh.22).
+func TestTheSessionIsGivenTheDenyRulesOfTheConfig(t *testing.T) {
+	rules := []string{"Bash(mw release *)", "Read(~/.ssh/**)"}
+	spec, err := New(WithDenyRules(rules...)).Session(launch(nil))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	settings := settingsFromLine(t, spec.Command[2])
+	var doc struct {
+		Attribution map[string]any `json:"attribution"`
+		Permissions struct {
+			Allow []string `json:"allow"`
+			Deny  []string `json:"deny"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(settings), &doc); err != nil {
+		t.Fatalf("settings %q are not JSON: %v", settings, err)
+	}
+	if !slices.Equal(doc.Permissions.Deny, rules) {
+		t.Errorf("expected permissions.deny to be exactly %v, got %v", rules, doc.Permissions.Deny)
+	}
+	if !slices.Equal(doc.Permissions.Allow, []string{BeadsAllowRule}) {
+		t.Errorf("expected the allow rules unchanged, got %v", doc.Permissions.Allow)
+	}
+	if len(doc.Attribution) != 3 || doc.Attribution["commit"] != "" || doc.Attribution["pr"] != "" || doc.Attribution["sessionUrl"] != false {
+		t.Errorf("expected the attribution unchanged, got %v", doc.Attribution)
+	}
+}
+
+// TestTheDenyRulesComeWithTheRigsTestsRules: both lists are in the one document.
+func TestTheDenyRulesComeWithTheRigsTestsRules(t *testing.T) {
+	h := New(WithTests(map[string]string{"spell-forge": "npm test"}), WithDenyRules("Bash(scp *)"))
+	spec, err := h.Session(launch(func(l *application.Launch) { l.Path.Rig = "spell-forge" }))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	settings := settingsFromLine(t, spec.Command[2])
+	if allow := settingsAllow(t, settings); !slices.Contains(allow, "Bash(npm test)") {
+		t.Errorf("expected the tests rule to stay, got %v", allow)
+	}
+	if !strings.Contains(settings, `"deny":["Bash(scp *)"]`) {
+		t.Errorf("expected the deny rule, got %q", settings)
+	}
+}
+
+// TestNoDenyRulesLeavesTheSettingsAsTheyWere: no rules, an empty list and a
+// reader that finds none all give SessionSettings byte for byte.
+func TestNoDenyRulesLeavesTheSettingsAsTheyWere(t *testing.T) {
+	for name, h := range map[string]*Harness{
+		"no option":    New(),
+		"empty list":   New(WithDenyRules()),
+		"reader finds": New(WithDeny(func() ([]string, error) { return nil, nil })),
+	} {
+		spec, err := h.Session(launch(nil))
+		if err != nil {
+			t.Fatalf("%s: assembling the session: %v", name, err)
+		}
+		if got := settingsFromLine(t, spec.Command[2]); got != SessionSettings {
+			t.Errorf("%s: expected SessionSettings byte for byte, got %q", name, got)
+		}
+	}
+}
+
+// TestABadDenyRuleRefusesTheLaunchAndNamesIt: nothing starts.
+func TestABadDenyRuleRefusesTheLaunchAndNamesIt(t *testing.T) {
+	for _, bad := range []string{"Bash(scp", "Bash(a\nb)", "not a rule", "Bash()"} {
+		rule := bad
+		_, err := New(WithDenyRules("Read(~/.ssh/**)", rule)).Session(launch(nil))
+		if err == nil {
+			t.Errorf("expected the rule %q to refuse the launch", rule)
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("%q", rule)) {
+			t.Errorf("expected the error to name %q, got %v", rule, err)
+		}
+	}
+	// A rule list that cannot be read refuses it too.
+	h := New(WithDeny(func() ([]string, error) { return nil, errors.New("session.deny is not an array") }))
+	if _, err := h.Session(launch(nil)); err == nil || !strings.Contains(err.Error(), "session.deny") {
+		t.Errorf("expected an unreadable list to refuse the launch naming the key, got %v", err)
+	}
+}
+
+// TestASeatIsNotGivenTheDenyRules: seatSettings is not in this slice.
+func TestASeatIsNotGivenTheDenyRules(t *testing.T) {
+	h := New(WithDenyRules("Bash(mw release *)"))
+	if got := seatSettings(true); got != SessionSettings {
+		t.Errorf("expected an attended seat to keep SessionSettings, got %q", got)
+	}
+	if got := seatSettings(false); got != UnattendedSeatSettings || strings.Contains(got, "deny\":[") {
+		t.Errorf("expected an unattended seat to keep UnattendedSeatSettings, got %q", got)
+	}
+	spec, err := h.SeatSession(seatLaunch(func(l *application.SeatLaunch) { l.Attended = true }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(spec.Command[2], "mw release") {
+		t.Errorf("expected a seat's line to carry no deny rule, got %q", spec.Command[2])
 	}
 }
 

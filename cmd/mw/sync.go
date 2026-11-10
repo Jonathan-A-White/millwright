@@ -209,7 +209,9 @@ func sessionHarness(vaultDir, host string, tuning ...sessionTuning) application.
 // adapter for yet, and a Builder's session on a host that has not chosen codex.
 func claudeHarness(vaultDir, host string, t sessionTuning) *claude.Harness {
 	opts := []claude.Option{claude.WithEnvFile(beadsEnvFile()), claude.WithClaudeEnvFile(claudeEnvFile()),
-		claude.WithTests(t.tests), claude.WithNice(t.nice), claude.WithJobs(t.jobs), claude.WithTimingTests(t.timing)}
+		claude.WithTests(t.tests), claude.WithNice(t.nice), claude.WithJobs(t.jobs), claude.WithTimingTests(t.timing),
+		// [session] deny, read at each launch: a story's session is refused what it lists.
+		claude.WithDeny(config.SessionDeny)}
 	if server := sessionServerHost(vaultDir, host); server != "" {
 		opts = append(opts, claude.WithBeadsServerHost(server))
 	}
