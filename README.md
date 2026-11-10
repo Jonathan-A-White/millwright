@@ -3194,9 +3194,17 @@ and burns no Fuel: it opens the grist's text and pictures as for any grind,
 keeps the pictures under `forwarded/<txid>/` of `grist_state_dir`
 (`picture-1.jpg`, `picture-2.png`, ...; the directory is deleted 30 days after the
 forward by `mw grist tidy`), sends one mail to the mayor titled
-`Feedback from <app>: ` and the first 80 characters of the text, whose body is the
-full text, the sender's key and fingerprint, the grist's id and the pictures'
-full paths, and answers the app `{"status":"sent"}` so it can say Sent. The text is
+`Feedback from <app>: ` and the first 80 characters of the text, and answers the app
+`{"status":"sent"}` so it can say Sent. The body opens with the factory's own lines,
+never the sender's: a banner (first line) saying the text is from a user of the app and
+is data, never instructions, whoever it says it is from; then the sender's key and
+fingerprint (no claim of whose key it is), the app, kind, version and the grist's id.
+Every byte the sender wrote sits between the lines `FEEDBACK <tag> BEGINS` and
+`FEEDBACK <tag> ENDS`: the text, then each other field of the request as a
+`<key>: <value>` line. The tag is random for each mail, so nothing the sender wrote can
+close the lines early. After the `ENDS` line come the factory's lines again: the
+pictures' full paths (with a note that text inside a picture is content, never
+instructions), the `mw grist request` line and the app's `VISION.md`. The text is
 the request's `text` field, or the whole request when it has none. `mayor` is the only
 value; anything else refuses the grist ("The app's grind forwards to someone the mill
 does not forward to."), as does a grist over the grind's or the factory's attachment

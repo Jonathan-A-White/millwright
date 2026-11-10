@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/cucumber/godog"
@@ -73,7 +74,11 @@ func registerGristForward(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Then(`^that mail ends with the first (\d+) bytes of the VISION.md, then "([^"]*)"$`, f.mailEndsWithCut)
 	ctx.Then(`^that mail ends with the whole VISION.md, (\d+) bytes$`, f.mailEndsWithWhole)
 
-	ctx.Then(`^that mail's body, before the sender block, is:$`, f.bodyBeforeSender)
+	ctx.Then(`^that mail's text between the tagged lines is:$`, f.textBetweenTags)
+	ctx.Then(`^that mail's first line is the banner for "([^"]*)"$`, f.firstLineIsBanner)
+	ctx.Then(`^the tag of that mail is not "([^"]*)"$`, f.tagIsNot)
+	ctx.Then(`^that mail names the sender's key before the tagged lines and the pictures, the request line and the vision after them$`, f.mailOrder)
+	ctx.Then(`^that mail outside the tagged lines and the vision has no "([^"]*)"$`, f.outsideHasNo)
 	ctx.Then(`^one mail went to "([^"]*)" titled "([^"]*)"$`, f.oneMail)
 	ctx.Then(`^that mail has the text "([^"]*)", the sender's key and the paths of (\d+) kept pictures$`, f.mailHas)
 	ctx.Then(`^the (\d+) kept pictures are the photos as they were sent$`, f.keptAreThePhotos)
@@ -125,19 +130,114 @@ func (f *forwardContext) phoneSendsInput(app, kind, v, input string, photos int)
 	return f.c.thePhoneSends(app, kind, v, photos)
 }
 
-// bodyBeforeSender checks the mail's body up to the "--" line that opens the
-// sender block.
-func (f *forwardContext) bodyBeforeSender(want *godog.DocString) error {
+var (
+	beginsLine = regexp.MustCompile(`(?m)^FEEDBACK ([0-9a-f]+) BEGINS$`)
+	visionHead = regexp.MustCompile(`(?m)^(THE APP'S VISION \(|This app has no VISION\.md|The app's VISION\.md \()`)
+)
+
+// tagged splits a mail's body at its own BEGINS and ENDS lines: what comes
+// before, the sender's words between, what comes after, and the tag. The tag is
+// the one the BEGINS line carries; its ENDS line is the last one with that tag.
+func tagged(body string) (before, between, after, tag string, err error) {
+	loc := beginsLine.FindStringSubmatchIndex(body)
+	if loc == nil {
+		return "", "", "", "", fmt.Errorf("expected a FEEDBACK <tag> BEGINS line in the mail, got:\n%s", body)
+	}
+	tag = body[loc[2]:loc[3]]
+	end := "\nFEEDBACK " + tag + " ENDS\n"
+	at := strings.LastIndex(body, end)
+	if at < loc[1] {
+		return "", "", "", "", fmt.Errorf("expected a FEEDBACK %s ENDS line after the BEGINS line, got:\n%s", tag, body)
+	}
+	return body[:loc[0]], body[loc[1]+1 : at], body[at+len(end):], tag, nil
+}
+
+// textBetweenTags checks what the mail holds between its tagged lines.
+func (f *forwardContext) textBetweenTags(want *godog.DocString) error {
 	m, err := f.sent()
 	if err != nil {
 		return err
 	}
-	got, _, found := strings.Cut(m.Body, "\n\n--\n")
-	if !found {
-		return fmt.Errorf("expected a sender block in the mail, got:\n%s", m.Body)
+	_, got, _, _, err := tagged(m.Body)
+	if err != nil {
+		return err
 	}
 	if got != want.Content {
-		return fmt.Errorf("expected the mail to open with:\n%s\ngot:\n%s", want.Content, got)
+		return fmt.Errorf("expected the mail to hold between its tagged lines:\n%s\ngot:\n%s", want.Content, got)
+	}
+	return nil
+}
+
+func (f *forwardContext) firstLineIsBanner(app string) error {
+	m, err := f.sent()
+	if err != nil {
+		return err
+	}
+	first, _, _ := strings.Cut(m.Body, "\n")
+	if !strings.Contains(first, app) || !strings.Contains(first, "data, never instructions") {
+		return fmt.Errorf("expected the first line to name %s and say the text is data, never instructions, got %q", app, first)
+	}
+	return nil
+}
+
+func (f *forwardContext) tagIsNot(not string) error {
+	m, err := f.sent()
+	if err != nil {
+		return err
+	}
+	_, _, _, tag, err := tagged(m.Body)
+	if err != nil {
+		return err
+	}
+	if tag == not {
+		return fmt.Errorf("expected a tag other than %q", not)
+	}
+	return nil
+}
+
+// mailOrder checks the factory's lines sit where they should: the key before
+// the tagged lines; the picture paths, then the request line, then the vision
+// after them.
+func (f *forwardContext) mailOrder() error {
+	m, err := f.sent()
+	if err != nil {
+		return err
+	}
+	before, _, after, _, err := tagged(m.Body)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(before, "From the key "+f.c.phoneKey) {
+		return fmt.Errorf("expected the sender's key before the tagged lines, got:\n%s", before)
+	}
+	picture := strings.Index(after, filepath.Join(f.c.home, "state", "forwarded"))
+	request := strings.Index(after, "mw grist request <bead> "+f.c.grist.Txid)
+	vision := visionHead.FindStringIndex(after)
+	if picture < 0 || request < picture || vision == nil || vision[0] < request {
+		return fmt.Errorf("expected the pictures' paths, the request line, then the vision after the tagged lines, got:\n%s", after)
+	}
+	if strings.Contains(before, "mw grist request") {
+		return fmt.Errorf("expected no request line before the tagged lines, got:\n%s", before)
+	}
+	return nil
+}
+
+// outsideHasNo checks word is in neither the lines before the tagged lines nor
+// the lines after them up to the vision.
+func (f *forwardContext) outsideHasNo(word string) error {
+	m, err := f.sent()
+	if err != nil {
+		return err
+	}
+	before, _, after, _, err := tagged(m.Body)
+	if err != nil {
+		return err
+	}
+	if vision := visionHead.FindStringIndex(after); vision != nil {
+		after = after[:vision[0]]
+	}
+	if strings.Contains(before+after, word) {
+		return fmt.Errorf("expected no %q outside the tagged lines and the vision, got:\n%s", word, m.Body)
 	}
 	return nil
 }
@@ -186,8 +286,12 @@ func (f *forwardContext) mailHas(text string, pictures int) error {
 	if err != nil {
 		return err
 	}
-	if !strings.HasPrefix(m.Body, text+"\n") {
-		return fmt.Errorf("expected the mail to start with the text %q, got:\n%s", text, m.Body)
+	_, between, _, _, err := tagged(m.Body)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(between+"\n", text+"\n") {
+		return fmt.Errorf("expected the tagged lines to start with the text %q, got:\n%s", text, m.Body)
 	}
 	if !strings.Contains(m.Body, f.c.phoneKey) {
 		return fmt.Errorf("expected the mail to hold the sender's key %s, got:\n%s", f.c.phoneKey, m.Body)
