@@ -49,6 +49,13 @@ type AfterLandingRun struct {
 	Built    BuiltMarks
 	Checkout FactoryCheckout
 
+	// Landed and Live write DEPLOYED-CHECKED, by DeployCheck.Write, on each story
+	// the checkout took in since the rig's deployed mark, once a whole pass has set
+	// the new one (mw-t5shinh.35), as the home's tick does for a deploy of its own.
+	// Either nil, or a rig with no deployed mark yet, writes nothing.
+	Landed LandedLog
+	Live   DeployCheck
+
 	// Out is where the lines are printed. A nil Out prints nothing.
 	Out io.Writer
 }
@@ -84,6 +91,10 @@ func (a AfterLandingRun) Run(ctx context.Context, rigName string) error {
 	if wait == nil {
 		wait = waitFor
 	}
+	var previous string
+	if a.Built != nil {
+		previous, _ = a.Built.Built(ctx, deployedMark(rigName))
+	}
 	ran, retried, runErr := runAfterLanding(ctx, a.AfterLanding, rigName, dir, a.RetryWait, wait)
 	if relErr := release(ctx); relErr != nil {
 		a.say("the after-landing lock of %s could not be given back: %v", rigName, relErr)
@@ -115,6 +126,8 @@ func (a AfterLandingRun) Run(ctx context.Context, rigName string) error {
 	a.say("%s", ran.Line())
 	if note := markDeployed(ctx, a.Built, a.Checkout, rigName, dir); note != "" {
 		a.say("%s", note)
+	} else {
+		a.deployedChecked(ctx, rigName, dir, previous)
 	}
 	notes, failed := RestartFactoryUnits(ctx, a.Units, rigName)
 	for _, note := range notes {
@@ -124,6 +137,26 @@ func (a AfterLandingRun) Run(ctx context.Context, rigName string) error {
 		return errors.New(UnitRestartFailedLine)
 	}
 	return nil
+}
+
+// deployedChecked writes DEPLOYED-CHECKED on the stories this run deployed: those
+// landed after the deployed mark the rig had before it, up to the checkout's
+// commit now. A rig that had no mark has no such range, and is said so.
+func (a AfterLandingRun) deployedChecked(ctx context.Context, rigName, dir, previous string) {
+	if a.Landed == nil || a.Live.Web == nil || a.Checkout == nil {
+		return
+	}
+	head, err := a.Checkout.Head(ctx, dir)
+	if err != nil || head == "" {
+		return
+	}
+	if previous == "" {
+		a.say("%s had no deployed mark, so the stories this run deployed are not known and no DEPLOYED-CHECKED was written", rigName)
+		return
+	}
+	for _, note := range deployedCheckedSince(ctx, a.Live, a.Landed, rigName, dir, previous, head) {
+		a.say("%s", note)
+	}
 }
 
 func (a AfterLandingRun) rigNames() []string {

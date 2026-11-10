@@ -1291,7 +1291,11 @@ did not happen or failed: in the rig's checkout as it is, under the same lock
 and the same one retry, restarting the follower after a successful build of
 `millwright` as a landing does. It prints `after landing: make build: ok`, or the
 failure line and exits non-zero. It fetches and moves nothing. A rig this host
-has no checkout of, or names no command for, is refused. See
+has no checkout of, or names no command for, is refused. When it passes whole
+on a rig whose file names a `site_url` or a `healthz_url`, it writes
+DEPLOYED-CHECKED (never VERIFIED) on each story landed since the rig's previous
+deployed mark, through the same live check the home's tick uses; a rig with no
+previous mark is said to have none and gets no comment. See
 `features/after_landing.feature`.
 
 When the rig is `millwright` and its command succeeded, the landing then runs
