@@ -67,7 +67,7 @@ func newMemberInitCmd() *cobra.Command {
 			"  2. loginctl enable-linger <name> (as root), so the Dolt unit runs while the member is logged out.\n" +
 			"  3. claude login: the member logs in to Claude as themselves.\n" +
 			"  4. Onboarding, with the member's Mayor in the first sitting: the member's own GitHub, their rigs, the vault's\n" +
-				"     private git remote (gh repo create, git remote add origin, git push) and their other tools' keys.\n\n" +
+			"     private git remote (gh repo create, git remote add origin, git push) and their other tools' keys.\n\n" +
 			"--harness codex makes the factory for a member who runs on Codex: it also writes AGENTS.md at the\n" +
 			"vault's root (the starter kit's CLAUDE.md text, which boots the session from seats/mayor/charter.md;\n" +
 			"Codex has no system-prompt flag, so this is how the Mayor's seat reaches its charter), writes\n" +
