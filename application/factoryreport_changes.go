@@ -346,6 +346,10 @@ type MetricSnapshot struct {
 	AttemptsPerLanding *float64 `json:"attempts_per_landing,omitempty"`
 	BugsPerLanding     *float64 `json:"bugs_per_landing,omitempty"`
 	EscapedBugs        *float64 `json:"escaped_bugs,omitempty"`
+	// SweepFinds are the bugs of the week that name a landing but are a
+	// Builder's find (IsSweepFind); EscapedBugs + SweepFinds is the count
+	// before they were split off.
+	SweepFinds         *float64 `json:"sweep_finds,omitempty"`
 	DispatchToLandingS *float64 `json:"dispatch_to_landing_s,omitempty"`
 	TokensPerLanding   *float64 `json:"tokens_per_landing,omitempty"`
 	USDPerLanding      *float64 `json:"usd_per_landing,omitempty"`
@@ -371,6 +375,10 @@ func takeSnapshot(all []reportEntry, review *ReviewTime, now time.Time) MetricSn
 	set(&s.AttemptsPerLanding, "attempts/landing")
 	set(&s.BugsPerLanding, "bugs/landing")
 	set(&s.EscapedBugs, "escaped bugs")
+	if !q.Empty() {
+		sweeps := float64(q.SweepFinds)
+		s.SweepFinds = &sweeps
+	}
 	set(&s.DispatchToLandingS, "dispatch-to-landing")
 	set(&s.TokensPerLanding, "tokens/landing")
 	set(&s.USDPerLanding, "$/landing")

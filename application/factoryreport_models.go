@@ -148,11 +148,11 @@ func sumModelUse(model, kind string, entries []reportEntry, escapedOf map[string
 
 // escapedOfLanding is the bugs traced to each landed story, each bug against
 // the newest landing it names, the one QUALITY counts it under; a Tester's
-// finding is left out.
+// finding and a sweep find are left out.
 func escapedOfLanding(escapes []escape) map[string]int {
 	of := map[string]int{}
 	for _, x := range escapes {
-		if x.byTester {
+		if x.byTester || x.sweep {
 			continue
 		}
 		of[x.landings[len(x.landings)-1].id]++

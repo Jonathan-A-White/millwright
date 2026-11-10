@@ -22,6 +22,9 @@ Feature: mw report
   Mayor of a WORSE change once and keep one snapshot of the key metrics a day.
   Beside the bugs filed, QUALITY counts the escaped bugs: a [bug] story of a
   landing's rig filed on its day or in the 14 days after, naming its story id;
+  A bug whose description's head says closing comment, sweep, LEFT BY, left
+  undone, Seen but NOT fixed or TO FILE is a sweep find, not an escape: QUALITY
+  counts it on its own line, "sweep finds S".
   FACTORY CHANGES shows each landing's own.
   After FUEL, MODELS sets the models side by side, a column each: opus and
   sonnet always, haiku and fable when they landed or were refused a story in
@@ -88,6 +91,44 @@ Feature: mw report
     And the report prints "escaped bugs 1 (Tester 0) ↔" under "lampas: landed 0 ↔, refused 0 (0%)"
     And the report prints "escaped bugs 0 (Tester 0)" under "orrery: landed 0, refused 0 (0%)"
 
+  Scenario: A sweep find that names a landing is not an escape: QUALITY counts it on its own line
+    Given the report stories:
+      | id  | title             | rig    | host   | model  | attempts | filed      | description                                          |
+      | l-1 | One               | lampas | laptop | opus   |          |            |                                                      |
+      | e-1 | [bug] it broke    | lampas | laptop | sonnet |          | 2026-10-09 | after l-1 landed                                     |
+      | e-2 | [bug] it leaks    | lampas | laptop | sonnet |          | 2026-10-09 | From l-1's closing comment, SWEEP: it leaks          |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker    |
+      | 2026-09-25 | l-1 | landed on main | opus/high |
+    When mw report runs with "--since 7d"
+    Then the report prints "escaped bugs 1 (Tester 0)" under "lampas: landed 0, refused 0 (0%)"
+    And the report prints "sweep finds 1" under "lampas: landed 0, refused 0 (0%)"
+
+  Scenario: A Tester finding that says closing comment is still an escape
+    Given the report stories:
+      | id  | title          | rig    | host   | model  | attempts | filed      | description                                                              |
+      | l-1 | One            | lampas | laptop | opus   |          |            |                                                                          |
+      | e-1 | [bug] it broke | lampas | laptop | sonnet |          | 2026-10-09 | From l-1's closing comment. Tester finding. Source: Tester on l-1.       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker    |
+      | 2026-09-25 | l-1 | landed on main | opus/high |
+    When mw report runs with "--since 7d"
+    Then the report prints "escaped bugs 1 (Tester 1)" under "lampas: landed 0, refused 0 (0%)"
+    And the report prints "sweep finds 0" under "lampas: landed 0, refused 0 (0%)"
+
+  Scenario: A bug mw next filed for an unmet criterion is an escape, and a sweep word after the head is no sweep find
+    Given the report stories:
+      | id  | title              | rig    | host   | model  | attempts | filed      | description                                                                                 |
+      | l-1 | One                | lampas | laptop | opus   |          |            |                                                                                             |
+      | e-1 | [bug] criterion    | lampas | laptop | sonnet |          | 2026-10-09 | mw next landed l-1 (One) although its closing comment says an acceptance criterion is not met. |
+      | e-2 | [bug] sweep late   | lampas | laptop | sonnet |          | 2026-10-09 | after l-1 landed xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx sweep                                                                 |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker    |
+      | 2026-09-25 | l-1 | landed on main | opus/high |
+    When mw report runs with "--since 7d"
+    Then the report prints "escaped bugs 2 (Tester 0)" under "lampas: landed 0, refused 0 (0%)"
+    And the report prints "sweep finds 0" under "lampas: landed 0, refused 0 (0%)"
+
   Scenario: --json carries the escaped bugs of every block and the window before
     Given the report stories:
       | id    | title          | rig    | host   | model  | attempts | filed      | description      |
@@ -101,6 +142,9 @@ Feature: mw report
     And the report JSON has rigs.0.previous.escaped_bugs as "0"
     And the report JSON has models.0.name as "opus"
     And the report JSON has models.0.quality.escaped_bugs as "1"
+    And the report JSON has rigs.0.quality.sweep_finds as "0"
+    And the report JSON has rigs.0.previous.sweep_finds as "0"
+    And the report JSON has models.0.quality.sweep_finds as "0"
 
   Scenario: Tester findings are counted per landing from the landed story's comments
     Given "lampas" landed 8 stories and refused 0 for "tests-fail" in the window

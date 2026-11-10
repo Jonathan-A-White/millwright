@@ -372,3 +372,14 @@ func TestTheShareBoundsAreTheConfigsAndShowInTheJSON(t *testing.T) {
 		t.Errorf("the JSON's invest_share is %v", got.Share)
 	}
 }
+
+func TestASweepFindDoesNotMakeQualityFallInTheBound(t *testing.T) {
+	f := newShareFactory(t)
+	f.rows("2026-09-30", 9, 3, 0)
+	f.rows("2026-10-08", 9, 3, 0)
+	f.escapedBugBy("2026-10-08", "From share-1's closing comment, SWEEP: it leaks")
+	result, _ := f.run(0, false)
+	if got := result.InvestShare; got.Bound != "" || got.Reason != "" {
+		t.Fatalf("the bound is %q for %q, want none: a sweep find is no escape", got.Bound, got.Reason)
+	}
+}

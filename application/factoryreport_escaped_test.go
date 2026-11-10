@@ -263,3 +263,78 @@ func TestIsTesterFindingReadsTheMarkerAnywhereAndTheFirstLineForTheOlderPhrasing
 		}
 	}
 }
+
+func TestIsSweepFindReadsTheHeadOfADescriptionNotAMwNextBugNorATestersFinding(t *testing.T) {
+	late := strings.Repeat("x", application.SweepHeadChars) + " sweep"
+	for desc, want := range map[string]bool{
+		"From mw-x's closing comment, SWEEP: it leaks":                  true,
+		"Found in the sweep of mw-x":                                    true,
+		"LEFT BY mw-x: the list is cut off":                             true,
+		"mw-x left undone the empty state":                              true,
+		"Seen but NOT fixed in mw-x: a typo":                            true,
+		"TO FILE from mw-x: the button":                                 true,
+		"mw next landed mw-x (T) although its closing comment says no.": false,
+		"  MW NEXT LANDED mw-x although its closing comment says no.":   false,
+		"After mw-x landed it broke":                                    false,
+		late:                                                            false,
+		"":                                                              false,
+		"From mw-x's closing comment.\n\n" + application.TesterFindingMarker: false,
+	} {
+		if got := application.IsSweepFind(desc); got != want {
+			t.Errorf("IsSweepFind(%q) = %t, want %t", desc, got, want)
+		}
+	}
+}
+
+func TestASweepFindIsNotAnEscapeAndHasItsOwnCountThatNothingElseReads(t *testing.T) {
+	f := newChangeFactory(t)
+	f.landing("mw-e.4", "millwright", "opus", "Expect: escaped bugs down", "2026-10-13")
+	f.filed("e-sweep", "bug", "Swept", "millwright", "2026-10-14T09:00:00Z", "From mw-e.4's closing comment, SWEEP: it leaks")
+	f.filed("e-plain", "bug", "Plain", "millwright", "2026-10-15T09:00:00Z", "after mw-e.4 landed")
+	f.filed("e-tester", "bug", "Tester", "millwright", "2026-10-15T10:00:00Z",
+		"From mw-e.4's closing comment.\n\n"+application.TesterFindingMarker+". Source: Tester on mw-e.4 (haiku).")
+	f.filed("e-next", "bug", "Unmet", "millwright", "2026-10-16T09:00:00Z", "mw next landed mw-e.4 (T) although its closing comment says no.")
+	f.filed("e-late", "bug", "Late", "millwright", "2026-10-16T10:00:00Z", "after mw-e.4 landed "+strings.Repeat("x", application.SweepHeadChars)+" sweep")
+
+	result, printed := f.report(true)
+	for _, block := range append(append([]application.ReportBlock{}, result.Rigs...), result.Models...) {
+		if block.Name != "millwright" && block.Name != "opus" {
+			continue
+		}
+		q := block.Quality
+		if q.EscapedBugs != 4 || q.EscapedTester != 1 || q.SweepFinds != 1 {
+			t.Errorf("%s: escaped %d (Tester %d), sweep finds %d; want 4 (Tester 1), 1", block.Name, q.EscapedBugs, q.EscapedTester, q.SweepFinds)
+		}
+		if block.Previous.SweepFinds != 0 {
+			t.Errorf("%s: the window before has %d sweep finds, want 0", block.Name, block.Previous.SweepFinds)
+		}
+	}
+	for _, want := range []string{"  escaped bugs 4 (Tester 1)", "  sweep finds 1\n"} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("the report lacks %q:\n%s", want, printed)
+		}
+	}
+	if c := changeOf(t, result, "mw-e.4"); c.EscapedBugs != 4 {
+		t.Errorf("the change's escaped bugs are %d (%v), want 4 without the sweep find", c.EscapedBugs, c.EscapedIDs)
+	}
+	var landed application.ModelUse
+	for _, m := range result.ModelCompare.Models {
+		if m.Landed == 1 {
+			landed = m
+		}
+	}
+	if landed.EscapedBugs != 3 {
+		t.Errorf("MODELS counts %d escaped bugs (not Tester), want 3 without the sweep find", landed.EscapedBugs)
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"sweep_finds":1`) || !strings.Contains(string(raw), `"sweep_finds":0`) {
+		t.Errorf("the JSON does not carry sweep_finds for the window and the one before:\n%s", raw)
+	}
+	snaps := f.snapshots.All()
+	if len(snaps) != 1 || snaps[0].SweepFinds == nil || *snaps[0].SweepFinds != 1 || snaps[0].EscapedBugs == nil || *snaps[0].EscapedBugs != 4 {
+		t.Errorf("the snapshot is %+v, want 4 escaped bugs and 1 sweep find", snaps)
+	}
+}

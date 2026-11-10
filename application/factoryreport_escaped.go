@@ -19,7 +19,44 @@ type escape struct {
 	bug      string
 	created  time.Time
 	byTester bool
+	// sweep says the bug is a sweep find (IsSweepFind): a Builder's find that
+	// names the landing it was found in, not one that landing let through.
+	sweep    bool
 	landings []reportEntry
+}
+
+// SweepHeadChars is how much of a bug's description IsSweepFind reads.
+const SweepHeadChars = 700
+
+// sweepPhrases are the words a Builder's find carries in the head of its
+// description: it came from a closing comment or a sweep.
+var sweepPhrases = []string{"closing comment", "sweep", "left by", "left undone", "seen but not fixed", "to file"}
+
+// IsSweepFind says a [bug] story's description is a sweep find: a bug a Builder
+// found in his sweep or closing comment, which names that landing as its finder
+// and not its cause. Its first SweepHeadChars characters say closing comment,
+// sweep, LEFT BY, left undone, Seen but NOT fixed or TO FILE. A Tester's
+// finding (IsTesterFinding) and the bug mw next files for an unmet criterion
+// ("mw next landed ...", which names the closing comment) are no sweep find.
+// Known limit: a sweep find that also names its cause counts as a sweep find.
+// mw report asks this one function.
+func IsSweepFind(description string) bool {
+	if IsTesterFinding(description) {
+		return false
+	}
+	head := strings.ToLower(strings.TrimSpace(description))
+	if strings.HasPrefix(head, "mw next landed") {
+		return false
+	}
+	if runes := []rune(head); len(runes) > SweepHeadChars {
+		head = string(runes[:SweepHeadChars])
+	}
+	for _, phrase := range sweepPhrases {
+		if strings.Contains(head, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // firstLandings are the landings among entries, each story's first.
@@ -40,7 +77,8 @@ func firstLandings(all []reportEntry) map[string]reportEntry {
 // landing's day or in the EscapeDays after it, on the landing's rig, whose
 // title or description names the landing's story id. Each bug comes once, with
 // every landing it names, oldest first; byTester says the bug's description
-// is a finding of the Tester's (IsTesterFinding).
+// is a finding of the Tester's (IsTesterFinding), sweep that it is a sweep
+// find (IsSweepFind) and no escape.
 func escapedBugs(stories []StoryDetail, first map[string]reportEntry) []escape {
 	var escapes []escape
 	for _, d := range stories {
@@ -66,7 +104,7 @@ func escapedBugs(stories []StoryDetail, first map[string]reportEntry) []escape {
 			return named[i].id < named[j].id
 		})
 		escapes = append(escapes, escape{bug: d.Story.ID, created: d.Created, landings: named,
-			byTester: IsTesterFinding(d.Description)})
+			byTester: IsTesterFinding(d.Description), sweep: IsSweepFind(d.Description)})
 	}
 	return escapes
 }
@@ -100,22 +138,26 @@ func storyIDsNamed(text string) map[string]bool {
 
 // escapedEntries are the escaped bugs as the report counts them: each once, on
 // the day it was filed, under the rig, host and model of the newest landing it
-// names.
+// names; a sweep find is marked, for QUALITY to count on its own line.
 func (r FactoryReportResult) escapedEntries(escapes []escape) []reportEntry {
 	var entries []reportEntry
 	for _, x := range escapes {
 		landing := x.landings[len(x.landings)-1]
 		previous, inside := r.windowOfTime(x.created)
-		entries = append(entries, reportEntry{id: x.bug, escaped: true, byTester: x.byTester, previous: previous, inWindow: inside,
+		entries = append(entries, reportEntry{id: x.bug, escaped: true, byTester: x.byTester, sweep: x.sweep, previous: previous, inWindow: inside,
 			at: reportDay(x.created), rig: landing.rig, host: landing.host, model: landing.model})
 	}
 	return entries
 }
 
-// escapedBy are the bugs that escaped each landing, by its story, sorted.
+// escapedBy are the bugs that escaped each landing, by its story, sorted; a
+// sweep find escaped nothing.
 func escapedBy(escapes []escape) map[string][]string {
 	by := map[string][]string{}
 	for _, x := range escapes {
+		if x.sweep {
+			continue
+		}
 		for _, landing := range x.landings {
 			by[landing.id] = append(by[landing.id], x.bug)
 		}

@@ -217,8 +217,12 @@ type Quality struct {
 	// (escapedBugs), counted under the rig, host and model of that landing;
 	// EscapedTester are those the Tester found, the factory catching a bug on
 	// purpose, so EscapedBugs less EscapedTester is the bugs that reached him.
-	EscapedBugs        int     `json:"escaped_bugs"`
-	EscapedTester      int     `json:"escaped_bugs_tester"`
+	EscapedBugs   int `json:"escaped_bugs"`
+	EscapedTester int `json:"escaped_bugs_tester"`
+	// SweepFinds are the bugs that name a landing but are a Builder's find in
+	// his sweep or closing comment (IsSweepFind), not counted in EscapedBugs:
+	// before they were split off, EscapedBugs + SweepFinds was the old count.
+	SweepFinds         int     `json:"sweep_finds"`
 	Findings           int     `json:"tester_findings"`
 	FindingsPerLanding float64 `json:"findings_per_landing"`
 }
@@ -313,7 +317,10 @@ type reportEntry struct {
 	escaped bool
 	// byTester says an escaped bug was the Tester's finding.
 	byTester bool
-	reason   string
+	// sweep says an escaped-flagged entry is a sweep find, counted by
+	// SweepFinds and not by EscapedBugs.
+	sweep  bool
+	reason string
 	// conflictFiles are the files a merge-conflict refusal's story last
 	// conflicted in.
 	conflictFiles []string
@@ -762,6 +769,8 @@ func sumQuality(entries []reportEntry) Quality {
 	conflicts := map[string]int{}
 	for _, e := range entries {
 		switch {
+		case e.escaped && e.sweep:
+			q.SweepFinds++
 		case e.escaped:
 			q.EscapedBugs++
 			if e.byTester {
@@ -917,6 +926,7 @@ func (k ReportBlock) writeQuality(b *strings.Builder) {
 	}
 	fmt.Fprintf(b, "  bugs filed %d%s\n", q.BugsFiled, perLanding(q, q.BugsPerLanding, k.arrow("bugs_per_landing")))
 	fmt.Fprintf(b, "  %s%s\n", q.escapedText(), k.arrow("escaped_bugs"))
+	fmt.Fprintf(b, "  sweep finds %d\n", q.SweepFinds)
 	if q.Landed > 0 {
 		fmt.Fprintf(b, "  Tester findings %d%s\n", q.Findings, perLanding(q, q.FindingsPerLanding, k.arrow("findings_per_landing")))
 	}

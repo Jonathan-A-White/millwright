@@ -26,6 +26,13 @@ func newReportCmd() *cobra.Command {
 			"naming its story id, counted under the rig, host and model of that landing, as 'escaped bugs N\n" +
 			"(Tester M)': the Tester's findings (a description carrying 'Tester finding') are the factory\n" +
 			"catching a bug, so the quality bound and MODELS leave them out.\n" +
+			"A bug whose first 700 characters say closing comment, sweep, LEFT BY, left undone, Seen but NOT\n" +
+			"fixed or TO FILE is a sweep find, a Builder's find that names the landing it was found in and not\n" +
+			"one that landing let through: it is counted on its own line, 'sweep finds S', and not in escaped\n" +
+			"bugs, a change's escapes, MODELS or the quality bound (escaped bugs + sweep finds is the count\n" +
+			"before they were split). A Tester finding, and the bug mw next files ('mw next landed ...') for\n" +
+			"an unmet criterion, stay escapes. Known limit: a sweep find that also names its cause counts as\n" +
+			"a sweep find (it may name two landings).\n" +
 			"QUALITY ends with INVESTMENTS: the landings labelled investment over all the landings, the\n" +
 			"window before, the arrow and the target ([factory] invest_share, 0.33 unless set; mw config\n" +
 			"set factory.invest_share 0.2), and a line when the share is under half or over double it.\n" +
