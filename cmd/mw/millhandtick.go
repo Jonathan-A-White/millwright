@@ -8,6 +8,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 	"github.com/Jonathan-A-White/millwright/infrastructure/grist"
@@ -34,7 +35,7 @@ var MillhandTickStateDir = filepath.Join(".local", "state", "mw-millhand-tick")
 //
 // The home's tick also installs a changed formulas/ into the vault's
 // .beads/formulas (mw-gq6.314), as the vault's own commit.
-func hostSelfUpdate(rigs, afterLanding map[string]string, afterLimits map[string]time.Duration, deploySteps rig.AfterLandingOption, home string, files *vault.Vault, host string) application.SelfUpdate {
+func hostSelfUpdate(gateway *beads.Gateway, rigs, afterLanding map[string]string, afterLimits map[string]time.Duration, deploySteps rig.AfterLandingOption, home string, files *vault.Vault, host string) application.SelfUpdate {
 	return application.SelfUpdate{
 		Formulas: vault.NewFormulas(files),
 		Home:     files,
@@ -45,7 +46,16 @@ func hostSelfUpdate(rigs, afterLanding map[string]string, afterLimits map[string
 		Built:    rig.NewBuiltMarks(filepath.Join(home, SyncHaltStateDir)),
 		Units:    userunits.Systemctl{},
 		Slot:     rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
+		Landed:   rig.New(),
+		Live:     hostDeployCheck(gateway, files, host),
 	}
+}
+
+// hostDeployCheck is the live check every path that puts a rig live shares
+// (application.DeployCheck, mw-t5shinh.27): it reads the rig's site and healthz
+// through verifyWeb and writes DEPLOYED-CHECKED through the tracker.
+func hostDeployCheck(gateway *beads.Gateway, rules application.EpicRules, host string) application.DeployCheck {
+	return application.DeployCheck{Web: verifyWeb{}, Rules: rules, Tracker: gateway, Host: host}
 }
 
 // newMillhandTickCmd builds `mw millhand tick`: what the routine timer runs.
@@ -183,7 +193,7 @@ func newMillhandTickCmd() *cobra.Command {
 					Host:     host,
 					Sessions: tmux.New(),
 				},
-				SelfUpdate: hostSelfUpdate(rigs, afterLanding, afterLimits, deploySteps, home, mwVault(dir, host), host),
+				SelfUpdate: hostSelfUpdate(gateway, rigs, afterLanding, afterLimits, deploySteps, home, mwVault(dir, host), host),
 				Backend:    hostBackend(gateway, mwVault(dir, host), host, rigs, cmd.ErrOrStderr()),
 				Tidy:       application.Tidy{Mail: gateway, Notes: gateway, Beads: gateway, Formulas: gateway, Host: host},
 				Reach:      doctor.NetReach{Hosts: reach},

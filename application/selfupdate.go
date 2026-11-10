@@ -37,6 +37,21 @@ type FactoryCheckout interface {
 	Advance(ctx context.Context, rigDir, branch, commit string) (Advanced, error)
 }
 
+// LandedRange is what a rig's checkout took in between two commits: the stories
+// whose branches were merged, oldest first, and the newest version raised.
+type LandedRange struct {
+	Stories []string
+	Version string
+}
+
+// LandedLog is the port that says which stories a deploy carried: it reads the
+// history of a rig's checkout, and nothing else.
+type LandedLog interface {
+	// LandedBetween is what the checkout at rigDir holds after from, up to and
+	// including to. An empty from or to, or the same commit twice, is nothing.
+	LandedBetween(ctx context.Context, rigDir, from, to string) (LandedRange, error)
+}
+
 // BuiltMarks is where a host remembers, per rig, the commit it last built
 // successfully, so that a build that failed is tried again by the next tick.
 type BuiltMarks interface {
@@ -86,6 +101,13 @@ type SelfUpdate struct {
 	// Slot is the rig's after-landing lock, taken around the command the home
 	// runs for a rig other than the factory rig (mw-gq6.562). A nil Slot takes none.
 	Slot MergeSlot
+
+	// Landed and Live are how the home's deploy of another rig writes
+	// DEPLOYED-CHECKED on the stories it carried (mw-t5shinh.27): Landed says which
+	// stories the checkout took in since the last deploy, Live is the one live check
+	// a landing's own after-landing makes too. Either nil writes nothing.
+	Landed LandedLog
+	Live   DeployCheck
 }
 
 // selfUpdateWords is how every note about an update begins.
@@ -411,7 +433,35 @@ func (s SelfUpdate) deployRig(ctx context.Context, rig, dir string) []string {
 		return []string{fmt.Sprintf("%s, the home's deploy %s: %s; %s; run mw after-landing %s by hand%s",
 			moved, failedWords, firstLine(runErr.Error()), next, rig, kept)}
 	}
-	return []string{fmt.Sprintf("%s, deployed by the home: %s", moved, strings.ReplaceAll(said, "\n", " / "))}
+	notes := []string{fmt.Sprintf("%s, deployed by the home: %s", moved, strings.ReplaceAll(said, "\n", " / "))}
+	if deployed == "" {
+		deployed = before
+	}
+	return append(notes, s.deployedChecked(ctx, rig, dir, deployed, head)...)
+}
+
+// deployedChecked writes DEPLOYED-CHECKED, by DeployCheck.Write, on each story the
+// home's deploy of rig carried: those merged into the checkout after from, the
+// commit the rig was last deployed at, up to head. It is called only after the
+// rig's command passed whole.
+func (s SelfUpdate) deployedChecked(ctx context.Context, rig, dir, from, head string) []string {
+	if s.Landed == nil || s.Live.Web == nil {
+		return nil
+	}
+	words := "self-update: " + rig
+	landed, err := s.Landed.LandedBetween(ctx, dir, from, head)
+	if err != nil {
+		return []string{fmt.Sprintf("%s: the stories it deployed could not be read, so its live site was not checked: %s", words, firstLine(err.Error()))}
+	}
+	var stories []liveStory
+	for _, id := range landed.Stories {
+		stories = append(stories, liveStory{id: id})
+	}
+	var notes []string
+	for _, note := range s.Live.Write(ctx, true, Deployed{Rig: rig, Commit: head, Version: landed.Version, Stories: stories}) {
+		notes = append(notes, words+": "+note)
+	}
+	return notes
 }
 
 // Look is the dry form of a tick's update: it moves, fetches and runs nothing,

@@ -219,6 +219,10 @@ type BackendStage struct {
 	// stagings are kept apart (stagingClaim).
 	Claim SwapLock
 	Now   func() time.Time
+
+	// Live writes DEPLOYED-CHECKED on the story a swap carried, once the swap has
+	// gone through (mw-t5shinh.27). A zero Live writes none.
+	Live DeployCheck
 }
 
 // Wants reports whether this host names a backend for rig.

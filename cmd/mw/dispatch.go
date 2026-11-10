@@ -457,7 +457,7 @@ func newDispatchCmd() *cobra.Command {
 				} else if home, err := os.UserHomeDir(); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "no self-update this tick: there is no home directory to remember a build in: %v\n", err)
 				} else {
-					dispatch.SelfUpdate = hostSelfUpdate(rigs, afterLanding, afterLimits, deploySteps, home, files, host)
+					dispatch.SelfUpdate = hostSelfUpdate(gateway, rigs, afterLanding, afterLimits, deploySteps, home, files, host)
 				}
 				dispatch.Backend = hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr())
 			}

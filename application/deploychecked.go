@@ -37,6 +37,9 @@ type liveRead struct {
 	HealthzStatus int
 	HealthzErr    error
 	HealthzBody   string
+	// Backend is the commit of a backend swap, looked for in the healthz's answer;
+	// empty for any other deploy.
+	Backend string
 }
 
 // versionOnPage says whether text holds version as a whole version: not as the
@@ -108,6 +111,38 @@ func (r liveRead) versionLine(version string) string {
 	return line
 }
 
+// commitOnHealthz says whether text holds commit, whole or as its first seven
+// characters, not as part of a longer run of hex digits.
+func commitOnHealthz(text, commit string) bool {
+	commit = strings.ToLower(strings.TrimSpace(commit))
+	if len(commit) < 7 {
+		return false
+	}
+	for _, want := range []string{commit, commit[:7]} {
+		whole := regexp.MustCompile(`(?i)(?:^|[^0-9a-f])` + regexp.QuoteMeta(want) + `(?:$|[^0-9a-f])`)
+		if whole.MatchString(text) {
+			return true
+		}
+	}
+	return false
+}
+
+// backendLine is the outcome for a backend swap's commit, as a sentence: the
+// swapped backend's short commit is its version, and its healthz is where it is
+// looked for.
+func (r liveRead) backendLine() string {
+	short := updatedRevision(r.Backend)
+	switch {
+	case r.Healthz == "":
+		return fmt.Sprintf("version %s could not be looked for, for the rig names no healthz_url", short)
+	case r.HealthzErr != nil:
+		return fmt.Sprintf("version %s could not be looked for, for the healthz was not read", short)
+	case commitOnHealthz(r.HealthzBody, r.Backend):
+		return fmt.Sprintf("version %s was found in the healthz answer", short)
+	}
+	return fmt.Sprintf("version %s was not found in the healthz answer", short)
+}
+
 // stringsLine is the outcome for the strings a story names, empty when it names
 // none.
 func (r liveRead) stringsLine(wanted []string) string {
@@ -133,6 +168,9 @@ func (r liveRead) stringsLine(wanted []string) string {
 // Note is the line the landing's report carries for the read: what a person
 // reading it, and not the story's comment, is told.
 func (r liveRead) Note(version string) string {
+	if r.Backend != "" {
+		return "live check: " + r.backendLine()
+	}
 	switch {
 	case r.Site == "":
 		return "live check: " + r.healthzLine()
@@ -164,7 +202,11 @@ func (r liveRead) Comment(host, commit, version string, wanted []string) string 
 	if r.Site != "" {
 		fmt.Fprintf(&b, "Page: %s, fetched at %s.\n", r.pageLine(), r.At.UTC().Format(time.RFC3339))
 	}
-	fmt.Fprintf(&b, "Version: %s.\n", r.versionLine(version))
+	if r.Backend != "" {
+		fmt.Fprintf(&b, "Version: %s.\n", r.backendLine())
+	} else {
+		fmt.Fprintf(&b, "Version: %s.\n", r.versionLine(version))
+	}
 	if r.Healthz != "" {
 		fmt.Fprintf(&b, "Healthz: %s.\n", r.healthzLine())
 	}
@@ -174,60 +216,121 @@ func (r liveRead) Comment(host, commit, version string, wanted []string) string 
 	return b.String()
 }
 
+// DeployTracker is the two calls the live check makes of the tracker: the
+// comments a story already has, for the strings it names, and the one it writes.
+type DeployTracker interface {
+	CommentOnStory(ctx context.Context, id, text string) error
+	StoryComments(ctx context.Context, id string) ([]Comment, error)
+}
+
+// DeployCheck is the one live check every path that puts a rig's build live goes
+// through (mw-t5shinh.27): a landing's own after-landing (Next), the home's tick
+// deploying another host's landing (SelfUpdate) and the home's swap of a staged
+// backend (BackendStage). It reads the rig's live site once and writes a
+// DEPLOYED-CHECKED comment on each story the deploy carried, by the same rules
+// whichever path asks: only after a whole pass, only for a rig whose file names a
+// site_url or a healthz_url, never the word VERIFIED. A nil Web, Rules or Tracker
+// checks nothing.
+type DeployCheck struct {
+	Web     VerifyWeb
+	Rules   EpicRules
+	Tracker DeployTracker
+	Host    string
+	// Now is the clock the comment is dated by, the real one when nil. Bound is how
+	// long the whole read may take, DeployedCheckedBound when zero.
+	Now   func() time.Time
+	Bound time.Duration
+}
+
+// Deployed is what a passing deploy put live: the rig, the commit and the version
+// it landed (empty when the rig keeps none) and the stories it carried. Backend
+// says the deploy is a backend swap, which raises no version: the commit is then
+// looked for in what the rig's healthz answers.
+type Deployed struct {
+	Rig, Commit, Version string
+	Backend              bool
+	Stories              []liveStory
+}
+
+func (d DeployCheck) now() time.Time {
+	if d.Now != nil {
+		return d.Now()
+	}
+	return time.Now()
+}
+
 // readLiveSite asks the rig's site for its page, and its healthz when it names
 // one, under one bound for all of it.
-func (n Next) readLiveSite(ctx context.Context, rig, site, healthz string) liveRead {
-	bound := n.LiveCheckBound
+func (d DeployCheck) readLiveSite(ctx context.Context, rig, site, healthz string) liveRead {
+	bound := d.Bound
 	if bound <= 0 {
 		bound = DeployedCheckedBound
 	}
 	ctx, cancel := context.WithTimeout(ctx, bound)
 	defer cancel()
-	read := liveRead{Site: site, Healthz: healthz, At: n.now()}
+	read := liveRead{Site: site, Healthz: healthz, At: d.now()}
 	if site != "" {
-		read.Page = readLivePage(ctx, n.LiveSite, rig, site)
+		read.Page = readLivePage(ctx, d.Web, rig, site)
 	}
 	if healthz != "" {
-		status, body, err := n.LiveSite.Get(ctx, healthz)
+		status, body, err := d.Web.Get(ctx, healthz)
 		read.HealthzStatus, read.HealthzErr, read.HealthzBody = status, err, string(body)
 	}
 	return read
 }
 
-// deployedChecked, once the rig's after-landing command has passed on this host,
-// reads the rig's live site once and writes a DEPLOYED-CHECKED comment on each
-// story the landing landed, saying what it found. It changes nothing about the
-// landing: a page that does not hold the landed version, or does not answer, is
-// written as it came out. A rig whose file names neither a site_url nor a
-// healthz_url gets no comment, for nothing live was checked; nor does a landing
-// whose command did not run or did not pass. The landing report gets one line.
+// Write, once the rig's deploy has passed whole (passed), reads the rig's live
+// site once and writes a DEPLOYED-CHECKED comment on each story of dep, saying
+// what it found. It changes nothing about the deploy: a page that does not hold
+// the landed version, or does not answer, is written as it came out. A rig whose
+// file names neither a site_url nor a healthz_url gets no comment, for nothing
+// live was checked; nor does a deploy that did not run or did not pass. The notes
+// it returns are for the report of whoever asked.
 //
-// commit and version are what the landing put on the target branch, not what a
-// close reason says: the stories are not closed yet when a single landing gets here.
-func (n Next) deployedChecked(ctx context.Context, rig string, once *NextReport, commit, version string, stories []liveStory) {
-	if n.LiveSite == nil || n.Rules == nil || !once.AfterLandingPassed || len(stories) == 0 {
-		return
+// The commit and version are what the deploy put live, not what a close reason
+// says: the stories are not closed yet when a single landing gets here.
+func (d DeployCheck) Write(ctx context.Context, passed bool, dep Deployed) []string {
+	if d.Web == nil || d.Rules == nil || d.Tracker == nil || !passed || len(dep.Stories) == 0 {
+		return nil
 	}
-	rules, _, err := n.landingRequirements(ctx, rig)
+	rules, _, err := landingRequirementsFrom(ctx, d.Rules, dep.Rig)
 	if err != nil {
-		once.Notes = append(once.Notes, fmt.Sprintf("live check: the file of rig %s could not be read, so its live site was not checked: %s", rig, firstLine(err.Error())))
-		return
+		return []string{fmt.Sprintf("live check: the file of rig %s could not be read, so its live site was not checked: %s", dep.Rig, firstLine(err.Error()))}
 	}
 	if rules.SiteURL == "" && rules.HealthzURL == "" {
-		return
+		return nil
 	}
-	read := n.readLiveSite(ctx, rig, rules.SiteURL, rules.HealthzURL)
-	once.Notes = append(once.Notes, read.Note(version))
-	for _, story := range stories {
-		texts := story.texts
-		if said, err := n.Tracker.StoryComments(ctx, story.id); err == nil {
+	read := d.readLiveSite(ctx, dep.Rig, rules.SiteURL, rules.HealthzURL)
+	if dep.Backend {
+		read.Backend = dep.Commit
+	}
+	notes := []string{read.Note(dep.Version)}
+	for _, story := range dep.Stories {
+		texts := append([]string(nil), story.texts...)
+		if said, err := d.Tracker.StoryComments(ctx, story.id); err == nil {
 			for _, c := range said {
 				texts = append(texts, c.Text)
 			}
 		}
-		comment := read.Comment(n.Host, commit, version, VerifyStrings(texts...))
-		if err := n.Tracker.CommentOnStory(ctx, story.id, comment); err != nil {
-			once.Notes = append(once.Notes, fmt.Sprintf("the live check of %s could not be written on the story: %v", story.id, err))
+		comment := read.Comment(d.Host, dep.Commit, dep.Version, VerifyStrings(texts...))
+		if err := d.Tracker.CommentOnStory(ctx, story.id, comment); err != nil {
+			notes = append(notes, fmt.Sprintf("the live check of %s could not be written on the story: %v", story.id, err))
 		}
 	}
+	return notes
+}
+
+// deployCheck is the live check of a landing, made from Next's own parts.
+func (n Next) deployCheck() DeployCheck {
+	return DeployCheck{Web: n.LiveSite, Rules: n.Rules, Tracker: n.Tracker, Host: n.Host, Now: n.now, Bound: n.LiveCheckBound}
+}
+
+// deployedChecked is a landing's live check: DeployCheck.Write once the rig's
+// after-landing command has passed on this host (once.AfterLandingPassed), its
+// notes added to the landing report.
+func (n Next) deployedChecked(ctx context.Context, rig string, once *NextReport, commit, version string, stories []liveStory) {
+	if n.Tracker == nil {
+		return
+	}
+	once.Notes = append(once.Notes, n.deployCheck().Write(ctx, once.AfterLandingPassed, Deployed{Rig: rig, Commit: commit, Version: version, Stories: stories})...)
 }
