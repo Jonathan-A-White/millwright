@@ -1491,6 +1491,74 @@ Feature: Closing out a finished story and carrying on
       | runs/mw-gq6.1/result.json        |
       | runs/mw-gq6.1/after-landing.log  |
 
+  Scenario: A landing whose after-landing command passes checks the live page and writes DEPLOYED-CHECKED on the story, never VERIFIED (mw-t5shinh.2)
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.0"
+    And the rig's file in the vault holds the line "version_files = ['package.json', 'package-lock.json']"
+    And the rig names a command to run after a landing
+    And the rig's live site serves a page that holds the version "0.1.1"
+    And the rig's live site answers its healthz
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And "mw-gq6.1" carries one comment that begins "DEPLOYED-CHECKED by mw on vps"
+    And that DEPLOYED-CHECKED comment says: version 0.1.1 was found on the page
+    And that DEPLOYED-CHECKED comment says: the page <the site> answered 200
+    And that DEPLOYED-CHECKED comment says: healthz <the healthz> answered 200
+    And that DEPLOYED-CHECKED comment says: No seat has read this
+    And that DEPLOYED-CHECKED comment does not say: VERIFIED
+    And the live site was asked for its page 1 time
+    And the report says: live check: <the site>: version 0.1.1 found
+
+  Scenario: A live page that serves an older version makes a DEPLOYED-CHECKED that says the landed version was not found, and the story still closes (mw-t5shinh.2)
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.0"
+    And the rig's file in the vault holds the line "version_files = ['package.json', 'package-lock.json']"
+    And the rig names a command to run after a landing
+    And the rig's live site serves a page that holds the version "0.1.0"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And "mw-gq6.1" carries one comment that begins "DEPLOYED-CHECKED by mw on vps"
+    And that DEPLOYED-CHECKED comment says: version 0.1.1 was not found on the page
+    And that DEPLOYED-CHECKED comment does not say: VERIFIED
+    And the report says: live check: <the site>: version 0.1.1 not found
+
+  Scenario: A live site that does not answer within the bound makes a DEPLOYED-CHECKED that says the page could not be read, and the story still closes (mw-t5shinh.2)
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.0"
+    And the rig's file in the vault holds the line "version_files = ['package.json', 'package-lock.json']"
+    And the rig names a command to run after a landing
+    And the rig's live site does not answer
+    And the live check is bounded at 300 milliseconds
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And "mw-gq6.1" carries one comment that begins "DEPLOYED-CHECKED by mw on vps"
+    And that DEPLOYED-CHECKED comment says: the page <the site> could not be read
+    And that DEPLOYED-CHECKED comment does not say: VERIFIED
+    And the report says: live check: <the site>: the page could not be read
+
+  Scenario: A failed after-landing command writes no DEPLOYED-CHECKED, and the live site is not asked (mw-t5shinh.2)
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.0"
+    And the rig's file in the vault holds the line "version_files = ['package.json', 'package-lock.json']"
+    And the rig names a command to run after a landing, which prints "make: *** No rule to make target 'build'" and exits 2
+    And the rig's live site serves a page that holds the version "0.1.1"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And the comment on "mw-gq6.1" says: after landing: <the command>: exit status 2: make: *** No rule to make target 'build'
+    And "mw-gq6.1" carries no DEPLOYED-CHECKED comment
+    And the live site was asked for its page 0 times
+
+  Scenario: A rig with no site_url and no healthz_url gets no DEPLOYED-CHECKED, for nothing live was checked (mw-t5shinh.2)
+    Given the rig names a command to run after a landing
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And "mw-gq6.1" carries no DEPLOYED-CHECKED comment
+
   Scenario: An after-landing command that went well keeps its output in the run too, and the report does not point at it (mw-gq6.479)
     Given the rig names a command to run after a landing
     And the session of "mw-gq6.1" reported a plain success

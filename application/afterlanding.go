@@ -502,6 +502,7 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 	}
 	if err == nil && ran.Succeeded() {
 		report.Notes = append(report.Notes, line)
+		report.AfterLandingPassed = true
 		if note := markDeployedAt(ctx, n.Deployed, c.path.Rig, report.How.Commit); note != "" {
 			report.Notes = append(report.Notes, note)
 		}

@@ -118,6 +118,9 @@ type nextContext struct {
 	afterLimit    time.Duration     // how long an after-landing command may run; zero is the adapter's own
 	afterRetry    time.Duration     // how long a failed-on-the-network after-landing command waits to be run again; zero is the use case's own
 
+	live            *liveSiteFixture    // the rig's public site, when a scenario has one
+	liveBound       time.Duration       // how long the live check may take; zero is the use case's own
+	deployedComment string              // the DEPLOYED-CHECKED comment a step found last
 	deployHolding   application.Holding // the after-landing lock another deploy holds, in the lock scenario
 	deployRanBeside atomic.Bool         // whether the command had started when that deploy let go
 	deployReleased  chan struct{}
@@ -171,6 +174,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 		return ctx, nil
 	})
 	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
+		c.stopTheLiveSite()
 		c.releaseTheOtherCloseOut()
 		c.stopTheOtherLander()
 		if c.root != "" {
@@ -233,6 +237,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextMailSteps(ctx, c)
 	registerNextRigSteps(ctx, c)
 	registerNextAfterLandingSteps(ctx, c)
+	registerNextDeployedCheckedSteps(ctx, c)
 	registerNextBackendSteps(ctx, c)
 	registerNextRebaseSteps(ctx, c)
 	registerNextUnionSteps(ctx, c)
@@ -1161,6 +1166,8 @@ func (c *nextContext) nextUseCase() application.Next {
 		AfterLanding:   rig.NewAfterLanding(rig.WithAfterCommands(c.afterCommands), rig.WithAfterLimit(c.afterLimit)),
 		DeploySlot:     rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix), rig.WithSlotWait(slotPatience), rig.WithSlotPoll(20*time.Millisecond)),
 		AfterRetryWait: c.afterRetry,
+		LiveSite:       c.liveWeb(),
+		LiveCheckBound: c.liveBound,
 		Backend:        c.backendStage(),
 		Units:          c.unitRestarter(),
 		Stamps:         c.stamps,

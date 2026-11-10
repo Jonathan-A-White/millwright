@@ -244,6 +244,22 @@ Feature: mw land lands a batch rig's queue under one gate run
     And metrics/factory.jsonl holds no line for the rig
     And the Mayor was sent no mail saying the batch was held
 
+  Scenario: A batch whose after-landing command passes asks the live site for its page once and writes a DEPLOYED-CHECKED on each story (mw-t5shinh.2)
+    Given the rig's main holds a package.json and a package-lock.json at version "1.4.2"
+    And the rig's file in the vault also holds the line "version_files = ['package.json', 'package-lock.json']"
+    And the rig names a command to run after a landing
+    And the rig's live site serves a page that holds the version "1.4.3"
+    And these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And "mw-gq6.1" carries one comment that begins "DEPLOYED-CHECKED by mw on"
+    And "mw-gq6.2" carries one comment that begins "DEPLOYED-CHECKED by mw on"
+    And that DEPLOYED-CHECKED comment says: version 1.4.3 was found on the page
+    And that DEPLOYED-CHECKED comment does not say: VERIFIED
+    And the live site was asked for its page 1 time
+
   Scenario: The batch raises the version once, with one changelog entry per story
     Given the rig's main holds a package.json and a package-lock.json at version "1.4.2"
     And the rig's file in the vault also holds the line "version_files = ['package.json', 'package-lock.json']"

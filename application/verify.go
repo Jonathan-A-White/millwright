@@ -664,37 +664,73 @@ func (v VerifyDeploy) liveBundle(ctx context.Context, rig, site string) (string,
 	if site == "" {
 		return "", fmt.Sprintf("no site_url for %s", rig)
 	}
-	status, page, err := v.Web.Get(ctx, site)
+	read := readLivePage(ctx, v.Web, rig, site)
+	return read.Bundle, read.Why
+}
+
+// livePage is a rig's public page as it was read: the page itself and the text
+// of every bundle it names.
+type livePage struct {
+	// Status and Err are the page's own answer: Err is a request that got no
+	// reply, Status the reply otherwise.
+	Status int
+	Err    error
+	// Page is the page's text, empty when the page was not read.
+	Page string
+	// Bundle is the text of the bundles read, Bundles how many that is.
+	Bundle  string
+	Bundles int
+	// Why says why Bundle holds none or only some of what the page names; empty
+	// when every bundle was read.
+	Why string
+}
+
+// Read says whether the page itself was read: a reply of any 2xx status.
+func (p livePage) Read() bool { return p.Err == nil && p.Status >= 200 && p.Status <= 299 }
+
+// readLivePage asks web for the page at site and then for each bundle it names.
+func readLivePage(ctx context.Context, web VerifyWeb, rig, site string) livePage {
+	status, page, err := web.Get(ctx, site)
+	read := livePage{Status: status, Err: err}
 	switch {
 	case err != nil:
-		return "", fmt.Sprintf("the page %s could not be read: %v", site, err)
+		read.Why = fmt.Sprintf("the page %s could not be read: %v", site, err)
+		return read
 	case status < 200 || status > 299:
-		return "", fmt.Sprintf("the page %s answered %d", site, status)
+		read.Why = fmt.Sprintf("the page %s answered %d", site, status)
+		return read
 	}
+	read.Page = string(page)
 	base, err := url.Parse(site)
 	if err != nil {
-		return "", fmt.Sprintf("site_url %q of %s is not a URL: %v", site, rig, err)
+		read.Why = fmt.Sprintf("site_url %q of %s is not a URL: %v", site, rig, err)
+		return read
 	}
 	var text strings.Builder
 	seen := map[string]bool{}
-	for _, m := range bundleRef.FindAllStringSubmatch(string(page), -1) {
+	for _, m := range bundleRef.FindAllStringSubmatch(read.Page, -1) {
 		ref, err := url.Parse(m[1])
 		if err != nil || seen[m[1]] {
 			continue
 		}
 		seen[m[1]] = true
 		address := base.ResolveReference(ref).String()
-		code, body, err := v.Web.Get(ctx, address)
+		code, body, err := web.Get(ctx, address)
 		if err != nil || code < 200 || code > 299 {
-			return text.String(), fmt.Sprintf("the bundle %s could not be read (status %d, %v)", address, code, err)
+			read.Bundle = text.String()
+			read.Why = fmt.Sprintf("the bundle %s could not be read (status %d, %v)", address, code, err)
+			return read
 		}
 		text.Write(body)
 		text.WriteByte('\n')
+		read.Bundles++
 	}
 	if len(seen) == 0 {
-		return "", fmt.Sprintf("no assets/index-*.js bundle named on %s", site)
+		read.Why = fmt.Sprintf("no assets/index-*.js bundle named on %s", site)
+		return read
 	}
-	return text.String(), ""
+	read.Bundle = text.String()
+	return read
 }
 
 // inBundle is whether the bundle holds want as it stands, or as a JavaScript

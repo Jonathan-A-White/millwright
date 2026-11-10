@@ -255,7 +255,7 @@ func TestEachLandingTakesTheStepsOfTheTailInTheOrderMainTookThem(t *testing.T) {
 	wantSingle := []string{
 		"read the backend mw-x.1", "read the grist mw-x.1", "read the files outside the key mw-x.1",
 		"advance the rig's checkout", "write the run state mw-x.1", "queue the chain stamp mw-x.1",
-		"say the files outside the key mw-x.1", "run the after-landing command", "make the grist smoke",
+		"say the files outside the key mw-x.1", "run the after-landing command", "check the live site", "make the grist smoke",
 		"stage the backend mw-x.1", "spring the Tester mw-x.1",
 		"take the worktree away mw-x.1", "record the benchmark mw-x.1", "write the ledger line mw-x.1",
 		"commit the vault mw-x.1", "close the story mw-x.1", "close the formula mw-x.1", "mail the Mayor mw-x.1",
@@ -278,7 +278,7 @@ func TestEachLandingTakesTheStepsOfTheTailInTheOrderMainTookThem(t *testing.T) {
 	}
 	wantBatch = append(wantBatch, "advance the rig's checkout", "run the after-landing command",
 		"stage the backend mw-x.1", "stage the backend mw-x.2", "mail the Mayor mw-x.1", "mail the Mayor mw-x.2",
-		"let the merge slot go", "make the grist smoke")
+		"let the merge slot go", "check the live site", "make the grist smoke")
 	if got := batch.taken(); !reflect.DeepEqual(got, wantBatch) {
 		t.Errorf("a batch landing took\n  %s\nexpected\n  %s", strings.Join(got, "\n  "), strings.Join(wantBatch, "\n  "))
 	}
