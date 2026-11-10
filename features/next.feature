@@ -1230,6 +1230,37 @@ Feature: Closing out a finished story and carrying on
       | 311,200 tokens |
       | $4.21          |
 
+  Scenario: A Landed mail leaves out the lines the ledger and the run keep, and names where the whole report is
+    Given the session of "mw-gq6.1" reported this result:
+      """
+      {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "num_turns": 37,
+        "duration_ms": 1680000,
+        "session_id": "s-1",
+        "total_cost_usd": 4.21,
+        "usage": {
+          "input_tokens": 1200,
+          "output_tokens": 18000,
+          "cache_read_input_tokens": 280000,
+          "cache_creation_input_tokens": 12000
+        }
+      }
+      """
+    And the story "mw-gq6.1" carries the closing comment "Done.\nFor the rig memory: nothing"
+    When mw closes out "mw-gq6.1"
+    Then that mail's subject is "Landed: The story mw-gq6.1"
+    And that mail's body names the commit that landed on "main"
+    And that mail's body holds:
+      | 311,200 tokens                   |
+      | For the rig memory (millwright): |
+    And that mail's body does not say "The story mw-gq6.1"
+    And that mail's body does not say "committed in the vault"
+    And that mail's body does not say "the story is closed"
+    And that mail's last line is: The whole report is in runs/mw-gq6.1/ and in the seat's ledger.
+
   Scenario: A demo that lands is left open and waits for the Governor's Looks good
     Given the story "mw-gq6.1" is labelled "demo"
     And the session of "mw-gq6.1" reported a plain success
