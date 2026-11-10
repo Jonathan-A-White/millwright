@@ -40,7 +40,8 @@ type ConfigSet struct {
 // and making no backup, a key with no table that is not a known root key, a
 // value on more than one line, a file that does not parse before or after the
 // change, a value the key already holds, and a [factory] value outside the
-// bounds on the investment share.
+// bounds on the investment share and a [session] deny that is not an array of
+// permission rules of the shape Name or Name(text).
 func (c ConfigSet) Run(ctx context.Context, dotted, value string, dryRun bool) error {
 	table, key, err := domain.SplitConfigKey(dotted)
 	if err != nil {
@@ -75,6 +76,10 @@ func (c ConfigSet) Run(ctx context.Context, dotted, value string, dryRun bool) e
 	}
 
 	if err := domain.CheckFactoryChange(after, table, key); err != nil {
+		return fmt.Errorf("%w, so nothing was changed", err)
+	}
+
+	if err := domain.CheckSessionDenyChange(after, table, key); err != nil {
 		return fmt.Errorf("%w, so nothing was changed", err)
 	}
 

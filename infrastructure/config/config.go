@@ -3041,6 +3041,39 @@ func Tester() (TesterSettings, error) {
 	return tester, nil
 }
 
+// SessionDeny is the permission rules the `[session]` table's `deny` key lists:
+// Claude Code deny rules every story session is given (mw-t5shinh.22). A missing
+// file, table or key is no rules, which is not an error. A value that is not an
+// array of strings is refused naming the key. The shape of each rule is judged at
+// launch (domain.CheckPermissionRule), and by `mw config set` when it is set.
+func SessionDeny() ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	file, err := domain.ParseConfigTOML(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("%s does not parse as TOML: %w", path, err)
+	}
+	literal, ok := file.Lookup(domain.SessionTable, domain.SessionDenyKey)
+	if !ok {
+		return nil, nil
+	}
+	rules, err := domain.SessionDenyRules(literal)
+	if err != nil {
+		return nil, fmt.Errorf("%s of %s: %w", domain.SessionTable+"."+domain.SessionDenyKey, path, err)
+	}
+	return rules, nil
+}
+
 // TodoTable is the table of the config file that says how mw todo rank runs
 // its model pass over the Governor's To do board: `rank_model` and
 // `rank_effort` (sonnet and medium when it does not say), and `tz`, his zone,

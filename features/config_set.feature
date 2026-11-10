@@ -190,6 +190,23 @@ Feature: mw config set changes one key of the config file, with a backup and the
     And the config set printed: way back: cp <the config>.bak-2026-10-12T140309Z <the config>
     And the config directory is as it was
 
+  Scenario: the deny rules of the sessions round-trip through set and get
+    When mw config set is run for "session.deny" with '["Bash(scp *)"]'
+    Then mw config set succeeded
+    And the config line "deny = [\"Bash(scp *)\"]" is in the table "session"
+    When mw config get is run for "session.deny"
+    Then mw config get printed: ["Bash(scp *)"]
+
+  Scenario: a deny rule that is not of the shape Name or Name(text) is refused and the file is unchanged
+    When mw config set is run for "session.deny" with '["Bash(scp"]'
+    Then mw config set was refused, saying: Bash(scp
+    And the config directory is as it was
+
+  Scenario: a deny that is not an array of strings is refused and the file is unchanged
+    When mw config set is run for "session.deny" with '"Bash(scp *)"'
+    Then mw config set was refused, saying: not an array of strings
+    And the config directory is as it was
+
   Scenario: get prints a string without its quotes
     When mw config get is run for "after_landing.millwright"
     Then mw config get printed: make build

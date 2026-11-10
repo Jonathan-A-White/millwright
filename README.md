@@ -30,6 +30,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
 - [The weekly loop's brief](#the-weekly-loops-brief)
 - [The factory's investments](#the-factorys-investments)
 - [Changing one key of the config file](#changing-one-key-of-the-config-file)
+  - [The `[session]` table: deny rules for story sessions](#the-session-table-deny-rules-for-story-sessions)
 - [Setting a story's path](#setting-a-storys-path)
 - [Booting a session into a seat](#booting-a-session-into-a-seat)
 - [Dispatching a story](#dispatching-a-story)
@@ -955,11 +956,39 @@ table, a missing table is appended, every other byte and a comment after the old
 value are kept), and prints the old value (or `unset`), the new value, the
 backup, and the way back as one whole command (`cp <backup> <config>`). A key
 with no table that is not a known root-table key, a value that would break the file, a file that does not parse as
-TOML before or after the change, and a value the key already holds
+TOML before or after the change, a `session.deny` that is not an array of permission rules, and a value the key already holds
 (`unchanged`) are refused with a non-zero status, nothing written and no backup
 made. A value that is already TOML (a quoted string, an array, a number, `true`)
 is written as typed; any other is quoted as a string. See
 `features/config_set.feature`.
+
+### The `[session]` table: deny rules for story sessions
+
+```toml
+[session]
+deny = ["Bash(mw release *)", "Read(~/.ssh/**)"]   # empty, and absent, by default
+```
+
+`deny` is an array of Claude Code permission rules. `mw` adds them as
+`permissions.deny` to the `--settings` of every story session it starts (Builder,
+Tester, batch fixer), so the harness itself refuses a matching call, ahead of any
+allow rule of the user's own settings and before the classifier is asked: Claude
+Code evaluates "deny, then ask, then allow", across settings files too. `mw` ships
+no rule; with no table or an empty array the settings are byte for byte what they
+were. The seats' windows (`seat`, `deputy`, `millhand`) are not given them, the
+Codex harness has no such rule (it is sandboxed, not rule-listed) and the grinds
+run `--restricted` with only `Read`, so none of the three carries the list.
+
+A rule is `Name` or `Name(text)` on one line. `mw config set session.deny '[...]'`
+refuses one that is not, and a value that is not an array of strings, writing
+nothing; a bad rule that gets into the file anyway (a hand edit) refuses each
+launch of a story session, naming the rule, rather than being skipped by the
+harness. **A Bash rule reads the command as typed.** It meets each part of a
+compound command, a `$(...)` and a `timeout`, `time`, `nice`, `nohup` or `stdbuf`
+wrapper, but not `/usr/bin/mw release`, `bash -c 'mw release'` or
+`git -C . push`: it is a bump, not a wall, and what it lets through meets the
+classifier as before. The way back is `mw config set session.deny '[]'`;
+`mw config get session.deny` prints the list on a host.
 
 ## Setting a story's path
 

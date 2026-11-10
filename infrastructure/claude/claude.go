@@ -144,20 +144,24 @@ var UnattendedSeatSettings = withDenyHook(SessionSettings)
 
 // sessionSettings is the --settings a story's session is given: SessionSettings,
 // plus a rule for tests's own allow rules when tests is not empty (see
-// testsAllowRule). A rig with no [tests] line — tests is "" — gets exactly
-// SessionSettings, byte for byte, so a host that names no tests for any rig
-// sees no change from before this rule existed.
+// testsAllowRule), plus deny as permissions.deny when it is not empty (see
+// denyRules). A rig with no [tests] line and no deny rules gets exactly
+// SessionSettings, byte for byte, so a host that names neither sees no change
+// from before these rules existed.
 //
 // The document is read and written back rather than spliced, for the same
 // reason withDenyHook is: so that the rule's own quotes and parentheses are
 // escaped by the JSON encoder and not by hand.
-func sessionSettings(tests string) (string, error) {
-	if tests == "" {
+func sessionSettings(tests string, deny []string) (string, error) {
+	if tests == "" && len(deny) == 0 {
 		return SessionSettings, nil
 	}
-	rules, err := testsAllowRule(tests)
-	if err != nil {
-		return "", err
+	var rules []string
+	if tests != "" {
+		var err error
+		if rules, err = testsAllowRule(tests); err != nil {
+			return "", err
+		}
 	}
 
 	var doc map[string]any
@@ -170,12 +174,76 @@ func sessionSettings(tests string) (string, error) {
 		allow = append(allow, rule)
 	}
 	permissions["allow"] = allow
+	if len(deny) > 0 {
+		denied := make([]any, 0, len(deny))
+		for _, rule := range deny {
+			denied = append(denied, rule)
+		}
+		permissions["deny"] = denied
+	}
 
 	out, err := json.Marshal(doc)
 	if err != nil {
 		return "", fmt.Errorf("the session settings for %q do not encode: %w", tests, err)
 	}
 	return string(out), nil
+}
+
+// denyRules checks the deny rules the config lists (mw-t5shinh.22, `[session]
+// deny`) before they become permissions.deny of a story's session: each must be
+// of the shape `Name` or `Name(text)` on one line, and one that is not refuses
+// the launch, naming the rule, so that nothing starts with a list the harness
+// would read otherwise than it was written. mw ships no rule of its own: the
+// list is the Governor's, and empty until he names it.
+//
+// What the permission reference of Claude Code 2.1.322 says (the page
+// "Configure permissions", code.claude.com/docs/en/permissions, read 2026-11-10),
+// on the three points this rests on (and the limit of a Bash rule, the third bullet):
+//
+//   - A deny rule against an allow rule from another settings file: "Rules are
+//     evaluated in order: deny, then ask, then allow. The first match in that
+//     order determines the outcome, and rule specificity doesn't change the
+//     order." and "The same holds across settings scopes: if user settings allow
+//     a permission and project settings deny it, the deny rule blocks it. The
+//     reverse is also true: a user-level deny blocks a project-level allow,
+//     because deny rules from any scope are evaluated before allow rules." So a
+//     deny in this --settings beats `Bash(mw config set:*)` and the rest of the
+//     user file's allow rules.
+//   - A Bash rule against a compound command, a `$(...)` and a wrapper: "Deny
+//     and ask rules apply when any subcommand matches them, including a command
+//     nested inside a subshell, a command substitution, or a control-flow body
+//     such as a `for` loop." (`cd /tmp && git clean -f` and `echo "$(git clean
+//     -f)"` are its examples.) "Before matching Bash rules, Claude Code strips a
+//     fixed set of wrappers, so a rule like `Bash(npm test *)` also matches
+//     `timeout 30 npm test`. The stripped wrappers are `timeout`, `time`, `nice`,
+//     `nohup`, and `stdbuf`, plus the shell builtins `command` and `builtin`,
+//     and zsh's `noglob`." Not stripped: "Exec wrappers: such as `watch`,
+//     `setsid`, `ionice`, and `flock`", and environment runners such as `npx` or
+//     `docker exec`.
+//   - A Bash rule is a bump, not a wall: "A Bash rule matches the command text
+//     Claude writes, after Claude Code splits compound commands and strips
+//     wrappers. It doesn't match the same program invoked in a different form, so
+//     a deny or ask rule covers the invocation Claude usually produces and isn't
+//     a security boundary around the program." (`Bash(rm *)` stops `rm -rf
+//     build/` and not `/bin/rm -rf build/` or `bash -c 'rm -rf build/'`.)
+//   - A rule the harness cannot parse: the page has no general statement. It says
+//     of one kind, "When Claude Code loads a settings file, it skips any `mcp__`
+//     rule that has parentheses. Claude Code lists the skipped rule in the
+//     invalid-settings dialog when an interactive session starts" (a story's
+//     session is headless and has no dialog), of `Bash(command:rm *)` that
+//     "Claude Code ignores it and emits a startup warning", and that "an allow
+//     rule with an unusable pattern doesn't approve anything" while "a deny or ask
+//     rule whose path isn't usable as a gitignore pattern still guards that exact
+//     path". So a rule the harness skips is a rule that does not deny, with at
+//     most a warning nobody reads: that is why the shape is checked here and by
+//     `mw config set` and not left to the harness.
+func denyRules(deny []string) ([]string, error) {
+	for _, rule := range deny {
+		if err := domain.CheckPermissionRule(rule); err != nil {
+			return nil, err
+		}
+	}
+	return deny, nil
 }
 
 // withDenyHook is settings with the PermissionRequest hook that runs
@@ -218,6 +286,7 @@ type Harness struct {
 	shell          string
 	permissionMode string
 	tests          map[string]string
+	deny           func() ([]string, error)
 	envFile        string
 	claudeEnvFile  string
 	serverHost     string
@@ -256,6 +325,22 @@ func WithPermissionMode(mode string) Option {
 // asked (mw-gq6.83). A rig this does not name gets no such rule.
 func WithTests(commands map[string]string) Option {
 	return func(h *Harness) { h.tests = commands }
+}
+
+// WithDeny gives a story's session the deny rules read leaves, as
+// permissions.deny of its --settings (`[session] deny` of the config file,
+// config.SessionDeny; mw-t5shinh.22). read is called at each launch, so a list
+// that cannot be read or a rule that is not of the shape `Name` or `Name(text)`
+// refuses that launch, naming it, and a change of the file is met by the next
+// session. No rules, or none read, leaves the settings as they were. A seat's
+// session (SeatSession) is not given them.
+func WithDeny(read func() ([]string, error)) Option {
+	return func(h *Harness) { h.deny = read }
+}
+
+// WithDenyRules is WithDeny for a list known in advance.
+func WithDenyRules(rules ...string) Option {
+	return WithDeny(func() ([]string, error) { return rules, nil })
 }
 
 // WithEnvFile names a file of shell assignments, such as ~/.config/mw/beads.env
@@ -374,7 +459,17 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	if !knownPermissionMode(h.permissionMode) {
 		return application.SessionSpec{}, fmt.Errorf("launching %s: %q is not a permission mode Claude Code takes", l.StoryID, h.permissionMode)
 	}
-	settings, err := sessionSettings(h.tests[l.Path.Rig])
+	var deny []string
+	if h.deny != nil {
+		read, err := h.deny()
+		if err == nil {
+			deny, err = denyRules(read)
+		}
+		if err != nil {
+			return application.SessionSpec{}, fmt.Errorf("launching %s: %w", l.StoryID, err)
+		}
+	}
+	settings, err := sessionSettings(h.tests[l.Path.Rig], deny)
 	if err != nil {
 		return application.SessionSpec{}, fmt.Errorf("launching %s: %w", l.StoryID, err)
 	}
@@ -398,8 +493,8 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	argv = append(argv, StoryDisallowedTools...)
 	argv = append(argv,
 		// The session signs nothing it commits, may run bd without being asked,
-		// and may run its own rig's tests when h.tests names one. See
-		// SessionSettings and sessionSettings.
+		// may run its own rig's tests when h.tests names one, and is refused what
+		// h.deny lists. See SessionSettings and sessionSettings.
 		"--settings", settings,
 		"--name", l.StoryID,
 	)

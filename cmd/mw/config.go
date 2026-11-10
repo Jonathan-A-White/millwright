@@ -77,7 +77,8 @@ func newConfigSetCmd() *cobra.Command {
 			"  mw config set after_landing.millwright 'make build'\n" +
 			"  mw config set cloud.caps.desktop 3\n" +
 			"  mw config set cap 2\n" +
-			"  mw config set tester.rigs '[\"lampas\"]'\n\n" +
+			"  mw config set tester.rigs '[\"lampas\"]'\n" +
+			"  mw config set session.deny '[\"Bash(mw release *)\"]'\n\n" +
 			"A value that is already TOML (a quoted string, an array, an inline table, a number, true or\n" +
 			"false, a date) is written as typed; any other value is written as a quoted string. To store\n" +
 			"the string 5 and not the number, pass '\"5\"'. The table may be dotted (cloud.caps); the key\n" +
@@ -86,7 +87,7 @@ func newConfigSetCmd() *cobra.Command {
 			"top-level key is refused, naming the known ones.\n\n" +
 			"It refuses, with a non-zero status, writing nothing and making no backup: a key with no\n" +
 			"table that is not a known top-level key, a value that would break the file, a file that does not parse as TOML before or after\n" +
-			"the change, and a value the key already holds (unchanged). --dry-run prints the same and\n" +
+			"the change, a session.deny that is not an array of permission rules (Name or Name(text)), and a value the key already holds (unchanged). --dry-run prints the same and\n" +
 			"writes nothing.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {

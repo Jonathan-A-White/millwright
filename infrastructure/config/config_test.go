@@ -3036,3 +3036,33 @@ func TestAnAfterLandingDeployStepThatIsNotAStepNumberIsRefusedByRigAndValue(t *t
 		}
 	}
 }
+
+// [session] deny is a list of Claude Code permission rules (mw-t5shinh.22).
+func TestSessionDenyIsReadFromItsTable(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n\n[session]\ndeny = [\"Bash(scp *)\", 'Read(~/.ssh/**)'] # nothing is copied out\n")
+	rules, err := config.SessionDeny()
+	if err != nil {
+		t.Fatalf("reading [session]: %v", err)
+	}
+	if want := []string{"Bash(scp *)", "Read(~/.ssh/**)"}; !slices.Equal(rules, want) {
+		t.Errorf("expected %v, got %v", want, rules)
+	}
+
+	writeConfig(t, "host = \"laptop\"\n")
+	if rules, err := config.SessionDeny(); err != nil || len(rules) != 0 {
+		t.Errorf("expected a missing table to be no rules, got %v, %v", rules, err)
+	}
+	writeConfig(t, "[session]\ndeny = []\n")
+	if rules, err := config.SessionDeny(); err != nil || len(rules) != 0 {
+		t.Errorf("expected an empty list to be no rules, got %v, %v", rules, err)
+	}
+}
+
+func TestSessionDenyThatIsNotAnArrayIsAnErrorNamingTheKey(t *testing.T) {
+	for _, body := range []string{"deny = \"x\"\n", "deny = [1, 2]\n"} {
+		writeConfig(t, "[session]\n"+body)
+		if _, err := config.SessionDeny(); err == nil || !strings.Contains(err.Error(), "session.deny") {
+			t.Errorf("expected %q to be an error naming session.deny, got %v", body, err)
+		}
+	}
+}
