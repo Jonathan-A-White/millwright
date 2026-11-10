@@ -75,7 +75,7 @@ installs and starts nothing.
 8. **rigs**: every rig in `BOOST_RIGS`.
 
    A checkout already there (5, 7 and 8; a box made from a snapshot has them all) is checked: for object files that are empty, then `git status` and `git fsck --connectivity-only`. A broken one is repaired: its empty objects removed, `git fetch`, `git reset --hard origin/<its branch>`. When that does not mend it, it is moved aside to `<dir>.broken-<time>` and cloned again, with its old `.git/config` copied in. The log says `repaired ...` or `re-cloned ...`. A snapshot of cloud1 once carried a vault whose HEAD was a zero-byte object, and every dispatch on the boxes made from it failed before claiming (mw-5gr3k0.8). The checkout the script is run from is only checked; what is wrong with it is a note.
-9. **config**: `~/.config/mw/config.toml` with `host`, `vault`, `cap`, `beads_sync = "auto"`, `beads_server_host`, the `[rigs]` table, and a `[tests]` line for each rig it cloned (and a `[changed_specs]` line and a `[test_parts.<rig>]` table, which splits that rig's gate into parts for `mw check <story> --part N`, where there is one), only if there is no config. In an existing one only the `host` line is ever edited: it is set to `BOOST_HOST` when it names another host, as a config a snapshot carries does, and every other line is kept; the additions are a `[test_parts.<rig>]` table the config has no header for, which is appended whole, so a Boost made before a rig's gate was split runs it in parts after a re-run (mw-gq6.592), and `millwright = "make build"` in `[after_landing]` when that table has no `millwright` key (a host's own value, even `""`, is kept), so a landing of a millwright story rebuilds the box's `mw` (mw-gq6.632). The other lines it lacks are listed. The `[tests]` and `[changed_specs]` lines and the `[test_parts.<rig>]` tables are copied, as written, from the vault's `hosts/boost-config.toml` (below), never typed per box. A rig that file does not name is said, not guessed: without its `[tests]` line `mw next` gates the rig with `make test`, which a rig with no Makefile refuses (mw-gq6.453). `mw doctor rig-tests` names such a rig on a Boost later.
+9. **config**: `~/.config/mw/config.toml` with `host`, `vault`, `cap`, `beads_sync = "auto"`, `beads_server_host`, the `[rigs]` table, and a `[tests]` line for each rig it cloned (and a `[changed_specs]` line and a `[test_parts.<rig>]` table, which splits that rig's gate into parts for `mw check <story> --part N`, where there is one, and the `[session]` table of deny rules every story session is refused, where the vault's file has one), only if there is no config. In an existing one only the `host` line is ever edited: it is set to `BOOST_HOST` when it names another host, as a config a snapshot carries does, and every other line is kept; the additions are a `[test_parts.<rig>]` table the config has no header for, which is appended whole, so a Boost made before a rig's gate was split runs it in parts after a re-run (mw-gq6.592), and `millwright = "make build"` in `[after_landing]` when that table has no `millwright` key (a host's own value, even `""`, is kept), so a landing of a millwright story rebuilds the box's `mw` (mw-gq6.632). The other lines it lacks are listed. The `[tests]` and `[changed_specs]` lines and the `[test_parts.<rig>]` tables are copied, as written, from the vault's `hosts/boost-config.toml` (below), never typed per box. A rig that file does not name is said, not guessed: without its `[tests]` line `mw next` gates the rig with `make test`, which a rig with no Makefile refuses (mw-gq6.453). `mw doctor rig-tests` names such a rig on a Boost later.
 10. **browsers**: for each cloned rig whose `package.json` depends on `@playwright/test` (lampas's `[changed_specs]` and postern's `gate:shots` drive a browser), `npx playwright@<the version its package-lock.json holds> install --with-deps chromium`, run in the rig, so the browser is the revision that rig's own Playwright wants. It needs root for the system libraries. Skipped when that version's chromium was installed before.
 11. **beads**: `~/.config/mw/beads.env` (mode 600): `BEADS_DOLT_SERVER_HOST`, `_PORT`, and the user and password if given. This is what makes `bd` reach the home's server instead of making a second, empty database.
 12. **profile**: a marked block in `~/.profile` that puts `~/.local/bin`, `~/.local/go/bin` and `/usr/local/go/bin` on `PATH` (each guarded on its own; an older block is replaced in place) and reads the three env files.
@@ -83,7 +83,7 @@ installs and starts nothing.
 
 ### hosts/boost-config.toml
 
-The one file in the vault that says what a Boost's `[tests]`, `[changed_specs]` and `[test_parts.<rig>]` hold: the same lines as the home's `config.toml`, one per rig, each on one line; a `[test_parts.<rig>]` table is one rig's gate in parts, one `"part name" = "command"` line each, in the order `--part N` counts them.
+The one file in the vault that says what a Boost's `[tests]`, `[changed_specs]`, `[test_parts.<rig>]` and `[session]` hold: the same lines as the home's `config.toml`, one per rig, each on one line; a `[test_parts.<rig>]` table is one rig's gate in parts, one `"part name" = "command"` line each, in the order `--part N` counts them.
 
 ```toml
 [tests]
@@ -96,10 +96,18 @@ lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"
 [test_parts.lampas]
 "install" = "npm ci --no-audit --no-fund"
 "vitest 1/6" = "TZ=UTC npx vitest run --shard 1/6"
+
+[session]
+deny = ["Bash(mw release *)", "Read(~/.ssh/**)"]
 ```
 
+`[session] deny` is the home's list of permission rules every story session is refused
+(README, "The `[session]` table"), on one line, copied whole into a new Boost's config; a Boost
+already up is brought level by `mw cloud check`, which runs `contrib/vultr-boost set-session-deny`
+on a box whose kept list is not the home's (mw-t5shinh.33).
+
 It is written by `mw config export-boost`, run on the home: it rewrites the file from the
-home's `[tests]`, `[changed_specs]` and `[test_parts.<rig>]` (nothing else of the config), names each line it
+home's `[tests]`, `[changed_specs]`, `[test_parts.<rig>]` and `[session]` deny (nothing else of the config), names each line it
 brings level, and commits the file in the vault (mw-gq6.456). When a rig's line changes in
 the home's `config.toml`, run it again, or the next Boost gets the old line; `mw doctor
 boost-config`, on the home, says when the two differ, naming each rig; on a Boost it says when a line the Boost holds differs from the file's, naming both values and the `mw config set` that levels it (a line the Boost lacks is not faulty: `mw sync` appends it). Only the rigs in

@@ -990,6 +990,15 @@ wrapper, but not `/usr/bin/mw release`, `bash -c 'mw release'` or
 classifier as before. The way back is `mw config set session.deny '[]'`;
 `mw config get session.deny` prints the list on a host.
 
+The rented boxes (cloud1 and the rest) get the same list: `mw config export-boost`
+writes the home's `[session]` table into the vault's `hosts/boost-config.toml`,
+`contrib/boost-bootstrap.sh` copies it into the config of a new Boost, and the
+cloud check (`mw cloud check`) sets it on a box already up whose kept list is not
+the home's (`contrib/vultr-boost set-session-deny`), once, as a move in the cloud
+report; a box already level gets no ssh. An unset or empty `deny` on the home
+sets no box and empties none. `mw doctor boost-config` names a home whose list
+differs from the file's.
+
 ## Setting a story's path
 
 ```sh

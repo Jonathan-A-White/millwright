@@ -20,6 +20,7 @@ contrib/vultr-boost spend          # what Vultr's billing says the boxes cost th
 contrib/vultr-boost set-cap        # --name NAME --cap N: set the sessions a box that is up runs at once
 contrib/vultr-boost set-pace       # --name NAME: make the box's dispatch timer tick every five minutes
 contrib/vultr-boost set-harness    # --name NAME --version V: bring the box's Claude Code up to V (docs/harness-level.md)
+contrib/vultr-boost set-session-deny  # --name NAME --deny '["rule", ...]': set [session] deny in the box's config.toml
 contrib/vultr-boost address        # --name NAME: the box's WireGuard address, then its user, off the hub
 ```
 
