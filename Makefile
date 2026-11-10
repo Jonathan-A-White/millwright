@@ -78,7 +78,8 @@ test:
 # Then the
 # gate's parallelism: GOFLAGS and GOMAXPROCS must follow JOBS. Then that no
 # tracked file is an ELF or Mach-O executable or over 2 MB outside testdata/
-# (scripts/check-tracked-binaries.sh). Every
+# (scripts/check-tracked-binaries.sh). Then the beads restore drill, against a
+# stand-in bd (scripts/check-beads-restore-drill.sh). Every
 # other check here reads only this repository (and a temporary directory)
 # and starts nothing.
 lint:
