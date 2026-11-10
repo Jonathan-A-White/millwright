@@ -1,9 +1,15 @@
 package main
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -43,7 +49,17 @@ func newReportCmd() *cobra.Command {
 			"After QUALITY come SPEED (the median and p90 of actual over par, the wall time from dispatch\n" +
 			"to landing, and each host's gate usual against latest; 'no par yet' where no close-out\n" +
 			"measured one) and FUEL (tokens per landing from the ledger and $ per landing from the result\n" +
-			"files, every attempt of a story summed). After FUEL, MODELS sets opus and sonnet (and haiku and\n" +
+			"files, every attempt of a story summed; the stories' own sessions on every host, and no seat's).\n" +
+			"For the whole factory (not under --rig or --host) FUEL ends with SEATS: on the home, a line for\n" +
+			"each seat that ran a session in the window (the Mayor, the Deputy and the rest), its dollars and\n" +
+			"dollars per landing, then 'all seats $/landing': the stories' figure plus the seats' dollars over\n" +
+			"the same landings. A seat's dollars are the totalCostUSD of the last cost-state line of each main\n" +
+			"session Claude Code recorded in the vault's directory whose transcript was last written in the\n" +
+			"window; the seat is the first word of the session's name (a name that is no folder under seats/\n" +
+			"is 'other'); a subagent adds nothing; a session with no cost-state line (one still running) adds\n" +
+			"no dollars and is counted as 'N sessions without a cost figure'. Off the home SEATS is one line,\n" +
+			"'seats: counted on the home'. mw report send keeps seat_usd and usd_per_landing_all in the day's\n" +
+			"row. After FUEL, MODELS sets opus and sonnet (and haiku and\n" +
 			"fable once they had a session) side by side: landed, first-try share, refused, retried, tokens,\n" +
 			"$ and escaped bugs per landed story, '-' where a model has nothing to measure, then by kind\n" +
 			"(rig and bug or feature) what each landed and its first-try share; --json has every number\n" +
@@ -104,20 +120,28 @@ func newReportCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			seatSessions, seats, err := seatFuelSources(dir)
+			if err != nil {
+				return err
+			}
 			_, err = application.FactoryReport{
-				Tracker:     gateway,
-				History:     files,
-				Review:      review,
-				Files:       files,
-				Benchmarks:  vault.Benchmarks{Vault: files},
-				Rules:       files,
-				Seat:        BuilderSeat,
-				Since:       from,
-				Around:      around,
-				Commits:     rig.New(),
-				FactoryDir:  factoryDir,
-				Investments: files,
-				InvestShare: share, InvestShareMin: shareMin, InvestShareMax: shareMax,
+				SeatSessions: seatSessions,
+				Seats:        seats,
+				Home:         files,
+				Here:         here,
+				Tracker:      gateway,
+				History:      files,
+				Review:       review,
+				Files:        files,
+				Benchmarks:   vault.Benchmarks{Vault: files},
+				Rules:        files,
+				Seat:         BuilderSeat,
+				Since:        from,
+				Around:       around,
+				Commits:      rig.New(),
+				FactoryDir:   factoryDir,
+				Investments:  files,
+				InvestShare:  share, InvestShareMin: shareMin, InvestShareMax: shareMax,
 				Rig:  rigName,
 				Host: host,
 				JSON: asJSON,
@@ -132,6 +156,27 @@ func newReportCmd() *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "", "narrow every block to this host")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the whole structure as JSON")
 	return cmd
+}
+
+// seatFuelSources is where the SEATS block of FUEL reads from: the transcripts
+// of the sessions run in the vault's directory, and the names of the seats, the
+// folders under seats/ in the vault.
+func seatFuelSources(vaultDir string) (application.SeatSessions, []string, error) {
+	root, err := claude.DefaultProjectsRoot()
+	if err != nil {
+		return nil, nil, err
+	}
+	entries, err := os.ReadDir(filepath.Join(vaultDir, application.SeatsDir))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, fmt.Errorf("listing the seats: %w", err)
+	}
+	var seats []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			seats = append(seats, entry.Name())
+		}
+	}
+	return claude.NewSeatTranscripts(root, vaultDir), seats, nil
 }
 
 // investShareSettings reads the [factory] table's investment target and the

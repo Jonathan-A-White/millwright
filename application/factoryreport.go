@@ -110,8 +110,17 @@ type FactoryReport struct {
 	// whole factory (a report narrowed to a rig or host, or to a landing, leaves
 	// them out); left nil the report has no HIS TIME part.
 	Review ReviewCounter
-	Now    func() time.Time
-	Out    io.Writer
+	// SeatSessions, Seats, Home and Here, when all set, add the SEATS block to
+	// FUEL for the whole factory: what the seats' sessions cost, read from the
+	// transcripts of this host's vault directory, and so on the home alone.
+	// Seats names the folders under seats/; Here is this host (Host narrows the
+	// report). Left unset the report has no SEATS block.
+	SeatSessions SeatSessions
+	Seats        []string
+	Home         HomeFile
+	Here         string
+	Now          func() time.Time
+	Out          io.Writer
 }
 
 // ReviewCounter counts what waits for him, as mw status DAMPERS does. The real
@@ -295,6 +304,10 @@ type FactoryReportResult struct {
 	ModelCompare *ModelCompare `json:"model_compare,omitempty"`
 	// Review is his time today, whole-factory; nil when the report counted none.
 	Review *ReviewTime `json:"his_time,omitempty"`
+	// SeatFuel is what the seats' sessions cost, the SEATS block of FUEL; its
+	// fields are flattened into the JSON, and empty for a report narrowed to a
+	// rig, host or landing.
+	SeatFuel
 	// EpicsMoved is how many epics had a story closed or claimed in the window;
 	// the parent's note says it in words. It is not in the JSON.
 	EpicsMoved int `json:"-"`
@@ -573,6 +586,10 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	if whole := r.blocks(entries, nil, func(reportEntry) string { return "factory" }, nil); len(whole) == 1 {
 		result.Whole = &whole[0]
 	}
+	var seatSessions []SeatSession
+	if result.SeatFuel, seatSessions, err = r.seatFuel(ctx, result, now); err != nil {
+		return result, fmt.Errorf("reporting quality: %w", err)
+	}
 	if result.Landing == nil {
 		share := readInvestShare(result.Whole, result.Rigs, starvedP1Rig(stories, now, r.Rig, r.Host), r.InvestShare, r.InvestShareMin, r.InvestShareMax)
 		result.InvestShare = &share
@@ -600,7 +617,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			fmt.Fprint(r.Out, result.String())
 		}
 	}
-	return result, r.record(ctx, result, all, now)
+	return result, r.record(ctx, result, all, seatSessions, now)
 }
 
 // snapshotHistory is where the daily snapshots are read from, if anywhere.
@@ -918,6 +935,9 @@ func (r FactoryReportResult) writeParts(b *strings.Builder) {
 		}
 		if i == 0 {
 			writeInvestShare(b, r.InvestShare)
+		}
+		if part.heading == "FUEL" {
+			r.SeatFuel.write(b)
 		}
 	}
 }

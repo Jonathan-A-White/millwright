@@ -70,6 +70,7 @@ func (s FactoryReportSend) Run(ctx context.Context) (string, error) {
 	report := s.Report
 	report.Now = func() time.Time { return now }
 	report.Out, report.JSON = nil, false
+	report.Home, report.Here = s.Home, s.Host
 	if s.DryRun {
 		// A dry run writes nothing: no mail to the Mayor, no snapshot.
 		report.Notes, report.Mailbox, report.Snapshots = nil, nil, nil

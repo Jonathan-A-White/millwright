@@ -359,10 +359,16 @@ type MetricSnapshot struct {
 	// report was not given the means to count them.
 	ReviewQueue  *float64 `json:"review_queue,omitempty"`
 	DemosWaiting *float64 `json:"demos_waiting,omitempty"`
+	// SeatUSD is what each seat's sessions cost over the week (the Mayor, the
+	// Deputy and the rest, by seat) and USDPerLandingAll the stories' $/landing
+	// with the seats' added. Both are left out off the home, where the seats'
+	// transcripts are not, and a row without them still parses.
+	SeatUSD          map[string]float64 `json:"seat_usd,omitempty"`
+	USDPerLandingAll *float64           `json:"usd_per_landing_all,omitempty"`
 }
 
 // takeSnapshot is the key metrics of the whole factory over the week to today.
-func takeSnapshot(all []reportEntry, review *ReviewTime, now time.Time) MetricSnapshot {
+func (r FactoryReport) takeSnapshot(all []reportEntry, review *ReviewTime, seats SeatFuel, sessions []SeatSession, now time.Time) MetricSnapshot {
 	today := reportDay(now)
 	week := entriesBetween(all, today.AddDate(0, 0, -ChangeWindowDays+1), today.AddDate(0, 0, 1))
 	q := sumQuality(week)
@@ -386,6 +392,7 @@ func takeSnapshot(all []reportEntry, review *ReviewTime, now time.Time) MetricSn
 		queue, demos := float64(review.Queue), float64(review.DemosWaiting)
 		s.ReviewQueue, s.DemosWaiting = &queue, &demos
 	}
+	seatSnapshot(&s, sessions, r.Seats, seats.Counted, week, now)
 	return s
 }
 
@@ -393,7 +400,7 @@ func takeSnapshot(all []reportEntry, review *ReviewTime, now time.Time) MetricSn
 // the Mayor, once, of each change that is WORSE, and keeps the day's snapshot
 // of the key metrics if today's is not kept yet. A report with none of the
 // means, or one narrowed to a rig or host, writes nothing.
-func (r FactoryReport) record(ctx context.Context, result FactoryReportResult, all []reportEntry, now time.Time) error {
+func (r FactoryReport) record(ctx context.Context, result FactoryReportResult, all []reportEntry, sessions []SeatSession, now time.Time) error {
 	var problems []string
 	if r.Notes != nil && r.Mailbox != nil {
 		for _, c := range worse(result.Changes) {
@@ -403,7 +410,7 @@ func (r FactoryReport) record(ctx context.Context, result FactoryReportResult, a
 		}
 	}
 	if r.Snapshots != nil && r.Rig == "" && r.Host == "" {
-		if err := r.keepSnapshot(ctx, takeSnapshot(all, result.Review, now)); err != nil {
+		if err := r.keepSnapshot(ctx, r.takeSnapshot(all, result.Review, result.SeatFuel, sessions, now)); err != nil {
 			problems = append(problems, err.Error())
 		}
 	}
