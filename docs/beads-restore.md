@@ -19,6 +19,17 @@ server is never touched. It steps over the `bd` shim (`exec mw bd`) that leads a
 seat's PATH, never calls `mw`, and never runs `mw bd export`. `scripts/check-beads-restore-drill.sh`
 (in `make lint`) holds all of that against a stand-in `bd`.
 
+<!-- toc -->
+
+- [What a restore costs (measured)](#what-a-restore-costs-measured)
+- [What came back](#what-came-back)
+  - [The 8 lines marked MISS in the whole-file run](#the-8-lines-marked-miss-in-the-whole-file-run)
+- [What a restore does not bring back](#what-a-restore-does-not-bring-back)
+- [What was not known, and is now](#what-was-not-known-and-is-now)
+- [The steps of a real restore, as far as the drill proves them](#the-steps-of-a-real-restore-as-far-as-the-drill-proves-them)
+
+<!-- /toc -->
+
 ## What a restore costs (measured)
 
 | run | lines | `bd import` | `.beads` on disk | came back |
