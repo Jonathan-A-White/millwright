@@ -13,6 +13,7 @@
 #   contrib/vultr-boost spend    [--name NAME]...
 #   contrib/vultr-boost set-cap  [--dry-run] --name NAME --cap N
 #   contrib/vultr-boost set-pace [--dry-run] --name NAME
+#   contrib/vultr-boost set-harness [--dry-run] --name NAME --version VERSION
 #   contrib/vultr-boost address  [--dry-run] --name NAME
 #   contrib/vultr-boost --help
 #
@@ -52,6 +53,14 @@
 #         OnCalendar the timer has, on a "pace = " line. A box made from the snapshot carries the
 #         home's hourly timer, and a box has no event follower to spring its dispatch. mw's cloud
 #         check runs it on each box it does not know to be at the pace (mw-gq6.1004).
+# set-harness brings the Claude Code of a box that is up to VERSION (the home's, which mw version
+#         prints), over WireGuard as set-pace does: ssh to the box's user reads `claude --version`,
+#         and a box behind VERSION gets one npm install -g --prefix ~/.local
+#         @anthropic-ai/claude-code@VERSION; a box level with it or ahead of it is left alone. It prints
+#         one last line, "harness = A -> B", "harness = A level" or "harness = A stays: WHY", and a
+#         failed install is a "stays" line with exit 0, never a box that cannot start a session. A box
+#         made from the snapshot comes up at the snapshot's version; mw's cloud check runs it before it
+#         sets the box's dispatch timer (mw-gq6.1059).
 # address prints a box's WireGuard address, read off the hub as set-cap reads it (nothing there
 #         changes), then the user the box dispatches as: two lines, the address and the user. mw
 #         peek, retry and pause reach a box at ssh <user>@<address>: the home resolves no name for it.
@@ -94,6 +103,7 @@ NAMES=()
 INSTANCE=""
 SNAPSHOT=""
 CAP=""
+VERSION=""
 STEPS=0
 N=0
 
@@ -113,12 +123,13 @@ Usage: vultr-boost up       [--yes] [--dry-run] [--name NAME] [--snapshot ID]
        vultr-boost spend    [--name NAME]...
        vultr-boost set-cap  [--dry-run] --name NAME --cap N
        vultr-boost set-pace [--dry-run] --name NAME
+       vultr-boost set-harness [--dry-run] --name NAME --version VERSION
        vultr-boost address  [--dry-run] --name NAME
 
 up makes the Boost box on Vultr and enrols it on the WireGuard hub; down destroys
 it and removes the peer; set-cap sets how many sessions a box that is up runs at
 once, in its own config, over WireGuard; set-pace has a box's dispatch timer tick every
-five minutes; address prints a box's WireGuard address and user
+five minutes; set-harness brings a box's Claude Code up to the home's VERSION; address prints a box's WireGuard address and user
 read off the hub; status prints its state and cost; snapshot makes a
 ready-made image of a bootstrapped box for up --snapshot; list prints every
 instance Vultr holds (id, label, status, server status); adopt imports a Vultr
@@ -133,7 +144,7 @@ EOF
 
 while [ $# -gt 0 ]; do
 	case $1 in
-	up | down | list | adopt | status | snapshot | spend | set-cap | set-pace | address)
+	up | down | list | adopt | status | snapshot | spend | set-cap | set-pace | set-harness | address)
 		[ -z "$CMD" ] || die "one command at a time: $CMD and $1"
 		CMD=$1
 		;;
@@ -146,6 +157,11 @@ while [ $# -gt 0 ]; do
 	--cap)
 		[ $# -gt 1 ] || die "--cap needs a number of sessions"
 		CAP=$2
+		shift
+		;;
+	--version)
+		[ $# -gt 1 ] || die "--version needs a Claude Code version"
+		VERSION=$2
 		shift
 		;;
 	--instance)
@@ -312,6 +328,12 @@ if [ "$DRY" = 1 ]; then
 		echo "vultr-boost set-pace --dry-run: nothing below is run"
 		step "ssh $HUB_SSH: read $NAME's address off /etc/wireguard/wg0.conf (nothing there changes)"
 		step "ssh $(box_user)@<$NAME's address>: write ~/.config/systemd/user/mw-dispatch.timer.d/boost-pace.conf (OnCalendar= then OnCalendar=*:0/5) unless it is so, reload, restart mw-dispatch.timer and start one dispatch, then print the timer's OnCalendar"
+		;;
+	set-harness)
+		STEPS=2
+		echo "vultr-boost set-harness --dry-run: nothing below is run"
+		step "ssh $HUB_SSH: read $NAME's address off /etc/wireguard/wg0.conf (nothing there changes)"
+		step "ssh $(box_user)@<$NAME's address>: read claude --version; when it is behind ${VERSION:-<version>}, run npm install -g --prefix ~/.local @anthropic-ai/claude-code@${VERSION:-<version>} once and read claude --version again; print harness = <before> -> <after>, level, or stays: <why> (a failed install leaves the box up as it was)"
 		;;
 	set-cap)
 		STEPS=2
@@ -846,6 +868,41 @@ do_set_pace() {
 	echo "$out"
 }
 
+# --- set-harness ----------------------------------------------------------------
+# The run on the box: $1 is the version wanted. The harness npm installs under the box's prefix
+# ~/.local (npm's own prefix on a box is the node folder, so a bare -g puts a copy where PATH never
+# reaches); ~/.local/bin is put on PATH here because a non-interactive ssh has not got it. A
+# box at $1 or later is left alone; any failure of the install is a "stays" line, and the script
+# exits 0, so the bring-up goes on with the box on the version it had.
+BOX_SET_HARNESS='export PATH=$HOME/.local/bin:$PATH; want=$1
+have() { claude --version 2>/dev/null | awk '"'"'{ print $1; exit }'"'"'; }
+was=$(have); [ -n "$was" ] || was=none
+if [ "$was" != none ] && [ "$(printf "%s\n%s\n" "$was" "$want" | sort -V | tail -n 1)" = "$was" ]; then
+	echo "harness = $was level"; exit 0
+fi
+if ! out=$(npm install -g --prefix "$HOME/.local" "@anthropic-ai/claude-code@$want" 2>&1); then
+	echo "harness = $was stays: npm install failed: $(printf "%s\n" "$out" | grep -v "^npm warn" | tail -n 1)"; exit 0
+fi
+now=$(have); [ -n "$now" ] || now=none
+if [ "$now" = "$want" ]; then echo "harness = $was -> $now"
+else echo "harness = $was stays: after the install claude --version says $now, not $want"; fi'
+
+do_set_harness() {
+	need ssh
+	[ -n "$NAME_ARG" ] || die "set-harness needs --name NAME: the box to bring the harness of up to date"
+	case $VERSION in
+	"" | *[!0-9.]* | .* | *. | *..*) die "set-harness needs --version VERSION, numbers and dots (as mw version prints the harness's), not '$VERSION'" ;;
+	esac
+	STEPS=2
+	local out
+	step "hub: read $NAME's address off $HUB_SSH"
+	box_address "$NAME"
+	local addr=$ADDR
+	step "box: Claude Code to $VERSION on $(box_user)@$addr"
+	out=$(ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new "$(box_user)@$addr" "sh -s -- $VERSION" <<<"$BOX_SET_HARNESS") || die "could not reach $NAME ($(box_user)@$addr) to read its Claude Code"
+	echo "$out"
+}
+
 # address prints the address and then the user, nothing else on standard output.
 do_address() {
 	need ssh
@@ -865,5 +922,6 @@ snapshot) do_snapshot ;;
 spend) do_spend ;;
 set-cap) do_set_cap ;;
 set-pace) do_set_pace ;;
+set-harness) do_set_harness ;;
 address) do_address ;;
 esac
