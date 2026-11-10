@@ -523,60 +523,84 @@ func (g *Gateway) giveClaimBack(ctx context.Context, id, holder, status string) 
 	return err
 }
 
-// SetStoryState implements application.WorkTracker. bd records the change as an
-// event bead and keeps a `<dimension>:<value>` label on the story for looking
-// it up cheaply — so a person, or a later mw, can see at a glance what this
-// story is doing without reading its history.
+// StateNotesLayout is the time at the head of each line SetStoryState appends to a
+// story's notes: UTC, to the second, ending in Z. The line is
+// "<time> <dimension>=<value> <actor> <reason>" (docs/bd-timeouts.md).
+const StateNotesLayout = "2006-01-02T15:04:05Z"
+
+// SetStoryState implements application.WorkTracker. A story's state is its
+// `<dimension>:<value>` label, which a person or a later mw reads at a glance,
+// and one dated line in the story's own notes saying what changed, by whom and
+// why. It is one `bd update`: no event bead is filed, so no dependency cycle
+// check runs to meet bd's 10 s pool deadline (mw-t5shinh.12, docs/bd-timeouts.md).
+//
+// A dimension with a fixed set of values (run, rebase, mergedtests) has the
+// others' labels removed blind, as ClearRunState does, so nothing is read first;
+// one whose values are open (mainred names a bead) has its label read first.
 func (g *Gateway) SetStoryState(ctx context.Context, id, dimension, value, reason string) error {
 	if dimension == "" {
 		return fmt.Errorf("recording the state of %s: which dimension?", id)
 	}
-	args := []string{"set-state", id, dimension + "=" + value}
-	if reason != "" {
-		args = append(args, "--reason", reason)
+	var old []string
+	if known, fixed := fixedStates(dimension); fixed {
+		old = known
+	} else {
+		var err error
+		if old, err = g.labelledValues(ctx, id, dimension); err != nil {
+			return err
+		}
 	}
+	args := []string{"update", id}
+	for _, was := range old {
+		if was != value {
+			args = append(args, "--remove-label", dimension+":"+was)
+		}
+	}
+	actor := g.actor
+	if actor == "" {
+		actor = "unknown"
+	}
+	line := fmt.Sprintf("%s %s=%s %s %s", g.clock().UTC().Format(StateNotesLayout), dimension, value, actor, reason)
+	args = append(args, "--add-label", dimension+":"+value, "--append-notes="+strings.TrimRight(line, " "))
 	_, err := g.call(ctx, args...)
-	if err != nil && eventUnfileable(err.Error()) {
-		return g.stateAsLabelAlone(ctx, id, dimension, value, err)
-	}
 	return err
 }
 
-// eventUnfileable reports whether what bd said is the failure of set-state's
-// event child under load: the dependency cycle check meets bd's fixed 10 s pool
-// deadline and reports "invalid connection" or "i/o timeout" (mw-gq6.1046,
-// docs/bd-timeouts.md). Nothing else is a reason to skip the event.
-func eventUnfileable(said string) bool {
-	said = strings.ToLower(said)
-	return strings.Contains(said, "invalid connection") || strings.Contains(said, "i/o timeout")
+// fixedStates is every value a dimension of a story's state takes, when mw names
+// them all.
+func fixedStates(dimension string) ([]string, bool) {
+	switch dimension {
+	case application.RunState:
+		return application.RunStates, true
+	case application.RebaseState:
+		return []string{application.RebaseSentBack}, true
+	case application.MergedTestsState:
+		return []string{application.MergedTestsSentBack}, true
+	}
+	return nil, false
 }
 
-// stateAsLabelAlone is SetStoryState's fall-back for a set-state whose event
-// could not be filed: one bd update that swaps the story's `<dimension>:*` label
-// for the new value, which files no event and checks no dependency, and a note on
-// the story saying the event was skipped and why. When the story cannot be read
-// or the label cannot be written either, the set-state's own failure is the one
-// returned, so a caller that retries sees what it saw before.
-func (g *Gateway) stateAsLabelAlone(ctx context.Context, id, dimension, value string, failure error) error {
+// labelledValues is the values the story carries under dimension now, read over
+// the kept connection or by one show. A story that cannot be read is an error:
+// writing the new label beside an old one would leave two.
+func (g *Gateway) labelledValues(ctx context.Context, id, dimension string) ([]string, error) {
+	if value, ok := g.stateOverConnection(ctx, id, dimension); ok {
+		if value == "" {
+			return nil, nil
+		}
+		return []string{value}, nil
+	}
 	story, err := g.showOne(ctx, id)
 	if err != nil {
-		return failure
+		return nil, err
 	}
-	args := []string{"update", id}
+	var values []string
 	for _, label := range story.Labels {
-		if strings.HasPrefix(label, dimension+":") && label != dimension+":"+value {
-			args = append(args, "--remove-label", label)
+		if value, found := strings.CutPrefix(label, dimension+":"); found {
+			values = append(values, value)
 		}
 	}
-	args = append(args, "--add-label", dimension+":"+value)
-	if _, err := g.call(ctx, args...); err != nil {
-		return failure
-	}
-	note := fmt.Sprintf("%s=%s recorded without its event: bd set-state could not file the event (%s). Only the label %s:%s was written.",
-		dimension, value, firstLine(failure.Error()), dimension, value)
-	// The label is the state; a note that cannot be written does not undo it.
-	_ = g.CommentOnStory(ctx, id, note)
-	return nil
+	return values, nil
 }
 
 // StoryState implements application.WorkTracker. A dimension nobody has ever

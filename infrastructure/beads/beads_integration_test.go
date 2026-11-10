@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -784,13 +785,92 @@ func TestGatewayKeepsWhatSweepSawWithoutFilingEvents(t *testing.T) {
 		t.Fatalf("expected sweep to remember nothing of %s after clearing it, got %q: %v", storyID, got, err)
 	}
 
-	// The one state sweep does write is an event worth keeping: that is what
-	// set-state files, and what the note above spared the story twice over.
+	// The one state sweep does write is a label and a dated line in the story's own
+	// notes: bd files no event bead for it (mw-t5shinh.12).
 	if err := gateway.SetStoryState(ctx, storyID, application.RunState, application.RunStuck, "stuck, found by the test"); err != nil {
 		t.Fatalf("recording %s stuck: %v", storyID, err)
 	}
-	if got := events(); got != 1 {
-		t.Fatalf("expected recording run=stuck to file one event bead, got %d", got)
+	if got := events(); got != 0 {
+		t.Fatalf("expected recording run=stuck to file no event bead, got %d", got)
+	}
+	if got, err := gateway.StoryState(ctx, storyID, application.RunState); err != nil || got != application.RunStuck {
+		t.Fatalf("expected %s to be labelled run:stuck, got %q: %v", storyID, got, err)
+	}
+	notes := storyNotes(t, vault, storyID)
+	if lines := strings.Split(strings.TrimRight(notes, "\n"), "\n"); !strings.HasSuffix(lines[len(lines)-1], " run=stuck mw@vps stuck, found by the test") {
+		t.Fatalf("expected the notes to end with a line holding run=stuck and the reason, got %q", notes)
+	}
+}
+
+// storyNotes is the notes field of one story, as bd shows it.
+func storyNotes(t *testing.T, vault, id string) string {
+	t.Helper()
+	out := bdRun(t, vault, beads.Program, "show", id, "--json")
+	var shown []struct {
+		Notes string `json:"notes"`
+	}
+	if err := json.Unmarshal([]byte(out), &shown); err != nil || len(shown) != 1 {
+		t.Fatalf("reading the notes of %s: %v\n%s", id, err, out)
+	}
+	return shown[0].Notes
+}
+
+// A story's state changes are its label and one dated line each in its own notes,
+// in order; a reason with a newline or a quote is kept whole, and mainred moves
+// from a bead to fixed leaving one label (mw-t5shinh.12).
+func TestGatewayKeepsEachStateChangeAsALineInTheStorysNotes(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := realBdContext(t)
+	defer cancel()
+
+	storyID := bdRun(t, vault, beads.Program, "create", "A story whose states are noted", "--silent")
+	gateway := beads.New(vault, beads.WithActor("mw@laptop"))
+
+	steps := []struct{ dimension, value, reason string }{
+		{application.RunState, application.RunRunning, "dispatched"},
+		{application.RunState, application.RunBlocked, "it said \"no\"\nand then stopped"},
+		{application.RebaseState, application.RebaseSentBack, "conflicts"},
+		{application.MergedTestsState, application.MergedTestsSentBack, "tests red"},
+		{application.MainRedState, "mw-bug.7", "main is red"},
+		{application.MainRedState, application.MainRedFixed, "fixed"},
+	}
+	for _, step := range steps {
+		if err := gateway.SetStoryState(ctx, storyID, step.dimension, step.value, step.reason); err != nil {
+			t.Fatalf("recording %s=%s: %v", step.dimension, step.value, err)
+		}
+	}
+
+	notes := storyNotes(t, vault, storyID)
+	at := 0
+	for _, step := range steps {
+		line := step.dimension + "=" + step.value + " mw@laptop " + step.reason
+		found := strings.Index(notes[at:], line)
+		if found < 0 {
+			t.Fatalf("expected the notes to hold %q in order after offset %d, got:\n%s", line, at, notes)
+		}
+		start := strings.LastIndex(notes[:at+found], "\n") + 1
+		if !regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ $`).MatchString(notes[start : at+found]) {
+			t.Fatalf("expected the line for %s=%s to begin with a UTC time, got %q", step.dimension, step.value, notes[start:at+found])
+		}
+		at += found + len(line)
+	}
+	for dimension, want := range map[string]string{
+		application.RunState:         application.RunBlocked,
+		application.RebaseState:      application.RebaseSentBack,
+		application.MergedTestsState: application.MergedTestsSentBack,
+		application.MainRedState:     application.MainRedFixed,
+	} {
+		if got, err := gateway.StoryState(ctx, storyID, dimension); err != nil || got != want {
+			t.Errorf("expected %s=%s, got %q: %v", dimension, want, got, err)
+		}
+	}
+	shown := bdRun(t, vault, beads.Program, "show", storyID, "--json")
+	if got := strings.Count(shown, `"mainred:`); got != 1 {
+		t.Errorf("expected exactly one mainred label, got %d:\n%s", got, shown)
+	}
+	if got := strings.Count(shown, `"run:`); got != 1 {
+		t.Errorf("expected exactly one run label, got %d:\n%s", got, shown)
 	}
 }
 

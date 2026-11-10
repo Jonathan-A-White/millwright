@@ -877,7 +877,9 @@ type WorkTracker interface {
 
 	// SetStoryState records one dimension of a story's operational state — what
 	// it is doing right now, as against what it is — with the reason it changed.
-	// A dispatched story is run=running.
+	// A dispatched story is run=running. The state is the story's
+	// `<dimension>:<value>` label, and the change a dated line in the story's own
+	// notes; no event bead is filed (mw-t5shinh.12).
 	SetStoryState(ctx context.Context, id, dimension, value, reason string) error
 
 	// Formulas names the formulas installed where this tracker can pour them. A
