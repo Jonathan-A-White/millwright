@@ -445,23 +445,31 @@ func (s SelfUpdate) deployRig(ctx context.Context, rig, dir string) []string {
 // commit the rig was last deployed at, up to head. It is called only after the
 // rig's command passed whole.
 func (s SelfUpdate) deployedChecked(ctx context.Context, rig, dir, from, head string) []string {
-	if s.Landed == nil || s.Live.Web == nil {
-		return nil
-	}
 	words := "self-update: " + rig
-	landed, err := s.Landed.LandedBetween(ctx, dir, from, head)
-	if err != nil {
-		return []string{fmt.Sprintf("%s: the stories it deployed could not be read, so its live site was not checked: %s", words, firstLine(err.Error()))}
-	}
-	var stories []liveStory
-	for _, id := range landed.Stories {
-		stories = append(stories, liveStory{id: id})
-	}
 	var notes []string
-	for _, note := range s.Live.Write(ctx, true, Deployed{Rig: rig, Commit: head, Version: landed.Version, Stories: stories}) {
+	for _, note := range deployedCheckedSince(ctx, s.Live, s.Landed, rig, dir, from, head) {
 		notes = append(notes, words+": "+note)
 	}
 	return notes
+}
+
+// deployedCheckedSince is what every path that deploys a rig by its checkout
+// shares (mw-t5shinh.35): the stories merged into the checkout at dir after from,
+// up to head, each given a DEPLOYED-CHECKED by live.Write. It is called only after
+// the rig's command passed whole. A nil landed log or no web checks nothing.
+func deployedCheckedSince(ctx context.Context, live DeployCheck, landed LandedLog, rig, dir, from, head string) []string {
+	if landed == nil || live.Web == nil {
+		return nil
+	}
+	carried, err := landed.LandedBetween(ctx, dir, from, head)
+	if err != nil {
+		return []string{fmt.Sprintf("the stories it deployed could not be read, so its live site was not checked: %s", firstLine(err.Error()))}
+	}
+	var stories []liveStory
+	for _, id := range carried.Stories {
+		stories = append(stories, liveStory{id: id})
+	}
+	return live.Write(ctx, true, Deployed{Rig: rig, Commit: head, Version: carried.Version, Stories: stories})
 }
 
 // Look is the dry form of a tick's update: it moves, fetches and runs nothing,

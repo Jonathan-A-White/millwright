@@ -7,6 +7,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/userunits"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
 )
@@ -25,7 +26,9 @@ func newAfterLandingCmd() *cobra.Command {
 			"a deploy that is running and never runs beside one. A command that fails on a network fault\n" +
 			"that may pass (ssh's exit status 255, a name that did not resolve, a connection refused) is\n" +
 			"run once more after thirty seconds, and the output says so. It moves nothing: use it after a\n" +
-			"landing whose deploy failed or did not happen.",
+			"landing whose deploy failed or did not happen. When it passes whole on a rig whose file names a\n" +
+			"site_url or a healthz_url, it writes DEPLOYED-CHECKED on each story landed since the rig's\n" +
+			"previous deployed mark, as the home's tick does for a deploy of its own.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			host, err := config.Host()
@@ -48,6 +51,10 @@ func newAfterLandingCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
 			return application.AfterLandingRun{
 				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits), deploySteps),
 				Slot: rig.NewSlots(
@@ -59,6 +66,8 @@ func newAfterLandingCmd() *cobra.Command {
 				Checkout: rig.New(),
 				Rigs:     rigs,
 				Host:     host,
+				Landed:   rig.New(),
+				Live:     hostDeployCheck(mwGateway(dir, host), vault.New(dir), host),
 				Out:      cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args[0])
 		},
