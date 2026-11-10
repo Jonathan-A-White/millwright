@@ -237,6 +237,39 @@ func (v Vultr) SetPace(ctx context.Context, name string) (string, error) {
 	return "", fmt.Errorf("%s set-pace printed no pace: the box's timer pace is not known", v.Command)
 }
 
+// SetHarness implements application.CloudProvider: `set-harness --name <box>
+// --version <v>`, which reads the box's Claude Code over ssh and installs the
+// version when the box is behind it. The wrapper's last "harness = " line is
+// the answer: "A -> B", "A level" or "A stays: why". A failed install is that
+// last line and no error; no such line is, because what the box has is not
+// known.
+func (v Vultr) SetHarness(ctx context.Context, name, version string) (application.CloudHarness, error) {
+	out, err := v.run(ctx, setHarnessLimit, "set-harness", "--name", name, "--version", version)
+	if err != nil {
+		return application.CloudHarness{}, err
+	}
+	for _, line := range slices.Backward(strings.Split(out, "\n")) {
+		said, found := strings.CutPrefix(strings.TrimSpace(line), "harness = ")
+		if !found {
+			continue
+		}
+		if was, now, ok := strings.Cut(said, " -> "); ok && was != "" && now != "" {
+			return application.CloudHarness{Was: was, Now: now}, nil
+		}
+		if was, ok := strings.CutSuffix(said, " level"); ok && was != "" {
+			return application.CloudHarness{Was: was, Now: was}, nil
+		}
+		if was, why, ok := strings.Cut(said, " stays: "); ok && was != "" {
+			return application.CloudHarness{Was: was, Now: was, Why: why}, nil
+		}
+	}
+	return application.CloudHarness{}, fmt.Errorf("%s set-harness printed no harness line: the box's Claude Code is not known", v.Command)
+}
+
+// setHarnessLimit is how long bringing a box's Claude Code level may take: an
+// ssh to the hub, one to the box, and an npm install on it.
+const setHarnessLimit = 10 * time.Minute
+
 // addressLimit is how long reading a box's address may take: one ssh to the hub,
 // with a connect timeout of 15 seconds.
 const addressLimit = time.Minute

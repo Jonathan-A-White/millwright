@@ -3,6 +3,7 @@ package cloud_test
 import (
 	"context"
 	"errors"
+	"github.com/Jonathan-A-White/millwright/application"
 	"os"
 	"path/filepath"
 	"strings"
@@ -170,6 +171,36 @@ func TestSetPaceWithNoPaceLineIsAnErrorNotAGuess(t *testing.T) {
 	command, _ := standIn(t, "echo done")
 	if _, err := (cloud.Vultr{Command: command}).SetPace(context.Background(), "cloud2"); err == nil || !strings.Contains(err.Error(), "printed no pace") {
 		t.Errorf("expected an error saying no pace was printed, got %v", err)
+	}
+}
+
+func TestSetHarnessRunsTheWrapperWithTheHomesVersionAndReadsWhatItSaid(t *testing.T) {
+	for _, c := range []struct {
+		say  string
+		want application.CloudHarness
+	}{
+		{"harness = 2.1.300 -> 2.1.322", application.CloudHarness{Was: "2.1.300", Now: "2.1.322"}},
+		{"harness = 2.1.330 level", application.CloudHarness{Was: "2.1.330", Now: "2.1.330"}},
+		{"harness = 2.1.300 stays: npm install failed: boom", application.CloudHarness{Was: "2.1.300", Now: "2.1.300", Why: "npm install failed: boom"}},
+	} {
+		command, calls := standIn(t, "echo '[2/2] box: Claude Code'; echo '"+c.say+"'")
+		got, err := (cloud.Vultr{Command: command}).SetHarness(context.Background(), "cloud2", "2.1.322")
+		if err != nil {
+			t.Fatalf("%s: %v", c.say, err)
+		}
+		if want := "set-harness --name cloud2 --version 2.1.322\n"; read(t, calls) != want {
+			t.Errorf("expected the wrapper run as %q, got %q", want, read(t, calls))
+		}
+		if got != c.want {
+			t.Errorf("%s: got %+v, want %+v", c.say, got, c.want)
+		}
+	}
+}
+
+func TestSetHarnessWithNoHarnessLineIsAnErrorNotAGuess(t *testing.T) {
+	command, _ := standIn(t, "echo done")
+	if _, err := (cloud.Vultr{Command: command}).SetHarness(context.Background(), "cloud2", "2.1.322"); err == nil || !strings.Contains(err.Error(), "printed no harness line") {
+		t.Errorf("expected an error saying no harness line was printed, got %v", err)
 	}
 }
 
