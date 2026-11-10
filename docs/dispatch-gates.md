@@ -395,6 +395,14 @@ host still far over its cores at the end of the wait skips the night with one li
 nothing and keeps nothing, and the next night tries again. A failure read between the cores
 and twice them is filed at once.
 
+The run of the failing tests on main alone (`Next.mainAlone`, mw-gq6.1064) does the same:
+a failure read with the host at twice its cores or more (before the run or after it) waits
+for the host to calm (`Next.waitToRunAgain` again) and runs the named tests on main once
+more, and the second run's result stands, with a note that it ran twice. A host still far
+over its cores at the end of the wait does not call main red: the tests are labelled
+"not run" with the load as the reason, and the branch's failure stands as if main were
+unknown. A failure on a calm host, or a busy one under twice its cores, is main's at once.
+
 Every place mw runs the rig's tests, and what it takes:
 
 | Where | Merge slot | Gate lock | Follows the rule |
@@ -408,6 +416,7 @@ Every place mw runs the rig's tests, and what it takes:
 | `mw check --no-slot` | no | no | no, the escape hatch |
 | `mw dispatch` bug recheck and `mw next` fixed-on-main recheck (`rerunUnderGate`) | no | yes, a short wait, else "not re-checked" | yes |
 | nightly `mw timing` | no | yes | yes; tests that failed while the host was far over its cores are run once more after the same wait, and the second run counts (mw-gq6.1063) |
+| the run of the failing tests on main alone (`mainAlone`) | no | yes, the close-out's own | yes; a failure read far over the cores is run once more after the same wait (mw-gq6.1064) |
 | `mw suite` and the nightly suite it is started by | no (it runs on a throwaway worktree of the rig's origin) | yes, taken after the wait for a calm host, for one command line at a time (the tests, the changed specs, each re-run of a failing file) and given back between them; a lock it cannot take ends the suite with nothing kept (`Suite.GateLock`, mw-gq6.914, mw-gq6.917) | yes |
 | a landing's after-landing command (deploy, shots) | its own after-landing slot | no | no: it is not the rig's tests; the shots run after the landing's gate has ended |
 | `mw grist eval` and `mw grist smoke` | no | no | not the rig's tests: they run the mill, under its own grind slots (`hostlock.GrindSlots`) |

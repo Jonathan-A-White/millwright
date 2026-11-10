@@ -279,6 +279,10 @@ func mainNotRunNote(tests []string, why string) string {
 	return labelNote(tests, "main", func(string) string { return NotRunPrefix + why })
 }
 
+// mainAloneRun names the run of the failing tests on main alone in the waits for a
+// calm host and the notes that come of them.
+const mainAloneRun = "the run of the failing tests on main alone"
+
 // waitForRoom says why the host has no room for the run on main alone, or "" when
 // it has. A host over its cores is waited on first, with the gate's own wait for
 // a calm host (Next.calmed, up to Next.loadBound), because main's red holds a
@@ -293,7 +297,7 @@ func (n Next) waitForRoom(ctx context.Context, c *closeOut, report *NextReport) 
 	if reading.NoRoom(RoomLimits{}) == "" {
 		return ""
 	}
-	const what = "the run of the failing tests on main alone"
+	const what = mainAloneRun
 	if reading.Busy() {
 		var err error
 		if reading, _, err = n.calmedThen(ctx, report, c, what, "was not made", false, false); err != nil {
@@ -377,16 +381,41 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	if bound <= 0 {
 		bound = DefaultMainAloneBound
 	}
-	bounded, cancel := context.WithTimeout(ctx, bound)
-	defer cancel()
-	run, err := n.NamedChecks.RunNamed(bounded, c.path.Rig, dir, asked)
-	took := n.now().Sub(began)
-	if ctx.Err() == nil && bounded.Err() != nil {
-		// Cut at its bound: what it printed so far is not an answer.
-		report.Notes = append(report.Notes, fmt.Sprintf("main alone was not checked for %s: the run did not end in %s", strings.Join(tests, ", "), bound))
-		labelMain(report, mainNotRunNote(tests, fmt.Sprintf("the run did not end in %s", bound)))
+	// The run is cut at its bound, and what it printed so far is not an answer.
+	runOnMain := func() (run NamedRun, err error, cut bool) {
+		bounded, cancel := context.WithTimeout(ctx, bound)
+		defer cancel()
+		run, err = n.NamedChecks.RunNamed(bounded, c.path.Rig, dir, asked)
+		return run, err, ctx.Err() == nil && bounded.Err() != nil
+	}
+	notRun := func(why string) *MainRed {
+		report.Notes = append(report.Notes, fmt.Sprintf("main alone was not checked for %s: %s", strings.Join(tests, ", "), why))
+		labelMain(report, mainNotRunNote(tests, why))
 		return nil
 	}
+	before, _ := n.readLoad(ctx)
+	run, err, cut := runOnMain()
+	if cut {
+		return notRun(fmt.Sprintf("the run did not end in %s", bound))
+	}
+	if err == nil && run.Ran && !run.NotRun && !run.Passed {
+		// A failure read with the host far over its cores is the host's more than
+		// main's (mw-gq6.1064): it waits for the host to calm, as a gate does, and
+		// the run is made once more; the second run's result stands.
+		busy, again, waitErr := n.waitToRunAgain(ctx, c, report, mainAloneRun, "them", before, false)
+		if waitErr != nil {
+			return notRun(firstLine(waitErr.Error()))
+		}
+		if again {
+			first := run.Checked
+			run, err, cut = runOnMain()
+			if cut {
+				return notRun(fmt.Sprintf("the run did not end in %s", bound))
+			}
+			report.Notes = append(report.Notes, ranTwice(mainAloneRun, n.Host, busy, first, run.Checked, err))
+		}
+	}
+	took := n.now().Sub(began)
 	switch {
 	case err != nil:
 		report.Notes = append(report.Notes, fmt.Sprintf("main alone was not checked for %s: %v", strings.Join(tests, ", "), err))
