@@ -294,3 +294,51 @@ func TestRanItMyselfDropsHitlWhenItWasTheLastLiveStep(t *testing.T) {
 		t.Fatal("expected hitl dropped once his word retired the last live step")
 	}
 }
+
+// A bead the Governor's story was filed hitl on before its first step keeps hitl
+// when the last step is retired: mw hands did not add the label, so it does not
+// take it off, and the dispatcher does not go on to build a Governor bead.
+func TestHandsRetireKeepsHitlTheBeadHadBeforeItsFirstStep(t *testing.T) {
+	tracker := handsTracker()
+	mustDo(t, tracker.AddLabel(context.Background(), "mw-f758y.8", application.LabelHitl))
+	for _, step := range []domain.HandsStep{lingerStep(), secondStep()} {
+		if _, err := addHands(tracker, &bytes.Buffer{}, application.HandsAddRequest{Bead: "mw-f758y.8", Step: step}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var out bytes.Buffer
+	mustDo(t, retireHands(tracker, &out, "mw-f758y.8", "linger", "done by hand"))
+	mustDo(t, retireHands(tracker, &out, "mw-f758y.8", "second", "done by hand"))
+
+	if !hasHitl(t, tracker, "mw-f758y.8") {
+		t.Fatal("expected hitl kept: the bead was hitl before its first step")
+	}
+	if strings.Contains(out.String(), "dropped") {
+		t.Errorf("expected no word of a drop, got %q", out.String())
+	}
+}
+
+// A bead that got hitl only from mw hands add loses it with its last live step.
+func TestHandsRetireDropsHitlThatMwHandsAddAdded(t *testing.T) {
+	tracker := handsTracker()
+	if hasHitl(t, tracker, "mw-f758y.8") {
+		t.Fatal("expected the bead to start without hitl")
+	}
+	for _, step := range []domain.HandsStep{lingerStep(), secondStep()} {
+		if _, err := addHands(tracker, &bytes.Buffer{}, application.HandsAddRequest{Bead: "mw-f758y.8", Step: step}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var out bytes.Buffer
+	mustDo(t, retireHands(tracker, &out, "mw-f758y.8", "linger", "done by hand"))
+	mustDo(t, retireHands(tracker, &out, "mw-f758y.8", "second", "done by hand"))
+
+	if hasHitl(t, tracker, "mw-f758y.8") {
+		t.Fatal("expected hitl dropped: only mw hands add put it there")
+	}
+	if !strings.Contains(out.String(), "hitl dropped") {
+		t.Errorf("expected the drop said, got %q", out.String())
+	}
+}

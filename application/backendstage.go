@@ -537,7 +537,7 @@ func (b BackendStage) fileSwap(ctx context.Context, epic string, story NewStory)
 // writeSwap writes step on bead and marks the older swaps of cfg's live binary as
 // superseded by it.
 func (b BackendStage) writeSwap(ctx context.Context, cfg BackendRig, bead string, step domain.HandsStep) error {
-	if _, err := b.Hands.Run(ctx, HandsAddRequest{Bead: bead, Step: step, Replace: true}); err != nil {
+	if _, err := b.Hands.Run(ctx, HandsAddRequest{Bead: bead, Step: step, Replace: true, Filed: true}); err != nil {
 		return fmt.Errorf("writing the swap on %s: %w", bead, err)
 	}
 	if err := b.supersedeOlder(ctx, cfg, bead, step.ID); err != nil {
