@@ -257,3 +257,38 @@ func TestDigestReadsHeldQuestionsOffTheGraphToo(t *testing.T) {
 		t.Fatalf("with the graph held = %+v, want mw-e.9", held)
 	}
 }
+
+func TestHeldQuestionCommentLeavesTheRecommendedLineOutWhenThereIsNone(t *testing.T) {
+	req := aCard("mw-e.1")
+	req.Recommend = ""
+	got := application.HeldQuestionComment(req)
+	if strings.Contains(got, "Recommended") {
+		t.Errorf("a card with no recommendation still has a Recommended line:\n%s", got)
+	}
+	req.Recommend = "   "
+	if got := application.HeldQuestionComment(req); strings.Contains(got, "Recommended") {
+		t.Errorf("a blank recommendation still has a Recommended line:\n%s", got)
+	}
+	if got := application.HeldQuestionComment(aCard("mw-e.1")); !strings.HasSuffix(got, "\nRecommended: A: ship") {
+		t.Errorf("a recommendation is no longer the last line:\n%s", got)
+	}
+}
+
+func TestReviewHoldNamesTheSenderInWhatItSays(t *testing.T) {
+	for _, sender := range []string{"mw grill --ask", "mw todo nightly"} {
+		hold, _, _, errOut := holdOver(t, fixedQueue{err: errors.New("bd is down")})
+		hold.Sender = sender
+		hold.Judge(context.Background(), aCard("mw-e.1"))
+		if !strings.HasPrefix(errOut.String(), sender+": ") {
+			t.Errorf("the line = %q, want it to open with %q", errOut.String(), sender+": ")
+		}
+		if strings.Contains(errOut.String(), "postern send") {
+			t.Errorf("the line names postern send for %s: %q", sender, errOut.String())
+		}
+	}
+	hold, _, _, errOut := holdOver(t, fixedQueue{err: errors.New("bd is down")})
+	hold.Judge(context.Background(), aCard("mw-e.1"))
+	if !strings.HasPrefix(errOut.String(), "mw postern send: ") {
+		t.Errorf("with no sender given the line = %q, want it to open with mw postern send", errOut.String())
+	}
+}

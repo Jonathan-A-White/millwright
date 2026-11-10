@@ -77,7 +77,7 @@ func newGrillCmd() *cobra.Command {
 					Now: posternClock, Out: out,
 				},
 				Cards: cards, Tracker: gateway, Notes: gateway,
-				Hold: application.ReviewHold{Queue: reviewQueueReader(gateway), Tracker: gateway, Out: out, Err: cmd.ErrOrStderr()},
+				Hold: application.ReviewHold{Queue: reviewQueueReader(gateway), Tracker: gateway, Out: out, Sender: "mw grill --ask", Err: cmd.ErrOrStderr()},
 			}
 			_, err = grill.Ask(cmd.Context(), application.GrillAsk{Bead: args[0], Question: ask, Recommend: recommend, Options: options, WhyNow: whyNow})
 			return err

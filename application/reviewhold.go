@@ -71,6 +71,17 @@ type ReviewHold struct {
 	// that could not be counted is.
 	Out io.Writer
 	Err io.Writer
+	// Sender is the command that asks, named in what the hold says ("mw grill
+	// --ask"); empty is "mw postern send".
+	Sender string
+}
+
+// sender is the name the hold's lines open with.
+func (h ReviewHold) sender() string {
+	if h.Sender == "" {
+		return "mw postern send"
+	}
+	return h.Sender
 }
 
 // ReviewVerdict is what the queue said about one request.
@@ -91,7 +102,7 @@ func (h ReviewHold) Judge(ctx context.Context, req PosternSendRequest) ReviewVer
 	size, limit, err := h.Queue.ReviewQueue(ctx)
 	if err != nil {
 		if h.Err != nil {
-			fmt.Fprintf(h.Err, "mw postern send: the review queue could not be counted, so the card is sent: %v\n", err)
+			fmt.Fprintf(h.Err, "%s: the review queue could not be counted, so the card is sent: %v\n", h.sender(), err)
 		}
 		return ReviewVerdict{}
 	}
@@ -102,7 +113,7 @@ func (h ReviewHold) Judge(ctx context.Context, req PosternSendRequest) ReviewVer
 // card is sent.
 func (h ReviewHold) Hold(ctx context.Context, req PosternSendRequest, v ReviewVerdict) error {
 	if err := h.Tracker.CommentOnStory(ctx, req.Bead, HeldQuestionComment(req)); err != nil {
-		return fmt.Errorf("mw postern send: holding the question on %s for Monday: %w", req.Bead, err)
+		return fmt.Errorf("%s: holding the question on %s for Monday: %w", h.sender(), req.Bead, err)
 	}
 	if h.Out != nil {
 		fmt.Fprintf(h.Out, "held %s for Monday: his review queue is %d, over the limit of %d; no card sent, the question is on the bead and Monday's digest carries it (--why-now \"<reason>\" sends it anyway)\n",
@@ -116,7 +127,7 @@ func (h ReviewHold) Overrode(ctx context.Context, req PosternSendRequest, v Revi
 	comment := fmt.Sprintf("%s the review queue was %d, over the limit of %d; sent as %s because: %s",
 		SentOverLimitPrefix, v.Size, v.Limit, txid, strings.TrimSpace(why))
 	if err := h.Tracker.CommentOnStory(ctx, req.Bead, comment); err != nil {
-		return fmt.Errorf("mw postern send: sent as %s, but recording on %s that it went over the limit failed: %w", txid, req.Bead, err)
+		return fmt.Errorf("%s: sent as %s, but recording on %s that it went over the limit failed: %w", h.sender(), txid, req.Bead, err)
 	}
 	return nil
 }
@@ -130,7 +141,9 @@ func HeldQuestionComment(req PosternSendRequest) string {
 	for _, option := range req.Options {
 		b.WriteString("\n- " + option)
 	}
-	b.WriteString("\nRecommended: " + req.Recommend)
+	if recommend := strings.TrimSpace(req.Recommend); recommend != "" {
+		b.WriteString("\nRecommended: " + recommend)
+	}
 	return b.String()
 }
 

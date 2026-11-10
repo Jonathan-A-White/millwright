@@ -93,6 +93,14 @@ Feature: The follower's todo-rank job ranks the To do board once a night
     And the todo-rank job is asked
     Then exactly 1 decision card was sent in all
 
+  Scenario: Over his review-queue limit the weekly card is held for Monday, not sent
+    Given his review queue holds 9 of a limit of 8
+    And the nightly clock stands at "2026-10-19T07:00:00Z"
+    And the nightly ranking model answers cards "mw-todo.5" and "mw-todo.6" "let-go" and the rest "later"
+    When the todo-rank job is asked
+    Then exactly 0 decision cards were sent in all
+    And the list "Errands" has a QUESTION for Monday comment holding the Let go card
+
   Scenario: No weekly card is sent when nothing is let go
     Given the nightly clock stands at "2026-10-19T07:00:00Z"
     When the todo-rank job is asked

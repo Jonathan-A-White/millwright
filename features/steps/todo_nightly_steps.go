@@ -33,6 +33,7 @@ type todoNightlyContext struct {
 	sender  *apptest.FakePosternSender
 	runs    *todoRankRuns
 
+	queue     todoNightlyQueue
 	now       time.Time
 	home      bool
 	hour      int
@@ -52,6 +53,12 @@ type todoNightlyContext struct {
 	replies int
 }
 
+// todoNightlyQueue is his review queue as the scenario counts it: size of
+// limit, the limit the hold is judged against.
+type todoNightlyQueue struct{ size, limit int }
+
+func (q todoNightlyQueue) ReviewQueue(context.Context) (int, int, error) { return q.size, q.limit, nil }
+
 // InitializeTodoNightlyScenario registers the steps of features/todo-nightly.feature.
 func InitializeTodoNightlyScenario(ctx *godog.ScenarioContext) {
 	c := &todoNightlyContext{}
@@ -59,7 +66,7 @@ func InitializeTodoNightlyScenario(ctx *godog.ScenarioContext) {
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
 		*c = todoNightlyContext{
 			tracker: apptest.NewFakeTracker(), grinder: &apptest.FakeGrinder{}, sender: &apptest.FakePosternSender{},
-			runs: &todoRankRuns{files: map[string]string{}}, hour: application.DefaultTodoRankHour, weekStart: time.Monday,
+			runs: &todoRankRuns{files: map[string]string{}}, queue: todoNightlyQueue{size: 0, limit: 8}, hour: application.DefaultTodoRankHour, weekStart: time.Monday,
 			backend: apptest.NewFakePostern(), mailbox: apptest.NewFakeMailbox(),
 		}
 		c.cipher = apptest.NewFakeCipher()
@@ -77,6 +84,10 @@ func InitializeTodoNightlyScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(clock, c.theClockStandsAt)
 	ctx.When(clock, c.theClockStandsAt)
 	ctx.Given(`^six To do cards are open on the list "([^"]*)" for the nightly job$`, c.sixCardsAreOpen)
+	ctx.Given(`^his review queue holds (\d+) of a limit of (\d+)$`, func(size, limit int) error {
+		c.queue = todoNightlyQueue{size: size, limit: limit}
+		return nil
+	})
 	ctx.Given(`^the nightly host is home$`, func() error { c.home = true; return nil })
 	ctx.Given(`^the nightly host is not home$`, func() error { c.home = false; return nil })
 	ctx.Given(`^the todo-rank hour is (\d+)$`, func(hour int) error { c.hour = hour; return nil })
@@ -101,6 +112,7 @@ func InitializeTodoNightlyScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the decision card lists "([^"]*)" and "([^"]*)" and not "([^"]*)"$`, c.theCardLists)
 	ctx.Then(`^the decision card says a tap on a card's own Keep or Drop is finer$`, c.theCardSaysFiner)
 	ctx.Then(`^exactly (\d+) decision cards? w(?:as|ere) sent in all$`, c.decisionCardsInAll)
+	ctx.Then(`^the list "([^"]*)" has a QUESTION for Monday comment holding the Let go card$`, c.listHoldsLetGoQuestion)
 	ctx.Then(`^the card "([^"]*)" is ranked "([^"]*)" for the nightly job$`, c.isRanked)
 	ctx.Then(`^the card "([^"]*)" is still open for the nightly job$`, c.isOpen)
 	ctx.Then(`^the card "([^"]*)" is still closed for the nightly job$`, c.isClosed)
@@ -204,6 +216,7 @@ func (c *todoNightlyContext) build() error {
 		Home: func(context.Context) (bool, error) { return c.home, nil },
 		Now:  func() time.Time { return c.now },
 		Err:  &c.printed,
+		Hold: application.ReviewHold{Queue: c.queue, Tracker: c.tracker, Err: &c.printed, Sender: "mw todo nightly"},
 	}
 	job := nightly.Job()
 	c.job = &job
@@ -433,4 +446,29 @@ func (c *todoNightlyContext) wasDropped(id, reason string) error {
 		return fmt.Errorf("expected %s closed with the reason %q, got %q\n%s", id, reason, got, c.printed.String())
 	}
 	return nil
+}
+
+func (c *todoNightlyContext) listHoldsLetGoQuestion(list string) error {
+	found, err := c.tracker.StoryComments(context.Background(), c.epic)
+	if err != nil {
+		return err
+	}
+	var comments []string
+	for _, comment := range found {
+		comments = append(comments, comment.Text)
+	}
+	for _, text := range comments {
+		if strings.HasPrefix(text, application.QuestionForMondayPrefix) {
+			for _, want := range []string{"Let go: 2 cards", "mw-todo.5", "mw-todo.6", application.TodoKeepAllOption, application.TodoDropAllOption} {
+				if !strings.Contains(text, want) {
+					return fmt.Errorf("the QUESTION for Monday on %q does not carry %q:\n%s", list, want, text)
+				}
+			}
+			if strings.Contains(text, "Recommended") {
+				return fmt.Errorf("the Let go card has no recommendation, but the comment has a Recommended line:\n%s", text)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("no comment on %q opens with %q; its comments: %q\nthe job said:\n%s", list, application.QuestionForMondayPrefix, comments, c.printed.String())
 }
