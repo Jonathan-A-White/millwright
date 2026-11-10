@@ -38,6 +38,8 @@ type timingNightlyContext struct {
 	log        *apptest.FakeEventLog
 	uptime     *apptest.FakeUptime
 	failing    map[string]string // rig -> the file its run fails in
+	firstOnly  bool              // the failing runs pass from their second on
+	runs       map[string]int    // rig -> how many failing runs were asked for
 	spring     *application.EventSpring
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -50,7 +52,7 @@ func InitializeTimingNightlyScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		*c = timingNightlyContext{
-			rigs: map[string]string{}, globs: map[string][]string{}, epics: map[string]string{}, failing: map[string]string{},
+			rigs: map[string]string{}, globs: map[string][]string{}, epics: map[string]string{}, failing: map[string]string{}, runs: map[string]int{},
 			rules: apptest.NewFakeEpicRules(), heads: apptest.NewFakeRigHeads(), records: &apptest.FakeTimingRecords{},
 			rig:  &apptest.FakeTimingRig{Tests: map[string][]application.TaggedTest{}, Changes: map[string][]string{}},
 			load: &apptest.FakeHostLoad{Reading: application.LoadReading{Load: 0.2, Cores: 4}}, tracker: apptest.NewFakeTracker(),
@@ -98,6 +100,25 @@ func InitializeTimingNightlyScenario(ctx *godog.ScenarioContext) {
 		c.failing[rig] = file
 		return nil
 	})
+	ctx.Given(`^the timing run of "([^"]*)" fails in "([^"]*)" on its first run only$`, func(rig, file string) error {
+		c.failing[rig] = file
+		c.firstOnly = true
+		return nil
+	})
+	ctx.Given(`^the timing host reads in turn the loads ([\d., and]+) of (\d+) cores$`, func(loads string, cores int) error {
+		c.load.Readings = nil
+		for _, word := range strings.FieldsFunc(loads, func(r rune) bool { return r == ',' || r == ' ' }) {
+			if word == "and" {
+				continue
+			}
+			n, err := strconv.ParseFloat(word, 64)
+			if err != nil {
+				return fmt.Errorf("the load %q: %w", word, err)
+			}
+			c.load.Readings = append(c.load.Readings, application.LoadReading{Load: n, Cores: cores})
+		}
+		return nil
+	})
 	ctx.Given(`^the timing host is at load ([\d.]+) of (\d+) cores$`, func(load string, cores int) error {
 		n, err := strconv.ParseFloat(load, 64)
 		c.load.Reading = application.LoadReading{Load: n, Cores: cores}
@@ -136,6 +157,10 @@ func InitializeTimingNightlyScenario(ctx *godog.ScenarioContext) {
 func (c *timingNightlyContext) respond(dir, _ string, _ map[string]string) (application.Checked, error) {
 	rig := strings.TrimPrefix(dir[strings.LastIndex(dir, "/")+1:], application.TimingTreePrefix)
 	if file, fails := c.failing[rig]; fails {
+		c.runs[rig]++
+		if c.firstOnly && c.runs[rig] > 1 {
+			return application.Checked{Passed: true}, nil
+		}
 		return application.Checked{Output: " FAIL  " + file + " > backs off\nAssertionError: expected 3 to be 2\n"}, nil
 	}
 	return application.Checked{Passed: true}, nil
