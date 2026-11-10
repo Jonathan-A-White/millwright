@@ -46,6 +46,7 @@ func (c *statusContext) registerTickSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the (dispatch|Millhand tick) log of "([^"]*)" then holds a line saying "([^"]*)" at "([^"]*)"$`, c.aLogThenHoldsALineSayingAt)
 	ctx.Given(`^the (dispatch|Millhand tick) log of "([^"]*)" (?:then )?holds (\d+) (good run|failed run|local network fault|skipped run)s?$`,
 		c.aLogHoldsRuns)
+	ctx.Given(`^the dispatch log of "([^"]*)" then holds (\d+) runs? whose self-update failed at ([a-z-]+) with "([^"]*)"$`, c.aLogHoldsFailedSelfUpdates)
 	ctx.Given(`^the host "([^"]*)" syncs$`, c.theHostSyncs)
 
 	ctx.Then(`^the TICKS section says of the (dispatch|Millhand tick): "([^"]*)"$`, c.theTicksSectionSays)
@@ -127,6 +128,28 @@ func (c *statusContext) aLogHoldsRuns(kind, host, countText, what string) error 
 	}
 	for i := 0; i < count; i++ {
 		if err := c.appendTick(kind, host, next, tickWords[kind][outcome]); err != nil {
+			return err
+		}
+		next = next.Add(15 * time.Minute)
+	}
+	return nil
+}
+
+// aLogHoldsFailedSelfUpdates adds dispatch ticks a quarter of an hour apart, as
+// aLogHoldsRuns does, each one a good run that went on after a self-update that
+// failed (mw-gq6.1067).
+func (c *statusContext) aLogHoldsFailedSelfUpdates(host, countText, step, said string) error {
+	count, err := strconv.Atoi(countText)
+	if err != nil {
+		return fmt.Errorf("the count %q is not a number: %w", countText, err)
+	}
+	next := time.Date(2026, 9, 21, 9, 0, 0, 0, time.UTC)
+	if last, ok := c.lastTick[host+"/dispatch"]; ok {
+		next = last.Add(15 * time.Minute)
+	}
+	words := tickWords["dispatch"]["good"] + application.SelfUpdateLogWords(step, said)
+	for i := 0; i < count; i++ {
+		if err := c.appendTick("dispatch", host, next, words); err != nil {
 			return err
 		}
 		next = next.Add(15 * time.Minute)

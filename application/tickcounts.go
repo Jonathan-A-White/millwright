@@ -90,6 +90,16 @@ type TickCount struct {
 	// FirstSkipped the time of the oldest of them.
 	Skipped      int
 	FirstSkipped time.Time
+	// UpdateFailed is how many of the newest ticks, running back to the first
+	// whose self-update did not fail, went on after a self-update that failed
+	// (mw-gq6.1067). Such a tick is a good run, so Failed does not count it;
+	// UpdateSince is the time of the oldest of them, UpdateStep the step the
+	// newest failed at, and UpdateSaid what it said, which only the host's own log
+	// holds: a note read back from another host has none.
+	UpdateFailed int
+	UpdateSince  time.Time
+	UpdateStep   string
+	UpdateSaid   string
 }
 
 // CountTicks reads a log's lines, newest first, until the last good run. A log
@@ -206,6 +216,28 @@ func DispatchOutcome(line string) (time.Time, TickOutcome) {
 	return time.Time{}, TickUnread
 }
 
+// selfUpdateRun reads a dispatch log for the ticks in a row, newest first,
+// whose self-update failed, and for the step and words of the newest of them.
+func selfUpdateRun(ctx context.Context, log TickLog) (run TickRun, step, said string) {
+	run = NewestRun(ctx, log, SelfUpdateOutcome)
+	if run.Outcome != TickFailed {
+		return TickRun{}, "", ""
+	}
+	lines, err := log.Read(ctx)
+	if err != nil {
+		return TickRun{}, "", ""
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		if _, outcome := SelfUpdateOutcome(lines[i]); outcome == TickUnread {
+			continue
+		}
+		_, after, _ := strings.Cut(lines[i], selfUpdateLogMark)
+		step, said, _ = strings.Cut(strings.TrimSpace(after), ": ")
+		return run, step, said
+	}
+	return TickRun{}, "", ""
+}
+
 // SelfUpdateOutcome reads a line of the dispatch log for what became of the
 // tick's self-update (mw-gq6.654): a failed run if the line says it failed, a
 // good one for any other tick, whatever else the tick met.
@@ -267,10 +299,16 @@ func (h HostTicks) Known() bool { return h.Dispatch.Known || h.Millhand.Known }
 
 // ReadHostTicks counts the runs of each log.
 func ReadHostTicks(ctx context.Context, logs TickLogs) HostTicks {
-	return HostTicks{
+	ticks := HostTicks{
 		Dispatch: CountTicks(ctx, logs.Dispatch, DispatchOutcome),
 		Millhand: CountTicks(ctx, logs.Millhand, MillhandTickOutcome),
 	}
+	if ticks.Dispatch.Known {
+		run, step, said := selfUpdateRun(ctx, logs.Dispatch)
+		ticks.Dispatch.UpdateFailed, ticks.Dispatch.UpdateSince = run.Count, run.First
+		ticks.Dispatch.UpdateStep, ticks.Dispatch.UpdateSaid = step, said
+	}
+	return ticks
 }
 
 // The words of the note, one part for each timer that has runs.
@@ -278,6 +316,14 @@ const (
 	ticksNoteDispatch = "dispatch"
 	ticksNoteMillhand = "millhand"
 	ticksNoteNoGood   = "none"
+)
+
+// The fields of a dispatch part of the note that tell of failed self-updates
+// (mw-gq6.1067); the step is a single word, and what was said stays in the log.
+const (
+	noteUpdateFailed = "selfupdate"
+	noteUpdateSince  = "selfupdatesince"
+	noteUpdateStep   = "selfupdatestep"
 )
 
 // Note is the counts as the one line a host leaves the other in the tracker's
@@ -300,6 +346,10 @@ func (h HostTicks) Note() string {
 		if timer.count.Skipped > 0 {
 			part += fmt.Sprintf(" skipped=%d", timer.count.Skipped)
 		}
+		if timer.count.UpdateFailed > 0 {
+			part += fmt.Sprintf(" %s=%d %s=%s %s=%s", noteUpdateFailed, timer.count.UpdateFailed,
+				noteUpdateSince, timer.count.UpdateSince.UTC().Format(time.RFC3339), noteUpdateStep, timer.count.UpdateStep)
+		}
 		parts = append(parts, part)
 	}
 	return strings.Join(parts, "; ")
@@ -320,6 +370,7 @@ func (h HostTicks) SaidBy(kept HostTicks) bool {
 	for _, pair := range [][2]TickCount{{h.Dispatch, kept.Dispatch}, {h.Millhand, kept.Millhand}} {
 		now, then := pair[0], pair[1]
 		if now.Known != then.Known || now.Failed != then.Failed || now.Faults != then.Faults || now.Skipped != then.Skipped ||
+			now.UpdateFailed != then.UpdateFailed || now.UpdateStep != then.UpdateStep ||
 			now.LastGood.IsZero() != then.LastGood.IsZero() {
 			return false
 		}
@@ -371,7 +422,15 @@ func parseTickCount(fields []string) (TickCount, bool) {
 				count.LastGood = at
 			}
 			good = true
-		case "failed", "faults", "skipped":
+		case noteUpdateSince:
+			at, err := time.Parse(time.RFC3339, value)
+			if err != nil {
+				return TickCount{}, false
+			}
+			count.UpdateSince = at
+		case noteUpdateStep:
+			count.UpdateStep = value
+		case "failed", "faults", "skipped", noteUpdateFailed:
 			n, err := strconv.Atoi(value)
 			if err != nil || n < 0 {
 				return TickCount{}, false
@@ -381,6 +440,8 @@ func parseTickCount(fields []string) (TickCount, bool) {
 				count.Failed, failed = n, true
 			case "faults":
 				count.Faults, faults = n, true
+			case noteUpdateFailed:
+				count.UpdateFailed = n
 			default:
 				count.Skipped = n
 			}
@@ -411,9 +472,29 @@ func (c TickCount) write(b *strings.Builder, pad, label string) {
 			faults = "local network fault"
 		}
 		clip(b, fmt.Sprintf("%s  %d %s, %d failed", pad, c.Faults, faults, c.Failed))
+		c.writeUpdate(b, pad)
 		return
 	}
 	clip(b, fmt.Sprintf("%s  failed %d in a row", pad, c.Failed))
+	c.writeUpdate(b, pad)
+}
+
+// writeUpdate is the line under a dispatch count that says its mw could not be
+// brought level: how many ticks in a row went on after a failed self-update, since
+// when, and on the next line at which step with what was said. A tick whose self-update did not
+// fail leaves none, so a host that is level looks as it always did.
+func (c TickCount) writeUpdate(b *strings.Builder, pad string) {
+	if c.UpdateFailed == 0 {
+		return
+	}
+	clip(b, fmt.Sprintf("%s  self-update failed %d in a row since %s:", pad, c.UpdateFailed, c.UpdateSince.UTC().Format(TicksTimeFormat)))
+	// The width is a phone's, and the time leaves no room on its line for what the
+	// step said, which is the part that tells the cause: it goes on the next.
+	said := c.UpdateStep
+	if c.UpdateSaid != "" {
+		said += ": " + c.UpdateSaid
+	}
+	clip(b, pad+"    "+said)
 }
 
 // write is both timers' counts, the dispatch first.

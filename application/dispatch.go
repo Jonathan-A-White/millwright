@@ -582,6 +582,7 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 	// whatever else the tick met (mw-gq6.654).
 	if updateFailure != nil && d.Log != nil && !d.DryRun {
 		if alarm := d.failedUpdate(ctx, updateFailure); alarm != nil {
+			d.mailFailedUpdate(ctx, alarm, &report)
 			if _, faulted := LocalFault(err); err == nil || faulted {
 				err = alarm
 			} else {
@@ -640,6 +641,27 @@ func (d Dispatch) failedUpdate(ctx context.Context, failure *SelfUpdateFailure) 
 	}
 	return fmt.Errorf("dispatching on %s: its mw could not be brought level for %d ticks in a row since %s: %s: %s",
 		d.Host, SelfUpdateAlarm, before.First.UTC().Format(time.RFC3339), failure.Step, oneLine(failure.Said))
+}
+
+// mailFailedUpdate tells the Mayor, once, that this host's mw could not be brought
+// level for SelfUpdateAlarm ticks in a row (mw-gq6.1067). Failing the unit is not
+// enough to be heard: mw-unit-failed@ mails only a second failure with no clean
+// run between, and the tick after this one exits clean, as every tick does that
+// the self-update does not fail, so that mail was never sent. failedUpdate gives
+// the alarm on the one tick whose count equals SelfUpdateAlarm, which is the once.
+func (d Dispatch) mailFailedUpdate(ctx context.Context, alarm error, report *DispatchReport) {
+	if d.Mailbox == nil {
+		return
+	}
+	if _, err := d.Mailbox.Send(ctx, NewMessage{
+		From:    SeatIdentity(MwSeat, d.Host),
+		To:      MayorMailbox,
+		Subject: fmt.Sprintf("%s: mw could not be brought level on %s", MailBlocked, d.Host),
+		Body: alarm.Error() + "\n\nThis host goes on with the mw it has, so its Builders run on old gates and it refuses rig keys " +
+			"a newer mw reads. `mw status` shows the count under TICKS, beside the dispatch, until a tick's self-update works.\n",
+	}); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the mail to %s that this host's mw could not be brought level could not be sent: %v", MayorMailbox, err))
+	}
 }
 
 // The words a dispatch's line of its log holds after the time. ok says the run

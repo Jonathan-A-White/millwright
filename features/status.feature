@@ -538,6 +538,35 @@ Feature: mw status
     And the TICKS section says of the Millhand tick: "last good 2026-09-21 09:05Z"
     And the TICKS section says of the Millhand tick: "failed 3 in a row"
 
+  # A tick whose self-update failed is a good dispatch run, so "failed 0 in a row"
+  # hid a host whose mw could not be brought level for hours (mw-gq6.1067).
+  Scenario: Ticks whose self-update failed are told under the dispatch count, with the first time and what was said
+    Given the dispatch log of "vps" holds a good run at "2026-09-21T09:00:00Z"
+    And the dispatch log of "vps" then holds 3 runs whose self-update failed at fetch with "error: wrong index v1 file size"
+    When mw status reads the host
+    Then reading status succeeds
+    And the TICKS section says of the dispatch: "failed 0 in a row"
+    And the TICKS section says of the dispatch: "self-update failed 3 in a row since 2026-09-21 09:15Z:"
+    And the TICKS section says of the dispatch: "fetch: error: wrong index v1 file size"
+
+  Scenario: A tick whose self-update did not fail ends the line
+    Given the dispatch log of "vps" holds a good run at "2026-09-21T09:00:00Z"
+    And the dispatch log of "vps" then holds 3 runs whose self-update failed at fetch with "fatal: Authentication failed"
+    And the dispatch log of "vps" then holds 1 good run
+    When mw status reads the host
+    Then reading status succeeds
+    And the TICKS section says of the dispatch: "failed 0 in a row"
+    And the TICKS section does not say of the dispatch: "self-update"
+
+  Scenario: The other host's failed self-updates appear under OTHER HOSTS after it syncs
+    Given a status story "mw-gq6.12" filed under it, overriding "host" with "laptop"
+    And the dispatch log of "laptop" holds a good run at "2026-09-21T09:00:00Z"
+    And the dispatch log of "laptop" then holds 4 runs whose self-update failed at fetch with "fatal: Authentication failed"
+    And the host "laptop" syncs
+    When mw status reads the host
+    Then reading status succeeds
+    And under OTHER HOSTS the host "laptop" shows for the dispatch: "self-update failed 4 in a row since 2026-09-21 09:15Z:"
+
   Scenario: A host with no log prints no TICKS section
     When mw status reads the host
     Then reading status succeeds
