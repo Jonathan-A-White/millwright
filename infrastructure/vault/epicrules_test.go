@@ -273,6 +273,49 @@ func TestARigsFileSaysWhetherItExpectsAFilesKeyAndRefusesAnythingElse(t *testing
 	}
 }
 
+func TestARigsFileSaysWhetherItReleasesOnPathSetAndReadsAsTodayWithoutTheKey(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+
+	for written, want := range map[string]bool{"release_on_path = true # trial\n": true, "release_on_path = false\n": false, "files_expected = true\n": false} {
+		writeRigFile(t, dir, "lampas", written)
+		got, err := v.EpicRequirements(context.Background(), "lampas")
+		if err != nil {
+			t.Fatalf("%q: reading the rig's file: %v", written, err)
+		}
+		if got.ReleaseOnPath != want {
+			t.Errorf("%q: ReleaseOnPath = %v, want %v", written, got.ReleaseOnPath, want)
+		}
+		if got.Any() {
+			t.Errorf("release_on_path is no requirement of an epic, but Any() = true")
+		}
+	}
+
+	// A rig's file without the key reads exactly as it did.
+	writeRigFile(t, dir, "lampas", "files_expected = true\nepic_sections = [\"Demo\"]\n")
+	got, err := v.EpicRequirements(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	want := domain.EpicRequirements{FilesExpected: true, Sections: []string{"Demo"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("a file without release_on_path reads %+v, want %+v", got, want)
+	}
+
+	for _, bad := range []string{`yes`, `"true"`, `[true]`, ``} {
+		writeRigFile(t, dir, "lampas", "release_on_path = "+bad+"\n")
+		if _, err := v.EpicRequirements(context.Background(), "lampas"); err == nil || !strings.Contains(err.Error(), "release_on_path") {
+			t.Errorf("release_on_path = %s: err = %v, want a refusal naming release_on_path", bad, err)
+		}
+	}
+
+	// A landing's lenient read still takes the key.
+	writeRigFile(t, dir, "lampas", "release_on_path = true\n")
+	if _, unknown, err := v.LandingRequirements(context.Background(), "lampas"); err != nil || len(unknown) != 0 {
+		t.Errorf("a landing read of release_on_path = true: unknown %v, err %v; want neither", unknown, err)
+	}
+}
+
 func TestARigsFileSaysWhetherItsSuiteRunsNightlyAndUnderWhichEpic(t *testing.T) {
 	dir := aVault(t)
 	v := vault.New(dir)

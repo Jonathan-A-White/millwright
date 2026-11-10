@@ -63,6 +63,12 @@ type EpicRequirements struct {
 	// them (mw-gq6.349). It is no requirement of an epic either, so Any does
 	// not count it.
 	FilesExpected bool
+	// ReleaseOnPath says the rig's held stories are released by the command that
+	// completes them: mw path set --after <ids|none> adds the dependencies, sets
+	// the path and releases the story it was told what it waits on, unless the
+	// story is held on purpose. Off by default. It is no requirement of an epic
+	// either, so Any does not count it.
+	ReleaseOnPath bool
 	// NightlySuite says the rig's whole test suite is run on its main each night
 	// (mw suite), and SuiteEpic is the epic the beads that run files are filed
 	// under. Neither is a requirement of an epic, so Any does not count them.

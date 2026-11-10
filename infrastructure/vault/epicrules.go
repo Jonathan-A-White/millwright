@@ -35,6 +35,7 @@ const (
 	SiteURLKey             = "site_url"
 	HealthzURLKey          = "healthz_url"
 	FilesExpectedKey       = "files_expected"
+	ReleaseOnPathKey       = "release_on_path"
 	NightlySuiteKey        = "nightly_suite"
 	SuiteEpicKey           = "suite_epic"
 
@@ -76,6 +77,7 @@ var beadID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 //	site_url               = "https://lampas.allmymind.org/"
 //	healthz_url            = "https://jonah.allmymind.org/api/leaderboard/healthz"
 //	files_expected         = true
+//	release_on_path        = true
 //	nightly_suite          = true
 //	suite_epic             = "mw-5r3p30"
 //	capacity_viewers       = 300     # expected concurrent viewers
@@ -129,7 +131,7 @@ func (v *Vault) readRigFile(_ context.Context, rig string, lenient bool) (domain
 // knownKeys are the keys a rig's file has.
 var knownKeys = map[string]bool{
 	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true, UnionMergeFilesKey: true, TimingTestsKey: true,
-	PublicURLKey: true, SiteURLKey: true, HealthzURLKey: true, FilesExpectedKey: true, NightlySuiteKey: true, SuiteEpicKey: true,
+	PublicURLKey: true, SiteURLKey: true, HealthzURLKey: true, FilesExpectedKey: true, ReleaseOnPathKey: true, NightlySuiteKey: true, SuiteEpicKey: true,
 	LandingKey: true, BatchEveryKey: true, BatchMinKey: true, BatchMaxKey: true,
 	BatchFixerModelKey: true, BatchFixerEffortKey: true, BatchFixerTurnsKey: true,
 	CapacityViewersKey: true, CapacitySSECapKey: true, CapacityNginxConnectionsKey: true, CapacityMemoryFreeKey: true,
@@ -141,7 +143,7 @@ var bareKey = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // parseRigFile reads the little TOML a rig's file holds: `key = ["a", "b"]`,
 // the list possibly running over several lines, `guest = "<owner>"`,
-// `files_expected = true` (or false), `nightly_suite = true` (or false),
+// `files_expected = true` (or false), `release_on_path = true` (or false), `nightly_suite = true` (or false),
 // `suite_epic = "<bead id>"`, and `#` comments. A lenient read sets a key it
 // does not know aside, whatever its value and however many lines the value
 // runs over, and names it in the second result; a strict one refuses it.
@@ -201,6 +203,15 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 				requirements.FilesExpected = value == "true"
 			default:
 				return requirements, nil, fmt.Errorf("line %d: expected `%s = true` or `%s = false`, got %q", i+1, FilesExpectedKey, FilesExpectedKey, lines[i])
+			}
+			continue
+		}
+		if found && key == ReleaseOnPathKey {
+			switch value {
+			case "true", "false":
+				requirements.ReleaseOnPath = value == "true"
+			default:
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = true` or `%s = false`, got %q", i+1, ReleaseOnPathKey, ReleaseOnPathKey, lines[i])
 			}
 			continue
 		}
@@ -286,8 +297,8 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
-				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, SiteURLKey, HealthzURLKey, FilesExpectedKey, NightlySuiteKey, SuiteEpicKey,
+			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
+				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, SiteURLKey, HealthzURLKey, FilesExpectedKey, ReleaseOnPathKey, NightlySuiteKey, SuiteEpicKey,
 				CapacityViewersKey, CapacitySSECapKey, CapacityNginxConnectionsKey, CapacityMemoryFreeKey,
 				LandingKey, BatchEveryKey, BatchMinKey, BatchMaxKey, BatchFixerModelKey, BatchFixerEffortKey, BatchFixerTurnsKey)
 		}
