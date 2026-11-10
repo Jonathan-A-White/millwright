@@ -96,6 +96,10 @@ const (
 	partNoTip   = "-"
 	partPassed  = "passed"
 	partFailed  = "failed"
+	// partHandedBack is the second line of the record of a part run by a process of
+	// its own that ended in an error without a result; the lines after it say the
+	// error, which the next call tells.
+	partHandedBack = "handed-back"
 )
 
 // CheckPartHeldFileName is the name of the record of the waits of part n of a
@@ -233,8 +237,39 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 }
 
 // runPart runs part n of the gate in the story's worktree and keeps what it said:
-// checkPart's last step, and the whole of a part worker's.
+// checkPart's last step, and the whole of a part worker's. A part worker's record
+// was made to say "running" by the call that started it, so a worker that ends in
+// an error without keeping a result (could not run, handed back on the wait for the
+// run again, record not kept) closes it as handed back, and the call waiting for it
+// tells that rather than a process stopped (mw-gq6.1065).
 func (k Check) runPart(ctx context.Context, report CheckReport, c *closeOut, label string, part GatePart, tip string, fit *callFit, before LoadReading) (CheckReport, error) {
+	report, err := k.runPartKeeping(ctx, report, c, label, part, tip, fit, before)
+	if err != nil && k.PartWorker {
+		k.closeRunningRecord(ctx, c, report.Attempt, err)
+	}
+	return report, err
+}
+
+// closeRunningRecord puts the hand-back in place of "running" in the record of the
+// part, unless the record already holds a result (a part that failed is an error
+// too, and keeps its failure). The write does not end with a cancelled context: a
+// worker that was cancelled is the case it is for.
+func (k Check) closeRunningRecord(ctx context.Context, c *closeOut, attempt int, handed error) {
+	ctx = context.WithoutCancel(ctx)
+	name := CheckPartFileName(attempt, k.Part)
+	if text, err := k.Records.ReadRunFile(ctx, c.id, name); err == nil {
+		if lines := strings.Split(text, "\n"); len(lines) >= 2 {
+			switch strings.TrimSpace(lines[1]) {
+			case partPassed, partFailed:
+				return
+			}
+		}
+	}
+	record := fmt.Sprintf("%s %s\n%s\n%s\n", partTipWord, partNoTip, partHandedBack, handed.Error())
+	_, _ = k.Records.PutRunFile(ctx, c.id, name, record)
+}
+
+func (k Check) runPartKeeping(ctx context.Context, report CheckReport, c *closeOut, label string, part GatePart, tip string, fit *callFit, before LoadReading) (CheckReport, error) {
 	if fit != nil && k.Out != nil {
 		fmt.Fprintf(k.Out, "  part    expected about %s, %s left in this call\n", gateWaited(fit.expected), gateWaited(fit.left()))
 	}

@@ -106,7 +106,29 @@ type detachedPartRig struct {
 	starter *workerStarter
 	told    *lockedBuffer
 	rigDir  string
+	load    *flippingLoad
 	check   func(budget time.Duration) error
+}
+
+// flippingLoad is a host that reads calm until the test sets it far over its cores.
+type flippingLoad struct {
+	mu   sync.Mutex
+	over bool
+}
+
+func (f *flippingLoad) set(over bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.over = over
+}
+
+func (f *flippingLoad) Load(context.Context) (application.LoadReading, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.over {
+		return application.LoadReading{Load: 45, Cores: 20}, nil
+	}
+	return application.LoadReading{Load: 3, Cores: 20}, nil
 }
 
 // aDetachedPartRig is mw check --part 1 of a gate whose part outruns the
@@ -124,6 +146,7 @@ func aDetachedPartRig(t *testing.T, passed bool) *detachedPartRig {
 		starter: &workerStarter{},
 		told:    &lockedBuffer{},
 		rigDir:  rigDir,
+		load:    &flippingLoad{},
 	}
 	tracker := apptest.NewFakeTracker()
 	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
@@ -135,6 +158,7 @@ func aDetachedPartRig(t *testing.T, passed bool) *detachedPartRig {
 			KeepPlace: 10 * time.Minute, CallBudget: budget,
 			GateNoticeEvery: 10 * time.Millisecond, PartPoll: 5 * time.Millisecond,
 			Host: "laptop", Remote: "origin",
+			Load: d.load, LoadPoll: 5 * time.Millisecond, PartSlotWait: 40 * time.Millisecond,
 			Rigs: map[string]string{"millwright": rigDir},
 			Out:  writerOf(out),
 		}
@@ -241,5 +265,38 @@ func TestADetachedPartWhoseProcessDiedWithoutAResultIsStartedAgain(t *testing.T)
 	}
 	if d.starter.startedCount() != 2 {
 		t.Errorf("expected the part to be started again, it was started %d time(s)", d.starter.startedCount())
+	}
+}
+
+// A part run by its own process that failed while the host was far over its cores,
+// and is handed back on the wait for the run again, keeps a record of the hand-back
+// in place of "running": the next call says so, and the first failure is not
+// counted as the part's result (mw-gq6.1065).
+func TestADetachedPartHandedBackOnTheRunAgainWaitIsToldAsHandedBackNotAsStopped(t *testing.T) {
+	d := aDetachedPartRig(t, false)
+
+	if err := d.check(100 * time.Millisecond); err == nil || !strings.Contains(err.Error(), "is still running") {
+		t.Fatalf("expected the first call to leave the part running, got %v", err)
+	}
+	<-d.parts.started
+	// The host is far over its cores when the part fails, and stays so.
+	d.load.set(true)
+	close(d.parts.release)
+
+	err := d.check(30 * time.Second)
+	if err == nil {
+		t.Fatal("expected the hand-back to be told, not a pass")
+	}
+	for _, want := range []string{"failed once while laptop was busy", "mw check mw-x.1 --part 1", "not counted"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the line to say %q, got %q", want, err.Error())
+		}
+	}
+	if strings.Contains(err.Error(), "was stopped") || strings.Contains(err.Error(), "did not pass") {
+		t.Errorf("expected a hand-back, not a stopped process or a failure, got %q", err.Error())
+	}
+	text, _ := d.records.ReadRunFile(context.Background(), "mw-x.1", application.CheckPartFileName(1, 1))
+	if lines := strings.Split(text, "\n"); len(lines) < 2 || lines[1] == "running" || lines[1] == "failed" || lines[1] == "passed" {
+		t.Errorf("expected the record to say it was handed back, neither running nor a result, got %q", text)
 	}
 }
