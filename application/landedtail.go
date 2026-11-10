@@ -126,8 +126,9 @@ var landedTail = []tailStep{
 			b.nr.Notes = append(b.nr.Notes, t.once.Notes...)
 		}},
 	{name: stepCheckLive, scope: onceForBatch,
-		why: "Once for a batch, and a DEPLOYED-CHECKED comment on each story it landed: the page is read once. It comes after the " +
-			"after-landing command, which it waits to have passed, and before the story is closed by a single landing.",
+		why: "Once for a batch, and a DEPLOYED-CHECKED comment on each story it landed: the page is read once. It waits for the " +
+			"after-landing command to have passed. A single landing takes it before its story is closed; a batch takes it after " +
+			"it lets the merge slot go, for up to 30 seconds of reading is no reason to hold the slot.",
 		run: func(t *tail, _ *tailStory) {
 			noted := len(t.once.Notes)
 			var stories []liveStory
@@ -403,13 +404,15 @@ var fixedOnMainFinish = []string{stepRemoveWorktree, stepLedger, stepCommit, ste
 // and a story's mail goes once that command has run or been skipped, so that
 // it can say first that the deploy did not happen; the mails go before the
 // smoke, so that the Mayor is told of a landing when it is made (mw-gq6.626).
+// The live site is read after the slot is let go, with the smoke, for reading it
+// is up to 30 seconds no other landing of the rig should wait for.
 var batchOrder = [][]string{
 	{stepReadGrist, stepReadBackend, stepReadFiles, stepRunState, stepChainStamp, stepSayFiles, stepBenchmark, stepLedger,
 		stepCommit, stepRemoveWorktree, stepClose, stepCloseFormula, stepSpringTester},
-	{stepAdvanceRig, stepAfterLanding, stepCheckLive},
+	{stepAdvanceRig, stepAfterLanding},
 	{stepStageBackend},
 	{stepLandedMail},
-	{stepLetTheSlotGo, stepGristSmoke},
+	{stepLetTheSlotGo, stepCheckLive, stepGristSmoke},
 }
 
 // landedTailStep is the row of the tail named name.
