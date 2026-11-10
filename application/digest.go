@@ -55,6 +55,9 @@ type Digest struct {
 	// Loop, when set, is where the card's Factory loop section is read from
 	// (mw loop brief's inputs); nil leaves the section out.
 	Loop LoopSource
+	// Graph, when set, lists every open bead, to be read for the questions held
+	// for Monday; nil reads only the stories in hand.
+	Graph BeadGraph
 	// DryRun prints the card and files and sends nothing.
 	DryRun bool
 	// Now dates the digest's title; nil reads the real clock.
@@ -77,6 +80,8 @@ type DigestReport struct {
 	Listed []DigestEntry
 	// LeftOut are the ids of labelled demos with no VERIFIED comment.
 	LeftOut []string
+	// Held are the questions held for Monday (HeldQuestion) the card carries.
+	Held []HeldQuestion
 	// Bead is the digest bead filed, and Txid the card sent on it; both empty
 	// on a dry run or when there was nothing to digest.
 	Bead string
@@ -119,12 +124,15 @@ func (d Digest) Run(ctx context.Context) (DigestReport, error) {
 		d.say("%s: not verified, left out\n", id)
 	}
 	section := d.loopSection(ctx)
-	if len(report.Listed) == 0 && !section.hasContent() {
+	if report.Held, err = d.heldQuestions(ctx); err != nil {
+		return report, err
+	}
+	if len(report.Listed) == 0 && !section.hasContent() && len(report.Held) == 0 {
 		d.say("nothing to digest\n")
 		return report, nil
 	}
 
-	card := d.card(report.Listed, section)
+	card := d.card(report.Listed, report.Held, section)
 	if d.DryRun {
 		d.say("dry run: would file %q under %s and send:\n%s\noptions: %s (recommended), %s\n",
 			d.title(len(report.Listed)), d.parent(), card.Text, card.Options[0], card.Options[1])
@@ -155,7 +163,7 @@ func (d Digest) Run(ctx context.Context) (DigestReport, error) {
 // card is the decision card naming each listed demo by its full id, so each
 // shows as a chip, then the Factory loop section; its Bead is set once the
 // digest is filed.
-func (d Digest) card(listed []DigestEntry, section digestLoop) PosternSendRequest {
+func (d Digest) card(listed []DigestEntry, held []HeldQuestion, section digestLoop) PosternSendRequest {
 	var text string
 	if len(listed) == 0 {
 		text = "Weekly digest: no factory demos this week.\nA closes this digest; B holds it and I ask."
@@ -167,6 +175,13 @@ func (d Digest) card(listed []DigestEntry, section digestLoop) PosternSendReques
 		text = fmt.Sprintf("Weekly digest: %d factory demos I verified myself.\n%s\nA closes them all; B holds them and I ask which.",
 			len(listed), strings.Join(lines, "\n"))
 	}
+	if len(held) > 0 {
+		lines := make([]string, 0, len(held))
+		for _, h := range held {
+			lines = append(lines, fmt.Sprintf("- %s: %s", h.Bead, h.Question))
+		}
+		text += fmt.Sprintf("\n\nQuestions held for Monday (%d):\n%s", len(held), strings.Join(lines, "\n"))
+	}
 	if loop := section.text(); loop != "" {
 		text += "\n\n" + loop
 	}
@@ -174,6 +189,53 @@ func (d Digest) card(listed []DigestEntry, section digestLoop) PosternSendReques
 	return PosternSendRequest{
 		Class: "decision-needed", Text: text, Recommend: looksGood, Options: []string{looksGood, DigestHoldOption},
 	}
+}
+
+// heldQuestions are the open beads whose newest QUESTION for Monday comment has
+// no ANSWER and no card sent after it, one for each, in id order. The open beads
+// are the graph's when it is set, with the stories in hand.
+func (d Digest) heldQuestions(ctx context.Context) ([]HeldQuestion, error) {
+	seen := map[string]bool{}
+	var ids []string
+	add := func(id string) {
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	work, err := d.Tracker.WorkInHand(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading what is in hand for the questions held for Monday: %w", err)
+	}
+	for _, story := range liveStories(work) {
+		add(story.Story.ID)
+	}
+	if d.Graph != nil {
+		graph, err := d.Graph.BeadGraph(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("reading the beads for the questions held for Monday: %w", err)
+		}
+		for _, b := range graph {
+			if !strings.EqualFold(b.Status, StatusClosed) {
+				add(b.ID)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	sort.Strings(ids)
+	comments, err := d.Tracker.StoriesComments(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("reading the comments for the questions held for Monday: %w", err)
+	}
+	var held []HeldQuestion
+	for _, id := range ids {
+		if question, ok := heldQuestionOf(comments[id]); ok {
+			held = append(held, HeldQuestion{Bead: id, Question: question})
+		}
+	}
+	return held, nil
 }
 
 // DigestLoopClip is how many characters of a pick's title and of an outcome's
