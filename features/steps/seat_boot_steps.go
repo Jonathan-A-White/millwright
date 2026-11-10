@@ -70,6 +70,7 @@ func InitializeSeatBootScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^this host caps a Builder's session at (\d+) turns$`, c.thisHostCapsASessionAt)
 	ctx.Given(`^the story's own path sets max_turns to "([^"]*)"$`, c.theStorysOwnPathSetsMaxTurns)
 	ctx.Given(`^the story's own path sets size to "([^"]*)"$`, c.theStorysOwnPathSetsSize)
+	ctx.Given(`^the story's own path sets files to "([^"]*)"$`, c.theStorysOwnPathSetsFiles)
 	ctx.Given(`^this host says it caps a Builder's session at (\d+) turns, as the ceiling of every size$`, c.thisHostSaysItCapsASessionAt)
 	ctx.Then(`^the settings on the command line are one JSON document that signs nothing and allows bd$`, c.theSettingsAreOneJSONDocument)
 	ctx.Then(`^the command line primes the session from the vault's "([^"]*)"$`, c.theCommandLinePrimesFrom)
@@ -140,8 +141,12 @@ func (c *seatBootContext) theRigHoldsTheseFacts(rig string, table *godog.Table) 
 		if cell["boot"] != "" {
 			boot = "boot: " + cell["boot"] + "\n"
 		}
-		text := fmt.Sprintf("---\nsubject: %s\nkind: %s\nstatus: %s\nsource: %s\nsince: 2026-09-01\n%s---\n\n%s\n",
-			cell["subject"], cell["kind"], cell["status"], cell["source"], boot, cell["sentence"])
+		since := "2026-09-01"
+		if cell["since"] != "" {
+			since = cell["since"]
+		}
+		text := fmt.Sprintf("---\nsubject: %s\nkind: %s\nstatus: %s\nsource: %s\nsince: %s\n%s---\n\n%s\n",
+			cell["subject"], cell["kind"], cell["status"], cell["source"], since, boot, cell["sentence"])
 		if err := c.write(text, "seats", "builder", "rigs", rig, "facts", cell["slug"]+".md"); err != nil {
 			return err
 		}
@@ -311,6 +316,10 @@ func (c *seatBootContext) thisHostSaysItCapsASessionAt(turns int) error {
 
 func (c *seatBootContext) theStorysOwnPathSetsSize(size string) error {
 	return c.detail.Story.Overrides.Set("size", size)
+}
+
+func (c *seatBootContext) theStorysOwnPathSetsFiles(files string) error {
+	return c.detail.Story.Overrides.Set("files", files)
 }
 
 func (c *seatBootContext) theStorysOwnPathSetsMaxTurns(turns string) error {

@@ -834,3 +834,210 @@ func TestBootTellsASplitGatesBuilderToStopEditingAndRunTheGateOnce(t *testing.T)
 		})
 	}
 }
+
+// pathFact is a current fact for the boot-memory tests; booted false is boot: no.
+func pathFact(slug, subject string, kind application.FactKind, since, sentence string, booted bool) application.RigFact {
+	return application.RigFact{
+		Slug: slug, Subject: subject, Kind: kind, Status: application.FactCurrent,
+		Source: "mw-t5shinh.4", Since: since, Sentence: sentence, Unbooted: !booted,
+	}
+}
+
+// padding is a booted gotcha about nothing the stories name, n bytes of room.
+func padding(slug, since string, n int) application.RigFact {
+	return pathFact(slug, "pad-"+slug, application.FactGotcha, since, strings.Repeat("x", n), true)
+}
+
+const bootMemoryFiles = "src/a.ts"
+
+// mw-t5shinh.4: the facts about the story's files come first, an exact file
+// before a folder, a deeper folder before a shallower one, newest first.
+func TestBootMemoryOrdersTheFactsAboutTheFilesAndListsNoneTwice(t *testing.T) {
+	facts := []application.RigFact{
+		pathFact("top", "src", application.FactGotcha, "2026-11-09", "TOP FOLDER", true),
+		pathFact("deep", "src/tutor", application.FactGotcha, "2026-10-01", "DEEP FOLDER", false),
+		pathFact("exact-old", "src/tutor/a.ts", application.FactGotcha, "2026-09-01", "EXACT OLD", false),
+		pathFact("exact-new", "src/tutor/a.ts", application.FactDecision, "2026-10-01", "EXACT NEW", true),
+		pathFact("elsewhere", "src/other.ts", application.FactGotcha, "2026-10-01", "ELSEWHERE", true),
+		padding("p1", "2026-08-01", 600),
+	}
+	memory := application.RenderBootMemory("millwright", "ABOUT", facts, "src/tutor/a.ts")
+
+	at := 0
+	for _, want := range []string{application.PathFactsHeading, "EXACT NEW", "EXACT OLD", "DEEP FOLDER", "TOP FOLDER", "ABOUT"} {
+		found := strings.Index(memory[at:], want)
+		if found < 0 {
+			t.Fatalf("expected %q after what comes before it, got:\n%s", want, memory)
+		}
+		at += found + len(want)
+	}
+	for _, once := range []string{"EXACT NEW", "EXACT OLD", "DEEP FOLDER", "TOP FOLDER", "ELSEWHERE"} {
+		if strings.Count(memory, once) > 1 {
+			t.Errorf("expected %q once, got:\n%s", once, memory)
+		}
+	}
+	if strings.Contains(memory, "ELSEWHERE") && strings.Index(memory, "ELSEWHERE") < strings.Index(memory, "ABOUT") {
+		t.Errorf("expected a fact about another file to stay in the general render, got:\n%s", memory)
+	}
+}
+
+func TestBootMemoryStopsThePathSectionAtItsCap(t *testing.T) {
+	var facts []application.RigFact
+	for i := 0; i < 60; i++ {
+		facts = append(facts, pathFact(fmt.Sprintf("f%02d", i), "src/a.ts", application.FactGotcha,
+			fmt.Sprintf("2026-10-%02d", i%28+1), fmt.Sprintf("PATH FACT %02d %s", i, strings.Repeat("y", 80)), false))
+	}
+	for i := 0; i < 40; i++ {
+		facts = append(facts, padding(fmt.Sprintf("pad%02d", i), fmt.Sprintf("2026-08-%02d", i%28+1), 300))
+	}
+	memory := application.RenderBootMemory("millwright", "", facts, bootMemoryFiles)
+
+	section := application.PathFactsHeading
+	shown := 0
+	for _, line := range strings.Split(memory, "\n") {
+		if strings.HasPrefix(line, "- [src/a.ts]") {
+			section += "\n\n" + line
+			shown++
+		}
+	}
+	if shown == 0 || shown == 60 {
+		t.Fatalf("expected the cap to cut the section part way, got %d of 60", shown)
+	}
+	if len(section) > application.PathFactsCap {
+		t.Errorf("expected the section within %d bytes, got %d", application.PathFactsCap, len(section))
+	}
+	if want := fmt.Sprintf("%d facts about this story's files that did not fit", 60-shown); !strings.Contains(memory, want) {
+		t.Errorf("expected the left-out line to say %q, got:\n%s", want, memory)
+	}
+}
+
+// A render at its budget: the whole memory is no larger than RenderRigMemory
+// alone, the gotchas that left are the unmatched ones oldest first, and no
+// decision and no fact that names the Governor left.
+func TestBootMemoryMakesRoomFromUnmatchedGotchasOldestFirstAndNothingElse(t *testing.T) {
+	facts := []application.RigFact{
+		pathFact("decide", "layout", application.FactDecision, "2026-08-01", "A DECISION "+strings.Repeat("d", 300), true),
+		pathFact("his", "his-word", application.FactGotcha, "2026-07-01", "As the Governor said "+strings.Repeat("g", 300), true),
+		pathFact("mine", "src/a.ts", application.FactGotcha, "2026-10-01", "MATCHED GOTCHA "+strings.Repeat("m", 100), true),
+		pathFact("demoted", "src/a.ts", application.FactGotcha, "2026-10-02", "DEMOTED "+strings.Repeat("n", 200), false),
+		pathFact("g-new", "new-one", application.FactGotcha, "2026-11-01", "NEWEST "+strings.Repeat("a", 200), true),
+		pathFact("g-mid", "mid-one", application.FactGotcha, "2026-10-01", "MIDDLE "+strings.Repeat("b", 200), true),
+		pathFact("g-old", "old-one", application.FactGotcha, "2026-09-01", "OLDEST "+strings.Repeat("c", 200), true),
+	}
+	general := application.RenderRigMemory("ABOUT", facts)
+	memory := application.RenderBootMemory("millwright", "ABOUT", facts, bootMemoryFiles)
+
+	if len(memory) > len(general) {
+		t.Fatalf("expected at most %d bytes, got %d:\n%s", len(general), len(memory), memory)
+	}
+	for _, kept := range []string{"A DECISION", "As the Governor said", "MATCHED GOTCHA", "DEMOTED"} {
+		if !strings.Contains(memory, kept) {
+			t.Errorf("expected %q to stay, got:\n%s", kept, memory)
+		}
+	}
+	if strings.Contains(memory, "OLDEST") {
+		t.Errorf("expected the oldest unmatched gotcha to leave first, got:\n%s", memory)
+	}
+	line := ""
+	for _, l := range strings.Split(memory, "\n") {
+		if strings.HasPrefix(l, "Left out of this boot") {
+			line = l
+		}
+	}
+	if !strings.Contains(line, "[old-one]") {
+		t.Fatalf("expected the left-out line to name the gotcha that left, got:\n%s", memory)
+	}
+	// Whatever stayed of the newer unmatched gotchas is whole, and only older ones left before them.
+	if strings.Contains(line, "[new-one]") && !strings.Contains(line, "[mid-one]") {
+		t.Errorf("expected the middle gotcha to leave before the newest, got %q", line)
+	}
+	if !strings.Contains(line, "mw memory query millwright <term>") {
+		t.Errorf("expected the command in the left-out line, got %q", line)
+	}
+}
+
+// When the unmatched gotchas cannot free the room, the path section is cut and
+// no decision leaves.
+func TestBootMemoryCutsThePathSectionWhenNoGotchaCanLeave(t *testing.T) {
+	facts := []application.RigFact{
+		pathFact("decide", "layout", application.FactDecision, "2026-08-01", "A DECISION "+strings.Repeat("d", 200), true),
+		pathFact("his", "his-word", application.FactGotcha, "2026-07-01", "As the Governor said "+strings.Repeat("g", 200), true),
+		pathFact("small", "src/a.ts", application.FactGotcha, "2026-10-03", "SMALL ONE "+strings.Repeat("s", 20), false),
+		pathFact("big", "src/a.ts", application.FactGotcha, "2026-10-02", "BIG ONE "+strings.Repeat("b", 1500), false),
+		padding("p1", "2026-08-01", 400),
+	}
+	general := application.RenderRigMemory("ABOUT", facts)
+	memory := application.RenderBootMemory("millwright", "ABOUT", facts, bootMemoryFiles)
+
+	if len(memory) > len(general) {
+		t.Fatalf("expected at most %d bytes, got %d:\n%s", len(general), len(memory), memory)
+	}
+	if strings.Contains(memory, "BIG ONE") {
+		t.Errorf("expected the path section to be cut, got:\n%s", memory)
+	}
+	for _, kept := range []string{"A DECISION", "As the Governor said", "SMALL ONE"} {
+		if !strings.Contains(memory, kept) {
+			t.Errorf("expected %q to stay, got:\n%s", kept, memory)
+		}
+	}
+	if !strings.Contains(memory, "1 fact about this story's files that did not fit") {
+		t.Errorf("expected the left-out line to count the fact that did not fit, got:\n%s", memory)
+	}
+}
+
+func TestBootMemoryIsTheGeneralRenderWithoutFilesOrWithNoMatch(t *testing.T) {
+	facts := []application.RigFact{
+		pathFact("mine", "src/a.ts", application.FactGotcha, "2026-10-01", "MATCHED", false),
+		padding("p1", "2026-08-01", 600),
+	}
+	general := application.RenderRigMemory("ABOUT", facts)
+	for _, files := range []string{"", "src/b.ts", " , "} {
+		if got := application.RenderBootMemory("millwright", "ABOUT", facts, files); got != general {
+			t.Errorf("files %q: expected the general render, got:\n%s", files, got)
+		}
+		if got := application.RenderBootMemory("millwright", "ABOUT", facts, files); strings.Contains(got, "Left out of this boot") {
+			t.Errorf("files %q: expected no left-out line when nothing was left out, got:\n%s", files, got)
+		}
+	}
+}
+
+func TestBootMemoryMatchesAGlobAndTheFilesUnderIt(t *testing.T) {
+	facts := []application.RigFact{
+		pathFact("folder", "src/tutor", application.FactGotcha, "2026-10-01", "ON THE FOLDER", false),
+		pathFact("file", "src/tutor/x.ts", application.FactGotcha, "2026-10-01", "ON A FILE", false),
+		pathFact("deeper", "src/tutor/sub/y.ts", application.FactGotcha, "2026-10-01", "ON A DEEPER FILE", false),
+		pathFact("other", "src/other/z.ts", application.FactGotcha, "2026-10-01", "ON ANOTHER", false),
+		pathFact("sibling", "src/tutorial", application.FactGotcha, "2026-10-01", "ON A SIBLING", false),
+		padding("p1", "2026-08-01", 900),
+	}
+	memory := application.RenderBootMemory("millwright", "", facts, "src/tutor/*")
+	for _, want := range []string{"ON THE FOLDER", "ON A FILE", "ON A DEEPER FILE"} {
+		if !strings.Contains(memory, want) {
+			t.Errorf("expected %q, got:\n%s", want, memory)
+		}
+	}
+	for _, not := range []string{"ON ANOTHER", "ON A SIBLING"} {
+		if strings.Contains(memory, not) {
+			t.Errorf("expected no %q, got:\n%s", not, memory)
+		}
+	}
+}
+
+func TestBootPromptOpensTheMemoryWithTheFactsAboutTheStorysFiles(t *testing.T) {
+	seat := application.Seat{
+		Name: "builder", Rig: "millwright", Charter: "CHARTER", Memory: "ABOUT", HasFacts: true,
+		Facts: []application.RigFact{
+			pathFact("mine", "src/a.ts", application.FactGotcha, "2026-10-01", "DEMOTED ONE", false),
+			padding("p1", "2026-08-01", 600),
+		},
+	}
+	with := application.BootPrompt(seat, aStory(func(d *application.StoryDetail) { d.Story.Overrides.Files = "src/a.ts" }))
+	if strings.Index(with, application.PathFactsHeading) < 0 || strings.Index(with, "DEMOTED ONE") < strings.Index(with, application.PathFactsHeading) ||
+		strings.Index(with, "DEMOTED ONE") > strings.Index(with, "ABOUT") {
+		t.Errorf("expected the demoted fact before the about text, got:\n%s", with)
+	}
+	without := application.BootPrompt(seat, aStory(nil))
+	if strings.Contains(without, "DEMOTED ONE") || strings.Contains(without, application.PathFactsHeading) {
+		t.Errorf("expected today's boot for a story with no files, got:\n%s", without)
+	}
+}

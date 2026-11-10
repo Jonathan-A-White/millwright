@@ -2,6 +2,7 @@ package application
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -300,9 +301,242 @@ func RenderRigMemory(about string, facts []RigFact) string {
 		})
 		lines := []string{group.heading, ""}
 		for _, fact := range current {
-			lines = append(lines, fmt.Sprintf("- [%s] %s (%s)", fact.Subject, fact.Sentence, fact.Source))
+			lines = append(lines, renderedFact(fact))
 		}
 		sections = append(sections, strings.Join(lines, "\n"))
 	}
 	return strings.Join(sections, "\n\n")
+}
+
+// renderedFact is how a render shows one fact: its subject, its sentence and where
+// it came from.
+func renderedFact(fact RigFact) string {
+	return fmt.Sprintf("- [%s] %s (%s)", fact.Subject, fact.Sentence, fact.Source)
+}
+
+// PathFactsCap is the most bytes the section of facts about a story's files may
+// take at boot, its heading included (mw-t5shinh.4).
+const PathFactsCap = 3000
+
+// PathFactsHeading opens the boot's memory section for a story whose files
+// have facts.
+const PathFactsHeading = "## For the files this story names"
+
+// RenderBootMemory is what a Builder of a story reads of a rig kept as facts:
+// when the story's files key names files that current facts are about, the
+// section of those facts first, then the general render without them, then one
+// line naming what was left out to make room. The whole is never larger than
+// RenderRigMemory alone: booted gotchas the story's files do not match leave
+// first, oldest since first, never a decision and never a fact that names the
+// Governor; if that does not free enough, the section of path facts is cut.
+// With no files, or no fact about them, it is RenderRigMemory itself.
+func RenderBootMemory(rig, about string, facts []RigFact, files string) string {
+	general := RenderRigMemory(about, facts)
+	matched := factsForFiles(facts, files)
+	if len(matched) == 0 {
+		return general
+	}
+
+	// Gotchas that may leave, oldest first.
+	named := map[string]bool{}
+	for _, fact := range matched {
+		named[fact.Slug] = true
+	}
+	var removable []RigFact
+	for _, fact := range facts {
+		if fact.Kind == FactGotcha && fact.Status == FactCurrent && !fact.Unbooted && !named[fact.Slug] && !namesTheGovernor(fact) {
+			removable = append(removable, fact)
+		}
+	}
+	sort.SliceStable(removable, func(i, j int) bool {
+		if removable[i].Since != removable[j].Since {
+			return removable[i].Since < removable[j].Since
+		}
+		return removable[i].Slug < removable[j].Slug
+	})
+
+	// The most path facts the cap takes, in order.
+	size := len(PathFactsHeading) + 2
+	shownMost := 0
+	for _, fact := range matched {
+		size += len(renderedFact(fact)) + 1
+		if size-1 > PathFactsCap {
+			break
+		}
+		shownMost++
+	}
+
+	for shown := shownMost; shown >= 0; shown-- {
+		for left := 0; left <= len(removable); left++ {
+			gone := map[string]bool{}
+			var section []string
+			if shown > 0 {
+				section = []string{PathFactsHeading, ""}
+			}
+			for _, fact := range matched[:shown] {
+				gone[fact.Slug] = true
+				section = append(section, renderedFact(fact))
+			}
+			for _, fact := range removable[:left] {
+				gone[fact.Slug] = true
+			}
+			unshown := 0
+			for _, fact := range matched[shown:] {
+				if fact.Unbooted {
+					unshown++
+				}
+			}
+			var rest []RigFact
+			for _, fact := range facts {
+				if !gone[fact.Slug] {
+					rest = append(rest, fact)
+				}
+			}
+
+			var parts []string
+			if len(section) > 0 {
+				parts = append(parts, strings.Join(section, "\n"))
+			}
+			if render := RenderRigMemory(about, rest); render != "" {
+				parts = append(parts, render)
+			}
+			if line := leftOutLine(rig, removable[:left], unshown); line != "" {
+				parts = append(parts, line)
+			}
+			if render := strings.Join(parts, "\n\n"); len(render) <= len(general) {
+				return render
+			}
+		}
+	}
+	return general
+}
+
+// leftOutLine names what a boot left out to make room for the facts about the
+// story's files: the subjects of the gotchas that left, how many facts about
+// the files were not shown, and the command that reads them. Empty when nothing
+// was left out.
+func leftOutLine(rig string, gotchas []RigFact, unshown int) string {
+	var what []string
+	if len(gotchas) > 0 {
+		subjects := make([]string, len(gotchas))
+		for i, fact := range gotchas {
+			subjects[i] = "[" + fact.Subject + "]"
+		}
+		what = append(what, "the gotchas "+strings.Join(subjects, ", "))
+	}
+	if unshown > 0 {
+		noun := "facts"
+		if unshown == 1 {
+			noun = "fact"
+		}
+		what = append(what, fmt.Sprintf("%d %s about this story's files that did not fit", unshown, noun))
+	}
+	if len(what) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Left out of this boot to make room: %s. Read them with mw memory query %s <term>.", strings.Join(what, "; and "), rig)
+}
+
+// factsForFiles is the current facts, booted or not, whose subject is a file the
+// story's files key names, a folder above one, or a path under a named folder or
+// glob: an exact file or glob match first, then the deepest folder, newest first.
+func factsForFiles(facts []RigFact, files string) []RigFact {
+	var patterns []string
+	for _, pattern := range strings.Split(files, ",") {
+		pattern = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(pattern), "./"), "/")
+		if pattern != "" {
+			patterns = append(patterns, pattern)
+		}
+	}
+	if len(patterns) == 0 {
+		return nil
+	}
+
+	type found struct {
+		fact  RigFact
+		exact bool
+		depth int
+	}
+	var matched []found
+	for _, fact := range facts {
+		if fact.Status != FactCurrent {
+			continue
+		}
+		subject := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(fact.Subject), "./"), "/")
+		best, hit := found{fact: fact}, false
+		for _, pattern := range patterns {
+			exact, ok := subjectMatches(subject, pattern)
+			if ok && (!hit || (exact && !best.exact)) {
+				best.exact, hit = exact, true
+			}
+		}
+		if hit {
+			best.depth = strings.Count(subject, "/")
+			matched = append(matched, best)
+		}
+	}
+	sort.SliceStable(matched, func(i, j int) bool {
+		a, b := matched[i], matched[j]
+		if a.exact != b.exact {
+			return a.exact
+		}
+		if a.depth != b.depth {
+			return a.depth > b.depth
+		}
+		if a.fact.Since != b.fact.Since {
+			return a.fact.Since > b.fact.Since
+		}
+		return a.fact.Slug < b.fact.Slug
+	})
+	out := make([]RigFact, len(matched))
+	for i, m := range matched {
+		out[i] = m.fact
+	}
+	return out
+}
+
+// subjectMatches reports whether a fact's subject is about a story's file or
+// glob, and whether it is the file itself (or a path the glob matches) rather
+// than a folder above it or a path under a named folder.
+func subjectMatches(subject, pattern string) (exact, ok bool) {
+	if subject == "" {
+		return false, false
+	}
+	// A ** ends the literal part: everything under what comes before it.
+	if at := strings.Index(pattern, "**"); at >= 0 {
+		pattern = strings.TrimSuffix(pattern[:at], "/")
+		if pattern == "" {
+			return false, false
+		}
+	}
+	if !strings.ContainsAny(pattern, "*?[") {
+		switch {
+		case subject == pattern:
+			return true, true
+		case strings.HasPrefix(pattern, subject+"/"), strings.HasPrefix(subject, pattern+"/"):
+			return false, true
+		}
+		return false, false
+	}
+
+	if matched, err := path.Match(pattern, subject); err == nil && matched {
+		return true, true
+	}
+	for above := path.Dir(subject); above != "." && above != "/"; above = path.Dir(above) {
+		if matched, err := path.Match(pattern, above); err == nil && matched {
+			return false, true
+		}
+	}
+	// The folder above the glob: its literal leading folders.
+	base := ""
+	for _, part := range strings.Split(pattern, "/") {
+		if strings.ContainsAny(part, "*?[") {
+			break
+		}
+		base = path.Join(base, part)
+	}
+	if base != "" && (subject == base || strings.HasPrefix(base, subject+"/")) {
+		return false, true
+	}
+	return false, false
 }

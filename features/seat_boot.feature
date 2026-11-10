@@ -238,3 +238,75 @@ Feature: Booting a session into a seat
       | make test passes                         |
     And the boot file holds none of:
       | NEVER SHOWN |
+
+  # mw-t5shinh.4: a fact about a file the story names reaches the Builder who
+  # edits it, even a demoted one, ahead of the general facts.
+  Scenario: A demoted fact about the story's own file opens the memory section
+    Given the vault holds the "builder" seat's about text for the rig "millwright"
+    And the rig "millwright" holds these facts:
+      | slug       | subject   | kind     | status  | sentence                | source   | boot |
+      | a-ts       | src/a.ts  | gotcha   | current | A.ts renders twice.     | mw-gq6.5 | no   |
+      | one-per    | layout    | decision | current | Facts live one per file. | mw-6ww.9 |      |
+      | git-rebase | git       | gotcha   | current | Rebase onto the target before you hand the branch back, never merge it, and run the whole gate again after the rebase, because a part's pass counts only at the commit it ran at. | mw-gq6.2 | |
+    And the story's own path sets files to "src/a.ts"
+    When the session that works the story is assembled for the "builder" seat
+    Then the boot file holds, in this order:
+      | For the files this story names            |
+      | - [src/a.ts] A.ts renders twice. (mw-gq6.5) |
+      | About millwright, in facts                |
+      | ## Decisions                              |
+      | - [layout] Facts live one per file. (mw-6ww.9) |
+      | make test passes                          |
+
+  Scenario: A story whose files match no fact boots as it did
+    Given the vault holds the "builder" seat's about text for the rig "millwright"
+    And the rig "millwright" holds these facts:
+      | slug | subject  | kind   | status  | sentence            | source   | boot |
+      | a-ts | src/a.ts | gotcha | current | A.ts renders twice. | mw-gq6.5 | no   |
+      | bd   | bd       | gotcha | current | Point bd at the vault. | mw-gq6.1 |   |
+    And the story's own path sets files to "src/b.ts"
+    When the session that works the story is assembled for the "builder" seat
+    Then the boot file holds none of:
+      | For the files this story names |
+      | A.ts renders twice             |
+      | Left out of this boot          |
+
+  Scenario: A glob in the story's files matches the folder and the files under it
+    Given the vault holds the "builder" seat's about text for the rig "millwright"
+    And the rig "millwright" holds these facts:
+      | slug     | subject            | kind   | status  | sentence                 | source   | boot |
+      | tutor    | src/tutor          | gotcha | current | The tutor folder note.   | mw-gq6.5 | no   |
+      | tutor-b  | src/tutor/b.ts     | gotcha | current | The b.ts note.           | mw-gq6.6 | no   |
+      | other    | src/other/c.ts     | gotcha | current | NOT ABOUT THE GLOB.      | mw-gq6.7 | no   |
+      | git      | git                | gotcha | current | Rebase onto the target before you hand the branch back, never merge it, and run the whole gate again after the rebase, because a part's pass counts only at the commit it ran at, so any later commit, a doc or a wording too, makes every part run again, and the last edit comes first. | mw-gq6.2 | |
+    And the story's own path sets files to "src/tutor/*"
+    When the session that works the story is assembled for the "builder" seat
+    Then the boot file holds, in this order:
+      | For the files this story names |
+      | The b.ts note.                 |
+      | The tutor folder note.         |
+      | make test passes               |
+    And the boot file holds none of:
+      | NOT ABOUT THE GLOB |
+
+  Scenario: A boot that makes room for a story's files says which gotchas it left out
+    Given the vault holds the "builder" seat's about text for the rig "millwright"
+    And the rig "millwright" holds these facts:
+      | slug    | subject  | kind     | status  | sentence                   | source   | since      | boot |
+      | a-ts    | src/a.ts | gotcha   | current | A.ts renders twice.        | mw-gq6.5 | 2026-11-01 | no   |
+      | old-bd  | bd       | gotcha   | current | Point bd at the vault, with -C, from every worktree, one call at a time. | mw-gq6.1 | 2026-09-01 |      |
+      | git     | git      | gotcha   | current | Rebase onto the target before you hand the branch back, never merge it, and run the whole gate again after the rebase, because a part's pass counts only at the commit it ran at. | mw-gq6.2 | 2026-10-01 |      |
+      | one-per | layout   | decision | current | Facts live one per file.   | mw-6ww.9 | 2026-09-01 |      |
+    And the story's own path sets files to "src/a.ts"
+    When the session that works the story is assembled for the "builder" seat
+    Then the boot file holds, in this order:
+      | For the files this story names |
+      | - [src/a.ts] A.ts renders twice. (mw-gq6.5) |
+      | - [layout] Facts live one per file. (mw-6ww.9) |
+      | Left out of this boot          |
+      | [bd]                           |
+      | mw memory query millwright <term> |
+      | make test passes               |
+    And the boot file holds none of:
+      | Point bd at the vault |
+      | Rebase onto the target |
