@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -40,15 +41,35 @@ type SeatHandover struct {
 	// boot set is within its manifest's ceiling: a handover is refused while the
 	// successor's next boot would fail it (mw-gq6.1058).
 	Ceiling BootCeiling
+	// Procs and Sleep are what a WhenWaiting handover looks at the host's
+	// processes and waits between looks with; Poll is the time between looks,
+	// DefaultHandoverPoll when zero. Sleep nil is a real sleep.
+	Procs UserProcesses
+	Sleep func(ctx context.Context, d time.Duration) error
+	Poll  time.Duration
 }
+
+// DefaultHandoverWaitLimit is how long a WhenWaiting handover waits for the
+// successor's handover wait when the request names no limit.
+const DefaultHandoverWaitLimit = 10 * time.Minute
+
+// DefaultHandoverPoll is how often a WhenWaiting handover looks for it.
+const DefaultHandoverPoll = 3 * time.Second
 
 // SeatHandoverRequest is what one handover is asked to do. At is the seq of
 // the last event the old session answers, the log's head when nil. Successor
 // is the successor's window by name, the newest other window of the seat
 // when empty.
+//
+// WhenWaiting makes the handover wait, before it writes anything, until a
+// process of this user is `mw events wait` for the seat with handover among its
+// kinds: the successor's wait, armed. Limit is how long it waits for it, zero
+// DefaultHandoverWaitLimit; at the limit nothing is handed over.
 type SeatHandoverRequest struct {
-	At        *uint64
-	Successor string
+	At          *uint64
+	Successor   string
+	WhenWaiting bool
+	Limit       time.Duration
 }
 
 // Run hands the seat over and returns the event it emitted.
@@ -76,6 +97,11 @@ func (h SeatHandover) Run(ctx context.Context, req SeatHandoverRequest) (events.
 			return events.Event{}, fmt.Errorf("the %s seat is not handed over, nothing is written: %w", h.Seat, err)
 		}
 	}
+	if req.WhenWaiting {
+		if successor, err = h.waitForSuccessor(ctx, req, successor); err != nil {
+			return events.Event{}, err
+		}
+	}
 	ev, err := EventEmit{
 		Log: h.Log, Now: h.Now,
 		Event: events.Event{Kind: events.KindHandover, Actor: h.Seat, Detail: events.Handover{Seat: h.Seat, Successor: successor, At: at}.Detail()},
@@ -92,6 +118,108 @@ func (h SeatHandover) Run(ctx context.Context, req SeatHandoverRequest) (events.
 			successor, at, ev.Seq, at)
 	}
 	return ev, nil
+}
+
+// waitForSuccessor looks every Poll for the successor's handover wait among the
+// host's processes, and returns the successor's window, found again, once it is
+// there. At the limit it fails, in one line, with nothing written.
+func (h SeatHandover) waitForSuccessor(ctx context.Context, req SeatHandoverRequest, successor string) (string, error) {
+	if h.Procs == nil {
+		return "", fmt.Errorf("waiting for the successor needs the host's process table")
+	}
+	limit, poll, sleep := req.Limit, h.Poll, h.Sleep
+	if limit <= 0 {
+		limit = DefaultHandoverWaitLimit
+	}
+	if poll <= 0 {
+		poll = DefaultHandoverPoll
+	}
+	if sleep == nil {
+		sleep = sleepContext
+	}
+	here, in, err := h.Terminal.ThisWindow(ctx)
+	if err != nil {
+		return "", err
+	}
+	self := ""
+	if in {
+		self = here.Name
+	}
+	deadline := h.Now().Add(limit)
+	for {
+		table, err := h.Procs.List(ctx)
+		if err != nil {
+			return "", fmt.Errorf("the processes of this host could not be looked at: %w", err)
+		}
+		for _, p := range table {
+			if p.waitsForHandover(h.Seat, self) {
+				return h.successor(ctx, req.Successor)
+			}
+		}
+		if !h.Now().Before(deadline) {
+			hand := "mw seat handover --to " + successor
+			if req.At != nil {
+				hand += fmt.Sprintf(" --at %d", *req.At)
+			}
+			return "", fmt.Errorf("the %s seat is not handed over, nothing is written: no mw events wait --for %s with handover among its kinds was running after %s, so %s is not ready; when it is, run: %s",
+				h.Seat, h.Seat, limit, successor, hand)
+		}
+		if err := sleep(ctx, poll); err != nil {
+			return "", err
+		}
+	}
+}
+
+// sleepContext waits d, or until ctx ends.
+func sleepContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// waitsForHandover reports whether p is `mw events wait` for seat with handover
+// among its --kinds: the wait a successor arms at boot. A wait named, with --as,
+// for the window self is the old session's own, not the successor's.
+func (p Process) waitsForHandover(seat, self string) bool {
+	start := -1
+	for i := 1; i+1 < len(p.Argv); i++ {
+		if p.Argv[i] == "events" && p.Argv[i+1] == "wait" && filepath.Base(p.Argv[i-1]) == "mw" {
+			start = i + 2
+			break
+		}
+	}
+	if start < 0 {
+		return false
+	}
+	flag := func(name string) (string, bool) {
+		for i := start; i < len(p.Argv); i++ {
+			if v, ok := strings.CutPrefix(p.Argv[i], name+"="); ok {
+				return v, true
+			}
+			if p.Argv[i] == name && i+1 < len(p.Argv) {
+				return p.Argv[i+1], true
+			}
+		}
+		return "", false
+	}
+	if target, _ := flag("--for"); target != seat {
+		return false
+	}
+	if as, ok := flag("--as"); ok && self != "" && as == self {
+		return false
+	}
+	kinds, _ := flag("--kinds")
+	for _, k := range strings.Split(kinds, ",") {
+		if strings.TrimSpace(k) == events.KindHandover {
+			return true
+		}
+	}
+	return false
 }
 
 // successor is the open window the seat is handed to: the one named, or the

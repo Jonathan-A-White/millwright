@@ -14,6 +14,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/codex"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/procs"
 	"github.com/Jonathan-A-White/millwright/infrastructure/reaper"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/shellcmd"
@@ -255,8 +256,10 @@ func thisWindowName(ctx context.Context) string {
 func newSeatHandoverCmd() *cobra.Command {
 	var at uint64
 	var to string
+	var whenWaiting bool
+	var limit time.Duration
 	cmd := &cobra.Command{
-		Use:   "handover [--at <seq>] [--to <window>]",
+		Use:   "handover [--at <seq>] [--to <window>] [--when-waiting [--limit 10m]]",
 		Short: "Hand the Mayor's seat to the successor that is already up, at event N of the log",
 		Long: "handover is what the old Mayor runs last, once the successor (bin/respawn-mayor) is up beside it.\n" +
 			"It marks event N of the home's event log, --at (default: the log's head), the last event the old\n" +
@@ -270,7 +273,13 @@ func newSeatHandoverCmd() *cobra.Command {
 			"N (mw events wait --since N; mw talk wait, from the talk cursor), so nothing the Governor sends\n" +
 			"falls between the two. It works on tmux's default server unless $" + TmuxSocketEnv + " names another.\n\n" +
 			"It is refused, writing nothing, while the Mayor's boot set (mw seat boot mayor) is over the ceiling\n" +
-			"of seats/mayor/boot.toml: it names the bytes, the ceiling and the handoff to shorten.",
+			"of seats/mayor/boot.toml: it names the bytes, the ceiling and the handoff to shorten.\n\n" +
+			"With --when-waiting it first waits, printing nothing, until a process of this user is mw events wait\n" +
+			"--for mayor with handover among its --kinds (the successor's wait, which seats/mayor/kickoff.md has it\n" +
+			"arm at boot), looking every few seconds, and then hands over as above. The ceiling and the successor's\n" +
+			"window are checked before the wait, so a refusal comes at once. If --limit (default 10m) passes first\n" +
+			"it hands nothing over, exits non-zero, and says in one line which window it would have used and the\n" +
+			"plain command to run by hand.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -281,7 +290,7 @@ func newSeatHandoverCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			req := application.SeatHandoverRequest{Successor: to}
+			req := application.SeatHandoverRequest{Successor: to, WhenWaiting: whenWaiting, Limit: limit}
 			if cmd.Flags().Changed("at") {
 				req.At = &at
 			}
@@ -297,12 +306,15 @@ func newSeatHandoverCmd() *cobra.Command {
 				Now:      eventsClock,
 				Out:      cmd.OutOrStdout(),
 				Ceiling:  application.SeatBootCeiling{Files: files, Rigs: rigs, Commands: shellcmd.New(shellcmd.DefaultTimeout), Host: host},
+				Procs:    procs.Table{},
 			}.Run(cmd.Context(), req)
 			return err
 		},
 	}
 	cmd.Flags().Uint64Var(&at, "at", 0, "the seq of the last event the old Mayor answers (default: the log's head)")
 	cmd.Flags().StringVar(&to, "to", "", "the successor's window name (default: the newest other window of the Mayor)")
+	cmd.Flags().BoolVar(&whenWaiting, "when-waiting", false, "first wait until the successor's mw events wait --for mayor --kinds handover is running, then hand over")
+	cmd.Flags().DurationVar(&limit, "limit", application.DefaultHandoverWaitLimit, "with --when-waiting, how long to wait for the successor's wait before handing nothing over")
 	return cmd
 }
 

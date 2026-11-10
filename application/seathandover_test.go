@@ -405,3 +405,169 @@ func TestAHandoverIsRefusedWithNothingWrittenWhileTheBootSetIsOverItsCeiling(t *
 		t.Error("the handover was not written")
 	}
 }
+
+// aWaitOf is the process the successor's armed wait is: mw events wait for a
+// seat, with the kinds given.
+func aWaitOf(pid int, seat, kinds string) application.Process {
+	return application.Process{Pid: pid, Argv: []string{"/home/mw/bin/mw", "events", "wait", "--for", seat, "--kinds", kinds, "--limit", "50m"}}
+}
+
+// lookingTable is a process table that shows its processes only from the look
+// numbered from, and notes how many events the log held at each look.
+type lookingTable struct {
+	from  int
+	shows []application.Process
+	log   *apptest.FakeEventLog
+	looks int
+	seen  []int
+}
+
+func (l *lookingTable) List(context.Context) ([]application.Process, error) {
+	l.looks++
+	l.seen = append(l.seen, len(l.log.All()))
+	if l.looks < l.from {
+		return nil, nil
+	}
+	return l.shows, nil
+}
+
+func (l *lookingTable) Stop(context.Context, int) error { return nil }
+
+func (f *handoverFixture) waiting(table application.UserProcesses) (application.SeatHandover, *aClock) {
+	clock := &aClock{now: time.Date(2026, 10, 1, 14, 30, 0, 0, time.UTC)}
+	h := f.handover()
+	h.Now = clock.Now
+	h.Procs = table
+	h.Sleep = clock.Sleep
+	return h, clock
+}
+
+// With --when-waiting the handover waits for the successor's handover wait, and
+// emits the event and writes the acting file once, after the look that shows it.
+func TestAHandoverWhenWaitingWaitsForTheSuccessorsWaitThenHandsOver(t *testing.T) {
+	f := aHandover(t)
+	table := &lookingTable{from: 3, shows: []application.Process{aWaitOf(41, "mayor", "mail,handover")}, log: f.log}
+	h, _ := f.waiting(table)
+
+	ev, err := h.Run(context.Background(), application.SeatHandoverRequest{WhenWaiting: true, Limit: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if table.looks != 3 {
+		t.Errorf("looked %d times, want 3", table.looks)
+	}
+	for i, n := range table.seen {
+		if n != 3 {
+			t.Errorf("at look %d the log held %d events: the handover was emitted before the wait was seen", i+1, n)
+		}
+	}
+	if ev.Seq != 4 || len(f.log.All()) != 4 {
+		t.Errorf("emitted %+v, the log holds %d events", ev, len(f.log.All()))
+	}
+	if !strings.Contains(f.acting.Text("mayor"), newMayorWindow) || !strings.Contains(f.out.String(), "Handed over to "+newMayorWindow) {
+		t.Errorf("acting %q, printed %q", f.acting.Text("mayor"), f.out.String())
+	}
+}
+
+// If the wait is never seen, nothing is handed over, and the error names the
+// successor window and the command to run by hand.
+func TestAHandoverWhenWaitingGivesUpAtTheLimitAndWritesNothing(t *testing.T) {
+	f := aHandover(t)
+	table := &lookingTable{from: 1 << 30, log: f.log}
+	h, clock := f.waiting(table)
+	start := clock.Now()
+	at := uint64(2)
+
+	_, err := h.Run(context.Background(), application.SeatHandoverRequest{At: &at, WhenWaiting: true, Limit: time.Minute})
+	if err == nil {
+		t.Fatal("a handover was made with no wait to hand over to")
+	}
+	for _, want := range []string{newMayorWindow, "mw seat handover --to " + newMayorWindow, "--at 2", "1m0s"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error %q does not say %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "\n") {
+		t.Errorf("the error %q is more than one line", err)
+	}
+	if clock.Now().Sub(start) < time.Minute || table.looks < 2 {
+		t.Errorf("gave up after %v and %d looks", clock.Now().Sub(start), table.looks)
+	}
+	if len(f.log.All()) != 3 || f.acting.Text("mayor") != "" || f.out.Len() != 0 {
+		t.Error("something was written")
+	}
+}
+
+// The ceiling is checked before the process table is looked at.
+func TestAHandoverWhenWaitingIsRefusedOverTheCeilingBeforeItLooksAtAnyProcess(t *testing.T) {
+	f := aHandover(t)
+	table := &lookingTable{from: 1, shows: []application.Process{aWaitOf(41, "mayor", "handover")}, log: f.log}
+	h, _ := f.waiting(table)
+	h.Ceiling = &fakeCeiling{err: &application.BootSetOver{Seat: "mayor", Bytes: 15001, Ceiling: 15000}}
+
+	_, err := h.Run(context.Background(), application.SeatHandoverRequest{WhenWaiting: true, Limit: time.Minute})
+	if err == nil || !strings.Contains(err.Error(), "15001 bytes") {
+		t.Fatalf("got %v, want the ceiling's refusal", err)
+	}
+	if table.looks != 0 {
+		t.Errorf("looked at the process table %d times", table.looks)
+	}
+	if len(f.log.All()) != 3 || f.acting.Text("mayor") != "" {
+		t.Error("something was written")
+	}
+}
+
+// With no other window open it is refused at once, without waiting.
+func TestAHandoverWhenWaitingWithNoSuccessorWindowIsRefusedAtOnce(t *testing.T) {
+	f := aHandover(t)
+	f.windows.Vanish("@5")
+	table := &lookingTable{from: 1, log: f.log}
+	h, _ := f.waiting(table)
+
+	_, err := h.Run(context.Background(), application.SeatHandoverRequest{WhenWaiting: true, Limit: time.Minute})
+	if err == nil || !strings.Contains(err.Error(), "start the successor first") || table.looks != 0 {
+		t.Errorf("got %v after %d looks", err, table.looks)
+	}
+}
+
+// Only mw events wait for this seat with handover among its kinds counts.
+func TestOnlyAnEventsWaitForTheSeatWithHandoverAmongItsKindsIsTheSuccessorsWait(t *testing.T) {
+	for name, tc := range map[string]struct {
+		argv []string
+		want bool
+	}{
+		"for this seat with handover":        {[]string{"mw", "events", "wait", "--for", "mayor", "--kinds", "mail,handover"}, true},
+		"for another seat":                   {[]string{"mw", "events", "wait", "--for", "deputy", "--kinds", "handover"}, false},
+		"for this seat without handover":     {[]string{"mw", "events", "wait", "--for", "mayor", "--kinds", "mail,landing"}, false},
+		"no kinds given":                     {[]string{"mw", "events", "wait", "--for", "mayor"}, false},
+		"equals-sign flags":                  {[]string{"/bin/mw", "events", "wait", "--for=mayor", "--kinds=handover"}, true},
+		"under timeout":                      {[]string{"timeout", "3000", "mw", "events", "wait", "--for", "mayor", "--kinds", "handover"}, true},
+		"another command with the same word": {[]string{"mw", "events", "tail", "--for", "mayor", "--kinds", "handover"}, false},
+		"a grep for it":                      {[]string{"pgrep", "-f", "events wait --for mayor --kinds handover"}, false},
+		"the old window's own wait":          {[]string{"mw", "events", "wait", "--for", "mayor", "--kinds", "handover", "--as", oldMayorWindow}, false},
+		"the successor's own wait":           {[]string{"mw", "events", "wait", "--for", "mayor", "--kinds", "handover", "--as", newMayorWindow}, true},
+	} {
+		f := aHandover(t)
+		table := apptest.NewFakeUserProcesses()
+		table.Start(application.Process{Pid: 7, Argv: tc.argv})
+		h, _ := f.waiting(table)
+
+		_, err := h.Run(context.Background(), application.SeatHandoverRequest{WhenWaiting: true, Limit: 10 * time.Second})
+		if got := err == nil; got != tc.want {
+			t.Errorf("%s: handed over %v (%v), want %v", name, got, err, tc.want)
+		}
+	}
+}
+
+// A process table that cannot be read is an error, not a hand over.
+func TestAHandoverWhenWaitingFailsWhenTheProcessTableCannotBeRead(t *testing.T) {
+	f := aHandover(t)
+	table := apptest.NewFakeUserProcesses()
+	table.Err = errors.New("no /proc")
+	h, _ := f.waiting(table)
+
+	_, err := h.Run(context.Background(), application.SeatHandoverRequest{WhenWaiting: true, Limit: time.Minute})
+	if err == nil || !strings.Contains(err.Error(), "no /proc") || len(f.log.All()) != 3 {
+		t.Errorf("got %v", err)
+	}
+}

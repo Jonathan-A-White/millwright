@@ -141,6 +141,7 @@ later ignores it. A wait with `handover` among its kinds and no `--since` looks 
 seat's newest handover is to its own window and the seat's acting file names that window at that handover's
 event, it says "you hold the seat from N" and ends at once, the handover having landed before it was armed
 (mw-gq6.668); a handover the file does not stand at, the old session still acting, is stale and the wait waits (mw-gq6.767). The old session reads and answers up to N, the successor from N on.
+`mw seat handover --when-waiting [--limit 10m]` first waits, after the boot ceiling and the successor's window are checked, until a process of the user is `mw events wait --for <seat>` with `handover` among its `--kinds` (the successor's armed wait), and then hands over as above; at the limit it hands nothing over and says which window it would have used and the command to run by hand.
 
 ### A call the follower waits on has a deadline
 
