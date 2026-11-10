@@ -273,3 +273,42 @@ func TestFailedSelfUpdatesAreCountedAsTheUnbrokenRunOfThemAtTheEnd(t *testing.T)
 		t.Errorf("expected an unread line, got %v", got)
 	}
 }
+
+func TestAHostWhoseSelfUpdatesFailShowsItUnderTheDispatchCountAndInItsNote(t *testing.T) {
+	stamp := func(minute int) string {
+		return time.Date(2026, 11, 10, 17, minute, 0, 0, time.UTC).Format(time.RFC3339) + " "
+	}
+	failing := application.DispatchLogNothingReady + application.SelfUpdateLogWords("fetch", "error: wrong index v1 file size")
+	log := heldLog(t, stamp(0)+application.DispatchLogNothingReady, stamp(15)+failing, stamp(30)+failing, stamp(45)+failing)
+	ticks := application.ReadHostTicks(context.Background(), application.TickLogs{Dispatch: log})
+
+	got := ticks.Dispatch
+	if got.Failed != 0 || got.UpdateFailed != 3 || got.UpdateStep != "fetch" || got.UpdateSaid != "error: wrong index v1 file size" ||
+		!got.UpdateSince.Equal(time.Date(2026, 11, 10, 17, 15, 0, 0, time.UTC)) {
+		t.Fatalf("expected 3 failed self-updates at fetch since 17:15, none of them a failed run, got %+v", got)
+	}
+	// The note a sync leaves carries the count, the time and the step, and reads back;
+	// what was said stays in the log.
+	read := application.ParseHostTicks(ticks.Note()).Dispatch
+	if read.UpdateFailed != 3 || read.UpdateStep != "fetch" || !read.UpdateSince.Equal(got.UpdateSince) || read.UpdateSaid != "" {
+		t.Errorf("expected the note to read back the 3 failed self-updates, got %+v", read)
+	}
+	if !ticks.SaidBy(application.ParseHostTicks(ticks.Note())) {
+		t.Errorf("expected the note to say what the log does")
+	}
+	more := application.ReadHostTicks(context.Background(), application.TickLogs{Dispatch: heldLog(t,
+		stamp(0)+application.DispatchLogNothingReady, stamp(15)+failing, stamp(30)+failing, stamp(45)+failing, stamp(59)+failing)})
+	if more.SaidBy(application.ParseHostTicks(ticks.Note())) {
+		t.Errorf("expected a fourth failed self-update to be said again")
+	}
+}
+
+func TestATickWhoseSelfUpdateDidNotFailLeavesNoSelfUpdateLine(t *testing.T) {
+	stamp := time.Date(2026, 11, 10, 17, 0, 0, 0, time.UTC).Format(time.RFC3339) + " "
+	failing := application.DispatchLogNothingReady + application.SelfUpdateLogWords("fetch", "fatal: Authentication failed")
+	log := heldLog(t, stamp+failing, stamp+failing, stamp+application.DispatchLogNothingReady)
+	ticks := application.ReadHostTicks(context.Background(), application.TickLogs{Dispatch: log})
+	if ticks.Dispatch.UpdateFailed != 0 || strings.Contains(ticks.Note(), "selfupdate") {
+		t.Errorf("expected nothing of self-updates after one that did not fail, got %+v\nnote %q", ticks.Dispatch, ticks.Note())
+	}
+}

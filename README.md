@@ -4066,7 +4066,11 @@ again until a good one resets the count (mw-gq6.650). A tick whose own mw could 
 be brought level (the fetch, the fast-forward or the build of the factory rig fails) goes
 on and leaves with 0, its line of the log ending `| self-update failed at <step>: <why>`;
 the third such tick in a row fails the unit once, naming the step, its error and the
-first one's time, and a good self-update resets the count (mw-gq6.654). The fetch of a rig's origin
+first one's time, and a good self-update resets the count (mw-gq6.654). That tick also mails
+the Mayor itself, once (`Blocked: mw could not be brought level on <host>`), because the next
+tick leaves with 0 and `mw-unit-failed@` mails only a second failure with no clean run
+between; and `mw status` shows `self-update failed <n> in a row since <time>:` under the
+dispatch count, on this host and, after a sync, under OTHER HOSTS (mw-gq6.1067). The fetch of a rig's origin
 before each session starts waits the same way (and says `retried the rig fetch 2
 times`); one that never gets through gives the story's claim back, prints the same
 `local network fault` line and leaves with 7. After changing the unit file,

@@ -136,6 +136,9 @@ Feature: Dispatching the stories this host is ready to work
     When dispatch runs on "vps" with a cap of 1
     Then dispatch failed, saying: its mw could not be brought level for 3 ticks in a row since 2026-09-21T10:00:00Z: <step>: <said>
     And dispatch leaves with status 1
+    And the Mayor has 1 mail
+    And the subject of the mail to the Mayor is "Blocked: mw could not be brought level on vps"
+    And the mail to the Mayor says "<step>: <said>"
 
     Examples:
       | step         | said                                              |
@@ -149,6 +152,7 @@ Feature: Dispatching the stories this host is ready to work
     When dispatch runs on "vps" with a cap of 1
     Then dispatch failed, saying: its mw could not be brought level for 3 ticks in a row since 2026-09-21T10:00:00Z: build: after landing: make build: exit status 2: undefined: Frobnicate
     And dispatch leaves with status 1
+    And the Mayor has 1 mail
 
   Scenario: Two ticks in a row whose self-update fails still send nothing
     Given the dispatch log already holds 1 run whose self-update failed
@@ -156,6 +160,7 @@ Feature: Dispatching the stories this host is ready to work
     And the host's self-update fails at build with "undefined: Frobnicate"
     When dispatch runs on "vps" with a cap of 1
     Then dispatch leaves with status 0
+    And the Mayor has 0 mails
 
   Scenario: Only the third tick alarms; a fourth does not until a good self-update has reset the count
     Given the dispatch log already holds 3 runs whose self-update failed
@@ -163,6 +168,7 @@ Feature: Dispatching the stories this host is ready to work
     And the host's self-update fails at fetch with "fatal: Authentication failed"
     When dispatch runs on "vps" with a cap of 1
     Then dispatch leaves with status 0
+    And the Mayor has 0 mails
 
   Scenario: A good self-update resets the count
     Given the dispatch log already holds 2 runs whose self-update failed
@@ -172,6 +178,7 @@ Feature: Dispatching the stories this host is ready to work
     And the host's self-update fails at fetch with "fatal: Authentication failed"
     When dispatch runs on "vps" with a cap of 1
     Then dispatch leaves with status 0
+    And the Mayor has 0 mails
 
   Scenario: A tick that fails its self-update is told in its line of the log
     Given a ready story "mw-gq6.1" of that epic
