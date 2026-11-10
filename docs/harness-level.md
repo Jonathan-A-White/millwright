@@ -4,6 +4,15 @@ A model can need a newer Claude Code than a host has (`claude-fable-5-2` needs
 2.1.321 or later), and a session started there fails. A host whose Claude Code
 falls behind the home's was unseen until mw-gq6.1059; now two things watch it.
 
+<!-- toc -->
+
+- [What watches](#what-watches)
+- [Bringing a host level by hand](#bringing-a-host-level-by-hand)
+- [The way back](#the-way-back)
+- [What else the snapshot freezes](#what-else-the-snapshot-freezes)
+
+<!-- /toc -->
+
 ## What watches
 
 - **`mw doctor harness-level`**, on the home. Every sync leaves the host's
