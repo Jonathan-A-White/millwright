@@ -16,7 +16,7 @@ var _ application.BeadFeed = (*Gateway)(nil)
 
 // The follower's reads, each one `bd sql` round trip to the served database
 // (about a tenth of a second on 2026-10-01, with 4,000 beads). bd's own event
-// beads (type event, one per set-state) are left out: a run state's label on
+// beads (type event, one per set-state, no longer filed) are left out: a run state's label on
 // the bead it is about is what the follower reads. A bead's run state comes
 // from its run:* label, joined in.
 const (

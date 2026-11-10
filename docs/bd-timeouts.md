@@ -38,3 +38,27 @@ bd 1.3.4 (the newest release) has the same code. The fix is upstream: `dolt.New`
 `applyConfigDefaults`) must read the two settings. Until then, setting the variables in a
 `beads.env` would only look like a cure, so none is set. A `bd dep add` that hits the
 deadline is retried when the host is calmer.
+
+## mw no longer runs `bd set-state`
+
+`bd set-state` files a closed event bead under the story and checks the new edge for a
+dependency cycle: the read that met the 10 s deadline above. Nothing in mw read those beads
+(10,295 of them, 15.7% of a week's new beads), so since mw-t5shinh.12 `SetStoryState` runs one
+`bd update` instead: it swaps the story's `<dimension>:*` label for the new value and appends
+one line to the story's own notes (`--append-notes`). No event bead and no cycle check, so that
+cycle check cannot time out a state change, and the label-alone fall-back (mw-gq6.1046) is gone
+since nothing is skipped. The event beads already filed stay.
+
+For `run`, `rebase` and `mergedtests` the old labels are removed blind (every value mw knows),
+so nothing is read first; for `mainred`, whose value names a bead, the label is read first,
+over the kept connection or by one `bd show`.
+
+The line's shape is fixed, so a later count can read it as the event beads were read:
+
+```
+<UTC time, 2006-01-02T15:04:05Z> <dimension>=<value> <actor> <whole reason>
+```
+
+for example `2026-11-10T14:41:05Z run=landed mw@laptop landed at 3f2a9c1`. The actor is the
+Gateway's (`mw@<host>`), `unknown` if it has none. The reason is kept whole and as it was
+given, so a reason with a newline runs over more lines, none of which begins with a time.
