@@ -49,13 +49,22 @@ type FakeCloud struct {
 	// made from the snapshot has "hourly"; none named is "hourly" too), and
 	// PaceStuck the boxes whose timer SetPace cannot change. PaceCalls are
 	// the SetPaces asked, by box name.
-	Paces       map[string]string
-	PaceStuck   map[string]bool
-	paceCalls   []string
-	BilledUSD   float64
-	BilledKnown bool
-	begun       []string
-	made        []application.CloudInstance
+	Paces     map[string]string
+	PaceStuck map[string]bool
+	paceCalls []string
+	// Harnesses is the Claude Code version each box has, by name (a box made
+	// from the snapshot has the snapshot's; none named has none), and
+	// HarnessStuck the boxes whose install fails, with why. HarnessCalls are
+	// the SetHarnesses asked, as "<box> <version>"; Order is every SetHarness
+	// and SetPace asked, in order, as "harness <box>" and "pace <box>".
+	Harnesses    map[string]string
+	HarnessStuck map[string]string
+	harnessCalls []string
+	order        []string
+	BilledUSD    float64
+	BilledKnown  bool
+	begun        []string
+	made         []application.CloudInstance
 }
 
 var _ application.CloudProvider = (*FakeCloud)(nil)
@@ -194,6 +203,7 @@ func (f *FakeCloud) SetPace(_ context.Context, name string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.paceCalls = append(f.paceCalls, name)
+	f.order = append(f.order, "pace "+name)
 	if f.Unreachable[name] {
 		return "", fmt.Errorf("ssh %s: no route to the box", name)
 	}
@@ -207,6 +217,45 @@ func (f *FakeCloud) SetPace(_ context.Context, name string) (string, error) {
 		f.Paces[name] = application.CloudPaceFive
 	}
 	return f.Paces[name], nil
+}
+
+// SetHarness implements application.CloudProvider: a box behind the version
+// takes it, unless it is Unreachable (an error) or HarnessStuck (it stays, with
+// the reason).
+func (f *FakeCloud) SetHarness(_ context.Context, name, version string) (application.CloudHarness, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.harnessCalls = append(f.harnessCalls, name+" "+version)
+	f.order = append(f.order, "harness "+name)
+	if f.Unreachable[name] {
+		return application.CloudHarness{}, fmt.Errorf("ssh %s: no route to the box", name)
+	}
+	if f.Harnesses == nil {
+		f.Harnesses = map[string]string{}
+	}
+	was := f.Harnesses[name]
+	if was != "" && !application.HarnessBehind(was, version) {
+		return application.CloudHarness{Was: was, Now: was}, nil
+	}
+	if why := f.HarnessStuck[name]; why != "" {
+		return application.CloudHarness{Was: was, Now: was, Why: why}, nil
+	}
+	f.Harnesses[name] = version
+	return application.CloudHarness{Was: was, Now: version}, nil
+}
+
+// HarnessCalls are the SetHarnesses asked for, in order, each "<box> <version>".
+func (f *FakeCloud) HarnessCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.harnessCalls...)
+}
+
+// Order is every SetHarness and SetPace asked for, in order.
+func (f *FakeCloud) Order() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.order...)
 }
 
 // PaceCalls are the SetPaces asked for, in order, each a box's name.

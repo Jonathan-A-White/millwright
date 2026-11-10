@@ -488,6 +488,108 @@ func TestABoxThatCannotBeReachedForItsPaceIsSaidSoAndTriedAgain(t *testing.T) {
 	}
 }
 
+// harnessCheck is paceCheck with the home's Claude Code at version.
+func harnessCheck(t *testing.T, cloud *apptest.FakeCloud, version string, box application.CloudBox) (application.CloudReport, *apptest.FakeCloudBook) {
+	t.Helper()
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	box.Up, box.Made, box.Dispatched = now.Add(-30*time.Minute), now.Add(-30*time.Minute), now.Add(-20*time.Minute)
+	box.Cap = 2
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: []application.CloudBox{box}}}
+	report, err := application.CloudCheck{
+		Work: apptest.NewFakeTracker(), Provider: cloud, Book: book, Host: "desktop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+		HarnessVersion: func(context.Context) (string, error) { return version, nil },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return report, book
+}
+
+func TestABoxBehindTheHomesHarnessIsBroughtLevelBeforeItsTimerIsSetAndTheMovesHoldBothVersions(t *testing.T) {
+	cloud := &apptest.FakeCloud{Harnesses: map[string]string{"cloud1": "2.1.300"}}
+	report, book := harnessCheck(t, cloud, "2.1.322", application.CloudBox{Name: "cloud1"})
+	if got := cloud.HarnessCalls(); len(got) != 1 || got[0] != "cloud1 2.1.322" {
+		t.Errorf("expected exactly one install asked, of 2.1.322, got %v", got)
+	}
+	if got, want := cloud.Order(), []string{"harness cloud1", "pace cloud1"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("expected the harness brought level before the timer is set, got %v", got)
+	}
+	if got := cloud.Harnesses["cloud1"]; got != "2.1.322" {
+		t.Errorf("expected the box at 2.1.322, got %q", got)
+	}
+	want := "cloud1: claude 2.1.300 to 2.1.322 (the home's)"
+	if !slices.ContainsFunc(report.Moves, func(m string) bool { return strings.Contains(m, want) }) {
+		t.Errorf("expected a move %q, got %q", want, report.Moves)
+	}
+	if !slices.ContainsFunc(book.State.Moves, func(m application.CloudMove) bool { return strings.Contains(m.What, want) }) {
+		t.Errorf("expected the book to keep the move %q, got %+v", want, book.State.Moves)
+	}
+}
+
+func TestABoxWhoseHarnessInstallFailsGoesOnAndItsTimerIsSetAndOneLineSaysWhy(t *testing.T) {
+	cloud := &apptest.FakeCloud{
+		Harnesses:    map[string]string{"cloud1": "2.1.300"},
+		HarnessStuck: map[string]string{"cloud1": "npm install failed: npm error network timeout"},
+	}
+	report, book := harnessCheck(t, cloud, "2.1.322", application.CloudBox{Name: "cloud1"})
+	if got := book.State.Boxes[0].Pace; got != application.CloudPaceFive {
+		t.Errorf("expected the timer set all the same, got pace %q", got)
+	}
+	want := "cloud1: claude stays at 2.1.300, not 2.1.322: npm install failed: npm error network timeout"
+	n := 0
+	for _, m := range report.Moves {
+		if strings.Contains(m, "claude stays") {
+			n++
+			if !strings.Contains(m, want) {
+				t.Errorf("expected the line %q, got %q", want, m)
+			}
+		}
+	}
+	if n != 1 {
+		t.Errorf("expected one line saying the harness stays, got %d in %q", n, report.Moves)
+	}
+}
+
+func TestABoxAlreadyLevelWithTheHomesHarnessRunsNoInstallAndSaysNothingMoved(t *testing.T) {
+	cloud := &apptest.FakeCloud{Harnesses: map[string]string{"cloud1": "2.1.322"}}
+	report, _ := harnessCheck(t, cloud, "2.1.322", application.CloudBox{Name: "cloud1"})
+	if got := cloud.Harnesses["cloud1"]; got != "2.1.322" {
+		t.Errorf("expected the box left at 2.1.322, got %q", got)
+	}
+	for _, m := range report.Moves {
+		if strings.Contains(m, "claude") {
+			t.Errorf("expected no move about the harness on a level box, got %q", m)
+		}
+	}
+}
+
+func TestABoxAtThePaceIsNotAskedItsHarnessAgainAndNoHomeVersionAsksNothing(t *testing.T) {
+	cloud := &apptest.FakeCloud{}
+	harnessCheck(t, cloud, "2.1.322", application.CloudBox{Name: "cloud1", Pace: application.CloudPaceFive})
+	if got := cloud.HarnessCalls(); len(got) != 0 {
+		t.Errorf("expected a box already brought up left alone, got %v", got)
+	}
+	harnessCheck(t, cloud, "", application.CloudBox{Name: "cloud2"})
+	if got := cloud.HarnessCalls(); len(got) != 0 {
+		t.Errorf("expected a home that cannot say its version to ask nothing, got %v", got)
+	}
+}
+
+func TestHarnessBehindComparesVersionsAsNumbers(t *testing.T) {
+	for _, c := range []struct {
+		have, want string
+		behind     bool
+	}{
+		{"2.1.300", "2.1.322", true}, {"2.1.322", "2.1.322", false}, {"2.1.330", "2.1.322", false},
+		{"2.1.99", "2.1.322", true}, {"2.1.1000", "2.1.322", false}, {"2.2", "2.1.322", false}, {"2.1", "2.1.1", true},
+	} {
+		if got := application.HarnessBehind(c.have, c.want); got != c.behind {
+			t.Errorf("HarnessBehind(%q, %q) = %v, want %v", c.have, c.want, got, c.behind)
+		}
+	}
+}
+
 // fakeBoxWork is the worktrees a cloud box keeps, as the home asks over ssh: it
 // writes a bundle into the fake vault as the adapter writes one into the real
 // one, and notes whether the provider had destroyed the box by then.

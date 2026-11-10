@@ -33,6 +33,11 @@ func LastSyncKey(host string) string { return "host." + host + ".last_sync" }
 // when it is not main's (mw-gq6.521).
 func MwCommitKey(host string) string { return "host." + host + ".mw_commit" }
 
+// HarnessKey is where a host leaves the version of its Claude Code, on every
+// sync, beside MwCommitKey: mw doctor's harness-level check reads it for each
+// Builder host and alarms on one older than the home's (mw-gq6.1059).
+func HarnessKey(host string) string { return "host." + host + ".harness" }
+
 // BeadsSyncMode is how mw sync treats this host's beads database: where the
 // database lives, and so what the tracker's remote is for.
 //
@@ -790,6 +795,12 @@ type Sync struct {
 	// level. Empty leaves no note: a build that knows no commit says nothing.
 	MwCommit string
 
+	// Harness is the version of this host's Claude Code (HarnessNumber of what
+	// `claude --version` prints). Every sync that gets level leaves it as
+	// HarnessKey. Empty leaves no note: a host with no Claude Code, or one that
+	// will not say, leaves the other hosts to say it is unread.
+	Harness string
+
 	// BoostConfig is this host's ~/.config/mw/config.toml and BoostTarget the
 	// vault's hosts/boost-config.toml. On a host that is not the home, a sync
 	// whose vault half got level appends to BoostConfig any [tests],
@@ -1101,6 +1112,14 @@ func (s Sync) noteMwCommit(ctx context.Context) {
 	}
 }
 
+// noteHarness leaves the version of this host's Claude Code for the home to
+// read, as noteMwCommit leaves the commit; best effort.
+func (s Sync) noteHarness(ctx context.Context) {
+	if s.Harness != "" {
+		_ = s.Tracker.SetNote(ctx, HarnessKey(s.Host), s.Harness)
+	}
+}
+
 // recordLevelInTheOneDatabase is the beads half on a host whose notes go
 // straight into the one database every host reads: the note of when this host
 // was level and its timers' counts, written on every sync because nothing has
@@ -1117,6 +1136,7 @@ func (s Sync) recordLevelInTheOneDatabase(ctx context.Context, report SyncReport
 	noteErr := s.Tracker.SetNote(ctx, LastSyncKey(s.Host), at.UTC().Format(LastSyncFormat))
 	s.noteTicks(ctx)
 	s.noteMwCommit(ctx)
+	s.noteHarness(ctx)
 
 	if report.Mode == BeadsSyncShared {
 		ClearSyncHalt(ctx, s.SyncHalts)
@@ -1228,6 +1248,7 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 	// dispatch.
 	s.noteTicks(ctx)
 	s.noteMwCommit(ctx)
+	s.noteHarness(ctx)
 
 	retried, err := s.syncTrackerMarking(ctx, &report)
 	// A cycle that halted still went through the database, which keeps growing

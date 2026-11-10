@@ -275,6 +275,9 @@ func cloudCheck(ctx context.Context, out io.Writer) (application.CloudCheck, boo
 		Host:   host,
 		Plan:   plan,
 		Out:    out,
+		// A box is brought to the Claude Code the home has before its timer is
+		// set (mw-gq6.1059).
+		HarnessVersion: ownHarnessVersion,
 	}, true, nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -309,6 +310,13 @@ func newDoctorCmd() *cobra.Command {
 			if home, homeErr := os.UserHomeDir(); homeErr == nil {
 				unitDrift.UnitDir = filepath.Join(home, ".config", "systemd", "user")
 			}
+			// Each Builder host's Claude Code against the home's, as the hosts left it
+			// with their last sync (mw-gq6.1059); it only reports.
+			harnessLevel := doctor.NewHarnessLevel(mwVault(vault, host), host, mwGateway(vault, host))
+			harnessLevel.Version = ownHarnessVersion
+			harnessLevel.Hosts = func(ctx context.Context) ([]doctor.HarnessHost, error) {
+				return harnessHosts(ctx, mwVault(vault, host), host)
+			}
 			checks := application.DoctorChecks{}
 			// The factory checkout the vault's formulas are judged against; none
 			// where this host checks the rig out nowhere.
@@ -521,6 +529,7 @@ func newDoctorCmd() *cobra.Command {
 				usageFresh,
 				unitEnv,
 				unitDrift,
+				harnessLevel,
 			}, churn...), checks...)
 			// Where Claude Code keeps its transcripts is the only place these
 			// two checks read; a host on codex has none, and says so once rather
@@ -733,4 +742,41 @@ func beadsServedHere() bool {
 		return true
 	}
 	return false
+}
+
+// harnessHosts are the Builder hosts the harness-level check looks at besides
+// this one: the Boost, the hosts [cloud.caps] names and the boxes the cloud
+// book holds up. A box is the one kind whose Claude Code is an npm package.
+func harnessHosts(ctx context.Context, files *vaultpkg.Vault, host string) ([]doctor.HarnessHost, error) {
+	seen := map[string]bool{host: true}
+	var hosts []doctor.HarnessHost
+	add := func(name string, box bool) {
+		if !seen[name] {
+			seen[name] = true
+			hosts = append(hosts, doctor.HarnessHost{Name: name, Box: box})
+		}
+	}
+	add(application.BoostOf(host), false)
+	if settings, ok, err := config.Cloud(); err != nil {
+		return nil, err
+	} else if ok {
+		names := make([]string, 0, len(settings.HostCaps))
+		for name := range settings.HostCaps {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			add(name, false)
+		}
+	}
+	if files != nil {
+		if state, err := (vaultpkg.CloudBook{Vault: files}).Read(ctx); err == nil {
+			for _, box := range state.Boxes {
+				if !box.Making && !box.Restoring {
+					add(box.Name, true)
+				}
+			}
+		}
+	}
+	return hosts, nil
 }

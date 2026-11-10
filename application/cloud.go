@@ -55,10 +55,24 @@ type CloudProvider interface {
 	// carries the home's hourly timer, and has no event follower to spring its
 	// dispatch. An error is a box that could not be reached or written.
 	SetPace(ctx context.Context, name string) (pace string, err error)
+	// SetHarness brings the box's Claude Code to version, the home's, when it
+	// is behind it, over WireGuard as SetPace does: a box made from the
+	// snapshot comes up on the snapshot's. A failed install is no error: the
+	// box is left as it was and CloudHarness.Why says why, because a box that
+	// cannot start a session is worse than one on an older Claude Code. An error
+	// is a box that could not be reached.
+	SetHarness(ctx context.Context, name, version string) (CloudHarness, error)
 	// Address is where the box is reached from the home: its WireGuard address
 	// read off the hub, and the user it dispatches as. The home resolves no
 	// name for a box. An error is a box with no address to read, with why.
 	Address(ctx context.Context, name string) (CloudAddress, error)
+}
+
+// CloudHarness is what bringing a box's Claude Code level found: the version
+// it had and has. Now equal to Was with no Why is a box already level; with a
+// Why, an install that did not happen or did not take.
+type CloudHarness struct {
+	Was, Now, Why string
 }
 
 // CloudAddress is where a cloud box is reached over WireGuard.
@@ -468,6 +482,10 @@ type CloudCheck struct {
 	Host string
 	Plan CloudPlan
 	Now  func() time.Time
+	// HarnessVersion is the Claude Code version of the home (`mw version`), which
+	// a box is brought to before its dispatch timer is set. Nil, or one that
+	// says nothing, brings no box to any.
+	HarnessVersion func(ctx context.Context) (string, error)
 	// Out is where what the check did and could not do is said. Nil says
 	// nothing.
 	Out io.Writer
@@ -1005,10 +1023,21 @@ func (p *cloudPass) setCaps(ctx context.Context) {
 // the pace is not reached again; one that could not be is a move the first time
 // for that fault, and tried at the next check.
 func (p *cloudPass) setPaces(ctx context.Context) {
+	home := ""
 	for i := range p.state.Boxes {
 		box := &p.state.Boxes[i]
 		if box.Making || box.Restoring || box.Pace == CloudPaceFive {
 			continue
+		}
+		if home == "" && p.check.HarnessVersion != nil {
+			version, err := p.check.HarnessVersion(ctx)
+			if home = HarnessNumber(version); home == "" {
+				home = "-"
+				p.check.say("the home's Claude Code version is not known (%q, %v): no box is brought level", version, err)
+			}
+		}
+		if home != "" && home != "-" {
+			p.setHarness(ctx, box, home)
 		}
 		pace, err := p.check.Provider.SetPace(ctx, box.Name)
 		if err != nil {
@@ -1037,6 +1066,32 @@ func (p *cloudPass) setPaces(ctx context.Context) {
 		p.report.Moves = append(p.report.Moves, what)
 		p.state.Moves = p.addMove(CloudMove{At: p.now, What: what})
 	}
+}
+
+// setHarness brings a box's Claude Code to the home's version before its timer
+// is set, and says the version before and after in a move. A box already level
+// is said nothing of; one whose install failed stays as it was, in one line, and
+// its timer is set all the same.
+func (p *cloudPass) setHarness(ctx context.Context, box *CloudBox, version string) {
+	got, err := p.check.Provider.SetHarness(ctx, box.Name, version)
+	if err != nil {
+		p.check.say("could not read the Claude Code of %s: %v", box.Name, oneLine(err.Error()))
+		return
+	}
+	var what string
+	switch {
+	case got.Why != "":
+		what = fmt.Sprintf("%s: claude stays at %s, not %s: %s", box.Name, got.Was, version, oneLine(got.Why))
+	case got.Now != got.Was:
+		what = fmt.Sprintf("%s: claude %s to %s (the home's)", box.Name, got.Was, got.Now)
+	default:
+		p.check.say("%s: claude %s is level with the home's %s", box.Name, got.Was, version)
+		return
+	}
+	p.dirty = box.Name + " harness"
+	p.check.say("%s", what)
+	p.report.Moves = append(p.report.Moves, what)
+	p.state.Moves = p.addMove(CloudMove{At: p.now, What: what})
 }
 
 // demand counts the stories that wait for any host, and the sessions free

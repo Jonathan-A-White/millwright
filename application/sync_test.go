@@ -524,6 +524,42 @@ func TestSyncThatKnowsNoCommitLeavesNoNoteOfIt(t *testing.T) {
 	}
 }
 
+func TestSyncLeavesTheVersionOfItsClaudeCodeForTheHomeToRead(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	sync.Harness = "2.1.300"
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if got := note(t, tracker, application.HarnessKey("vps")); got != "2.1.300" {
+		t.Fatalf("expected host.vps.harness to hold the version, got %q", got)
+	}
+	if key := application.HarnessKey("vps"); key != "host.vps.harness" {
+		t.Fatalf("unexpected key %q", key)
+	}
+}
+
+func TestAHostThatKeepsTheOneDatabaseLeavesTheVersionOfItsClaudeCodeOnEverySync(t *testing.T) {
+	sync, _, tracker := keeping(t)
+	backedUpAgo(t, tracker, 10*time.Minute)
+	sync.Harness = "2.1.322"
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if got := note(t, tracker, application.HarnessKey("vps")); got != "2.1.322" {
+		t.Fatalf("expected host.vps.harness to hold the version, got %q", got)
+	}
+}
+
+func TestSyncThatKnowsNoClaudeCodeLeavesNoNoteOfIt(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if got := note(t, tracker, application.HarnessKey("vps")); got != "" {
+		t.Fatalf("expected no note of a version nobody named, got %q", got)
+	}
+}
+
 func TestAHaltWorthAnAlarmNotesItselfForTheOtherHost(t *testing.T) {
 	for _, code := range []int{2, 4} {
 		sync, _, tracker := syncing(t)

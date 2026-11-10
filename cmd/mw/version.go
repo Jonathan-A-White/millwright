@@ -91,6 +91,14 @@ func harnessVersionLine(ctx context.Context, harness *claude.Harness) string {
 	return claude.Program + " " + printed
 }
 
+// ownHarnessVersion is the Claude Code version this host runs, as `mw version`
+// prints it after "claude".
+func ownHarnessVersion(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, harnessVersionTimeout)
+	defer cancel()
+	return claude.New().Version(ctx)
+}
+
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
