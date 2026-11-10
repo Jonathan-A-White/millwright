@@ -813,8 +813,9 @@ type StatusReport struct {
 	// the Millhand tick while its resume grace still holds; "" once it does
 	// not.
 	MillhandResume string
-	// FuelToday is every token the seat's ledger charged today, summed from
-	// the lines the ledger dates today.
+	// FuelToday is every token the Builder's ledger charged today, summed from
+	// the lines the ledger dates today. It is the Builder stories' fuel, not the
+	// factory's; the printed line says so.
 	FuelToday int
 	// RigMemory are the rigs whose memory is larger than RigMemoryBudget, in rig
 	// order. It is empty, and the report has no section for it, when none is.
@@ -2645,7 +2646,7 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	}
 
-	clip(&b, fmt.Sprintf("FUEL today: %s tokens", Thousands(r.FuelToday)))
+	clip(&b, fmt.Sprintf("FUEL today (Builder ledger): %s tokens", Thousands(r.FuelToday)))
 	b.WriteString("\n")
 	return b.String()
 }

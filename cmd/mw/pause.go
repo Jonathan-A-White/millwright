@@ -19,7 +19,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// pauseSeats are the seats whose ledgers the burn is read from.
+// pauseSeats are the seats whose ledgers the burn is read from. The only
+// ledger mw writes is the Builder's (seats/builder/ledger.md); the mayor,
+// deputy and millhand entries read nothing and are kept so a ledger written for
+// them later is counted. The resume planner's per-token rate is calibrated
+// against the whole-account percent, so a steady non-Builder share cancels
+// (mw-t5shinh.28).
 var pauseSeats = []string{"builder", "mayor", "deputy", "millhand"}
 
 // newPauseCmd builds `mw pause`: the factory stopped at the Governor's word

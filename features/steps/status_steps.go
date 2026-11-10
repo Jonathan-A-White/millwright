@@ -256,6 +256,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report does not show "([^"]*)" as stopped at the usage limit$`, c.theReportDoesNotShowAtTheUsageLimit)
 	ctx.Then(`^the report does not show "([^"]*)" as refused$`, c.theReportDoesNotShowRefused)
 	ctx.Then(`^the report says today's fuel is (.+)$`, c.theReportSaysTodaysFuelIs)
+	ctx.Then(`^the printed report has the line "([^"]*)"$`, c.thePrintedReportHasTheLine)
 	ctx.Then(`^every line of the report is at most 60 columns wide$`, c.everyLineIsAtMost60ColumnsWide)
 	ctx.Then(`^nothing was written through the tracker, the ledger or the runner$`, c.nothingWasWritten)
 	ctx.Then(`^the report lists "([^"]*)" under the other host "([^"]*)"$`, c.theReportListsUnderTheOtherHost)
@@ -1260,6 +1261,18 @@ func (c *statusContext) theReportSaysTodaysFuelIs(want string) error {
 		return fmt.Errorf("expected the printed report to say %q, got:\n%s", got, c.report.String())
 	}
 	return nil
+}
+
+func (c *statusContext) thePrintedReportHasTheLine(want string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	for _, line := range strings.Split(c.report.String(), "\n") {
+		if line == want {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected the printed report to have the line %q, got:\n%s", want, c.report.String())
 }
 
 func (c *statusContext) everyLineIsAtMost60ColumnsWide() error {

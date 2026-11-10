@@ -1209,3 +1209,13 @@ func TestStatusHasNoHeldForSectionWhenNothingIsHeldForAnEvent(t *testing.T) {
 		t.Fatalf("the report has a held-for section though no bead is held for an event:\n%s", report.String())
 	}
 }
+
+// TestStatusFuelLineNamesTheBuilderLedger: the fuel line is the Builder
+// ledger's figure, not the factory's, so it says so (mw-t5shinh.28).
+func TestStatusFuelLineNamesTheBuilderLedger(t *testing.T) {
+	printed := application.StatusReport{FuelToday: 15000}.String()
+	want := "FUEL today (Builder ledger): 15,000 tokens"
+	if !strings.Contains(printed, want) {
+		t.Fatalf("expected the report to say %q, got:\n%s", want, printed)
+	}
+}
