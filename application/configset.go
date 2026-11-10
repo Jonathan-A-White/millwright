@@ -166,7 +166,7 @@ type BoostConfigVault interface {
 
 // ConfigExportBoost rewrites the vault's hosts/boost-config.toml from the
 // home's config file: `mw config export-boost` (mw-gq6.456). It carries the
-// [tests], [changed_specs] and [test_parts.<rig>] tables (domain.BoostTableNames) and nothing
+// [tests], [changed_specs], [test_parts.<rig>] and [session] deny tables (domain.BoostTableNames) and nothing
 // else of the config, and commits that one file.
 type ConfigExportBoost struct {
 	// Config is the home's ~/.config/mw/config.toml.
@@ -248,7 +248,7 @@ func (e ConfigExportBoost) Run(ctx context.Context, dryRun bool) error {
 	if err := e.Target.Write([]byte(text)); err != nil {
 		return fmt.Errorf("writing %s: %w", e.Target.Path(), err)
 	}
-	message := fmt.Sprintf("%s: [tests], [changed_specs] and [test_parts] from %s's config.toml (mw config export-boost)", BoostConfigFile, e.Host)
+	message := fmt.Sprintf("%s: [tests], [changed_specs], [test_parts] and [session] from %s's config.toml (mw config export-boost)", BoostConfigFile, e.Host)
 	committed, err := commitWritten(ctx, e.Vault, message, []string{BoostConfigFile})
 	if err != nil {
 		return fmt.Errorf("%s is written but not committed: %w", e.Target.Path(), err)

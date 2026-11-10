@@ -33,9 +33,12 @@ Feature: mw config export-boost writes the vault's hosts/boost-config.toml from 
 
       [heavy_net]
       postern = true
+
+      [session]
+      deny = ["Bash(mw config set *)", "Bash(scp *)", "Read(~/.ssh/**)"]
       """
 
-  Scenario: on the home it writes only [tests], [changed_specs] and [test_parts.<rig>], and commits that file alone
+  Scenario: on the home it writes only [tests], [changed_specs], [test_parts.<rig>] and [session], and commits that file alone
     Given the export runs on the home
     When mw config export-boost runs
     Then mw config export-boost succeeded
@@ -52,10 +55,14 @@ Feature: mw config export-boost writes the vault's hosts/boost-config.toml from 
       "install" = "npm ci --no-audit --no-fund"
       "vitest 2/2" = "TZ=UTC npx vitest run --shard 2/2"
       "vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"
+
+      [session]
+      deny = ["Bash(mw config set *)", "Bash(scp *)", "Read(~/.ssh/**)"]
       """
     And the export committed "hosts/boost-config.toml" and nothing else
     And mw config export-boost printed "[tests] argus: missing"
     And mw config export-boost printed "[test_parts.lampas]: missing"
+    And mw config export-boost printed "[session] deny: missing"
 
   Scenario: it names each line it brings level: missing, different and gone from the home
     Given the export runs on the home
@@ -90,6 +97,60 @@ Feature: mw config export-boost writes the vault's hosts/boost-config.toml from 
     Then mw config export-boost succeeded
     And mw config export-boost printed "[test_parts.lampas]: differs"
     And mw config export-boost printed "[test_parts.postern]: not on the home"
+
+  Scenario: a session deny list that differs or is gone from the home is named
+    Given the export runs on the home
+    And the vault's hosts/boost-config.toml for the export holding:
+      """
+      [session]
+      deny = ["Bash(scp *)"]
+      """
+    When mw config export-boost runs
+    Then mw config export-boost succeeded
+    And mw config export-boost printed "[session] deny: differs"
+    And the vault's hosts/boost-config.toml holds, after its header:
+      """
+      [tests]
+      argus = "npm ci --no-audit --no-fund && npm run lint && npm run build"
+      millwright = "make test && scripts/check-codemap.sh"
+
+      [changed_specs]
+      lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"
+
+      [test_parts.lampas]
+      "install" = "npm ci --no-audit --no-fund"
+      "vitest 2/2" = "TZ=UTC npx vitest run --shard 2/2"
+      "vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"
+
+      [session]
+      deny = ["Bash(mw config set *)", "Bash(scp *)", "Read(~/.ssh/**)"]
+      """
+
+  Scenario: a session deny list the home no longer has is named and left out of the file
+    Given the export runs on the home
+    And the home's config file for the export holding:
+      """
+      [rigs]
+      argus = "/home/jwhite/argus"
+
+      [tests]
+      argus = "npm test"
+      """
+    And the vault's hosts/boost-config.toml for the export holding:
+      """
+      [session]
+      deny = ["Bash(scp *)"]
+      """
+    When mw config export-boost runs
+    Then mw config export-boost succeeded
+    And mw config export-boost printed "[session] deny: not on the home"
+    And the vault's hosts/boost-config.toml holds, after its header:
+      """
+      [tests]
+      argus = "npm test"
+
+      [changed_specs]
+      """
 
   Scenario: a second export finds the file level, writes nothing and commits nothing
     Given the export runs on the home

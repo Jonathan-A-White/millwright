@@ -76,6 +76,17 @@ func SessionDenyRules(literal string) ([]string, error) {
 	return rules, nil
 }
 
+// SessionDenyLiteral is the rules as a one-line TOML array of basic strings,
+// the way `mw config export-boost` writes them and the cloud pass sets them on a
+// box: ["a", "b"]. The same rules in the same order are the same text.
+func SessionDenyLiteral(rules []string) string {
+	items := make([]string, len(rules))
+	for i, rule := range rules {
+		items[i] = tomlBasicString(rule)
+	}
+	return "[" + strings.Join(items, ", ") + "]"
+}
+
 // TOMLStringArray is the strings of an array literal such as ["a", 'b'], which
 // may span lines and hold comments and a trailing comma. Anything else (a
 // string, a number, an element that is not a string) is an error beginning "is
