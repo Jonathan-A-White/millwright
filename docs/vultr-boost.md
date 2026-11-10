@@ -19,6 +19,7 @@ contrib/vultr-boost snapshot       # a ready-made image of a bootstrapped box
 contrib/vultr-boost spend          # what Vultr's billing says the boxes cost this month
 contrib/vultr-boost set-cap        # --name NAME --cap N: set the sessions a box that is up runs at once
 contrib/vultr-boost set-pace       # --name NAME: make the box's dispatch timer tick every five minutes
+contrib/vultr-boost set-harness    # --name NAME --version V: bring the box's Claude Code up to V (docs/harness-level.md)
 contrib/vultr-boost address        # --name NAME: the box's WireGuard address, then its user, off the hub
 ```
 
@@ -281,6 +282,14 @@ tried at each check, and says so once as a `cloud` event. It does not wait for t
 dispatch, which an hourly box may be an hour in making. `mw cloud check` ends with a line for each
 box, `cloud1: dispatch timer every 5 minutes`, or `hourly, not every 5 minutes` when it is not,
 or `pace not known` with why.
+
+### A box is brought to the home's Claude Code before its timer is set
+
+A box made from the snapshot has the snapshot's Claude Code. Before `set-pace`, each cloud check runs
+`contrib/vultr-boost set-harness --name cloudN --version V` on a box whose book entry does not yet say
+its pace is `*:0/5`, with `V` the home's `claude --version`. The box is installed over only when it is behind
+`V` (versions compared as numbers); a failed install is a line, never a box that cannot start. See
+docs/harness-level.md.
 
 ### A changed box_cap reaches the boxes already up
 
