@@ -97,6 +97,9 @@ Feature: A one-week Tester trial
     And that mail's body holds:
       | held    mw-l.9 filed by the Tester for its findings: release or drop them |
       | twin    mw-l.7 already open                                                |
+    And that mail's body does not say "committed in the vault"
+    And that mail's body does not say "the story is closed"
+    And that mail's last line is: The whole report is in runs/mw-l.2/ and in the seat's ledger.
 
   Scenario: A correction comment that holds a story but no tag still counts the finding it holds (mw-f7xsy4)
     Given the story "mw-l.1" is planned and ready to be worked here

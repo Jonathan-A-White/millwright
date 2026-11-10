@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"fmt"
+	"path"
+	"strconv"
 	"strings"
 )
 
@@ -320,6 +322,7 @@ var landedTail = []tailStep{
 				Notes: append([]string{fmt.Sprintf("landed by mw land in %s (%s), whose commit %s is on %s", report.Label(), strings.Join(b.together, ", "),
 					shortCommit(report.Commit), report.Target)}, report.fixerNotes(s.story.ID)...),
 				AfterLandingSkipped: t.once.AfterLandingSkipped,
+				RunFolder:           path.Join(BatchDir, report.Rig, strconv.Itoa(report.Number)) + "/",
 			}
 			verdict, said := t.n.closingMail(t.ctx, s.c, &mailed, false)
 			t.n.mailTheMayor(t.ctx, s.c, &mailed, verdict, said)

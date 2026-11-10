@@ -63,6 +63,19 @@ Feature: mw land lands a batch rig's queue under one gate run
     And the filed bug is titled "[bug] mw-gq6.1 landed without its AC 2: The second thing works."
     And the filed bug is held and labelled "bug" and "friction"
 
+  Scenario: A batch's Landed mail leaves out the ledger's cells and names the batch's run folder
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And that mail's subject is "Landed: The story mw-gq6.1"
+    And that mail's body holds:
+      | landed by mw land in batch 1 |
+    And that mail's body does not say "committed in the vault"
+    And that mail's body does not say "the story is closed"
+    And that mail's body does not say "| 20"
+    And that mail's last line is: The whole report is in runs/batch/millwright/1/ and in the seat's ledger.
+
   Scenario: The after-landing command runs once for a batch whose rig checkout was already level with the batch commit (mw-gq6.484)
     Given the rig names a command to run after a landing
     And something else brings the rig checkout level with the origin the moment a push reaches it

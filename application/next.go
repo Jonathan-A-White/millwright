@@ -704,6 +704,11 @@ type NextReport struct {
 	// book to compare it with.
 	Bench []string
 
+	// RunFolder is the folder in the vault, from its root, that holds a batch
+	// landing's whole report; empty for a story, whose files go in runs/<id>/.
+	// Only the mail to the Mayor reads it (mailBody).
+	RunFolder string
+
 	Synced     bool
 	Sync       SyncReport
 	Dispatched bool
@@ -3665,7 +3670,11 @@ func (n Next) mayorMail(c *closeOut, report *NextReport, verdict, said string) N
 	if verdict == MailTested {
 		title = c.tested + ": " + c.findings.Counted()
 	}
+	slim := verdict != MailRefused && verdict != MailBlocked
 	body := report.String()
+	if slim {
+		body = report.mailBody()
+	}
 	if report.AfterLandingStopped > 0 {
 		body = AfterLandingStoppedLine + "\n" + body
 	}
@@ -3680,6 +3689,9 @@ func (n Next) mayorMail(c *closeOut, report *NextReport, verdict, said string) N
 	}
 	if verdict == MailRefused || verdict == MailBlocked {
 		body = strings.TrimRight(body, "\n") + "\n\n" + CauseLine(c.id) + "\n"
+	}
+	if slim {
+		body = strings.TrimRight(body, "\n") + "\n" + whereTheWholeReportIs(c.id, report.RunFolder) + "\n"
 	}
 	return NewMessage{
 		From:    SeatIdentity(MwSeat, n.Host),
@@ -4160,7 +4172,40 @@ func (n Next) print(text string) {
 }
 
 // String is the close-out as a person reads it.
-func (r NextReport) String() string {
+func (r NextReport) String() string { return r.text(false) }
+
+// mailBody is the report as a Landed or Tested mail carries it: String without
+// the lines the ledger, the vault's log and the run folder keep (the ledger line
+// cut to its model and effort and its fuel, the vault commit, the plain closed
+// line, a bench line that is no flag), so the mail holds what its reader acts on
+// and the reader is told where the whole report is (whereTheWholeReportIs).
+func (r NextReport) mailBody() string { return r.text(true) }
+
+// whereTheWholeReportIs is the last line of a Landed or Tested mail: the folder
+// of the run that keeps the whole report, and the ledger. runFolder is a
+// batch's; a story's is runs/<id>/, which a story id that is no name for a
+// directory has not.
+func whereTheWholeReportIs(storyID, runFolder string) string {
+	if runFolder == "" {
+		runFolder = runFilePath(storyID, "")
+	}
+	if runFolder == "" {
+		return "The whole report is in the seat's ledger."
+	}
+	return "The whole report is in " + strings.TrimSuffix(runFolder, "/") + "/ and in the seat's ledger."
+}
+
+// fuelCells is a ledger line cut to its model and effort cell and its fuel
+// cell, " | " apart, or the line as it is when it has no such cells.
+func fuelCells(line string) string {
+	cells := strings.Split(strings.Trim(strings.TrimSpace(line), "|"), " | ")
+	if len(cells) < 5 {
+		return line
+	}
+	return strings.TrimSpace(cells[3]) + " | " + strings.TrimSpace(cells[4])
+}
+
+func (r NextReport) text(forMail bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "next on %s: %s\n", r.Host, r.StoryID)
 	switch {
@@ -4239,18 +4284,25 @@ func (r NextReport) String() string {
 		}
 	}
 	for _, line := range r.Bench {
+		if forMail && !strings.HasPrefix(line, "FLAG ") {
+			continue
+		}
 		fmt.Fprintf(&b, "  bench   %s\n", line)
 	}
 	if r.Ledger != "" {
-		fmt.Fprintf(&b, "  ledger  %s\n", r.Ledger)
+		if forMail {
+			fmt.Fprintf(&b, "  ledger  %s\n", fuelCells(r.Ledger))
+		} else {
+			fmt.Fprintf(&b, "  ledger  %s\n", r.Ledger)
+		}
 	}
-	if len(r.Committed) > 0 {
+	if len(r.Committed) > 0 && !forMail {
 		fmt.Fprintf(&b, "  commit  %s committed in the vault\n", strings.Join(r.Committed, ", "))
 	}
 	if r.NotCommitted != "" {
 		fmt.Fprintf(&b, "  %s\n", r.NotCommitted)
 	}
-	if r.Closed {
+	if r.Closed && !forMail {
 		b.WriteString("  closed  the story is closed\n")
 	}
 	if r.FormulaClosed.Any() {
