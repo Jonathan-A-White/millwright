@@ -497,6 +497,19 @@ demos and unrun hands steps over 8). The limits are the config file's `[dampers]
 `ready_p1`, `p1_untouched_days`, `demo_waiting_days`, `grilling_days`, `testers_per_rig`,
 `review_queue`. `mw doctor` repeats the counts on one `dampers:` line.
 
+The review limit holds for questions too (mw-t5shinh.26). While his review queue is over
+`review_queue`, `mw postern send --class decision-needed --bead <id>` sends no card: it writes
+the question, every `--option` and the `--recommend` on the bead as a comment opening
+`QUESTION for Monday:`, prints one line naming the bead, the queue and the limit, and exits 0.
+`--why-now "<reason>"` sends the card anyway and writes a comment opening `SENT OVER THE LIMIT:`
+that quotes the reason (an empty reason is refused). At or under the limit nothing changes.
+Monday's `mw digest send` (and its `--dry-run`) lists under "Questions held for Monday" every
+open bead whose newest `QUESTION for Monday:` comment has no later `ANSWER` and no card sent on
+that bead, one line each: the bead id and the question. Demos and hands steps keep their own
+rules (one demo card a rig a week; no new hands step while the queue is 20 or more). Only
+`mw postern send` holds: the digest's own card, `mw hands` and the grilling paths send through
+`PosternSend` directly and are not held.
+
 Every story is filed **held** — beads' `deferred` status — so that nothing can
 be dispatched from a plan nobody has approved. `mw file` prints the tree it
 filed, with each story's Path and what it waits on, and then asks. `--approve`
