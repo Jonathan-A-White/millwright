@@ -386,6 +386,15 @@ part back (first failure not counted, nothing kept) with the command to run it a
 failure read between the cores and twice them counts at once. A part run by its own
 process (`PartWorker`) judges by the load after it only.
 
+The nightly `mw timing` run does the same (`NightlyTiming.runRig`, mw-gq6.1063): its tests,
+failed with the host at twice its cores or more (read after the run), are run once more after
+the wait for a calm host that a part makes (`Next.waitToRunAgain`, the one function both
+call), and only the second run counts: a pass files nothing, a second failure files the
+second run's failing files, and the result (`ran_twice`) and the output say it ran twice. A
+host still far over its cores at the end of the wait skips the night with one line, files
+nothing and keeps nothing, and the next night tries again. A failure read between the cores
+and twice them is filed at once.
+
 Every place mw runs the rig's tests, and what it takes:
 
 | Where | Merge slot | Gate lock | Follows the rule |
@@ -398,7 +407,7 @@ Every place mw runs the rig's tests, and what it takes:
 | `mw check --part N` | only a part that is not slot-free, taken after the calm wait | no | yes, before the part and before its slot, within the same 9 minutes, ending in one line naming the load and `--part N` (mw-gq6.987); a part that failed far over its cores is run once more after the same wait (mw-gq6.1060) |
 | `mw check --no-slot` | no | no | no, the escape hatch |
 | `mw dispatch` bug recheck and `mw next` fixed-on-main recheck (`rerunUnderGate`) | no | yes, a short wait, else "not re-checked" | yes |
-| nightly `mw timing` | no | yes | yes |
+| nightly `mw timing` | no | yes | yes; tests that failed while the host was far over its cores are run once more after the same wait, and the second run counts (mw-gq6.1063) |
 | `mw suite` and the nightly suite it is started by | no (it runs on a throwaway worktree of the rig's origin) | yes, taken after the wait for a calm host, for one command line at a time (the tests, the changed specs, each re-run of a failing file) and given back between them; a lock it cannot take ends the suite with nothing kept (`Suite.GateLock`, mw-gq6.914, mw-gq6.917) | yes |
 | a landing's after-landing command (deploy, shots) | its own after-landing slot | no | no: it is not the rig's tests; the shots run after the landing's gate has ended |
 | `mw grist eval` and `mw grist smoke` | no | no | not the rig's tests: they run the mill, under its own grind slots (`hostlock.GrindSlots`) |

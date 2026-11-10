@@ -67,6 +67,29 @@ Feature: The follower runs a rig's timing tests on the home at night
     And the suite epic "mw-suite" holds 0 bugs
     And the last event of the job "timing@desktop" is done and says "6.5 of 4 cores"
 
+  Scenario: A run that fails while the host is far over its cores is run again once it calms, and the second run stands
+    Given "src/sw/backoff.ts" changed in "lampas" between "aaa" and "bbb"
+    And the timing run of "lampas" fails in "tests/timing/sw.test.ts" on its first run only
+    And the timing host reads in turn the loads 0.2, 9.0 and 1.0 of 4 cores
+    And the timing follower has taken its bearings
+    When the timing clock reads "2026-10-21 09:00" UTC
+    And the timing follower runs a cycle
+    Then the timing command of "lampas" was run with MW_TIMING=only 2 times
+    And the suite epic "mw-suite" holds 0 bugs
+    And the timing result of "lampas" for "2026-10-21" is kept as passed at "bbb"
+
+  Scenario: A run that fails while the host is far over its cores and finds it still so is skipped and files nothing
+    Given "src/sw/backoff.ts" changed in "lampas" between "aaa" and "bbb"
+    And the timing run of "lampas" fails in "tests/timing/sw.test.ts" on its first run only
+    And the timing host reads in turn the loads 0.2 and 9.0 of 4 cores
+    And the timing follower has taken its bearings
+    When the timing clock reads "2026-10-21 09:00" UTC
+    And the timing follower runs a cycle
+    Then the timing command of "lampas" was run with MW_TIMING=only 1 time
+    And nothing is kept for "lampas" on "2026-10-21"
+    And the suite epic "mw-suite" holds 0 bugs
+    And the last event of the job "timing@desktop" is done and says "failed while desktop was at load 9.0 of 4 cores"
+
   Scenario: On a host that is not the home it never runs
     Given the timing follower is running on "laptop" and the home is "desktop"
     And "src/sw/backoff.ts" changed in "lampas" between "aaa" and "bbb"

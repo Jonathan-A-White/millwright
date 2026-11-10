@@ -639,6 +639,41 @@ func (n Next) noteCountedAtOnce(report *NextReport, what string, busy LoadReadin
 	report.Notes = append(report.Notes, note)
 }
 
+// waitToRunAgain is what every run of tests that failed is dealt with first, the
+// one place both a part of a check (Check.runPartAgain) and a nightly timing run
+// (NightlyTiming.runRig) ask whether the failure is the host's (mw-gq6.1063): the
+// load read after the failed run is taken, the busier of it and before standing
+// as the load the run failed at. A failure read with the host far over its cores
+// (again is true) says it will be run once more, and waits, as every run again
+// does (Next.calmed, with handBack as the caller asks for it), for the host to
+// calm; a failure read between its cores and twice them is counted at once and a
+// calm one is not remarked on. it is how the line names the tests ("it", "them").
+// The error is the wait's: a HostBusyError for a host still far over its cores at
+// the bound, or the caller's own hand-back. A Next with no load to read never
+// asks for a run again.
+func (n Next) waitToRunAgain(ctx context.Context, c *closeOut, report *NextReport, what, it string, before LoadReading, handBack bool) (busy LoadReading, again bool, err error) {
+	busy = before
+	reading, ok := n.readLoad(ctx)
+	if !ok && n.Load == nil {
+		return busy, false, nil
+	}
+	if ok && reading.Busy() {
+		busy = reading
+	}
+	if !busy.FarOver() {
+		if busy.Busy() {
+			n.noteCountedAtOnce(report, what, busy)
+		}
+		return busy, false, nil
+	}
+	n.print(fmt.Sprintf("  retry   %s failed while %s was at load %.1f of %d cores: running %s once more when it calms\n",
+		what, n.Host, busy.Load, busy.Cores, it))
+	if _, _, err := n.calmed(ctx, report, c, what+" again", handBack, true); err != nil {
+		return busy, true, err
+	}
+	return busy, true, nil
+}
+
 // ranTwice says how a gate that was run twice went. A first run whose tests
 // passed on the second is a flake, and the sentence names the tests the first
 // run failed, as the output of that run is not kept (mw-gq6.699).

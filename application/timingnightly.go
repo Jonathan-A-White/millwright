@@ -145,6 +145,10 @@ type TimingResult struct {
 	Failing         []TimingFailure `json:"failing_files"`
 	// Unnamed says how a failed run named no file.
 	Unnamed string `json:"failed_without_a_file,omitempty"`
+	// RanTwice says how the two runs went when the first failed while the host was
+	// far over its cores and the tests were run once more when it calmed
+	// (mw-gq6.1063); empty for a run made once.
+	RanTwice string `json:"ran_twice,omitempty"`
 }
 
 // TimingRecord is one kept result: the UTC day of the file it is in
@@ -687,13 +691,48 @@ func (n *NightlyTiming) runRig(ctx context.Context, due TimingDue) (skipped stri
 	finished := n.now()
 	after := n.uptime(ctx)
 
+	// A run that failed while the host was far over its cores is the host's more
+	// than the tests': it waits for the host to calm, with the wait a part of a
+	// check makes, and runs them once more; the second run's result stands
+	// (mw-gq6.1063).
+	var ranTwice string
+	if !checked.Passed {
+		busy, again, err := n.timingWait().waitToRunAgain(ctx, &closeOut{id: "timing " + rig}, &NextReport{}, "the timing tests", "them", reading, false)
+		var stillBusy HostBusyError
+		switch {
+		case errors.As(err, &stillBusy):
+			skipped = fmt.Sprintf("the timing run of %s was skipped: its tests failed while %s was at load %.1f of %d cores, and it was still at load %.1f of %d cores after waiting %s to run them again; nothing is filed and the next night tries again",
+				rig, n.Host, busy.Load, busy.Cores, stillBusy.Reading.Load, stillBusy.Reading.Cores, stillBusy.Waited)
+			n.say("  timing  %s\n", skipped)
+			return skipped, nil
+		case err != nil:
+			return "", fmt.Errorf("waiting for %s to calm to run the timing tests again: %w", n.Host, err)
+		case again:
+			started = n.now()
+			before = n.uptime(ctx)
+			n.say("  run     %s at %s on %s: %s (again)\n", rig, short(head.Commit), head.Branch, tests)
+			second, err := n.Runner.RunTiming(ctx, rig, dir, tests, TimingEnv(TimingOnly, due.Globs))
+			if err != nil {
+				return "", fmt.Errorf("running `%s` in %s again: %w", tests, dir, err)
+			}
+			if second.NotRun {
+				return "", fmt.Errorf("`%s` could not be run in %s again, so there is no result to keep: %s", tests, dir, second.Tail(5))
+			}
+			ranTwice = ranTwiceSaid("the timing tests", n.Host, busy, checked, second)
+			n.say("  timing  %s\n", ranTwice)
+			checked = second
+			finished = n.now()
+			after = n.uptime(ctx)
+		}
+	}
+
 	result := TimingResult{
 		Rig: rig, Host: n.Host, Sha: head.Commit, Branch: head.Branch, Since: due.Since,
 		Started:         started.Format(time.RFC3339),
 		DurationSeconds: math.Round(finished.Sub(started).Seconds()*1000) / 1000,
 		UptimeBefore:    before, UptimeAfter: after, WaitedSeconds: waited.Seconds(),
 		Command: tests, Globs: due.Globs, ChangedCovered: due.Covered,
-		Passed: checked.Passed, Failing: []TimingFailure{},
+		Passed: checked.Passed, Failing: []TimingFailure{}, RanTwice: ranTwice,
 	}
 	if result.ChangedCovered == nil {
 		result.ChangedCovered = []string{}
@@ -733,6 +772,22 @@ func (n *NightlyTiming) runRig(ctx context.Context, due TimingDue) (skipped stri
 		}
 	}
 	return "", nil
+}
+
+// ranTwiceSaid is ranTwice for two runs: how they went.
+func ranTwiceSaid(what, host string, busy LoadReading, first, second Checked) string {
+	return ranTwice(what, host, busy, first, second, nil)
+}
+
+// timingWait is the Next the nightly timing run waits for a calm host with when
+// its tests failed (waitToRunAgain), over the same load, poll and bound as the
+// wait before its first run.
+func (n *NightlyTiming) timingWait() Next {
+	bound := n.LoadBound
+	if bound <= 0 {
+		bound = SuiteCalmBound
+	}
+	return Next{Load: n.Load, LoadPoll: n.LoadPoll, LoadBound: bound, LoadWait: n.LoadWait, Host: n.Host, Out: n.Out}
 }
 
 // uptime is the host's uptime line, or what could not be read.

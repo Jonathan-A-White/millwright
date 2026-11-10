@@ -393,3 +393,152 @@ func TestARigAddedToTheConfigAfterTheNightWasMadeIsDue(t *testing.T) {
 		t.Errorf("due = %v, want lampas", got)
 	}
 }
+
+// failFirstThenPass is a timing run whose tests fail on the first run and pass on the
+// second, with the host's load read in the order of reads: before the run, after
+// the failed run, then while it waits to run again.
+func (f *timingNight) failFirstThenPass(reads ...application.LoadReading) {
+	f.load.Readings = reads
+	runs := 0
+	f.runner.Respond = func(string, string, map[string]string) (application.Checked, error) {
+		runs++
+		if runs == 1 {
+			return application.Checked{Output: " FAIL  tests/timing/sw.test.ts > first run\nAssertionError: expected 3 to be 2\n"}, nil
+		}
+		return application.Checked{Passed: true}, nil
+	}
+}
+
+func (f *timingNight) bugs(t *testing.T) []application.StoryDetail {
+	t.Helper()
+	epic, err := f.tracker.ShowEpic(context.Background(), "mw-suite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return epic.Stories
+}
+
+func TestATimingRunThatFailsFarOverItsCoresIsRunAgainAndKeepsThePass(t *testing.T) {
+	f := newTimingNight(t)
+	f.failFirstThenPass(
+		application.LoadReading{Load: 0.2, Cores: 4},
+		application.LoadReading{Load: 9.0, Cores: 4}, // far over, after the failed run
+		application.LoadReading{Load: 1.0, Cores: 4}, // calm on the wait
+	)
+	if err := f.night.Job().Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.runner.Ran(); len(got) != 2 {
+		t.Fatalf("ran %d times, want 2: %+v", len(got), got)
+	}
+	if got := f.bugs(t); len(got) != 0 {
+		t.Errorf("a run that passed on the calm host filed %d bugs", len(got))
+	}
+	kept, ok := f.records.File("runs/timing/lampas/2026-10-21.json")
+	if !ok {
+		t.Fatalf("no result kept, got %v", f.records.Paths())
+	}
+	record, err := application.ParseTimingRecord("2026-10-21", kept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !record.Result.Passed {
+		t.Errorf("the result kept is not a pass: %+v", record.Result)
+	}
+	if !strings.Contains(record.Result.RanTwice, "ran twice") || !strings.Contains(record.Result.RanTwice, "first run") {
+		t.Errorf("the result does not say it ran twice and what flaked: %q", record.Result.RanTwice)
+	}
+	if !strings.Contains(f.out.String(), "ran twice") {
+		t.Errorf("the output does not say it ran twice: %q", f.out.String())
+	}
+}
+
+func TestATimingRunThatFailsFarOverAndFailsAgainFilesTheSecondFailure(t *testing.T) {
+	f := newTimingNight(t)
+	f.load.Readings = []application.LoadReading{
+		{Load: 0.2, Cores: 4}, {Load: 9.0, Cores: 4}, {Load: 1.0, Cores: 4},
+	}
+	runs := 0
+	f.runner.Respond = func(string, string, map[string]string) (application.Checked, error) {
+		runs++
+		if runs == 1 {
+			return application.Checked{Output: " FAIL  tests/timing/sw.test.ts > only the first\nAssertionError: a\n"}, nil
+		}
+		return application.Checked{Output: " FAIL  tests/timing/sw.test.ts > the second\nAssertionError: b\n"}, nil
+	}
+	if err := f.night.Job().Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.runner.Ran(); len(got) != 2 {
+		t.Fatalf("ran %d times, want 2", len(got))
+	}
+	bugs := f.bugs(t)
+	if len(bugs) != 1 {
+		t.Fatalf("filed %d bugs, want one", len(bugs))
+	}
+	if !strings.Contains(bugs[0].Description, "the second") || strings.Contains(bugs[0].Description, "only the first") {
+		t.Errorf("the bug is not the second run's failure: %s", bugs[0].Description)
+	}
+	if !strings.Contains(f.out.String(), "ran twice") {
+		t.Errorf("the output does not say it ran twice: %q", f.out.String())
+	}
+}
+
+func TestATimingRunThatFailsOnACalmHostIsFiledAtOnce(t *testing.T) {
+	f := newTimingNight(t)
+	f.failFirstThenPass(application.LoadReading{Load: 0.2, Cores: 4})
+	if err := f.night.Job().Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.runner.Ran(); len(got) != 1 {
+		t.Errorf("ran %d times, want once", len(got))
+	}
+	if got := f.bugs(t); len(got) != 1 {
+		t.Errorf("filed %d bugs, want one", len(got))
+	}
+}
+
+func TestATimingRunThatFailsOnABusyHostUnderTwiceItsCoresIsFiledAtOnce(t *testing.T) {
+	f := newTimingNight(t)
+	f.failFirstThenPass(
+		application.LoadReading{Load: 0.2, Cores: 4},
+		application.LoadReading{Load: 5.0, Cores: 4}, // busy, not twice the cores
+	)
+	if err := f.night.Job().Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.runner.Ran(); len(got) != 1 {
+		t.Errorf("ran %d times, want once", len(got))
+	}
+	if got := f.bugs(t); len(got) != 1 {
+		t.Errorf("filed %d bugs, want one", len(got))
+	}
+	if !strings.Contains(f.out.String(), "counts and they were not run again") {
+		t.Errorf("the output does not say the failure was counted at once: %q", f.out.String())
+	}
+}
+
+func TestATimingRunThatFailsFarOverAndTheHostNeverCalmsIsSkippedAndFilesNothing(t *testing.T) {
+	f := newTimingNight(t)
+	f.failFirstThenPass(
+		application.LoadReading{Load: 0.2, Cores: 4},
+		application.LoadReading{Load: 9.0, Cores: 4}, // far over, and the last is said again
+	)
+	err := f.night.Job().Run(context.Background())
+	var skipped *application.SkippedPassError
+	if !errors.As(err, &skipped) {
+		t.Fatalf("run = %v, want a skipped pass", err)
+	}
+	if !strings.Contains(skipped.Why, "9.0 of 4 cores") || !strings.Contains(skipped.Why, "failed") {
+		t.Errorf("the skip does not name the load and the failure: %q", skipped.Why)
+	}
+	if got := f.runner.Ran(); len(got) != 1 {
+		t.Errorf("ran %d times, want once: the host never calmed", len(got))
+	}
+	if got := f.bugs(t); len(got) != 0 {
+		t.Errorf("a load-skipped run filed %d bugs", len(got))
+	}
+	if got := f.records.Paths(); len(got) != 0 {
+		t.Errorf("a load-skipped run kept %v", got)
+	}
+}

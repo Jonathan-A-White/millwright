@@ -164,40 +164,28 @@ func (k Check) runPartAgain(ctx context.Context, c *closeOut, attempt, n int, la
 	if k.Load == nil {
 		return partAgain{}, nil
 	}
-	reading, err := k.Load.Load(ctx)
-	busy := before
-	if err == nil && reading.Busy() {
-		busy = reading
-	}
-	wait := Next{Host: k.Host, Out: k.Out}
-	if !busy.FarOver() {
-		if busy.Busy() {
-			wait.noteCountedAtOnce(&NextReport{}, label, busy)
-		}
-		return partAgain{}, nil
-	}
-	if k.Out != nil {
-		fmt.Fprintf(k.Out, "  retry   %s failed while %s was at load %.1f of %d cores: running it once more when it calms\n",
-			label, k.Host, busy.Load, busy.Cores)
-	}
 	var left func() time.Duration
 	if fit != nil {
 		// The run again must end inside the call as the first run was to.
 		left = func() time.Duration { return max(fit.left()-fit.expected, 0) }
 	}
-	if _, _, err := k.partCalm(c, attempt, n, label, left).calmed(ctx, &NextReport{}, c, label+" again", true, true); err != nil {
+	busy, again, err := k.partCalm(c, attempt, n, label, left).waitToRunAgain(ctx, c, &NextReport{}, label, "it", before, true)
+	if err != nil {
 		return partAgain{}, err
+	}
+	if !again {
+		return partAgain{}, nil
 	}
 	if fit != nil && fit.late() {
 		return partAgain{}, fmt.Errorf("%s failed once while %s was busy, and the run again that a failure on a busy host gets did not start: it needs about %s and only %s is left in this call; the first failure is not counted and nothing has been run since, and that is the host's load and not a failure of the part: run the same part again with `mw check %s --part %d`",
 			label, k.Host, gateWaited(fit.expected), gateWaited(fit.left()), c.id, n)
 	}
 	from := time.Now()
-	again, err := k.Parts.RunLine(ctx, c.path.Rig, c.worktree, part.Command)
+	second, err := k.Parts.RunLine(ctx, c.path.Rig, c.worktree, part.Command)
 	if err != nil {
 		return partAgain{}, fmt.Errorf("checking %s: %s could not be run again: %w", c.id, label, err)
 	}
-	return partAgain{Again: again, Said: ranTwice(label, k.Host, busy, first, again, nil), From: from}, nil
+	return partAgain{Again: second, Said: ranTwice(label, k.Host, busy, first, second, nil), From: from}, nil
 }
 
 // calmPartRerunRefusal is calmPartRefusal for the wait before the run again of a
