@@ -239,3 +239,82 @@ func TestInboxApplyOfAnAnswerWithoutAGrillingCardTouchesNoCard(t *testing.T) {
 		t.Errorf("expected the answer recorded on the ticket as before, got %v", got)
 	}
 }
+
+// askOverQueue asks one question with his review queue at size of limit 8.
+func (f *grillFixture) askOverQueue(t *testing.T, size int, whyNow string) application.GrillAsked {
+	t.Helper()
+	g := f.grill()
+	g.Hold = application.ReviewHold{Queue: fixedQueue{size: size, limit: 8}, Tracker: f.tracker}
+	asked, err := g.Ask(context.Background(), application.GrillAsk{
+		Bead: grillTicket, Question: "Where does the second list live?", Recommend: "A: yes", Options: []string{"A: yes", "B: no"}, WhyNow: whyNow,
+	})
+	if err != nil {
+		t.Fatalf("mw grill: %v", err)
+	}
+	return asked
+}
+
+func TestGrillAskOverTheReviewQueueLimitHoldsTheQuestionForMonday(t *testing.T) {
+	f := newGrillFixture(t)
+
+	asked := f.askOverQueue(t, 9, "")
+
+	if !asked.Held || asked.Question != "" || asked.Card != "" {
+		t.Fatalf("expected a held question with no txid, got %+v", asked)
+	}
+	comments := f.tracker.Comments(grillTicket)
+	if len(comments) != 1 || !strings.HasPrefix(comments[0], application.QuestionForMondayPrefix) ||
+		!strings.Contains(comments[0], "Where does the second list live?") {
+		t.Fatalf("expected one QUESTION for Monday comment on the ticket, got %q", comments)
+	}
+	if len(f.backend.Delivered()) != 0 || len(f.cards.Delivered()) != 0 {
+		t.Errorf("expected no card sent, got %d decision and %d running card records", len(f.backend.Delivered()), len(f.cards.Delivered()))
+	}
+	note, err := f.tracker.Note(context.Background(), application.GrillKey(grillTicket))
+	mustDo(t, err)
+	if strings.Contains(note, "txid") || strings.Contains(note, "card") || strings.Contains(note, "Where") {
+		t.Errorf("expected the grilling note unchanged, got %q", note)
+	}
+}
+
+func TestGrillAskWhyNowSendsOverTheLimitAndSaysWhyOnTheBead(t *testing.T) {
+	f := newGrillFixture(t)
+
+	asked := f.askOverQueue(t, 9, "the build waits on this answer")
+
+	if asked.Held || asked.Question == "" || asked.Card == "" {
+		t.Fatalf("expected both cards sent, got %+v", asked)
+	}
+	if len(f.backend.Delivered()) != 1 || len(f.cards.Delivered()) != 1 {
+		t.Errorf("expected the decision card and the running card sent, got %d and %d", len(f.backend.Delivered()), len(f.cards.Delivered()))
+	}
+	var over []string
+	for _, c := range f.tracker.Comments(grillTicket) {
+		if strings.HasPrefix(c, application.SentOverLimitPrefix) {
+			over = append(over, c)
+		}
+		if strings.HasPrefix(c, application.QuestionForMondayPrefix) {
+			t.Errorf("expected no QUESTION for Monday when the card is sent: %q", c)
+		}
+	}
+	if len(over) != 1 || !strings.Contains(over[0], "the build waits on this answer") || !strings.Contains(over[0], asked.Question) {
+		t.Fatalf("expected one SENT OVER THE LIMIT comment quoting the reason and the txid, got %q", over)
+	}
+}
+
+func TestGrillAskAtOrUnderTheLimitIsUnchanged(t *testing.T) {
+	for _, size := range []int{0, 8} {
+		f := newGrillFixture(t)
+
+		asked := f.askOverQueue(t, size, "")
+
+		if asked.Held || asked.Question == "" || asked.Card == "" {
+			t.Fatalf("queue %d: expected both cards sent, got %+v", size, asked)
+		}
+		for _, c := range f.tracker.Comments(grillTicket) {
+			if strings.HasPrefix(c, application.QuestionForMondayPrefix) || strings.HasPrefix(c, application.SentOverLimitPrefix) {
+				t.Errorf("queue %d: expected no hold comment, got %q", size, c)
+			}
+		}
+	}
+}

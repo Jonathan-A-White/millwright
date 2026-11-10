@@ -84,13 +84,19 @@ type GrillAsk struct {
 	Question  string
 	Recommend string
 	Options   []string
+	// WhyNow, when not blank, sends the question though his review queue is
+	// over its limit, and is written on the ticket as SENT OVER THE LIMIT.
+	WhyNow string
 }
 
 // GrillAsked is what Ask sent: the decision card's txid and the running
-// card's.
+// card's. Held is set when his review queue was over its limit and the
+// question was written on the ticket as a QUESTION for Monday instead: no card
+// was sent and both txids are empty.
 type GrillAsked struct {
 	Question string
 	Card     string
+	Held     bool
 }
 
 // Grill asks a grilling ticket's questions: each as a decision card, and each
@@ -106,6 +112,9 @@ type Grill struct {
 	Tracker CardBeads
 	// Notes keeps the running card's txid and its items under GrillKey.
 	Notes PosternNotes
+	// Hold keeps a question from a review queue over its limit
+	// (mw-t5shinh.30); with no Queue nothing is held.
+	Hold ReviewHold
 }
 
 // Ask asks req on its ticket and keeps the running card current. The ticket
@@ -138,13 +147,27 @@ func (g Grill) Ask(ctx context.Context, req GrillAsk) (GrillAsked, error) {
 		return GrillAsked{}, fmt.Errorf("%s: %w", command, err)
 	}
 
-	txid, err := g.Send.Run(ctx, PosternSendRequest{
+	send := PosternSendRequest{
 		Class: "decision-needed", Text: req.Question, Bead: bead, Recommend: req.Recommend, Options: req.Options,
-	})
+	}
+	verdict := g.Hold.Judge(ctx, send)
+	if verdict.Over && strings.TrimSpace(req.WhyNow) == "" {
+		if err := g.Hold.Hold(ctx, send, verdict); err != nil {
+			return GrillAsked{}, err
+		}
+		return GrillAsked{Held: true}, nil
+	}
+	txid, err := g.Send.Run(ctx, send)
 	if err != nil {
 		return GrillAsked{}, err
 	}
 	asked := GrillAsked{Question: txid}
+	// A reason that could not be written on the ticket must not leave the
+	// running card behind the decision card already sent; it is returned last.
+	var overErr error
+	if verdict.Over {
+		overErr = g.Hold.Overrode(ctx, send, verdict, req.WhyNow, txid)
+	}
 	note.Items = append(note.Items, grillItem{Q: req.Question, Txid: txid})
 	n := len(note.Items)
 
@@ -162,7 +185,7 @@ func (g Grill) Ask(ctx context.Context, req GrillAsk) (GrillAsked, error) {
 	if cardErr != nil {
 		return asked, fmt.Errorf("%s: asked as %s, but the running card could not be kept current: %w", command, txid, cardErr)
 	}
-	return asked, nil
+	return asked, overErr
 }
 
 func containsLabel(labels []string, want string) bool {

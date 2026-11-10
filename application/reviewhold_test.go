@@ -212,6 +212,30 @@ func TestDigestLeavesOutAHeldQuestionOfAClosedBead(t *testing.T) {
 	}
 }
 
+// A question mw grill held (mw-t5shinh.30) is a QUESTION for Monday like any
+// other: the digest carries it until a card or an answer meets it.
+func TestDigestCarriesAHeldGrillQuestion(t *testing.T) {
+	f := newDigestFixture()
+	ctx := context.Background()
+	grillAsk := application.PosternSendRequest{
+		Class: "decision-needed", Bead: "mw-e.9", Text: "Where does the second list live?",
+		Options: []string{"A: yes", "B: no"}, Recommend: "A: yes",
+	}
+	f.tracker.AddStory("mw-e", domain.Story{ID: "mw-e.9", Title: "A grilling"})
+	mustDo(t, f.tracker.SetLabels("mw-e.9", "grilling"))
+	mustDo(t, f.tracker.CommentOnStory(ctx, "mw-e.9", application.HeldQuestionComment(grillAsk)))
+	report, err := application.Digest{Tracker: f.tracker, Sender: f.sender, Parent: "mw-6ww.119", DryRun: true, Out: &f.out}.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Held) != 1 || report.Held[0].Bead != "mw-e.9" || report.Held[0].Question != "Where does the second list live?" {
+		t.Fatalf("held = %+v, want mw-e.9's grill question", report.Held)
+	}
+	if !strings.Contains(f.out.String(), "- mw-e.9: Where does the second list live?") {
+		t.Errorf("the dry run does not print the grill question:\n%s", f.out.String())
+	}
+}
+
 func TestDigestReadsHeldQuestionsOffTheGraphToo(t *testing.T) {
 	f := newDigestFixture()
 	ctx := context.Background()
