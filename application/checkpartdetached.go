@@ -199,6 +199,12 @@ func (k Check) partEnded(ctx context.Context, report CheckReport, c *closeOut, l
 		return fmt.Errorf("checking %s: %s ended without keeping a result (its process was stopped?): run the same part again with `mw check %s --part %d` to start it again", c.id, label, c.id, k.Part)
 	}
 	switch strings.TrimSpace(lines[1]) {
+	case partHandedBack:
+		// The worker ended in an error without a result: tell that error, which says
+		// what to run, and not that the process was stopped.
+		if said := strings.TrimSpace(strings.Join(lines[2:], "\n")); said != "" {
+			return errors.New(said)
+		}
 	case partPassed:
 		return nil
 	case partFailed:
