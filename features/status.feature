@@ -321,6 +321,19 @@ Feature: mw status
     Then reading status succeeds
     And the report says today's fuel is 15,000 tokens
 
+  Scenario: The fuel line names the Builder ledger
+    Given the builder's ledger holds a line from today burning 12000 tokens
+    When mw status reads the host
+    Then reading status succeeds
+    And the printed report has the line "FUEL today (Builder ledger): 12,000 tokens"
+
+  Scenario: A 10-digit fuel figure still fits the phone width
+    Given the builder's ledger holds a line from today burning 1234567890 tokens
+    When mw status reads the host
+    Then reading status succeeds
+    And the printed report has the line "FUEL today (Builder ledger): 1,234,567,890 tokens"
+    And every line of the report is at most 60 columns wide
+
   Scenario: Today's fuel is zero when the seat has no ledger yet
     When mw status reads the host
     Then reading status succeeds

@@ -4581,8 +4581,11 @@ five parts, and two more when there is something to say.
   and no eval fails, a rig with
   no memory file is not an error, and the archive a memory is pruned into
   (`<rig>-archive.md`) is never counted.
-- **FUEL today** — the tokens the Builder's ledger charged on lines dated today,
-  and 0 when the seat has no ledger yet. A session's fuel is charged by one line
+- **FUEL today (Builder ledger)** — the tokens the Builder's ledger charged on
+  lines dated today, and 0 when the seat has no ledger yet. It is Builder
+  stories only, not the whole factory's fuel: `mw report`'s FUEL block gives the
+  seat dollars (from the session transcripts) and `mw fuel` the sleep and
+  todo-rank passes. A session's fuel is charged by one line
   only: a story `mw next` closes out again (refused, then refused or landed) gets
   a second line for its outcome that says the fuel was already charged and holds
   no token figure.

@@ -394,7 +394,8 @@ type Burn interface {
 	TokensByDay(ctx context.Context) (map[string]int, error)
 }
 
-// LedgerBurn reads the seat ledgers: the same fuel column mw status adds.
+// LedgerBurn reads the seat ledgers: the same fuel column mw status adds. In
+// practice that is the Builder's ledger alone, the only one mw writes.
 type LedgerBurn struct {
 	Vault Vault
 	Seats []string
