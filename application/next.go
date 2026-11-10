@@ -2833,11 +2833,17 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 // rules can, so that a key set in the vault after this mw was built does not
 // stop it, with the keys it did not know beside what the known ones say.
 func (n Next) landingRequirements(ctx context.Context, rig string) (domain.EpicRequirements, []string, error) {
-	if lenient, ok := n.Rules.(LandingRules); ok {
+	return landingRequirementsFrom(ctx, n.Rules, rig)
+}
+
+// landingRequirementsFrom reads a rig's file through rules as a landing does:
+// leniently when rules offer LandingRules, strictly otherwise.
+func landingRequirementsFrom(ctx context.Context, rules EpicRules, rig string) (domain.EpicRequirements, []string, error) {
+	if lenient, ok := rules.(LandingRules); ok {
 		return lenient.LandingRequirements(ctx, rig)
 	}
-	rules, err := n.Rules.EpicRequirements(ctx, rig)
-	return rules, nil, err
+	got, err := rules.EpicRequirements(ctx, rig)
+	return got, nil, err
 }
 
 // push is one attempt at a landing, in a landing worktree that is already open:

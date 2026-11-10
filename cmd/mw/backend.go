@@ -51,6 +51,9 @@ func hostBackend(gateway *beads.Gateway, files application.HomeFile, host string
 			ViewLock: newHandsViewLock(),
 		},
 	}
+	if rules, ok := files.(application.EpicRules); ok {
+		stage.Live = hostDeployCheck(gateway, rules, host)
+	}
 	for name, b := range settings {
 		stage.Settings[name] = application.BackendRig{
 			Dir: b.Dir, Build: b.Build, Stage: b.Stage, Live: b.Live, Service: b.Service, Health: b.Health, Check: b.Check, Swap: b.Swap,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -210,8 +211,28 @@ func (b BackendStage) swapResult(ctx context.Context, swap stagedSwap, step doma
 		if err := b.Tracker.CloseStory(ctx, swap.Bead, said); err != nil {
 			problem("closing "+swap.Bead, err)
 		}
+		lines = append(lines, b.deployedChecked(ctx, swap)...)
 	}
 	return append([]string{"backend: " + said}, lines...)
+}
+
+// swapStoryRef is a story the swap names by its id, as a tracker holds it; a
+// swap of a backend change no host told the home of names the commit instead.
+var swapStoryRef = regexp.MustCompile(`^` + backendStoryRef.String() + `$`)
+
+// deployedChecked, once a swap has gone through (the step left with 0, its health
+// check passed), writes DEPLOYED-CHECKED on the story it carried, by
+// DeployCheck.Write: the backend's commit is looked for in what the rig's
+// healthz_url answers. A swap with no story of its own gets none.
+func (b BackendStage) deployedChecked(ctx context.Context, swap stagedSwap) []string {
+	if b.Live.Web == nil || !swapStoryRef.MatchString(swap.Story) {
+		return nil
+	}
+	var notes []string
+	for _, note := range b.Live.Write(ctx, true, Deployed{Rig: swap.Rig, Commit: swap.Commit, Backend: true, Stories: []liveStory{{id: swap.Story}}}) {
+		notes = append(notes, fmt.Sprintf("backend: the swap of %s to %s: %s", swap.Rig, updatedRevision(swap.Commit), note))
+	}
+	return notes
 }
 
 // dropHitl takes hitl off bead when none of its hands steps is live.
