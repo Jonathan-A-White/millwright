@@ -108,7 +108,7 @@ func (g *Gateway) listing(ctx context.Context, leave ...string) ([]bead, error) 
 	}
 	kept, err := g.cache.beads.get(func() ([]bead, error) {
 		if all, ok := g.listAllOverConnection(ctx); ok {
-			return withoutTypes(all, cachedLeaves), nil
+			return all, nil
 		}
 		return g.listFromBd(ctx, cachedLeaves)
 	})

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"io"
+
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 
 	"github.com/spf13/cobra"
@@ -36,8 +39,10 @@ func newBriefCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			tracker, stop := keptBriefTracker(dir, host, cmd.ErrOrStderr())
+			defer stop()
 			_, err = application.Brief{
-				Tracker:  mwGateway(dir, host),
+				Tracker:  tracker,
 				Rules:    mwVault(dir, host),
 				Ideas:    bootIdeasOnly(),
 				Comments: comments,
@@ -48,4 +53,19 @@ func newBriefCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&comments, "comments", 0, "print the newest N comments of each bead, in full")
 	return cmd
+}
+
+// keptBriefTracker is the tracker mw brief reads from. With a beads server to
+// reach it keeps one connection for the command's life and reads the list of
+// every bead over it once: the epic, its children and what they wait on are
+// answered from that list, where a bd was started for each, and a bd is started
+// only when the connection fails, said on said. With none it reads by bd as
+// before, because the whole list is a worse read by bd than the three that ask
+// for one epic (mw-t5shinh.13).
+func keptBriefTracker(dir, host string, said io.Writer) (*beads.Gateway, func()) {
+	stop, served := keepBeadsConnectionIfServed(dir, said)
+	if !served {
+		return mwGateway(dir, host), stop
+	}
+	return mwGateway(dir, host, beads.WithRunCache()), stop
 }
