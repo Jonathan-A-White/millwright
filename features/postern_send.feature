@@ -426,3 +426,52 @@ Feature: mw postern send
     Then sending succeeds
     And the broadcast record has no "channel" key
     And the broadcast record has no "bead" key
+
+  Scenario: a message over 200 words from the command line is refused, naming the count, the limit and --long
+    Given the postern channel is "direct"
+    When mw postern send "message" of 201 words is run from the command line
+    Then it is refused, naming 201 words, the limit of 200 and --long
+    And it is refused, and nothing was uploaded or sent
+
+  Scenario: a message of 81 words is sent with one warning
+    Given the postern channel is "direct"
+    When mw postern send "message" of 81 words is run from the command line
+    Then sending succeeds
+    And one warning naming 81 words was printed
+
+  Scenario: a message of 80 words is sent with no warning
+    Given the postern channel is "direct"
+    When mw postern send "message" of 80 words is run from the command line
+    Then sending succeeds
+    And no warning was printed
+
+  Scenario: a card whose question is 121 words is refused
+    Given the postern channel is "direct"
+    When mw postern send "decision-needed" of 121 words is run from the command line
+    Then it is refused, naming 121 words, the limit of 120 and --long
+    And it is refused, and nothing was uploaded or sent
+
+  Scenario: a card whose question is 61 words is sent with one warning
+    Given the postern channel is "direct"
+    When mw postern send "decision-needed" of 61 words is run from the command line
+    Then sending succeeds
+    And one warning naming 61 words was printed
+
+  Scenario: a card whose question is 60 words is sent unwarned, however long its options
+    Given the postern channel is "direct"
+    When mw postern send "decision-needed" of 60 words with three options of 90 words each is run from the command line
+    Then sending succeeds
+    And no warning was printed
+
+  Scenario: --long sends a 500-word message and a 121-word card question
+    Given the postern channel is "direct"
+    When mw postern send "message" of 500 words is run from the command line with --long
+    Then sending succeeds
+    And no warning was printed
+    When mw postern send "decision-needed" of 121 words is run from the command line with --long
+    Then sending succeeds
+
+  Scenario: a send by mw itself of 300 words is not refused
+    Given the postern channel is "direct"
+    When mw postern send "message" of 300 words is run by mw itself
+    Then sending succeeds

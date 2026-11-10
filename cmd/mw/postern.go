@@ -550,7 +550,7 @@ func posternInboxLock(attachmentDir string) *hostlock.Lock {
 // postern_backend, by postern_channel.
 func newPosternSendCmd() *cobra.Command {
 	var class, bead, recommend, thread, topic, beadChannel, channelName, re string
-	var chain, newPost bool
+	var chain, newPost, long bool
 	var options, attach []string
 	var file string
 
@@ -612,7 +612,12 @@ func newPosternSendCmd() *cobra.Command {
 			"quote in a long or odd post arrives as written, where \"$0.92 spent\" in double quotes\n" +
 			"reaches him as \".92 spent\". Write the post to a file with a quoted heredoc\n" +
 			"(cat > post.txt <<'EOF') and send that. It is refused with a text argument, with a\n" +
-			"file that cannot be read and with one that holds nothing.",
+			"file that cannot be read and with one that holds nothing.\n\n" +
+			"The text is counted in words, split on white space, a card's question alone (--class\n" +
+			"decision-needed), not its options. Over 80 words (a card's question over 60) it prints one\n" +
+			"warning line to stderr and sends; over 200 (a card's question over 120) it refuses and\n" +
+			"sends nothing: trim, put the detail on the bead, or give --long, which sends past both\n" +
+			"limits.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := ""
@@ -646,6 +651,13 @@ func newPosternSendCmd() *cobra.Command {
 			}
 			if err := request.ValidateReplyFlags(); err != nil {
 				return err
+			}
+			warning, err := request.CheckLength(long)
+			if err != nil {
+				return err
+			}
+			if warning != "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), warning)
 			}
 			keys, err := posternKeys()
 			if err != nil {
@@ -710,6 +722,7 @@ func newPosternSendCmd() *cobra.Command {
 		_ = cmd.Flags().MarkDeprecated(flag, use)
 	}
 	cmd.Flags().BoolVar(&newPost, "new", false, "post top-level in Factory on purpose, though the Governor's newest Factory post has no answer yet")
+	cmd.Flags().BoolVar(&long, "long", false, "send past the word limits (80 warns and 200 refuses; a card's question 60 and 120)")
 	cmd.Flags().BoolVar(&chain, "chain", false, "also broadcast the message on chain, for a phone that cannot reach the backend")
 	cmd.Flags().StringVar(&re, "re", "", "the txid of the post whose thread this message answers in, printed form or bare; with no channel flag the reply goes to its channel (refused with --bead)")
 	return cmd

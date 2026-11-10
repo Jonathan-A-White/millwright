@@ -187,3 +187,114 @@ func TestPosternSendRefusesAFileItCannotReadOrThatIsEmpty(t *testing.T) {
 		}
 	}
 }
+
+// lengthSend runs mw postern send with args on the direct channel, keeping
+// stdout and stderr apart.
+func lengthSend(t *testing.T, args ...string) (plaintexts []string, stderr string, err error) {
+	t.Helper()
+	sent, _ := channelHome(t)
+	var out, errOut strings.Builder
+	root := newRootCmd()
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SetArgs(append([]string{"postern", "send"}, args...))
+	err = root.Execute()
+	return *sent, errOut.String(), err
+}
+
+func nWords(n int) string { return strings.TrimSpace(strings.Repeat("word ", n)) }
+
+// A message over 200 words is refused with the count, the limit and --long
+// named, and nothing is sent (mw-t5shinh.5).
+func TestPosternSendRefusesAMessageOver200Words(t *testing.T) {
+	plaintexts, _, err := lengthSend(t, nWords(201))
+	if err == nil {
+		t.Fatal("expected 201 words to be refused")
+	}
+	for _, want := range []string{"201 words", "200", "--long"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the refusal to name %q, got: %v", want, err)
+		}
+	}
+	if len(plaintexts) != 0 {
+		t.Fatalf("expected nothing sent, got %d", len(plaintexts))
+	}
+}
+
+func TestPosternSendWarnsOnceOver80WordsAndSendsAnyway(t *testing.T) {
+	plaintexts, stderr, err := lengthSend(t, nWords(81))
+	if err != nil {
+		t.Fatalf("expected 81 words to be sent: %v", err)
+	}
+	if len(plaintexts) != 1 {
+		t.Fatalf("expected one send, got %d", len(plaintexts))
+	}
+	if strings.Count(stderr, "\n") != 1 || !strings.Contains(stderr, "81 words") || !strings.HasPrefix(stderr, "mw postern send:") {
+		t.Fatalf("expected one warning line naming 81 on stderr, got %q", stderr)
+	}
+}
+
+func TestPosternSendSays80WordsWithoutAWarning(t *testing.T) {
+	plaintexts, stderr, err := lengthSend(t, nWords(80))
+	if err != nil || len(plaintexts) != 1 {
+		t.Fatalf("expected 80 words sent, got %d, %v", len(plaintexts), err)
+	}
+	if stderr != "" {
+		t.Fatalf("expected no warning, got %q", stderr)
+	}
+}
+
+func TestPosternSendCountsACardsQuestionAlone(t *testing.T) {
+	opts := []string{"--option", nWords(90), "--option", nWords(90), "--option", nWords(90)}
+	if _, stderr, err := lengthSend(t, append([]string{"--class", "decision-needed", nWords(60)}, opts...)...); err != nil || stderr != "" {
+		t.Fatalf("expected a 60-word question with long options sent unwarned, got %q, %v", stderr, err)
+	}
+	if plaintexts, stderr, err := lengthSend(t, "--class", "decision-needed", nWords(61)); err != nil || len(plaintexts) != 1 || strings.Count(stderr, "\n") != 1 || !strings.Contains(stderr, "61 words") {
+		t.Fatalf("expected a 61-word question sent with one warning naming 61, got %q, %v", stderr, err)
+	}
+	if plaintexts, _, err := lengthSend(t, "--class", "decision-needed", nWords(121)); err == nil || len(plaintexts) != 0 {
+		t.Fatalf("expected a 121-word question refused, got %d sent, %v", len(plaintexts), err)
+	}
+}
+
+func TestPosternSendLongSendsPastBothLimits(t *testing.T) {
+	if plaintexts, stderr, err := lengthSend(t, "--long", nWords(500)); err != nil || len(plaintexts) != 1 {
+		t.Fatalf("expected 500 words sent with --long, got %d, %v (%q)", len(plaintexts), err, stderr)
+	}
+	if plaintexts, _, err := lengthSend(t, "--long", "--class", "decision-needed", nWords(121)); err != nil || len(plaintexts) != 1 {
+		t.Fatalf("expected a 121-word question sent with --long, got %d, %v", len(plaintexts), err)
+	}
+}
+
+func TestPosternSendCountsAFilesTextLikeAnArgument(t *testing.T) {
+	long := filepath.Join(t.TempDir(), "long.txt")
+	if err := os.WriteFile(long, []byte(nWords(201)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if plaintexts, _, err := lengthSend(t, "--file", long); err == nil || !strings.Contains(err.Error(), "201 words") || len(plaintexts) != 0 {
+		t.Fatalf("expected a 201-word file refused, got %d sent, %v", len(plaintexts), err)
+	}
+	warned := filepath.Join(t.TempDir(), "warn.txt")
+	if err := os.WriteFile(warned, []byte(nWords(81)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if plaintexts, stderr, err := lengthSend(t, "--file", warned); err != nil || len(plaintexts) != 1 || !strings.Contains(stderr, "81 words") {
+		t.Fatalf("expected an 81-word file sent with a warning, got %d, %q, %v", len(plaintexts), stderr, err)
+	}
+}
+
+func TestPosternSendHelpNamesTheFourLimitsAndLong(t *testing.T) {
+	var out strings.Builder
+	root := newRootCmd()
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"postern", "send", "--help"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"--long", "80", "200", "60", "120"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("expected --help to name %q:\n%s", want, out.String())
+		}
+	}
+}

@@ -292,3 +292,67 @@ func TestPosternSendAKeepsTheOlderCardsWhenAskedAgainOnABead(t *testing.T) {
 		t.Errorf("expected the first and second cards kept in order, got %+v", saved.Earlier)
 	}
 }
+
+func words(n int) string { return strings.TrimSpace(strings.Repeat("word ", n)) }
+
+func TestPosternLengthCheckWarnsAndRefusesAtTheLimits(t *testing.T) {
+	cases := []struct {
+		name    string
+		req     application.PosternSendRequest
+		long    bool
+		warn    string // substring of the warning, "" for none
+		refused []string
+	}{
+		{name: "80 words", req: application.PosternSendRequest{Text: words(80)}},
+		{name: "81 words", req: application.PosternSendRequest{Text: words(81)}, warn: "81 words"},
+		{name: "200 words", req: application.PosternSendRequest{Text: words(200)}, warn: "200 words"},
+		{name: "201 words", req: application.PosternSendRequest{Text: words(201)}, refused: []string{"201 words", "200", "--long"}},
+		{name: "500 words with --long", req: application.PosternSendRequest{Text: words(500)}, long: true},
+		{name: "card question 60", req: application.PosternSendRequest{Class: "decision-needed", Text: words(60), Options: []string{words(80), words(80), words(80)}}},
+		{name: "card question 61", req: application.PosternSendRequest{Class: "decision-needed", Text: words(61)}, warn: "61 words"},
+		{name: "card question 120", req: application.PosternSendRequest{Class: "decision-needed", Text: words(120)}, warn: "120 words"},
+		{name: "card question 121", req: application.PosternSendRequest{Class: "decision-needed", Text: words(121)}, refused: []string{"121 words", "120", "--long"}},
+		{name: "card question 121 with --long", req: application.PosternSendRequest{Class: "decision-needed", Text: words(121)}, long: true},
+		{name: "white space only splits", req: application.PosternSendRequest{Text: strings.Repeat("a\n\tb  ", 40)}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			warn, err := c.req.CheckLength(c.long)
+			if len(c.refused) > 0 {
+				if err == nil {
+					t.Fatalf("expected a refusal, got none (warning %q)", warn)
+				}
+				for _, want := range c.refused {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("expected the refusal to name %q, got: %v", want, err)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected refusal: %v", err)
+			}
+			if c.warn == "" && warn != "" {
+				t.Fatalf("expected no warning, got %q", warn)
+			}
+			if c.warn != "" && !strings.Contains(warn, c.warn) {
+				t.Fatalf("expected a warning naming %q, got %q", c.warn, warn)
+			}
+			if strings.Contains(warn, "\n") {
+				t.Fatalf("expected one warning line, got %q", warn)
+			}
+		})
+	}
+}
+
+// Only the command line checks the length: PosternSend.Run, which mw's own
+// sends use, sends a hands outcome of 300 words.
+func TestPosternSendRunDoesNotRefuseALongText(t *testing.T) {
+	f := newSendFixture()
+	if _, err := f.send(application.PosternChannelDirect).Run(context.Background(), application.PosternSendRequest{Text: words(300)}); err != nil {
+		t.Fatalf("expected 300 words to be sent by Run, got: %v", err)
+	}
+	if len(f.backend.Delivered()) != 1 {
+		t.Fatalf("expected one delivery, got %d", len(f.backend.Delivered()))
+	}
+}
