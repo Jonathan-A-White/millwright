@@ -57,6 +57,9 @@ func (r FactoryReportResult) summaryQualitySpeedFuel(b *strings.Builder) {
 	summaryLine(b, "  ", "", q.escapedText()+whole.arrow("escaped_bugs"))
 	if r.InvestShare != nil {
 		summaryLine(b, "  ", "", r.InvestShare.summaryText())
+		if words := r.InvestShare.partsWords(); words != "" {
+			summaryLine(b, "    ", "", words)
+		}
 		if words := r.InvestShare.boundWords(); words != "" {
 			wrapInto(b, "    ", words)
 		}

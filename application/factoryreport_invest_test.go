@@ -383,3 +383,98 @@ func TestASweepFindDoesNotMakeQualityFallInTheBound(t *testing.T) {
 		t.Fatalf("the bound is %q for %q, want none: a sweep find is no escape", got.Bound, got.Reason)
 	}
 }
+
+// frictionWindow is a window of landed landings and refused refusals on
+// 2026-10-08, share-1 and on, ready for a test to label or move.
+func frictionWindow(t *testing.T, landed, refused int) *shareFactory {
+	t.Helper()
+	f := newShareFactory(t)
+	f.rows("2026-10-08", landed, 0, refused)
+	return f
+}
+
+func (f *shareFactory) underFriction(ids ...string) {
+	f.t.Helper()
+	for _, id := range ids {
+		if err := f.tracker.MoveStory(context.Background(), id, application.ContributeBackEpic); err != nil {
+			f.t.Fatal(err)
+		}
+	}
+}
+
+func TestALandingUnderTheFrictionRegisterIsAnInvestmentAndTheLineUnderItSaysTheParts(t *testing.T) {
+	f := frictionWindow(t, 4, 0)
+	if err := f.tracker.SetLabels("share-1", "run:landed", application.LabelInvestment); err != nil {
+		t.Fatal(err)
+	}
+	f.underFriction("share-2")
+	result, printed := f.run(0, false)
+	share := result.InvestShare
+	if share.Invested != 2 || share.Landed != 4 || share.Picked != 1 || share.Friction != 1 {
+		t.Errorf("the share is %+v, want 2 of 4, 1 picked, 1 friction-register", *share)
+	}
+	if !strings.Contains(printed, "INVESTMENTS 2/4 (50%), before none landed, target 33%\n  1 picked by the loop, 1 friction-register story\n") {
+		t.Errorf("the INVESTMENTS line is not followed by its two parts:\n%s", printed)
+	}
+	if !strings.Contains(result.Summary(), "  investments 2/4 (50%)") || !strings.Contains(result.Summary(), "1 picked by the loop, 1 friction-register story") {
+		t.Errorf("the summary does not carry the count and its parts:\n%s", result.Summary())
+	}
+	_, asJSON := f.run(0, true)
+	var got struct {
+		Share map[string]any `json:"invest_share"`
+	}
+	if err := json.Unmarshal([]byte(asJSON), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Share["invested"] != 2.0 || got.Share["picked"] != 1.0 {
+		t.Errorf("the JSON's invest_share is %v, want invested 2 beside picked 1", got.Share)
+	}
+}
+
+func TestAFrictionRegisterStoryThatAlsoCarriesTheLabelCountsOnceAndAsPicked(t *testing.T) {
+	f := frictionWindow(t, 4, 0)
+	if err := f.tracker.SetLabels("share-1", "run:landed", application.LabelInvestment); err != nil {
+		t.Fatal(err)
+	}
+	f.underFriction("share-1", "share-2")
+	result, printed := f.run(0, false)
+	share := result.InvestShare
+	if share.Invested != 2 || share.Picked != 1 || share.Friction != 1 {
+		t.Errorf("the share is %+v, want 2 invested once each: 1 picked and 1 friction-register", *share)
+	}
+	if !strings.Contains(printed, "INVESTMENTS 2/4 (50%)") || !strings.Contains(printed, "\n  1 picked by the loop, 1 friction-register story\n") {
+		t.Errorf("the labelled friction story is not counted once, as picked:\n%s", printed)
+	}
+}
+
+func TestARefusedStoryAndATesterStoryUnderTheFrictionRegisterAreNotCounted(t *testing.T) {
+	f := frictionWindow(t, 4, 1)
+	f.underFriction("share-5") // the refused one
+	if err := f.tracker.SetLabels("share-4", "run:landed", application.LabelTester); err != nil {
+		t.Fatal(err)
+	}
+	f.underFriction("share-4")
+	result, printed := f.run(0, false)
+	share := result.InvestShare
+	if share.Invested != 0 || share.Landed != 3 || share.Friction != 0 || share.Picked != 0 {
+		t.Errorf("the share is %+v, want 0 of 3: a refusal and a Tester's story are no investment", *share)
+	}
+	if strings.Contains(printed, "friction-register") {
+		t.Errorf("a line names friction-register stories when none landed:\n%s", printed)
+	}
+}
+
+func TestALandedBugOutsideTheFrictionRegisterWithNoLabelIsNotCounted(t *testing.T) {
+	f := frictionWindow(t, 4, 0)
+	f.tracker.AddStory("", domain.Story{ID: "share-1", Title: "[bug] it leaks", Overrides: domain.Path{Rig: f.rig, Host: "laptop", Model: "sonnet"}})
+	if err := f.tracker.SetUpdated("share-1", f.now); err != nil {
+		t.Fatal(err)
+	}
+	result, printed := f.run(0, false)
+	if share := result.InvestShare; share.Invested != 0 || share.Landed != 4 {
+		t.Errorf("the share is %+v, want 0 of 4: a bug story outside mw-gq6 is no investment", *share)
+	}
+	if strings.Contains(printed, "friction-register") || strings.Contains(printed, "picked by the loop") {
+		t.Errorf("a parts line is printed with no friction-register landing:\n%s", printed)
+	}
+}

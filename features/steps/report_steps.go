@@ -67,6 +67,7 @@ func InitializeReportScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^every refused story of "([^"]*)" has the cause "([^"]*)"$`, c.everyRefusedStoryHasTheCause)
 	ctx.Given(`^the report story "([^"]*)" carries the comment "([^"]*)"$`, c.theStoryCarriesTheComment)
 	ctx.Given(`^the report stories "([^"]*)" carry the label "([^"]*)"$`, c.theStoriesCarryTheLabel)
+	ctx.Given(`^the report stories "([^"]*)" are under the friction register$`, c.theStoriesAreUnderTheFrictionRegister)
 	ctx.Given(`^the report's investment target is ([0-9.]+)$`, c.theInvestmentTarget)
 	ctx.Given(`^the report ledger also holds a landed row for "([^"]*)" on "([^"]*)"$`, c.aLandedRowOn)
 	ctx.Given(`^"([^"]*)" landed (\d+) and refused (\d+) on "([^"]*)"$`, c.aRigLandedAndRefusedOn)
@@ -241,6 +242,17 @@ func (c *reportContext) everyRefusedStoryHasTheCause(rig, class string) error {
 func (c *reportContext) theStoriesCarryTheLabel(ids, label string) error {
 	for _, id := range strings.Split(ids, ",") {
 		if err := c.tracker.AddLabel(context.Background(), strings.TrimSpace(id), label); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// theStoriesAreUnderTheFrictionRegister files each of a comma-separated list of
+// stories under the friction register's epic.
+func (c *reportContext) theStoriesAreUnderTheFrictionRegister(ids string) error {
+	for _, id := range strings.Split(ids, ",") {
+		if err := c.tracker.MoveStory(context.Background(), strings.TrimSpace(id), application.ContributeBackEpic); err != nil {
 			return err
 		}
 	}

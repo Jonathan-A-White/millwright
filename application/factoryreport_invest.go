@@ -12,7 +12,8 @@ import (
 )
 
 // LabelInvestment is the label of a story that is an investment rather than
-// an app's own work; mw report counts the landings that carry it.
+// an app's own work; mw report counts the landings that carry it, and those of
+// a story under the friction register (ContributeBackEpic), as investments.
 const LabelInvestment = "investment"
 
 // DefaultInvestShare is the share of landings meant to be investments when the
@@ -44,11 +45,16 @@ const StarvedP1Hours = 24
 // a share of the week before, before its rig counts as starving: a third.
 const StarvedLandingsFall = 1.0 / 3
 
-// InvestShare is the share of a window's landings that carried LabelInvestment,
-// beside the window before and the target. Share, PreviousShare and Target are
+// InvestShare is the share of a window's landings that were investments (they
+// carried LabelInvestment or were friction register stories), beside the window
+// before and the target. Share, PreviousShare and Target are
 // in percent, as the refusal rate is.
 type InvestShare struct {
-	Invested         int     `json:"invested"`
+	Invested int `json:"invested"`
+	// Picked are the invested landings that carry the label, the loop's picks;
+	// Friction those under the friction register without it.
+	Picked           int     `json:"picked"`
+	Friction         int     `json:"friction"`
 	Landed           int     `json:"landed"`
 	Share            float64 `json:"share"`
 	PreviousInvested int     `json:"previous_invested"`
@@ -91,7 +97,7 @@ func readInvestShare(whole *ReportBlock, rigs []ReportBlock, starvedP1 string, t
 	}
 	now, before := whole.Quality, whole.Previous
 	s := InvestShare{
-		Invested: now.Invested, Landed: now.Landed, Share: percentOf(now.Invested, now.Landed),
+		Invested: now.Invested, Picked: now.Picked, Friction: now.Friction, Landed: now.Landed, Share: percentOf(now.Invested, now.Landed),
 		PreviousInvested: before.Invested, PreviousLanded: before.Landed, PreviousShare: percentOf(before.Invested, before.Landed),
 		Target: math.Round(target*1000) / 10, Min: math.Round(min*1000) / 10, Max: math.Round(max*1000) / 10,
 	}
@@ -205,6 +211,20 @@ func shareOf(invested, landed int) string {
 	return fmt.Sprintf("%d/%d (%.0f%%)", invested, landed, percentOf(invested, landed))
 }
 
+// partsWords says the two parts of the count when a friction register story
+// landed: "1 picked by the loop, 2 friction-register stories"; nothing when none
+// did, so a window of the label alone reads as it always has.
+func (s InvestShare) partsWords() string {
+	if s.Friction == 0 {
+		return ""
+	}
+	noun := "stories"
+	if s.Friction == 1 {
+		noun = "story"
+	}
+	return fmt.Sprintf("%d picked by the loop, %d friction-register %s", s.Picked, s.Friction, noun)
+}
+
 // lines are the lines that end QUALITY: the share, the share before and the
 // target, and under it the words when the share is far off; nil for no share.
 func (s *InvestShare) lines() []string {
@@ -214,6 +234,9 @@ func (s *InvestShare) lines() []string {
 	line := fmt.Sprintf("INVESTMENTS %s%s, before %s, target %s",
 		shareOf(s.Invested, s.Landed), s.Arrow.Text(), shareOf(s.PreviousInvested, s.PreviousLanded), s.target())
 	lines := []string{fitLine(line, ReportWidth)}
+	if words := s.partsWords(); words != "" {
+		lines = append(lines, "  "+words)
+	}
 	if words := s.offWords(); words != "" {
 		lines = append(lines, "  "+words)
 	}
