@@ -220,19 +220,112 @@ func (b BackendStage) swapResult(ctx context.Context, swap stagedSwap, step doma
 // swap of a backend change no host told the home of names the commit instead.
 var swapStoryRef = regexp.MustCompile(`^` + backendStoryRef.String() + `$`)
 
+// swapBeadStory is the story a swap bead was filed for: the first word of its
+// description, "<story> landed (...)", as backendBeadText and standbyBeadText write
+// it. It is empty when the bead cannot be read or names no story.
+func (b BackendStage) swapBeadStory(ctx context.Context, bead string) string {
+	detail, err := b.Tracker.ShowStory(ctx, bead)
+	if err != nil {
+		return ""
+	}
+	first, _, _ := strings.Cut(strings.TrimSpace(detail.Description), " ")
+	if swapStoryRef.MatchString(first) {
+		return first
+	}
+	return ""
+}
+
+// swapRange is every story the swap on bead made live (mw-t5shinh.36): the story
+// named first, if it is one, and the story of each older swap that bead's step
+// superseded, for the binary it installs holds those changes too. Each story is
+// once, the first named first, then the older ones in the order of their beads.
+func (b BackendStage) swapRange(ctx context.Context, bead, first string) []liveStory {
+	var stories []liveStory
+	seen := map[string]bool{}
+	add := func(id string) {
+		if swapStoryRef.MatchString(id) && !seen[id] {
+			seen[id] = true
+			stories = append(stories, liveStory{id: id})
+		}
+	}
+	add(first)
+	marks, err := b.Notes.NotesWithPrefix(ctx, "hands.superseded.")
+	if err != nil {
+		return stories
+	}
+	keys := make([]string, 0, len(marks))
+	for key, by := range marks {
+		if strings.TrimSpace(by) == bead {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		// hands.superseded.<bead>.<step id>: a step id holds no dot.
+		holder := strings.TrimPrefix(key, "hands.superseded.")
+		if dot := strings.LastIndex(holder, "."); dot > 0 {
+			holder = holder[:dot]
+		}
+		add(b.swapBeadStory(ctx, holder))
+	}
+	return stories
+}
+
 // deployedChecked, once a swap has gone through (the step left with 0, its health
-// check passed), writes DEPLOYED-CHECKED on the story it carried, by
+// check passed), writes DEPLOYED-CHECKED on the stories it carried, by
 // DeployCheck.Write: the backend's commit is looked for in what the rig's
 // healthz_url answers. A swap with no story of its own gets none.
 func (b BackendStage) deployedChecked(ctx context.Context, swap stagedSwap) []string {
-	if b.Live.Web == nil || !swapStoryRef.MatchString(swap.Story) {
+	return b.liveChecked(ctx, swap.Rig, swap.Commit, swap.Bead, swap.Story)
+}
+
+// liveChecked is the one place a swap of rig to commit, run on bead, is checked
+// live: the stories of its range go to DeployCheck.Write, and each note it returns
+// is said as the swap's.
+func (b BackendStage) liveChecked(ctx context.Context, rig, commit, bead, story string) []string {
+	if b.Live.Web == nil {
 		return nil
 	}
+	stories := b.swapRange(ctx, bead, story)
 	var notes []string
-	for _, note := range b.Live.Write(ctx, true, Deployed{Rig: swap.Rig, Commit: swap.Commit, Backend: true, Stories: []liveStory{{id: swap.Story}}}) {
-		notes = append(notes, fmt.Sprintf("backend: the swap of %s to %s: %s", swap.Rig, updatedRevision(swap.Commit), note))
+	for _, note := range b.Live.Write(ctx, true, Deployed{Rig: rig, Commit: commit, Backend: true, Stories: stories}) {
+		notes = append(notes, fmt.Sprintf("backend: the swap of %s to %s: %s", rig, updatedRevision(commit), note))
 	}
 	return notes
+}
+
+// TappedSwaps is what a hands step run by a tap is offered to once it has run: a
+// swap of a staged backend is checked live as the home's own is.
+type TappedSwaps interface {
+	// TappedSwap says what the live check of step, run on bead with outcome, wrote or
+	// could not; none for a step that is no backend swap or a swap that did not go through.
+	TappedSwap(ctx context.Context, bead string, step domain.HandsStep, outcome HandsOutcome) []string
+}
+
+// TappedSwap is the live check of a swap the Governor's tap ran (mw-t5shinh.36), the
+// home's standby swap included: a step named backend-<short commit> whose text
+// swaps the live binary of a rig this host names a table for. It writes
+// DEPLOYED-CHECKED through DeployCheck.Write only when the step left with 0, on the
+// stories of the swap's range, by the rules swapResult follows for an automatic one.
+func (b BackendStage) TappedSwap(ctx context.Context, bead string, step domain.HandsStep, outcome HandsOutcome) []string {
+	short, isSwap := strings.CutPrefix(step.ID, "backend-")
+	if !isSwap || short == "" || outcome.Exit != 0 || b.Tracker == nil || b.Notes == nil {
+		return nil
+	}
+	names := make([]string, 0, len(b.Settings))
+	for name := range b.Settings {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		cfg := b.Settings[name]
+		for _, live := range []string{cfg.Live, cfg.VPSLive} {
+			if live != "" && strings.Contains(step.Run, "l="+shQuote(live)+";") {
+				return b.liveChecked(ctx, name, short, bead, b.swapBeadStory(ctx, bead))
+			}
+		}
+	}
+	return nil
 }
 
 // dropHitl takes hitl off bead when none of its hands steps is live.

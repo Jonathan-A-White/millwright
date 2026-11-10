@@ -370,7 +370,14 @@ func newPosternInbox(out io.Writer) (application.PosternInbox, posternWiring, er
 	if cards, err := posternCards(nil); err == nil {
 		cardSender = &cards
 	}
+	// A swap of a backend the Governor taps is checked live as the home's own is
+	// (mw-t5shinh.36); a host with no [backend.<rig>] table checks nothing.
+	var swaps application.TappedSwaps
+	if vaultDir, err := config.Vault(); err == nil {
+		swaps = hostBackend(gateway, mwVault(vaultDir, host), host, nil, nil)
+	}
 	return application.PosternInbox{
+		Swaps:         swaps,
 		Ideas:         &ideas,
 		Cards:         cardSender,
 		Threads:       threads,

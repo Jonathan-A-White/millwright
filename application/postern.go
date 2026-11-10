@@ -739,6 +739,10 @@ type PosternInbox struct {
 	// <draft>' line in the notes of a To do card he adds or edits is given the
 	// name's one mobile number (TextNumbers). Nil leaves every line as typed.
 	Contacts ContactBook
+	// Swaps, when set, is offered every hands step a tap ran, once it has run: a
+	// backend swap that went through is checked live and DEPLOYED-CHECKED written
+	// on its stories (mw-t5shinh.36). Nil checks nothing.
+	Swaps TappedSwaps
 	// Host names this host, for the mail a recorded reply sends: it is signed
 	// SeatIdentity(MwSeat, Host).
 	Host string
