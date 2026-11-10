@@ -195,7 +195,7 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	case k.PartWorker:
 		// The process a call started for the part: it waits for neither a calm host
 		// nor the slot, which the call that started it did.
-		return k.runPart(ctx, report, c, label, part, tip, nil)
+		return k.runPart(ctx, report, c, label, part, tip, nil, LoadReading{})
 	case k.detachesPart(part):
 		return k.checkPartDetached(ctx, report, c, label, part, tip)
 	}
@@ -206,7 +206,8 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	// (mw-gq6.987).
 	began := time.Now()
 	left := func() time.Duration { return max((k.partSlotWait() - time.Since(began)).Round(time.Millisecond), 0) }
-	if err := k.calmForPart(ctx, c, report.Attempt, k.Part, label, left); err != nil {
+	before, err := k.calmForPart(ctx, c, report.Attempt, k.Part, label, left)
+	if err != nil {
 		return report, fmt.Errorf("checking %s: %w", c.id, err)
 	}
 
@@ -228,12 +229,12 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 		return report, fmt.Errorf("checking %s: %s did not start: the part needs about %s and only %s is left in this call, after waiting for %s to calm; nothing was run: run the same part again with `mw check %s --part %d`",
 			c.id, label, gateWaited(fit.expected), gateWaited(fit.left()), k.Host, c.id, k.Part)
 	}
-	return k.runPart(ctx, report, c, label, part, tip, fit)
+	return k.runPart(ctx, report, c, label, part, tip, fit, before)
 }
 
 // runPart runs part n of the gate in the story's worktree and keeps what it said:
 // checkPart's last step, and the whole of a part worker's.
-func (k Check) runPart(ctx context.Context, report CheckReport, c *closeOut, label string, part GatePart, tip string, fit *callFit) (CheckReport, error) {
+func (k Check) runPart(ctx context.Context, report CheckReport, c *closeOut, label string, part GatePart, tip string, fit *callFit, before LoadReading) (CheckReport, error) {
 	if fit != nil && k.Out != nil {
 		fmt.Fprintf(k.Out, "  part    expected about %s, %s left in this call\n", gateWaited(fit.expected), gateWaited(fit.left()))
 	}
@@ -241,6 +242,19 @@ func (k Check) runPart(ctx context.Context, report CheckReport, c *closeOut, lab
 	checked, err := k.Parts.RunLine(ctx, c.path.Rig, c.worktree, part.Command)
 	if err != nil {
 		return report, fmt.Errorf("checking %s: %s could not be run: %w", c.id, label, err)
+	}
+	// A part that failed while the host was far over its cores is run once more
+	// when it calms, as a whole check's tests are, and only that run counts
+	// (mw-gq6.1060). before is the reading the part began at.
+	var ranTwice string
+	if !checked.Passed && !checked.NotRun {
+		again, err := k.runPartAgain(ctx, c, report.Attempt, k.Part, label, part, checked, before, fit)
+		if err != nil {
+			return report, fmt.Errorf("checking %s: %w", c.id, err)
+		}
+		if again.Said != "" {
+			checked, ranTwice, ranFrom = again.Again, again.Said, again.From
+		}
 	}
 	// The record says which commit the part ran at only when nothing else was in
 	// the worktree and the tip did not move while it ran.
@@ -270,6 +284,9 @@ func (k Check) runPart(ctx context.Context, report CheckReport, c *closeOut, lab
 
 	var said strings.Builder
 	fmt.Fprintf(&said, "check on %s: %s\n", k.Host, c.id)
+	if ranTwice != "" {
+		fmt.Fprintf(&said, "  %s\n", ranTwice)
+	}
 	switch {
 	case checked.NotRun:
 		fmt.Fprintf(&said, "  %s could not be run: `%s` did not start, so this host is missing something the command needs (a toolchain not on its PATH?)\n", label, checked.Command)

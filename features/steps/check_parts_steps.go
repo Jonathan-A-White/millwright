@@ -19,6 +19,7 @@ func registerCheckPartsSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig's gate is split into these parts:$`, c.theGateIsSplit)
 	ctx.Given(`^the rig's gate is not split into parts$`, c.theGateIsNotSplit)
 	ctx.Given(`^the part "([^"]*)" fails, saying "([^"]*)"$`, c.aPartFails)
+	ctx.Given(`^the part "([^"]*)" fails its first run only, saying "([^"]*)"$`, c.aPartFailsOnce)
 
 	ctx.When(`^a session checks "([^"]*)" part (\d+)$`, c.aSessionChecksAPart)
 	ctx.When(`^the session of "([^"]*)" commits another change$`, c.theSessionCommitsAgain)
@@ -47,6 +48,18 @@ func (c *nextContext) aPartFails(name, saying string) error {
 	for i, part := range c.gateParts {
 		if part.Name == name {
 			c.gateParts[i].Command = fmt.Sprintf("%s; echo '%s'; exit 1", part.Command, saying)
+			return nil
+		}
+	}
+	return fmt.Errorf("the gate has no part %q", name)
+}
+
+// aPartFailsOnce is a part as a loaded host runs it: the first run, which is the
+// first line the part's command writes to the scenario's log, fails.
+func (c *nextContext) aPartFailsOnce(name, saying string) error {
+	for i, part := range c.gateParts {
+		if part.Name == name {
+			c.gateParts[i].Command = fmt.Sprintf("%s; if [ \"$(wc -l < %s)\" -le 1 ]; then echo '%s'; exit 1; fi", part.Command, c.checkLog, saying)
 			return nil
 		}
 	}
