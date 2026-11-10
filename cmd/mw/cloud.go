@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
-	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/cloud"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
@@ -370,12 +369,4 @@ func cloudStatus(dir, host string) (application.CloudBook, application.CloudPlan
 		return nil, application.CloudPlan{}
 	}
 	return vault.CloudBook{Vault: mwVault(dir, host)}, plan
-}
-
-// ownHarnessVersion is the Claude Code version this host runs, as `mw version`
-// prints it after "claude".
-func ownHarnessVersion(ctx context.Context) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, harnessVersionTimeout)
-	defer cancel()
-	return claude.New().Version(ctx)
 }
