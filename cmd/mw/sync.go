@@ -272,6 +272,11 @@ func hostSync(sync application.Sync) (application.Sync, error) {
 	if sync.MwCommit == "" {
 		sync.MwCommit = builtCommit()
 	}
+	if sync.Harness == "" {
+		if printed, err := ownHarnessVersion(context.Background()); err == nil {
+			sync.Harness = application.HarnessNumber(printed)
+		}
+	}
 	sync.Squash = squash
 	if sync.BoostConfig == nil && sync.BoostTarget == nil {
 		// A config or vault that cannot be placed levels nothing: the commands
