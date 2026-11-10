@@ -144,11 +144,11 @@ func TestValidateAcceptsEveryKnownModelAndEffort(t *testing.T) {
 	}
 }
 
-// The full ids are the current family's: Fable 5.1, Opus 5.5, Sonnet 5.5,
+// The full ids are the current family's: Fable 5.2, Opus 5.5, Sonnet 5.5,
 // Haiku 5.5 (mw-2zh33g.10: haiku was still claude-haiku-4-5-20251001).
 func TestFullModelIDIsTheCurrentFamilysIdForEveryAlias(t *testing.T) {
 	want := map[domain.Model]string{
-		domain.ModelFable:  "claude-fable-5-1",
+		domain.ModelFable:  "claude-fable-5-2",
 		domain.ModelOpus:   "claude-opus-5-5",
 		domain.ModelSonnet: "claude-sonnet-5-5",
 		domain.ModelHaiku:  "claude-haiku-5-5",

@@ -551,7 +551,7 @@ func KnownModel(h Harness, m Model) bool {
 func FullModelID(m Model) string {
 	switch m {
 	case ModelFable:
-		return "claude-fable-5-1"
+		return "claude-fable-5-2"
 	case ModelOpus:
 		return "claude-opus-5-5"
 	case ModelSonnet:
