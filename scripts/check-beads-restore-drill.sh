@@ -16,7 +16,9 @@
 #   - an empty dump, a missing dump and a host with under 8 GB free are each
 #     refused the same way;
 #   - the scratch directory is gone after a pass and after a failure;
-#   - `mw` is never called (a stand-in mw on PATH records any call);
+#   - `mw` is never called (a stand-in mw on PATH records any call), nor the
+#     `bd` shim that execs `mw bd` and leads a seat's PATH: the drill steps
+#     over it to the next bd;
 #   - the bd calls are the ones the story names, in order: init with its flags,
 #     config set types.custom mail, import, count --include-infra, count
 #     --by-type, show mw-6ww.9, create --parent mw-gq6;
@@ -131,6 +133,17 @@ echo "mw \$*" >>"$MWCALLS"
 exit 99
 EOF
 chmod +x "$STAND/mw"
+# A seat's PATH leads with a bd that is `exec mw bd "$@"`. The drill must step over
+# it to the stand-in bd, which comes after it on PATH here.
+SHIM=$T/shim
+mkdir -p "$SHIM"
+cat >"$SHIM/bd" <<EOF
+#!/bin/sh
+# exec mw bd "\$@"
+echo "shim bd \$*" >>"$MWCALLS"
+exit 99
+EOF
+chmod +x "$SHIM/bd"
 cat >"$STAND/free" <<'EOF'
 #!/bin/sh
 echo "               total        used        free      shared  buff/cache   available"
@@ -150,7 +163,7 @@ run() {
 	RC=0
 	(
 		cd "$dir"
-		PATH="$STAND:$PATH" TMPDIR="$TMP" \
+		PATH="$SHIM:$STAND:$PATH" TMPDIR="$TMP" \
 			BEADS_DOLT_SERVER_HOST=10.0.0.1 BEADS_ACTOR=someone BEADS_DOLT_PASSWORD=secret \
 			"$SCRIPT_ABS" "$@"
 	) >"$OUT/last" 2>&1 || RC=$?
@@ -250,7 +263,7 @@ mkdir -p "$T/withbeads/tmp"
 TMP=$T/withbeads/tmp
 : >"$CALLS"
 RC=0
-(cd "$T/clean" && PATH="$STAND:$PATH" TMPDIR="$TMP" "$SCRIPT_ABS" "$T/dump.jsonl.gz") >"$OUT/last" 2>&1 || RC=$?
+(cd "$T/clean" && PATH="$SHIM:$STAND:$PATH" TMPDIR="$TMP" "$SCRIPT_ABS" "$T/dump.jsonl.gz") >"$OUT/last" 2>&1 || RC=$?
 [ "$RC" -ne 0 ] || fail "a scratch directory under .beads: exited 0"
 [ "$(ncalls)" -eq 0 ] || fail "a scratch directory under .beads: bd was called"
 [ -z "$(ls -A "$TMP")" ] || fail "a scratch directory under .beads is not gone"

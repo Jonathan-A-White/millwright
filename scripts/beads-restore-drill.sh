@@ -142,13 +142,32 @@ STORE=$SCRATCH/store
 HOME_S=$SCRATCH/home
 mkdir -p "$STORE" "$HOME_S" || die "cannot make $STORE"
 
+# The bd to run is the first on PATH that is not a shim. A seat's PATH leads with
+# a directory holding a `bd` that is `exec mw bd "$@"`, which queues behind the
+# home's other bd turns and reaches for the live store; the drill never calls mw,
+# so it skips that directory, here and in the PATH it hands bd.
+BD_BIN=""
+BD_PATH=""
+oldifs=$IFS
+IFS=:
+for d in $PATH; do
+	[ -n "$d" ] || continue
+	if [ -e "$d/bd" ] && head -c 400 "$d/bd" 2>/dev/null | grep -aq 'mw bd'; then
+		continue
+	fi
+	[ -x "$d/bd" ] && [ -z "$BD_BIN" ] && BD_BIN=$d/bd
+	BD_PATH=${BD_PATH:+$BD_PATH:}$d
+done
+IFS=$oldifs
+[ -n "$BD_BIN" ] || refuse "no bd on PATH that is not the mw bd shim"
+
 # Every bd call. env -i drops BEADS_*; HOME is the scratch home; the working
 # directory is the scratch store.
 bd_run() {
-	(cd "$STORE" && env -i HOME="$HOME_S" PATH="$PATH" nice -n 19 bd "$@")
+	(cd "$STORE" && env -i HOME="$HOME_S" PATH="$BD_PATH" nice -n 19 "$BD_BIN" "$@")
 }
 bd_import() { # <file>: under timeout 90m, the longest a restore may take
-	(cd "$STORE" && timeout 90m env -i HOME="$HOME_S" PATH="$PATH" nice -n 19 bd import "$1")
+	(cd "$STORE" && timeout 90m env -i HOME="$HOME_S" PATH="$BD_PATH" nice -n 19 "$BD_BIN" import "$1")
 }
 
 NMISS=0
@@ -194,7 +213,7 @@ FILE_WISPS=$(awk -F'\t' '$3 == "true"' "$SCRATCH/index.tsv" | wc -l)
 FILE_MEMORY=$((N_LINES - FILE_ISSUES))
 
 # --- the restore -------------------------------------------------------------
-env -i HOME="$HOME_S" PATH="$PATH" git -C "$STORE" init -q . || die "git init failed"
+env -i HOME="$HOME_S" PATH="$BD_PATH" git -C "$STORE" init -q . || die "git init failed"
 bd_run metrics off >/dev/null 2>&1
 bd_run init -p mw --non-interactive --role maintainer --skip-agents --skip-hooks -q >"$SCRATCH/init.log" 2>&1 ||
 	{
