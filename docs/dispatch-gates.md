@@ -377,6 +377,15 @@ load and `mw check <story> --part N`, counted once for the attempt when repeated
 its call is not started either. Before this a part started at any load, and on the
 desktop's three or four suites at once (load 25 to 30 of 16 cores) outran the call.
 
+A part that fails while the host is at twice its cores or more (read before it began or
+after it ended, `GateFarOver`) is run once more after the same wait for a calm host, as a
+whole check's tests are (`Check.runPartAgain`, mw-gq6.1060, after mw-gq6.228): only the
+second run counts and is the part's record, and the output says the part ran twice. A
+wait that ends with the host still busy, or with too little of the call left, hands the
+part back (first failure not counted, nothing kept) with the command to run it again. A
+failure read between the cores and twice them counts at once. A part run by its own
+process (`PartWorker`) judges by the load after it only.
+
 Every place mw runs the rig's tests, and what it takes:
 
 | Where | Merge slot | Gate lock | Follows the rule |
@@ -386,7 +395,7 @@ Every place mw runs the rig's tests, and what it takes:
 | `mw land` batch gate (and its changed specs) | yes, alone, yielded while it waits for the lock or calm | yes | yes |
 | `mw check`, whole, rig not split | yes, shared | yes (after the slot) | yes |
 | `mw check`, changed specs | yes, shared | yes | yes |
-| `mw check --part N` | only a part that is not slot-free, taken after the calm wait | no | yes, before the part and before its slot, within the same 9 minutes, ending in one line naming the load and `--part N` (mw-gq6.987) |
+| `mw check --part N` | only a part that is not slot-free, taken after the calm wait | no | yes, before the part and before its slot, within the same 9 minutes, ending in one line naming the load and `--part N` (mw-gq6.987); a part that failed far over its cores is run once more after the same wait (mw-gq6.1060) |
 | `mw check --no-slot` | no | no | no, the escape hatch |
 | `mw dispatch` bug recheck and `mw next` fixed-on-main recheck (`rerunUnderGate`) | no | yes, a short wait, else "not re-checked" | yes |
 | nightly `mw timing` | no | yes | yes |

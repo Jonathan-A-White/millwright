@@ -100,6 +100,43 @@ Feature: Checking a rig whose gate is split into parts
     And the parts that ran, in order, were: lint
     And the check prints: waiting up to
 
+  Scenario: A part that fails while the host was far over its cores is run once more when it calms, and passes (mw-gq6.1060)
+    Given the host's load reads in turn: calm, far over, calm
+    And the part "lint" fails its first run only, saying "timeout"
+    When a session checks "mw-gq6.1" part 1
+    Then the check part passes
+    And the parts that ran, in order, were: lint, lint
+    And the check prints: ran twice
+    And the check prints: the first run failed while
+
+  Scenario: A part that fails again on the calm run is that run's failure, and says it ran twice (mw-gq6.1060)
+    Given the host's load reads in turn: calm, far over, calm
+    And the part "lint" fails, saying "timeout"
+    When a session checks "mw-gq6.1" part 1
+    Then the check part fails
+    And the parts that ran, in order, were: lint, lint
+    And the check prints: ran twice
+    And the check prints: part 1 of 3 (lint) failed
+    And the check part error says: did not pass
+
+  Scenario: A part that fails while the host was only busy is not run again (mw-gq6.1060)
+    Given the host's load reads in turn: calm, busy
+    And the part "lint" fails, saying "timeout"
+    When a session checks "mw-gq6.1" part 1
+    Then the check part fails
+    And the parts that ran, in order, were: lint
+    And the check does not print: ran twice
+
+  Scenario: A part that failed on a far over host and finds it still so at the bound is handed back, not counted (mw-gq6.1060)
+    Given the host's load reads in turn: calm, far over
+    And the part "lint" fails, saying "timeout"
+    When a session checks "mw-gq6.1" part 1
+    Then the check part fails
+    And the parts that ran, in order, were: lint
+    And the check part error says: failed once while
+    And the check part error says: mw check mw-gq6.1 --part 1
+    And the check part error says: not a failure of the part
+
   Scenario: A rig whose gate is not split refuses --part
     Given the rig's gate is not split into parts
     When a session checks "mw-gq6.1" part 1

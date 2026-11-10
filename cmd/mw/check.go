@@ -78,7 +78,9 @@ func newCheckCmd() *cobra.Command {
 			"A rig whose whole gate outruns a foreground tool call's 590 seconds is named as parts in the host's\n" +
 			"config file (the [test_parts.<rig>] tables, mw-gq6.567). mw check <story> --part N then runs part N\n" +
 			"alone, after the same wait for a calm host a whole check makes (up to nine minutes, ending in one line\n" +
-			"naming the load and the part to run again) and with no second run, and keeps what it said at the branch's tip;\n" +
+			"naming the load and the part to run again), and keeps what it said at the branch's tip. A part that failed while\n" +
+			"the host was at twice its cores or more is run once more when it has calmed, and only that second run counts,\n" +
+			"as a whole check's tests are, saying it ran twice (mw-gq6.1060);\n" +
 			"run it once for each part, each as a call of its own, and then mw check <story> with no --part: that\n" +
 			"runs none of the gate again, it reads the parts' records and reports the whole gate green, or names\n" +
 			"each part that failed or was not run at this commit, with the call that runs it. A part that only\n" +
