@@ -167,8 +167,8 @@ const beadColumns = "select i.id as id, i.title as title, i.description as descr
 type listingQueries struct{ beads, labels, edges string }
 
 // listAllOverConnection is the beads `bd list --all --json` prints, read over
-// the kept connection in three queries, less mail and event beads; ok is false when there is no
-// connection or it failed, and the caller starts a bd.
+// the kept connection in three queries, less mail and event beads; ok is false
+// when there is no connection or it failed, and the caller starts a bd.
 func (g *Gateway) listAllOverConnection(ctx context.Context) (all []bead, ok bool) {
 	db := g.keptDB()
 	if db == nil {
