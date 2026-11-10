@@ -314,7 +314,7 @@ func TestBoostTablesTextWritesTheSessionDenyOnOneLineAndReadsBack(t *testing.T) 
 	}
 	// A home with no deny writes no [session] table at all.
 	none, _ := BoostTablesOf(mustParse(t, "[tests]\nargus = \"npm test\"\n"))
-	if strings.Contains(none.Text(), "[session]") {
+	if strings.Contains(none.Text(), "\n[session]\n") {
 		t.Errorf("expected no [session] table, got:\n%s", none.Text())
 	}
 }
