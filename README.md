@@ -5033,8 +5033,9 @@ talk. A session cannot change its own model, and typing `/model` into a live
 Claude Code window failed and froze the seat on a dialog, so the switch is a
 fresh Mayor on the chosen model. The command types into no window and starts
 nothing. It maps the chip name to the full model id (`sonnet` is
-`claude-sonnet-5-5`, `opus` `claude-opus-5-5`, `fable` `claude-fable-5-1`,
-`haiku` `claude-haiku-5-5`), speaks on the talk "Switching to Sonnet:
+`claude-sonnet-5-5`, `opus` `claude-opus-5-5`, `fable` `claude-fable-5-2`,
+`haiku` `claude-haiku-5-5`; the fable id needs Claude Code 2.1.321 or later
+on the host), speaks on the talk "Switching to Sonnet:
 a fresh Mayor takes the line in about a minute", appends a dated line to
 `.mayor-talk.log` in the vault, and prints the one line the Mayor runs next:
 

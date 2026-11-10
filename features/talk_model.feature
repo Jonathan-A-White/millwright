@@ -29,7 +29,7 @@ Feature: mw talk model
     Examples:
       | chip   | name   | id                        |
       | opus   | Opus   | claude-opus-5-5           |
-      | fable  | Fable  | claude-fable-5-1          |
+      | fable  | Fable  | claude-fable-5-2          |
       | haiku  | Haiku  | claude-haiku-5-5          |
 
   Scenario: An unknown chip name is refused and nothing is said, logged or typed

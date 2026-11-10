@@ -60,7 +60,7 @@ func TestAStorySessionIsStartedOnTheModelsFullID(t *testing.T) {
 		"haiku":  "--model claude-haiku-5-5 ",
 		"sonnet": "--model claude-sonnet-5-5 ",
 		"opus":   "--model claude-opus-5-5 ",
-		"fable":  "--model claude-fable-5-1 ",
+		"fable":  "--model claude-fable-5-2 ",
 	} {
 		spec, err := New().Session(launch(func(l *application.Launch) { l.Path.Model = domain.Model(model) }))
 		if err != nil {
