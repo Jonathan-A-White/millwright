@@ -3122,7 +3122,8 @@ func (n Next) changelogNote(ctx context.Context, c *closeOut, report *NextReport
 // closingMail is the verdict a landing's mail goes under and the block it
 // carries, from the story's closing comments, read once: for a landing whose
 // comment says an acceptance criterion is not met, the criteria marked in the
-// verdict and the bug filed for them, then its common errors (mw-gq6.420) and
+// verdict and the bug filed for them, the bugs filed for the findings it did not
+// fix (mw-t5shinh.24), then its common errors (mw-gq6.420) and
 // its rig-memory proposals, a blank line apart. When the comments cannot be
 // read the block is empty, and a landing is never refused for it. A close-out run again (again) files the bug an earlier one could not,
 // and sends nothing.
@@ -3135,11 +3136,12 @@ func (n Next) closingMail(ctx context.Context, c *closeOut, report *NextReport, 
 	if err != nil {
 		return verdict, ""
 	}
-	var unmet string
+	var unmet, found string
 	if c.tested == "" {
 		verdict, unmet = n.landedWithoutACs(ctx, c, report, again, comments)
+		found = n.filedFromFoundNotFixed(ctx, c, report, again, comments)
 	}
-	return verdict, joinBlocks(unmet, n.commonErrors(ctx, c, comments), n.rigMemoryProposals(ctx, c, comments))
+	return verdict, joinBlocks(unmet, found, n.commonErrors(ctx, c, comments), n.rigMemoryProposals(ctx, c, comments))
 }
 
 // rigMemoryProposals is the block from the story's newest closing comment that

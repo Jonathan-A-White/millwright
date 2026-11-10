@@ -84,7 +84,7 @@ func ParseFactProposals(comment string) FactProposals {
 	for _, raw := range append([]string{first}, lines[start+1:]...) {
 		// A bug's 'For common errors:' section, written after this one, is not
 		// a proposal of it (mw-gq6.420).
-		if strings.Contains(strings.ToLower(raw), strings.ToLower(CommonErrorsMarker)) {
+		if strings.Contains(strings.ToLower(raw), strings.ToLower(CommonErrorsMarker)) || isFoundNotFixedHeading(raw) {
 			break
 		}
 		text := strings.TrimSpace(domain.TrimListMarker(raw))

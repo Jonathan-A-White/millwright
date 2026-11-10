@@ -3,6 +3,7 @@ package steps
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -139,4 +140,99 @@ func (c *nextContext) theFiledBugsAcceptanceHasALine(prefix string) error {
 		}
 	}
 	return fmt.Errorf("no line of the filed bug's acceptance begins %q:\n%s", prefix, bug.Acceptance)
+}
+
+// The steps of features/found_not_fixed.feature (mw-t5shinh.24): the bugs a
+// landing files from the 'Found, not fixed:' section of a closing comment.
+
+// registerFoundNotFixedSteps registers the steps of features/found_not_fixed.feature.
+func registerFoundNotFixedSteps(ctx *godog.ScenarioContext, c *nextContext) {
+	ctx.Then(`^the bugs filed under "([^"]*)" are held and labelled "([^"]*)" and "([^"]*)"$`, c.theBugsAreHeldAndLabelled)
+	ctx.Then(`^a bug filed under "([^"]*)" quotes: (.+)$`, c.aBugFiledQuotes)
+	ctx.Then(`^the bugs filed under "([^"]*)" all quote: (.+)$`, c.theBugsFiledAllQuote)
+	ctx.Then(`^one bug filed under "([^"]*)" quotes both: (.+) \| (.+)$`, c.oneBugFiledQuotesBoth)
+	ctx.Then(`^the bugs filed under "([^"]*)" have the path of "([^"]*)" and no acceptance$`, c.theBugsHaveThePathAndNoAcceptance)
+}
+
+func (c *nextContext) theBugsAreHeldAndLabelled(epic, first, second string) error {
+	bugs, err := c.filedBugs(epic)
+	if err != nil {
+		return err
+	}
+	if len(bugs) == 0 {
+		return fmt.Errorf("no bug was filed under %s", epic)
+	}
+	for _, bug := range bugs {
+		if !bug.Held() {
+			return fmt.Errorf("the filed bug %s is %q, expected it held", bug.Story.ID, bug.Status)
+		}
+		for _, want := range []string{first, second} {
+			if !slices.Contains(bug.Labels, want) {
+				return fmt.Errorf("the filed bug %s has the labels %v, expected %q", bug.Story.ID, bug.Labels, want)
+			}
+		}
+	}
+	return nil
+}
+
+func (c *nextContext) aBugFiledQuotes(epic, quote string) error {
+	bugs, err := c.filedBugs(epic)
+	if err != nil {
+		return err
+	}
+	for _, bug := range bugs {
+		if strings.Contains(bug.Description, quote) {
+			return nil
+		}
+	}
+	return fmt.Errorf("no bug filed under %s quotes %q", epic, quote)
+}
+
+func (c *nextContext) theBugsFiledAllQuote(epic, quote string) error {
+	bugs, err := c.filedBugs(epic)
+	if err != nil {
+		return err
+	}
+	if len(bugs) == 0 {
+		return fmt.Errorf("no bug was filed under %s", epic)
+	}
+	for _, bug := range bugs {
+		if !strings.Contains(bug.Description, quote) {
+			return fmt.Errorf("the description of %s does not hold %q:\n%s", bug.Story.ID, quote, bug.Description)
+		}
+	}
+	return nil
+}
+
+func (c *nextContext) oneBugFiledQuotesBoth(epic, first, second string) error {
+	bugs, err := c.filedBugs(epic)
+	if err != nil {
+		return err
+	}
+	for _, bug := range bugs {
+		if strings.Contains(bug.Description, first) && strings.Contains(bug.Description, second) {
+			return nil
+		}
+	}
+	return fmt.Errorf("no one bug filed under %s quotes both %q and %q", epic, first, second)
+}
+
+func (c *nextContext) theBugsHaveThePathAndNoAcceptance(epic, id string) error {
+	bugs, err := c.filedBugs(epic)
+	if err != nil {
+		return err
+	}
+	landed, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	for _, bug := range bugs {
+		if got, want := bug.Merged(), landed.Merged(); got != want {
+			return fmt.Errorf("the path of %s is %+v, expected %+v", bug.Story.ID, got, want)
+		}
+		if strings.TrimSpace(bug.Acceptance) != "" {
+			return fmt.Errorf("%s has an acceptance, expected none (the Mayor words it): %s", bug.Story.ID, bug.Acceptance)
+		}
+	}
+	return nil
 }
