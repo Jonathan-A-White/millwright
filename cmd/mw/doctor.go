@@ -303,6 +303,12 @@ func newDoctorCmd() *cobra.Command {
 				_, err := mwGateway(vault, host).Send(ctx, message)
 				return err
 			}
+			// A user unit installed here that differs from the copy its rig ships in
+			// deploy/ is a landed fix not yet in effect (mw-gq6.1056); it warns only.
+			unitDrift := &doctor.UnitDrift{Rigs: config.Rigs}
+			if home, homeErr := os.UserHomeDir(); homeErr == nil {
+				unitDrift.UnitDir = filepath.Join(home, ".config", "systemd", "user")
+			}
 			checks := application.DoctorChecks{}
 			// The factory checkout the vault's formulas are judged against; none
 			// where this host checks the rig out nowhere.
@@ -514,6 +520,7 @@ func newDoctorCmd() *cobra.Command {
 				doctor.NewWorkflowScope(doctor.GhScopes{}, host),
 				usageFresh,
 				unitEnv,
+				unitDrift,
 			}, churn...), checks...)
 			// Where Claude Code keeps its transcripts is the only place these
 			// two checks read; a host on codex has none, and says so once rather
