@@ -691,6 +691,7 @@ func (f *FakeTracker) ShowStory(_ context.Context, id string) (application.Story
 		return application.StoryDetail{}, fmt.Errorf("no story %q", id)
 	}
 	detail := s.detail
+	detail.Needs = append([]string(nil), s.needs...)
 	detail.CommentCount = len(s.comments)
 	return detail, nil
 }

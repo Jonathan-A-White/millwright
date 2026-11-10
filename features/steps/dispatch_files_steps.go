@@ -35,6 +35,7 @@ func (c *dispatchContext) registerFileSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the story "([^"]*)" has recorded "([^"]*)" as changed$`, c.theStoryHasRecordedAsChanged)
 	ctx.When(`^mw status is read on "([^"]*)"$`, c.mwStatusIsReadOn)
 	ctx.Then(`^mw status lists "([^"]*)" as ready, saying "([^"]*)"$`, c.mwStatusListsAsReadySaying)
+	ctx.Then(`^mw status lists "([^"]*)" as ready, first saying "([^"]*)"$`, c.mwStatusListsAsReadyFirstSaying)
 	ctx.Then(`^mw status lists "([^"]*)" as ready, saying nothing of waiting$`, c.mwStatusListsAsReadyNotWaiting)
 }
 
@@ -205,6 +206,20 @@ func (c *dispatchContext) mwStatusListsAsReadySaying(id, saying string) error {
 	}
 	if !strings.Contains(block, "\n    "+saying) {
 		return fmt.Errorf("expected mw status to say %q of %s, it printed:\n%s", saying, id, block)
+	}
+	return nil
+}
+
+// mwStatusListsAsReadyFirstSaying is the first line under the story's own: the
+// reason a reader sees first must be the one that stops the story outright.
+func (c *dispatchContext) mwStatusListsAsReadyFirstSaying(id, saying string) error {
+	block, err := c.statusReady(id)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(block, "\n")
+	if len(lines) < 2 || !strings.HasPrefix(lines[1], "    "+saying) {
+		return fmt.Errorf("expected mw status to say %q first of %s, it printed:\n%s", saying, id, block)
 	}
 	return nil
 }

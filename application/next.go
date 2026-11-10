@@ -2649,12 +2649,33 @@ func (n Next) closeStory(ctx context.Context, id, outcome string) ([]string, err
 		}
 		if detail, err := n.Tracker.ShowStory(ctx, id); err == nil && detail.Closed() {
 			return notes, nil
+		} else if err == nil {
+			// A story that waits on one still open is not closed by trying
+			// again: say which, and how to end the wait (mw-jmvq22o).
+			if blocker, status, blocked := n.stillWaitsOn(ctx, detail); blocked {
+				return notes, fmt.Errorf("%s cannot close: it waits on %s (%s), which is not finished; "+
+					"if that wait is wrong (the two share a file, say), remove it with `bd dep remove %s %s` and run `mw next %s` again: %w",
+					id, blocker, status, id, blocker, id, last)
+			}
 		}
 	}
 	if tries == 1 {
 		return notes, last
 	}
 	return notes, fmt.Errorf("the close failed on each of its %d tries, the last saying: %w", tries, last)
+}
+
+// stillWaitsOn is the first story the detail waits on that the tracker does not
+// show closed, and its status. A need that cannot be read is not called a wait.
+func (n Next) stillWaitsOn(ctx context.Context, detail StoryDetail) (blocker, status string, blocked bool) {
+	for _, need := range detail.Needs {
+		read, err := n.Tracker.ShowStory(ctx, need)
+		if err != nil || read.Closed() {
+			continue
+		}
+		return need, read.Status, true
+	}
+	return "", "", false
 }
 
 // takeOverAndClose is the close of a landed story whose claim another actor

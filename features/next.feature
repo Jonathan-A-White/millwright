@@ -1071,6 +1071,16 @@ Feature: Closing out a finished story and carrying on
     And git was asked to merge once and to push once
     And the rig's tests were run 1 times
 
+  Scenario: A close that beads refuses for a story it still waits on names the story and how to end the wait
+    Given the session of "mw-gq6.1" reported a plain success
+    And the story "mw-gq6.2" is planned and ready to be worked here
+    And the story "mw-gq6.1" is made to wait on "mw-gq6.2"
+    And the tracker refuses to close "mw-gq6.1", saying: cannot close blocked issue mw-gq6.1: blocked by mw-gq6.2
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is not closed
+    And the close-out says the story is landed but still open
+    And the close-out names "mw-gq6.2" as what "mw-gq6.1" waits on, and says to remove that wait
+
   Scenario: A landing whose run=landed write failed is found already landed by the next run, and only closed
     Given the session of "mw-gq6.1" reported a plain success
     And the tracker cannot record the run state, saying: the database is locked

@@ -297,6 +297,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the terminal holds no session of "([^"]*)"$`, c.theTerminalHoldsNoSession)
 	ctx.Then(`^the session of "([^"]*)" is still on the terminal, exited$`, c.theSessionIsStillThereExited)
 	ctx.Then(`^the close-out says the story is landed but still open$`, c.landedButStillOpen)
+	ctx.Given(`^the story "([^"]*)" is made to wait on "([^"]*)"$`, c.theStoryWaitsOn)
+	ctx.Then(`^the close-out names "([^"]*)" as what "([^"]*)" waits on, and says to remove that wait$`, c.theCloseOutNamesTheWait)
 	ctx.Then(`^the ledger holds exactly one line for "([^"]*)"$`, c.theLedgerHoldsOneLineFor)
 	ctx.Then(`^the ledger holds no "([^"]*)" line for "([^"]*)"$`, c.theLedgerHoldsNoSuchLineFor)
 	ctx.Then(`^the close-out says the story was landed by an earlier run$`, c.theCloseOutSaysLandedEarlier)
@@ -443,6 +445,24 @@ func (c *nextContext) aPlanWorkedHere(epic, host, branch string) error {
 		Model: domain.ModelOpus, Effort: domain.EffortHigh, Host: host,
 	})
 	c.lastEpic = epic
+	return nil
+}
+
+// theStoryWaitsOn is a dependency on another story, which beads then refuses
+// to close the waiting story over.
+func (c *nextContext) theStoryWaitsOn(id, blocker string) error {
+	return c.tracker.AddBlocker(context.Background(), id, blocker)
+}
+
+// theCloseOutNamesTheWait is the report naming the story the close waits on and
+// the command that ends the wait, rather than only the tracker's refusal.
+func (c *nextContext) theCloseOutNamesTheWait(blocker, id string) error {
+	said := c.printed.String()
+	for _, want := range []string{id + " cannot close: it waits on " + blocker, "bd dep remove " + id + " " + blocker} {
+		if !strings.Contains(said, want) {
+			return fmt.Errorf("expected the report to say %q, got:\n%s", want, said)
+		}
+	}
 	return nil
 }
 

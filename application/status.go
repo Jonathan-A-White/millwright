@@ -650,6 +650,10 @@ type StatusReport struct {
 	// Grist is what the mill is doing, zero (Known false) when this host has none.
 	Grist GristPulse
 	Ready []StoryDetail
+	// NoPath is the line for each ready story mw dispatch passes over at its
+	// no-path gate, by story id: a key of its path is missing or unknown
+	// (mw-jmvq22o). It is said before any wait, because no wait ends it.
+	NoPath map[string]string
 	// Sharing are the ready stories mw dispatch passes over for a file a
 	// running story here shares with them, by story id (mw-gq6.349).
 	Sharing map[string]FileShare
@@ -1021,6 +1025,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		report.Ready = append(report.Ready, detail)
 	}
 	awayRuns, _ := awayRunsRead()
+	report.NoPath = s.noPath(report.Ready)
 	report.Sharing = s.sharing(ctx, report.Running, report.Ready, away, work.Held, awayRuns)
 	report.TesterHolds = s.testerHolds(work, report.Ready, s.now())
 	report.HeldByFiles = s.heldByFiles(ctx, report.Ready)
@@ -1561,6 +1566,25 @@ func (s Status) noGristKey(ready []StoryDetail) map[string]string {
 			lines = map[string]string{}
 		}
 		lines[detail.Story.ID] = fmt.Sprintf("passed by %s: no grist test key (its checks run mw grist eval or smoke, or its files key names grinds/); a host that has one takes it", s.Host)
+	}
+	return lines
+}
+
+// noPath is the line for each ready story whose path is not whole, by id, in
+// the words of mw dispatch's no-path gate: the story waits on a key, not on a
+// turn, and a wait for a file another story holds would hide that.
+func (s Status) noPath(ready []StoryDetail) map[string]string {
+	var lines map[string]string
+	for _, detail := range ready {
+		if detail.IsEpic {
+			continue
+		}
+		if _, err := detail.Path(); err != nil {
+			if lines == nil {
+				lines = map[string]string{}
+			}
+			lines[detail.Story.ID] = fmt.Sprintf("passed by %s: it has no path: %s; `mw path set %s <key>=<value>` mends it", s.Host, err, detail.Story.ID)
+		}
 	}
 	return lines
 }
@@ -2276,6 +2300,9 @@ func (r StatusReport) String() string {
 		}
 		writeStory(&b, d, note)
 		// Wrapped, not clipped: a long path must not cut off whom it waits for.
+		if line := r.NoPath[d.Story.ID]; line != "" {
+			wrapInto(&b, "    ", line)
+		}
 		if share, sharing := r.Sharing[d.Story.ID]; sharing {
 			wrapInto(&b, "    ", share.String())
 		}

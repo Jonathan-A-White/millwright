@@ -1506,6 +1506,20 @@ Feature: Dispatching the stories this host is ready to work
     Then mw status lists "mw-gq6.2" as ready, saying "waiting: shares src/Reader.tsx with mw-gq6.1"
     And mw status lists "mw-gq6.3" as ready, saying nothing of waiting
 
+  Scenario: mw status names a missing path key before any wait on a shared file
+    Given a story "mw-gq6.1" of that epic is already running here, expecting to change "src/Reader.tsx"
+    And an epic "mw-gq7" whose stories are planned with the path:
+      | rig     | millwright  |
+      | branch  | main        |
+      | model   | opus        |
+      | effort  | high        |
+      | formula | tdd-feature |
+      | host    | vps         |
+    And a ready story "mw-gq7.1" of that epic expecting to change "src/Reader.tsx"
+    When mw status is read on "vps"
+    Then mw status lists "mw-gq7.1" as ready, first saying "passed by vps: it has no path: harness is required"
+    And mw status lists "mw-gq7.1" as ready, saying "waiting: shares src/Reader.tsx with mw-gq6.1"
+
   Scenario: mw status says a story with no files key needs one
     Given the rig "millwright" expects a files key
     And a ready story "mw-gq6.2" of that epic
