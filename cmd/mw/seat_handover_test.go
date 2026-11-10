@@ -186,3 +186,20 @@ func TestSeatHandoverIsRefusedOneByteOverTheBootCeilingAndGoesThroughAtIt(t *tes
 		t.Errorf("no acting file: %v", statErr)
 	}
 }
+
+// mw seat handover --help names the flags that make it wait for the successor.
+func TestSeatHandoverHelpNamesWhenWaitingAndLimit(t *testing.T) {
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"seat", "handover", "--help"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"--when-waiting", "--limit", "10m"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the help does not say %q:\n%s", want, out)
+		}
+	}
+}
