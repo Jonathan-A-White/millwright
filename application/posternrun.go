@@ -182,6 +182,11 @@ func (i PosternInbox) applyRun(ctx context.Context, m PosternInboxMessage, actio
 			text += fmt.Sprintf("\n\nBut %s was not taken off %s: %v", LabelHitl, action.Bead, err)
 		}
 	}
+	if i.Swaps != nil {
+		for _, note := range i.Swaps.TappedSwap(ctx, action.Bead, step, outcome) {
+			text += "\n\n" + note
+		}
+	}
 	return result, i.reportRun(ctx, action.Bead, m.Txid, text, "", fmt.Sprintf("Ran: %s %s, exit %d", action.Bead, step.ID, outcome.Exit))
 }
 
