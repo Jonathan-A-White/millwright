@@ -183,3 +183,127 @@ func TestPathSetAddsNothingWithoutExactlyOneDemoOrWithoutTheRigAskingForOne(t *t
 		}
 	}
 }
+
+// aReleasingRig is a fake vault with a held story S pathed from a sibling, a
+// closed-over story B for it to wait on, and a rig file asking to release on
+// path set.
+func aReleasingRig(t *testing.T) (*apptest.FakeTracker, *apptest.FakeEpicRules) {
+	t.Helper()
+	tracker := aVaultWithTwoFormulas()
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.3", Title: "needed first"})
+	if err := tracker.SetStatus("mw-gq6.2", apptest.StatusDeferred); err != nil {
+		t.Fatal(err)
+	}
+	rules := apptest.NewFakeEpicRules()
+	rules.Require("millwright", domain.EpicRequirements{ReleaseOnPath: true})
+	return tracker, rules
+}
+
+func TestPathSetAfterReleasesTheHeldStoryLastOnARigThatReleasesOnPathSet(t *testing.T) {
+	tracker, rules := aReleasingRig(t)
+	var out strings.Builder
+
+	_, err := application.PathSet{Tracker: tracker, Rules: rules, Out: &out, After: []string{"mw-gq6.3"}}.
+		Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil)
+	if err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	detail, _ := tracker.ShowStory(context.Background(), "mw-gq6.2")
+	if detail.Held() || !slices.Contains(detail.Needs, "mw-gq6.3") {
+		t.Errorf("expected the story open and waiting on mw-gq6.3, got status %s, needs %v", detail.Status, detail.Needs)
+	}
+	comments, _ := tracker.StoryComments(context.Background(), "mw-gq6.2")
+	if len(comments) != 1 || comments[0].Text != application.ReleasedOnPathSet {
+		t.Errorf("expected the one comment %q, got %+v", application.ReleasedOnPathSet, comments)
+	}
+}
+
+func TestPathSetAfterNoneReleasesAndNoAfterNeverDoes(t *testing.T) {
+	tracker, rules := aReleasingRig(t)
+	if _, err := (application.PathSet{Tracker: tracker, Rules: rules}).Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err != nil {
+		t.Fatalf("setting the path with no --after: %v", err)
+	}
+	if detail, _ := tracker.ShowStory(context.Background(), "mw-gq6.2"); !detail.Held() {
+		t.Errorf("expected the story held with no --after, got %s", detail.Status)
+	}
+	if _, err := (application.PathSet{Tracker: tracker, Rules: rules, After: []string{}}).Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err != nil {
+		t.Fatalf("setting the path with --after none: %v", err)
+	}
+	if detail, _ := tracker.ShowStory(context.Background(), "mw-gq6.2"); detail.Held() {
+		t.Errorf("expected the story released by --after none, got %s", detail.Status)
+	}
+}
+
+func TestPathSetAfterOnARigWithoutTheKeyOnlyAddsTheDependency(t *testing.T) {
+	tracker, _ := aReleasingRig(t)
+	rules := apptest.NewFakeEpicRules()
+	for _, withRules := range []application.EpicRules{nil, rules} {
+		set := application.PathSet{Tracker: tracker, After: []string{"mw-gq6.3"}}
+		if withRules != nil {
+			set.Rules = withRules
+		}
+		if _, err := set.Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err != nil {
+			t.Fatalf("setting the path: %v", err)
+		}
+		detail, _ := tracker.ShowStory(context.Background(), "mw-gq6.2")
+		if !detail.Held() || !slices.Contains(detail.Needs, "mw-gq6.3") {
+			t.Errorf("expected the story held and waiting on mw-gq6.3, got %s, %v", detail.Status, detail.Needs)
+		}
+	}
+}
+
+func TestPathSetHoldWritesTheReasonAndKeepsTheStoryHeldEvenWithAfter(t *testing.T) {
+	tracker, rules := aReleasingRig(t)
+	_, err := application.PathSet{Tracker: tracker, Rules: rules, After: []string{"mw-gq6.3"}, Hold: "waits for the demo"}.
+		Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil)
+	if err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	detail, _ := tracker.ShowStory(context.Background(), "mw-gq6.2")
+	comments, _ := tracker.StoryComments(context.Background(), "mw-gq6.2")
+	if !detail.Held() || len(comments) != 1 || comments[0].Text != "HELD: waits for the demo" {
+		t.Errorf("expected the story held with HELD: waits for the demo, got %s, %+v", detail.Status, comments)
+	}
+}
+
+func TestPathSetRefusesBadAfterAndHoldBeforeWritingAnything(t *testing.T) {
+	for name, set := range map[string]application.PathSet{
+		"a missing story":   {After: []string{"mw-gq6.99"}},
+		"the story itself":  {After: []string{"mw-gq6.2"}},
+		"an empty id":       {After: []string{" "}},
+		"a blank hold":      {Hold: "  "},
+		"a hold on an open": {Hold: "why", After: []string{"mw-gq6.3"}},
+	} {
+		tracker, rules := aReleasingRig(t)
+		if name == "a hold on an open" {
+			if err := tracker.SetStatus("mw-gq6.2", apptest.StatusOpen); err != nil {
+				t.Fatal(err)
+			}
+		}
+		set.Tracker, set.Rules = tracker, rules
+		writes := tracker.Writes()
+		if _, err := set.Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err == nil {
+			t.Errorf("%s: expected a refusal", name)
+		}
+		if tracker.Writes() != writes {
+			t.Errorf("%s: expected nothing written, the tracker took %d writes", name, tracker.Writes()-writes)
+		}
+	}
+}
+
+func TestPathSetAfterStaysHeldWhenTheEpicHoldsItOnTheGovernorsWord(t *testing.T) {
+	tracker, rules := aReleasingRig(t)
+	tracker.AddEpicComment("mw-gq6", "HELD: mw-gq6.2 waits for the Governor's word on the colour")
+	var out strings.Builder
+
+	if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Out: &out, After: []string{"mw-gq6.3"}}).
+		Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	if detail, _ := tracker.ShowStory(context.Background(), "mw-gq6.2"); !detail.Held() {
+		t.Errorf("expected the story held on the Governor's word, got %s", detail.Status)
+	}
+	if !strings.Contains(out.String(), "held: mw-gq6.2: it is held on the Governor's word") {
+		t.Errorf("expected a held: line naming the Governor's word, got:\n%s", out.String())
+	}
+}

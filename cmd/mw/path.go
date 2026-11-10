@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
@@ -22,9 +24,9 @@ func newPathCmd() *cobra.Command {
 }
 
 func newPathSetCmd() *cobra.Command {
-	var from string
+	var from, after, hold string
 	cmd := &cobra.Command{
-		Use:   "set <story-id> [--from <sibling-id>] [key=value ...]",
+		Use:   "set <story-id> [--from <sibling-id>] [--after <ids|none>] [--hold \"<why>\"] [key=value ...]",
 		Short: "Set a story's path keys in one write",
 		Long: "set gives a story its path keys (rig, branch, harness, model, effort, formula, host,\n" +
 			"files, size) in one write, in place of one bd update --set-metadata call for each.\n" +
@@ -60,7 +62,18 @@ func newPathSetCmd() *cobra.Command {
 			"WARN on stderr naming host=auto: that rig installs dependencies, so its stories are not started while\n" +
 			"the host's network is metered, and a pin keeps any other host from taking them. It is set all the same.\n\n" +
 			"A story in an epic whose rig asks for a last story (epic_last_story_labels) with exactly one\n" +
-			"open or held story carrying it is made a need of that story, and one line says so.",
+			"open or held story carrying it is made a need of that story, and one line says so.\n\n" +
+			"--after <id,id|none> names the stories this one waits on: each is added as a blocker before the\n" +
+			"path is written, in the one command (--after none is a story that waits on nothing). On a rig\n" +
+			"whose file in the vault says release_on_path = true (off by default), a held story given --after\n" +
+			"is then released, last, as mw release <id> releases it, with the comment 'released on path set'.\n" +
+			"It stays held, and one 'held: <id>: <reason>' line says why, when it has a hold label (grilling,\n" +
+			"hitl, demo, icebox), a HELD: comment, a hold on the Governor's word, no files key on a rig that\n" +
+			"expects one, no rig or branch, or a gate mw dispatch would pass it over at (a bug with no Sweep:\n" +
+			"line, a Tester story with no Landed story: line). With no --after nothing is released; on a rig\n" +
+			"without the key --after only adds the dependencies.\n" +
+			"--hold \"<why>\" keeps a held story held and writes HELD: <why> on it, so a hold always has a\n" +
+			"written reason; it releases nothing, with or without --after.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, err := beads.FromConfig()
@@ -72,13 +85,44 @@ func newPathSetCmd() *cobra.Command {
 			rigs, _ := config.Rigs()
 			// Likewise a [heavy_net] table that cannot be read warns of nothing.
 			heavy, _ := config.HeavyNet()
-			_, err = application.PathSet{Tracker: gateway, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}.
+			var afterIDs []string
+			if cmd.Flags().Changed("after") {
+				if afterIDs, err = parseAfter(after); err != nil {
+					return err
+				}
+			}
+			if cmd.Flags().Changed("hold") && strings.TrimSpace(hold) == "" {
+				return fmt.Errorf("--hold needs a reason, as --hold \"waits for the demo\"")
+			}
+			_, err = application.PathSet{Tracker: gateway, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
+				After: afterIDs, Hold: hold}.
 				Run(cmd.Context(), args[0], from, args[1:])
 			return err
 		},
 	}
 	cmd.Flags().StringVar(&from, "from", "", "the sibling story to copy the seven path keys from")
+	cmd.Flags().StringVar(&after, "after", "", "the stories this one waits on, comma-separated, or none; on a rig with release_on_path = true it also releases the held story")
+	cmd.Flags().StringVar(&hold, "hold", "", "why the story stays held: written as a HELD: comment; nothing is released")
 	return cmd
+}
+
+// parseAfter reads --after: story ids separated by commas, or the one word none
+// for a story that waits on nothing, which is an empty list that is given.
+func parseAfter(after string) ([]string, error) {
+	after = strings.TrimSpace(after)
+	if after == "" {
+		return nil, fmt.Errorf("--after needs story ids separated by commas, or none")
+	}
+	if strings.EqualFold(after, "none") {
+		return []string{}, nil
+	}
+	ids := strings.Split(after, ",")
+	for _, id := range ids {
+		if strings.EqualFold(strings.TrimSpace(id), "none") {
+			return nil, fmt.Errorf("--after none stands alone: it is a story that waits on nothing, so it cannot be listed with other ids")
+		}
+	}
+	return ids, nil
 }
 
 func newPathShowCmd() *cobra.Command {

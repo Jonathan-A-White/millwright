@@ -200,3 +200,122 @@ Feature: Setting and showing a story's path
     When the path of "B" is set from "A"
     Then setting the path succeeds
     And the path-set did not warn
+
+  # A story filed by hand is filed held, its dependencies added, its path set,
+  # and then un-held by a separate command. On a rig whose file says
+  # release_on_path = true, mw path set --after does the last step too, so a
+  # story is never left held by being forgotten.
+
+  Scenario: On a rig that releases on path set, --after adds the dependency and releases the held story
+    Given the path-set rig "millwright" releases on path set
+    And the path-set story "S" is filed held
+    When the path of "S" is set from "A" after "B"
+    Then setting the path succeeds
+    And the path-set story "S" is open
+    And the path-set story "S" waits on "B"
+    And the path-set story "S" has a comment opening "released on path set"
+    And the path-set added the blockers before it wrote the path and released the story
+    And the story "S" has the path key "rig" as "millwright"
+
+  Scenario: --after none releases a held story that waits on nothing
+    Given the path-set rig "millwright" releases on path set
+    And the path-set story "S" is filed held
+    When the path of "S" is set from "A" after "none"
+    Then setting the path succeeds
+    And the path-set story "S" is open
+    And the path-set story "S" has a comment opening "released on path set"
+
+  Scenario: --hold keeps the story held and writes the reason
+    Given the path-set rig "millwright" releases on path set
+    And the path-set story "S" is filed held
+    When the path of "S" is set from "A" after "B" holding "waits for the demo"
+    Then setting the path succeeds
+    And the path-set story "S" is held
+    And the path-set story "S" waits on "B"
+    And the path-set story "S" has a comment opening "HELD: waits for the demo"
+    And the path-set story "S" has no comment opening "released on path set"
+
+  Scenario Outline: A hold the story already carries is never released over
+    Given the path-set rig "millwright" releases on path set
+    And the path-set story "S" is filed held
+    And the path-set story "S" carries the label "<label>"
+    When the path of "S" is set from "A" after "B"
+    Then setting the path succeeds
+    And the path-set story "S" is held
+    And the path-set printed exactly 1 line starting: held: S:
+    And the path-set printed the line containing: <label>
+
+    Examples:
+      | label    |
+      | grilling |
+      | hitl     |
+      | demo     |
+      | icebox   |
+
+  Scenario: A story with a HELD: comment stays held
+    Given the path-set rig "millwright" releases on path set
+    And the path-set story "S" is filed held
+    And the path-set story "S" has the comment "HELD: waits for the colour"
+    When the path of "S" is set from "A" after "B"
+    Then setting the path succeeds
+    And the path-set story "S" is held
+    And the path-set printed exactly 1 line starting: held: S:
+    And the path-set printed the line containing: waits for the colour
+
+  Scenario: A story held on the Governor's word stays held
+    Given the path-set rig "millwright" releases on path set
+    And the path-set story "S" is filed held
+    And the path-set story "S" has the comment "HELD: waits for the Governor's word on the colour"
+    When the path of "S" is set from "A" after "B"
+    Then setting the path succeeds
+    And the path-set story "S" is held
+    And the path-set printed exactly 1 line starting: held: S:
+    And the path-set printed the line containing: Governor's word
+
+  Scenario: A story with no files key on a rig that expects one stays held
+    Given the path-set rig "millwright" releases on path set and expects a files key
+    And the path-set story "S" is filed held
+    When the path of "S" is set from "A" after "B"
+    Then setting the path succeeds
+    And the path-set story "S" is held
+    And the path-set printed exactly 1 line starting: held: S:
+    And the path-set printed the line containing: no files key
+
+  Scenario: A story with a files key on a rig that expects one is released
+    Given the path-set rig "millwright" releases on path set and expects a files key
+    And the path-set story "S" is filed held
+    When the path of "S" is set from "A" after "B" with files=src/a.go
+    Then setting the path succeeds
+    And the path-set story "S" is open
+
+  Scenario: A bug with no Sweep: line stays held
+    Given the path-set rig "millwright" releases on path set
+    And the path-set story "S" is filed held as a bug after the sweep rule
+    When the path of "S" is set from "A" after "B"
+    Then setting the path succeeds
+    And the path-set story "S" is held
+    And the path-set printed exactly 1 line starting: held: S:
+    And the path-set printed the line containing: Sweep
+
+  Scenario: With no --after nothing is released
+    Given the path-set rig "millwright" releases on path set
+    And the path-set story "S" is filed held
+    When the path of "S" is set from "A"
+    Then setting the path succeeds
+    And the path-set story "S" is held
+    And the path-set story "S" has no comment opening "released on path set"
+
+  Scenario: On a rig without the key --after only adds the dependency
+    Given the path-set story "S" is filed held
+    When the path of "S" is set from "A" after "B"
+    Then setting the path succeeds
+    And the path-set story "S" is held
+    And the path-set story "S" waits on "B"
+    And the path-set story "S" has no comment opening "released on path set"
+
+  Scenario: An --after story the tracker does not have is refused and nothing is written
+    Given the path-set rig "millwright" releases on path set
+    And the path-set story "S" is filed held
+    When the path of "S" is set from "A" after "nope"
+    Then setting the path is refused, saying: nope
+    And nothing was written

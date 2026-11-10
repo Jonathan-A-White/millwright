@@ -48,6 +48,16 @@ type PathSet struct {
 	// Out is where the path that was set is printed. A nil Out prints nothing.
 	Out io.Writer
 
+	// After is --after: the stories the story waits on, each added as a blocker
+	// before the path is written. Nil is no --after; an empty, non-nil list is
+	// --after none, a story that waits on nothing. On a rig whose file says
+	// release_on_path = true a given --after also releases the held story last,
+	// unless it is held on purpose (mw-t5shinh.16).
+	After []string
+	// Hold is --hold: why the story stays held. It is written as a HELD: comment
+	// and the story is not released.
+	Hold string
+
 	// HeavyNet names the rigs that install dependencies ([heavy_net]): a path
 	// that pins one to a home host draws a warning on Err naming host=auto
 	// (mw-gq6.702). A nil HeavyNet warns of none.
@@ -74,6 +84,9 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 	}
 
 	var path domain.Path
+	if s.Hold != "" && strings.TrimSpace(s.Hold) == "" {
+		return domain.Path{}, fmt.Errorf("setting a path: --hold needs a reason, as --hold \"waits for the demo\"")
+	}
 	named, err := parsePathPairs(pairs)
 	if err != nil {
 		return domain.Path{}, err
@@ -129,6 +142,27 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 	if named.Files != "" {
 		if err := crowdedFiles(s.Rigs, s.RigFiles, story.Merged().Overlay(path)); err != nil {
 			return domain.Path{}, fmt.Errorf("%w: nothing was written", err)
+		}
+	}
+
+	// --after and --hold are judged, like the rest, before anything is written.
+	after, err := s.afterIDs(ctx, id)
+	if err != nil {
+		return domain.Path{}, err
+	}
+	holding := strings.TrimSpace(s.Hold) != ""
+	if holding && !story.Held() {
+		return domain.Path{}, fmt.Errorf("the story %s is %s, and --hold keeps a held story held: nothing was written", id, strings.ToLower(strings.TrimSpace(story.Status)))
+	}
+	releasing, err := s.releasesOnPath(ctx, story.Merged().Overlay(path).Rig)
+	if err != nil {
+		return domain.Path{}, fmt.Errorf("%w: nothing was written", err)
+	}
+	// The dependencies go in before the path, and the release is last, so a story
+	// is never open and not yet waiting on what it waits on (mw-b00z.9).
+	for _, blocker := range after {
+		if err := s.Tracker.AddBlocker(ctx, id, blocker); err != nil {
+			return domain.Path{}, fmt.Errorf("making %s wait on %s: %w", id, blocker, err)
 		}
 	}
 
@@ -191,6 +225,15 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		}
 		for _, note := range notes {
 			fmt.Fprintln(s.Out, note)
+		}
+	}
+	if holding {
+		if err := s.holdOnPathSet(ctx, id); err != nil {
+			return path, err
+		}
+	} else if releasing {
+		if err := s.releaseOnPathSet(ctx, id, story, path); err != nil {
+			return path, err
 		}
 	}
 	return path, nil
