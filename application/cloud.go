@@ -255,6 +255,12 @@ type CloudBox struct {
 	// one a box needs; PaceFault is why the check could not set or read it.
 	Pace      string `json:"pace,omitempty"`
 	PaceFault string `json:"pace_fault,omitempty"`
+	// Harness is the home's Claude Code version the box was last brought level
+	// to ("" in a book written before it was kept, or a box never brought level),
+	// so that a pass reaches a box again only when the home's version has moved;
+	// HarnessFault is why the last install did not take, said as a move once.
+	Harness      string `json:"harness,omitempty"`
+	HarnessFault string `json:"harness_fault,omitempty"`
 	// Saved are the worktrees of the box whose work the vault already holds,
 	// each as "<story> <head> <hash of the uncommitted patch>", so that a
 	// teardown refused later does not bundle the same work again at every
@@ -1020,24 +1026,31 @@ func (p *cloudPass) setCaps(ctx context.Context) {
 // follower springs; a box has none, so it would wait up to an hour for each
 // dispatch (mw-gq6.1004). Unlike the cap it does not wait for the box's first
 // dispatch, which an hourly box may be a long time making. A box known to be at
-// the pace is not reached again; one that could not be is a move the first time
-// for that fault, and tried at the next check.
+// the pace does not have its timer set again, but its Claude Code is brought
+// level whenever the home's version is not the one it was last brought level to
+// (mw-gq6.1062); one that could not be reached for its pace is a move the first
+// time for that fault, and tried at the next check. The home's version is read
+// once a pass.
 func (p *cloudPass) setPaces(ctx context.Context) {
-	home := ""
+	home, read := "", false
 	for i := range p.state.Boxes {
 		box := &p.state.Boxes[i]
-		if box.Making || box.Restoring || box.Pace == CloudPaceFive {
+		if box.Making || box.Restoring {
 			continue
 		}
-		if home == "" && p.check.HarnessVersion != nil {
+		if !read && p.check.HarnessVersion != nil {
+			read = true
 			version, err := p.check.HarnessVersion(ctx)
 			if home = HarnessNumber(version); home == "" {
 				home = "-"
 				p.check.say("the home's Claude Code version is not known (%q, %v): no box is brought level", version, err)
 			}
 		}
-		if home != "" && home != "-" {
+		if home != "" && home != "-" && box.Harness != home {
 			p.setHarness(ctx, box, home)
+		}
+		if box.Pace == CloudPaceFive {
+			continue
 		}
 		pace, err := p.check.Provider.SetPace(ctx, box.Name)
 		if err != nil {
@@ -1068,10 +1081,11 @@ func (p *cloudPass) setPaces(ctx context.Context) {
 	}
 }
 
-// setHarness brings a box's Claude Code to the home's version before its timer
-// is set, and says the version before and after in a move. A box already level
-// is said nothing of; one whose install failed stays as it was, in one line, and
-// its timer is set all the same.
+// setHarness brings a box's Claude Code to the home's version, and keeps the
+// version the box was brought level to, saying the version before and after in
+// a move. A box already level is said nothing of; one whose install failed
+// stays as it was, in one line that is a move only the first time, and is tried
+// again at the next pass.
 func (p *cloudPass) setHarness(ctx context.Context, box *CloudBox, version string) {
 	got, err := p.check.Provider.SetHarness(ctx, box.Name, version)
 	if err != nil {
@@ -1082,13 +1096,23 @@ func (p *cloudPass) setHarness(ctx context.Context, box *CloudBox, version strin
 	switch {
 	case got.Why != "":
 		what = fmt.Sprintf("%s: claude stays at %s, not %s: %s", box.Name, got.Was, version, oneLine(got.Why))
+		if box.HarnessFault == what {
+			p.check.say("%s", what)
+			return
+		}
+		box.HarnessFault = what
 	case got.Now != got.Was:
 		what = fmt.Sprintf("%s: claude %s to %s (the home's)", box.Name, got.Was, got.Now)
 	default:
 		p.check.say("%s: claude %s is level with the home's %s", box.Name, got.Was, version)
-		return
+	}
+	if got.Why == "" {
+		box.Harness, box.HarnessFault = version, ""
 	}
 	p.dirty = box.Name + " harness"
+	if what == "" {
+		return
+	}
 	p.check.say("%s", what)
 	p.report.Moves = append(p.report.Moves, what)
 	p.state.Moves = p.addMove(CloudMove{At: p.now, What: what})

@@ -38,6 +38,12 @@ falls behind the home's was unseen until mw-gq6.1059; now two things watch it.
   one line, `cloud1: claude stays at 2.1.300, not 2.1.322: npm install failed:
   ...`; it is never a box that cannot start a session, and the doctor's check
   then names it until a person brings it level.
+- **A box at the pace is brought level again when the home's Claude Code moves.**
+  The book keeps the version each box was last brought level to (`harness`). Each
+  cloud check reads the home's version once and runs `set-harness` on every box
+  up whose kept version is not the home's, whether or not its timer is already
+  at the five-minute pace; a level box is not reached. A failed install is a move
+  the first time only and is tried again at the next check (mw-gq6.1062).
 
 ## Bringing a host level by hand
 

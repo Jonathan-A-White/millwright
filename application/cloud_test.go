@@ -564,15 +564,113 @@ func TestABoxAlreadyLevelWithTheHomesHarnessRunsNoInstallAndSaysNothingMoved(t *
 	}
 }
 
-func TestABoxAtThePaceIsNotAskedItsHarnessAgainAndNoHomeVersionAsksNothing(t *testing.T) {
+func TestABoxLevelAtThePaceIsNotAskedItsHarnessAgainAndNoHomeVersionAsksNothing(t *testing.T) {
 	cloud := &apptest.FakeCloud{}
-	harnessCheck(t, cloud, "2.1.322", application.CloudBox{Name: "cloud1", Pace: application.CloudPaceFive})
+	harnessCheck(t, cloud, "2.1.322", application.CloudBox{Name: "cloud1", Pace: application.CloudPaceFive, Harness: "2.1.322"})
 	if got := cloud.HarnessCalls(); len(got) != 0 {
-		t.Errorf("expected a box already brought up left alone, got %v", got)
+		t.Errorf("expected a box already brought up and level left alone, got %v", got)
 	}
 	harnessCheck(t, cloud, "", application.CloudBox{Name: "cloud2"})
 	if got := cloud.HarnessCalls(); len(got) != 0 {
 		t.Errorf("expected a home that cannot say its version to ask nothing, got %v", got)
+	}
+	harnessCheck(t, cloud, "", application.CloudBox{Name: "cloud3", Pace: application.CloudPaceFive})
+	if got := cloud.HarnessCalls(); len(got) != 0 {
+		t.Errorf("expected a box at the pace and a home with no version to ask nothing, got %v", got)
+	}
+}
+
+func TestACloudBoxAtTheFiveMinutePaceIsBroughtLevelWhenTheHomesHarnessMoves(t *testing.T) {
+	cloud := &apptest.FakeCloud{Harnesses: map[string]string{"cloud1": "2.1.320"}}
+	report, book := harnessCheck(t, cloud, "2.1.322", application.CloudBox{Name: "cloud1", Pace: application.CloudPaceFive, Harness: "2.1.320"})
+	if got := cloud.HarnessCalls(); len(got) != 1 || got[0] != "cloud1 2.1.322" {
+		t.Errorf("expected exactly one install asked, of 2.1.322, got %v", got)
+	}
+	if got := cloud.PaceCalls(); len(got) != 0 {
+		t.Errorf("expected the timer of a box at the pace left alone, got %v", got)
+	}
+	want := "cloud1: claude 2.1.320 to 2.1.322 (the home's)"
+	if !slices.ContainsFunc(report.Moves, func(m string) bool { return strings.Contains(m, want) }) {
+		t.Errorf("expected a move %q, got %q", want, report.Moves)
+	}
+	if got := book.State.Boxes[0].Harness; got != "2.1.322" {
+		t.Errorf("expected the book to keep the box at 2.1.322, got %q", got)
+	}
+	if len(book.Whys) == 0 {
+		t.Errorf("expected the book written")
+	}
+}
+
+func TestACloudBoxAtThePaceWithNoKeptHarnessIsBroughtLevel(t *testing.T) {
+	cloud := &apptest.FakeCloud{Harnesses: map[string]string{"cloud1": "2.1.300"}}
+	_, book := harnessCheck(t, cloud, "2.1.322", application.CloudBox{Name: "cloud1", Pace: application.CloudPaceFive})
+	if got := cloud.HarnessCalls(); len(got) != 1 {
+		t.Errorf("expected one install asked, got %v", got)
+	}
+	if got := book.State.Boxes[0].Harness; got != "2.1.322" {
+		t.Errorf("expected the book to keep 2.1.322, got %q", got)
+	}
+}
+
+func TestALevelBoxIsNotReachedAgain(t *testing.T) {
+	cloud := &apptest.FakeCloud{}
+	harnessCheck(t, cloud, "2.1.322", application.CloudBox{Name: "cloud1", Pace: application.CloudPaceFive, Harness: "2.1.322"})
+	if got := cloud.HarnessCalls(); len(got) != 0 {
+		t.Errorf("expected no SetHarness to a level box, got %v", got)
+	}
+	if got := cloud.PaceCalls(); len(got) != 0 {
+		t.Errorf("expected no SetPace to a level box, got %v", got)
+	}
+}
+
+func TestABoxWhoseHarnessStaysAtThePaceIsSaidOnceAndTriedAgain(t *testing.T) {
+	cloud := &apptest.FakeCloud{
+		Harnesses:    map[string]string{"cloud1": "2.1.300"},
+		HarnessStuck: map[string]string{"cloud1": "npm install failed"},
+	}
+	_, book := harnessCheck(t, cloud, "2.1.322", application.CloudBox{Name: "cloud1", Pace: application.CloudPaceFive, Harness: "2.1.300"})
+	if got := book.State.Boxes[0].Harness; got != "2.1.300" {
+		t.Errorf("expected the kept version left at 2.1.300, got %q", got)
+	}
+	report, _ := harnessCheck(t, cloud, "2.1.322", book.State.Boxes[0])
+	if got := cloud.HarnessCalls(); len(got) != 2 {
+		t.Errorf("expected the install tried at each pass, got %v", got)
+	}
+	for _, m := range report.Moves {
+		if strings.Contains(m, "claude stays") {
+			t.Errorf("expected the same failure not a move twice, got %q", m)
+		}
+	}
+}
+
+func TestTheHomesHarnessIsReadOncePerPass(t *testing.T) {
+	cloud := &apptest.FakeCloud{}
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	var boxes []application.CloudBox
+	for _, name := range []string{"cloud1", "cloud2", "cloud3"} {
+		boxes = append(boxes, application.CloudBox{Name: name, Pace: application.CloudPaceFive, Harness: "2.1.322", Cap: 2,
+			Up: now.Add(-30 * time.Minute), Made: now.Add(-30 * time.Minute), Dispatched: now.Add(-20 * time.Minute)})
+	}
+	for _, home := range []string{"2.1.322", ""} {
+		reads := 0
+		book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: append([]application.CloudBox(nil), boxes...)}}
+		report, err := application.CloudCheck{
+			Work: apptest.NewFakeTracker(), Provider: cloud, Book: book, Host: "desktop",
+			Plan: cloudPlan, Now: func() time.Time { return now },
+			HarnessVersion: func(context.Context) (string, error) { reads++; return home, nil },
+		}.Run(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reads > 1 {
+			t.Errorf("home %q: expected the home's version read at most once, read %d times", home, reads)
+		}
+		if home == "" && strings.Count(report.String(), "version is not known") > 1 {
+			t.Errorf("expected the unknown version said once, got:\n%s", report.String())
+		}
+	}
+	if got := cloud.HarnessCalls(); len(got) != 0 {
+		t.Errorf("expected no box brought level, got %v", got)
 	}
 }
 
