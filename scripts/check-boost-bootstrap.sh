@@ -22,7 +22,9 @@
 #   f. config.toml gets a [tests] line for every rig it clones, and [changed_specs]
 #      where the vault's hosts/boost-config.toml has one, copied from that file, and
 #      a [test_parts.<rig>] table (the rig's gate in parts) likewise, in order; a
-#      rig that file does not name is said, not guessed (mw-gq6.453, mw-gq6.592)
+#      rig that file does not name is said, not guessed (mw-gq6.453, mw-gq6.592); and
+#      the file's [session] deny table likewise, none written when the file has none
+#      (mw-t5shinh.33)
 #   g. each cloned rig that depends on @playwright/test has chromium installed
 #      with its system deps, at that rig's own version; the step is planned in a
 #      dry run and skipped on a second run (mw-gq6.453)
@@ -278,6 +280,9 @@ lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"
 "vitest 2/2" = "TZ=UTC npx vitest run --shard 2/2"
 "shots" = "npm run gate:shots"
 "vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"
+
+[session]
+deny = ["Bash(mw config set *)", "Bash(scp *)", "Read(~/.ssh/**)"]
 EOF2
 # postern depends on @playwright/test, locked at 1.49.1; argus does not.
 POSTERN_TEMPLATE=$T/postern-template
@@ -461,6 +466,9 @@ sed -n '/^\[changed_specs\]$/,/^$/p' "$CONF" | grep -Fxq 'postern = "npm run bui
 "shots" = "npm run gate:shots"
 "vitest 1/2" = "TZ=UTC npx vitest run --shard 1/2"' ] || fail "$NAME: config.toml has no [test_parts.postern] as the vault's file has it: $(cat "$CONF")"
 grep -Fq 'lampas' "$CONF" && fail "$NAME: config.toml names lampas, a rig that was not cloned: $(cat "$CONF")"
+# f. the vault file's [session] table (the deny rules of a story session, mw-t5shinh.33), copied whole
+[ "$(sed -n '/^\[session\]$/,/^$/p' "$CONF" | grep -v '^$')" = '[session]
+deny = ["Bash(mw config set *)", "Bash(scp *)", "Read(~/.ssh/**)"]' ] || fail "$NAME: config.toml has no [session] deny table as the vault's file has it: $(cat "$CONF")"
 # g. chromium, at the rig's own locked version, only where the rig depends on @playwright/test
 grep -F 'npx --yes playwright@1.49.1 install --with-deps chromium (in '"$HOME_DIR"'/postern)' "$CALLS" >/dev/null || fail "$NAME: no Playwright chromium install in postern at 1.49.1: $(grep npx "$CALLS")"
 [ "$(grep -c 'install --with-deps chromium' "$CALLS")" = 1 ] || fail "$NAME: chromium was installed for a rig that does not depend on @playwright/test: $(grep npx "$CALLS")"
@@ -686,6 +694,7 @@ OUT=$(env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELE
 [ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
 printf '%s\n' "$OUT" | grep -Fq 'the vault has no hosts/boost-config.toml' || fail "$NAME: the missing file is not said: $OUT"
 grep -Fq '[tests]' "$HOME_DIR/.config/mw/config.toml" && fail "$NAME: a [tests] table was written from nothing"
+grep -Fq '[session]' "$HOME_DIR/.config/mw/config.toml" && fail "$NAME: a [session] table was written from nothing"
 echo "ok: $NAME"
 
 NAME="a rig the vault's file does not name is said, and its line is not guessed"
@@ -703,6 +712,7 @@ printf '%s\n' "$OUT" | grep -Fq 'no [tests] line for postern' || fail "$NAME: po
 printf '%s\n' "$OUT" | grep -Fq 'no [tests] line for argus' && fail "$NAME: argus has a line and is said to lack one"
 grep -Fxq 'argus = "npm test"' "$HOME_DIR/.config/mw/config.toml" || fail "$NAME: argus's line was not copied"
 sed -n '/^\[tests\]$/,/^$/p' "$HOME_DIR/.config/mw/config.toml" | grep -Fq 'postern' && fail "$NAME: a postern [tests] line was made up"
+grep -Fq '[session]' "$HOME_DIR/.config/mw/config.toml" && fail "$NAME: a vault file without [session] gave the config one"
 echo "ok: $NAME"
 
 # --- h. a box made from cloud1's snapshot becomes cloud2, and its checkouts are mended ----
