@@ -92,6 +92,7 @@ lint:
 	scripts/check-template.sh
 	scripts/check-install.sh
 	scripts/check-install-units.sh
+	scripts/check-beads-restore-drill.sh
 	scripts/check-heavy.sh
 	scripts/check-wg-enrol.sh
 	scripts/check-install-sops-age.sh
