@@ -64,6 +64,10 @@ type TodoNightly struct {
 	Tracker WorkTracker
 	Notes   TodoNightlyNotes
 	Sender  PosternSender
+	// Hold keeps the weekly Let go card from a review queue over its limit: the
+	// card is written on its list as a QUESTION for Monday instead. A zero Hold
+	// holds nothing.
+	Hold ReviewHold
 	// Home says whether this host is the home: only the home ranks.
 	Home func(ctx context.Context) (bool, error)
 	// Now is the clock; nil is time.Now.
@@ -277,12 +281,51 @@ func (n *TodoNightly) weeklyLetGo(ctx context.Context) error {
 	}
 	text := fmt.Sprintf("Let go: %d cards look ready to go.\n%s\nA tap on a card's own Keep or Drop is finer; these two answer for all of them.",
 		len(letGo), strings.Join(lines, "\n"))
-	if _, err := n.Sender.Run(ctx, PosternSendRequest{
+	card := PosternSendRequest{
 		Class: "decision-needed", Text: text, Bead: epic, Options: []string{TodoKeepAllOption, TodoDropAllOption},
-	}); err != nil {
+	}
+	// A timer never overrides the hold: over the limit the card waits for
+	// Monday's digest, and is not written again this week (mw-t5shinh.31).
+	if verdict := n.Hold.Judge(ctx, card); verdict.Over {
+		return n.holdLetGo(ctx, card, verdict, week)
+	}
+	if _, err := n.Sender.Run(ctx, card); err != nil {
 		return fmt.Errorf("sending the Let go card: %w", err)
 	}
 	return n.Notes.SetNote(ctx, TodoRankWeeklyKey, week)
+}
+
+// holdLetGo writes the Let go card on its list as a QUESTION for Monday, naming
+// the digest that will carry it, and marks the week done so the next night does
+// not write it again. The cards it listed stay in their note, for an answer to
+// find.
+func (n *TodoNightly) holdLetGo(ctx context.Context, card PosternSendRequest, v ReviewVerdict, week string) error {
+	digest := nextDigestDay(n.now())
+	comment := fmt.Sprintf("%s\ncarried by the digest of %s", HeldQuestionComment(card), digest)
+	if err := n.Tracker.CommentOnStory(ctx, card.Bead, comment); err != nil {
+		return fmt.Errorf("holding the Let go card on %s for Monday: %w", card.Bead, err)
+	}
+	n.say("mw events follow: the Let go card is held for Monday: his review queue is %d, over the limit of %d; the question is on %s, carried by the digest of %s\n",
+		v.Size, v.Limit, card.Bead, digest)
+	return n.Notes.SetNote(ctx, TodoRankWeeklyKey, week)
+}
+
+// nextDigestDay is the UTC day of the first weekly digest still to be sent at
+// the time given: this day when it is DigestWeekday before DigestHour, else the
+// next DigestWeekday. The digest reads the questions held when it runs, so one
+// held at or after DigestHour waits for the week after.
+func nextDigestDay(at time.Time) string {
+	at = at.UTC()
+	day := time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, time.UTC)
+	if at.Weekday() == DigestWeekday && at.Hour() < DigestHour {
+		return day.Format(time.DateOnly)
+	}
+	for {
+		day = day.AddDate(0, 0, 1)
+		if day.Weekday() == DigestWeekday {
+			return day.Format(time.DateOnly)
+		}
+	}
 }
 
 func (n *TodoNightly) say(format string, args ...any) {
