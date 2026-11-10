@@ -40,8 +40,9 @@ type posternSendContext struct {
 	channel     string
 	now         func() time.Time
 
-	txid string
-	err  error
+	txid    string
+	err     error
+	warning string
 }
 
 // InitializePosternSendScenario registers the steps of
@@ -114,6 +115,13 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Given(`^the backend still lists what that send spent, and its change$`, c.theBackendStillListsWhatThatSendSpentAndItsChange)
 	ctx.Then(`^the second broadcast does not spend what the first one spent$`, c.theSecondBroadcastDoesNotSpendWhatTheFirstSpent)
+	ctx.When(`^mw postern send "([^"]*)" of (\d+) words is run from the command line$`, c.mwPosternSendOfWordsFromTheCommandLine)
+	ctx.When(`^mw postern send "([^"]*)" of (\d+) words is run from the command line with --long$`, c.mwPosternSendOfWordsFromTheCommandLineLong)
+	ctx.When(`^mw postern send "([^"]*)" of (\d+) words with three options of (\d+) words each is run from the command line$`, c.mwPosternSendOfWordsWithLongOptions)
+	ctx.When(`^mw postern send "([^"]*)" of (\d+) words is run by mw itself$`, c.mwPosternSendOfWordsByMwItself)
+	ctx.Then(`^one warning naming (\d+) words was printed$`, c.oneWarningNaming)
+	ctx.Then(`^no warning was printed$`, c.noWarningWasPrinted)
+	ctx.Then(`^it is refused, naming (\d+) words, the limit of (\d+) and --long$`, c.itIsRefusedNamingTheWordsTheLimitAndLong)
 	ctx.Then(`^sending succeeds$`, c.itSucceeds)
 	ctx.Then(`^it prints "([^"]*)"$`, c.itPrints)
 	ctx.Then(`^it is refused, naming the excess of (\d+)$`, c.itIsRefusedNamingTheExcessOf)
@@ -1066,6 +1074,68 @@ func (c *posternSendContext) itIsRefusedSaying(words string) error {
 	}
 	if !strings.Contains(c.err.Error(), words) {
 		return fmt.Errorf("expected the refusal to say %q, got: %q", words, c.err.Error())
+	}
+	return nil
+}
+
+func nWords(n int) string {
+	return strings.TrimSpace(strings.Repeat("word ", n))
+}
+
+// fromTheCommandLine runs the send as mw postern send does: the length check
+// first, its warning kept, then PosternSend.Run unless it refused.
+func (c *posternSendContext) fromTheCommandLine(req application.PosternSendRequest, long bool) {
+	c.warning, c.err = req.CheckLength(long)
+	if c.err != nil {
+		return
+	}
+	c.txid, c.err = c.send().Run(context.Background(), req)
+}
+
+func (c *posternSendContext) mwPosternSendOfWordsFromTheCommandLine(class string, n int) error {
+	c.fromTheCommandLine(application.PosternSendRequest{Class: class, Text: nWords(n)}, false)
+	return nil
+}
+
+func (c *posternSendContext) mwPosternSendOfWordsFromTheCommandLineLong(class string, n int) error {
+	c.fromTheCommandLine(application.PosternSendRequest{Class: class, Text: nWords(n)}, true)
+	return nil
+}
+
+func (c *posternSendContext) mwPosternSendOfWordsWithLongOptions(class string, n, optionWords int) error {
+	c.fromTheCommandLine(application.PosternSendRequest{
+		Class: class, Text: nWords(n), Options: []string{nWords(optionWords), nWords(optionWords), nWords(optionWords)},
+	}, false)
+	return nil
+}
+
+func (c *posternSendContext) mwPosternSendOfWordsByMwItself(class string, n int) error {
+	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{Class: class, Text: nWords(n)})
+	return nil
+}
+
+func (c *posternSendContext) oneWarningNaming(n int) error {
+	if strings.Count(c.warning, "\n") != 0 || !strings.Contains(c.warning, strconv.Itoa(n)+" words") {
+		return fmt.Errorf("expected one warning line naming %d words, got %q", n, c.warning)
+	}
+	return nil
+}
+
+func (c *posternSendContext) noWarningWasPrinted() error {
+	if c.warning != "" {
+		return fmt.Errorf("expected no warning, got %q", c.warning)
+	}
+	return nil
+}
+
+func (c *posternSendContext) itIsRefusedNamingTheWordsTheLimitAndLong(n, limit int) error {
+	if c.err == nil {
+		return fmt.Errorf("expected send to be refused, but it succeeded")
+	}
+	for _, want := range []string{strconv.Itoa(n) + " words", strconv.Itoa(limit), "--long"} {
+		if !strings.Contains(c.err.Error(), want) {
+			return fmt.Errorf("expected the refusal to name %q, got: %q", want, c.err.Error())
+		}
 	}
 	return nil
 }

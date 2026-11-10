@@ -2617,3 +2617,38 @@ func (s PosternSend) printf(format string, args ...any) {
 		fmt.Fprintf(s.Out, format, args...)
 	}
 }
+
+// The word limits of a message mw postern send puts on a phone screen: past
+// the warn limit the command line says so and sends, past the refuse limit it
+// sends nothing unless --long is given. A card (class decision-needed) counts
+// its question alone, not its options. Only the command line checks them
+// (PosternSendRequest.CheckLength): PosternSend.Run, which mw's own sends use,
+// does not.
+const (
+	PosternWarnWords       = 80
+	PosternRefuseWords     = 200
+	PosternCardWarnWords   = 60
+	PosternCardRefuseWords = 120
+)
+
+// CheckLength counts the words of the text the command line sends, split on
+// white space. Over the warn limit it returns a one-line warning to print and
+// goes on; over the refuse limit it returns an error naming the count, the
+// limit and --long. long skips both.
+func (r PosternSendRequest) CheckLength(long bool) (warning string, err error) {
+	if long {
+		return "", nil
+	}
+	warn, refuse, what := PosternWarnWords, PosternRefuseWords, "message"
+	if r.Class == "decision-needed" {
+		warn, refuse, what = PosternCardWarnWords, PosternCardRefuseWords, "card question"
+	}
+	n := len(strings.Fields(r.Text))
+	switch {
+	case n > refuse:
+		return "", fmt.Errorf("mw postern send: %d words, over the %d a %s may run: trim it, put the detail on the bead, or give --long to send past the limits", n, refuse, what)
+	case n > warn:
+		return fmt.Sprintf("mw postern send: %d words; a phone shows about %d: trim, or say it in the bead", n, warn), nil
+	}
+	return "", nil
+}
