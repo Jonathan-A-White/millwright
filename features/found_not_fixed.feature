@@ -75,3 +75,23 @@ Feature: A landing whose closing comment lists what the Builder found and did no
     And exactly 6 bugs were filed under "mw-gq6"
     And a bug filed under "mw-gq6" quotes: Finding five (a.go:5)
     And one bug filed under "mw-gq6" quotes both: Finding six (a.go:6) | Finding seven (a.go:7)
+
+  Scenario: The same fault named by a second story, worded differently, is not filed again
+    Given the story "mw-gq6.5" has been worked in its own worktree
+    And the session of "mw-gq6.5" reported a plain success
+    And the story "mw-gq6.1" carries the closing comment "Done.\nFound, not fixed:\ngofmt -l lists cmd/mw/member.go (cmd/mw/member.go:1)\nFor the rig memory: nothing"
+    And the story "mw-gq6.5" carries the closing comment "Done.\nFound, not fixed:\nA formatting fault: cmd/mw/member.go is not gofmt-clean\nFor the rig memory: nothing"
+    When mw closes out "mw-gq6.1"
+    Then exactly 1 bugs were filed under "mw-gq6"
+    When mw closes out "mw-gq6.5"
+    Then the story "mw-gq6.5" is closed
+    And exactly 1 bugs were filed under "mw-gq6"
+    And the mail "Landed: The story mw-gq6.5" says: Already filed: mw-gq6.3.
+
+  Scenario: A finding that names a file takes that file as its files key
+    Given the finder "mw-gq6.1" expects to change the files "cmd/mw/afterlanding.go"
+    And the story "mw-gq6.1" carries the closing comment "Done.\nFound, not fixed:\nThe parser drops a trailing line (application/parse.go:12)\nThe loader reads the file twice (application/load.go:40) and application/load_test.go:3 does not cover it\nNobody has named a file here\nFor the rig memory: nothing"
+    When mw closes out "mw-gq6.1"
+    Then the bug filed under "mw-gq6" quoting "The parser drops" has the files "application/parse.go"
+    And the bug filed under "mw-gq6" quoting "The loader reads" has the files "application/load.go,application/load_test.go"
+    And the bug filed under "mw-gq6" quoting "Nobody has named" has the files "cmd/mw/afterlanding.go"

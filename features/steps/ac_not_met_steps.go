@@ -152,6 +152,9 @@ func registerFoundNotFixedSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the bugs filed under "([^"]*)" all quote: (.+)$`, c.theBugsFiledAllQuote)
 	ctx.Then(`^one bug filed under "([^"]*)" quotes both: (.+) \| (.+)$`, c.oneBugFiledQuotesBoth)
 	ctx.Then(`^the bugs filed under "([^"]*)" have the path of "([^"]*)" and no acceptance$`, c.theBugsHaveThePathAndNoAcceptance)
+	ctx.Given(`^the finder "([^"]*)" expects to change the files "([^"]*)"$`, c.theFinderExpectsToChange)
+	ctx.Then(`^the mail "([^"]*)" says: (.+)$`, c.theMailSubjectSays)
+	ctx.Then(`^the bug filed under "([^"]*)" quoting "([^"]*)" has the files "([^"]*)"$`, c.theBugQuotingHasTheFiles)
 }
 
 func (c *nextContext) theBugsAreHeldAndLabelled(epic, first, second string) error {
@@ -227,7 +230,11 @@ func (c *nextContext) theBugsHaveThePathAndNoAcceptance(epic, id string) error {
 		return err
 	}
 	for _, bug := range bugs {
-		if got, want := bug.Merged(), landed.Merged(); got != want {
+		// The files key is the finding's own when it names a file
+		// (mw-gq6.1068); everything else is the finder's.
+		got, want := bug.Merged(), landed.Merged()
+		got.Files, want.Files = "", ""
+		if got != want {
 			return fmt.Errorf("the path of %s is %+v, expected %+v", bug.Story.ID, got, want)
 		}
 		if strings.TrimSpace(bug.Acceptance) != "" {
@@ -235,4 +242,41 @@ func (c *nextContext) theBugsHaveThePathAndNoAcceptance(epic, id string) error {
 		}
 	}
 	return nil
+}
+
+func (c *nextContext) theBugQuotingHasTheFiles(epic, quote, files string) error {
+	bugs, err := c.filedBugs(epic)
+	if err != nil {
+		return err
+	}
+	for _, bug := range bugs {
+		if strings.Contains(bug.Description, quote) {
+			if got := bug.Merged().Files; got != files {
+				return fmt.Errorf("the bug %s quoting %q has the files %q, expected %q", bug.Story.ID, quote, got, files)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("no bug filed under %s quotes %q", epic, quote)
+}
+
+func (c *nextContext) theFinderExpectsToChange(id, files string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{"files": files})
+}
+
+// theMailSubjectSays reads the mail of that subject, among several.
+func (c *nextContext) theMailSubjectSays(subject, line string) error {
+	sent, err := c.mailSent()
+	if err != nil {
+		return err
+	}
+	for _, mail := range sent {
+		if mail.Subject == subject {
+			if want := c.spoken(line); !strings.Contains(mail.Body, want) {
+				return fmt.Errorf("expected the body of %q to say %q, got:\n%s", subject, want, mail.Body)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("no mail is subjected %q among %+v", subject, sent)
 }

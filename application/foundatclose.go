@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -165,6 +167,90 @@ func foundBugs(id string, lines []string) []foundBug {
 	return bugs
 }
 
+// foundPathPattern finds a repo path in a finding: segments joined by '/', a
+// last one with an extension, then an optional ':line' or ':line-line'.
+var foundPathPattern = regexp.MustCompile(`(?:[A-Za-z0-9_.\-]+/)*[A-Za-z0-9_\-]+\.[a-z][a-z0-9]{0,5}\b(?::\d+(?:-\d+)?)?`)
+
+// foundBareExtensions are the extensions a name with no directory must have to
+// be read as a file: 'e.g.' and 'application.Next' name none.
+var foundBareExtensions = map[string]bool{
+	"go": true, "md": true, "feature": true, "json": true, "yml": true, "yaml": true, "sh": true, "toml": true,
+	"sql": true, "txt": true, "mod": true, "sum": true, "js": true, "ts": true, "tsx": true, "css": true,
+	"html": true, "py": true, "service": true, "timer": true,
+}
+
+// foundPaths are the files text names, each once, in order: path:line is read as
+// path, and a leading './' is dropped.
+func foundPaths(text string) []string {
+	var paths []string
+	seen := map[string]bool{}
+	for _, match := range foundPathPattern.FindAllString(text, -1) {
+		path, _, _ := strings.Cut(match, ":")
+		path = strings.TrimPrefix(path, "./")
+		dot := strings.LastIndex(path, ".")
+		if dot < 0 || (!strings.Contains(path, "/") && !foundBareExtensions[path[dot+1:]]) || seen[path] {
+			continue
+		}
+		seen[path] = true
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+// foundFiles is the files key of a bug filed for lines: the files they name,
+// else finder, the files key of the story that found it.
+func foundFiles(lines []string, finder string) string {
+	var paths []string
+	seen := map[string]bool{}
+	for _, line := range lines {
+		for _, path := range foundPaths(line) {
+			if !seen[path] {
+				seen[path] = true
+				paths = append(paths, path)
+			}
+		}
+	}
+	if len(paths) == 0 {
+		return finder
+	}
+	return strings.Join(paths, ",")
+}
+
+// foundSameFile is the id of a bead that is the finding already: one not closed,
+// labelled found-at-close, that names a file the finding names in its title or
+// description, where the lines mw next wrote to say who found it are not read.
+// A bead another close-out of the same story filed is not one: a story's own
+// findings may share a file (mw-gq6.1068).
+func foundSameFile(bug foundBug, beads []StoryDetail, finder string) (string, bool) {
+	want := map[string]bool{}
+	for _, line := range bug.lines {
+		for _, path := range foundPaths(line) {
+			want[path] = true
+		}
+	}
+	if len(want) == 0 {
+		return "", false
+	}
+	for _, d := range beads {
+		if d.Closed() || !slices.Contains(d.Labels, LabelFoundAtClose) || strings.Contains(d.Description, "Seen by: "+finder+"\n") {
+			continue
+		}
+		var text []string
+		text = append(text, d.Story.Title)
+		for _, line := range strings.Split(d.Description, "\n") {
+			if !strings.Contains(line, " landed, and its closing comment lists ") && !strings.HasPrefix(line, "Seen by:") && !strings.HasPrefix(line, "Source:") {
+				text = append(text, line)
+			}
+		}
+		for _, path := range foundPaths(strings.Join(text, "\n")) {
+			if want[path] {
+				return d.Story.ID, true
+			}
+		}
+	}
+	return "", false
+}
+
 func foundDescription(c *closeOut, bug foundBug, host string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s (%s) landed, and its closing comment lists %s under 'Found, not fixed:':\n\n", c.id, c.detail.Story.Title, thisOrThese(len(bug.lines)))
@@ -188,7 +274,9 @@ func thisOrThese(n int) string {
 // <id>, held.' for each. The landing is never undone for it: bugs that cannot
 // be filed are a note and a mail to the Mayor. A bug of the same title, open or
 // closed, is the one already filed, so a close-out run again files nothing
-// (mw-t5shinh.24).
+// (mw-t5shinh.24); so is a bead not closed that another story's finding filed
+// for the same file, worded as it likes (mw-gq6.1068). A bug's files key is the
+// files its lines name, else the finder's.
 func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *NextReport, again bool, comments []Comment) string {
 	section := closingFoundNotFixed(comments)
 	if len(section.Lines) == 0 {
@@ -210,6 +298,7 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 	}
 
 	filed := map[string]string{}
+	var beads []StoryDetail
 	lister, ok := n.Tracker.(TesterStories)
 	if !ok && again {
 		return ""
@@ -223,24 +312,30 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 		for _, d := range stories {
 			filed[d.Story.Title] = d.Story.ID
 		}
+		beads = stories
 	}
 
 	for i, bug := range bugs {
-		if id, there := filed[bug.title]; there {
+		id, there := filed[bug.title]
+		if !there {
+			id, there = foundSameFile(bug, beads, c.id)
+		}
+		if there {
 			report.Notes = append(report.Notes, fmt.Sprintf("%s already files the finding of %s: %s", id, c.id, bug.title))
 			block = append(block, fmt.Sprintf("Already filed: %s. %s", id, strings.Join(bug.lines, " ")))
 			continue
 		}
+		overrides := c.path
+		overrides.Files = foundFiles(bug.lines, c.path.Files)
 		story := NewStory{
 			EpicID:      c.detail.EpicID,
 			Standalone:  c.detail.EpicID == "",
 			Title:       bug.title,
 			Description: foundDescription(c, bug, n.Host),
 			Priority:    2,
-			Overrides:   c.path,
+			Overrides:   overrides,
 			Labels:      []string{LabelBug, LabelFoundAtClose},
 		}
-		var id string
 		err := writeRetrying(ctx, n, report, "the bug for a finding not fixed", func() error {
 			var err error
 			id, err = n.Tracker.CreateStory(ctx, story)

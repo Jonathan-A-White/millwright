@@ -160,3 +160,43 @@ func TestATrackerThatRefusesTheCreateStillLandsTheStoryAndMailsALostWrite(t *tes
 		t.Errorf("expected mw-x.1 closed, got %q", d.Status)
 	}
 }
+
+// A finding is the bead already filed when a bead not closed, labelled
+// found-at-close, names the same file; and the files key is the finding's own
+// (mw-gq6.1068).
+func TestAFindingNamingTheFileOfAnOpenFoundAtCloseBeadIsNotFiledAgain(t *testing.T) {
+	cases := []struct {
+		name, title, description, status string
+		labels                           []string
+		filed                            bool
+	}{
+		{"the file in the title, held", "[bug] gofmt lists cmd/mw/member.go", "", apptest.StatusDeferred, []string{"bug", "found-at-close"}, false},
+		{"the file with a line, in the description", "[bug] unformatted", "Reworded: cmd/mw/member.go:1 is not gofmt-clean.", apptest.StatusOpen, []string{"bug", "found-at-close"}, false},
+		{"closed", "[bug] gofmt lists cmd/mw/member.go", "", apptest.StatusClosed, []string{"bug", "found-at-close"}, true},
+		{"not found at close", "[bug] gofmt lists cmd/mw/member.go", "", apptest.StatusOpen, []string{"bug"}, true},
+		{"another file", "[bug] gofmt lists cmd/mw/other.go", "", apptest.StatusOpen, []string{"bug", "found-at-close"}, true},
+		{"the finder's own title does not count", "[bug] x", "mw-z.9 (fix cmd/mw/member.go) landed, and its closing comment lists this finding under 'Found, not fixed:':\n\n> unrelated\n", apptest.StatusOpen, []string{"bug", "found-at-close"}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tracker, rules := aBatchEpicToTest(t)
+			ctx := context.Background()
+			tracker.AddStory("mw-e", domain.Story{ID: "mw-e.9", Title: c.title})
+			mustDo(t, tracker.SetDescription("mw-e.9", c.description))
+			mustDo(t, tracker.SetLabels("mw-e.9", c.labels...))
+			mustDo(t, tracker.SetStatus("mw-e.9", c.status))
+			mustDo(t, tracker.CommentOnStory(ctx, "mw-e.1", "Done.\nFound, not fixed:\nA formatting fault in cmd/mw/member.go:1\nFor the rig memory: nothing"))
+			before := tracker.Stories()
+
+			aBatchLandedWithTesters(t, application.TesterTrial{}, tracker, rules, "mw-e.1", "mw-e.2")
+
+			filed := theTestersFiled(t, tracker, before)
+			if c.filed != (len(filed) == 1) {
+				t.Fatalf("expected filed=%v, got %d filed: %+v", c.filed, len(filed), filed)
+			}
+			if c.filed && filed[0].Merged().Files != "cmd/mw/member.go" {
+				t.Errorf("expected the files key of the file the finding names, got %q", filed[0].Merged().Files)
+			}
+		})
+	}
+}
