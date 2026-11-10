@@ -210,15 +210,16 @@ func (c *dispatchContext) mwStatusListsAsReadySaying(id, saying string) error {
 	return nil
 }
 
-// mwStatusListsAsReadyFirstSaying is the first line under the story's own: the
+// mwStatusListsAsReadyFirstSaying is the first reason under the story's own: the
 // reason a reader sees first must be the one that stops the story outright.
 func (c *dispatchContext) mwStatusListsAsReadyFirstSaying(id, saying string) error {
 	block, err := c.statusReady(id)
 	if err != nil {
 		return err
 	}
+	// The block opens on the rig, then the story's title; the reasons follow.
 	lines := strings.Split(block, "\n")
-	if len(lines) < 2 || !strings.HasPrefix(lines[1], "    "+saying) {
+	if len(lines) < 3 || !strings.HasPrefix(lines[2], "    "+saying) {
 		return fmt.Errorf("expected mw status to say %q first of %s, it printed:\n%s", saying, id, block)
 	}
 	return nil
