@@ -397,6 +397,90 @@ func TestAStorySessionDisablesBackgroundTasks(t *testing.T) {
 	}
 }
 
+// TestAStorySessionStartsWithAutoMemoryOffAndFiveToolsOut pins mw-t5shinh.18:
+// a Builder's first request carried a Memory block pointing every Builder of a
+// rig at one folder nobody reads, and the schemas of five tools no Builder
+// called, all of it read again on every request.
+func TestAStorySessionStartsWithAutoMemoryOffAndFiveToolsOut(t *testing.T) {
+	spec, err := New().Session(launch(nil))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	if got := spec.Env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]; got != "1" {
+		t.Errorf("expected a story session to start with auto memory off, got %q", got)
+	}
+	argv := commandWords(t, spec.Command[2])
+	at := slices.Index(argv, "--disallowed-tools")
+	if at < 0 {
+		t.Fatalf("expected --disallowed-tools in the command line, got %q", argv)
+	}
+	want := []string{"Workflow", "ScheduleWakeup", "ListAgents", "ReportFindings", "Skill"}
+	if got := argv[at+1 : at+1+len(want)]; !slices.Equal(got, want) {
+		t.Errorf("expected --disallowed-tools to name %q, got %q", want, got)
+	}
+	// The flag takes every word up to the next flag, so a flag must follow the
+	// list, and the kickoff must still be the last word: else the kickoff is
+	// read as a tool name and the session starts with no prompt.
+	if next := argv[at+1+len(want)]; !strings.HasPrefix(next, "--") {
+		t.Errorf("expected a flag right after the disallowed tools, got %q", next)
+	}
+	if last := argv[len(argv)-1]; last != "You are booted into the builder seat." {
+		t.Errorf("expected the kickoff to be the last word, got %q", last)
+	}
+	for _, kept := range []string{"Agent", "ToolSearch", "WebSearch", "WebFetch"} {
+		if slices.Contains(argv[at+1:at+1+len(want)], kept) {
+			t.Errorf("expected %s to stay available", kept)
+		}
+	}
+}
+
+// commandWords is the claude command of a story's shell line, split into its
+// words, with the redirect and everything after it left off.
+func commandWords(t *testing.T, line string) []string {
+	t.Helper()
+	start := strings.Index(line, "claude --print")
+	end := strings.Index(line, " > ")
+	if start < 0 || end < start {
+		t.Fatalf("expected the claude command and a redirect in %q", line)
+	}
+	var words []string
+	var word strings.Builder
+	quoted, in := false, false
+	for _, r := range line[start:end] {
+		switch {
+		case r == '\'':
+			quoted, in = !quoted, true
+		case r == ' ' && !quoted:
+			if in {
+				words = append(words, word.String())
+				word.Reset()
+				in = false
+			}
+		default:
+			word.WriteRune(r)
+			in = true
+		}
+	}
+	if in {
+		words = append(words, word.String())
+	}
+	return words
+}
+
+// A seat keeps its memory and its tools: the Mayor's memory is the point of him.
+func TestASeatSessionKeepsItsMemoryAndItsTools(t *testing.T) {
+	spec, err := New().SeatSession(seatLaunch(nil))
+	if err != nil {
+		t.Fatalf("assembling the seat's session: %v", err)
+	}
+	if _, ok := spec.Env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]; ok {
+		t.Errorf("expected a seat's session not to turn auto memory off, got %q", spec.Env)
+	}
+	if line := strings.Join(spec.Command, " "); strings.Contains(line, "--disallowed-tools") {
+		t.Errorf("expected a seat's session not to take tools out, got %q", line)
+	}
+}
+
 func TestSessionTakesThePermissionModeItIsGiven(t *testing.T) {
 	spec, err := New(WithPermissionMode(PermissionDontAsk)).Session(launch(nil))
 	if err != nil {
@@ -549,6 +633,7 @@ func TestTheHeartbeatRunsBesideTheHarnessAndIsKilledBeforeTheCloseOut(t *testing
 	want := "/root/millwright/bin/mw next --heartbeat mw-gq6.6 & HB=$!; claude --print" +
 		" --output-format json --model claude-opus-5-5 --effort high --permission-mode auto" +
 		" --permission-prompts none --append-system-prompt-file /root/millwright-vault/runs/mw-gq6.6/boot.md" +
+		" --disallowed-tools " + strings.Join(StoryDisallowedTools, " ") +
 		" --settings " + shellQuote(SessionSettings) +
 		" --name mw-gq6.6 'You are booted into the builder seat.'" +
 		" > /root/millwright-vault/runs/mw-gq6.6/result.json.tmp" +
@@ -625,7 +710,7 @@ func TestASessionWithNoHeartbeatStartsNothingBesideTheHarness(t *testing.T) {
 		t.Fatalf("assembling the session: %v", err)
 	}
 	line := spec.Command[2]
-	for _, unwanted := range []string{"&", "HB=", "kill "} {
+	for _, unwanted := range []string{"&", "HB=", "kill $"} {
 		if strings.Contains(line, unwanted) {
 			t.Errorf("expected no heartbeat, backgrounding or kill with an empty Heartbeat, got %q in %q", unwanted, line)
 		}
@@ -1180,6 +1265,12 @@ func TestACloseOutAloneRunsOnlyItsCloseOutInTheSessionsEnvironment(t *testing.T)
 	}
 	if spec.Env["MW_SEAT"] != "builder@vps" || spec.Env["MW_STORY"] != "mw-gq6.6" || spec.Dir != "/root/.mw-worktrees/mw-gq6.6" {
 		t.Errorf("expected the seat's identity and the story in the worktree, got %+v in %q", spec.Env, spec.Dir)
+	}
+	if strings.Contains(line, "--disallowed-tools") {
+		t.Errorf("expected a close-out alone to take no tools out, got %q", line)
+	}
+	if _, ok := spec.Env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]; ok {
+		t.Errorf("expected a close-out alone to leave auto memory alone, got %+v", spec.Env)
 	}
 
 	if _, err := New().Session(application.Launch{StoryID: "mw-gq6.6", Path: launch(nil).Path, Seat: "builder", CloseOutOnly: true}); err == nil {

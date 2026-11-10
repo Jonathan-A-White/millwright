@@ -338,6 +338,21 @@ func New(opts ...Option) *Harness {
 // Name implements application.Harness.
 func (h *Harness) Name() domain.Harness { return domain.HarnessClaude }
 
+// StoryDisallowedTools are the tools a story's session is started without
+// (`--disallowed-tools`: a bare name removes the tool from the model's context,
+// schema and all). The week of 2026-11-03 held 444 Builder sessions and about
+// 21,100 tool calls, none to these, and their schemas were 15,700 of the 29,020
+// characters of tool schemas, read again on every request (mw-t5shinh.18).
+//   - Workflow: a Builder runs one story and starts no multi-agent script.
+//   - ScheduleWakeup: for /loop; a headless session ends with its turn.
+//   - ListAgents: a Builder messages no other agent.
+//   - ReportFindings: for a code review's host UI, not a Builder.
+//   - Skill: a Builder works from its formula, not from skills.
+//
+// Agent, ToolSearch, WebSearch and WebFetch stay: the charter lets a Builder
+// ask for search and advice, and they are called.
+var StoryDisallowedTools = []string{"Workflow", "ScheduleWakeup", "ListAgents", "ReportFindings", "Skill"}
+
 // Session implements application.Harness: the session that works one launch.
 //
 // The session is a headless run — `--print` with `--output-format json` — so
@@ -375,12 +390,19 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 		// rather than left waiting forever in a pane nobody is watching.
 		"--permission-prompts", "none",
 		"--append-system-prompt-file", l.BootFile,
+	}
+	// The flag takes every word after it up to the next flag, so it goes
+	// before --settings and never last before the kickoff, which it would
+	// swallow as a tool name.
+	argv = append(argv, "--disallowed-tools")
+	argv = append(argv, StoryDisallowedTools...)
+	argv = append(argv,
 		// The session signs nothing it commits, may run bd without being asked,
 		// and may run its own rig's tests when h.tests names one. See
 		// SessionSettings and sessionSettings.
 		"--settings", settings,
 		"--name", l.StoryID,
-	}
+	)
 	if l.MaxTurns > 0 {
 		argv = append(argv, "--max-turns", strconv.Itoa(l.MaxTurns))
 	}
@@ -397,7 +419,12 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	line = sessionshell.WithBdShim(line, l.BdRetry)
 	line = sessionshell.WithHeartbeat(line, l)
 	line = sessionshell.WithAfter(line, l)
-	return h.spec(l, line), nil
+	spec := h.spec(l, line)
+	// Auto memory points every Builder of a rig at one folder nobody reads and
+	// puts a Memory block in the system prompt of every request (mw-t5shinh.18).
+	// A seat's session (SeatSession) keeps it: the Mayor's memory is his.
+	spec.Env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
+	return spec, nil
 }
 
 // spec is the session that runs line for the launch: the host's beads
