@@ -278,6 +278,8 @@ func cloudCheck(ctx context.Context, out io.Writer) (application.CloudCheck, boo
 		// A box is brought to the Claude Code the home has before its timer is
 		// set (mw-gq6.1059).
 		HarnessVersion: ownHarnessVersion,
+		// A box is brought to the home's [session] deny list (mw-t5shinh.33).
+		SessionDeny: func(context.Context) ([]string, error) { return config.SessionDeny() },
 	}, true, nil
 }
 

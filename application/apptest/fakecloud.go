@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // FakeCloud is an application.CloudProvider that makes nothing: it records
@@ -61,10 +62,15 @@ type FakeCloud struct {
 	HarnessStuck map[string]string
 	harnessCalls []string
 	order        []string
-	BilledUSD    float64
-	BilledKnown  bool
-	begun        []string
-	made         []application.CloudInstance
+	// SessionDenies is the [session] deny list each box holds, by name, as
+	// domain.SessionDenyLiteral spells it ("" is none); SessionDenyCalls are the
+	// SetSessionDenys asked, as "<box> <list>" (mw-t5shinh.33).
+	SessionDenies map[string]string
+	denyCalls     []string
+	BilledUSD     float64
+	BilledKnown   bool
+	begun         []string
+	made          []application.CloudInstance
 }
 
 var _ application.CloudProvider = (*FakeCloud)(nil)
@@ -242,6 +248,31 @@ func (f *FakeCloud) SetHarness(_ context.Context, name, version string) (applica
 	}
 	f.Harnesses[name] = version
 	return application.CloudHarness{Was: was, Now: version}, nil
+}
+
+// SetSessionDeny implements application.CloudProvider: the box takes the list
+// unless it is Unreachable (an error); changed says it held another.
+func (f *FakeCloud) SetSessionDeny(_ context.Context, name string, rules []string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	literal := domain.SessionDenyLiteral(rules)
+	f.denyCalls = append(f.denyCalls, name+" "+literal)
+	if f.Unreachable[name] {
+		return false, fmt.Errorf("ssh %s: no route to the box", name)
+	}
+	if f.SessionDenies == nil {
+		f.SessionDenies = map[string]string{}
+	}
+	changed := f.SessionDenies[name] != literal
+	f.SessionDenies[name] = literal
+	return changed, nil
+}
+
+// SessionDenyCalls are the SetSessionDenys asked for, in order, each "<box> <list>".
+func (f *FakeCloud) SessionDenyCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.denyCalls...)
 }
 
 // HarnessCalls are the SetHarnesses asked for, in order, each "<box> <version>".
