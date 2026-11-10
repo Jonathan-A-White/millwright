@@ -190,8 +190,12 @@ dump_cat >"$SCRATCH/full.jsonl"
 TOTAL_LINES=$(wc -l <"$SCRATCH/full.jsonl")
 if [ -n "$LINES" ]; then
 	head -n "$LINES" "$SCRATCH/full.jsonl" >"$SCRATCH/lines.jsonl"
-	jq -c 'select(.id == "mw-6ww.9" or .id == "mw-6ww" or .id == "mw-gq6")' "$SCRATCH/full.jsonl" >>"$SCRATCH/lines.jsonl"
-	awk '!seen[$0]++' "$SCRATCH/lines.jsonl" >"$SCRATCH/lines.uniq" && mv "$SCRATCH/lines.uniq" "$SCRATCH/lines.jsonl"
+	# The lines as the file has them, not as jq writes them again: a line that is in
+	# the first N already is not added twice.
+	for id in mw-6ww.9 mw-6ww mw-gq6; do
+		grep -qF "\"_type\":\"issue\",\"id\":\"$id\"," "$SCRATCH/lines.jsonl" && continue
+		grep -m 1 -F "\"_type\":\"issue\",\"id\":\"$id\"," "$SCRATCH/full.jsonl" >>"$SCRATCH/lines.jsonl"
+	done
 else
 	mv "$SCRATCH/full.jsonl" "$SCRATCH/lines.jsonl"
 fi

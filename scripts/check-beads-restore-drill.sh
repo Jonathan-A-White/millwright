@@ -77,7 +77,7 @@ mkdir -p "$STAND" "$TMP" "$OUT"
 # The dump: 5 issue lines of 3 types, one with a dangling parent, a parent
 # mw-6ww for mw-6ww.9 with two labels and two comments, mw-gq6 with two children.
 cat >"$T/dump.jsonl" <<'EOF'
-{"_type":"issue","id":"mw-6ww","title":"wayfinder","status":"open","priority":2,"issue_type":"epic"}
+{"_type":"issue","id":"mw-6ww","title":"wayfinder \u00e9","status":"open","priority":2,"issue_type":"epic"}
 {"_type":"issue","id":"mw-6ww.9","title":"How","status":"open","priority":2,"issue_type":"task","labels":["hitl","wayfinder:grilling"],"dependencies":[{"issue_id":"mw-6ww.9","depends_on_id":"mw-6ww","type":"parent-child"},{"issue_id":"mw-6ww.9","depends_on_id":"mw-6ww.2","type":"blocks"}],"comments":[{"id":"a","text":"one"},{"id":"b","text":"two"}]}
 {"_type":"issue","id":"mw-gq6","title":"factory","status":"open","priority":2,"issue_type":"epic"}
 {"_type":"issue","id":"mw-gq6.1","title":"one","status":"closed","priority":2,"issue_type":"task"}
@@ -110,6 +110,7 @@ metrics | config) exit 0 ;;
 init) mkdir -p .beads ;;
 import)
 	cp "\$2" ./imported.jsonl
+	echo "IMPORTED \$(wc -l <./imported.jsonl) \$(jq -r .id ./imported.jsonl | sort -u | wc -l)" >>"$CALLS"
 	echo "Imported \$(wc -l <./imported.jsonl) issues from \$2"
 	;;
 count)
@@ -234,6 +235,9 @@ expect_gone "a short store"
 # --- 3. a trial --------------------------------------------------------------
 run "$T/clean" "$T/dump.jsonl.gz" --lines 2
 [ "$RC" -eq 0 ] || fail "--lines 2 exited $RC: $(cat "$OUT/last")"
+# the pinned line is added once, and as the file has it (the first line holds an escape jq would write out)
+imported=$(grep '^IMPORTED ' "$CALLS" | awk '{ print $2 " lines of " $3 " distinct beads" }')
+[ "$imported" = "3 lines of 3 distinct beads" ] || fail "--lines 2 imported $imported, expected the two lines and the pinned mw-gq6: $(cat "$CALLS")"
 grep -q 'trial' "$OUT/last" || fail "--lines 2 did not say it is a trial"
 grep -q 'expected' "$OUT/last" || fail "--lines 2 did not say dangling parents are expected"
 grep -q 'projection' "$OUT/last" || fail "--lines 2 printed no projection of the whole file"
