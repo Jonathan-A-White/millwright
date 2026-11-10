@@ -174,3 +174,36 @@ func TestAForwardingGristRefusesATextTypeItsGrindDoesNotList(t *testing.T) {
 		t.Fatalf("expected the mime refusal, got %+v", answer)
 	}
 }
+
+// Two mails of the same text carry different tags, so a sender can never
+// guess the line that would close his words early.
+func TestTwoForwardMailsOfTheSameTextCarryDifferentTags(t *testing.T) {
+	tagOf := func() string {
+		mill, _, mailbox, _ := aCSVMill(t, "feedback", application.GristForwardMayor, "text/csv", csvOf(100), application.GristCeilings{})
+		if _, err := mill.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		mail, err := mailbox.Inbox(context.Background(), application.GristForwardMayor)
+		if err != nil || len(mail) != 1 {
+			t.Fatalf("expected one mail to the Mayor, got %d (%v)", len(mail), err)
+		}
+		var tag string
+		for _, line := range strings.Split(mail[0].Body, "\n") {
+			if rest, ok := strings.CutPrefix(line, "FEEDBACK "); ok {
+				if t, ok := strings.CutSuffix(rest, " BEGINS"); ok {
+					tag = t
+				}
+			}
+		}
+		if tag == "" || tag == "0000" {
+			t.Fatalf("expected a random tag on the BEGINS line, got body:\n%s", mail[0].Body)
+		}
+		if !strings.Contains(mail[0].Body, "\nFEEDBACK "+tag+" ENDS\n") {
+			t.Fatalf("expected an ENDS line with the tag %s, got body:\n%s", tag, mail[0].Body)
+		}
+		return tag
+	}
+	if a, b := tagOf(), tagOf(); a == b {
+		t.Fatalf("expected two mails to carry different tags, both carried %s", a)
+	}
+}
