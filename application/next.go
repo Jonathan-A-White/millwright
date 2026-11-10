@@ -288,6 +288,13 @@ type Next struct {
 	// from the rig by itself. A nil AfterLanding runs nothing.
 	AfterLanding AfterLanding
 
+	// LiveSite reads the rig's live page and healthz after a passing after-landing
+	// command, so that each story landed gets a DEPLOYED-CHECKED comment
+	// (deploychecked.go). A nil LiveSite checks nothing. LiveCheckBound is how long
+	// the whole check may take; zero is DeployedCheckedBound.
+	LiveSite       VerifyWeb
+	LiveCheckBound time.Duration
+
 	// PushScope reads this host's push credential for the workflow scope, asked
 	// of a branch that changes a file under .github/workflows/ before it is
 	// landed (mw-gq6.999). A nil PushScope asks nothing: the push itself is
@@ -625,6 +632,9 @@ type NextReport struct {
 	// named for this host but not run, and why; empty when it ran or none is
 	// named. The mail to the Mayor says it first.
 	AfterLandingSkipped string
+	// AfterLandingPassed says the rig's after-landing command ran on this host and
+	// passed whole: what the live check waits for.
+	AfterLandingPassed bool
 	// Why is the reason nothing landed, empty when something did, and Reason is
 	// the code it is filed under. Refused says it is the branch itself the
 	// checks turned away — no commits, a signed commit, open formula steps,

@@ -254,7 +254,7 @@ func (c *nextContext) theCommandDidNotRun() error {
 
 // spoken is a step's text with the command line put in where the feature named it.
 func (c *nextContext) spoken(text string) string {
-	return strings.ReplaceAll(text, afterCommandToken, c.afterCommands["millwright"])
+	return c.siteWords(strings.ReplaceAll(text, afterCommandToken, c.afterCommands["millwright"]))
 }
 
 func (c *nextContext) theReportSays(line string) error {

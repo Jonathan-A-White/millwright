@@ -57,6 +57,7 @@ const (
 	stepChainStamp     = "queue the chain stamp"
 	stepSayFiles       = "say the files outside the key"
 	stepAfterLanding   = "run the after-landing command"
+	stepCheckLive      = "check the live site"
 	stepLetTheSlotGo   = "let the merge slot go"
 	stepGristSmoke     = "make the grist smoke"
 	stepStageBackend   = "stage the backend"
@@ -123,6 +124,27 @@ var landedTail = []tailStep{
 			}
 			b.land.say("after landing done: the rig's checkout is brought up and its command run or skipped")
 			b.nr.Notes = append(b.nr.Notes, t.once.Notes...)
+		}},
+	{name: stepCheckLive, scope: onceForBatch,
+		why: "Once for a batch, and a DEPLOYED-CHECKED comment on each story it landed: the page is read once. It comes after the " +
+			"after-landing command, which it waits to have passed, and before the story is closed by a single landing.",
+		run: func(t *tail, _ *tailStory) {
+			noted := len(t.once.Notes)
+			var stories []liveStory
+			commit, version := t.once.How.Commit, t.once.How.Version
+			if t.batch == nil {
+				stories = []liveStory{{id: t.last.id, texts: []string{t.last.detail.Description}}}
+			} else {
+				commit, version = t.batch.report.Commit, t.batch.report.Version
+				for i := range t.batch.report.Merged {
+					s := t.batch.story(i)
+					stories = append(stories, liveStory{id: s.c.id, texts: []string{s.c.detail.Description}})
+				}
+			}
+			t.n.deployedChecked(t.ctx, t.last.path.Rig, t.once, commit, version, stories)
+			if t.batch != nil {
+				t.batch.nr.Notes = append(t.batch.nr.Notes, t.once.Notes[noted:]...)
+			}
 		}},
 	{name: stepLetTheSlotGo, scope: onceForBatch, only: batchLanding,
 		why: "A single landing gives the rig's merge slot back as soon as it has pushed. A batch holds it through the rig's checkout, " +
@@ -360,7 +382,7 @@ var landedTail = []tailStep{
 // run again on a landed story takes too.
 var (
 	singleReads     = []string{stepReadBackend, stepReadGrist, stepReadFiles}
-	singleAfterPush = []string{stepAdvanceRig, stepRunState, stepChainStamp, stepSayFiles, stepAfterLanding, stepGristSmoke, stepStageBackend, stepSpringTester}
+	singleAfterPush = []string{stepAdvanceRig, stepRunState, stepChainStamp, stepSayFiles, stepAfterLanding, stepCheckLive, stepGristSmoke, stepStageBackend, stepSpringTester}
 	singleFinish    = []string{stepRemoveWorktree, stepBenchmark, stepLedger, stepCommit, stepClose, stepCloseFormula, stepLandedMail, stepAbandoned, stepCarryOn}
 )
 
@@ -384,7 +406,7 @@ var fixedOnMainFinish = []string{stepRemoveWorktree, stepLedger, stepCommit, ste
 var batchOrder = [][]string{
 	{stepReadGrist, stepReadBackend, stepReadFiles, stepRunState, stepChainStamp, stepSayFiles, stepBenchmark, stepLedger,
 		stepCommit, stepRemoveWorktree, stepClose, stepCloseFormula, stepSpringTester},
-	{stepAdvanceRig, stepAfterLanding},
+	{stepAdvanceRig, stepAfterLanding, stepCheckLive},
 	{stepStageBackend},
 	{stepLandedMail},
 	{stepLetTheSlotGo, stepGristSmoke},
