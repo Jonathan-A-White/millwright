@@ -4751,6 +4751,19 @@ the Mayor to read, word and release. A bug of that title already filed, open or
 closed, is the one filed: a close-out run again files nothing. `mw land` takes
 the same check for each story of a batch. See `features/ac_not_met.feature`.
 
+A Builder files no bead: it lists what it saw and did not fix in a closing-comment
+section headed `Found, not fixed:` (at the start of a line, before `For common
+errors:`), one finding to a line, or the word `nothing`. `mw next` files each line
+as a held `[bug]` under the landed story's epic (standalone when it has none),
+titled with the line, labelled `bug` and `found-at-close`, with the landed story's
+path, the line and `Seen by: <id>` in its description and no acceptance, for the
+Mayor to word and release. The Landed mail says `Filed: <id>, held.` for each.
+At most five bugs are filed for a close-out; the lines after them go into one more
+bug that lists them. A title already filed, open or closed, files nothing, so a
+close-out run again files nothing; a bug the tracker refuses is a lost-write mail,
+never a refused landing. `mw land` takes the same for each story of a batch. See
+`features/found_not_fixed.feature`.
+
 ## Closing what is plainly finished
 
 ```sh

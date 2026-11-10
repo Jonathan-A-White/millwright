@@ -46,3 +46,30 @@ func TestEachFormulasClosingStepSaysToPostTheCommentFromAFileAndReadItBack(t *te
 		}
 	}
 }
+
+// A Builder's closing step names the heading mw next reads its findings under
+// (mw-t5shinh.24): the tester's FINDINGS step has its own sections.
+func TestEachBuildersClosingStepAsksForTheFoundNotFixedSection(t *testing.T) {
+	for file, ids := range closingSteps {
+		if file == "tester.formula.json" {
+			continue
+		}
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var formula struct {
+			Steps []struct{ ID, Description string }
+		}
+		if err := json.Unmarshal(raw, &formula); err != nil {
+			t.Fatalf("%s: %v", file, err)
+		}
+		for _, id := range ids {
+			for _, step := range formula.Steps {
+				if step.ID == id && !strings.Contains(step.Description, "a section headed exactly 'Found, not fixed:'") {
+					t.Errorf("%s step %s: expected it to ask for a section headed exactly 'Found, not fixed:'", file, id)
+				}
+			}
+		}
+	}
+}
