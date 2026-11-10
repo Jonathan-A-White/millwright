@@ -120,6 +120,7 @@ count)
 	*) echo "{\"count\": \$n}" ;;
 	esac
 	;;
+list) jq -r '.id' ./imported.jsonl | { if [ -n "\$FAKE_SHORT" ]; then sed '\$d'; else cat; fi; } | jq -R '{id: .}' | jq -s -c . ;;
 show) echo '[{"id":"mw-6ww.9","parent":"mw-6ww","labels":["wayfinder:grilling","hitl"]}]' ;;
 comments) echo '[1,2]' ;;
 create) echo '{"id":"mw-gq6.3"}' ;;
@@ -226,6 +227,7 @@ run "$T/clean" "$T/dump.jsonl.gz"
 rm -f "$CTL"
 [ "$RC" -eq 0 ] || fail "a short store made the drill exit $RC: it reports, it does not stop: $(cat "$OUT/last")"
 [ "$(nmiss)" -ge 1 ] || fail "a store one bead short printed no MISS line: $(cat "$OUT/last")"
+grep -q '^info absent from the store: 1 ids' "$OUT/last" || fail "a short store did not say which bead is absent: $(cat "$OUT/last")"
 grep '^MISS ' "$OUT/last" | grep -q 'file 5, store 4' || fail "the MISS line names no two numbers: $(grep MISS "$OUT/last")"
 expect_gone "a short store"
 

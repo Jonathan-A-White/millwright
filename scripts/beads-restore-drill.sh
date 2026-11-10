@@ -264,6 +264,18 @@ fi
 # --- counts ------------------------------------------------------------------
 STORE_TOTAL=$(bd_run count --include-infra --json 2>/dev/null | jq -r '.count // "none"')
 same "count --include-infra against the file's issue lines" "$FILE_ISSUES" "$STORE_TOTAL"
+if [ "$FILE_ISSUES" != "$STORE_TOTAL" ]; then
+	# Say which beads did not come back, from the ids of the store against the file's.
+	bd_run list --all --include-infra --brief --json -n 0 2>/dev/null | jq -r '.[]?.id' | sort -u >"$SCRATCH/store.ids"
+	cut -f1 "$SCRATCH/index.tsv" | sort -u >"$SCRATCH/file.ids"
+	comm -23 "$SCRATCH/file.ids" "$SCRATCH/store.ids" >"$SCRATCH/absent.ids"
+	info "absent from the store: $(wc -l <"$SCRATCH/absent.ids") ids of the file; first 10: $(head -n 10 "$SCRATCH/absent.ids" | tr '\n' ' ')"
+	if [ -s "$SCRATCH/absent.ids" ]; then
+		a=$(head -n 1 "$SCRATCH/absent.ids")
+		info "the first of them, $a, in the file: $(grep -F "\"id\":\"$a\"" "$IMPORT_FILE" | head -n 1 | jq -c '{id, issue_type, status, priority, created_at, dependency_count, labels}' 2>/dev/null)"
+		grep -n "$a" "$SCRATCH/import.log" | head -n 3 | sed 's/^/info import.log: /'
+	fi
+fi
 
 bd_run count --include-infra --by-type --json 2>/dev/null | jq -r '.groups[]? | [.group, .count] | @tsv' | sort >"$SCRATCH/store.types"
 awk -F'\t' '{ n[$2]++ } END { for (t in n) printf "%s\t%d\n", t, n[t] }' "$SCRATCH/index.tsv" | sort >"$SCRATCH/file.types"
