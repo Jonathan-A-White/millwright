@@ -36,6 +36,10 @@ type SeatHandover struct {
 	Acting   ActingFile
 	Now      func() time.Time
 	Out      io.Writer
+	// Ceiling, when set, is asked before anything is written whether the seat's
+	// boot set is within its manifest's ceiling: a handover is refused while the
+	// successor's next boot would fail it (mw-gq6.1058).
+	Ceiling BootCeiling
 }
 
 // SeatHandoverRequest is what one handover is asked to do. At is the seq of
@@ -66,6 +70,11 @@ func (h SeatHandover) Run(ctx context.Context, req SeatHandoverRequest) (events.
 	successor, err := h.successor(ctx, req.Successor)
 	if err != nil {
 		return events.Event{}, err
+	}
+	if h.Ceiling != nil {
+		if err := h.Ceiling.CheckCeiling(ctx, h.Seat); err != nil {
+			return events.Event{}, fmt.Errorf("the %s seat is not handed over, nothing is written: %w", h.Seat, err)
+		}
 	}
 	ev, err := EventEmit{
 		Log: h.Log, Now: h.Now,

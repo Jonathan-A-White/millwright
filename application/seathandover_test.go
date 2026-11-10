@@ -360,3 +360,48 @@ func TestAnOldWaitArmedAtTheHeadIsToldHandedOverAtTheHead(t *testing.T) {
 		t.Errorf("printed %q", out.String())
 	}
 }
+
+// fakeCeiling is the boot set's ceiling check, answering with err.
+type fakeCeiling struct {
+	err  error
+	seat string
+}
+
+func (c *fakeCeiling) CheckCeiling(_ context.Context, seat string) error {
+	c.seat = seat
+	return c.err
+}
+
+// A handover is refused, with nothing written, while the seat's boot set is over
+// its ceiling, and goes through when the check passes (mw-gq6.1058).
+func TestAHandoverIsRefusedWithNothingWrittenWhileTheBootSetIsOverItsCeiling(t *testing.T) {
+	f := aHandover(t)
+	over := &application.BootSetOver{Seat: "mayor", Bytes: 15001, Ceiling: 15000, File: "seats/mayor/handoffs/2026-11-10-825.md", FileSize: 7472, Handoff: true}
+	ceiling := &fakeCeiling{err: over}
+	h := f.handover()
+	h.Ceiling = ceiling
+
+	_, err := h.Run(context.Background(), application.SeatHandoverRequest{})
+	if err == nil {
+		t.Fatal("a boot set over its ceiling was handed over")
+	}
+	for _, want := range []string{"15001 bytes", "15000 bytes", "seats/mayor/handoffs/2026-11-10-825.md"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal %q does not say %q", err, want)
+		}
+	}
+	if ceiling.seat != "mayor" {
+		t.Errorf("checked the %q seat", ceiling.seat)
+	}
+	if len(f.log.All()) != 3 || f.acting.Text("mayor") != "" || f.out.Len() != 0 {
+		t.Error("something was written")
+	}
+
+	ceiling.err = nil
+	if _, err := h.Run(context.Background(), application.SeatHandoverRequest{}); err != nil {
+		t.Fatalf("a boot set within its ceiling: %v", err)
+	}
+	if len(f.log.All()) != 4 || f.acting.Text("mayor") == "" {
+		t.Error("the handover was not written")
+	}
+}

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -386,13 +387,19 @@ func (b SeatBootSet) Run(ctx context.Context) error {
 	b.Out = out
 	fmt.Fprintf(b.Out, "# What the %s seat reads at boot (%s)\n\n", b.Seat, seatManifestPath(b.Seat))
 	failed := 0
+	var printed []bootPrint
 	for i, part := range m.Parts {
 		if i > 0 {
 			fmt.Fprintln(b.Out)
 		}
-		if !b.part(ctx, part) {
+		before := out.n
+		p, ok := b.part(ctx, part)
+		if !ok {
 			failed++
+			continue
 		}
+		p.Printed = out.n - before
+		printed = append(printed, p)
 	}
 	if len(m.Topics) > 0 {
 		if len(m.Parts) > 0 {
@@ -411,9 +418,97 @@ func (b SeatBootSet) Run(ctx context.Context) error {
 		return fmt.Errorf("%d of %d parts of the %s seat's boot set could not be read", failed, len(m.Parts)+len(m.Topics), b.Seat)
 	}
 	if m.Ceiling > 0 && out.n > m.Ceiling {
-		over := fmt.Sprintf("the %s seat's boot set is %d bytes, over its manifest's ceiling of %d bytes: cut a part or move it to a topic", b.Seat, out.n, m.Ceiling)
+		over := newBootSetOver(b.Seat, out.n, m.Ceiling, printed)
 		fmt.Fprintf(b.Out, "\n[over the manifest's ceiling: %d of %d bytes]\n", out.n, m.Ceiling)
-		return fmt.Errorf("%s", over)
+		return over
+	}
+	return nil
+}
+
+// bootPrint is what one part of a boot set came to: its title, whether it is the
+// newest file of a directory (a seat's handoff), the size of the text it was
+// cut from and the bytes printed of it, its title line and cut note included.
+type bootPrint struct {
+	Title   string
+	Newest  bool
+	Size    int
+	Printed int
+}
+
+// BootSetOver is the error of a boot set printed past its manifest's ceiling.
+// File is the part to shorten to bring it under, FileSize its text's bytes.
+type BootSetOver struct {
+	Seat    string
+	Bytes   int
+	Ceiling int
+	// File is the part to shorten: the handoff when shortening it can bring the
+	// set under, else the largest part printed. Empty when nothing was printed.
+	File     string
+	FileSize int
+	// Handoff says File is the newest file of a seat's handoffs directory.
+	Handoff bool
+}
+
+// newBootSetOver names, of what was printed, the part to shorten: the handoff
+// when the overage is within what it printed, else the largest part.
+func newBootSetOver(seat string, bytes, ceiling int, printed []bootPrint) *BootSetOver {
+	e := &BootSetOver{Seat: seat, Bytes: bytes, Ceiling: ceiling}
+	var pick *bootPrint
+	for i := range printed {
+		p := &printed[i]
+		if p.Newest && p.Printed >= bytes-ceiling {
+			pick = p
+			break
+		}
+		if pick == nil || p.Printed > pick.Printed {
+			pick = p
+		}
+	}
+	if pick != nil {
+		e.File, e.FileSize, e.Handoff = pick.Title, pick.Size, pick.Newest
+	}
+	return e
+}
+
+// Over is how many bytes past the ceiling the set is.
+func (e *BootSetOver) Over() int { return e.Bytes - e.Ceiling }
+
+func (e *BootSetOver) Error() string {
+	head := fmt.Sprintf("the %s seat's boot set is %d bytes, over its manifest's ceiling of %d bytes", e.Seat, e.Bytes, e.Ceiling)
+	switch {
+	case e.File == "":
+		return head + ": cut a part or move it to a topic"
+	case e.Handoff:
+		return fmt.Sprintf("%s: shorten the handoff %s (%d bytes) by at least %d bytes", head, e.File, e.FileSize, e.Over())
+	default:
+		return fmt.Sprintf("%s: shorten %s (%d bytes) by at least %d bytes, or move a part to a topic", head, e.File, e.FileSize, e.Over())
+	}
+}
+
+// BootCeiling is the port a handover checks the seat's boot set against its
+// manifest's ceiling through. It returns a *BootSetOver when the set is over.
+type BootCeiling interface {
+	CheckCeiling(ctx context.Context, seat string) error
+}
+
+// SeatBootCeiling measures a seat's boot set as `mw seat boot` prints it, by
+// printing it nowhere: the one count there is. Only an overage is an error here;
+// a seat with no manifest, no ceiling or a part that cannot be read on this host
+// has nothing to refuse, and `mw seat boot` says what is wrong with those.
+type SeatBootCeiling struct {
+	Files    SeatBootFiles
+	Rigs     RigDocs
+	Commands BootCommands
+	Host     string
+}
+
+// CheckCeiling returns the *BootSetOver of the seat's boot set, nil when it is
+// within its ceiling or cannot be measured.
+func (c SeatBootCeiling) CheckCeiling(ctx context.Context, seat string) error {
+	err := SeatBootSet{Files: c.Files, Rigs: c.Rigs, Commands: c.Commands, Seat: seat, Host: c.Host, Out: io.Discard}.Run(ctx)
+	var over *BootSetOver
+	if errors.As(err, &over) {
+		return over
 	}
 	return nil
 }
@@ -431,11 +526,11 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 }
 
 // part prints one part of the boot set, and whether it could be read.
-func (b SeatBootSet) part(ctx context.Context, part BootPart) bool {
+func (b SeatBootSet) part(ctx context.Context, part BootPart) (bootPrint, bool) {
 	part, err := part.fill(b.Seat, b.Host)
 	if err != nil {
 		fmt.Fprintf(b.Out, "==> %s <==\n\n[not read: %v]\n", part.File+part.Newest, err)
-		return false
+		return bootPrint{}, false
 	}
 	var title, text string
 	switch {
@@ -452,7 +547,7 @@ func (b SeatBootSet) part(ctx context.Context, part BootPart) bool {
 				fmt.Fprintln(b.Out, text)
 			}
 			fmt.Fprintf(b.Out, "[failed: %v]\n", err)
-			return false
+			return bootPrint{}, false
 		}
 	case part.Newest != "":
 		title, text, err = b.Files.NewestVaultFile(ctx, part.Newest)
@@ -465,14 +560,14 @@ func (b SeatBootSet) part(ctx context.Context, part BootPart) bool {
 	}
 	if err != nil {
 		fmt.Fprintf(b.Out, "==> %s <==\n\n[not read: %v]\n", title, err)
-		return false
+		return bootPrint{}, false
 	}
 	if part.Section != "" {
 		title += ": " + part.Section
 		section, ok := Section(text, part.Section)
 		if !ok {
 			fmt.Fprintf(b.Out, "==> %s <==\n\n[not read: %s has no heading %q]\n", title, partTitle(part), part.Section)
-			return false
+			return bootPrint{}, false
 		}
 		text = section
 	}
@@ -484,7 +579,7 @@ func (b SeatBootSet) part(ctx context.Context, part BootPart) bool {
 	if cut {
 		fmt.Fprintf(b.Out, "[cut at %d of %d bytes]\n", part.Cap, len(text))
 	}
-	return true
+	return bootPrint{Title: title, Newest: part.Newest != "", Size: len(text)}, true
 }
 
 // partTitle names a file part: its path, with the rig when it is a rig's.

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -120,5 +121,68 @@ func TestHandoverWaitEndsEarlyWhenTheWindowTheActingFileNamesIsClosed(t *testing
 	}
 	if out := wait(mine); strings.Contains(out, "no handover can come") || !strings.Contains(out, "No events") {
 		t.Errorf("a predecessor whose window is open: printed %q", out)
+	}
+}
+
+// mw seat handover measures the boot set as mw seat boot does and refuses, with
+// nothing written, one byte over the ceiling of seats/mayor/boot.toml; exactly
+// at the ceiling it hands over as it always did (mw-gq6.1058).
+func TestSeatHandoverIsRefusedOneByteOverTheBootCeilingAndGoesThroughAtIt(t *testing.T) {
+	const oldWindow, newWindow = "mayor-2026-10-01-159", "mayor-2026-10-01-160"
+	socket := privateTmux(t, oldWindow)
+	if out, err := exec.Command("tmux", "-L", socket, "new-window", "-d", "-n", newWindow, "sleep 60").CombinedOutput(); err != nil {
+		t.Fatalf("opening the successor's window: %v: %s", err, out)
+	}
+	vaultDir := t.TempDir()
+	eventsHome(t)
+	mwConfig(t, "vault = \""+vaultDir+"\"\nhost = \"laptop\"\n")
+	handoff := "seats/mayor/handoffs/2026-10-01-159.md"
+	if err := os.MkdirAll(filepath.Join(vaultDir, "seats/mayor/handoffs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vaultDir, handoff), []byte("# Handoff 159\n\nCarry on.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := func(ceiling int) {
+		t.Helper()
+		text := "ceiling = " + strconv.Itoa(ceiling) + "\n\n[[boot]]\nnewest = \"seats/mayor/handoffs\"\n"
+		if err := os.WriteFile(filepath.Join(vaultDir, "seats/mayor/boot.toml"), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest(100000)
+	booted := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(booted)
+	root.SetErr(booted)
+	root.SetArgs([]string{"seat", "boot", "mayor"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("mw seat boot mayor: %v\n%s", err, booted)
+	}
+	size := booted.Len()
+
+	manifest(size - 1)
+	out, err := handoverOf(t, socket, oldWindow)
+	if err == nil {
+		t.Fatalf("handed over one byte over the ceiling: %s", out)
+	}
+	for _, want := range []string{strconv.Itoa(size) + " bytes", "ceiling of " + strconv.Itoa(size-1) + " bytes", handoff} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal %q does not say %q", err, want)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(vaultDir, ".mayor-acting")); statErr == nil {
+		t.Error("an acting file was written")
+	}
+	if tail, _ := runEvents(t, "tail", "--since", "0"); strings.Contains(tail, "handover") {
+		t.Errorf("a handover event was emitted: %q", tail)
+	}
+
+	manifest(size)
+	if out, err := handoverOf(t, socket, oldWindow); err != nil || !strings.Contains(out, "Handed over to "+newWindow) {
+		t.Fatalf("at the ceiling: %v\n%s", err, out)
+	}
+	if _, statErr := os.Stat(filepath.Join(vaultDir, ".mayor-acting")); statErr != nil {
+		t.Errorf("no acting file: %v", statErr)
 	}
 }

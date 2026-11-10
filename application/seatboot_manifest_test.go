@@ -493,3 +493,59 @@ func TestParseSeatManifestReadsTheCeilingAndRefusesABadOne(t *testing.T) {
 		t.Errorf("a bad ceiling: %v", err)
 	}
 }
+
+// The count a handover refuses on is the boot's own: a set one byte over its
+// ceiling is over, one exactly at it is not, and the overage names the handoff
+// to shorten (mw-gq6.1058).
+func TestSeatBootCeilingIsTheBootsOwnCountAndNamesTheHandoff(t *testing.T) {
+	files := fixtureSeatFiles()
+	files.files["seats/mayor/handoffs/2026-10-17-416.md"] = "# Handoff 416\n\n" + strings.Repeat("What happened this sitting.\n", 40)
+	manifest := "ceiling = %d\n\n[[boot]]\nfile = \"seats/mayor/vision.md\"\n\n[[boot]]\nnewest = \"seats/mayor/handoffs\"\n"
+	files.manifests["mayor"] = fmt.Sprintf(manifest, 100000)
+	printed, err := bootSet(files, "mayor", "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := len(printed)
+	check := SeatBootCeiling{Files: files, Rigs: files, Commands: files, Host: "laptop"}
+
+	files.manifests["mayor"] = fmt.Sprintf(manifest, size)
+	if err := check.CheckCeiling(context.Background(), "mayor"); err != nil {
+		t.Errorf("a boot set exactly at its ceiling (%d) is over: %v", size, err)
+	}
+
+	files.manifests["mayor"] = fmt.Sprintf(manifest, size-1)
+	err = check.CheckCeiling(context.Background(), "mayor")
+	var over *BootSetOver
+	if !errors.As(err, &over) {
+		t.Fatalf("a boot set one byte over its ceiling: %v", err)
+	}
+	for _, want := range []string{
+		fmt.Sprintf("%d bytes", size), fmt.Sprintf("ceiling of %d bytes", size-1),
+		"seats/mayor/handoffs/2026-10-17-416.md", "by at least 1 bytes",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal %q does not say %q", err, want)
+		}
+	}
+
+	// A seat with no ceiling, no manifest or a part it cannot read is not refused.
+	files.manifests["mayor"] = fmt.Sprintf(manifest, 0)
+	if err := check.CheckCeiling(context.Background(), "mayor"); err != nil {
+		t.Errorf("no ceiling: %v", err)
+	}
+	if err := check.CheckCeiling(context.Background(), "nobody"); err != nil {
+		t.Errorf("no manifest: %v", err)
+	}
+}
+
+// When shortening the handoff cannot bring the set under, the largest part is named.
+func TestABootSetOverByMoreThanTheHandoffPrintedNamesTheLargestPart(t *testing.T) {
+	files := fixtureSeatFiles()
+	files.files["seats/mayor/big.md"] = "# Big\n\n" + strings.Repeat("A line the Mayor does not need at boot.\n", 100)
+	files.manifests["mayor"] = "ceiling = 1000\n\n[[boot]]\nfile = \"seats/mayor/big.md\"\ncap = 0\n\n[[boot]]\nnewest = \"seats/mayor/handoffs\"\n"
+	err := SeatBootCeiling{Files: files, Rigs: files, Commands: files, Host: "laptop"}.CheckCeiling(context.Background(), "mayor")
+	if err == nil || !strings.Contains(err.Error(), "shorten seats/mayor/big.md") || strings.Contains(err.Error(), "the handoff") {
+		t.Errorf("got %v", err)
+	}
+}

@@ -424,3 +424,12 @@ the glossary are topics (`mw seat read mayor vision`, `... standing-asks`,
 growing back. Measured on copies of the real files with the brief held to 1K,
 the set is ~14.8K; the handoff, Boot and Rules are 12.1K of that on their own,
 so the brief is what a ceiling of 15K leaves room for the least of.
+
+`mw seat handover` enforces the ceiling (mw-gq6.1058): before it emits the
+handover event or writes the acting file it measures the seat's boot set the way
+`mw seat boot` does (`SeatBootCeiling`, one count) and, when the set is over,
+refuses with the bytes, the ceiling and the file to shorten (the handoff when
+shortening it can bring the set under, else the largest part), writing nothing.
+A seat with no manifest, no ceiling, or a part this host cannot read is not
+refused. Only the Mayor is handed over (`MayorSeat`); the check is `SeatHandover.Ceiling`
+and applies to any seat whose boot.toml sets a ceiling.

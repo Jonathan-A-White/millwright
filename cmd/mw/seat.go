@@ -268,7 +268,9 @@ func newSeatHandoverCmd() *cobra.Command {
 			"'handed over at N', and the old Mayor answers nothing after N; the successor's mw events wait,\n" +
 			"begun before it, ends with 'You hold the mayor seat from event N', and its waits then read from\n" +
 			"N (mw events wait --since N; mw talk wait, from the talk cursor), so nothing the Governor sends\n" +
-			"falls between the two. It works on tmux's default server unless $" + TmuxSocketEnv + " names another.",
+			"falls between the two. It works on tmux's default server unless $" + TmuxSocketEnv + " names another.\n\n" +
+			"It is refused, writing nothing, while the Mayor's boot set (mw seat boot mayor) is over the ceiling\n" +
+			"of seats/mayor/boot.toml: it names the bytes, the ceiling and the handoff to shorten.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -283,6 +285,10 @@ func newSeatHandoverCmd() *cobra.Command {
 			if cmd.Flags().Changed("at") {
 				req.At = &at
 			}
+			files, rigs, host, err := seatBootPorts()
+			if err != nil {
+				return err
+			}
 			_, err = application.SeatHandover{
 				Seat:     application.MayorSeat,
 				Log:      eventlog.New(path),
@@ -290,6 +296,7 @@ func newSeatHandoverCmd() *cobra.Command {
 				Acting:   vault.New(dir),
 				Now:      eventsClock,
 				Out:      cmd.OutOrStdout(),
+				Ceiling:  application.SeatBootCeiling{Files: files, Rigs: rigs, Commands: shellcmd.New(shellcmd.DefaultTimeout), Host: host},
 			}.Run(cmd.Context(), req)
 			return err
 		},
