@@ -50,7 +50,10 @@ func newDigestSendCmd() *cobra.Command {
 			"outcomes recorded) and SHARE (the investment line and its bound, with 'moved to N% on <date>' when\n" +
 			"the target differs from the one the previous digest bead recorded). With no demos but a pick or a\n" +
 			"verdict the card still goes out, saying 'no factory demos this week'; with neither it prints\n" +
-			"'nothing to digest' and sends nothing. --dry-run prints the card and files and sends nothing.",
+			"'nothing to digest' and sends nothing. The card also lists, under 'Questions held for Monday', every open\n" +
+			"bead whose newest '" + application.QuestionForMondayPrefix + "' comment (what mw postern send writes instead of a card while his review\n" +
+			"queue is over its limit) has no later ANSWER and no card sent on that bead: the bead id and the question,\n" +
+			"one line each; a week with only those still goes out. --dry-run prints the card and files and sends nothing.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := config.Vault()
@@ -70,6 +73,7 @@ func newDigestSendCmd() *cobra.Command {
 				Tracker: gateway,
 				Sender:  newDigestSender(gateway),
 				Loop:    loop,
+				Graph:   gateway,
 				Parent:  parent,
 				DryRun:  dryRun,
 				Out:     cmd.OutOrStdout(),
@@ -101,7 +105,7 @@ func digestSpringJob(host string, out io.Writer) (application.SpringJob, error) 
 			if err != nil {
 				return fmt.Errorf("mw digest send: %w", err)
 			}
-			_, err = application.Digest{Tracker: gateway, Sender: newDigestSender(gateway), Loop: loop, Out: out}.Run(ctx)
+			_, err = application.Digest{Tracker: gateway, Sender: newDigestSender(gateway), Loop: loop, Graph: gateway, Out: out}.Run(ctx)
 			if err != nil {
 				return fmt.Errorf("mw digest send: %w", err)
 			}

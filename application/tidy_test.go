@@ -156,3 +156,37 @@ func TestTidyKeepsAnUnansweredCardWhenTheMayorCannotBeMailed(t *testing.T) {
 		t.Errorf("expected only the QUESTION comment, got %q", said)
 	}
 }
+
+// A QUESTION for Monday written after the Governor answered a card is not a
+// card nobody answered: mw tidy does not take it for the newest QUESTION.
+func TestTidyDoesNotTakeAQuestionForMondayForAnUnansweredCard(t *testing.T) {
+	ctx := context.Background()
+	mail := apptest.NewFakeMailbox()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("t", domain.Path{})
+	tracker.AddStory("t", domain.Story{ID: "t.1", Title: "t.1"})
+	for _, c := range []string{
+		"QUESTION 2026-10-16T11:00:38Z asked by postern, txid abc: Squash? (recommended A; options A, B)",
+		"ANSWER 2026-10-16T12:00:00Z from 02ab, txid def: A",
+		application.QuestionForMondayPrefix + " Another thing?\n\nOptions:\n- A\nRecommended: A",
+	} {
+		if err := tracker.CommentOnStory(ctx, "t.1", c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tracker.SetStatus("t.1", apptest.StatusClosed); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetNote(ctx, application.PosternQuestionKey("t.1"), `{"txid":"abc","q":"Squash?"}`); err != nil {
+		t.Fatal(err)
+	}
+	report, err := application.Tidy{Mail: mail, Notes: tracker, Beads: tracker}.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, act := range report.Acts {
+		if act.Kind == application.TidyUnansweredCard {
+			t.Fatalf("tidy took the held question for an unanswered card: %+v", act)
+		}
+	}
+}

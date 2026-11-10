@@ -609,7 +609,7 @@ func eventsOf(changes []BeadChange, states map[string]string, verified map[strin
 		}
 		text := ch.Comment
 		switch {
-		case strings.HasPrefix(text, "QUESTION "):
+		case isCardAskedComment(text):
 			evs = append(evs, event(ch, events.KindCardAsked, events.Start, events.CardAsked, commentTxid(text)))
 		case strings.HasPrefix(text, "ANSWER "):
 			evs = append(evs, event(ch, events.KindCardAnswered, events.CardAsked, events.CardAnswered, commentTxid(text)))

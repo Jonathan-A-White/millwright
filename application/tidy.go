@@ -380,7 +380,7 @@ func (t Tidy) unansweredCard(ctx context.Context, bead StoryDetail, note postern
 func cardAnswered(comments []Comment) bool {
 	asked := -1
 	for i, c := range comments {
-		if strings.HasPrefix(c.Text, "QUESTION ") {
+		if isCardAskedComment(c.Text) {
 			asked = i
 		}
 	}
