@@ -79,13 +79,14 @@ func TestATestedMailIsCutTheSameWay(t *testing.T) {
 	}
 }
 
-func TestARefusedMailIsTheWholeReport(t *testing.T) {
-	report := slimReport()
-	report.Landed, report.Closed = false, false
-	body := slimMail(report, MailRefused)
-	for _, want := range []string{"committed in the vault", "2026-11-10", "gate 1m02s"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("expected a Refused mail to hold %q, got:\n%s", want, body)
+func TestARefusedAndABlockedMailAreTheWholeReportAsBefore(t *testing.T) {
+	for _, verdict := range []string{MailRefused, MailBlocked} {
+		report := slimReport()
+		report.Landed, report.Closed = false, false
+		want := report.String()
+		want = strings.TrimRight(want, "\n") + "\n\n" + CauseLine("mw-1.1") + "\n"
+		if got := slimMail(report, verdict); got != want {
+			t.Errorf("expected a %s mail to be the whole report and its cause line, got:\n%s\nwant:\n%s", verdict, got, want)
 		}
 	}
 }
