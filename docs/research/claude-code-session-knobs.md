@@ -59,8 +59,8 @@
 4. **Cost tracking**: `--output-format json` returns single result with `usage.cache_read_input_tokens`, `cache_creation_input_tokens`, and cost fields; Pro/Max track sessions in 5-hour rolling windows + weekly caps; "out of fuel" exits with code 1 on subscription plans ("You've hit your session limit").
 5. **Hooks for external tracking**: SessionStart/SessionEnd fire per session; PreToolUse/PostToolUse per tool call; each receives JSON with `session_id`, `transcript_path`, `cwd`, `permission_mode`, `effort` level; scope hooks per project in `.claude/settings.json` (shared) or `~/.claude/settings.json` (global).
 6. **Priming cheap**: `--append-system-prompt(-file)`, `--settings`, `--add-dir`, and CLAUDE.md auto-load at session start—all paid upfront; `--agent` and skills lazy-load only when used; no cross-session prompt cache persistence (each session starts fresh, but cache lifetime is 1 hour on subscription within plan usage, 5 min on usage credits).
-7. **Pro ($20) vs Max ($200)**: Same models (Fable 5.1, Opus 5, Sonnet 5 available on both); Pro has 5-hour session window + weekly limit; Max has 20× more tokens. Both use Claude subscription (no API key); Fable 5.1 available on both.
-8. **Context windows**: Fable 5.1 default 200K (1M variant via `fable[1m]`); Opus 5 and Sonnet 5 have native 1M windows; auto-compact at ~967K threshold; disable 1M with `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`.
+7. **Pro ($20) vs Max ($200)**: Same models (Fable 5.2, Opus 5, Sonnet 5 available on both); Pro has 5-hour session window + weekly limit; Max has 20× more tokens. Both use Claude subscription (no API key); Fable 5.2 available on both.
+8. **Context windows**: Fable 5.2 default 200K (1M variant via `fable[1m]`); Opus 5 and Sonnet 5 have native 1M windows; auto-compact at ~967K threshold; disable 1M with `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`.
 9. **Session lifecycle**: Each fresh session starts with no context; background sessions persist in state directories and reattach via `claude attach <id>`; transcripts saved to JSONL in session dir; `/clear` resets context; `/compact` summarizes history when approaching limits (not enforced end-of-session).
 10. **Detect out of fuel**: Subscription plan hit shows "You've hit your session limit" in stderr; exit code 1 on `-p` mode; `/usage` command shows rolling-window status; implement monitoring via `--max-budget-usd` with early failures at threshold.
 
@@ -84,7 +84,7 @@
 **Effort level** (how much thinking/iterations Claude applies):
 - `--effort <level>`: Session flag
   - Levels: `low`, `medium`, `high`, `xhigh`, `max`, `ultracode` (xhigh + dynamic workflows)
-  - Available on all modern models (Fable 5.1, Opus 5, Sonnet 5)
+  - Available on all modern models (Fable 5.2, Opus 5, Sonnet 5)
   - Example: `claude --effort high`
 
 - `CLAUDE_CODE_EFFORT_LEVEL` environment variable
@@ -381,7 +381,7 @@ Session transcript at `~/.claude/sessions/<id>/transcript.jsonl`:
 **Pro ($20):**
 - 5-hour rolling-window limit (resets every 5 hours)
 - Weekly cap
-- Same models as Max (Fable 5.1, Opus 5, Sonnet 5 available)
+- Same models as Max (Fable 5.2, Opus 5, Sonnet 5 available)
 - `/usage` shows rolling-window percentage
 
 **Max ($200):**
@@ -464,7 +464,7 @@ When you resume an old session after cache expires, the entire conversation hist
 
 ### Startup Token Estimates
 
-Example minimal session (Fable 5.1):
+Example minimal session (Fable 5.2):
 - System prompt + tool definitions: ~1K tokens
 - CLAUDE.md (100 lines): ~300 tokens
 - First user prompt: ~500 tokens
@@ -485,7 +485,7 @@ With prompt caching warm, subsequent messages reuse cached prefix, adding only n
 ### Models Available
 
 Both Pro and Max can run:
-- **Fable 5.1** (latest fast model, good for most tasks)
+- **Fable 5.2** (latest fast model, good for most tasks)
 - **Opus 5** (latest high-capability model, best for complex reasoning)
 - **Sonnet 5** (latest balanced model)
 - **Haiku 4.5** (fast, small model)
@@ -567,7 +567,7 @@ fi
 
 | Model | Default | 1M Variant | Availability |
 |-------|---------|-----------|--------------|
-| Fable 5.1 | 200K | Yes (`fable[1m]`) | Pro, Max, API |
+| Fable 5.2 | 200K | Yes (`fable[1m]`) | Pro, Max, API |
 | Opus 5 | 1M (native) | N/A | Pro, Max, API |
 | Sonnet 5 | 1M (native) | N/A | Pro, Max, API |
 | Haiku 4.5 | 200K | Yes (`haiku[1m]`) | Pro, Max, API |
@@ -630,7 +630,7 @@ fi
 
 ## Summary for Factory Implementation
 
-1. **Per-story launch:** `claude --model fable --effort high -p "story prompt"` for Fable-5.1 at high effort, one story per session.
+1. **Per-story launch:** `claude --model fable --effort high -p "story prompt"` for Fable-5.2 at high effort, one story per session.
 
 2. **Unattended execution:** Use `--bg` for background spawning, or `-p --output-format json` for headless + JSON cost parsing. Monitor via SessionStart/SessionEnd hooks posting to external tracker.
 
