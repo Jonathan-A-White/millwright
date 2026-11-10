@@ -101,6 +101,15 @@ func (s Seat) RigMemory() string {
 	return s.Memory
 }
 
+// RigMemoryFor is RigMemory for a story whose files key names files: for a rig
+// kept as facts, the facts about those files first (RenderBootMemory).
+func (s Seat) RigMemoryFor(files string) string {
+	if s.HasFacts {
+		return RenderBootMemory(s.Rig, s.Memory, s.Facts, files)
+	}
+	return s.Memory
+}
+
 // The vault's own layout, as far as anything outside the vault adapter needs to
 // name it: the directory the seats are in, and the directory a seat keeps its
 // memory of each rig in (ADR 0003). They are here rather than in the adapter
@@ -972,7 +981,7 @@ func BootPrompt(seat Seat, detail StoryDetail) string {
 	fmt.Fprintf(&b, "# The %s seat\n\n", seat.Name)
 	section(&b, seat.Charter)
 
-	memory := seat.RigMemory()
+	memory := seat.RigMemoryFor(detail.Merged().Files)
 	if memory != "" || len(seat.SkippedFacts) > 0 {
 		fmt.Fprintf(&b, "# The %s seat's memory of the rig %s\n\n", seat.Name, seat.Rig)
 		if memory != "" {
