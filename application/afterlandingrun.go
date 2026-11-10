@@ -64,28 +64,37 @@ type AfterLandingRun struct {
 // command that did not succeed is an error carrying the one line the landing
 // would have said, so that the command's exit status says so too.
 func (a AfterLandingRun) Run(ctx context.Context, rigName string) error {
+	_, err := a.run(ctx, rigName)
+	return err
+}
+
+// run is Run that also says, as afterFailure, where the command failed when it
+// passed the step the host names as the deploy and failed a later one and the
+// deployed mark was set for it (Ran.FailedAfterDeploy): the home's tick writes
+// DEPLOYED-CHECKED for the stories it carried from it (mw-t5shinh.45).
+func (a AfterLandingRun) run(ctx context.Context, rigName string) (afterFailure string, err error) {
 	rigName = strings.TrimSpace(rigName)
 	if rigName == "" {
-		return errors.New("running the after-landing command: which rig?")
+		return "", errors.New("running the after-landing command: which rig?")
 	}
 	if a.AfterLanding == nil {
-		return errors.New("running the after-landing command: it needs the host's after-landing commands")
+		return "", errors.New("running the after-landing command: it needs the host's after-landing commands")
 	}
 	dir, ok := a.Rigs[rigName]
 	if !ok || dir == "" {
-		return fmt.Errorf("the rig %s is not one this host has checked out (it has: %s)", rigName, strings.Join(a.rigNames(), ", "))
+		return "", fmt.Errorf("the rig %s is not one this host has checked out (it has: %s)", rigName, strings.Join(a.rigNames(), ", "))
 	}
 	command := a.AfterLanding.Command(rigName)
 	if command == "" {
-		return fmt.Errorf("this host names no after-landing command for %s", rigName)
+		return "", fmt.Errorf("this host names no after-landing command for %s", rigName)
 	}
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		return fmt.Errorf("the checkout of %s, %s, is not there", rigName, dir)
+		return "", fmt.Errorf("the checkout of %s, %s, is not there", rigName, dir)
 	}
 
 	release, err := takeAfterLandingSlot(ctx, a.Slot, dir, fmt.Sprintf("%s running the after-landing command of %s", SeatIdentity(MwSeat, a.Host), rigName))
 	if err != nil {
-		return err
+		return "", err
 	}
 	wait := a.Wait
 	if wait == nil {
@@ -103,7 +112,7 @@ func (a AfterLandingRun) Run(ctx context.Context, rigName string) error {
 		a.say("%s", retried)
 	}
 	if runErr != nil {
-		return errors.New(afterLandingLine(command, "could not be run: "+firstLine(runErr.Error())))
+		return "", errors.New(afterLandingLine(command, "could not be run: "+firstLine(runErr.Error())))
 	}
 	if !ran.Succeeded() {
 		// The step the host names as the deploy passed and a later one failed: the
@@ -118,31 +127,35 @@ func (a AfterLandingRun) Run(ctx context.Context, rigName string) error {
 					a.say("%s", note)
 				} else {
 					ran.DeployStep, ran.DeployedAt = step, head
+					afterFailure = ran.FailedAfterDeploy(step)
+					a.deployedChecked(ctx, rigName, dir, previous, afterFailure)
 				}
 			}
 		}
-		return errors.New(ran.Line())
+		return afterFailure, errors.New(ran.Line())
 	}
 	a.say("%s", ran.Line())
 	if note := markDeployed(ctx, a.Built, a.Checkout, rigName, dir); note != "" {
 		a.say("%s", note)
 	} else {
-		a.deployedChecked(ctx, rigName, dir, previous)
+		a.deployedChecked(ctx, rigName, dir, previous, "")
 	}
 	notes, failed := RestartFactoryUnits(ctx, a.Units, rigName)
 	for _, note := range notes {
 		a.say("%s", note)
 	}
 	if len(failed) > 0 {
-		return errors.New(UnitRestartFailedLine)
+		return "", errors.New(UnitRestartFailedLine)
 	}
-	return nil
+	return "", nil
 }
 
 // deployedChecked writes DEPLOYED-CHECKED on the stories this run deployed: those
 // landed after the deployed mark the rig had before it, up to the checkout's
 // commit now. A rig that had no mark has no such range, and is said so.
-func (a AfterLandingRun) deployedChecked(ctx context.Context, rigName, dir, previous string) {
+// afterFailure is where the command failed after its deploy step, empty for a
+// whole pass.
+func (a AfterLandingRun) deployedChecked(ctx context.Context, rigName, dir, previous, afterFailure string) {
 	if a.Landed == nil || a.Live.Web == nil || a.Checkout == nil {
 		return
 	}
@@ -154,7 +167,7 @@ func (a AfterLandingRun) deployedChecked(ctx context.Context, rigName, dir, prev
 		a.say("%s had no deployed mark, so the stories this run deployed are not known and no DEPLOYED-CHECKED was written", rigName)
 		return
 	}
-	for _, note := range deployedCheckedSince(ctx, a.Live, a.Landed, rigName, dir, previous, head) {
+	for _, note := range deployedCheckedSince(ctx, a.Live, a.Landed, rigName, dir, previous, head, afterFailure) {
 		a.say("%s", note)
 	}
 }

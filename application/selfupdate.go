@@ -407,7 +407,7 @@ func (s SelfUpdate) deployRig(ctx context.Context, rig, dir string) []string {
 
 	var out strings.Builder
 	run := AfterLandingRun{AfterLanding: s.After, Slot: s.Slot, Rigs: s.Rigs, Host: s.Host, Out: &out, Built: s.Built, Checkout: s.Checkout}
-	runErr := run.Run(ctx, rig)
+	afterFailure, runErr := run.run(ctx, rig)
 	moved := fmt.Sprintf("%s %s → %s", words, updatedRevision(before), updatedRevision(head))
 	if !advanced.Moved {
 		moved = fmt.Sprintf("%s at %s, not yet deployed", words, updatedRevision(head))
@@ -417,8 +417,15 @@ func (s SelfUpdate) deployRig(ctx context.Context, rig, dir string) []string {
 		// The run passed the step the host names as the deploy and failed a later
 		// one, and set the deployed mark: the commit is live, so this is no failed
 		// deploy to count and try again (mw-gq6.866).
-		return []string{fmt.Sprintf("%s, deployed by the home, but the command failed after the deploy: %s; run mw after-landing %s by hand if the later step matters",
+		notes := []string{fmt.Sprintf("%s, deployed by the home, but the command failed after the deploy: %s; run mw after-landing %s by hand if the later step matters",
 			moved, firstLine(runErr.Error()), rig)}
+		if afterFailure == "" {
+			return notes
+		}
+		if deployed == "" {
+			deployed = before
+		}
+		return append(notes, s.deployedChecked(ctx, rig, dir, deployed, head, afterFailure)...)
 	}
 	if runErr != nil {
 		tries++
@@ -437,17 +444,18 @@ func (s SelfUpdate) deployRig(ctx context.Context, rig, dir string) []string {
 	if deployed == "" {
 		deployed = before
 	}
-	return append(notes, s.deployedChecked(ctx, rig, dir, deployed, head)...)
+	return append(notes, s.deployedChecked(ctx, rig, dir, deployed, head, "")...)
 }
 
 // deployedChecked writes DEPLOYED-CHECKED, by DeployCheck.Write, on each story the
 // home's deploy of rig carried: those merged into the checkout after from, the
-// commit the rig was last deployed at, up to head. It is called only after the
-// rig's command passed whole.
-func (s SelfUpdate) deployedChecked(ctx context.Context, rig, dir, from, head string) []string {
+// commit the rig was last deployed at, up to head. It is called after the rig's
+// command passed whole, or (afterFailure set) after it passed its deploy step and
+// failed a later one.
+func (s SelfUpdate) deployedChecked(ctx context.Context, rig, dir, from, head, afterFailure string) []string {
 	words := "self-update: " + rig
 	var notes []string
-	for _, note := range deployedCheckedSince(ctx, s.Live, s.Landed, rig, dir, from, head) {
+	for _, note := range deployedCheckedSince(ctx, s.Live, s.Landed, rig, dir, from, head, afterFailure) {
 		notes = append(notes, words+": "+note)
 	}
 	return notes
@@ -455,9 +463,11 @@ func (s SelfUpdate) deployedChecked(ctx context.Context, rig, dir, from, head st
 
 // deployedCheckedSince is what every path that deploys a rig by its checkout
 // shares (mw-t5shinh.35): the stories merged into the checkout at dir after from,
-// up to head, each given a DEPLOYED-CHECKED by live.Write. It is called only after
-// the rig's command passed whole. A nil landed log or no web checks nothing.
-func deployedCheckedSince(ctx context.Context, live DeployCheck, landed LandedLog, rig, dir, from, head string) []string {
+// up to head, each given a DEPLOYED-CHECKED by live.Write. It is called after the
+// rig's command passed whole, or (afterFailure set, mw-t5shinh.45) after it passed
+// its deploy step and failed a later one and the deployed mark was set. A nil
+// landed log or no web checks nothing.
+func deployedCheckedSince(ctx context.Context, live DeployCheck, landed LandedLog, rig, dir, from, head, afterFailure string) []string {
 	if landed == nil || live.Web == nil {
 		return nil
 	}
@@ -469,7 +479,7 @@ func deployedCheckedSince(ctx context.Context, live DeployCheck, landed LandedLo
 	for _, id := range carried.Stories {
 		stories = append(stories, liveStory{id: id})
 	}
-	return live.Write(ctx, true, Deployed{Rig: rig, Commit: head, Version: carried.Version, Stories: stories})
+	return live.Write(ctx, true, Deployed{Rig: rig, Commit: head, Version: carried.Version, AfterFailure: afterFailure, Stories: stories})
 }
 
 // Look is the dry form of a tick's update: it moves, fetches and runs nothing,

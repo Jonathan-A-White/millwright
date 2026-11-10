@@ -635,6 +635,11 @@ type NextReport struct {
 	// AfterLandingPassed says the rig's after-landing command ran on this host and
 	// passed whole: what the live check waits for.
 	AfterLandingPassed bool
+	// AfterLandingFailure is where the command failed when it passed the step the
+	// host names as the deploy and failed a later one, and the deployed mark was
+	// set for it (Ran.FailedAfterDeploy); empty otherwise. The live check runs on
+	// it too (mw-t5shinh.45).
+	AfterLandingFailure string
 	// Why is the reason nothing landed, empty when something did, and Reason is
 	// the code it is filed under. Refused says it is the branch itself the
 	// checks turned away — no commits, a signed commit, open formula steps,

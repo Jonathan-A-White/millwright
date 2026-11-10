@@ -1295,8 +1295,11 @@ has no checkout of, or names no command for, is refused. When it passes whole
 on a rig whose file names a `site_url` or a `healthz_url`, it writes
 DEPLOYED-CHECKED (never VERIFIED) on each story landed since the rig's previous
 deployed mark, through the same live check the home's tick uses; a rig with no
-previous mark is said to have none and gets no comment. See
-`features/after_landing.feature`.
+previous mark is said to have none and gets no comment. A run that passes the
+step the host names as the deploy and fails a later one (the deployed mark is set,
+mw-gq6.866) writes the same comments, each with an `After-landing: failed after the
+deploy, at step N: <the step>` line, and so do a landing's own after-landing and the
+home's tick (mw-t5shinh.45). See `features/after_landing.feature`.
 
 When the rig is `millwright` and its command succeeded, the landing then runs
 `systemctl --user try-restart mw-view-follow.service`, so that the follower
