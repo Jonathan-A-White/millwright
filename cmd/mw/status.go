@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"path/filepath"
 	"time"
 
@@ -164,7 +165,8 @@ func newStatusCmd() *cobra.Command {
 				return err
 			}
 
-			tracker := statusTracker(dir, host)
+			tracker, stop := keptStatusTracker(dir, host, cmd.ErrOrStderr())
+			defer stop()
 			events, err := eventsShipping(host)
 			if err != nil {
 				return err
@@ -299,6 +301,16 @@ func newStatusCmd() *cobra.Command {
 // and the notes are read once (mw-gq6.659); status writes nothing.
 func statusTracker(dir, host string) *beads.Gateway {
 	return mwGateway(dir, host, beads.WithRunCache())
+}
+
+// keptStatusTracker is statusTracker with every read it makes that a connection
+// to the beads server can answer made over one connection, kept open for the
+// command's life: the list of every bead is three queries and the notes one
+// each, and a bd is started only when the connection fails, said on said. On a
+// host with no server to reach they are read by bd as before (mw-t5shinh.13).
+func keptStatusTracker(dir, host string, said io.Writer) (*beads.Gateway, func()) {
+	stop := keepBeadsConnection(dir, said)
+	return statusTracker(dir, host), stop
 }
 
 // eventsShipping is where mw status reads the event follower's sending from,

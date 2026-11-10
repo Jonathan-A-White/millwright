@@ -138,14 +138,19 @@ func rfc3339Of(text string) string {
 }
 
 // beadsListQuery, beadLabelsQuery and beadEdgesQuery are `bd list --all` as the
-// served database holds it: every bead with its lease and a count of its
-// comments, every label, every dependency (an edge to a bead, a wisp or an
-// external reference, whichever it names).
+// served database holds it, less the mail and the event beads: every other bead
+// with its lease and a count of its comments, every label and every dependency
+// of those (an edge to a bead, a wisp or an external reference, whichever it
+// names). There were 14,323 mails and 10,295 events among 64,776 beads, none of
+// them work, and the listing is read for every view the follower builds
+// (mw-t5shinh.13). A caller that wants one of them asks for it by id.
 const (
-	beadsListQuery  = beadColumns + " order by i.created_at, i.id"
-	beadLabelsQuery = "select issue_id, label from labels order by issue_id, label"
-	beadEdgesQuery  = "select issue_id, coalesce(depends_on_issue_id, depends_on_wisp_id, depends_on_external) as depends_on_id, type from dependencies" +
-		" order by issue_id, created_at"
+	listedWhere     = "i.issue_type not in ('mail', 'event')"
+	beadsListQuery  = beadColumns + " where " + listedWhere + " order by i.created_at, i.id"
+	beadLabelsQuery = "select l.issue_id, l.label from labels l join issues i on i.id = l.issue_id where " + listedWhere +
+		" order by l.issue_id, l.label"
+	beadEdgesQuery = "select d.issue_id, coalesce(d.depends_on_issue_id, d.depends_on_wisp_id, d.depends_on_external) as depends_on_id, d.type" +
+		" from dependencies d join issues i on i.id = d.issue_id where " + listedWhere + " order by d.issue_id, d.created_at"
 )
 
 // beadColumns is a bead as a listing reads it, its lease and the count of its
@@ -162,8 +167,8 @@ const beadColumns = "select i.id as id, i.title as title, i.description as descr
 type listingQueries struct{ beads, labels, edges string }
 
 // listAllOverConnection is the beads `bd list --all --json` prints, read over
-// the kept connection in three queries; ok is false when there is no
-// connection or it failed, and the caller starts a bd.
+// the kept connection in three queries, less mail and event beads; ok is false
+// when there is no connection or it failed, and the caller starts a bd.
 func (g *Gateway) listAllOverConnection(ctx context.Context) (all []bead, ok bool) {
 	db := g.keptDB()
 	if db == nil {

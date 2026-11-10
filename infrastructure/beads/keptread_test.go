@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +30,36 @@ type keptServer struct {
 	fail  atomic.Bool
 	// queued says that a story in hand carries the run:queued label.
 	queued atomic.Bool
+	// mailed says that the vault also holds a mail bead and an event bead, which
+	// a query that leaves both types out does not return.
+	mailed atomic.Bool
+
+	mu   sync.Mutex
+	seen []string
+}
+
+// asked is every query the server was sent, in order.
+func (s *keptServer) asked() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.seen...)
+}
+
+// listingQueries is the queries sent for the beads, the labels and the edges of
+// a listing, in the order they were sent.
+func (s *keptServer) listingQueries() (beads, labels, edges []string) {
+	for _, q := range s.asked() {
+		l := strings.ToLower(q)
+		switch {
+		case strings.Contains(l, "from issues i") && strings.Contains(l, "leases"):
+			beads = append(beads, q)
+		case strings.Contains(l, "from labels"):
+			labels = append(labels, q)
+		case strings.Contains(l, "from dependencies"):
+			edges = append(edges, q)
+		}
+	}
+	return beads, labels, edges
 }
 
 type keptConn struct{ s *keptServer }
@@ -59,6 +92,9 @@ func (c keptConn) QueryContext(_ context.Context, query string, _ []driver.Named
 	if c.s.fail.Load() {
 		return nil, errors.New("server went away")
 	}
+	c.s.mu.Lock()
+	c.s.seen = append(c.s.seen, query)
+	c.s.mu.Unlock()
 	q := strings.ToLower(query)
 	switch {
 	case strings.Contains(q, "dolt_hashof_db"):
@@ -67,11 +103,26 @@ func (c keptConn) QueryContext(_ context.Context, query string, _ []driver.Named
 		cols := []string{"id", "title", "description", "acceptance_criteria", "status", "issue_type", "assignee",
 			"estimated_minutes", "created_at", "started_at", "updated_at", "closed_at", "priority", "metadata",
 			"lease_expires_at", "comment_count"}
-		return &keptRows{cols: cols, rows: [][]driver.Value{
+		rows := [][]driver.Value{
 			{"t-1", "Epic", "", "", "open", "epic", nil, nil, "2026-10-01 10:00:00", nil, "2026-10-01 10:00:00", nil, int64(1), `{"rig":"millwright"}`, nil, int64(0)},
 			{"t-1.1", "By hand", "do it", "1. it works", "in_progress", "task", "mw@laptop", int64(30), "2026-10-01 10:05:00", "2026-10-01 11:00:00", "2026-10-01 11:00:00", nil, int64(2), `{}`, "2026-10-01 11:05:00", int64(1)},
 			{"t-0", "Long gone", "", "", "closed", "task", nil, nil, "2026-08-01 00:00:00", nil, "2026-08-01 00:00:00", "2026-08-01 00:00:00", int64(2), `{}`, nil, int64(3)},
-		}}, nil
+		}
+		if c.s.mailed.Load() {
+			rows = append(rows,
+				[]driver.Value{"m-1", "A mail", "long body", "", "open", "mail", "mw@laptop", nil, "2026-10-01 12:00:00", nil, "2026-10-01 12:00:00", nil, int64(2), `{}`, nil, int64(0)},
+				[]driver.Value{"e-1", "An event", "long body", "", "closed", "event", nil, nil, "2026-10-01 12:01:00", nil, "2026-10-01 12:01:00", "2026-10-01 12:01:00", int64(4), `{}`, nil, int64(0)})
+		}
+		if leavesOut(q, "mail", "event") {
+			kept := rows[:0:0]
+			for _, row := range rows {
+				if row[5] != "mail" && row[5] != "event" {
+					kept = append(kept, row)
+				}
+			}
+			rows = kept
+		}
+		return &keptRows{cols: cols, rows: rows}, nil
 	case strings.Contains(q, "hitl:todo"):
 		return &keptRows{cols: []string{"id", "metadata"}, rows: [][]driver.Value{
 			{"td-1", `{"todo_due":"2026-10-14T08:00:00Z"}`},
@@ -116,6 +167,22 @@ func (c keptConn) QueryContext(_ context.Context, query string, _ []driver.Named
 	}
 	return nil, fmt.Errorf("unexpected query %q", query)
 }
+
+// leavesOut says whether the query's where leaves out the types, as `i.issue_type
+// not in ('mail', 'event')` does.
+func leavesOut(lowered string, types ...string) bool {
+	where, found := strings.CutPrefix(lowered[strings.Index(lowered, " where ")+1:], "where ")
+	if !found {
+		return false
+	}
+	for _, t := range types {
+		if !strings.Contains(where, "'"+t+"'") || !strings.Contains(where, "not in") {
+			return false
+		}
+	}
+	return true
+}
+
 func (r *keptRows) Columns() []string { return r.cols }
 func (r *keptRows) Close() error      { return nil }
 func (r *keptRows) Next(dest []driver.Value) error {
@@ -383,5 +450,177 @@ func TestTodoDueCardsErrWithoutAConnectionSoTheReadyCardsAreListed(t *testing.T)
 	}
 	if !strings.Contains(said.String(), "the To do cards") || !strings.Contains(said.String(), "bd reads") {
 		t.Fatalf("expected the log to say the read failed and bd reads instead, got %q", said.String())
+	}
+}
+
+// mw-t5shinh.13: the listing read every bead, 14,323 mails and 10,295 events
+// among them (38% of the rows), on every view the follower built. A listing
+// read over the kept connection leaves both types out in each of its three
+// queries, as the live work's reads do, and so holds no mail and no event.
+func TestAListingOverTheKeptConnectionLeavesMailAndEventsOutOfItsThreeQueries(t *testing.T) {
+	s := &keptServer{}
+	s.mailed.Store(true)
+	program, _ := standInSnapshotProgram(t, bdListing, bdTable)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(s.open(t)))
+
+	if _, err := g.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	queries, labels, edges := s.listingQueries()
+	for name, sent := range map[string][]string{"beads": queries, "labels": labels, "edges": edges} {
+		if len(sent) != 1 {
+			t.Fatalf("expected one %s query, got %d", name, len(sent))
+		}
+		lowered := strings.ToLower(sent[0])
+		where := lowered[strings.Index(lowered, " where ")+1:]
+		if !strings.Contains(where, "'mail'") || !strings.Contains(where, "'event'") {
+			t.Errorf("expected the %s query to name mail and event in its where, got %q", name, sent[0])
+		}
+	}
+}
+
+// A snapshot holds no mail bead, and a view that asks for one by id is answered
+// by the gateway.
+func TestASnapshotAsksTheGatewayForAMailBeadItDoesNotHold(t *testing.T) {
+	s := &keptServer{}
+	s.mailed.Store(true)
+	dir := t.TempDir()
+	asked := filepath.Join(dir, "asked")
+	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$*" >> %[1]q
+case "$*" in
+*" show "*) echo '[{"id":"m-1","title":"A mail","description":"long body","status":"open","issue_type":"mail","assignee":"mw@laptop","priority":2}]' ;;
+*) echo '[]' ;;
+esac
+`, asked)
+	program := filepath.Join(dir, "bd-show")
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(s.open(t)))
+	tracker, err := g.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	details, err := tracker.ShowBeads(context.Background(), []string{"t-1.1", "m-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(details) != 2 || details[0].Story.ID != "t-1.1" || details[1].Story.ID != "m-1" || details[1].Description != "long body" {
+		t.Fatalf("expected the story and the mail bead, in the order asked, got %+v", details)
+	}
+	if got := bdsStarted(t, asked); got != 1 {
+		t.Errorf("expected the one bd show for the mail bead, got %d bd", got)
+	}
+}
+
+// The Postern view built from a vault that holds mail and event beads is the
+// view built from one that holds none: they were never in it.
+func TestTheViewBuiltFromAVaultWithMailAndEventsIsTheViewWithoutThem(t *testing.T) {
+	build := func(mailed bool) string {
+		s := &keptServer{}
+		s.mailed.Store(mailed)
+		program, _ := standInSnapshotProgram(t, bdListing, bdTable)
+		g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(s.open(t)))
+		view := application.PosternView{
+			Tracker: g, Notes: g, Host: "laptop",
+			Now: func() time.Time { return time.Date(2026, 10, 18, 7, 0, 0, 0, time.UTC) },
+		}
+		doc, err := view.Build(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}
+	with, without := build(true), build(false)
+	if !strings.Contains(without, "t-1.1") {
+		t.Fatalf("expected the story in the view, got %s", without)
+	}
+	if with != without {
+		t.Errorf("expected the same view with mail and events in the vault:\n with:    %s\n without: %s", with, without)
+	}
+}
+
+// Under a run cache the snapshot is the cache's one listing, not a second whole
+// read beside it.
+func TestUnderARunCacheSnapshotAndTheCacheShareOneListingRead(t *testing.T) {
+	s := &keptServer{}
+	program, asked := standInSnapshotProgram(t, bdListing, bdTable)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(s.open(t)), beads.WithRunCache())
+
+	if _, err := g.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.BeadGraph(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.StoriesSince(context.Background(), time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	queries, labels, edges := s.listingQueries()
+	if len(queries) != 1 || len(labels) != 1 || len(edges) != 1 {
+		t.Errorf("expected one read of the beads, labels and edges, got %d, %d and %d", len(queries), len(labels), len(edges))
+	}
+	if got := bdsStarted(t, asked); got != 0 {
+		t.Errorf("expected no bd while the connection answers, got %d", got)
+	}
+}
+
+// A kept read that fails mid-run leaves the rest of the run reading by bd, and
+// the connection says so once.
+func TestAKeptReadThatFailsMidRunLeavesTheRestOfTheRunToBd(t *testing.T) {
+	s := &keptServer{}
+	dir := t.TempDir()
+	asked := filepath.Join(dir, "asked")
+	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$*" >> %[1]q
+case "$*" in
+*" kv "*) echo '{"some.note":"by bd"}' ;;
+*" list "*) cat <<'LISTING'
+%[2]s
+LISTING
+;;
+*) echo '[]' ;;
+esac
+`, asked, bdListing)
+	program := filepath.Join(dir, "bd-fallback")
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var said strings.Builder
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(s.open(t)),
+		beads.WithKeptSaid(&said), beads.WithRunCache())
+	ctx := context.Background()
+
+	notes, err := g.NotesWithPrefix(ctx, "some.")
+	if err != nil || notes["some.note"] != "its value" {
+		t.Fatalf("expected the note over the connection, got %v, %v", notes, err)
+	}
+	if got := bdsStarted(t, asked); got != 0 {
+		t.Fatalf("expected no bd while the connection answers, got %d", got)
+	}
+	s.fail.Store(true)
+	if _, err := g.Snapshot(ctx); err != nil {
+		t.Fatalf("a failing connection must not fail the read: %v", err)
+	}
+	notes, err = g.NotesWithPrefix(ctx, "some.")
+	if err != nil || notes["some.note"] != "by bd" {
+		t.Fatalf("expected the note by bd for the rest of the run, got %v, %v", notes, err)
+	}
+	if got := strings.Count(said.String(), "the kept beads connection failed"); got != 1 {
+		t.Errorf("expected the one line saying so, got %d: %q", got, said.String())
+	}
+	if got := bdsStarted(t, asked); got != 3 {
+		t.Errorf("expected the one bd list, the snapshot's one bd sql and the one bd kv list, got %d bd", got)
+	}
+	if _, err := g.StoriesSince(ctx, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := bdsStarted(t, asked); got != 3 {
+		t.Errorf("expected the listing already read to be shared, got %d bd", got)
 	}
 }

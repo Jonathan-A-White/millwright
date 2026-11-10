@@ -38,12 +38,9 @@ var _ application.HeldStories = (*Gateway)(nil)
 // `bd sql`'s own shape, and starts no bd unless the connection fails
 // (mw-gq6.600).
 func (g *Gateway) Snapshot(ctx context.Context) (application.WorkTracker, error) {
-	all, kept := g.listAllOverConnection(ctx)
-	if !kept {
-		var err error
-		if all, err = g.listing(ctx); err != nil {
-			return nil, err
-		}
+	all, err := g.snapshotListing(ctx)
+	if err != nil {
+		return nil, err
 	}
 	s := newSnapshot(g, all)
 	// The listing is enough to build a view should this read fail, so the
@@ -54,6 +51,20 @@ func (g *Gateway) Snapshot(ctx context.Context) (application.WorkTracker, error)
 		s.notes, s.comments, s.commentsHeld = notes, comments, held
 	}
 	return s, nil
+}
+
+// snapshotListing is the beads a snapshot holds: every one but the mail and the
+// event beads, which are never an epic, a story or a step, and which a snapshot
+// asked for by id reads through the gateway. Under a run cache it is the one
+// listing the cache keeps, and not a second read of every bead; otherwise it is
+// read over the kept connection when there is one, and by bd when there is not.
+func (g *Gateway) snapshotListing(ctx context.Context) ([]bead, error) {
+	if g.cache == nil {
+		if all, ok := g.listAllOverConnection(ctx); ok {
+			return all, nil
+		}
+	}
+	return g.listing(ctx, cachedLeaves...)
 }
 
 // newSnapshot is the listing indexed, with no notes and no comments.

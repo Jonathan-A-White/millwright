@@ -14,15 +14,29 @@ import (
 // more are the command's other options for those Gateways. A host with no
 // server to reach leaves the Gateways as they were, reading by bd.
 func keepBeadsConnection(vault string, said io.Writer, more ...beads.Option) (stop func()) {
+	stop, _ = keepBeadsConnectionIfServed(vault, said, more...)
+	return stop
+}
+
+// openBeadsServer is how a command reaches the vault's beads server: a test
+// swaps it for a stand-in.
+var openBeadsServer = beads.ServerHeadDB
+
+// keepBeadsConnectionIfServed is keepBeadsConnection that also says whether
+// there is a server to reach (false on a host that reads by bd), for a command
+// whose reads are better made over the connection than by bd only when there
+// is one.
+func keepBeadsConnectionIfServed(vault string, said io.Writer, more ...beads.Option) (stop func(), served bool) {
 	options := append(more, beads.WithKeptSaid(said))
 	closeDB := func() {}
-	if db := beads.ServerHeadDB(vault); db != nil {
+	if db := openBeadsServer(vault); db != nil {
 		options = append(options, beads.WithHeadDB(db))
 		closeDB = func() { db.Close() }
+		served = true
 	}
 	followerGatewayOptions = options
 	return func() {
 		followerGatewayOptions = nil
 		closeDB()
-	}
+	}, served
 }
