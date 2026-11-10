@@ -30,6 +30,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
 - [The weekly loop's brief](#the-weekly-loops-brief)
 - [The factory's investments](#the-factorys-investments)
 - [Changing one key of the config file](#changing-one-key-of-the-config-file)
+  - [The `[session]` table: deny rules for story sessions](#the-session-table-deny-rules-for-story-sessions)
 - [Setting a story's path](#setting-a-storys-path)
 - [Booting a session into a seat](#booting-a-session-into-a-seat)
 - [Dispatching a story](#dispatching-a-story)
