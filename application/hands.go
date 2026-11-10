@@ -30,6 +30,11 @@ func HandsSupersededKey(bead, id string) string { return "hands.superseded." + b
 // approved or run (mw-gq6.571).
 func HandsRetiredKey(bead, id string) string { return "hands.retired." + bead + "." + id }
 
+// HandsHitlBeforeKey is the note that says a bead was labelled hitl before its
+// first hands step: mw did not add the label, so dropHitlWhenNoLiveStep leaves
+// it on when the last step is done (mw-gq6.1057).
+func HandsHitlBeforeKey(bead string) string { return "hands.hitl-before." + bead }
+
 // HandsApprovalKey is the note an approval is marked run under once mw has
 // started its step, holding the txid that carried it: an approval runs once.
 func HandsApprovalKey(approvalID string) string { return "hands.approval." + approvalID }
@@ -116,6 +121,10 @@ type HandsAddRequest struct {
 	// each is made to block Bead (AddBlocker) before the step is kept, so the
 	// view marks the step waiting and the push says what it waits on.
 	After []string
+	// Filed says mw itself filed the bead hitl for this step (a backend swap),
+	// so the label is its own to take off when the step is done, as if hands
+	// add had put it there.
+	Filed bool
 }
 
 // PosternSender sends one message to the Governor: PosternSend, narrowed to
@@ -248,6 +257,7 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 		steps[i] = record
 		replaced = true
 	}
+	firstStep := len(steps) == 0
 	if !replaced {
 		steps = append(steps, record)
 	}
@@ -277,7 +287,15 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 	if err := h.Tracker.CommentOnStory(ctx, req.Bead, handsStepComment(req.Step, replaced)); err != nil {
 		return HandsStepRecord{}, fmt.Errorf("mw hands add: commenting the step on %s: %w", req.Bead, err)
 	}
-	if !hasLabel(found[0].Labels, LabelHitl) {
+	if hasLabel(found[0].Labels, LabelHitl) {
+		// The label was there before the bead's first step and was not put there
+		// by mw: keep that, so retiring the last step does not take it off.
+		if firstStep && !req.Filed {
+			if err := h.Notes.SetNote(ctx, HandsHitlBeforeKey(req.Bead), "the bead was hitl before its first hands step"); err != nil {
+				return HandsStepRecord{}, fmt.Errorf("mw hands add: keeping that %s was already on %s: %w", LabelHitl, req.Bead, err)
+			}
+		}
+	} else {
 		if err := h.Tracker.AddLabel(ctx, req.Bead, LabelHitl); err != nil {
 			return HandsStepRecord{}, fmt.Errorf("mw hands add: labelling %s %s: %w", req.Bead, LabelHitl, err)
 		}
@@ -556,9 +574,19 @@ func (h HandsRetire) Run(ctx context.Context, req HandsRetireRequest) error {
 // whether it did. Every path that finishes a hands step (mw hands retire, a
 // Postern Run tap, a backend swap) calls it, so a child filed by copying the
 // bead's labels is not parked on a human step (mw-gq6.750, mw-gq6.1011). A bead
-// without the label, or with a live step left, is not touched.
+// without the label, one that had it before its first step (HandsHitlBeforeKey),
+// or one with a live step left, is not touched.
 func dropHitlWhenNoLiveStep(ctx context.Context, tracker WorkTracker, notes PosternNotes, bead string, labels []string, steps []HandsStepRecord) (bool, error) {
 	if !hasLabel(labels, LabelHitl) {
+		return false, nil
+	}
+	// A bead that was hitl before its first step keeps the label: hands add did
+	// not put it there (mw-gq6.1057).
+	before, err := notes.Note(ctx, HandsHitlBeforeKey(bead))
+	if err != nil {
+		return false, fmt.Errorf("reading whether %s was %s before its steps: %w", bead, LabelHitl, err)
+	}
+	if strings.TrimSpace(before) != "" {
 		return false, nil
 	}
 	live, err := handsLiveSteps(ctx, notes, bead, steps)
