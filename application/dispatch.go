@@ -569,13 +569,19 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 	words := dispatchLogWords(report, err)
 	if gone, unreachable := Unreachable(err); unreachable && d.Log != nil && !d.DryRun {
 		d.print(words + "\n")
-		err = d.skippedTick(ctx, gone)
+		var raised bool
+		if err, raised = d.skippedTick(ctx, gone); raised {
+			d.mailSkippedAlarm(ctx, gone, err, &report)
+		}
 	}
 	// A local network fault that lasts is not to go unseen: the unit leaves with
 	// NetworkFaultExit, a success to the timer, tick after tick, so the third in a
 	// row fails it instead, once (mw-gq6.650).
 	if fault, faulted := LocalFault(err); faulted && d.Log != nil && !d.DryRun {
-		err = d.faultedTick(ctx, fault, err)
+		var raised bool
+		if err, raised = d.faultedTick(ctx, fault, err); raised {
+			d.mailFaultedAlarm(ctx, err, &report)
+		}
 	}
 	// A mw that cannot update itself runs old unseen, tick after tick, with the
 	// tick going on: the third failed self-update in a row fails the unit, once,
@@ -602,30 +608,70 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 
 // skippedTick is what Run reports of a tick that could not reach a remote: nil,
 // unless this is the SkippedTicksAlarm'th in a row, counted from the log as it
-// stands before this tick's own line is added.
-func (d Dispatch) skippedTick(ctx context.Context, gone *RemoteUnreachable) error {
+// stands before this tick's own line is added; raised says it is that one.
+func (d Dispatch) skippedTick(ctx context.Context, gone *RemoteUnreachable) (err error, raised bool) {
 	before := CountTicks(ctx, d.Log, DispatchOutcome)
 	if before.Skipped+1 != SkippedTicksAlarm {
-		return nil
+		return nil, false
 	}
 	return fmt.Errorf("dispatching on %s: %s unreachable for %d ticks in a row since %s: %s",
-		d.Host, gone.Remote, SkippedTicksAlarm, before.FirstSkipped.UTC().Format(time.RFC3339), oneLine(gone.Said))
+		d.Host, gone.Remote, SkippedTicksAlarm, before.FirstSkipped.UTC().Format(time.RFC3339), oneLine(gone.Said)), true
 }
 
 // faultedTick is what Run reports of a tick that gave up waiting for the network:
 // the fault as it was, with its exit status 7, unless this is the
 // FaultedTicksAlarm'th in a row, counted from the log as it stands before this
-// tick's own line is added; that one is a plain failure naming the fault.
-func (d Dispatch) faultedTick(ctx context.Context, fault *LocalNetworkFault, err error) error {
+// tick's own line is added; that one is a plain failure naming the fault, and
+// raised says it is that one.
+func (d Dispatch) faultedTick(ctx context.Context, fault *LocalNetworkFault, err error) (_ error, raised bool) {
 	before := NewestRun(ctx, d.Log, DispatchOutcome)
 	if before.Outcome != TickFault {
 		before = TickRun{}
 	}
 	if before.Count+1 != FaultedTicksAlarm {
-		return err
+		return err, false
 	}
 	return fmt.Errorf("dispatching on %s: local network fault for %d ticks in a row since %s: %s",
-		d.Host, FaultedTicksAlarm, before.First.UTC().Format(time.RFC3339), oneLine(fault.Said))
+		d.Host, FaultedTicksAlarm, before.First.UTC().Format(time.RFC3339), oneLine(fault.Said)), true
+}
+
+// mailSkippedAlarm tells the Mayor, once, that a remote could not be reached for
+// SkippedTicksAlarm ticks in a row (mw-gq6.1071). Failing the unit is not enough
+// to be heard: mw-unit-failed@ mails only a second failure with no clean run
+// between, and the tick after this one skips with a clean exit. skippedTick
+// raises the alarm on the one tick whose count equals SkippedTicksAlarm, which is
+// the once.
+func (d Dispatch) mailSkippedAlarm(ctx context.Context, gone *RemoteUnreachable, alarm error, report *DispatchReport) {
+	d.mailAlarm(ctx, fmt.Sprintf("%s: %s unreachable from %s", MailBlocked, gone.Remote, d.Host), alarm,
+		"This host dispatches nothing while it cannot reach "+gone.Remote+": each tick is skipped and claims nothing. "+
+			"`mw status` shows the count under TICKS, beside the dispatch, as remote unreachable, until a tick gets through.", report)
+}
+
+// mailFaultedAlarm tells the Mayor, once, that this host's own network faulted
+// for FaultedTicksAlarm ticks in a row (mw-gq6.1071), for the reason
+// mailSkippedAlarm is sent: the unit that exits NetworkFaultExit is a success to
+// the timer, so the failed unit run is followed by a clean one.
+func (d Dispatch) mailFaultedAlarm(ctx context.Context, alarm error, report *DispatchReport) {
+	d.mailAlarm(ctx, fmt.Sprintf("%s: local network fault on %s", MailBlocked, d.Host), alarm,
+		"This host cannot resolve names, so it dispatches nothing: each tick is given up and claims nothing. "+
+			"`mw status` shows the count under TICKS, beside the dispatch, as local network fault, until a tick gets through.", report)
+}
+
+// mailAlarm sends the Mayor an alarm's text and what it means. A mail that cannot
+// be sent is a note in the report, as mailFailedUpdate's is; no Mailbox sends
+// nothing.
+func (d Dispatch) mailAlarm(ctx context.Context, subject string, alarm error, meaning string, report *DispatchReport) {
+	if d.Mailbox == nil {
+		return
+	}
+	if _, err := d.Mailbox.Send(ctx, NewMessage{
+		From:    SeatIdentity(MwSeat, d.Host),
+		To:      MayorMailbox,
+		Subject: subject,
+		Body:    alarm.Error() + "\n\n" + meaning + "\n",
+	}); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the mail to %s that %q could not be sent: %v", MayorMailbox, subject, err))
+	}
 }
 
 // failedUpdate is the failure Run reports when this tick's failed self-update is
