@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 )
 
@@ -295,6 +297,121 @@ func TestPosternSendHelpNamesTheFourLimitsAndLong(t *testing.T) {
 	for _, want := range []string{"--long", "80", "200", "60", "120"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("expected --help to name %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// fixedReviewQueue stands in for the count of his review queue.
+type fixedReviewQueue struct{ size, limit int }
+
+func (q fixedReviewQueue) ReviewQueue(context.Context) (int, int, error) { return q.size, q.limit, nil }
+
+func withReviewQueue(t *testing.T, size, limit int) {
+	t.Helper()
+	real := reviewQueueReader
+	t.Cleanup(func() { reviewQueueReader = real })
+	reviewQueueReader = func(*beads.Gateway) application.ReviewQueueReader { return fixedReviewQueue{size, limit} }
+}
+
+var cardArgs = []string{"--class", "decision-needed", "--bead", "mw-a.1", "--recommend", "A: yes", "--option", "A: yes", "--option", "B: no", "Ship it?"}
+
+// Over his review-queue limit a card is not sent: the question, every option
+// and the recommendation are written on the bead as a QUESTION for Monday, one
+// line names the bead, the queue and the limit, and it exits 0.
+func TestPosternSendHoldsACardOverTheReviewQueueLimitForMonday(t *testing.T) {
+	withReviewQueue(t, 11, 8)
+	plaintexts, bd, out, err := channelSend(t, cardArgs...)
+	if err != nil {
+		t.Fatalf("a held card is not an error: %v\n%s", err, out)
+	}
+	if len(plaintexts) != 0 {
+		t.Fatalf("expected no card sent, got %v", plaintexts)
+	}
+	for _, want := range []string{"comment mw-a.1 QUESTION for Monday: Ship it?", "A: yes", "B: no", "Recommended: A: yes"} {
+		if !strings.Contains(bd, want) {
+			t.Errorf("expected bd to be asked for %q, it was asked:\n%s", want, bd)
+		}
+	}
+	if strings.Count(bd, "comment mw-a.1") != 1 || strings.Contains(bd, "SENT OVER THE LIMIT") {
+		t.Errorf("expected exactly one comment on the bead, bd was asked:\n%s", bd)
+	}
+	for _, want := range []string{"mw-a.1", "11", "8", "Monday"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected the line to name %q, got:\n%s", want, out)
+		}
+	}
+}
+
+// --why-now sends the card anyway and writes the reason on the bead.
+func TestPosternSendWhyNowSendsOverTheLimitAndSaysWhyOnTheBead(t *testing.T) {
+	withReviewQueue(t, 11, 8)
+	plaintexts, bd, out, err := channelSend(t, append([]string{"--why-now", "the deploy stops at noon"}, cardArgs...)...)
+	if err != nil {
+		t.Fatalf("send failed: %v\n%s", err, out)
+	}
+	if len(plaintexts) != 1 {
+		t.Fatalf("expected the card sent, got %v", plaintexts)
+	}
+	if !strings.Contains(bd, "comment mw-a.1 SENT OVER THE LIMIT:") || !strings.Contains(bd, "the deploy stops at noon") {
+		t.Errorf("expected the reason commented on the bead, bd was asked:\n%s", bd)
+	}
+	if strings.Contains(bd, "QUESTION for Monday") {
+		t.Errorf("expected no QUESTION for Monday when the card is sent, bd was asked:\n%s", bd)
+	}
+}
+
+func TestPosternSendRefusesAnEmptyWhyNowAndWhyNowOnAnythingButACard(t *testing.T) {
+	withReviewQueue(t, 11, 8)
+	for name, args := range map[string][]string{
+		"empty":         append([]string{"--why-now", ""}, cardArgs...),
+		"blank":         append([]string{"--why-now", "   "}, cardArgs...),
+		"not a card":    {"--why-now", "because", "hello"},
+		"card, no bead": {"--why-now", "because", "--class", "decision-needed", "hello"},
+	} {
+		plaintexts, bd, out, err := channelSend(t, args...)
+		if err == nil || !strings.Contains(err.Error(), "--why-now") {
+			t.Errorf("%s: expected a refusal naming --why-now, got %v\n%s", name, err, out)
+		}
+		if len(plaintexts) != 0 || strings.Contains(bd, "comment") {
+			t.Errorf("%s: expected nothing sent or written, got %v / %s", name, plaintexts, bd)
+		}
+	}
+}
+
+// At the limit, and under it, the send is as it was; so is any message that is
+// not a card on a bead, whatever the queue.
+func TestPosternSendAtOrUnderTheReviewQueueLimitSendsAsBefore(t *testing.T) {
+	for _, size := range []int{0, 8} {
+		withReviewQueue(t, size, 8)
+		plaintexts, bd, out, err := channelSend(t, cardArgs...)
+		if err != nil || len(plaintexts) != 1 {
+			t.Fatalf("queue %d: expected the card sent, got %v, %v\n%s", size, plaintexts, err, out)
+		}
+		if strings.Contains(bd, "QUESTION for Monday") || strings.Contains(bd, "SENT OVER THE LIMIT") {
+			t.Errorf("queue %d: expected no hold comment, bd was asked:\n%s", size, bd)
+		}
+	}
+	withReviewQueue(t, 99, 8)
+	if plaintexts, _, out, err := channelSend(t, "--class", "decision-needed", "a card with no bead"); err != nil || len(plaintexts) != 1 {
+		t.Fatalf("a card with no bead was held: %v, %v\n%s", plaintexts, err, out)
+	}
+	if plaintexts, _, out, err := channelSend(t, "hello"); err != nil || len(plaintexts) != 1 {
+		t.Fatalf("a plain message was held: %v, %v\n%s", plaintexts, err, out)
+	}
+}
+
+func TestPosternSendHelpSaysTheHoldAndWhyNow(t *testing.T) {
+	var out strings.Builder
+	root := newRootCmd()
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"postern", "send", "--help"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"--why-now", "QUESTION for Monday:", "SENT OVER THE LIMIT:", "review_queue", "Monday's mw digest send"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("expected --help to say %q:\n%s", want, out.String())
 		}
 	}
 }

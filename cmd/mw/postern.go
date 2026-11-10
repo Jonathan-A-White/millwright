@@ -552,7 +552,7 @@ func newPosternSendCmd() *cobra.Command {
 	var class, bead, recommend, thread, topic, beadChannel, channelName, re string
 	var chain, newPost, long bool
 	var options, attach []string
-	var file string
+	var file, whyNow string
 
 	cmd := &cobra.Command{
 		Use:   "send [<text> | --file <path>]",
@@ -617,7 +617,15 @@ func newPosternSendCmd() *cobra.Command {
 			"decision-needed), not its options. Over 80 words (a card's question over 60) it prints one\n" +
 			"warning line to stderr and sends; over 200 (a card's question over 120) it refuses and\n" +
 			"sends nothing: trim, put the detail on the bead, or give --long, which sends past both\n" +
-			"limits.",
+			"limits.\n\n" +
+			"His review queue (open cards, open demos and unrun hands steps, as mw status DAMPERS counts it)\n" +
+			"has a limit, [dampers] review_queue (default 8). A card (--class decision-needed with --bead) asked\n" +
+			"while the queue is over it is not sent: the question, every --option and the --recommend are\n" +
+			"written on the bead as a comment opening 'QUESTION for Monday:', one line says the bead, the\n" +
+			"queue and the limit, and the command succeeds. Monday's mw digest send lists every such question\n" +
+			"nobody has answered. --why-now \"<reason>\" sends the card anyway and writes a comment on the bead\n" +
+			"opening 'SENT OVER THE LIMIT:' that quotes the reason; an empty reason is refused, and so is\n" +
+			"--why-now on anything but a card with --bead. At or under the limit the send is unchanged.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := ""
@@ -638,6 +646,14 @@ func newPosternSendCmd() *cobra.Command {
 				}
 			} else if len(args) == 0 && len(attach) == 0 {
 				return fmt.Errorf("mw postern send: what should it say? give the text, --file <path>, or --attach a file")
+			}
+			if cmd.Flags().Changed("why-now") {
+				if strings.TrimSpace(whyNow) == "" {
+					return fmt.Errorf("mw postern send: --why-now needs a reason: say why this card cannot wait for Monday")
+				}
+				if class != "decision-needed" || strings.TrimSpace(bead) == "" {
+					return fmt.Errorf("mw postern send: --why-now is only accepted with --class decision-needed and --bead: it sends a card over his review-queue limit")
+				}
 			}
 			if thread != "" && beadChannel != "" {
 				return fmt.Errorf("mw postern send: --thread is the old name of --bead-channel: give only --bead-channel")
@@ -704,10 +720,22 @@ func newPosternSendCmd() *cobra.Command {
 			if err := send.CheckAddressing(cmd.Context(), request); err != nil {
 				return err
 			}
-			_, err = send.Run(cmd.Context(), request)
-			return err
+			hold := application.ReviewHold{Queue: reviewQueueReader(gateway), Tracker: gateway, Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}
+			verdict := hold.Judge(cmd.Context(), request)
+			if verdict.Over && strings.TrimSpace(whyNow) == "" {
+				return hold.Hold(cmd.Context(), request, verdict)
+			}
+			txid, err := send.Run(cmd.Context(), request)
+			if err != nil {
+				return err
+			}
+			if verdict.Over {
+				return hold.Overrode(cmd.Context(), request, verdict, whyNow, txid)
+			}
+			return nil
 		},
 	}
+	cmd.Flags().StringVar(&whyNow, "why-now", "", "send a card over his review-queue limit anyway, for this reason (written on the bead as SENT OVER THE LIMIT:)")
 	cmd.Flags().StringArrayVar(&attach, "attach", nil, "a file to send with the message, encrypted to the Governor (repeatable)")
 	cmd.Flags().StringVar(&file, "file", "", "read the text of the message from this file, byte for byte, so the shell cannot eat a $ or a backtick (refused with a text argument)")
 	cmd.Flags().StringVar(&class, "class", "", "the message's class: message, decision-needed, landing or alarm (default message)")
@@ -726,6 +754,24 @@ func newPosternSendCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&chain, "chain", false, "also broadcast the message on chain, for a phone that cannot reach the backend")
 	cmd.Flags().StringVar(&re, "re", "", "the txid of the post whose thread this message answers in, printed form or bare; with no channel flag the reply goes to its channel (refused with --bead)")
 	return cmd
+}
+
+// reviewQueueReader is where mw postern send counts his review queue from. A
+// test swaps it.
+var reviewQueueReader = func(gateway *beads.Gateway) application.ReviewQueueReader {
+	return reviewQueueOf{gateway: gateway}
+}
+
+// reviewQueueOf counts the queue through the [dampers] table's survey, read
+// only when a card is about to be sent.
+type reviewQueueOf struct{ gateway *beads.Gateway }
+
+func (r reviewQueueOf) ReviewQueue(ctx context.Context) (int, int, error) {
+	survey, err := damperSurvey(r.gateway)
+	if err != nil {
+		return 0, 0, err
+	}
+	return survey.ReviewQueue(ctx)
 }
 
 // posternSnapshotClock stamps the written_at a snapshot is built with. A test

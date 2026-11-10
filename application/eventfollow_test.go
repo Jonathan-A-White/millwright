@@ -281,6 +281,7 @@ func TestEachKindOfChangeBecomesItsEvent(t *testing.T) {
 			comment("c2", 3, "RAN step linger on laptop as root, exit 0 (approved by the Governor via postern, txid direct:r1)\n\nok"),
 			comment("c3", 4, "The Governor by postern 2026-10-01T13:00:04Z, txid direct:m1, on general:\n\nhello"),
 			comment("c4", 5, "Landed by hand."),
+			comment("c5", 6, "QUESTION for Monday: Ship it?\n\nOptions:\n- Yes\nRecommended: Yes"),
 		} {
 			w.tracker.AddBeadChange(c)
 		}
@@ -295,6 +296,7 @@ func TestEachKindOfChangeBecomesItsEvent(t *testing.T) {
 		"7:hands_ran:mw-2:->:linger",
 		"8:message:mw-2:->:direct:m1",
 		"9:bead_changed:mw-2:running->running:comment",
+		"10:bead_changed:mw-2:running->running:comment", // a question held for Monday is no card asked
 	}, " ")
 	if got := kindsOf(w.log.All()); got != want {
 		t.Fatalf("the log holds\n%s\nwant\n%s", strings.ReplaceAll(got, " ", "\n"), strings.ReplaceAll(want, " ", "\n"))
