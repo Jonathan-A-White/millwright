@@ -7,10 +7,12 @@ Feature: mw report
   After QUALITY come SPEED (the landings' time against par, and each host's
   gate) and FUEL (tokens and dollars per landing), and every number carries an
   arrow against the window of the same length before it. QUALITY ends with
-  INVESTMENTS: the share of the landings labelled investment, against the
-  window before and the target ([factory] invest_share, one in three unless
-  set), with words and a cheap win when it is under half or over double the
-  target. The report ends with
+  INVESTMENTS: the share of the landings labelled investment or filed under the
+  friction register (mw-gq6), counted once, against the window before and the
+  target ([factory] invest_share, one in three unless set), with words and a
+  cheap win when it is under half or over double the target; when a friction
+  register story landed, a line under it says how many the loop picked (the
+  label) and how many are friction register stories. The report ends with
   CHEAP WINS: at most three one-line suggestions chosen by fixed rules over its
   numbers, quality rules first, or "CHEAP WINS: none seen". Before CHEAP WINS
   comes FACTORY CHANGES: each millwright landing of the last 30 days with the
@@ -737,6 +739,17 @@ Feature: mw report
     Then the report JSON has invest_share.share as "55.6"
     And the report JSON has invest_share.target as "20"
     And the report JSON has invest_share.off as "over"
+
+  Scenario: A landing under the friction register counts as an investment, and a line under INVESTMENTS says the two parts
+    Given "lampas" landed 4 stories and refused 0 for "tests-fail" in the window
+    And the report stories "lampas-l1" carry the label "investment"
+    And the report stories "lampas-l2" are under the friction register
+    When mw report runs with "--since 7d --json"
+    Then the report JSON has invest_share.invested as "2"
+    And the report JSON has invest_share.picked as "1"
+    When mw report runs with "--since 7d"
+    Then the report prints the line "INVESTMENTS 2/4 (50%), before none landed, target 33%"
+    And the report prints the line "1 picked by the loop, 1 friction-register story"
 
   Scenario: MODELS sets two models side by side: first try, refusals, retries and fuel per landed story
     Given the report stories:

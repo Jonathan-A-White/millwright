@@ -744,9 +744,12 @@ does not name `mw-x`). It is counted in the window it was filed in, once, under 
 rig, host and model of the newest landing it names.
 
 QUALITY ends with the INVESTMENTS line, for the whole factory (or what `--rig` and
-`--host` narrow it to): the landings whose story carries the label `investment` over
+`--host` narrow it to): the landings whose story carries the label `investment` or is
+a child of the friction register (`mw-gq6`), each counted once, over
 all the landings, beside the window before, with its arrow, and the target,
-`INVESTMENTS 3/9 (33%) ↑, before 1/4 (25%), target 33%`. The target is `[factory]
+`INVESTMENTS 3/9 (33%) ↑, before 1/4 (25%), target 33%`. When a friction register
+story landed, a line under it says how many the loop picked (the label) and how many are
+friction register stories, and `--json` carries `invest_share.picked` beside `invested`. The target is `[factory]
 invest_share` of the config, a fraction (`mw config set factory.invest_share 0.2`),
 0.33 when unset. A share under half the target or over double it adds a line
 saying so (`under half the 33% target`) and is cheap win R7. `--json` has it under

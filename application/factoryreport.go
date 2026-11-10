@@ -209,8 +209,14 @@ type Quality struct {
 	// Uncaused are the ids of the refused stories counted under CauseUnset, once
 	// each and sorted; cheap win R1 names them. They are not in the JSON.
 	Uncaused []string `json:"-"`
-	// Invested are the landings whose story carries LabelInvestment.
+	// Invested are the landings whose story carries LabelInvestment or is a
+	// child of the friction register (ContributeBackEpic), each counted once.
+	// Picked are those that carry the label, the loop's picks; Friction those
+	// under the friction register that do not, so Picked + Friction = Invested.
+	// Only the share carries the two in the JSON.
 	Invested       int     `json:"invested"`
+	Picked         int     `json:"-"`
+	Friction       int     `json:"-"`
 	BugsFiled      int     `json:"bugs_filed"`
 	BugsPerLanding float64 `json:"bugs_per_landing"`
 	// EscapedBugs are the bugs filed in the window that a landing let through
@@ -309,8 +315,11 @@ type reportEntry struct {
 	// tester says a Tester's session: its "tested" row stands for a landing and
 	// its "not landed" row for a refusal, in MODELS alone (modelCompare); every
 	// other section leaves a Tester's rows out.
-	tester     bool
+	tester bool
+	// investment says the story carries LabelInvestment, and friction that it is
+	// a child of the friction register; either makes the landing an investment.
 	investment bool
+	friction   bool
 	bug        bool
 	// escaped is a bug a landing let through, under that landing's rig, host
 	// and model, its id the bug's.
@@ -456,6 +465,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			}
 			e.exhausted = d.Exhausted
 			e.investment = hasLabel(d.Labels, LabelInvestment)
+			e.friction = d.EpicID == ContributeBackEpic
 			e.bugStory = domain.IsBugStory(d.Type, d.Story.Title)
 			if d.Attempts > 1 {
 				e.attempts = d.Attempts
@@ -780,8 +790,13 @@ func sumQuality(entries []reportEntry) Quality {
 			q.BugsFiled++
 		case e.landed:
 			q.Landed++
-			if e.investment {
+			switch {
+			case e.investment:
 				q.Invested++
+				q.Picked++
+			case e.friction:
+				q.Invested++
+				q.Friction++
 			}
 			q.Attempts += e.attempts
 			q.Findings += e.findings
