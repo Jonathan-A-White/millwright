@@ -219,7 +219,7 @@ func suiteComment(report SuiteReport, file SuiteFile) string {
 // failed, the body names each bead with its file and whether it is new.
 func suiteMail(host string, report SuiteReport, filed []SuiteFiled, failures []string) NewMessage {
 	result := report.Result
-	failing := len(result.Failing) + len(result.Unnamed)
+	failing := len(result.Failing) + len(result.Unnamed) + len(result.SkippedForLoad)
 	subject := fmt.Sprintf("Suite: %s main %s: all pass", result.Rig, short(result.Sha))
 	if failing > 0 {
 		subject = fmt.Sprintf("Suite: %s main %s: %d failing", result.Rig, short(result.Sha), failing)
@@ -246,6 +246,12 @@ func suiteMail(host string, report SuiteReport, filed []SuiteFiled, failures []s
 	}
 	for _, said := range result.Unnamed {
 		fmt.Fprintf(&b, "no file  %s\n", said)
+	}
+	for _, skipped := range result.SkippedForLoad {
+		fmt.Fprintf(&b, "%s\n", skipped)
+	}
+	for _, note := range result.Notes {
+		fmt.Fprintf(&b, "note  %s\n", note)
 	}
 	for _, failure := range failures {
 		fmt.Fprintf(&b, "not filed  %s\n", failure)
