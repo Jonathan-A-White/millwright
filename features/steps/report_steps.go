@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/cucumber/godog"
@@ -34,6 +36,13 @@ type reportContext struct {
 	now        time.Time
 	// investTarget is the [factory] invest_share the report is given; 0 is the default.
 	investTarget float64
+
+	// here and home are the host the report runs on and the home the vault names,
+	// seats the folders under seats/, and transcripts the root of the fixture
+	// Claude Code projects directory; all empty when a scenario counts no seats.
+	here, home  string
+	seats       []string
+	transcripts string
 
 	// refused are the ids of the refused stories rigLanded filed, by rig.
 	refused map[string][]string
@@ -59,6 +68,9 @@ func InitializeReportScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a report factory whose clock reads "([^"]*)"$`, c.aFactory)
 	ctx.Given(`^"([^"]*)" landed (\d+) stories and refused (\d+) for "([^"]*)" in the window$`, c.aRigLandedAndRefused)
 	ctx.Given(`^"([^"]*)" landed (\d+) stories and refused (\d+) for "([^"]*)" in the window before$`, c.aRigLandedAndRefusedBefore)
+	ctx.Given(`^the report runs on "([^"]*)" and the home is "([^"]*)"$`, c.theReportRunsOn)
+	ctx.Given(`^the report knows the seat folders "([^"]*)"$`, c.theReportKnowsTheSeats)
+	ctx.Given(`^the vault's session transcripts:$`, c.theSessionTranscripts)
 	ctx.Given(`^the report benchmarks:$`, c.theBenchmarks)
 	ctx.Given(`^the report result files:$`, c.theResultFiles)
 	ctx.Given(`^the report stories:$`, c.theStories)
@@ -76,6 +88,9 @@ func InitializeReportScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^the report factory clock moves on a day$`, c.theClockMovesOn)
 	ctx.When(`^mw report runs with "([^"]*)"$`, c.reportRuns)
 	ctx.When(`^the writes of mw report send run (\d+) times?$`, c.sendWritesRun)
+	ctx.Then(`^the metric snapshot of "([^"]*)" has no seat_usd$`, c.theSnapshotHasNoSeatUSD)
+	ctx.Then(`^the metric snapshot of "([^"]*)" has seat_usd "([^"]*)" and usd_per_landing_all ([0-9.]+)$`, c.theSnapshotHasSeatUSD)
+	ctx.Then(`^the report puts SEATS in FUEL, after the hosts and before MODELS$`, c.seatsAreInFuel)
 	ctx.Then(`^the Mayor's inbox holds (\d+) messages? about "([^"]*)"$`, c.theMayorHasMessages)
 	ctx.Then(`^the vault holds the metric snapshots of the days "([^"]*)"$`, c.theVaultHoldsSnapshots)
 	ctx.Then(`^the report prints the line "([^"]*)"$`, c.printsTheLine)
@@ -330,6 +345,7 @@ func (c *reportContext) sendWritesRun(n int) error {
 		report := application.FactoryReport{Tracker: c.tracker, Files: c.files, Seat: reportSeat, Benchmarks: c.benchmarks,
 			Since: from, Now: func() time.Time { return c.now },
 			Notes: c.tracker, Mailbox: c.mailbox, Snapshots: c.files}
+		c.giveSeatMeans(&report)
 		if _, err := report.Run(context.Background()); err != nil {
 			return fmt.Errorf("the report send writes failed: %w", err)
 		}
@@ -376,6 +392,7 @@ func (c *reportContext) reportRuns(flags string) error {
 		return err
 	}
 	report.Tracker, report.Files, report.Seat = c.tracker, c.files, reportSeat
+	c.giveSeatMeans(&report)
 	report.Benchmarks = c.benchmarks
 	report.Commits, report.FactoryDir = c.commits, reportFactoryDir
 	report.InvestShare = c.investTarget
@@ -782,4 +799,137 @@ func (c *reportContext) modelsLineReads(label, want string) error {
 		}
 	}
 	return fmt.Errorf("expected a MODELS line %q, got:\n%s", label, c.printed.String())
+}
+
+// theReportRunsOn names the host the report runs on and writes the home file
+// that names the home; the seats are counted on the home alone.
+func (c *reportContext) theReportRunsOn(here, home string) error {
+	c.here, c.home = here, home
+	return c.files.WriteHome(context.Background(), domain.HomeRecord{Host: home, At: c.now, By: "test"})
+}
+
+func (c *reportContext) theReportKnowsTheSeats(names string) error {
+	c.seats = nil
+	for _, name := range strings.Split(names, ",") {
+		c.seats = append(c.seats, strings.TrimSpace(name))
+	}
+	return nil
+}
+
+// giveSeatMeans gives the report the means to count the seats, if the scenario
+// said where it runs; otherwise the report has no SEATS block.
+func (c *reportContext) giveSeatMeans(report *application.FactoryReport) {
+	if c.here == "" {
+		return
+	}
+	root := c.transcripts
+	if root == "" {
+		root = filepath.Join(c.files.Dir(), "no-transcripts")
+	}
+	report.SeatSessions = claude.NewSeatTranscripts(root, c.files.Dir())
+	report.Seats = c.seats
+	report.Home, report.Here = c.files, c.here
+}
+
+// theSessionTranscripts writes a fixture transcript for each row where Claude
+// Code would keep the vault directory's: a session named name, last written on
+// the day, whose cost-state line says cost (none when the cell is empty). A
+// subagent's file lies under the session's directory.
+func (c *reportContext) theSessionTranscripts(table *godog.Table) error {
+	if c.transcripts == "" {
+		dir, err := os.MkdirTemp("", "mw-report-transcripts-")
+		if err != nil {
+			return err
+		}
+		c.transcripts = dir
+	}
+	project := claude.ProjectDir(c.transcripts, c.files.Dir())
+	cols := columns(table)
+	for i, row := range table.Rows[1:] {
+		cell := func(name string) string { return strings.TrimSpace(row.Cells[cols[name]].Value) }
+		day, err := time.Parse(application.LedgerDate, cell("day"))
+		if err != nil {
+			return err
+		}
+		id := fmt.Sprintf("session-%d", i)
+		lines := []string{fmt.Sprintf(`{"type":"custom-title","customTitle":%q,"sessionId":%q}`, cell("name"), id),
+			`{"type":"assistant","message":{"role":"assistant"}}`}
+		if cost := cell("cost"); cost != "" {
+			lines = append(lines, fmt.Sprintf(`{"type":"cost-state","sessionId":%q,"totalCostUSD":%s}`, id, cost))
+		}
+		file := filepath.Join(project, id+".jsonl")
+		if cell("where") == "subagent" {
+			file = filepath.Join(project, "parent-session", "subagents", "agent-"+id+".jsonl")
+		}
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(file, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			return err
+		}
+		at := day.Add(12 * time.Hour)
+		if err := os.Chtimes(file, at, at); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// seatsAreInFuel checks the SEATS block follows the by-host blocks of FUEL and
+// comes before MODELS.
+func (c *reportContext) seatsAreInFuel() error {
+	text := c.printed.String()
+	fuel, seats, models := strings.Index(text, "\nFUEL\n"), strings.Index(text, "\nSEATS\n"), strings.Index(text, "\nMODELS")
+	host := strings.LastIndex(text[:max(seats, 0)], "\nby host\n")
+	if fuel < 0 || seats < 0 || models < 0 || !(fuel < host && host < seats && seats < models) {
+		return fmt.Errorf("expected SEATS in FUEL after the hosts and before MODELS, got:\n%s", text)
+	}
+	return nil
+}
+
+func (c *reportContext) snapshotOf(day string) (application.MetricSnapshot, error) {
+	kept, err := c.files.Snapshots(context.Background())
+	if err != nil {
+		return application.MetricSnapshot{}, err
+	}
+	for _, s := range kept {
+		if s.Day == day {
+			return s, nil
+		}
+	}
+	return application.MetricSnapshot{}, fmt.Errorf("the vault holds no metric snapshot of %s", day)
+}
+
+func (c *reportContext) theSnapshotHasNoSeatUSD(day string) error {
+	s, err := c.snapshotOf(day)
+	if err != nil {
+		return err
+	}
+	if len(s.SeatUSD) > 0 || s.USDPerLandingAll != nil {
+		return fmt.Errorf("expected no seat figure in the snapshot of %s, got %+v", day, s)
+	}
+	return nil
+}
+
+// theSnapshotHasSeatUSD checks the seats' dollars as "seat 1.00, seat 2.00"
+// in name order, and the all-seats figure.
+func (c *reportContext) theSnapshotHasSeatUSD(day, seats, all string) error {
+	s, err := c.snapshotOf(day)
+	if err != nil {
+		return err
+	}
+	var names []string
+	for seat := range s.SeatUSD {
+		names = append(names, seat)
+	}
+	sort.Strings(names)
+	var got []string
+	for _, seat := range names {
+		got = append(got, fmt.Sprintf("%s %.2f", seat, s.SeatUSD[seat]))
+	}
+	want, _ := strconv.ParseFloat(all, 64)
+	if strings.Join(got, ", ") != seats || s.USDPerLandingAll == nil || *s.USDPerLandingAll != want {
+		return fmt.Errorf("expected seat_usd %q and usd_per_landing_all %s in the snapshot of %s, got %+v", seats, all, day, s)
+	}
+	return nil
 }

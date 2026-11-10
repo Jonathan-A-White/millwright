@@ -124,18 +124,24 @@ func newReportSendCmd() *cobra.Command {
 				}.Run(cmd.Context())
 				return err
 			}
+			seatSessions, seats, err := seatFuelSources(dir)
+			if err != nil {
+				return err
+			}
 			_, err = application.FactoryReportSend{
 				Report: application.FactoryReport{
-					Tracker:     gateway,
-					Files:       files,
-					Benchmarks:  vault.Benchmarks{Vault: files},
-					Rules:       files,
-					Seat:        BuilderSeat,
-					Notes:       gateway,
-					Mailbox:     gateway,
-					Snapshots:   files,
-					Review:      review,
-					InvestShare: share, InvestShareMin: shareMin, InvestShareMax: shareMax,
+					SeatSessions: seatSessions,
+					Seats:        seats,
+					Tracker:      gateway,
+					Files:        files,
+					Benchmarks:   vault.Benchmarks{Vault: files},
+					Rules:        files,
+					Seat:         BuilderSeat,
+					Notes:        gateway,
+					Mailbox:      gateway,
+					Snapshots:    files,
+					Review:       review,
+					InvestShare:  share, InvestShareMin: shareMin, InvestShareMax: shareMax,
 				},
 				Home:   files,
 				Host:   here,

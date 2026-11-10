@@ -5,7 +5,9 @@ Feature: mw report
   filed and how many findings the Tester made per landing. It prints one block
   per rig, then per model, then per host, in 60 columns, or all of it as JSON.
   After QUALITY come SPEED (the landings' time against par, and each host's
-  gate) and FUEL (tokens and dollars per landing), and every number carries an
+  gate) and FUEL (tokens and dollars per landing; for the whole factory on the
+  home it ends with SEATS, the Mayor's, the Deputy's and the other seats' dollars
+  and the all-seats $/landing), and every number carries an
   arrow against the window of the same length before it. QUALITY ends with
   INVESTMENTS: the share of the landings labelled investment or filed under the
   friction register (mw-gq6), counted once, against the window before and the
@@ -320,6 +322,134 @@ Feature: mw report
     Given "lampas" landed 2 stories and refused 0 for "tests-fail" in the window
     When mw report runs with "--since 7d"
     Then the FUEL "rig" block "lampas" prints "no fuel figures yet"
+
+  Scenario: FUEL gains a SEATS block with each seat's dollars and the all-seats figure
+    Given the report stories:
+      | id  | title | rig    | host   | model  | attempts | filed |
+      | s-1 | One   | lampas | laptop | sonnet |          |       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker      |
+      | 2026-10-08 | s-1 | landed on main | sonnet/high |
+    And the report result files:
+      | story | attempt | cost |
+      | s-1   | 1       | 1.00 |
+    And the report runs on "laptop" and the home is "laptop"
+    And the report knows the seat folders "builder, deputy, mayor, millhand"
+    And the vault's session transcripts:
+      | name              | day        | cost | where |
+      | Mayor (after x)   | 2026-10-09 | 3.00 | main  |
+      | deputy-x          | 2026-10-09 | 1.00 | main  |
+    When mw report runs with "--since 7d"
+    Then the report prints "mayor $3.00 (3.00/landing)" under "SEATS"
+    And the report prints "deputy $1.00 (1.00/landing)" under "SEATS"
+    And the report prints "all seats $/landing 5.00" under "SEATS"
+    And the report puts SEATS in FUEL, after the hosts and before MODELS
+
+  Scenario: A session in an unknown seat's name is other; a subagent adds nothing; a session with no cost figure is counted
+    Given the report stories:
+      | id  | title | rig    | host   | model  | attempts | filed |
+      | s-1 | One   | lampas | laptop | sonnet |          |       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker      |
+      | 2026-10-08 | s-1 | landed on main | sonnet/high |
+    And the report runs on "laptop" and the home is "laptop"
+    And the report knows the seat folders "builder, deputy, mayor, millhand"
+    And the vault's session transcripts:
+      | name              | day        | cost | where    |
+      | Mayor (after x)   | 2026-10-09 | 3.00 | main     |
+      | Mayor (after x)   | 2026-10-09 | 5.00 | subagent |
+      | Mayor (running)   | 2026-10-10 |      | main     |
+      | scratch pad       | 2026-10-10 | 0.50 | main     |
+    When mw report runs with "--since 7d"
+    Then the report prints "mayor $3.00 (3.00/landing)" under "SEATS"
+    And the report prints "other $0.50 (0.50/landing)" under "SEATS"
+    And the report prints "1 session without a cost figure" under "SEATS"
+    And the report prints "all seats $/landing 3.50" under "SEATS"
+
+  Scenario: A session from the window before counts there, and the all-seats line carries an arrow
+    Given the report stories:
+      | id  | title | rig    | host   | model  | attempts | filed |
+      | s-0 | Old   | lampas | laptop | sonnet |          |       |
+      | s-1 | One   | lampas | laptop | sonnet |          |       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker      |
+      | 2026-09-30 | s-0 | landed on main | sonnet/high |
+      | 2026-10-08 | s-1 | landed on main | sonnet/high |
+    And the report result files:
+      | story | attempt | cost |
+      | s-0   | 1       | 1.00 |
+      | s-1   | 1       | 1.00 |
+    And the report runs on "laptop" and the home is "laptop"
+    And the report knows the seat folders "builder, deputy, mayor, millhand"
+    And the vault's session transcripts:
+      | name              | day        | cost | where |
+      | Mayor (after x)   | 2026-10-09 | 3.00 | main  |
+      | Mayor (after y)   | 2026-09-30 | 1.50 | main  |
+    When mw report runs with "--since 7d"
+    Then the report prints "mayor $3.00 (3.00/landing ↑ worse)" under "SEATS"
+    And the report prints "all seats $/landing 4.00 ↑ worse" under "SEATS"
+
+  Scenario: Narrowed to a rig or a host the report has no SEATS block
+    Given the report stories:
+      | id  | title | rig    | host   | model  | attempts | filed |
+      | s-1 | One   | lampas | laptop | sonnet |          |       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker      |
+      | 2026-10-08 | s-1 | landed on main | sonnet/high |
+    And the report runs on "laptop" and the home is "laptop"
+    And the report knows the seat folders "builder, deputy, mayor, millhand"
+    And the vault's session transcripts:
+      | name              | day        | cost | where |
+      | Mayor (after x)   | 2026-10-09 | 3.00 | main  |
+    When mw report runs with "--since 7d --rig lampas"
+    Then the report prints no line starting "SEATS"
+    And the report prints no line starting "seats:"
+    When mw report runs with "--since 7d --host laptop"
+    Then the report prints no line starting "SEATS"
+    And the report prints no line starting "all seats"
+
+  Scenario: Off the home the block is one line and no seat figure is written
+    Given the report stories:
+      | id  | title | rig    | host   | model  | attempts | filed |
+      | s-1 | One   | lampas | laptop | sonnet |          |       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker      |
+      | 2026-10-09 | s-1 | landed on main | sonnet/high |
+    And the report runs on "vps" and the home is "laptop"
+    And the report knows the seat folders "builder, deputy, mayor, millhand"
+    And the vault's session transcripts:
+      | name              | day        | cost | where |
+      | Mayor (after x)   | 2026-10-09 | 3.00 | main  |
+    When mw report runs with "--since 7d"
+    Then the report prints "seats: counted on the home" under "SEATS"
+    And the report prints no line starting "all seats"
+    When the writes of mw report send run 1 time
+    Then the metric snapshot of "2026-10-11" has no seat_usd
+
+  Scenario: The JSON holds each seat's dollars and the all-seats figure, and the day row keeps them
+    Given the report stories:
+      | id  | title | rig    | host   | model  | attempts | filed |
+      | s-1 | One   | lampas | laptop | sonnet |          |       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker      |
+      | 2026-10-08 | s-1 | landed on main | sonnet/high |
+    And the report result files:
+      | story | attempt | cost |
+      | s-1   | 1       | 1.00 |
+    And the report runs on "laptop" and the home is "laptop"
+    And the report knows the seat folders "builder, deputy, mayor, millhand"
+    And the vault's session transcripts:
+      | name              | day        | cost | where |
+      | Mayor (after x)   | 2026-10-09 | 3.00 | main  |
+      | deputy-x          | 2026-10-09 | 1.00 | main  |
+    When mw report runs with "--since 7d --json"
+    Then the report JSON has seats.0.seat as "mayor"
+    And the report JSON has seats.0.usd as "3"
+    And the report JSON has seats.0.usd_per_landing as "3"
+    And the report JSON has seats.1.seat as "deputy"
+    And the report JSON has usd_per_landing_all as "5"
+    When the writes of mw report send run 1 time
+    Then the metric snapshot of "2026-10-11" has seat_usd "deputy 1.00, mayor 3.00" and usd_per_landing_all 5
 
   Scenario: A refusal rate that fell is better and a landed count that held is level
     Given "lampas" landed 9 stories and refused 1 for "tests-fail" in the window
