@@ -362,6 +362,39 @@ func TestHandsAddWarnsWhenNoRouteReachesTheStepsHost(t *testing.T) {
 	}
 }
 
+// mw-6ww.163.5: a step for a host the Governor retired could never run, so it
+// is refused with the config key named, and nothing is kept.
+func TestHandsAddRefusesAStepForARetiredHost(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		retired []string
+		refused bool
+	}{{"desktop retired", []string{"desktop"}, true}, {"another host retired", []string{"cloud1"}, false}, {"none retired", nil, false}} {
+		t.Run(c.name, func(t *testing.T) {
+			tracker := handsTracker()
+			_, err := application.HandsAdd{Tracker: tracker, Notes: tracker, Now: func() time.Time { return handsNow },
+				Here: "laptop", Retired: c.retired,
+			}.Run(context.Background(), application.HandsAddRequest{Bead: "mw-f758y.8",
+				Step: domain.HandsStep{ID: "s", Host: "desktop", As: "user", Run: "echo hi"}})
+			if c.refused {
+				if err == nil || !strings.Contains(err.Error(), application.RetiredHostsKey) {
+					t.Fatalf("expected a refusal naming retired_hosts, got %v", err)
+				}
+				if len(handsSteps(t, tracker, "mw-f758y.8")) != 0 {
+					t.Fatal("expected no step kept")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(handsSteps(t, tracker, "mw-f758y.8")) != 1 {
+				t.Fatal("expected the step kept")
+			}
+		})
+	}
+}
+
 // With HeldFails, a step added to a held bead is kept (and replaced) all the same,
 // the Governor is sent no push for it, and Run returns a HandsHeld error whose text is
 // the warning, so that it is what the command ends on; without HeldFails the warning

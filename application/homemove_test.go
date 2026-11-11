@@ -453,6 +453,25 @@ func TestAMoveToAnotherHostThanThisRefusesBeforeRunningAnything(t *testing.T) {
 	wantCalls(t, w)
 }
 
+func TestAMoveToARetiredHostRefusesNamingRetiredHostsAndChangesNothing(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	m := move(w, out)
+	m.Retired = []string{"laptop"}
+
+	err := m.Run(context.Background())
+
+	if err == nil || !strings.Contains(err.Error(), application.RetiredHostsKey) || !strings.Contains(err.Error(), "Nothing was changed") {
+		t.Fatalf("expected a refusal naming retired_hosts and saying nothing was changed, got %v", err)
+	}
+	wantCalls(t, w)
+
+	// With nothing retired the same move goes on.
+	m.Retired = nil
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("expected the move to run with no host retired, got %v", err)
+	}
+}
+
 func TestAMoveToTheVPSRefuses(t *testing.T) {
 	w, out := newMoveWorld(), &bytes.Buffer{}
 	m := move(w, out)

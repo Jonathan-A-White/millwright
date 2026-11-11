@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -199,6 +200,10 @@ type HandsAdd struct {
 	// A step whose host it says no to is kept with a warning on Err naming the
 	// missing [hands_hosts] entry (mw-gq6.584). A nil Reaches checks nothing.
 	Reaches func(host string) bool
+
+	// Retired are the hosts the Governor retired (retired_hosts): a step for
+	// one of them could never run, so it is refused.
+	Retired []string
 }
 
 // HandsReaches is the Reaches of a host called here whose config says hosts
@@ -218,6 +223,9 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 	}
 	if err := domain.ValidateHandsStep(req.Bead, req.Step); err != nil {
 		return HandsStepRecord{}, fmt.Errorf("mw hands add: %w", err)
+	}
+	if IsRetired(h.Retired, req.Step.Host) {
+		return HandsStepRecord{}, errors.New("mw hands add: " + refusedRetiredFor(req.Step.Host, "no step runs on it, so name a host that is awake. Nothing was written", h.Retired))
 	}
 	found, err := h.Tracker.ShowBeads(ctx, append([]string{req.Bead}, req.After...))
 	if err != nil {

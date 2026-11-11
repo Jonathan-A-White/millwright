@@ -216,12 +216,18 @@ func (s Status) noHostTakes(ctx context.Context, ready []StoryDetail) map[string
 			byHost[host][p.Story] = p
 		}
 	}
-	anyHost := map[string]bool{s.Host: true}
-	for _, host := range domain.HomeHosts {
+	// A retired host takes nothing, so it is neither waited for nor named.
+	anyHost := map[string]bool{}
+	for _, host := range append([]string{s.Host}, domain.HomeHosts...) {
 		anyHost[host] = true
 	}
 	for host := range byHost {
 		anyHost[host] = true
+	}
+	for host := range anyHost {
+		if IsRetired(s.Retired, host) {
+			delete(anyHost, host)
+		}
 	}
 	var found map[string]NoHostTakes
 	for _, detail := range ready {

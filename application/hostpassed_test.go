@@ -104,3 +104,52 @@ func TestDispatchKeepsTheNoteOfAStoryPassedForWantOfAGristTestKey(t *testing.T) 
 		t.Fatalf("expected the note to hold mw-gq6.1 with the dispatch's own reason %q, got %q", passed.Why, kept)
 	}
 }
+
+// mw-6ww.163.5: a host the Governor retired (retired_hosts) is no host that
+// could take a ready story, so its silence or its stale pass note is not
+// counted when mw status asks whether every host passed a story.
+
+func passedNote(t *testing.T, tracker interface {
+	SetNote(context.Context, string, string) error
+}, host, id string) {
+	t.Helper()
+	line := application.FormatHostPassed([]application.HostPassed{{
+		Story: id, Since: statusNow.Add(-40 * time.Minute), Gate: "metered-network", Why: "the network is metered"}})
+	if err := tracker.SetNote(context.Background(), application.HostPassedKey(host), line); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func passedHosts(report application.StatusReport, id string) []string {
+	var hosts []string
+	for _, p := range report.NoHostTakes[id].Passed {
+		hosts = append(hosts, p.Host)
+	}
+	return hosts
+}
+
+func TestStatusDoesNotCountARetiredHostAsOneThatCouldTakeAReadyStory(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		retired []string
+		noteOf  []string
+		want    []string
+	}{
+		{"retired desktop with no note", []string{"desktop"}, []string{"laptop"}, []string{"laptop"}},
+		{"retired desktop with a stale note", []string{"desktop"}, []string{"laptop", "desktop"}, []string{"laptop"}},
+		{"nothing retired, desktop has not passed", nil, []string{"laptop"}, nil},
+		{"nothing retired, desktop passed too", nil, []string{"laptop", "desktop"}, []string{"desktop", "laptop"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tracker := aTrackerPathedToVPS(t)
+			storyOn(t, tracker, "mw-gq6.50", "A ready story", "auto")
+			for _, host := range c.noteOf {
+				passedNote(t, tracker, host, "mw-gq6.50")
+			}
+			got := passedHosts(retiredStatus(t, tracker, c.retired...), "mw-gq6.50")
+			if strings.Join(got, ",") != strings.Join(c.want, ",") {
+				t.Fatalf("expected the hosts that passed it to be %v, got %v", c.want, got)
+			}
+		})
+	}
+}

@@ -186,6 +186,9 @@ type HomeMove struct {
 	// Host is this host's name, and Target the host the move makes home: the two
 	// must be the same.
 	Host, Target string
+	// Retired are the hosts the Governor retired (retired_hosts): none can
+	// become home.
+	Retired []string
 	// Reach is how this host reaches each other host: an ssh prefix by host name.
 	Reach map[string]string
 	// VaultDir is the vault's directory, named in the ways back.
@@ -296,6 +299,9 @@ func (m HomeMove) out() io.Writer {
 func (m HomeMove) refuse(ctx context.Context) (old string, prefix []string, prev *domain.HomeRecord, hadFile bool, err error) {
 	if !isHomeHost(m.Target) {
 		return "", nil, nil, false, fmt.Errorf("the home can only be %s, not %s. Nothing was changed", strings.Join(domain.HomeHosts, " or "), m.Target)
+	}
+	if IsRetired(m.Retired, m.Target) {
+		return "", nil, nil, false, errors.New(refusedRetiredFor(m.Target, "a retired host cannot become home, so move the home to one that is awake. Nothing was changed", m.Retired))
 	}
 	if m.Host != m.Target {
 		return "", nil, nil, false, fmt.Errorf("this host is %s, not %s: mw home move runs on the host that becomes home, so run it on %s. Nothing was changed", m.Host, m.Target, m.Target)

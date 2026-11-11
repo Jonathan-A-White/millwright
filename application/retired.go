@@ -23,3 +23,11 @@ func refusedRetired(host string, retired []string) error {
 		"so name a host that is awake, or host=auto: nothing was written",
 		host, RetiredHostsKey, strings.Join(retired, ", "))
 }
+
+// refusedRetiredFor is the refusal of a command that names a retired host as a
+// place work goes: it names the config key and the host, and says what the
+// command cannot do with it. The caller adds what was or was not written.
+func refusedRetiredFor(host, cannot string, retired []string) string {
+	return fmt.Sprintf("the host %s is retired (%s = [%s] in the config file): %s",
+		host, RetiredHostsKey, strings.Join(retired, ", "), cannot)
+}

@@ -193,7 +193,12 @@ func newHandsAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			retired, err := config.RetiredHosts()
+			if err != nil {
+				return err
+			}
 			_, err = application.HandsAdd{
+				Retired: retired,
 				Tracker: gateway,
 				Notes:   gateway,
 				Now:     handsClock,

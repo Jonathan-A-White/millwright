@@ -70,6 +70,10 @@ func newHomeMoveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			retired, err := config.RetiredHosts()
+			if err != nil {
+				return err
+			}
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("there is no home directory to set the old database aside in: %w", err)
@@ -89,6 +93,7 @@ func newHomeMoveCmd() *cobra.Command {
 				Out:         cmd.OutOrStdout(),
 				Host:        host,
 				Target:      args[0],
+				Retired:     retired,
 				Reach:       reach,
 				VaultDir:    dir,
 				DataDir:     data,
