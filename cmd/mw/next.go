@@ -197,7 +197,7 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			recheckSuite := hostRecheckSuite(cmd.Context(), worktrees, files, rigs, tests, changedSpecs, nice, jobs)
+			recheckSuite := hostRecheckSuite(cmd.Context(), worktrees, files, rigs, tests, changedSpecs, nice, jobs, host)
 			var dispatcher application.Dispatcher
 			if !noDispatch {
 				dispatcher = withHostDispatchLocks(withHostRechecks(application.Dispatch{
