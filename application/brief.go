@@ -10,10 +10,12 @@ import (
 // The headings of the groups a brief lists a bead's unfinished children under,
 // in the order it lists them. A child that is neither in progress nor held —
 // open, or in any other state the tracker has that is not finished — is Open.
+// A child that is itself a parent (IsParent) is listed under Parents instead.
 const (
 	BriefInProgressHeading = "In progress"
 	BriefOpenHeading       = "Open"
 	BriefHeldHeading       = "Held"
+	BriefParentsHeading    = "Parents"
 )
 
 // BriefWaitWidth is the most a title is given when a line names it as what a
@@ -63,6 +65,9 @@ type BeadBrief struct {
 	InProgress []BriefLine
 	Open       []BriefLine
 	Held       []BriefLine
+	// Parents are the unfinished children that are themselves parents: their
+	// own children are the work, so they are no open or frontier line.
+	Parents []BriefLine
 	// Closed is how many children are finished, whose lines are left out.
 	Closed int
 
@@ -175,6 +180,10 @@ func (b Brief) bead(ctx context.Context, id string, lookup map[string]StoryDetai
 		}
 		line := BriefLine{Story: child, Waits: waits}
 		switch {
+		case child.IsParent():
+			// Its own children are the work: it is no open or frontier line
+			// (mw-gq6.1095).
+			brief.Parents = append(brief.Parents, line)
 		case strings.EqualFold(strings.TrimSpace(child.Status), StatusInProgress):
 			brief.InProgress = append(brief.InProgress, line)
 		case child.Held():
@@ -185,7 +194,7 @@ func (b Brief) bead(ctx context.Context, id string, lookup map[string]StoryDetai
 	}
 
 	var kids []*StoryDetail
-	for _, group := range [][]BriefLine{brief.InProgress, brief.Open, brief.Held} {
+	for _, group := range [][]BriefLine{brief.InProgress, brief.Open, brief.Held, brief.Parents} {
 		for i := range group {
 			kids = append(kids, &group[i].Story)
 		}
@@ -255,6 +264,7 @@ func (o BeadBrief) write(b *strings.Builder) {
 	writeGroup(b, BriefInProgressHeading, o.InProgress)
 	writeGroup(b, BriefOpenHeading, o.Open)
 	writeGroup(b, BriefHeldHeading, o.Held)
+	writeGroup(b, BriefParentsHeading, o.Parents)
 	fmt.Fprintf(b, "%d closed\n", o.Closed)
 
 	if len(o.Comments) == 0 {
@@ -310,6 +320,13 @@ func (l BriefLine) String() string {
 	}
 	if l.Story.Guest != "" {
 		parts = append(parts, "guest: "+l.Story.Guest)
+	}
+	if l.Story.IsParent() {
+		if l.Story.Children > 0 {
+			parts = append(parts, fmt.Sprintf("parent of %d", l.Story.Children))
+		} else {
+			parts = append(parts, "epic")
+		}
 	}
 	for _, title := range l.Waits {
 		parts = append(parts, "waits on "+clippedTo(title, BriefWaitWidth))

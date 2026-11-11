@@ -1523,6 +1523,13 @@ func TestGatewayReadsABeadPageAsTheSeparateReadsDo(t *testing.T) {
 	if len(page.Parent.Stories) != 3 || page.Parent.Stories[1].Story.ID != after {
 		t.Errorf("expected the epic's three children in filed order, got %+v", page.Parent.Stories)
 	}
+	// A listing of an epic's children counts each one's own open children, so a
+	// child with children of its own reads as a parent (mw-gq6.1095).
+	for _, filed := range page.Parent.Stories {
+		if want := map[bool]int{true: 1, false: 0}[filed.Story.ID == child]; filed.Children != want {
+			t.Errorf("expected %s to count %d open children, got %d", filed.Story.ID, want, filed.Children)
+		}
+	}
 
 	// An epic with a parent: its own children and its parent's.
 	subPage, found, err := gateway.ShowBeadPage(ctx, child)

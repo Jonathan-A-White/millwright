@@ -394,7 +394,38 @@ func (g *Gateway) childrenOf(ctx context.Context, id string, defaults domain.Pat
 	for _, story := range inSiblingOrder(stories) {
 		filed = append(filed, story.detail(defaults))
 	}
-	return filed, nil
+	return g.countingChildren(ctx, filed, stories)
+}
+
+// countingChildren sets on each story of a listing of an epic's children how
+// many beads that are not closed hang from it, so a task-typed bead with
+// children of its own reads as a parent (StoryDetail.IsParent, mw-gq6.1095).
+// The Gateway's cache counts them from its one list of every bead; without
+// one, a single bd list of the live beads does (withChildren). Nothing is read
+// when every child is closed.
+func (g *Gateway) countingChildren(ctx context.Context, filed []application.StoryDetail, beads []bead) ([]application.StoryDetail, error) {
+	open := false
+	for _, b := range beads {
+		open = open || b.Status != StatusClosed
+	}
+	if !open {
+		return filed, nil
+	}
+	if g.cache != nil {
+		if all, err := g.listing(ctx); err == nil {
+			counts := map[string]int{}
+			for _, b := range all {
+				if b.Parent != "" && b.Status != StatusClosed {
+					counts[b.Parent]++
+				}
+			}
+			for i := range filed {
+				filed[i].Children = counts[filed[i].Story.ID]
+			}
+			return filed, nil
+		}
+	}
+	return g.withChildren(ctx, filed)
 }
 
 // ShowBeadPage implements application.WorkTracker: one bd show
