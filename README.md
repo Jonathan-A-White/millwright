@@ -2372,6 +2372,8 @@ mw giveway on --session <name>   # only that tmux session (repeatable, on and of
 
 While the marker stands, `mw dispatch` on the host does nothing at all (not even its self-update) and says `gives way since <time>`, and so do `mw millhand`, `mw suite`, `mw land`, `mw after-landing`, `mw grist grind`, `mw sleep pass`, `mw deputy` and the follower's suite, timing, grist, batch-land and sleep jobs. A second `on` renews the marker's `seen` time. A marker not renewed for `giveway_stale` (default 15m) is lifted by the next dispatch tick (`off` first, event `expired`), so a lock that Windows never reported cannot freeze the host for good. `off` continues each process the marker names only if its pid and start time both still match, so a pid another process has since been given is sent nothing.
 
+The Windows side calls these at unlock, at lock and every 5 minutes: `mw host giveway --install-line` prints the one paste that installs it on the desktop (`--uninstall-line` the way back, `--mode-line freeze|shutdown` the switch to the fallback that shuts WSL down at unlock); [docs/give-way.md](docs/give-way.md) has what each event does, the logs and what is not covered.
+
 On the home (the host that serves the Mayor and the beads), `on` without `--session` is refused: the home never gives way. State is in `~/.local/state/mw` (`MW_GIVEWAY_DIR` overrides). The scenarios are in `features/giveway.feature`.
 
 ## Pausing the factory (mw pause, mw resume, mw usage)

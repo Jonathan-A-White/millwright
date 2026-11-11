@@ -1,0 +1,304 @@
+package main
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"os"
+	"os/exec"
+	"regexp"
+	"strings"
+	"testing"
+
+	millwright "github.com/Jonathan-A-White/millwright"
+)
+
+// The script and mw giveway (the first story's command) must agree: the three
+// events, the two modes, and the on, off and mark commands with the notes the
+// log reads. A script holding a non-ASCII byte would be misread by Windows
+// PowerShell 5.1, which reads a BOM-less file as ANSI.
+func TestGiveWayScriptKeepsItsEventsModesAndCommands(t *testing.T) {
+	s := millwright.GiveWayScript
+	for _, want := range []string{
+		"'unlock'", "'lock'", "'tick'", "'freeze'", "'shutdown'",
+		"'giveway', 'on'", "'giveway', 'off'", "'giveway', 'mark'",
+		"windows-unlock", "windows-lock", "windows-tick",
+		"windows_free_mb=", "windows_ms=",
+		"[switch]$DryRun", "--exec", "--terminate", "Start WSL (millwright)",
+		"drop_caches", "Ubuntu-24.04", "jwhite",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the give-way script lacks %q", want)
+		}
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			t.Fatalf("the give-way script holds a non-ASCII byte at %d", i)
+		}
+	}
+	// the freeze comes first at unlock, before anything that can take time
+	on, state, drop, sleep, mark := strings.Index(s, "windows-unlock"), strings.Index(s, "Set-State 'unlocked'"),
+		strings.Index(s, "drop_caches"), strings.Index(s, "Start-Sleep 10"), strings.Index(s, "'giveway', 'mark'")
+	if on < 0 || state < on || drop < state || sleep < drop || mark < sleep {
+		t.Errorf("at unlock the order must be on (%d), state (%d), drop caches (%d), sleep (%d), mark (%d)", on, state, drop, sleep, mark)
+	}
+	// the three tick modes: freeze renews, shutdown does not
+	if !strings.Contains(s, "'giveway', 'on'") || strings.Count(s, "windows-tick") < 1 {
+		t.Errorf("tick must renew with mw giveway on --by windows-tick")
+	}
+}
+
+// The script's flags and note names are the ones mw giveway reads.
+func TestGiveWayScriptUsesFlagsMwGivewayHas(t *testing.T) {
+	root := newRootCmd()
+	cmd, _, err := root.Find([]string{"giveway"})
+	if err != nil || cmd.Name() != "giveway" {
+		t.Fatalf("mw giveway not found: %v", err)
+	}
+	for _, flag := range []string{"by", "note"} {
+		if cmd.Flags().Lookup(flag) == nil {
+			t.Errorf("mw giveway has no --%s, which the give-way script passes", flag)
+		}
+	}
+	for _, flag := range []string{"--by", "--note"} {
+		if !strings.Contains(millwright.GiveWayScript, flag) {
+			t.Errorf("the give-way script does not pass %s", flag)
+		}
+	}
+}
+
+func giveWayPinned(t *testing.T) {
+	t.Helper()
+	wslFlagPinned(t, wslFlagTestCommit)
+}
+
+func TestGiveWayInstallLineStartsWithACommentWithItsWayBack(t *testing.T) {
+	giveWayPinned(t)
+	for _, inline := range []bool{false, true} {
+		line, err := GiveWayInstallLine("grace", inline)
+		if err != nil {
+			t.Fatal(err)
+		}
+		first := strings.SplitN(line, "\n", 2)[0]
+		if !strings.HasPrefix(first, "# ") || !strings.Contains(first, "mw host giveway --uninstall-line") {
+			t.Errorf("(inline %v) the paste must begin with a comment saying what it does and its way back, got %q", inline, first)
+		}
+	}
+}
+
+func TestGiveWayInstallLineRegistersThreeTasksWithTheTriggersForAnyUser(t *testing.T) {
+	giveWayPinned(t)
+	line, err := GiveWayInstallLine("grace", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"millwright give way (unlock)", "millwright give way (lock)", "millwright give way (tick)"} {
+		if !strings.Contains(line, "'"+name+"'") {
+			t.Errorf("the paste must register the task %q:\n%s", name, line)
+		}
+	}
+	if n := strings.Count(line, "Register-ScheduledTask"); n != 3 {
+		t.Errorf("expected three Register-ScheduledTask, got %d", n)
+	}
+	// session state changes: 1 console connect, 2 console disconnect, 7 lock, 8 unlock, of any user's session
+	if !strings.Contains(line, "MSFT_TaskSessionStateChangeTrigger") {
+		t.Errorf("the lock, unlock and console triggers are session-state-change triggers")
+	}
+	for _, want := range []string{"StateChange=8", "StateChange=7", "StateChange=1", "StateChange=2", "-AtLogOn"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the paste lacks the trigger %q", want)
+		}
+	}
+	if strings.Contains(line, "UserId=") || strings.Contains(line, "-AtLogOn -User") {
+		t.Errorf("the triggers must fire for ANY user's session: no UserId on a trigger")
+	}
+	// every in-script event name is the script's own
+	for _, ev := range []string{"-Event unlock", "-Event lock", "-Event tick"} {
+		if !strings.Contains(line, ev) {
+			t.Errorf("the paste lacks the action %q", ev)
+		}
+	}
+	// no window: the task's action is a console-less host, not a flag that still flashes
+	if !strings.Contains(line, "conhost.exe") || !strings.Contains(line, "--headless") {
+		t.Errorf("the task action must start powershell under conhost.exe --headless")
+	}
+	// the tick repeats every 5 minutes
+	if !strings.Contains(line, "-RepetitionInterval (New-TimeSpan -Minutes 5)") {
+		t.Errorf("the tick task must repeat every 5 minutes")
+	}
+	// the principal is the account that runs the paste, and the paste refuses any other
+	if !strings.Contains(line, `-UserId "$env:USERDOMAIN\$env:USERNAME"`) || !strings.Contains(line, "-LogonType Interactive") {
+		t.Errorf("the tasks must run under the account that runs the paste")
+	}
+	if !strings.Contains(line, "$env:USERNAME -ne 'grace'") {
+		t.Errorf("the paste must refuse to run under any account but the one that owns WSL")
+	}
+	// the folder, the mode file and the print of what was registered
+	for _, want := range []string{`$env:ProgramData\millwright\giveway`, `"$d\mode"`, "-Value freeze", "Get-ScheduledTaskInfo", "NextRunTime"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the paste lacks %q", want)
+		}
+	}
+}
+
+func TestGiveWayInstallLineChecksTheDownloadBeforeItRegistersAnything(t *testing.T) {
+	giveWayPinned(t)
+	line, err := GiveWayInstallLine("grace", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := "https://raw.githubusercontent.com/Jonathan-A-White/millwright/" + wslFlagTestCommit + "/contrib/windows/giveway.ps1"
+	if !strings.Contains(line, "'"+url+"'") {
+		t.Errorf("expected a download of %s pinned at the commit:\n%s", url, line)
+	}
+	sum := sha256.Sum256([]byte(millwright.GiveWayScript))
+	if !strings.Contains(line, "-ne '"+strings.ToUpper(hex.EncodeToString(sum[:]))+"'") {
+		t.Errorf("expected the SHA-256 of the embedded script checked")
+	}
+	chk, mv, reg := strings.Index(line, "Get-FileHash"), strings.Index(line, "Move-Item"), strings.Index(line, "Register-ScheduledTask")
+	if chk < 0 || mv < chk || reg < mv {
+		t.Errorf("hash (%d) before move (%d) before register (%d)", chk, mv, reg)
+	}
+	// the build check comes before the first thing it changes
+	build, mk := strings.Index(line, "OSVersion.Version.Build"), strings.Index(line, "New-Item")
+	if build < 0 || mk < build {
+		t.Errorf("the Windows build and the account are checked (%d) before the folder is made (%d)", build, mk)
+	}
+	if strings.Contains(line, "FromBase64String") {
+		t.Errorf("the short paste must not carry the script in itself")
+	}
+}
+
+func TestGiveWayInstallLineWithNoCommitToPinAtSaysInline(t *testing.T) {
+	wslFlagPinned(t, "")
+	out, err := runMw(t, "host", "giveway", "--install-line")
+	if err == nil || !strings.Contains(err.Error(), "--inline") {
+		t.Errorf("expected a refusal naming --inline, got %v\n%s", err, out)
+	}
+	if out, err = runMw(t, "host", "giveway", "--install-line", "--inline"); err != nil {
+		t.Errorf("--inline needs no commit: %v\n%s", err, out)
+	}
+}
+
+func TestGiveWayInstallLineInlineCarriesTheScript(t *testing.T) {
+	out, err := runMw(t, "host", "giveway", "--install-line", "--inline")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	m := regexp.MustCompile(`FromBase64String\('([^']+)'\)`).FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("expected the script carried in the paste:\n%s", out)
+	}
+	script, err := base64.StdEncoding.DecodeString(m[1])
+	if err != nil || string(script) != millwright.GiveWayScript {
+		t.Errorf("the paste must carry contrib/windows/giveway.ps1 as it is (err %v)", err)
+	}
+}
+
+func TestGiveWayInstallLineTakesAnotherAccount(t *testing.T) {
+	line, err := GiveWayInstallLine("someone", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(line, "$env:USERNAME -ne 'someone'") {
+		t.Errorf("--account must change the account the paste insists on")
+	}
+	if _, err := GiveWayInstallLine("a'b", true); err == nil {
+		t.Errorf("an account holding a quote must be refused")
+	}
+}
+
+func TestGiveWayUninstallLineRemovesTheThreeTasksAndTheFolder(t *testing.T) {
+	out, err := runMw(t, "host", "giveway", "--uninstall-line")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out, "# ") {
+		t.Errorf("must begin with a comment, got %.60q", out)
+	}
+	for _, want := range []string{"millwright give way (unlock)", "millwright give way (lock)", "millwright give way (tick)",
+		"Unregister-ScheduledTask", "Remove-Item", `millwright\giveway`, "giveway off --by windows-uninstall"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the way back lacks %q:\n%s", want, out)
+		}
+	}
+	// the wsl-flag script's folder is left as it is
+	if strings.Contains(out, `Remove-Item "$env:ProgramData\millwright"`) {
+		t.Errorf("the way back must not remove the folder of the other scripts")
+	}
+}
+
+func TestGiveWayModeLine(t *testing.T) {
+	for _, mode := range []string{"freeze", "shutdown"} {
+		out, err := runMw(t, "host", "giveway", "--mode-line", mode)
+		if err != nil {
+			t.Fatalf("%s: %v", mode, err)
+		}
+		if !strings.HasPrefix(out, "# ") || !strings.Contains(out, "mw host giveway --mode-line ") {
+			t.Errorf("%s: must begin with a comment that names its way back, got %.80q", mode, out)
+		}
+		if !strings.Contains(out, `Set-Content -Path "$env:ProgramData\millwright\giveway\mode" -Value `+mode) {
+			t.Errorf("%s: must write the mode file:\n%s", mode, out)
+		}
+	}
+	if out, err := runMw(t, "host", "giveway", "--mode-line", "sleep"); err == nil {
+		t.Errorf("a mode that is not freeze or shutdown must be refused, got:\n%s", out)
+	}
+}
+
+func TestGiveWayHostCommandWantsExactlyOneThing(t *testing.T) {
+	if out, err := runMw(t, "host", "giveway"); err == nil {
+		t.Errorf("no flag must be refused, got:\n%s", out)
+	}
+	if out, err := runMw(t, "host", "giveway", "--install-line", "--uninstall-line"); err == nil {
+		t.Errorf("two flags must be refused, got:\n%s", out)
+	}
+	if out, err := runMw(t, "host", "giveway", "--inline", "--uninstall-line"); err == nil {
+		t.Errorf("--inline without --install-line must be refused, got:\n%s", out)
+	}
+}
+
+// windowsPowerShell is the real Windows PowerShell 5.1 from a WSL with interop;
+// the parse tests are skipped where there is none.
+const windowsPowerShell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+
+// parseWithWindowsPowerShell hands text to the language parser on stdin and
+// returns the parse errors it prints (none when the text is whole). It parses
+// only: nothing is run and nothing is written.
+func parseWithWindowsPowerShell(t *testing.T, text string) string {
+	t.Helper()
+	if _, err := os.Stat(windowsPowerShell); err != nil {
+		t.Skip("no Windows PowerShell on this host")
+	}
+	cmd := exec.Command(windowsPowerShell, "-NoProfile", "-NonInteractive", "-Command",
+		`$t=[Console]::In.ReadToEnd(); $e=$null; $tk=$null; [void][System.Management.Automation.Language.Parser]::ParseInput($t,[ref]$tk,[ref]$e); "PARSEERRORS=$($e.Count)"; $e | ForEach-Object { $_.ToString() }`)
+	cmd.Stdin = strings.NewReader(text)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Run(); err != nil {
+		t.Skipf("Windows PowerShell is not usable here: %v: %s", err, out.String())
+	}
+	return out.String()
+}
+
+func TestWindowsPowerShellParsesTheScriptAndTheThreePastes(t *testing.T) {
+	giveWayPinned(t)
+	short, err := GiveWayInstallLine("grace", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inline, err := GiveWayInstallLine("grace", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mode, _ := GiveWayModeLine("shutdown")
+	for name, text := range map[string]string{
+		"giveway.ps1": millwright.GiveWayScript, "install-line": short, "install-line --inline": inline,
+		"uninstall-line": GiveWayUninstallLine(), "mode-line": mode,
+	} {
+		if got := parseWithWindowsPowerShell(t, text); !strings.HasPrefix(got, "PARSEERRORS=0") {
+			t.Errorf("%s: the real Windows PowerShell reports parse errors:\n%s", name, got)
+		}
+	}
+}
