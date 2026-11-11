@@ -190,9 +190,10 @@ type BoostHeld struct{ Key, Here, Vault string }
 // BoostTablesHeldDifferently is every line that both a Boost's tables and the
 // vault's hold with different values, in table and then rig order, then each
 // rig's [test_parts.<rig>] table when both hold it and its parts or their order
-// differ (mw-gq6.704). A line only one of them holds is left out: sync appends
-// what a Boost lacks (mw-gq6.593), and a Boost may hold a line the vault does
-// not.
+// differ (mw-gq6.704), then "session.deny" when both hold the key and the rules
+// or their order differ (mw-t5shinh.61). A line only one of them holds is left
+// out: sync appends what a Boost lacks (mw-gq6.593), and a Boost may hold a line
+// the vault does not.
 func BoostTablesHeldDifferently(here, vault BoostTables) []BoostHeld {
 	var held []BoostHeld
 	for _, name := range BoostTableNames {
@@ -208,6 +209,13 @@ func BoostTablesHeldDifferently(here, vault BoostTables) []BoostHeld {
 		if want, ok := vault.Parts[rig]; ok && !slices.Equal(got, want) {
 			held = append(held, BoostHeld{Key: BoostPartsPrefix + rig, Here: partsText(got), Vault: partsText(want)})
 		}
+	}
+	if here.HasSessionDeny && vault.HasSessionDeny && !slices.Equal(here.SessionDeny, vault.SessionDeny) {
+		held = append(held, BoostHeld{
+			Key:   SessionTable + "." + SessionDenyKey,
+			Here:  SessionDenyLiteral(here.SessionDeny),
+			Vault: SessionDenyLiteral(vault.SessionDeny),
+		})
 	}
 	return held
 }
