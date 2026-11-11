@@ -28,6 +28,7 @@ type suiteNightlyContext struct {
 	rules      *apptest.FakeEpicRules
 	records    *apptest.FakeSuiteRecords
 	log        *apptest.FakeEventLog
+	heads      *apptest.FakeRigHeads
 	spring     *application.EventSpring
 	last       events.Event
 	ctx        context.Context
@@ -52,6 +53,7 @@ func InitializeSuiteNightlyScenario(ctx *godog.ScenarioContext) {
 		*c = suiteNightlyContext{
 			hour: application.DefaultNightlySuiteHour, rigs: map[string]string{},
 			rules: apptest.NewFakeEpicRules(), records: &apptest.FakeSuiteRecords{}, log: &apptest.FakeEventLog{},
+			heads: apptest.NewFakeRigHeads(),
 		}
 		c.ctx, c.cancel = context.WithCancel(context.Background())
 		return ctx, nil
@@ -74,6 +76,10 @@ func InitializeSuiteNightlyScenario(ctx *godog.ScenarioContext) {
 		c.rigs[rig] = "/rigs/" + rig
 		return nil
 	})
+	ctx.Given(`^the rig "([^"]*)" says suite_every = "([^"]*)" and suite_host = "([^"]*)"$`, c.rigSaysSuiteEvery)
+	ctx.Given(`^the newest result of "([^"]*)" began "([^"]*)" UTC at "([^"]*)"$`, c.newestResult)
+	ctx.Given(`^main's head of "([^"]*)" is "([^"]*)"$`, c.setHead)
+	ctx.When(`^main's head of "([^"]*)" is "([^"]*)"$`, c.setHead)
 	ctx.Given(`^the nightly suite is sprung at hour (\d+)$`, func(hour int) error { c.hour = hour; return nil })
 	ctx.Given(`^the suite of "([^"]*)" cannot be run$`, func(string) error { c.cannotRun = true; return nil })
 	ctx.Given(`^the result of "([^"]*)" for "([^"]*)" is already kept$`, c.alreadyKept)
@@ -120,6 +126,34 @@ func (c *suiteNightlyContext) rigSays(rig string, on bool) error {
 	return nil
 }
 
+func (c *suiteNightlyContext) rigSaysSuiteEvery(rig, every, host string) error {
+	d, err := time.ParseDuration(every)
+	if err != nil {
+		return fmt.Errorf("suite_every %q: %w", every, err)
+	}
+	c.rigs[rig] = "/rigs/" + rig
+	c.rules.Require(rig, domain.EpicRequirements{NightlySuite: true, SuiteEvery: d, SuiteHost: host})
+	return nil
+}
+
+// newestResult keeps a result that began at the given time, as another host's
+// suite would have, and that ran main at sha.
+func (c *suiteNightlyContext) newestResult(rig, began, sha string) error {
+	t, err := time.Parse("2006-01-02 15:04", began)
+	if err != nil {
+		return fmt.Errorf("the time %q: %w", began, err)
+	}
+	t = t.UTC()
+	_, err = c.records.PutSuiteFile(c.ctx, rig, t.Format("2006-01-02")+".json",
+		fmt.Sprintf(`{"rig":%q,"sha":%q,"started":%q,"passed":true}`, rig, sha, t.Format(time.RFC3339)))
+	return err
+}
+
+func (c *suiteNightlyContext) setHead(rig, sha string) error {
+	c.heads.SetHead("/rigs/"+rig, sha)
+	return nil
+}
+
 func (c *suiteNightlyContext) setClock(at string) error {
 	t, err := time.Parse("2006-01-02 15:04", at)
 	if err != nil {
@@ -152,8 +186,20 @@ func (c *suiteNightlyContext) suite(ctx context.Context, rig string) error {
 	if cannot {
 		return fmt.Errorf("the worktree could not be cut")
 	}
-	_, err := c.records.PutSuiteFile(ctx, rig, day+".json", `{"rig":"`+rig+`","sha":"abc","passed":true}`)
+	head, err := c.heads.Resolve(ctx, "/rigs/"+rig, "")
+	sha := "abc"
+	if err == nil {
+		sha = head.Commit
+	}
+	_, err = c.records.PutSuiteFile(ctx, rig, day+".json",
+		fmt.Sprintf(`{"rig":%q,"sha":%q,"started":%q,"passed":true}`, rig, sha, c.nowAt().Format(time.RFC3339)))
 	return err
+}
+
+func (c *suiteNightlyContext) nowAt() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
 }
 
 func (c *suiteNightlyContext) cycle() error {
@@ -175,8 +221,9 @@ func (c *suiteNightlyContext) begin() error {
 		suite := &application.NightlySuite{
 			Hour: c.hour, Rigs: c.rigs, Rules: c.rules, History: c.records,
 			Home: func(context.Context) (bool, error) { return c.host == c.home, nil },
-			Run:  run,
-			Now:  func() time.Time { return c.now },
+			Host: c.host, Heads: c.heads,
+			Run: run,
+			Now: func() time.Time { return c.now },
 		}
 		c.spring = &application.EventSpring{Log: c.log, Host: c.host, Jobs: []application.SpringJob{suite.Job()}, Now: func() time.Time { return c.now }}
 	}
