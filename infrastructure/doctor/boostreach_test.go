@@ -166,3 +166,21 @@ func TestBoostRealSshExitOf73IsACannotWriteAlarm(t *testing.T) {
 		}
 	}
 }
+
+// mw-6ww.163.1: a Boost the Governor retired is not asked, and so not alarmed.
+func TestBoostReachSkipsARetiredBoostWithoutAskingIt(t *testing.T) {
+	r := newBoostRig(t)
+	asked := false
+	check := doctor.NewBoostReach(&apptest.FakeHomeFile{Text: "laptop 2026-09-29T00:10:00Z mw@laptop"}, "laptop", map[string]string{"desktop": "ssh desktop"}, r.store)
+	check.Retired = []string{"desktop"}
+	check.Ssh = func(context.Context, []string) error { asked = true; return errors.New("ssh: timed out") }
+	check.Alarm = func(context.Context, string) (uint64, error) { r.alarms = append(r.alarms, "alarm"); return 1, nil }
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorOK || !strings.Contains(reason, "retired") {
+		t.Fatalf("expected ok, saying the desktop is retired, got %s (%s)", verdict, reason)
+	}
+	if asked || len(r.alarms) != 0 {
+		t.Fatalf("expected no ssh and no alarm for a retired Boost, asked %v, alarms %v", asked, r.alarms)
+	}
+}

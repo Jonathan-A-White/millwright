@@ -408,3 +408,34 @@ func TestPosternMirrorFailedMillCopyLeavesTheCursorWhereItWas(t *testing.T) {
 		t.Errorf("the copy after the failure named %q, want the missed run too", last)
 	}
 }
+
+// mw-6ww.163.1: a Boost the Governor retired is not asked at all (no ssh), one
+// line says so, the watchdog's files still go, and the run succeeds.
+func TestPosternMirrorSkipsARetiredBoostWithoutSSHAndStillFeedsTheWatchdog(t *testing.T) {
+	m := &downBoostMirrorer{askErr: errors.New(connectRefused)}
+	out := &bytes.Buffer{}
+	err := application.PosternMirror{
+		Files:          &apptest.FakeHomeFile{Text: "laptop 2026-10-01T00:00:00Z mw@laptop\n"},
+		Mirrorer:       m,
+		Out:            out,
+		Host:           "laptop",
+		DataDir:        "/data",
+		MillStateDir:   "/state",
+		Reach:          map[string]string{"desktop": "ssh desktop"},
+		Retired:        []string{"desktop", "vps"},
+		WatchdogTarget: "root@vps:/var/lib/postern-watchdog/",
+		Sleep:          func(context.Context, time.Duration) error { return nil },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("a retired boost failed the run: %v", err)
+	}
+	if m.indexCalls != 0 {
+		t.Errorf("the retired boost was asked %d times, want none", m.indexCalls)
+	}
+	if len(m.dests) != 1 || m.dests[0] != "root@vps:/var/lib/postern-watchdog/" {
+		t.Errorf("copied to %v, want only the watchdog", m.dests)
+	}
+	if n := strings.Count(out.String(), "desktop is retired"); n != 1 || strings.Contains(out.String(), "unreachable") {
+		t.Errorf("want one line saying desktop is retired, got:\n%s", out.String())
+	}
+}

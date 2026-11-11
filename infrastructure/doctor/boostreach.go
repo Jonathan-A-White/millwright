@@ -79,6 +79,9 @@ type BoostReach struct {
 	Host string
 	// Reach is [hands_hosts]: how this host reaches each other host by ssh.
 	Reach map[string]string
+	// Retired are the hosts the Governor retired (retired_hosts): a retired
+	// Boost is not asked and nothing is alarmed about it (mw-6ww.163.1).
+	Retired []string
 	// State is where the check keeps when the Boost first failed to answer.
 	State application.DoctorState
 	// WgFaulty reports whether the home's wg hub check is faulty. Nil says it
@@ -142,6 +145,9 @@ func (b *BoostReach) Probe(ctx context.Context) (application.Verdict, string) {
 		return application.DoctorOK, "n/a: this host is not home"
 	}
 	boost := application.BoostOf(b.Host)
+	if application.IsRetired(b.Retired, boost) {
+		return application.DoctorOK, fmt.Sprintf("n/a: %s is retired", boost)
+	}
 	prefix := strings.Fields(b.Reach[boost])
 	if len(prefix) < 2 {
 		return application.DoctorOK, fmt.Sprintf("n/a: no [hands_hosts] entry for %s", boost)

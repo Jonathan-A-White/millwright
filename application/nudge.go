@@ -108,6 +108,10 @@ type Nudge struct {
 	// that cannot be told, leaves the alarm running as it always did.
 	Home HomeFile
 
+	// Retired are the hosts the Governor retired (retired_hosts): none is named
+	// as quiet, whatever it still holds (mw-6ww.163.1).
+	Retired []string
+
 	// SyncHalt is this host's own mark of a halted sync, read straight rather
 	// than through the tracker, the same as Status.SyncHalt: the one thing a
 	// halt cannot carry is word of itself, since nothing it writes is
@@ -191,7 +195,7 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 		}
 	}
 
-	s := Status{Tracker: n.Tracker, Notes: n.Notes, Host: n.Host, Now: n.Now}
+	s := Status{Tracker: n.Tracker, Notes: n.Notes, Host: n.Host, Now: n.Now, Retired: n.Retired}
 	work, err := s.Tracker.WorkInHand(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reading what is in hand: %w", err)

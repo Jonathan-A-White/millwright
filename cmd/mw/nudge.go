@@ -86,8 +86,13 @@ func newNudgeCmd() *cobra.Command {
 			// after hostBeads, which may point this process at the home's server.
 			defer keepBeadsConnection(dir, cmd.ErrOrStderr())()
 
+			retired, err := config.RetiredHosts()
+			if err != nil {
+				return err
+			}
 			tracker := mwGateway(dir, host)
 			clauses, err := application.Nudge{
+				Retired:     retired,
 				Tracker:     tracker,
 				Notes:       tracker,
 				Mayor:       application.MayorReader{Tracker: tracker, Notes: tracker},

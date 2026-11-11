@@ -3066,3 +3066,17 @@ func TestSessionDenyThatIsNotAnArrayIsAnErrorNamingTheKey(t *testing.T) {
 		}
 	}
 }
+
+func TestRetiredHostsAreNoneUntilTheConfigNamesThem(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nhost = \"laptop\"\n")
+	hosts, err := config.RetiredHosts()
+	if err != nil || len(hosts) != 0 {
+		t.Fatalf("expected no retired hosts, got %v: %v", hosts, err)
+	}
+
+	writeConfig(t, "vault = \"/v\"\nretired_hosts = [\"desktop\", \"vps\"] # off\n\n[hands_hosts]\nretired_hosts = \"nope\"\n")
+	hosts, err = config.RetiredHosts()
+	if err != nil || len(hosts) != 2 || hosts[0] != "desktop" || hosts[1] != "vps" {
+		t.Fatalf("expected desktop and vps retired, got %v: %v", hosts, err)
+	}
+}

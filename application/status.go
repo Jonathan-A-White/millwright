@@ -294,6 +294,10 @@ type Status struct {
 	// HostSilence is how long another host's recorded sync may be behind
 	// before its work is called stranded. Zero reads DefaultHostSilence.
 	HostSilence time.Duration
+	// Retired are the hosts the Governor retired (retired_hosts): each is one
+	// line under OTHER HOSTS, never called asleep, and its work is shown under
+	// the line that re-paths it (mw-6ww.163.1).
+	Retired []string
 	// Signs is where another host's other signs of life are read, so that a
 	// host whose last sync is old but which has committed to the vault, or
 	// whose claimed story's lease was renewed, within HostSilence is not called
@@ -595,6 +599,10 @@ type HostWork struct {
 	// host's next dispatch tick as a stranded one is (mw-gq6.941). A story whose
 	// state could not be read has none.
 	Runs map[string]string
+	// Retired says the Governor retired this host: it is said once, none of its
+	// notes are read, and it is never asleep. Work still pathed to or claimed by
+	// it is listed under the line that re-paths it.
+	Retired bool
 	// Asleep says this host has been silent for longer than the threshold — or
 	// has never synced, or left a note that is not a time. Its stories are
 	// stranded: nothing here will move them, and no other host will take them
@@ -1934,6 +1942,13 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 		}
 		byHost[host] = append(byHost[host], detail)
 	}
+	// A retired host is listed whether or not it holds work, and none of its
+	// notes are read: it is gone, not asleep.
+	for _, host := range s.Retired {
+		if _, seen := byHost[host]; !seen && host != s.Host && !slices.Contains(hosts, host) {
+			hosts = append(hosts, host)
+		}
+	}
 	sort.Strings(hosts)
 
 	// Each host's three notes are a read apiece, and no note depends on
@@ -1944,6 +1959,9 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 	}
 	notes := make([]noted, len(hosts))
 	for i, host := range hosts {
+		if IsRetired(s.Retired, host) {
+			continue
+		}
 		read := func(key string) func() (string, error) {
 			return later(func() (string, error) { return s.Notes.Note(ctx, key) })
 		}
@@ -1952,6 +1970,10 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 
 	work := make([]HostWork, 0, len(hosts))
 	for i, host := range hosts {
+		if IsRetired(s.Retired, host) {
+			work = append(work, HostWork{Host: host, Retired: true, Stories: byHost[host], Now: now})
+			continue
+		}
 		said, err := notes[i].synced()
 		if err != nil {
 			return nil, fmt.Errorf("reading when %s last synced: %w", host, err)
@@ -2719,6 +2741,10 @@ func needWhy(need PosternViewNeed) string {
 // live says the note was read straight out of the one database every host
 // shares, rather than out of this host's own copy, which is a cycle behind.
 func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
+	if w.Retired {
+		w.writeRetired(b, here)
+		return
+	}
 	clip(b, fmt.Sprintf("  %s · %s", w.Host, w.state()))
 	if w.Halt != nil {
 		clip(b, "    "+haltLine(w.Host, *w.Halt))
@@ -2760,6 +2786,20 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 		} else if since := lapsedLease(d, w.Now); !d.Hitl() && !since.IsZero() {
 			wrapInto(b, "      ", strandedLine(since, w.Runs[d.Story.ID]))
 		}
+	}
+}
+
+// writeRetired is a retired host's block: one line saying so, and, when work is
+// still pathed to or claimed by it, the line that re-paths it and the stories,
+// each once. Nothing of its sleep, doctor, sync or timers is said.
+func (w HostWork) writeRetired(b *strings.Builder, here string) {
+	clip(b, fmt.Sprintf("  %s · %s", w.Host, w.state()))
+	if len(w.Stories) == 0 {
+		return
+	}
+	clip(b, "    re-path: "+RepathHint+here)
+	for _, d := range w.Stories {
+		writeStoryIn(b, "    ", d, w.readyOrClaimed(d))
 	}
 }
 
@@ -2826,6 +2866,8 @@ func (w HostWork) writeMw(b *strings.Builder, main string) {
 // state is how a host's silence reads at the head of its block.
 func (w HostWork) state() string {
 	switch {
+	case w.Retired:
+		return "retired"
 	case w.NeverSynced():
 		return "ASLEEP, never synced"
 	case w.Unreadable():

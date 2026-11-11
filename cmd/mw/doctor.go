@@ -253,7 +253,12 @@ func newDoctorCmd() *cobra.Command {
 				return err
 			}
 			wg := doctor.NewWg(wgHub, reach, wgUnit, store)
+			retired, err := config.RetiredHosts()
+			if err != nil {
+				return err
+			}
 			boostReach := doctor.NewBoostReach(mwVault(vault, host), host, handsHosts, store)
+			boostReach.Retired = retired
 			boostReach.Alarm = alarm
 			// The Boost answering again is still pushed to the phone, as its
 			// alarm was; it is the event that rides the normal lane.
@@ -272,6 +277,7 @@ func newDoctorCmd() *cobra.Command {
 			// a host_silent_hours this host cannot read is its to say.
 			boostAsleep := doctor.NewBoostAsleep(mwVault(vault, host), host, mwGateway(vault, host))
 			boostAsleep.Work = mwGateway(vault, host)
+			boostAsleep.Retired = retired
 			boostAsleep.Signs = mwVault(vault, host)
 			if hours, hoursErr := config.HostSilentHours(); hoursErr != nil {
 				boostAsleep.LimitErr = hoursErr
@@ -315,7 +321,7 @@ func newDoctorCmd() *cobra.Command {
 			harnessLevel := doctor.NewHarnessLevel(mwVault(vault, host), host, mwGateway(vault, host))
 			harnessLevel.Version = ownHarnessVersion
 			harnessLevel.Hosts = func(ctx context.Context) ([]doctor.HarnessHost, error) {
-				return harnessHosts(ctx, mwVault(vault, host), host)
+				return harnessHosts(ctx, mwVault(vault, host), host, retired)
 			}
 			checks := application.DoctorChecks{}
 			// The factory checkout the vault's formulas are judged against; none
@@ -747,11 +753,11 @@ func beadsServedHere() bool {
 // harnessHosts are the Builder hosts the harness-level check looks at besides
 // this one: the Boost, the hosts [cloud.caps] names and the boxes the cloud
 // book holds up. A box is the one kind whose Claude Code is an npm package.
-func harnessHosts(ctx context.Context, files *vaultpkg.Vault, host string) ([]doctor.HarnessHost, error) {
+func harnessHosts(ctx context.Context, files *vaultpkg.Vault, host string, retired []string) ([]doctor.HarnessHost, error) {
 	seen := map[string]bool{host: true}
 	var hosts []doctor.HarnessHost
 	add := func(name string, box bool) {
-		if !seen[name] {
+		if !seen[name] && !application.IsRetired(retired, name) {
 			seen[name] = true
 			hosts = append(hosts, doctor.HarnessHost{Name: name, Box: box})
 		}

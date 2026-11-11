@@ -581,3 +581,19 @@ func TestNudgeSkipsABoxThatWasBroughtDownButNamesALiveOne(t *testing.T) {
 		t.Fatalf("expected only the clause for the live box, got %+v", clauses)
 	}
 }
+
+// mw-6ww.163.1: a retired host holding a claim is gone, not quiet: the alarm
+// that mails the Mayor each minute does not name it.
+func TestNudgeSaysNothingOfARetiredHostHoldingAClaim(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "Left on the desktop", "desktop")
+	claim(t, tracker, "mw-gq6.30", 3*time.Hour)
+	syncedAt(t, tracker, "desktop", 3*time.Hour)
+
+	if clauses := nudgeReport(t, tracker, application.Nudge{}); len(clauses) != 1 || clauses[0].Key != "host:desktop" {
+		t.Fatalf("expected the desktop named while it is not retired, got %+v", clauses)
+	}
+	if clauses := nudgeReport(t, tracker, application.Nudge{Retired: []string{"desktop"}}); len(clauses) != 0 {
+		t.Fatalf("expected nothing of a retired host, got %+v", clauses)
+	}
+}

@@ -1686,6 +1686,7 @@ vault = "/root/millwright-vault"   # the one beads database and the seats
 host  = "vps"                      # which of the factory's hosts this is
 cap   = 1                          # sessions running here at once (default 1)
 host_silent_hours = 2              # how long another host may go unsynced (default 2)
+retired_hosts = ["desktop", "vps"] # hosts the Governor retired: one line in mw status, skipped by mw doctor and the postern mirror, refused by mw path set host= (default none)
 handoff_at = 180000                # the context size, in tokens, at which mw seat context says handoff (default 180000)
 rig_memory_bytes = 8000            # how large the Builder's memory of one rig may grow before mw status says prune (default 8000)
 beads_budget_bytes = 1500000000    # how large this host's .beads may grow before mw status warns and mw doctor's beads-size goes faulty (default 1.5 GB; raise it on a host that serves every rig's beads)

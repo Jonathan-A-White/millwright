@@ -103,7 +103,11 @@ func newPathSetCmd() *cobra.Command {
 					readings = application.UsageReadings{Notes: mwGateway(dir, host)}
 				}
 			}
-			_, err = application.PathSet{Tracker: gateway, Readings: readings, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
+			retired, err := config.RetiredHosts()
+			if err != nil {
+				return err
+			}
+			_, err = application.PathSet{Tracker: gateway, Retired: retired, Readings: readings, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
 				After: afterIDs, Hold: hold}.
 				Run(cmd.Context(), args[0], from, args[1:])
 			return err

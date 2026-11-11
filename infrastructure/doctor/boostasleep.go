@@ -63,6 +63,9 @@ type BoostAsleep struct {
 	// cannot make sense of: the check then cannot tell, and the other checks
 	// still run.
 	LimitErr error
+	// Retired are the hosts the Governor retired (retired_hosts): a retired
+	// Boost is gone, not asleep, and the check is ok, n/a (mw-6ww.163.1).
+	Retired []string
 	// Now is the clock. The zero value reads the real one.
 	Now func() time.Time
 
@@ -108,6 +111,9 @@ func (b *BoostAsleep) Probe(ctx context.Context) (application.Verdict, string) {
 	}
 
 	boost := application.BoostOf(b.Host)
+	if application.IsRetired(b.Retired, boost) {
+		return application.DoctorOK, fmt.Sprintf("n/a: %s is retired", boost)
+	}
 	said, err := b.Notes.Note(ctx, application.LastSyncKey(boost))
 	if err != nil {
 		return application.DoctorCannotTell, fmt.Sprintf("reading when %s last synced: %v", boost, err)
