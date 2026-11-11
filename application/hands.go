@@ -715,6 +715,120 @@ func (i PosternInbox) applyRanItMyself(ctx context.Context, m PosternInboxMessag
 	return result, true, nil
 }
 
+// doneStep reads the Governor's 'Done <step>': the step he typed, or false for
+// any other words. The case, the spacing and one closing '.' or '!' do not
+// matter; any other word in the message does, so 'Done.' and 'done s5 but it
+// errored' are only comments.
+var doneStep = regexp.MustCompile(`(?i)^done ([a-z0-9][a-z0-9._-]*?)[.!]?$`)
+
+func doneStepWord(text string) (string, bool) {
+	match := doneStep.FindStringSubmatch(strings.Join(strings.Fields(text), " "))
+	if match == nil {
+		return "", false
+	}
+	return match[1], true
+}
+
+// liveHandsSteps are the ids of bead's steps still for the Governor's hands, in
+// the order they were added (see handsLiveSteps).
+func liveHandsSteps(ctx context.Context, notes PosternNotes, bead string, steps []HandsStepRecord) ([]string, error) {
+	var live []string
+	for _, step := range steps {
+		one, err := handsLiveSteps(ctx, notes, bead, []HandsStepRecord{step})
+		if err != nil {
+			return nil, err
+		}
+		if one > 0 {
+			live = append(live, step.ID)
+		}
+	}
+	return live, nil
+}
+
+// applyDone retires the live hands step the Governor names with 'Done <step>' in
+// the bead's thread (mw-gq6.1073), as 'I ran step <id> myself.' does: <step> is
+// a live step's id or a prefix of exactly one live step's id (he types 's5' for
+// 's5-receiver-notes'). His words are commented on the bead, the step is retired
+// through HandsRetire with a reason quoting them and the txid, and the Mayor is
+// mailed 'Retired: <step> on <bead> on his Done'. Words that name no live step,
+// or a prefix that fits two, retire nothing and the Mayor is mailed 'Not applied:
+// Done <step> on <bead>' with the live steps. A message that is not those words,
+// from a signer not checked, or on a bead with no hands steps is not its: it
+// reports false and takes the ordinary path.
+func (i PosternInbox) applyDone(ctx context.Context, m PosternInboxMessage) (posternApplied, bool, error) {
+	typed, ok := doneStepWord(m.Text)
+	if !ok || !m.SignerChecked || i.Tracker == nil || i.Memory == nil {
+		return posternApplied{}, false, nil
+	}
+	raw, err := i.Memory.Note(ctx, HandsStepsKey(m.Thread))
+	if err != nil {
+		return posternApplied{}, false, err
+	}
+	steps, err := parseHandsSteps(raw)
+	if err != nil || len(steps) == 0 {
+		return posternApplied{}, false, nil
+	}
+	live, err := liveHandsSteps(ctx, i.Memory, m.Thread, steps)
+	if err != nil {
+		return posternApplied{}, false, err
+	}
+	var named []string
+	for _, id := range live {
+		if strings.EqualFold(id, typed) {
+			named = []string{id}
+			break
+		}
+		if len(id) >= len(typed) && strings.EqualFold(id[:len(typed)], typed) {
+			named = append(named, id)
+		}
+	}
+	recorded, fresh, err := i.recordThreadCommentOnce(ctx, m, nil)
+	if err != nil || !recorded {
+		return posternApplied{}, false, err
+	}
+	said := strings.Join(strings.Fields(m.Text), " ")
+	if len(named) != 1 {
+		result := posternApplied{Kind: "done", Bead: m.Thread, Txid: m.Txid, Refused: true}
+		if len(named) == 0 {
+			result.Detail = fmt.Sprintf("no live step is called %s", typed)
+		} else {
+			result.Detail = fmt.Sprintf("%s fits %d live steps", typed, len(named))
+		}
+		result.Detail += "; live steps: " + liveStepsSaid(live)
+		if fresh {
+			body := fmt.Sprintf("The Governor said %q by postern %s, txid %s, on %s; not applied: %s.", said, sentInFull(m.Ts), m.Txid, m.Thread, result.Detail)
+			if err := i.mail(ctx, fmt.Sprintf("Not applied: Done %s on %s", typed, m.Thread), body); err != nil {
+				return posternApplied{}, false, err
+			}
+		}
+		return result, true, nil
+	}
+	id := named[0]
+	result := posternApplied{Kind: "done", Bead: m.Thread, Txid: m.Txid}
+	reason := fmt.Sprintf("done by the Governor's hand: he typed %q by postern (txid %s)", said, m.Txid)
+	if err := (HandsRetire{
+		Tracker: i.Tracker, Notes: i.Memory, Out: nil,
+		View: i.View, ViewLock: i.ViewLock, Err: i.Out,
+	}).Run(ctx, HandsRetireRequest{Bead: m.Thread, ID: id, Reason: reason}); err != nil {
+		return posternApplied{}, false, err
+	}
+	if fresh {
+		body := fmt.Sprintf("The Governor by postern %s, txid %s, on %s:\n\n%s\n\nThe step %s is retired: %s.", sentInFull(m.Ts), m.Txid, m.Thread, m.Text, id, reason)
+		if err := i.mail(ctx, fmt.Sprintf("Retired: %s on %s on his Done", id, m.Thread), body); err != nil {
+			return posternApplied{}, false, err
+		}
+	}
+	return result, true, nil
+}
+
+// liveStepsSaid names live step ids for a mail, or says there are none.
+func liveStepsSaid(live []string) string {
+	if len(live) == 0 {
+		return "none"
+	}
+	return strings.Join(live, ", ")
+}
+
 // HandsList prints every hands step of a bead: where and as whom it runs,
 // its §17 sha256, whether it has run, its text and its way back. With no
 // bead it prints one line for each step not yet run on every open bead. It
