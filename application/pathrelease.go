@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -141,7 +142,38 @@ func (s PathSet) whyStayHeld(ctx context.Context, id string, story, written Stor
 	if lines := dispatchRefusals(written); len(lines) > 0 {
 		return lines[0], nil
 	}
-	return "", nil
+	return s.whyOverThePace(ctx, id, story)
+}
+
+// whyOverThePace is why a story labelled model-story is not released now, by the
+// pace of mw release-paced (checkPace, the one check of both): the usage reading
+// missing, stale or over the line, or ReleasePacedMax model stories of its epic
+// already open or running. A story without the label is never paced, so "".
+func (s PathSet) whyOverThePace(ctx context.Context, id string, story StoryDetail) (string, error) {
+	if !hasLabel(story.Labels, LabelModelStory) {
+		return "", nil
+	}
+	var active int
+	if story.EpicID != "" {
+		epic, err := s.Tracker.ShowEpic(ctx, story.EpicID)
+		if err != nil {
+			return "", fmt.Errorf("reading the model stories of %s to count the pace: %w", story.EpicID, err)
+		}
+		for _, other := range epic.Stories {
+			if other.Story.ID != id && hasLabel(other.Labels, LabelModelStory) && !other.Held() && !other.Closed() {
+				active++
+			}
+		}
+	}
+	now := time.Now()
+	if s.Now != nil {
+		now = s.Now()
+	}
+	pace, err := checkPace(ctx, s.Readings, now.UTC(), active, "its epic's model stories")
+	if err != nil {
+		return "", err
+	}
+	return pace.Held(), nil
 }
 
 // heldLine is the first line of a comment, cut at 160 characters.
