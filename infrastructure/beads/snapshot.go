@@ -341,7 +341,13 @@ func (s *snapshot) ShowEpics(ctx context.Context, ids []string) ([]application.E
 
 		var filed []application.StoryDetail
 		for _, story := range inSiblingOrder(append([]bead(nil), s.children[id]...)) {
-			filed = append(filed, story.detail(defaults))
+			detail := story.detail(defaults)
+			for _, child := range s.children[story.ID] {
+				if child.Status != StatusClosed {
+					detail.Children++
+				}
+			}
+			filed = append(filed, detail)
 		}
 		out = append(out, application.EpicDetail{
 			ID: epic.ID, Title: epic.Title, Status: epic.Status, Priority: epic.priority(), Defaults: defaults,

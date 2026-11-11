@@ -360,3 +360,36 @@ func TestABeadPageCarriesTheChildrenOfItsChildren(t *testing.T) {
 		t.Errorf("expected at most 3 bd calls, got %d:\n%v", n, asked(t, log))
 	}
 }
+
+// A snapshot's ShowEpics reads the listing it holds, so it counts each child's
+// open children from that listing as the gateway's does (mw-gq6.1097).
+func TestASnapshotsShowEpicsCarriesTheChildrenOfEachChild(t *testing.T) {
+	ctx := context.Background()
+	program, asked := recordingBd(t)
+	server := aQuietFactory(asked)
+	at := "2026-10-18 10:00:00"
+	task := func(id, status string) []driver.Value {
+		return []driver.Value{id, "The bead " + id, "", "", status, "task", nil, nil, at, nil, at, nil, int64(1), `{"host":"desktop"}`, nil, int64(0)}
+	}
+	server.beads = append(server.beads, task("mw-e.6", "open"), task("mw-e.6.1", "open"), task("mw-e.6.2", "closed"))
+	server.edges = append(server.edges,
+		[3]string{"mw-e.6", "mw-e", "parent-child"},
+		[3]string{"mw-e.6.1", "mw-e.6", "parent-child"}, [3]string{"mw-e.6.2", "mw-e.6", "parent-child"})
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(server.open(t)), beads.WithKeptSaid(io.Discard))
+
+	tracker, err := g.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	epics, err := tracker.ShowEpics(ctx, []string{"mw-e"})
+	if err != nil || len(epics) != 1 {
+		t.Fatalf("reading the epic: %+v, %v", epics, err)
+	}
+	counts := map[string]int{}
+	for _, d := range epics[0].Stories {
+		counts[d.Story.ID] = d.Children
+	}
+	if counts["mw-e.6"] != 1 || counts["mw-e.2"] != 0 {
+		t.Errorf("expected mw-e.6 to count its 1 open child and mw-e.2 none, got %v", counts)
+	}
+}
