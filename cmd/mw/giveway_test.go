@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -143,5 +144,36 @@ func TestGiveWayHelpStatesTheVerbsTheFlagsAndTheHomesRefusal(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("help does not say %q", want)
 		}
+	}
+}
+
+// mw-2891blf.7: hostGiveWay looks at the tmux servers the host names: the default,
+// $MW_TMUX_SOCKET and the config's giveway_tmux_sockets.
+func TestHostGiveWayListsPanesFromEveryTmuxServerTheHostNames(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MW_GIVEWAY_DIR", t.TempDir())
+	t.Setenv("MW_GIVEWAY_TMUX_SOCKETS", "")
+	t.Setenv(TmuxSocketEnv, "seats")
+	if err := os.MkdirAll(filepath.Join(home, ".config", "mw"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".config", "mw", "config.toml"), []byte("giveway_tmux_sockets = [\"factory\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	way, ok := hostGiveWay("desktop")
+	if !ok {
+		t.Fatal("no give-way for the host")
+	}
+	servers, isServers := way.Panes.(giveway.Servers)
+	if !isServers {
+		t.Fatalf("panes = %T, want giveway.Servers", way.Panes)
+	}
+	var sockets []string
+	for _, s := range servers {
+		sockets = append(sockets, s.Socket)
+	}
+	if want := []string{"", "seats", "factory"}; !reflect.DeepEqual(sockets, want) {
+		t.Fatalf("sockets = %q, want the default server, seats and factory %q", sockets, want)
 	}
 }

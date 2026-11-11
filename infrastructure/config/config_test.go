@@ -3080,3 +3080,28 @@ func TestRetiredHostsAreNoneUntilTheConfigNamesThem(t *testing.T) {
 		t.Fatalf("expected desktop and vps retired, got %v: %v", hosts, err)
 	}
 }
+
+// mw-2891blf.7: the tmux servers give way looks at: the default, $MW_TMUX_SOCKET
+// (the seat commands' server) and the host's giveway_tmux_sockets.
+func TestGiveWayTmuxSocketsAreTheEnvironmentsAndTheConfigsAndNoneByDefault(t *testing.T) {
+	t.Setenv("MW_TMUX_SOCKET", "")
+	t.Setenv("MW_GIVEWAY_TMUX_SOCKETS", "")
+	writeConfig(t, "vault = \"/v\"\n")
+	if got, err := config.GiveWayTmuxSockets(); err != nil || len(got) != 0 {
+		t.Fatalf("no socket named: %v %v", got, err)
+	}
+
+	writeConfig(t, "vault = \"/v\"\ngiveway_tmux_sockets = [\"mw-seat\", \"factory\"] # -L names\n\n[x]\ngiveway_tmux_sockets = \"no\"\n")
+	t.Setenv("MW_TMUX_SOCKET", "seats")
+	got, err := config.GiveWayTmuxSockets()
+	if want := []string{"seats", "mw-seat", "factory"}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("sockets = %v, %v, want %v", got, err, want)
+	}
+
+	// The environment overrides the config's list; a name given twice is kept once.
+	t.Setenv("MW_GIVEWAY_TMUX_SOCKETS", "one, two,seats")
+	got, err = config.GiveWayTmuxSockets()
+	if want := []string{"seats", "one", "two"}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("sockets = %v, %v, want %v", got, err, want)
+	}
+}
