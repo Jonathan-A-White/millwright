@@ -365,3 +365,64 @@ func TestBoostTablesHeldDifferentlyNamesADifferingSessionDeny(t *testing.T) {
 		}
 	}
 }
+
+const levelVaultSessionText = levelVaultText + "\n[session]\ndeny = [\"Bash(scp *)\", 'Read(~/.ssh/**)']\n"
+
+func levelVaultWithSession(t *testing.T) BoostTables {
+	t.Helper()
+	tables, err := BoostTablesOf(mustParse(t, levelVaultSessionText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tables
+}
+
+func TestLevelBoostConfigAppendsTheSessionDenyTheConfigLacks(t *testing.T) {
+	wantLine := "deny = [\"Bash(scp *)\", \"Read(~/.ssh/**)\"]\n"
+	for name, c := range map[string]struct{ before, after string }{
+		"no session table": {
+			"host = \"desktop\" # mine\n\n[rigs]\nmillwright = \"/m\"\n",
+			"host = \"desktop\" # mine\n\n[rigs]\nmillwright = \"/m\"\n\n[session]\n" + wantLine},
+		"a session table with no deny": {
+			"[rigs]\nmillwright = \"/m\"\n\n[session]\nother = 1\n\n[tests]\nx = \"y\"\n",
+			"[rigs]\nmillwright = \"/m\"\n\n[session]\nother = 1\n" + wantLine + "\n[tests]\nx = \"y\"\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, appended, differing, err := LevelBoostConfig(c.before, levelVaultWithSession(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out != c.after {
+				t.Errorf("out =\n%q\nwant\n%q", out, c.after)
+			}
+			if !reflect.DeepEqual(appended, []string{"[session] deny"}) || len(differing) != 0 {
+				t.Errorf("appended = %v, differing = %v", appended, differing)
+			}
+			again, appended, _, err := LevelBoostConfig(out, levelVaultWithSession(t))
+			if err != nil || again != out || len(appended) != 0 {
+				t.Errorf("a second run changed %q (appended %v, err %v)", again, appended, err)
+			}
+		})
+	}
+}
+
+func TestLevelBoostConfigNeverEditsASessionDenyTheConfigHolds(t *testing.T) {
+	same := "[rigs]\nmillwright = \"/m\"\n\n[session]\ndeny = [\"Bash(scp *)\", \"Read(~/.ssh/**)\"]\n"
+	out, appended, differing, err := LevelBoostConfig(same, levelVaultWithSession(t))
+	if err != nil || out != same || len(appended) != 0 || len(differing) != 0 {
+		t.Errorf("the same deny: out %q, appended %v, differing %v, err %v", out, appended, differing, err)
+	}
+	other := "[rigs]\nmillwright = \"/m\"\n\n[session]\ndeny = [\"Bash(rm *)\"]\n"
+	out, appended, differing, err = LevelBoostConfig(other, levelVaultWithSession(t))
+	if err != nil || out != other || len(appended) != 0 || !reflect.DeepEqual(differing, []string{"[session] deny: differs"}) {
+		t.Errorf("a differing deny: out %q, appended %v, differing %v, err %v", out, appended, differing, err)
+	}
+}
+
+func TestLevelBoostConfigAppendsNoSessionDenyWhenTheVaultHoldsNone(t *testing.T) {
+	config := "[rigs]\nmillwright = \"/m\"\n"
+	out, appended, differing, err := LevelBoostConfig(config, levelVault(t))
+	if err != nil || out != config || len(appended) != 0 || len(differing) != 0 {
+		t.Errorf("out %q, appended %v, differing %v, err %v", out, appended, differing, err)
+	}
+}

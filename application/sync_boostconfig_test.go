@@ -114,3 +114,45 @@ func TestSyncWithAConfigItCannotReadStillSucceedsAndSaysSo(t *testing.T) {
 		t.Errorf("nothing said of the config: %q", report.String())
 	}
 }
+
+func TestSyncOnABoostAppendsTheSessionDenyItLacksAndSaysSo(t *testing.T) {
+	sync, config, target := boostSync(t)
+	sync.Host = "desktop"
+	target.data = boostVaultTables + "\n[session]\ndeny = [\"Bash(scp *)\", 'Read(~/.ssh/**)']\n"
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := boostConfigBefore + "\n[test_parts.postern]\n\"gate\" = \"make gate\"\n\n[session]\ndeny = [\"Bash(scp *)\", \"Read(~/.ssh/**)\"]\n"
+	if config.data != want {
+		t.Errorf("config =\n%q\nwant\n%q", config.data, want)
+	}
+	if !strings.Contains(report.String(), "config.toml: appended") || !strings.Contains(report.String(), "[session] deny") {
+		t.Errorf("the sync line does not say it: %q", report.String())
+	}
+	writes := config.writes
+	report, err = sync.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.writes != writes || strings.Contains(report.String(), "appended") {
+		t.Errorf("a second run appended again: %d writes, %q", config.writes, report.String())
+	}
+}
+
+func TestSyncOnABoostLeavesADifferingSessionDenyAndSaysSo(t *testing.T) {
+	sync, config, target := boostSync(t)
+	config.data = boostConfigBefore + "\n[test_parts.postern]\n\"gate\" = \"make gate\"\n\n[session]\ndeny = [\"Bash(rm *)\"]\n"
+	before := config.data
+	target.data = boostVaultTables + "\n[session]\ndeny = [\"Bash(scp *)\"]\n"
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.data != before {
+		t.Errorf("the differing deny was edited:\n%q", config.data)
+	}
+	if !strings.Contains(report.String(), "[session] deny: differs") {
+		t.Errorf("the sync line does not say it differs: %q", report.String())
+	}
+}
