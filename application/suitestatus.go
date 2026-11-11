@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // SuiteHeading heads the section naming, for each rig that runs the nightly
@@ -41,6 +43,12 @@ type SuiteStatus struct {
 	Bugs    []SuiteBug
 	// DaysAgo is how many UTC days before the report the result is of.
 	DaysAgo int
+	// MainUnchanged says main's head is still the commit the result is of, so a
+	// suite host rightly ran nothing since: the result is old but not late.
+	MainUnchanged bool
+	// NotDue says the rig's suite_every has not yet passed since the result
+	// began, so that the suite host is not yet to run another.
+	NotDue bool
 }
 
 // Line is the line printed for the rig.
@@ -55,8 +63,12 @@ func (u SuiteStatus) Line() string {
 			line += ": " + u.bugsLine()
 		}
 	}
-	if u.DaysAgo >= SuiteStale {
-		line += fmt.Sprintf(" · not run for %d days", u.DaysAgo)
+	if u.DaysAgo >= SuiteStale && !u.NotDue {
+		if u.MainUnchanged {
+			line += fmt.Sprintf(" · main unchanged since the last run (%d days)", u.DaysAgo)
+		} else {
+			line += fmt.Sprintf(" · not run for %d days", u.DaysAgo)
+		}
 	}
 	return line
 }
@@ -129,11 +141,28 @@ func (s Status) suiteStatuses(ctx context.Context) []SuiteStatus {
 			if day, err := time.Parse("2006-01-02", latest.Day); err == nil {
 				one.DaysAgo = int(today.Sub(day) / (24 * time.Hour))
 			}
+			onSuiteHost := rules.SuiteEvery > 0 && rules.SuiteHost != ""
+			one.NotDue = onSuiteHost && s.now().Sub(latest.Began()) <= rules.SuiteEvery
+			one.MainUnchanged = s.suiteMainUnchanged(ctx, s.Rigs[name], rules, latest)
 			one.Bugs = s.suiteBugs(ctx, rules.SuiteEpic, latest.Day, latest.Result)
 		}
 		out = append(out, one)
 	}
 	return out
+}
+
+// suiteMainUnchanged says whether a rig that runs its suite on a suite host has
+// had no suite since its newest result because main has not moved: its head, as
+// the checkout has it, is the result's sha. The suite host runs only when main
+// has moved and suite_every has passed, so only then is an old result no
+// lateness. A rig on the home's nightly run, no head to read, or one that
+// cannot be read, is not said to be unchanged.
+func (s Status) suiteMainUnchanged(ctx context.Context, dir string, rules domain.EpicRequirements, latest SuiteRecord) bool {
+	if s.SuiteHeads == nil || dir == "" || rules.SuiteEvery <= 0 || rules.SuiteHost == "" || latest.Result.Sha == "" {
+		return false
+	}
+	head, err := s.SuiteHeads.CommitOf(ctx, dir, "origin/HEAD")
+	return err == nil && head.Commit == latest.Result.Sha
 }
 
 // suiteBugs says, for each file the result says failed and in the order the

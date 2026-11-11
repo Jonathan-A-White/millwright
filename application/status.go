@@ -263,6 +263,11 @@ type Status struct {
 	// read from, for the SUITE section; with Rigs and Rules, which say which
 	// rigs run it. Nil leaves the section out.
 	Suites SuiteHistory
+	// SuiteHeads, when set, reads the head of each suite rig's main as its
+	// checkout has it, with no fetch, so that a suite is called late only when
+	// main has moved since it (mw-t5shinh.67). Nil, or a head that cannot be
+	// read, is a head not known to be the result's.
+	SuiteHeads FactoryCommits
 
 	// Landings, when set, names the rigs with an `mw land` alive on this host
 	// (LandProcesses.Pending), and GateHolder whose gate holds the host's gate

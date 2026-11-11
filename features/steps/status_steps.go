@@ -98,6 +98,9 @@ type statusContext struct {
 	// results of their whole suites kept in the vault (mw-8w7xb7.3).
 	rigs   map[string]string
 	suites *apptest.FakeSuiteRecords
+	// suiteHeads is the head of each rig's main as the checkout has it, by rig
+	// name (mw-t5shinh.67).
+	suiteHeads statusSuiteHeads
 
 	report application.StatusReport
 	err    error
@@ -760,6 +763,9 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 	}
 	if c.suites != nil {
 		status.Rigs, status.Suites = c.rigs, c.suites
+		if c.suiteHeads != nil {
+			status.SuiteHeads = c.suiteHeads
+		}
 	}
 	if c.turns != nil {
 		status.Turns = c.turns
