@@ -209,3 +209,52 @@ func TestTheViewCarriesUpNextPerHostInStartOrder(t *testing.T) {
 		t.Fatalf("expected up_next in the JSON, got %s", raw)
 	}
 }
+
+// A ready bead that has children is a parent: its children are the work, and
+// dispatch passes it over by the parent gate. The queue lists it apart from the
+// stories a dispatch starts, saying how many children it has, and does not count
+// it as one (mw-gq6.1088).
+func TestTheQueueListsAReadyBeadWithChildrenAsAParentNotAStoryToStart(t *testing.T) {
+	ctx := context.Background()
+	tracker := aQueueOf(t, queued{"mw-q.1", 1, 2, domain.SizeS, ""}, queued{"mw-q.2", 1, 3, domain.SizeS, ""})
+	tracker.AddStory("mw-q.2", domain.Story{ID: "mw-q.2.1", Title: "First child"})
+	tracker.AddStory("mw-q.2", domain.Story{ID: "mw-q.2.2", Title: "Second child"})
+
+	var out bytes.Buffer
+	got, err := application.Queue{Tracker: tracker, Host: "vps", Now: func() time.Time { return queueNow }, Out: &out}.Run(ctx)
+	if err != nil {
+		t.Fatalf("the queue: %v", err)
+	}
+	for _, row := range got.Ready {
+		if row.ID == "mw-q.2" {
+			t.Fatalf("expected the parent mw-q.2 left out of the ready rows, got %+v", got.Ready)
+		}
+	}
+	if len(got.Parents) != 1 || got.Parents[0].ID != "mw-q.2" || got.Parents[0].Children != 2 {
+		t.Fatalf("expected mw-q.2 listed as a parent of 2, got %+v", got.Parents)
+	}
+	text := out.String()
+	if !strings.Contains(text, "parent of 2") {
+		t.Fatalf("expected the row to say 'parent of 2', got:\n%s", text)
+	}
+	if !strings.Contains(text, "READY on vps (1),") {
+		t.Fatalf("expected only mw-q.1 counted as a story to start, got:\n%s", text)
+	}
+	if strings.Contains(text, "READY on vps (2)") {
+		t.Fatalf("expected the parent not counted among the stories to start, got:\n%s", text)
+	}
+}
+
+// A ready bead with no children prints as before, with no parents section.
+func TestTheQueueWithNoParentsPrintsNoParentsSection(t *testing.T) {
+	ctx := context.Background()
+	tracker := aQueueOf(t, queued{"mw-q.1", 1, 2, domain.SizeS, ""})
+	var out bytes.Buffer
+	got, err := application.Queue{Tracker: tracker, Host: "vps", Now: func() time.Time { return queueNow }, Out: &out}.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Parents) != 0 || strings.Contains(out.String(), "parent") {
+		t.Fatalf("expected no parents, got %+v:\n%s", got.Parents, out.String())
+	}
+}
