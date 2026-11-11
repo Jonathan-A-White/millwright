@@ -13,6 +13,7 @@
 //	beads_budget_bytes = 1500000000
 //	dispatch_sync_tries = 3
 //	dispatch_sync_wait = "15s"
+//	giveway_stale = "15m"              # how long a give-way marker may go unrenewed before the next dispatch tick lifts it
 //	push_tries = 4
 //	push_wait_seconds = 20
 //	millhand_routine_model = "sonnet"
@@ -163,6 +164,8 @@ const (
 
 	DispatchSyncTriesEnv = "MW_DISPATCH_SYNC_TRIES"
 	DispatchSyncWaitEnv  = "MW_DISPATCH_SYNC_WAIT"
+	GiveWayStaleEnv      = "MW_GIVEWAY_STALE"
+	GiveWayDirEnv        = "MW_GIVEWAY_DIR"
 
 	PushTriesEnv       = "MW_PUSH_TRIES"
 	PushWaitSecondsEnv = "MW_PUSH_WAIT_SECONDS"
@@ -4132,4 +4135,44 @@ func tableNames(path, prefix string) ([]string, error) {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 	return names, nil
+}
+
+// DefaultGiveWayStale is how long a give-way marker may go without being
+// renewed before the next dispatch tick on the host lifts it.
+const DefaultGiveWayStale = 15 * time.Minute
+
+// GiveWayStale reports how long a give-way marker may go unrenewed:
+// $MW_GIVEWAY_STALE if it is set, otherwise the root-table `giveway_stale` key
+// of ~/.config/mw/config.toml, written as a duration ("15m"), and
+// DefaultGiveWayStale when neither says. It must be more than zero.
+func GiveWayStale() (time.Duration, error) {
+	said, err := optionalSetting("giveway_stale", GiveWayStaleEnv, "")
+	if err != nil {
+		return 0, err
+	}
+	if said == "" {
+		return DefaultGiveWayStale, nil
+	}
+	stale, err := time.ParseDuration(said)
+	if err != nil {
+		return 0, fmt.Errorf("the time a give-way marker may go unrenewed is %q, which is not a duration such as 15m: set %s=<duration>, or `giveway_stale = \"<duration>\"` in %s", said, GiveWayStaleEnv, File)
+	}
+	if stale <= 0 {
+		return 0, fmt.Errorf("the time a give-way marker may go unrenewed is %s: set it to more than zero", stale)
+	}
+	return stale, nil
+}
+
+// GiveWayDir is where this host keeps giveway.json and giveway.log:
+// $MW_GIVEWAY_DIR if it is set (a test's, or a rehearsal's), otherwise
+// ~/.local/state/mw.
+func GiveWayDir() (string, error) {
+	if dir := os.Getenv(GiveWayDirEnv); dir != "" {
+		return dir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("finding where give-way is kept: no home directory: %w", err)
+	}
+	return filepath.Join(home, ".local", "state", "mw"), nil
 }
