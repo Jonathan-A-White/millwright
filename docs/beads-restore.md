@@ -5,12 +5,22 @@ gzipped (the Mayor's export of 2026-11-10 15:23Z, `beads-20261110.jsonl.gz`: 64,
 beads, 26 MB). `scripts/beads-restore-drill.sh` reads such a file back into a
 scratch store and counts what came back against the file. This page is what the
 drill found on 2026-11-10 on the desktop (bd 1.3.0, embedded Dolt, 12 GB of memory,
-other sessions running), and how to repeat it:
+other sessions running; the whole-file run below was made again on 2026-11-10/11 with a 360-minute cap), and how to repeat it:
 
 ```sh
 cd /tmp            # any directory with no .beads at or above it
-/path/to/millwright/scripts/beads-restore-drill.sh <dump.jsonl.gz> [--lines N]
+/path/to/millwright/scripts/beads-restore-drill.sh <dump.jsonl.gz> [--lines N] [--timeout MINUTES]
 ```
+
+`--timeout MINUTES` (default 360) caps `bd import` over all its passes. A cap that
+cuts the import is said, with the count the store had reached. An import that exits
+non-zero before the cap is run again on the same store (`bd import --help`: committed
+chunks stay durable, a failed import is safe to re-run), up to 3 passes, and each
+pass prints its minutes and the store's count. A whole file takes hours: start it
+detached and read its log, for example
+`systemd-run --user --unit=beads-drill -p StandardOutput=file:/tmp/drill.log -p StandardError=file:/tmp/drill.log -E PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin /path/to/millwright/scripts/beads-restore-drill.sh <dump.jsonl.gz>`
+(the user manager's PATH holds no `bd`, so name one). The drill prints nothing of the
+import until its pass ends.
 
 It works only in a directory it makes with `mktemp -d` and removes on exit; every
 `bd` runs as `env -i HOME=<scratch>/home PATH=... nice -n 19 bd` from
@@ -23,7 +33,7 @@ seat's PATH, never calls `mw`, and never runs `mw bd export`. `scripts/check-bea
 
 - [What a restore costs (measured)](#what-a-restore-costs-measured)
 - [What came back](#what-came-back)
-  - [The 8 lines marked MISS in the whole-file run](#the-8-lines-marked-miss-in-the-whole-file-run)
+  - [The 7 lines marked MISS in the second whole-file run](#the-7-lines-marked-miss-in-the-second-whole-file-run)
 - [What a restore does not bring back](#what-a-restore-does-not-bring-back)
 - [What was not known, and is now](#what-was-not-known-and-is-now)
 - [The steps of a real restore, as far as the drill proves them](#the-steps-of-a-real-restore-as-far-as-the-drill-proves-them)
@@ -35,53 +45,67 @@ seat's PATH, never calls `mw`, and never runs `mw bd export`. `scripts/check-bea
 | run | lines | `bd import` | `.beads` on disk | came back |
 | --- | --- | --- | --- | --- |
 | trial, `--lines 2000` (with the 3 beads the checks name) | 2,002 | 105 s (an earlier trial of the same lines: 70 s, 182 s on a busier host) | 557 MB | all 2,002 |
-| whole file | 64,878 | **stopped by `timeout 90m` after 5,228 s (87.1 min)** | 7.4 GB | 40,000 of 64,878 |
+| whole file, first run (90-minute cap) | 64,878 | stopped by `timeout 90m` after 5,228 s (87.1 min) | 7.4 GB | 40,000 of 64,878 |
+| whole file, second run (`--timeout 360`, one pass) | 64,878 | **stopped by the 360-minute cap (`timeout 21600s`); the drill's own `date` clock read 19,695 s (328.2 min) when it stopped** | 12 GB | 55,750 of 64,878 |
 
-The trial projected 57 min and 17.6 GB for the whole file, under the stop rule of 90
-minutes and 40 GB, so the whole file was run. It did not finish: the import slows as
-the store grows (about 19 beads/s in the trial, about 7.6 beads/s over the 40,000
-that landed), so cost is not linear in beads. **A restore of today's store takes
-more than 87 minutes; how much more is not measured.** Disk was 7.4 GB at 40,000
-beads (about 185 KB a bead, against 280 KB a bead in the trial), so the whole file
-needs roughly 12 GB or more; keep 40 GB free. Memory: the import held 16-23% of a
-12 GB host. The drill refuses with under 8 GB available.
+**A restore of the 2026-11-10 store did not finish inside 360 minutes.** (The two clocks
+disagree: `ps` showed `bd import` at 5 h 34 min elapsed while the drill's `date` had
+counted less, so the drill's 328.2 min is the lower reading and the 360-minute cap, which
+`timeout` counts, is the real stop; why they differ on this WSL host is not known. Rates
+below use the drill's `date` clock.) The import
+exited by the cap (exit 124), not by an error, so there was no second pass. 40,000 was
+therefore not a limit of `bd import`: the second run went past it, to 55,750. It is
+slow and slows as the store grows: 40,000 beads in the first 87 minutes (about 7.6
+beads/s), then 15,750 more in the next 241 minutes (about 1.1 beads/s). The 9,128
+beads left at the cut would take hours more at that rate; how many is not measured.
+**How long a whole restore takes is still not known; it is more than 5 hours.** Disk
+was 12 GB at 55,750 beads (about 220 KB a bead), so the whole file needs about 14 GB or
+more; keep 40 GB free. The drill refuses with under 8 GB available.
 
-Exactly 40,000 of the 64,878 beads were in the store when the import was stopped, a
-round number that this drill did not explain (a batch of the import is a guess); the
-24,878 that were not are not known to be the file's last lines. The drill names the
-first ten absent ids when a count is short (the first was `mw-06ggew.10.1`, an
-`event`).
+The trial projected 57 min and 17.6 GB for the whole file, so the trial's linear
+projection is wrong for time (it was right-ish for disk): do not trust a trial's
+minutes for the whole file. To finish a restore, give the drill `--timeout` of more
+than 360 (say 720) and read its log; a restore that is cut can be continued by running
+`bd import` on the same store, but the drill makes a fresh store each time and does not
+do that.
+
+The 9,128 beads not in the store at the cut are not known to be the file's last lines
+(the first absent id was `mw-06ggew.11`, a closed `task`; the first run's was
+`mw-06ggew.10.1`).
 
 ## What came back
 
 From the whole-file run (partial) and the trial (complete):
 
-- Every bead in the trial, and the 40,000 that landed: `bd count --include-infra`
-  and `--by-type` agree with the file on the types that finished (`chore` 9,
+- Every bead in the trial, and the 55,750 that landed in the second whole run: `bd count --include-infra`
+  and `--by-type` agree with the file on the types that finished (`chore` 9, `epic` 225,
   `mail` 14,340, `molecule` 4,445) and on every type in the trial.
 - `mw-6ww.9`: parent `mw-6ww`, labels `hitl` and `wayfinder:grilling`, and all 281
   comments, as the file has them (ok in both runs).
-- A new `bd create --parent mw-gq6` took `mw-gq6.1059` in the whole run (the file's
+- A new `bd create --parent mw-gq6` took `mw-gq6.1059` in both whole runs (the file's
   highest is `mw-gq6.1058`, and 1059 was never a bead in the file) and `mw-gq6.1024`
   in the trial (the trial's highest is 1023): the new child follows the file's
   highest number and reuses none of the file's, in both runs.
 - Dependencies: the whole-file import skipped none (every target lies in the file);
   the trial skipped 967 whose targets were outside its 2,000 lines, as expected.
 
-### The 8 lines marked MISS in the whole-file run
+### The 7 lines marked MISS in the second whole-file run
 
-Each is a count that came back short in a store whose import was stopped at 90
-minutes. Whether the import would have brought back every bead had it been let run
-is not known: it was not run past the stop.
+Each is a count that came back short in a store whose import was cut at 360 minutes.
+Whether the import would have brought back every bead had it been let run is not
+known: it was not run past the cap.
 
-1. `import: bd import was stopped by timeout 90m after 5228 s`
-2. `count --include-infra against the file's issue lines: file 64878, store 40000`
-3. `by-type bug: file 1329, store 1158`
-4. `by-type epic: file 225, store 224`
-5. `by-type event: file 10311, store 4749`
-6. `by-type feature: file 215, store 129`
-7. `by-type story: file 32, store 21`
-8. `by-type task: file 33972, store 14925`
+1. `import: bd import was stopped by the --timeout cap of 360 min after 19695 s, with 55750 of 64878 issue lines in the store`
+2. `count --include-infra against the file's issue lines: file 64878, store 55750`
+3. `by-type bug: file 1329, store 1277`
+4. `by-type event: file 10311, store 8458`
+5. `by-type feature: file 215, store 192`
+6. `by-type story: file 32, store 31`
+7. `by-type task: file 33972, store 26773`
+
+`chore` (9), `epic` (225), `mail` (14,340) and `molecule` (4,445) agree with the file.
+In the first run (90-minute cap) `epic` was also short (224 of 225) and there were 8
+lines; at 55,750 every `epic` is back.
 
 ## What a restore does not bring back
 
@@ -101,7 +125,7 @@ The dump is a list of beads, so a restore does not bring back:
 
 - Wisp-tier beads: none of the file's 64,878 issue lines carries an `ephemeral` or
   `wisp` flag, and the store's `bd count` is the same with and without
-  `--include-infra` (40,000 of 40,000). Whether `bd export` leaves wisps out or the
+  `--include-infra` (55,750 of 55,750). Whether `bd export` leaves wisps out or the
   store holds none was not told apart by this drill.
 - Memory records (`"_type":"memory"`): none in this file (0 lines).
 - The new child's number: see above, `mw-gq6.1059`.
@@ -116,7 +140,9 @@ The dump is a list of beads, so a restore does not bring back:
    (`env -i` keeps `BEADS_DOLT_*` of the shell out of it).
 3. `bd config set types.custom mail`.
 4. Unzip the dump and `bd import <file>.jsonl`, under no timeout shorter than the
-   measurement above: more than 87 minutes and about 12 GB for the 2026-11-10 file.
+   measurement above: more than 5 hours (not finished at 360 minutes) and about 14 GB
+   or more for the 2026-11-10 file. Re-run `bd import` on the same store if it exits
+   non-zero.
 5. Count: `bd count --include-infra` and `--by-type` against the file's lines by
    `issue_type`; read one bead with parent, labels and comments.
 
