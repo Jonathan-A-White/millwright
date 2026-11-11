@@ -47,6 +47,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
 - [Running a rig's whole suite](#running-a-rigs-whole-suite)
 - [The Tester trial](#the-tester-trial)
 - [Keeping two hosts level](#keeping-two-hosts-level)
+- [A host that gives way to the person at its screen (mw giveway)](#a-host-that-gives-way-to-the-person-at-its-screen-mw-giveway)
 - [Pausing the factory (mw pause, mw resume, mw usage)](#pausing-the-factory-mw-pause-mw-resume-mw-usage)
 - [Keeping the factory's tokens](#keeping-the-factorys-tokens)
 - [Linking his Google account (mw google)](#linking-his-google-account-mw-google)
@@ -1692,6 +1693,7 @@ rig_memory_bytes = 8000            # how large the Builder's memory of one rig m
 beads_budget_bytes = 1500000000    # how large this host's .beads may grow before mw status warns and mw doctor's beads-size goes faulty (default 1.5 GB; raise it on a host that serves every rig's beads)
 dispatch_sync_tries = 3            # how many times mw dispatch tries its sync when a name cannot be resolved (default 3)
 dispatch_sync_wait = "15s"         # how long it waits between those tries (default 15s, at most 90s in all)
+giveway_stale = "15m"              # how long a give-way marker may go unrenewed before the next dispatch tick lifts it (default 15m; MW_GIVEWAY_STALE)
 push_tries = 4                     # how many times mw next tries a push in all after a fault at the remote itself (default 4: three retries)
 push_wait_seconds = 20             # the base wait between those tries, which grow: half of it, then it, then half as much again; a fetch that meets a passing network fault, or loses a ref's lock to another fetch in the same checkout, is retried the same way (default 20)
 max_attempts = 3                   # how many times a story is started in all before mw dispatch stops and mails the Mayor (default 3)
@@ -2349,6 +2351,25 @@ only a backup, run once one is due, and on a host that reaches it (`shared`)
 there is none; in both the note is written straight into the database every
 sync. See *The factory on one host (the desktop)*, above, and
 `features/sync.feature`.
+
+## A host that gives way to the person at its screen (mw giveway)
+
+A host that a person also sits at (the desktop, when Grace unlocks it) gives way to them: `mw giveway on` stops every Builder process there within a second, and the host takes nothing new until `mw giveway off`. It is not `mw pause` (the fuel is low, Builders check in and stop) and not a retirement: the work goes on where it stopped.
+
+```sh
+mw giveway on                    # stop it all; write giveway.json first, one JSON line to giveway.log last
+mw giveway on --note windows_free_mb=1234   # the same, with a measurement of the caller's in the log line
+mw giveway off                   # SIGCONT whatever it stopped; remove the marker; retry a session whose pane died
+mw giveway status                # whether it gives way, since when, how many, and the last 5 log lines
+mw giveway mark --note k=v       # append a line of event mark: the Windows side's own measurements
+mw giveway on --session <name>   # only that tmux session (repeatable, on and off); no marker, no gate
+```
+
+`on` sends SIGSTOP to every process below the pane of each Builder session, and to every process of the factory's apart scopes (landings, suites, `mw-heavy`: `systemd-run` scopes outside any pane), and looks at the process table again until a pass finds nothing new (a stopped parent cannot fork; a child that was mid-fork is caught by the next pass). It never stops a session's `mw next --heartbeat` or anything it starts (it renews the story's 5-minute lease, so the story is not marked stuck while frozen), the tmux server, `mw giveway` itself, or a pane's own process (tmux resumes a stopped pane process and its whole process group, undoing the stop). It does this with the host's own files and `/proc` only: before the last stop it makes no beads call, no ssh and no network call. A cgroup freeze was not used because the heartbeat sits in the same cgroup as the harness it reports for, and a frozen cgroup cannot keep one process of it going.
+
+While the marker stands, `mw dispatch` on the host does nothing at all (not even its self-update) and says `gives way since <time>`, and so do `mw millhand`, `mw suite`, `mw land`, `mw after-landing`, `mw grist grind`, `mw sleep pass`, `mw deputy` and the follower's suite, timing, grist, batch-land and sleep jobs. A second `on` renews the marker's `seen` time. A marker not renewed for `giveway_stale` (default 15m) is lifted by the next dispatch tick (`off` first, event `expired`), so a lock that Windows never reported cannot freeze the host for good. `off` continues each process the marker names only if its pid and start time both still match, so a pid another process has since been given is sent nothing.
+
+On the home (the host that serves the Mayor and the beads), `on` without `--session` is refused: the home never gives way. State is in `~/.local/state/mw` (`MW_GIVEWAY_DIR` overrides). The scenarios are in `features/giveway.feature`.
 
 ## Pausing the factory (mw pause, mw resume, mw usage)
 

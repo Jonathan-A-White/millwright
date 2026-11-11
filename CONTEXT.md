@@ -100,6 +100,10 @@ The one host, the desktop or the Laptop, that holds the beads server, the Mayor 
 **Boost**:
 The host that is not home. It builds, dispatching against the home's beads server, whenever it is on, and holds nothing that must stay up.
 
+**Give way**:
+A host gives way to the person at its screen: `mw giveway on` stops every Builder process there where it stands (not the heartbeat that keeps each story's lease) and the host takes nothing new until `mw giveway off`. It is not a pause (`mw pause`: the fuel is low, so Builders check their work in and stop, the factory over) and not a retirement (`retired_hosts`: the host is out of the factory). Nothing is lost or handed back: the work goes on where it stopped. The home never gives way.
+_Avoid_: Freeze, suspend
+
 ### Apps
 
 **Grist**:
