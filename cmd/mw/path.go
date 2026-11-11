@@ -70,7 +70,9 @@ func newPathSetCmd() *cobra.Command {
 			"It stays held, and one 'held: <id>: <reason>' line says why, when it has a hold label (grilling,\n" +
 			"hitl, demo, icebox), a HELD: comment, a hold on the Governor's word, no files key on a rig that\n" +
 			"expects one, no rig or branch, or a gate mw dispatch would pass it over at (a bug with no Sweep:\n" +
-			"line, a Tester story with no Landed story: line). With no --after nothing is released; on a rig\n" +
+			"line, a Tester story with no Landed story: line), or, for a story labelled model-story, the pace of\n" +
+			"mw release-paced: usage over 60% of the week, missing or stale, or 3 model stories of its epic open\n" +
+			"or running. With no --after nothing is released; on a rig\n" +
 			"without the key --after only adds the dependencies.\n" +
 			"--hold \"<why>\" keeps a held story held and writes HELD: <why> on it, so a hold always has a\n" +
 			"written reason; it releases nothing, with or without --after.",
@@ -94,7 +96,14 @@ func newPathSetCmd() *cobra.Command {
 			if cmd.Flags().Changed("hold") && strings.TrimSpace(hold) == "" {
 				return fmt.Errorf("--hold needs a reason, as --hold \"waits for the demo\"")
 			}
-			_, err = application.PathSet{Tracker: gateway, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
+			// The usage readings pace a story labelled model-story, as mw release-paced does.
+			var readings application.UsageReadings
+			if dir, vaultErr := config.Vault(); vaultErr == nil {
+				if host, hostErr := config.Host(); hostErr == nil {
+					readings = application.UsageReadings{Notes: mwGateway(dir, host)}
+				}
+			}
+			_, err = application.PathSet{Tracker: gateway, Readings: readings, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
 				After: afterIDs, Hold: hold}.
 				Run(cmd.Context(), args[0], from, args[1:])
 			return err
