@@ -395,7 +395,14 @@ func (g *Gateway) WorkInHand(ctx context.Context) (application.WorkInHand, error
 	if err != nil {
 		return application.WorkInHand{}, err
 	}
-	return application.WorkInHand{Ready: details[:n:n], Running: details[n:m:m], OpenClaimed: details[m:]}, nil
+	// What is ready carries how many children hang from each, as the kept
+	// connection's listing does (mw-gq6.1089): mw status shows a parent as ready
+	// otherwise.
+	offered, err := g.withChildren(ctx, details[:n:n])
+	if err != nil {
+		return application.WorkInHand{}, err
+	}
+	return application.WorkInHand{Ready: offered, Running: details[n:m:m], OpenClaimed: details[m:]}, nil
 }
 
 // onHost narrows beads to the stories worked on one host, with each story's

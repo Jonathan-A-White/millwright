@@ -163,8 +163,8 @@ func TestWorkInHandReadsAllTheEpicsInOneBd(t *testing.T) {
 			t.Errorf("expected %s to inherit its epic's host laptop, got %q", detail.Story.ID, detail.Merged().Host)
 		}
 	}
-	if got := bdCalls(t, log); got > 4 {
-		t.Errorf("expected ready, the two lists and one show of the epics (4 bd calls), got %d: %v", got, asked(t, log))
+	if got := bdCalls(t, log); got > 5 {
+		t.Errorf("expected ready, the two lists, one show of the epics and one list of the children (5 bd calls), got %d: %v", got, asked(t, log))
 	}
 }
 
@@ -194,8 +194,8 @@ func TestWorkInHandReadsTheEpicsWithOneListAgainstAServer(t *testing.T) {
 	if shows := showsAsked(t, log); len(shows) != 0 {
 		t.Errorf("expected no bd show for the epics, got %v", shows)
 	}
-	if got := bdCalls(t, log); got != 4 {
-		t.Errorf("expected ready, the two lists and one list of the epics (4 bd calls), got %d: %v", got, asked(t, log))
+	if got := bdCalls(t, log); got != 5 {
+		t.Errorf("expected ready, the two lists, one list of the epics and one list of the children (5 bd calls), got %d: %v", got, asked(t, log))
 	}
 }
 

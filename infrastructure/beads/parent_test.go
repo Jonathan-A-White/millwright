@@ -64,7 +64,7 @@ func TestAReadyTaskWithChildrenCarriesTheirCountOverTheKeptConnection(t *testing
 
 // parentStandIn is a stand-in bd whose `ready` lists mw-p.1 (with two children)
 // and mw-p.2 (with none) pathed to laptop, and whose `list` lists the beads not
-// closed, the two children among them; a call is recorded in the file it
+// closed, the two children among them (and none in progress); a call is recorded in the file it
 // returns.
 func parentStandIn(t *testing.T) (*beads.Gateway, string) {
 	t.Helper()
@@ -84,6 +84,9 @@ case "$1" in
     printf '[{"id":"mw-p.1","title":"t","status":"open","issue_type":"task","metadata":{"host":"laptop","rig":"millwright"}},'
     printf '{"id":"mw-p.2","title":"t","status":"open","issue_type":"task","metadata":{"host":"laptop","rig":"millwright"}}]' ;;
   list)
+    case "$3" in
+      in_progress) printf '[]'; exit 0 ;;
+    esac
     printf '[{"id":"mw-p.1.1","title":"t","status":"open","issue_type":"task","parent":"mw-p.1"},'
     printf '{"id":"mw-p.1.2","title":"t","status":"in_progress","issue_type":"task","parent":"mw-p.1"},'
     printf '{"id":"mw-p.2","title":"t","status":"open","issue_type":"task"}]' ;;
@@ -108,6 +111,26 @@ func TestAReadyTaskWithChildrenCarriesTheirCountFromBd(t *testing.T) {
 	}
 	children := map[string]int{}
 	for _, d := range ready {
+		children[d.Story.ID] = d.Children
+	}
+	if len(children) != 2 || children["mw-p.1"] != 2 || children["mw-p.2"] != 0 {
+		t.Errorf("expected mw-p.1 to carry 2 children and mw-p.2 none, got %v", children)
+	}
+}
+
+// With no kept connection, WorkInHand carries the same counts on what is ready
+// as the kept connection does (mw-gq6.1089), so mw status does not show a
+// parent as ready.
+func TestWorkInHandCarriesTheChildrenOfAReadyTaskFromBd(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "")
+	g, _ := parentStandIn(t)
+
+	inHand, err := g.WorkInHand(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	children := map[string]int{}
+	for _, d := range inHand.Ready {
 		children[d.Story.ID] = d.Children
 	}
 	if len(children) != 2 || children["mw-p.1"] != 2 || children["mw-p.2"] != 0 {
