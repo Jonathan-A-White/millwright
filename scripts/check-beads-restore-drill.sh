@@ -24,6 +24,11 @@
 #     --by-type, show mw-6ww.9, create --parent mw-gq6;
 #   - --lines N imports the first N lines (and the three the checks name) and says
 #     dangling parents are expected;
+#   - --timeout MINUTES reaches the import's time limit (default 360 minutes);
+#     a cap that cuts the import is said so with the count reached;
+#   - an import that exits non-zero is run again on the same store, up to 3
+#     passes: one that fails once and then passes leaves a passing drill, one that
+#     always fails stops after 3 passes and the drill exits non-zero;
 #   - a store that comes back short prints a MISS line and a store that matches
 #     prints none.
 #
@@ -102,7 +107,7 @@ cat >"$STAND/bd" <<EOF
 	echo "HOME \$HOME"
 	env | sed -n 's/^\(BEADS_[A-Z0-9_]*\)=.*/BEADS \1/p'
 } >>"$CALLS"
-FAKE_SHORT="" FAKE_FAIL=""
+FAKE_SHORT="" FAKE_FAIL="" FAKE_IMPORT_FAILS=0
 [ ! -f "$CTL" ] || . "$CTL"
 case "\$FAKE_FAIL" in "\$1") exit 1 ;; esac
 case \$1 in
@@ -110,6 +115,13 @@ metrics | config) exit 0 ;;
 init) mkdir -p .beads ;;
 import)
 	cp "\$2" ./imported.jsonl
+	n=\$(cat ./import-n 2>/dev/null || echo 0)
+	echo \$((n + 1)) >./import-n
+	echo "IMPORT-PASS \$((n + 1))" >>"$CALLS"
+	if [ "\$n" -lt "\$FAKE_IMPORT_FAILS" ]; then
+		echo "import failed on pass \$((n + 1))"
+		exit 1
+	fi
 	echo "IMPORTED \$(wc -l <./imported.jsonl) \$(jq -r .id ./imported.jsonl | sort -u | wc -l)" >>"$CALLS"
 	echo "Imported \$(wc -l <./imported.jsonl) issues from \$2"
 	;;
@@ -129,6 +141,19 @@ create) echo '{"id":"mw-gq6.3"}' ;;
 esac
 EOF
 chmod +x "$STAND/bd"
+# A stand-in timeout records the limit it was given, then runs the command; with
+# the file $T/cut it stops the command as the real one does at its limit, exit 124.
+cat >"$STAND/timeout" <<EOF
+#!/bin/sh
+echo "TIMEOUT \$1" >>"$CALLS"
+shift
+if [ -f "$T/cut" ]; then
+	"\$@" >/dev/null 2>&1 || true
+	exit 124
+fi
+exec "\$@"
+EOF
+chmod +x "$STAND/timeout"
 cat >"$STAND/mw" <<EOF
 #!/bin/sh
 echo "mw \$*" >>"$MWCALLS"
@@ -242,6 +267,53 @@ grep -q 'trial' "$OUT/last" || fail "--lines 2 did not say it is a trial"
 grep -q 'expected' "$OUT/last" || fail "--lines 2 did not say dangling parents are expected"
 grep -q 'projection' "$OUT/last" || fail "--lines 2 printed no projection of the whole file"
 expect_gone "a trial"
+
+# --- 3b. the import's time limit and its passes --------------------------------
+timeouts() { grep '^TIMEOUT ' "$CALLS" | awk '{ print $2 }' | tr '\n' ' '; }
+passes() { grep -c '^IMPORT-PASS ' "$CALLS" || true; }
+run "$T/clean" "$T/dump.jsonl.gz"
+t=$(timeouts)
+[ "$t" = "21600s " ] || fail "the default time limit of the import is not 360 minutes (21600s): got '$t'"
+run "$T/clean" "$T/dump.jsonl.gz" --timeout 7
+[ "$RC" -eq 0 ] || fail "--timeout 7 exited $RC: $(cat "$OUT/last")"
+t=$(timeouts)
+[ "$t" = "420s " ] || fail "--timeout 7 did not reach the import's time limit (420s): got '$t'"
+run "$T/clean" "$T/dump.jsonl.gz" --timeout=2
+t=$(timeouts)
+[ "$t" = "120s " ] || fail "--timeout=2 did not reach the import's time limit (120s): got '$t'"
+for bad in 0 abc -5 ""; do
+	run "$T/clean" "$T/dump.jsonl.gz" --timeout "$bad"
+	expect_refused "--timeout '$bad'"
+done
+# a cap that cuts the import is said, with the count reached, and is not run again
+: >"$T/cut"
+run "$T/clean" "$T/dump.jsonl.gz" --timeout 5
+rm -f "$T/cut"
+[ "$(passes)" -eq 1 ] || fail "a cut import was run $(passes) times, expected once: $(cat "$OUT/last")"
+grep '^MISS import: ' "$OUT/last" | grep -q 'stopped by the --timeout cap of 5 min' || fail "a cut import did not say the cap stopped it: $(cat "$OUT/last")"
+grep '^MISS import: ' "$OUT/last" | grep -q 'with 5 of 5 issue lines in the store' || fail "a cut import did not give the count reached: $(cat "$OUT/last")"
+expect_gone "a cut import"
+# an import that fails once and then passes is run again and the drill passes
+echo FAKE_IMPORT_FAILS=1 >"$CTL"
+run "$T/clean" "$T/dump.jsonl.gz"
+rm -f "$CTL"
+[ "$RC" -eq 0 ] || fail "an import that fails once made the drill exit $RC: $(cat "$OUT/last")"
+[ "$(passes)" -eq 2 ] || fail "an import that fails once was run $(passes) times, expected 2: $(cat "$OUT/last")"
+[ "$(nmiss)" -eq 0 ] || fail "an import that passed on its 2nd pass printed a MISS: $(cat "$OUT/last")"
+[ "$(grep -c '^info import pass ' "$OUT/last")" -eq 2 ] || fail "the passes were not each printed: $(cat "$OUT/last")"
+grep '^info import pass 1 ' "$OUT/last" | grep -q 'exit 1,' || fail "pass 1 did not print its exit: $(cat "$OUT/last")"
+grep '^info import pass 1 ' "$OUT/last" | grep -q 'min)' || fail "pass 1 did not print its minutes: $(cat "$OUT/last")"
+grep '^info import pass 1 ' "$OUT/last" | grep -q 'store holds 5 of 5' || fail "pass 1 did not print the store's count: $(cat "$OUT/last")"
+grep -q '^ok   import: bd import exited 0 (pass 2)' "$OUT/last" || fail "the passing 2nd pass was not said: $(cat "$OUT/last")"
+expect_gone "an import that fails once"
+# an import that always fails stops after 3 passes and the drill exits non-zero
+echo FAKE_IMPORT_FAILS=99 >"$CTL"
+run "$T/clean" "$T/dump.jsonl.gz"
+rm -f "$CTL"
+[ "$RC" -ne 0 ] || fail "an import that always fails made the drill exit 0: $(cat "$OUT/last")"
+[ "$(passes)" -eq 3 ] || fail "an import that always fails was run $(passes) times, expected 3: $(cat "$OUT/last")"
+grep -q '^MISS import: bd import exited 1 on each of 3 passes' "$OUT/last" || fail "the failed import was not said to be a MISS: $(cat "$OUT/last")"
+expect_gone "an import that always fails"
 
 # --- 4. refusals --------------------------------------------------------------
 run "$T/withbeads" "$T/dump.jsonl.gz"
