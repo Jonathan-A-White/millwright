@@ -1,0 +1,413 @@
+package application_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
+)
+
+func proc(pid, ppid int, state, start string, argv ...string) application.GiveWayProcess {
+	return application.GiveWayProcess{Pid: pid, Ppid: ppid, Sid: ppid, State: state, Start: start, Argv: argv}
+}
+
+// aGiveWayWorld is a host with a tmux server (100), two Builder sessions, each
+// with a pane shell, a harness, a heartbeat and a tool process (200s, 300s), a
+// factory scope (400s), mw giveway itself (900) and a browser (500) that is
+// nobody's to stop.
+func aGiveWayWorld() (application.GiveWay, *apptest.FakeGiveWayHost, *bytes.Buffer, *time.Time) {
+	host := &apptest.FakeGiveWayHost{
+		Procs: []application.GiveWayProcess{
+			proc(100, 1, "S", "t100", "tmux: server"),
+			proc(200, 100, "S", "t200", "/bin/sh", "-c", "run"),
+			proc(201, 200, "S", "t201", "claude", "--print"),
+			proc(202, 200, "S", "t202", "/bin/mw", "next", "--heartbeat", "mw-a.1"),
+			proc(203, 201, "R", "t203", "go", "test", "./..."),
+			proc(300, 100, "S", "t300", "/bin/sh", "-c", "run"),
+			proc(301, 300, "S", "t301", "claude", "--print"),
+			proc(302, 300, "S", "t302", "/bin/mw", "next", "--heartbeat", "mw-b.2"),
+			proc(500, 1, "S", "t500", "firefox"),
+			proc(900, 1, "R", "t900", "/bin/mw", "giveway", "on"),
+		},
+		PaneList: []application.GiveWayPane{
+			{Session: "mw-a_1", Pid: 200}, {Session: "mw-b_2", Pid: 300}, {Session: "0", Pid: 600},
+		},
+	}
+	scope1 := proc(400, 1, "S", "t400", "sh", "-c", "land")
+	scope1.Scope = true
+	scope2 := proc(401, 400, "R", "t401", "go", "build")
+	scope2.Scope = true
+	host.Procs = append(host.Procs, scope1, scope2)
+	now := time.Date(2026, 11, 13, 16, 40, 0, 0, time.UTC)
+	var out bytes.Buffer
+	return application.GiveWay{
+		Processes: host, Panes: host, Marker: host, Log: host, Host: "desktop", Self: 900,
+		Now: func() time.Time { return now }, Out: &out,
+	}, host, &out, &now
+}
+
+func logEntry(t *testing.T, line string) map[string]any {
+	t.Helper()
+	var entry map[string]any
+	if err := json.Unmarshal([]byte(line), &entry); err != nil {
+		t.Fatalf("a log line %q is not JSON: %v", line, err)
+	}
+	return entry
+}
+
+func TestGiveWayOnStopsEverySessionAndScopeProcessButNotTheHeartbeat(t *testing.T) {
+	way, host, _, _ := aGiveWayWorld()
+	if err := way.On(context.Background(), application.GiveWayRequest{Notes: map[string]string{"windows_free_mb": "1234"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := host.Stopped(), []int{201, 203, 301, 400, 401}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("stopped %v, want %v (not the heartbeats 202 and 302, the panes' own 200 and 300 (tmux resumes a stopped pane process and its whole group), the tmux server 100, mw giveway 900, the browser 500)", got, want)
+	}
+	if host.Marker == nil || host.Marker.By != "mw@desktop" || len(host.Marker.Stopped) != 5 || len(host.Marker.Sessions) != 2 {
+		t.Fatalf("marker = %+v, want two sessions and five processes by mw@desktop", host.Marker)
+	}
+	if len(host.Lines) != 1 {
+		t.Fatalf("log = %q, want one line", host.Lines)
+	}
+	entry := logEntry(t, host.Lines[0])
+	if entry["event"] != "on" || entry["stopped"] != float64(5) || entry["sessions"] != float64(2) {
+		t.Fatalf("log entry = %v", entry)
+	}
+	if _, ok := entry["took_ms"]; !ok {
+		t.Fatalf("log entry has no took_ms: %v", entry)
+	}
+	if notes, _ := entry["notes"].(map[string]any); notes["windows_free_mb"] != "1234" {
+		t.Fatalf("notes = %v, want windows_free_mb=1234", entry["notes"])
+	}
+	if i := slices.Index(host.Order, "marker written"); i != 0 {
+		t.Fatalf("the marker was not written first: %v", host.Order)
+	}
+}
+
+// A heartbeat that renews the lease through a child process (bd) must not wait
+// for that child for good: what the heartbeat starts is not stopped either.
+func TestGiveWayOnLeavesWhatTheHeartbeatStartsGoing(t *testing.T) {
+	way, host, _, _ := aGiveWayWorld()
+	host.Procs = append(host.Procs, proc(210, 202, "S", "t210", "bd", "update", "mw-a.1"))
+	if err := way.On(context.Background(), application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if host.State(210) == "T" || host.State(202) == "T" {
+		t.Fatalf("stopped %v: the heartbeat's child was stopped", host.Stopped())
+	}
+}
+
+func TestGiveWayOnPassesOverTheTableUntilNothingIsNew(t *testing.T) {
+	way, host, _, _ := aGiveWayWorld()
+	// 201 forks 204 in the instant it is stopped, and 204 forks 205.
+	host.Forks = map[int][]application.GiveWayProcess{
+		201: {proc(204, 201, "R", "t204", "sh", "-c", "late")},
+		204: {proc(205, 204, "R", "t205", "sleep", "9")},
+	}
+	if err := way.On(context.Background(), application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(host.Stopped(), 204) || !slices.Contains(host.Stopped(), 205) {
+		t.Fatalf("stopped %v: a child that was mid-fork was missed", host.Stopped())
+	}
+}
+
+func TestASecondGiveWayOnRenewsAndStopsOnlyWhatIsNew(t *testing.T) {
+	way, host, _, now := aGiveWayWorld()
+	ctx := context.Background()
+	if err := way.On(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	since := host.Marker.Since
+	host.Procs = append(host.Procs, proc(206, 201, "R", "t206", "make"))
+	host.Calls = nil
+	*now = now.Add(5 * time.Minute)
+	if err := way.On(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(host.Calls, []string{"stop 206"}) {
+		t.Fatalf("calls = %v, want only stop 206", host.Calls)
+	}
+	if !host.Marker.Since.Equal(since) || !host.Marker.Seen.Equal(*now) || len(host.Marker.Stopped) != 6 {
+		t.Fatalf("marker = %+v, want since kept, seen renewed, six processes held", host.Marker)
+	}
+	if entry := logEntry(t, host.Lines[1]); entry["event"] != "renew" || entry["stopped"] != float64(1) || entry["held"] != float64(6) {
+		t.Fatalf("second log entry = %v, want a renew of one new process", entry)
+	}
+}
+
+// mw-2891blf.1: nothing before the last stop is a call to the tracker, a mail,
+// ssh or the network, and on goes through with a tracker that errors.
+func TestGiveWayOnMakesNoCallToTheTrackerAndSucceedsWithOneThatFails(t *testing.T) {
+	way, host, _, _ := aGiveWayWorld()
+	retry := &apptest.FakeGiveWayRetry{Host: host, Err: errors.New("beads: connection refused")}
+	way.Retry = retry
+	home := &apptest.FakeHomeFile{Text: "laptop 2026-11-11T00:00:00Z mw@laptop\n"}
+	way.Home = home
+	if err := way.On(context.Background(), application.GiveWayRequest{}); err != nil {
+		t.Fatalf("on with a failing tracker: %v", err)
+	}
+	for _, event := range host.Order {
+		if strings.HasPrefix(event, "retry") {
+			t.Fatalf("a tracker call was made during on: %v", host.Order)
+		}
+	}
+}
+
+func TestGiveWayOnTheHomeWithoutASessionIsRefusedAndWithOneIsNot(t *testing.T) {
+	way, host, _, _ := aGiveWayWorld()
+	way.Host = "laptop"
+	way.Home = &apptest.FakeHomeFile{Text: "laptop 2026-11-11T00:00:00Z mw@laptop\n"}
+	err := way.On(context.Background(), application.GiveWayRequest{})
+	if err == nil || !strings.Contains(err.Error(), "never gives way") || !strings.Contains(err.Error(), "--session") {
+		t.Fatalf("on the home: %v, want a refusal saying the home never gives way", err)
+	}
+	if len(host.Stopped()) != 0 || host.Marker != nil || len(host.Lines) != 0 {
+		t.Fatalf("a refused on stopped %v, wrote %+v and logged %q", host.Stopped(), host.Marker, host.Lines)
+	}
+	if err := way.On(context.Background(), application.GiveWayRequest{Sessions: []string{"mw-a_1"}}); err != nil {
+		t.Fatalf("on the home with --session: %v", err)
+	}
+	if got, want := host.Stopped(), []int{201, 203}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("stopped %v, want only the named session's %v", got, want)
+	}
+	if host.Marker != nil {
+		t.Fatalf("a --session on wrote the marker %+v", host.Marker)
+	}
+	if entry := logEntry(t, host.Lines[0]); entry["event"] != "on" || entry["only_sessions"] == nil {
+		t.Fatalf("entry = %v", entry)
+	}
+	// Off for the same session lets it go on and leaves the rest alone.
+	if err := way.Off(context.Background(), application.GiveWayRequest{Sessions: []string{"mw-a_1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.Stopped()) != 0 {
+		t.Fatalf("still stopped after off: %v", host.Stopped())
+	}
+}
+
+func TestAHostWhoseHomeCannotBeToldDoesNotGiveWayWithoutASession(t *testing.T) {
+	way, host, _, _ := aGiveWayWorld()
+	way.Home = &apptest.FakeHomeFile{Missing: true}
+	if err := way.On(context.Background(), application.GiveWayRequest{}); err == nil {
+		t.Fatal("on went ahead with no home file")
+	}
+	if len(host.Stopped()) != 0 {
+		t.Fatalf("stopped %v", host.Stopped())
+	}
+}
+
+func TestGiveWayOffContinuesWhatWasStoppedRemovesTheMarkerAndTimesItself(t *testing.T) {
+	way, host, out, now := aGiveWayWorld()
+	ctx := context.Background()
+	if err := way.On(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(7 * time.Minute)
+	if err := way.Off(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.Stopped()) != 0 || host.Marker != nil {
+		t.Fatalf("after off: stopped %v, marker %+v", host.Stopped(), host.Marker)
+	}
+	entry := logEntry(t, host.Lines[1])
+	if entry["event"] != "off" || entry["continued"] != float64(5) || entry["gave_way_ms"] != float64((7*time.Minute).Milliseconds()) {
+		t.Fatalf("off entry = %v, want 7 continued after 7 minutes", entry)
+	}
+	if !strings.Contains(out.String(), "goes on") {
+		t.Fatalf("said %q", out.String())
+	}
+}
+
+func TestGiveWayOffRetriesTheStoryOfASessionWhosePaneDied(t *testing.T) {
+	way, host, _, _ := aGiveWayWorld()
+	retry := &apptest.FakeGiveWayRetry{Host: host}
+	way.Retry = retry
+	ctx := context.Background()
+	if err := way.On(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	// Session mw-b_2 is killed while the host gives way: its pane is dead.
+	host.PaneList = []application.GiveWayPane{{Session: "mw-a_1", Pid: 200}, {Session: "mw-b_2", Dead: true}}
+	if err := way.Off(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(retry.Retried, []string{"mw-b.2"}) {
+		t.Fatalf("retried %v, want only the dead session's story mw-b.2", retry.Retried)
+	}
+	var dead map[string]any
+	for _, line := range host.Lines {
+		if e := logEntry(t, line); e["event"] == "dead_pane" {
+			dead = e
+		}
+	}
+	if dead == nil || dead["session"] != "mw-b_2" || dead["story"] != "mw-b.2" {
+		t.Fatalf("log = %q, want a dead_pane line for mw-b_2", host.Lines)
+	}
+	// The retry came after the continue: it is not timed.
+	if slices.Index(host.Order, "retry mw-b.2") < slices.Index(host.Order, "cont 301") {
+		t.Fatalf("the retry came before the continue: %v", host.Order)
+	}
+}
+
+func TestGiveWayOffWithNoMarkerStillContinuesAStoppedBuilderProcess(t *testing.T) {
+	way, host, out, _ := aGiveWayWorld()
+	for i := range host.Procs {
+		if host.Procs[i].Pid == 203 {
+			host.Procs[i].State = "T"
+		}
+	}
+	if err := way.Off(context.Background(), application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.Stopped()) != 0 {
+		t.Fatalf("still stopped: %v", host.Stopped())
+	}
+	if entry := logEntry(t, host.Lines[0]); entry["event"] != "off" || entry["no_marker"] != true || entry["continued"] != float64(1) {
+		t.Fatalf("entry = %v", entry)
+	}
+	if !strings.Contains(out.String(), "no marker") {
+		t.Fatalf("said %q, want it to say there was no marker", out.String())
+	}
+}
+
+// mw-2891blf.1: a process that ended and whose pid another process now has is
+// sent nothing: pid and start time both match, or no signal.
+func TestGiveWayOffSendsNothingToAReusedPid(t *testing.T) {
+	way, host, _, _ := aGiveWayWorld()
+	ctx := context.Background()
+	if err := way.On(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	// 203 ended; 203 is now somebody's other process, running, in no session.
+	host.Reuse(203, "other-start")
+	host.Calls = nil
+	if err := way.Off(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range host.Calls {
+		if strings.HasSuffix(call, " 203") {
+			t.Fatalf("a signal went to the reused pid: %v", host.Calls)
+		}
+	}
+}
+
+func TestAStaleGiveWayMarkerIsLiftedByTheGateAndLoggedAsExpired(t *testing.T) {
+	way, host, _, now := aGiveWayWorld()
+	ctx := context.Background()
+	if err := way.On(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(10 * time.Minute)
+	if _, standing, err := way.Standing(ctx, true); err != nil || !standing {
+		t.Fatalf("a marker renewed 10 minutes ago: standing=%v err=%v", standing, err)
+	}
+	*now = now.Add(6 * time.Minute)
+	if _, standing, err := way.Standing(ctx, false); err != nil || standing || host.Marker == nil {
+		t.Fatalf("a dry look at a stale marker: standing=%v err=%v marker=%v", standing, err, host.Marker)
+	}
+	if _, standing, err := way.Standing(ctx, true); err != nil || standing {
+		t.Fatalf("a stale marker: standing=%v err=%v", standing, err)
+	}
+	if host.Marker != nil || len(host.Stopped()) != 0 {
+		t.Fatalf("not lifted: marker %+v stopped %v", host.Marker, host.Stopped())
+	}
+	if entry := logEntry(t, host.Lines[len(host.Lines)-1]); entry["event"] != "expired" {
+		t.Fatalf("last entry = %v, want event expired", entry)
+	}
+}
+
+func TestGiveWayStatusAndMark(t *testing.T) {
+	way, host, out, _ := aGiveWayWorld()
+	ctx := context.Background()
+	if err := way.Status(ctx); err != nil || !strings.Contains(out.String(), "not giving way") {
+		t.Fatalf("status of an idle host: %v %q", err, out.String())
+	}
+	if err := way.On(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := way.Mark(ctx, map[string]string{"windows_free_mb": "1234"}); err != nil {
+		t.Fatal(err)
+	}
+	if entry := logEntry(t, host.Lines[1]); entry["event"] != "mark" || entry["notes"].(map[string]any)["windows_free_mb"] != "1234" {
+		t.Fatalf("mark entry = %v", entry)
+	}
+	out.Reset()
+	if err := way.Status(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "gives way since 2026-11-13T16:40:00Z") || !strings.Contains(out.String(), "2 sessions, 5 processes stopped") {
+		t.Fatalf("status = %q", out.String())
+	}
+}
+
+// The give-way use case holds no work tracker, mailbox or network port at all
+// but the retry of off: the second that matters (on) has nothing to call.
+func TestGiveWayHoldsNoNetworkPortButTheRetryOfOff(t *testing.T) {
+	allowed := map[string]bool{
+		"Processes": true, "Panes": true, "Marker": true, "Log": true, "Load": true, "Home": true,
+		"Host": true, "Retry": true, "Stale": true, "Self": true, "By": true, "Now": true, "Out": true,
+	}
+	typ := reflect.TypeOf(application.GiveWay{})
+	for i := 0; i < typ.NumField(); i++ {
+		if !allowed[typ.Field(i).Name] {
+			t.Errorf("GiveWay has a field %s: a port that on might reach the network through must be added here on purpose", typ.Field(i).Name)
+		}
+	}
+}
+
+func TestDispatchOnAHostThatGivesWayClaimsNothingAndSaysSince(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	way, host, _, now := aGiveWayWorld()
+	var out bytes.Buffer
+	ticks := &apptest.FakeTickLog{}
+	dispatch.GiveWay, dispatch.Out, dispatch.Log = way, &out, ticks
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	if err := way.On(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(time.Minute)
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if report.GivesWay == nil || len(report.Started) != 0 || len(runner.Names()) != 0 {
+		t.Fatalf("report = %+v: a host that gives way started something", report)
+	}
+	if d, _ := tracker.ShowStory(ctx, "mw-gq6.1"); d.Assignee != "" {
+		t.Fatalf("claimed the story for %q", d.Assignee)
+	}
+	if !strings.Contains(out.String(), "gives way since 2026-11-13T16:40:00Z") {
+		t.Fatalf("said %q", out.String())
+	}
+	if lines := ticks.Lines(); len(lines) != 1 || !strings.Contains(lines[0], "ok: gives way since") {
+		t.Fatalf("dispatch log = %q", lines)
+	}
+	if host.Marker == nil {
+		t.Fatal("the gate removed a fresh marker")
+	}
+
+	// Nobody renewed it: the next tick lifts it first, logs expired, and goes on.
+	*now = now.Add(20 * time.Minute)
+	report, err = dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("dispatching past the stale marker: %v", err)
+	}
+	if report.GivesWay != nil || len(report.Started) != 1 || host.Marker != nil {
+		t.Fatalf("after expiry: gives way %v, started %d, marker %v", report.GivesWay, len(report.Started), host.Marker)
+	}
+	if entry := logEntry(t, host.Lines[len(host.Lines)-1]); entry["event"] != "expired" {
+		t.Fatalf("last giveway.log line = %v", entry)
+	}
+}
