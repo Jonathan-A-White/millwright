@@ -245,6 +245,7 @@ func newStatusCmd() *cobra.Command {
 				Errors:           files,
 				Rules:            files,
 				Suites:           files,
+				SuiteHeads:       rig.New(),
 				Batches:          files,
 				Graph:            tracker,
 				SyncHalt:         hostSyncHalt(),

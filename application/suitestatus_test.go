@@ -34,3 +34,24 @@ func TestSuiteStatusLineSaysWhereEachFailingFilesBugStands(t *testing.T) {
 		}
 	}
 }
+
+func TestSuiteStatusLineSaysAnOldResultOfAnUnmovedMainIsNotLate(t *testing.T) {
+	old := application.SuiteStatus{Rig: "lampas", Kept: true, Day: "2026-10-18", Sha: "3387eb6f8aaaa", DaysAgo: 3}
+	unchanged, notDue := old, old
+	unchanged.MainUnchanged = true
+	notDue.NotDue = true
+	cases := []struct {
+		name string
+		got  application.SuiteStatus
+		want string
+	}{
+		{"main moved", old, "lampas 2026-10-18 3387eb6f8: all pass · not run for 3 days"},
+		{"main unchanged", unchanged, "lampas 2026-10-18 3387eb6f8: all pass · main unchanged since the last run (3 days)"},
+		{"suite_every not passed", notDue, "lampas 2026-10-18 3387eb6f8: all pass"},
+	}
+	for _, c := range cases {
+		if got := c.got.Line(); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}

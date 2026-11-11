@@ -24,6 +24,9 @@ func registerStatusSuiteSteps(ctx *godog.ScenarioContext, c *statusContext) {
 	ctx.Given(`^the last suite of "([^"]*)" was kept (today|\d+ days? ago) at "([^"]*)", all passed$`, c.theLastSuitePassed)
 	ctx.Given(`^the epic "([^"]*)" holds the bug "([^"]*)" for "([^"]*)" of "([^"]*)", closed today at "([^"]*)"$`, c.theEpicHoldsTheClosedBug)
 	ctx.Given(`^the last suite of "([^"]*)" was kept (today|\d+ days? ago) at "([^"]*)", failing "([^"]*)"$`, c.theLastSuiteFailedOne)
+	ctx.Given(`^the status rig "([^"]*)" runs its suite on "([^"]*)" every (\d+) hours, its bugs filed under the epic "([^"]*)"$`, c.theStatusRigRunsOnASuiteHost)
+	ctx.Given(`^the main of "([^"]*)" is still at "([^"]*)"$`, c.theMainOfIsAt)
+	ctx.Given(`^the main of "([^"]*)" has moved on to "([^"]*)"$`, c.theMainOfIsAt)
 	ctx.Then(`^the SUITE section reads "([^"]*)"$`, c.theSuiteSectionReads)
 	ctx.Then(`^the report has no heading for the suite$`, c.theReportHasNoSuiteHeading)
 }
@@ -140,5 +143,32 @@ func (c *statusContext) theSuiteSectionReads(want string) error {
 	if got := strings.Join(section, " "); got != want {
 		return fmt.Errorf("expected the SUITE section to read %q, got %q in:\n%s", want, got, c.report.String())
 	}
+	return nil
+}
+
+// statusSuiteHeads answers, for a rig's checkout, the head of its main.
+type statusSuiteHeads map[string]string
+
+// CommitOf implements application.FactoryCommits.
+func (h statusSuiteHeads) CommitOf(_ context.Context, rigDir, _ string) (application.RigCommit, error) {
+	commit, ok := h[rigDir]
+	if !ok {
+		return application.RigCommit{}, fmt.Errorf("no rig is checked out at %s", rigDir)
+	}
+	return application.RigCommit{Commit: commit}, nil
+}
+
+func (c *statusContext) theStatusRigRunsOnASuiteHost(rig, host string, hours int, epic string) error {
+	c.suiteRigs(rig)
+	c.tracker.AddEpic(epic, domain.Path{Rig: rig, Branch: "main", Harness: "claude", Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "vps"})
+	c.epicRules.Require(rig, domain.EpicRequirements{NightlySuite: true, SuiteEpic: epic, SuiteHost: host, SuiteEvery: time.Duration(hours) * time.Hour})
+	return nil
+}
+
+func (c *statusContext) theMainOfIsAt(rig, sha string) error {
+	if c.suiteHeads == nil {
+		c.suiteHeads = statusSuiteHeads{}
+	}
+	c.suiteHeads[c.rigs[rig]] = sha
 	return nil
 }

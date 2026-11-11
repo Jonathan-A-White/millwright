@@ -958,6 +958,25 @@ Feature: mw status
     Then reading status succeeds
     And the report has the line "  lampas 2026-09-17 9f3c2ab1d: all pass"
 
+  # mw-t5shinh.67: a suite host runs the suite only when main has moved, so a
+  # result that is days old is late only if main has moved since it.
+  Scenario: A rig on a suite host whose main has moved is called late
+    Given the status rig "lampas" runs its suite on "vps" every 6 hours, its bugs filed under the epic "mw-suite"
+    And the last suite of "lampas" was kept 3 days ago at "9f3c2ab1d", all passed
+    And the main of "lampas" has moved on to "b7e1d4c02"
+    When mw status reads the host
+    Then reading status succeeds
+    And the SUITE section reads "lampas 2026-09-15 9f3c2ab1d: all pass · not run for 3 days"
+
+  Scenario: A rig on a suite host whose main has not moved is not called late
+    Given the status rig "lampas" runs its suite on "vps" every 6 hours, its bugs filed under the epic "mw-suite"
+    And the last suite of "lampas" was kept 3 days ago at "9f3c2ab1d", all passed
+    And the main of "lampas" is still at "9f3c2ab1d"
+    When mw status reads the host
+    Then reading status succeeds
+    And the SUITE section reads "lampas 2026-09-15 9f3c2ab1d: all pass · main unchanged since the last run (3 days)"
+    And the report does not say "not run for"
+
   Scenario: A rig that has never run its nightly suite says so
     Given the status rig "lampas" runs the nightly suite, its bugs filed under the epic "mw-suite"
     When mw status reads the host
