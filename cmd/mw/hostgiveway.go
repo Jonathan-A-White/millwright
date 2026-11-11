@@ -153,7 +153,7 @@ func newHostGiveWayCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "giveway --install-line [--inline] [--account <name>] | --uninstall-line | --mode-line freeze|shutdown",
 		Short: "Print the paste that sets up, takes away or switches the Windows half of give way on a host a person also sits at",
-		Long: "The desktop is also Grace's PC. `mw giveway on` freezes the factory while she is at the screen, `off` lets it go\n" +
+		Long: "The desktop is also another person's PC. `mw giveway on` freezes the factory while she is at the screen, `off` lets it go\n" +
 			"on; the Windows half (contrib/windows/giveway.ps1) calls them: three scheduled tasks of the account that owns\n" +
 			"the WSL distro run it at unlock (and console connect, and logon), at lock (and console disconnect), and every\n" +
 			"5 minutes (a renew). No window is shown. docs/give-way.md has what each does.\n\n" +

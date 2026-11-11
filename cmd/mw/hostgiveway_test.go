@@ -127,12 +127,12 @@ func TestGiveWayInstallLineRegistersThreeTasksWithTheTriggersForAnyUser(t *testi
 	if !strings.Contains(line, "-RepetitionInterval (New-TimeSpan -Minutes 5)") {
 		t.Errorf("the tick task must repeat every 5 minutes")
 	}
-	// grace's account: the principal is the account that runs the paste, and the paste refuses any other
+	// the principal is the account that runs the paste, and the paste refuses any other
 	if !strings.Contains(line, `-UserId "$env:USERDOMAIN\$env:USERNAME"`) || !strings.Contains(line, "-LogonType Interactive") {
 		t.Errorf("the tasks must run under the account that runs the paste")
 	}
 	if !strings.Contains(line, "$env:USERNAME -ne 'grace'") {
-		t.Errorf("the paste must refuse to run under any account but grace's")
+		t.Errorf("the paste must refuse to run under any account but the one that owns WSL")
 	}
 	// the folder, the mode file and the print of what was registered
 	for _, want := range []string{`$env:ProgramData\millwright\giveway`, `"$d\mode"`, "-Value freeze", "Get-ScheduledTaskInfo", "NextRunTime"} {

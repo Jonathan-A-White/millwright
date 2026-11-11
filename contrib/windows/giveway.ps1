@@ -1,5 +1,5 @@
 # millwright: give way to the person at this PC's screen (mw-2891blf.2). The desktop
-# is also Grace's PC, and the factory runs inside its WSL. This script is the Windows
+# is also another person's PC, and the factory runs inside its WSL. This script is the Windows
 # half of `mw giveway`: three scheduled tasks of the account that owns the WSL
 # distro run it, with the event as the argument.
 #

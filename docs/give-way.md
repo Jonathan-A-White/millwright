@@ -1,9 +1,9 @@
 # Give way: the Windows half
 
-The desktop is also Grace's PC, and the factory runs inside its WSL. `mw giveway on` (see the README,
+The desktop is also another person's PC, and the factory runs inside its WSL. `mw giveway on` (see the README,
 "A host that gives way to the person at its screen") freezes the factory there and `mw giveway off` lets it
 go on. The Windows half is one script, `contrib/windows/giveway.ps1`, and three scheduled tasks of the
-account that owns the WSL distro (`grace`) that run it. They are installed by one paste that mw prints.
+account that owns the WSL distro (the default of `--account`) that run it. They are installed by one paste that mw prints.
 
 Windows PowerShell 5.1, no module beyond what Windows ships. The distro is `Ubuntu-24.04`, its user
 `jwhite`, and mw is `/home/jwhite/.local/bin/mw` (the three are at the top of the script).
@@ -39,14 +39,14 @@ writes no state and no log. A tick in a dry run assumes `unlocked` and someone a
 
 ## The paste
 
-On the desktop, in a NEW admin Windows PowerShell as `grace` (`PS C:\Users\grace>`). On any host that has mw:
+On the desktop, in a NEW admin Windows PowerShell as the account that owns WSL (the default of `--account`; the prompt is `PS C:\Users\<that account>>`). On any host that has mw:
 
 ```sh
 mw host giveway --install-line
 ```
 
 It prints one block of text that begins with a comment saying what it does and its way back. Paste the whole
-block. It refuses to run under any account but `grace` (`--account <name>` changes that) and on a Windows
+block. It refuses to run under any account but that one (`--account <name>` changes it) and on a Windows
 older than build 19041; it makes the folder `C:\ProgramData\millwright\giveway`; downloads the script from the
 public repo pinned at the commit this mw was built from and refuses it unless its SHA-256 is the embedded
 copy's (`--inline` instead carries the script in the paste, base64, for a host that cannot reach the repo);
