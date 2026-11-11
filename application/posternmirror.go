@@ -97,6 +97,9 @@ type PosternMirror struct {
 	// Reach is how this host reaches each other host: an ssh prefix by host name
 	// (`ssh desktop`), the last word of it the host itself.
 	Reach map[string]string
+	// Retired are the hosts the Governor retired (retired_hosts): a retired
+	// Boost is not asked, and nothing is copied to it (mw-6ww.163.1).
+	Retired []string
 	// WatchdogTarget is where the watchdog's two files go, an rsync destination
 	// (`root@vps:/var/lib/postern-watchdog/`). Empty copies nothing there.
 	WatchdogTarget string
@@ -222,13 +225,17 @@ func (m PosternMirror) Run(ctx context.Context) error {
 		return nil
 	}
 
-	boostErr := m.toBoost(ctx)
-	var millErr error
+	var boostErr, millErr error
 	// A boost that did not answer is not asked again for the mill.
 	var down *BoostDown
-	if !errors.As(boostErr, &down) {
-		millErr = m.millToBoost(ctx)
-		errors.As(millErr, &down)
+	if IsRetired(m.Retired, m.boost()) {
+		fmt.Fprintf(m.Out, "%s is retired (%s): nothing copied to it; the watchdog's files still go\n", m.boost(), RetiredHostsKey)
+	} else {
+		boostErr = m.toBoost(ctx)
+		if !errors.As(boostErr, &down) {
+			millErr = m.millToBoost(ctx)
+			errors.As(millErr, &down)
+		}
 	}
 	if down != nil {
 		fmt.Fprintf(m.Out, "%s is unreachable (%s): nothing copied to it this run; the watchdog's files still go\n", down.Boost, sshReason(down.Err))

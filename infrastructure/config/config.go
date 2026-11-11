@@ -639,6 +639,23 @@ func HandsHosts() (map[string]string, error) {
 	return tableIn(filepath.Join(home, File), HandsHostsTable)
 }
 
+// RetiredHosts reports the hosts the Governor has retired, read from the
+// root-table `retired_hosts` key of ~/.config/mw/config.toml, as
+// `retired_hosts = ["desktop", "vps"]`. A retired host is no place work or
+// copies can go: mw status says it once, and mw doctor, the postern mirror and
+// mw path leave it alone. Absent means none.
+func RetiredHosts() ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	said, err := valueIn(filepath.Join(home, File), "retired_hosts")
+	if err != nil {
+		return nil, err
+	}
+	return list(said), nil
+}
+
 // PosternData reports the postern backend's data directory, its POSTERN_DATA:
 // $MW_POSTERN_DATA if it is set, otherwise the root-table `postern_data` key of
 // ~/.config/mw/config.toml, a full path either way. It is an error for neither to

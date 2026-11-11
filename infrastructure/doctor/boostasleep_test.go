@@ -229,3 +229,14 @@ func TestTheBoostAsleepProbeIsFaultyWithNoSignWithinTheThresholdAndSaysTheNewest
 		t.Fatalf("expected the reason to say %q, got %q", want, reason)
 	}
 }
+
+// mw-6ww.163.1: a Boost the Governor retired is not asleep; it is gone.
+func TestTheBoostAsleepProbeSkipsARetiredBoostHoweverLongItHasBeenSilent(t *testing.T) {
+	check, _ := baCheck(t, "2026-10-05T13:40:24Z", "")
+	check.Retired = []string{"desktop"}
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorOK || !strings.Contains(reason, "retired") {
+		t.Fatalf("expected ok, saying the desktop is retired, got %s (%s)", verdict, reason)
+	}
+}

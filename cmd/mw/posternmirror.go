@@ -56,7 +56,12 @@ func newPosternMirrorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			retired, err := config.RetiredHosts()
+			if err != nil {
+				return err
+			}
 			return application.PosternMirror{
+				Retired:        retired,
 				Files:          mwVault(dir, host),
 				Mirrorer:       postern.Mirrorer{},
 				Out:            cmd.OutOrStdout(),

@@ -39,7 +39,9 @@ func newStatusCmd() *cobra.Command {
 			"commit, a claim, a renewed lease on a story it holds; the newest is shown), or that never\n" +
 			"synced at all, is marked asleep and its work\n" +
 			"is listed as stranded, with the one line that re-paths a story here. Re-pathing is a\n" +
-			"person's act: status only says which stories are waiting for one.\n\n" +
+			"person's act: status only says which stories are waiting for one.\n" +
+			"A host named in the config's `retired_hosts` is one line, 'desktop · retired', never asleep: its notes are\n" +
+			"not read, and work still pathed to or claimed by it is shown once under the line that re-paths it.\n\n" +
 			"A DAMPERS section line 'stuck: N live beads behind M held roots: <ids>' names the held beads that\n" +
 			"live beads wait behind and that cannot move on their own (mw stuck lists them with what is behind).\n" +
 			"A DAMPERS 'ageing' line 'weekly loop sitting overdue: the last was <day>' appears when no sitting is\n" +
@@ -225,6 +227,10 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			retired, err := config.RetiredHosts()
+			if err != nil {
+				return err
+			}
 			_, err = application.Status{
 				MaxTurns:         maxTurns,
 				MaxTurnsSaid:     maxTurnsSaid,
@@ -269,6 +275,7 @@ func newStatusCmd() *cobra.Command {
 				Apps:             gristApps,
 				Visions:          grist.NewVisions(),
 				HostSilence:      time.Duration(hours) * time.Hour,
+				Retired:          retired,
 				RigMemoryBytes:   budget,
 				BeadsBudgetBytes: beadsBudget,
 				SyncMode:         setting.Configured,

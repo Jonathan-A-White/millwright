@@ -72,6 +72,10 @@ type PathSet struct {
 	// Err is where the warning of a story with more test callers than its size
 	// allows goes (mw-gq6.661). A nil Err prints none.
 	Err io.Writer
+
+	// Retired are the hosts the Governor retired (retired_hosts): a path
+	// naming one, written or copied from a sibling, is refused (mw-6ww.163.1).
+	Retired []string
 }
 
 // Run sets the path of story id. from names the sibling to copy the seven
@@ -132,6 +136,9 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		}
 	}
 	path = path.Overlay(named)
+	if IsRetired(s.Retired, path.Host) {
+		return domain.Path{}, refusedRetired(path.Host, s.Retired)
+	}
 	// A formula the vault has not installed would park the story: dispatch
 	// leaves it unclaimed with one comment nobody reads (mw-gq6.497).
 	if path.Formula != "" {
