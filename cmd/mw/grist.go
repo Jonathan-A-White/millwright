@@ -900,10 +900,12 @@ func hostHasGristTestKey() bool {
 // hostExampleRecheck is the dispatch's ExampleRechecker on this host: it sends the
 // examples a bug names, as mw grist eval does, against the app's main (mw-gq6.775).
 // A host without the grist test key sends nothing, and the smoke is set up only
-// when an example is to be sent.
-type hostExampleRecheck struct{}
+// when an example is to be sent. calm is the recheck suite whose Load, Host and
+// calm bound a failed example waits by when the host was far over its cores
+// (mw-gq6.1083); a zero calm sends once.
+type hostExampleRecheck struct{ calm application.Suite }
 
-func (hostExampleRecheck) RecheckExamples(ctx context.Context, app, kind string, examples []string) (application.SpecRecheck, error) {
+func (h hostExampleRecheck) RecheckExamples(ctx context.Context, app, kind string, examples []string) (application.SpecRecheck, error) {
 	if !hostHasGristTestKey() {
 		return application.SpecRecheck{}, application.ErrNoGristKey
 	}
@@ -911,7 +913,7 @@ func (hostExampleRecheck) RecheckExamples(ctx context.Context, app, kind string,
 	if err != nil {
 		return application.SpecRecheck{}, err
 	}
-	return application.GristExampleRecheck{Smoke: smoke, HasKey: hostHasGristTestKey}.RecheckExamples(ctx, app, kind, examples)
+	return application.GristExampleRecheck{Smoke: smoke, HasKey: hostHasGristTestKey, Calm: h.calm}.RecheckExamples(ctx, app, kind, examples)
 }
 
 // hostGristRoom is what the dispatch and mw status read of the mill on this

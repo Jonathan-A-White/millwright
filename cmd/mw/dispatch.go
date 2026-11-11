@@ -109,10 +109,13 @@ func hostGateLock() application.GateLock {
 // hostRecheckSuite is the suite that re-runs one spec alone on a rig's main: the
 // dispatch re-runs a bug's spec with it before it claims the bug (mw-gq6.414), and
 // mw next re-runs it for a bug whose Builder found it fixed already (mw-gq6.869).
-func hostRecheckSuite(ctx context.Context, worktrees *rig.Worktrees, files *vault.Vault, rigs, tests, changedSpecs map[string]string, nice, jobs int) application.Suite {
+// It reads the host's load and waits for a calm host before a second run as mw suite
+// does (mw-gq6.1081), with the same calm bound.
+func hostRecheckSuite(ctx context.Context, worktrees *rig.Worktrees, files *vault.Vault, rigs, tests, changedSpecs map[string]string, nice, jobs int, host string) application.Suite {
 	return application.Suite{
 		Trees: worktrees, Heads: worktrees, Runner: rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs), rig.WithTimingTests(files.TimingTests(ctx))),
 		Rigs: rigs, Tests: tests, ChangedSpecs: changedSpecs,
+		Load: hostload.Proc{}, LoadBound: application.SuiteCalmBound, Host: host,
 	}
 }
 
@@ -123,7 +126,7 @@ func hostRecheckSuite(ctx context.Context, worktrees *rig.Worktrees, files *vaul
 // spec passes on main is closed with no session, whichever dispatch finds it.
 func withHostRechecks(d application.Dispatch, suite application.Suite) application.Dispatch {
 	d.Rechecks = suite
-	d.ExampleRechecks = hostExampleRecheck{}
+	d.ExampleRechecks = hostExampleRecheck{calm: suite}
 	d.GateLock = hostGateLock()
 	return d
 }
@@ -388,7 +391,7 @@ func newDispatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			recheckSuite := hostRecheckSuite(cmd.Context(), worktrees, files, rigs, tests, changedSpecs, nice, jobs)
+			recheckSuite := hostRecheckSuite(cmd.Context(), worktrees, files, rigs, tests, changedSpecs, nice, jobs, host)
 			dispatch := withHostRechecks(application.Dispatch{
 				Tracker:       gateway,
 				Worktrees:     worktrees,
