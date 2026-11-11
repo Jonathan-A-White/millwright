@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -293,6 +294,7 @@ type Harness struct {
 	nice           int
 	jobs           int
 	timing         map[string][]string
+	builderCalls   map[string]time.Duration
 }
 
 // Harness satisfies the port.
@@ -410,6 +412,15 @@ func WithTimingTests(timing map[string][]string) Option {
 	return func(h *Harness) { h.timing = timing }
 }
 
+// WithBuilderCalls gives a story's session on a rig that gives its Builders a
+// longer Bash call (builder_call in the rig's file) BASH_MAX_TIMEOUT_MS as that
+// call in milliseconds (application.BashMaxTimeoutEnv), by rig name, so that one
+// foreground mw check can wait inside a single call (mw-t5shinh.14). A rig this
+// does not name, and a seat's session, get nothing.
+func WithBuilderCalls(calls map[string]time.Duration) Option {
+	return func(h *Harness) { h.builderCalls = calls }
+}
+
 // New returns a Harness that runs Claude Code as this host has it, unless an
 // option says otherwise.
 func New(opts ...Option) *Harness {
@@ -519,6 +530,10 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	// puts a Memory block in the system prompt of every request (mw-t5shinh.18).
 	// A seat's session (SeatSession) keeps it: the Mayor's memory is his.
 	spec.Env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
+	// The rig's longer Bash call, when its file gives one.
+	if call := h.builderCalls[l.Path.Rig]; call > 0 {
+		spec.Env[application.BashMaxTimeoutEnv] = strconv.FormatInt(call.Milliseconds(), 10)
+	}
 	return spec, nil
 }
 

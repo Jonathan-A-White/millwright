@@ -378,7 +378,7 @@ func withHostDispatchLocks(d application.Dispatch, vault string) application.Dis
 func builderBoot(files *vault.Vault, host string, tests map[string]string, nice, jobs, turns int, turnsSaid bool) application.SeatBoot {
 	return application.SeatBoot{
 		Vault:        files,
-		Harness:      sessionHarness(files.Dir(), host, sessionTuning{tests: tests, nice: nice, jobs: jobs, timing: files.TimingTests(context.Background())}),
+		Harness:      sessionHarness(files.Dir(), host, sessionTuning{tests: tests, nice: nice, jobs: jobs, timing: files.TimingTests(context.Background()), calls: files.BuilderCalls(context.Background())}),
 		Seat:         BuilderSeat,
 		Host:         host,
 		After:        afterSession(),
