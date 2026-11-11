@@ -207,6 +207,12 @@ type Dispatch struct {
 	// log is no reason to stop the factory.
 	Events EventLog
 
+	// GiveWay is the host's give-way marker (mw giveway): while it stands the pass
+	// does nothing at all, not even its self-update, and says "gives way since
+	// <time>". A marker nobody renewed is lifted first. A nil GiveWay gives way
+	// to nobody; a marker that cannot be read is a note, and the pass goes on.
+	GiveWay GiveWayGate
+
 	// Network says whether the network is metered, and HeavyNet names the rigs
 	// whose gate or close-out installs dependencies (npm ci, go mod download).
 	// While the network is metered a story on such a rig is passed over and
@@ -476,6 +482,8 @@ type DispatchReport struct {
 	// this dispatch gave its claim back itself, the stopped attempt not counted,
 	// so it is read fresh among what is ready.
 	HarnessRetried []string
+	// GivesWay is the give-way this pass found standing, nil when none did.
+	GivesWay *GiveWayStanding
 	// Paused is the pause-host event that stopped this pass, nil when none did.
 	Paused  *HostPause
 	Started []Started
@@ -546,6 +554,27 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 		}
 		defer release()
 	}
+	// A host that gives way to the person at its screen starts nothing, and not
+	// the build of a self-update either: the marker is the host's own file.
+	var wayNote string
+	if d.GiveWay != nil {
+		standing, giving, err := d.GiveWay.Standing(ctx, !d.DryRun)
+		switch {
+		case err != nil:
+			wayNote = "give-way marker: " + err.Error()
+		case giving:
+			d.print(fmt.Sprintf("dispatch on %s: gives way since %s (%s); nothing done\n",
+				d.Host, standing.Since.UTC().Format(time.RFC3339), standing.By))
+			report := DispatchReport{Host: d.Host, Cap: d.Cap, GivesWay: &standing, DryRun: d.DryRun}
+			if d.Log != nil && !d.DryRun {
+				line := d.now().UTC().Format(time.RFC3339) + " " + dispatchLogWords(report, nil)
+				if logErr := d.Log.Append(ctx, line); logErr != nil {
+					return report, fmt.Errorf("appending to the dispatch log: %w", logErr)
+				}
+			}
+			return report, nil
+		}
+	}
 	// First, before the sync or any claim, so that a host with a Millhand that
 	// never ticks keeps its mw level: the same look as the Millhand tick's, and
 	// what it says is printed. A build that fails costs the tick nothing.
@@ -561,6 +590,9 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 		}
 	}
 	report, err := d.run(ctx)
+	if wayNote != "" {
+		report.Notes = append(report.Notes, wayNote)
+	}
 	// A remote that cannot be reached is one tick's blip: the tick is skipped, with
 	// the line saying so and no failure, until SkippedTicksAlarm ticks in a row
 	// have been; the tick that makes that many fails, once, and the ones after it
@@ -719,6 +751,7 @@ const (
 	DispatchLogOK           = "ok: "
 	DispatchLogNothingReady = DispatchLogOK + "nothing ready"
 	DispatchLogPaused       = DispatchLogOK + "paused"
+	DispatchLogGivesWay     = DispatchLogOK + "gives way"
 	DispatchLogDrained      = DispatchLogOK + "capped at 0"
 	DispatchLogFault        = "local network fault"
 	DispatchLogSkipped      = "skipped: "
@@ -755,6 +788,8 @@ func dispatchLogWords(report DispatchReport, err error) string {
 			return DispatchLogOK + "claim lost to " + strings.Join(holders, ", ")
 		}
 		return DispatchLogFailed + clippedTo(oneLine(err.Error()), DispatchLogReasonLimit)
+	case report.GivesWay != nil:
+		return DispatchLogGivesWay + " since " + report.GivesWay.Since.UTC().Format(time.RFC3339)
 	case report.Paused != nil:
 		return DispatchLogPaused + " by " + report.Paused.Actor
 	case report.Drained():
