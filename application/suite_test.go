@@ -495,3 +495,94 @@ func TestAFileRerunThatFailsBusyButNotFarOverTheCoresIsRunOnceAndFiledAsToday(t 
 		t.Errorf("expected the load in the summary and no second run, got:\n%s", printed)
 	}
 }
+
+// A spec rechecked alone that fails while the host is far over its cores (mw-gq6.1070).
+
+// loadedRecheck is recheckSuite whose host reads readings in turn (the last
+// again and again), whose waits take no time, and whose runner answers each run
+// from answers in turn (the last again).
+func loadedRecheck(answers []application.Checked, readings ...application.LoadReading) (application.Suite, *apptest.FakeSuiteRunner, *apptest.FakeHostLoad) {
+	n := 0
+	runs := &apptest.FakeSuiteRunner{Respond: func(_, _ string) (application.Checked, error) {
+		one := answers[min(n, len(answers)-1)]
+		n++
+		return one, nil
+	}}
+	suite, _ := recheckSuite(runs)
+	suite.Host = "cloud1"
+	load := &apptest.FakeHostLoad{Readings: readings}
+	suite.Load = load
+	suite.LoadPoll = time.Second
+	suite.LoadBound = 3 * time.Second
+	suite.LoadWait = func(context.Context, time.Duration) error { return nil }
+	return suite, runs, load
+}
+
+var (
+	specFailed = application.Checked{Output: "  1) [shots] › " + greekSpec + ":4:1 › plays\n  1 failed\n"}
+	specPassed = application.Checked{Passed: true, Output: "Running 3 tests using 1 worker\n  3 passed (4.1s)\n"}
+)
+
+func TestARecheckThatFailsFarOverTheCoresAndPassesWhenTheHostCalmsPasses(t *testing.T) {
+	suite, runs, _ := loadedRecheck([]application.Checked{specFailed, specPassed}, farOverHost, calmHost)
+
+	got, err := suite.Recheck(context.Background(), "lampas", greekSpec)
+	if err != nil {
+		t.Fatalf("re-running: %v", err)
+	}
+	if !got.Passed || got.Tests != 3 {
+		t.Errorf("expected the second run to stand: passed, 3 tests, got %+v", got)
+	}
+	if n := len(runs.Ran()); n != 2 {
+		t.Errorf("expected the spec run twice, ran %d times", n)
+	}
+}
+
+func TestARecheckThatFailsFarOverTheCoresAndFailsAgainAfterTheHostCalmsFails(t *testing.T) {
+	suite, runs, _ := loadedRecheck([]application.Checked{specFailed}, farOverHost, calmHost)
+
+	got, err := suite.Recheck(context.Background(), "lampas", greekSpec)
+	if err != nil || got.Passed {
+		t.Errorf("expected the second failure to stand as an answer, got %+v, %v", got, err)
+	}
+	if n := len(runs.Ran()); n != 2 {
+		t.Errorf("expected the spec run twice, ran %d times", n)
+	}
+}
+
+func TestARecheckThatFailsFarOverTheCoresOnAHostThatNeverCalmsIsABusyHostNotAnAnswer(t *testing.T) {
+	suite, runs, _ := loadedRecheck([]application.Checked{specFailed}, farOverHost)
+
+	got, err := suite.Recheck(context.Background(), "lampas", greekSpec)
+	if err == nil {
+		t.Fatalf("expected an error for a host that never calmed, got %+v", got)
+	}
+	if want := "not re-checked: cloud1 stayed at load 40.0 of 16"; !strings.Contains(err.Error(), want) {
+		t.Errorf("expected %q in the error, got %q", want, err.Error())
+	}
+	if n := len(runs.Ran()); n != 1 {
+		t.Errorf("expected no second run on a host that never calmed, ran %d times", n)
+	}
+}
+
+func TestARecheckThatFailsBusyButNotFarOverTheCoresIsRunOnce(t *testing.T) {
+	suite, runs, _ := loadedRecheck([]application.Checked{specFailed, specPassed}, busyHost)
+
+	got, err := suite.Recheck(context.Background(), "lampas", greekSpec)
+	if err != nil || got.Passed {
+		t.Errorf("expected the failure to stand at once, got %+v, %v", got, err)
+	}
+	if n := len(runs.Ran()); n != 1 {
+		t.Errorf("expected one run at 20 of 16, ran %d times", n)
+	}
+}
+
+func TestARecheckThatPassesReadsNoLoad(t *testing.T) {
+	suite, _, load := loadedRecheck([]application.Checked{specPassed}, farOverHost)
+	if got, err := suite.Recheck(context.Background(), "lampas", greekSpec); err != nil || !got.Passed {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	if load.Reads != 0 {
+		t.Errorf("a pass needs no look at the load, it was read %d times", load.Reads)
+	}
+}
