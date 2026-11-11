@@ -38,6 +38,7 @@ const (
 	ReleaseOnPathKey       = "release_on_path"
 	NightlySuiteKey        = "nightly_suite"
 	SuiteEpicKey           = "suite_epic"
+	BuilderCallKey         = "builder_call"
 
 	// The capacity keys: what a deployed rig records of its limits before an
 	// event, each a whole number above zero (mw-gq6.761).
@@ -80,6 +81,7 @@ var beadID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 //	release_on_path        = true
 //	nightly_suite          = true
 //	suite_epic             = "mw-5r3p30"
+//	builder_call           = "55m"   # one Bash call for a Builder, 10m to 55m
 //	capacity_viewers       = 300     # expected concurrent viewers
 //	capacity_sse_cap       = 500     # the cap on server-sent-event connections
 //	capacity_nginx_worker_connections = 1024
@@ -131,7 +133,7 @@ func (v *Vault) readRigFile(_ context.Context, rig string, lenient bool) (domain
 // knownKeys are the keys a rig's file has.
 var knownKeys = map[string]bool{
 	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true, UnionMergeFilesKey: true, TimingTestsKey: true,
-	PublicURLKey: true, SiteURLKey: true, HealthzURLKey: true, FilesExpectedKey: true, ReleaseOnPathKey: true, NightlySuiteKey: true, SuiteEpicKey: true,
+	PublicURLKey: true, SiteURLKey: true, HealthzURLKey: true, FilesExpectedKey: true, ReleaseOnPathKey: true, NightlySuiteKey: true, SuiteEpicKey: true, BuilderCallKey: true,
 	LandingKey: true, BatchEveryKey: true, BatchMinKey: true, BatchMaxKey: true,
 	BatchFixerModelKey: true, BatchFixerEffortKey: true, BatchFixerTurnsKey: true,
 	CapacityViewersKey: true, CapacitySSECapKey: true, CapacityNginxConnectionsKey: true, CapacityMemoryFreeKey: true,
@@ -144,7 +146,7 @@ var bareKey = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // parseRigFile reads the little TOML a rig's file holds: `key = ["a", "b"]`,
 // the list possibly running over several lines, `guest = "<owner>"`,
 // `files_expected = true` (or false), `release_on_path = true` (or false), `nightly_suite = true` (or false),
-// `suite_epic = "<bead id>"`, and `#` comments. A lenient read sets a key it
+// `suite_epic = "<bead id>"`, `builder_call = "<10m to 55m>"`, and `#` comments. A lenient read sets a key it
 // does not know aside, whatever its value and however many lines the value
 // runs over, and names it in the second result; a strict one refuses it.
 func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []string, error) {
@@ -224,6 +226,18 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 			}
 			continue
 		}
+		if found && key == BuilderCallKey {
+			call, err := quotedStrings(value)
+			var parsed time.Duration
+			if err == nil && len(call) == 1 {
+				parsed, err = time.ParseDuration(call[0])
+			}
+			if err != nil || len(call) != 1 || parsed < application.BuilderCallMin || parsed > application.BuilderCallMax {
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = \"<10m to 55m>\"`, got %q", i+1, BuilderCallKey, lines[i])
+			}
+			requirements.BuilderCall = parsed
+			continue
+		}
 		if found && key == SuiteEpicKey {
 			epic, err := quotedStrings(value)
 			if err != nil || len(epic) != 1 || !beadID.MatchString(epic[0]) {
@@ -297,8 +311,8 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
-				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, SiteURLKey, HealthzURLKey, FilesExpectedKey, ReleaseOnPathKey, NightlySuiteKey, SuiteEpicKey,
+			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
+				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, SiteURLKey, HealthzURLKey, FilesExpectedKey, ReleaseOnPathKey, NightlySuiteKey, SuiteEpicKey, BuilderCallKey,
 				CapacityViewersKey, CapacitySSECapKey, CapacityNginxConnectionsKey, CapacityMemoryFreeKey,
 				LandingKey, BatchEveryKey, BatchMinKey, BatchMaxKey, BatchFixerModelKey, BatchFixerEffortKey, BatchFixerTurnsKey)
 		}
@@ -455,4 +469,30 @@ func (v *Vault) TimingTests(ctx context.Context) map[string][]string {
 		timing[rig] = requirements.TimingTests
 	}
 	return timing
+}
+
+// BuilderCalls reads the builder_call of every rig that has a file in the vault's
+// rigs directory, by rig name; a rig that gives none is left out. It is how a
+// story's session learns the Bash call it is given (BASH_MAX_TIMEOUT_MS). A file
+// that cannot be read is left out too, so that one rig's bad file cannot stop
+// another rig's session: that rig's own landing refuses the file, and until then
+// its Builders have the harness's own 600 seconds.
+func (v *Vault) BuilderCalls(ctx context.Context) map[string]time.Duration {
+	calls := map[string]time.Duration{}
+	entries, err := os.ReadDir(filepath.Join(v.dir, application.RigsDir))
+	if err != nil {
+		return calls
+	}
+	for _, entry := range entries {
+		rig, isRigFile := strings.CutSuffix(entry.Name(), RigFileExt)
+		if !isRigFile || entry.IsDir() {
+			continue
+		}
+		requirements, _, err := v.LandingRequirements(ctx, rig)
+		if err != nil || requirements.BuilderCall <= 0 {
+			continue
+		}
+		calls[rig] = requirements.BuilderCall
+	}
+	return calls
 }

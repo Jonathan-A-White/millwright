@@ -566,3 +566,47 @@ func TestARigsFileKeepsItsCapacityFactsForMwDoctorAndRefusesAValueThatIsNoWholeN
 		}
 	}
 }
+
+// A rig's file may give its Builders a longer Bash call: builder_call = "55m",
+// ten to 55 minutes. A file without the key reads as none (mw-t5shinh.14).
+func TestARigsFileMayGiveItsBuildersALongerCallAndRefusesOneOutOfRange(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	writeRigFile(t, dir, "lampas", "builder_call = \"55m\"\n")
+	got, err := v.EpicRequirements(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	if got.BuilderCall != 55*time.Minute {
+		t.Errorf("builder_call = %v, want 55m", got.BuilderCall)
+	}
+	if got.Any() {
+		t.Errorf("builder_call is no requirement of an epic, but Any() = true")
+	}
+	writeRigFile(t, dir, "lampas", "builder_call = \"10m\"\n")
+	if got, err := v.EpicRequirements(context.Background(), "lampas"); err != nil || got.BuilderCall != 10*time.Minute {
+		t.Errorf("10m read as %v, %v", got.BuilderCall, err)
+	}
+
+	writeRigFile(t, dir, "lampas", "union_merge_files = [\"docs/*.md\"]\n")
+	if got, err := v.EpicRequirements(context.Background(), "lampas"); err != nil || got.BuilderCall != 0 {
+		t.Errorf("a file without the key read %v, %v; want none", got.BuilderCall, err)
+	}
+
+	for _, bad := range []string{`"9m"`, `"56m"`, `"soon"`, `55m`, `""`} {
+		writeRigFile(t, dir, "lampas", "# a comment\nbuilder_call = "+bad+"\n")
+		_, err := v.EpicRequirements(context.Background(), "lampas")
+		if err == nil || !strings.Contains(err.Error(), "line 2") || !strings.Contains(err.Error(), "builder_call") {
+			t.Errorf("builder_call = %s: err = %v, want a refusal naming line 2 and builder_call", bad, err)
+		}
+	}
+
+	// Every rig's call, by rig name, leaves out a rig that gives none and a file
+	// that cannot be read.
+	writeRigFile(t, dir, "lampas", "builder_call = \"55m\"\n")
+	writeRigFile(t, dir, "millwright", "nightly_suite = true\n")
+	writeRigFile(t, dir, "broken", "builder_call = \"soon\"\n")
+	if calls := v.BuilderCalls(context.Background()); !reflect.DeepEqual(calls, map[string]time.Duration{"lampas": 55 * time.Minute}) {
+		t.Errorf("builder calls = %v, want only lampas at 55m", calls)
+	}
+}

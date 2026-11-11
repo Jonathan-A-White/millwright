@@ -74,6 +74,10 @@ type EpicRequirements struct {
 	// under. Neither is a requirement of an epic, so Any does not count them.
 	NightlySuite bool
 	SuiteEpic    string
+	// BuilderCall is the one Bash call, from ten to 55 minutes, a story's session
+	// on the rig is given (builder_call); zero is the harness's own 600 seconds.
+	// It is no requirement of an epic either, so Any does not count it.
+	BuilderCall time.Duration
 	// Capacity is what the rig's file records of its limits before an event
 	// (mw-gq6.761). It is no requirement of an epic either, so Any does not
 	// count it.
