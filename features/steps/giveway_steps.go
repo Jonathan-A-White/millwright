@@ -284,6 +284,54 @@ func (c *giveWayContext) refused() error {
 	return nil
 }
 
+func (c *giveWayContext) dispatchRunning() error {
+	c.host.Procs = append(c.host.Procs,
+		gwProc(800, 1, "S", "t800", "mw", "dispatch"),
+		gwProc(801, 800, "R", "t801", "go", "build", "./cmd/mw"))
+	return nil
+}
+
+func (c *giveWayContext) dispatchNotStopped() error {
+	for _, pid := range []int{800, 801} {
+		if c.host.State(pid) == "T" {
+			return fmt.Errorf("process %d is stopped, and must not be", pid)
+		}
+	}
+	return nil
+}
+
+func (c *giveWayContext) dispatchLowered() error {
+	if fmt.Sprint(c.host.LoweredPids) != "[800 801]" {
+		return fmt.Errorf("lowered %v, want [800 801]", c.host.LoweredPids)
+	}
+	return nil
+}
+
+func (c *giveWayContext) statusNamesDispatch() error {
+	c.out.Reset()
+	if err := c.way.Status(context.Background()); err != nil {
+		return err
+	}
+	if !strings.Contains(c.out.String(), "800 mw dispatch") {
+		return fmt.Errorf("status said %q, want it to name 800 mw dispatch", c.out.String())
+	}
+	return nil
+}
+
+func (c *giveWayContext) toolLeftBehind() error {
+	orphan := gwProc(700, 1, "S", "t700", "node", "dev-server")
+	orphan.Sid, orphan.Cwd = 700, "/home/g/.mw-worktrees/mw-a.1/web"
+	c.host.Procs = append(c.host.Procs, orphan)
+	return nil
+}
+
+func (c *giveWayContext) leftBehindStopped() error {
+	if c.host.State(700) != "T" {
+		return fmt.Errorf("the left-behind tool is in state %q, want T", c.host.State(700))
+	}
+	return nil
+}
+
 // InitializeGiveWayScenario registers the steps of features/giveway.feature.
 func InitializeGiveWayScenario(ctx *godog.ScenarioContext) {
 	c := &giveWayContext{}
@@ -294,6 +342,8 @@ func InitializeGiveWayScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the session "([^"]*)" died while the host gave way$`, c.paneDied)
 	ctx.Given(`^a Builder process was left stopped and no marker stands$`, c.leftStopped)
 	ctx.Given(`^this host is the home$`, c.isTheHome)
+	ctx.Given(`^a mw dispatch is running in a service, with a build it started$`, c.dispatchRunning)
+	ctx.Given(`^a Builder's tool left behind by its parent, in a session of its own, with a worktree for its cwd$`, c.toolLeftBehind)
 	ctx.When(`^mw giveway on runs$`, c.whenOnRuns)
 	ctx.When(`^mw giveway off runs$`, c.whenOffRuns)
 	ctx.When(`^dispatch runs on the host with a story ready$`, c.dispatchRuns)
@@ -312,5 +362,9 @@ func InitializeGiveWayScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story "([^"]*)" was not retried$`, c.notRetried)
 	ctx.Then(`^mw giveway says there was no marker$`, c.saysNoMarker)
 	ctx.Then(`^dispatch went on past the gate$`, c.wentOn)
+	ctx.Then(`^the dispatch and its build are not stopped$`, c.dispatchNotStopped)
+	ctx.Then(`^the dispatch and its build are lowered$`, c.dispatchLowered)
+	ctx.Then(`^mw giveway status names the dispatch as lowered$`, c.statusNamesDispatch)
+	ctx.Then(`^the left-behind tool is stopped$`, c.leftBehindStopped)
 	ctx.Then(`^mw giveway is refused, saying the home never gives way$`, c.refused)
 }

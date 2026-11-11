@@ -30,11 +30,14 @@ type FakeGiveWayHost struct {
 	Marker *application.GiveWayMarker
 	Lines  []string
 
-	// Calls is every Stop and Continue sent, as "stop <pid>" and "cont <pid>",
-	// and every refused one as "skip stop <pid>" and "skip cont <pid>".
+	// Calls is every Stop, Continue and Lower sent, as "stop <pid>", "cont <pid>"
+	// and "lower <pid>", and every refused one as "skip stop <pid>", "skip cont
+	// <pid>" and "skip lower <pid>".
 	Calls []string
 	// Order is every event of the host and of the fakes that share it, in order.
 	Order []string
+	// LoweredPids is the pids Lower reached (reniced to 19, ionice idle), in order.
+	LoweredPids []int
 }
 
 var (
@@ -138,6 +141,27 @@ func (h *FakeGiveWayHost) Continue(_ context.Context, pid int, start string) (bo
 		return true, nil
 	}
 	h.Calls = append(h.Calls, fmt.Sprintf("skip cont %d", pid))
+	return false, nil
+}
+
+// Lower implements application.GiveWayProcesses.
+func (h *FakeGiveWayHost) Lower(_ context.Context, pid int, start string) (bool, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := range h.Procs {
+		if h.Procs[i].Pid != pid {
+			continue
+		}
+		if h.Procs[i].Start != start {
+			h.Calls = append(h.Calls, fmt.Sprintf("skip lower %d", pid))
+			return false, nil
+		}
+		h.LoweredPids = append(h.LoweredPids, pid)
+		h.Calls = append(h.Calls, fmt.Sprintf("lower %d", pid))
+		h.Order = append(h.Order, fmt.Sprintf("lower %d", pid))
+		return true, nil
+	}
+	h.Calls = append(h.Calls, fmt.Sprintf("skip lower %d", pid))
 	return false, nil
 }
 
