@@ -203,13 +203,13 @@ func (r DampersReport) FullList() string {
 // MeteredPinned is the alarm for the ready stories pinned to host whose rig is
 // in heavy: while the network is metered mw dispatch on that host passes them
 // all (gate metered-network), and a pin to a home host lets no other take them.
-// It is the zero alarm, with no beads, when none is. Epics and hands beads are
+// It is the zero alarm, with no beads, when none is. Parents and hands beads are
 // never dispatched, so they are left out (mw-gq6.702).
 func MeteredPinned(work WorkInHand, host string, heavy map[string]bool) (DamperAlarm, bool) {
 	var stuck []string
 	for _, d := range work.Ready {
 		merged := d.Merged()
-		if d.IsEpic || d.Hitl() || merged.Host == "" || merged.Host == domain.HostAuto || merged.Host != host || !heavy[merged.Rig] {
+		if d.IsParent() || d.Hitl() || merged.Host == "" || merged.Host == domain.HostAuto || merged.Host != host || !heavy[merged.Rig] {
 			continue
 		}
 		stuck = append(stuck, d.Story.ID)
@@ -304,7 +304,7 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 
 	var readyP1, untouched, demos, oldDemos []string
 	for _, d := range facts.Work.Ready {
-		if d.Priority == 1 && !d.IsEpic && !d.Hitl() {
+		if d.Priority == 1 && !d.IsParent() && !d.Hitl() {
 			readyP1 = append(readyP1, d.Story.ID)
 		}
 	}

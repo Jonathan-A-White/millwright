@@ -725,6 +725,7 @@ func (f *FakeTracker) ShowEpic(_ context.Context, id string) (application.EpicDe
 		detail := s.detail
 		detail.Needs = append([]string(nil), s.needs...)
 		detail.CommentCount = len(s.comments)
+		detail.Children = f.openChildren(storyID) // a listing of an epic's stories counts each one's children
 		epic.Stories = append(epic.Stories, detail)
 	}
 	return epic, nil
@@ -1611,6 +1612,7 @@ func (f *FakeTracker) WorkInHand(_ context.Context) (application.WorkInHand, err
 		case s.detail.Status == StatusInProgress:
 			work.Running = append(work.Running, detail)
 		case s.detail.Status == StatusOpen && s.detail.Assignee == "" && !f.waiting(s):
+			detail.Children = f.openChildren(id) // what is ready carries its children, as the gateway's does
 			work.Ready = append(work.Ready, detail)
 		case s.detail.Status == StatusOpen && application.ClaimHost(s.detail.Assignee) != "":
 			work.OpenClaimed = append(work.OpenClaimed, detail)

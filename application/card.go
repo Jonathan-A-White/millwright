@@ -170,7 +170,7 @@ func (c Cards) checkExpectations(ctx context.Context, items []domain.CardItem) e
 		if len(found) == 0 {
 			return fmt.Errorf("cannot read %s: the tracker does not know it", e.Bead)
 		}
-		if why := e.NeverTicks(found[0].IsEpic || strings.TrimSpace(found[0].Type) == "epic"); why != "" {
+		if why := e.NeverTicks(found[0].IsParent()); why != "" {
 			return fmt.Errorf("item %d: %s", item.N, why)
 		}
 	}

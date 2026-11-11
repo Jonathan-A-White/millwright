@@ -1749,7 +1749,7 @@ func (v PosternView) upNext(b *viewBuild, hosts []PosternViewHost) {
 			e := b.entries[id]
 			d := e.detail
 			host := d.Merged().Host
-			if e.verifyOnly || d.IsEpic || d.Type == "epic" || d.Hitl() || len(e.waits) > 0 || d.Assignee != "" ||
+			if e.verifyOnly || d.IsParent() || d.Hitl() || len(e.waits) > 0 || d.Assignee != "" ||
 				!strings.EqualFold(strings.TrimSpace(d.Status), StatusOpen) ||
 				host != hosts[i].Name && host != domain.HostAuto {
 				continue

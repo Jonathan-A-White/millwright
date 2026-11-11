@@ -1036,6 +1036,12 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			}
 			continue
 		}
+		if detail.IsParent() {
+			// A parent's children are the work: it is no ready story to list or
+			// count, and a dispatch passes it over by the parent gate
+			// (mw-gq6.1092).
+			continue
+		}
 		report.Ready = append(report.Ready, detail)
 	}
 	awayRuns, _ := awayRunsRead()

@@ -1514,7 +1514,13 @@ func TestGatewayReadsABeadPageAsTheSeparateReadsDo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if page.Parent == nil || page.Parent.Defaults != wantParent.Defaults || !reflect.DeepEqual(page.Parent.Stories, wantParent.Stories) {
+	// ShowEpic counts each child's open children (mw-gq6.1095); a bead page is held
+	// to three bd calls and does not, so the two agree on everything else.
+	uncounted := append([]application.StoryDetail(nil), wantParent.Stories...)
+	for i := range uncounted {
+		uncounted[i].Children = 0
+	}
+	if page.Parent == nil || page.Parent.Defaults != wantParent.Defaults || !reflect.DeepEqual(page.Parent.Stories, uncounted) {
 		t.Errorf("expected the page's parent to be ShowEpic's, got %+v want %+v", page.Parent, wantParent)
 	}
 	if page.Children != nil {
@@ -1522,6 +1528,13 @@ func TestGatewayReadsABeadPageAsTheSeparateReadsDo(t *testing.T) {
 	}
 	if len(page.Parent.Stories) != 3 || page.Parent.Stories[1].Story.ID != after {
 		t.Errorf("expected the epic's three children in filed order, got %+v", page.Parent.Stories)
+	}
+	// A listing of an epic's children counts each one's own open children, so a
+	// child with children of its own reads as a parent (mw-gq6.1095).
+	for _, filed := range wantParent.Stories {
+		if want := map[bool]int{true: 1, false: 0}[filed.Story.ID == child]; filed.Children != want {
+			t.Errorf("expected %s to count %d open children, got %d", filed.Story.ID, want, filed.Children)
+		}
 	}
 
 	// An epic with a parent: its own children and its parent's.
