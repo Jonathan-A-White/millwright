@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -558,4 +559,128 @@ func TestADispatchNotesASkipForASuiteBugWhoseRecheckFailedOnAHostThatNeverCalmed
 	if got := report.Started[0].Recheck; !strings.Contains(got, want) || strings.Contains(got, "still fails") {
 		t.Errorf("the started line should say it was not re-checked, not that it still fails, got %q", got)
 	}
+}
+
+// A re-run that waits for the host to calm does not hold the gate lock while it
+// waits (mw-gq6.1082).
+
+// aGatedFarOverRecheck is a dispatch with a suite bug of the rig millwright whose
+// spec fails once with the host far over its cores and passes after it calms,
+// under a gate lock that counts what is out: held lists the locks out at each
+// run of the spec and at each wait for the host to calm.
+func aGatedFarOverRecheck(t *testing.T, answers []application.Checked, readings ...application.LoadReading) (application.Dispatch, *apptest.FakeTracker, *aGateLock, *[]string, *apptest.FakeSuiteRunner) {
+	t.Helper()
+	dispatch, tracker, _, _, _ := aFactory(t)
+	aSuiteBug(t, tracker, "mw-gq6.1", application.LabelBug, application.LabelSuite)
+	lock := &aGateLock{}
+	var seen []string
+	n := 0
+	runs := &apptest.FakeSuiteRunner{Respond: func(_, _ string) (application.Checked, error) {
+		seen = append(seen, fmt.Sprintf("run:%d", lock.taken-lock.freed))
+		one := answers[min(n, len(answers)-1)]
+		n++
+		return one, nil
+	}}
+	heads := apptest.NewFakeRigHeads()
+	heads.SetHead("/rigs/millwright", "9f3c2ab41d0e")
+	suite := application.Suite{
+		Trees: &apptest.FakeSuiteTrees{}, Heads: heads, Runner: runs,
+		Rigs:         map[string]string{"millwright": "/rigs/millwright"},
+		Tests:        map[string]string{"millwright": "npm test"},
+		ChangedSpecs: map[string]string{"millwright": "npx playwright test " + application.SpecsPlaceholder},
+		Host:         "cloud1",
+		Load:         &apptest.FakeHostLoad{Readings: readings},
+		LoadPoll:     time.Second,
+		LoadBound:    3 * time.Second,
+		LoadWait: func(context.Context, time.Duration) error {
+			seen = append(seen, fmt.Sprintf("wait:%d", lock.taken-lock.freed))
+			return nil
+		},
+	}
+	dispatch.Rechecks = suite
+	dispatch.GateLock = lock
+	return dispatch, tracker, lock, &seen, runs
+}
+
+func TestAReRunThatWaitsForTheHostToCalmHoldsNoGateLockWhileItWaitsAndHoldsOneForEachRun(t *testing.T) {
+	dispatch, tracker, lock, seen, runs := aGatedFarOverRecheck(t, []application.Checked{specFailed, specPassed}, farOverHost, farOverHost, calmHost)
+
+	if _, err := dispatch.Run(context.Background()); err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if got, want := strings.Join(*seen, " "), "run:1 wait:0 run:1"; got != want {
+		t.Errorf("locks out at each run and each wait of the host to calm:\n got %q\nwant %q", got, want)
+	}
+	if n := len(runs.Ran()); n != 2 {
+		t.Errorf("expected the spec run twice, ran %d times", n)
+	}
+	if got := tracker.CloseReason("mw-gq6.1"); !strings.Contains(got, "already fixed on main") {
+		t.Errorf("the second run's pass should stand and close the bug, got %q", got)
+	}
+	if lock.taken != lock.freed || lock.taken != 2 {
+		t.Errorf("expected the lock taken twice and given back twice, got taken %d freed %d", lock.taken, lock.freed)
+	}
+}
+
+func TestAReRunThatNeverSeesTheHostCalmIsASkipWithTheGateLockGivenBack(t *testing.T) {
+	dispatch, tracker, lock, seen, runs := aGatedFarOverRecheck(t, []application.Checked{specFailed}, farOverHost)
+
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	for _, s := range *seen {
+		if s == "wait:1" {
+			t.Errorf("the gate lock was held while waiting for the host to calm: %v", *seen)
+		}
+	}
+	if n := len(runs.Ran()); n != 1 {
+		t.Errorf("expected no second run on a host that never calmed, ran %d times", n)
+	}
+	if len(report.Started) != 1 || !strings.Contains(report.Started[0].Recheck, "not re-checked: cloud1 stayed at load 40.0 of 16") {
+		t.Errorf("expected the busy-host skip on the started story, got %+v", report.Started)
+	}
+	if tracker.CloseReason("mw-gq6.1") != "" {
+		t.Errorf("a bug that was not re-checked must not be closed")
+	}
+	if lock.taken != lock.freed {
+		t.Errorf("the gate lock must be given back, got taken %d freed %d", lock.taken, lock.freed)
+	}
+}
+
+func TestAReRunThatCannotTakeTheGateLockAgainAfterTheCalmIsABusyGateAndGivesNothingBack(t *testing.T) {
+	dispatch, _, lock, _, runs := aGatedFarOverRecheck(t, []application.Checked{specFailed, specPassed}, farOverHost, farOverHost, calmHost)
+	dispatch.GateLock = &aGateLockOnce{aGateLock: lock}
+
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if n := len(runs.Ran()); n != 1 {
+		t.Errorf("expected no second run without the lock, ran %d times", n)
+	}
+	if len(report.Started) != 1 || !strings.Contains(report.Started[0].Recheck, "not re-checked: the gate is busy") {
+		t.Errorf("expected the busy-gate skip, got %+v", report.Started)
+	}
+	if lock.taken != lock.freed {
+		t.Errorf("the gate lock must be given back, got taken %d freed %d", lock.taken, lock.freed)
+	}
+}
+
+// aGateLockOnce is a gate lock that is free the first time and held by another
+// gate every time after.
+type aGateLockOnce struct {
+	*aGateLock
+	took bool
+}
+
+func (g *aGateLockOnce) Take(ctx context.Context, holder string, held func(string)) (application.GateTurn, error) {
+	if g.took {
+		if held != nil {
+			held("mw-x.9")
+		}
+		return application.GateTurn{}, context.DeadlineExceeded
+	}
+	g.took = true
+	return g.aGateLock.Take(ctx, holder, held)
 }

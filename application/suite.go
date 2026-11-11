@@ -78,7 +78,8 @@ type Suite struct {
 	// between them, so it never runs beside a gate (mw-gq6.914) and a gate waits
 	// behind one command line of it, not the whole suite (mw-gq6.917). nil takes
 	// none. Only Run takes it: Recheck is run by callers that hold it already
-	// (rerunUnderGate).
+	// (rerunUnderGate), which lend it to RecheckBetween for the wait for a calm
+	// host.
 	GateLock GateLock
 	// GateNoticeEvery is how often a suite that waits for the gate lock says
 	// again that it is waiting; zero reads CheckGateNoticeEvery.
@@ -844,6 +845,24 @@ var passedCount = regexp.MustCompile(`(\d+) passed`)
 // [tests] command and the file added. A spec that fails is an answer; an error
 // is a run that could not be made.
 func (s Suite) Recheck(ctx context.Context, rig, spec string) (SpecRecheck, error) {
+	return s.RecheckBetween(ctx, rig, spec, nil)
+}
+
+// RecheckGate is the gate lock as a caller that holds it lends it to a re-run:
+// the re-run gives it back with Free for its wait for a calm host, so that
+// another gate is not kept waiting behind it, and takes it again with Retake
+// before it runs the spec once more (mw-gq6.1082). A Retake that fails ends the
+// re-run, and the caller's own release of the lock is for whatever it holds then.
+type RecheckGate interface {
+	Free()
+	Retake(ctx context.Context) error
+}
+
+// RecheckBetween is Recheck for a caller that holds the host's gate lock for the
+// runs of the spec: gate, when it is not nil, is freed for the wait for a calm
+// host and retaken before the second run. A host that never calms ends the
+// re-run with the lock free, not retaken.
+func (s Suite) RecheckBetween(ctx context.Context, rig, spec string, gate RecheckGate) (SpecRecheck, error) {
 	rigDir, known := s.Rigs[rig]
 	if !known {
 		return SpecRecheck{}, fmt.Errorf("%s is no rig of this host: the config file's [rigs] table does not name it", rig)
@@ -888,12 +907,20 @@ func (s Suite) Recheck(ctx context.Context, rig, spec string) (SpecRecheck, erro
 		// answer, so the caller notes a skip and claims nothing.
 		if busy, err := s.Load.Load(ctx); err == nil && busy.FarOver() {
 			s.say("  retry   `%s` failed while %s was at load %.1f of %d cores: running it once more when it calms\n", command, s.Host, busy.Load, busy.Cores)
+			if gate != nil {
+				gate.Free()
+			}
 			calm, _, _, gaveUp, err := s.calmed(ctx, "the re-run of "+spec)
 			if err != nil {
 				return SpecRecheck{}, fmt.Errorf("waiting for %s to calm: %w", s.Host, err)
 			}
 			if gaveUp {
 				return SpecRecheck{}, gateBusy{fmt.Sprintf("not re-checked: %s stayed at load %.1f of %d", s.Host, calm.Load, calm.Cores)}
+			}
+			if gate != nil {
+				if err := gate.Retake(ctx); err != nil {
+					return SpecRecheck{}, err
+				}
 			}
 			if checked, err = s.Runner.RunLine(ctx, rig, dir, command); err != nil {
 				return SpecRecheck{}, fmt.Errorf("running `%s` in %s: %w", command, dir, err)
