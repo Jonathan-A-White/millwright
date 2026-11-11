@@ -17,13 +17,33 @@ import (
 // target branch alone, as the gate's own failure does (mw-gq6.943): the notes
 // say of each whether it fails on main too, on the branch only, or was not run.
 // The check only labels; the stop is the same whatever it finds.
+//
+// A run that fails with the host far over its cores is the host's more than the
+// story's (mw-gq6.1076): it waits for the host to calm, as a gate does
+// (Next.waitToRunAgain), and runs the specs once more; the second run's result
+// stands. A host that does not calm by the bound is a stop as tests-not-run.
 func (n Next) specsRefusal(ctx context.Context, c *closeOut, report *NextReport, dir, base, where string, fail Reason, labelMain bool) (Refusal, bool) {
 	if n.SpecChecks == nil {
 		return Refusal{}, false
 	}
+	before, _ := n.readLoad(ctx)
 	run, err := n.SpecChecks.RunSpecs(ctx, c.path.Rig, dir, base)
 	if len(run.LeftOut) > 0 {
 		report.Notes = appendNew(report.Notes, LeftOutTimingSpecs(run.LeftOut))
+	}
+	if err == nil && len(run.Specs) > 0 && !run.NotRun && !run.Passed {
+		busy, again, waitErr := n.waitToRunAgain(ctx, c, report, "the changed specs", "them", before, false)
+		if waitErr != nil {
+			return Refusal{ReasonTestsNotRun, fmt.Sprintf("the rig's changed specs failed %s and were not run again: %s", where, firstLine(waitErr.Error())), ""}, true
+		}
+		if again {
+			first := run.Checked
+			run, err = n.SpecChecks.RunSpecs(ctx, c.path.Rig, dir, base)
+			if len(run.LeftOut) > 0 {
+				report.Notes = appendNew(report.Notes, LeftOutTimingSpecs(run.LeftOut))
+			}
+			report.Notes = append(report.Notes, ranTwice("the changed specs", n.Host, busy, first, run.Checked, err))
+		}
 	}
 	named := strings.Join(run.Specs, ", ")
 	switch {
