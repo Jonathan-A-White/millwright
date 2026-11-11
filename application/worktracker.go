@@ -167,6 +167,11 @@ type StoryDetail struct {
 	// Type is the tracker's own word for what kind of bead this is — epic,
 	// task, bug, feature, chore — as it spells it; empty when it did not say.
 	Type string
+	// Children is how many beads that are not closed hang from this one, as a
+	// listing of ready work counts them; zero when none do or the tracker was not
+	// asked. A bead with any is a parent: its children are the work, and
+	// dispatch never takes it for a session (mw-gq6.1086).
+	Children int
 	// Attempts is how many times a session was started for this story, as its
 	// AttemptsField metadata says; zero when it never was. Exhausted says mw
 	// dispatch has already told the Mayor the story used them all up.
