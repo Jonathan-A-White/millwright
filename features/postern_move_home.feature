@@ -62,6 +62,17 @@ Feature: mw postern inbox --apply moves the home on the Governor's tap
     And the txid "tx-other-host" is not marked
     And bead "mw-home" has no comment
 
+  Scenario: A move-home naming a retired host runs nothing and is recorded as refused
+    Given the host "desktop" is retired
+    And the old home answers ssh
+    And a move-home to "desktop" signed by "governor-pubkey-hex", sent 5 minutes ago, with txid "tx-retired"
+    When mw postern inbox --apply is run
+    Then reading succeeds
+    And mw home move did not run
+    And the txid "tx-retired" is marked refused, saying "the host desktop is retired (retired_hosts = [desktop] in the config file): a retired host cannot become home"
+    And bead "mw-home"'s last comment starts "MOVE-HOME to desktop NOT RUN"
+    And mail "Home move to desktop refused" was sent to mayor
+
   Scenario: A move-home older than 30 minutes is a replay, and is refused
     Given a move-home to "desktop" signed by "governor-pubkey-hex", sent 31 minutes ago, with txid "tx-old"
     When mw postern inbox --apply is run

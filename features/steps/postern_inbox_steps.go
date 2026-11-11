@@ -64,6 +64,7 @@ type posternInboxContext struct {
 	homeFile *apptest.FakeHomeFile
 	mover    *apptest.FakeHomeMover
 	moveBead string
+	retired  []string
 	now      time.Time
 	// clock is the time the keep and close scenarios read; zero leaves
 	// the inbox on the real one.
@@ -821,6 +822,7 @@ func (c *posternInboxContext) inbox() application.PosternInbox {
 		inbox.Home = c.homeFile
 		inbox.HomeMover = c.mover
 		inbox.HomeMoveBead = c.moveBead
+		inbox.Retired = c.retired
 		inbox.HandsHosts = map[string]string{"laptop": "ssh laptop", "desktop": "ssh desktop"}
 		inbox.Now = func() time.Time { return c.now }
 	}

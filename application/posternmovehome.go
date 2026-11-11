@@ -75,8 +75,8 @@ func (i PosternInbox) homeHost(ctx context.Context) (string, error) {
 // when its signer — the key the backend vouches for, which signed the
 // transaction or delivered the record — is not the Governor's, when it is
 // older than PosternMoveHomeMaxAge, when its body names no host that can be
-// home, and when the host it names is already home. One naming the other host
-// is that host's to run: nothing is done here. One naming this host runs mw
+// home or one the Governor retired, and when the host it names is already
+// home. One naming the other host is that host's to run: nothing is done here. One naming this host runs mw
 // home move, --planned when the old home answers ssh and --old-home-dead when
 // it does not; the start and the result are written on HomeMoveBead and the
 // result mailed to the Mayor. Every write is best effort: on a boost the
@@ -115,6 +115,9 @@ func (i PosternInbox) applyMoveHome(ctx context.Context, m PosternInboxMessage, 
 	}
 	if !isHomeHost(target) {
 		return refuse(fmt.Sprintf("it names %q, and the home can only be %s", target, strings.Join(domain.HomeHosts, " or ")))
+	}
+	if IsRetired(i.Retired, target) {
+		return refuse(refusedRetiredFor(target, "a retired host cannot become home, so tap a host that is awake. Nothing was changed", i.Retired))
 	}
 	if target != i.Host {
 		return posternApplied{}, false

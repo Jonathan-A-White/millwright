@@ -20,6 +20,7 @@ import (
 func registerPosternMoveHomeSteps(ctx *godog.ScenarioContext, c *posternInboxContext) {
 	ctx.Given(`^this host is "([^"]*)" and the vault's home file names "([^"]*)"$`, c.thisHostIsAndTheHomeFileNames)
 	ctx.Given(`^the home move is written on bead "([^"]*)"$`, c.theHomeMoveIsWrittenOnBead)
+	ctx.Given(`^the host "([^"]*)" is retired$`, c.theHostIsRetired)
 	ctx.Given(`^the old home answers ssh$`, c.theOldHomeAnswers)
 	ctx.Given(`^the old home does not answer ssh$`, c.theOldHomeDoesNotAnswer)
 	ctx.Given(`^the tracker cannot be reached$`, c.theTrackerCannotBeReached)
@@ -52,6 +53,12 @@ func (c *posternInboxContext) thisHostIsAndTheHomeFileNames(host, home string) e
 func (c *posternInboxContext) theHomeMoveIsWrittenOnBead(bead string) error {
 	c.memory.AddEpic(bead, domain.Path{})
 	c.moveBead = bead
+	return nil
+}
+
+func (c *posternInboxContext) theHostIsRetired(host string) error {
+	c.moveHomeWorld()
+	c.retired = append(c.retired, host)
 	return nil
 }
 
