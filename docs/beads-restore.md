@@ -9,7 +9,7 @@ other sessions running; the whole-file run below was made again on 2026-11-10/11
 
 ```sh
 cd /tmp            # any directory with no .beads at or above it
-/path/to/millwright/scripts/beads-restore-drill.sh <dump.jsonl.gz> [--lines N] [--timeout MINUTES]
+/path/to/millwright/scripts/beads-restore-drill.sh <dump.jsonl.gz> [--lines N] [--timeout MINUTES] [--keep | --resume DIR]
 ```
 
 `--timeout MINUTES` (default 360) caps `bd import` over all its passes. A cap that
@@ -19,8 +19,28 @@ chunks stay durable, a failed import is safe to re-run), up to 3 passes, and eac
 pass prints its minutes and the store's count. A whole file takes hours: start it
 detached and read its log, for example
 `systemd-run --user --unit=beads-drill -p StandardOutput=file:/tmp/drill.log -p StandardError=file:/tmp/drill.log -E PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin /path/to/millwright/scripts/beads-restore-drill.sh <dump.jsonl.gz>`
-(the user manager's PATH holds no `bd`, so name one). The drill prints nothing of the
-import until its pass ends.
+(the user manager's PATH holds no `bd`, so name one).
+
+**Progress.** During each pass the drill prints an `info import progress` line every 10
+minutes: the pass, the minutes into it, and the count `bd import` prints on its own
+stderr (`bd import: 5000/64878 issues committed`, one line every 250 beads in a 1,500-line probe of bd 1.3.0). The drill
+never asks the store for its count while the import runs (a second `bd` on the store
+could contend with the import), so the count is bd's own; until bd has printed one the
+line says the store's count is not read during the import, and why. A pass still prints
+its own `info import pass` line, with the store's count, when it ends.
+
+**Keep and resume.** A restore that the cap cuts used to be lost with its scratch
+directory. `--keep` leaves the scratch directory in place when the import did not
+finish (cut by `--timeout`, or failed on every pass) and prints its path and the
+command to continue it; a pass that finished removes it as ever, and a drill without
+the flag removes it on every exit. `--resume DIR` imports again into that kept store
+(`bd import` is safe to re-run on it), counts it against the file and removes it once
+the import has finished; give it the same dump and the same `--lines`, or it refuses
+(it checks the import file against the one the store was made for) and leaves `DIR`
+alone. `--resume` keeps the store again if the import is cut again, with a new
+`--timeout`. A kept store costs disk: about 220 KB a bead, 12 GB at 55,750 beads, 14 GB
+or more for the whole file. The drill makes no `bd create` in a store it keeps, since a
+new bead would change its count.
 
 It works only in a directory it makes with `mktemp -d` and removes on exit; every
 `bd` runs as `env -i HOME=<scratch>/home PATH=... nice -n 19 bd` from
@@ -63,11 +83,18 @@ was 12 GB at 55,750 beads (about 220 KB a bead), so the whole file needs about 1
 more; keep 40 GB free. The drill refuses with under 8 GB available.
 
 The trial projected 57 min and 17.6 GB for the whole file, so the trial's linear
-projection is wrong for time (it was right-ish for disk): do not trust a trial's
-minutes for the whole file. To finish a restore, give the drill `--timeout` of more
-than 360 (say 720) and read its log; a restore that is cut can be continued by running
-`bd import` on the same store, but the drill makes a fresh store each time and does not
-do that.
+projection was wrong for time (it was right-ish for disk). **The projection is now made
+from this measurement, not linearly**: the minutes for the whole file are read off the
+curve of the second whole-file run (0 beads at 0 min, 40,000 at 87.1 min, 55,750 at
+328.2 min, and past 55,750 the last stretch's rate, 1.1 beads/s, which was still
+falling, so past it the figure is a floor), and scaled by how this trial's seconds a
+line compare with the trial that measurement began with (2,002 lines in 105 s). For the
+64,878 lines of the 2026-11-10 file a trial at that rate projects about 468 min, not 57,
+and so is told to stop; disk stays linear. The line says it is a projection from the
+measurement of mw-t5shinh.38; a trial on a host much quicker than the desktop projects
+fewer minutes, and the measurement is of that one host and file. To finish a restore,
+give the drill `--timeout` of more than 360 (say 720) and `--keep`, read its log, and
+`--resume` the kept store if it is cut.
 
 The 9,128 beads not in the store at the cut are not known to be the file's last lines
 (the first absent id was `mw-06ggew.11`, a closed `task`; the first run's was
@@ -142,7 +169,7 @@ The dump is a list of beads, so a restore does not bring back:
 4. Unzip the dump and `bd import <file>.jsonl`, under no timeout shorter than the
    measurement above: more than 5 hours (not finished at 360 minutes) and about 14 GB
    or more for the 2026-11-10 file. Re-run `bd import` on the same store if it exits
-   non-zero.
+   non-zero or is cut (the drill's `--keep` and `--resume` do that).
 5. Count: `bd count --include-infra` and `--by-type` against the file's lines by
    `issue_type`; read one bead with parent, labels and comments.
 

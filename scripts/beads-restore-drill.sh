@@ -3,6 +3,7 @@
 # count what came back against the file, and print one line per check.
 #
 #   scripts/beads-restore-drill.sh <dump.jsonl.gz> [--lines N] [--timeout MINUTES]
+#                                  [--keep | --resume DIR]
 #
 # A dump that cannot be read back is not a backup. This script says, before the
 # day it is needed, how long a restore takes, how much disk it takes, and what
@@ -10,7 +11,8 @@
 # measurement).
 #
 # It works only in a scratch directory it makes (mktemp -d, so TMPDIR steers
-# it) and removes on every exit. Every bd call runs as
+# it) and removes on every exit, except a --keep or --resume run whose import did
+# not finish (below). Every bd call runs as
 #   env -i HOME=<scratch>/home PATH=... nice -n 19 bd
 # from <scratch>/store. env -i is what keeps this bd off the live beads server:
 # a seat's shell carries BEADS_DOLT_* and BEADS_ACTOR, and a bd that saw them
@@ -29,8 +31,12 @@
 # --lines N is a trial: it imports the first N lines of the dump, plus the
 # lines of mw-6ww.9, its parent mw-6ww and mw-gq6 when they lie beyond N (the
 # checks below need them), and projects the whole file's minutes and disk from
-# the trial, linearly. Dependencies to a bead outside the trial are skipped by
-# the import: that is expected there and is said so.
+# the trial. The projection is not linear: a restore slows as the store grows
+# (mw-t5shinh.38 measured 40,000 beads in the first 87 minutes and 15,750 more in
+# the next 241), so the minutes come from that measured curve (docs/beads-restore.md),
+# scaled by how the trial's own rate compares with the trial that measurement began
+# with (2,002 lines in 105 s). Dependencies to a bead outside the trial are skipped
+# by the import: that is expected there and is said so.
 #
 # --timeout MINUTES (default 360) is the cap on bd import, over all its passes
 # together: each pass gets what is left of it. When the cap cuts the import it
@@ -40,6 +46,20 @@
 # passes in all, printing each pass's minutes and the store's count after it.
 # An import that still fails after the 3rd pass is a MISS, the counts below are
 # still made, and the drill then exits 1.
+#
+# During each pass it prints an `info import progress` line every 10 minutes
+# (MW_DRILL_PROGRESS_SECS overrides the 600, for a test): the minutes into the
+# pass and the count bd itself prints ("bd import: N/M issues committed", on its
+# stderr). The store is not asked for its count during the import: a second bd on
+# the store could contend with the import, and the line says so when bd has
+# printed no count yet.
+#
+# --keep leaves the scratch directory (the cut store, about 220 KB a bead) in
+# place when the import did not finish, and says its path; --resume DIR runs the
+# import again into that store, with the same dump and the same --lines, and counts
+# it against the file. --resume implies --keep. A store whose import finished is
+# removed as ever, and a drill without either flag removes it on every exit. A kept
+# store gets no `bd create` from the drill (a new bead would change its count).
 #
 # Output: `ok   <check>: ...` or `MISS <check>: ...` for each check, `info`
 # lines for numbers that are not checks, and a closing `drill:` line. Nothing
@@ -55,7 +75,7 @@
 set -u
 
 usage() {
-	echo "usage: $0 <dump.jsonl.gz> [--lines N] [--timeout MINUTES]" >&2
+	echo "usage: $0 <dump.jsonl.gz> [--lines N] [--timeout MINUTES] [--keep | --resume DIR]" >&2
 	exit 2
 }
 
@@ -72,6 +92,8 @@ die() {
 DUMP=""
 LINES=""
 TIMEOUT_MIN=360
+KEEP=0
+RESUME=""
 while [ $# -gt 0 ]; do
 	case $1 in
 	--lines)
@@ -92,6 +114,20 @@ while [ $# -gt 0 ]; do
 		TIMEOUT_MIN=${1#--timeout=}
 		shift
 		;;
+	--keep)
+		KEEP=1
+		shift
+		;;
+	--resume)
+		[ $# -ge 2 ] && [ -n "$2" ] || usage
+		RESUME=$2
+		shift 2
+		;;
+	--resume=*)
+		RESUME=${1#--resume=}
+		[ -n "$RESUME" ] || usage
+		shift
+		;;
 	-h | --help) usage ;;
 	-*) usage ;;
 	*)
@@ -110,9 +146,14 @@ fi
 case $TIMEOUT_MIN in
 '' | *[!0-9]* | 0*) usage ;;
 esac
+[ -z "$RESUME" ] || KEEP=1
+PROGRESS_SECS=${MW_DRILL_PROGRESS_SECS:-600}
+case $PROGRESS_SECS in
+'' | *[!0-9]* | 0*) PROGRESS_SECS=600 ;;
+esac
 
 # --- refusals: before anything is made ---------------------------------------
-for tool in jq gzip git timeout nice du awk free; do
+for tool in jq gzip git timeout nice du awk free cksum; do
 	command -v "$tool" >/dev/null 2>&1 || refuse "$tool is not on PATH"
 done
 
@@ -153,11 +194,29 @@ esac
 [ "$avail" -ge "$MIN_MB" ] || refuse "free -m shows $avail MB available; the import needs $MIN_MB MB"
 
 # --- the scratch directory ---------------------------------------------------
-SCRATCH=$(mktemp -d) || refuse "mktemp -d made no scratch directory"
-trap 'rm -rf "$SCRATCH"' EXIT
+# The scratch directory is removed on every exit but one: KEEP_ON_EXIT is set once
+# a --keep or --resume run has a store worth continuing, and cleared when its
+# import has finished. TICKER is the progress printer of a pass, stopped on exit.
+SCRATCH=""
+KEEP_ON_EXIT=0
+TICKER=""
+cleanup() {
+	[ -z "$TICKER" ] || kill "$TICKER" 2>/dev/null
+	[ "$KEEP_ON_EXIT" -eq 1 ] || [ -z "$SCRATCH" ] || rm -rf "$SCRATCH"
+}
+trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-SCRATCH=$(cd "$SCRATCH" && pwd -P)
+if [ -n "$RESUME" ]; then
+	# A kept store is adopted, not made; a directory that is not one is refused and
+	# left as it is (SCRATCH stays empty, so nothing is removed).
+	[ -d "$RESUME/store/.beads" ] && [ -f "$RESUME/resume.info" ] || refuse "$RESUME is not a store kept by this drill (--keep); it holds no store/.beads and resume.info"
+	SCRATCH=$(cd "$RESUME" && pwd -P)
+	KEEP_ON_EXIT=1
+else
+	SCRATCH=$(mktemp -d) || refuse "mktemp -d made no scratch directory"
+	SCRATCH=$(cd "$SCRATCH" && pwd -P)
+fi
 if there=$(holds_beads "$SCRATCH"); then
 	refuse "the scratch directory $SCRATCH lies under $there, which holds .beads; set TMPDIR elsewhere"
 fi
@@ -191,6 +250,40 @@ bd_run() {
 }
 bd_import() { # <file> <seconds>: under timeout, the longest this pass may take
 	(cd "$STORE" && timeout "${2}s" env -i HOME="$HOME_S" PATH="$BD_PATH" nice -n 19 "$BD_BIN" import "$1")
+}
+
+# The progress of a pass: a line every PROGRESS_SECS, from a background ticker
+# that reads the count bd prints on its own stderr ("bd import: N/M issues
+# committed", kept in pass.log). It never runs bd.
+progress_line() {
+	now=$(date +%s)
+	mins=$(awk -v s="$((now - P_START))" 'BEGIN { printf "%.1f", s / 60 }')
+	got=$(grep -a '^bd import: [0-9]*/[0-9]* issues committed' "$SCRATCH/pass.log" 2>/dev/null | tail -n 1)
+	if [ -n "$got" ]; then
+		echo "info import progress: pass $PASS, $mins min into it; $got (bd's own count, read from its output)"
+	else
+		echo "info import progress: pass $PASS, $mins min into it; the store's count is not read during the import because a second bd on the store could contend with the import, and bd has printed no count of its own yet"
+	fi
+}
+progress_start() {
+	(
+		sp=""
+		trap 'kill "$sp" 2>/dev/null; exit 0' TERM
+		while :; do
+			sleep "$PROGRESS_SECS" &
+			sp=$!
+			wait "$sp"
+			progress_line
+		done
+	) &
+	TICKER=$!
+}
+progress_stop() {
+	if [ -n "$TICKER" ]; then
+		kill "$TICKER" 2>/dev/null
+		wait "$TICKER" 2>/dev/null
+		TICKER=""
+	fi
 }
 
 NMISS=0
@@ -240,18 +333,26 @@ FILE_WISPS=$(awk -F'\t' '$3 == "true"' "$SCRATCH/index.tsv" | wc -l)
 FILE_MEMORY=$((N_LINES - FILE_ISSUES))
 
 # --- the restore -------------------------------------------------------------
-env -i HOME="$HOME_S" PATH="$BD_PATH" git -C "$STORE" init -q . || die "git init failed"
-bd_run metrics off >/dev/null 2>&1
-bd_run init -p mw --non-interactive --role maintainer --skip-agents --skip-hooks -q >"$SCRATCH/init.log" 2>&1 ||
-	{
-		cat "$SCRATCH/init.log" >&2
-		die "bd init failed"
-	}
-bd_run config set types.custom mail >"$SCRATCH/config.log" 2>&1 ||
-	{
-		cat "$SCRATCH/config.log" >&2
-		die "bd config set types.custom failed"
-	}
+# What the import file is, to hold a resume to the same dump and the same --lines.
+FILE_ID="$N_LINES $(cksum <"$IMPORT_FILE" | awk '{ print $1 " " $2 }')"
+if [ -n "$RESUME" ]; then
+	[ "$(cat "$SCRATCH/resume.info")" = "$FILE_ID" ] || refuse "$RESUME was kept for another dump or another --lines (it holds '$(cat "$SCRATCH/resume.info")', this run's import file is '$FILE_ID')"
+	info "resume: importing again into the kept store $SCRATCH"
+else
+	env -i HOME="$HOME_S" PATH="$BD_PATH" git -C "$STORE" init -q . || die "git init failed"
+	bd_run metrics off >/dev/null 2>&1
+	bd_run init -p mw --non-interactive --role maintainer --skip-agents --skip-hooks -q >"$SCRATCH/init.log" 2>&1 ||
+		{
+			cat "$SCRATCH/init.log" >&2
+			die "bd init failed"
+		}
+	bd_run config set types.custom mail >"$SCRATCH/config.log" 2>&1 ||
+		{
+			cat "$SCRATCH/config.log" >&2
+			die "bd config set types.custom failed"
+		}
+	echo "$FILE_ID" >"$SCRATCH/resume.info"
+fi
 
 MAX_PASSES=3
 CAP_SECS=$((TIMEOUT_MIN * 60))
@@ -264,8 +365,12 @@ while [ "$PASS" -lt "$MAX_PASSES" ]; do
 	LEFT=$((CAP_SECS - ($(date +%s) - START)))
 	[ "$LEFT" -ge 1 ] || LEFT=1
 	P_START=$(date +%s)
-	bd_import "$IMPORT_FILE" "$LEFT" >>"$SCRATCH/import.log" 2>&1
+	: >"$SCRATCH/pass.log"
+	progress_start
+	bd_import "$IMPORT_FILE" "$LEFT" >>"$SCRATCH/pass.log" 2>&1
 	IMPORT_RC=$?
+	progress_stop
+	cat "$SCRATCH/pass.log" >>"$SCRATCH/import.log"
 	P_SECS=$(($(date +%s) - P_START))
 	P_COUNT=$(bd_run count --include-infra --json 2>/dev/null | jq -r '.count // "none"' 2>/dev/null)
 	info "import pass $PASS of up to $MAX_PASSES: exit $IMPORT_RC, $P_SECS s ($(awk -v s="$P_SECS" 'BEGIN { printf "%.1f", s / 60 }') min), store holds ${P_COUNT:-none} of $FILE_ISSUES issue lines"
@@ -273,6 +378,9 @@ while [ "$PASS" -lt "$MAX_PASSES" ]; do
 done
 END=$(date +%s)
 SECS=$((END - START))
+# A store whose import finished is not worth keeping; one that was cut or failed
+# is, when the run was asked to keep it.
+if [ "$IMPORT_RC" -eq 0 ]; then KEEP_ON_EXIT=0; elif [ "$KEEP" -eq 1 ]; then KEEP_ON_EXIT=1; fi
 DISK_H=$(cd "$STORE" && du -sh .beads | awk '{ print $1 }')
 DISK_KB=$(cd "$STORE" && du -sk .beads | awk '{ print $1 }')
 MINS=$(awk -v s="$SECS" 'BEGIN { printf "%.1f", s / 60 }')
@@ -296,12 +404,23 @@ else
 fi
 
 if [ -n "$LINES" ]; then
+	# Not linear: a restore slows as the store grows. The curve is what
+	# mw-t5shinh.38 measured on the whole file (docs/beads-restore.md): 40,000 beads
+	# at 87.1 min, 55,750 at 328.2 min, and past that the last stretch's rate (1.1
+	# beads/s, still falling, so a floor). Its trial was 2,002 lines in 105 s. This
+	# trial's seconds a line, against that one's, scales the curve; disk is linear.
 	awk -v s="$SECS" -v kb="$DISK_KB" -v n="$N_LINES" -v t="$TOTAL_LINES" '
+		function curve(x) { # minutes for x beads on the reference host
+			if (x <= 40000) return x * 87.1 / 40000
+			if (x <= 55750) return 87.1 + (x - 40000) * (328.2 - 87.1) / (55750 - 40000)
+			return 328.2 + (x - 55750) * (328.2 - 87.1) / (55750 - 40000)
+		}
 		BEGIN {
-			min = s * t / n / 60
+			scale = (s / n) / (105 / 2002)
+			min = scale * curve(t)
 			gb = kb * t / n / 1048576
 			verdict = (min < 90 && gb < 40) ? "go on to the whole file" : "stop: do not run the whole file"
-			printf "info projection: the whole file of %d lines would take about %.0f min and %.1f GB (linear from the trial); stop rule is under 90 min and under 40 GB: %s\n", t, min, gb, verdict
+			printf "info projection: the whole file of %d lines would take about %.0f min and %.1f GB (a projection from the measurement of mw-t5shinh.38, not linear: the rate falls as the store grows, 40,000 beads by 87 min, 55,750 by 328 min, then at least 1.1 beads/s; scaled by this trial being %.2f times that trial'"'"'s time a line; disk is linear); stop rule is under 90 min and under 40 GB: %s\n", t, min, gb, scale, verdict
 		}'
 fi
 
@@ -355,7 +474,9 @@ fi
 
 # --- the next child of mw-gq6 ------------------------------------------------
 FILE_MAX=$(awk -F'\t' '$1 ~ /^mw-gq6\.[0-9]+$/ { sub(/^mw-gq6\./, "", $1); if ($1 + 0 > m) m = $1 + 0 } END { print m + 0 }' "$SCRATCH/index.tsv")
-if awk -F'\t' '$1 == "mw-gq6" { f = 1 } END { exit !f }' "$SCRATCH/index.tsv"; then
+if [ "$KEEP_ON_EXIT" -eq 1 ]; then
+	info "new child: bd create --parent mw-gq6 not run; the store is kept for --resume and a new bead would change its count"
+elif awk -F'\t' '$1 == "mw-gq6" { f = 1 } END { exit !f }' "$SCRATCH/index.tsv"; then
 	CHILD=$(bd_run create "restore drill child" --parent mw-gq6 --json 2>/dev/null | jq -r '.id // "none"')
 	info "new child: bd create --parent mw-gq6 made $CHILD; the imported lines hold mw-gq6.1 to mw-gq6.$FILE_MAX"
 	CHILD_N=${CHILD#mw-gq6.}
@@ -375,5 +496,8 @@ else
 fi
 
 info "kept out of any restore: Dolt history, bd's audit table, the config table (types.custom is set by hand above) and every kv.* note mw keeps; this drill does not read them back"
+if [ "$KEEP_ON_EXIT" -eq 1 ]; then
+	info "kept: the import did not finish; the store ($DISK_H on disk, about 220 KB a bead) is left at $SCRATCH; continue it with: $0 $DUMP${LINES:+ --lines $LINES} --resume $SCRATCH"
+fi
 echo "drill: $NOK ok, $NMISS to look at, $SECS s, $DISK_H, $N_LINES lines of $TOTAL_LINES"
 exit "$EXIT_RC"

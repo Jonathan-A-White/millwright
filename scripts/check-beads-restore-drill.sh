@@ -30,7 +30,16 @@
 #     passes: one that fails once and then passes leaves a passing drill, one that
 #     always fails stops after 3 passes and the drill exits non-zero;
 #   - a store that comes back short prints a MISS line and a store that matches
-#     prints none.
+#     prints none;
+#   - a trial's projection of the whole file is not linear: at the trial rate
+#     mw-t5shinh.38 measured (2,002 lines in 105 s) a 64,878-line file projects to
+#     more than 328 minutes and is not told "go on", a far faster trial is, and
+#     the line says it is a projection from that measurement;
+#   - an import longer than the progress interval prints a progress line (every
+#     600 s by default) with the count bd itself reports, or says why it has none;
+#   - --keep leaves a cut store in place, --resume DIR imports again into it and
+#     removes it once the import has passed, and a run without either leaves
+#     nothing.
 #
 # Both scripts are parsed with sh and bash, and linted with shellcheck when it is
 # installed, and skipped when not.
@@ -107,7 +116,7 @@ cat >"$STAND/bd" <<EOF
 	echo "HOME \$HOME"
 	env | sed -n 's/^\(BEADS_[A-Z0-9_]*\)=.*/BEADS \1/p'
 } >>"$CALLS"
-FAKE_SHORT="" FAKE_FAIL="" FAKE_IMPORT_FAILS=0
+FAKE_SHORT="" FAKE_FAIL="" FAKE_IMPORT_FAILS=0 FAKE_IMPORT_SLEEP=0 FAKE_IMPORT_CLOCK=0 FAKE_NO_PROGRESS=""
 [ ! -f "$CTL" ] || . "$CTL"
 case "\$FAKE_FAIL" in "\$1") exit 1 ;; esac
 case \$1 in
@@ -118,6 +127,9 @@ import)
 	n=\$(cat ./import-n 2>/dev/null || echo 0)
 	echo \$((n + 1)) >./import-n
 	echo "IMPORT-PASS \$((n + 1))" >>"$CALLS"
+	[ -n "\$FAKE_NO_PROGRESS" ] || echo "bd import: 3/\$(wc -l <./imported.jsonl) issues committed" >&2
+	[ "\$FAKE_IMPORT_SLEEP" -eq 0 ] || sleep "\$FAKE_IMPORT_SLEEP"
+	if [ -f "$T/clock" ]; then echo \$((\$(cat "$T/clock") + FAKE_IMPORT_CLOCK)) >"$T/clock"; fi
 	if [ "\$n" -lt "\$FAKE_IMPORT_FAILS" ]; then
 		echo "import failed on pass \$((n + 1))"
 		exit 1
@@ -154,6 +166,24 @@ fi
 exec "\$@"
 EOF
 chmod +x "$STAND/timeout"
+# A stand-in date reads the clock file $T/clock for "date +%s" when there is one,
+# so that a scenario says how long the import took; otherwise it is the real date.
+REAL_DATE=$(command -v date)
+cat >"$STAND/date" <<EOF
+#!/bin/sh
+if [ -f "$T/clock" ] && [ "\$*" = "+%s" ]; then cat "$T/clock"; exit 0; fi
+exec "$REAL_DATE" "\$@"
+EOF
+chmod +x "$STAND/date"
+# A stand-in sleep records the time it was asked for, then sleeps it.
+REAL_SLEEP=$(command -v sleep)
+SLEEPS=$T/sleeps
+cat >"$STAND/sleep" <<EOF
+#!/bin/sh
+echo "SLEEP \$1" >>"$SLEEPS"
+exec "$REAL_SLEEP" "\$@"
+EOF
+chmod +x "$STAND/sleep"
 cat >"$STAND/mw" <<EOF
 #!/bin/sh
 echo "mw \$*" >>"$MWCALLS"
@@ -186,6 +216,7 @@ run() {
 	shift
 	: >"$CALLS"
 	: >"$MWCALLS"
+	: >"$SLEEPS"
 	rm -rf "${TMP:?}"/*
 	RC=0
 	(
@@ -314,6 +345,104 @@ rm -f "$CTL"
 [ "$(passes)" -eq 3 ] || fail "an import that always fails was run $(passes) times, expected 3: $(cat "$OUT/last")"
 grep -q '^MISS import: bd import exited 1 on each of 3 passes' "$OUT/last" || fail "the failed import was not said to be a MISS: $(cat "$OUT/last")"
 expect_gone "an import that always fails"
+
+# --- 3c. the projection of a trial is not linear -------------------------------
+# A file of 64,878 lines, the size of the 2026-11-10 store: the five lines above,
+# then plain tasks.
+{
+	cat "$T/dump.jsonl"
+	awk 'BEGIN { for (i = 6; i <= 64878; i++) printf "{\"_type\":\"issue\",\"id\":\"mw-big.%d\",\"title\":\"t\",\"status\":\"open\",\"priority\":2,\"issue_type\":\"task\"}\n", i }'
+} | gzip -c >"$T/big.jsonl.gz"
+[ "$(gzip -dc "$T/big.jsonl.gz" | wc -l)" -eq 64878 ] || fail "the check's big dump is not 64,878 lines"
+projected_min() { sed -n 's/^info projection: .* would take about \([0-9][0-9]*\) min.*/\1/p' "$OUT/last"; }
+# mw-t5shinh.38's trial: 2,002 lines imported in 105 s
+echo 1000000 >"$T/clock"
+echo FAKE_IMPORT_CLOCK=105 >"$CTL"
+run "$T/clean" "$T/big.jsonl.gz" --lines 2002
+[ "$RC" -eq 0 ] || fail "the 64,878-line trial exited $RC: $(cat "$OUT/last")"
+grep -q '^info projection: ' "$OUT/last" || fail "the 64,878-line trial printed no projection: $(cat "$OUT/last")"
+m=$(projected_min)
+[ -n "$m" ] || fail "the projection line names no minutes: $(grep projection "$OUT/last")"
+[ "$m" -gt 328 ] || fail "a 64,878-line file at the trial rate of mw-t5shinh.38 projects to $m min, expected more than 328 (the linear 57 was wrong): $(grep projection "$OUT/last")"
+grep '^info projection: ' "$OUT/last" | grep -q 'stop: do not run the whole file' || fail "a projection of $m min was not told to stop: $(grep projection "$OUT/last")"
+if grep '^info projection: ' "$OUT/last" | grep -q 'go on to the whole file'; then fail "a projection of $m min was told to go on"; fi
+grep '^info projection: ' "$OUT/last" | grep -q 'projection from the measurement of mw-t5shinh.38' || fail "the projection line does not say it is a projection from that measurement: $(grep projection "$OUT/last")"
+if grep '^info projection: ' "$OUT/last" | grep -q '(linear from the trial)'; then fail "the projection line still says it is linear: $(grep projection "$OUT/last")"; fi
+# a trial twenty times quicker projects the whole file in under 90 minutes: go on
+echo FAKE_IMPORT_CLOCK=5 >"$CTL"
+echo 1000000 >"$T/clock"
+run "$T/clean" "$T/big.jsonl.gz" --lines 2002
+m=$(projected_min)
+[ -n "$m" ] && [ "$m" -lt 90 ] || fail "a trial of 5 s for 2,002 lines projected '$m' min, expected under 90: $(grep projection "$OUT/last")"
+grep '^info projection: ' "$OUT/last" | grep -q 'go on to the whole file' || fail "a quick trial was not told to go on: $(grep projection "$OUT/last")"
+rm -f "$CTL" "$T/clock"
+expect_gone "a projected trial"
+
+# --- 3d. progress during the import ------------------------------------------
+# a pass longer than the interval prints a line (1 s here, 600 s by default)
+echo FAKE_IMPORT_SLEEP=3 >"$CTL"
+MW_DRILL_PROGRESS_SECS=1
+export MW_DRILL_PROGRESS_SECS
+run "$T/clean" "$T/dump.jsonl.gz"
+[ "$RC" -eq 0 ] || fail "a slow import exited $RC: $(cat "$OUT/last")"
+n=$(grep -c '^info import progress' "$OUT/last" || true)
+[ "$n" -ge 1 ] || fail "an import of 3 s with a 1 s interval printed no progress line: $(cat "$OUT/last")"
+grep '^info import progress' "$OUT/last" | grep -q 'min' || fail "the progress line gives no minutes: $(grep progress "$OUT/last")"
+grep '^info import progress' "$OUT/last" | grep -q '3/5 issues committed' || fail "the progress line does not give the count bd reported: $(grep progress "$OUT/last")"
+lp=$(grep -n '^info import progress' "$OUT/last" | head -n 1 | cut -d: -f1)
+lq=$(grep -n '^info import pass 1' "$OUT/last" | head -n 1 | cut -d: -f1)
+[ "$lp" -lt "$lq" ] || fail "the progress line did not come before the end of the pass: $(cat "$OUT/last")"
+[ "$(nmiss)" -eq 0 ] || fail "a slow import printed a MISS: $(cat "$OUT/last")"
+# bd printed no count: the line says it is not read during the import, and why
+printf 'FAKE_IMPORT_SLEEP=3\nFAKE_NO_PROGRESS=1\n' >"$CTL"
+run "$T/clean" "$T/dump.jsonl.gz"
+grep '^info import progress' "$OUT/last" | grep -q 'not read during the import' || fail "with no count from bd the progress line does not say so: $(cat "$OUT/last")"
+grep '^info import progress' "$OUT/last" | grep -q 'because' || fail "with no count from bd the progress line does not say why: $(cat "$OUT/last")"
+# the default interval is 10 minutes
+unset MW_DRILL_PROGRESS_SECS
+echo FAKE_IMPORT_SLEEP=1 >"$CTL"
+run "$T/clean" "$T/dump.jsonl.gz"
+rm -f "$CTL"
+grep -q '^SLEEP 600$' "$SLEEPS" || fail "the default progress interval is not 600 s: $(cat "$SLEEPS")"
+expect_gone "a slow import"
+
+# --- 3e. keep a cut store, resume it ------------------------------------------
+# no flag: nothing left (see the cut import above). --keep on a pass: nothing left.
+run "$T/clean" "$T/dump.jsonl.gz" --keep
+[ "$RC" -eq 0 ] || fail "--keep on a passing import exited $RC: $(cat "$OUT/last")"
+expect_gone "--keep on a passing import"
+# --keep on a cut import leaves the store, says where, and makes no new bead in it
+: >"$T/cut"
+run "$T/clean" "$T/dump.jsonl.gz" --timeout 5 --keep
+rm -f "$T/cut"
+set -- "$TMP"/*
+[ "$#" -eq 1 ] && [ -d "$1/store/.beads" ] || fail "--keep on a cut import did not leave the store: $(ls -A "$TMP")"
+KEPT=$T/kept
+mv "$1" "$KEPT"
+grep -q "^info kept: " "$OUT/last" || fail "--keep did not say the store is kept: $(cat "$OUT/last")"
+grep '^info kept: ' "$OUT/last" | grep -q -- "--resume " || fail "--keep did not say how to resume: $(cat "$OUT/last")"
+if grep -q '^CALL create' "$CALLS"; then fail "a kept store was given a new bead by the drill: $(cat "$CALLS")"; fi
+grep -q '^MISS import: .*stopped by the --timeout cap' "$OUT/last" || fail "the kept run did not say it was cut"
+# a resume of a directory that is no kept store, or with another file, is refused and removes nothing
+mkdir -p "$T/notastore"
+run "$T/clean" "$T/dump.jsonl.gz" --resume "$T/notastore"
+expect_refused "--resume of a directory that is no kept store"
+[ -d "$T/notastore" ] || fail "--resume of a non-store removed the directory"
+run "$T/clean" "$T/dump.jsonl.gz" --lines 2 --resume "$KEPT"
+expect_refused "--resume with another --lines than the kept store was made with"
+[ -d "$KEPT/store/.beads" ] || fail "a refused --resume removed the kept store"
+# the resume: no new init, the import is run again on the same store, it passes, the store is removed
+run "$T/clean" "$T/dump.jsonl.gz" --resume "$KEPT"
+[ "$RC" -eq 0 ] || fail "--resume exited $RC: $(cat "$OUT/last")"
+if grep -q '^CALL init' "$CALLS"; then fail "--resume made a new store: $(cat "$CALLS")"; fi
+grep -q '^IMPORT-PASS 2$' "$CALLS" || fail "--resume did not import into the kept store (the stand-in counts its imports in the store): $(cat "$CALLS")"
+grep -q '^ok   import: bd import exited 0' "$OUT/last" || fail "the resumed import did not pass: $(cat "$OUT/last")"
+[ "$(nmiss)" -eq 0 ] || fail "a resumed store that matches printed a MISS: $(cat "$OUT/last")"
+grep -q '^ok   count --include-infra against the file' "$OUT/last" || fail "the resumed store was not counted against the file: $(cat "$OUT/last")"
+bad=$(grep -E '^(PWD|HOME) ' "$CALLS" | grep -v "^[A-Z]* $KEPT/" || true)
+[ -z "$bad" ] || fail "a resumed bd call ran outside the kept store: $bad"
+[ ! -e "$KEPT" ] || fail "--resume of a passing import left the store"
+expect_gone "--resume"
 
 # --- 4. refusals --------------------------------------------------------------
 run "$T/withbeads" "$T/dump.jsonl.gz"
