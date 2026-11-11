@@ -6286,6 +6286,8 @@ on a bundled font or data file that no credit names.
   the pure-Go SQLite driver (`modernc.org/sqlite`, no cgo) under the FTS5 index of `mw todo search`. Unmodified.
 - [Go-MySQL-Driver](https://github.com/go-sql-driver/mysql) (Mozilla Public License 2.0, [LICENSE](https://github.com/go-sql-driver/mysql/blob/HEAD/LICENSE)):
   the one connection `mw events follow` keeps open to the beads server to read the beads' head, in place of a `bd` started every second. Unmodified.
+- [x/sys](https://golang.org/x/sys) (BSD 3-Clause licence, [LICENSE](https://cs.opensource.google/go/x/sys/+/refs/heads/master:LICENSE)):
+  the system call number of `ioprio_set`, with which `mw giveway on` sets a running dispatch's io class to idle. Unmodified.
 
 ### Outside services and networks
 
