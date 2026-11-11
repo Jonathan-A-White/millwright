@@ -1572,7 +1572,7 @@ waits for it (`waiting for the merge slot: held by ...` on stderr), and a close-
 gate, of any rig, holds the host's gate lock, so a check waits for that too (`still
 waiting for <host>'s gate lock, held by ... since ...` every minute), rather than running
 its whole gate on top of the close-out's, where both fail from load (mw-gq6.906). Both
-waits share nine minutes in the foreground, under a Builder's 590 s tool call, and end in one
+waits share nine minutes in the foreground, under a Builder's 600 s tool call (its default cap; see `builder_call`), and end in one
 line (exit 0, nothing run) naming the holder, *your place N of M in the queue is kept for 10
 minutes* and *run the same command again to go on waiting*: the check's ticket outlives the call
 and the same command run again takes the same place, not the back of the queue (mw-gq6.939).
@@ -1861,7 +1861,7 @@ A rig with a Go server too (postern) adds a third kind to the same line: `Test*)
 in the `case`, and `[ -z "$g" ] || { cd server && go test -run "^($(echo $g | tr " " "|"))$" ./...; } || r=1;`
 before `exit $r`. The way back for any rig is to delete its line from the table.
 
-A gate in parts (mw-gq6.567). A Builder's tool call is cut off after 590 seconds, and
+A gate in parts (mw-gq6.567). A Builder's tool call is cut off after 600 seconds by default, and
 `mw check`'s whole-gate run, or a gate waited on in the background, can outrun that
 on a loaded host. A host names such a rig's gate as parts in `[test_parts.<rig>]`
 (each key a part's name, each value its command line, in the order written; the
@@ -2135,6 +2135,16 @@ passes alone is flaky. The whole output goes to
 duration, load at start, each failing file with its first failing test and
 first error lines, flaky or not) to `<UTC date>.json`, both committed in the
 vault. Exit 0 when everything passed, 1 when any file failed.
+
+A rig's file `rigs/<rig>.toml` may say `builder_call = "55m"` (10m to 55m; anything else is
+refused with its line number): every story session on that rig is started with `BASH_MAX_TIMEOUT_MS`
+set to it, so a Builder may make one foreground Bash call of that length (the harness's default cap
+is 600 s), and `mw check` reads the variable and waits inside the call, spending it less 50 s, where
+it would otherwise end at 540 s with a line to run the same command again. 55m is the longest, so
+that the one-hour prompt cache outlives a call. Seats' sessions are not given it. The way back is to
+delete the line from the rig's file and commit it: the next session starts as before. An older `mw`
+refuses a rig file with a key it does not know, so write the key only when every host's `mw` holds
+this change.
 
 A rig's file `rigs/<rig>.toml` may say `nightly_suite = true` and
 `suite_epic = "<bead id>"`. `mw suite` reads `suite_epic` only with `--file`:

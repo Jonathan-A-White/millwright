@@ -10,7 +10,7 @@ import (
 // A whole check on a rig whose gate is not split waits for a calm host before the
 // rig's tests, as a close-out does (Next.calmed), but no longer than it waits for
 // the merge slot and the gate lock together (CheckPartSlotWait, one deadline from
-// the start of the check, mw-gq6.915): the 590 seconds a Builder's foreground call
+// the start of the check, mw-gq6.915): the 600 seconds (the default cap) a Builder's foreground call
 // is given are not to be spent in a wait that ends in the tool's own silence. A
 // host still busy at the end of it hands the check back in one line naming the
 // load and the command to run again, and a hand-back repeated in one attempt is

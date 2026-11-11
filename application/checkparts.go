@@ -9,7 +9,7 @@ import (
 )
 
 // CheckPartSlotWait is the most mw check --part N waits for the rig's merge
-// slot before it ends with a line saying who holds it: under the 590 seconds a
+// slot before it ends with a line saying who holds it: under the 600 seconds (the default cap) a
 // Builder's foreground tool call is given, so that the call ends in words rather
 // than in the tool's own silent timeout (mw-6zgnz5y). It is nine minutes, since
 // a batch landing holds the slot 10 to 40 minutes and a shorter wait handed the
@@ -29,13 +29,13 @@ const CheckPartSlotWait = 9 * time.Minute
 // comes back does not hold up the queue for long.
 const CheckKeepPlace = 10 * time.Minute
 
-// CheckCallBudget is how much of the 590 seconds a Builder's foreground tool call
-// is given a whole mw check may spend before it must not start the rig's gate: the
-// call is cut off at 590 s with no words and the gate lock held, so the gate is
+// CheckCallBudget is how much of the 600 seconds a Builder's foreground tool call
+// is given by default a whole mw check may spend before it must not start the rig's gate: the
+// call is cut off at 600 s with no words and the gate lock held, so the gate is
 // started only when it is expected to end inside this (mw-gq6.940).
 const CheckCallBudget = 540 * time.Second
 
-// A rig's whole gate can outrun the 590 seconds a Builder's foreground tool call
+// A rig's whole gate can outrun the 600 seconds (the default cap) a Builder's foreground tool call
 // is given, and waiting on one run in the background is a wait the auto-mode
 // classifier refuses (mw-gq6.567). A host can therefore name a rig's gate as
 // parts (the `[test_parts.<rig>]` tables of its config file). The Builder runs
@@ -370,7 +370,7 @@ type slotTry struct {
 }
 
 // takeSlotWithin takes the rig's slot for a worktree check, waiting no longer
-// than partSlotWait: under the 590 seconds a Builder's foreground call is given.
+// than partSlotWait: under the 600 seconds (the default cap) a Builder's foreground call is given.
 // It ends a wait that ran out in one line (slotRefusal).
 func (k Check) takeSlotWithin(ctx context.Context, c *closeOut, try slotTry) (Holding, error) {
 	return k.takeSlotFor(ctx, c, try, k.partSlotWait())

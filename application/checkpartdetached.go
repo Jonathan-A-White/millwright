@@ -10,7 +10,7 @@ import (
 )
 
 // A part that outruns the Builder's foreground call (mw-gq6.1029). A loaded host
-// can take more than the 590 seconds a tool call is given over one part of a split
+// can take more than the 600 seconds a tool call is given by default over one part of a split
 // gate, and a part cut off with its call keeps nothing. A --part that takes no
 // merge slot is therefore run by a process of its own (PartStarter), in a session
 // of its own, and the call waits for that process for what is left of the call. A
