@@ -10,14 +10,17 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/apartproc"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
 // nightlySuiteSpringJob is the job that runs the nightly whole suite: from
 // suiteHour (UTC) each day, on the home only, `mw suite <rig> --file` for each
-// of this host's rigs whose file says nightly_suite = true, one at a time. Each
-// is a process of this binary of its own, apart from the follower (in a systemd
-// scope where there is one): a follower restarted by a self-update leaves a suite
+// of this host's rigs whose file says nightly_suite = true, one at a time. A rig
+// whose file names suite_every and suite_host is run on that host whenever main
+// has moved and suite_every has passed, and by the home only when its newest
+// result is over 26 hours old. Each suite is a process of this binary of its
+// own, apart from the follower (in a systemd scope where there is one): a follower restarted by a self-update leaves a suite
 // running, and the one that comes back adopts it and tells its real outcome
 // (mw-gq6.395). Its output goes to a log beside its state, under
 // ~/.local/state/mw/suite.
@@ -44,6 +47,7 @@ func nightlySuiteSpringJob(host string, suiteHour int, out io.Writer) (applicati
 	files := vault.New(dir)
 	suite := &application.NightlySuite{
 		Hour: suiteHour, Rigs: rigs, ReadRigs: config.Rigs, Rules: files, History: files,
+		Host: host, Heads: rig.New(),
 		Home: func(ctx context.Context) (bool, error) {
 			return application.IsHome(ctx, mwVault(dir, host), host)
 		},

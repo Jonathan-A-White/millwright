@@ -126,3 +126,101 @@ Feature: The follower springs the nightly whole suite on the home
     Then "mw suite lampas --file" was begun 1 time
     And the last event of the job "suite@laptop" is done
     And that event does not say the follower stopped
+
+  # The first cycle of a follower only reads the log, so each scenario below runs one first.
+  # suite_every and suite_host (mw-t5shinh.15): a rig that names both has its
+  # whole suite run on its suite host whenever main has moved and suite_every has
+  # passed since the newest kept result began; the home keeps the nightly only as
+  # a fallback for a suite host that is down.
+
+  Scenario: The suite host runs the suite when the newest result began 5 hours ago at another sha than main's head
+    Given the nightly follower is running on "desktop" and the home is "laptop"
+    And the rig "lampas" says suite_every = "4h" and suite_host = "desktop"
+    And the newest result of "lampas" began "2026-10-13 05:00" UTC at "abc"
+    And main's head of "lampas" is "def"
+    And the nightly follower runs a cycle
+    When the nightly clock reads "2026-10-13 10:00" UTC
+    And the nightly follower runs a cycle
+    Then "mw suite lampas --file" was run 1 time
+
+  Scenario: The suite host does not run the suite when the newest result began 3 hours ago
+    Given the nightly follower is running on "desktop" and the home is "laptop"
+    And the rig "lampas" says suite_every = "4h" and suite_host = "desktop"
+    And the newest result of "lampas" began "2026-10-13 07:00" UTC at "abc"
+    And main's head of "lampas" is "def"
+    And the nightly follower runs a cycle
+    When the nightly clock reads "2026-10-13 10:00" UTC
+    And the nightly follower runs a cycle
+    Then "mw suite lampas --file" was run 0 times
+
+  Scenario: The suite host does not run the suite when main's head is the sha of the newest result
+    Given the nightly follower is running on "desktop" and the home is "laptop"
+    And the rig "lampas" says suite_every = "4h" and suite_host = "desktop"
+    And the newest result of "lampas" began "2026-10-13 05:00" UTC at "abc"
+    And main's head of "lampas" is "abc"
+    And the nightly follower runs a cycle
+    When the nightly clock reads "2026-10-13 10:00" UTC
+    And the nightly follower runs a cycle
+    Then "mw suite lampas --file" was run 0 times
+
+  Scenario: The suite host runs at any hour of the day, not only from the nightly hour
+    Given the nightly follower is running on "desktop" and the home is "laptop"
+    And the rig "lampas" says suite_every = "4h" and suite_host = "desktop"
+    And the newest result of "lampas" began "2026-10-13 00:00" UTC at "abc"
+    And main's head of "lampas" is "def"
+    And the nightly follower runs a cycle
+    When the nightly clock reads "2026-10-13 04:30" UTC
+    And the nightly follower runs a cycle
+    Then "mw suite lampas --file" was run 1 time
+
+  Scenario: The suite host runs again after suite_every when main has moved, and not before
+    Given the nightly follower is running on "desktop" and the home is "laptop"
+    And the rig "lampas" says suite_every = "4h" and suite_host = "desktop"
+    And main's head of "lampas" is "def"
+    And the nightly follower runs a cycle
+    And the nightly clock reads "2026-10-13 10:00" UTC
+    And the nightly follower runs a cycle
+    When main's head of "lampas" is "ghi"
+    And the nightly clock reads "2026-10-13 13:00" UTC
+    And the nightly follower runs a cycle
+    Then "mw suite lampas --file" was run 1 time
+    When the nightly clock reads "2026-10-13 14:30" UTC
+    And the nightly follower runs a cycle
+    Then "mw suite lampas --file" was run 2 times
+
+  Scenario: The home's follower does not run the suite at the nightly hour while the newest result is 10 hours old
+    Given the rig "lampas" says suite_every = "4h" and suite_host = "desktop"
+    And the newest result of "lampas" began "2026-10-13 22:00" UTC at "abc"
+    And main's head of "lampas" is "def"
+    And the nightly clock reads "2026-10-14 07:55" UTC
+    And the nightly follower runs a cycle
+    When the nightly clock reads "2026-10-14 08:00" UTC
+    And the nightly follower runs a cycle
+    Then "mw suite lampas --file" was run 0 times
+
+  Scenario: The home's follower runs the suite at the nightly hour when the newest result is 27 hours old
+    Given the rig "lampas" says suite_every = "4h" and suite_host = "desktop"
+    And the newest result of "lampas" began "2026-10-13 05:00" UTC at "abc"
+    And main's head of "lampas" is "def"
+    And the nightly clock reads "2026-10-14 07:55" UTC
+    And the nightly follower runs a cycle
+    When the nightly clock reads "2026-10-14 08:00" UTC
+    And the nightly follower runs a cycle
+    Then "mw suite lampas --file" was run 1 time
+
+  Scenario: A host that is neither the suite host nor the home never runs it
+    Given the nightly follower is running on "mercy" and the home is "laptop"
+    And the rig "lampas" says suite_every = "4h" and suite_host = "desktop"
+    And the newest result of "lampas" began "2026-10-12 05:00" UTC at "abc"
+    And main's head of "lampas" is "def"
+    And the nightly follower runs a cycle
+    When the nightly clock reads "2026-10-14 09:00" UTC
+    And the nightly follower runs a cycle
+    Then "mw suite lampas --file" was run 0 times
+
+  Scenario: A rig that names neither key keeps its nightly as before
+    Given the newest result of "lampas" began "2026-10-13 22:00" UTC at "abc"
+    And the nightly follower runs a cycle
+    When the nightly clock reads "2026-10-14 08:00" UTC
+    And the nightly follower runs a cycle
+    Then "mw suite lampas --file" was run 1 time

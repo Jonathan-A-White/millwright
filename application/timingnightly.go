@@ -498,7 +498,10 @@ func (n *NightlyTiming) Due(ctx context.Context) ([]TimingDue, error) {
 			n.say("  timing  %s has timing_tests but no suite_epic in its rules file in the vault: its timing run has no epic to file a bug under, so it is not run\n", name)
 			continue
 		}
-		if rules.NightlySuite && n.Suites != nil {
+		// A rig whose suite runs on its suite host whenever main has moved (suite_every)
+		// has no suite of today to wait for: its newest result, whoever kept it, may
+		// be of an earlier day because main has not moved since (mw-t5shinh.15).
+		if rules.NightlySuite && rules.SuiteEvery == 0 && n.Suites != nil {
 			suite, kept, err := n.Suites.LatestSuite(ctx, name)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("reading the last suite of %s: %w", name, err))

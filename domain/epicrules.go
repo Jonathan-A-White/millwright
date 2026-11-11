@@ -74,6 +74,14 @@ type EpicRequirements struct {
 	// under. Neither is a requirement of an epic, so Any does not count them.
 	NightlySuite bool
 	SuiteEpic    string
+	// SuiteEvery and SuiteHost (suite_every, suite_host) move the whole suite off
+	// the home's one run a night: the follower on SuiteHost runs it whenever main
+	// has moved and SuiteEvery has passed since the newest kept result began, and
+	// the home runs its nightly only when that result is over 26 hours old. Both
+	// or neither: a rig that names one without the other is refused, and SuiteEvery
+	// is an hour or more.
+	SuiteEvery time.Duration
+	SuiteHost  string
 	// BuilderCall is the one Bash call, from ten to 55 minutes, a story's session
 	// on the rig is given (builder_call); zero is the harness's own 600 seconds.
 	// It is no requirement of an epic either, so Any does not count it.

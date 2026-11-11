@@ -182,6 +182,21 @@ func TestARigIsNotDueBeforeTheHourOrBeforeItsSuiteHasRun(t *testing.T) {
 	}
 }
 
+func TestARigWhoseSuiteRunsOnItsSuiteHostDoesNotWaitForASuiteOfToday(t *testing.T) {
+	f := newTimingNight(t)
+	f.rules.Require("lampas", domain.EpicRequirements{TimingTests: []string{"tests/timing/**"}, SuiteEpic: "mw-suite", NightlySuite: true,
+		SuiteEvery: 6 * time.Hour, SuiteHost: "desktop"})
+	suites := &apptest.FakeSuiteRecords{}
+	f.night.Suites = suites
+	// The newest result is yesterday's, kept by the suite host; main has not moved since.
+	if _, err := suites.PutSuiteFile(context.Background(), "lampas", "2026-10-20.json", `{"rig":"lampas","passed":true}`); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.due(t); len(got) != 1 {
+		t.Errorf("the timing run waited for a suite of today that the suite host will not make while main stands: %v", got)
+	}
+}
+
 func TestARigWithTimingTestsAndNoSuiteEpicIsSaidAndNotRun(t *testing.T) {
 	f := newTimingNight(t)
 	f.rules.Require("lampas", domain.EpicRequirements{TimingTests: []string{"tests/timing/**"}})

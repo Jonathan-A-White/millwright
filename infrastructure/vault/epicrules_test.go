@@ -610,3 +610,54 @@ func TestARigsFileMayGiveItsBuildersALongerCallAndRefusesOneOutOfRange(t *testin
 		t.Errorf("builder calls = %v, want only lampas at 55m", calls)
 	}
 }
+
+func TestARigsFileNamesItsSuiteHostAndHowOftenItRunsThereAndRefusesTheRest(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+
+	writeRigFile(t, dir, "lampas", "nightly_suite = true\nsuite_every = \"6h\" # four runs a day\nsuite_host = \"desktop\"\n")
+	for name, read := range map[string]func() (domain.EpicRequirements, error){
+		"strict": func() (domain.EpicRequirements, error) { return v.EpicRequirements(context.Background(), "lampas") },
+		"lenient": func() (domain.EpicRequirements, error) {
+			got, _, err := v.LandingRequirements(context.Background(), "lampas")
+			return got, err
+		},
+	} {
+		got, err := read()
+		if err != nil {
+			t.Fatalf("%s read: %v", name, err)
+		}
+		if got.SuiteEvery != 6*time.Hour || got.SuiteHost != "desktop" || !got.NightlySuite {
+			t.Errorf("%s read: %+v, want suite_every 6h and suite_host desktop", name, got)
+		}
+		if got.Any() {
+			t.Errorf("%s read: suite_every and suite_host are no requirement of an epic, but Any() = true", name)
+		}
+	}
+
+	for _, bad := range []string{
+		"suite_host = \"desktop\"\n",                        // a host and no interval
+		"suite_every = \"6h\"\n",                            // an interval and no host
+		"suite_every = \"59m\"\nsuite_host = \"desktop\"\n", // under an hour
+		"suite_every = \"0s\"\nsuite_host = \"desktop\"\n",
+		"suite_every = 6\nsuite_host = \"desktop\"\n",
+		"suite_every = \"soon\"\nsuite_host = \"desktop\"\n",
+		"suite_every = \"6h\"\nsuite_host = \"\"\n",
+		"suite_every = \"6h\"\nsuite_host = desktop\n",
+		"suite_every = \"6h\"\nsuite_host = [\"desktop\"]\n",
+	} {
+		writeRigFile(t, dir, "lampas", bad)
+		if _, err := v.EpicRequirements(context.Background(), "lampas"); err == nil {
+			t.Errorf("strict read of %q: no refusal", bad)
+		}
+		if _, _, err := v.LandingRequirements(context.Background(), "lampas"); err == nil {
+			t.Errorf("lenient read of %q: no refusal", bad)
+		}
+	}
+
+	// A rig that names neither key reads as before.
+	writeRigFile(t, dir, "lampas", "nightly_suite = true\n")
+	if got, err := v.EpicRequirements(context.Background(), "lampas"); err != nil || got.SuiteEvery != 0 || got.SuiteHost != "" {
+		t.Errorf("neither key: %+v, %v", got, err)
+	}
+}
