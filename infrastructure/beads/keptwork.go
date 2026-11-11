@@ -146,7 +146,24 @@ func (l *liveListing) readyWhere(keep func(bead) bool) []application.StoryDetail
 		}
 		return found[i].created().Before(found[j].created())
 	})
-	return l.details(found)
+	details := l.details(found)
+	children := l.childCounts()
+	for i := range details {
+		details[i].Children = children[details[i].Story.ID]
+	}
+	return details
+}
+
+// childCounts is how many beads that are not closed hang from each bead the
+// live beads name as a parent.
+func (l *liveListing) childCounts() map[string]int {
+	counts := map[string]int{}
+	for _, b := range l.beads {
+		if b.Parent != "" && b.Status != StatusClosed {
+			counts[b.Parent]++
+		}
+	}
+	return counts
 }
 
 // withStatus is the beads with status that are no epic, in the order filed.

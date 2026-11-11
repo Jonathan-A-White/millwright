@@ -68,6 +68,7 @@ const HeldAfterClaimGate = "held-after-claim"
 var StarvedHolds = map[string]string{
 	"hitl":                   "Governor's own story",
 	"held-for":               "held for an event",
+	"parent":                 "parent with open children",
 	"no-path":                "unreadable path",
 	"no-host":                "no host",
 	"other-host":             "another host (asleep?)",
@@ -210,7 +211,7 @@ func starvedPass(ready []StoryDetail, passed []Passed, running []StoryDetail, st
 	var order = map[string][]string{}
 	for _, p := range passed {
 		rig, hold := rigOf[p.StoryID], StarvedHolds[p.Gate]
-		if rig == "" || hold == "" || p.Gate == "hitl" || p.Gate == "held-for" || p.Waiting || busy[rig] {
+		if rig == "" || hold == "" || p.Gate == "hitl" || p.Gate == "held-for" || p.Gate == "parent" || p.Waiting || busy[rig] {
 			continue
 		}
 		if holds[rig] == nil {

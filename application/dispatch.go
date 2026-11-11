@@ -1069,6 +1069,15 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				"the Governor must be present for it (labelled %s): it is worked with the Mayor, never by a dispatched session", label)})
 			continue
 		}
+		// gate: parent
+		// A bead with children is a parent: the children are the work, and a
+		// session handed the parent has nothing a Builder can do. It was taken
+		// twice while typed task, not epic, and committed nothing (mw-gq6.1086).
+		if detail.Children > 0 {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "parent", Why: fmt.Sprintf(
+				"it has %d child stories: a parent is never a session's to take", detail.Children)})
+			continue
+		}
 		// gate: held-for
 		// A story parked behind an event keeps its held-for-<event> label whatever
 		// its status says: a turn-cap hand-back reopens a story before the Mayor has

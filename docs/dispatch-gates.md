@@ -11,6 +11,7 @@ three.
 |-|-|
 | `paused` | the host is paused by a pause-host event: nothing at all is done |
 | `hitl` | the story is labelled hitl, or demo with no files key (his own demo): the Governor must be present, the Mayor works it |
+| `parent` | the bead has child beads that are not closed: a parent is never a session's to take, its children are the work (mw-gq6.1086) |
 | `held-for` | the story carries a `held-for-<event>` label (say `held-for-jonah`): it is parked behind an event and is not claimed, however open or ready its status, until the label is removed (mw-gq6.753) |
 | `no-path` | the story's path cannot be read |
 | `no-host` | the path names no host |
@@ -156,6 +157,7 @@ is mapped there too, and a test says so.
 | Gate | Hold name |
 |-|-|
 | `hitl` | Governor's own story |
+| `parent` | parent with open children (not counted in the alarm, as `hitl` and `held-for` are not) |
 | `held-for` | held for an event |
 | `no-path` | unreadable path |
 | `no-host` | no host |

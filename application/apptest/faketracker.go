@@ -1376,6 +1376,7 @@ func (f *FakeTracker) ReadyForHost(_ context.Context, host string) ([]applicatio
 		detail := s.detail
 		detail.Needs = append([]string(nil), s.needs...)
 		detail.CommentCount = len(s.comments) // bd ready carries it, as bd show does
+		detail.Children = f.openChildren(id)  // and the gateway counts the children not closed
 		ready = append(ready, detail)
 	}
 	return ready, nil

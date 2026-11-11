@@ -25,6 +25,10 @@ import (
 // names domain.HostAuto is offered to every host: whichever takes it writes
 // its own name in place of "auto" when it claims.
 //
+// A story that has child beads is offered all the same, with Children set:
+// it is a parent, and mw dispatch says so when it passes it over rather than
+// leaving it out unexplained (mw-gq6.1086).
+//
 // A Gateway with a kept connection reads it, and RunningStories,
 // RunningElsewhere, RunningEverywhere and WorkInHand, from the live beads over
 // that connection (keptwork.go), and starts no bd unless it fails (mw-gq6.612).
@@ -43,7 +47,40 @@ func (g *Gateway) ReadyForHost(ctx context.Context, host string) ([]application.
 	if err != nil {
 		return nil, fmt.Errorf("reading what is ready on %s: %w", host, err)
 	}
-	return g.onHost(ctx, stories, host, true)
+	on, err := g.onHost(ctx, stories, host, true)
+	if err != nil {
+		return nil, err
+	}
+	return g.withChildren(ctx, on)
+}
+
+// withChildren sets, on each of details, how many beads that are not closed hang
+// from it (mw-gq6.1086): one more bd list, and only when there is a story to
+// look at. The kept connection counts them from the live beads it has already
+// read (liveListing.ready).
+func (g *Gateway) withChildren(ctx context.Context, details []application.StoryDetail) ([]application.StoryDetail, error) {
+	if len(details) == 0 {
+		return details, nil
+	}
+	out, err := g.call(ctx, "list", "--status", strings.Join([]string{StatusOpen, StatusInProgress, "blocked", StatusDeferred}, ","),
+		"--exclude-type", "mail,event", "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	live, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading which beads have children: %w", err)
+	}
+	counts := map[string]int{}
+	for _, b := range live {
+		if b.Parent != "" {
+			counts[b.Parent]++
+		}
+	}
+	for i := range details {
+		details[i].Children = counts[details[i].Story.ID]
+	}
+	return details, nil
 }
 
 // ReadyWithLabel implements application.WorkTracker. It is `bd ready` narrowed
