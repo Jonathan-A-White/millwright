@@ -241,11 +241,14 @@ func sortedKeys[V any](m map[string]V) []string {
 // (mw-gq6.593): for each rig the config's [rigs] names, a [tests] or
 // [changed_specs] line it lacks is appended to its table (the table too, when
 // it lacks that), and a [test_parts.<rig>] table it lacks altogether is appended
-// whole, with its parts in order. A line or table the config has is never edited
+// whole, with its parts in order, and so is the vault's [session] deny when the
+// config holds none (mw-t5shinh.62; a cloud box also has it set by the cloud
+// check, which finds it level). A line or table the config has is never edited
 // or removed: one that differs from the vault's is only named, as
-// "[tests] rig: differs" or "[test_parts.rig]: differs". out is the config's
-// text with the additions, every other byte as it was; appended names each
-// addition, as "[tests] rig" or "[test_parts.rig]".
+// "[tests] rig: differs", "[test_parts.rig]: differs" or "[session] deny:
+// differs". out is the config's text with the additions, every other byte as it
+// was; appended names each addition, as "[tests] rig", "[test_parts.rig]" or
+// "[session] deny".
 func LevelBoostConfig(config string, vault BoostTables) (out string, appended, differing []string, err error) {
 	file, err := ParseConfigTOML(config)
 	if err != nil {
@@ -306,6 +309,20 @@ func LevelBoostConfig(config string, vault BoostTables) (out string, appended, d
 			out += tomlBasicString(part.Name) + " = " + tomlBasicString(part.Command) + "\n"
 		}
 		appended = append(appended, fmt.Sprintf("[%s%s]", BoostPartsPrefix, rig))
+	}
+	if vault.HasSessionDeny && len(vault.SessionDeny) > 0 {
+		session := fmt.Sprintf("[%s] %s", SessionTable, SessionDenyKey)
+		switch {
+		case !have.HasSessionDeny:
+			current, perr := ParseConfigTOML(out)
+			if perr != nil {
+				return config, nil, nil, perr
+			}
+			out = current.Set(SessionTable, SessionDenyKey, SessionDenyLiteral(vault.SessionDeny))
+			appended = append(appended, session)
+		case !slices.Equal(have.SessionDeny, vault.SessionDeny):
+			differing = append(differing, session+": differs")
+		}
 	}
 	return out, appended, differing, nil
 }
