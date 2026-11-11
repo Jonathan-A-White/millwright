@@ -79,7 +79,10 @@ test:
 # gate's parallelism: GOFLAGS and GOMAXPROCS must follow JOBS. Then that no
 # tracked file is an ELF or Mach-O executable or over 2 MB outside testdata/
 # (scripts/check-tracked-binaries.sh). Then the beads restore drill, against a
-# stand-in bd (scripts/check-beads-restore-drill.sh). Every
+# stand-in bd (scripts/check-beads-restore-drill.sh). Then that no tracked line
+# holds more of a term of the vault's private list than the baseline beside it
+# allows (scripts/check-private-terms.sh; it reads the list and baseline in the vault and passes, saying "skipped", where the
+# list or the baseline is missing, and the same check runs in make test). Every
 # other check here reads only this repository (and a temporary directory)
 # and starts nothing.
 lint:
@@ -103,6 +106,7 @@ lint:
 	scripts/check-chain-stamps-doc.sh
 	scripts/check-shellcheck-directives.sh
 	scripts/check-tracked-binaries.sh
+	scripts/check-private-terms.sh
 
 clean:
 	rm -rf bin

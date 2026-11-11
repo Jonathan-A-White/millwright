@@ -359,7 +359,7 @@ BOOST_RIGS="argus=https://github.com/Jonathan-A-White/argus.git postern=https://
 BOOST_GITHUB_TOKEN=$GH_TOKEN_VALUE
 BOOST_CLAUDE_TOKEN=$CLAUDE_TOKEN_VALUE
 BOOST_GIT_NAME="Jonathan White"
-BOOST_GIT_EMAIL=jonathan.jawhite@gmail.com
+BOOST_GIT_EMAIL=you@example.com
 EOF
 chmod 600 "$ENVFILE"
 
