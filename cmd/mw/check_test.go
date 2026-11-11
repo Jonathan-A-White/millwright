@@ -81,7 +81,7 @@ func TestCheckWaitsNineMinutesInTheForegroundAndKeepsItsPlaceAndFortyMinutesWith
 				t.Fatal(err)
 			}
 		}
-		limit, once, keep := checkWaitLimit(cmd, c.part)
+		limit, once, keep := checkWaitLimit(cmd, c.part, application.CheckCallLimitsFor(""))
 		if limit != c.wantLimit || once != c.wantOnce || keep != c.wantKeep {
 			t.Errorf("%s: expected a limit of %s, hand back at once %v and a place kept %s, got %s, %v and %s", c.name, c.wantLimit, c.wantOnce, c.wantKeep, limit, once, keep)
 		}
@@ -101,6 +101,32 @@ func TestCheckWaitsNineMinutesInTheForegroundAndKeepsItsPlaceAndFortyMinutesWith
 		}
 		if got := checkBackgroundWait(cmd); got != want {
 			t.Errorf("expected a background check given %q to wait %s, got %s", given, want, got)
+		}
+	}
+}
+
+// A foreground check reads BASH_MAX_TIMEOUT_MS from its own environment: unset or
+// not a number it keeps to today's times, and a longer call is its budget less 50
+// seconds for the call and for every wait (mw-t5shinh.14).
+func TestCheckReadsItsCallFromBashMaxTimeout(t *testing.T) {
+	t.Setenv("BASH_MAX_TIMEOUT_MS", "")
+	if got := checkCallLimits(); got.Budget != 540*time.Second || got.Wait != 9*time.Minute || got.Keep != 10*time.Minute {
+		t.Errorf("unset: expected today's 540s, 9m and 10m, got %+v", got)
+	}
+	t.Setenv("BASH_MAX_TIMEOUT_MS", "soon")
+	if got := checkCallLimits(); got.Budget != 540*time.Second {
+		t.Errorf("not a number: expected 540s, got %+v", got)
+	}
+	t.Setenv("BASH_MAX_TIMEOUT_MS", "3300000")
+	got := checkCallLimits()
+	if got.Budget != 3250*time.Second {
+		t.Errorf("a 55 minute call: expected a budget of 3250s, got %+v", got)
+	}
+	cmd := newCheckCmd()
+	for _, part := range []int{0, 1} {
+		limit, once, keep := checkWaitLimit(cmd, part, got)
+		if limit != 3250*time.Second || once || keep != application.CheckKeepPlace {
+			t.Errorf("part %d: expected a wait of 3250s and a place kept 10m, got %s, %v and %s", part, limit, once, keep)
 		}
 	}
 }
