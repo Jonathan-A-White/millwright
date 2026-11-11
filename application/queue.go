@@ -45,6 +45,8 @@ type QueueRow struct {
 	// Held is why a dispatch would pass it over for now, when one would: the
 	// shared-files guard, or the Governor's presence being needed.
 	Held string `json:"held,omitempty"`
+	// Children is how many open beads hang from this one; set only on a parent.
+	Children int `json:"children,omitempty"`
 }
 
 // QueueBlocked is one blocked story and the stories it waits on.
@@ -58,14 +60,18 @@ type QueueBlocked struct {
 
 // QueueReport is what mw queue found.
 type QueueReport struct {
-	Host    string         `json:"host"`
-	Ready   []QueueRow     `json:"ready"`
+	Host  string     `json:"host"`
+	Ready []QueueRow `json:"ready"`
+	// Parents are the ready beads that have children, in the order of Ready:
+	// the children are the work, so a dispatch passes them over and they are
+	// not counted among the stories to start.
+	Parents []QueueRow     `json:"parents"`
 	Blocked []QueueBlocked `json:"blocked"`
 }
 
 // Run reads the host's ready and blocked stories and prints them.
 func (q Queue) Run(ctx context.Context) (QueueReport, error) {
-	report := QueueReport{Host: q.Host, Ready: []QueueRow{}, Blocked: []QueueBlocked{}}
+	report := QueueReport{Host: q.Host, Ready: []QueueRow{}, Parents: []QueueRow{}, Blocked: []QueueBlocked{}}
 	ready, err := q.Tracker.ReadyForHost(ctx, q.Host)
 	if err != nil {
 		return report, fmt.Errorf("reading what is ready on %s: %w", q.Host, err)
@@ -105,6 +111,15 @@ func (q Queue) Run(ctx context.Context) (QueueReport, error) {
 	}
 	for _, detail := range inStartOrder(unblocked) {
 		row := q.row(detail)
+		// A bead with children is a parent: its children are the work, and a
+		// dispatch passes it over by the parent gate, so it is no story to start
+		// (mw-gq6.1088).
+		if detail.Children > 0 {
+			row.Children = detail.Children
+			row.Why += fmt.Sprintf(", parent of %d: its children are the work", detail.Children)
+			report.Parents = append(report.Parents, row)
+			continue
+		}
 		if detail.Hitl() {
 			why := LabelHitl
 			if !hasHitlLabel(detail.Labels) {
@@ -196,6 +211,12 @@ func (r QueueReport) String() string {
 		fmt.Fprintf(&b, "    %s\n", row.Why)
 		if row.Held != "" {
 			fmt.Fprintf(&b, "    held: %s\n", row.Held)
+		}
+	}
+	if len(r.Parents) > 0 {
+		fmt.Fprintf(&b, "PARENTS on %s (%d), never started: their children are the work\n", r.Host, len(r.Parents))
+		for _, row := range r.Parents {
+			fmt.Fprintf(&b, "  %s  %s\n    parent of %d\n", row.ID, row.Title, row.Children)
 		}
 	}
 	fmt.Fprintf(&b, "BLOCKED on %s (next %d)\n", r.Host, len(r.Blocked))
