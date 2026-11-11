@@ -467,6 +467,11 @@ func moveHomeOnTheGovernorsTap(inbox *application.PosternInbox, host, attachment
 	if err != nil {
 		return fmt.Errorf("there is no home directory for mw home move to set the old database aside in: %w", err)
 	}
+	retired, err := config.RetiredHosts()
+	if err != nil {
+		return err
+	}
+	inbox.Retired = retired
 	inbox.Home = mwVault(dir, host)
 	inbox.HomeMover = homemove.Command{Host: homemove.Host{Vault: dir, Home: home}, Spent: filepath.Dir(attachmentDir)}
 	inbox.HomeMoveBead = bead

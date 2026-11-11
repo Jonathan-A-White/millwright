@@ -32,6 +32,13 @@ func hostBackend(gateway *beads.Gateway, files application.HomeFile, host string
 	if len(settings) == 0 {
 		return application.BackendStage{}
 	}
+	retired, err := config.RetiredHosts()
+	if err != nil {
+		if errs != nil {
+			fmt.Fprintf(errs, "no backend staging: %v\n", err)
+		}
+		return application.BackendStage{}
+	}
 	stage := application.BackendStage{
 		Rigs:     rigs,
 		Settings: map[string]application.BackendRig{},
@@ -41,6 +48,7 @@ func hostBackend(gateway *beads.Gateway, files application.HomeFile, host string
 		Tracker:  gateway,
 		Notes:    gateway,
 		Hands: application.HandsAdd{
+			Retired: retired,
 			Tracker: gateway,
 			Notes:   gateway,
 			Now:     handsClock,

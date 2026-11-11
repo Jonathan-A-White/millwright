@@ -800,6 +800,10 @@ type PosternInbox struct {
 	// HomeMoveBead is the bead a move's start and result are written on —
 	// config home_move_bead. Empty writes them on no bead.
 	HomeMoveBead string
+	// Retired are the hosts the Governor retired (retired_hosts): a move-home
+	// naming one is refused, as mw home move would refuse it, before anything
+	// is changed.
+	Retired []string
 
 	// Ideas, when set, is the Governor's Ideas only: while it is on, a verified
 	// record of his is kept, answered 'Recorded for after <time>' in its thread
