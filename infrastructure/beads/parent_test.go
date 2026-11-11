@@ -85,7 +85,7 @@ case "$1" in
     printf '{"id":"mw-p.2","title":"t","status":"open","issue_type":"task","metadata":{"host":"laptop","rig":"millwright"}}]' ;;
   list)
     case "$3" in
-      in_progress) printf '[]'; exit 0 ;;
+      in_progress|deferred) printf '[]'; exit 0 ;;
     esac
     printf '[{"id":"mw-p.1.1","title":"t","status":"open","issue_type":"task","parent":"mw-p.1"},'
     printf '{"id":"mw-p.1.2","title":"t","status":"in_progress","issue_type":"task","parent":"mw-p.1"},'
@@ -135,5 +135,61 @@ func TestWorkInHandCarriesTheChildrenOfAReadyTaskFromBd(t *testing.T) {
 	}
 	if len(children) != 2 || children["mw-p.1"] != 2 || children["mw-p.2"] != 0 {
 		t.Errorf("expected mw-p.1 to carry 2 children and mw-p.2 none, got %v", children)
+	}
+}
+
+// With no kept connection, ReadyWithLabel carries the children of what it lists
+// as the kept connection does (mw-gq6.1090).
+func TestReadyWithLabelCarriesTheChildrenOfATaskFromBd(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "")
+	g, _ := parentStandIn(t)
+
+	ready, err := g.ReadyWithLabel(context.Background(), "todo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	children := map[string]int{}
+	for _, d := range ready {
+		children[d.Story.ID] = d.Children
+	}
+	if len(children) != 2 || children["mw-p.1"] != 2 || children["mw-p.2"] != 0 {
+		t.Errorf("expected mw-p.1 to carry 2 children and mw-p.2 none, got %v", children)
+	}
+}
+
+// With no kept connection, WorkInHand lists the held stories as the kept
+// connection does (mw-gq6.1090).
+func TestWorkInHandListsTheHeldStoriesFromBd(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "")
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in for bd is a shell script")
+	}
+	dir := t.TempDir()
+	script := `#!/bin/sh
+shift 2
+case "$1" in
+  --actor) shift 2 ;;
+esac
+case "$1" in
+  list)
+    case "$3" in
+      deferred) printf '[{"id":"mw-h.1","title":"t","status":"deferred","issue_type":"task","metadata":{"host":"laptop"}}]'; exit 0 ;;
+    esac
+    printf '[]' ;;
+  *) printf '[]' ;;
+esac
+`
+	path := filepath.Join(dir, "bd-held")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in: %v", err)
+	}
+	g := beads.New(t.TempDir(), beads.WithProgram(path))
+
+	inHand, err := g.WorkInHand(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inHand.Held) != 1 || inHand.Held[0].Story.ID != "mw-h.1" {
+		t.Errorf("expected the held story mw-h.1 in Held, got %v", inHand.Held)
 	}
 }

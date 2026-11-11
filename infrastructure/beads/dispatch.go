@@ -105,7 +105,13 @@ func (g *Gateway) ReadyWithLabel(ctx context.Context, label string) ([]applicati
 	if err != nil {
 		return nil, fmt.Errorf("reading what is ready under the label %s: %w", label, err)
 	}
-	return g.overlaid(ctx, beads)
+	details, err := g.overlaid(ctx, beads)
+	if err != nil {
+		return nil, err
+	}
+	// As the kept connection's listing does, the ones with children carry their
+	// count (mw-gq6.1090).
+	return g.withChildren(ctx, details)
 }
 
 // ClosedWithLabel implements application.ClosedTodoCards: `bd list` of the
@@ -390,8 +396,18 @@ func (g *Gateway) WorkInHand(ctx context.Context) (application.WorkInHand, error
 		}
 	}
 
-	n, m := len(ready), len(ready)+len(claimed)
-	details, err := g.overlaid(ctx, append(append(ready, claimed...), stale...))
+	// What is held, as the kept connection's listing has it (mw-gq6.1090).
+	out, err = g.call(ctx, "list", "--status", StatusDeferred, "--exclude-type", "epic", "--limit", "0", "--json")
+	if err != nil {
+		return application.WorkInHand{}, err
+	}
+	held, err := decodeBeads(out)
+	if err != nil {
+		return application.WorkInHand{}, fmt.Errorf("reading what is held: %w", err)
+	}
+
+	n, m, k := len(ready), len(ready)+len(claimed), len(ready)+len(claimed)+len(stale)
+	details, err := g.overlaid(ctx, append(append(append(ready, claimed...), stale...), held...))
 	if err != nil {
 		return application.WorkInHand{}, err
 	}
@@ -402,7 +418,7 @@ func (g *Gateway) WorkInHand(ctx context.Context) (application.WorkInHand, error
 	if err != nil {
 		return application.WorkInHand{}, err
 	}
-	return application.WorkInHand{Ready: offered, Running: details[n:m:m], OpenClaimed: details[m:]}, nil
+	return application.WorkInHand{Ready: offered, Running: details[n:m:m], OpenClaimed: details[m:k:k], Held: details[k:]}, nil
 }
 
 // onHost narrows beads to the stories worked on one host, with each story's
