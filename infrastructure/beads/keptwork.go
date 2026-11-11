@@ -193,7 +193,15 @@ func (l *liveListing) workInHand() application.WorkInHand {
 			stale = append(stale, b)
 		}
 	}
-	return application.WorkInHand{Ready: l.ready(), Running: l.details(l.withStatus(StatusInProgress)), OpenClaimed: l.details(stale), Held: l.details(l.withStatus(StatusDeferred))}
+	children := l.childCounts()
+	counted := func(beads []bead) []application.StoryDetail {
+		details := l.details(beads)
+		for i := range details {
+			details[i].Children = children[details[i].Story.ID]
+		}
+		return details
+	}
+	return application.WorkInHand{Ready: l.ready(), Running: counted(l.withStatus(StatusInProgress)), OpenClaimed: counted(stale), Held: counted(l.withStatus(StatusDeferred))}
 }
 
 // onHost narrows details as Gateway.onHost does.

@@ -411,14 +411,15 @@ func (g *Gateway) WorkInHand(ctx context.Context) (application.WorkInHand, error
 	if err != nil {
 		return application.WorkInHand{}, err
 	}
-	// What is ready carries how many children hang from each, as the kept
-	// connection's listing does (mw-gq6.1089): mw status shows a parent as ready
-	// otherwise.
-	offered, err := g.withChildren(ctx, details[:n:n])
+	// Every story carries how many children hang from it, as the kept
+	// connection's listing does (mw-gq6.1089, mw-gq6.1097): mw status shows a
+	// parent as ready otherwise, and a claimed, running or held task with
+	// children of its own is a parent to the readers of those lists as well.
+	counted, err := g.withChildren(ctx, details)
 	if err != nil {
 		return application.WorkInHand{}, err
 	}
-	return application.WorkInHand{Ready: offered, Running: details[n:m:m], OpenClaimed: details[m:k:k], Held: details[k:]}, nil
+	return application.WorkInHand{Ready: counted[:n:n], Running: counted[n:m:m], OpenClaimed: counted[m:k:k], Held: counted[k:]}, nil
 }
 
 // onHost narrows beads to the stories worked on one host, with each story's
