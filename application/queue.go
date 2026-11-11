@@ -114,7 +114,7 @@ func (q Queue) Run(ctx context.Context) (QueueReport, error) {
 		// A bead with children is a parent: its children are the work, and a
 		// dispatch passes it over by the parent gate, so it is no story to start
 		// (mw-gq6.1088).
-		if detail.Children > 0 {
+		if detail.IsParent() {
 			row.Children = detail.Children
 			row.Why += fmt.Sprintf(", parent of %d: its children are the work", detail.Children)
 			report.Parents = append(report.Parents, row)

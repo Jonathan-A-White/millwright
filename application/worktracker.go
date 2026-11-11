@@ -549,6 +549,18 @@ func (d StoryDetail) Closed() bool {
 	return strings.EqualFold(strings.TrimSpace(d.Status), StatusClosed)
 }
 
+// IsParent is the one check every listing makes to tell a parent from a story:
+// a bead with children, or one typed epic. A parent's children are the work, so
+// it is never a story to start, count as ready, or call refused or starved. The
+// type alone is not enough: a bead typed task with children read as a ready
+// story in each listing that tested the type (mw-gq6.1086, .1088, .1092 to
+// .1095). Children is filled by the listing of ready work and by a listing of
+// an epic's stories; a bead read some other way and not typed epic reads as a
+// story here.
+func (d StoryDetail) IsParent() bool {
+	return d.Children > 0 || d.IsEpic || strings.EqualFold(strings.TrimSpace(d.Type), "epic")
+}
+
 // Hitl reports whether this story is worked with the Governor present, which
 // no dispatcher may take and which is not a session for a host's cap to count.
 // The Governor's own demo is one (GovernorsDemo), labelled hitl or not.

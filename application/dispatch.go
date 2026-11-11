@@ -1073,9 +1073,12 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// A bead with children is a parent: the children are the work, and a
 		// session handed the parent has nothing a Builder can do. It was taken
 		// twice while typed task, not epic, and committed nothing (mw-gq6.1086).
-		if detail.Children > 0 {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "parent", Why: fmt.Sprintf(
-				"it has %d child stories: a parent is never a session's to take", detail.Children)})
+		if detail.IsParent() {
+			why := "it is an epic: a parent is never a session's to take"
+			if detail.Children > 0 {
+				why = fmt.Sprintf("it has %d child stories: a parent is never a session's to take", detail.Children)
+			}
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "parent", Why: why})
 			continue
 		}
 		// gate: held-for
