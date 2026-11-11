@@ -21,9 +21,9 @@ import (
 func TestGiveWayScriptKeepsItsEventsModesAndCommands(t *testing.T) {
 	s := millwright.GiveWayScript
 	for _, want := range []string{
-		"'unlock'", "'lock'", "'tick'", "'freeze'", "'shutdown'",
+		"'unlock'", "'lock'", "'logoff'", "'tick'", "'freeze'", "'shutdown'",
 		"'giveway', 'on'", "'giveway', 'off'", "'giveway', 'mark'",
-		"windows-unlock", "windows-lock", "windows-tick",
+		"windows-unlock", "windows-lock", "windows-logoff", "windows-tick",
 		"windows_free_mb=", "windows_ms=",
 		"[switch]$DryRun", "--exec", "--terminate", "Start WSL (millwright)",
 		"drop_caches", "Ubuntu-24.04", "jwhite",
@@ -38,8 +38,9 @@ func TestGiveWayScriptKeepsItsEventsModesAndCommands(t *testing.T) {
 		}
 	}
 	// the freeze comes first at unlock, before anything that can take time
-	on, state, drop, sleep, mark := strings.Index(s, "windows-unlock"), strings.Index(s, "Set-State 'unlocked'"),
-		strings.Index(s, "drop_caches"), strings.Index(s, "Start-Sleep 10"), strings.Index(s, "'giveway', 'mark'")
+	on := strings.Index(s, "'giveway', 'on', '--by', 'windows-unlock'")
+	state := on + strings.Index(s[on:], "Set-State 'unlocked'")
+	drop, sleep, mark := strings.Index(s, "drop_caches"), strings.Index(s, "Start-Sleep 10"), strings.Index(s, "'giveway', 'mark'")
 	if on < 0 || state < on || drop < state || sleep < drop || mark < sleep {
 		t.Errorf("at unlock the order must be on (%d), state (%d), drop caches (%d), sleep (%d), mark (%d)", on, state, drop, sleep, mark)
 	}
@@ -87,25 +88,26 @@ func TestGiveWayInstallLineStartsWithACommentWithItsWayBack(t *testing.T) {
 	}
 }
 
-func TestGiveWayInstallLineRegistersThreeTasksWithTheTriggersForAnyUser(t *testing.T) {
+func TestGiveWayInstallLineRegistersFourTasksWithTheTriggersForAnyUser(t *testing.T) {
 	giveWayPinned(t)
 	line, err := GiveWayInstallLine("grace", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"millwright give way (unlock)", "millwright give way (lock)", "millwright give way (tick)"} {
+	for _, name := range []string{"millwright give way (unlock)", "millwright give way (lock)", "millwright give way (logoff)", "millwright give way (tick)"} {
 		if !strings.Contains(line, "'"+name+"'") {
 			t.Errorf("the paste must register the task %q:\n%s", name, line)
 		}
 	}
-	if n := strings.Count(line, "Register-ScheduledTask"); n != 3 {
-		t.Errorf("expected three Register-ScheduledTask, got %d", n)
+	if n := strings.Count(line, "Register-ScheduledTask"); n != 4 {
+		t.Errorf("expected four Register-ScheduledTask, got %d", n)
 	}
 	// session state changes: 1 console connect, 2 console disconnect, 7 lock, 8 unlock, of any user's session
 	if !strings.Contains(line, "MSFT_TaskSessionStateChangeTrigger") {
 		t.Errorf("the lock, unlock and console triggers are session-state-change triggers")
 	}
-	for _, want := range []string{"StateChange=8", "StateChange=7", "StateChange=1", "StateChange=2", "-AtLogOn"} {
+	// 3 remote connect and 4 remote disconnect (remote desktop) are the same as console connect and disconnect
+	for _, want := range []string{"StateChange=8", "StateChange=7", "StateChange=1", "StateChange=2", "StateChange=3", "StateChange=4", "-AtLogOn"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("the paste lacks the trigger %q", want)
 		}
@@ -114,7 +116,7 @@ func TestGiveWayInstallLineRegistersThreeTasksWithTheTriggersForAnyUser(t *testi
 		t.Errorf("the triggers must fire for ANY user's session: no UserId on a trigger")
 	}
 	// every in-script event name is the script's own
-	for _, ev := range []string{"-Event unlock", "-Event lock", "-Event tick"} {
+	for _, ev := range []string{"-Event unlock", "-Event lock", "-Event logoff", "-Event tick"} {
 		if !strings.Contains(line, ev) {
 			t.Errorf("the paste lacks the action %q", ev)
 		}
@@ -139,6 +141,107 @@ func TestGiveWayInstallLineRegistersThreeTasksWithTheTriggersForAnyUser(t *testi
 		if !strings.Contains(line, want) {
 			t.Errorf("the paste lacks %q", want)
 		}
+	}
+}
+
+// A sign-out lifts the give way at once: Task Scheduler has no logoff trigger, so
+// an event-log trigger on the User Profile Service's "Finished processing user
+// logoff notification" (event 4, which fires after the session has ended) runs
+// the logoff task. It carries no user, so a sign-out of any account fires it.
+func TestGiveWayInstallLineHasALogoffTaskOnTheUserProfileServiceEvent(t *testing.T) {
+	giveWayPinned(t)
+	line, err := GiveWayInstallLine("grace", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"MSFT_TaskEventTrigger",
+		"Microsoft-Windows-User Profile Service/Operational",
+		// the log is "Profile Service" and the provider "Profiles Service": read off the Laptop's real events
+		`Provider[@Name="Microsoft-Windows-User Profiles Service"]`,
+		"EventID=4",
+		"Subscription=",
+	} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the logoff trigger lacks %q:\n%s", want, line)
+		}
+	}
+	// the logoff task has the event trigger and no other
+	m := regexp.MustCompile(`Register-ScheduledTask -TaskName 'millwright give way \(logoff\)'[^\n]*`).FindString(line)
+	if m == "" || !strings.Contains(m, "-Event logoff") || !strings.Contains(m, "$lo") || strings.Contains(m, "$t") || strings.Contains(m, "-AtLogOn") {
+		t.Errorf("the logoff task must run -Event logoff on the event trigger alone, got %q", m)
+	}
+	if !strings.Contains(line, "$lo=") {
+		t.Errorf("the event trigger must be built once, as $lo, and handed to the logoff task")
+	}
+}
+
+// Remote desktop connect and disconnect give way and let go like the console's.
+func TestGiveWayRemoteDesktopTriggersAreOnTheUnlockAndLockTasks(t *testing.T) {
+	giveWayPinned(t)
+	line, err := GiveWayInstallLine("grace", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock := regexp.MustCompile(`Register-ScheduledTask -TaskName 'millwright give way \(unlock\)'[^\n]*`).FindString(line)
+	lock := regexp.MustCompile(`Register-ScheduledTask -TaskName 'millwright give way \(lock\)'[^\n]*`).FindString(line)
+	// each session-state trigger is built once, as $tN for StateChange=N, and handed to the tasks
+	for _, n := range []string{"3", "4"} {
+		if !strings.Contains(line, "$t"+n+"=") || !strings.Contains(line, "StateChange="+n+";") {
+			t.Errorf("the paste must build the session-state trigger %s", n)
+		}
+	}
+	if !strings.Contains(unlock, "$t3") || !strings.Contains(unlock, "$t1") || !strings.Contains(unlock, "$t8") {
+		t.Errorf("the unlock task must carry session states 8 (unlock), 1 (console connect) and 3 (remote connect): %q", unlock)
+	}
+	if !strings.Contains(lock, "$t7") || !strings.Contains(lock, "$t2") || !strings.Contains(lock, "$t4") {
+		t.Errorf("the lock task must carry session states 7 (lock), 2 (console disconnect) and 4 (remote disconnect): %q", lock)
+	}
+}
+
+// With WSL down nothing runs the factory, so a give way has nothing to freeze, and
+// wsl.exe --exec would START the distro: the script looks for the WSL virtual
+// machine's process (some tens of ms; wsl.exe --list --running takes about 400)
+// before it calls wsl.exe, and does not call it when there is none.
+func TestGiveWayScriptDoesNotStartWslThatIsDown(t *testing.T) {
+	s := millwright.GiveWayScript
+	for _, want := range []string{"function Wsl-Running", "GetProcessesByName", "vmmemWSL", "vmmem", "-AssumeWsl", "'up', 'down'"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the give-way script lacks %q", want)
+		}
+	}
+	if strings.Contains(s, "--list --running") || strings.Contains(s, "'--list'") {
+		t.Errorf("wsl.exe --list --running costs about 400 ms: the check must be a process lookup")
+	}
+	// at unlock the check comes before the freeze (it costs nothing) and before anything that calls wsl.exe
+	i := strings.Index(s, "if ($Event -eq 'unlock')")
+	if i < 0 {
+		t.Fatalf("no unlock branch")
+	}
+	unlock := s[i:]
+	check, on := strings.Index(unlock, "Wsl-Running"), strings.Index(unlock, "windows-unlock")
+	if check < 0 || on < check {
+		t.Errorf("at unlock Wsl-Running (%d) must come before the freeze (%d)", check, on)
+	}
+	// every place the script calls wsl.exe for mw is behind the check, except shutdown mode's start
+	for _, want := range []string{"WSL is not running"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the log must say when it skipped for a WSL that is down: %q", want)
+		}
+	}
+}
+
+// A person at the screen under any account, console or remote, is what the tick and
+// the logoff look for.
+func TestGiveWayScriptLooksForASessionOfAnyUser(t *testing.T) {
+	s := millwright.GiveWayScript
+	for _, want := range []string{"function Screen-Occupied", "quser.exe", "Active", "LogonUI", "SessionId", "-AssumeScreen", "'occupied', 'empty'"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the give-way script lacks %q", want)
+		}
+	}
+	if strings.Contains(s, `\bconsole\b`) {
+		t.Errorf("a remote session is at the screen too: the check must not insist on the console")
 	}
 }
 
@@ -209,7 +312,7 @@ func TestGiveWayInstallLineTakesAnotherAccount(t *testing.T) {
 	}
 }
 
-func TestGiveWayUninstallLineRemovesTheThreeTasksAndTheFolder(t *testing.T) {
+func TestGiveWayUninstallLineRemovesTheFourTasksAndTheFolder(t *testing.T) {
 	out, err := runMw(t, "host", "giveway", "--uninstall-line")
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +320,7 @@ func TestGiveWayUninstallLineRemovesTheThreeTasksAndTheFolder(t *testing.T) {
 	if !strings.HasPrefix(out, "# ") {
 		t.Errorf("must begin with a comment, got %.60q", out)
 	}
-	for _, want := range []string{"millwright give way (unlock)", "millwright give way (lock)", "millwright give way (tick)",
+	for _, want := range []string{"millwright give way (unlock)", "millwright give way (lock)", "millwright give way (logoff)", "millwright give way (tick)",
 		"Unregister-ScheduledTask", "Remove-Item", `millwright\giveway`, "giveway off --by windows-uninstall"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the way back lacks %q:\n%s", want, out)
@@ -282,7 +385,7 @@ func parseWithWindowsPowerShell(t *testing.T, text string) string {
 	return out.String()
 }
 
-func TestWindowsPowerShellParsesTheScriptAndTheThreePastes(t *testing.T) {
+func TestWindowsPowerShellParsesTheScriptAndThePastes(t *testing.T) {
 	giveWayPinned(t)
 	short, err := GiveWayInstallLine("grace", false)
 	if err != nil {
