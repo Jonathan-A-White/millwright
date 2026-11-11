@@ -274,14 +274,14 @@ func (o OpenRefused) Alarm() DamperAlarm {
 
 // OpenRefusedStories are the stories ready or open and claimed (neither is
 // running) that carry a run state mw dispatch passes over, last changed more
-// than OpenRefusedAge before now, oldest first. An epic, a story of his own
+// than OpenRefusedAge before now, oldest first. A parent (an epic, or a bead with children), a story of his own
 // (hitl) and a story whose age the tracker did not say are left out.
 func OpenRefusedStories(work WorkInHand, now time.Time) []OpenRefused {
 	var found []OpenRefused
 	seen := map[string]bool{}
 	for _, list := range [][]StoryDetail{work.Ready, work.OpenClaimed} {
 		for _, d := range list {
-			if seen[d.Story.ID] || d.IsEpic || d.Hitl() || !strings.EqualFold(d.Status, StatusOpen) {
+			if seen[d.Story.ID] || d.IsParent() || d.Hitl() || !strings.EqualFold(d.Status, StatusOpen) {
 				continue
 			}
 			seen[d.Story.ID] = true

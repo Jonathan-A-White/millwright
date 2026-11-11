@@ -303,12 +303,12 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 		running := false
 		for _, list := range [][]StoryDetail{work.Running, work.OpenClaimed} {
 			for _, d := range list {
-				running = running || !d.IsEpic && !d.Hitl() && !QueuedForBatch(d) && d.Merged().Rig == rig
+				running = running || !d.IsParent() && !d.Hitl() && !QueuedForBatch(d) && d.Merged().Rig == rig
 			}
 		}
 		var ready []string
 		for _, d := range work.Ready {
-			if !d.IsEpic && !d.Hitl() && d.Merged().Rig == rig {
+			if !d.IsParent() && !d.Hitl() && d.Merged().Rig == rig {
 				ready = append(ready, d.Story.ID)
 			}
 		}
@@ -389,14 +389,14 @@ func harnessWayOut(r StarvedRig, work WorkInHand) string {
 	}
 	for _, list := range [][]StoryDetail{work.Ready, work.Running, work.OpenClaimed} {
 		for _, d := range list {
-			if host := d.Merged().Host; !d.IsEpic && d.Merged().Rig == r.Rig && host != "" && host != domain.HostAuto && host != r.Host {
+			if host := d.Merged().Host; !d.IsParent() && d.Merged().Rig == r.Rig && host != "" && host != domain.HostAuto && host != r.Host {
 				others[host] = true
 			}
 		}
 	}
 	var routed []string
 	for _, d := range work.Ready {
-		if !d.IsEpic && !d.Hitl() && d.Merged().Rig == r.Rig && d.Merged().Host == r.Host {
+		if !d.IsParent() && !d.Hitl() && d.Merged().Rig == r.Rig && d.Merged().Host == r.Host {
 			routed = append(routed, d.Story.ID)
 		}
 	}
