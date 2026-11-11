@@ -8,6 +8,18 @@ account that owns the WSL distro (the default of `--account`) that run it. They 
 Windows PowerShell 5.1, no module beyond what Windows ships. The distro is `Ubuntu-24.04`, its user
 `jwhite`, and mw is `/home/jwhite/.local/bin/mw` (the three are at the top of the script).
 
+<!-- toc -->
+
+- [What happens at unlock and at lock](#what-happens-at-unlock-and-at-lock)
+- [The paste](#the-paste)
+- [The mode, and the way back](#the-mode-and-the-way-back)
+- [The two logs](#the-two-logs)
+- [Which event does what](#which-event-does-what)
+- [What is NOT covered](#what-is-not-covered)
+- [Checking it](#checking-it)
+
+<!-- /toc -->
+
 ## What happens at unlock and at lock
 
 Each task runs `giveway.ps1 -Event unlock|lock|tick`. The mode is one word in the file `mode` beside the
