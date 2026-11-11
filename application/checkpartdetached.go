@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +30,27 @@ const (
 	partRunStarted = "started"
 )
 
+// CheckPartHungCeiling is how long a detached part may write nothing before it is
+// killed as hung when mw has no usual time for the part on this host; with one the
+// ceiling is hungTimes its usual (PartHungCeilingFor, mw-82lb97i.12).
+const CheckPartHungCeiling = 20 * time.Minute
+
+// hungTimes is how many times its usual run a part may go without writing.
+const hungTimes = 10
+
+// PartHungCeilingFor is how long a part that writes nothing is let run: ten times
+// its usual (the median of its last passing runs on this host) when mw has one,
+// else fixed, or CheckPartHungCeiling when that is not given.
+func PartHungCeilingFor(usual, fixed time.Duration) time.Duration {
+	if usual > 0 {
+		return hungTimes * usual
+	}
+	if fixed > 0 {
+		return fixed
+	}
+	return CheckPartHungCeiling
+}
+
 // CheckPartRunFileName is the name of the record of the process that runs part n
 // of a story's attempt: its pid and when it began, until a call has told the
 // Builder how it ended; CheckPartOutFileName the file the process writes to. Their
@@ -45,6 +68,32 @@ func CheckPartOutFileName(attempt, n int) string {
 		attempt = 1
 	}
 	return fmt.Sprintf("check-%d-part-%d.out", attempt, n)
+}
+
+// CheckPartProgressFileName is the name of the file a part worker's command line
+// streams what it prints to as it prints it, so that a part that is slow but at
+// work is told from one that is hung by the file growing. It is apart from the
+// part's out file, which the call waiting for the part prints whole when it ends.
+func CheckPartProgressFileName(attempt, n int) string {
+	if attempt < 1 {
+		attempt = 1
+	}
+	return fmt.Sprintf("check-%d-part-%d.prog", attempt, n)
+}
+
+type runProgressKey struct{}
+
+// WithRunProgress is ctx with a writer that a runner of a command line copies what
+// the command prints to as it prints it (mw-82lb97i.12). A write that fails is not
+// the command's failure.
+func WithRunProgress(ctx context.Context, w io.Writer) context.Context {
+	return context.WithValue(ctx, runProgressKey{}, w)
+}
+
+// RunProgressOf is the writer WithRunProgress put in ctx, nil when there is none.
+func RunProgressOf(ctx context.Context) io.Writer {
+	w, _ := ctx.Value(runProgressKey{}).(io.Writer)
+	return w
 }
 
 func (k Check) partPoll() time.Duration {
@@ -123,6 +172,9 @@ func (k Check) startPart(ctx context.Context, report CheckReport, c *closeOut, l
 	if _, err := k.Logs.PutRunFile(ctx, c.id, outName, ""); err != nil {
 		return partRun{}, fmt.Errorf("%s could not be started: the file it writes to could not be made: %w", label, err)
 	}
+	if _, err := k.Logs.PutRunFile(ctx, c.id, CheckPartProgressFileName(report.Attempt, k.Part), ""); err != nil {
+		return partRun{}, fmt.Errorf("%s could not be started: the file it writes to could not be made: %w", label, err)
+	}
 	pid, err := k.PartStarter.Start(ctx, c.id, k.Part, k.Logs.RunFile(c.id, outName))
 	if err != nil {
 		return partRun{}, fmt.Errorf("%s could not be started: %w", label, err)
@@ -153,6 +205,9 @@ func (k Check) waitForPart(ctx context.Context, report CheckReport, c *closeOut,
 		if !k.PartStarter.Alive(run.pid) {
 			return k.partEnded(ctx, report, c, label)
 		}
+		if idle, ceiling := k.partSilence(ctx, report, c, run); idle > ceiling {
+			return k.killHungPart(ctx, report, c, label, run, idle, ceiling)
+		}
 		if fit.left() <= 0 {
 			return errors.New(k.partStillRunningLine(ctx, c, label, run))
 		}
@@ -167,6 +222,42 @@ func (k Check) waitForPart(ctx context.Context, report CheckReport, c *closeOut,
 		case <-time.After(k.partPoll()):
 		}
 	}
+}
+
+// partSilence is how long the part's process has written nothing, and the longest
+// it may: ten times the part's usual run on this host when mw has one, else the
+// fixed ceiling. It writes when it has written to its out file, its streamed
+// progress or, if it never has, when it began.
+func (k Check) partSilence(ctx context.Context, report CheckReport, c *closeOut, run partRun) (idle, ceiling time.Duration) {
+	var usual time.Duration
+	if k.PartExpected != nil {
+		usual = k.PartExpected(ctx, c.path.Rig, k.Part)
+	}
+	ceiling = PartHungCeilingFor(usual, k.PartHungAfter)
+	last := run.started
+	for _, name := range []string{CheckPartOutFileName(report.Attempt, k.Part), CheckPartProgressFileName(report.Attempt, k.Part)} {
+		if info, err := os.Stat(k.Logs.RunFile(c.id, name)); err == nil && info.ModTime().After(last) {
+			last = info.ModTime()
+		}
+	}
+	return time.Since(last), ceiling
+}
+
+// killHungPart stops the process of a part that has written nothing past its
+// ceiling, with everything it started, keeps the part as hung and tells the call
+// so, in one line. The process is then told of, so that the next call starts the
+// part afresh (mw-82lb97i.12).
+func (k Check) killHungPart(ctx context.Context, report CheckReport, c *closeOut, label string, run partRun, idle, ceiling time.Duration) error {
+	if err := k.PartStarter.Kill(run.pid); err != nil {
+		return fmt.Errorf("checking %s: %s wrote nothing for %s and could not be stopped: %w", c.id, label, gateWaited(idle), err)
+	}
+	said := fmt.Sprintf("checking %s: %s hung on %s: no output for %s (more than the %s a part like it is let go), so it was stopped; run the same part again with `mw check %s --part %d` to start it again",
+		c.id, label, k.Host, gateWaited(idle), gateWaited(ceiling), c.id, k.Part)
+	ctx = context.WithoutCancel(ctx)
+	record := fmt.Sprintf("%s %s\n%s\n%s\n", partTipWord, partNoTip, partHung, said)
+	_, _ = k.Records.PutRunFile(ctx, c.id, CheckPartFileName(report.Attempt, k.Part), record)
+	_, _ = k.Records.PutRunFile(ctx, c.id, CheckPartRunFileName(report.Attempt, k.Part), "told\n")
+	return errors.New(said)
 }
 
 // partStillRunningLine is the one line a call ends with when its time ran out

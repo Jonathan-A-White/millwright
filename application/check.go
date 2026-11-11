@@ -154,6 +154,10 @@ type Check struct {
 	PartStarter PartStarter
 	PartWorker  bool
 	PartPoll    time.Duration
+	// PartHungAfter is how long a detached part may write nothing before it is
+	// killed as hung when mw has no usual time for it; CheckPartHungCeiling when zero
+	// (mw-82lb97i.12).
+	PartHungAfter time.Duration
 
 	// SpecsStarter, when it is set, runs the changed specs of a whole check that is
 	// kept to a Builder's call (CallBudget) as a process of its own that outlives the

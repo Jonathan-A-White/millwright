@@ -392,6 +392,38 @@ func (partProcess) Start(_ context.Context, storyID string, part int, logPath st
 	return cmd.Process.Pid, nil
 }
 
+// Kill stops the part's process and everything in its group (Start made it the
+// leader of a session of its own): the worker is told to stop first, so that it
+// stops the command it runs, which keeps a group of its own, and the group is
+// killed outright once the process is gone or has not gone in killWait.
+func (partProcess) Kill(pid int) error { return killGroup(pid, processAliveAny, killWait) }
+
+// killWait is how long a process told to stop is given before its group is killed.
+var killWait = 15 * time.Second
+
+// processAliveAny says whether pid is running, whatever it is.
+func processAliveAny(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+// killGroup sends SIGTERM to the group led by pid, waits up to wait for pid to be
+// gone, then kills the whole group with SIGKILL, so that what the process started
+// goes with it.
+func killGroup(pid int, alive func(int) bool, wait time.Duration) error {
+	if pid <= 1 {
+		return fmt.Errorf("not a process to stop: %d", pid)
+	}
+	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	for deadline := time.Now().Add(wait); alive(pid) && time.Now().Before(deadline); {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return err
+	}
+	return nil
+}
+
 // Alive says whether the process Start returned is still running: not ended, and
 // not a pid some other process has since been given.
 func (partProcess) Alive(pid int) bool { return processAlive(pid, "--part-worker") }

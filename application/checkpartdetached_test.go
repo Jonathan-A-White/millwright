@@ -64,19 +64,60 @@ type workerStarter struct {
 	started int
 	done    chan struct{}
 	run     func()
+	// stop is closed by Kill: a process that sleeps waits for it.
+	stop    chan struct{}
+	killed  int
+	pids    []int
+	logPath string
 }
 
-func (s *workerStarter) Start(_ context.Context, _ string, _ int, _ string) (int, error) {
+func (s *workerStarter) Start(_ context.Context, _ string, _ int, logPath string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.started++
 	s.done = make(chan struct{})
+	s.stop = make(chan struct{})
+	s.logPath = logPath
 	done := s.done
 	go func() {
 		defer close(done)
 		s.run()
 	}()
-	return 4242, nil
+	pid := 4242 + s.started
+	s.pids = append(s.pids, pid)
+	return pid, nil
+}
+
+// Kill ends the process as a kill of its group would: a process that waits for
+// stopped() goes.
+func (s *workerStarter) Kill(int) error {
+	s.mu.Lock()
+	s.killed++
+	stop, done := s.stop, s.done
+	s.mu.Unlock()
+	if stop != nil {
+		select {
+		case <-stop:
+		default:
+			close(stop)
+		}
+	}
+	if done != nil {
+		<-done
+	}
+	return nil
+}
+
+func (s *workerStarter) stopped() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stop
+}
+
+func (s *workerStarter) killedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.killed
 }
 
 func (s *workerStarter) Alive(int) bool {
@@ -108,6 +149,8 @@ type detachedPartRig struct {
 	rigDir  string
 	load    *flippingLoad
 	check   func(budget time.Duration) error
+	// tune, when it is set, changes the Check a call is built as.
+	tune func(*application.Check)
 }
 
 // flippingLoad is a host that reads calm until the test sets it far over its cores.
@@ -161,6 +204,9 @@ func aDetachedPartRig(t *testing.T, passed bool) *detachedPartRig {
 			Load: d.load, LoadPoll: 5 * time.Millisecond, PartSlotWait: 40 * time.Millisecond,
 			Rigs: map[string]string{"millwright": rigDir},
 			Out:  writerOf(out),
+		}
+		if d.tune != nil {
+			d.tune(&k)
 		}
 		if worker {
 			k.PartWorker = true
@@ -298,5 +344,156 @@ func TestADetachedPartHandedBackOnTheRunAgainWaitIsToldAsHandedBackNotAsStopped(
 	text, _ := d.records.ReadRunFile(context.Background(), "mw-x.1", application.CheckPartFileName(1, 1))
 	if lines := strings.Split(text, "\n"); len(lines) < 2 || lines[1] == "running" || lines[1] == "failed" || lines[1] == "passed" {
 		t.Errorf("expected the record to say it was handed back, neither running nor a result, got %q", text)
+	}
+}
+
+// aSilentProcess is a part whose process sleeps and writes nothing until it is
+// killed.
+func aSilentProcess(d *detachedPartRig) {
+	d.starter.run = func() { <-d.starter.stopped() }
+}
+
+// A detached part that has written nothing past the ceiling is hung, not running:
+// it is killed, the call says so in one line (not "still running"), and the part
+// is kept as failed-hung (mw-82lb97i.12).
+func TestADetachedPartThatWritesNothingPastTheCeilingIsKilledAndToldAsHung(t *testing.T) {
+	d := aDetachedPartRig(t, true)
+	aSilentProcess(d)
+	d.tune = func(k *application.Check) { k.PartHungAfter = 100 * time.Millisecond }
+
+	err := d.check(30 * time.Second)
+	if err == nil {
+		t.Fatal("expected a hung part to be told, not to pass")
+	}
+	for _, want := range []string{"part 1 of 1 (vitest 5/6) hung", "no output", "mw check mw-x.1 --part 1"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the line to say %q, got %q", want, err.Error())
+		}
+	}
+	if strings.Contains(err.Error(), "still running") || strings.Contains(err.Error(), "does not start it again") {
+		t.Errorf("expected a hung part not to be said to be running, got %q", err.Error())
+	}
+	if strings.Contains(err.Error(), "\n") {
+		t.Errorf("expected one line, got %q", err.Error())
+	}
+	if d.starter.killedCount() != 1 {
+		t.Errorf("expected the process to be killed once, it was killed %d time(s)", d.starter.killedCount())
+	}
+	text, _ := d.records.ReadRunFile(context.Background(), "mw-x.1", application.CheckPartFileName(1, 1))
+	if lines := strings.Split(text, "\n"); len(lines) < 2 || lines[1] != "hung" {
+		t.Errorf("expected the record to say the part hung, got %q", text)
+	}
+}
+
+// After a part was killed as hung the next call starts it again, with a new
+// process, and does not say it will not start it.
+func TestAfterAHungPartTheNextCallStartsItAgain(t *testing.T) {
+	d := aDetachedPartRig(t, true)
+	worker := d.starter.run
+	aSilentProcess(d)
+	d.tune = func(k *application.Check) { k.PartHungAfter = 100 * time.Millisecond }
+	if err := d.check(30 * time.Second); err == nil || !strings.Contains(err.Error(), "hung") {
+		t.Fatalf("expected the first call to tell a hung part, got %v", err)
+	}
+
+	d.starter.run = worker
+	close(d.parts.release)
+	err := d.check(30 * time.Second)
+	if err != nil {
+		t.Fatalf("expected the part started again to pass, got %v", err)
+	}
+	if strings.Contains(d.told.String(), "does not start it again") {
+		t.Errorf("expected no word of a run that is not started again, got %q", d.told.String())
+	}
+	if d.starter.startedCount() != 2 || d.parts.ranCount() != 1 {
+		t.Errorf("expected a second process to run the part, started %d process(es), ran %d time(s)", d.starter.startedCount(), d.parts.ranCount())
+	}
+	if len(d.starter.pids) != 2 || d.starter.pids[0] == d.starter.pids[1] {
+		t.Errorf("expected a new pid for the second process, got %v", d.starter.pids)
+	}
+}
+
+// A slow part that still writes is not killed: the ceiling counts from its last
+// write, not from its start.
+func TestADetachedPartThatKeepsWritingIsNotKilled(t *testing.T) {
+	d := aDetachedPartRig(t, true)
+	d.tune = func(k *application.Check) { k.PartHungAfter = 300 * time.Millisecond }
+	d.starter.run = func() {
+		stop := d.starter.stopped()
+		d.starter.mu.Lock()
+		path := d.starter.logPath
+		d.starter.mu.Unlock()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Error(err)
+			return
+		}
+		for i := 0; i < 100; i++ {
+			f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_, _ = f.WriteString("still going\n")
+			f.Close()
+			select {
+			case <-stop:
+				return
+			case <-time.After(30 * time.Millisecond):
+			}
+		}
+	}
+	t.Cleanup(func() { _ = d.starter.Kill(0) })
+
+	err := d.check(1200 * time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "is still running") {
+		t.Fatalf("expected the part to be said to be still running, got %v", err)
+	}
+	if strings.Contains(err.Error(), "hung") {
+		t.Errorf("expected a part that writes not to be said to be hung, got %q", err.Error())
+	}
+	if d.starter.killedCount() != 0 {
+		t.Errorf("expected a part that keeps writing not to be killed, it was killed %d time(s)", d.starter.killedCount())
+	}
+}
+
+// The ceiling is ten times the part's usual run when mw has one, else the fixed one.
+func TestThePartCeilingIsTenTimesItsUsualRunElseTheFixedOne(t *testing.T) {
+	if got := application.PartHungCeilingFor(3*time.Minute, 5*time.Minute); got != 30*time.Minute {
+		t.Errorf("expected ten times the usual run, got %s", got)
+	}
+	if got := application.PartHungCeilingFor(0, 5*time.Minute); got != 5*time.Minute {
+		t.Errorf("expected the fixed ceiling when no usual run is known, got %s", got)
+	}
+	if got := application.PartHungCeilingFor(0, 0); got != 20*time.Minute || application.CheckPartHungCeiling != 20*time.Minute {
+		t.Errorf("expected the named fixed ceiling of 20 minutes, got %s", got)
+	}
+}
+
+// The Check reads the usual run of the part it waits for: a part with a usual run
+// of 40ms is hung at 400ms though the fixed ceiling is far longer, and one whose
+// usual run is long is not killed at a short fixed ceiling.
+func TestACallUsesTheUsualRunOfThePartForItsCeilingAndTheFixedOneWithout(t *testing.T) {
+	d := aDetachedPartRig(t, true)
+	aSilentProcess(d)
+	d.tune = func(k *application.Check) {
+		k.PartHungAfter = time.Hour
+		k.PartExpected = func(context.Context, string, int) time.Duration { return 40 * time.Millisecond }
+	}
+	if err := d.check(30 * time.Second); err == nil || !strings.Contains(err.Error(), "hung") {
+		t.Fatalf("expected the part to be hung at ten times its usual run, got %v", err)
+	}
+
+	d = aDetachedPartRig(t, true)
+	aSilentProcess(d)
+	t.Cleanup(func() { _ = d.starter.Kill(0) })
+	d.tune = func(k *application.Check) {
+		k.PartHungAfter = 20 * time.Millisecond
+		k.PartExpected = func(context.Context, string, int) time.Duration { return time.Hour }
+	}
+	if err := d.check(300 * time.Millisecond); err == nil || !strings.Contains(err.Error(), "is still running") {
+		t.Fatalf("expected a part with a long usual run to be left running, got %v", err)
+	}
+	if d.starter.killedCount() != 0 {
+		t.Errorf("expected no kill, got %d", d.starter.killedCount())
 	}
 }

@@ -381,6 +381,24 @@ lock for 9 to 25 minutes would reverse that with no measurement of parts to say 
 should: the bench above is of the whole check of an unsplit rig, and the parts' records
 keep no times. Measuring parts is reported to the Mayor to file as a follow-up.
 
+A part run by a process of its own (`PartStarter`, mw-gq6.1029) that writes nothing
+past its ceiling is hung, not running (mw-82lb97i.12): the call that waits for it kills
+the process and everything it started (`PartStarter.Kill` takes the whole process
+group: the worker is sent SIGTERM so that it stops its command, whose group is its
+own, and the group is then killed), keeps the part's record as `hung`, and ends in one
+line, "part N of M (name) hung on <host>: no output for <time>", naming `mw check
+<story> --part N`, which starts the part again. "Writes" is the part's out file
+(`CheckPartOutFileName`) or `check-<attempt>-part-<n>.prog`, the file a part worker
+copies what its command prints to as it prints it (`WithRunProgress`, `rig.runLine`),
+growing; a slow part that prints is never killed. The ceiling (`PartHungCeilingFor`) is
+ten times the part's usual run on this host (`Check.PartExpected`, the median of its
+last passing runs) when mw has one, else the fixed `CheckPartHungCeiling` of 20
+minutes (`Check.PartHungAfter` in a test). Not under the ceiling: a part run in the
+call itself (a part that takes the merge slot, which the tool call's own limit ends),
+the changed specs' process (`SpecsStarter`) and a `--background` check, which queue
+for the slot and gate lock for up to 40 minutes and write nothing while they wait, so
+silence is not a hang there.
+
 A part does wait for a calm host, as a whole check does (`Check.calmForPart`,
 mw-gq6.987): before it starts, and before its slot, up to the same nine minutes (what
 the wait leaves is what the slot is waited for in), saying every minute that it is

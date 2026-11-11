@@ -233,6 +233,15 @@ func (c *Checks) runLineWith(ctx context.Context, rig, dir, command string, extr
 	return application.Checked{}, fmt.Errorf("running `%s` in %s: %w: %s", command, dir, err, application.RecentLines(output, 10))
 }
 
+// quietWriter is a writer whose errors are not reported: a sink for progress must
+// not end the copy of the output it is a copy of.
+type quietWriter struct{ w io.Writer }
+
+func (q quietWriter) Write(p []byte) (int, error) {
+	_, _ = q.w.Write(p)
+	return len(p), nil
+}
+
 // killGrace is how long a command that has been told to stop is given to let go
 // of what it printed before mw stops waiting for it.
 const killGrace = time.Second
@@ -297,7 +306,13 @@ func runLine(ctx context.Context, shell, command, dir string, nice int, env []st
 	var out bytes.Buffer
 	copied := make(chan struct{})
 	go func() {
-		_, _ = io.Copy(&out, read)
+		var into io.Writer = &out
+		if progress := application.RunProgressOf(ctx); progress != nil {
+			// Copied as it comes, so a caller can tell a command at work from a hung one
+			// (mw-82lb97i.12); a write that fails does not stop the output being read.
+			into = io.MultiWriter(&out, quietWriter{progress})
+		}
+		_, _ = io.Copy(into, read)
 		close(copied)
 	}()
 

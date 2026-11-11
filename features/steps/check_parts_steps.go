@@ -168,6 +168,8 @@ func (p *clockedPart) Start(context.Context, string, int, string) (int, error) {
 	return 4242, nil
 }
 
+func (p *clockedPart) Kill(int) error { return nil }
+
 func (p *clockedPart) Alive(int) bool {
 	if p.clock.peek().Sub(p.began) < p.runsFor {
 		return true

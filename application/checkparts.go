@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 )
@@ -73,6 +74,9 @@ type CheckRecords interface {
 type PartStarter interface {
 	Start(ctx context.Context, storyID string, part int, logPath string) (pid int, err error)
 	Alive(pid int) bool
+	// Kill stops the process Start returned and everything it started, its whole
+	// process group, and returns once it is gone (mw-82lb97i.12).
+	Kill(pid int) error
 }
 
 // CheckPartPoll is how often a call that waits for a detached part looks at it.
@@ -100,6 +104,10 @@ const (
 	// its own that ended in an error without a result; the lines after it say the
 	// error, which the next call tells.
 	partHandedBack = "handed-back"
+	// partHung is the second line of the record of a part whose process wrote
+	// nothing past its ceiling and was killed; the line after it says so
+	// (mw-82lb97i.12).
+	partHung = "hung"
 )
 
 // CheckPartHeldFileName is the name of the record of the waits of part n of a
@@ -274,6 +282,14 @@ func (k Check) runPartKeeping(ctx context.Context, report CheckReport, c *closeO
 		fmt.Fprintf(k.Out, "  part    expected about %s, %s left in this call\n", gateWaited(fit.expected), gateWaited(fit.left()))
 	}
 	ranFrom := time.Now()
+	if k.PartWorker && k.Logs != nil {
+		// What the part prints is copied to a file as it prints it, which is how a
+		// call waiting for this process tells work from a hang.
+		if progress, err := os.OpenFile(k.Logs.RunFile(c.id, CheckPartProgressFileName(report.Attempt, k.Part)), os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644); err == nil {
+			defer progress.Close()
+			ctx = WithRunProgress(ctx, progress)
+		}
+	}
 	checked, err := k.Parts.RunLine(ctx, c.path.Rig, c.worktree, part.Command)
 	if err != nil {
 		return report, fmt.Errorf("checking %s: %s could not be run: %w", c.id, label, err)
