@@ -10,7 +10,7 @@ import (
 
 // The changed specs of a whole check that outrun the Builder's foreground call
 // (mw-gq6.988). A rig's changed specs can take 25 minutes on a loaded host, and the
-// call a Builder runs mw check in is cut off at 590 seconds, with the specs and
+// call a Builder runs mw check in is cut off at 600 seconds (the default cap), with the specs and
 // their verdict. A foreground whole check therefore hands the specs to a process of
 // its own (SpecsStarter), as a --part that takes no merge slot is (mw-gq6.1029),
 // and waits for it for what is left of the call. The process takes the rig's merge

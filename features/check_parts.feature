@@ -137,6 +137,21 @@ Feature: Checking a rig whose gate is split into parts
     And the check part error says: mw check mw-gq6.1 --part 1
     And the check part error says: not a failure of the part
 
+  Scenario: A part that outlasts 540 seconds ends the call with a line to run it again, as today (mw-t5shinh.14)
+    Given the part "unit 1/2" runs for 600 seconds on the call's clock
+    When a session checks "mw-gq6.1" part 2 in one foreground call
+    Then the check part fails
+    And the check part error says: part 2 of 3 (unit 1/2) is still running
+    And the check part error says: mw check mw-gq6.1 --part 2
+
+  Scenario: A part that outlasts 540 seconds is waited for in the same call when the rig gave its Builders a 55 minute call (mw-t5shinh.14)
+    Given the call's BASH_MAX_TIMEOUT_MS is "3300000"
+    And the part "unit 1/2" runs for 600 seconds on the call's clock
+    When a session checks "mw-gq6.1" part 2 in one foreground call
+    Then the check part passes
+    And the check prints: part 2 of 3 (unit 1/2) passed
+    And the parts that ran, in order, were: unit-1
+
   Scenario: A rig whose gate is not split refuses --part
     Given the rig's gate is not split into parts
     When a session checks "mw-gq6.1" part 1

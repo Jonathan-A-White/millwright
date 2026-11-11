@@ -215,7 +215,8 @@ which is one try, not a wait. The tests themselves take as long as they take, an
 not under it.
 
 How long the deadline is depends on whether the call can outlast a Builder's tool
-call, which is cut off at 590 seconds with no words (mw-gq6.939):
+call, which is cut off at 600 seconds with no words (mw-gq6.939); that is the harness's default cap, which
+`BASH_MAX_TIMEOUT_MS` raises (see *A rig's longer call* below):
 
 - **Foreground, no `--wait`** (what the formulas tell a Builder to run): the deadline is
   `CheckPartSlotWait`, 9 minutes. A wait that runs out keeps the check's place in the
@@ -227,7 +228,7 @@ call, which is cut off at 590 seconds with no words (mw-gq6.939):
   as many times as the session's time allows, and hands back (a comment naming the
   holder) only when the session's turn cap nears. The gate itself is not under the
   deadline, so a check that won the gate lock after a long wait could start a gate
-  the call cannot finish: it is then cut off at 590 seconds with the lock held
+  the call cannot finish: it is then cut off at 600 seconds with the lock held
   (mw-gq6.940). So when the lock is won and the rig's usual gate on this host (the
   median of the last gates in the vault's bench lines, `GateExpectedFor`) is more than
   what is left of `CheckCallBudget`, 540 seconds from the check's start, the check
@@ -249,7 +250,7 @@ call, which is cut off at 590 seconds with no words (mw-gq6.939):
   limit was reached, naming the holder, and that the Builder hands back at once and
   does not run it again (`Check.HandBackAtOnce`): no place is kept. `--background`
   detaches the check with `--wait` 40m (the log is the story's `check-N.log`).
-- **`mw check --part N`** is run one call per part to fit the 590 seconds and keeps
+- **`mw check --part N`** is run one call per part to fit the 600 seconds and keeps
   `CheckPartSlotWait` and the kept place whether or not `--wait` is given; its line is
   that part's name, *did not start*, and the same words. A part that passed keeps how
   long it took, by part number and host, in the story's run
@@ -265,6 +266,16 @@ call, which is cut off at 590 seconds with no words (mw-gq6.939):
   with nothing run). A part with no figure yet, one whose time is longer than a whole
   call, or one that needs no merge slot (nothing to wait for, so the whole call is left),
   is started as it always was (mw-gq6.944).
+
+**A rig's longer call** (mw-t5shinh.14). The 600 seconds are the harness's default: Claude Code reads
+`BASH_MAX_TIMEOUT_MS` as the cap on a foreground Bash call. A rig's file may say `builder_call = "55m"`
+(10m to 55m, `domain.EpicRequirements.BuilderCall`); a story's session on that rig is started with the
+variable set to it (`claude.WithBuilderCalls`; a seat's session is not given it). A foreground
+`mw check` reads the variable from its own environment (`application.CheckCallLimitsFor`): when it
+is above 600000 the call budget (`Check.CallBudget`) is the call less 50 seconds, and the waits
+(`Check.PartSlotWait`: slot, gate lock, calm host, a part or the specs still running) may spend it;
+unset, empty, not a number or no larger than 600000, every value is the one above (540 s, 9 minutes).
+The kept place stays 10 minutes.
 
 A place is kept by the queue itself (`infrastructure/ticketq`): the ticket of a waiter
 that asked (`application.QueuePlace`, put on the wait's context) is not removed when

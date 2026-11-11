@@ -21,7 +21,7 @@ import (
 // The order is the rig's merge slot, shared, and then the gate lock: a close-out
 // that holds the slot alone and waits for the lock (mw next holds it throughout)
 // can then never wait for a check that waits for the slot. Both waits are one
-// budget, partSlotWait: under the 590 seconds a Builder's foreground call is
+// budget, partSlotWait: under the 600 seconds (the default cap) a Builder's foreground call is
 // given, ending in one line that names the holder, since when, and the command
 // to run again, not in a loop that spends the Builder's turns. The wait for a
 // calm host that follows (checkcalm.go) is the same deadline, not another: it

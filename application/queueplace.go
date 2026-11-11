@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// A foreground tool call of a Builder is cut off at 590 seconds with no words, so
+// A foreground tool call of a Builder is cut off at 600 seconds (the default cap) with no words, so
 // a mw check whose wait for the merge slot or the host's gate lock outlasts one
 // ends before that and the Builder runs it again. Run again, it must not join the
 // queue at the back, or a check queued behind a long gate would never reach the

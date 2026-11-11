@@ -92,6 +92,8 @@ type nextContext struct {
 	named        map[string]string           // the [named_tests] table this scenario's host has
 	gateParts    []application.GatePart      // the parts this scenario's host names the rig's gate as
 	partToCheck  int                         // the --part of the check being run, 0 for none
+	callEnv      string                      // BASH_MAX_TIMEOUT_MS in the environment of the check being run
+	partRunsFor  time.Duration               // how long the part outlasts on the call's injected clock
 	background   *backgroundChecks           // the checks a scenario started with --background
 	racer        string                      // the other host, landing work mid-push
 	refusal      []string                    // what the origin's hook says when it refuses a push

@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -1342,6 +1343,37 @@ func TestTheBuildersSessionIsGivenItsRigsTimingTests(t *testing.T) {
 				t.Errorf("expected no %s for a rig without timing tests, got %q", name, v)
 			}
 		}
+	}
+}
+
+// TestAStorySessionOnARigWithALongerCallIsGivenBashMaxTimeout: a rig's file may
+// give its Builders one Bash call of up to 55 minutes (builder_call), and its
+// story's session is started with BASH_MAX_TIMEOUT_MS as that many milliseconds.
+// A rig without the key, and a seat's session, are given none (mw-t5shinh.14).
+func TestAStorySessionOnARigWithALongerCallIsGivenBashMaxTimeout(t *testing.T) {
+	calls := map[string]time.Duration{"millwright": 55 * time.Minute}
+	spec, err := New(WithBuilderCalls(calls)).Session(launch(nil))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	if got := spec.Env["BASH_MAX_TIMEOUT_MS"]; got != "3300000" {
+		t.Errorf("expected BASH_MAX_TIMEOUT_MS=3300000, got %q", got)
+	}
+	for _, opts := range [][]Option{nil, {WithBuilderCalls(map[string]time.Duration{"lampas": 55 * time.Minute})}} {
+		spec, err := New(opts...).Session(launch(nil))
+		if err != nil {
+			t.Fatalf("assembling the session: %v", err)
+		}
+		if v, set := spec.Env["BASH_MAX_TIMEOUT_MS"]; set {
+			t.Errorf("expected no BASH_MAX_TIMEOUT_MS for a rig without the key, got %q", v)
+		}
+	}
+	seat, err := New(WithBuilderCalls(calls)).SeatSession(seatLaunch(nil))
+	if err != nil {
+		t.Fatalf("assembling the seat's session: %v", err)
+	}
+	if v, set := seat.Env["BASH_MAX_TIMEOUT_MS"]; set {
+		t.Errorf("expected a seat's session to have no BASH_MAX_TIMEOUT_MS, got %q", v)
 	}
 }
 
