@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // NightlySuiteJobName is the name of the follower's job that runs the nightly
@@ -23,6 +25,14 @@ const NightlySuiteJobName = "suite"
 // UTC. So the suite shares the host with gates and Builders; see
 // docs/dispatch-gates.md.
 const DefaultNightlySuiteHour = 8
+
+// SuiteEveryMin is the shortest suite_every a rig's file may name.
+const SuiteEveryMin = time.Hour
+
+// SuiteFallbackAfter is how old the newest kept result of a rig with a suite
+// host must be before the home runs its nightly all the same: a suite host that
+// is down costs one day, not the suite (mw-t5shinh.15).
+const SuiteFallbackAfter = 26 * time.Hour
 
 // SuiteRecord is the newest result a rig's suite has kept: the UTC day of the
 // file it is in (YYYY-MM-DD) and what it holds.
@@ -39,6 +49,18 @@ type SuiteHistory interface {
 	LatestSuite(ctx context.Context, rig string) (SuiteRecord, bool, error)
 }
 
+// Began is when the run of the result began, from the time the result keeps. A
+// result that keeps none, or none that reads, began at the start of its day.
+func (r SuiteRecord) Began() time.Time {
+	if t, err := time.Parse(time.RFC3339, r.Result.Started); err == nil {
+		return t.UTC()
+	}
+	if t, err := time.Parse("2006-01-02", r.Day); err == nil {
+		return t
+	}
+	return time.Time{}
+}
+
 // ParseSuiteRecord reads one kept result file, named for its day.
 func ParseSuiteRecord(day, contents string) (SuiteRecord, error) {
 	var result SuiteResult
@@ -50,6 +72,12 @@ func ParseSuiteRecord(day, contents string) (SuiteRecord, error) {
 
 // NightlySuite is the follower's job that runs the whole suite of every rig
 // whose file says nightly_suite = true, once a UTC day, on the home only.
+//
+// A rig whose file also names suite_every and suite_host is run by the follower
+// on that host instead, whenever the newest kept result began more than
+// suite_every ago and main's head is not that result's sha, at any hour; the
+// home then runs its nightly only when the newest kept result, whoever kept it,
+// began more than 26 hours ago (mw-t5shinh.15).
 //
 // From Hour on, a rig whose newest kept result is not of today's date is due.
 // The passes run the due rigs one after the other, so two suites never run
@@ -69,8 +97,14 @@ type NightlySuite struct {
 	Rules EpicRules
 	// History is where a day's kept result is looked for.
 	History SuiteHistory
-	// Home says whether this host is the home: only the home runs the suite.
+	// Home says whether this host is the home: only the home runs the nightly.
 	Home func(ctx context.Context) (bool, error)
+	// Host is this host's name, which a rig's suite_host is compared with.
+	Host string
+	// Heads reads the head of a rig's main, as the suite host asks whether it has
+	// moved since the newest result. Nil is a head that is not known to be the
+	// result's, so that the time alone decides.
+	Heads RigHeads
 	// Run does mw suite <rig> --file.
 	Run func(ctx context.Context, rig string) error
 	// Now is the clock; nil is time.Now.
@@ -78,6 +112,10 @@ type NightlySuite struct {
 
 	mu    sync.Mutex
 	tried map[string]string // rig -> the day it was last begun
+	// triedAt is when a suite host's run of a rig was last begun, for the rigs
+	// that run every suite_every: a run that keeps no result is not begun again
+	// before suite_every has passed.
+	triedAt map[string]time.Time
 }
 
 func (n *NightlySuite) now() time.Time {
@@ -110,9 +148,6 @@ func (n *NightlySuite) Job() SpringJob {
 // comes back beside the rest.
 func (n *NightlySuite) due(ctx context.Context) ([]string, error) {
 	now := n.now()
-	if now.Hour() < n.Hour {
-		return nil, nil
-	}
 	day := now.Format("2006-01-02")
 	rigs := n.Rigs
 	if n.ReadRigs != nil {
@@ -128,18 +163,34 @@ func (n *NightlySuite) due(ctx context.Context) ([]string, error) {
 
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	var due []string
+	var due, atHome []string
 	var errs []error
 	for _, name := range names {
-		if n.tried[name] == day {
-			continue
-		}
 		rules, err := n.Rules.EpicRequirements(ctx, name)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("reading the rules of %s: %w", name, err))
 			continue
 		}
 		if !rules.NightlySuite {
+			continue
+		}
+		suiteHost := rules.SuiteEvery > 0 && rules.SuiteHost != ""
+		if suiteHost && rules.SuiteHost == n.Host {
+			// The suite host runs it whenever it is due, at any hour, wherever the home is.
+			if at, ok := n.triedAt[name]; ok && now.Sub(at) < rules.SuiteEvery {
+				continue
+			}
+			moved, err := n.movedSince(ctx, name, rigs[name], rules, now)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if moved {
+				due = append(due, name)
+			}
+			continue
+		}
+		if now.Hour() < n.Hour || n.tried[name] == day {
 			continue
 		}
 		latest, kept, err := n.History.LatestSuite(ctx, name)
@@ -150,16 +201,49 @@ func (n *NightlySuite) due(ctx context.Context) ([]string, error) {
 		if kept && latest.Day >= day {
 			continue
 		}
-		due = append(due, name)
+		if suiteHost && kept && now.Sub(latest.Began()) <= SuiteFallbackAfter {
+			// Its suite host keeps the suite; the home steps in only when that host has gone quiet.
+			continue
+		}
+		atHome = append(atHome, name)
+	}
+	if len(atHome) > 0 {
+		// Home last, for it reads a file in the vault: asked only when a rig is due.
+		if at, err := n.Home(ctx); err != nil {
+			errs = append(errs, err)
+		} else if at {
+			due = append(due, atHome...)
+			sort.Strings(due)
+		}
 	}
 	if len(due) == 0 {
 		return nil, errors.Join(errs...)
 	}
-	// Home last, for it reads a file in the vault: asked only when a rig is due.
-	if at, err := n.Home(ctx); err != nil || !at {
-		return nil, errors.Join(append(errs, err)...)
-	}
 	return due, errors.Join(errs...)
+}
+
+// movedSince says whether the suite host is to run the suite of rig now: no
+// result is kept, or the newest began more than suite_every ago and main's head
+// is not its sha.
+func (n *NightlySuite) movedSince(ctx context.Context, rig, dir string, rules domain.EpicRequirements, now time.Time) (bool, error) {
+	latest, kept, err := n.History.LatestSuite(ctx, rig)
+	if err != nil {
+		return false, fmt.Errorf("reading the last suite of %s: %w", rig, err)
+	}
+	if !kept {
+		return true, nil
+	}
+	if now.Sub(latest.Began()) <= rules.SuiteEvery {
+		return false, nil
+	}
+	if n.Heads == nil {
+		return true, nil
+	}
+	head, err := n.Heads.Resolve(ctx, dir, "")
+	if err != nil {
+		return false, fmt.Errorf("reading the head of %s's main: %w", rig, err)
+	}
+	return head.Commit != latest.Result.Sha, nil
 }
 
 // run runs each due rig's suite, one at a time, marking every one of them
@@ -172,15 +256,20 @@ func (n *NightlySuite) run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		return SkippedPass("no suite run: no rig is due (none asks for it, each has today's result, or this host is not the home)")
+		return SkippedPass("no suite run: no rig is due (none asks for it, each has its result, or this host is neither the home nor a rig's suite host)")
 	}
 	day := n.now().Format("2006-01-02")
 	n.mu.Lock()
 	if n.tried == nil {
 		n.tried = map[string]string{}
 	}
+	if n.triedAt == nil {
+		n.triedAt = map[string]time.Time{}
+	}
+	at := n.now()
 	for _, name := range due {
 		n.tried[name] = day
+		n.triedAt[name] = at
 	}
 	n.mu.Unlock()
 

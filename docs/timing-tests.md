@@ -61,7 +61,9 @@ command named on one alone finds nothing to run. The gate log says
 
 The home's follower runs the tagged tests itself: the job `timing@<host>`. From
 the suite's hour (`suite_hour`, 08:00 UTC unless the config says another), after
-the night's suite of a rig that asks for one, a rig with `timing_tests` is run
+the night's suite of a rig that asks for one (a rig whose file names `suite_every`
+and `suite_host` has its suite run on that host whenever main has moved, so the
+timing run does not wait for a suite of today), a rig with `timing_tests` is run
 when a file a tagged test covers has changed between the commit of its last
 passing night and origin's main (`git diff --name-only`). A test's covered files
 are the globs of its `covers:` line, or the whole rig without one, and the test

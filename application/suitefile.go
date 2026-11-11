@@ -60,11 +60,28 @@ func (f SuiteFiler) Epic(ctx context.Context, rig string) (string, error) {
 	return strings.TrimSpace(rules.SuiteEpic), nil
 }
 
+// onSuiteHost says whether this run is the suite host's own, for a rig that
+// names suite_every and suite_host: it runs four times a day and so draws four
+// times the flakes and four mails, which two dampers hold back (mw-t5shinh.15).
+// A rig whose rules cannot be read is not damped.
+func (f SuiteFiler) onSuiteHost(ctx context.Context, rig string) bool {
+	if f.Rules == nil || f.Host == "" {
+		return false
+	}
+	rules, err := f.Rules.EpicRequirements(ctx, rig)
+	return err == nil && rules.SuiteEvery > 0 && rules.SuiteHost == f.Host
+}
+
 // File writes down what report found, under epic: for each failing file the
 // bead that holds it, and then the one mail to the Mayor. A file that could not
 // be filed does not stop the others; its failure comes back with what was done.
+//
+// A run on the rig's suite host files no new bug for a file that passed when run
+// alone (the result still records it flaky; an open bug for it is commented on
+// as always), and sends no mail when it filed nothing new and failed at nothing.
 func (f SuiteFiler) File(ctx context.Context, epic string, report SuiteReport) ([]SuiteFiled, error) {
 	result := report.Result
+	damped := f.onSuiteHost(ctx, result.Rig)
 	var filed []SuiteFiled
 	var failures []string
 	if len(result.Failing) > 0 {
@@ -77,6 +94,9 @@ func (f SuiteFiler) File(ctx context.Context, epic string, report SuiteReport) (
 				// A run alone that ran no test is the tooling's fault: no bug of the file.
 				continue
 			}
+			if _, open := openSuiteBug(detail, file.File); damped && file.Flaky && !open {
+				continue
+			}
 			one, err := f.fileOne(ctx, detail, report, file)
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("%s: %v", file.File, err))
@@ -86,13 +106,25 @@ func (f SuiteFiler) File(ctx context.Context, epic string, report SuiteReport) (
 		}
 	}
 
-	if _, err := f.Mailbox.Send(ctx, suiteMail(f.Host, report, filed, failures)); err != nil {
-		failures = append(failures, fmt.Sprintf("the mail to %s could not be sent: %v", MayorMailbox, err))
+	if !damped || len(failures) > 0 || filedNew(filed) {
+		if _, err := f.Mailbox.Send(ctx, suiteMail(f.Host, report, filed, failures)); err != nil {
+			failures = append(failures, fmt.Sprintf("the mail to %s could not be sent: %v", MayorMailbox, err))
+		}
 	}
 	if len(failures) > 0 {
 		return filed, fmt.Errorf("mw suite --file did not finish:\n  %s", strings.Join(failures, "\n  "))
 	}
 	return filed, nil
+}
+
+// filedNew says whether any of filed is a bug filed now.
+func filedNew(filed []SuiteFiled) bool {
+	for _, one := range filed {
+		if one.New {
+			return true
+		}
+	}
+	return false
 }
 
 // fileOne puts one failing file on a bead: the open one that already names it,

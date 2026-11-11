@@ -2197,6 +2197,35 @@ bugs under the `suite_epic` that name the failing files), and `· not run for <n
 result is two days old or more; a rig with no result yet says `never run`. See
 `features/suite_nightly.feature` and the SUITE scenarios of `features/status.feature`.
 
+**The suite on its own host** (mw-t5shinh.15). One run a night finds a red main with some 38 stories
+landed since the last, and holds the home's gate lock for hours. A rig's file may name two keys
+beside `nightly_suite`, both or neither (a file with one alone, or a `suite_every` under `1h`, is
+refused by the strict and the lenient read alike):
+
+```toml
+nightly_suite = true
+suite_epic    = "mw-5r3p30"
+suite_every   = "6h"        # 1h or more
+suite_host    = "desktop"   # the host (its mw config's `host`) that runs the suite
+```
+
+With both, the follower on `suite_host`, not the home's, runs `mw suite <rig> --file` at any hour of
+the day when the newest kept result began more than `suite_every` ago **and** main's head is not that
+result's sha; a rig with no result yet is run at once, and a run that kept no result is not begun
+again before `suite_every` has passed. The newest result of a day replaces the earlier ones
+(`<date>.json`), and every reader (the home's nightly, `mw status`'s `SUITE` line, the timing run)
+takes the newest whoever kept it. The home's nightly, at its hour, runs only when the newest kept
+result is **more than 26 hours old**: a suite host that is down costs one day, not the suite. The
+timing run does not wait for a suite of today for such a rig, since main may not have moved.
+
+Four runs a day draw four times the flakes and four mails, so a run on `suite_host` has two dampers:
+it files **no new bug for a file that passed when run alone** (the result still records it flaky,
+and an open bug for the file is commented on as always), and it **sends no mail when it filed
+nothing new** (a failure to file is still mailed). The home's nightly files and mails as before.
+Write the keys only when every host's `mw` holds this change: an older `mw` refuses a rig file
+with a key it does not know. The way back is to delete the two lines. See
+`features/suite_nightly.feature`.
+
 ## The Tester trial
 
 A week's trial (mw-it6qk5.5): a fresh session that only uses the app finds what

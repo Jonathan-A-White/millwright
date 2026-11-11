@@ -38,6 +38,8 @@ const (
 	ReleaseOnPathKey       = "release_on_path"
 	NightlySuiteKey        = "nightly_suite"
 	SuiteEpicKey           = "suite_epic"
+	SuiteEveryKey          = "suite_every"
+	SuiteHostKey           = "suite_host"
 	BuilderCallKey         = "builder_call"
 
 	// The capacity keys: what a deployed rig records of its limits before an
@@ -81,6 +83,8 @@ var beadID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 //	release_on_path        = true
 //	nightly_suite          = true
 //	suite_epic             = "mw-5r3p30"
+//	suite_every            = "6h"    # with suite_host: the suite runs there when main has moved, 1h or more
+//	suite_host             = "desktop"
 //	builder_call           = "55m"   # one Bash call for a Builder, 10m to 55m
 //	capacity_viewers       = 300     # expected concurrent viewers
 //	capacity_sse_cap       = 500     # the cap on server-sent-event connections
@@ -133,7 +137,7 @@ func (v *Vault) readRigFile(_ context.Context, rig string, lenient bool) (domain
 // knownKeys are the keys a rig's file has.
 var knownKeys = map[string]bool{
 	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true, UnionMergeFilesKey: true, TimingTestsKey: true,
-	PublicURLKey: true, SiteURLKey: true, HealthzURLKey: true, FilesExpectedKey: true, ReleaseOnPathKey: true, NightlySuiteKey: true, SuiteEpicKey: true, BuilderCallKey: true,
+	PublicURLKey: true, SiteURLKey: true, HealthzURLKey: true, FilesExpectedKey: true, ReleaseOnPathKey: true, NightlySuiteKey: true, SuiteEpicKey: true, SuiteEveryKey: true, SuiteHostKey: true, BuilderCallKey: true,
 	LandingKey: true, BatchEveryKey: true, BatchMinKey: true, BatchMaxKey: true,
 	BatchFixerModelKey: true, BatchFixerEffortKey: true, BatchFixerTurnsKey: true,
 	CapacityViewersKey: true, CapacitySSECapKey: true, CapacityNginxConnectionsKey: true, CapacityMemoryFreeKey: true,
@@ -246,6 +250,26 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 			requirements.SuiteEpic = epic[0]
 			continue
 		}
+		if found && key == SuiteEveryKey {
+			every, err := quotedStrings(value)
+			var parsed time.Duration
+			if err == nil && len(every) == 1 {
+				parsed, err = time.ParseDuration(every[0])
+			}
+			if err != nil || len(every) != 1 || parsed < application.SuiteEveryMin {
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = \"<1h or more>\"`, got %q", i+1, SuiteEveryKey, lines[i])
+			}
+			requirements.SuiteEvery = parsed
+			continue
+		}
+		if found && key == SuiteHostKey {
+			host, err := quotedStrings(value)
+			if err != nil || len(host) != 1 || !beadID.MatchString(host[0]) {
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = \"<host name>\"`, got %q", i+1, SuiteHostKey, lines[i])
+			}
+			requirements.SuiteHost = host[0]
+			continue
+		}
 		if found && key == PublicURLKey {
 			url, err := quotedStrings(value)
 			if err != nil || len(url) != 1 || !strings.HasPrefix(url[0], "https://") {
@@ -311,11 +335,15 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
-				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, SiteURLKey, HealthzURLKey, FilesExpectedKey, ReleaseOnPathKey, NightlySuiteKey, SuiteEpicKey, BuilderCallKey,
+			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
+				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, SiteURLKey, HealthzURLKey, FilesExpectedKey, ReleaseOnPathKey, NightlySuiteKey, SuiteEpicKey, SuiteEveryKey, SuiteHostKey, BuilderCallKey,
 				CapacityViewersKey, CapacitySSECapKey, CapacityNginxConnectionsKey, CapacityMemoryFreeKey,
 				LandingKey, BatchEveryKey, BatchMinKey, BatchMaxKey, BatchFixerModelKey, BatchFixerEffortKey, BatchFixerTurnsKey)
 		}
+	}
+	if (requirements.SuiteEvery > 0) != (requirements.SuiteHost != "") {
+		return requirements, nil, fmt.Errorf("%s and %s go together: a rig's file names both or neither (got %s only)", SuiteEveryKey, SuiteHostKey,
+			map[bool]string{true: SuiteEveryKey, false: SuiteHostKey}[requirements.SuiteEvery > 0])
 	}
 	return requirements, unknown, nil
 }
