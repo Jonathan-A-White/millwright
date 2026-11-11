@@ -36,10 +36,19 @@ func TestTheGateStepOfEachFormulaNamesTheForegroundWay(t *testing.T) {
 				continue
 			}
 			found = true
-			for _, want := range []string{"timeout 590 make test", "mw check {{story}}", "mw check {{story}} --part N", "Never nohup", "tail --pid", "sleep"} {
+			for _, want := range []string{"mw check {{story}}", "the largest timeout the Bash tool's own description allows", "mw check {{story}} --part N", "Never nohup", "tail --pid", "sleep"} {
 				if !strings.Contains(s.Description, want) {
 					t.Errorf("%s step %q: expected the description to contain %q, got: %s", tc.file, tc.step, want, s.Description)
 				}
+			}
+			// A rig may give its Builders a call far longer than 590 seconds
+			// (mw-t5shinh.14): the step wraps nothing in timeout.
+			if strings.Contains(s.Description, "timeout 590") {
+				t.Errorf("%s step %q: expected no `timeout 590` wrapper, got: %s", tc.file, tc.step, s.Description)
+			}
+			// The step is read on every request of the session, so it stays short.
+			if tc.file == "tdd-feature.formula.json" && len(s.Description) >= 2200 {
+				t.Errorf("%s step %q: expected under 2,200 characters, got %d", tc.file, tc.step, len(s.Description))
 			}
 		}
 		if !found {
