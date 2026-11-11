@@ -340,3 +340,28 @@ func TestBoostTablesDriftNamesTheSessionDenyMissingDifferentOrGone(t *testing.T)
 		t.Errorf("a level deny should be no drift, got %v", got)
 	}
 }
+
+func TestBoostTablesHeldDifferentlyNamesADifferingSessionDeny(t *testing.T) {
+	vault, _ := BoostTablesOf(mustParse(t, homeWithSession))
+	other, _ := BoostTablesOf(mustParse(t, "[session]\ndeny = [\"Bash(scp *)\"]\n"))
+	reordered, _ := BoostTablesOf(mustParse(t, "[session]\ndeny = [\"Read(~/.ssh/**)\", \"Bash(scp *)\"]\n"))
+	for name, here := range map[string]BoostTables{"fewer rules": other, "other order": reordered} {
+		got := BoostTablesHeldDifferently(here, vault)
+		want := []BoostHeld{{Key: "session.deny", Here: SessionDenyLiteral(here.SessionDeny), Vault: SessionDenyLiteral(vault.SessionDeny)}}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: got %+v, want %+v", name, got, want)
+		}
+	}
+	// A level list, a Boost without the key and a vault without it are left out:
+	// sync levels what a Boost lacks.
+	for name, c := range map[string]struct{ here, vault BoostTables }{
+		"level":       {vault, vault},
+		"boost lacks": {BoostTables{}, vault},
+		"vault lacks": {vault, BoostTables{}},
+		"both lack":   {BoostTables{}, BoostTables{}},
+	} {
+		if got := BoostTablesHeldDifferently(c.here, c.vault); len(got) != 0 {
+			t.Errorf("%s: expected nothing held differently, got %+v", name, got)
+		}
+	}
+}

@@ -147,6 +147,11 @@ func (b *BoostConfig) probeBoost() (application.Verdict, string) {
 				h.Key, h.Here, h.Vault, b.Config.Path()))
 			continue
 		}
+		if h.Key == domain.SessionTable+"."+domain.SessionDenyKey {
+			// Here and Vault are TOML arrays already; the shell gets the vault's whole.
+			held = append(held, fmt.Sprintf("%s: here %s, vault %s (fix: mw config set %s '%s')", h.Key, h.Here, h.Vault, h.Key, h.Vault))
+			continue
+		}
 		held = append(held, fmt.Sprintf("%s: here %q, vault %q (fix: mw config set %s %q)", h.Key, h.Here, h.Vault, h.Key, h.Vault))
 	}
 	if len(held) == 0 {

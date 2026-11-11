@@ -163,3 +163,30 @@ func TestBoostConfigOnABoostIsOkWithNothingToCompare(t *testing.T) {
 		t.Fatalf("expected ok with no vault file, got %s (%s)", verdict, reason)
 	}
 }
+
+func TestBoostConfigOnABoostIsFaultyForADifferingSessionDeny(t *testing.T) {
+	vault := "[session]\ndeny = [\"Bash(scp *)\", \"Read(~/.ssh/**)\"]\n"
+	for name, here := range map[string]string{
+		"fewer rules": "[session]\ndeny = [\"Bash(scp *)\"]\n",
+		"other order": "[session]\ndeny = [\"Read(~/.ssh/**)\", \"Bash(scp *)\"]\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			verdict, reason := boostConfigOnABoost(t, here, vault).Probe(context.Background())
+			if verdict != application.DoctorFaulty {
+				t.Fatalf("expected faulty, got %s (%s)", verdict, reason)
+			}
+			for _, want := range []string{"session.deny", `["Bash(scp *)", "Read(~/.ssh/**)"]`, `mw config set session.deny '["Bash(scp *)", "Read(~/.ssh/**)"]'`} {
+				if !strings.Contains(reason, want) {
+					t.Errorf("reason lacks %q: %s", want, reason)
+				}
+			}
+		})
+	}
+	// A Boost without the key, or with one the vault lacks, is left to sync.
+	if verdict, reason := boostConfigOnABoost(t, "[tests]\n", vault).Probe(context.Background()); verdict != application.DoctorOK {
+		t.Errorf("a Boost without the key should be ok, got %s (%s)", verdict, reason)
+	}
+	if verdict, reason := boostConfigOnABoost(t, vault, "[tests]\n").Probe(context.Background()); verdict != application.DoctorOK {
+		t.Errorf("a vault without the key should be ok, got %s (%s)", verdict, reason)
+	}
+}
