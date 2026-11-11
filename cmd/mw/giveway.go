@@ -55,8 +55,12 @@ func hostGiveWay(host string) (application.GiveWay, bool) {
 	if err != nil {
 		stale = config.DefaultGiveWayStale
 	}
+	// A host whose factory runs its sessions on a tmux server of its own (tmux -L)
+	// is seen as well as the default server. A config that cannot be read leaves
+	// the sockets the environment names, and the default server.
+	sockets, _ := config.GiveWayTmuxSockets()
 	way := application.GiveWay{
-		Processes: procs.Freezer{}, Panes: giveway.Panes{}, Marker: store, Log: store,
+		Processes: procs.Freezer{}, Panes: giveway.ServersFor(sockets), Marker: store, Log: store,
 		Load: hostload.Proc{}, Host: host, Stale: stale, Self: os.Getpid(), By: "mw@" + host,
 	}
 	if self, err := os.Executable(); err == nil {
@@ -172,7 +176,12 @@ func newGiveWayCmd() *cobra.Command {
 			"  mw giveway on      stops (SIGSTOP) every process below every Builder session's pane (not the pane's own, which tmux resumes) and every process of\n" +
 			"                     the factory's apart scopes (landings, suites, mw-heavy) on this host, except each\n" +
 			"                     session's `mw next --heartbeat` (it keeps the story's lease), the tmux server and\n" +
-			"                     itself, and passes over the table again until nothing new is found. It writes the\n" +
+			"                     itself, and passes over the table again until nothing new is found. It lists the panes of\n" +
+			"                     every tmux server the host names (the default, $MW_TMUX_SOCKET, giveway_tmux_sockets in the config)\n" +
+			"                     and also stops a Builder's process left behind in a session of its own (a worktree for cwd, or\n" +
+			"                     MW_STORY in its environment). A mw dispatch or mw millhand tick already running, and what it\n" +
+			"                     started, is only LOWERED (nice 19, io idle), never stopped (a stop mid-sync could wedge the sync\n" +
+			"                     lock); status names each until it ends. It writes the\n" +
 			"                     marker (giveway.json) first and one JSON line to giveway.log last, with took_ms, the\n" +
 			"                     sessions and processes stopped, MemAvailable and load1 and every --note k=v. Before the\n" +
 			"                     last stop it makes no beads call, no ssh and no network call. A second `on` only renews\n" +

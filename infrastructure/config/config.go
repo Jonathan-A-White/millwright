@@ -14,6 +14,7 @@
 //	dispatch_sync_tries = 3
 //	dispatch_sync_wait = "15s"
 //	giveway_stale = "15m"              # how long a give-way marker may go unrenewed before the next dispatch tick lifts it
+//	giveway_tmux_sockets = ["mw-seat"]  # tmux -L servers, besides the default and $MW_TMUX_SOCKET, whose panes mw giveway looks at
 //	push_tries = 4
 //	push_wait_seconds = 20
 //	millhand_routine_model = "sonnet"
@@ -139,6 +140,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -166,6 +168,10 @@ const (
 	DispatchSyncWaitEnv  = "MW_DISPATCH_SYNC_WAIT"
 	GiveWayStaleEnv      = "MW_GIVEWAY_STALE"
 	GiveWayDirEnv        = "MW_GIVEWAY_DIR"
+	// GiveWayTmuxSocketsEnv and TmuxSocketEnv name tmux servers (tmux -L) that give
+	// way looks at for the panes of Builder sessions, besides the default server.
+	GiveWayTmuxSocketsEnv = "MW_GIVEWAY_TMUX_SOCKETS"
+	TmuxSocketEnv         = "MW_TMUX_SOCKET"
 
 	PushTriesEnv       = "MW_PUSH_TRIES"
 	PushWaitSecondsEnv = "MW_PUSH_WAIT_SECONDS"
@@ -4161,6 +4167,30 @@ func GiveWayStale() (time.Duration, error) {
 		return 0, fmt.Errorf("the time a give-way marker may go unrenewed is %s: set it to more than zero", stale)
 	}
 	return stale, nil
+}
+
+// GiveWayTmuxSockets reports the tmux servers, besides tmux's default one, whose
+// panes give way looks at to find the Builder sessions: $MW_TMUX_SOCKET (the
+// server the seat commands work on) and then the list in $MW_GIVEWAY_TMUX_SOCKETS
+// (comma-separated) if it is set, otherwise the root-table `giveway_tmux_sockets`
+// key of ~/.config/mw/config.toml, as `giveway_tmux_sockets = ["mw-seat"]`. A name
+// is kept once; none named is none.
+func GiveWayTmuxSockets() ([]string, error) {
+	var sockets []string
+	add := func(names []string) {
+		for _, name := range names {
+			if name = strings.TrimSpace(name); name != "" && !slices.Contains(sockets, name) {
+				sockets = append(sockets, name)
+			}
+		}
+	}
+	add([]string{os.Getenv(TmuxSocketEnv)})
+	said, err := optionalSetting("giveway_tmux_sockets", GiveWayTmuxSocketsEnv, "")
+	if err != nil {
+		return sockets, err
+	}
+	add(list(said))
+	return sockets, nil
 }
 
 // GiveWayDir is where this host keeps giveway.json and giveway.log:

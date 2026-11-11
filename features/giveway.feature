@@ -65,3 +65,17 @@ Feature: A host gives way to the person at its screen
     Then mw giveway is refused, saying the home never gives way
     And no process is stopped
     And the give-way marker is gone
+
+  Scenario: a dispatch already running is lowered, not stopped, and status names it
+    Given a mw dispatch is running in a service, with a build it started
+    When mw giveway on runs
+    Then the dispatch and its build are not stopped
+    And the dispatch and its build are lowered
+    And mw giveway status names the dispatch as lowered
+
+  Scenario: a Builder's tool left behind in a session of its own is stopped and off continues it
+    Given a Builder's tool left behind by its parent, in a session of its own, with a worktree for its cwd
+    When mw giveway on runs
+    Then the left-behind tool is stopped
+    When mw giveway off runs
+    Then no process is stopped

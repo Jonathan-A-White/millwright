@@ -33,6 +33,10 @@ type GiveWayProcess struct {
 	// Scope says the process sits in a systemd-run scope, which is where the
 	// factory puts its landings, suites and mw-heavy commands, outside any pane.
 	Scope bool
+	// Cwd is where the process works (its /proc cwd link); empty when it cannot be
+	// read. Story is the MW_STORY of its environment, which a Builder's session sets
+	// for everything it starts, empty when there is none or it cannot be read.
+	Cwd, Story string
 }
 
 // stopped is whether the process is stopped already, or ended.
@@ -41,14 +45,17 @@ func (p GiveWayProcess) stopped() bool { return p.State == "T" || p.State == "t"
 func (p GiveWayProcess) gone() bool { return p.State == "Z" || p.State == "X" || p.State == "x" }
 
 // GiveWayProcesses is the host's process table, and the two signals give way
-// sends. Stop and Continue send only to the process whose pid AND start time
-// match: the bool is whether a signal went.
+// sends, and the lowering of a process. Stop, Continue and Lower reach only the
+// process whose pid AND start time match: the bool is whether one did.
 type GiveWayProcesses interface {
 	List(ctx context.Context) ([]GiveWayProcess, error)
 	// Stop sends SIGSTOP.
 	Stop(ctx context.Context, pid int, start string) (bool, error)
 	// Continue sends SIGCONT.
 	Continue(ctx context.Context, pid int, start string) (bool, error)
+	// Lower renices the process, every thread of it, to 19 and sets its io class to
+	// idle. It is not undone: a process cannot take its priority back.
+	Lower(ctx context.Context, pid int, start string) (bool, error)
 }
 
 // GiveWayPane is one tmux pane: its session, the pid of the process it runs
@@ -86,6 +93,10 @@ type GiveWayMarker struct {
 	Seen     time.Time        `json:"seen"`
 	Sessions []GiveWaySession `json:"sessions,omitempty"`
 	Stopped  []GiveWayStopped `json:"stopped,omitempty"`
+	// Lowered are the factory's own entries found running (a mw dispatch, a mw
+	// millhand tick) and what they started: lowered, not stopped. mw giveway status
+	// names those still running.
+	Lowered []GiveWayStopped `json:"lowered,omitempty"`
 }
 
 // GiveWayMarkers keeps the marker in the host's own state directory. Nothing
@@ -116,6 +127,7 @@ type GiveWayEntry struct {
 	GaveWayMs *int64 `json:"gave_way_ms,omitempty"`
 	Sessions  *int   `json:"sessions,omitempty"`
 	Stopped   *int   `json:"stopped,omitempty"`
+	Lowered   *int   `json:"lowered,omitempty"`
 	Held      *int   `json:"held,omitempty"`
 	Continued *int   `json:"continued,omitempty"`
 	// MemAvailableMB and Load1 are read from /proc after the last stop.
@@ -233,17 +245,100 @@ func isTmux(argv []string) bool {
 	return strings.HasPrefix(name, "tmux")
 }
 
+// factoryEntry says whether a command line is one of the factory's own commands
+// that runs outside any pane, and which: "dispatch", "millhand tick" and the like.
+// hard is true for the two that a stop could hurt (a stop in the middle of a sync
+// could wedge the sync lock) and that give way only lowers, whatever else would
+// stop them.
+func factoryEntry(argv []string) (name string, hard bool) {
+	if len(argv) < 2 {
+		return "", false
+	}
+	program := argv[0]
+	if i := strings.LastIndex(program, "/"); i >= 0 {
+		program = program[i+1:]
+	}
+	if program != "mw" {
+		return "", false
+	}
+	switch argv[1] {
+	case "dispatch":
+		return "dispatch", true
+	case "millhand":
+		if len(argv) > 2 && argv[2] == "tick" {
+			return "millhand tick", true
+		}
+		return "millhand", true
+	case "suite", "land", "deputy":
+		return argv[1], false
+	case "after-landing":
+		return argv[1], false
+	case "grist":
+		if len(argv) > 2 && argv[2] == "grind" {
+			return "grist grind", false
+		}
+	case "sleep":
+		if len(argv) > 2 && argv[2] == "pass" {
+			return "sleep pass", false
+		}
+	case "events":
+		if len(argv) > 2 && argv[2] == "follow" {
+			return "events follow", false
+		}
+	}
+	return "", false
+}
+
+// builderMarked is whether a process carries the mark of a Builder's session: the
+// story in its environment (MW_STORY, which the session sets for all it starts) or
+// a story worktree for its cwd.
+func builderMarked(p GiveWayProcess) bool {
+	if p.Story != "" {
+		return true
+	}
+	return strings.Contains(p.Cwd+"/", "/"+WorktreesDir+"/")
+}
+
+// reparented is whether a process was left behind by its parent: init (or the
+// user's systemd, which adopts orphans in its place) is its parent now, or its
+// parent is not in the table (it is another user's, as init is). A person's own
+// terminal, which has a worktree for its cwd, is not.
+func reparented(p GiveWayProcess, byPid map[int]GiveWayProcess) bool {
+	if p.Ppid <= 1 {
+		return true
+	}
+	parent, there := byPid[p.Ppid]
+	if !there {
+		return true
+	}
+	if len(parent.Argv) == 0 {
+		return false
+	}
+	name := parent.Argv[0]
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	return name == "systemd" || name == "init"
+}
+
 // giveWayPlan is who is to give way, read from one look at the table.
 type giveWayPlan struct {
 	// targets are the processes to stop, parents before children.
-	targets  []GiveWayProcess
+	targets []GiveWayProcess
+	// lowered are the processes to lower and not stop: the factory's own entries
+	// found running, and what they started.
+	lowered  []GiveWayProcess
 	sessions []GiveWaySession
 }
 
 // plan picks the processes that give way from one listing: everything below the
 // panes of the Builder sessions (or of the named sessions) and, when no sessions
-// are named, everything in an apart scope; never a heartbeat, a tmux process
-// or this process and the ones it descends from.
+// are named, everything in an apart scope and what a Builder's tool started and
+// left behind in a session of its own (found by a worktree for cwd, or the story
+// in its environment); never a heartbeat, a tmux process or this process and the
+// ones it descends from. A mw dispatch or millhand tick found running, and what
+// it started, is lowered, not stopped; so is the rest of the factory's own commands
+// (events follow, suite, grist grind...) unless they are stopped for another reason.
 func (g GiveWay) plan(table []GiveWayProcess, panes []GiveWayPane, only []string) giveWayPlan {
 	byPid := map[int]GiveWayProcess{}
 	children := map[int][]int{}
@@ -317,10 +412,44 @@ func (g GiveWay) plan(table []GiveWayProcess, panes []GiveWayPane, only []string
 			chosen[pid] = true
 		}
 	}
+	hardLowered, softLowered := map[int]bool{}, map[int]bool{}
 	if len(named) == 0 {
 		for _, p := range table {
 			if p.Scope {
 				chosen[p.Pid] = true
+			}
+		}
+		// What is under any pane, a Builder's or not, is a pane's business; what is
+		// marked as a Builder's and is under none was left behind by a tool whose
+		// parent ended, and is stopped with what it started.
+		underPane := map[int]bool{}
+		for _, pane := range panes {
+			if pane.Dead || pane.Pid <= 0 {
+				continue
+			}
+			walk(pane.Pid, underPane)
+			for _, pid := range bySid[pane.Pid] {
+				walk(pid, underPane)
+			}
+		}
+		orphaned := map[int]bool{}
+		for _, p := range table {
+			if !underPane[p.Pid] && builderMarked(p) && reparented(p, byPid) {
+				walk(p.Pid, orphaned)
+			}
+		}
+		for pid := range orphaned {
+			if !underPane[pid] {
+				chosen[pid] = true
+			}
+		}
+		for _, p := range table {
+			if name, hard := factoryEntry(p.Argv); name != "" && !spared[p.Pid] {
+				if hard {
+					walk(p.Pid, hardLowered)
+				} else {
+					walk(p.Pid, softLowered)
+				}
 			}
 		}
 	}
@@ -333,13 +462,18 @@ func (g GiveWay) plan(table []GiveWayProcess, panes []GiveWayPane, only []string
 		}
 	}
 	for _, p := range table {
-		if !chosen[p.Pid] || spared[p.Pid] || roots[p.Pid] || beating[p.Pid] || isTmux(p.Argv) {
+		if spared[p.Pid] || roots[p.Pid] || beating[p.Pid] || isTmux(p.Argv) {
 			continue
 		}
-		if _, ok := byPid[p.Pid]; !ok {
+		if hardLowered[p.Pid] || (softLowered[p.Pid] && !chosen[p.Pid]) {
+			if !p.gone() {
+				plan.lowered = append(plan.lowered, p)
+			}
 			continue
 		}
-		plan.targets = append(plan.targets, p)
+		if chosen[p.Pid] {
+			plan.targets = append(plan.targets, p)
+		}
 	}
 	// Parents before children, so that a stopped parent forks nothing more.
 	depth := func(p GiveWayProcess) int {
@@ -397,6 +531,12 @@ func (g GiveWay) On(ctx context.Context, req GiveWayRequest) error {
 		return fmt.Errorf("listing the tmux panes: %w", err)
 	}
 	signalled := map[procKey]GiveWayStopped{}
+	lowered := map[procKey]GiveWayStopped{}
+	// What an earlier on lowered is lowered still, for good: not done again.
+	lowerDone := map[procKey]bool{}
+	for _, l := range marker.Lowered {
+		lowerDone[procKey{l.Pid, l.Start}] = true
+	}
 	sessions := map[string]GiveWaySession{}
 	lastStop := start
 	for pass := 0; pass < giveWayPasses; pass++ {
@@ -423,6 +563,21 @@ func (g GiveWay) On(ctx context.Context, req GiveWayRequest) error {
 				fresh++
 			}
 		}
+		// The stops come first: they are what the person at the screen waits for. A
+		// lowering is not undone, so it is done once per process.
+		for _, p := range plan.lowered {
+			if _, done := lowered[keyOf(p)]; done || lowerDone[keyOf(p)] || p.gone() {
+				continue
+			}
+			sent, err := g.Processes.Lower(ctx, p.Pid, p.Start)
+			if err != nil {
+				return fmt.Errorf("lowering process %d: %w", p.Pid, err)
+			}
+			if sent {
+				lowered[keyOf(p)] = GiveWayStopped{Pid: p.Pid, Start: p.Start, Cmd: commandHead(p.Argv)}
+				fresh++
+			}
+		}
 		if fresh == 0 {
 			break
 		}
@@ -432,9 +587,13 @@ func (g GiveWay) On(ctx context.Context, req GiveWayRequest) error {
 	if !scoped {
 		table, _ := g.Processes.List(ctx)
 		alive := map[procKey]bool{}
+		running := map[procKey]bool{}
 		for _, p := range table {
 			if p.stopped() {
 				alive[keyOf(p)] = true
+			}
+			if !p.gone() {
+				running[keyOf(p)] = true
 			}
 		}
 		var kept []GiveWayStopped
@@ -454,6 +613,21 @@ func (g GiveWay) On(ctx context.Context, req GiveWayRequest) error {
 			kept = append(kept, signalled[k])
 		}
 		marker.Stopped = kept
+		var stillLowered []GiveWayStopped
+		for _, l := range marker.Lowered {
+			if running[procKey{l.Pid, l.Start}] {
+				stillLowered = append(stillLowered, l)
+			}
+		}
+		lowKeys := make([]procKey, 0, len(lowered))
+		for k := range lowered {
+			lowKeys = append(lowKeys, k)
+		}
+		sort.Slice(lowKeys, func(i, j int) bool { return lowKeys[i].pid < lowKeys[j].pid })
+		for _, k := range lowKeys {
+			stillLowered = append(stillLowered, lowered[k])
+		}
+		marker.Lowered = stillLowered
 		names := make([]string, 0, len(sessions))
 		for n := range sessions {
 			names = append(names, n)
@@ -484,6 +658,7 @@ func (g GiveWay) On(ctx context.Context, req GiveWayRequest) error {
 	if !scoped {
 		entry.Held = intp(len(marker.Stopped))
 		entry.Sessions = intp(len(marker.Sessions))
+		entry.Lowered = intp(len(lowered))
 	}
 	g.reading(ctx, &entry)
 	if err := g.append(ctx, entry); err != nil {
@@ -494,6 +669,9 @@ func (g GiveWay) On(ctx context.Context, req GiveWayRequest) error {
 	} else {
 		g.say("%s gives way since %s: %d processes stopped now (%d held), %d sessions, in %d ms", g.Host,
 			marker.Since.UTC().Format(time.RFC3339), len(signalled), len(marker.Stopped), len(marker.Sessions), took.Milliseconds())
+		if len(marker.Lowered) > 0 {
+			g.say("%d factory processes found running are lowered, not stopped (%d new): mw giveway status names them", len(marker.Lowered), len(lowered))
+		}
 	}
 	return nil
 }
@@ -696,6 +874,36 @@ func (g GiveWay) Standing(ctx context.Context, lift bool) (GiveWayStanding, bool
 	return GiveWayStanding{Since: marker.Since, By: marker.By}, true, nil
 }
 
+// sayLowered names each process the marker lowered that is still running: a
+// dispatch or tick found running when the host gave way, and what it started. It
+// says nothing of those that have ended, and nothing when the table cannot be read.
+func (g GiveWay) sayLowered(ctx context.Context, marker GiveWayMarker) {
+	if len(marker.Lowered) == 0 || g.Processes == nil {
+		return
+	}
+	table, err := g.Processes.List(ctx)
+	if err != nil {
+		return
+	}
+	running := map[procKey]bool{}
+	for _, p := range table {
+		if !p.gone() {
+			running[keyOf(p)] = true
+		}
+	}
+	first := true
+	for _, l := range marker.Lowered {
+		if !running[procKey{l.Pid, l.Start}] {
+			continue
+		}
+		if first {
+			g.say("running lowered (nice 19, io idle) and not stopped, until it ends:")
+			first = false
+		}
+		g.say("  %d %s", l.Pid, l.Cmd)
+	}
+}
+
 // Mark appends a line of event mark with the notes given: the Windows side puts
 // its own measurements in the same log.
 func (g GiveWay) Mark(ctx context.Context, notes map[string]string) error {
@@ -717,6 +925,7 @@ func (g GiveWay) Status(ctx context.Context) error {
 		if now.Sub(marker.Seen) > g.stale() {
 			g.say("the marker is stale (not renewed for over %s): the next dispatch tick lifts it", g.stale())
 		}
+		g.sayLowered(ctx, marker)
 	}
 	lines, err := g.Log.Tail(ctx, 5)
 	if err != nil {

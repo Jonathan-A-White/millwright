@@ -411,3 +411,181 @@ func TestDispatchOnAHostThatGivesWayClaimsNothingAndSaysSince(t *testing.T) {
 		t.Fatalf("last giveway.log line = %v", entry)
 	}
 }
+
+// mw-2891blf.6: a mw dispatch or a mw millhand tick that is running when the host
+// gives way (a systemd service cgroup: no pane, no run scope) is not stopped, for
+// a stop in the middle of a sync could wedge the sync lock; it and its children
+// are lowered (nice 19, ionice idle) at once, and status names them until they end.
+func TestGiveWayOnLowersARunningDispatchAndATickAndTheirBuildsAndStopsNeitherOfThem(t *testing.T) {
+	way, host, out, now := aGiveWayWorld()
+	host.Procs = append(host.Procs,
+		proc(800, 1, "S", "t800", "mw", "dispatch"),
+		proc(801, 800, "S", "t801", "git", "pull"),
+		proc(810, 1, "S", "t810", "/home/g/.local/bin/mw", "millhand", "tick"),
+		proc(811, 810, "S", "t811", "go", "build", "./cmd/mw"),
+		proc(812, 811, "R", "t812", "compile"),
+	)
+	ctx := context.Background()
+	if err := way.On(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, pid := range []int{800, 801, 810, 811, 812} {
+		if slices.Contains(host.Stopped(), pid) {
+			t.Errorf("process %d was stopped: a running dispatch or tick and its children are lowered, never stopped", pid)
+		}
+	}
+	got := slices.Clone(host.LoweredPids)
+	slices.Sort(got)
+	if want := []int{800, 801, 810, 811, 812}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("lowered %v, want %v", got, want)
+	}
+	if host.Marker == nil || len(host.Marker.Lowered) != 5 {
+		t.Fatalf("marker = %+v, want five lowered processes named", host.Marker)
+	}
+	if entry := logEntry(t, host.Lines[0]); entry["lowered"] != float64(5) {
+		t.Fatalf("log entry = %v, want lowered 5", entry)
+	}
+
+	out.Reset()
+	if err := way.Status(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"800", "mw dispatch", "810", "millhand tick", "811", "go build"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("status = %q, want it to name %q as lowered", out.String(), want)
+		}
+	}
+
+	// The tick ends and its build with it: status stops naming them.
+	var left []application.GiveWayProcess
+	for _, p := range host.Procs {
+		if p.Pid < 810 || p.Pid > 812 {
+			left = append(left, p)
+		}
+	}
+	host.Procs = left
+	out.Reset()
+	if err := way.Status(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "millhand tick") || !strings.Contains(out.String(), "mw dispatch") {
+		t.Fatalf("status = %q, want only the dispatch still named", out.String())
+	}
+
+	// A child the dispatch starts later is lowered by the next on, once.
+	host.Procs = append(host.Procs, proc(820, 800, "S", "t820", "make"))
+	host.Calls = nil
+	*now = now.Add(time.Minute)
+	if err := way.On(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(host.Calls, []string{"lower 820"}) {
+		t.Fatalf("calls = %v, want only lower 820", host.Calls)
+	}
+	if len(host.Marker.Lowered) != 3 {
+		t.Fatalf("marker lowered = %+v, want the dispatch, its first child and the new one", host.Marker.Lowered)
+	}
+}
+
+func TestGiveWayOffLeavesALoweredProcessAloneAndTheMarkerGoes(t *testing.T) {
+	way, host, _, _ := aGiveWayWorld()
+	host.Procs = append(host.Procs, proc(800, 1, "S", "t800", "mw", "dispatch"))
+	ctx := context.Background()
+	if err := way.On(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	host.Calls = nil
+	if err := way.Off(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range host.Calls {
+		if strings.HasSuffix(call, " 800") {
+			t.Fatalf("off signalled the dispatch: %v", host.Calls)
+		}
+	}
+	if host.Marker != nil {
+		t.Fatalf("marker stands after off: %+v", host.Marker)
+	}
+}
+
+// A named session is the way to try give way on a busy host: it lowers and stops
+// nothing outside the sessions.
+func TestGiveWayOnForANamedSessionLowersNothingAndStopsNoOrphan(t *testing.T) {
+	way, host, _, _ := aGiveWayWorld()
+	way.Home = &apptest.FakeHomeFile{Text: "laptop 2026-11-11T00:00:00Z mw@laptop\n"}
+	way.Host = "laptop"
+	orphan := proc(700, 1, "S", "t700", "sleep", "900")
+	orphan.Sid, orphan.Cwd = 700, "/home/g/.mw-worktrees/mw-a.1/web"
+	host.Procs = append(host.Procs, orphan, proc(800, 1, "S", "t800", "mw", "dispatch"))
+	if err := way.On(context.Background(), application.GiveWayRequest{Sessions: []string{"mw-a_1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(host.Stopped(), 700) || len(host.LoweredPids) != 0 {
+		t.Fatalf("a named session touched the rest: stopped %v lowered %v", host.Stopped(), host.LoweredPids)
+	}
+}
+
+// mw-2891blf.8: what a Builder's tool started and that was reparented to init in
+// a session of its own (setsid), in no scope, is in no pane's tree: it is found by
+// the worktree in its cwd, or by the story marker in its environment, and stopped.
+func TestGiveWayOnStopsAnOrphanedBuilderProcessInASessionOfItsOwnAndOffContinuesIt(t *testing.T) {
+	way, host, _, _ := aGiveWayWorld()
+	byCwd := proc(700, 1, "S", "t700", "node", "dev-server")
+	byCwd.Sid, byCwd.Cwd = 700, "/home/g/.mw-worktrees/mw-a.1/web"
+	byEnv := proc(710, 1, "S", "t710", "sleep", "900")
+	byEnv.Sid, byEnv.Story = 710, "mw-b.2"
+	childOfOrphan := proc(701, 700, "S", "t701", "esbuild")
+	childOfOrphan.Sid = 700
+	stranger := proc(720, 1, "S", "t720", "sleep", "900")
+	stranger.Sid, stranger.Cwd = 720, "/home/g/projects/other"
+	// A Mayor's pane (session "0", pane shell 600) is no Builder's: what sits under
+	// it is left alone even with a worktree for its cwd.
+	mayorShell := proc(600, 100, "S", "t600", "bash")
+	underMayor := proc(601, 600, "S", "t601", "git", "status")
+	underMayor.Cwd = "/home/g/.mw-worktrees/mw-a.1"
+	// A person's terminal that sits in a worktree is not an orphan: its parent is a
+	// terminal emulator, and it is not reparented. Nor is the user's systemd's child
+	// the less an orphan: systemd adopts orphans.
+	terminal := proc(730, 731, "S", "t730", "bash")
+	terminal.Sid, terminal.Cwd = 730, "/home/g/.mw-worktrees/mw-a.1"
+	emulator := proc(731, 1, "S", "t731", "/usr/bin/gnome-terminal")
+	userManager := proc(740, 1, "S", "t740", "/lib/systemd/systemd", "--user")
+	adopted := proc(741, 740, "S", "t741", "sleep", "900")
+	adopted.Sid, adopted.Cwd = 741, "/home/g/.mw-worktrees/mw-a.1"
+	host.Procs = append(host.Procs, byCwd, byEnv, childOfOrphan, stranger, mayorShell, underMayor, terminal, emulator, userManager, adopted)
+	ctx := context.Background()
+	if err := way.On(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	stopped := host.Stopped()
+	for _, pid := range []int{700, 701, 710, 741} {
+		if !slices.Contains(stopped, pid) {
+			t.Errorf("orphan %d was not stopped: %v", pid, stopped)
+		}
+	}
+	for _, pid := range []int{720, 600, 601, 730, 731, 740} {
+		if slices.Contains(stopped, pid) {
+			t.Errorf("process %d was stopped though it is no Builder's orphan: %v", pid, stopped)
+		}
+	}
+	if err := way.Off(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.Stopped()) != 0 {
+		t.Fatalf("still stopped after off: %v", host.Stopped())
+	}
+}
+
+// With no marker (a crashed on, a hand-made stop) off still finds the orphan.
+func TestGiveWayOffWithNoMarkerContinuesAStoppedOrphan(t *testing.T) {
+	way, host, _, _ := aGiveWayWorld()
+	orphan := proc(700, 1, "T", "t700", "node", "dev-server")
+	orphan.Sid, orphan.Cwd = 700, "/home/g/.mw-worktrees/mw-a.1/web"
+	host.Procs = append(host.Procs, orphan)
+	if err := way.Off(context.Background(), application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.Stopped()) != 0 {
+		t.Fatalf("still stopped: %v", host.Stopped())
+	}
+}

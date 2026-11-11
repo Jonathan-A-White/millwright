@@ -157,6 +157,41 @@ func (p Panes) Panes(ctx context.Context) ([]application.GiveWayPane, error) {
 	return ParsePanes(out.String()), nil
 }
 
+// Servers is the tmux servers of a host, one Panes each: the panes of all, in
+// the order of the servers. A server that is not running is no panes.
+type Servers []Panes
+
+var _ application.GiveWayPanes = Servers{}
+
+// ServersFor is the default server and then a server for each socket named (tmux's
+// -L), each once; an empty name is the default server and is not added again.
+func ServersFor(sockets []string) Servers {
+	servers := Servers{{}}
+	seen := map[string]bool{"": true}
+	for _, socket := range sockets {
+		socket = strings.TrimSpace(socket)
+		if seen[socket] {
+			continue
+		}
+		seen[socket] = true
+		servers = append(servers, Panes{Socket: socket})
+	}
+	return servers
+}
+
+// Panes implements application.GiveWayPanes.
+func (s Servers) Panes(ctx context.Context) ([]application.GiveWayPane, error) {
+	var all []application.GiveWayPane
+	for _, server := range s {
+		panes, err := server.Panes(ctx)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, panes...)
+	}
+	return all, nil
+}
+
 // ParsePanes reads list-panes output, a pane to a line, "session|pid|dead". The
 // session's name may itself hold a bar, so the two fields are read from the end.
 func ParsePanes(printed string) []application.GiveWayPane {
