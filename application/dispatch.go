@@ -1518,12 +1518,59 @@ func rerunUnderGate(ctx context.Context, rechecks SpecRechecker, lock GateLock, 
 		}
 		return SpecRecheck{}, gateBusy{fmt.Sprintf("not re-checked: the gate lock could not be taken: %v", oneLine(err.Error()))}
 	}
-	defer func() {
-		if err := turn.Holding.Release(context.Background()); err != nil {
-			note(fmt.Sprintf("%s's gate lock could not be given back: %v", host, err))
-		}
-	}()
+	gate := &heldRecheckGate{ctx: ctx, lock: lock, id: id, wait: wait, host: host, turn: turn, note: note}
+	defer gate.Free()
+	if between, ok := rechecks.(gateRechecker); ok {
+		return between.RecheckBetween(ctx, rig, spec, gate)
+	}
 	return rechecks.Recheck(ctx, rig, spec)
+}
+
+// gateRechecker is a SpecRechecker that can give the gate lock back for its wait
+// for a calm host and take it again (Suite.RecheckBetween, mw-gq6.1082).
+type gateRechecker interface {
+	RecheckBetween(ctx context.Context, rig, spec string, gate RecheckGate) (SpecRecheck, error)
+}
+
+var _ gateRechecker = Suite{}
+
+// heldRecheckGate is the gate lock rerunUnderGate holds, lent to a re-run: Free
+// gives it back and Retake takes it again, waiting no longer than the first take
+// did. rerunUnderGate's own release is Free, for whatever turn is held when the
+// re-run ends.
+type heldRecheckGate struct {
+	ctx  context.Context
+	lock GateLock
+	id   string
+	wait time.Duration
+	host string
+	turn GateTurn
+	note func(string)
+}
+
+func (g *heldRecheckGate) Free() {
+	if g.turn.Holding == nil {
+		return
+	}
+	if err := g.turn.Holding.Release(context.WithoutCancel(g.ctx)); err != nil {
+		g.note(fmt.Sprintf("%s's gate lock could not be given back: %v", g.host, err))
+	}
+	g.turn.Holding = nil
+}
+
+func (g *heldRecheckGate) Retake(ctx context.Context) error {
+	waitCtx, cancel := context.WithTimeout(ctx, g.wait)
+	defer cancel()
+	var heldBy string
+	turn, err := g.lock.Take(waitCtx, g.id, func(by string) { heldBy = by })
+	if err != nil {
+		if heldBy != "" || errors.Is(err, context.DeadlineExceeded) {
+			return gateBusy{"not re-checked: the gate is busy"}
+		}
+		return gateBusy{fmt.Sprintf("not re-checked: the gate lock could not be taken: %v", oneLine(err.Error()))}
+	}
+	g.turn = turn
+	return nil
 }
 
 // answerWaitingGrist runs one pass of the mill after the claims, on the host
