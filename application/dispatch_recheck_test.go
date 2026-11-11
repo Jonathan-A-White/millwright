@@ -510,3 +510,52 @@ func TestADispatchLineSaysAUnitTestBugOfARigWithNoWayToRunOneFileAloneWasNotReRu
 		t.Errorf("ran %+v", ran)
 	}
 }
+
+// A bug whose spec fails on main while the host is far over its cores, and
+// never calms, was neither found fixed nor found still broken (mw-gq6.1070):
+// the dispatch notes a skip, says so on the started line, and does not close or
+// claim it as a settled answer.
+func TestADispatchNotesASkipForASuiteBugWhoseRecheckFailedOnAHostThatNeverCalmed(t *testing.T) {
+	dispatch, tracker, _, _, _ := aFactory(t)
+	aSuiteBug(t, tracker, "mw-gq6.1", application.LabelBug, application.LabelSuite)
+	runs := &apptest.FakeSuiteRunner{Respond: func(_, _ string) (application.Checked, error) {
+		return application.Checked{Output: "  1) [shots] › " + greekSpec + ":4:1 › plays\n  1 failed\n"}, nil
+	}}
+	suite, _ := recheckSuite(runs)
+	suite.Rigs = map[string]string{"millwright": "/rigs/millwright"}
+	suite.Tests = map[string]string{"millwright": "npm test"}
+	suite.ChangedSpecs = map[string]string{"millwright": "npx playwright test " + application.SpecsPlaceholder}
+	heads := apptest.NewFakeRigHeads()
+	heads.SetHead("/rigs/millwright", "9f3c2ab41d0e")
+	suite.Heads = heads
+	suite.Host = "cloud1"
+	suite.Load = &apptest.FakeHostLoad{Reading: application.LoadReading{Load: 40, Cores: 16}}
+	suite.LoadPoll, suite.LoadBound = time.Second, 3*time.Second
+	suite.LoadWait = func(context.Context, time.Duration) error { return nil }
+	dispatch.Rechecks = suite
+	log := &apptest.FakeTickLog{}
+	dispatch.RecheckSkips = log
+	dispatch.Now = func() time.Time { return skipNow }
+
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if n := len(runs.Ran()); n != 1 {
+		t.Errorf("the spec should be run once and not again on a host that never calmed, ran %d times", n)
+	}
+	want := "not re-checked: cloud1 stayed at load 40.0 of 16"
+	lines := log.Lines()
+	if len(lines) != 1 || !strings.Contains(lines[0], "mw-gq6.1 "+want) {
+		t.Errorf("recheck log = %q, want a skip naming the story and %q", lines, want)
+	}
+	if len(report.FixedOnMain) != 0 || tracker.CloseReason("mw-gq6.1") != "" {
+		t.Errorf("the bug must not be closed as fixed, got %+v", report.FixedOnMain)
+	}
+	if ids := startedIDs(report); len(ids) != 1 {
+		t.Fatalf("started %v, want the bug dispatched as before", ids)
+	}
+	if got := report.Started[0].Recheck; !strings.Contains(got, want) || strings.Contains(got, "still fails") {
+		t.Errorf("the started line should say it was not re-checked, not that it still fails, got %q", got)
+	}
+}

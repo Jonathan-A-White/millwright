@@ -881,6 +881,28 @@ func (s Suite) Recheck(ctx context.Context, rig, spec string) (SpecRecheck, erro
 	if checked.NotRun {
 		return SpecRecheck{}, fmt.Errorf("`%s` could not be run in %s: %s", command, dir, checked.Tail(3))
 	}
+	if !checked.Passed && s.Load != nil {
+		// A failure read while the host was far over its cores may be the host's
+		// (mw-gq6.1070): wait for it to calm by the suite's rule and run the spec
+		// once more, and the second result stands. A host that never calms gives no
+		// answer, so the caller notes a skip and claims nothing.
+		if busy, err := s.Load.Load(ctx); err == nil && busy.FarOver() {
+			s.say("  retry   `%s` failed while %s was at load %.1f of %d cores: running it once more when it calms\n", command, s.Host, busy.Load, busy.Cores)
+			calm, _, _, gaveUp, err := s.calmed(ctx, "the re-run of "+spec)
+			if err != nil {
+				return SpecRecheck{}, fmt.Errorf("waiting for %s to calm: %w", s.Host, err)
+			}
+			if gaveUp {
+				return SpecRecheck{}, gateBusy{fmt.Sprintf("not re-checked: %s stayed at load %.1f of %d", s.Host, calm.Load, calm.Cores)}
+			}
+			if checked, err = s.Runner.RunLine(ctx, rig, dir, command); err != nil {
+				return SpecRecheck{}, fmt.Errorf("running `%s` in %s: %w", command, dir, err)
+			}
+			if checked.NotRun {
+				return SpecRecheck{}, fmt.Errorf("`%s` could not be run in %s: %s", command, dir, checked.Tail(3))
+			}
+		}
+	}
 	found := SpecRecheck{Spec: spec, Sha: head.Commit, Passed: checked.Passed, Tail: checked.Tail(SpecRecheckTail)}
 	if all := passedCount.FindAllStringSubmatch(domain.StripANSI(checked.Output), -1); len(all) > 0 {
 		found.Tests, _ = strconv.Atoi(all[len(all)-1][1])
