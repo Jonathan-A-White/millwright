@@ -263,6 +263,10 @@ type GristExampleRecheck struct {
 	Smoke GristSmoke
 	// HasKey says whether this host holds the grist test key; nil holds it.
 	HasKey func() bool
+	// Calm is the suite whose rule for a host far over its cores the recheck
+	// follows (mw-gq6.1083): only its Load, Host, LoadPoll, LoadBound, LoadWait and
+	// Out are read. A zero Calm reads no load, and an example is run once.
+	Calm Suite
 }
 
 var _ ExampleRechecker = GristExampleRecheck{}
@@ -276,8 +280,36 @@ func (g GristExampleRecheck) RecheckExamples(ctx context.Context, app, kind stri
 	if err != nil {
 		return SpecRecheck{}, err
 	}
+	found, err := g.evalOnce(ctx, app, kind, examples, commit)
+	if err != nil || found.Passed || g.Calm.Load == nil {
+		return found, err
+	}
+	// A failure read while the host was far over its cores may be the host's
+	// (mw-gq6.1083), as for a spec (mw-gq6.1070): wait for it to calm by the suite's
+	// rule and send the examples once more, and the second result stands. A host
+	// that never calms gives no answer, so the caller notes a skip and claims
+	// nothing.
+	busy, readErr := g.Calm.Load.Load(ctx)
+	if readErr != nil || !busy.FarOver() {
+		return found, nil
+	}
+	spec := found.Spec
+	g.Calm.say("  retry   `%s` failed while %s was at load %.1f of %d cores: running it once more when it calms\n", spec, g.Calm.Host, busy.Load, busy.Cores)
+	calm, _, _, gaveUp, err := g.Calm.calmed(ctx, "the re-run of "+spec)
+	if err != nil {
+		return SpecRecheck{}, fmt.Errorf("waiting for %s to calm: %w", g.Calm.Host, err)
+	}
+	if gaveUp {
+		return SpecRecheck{}, gateBusy{fmt.Sprintf("not re-checked: %s stayed at load %.1f of %d", g.Calm.Host, calm.Load, calm.Cores)}
+	}
+	return g.evalOnce(ctx, app, kind, examples, commit)
+}
+
+// evalOnce sends the examples once, against main at commit, and says whether each
+// met its expect. An error is a send that could not be made.
+func (g GristExampleRecheck) evalOnce(ctx context.Context, app, kind string, examples []string, commit string) (SpecRecheck, error) {
 	var out bytes.Buffer
-	err = GristEvalExamples{Smoke: g.Smoke, Out: &out}.Run(ctx, app, kind, examples)
+	err := GristEvalExamples{Smoke: g.Smoke, Out: &out}.Run(ctx, app, kind, examples)
 	found := SpecRecheck{
 		Spec: BugCheck{App: app, Kind: kind, Examples: examples}.String(), Sha: commit,
 		Tail: lastLines(out.String(), SpecRecheckTail),

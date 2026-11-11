@@ -45,6 +45,12 @@ type PathSet struct {
 	// Rules keeps nothing.
 	Rules EpicRules
 
+	// Readings are the usage readings mw usage read keeps. A story labelled
+	// model-story is released on path set only at the pace of mw release-paced
+	// (ReleasePacedUsageLine, ReleasePacedMax), which needs them: with none
+	// (a nil Notes) such a story stays held.
+	Readings UsageReadings
+
 	// Out is where the path that was set is printed. A nil Out prints nothing.
 	Out io.Writer
 

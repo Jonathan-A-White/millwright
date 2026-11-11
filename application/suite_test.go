@@ -279,3 +279,310 @@ func TestARigWithNoUnitRunnerStepHasItsFailingFileMarkedVoidAndRunsNoChainAgain(
 		t.Errorf("expected one mail that does not say failed twice, got %+v", mail)
 	}
 }
+
+// A suite on a host that was far over its cores while a command line ran (mw-gq6.1069).
+
+// loadedSuite is lampasSuite whose host reads readings in turn (the last again
+// and again) and whose waits take no time, with a calm bound of three polls.
+func loadedSuite(t *testing.T, answers map[string]application.Checked, readings ...application.LoadReading) (application.Suite, *apptest.FakeHostLoad, *apptest.FakeTracker, *apptest.FakeMailbox) {
+	t.Helper()
+	suite, _, tracker, mailbox := lampasSuite(t, answers)
+	suite.ChangedSpecs = nil
+	load := &apptest.FakeHostLoad{Readings: readings}
+	suite.Load = load
+	suite.LoadPoll = time.Second
+	suite.LoadBound = 3 * time.Second
+	suite.LoadWait = func(context.Context, time.Duration) error { return nil }
+	return suite, load, tracker, mailbox
+}
+
+// suiteAnswers makes a Respond that answers each command from a list of
+// answers in turn (the last again), and counts how many times it was run.
+func suiteAnswers(suite application.Suite, byCommand map[string][]application.Checked) {
+	runs := map[string]int{}
+	suite.Runner.(*apptest.FakeSuiteRunner).Respond = func(_, command string) (application.Checked, error) {
+		answers := byCommand[command]
+		if len(answers) == 0 {
+			return application.Checked{Passed: true, Output: "ok\n"}, nil
+		}
+		i := min(runs[command], len(answers)-1)
+		runs[command]++
+		return answers[i], nil
+	}
+}
+
+func ranCount(suite application.Suite, command string) int {
+	n := 0
+	for _, one := range suite.Runner.(*apptest.FakeSuiteRunner).Ran() {
+		if one.Command == command {
+			n++
+		}
+	}
+	return n
+}
+
+var (
+	calmHost     = application.LoadReading{Load: 2, Cores: 16}
+	farOverHost  = application.LoadReading{Load: 40, Cores: 16}
+	busyHost     = application.LoadReading{Load: 20, Cores: 16}
+	failedAFile  = application.Checked{Output: " FAIL  tests/unit/a.test.ts > renders\nError: boom\n Test Files  1 failed | 9 passed (10)\n"}
+	failedAlone  = application.Checked{Output: " FAIL  tests/unit/a.test.ts > renders\nError: boom\n Test Files  1 failed (1)\n"}
+	passedAlone  = application.Checked{Passed: true, Output: " Test Files  1 passed (1)\n"}
+	aloneCommand = "npm test -- tests/unit/a.test.ts"
+)
+
+func TestACommandLineThatFailsFarOverTheCoresAndPassesWhenTheHostCalmsFilesNothing(t *testing.T) {
+	suite, _, tracker, mailbox := loadedSuite(t, nil, calmHost, farOverHost, calmHost)
+	suiteAnswers(suite, map[string][]application.Checked{"npm test": {failedAFile, {Passed: true, Output: "ok\n"}}})
+
+	report, err := suite.Run(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	if got := ranCount(suite, "npm test"); got != 2 {
+		t.Errorf("expected the line to be run again once the host calmed, it ran %d times", got)
+	}
+	if !report.Result.Passed || len(report.Result.Failing) != 0 || len(tracker.Stories()) != 0 {
+		t.Errorf("expected the second run to stand and nothing filed, got %+v and %v", report.Result, tracker.Stories())
+	}
+	if printed := report.String(); !strings.Contains(printed, "ran again after load 40.0 of 16") {
+		t.Errorf("expected the summary to say it ran again after load 40.0 of 16, got:\n%s", printed)
+	}
+	if mail, _ := mailbox.Inbox(context.Background(), application.MayorMailbox); len(mail) != 1 || !strings.Contains(mail[0].Body, "ran again after load 40.0 of 16") {
+		t.Errorf("expected the mail to say it ran again after load 40.0 of 16, got %+v", mail)
+	}
+}
+
+func TestACommandLineThatFailsFarOverTheCoresAndFailsAgainIsFiledAsToday(t *testing.T) {
+	suite, _, tracker, _ := loadedSuite(t, nil, calmHost, farOverHost, calmHost)
+	suiteAnswers(suite, map[string][]application.Checked{"npm test": {failedAFile}, aloneCommand: {failedAlone}})
+
+	report, err := suite.Run(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	if got := ranCount(suite, "npm test"); got != 2 {
+		t.Errorf("expected the line to be run twice, it ran %d times", got)
+	}
+	if len(report.Result.Failing) != 1 || report.Result.Failing[0].Alone != "failed" || len(tracker.Stories()) != 1 {
+		t.Errorf("expected the file filed as failing twice, got %+v and %v", report.Result.Failing, tracker.Stories())
+	}
+}
+
+func TestACommandLineThatFailsFarOverTheCoresOnAHostThatNeverCalmsFilesNothingAndIsListedAsSkippedForLoad(t *testing.T) {
+	suite, _, tracker, mailbox := loadedSuite(t, nil, calmHost, farOverHost)
+	suiteAnswers(suite, map[string][]application.Checked{"npm test": {failedAFile}})
+
+	report, err := suite.Run(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	if got := ranCount(suite, "npm test"); got != 1 {
+		t.Errorf("expected no second run on a host that never calmed, the line ran %d times", got)
+	}
+	if got := ranCount(suite, aloneCommand); got != 0 {
+		t.Errorf("expected no re-run of a file of a line skipped for load, got %d", got)
+	}
+	if report.Result.Passed || len(tracker.Stories()) != 0 {
+		t.Errorf("expected a suite that is not passed and files nothing, got passed %v and %v", report.Result.Passed, tracker.Stories())
+	}
+	printed := report.String()
+	for _, want := range []string{"skipped for load", "tests/unit/a.test.ts", "load 40.0 of 16"} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("expected the summary to hold %q, got:\n%s", want, printed)
+		}
+	}
+	mail, _ := mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if len(mail) != 1 || !strings.Contains(mail[0].Body, "skipped for load") || strings.Contains(mail[0].Subject, "all pass") {
+		t.Errorf("expected the mail to list the file as skipped for load and not say all pass, got %+v", mail)
+	}
+}
+
+func TestACommandLineThatFailsBusyButNotFarOverTheCoresIsRunOnceAndFiledAsToday(t *testing.T) {
+	suite, _, tracker, _ := loadedSuite(t, nil, calmHost, busyHost)
+	suiteAnswers(suite, map[string][]application.Checked{"npm test": {failedAFile}, aloneCommand: {failedAlone}})
+
+	report, err := suite.Run(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	if got := ranCount(suite, "npm test"); got != 1 {
+		t.Errorf("expected one run of the line at load 20 of 16, it ran %d times", got)
+	}
+	if len(tracker.Stories()) != 1 {
+		t.Errorf("expected the failure filed as today, got %v", tracker.Stories())
+	}
+	if printed := report.String(); !strings.Contains(printed, "load 20.0 of 16") || strings.Contains(printed, "ran again") {
+		t.Errorf("expected the load in the summary and no second run, got:\n%s", printed)
+	}
+}
+
+func TestAFileRerunThatFailsFarOverTheCoresAndPassesWhenTheHostCalmsIsTheSecondRun(t *testing.T) {
+	suite, _, _, _ := loadedSuite(t, nil, calmHost, calmHost, farOverHost, calmHost)
+	suiteAnswers(suite, map[string][]application.Checked{"npm test": {failedAFile}, aloneCommand: {failedAlone, passedAlone}})
+
+	report, err := suite.Run(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	if got := ranCount(suite, aloneCommand); got != 2 {
+		t.Errorf("expected the re-run to be run again once the host calmed, it ran %d times", got)
+	}
+	if len(report.Result.Failing) != 1 || report.Result.Failing[0].Alone != "passed" || !report.Result.Failing[0].Flaky {
+		t.Errorf("expected the second re-run to stand: passed alone, got %+v", report.Result.Failing)
+	}
+	if printed := report.String(); !strings.Contains(printed, "ran again after load 40.0 of 16") {
+		t.Errorf("expected the summary to say it ran again after load 40.0 of 16, got:\n%s", printed)
+	}
+}
+
+func TestAFileRerunThatFailsFarOverTheCoresAndFailsAgainIsFiledAsToday(t *testing.T) {
+	suite, _, tracker, _ := loadedSuite(t, nil, calmHost, calmHost, farOverHost, calmHost)
+	suiteAnswers(suite, map[string][]application.Checked{"npm test": {failedAFile}, aloneCommand: {failedAlone}})
+
+	report, err := suite.Run(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	if got := ranCount(suite, aloneCommand); got != 2 {
+		t.Errorf("expected the re-run twice, it ran %d times", got)
+	}
+	if len(report.Result.Failing) != 1 || report.Result.Failing[0].Alone != "failed" || len(tracker.Stories()) != 1 {
+		t.Errorf("expected the file filed as failing twice, got %+v and %v", report.Result.Failing, tracker.Stories())
+	}
+}
+
+func TestAFileRerunThatFailsFarOverTheCoresOnAHostThatNeverCalmsFilesNothingAndIsListedAsSkippedForLoad(t *testing.T) {
+	suite, _, tracker, mailbox := loadedSuite(t, nil, calmHost, calmHost, farOverHost)
+	suiteAnswers(suite, map[string][]application.Checked{"npm test": {failedAFile}, aloneCommand: {failedAlone}})
+
+	report, err := suite.Run(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	if got := ranCount(suite, aloneCommand); got != 1 {
+		t.Errorf("expected no second re-run on a host that never calmed, it ran %d times", got)
+	}
+	if len(report.Result.Failing) != 0 || report.Result.Passed || len(tracker.Stories()) != 0 {
+		t.Errorf("expected nothing failing, nothing filed and a suite not passed, got %+v and %v", report.Result, tracker.Stories())
+	}
+	printed := report.String()
+	for _, want := range []string{"skipped for load", "tests/unit/a.test.ts", "load 40.0 of 16"} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("expected the summary to hold %q, got:\n%s", want, printed)
+		}
+	}
+	if mail, _ := mailbox.Inbox(context.Background(), application.MayorMailbox); len(mail) != 1 || !strings.Contains(mail[0].Body, "skipped for load") {
+		t.Errorf("expected the mail to list the file as skipped for load, got %+v", mail)
+	}
+}
+
+func TestAFileRerunThatFailsBusyButNotFarOverTheCoresIsRunOnceAndFiledAsToday(t *testing.T) {
+	suite, _, tracker, _ := loadedSuite(t, nil, calmHost, calmHost, busyHost)
+	suiteAnswers(suite, map[string][]application.Checked{"npm test": {failedAFile}, aloneCommand: {failedAlone}})
+
+	report, err := suite.Run(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	if got := ranCount(suite, aloneCommand); got != 1 {
+		t.Errorf("expected one run of the re-run at load 20 of 16, it ran %d times", got)
+	}
+	if len(tracker.Stories()) != 1 {
+		t.Errorf("expected the failure filed as today, got %v", tracker.Stories())
+	}
+	if printed := report.String(); !strings.Contains(printed, "load 20.0 of 16") || strings.Contains(printed, "ran again") {
+		t.Errorf("expected the load in the summary and no second run, got:\n%s", printed)
+	}
+}
+
+// A spec rechecked alone that fails while the host is far over its cores (mw-gq6.1070).
+
+// loadedRecheck is recheckSuite whose host reads readings in turn (the last
+// again and again), whose waits take no time, and whose runner answers each run
+// from answers in turn (the last again).
+func loadedRecheck(answers []application.Checked, readings ...application.LoadReading) (application.Suite, *apptest.FakeSuiteRunner, *apptest.FakeHostLoad) {
+	n := 0
+	runs := &apptest.FakeSuiteRunner{Respond: func(_, _ string) (application.Checked, error) {
+		one := answers[min(n, len(answers)-1)]
+		n++
+		return one, nil
+	}}
+	suite, _ := recheckSuite(runs)
+	suite.Host = "cloud1"
+	load := &apptest.FakeHostLoad{Readings: readings}
+	suite.Load = load
+	suite.LoadPoll = time.Second
+	suite.LoadBound = 3 * time.Second
+	suite.LoadWait = func(context.Context, time.Duration) error { return nil }
+	return suite, runs, load
+}
+
+var (
+	specFailed = application.Checked{Output: "  1) [shots] › " + greekSpec + ":4:1 › plays\n  1 failed\n"}
+	specPassed = application.Checked{Passed: true, Output: "Running 3 tests using 1 worker\n  3 passed (4.1s)\n"}
+)
+
+func TestARecheckThatFailsFarOverTheCoresAndPassesWhenTheHostCalmsPasses(t *testing.T) {
+	suite, runs, _ := loadedRecheck([]application.Checked{specFailed, specPassed}, farOverHost, calmHost)
+
+	got, err := suite.Recheck(context.Background(), "lampas", greekSpec)
+	if err != nil {
+		t.Fatalf("re-running: %v", err)
+	}
+	if !got.Passed || got.Tests != 3 {
+		t.Errorf("expected the second run to stand: passed, 3 tests, got %+v", got)
+	}
+	if n := len(runs.Ran()); n != 2 {
+		t.Errorf("expected the spec run twice, ran %d times", n)
+	}
+}
+
+func TestARecheckThatFailsFarOverTheCoresAndFailsAgainAfterTheHostCalmsFails(t *testing.T) {
+	suite, runs, _ := loadedRecheck([]application.Checked{specFailed}, farOverHost, calmHost)
+
+	got, err := suite.Recheck(context.Background(), "lampas", greekSpec)
+	if err != nil || got.Passed {
+		t.Errorf("expected the second failure to stand as an answer, got %+v, %v", got, err)
+	}
+	if n := len(runs.Ran()); n != 2 {
+		t.Errorf("expected the spec run twice, ran %d times", n)
+	}
+}
+
+func TestARecheckThatFailsFarOverTheCoresOnAHostThatNeverCalmsIsABusyHostNotAnAnswer(t *testing.T) {
+	suite, runs, _ := loadedRecheck([]application.Checked{specFailed}, farOverHost)
+
+	got, err := suite.Recheck(context.Background(), "lampas", greekSpec)
+	if err == nil {
+		t.Fatalf("expected an error for a host that never calmed, got %+v", got)
+	}
+	if want := "not re-checked: cloud1 stayed at load 40.0 of 16"; !strings.Contains(err.Error(), want) {
+		t.Errorf("expected %q in the error, got %q", want, err.Error())
+	}
+	if n := len(runs.Ran()); n != 1 {
+		t.Errorf("expected no second run on a host that never calmed, ran %d times", n)
+	}
+}
+
+func TestARecheckThatFailsBusyButNotFarOverTheCoresIsRunOnce(t *testing.T) {
+	suite, runs, _ := loadedRecheck([]application.Checked{specFailed, specPassed}, busyHost)
+
+	got, err := suite.Recheck(context.Background(), "lampas", greekSpec)
+	if err != nil || got.Passed {
+		t.Errorf("expected the failure to stand at once, got %+v, %v", got, err)
+	}
+	if n := len(runs.Ran()); n != 1 {
+		t.Errorf("expected one run at 20 of 16, ran %d times", n)
+	}
+}
+
+func TestARecheckThatPassesReadsNoLoad(t *testing.T) {
+	suite, _, load := loadedRecheck([]application.Checked{specPassed}, farOverHost)
+	if got, err := suite.Recheck(context.Background(), "lampas", greekSpec); err != nil || !got.Passed {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	if load.Reads != 0 {
+		t.Errorf("a pass needs no look at the load, it was read %d times", load.Reads)
+	}
+}

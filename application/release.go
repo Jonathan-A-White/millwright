@@ -443,6 +443,10 @@ const (
 	ReleasePacedUsageLine = 60.0
 )
 
+// LabelModelStory marks a story that is a model's judgement (a pass over a batch
+// of chapters, say): it is released at the pace above, whoever releases it.
+const LabelModelStory = "model-story"
+
 // ReleasePaced un-holds the next stories of a list, in the order the list gives,
 // at the pace of the epic that filed them (ReleasePacedMax, ReleasePacedUsageLine),
 // so that nobody reads the usage and counts what runs by hand at each sitting.
@@ -474,11 +478,6 @@ func (r ReleasePaced) Run(ctx context.Context, ids []string) ([]string, error) {
 	}
 	now = now.UTC()
 
-	reading, ok, err := r.usage(ctx, now)
-	if err != nil || !ok {
-		return nil, err
-	}
-
 	details, err := r.Tracker.ShowBeads(ctx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("reading the stories of the list: %w", err)
@@ -505,15 +504,26 @@ func (r ReleasePaced) Run(ctx context.Context, ids []string) ([]string, error) {
 			active++
 		}
 	}
+
+	// The usage speaks first, before the skipped are named; the count after.
+	pace, err := checkPace(ctx, r.Readings, now, active, "the list")
+	if err != nil {
+		return nil, err
+	}
+	if pace.OnUsage {
+		r.print(pace.Refusal() + "\n")
+		return nil, nil
+	}
 	r.printSkipped("closed, skipped", closed)
 	r.printSkipped("not in the tracker, skipped", missing)
 	r.printSkipped("iced, skipped (mw thaw first)", iced)
-
-	room := ReleasePacedMax - active
-	switch {
-	case room <= 0:
-		r.print(fmt.Sprintf("%d of the list running or open, at most %d at once: nothing released\n", active, ReleasePacedMax))
+	if pace.Why != "" {
+		r.print(pace.Refusal() + "\n")
 		return nil, nil
+	}
+	reading, room := pace.Reading, pace.Room
+
+	switch {
 	case len(held) == 0:
 		r.print("no story of the list is held: nothing released\n")
 		return nil, nil
@@ -551,29 +561,61 @@ func (r ReleasePaced) Run(ctx context.Context, ids []string) ([]string, error) {
 	return released, nil
 }
 
-// usage reads the newest reading and says whether it lets a release go on. When
-// it does not, the reason is printed and ok is false with no error: the pace
-// held the release back, which is no failure.
-func (r ReleasePaced) usage(ctx context.Context, now time.Time) (reading UsageReading, ok bool, err error) {
-	all, err := r.Readings.All(ctx)
+// Pace is the verdict of the pace of a paced release on a count of what already
+// runs or is open: the usage reading it read, the room left under
+// ReleasePacedMax, and why it lets nothing go when it does not.
+type Pace struct {
+	Reading UsageReading
+	// Room is how many more may be released at once; zero when Why is set.
+	Room int
+	// Why is empty when a release may go on, else the reason none may.
+	Why string
+	// OnUsage is whether Why is about the usage (missing, stale or over the
+	// line), rather than the count.
+	OnUsage bool
+	// hint is what to do about the reason, as the paced release says it.
+	hint string
+}
+
+// Refusal is the reason as mw release-paced prints it.
+func (p Pace) Refusal() string { return p.Why + ": nothing released" + p.hint }
+
+// Held is the reason as mw path set prints it after "held: <id>: ".
+func (p Pace) Held() string { return p.Why + p.hint }
+
+// checkPace is the one pace check of a paced release, used by ReleasePaced.Run
+// and by mw path set (whyStayHeld) for a story labelled model-story: the newest
+// usage reading must be current and not over ReleasePacedUsageLine, and fewer
+// than ReleasePacedMax stories may already be running or open (active, of what,
+// as the count says it). A reason is no error; a reading that cannot be read is.
+func checkPace(ctx context.Context, readings UsageReadings, now time.Time, active int, of string) (Pace, error) {
+	const unreported = "no usage was reported (mw usage read, or mw usage set <percent>)"
+	if readings.Notes == nil {
+		return Pace{OnUsage: true, Why: unreported}, nil
+	}
+	all, err := readings.All(ctx)
 	if err != nil {
-		return UsageReading{}, false, fmt.Errorf("reading the usage: %w", err)
+		return Pace{}, fmt.Errorf("reading the usage: %w", err)
 	}
 	if len(all) == 0 {
-		r.print("no usage was reported (mw usage read, or mw usage set <percent>): nothing released\n")
-		return UsageReading{}, false, nil
+		return Pace{OnUsage: true, Why: unreported}, nil
 	}
-	reading = all[len(all)-1]
+	reading := all[len(all)-1]
 	if why := reading.Stale(now); why != "" {
-		r.print(fmt.Sprintf("usage %.1f%% is STALE (%s): nothing released; run mw usage read\n", reading.Percent, why))
-		return reading, false, nil
+		return Pace{Reading: reading, OnUsage: true, hint: "; run mw usage read",
+			Why: fmt.Sprintf("usage %.1f%% is STALE (%s)", reading.Percent, why)}, nil
 	}
 	if reading.Percent > ReleasePacedUsageLine {
-		r.print(fmt.Sprintf("usage %.1f%% of the week (read %s) is over %.0f%%: nothing released\n",
-			reading.Percent, reading.At.UTC().Format(time.RFC3339), ReleasePacedUsageLine))
-		return reading, false, nil
+		return Pace{Reading: reading, OnUsage: true,
+			Why: fmt.Sprintf("usage %.1f%% of the week (read %s) is over %.0f%%",
+				reading.Percent, reading.At.UTC().Format(time.RFC3339), ReleasePacedUsageLine)}, nil
 	}
-	return reading, true, nil
+	room := ReleasePacedMax - active
+	if room <= 0 {
+		return Pace{Reading: reading,
+			Why: fmt.Sprintf("%d of %s running or open, at most %d at once", active, of, ReleasePacedMax)}, nil
+	}
+	return Pace{Reading: reading, Room: room}, nil
 }
 
 // choose is the first room of the held stories, in order, that no comment holds

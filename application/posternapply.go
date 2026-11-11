@@ -489,6 +489,9 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 		if result, handled, err := i.applyRanItMyself(ctx, m); handled || err != nil {
 			return result, handled && err == nil, err
 		}
+		if result, handled, err := i.applyDone(ctx, m); handled || err != nil {
+			return result, handled && err == nil, err
+		}
 		recorded, fresh, err := i.recordThreadCommentOnce(ctx, m, saved)
 		if err != nil || !recorded {
 			return posternApplied{}, false, err

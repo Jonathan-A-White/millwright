@@ -78,7 +78,8 @@ type Suite struct {
 	// between them, so it never runs beside a gate (mw-gq6.914) and a gate waits
 	// behind one command line of it, not the whole suite (mw-gq6.917). nil takes
 	// none. Only Run takes it: Recheck is run by callers that hold it already
-	// (rerunUnderGate).
+	// (rerunUnderGate), which lend it to RecheckBetween for the wait for a calm
+	// host.
 	GateLock GateLock
 	// GateNoticeEvery is how often a suite that waits for the gate lock says
 	// again that it is waiting; zero reads CheckGateNoticeEvery.
@@ -158,6 +159,34 @@ type SuiteResult struct {
 	// Lines are the command lines run, in order, each with its seconds. A result
 	// kept before mw-gq6.920 has none, and one with none writes no key.
 	Lines []SuiteLine `json:"lines,omitempty"`
+	// Notes say what was read of the host's load when a command line failed
+	// (mw-gq6.1069): that it ran again after the host was far over its cores, or
+	// that it was busy and the failure counted at once.
+	Notes []string `json:"notes,omitempty"`
+	// SkippedForLoad are the failures read with the host far over its cores that
+	// the host did not calm for, so they were not run again and are filed as
+	// nothing (mw-gq6.1069). A result with any is not passed.
+	SkippedForLoad []SuiteSkipped `json:"skipped_for_load,omitempty"`
+}
+
+// SuiteSkipped is one failure a suite did not stand behind because the host was
+// far over its cores while it ran and never calmed: the command line that failed
+// and the file of it, when its output names one (a file's re-run is the file's),
+// and the load it was read at.
+type SuiteSkipped struct {
+	Command string  `json:"command"`
+	File    string  `json:"file,omitempty"`
+	Load    float64 `json:"load"`
+	Cores   int     `json:"cores"`
+}
+
+// String says what was skipped, as the summary and the mail list it.
+func (k SuiteSkipped) String() string {
+	what := k.File
+	if what == "" {
+		what = "`" + k.Command + "`"
+	}
+	return fmt.Sprintf("skipped for load  %s  failed at load %.1f of %d cores and the host did not calm: not run again, not filed", what, k.Load, k.Cores)
 }
 
 // SuiteReport is what a suite did: its result, where the two files are kept
@@ -208,6 +237,12 @@ func (r SuiteReport) String() string {
 	}
 	for _, said := range r.Result.Unnamed {
 		fmt.Fprintf(&b, "  %s\n", said)
+	}
+	for _, skipped := range r.Result.SkippedForLoad {
+		fmt.Fprintf(&b, "  %s\n", skipped)
+	}
+	for _, note := range r.Result.Notes {
+		fmt.Fprintf(&b, "  note    %s\n", note)
 	}
 	for _, one := range r.Filed {
 		how := "commented on"
@@ -383,6 +418,17 @@ func (l *suiteLog) section(title, output string) {
 	l.b.WriteString("\n")
 }
 
+// suiteAttempt is one command line as Suite.Run ran it: what the run that stands
+// said and its error, and whether the host was far over its cores and never
+// calmed, so that the line was not run again and its failure is skipped for the
+// load Busy (mw-gq6.1069).
+type suiteAttempt struct {
+	Checked
+	Err     error
+	Skipped bool
+	Busy    LoadReading
+}
+
 // suitePhase is one command line of the whole run: the rig's tests, then its
 // changed-specs command with every spec. alone is the command that runs one
 // failing file by itself, or why there is none: a re-run that is not alone is
@@ -505,6 +551,12 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		return checked, err
 	}
 
+	// lastLoad is the last reading of the host's load taken, the load a line is
+	// taken to have started at (mw-gq6.1069).
+	var lastLoad LoadReading
+	if read {
+		lastLoad = reading
+	}
 	if err := take("the suite"); err != nil {
 		return SuiteReport{}, err
 	}
@@ -533,16 +585,63 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 	}
 
 	log := &suiteLog{}
+	// attempt runs one command line, and runs it once more when it failed with the
+	// host far over its cores (mw-gq6.1069): the load read at once after the
+	// failure, or the one before the line, whichever is the busier, is the load it
+	// failed at. Far over, it waits for the host to calm by the suite's own rule
+	// and runs it again, and the second result stands; a host that never calms
+	// ends it skipped, filed as nothing. Busy but not far over, the failure counts
+	// at once and the note says the load. what names the line for the waits.
+	attempt := func(dir, command, what string) (run suiteAttempt, err error) {
+		if err := turn(what); err != nil {
+			return suiteAttempt{}, err
+		}
+		run.Checked, run.Err = runLine(dir, command)
+		if run.Err != nil || run.NotRun || run.Passed || s.Load == nil {
+			return run, nil
+		}
+		busy := lastLoad
+		if after, err := s.Load.Load(ctx); err == nil {
+			lastLoad = after
+			if after.Busy() {
+				busy = after
+			}
+		}
+		if !busy.FarOver() {
+			if busy.Busy() {
+				result.Notes = append(result.Notes, fmt.Sprintf("`%s` failed at load %.1f of %d cores, under %.0f times them, so the failure counts and it was not run again", command, busy.Load, busy.Cores, GateFarOver))
+			}
+			return run, nil
+		}
+		s.say("  retry   `%s` failed while %s was at load %.1f of %d cores: running it once more when it calms\n", command, s.Host, busy.Load, busy.Cores)
+		log.section(command+" (first run, failed at load "+fmt.Sprintf("%.1f of %d", busy.Load, busy.Cores)+")", run.Output)
+		calm, _, _, gaveUp, err := s.calmed(ctx, what+" again")
+		if err != nil {
+			return suiteAttempt{}, fmt.Errorf("waiting for %s to calm: %w", s.Host, err)
+		}
+		lastLoad = calm
+		if gaveUp {
+			run.Skipped, run.Busy = true, busy
+			return run, nil
+		}
+		if err := turn(what + " again"); err != nil {
+			return suiteAttempt{}, err
+		}
+		run.Checked, run.Err = runLine(dir, command)
+		result.Notes = append(result.Notes, fmt.Sprintf("`%s` ran again after load %.1f of %d (%s was far over its cores when it failed): the second run stands", command, busy.Load, busy.Cores, s.Host))
+		return run, nil
+	}
 	fmt.Fprintf(&log.b, "mw suite %s on %s at %s (%s), started %s\n\n", rig, s.Host, head.Commit, head.Branch, result.Started)
 	s.say("  run     %s at %s on %s\n", rig, short(head.Commit), head.Branch)
 	for _, phase := range phases {
 		result.Commands = append(result.Commands, phase.command)
-		if err := turn("the " + strings.ReplaceAll(phase.name, "_", " ")); err != nil {
+		whole, err := attempt(dir, phase.command, "the "+strings.ReplaceAll(phase.name, "_", " "))
+		if err != nil {
 			return SuiteReport{}, err
 		}
-		checked, err := runLine(dir, phase.command)
-		if err != nil {
-			return SuiteReport{}, fmt.Errorf("running `%s` in %s: %w", phase.command, dir, err)
+		checked := whole.Checked
+		if whole.Err != nil {
+			return SuiteReport{}, fmt.Errorf("running `%s` in %s: %w", phase.command, dir, whole.Err)
 		}
 		log.section(phase.command, checked.Output)
 		if checked.NotRun {
@@ -552,6 +651,17 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 			continue
 		}
 		files := FailingFiles(checked.Output)
+		if whole.Skipped {
+			// The host never calmed: the failure is the host's as far as is known, so
+			// no file of it is run alone and none is filed.
+			if len(files) == 0 {
+				result.SkippedForLoad = append(result.SkippedForLoad, SuiteSkipped{Command: phase.command, Load: whole.Busy.Load, Cores: whole.Busy.Cores})
+			}
+			for _, failed := range files {
+				result.SkippedForLoad = append(result.SkippedForLoad, SuiteSkipped{Command: phase.command, File: failed.File, Load: whole.Busy.Load, Cores: whole.Busy.Cores})
+			}
+			continue
+		}
 		if len(files) == 0 {
 			said := fmt.Sprintf("`%s` failed and its output names no test file", phase.command)
 			if short := FailingTestsShort(checked.Output); short != "" {
@@ -567,13 +677,18 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 				result.Failing = append(result.Failing, file)
 				continue
 			}
-			if err := turn("the re-run of " + failed.File); err != nil {
+			attempted, err := attempt(dir, again, "the re-run of "+failed.File)
+			if err != nil {
 				return SuiteReport{}, err
 			}
-			alone, err := runLine(dir, again)
+			alone := attempted.Checked
 			switch {
-			case err != nil:
-				file.Alone, file.Void = "recheck void: could not be run: "+err.Error(), true
+			case attempted.Skipped:
+				log.section(again, alone.Output)
+				result.SkippedForLoad = append(result.SkippedForLoad, SuiteSkipped{Command: again, File: failed.File, Load: attempted.Busy.Load, Cores: attempted.Busy.Cores})
+				continue
+			case attempted.Err != nil:
+				file.Alone, file.Void = "recheck void: could not be run: "+attempted.Err.Error(), true
 			case alone.NotRun:
 				file.Alone, file.Void = "recheck void: could not be run: "+alone.Tail(3), true
 			default:
@@ -593,7 +708,7 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 	result.DurationSeconds = math.Round(s.now().UTC().Sub(started).Seconds()*1000) / 1000
 	result.GateWaitedSeconds = math.Round(gateWaited.Seconds()*1000) / 1000
 	result.Lines = lines
-	result.Passed = len(result.Failing) == 0 && len(result.Unnamed) == 0
+	result.Passed = len(result.Failing) == 0 && len(result.Unnamed) == 0 && len(result.SkippedForLoad) == 0
 
 	day := started.Format("2006-01-02")
 	report := SuiteReport{Result: result, Failed: !result.Passed}
@@ -730,6 +845,24 @@ var passedCount = regexp.MustCompile(`(\d+) passed`)
 // [tests] command and the file added. A spec that fails is an answer; an error
 // is a run that could not be made.
 func (s Suite) Recheck(ctx context.Context, rig, spec string) (SpecRecheck, error) {
+	return s.RecheckBetween(ctx, rig, spec, nil)
+}
+
+// RecheckGate is the gate lock as a caller that holds it lends it to a re-run:
+// the re-run gives it back with Free for its wait for a calm host, so that
+// another gate is not kept waiting behind it, and takes it again with Retake
+// before it runs the spec once more (mw-gq6.1082). A Retake that fails ends the
+// re-run, and the caller's own release of the lock is for whatever it holds then.
+type RecheckGate interface {
+	Free()
+	Retake(ctx context.Context) error
+}
+
+// RecheckBetween is Recheck for a caller that holds the host's gate lock for the
+// runs of the spec: gate, when it is not nil, is freed for the wait for a calm
+// host and retaken before the second run. A host that never calms ends the
+// re-run with the lock free, not retaken.
+func (s Suite) RecheckBetween(ctx context.Context, rig, spec string, gate RecheckGate) (SpecRecheck, error) {
 	rigDir, known := s.Rigs[rig]
 	if !known {
 		return SpecRecheck{}, fmt.Errorf("%s is no rig of this host: the config file's [rigs] table does not name it", rig)
@@ -766,6 +899,36 @@ func (s Suite) Recheck(ctx context.Context, rig, spec string) (SpecRecheck, erro
 	}
 	if checked.NotRun {
 		return SpecRecheck{}, fmt.Errorf("`%s` could not be run in %s: %s", command, dir, checked.Tail(3))
+	}
+	if !checked.Passed && s.Load != nil {
+		// A failure read while the host was far over its cores may be the host's
+		// (mw-gq6.1070): wait for it to calm by the suite's rule and run the spec
+		// once more, and the second result stands. A host that never calms gives no
+		// answer, so the caller notes a skip and claims nothing.
+		if busy, err := s.Load.Load(ctx); err == nil && busy.FarOver() {
+			s.say("  retry   `%s` failed while %s was at load %.1f of %d cores: running it once more when it calms\n", command, s.Host, busy.Load, busy.Cores)
+			if gate != nil {
+				gate.Free()
+			}
+			calm, _, _, gaveUp, err := s.calmed(ctx, "the re-run of "+spec)
+			if err != nil {
+				return SpecRecheck{}, fmt.Errorf("waiting for %s to calm: %w", s.Host, err)
+			}
+			if gaveUp {
+				return SpecRecheck{}, gateBusy{fmt.Sprintf("not re-checked: %s stayed at load %.1f of %d", s.Host, calm.Load, calm.Cores)}
+			}
+			if gate != nil {
+				if err := gate.Retake(ctx); err != nil {
+					return SpecRecheck{}, err
+				}
+			}
+			if checked, err = s.Runner.RunLine(ctx, rig, dir, command); err != nil {
+				return SpecRecheck{}, fmt.Errorf("running `%s` in %s: %w", command, dir, err)
+			}
+			if checked.NotRun {
+				return SpecRecheck{}, fmt.Errorf("`%s` could not be run in %s: %s", command, dir, checked.Tail(3))
+			}
+		}
 	}
 	found := SpecRecheck{Spec: spec, Sha: head.Commit, Passed: checked.Passed, Tail: checked.Tail(SpecRecheckTail)}
 	if all := passedCount.FindAllStringSubmatch(domain.StripANSI(checked.Output), -1); len(all) > 0 {

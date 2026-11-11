@@ -1078,3 +1078,144 @@ func TestInboxHeldOffByTheLockSaysSoPlainly(t *testing.T) {
 		})
 	}
 }
+
+// mailsTo returns the Mayor's mail whose subject starts with prefix.
+func (f *applyFixture) mailsTo(t *testing.T, prefix string) []application.Message {
+	t.Helper()
+	mail, err := f.mailbox.Inbox(context.Background(), application.MayorMailbox)
+	mustDo(t, err)
+	var out []application.Message
+	for _, m := range mail {
+		if strings.HasPrefix(m.Subject, prefix) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// The Governor typed 'Done s5' for the step s5-receiver-notes
+// (mw-qtu3zvz.49, 2026-11-10): the one live step that id starts with is
+// retired as done by his hand, quoting his words and txid, and the Mayor gets
+// one mail (mw-gq6.1073).
+func TestTypedDoneRetiresTheOneLiveStepItNames(t *testing.T) {
+	ctx := context.Background()
+	for _, text := range []string{"Done echo", "Done e", "done ECHO!", "  DONE e.  ", "Done   echo"} {
+		t.Run(text, func(t *testing.T) {
+			f := newRunFixture(t)
+			mustDo(t, f.tracker.SetLabels("mw-e.3", application.LabelHitl))
+			for _, id := range []string{"linger", "far", "nowhere"} {
+				mustDo(t, f.tracker.SetNote(ctx, application.HandsRetiredKey("mw-e.3", id), "moot"))
+			}
+			f.say(t, "tx-done", "mw-e.3", text)
+			view := &countingView{}
+			inbox := f.inbox()
+			inbox.View = view
+
+			if _, err := inbox.Apply(ctx); err != nil {
+				t.Fatalf("applying: %v", err)
+			}
+
+			note, _ := f.tracker.Note(ctx, application.HandsRetiredKey("mw-e.3", "echo"))
+			if !strings.Contains(strings.ToLower(note), "done") || !strings.Contains(note, "tx-done") {
+				t.Fatalf("expected the step retired with his words and the txid, got %q", note)
+			}
+			if view.runs != 1 {
+				t.Errorf("expected the live view published once, got %d", view.runs)
+			}
+			if hasHitl(t, f.tracker, "mw-e.3") {
+				t.Error("expected hitl dropped with the last live step")
+			}
+			mails := f.mailsTo(t, "Retired: echo on mw-e.3 on his Done")
+			if len(mails) != 1 || len(f.subjects(t)) != 1 {
+				t.Errorf("expected the one Retired mail, got %v", f.subjects(t))
+			}
+			if jobs := f.runner.Jobs(); len(jobs) != 0 {
+				t.Errorf("expected nothing run, got %+v", jobs)
+			}
+		})
+	}
+}
+
+// A step that names no live step, or a prefix that fits two, retires nothing,
+// and the Mayor is mailed which steps are live (mw-gq6.1073).
+func TestTypedDoneThatNamesNoOneLiveStepRetiresNothing(t *testing.T) {
+	ctx := context.Background()
+	for name, c := range map[string]struct {
+		text, subject string
+		live          []string
+	}{
+		"no such step":    {"Done zzz", "Not applied: Done zzz on mw-e.3", []string{"echo", "echo-again", "far", "nowhere"}},
+		"prefix of two":   {"Done e", "Not applied: Done e on mw-e.3", []string{"echo", "echo-again"}},
+		"retired already": {"Done linger", "Not applied: Done linger on mw-e.3", []string{"echo", "far"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newRunFixture(t)
+			records := []application.HandsStepRecord{}
+			for _, id := range []string{"echo", "echo-again", "linger", "far", "nowhere"} {
+				step := domain.HandsStep{ID: id, Host: "desktop", As: "user", Run: "true"}
+				records = append(records, application.HandsStepRecord{HandsStep: step, AddedAt: "2026-09-28T11:00:00Z"})
+			}
+			raw, _ := json.Marshal(records)
+			mustDo(t, f.tracker.SetNote(ctx, application.HandsStepsKey("mw-e.3"), string(raw)))
+			mustDo(t, f.tracker.SetNote(ctx, application.HandsRetiredKey("mw-e.3", "linger"), "moot"))
+			f.say(t, "tx-done", "mw-e.3", c.text)
+
+			if _, err := f.inbox().Apply(ctx); err != nil {
+				t.Fatalf("applying: %v", err)
+			}
+
+			for _, id := range []string{"echo", "echo-again", "far", "nowhere"} {
+				if note, _ := f.tracker.Note(ctx, application.HandsRetiredKey("mw-e.3", id)); note != "" {
+					t.Errorf("expected step %s left alone, retired as %q", id, note)
+				}
+			}
+			mails := f.mailsTo(t, c.subject)
+			if len(mails) != 1 || len(f.subjects(t)) != 1 {
+				t.Fatalf("expected the one mail %q, got %v", c.subject, f.subjects(t))
+			}
+			for _, live := range c.live {
+				if !strings.Contains(mails[0].Body, live) {
+					t.Errorf("expected the live step %s named, got %q", live, mails[0].Body)
+				}
+			}
+			if got := f.tracker.Comments("mw-e.3"); len(got) != 1 || !strings.Contains(got[0], c.text) {
+				t.Errorf("expected his word kept on the bead as a comment, got %q", got)
+			}
+		})
+	}
+}
+
+// 'done' among other words, 'Done.' alone, and a bead with no hands steps take
+// the ordinary path: a comment and the usual mail, no step touched.
+func TestTypedDoneAmongOtherWordsTakesTheOrdinaryPath(t *testing.T) {
+	ctx := context.Background()
+	f := newRunFixture(t)
+	f.say(t, "tx-1", "mw-e.3", "done echo but it errored")
+	f.say(t, "tx-2", "mw-e.3", "Done.")
+	f.say(t, "tx-3", "mw-e.3", "Done with echo")
+	f.say(t, "tx-4", "mw-e.2", "Done echo")
+
+	if _, err := f.inbox().Apply(ctx); err != nil {
+		t.Fatalf("applying: %v", err)
+	}
+
+	for _, id := range []string{"echo", "linger", "far", "nowhere"} {
+		if note, _ := f.tracker.Note(ctx, application.HandsRetiredKey("mw-e.3", id)); note != "" {
+			t.Errorf("expected step %s left alone, retired as %q", id, note)
+		}
+	}
+	if got := f.tracker.Comments("mw-e.3"); len(got) != 3 {
+		t.Errorf("expected his three messages as comments, got %q", got)
+	}
+	if got := f.tracker.Comments("mw-e.2"); len(got) != 1 {
+		t.Errorf("expected the word on a bead with no steps a comment, got %q", got)
+	}
+	for _, subject := range f.subjects(t) {
+		if !strings.HasPrefix(subject, "Governor on ") {
+			t.Errorf("expected only the ordinary mails, got %q", subject)
+		}
+	}
+	if len(f.subjects(t)) != 4 {
+		t.Errorf("expected four ordinary mails, got %v", f.subjects(t))
+	}
+}
