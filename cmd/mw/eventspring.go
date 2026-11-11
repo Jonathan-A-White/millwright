@@ -123,6 +123,7 @@ func homeSpring(path, host string, out io.Writer) (*application.EventSpring, err
 	} else if ok {
 		jobs = append(jobs, job)
 	}
+	gateJobsByGiveWay(jobs, out)
 	spring := &application.EventSpring{Log: eventlog.New(path), Host: host, Jobs: jobs, Err: out, Settle: 2 * time.Second}
 	// The Mayor is mailed of a failed nightly or weekly pass (mw-gq6.531); with
 	// no vault configured there is no mailbox and no one is told.

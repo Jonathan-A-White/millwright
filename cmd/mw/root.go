@@ -27,6 +27,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newFileCmd())
 	root.AddCommand(newFuelCmd())
 	root.AddCommand(newGristCmd())
+	root.AddCommand(newGiveWayCmd())
 	root.AddCommand(newGhostCmd())
 	root.AddCommand(newImageCmd())
 	root.AddCommand(newGoogleCmd())
@@ -86,6 +87,9 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newUsageCmd())
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newWatchCmd())
+
+	// While the host gives way, the entries that start heavy work do nothing.
+	gateByGiveWay(root)
 
 	return root
 }
