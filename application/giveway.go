@@ -254,6 +254,9 @@ func factoryEntry(argv []string) (name string, hard bool) {
 	if len(argv) < 2 {
 		return "", false
 	}
+	if name := factoryService(argv); name != "" {
+		return name, false
+	}
 	program := argv[0]
 	if i := strings.LastIndex(program, "/"); i >= 0 {
 		program = program[i+1:]
@@ -262,6 +265,20 @@ func factoryEntry(argv []string) (name string, hard bool) {
 		return "", false
 	}
 	switch argv[1] {
+	case "usage":
+		if len(argv) > 2 && argv[2] == "read" {
+			return "usage read", false
+		}
+	case "doctor":
+		return "doctor", false
+	case "report":
+		if len(argv) > 2 && argv[2] == "send" {
+			return "report send", false
+		}
+	case "postern":
+		if len(argv) > 2 && argv[2] == "mirror" {
+			return "postern mirror", false
+		}
 	case "dispatch":
 		return "dispatch", true
 	case "millhand":
@@ -287,6 +304,29 @@ func factoryEntry(argv []string) (name string, hard bool) {
 		}
 	}
 	return "", false
+}
+
+// factoryService says whether a command line is one of the factory's services
+// that is not a mw command: the local phoneme scorer (python -m mw_scorer, the
+// mw-scorer.service) and the two shell scripts the timers run, mw-health and
+// mw-mail-notify (the script is the first or second word, after sh or bash). They
+// are lowered, never stopped: a stopped scorer would hold a caller's request for
+// good, and a stopped script would hold its lock.
+func factoryService(argv []string) string {
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == "-m" && argv[i+1] == "mw_scorer" {
+			return "mw_scorer"
+		}
+	}
+	for _, word := range argv[:min(len(argv), 2)] {
+		if i := strings.LastIndex(word, "/"); i >= 0 {
+			word = word[i+1:]
+		}
+		if word == "mw-health" || word == "mw-mail-notify" {
+			return word
+		}
+	}
+	return ""
 }
 
 // builderMarked is whether a process carries the mark of a Builder's session: the

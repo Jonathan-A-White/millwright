@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // closeOutAgain runs the close-out alone again of a story its last close-out
@@ -50,6 +51,12 @@ func (d Dispatch) closeOutAgain(ctx context.Context, detail StoryDetail, report 
 	spec, err := d.Boot.CloseOut(ctx, detail, WorktreeDir(rigDir, id))
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: %v", id, err))
+		return false
+	}
+	// The marker is read again right before the close-out starts, as it is before
+	// a Builder's session (mw-2891blf.16): it runs the rig's tests.
+	if standing, giving := d.givesWayNow(ctx); giving {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: handed back for its close-out alone, but the host gives way since %s, so it was left for the next tick", id, standing.Since.UTC().Format(time.RFC3339)))
 		return false
 	}
 	if status.State != StateGone {

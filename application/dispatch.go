@@ -1423,6 +1423,18 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			report.Notes = append(report.Notes, "local network fault: "+fault.Said+"; the stories after it were not tried")
 			break
 		}
+		var gaveWay *gaveWayAfterClaim
+		if errors.As(err, &gaveWay) {
+			// The host began to give way after this pass's look at the marker: the
+			// claim has gone back and the story is ready, as it was. The report says
+			// what the first look would have, and the stories after this one are not
+			// tried (mw-2891blf.16).
+			standing := gaveWay.standing
+			report.GivesWay = &standing
+			d.print(fmt.Sprintf("dispatch on %s: gives way since %s (%s); %s was not started\n",
+				d.Host, standing.Since.UTC().Format(time.RFC3339), standing.By, id))
+			break
+		}
 		if err != nil {
 			var pour *pourRefusal
 			var refused *leftoverRefusal
@@ -2093,6 +2105,19 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	}
 	if again.Held() {
 		return undoAs("starting the session", errHeldAfterClaim, true, d.releaseHeld)
+	}
+	// The worktree, the pour and the boot took their time, and the person at the
+	// host's screen may have turned give way on in it: the marker is read once more,
+	// right before the session starts, and a host that gives way starts no Builder
+	// (mw-2891blf.16). The story goes back as it was found, ready.
+	if standing, giving := d.givesWayNow(ctx); giving {
+		return undoAs("starting the session", errGaveWayAfterClaim, true, func(ctx context.Context, id string, why error) (bool, error) {
+			released, err := d.release(ctx, id, why)
+			if released {
+				return true, &gaveWayAfterClaim{standing: standing, err: err}
+			}
+			return released, err
+		})
 	}
 	// Only now, with everything else in place, is the dead session cleared away:
 	// its output is all that is left of the run before, and a dispatch that fails
@@ -2918,6 +2943,36 @@ const (
 // errHeldAfterClaim is why a claimed story is given back without a session: the
 // Mayor held it after the claim was made.
 var errHeldAfterClaim = errors.New("the story was held after it was claimed, so no session is started for it")
+
+// errGaveWayAfterClaim is why a claimed story is given back without a session: the
+// host's give-way marker was found standing right before the session would start.
+var errGaveWayAfterClaim = errors.New("the host gives way, so no session is started for it")
+
+// gaveWayAfterClaim is the refusal start returns for a story whose claim was given
+// back because the host began to give way after the pass's first look at the
+// marker. Run records the give-way in the report, as the first look does, and
+// goes no further: it is no failed start.
+type gaveWayAfterClaim struct {
+	standing GiveWayStanding
+	err      error
+}
+
+func (g *gaveWayAfterClaim) Error() string { return g.err.Error() }
+func (g *gaveWayAfterClaim) Unwrap() error { return g.err }
+
+// givesWayNow reads the give-way marker again, for the places that start a session
+// after the pass read it once at its start. A marker that cannot be read gives way
+// to nobody, as at the start of the pass.
+func (d Dispatch) givesWayNow(ctx context.Context) (GiveWayStanding, bool) {
+	if d.GiveWay == nil || d.DryRun {
+		return GiveWayStanding{}, false
+	}
+	standing, giving, err := d.GiveWay.Standing(ctx, true)
+	if err != nil || !giving {
+		return GiveWayStanding{}, false
+	}
+	return standing, true
+}
 
 // heldAfterClaim is the refusal start returns for a story held after its claim;
 // Run passes the story over for it as it does for a claim lost, and the story is

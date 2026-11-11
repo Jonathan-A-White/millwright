@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -587,5 +588,120 @@ func TestGiveWayOffWithNoMarkerContinuesAStoppedOrphan(t *testing.T) {
 	}
 	if len(host.Stopped()) != 0 {
 		t.Fatalf("still stopped: %v", host.Stopped())
+	}
+}
+
+// lateGate is a give-way gate that finds the host free when the dispatch begins
+// and giving way every time it is asked after: give way turned on while the
+// dispatch was between its gate and its first session (mw-2891blf.16).
+type lateGate struct {
+	calls int
+	since time.Time
+}
+
+func (g *lateGate) Standing(context.Context, bool) (application.GiveWayStanding, bool, error) {
+	g.calls++
+	if g.calls == 1 {
+		return application.GiveWayStanding{}, false, nil
+	}
+	return application.GiveWayStanding{Since: g.since, By: "mw@laptop"}, true, nil
+}
+
+// mw-2891blf.16: a dispatch that passed its gate before give way turned on reads
+// the marker again right before it starts a Builder session, and starts none: it
+// leaves the story as it found it (ready, nobody's), and the run log says why.
+func TestADispatchPastItsGateStartsNoSessionOnceTheHostGivesWay(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, worktrees, runner, _ := aFactory(t)
+	var out bytes.Buffer
+	ticks := &apptest.FakeTickLog{}
+	gate := &lateGate{since: time.Date(2026, 11, 13, 16, 40, 0, 0, time.UTC)}
+	dispatch.GiveWay, dispatch.Out, dispatch.Log = gate, &out, ticks
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("dispatching: %v\n%s", err, out.String())
+	}
+	if len(report.Started) != 0 || len(runner.Names()) != 0 {
+		t.Fatalf("started %+v, sessions %v: a host that gives way started a Builder", report.Started, runner.Names())
+	}
+	if len(report.Failed) != 0 {
+		t.Fatalf("giving way is not a failed start: %+v", report.Failed)
+	}
+	if report.GivesWay == nil {
+		t.Fatalf("the report does not say the host gives way: %+v", report)
+	}
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Assignee != "" || detail.Held() || !detail.LeaseExpires.IsZero() {
+		t.Fatalf("story left claimed or held: status %q assignee %q lease %v", detail.Status, detail.Assignee, detail.LeaseExpires)
+	}
+	for _, label := range detail.Labels {
+		if label == application.RunState+":"+application.RunRunning {
+			t.Fatalf("story reads as running, labels %v", detail.Labels)
+		}
+	}
+	if len(worktrees.removed) == 0 {
+		t.Fatalf("the worktree cut for the story was left behind")
+	}
+	if lines := ticks.Lines(); len(lines) != 1 || !strings.Contains(lines[0], "ok: gives way since 2026-11-13T16:40:00Z") {
+		t.Fatalf("dispatch log = %q, want it to say the host gives way", lines)
+	}
+}
+
+// mw-2891blf.16: give way lowers the scorer service and a running oneshot timer
+// service of mw's (usage read, doctor, report send, postern mirror, mw-health,
+// mw-mail-notify) as it lowers a running dispatch, stops none of them, and status
+// names each; off signals none of them.
+func TestGiveWayOnLowersTheScorerAndTheTimerServicesAndStopsNoneOfThem(t *testing.T) {
+	way, host, out, _ := aGiveWayWorld()
+	host.Procs = append(host.Procs,
+		proc(700, 1, "S", "t700", "/home/g/.local/share/mw-scorer/venv/bin/python", "-m", "mw_scorer", "--host", "127.0.0.1", "--port", "8765"),
+		proc(710, 1, "S", "t710", "/home/g/.local/bin/mw", "usage", "read"),
+		proc(720, 1, "S", "t720", "/home/g/.local/bin/mw", "doctor"),
+		proc(721, 720, "S", "t721", "bd", "list"),
+		proc(730, 1, "S", "t730", "/home/g/.local/bin/mw", "report", "send"),
+		proc(740, 1, "S", "t740", "mw", "postern", "mirror"),
+		proc(750, 1, "S", "t750", "/bin/sh", "/home/g/.local/bin/mw-health"),
+		proc(760, 1, "S", "t760", "/bin/bash", "/home/g/.local/bin/mw-mail-notify"),
+		proc(761, 760, "S", "t761", "sleep", "60"),
+		proc(770, 1, "S", "t770", "/usr/bin/python3", "-m", "http.server"),
+	)
+	ctx := context.Background()
+	if err := way.On(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	lowered := slices.Clone(host.LoweredPids)
+	slices.Sort(lowered)
+	if want := []int{700, 710, 720, 721, 730, 740, 750, 760, 761}; !reflect.DeepEqual(lowered, want) {
+		t.Fatalf("lowered %v, want %v (and not the unrelated python 770)", lowered, want)
+	}
+	for _, pid := range lowered {
+		if slices.Contains(host.Stopped(), pid) {
+			t.Errorf("process %d was stopped: a service is lowered, never stopped", pid)
+		}
+	}
+	out.Reset()
+	if err := way.Status(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"mw_scorer", "usage read", "mw doctor", "report send", "postern mirror", "mw-health", "mw-mail-notify"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("status = %q, want it to name %q as lowered", out.String(), want)
+		}
+	}
+	host.Calls = nil
+	if err := way.Off(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range host.Calls {
+		for _, pid := range lowered {
+			if strings.HasSuffix(call, fmt.Sprintf(" %d", pid)) {
+				t.Fatalf("off signalled a lowered process: %v", host.Calls)
+			}
+		}
 	}
 }
