@@ -61,3 +61,12 @@ var DispatchTimer string
 //
 //go:embed contrib/windows/wsl-flag-watch.ps1
 var WSLFlagWatch string
+
+// GiveWayScript is contrib/windows/giveway.ps1: the Windows half of `mw giveway`,
+// run by three scheduled tasks of the account that owns the WSL distro (unlock,
+// lock, tick). mw host giveway --install-line pins a download of it in the paste
+// it prints and holds the download to this copy's SHA-256; --inline carries it
+// in the paste instead.
+//
+//go:embed contrib/windows/giveway.ps1
+var GiveWayScript string
