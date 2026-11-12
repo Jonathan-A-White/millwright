@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -91,7 +90,10 @@ func newNudgeCmd() *cobra.Command {
 				return err
 			}
 			tracker := mwGateway(dir, host)
+			cloudBook, cloudPlan := cloudStatus(dir, host)
 			clauses, err := application.Nudge{
+				CloudBook:    cloudBook,
+				CloudPlan:    cloudPlan,
 				Retired:      retired,
 				Tracker:      tracker,
 				Notes:        tracker,
@@ -103,7 +105,7 @@ func newNudgeCmd() *cobra.Command {
 				CloseOuts:    hostCloseOuts(),
 				Transcripts:  transcripts,
 				Rigs:         rigs,
-				Down:         boxesDown{files: mwVault(dir, host), book: pause.Book{Root: dir, Files: mwVault(dir, host), Notes: tracker}},
+				Down:         boxesDown{files: mwVault(dir, host), book: pause.Book{Root: dir, Files: mwVault(dir, host), Notes: tracker}, cloud: application.CloudBoxesDown{Book: cloudBook, Plan: cloudPlan}},
 				SyncMode:     setting.Mode(),
 				GiveWayStale: giveWayStaleSetting(),
 				NudgeAfter:   time.Duration(after) * time.Minute,
@@ -122,10 +124,13 @@ func newNudgeCmd() *cobra.Command {
 
 // boxesDown is application.DownHosts: a host is a down box when the pause in
 // force brought it down, or when its name is one the cloud gives a box and the
-// cloud book holds no such box up or being made (mw cloud down destroyed it).
+// cloud book holds no such box, or one still being made or restored (mw cloud
+// down destroyed the box that wrote the sync note; a new box under the name has
+// written none, mw-gq6.1127).
 type boxesDown struct {
 	files *vault.Vault
 	book  pause.Book
+	cloud application.CloudBoxesDown
 }
 
 func (d boxesDown) Down(ctx context.Context, host string) (bool, error) {
@@ -134,22 +139,5 @@ func (d boxesDown) Down(ctx context.Context, host string) (bool, error) {
 			return true, nil
 		}
 	}
-	_, ok, err := config.Cloud()
-	if err != nil || !ok {
-		return false, err
-	}
-	number, found := strings.CutPrefix(host, application.DefaultCloudPrefix)
-	if !found || number == "" || strings.Trim(number, "0123456789") != "" {
-		return false, nil
-	}
-	state, err := (vault.CloudBook{Vault: d.files}).Read(ctx)
-	if err != nil {
-		return false, err
-	}
-	for _, box := range state.Boxes {
-		if box.Name == host {
-			return false, nil
-		}
-	}
-	return true, nil
+	return d.cloud.Down(ctx, host)
 }

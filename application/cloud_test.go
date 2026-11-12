@@ -360,32 +360,60 @@ func TestABoxWithARunningSessionBesideAQueuedClaimStaysBusy(t *testing.T) {
 }
 
 // checkHandedBack asserts what destroying cloud1 did to the stories of
-// queuedOnBox, and that the text says so.
+// queuedOnBox, and that the text says so: every claim the box held is given
+// back (mw-gq6.1127), whatever became of its session, and re-pathed to
+// host=auto. The queued one keeps its run state, so that its batch lands it;
+// the others lose theirs, so that a fresh dispatch is not confused by it.
 func checkHandedBack(t *testing.T, tracker *apptest.FakeTracker, text string) {
 	t.Helper()
-	assignee, status := claimOf(t, tracker, "mw-q.1")
-	if assignee != "" || status != apptest.StatusOpen {
-		t.Errorf("expected the queued mw-q.1 handed back (open, unassigned), got %q %q", assignee, status)
-	}
-	if got := hostOf(t, tracker, "mw-q.1"); got != domain.HostAuto {
-		t.Errorf("expected mw-q.1 re-pathed to host auto, got %s", got)
+	for _, id := range []string{"mw-q.1", "mw-q.2", "mw-q.3"} {
+		assignee, status := claimOf(t, tracker, id)
+		if assignee != "" || status != apptest.StatusOpen {
+			t.Errorf("expected %s handed back (open, unassigned), got %q %q", id, assignee, status)
+		}
+		if got := hostOf(t, tracker, id); got != domain.HostAuto {
+			t.Errorf("expected %s re-pathed to host auto, got %s", id, got)
+		}
+		if !strings.Contains(text, id) {
+			t.Errorf("expected the output to name %s as handed back:\n%s", id, text)
+		}
 	}
 	if got := tracker.State("mw-q.1", application.RunState); got != application.RunQueued {
 		t.Errorf("expected mw-q.1 still %s=%s, so that its batch lands it and nobody works it again, got %q", application.RunState, application.RunQueued, got)
 	}
 	for _, id := range []string{"mw-q.2", "mw-q.3"} {
-		if assignee, _ := claimOf(t, tracker, id); assignee != "mw@cloud1" {
-			t.Errorf("expected %s left to its claim on cloud1, got %q", id, assignee)
-		}
-		if got := hostOf(t, tracker, id); got != "cloud1" {
-			t.Errorf("expected %s left on cloud1, got %s", id, got)
+		if got := tracker.State(id, application.RunState); got != "" {
+			t.Errorf("expected the run state of %s cleared with its claim, got %q", id, got)
 		}
 	}
 	if got := hostOf(t, tracker, "mw-q.4"); got != domain.HostAuto {
 		t.Errorf("expected the open mw-q.4 re-pathed as before, got %s", got)
 	}
-	if !strings.Contains(text, "mw-q.1") || !strings.Contains(text, "queued") || strings.Contains(text, "mw-q.2") || strings.Contains(text, "mw-q.3") {
-		t.Errorf("expected the output to name the queued mw-q.1 handed back, and not the stories left:\n%s", text)
+}
+
+// A claim on another box is not the destroyed box's to give back.
+func TestMwCloudDownLeavesAClaimOnAnotherBoxAlone(t *testing.T) {
+	now := time.Date(2026, 11, 12, 18, 50, 0, 0, time.UTC)
+	tracker := queuedOnBox(t)
+	tracker.AddStory("mw-q", domain.Story{ID: "mw-q.5", Title: "story mw-q.5"})
+	if err := tracker.SetStoryMetadata(context.Background(), "mw-q.5", map[string]string{"host": "cloud2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.ClaimAs("mw-q.5", "mw@cloud2", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: []application.CloudBox{{Name: "cloud1", Up: now.Add(-3 * time.Hour)}}}}
+	if _, err := (application.CloudCheck{
+		Work: tracker, Stories: tracker, Provider: &apptest.FakeCloud{}, Book: book, Host: "desktop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}).Down(context.Background(), "cloud1"); err != nil {
+		t.Fatal(err)
+	}
+	if assignee, _ := claimOf(t, tracker, "mw-q.5"); assignee != "mw@cloud2" {
+		t.Errorf("expected cloud2's claim left alone, got %q", assignee)
+	}
+	if got := hostOf(t, tracker, "mw-q.5"); got != "cloud2" {
+		t.Errorf("expected mw-q.5 left on cloud2, got %s", got)
 	}
 }
 
@@ -1383,4 +1411,203 @@ func TestABoxStillBeingMadeCountsNoSessionFreeAndNoSecondBoxIsMade(t *testing.T)
 func cloudEventsOf(log *apptest.FakeEventLog) []events.Event {
 	got, _ := log.Since(context.Background(), 0)
 	return got
+}
+
+// mw-gq6.1127: the quiet alarm cried "cloud1 last synced 25 min ago" for the
+// old cloud1, destroyed, while a new cloud1 was being made under the name.
+
+func quietAlarmOf(t *testing.T, book application.CloudBook) []application.NudgeClause {
+	t.Helper()
+	tracker := aHostSyncedLongAgoHoldingAClaim(t)
+	syncedAt(t, tracker, "cloud2", 25*time.Minute)
+	return nudgeReport(t, tracker, application.Nudge{
+		Down:      application.CloudBoxesDown{Book: book, Plan: cloudPlan},
+		CloudBook: book, CloudPlan: cloudPlan,
+	})
+}
+
+func TestTheQuietAlarmIsNotRaisedForABoxTheCloudBookMarksMaking(t *testing.T) {
+	made := statusNow.Add(-5 * time.Minute)
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11",
+		Boxes: []application.CloudBox{{Name: "cloud2", Up: made, Making: true, Vultr: "active locked"}}}}
+	for _, c := range quietAlarmOf(t, book) {
+		if c.Key == "host:cloud2" {
+			t.Errorf("expected no quiet alarm for a box being made, got %+v", c)
+		}
+	}
+}
+
+func TestTheQuietAlarmIsNotRaisedForABoxTheCloudBookDoesNotHold(t *testing.T) {
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11"}}
+	for _, c := range quietAlarmOf(t, book) {
+		if c.Key == "host:cloud2" {
+			t.Errorf("expected no quiet alarm for a box that is down, got %+v", c)
+		}
+	}
+}
+
+func TestTheQuietAlarmIsStillRaisedForABoxUpAndSilent(t *testing.T) {
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11",
+		Boxes: []application.CloudBox{{Name: "cloud2", Up: statusNow.Add(-5 * time.Hour)}}}}
+	found := false
+	for _, c := range quietAlarmOf(t, book) {
+		found = found || c.Key == "host:cloud2"
+	}
+	if !found {
+		t.Errorf("expected the quiet alarm for a box that is up and silent")
+	}
+}
+
+func TestAMakingBoxPast15MinutesHasItsOwnAlarmNamingVultrsStatusAndTheStep(t *testing.T) {
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11",
+		Boxes: []application.CloudBox{{Name: "cloud2", Up: statusNow.Add(-16 * time.Minute), Making: true, Vultr: "active locked"}}}}
+	clauses := quietAlarmOf(t, book)
+	var got string
+	for _, c := range clauses {
+		if c.Key == "cloud:cloud2" {
+			got = c.Text
+		}
+	}
+	for _, want := range []string{"cloud2", "16m", "Vultr says active locked", "mw cloud down cloud2"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected the making alarm to say %q, got %q in %+v", want, got, clauses)
+		}
+	}
+	// And it is the DAMPERS line too.
+	book.State.Boxes[0].Up = statusNow.Add(-14 * time.Minute)
+	for _, c := range quietAlarmOf(t, book) {
+		if c.Key == "cloud:cloud2" {
+			t.Errorf("expected no making alarm at 14 minutes, got %+v", c)
+		}
+	}
+}
+
+func TestTheDampersSaysAMakeOf16MinutesAndTheStepToEndIt(t *testing.T) {
+	now := time.Date(2026, 11, 12, 19, 10, 0, 0, time.UTC)
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11",
+		Boxes: []application.CloudBox{{Name: "cloud1", Up: now.Add(-16 * time.Minute), Making: true, Vultr: "active locked"}}}}
+	tracker := apptest.NewFakeTracker()
+	damp, err := application.DamperSurvey{Tracker: tracker, Notes: tracker, Cloud: book, CloudPlan: cloudPlan}.Dampers(context.Background(), application.WorkInHand{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for _, a := range damp.Alarms {
+		lines = append(lines, a.Line())
+	}
+	text := strings.Join(lines, "\n")
+	if !strings.Contains(text, "Vultr says active locked") || !strings.Contains(text, "mw cloud down cloud1") {
+		t.Errorf("expected a DAMPERS line with Vultr's status and the step, got %q", text)
+	}
+}
+
+// A box destroyed is not made again under its name for 24 hours: its notes
+// (last sync, ticks, mw commit) would otherwise be read as the new box's.
+func TestANewBoxNeverTakesTheNameOfABoxDownedInTheLast24Hours(t *testing.T) {
+	now := time.Date(2026, 11, 12, 18, 50, 0, 0, time.UTC)
+	tracker := fullHostsWithAutoWaiting(t, now, map[string]int{"laptop": 2})
+	plan := cloudPlan
+	plan.HostCaps = map[string]int{"laptop": 2}
+	provider := &apptest.FakeCloud{}
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: []application.CloudBox{{Name: "cloud1", Up: now.Add(-3 * time.Hour)}}}}
+	at := now
+	check := application.CloudCheck{Work: tracker, Stories: tracker, Provider: provider, Book: book, Host: "laptop",
+		Plan: plan, Now: func() time.Time { return at }}
+	if _, err := check.Down(context.Background(), "cloud1"); err != nil {
+		t.Fatal(err)
+	}
+	at = now.Add(2 * time.Minute)
+	if _, err := check.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := provider.TakeBegun(); len(got) != 1 || got[0] != "cloud2" {
+		t.Fatalf("expected cloud2 begun, the name cloud1 being a box downed 2 minutes ago, got %v", got)
+	}
+	// 24 hours on, the name is free again.
+	book.State.Boxes = nil
+	at = now.Add(24*time.Hour + time.Minute)
+	if _, err := check.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := provider.TakeBegun(); len(got) != 1 || got[0] != "cloud1" {
+		t.Errorf("expected cloud1 made again after 24 hours, got %v", got)
+	}
+}
+
+// A box Vultr reports locked past 30 minutes, making or down, is named with
+// its instance id and the step: open a Vultr ticket.
+func TestABoxVultrHoldsLockedPast30MinutesIsNamedWithItsInstanceIdAndTheStep(t *testing.T) {
+	for name, box := range map[string]application.CloudBox{
+		"making": {Name: "cloud1", Making: true},
+		"down":   {Name: "cloud1", Refused: ": Vultr would not delete (locked)"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			now := time.Date(2026, 11, 12, 19, 0, 0, 0, time.UTC)
+			box.Up = now.Add(-5 * time.Minute)
+			provider := &apptest.FakeCloud{Orphans: []application.CloudInstance{{ID: "vultr-9f3", Label: "cloud1", Status: "active", Server: "locked"}}}
+			book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: []application.CloudBox{box}}}
+			tracker := apptest.NewFakeTracker()
+			at := now
+			// An idle box is destroyed after the plan's Idle; this one is kept to be read.
+			plan := cloudPlan
+			plan.Idle = 10 * time.Hour
+			check := application.CloudCheck{Work: tracker, Provider: provider, Book: book, Host: "laptop",
+				Plan: plan, Now: func() time.Time { return at }}
+			survey := application.DamperSurvey{Tracker: tracker, Notes: tracker, Cloud: book, CloudPlan: cloudPlan}
+			alarms := func() string {
+				damp, err := survey.Dampers(context.Background(), application.WorkInHand{}, at)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var lines []string
+				for _, a := range damp.Alarms {
+					if a.Principle == application.DamperCloudMake {
+						lines = append(lines, a.Line())
+					}
+				}
+				return strings.Join(lines, "\n")
+			}
+			if _, err := check.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if text := alarms(); strings.Contains(text, "vultr-9f3") {
+				t.Errorf("expected no ticket line the minute the lock is first seen:\n%s", text)
+			}
+			at = now.Add(31 * time.Minute)
+			if _, err := check.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			text := alarms()
+			for _, want := range []string{"cloud1", "locked", "vultr-9f3", "open a Vultr ticket"} {
+				if !strings.Contains(text, want) {
+					t.Errorf("expected the alarm to say %q, got:\n%s", want, text)
+				}
+			}
+		})
+	}
+}
+
+// A box stuck making is not a box to make a second beside.
+func TestNoNewBoxIsMadeWhileOneIsStuckMaking(t *testing.T) {
+	now := time.Date(2026, 11, 12, 19, 0, 0, 0, time.UTC)
+	tracker := fullHostsWithAutoWaiting(t, now, map[string]int{"laptop": 2})
+	plan := cloudPlan
+	plan.HostCaps = map[string]int{"laptop": 2}
+	provider, book := aMakingBox(now)
+	book.State.Boxes[0].Cap = 1
+	check := func(up time.Duration) []string {
+		book.State.Boxes[0].Up = now.Add(-up)
+		if _, err := (application.CloudCheck{Work: tracker, Stories: tracker, Provider: provider, Book: book, Host: "laptop",
+			Plan: plan, Now: func() time.Time { return now }}).Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		return provider.TakeBegun()
+	}
+	if got := check(56 * time.Minute); len(got) != 0 {
+		t.Errorf("expected no box begun beside one stuck making for 56 minutes, got %v", got)
+	}
+	book.State.Boxes = book.State.Boxes[:1]
+	if got := check(5 * time.Minute); len(got) != 1 {
+		t.Errorf("expected a second box begun beside one made for 5 minutes (the demand outruns its cap), got %v", got)
+	}
 }
