@@ -715,9 +715,21 @@ func (g *Gateway) SupersedeStory(ctx context.Context, id, with string) error {
 
 // HoldStory implements application.WorkTracker: the story goes back to
 // deferred, beads' own way of holding work, the status CreateStory files it
-// in.
+// in. The hold is guarded on nobody holding the story (--if-assignee ''), so a
+// claim that lands between the caller's read of the story and this write is
+// not held over: bd writes nothing and exits 13, and the Builder's run stays in
+// progress (mw-gq6.1150). The refusal is told apart from any other failure by
+// reading the story back, as ClaimStory does, rather than by bd's wording. A
+// story already held or open and unassigned is held as before.
 func (g *Gateway) HoldStory(ctx context.Context, id string) error {
-	_, err := g.call(ctx, "update", id, "--status", StatusDeferred)
+	_, err := g.call(ctx, "update", id, "--status", StatusDeferred, "--if-assignee", "")
+	if err == nil {
+		return nil
+	}
+	story, readErr := g.showOne(ctx, id)
+	if readErr == nil && story.Assignee != "" {
+		return fmt.Errorf("%s is claimed by %s, so it was not held and nothing was written: %w", id, story.Assignee, err)
+	}
 	return err
 }
 

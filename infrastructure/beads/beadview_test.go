@@ -116,8 +116,8 @@ func TestSetStoryPriorityAndHoldStoryAreOneBdUpdateEach(t *testing.T) {
 	if !strings.HasSuffix(lines[0], "update t-1 --priority 0") {
 		t.Errorf("expected bd update t-1 --priority 0, got %q", lines[0])
 	}
-	if !strings.HasSuffix(lines[1], "update t-1 --status deferred") {
-		t.Errorf("expected bd update t-1 --status deferred, got %q", lines[1])
+	if !strings.HasSuffix(lines[1], "update t-1 --status deferred --if-assignee") {
+		t.Errorf("expected bd update t-1 --status deferred --if-assignee '', got %q", lines[1])
 	}
 }
 
