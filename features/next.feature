@@ -1382,6 +1382,7 @@ Feature: Closing out a finished story and carrying on
     And the tracker refuses to close "mw-gq6.1", saying: assignee is root, actor is mw@vps; reclaim or use --force
     When mw closes out "mw-gq6.1"
     Then the close-out says the story is landed but still open
+    And the Mayor was mailed that the close of "mw-gq6.1" was lost after 4 tries, and has read it
     Given the tracker will take a close of "mw-gq6.1" again
     When mw closes out "mw-gq6.1" a second time
     Then the story "mw-gq6.1" is closed

@@ -23,6 +23,7 @@ func registerNextMailSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^that mail's body names the commit that landed on "([^"]*)"$`, c.thatMailsBodyNamesTheCommit)
 	ctx.Then(`^that mail's body holds:$`, c.thatMailsBodyHolds)
 	ctx.Then(`^that mail's last line is: (.+)$`, c.thatMailsLastLineIs)
+	ctx.Then(`^the Mayor was mailed that the close of "([^"]*)" was lost after (\d+) tries, and has read it$`, c.theMayorWasMailedTheCloseWasLost)
 	ctx.Then(`^no mail was sent$`, c.noMailWasSent)
 	ctx.Then(`^the close-out returned no error$`, c.theCloseOutReturnedNoError)
 	ctx.Then(`^stderr says the Mayor could not be mailed, quoting: (.+)$`, c.stderrSaysTheMayorCouldNotBeMailed)
@@ -67,6 +68,31 @@ func (c *nextContext) exactlyOneMailWasSent(to, from string) error {
 		return fmt.Errorf("expected the mail to go to %q from %q, got to %q from %q", to, from, mail.To, mail.From)
 	}
 	return nil
+}
+
+// theMayorWasMailedTheCloseWasLost checks that the mail so far holds exactly one
+// lost-write mail about the story's close (mw-gq6.1119), naming how often the
+// close was tried, and reads it, so that what the scenario counts after is the
+// mail of the landing.
+func (c *nextContext) theMayorWasMailedTheCloseWasLost(id string, tries int) error {
+	sent, err := c.mailSent()
+	if err != nil {
+		return err
+	}
+	var lost []application.Message
+	for _, mail := range sent {
+		if mail.To == "mayor" && strings.HasPrefix(mail.Subject, "lost write: the close of "+id+" ") {
+			lost = append(lost, mail)
+		}
+	}
+	if len(lost) != 1 {
+		return fmt.Errorf("expected one lost-write mail about the close of %s to the Mayor, got %d among %+v", id, len(lost), sent)
+	}
+	if want := fmt.Sprintf("tried %d times", tries); !strings.Contains(lost[0].Body, want) {
+		return fmt.Errorf("expected the mail to say it was %q, got:\n%s", want, lost[0].Body)
+	}
+	_, err = c.mailbox.Read(context.Background(), lost[0].ID, "mayor")
+	return err
 }
 
 func (c *nextContext) thatMailsSubjectIs(want string) error {

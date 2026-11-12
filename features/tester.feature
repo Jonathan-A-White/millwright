@@ -168,6 +168,7 @@ Feature: A one-week Tester trial
     When mw closes out "mw-l.2"
     Then the story "mw-l.2" is not closed
     And nothing is left of the worktree of "mw-l.2"
+    And the Mayor was mailed that the close of "mw-l.2" was lost after 4 tries, and has read it
     Given the tracker will take a close of "mw-l.2" again
     When mw closes out "mw-l.2" a second time
     Then the story "mw-l.2" is closed
