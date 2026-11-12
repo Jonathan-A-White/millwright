@@ -2558,6 +2558,28 @@ month's cap, counted from the box hours it made (kept in the vault) and Vultr's
 billing. Each move is a `cloud` event, and `mw status` shows a CLOUD section.
 `docs/vultr-boost.md` ("Elastic") says it all. See `features/cloud.feature`.
 
+The table, with each default where it has one (`slow_make_minutes` is how long a
+make may run, unfinished, before the check says so as a cloud event and DAMPERS
+names the box):
+
+```toml
+[cloud]
+provider        = "vultr"   # the one provider
+max_boxes       = 2         # boxes up at once, at most
+monthly_cap_usd = 75        # the most the boxes may cost in a UTC month
+idle_minutes    = 30        # a box with no story this long is destroyed
+hourly_usd      = 0.132     # what one box costs an hour
+box_cap         = 2         # sessions a box runs at once
+up_minutes      = 60        # how long a make may run before it reads the box back from Vultr
+slow_make_minutes = 30      # how long a make may run, unfinished, before it is a cloud event and a DAMPERS line
+snapshot        = "<id>"    # what contrib/vultr-boost snapshot printed; blank bootstraps in full
+command         = "<full path to contrib/vultr-boost>"   # default: the millwright checkout of [rigs]
+
+[cloud.caps]                # the sessions each host runs at once
+desktop = 2
+laptop  = 2
+```
+
 ## Going easy on a metered network
 
 On a WSL host mw asks Windows whether the connection it is using is metered
