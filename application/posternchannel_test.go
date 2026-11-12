@@ -135,3 +135,24 @@ func TestPosternSendBeadWithoutClassPointsAtBeadChannel(t *testing.T) {
 		t.Fatalf("expected the refusal to name --bead-channel, got %v", err)
 	}
 }
+
+// A reply of his in a bead's or a named channel to a root is answered with
+// --re alone: the root may be in Factory, where send refuses a channel flag
+// that is not the root's, and mw finds the root's channel from the --re.
+func TestPosternInboxReplyAnswerNamesNoChannelFlag(t *testing.T) {
+	for name, thread := range map[string]application.PosternThread{
+		"bead":  {Bead: "mw-zz.9"},
+		"named": {Topic: "roadmap"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out := channelInbox(t, threaded(t, thread, "direct:factoryroot"), "direct:reply")
+			want := `answer in its thread: mw postern send --re direct:factoryroot "..."`
+			if !strings.Contains(out, want) {
+				t.Fatalf("expected %q, got:\n%s", want, out)
+			}
+			if strings.Contains(out, "--bead-channel") || strings.Contains(out, "--channel") {
+				t.Fatalf("expected no channel flag in the answer line, got:\n%s", out)
+			}
+		})
+	}
+}

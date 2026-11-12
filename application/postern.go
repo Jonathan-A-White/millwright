@@ -1052,7 +1052,8 @@ func (m PosternInboxMessage) reLabel() string {
 
 // answerLine is the command that answers this message inside its thread: the
 // channel's flag, if it is not General, and --re naming the post the thread
-// hangs from — this message's own re when it answers one, else its own txid.
+// hangs from — this message's own re when it answers one (with no channel
+// flag: the root's channel is found from the --re), else its own txid.
 // "" when the message has neither.
 func (m PosternInboxMessage) answerLine() string {
 	post := m.Re
@@ -1064,6 +1065,11 @@ func (m PosternInboxMessage) answerLine() string {
 	}
 	channel := ""
 	switch {
+	case m.Re != "":
+		// A reply hangs in its root's channel, which may not be the channel
+		// the reply itself names (a root in Factory): send refuses a channel
+		// flag that is not the root's, and finds the root's own from --re
+		// (rememberChannelOf, PosternSend.inRootsChannel).
 	case m.ThreadIsBead:
 		channel = " --bead-channel " + m.Thread
 	case m.Thread != PosternGeneralThread:
