@@ -351,3 +351,39 @@ func TestPathSetRefusesARetiredHostCopiedFromASibling(t *testing.T) {
 		t.Fatalf("expected the copied host to be refused naming retired_hosts, got %v", err)
 	}
 }
+
+func TestPathSetWithNeitherAfterNorHoldOnAReleasingRigSaysTheStoryStaysHeld(t *testing.T) {
+	const line = `held: no --after given; pass --after none to release or --hold "<why>" to keep it held`
+	for name, set := range map[string]application.PathSet{
+		"neither":    {},
+		"after":      {After: []string{"mw-gq6.3"}},
+		"after none": {After: []string{}},
+		"hold":       {Hold: "waits for the demo"},
+	} {
+		tracker, rules := aReleasingRig(t)
+		var errOut strings.Builder
+		set.Tracker, set.Rules, set.Err = tracker, rules, &errOut
+		if _, err := set.Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err != nil {
+			t.Fatalf("%s: setting the path: %v", name, err)
+		}
+		got := errOut.String()
+		if name == "neither" {
+			if got != line+"\n" {
+				t.Errorf("%s: expected stderr to be the one line %q, got %q", name, line, got)
+			}
+		} else if strings.Contains(got, "no --after given") {
+			t.Errorf("%s: expected no held line, got %q", name, got)
+		}
+	}
+}
+
+func TestPathSetWithNeitherAfterNorHoldOnARigWithoutTheKeySaysNothing(t *testing.T) {
+	tracker, _ := aReleasingRig(t)
+	var errOut strings.Builder
+	if _, err := (application.PathSet{Tracker: tracker, Err: &errOut}).Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(errOut.String(), "no --after given") {
+		t.Errorf("a rig without release_on_path: expected no held line, got %q", errOut.String())
+	}
+}

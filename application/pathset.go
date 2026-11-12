@@ -240,6 +240,13 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 			fmt.Fprintln(s.Out, note)
 		}
 	}
+	// A held story on a rig that releases on path set, given neither --after nor
+	// --hold, stays held by design; say so, so the seat does not think it released it.
+	if !releasing && !holding && s.After == nil && story.Held() && s.Err != nil {
+		if onPath, err := s.rigReleasesOnPath(ctx, story.Merged().Overlay(path).Rig); err == nil && onPath {
+			fmt.Fprintln(s.Err, StaysHeldNoAfterLine)
+		}
+	}
 	if holding {
 		if err := s.holdOnPathSet(ctx, id); err != nil {
 			return path, err
@@ -251,6 +258,10 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 	}
 	return path, nil
 }
+
+// StaysHeldNoAfterLine is the line on stderr of a path set on a release_on_path
+// rig that gave neither --after nor --hold: the held story stays held.
+const StaysHeldNoAfterLine = `held: no --after given; pass --after none to release or --hold "<why>" to keep it held`
 
 // MostFilesInADirectory is the most files a directory a files key names, or a
 // glob in it, may hold (mw-gq6.442, mw-gq6.633). Dispatch holds a story behind

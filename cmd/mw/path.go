@@ -72,7 +72,7 @@ func newPathSetCmd() *cobra.Command {
 			"expects one, no rig or branch, or a gate mw dispatch would pass it over at (a bug with no Sweep:\n" +
 			"line, a Tester story with no Landed story: line), or, for a story labelled model-story, the pace of\n" +
 			"mw release-paced: usage over 60% of the week, missing or stale, or 3 model stories of its epic open\n" +
-			"or running. With no --after nothing is released; on a rig\n" +
+			"or running. With no --after nothing is released, and on a release_on_path rig one 'held:' line on stderr says so; on a rig\n" +
 			"without the key --after only adds the dependencies.\n" +
 			"--hold \"<why>\" keeps a held story held and writes HELD: <why> on it, so a hold always has a\n" +
 			"written reason; it releases nothing, with or without --after.",
