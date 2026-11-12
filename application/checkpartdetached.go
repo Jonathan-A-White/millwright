@@ -145,7 +145,9 @@ func (k Check) checkPartDetached(ctx context.Context, report CheckReport, c *clo
 	run, outstanding := k.partRunOf(ctx, c.id, runName)
 	if !outstanding {
 		wait := k.callNow()
-		left := func() time.Duration { return max((k.partSlotWait() - k.callNow().Sub(wait)).Round(time.Millisecond), 0) }
+		left := func() time.Duration {
+			return max((k.partSlotWait() - k.callNow().Sub(wait)).Round(time.Millisecond), 0)
+		}
 		if _, err := k.calmForPart(ctx, c, report.Attempt, k.Part, label, left); err != nil {
 			return report, fmt.Errorf("checking %s: %w", c.id, err)
 		}

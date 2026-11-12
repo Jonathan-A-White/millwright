@@ -218,7 +218,9 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	// (mw-gq6.987).
 	// It is read by the check's clock (CallNow), as a whole check's is (mw-gq6.1135).
 	began := k.callNow()
-	left := func() time.Duration { return max((k.partSlotWait() - k.callNow().Sub(began)).Round(time.Millisecond), 0) }
+	left := func() time.Duration {
+		return max((k.partSlotWait() - k.callNow().Sub(began)).Round(time.Millisecond), 0)
+	}
 	before, err := k.calmForPart(ctx, c, report.Attempt, k.Part, label, left)
 	if err != nil {
 		return report, fmt.Errorf("checking %s: %w", c.id, err)
