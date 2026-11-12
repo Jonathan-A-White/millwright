@@ -370,6 +370,9 @@ type CloudPlan struct {
 	// each other host does: the free sessions are counted from them.
 	BoxCap   int
 	HostCaps map[string]int
+	// Retired are the hosts in retired_hosts: no session runs on one, so a
+	// line of HostCaps naming one counts no free sessions (mw-gq6.1111).
+	Retired []string
 	// Prefix names the boxes, Prefix1, Prefix2, ...; empty is "cloud".
 	Prefix string
 	// Up is how long a make may run before it reads the instance back from the
@@ -1196,6 +1199,9 @@ func (p *cloudPass) demand(work WorkInHand) (waiting, free int) {
 		}
 	}
 	for host, limit := range p.check.Plan.HostCaps {
+		if IsRetired(p.check.Plan.Retired, host) {
+			continue
+		}
 		free += max(0, limit-sessions(work, host, p.now))
 	}
 	for _, box := range p.state.Boxes {

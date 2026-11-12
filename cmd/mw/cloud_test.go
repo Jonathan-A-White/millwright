@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
 )
 
@@ -77,5 +78,25 @@ func TestACloudCheckFindingTheLockHeldDoesNothing(t *testing.T) {
 	_, ran, err := runCloudCheck(context.Background(), application.CloudCheck{})
 	if ran || err != nil {
 		t.Fatalf("expected a check to find the lock held and do nothing, got ran %v, %v", ran, err)
+	}
+}
+
+// The plan the check reads carries retired_hosts, so a retired host's line in
+// [cloud.caps] counts no free sessions (mw-gq6.1111).
+func TestCloudPlanCarriesTheRetiredHostsOfTheConfig(t *testing.T) {
+	mwConfig(t, "host = \"laptop\"\nretired_hosts = [\"desktop\"]\n\n[cloud]\ncommand = \"/opt/millwright/contrib/vultr-boost\"\nmax_boxes = 2\n\n[cloud.caps]\nlaptop = 2\ndesktop = 6\n")
+	settings, ok, err := config.Cloud()
+	if err != nil || !ok {
+		t.Fatalf("expected a [cloud] table, got %v, %v", ok, err)
+	}
+	plan, err := cloudPlan(settings, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !application.IsRetired(plan.Retired, "desktop") || application.IsRetired(plan.Retired, "laptop") {
+		t.Errorf("expected the plan to retire desktop alone, got %v", plan.Retired)
+	}
+	if plan.HostCaps["desktop"] != 6 {
+		t.Errorf("expected desktop's line kept in the plan, got %v", plan.HostCaps)
 	}
 }

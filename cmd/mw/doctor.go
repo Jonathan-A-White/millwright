@@ -323,6 +323,22 @@ func newDoctorCmd() *cobra.Command {
 			harnessLevel.Hosts = func(ctx context.Context) ([]doctor.HarnessHost, error) {
 				return harnessHosts(ctx, mwVault(vault, host), host, retired)
 			}
+			// A host [cloud.caps] names that retired_hosts retires (mw-gq6.1111); it
+			// warns only.
+			cloudCapsRetired := &doctor.CloudCapsRetired{
+				Caps: func() ([]string, error) {
+					settings, ok, err := config.Cloud()
+					if err != nil || !ok {
+						return nil, err
+					}
+					names := make([]string, 0, len(settings.HostCaps))
+					for name := range settings.HostCaps {
+						names = append(names, name)
+					}
+					return names, nil
+				},
+				Retired: config.RetiredHosts,
+			}
 			checks := application.DoctorChecks{}
 			// The factory checkout the vault's formulas are judged against; none
 			// where this host checks the rig out nowhere.
@@ -537,6 +553,7 @@ func newDoctorCmd() *cobra.Command {
 				unitEnv,
 				unitDrift,
 				harnessLevel,
+				cloudCapsRetired,
 			}, churn...), checks...)
 			// Where Claude Code keeps its transcripts is the only place these
 			// two checks read; a host on codex has none, and says so once rather

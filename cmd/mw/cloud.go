@@ -298,8 +298,13 @@ func (governorNotice) Tell(ctx context.Context, title, text string) error {
 }
 
 // cloudPlan is the [cloud] table as the check reads it. Without [cloud.caps]
-// the hosts are this one alone, at its own cap.
+// the hosts are this one alone, at its own cap. The hosts of retired_hosts are
+// named in the plan, and the check counts no sessions free on them.
 func cloudPlan(settings config.CloudSettings, host string) (application.CloudPlan, error) {
+	retired, err := config.RetiredHosts()
+	if err != nil {
+		return application.CloudPlan{}, err
+	}
 	caps := settings.HostCaps
 	if len(caps) == 0 {
 		n, err := config.Cap()
@@ -316,6 +321,8 @@ func cloudPlan(settings config.CloudSettings, host string) (application.CloudPla
 		BoxCap:        settings.BoxCap,
 		Up:            time.Duration(settings.UpMinutes) * time.Minute,
 		HostCaps:      caps,
+		// A retired host's line in [cloud.caps] counts no sessions (mw-gq6.1111).
+		Retired: retired,
 	}, nil
 }
 

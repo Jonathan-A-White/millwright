@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -1158,5 +1159,83 @@ func TestMwCloudDownForceDestroysWithoutSalvageAndSaysTheWorkWasNotSaved(t *test
 	}
 	if len(r.book.State.Boxes) != 0 {
 		t.Errorf("expected the box out of the book, got %+v", r.book.State.Boxes)
+	}
+}
+
+// fullHostsWithAutoWaiting files an epic with n stories claimed on each of the
+// given hosts and two stories waiting for any host.
+func fullHostsWithAutoWaiting(t *testing.T, now time.Time, running map[string]int) *apptest.FakeTracker {
+	t.Helper()
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-r", domain.Path{Rig: "millwright", Branch: "main", Host: domain.HostAuto})
+	next := 0
+	file := func(host string) string {
+		next++
+		id := fmt.Sprintf("mw-r.%d", next)
+		tracker.AddStory("mw-r", domain.Story{ID: id, Title: "story " + id})
+		if err := tracker.SetStoryMetadata(ctx, id, map[string]string{"host": host}); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	for host, n := range running {
+		for i := 0; i < n; i++ {
+			if err := tracker.ClaimAs(file(host), "mw@"+host, now.Add(5*time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	file(domain.HostAuto)
+	file(domain.HostAuto)
+	return tracker
+}
+
+// A host named in retired_hosts is no place a session runs, whatever
+// [cloud.caps] says of it (mw-gq6.1111): its line must not count as free
+// sessions, or no box is made while every live host is full.
+func TestARetiredHostsCapCountsNoFreeSessionsSoABoxIsMade(t *testing.T) {
+	now := time.Date(2026, 11, 12, 15, 55, 0, 0, time.UTC)
+	tracker := fullHostsWithAutoWaiting(t, now, map[string]int{"laptop": 2})
+	plan := cloudPlan
+	plan.HostCaps = map[string]int{"laptop": 2, "desktop": 6}
+	plan.Retired = []string{"desktop"}
+	provider := &apptest.FakeCloud{}
+	book := &apptest.FakeCloudBook{}
+	report, err := application.CloudCheck{
+		Work: tracker, Stories: tracker, Provider: provider, Book: book, Host: "laptop",
+		Plan: plan, Now: func() time.Time { return now },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Free != 0 {
+		t.Errorf("expected no sessions free (laptop full, desktop retired), got %d: %s", report.Free, report)
+	}
+	if got := provider.TakeBegun(); len(got) != 1 {
+		t.Errorf("expected one box begun for the 2 waiting stories, got %v: %s", got, report)
+	}
+}
+
+// Without the host retired the same line does count, so the test above fails
+// for the retired host and not for some other reason.
+func TestAHostInTheCapsAndNotRetiredCountsItsFreeSessions(t *testing.T) {
+	now := time.Date(2026, 11, 12, 15, 55, 0, 0, time.UTC)
+	tracker := fullHostsWithAutoWaiting(t, now, map[string]int{"laptop": 2})
+	plan := cloudPlan
+	plan.HostCaps = map[string]int{"laptop": 2, "desktop": 6}
+	provider := &apptest.FakeCloud{}
+	report, err := application.CloudCheck{
+		Work: tracker, Stories: tracker, Provider: provider, Book: &apptest.FakeCloudBook{}, Host: "laptop",
+		Plan: plan, Now: func() time.Time { return now },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Free != 6 {
+		t.Errorf("expected desktop's 6 sessions free, got %d: %s", report.Free, report)
+	}
+	if got := provider.TakeBegun(); len(got) != 0 {
+		t.Errorf("expected no box begun while desktop has room, got %v", got)
 	}
 }
