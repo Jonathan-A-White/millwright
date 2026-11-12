@@ -94,7 +94,7 @@ func (g checkGateLock) Take(ctx context.Context, _ string, held func(by string))
 // given back and the check's place in its queue is kept, with one line saying so
 // (mw-gq6.940); a gate that does start says how much of the call is left.
 func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, within time.Duration, fit *callFit, held func(by string)) (GateTurn, error) {
-	began := time.Now()
+	began := k.callNow()
 	var slot Holding
 	if k.Slot != nil {
 		taken, err := k.takeSlotFor(ctx, c, try, within)
@@ -107,7 +107,7 @@ func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, withi
 		return GateTurn{Holding: bothHoldings{slot: slot}}, nil
 	}
 
-	waitCtx, cancel := context.WithTimeout(ctx, max(within-time.Since(began), 0))
+	waitCtx, cancel := k.boundByClock(ctx, max(within-k.callNow().Sub(began), 0))
 	defer cancel()
 	waitCtx, ask := k.askToKeep(waitCtx, c)
 	if ask != nil && fit != nil {
@@ -129,7 +129,7 @@ func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, withi
 		if errors.Is(err, ErrPlaceKeptLate) {
 			return GateTurn{}, GateLockHandBack{Why: k.tooLateLine(fit, ask)}
 		}
-		return GateTurn{}, k.gateLockRefusal(ctx, waitCtx, c, try, notices.by, time.Since(began), err, ask)
+		return GateTurn{}, k.gateLockRefusal(ctx, waitCtx, c, try, notices.by, k.callNow().Sub(began), err, ask)
 	}
 	if fit != nil && k.Out != nil {
 		fmt.Fprintf(k.Out, "  gate    expected about %s, %s left in this call\n", gateWaited(fit.expected), gateWaited(fit.left()))
@@ -441,3 +441,79 @@ func (k Check) limitReached(label string, waited time.Duration, still, holder st
 	return fmt.Sprintf("%s did not start: the wait limit of %s was reached after %s and %s, and nothing was run; that is the holder's wait and not a failure of the check, so do not run it again: comment on the story naming %s and hand back at once",
 		label, gateWaited(k.partSlotWait()), gateWaited(waited), still, holder)
 }
+
+// clockPoll is how often a wait bounded by the check's clock reads it.
+const clockPoll = 5 * time.Millisecond
+
+// boundByClock is the context a wait of at most within is made under. A check
+// with no clock of its own (CallNow nil) waits the real time, as a context
+// timeout counts it. A check with one (a test, which moves it by hand) gives up
+// when that clock has passed within, read by polling, and also when the real time
+// has, so a wait is never longer than it was; the context then ends with
+// context.DeadlineExceeded, as a timeout's does (mw-gq6.1142).
+func (k Check) boundByClock(ctx context.Context, within time.Duration) (context.Context, context.CancelFunc) {
+	if k.CallNow == nil {
+		return context.WithTimeout(ctx, within)
+	}
+	b := &clockBound{Context: ctx, done: make(chan struct{})}
+	if within <= 0 {
+		b.end(context.DeadlineExceeded)
+		return b, func() {}
+	}
+	began := k.CallNow()
+	quit := make(chan struct{})
+	var once sync.Once
+	go func() {
+		real := time.NewTimer(within)
+		defer real.Stop()
+		tick := time.NewTicker(clockPoll)
+		defer tick.Stop()
+		for {
+			select {
+			case <-quit:
+				b.end(context.Canceled)
+				return
+			case <-ctx.Done():
+				b.end(ctx.Err())
+				return
+			case <-real.C:
+				b.end(context.DeadlineExceeded)
+				return
+			case <-tick.C:
+				if k.CallNow().Sub(began) >= within {
+					b.end(context.DeadlineExceeded)
+					return
+				}
+			}
+		}
+	}()
+	return b, func() { once.Do(func() { close(quit) }) }
+}
+
+// clockBound is a context that ends when a clock says so, with the error it was
+// ended with.
+type clockBound struct {
+	context.Context
+	mu   sync.Mutex
+	err  error
+	done chan struct{}
+}
+
+func (b *clockBound) end(err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.err == nil {
+		b.err = err
+		close(b.done)
+	}
+}
+
+func (b *clockBound) Done() <-chan struct{} { return b.done }
+
+func (b *clockBound) Err() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.err
+}
+
+func (b *clockBound) Deadline() (time.Time, bool) { return time.Time{}, false }
