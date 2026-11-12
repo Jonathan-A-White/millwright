@@ -24,7 +24,7 @@ func newPathCmd() *cobra.Command {
 }
 
 func newPathSetCmd() *cobra.Command {
-	var from, after, hold string
+	var from, after, hold, overClaim string
 	cmd := &cobra.Command{
 		Use:   "set <story-id> [--from <sibling-id>] [--after <ids|none>] [--hold \"<why>\"] [key=value ...]",
 		Short: "Set a story's path keys in one write",
@@ -47,6 +47,8 @@ func newPathSetCmd() *cobra.Command {
 			"So is a files key naming a directory of more than " + strconv.Itoa(application.MostFilesInADirectory) + " files in the rig's checkout here, a glob matching more than that, or\n" +
 			"a whole directory (src/, src/**) or a glob ending in a wildcard (tests/e2e/*.ts) where the rig is not\n" +
 			"checked out to count it.\n\n" +
+			"--over-claim \"<why>\" adjusts the path of a story a Builder has claimed all the same, and writes the why on it as an\n" +
+			"OVER-CLAIM: comment; a closed story is refused whatever it says.\n\n" +
 			"A story with files and a size is told 'test callers: N for size S (allows M)': the rig's test\n" +
 			"files (features/, tests/, *_test.go) calling what its files declare, against XS 5, S 10, M 20,\n" +
 			"L 35, XL 50. Over that, a WARN on stderr says to split the story or size it up; nothing is refused.\n" +
@@ -87,6 +89,9 @@ func newPathSetCmd() *cobra.Command {
 			rigs, _ := config.Rigs()
 			// Likewise a [heavy_net] table that cannot be read warns of nothing.
 			heavy, _ := config.HeavyNet()
+			if cmd.Flags().Changed("over-claim") && strings.TrimSpace(overClaim) == "" {
+				return fmt.Errorf("--over-claim needs a reason, as --over-claim \"the Builder is on the wrong model\"")
+			}
 			var afterIDs []string
 			if cmd.Flags().Changed("after") {
 				if afterIDs, err = parseAfter(after); err != nil {
@@ -108,13 +113,14 @@ func newPathSetCmd() *cobra.Command {
 				return err
 			}
 			_, err = application.PathSet{Tracker: gateway, Retired: retired, Readings: readings, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
-				After: afterIDs, Hold: hold}.
+				After: afterIDs, Hold: hold, OverClaim: overClaim}.
 				Run(cmd.Context(), args[0], from, args[1:])
 			return err
 		},
 	}
 	cmd.Flags().StringVar(&from, "from", "", "the sibling story to copy the seven path keys from")
 	cmd.Flags().StringVar(&after, "after", "", "the stories this one waits on, comma-separated, or none; on a rig with release_on_path = true it also releases the held story")
+	cmd.Flags().StringVar(&overClaim, "over-claim", "", "why the path of a story a Builder has claimed (in progress, or a live claim) is adjusted all the same; written as an OVER-CLAIM: comment")
 	cmd.Flags().StringVar(&hold, "hold", "", "why the story stays held: written as a HELD: comment; nothing is released")
 	return cmd
 }
