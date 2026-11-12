@@ -45,6 +45,8 @@ func newSweepCmd() *cobra.Command {
 				Host:     host,
 				Sessions: tmux.New(),
 				Out:      cmd.OutOrStdout(),
+
+				Notes: gateway, GiveWayStale: giveWayStaleSetting(),
 			}.Run(cmd.Context())
 			return err
 		},

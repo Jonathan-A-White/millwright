@@ -92,21 +92,22 @@ func newNudgeCmd() *cobra.Command {
 			}
 			tracker := mwGateway(dir, host)
 			clauses, err := application.Nudge{
-				Retired:     retired,
-				Tracker:     tracker,
-				Notes:       tracker,
-				Mayor:       application.MayorReader{Tracker: tracker, Notes: tracker},
-				Host:        host,
-				Home:        mwVault(dir, host),
-				Signs:       mwVault(dir, host),
-				SyncHalt:    hostSyncHalt(),
-				CloseOuts:   hostCloseOuts(),
-				Transcripts: transcripts,
-				Rigs:        rigs,
-				Down:        boxesDown{files: mwVault(dir, host), book: pause.Book{Root: dir, Files: mwVault(dir, host), Notes: tracker}},
-				SyncMode:    setting.Mode(),
-				NudgeAfter:  time.Duration(after) * time.Minute,
-				SyncStale:   time.Duration(stale) * time.Minute,
+				Retired:      retired,
+				Tracker:      tracker,
+				Notes:        tracker,
+				Mayor:        application.MayorReader{Tracker: tracker, Notes: tracker},
+				Host:         host,
+				Home:         mwVault(dir, host),
+				Signs:        mwVault(dir, host),
+				SyncHalt:     hostSyncHalt(),
+				CloseOuts:    hostCloseOuts(),
+				Transcripts:  transcripts,
+				Rigs:         rigs,
+				Down:         boxesDown{files: mwVault(dir, host), book: pause.Book{Root: dir, Files: mwVault(dir, host), Notes: tracker}},
+				SyncMode:     setting.Mode(),
+				GiveWayStale: giveWayStaleSetting(),
+				NudgeAfter:   time.Duration(after) * time.Minute,
+				SyncStale:    time.Duration(stale) * time.Minute,
 			}.Run(cmd.Context())
 			if err != nil {
 				return err

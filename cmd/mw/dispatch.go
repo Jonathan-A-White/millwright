@@ -128,6 +128,7 @@ func withHostRechecks(d application.Dispatch, suite application.Suite) applicati
 	d.Rechecks = suite
 	d.ExampleRechecks = hostExampleRecheck{calm: suite}
 	d.GateLock = hostGateLock()
+	d.GiveWayStale = giveWayStaleSetting()
 	// A host that gives way to the person at its screen starts nothing, whichever
 	// dispatch it is: the timer's, the follower's, or the one that ends a close-out.
 	if way, ok := hostGiveWay(d.Host); ok {

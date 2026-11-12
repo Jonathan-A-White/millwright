@@ -43,6 +43,12 @@ type Sweep struct {
 	// Host is which of the factory's hosts this sweep is for.
 	Host string
 
+	// Notes is where the hosts' give-way notes are read (mw-2891blf.3): the claims
+	// of a host whose note stands are frozen, not stuck. nil judges every claim by
+	// its lease. GiveWayStale is giveway_stale (zero reads DefaultGiveWayStale).
+	Notes        GiveWayNoteReader
+	GiveWayStale time.Duration
+
 	// Now is the clock staleness is measured against. The zero value reads the
 	// real one.
 	Now func() time.Time
@@ -70,6 +76,9 @@ type SweepReport struct {
 	// handed them back for their close-out alone (RunCloseOutAgain,
 	// mw-gq6.467): the next dispatch tick runs it again.
 	HandedBack []string
+	// GaveWay is the claimed stories left alone because this host gives way: its
+	// sessions are frozen and silent, whatever their leases say.
+	GaveWay []string
 	// SessionsSeen is how many tmux sessions this host held when the sweep
 	// looked; zero when Sweep.Sessions is nil or there was no tmux or none.
 	SessionsSeen int
@@ -114,10 +123,16 @@ func (s Sweep) Run(ctx context.Context) (SweepReport, error) {
 		staleIDs[detail.Story.ID] = true
 	}
 
+	giving := GiveWayReader{Notes: s.Notes, Stale: s.GiveWayStale}.Stands(ctx, s.Host, s.now())
 	for _, detail := range claimed {
-		if staleIDs[detail.Story.ID] {
-			s.one(ctx, detail, &report)
+		if !staleIDs[detail.Story.ID] {
+			continue
 		}
+		if giving {
+			report.GaveWay = append(report.GaveWay, detail.Story.ID)
+			continue
+		}
+		s.one(ctx, detail, &report)
 	}
 
 	s.sessions(ctx, &report)
@@ -200,6 +215,9 @@ func (r SweepReport) String() string {
 	}
 	if len(r.HandedBack) > 0 {
 		clip(&b, "  handed back for its close-out alone, not stuck: "+strings.Join(r.HandedBack, ", "))
+	}
+	if len(r.GaveWay) > 0 {
+		clip(&b, "  this host gives way, not stuck: "+strings.Join(r.GaveWay, ", "))
 	}
 	if len(r.SessionsClosed) > 0 {
 		clip(&b, "  closed the idle session of a closed story: "+strings.Join(r.SessionsClosed, ", "))

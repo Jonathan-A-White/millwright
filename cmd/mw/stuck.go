@@ -64,7 +64,7 @@ func newStuckCmd() *cobra.Command {
 				fmt.Fprint(cmd.OutOrStdout(), list)
 				return nil
 			}
-			report, err := application.StuckSurvey{Graph: gateway, Comments: gateway, Claims: gateway}.Find(cmd.Context())
+			report, err := application.StuckSurvey{Graph: gateway, Comments: gateway, Claims: gateway, GiveWay: application.GiveWayReader{Notes: gateway, Stale: giveWayStaleSetting()}}.Find(cmd.Context())
 			if err != nil {
 				return err
 			}

@@ -30,8 +30,14 @@ func (d Dispatch) reclaimNoSessionClaims(ctx context.Context, reads *candidateRe
 		report.Notes = append(report.Notes, fmt.Sprintf("the claims with no session could not be read, so none was given back: %v", err))
 		return
 	}
+	giveWay := GiveWayReader{Notes: d.Memory, Stale: d.GiveWayStale}
 	for _, detail := range stale {
 		if !NoSessionClaimOf(detail, d.now(), d.Host) {
+			continue
+		}
+		// A claim held on a host that gives way is frozen with its session, and is
+		// not given back from under it (mw-2891blf.3).
+		if giveWay.Stands(ctx, claimedOn(detail), d.now()) {
 			continue
 		}
 		id, name := detail.Story.ID, SessionName(detail.Story.ID)

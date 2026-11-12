@@ -212,6 +212,10 @@ type Dispatch struct {
 	// <time>". A marker nobody renewed is lifted first. A nil GiveWay gives way
 	// to nobody; a marker that cannot be read is a note, and the pass goes on.
 	GiveWay GiveWayGate
+	// GiveWayStale is giveway_stale, for the hosts' give-way notes this dispatch
+	// reads through Memory when it judges a claim no host names (mw-2891blf.3);
+	// zero reads DefaultGiveWayStale.
+	GiveWayStale time.Duration
 
 	// Network says whether the network is metered, and HeavyNet names the rigs
 	// whose gate or close-out installs dependencies (npm ci, go mod download).

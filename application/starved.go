@@ -131,6 +131,10 @@ type StarvedRig struct {
 	// dispatch at all. Set when the notes are read; not kept in the note.
 	PassAt    time.Time
 	PassKnown bool
+	// GivesWay says Host gives way to the person at its screen: its sessions
+	// are frozen, so a rig it holds back is not starved, and its note of it was
+	// written before the freeze. Set when the notes are read; not kept in the note.
+	GivesWay bool
 }
 
 // current says whether the note still holds at now: no story of the rig closed
@@ -287,7 +291,10 @@ func (d Dispatch) keepStarved(ctx context.Context, ready []StoryDetail, running 
 func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAlarm {
 	oldest := map[string]StarvedRig{}
 	for _, r := range rigs {
-		if !r.current(now) {
+		// A host that gives way holds nothing back: it takes nothing new while the
+		// person is at the screen, and what it noted before the freeze is not a
+		// rig left to starve (mw-2891blf.3).
+		if r.GivesWay || !r.current(now) {
 			continue
 		}
 		if held, ok := oldest[r.Rig]; !ok || r.Since.Before(held.Since) {
@@ -496,6 +503,7 @@ func (s DamperSurvey) readStarved(ctx context.Context, now time.Time) ([]Starved
 			for _, r := range ParseStarved(notes[key]) {
 				r.Host = host
 				r.PassKnown, r.PassAt = dispatch.Known, dispatch.LastGood
+				r.GivesWay = readGiveWay(notes[GiveWayKey(host)], now, s.GiveWayStale).Stands
 				// The closed stories are read for a note old enough to be an alarm
 				// (the landing that clears it) and for a harness stop (the hosts
 				// that ran the rig), once a rig.

@@ -192,6 +192,8 @@ func newMillhandTickCmd() *cobra.Command {
 					Tracker:  gateway,
 					Host:     host,
 					Sessions: tmux.New(),
+
+					Notes: gateway, GiveWayStale: giveWayStaleSetting(),
 				},
 				SelfUpdate: hostSelfUpdate(gateway, rigs, afterLanding, afterLimits, deploySteps, home, mwVault(dir, host), host),
 				Backend:    hostBackend(gateway, mwVault(dir, host), host, rigs, cmd.ErrOrStderr()),

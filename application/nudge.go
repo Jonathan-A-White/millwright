@@ -156,6 +156,10 @@ type Nudge struct {
 	// Down, or one that cannot be read, leaves every host judged by its sync.
 	Down DownHosts
 
+	// GiveWayStale is giveway_stale: a host whose give-way note was not rewritten
+	// for twice this is not believed. Zero reads DefaultGiveWayStale.
+	GiveWayStale time.Duration
+
 	// NudgeAfter is how long a claimed story may run with nothing mailed about
 	// it before it is named. Zero reads DefaultNudgeAfter.
 	NudgeAfter time.Duration
@@ -204,7 +208,14 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 	var clauses []NudgeClause
 	now := s.now()
 	closing := closingOut(ctx, n.CloseOuts)
-	for _, detail := range work.RunningOnLive(n.Host, now) {
+	// A host that gives way has frozen sessions that are silent for as long as
+	// the person is at its screen: none of its stories is quiet (mw-2891blf.3).
+	giveWay := GiveWayReader{Notes: n.Notes, Stale: n.GiveWayStale}
+	running := work.RunningOnLive(n.Host, now)
+	if giveWay.Stands(ctx, n.Host, now) {
+		running = nil
+	}
+	for _, detail := range running {
 		since := detail.QuietSince()
 		if detail.Hitl() || since.IsZero() {
 			continue
@@ -300,7 +311,7 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 		return nil, err
 	}
 	for _, w := range others {
-		if n.isDown(ctx, w.Host) {
+		if n.isDown(ctx, w.Host) || giveWay.Stands(ctx, w.Host, now) {
 			continue
 		}
 		if w.LastSync.IsZero() || w.Silent <= n.syncStale() || !w.holdsClaim() {
