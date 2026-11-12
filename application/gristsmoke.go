@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -17,6 +18,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain/events"
@@ -36,6 +38,19 @@ const GristSmokeWait = 5 * time.Minute
 // GristSmokeBackendWait is how long the smoke waits before it sends once more
 // an example the backend refused with its own trouble (gristBackendsFault).
 const GristSmokeBackendWait = 20 * time.Second
+
+// GristSmokeRetryWait is how long the smoke waits, once all its examples have
+// gone, before it sends once more each example it could not run for the backend
+// (out of reach, or refusing twice): a backend that was restarted under the run
+// is back by then (mw-6ww.169).
+const GristSmokeRetryWait = 60 * time.Second
+
+// GristSmokeSwapWait is the longest the smoke waits for a backend swap in
+// progress to finish before it sends, and GristSmokeSwapPoll how often it looks.
+const (
+	GristSmokeSwapWait = 5 * time.Minute
+	GristSmokeSwapPoll = 10 * time.Second
+)
 
 // GristSmokeSender sends one grist as the smoke's test key and waits for its
 // answer. GristSend is the real one.
@@ -64,6 +79,9 @@ type GristSmoke struct {
 	// Sleep is the wait before an example the backend refused is sent once
 	// more; nil waits for real.
 	Sleep func(ctx context.Context, d time.Duration) error
+	// Swap says whether a swap of the postern backend is in progress, so that the
+	// smoke waits for it (GristSmokeSwapWait) before it sends; nil waits for none.
+	Swap GristSmokeSwapWatch
 	// Record is the mill's record of its runs (its grinds.jsonl), when this host
 	// holds it: a grind that did not finish is said with the notes the mill kept
 	// of why. Nil says no more than the answer's reason.
@@ -83,6 +101,57 @@ type GristSmoke struct {
 	Out io.Writer
 	// Now is the clock the failing runs are timed by; nil is time.Now.
 	Now func() time.Time
+}
+
+// GristSmokeSwapWatch says whether the postern backend is being swapped now, and
+// so about to be restarted: BackendSwapWatch is the real one.
+type GristSmokeSwapWatch interface {
+	SwapRunning(ctx context.Context) (bool, error)
+}
+
+// BackendSwapWatch reads the hands notes for a backend swap that has started and
+// has not reported back (a ran record with exit -1 and HandsStartedWhy, on a step
+// named backend-<commit>): the swap the Governor's tap or the home's tick began
+// writes it before it restarts the backend, and the finished record replaces it.
+// A started record older than BackendSwapStale is a pass that never reported back,
+// not a swap in progress.
+type BackendSwapWatch struct {
+	Notes PosternNotes
+	Now   func() time.Time
+}
+
+// BackendSwapStale is how old a started record may be and still be a swap in
+// progress.
+const BackendSwapStale = 10 * time.Minute
+
+// SwapRunning implements GristSmokeSwapWatch.
+func (w BackendSwapWatch) SwapRunning(ctx context.Context) (bool, error) {
+	if w.Notes == nil {
+		return false, nil
+	}
+	notes, err := w.Notes.NotesWithPrefix(ctx, "hands.ran.")
+	if err != nil {
+		return false, err
+	}
+	now := time.Now
+	if w.Now != nil {
+		now = w.Now
+	}
+	for key, raw := range notes {
+		// hands.ran.<bead>.<step>: a bead id has dots of its own, a swap step's id
+		// begins backend-.
+		if !strings.Contains(strings.TrimPrefix(key, "hands.ran."), ".backend-") {
+			continue
+		}
+		ran, ok := parseHandsRan(raw)
+		if !ok || ran.Exit != -1 || ran.Why != HandsStartedWhy {
+			continue
+		}
+		if at, err := time.Parse(time.RFC3339, ran.At); err == nil && now().Sub(at) < BackendSwapStale {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // GristRecord is the mill's record of its runs, read: GristState has it.
@@ -138,8 +207,9 @@ type GristSmokeReport struct {
 	// went wrong: it refused for the day's limit or the licence, failed for a
 	// limit of the factory's, its usage limit or its model's
 	// (GristReasonLimited), or could not be reached. None of that is the
-	// examples' fault, so it is no Failure and holds nothing. Any Failure beside
-	// it takes these into itself.
+	// examples' fault, so it is no Failure and holds nothing, beside a Failure
+	// too (mw-6ww.169). An example the backend was out of reach for is sent once
+	// more after GristSmokeRetryWait before it is counted here.
 	NotRun []string `json:"not_run,omitempty"`
 	// FiledOn are the open beads that name every failing example (SmokeExamplesField),
 	// set by GristSmokeBook.Mark; empty when any failure is not named, so the
@@ -152,6 +222,18 @@ type GristSmokeReport struct {
 	// whether its grind changed on the app's main after (mw-gq6.807), keyed by
 	// <app>/<kind>/<example>. The grinds were all read at Commit.
 	Runs map[string]GristSmokeRun `json:"runs,omitempty"`
+
+	// pending are the examples the backend could not be asked for, kept until the
+	// run has gone through them all and sends them once more.
+	pending []smokePending
+}
+
+// smokePending is an example not run for the backend, and what sending it once
+// more takes.
+type smokePending struct {
+	checkout, commit, app, kind, file string
+	schema                            smokeSchema
+	reason                            string
 }
 
 // GristSmokeRun is when the failing run of an example went and what the app's
@@ -215,7 +297,11 @@ func failuresWithRuns(failures []string, runs map[string]GristSmokeRun, commit s
 // as a clause to add to the not-run line; empty when none is known.
 func notRunNote(runs map[string]GristSmokeRun, commit string) string {
 	var first *GristSmokeRun
+	count := 0
 	for _, run := range runs {
+		if run.NotRun {
+			count++
+		}
 		if run.NotRun && (first == nil || run.At.Before(first.At)) {
 			first = &run
 		}
@@ -223,7 +309,23 @@ func notRunNote(runs map[string]GristSmokeRun, commit string) string {
 	if first == nil {
 		return ""
 	}
-	return fmt.Sprintf(" (the first send went at %s on the grinds read at %s)", first.At.UTC().Format("2006-01-02 15:04:05Z"), shortCommit(commit))
+	return fmt.Sprintf(" (%d %s not run; the first send went at %s on the grinds read at %s)", count, pluralExamples(count), first.At.UTC().Format("2006-01-02 15:04:05Z"), shortCommit(commit))
+}
+
+func pluralExamples(n int) string {
+	if n == 1 {
+		return "example"
+	}
+	return "examples"
+}
+
+// notRunBeside is what a failed line says of the examples not run beside its
+// failures: they are no failure and hold nothing. Empty when none was not run.
+func notRunBeside(notRun []string, runs map[string]GristSmokeRun, commit string) string {
+	if len(notRun) == 0 {
+		return ""
+	}
+	return "; also not run, and held for nothing: " + strings.Join(notRun, "; ") + notRunNote(runs, commit)
 }
 
 // GristSmokeResends is how many more times a smoke sends an example whose
@@ -271,7 +373,7 @@ func (r GristSmokeReport) Line() string {
 		if len(r.FiledOn) > 0 {
 			filed = ", all filed on " + strings.Join(r.FiledOn, ", ") + ": not held"
 		}
-		return fmt.Sprintf("grist smoke: %s: FAILED %d of %d examples%s: %s%s", r.App, len(r.Failures), r.Examples, filed, strings.Join(failuresWithRuns(r.Failures, r.Runs, r.Commit), "; "), r.flakyNote())
+		return fmt.Sprintf("grist smoke: %s: FAILED %d of %d examples%s: %s%s%s", r.App, len(r.Failures), r.Examples, filed, strings.Join(failuresWithRuns(r.Failures, r.Runs, r.Commit), "; "), notRunBeside(r.NotRun, r.Runs, r.Commit), r.flakyNote())
 	case len(r.NotRun) > 0:
 		return fmt.Sprintf("grist smoke: %s: not run: %s%s%s", r.App, strings.Join(r.NotRun, "; "), notRunNote(r.Runs, r.Commit), r.flakyNote())
 	}
@@ -325,15 +427,69 @@ func (s GristSmoke) Run(ctx context.Context, app, kind string) (GristSmokeReport
 		report.NoGrinds = true
 		return report, nil
 	}
+	// A swap of the backend restarts it: wait it out before the first send.
+	s.waitOutSwap(ctx)
 	for _, k := range kinds {
 		s.kind(ctx, checkout, commit, app, k, files, &report)
 	}
-	if report.Failed() {
-		// The smoke failed whatever the mill refused, and says all it found.
-		report.Failures = append(report.Failures, report.NotRun...)
-		report.NotRun = nil
-	}
+	s.retryNotRun(ctx, &report)
 	return report, nil
+}
+
+// waitOutSwap waits while a swap of the postern backend is in progress, at most
+// GristSmokeSwapWait, and then sends whatever it found (mw-6ww.169).
+func (s GristSmoke) waitOutSwap(ctx context.Context) {
+	if s.Swap == nil {
+		return
+	}
+	for waited := time.Duration(0); ; waited += GristSmokeSwapPoll {
+		if running, err := s.Swap.SwapRunning(ctx); err != nil || !running {
+			return
+		}
+		if waited >= GristSmokeSwapWait {
+			s.say("note: a swap of the postern backend is still in progress after %s; sending anyway", waited)
+			return
+		}
+		if waited == 0 {
+			s.say("a swap of the postern backend is in progress; waiting for it (up to %s) ...", GristSmokeSwapWait)
+		}
+		if s.sleep(ctx, GristSmokeSwapPoll) != nil {
+			return
+		}
+	}
+}
+
+// retryNotRun sends once more, after GristSmokeRetryWait, each example that was
+// not run for the backend, and counts the ones it is still out of reach for as
+// not run.
+func (s GristSmoke) retryNotRun(ctx context.Context, report *GristSmokeReport) {
+	pending := report.pending
+	report.pending = nil
+	if len(pending) == 0 {
+		return
+	}
+	s.say("%d %s not run for the backend; sending %s again in %s ...", len(pending), pluralExamples(len(pending)), map[bool]string{true: "it", false: "them"}[len(pending) == 1], GristSmokeRetryWait)
+	if s.sleep(ctx, GristSmokeRetryWait) != nil {
+		for _, p := range pending {
+			report.addNotRun(p.reason)
+		}
+		return
+	}
+	s.waitOutSwap(ctx)
+	for _, p := range pending {
+		label := p.app + "/" + p.kind
+		name := strings.TrimSuffix(path.Base(p.file), ".json")
+		s.say("sending %s/%s again ...", label, name)
+		at := s.now()
+		s.settle(ctx, report, p, at, s.example(ctx, p.checkout, p.commit, p.app, p.kind, p.file, p.schema), true)
+	}
+}
+
+// addNotRun adds a reason the mill could not be asked, once.
+func (r *GristSmokeReport) addNotRun(reason string) {
+	if !slices.Contains(r.NotRun, reason) {
+		r.NotRun = append(r.NotRun, reason)
+	}
 }
 
 // open finds app's rig, brings it level with its remote when it can, and says
@@ -416,37 +572,48 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 		report.Examples++
 		s.say("sending %s/%s ...", label, name)
 		at := s.now()
-		why, notRun, flake, groundAt := s.example(ctx, checkout, commit, app, kind, example, held)
-		if flake != nil || notRun != "" || why != "" {
-			report.addRun(label+"/"+name, GristSmokeRun{
-				At: at, NotRun: flake == nil && notRun != "", Changed: s.changedAfter(ctx, checkout, commit, kind, example),
-			})
+		pending := smokePending{checkout: checkout, commit: commit, app: app, kind: kind, file: example, schema: held}
+		s.settle(ctx, report, pending, at, s.example(ctx, checkout, commit, app, kind, example, held), false)
+	}
+}
+
+// settle puts what one send of an example came to into the report. An example
+// not run for the backend waits for the run's end to be sent once more (again is
+// false); one that is still not run then (again is true) is counted not run.
+func (s GristSmoke) settle(ctx context.Context, report *GristSmokeReport, p smokePending, at time.Time, out exampleOutcome, again bool) {
+	label, name := p.app+"/"+p.kind, strings.TrimSuffix(path.Base(p.file), ".json")
+	key := label + "/" + name
+	stillOut := again && out.notRun != "" && out.backend
+	if (out.flake != nil || out.notRun != "" || out.why != "") && !stillOut {
+		report.addRun(key, GristSmokeRun{
+			At: at, NotRun: out.flake == nil && out.notRun != "", Changed: s.changedAfter(ctx, p.checkout, p.commit, p.kind, p.file),
+		})
+	} else if again && !stillOut {
+		delete(report.Runs, key)
+	}
+	if out.groundAt != "" {
+		note := groundElsewhere(key, p.app, out.groundAt, p.commit)
+		if !slices.Contains(report.Warnings, note) {
+			report.Warnings = append(report.Warnings, note)
 		}
-		if groundAt != "" {
-			note := groundElsewhere(label+"/"+name, app, groundAt, commit)
-			if !slices.Contains(report.Warnings, note) {
-				report.Warnings = append(report.Warnings, note)
-			}
-			s.say("  note: %s", note)
-		}
-		if flake != nil {
-			report.Flakes = append(report.Flakes, *flake)
-			report.Warnings = append(report.Warnings, flake.String())
-			s.say("  %s", flake)
-			continue
-		}
-		if notRun != "" {
-			if !slices.Contains(report.NotRun, notRun) {
-				report.NotRun = append(report.NotRun, notRun)
-			}
-			s.say("  NOT RUN: %s", notRun)
-			continue
-		}
-		if why != "" {
-			report.Failures = append(report.Failures, label+"/"+name+": "+why)
-			s.say("  FAILED: %s", why)
-			continue
-		}
+		s.say("  note: %s", note)
+	}
+	switch {
+	case out.flake != nil:
+		report.Flakes = append(report.Flakes, *out.flake)
+		report.Warnings = append(report.Warnings, out.flake.String())
+		s.say("  %s", out.flake)
+	case out.notRun != "" && out.backend && !again:
+		p.reason = out.notRun
+		report.pending = append(report.pending, p)
+		s.say("  NOT RUN: %s", out.notRun)
+	case out.notRun != "":
+		report.addNotRun(out.notRun)
+		s.say("  NOT RUN: %s", out.notRun)
+	case out.why != "":
+		report.Failures = append(report.Failures, key+": "+out.why)
+		s.say("  FAILED: %s", out.why)
+	default:
 		s.say("  ok")
 	}
 }
@@ -746,18 +913,18 @@ func groundElsewhere(example, app, groundAt, read string) string {
 // right the example does not fail, and flake says so instead. groundAt is the
 // commit an answer was held to the schema at, when it was not the smoke's (see
 // smokeTry.groundAt).
-func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, file string, schema smokeSchema) (why, notRun string, flake *GristSmokeFlake, groundAt string) {
+func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, file string, schema smokeSchema) exampleOutcome {
 	prepared, why := s.prepare(ctx, checkout, commit, app, kind, file)
 	if why != "" {
-		return why, "", nil, ""
+		return exampleOutcome{why: why}
 	}
 	defer os.RemoveAll(prepared.dir)
 	example, turns, wait := prepared.example, prepared.turns, prepared.wait
 	name := strings.TrimSuffix(path.Base(file), ".json")
 	first := s.attempt(ctx, kind+"/"+name, turns, wait, schema, example.Expect)
-	groundAt = first.groundAt
+	groundAt := first.groundAt
 	if !first.slip {
-		return first.why, first.notRun, nil, groundAt
+		return exampleOutcome{why: first.why, notRun: first.notRun, backend: first.backend, groundAt: groundAt}
 	}
 	// The answer was a model's and wrong: send the example again before it
 	// holds the landing rig's queue. A send again that cannot be told apart
@@ -782,12 +949,24 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 		}
 	}
 	if missed == sent {
-		return first.why, "", nil, groundAt
+		return exampleOutcome{why: first.why, groundAt: groundAt}
 	}
-	return "", "", &GristSmokeFlake{
+	return exampleOutcome{flake: &GristSmokeFlake{
 		Example: app + "/" + kind + "/" + strings.TrimSuffix(path.Base(file), ".json"),
 		Missed:  missed, Sent: sent, Misses: first.misses, Txid: first.txid,
-	}, groundAt
+	}, groundAt: groundAt}
+}
+
+// exampleOutcome is what sending one example came to: why it failed, or notRun
+// when the mill could not be asked (backend says the backend was the reason, so
+// the example is sent again at the run's end), or a flake. groundAt is the commit
+// an answer was held to the schema at, when it was not the smoke's (see
+// smokeTry.groundAt).
+type exampleOutcome struct {
+	why, notRun string
+	backend     bool
+	flake       *GristSmokeFlake
+	groundAt    string
 }
 
 // attempt sends the example once whole: its one grist, or its turns one after
@@ -869,6 +1048,9 @@ func (s GristSmoke) tidy(ctx context.Context, app string) {
 // smokeTry is one send of an example and what came of it.
 type smokeTry struct {
 	why, notRun string
+	// backend says notRun is the postern backend's: out of reach, or refusing with
+	// its own trouble. Such an example is sent once more at the run's end.
+	backend bool
 	// answer is the answer of the last grist sent, when it came and fit.
 	answer json.RawMessage
 	// talk is what that answer said of its talk's session, when it said.
@@ -934,11 +1116,11 @@ func (s GristSmoke) try(ctx context.Context, send GristSendRequest, wait time.Du
 		}
 		return smokeTry{why: fmt.Sprintf("the mill %s it: %s", status, reason)}
 	}
-	if errors.Is(err, ErrPosternUnreachable) {
-		return smokeTry{notRun: ErrPosternUnreachable.Error() + ": " + firstLine(err.Error())}
+	if backendOutOfReach(ctx, err) {
+		return smokeTry{notRun: ErrPosternUnreachable.Error() + ": " + firstLine(err.Error()), backend: true}
 	}
 	if status, ok := gristBackendsFault(err); ok {
-		return smokeTry{notRun: fmt.Sprintf("the postern backend refused it with %d, and again when it was retried: %s", status, firstLine(err.Error()))}
+		return smokeTry{notRun: fmt.Sprintf("the postern backend refused it with %d, and again when it was retried: %s", status, firstLine(err.Error())), backend: true}
 	}
 	if err != nil {
 		return smokeTry{why: "it could not be sent: " + firstLine(err.Error())}
@@ -1026,6 +1208,27 @@ func gristMillsFault(err error) bool {
 		return true
 	}
 	return false
+}
+
+// backendOutOfReach says a send or the read of its answer failed because the
+// postern backend could not be reached: the adapter says so (ErrPosternUnreachable)
+// or the error is the network's own, a refused or reset connection or a timeout,
+// that an adapter did not classify. A run that was cancelled is not the backend's
+// (mw-6ww.169).
+func backendOutOfReach(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrPosternUnreachable) {
+		return true
+	}
+	if ctx.Err() != nil {
+		return false
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) ||
+		errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // gristBackendsFault says the postern backend refused a send for its own
@@ -1147,7 +1350,7 @@ func (r GristSmokeRecord) FailingExamples() []string {
 func (r GristSmokeRecord) Line() string {
 	if r.Failed && len(r.FiledOn) > 0 {
 		return fmt.Sprintf("grist smoke: %s FAILED %s: %s. All filed on %s, not held.",
-			r.App, r.At.UTC().Format("2006-01-02 15:04Z"), strings.Join(failuresWithRuns(r.Failures, r.Runs, r.Commit), "; "), strings.Join(r.FiledOn, ", "))
+			r.App, r.At.UTC().Format("2006-01-02 15:04Z"), strings.Join(failuresWithRuns(r.Failures, r.Runs, r.Commit), "; ")+notRunBeside(r.NotRun, r.Runs, r.Commit), strings.Join(r.FiledOn, ", "))
 	}
 	if r.Failed {
 		held := "no rig's stories are held"
@@ -1155,7 +1358,7 @@ func (r GristSmokeRecord) Line() string {
 			held = "the open stories of " + r.Rig + " are held"
 		}
 		line := fmt.Sprintf("grist smoke: %s FAILED %s (%s): %s. `mw grist smoke %s` that passes lifts the hold, or `mw grist smoke %s --lift`.",
-			r.App, r.At.UTC().Format("2006-01-02 15:04Z"), held, strings.Join(failuresWithRuns(r.Failures, r.Runs, r.Commit), "; "), r.App, r.App)
+			r.App, r.At.UTC().Format("2006-01-02 15:04Z"), held, strings.Join(failuresWithRuns(r.Failures, r.Runs, r.Commit), "; ")+notRunBeside(r.NotRun, r.Runs, r.Commit), r.App, r.App)
 		if len(r.Fixes) > 0 {
 			line += " " + strings.Join(r.Fixes, ", ") + " runs over the hold, as it names a failing example."
 		}
@@ -1458,7 +1661,7 @@ func (b GristSmokeBook) record(ctx context.Context, rig string, report GristSmok
 		FiledOn: report.FiledOn, Runs: report.Runs,
 	}
 	before, had := b.read(ctx, key)
-	if len(record.NotRun) > 0 && had && before.Failed {
+	if !record.Failed && len(record.NotRun) > 0 && had && before.Failed {
 		// A smoke that was not run proves nothing of the failure before it: its
 		// hold stays until a smoke passes or is lifted.
 		return nil

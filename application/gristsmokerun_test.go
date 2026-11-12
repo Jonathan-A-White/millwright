@@ -176,7 +176,7 @@ func TestAMissThatHoldsAndASendNotRunNameTheirCommitAndTime(t *testing.T) {
 	}
 
 	refused := refusedWith(503, "down")
-	notRun, _ := smokeWith(&smokeScript{errs: []error{refused, refused}})
+	notRun, _ := smokeWith(&smokeScript{errs: []error{refused, refused, refused, refused}})
 	notRun.Now = func() time.Time { return smokeRunAt }
 	report, err = notRun.Run(ctx, "lampas", "")
 	if err != nil {

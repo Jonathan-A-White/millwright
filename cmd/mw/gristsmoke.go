@@ -59,6 +59,12 @@ func newSmoker(out io.Writer, wait time.Duration) (application.GristSmoke, error
 		Wait:   wait,
 		Out:    out,
 	}
+	// A swap of the postern backend restarts it: the smoke waits for one that has
+	// started, as the hands notes say, before it sends (mw-6ww.169). A host with no
+	// vault waits for none.
+	if gateway, _, err := posternGateway(); err == nil {
+		smoke.Swap = application.BackendSwapWatch{Notes: gateway}
+	}
 	// The talks of an example of two turns are the mill's, on this host's state
 	// directory when the mill runs here; a host with no talks there has none to end.
 	if stateDir, err := config.GristStateDir(); err == nil {
