@@ -91,6 +91,10 @@ func newBdCmd() *cobra.Command {
 			"indeterminate) it waits and runs it again, for up to two minutes. A close or a comment that bd\n" +
 			"said was indeterminate is checked on the bead first, so that it is never written twice; a create is\n" +
 			"never run again. A command that still fails leaves with bd's status and says which fault it met.\n\n" +
+			"A hold (bd update <id> --status deferred or blocked) of a story a Builder has claimed (in progress, or\n" +
+			"holding a live claim lease) is refused, naming the claimer, and nothing is written: it would leave that run\n" +
+			"held mid-work. " + application.BdOverClaimFlag + " \"<why>\" lets it land and writes the why on the bead as an " + application.OverClaimPrefix + "\n" +
+			"comment; bd never sees the flag. A bead that cannot be read is held as before.\n\n" +
 			"A Builder's session runs it as `bd`, through a script ahead of the real bd on its PATH. The real bd\n" +
 			"is named in " + bdRealEnv + ", or is the first bd on PATH.\n\n" +
 			"Before it runs bd it waits for this host's turn (one mw bd at a time) and for quiet: no other bd\n" +

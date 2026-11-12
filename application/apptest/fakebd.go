@@ -27,6 +27,7 @@ type FakeBd struct {
 	mu sync.Mutex
 
 	status     map[string]string
+	claims     map[string]fakeBdClaim
 	comments   map[string][]string
 	faults     []BdFault
 	readFaults []BdFault
@@ -37,11 +38,26 @@ type FakeBd struct {
 
 // NewFakeBd is a bd whose beads are the given ids, all open.
 func NewFakeBd(ids ...string) *FakeBd {
-	f := &FakeBd{status: map[string]string{}, comments: map[string][]string{}, now: time.Now}
+	f := &FakeBd{status: map[string]string{}, claims: map[string]fakeBdClaim{}, comments: map[string][]string{}, now: time.Now}
 	for _, id := range ids {
 		f.status[id] = "open"
 	}
 	return f
+}
+
+// fakeBdClaim is who holds a bead and until when.
+type fakeBdClaim struct {
+	assignee string
+	lease    time.Time
+}
+
+// Claim has assignee claim the bead, in progress, with a lease that runs out
+// at lease (the zero time for none), as a Builder's claim leaves it.
+func (f *FakeBd) Claim(id, assignee string, lease time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status[id] = "in_progress"
+	f.claims[id] = fakeBdClaim{assignee: assignee, lease: lease}
 }
 
 // FailWrites makes the next writes, one fault each in order, go wrong before
@@ -146,8 +162,38 @@ func (f *FakeBd) Run(_ context.Context, args []string) (application.BdRun, error
 	case "create":
 		return f.write(func() { f.status[strings.Join(rest[1:], " ")] = "open" }), nil
 	case "show":
-		out, _ := json.Marshal([]map[string]string{{"id": rest[1], "status": f.status[rest[1]]}})
+		shown := map[string]string{"id": rest[1], "status": f.status[rest[1]]}
+		if claim, ok := f.claims[rest[1]]; ok {
+			shown["assignee"] = claim.assignee
+			if !claim.lease.IsZero() {
+				shown["lease_expires_at"] = claim.lease.UTC().Format(time.RFC3339)
+			}
+		}
+		out, _ := json.Marshal([]map[string]string{shown})
 		return application.BdRun{Stdout: string(out) + "\n"}, nil
+	case "update":
+		var ids []string
+		status := ""
+		for i := 1; i < len(rest); i++ {
+			switch {
+			case rest[i] == "--status" || rest[i] == "-s":
+				i++
+				if i < len(rest) {
+					status = rest[i]
+				}
+			case strings.HasPrefix(rest[i], "--status="):
+				status = strings.TrimPrefix(rest[i], "--status=")
+			case !strings.HasPrefix(rest[i], "-"):
+				ids = append(ids, rest[i])
+			}
+		}
+		return f.write(func() {
+			for _, id := range ids {
+				if status != "" {
+					f.status[id] = status
+				}
+			}
+		}), nil
 	}
 	return application.BdRun{Stdout: "ok\n"}, nil
 }
