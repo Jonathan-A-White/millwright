@@ -39,19 +39,14 @@ func (f FormulaClosed) String() string {
 	return f.Root + " and " + steps
 }
 
-// closeFormula closes what is still open of the formula poured as root: each
-// step left open, in the order they are worked, and then the root itself, each
-// with reason. An empty root, a story no formula was recorded for, has nothing
-// to close; a root closed already has only its steps closed. It stops at the
-// first close that fails, so that a root is never closed over a step still
-// open, and says what it closed before it.
-func closeFormula(ctx context.Context, beads WorkTracker, root, reason string) (FormulaClosed, error) {
-	return closeFormulaWith(ctx, beads, root, reason, func(id string) error { return beads.CloseStory(ctx, id, reason) })
-}
-
-// closeFormulaWith is closeFormula with the close of each bead, a step or the
-// root, made by closeOne: mw next closes them through its own retry of a write
-// (mw-gq6.990), mw retry and mw tidy straight.
+// closeFormulaWith closes what is still open of the formula poured as root:
+// each step left open, in the order they are worked, and then the root itself,
+// each by closeOne, which carries the reason. An empty root, a story no formula
+// was recorded for, has nothing to close; a root closed already has only its
+// steps closed. It stops at the first close that fails, so that a root is never
+// closed over a step still open, and says what it closed before it. mw next and
+// mw retry close each bead through their own retry of a write (mw-gq6.990,
+// mw-gq6.1120).
 func closeFormulaWith(ctx context.Context, beads WorkTracker, root, reason string, closeOne func(id string) error) (FormulaClosed, error) {
 	closed := FormulaClosed{Root: root}
 	if strings.TrimSpace(root) == "" {
