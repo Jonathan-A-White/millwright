@@ -251,6 +251,17 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 				now.Host, now.Rig, id)
 		}
 	}
+	// --from never copies files, so on a rig that expects them the seat that
+	// forgot files= is told now and not by a later mw path show (mw-gq6.1130).
+	if from != "" && named.Files == "" && s.Err != nil {
+		now := story.Merged().Overlay(path)
+		if strings.TrimSpace(now.Files) == "" && !claimsNoFiles(now) && strings.TrimSpace(now.Rig) != "" && s.Rules != nil {
+			// A rig file that cannot be read says nothing here: mw path show warns later.
+			if required, err := s.Rules.EpicRequirements(ctx, now.Rig); err == nil && required.FilesExpected {
+				fmt.Fprintln(s.Err, FilesNotCopiedLine(from))
+			}
+		}
+	}
 	// A story filed by hand into an epic is made a need of the epic's last
 	// story, as the Tester's is (mw-gq6.498).
 	line, notes := KeepDemoLast(ctx, s.Tracker, s.Rules, story.Merged().Overlay(path).Rig, story.EpicID, id)
@@ -279,6 +290,12 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		}
 	}
 	return path, nil
+}
+
+// FilesNotCopiedLine is the line on stderr of a path set --from on a rig that
+// expects files, given no files=: the sibling's files are never copied.
+func FilesNotCopiedLine(from string) string {
+	return fmt.Sprintf("files not copied from %s: pass files=", from)
 }
 
 // StaysHeldNoAfterLine is the line on stderr of a path set on a release_on_path
