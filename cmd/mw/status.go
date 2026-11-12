@@ -1,14 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
+	"github.com/Jonathan-A-White/millwright/infrastructure/cloud"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/grist"
@@ -299,6 +305,7 @@ func newStatusCmd() *cobra.Command {
 				Standby:          standby,
 				Cloud:            cloudBook,
 				CloudPlan:        plan,
+				BoxPanes:         cloudBoxPanes(cloudBook),
 				Benchmarks:       vault.Benchmarks{Vault: files},
 				Bench:            benchmarkLimits(bench),
 				Causes:           tracker,
@@ -434,4 +441,88 @@ func gateScaledWait(book application.BenchmarkBook, rigs map[string]string, host
 		}
 		return rig.SlotWait
 	}
+}
+
+// boxPanesLimit is how long mw status waits on one box for its panes.
+const boxPanesLimit = 20 * time.Second
+
+// boxPanesScript prints, for each tmux pane on the box, a line
+// "@@PANE<TAB>window<TAB>last activity (Unix seconds)" and then the last 200
+// lines of the pane. A box with no tmux server prints nothing.
+const boxPanesScript = `tmux list-panes -a -F '#{pane_id}|#{window_name}|#{window_activity}' 2>/dev/null | while IFS='|' read -r id name act; do
+  printf '@@PANE\t%s\t%s\n' "$name" "$act"
+  tmux capture-pane -p -S -200 -t "$id" 2>/dev/null
+done
+`
+
+// sshBoxPanes is application.BoxPanes over ssh, reaching a box at the address
+// the cloud's provider reads off the hub, as cloud.BoxWork does. Nothing is
+// written on the box.
+type sshBoxPanes struct {
+	address func(ctx context.Context, box string) (application.CloudAddress, error)
+}
+
+// cloudBoxPanes is the reader of the cloud boxes' panes, nil when this host
+// keeps no cloud book or has no [cloud] command to find a box with.
+func cloudBoxPanes(book application.CloudBook) application.BoxPanes {
+	if book == nil {
+		return nil
+	}
+	settings, ok, err := config.Cloud()
+	if err != nil || !ok || settings.Command == "" {
+		return nil
+	}
+	return sshBoxPanes{address: cloud.Vultr{Command: settings.Command}.Address}
+}
+
+// Panes implements application.BoxPanes.
+func (s sshBoxPanes) Panes(ctx context.Context, box string, since time.Time) ([]application.BoxPane, error) {
+	addr, err := s.address(ctx, box)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s's address: %w", box, err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, boxPanesLimit)
+	defer cancel()
+	var out, stderr bytes.Buffer
+	remote := "sh -c '" + strings.ReplaceAll(boxPanesScript, "'", `'\''`) + "'"
+	cmd := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new", addr.String(), remote)
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	cmd.WaitDelay = 5 * time.Second
+	if err := cmd.Run(); err != nil {
+		if last := strings.TrimSpace(stderr.String()); last != "" {
+			return nil, fmt.Errorf("ssh %s: %v: %s", addr, err, last[strings.LastIndex(last, "\n")+1:])
+		}
+		return nil, fmt.Errorf("ssh %s: %w", addr, err)
+	}
+	return parseBoxPanes(out.String(), since), nil
+}
+
+// parseBoxPanes reads boxPanesScript's output into the panes active at or after since.
+func parseBoxPanes(out string, since time.Time) []application.BoxPane {
+	var panes []application.BoxPane
+	var text strings.Builder
+	var current *application.BoxPane
+	finish := func() {
+		if current != nil && !current.At.Before(since) {
+			current.Text = text.String()
+			panes = append(panes, *current)
+		}
+		current = nil
+		text.Reset()
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if fields := strings.Split(line, "\t"); len(fields) == 3 && fields[0] == "@@PANE" {
+			finish()
+			secs, err := strconv.ParseInt(fields[2], 10, 64)
+			if err != nil {
+				continue
+			}
+			current = &application.BoxPane{Window: fields[1], At: time.Unix(secs, 0).UTC()}
+			continue
+		}
+		text.WriteString(line)
+		text.WriteString("\n")
+	}
+	finish()
+	return panes
 }
