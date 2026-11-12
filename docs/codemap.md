@@ -58,7 +58,7 @@ Files: [codemap-detail.md](codemap-detail.md).
 | Seat* | cmd/mw/seat.go | seat_* |
 | Talk*, TalkShow | cmd/mw/talk.go | talk_* |
 | Millhand, Deputy, MillhandTick | cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | {millhand*,deputy} |
-| Secrets*, Google*, Contacts, Hands*, Ask, Watch, Doctor | cmd/mw/secrets.go, cmd/mw/google.go, cmd/mw/contacts.go, cmd/mw/hands.go, cmd/mw/ask.go, cmd/mw/watch.go, cmd/mw/doctor.go | {secrets,hands,ask,watch,doctor} |
+| Secrets*, Google*, Gdrive (mw gdrive; infrastructure/gdrive, no port), Contacts, Hands*, Ask, Watch, Doctor | cmd/mw/secrets.go, cmd/mw/google.go, cmd/mw/gdrive.go, cmd/mw/contacts.go, cmd/mw/hands.go, cmd/mw/ask.go, cmd/mw/watch.go, cmd/mw/doctor.go | {secrets,hands,ask,watch,doctor} |
 | SeatBoot{,Set}, SeatRead, Memory[Log], Errors, Init | cmd/mw/init.go, cmd/mw/memory.go, cmd/mw/errors.go, infra/memoryqueries | {seat_boot,init,memory,errors} |
 | Postern* (+clear), Digest + Factory loop (LoopSource) | cmd/mw/postern.go, cmd/mw/posternview.go, cmd/mw/posternbead.go, cmd/mw/posternmirror.go, cmd/mw/digest.go | postern_* |
 | Event* | cmd/mw/events.go | event_follow |

@@ -52,6 +52,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
 - [Keeping the factory's tokens](#keeping-the-factorys-tokens)
 - [Linking his Google account (mw google)](#linking-his-google-account-mw-google)
   - [Finding a number in his contacts (mw contacts find)](#finding-a-number-in-his-contacts-mw-contacts-find)
+  - [Reading and writing his Drive and Sheets (mw gdrive)](#reading-and-writing-his-drive-and-sheets-mw-gdrive)
 - [Cloud boxes made by demand](#cloud-boxes-made-by-demand)
 - [Going easy on a metered network](#going-easy-on-a-metered-network)
 - [Stamping a rig's head by hand](#stamping-a-rigs-head-by-hand)
@@ -2515,6 +2516,34 @@ address book is kept anywhere. `mw hands add`, `mw todo then` and the Then card
 a Done card files write no `Text:` line, so they make no lookup. The tests are
 `application/contacts_test.go`, `infrastructure/google/people_test.go` and
 `cmd/mw/contacts_test.go`.
+
+### Reading and writing his Drive and Sheets (mw gdrive)
+
+    mw gdrive auth --client-id ID --client-secret S   # once: sign in as him
+    mw gdrive find budget                  # id, name, modified, mime; newest modified first
+    mw gdrive read FILE_ID                 # the tabs of a spreadsheet
+    mw gdrive read FILE_ID --sheet Main --range A1:Z99   # cells as CSV
+    mw gdrive write FILE_ID 'Main!A1:C1' a b =1+1        # update cells in place
+    mw gdrive revoke                       # delete the kept client and token
+
+`mw gdrive` reads and writes his Google Drive and Sheets signed in as him,
+through his own Desktop OAuth client (scopes `drive` and `spreadsheets`).
+Nothing is mirrored: a file is fetched only when a command names it. The
+sign-in is separate from `mw google` (contacts only). `auth` prints a consent
+URL (offline access, forced consent, PKCE); he opens it in any browser, allows
+access, and pastes back the `http://localhost/?...` address the browser then
+fails to load (Google's out-of-band code flow is gone). The client is read from
+`~/.config/mw/google-client.json` when that file is there; when it is not,
+`--client-id` and `--client-secret` write it (mode 600). A copy of the client
+and the token are kept in `~/.config/mw/gdrive/` (`client.json`, `token.json`;
+directory mode 700, files 600); an expired access token is refreshed and the
+new one saved. `read` with neither `--sheet` nor `--range` lists the tabs.
+`write` puts the values in one row from the range, `USER_ENTERED`, and prints
+the cells' old and new contents; a file whose name contains `Budget` (any case)
+is refused unless `--yes` is given. `revoke` deletes the two files and prints
+`https://myaccount.google.com/permissions`, where he takes mw's access back.
+No token or secret is printed or logged. The tests are
+`infrastructure/gdrive/gdrive_test.go` and `cmd/mw/gdrive_test.go`.
 
 ## Cloud boxes made by demand
 
