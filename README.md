@@ -3998,6 +3998,16 @@ second run writes nothing. Each `--write` run is recorded in `~/.local/state/mw/
 (PROVISIONAL, off unless given) also writes on a landing of his line closed 14 days or more whose deployed build the
 rig's `site_url` page states, ending `His own walk stays open to him.` The steps are in `features/needs_sweep.feature`.
 
+**The nightly timer.** `mw-needs-nightly.timer` runs `mw-needs-nightly.service` at 08:30 UTC every day
+(PROVISIONAL, with no catch-up for a missed night): `mw needs sweep --write`, and then
+`mw verify match --since 36h`, which runs even when the sweep failed (the unit then fails and the Mayor is
+mailed). It runs at `Nice=10`. Enable it on the home only: `sh scripts/install-units.sh mw-needs-nightly`
+links the pair, and `systemctl --user enable --now mw-needs-nightly.timer` arms it. To stop it:
+`systemctl --user disable --now mw-needs-nightly.timer`. The hour is changed with a drop-in
+(`systemctl --user edit mw-needs-nightly.timer`), not by editing the file. The pass writes only what the two
+commands write by hand, and `mw status` names, under DAMPERS, `proposals · N waiting over 2 days: <ids> (mw
+verify list)` when a `PROPOSED` comment of the match has waited over 2 days with no `VERIFIED` after it.
+
 ## Saved prompts
 
 The Mayor keeps prompts on the postern backend, so the Governor can run one by

@@ -1,0 +1,32 @@
+# One nightly pass over his Needs you line, as the user, then it exits: no daemon.
+# For `systemctl --user`; see README.md, "Verifying the internal landings itself
+# (mw needs sweep)".
+#
+# Started by mw-needs-nightly.timer, on the home only (enable it nowhere else).
+# It runs, in this order, `mw needs sweep --write` (comments VERIFIED, by the
+# factory's own check, on the internal landings it can prove) and then
+# `mw verify match --since 36h` (matches what he sent in the last 36 hours to the
+# demos and landings waiting, and proposes). The second runs even when the first
+# fails; the unit then fails, so the mail to the Mayor comes. Neither closes a
+# bead or writes a VERIFIED comment for his use.
+[Unit]
+Description=Nightly: sweep the Needs you line and match his messages to what waits (mw needs sweep, mw verify match)
+OnFailure=mw-unit-failed@%n.service
+
+[Service]
+Type=oneshot
+# The sweep and the match are the home's: Nice keeps them out of a session's way.
+Nice=10
+
+# Like mw-report.service, it runs the one fixed binary rather than relying on
+# PATH; the bd and the agent they call are found through dispatch.env's PATH, and
+# the home's Dolt server through BEADS_DOLT_* in beads.env.
+EnvironmentFile=-%h/.config/mw/beads.env
+EnvironmentFile=-%h/.config/mw/dispatch.env
+# One shell, so that the match runs after a failed sweep and the unit still ends
+# failed (a second ExecStart= would not run after the first failed).
+ExecStart=/bin/sh -c '%h/.local/bin/mw needs sweep --write; sweep=$$?; %h/.local/bin/mw verify match --since 36h; match=$$?; [ "$$sweep" -eq 0 ] && [ "$$match" -eq 0 ]'
+
+# Type=oneshot has no start timeout by default, and a hung read or agent call
+# would then block every later run.
+TimeoutStartSec=30min

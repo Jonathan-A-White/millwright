@@ -1,0 +1,19 @@
+# Runs mw-needs-nightly.service once a day, at 08:30 UTC. For `systemctl --user`;
+# see README.md, "Verifying the internal landings itself (mw needs sweep)".
+#
+# The hour is a fuel-free knob (PROVISIONAL): the sweep reads files and the
+# tracker, and the match makes one bounded agent call. Change it with a drop-in
+# (`systemctl --user edit mw-needs-nightly.timer`), never by editing this file.
+[Unit]
+Description=Daily at 08:30 UTC, sweep the Needs you line and match his messages (mw needs sweep, mw verify match)
+
+[Timer]
+OnCalendar=*-*-* 08:30:00 UTC
+# No catch-up: a host that was asleep or off at 08:30 does not run it when it
+# wakes, and is not woken to run it. The next 08:30 is the next run.
+Persistent=false
+WakeSystem=false
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
