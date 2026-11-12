@@ -53,6 +53,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
 - [Linking his Google account (mw google)](#linking-his-google-account-mw-google)
   - [Finding a number in his contacts (mw contacts find)](#finding-a-number-in-his-contacts-mw-contacts-find)
   - [Reading and writing his Drive and Sheets (mw gdrive)](#reading-and-writing-his-drive-and-sheets-mw-gdrive)
+  - [Reading his Gmail (mw gmail)](#reading-his-gmail-mw-gmail)
 - [Cloud boxes made by demand](#cloud-boxes-made-by-demand)
 - [Going easy on a metered network](#going-easy-on-a-metered-network)
 - [Stamping a rig's head by hand](#stamping-a-rigs-head-by-hand)
@@ -2527,7 +2528,8 @@ a Done card files write no `Text:` line, so they make no lookup. The tests are
     mw gdrive revoke                       # delete the kept client and token
 
 `mw gdrive` reads and writes his Google Drive and Sheets signed in as him,
-through his own Desktop OAuth client (scopes `drive` and `spreadsheets`).
+through his own Desktop OAuth client (scopes `drive`, `spreadsheets` and the
+read-only `gmail.readonly` that `mw gmail` uses).
 Nothing is mirrored: a file is fetched only when a command names it. The
 sign-in is separate from `mw google` (contacts only). `auth` prints a consent
 URL (offline access, forced consent, PKCE); he opens it in any browser, allows
@@ -2544,6 +2546,25 @@ is refused unless `--yes` is given. `revoke` deletes the two files and prints
 `https://myaccount.google.com/permissions`, where he takes mw's access back.
 No token or secret is printed or logged. The tests are
 `infrastructure/gdrive/gdrive_test.go` and `cmd/mw/gdrive_test.go`.
+
+### Reading his Gmail (mw gmail)
+
+    mw gmail search "from:bills newer_than:30d" --limit 5   # id, date, from, subject; newest first
+    mw gmail read MESSAGE_ID               # headers, then the plain-text body
+
+`mw gmail` looks into his Gmail, read-only, on the same Google sign-in as
+`mw gdrive` (the same client, the same token in `~/.config/mw/gdrive/`; there
+is no second token file). The scope is `gmail.readonly` alone: nothing is sent,
+changed, deleted or labelled. `search` takes Gmail's own query syntax and lists
+at most `--limit` messages (default 10, at most 100), tab-separated, newest
+first, the date in UTC. `read` prints From, To, Cc, Date and Subject, then the
+text part of the body (the HTML part stripped to text when there is none), then
+the names of the attachments, which are not downloaded. Control characters in a
+message are dropped, so a message cannot move his terminal. A token saved
+before Gmail was added to the sign-in makes both commands say `run mw gdrive
+auth again to add Gmail`, without a stack or a token. No token or secret is
+printed or logged. The tests are `infrastructure/gmail/gmail_test.go` and
+`cmd/mw/gmail_test.go`.
 
 ## Cloud boxes made by demand
 

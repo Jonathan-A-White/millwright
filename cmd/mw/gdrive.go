@@ -69,7 +69,7 @@ func newGdriveCmd() *cobra.Command {
 		Use:   "gdrive",
 		Short: "Read and write his Google Drive and Sheets, signed in as him (auth, find, read, write, revoke)",
 		Long: "gdrive reads and writes his Google Drive and Sheets, signed in as him through his own Desktop\n" +
-			"OAuth client (scopes " + gdrive.DriveScope + "\nand " + gdrive.SheetsScope + ").\n" +
+			"OAuth client (scopes " + gdrive.DriveScope + ",\n" + gdrive.SheetsScope + " and " + gdrive.GmailScope + ", the last for mw gmail).\n" +
 			"Nothing is mirrored: a file is fetched only when a command names it. The client and the\n" +
 			"refresh token are kept in ~/.config/mw/gdrive/ (the directory mode 700, the files 600) and\n" +
 			"are never printed or logged.",

@@ -202,7 +202,7 @@ func TestGdriveAuthWritesClientAndTokenPrivately(t *testing.T) {
 	}
 	u := strings.Fields(said[strings.Index(said, "https://accounts.example/auth"):])[0]
 	parsed, _ := url.Parse(u)
-	if parsed.Query().Get("scope") != "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets" || parsed.Query().Get("access_type") != "offline" || parsed.Query().Get("prompt") != "consent" {
+	if parsed.Query().Get("scope") != "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/gmail.readonly" || parsed.Query().Get("access_type") != "offline" || parsed.Query().Get("prompt") != "consent" {
 		t.Fatalf("unexpected consent URL %s", u)
 	}
 

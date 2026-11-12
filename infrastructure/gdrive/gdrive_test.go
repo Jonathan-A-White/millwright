@@ -188,7 +188,7 @@ func TestAuthorizeExchangesThePastedBackAddressAndKeepsFilesPrivate(t *testing.T
 	q := u.Query()
 	for k, want := range map[string]string{
 		"client_id": "cid", "response_type": "code", "access_type": "offline", "prompt": "consent",
-		"scope":                 "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets",
+		"scope":                 "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/gmail.readonly",
 		"code_challenge_method": "S256",
 	} {
 		if q.Get(k) != want {

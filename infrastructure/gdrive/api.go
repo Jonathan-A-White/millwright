@@ -70,6 +70,25 @@ func (s Session) bearer(ctx context.Context) (string, error) {
 	return fresh.Access, nil
 }
 
+// HTTPError is Google refusing a call: the status and its own message, cut
+// short. It holds nothing of the request.
+type HTTPError struct {
+	Status  int
+	Message string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("Google answered HTTP %d: %s", e.Status, e.Message)
+}
+
+// GetJSON is a GET of address with the bearer token (refreshed and saved when
+// it has run out), its JSON answer decoded into into. It is how mw gmail
+// reaches Google through this one sign-in; an answer of 401 wraps
+// ErrNotSignedIn, any other refusal is an *HTTPError.
+func (s Session) GetJSON(ctx context.Context, address string, into any) error {
+	return s.call(ctx, http.MethodGet, address, nil, into)
+}
+
 // call sends one request with the bearer token and decodes a JSON answer into
 // into (nil to ignore it). A refusal is said as HTTP status and Google's own
 // message, cut short.
@@ -123,7 +142,7 @@ func (s Session) call(ctx context.Context, method, address string, body any, int
 		if resp.StatusCode == http.StatusUnauthorized {
 			return fmt.Errorf("%w: Google refused the token (HTTP 401); run mw gdrive auth again", ErrNotSignedIn)
 		}
-		return fmt.Errorf("Google answered HTTP %d: %s", resp.StatusCode, msg)
+		return &HTTPError{Status: resp.StatusCode, Message: msg}
 	}
 	if into == nil {
 		return nil
