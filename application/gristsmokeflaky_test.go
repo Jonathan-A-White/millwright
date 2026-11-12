@@ -98,11 +98,11 @@ func TestAPassingExampleAndANotRunSmokeAreSentOnce(t *testing.T) {
 		t.Fatalf("expected one send, got %d %v", sender.sent, err)
 	}
 	refused := refusedWith(503, "down")
-	notRun := &smokeScript{errs: []error{refused, refused}}
+	notRun := &smokeScript{errs: []error{refused, refused, refused, refused}}
 	smoke, _ = smokeWith(notRun)
 	report, err := smoke.Run(context.Background(), "lampas", "")
-	if err != nil || notRun.sent != 2 || len(report.NotRun) != 1 || report.Failed() {
-		t.Fatalf("expected the backend's one retry only and not run, got %d sends %+v %v", notRun.sent, report, err)
+	if err != nil || notRun.sent != 4 || len(report.NotRun) != 1 || report.Failed() {
+		t.Fatalf("expected the backend's one retry, the one send at the end, and not run, got %d sends %+v %v", notRun.sent, report, err)
 	}
 }
 

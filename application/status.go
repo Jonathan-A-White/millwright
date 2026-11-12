@@ -3265,6 +3265,12 @@ func writeGristSmoke(b *strings.Builder, records []GristSmokeRecord) {
 		for _, failure := range r.Failures {
 			wrapInto(b, "    ", failure)
 		}
+		if r.Failed {
+			// Not run beside the failures: no failure, and held for nothing.
+			for _, why := range r.NotRun {
+				wrapInto(b, "    ", "not run: "+why)
+			}
+		}
 		for _, warning := range r.Warnings {
 			wrapInto(b, "    ", "warning: "+warning)
 		}

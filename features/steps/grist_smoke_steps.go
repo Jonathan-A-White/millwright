@@ -122,7 +122,9 @@ func (c *smokeContext) book() application.GristSmokeBook {
 }
 
 func (c *smokeContext) smoke() application.GristSmoke {
-	return application.GristSmoke{Grinds: c.grinds, Send: c.sender, Apps: c.apps, Wait: application.GristSmokeWait}
+	return application.GristSmoke{Grinds: c.grinds, Send: c.sender, Apps: c.apps, Wait: application.GristSmokeWait,
+		// The waits (a backend refusing, a minute before an example is sent once more) are not slept.
+		Sleep: func(context.Context, time.Duration) error { return nil }}
 }
 
 // InitializeGristSmokeScenario registers the steps of features/grist_smoke.feature.

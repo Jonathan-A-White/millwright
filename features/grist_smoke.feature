@@ -14,6 +14,11 @@ Feature: mw grist smoke tests an app's grist end to end
   before it fails. A send the postern backend refuses with 429, 502, 503 or 504
   (a chain service throttling its licence check) is the backend's fault: it is
   sent once more after a wait, and counted "not run" if refused again. An
+  example the backend could not be reached for, or refused twice, is sent once
+  more after 60 seconds, when the run is over, and counted "not run" (with its
+  count in the line, and holding nothing, beside a failure too) if it is not
+  back by then; a backend swap in progress when the smoke starts is waited for,
+  five minutes at most. An
   example whose answer the model got wrong (it misses its expect, or does not
   fit the schema) is sent twice more before it holds: if one of those is right
   it holds nothing, the report says "flaky: <example> missed 1 of 3", and the
@@ -265,10 +270,21 @@ Feature: mw grist smoke tests an app's grist end to end
   Scenario: a smoke that cannot reach the mill is not run, and holds nothing
     Given a rig "trade-tracker" checked out where the app "trade-tracker" is
     And the postern backend cannot be reached for the next grist
+    And the postern backend cannot be reached for the next grist
     When a landing in "trade-tracker" changes "grinds/price-check.json"
     Then mw status shows "trade-tracker not run"
     And mw status shows "not run: the postern backend could not be reached"
     And the open stories of "trade-tracker" are not held
+
+  Scenario: an example the backend was out of reach for is sent once more at the end, and passes when it is back
+    Given the postern backend cannot be reached for the next grist
+    And the mill answers the next grist with:
+      """
+      {"price": null, "confidence": "low"}
+      """
+    When mw grist smoke is run for "trade-tracker"
+    Then the smoke sent 2 grist as "trade-tracker/price-check" with the photo "blank.jpg"
+    And the smoke passed, saying "trade-tracker: ok, 1 examples"
 
   Scenario: a smoke the mill cannot grind for its usage limit is not run, and holds nothing
     Given a rig "trade-tracker" checked out where the app "trade-tracker" is

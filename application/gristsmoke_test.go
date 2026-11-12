@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -89,14 +91,15 @@ func TestABackendRefusalThatRepeatsIsNotRunAndHoldsNothing(t *testing.T) {
 	for _, code := range []int{429, 502, 503, 504} {
 		t.Run(fmt.Sprint(code), func(t *testing.T) {
 			again := refusedWith(code, "checking licence: WhatsOnChain said 429")
-			sender := &smokeScript{errs: []error{again, again}}
+			// Refused twice, then sent once more at the run's end and refused twice again.
+			sender := &smokeScript{errs: []error{again, again, again, again}}
 			smoke, _ := smokeWith(sender)
 			report, err := smoke.Run(context.Background(), "lampas", "")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if sender.sent != 2 {
-				t.Errorf("expected the send retried once, got %d sends", sender.sent)
+			if sender.sent != 4 {
+				t.Errorf("expected the send retried once and the example sent again at the end, got %d sends", sender.sent)
 			}
 			if report.Failed() || report.Held() {
 				t.Errorf("expected nothing failed or held, got %+v", report)
@@ -136,13 +139,14 @@ func TestARefusalAboutTheRequestStillFailsTheExample(t *testing.T) {
 
 // A backend that cannot be reached at all stays not run, as it was.
 func TestAnUnreachableBackendStaysNotRun(t *testing.T) {
-	sender := &smokeScript{errs: []error{fmt.Errorf("reaching it: %w", application.ErrPosternUnreachable)}}
+	gone := fmt.Errorf("reaching it: %w", application.ErrPosternUnreachable)
+	sender := &smokeScript{errs: []error{gone, gone}}
 	smoke, _ := smokeWith(sender)
 	report, err := smoke.Run(context.Background(), "lampas", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Failed() || len(report.NotRun) != 1 || sender.sent != 1 {
+	if report.Failed() || len(report.NotRun) != 1 || sender.sent != 2 {
 		t.Errorf("expected one send, not run, got %d sends, %+v", sender.sent, report)
 	}
 }
@@ -150,14 +154,14 @@ func TestAnUnreachableBackendStaysNotRun(t *testing.T) {
 // A 500 whose body names an upstream 429 is the backend's too.
 func TestAServerErrorNamingAnUpstream429IsTheBackendsFault(t *testing.T) {
 	again := refusedWith(500, "checking licence: WhatsOnChain said 429")
-	sender := &smokeScript{errs: []error{again, again}}
+	sender := &smokeScript{errs: []error{again, again, again, again}}
 	smoke, _ := smokeWith(sender)
 	report, err := smoke.Run(context.Background(), "lampas", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Failed() || len(report.NotRun) != 1 || sender.sent != 2 {
-		t.Errorf("expected two sends and not run, got %d sends, %+v", sender.sent, report)
+	if report.Failed() || len(report.NotRun) != 1 || sender.sent != 4 {
+		t.Errorf("expected four sends and not run, got %d sends, %+v", sender.sent, report)
 	}
 }
 
@@ -381,5 +385,261 @@ func TestAnAnswerThatFitsTheSchemaAtNeitherCommitFailsAgainstTheMills(t *testing
 	}
 	if !strings.Contains(failure, "schema at "+after) {
 		t.Errorf("the failure should name the mill's commit %s, got %q", after, failure)
+	}
+}
+
+// smokeOfTwo is smokeWith with a second example of the same grind, so that one
+// example can fail for its own reasons and the other not be run. The examples go
+// in name order: "a-real" first, "hello" second.
+func smokeOfTwo(sender application.GristSmokeSender) (application.GristSmoke, *[]time.Duration) {
+	smoke, waits := smokeWith(sender)
+	grinds := smoke.Grinds.(*apptest.FakeGrinds)
+	grinds.SetFile("/rigs/lampas", "c1", "grinds/examples/tutor/a-real.json", []byte(`{"schemaVersion": "1", "request": {"note": "hi"}, "expect": {"confidence": "low"}}`))
+	return smoke, waits
+}
+
+// mw-6ww.169: an example the backend could not be reached for is not run, and
+// stays not run beside an example that really failed: it is no failure, and the
+// hold is the real failure's alone.
+func TestAnExampleNotRunForTheBackendIsNoFailureBesideARealFailure(t *testing.T) {
+	gone := fmt.Errorf("mw grist send: sent as direct:x, but reading its answer failed: asking the postern backend for a challenge: %w",
+		fmt.Errorf("reaching the postern backend at http://10.88.0.2:8787: dial tcp 10.88.0.2:8787: connect: connection refused: %w", application.ErrPosternUnreachable))
+	sender := &smokeScript{errs: []error{fmt.Errorf("boom"), gone, gone}}
+	smoke, _ := smokeOfTwo(sender)
+	report, err := smoke.Run(context.Background(), "lampas", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Failures) != 1 || !strings.Contains(report.Failures[0], "lampas/tutor/a-real: it could not be sent: boom") {
+		t.Errorf("expected the one real failure, got %v", report.Failures)
+	}
+	if len(report.NotRun) != 1 || !strings.Contains(report.NotRun[0], "could not be reached") {
+		t.Errorf("expected the unreachable backend as not run, got %v", report.NotRun)
+	}
+	if !report.Held() {
+		t.Errorf("expected the real failure to hold, got %+v", report)
+	}
+	line := report.Line()
+	if !strings.Contains(line, "FAILED 1 of 2 examples") || !strings.Contains(line, "1 example not run") {
+		t.Errorf("expected FAILED 1 of 2 and the count not run, got %q", line)
+	}
+}
+
+// A send or answer read cut off by the network in a way the adapter did not
+// classify (a refused connection, a timeout) is the backend out of reach too.
+func TestANetworkErrorOfASendIsTheBackendOutOfReach(t *testing.T) {
+	refused := &net.OpError{Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED}}
+	for name, cause := range map[string]error{"refused": refused, "timeout": timedOut{}} {
+		t.Run(name, func(t *testing.T) {
+			err := fmt.Errorf("mw grist send: sent as direct:x, but reading its answer failed: %w", cause)
+			sender := &smokeScript{errs: []error{err, err}}
+			smoke, _ := smokeWith(sender)
+			report, runErr := smoke.Run(context.Background(), "lampas", "")
+			if runErr != nil {
+				t.Fatal(runErr)
+			}
+			if report.Failed() || report.Held() || len(report.NotRun) != 1 {
+				t.Errorf("expected not run and nothing held, got %+v", report)
+			}
+		})
+	}
+}
+
+// timedOut is a net.Error that timed out.
+type timedOut struct{}
+
+func (timedOut) Error() string   { return "i/o timeout" }
+func (timedOut) Timeout() bool   { return true }
+func (timedOut) Temporary() bool { return true }
+
+// Sweep: every other reason the mill could not be asked is not run beside a real
+// failure too, per example, and is not sent again.
+func TestEveryOtherNotRunReasonStaysNotRunBesideARealFailure(t *testing.T) {
+	until := time.Date(2026, 10, 7, 14, 0, 0, 0, time.UTC)
+	cases := map[string]*application.GristUnanswered{
+		"the key's daily limit":  {Txid: "direct:b", Answer: &application.GristAnswer{Status: application.GristRefused, Reason: application.GristReasonDaily(100)}},
+		"the app's licence":      {Txid: "direct:b", Answer: &application.GristAnswer{Status: application.GristRefused, Reason: application.GristReasonLicence}},
+		"the usage limit":        {Txid: "direct:b", Answer: &application.GristAnswer{Status: application.GristFailed, Reason: application.GristReasonLimited(application.HarnessStop{Reason: application.ReasonUsageLimit, Until: until})}},
+		"the model's rate limit": {Txid: "direct:b", Answer: &application.GristAnswer{Status: application.GristFailed, Reason: application.GristReasonLimited(application.HarnessStop{Reason: application.ReasonRateLimit, Until: until})}},
+		"the model overloaded":   {Txid: "direct:b", Answer: &application.GristAnswer{Status: application.GristFailed, Reason: application.GristReasonLimited(application.HarnessStop{Reason: application.ReasonOverloaded, Until: until})}},
+	}
+	for name, unanswered := range cases {
+		t.Run(name, func(t *testing.T) {
+			sender := &smokeScript{errs: []error{fmt.Errorf("boom"), unanswered}}
+			smoke, _ := smokeOfTwo(sender)
+			report, err := smoke.Run(context.Background(), "lampas", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(report.Failures) != 1 || len(report.NotRun) != 1 || sender.sent != 2 {
+				t.Errorf("expected one failure, one not run and two sends, got %d sends %+v", sender.sent, report)
+			}
+			if !report.Held() {
+				t.Errorf("expected the real failure to hold, got %+v", report)
+			}
+		})
+	}
+}
+
+// mw-6ww.169: an example the backend could not be reached for is sent once more
+// after 60 s, and passes when the backend is back: nothing is not run, nothing
+// fails.
+func TestAnExampleNotRunForTheBackendIsSentOnceMoreAfterSixtySeconds(t *testing.T) {
+	gone := fmt.Errorf("reaching it: %w", application.ErrPosternUnreachable)
+	sender := &smokeScript{errs: []error{gone, nil}}
+	smoke, waits := smokeWith(sender)
+	report, err := smoke.Run(context.Background(), "lampas", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sender.sent != 2 || len(*waits) != 1 || (*waits)[0] != application.GristSmokeRetryWait || application.GristSmokeRetryWait != 60*time.Second {
+		t.Errorf("expected two sends with one wait of 60s, got %d sends, waits %v", sender.sent, *waits)
+	}
+	if report.Failed() || len(report.NotRun) != 0 || len(report.Runs) != 0 || len(report.Failures) != 0 {
+		t.Errorf("expected the example to pass on the second try, got %+v", report)
+	}
+}
+
+// The retry of one example that fails for its own reason fails it, as a send
+// would; one still out of reach is not run, with the count in the mail's line.
+func TestTheRetryAtTheEndKeepsEachExamplesOwnVerdict(t *testing.T) {
+	gone := fmt.Errorf("reaching it: %w", application.ErrPosternUnreachable)
+	// a-real and hello are both out of reach; on the retry a-real is answered
+	// with a refusal about the request and hello is out of reach still.
+	sender := &smokeScript{errs: []error{gone, gone, refusedWith(403, "no"), gone}}
+	smoke, _ := smokeOfTwo(sender)
+	report, err := smoke.Run(context.Background(), "lampas", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sender.sent != 4 {
+		t.Errorf("expected each example sent twice, got %d", sender.sent)
+	}
+	if len(report.Failures) != 1 || !strings.Contains(report.Failures[0], "lampas/tutor/a-real: it could not be sent") {
+		t.Errorf("expected a-real to fail on its retry, got %v", report.Failures)
+	}
+	if len(report.NotRun) != 1 || report.Runs["lampas/tutor/hello"].NotRun != true || report.Runs["lampas/tutor/a-real"].NotRun {
+		t.Errorf("expected hello alone to stay not run, got %+v", report)
+	}
+	if line := report.Line(); !strings.Contains(line, "1 example not run") || !strings.Contains(line, "FAILED 1 of 2") {
+		t.Errorf("expected the line to say FAILED 1 of 2 and 1 example not run, got %q", line)
+	}
+}
+
+// A run of nothing but not-run examples says their count too.
+func TestANotRunLineSaysHowManyExamplesWereNotRun(t *testing.T) {
+	gone := fmt.Errorf("reaching it: %w", application.ErrPosternUnreachable)
+	smoke, _ := smokeOfTwo(&smokeScript{errs: []error{gone, gone, gone, gone}})
+	report, err := smoke.Run(context.Background(), "lampas", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Failed() || !strings.Contains(report.Line(), "2 examples not run") {
+		t.Errorf("expected not run with the count 2, got %q", report.Line())
+	}
+}
+
+// swapScript is a swap watch that says a swap is running for the first n looks.
+type swapScript struct {
+	running int
+	looks   int
+}
+
+func (w *swapScript) SwapRunning(context.Context) (bool, error) {
+	w.looks++
+	return w.looks <= w.running, nil
+}
+
+// A smoke run while the backend is being swapped waits for the swap to finish
+// before its first send.
+func TestASmokeWaitsForABackendSwapToFinishBeforeItSends(t *testing.T) {
+	sender := &smokeScript{errs: []error{nil}}
+	smoke, waits := smokeWith(sender)
+	smoke.Swap = &swapScript{running: 3}
+	report, err := smoke.Run(context.Background(), "lampas", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*waits) != 3 || sender.sent != 1 || report.Failed() {
+		t.Errorf("expected three waits for the swap and one send, got waits %v, %d sends, %+v", *waits, sender.sent, report)
+	}
+}
+
+// A swap that does not finish is waited for five minutes, then the smoke sends.
+func TestASmokeWaitsAtMostFiveMinutesForABackendSwap(t *testing.T) {
+	sender := &smokeScript{errs: []error{nil}}
+	smoke, waits := smokeWith(sender)
+	smoke.Swap = &swapScript{running: 1 << 30}
+	if _, err := smoke.Run(context.Background(), "lampas", ""); err != nil {
+		t.Fatal(err)
+	}
+	var total time.Duration
+	for _, d := range *waits {
+		total += d
+	}
+	if total != application.GristSmokeSwapWait || application.GristSmokeSwapWait != 5*time.Minute || sender.sent != 1 {
+		t.Errorf("expected waits of 5 minutes in all and a send, got %v (%d sends)", total, sender.sent)
+	}
+}
+
+// BackendSwapWatch reads a swap that has started and not reported back from the
+// hands notes; a finished one, another step, and a stale start are not.
+func TestBackendSwapWatchSeesAStartedSwapStep(t *testing.T) {
+	now := time.Date(2026, 11, 12, 0, 45, 0, 0, time.UTC)
+	started := func(ago time.Duration, exit int, why string) string {
+		raw, _ := json.Marshal(application.HandsRan{At: now.Add(-ago).Format(time.RFC3339), Exit: exit, Host: "home", Why: why})
+		return string(raw)
+	}
+	for name, test := range map[string]struct {
+		key, value string
+		want       bool
+	}{
+		"a swap just started":           {"hands.ran.mw-mr4xgrw.59.backend-abc123", started(time.Minute, -1, application.HandsStartedWhy), true},
+		"a swap that finished":          {"hands.ran.mw-mr4xgrw.59.backend-abc123", started(time.Minute, 0, ""), false},
+		"a start nobody reported on":    {"hands.ran.mw-mr4xgrw.59.backend-abc123", started(time.Hour, -1, application.HandsStartedWhy), false},
+		"another step that just starts": {"hands.ran.mw-5r3p30.1.deploy-site", started(time.Minute, -1, application.HandsStartedWhy), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tracker := apptest.NewFakeTracker()
+			if err := tracker.SetNote(context.Background(), test.key, test.value); err != nil {
+				t.Fatal(err)
+			}
+			running, err := application.BackendSwapWatch{Notes: tracker, Now: func() time.Time { return now }}.SwapRunning(context.Background())
+			if err != nil || running != test.want {
+				t.Errorf("expected %v, got %v %v", test.want, running, err)
+			}
+		})
+	}
+}
+
+// A failure that holds is recorded with the examples not run beside it, and the
+// record says them in mw status and in its line; a new failure is recorded over
+// a standing one (the not-run examples do not stop it).
+func TestAFailedRecordSaysTheExamplesNotRunBesideIt(t *testing.T) {
+	ctx := context.Background()
+	gone := fmt.Errorf("reaching it: %w", application.ErrPosternUnreachable)
+	smoke, _ := smokeOfTwo(&smokeScript{errs: []error{fmt.Errorf("boom"), gone, gone}})
+	report, err := smoke.Run(ctx, "lampas", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracker := apptest.NewFakeTracker()
+	book := application.GristSmokeBook{Notes: tracker, Host: "laptop"}
+	// An earlier failure stands; the new smoke's failure replaces it.
+	if err := book.Record(ctx, "millwright", application.GristSmokeReport{App: "lampas", Examples: 1, Failures: []string{"lampas/tutor/old: boom"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := book.Record(ctx, "millwright", report); err != nil {
+		t.Fatal(err)
+	}
+	records, err := book.Records(ctx)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("%v %v", records, err)
+	}
+	if got := records[0].FailingExamples(); len(got) != 1 || got[0] != "lampas/tutor/a-real" {
+		t.Errorf("expected the new failure to be the record, got %v", records[0].Failures)
+	}
+	if line := records[0].Line(); !strings.Contains(line, "also not run, and held for nothing") || !strings.Contains(line, "1 example not run") {
+		t.Errorf("expected the record's line to say what was not run, got %q", line)
 	}
 }
