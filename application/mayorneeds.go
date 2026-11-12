@@ -15,9 +15,7 @@ import (
 // by hand: this costs one read of the notes and, only when a bead with no
 // steps has comments, one read of those.
 //
-// It leaves out what the view makes a need of another kind: a bead older than
-// PosternViewStaleHands, which the view turns into a stale need waiting on the
-// Governor, one he has kept, a demo-only bead, one whose BY HAND comment gives
+// It leaves out what the view makes a need of another kind: one he has kept, a demo-only bead, one whose BY HAND comment gives
 // him his instructions, and one whose question card stands (it waits on his
 // answer). Nor does it see a landing with no HOW TO CHECK IT or a story out of
 // attempts: those take the view's whole tree.
@@ -49,7 +47,7 @@ func (r MayorReader) MayorNeeds(ctx context.Context, hitl []StoryDetail) ([]Post
 	// has one, whether or not its notes turn out to give it steps.
 	var maybe []string
 	for _, d := range hitl {
-		if d.CommentCount > 0 && r.maybeNeed(d, now) {
+		if d.CommentCount > 0 && r.maybeNeed(d) {
 			maybe = append(maybe, d.Story.ID)
 		}
 	}
@@ -83,7 +81,7 @@ func (r MayorReader) MayorNeeds(ctx context.Context, hitl []StoryDetail) ([]Post
 	for _, d := range hitl {
 		id := d.Story.ID
 		e := &viewEntry{detail: d, waits: []string{}}
-		if seen[id] || !r.maybeNeed(d, now) || b.kept(e, notes) {
+		if seen[id] || !r.maybeNeed(d) || b.kept(e, notes) {
 			continue
 		}
 		seen[id] = true
@@ -115,13 +113,14 @@ func (r MayorReader) MayorNeeds(ctx context.Context, hitl []StoryDetail) ([]Post
 
 // maybeNeed reports whether d could be a hands need waiting on the Mayor by
 // what the bead says of itself alone: open or claimed, a hands kind of hitl
-// bead (bare hitl, or hitl:hands) but not demo or hitl:todo, and not yet old enough for the view to call it stale.
-func (r MayorReader) maybeNeed(d StoryDetail, now time.Time) bool {
+// bead (bare hitl, or hitl:hands) but not demo or hitl:todo. Its age does not
+// matter: a hands bead with no step and no BY HAND comment waits on the Mayor
+// however old, and the view never turns it into a stale need.
+func (r MayorReader) maybeNeed(d StoryDetail) bool {
 	if !workable(d) || !hasHitlLabel(d.Labels) || isTodo(d.Labels) || hitlNeedKind(d.Labels) != PosternNeedHands || hasLabel(d.Labels, LabelDemo) {
 		return false
 	}
-	since := firstKnown(d.Created, d.Updated)
-	return since.IsZero() || now.Sub(since) <= PosternViewStaleHands
+	return true
 }
 
 // HeldHands lists the held beads with a hands step that has not run clean and

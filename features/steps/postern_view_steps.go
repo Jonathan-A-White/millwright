@@ -81,6 +81,7 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed a month ago$`, c.theViewsBeadLandedAMonthAgo)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed two hours ago with the Mayor's comment "([^"]*)"$`, c.theViewsBeadLandedTwoHoursAgoChecked)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" has a postern question open since two hours ago$`, c.theViewsBeadHasAQuestionOpen)
+	ctx.Given(`^the view's bead "([^"]*)" has a postern question open since two hours ago$`, c.theViewsFiledBeadHasAQuestionOpen)
 
 	ctx.Given(`^the view's bead "([^"]*)" has the hands step "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.theViewsBeadHasTheHandsStep)
 	ctx.Given(`^the view's hands step "([^"]*)" on "([^"]*)" is superseded by "([^"]*)"$`, c.theViewsHandsStepIsSupersededBy)
@@ -513,6 +514,12 @@ func (c *posternViewContext) theViewsBeadLandedAMonthAgo(id, epic string) error 
 
 func (c *posternViewContext) theViewsBeadHasAQuestionOpen(id, epic string) error {
 	c.tracker.AddStory(epic, domain.Story{ID: id, Title: "Which way?"})
+	return c.theViewsFiledBeadHasAQuestionOpen(id)
+}
+
+// theViewsFiledBeadHasAQuestionOpen puts a standing question on a bead the
+// scenario has already filed, leaving its labels and age as they are.
+func (c *posternViewContext) theViewsFiledBeadHasAQuestionOpen(id string) error {
 	note, err := json.Marshal(map[string]any{
 		"txid": "q-" + id, "options": []string{"left", "right"}, "q": "Which way?", "rec": "left",
 		"asked": posternViewFeatureNow.Add(-2 * time.Hour).Format(time.RFC3339),
