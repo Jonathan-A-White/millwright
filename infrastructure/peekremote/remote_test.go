@@ -86,3 +86,23 @@ func TestWorktreeStateIsAnErrorWhenTheHostSaysNothingOfItsWorktree(t *testing.T)
 		t.Fatalf("expected a refusal naming [hands_hosts], got %v", err)
 	}
 }
+
+func TestRetryThereRunsMwRetryWithItsFlagsOnTheHostAndReturnsWhatItPrints(t *testing.T) {
+	log := standIn(t, 0)
+	got, err := Remote{Reach: map[string]string{"desktop": "ssh desktop"}}.RetryThere(context.Background(), "desktop", "mw-1", []string{"--hold"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "host: desktop\n" {
+		t.Fatalf("printed %q", got)
+	}
+	args, _ := os.ReadFile(log)
+	want := "bash -lc 'mw retry '\\''--hold'\\'' '\\''mw-1'\\'''\n"
+	if !strings.HasSuffix(string(args), want) {
+		t.Fatalf("ssh got\n%s\nwant it to end with\n%s", args, want)
+	}
+	standIn(t, 1)
+	if _, err := (Remote{Reach: map[string]string{"desktop": "ssh desktop"}}).RetryThere(context.Background(), "desktop", "mw-1", nil); err == nil || !strings.Contains(err.Error(), "oops") {
+		t.Fatalf("expected ssh's stderr in the error, got %v", err)
+	}
+}

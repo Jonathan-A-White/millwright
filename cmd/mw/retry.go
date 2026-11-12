@@ -39,8 +39,10 @@ func newRetryCmd() *cobra.Command {
 			"no worktree: it gives the claim back, guarded on whoever actually holds it, and leaves that\n" +
 			"host's worktree and branch to be bundled by that host's next dispatch. First it asks that host,\n" +
 			"over the ssh line [hands_hosts] gives, whether its worktree holds anything uncommitted: if it\n" +
-			"does, or the host cannot be asked, the retry is refused, naming the host and the command to run\n" +
-			"there. --force goes on anyway and says \"work left unsaved on <host>: <path>\" on stderr and on\n" +
+			"does, it asks that host to run mw retry itself (--from-main, --hold and --repathed passed on): the\n" +
+			"host bundles the work into its vault and gives the claim back, and what it printed, naming the\n" +
+			"bundle, is printed here. If the host cannot be asked, or its retry refuses, the retry is refused,\n" +
+			"naming the host and the command to run there. --force goes on anyway and says \"work left unsaved on <host>: <path>\" on stderr and on\n" +
 			"the story. Where a story was worked\n" +
 			"is read from its claim (mw@<host>) first, and only without one from the host key of its path,\n" +
 			"so changing the host key of a story in progress moves neither its worktree nor its retry.\n\n" +
