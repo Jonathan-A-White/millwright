@@ -856,6 +856,7 @@ func TestPosternViewStaleNeedSortsBySinceItWentStaleAndReadsItsComments(t *testi
 		mustDo(t, tracker.CommentOnStory(context.Background(), id, "a word"))
 	}
 	mustDo(t, tracker.SetLabels("mw-a.1", "hitl"))
+	fileOneStep(t, tracker, "mw-a.1")
 	mustDo(t, tracker.SetLabels("mw-a.2", "demo"))
 	tracker.AddStory("mw-a", domain.Story{ID: "mw-a.3", Title: "Young hands"})
 	mustDo(t, tracker.SetLabels("mw-a.3", "hitl"))
@@ -1186,4 +1187,50 @@ func TestPosternViewHandsNeedWithNoRouteSaysWhyThereIsNoApprove(t *testing.T) {
 			t.Fatalf("expected a ready need, got %+v", n)
 		}
 	})
+}
+
+// One bead makes one card: a standing question note makes the question need
+// alone, and a hands bead nobody wrote a step for waits on the Mayor at any
+// age, where one with a step goes stale on his line.
+func TestPosternViewOneBeadMakesOneCard(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	liveEpic(tracker, "mw-a", domain.Path{})
+	old := viewNow.Add(-5 * 24 * time.Hour)
+	for _, id := range []string{"mw-a.1", "mw-a.2", "mw-a.3", "mw-a.4"} {
+		tracker.AddStory("mw-a", domain.Story{ID: id, Title: "Story " + id})
+		mustDo(t, tracker.SetCreated(id, old))
+		mustDo(t, tracker.SetLabels(id, "hitl"))
+	}
+	// mw-a.1 stands on a question; mw-a.2 has no step; mw-a.3 has a step;
+	// mw-a.4 has no step but a BY HAND comment.
+	mustDo(t, tracker.SetNote(ctx, application.PosternQuestionKey("mw-a.1"), "txid-mw-a.1"))
+	fileOneStep(t, tracker, "mw-a.3")
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-a.4", "BY HAND: switch it off"))
+
+	doc := viewDoc(t, tracker)
+
+	if got, want := viewNeeds(doc), []string{"hands:mw-a.2", "question:mw-a.1", "stale:mw-a.3", "stale:mw-a.4"}; !equalStrings(sortedCopy(got), want) {
+		t.Fatalf("expected needs %v, got %v", want, got)
+	}
+	n := viewNeed(t, doc, "hands", "mw-a.2")
+	if n.WaitsFor != application.PosternWaitsMayor || !n.NotReady {
+		t.Fatalf("expected the hands bead with no step to wait on the Mayor, got %+v", n)
+	}
+	if s := viewNeed(t, doc, "stale", "mw-a.3"); s.WaitsFor != application.PosternWaitsYou {
+		t.Fatalf("expected the stale need of the bead with a step to wait on him, got %+v", s)
+	}
+}
+
+func sortedCopy(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
+}
+
+// fileOneStep files one unrun hands step on bead.
+func fileOneStep(t *testing.T, tracker *apptest.FakeTracker, bead string) {
+	t.Helper()
+	raw, _ := json.Marshal([]application.HandsStepRecord{{HandsStep: domain.HandsStep{ID: "a", Host: "desktop", As: "user", Run: "true"}}})
+	mustDo(t, tracker.SetNote(context.Background(), application.HandsStepsKey(bead), string(raw)))
 }

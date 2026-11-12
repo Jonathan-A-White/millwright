@@ -928,6 +928,11 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 				waiting = append(waiting, waitingNeed{need: need, entry: e, window: PosternViewStaleHands, fact: "not yet answered"})
 				continue
 			}
+			// A bead whose question note stands makes the question need alone:
+			// one bead, one card.
+			if strings.TrimSpace(notes[PosternQuestionKey(id)]) != "" {
+				continue
+			}
 			steps := viewHandsSteps(id, notes)
 			// A demo bead is labelled hitl only to keep it from dispatch; it
 			// is his demo card alone unless it also carries a hands step.
@@ -1012,6 +1017,15 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		}
 		if w.need.Kind != PosternNeedApprove && w.need.Kind != PosternNeedHands && !w.stale(b.now) {
 			b.markNotReady(&w.need, w.entry, false)
+		}
+		if w.need.Kind == PosternNeedHands {
+			// A hands bead nobody wrote a step for, with no BY HAND comment,
+			// waits on the Mayor whatever its age: nothing there is his to
+			// do, so it never goes stale on his line.
+			if len(w.need.Steps) == 0 && byHandInstructions(comments[w.entry.detail.Story.ID]) == "" {
+				w.window = 0
+				w.fact = viewNoStepFiled
+			}
 		}
 		if w.need.Kind == PosternNeedHands && !w.stale(b.now) {
 			steps := w.need.Steps
@@ -1614,6 +1628,10 @@ func uniqueStrings(ids []string) []string {
 
 // viewMayorWritesSteps is what a hands need with no steps yet waits on.
 const viewMayorWritesSteps = "the Mayor to write the steps"
+
+// viewNoStepFiled is the fact of a hands bead with no step and no BY HAND
+// comment: it waits on the Mayor, who writes the step or closes the bead.
+const viewNoStepFiled = "no step filed: the Mayor writes it or closes it"
 
 // markNotReady marks need, a hands or demo need on e, not ready when e waits
 // on an open bead or, with noSteps, has no hands steps yet: WaitingOn names the

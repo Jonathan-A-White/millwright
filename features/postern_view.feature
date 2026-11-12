@@ -214,6 +214,7 @@ Feature: mw postern view
   Scenario: A newest comment is cut to its first 200 characters
     Given the view's epic "mw-hnd" is live
     And the view's hitl bead "mw-hnd.1" under "mw-hnd" was filed 4 days ago
+    And the view's bead "mw-hnd.1" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
     And the view's bead "mw-hnd.1" has a comment of 300 letters
     When the live view is built
     Then the view's stale need on "mw-hnd.1" quotes 200 letters of its newest comment
@@ -239,6 +240,7 @@ Feature: mw postern view
     Given the view's epic "mw-kept" is live
     And the view's held story "mw-kept.1" under "mw-kept" was filed 8 days ago
     And the view's hitl bead "mw-kept.2" under "mw-kept" was filed 4 days ago
+    And the view's bead "mw-kept.2" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
     And the view's bead "mw-kept" is kept until 1 day ago
     And the view's bead "mw-kept.2" is kept until 1 day ago
     When the live view is built
@@ -252,6 +254,29 @@ Feature: mw postern view
     When the live view is built
     Then the view's hands need on "mw-who.1" waits for "mayor"
     And the view's hands need on "mw-who.1" is not ready, waiting on "the Mayor to write the steps"
+
+  Scenario: A hands bead with no step and no BY HAND comment waits on the Mayor at any age and never goes stale
+    Given the view's epic "mw-who" is live
+    And the view's hitl bead "mw-who.1" under "mw-who" was filed 5 days ago
+    When the live view is built
+    Then the view's needs on "mw-who.1" are "hands:mw-who.1"
+    And the view's hands need on "mw-who.1" waits for "mayor"
+    And the view's hands need on "mw-who.1" is not ready, waiting on "the Mayor to write the steps"
+
+  Scenario: A hands bead with one unrun step, 5 days old, is a stale card waiting on him
+    Given the view's epic "mw-who" is live
+    And the view's hitl bead "mw-who.1" under "mw-who" was filed 5 days ago
+    And the view's bead "mw-who.1" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    When the live view is built
+    Then the view's needs on "mw-who.1" are "stale:mw-who.1"
+    And the view's need "stale" on "mw-who.1" waits for "you"
+
+  Scenario: A hitl bead with a standing question makes the question card alone
+    Given the view's epic "mw-one" is live
+    And the view's hitl bead "mw-one.1" under "mw-one" was filed 5 days ago
+    And the view's bead "mw-one.1" has a postern question open since two hours ago
+    When the live view is built
+    Then the view's needs on "mw-one.1" are "question:mw-one.1"
 
   Scenario: A hands bead with a BY HAND comment is his, with Done
     Given the view's epic "mw-who" is live
@@ -289,6 +314,7 @@ Feature: mw postern view
   Scenario: A question, a landing to verify and a stale card wait on him
     Given the view's epic "mw-old" is live
     And the view's hitl bead "mw-old.1" under "mw-old" was filed 4 days ago
+    And the view's bead "mw-old.1" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
     And the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "HOW TO CHECK IT: 1. Open the app."
     When the live view is built
     Then the view's need "question" on "mw-v.4" waits for "you"

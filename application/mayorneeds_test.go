@@ -42,7 +42,6 @@ func TestMayorReaderListsAHandsBeadWithNoStepAsWaitingOnTheMayor(t *testing.T) {
 
 func TestMayorReaderLeavesOutWhatTheViewMakesSomeoneElsesNeed(t *testing.T) {
 	tracker := aTrackerPathedToVPS(t)
-	aHandsBeadFiledAgo(t, tracker, "mw-gq6.71", 4*24*time.Hour) // stale: the view asks him
 	aHandsBeadFiledAgo(t, tracker, "mw-gq6.72", time.Hour)
 	if err := tracker.CommentOnStory(context.Background(), "mw-gq6.72", "BY HAND: run the script"); err != nil {
 		t.Fatalf("commenting: %v", err)
@@ -74,5 +73,16 @@ func TestMayorReaderLeavesOutAHandsBeadWhoseQuestionCardStands(t *testing.T) {
 
 	if len(needs) != 1 || needs[0].Bead != "mw-gq6.76" {
 		t.Fatalf("expected only the bead with no question card to wait on the Mayor, got %+v", needs)
+	}
+}
+
+func TestMayorReaderListsAHandsBeadWithNoStepHoweverOld(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	aHandsBeadFiledAgo(t, tracker, "mw-gq6.77", 5*24*time.Hour)
+
+	needs := mayorNeedsFor(t, tracker)
+
+	if len(needs) != 1 || needs[0].Bead != "mw-gq6.77" || needs[0].WaitsFor != application.PosternWaitsMayor {
+		t.Fatalf("expected the 5-day-old hands bead with no step to wait on the Mayor, got %+v", needs)
 	}
 }
