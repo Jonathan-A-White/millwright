@@ -208,7 +208,9 @@ func (b BackendStage) swapResult(ctx context.Context, swap stagedSwap, step doma
 		problem("taking "+LabelHitl+" off "+swap.Bead, err)
 	}
 	if outcome.Exit == 0 {
-		if err := b.Tracker.CloseStory(ctx, swap.Bead, said); err != nil {
+		closer := CloseRetry{Close: b.Tracker.CloseStory, Show: b.Tracker.ShowStory, Host: b.Host,
+			PushWait: b.PushWait, RetryWait: b.RetryWait, Mailbox: b.Mailbox}
+		if err := closer.CloseStory(ctx, "mw backend swap", "swapping", swap.Bead, said); err != nil {
 			problem("closing "+swap.Bead, err)
 		}
 		lines = append(lines, b.deployedChecked(ctx, swap)...)

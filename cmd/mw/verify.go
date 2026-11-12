@@ -234,7 +234,7 @@ func newVerifyConfirmCmd() *cobra.Command {
 			"it working, and is refused unless --force \"<reason>\" says why; the reason stands in the VERIFIED comment.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			gateway, _, err := posternGateway()
+			gateway, host, err := posternGateway()
 			if err != nil {
 				return err
 			}
@@ -248,6 +248,7 @@ func newVerifyConfirmCmd() *cobra.Command {
 			}
 			return application.VerifyConfirm{
 				Beads: gateway, Notes: gateway, Sender: newHandsPush(gateway), GovernorKey: governorKey, InboxDir: inbox, Out: cmd.OutOrStdout(),
+				Host: host, PushWait: closePushWait(), Mailbox: gateway,
 			}.Run(cmd.Context(), application.VerifyConfirmRequest{Bead: args[0], Txid: txid, As: as, Shows: shows, Force: force})
 		},
 	}

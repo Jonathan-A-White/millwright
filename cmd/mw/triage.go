@@ -54,7 +54,7 @@ func newTriageDumpCmd() *cobra.Command {
 			}
 			gateway := mwGateway(dir, host)
 			if sweepOrphans {
-				_, err := application.TriageOrphans{Source: gateway, Closer: gateway, Apply: apply, Out: cmd.OutOrStdout()}.Run(cmd.Context())
+				_, err := application.TriageOrphans{Source: gateway, Closer: gateway, Apply: apply, Out: cmd.OutOrStdout(), Host: host, PushWait: closePushWait(), Mailbox: gateway}.Run(cmd.Context())
 				return err
 			}
 			file, err := os.Create(out)
