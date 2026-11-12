@@ -230,6 +230,7 @@ var landedTail = []tailStep{
 			if s.ledgered {
 				return
 			}
+			t.n.readDocsForLedger(t.ctx, s.c)
 			if t.batch == nil {
 				if err := t.n.ledger(t.ctx, s.c, s.report, s.outcome); err != nil {
 					s.report.Notes = append(s.report.Notes, err.Error())
@@ -241,7 +242,7 @@ var landedTail = []tailStep{
 				When: t.n.now(), StoryID: s.story.ID, Title: s.story.Title, Outcome: s.outcome, Path: s.story.path,
 				// The session's fuel was charged by the line that queued it.
 				FuelCharged: true,
-				Notes:       append([]string{"landed by mw land on " + t.n.Host, b.report.Label() + ": " + strings.Join(b.together, ", ")}, b.report.fixerNotes(s.story.ID)...),
+				Notes:       append(append([]string{"landed by mw land on " + t.n.Host, b.report.Label() + ": " + strings.Join(b.together, ", ")}, b.report.fixerNotes(s.story.ID)...), s.c.docsNoteList()...),
 			}.String()
 			if err := t.n.Vault.AppendToLedger(t.ctx, t.n.Seat, s.line); err != nil {
 				s.report.Notes = append(s.report.Notes, fmt.Sprintf("the line for %s could not be appended to the %s seat's ledger: %v", s.story.ID, t.n.Seat, err))

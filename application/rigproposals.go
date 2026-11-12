@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -411,4 +412,23 @@ func closingDocs(comments []Comment) DocsReading {
 		}
 	}
 	return DocsReading{}
+}
+
+// readDocsForLedger reads the story's comments once for a landing's ledger row,
+// keeping them and the row's docs note on c, which the landing's mail then uses
+// instead of a read of its own. Comments that cannot be read leave c as it was.
+func (n Next) readDocsForLedger(ctx context.Context, c *closeOut) {
+	comments, err := n.Tracker.StoryComments(ctx, c.id)
+	if err != nil {
+		return
+	}
+	c.comments, c.docsNote = comments, closingDocs(comments).LedgerNote()
+}
+
+// docsNoteList is the docs note as the notes of a ledger row: none, or one.
+func (c *closeOut) docsNoteList() []string {
+	if c.docsNote == "" {
+		return nil
+	}
+	return []string{c.docsNote}
 }

@@ -747,6 +747,11 @@ type NextReport struct {
 // it between themselves.
 type closeOut struct {
 	id string
+	// comments and docsNote are the story's comments and the ledger note of the
+	// Docs line in them, read once by a landing's ledger step so that its mail
+	// does not read them again (mw-gq6.1106); nil and empty until then.
+	comments []Comment
+	docsNote string
 	// place is where a batch's close-out keeps its files, runs/batch/<rig>/<n>/;
 	// nil for a story, whose files go in runs/<id>/. A batch's id is its label,
 	// 'batch 3 of lampas', which is no name for a directory (mw-gq6.969).
@@ -3206,9 +3211,12 @@ func (n Next) closingMail(ctx context.Context, c *closeOut, report *NextReport, 
 	if c.tested != "" {
 		verdict = MailTested
 	}
-	comments, err := n.Tracker.StoryComments(ctx, c.id)
-	if err != nil {
-		return verdict, ""
+	comments := c.comments
+	if comments == nil {
+		var err error
+		if comments, err = n.Tracker.StoryComments(ctx, c.id); err != nil {
+			return verdict, ""
+		}
 	}
 	var unmet, found string
 	if c.tested == "" {
@@ -3846,14 +3854,6 @@ func (n Next) ledger(ctx context.Context, c *closeOut, report *NextReport, outco
 	if err != nil {
 		report.Notes = append(report.Notes, err.Error())
 	}
-	notes := n.ledgerNotes(c, report)
-	// The Docs line a rig asks of its Builders is kept in the row, where it can
-	// be counted (mw-gq6.1106); comments that cannot be read add nothing.
-	if comments, err := n.Tracker.StoryComments(ctx, c.id); err == nil {
-		if note := closingDocs(comments).LedgerNote(); note != "" {
-			notes = append(notes, note)
-		}
-	}
 	line := LedgerLine{
 		When:        n.now(),
 		StoryID:     c.id,
@@ -3861,7 +3861,7 @@ func (n Next) ledger(ctx context.Context, c *closeOut, report *NextReport, outco
 		Outcome:     outcome,
 		Path:        c.path,
 		Result:      c.result,
-		Notes:       notes,
+		Notes:       n.ledgerNotes(c, report),
 		FuelCharged: charged,
 	}.String()
 
@@ -4008,6 +4008,9 @@ func (n Next) ledgerNotes(c *closeOut, report *NextReport) []string {
 	}
 	if c.result.Denials > 0 {
 		notes = append(notes, fmt.Sprintf("%d permission denial(s) during the session", c.result.Denials))
+	}
+	if c.docsNote != "" {
+		notes = append(notes, c.docsNote)
 	}
 	return append(notes, report.Notes...)
 }
