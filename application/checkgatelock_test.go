@@ -1231,3 +1231,80 @@ func TestAPartsExpectedTimeIsTheMedianOfItsLastRunsOnTheHostAlone(t *testing.T) 
 		t.Errorf("expected the median of the last two runs, 250s, got %s", got)
 	}
 }
+
+// The wait for the host's gate lock is bounded by the check's clock (Check.CallNow)
+// and not by the real time: with an hour of wait and the lock held, a clock moved
+// past the hour ends the wait at once, with no sleep (mw-gq6.1142).
+func TestAWholeChecksWaitForTheGateLockEndsWhenTheChecksClockPassesItsBound(t *testing.T) {
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	holder, err := w.gate.Take(context.Background(), "mw-gq6.1142-holder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Holding.Release(context.Background())
+	go func() {
+		for deadline := time.Now().Add(10 * time.Second); w.queuedGate() < 1 && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		}
+		w.clock.Pass(2 * time.Hour)
+	}()
+
+	started := time.Now()
+	report, err := w.checkInACall(time.Hour, time.Hour, 0)
+	if err == nil {
+		t.Fatalf("expected the check not to pass while the gate lock was held\n%s", report)
+	}
+	if took := time.Since(started); took > 20*time.Second {
+		t.Errorf("expected the wait to end when the check's clock passed its bound, it took %s of real time", took)
+	}
+	refusal := slotRefusalOf(report)
+	if refusal == nil {
+		t.Fatalf("expected a refusal that the tests were not run, got %+v", report.Refusals)
+	}
+	for _, want := range []string{"did not start", "gate lock", "mw-gq6.1142-holder", "nothing was run"} {
+		if !strings.Contains(refusal.Why, want) {
+			t.Errorf("expected the line to say %q, got %q", want, refusal.Why)
+		}
+	}
+	if checks.runs != 0 {
+		t.Errorf("expected the tests not to have run, they ran %d time(s)", checks.runs)
+	}
+}
+
+// The same for the rig's merge slot, the other wait takeForTests makes.
+func TestAWholeChecksWaitForTheMergeSlotEndsWhenTheChecksClockPassesItsBound(t *testing.T) {
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	told := &lockedBuffer{}
+	w.slots = rig.NewSlots(rig.WithSlotPoll(5*time.Millisecond), rig.WithSlotNoticeEvery(10*time.Millisecond),
+		rig.WithSlotNotice(func(said string) { told.WriteString(said) }))
+	landing, err := w.slots.Take(context.Background(), w.rigDir, "mw land, landing a batch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer landing.Release(context.Background())
+	go func() {
+		for deadline := time.Now().Add(10 * time.Second); told.String() == "" && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		}
+		w.clock.Pass(2 * time.Hour)
+	}()
+
+	started := time.Now()
+	report, err := w.checkInACall(time.Hour, time.Hour, 0)
+	if err == nil {
+		t.Fatalf("expected the check not to pass while the merge slot was held\n%s", report)
+	}
+	if took := time.Since(started); took > 20*time.Second {
+		t.Errorf("expected the wait to end when the check's clock passed its bound, it took %s of real time", took)
+	}
+	refusal := slotRefusalOf(report)
+	if refusal == nil {
+		t.Fatalf("expected a refusal that the tests were not run, got %+v", report.Refusals)
+	}
+	if !strings.Contains(refusal.Why, "merge slot") || !strings.Contains(refusal.Why, "nothing was run") {
+		t.Errorf("expected the line to name the merge slot and that nothing was run, got %q", refusal.Why)
+	}
+	if checks.runs != 0 {
+		t.Errorf("expected the tests not to have run, they ran %d time(s)", checks.runs)
+	}
+}

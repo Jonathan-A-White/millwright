@@ -405,7 +405,7 @@ func (k Check) takeSlotFor(ctx context.Context, c *closeOut, try slotTry, within
 // end inside what is left of the call is not started, the slot is given back and
 // the place kept (mw-gq6.944).
 func (k Check) takeSlotFit(ctx context.Context, c *closeOut, fit *callFit, within time.Duration, try slotTry) (Holding, error) {
-	waitCtx, cancel := context.WithTimeout(ctx, within)
+	waitCtx, cancel := k.boundByClock(ctx, within)
 	defer cancel()
 	waitCtx, ask := k.askToKeep(waitCtx, c)
 	if ask != nil && fit != nil {
