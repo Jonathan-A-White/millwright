@@ -135,6 +135,7 @@ func sealedPosternView(view application.PosternView) (application.PosternView, e
 	}
 	view.Cipher = posternCipher(keys)
 	view.File = postern.NewSnapshotFile(path)
+	view.CountsFile = postern.NewSnapshotFile(application.PosternNeedsCountsPath(path))
 	view.GovernorKey = governorKey
 	return view, nil
 }

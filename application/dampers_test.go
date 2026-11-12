@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -275,5 +276,112 @@ func TestDamperAlarmHintNamesACommandThatPrintsTheWholeList(t *testing.T) {
 	}
 	if got := (application.DampersReport{}).FullList(); !strings.Contains(got, "no damper alarm") {
 		t.Errorf("FullList with none = %q, want it to say so", got)
+	}
+}
+
+// needsCountsFile is the counts file the view writes at written, for a doc
+// holding n verify needs and one each of a few other kinds waiting on him.
+func needsCountsFile(t *testing.T, written time.Time, verify int) []byte {
+	t.Helper()
+	doc := application.PosternViewDoc{}
+	add := func(kind string, n int) {
+		for i := 0; i < n; i++ {
+			doc.Needs = append(doc.Needs, application.PosternViewNeed{Kind: kind, WaitsFor: application.PosternWaitsYou})
+		}
+	}
+	add(application.PosternNeedVerify, verify)
+	add(application.PosternNeedStale, 2)
+	add(application.PosternNeedApprove, 3)
+	add(application.PosternNeedDemo, 4)
+	add(application.PosternNeedQuestion, 5)
+	add(application.PosternNeedHands, 6)
+	raw, err := application.PosternNeedsCountsJSON(doc, written)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func needsYouLine(report application.DampersReport) (string, bool) {
+	for _, alarm := range report.Alarms {
+		if alarm.Principle == application.DamperNeedsYou {
+			return alarm.Line(), true
+		}
+	}
+	return "", false
+}
+
+func TestDampersRingWhenHisLineIsOverTheLimit(t *testing.T) {
+	facts := aCleanDamperFixture()
+	facts.NeedsCounts = needsCountsFile(t, facts.Now.Add(-5*time.Minute), 10) // 30 in all
+	report := application.ReadDampers(facts, application.DamperLimits{})
+	got, ok := needsYouLine(report)
+	want := "needs you · his line is 30: 10 verify, 2 stale, 3 release, 4 demos, 5 questions, 6 hands (limit 25)"
+	if !ok || got != want {
+		t.Errorf("line = %q (%v), want %q", got, ok, want)
+	}
+	if report.Counts.NeedsYou != 30 {
+		t.Errorf("NeedsYou = %d, want 30", report.Counts.NeedsYou)
+	}
+	if !strings.Contains(report.FullList(), want) {
+		t.Errorf("mw stuck --dampers does not list it:\n%s", report.FullList())
+	}
+}
+
+func TestDampersAreQuietAtOrUnderTheNeedsYouLimit(t *testing.T) {
+	for _, verify := range []int{4, 5} { // 25 is the limit, 24 is under it
+		facts := aCleanDamperFixture()
+		facts.NeedsCounts = needsCountsFile(t, facts.Now.Add(-time.Minute), verify)
+		// 20 other needs; verify 4 -> 24, verify 5 -> 25
+		report := application.ReadDampers(facts, application.DamperLimits{})
+		if line, ok := needsYouLine(report); ok {
+			t.Errorf("verify %d: rang %q at or under the limit", verify, line)
+		}
+	}
+}
+
+func TestDampersNeedsYouLimitIsTheKnob(t *testing.T) {
+	facts := aCleanDamperFixture()
+	facts.NeedsCounts = needsCountsFile(t, facts.Now.Add(-time.Minute), 0) // 20
+	if _, ok := needsYouLine(application.ReadDampers(facts, application.DamperLimits{NeedsYou: 19})); !ok {
+		t.Error("a limit of 19 did not ring at 20")
+	}
+	if line, ok := needsYouLine(application.ReadDampers(facts, application.DamperLimits{NeedsYou: 20})); ok {
+		t.Errorf("a limit of 20 rang at 20: %q", line)
+	}
+}
+
+func TestDampersSayTheNeedsCountIsStaleInsteadOfANumber(t *testing.T) {
+	facts := aCleanDamperFixture()
+	written := facts.Now.Add(-31 * time.Minute)
+	facts.NeedsCounts = needsCountsFile(t, written, 20) // over the limit, but old
+	got, ok := needsYouLine(application.ReadDampers(facts, application.DamperLimits{}))
+	if !ok || !strings.HasPrefix(got, "needs you · count is stale (written ") || !strings.Contains(got, written.UTC().Format("15:04")) {
+		t.Errorf("line = %q (%v), want the stale-count line naming when it was written", got, ok)
+	}
+	if strings.Contains(got, "his line is") {
+		t.Errorf("a stale count still gave a number: %q", got)
+	}
+	// exactly 30 minutes old is not yet stale
+	facts.NeedsCounts = needsCountsFile(t, facts.Now.Add(-30*time.Minute), 20)
+	if got, _ := needsYouLine(application.ReadDampers(facts, application.DamperLimits{})); strings.Contains(got, "count is stale") {
+		t.Errorf("a count 30 minutes old is called stale: %q", got)
+	}
+}
+
+func TestDampersSayNothingOfNeedsWhenThereIsNoCountsFile(t *testing.T) {
+	facts := aCleanDamperFixture()
+	facts.NeedsCounts = nil
+	if line, ok := needsYouLine(application.ReadDampers(facts, application.DamperLimits{})); ok {
+		t.Errorf("a missing counts file rang %q", line)
+	}
+}
+
+func TestDampersNameACountsFileThatCannotBeRead(t *testing.T) {
+	facts := aCleanDamperFixture()
+	facts.NeedsCounts = []byte("not json")
+	got, ok := needsYouLine(application.ReadDampers(facts, application.DamperLimits{}))
+	if !ok || !strings.Contains(got, "count is stale") {
+		t.Errorf("line = %q (%v), want a count that cannot be trusted said as stale", got, ok)
 	}
 }

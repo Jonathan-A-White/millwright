@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -1233,4 +1234,110 @@ func fileOneStep(t *testing.T, tracker *apptest.FakeTracker, bead string) {
 	t.Helper()
 	raw, _ := json.Marshal([]application.HandsStepRecord{{HandsStep: domain.HandsStep{ID: "a", Host: "desktop", As: "user", Run: "true"}}})
 	mustDo(t, tracker.SetNote(context.Background(), application.HandsStepsKey(bead), string(raw)))
+}
+
+// needsCountsDoc is a view holding needs of every kind, waiting on him and on
+// the Mayor, some of them folded.
+func needsCountsDoc() application.PosternViewDoc {
+	need := func(kind, bead, waits string, folded bool) application.PosternViewNeed {
+		return application.PosternViewNeed{Kind: kind, Bead: bead, Title: "Secret title of " + bead, Text: "Secret text of " + bead, WaitsFor: waits, Folded: folded}
+	}
+	return application.PosternViewDoc{Needs: []application.PosternViewNeed{
+		need(application.PosternNeedVerify, "mw-n.1", application.PosternWaitsYou, false),
+		need(application.PosternNeedVerify, "mw-n.2", application.PosternWaitsYou, false),
+		need(application.PosternNeedVerify, "mw-n.3", application.PosternWaitsYou, true),
+		need(application.PosternNeedStale, "mw-n.4", application.PosternWaitsYou, false),
+		need(application.PosternNeedApprove, "mw-n.5", application.PosternWaitsYou, false),
+		need(application.PosternNeedApprove, "mw-n.6", application.PosternWaitsMayor, false),
+		need(application.PosternNeedDemo, "mw-n.7", application.PosternWaitsYou, false),
+		need(application.PosternNeedQuestion, "mw-n.8", application.PosternWaitsYou, false),
+		need(application.PosternNeedHands, "mw-n.9", application.PosternWaitsYou, false),
+		need(application.PosternNeedHands, "mw-n.10", application.PosternWaitsMayor, false),
+		need(application.PosternNeedHands, "mw-n.11", application.PosternWaitsFactory, false),
+		need(application.PosternNeedDecision, "mw-n.12", application.PosternWaitsYou, false),
+	}}
+}
+
+func TestPosternNeedsCountsFollowTheBadgeRule(t *testing.T) {
+	counts := application.CountPosternNeeds(needsCountsDoc(), viewNow)
+	if counts.You.Total != 8 {
+		t.Errorf("you total = %d, want 8 (the folded verify and the other waiters are not his)", counts.You.Total)
+	}
+	want := map[string]int{"verify": 2, "stale": 1, "approve": 1, "demo": 1, "question": 1, "hands": 1, "decision": 1}
+	if !reflect.DeepEqual(counts.You.Kinds, want) {
+		t.Errorf("you kinds = %v, want %v", counts.You.Kinds, want)
+	}
+	if counts.Mayor.Total != 2 || counts.Mayor.Kinds["approve"] != 1 || counts.Mayor.Kinds["hands"] != 1 {
+		t.Errorf("mayor counts = %+v, want 2: an approve and a hands", counts.Mayor)
+	}
+	if counts.WrittenAt != viewNow.UTC().Format(time.RFC3339) {
+		t.Errorf("written_at = %q", counts.WrittenAt)
+	}
+}
+
+func TestRunWritesTheNeedsCountsBesideTheViewWithNoBeadIDOrText(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	liveEpic(tracker, "mw-a", domain.Path{})
+	cipher := apptest.NewFakeCipher()
+	file := apptest.NewFakeSnapshotFile("/state/postern/view.b64")
+	counts := apptest.NewFakeSnapshotFile("/state/postern/" + application.PosternNeedsCountsFile)
+	view := application.PosternView{
+		Tracker: tracker, Notes: tracker, Cipher: cipher, File: file, CountsFile: counts,
+		GovernorKey: "governor-pubkey-hex", Host: "desktop", Now: func() time.Time { return viewNow },
+	}
+	doc, err := view.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(counts.Written()) == 0 {
+		t.Fatal("no counts file was written")
+	}
+	var got application.PosternNeedsCounts
+	if err := json.Unmarshal(counts.Written(), &got); err != nil {
+		t.Fatalf("the counts file is not JSON: %v", err)
+	}
+	if want := application.CountPosternNeeds(doc, viewNow); !reflect.DeepEqual(got, want) {
+		t.Errorf("counts file = %+v, want %+v", got, want)
+	}
+
+	// the counts of a view with needs of each kind hold no bead id, title or text
+	raw, err := application.PosternNeedsCountsJSON(needsCountsDoc(), viewNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leak := range []string{"mw-n", "Secret", "title", "bead"} {
+		if strings.Contains(string(raw), leak) {
+			t.Errorf("the counts file holds %q: %s", leak, raw)
+		}
+	}
+}
+
+func TestRunWritesTheNeedsCountsEvenWhenTheMemoSkipsTheView(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	liveEpic(tracker, "mw-a", domain.Path{})
+	file := apptest.NewFakeSnapshotFile("/state/postern/view.b64")
+	counts := apptest.NewFakeSnapshotFile("/state/postern/needs-counts.json")
+	now := viewNow
+	view := application.PosternView{
+		Tracker: tracker, Notes: tracker, Cipher: apptest.NewFakeCipher(), File: file, CountsFile: counts,
+		GovernorKey: "governor-pubkey-hex", Host: "desktop", Memo: &application.PosternViewMemo{},
+		Now: func() time.Time { return now },
+	}
+	if _, err := view.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first := string(counts.Written())
+	now = now.Add(time.Hour)
+	if _, err := view.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if string(counts.Written()) == first {
+		t.Errorf("the counts file kept its written_at while the view was skipped: %s", first)
+	}
+}
+
+func TestNeedsCountsPathIsBesideTheView(t *testing.T) {
+	if got := application.PosternNeedsCountsPath("/state/postern/view.b64"); got != "/state/postern/needs-counts.json" {
+		t.Errorf("path = %q", got)
+	}
 }

@@ -498,7 +498,16 @@ its rig runs that many on any host, and `mw status` shows the same line under it
 over 7 days, a grilling open over 7 days with no card), review (his open cards, open
 demos and unrun hands steps over 8). The limits are the config file's `[dampers]` table:
 `ready_p1`, `p1_untouched_days`, `demo_waiting_days`, `grilling_days`, `testers_per_rig`,
-`review_queue`. `mw doctor` repeats the counts on one `dampers:` line.
+`review_queue`, `needs_you`. `mw doctor` repeats the counts on one `dampers:` line.
+
+His badge's number has an alarm of its own (mw-27f7myz.4). Each time `mw postern view` writes the
+view it also writes, atomically, `needs-counts.json` in the same directory: for the needs waiting on
+`you` and not folded (the badge's rule) and for those on `mayor`, the total and the count by kind,
+and `written_at`; no bead id, title or text. The view is sealed to his key, so this is what `mw status`
+can read. Over `needs_you` in `[dampers]` (default 25), DAMPERS prints `needs you · his line is N: a
+verify, b stale, c release, d demos, e questions, f hands (limit 25)`; a file older than 30 minutes
+prints `needs you · count is stale (written <time>)` instead of a number, and a missing file prints
+nothing. `mw stuck --dampers` lists it like the other alarms.
 
 The review limit holds for questions too (mw-t5shinh.26). While his review queue is over
 `review_queue`, `mw postern send --class decision-needed --bead <id>` sends no card: it writes
