@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -50,8 +51,9 @@ func (c *posternInboxContext) thePosternInboxClockReads(stamp string) error {
 }
 
 // theStaleHandsBead files a hitl bead id under a live epic, filed days before
-// the inbox's clock: old enough for the view to call its hands need stale. (A
-// held story never goes stale: the Mayor releases it.)
+// the inbox's clock, with one unrun hands step: old enough for the view to call
+// its hands need stale. (A held story never goes stale: the Mayor releases it;
+// nor does a hands bead nobody filed a step for.)
 func (c *posternInboxContext) theStaleHandsBead(id string, days int) error {
 	epic := id + "-epic"
 	c.memory.AddEpic(epic, domain.Path{})
@@ -60,7 +62,14 @@ func (c *posternInboxContext) theStaleHandsBead(id string, days int) error {
 	if err := c.memory.SetLabels(id, "hitl"); err != nil {
 		return err
 	}
-	return c.memory.SetCreated(id, c.clock.Add(-time.Duration(days)*24*time.Hour))
+	if err := c.memory.SetCreated(id, c.clock.Add(-time.Duration(days)*24*time.Hour)); err != nil {
+		return err
+	}
+	raw, err := json.Marshal([]application.HandsStepRecord{{HandsStep: domain.HandsStep{ID: "step", Host: "desktop", As: "user", Run: "true"}}})
+	if err != nil {
+		return err
+	}
+	return c.memory.SetNote(context.Background(), application.HandsStepsKey(id), string(raw))
 }
 
 func (c *posternInboxContext) aPosternKeepActionFromTheGovernor(bead string, days int, txid string) error {
