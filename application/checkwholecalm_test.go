@@ -18,6 +18,29 @@ import (
 // after), with a wait for a calm host that is counted and not slept (mw-gq6.819).
 func wholeCheckOnABusyHost(t *testing.T, readings []application.LoadReading, wait time.Duration) (check func() (application.CheckReport, error), checks *scriptedChecks, said *strings.Builder, waited *time.Duration) {
 	t.Helper()
+	return wholeCheckOnAStalledBusyHost(t, readings, wait, 0)
+}
+
+// stallingLoad is a host load that takes stall of real time over its first
+// reading, as a host that is slow for a moment does, and says what the readings say.
+type stallingLoad struct {
+	*apptest.FakeHostLoad
+	stall time.Duration
+}
+
+func (l *stallingLoad) Load(ctx context.Context) (application.LoadReading, error) {
+	if l.Reads == 0 {
+		time.Sleep(l.stall)
+	}
+	return l.FakeHostLoad.Load(ctx)
+}
+
+// wholeCheckOnAStalledBusyHost is wholeCheckOnABusyHost on a host that takes stall of
+// real time before the wait for a calm host reads its bound. The check's clock
+// (Check.CallNow) is moved by hand, by the waits and by nothing else, so the real
+// time the stall takes is not time the check has spent (mw-gq6.991).
+func wholeCheckOnAStalledBusyHost(t *testing.T, readings []application.LoadReading, wait, stall time.Duration) (check func() (application.CheckReport, error), checks *scriptedChecks, said *strings.Builder, waited *time.Duration) {
+	t.Helper()
 	tracker := apptest.NewFakeTracker()
 	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
 	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
@@ -28,13 +51,15 @@ func wholeCheckOnABusyHost(t *testing.T, readings []application.LoadReading, wai
 	checks = &scriptedChecks{passes: []bool{true}}
 	records := &mapRecords{}
 	said, waited = &strings.Builder{}, new(time.Duration)
+	now := time.Now()
 	check = func() (application.CheckReport, error) {
 		return application.Check{
 			Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: checks,
 			Slot: aSlot{}, Records: records, PartSlotWait: wait,
-			Load:     &apptest.FakeHostLoad{Readings: readings},
+			CallNow:  func() time.Time { return now },
+			Load:     &stallingLoad{FakeHostLoad: &apptest.FakeHostLoad{Readings: readings}, stall: stall},
 			LoadPoll: 30 * time.Second, // LoadBound is left at its default, 15 minutes
-			LoadWait: func(_ context.Context, d time.Duration) error { *waited += d; return nil },
+			LoadWait: func(_ context.Context, d time.Duration) error { *waited += d; now = now.Add(d); return nil },
 			Host:     "laptop", Remote: "origin",
 			Rigs: map[string]string{"millwright": rigDir},
 			Out:  said,
@@ -80,6 +105,26 @@ func TestACheckWithNoPartOnAHostThatStaysBusyWaitsNoLongerThanTheSlotWaitAndEnds
 	}
 	if !strings.Contains(said.String(), "load 39.0 of 20 cores") {
 		t.Errorf("expected the notices to say the load, got %q", said.String())
+	}
+}
+
+// A stall of real time before the wait reads its bound (the host was slow for a
+// moment) is not time the check has spent: the notices are counted against the
+// check's clock, which a test moves by hand (mw-gq6.991, seen in mw-gq6.983's gate).
+func TestACheckWithNoPartOnAHostThatStallsBeforeItsWaitCountsTheSameNoticesAsOneThatDoesNot(t *testing.T) {
+	check, _, said, waited := wholeCheckOnAStalledBusyHost(t, []application.LoadReading{busy()}, 3*time.Minute, 20*time.Millisecond)
+
+	if _, err := check(); err == nil {
+		t.Fatal("expected the check not to pass while the host stayed busy")
+	}
+	if *waited != 3*time.Minute {
+		t.Errorf("expected a wait of the whole 3m, it waited %s", *waited)
+	}
+	if n := strings.Count(said.String(), "still waiting for laptop to calm"); n != 3 {
+		t.Errorf("expected 3 notices in a 3m wait whatever the real time took, got %d in %q", n, said.String())
+	}
+	if !strings.Contains(said.String(), "(3m so far") {
+		t.Errorf("expected the last notice, got %q", said.String())
 	}
 }
 

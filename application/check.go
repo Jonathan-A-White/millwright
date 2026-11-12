@@ -100,9 +100,11 @@ type Check struct {
 	CallBudget   time.Duration
 	GateExpected func(ctx context.Context, rig string) time.Duration
 	// CallNow, when it is set, is the clock the fit of the gate to the call is
-	// read by (when the call began, what is left of it): the real clock when it
-	// is nil. A test of the fit moves it by hand instead of sleeping and hoping
-	// the host does not take longer than its margin (mw-gq6.983).
+	// read by (when the call began, what is left of it), and the clock a whole
+	// check's one deadline for its waits is read by: the real clock when it
+	// is nil. A test of the fit or of the waits moves it by hand instead of sleeping
+	// and hoping the host does not take longer than its margin (mw-gq6.983,
+	// mw-gq6.991).
 	CallNow func() time.Time
 
 	// PartExpected is the same for part n of a split gate: how long it usually
@@ -368,8 +370,12 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	// is one deadline from here (mw-gq6.915): the slot, the gate lock and a calm
 	// host before the tests, and after them the slot and gate lock of the changed
 	// specs and the wait for a calm host before a run again (mw-gq6.918).
-	began := time.Now()
-	left := func() time.Duration { return max((k.partSlotWait() - time.Since(began)).Round(time.Millisecond), 0) }
+	// It is read by the check's clock (CallNow), so that a test that moves the clock
+	// by hand is not at the mercy of the real time the host takes (mw-gq6.991).
+	began := k.callNow()
+	left := func() time.Duration {
+		return max((k.partSlotWait() - k.callNow().Sub(began)).Round(time.Millisecond), 0)
+	}
 	// The commit the checks are run at, when the worktree holds nothing else.
 	tip := k.cleanTip(ctx, c)
 	tests := &lastChecks{inner: k.Checks}
