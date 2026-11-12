@@ -715,7 +715,7 @@ func (g *Gateway) SupersedeStory(ctx context.Context, id, with string) error {
 
 // HoldStory implements application.WorkTracker: the story goes back to
 // deferred, beads' own way of holding work, the status CreateStory files it
-// in. The hold is guarded on nobody holding the story (--if-assignee ''), so a
+// in. The hold is guarded on nobody holding the story (--if-assignee with an empty value), so a
 // claim that lands between the caller's read of the story and this write is
 // not held over: bd writes nothing and exits 13, and the Builder's run stays in
 // progress (mw-gq6.1150). The refusal is told apart from any other failure by

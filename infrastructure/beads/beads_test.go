@@ -15,7 +15,7 @@ import (
 // holdStandIn is a stand-in bd that keeps one story's status and assignee in
 // files, and answers bd show and bd update as bd 1.3.0 does: an update that
 // carries --if-assignee writes nothing and exits 13 when the assignee is not
-// the one named ('' names nobody). It returns the Gateway, a function that
+// the one named (an empty value names nobody). It returns the Gateway, a function that
 // claims the story as a session on another host would (between a caller's read
 // and its hold), and a function that reads the status back.
 func holdStandIn(t *testing.T, status, assignee string) (g *beads.Gateway, claim func(), statusNow func() string) {
