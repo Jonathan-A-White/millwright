@@ -256,7 +256,7 @@ func TestVerifyMatchReadsOnlyTheNewestLandingsAndEveryDemo(t *testing.T) {
 // mw-9q8wp1.9 was proposed from the very ask that made it.
 func TestVerifyMatchDropsEvidenceOlderThanTheLandingAndCountsIt(t *testing.T) {
 	r := newVerifyRig(t, `{"matches":[
-	 {"bead":"s-late","txid":"direct:bbb","shows":"the picture of the new reading","confidence":0.82},
+	 {"bead":"s-late","txid":"direct:bbb","shows":"the picture of the new reading","confidence":0.96},
 	 {"bead":"s-late","txid":"direct:aaa","shows":"he used the new reading","confidence":0.9}]}`)
 	r.beads.Closed = append(r.beads.Closed, verifyClosed("s-late", "e-9", "landed on main", 90*time.Minute))
 	r.beads.Comments["s-late"] = verifyComment(closingWithCheck)
@@ -598,5 +598,61 @@ func TestVerifyMatchReadsNoCardsOfAClosedBeadOrWithoutACardSource(t *testing.T) 
 	}
 	if strings.Contains(r.out.String(), "q-1") {
 		t.Fatalf("a closed bead's card is not a candidate:\n%s", r.out.String())
+	}
+}
+
+// A picture with no words of his has only the agent's own account of it to go
+// on, so it needs more than the common bar (mw-gq6.1101): a photo of a WSL start
+// failure was proposed as the check of the Septuagint verse tag at 0.80.
+func TestVerifyMatchHoldsAPictureWithNoWordsToAHigherBar(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[
+	 {"bead":"d-reader","txid":"direct:bbb","shows":"His phone, Septuagint Reader English view, Psalms 24: each Greek verse tag stands clear of its verse","confidence":0.80}]}`)
+	r.beads.Work.Ready = append(r.beads.Work.Ready, verifyDemo("d-reader", "e-3", "Open the Septuagint Reader screen and see the Greek verse tag clear of the verse."))
+	result, err := r.match().Run(context.Background(), application.VerifyOptions{Since: 7 * 24 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) != 0 || len(result.Proposed) != 0 {
+		t.Fatalf("a picture with no words at 0.80 is not proposed: %+v", r.beads.Written)
+	}
+	raw, err := os.ReadFile(filepath.Join(r.runs, result.Run+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "no words of his") || !strings.Contains(string(raw), "0.95") {
+		t.Fatalf("the run's record does not say the bar: %s", raw)
+	}
+}
+
+// The same picture with words of his beside it is held to the common bar only,
+// and so is a message of his.
+func TestVerifyMatchHoldsAPictureWithWordsToTheCommonBarOnly(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[
+	 {"bead":"d-reader","txid":"direct:bbb","shows":"the Reader screen with the chapter heading","confidence":0.80}]}`)
+	r.beads.Work.Ready = append(r.beads.Work.Ready, verifyDemo("d-reader", "e-3", "Open the Reader screen and see the chapter heading."))
+	kept := `{"txid":"direct:bbb","text":"the heading is there now"}`
+	if err := os.WriteFile(filepath.Join(r.inbox, "direct-bbb.message.json"), []byte(kept), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.match().Run(context.Background(), application.VerifyOptions{Since: 7 * 24 * time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) != 1 {
+		t.Fatalf("a picture with his words at 0.80 is proposed as before: %+v", r.beads.Written)
+	}
+}
+
+// A proposal he rejected is not written again by a later run for the same txid.
+func TestVerifyMatchDoesNotProposeARejectedTxidAgain(t *testing.T) {
+	r := newVerifyRig(t, verifyTwoAnswers)
+	r.beads.Comments["d-1"] = []application.Comment{
+		{Text: "PROPOSED VERIFIED by the Governor's use, from direct:aaa (2026-10-21 17:00Z): the green tick after Save (confidence 0.90, haiku, run r-1)"},
+		{Text: application.RejectedComment("direct:aaa", "not it")},
+	}
+	if _, err := r.match().Run(context.Background(), application.VerifyOptions{Since: 7 * 24 * time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) != 0 {
+		t.Fatalf("a rejected txid is not proposed again: %+v", r.beads.Written)
 	}
 }

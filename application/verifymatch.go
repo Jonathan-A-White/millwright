@@ -548,8 +548,10 @@ func (w verifyProposer) propose(ctx context.Context, candidates []VerifyCandidat
 	}
 	at := map[string]time.Time{}
 	pictures := map[string]string{}
+	wordless := map[string]bool{}
 	for _, e := range evidence {
 		at[e.Txid] = e.At
+		wordless[e.Txid] = evidenceHasPicture(e) && !evidenceHasWords(e)
 		for _, path := range e.Files {
 			if !strings.EqualFold(filepath.Ext(path), ".txt") {
 				pictures[e.Txid] = filepath.Base(path)
@@ -578,6 +580,8 @@ func (w verifyProposer) propose(ctx context.Context, candidates []VerifyCandidat
 			record.Outcome = "left out: no such evidence"
 		case m.Confidence < w.Confidence:
 			record.Outcome = fmt.Sprintf("left out: confidence under %.2f", w.Confidence)
+		case wordless[m.Txid] && m.Confidence < VerifyWordlessPictureConfidence:
+			record.Outcome = fmt.Sprintf("left out: a picture with no words of his needs confidence %.2f, this one is %.2f", VerifyWordlessPictureConfidence, m.Confidence)
 		case at[m.Txid].Before(landedAt[m.Bead]):
 			record.Outcome = verifyOlderOutcome
 		case notOfScreen != "":
@@ -602,6 +606,14 @@ func (w verifyProposer) propose(ctx context.Context, candidates []VerifyCandidat
 	}
 	return proposals, records, errors.Join(errs...)
 }
+
+// VerifyWordlessPictureConfidence is the least confidence at which a picture he
+// sent with no words becomes a proposal, whatever [verify] confidence says: the
+// agent's own account of the picture is all there is to go on, and a photo of a
+// WSL start failure was proposed as the check of a Reader story at 0.80
+// (mw-gq6.1101). The sleep pass and mw verify match both write through
+// verifyProposer, so both hold to it.
+const VerifyWordlessPictureConfidence = 0.95
 
 // verifyOlderOutcome is the outcome of a match whose evidence was written before
 // the candidate landed: it cannot show that landing met (mw-gq6.742).
