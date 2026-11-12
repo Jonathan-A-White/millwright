@@ -216,8 +216,9 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	// The part waits for a calm host, as a whole check does, before anything else
 	// of it, and what the wait leaves is what the merge slot is waited for in
 	// (mw-gq6.987).
-	began := time.Now()
-	left := func() time.Duration { return max((k.partSlotWait() - time.Since(began)).Round(time.Millisecond), 0) }
+	// It is read by the check's clock (CallNow), as a whole check's is (mw-gq6.1135).
+	began := k.callNow()
+	left := func() time.Duration { return max((k.partSlotWait() - k.callNow().Sub(began)).Round(time.Millisecond), 0) }
 	before, err := k.calmForPart(ctx, c, report.Attempt, k.Part, label, left)
 	if err != nil {
 		return report, fmt.Errorf("checking %s: %w", c.id, err)

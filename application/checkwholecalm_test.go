@@ -189,6 +189,15 @@ func (p *toolParts) RunLine(_ context.Context, _, _, command string) (applicatio
 // keeps its place, as the command line gives it.
 func partOnABusyHost(t *testing.T, readings []application.LoadReading, wait time.Duration) (check func() (application.CheckReport, error), parts *toolParts, said *strings.Builder, waited *time.Duration, records *mapRecords) {
 	t.Helper()
+	return partOnAStalledBusyHost(t, readings, wait, 0)
+}
+
+// partOnAStalledBusyHost is partOnABusyHost on a host that takes stall of real time
+// before the wait for a calm host reads its bound. The check's clock (Check.CallNow)
+// is moved by hand, by the waits and by nothing else, so the real time the stall
+// takes is not time the part has spent (mw-gq6.1135).
+func partOnAStalledBusyHost(t *testing.T, readings []application.LoadReading, wait, stall time.Duration) (check func() (application.CheckReport, error), parts *toolParts, said *strings.Builder, waited *time.Duration, records *mapRecords) {
+	t.Helper()
 	tracker := apptest.NewFakeTracker()
 	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
 	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
@@ -198,13 +207,15 @@ func partOnABusyHost(t *testing.T, readings []application.LoadReading, wait time
 	}
 	parts, records = &toolParts{}, &mapRecords{}
 	said, waited = &strings.Builder{}, new(time.Duration)
+	now := time.Now()
 	check = func() (application.CheckReport, error) {
 		return application.Check{
 			Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: &scriptedChecks{passes: []bool{true}},
 			Slot: aSlot{}, Parts: parts, Records: records, Part: 2, PartSlotWait: wait, KeepPlace: application.CheckKeepPlace,
-			Load:     &apptest.FakeHostLoad{Readings: readings},
+			CallNow:  func() time.Time { return now },
+			Load:     &stallingLoad{FakeHostLoad: &apptest.FakeHostLoad{Readings: readings}, stall: stall},
 			LoadPoll: 30 * time.Second,
-			LoadWait: func(_ context.Context, d time.Duration) error { *waited += d; return nil },
+			LoadWait: func(_ context.Context, d time.Duration) error { *waited += d; now = now.Add(d); return nil },
 			Host:     "laptop", Remote: "origin",
 			Rigs: map[string]string{"millwright": rigDir},
 			Out:  said,
@@ -241,6 +252,26 @@ func TestAPartOnAHostThatStaysBusyWaitsForItToCalmThenStartsNothingAndEndsInOneL
 	}
 	if _, rerr := records.ReadRunFile(context.Background(), "mw-x.1", application.CheckPartFileName(1, 2)); rerr == nil {
 		t.Error("expected a part that did not start to leave no record of a run")
+	}
+}
+
+// A stall of real time before the wait reads its bound (the host was slow for a
+// moment) is not time the part has spent: the notices are counted against the
+// check's clock, which a test moves by hand (mw-gq6.1135).
+func TestAPartOnAHostThatStallsBeforeItsWaitCountsTheSameNoticesAsOneThatDoesNot(t *testing.T) {
+	check, parts, said, waited, _ := partOnAStalledBusyHost(t, []application.LoadReading{busy()}, 3*time.Minute, 20*time.Millisecond)
+
+	if _, err := check(); err == nil {
+		t.Fatal("expected the part not to pass while the host stayed busy")
+	}
+	if len(parts.ran) != 0 {
+		t.Errorf("expected the part not to start on a busy host, it ran %v", parts.ran)
+	}
+	if *waited != 3*time.Minute {
+		t.Errorf("expected a wait of the whole 3m, it waited %s", *waited)
+	}
+	if n := strings.Count(said.String(), "still waiting for laptop to calm"); n != 3 {
+		t.Errorf("expected 3 notices in a 3m wait whatever the real time took, got %d in %q", n, said.String())
 	}
 }
 
