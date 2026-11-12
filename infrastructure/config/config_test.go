@@ -3105,3 +3105,22 @@ func TestGiveWayTmuxSocketsAreTheEnvironmentsAndTheConfigsAndNoneByDefault(t *te
 		t.Fatalf("sockets = %v, %v, want %v", got, err, want)
 	}
 }
+
+func TestNeedsMinAgeDefaultsToADayAndReadsHoursAndDays(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	if got, err := config.Needs(); err != nil || got.MinAge != 24*time.Hour {
+		t.Fatalf("defaults = %+v (%v)", got, err)
+	}
+	for said, want := range map[string]time.Duration{"36h": 36 * time.Hour, `"2d"`: 48 * time.Hour} {
+		writeConfig(t, "[needs]\nmin_age = "+said+"\n")
+		if got, err := config.Needs(); err != nil || got.MinAge != want {
+			t.Errorf("min_age = %s read %+v (%v), want %v", said, got, err, want)
+		}
+	}
+	for _, bad := range []string{"soon", "0h", "-3h", "0d"} {
+		writeConfig(t, "[needs]\nmin_age = "+bad+"\n")
+		if _, err := config.Needs(); err == nil || !strings.Contains(err.Error(), "min_age") {
+			t.Errorf("min_age = %s was not refused: %v", bad, err)
+		}
+	}
+}

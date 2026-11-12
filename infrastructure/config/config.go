@@ -1917,6 +1917,64 @@ func VerifyRunDir() (string, error) {
 	return filepath.Join(home, DefaultVerifyRunDir), nil
 }
 
+// NeedsTable is the table of the config file that says how mw needs sweep
+// judges a landing: `min_age`, how long a landing must have been closed before
+// the sweep writes on it, a duration like 24h or 2d (24h when it does not say).
+const NeedsTable = "needs"
+
+// DefaultNeedsMinAge is application.DefaultNeedsMinAge.
+const DefaultNeedsMinAge = 24 * time.Hour
+
+// NeedsSettings is what the `[needs]` table says, the defaults filled in.
+type NeedsSettings struct {
+	MinAge time.Duration
+}
+
+// Needs reports the `[needs]` table of ~/.config/mw/config.toml. A machine with
+// no such table has the defaults; a min_age that is not a duration above zero is
+// refused.
+func Needs() (NeedsSettings, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return NeedsSettings{}, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, NeedsTable)
+	if err != nil {
+		return NeedsSettings{}, err
+	}
+	settings := NeedsSettings{MinAge: DefaultNeedsMinAge}
+	if said := strings.Trim(strings.TrimSpace(table["min_age"]), `"'`); said != "" {
+		var age time.Duration
+		if days, ok := strings.CutSuffix(said, "d"); ok {
+			n, convErr := strconv.Atoi(days)
+			if convErr == nil && n >= 1 {
+				age = time.Duration(n) * 24 * time.Hour
+			}
+		} else if parsed, parseErr := time.ParseDuration(said); parseErr == nil {
+			age = parsed
+		}
+		if age <= 0 {
+			return NeedsSettings{}, fmt.Errorf("the [%s] table of %s says min_age = %q: use a duration above zero like 24h or 2d", NeedsTable, path, said)
+		}
+		settings.MinAge = age
+	}
+	return settings, nil
+}
+
+// DefaultNeedsRunDir is where mw needs sweep records each --write run, under the
+// home directory: host state, never the vault.
+var DefaultNeedsRunDir = filepath.Join(".local", "state", "mw", "needs")
+
+// NeedsRunDir reports the full path to DefaultNeedsRunDir. There is no setting for it.
+func NeedsRunDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("there is no home directory to record a needs sweep in: %w", err)
+	}
+	return filepath.Join(home, DefaultNeedsRunDir), nil
+}
+
 // countIn reads a [grist] key that is a whole number, 1 or more, and
 // fallback when the table says nothing about it.
 func countIn(table map[string]string, key string, fallback int64, path string) (int64, error) {

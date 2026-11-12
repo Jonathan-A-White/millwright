@@ -39,7 +39,7 @@ func (g *Gateway) TriageBeads(ctx context.Context) ([]application.TriageBead, er
 			Labels: append([]string(nil), b.Labels...), Rig: rig,
 			Size: b.text(application.TriageSizeField), Parent: b.Parent,
 			Description: b.Description,
-			Created:     b.created(), Updated: b.updated(), ClosedAt: b.closedAt(),
+			Created:     b.created(), Updated: b.updated(), ClosedAt: b.closedAt(), CloseReason: b.CloseReason,
 			Needs:    b.needs(),
 			Molecule: b.pathMetadata()[application.MoleculeField],
 		})
