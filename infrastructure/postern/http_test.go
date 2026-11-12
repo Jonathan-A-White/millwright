@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -933,5 +934,68 @@ func TestRecordSeqIsOneRequestAndLetsAReaderStartThere(t *testing.T) {
 	}
 	if head, err := backend.RecordSeq(context.Background(), "direct:none"); err != nil || head != 1000 {
 		t.Fatalf("expected the head for a record not indexed, got %d, %v", head, err)
+	}
+}
+
+// cutMidBody is a backend that answers the challenge, then sends the headers of
+// every other answer and part of the body before it drops the connection: with
+// reset it is a reset (RST), without it a plain close short of Content-Length.
+func cutMidBody(t *testing.T, reset bool) *postern.HTTP {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/challenge" {
+			io.WriteString(w, `{"nonce":"n"}`)
+			return
+		}
+		conn, buf, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("hijacking: %v", err)
+			return
+		}
+		io.WriteString(buf, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{\"balance\":")
+		buf.Flush()
+		if tcp, ok := conn.(*net.TCPConn); ok && reset {
+			tcp.SetLinger(0)
+		}
+		conn.Close()
+	}))
+	t.Cleanup(srv.Close)
+	keys, _ := testKeyAndAddress(t)
+	return postern.NewHTTP(srv.URL, keys)
+}
+
+func TestAConnectionCutWhileReadingTheAnswerIsUnreachable(t *testing.T) {
+	for name, reset := range map[string]bool{"reset": true, "closed short": false} {
+		t.Run(name, func(t *testing.T) {
+			_, err := cutMidBody(t, reset).Balance(context.Background(), "mtAddr")
+			if err == nil {
+				t.Fatal("expected an error from an answer cut short")
+			}
+			if !errors.Is(err, application.ErrPosternUnreachable) {
+				t.Fatalf("expected the error to be ErrPosternUnreachable, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), "reading the postern backend's answer") {
+				t.Fatalf("expected the error to say it was reading the answer, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestAnAnswerThatIsNotAnOutageIsNotUnreachable(t *testing.T) {
+	_, h := serve(t, map[string]answer{
+		"GET /api/balance/mtAddr": {status: 200, body: `not json`},
+		"GET /api/me":             {status: 500, body: `{"error":"boom"}`},
+		"GET /api/prompts":        {status: 404, body: `gone`},
+	})
+	_, balanceErr := h.Balance(context.Background(), "mtAddr")
+	_, meErr := h.Me(context.Background())
+	_, listErr := h.List(context.Background())
+	for name, err := range map[string]error{"bad JSON": balanceErr, "500 with a body": meErr, "404 with a body": listErr} {
+		if err == nil {
+			t.Fatalf("%s: expected an error", name)
+		}
+		if errors.Is(err, application.ErrPosternUnreachable) {
+			t.Fatalf("%s: expected a plain error, not unreachable: %v", name, err)
+		}
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -650,6 +651,20 @@ func (u unreachable) Unwrap() error { return u.error }
 
 func (u unreachable) Is(target error) bool { return target == application.ErrPosternUnreachable }
 
+// cutByTheNetwork reports whether err, from reading an answer's body, is the
+// connection failing rather than anything in the answer: a reset, a broken pipe,
+// a connection closed short of the length it promised, or a network timeout. A
+// call whose own ctx is done was not cut by the backend (mw-6ww.171).
+func cutByTheNetwork(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, io.ErrUnexpectedEOF)
+}
+
 // fetchAs is fetch with a body of contentType.
 func (h *HTTP) fetchAs(ctx context.Context, method, path string, body []byte, authHeader, contentType string) ([]byte, error) {
 	var reader io.Reader
@@ -673,7 +688,11 @@ func (h *HTTP) fetchAs(ctx context.Context, method, path string, body []byte, au
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading the postern backend's answer to %s %s: %w", method, path, err)
+		cut := fmt.Errorf("reading the postern backend's answer to %s %s: %w", method, path, err)
+		if cutByTheNetwork(ctx, err) {
+			return nil, unreachable{cut}
+		}
+		return nil, cut
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		var said struct {
