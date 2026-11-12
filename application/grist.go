@@ -89,9 +89,10 @@ type GristGrindOverride struct {
 	Instructions string `json:"instructions"`
 	Schema       string `json:"schema"`
 	// Grind is the grind file itself (grinds/<kind>.json) at the ref. The mill
-	// grinds with it only for a kind its main does not have yet, so that a new
-	// kind is proved live on its branch before it lands; a kind main has keeps
-	// main's grind file.
+	// grinds with it for a kind its main does not have yet, so that a new kind is
+	// proved live on its branch before it lands; for a kind main has, it takes
+	// from it only a version main's grind file does not list yet, and keeps
+	// main's model, effort and the rest.
 	Grind json.RawMessage `json:"grind,omitempty"`
 }
 

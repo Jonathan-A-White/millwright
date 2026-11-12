@@ -788,7 +788,7 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 	if name.Effort != "" {
 		w.effort, w.effortFrom = name.Effort, gristFromGrist
 	}
-	if !slices.Contains(w.grind.Versions, name.V) {
+	if !slices.Contains(w.grind.Versions, name.V) && !w.overrideTakesVersion(name) {
 		w.settle(GristRefused, GristReasonVersion)
 		return
 	}
@@ -820,6 +820,25 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		return
 	}
 	w.system, w.schema = g.readGrindText(ctx, w, checkout)
+}
+
+// overrideTakesVersion says the grind file the grist brings lists name's
+// version, for the grind of that app and kind: a new version of a kind main has
+// is proved on its branch before it lands. judgeOverride has let only the
+// factory's test key bring a grind file, in an eval or smoke talk, so a live
+// grist's version is main's alone; the model, effort and the rest stay main's
+// (mw-gq6.1104).
+func (w *gristWork) overrideTakesVersion(name GristName) bool {
+	o := w.plain.GrindOverride
+	if o == nil || len(o.Grind) == 0 {
+		return false
+	}
+	var brought GrindFile
+	if json.Unmarshal(o.Grind, &brought) != nil || brought.Grind != GrindFileFormat ||
+		brought.App != name.App || brought.Kind != name.Kind {
+		return false
+	}
+	return slices.Contains(brought.Versions, name.V)
 }
 
 // judgeOverride is why the grind text a grist brings is not taken, or "": a

@@ -430,3 +430,90 @@ func TestAGristInASmokeOrEvalTalkIsKeptAsTheFactorysWhoeverSealedIt(t *testing.T
 		})
 	}
 }
+
+// newVersionMill is overrideMill for a version main does not list: main's grind
+// for the tutor kind lists only 1.1, and the grist names the version v and
+// brings, when refVersions is not empty, a grind file at the ref listing those.
+// It brings the ref's model and effort in the grind file too, to see that main's
+// are kept.
+func newVersionMill(t *testing.T, from, talk, v string, refVersions []string) (application.GristGrind, *apptest.FakePostern, *apptest.FakeGrinder) {
+	t.Helper()
+	mill, _, grinder := overrideMill(t, from, talk)
+	const factory = "03aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const phone = "02466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27"
+	sender := phone
+	if from == "factory" {
+		sender = factory
+	}
+	mill.Grinds.(*apptest.FakeGrinds).SetFile("/rigs/lampas", "c0ffee", "grinds/tutor.json", []byte(`{"grind":1,"app":"lampas","kind":"tutor","versions":["1.1"],
+		"model":"sonnet","effort":"low","instructions":"grinds/tutor.md","answerSchema":"schema.json","attachments":{"min":0,"max":0}}`))
+	keys := &fakeMillKey{made: true}
+	millKey, _, _ := keys.PublicKey()
+	override := &application.GristGrindOverride{Instructions: "SAY REF", Schema: `{"type": "object", "required": ["answer"]}`}
+	if len(refVersions) > 0 {
+		versions, _ := json.Marshal(refVersions)
+		override.Grind = json.RawMessage(`{"grind":1,"app":"lampas","kind":"tutor","versions":` + string(versions) + `,
+			"model":"opus","effort":"high","instructions":"grinds/tutor.md","answerSchema":"schema.json","attachments":{"min":0,"max":0}}`)
+	}
+	plain, _ := json.Marshal(application.GristPlaintext{
+		Grist: application.GristName{App: "lampas", Kind: "tutor", V: v, Talk: talk}, Input: json.RawMessage(`{"question":"hi"}`),
+		GrindOverride: override,
+	})
+	ct, _ := (&apptest.FakeCipher{From: sender}).Encrypt(millKey, string(plain))
+	fresh := apptest.NewFakePostern()
+	fresh.AddRecord(application.PosternRecord{Txid: "direct:g4", Class: application.GristClass, From: sender, To: millKey,
+		Signer: sender, SignerApps: []string{"lampas"}, Ciphertext: ct})
+	mill.Postern = fresh
+	return mill, fresh, grinder
+}
+
+// A new version of a kind main has is proved on its branch: the grind file an
+// eval brings lists the version, and the mill takes it, with main's model and
+// effort.
+func TestGristGrindANewVersionOfAKindMainHasIsGroundWithTheGrindAnEvalBrings(t *testing.T) {
+	for _, talk := range []string{"eval:greets:ab12cd34", "smoke:tutor/greets:ab12cd34"} {
+		mill, backend, grinder := newVersionMill(t, "factory", talk, "1.2", []string{"1.1", "1.2"})
+		runs := &apptest.FakeGristRuns{}
+		mill.Runs = runs
+		if _, err := mill.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		answer := openFakeAnswer(t, backend.Delivered()[0])
+		if answer.Status != application.GristAnswered || answer.Reason == application.GristReasonVersion {
+			t.Fatalf("%s: expected the new version ground, got %+v", talk, answer)
+		}
+		calls := grinder.Calls()
+		if len(calls) != 1 || calls[0].Call.Model != "sonnet" || calls[0].Call.Effort != "low" || !strings.HasSuffix(calls[0].Call.System, "SAY REF") {
+			t.Fatalf("%s: expected one grind on main's model and effort with the brought text, got %+v", talk, calls)
+		}
+	}
+}
+
+// The ref's versions are taken from the factory's test key in an eval or smoke
+// talk alone, and a version neither file lists is refused.
+func TestGristGrindANewVersionIsRefusedUnlessTheTestKeyBringsItInAnEvalTalk(t *testing.T) {
+	for name, tc := range map[string]struct {
+		from, talk, v, reason string
+		refVersions           []string
+	}{
+		"an app's key":                {"phone", "eval:greets:ab12cd34", "1.2", application.GristReasonOverride, []string{"1.1", "1.2"}},
+		"the test key, ordinary talk": {"factory", "chat:1", "1.2", application.GristReasonOverride, []string{"1.1", "1.2"}},
+		"the test key, no talk":       {"factory", "", "1.2", application.GristReasonOverride, []string{"1.1", "1.2"}},
+		"a version in neither file":   {"factory", "eval:greets:ab12cd34", "1.3", application.GristReasonVersion, []string{"1.1", "1.2"}},
+		"no grind file brought":       {"factory", "eval:greets:ab12cd34", "1.2", application.GristReasonVersion, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mill, backend, grinder := newVersionMill(t, tc.from, tc.talk, tc.v, tc.refVersions)
+			if _, err := mill.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			answer := openFakeAnswer(t, backend.Delivered()[0])
+			if answer.Status != application.GristRefused || answer.Reason != tc.reason {
+				t.Errorf("expected the grist refused with %q, got %+v", tc.reason, answer)
+			}
+			if len(grinder.Calls()) != 0 {
+				t.Errorf("expected nothing ground, got %d grinds", len(grinder.Calls()))
+			}
+		})
+	}
+}
