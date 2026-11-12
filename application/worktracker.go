@@ -438,6 +438,14 @@ type HeldStories interface {
 	HeldStories(ctx context.Context) ([]StoryDetail, error)
 }
 
+// HeldWithLabel is a tracker that lists the held beads carrying a label, epics
+// left out and the iced ideas too: a demo that has landed is held for the
+// Governor's "Looks good", which ReadyWithLabel never lists, so the weekly
+// digest asks for it beside the ready ones (mw-27f7myz.5).
+type HeldWithLabel interface {
+	HeldWithLabel(ctx context.Context, label string) ([]StoryDetail, error)
+}
+
 // Elsewhere is every story, ready and then claimed, whose Path names some host
 // other than this one. A story whose Path names no host is nobody's, and one
 // that names domain.HostAuto is not elsewhere: any host may take it.

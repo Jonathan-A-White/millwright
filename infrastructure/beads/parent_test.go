@@ -393,3 +393,43 @@ func TestASnapshotsShowEpicsCarriesTheChildrenOfEachChild(t *testing.T) {
 		t.Errorf("expected mw-e.6 to count its 1 open child and mw-e.2 none, got %v", counts)
 	}
 }
+
+// With no kept connection, HeldWithLabel asks bd for the deferred beads under
+// the label (mw-27f7myz.5).
+func TestHeldWithLabelListsTheDeferredBeadsUnderTheLabelFromBd(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "")
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in for bd is a shell script")
+	}
+	dir := t.TempDir()
+	script := `#!/bin/sh
+shift 2
+case "$1" in
+  --actor) shift 2 ;;
+esac
+case "$1" in
+  list)
+    case "$*" in
+      *"--status deferred --label digest"*) printf '[{"id":"mw-h.1","title":"Demo: x","status":"deferred","issue_type":"task","labels":["digest"]}]'; exit 0 ;;
+    esac
+    printf '[]' ;;
+  *) printf '[]' ;;
+esac
+`
+	path := filepath.Join(dir, "bd-held-label")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in: %v", err)
+	}
+	g := beads.New(t.TempDir(), beads.WithProgram(path))
+
+	held, err := g.HeldWithLabel(context.Background(), "digest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(held) != 1 || held[0].Story.ID != "mw-h.1" || held[0].Status != "deferred" {
+		t.Fatalf("expected the one deferred bead mw-h.1, got %+v", held)
+	}
+	if _, err := g.HeldWithLabel(context.Background(), " "); err == nil {
+		t.Fatal("expected an empty label to be refused")
+	}
+}

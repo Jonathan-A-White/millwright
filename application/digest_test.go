@@ -490,3 +490,53 @@ func TestDigestOptionWithNoDemosDoesNotCountThemAndWithSomeStillDoes(t *testing.
 		t.Fatalf("the card with no demos offers %q", got)
 	}
 }
+
+// A landed demo is held for the Governor's "Looks good" (status deferred), which
+// bd ready never lists: the digest reads the held ones too (mw-27f7myz.5).
+func TestDigestSendListsTheHeldDemosLabelledDigest(t *testing.T) {
+	f := newDigestFixture()
+	both := []string{application.LabelDemo, application.LabelDigest}
+	f.demo(t, "mw-e.1", "Demo: held and verified", both, "VERIFIED by the Mayor: it works")
+	f.demo(t, "mw-e.2", "Demo: held, not verified", both, "landed")
+	f.demo(t, "mw-e.3", "Demo: open and verified", both, "VERIFIED by the Mayor: also works")
+	f.demo(t, "mw-e.4", "Demo: closed", both, "VERIFIED by the Mayor")
+	f.demo(t, "mw-e.5", "Demo: claimed", both, "VERIFIED by the Mayor")
+	f.demo(t, "mw-e.6", "Held, labelled digest, no demo", []string{application.LabelDigest}, "VERIFIED by the Mayor")
+	f.demo(t, "mw-e.7", "Demo: held, not labelled digest", []string{application.LabelDemo}, "VERIFIED by the Mayor")
+	for _, id := range []string{"mw-e.1", "mw-e.2", "mw-e.5", "mw-e.6", "mw-e.7"} {
+		mustDo(t, f.tracker.SetStatus(id, application.StatusHeld))
+	}
+	mustDo(t, f.tracker.SetStatus("mw-e.4", application.StatusClosed))
+	mustDo(t, f.tracker.SetStatus("mw-e.5", application.StatusInProgress))
+
+	report := f.run(t, false)
+
+	var listed []string
+	for _, e := range report.Listed {
+		listed = append(listed, e.ID)
+	}
+	if got := strings.Join(listed, ","); got != "mw-e.3,mw-e.1" {
+		t.Fatalf("the digest lists %q, want the open then the held verified demos mw-e.3,mw-e.1", got)
+	}
+	if strings.Join(report.LeftOut, ",") != "mw-e.2" {
+		t.Fatalf("left out %q, want only mw-e.2", report.LeftOut)
+	}
+	if !strings.Contains(f.out.String(), "mw-e.2: not verified, left out") {
+		t.Fatalf("the output does not say mw-e.2 was not verified, left out:\n%s", f.out.String())
+	}
+	created, err := f.tracker.ShowStory(context.Background(), report.Bead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	card := f.sender.Sent()[0]
+	for _, text := range []string{created.Description, card.Text} {
+		if !strings.Contains(text, "mw-e.1") || !strings.Contains(text, "mw-e.3") {
+			t.Fatalf("the digest bead or its card does not name the held demo mw-e.1:\n%s", text)
+		}
+		for _, no := range []string{"mw-e.4", "mw-e.5", "mw-e.6", "mw-e.7"} {
+			if strings.Contains(text, no) {
+				t.Fatalf("%s should be left out:\n%s", no, text)
+			}
+		}
+	}
+}

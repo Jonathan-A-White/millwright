@@ -205,6 +205,43 @@ func (g *Gateway) IcedBeads(ctx context.Context) ([]application.StoryDetail, err
 	return g.overlaid(ctx, beads)
 }
 
+var _ application.HeldWithLabel = (*Gateway)(nil)
+
+// HeldWithLabel implements application.HeldWithLabel: the held beads carrying
+// label, epics left out, read from the live beads over a kept connection and by
+// `bd list --status deferred --label` otherwise. Each carries the count of its
+// open children, as ReadyWithLabel's do.
+func (g *Gateway) HeldWithLabel(ctx context.Context, label string) ([]application.StoryDetail, error) {
+	if strings.TrimSpace(label) == "" {
+		return nil, fmt.Errorf("which label are the held beads carrying?")
+	}
+	if live, ok := g.liveOverConnection(ctx); ok {
+		var found []application.StoryDetail
+		children := live.childCounts()
+		for _, b := range live.withStatus(StatusDeferred) {
+			if slices.Contains(b.Labels, label) {
+				detail := live.shown(b)
+				detail.Children = children[detail.Story.ID]
+				found = append(found, detail)
+			}
+		}
+		return found, nil
+	}
+	out, err := g.call(ctx, "list", "--status", StatusDeferred, "--label", label, "--exclude-type", "epic", "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	beads, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading the held beads under the label %s: %w", label, err)
+	}
+	details, err := g.overlaid(ctx, beads)
+	if err != nil {
+		return nil, err
+	}
+	return g.withChildren(ctx, details)
+}
+
 // RunningStories implements application.WorkTracker: what this host has in
 // flight, which is what a concurrency cap counts.
 func (g *Gateway) RunningStories(ctx context.Context, host string) ([]application.StoryDetail, error) {

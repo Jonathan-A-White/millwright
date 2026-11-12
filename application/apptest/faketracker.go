@@ -1484,6 +1484,30 @@ func (f *FakeTracker) HeldStories(_ context.Context) ([]application.StoryDetail,
 	return held, nil
 }
 
+// HeldWithLabel implements application.HeldWithLabel: the held stories that
+// carry the label and are no epic, in the order filed.
+func (f *FakeTracker) HeldWithLabel(_ context.Context, label string) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, "HeldWithLabel")
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	if label == "" {
+		return nil, fmt.Errorf("which label are the held beads carrying?")
+	}
+	var held []application.StoryDetail
+	for _, id := range f.order {
+		s := f.stories[id]
+		if !s.detail.IsEpic && s.detail.Status == StatusDeferred && carries(s.detail.Labels, label) {
+			detail := s.detail
+			detail.CommentCount = len(s.comments)
+			held = append(held, detail)
+		}
+	}
+	return held, nil
+}
+
 // BlockedForHost implements application.WorkTracker.
 func (f *FakeTracker) BlockedForHost(_ context.Context, host string) ([]application.StoryDetail, error) {
 	f.mu.Lock()

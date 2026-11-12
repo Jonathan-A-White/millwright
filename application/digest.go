@@ -40,7 +40,7 @@ func DigestLooksGoodOption(n int) string {
 	return fmt.Sprintf("A: Looks good on all %d", n)
 }
 
-// Digest is mw digest send: every open, unclaimed demo labelled digest whose
+// Digest is mw digest send: every open or held, unclaimed demo labelled digest whose
 // comments include one beginning VERIFIED goes on a fresh open task bead
 // under Parent, and one decision card on that bead asks the Governor to take
 // them all with one tap. A labelled demo with no VERIFIED comment is said in
@@ -91,9 +91,9 @@ type DigestReport struct {
 // Run lists the labelled demos, files the digest bead and sends its card.
 func (d Digest) Run(ctx context.Context) (DigestReport, error) {
 	var report DigestReport
-	labelled, err := d.Tracker.ReadyWithLabel(ctx, LabelDigest)
+	labelled, err := d.labelled(ctx)
 	if err != nil {
-		return report, fmt.Errorf("listing the demos labelled %s: %w", LabelDigest, err)
+		return report, err
 	}
 	var demos []StoryDetail
 	var ids []string
@@ -158,6 +158,35 @@ func (d Digest) Run(ctx context.Context) (DigestReport, error) {
 	report.Txid = txid
 	d.say("sent the digest card on %s: %s\n", id, txid)
 	return report, nil
+}
+
+// labelled is every bead labelled digest that is open or held: the ready ones,
+// then the held ones the ready read never lists (a landed demo waits held for the
+// Governor's "Looks good"), each once.
+func (d Digest) labelled(ctx context.Context) ([]StoryDetail, error) {
+	ready, err := d.Tracker.ReadyWithLabel(ctx, LabelDigest)
+	if err != nil {
+		return nil, fmt.Errorf("listing the demos labelled %s: %w", LabelDigest, err)
+	}
+	reader, ok := d.Tracker.(HeldWithLabel)
+	if !ok {
+		return ready, nil
+	}
+	held, err := reader.HeldWithLabel(ctx, LabelDigest)
+	if err != nil {
+		return nil, fmt.Errorf("listing the held demos labelled %s: %w", LabelDigest, err)
+	}
+	seen := map[string]bool{}
+	for _, bead := range ready {
+		seen[bead.Story.ID] = true
+	}
+	for _, bead := range held {
+		if !seen[bead.Story.ID] {
+			seen[bead.Story.ID] = true
+			ready = append(ready, bead)
+		}
+	}
+	return ready, nil
 }
 
 // card is the decision card naming each listed demo by its full id, so each

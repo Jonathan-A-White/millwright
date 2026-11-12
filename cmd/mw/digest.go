@@ -39,7 +39,7 @@ func newDigestSendCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "send [--dry-run] [--parent <bead>]",
 		Short: "File a 'Weekly digest <date>' bead of the verified demos labelled digest and send one decision card on it",
-		Long: "send lists every open, unclaimed demo labelled " + application.LabelDigest + " whose comments include one\n" +
+		Long: "send lists every open or held, unclaimed demo labelled " + application.LabelDigest + " whose comments include one\n" +
 			"beginning VERIFIED, files an open task bead 'Weekly digest <YYYY-MM-DD>: N factory demos' under\n" +
 			"--parent (default " + application.DigestDefaultParent + ") listing each one's id, title and VERIFIED line, and sends one\n" +
 			"decision-needed card on it naming each demo by its full id, offering 'A: Looks good on all N'\n" +
