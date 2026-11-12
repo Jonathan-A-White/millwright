@@ -832,7 +832,7 @@ func pictureProposalFixture(t *testing.T, proposals string) (*sleepFixture, *app
 func TestAProposalNamesTheTxidOfThePictureItsDescriptionCameFromNotANeighbours(t *testing.T) {
 	// The agent wrote the neighbour's txid (direct:bbb) beside a description it
 	// read from direct-aaa.jpg.
-	f, beads := pictureProposalFixture(t, `[{"bead":"d-1","txid":"direct:bbb","picture":"direct-aaa.jpg","sees":"The Reader showing Psalms 24 with the Greek verse tag (23:1) over the first words","shows":"the verse tag stands clear","confidence":0.9}]`)
+	f, beads := pictureProposalFixture(t, `[{"bead":"d-1","txid":"direct:bbb","picture":"direct-aaa.jpg","sees":"The Reader showing Psalms 24 with the Greek verse tag (23:1) over the first words","shows":"the verse tag stands clear","confidence":0.96}]`)
 	result, err := f.pass.Run(context.Background(), application.SleepOptions{})
 	if err != nil {
 		t.Fatal(err)

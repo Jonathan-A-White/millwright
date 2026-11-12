@@ -84,7 +84,7 @@ func newVerifyCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.AddCommand(newVerifyMatchCmd(), newVerifyConfirmCmd(), newVerifyListCmd(), newVerifyNotMetCmd())
+	cmd.AddCommand(newVerifyMatchCmd(), newVerifyConfirmCmd(), newVerifyListCmd(), newVerifyRejectCmd(), newVerifyNotMetCmd())
 	return cmd
 }
 
@@ -129,7 +129,7 @@ func newVerifyMatchCmd() *cobra.Command {
 			"which candidates the evidence shows met and what exactly shows it.\n\n" +
 			"A match at or over [verify] confidence (0.8) becomes a comment on its bead whose first word is PROPOSED,\n" +
 			"naming the txid, the time and what it shows; a bead already proposed for that txid is not commented\n" +
-			"twice. One mail to the Mayor lists the run's proposals with the line that confirms each; none when\n" +
+			"twice, or again once `mw verify reject` took it back. A picture he sent with no words becomes one only at 0.95\nor over, whatever [verify] confidence says. One mail to the Mayor lists the run's proposals with the line that confirms each; none when\n" +
 			"there are none. Nothing is closed, no status changes, and no comment opens with VERIFIED. The run is\n" +
 			"recorded in ~/.local/state/mw/verify/<run>.json: model, effort, tokens, candidates and every answer.\n\n" +
 			"The candidates also include every standing question card (a postern.question note on an open bead) that has a\n" +
@@ -256,6 +256,35 @@ func newVerifyConfirmCmd() *cobra.Command {
 	cmd.Flags().StringVar(&shows, "shows", "", "what the evidence shows; required when no PROPOSED comment names the txid, and then recorded as by hand")
 	cmd.Flags().StringVar(&force, "force", "", "why a txid written before the bead landed may still confirm it; recorded in the comment")
 	_ = cmd.MarkFlagRequired("txid")
+	return cmd
+}
+
+func newVerifyRejectCmd() *cobra.Command {
+	var txid, why string
+	cmd := &cobra.Command{
+		Use:   "reject <bead> --txid <txid> --why \"<why>\"",
+		Short: "Take back a PROPOSED match that is wrong: a REJECTED comment with the why; mw verify list and confirm no longer see it",
+		Long: "reject writes one comment on the bead whose first word is REJECTED, naming the txid of the proposal and why:\n" +
+			"  REJECTED PROPOSED from <txid>: <why>\n" +
+			"mw verify list and mw verify confirm then no longer see that proposal, and mw verify match and the sleep pass\n" +
+			"do not propose the same txid for the bead again. A PROPOSED comment for the txid written after the REJECTED\n" +
+			"one stands. Nothing is closed, no comment opens with VERIFIED, and no card is cleared. It is refused for an\n" +
+			"unknown bead, one already carrying a VERIFIED comment, and a txid the bead holds no standing proposal for. No\n" +
+			"agent is called.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			gateway, _, err := posternGateway()
+			if err != nil {
+				return err
+			}
+			return application.VerifyReject{Beads: gateway, Out: cmd.OutOrStdout()}.
+				Run(cmd.Context(), application.VerifyRejectRequest{Bead: args[0], Txid: txid, Why: why})
+		},
+	}
+	cmd.Flags().StringVar(&txid, "txid", "", "the txid of the proposal to take back (required)")
+	cmd.Flags().StringVar(&why, "why", "", "what is wrong with the proposal; kept in the comment (required)")
+	_ = cmd.MarkFlagRequired("txid")
+	_ = cmd.MarkFlagRequired("why")
 	return cmd
 }
 
