@@ -44,7 +44,16 @@ func (s PathSet) afterIDs(ctx context.Context, id string) ([]string, error) {
 // --after release the story it completes. A path set with no --after, with a
 // --hold, or with no rules to read releases none.
 func (s PathSet) releasesOnPath(ctx context.Context, rig string) (bool, error) {
-	if s.After == nil || strings.TrimSpace(s.Hold) != "" || s.Rules == nil || strings.TrimSpace(rig) == "" {
+	if s.After == nil || strings.TrimSpace(s.Hold) != "" {
+		return false, nil
+	}
+	return s.rigReleasesOnPath(ctx, rig)
+}
+
+// rigReleasesOnPath is whether the rig's file says release_on_path = true; no
+// rules to read, or no rig, says no.
+func (s PathSet) rigReleasesOnPath(ctx context.Context, rig string) (bool, error) {
+	if s.Rules == nil || strings.TrimSpace(rig) == "" {
 		return false, nil
 	}
 	required, err := s.Rules.EpicRequirements(ctx, rig)
