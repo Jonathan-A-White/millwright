@@ -108,8 +108,9 @@ type EventShipper interface {
 // events: each pass reads the beads' head and, when it has moved, reads the
 // changes since the cursor, turns each into events by kind, appends them to
 // Log and saves the cursor; and republishes the live view, so a tap of the
-// Governor's shows at once. A pass whose head is unchanged reads nothing else
-// and costs no tokens. The first pass of a follower with no cursor only reads
+// Governor's shows at once, and again every FollowRepublishEvery while the head
+// stays the same (the view holds facts that depend on the clock). A pass whose
+// head is unchanged reads nothing else and costs no tokens. The first pass of a follower with no cursor only reads
 // every bead's state: it appends nothing.
 //
 // A bead's status move is one bead_changed event per step of the bead
