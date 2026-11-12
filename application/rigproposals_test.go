@@ -9,8 +9,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 func TestTheFiveProposalFormsAndNothingAreParsedTyped(t *testing.T) {
@@ -252,5 +255,95 @@ func TestEachFormulaAsksForReadyMemoryCommands(t *testing.T) {
 		if closing == 0 {
 			t.Errorf("%s: no closing step names the rig memory section", file)
 		}
+	}
+}
+
+// mw-tkszyqr's own closing line, written after its rig-memory section.
+const tkszyqrDocs = "Docs: read CLAUDE.md; unused because the work was in the grind, its example and the grind-examples test, none of which it covers."
+
+func TestADocsLineAfterTheRigMemorySectionIsNotAProposalAndIsRead(t *testing.T) {
+	comment := "Done.\n\nFor the rig memory:\nnothing\n" + tkszyqrDocs + "\n"
+	if got := application.ParseFactProposals(comment); len(got.Lines) != 1 || got.Lines[0].Malformed != "" {
+		t.Errorf("the Docs line was read as part of the section: %+v", got.Lines)
+	}
+	if got := application.ParseCommonErrors("For common errors:\nnothing\n" + tkszyqrDocs); len(got.Lines) != 1 || got.Lines[0].Malformed != "" {
+		t.Errorf("the Docs line was read as a common error: %+v", got.Lines)
+	}
+	want := application.DocsReading{
+		Found: true, Files: "CLAUDE.md", Verdict: "unused",
+		Because: "the work was in the grind, its example and the grind-examples test, none of which it covers.",
+	}
+	if got := application.ParseDocsReading(comment); got != want {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestADocsLineIsReadWhereverItSitsAndInEachVerdict(t *testing.T) {
+	for _, verdict := range []string{"helped", "unused", "hurt"} {
+		for name, comment := range map[string]string{
+			"first":    "Docs: read a.md, b.md; " + verdict + " because it said so.\nDone.",
+			"bulleted": "Done.\n- **Docs:** read a.md, b.md; " + verdict + " because it said so.\nMore.",
+		} {
+			got := application.ParseDocsReading(comment)
+			if !got.Found || got.Unread != "" || got.Files != "a.md, b.md" || got.Verdict != verdict || got.Because != "it said so." {
+				t.Errorf("%s/%s: got %+v", name, verdict, got)
+			}
+		}
+	}
+}
+
+func TestADocsLineNotOfTheShapeIsKeptUnread(t *testing.T) {
+	got := application.ParseDocsReading("Done.\nDocs: I read the codemap and it was fine.\n")
+	if !got.Found || got.Unread != "I read the codemap and it was fine." || got.Files != "" || got.Verdict != "" {
+		t.Errorf("got %+v", got)
+	}
+	if got := application.ParseDocsReading("Done. The Docs: line is not here."); got.Found {
+		t.Errorf("a mention in a sentence was read: %+v", got)
+	}
+	if got := application.ParseDocsReading("Docs: read a.md; maybe because x"); got.Verdict != "" || got.Unread == "" {
+		t.Errorf("an unknown verdict was taken: %+v", got)
+	}
+}
+
+func TestTheDocsLineShowsInTheLandedMailAndTheLedgerRow(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
+	if err := tracker.CommentOnStory(ctx, "mw-x.1", "Done.\n\nFor the rig memory:\nnothing\n"+tkszyqrDocs); err != nil {
+		t.Fatal(err)
+	}
+	vault := newFakeVault()
+	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
+	lands := &aLandingLanding{fakeRetryLanding{AheadCount: 1}}
+	mailbox := apptest.NewFakeMailbox()
+
+	report, err := application.Next{
+		Tracker: tracker, Vault: vault, Worktrees: lands, Landing: lands,
+		Checks: &scriptedChecks{passes: []bool{true}}, Slot: aSlot{}, Mailbox: mailbox,
+		RetryWait: func(context.Context, time.Duration) error { return nil },
+		Seat:      "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	if err != nil || !report.Landed {
+		t.Fatalf("expected a landing, got err %v and %+v", err, report)
+	}
+	mail, _ := mailbox.Inbox(ctx, application.MayorMailbox)
+	var body string
+	for _, m := range mail {
+		if strings.HasPrefix(m.Subject, application.MailLanded) {
+			body = m.Body
+		}
+	}
+	if strings.Contains(body, "MALFORMED") {
+		t.Errorf("the Landed mail flags a line malformed:\n%s", body)
+	}
+	line := "docs    files: CLAUDE.md; verdict: unused; because: the work was in the grind, its example and the grind-examples test, none of which it covers."
+	if !strings.Contains(body, line) {
+		t.Errorf("the Landed mail has no docs line %q:\n%s", line, body)
+	}
+	if len(vault.ledger) != 1 || !strings.Contains(vault.ledger[0], "docs: CLAUDE.md (unused)") {
+		t.Errorf("the ledger row does not carry the docs files and verdict: %q", vault.ledger)
 	}
 }

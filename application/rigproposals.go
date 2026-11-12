@@ -84,7 +84,7 @@ func ParseFactProposals(comment string) FactProposals {
 	for _, raw := range append([]string{first}, lines[start+1:]...) {
 		// A bug's 'For common errors:' section, written after this one, is not
 		// a proposal of it (mw-gq6.420).
-		if strings.Contains(strings.ToLower(raw), strings.ToLower(CommonErrorsMarker)) || isFoundNotFixedHeading(raw) {
+		if strings.Contains(strings.ToLower(raw), strings.ToLower(CommonErrorsMarker)) || isFoundNotFixedHeading(raw) || isDocsHeading(raw) {
 			break
 		}
 		text := strings.TrimSpace(domain.TrimListMarker(raw))
@@ -333,4 +333,82 @@ func (f FactProposals) RigMemoryBlock(rig, story, flatFile string) string {
 // closed, escaped and opened again.
 func shellQuoted(text string) string {
 	return "'" + strings.ReplaceAll(text, "'", `'\''`) + "'"
+}
+
+// DocsMarker heads the line some rigs ask every Builder to end a closing
+// comment with: 'Docs: read <files>; <helped|unused|hurt> because <one line>'.
+const DocsMarker = "Docs:"
+
+func isDocsHeading(line string) bool {
+	_, ok := headingRest(line, DocsMarker)
+	return ok
+}
+
+// DocsReading is what a closing comment's 'Docs:' line says. Found is false
+// when the comment has none. A line of the asked shape has Files, Verdict
+// (helped, unused or hurt) and Because; any other 'Docs:' line is kept whole in
+// Unread, so that it still shows (mw-gq6.1106).
+type DocsReading struct {
+	Found   bool
+	Files   string
+	Verdict string
+	Because string
+	Unread  string
+}
+
+var docsForm = regexp.MustCompile(`(?i)^read\s+(.+?)\s*;\s*(helped|unused|hurt)\s+because\s+(\S.*)$`)
+
+// ParseDocsReading reads the 'Docs:' line of one closing comment, wherever it
+// sits. When the comment holds more than one, the last is the reading.
+func ParseDocsReading(comment string) DocsReading {
+	var reading DocsReading
+	for _, raw := range strings.Split(strings.ReplaceAll(comment, "\r\n", "\n"), "\n") {
+		rest, ok := headingRest(raw, DocsMarker)
+		if !ok {
+			continue
+		}
+		rest = strings.Join(strings.Fields(strings.TrimRight(rest, "*_ \t")), " ")
+		if rest == "" {
+			continue
+		}
+		reading = DocsReading{Found: true, Unread: rest}
+		if m := docsForm.FindStringSubmatch(rest); m != nil {
+			reading = DocsReading{Found: true, Files: m[1], Verdict: strings.ToLower(m[2]), Because: m[3]}
+		}
+	}
+	return reading
+}
+
+// MailLine is the reading as the one 'docs' line of a Landed mail.
+func (d DocsReading) MailLine() string {
+	switch {
+	case !d.Found:
+		return ""
+	case d.Unread != "":
+		return "docs    unread: " + d.Unread
+	}
+	return fmt.Sprintf("docs    files: %s; verdict: %s; because: %s", d.Files, d.Verdict, d.Because)
+}
+
+// LedgerNote is the reading as the ledger row's note, which carries the files
+// and the verdict so that they can be counted.
+func (d DocsReading) LedgerNote() string {
+	switch {
+	case !d.Found:
+		return ""
+	case d.Unread != "":
+		return "docs unread: " + d.Unread
+	}
+	return fmt.Sprintf("docs: %s (%s)", d.Files, d.Verdict)
+}
+
+// closingDocs is the reading of the story's newest closing comment that has a
+// 'Docs:' line.
+func closingDocs(comments []Comment) DocsReading {
+	for i := len(comments) - 1; i >= 0; i-- {
+		if reading := ParseDocsReading(comments[i].Text); reading.Found {
+			return reading
+		}
+	}
+	return DocsReading{}
 }

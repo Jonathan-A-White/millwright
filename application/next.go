@@ -3215,7 +3215,7 @@ func (n Next) closingMail(ctx context.Context, c *closeOut, report *NextReport, 
 		verdict, unmet = n.landedWithoutACs(ctx, c, report, again, comments)
 		found = n.filedFromFoundNotFixed(ctx, c, report, again, comments)
 	}
-	return verdict, joinBlocks(unmet, found, n.commonErrors(ctx, c, comments), n.rigMemoryProposals(ctx, c, comments))
+	return verdict, joinBlocks(unmet, found, n.commonErrors(ctx, c, comments), n.rigMemoryProposals(ctx, c, comments), closingDocs(comments).MailLine())
 }
 
 // rigMemoryProposals is the block from the story's newest closing comment that
@@ -3846,6 +3846,14 @@ func (n Next) ledger(ctx context.Context, c *closeOut, report *NextReport, outco
 	if err != nil {
 		report.Notes = append(report.Notes, err.Error())
 	}
+	notes := n.ledgerNotes(c, report)
+	// The Docs line a rig asks of its Builders is kept in the row, where it can
+	// be counted (mw-gq6.1106); comments that cannot be read add nothing.
+	if comments, err := n.Tracker.StoryComments(ctx, c.id); err == nil {
+		if note := closingDocs(comments).LedgerNote(); note != "" {
+			notes = append(notes, note)
+		}
+	}
 	line := LedgerLine{
 		When:        n.now(),
 		StoryID:     c.id,
@@ -3853,7 +3861,7 @@ func (n Next) ledger(ctx context.Context, c *closeOut, report *NextReport, outco
 		Outcome:     outcome,
 		Path:        c.path,
 		Result:      c.result,
-		Notes:       n.ledgerNotes(c, report),
+		Notes:       notes,
 		FuelCharged: charged,
 	}.String()
 

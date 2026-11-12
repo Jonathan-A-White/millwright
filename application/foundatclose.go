@@ -33,7 +33,7 @@ const (
 
 // foundSectionEnders are the headings that end the section when one starts a
 // line after it, beside a blank line after a finding.
-var foundSectionEnders = []string{RigMemoryMarker, CommonErrorsMarker, "What's new:", "HOW TO CHECK IT", "Internal:"}
+var foundSectionEnders = []string{RigMemoryMarker, CommonErrorsMarker, "What's new:", "HOW TO CHECK IT", "Internal:", DocsMarker}
 
 // headingRest is the text after heading when line starts with it, case ignored,
 // after any bullet, number or emphasis marks; ok is false when the line does

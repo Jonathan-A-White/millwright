@@ -1011,7 +1011,7 @@ func ParseCommonErrors(comment string) CommonErrorProposals {
 	}
 	found := CommonErrorProposals{Found: true}
 	for _, raw := range append([]string{first}, lines[start+1:]...) {
-		if strings.Contains(strings.ToLower(raw), strings.ToLower(RigMemoryMarker)) || isFoundNotFixedHeading(raw) {
+		if strings.Contains(strings.ToLower(raw), strings.ToLower(RigMemoryMarker)) || isFoundNotFixedHeading(raw) || isDocsHeading(raw) {
 			break
 		}
 		text := strings.TrimSpace(domain.TrimListMarker(raw))
