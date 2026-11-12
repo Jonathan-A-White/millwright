@@ -1,37 +1,46 @@
-# millwright: give way to the person at this PC's screen (mw-2891blf.2). The desktop
+# millwright: give way to the person at this PC's screen (mw-2891blf.2, .15). The desktop
 # is also another person's PC, and the factory runs inside its WSL. This script is the Windows
-# half of `mw giveway`: three scheduled tasks of the account that owns the WSL
-# distro run it, with the event as the argument.
+# half of `mw giveway`: four scheduled tasks of the account that owns the WSL distro run it,
+# with the event as the argument.
 #
-#   -Event unlock   someone is at the screen (unlock, console connect, logon):
+#   -Event unlock   someone is at the screen (unlock, console or remote connect, logon):
 #                   freeze mode      mw giveway on at once; then (not before) sync and drop
 #                                    the page cache as root, so the guest hands memory back to
 #                                    Windows; 10 s later one mw giveway mark with the free memory
 #                   shutdown mode    mw giveway on, then wsl.exe --terminate
-#   -Event lock     nobody is (lock, console disconnect):
-#                   freeze mode      mw giveway off
+#                   WSL is not running (no vmmemWSL or vmmem process): nothing runs the factory,
+#                   so nothing is frozen and wsl.exe is NOT called (it would start the distro).
+#   -Event lock     nobody is (lock, console or remote disconnect):
+#                   freeze mode      mw giveway off (not called when WSL is not running)
 #                   shutdown mode    start WSL as the task 'Start WSL (millwright)' does, wait
 #                                    until it answers, then mw giveway off (which retries the
 #                                    sessions that died)
-#   -Event tick     every 5 minutes: freeze mode, state 'unlocked' and a session active at the
-#                   console: mw giveway on (a renew). Otherwise nothing. Shutdown mode: nothing
-#                   (a renew would start WSL again).
+#   -Event logoff   a sign-out (event 4 of the User Profile Service, after the session ended):
+#                   if a session of some user is still at the screen, nothing (the tick keeps
+#                   the give way going); otherwise as lock, by windows-logoff.
+#   -Event tick     every 5 minutes: freeze mode, a session of ANY user active at the screen
+#                   (console or remote, its lock screen not up) and WSL running: mw giveway on (a
+#                   renew). Otherwise nothing. Shutdown mode: nothing (a renew would start WSL).
 #   -DryRun         prints the commands it would run, in order, and runs none; writes no state
-#                   and no log. A tick assumes state 'unlocked' and someone at the console.
+#                   and no log. -AssumeWsl up|down (default up) says what the WSL check would
+#                   find; -AssumeScreen occupied|empty says what the screen check would find
+#                   (default: occupied for a tick, empty for a logoff).
 #
 # Files beside this script (the folder the install paste makes under ProgramData):
 #   mode          one word, freeze (the default when the file is missing) or shutdown
 #   state         one word, unlocked or locked: what the last unlock or lock said
 #   giveway.log   one line per run: UTC time, event, mode, each command's exit code and ms
 # `mw host giveway --install-line` prints the paste that installs this file and registers
-# the three tasks; --uninstall-line the way back; --mode-line freeze|shutdown flips the mode.
+# the four tasks; --uninstall-line the way back; --mode-line freeze|shutdown flips the mode.
 # Windows PowerShell 5.1, no module beyond what Windows ships. No window is shown: the task's
 # action is conhost.exe --headless powershell.exe ... (Windows 10 build 19041 or later).
 # A failure of wsl.exe (WSL down, the distro missing) is logged; the script exits 0.
 
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('unlock', 'lock', 'tick')][string]$Event,
-    [switch]$DryRun
+    [Parameter(Mandatory = $true)][ValidateSet('unlock', 'lock', 'logoff', 'tick')][string]$Event,
+    [switch]$DryRun,
+    [ValidateSet('up', 'down')][string]$AssumeWsl = 'up',
+    [ValidateSet('', 'occupied', 'empty')][string]$AssumeScreen = ''
 )
 
 $ErrorActionPreference = 'Continue'
@@ -90,12 +99,34 @@ function Mw-Giveway([string]$label, [string[]]$more) {
     return (Wsl-Run $label (@('-d', $distro, '-u', $wslUser, '--exec', $mw) + $more))
 }
 
-# Someone is at the console: a session on it is active and the lock screen is not up.
-function Console-Active {
-    if (Get-Process -Name LogonUI -ErrorAction SilentlyContinue) { return $false }
+# Someone is at the screen: a session of ANY user, on the console or remote, is Active and its
+# lock screen (a LogonUI in that session) is not up.
+function Screen-Occupied {
+    if ($DryRun) {
+        $yes = if ($AssumeScreen) { $AssumeScreen -eq 'occupied' } else { $Event -eq 'tick' }
+        Write-Host ("DRYRUN check a session of some user is active at the screen: assumed " + $(if ($yes) { 'occupied' } else { 'empty' }))
+        return $yes
+    }
     try { $rows = @(& quser.exe 2>$null) } catch { return $false }
-    foreach ($r in $rows) { if ($r -match '\bconsole\b' -and $r -match '\bActive\b') { return $true } }
+    $locked = @(Get-Process -Name LogonUI -ErrorAction SilentlyContinue | ForEach-Object { $_.SessionId })
+    foreach ($r in $rows) {
+        if ($r -match '\s(\d+)\s+Active\b' -and ($locked -notcontains [int]$Matches[1])) { return $true }
+    }
     return $false
+}
+
+# WSL is running: the WSL 2 virtual machine has a process. This takes some tens of ms (asking
+# wsl.exe for its running distros takes about 400), and unlike wsl.exe --exec it does not start the distro.
+# When the check itself fails it says yes: better to call wsl.exe than to leave the host unfrozen.
+function Wsl-Running {
+    if ($DryRun) {
+        Write-Host "DRYRUN check WSL is running: a vmmemWSL or vmmem process (assumed $AssumeWsl)"
+        return ($AssumeWsl -eq 'up')
+    }
+    try {
+        foreach ($n in 'vmmemWSL', 'vmmem') { if ([System.Diagnostics.Process]::GetProcessesByName($n).Count -gt 0) { return $true } }
+        return $false
+    } catch { return $true }
 }
 
 function Start-Wsl {
@@ -137,42 +168,65 @@ if ($DryRun) { Write-Host "DRYRUN event: $Event, mode: $mode" }
 
 try {
     if ($Event -eq 'unlock') {
-        # The freeze comes first, before anything that can take time.
-        $null = Mw-Giveway 'on' @('giveway', 'on', '--by', 'windows-unlock', '--note', "windows_free_mb=$(Free-Mb)", '--note', "windows_ms=$(Elapsed-Ms)")
-        Set-State 'unlocked'
-        if ($mode -eq 'shutdown') {
-            $null = Wsl-Run 'terminate' @('--terminate', $distro)
+        if (-not (Wsl-Running)) {
+            # Nothing runs the factory, so nothing is frozen; calling wsl.exe would start the distro.
+            Set-State 'unlocked'
+            if ($DryRun) { Write-Host 'DRYRUN WSL is not running: nothing frozen, wsl.exe not called' } else { $steps.Add('WSL is not running: nothing to freeze, not started') }
         } else {
-            # After the freeze: hand the guest's memory back to Windows.
-            if ($DryRun -or (Read-Word $stateFile '') -eq 'unlocked') {
-                $null = Wsl-Run 'drop-caches' @('-d', $distro, '-u', 'root', '--exec', 'sh', '-c', 'sync; echo 3 > /proc/sys/vm/drop_caches')
-                if ($DryRun) { Write-Host 'DRYRUN wait 10 s' } else { Start-Sleep 10 }
-                if ($DryRun -or (Read-Word $stateFile '') -eq 'unlocked') {
-                    $null = Mw-Giveway 'mark' @('giveway', 'mark', '--by', 'windows-unlock', '--note', "windows_free_mb=$(Free-Mb)")
-                }
+            # The freeze comes first, before anything that can take time.
+            $null = Mw-Giveway 'on' @('giveway', 'on', '--by', 'windows-unlock', '--note', "windows_free_mb=$(Free-Mb)", '--note', "windows_ms=$(Elapsed-Ms)")
+            Set-State 'unlocked'
+            if ($mode -eq 'shutdown') {
+                $null = Wsl-Run 'terminate' @('--terminate', $distro)
             } else {
-                $steps.Add('locked again: no drop-caches')
+                # After the freeze: hand the guest's memory back to Windows.
+                if ($DryRun -or (Read-Word $stateFile '') -eq 'unlocked') {
+                    $null = Wsl-Run 'drop-caches' @('-d', $distro, '-u', 'root', '--exec', 'sh', '-c', 'sync; echo 3 > /proc/sys/vm/drop_caches')
+                    if ($DryRun) { Write-Host 'DRYRUN wait 10 s' } else { Start-Sleep 10 }
+                    if ($DryRun -or (Read-Word $stateFile '') -eq 'unlocked') {
+                        $null = Mw-Giveway 'mark' @('giveway', 'mark', '--by', 'windows-unlock', '--note', "windows_free_mb=$(Free-Mb)")
+                    }
+                } else {
+                    $steps.Add('locked again: no drop-caches')
+                }
             }
         }
     }
-    elseif ($Event -eq 'lock') {
-        Set-State 'locked'
-        if ($mode -eq 'shutdown') {
-            Start-Wsl
-            Wait-Wsl
+    elseif ($Event -eq 'lock' -or $Event -eq 'logoff') {
+        $by = if ($Event -eq 'logoff') { 'windows-logoff' } else { 'windows-lock' }
+        if ($Event -eq 'logoff') {
+            # The sign-out event comes as the session ends: give it a moment, then look. Someone
+            # else may still be at the screen (another user's session); the tick keeps that going.
+            if ($DryRun) { Write-Host 'DRYRUN wait 3 s' } else { Start-Sleep 3 }
         }
-        $null = Mw-Giveway 'off' @('giveway', 'off', '--by', 'windows-lock')
+        if ($Event -eq 'logoff' -and (Screen-Occupied)) {
+            if ($DryRun) { Write-Host 'DRYRUN nothing: someone else is still at the screen' } else { $steps.Add('someone else still at the screen: nothing') }
+        } else {
+            Set-State 'locked'
+            if ($mode -eq 'shutdown') {
+                # Starting WSL is the point of the lock in this mode.
+                Start-Wsl
+                Wait-Wsl
+                $null = Mw-Giveway 'off' @('giveway', 'off', '--by', $by)
+            } elseif (Wsl-Running) {
+                $null = Mw-Giveway 'off' @('giveway', 'off', '--by', $by)
+            } else {
+                if ($DryRun) { Write-Host 'DRYRUN WSL is not running: nothing frozen to lift, wsl.exe not called' } else { $steps.Add('WSL is not running: nothing to lift, not started') }
+            }
+        }
     }
     else {
         if ($mode -eq 'shutdown') {
             if ($DryRun) { Write-Host 'DRYRUN nothing: shutdown mode keeps WSL down while unlocked, and a renew would start it' }
             else { $steps.Add('shutdown mode: nothing') }
         } else {
-            $unlocked = $true
-            if ($DryRun) { Write-Host 'DRYRUN assume: state unlocked and a session active at the console' }
-            else { $unlocked = ((Read-Word $stateFile '') -eq 'unlocked') -and (Console-Active) }
-            if ($unlocked) { $null = Mw-Giveway 'renew' @('giveway', 'on', '--by', 'windows-tick') }
-            else { $steps.Add('nobody at the screen: nothing') }
+            if (-not (Screen-Occupied)) {
+                if ($DryRun) { Write-Host 'DRYRUN nothing: nobody at the screen' } else { $steps.Add('nobody at the screen: nothing') }
+            } elseif (-not (Wsl-Running)) {
+                if ($DryRun) { Write-Host 'DRYRUN nothing: WSL is not running, a renew would start it' } else { $steps.Add('WSL is not running: nothing to renew, not started') }
+            } else {
+                $null = Mw-Giveway 'renew' @('giveway', 'on', '--by', 'windows-tick')
+            }
         }
     }
 } catch {
