@@ -794,6 +794,25 @@ func (r reviewQueueOf) ReviewQueue(ctx context.Context) (int, int, error) {
 	return survey.ReviewQueue(ctx)
 }
 
+// CloudMakeLines are the cloud make alarms the survey's book holds, said beside
+// the queue when a card is about to be sent (mw-gq6.1128). A book that cannot be
+// opened says none.
+func (r reviewQueueOf) CloudMakeLines(ctx context.Context, now time.Time) []string {
+	dir, err := config.Vault()
+	if err != nil {
+		return nil
+	}
+	host, err := config.Host()
+	if err != nil {
+		return nil
+	}
+	survey, err := damperSurvey(r.gateway, dir, host)
+	if err != nil {
+		return nil
+	}
+	return survey.CloudMakeLines(ctx, now)
+}
+
 // posternSnapshotClock stamps the written_at a snapshot is built with. A test
 // fixes it.
 var posternSnapshotClock = time.Now

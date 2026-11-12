@@ -5,7 +5,9 @@ import (
 	"strings"
 )
 
-// SummaryLines is the most lines the phone summary of mw report send has.
+// SummaryLines is the most lines the phone summary of mw report send has, not
+// counting the cloud make alarm lines (up to two for each slow make) it says
+// under HIS TIME (mw-gq6.1128).
 const SummaryLines = 19
 
 // Summary is the report as a phone reads it: the window, then QUALITY (escaped
@@ -21,6 +23,9 @@ func (r FactoryReportResult) Summary() string {
 	r.summaryQualitySpeedFuel(&b)
 	if t := r.Review; t != nil {
 		summaryLine(&b, "", "HIS TIME ", fmt.Sprintf("review queue %d (limit %d), demos waiting %d", t.Queue, t.QueueLimit, t.DemosWaiting))
+		for _, line := range t.CloudMake {
+			wrapInto(&b, "", line)
+		}
 	}
 
 	if bad := worse(r.Changes); len(bad) > 0 {

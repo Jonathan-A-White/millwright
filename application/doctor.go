@@ -452,6 +452,12 @@ func (d Doctor) Run(ctx context.Context, name string, dryRun bool) (DoctorReport
 				fmt.Fprintf(d.Out, "dampers: could not be read (%v)\n", err)
 			} else {
 				fmt.Fprintln(d.Out, dampers.CountsLine())
+				// The cloud make alarm is the one alarm that is a fault of a box and
+				// not a plan of the Mayor's, so it is said beside the counts
+				// (mw-gq6.1128).
+				for _, line := range cloudMakeLines(dampers.Alarms) {
+					fmt.Fprintln(d.Out, line)
+				}
 			}
 		}
 	}

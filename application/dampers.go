@@ -480,11 +480,7 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 		report.Alarms = append(report.Alarms, alarm)
 	}
 	for _, box := range facts.SlowMakes {
-		report.Alarms = append(report.Alarms, DamperAlarm{
-			Principle: DamperCloudMake,
-			Text:      fmt.Sprintf("%s has been made for %s and the make has not finished; %s", box.Name, Clock(facts.Now.Sub(box.Up)), box.vultrText()),
-			Identity:  "cloud make " + box.Name,
-		})
+		report.Alarms = append(report.Alarms, cloudMakeAlarm(box, facts.Now))
 	}
 	if len(queue) > limits.ReviewQueue {
 		add(DamperReview, fmt.Sprintf("his review queue is %d: %d cards, %d demos, %d hands steps (limit %d)",
@@ -737,13 +733,54 @@ func (s DamperSurvey) Dampers(ctx context.Context, work WorkInHand, now time.Tim
 			facts.Proposals = proposals
 		}
 	}
-	if s.Cloud != nil {
-		// A book that cannot be read is a gauge missing, not a fault in the others.
-		if state, err := s.Cloud.Read(ctx); err == nil {
-			facts.SlowMakes = state.SlowMakes(s.CloudPlan, now)
+	facts.SlowMakes = s.slowMakes(ctx, now)
+	return ReadDampers(facts, s.Limits), nil
+}
+
+// slowMakes are the boxes of the cloud's book made for longer than the plan's
+// limit; none when there is no book or it cannot be read, a gauge missing and
+// not a fault in the others.
+func (s DamperSurvey) slowMakes(ctx context.Context, now time.Time) []CloudBox {
+	if s.Cloud == nil {
+		return nil
+	}
+	state, err := s.Cloud.Read(ctx)
+	if err != nil {
+		return nil
+	}
+	return state.SlowMakes(s.CloudPlan, now)
+}
+
+// cloudMakeAlarm is the alarm for one box whose make has run past the limit,
+// the one text mw status, mw report and the review hold all say.
+func cloudMakeAlarm(box CloudBox, now time.Time) DamperAlarm {
+	return DamperAlarm{
+		Principle: DamperCloudMake,
+		Text:      fmt.Sprintf("%s has been made for %s and the make has not finished; %s", box.Name, Clock(now.Sub(box.Up)), box.vultrText()),
+		Identity:  "cloud make " + box.Name,
+	}
+}
+
+// CloudMakeLines are the cloud make alarms of the book alone, one line for each
+// slow make, for a surface that counts something else from the survey and
+// would otherwise not say them. It reads no bead.
+func (s DamperSurvey) CloudMakeLines(ctx context.Context, now time.Time) []string {
+	var lines []string
+	for _, box := range s.slowMakes(ctx, now) {
+		lines = append(lines, cloudMakeAlarm(box, now).Line())
+	}
+	return lines
+}
+
+// cloudMakeLines are the lines of the cloud make alarms among a report's alarms.
+func cloudMakeLines(alarms []DamperAlarm) []string {
+	var lines []string
+	for _, a := range alarms {
+		if a.Principle == DamperCloudMake {
+			lines = append(lines, a.Line())
 		}
 	}
-	return ReadDampers(facts, s.Limits), nil
+	return lines
 }
 
 // ReadProposals reads the standing proposals of the open demos and of the
