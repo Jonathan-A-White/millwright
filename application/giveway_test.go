@@ -352,11 +352,14 @@ func TestGiveWayStatusAndMark(t *testing.T) {
 }
 
 // The give-way use case holds no work tracker, mailbox or network port at all
-// but the retry of off: the second that matters (on) has nothing to call.
+// but the retry of off and the note for the home (Notes, mw-2891blf.3), which on
+// writes only after its last stop (TestGiveWayNoteIsWrittenOnlyAfterTheLastStop):
+// the second that matters (on) has nothing to call before then.
 func TestGiveWayHoldsNoNetworkPortButTheRetryOfOff(t *testing.T) {
 	allowed := map[string]bool{
 		"Processes": true, "Panes": true, "Marker": true, "Log": true, "Load": true, "Home": true,
 		"Host": true, "Retry": true, "Stale": true, "Self": true, "By": true, "Now": true, "Out": true,
+		"Notes": true, "NoteTimeout": true,
 	}
 	typ := reflect.TypeOf(application.GiveWay{})
 	for i := 0; i < typ.NumField(); i++ {
