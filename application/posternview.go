@@ -307,6 +307,12 @@ type PosternView struct {
 	// postern_view_path. The snapshot's own port serves, since both are one
 	// sealed file written whole.
 	File PosternSnapshotFile
+	// CountsFile, when set, is where the plaintext needs counts are written,
+	// atomically, each time Run builds the view (PosternNeedsCountsFile in
+	// File's directory): so mw status can ring on his badge's number although
+	// the view is sealed. A memo-skipped view still rewrites it, since the
+	// counts' written_at is what says they are fresh. Nil writes none.
+	CountsFile PosternSnapshotFile
 
 	// GovernorKey is who the view is sealed to: config postern_governor_key.
 	// Required only by Run, not Build.
@@ -401,6 +407,7 @@ func (v PosternView) Run(ctx context.Context) (PosternViewDoc, error) {
 	if err != nil {
 		return PosternViewDoc{}, err
 	}
+	v.writeCounts(ctx, doc)
 	var digest [sha256.Size]byte
 	if v.Memo != nil {
 		v.Memo.mu.Lock()
@@ -427,6 +434,21 @@ func (v PosternView) Run(ctx context.Context) (PosternViewDoc, error) {
 			len(doc.Beads), len(doc.Needs), plain, zipped, v.File.Path())
 	}
 	return doc, nil
+}
+
+// writeCounts writes the needs counts of doc through CountsFile. A failure is
+// said on Err and stops nothing: the counts are a gauge, the view is the work.
+func (v PosternView) writeCounts(ctx context.Context, doc PosternViewDoc) {
+	if v.CountsFile == nil {
+		return
+	}
+	raw, err := PosternNeedsCountsJSON(doc, v.now())
+	if err == nil {
+		err = v.CountsFile.Write(ctx, raw)
+	}
+	if err != nil && v.Err != nil {
+		fmt.Fprintf(v.Err, "mw postern view: the needs counts were not written to %s: %v\n", v.CountsFile.Path(), err)
+	}
 }
 
 // checkWritable reports whether Run has what writing needs, without touching

@@ -36,7 +36,8 @@ func newStuckCmd() *cobra.Command {
 			"it prints a single line saying so. It reads and writes nothing.\n\n" +
 			"With --dampers it prints instead every DAMPERS alarm mw status shows, each with every bead it names,\n" +
 			"one a line (mw status cuts a list at 5 and ends it '+N (all: mw stuck --dampers)'): the review queue's\n" +
-			"cards, demos and hands steps, the untouched P1s, the waiting demos, the grillings with no card. With\n" +
+			"cards, demos and hands steps, the untouched P1s, the waiting demos, the grillings with no card, the\n" +
+			"needs-you line when his badge's count is over needs_you. With\n" +
 			"no alarm tripped it prints a single line saying so. It reads and writes nothing.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

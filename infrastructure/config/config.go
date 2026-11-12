@@ -1519,13 +1519,15 @@ type DampersSettings struct {
 	GrillingDays    int
 	TestersPerRig   int
 	ReviewQueue     int
+	NeedsYou        int
 }
 
 // Dampers reports the [dampers] table of ~/.config/mw/config.toml:
 // `ready_p1` (how many ready P1 stories before the alarm, default 10),
 // `p1_untouched_days` (5), `demo_waiting_days` (7), `grilling_days` (7),
-// `testers_per_rig` (1) and `review_queue` (8); each a whole number, 1 or
-// more.
+// `testers_per_rig` (1), `review_queue` (8) and `needs_you` (25, the needs
+// waiting on him that the view's counts file may show); each a whole number, 1
+// or more.
 func Dampers() (DampersSettings, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -1541,6 +1543,7 @@ func Dampers() (DampersSettings, error) {
 		"ready_p1": &settings.ReadyP1, "p1_untouched_days": &settings.P1UntouchedDays,
 		"demo_waiting_days": &settings.DemoWaitingDays, "grilling_days": &settings.GrillingDays,
 		"testers_per_rig": &settings.TestersPerRig, "review_queue": &settings.ReviewQueue,
+		"needs_you": &settings.NeedsYou,
 	} {
 		said := strings.TrimSpace(table[key])
 		if said == "" {

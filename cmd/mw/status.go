@@ -13,6 +13,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/grist"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
+	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 	"github.com/Jonathan-A-White/millwright/infrastructure/procs"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
@@ -370,8 +371,20 @@ func damperSurvey(tracker *beads.Gateway) (application.DamperSurvey, error) {
 		Limits: application.DamperLimits{
 			ReadyP1: limits.ReadyP1, P1UntouchedDays: limits.P1UntouchedDays, DemoWaitingDays: limits.DemoWaitingDays,
 			GrillingDays: limits.GrillingDays, TestersPerRig: limits.TestersPerRig, ReviewQueue: limits.ReviewQueue,
+			NeedsYou: limits.NeedsYou,
 		},
+		NeedsCounts: needsCountsReader(),
 	}, nil
+}
+
+// needsCountsReader reads the counts file the view writes beside itself, or is
+// nil when the view's path cannot be told.
+func needsCountsReader() application.NeedsCountsReader {
+	path, err := config.PosternViewPath()
+	if err != nil {
+		return nil
+	}
+	return postern.NewNeedsCountsFile(application.PosternNeedsCountsPath(path))
 }
 
 // testersPerRig is the [dampers] testers_per_rig key, 0 when the table leaves it

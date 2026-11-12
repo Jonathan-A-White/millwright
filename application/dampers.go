@@ -27,6 +27,9 @@ type DamperLimits struct {
 	// ReviewQueue is how many open cards, open demos and unrun hands steps he
 	// may have waiting.
 	ReviewQueue int
+	// NeedsYou is how many needs waiting on him the view's counts file may show
+	// before the alarm rings: the number his badge reads.
+	NeedsYou int
 }
 
 // The defaults of DamperLimits.
@@ -37,6 +40,7 @@ const (
 	DefaultDamperGrillingDays    = 7
 	DefaultDamperTestersPerRig   = 1
 	DefaultDamperReviewQueue     = 8
+	DefaultDamperNeedsYou        = 25
 )
 
 // DamperFacts is everything the alarms are judged from, all read already.
@@ -55,6 +59,9 @@ type DamperFacts struct {
 	// LoopSitting is the weekly loop sitting as the notes keep it; the alarm is
 	// judged only when it was read (mw-gq6.997).
 	LoopSitting LoopSitting
+	// NeedsCounts is the bytes of the counts file the view writes beside itself
+	// (PosternNeedsCountsFile); nil when there is none to read.
+	NeedsCounts []byte
 }
 
 // DamperAlarm is one tripped alarm: the principle in a word (WIP, ageing,
@@ -95,6 +102,9 @@ type DamperCounts struct {
 	// OpenRefused are the open stories a run state has kept from dispatch for over
 	// OpenRefusedAge (mw-gq6.1026).
 	OpenRefused int
+	// NeedsYou is the count of needs waiting on him in the view's counts file;
+	// zero when there is none or it is stale.
+	NeedsYou int
 }
 
 // DampersHeading heads the section naming the alarms that are tripped: the
@@ -126,6 +136,9 @@ const (
 	// DamperDoctor is the alarm for a check another host's doctor left faulty:
 	// its report reaches the home as a note, since nobody reads that host's log.
 	DamperDoctor = "doctor"
+	// DamperNeedsYou is the alarm for the needs waiting on him that his badge
+	// counts, read from the counts file the view writes (mw-27f7myz.4).
+	DamperNeedsYou = "needs you"
 )
 
 // damperNamed is how many beads an alarm's line names before it counts the rest.
@@ -139,6 +152,7 @@ func (l DamperLimits) orDefaults() DamperLimits {
 		{&l.ReadyP1, DefaultDamperReadyP1}, {&l.P1UntouchedDays, DefaultDamperP1UntouchedDays},
 		{&l.DemoWaitingDays, DefaultDamperDemoWaitingDays}, {&l.GrillingDays, DefaultDamperGrillingDays},
 		{&l.TestersPerRig, DefaultDamperTestersPerRig}, {&l.ReviewQueue, DefaultDamperReviewQueue},
+		{&l.NeedsYou, DefaultDamperNeedsYou},
 	} {
 		if *one.have <= 0 {
 			*one.have = one.want
@@ -400,6 +414,11 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 	for _, rig := range rigs {
 		add(DamperWIP, fmt.Sprintf("%d Tester stories running on %s (limit %d)", len(testers[rig]), rig, limits.TestersPerRig), testers[rig])
 	}
+	alarm, count, ring := needsYouAlarm(facts.NeedsCounts, facts.Now, limits.NeedsYou)
+	report.Counts.NeedsYou = count
+	if ring {
+		report.Alarms = append(report.Alarms, alarm)
+	}
 	if len(queue) > limits.ReviewQueue {
 		add(DamperReview, fmt.Sprintf("his review queue is %d: %d cards, %d demos, %d hands steps (limit %d)",
 			len(queue), len(cards), len(demos), len(hands), limits.ReviewQueue), uniqueStrings(queue))
@@ -560,6 +579,15 @@ type DamperSurvey struct {
 	// GiveWayStale is giveway_stale, for the hosts' give-way notes read with the
 	// rest (mw-2891blf.3); zero reads DefaultGiveWayStale.
 	GiveWayStale time.Duration
+	// NeedsCounts, when set, reads the counts file the view writes beside
+	// itself; nil reads none, and the needs-you alarm is silent.
+	NeedsCounts NeedsCountsReader
+}
+
+// NeedsCountsReader reads the bytes of the view's counts file, nil with no
+// error when there is none.
+type NeedsCountsReader interface {
+	ReadNeedsCounts(ctx context.Context) ([]byte, error)
 }
 
 // Dampers reads the alarms from work already read.
@@ -593,6 +621,12 @@ func (s DamperSurvey) Dampers(ctx context.Context, work WorkInHand, now time.Tim
 	if s.Stuck != nil {
 		if stuck, err := s.Stuck.Find(ctx); err == nil {
 			facts.Stuck = stuck
+		}
+	}
+	if s.NeedsCounts != nil {
+		// A file that cannot be read is a gauge missing, not a fault in the others.
+		if raw, err := s.NeedsCounts.ReadNeedsCounts(ctx); err == nil {
+			facts.NeedsCounts = raw
 		}
 	}
 	return ReadDampers(facts, s.Limits), nil
