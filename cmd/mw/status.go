@@ -224,6 +224,8 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// A make that runs long is named under DAMPERS (mw-gq6.1113).
+			dampers.Cloud, dampers.CloudPlan = cloudBook, plan
 			heavy, err := config.HeavyNet()
 			if err != nil {
 				return err
