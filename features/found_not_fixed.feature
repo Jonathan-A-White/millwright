@@ -80,13 +80,25 @@ Feature: A landing whose closing comment lists what the Builder found and did no
     Given the story "mw-gq6.5" has been worked in its own worktree
     And the session of "mw-gq6.5" reported a plain success
     And the story "mw-gq6.1" carries the closing comment "Done.\nFound, not fixed:\ngofmt -l lists cmd/mw/member.go (cmd/mw/member.go:1)\nFor the rig memory: nothing"
-    And the story "mw-gq6.5" carries the closing comment "Done.\nFound, not fixed:\nA formatting fault: cmd/mw/member.go is not gofmt-clean\nFor the rig memory: nothing"
+    And the story "mw-gq6.5" carries the closing comment "Done.\nFound, not fixed:\nA formatting fault: cmd/mw/member.go:1 is not gofmt-clean\nFor the rig memory: nothing"
     When mw closes out "mw-gq6.1"
     Then exactly 1 bugs were filed under "mw-gq6"
     When mw closes out "mw-gq6.5"
     Then the story "mw-gq6.5" is closed
     And exactly 1 bugs were filed under "mw-gq6"
     And the mail "Landed: The story mw-gq6.5" says: Already filed: mw-gq6.3.
+
+  Scenario: A finding that shares only a file with an open bug is filed, and its mail names that bug
+    Given the story "mw-gq6.5" has been worked in its own worktree
+    And the session of "mw-gq6.5" reported a plain success
+    And the story "mw-gq6.1" carries the closing comment "Done.\nFound, not fixed:\nThe parser drops a trailing line (application/parse.go:12)\nFor the rig memory: nothing"
+    And the story "mw-gq6.5" carries the closing comment "Done.\nFound, not fixed:\nThe loader reads the file twice (application/parse.go:40)\nFor the rig memory: nothing"
+    When mw closes out "mw-gq6.1"
+    Then exactly 1 bugs were filed under "mw-gq6"
+    When mw closes out "mw-gq6.5"
+    Then the story "mw-gq6.5" is closed
+    And exactly 2 bugs were filed under "mw-gq6"
+    And the mail "Landed: The story mw-gq6.5" says: may overlap mw-gq6.3
 
   Scenario: A finding that names a file takes that file as its files key
     Given the finder "mw-gq6.1" expects to change the files "cmd/mw/afterlanding.go"

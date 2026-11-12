@@ -162,7 +162,7 @@ func TestATrackerThatRefusesTheCreateStillLandsTheStoryAndMailsALostWrite(t *tes
 }
 
 // A finding is the bead already filed when a bead not closed, labelled
-// found-at-close, names the same file; and the files key is the finding's own
+// found-at-close, names the same file:line; and the files key is the finding's own
 // (mw-gq6.1068).
 func TestAFindingNamingTheFileOfAnOpenFoundAtCloseBeadIsNotFiledAgain(t *testing.T) {
 	cases := []struct {
@@ -205,7 +205,7 @@ func TestAFindingNamingTheFileOfAnOpenFoundAtCloseBeadIsNotFiledAgain(t *testing
 // the same file:line, or the same symbol and the same fault words; a shared file
 // or function alone is a near match, which is filed and named in the mail
 // (mw-gq6.1103).
-func TestAFindingSharingOnlyAFileWithAnOpenFoundAtCloseBeadIsFiledAndNamesItAsNear(t *testing.T) {
+func TestAFindingIsTheBeadAlreadyFiledOnlyWhenItNamesTheSameFault(t *testing.T) {
 	cases := []struct {
 		name, title, description, finding string
 		filed                             bool
@@ -258,7 +258,7 @@ func TestAFindingSharingOnlyAFileWithAnOpenFoundAtCloseBeadIsFiledAndNamesItAsNe
 			if c.filed != (len(filed) == 1) {
 				t.Fatalf("expected filed=%v, got %d filed: %+v", c.filed, len(filed), filed)
 			}
-			if c.filed && (filed[0].Story.Title != "[bug] "+c.finding || filed[0].Status != apptest.StatusDeferred ||
+			if c.filed && (!strings.HasPrefix(filed[0].Story.Title, "[bug] "+c.finding[:min(len(c.finding), 50)]) || !strings.Contains(filed[0].Description, "> "+c.finding) || filed[0].Status != apptest.StatusDeferred ||
 				!slices.Contains(filed[0].Labels, "found-at-close")) {
 				t.Errorf("expected a held found-at-close bug of the finding, got %+v", filed[0])
 			}

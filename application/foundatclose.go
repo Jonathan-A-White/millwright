@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -216,39 +217,195 @@ func foundFiles(lines []string, finder string) string {
 	return strings.Join(paths, ",")
 }
 
-// foundSameFile is the id of a bead that is the finding already: one not closed,
-// labelled found-at-close, that names a file the finding names in its title or
-// description, where the lines mw next wrote to say who found it are not read.
-// A bead another close-out of the same story filed is not one: a story's own
-// findings may share a file (mw-gq6.1068).
-func foundSameFile(bug foundBug, beads []StoryDetail, finder string) (string, bool) {
-	want := map[string]bool{}
-	for _, line := range bug.lines {
-		for _, path := range foundPaths(line) {
-			want[path] = true
+// foundRef is a file a finding names, with the lines it names in it; from and to
+// are 0 when it names no line.
+type foundRef struct {
+	path     string
+	from, to int
+}
+
+var foundLinePattern = regexp.MustCompile(`:(\d+)(?:-(\d+))?$`)
+
+// foundRefs are the files text names with their lines, each ref once, in order.
+func foundRefs(text string) []foundRef {
+	var refs []foundRef
+	seen := map[foundRef]bool{}
+	for _, match := range foundPathPattern.FindAllString(text, -1) {
+		ref := foundRef{}
+		if m := foundLinePattern.FindStringSubmatch(match); m != nil {
+			ref.from, _ = strconv.Atoi(m[1])
+			ref.to = ref.from
+			if m[2] != "" {
+				ref.to, _ = strconv.Atoi(m[2])
+			}
+		}
+		path, _, _ := strings.Cut(match, ":")
+		path = strings.TrimPrefix(path, "./")
+		dot := strings.LastIndex(path, ".")
+		if dot < 0 || (!strings.Contains(path, "/") && !foundBareExtensions[path[dot+1:]]) {
+			continue
+		}
+		ref.path = path
+		if !seen[ref] {
+			seen[ref] = true
+			refs = append(refs, ref)
 		}
 	}
-	if len(want) == 0 {
-		return "", false
+	return refs
+}
+
+var (
+	foundBacktickPattern = regexp.MustCompile("`([^`]+)`")
+	foundTokenPattern    = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*(?:\(\))?`)
+	foundWordPattern     = regexp.MustCompile(`[a-z]+`)
+)
+
+// foundSymbols are the code names text mentions: what sits between backticks,
+// and any name with an inner capital, an underscore, a dot between names or a
+// '()' after it. A plain capitalised word (Job) is a symbol only in backticks.
+// A file the text names is not one.
+func foundSymbols(text string) map[string]bool {
+	files := map[string]bool{}
+	for _, path := range foundPaths(text) {
+		files[path] = true
+		files[path[strings.LastIndex(path, "/")+1:]] = true
+	}
+	symbols := map[string]bool{}
+	add := func(token string) {
+		token = strings.TrimSuffix(token, "()")
+		if token != "" && !files[token] && !foundFileLike(token) {
+			symbols[token] = true
+		}
+	}
+	for _, m := range foundBacktickPattern.FindAllStringSubmatch(text, -1) {
+		if tokens := foundTokenPattern.FindAllString(m[1], -1); len(tokens) == 1 && !strings.ContainsAny(m[1], " \t") {
+			add(tokens[0])
+		}
+	}
+	stripped := foundBacktickPattern.ReplaceAllString(text, " ")
+	for _, path := range foundPaths(stripped) {
+		stripped = strings.ReplaceAll(stripped, path, " ")
+	}
+	for _, token := range foundTokenPattern.FindAllString(stripped, -1) {
+		innerCapital := false
+		for i := 1; i < len(token); i++ {
+			if token[i] >= 'A' && token[i] <= 'Z' && token[i-1] >= 'a' && token[i-1] <= 'z' {
+				innerCapital = true
+			}
+		}
+		if innerCapital || strings.ContainsAny(token, "_.") || strings.HasSuffix(token, "()") {
+			add(token)
+		}
+	}
+	return symbols
+}
+
+// foundFileLike says whether token is a file name: a last part that is a known
+// extension.
+func foundFileLike(token string) bool {
+	dot := strings.LastIndex(token, ".")
+	return dot >= 0 && foundBareExtensions[token[dot+1:]]
+}
+
+var foundStopWords = map[string]bool{
+	"that": true, "this": true, "with": true, "from": true, "into": true, "when": true, "then": true, "than": true,
+	"which": true, "while": true, "where": true, "there": true, "their": true, "these": true, "those": true,
+	"have": true, "does": true, "doesn": true, "been": true, "being": true, "were": true, "will": true, "would": true,
+	"should": true, "could": true, "also": true, "only": true, "such": true, "same": true, "each": true, "because": true,
+	"about": true, "after": true, "before": true, "says": true, "said": true, "file": true,
+	"line": true, "lines": true, "bug": true, "found": true, "fixed": true, "not": true,
+}
+
+// foundFaultWords are the plain words text uses to say what is wrong, with the
+// files and the symbols left out.
+func foundFaultWords(text string) map[string]bool {
+	text = foundBacktickPattern.ReplaceAllString(text, " ")
+	for _, path := range foundPaths(text) {
+		text = strings.ReplaceAll(text, path, " ")
+	}
+	words := map[string]bool{}
+	for _, token := range foundTokenPattern.FindAllString(text, -1) {
+		if strings.ContainsAny(token, "_.") || strings.HasSuffix(token, "()") {
+			continue
+		}
+		for _, word := range foundWordPattern.FindAllString(strings.ToLower(token), -1) {
+			if len(word) >= 4 && !foundStopWords[word] {
+				words[word] = true
+			}
+		}
+	}
+	return words
+}
+
+// foundSameWords says whether a and b say the same thing: three or more words
+// in common, and at least half of the shorter's.
+func foundSameWords(a, b map[string]bool) bool {
+	shared := 0
+	for word := range a {
+		if b[word] {
+			shared++
+		}
+	}
+	return shared >= 3 && shared*2 >= min(len(a), len(b))
+}
+
+// foundOverlap says whether two refs name a line in common of one file.
+func foundOverlap(a, b foundRef) bool {
+	return a.path == b.path && a.from > 0 && b.from > 0 && a.from <= b.to && b.from <= a.to
+}
+
+// foundBeadText is the words of an open bead that say what is wrong: its title
+// and description, where the lines mw next wrote to say who found it, and the
+// request to word it, are not read.
+func foundBeadText(d StoryDetail) string {
+	text := []string{strings.TrimPrefix(d.Story.Title, "[bug] ")}
+	for _, line := range strings.Split(d.Description, "\n") {
+		if !strings.Contains(line, " landed, and its closing comment lists ") && !strings.HasPrefix(line, "Seen by:") &&
+			!strings.HasPrefix(line, "Source:") && !strings.HasPrefix(line, "The Builder saw it and did not fix it") {
+			text = append(text, strings.TrimPrefix(line, "> "))
+		}
+	}
+	return strings.Join(text, "\n")
+}
+
+// foundMatch is the open found-at-close beads a finding meets: same is the one
+// that names the same fault, the same file:line or the same symbol and the same
+// fault words; near is one that shares only a file or a symbol with it, which is
+// no reason to file nothing. A bead another close-out of the same story filed is
+// neither: a story's own findings may share a file (mw-gq6.1068). A shared file
+// or function alone never makes a match (mw-gq6.1103).
+func foundMatch(bug foundBug, beads []StoryDetail, finder string) (same, near string) {
+	text := strings.Join(bug.lines, "\n")
+	refs, symbols, words := foundRefs(text), foundSymbols(text), foundFaultWords(text)
+	if len(refs) == 0 && len(symbols) == 0 {
+		return "", ""
 	}
 	for _, d := range beads {
 		if d.Closed() || !slices.Contains(d.Labels, LabelFoundAtClose) || strings.Contains(d.Description, "Seen by: "+finder+"\n") {
 			continue
 		}
-		var text []string
-		text = append(text, d.Story.Title)
-		for _, line := range strings.Split(d.Description, "\n") {
-			if !strings.Contains(line, " landed, and its closing comment lists ") && !strings.HasPrefix(line, "Seen by:") && !strings.HasPrefix(line, "Source:") {
-				text = append(text, line)
+		other := foundBeadText(d)
+		otherRefs, otherSymbols := foundRefs(other), foundSymbols(other)
+		sameSymbol, sharesFile := false, false
+		for _, ref := range refs {
+			for _, o := range otherRefs {
+				if foundOverlap(ref, o) {
+					return d.Story.ID, near
+				}
+				sharesFile = sharesFile || ref.path == o.path
 			}
 		}
-		for _, path := range foundPaths(strings.Join(text, "\n")) {
-			if want[path] {
-				return d.Story.ID, true
-			}
+		for symbol := range symbols {
+			sameSymbol = sameSymbol || otherSymbols[symbol]
+		}
+		if sameSymbol && foundSameWords(words, foundFaultWords(other)) {
+			return d.Story.ID, near
+		}
+		if near == "" && (sameSymbol || sharesFile) {
+			near = d.Story.ID
 		}
 	}
-	return "", false
+	return "", near
 }
 
 func foundDescription(c *closeOut, bug foundBug, host string) string {
@@ -275,7 +432,9 @@ func thisOrThese(n int) string {
 // be filed are a note and a mail to the Mayor. A bug of the same title, open or
 // closed, is the one already filed, so a close-out run again files nothing
 // (mw-t5shinh.24); so is a bead not closed that another story's finding filed
-// for the same file, worded as it likes (mw-gq6.1068). A bug's files key is the
+// for the same fault, worded as it likes (mw-gq6.1068); a bead that shares only a
+// file or symbol is not, and the bug filed names it as one it may overlap
+// (mw-gq6.1103). A bug's files key is the
 // files its lines name, else the finder's.
 func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *NextReport, again bool, comments []Comment) string {
 	section := closingFoundNotFixed(comments)
@@ -317,8 +476,10 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 
 	for i, bug := range bugs {
 		id, there := filed[bug.title]
+		near := ""
 		if !there {
-			id, there = foundSameFile(bug, beads, c.id)
+			id, near = foundMatch(bug, beads, c.id)
+			there = id != ""
 		}
 		if there {
 			report.Notes = append(report.Notes, fmt.Sprintf("%s already files the finding of %s: %s", id, c.id, bug.title))
@@ -346,7 +507,12 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 			break
 		}
 		report.Notes = append(report.Notes, fmt.Sprintf("filed %s, held: %s found it and did not fix it", id, c.id))
-		block = append(block, fmt.Sprintf("Filed: %s, held. %s", id, strings.Join(bug.lines, " ")))
+		if near != "" {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s may overlap %s, which names the same file or symbol but not the same fault", id, near))
+			block = append(block, fmt.Sprintf("Filed: %s, held (may overlap %s). %s", id, near, strings.Join(bug.lines, " ")))
+		} else {
+			block = append(block, fmt.Sprintf("Filed: %s, held. %s", id, strings.Join(bug.lines, " ")))
+		}
 	}
 	return strings.Join(block, "\n")
 }
