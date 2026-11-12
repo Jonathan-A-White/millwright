@@ -271,7 +271,7 @@ var landedTail = []tailStep{
 				s.closeErr = t.n.holdDemo(t.ctx, c, s.report, s.outcome)
 				s.heldDemo = s.closeErr == nil
 			} else {
-				notes, err := t.n.closeStory(t.ctx, c.id, s.outcome)
+				notes, err := t.n.closeStory(t.ctx, c, s.report, s.outcome)
 				s.report.Notes = append(s.report.Notes, notes...)
 				s.closeErr, s.closed = err, err == nil
 			}
