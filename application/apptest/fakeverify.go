@@ -2,6 +2,7 @@ package apptest
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,10 @@ type FakeVerifyBeads struct {
 	Comments map[string][]application.Comment
 	// Now stamps the comments written; zero stamps none.
 	Now time.Time
+
+	// Notes are the tracker's notes by key, which NotesWithPrefix reads: the
+	// postern.question.<bead> notes of the standing cards.
+	Notes map[string]string
 
 	// Details are the beads ShowBeads answers for besides those of Work, by id.
 	Details map[string]application.StoryDetail
@@ -131,4 +136,18 @@ func (f *FakeVerifyBeads) CloseStory(_ context.Context, id, reason string) error
 	d.Status = application.StatusClosed
 	f.Details[id] = d
 	return nil
+}
+
+// NotesWithPrefix implements application.VerifyCardBeads: the notes of Notes
+// whose key has the prefix.
+func (f *FakeVerifyBeads) NotesWithPrefix(_ context.Context, prefix string) (map[string]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[string]string{}
+	for key, value := range f.Notes {
+		if strings.HasPrefix(key, prefix) {
+			out[key] = value
+		}
+	}
+	return out, nil
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 type verifyRig struct {
@@ -387,5 +388,215 @@ func TestVerifyMatchDoesNotHoldAMessageToAScreenName(t *testing.T) {
 	}
 	if len(r.beads.Written) != 1 {
 		t.Fatalf("a message of his is proposed as before: %+v", r.beads.Written)
+	}
+}
+
+// --- standing question cards (mw-27f7myz.9) ---
+
+// cardNote is a bead's postern.question note as the sender writes it.
+func cardNote(txid string, asked time.Time, q string, options ...string) string {
+	raw, _ := json.Marshal(map[string]any{"txid": txid, "options": options, "asked": asked.Format(time.RFC3339), "q": q})
+	return string(raw)
+}
+
+// withCard puts an open bead with a standing card in the rig: asked ago before
+// the clock.
+func (r *verifyRig) withCard(bead string, ago time.Duration, options ...string) {
+	if r.beads.Notes == nil {
+		r.beads.Notes = map[string]string{}
+	}
+	if r.beads.Details == nil {
+		r.beads.Details = map[string]application.StoryDetail{}
+	}
+	r.beads.Details[bead] = application.StoryDetail{Story: domain.Story{ID: bead, Title: "Bead " + bead}, Status: application.StatusOpen}
+	r.beads.Notes[application.PosternQuestionKey(bead)] = cardNote("direct:card-"+bead, verifyNow.Add(-ago), "Which one for "+bead+"?", options...)
+}
+
+// saysIn keeps a message of his under txid, written ago before the clock in the
+// thread, with the words.
+func (r *verifyRig) saysIn(t *testing.T, txid, thread string, ago time.Duration, words string) {
+	t.Helper()
+	stem := strings.Replace(txid, ":", "-", 1)
+	at := verifyNow.Add(-ago)
+	kept, _ := json.Marshal(map[string]any{"txid": txid, "thread": thread, "ts": at, "text": words})
+	for name, body := range map[string][]byte{stem + ".txt": []byte(words), stem + ".message.json": kept} {
+		path := filepath.Join(r.inbox, name)
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func (r *verifyRig) cardMatch() application.VerifyMatch {
+	m := r.match()
+	m.Cards = r.beads
+	return m
+}
+
+var cardRun = application.VerifyOptions{Since: 7 * 24 * time.Hour}
+
+func TestVerifyMatchDryRunListsTheCardsWithALaterMessageAndNoOther(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[]}`)
+	r.withCard("q-answered", 3*time.Hour, "A: Yes", "B: No")
+	r.withCard("q-unheard", 30*time.Minute, "A: Yes", "B: No")
+	r.withCard("q-elsewhere", 3*time.Hour, "A: Yes", "B: No")
+	r.saysIn(t, "direct:ans", "q-answered", 90*time.Minute, "B, the second one")
+	r.saysIn(t, "direct:before", "q-unheard", 2*time.Hour, "an old remark")
+	r.saysIn(t, "direct:other", "q-someone-else", 90*time.Minute, "about another bead")
+	dry := cardRun
+	dry.DryRun = true
+	if _, err := r.cardMatch().Run(context.Background(), dry); err != nil {
+		t.Fatal(err)
+	}
+	said := r.out.String()
+	if !strings.Contains(said, "q-answered") {
+		t.Errorf("the card with a later message is not listed:\n%s", said)
+	}
+	for _, not := range []string{"q-unheard", "q-elsewhere"} {
+		if strings.Contains(said, not) {
+			t.Errorf("%s has no later message of his and is not a candidate:\n%s", not, said)
+		}
+	}
+	if len(r.grinder.Calls()) != 0 || len(r.beads.Written) != 0 {
+		t.Fatalf("a dry run calls and writes nothing")
+	}
+}
+
+func TestVerifyMatchProposesClearingACardHeAnsweredInHisOwnWords(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[{"bead":"q-1","txid":"direct:ans","option":"B","shows":"he picks the second option","confidence":0.93}]}`)
+	r.withCard("q-1", 3*time.Hour, "A: Keep it", "B: Drop it")
+	r.saysIn(t, "direct:ans", "q-1", 90*time.Minute, "B, the second one")
+	notes := map[string]string{}
+	for k, v := range r.beads.Notes {
+		notes[k] = v
+	}
+	result, err := r.cardMatch().Run(context.Background(), cardRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) != 1 || r.beads.Written[0].ID != "q-1" {
+		t.Fatalf("expected one comment on q-1, got %+v", r.beads.Written)
+	}
+	text := r.beads.Written[0].Text
+	for _, want := range []string{"direct:ans", "B: Drop it", `"B, the second one"`, "direct:card-q-1"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the proposal lacks %q: %s", want, text)
+		}
+	}
+	if firstWordOf(text) != "PROPOSED" || strings.Contains(text, "VERIFIED") {
+		t.Fatalf("the comment opens PROPOSED and is not a verification: %q", text)
+	}
+	inbox, _ := r.mail.Inbox(context.Background(), "mayor")
+	if len(inbox) != 1 || !strings.Contains(inbox[0].Body, `mw postern clear q-1 --why "`) || !strings.Contains(inbox[0].Body, "B, the second one") {
+		t.Fatalf("the mail: %+v", inbox)
+	}
+	if len(result.Proposed) != 1 || result.Proposed[0].Bead != "q-1" {
+		t.Fatalf("proposed: %+v", result.Proposed)
+	}
+	if len(r.beads.Shut) != 0 || len(r.beads.Notes) != len(notes) || r.beads.Notes[application.PosternQuestionKey("q-1")] != notes[application.PosternQuestionKey("q-1")] {
+		t.Fatalf("the run clears nothing and changes no note")
+	}
+	// The line the Mayor runs is the one posted on the mail, with no stray quote in his words.
+	if line := clearLineOf(inbox[0].Body); strings.Count(line, `"`) != 2 {
+		t.Fatalf("the clear line is not one quoted --why: %q", line)
+	}
+}
+
+func clearLineOf(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, "mw postern clear ") {
+			return line
+		}
+	}
+	return ""
+}
+
+func TestVerifyMatchProposesNothingForAQuestionBackOrALeftOverCard(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[]}`)
+	r.withCard("q-1", 3*time.Hour, "A: Keep it", "B: Drop it")
+	r.saysIn(t, "direct:ans", "q-1", 90*time.Minute, "what does the second one do?")
+	if _, err := r.cardMatch().Run(context.Background(), cardRun); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) != 0 || r.mail.Writes() != 0 {
+		t.Fatalf("a question back proposes nothing, got %+v", r.beads.Written)
+	}
+}
+
+func TestVerifyMatchProposesAnAnswerOnItsOwnCardOnly(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[
+	 {"bead":"q-2","txid":"direct:ans2","option":"A","shows":"he picks the first","confidence":0.95},
+	 {"bead":"q-1","txid":"direct:ans2","option":"A","shows":"he picks the first","confidence":0.95}]}`)
+	r.withCard("q-1", 3*time.Hour, "A: Keep it", "B: Drop it")
+	r.withCard("q-2", 3*time.Hour, "A: Keep it", "B: Drop it")
+	r.saysIn(t, "direct:ans2", "q-2", 90*time.Minute, "A")
+	result, err := r.cardMatch().Run(context.Background(), cardRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) != 1 || r.beads.Written[0].ID != "q-2" {
+		t.Fatalf("the answer in q-2's thread is proposed on q-2 only: %+v", r.beads.Written)
+	}
+	raw, _ := os.ReadFile(filepath.Join(r.runs, result.Run+".json"))
+	if !strings.Contains(string(raw), "left out") {
+		t.Fatalf("the answer on the other card is kept in the record as left out: %s", raw)
+	}
+}
+
+func TestVerifyMatchReadsAGeneralMessageAsAnswerToAnyCard(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[{"bead":"q-1","txid":"direct:gen","option":"A","shows":"first","confidence":0.9}]}`)
+	r.withCard("q-1", 3*time.Hour, "A: Keep it", "B: Drop it")
+	r.saysIn(t, "direct:gen", "general", 90*time.Minute, "Keep it, A")
+	if _, err := r.cardMatch().Run(context.Background(), cardRun); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) != 1 || r.beads.Written[0].ID != "q-1" {
+		t.Fatalf("a general message answers: %+v", r.beads.Written)
+	}
+}
+
+func TestVerifyMatchProposesACardOnceForTheSameMessage(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[{"bead":"q-1","txid":"direct:ans","option":"B","shows":"second","confidence":0.9}]}`)
+	r.withCard("q-1", 3*time.Hour, "A: Keep it", "B: Drop it")
+	r.saysIn(t, "direct:ans", "q-1", 90*time.Minute, "B")
+	for range 2 {
+		if _, err := r.cardMatch().Run(context.Background(), cardRun); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(r.beads.Written) != 1 || r.mail.Writes() != 1 {
+		t.Fatalf("expected one comment and one mail, got %+v and %d", r.beads.Written, r.mail.Writes())
+	}
+}
+
+func TestVerifyMatchLeavesOutACardAnswerNamingNoSuchOption(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[{"bead":"q-1","txid":"direct:ans","option":"C","shows":"third","confidence":0.9}]}`)
+	r.withCard("q-1", 3*time.Hour, "A: Keep it", "B: Drop it")
+	r.saysIn(t, "direct:ans", "q-1", 90*time.Minute, "C")
+	if _, err := r.cardMatch().Run(context.Background(), cardRun); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) != 0 {
+		t.Fatalf("an option the card does not offer is no proposal: %+v", r.beads.Written)
+	}
+}
+
+func TestVerifyMatchReadsNoCardsOfAClosedBeadOrWithoutACardSource(t *testing.T) {
+	r := newVerifyRig(t, `{"matches":[]}`)
+	r.withCard("q-1", 3*time.Hour, "A: Keep it", "B: Drop it")
+	r.saysIn(t, "direct:ans", "q-1", 90*time.Minute, "B")
+	d := r.beads.Details["q-1"]
+	d.Status = application.StatusClosed
+	r.beads.Details["q-1"] = d
+	dry := cardRun
+	dry.DryRun = true
+	if _, err := r.cardMatch().Run(context.Background(), dry); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(r.out.String(), "q-1") {
+		t.Fatalf("a closed bead's card is not a candidate:\n%s", r.out.String())
 	}
 }

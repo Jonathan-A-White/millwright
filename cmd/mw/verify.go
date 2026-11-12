@@ -132,6 +132,12 @@ func newVerifyMatchCmd() *cobra.Command {
 			"twice. One mail to the Mayor lists the run's proposals with the line that confirms each; none when\n" +
 			"there are none. Nothing is closed, no status changes, and no comment opens with VERIFIED. The run is\n" +
 			"recorded in ~/.local/state/mw/verify/<run>.json: model, effort, tokens, candidates and every answer.\n\n" +
+			"The candidates also include every standing question card (a postern.question note on an open bead) that has a\n" +
+			"message of his, in that bead's thread or in general, written after the card was asked. The agent is asked\n" +
+			"whether a message answers the card and with which option. A match at or over the confidence becomes a comment\n" +
+			"on the bead opening PROPOSED CLEARING that names the card's txid, his message's txid, the option and his\n" +
+			"words quoted, and its line in the Mayor's mail is the mw postern clear <bead> --why \"...\" to run. The run\n" +
+			"clears nothing and changes no note.\n\n" +
 			"--dry-run prints the candidates, the evidence and the directory's size, and calls no agent.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -178,7 +184,7 @@ func newVerifyMatch(out io.Writer) (application.VerifyMatch, config.VerifySettin
 	}
 	gateway := mwGateway(dir, host)
 	match := application.VerifyMatch{
-		Beads: gateway, Grinder: claudeGrinder(), Mailbox: gateway,
+		Beads: gateway, Cards: gateway, Grinder: claudeGrinder(), Mailbox: gateway,
 		Settings: application.VerifySettings{Model: settings.Model, Effort: settings.Effort, Confidence: settings.Confidence},
 		InboxDir: inbox, RunDir: runs, Host: host, Out: out,
 	}

@@ -30,6 +30,7 @@ type verifyMatchContext struct {
 	inbox   string
 	runs    string
 	answers []map[string]any
+	cards   map[string]string
 	out     bytes.Buffer
 	err     error
 }
@@ -44,6 +45,8 @@ func InitializeVerifyMatchScenario(ctx *godog.ScenarioContext) {
 			grinder: &apptest.FakeGrinder{},
 			mail:    apptest.NewFakeMailbox(),
 		}
+		c.beads.Notes = map[string]string{}
+		c.beads.Details = map[string]application.StoryDetail{}
 		return ctx, nil
 	})
 	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
@@ -57,6 +60,31 @@ func InitializeVerifyMatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a verify landing "([^"]*)" closed (\d+) minutes ago whose closing comment says how to check it$`, c.landingMinutesAgo)
 	ctx.Given(`^a saved message of his "([^"]*)" and a saved picture "([^"]*)"$`, c.evidence)
 	ctx.Given(`^the verify stand-in answers "([^"]*)" from "([^"]*)" showing "([^"]*)" at (\d+\.\d+)$`, c.standInAnswers)
+	ctx.Given(`^a standing card on "([^"]*)" asked (\d+) hours? ago with the options "([^"]*)" and "([^"]*)"$`, c.standingCard)
+	ctx.Given(`^a standing card on "([^"]*)" asked (\d+) minutes ago with the options "([^"]*)" and "([^"]*)"$`, c.standingCardMinutes)
+	ctx.Given(`^his message "([^"]*)" in the thread "([^"]*)" (\d+) minutes ago saying "([^"]*)"$`, c.hisMessage)
+	ctx.Given(`^the verify stand-in answers the card "([^"]*)" from "([^"]*)" with the option "([^"]*)" at (\d+\.\d+)$`, c.standInAnswersCard)
+	ctx.Then(`^the verify output names the card "([^"]*)"$`, func(bead string) error {
+		if !strings.Contains(c.out.String(), bead+"  card") {
+			return fmt.Errorf("the output does not list %s as a card:\n%s", bead, c.out.String())
+		}
+		return nil
+	})
+	ctx.Then(`^the verify output does not name "([^"]*)"$`, func(not string) error {
+		if strings.Contains(c.out.String(), not) {
+			return fmt.Errorf("the output names %s:\n%s", not, c.out.String())
+		}
+		return nil
+	})
+	ctx.Then(`^the verify comment on "([^"]*)" quotes his words "([^"]*)"$`, func(bead, words string) error {
+		for _, text := range c.written(bead) {
+			if strings.Contains(text, `"`+words+`"`) {
+				return nil
+			}
+		}
+		return fmt.Errorf("no comment on %s quotes %q: %q", bead, words, c.written(bead))
+	})
+	ctx.Then(`^no standing card was cleared$`, c.noneCleared)
 	ctx.When(`^mw verify match runs$`, func() error { return c.run(false) })
 	ctx.When(`^mw verify match runs as a dry run$`, func() error { return c.run(true) })
 	ctx.Then(`^the verify bead "([^"]*)" has one comment opening PROPOSED that names "([^"]*)" and "([^"]*)"$`, c.hasOneProposal)
@@ -151,7 +179,7 @@ func (c *verifyMatchContext) run(dry bool) error {
 	_, c.err = application.VerifyMatch{
 		Beads: c.beads, Grinder: c.grinder, Mailbox: c.mail,
 		Settings: application.VerifySettings{Model: "haiku", Effort: "medium", Confidence: 0.8},
-		InboxDir: c.inbox, RunDir: c.runs, Host: "laptop", Now: func() time.Time { return verifyMatchNow }, Out: &c.out,
+		Cards:    c.beads, InboxDir: c.inbox, RunDir: c.runs, Host: "laptop", Now: func() time.Time { return verifyMatchNow }, Out: &c.out,
 	}.Run(context.Background(), application.VerifyOptions{Since: 7 * 24 * time.Hour, DryRun: dry})
 	return c.err
 }
@@ -282,6 +310,84 @@ func (c *verifyMatchContext) outputNames(a, b, d, e, f string) error {
 		if !strings.Contains(said, want) {
 			return fmt.Errorf("the output does not say %q:\n%s", want, said)
 		}
+	}
+	return nil
+}
+
+// ensureInbox makes the inbox and run dirs when no step has yet.
+func (c *verifyMatchContext) ensureInbox() error {
+	if c.inbox != "" {
+		return nil
+	}
+	var err error
+	if c.inbox, err = os.MkdirTemp("", "mw-verify-inbox-"); err != nil {
+		return err
+	}
+	c.runs, err = os.MkdirTemp("", "mw-verify-runs-")
+	return err
+}
+
+func (c *verifyMatchContext) standingCard(bead string, hours int, a, b string) error {
+	return c.cardAsked(bead, time.Duration(hours)*time.Hour, a, b)
+}
+
+func (c *verifyMatchContext) standingCardMinutes(bead string, minutes int, a, b string) error {
+	return c.cardAsked(bead, time.Duration(minutes)*time.Minute, a, b)
+}
+
+func (c *verifyMatchContext) cardAsked(bead string, ago time.Duration, a, b string) error {
+	raw, err := json.Marshal(map[string]any{
+		"txid": "direct:card-" + bead, "options": []string{a, b},
+		"asked": verifyMatchNow.Add(-ago).Format(time.RFC3339), "q": "Which one for " + bead + "?",
+	})
+	if err != nil {
+		return err
+	}
+	c.beads.Notes[application.PosternQuestionKey(bead)] = string(raw)
+	c.beads.Details[bead] = application.StoryDetail{Story: domain.Story{ID: bead, Title: "Bead " + bead}, Status: application.StatusOpen}
+	return nil
+}
+
+func (c *verifyMatchContext) hisMessage(txid, thread string, minutes int, words string) error {
+	if err := c.ensureInbox(); err != nil {
+		return err
+	}
+	stem := strings.Replace(txid, ":", "-", 1)
+	at := verifyMatchNow.Add(-time.Duration(minutes) * time.Minute)
+	kept, err := json.Marshal(map[string]any{"txid": txid, "thread": thread, "ts": at, "text": words})
+	if err != nil {
+		return err
+	}
+	for name, body := range map[string][]byte{stem + ".txt": []byte(words), stem + ".message.json": kept} {
+		path := filepath.Join(c.inbox, name)
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			return err
+		}
+		if err := os.Chtimes(path, at, at); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *verifyMatchContext) standInAnswersCard(bead, txid, option, confidence string) error {
+	level, err := strconv.ParseFloat(confidence, 64)
+	if err != nil {
+		return err
+	}
+	c.answers = append(c.answers, map[string]any{"bead": bead, "txid": txid, "option": option, "shows": "he chooses " + option, "confidence": level})
+	return nil
+}
+
+// noneCleared: the run clears no card, so every card's note is as it was set.
+func (c *verifyMatchContext) noneCleared() error {
+	for key, value := range c.beads.Notes {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("the note %s was cleared", key)
+		}
+	}
+	if len(c.beads.Shut) != 0 {
+		return fmt.Errorf("a bead was closed: %+v", c.beads.Shut)
 	}
 	return nil
 }
