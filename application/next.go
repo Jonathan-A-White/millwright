@@ -3700,31 +3700,84 @@ func TurnCapWhy(turns int) string {
 // it once the story is closed.
 func (n Next) closeFormula(ctx context.Context, c *closeOut, report *NextReport, what string) {
 	root := c.detail.Molecule.RootID
-	closed, err := closeFormula(ctx, n.Tracker, root, FormulaClosedWhy("mw next", n.Host, c.id, what))
+	reason := FormulaClosedWhy("mw next", n.Host, c.id, what)
+	tries := 0
+	closed, err := closeFormulaWith(ctx, n.Tracker, root, reason, func(id string) error {
+		tries = 0
+		return writeRetrying(ctx, n, report, "the close of "+id, func() error {
+			tries++
+			return n.closeFormulaBead(ctx, root, id, reason)
+		})
+	})
 	report.FormulaClosed = closed
 	if err != nil {
 		lost := fmt.Sprintf("the formula %s of %s could not be closed: %v", root, c.id, err)
 		report.Notes = append(report.Notes, lost)
-		n.mailLostWrite(ctx, c, report, "the formula close", lost)
+		n.mailLostWriteAfter(ctx, c, report, "the formula close", lost, tries)
 	}
 }
 
+// closeFormulaBead makes one close of a bead of the formula poured as root: a
+// step or the root itself. A close bd said was indeterminate ("write commit
+// result indeterminate", which may follow a close that landed, and which bd will
+// not retry for fear of applying it twice) or that met a passing fault is
+// checked on the formula first, the rule mw bd keeps for a Builder's close
+// (mw-gq6.393): a bead that now reads closed is closed, and one that reads open
+// is a passing fault for writeRetrying to try again (mw-gq6.990).
+func (n Next) closeFormulaBead(ctx context.Context, root, id, reason string) error {
+	err := n.Tracker.CloseStory(ctx, id, reason)
+	if err == nil {
+		return nil
+	}
+	_, passing := Faulted(err)
+	unsure := strings.Contains(strings.ToLower(err.Error()), "indeterminate")
+	if !passing && !unsure {
+		return err
+	}
+	if molecule, readErr := n.Tracker.OpenMolecule(ctx, root); readErr == nil {
+		open := molecule.RootID != ""
+		if id != root {
+			open = slices.ContainsFunc(molecule.Steps, func(step FormulaStep) bool { return step.ID == id })
+		}
+		if !open {
+			return nil
+		}
+	}
+	if !passing {
+		return &TransientFault{Why: "write commit result indeterminate", Err: err}
+	}
+	return err
+}
+
 // mailLostWrite tells the Mayor of a write to the tracker that was lost for good
-// — tried again by the gateway and by writeRetrying, and still refused — so
-// that it is not only a note in the close-out that nobody reads (mw-gq6.538).
-// The mail names the story, what was lost and the command that failed, in the
-// tracker's own words, and what the loss costs. A mail that cannot be sent is
-// said on stderr and changes nothing else.
+// so that it is not only a note in the close-out that nobody reads (mw-gq6.538),
+// without saying how often it was tried: see mailLostWriteAfter.
 func (n Next) mailLostWrite(ctx context.Context, c *closeOut, report *NextReport, what, said string) {
+	n.mailLostWriteAfter(ctx, c, report, what, said, 0)
+}
+
+// mailLostWriteAfter is mailLostWrite for a write tried tries times (0 when the
+// caller does not know). The mail names the story, what was lost and the command
+// that failed, in the tracker's own words, and what the loss costs, and says
+// "tried again" only of a write that was (mw-gq6.990). A mail that cannot be
+// sent is said on stderr and changes nothing else.
+func (n Next) mailLostWriteAfter(ctx context.Context, c *closeOut, report *NextReport, what, said string, tries int) {
 	if n.Mailbox == nil || ctx.Err() != nil {
 		return
+	}
+	tried := "It failed"
+	switch {
+	case tries == 1:
+		tried = "It was tried once; the fault was not a passing one, so it was not tried again, and it failed"
+	case tries > 1:
+		tried = fmt.Sprintf("It was tried %d times, waiting between the tries, and failed every time", tries)
 	}
 	mail := NewMessage{
 		From:    SeatIdentity(MwSeat, n.Host),
 		To:      MayorMailbox,
 		Subject: fmt.Sprintf("lost write: %s on %s (%s)", what, c.id, n.Host),
-		Body: fmt.Sprintf("mw next on %s lost a write while closing out %s: %s.\n\n%s\n\nIt was tried again and still failed; "+
-			"nothing else was changed for it. Make the write by hand, with the command named above.\n", n.Host, c.id, what, said),
+		Body: fmt.Sprintf("mw next on %s lost a write while closing out %s: %s.\n\n%s\n\n%s; "+
+			"nothing else was changed for it. Make the write by hand, with the command named above.\n", n.Host, c.id, what, said, tried),
 	}
 	err := writeRetrying(ctx, n, report, "the mail about a lost write", func() error {
 		_, err := n.Mailbox.Send(ctx, mail)
