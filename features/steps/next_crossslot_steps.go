@@ -83,6 +83,7 @@ type otherLander struct {
 	err      error
 	progress int           // counts each step the other host takes (taking the slot, a landing begun, a landing done), so idle can tell slow from stuck
 	stall    time.Duration // how long idle waits with the other host making no progress; otherHostStall when zero
+	pause    func()        // what idle does between two looks at the other host; a short sleep when nil (a test sets it to stand in for a starved watcher)
 
 	seen     chan struct{} // closed once this host has read the slot and found it held by this one
 	seenOnce sync.Once
@@ -263,7 +264,10 @@ func (l *otherLander) idle() error {
 	last := l.progress
 	l.mu.Unlock()
 	deadline := time.Now().Add(l.stallLimit())
-	for time.Now().Before(deadline) {
+	for {
+		// The other host is looked at before the clock is: a watcher starved for
+		// longer than the stall limit finds the progress made meanwhile, and does
+		// not call that landing stalled (mw-gq6.1155).
 		l.mu.Lock()
 		quiet := l.holding == nil && !l.busy && countLines(l.gates) <= l.served
 		err := l.err
@@ -279,9 +283,15 @@ func (l *otherLander) idle() error {
 			last = now
 			deadline = time.Now().Add(l.stallLimit())
 		}
-		time.Sleep(10 * time.Millisecond)
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("the other host was still landing after %s with no progress", l.stallLimit())
+		}
+		if l.pause != nil {
+			l.pause()
+		} else {
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
-	return fmt.Errorf("the other host was still landing after %s with no progress", l.stallLimit())
 }
 
 func (l *otherLander) stallLimit() time.Duration {
