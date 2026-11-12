@@ -14,7 +14,7 @@ on 2026-11-07.
 | auto-push | 30 s | `dolt.auto-push-timeout` | not set |
 | Dolt server read / write (server side) | 8 h (28,800,000 ms) | `read_timeout_millis`, `write_timeout_millis` in `.beads/dolt/config.yaml` | commented defaults |
 | Dolt server idle (`wait_timeout`) | 30 s | the server's | bd retires its idle connections at 20 s |
-| mw units' `TimeoutStartSec` | dispatch 45 min, millhand-tick 45 min, postern-mirror 30 min, report 5 min, mail-notify 4 min, usage-read 3 min, doctor 2 min, unit-failed 2 min | the unit files | the `beads.conf` drop-ins only add `EnvironmentFile=beads.env` |
+| mw units' `TimeoutStartSec` | dispatch 45 min, millhand-tick 45 min, postern-mirror 30 min, report 5 min, mail-notify 4 min, usage-read 20 min, doctor 2 min, unit-failed 2 min | the unit files | the `beads.conf` drop-ins only add `EnvironmentFile=beads.env` |
 
 ## Why `bd dep add` fails at high load, and why no beads.env line fixes it
 

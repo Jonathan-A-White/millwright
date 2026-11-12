@@ -22,5 +22,10 @@ EnvironmentFile=-%h/.config/mw/beads.env
 EnvironmentFile=-%h/.config/mw/dispatch.env
 ExecStart=/usr/bin/env %h/.local/bin/mw usage read
 
-# ~10 s for claude to start, ~8 s for the screen, a few looks more.
-TimeoutStartSec=3min
+# ~10 s for claude to start, ~8 s for the screen, a few looks more; then, when
+# the reserve is reached, mw pause, which waits up to its --wait (10 min,
+# application.PauseWait) on the Builders to push, and commits, pushes, schedules
+# the resume timer and writes the paused set after. A stop before that ends left
+# a pause half done (mw-gq6.1110), so the stop is well above the wait.
+# contrib/unittimeout_test.go holds it above PauseWait plus the probe.
+TimeoutStartSec=20min
