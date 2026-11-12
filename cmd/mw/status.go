@@ -220,12 +220,10 @@ func newStatusCmd() *cobra.Command {
 			if projects, err := claude.DefaultProjectsRoot(); err == nil {
 				turns = claude.NewTranscripts(projects)
 			}
-			dampers, err := damperSurvey(tracker)
+			dampers, err := damperSurvey(tracker, dir, host)
 			if err != nil {
 				return err
 			}
-			// A make that runs long is named under DAMPERS (mw-gq6.1113).
-			dampers.Cloud, dampers.CloudPlan = cloudBook, plan
 			heavy, err := config.HeavyNet()
 			if err != nil {
 				return err
@@ -359,15 +357,20 @@ func idleSource() (application.EventLog, time.Duration, error) {
 }
 
 // benchmarkLimits is the [benchmark] table as the use cases read it.
-// damperSurvey is where mw status and mw doctor judge the DAMPERS alarms from:
-// the [dampers] table's limits over the tracker.
-func damperSurvey(tracker *beads.Gateway) (application.DamperSurvey, error) {
+// damperSurvey is where every surface judges the DAMPERS alarms from (mw status,
+// mw doctor, mw report, mw report send, mw stuck --dampers and the Postern
+// view's review count): the [dampers] table's limits over the tracker, and the
+// cloud's book (cloudStatus) so the cloud make alarm shows in all of them
+// (mw-gq6.1122). No surface opens the book its own way.
+func damperSurvey(tracker *beads.Gateway, dir, host string) (application.DamperSurvey, error) {
 	limits, err := config.Dampers()
 	if err != nil {
 		return application.DamperSurvey{}, err
 	}
+	cloudBook, cloudPlan := cloudStatus(dir, host)
 	return application.DamperSurvey{
 		Tracker: tracker, Notes: tracker, Graph: tracker,
+		Cloud: cloudBook, CloudPlan: cloudPlan,
 		Stuck:        application.StuckSurvey{Graph: tracker, Comments: tracker, Claims: tracker, GiveWay: application.GiveWayReader{Notes: tracker, Stale: giveWayStaleSetting()}},
 		GiveWayStale: giveWayStaleSetting(),
 		Limits: application.DamperLimits{

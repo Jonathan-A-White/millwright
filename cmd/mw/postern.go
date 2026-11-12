@@ -779,7 +779,15 @@ var reviewQueueReader = func(gateway *beads.Gateway) application.ReviewQueueRead
 type reviewQueueOf struct{ gateway *beads.Gateway }
 
 func (r reviewQueueOf) ReviewQueue(ctx context.Context) (int, int, error) {
-	survey, err := damperSurvey(r.gateway)
+	dir, err := config.Vault()
+	if err != nil {
+		return 0, 0, err
+	}
+	host, err := config.Host()
+	if err != nil {
+		return 0, 0, err
+	}
+	survey, err := damperSurvey(r.gateway, dir, host)
 	if err != nil {
 		return 0, 0, err
 	}
