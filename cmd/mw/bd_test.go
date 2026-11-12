@@ -134,3 +134,49 @@ func TestMwBdThatCannotGetQuietExitsNonZeroNamingTheBlocker(t *testing.T) {
 		t.Errorf("want exit status 1, got %v", err)
 	}
 }
+
+// mw-gq6.1129: a hold of a story a Builder has claimed is refused without
+// --over-claim, with a fake bd behind mw bd.
+func TestMwBdRefusesAHoldOfAClaimedStoryUnlessOverClaimWithAFakeBd(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	script := filepath.Join(dir, "realbd")
+	body := "#!/bin/sh\n" +
+		"echo \"$*\" >> " + log + "\n" +
+		"case \"$*\" in *\" show \"*)\n" +
+		"  echo '[{\"id\":\"x-1\",\"status\":\"in_progress\",\"assignee\":\"mw@cloud2\"}]'\n" +
+		"esac\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(bdRealEnv, script)
+	procs := apptest.NewFakeUserProcesses()
+	real := newBdQuiet
+	newBdQuiet = func() application.UserProcesses { return procs }
+	t.Cleanup(func() { newBdQuiet = real })
+
+	out, err := runMw(t, "bd", "--actor", "root", "update", "x-1", "--status", "deferred")
+	if exit, ok := err.(*handedOffExit); !ok || exit.code != 1 {
+		t.Fatalf("want exit 1, got %v\n%s", err, out)
+	}
+	for _, said := range []string{"x-1", "mw@cloud2", "--over-claim"} {
+		if !strings.Contains(out, said) {
+			t.Errorf("the refusal should say %q, it said %q", said, out)
+		}
+	}
+	if ran, _ := os.ReadFile(log); strings.Contains(string(ran), "update") {
+		t.Errorf("bd update was run: %q", ran)
+	}
+
+	if out, err := runMw(t, "bd", "--actor", "root", "update", "x-1", "--status", "deferred", "--over-claim", "amending"); err != nil {
+		t.Fatalf("with --over-claim: %v\n%s", err, out)
+	}
+	ran, _ := os.ReadFile(log)
+	if !strings.Contains(string(ran), "update x-1 --status deferred\n") || strings.Contains(string(ran), "update x-1 --status deferred --over") {
+		t.Errorf("bd should be given the update without the flag, ran %q", ran)
+	}
+	if !strings.Contains(string(ran), "comments add x-1 OVER-CLAIM:") || !strings.Contains(string(ran), "amending") {
+		t.Errorf("the why should be written on the bead, ran %q", ran)
+	}
+}

@@ -204,6 +204,19 @@ func (r BdRetry) Run(ctx context.Context, args []string) (int, error) {
 		return 1, err
 	}
 	defer release()
+	run, comments, refused := r.guardHold(ctx, args)
+	if refused {
+		return 1, nil
+	}
+	exit, err := r.attempt(ctx, run)
+	if err == nil && exit == 0 && len(comments) > 0 && !r.writeOverClaim(ctx, parseBdCall(run), comments) {
+		return 1, nil
+	}
+	return exit, err
+}
+
+// attempt runs bd with args, and again while it meets a passing fault.
+func (r BdRetry) attempt(ctx context.Context, args []string) (int, error) {
 	call := parseBdCall(args)
 	kind := call.kind()
 	began := r.now()

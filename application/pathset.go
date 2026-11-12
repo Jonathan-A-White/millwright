@@ -64,6 +64,11 @@ type PathSet struct {
 	// and the story is not released.
 	Hold string
 
+	// OverClaim is --over-claim: why the path of a story a Builder has claimed is
+	// adjusted all the same (mw-gq6.1129). It is written as an OVER-CLAIM: comment
+	// after the path. A closed story is refused whatever it says.
+	OverClaim string
+
 	// HeavyNet names the rigs that install dependencies ([heavy_net]): a path
 	// that pins one to a home host draws a warning on Err naming host=auto
 	// (mw-gq6.702). A nil HeavyNet warns of none.
@@ -106,14 +111,26 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 	if err != nil {
 		return domain.Path{}, fmt.Errorf("reading the story %s: %w", id, err)
 	}
-	if status := strings.ToLower(strings.TrimSpace(story.Status)); status == StatusInProgress || status == StatusClosed {
+	status := strings.ToLower(strings.TrimSpace(story.Status))
+	if status == StatusClosed {
 		return domain.Path{}, fmt.Errorf("the story %s is %s, and a path is adjusted only before a story starts: nothing was written", id, status)
+	}
+	overClaim := strings.Join(strings.Fields(s.OverClaim), " ")
+	claimedBy := ""
+	if status == StatusInProgress {
+		claimedBy = fmt.Sprintf("%s (%s)", orNoAssignee(story.Assignee), status)
+		if overClaim == "" {
+			return domain.Path{}, fmt.Errorf("the story %s is %s, and a path is adjusted only before a story starts: nothing was written; to adjust it anyway, add %s \"<why>\"", id, status, BdOverClaimFlag)
+		}
 	}
 	// A story set back to open or held under its session still has the session,
 	// and its claim lease is what says so (mw-gq6.880).
-	if LiveClaim(s.now(), story) {
-		return domain.Path{}, fmt.Errorf("the story %s is %s but holds a live claim (%s until %s), so a session works it, and a path is adjusted only before a story starts: nothing was written",
-			id, strings.ToLower(strings.TrimSpace(story.Status)), story.Assignee, story.LeaseExpires.UTC().Format(time.RFC3339))
+	if claimedBy == "" && LiveClaim(s.now(), story) {
+		claimedBy = fmt.Sprintf("%s (%s)", story.Assignee, status)
+		if overClaim == "" {
+			return domain.Path{}, fmt.Errorf("the story %s is %s but holds a live claim (%s until %s), so a session works it, and a path is adjusted only before a story starts: nothing was written; to adjust it anyway, add %s \"<why>\"",
+				id, status, story.Assignee, story.LeaseExpires.UTC().Format(time.RFC3339), BdOverClaimFlag)
+		}
 	}
 
 	if from != "" {
@@ -182,6 +199,11 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 	fields := path.Metadata()
 	if err := s.Tracker.SetStoryMetadata(ctx, id, fields); err != nil {
 		return domain.Path{}, fmt.Errorf("setting the path of %s: %w", id, err)
+	}
+	if claimedBy != "" {
+		if err := s.Tracker.CommentOnStory(ctx, id, fmt.Sprintf("%s path set over the claim of %s: %s", OverClaimPrefix, claimedBy, overClaim)); err != nil {
+			return path, fmt.Errorf("the path of %s was set, but the reason could not be written on it: %w", id, err)
+		}
 	}
 	if s.Out != nil {
 		// The echo is the path as PathShow reads it after the write: the keys
@@ -425,4 +447,12 @@ func (s PathSet) now() time.Time {
 		return s.Now()
 	}
 	return time.Now()
+}
+
+// orNoAssignee names a claim's holder, or says there is none named.
+func orNoAssignee(assignee string) string {
+	if assignee == "" {
+		return "a session with no assignee named"
+	}
+	return assignee
 }
