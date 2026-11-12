@@ -10,7 +10,7 @@
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | beads/mail.go |
 | EpicRules | application/epicrules.go | vault/epicrules.go |
 | Pause{Fleet,Book,Timer,Git} | application/pause.go | pause, rig |
-| GiveWay{Processes,Panes,Markers,Log}, GiveWayNote{Writer,Reader} | application/giveway.go, application/givewaynote.go | giveway, procs/freeze.go, beads (the note) |
+| GiveWay{Processes,Panes,Markers,Log} | application/giveway.go | giveway, procs/freeze.go |
 | Vault, Harness, SeatBootFiles, RigDocs, BootCommands | seatboot.go, application/seatboot_manifest.go, application/harness.go | {vault,claude,shellcmd}, rig/rigfiles.go |
 | Runner, BdProgram | application/runner.go, application/bdretry.go | {tmux,bdprogram} |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go, application/seattake.go | {vault/{seat,reaplog},tmux/window,claude/claude}.go |
@@ -52,7 +52,7 @@ Use cases' files: [codemap-detail.md](codemap-detail.md).
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | {sweep,tidy,sync,mail,home} |
 | Suite, SuiteFiler, NightlySuite, NightlyTiming, ContributeBack | cmd/mw/suite.go, cmd/mw/suitenightly.go, cmd/mw/timingnightly.go | {suite*,timing_nightly,contribute_back} |
 | Config* | cmd/mw/config.go | config_* |
-| Pause, Resume, Usage, GiveWay | cmd/mw/pause.go, cmd/mw/resume.go, cmd/mw/usage.go | {pause,giveway,giveway_home} |
+| Pause, Resume, Usage, GiveWay | cmd/mw/pause.go, cmd/mw/resume.go, cmd/mw/usage.go | {pause,giveway} |
 | IdeasOnly* | cmd/mw/ideasonly.go | ideas_only, postern_inbox_apply, talk_wait |
 | Member[Remove] ([docs/family.md](family.md)) | cmd/mw/member.go | member |
 | Seat* | cmd/mw/seat.go | seat_* |
