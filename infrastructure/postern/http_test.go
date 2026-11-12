@@ -999,3 +999,51 @@ func TestAnAnswerThatIsNotAnOutageIsNotUnreachable(t *testing.T) {
 		}
 	}
 }
+
+// A call whose own ctx was cancelled or ran out was not failed by the backend:
+// it is the ctx's error, not an outage (mw-6ww.173).
+func TestACallFailedByItsOwnCtxIsTheCtxErrorNotUnreachable(t *testing.T) {
+	_, h := serve(t, map[string]answer{"GET /api/balance/mtAddr": {status: 200, body: `{"balance":1}`}})
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, stop := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer stop()
+
+	for name, c := range map[string]struct {
+		ctx  context.Context
+		want error
+	}{"cancelled": {cancelled, context.Canceled}, "expired": {expired, context.DeadlineExceeded}} {
+		t.Run(name, func(t *testing.T) {
+			_, err := h.Balance(c.ctx, "mtAddr")
+			if !errors.Is(err, c.want) {
+				t.Fatalf("expected %v, got: %v", c.want, err)
+			}
+			if errors.Is(err, application.ErrPosternUnreachable) {
+				t.Fatalf("expected a call failed by its own ctx not to be unreachable: %v", err)
+			}
+			err = h.Events(c.ctx, func(application.PosternEvent) error { return nil })
+			if !errors.Is(err, c.want) || errors.Is(err, application.ErrPosternUnreachable) {
+				t.Fatalf("expected the event stream to give %v and not unreachable, got: %v", c.want, err)
+			}
+		})
+	}
+}
+
+// The event stream is opened with its own client after the challenge: when that
+// connection is refused, it is an outage like any other call's.
+func TestARefusedEventStreamIsUnreachable(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close") // so the stream must dial again
+		io.WriteString(w, `{"nonce":"n"}`)
+		srv.Listener.Close() // the next connection, the stream's, is refused
+	}))
+	t.Cleanup(srv.Close)
+	keys, _ := testKeyAndAddress(t)
+
+	err := postern.NewHTTP(srv.URL, keys).Events(context.Background(), func(application.PosternEvent) error { return nil })
+	if err == nil || !errors.Is(err, application.ErrPosternUnreachable) {
+		t.Fatalf("expected the error to be ErrPosternUnreachable, got: %v", err)
+	}
+}

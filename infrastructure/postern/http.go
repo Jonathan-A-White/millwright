@@ -665,6 +665,18 @@ func cutByTheNetwork(ctx context.Context, err error) bool {
 		errors.Is(err, io.ErrUnexpectedEOF)
 }
 
+// failedDo is the error of a Do that failed: unreachable, as an outage is,
+// unless the caller's own ctx is done, when the call was ended by its caller and
+// the error is a plain one that still says context.Canceled or
+// context.DeadlineExceeded (mw-6ww.173).
+func failedDo(ctx context.Context, base string, err error) error {
+	failed := fmt.Errorf("reaching the postern backend at %s: %w", base, err)
+	if ctx.Err() != nil {
+		return failed
+	}
+	return unreachable{failed}
+}
+
 // fetchAs is fetch with a body of contentType.
 func (h *HTTP) fetchAs(ctx context.Context, method, path string, body []byte, authHeader, contentType string) ([]byte, error) {
 	var reader io.Reader
@@ -683,7 +695,7 @@ func (h *HTTP) fetchAs(ctx context.Context, method, path string, body []byte, au
 	}
 	resp, err := h.client.Do(req)
 	if err != nil {
-		return nil, unreachable{fmt.Errorf("reaching the postern backend at %s: %w", h.base, err)}
+		return nil, failedDo(ctx, h.base, err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
@@ -724,7 +736,7 @@ func (h *HTTP) Events(ctx context.Context, onEvent func(application.PosternEvent
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := h.stream.Do(req)
 	if err != nil {
-		return fmt.Errorf("reaching the postern backend at %s: %w", h.base, err)
+		return failedDo(ctx, h.base, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
