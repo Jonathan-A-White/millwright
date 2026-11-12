@@ -190,3 +190,184 @@ func TestTidyDoesNotTakeAQuestionForMondayForAnUnansweredCard(t *testing.T) {
 		}
 	}
 }
+
+// mw-gq6.1132: mw tidy closed each bead of a closed story's formula with one
+// call and no read, so a close that met a passing fault left the formula open
+// for the next tidy, and one bd called indeterminate that had landed was
+// reported as a fault. These tests close a formula through a tracker whose
+// closes fail the way bd's do.
+
+// tidyFormulaTracker is a FakeTracker that closes the beads of a formula the
+// way a real tracker does, failing the first fails closes of each bead named in
+// failing with err; with landed, a close that failed was made all the same.
+type tidyFormulaTracker struct {
+	*apptest.FakeTracker
+	failing map[string]int
+	err     error
+	landed  bool
+	asked   []string
+}
+
+func (f *tidyFormulaTracker) CloseFormulaBead(ctx context.Context, id, reason string) error {
+	f.asked = append(f.asked, id)
+	if f.failing[id] > 0 {
+		f.failing[id]--
+		if f.landed {
+			if err := f.FakeTracker.CloseFormulaBead(ctx, id, reason); err != nil {
+				return err
+			}
+		}
+		return f.err
+	}
+	return f.FakeTracker.CloseFormulaBead(ctx, id, reason)
+}
+
+type tidiedFormula struct {
+	tracker *tidyFormulaTracker
+	mail    *apptest.FakeMailbox
+	report  application.TidyReport
+	err     error
+	waits   []time.Duration
+	root    string
+	step    string
+}
+
+// aClosedStoryWhoseFormulaCloseFaults tidies the formula of a closed story, one
+// step and a root, whose close of the step fails fails times with err.
+func aClosedStoryWhoseFormulaCloseFaults(t *testing.T, fails int, err error, landed bool) *tidiedFormula {
+	t.Helper()
+	ctx := context.Background()
+	fake := apptest.NewFakeTracker()
+	fake.AddFormula("tdd-feature", application.FormulaStep{Title: "Understand {{story}}: {{title}}"})
+	fake.AddEpic("mw-x", domain.Path{})
+	fake.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A closed story"})
+	poured, perr := fake.PourFormula(ctx, "tdd-feature", "mw-x.1", "A closed story", false)
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	if err := fake.SetStatus("mw-x.1", apptest.StatusClosed); err != nil {
+		t.Fatal(err)
+	}
+	run := &tidiedFormula{mail: apptest.NewFakeMailbox(), root: poured.RootID, step: poured.Steps[0].ID}
+	run.tracker = &tidyFormulaTracker{FakeTracker: fake, failing: map[string]int{poured.Steps[0].ID: fails}, err: err, landed: landed}
+	run.report, run.err = application.Tidy{
+		Mail: run.mail, Notes: fake, Beads: fake, Formulas: run.tracker, Molecules: fake,
+		Host: "laptop", PushWait: 20 * time.Second,
+		RetryWait: func(_ context.Context, d time.Duration) error {
+			run.waits = append(run.waits, d)
+			return nil
+		},
+	}.Run(ctx)
+	return run
+}
+
+func (r *tidiedFormula) leftOpen(t *testing.T) []string {
+	t.Helper()
+	open, err := r.tracker.OpenFormulas(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	for _, formula := range open {
+		left = append(left, formula.Root)
+	}
+	return left
+}
+
+func (r *tidiedFormula) lostWriteMails(t *testing.T) []application.Message {
+	t.Helper()
+	inbox, _ := r.mail.Inbox(context.Background(), application.MayorMailbox)
+	var lost []application.Message
+	for _, m := range inbox {
+		if strings.HasPrefix(m.Subject, "lost write") {
+			lost = append(lost, m)
+		}
+	}
+	return lost
+}
+
+// A close that met a passing fault is tried again, and the formula ends closed
+// with nothing left for the next tidy.
+func TestTidyRetriesAFormulaCloseThatMetAPassingFault(t *testing.T) {
+	run := aClosedStoryWhoseFormulaCloseFaults(t, 2, formulaTimeout(), false)
+	if run.err != nil {
+		t.Fatalf("tidying: %v", run.err)
+	}
+	if left := run.leftOpen(t); len(left) != 0 {
+		t.Errorf("expected the formula closed, %v is left open", left)
+	}
+	if len(run.report.Acts) != 2 {
+		t.Errorf("expected a step act and a root act, got %+v", run.report.Acts)
+	}
+	if len(run.waits) != 2 {
+		t.Errorf("expected two waits between three tries, got %v", run.waits)
+	}
+	if lost := run.lostWriteMails(t); len(lost) != 0 {
+		t.Errorf("expected no lost-write mail, got %d", len(lost))
+	}
+}
+
+// A close bd called indeterminate is read first: one that landed is done and
+// not tried again.
+func TestTidyReadsFirstAnIndeterminateFormulaCloseThatLanded(t *testing.T) {
+	run := aClosedStoryWhoseFormulaCloseFaults(t, 1, errors.New(formulaUnsure), true)
+	if run.err != nil {
+		t.Fatalf("tidying: %v", run.err)
+	}
+	if left := run.leftOpen(t); len(left) != 0 {
+		t.Errorf("expected the formula closed, %v is left open", left)
+	}
+	if n := timesAsked(run.tracker.asked, run.step); n != 1 {
+		t.Errorf("expected the step closed once, it was asked %d times", n)
+	}
+	if len(run.waits) != 0 {
+		t.Errorf("expected no wait for a close that had landed, got %v", run.waits)
+	}
+}
+
+// A close bd called indeterminate that did not land is read open and tried
+// again.
+func TestTidyTriesAgainAnIndeterminateFormulaCloseThatDidNotLand(t *testing.T) {
+	run := aClosedStoryWhoseFormulaCloseFaults(t, 1, errors.New(formulaUnsure), false)
+	if run.err != nil {
+		t.Fatalf("tidying: %v", run.err)
+	}
+	if left := run.leftOpen(t); len(left) != 0 {
+		t.Errorf("expected the formula closed, %v is left open", left)
+	}
+	if n := timesAsked(run.tracker.asked, run.step); n != 2 {
+		t.Errorf("expected the step closed in two tries, it was asked %d times", n)
+	}
+}
+
+// A bead that fails every try is a fault of the pass and is mailed to the Mayor
+// once, with the count of the tries; the root is not closed over it.
+func TestTidyMailsAFormulaCloseLostEveryTryOnceWithTheCount(t *testing.T) {
+	run := aClosedStoryWhoseFormulaCloseFaults(t, 100, formulaTimeout(), false)
+	if run.err == nil {
+		t.Fatal("expected the lost close to be a fault of the pass")
+	}
+	if n := timesAsked(run.tracker.asked, run.step); n != application.ReadRetries+1 {
+		t.Errorf("expected %d tries, got %d", application.ReadRetries+1, n)
+	}
+	if n := timesAsked(run.tracker.asked, run.root); n != 0 {
+		t.Errorf("expected the root not closed over a step that would not close, it was asked %d times", n)
+	}
+	lost := run.lostWriteMails(t)
+	if len(lost) != 1 {
+		t.Fatalf("expected one lost-write mail, got %d", len(lost))
+	}
+	if want := "tried 5 times"; !strings.Contains(lost[0].Body, want) {
+		t.Errorf("expected the mail to say %q, got %q", want, lost[0].Body)
+	}
+}
+
+func timesAsked(ids []string, id string) int {
+	n := 0
+	for _, got := range ids {
+		if got == id {
+			n++
+		}
+	}
+	return n
+}

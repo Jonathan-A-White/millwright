@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -46,15 +47,22 @@ func newTidyCmd() *cobra.Command {
 				return fmt.Errorf("there is no home directory to keep the tick log in: %w", err)
 			}
 
+			pushWaitSeconds, err := config.PushWaitSeconds()
+			if err != nil {
+				return err
+			}
 			gateway := mwGateway(dir, host)
 			tidy := application.Tidy{
 				Mail:     gateway,
 				Notes:    gateway,
 				Beads:    gateway,
 				Formulas: gateway,
-				Host:     host,
-				DryRun:   dryRun,
-				Out:      cmd.OutOrStdout(),
+				// A formula close that met a passing fault is read and tried again.
+				Molecules: gateway,
+				PushWait:  time.Duration(pushWaitSeconds) * time.Second,
+				Host:      host,
+				DryRun:    dryRun,
+				Out:       cmd.OutOrStdout(),
 			}
 			// A rehearsal is not a run: it leaves nothing in the log.
 			if !dryRun {

@@ -120,6 +120,12 @@ type TidyFormulas interface {
 	CloseFormulaBead(ctx context.Context, id, reason string) error
 }
 
+// TidyMolecules is the part of the work tracker mw tidy reads a formula
+// through when a close of one of its beads was not sure.
+type TidyMolecules interface {
+	OpenMolecule(ctx context.Context, rootID string) (Molecule, error)
+}
+
 // The kinds of act mw tidy makes: the four rows of docs/tidy.md, the fourth
 // closing a formula's steps and then its root.
 const (
@@ -151,6 +157,12 @@ type Tidy struct {
 	// Formulas is what the formula beads of closed stories are closed
 	// through; nil leaves formulas alone.
 	Formulas TidyFormulas
+	// Molecules is what a formula bead whose close met a fault is read through
+	// before it is closed again; nil reads none.
+	Molecules TidyMolecules
+	// PushWait and RetryWait pace the tries of a close, as Next's do.
+	PushWait  time.Duration
+	RetryWait func(ctx context.Context, d time.Duration) error
 
 	// Host is the host mw tidy runs on, the mail to the Mayor is from.
 	Host string
@@ -448,8 +460,10 @@ func (t Tidy) formulas(ctx context.Context, report *TidyReport) error {
 		for _, act := range acts {
 			if !t.DryRun {
 				// A root is never closed over a step that would not close.
-				if err := t.Formulas.CloseFormulaBead(ctx, act.ID, act.Why); err != nil {
+				if tries, err := t.closeFormulaBead(ctx, formula.Root, act, report); err != nil {
 					faults = append(faults, fmt.Errorf("closing the %s %s: %w", act.Kind, act.ID, err))
+					lost := fmt.Sprintf("the %s %s of the formula %s of %s could not be closed: %v", act.Kind, act.ID, formula.Root, formula.Story, err)
+					t.nextForWrites().mailLostWriteVia(ctx, t.mailSend(), "mw tidy", "tidying", formula.Story, nil, "the formula close", lost, tries)
 					break
 				}
 				t.log(ctx, act, report)
@@ -458,6 +472,38 @@ func (t Tidy) formulas(ctx context.Context, report *TidyReport) error {
 		}
 	}
 	return errors.Join(faults...)
+}
+
+// closeFormulaBead closes one bead of the formula poured as root as mw next
+// closes one: each try through writeRetrying, a close that met a passing fault
+// or that bd called indeterminate read first (mw-gq6.1132). It says how many
+// times the last close was tried.
+func (t Tidy) closeFormulaBead(ctx context.Context, root string, act TidyAct, report *TidyReport) (int, error) {
+	n := t.nextForWrites()
+	var notes NextReport
+	tries := 0
+	err := writeRetrying(ctx, n, &notes, "the close of "+act.ID, func() error {
+		tries++
+		return closeFormulaBeadChecked(ctx, t.Molecules, root, act.ID, func() error {
+			return t.Formulas.CloseFormulaBead(ctx, act.ID, act.Why)
+		})
+	})
+	report.Notes = append(report.Notes, notes.Notes...)
+	return tries, err
+}
+
+// nextForWrites is the Next whose retry pacing and lost-write mail mw tidy
+// borrows.
+func (t Tidy) nextForWrites() Next {
+	return Next{Host: t.Host, PushWait: t.PushWait, RetryWait: t.RetryWait}
+}
+
+// mailSend is how the Mayor is mailed; nil when tidy has no mailbox.
+func (t Tidy) mailSend() func(context.Context, NewMessage) (string, error) {
+	if t.Mail == nil {
+		return nil
+	}
+	return t.Mail.Send
 }
 
 // log adds the act's line to the tick log, dated as the tick's own are. A log
