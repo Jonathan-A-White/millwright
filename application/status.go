@@ -437,6 +437,13 @@ type Status struct {
 	Cloud     CloudBook
 	CloudPlan CloudPlan
 
+	// BoxPanes, when set with Cloud, is asked for the session panes each cloud
+	// box kept in the last day, so that a box whose harness (Claude Code on Bun)
+	// crashed twice or more in a day is named under HARNESS (mw-gq6.1139). Nil
+	// leaves the crashes out; the harness version of each box is printed all the
+	// same, from the cloud's book.
+	BoxPanes BoxPanes
+
 	// Benchmarks, when set, is the book of past close-outs' benchmarks, read for
 	// the BENCHMARKS section: each host's usual gate time against its latest,
 	// what each host landed at each running count, and how well the par of each
@@ -816,6 +823,10 @@ type StatusReport struct {
 	// Cloud is the cloud's boxes and the month's spend; nil when not asked or
 	// not read.
 	Cloud *CloudReading
+	// BoxHarness is the HARNESS section: the Claude Code version of each cloud
+	// box, and the harness crashes it had in the last day. Empty when the
+	// cloud was not read.
+	BoxHarness []BoxHarness
 	// Benchmarks is what the close-outs measured, and nil when not asked, not
 	// read or there is none yet.
 	Benchmarks *BenchmarkReport
@@ -1226,6 +1237,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	if s.Cloud != nil {
 		if reading, err := ReadCloud(ctx, s.Cloud, s.CloudPlan, s.now()); err == nil {
 			report.Cloud = reading
+			report.BoxHarness = s.boxHarness(ctx, reading)
 		} else {
 			s.print(fmt.Sprintf("mw status: the cloud's book could not be read: %v\n", err))
 		}
@@ -2563,6 +2575,11 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	}
 
+	if len(r.BoxHarness) > 0 {
+		writeBoxHarness(&b, r.BoxHarness)
+		b.WriteString("\n")
+	}
+
 	if r.Benchmarks != nil {
 		r.Benchmarks.write(&b)
 		b.WriteString("\n")
@@ -3445,4 +3462,108 @@ func (s Status) uncheckedErrors(ctx context.Context) ([]UncheckedClass, string) 
 	}
 	classes, _ := LoadErrorClasses(files)
 	return UncheckedClasses(classes, kinds), ""
+}
+
+// HarnessCrashDay is how far back a box's panes are read for the harness's
+// crashes, and BoxHarnessCrashesNamed how many of them in that time name the
+// box: one crash is the harness's bad luck, two on a box say the box is
+// suspect (mw-gq6.1139).
+const (
+	HarnessCrashDay          = 24 * time.Hour
+	BoxHarnessCrashesNamed   = 2
+	harnessCrashBannerPrefix = "Bun v"
+)
+
+// BoxPane is one session pane a box kept: Window names it (the story it ran),
+// At is when it was last active and Text what it showed.
+type BoxPane struct {
+	Window string
+	At     time.Time
+	Text   string
+}
+
+// BoxPanes is what mw status asks of a cloud box to count its harness crashes:
+// the session panes it kept at or after since. The adapter reaches the box over
+// ssh; an error is a box that could not be read, not a box with none.
+type BoxPanes interface {
+	Panes(ctx context.Context, box string, since time.Time) ([]BoxPane, error)
+}
+
+// isHarnessCrash reports whether a pane shows the harness crashing: the Bun
+// runtime's banner ("Bun v1.4.4 (...) Linux x64") together with its crash
+// words. A segfault alone is not it (any program can), nor is a pane that only
+// mentions a Bun version.
+func isHarnessCrash(text string) bool {
+	if !strings.Contains(text, harnessCrashBannerPrefix) {
+		return false
+	}
+	low := strings.ToLower(text)
+	return strings.Contains(low, "segmentation fault") || strings.Contains(low, "panic(") || strings.Contains(low, "has crashed")
+}
+
+// BoxHarness is one cloud box's line of HARNESS: the Claude Code version the
+// cloud's book says it was brought level to ("" when it never was), the panes
+// of the harness's crashes in the last day, and why its panes could not be
+// read when they could not.
+type BoxHarness struct {
+	Box      string
+	Version  string
+	Crashes  []BoxPane
+	ReadFail string
+}
+
+// boxHarness reads HARNESS for the boxes of the cloud's reading. A box still
+// being made or restored runs no session and is not reached.
+func (s Status) boxHarness(ctx context.Context, reading *CloudReading) []BoxHarness {
+	var out []BoxHarness
+	since := reading.Now.Add(-HarnessCrashDay)
+	for _, box := range reading.Boxes {
+		if box.Making || box.Restoring {
+			continue
+		}
+		line := BoxHarness{Box: box.Name, Version: box.Harness}
+		if s.BoxPanes != nil {
+			panes, err := s.BoxPanes.Panes(ctx, box.Name, since)
+			if err != nil {
+				line.ReadFail = oneLine(err.Error())
+			}
+			for _, pane := range panes {
+				if !pane.At.Before(since) && isHarnessCrash(pane.Text) {
+					line.Crashes = append(line.Crashes, pane)
+				}
+			}
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// writeBoxHarness is the HARNESS section: each box's harness version, and a
+// box with BoxHarnessCrashesNamed or more crashes in the last day named, with
+// the sessions that crashed.
+func writeBoxHarness(b *strings.Builder, boxes []BoxHarness) {
+	clip(b, "HARNESS: Claude Code on each cloud box")
+	for _, box := range boxes {
+		if box.Version == "" {
+			clip(b, fmt.Sprintf("  %s: claude version not known", box.Box))
+		} else {
+			clip(b, fmt.Sprintf("  %s: claude %s", box.Box, box.Version))
+		}
+		if box.ReadFail != "" {
+			wrapInto(b, "    ", "its panes could not be read for crashes: "+box.ReadFail)
+		}
+		if len(box.Crashes) < BoxHarnessCrashesNamed {
+			continue
+		}
+		var last time.Time
+		var windows []string
+		for _, pane := range box.Crashes {
+			windows = append(windows, pane.Window)
+			if pane.At.After(last) {
+				last = pane.At
+			}
+		}
+		clip(b, fmt.Sprintf("  %s: the harness crashed %d times in the last day", box.Box, len(box.Crashes)))
+		wrapInto(b, "    ", fmt.Sprintf("last %s: %s", last.UTC().Format("01-02 15:04Z"), strings.Join(windows, ", ")))
+	}
 }
