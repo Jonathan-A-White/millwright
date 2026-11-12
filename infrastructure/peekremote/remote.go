@@ -13,7 +13,8 @@ import (
 )
 
 // Remote runs `mw peek --here` on the host a story is worked on, and
-// `mw retry --worktree-state` to ask what its worktree there holds.
+// `mw retry --worktree-state` to ask what its worktree there holds, and
+// `mw retry` to have it bundle that work and give the claim back.
 type Remote struct {
 	// Reach is how this host reaches each other host: an ssh prefix by host
 	// name (`ssh desktop`), the last word of it the host itself — config
@@ -47,6 +48,17 @@ func (r Remote) WorktreeState(ctx context.Context, host, storyID string) (applic
 		return application.WorktreeState{}, err
 	}
 	return application.ParseWorktreeState(text)
+}
+
+// RetryThere implements application.WorktreeRemote: it runs mw retry on host, so
+// that the host bundles its own worktree into its own vault clone and gives the
+// claim back, and returns what that retry printed.
+func (r Remote) RetryThere(ctx context.Context, host, storyID string, flags []string) (string, error) {
+	command := "mw retry"
+	for _, flag := range flags {
+		command += " " + quote(flag)
+	}
+	return r.run(ctx, host, command+" "+quote(storyID))
 }
 
 // run runs command on host over its ssh line and returns what it printed.

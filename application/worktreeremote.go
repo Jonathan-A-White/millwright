@@ -14,6 +14,12 @@ type WorktreeRemote interface {
 	// WorktreeState reports what the story's worktree on host holds. An error is
 	// a host that could not be asked, which is not the same as a clean worktree.
 	WorktreeState(ctx context.Context, host, storyID string) (WorktreeState, error)
+
+	// RetryThere asks host to run mw retry on the story with flags, which
+	// bundles its worktree's work there and gives the claim back (mw-gq6.1138),
+	// and returns what that retry printed. An error carries why the host's retry
+	// did not go through, and changed nothing there.
+	RetryThere(ctx context.Context, host, storyID string, flags []string) (string, error)
 }
 
 // WorktreeState is what a story's worktree on one host holds: where it is, and

@@ -141,7 +141,20 @@ Feature: mw retry
 
   # mw-gq6.774: a retry off the story's host asks that host before it gives the claim back.
 
-  Scenario: A retry off the story's host refuses when its worktree there holds uncommitted work
+  # mw-gq6.1138: a retry off the story's host has that host bundle the work it holds, so --force is not needed.
+
+  Scenario: A retry off the story's host asks that host to bundle its uncommitted work and give back
+    Given the story "mw-gq6.1" ran on the host "desktop" and is claimed there by "mw@desktop"
+    And the worktree of "mw-gq6.1" on the host "desktop" holds uncommitted work in "application/retry.go"
+    And the host "desktop" bundles and gives back when asked, printing the bundle "runs/mw-gq6.1/attempt-1.bundle"
+    And the story "mw-gq6.1" has been tried 1 time in all
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And the host "desktop" was asked to retry "mw-gq6.1"
+    And the printed report names the bundle "runs/mw-gq6.1/attempt-1.bundle"
+    And the retry says nothing of unsaved work on stderr or on the bead "mw-gq6.1"
+
+  Scenario: A retry off the story's host refuses when its worktree there holds uncommitted work and that host cannot bundle it
     Given the story "mw-gq6.1" ran on the host "desktop" and is claimed there by "mw@desktop"
     And the worktree of "mw-gq6.1" on the host "desktop" holds uncommitted work in "application/retry.go"
     And the story "mw-gq6.1" has been tried 1 time in all

@@ -112,6 +112,9 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw retries "([^"]*)" with --force$`, c.mwRetriesForced)
 	ctx.Given(`^the worktree of "([^"]*)" on the host "([^"]*)" holds uncommitted work in "([^"]*)"$`, c.theWorktreeThereHoldsUncommittedWork)
 	ctx.Given(`^the ssh line to the host "([^"]*)" is down$`, c.theHostCannotBeReached)
+	ctx.Given(`^the host "([^"]*)" bundles and gives back when asked, printing the bundle "([^"]*)"$`, c.theHostBundlesWhenAsked)
+	ctx.Then(`^the host "([^"]*)" was asked to retry "([^"]*)"$`, c.theHostWasAskedToRetry)
+	ctx.Then(`^the printed report names the bundle "([^"]*)"$`, c.thePrintedReportNamesTheBundle)
 	ctx.Then(`^the retry says "([^"]*)" on stderr and on the bead "([^"]*)"$`, c.theRetrySaysOnStderrAndTheBead)
 	ctx.Then(`^the retry says nothing of unsaved work on stderr or on the bead "([^"]*)"$`, c.theRetrySaysNothingUnsaved)
 	ctx.Then(`^the host "([^"]*)" was asked what its worktree holds$`, c.theHostWasAsked)
@@ -1062,6 +1065,29 @@ func (c *retryContext) theWorktreeThereHoldsUncommittedWork(id, host, path strin
 // theHostCannotBeReached is a host the ssh line to which is down.
 func (c *retryContext) theHostCannotBeReached(host string) error {
 	c.remote().Unreachable(host, fmt.Errorf("ssh: connect to host %s port 22: Connection refused", host))
+	return nil
+}
+
+// theHostBundlesWhenAsked makes the host's own mw retry succeed, printing the
+// report of a bundle it made.
+func (c *retryContext) theHostBundlesWhenAsked(host, bundle string) error {
+	c.remote().RetriesWith(host, "retry on "+host+": story\n  bundle  attempt 1 into "+bundle+"\n")
+	return nil
+}
+
+func (c *retryContext) theHostWasAskedToRetry(host, id string) error {
+	for _, asked := range c.remote().Retried() {
+		if asked == host+" "+id {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected %s asked to retry %s, got %v", host, id, c.remote().Retried())
+}
+
+func (c *retryContext) thePrintedReportNamesTheBundle(bundle string) error {
+	if !strings.Contains(c.printed.String(), bundle) {
+		return fmt.Errorf("expected the printed report to name %s, got:\n%s", bundle, c.printed.String())
+	}
 	return nil
 }
 

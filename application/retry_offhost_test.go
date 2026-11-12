@@ -63,16 +63,59 @@ func TestRetryOffTheStoryHostGivesTheClaimBackWhenItsWorktreeThereIsClean(t *tes
 	}
 }
 
-func TestRetryOffTheStoryHostRefusesWhenItsWorktreeThereIsDirty(t *testing.T) {
+func TestRetryOffTheStoryHostAsksTheHostToBundleAndGiveBackWhenItsWorktreeThereIsDirty(t *testing.T) {
 	remote := apptest.NewFakeWorktreeRemote()
 	remote.Holds("desktop", application.WorktreeState{Path: "/home/j/.mw-worktrees/mw-gq6.1", Left: []string{"application/retry.go"}})
+	remote.RetriesWith("desktop", "retry on desktop: mw-gq6.1\n  bundle  attempt 1 of mw/mw-gq6.1 (abc1234) into runs/mw-gq6.1/attempt-1.bundle\n")
+	retry, tracker, landing, out, errs := offHostRetry(t, remote)
+
+	report, err := retry.Run(context.Background(), "mw-gq6.1")
+	if err != nil || report.Refused {
+		t.Fatalf("expected the retry to go through with no --force, got err %v report %+v\n%s", err, report, out)
+	}
+	if got := remote.Retried(); len(got) != 1 || got[0] != "desktop mw-gq6.1" {
+		t.Errorf("expected desktop asked once to retry mw-gq6.1, got %v", got)
+	}
+	if !strings.Contains(out.String(), "runs/mw-gq6.1/attempt-1.bundle") {
+		t.Errorf("expected the output to name the bundle desktop made, got %q", out)
+	}
+	if report.Unsaved != "" || errs.Len() != 0 {
+		t.Errorf("expected no unsaved-work warning, the work was kept: %+v stderr %q", report, errs)
+	}
+	if landing.bundled || landing.removed {
+		t.Errorf("expected no worktree read or removed on laptop")
+	}
+	if len(tracker.Comments("mw-gq6.1")) != 0 {
+		t.Errorf("expected laptop to write no comment of its own, desktop's retry wrote it: %v", tracker.Comments("mw-gq6.1"))
+	}
+}
+
+func TestRetryOffTheStoryHostPassesItsFlagsOnToTheHostsRetry(t *testing.T) {
+	remote := apptest.NewFakeWorktreeRemote()
+	remote.Holds("desktop", application.WorktreeState{Path: "/w", Left: []string{"a.go"}})
+	remote.RetriesWith("desktop", "ok\n")
+	retry, _, _, _, _ := offHostRetry(t, remote)
+	retry.FromMain, retry.Hold, retry.RePathed = true, true, "the path was fixed"
+
+	if _, err := retry.Run(context.Background(), "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := remote.RetryFlags(); strings.Join(got, "|") != "--from-main|--hold|--repathed|the path was fixed" {
+		t.Errorf("expected the flags passed on, got %q", got)
+	}
+}
+
+func TestRetryOffTheStoryHostRefusesWhenTheHostCannotBundleItsDirtyWorktree(t *testing.T) {
+	remote := apptest.NewFakeWorktreeRemote()
+	remote.Holds("desktop", application.WorktreeState{Path: "/home/j/.mw-worktrees/mw-gq6.1", Left: []string{"application/retry.go"}})
+	remote.RetryFails("desktop", errors.New("retrying mw-gq6.1: its session is still running"))
 	retry, tracker, _, out, _ := offHostRetry(t, remote)
 
 	report, err := retry.Run(context.Background(), "mw-gq6.1")
 	if err == nil || !report.Refused {
 		t.Fatalf("expected the retry refused, got err %v report %+v", err, report)
 	}
-	for _, want := range []string{"desktop", "/home/j/.mw-worktrees/mw-gq6.1", "application/retry.go", "mw retry mw-gq6.1", "--force"} {
+	for _, want := range []string{"desktop", "/home/j/.mw-worktrees/mw-gq6.1", "application/retry.go", "mw retry mw-gq6.1", "--force", "still running"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("expected the refusal to say %q, got: %v", want, err)
 		}
