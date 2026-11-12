@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/infrastructure/atomicfile"
@@ -31,6 +33,16 @@ type Token struct {
 	Expiry  time.Time `json:"expiry"`
 	Scope   string    `json:"scope,omitempty"`
 	Type    string    `json:"token_type,omitempty"`
+}
+
+// Has says whether the scopes Google recorded with the token include scope. A
+// token with no scope recorded says yes: nothing is known, so the call is tried
+// and Google's answer decides.
+func (t Token) Has(scope string) bool {
+	if strings.TrimSpace(t.Scope) == "" {
+		return true
+	}
+	return slices.Contains(strings.Fields(t.Scope), scope)
 }
 
 // ErrNotSignedIn is wrapped by every error that says mw gdrive auth has not

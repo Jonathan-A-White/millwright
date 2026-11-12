@@ -14,11 +14,13 @@ import (
 	"time"
 )
 
-// The two scopes mw gdrive asks for: his Drive files and his Sheets cells.
+// The scopes the one Google sign-in asks for: his Drive files, his Sheets cells
+// and, read-only, his Gmail (mw gmail). There is no send, modify or label scope.
 const (
 	DriveScope  = "https://www.googleapis.com/auth/drive"
 	SheetsScope = "https://www.googleapis.com/auth/spreadsheets"
-	Scope       = DriveScope + " " + SheetsScope
+	GmailScope  = "https://www.googleapis.com/auth/gmail.readonly"
+	Scope       = DriveScope + " " + SheetsScope + " " + GmailScope
 )
 
 // Redirect is the address Google sends the browser to after consent. Nothing
@@ -35,6 +37,7 @@ type Endpoints struct {
 	Token  string
 	Drive  string
 	Sheets string
+	Gmail  string
 }
 
 // GoogleEndpoints are Google's own.
@@ -43,6 +46,7 @@ var GoogleEndpoints = Endpoints{
 	Token:  "https://oauth2.googleapis.com/token",
 	Drive:  "https://www.googleapis.com",
 	Sheets: "https://sheets.googleapis.com",
+	Gmail:  "https://gmail.googleapis.com",
 }
 
 // Account is Google's sign-in side: the consent URL and the code exchange.
