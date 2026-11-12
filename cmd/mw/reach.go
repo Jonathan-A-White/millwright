@@ -14,7 +14,7 @@ import (
 // address. A home with no [cloud] table reaches [hands_hosts] alone. gaps are
 // the boxes left out, each with why its address could not be read.
 func storyReach(ctx context.Context, out io.Writer) (reach, gaps map[string]string, err error) {
-	return storyReachOf(ctx, pauseCloud(ctx, out))
+	return storyReachOf(ctx, pauseCloud(ctx, out), false)
 }
 
 // reachCloud is the cloud as the reach sees it: the boxes up, and where each
@@ -25,13 +25,21 @@ type reachCloud interface {
 }
 
 // storyReachOf is storyReach for a cloud the caller already made, so mw pause
-// reaches boxes through the very cloud it destroys them with.
-func storyReachOf(ctx context.Context, cloud reachCloud) (reach, gaps map[string]string, err error) {
+// reaches boxes through the very cloud it destroys them with. skipRetired
+// leaves out every host of retired_hosts, for the commands that go to every
+// host (mw pause and mw resume): a retired host is no place to ssh to.
+func storyReachOf(ctx context.Context, cloud reachCloud, skipRetired bool) (reach, gaps map[string]string, err error) {
 	hands, err := config.HandsHosts()
 	if err != nil {
 		return nil, nil, err
 	}
-	return reachWithCloud(ctx, hands, cloud)
+	var retired []string
+	if skipRetired {
+		if retired, err = config.RetiredHosts(); err != nil {
+			return nil, nil, err
+		}
+	}
+	return reachWithCloud(ctx, hands, retired, cloud)
 }
 
 // reachWithCloud copies hands and adds each box cloud holds at ssh
@@ -39,18 +47,21 @@ func storyReachOf(ctx context.Context, cloud reachCloud) (reach, gaps map[string
 // no name for a box), when hands has no entry for it: a cloud box comes and
 // goes, so a hand entry would go stale, and one that is there wins. A box
 // whose address cannot be read is left out of the reach and is in gaps with
-// the reason.
-func reachWithCloud(ctx context.Context, hands map[string]string, cloud reachCloud) (reach, gaps map[string]string, err error) {
+// the reason. A host in retired is left out of both, whether [hands_hosts]
+// or the cloud holds it.
+func reachWithCloud(ctx context.Context, hands map[string]string, retired []string, cloud reachCloud) (reach, gaps map[string]string, err error) {
 	reach, gaps = map[string]string{}, map[string]string{}
 	for k, v := range hands {
-		reach[k] = v
+		if !application.IsRetired(retired, k) {
+			reach[k] = v
+		}
 	}
 	boxes, err := cloud.Boxes(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, box := range boxes {
-		if reach[box] != "" {
+		if reach[box] != "" || application.IsRetired(retired, box) {
 			continue
 		}
 		at, err := cloud.Address(ctx, box)

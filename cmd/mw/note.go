@@ -84,7 +84,7 @@ func newNoteCmd() *cobra.Command {
 type lazyBuilderReach struct{ out io.Writer }
 
 func (l lazyBuilderReach) Type(ctx context.Context, host, storyID, line string) error {
-	reach, gaps, err := storyReachOf(ctx, pauseCloud(ctx, l.out))
+	reach, gaps, err := storyReachOf(ctx, pauseCloud(ctx, l.out), false)
 	if err != nil {
 		return err
 	}

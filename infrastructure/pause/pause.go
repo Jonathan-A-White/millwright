@@ -90,6 +90,10 @@ type Fleet struct {
 	// address could not be read): they are still hosts to pause, and the pause
 	// of one says why it was not reached.
 	Gaps map[string]string
+	// Retired are the hosts of retired_hosts: never listed, never asked. A
+	// pause recorded before a host was retired still names it, and its resume
+	// says it is retired rather than ssh to it.
+	Retired []string
 	// Run runs a program and returns its standard output; empty runs for
 	// real.
 	Run func(ctx context.Context, argv []string) (string, error)
@@ -102,12 +106,12 @@ func (f Fleet) Hosts(context.Context) ([]string, error) {
 	hosts := []string{f.Home}
 	var others []string
 	for host := range f.Reach {
-		if host != f.Home {
+		if host != f.Home && !application.IsRetired(f.Retired, host) {
 			others = append(others, host)
 		}
 	}
 	for host := range f.Gaps {
-		if _, reached := f.Reach[host]; host != f.Home && !reached {
+		if _, reached := f.Reach[host]; host != f.Home && !reached && !application.IsRetired(f.Retired, host) {
 			others = append(others, host)
 		}
 	}
@@ -139,6 +143,9 @@ func (f Fleet) Resume(ctx context.Context, host string, order application.HostRe
 // that mw is on its PATH as it is for the person who logs in, and reads the
 // JSON it prints.
 func (f Fleet) remote(ctx context.Context, host, verb string, order, into any) error {
+	if application.IsRetired(f.Retired, host) {
+		return fmt.Errorf("%s is retired (%s in the config file): not asked", host, application.RetiredHostsKey)
+	}
 	prefix := strings.Fields(f.Reach[host])
 	if len(prefix) < 2 {
 		if why := f.Gaps[host]; why != "" {

@@ -238,3 +238,30 @@ func TestBuilderReachTypesOverSshAsAQuotedWord(t *testing.T) {
 		t.Fatalf("expected a gap to say why, got %v", err)
 	}
 }
+
+func TestFleetNeverListsOrAsksARetiredHost(t *testing.T) {
+	var ran [][]string
+	fleet := Fleet{Home: "laptop", Retired: []string{"desktop", "cloud1"},
+		Reach: map[string]string{"desktop": "ssh desktop", "vps": "ssh vps"},
+		Gaps:  map[string]string{"cloud1": "no address"},
+		Run: func(_ context.Context, argv []string) (string, error) {
+			ran = append(ran, argv)
+			return `{}`, nil
+		}}
+	hosts, err := fleet.Hosts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(hosts, ",") != "laptop,vps" {
+		t.Errorf("hosts = %v, want laptop,vps", hosts)
+	}
+	for _, host := range []string{"desktop", "cloud1"} {
+		_, err := fleet.Resume(context.Background(), host, application.HostResumeOrder{})
+		if err == nil || !strings.Contains(err.Error(), "retired") {
+			t.Errorf("Resume(%s) = %v, want a refusal saying it is retired", host, err)
+		}
+	}
+	if len(ran) != 0 {
+		t.Errorf("ran %v, want no ssh to a retired host", ran)
+	}
+}

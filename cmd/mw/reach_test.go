@@ -32,7 +32,7 @@ func (boxesFail) Boxes(context.Context) ([]string, error) { return nil, errors.N
 func TestReachAddsEachCloudBoxTheHandsHostsLackAtItsAddress(t *testing.T) {
 	hands := map[string]string{"desktop": "ssh jwhite@desktop"}
 	cloud := boxesOf{boxes: []string{"cloud1", "cloud2"}, at: map[string]string{"cloud1": "10.88.0.21", "cloud2": "10.88.0.22"}}
-	reach, gaps, err := reachWithCloud(context.Background(), hands, cloud)
+	reach, gaps, err := reachWithCloud(context.Background(), hands, nil, cloud)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestReachAddsEachCloudBoxTheHandsHostsLackAtItsAddress(t *testing.T) {
 func TestReachKeepsAHandsHostsEntryForACloudBox(t *testing.T) {
 	hands := map[string]string{"cloud1": "ssh other@cloud1.example"}
 	cloud := boxesOf{boxes: []string{"cloud1"}, at: map[string]string{"cloud1": "10.88.0.21"}}
-	reach, _, err := reachWithCloud(context.Background(), hands, cloud)
+	reach, _, err := reachWithCloud(context.Background(), hands, nil, cloud)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestReachKeepsAHandsHostsEntryForACloudBox(t *testing.T) {
 func TestReachLeavesOutABoxWhoseAddressCannotBeReadWithTheReason(t *testing.T) {
 	hands := map[string]string{"desktop": "ssh desktop"}
 	cloud := boxesOf{boxes: []string{"cloud1", "cloud2"}, at: map[string]string{"cloud2": "10.88.0.22"}}
-	reach, gaps, err := reachWithCloud(context.Background(), hands, cloud)
+	reach, gaps, err := reachWithCloud(context.Background(), hands, nil, cloud)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestReachLeavesOutABoxWhoseAddressCannotBeReadWithTheReason(t *testing.T) {
 func TestReachWithNoCloudTableIsHandsHostsAlone(t *testing.T) {
 	hands := map[string]string{"vps": "ssh vps", "desktop": "ssh desktop"}
 	// cloudOfPause with ok false is what pauseCloud gives a home with no [cloud] table.
-	reach, gaps, err := reachWithCloud(context.Background(), hands, cloudOfPause{})
+	reach, gaps, err := reachWithCloud(context.Background(), hands, nil, cloudOfPause{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,30 @@ func TestReachWithNoCloudTableIsHandsHostsAlone(t *testing.T) {
 }
 
 func TestReachFailsWhenTheBookCannotBeRead(t *testing.T) {
-	if _, _, err := reachWithCloud(context.Background(), nil, boxesFail{}); err == nil {
+	if _, _, err := reachWithCloud(context.Background(), nil, nil, boxesFail{}); err == nil {
 		t.Fatal("want the book's error")
+	}
+}
+
+func TestReachLeavesOutARetiredHostOfHandsHostsAndOfTheCloud(t *testing.T) {
+	hands := map[string]string{"desktop": "ssh jwhite@desktop", "vps": "ssh vps"}
+	cloud := boxesOf{boxes: []string{"cloud1", "cloud2"}, at: map[string]string{"cloud2": "10.88.0.22"}}
+	reach, gaps, err := reachWithCloud(context.Background(), hands, []string{"desktop", "cloud1"}, cloud)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range []string{"desktop", "cloud1"} {
+		if _, ok := reach[retired]; ok {
+			t.Errorf("reach = %v, want retired %s left out (no ssh to it)", reach, retired)
+		}
+		if _, ok := gaps[retired]; ok {
+			t.Errorf("gaps = %v, want retired %s not listed as a host to reach", gaps, retired)
+		}
+	}
+	if reach["vps"] != "ssh vps" || reach["cloud2"] != "ssh mw@10.88.0.22" {
+		t.Errorf("reach = %v, want the hosts not retired still reached", reach)
+	}
+	if _, ok := hands["desktop"]; !ok {
+		t.Error("the [hands_hosts] map was written to")
 	}
 }

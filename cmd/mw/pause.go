@@ -163,7 +163,7 @@ func pauseParts(ctx context.Context, dir, host string, out io.Writer) (pauseHome
 		return pauseHomeParts{}, err
 	}
 	cloud := pauseCloud(ctx, out)
-	reach, gaps, err := storyReachOf(ctx, cloud)
+	reach, gaps, err := storyReachOf(ctx, cloud, true)
 	if err != nil {
 		return pauseHomeParts{}, err
 	}
@@ -171,11 +171,15 @@ func pauseParts(ctx context.Context, dir, host string, out io.Writer) (pauseHome
 	if err != nil {
 		return pauseHomeParts{}, err
 	}
+	retired, err := config.RetiredHosts()
+	if err != nil {
+		return pauseHomeParts{}, err
+	}
 	gateway := mwGateway(dir, host)
 	return pauseHomeParts{
 		files:  files,
 		book:   pause.Book{Root: dir, Files: files, Notes: gateway},
-		fleet:  pause.Fleet{Home: host, Local: local, Reach: reach, Gaps: gaps},
+		fleet:  pause.Fleet{Home: host, Local: local, Reach: reach, Gaps: gaps, Retired: retired},
 		cloud:  cloud,
 		config: pause.Config{Path: cfgPath, Out: out},
 		timer:  pause.Timer{Mw: self, Path: os.Getenv("PATH")},
