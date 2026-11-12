@@ -31,7 +31,11 @@ type PosternClear struct {
 	// other cards and their note stay. Unset, the whole note is cleared and the
 	// reply goes under the newest card.
 	Txid string
-	// DryRun prints the three acts and does none of them.
+	// Quiet leaves out the reply: the note is cleared and the bead commented,
+	// and nothing is sent, so his Channels gain no unread row. For a sweep that
+	// clears a card he has already answered in his own words.
+	Quiet bool
+	// DryRun prints the acts (two with Quiet, else three) and does none of them.
 	DryRun bool
 	// Out is where each act is said. A nil Out says nothing.
 	Out io.Writer
@@ -81,9 +85,11 @@ func (c PosternClear) Run(ctx context.Context, bead, why string) error {
 			c.printf("would clear the question note of %s\n", bead)
 		}
 		c.printf("would comment on %s: %s\n", bead, comment)
-		if txid == "" {
+		switch {
+		case c.Quiet: // two acts: none is sent, so none is said
+		case txid == "":
 			c.printf("would send no reply: the note records no txid\n")
-		} else {
+		default:
 			c.printf("would reply under %s: %s\n", txid, reply)
 		}
 		return nil
@@ -103,6 +109,9 @@ func (c PosternClear) Run(ctx context.Context, bead, why string) error {
 		return fmt.Errorf("mw postern clear: %s's note is cleared, but commenting on it failed: %w", bead, err)
 	}
 	c.printf("commented on %s\n", bead)
+	if c.Quiet {
+		return nil
+	}
 	if txid == "" {
 		c.printf("sent no reply: the note records no txid\n")
 		return nil

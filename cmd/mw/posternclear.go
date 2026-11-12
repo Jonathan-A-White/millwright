@@ -10,7 +10,7 @@ import (
 // card the Governor has answered while its bead stays open.
 func newPosternClearCmd() *cobra.Command {
 	var why, txid string
-	var dryRun bool
+	var dryRun, quiet bool
 
 	cmd := &cobra.Command{
 		Use:   "clear <bead> --why \"<text>\"",
@@ -26,7 +26,10 @@ func newPosternClearCmd() *cobra.Command {
 			"note is refused, naming it. --why is required. --txid <txid> withdraws only the card asked under\n" +
 			"that txid (a bead keeps its overtaken cards in the note): the reply goes under that card, and\n" +
 			"the bead's other cards and their note stay; without it the whole note is cleared.\n" +
-			"--dry-run prints the three acts and does none.",
+			"--quiet leaves out act 3: the note is cleared and the bead commented, and no reply is sent, so\n" +
+			"his Channels gain no unread row. Use it in a sweep that clears a card he has already answered\n" +
+			"in his own words; leave it off when the thread should hear that the card is cleared.\n" +
+			"--dry-run prints the three acts (two with --quiet) and does none.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, _, err := posternGateway()
@@ -38,6 +41,7 @@ func newPosternClearCmd() *cobra.Command {
 				Notes:  gateway,
 				Sender: newHandsPush(gateway),
 				Txid:   txid,
+				Quiet:  quiet,
 				DryRun: dryRun,
 				Out:    cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args[0], why)
@@ -45,6 +49,7 @@ func newPosternClearCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&why, "why", "", "why the card is cleared: it goes on the bead and under the card (required)")
 	cmd.Flags().StringVar(&txid, "txid", "", "withdraw only the card asked under this txid, leaving the bead's other cards")
+	cmd.Flags().BoolVar(&quiet, "quiet", false, "clear and comment but post no reply, so his Channels gain no unread row")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the three acts it would do, and change nothing")
 	_ = cmd.MarkFlagRequired("why")
 	return cmd

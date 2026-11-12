@@ -56,6 +56,9 @@ bead `Card cleared by mw postern clear: <why>`, and posts a short reply under
 the card's txid saying it is cleared and why, so his phone thread closes the
 loop. The bead's status and fields are never touched. A bead with no question
 note is refused, naming it. `--dry-run` prints the three acts and does none.
+`--quiet` leaves out the reply (two acts: the note and the comment, nothing
+sent), so a sweep that clears a card he already answered in his own words adds
+no unread row to his Channels; `--dry-run --quiet` prints the two acts.
 
 A second card asked on a bead keeps the first in the note's `earlier` list rather
 than overwriting it. `--txid <txid>` withdraws only the card asked under that

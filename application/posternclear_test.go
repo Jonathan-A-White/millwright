@@ -251,3 +251,60 @@ func TestPosternClearWithoutTxidClearsTheWholeNote(t *testing.T) {
 		t.Errorf("got comments %q", comments)
 	}
 }
+
+// --quiet clears the note and comments the bead but posts no reply, so his
+// Channels gain no unread row; a txid-withdraw is quiet too.
+func TestPosternClearQuietSendsNoReply(t *testing.T) {
+	ctx := context.Background()
+	tracker := clearFixture(t)
+	sender := &apptest.FakePosternSender{}
+	var out bytes.Buffer
+
+	err := application.PosternClear{Beads: tracker, Notes: tracker, Sender: sender, Quiet: true, Out: &out}.Run(ctx, "t.1", "he answered in his own words")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if note, _ := tracker.Note(ctx, application.PosternQuestionKey("t.1")); note != "" {
+		t.Errorf("expected the note cleared, got %q", note)
+	}
+	if comments := tracker.Comments("t.1"); len(comments) != 1 || comments[0] != "Card cleared by mw postern clear: he answered in his own words" {
+		t.Errorf("got comments %q", comments)
+	}
+	if sent := sender.Sent(); len(sent) != 0 {
+		t.Errorf("expected zero sends with --quiet, got %+v", sent)
+	}
+	if strings.Contains(out.String(), "replied") {
+		t.Errorf("a quiet clear said it replied: %q", out.String())
+	}
+}
+
+// --dry-run --quiet prints two acts, the note and the comment, and no reply.
+func TestPosternClearDryRunQuietPrintsTwoActs(t *testing.T) {
+	ctx := context.Background()
+	tracker := clearFixture(t)
+	sender := &apptest.FakePosternSender{}
+	var out bytes.Buffer
+
+	err := application.PosternClear{Beads: tracker, Notes: tracker, Sender: sender, DryRun: true, Quiet: true, Out: &out}.Run(ctx, "t.1", "why not")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected two acts, got %d: %q", len(lines), out.String())
+	}
+	for _, want := range []string{"would clear the question note of t.1", "would comment on t.1: Card cleared by mw postern clear: why not"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("expected %q in %q", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "reply") {
+		t.Errorf("a quiet dry run mentioned a reply: %q", out.String())
+	}
+	if note, _ := tracker.Note(ctx, application.PosternQuestionKey("t.1")); note == "" {
+		t.Errorf("the note was cleared on a dry run")
+	}
+	if len(tracker.Comments("t.1")) != 0 || len(sender.Sent()) != 0 {
+		t.Errorf("a dry run changed something: %q, %+v", tracker.Comments("t.1"), sender.Sent())
+	}
+}
