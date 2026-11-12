@@ -541,3 +541,212 @@ func TestFollowRepublishesTheViewAtMostTwiceForTwentyChangesInTenSeconds(t *test
 		}
 	}
 }
+
+// mw-27f7myz.12: the view is also built on the clock, not only on a change of
+// head, for a count that depends on time (a card turning stale by age) and the
+// counts file's own stamp (mw status says "count is stale" past 30 minutes).
+func TestFollowRepublishesTheViewOnAFixedIntervalWhileTheHeadIsUnchanged(t *testing.T) {
+	for _, aside := range []bool{false, true} {
+		now := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
+		head := &apptest.FakeHead{Heads: []string{"a"}}
+		ctx, stop := context.WithCancel(context.Background())
+		var stamps []time.Time
+		var mu sync.Mutex
+		follow := application.EventFollow{
+			Head: head,
+			Publish: func(context.Context) error {
+				mu.Lock()
+				defer mu.Unlock()
+				stamps = append(stamps, now)
+				return nil
+			},
+			Aside: aside,
+			Now:   func() time.Time { return now },
+			Sleep: func(context.Context, time.Duration) error {
+				if head.Calls() >= 21 {
+					stop()
+					return ctx.Err()
+				}
+				mu.Lock()
+				now = now.Add(time.Minute)
+				mu.Unlock()
+				if aside {
+					time.Sleep(2 * time.Millisecond) // the publishing goroutine takes its turn
+				}
+				return nil
+			},
+		}
+		if err := follow.Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+		stop()
+		mu.Lock()
+		got := len(stamps)
+		mu.Unlock()
+		// Passes at 0..20 minutes over one head: the first view at 0, the
+		// republish at 15 minutes (application.FollowRepublishEvery).
+		if application.FollowRepublishEvery > 15*time.Minute {
+			t.Fatalf("FollowRepublishEvery is %s, want at most 15 minutes", application.FollowRepublishEvery)
+		}
+		if got != 2 {
+			t.Fatalf("aside=%v: %d views over 20 quiet minutes, want 2 (the first and the one at %s)", aside, got, application.FollowRepublishEvery)
+		}
+	}
+}
+
+func TestAHeadChangeStillPublishesAtOnceAndRestartsTheRepublishClock(t *testing.T) {
+	now := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
+	// a for 10 minutes, then b: b is published at once, and the republish of
+	// b falls a full interval after b, not after a.
+	var heads []string
+	for i := 0; i < 10; i++ {
+		heads = append(heads, "a")
+	}
+	for i := 10; i < 30; i++ {
+		heads = append(heads, "b")
+	}
+	head := &apptest.FakeHead{Heads: heads}
+	ctx, stop := context.WithCancel(context.Background())
+	var stamps []time.Duration
+	start := now
+	follow := application.EventFollow{
+		Head:    head,
+		Publish: func(context.Context) error { stamps = append(stamps, now.Sub(start)); return nil },
+		Now:     func() time.Time { return now },
+		Sleep: func(context.Context, time.Duration) error {
+			if head.Calls() >= 30 {
+				stop()
+				return ctx.Err()
+			}
+			now = now.Add(time.Minute)
+			return nil
+		},
+	}
+	if err := follow.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := []time.Duration{0, 10 * time.Minute, 10*time.Minute + application.FollowRepublishEvery}
+	if fmt.Sprint(stamps) != fmt.Sprint(want) {
+		t.Fatalf("views at %v, want %v", stamps, want)
+	}
+}
+
+func TestTwoRepublishesNeverRunAtTheSameTime(t *testing.T) {
+	now := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
+	head := &apptest.FakeHead{Heads: []string{"a"}}
+	ctx, stop := context.WithCancel(context.Background())
+	var running, most, calls atomic.Int32
+	follow := application.EventFollow{
+		Head: head,
+		Publish: func(ctx context.Context) error {
+			n := running.Add(1)
+			defer running.Add(-1)
+			if n > most.Load() {
+				most.Store(n)
+			}
+			calls.Add(1)
+			time.Sleep(5 * time.Millisecond) // a slow view, longer than several passes
+			return nil
+		},
+		Aside: true,
+		Now:   func() time.Time { return now },
+		Sleep: func(context.Context, time.Duration) error {
+			if head.Calls() >= 100 {
+				stop()
+				return ctx.Err()
+			}
+			now = now.Add(16 * time.Minute) // every pass is due a republish
+			time.Sleep(time.Millisecond)
+			return nil
+		},
+	}
+	if err := follow.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	if calls.Load() < 2 {
+		t.Fatalf("only %d views over passes each a republish apart", calls.Load())
+	}
+	if most.Load() != 1 {
+		t.Fatalf("%d views ran at once, want 1", most.Load())
+	}
+}
+
+func TestAFailedRepublishIsTriedAgainOnTheNextPassAndSaid(t *testing.T) {
+	now := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
+	head := &apptest.FakeHead{Heads: []string{"a"}}
+	ctx, stop := context.WithCancel(context.Background())
+	var calls int
+	var errs bytes.Buffer
+	follow := application.EventFollow{
+		Head: head,
+		Publish: func(context.Context) error {
+			calls++
+			if calls == 2 {
+				return errors.New("sealing failed")
+			}
+			return nil
+		},
+		Now: func() time.Time { return now },
+		Err: &errs,
+		Sleep: func(context.Context, time.Duration) error {
+			if head.Calls() >= 20 {
+				stop()
+				return ctx.Err()
+			}
+			now = now.Add(time.Minute)
+			return nil
+		},
+	}
+	if err := follow.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// 0: first; 15: republish fails; 16: retried and goes through; quiet after.
+	if calls != 3 {
+		t.Fatalf("%d views, want 3 (first, failed republish, its retry); said %q", calls, errs.String())
+	}
+	if !strings.Contains(errs.String(), "sealing failed") {
+		t.Fatalf("the failed republish was not said: %q", errs.String())
+	}
+}
+
+// DAMPERS on a beads quiet for over 30 minutes, with the follower running,
+// prints no "count is stale" line: the view's publish writes the counts file
+// stamped with the follower's clock, and the follower republishes within
+// PosternNeedsCountsStale.
+func TestDampersSayNoStaleCountOnABeadsQuietForFortyFiveMinutes(t *testing.T) {
+	now := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
+	var counts []byte // the counts file, as the view's publish writes it
+	head := &apptest.FakeHead{Heads: []string{"a"}}
+	ctx, stop := context.WithCancel(context.Background())
+	var stale []string
+	follow := application.EventFollow{
+		Head: head,
+		Publish: func(context.Context) error {
+			raw, err := application.PosternNeedsCountsJSON(application.PosternViewDoc{}, now)
+			counts = raw
+			return err
+		},
+		Now: func() time.Time { return now },
+		Sleep: func(context.Context, time.Duration) error {
+			facts := aCleanDamperFixture()
+			facts.Now = now
+			facts.NeedsCounts = counts
+			if line, ok := needsYouLine(application.ReadDampers(facts, application.DamperLimits{})); ok && strings.Contains(line, "count is stale") {
+				stale = append(stale, fmt.Sprintf("at %s: %s", now.Format("15:04"), line))
+			}
+			if head.Calls() >= 46 {
+				stop()
+				return ctx.Err()
+			}
+			now = now.Add(time.Minute)
+			return nil
+		},
+	}
+	if err := follow.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(stale) > 0 {
+		t.Fatalf("DAMPERS said the count was stale over 45 quiet minutes: %v", stale)
+	}
+}

@@ -24,6 +24,14 @@ const DefaultEventFollowEvery = time.Second
 // the last one seen is still caught; one read twice is known by its key.
 const FollowWindow = time.Minute
 
+// FollowRepublishEvery is how long the follower lets a view stand while the
+// beads' head is unchanged before it publishes again: some of the view's facts
+// depend on the clock (a card turning stale by age) and the needs counts file
+// carries its own time, which mw status calls stale past
+// PosternNeedsCountsStale. It is a constant, not a setting, and well under
+// that limit.
+const FollowRepublishEvery = 15 * time.Minute
+
 // BeadsHead is the cheapest read that says whether any bead has changed: a
 // hash of the beads' database that differs after every write, and is the same
 // while nothing is written. It is an opaque string: only equality means
@@ -235,20 +243,29 @@ func (f EventFollow) Run(ctx context.Context) error {
 		delete(said, what)
 	}
 	var published string
-	publishAt := func(head string) {
-		if head == published {
+	// publishAt builds the view for head unless it was built for that head
+	// already; again is the clock's call for a new one (FollowRepublishEvery).
+	// A republish that fails forgets the head it stood on, so the next pass
+	// tries again.
+	publishAt := func(head string, again bool) {
+		if head == published && !again {
 			return
 		}
 		if err := f.Publish(ctx); err != nil {
 			if ctx.Err() == nil {
 				say("publishing the view", err)
 			}
+			published = ""
 			return
 		}
 		published = head
 		quiet("publishing the view")
 	}
-	kick := make(chan string, 1)
+	type viewKick struct {
+		head  string
+		again bool
+	}
+	kick := make(chan viewKick, 1)
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	if f.Aside {
@@ -259,8 +276,8 @@ func (f EventFollow) Run(ctx context.Context) error {
 				select {
 				case <-ctx.Done():
 					return
-				case head := <-kick:
-					publishAt(head)
+				case k := <-kick:
+					publishAt(k.head, k.again)
 				}
 			}
 		}()
@@ -305,6 +322,12 @@ func (f EventFollow) Run(ctx context.Context) error {
 			letThrough, letThroughAt = head, clock()
 		}
 	}
+	// viewAt is when a view was last asked for: a head unchanged for
+	// FollowRepublishEvery after it is asked for again.
+	var viewAt time.Time
+	republishDue := func(head string) bool {
+		return head == letThrough && !viewAt.IsZero() && clock().Sub(viewAt) >= FollowRepublishEvery
+	}
 	for ctx.Err() == nil {
 		head, err := f.Head.Head(ctx)
 		switch {
@@ -326,18 +349,23 @@ func (f EventFollow) Run(ctx context.Context) error {
 			if !publishDue(head) {
 				break
 			}
+			again := republishDue(head)
+			if again || head != letThrough || viewAt.IsZero() {
+				viewAt = clock()
+			}
 			letThroughHead(head)
 			if !f.Aside {
-				publishAt(head)
+				publishAt(head, again)
 				break
 			}
 			// Only this loop sends, so a kick drained here leaves room
-			// for the newest head.
+			// for the newest head, and keeps a republish it held.
 			select {
-			case <-kick:
+			case old := <-kick:
+				again = again || old.again
 			default:
 			}
-			kick <- head
+			kick <- viewKick{head: head, again: again}
 		}
 		if f.Controller != nil && f.Log != nil && ctx.Err() == nil {
 			if err := f.Controller.Control(ctx); err != nil {
