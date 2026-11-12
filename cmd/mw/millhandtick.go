@@ -177,6 +177,10 @@ func newMillhandTickCmd() *cobra.Command {
 				return fmt.Errorf("finding the mw that is running, to arm a reaper with: %w", err)
 			}
 
+			pushWaitSeconds, err := config.PushWaitSeconds()
+			if err != nil {
+				return err
+			}
 			windows := seatWindows()
 			files := vault.New(dir)
 			gateway := mwGateway(dir, host)
@@ -184,6 +188,8 @@ func newMillhandTickCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			tidy := application.Tidy{Mail: gateway, Notes: gateway, Beads: gateway, Formulas: gateway, Molecules: gateway,
+				PushWait: time.Duration(pushWaitSeconds) * time.Second, Host: host}
 			tick := application.MillhandTick{
 				Millhand: application.Millhand{
 					Seats:    files,
@@ -209,7 +215,7 @@ func newMillhandTickCmd() *cobra.Command {
 				},
 				SelfUpdate: hostSelfUpdate(gateway, rigs, afterLanding, afterLimits, deploySteps, home, mwVault(dir, host), host),
 				Backend:    hostBackend(gateway, mwVault(dir, host), host, rigs, cmd.ErrOrStderr()),
-				Tidy:       application.Tidy{Mail: gateway, Notes: gateway, Beads: gateway, Formulas: gateway, Host: host},
+				Tidy:       tidy,
 				Reach:      doctor.NetReach{Hosts: reach},
 				ReapLog:    files,
 				Events:     homeEventLog(),

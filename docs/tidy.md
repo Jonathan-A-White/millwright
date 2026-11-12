@@ -30,6 +30,11 @@ It never:
   story no step names: a formula's beads are listed and closed as a formula's,
   and the beads adapter refuses to close any bead without the `-mol-` infix.
 
+Row 4 closes each bead as `mw next` closes its story's formula (mw-gq6.1132): a
+close that met a passing fault is tried again, one bd called indeterminate is
+read first (closed is done), and a bead lost every try is mailed to the Mayor
+once with the count of the tries.
+
 Row 2 is the row to know about: `mw mail read` closes a message, so a message
 the beads mailbox holds read is already closed and row 2 finds nothing to act
 on there today. It is written against the mailbox's own word for read, so that

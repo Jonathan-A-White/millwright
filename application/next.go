@@ -3783,7 +3783,15 @@ func (n Next) closeFormulaRetrying(ctx context.Context, report *NextReport, root
 // (mw-gq6.393): a bead that now reads closed is closed, and one that reads open
 // is a passing fault for writeRetrying to try again (mw-gq6.990).
 func (n Next) closeFormulaBead(ctx context.Context, root, id, reason string) error {
-	err := n.Tracker.CloseStory(ctx, id, reason)
+	return closeFormulaBeadChecked(ctx, n.Tracker, root, id, func() error { return n.Tracker.CloseStory(ctx, id, reason) })
+}
+
+// closeFormulaBeadChecked is closeFormulaBead for any close of a bead of the
+// formula poured as root, made by closeIt, the molecule read through molecules:
+// mw tidy closes the beads of a closed story's formula through it too
+// (mw-gq6.1132). A nil molecules reads nothing, and a fault is then tried again.
+func closeFormulaBeadChecked(ctx context.Context, molecules TidyMolecules, root, id string, closeIt func() error) error {
+	err := closeIt()
 	if err == nil {
 		return nil
 	}
@@ -3792,13 +3800,15 @@ func (n Next) closeFormulaBead(ctx context.Context, root, id, reason string) err
 	if !passing && !unsure {
 		return err
 	}
-	if molecule, readErr := n.Tracker.OpenMolecule(ctx, root); readErr == nil {
-		open := molecule.RootID != ""
-		if id != root {
-			open = slices.ContainsFunc(molecule.Steps, func(step FormulaStep) bool { return step.ID == id })
-		}
-		if !open {
-			return nil
+	if molecules != nil {
+		if molecule, readErr := molecules.OpenMolecule(ctx, root); readErr == nil {
+			open := molecule.RootID != ""
+			if id != root {
+				open = slices.ContainsFunc(molecule.Steps, func(step FormulaStep) bool { return step.ID == id })
+			}
+			if !open {
+				return nil
+			}
 		}
 	}
 	if !passing {
@@ -3826,7 +3836,16 @@ func (n Next) mailLostWriteAfter(ctx context.Context, c *closeOut, report *NextR
 // mailLostWriteBy is mailLostWriteAfter for command, which was doing (closing
 // out, retrying) the story when it lost the write.
 func (n Next) mailLostWriteBy(ctx context.Context, command, doing, storyID string, report *NextReport, what, said string, tries int) {
-	if n.Mailbox == nil || ctx.Err() != nil {
+	if n.Mailbox == nil {
+		return
+	}
+	n.mailLostWriteVia(ctx, n.Mailbox.Send, command, doing, storyID, report, what, said, tries)
+}
+
+// mailLostWriteVia is mailLostWriteBy through send, the one way to a mailbox
+// that mw tidy has (mw-gq6.1132).
+func (n Next) mailLostWriteVia(ctx context.Context, send func(context.Context, NewMessage) (string, error), command, doing, storyID string, report *NextReport, what, said string, tries int) {
+	if send == nil || ctx.Err() != nil {
 		return
 	}
 	tried := "It failed"
@@ -3844,7 +3863,7 @@ func (n Next) mailLostWriteBy(ctx context.Context, command, doing, storyID strin
 			"nothing else was changed for it. Make the write by hand, with the command named above.\n", command, n.Host, doing, storyID, what, said, tried),
 	}
 	err := writeRetrying(ctx, n, report, "the mail about a lost write", func() error {
-		_, err := n.Mailbox.Send(ctx, mail)
+		_, err := send(ctx, mail)
 		return err
 	})
 	if err != nil && n.Err != nil {
