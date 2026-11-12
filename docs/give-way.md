@@ -15,6 +15,7 @@ Windows PowerShell 5.1, no module beyond what Windows ships. The distro is `Ubun
 - [The mode, and the way back](#the-mode-and-the-way-back)
 - [The two logs](#the-two-logs)
 - [Which event does what](#which-event-does-what)
+- [What the home shows](#what-the-home-shows)
 - [What is NOT covered](#what-is-not-covered)
 - [Checking it](#checking-it)
 
@@ -128,6 +129,29 @@ event `on` by `windows-unlock` within a couple of seconds of the unlock, with a 
 | unlock with WSL down | unlock | nothing is called, WSL is not started, nothing is frozen |
 | sleep, wake | none | nothing. Windows holds WSL still while asleep; after wake the lock screen asks for the password and unlock fires, or the tick renews if the session is still active |
 | a restart | none (logon fires the unlock task after it) | WSL comes back with the marker file still on disk; the next `mw dispatch` tick lifts it when it is older than `giveway_stale` |
+
+## What the home shows
+
+A host that gives way keeps its claims (the heartbeats go on), but its sessions are silent for as long as the person
+is at the screen. So that the home does not take that silence for a fault, the host tells it (mw-2891blf.3).
+
+- **The note.** After `mw giveway on` has made its last stop (never before: the freeze makes no beads call), the host
+  writes the tracker's note `host.<host>.gives_way` = `<since RFC3339> <by> <seen RFC3339>`, under a timeout of 5
+  seconds. A failure (the tracker down, slow or erroring) is the `note` field of the `on` line in `giveway.log`
+  (`failed: ...`) and changes nothing else; the next renew writes it again. A renew rewrites it no oftener than every
+  10 minutes (`seen` is the time of the write). `mw giveway off` clears it after the host has gone on, and so does the
+  expired lift of a stale marker (`note` is `cleared`, or `failed to clear: ...`).
+- **What the home does with it.** While a note stands, every place the home judges a session quiet, stuck,
+  stranded or starved passes over the stories claimed on that host: the quiet alarm (`mw nudge`: no "in progress N min"
+  and no "<host> last synced N min ago"), `mw sweep` (no "stuck" comment, no `run=stuck`; the report names them as
+  frozen), `mw status` (no STRANDED line, no NO SESSION line, the host is not called asleep, no STUCK CLAIMS entry),
+  the DAMPERS starved-rig alarm, `mw stuck`, `mw doctor`'s `stuck-claims` check and the claim no host names that a
+  dispatch gives back.
+- **The line.** `mw status` says once, under the host in OTHER HOSTS (and at the top of its own report on the host
+  that gives way): `<host> gives way since <MM-DD HH:MMZ> (<n> stories frozen)`. `<n>` is the stories claimed there.
+- **A note that is not believed.** A note not rewritten for twice `giveway_stale` (30 minutes by default) is stale: a
+  host that was switched off, crashed or lost its WSL leaves its note behind. `mw status` says `<host>: gives-way note
+  stale, last written <time>: not believed` and every alarm behaves as it does with no note.
 
 ## What is NOT covered
 

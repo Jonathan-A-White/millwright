@@ -40,6 +40,10 @@ func newStatusCmd() *cobra.Command {
 			"synced at all, is marked asleep and its work\n" +
 			"is listed as stranded, with the one line that re-paths a story here. Re-pathing is a\n" +
 			"person's act: status only says which stories are waiting for one.\n" +
+			"A host that gives way to the person at its screen (mw giveway) keeps a note for the home, and while it\n" +
+			"stands status says once, under the host, '<host> gives way since <time> (<n> stories frozen)':\n" +
+			"its claimed stories are frozen, not stranded, and the host is not asleep. A note nobody renewed for\n" +
+			"twice `giveway_stale` is not believed: status says 'gives-way note stale' and judges as without it.\n" +
 			"A host named in the config's `retired_hosts` is one line, 'desktop · retired', never asleep: its notes are\n" +
 			"not read, and work still pathed to or claimed by it is shown once under the line that re-paths it.\n\n" +
 			"A DAMPERS section line 'stuck: N live beads behind M held roots: <ids>' names the held beads that\n" +
@@ -244,6 +248,7 @@ func newStatusCmd() *cobra.Command {
 				Changes:          rig.New(),
 				RigFiles:         rig.Files{},
 				Notes:            tracker,
+				GiveWayStale:     giveWayStaleSetting(),
 				MainCommit:       mainCommit,
 				Signs:            mwVault(dir, host),
 				Vault:            mwVault(dir, host),
@@ -360,7 +365,8 @@ func damperSurvey(tracker *beads.Gateway) (application.DamperSurvey, error) {
 	}
 	return application.DamperSurvey{
 		Tracker: tracker, Notes: tracker, Graph: tracker,
-		Stuck: application.StuckSurvey{Graph: tracker, Comments: tracker, Claims: tracker},
+		Stuck:        application.StuckSurvey{Graph: tracker, Comments: tracker, Claims: tracker, GiveWay: application.GiveWayReader{Notes: tracker, Stale: giveWayStaleSetting()}},
+		GiveWayStale: giveWayStaleSetting(),
 		Limits: application.DamperLimits{
 			ReadyP1: limits.ReadyP1, P1UntouchedDays: limits.P1UntouchedDays, DemoWaitingDays: limits.DemoWaitingDays,
 			GrillingDays: limits.GrillingDays, TestersPerRig: limits.TestersPerRig, ReviewQueue: limits.ReviewQueue,

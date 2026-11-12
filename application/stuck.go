@@ -110,6 +110,9 @@ type StuckSurvey struct {
 	Graph    BeadGraph
 	Comments StuckComments
 	Claims   StuckClaims
+	// GiveWay reads the hosts' give-way notes: a claim held on a host whose note
+	// stands is frozen, not a claim with no session (mw-2891blf.3).
+	GiveWay GiveWayReader
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 }
@@ -173,6 +176,9 @@ func (s StuckSurvey) Find(ctx context.Context) (StuckReport, error) {
 			return StuckReport{}, fmt.Errorf("reading the claims with no session: %w", err)
 		}
 		for _, claim := range stale {
+			if s.GiveWay.Stands(ctx, claimedOn(claim), now) {
+				continue
+			}
 			if live := behind(claim.Story.ID); len(live) > 0 {
 				roots = append(roots, StuckRoot{ID: claim.Story.ID, Why: "claimed, no session for over 6 hours", Behind: live})
 			}

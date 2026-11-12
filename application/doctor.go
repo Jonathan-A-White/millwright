@@ -1163,6 +1163,9 @@ type NoSessionClaimsCheck struct {
 	Host     string
 	Sessions SessionStatuser
 	Tracker  StuckClaimTracker
+	// GiveWay reads the hosts' give-way notes: a claim held on a host whose note
+	// stands is frozen, not stuck, and is passed over (mw-2891blf.3).
+	GiveWay GiveWayReader
 
 	given []string
 }
@@ -1205,7 +1208,7 @@ func (c *NoSessionClaimsCheck) find(ctx context.Context) ([]stuckClaim, error) {
 	}
 	var found []stuckClaim
 	for _, detail := range stale {
-		if !NoSessionClaimOf(detail, now, c.Host) {
+		if !NoSessionClaimOf(detail, now, c.Host) || c.GiveWay.Stands(ctx, claimedOn(detail), now) {
 			continue
 		}
 		found = append(found, stuckClaim{detail: detail, own: c.givesBack(ctx, detail)})

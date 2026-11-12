@@ -298,6 +298,12 @@ type Status struct {
 	// line under OTHER HOSTS, never called asleep, and its work is shown under
 	// the line that re-paths it (mw-6ww.163.1).
 	Retired []string
+	// GiveWayStale is giveway_stale: a host's give-way note not rewritten for twice
+	// this is not believed (mw-2891blf.3). Zero reads DefaultGiveWayStale.
+	GiveWayStale time.Duration
+	// hereGivesWay is this host's own give-way note as the run read it: the
+	// stories claimed here are frozen, not stranded or without a session.
+	hereGivesWay GiveWayRead
 	// Signs is where another host's other signs of life are read, so that a
 	// host whose last sync is old but which has committed to the vault, or
 	// whose claimed story's lease was renewed, within HostSilence is not called
@@ -608,6 +614,10 @@ type HostWork struct {
 	// stranded: nothing here will move them, and no other host will take them
 	// until somebody re-paths them.
 	Asleep bool
+	// GivesWay is that host's give-way note (mw-2891blf.3): when it stands the host's
+	// claimed stories are frozen, never stranded, and the host never asleep; a stale
+	// one is said and not believed.
+	GivesWay GiveWayRead
 	// Ticks are the counts of that host's timers as it left them with its last
 	// sync: nothing known of a host that has left none.
 	Ticks HostTicks
@@ -730,6 +740,9 @@ type StatusReport struct {
 	// back only a claim whose run state is empty or running (mw-gq6.941).
 	NoSessionRuns map[string]string
 	Blocked       []StoryDetail
+	// HereGivesWay is this host's own give-way note when it stands, or is stale
+	// (mw-2891blf.3); the zero value says nothing.
+	HereGivesWay GiveWayRead
 	// Others is what every other host named in a story's Path has in hand, one
 	// entry per host, in host order.
 	Others []HostWork
@@ -963,6 +976,13 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		return report, fmt.Errorf("reading what is in hand: %w", err)
 	}
 	waits := s.batchWaits(ctx, work)
+	// A host that gives way keeps its claims and its sessions are silent: its own
+	// stories are frozen, not stranded (mw-2891blf.3).
+	s.hereGivesWay = s.giveWays().Of(ctx, s.Host, s.now())
+	report.HereGivesWay = s.hereGivesWay
+	if s.hereGivesWay.Stands {
+		report.HereGivesWay.Stories = len(work.RunningOn(s.Host))
+	}
 	runningRead := map[string]func() (RunningStory, error){}
 	// A story with a live lease runs whatever its status says (mw-gq6.878).
 	runningHere := work.RunningOnLive(s.Host, s.now())
@@ -1350,7 +1370,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			report.OpenButClaimed = append(report.OpenButClaimed, detail)
 		}
 	}
-	report.NoSessionClaims = work.NoSessionClaims(s.now())
+	report.NoSessionClaims = s.withoutGivingWay(ctx, work.NoSessionClaims(s.now()))
 	report.NoSessionRuns = s.runStates(ctx, report.NoSessionClaims)
 
 	if dampersRead != nil {
@@ -1780,13 +1800,45 @@ func (s Status) running(ctx context.Context, detail StoryDetail) (RunningStory, 
 	rs.UsageLimit = s.usageLimit(ctx, detail)
 	rs.Turns = s.turns(ctx, rs)
 	rs.TurnCap = s.turnCap(detail)
-	if !rs.Refused() && !rs.Queued() && !rs.HandedBack() {
+	if !rs.Refused() && !rs.Queued() && !rs.HandedBack() && !s.hereGivesWay.Stands {
 		rs.Stranded = lapsedLease(detail, s.now())
 	}
 	if rs.NoSession = s.noSession(ctx, rs); !rs.NoSession.IsZero() {
 		rs.Now = s.now()
 	}
 	return rs, nil
+}
+
+// giveWays is the reader of the hosts' give-way notes this status judges by.
+func (s Status) giveWays() GiveWayReader {
+	return GiveWayReader{Notes: s.Notes, Stale: s.GiveWayStale}
+}
+
+// withoutGivingWay drops the claims held on a host whose give-way note stands:
+// its sessions are frozen, and the lease it renews through the heartbeat is no
+// sign that one is missing.
+func (s Status) withoutGivingWay(ctx context.Context, claims []StoryDetail) []StoryDetail {
+	if len(claims) == 0 {
+		return claims
+	}
+	stands := map[string]bool{}
+	var kept []StoryDetail
+	for _, d := range claims {
+		host := claimedOn(d)
+		giving, read := stands[host]
+		if !read {
+			if host == s.Host {
+				giving = s.hereGivesWay.Stands
+			} else {
+				giving = s.giveWays().Stands(ctx, host, s.now())
+			}
+			stands[host] = giving
+		}
+		if !giving {
+			kept = append(kept, d)
+		}
+	}
+	return kept
 }
 
 // SessionStatuser is the part of a Runner that says whether a session is alive.
@@ -1805,7 +1857,7 @@ const NoSessionNamedAfter = StuckClaimAge
 // that cannot say names nothing. Zero otherwise.
 func (s Status) noSession(ctx context.Context, rs RunningStory) time.Time {
 	detail := rs.Detail
-	if s.Sessions == nil || rs.Queued() || rs.HandedBack() || rs.CloseOut != nil ||
+	if s.Sessions == nil || rs.Queued() || rs.HandedBack() || rs.CloseOut != nil || s.hereGivesWay.Stands ||
 		!strings.EqualFold(strings.TrimSpace(detail.Status), StatusInProgress) {
 		return time.Time{}
 	}
@@ -1961,7 +2013,7 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 	// another: all of them are started before the first is waited for.
 	now := s.now()
 	type noted struct {
-		synced, halted, ticks, mw, doctor, passed func() (string, error)
+		synced, halted, ticks, mw, doctor, passed, givesWay func() (string, error)
 	}
 	notes := make([]noted, len(hosts))
 	for i, host := range hosts {
@@ -1971,7 +2023,7 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 		read := func(key string) func() (string, error) {
 			return later(func() (string, error) { return s.Notes.Note(ctx, key) })
 		}
-		notes[i] = noted{read(LastSyncKey(host)), read(SyncHaltKey(host)), read(TicksKey(host)), read(MwCommitKey(host)), read(DoctorVerdictKey(host)), read(HostPassedKey(host))}
+		notes[i] = noted{read(LastSyncKey(host)), read(SyncHaltKey(host)), read(TicksKey(host)), read(MwCommitKey(host)), read(DoctorVerdictKey(host)), read(HostPassedKey(host)), read(GiveWayKey(host))}
 	}
 
 	work := make([]HostWork, 0, len(hosts))
@@ -2048,6 +2100,20 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 		for _, p := range ParseHostPassed(passed) {
 			if hostPassedGates[p.Gate] {
 				held.Passed[p.Story] = p
+			}
+		}
+		// A host that gives way keeps its claims and its heartbeats while its
+		// sessions are silent: its stories are frozen, not stranded, and the host
+		// is not asleep. A note that cannot be read is no note (mw-2891blf.3).
+		if said, err := notes[i].givesWay(); err == nil {
+			held.GivesWay = readGiveWay(said, now, s.GiveWayStale)
+			if held.GivesWay.Stands {
+				held.Asleep = false
+				for _, d := range held.Stories {
+					if strings.EqualFold(strings.TrimSpace(d.Status), StatusInProgress) {
+						held.GivesWay.Stories++
+					}
+				}
 			}
 		}
 		work = append(work, held)
@@ -2260,6 +2326,9 @@ func (r StatusReport) String() string {
 
 	r.Dampers.Write(&b)
 
+	if line := r.HereGivesWay.line(r.Host); line != "" {
+		wrapInto(&b, "", line)
+	}
 	if r.Drained {
 		clip(&b, fmt.Sprintf("host: drained (cap 0), %d running: it starts nothing, and still syncs and closes out", r.InUse))
 		if r.CapWhy != "" {
@@ -2752,6 +2821,9 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 		return
 	}
 	clip(b, fmt.Sprintf("  %s · %s", w.Host, w.state()))
+	if line := w.GivesWay.line(w.Host); line != "" {
+		wrapInto(b, "    ", line)
+	}
 	if w.Halt != nil {
 		clip(b, "    "+haltLine(w.Host, *w.Halt))
 	}
@@ -2789,7 +2861,7 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 			wrapInto(b, "      ", refusedLine)
 		} else if w.Runs[d.Story.ID] == RunCloseOutAgain {
 			wrapInto(b, "      ", handedBackLine)
-		} else if since := lapsedLease(d, w.Now); !d.Hitl() && !since.IsZero() {
+		} else if since := lapsedLease(d, w.Now); !d.Hitl() && !since.IsZero() && !w.GivesWay.Stands {
 			wrapInto(b, "      ", strandedLine(since, w.Runs[d.Story.ID]))
 		}
 	}

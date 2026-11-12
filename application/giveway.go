@@ -97,6 +97,10 @@ type GiveWayMarker struct {
 	// millhand tick) and what they started: lowered, not stopped. mw giveway status
 	// names those still running.
 	Lowered []GiveWayStopped `json:"lowered,omitempty"`
+	// NoteAt is when the host last wrote its give-way note for the home (Notes), zero
+	// before the first write or after one that failed: a renew writes it again at
+	// once then, and otherwise no oftener than GiveWayNoteRenewEvery.
+	NoteAt time.Time `json:"note_at,omitempty"`
 }
 
 // GiveWayMarkers keeps the marker in the host's own state directory. Nothing
@@ -131,14 +135,18 @@ type GiveWayEntry struct {
 	Held      *int   `json:"held,omitempty"`
 	Continued *int   `json:"continued,omitempty"`
 	// MemAvailableMB and Load1 are read from /proc after the last stop.
-	MemAvailableMB *int              `json:"mem_available_mb,omitempty"`
-	Load1          *float64          `json:"load1,omitempty"`
-	Scoped         []string          `json:"only_sessions,omitempty"`
-	Session        string            `json:"session,omitempty"`
-	Story          string            `json:"story,omitempty"`
-	Result         string            `json:"result,omitempty"`
-	NoMarker       bool              `json:"no_marker,omitempty"`
-	Notes          map[string]string `json:"notes,omitempty"`
+	MemAvailableMB *int     `json:"mem_available_mb,omitempty"`
+	Load1          *float64 `json:"load1,omitempty"`
+	Scoped         []string `json:"only_sessions,omitempty"`
+	Session        string   `json:"session,omitempty"`
+	Story          string   `json:"story,omitempty"`
+	Result         string   `json:"result,omitempty"`
+	NoMarker       bool     `json:"no_marker,omitempty"`
+	// Note is what became of the host's give-way note for the home: "set",
+	// "kept" (a renew within ten minutes of the last write), "cleared", or the
+	// failure ("failed: ..."), which changes nothing else.
+	Note  string            `json:"note,omitempty"`
+	Notes map[string]string `json:"notes,omitempty"`
 }
 
 // GiveWay is mw giveway: a host gives way to the person at its screen. On
@@ -152,6 +160,11 @@ type GiveWay struct {
 	Panes     GiveWayPanes
 	Marker    GiveWayMarkers
 	Log       GiveWayLog
+	// Notes is where the host keeps the note the home reads (GiveWayKey): written
+	// after the last stop of on, never before, and cleared by off. nil keeps none.
+	// NoteTimeout is how long one write waits (zero reads GiveWayNoteTimeout).
+	Notes       GiveWayNoteWriter
+	NoteTimeout time.Duration
 	// Load reads MemAvailable and load1 for the log; nil leaves them out.
 	Load HostLoad
 	// Home and Host refuse On on the home, which never gives way, except for the
@@ -624,6 +637,7 @@ func (g GiveWay) On(ctx context.Context, req GiveWayRequest) error {
 	}
 	took := lastStop.Sub(start)
 
+	noted := ""
 	if !scoped {
 		table, _ := g.Processes.List(ctx)
 		alive := map[procKey]bool{}
@@ -668,6 +682,9 @@ func (g GiveWay) On(ctx context.Context, req GiveWayRequest) error {
 			stillLowered = append(stillLowered, lowered[k])
 		}
 		marker.Lowered = stillLowered
+		// The note for the home comes after the last stop, never before it, and a
+		// failure of it is the log's word and nothing else.
+		noted = g.keepNote(ctx, &marker, g.now())
 		names := make([]string, 0, len(sessions))
 		for n := range sessions {
 			names = append(names, n)
@@ -693,7 +710,7 @@ func (g GiveWay) On(ctx context.Context, req GiveWayRequest) error {
 	}
 	entry := GiveWayEntry{
 		Event: event, At: start.UTC(), By: g.by(), TookMs: ms(took),
-		Sessions: intp(len(sessions)), Stopped: intp(len(signalled)), Notes: req.Notes, Scoped: req.Sessions,
+		Sessions: intp(len(sessions)), Stopped: intp(len(signalled)), Notes: req.Notes, Scoped: req.Sessions, Note: noted,
 	}
 	if !scoped {
 		entry.Held = intp(len(marker.Stopped))
@@ -817,9 +834,15 @@ func (g GiveWay) off(ctx context.Context, req GiveWayRequest, event string) erro
 		}
 	}
 	took := lastCont.Sub(start)
+	// The note for the home goes after the host has gone on, and a failure of it
+	// is the log's word and nothing else. The expired path lands here too.
+	noted := ""
+	if !scoped {
+		noted = g.clearNote(ctx)
+	}
 	entry := GiveWayEntry{
 		Event: event, At: start.UTC(), By: g.by(), TookMs: ms(took), Continued: intp(continued),
-		Notes: req.Notes, Scoped: req.Sessions, NoMarker: !scoped && !there,
+		Notes: req.Notes, Scoped: req.Sessions, NoMarker: !scoped && !there, Note: noted,
 	}
 	if there {
 		entry.GaveWayMs = ms(start.Sub(marker.Since))

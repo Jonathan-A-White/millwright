@@ -460,6 +460,7 @@ func newDoctorCmd() *cobra.Command {
 				Host:     host,
 				Sessions: tmux.New(),
 				Tracker:  stuckGateway,
+				GiveWay:  application.GiveWayReader{Notes: stuckGateway, Stale: giveWayStaleSetting()},
 			}
 			// A rig of the vault with no kinds in the common-errors register; a
 			// warning only (mw-gq6.751).

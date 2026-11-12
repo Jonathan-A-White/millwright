@@ -43,6 +43,16 @@ var giveWayGatedJobs = map[string]bool{
 	application.BatchLandJobName: true, application.SleepJobName: true,
 }
 
+// giveWayStaleSetting is giveway_stale as the readers of the hosts' give-way notes
+// judge by: the setting, and the default when it cannot be read.
+func giveWayStaleSetting() time.Duration {
+	stale, err := config.GiveWayStale()
+	if err != nil {
+		return config.DefaultGiveWayStale
+	}
+	return stale
+}
+
 // hostGiveWay is this host's give-way, over the host's own state directory. It
 // is false when the host has no state directory to keep one in.
 func hostGiveWay(host string) (application.GiveWay, bool) {
@@ -62,6 +72,11 @@ func hostGiveWay(host string) (application.GiveWay, bool) {
 	way := application.GiveWay{
 		Processes: procs.Freezer{}, Panes: giveway.ServersFor(sockets), Marker: store, Log: store,
 		Load: hostload.Proc{}, Host: host, Stale: stale, Self: os.Getpid(), By: "mw@" + host,
+	}
+	// The note the home reads is kept in the tracker's notes, after the freeze and
+	// with a short timeout; a host with no vault keeps none (mw-2891blf.3).
+	if vault, err := config.Vault(); err == nil {
+		way.Notes = mwGateway(vault, host)
 	}
 	if self, err := os.Executable(); err == nil {
 		way.Retry = pause.Retry{Mw: self}
@@ -206,6 +221,10 @@ func newGiveWayCmd() *cobra.Command {
 			"                     5 lines of the log. Exit 0 either way.\n" +
 			"  mw giveway mark    only appends a line of event mark with the --note k=v given: the Windows side puts its own\n" +
 			"                     measurements in the same log.\n\n" +
+			"After its last stop `on` writes a note for the home, host.<host>.gives_way = '<since> <by> <seen>', to the\n" +
+			"tracker's notes (a short timeout; a failure is logged in giveway.log as note and changes nothing else). A\n" +
+			"renew rewrites it no oftener than every 10 minutes; `off` and the expired lift clear it. While it stands, the\n" +
+			"home's quiet, stuck, stranded and starved alarms pass the host's frozen stories over, and mw status says so.\n\n" +
 			"While the marker stands, mw dispatch on this host does nothing at all and says \"gives way since <time>\", and so\n" +
 			"does every other entry that starts heavy work (millhand, suite, land, after-landing, grist grind, sleep pass,\n" +
 			"deputy, and the follower's suite, timing, grist, batch-land and sleep jobs). A marker not renewed for giveway_stale\n" +

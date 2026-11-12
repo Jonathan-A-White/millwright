@@ -557,6 +557,9 @@ type DamperSurvey struct {
 	// none. A stuck check that cannot be read costs the section only its stuck
 	// line.
 	Stuck StuckFinder
+	// GiveWayStale is giveway_stale, for the hosts' give-way notes read with the
+	// rest (mw-2891blf.3); zero reads DefaultGiveWayStale.
+	GiveWayStale time.Duration
 }
 
 // Dampers reads the alarms from work already read.
