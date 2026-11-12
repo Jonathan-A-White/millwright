@@ -320,6 +320,7 @@ func cloudPlan(settings config.CloudSettings, host string) (application.CloudPla
 		Idle:          time.Duration(settings.IdleMinutes) * time.Minute,
 		BoxCap:        settings.BoxCap,
 		Up:            time.Duration(settings.UpMinutes) * time.Minute,
+		MakeSlow:      time.Duration(settings.SlowMakeMinutes) * time.Minute,
 		HostCaps:      caps,
 		// A retired host's line in [cloud.caps] counts no sessions (mw-gq6.1111).
 		Retired: retired,

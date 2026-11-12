@@ -65,6 +65,9 @@ type DamperFacts struct {
 	// Proposals are the PROPOSED comments of mw verify match that no VERIFIED or
 	// REJECTED comment answers (ProposalsOf); the alarm is judged from their age.
 	Proposals []DamperProposal
+	// SlowMakes are the cloud boxes whose make has run past the plan's limit
+	// (CloudState.SlowMakes); the alarm is judged from them (mw-gq6.1113).
+	SlowMakes []CloudBox
 }
 
 // DamperProposal is one bead holding a proposal of mw verify match that nobody
@@ -189,6 +192,10 @@ const (
 	// DamperProposals is the alarm for proposals of mw verify match that nobody
 	// has confirmed in DamperProposalWaiting (mw-27f7myz.10).
 	DamperProposals = "proposals"
+	// DamperCloudMake is the alarm for a cloud box whose make has not finished
+	// after the plan's slow-make limit: it is billed and takes no story, and it
+	// names the box and what Vultr says of it (mw-gq6.1113).
+	DamperCloudMake = "cloud make"
 )
 
 // damperNamed is how many beads an alarm's line names before it counts the rest.
@@ -215,7 +222,7 @@ func (l DamperLimits) orDefaults() DamperLimits {
 // to five beads, then how many more.
 func (a DamperAlarm) Line() string {
 	line := a.Principle + " · " + a.Text
-	if a.Principle == DamperStuck || a.Principle == DamperInversion || a.Principle == DamperMetered || a.Principle == DamperNoHost || a.Principle == DamperDoctor || a.Principle == DamperNeedsFilesKey || a.Principle == DamperRefusedHold || a.Principle == DamperOpenRefused {
+	if a.Principle == DamperStuck || a.Principle == DamperInversion || a.Principle == DamperMetered || a.Principle == DamperNoHost || a.Principle == DamperDoctor || a.Principle == DamperNeedsFilesKey || a.Principle == DamperRefusedHold || a.Principle == DamperOpenRefused || a.Principle == DamperCloudMake {
 		line = a.Principle + ": " + a.Text
 	}
 	if len(a.Beads) == 0 {
@@ -472,6 +479,13 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 	if alarm, ring := proposalsAlarm(facts.Proposals, facts.Now); ring {
 		report.Alarms = append(report.Alarms, alarm)
 	}
+	for _, box := range facts.SlowMakes {
+		report.Alarms = append(report.Alarms, DamperAlarm{
+			Principle: DamperCloudMake,
+			Text:      fmt.Sprintf("%s has been made for %s and the make has not finished; %s", box.Name, Clock(facts.Now.Sub(box.Up)), box.vultrText()),
+			Identity:  "cloud make " + box.Name,
+		})
+	}
 	if len(queue) > limits.ReviewQueue {
 		add(DamperReview, fmt.Sprintf("his review queue is %d: %d cards, %d demos, %d hands steps (limit %d)",
 			len(queue), len(cards), len(demos), len(hands), limits.ReviewQueue), uniqueStrings(queue))
@@ -665,6 +679,11 @@ type DamperSurvey struct {
 	// Proposals, when set, reads the beads mw verify match left a proposal on; nil
 	// reads none, and the proposals alarm is silent.
 	Proposals VerifyBeads
+	// Cloud, when set, is the cloud's book, read for the boxes whose make has run
+	// past CloudPlan.MakeSlowLimit; nil reads none, and the cloud make alarm is
+	// silent.
+	Cloud     CloudBook
+	CloudPlan CloudPlan
 }
 
 // NeedsCountsReader reads the bytes of the view's counts file, nil with no
@@ -716,6 +735,12 @@ func (s DamperSurvey) Dampers(ctx context.Context, work WorkInHand, now time.Tim
 		// Comments that cannot be read are a gauge missing, not a fault in the others.
 		if proposals, err := ReadProposals(ctx, s.Proposals, now); err == nil {
 			facts.Proposals = proposals
+		}
+	}
+	if s.Cloud != nil {
+		// A book that cannot be read is a gauge missing, not a fault in the others.
+		if state, err := s.Cloud.Read(ctx); err == nil {
+			facts.SlowMakes = state.SlowMakes(s.CloudPlan, now)
 		}
 	}
 	return ReadDampers(facts, s.Limits), nil

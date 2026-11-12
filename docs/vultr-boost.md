@@ -179,6 +179,7 @@ idle_minutes    = 30        # a box with no story this long is destroyed
 hourly_usd      = 0.132     # what one box costs an hour
 box_cap         = 2         # sessions a box runs at once; a change reaches the boxes up (see "A changed box_cap")
 up_minutes      = 60        # how long a make may run before it reads the box back from Vultr
+slow_make_minutes = 30      # how long a make may run, unfinished, before it is a cloud event and a DAMPERS line
 snapshot        = "<id>"    # what contrib/vultr-boost snapshot printed; blank bootstraps in full
 command         = "<full path to contrib/vultr-boost>"   # default: the millwright checkout of [rigs]
 
@@ -218,7 +219,13 @@ Each check:
    and writes the end into the book and a `cloud` event, under the cloud lock only
    while it writes. A box being made is never destroyed as idle, and a check that
    finds one begun `up_minutes` and 15 minutes ago, with the process gone (a
-   reboot), destroys it and says `failed`. Its output is in `~/.local/state/mw-dispatch/cloud-make.log` (the dispatch
+   reboot), destroys it and says `failed`. mw status shows a box being made as
+   `cloud1  making 56m, Vultr active locked` (Vultr's word as the last check read
+   it), never as up or working: it has taken no story and counts no session free
+   (the check counts its sessions as coming, so it does not make a second box for
+   the same stories). A make still running `slow_make_minutes` (default 30) after
+   it began is one `cloud` event naming the box and Vultr's status, and a `cloud
+   make` line under DAMPERS for as long as it runs. Its output is in `~/.local/state/mw-dispatch/cloud-make.log` (the dispatch
    state directory).
 5. **A box that does not come up** (the wrapper fails) is destroyed and tried once
    more, by the same process. When that fails too it is destroyed again and no box

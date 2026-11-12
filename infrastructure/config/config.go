@@ -124,6 +124,7 @@
 //	hourly_usd      = 0.132
 //	box_cap         = 2
 //	up_minutes      = 60                    # how long a make may run before it reads the box back from Vultr
+//	slow_make_minutes = 30                  # how long a make may run before it is a cloud event and a DAMPERS line
 //	snapshot        = "<a Vultr snapshot id>"   # contrib/vultr-boost snapshot makes one
 //	command         = "/home/jwhite/millwright/contrib/vultr-boost"
 //
@@ -3259,6 +3260,9 @@ const (
 	// DefaultCloudUpMinutes is how long a make may run before it reads the
 	// instance back: a snapshot restore took about 50 minutes (mw-gq6.465).
 	DefaultCloudUpMinutes = 60
+	// DefaultCloudSlowMakeMinutes is how long a make may run before it is a
+	// cloud event and a DAMPERS line (mw-gq6.1113).
+	DefaultCloudSlowMakeMinutes = 30
 )
 
 // CloudSettings is what the `[cloud]` table says.
@@ -3273,6 +3277,9 @@ type CloudSettings struct {
 	// UpMinutes is how long a make may run before it reads the instance back
 	// from Vultr, and a check gives a make that left no word 15 more.
 	UpMinutes int
+	// SlowMakeMinutes is how long a make may run, unfinished, before the check
+	// says so as a cloud event and DAMPERS names the box.
+	SlowMakeMinutes int
 	// Snapshot is the Vultr snapshot a box is made from; empty makes it from
 	// Ubuntu and bootstraps it in full.
 	Snapshot string
@@ -3301,20 +3308,21 @@ func Cloud() (CloudSettings, bool, error) {
 		return CloudSettings{}, false, err
 	}
 	cloud := CloudSettings{
-		Provider:      DefaultCloudProvider,
-		MaxBoxes:      DefaultCloudMaxBoxes,
-		MonthlyCapUSD: DefaultCloudMonthlyCapUSD,
-		IdleMinutes:   DefaultCloudIdleMinutes,
-		HourlyUSD:     DefaultCloudHourlyUSD,
-		BoxCap:        DefaultCloudBoxCap,
-		UpMinutes:     DefaultCloudUpMinutes,
-		Snapshot:      strings.TrimSpace(table["snapshot"]),
-		Command:       strings.TrimSpace(table["command"]),
+		Provider:        DefaultCloudProvider,
+		MaxBoxes:        DefaultCloudMaxBoxes,
+		MonthlyCapUSD:   DefaultCloudMonthlyCapUSD,
+		IdleMinutes:     DefaultCloudIdleMinutes,
+		HourlyUSD:       DefaultCloudHourlyUSD,
+		BoxCap:          DefaultCloudBoxCap,
+		UpMinutes:       DefaultCloudUpMinutes,
+		SlowMakeMinutes: DefaultCloudSlowMakeMinutes,
+		Snapshot:        strings.TrimSpace(table["snapshot"]),
+		Command:         strings.TrimSpace(table["command"]),
 	}
 	if said := strings.TrimSpace(table["provider"]); said != "" && said != DefaultCloudProvider {
 		return CloudSettings{}, false, fmt.Errorf("the [%s] table of %s says provider = %q: the one provider is %q", CloudTable, path, said, DefaultCloudProvider)
 	}
-	for key, into := range map[string]*int{"max_boxes": &cloud.MaxBoxes, "idle_minutes": &cloud.IdleMinutes, "box_cap": &cloud.BoxCap, "up_minutes": &cloud.UpMinutes} {
+	for key, into := range map[string]*int{"max_boxes": &cloud.MaxBoxes, "idle_minutes": &cloud.IdleMinutes, "box_cap": &cloud.BoxCap, "up_minutes": &cloud.UpMinutes, "slow_make_minutes": &cloud.SlowMakeMinutes} {
 		said := strings.TrimSpace(table[key])
 		if said == "" {
 			continue

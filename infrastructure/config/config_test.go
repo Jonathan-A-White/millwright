@@ -2342,7 +2342,7 @@ func TestCloudReadsTheTableWithItsDefaultsAndRefusesABadOne(t *testing.T) {
 		t.Fatalf("reading [cloud]: %v, %v", ok, err)
 	}
 	if cloud.Provider != "vultr" || cloud.MaxBoxes != 2 || cloud.MonthlyCapUSD != 40.5 || cloud.IdleMinutes != 30 ||
-		cloud.HourlyUSD != config.DefaultCloudHourlyUSD || cloud.BoxCap != 2 || cloud.UpMinutes != 60 || cloud.Snapshot != "snap-1" ||
+		cloud.HourlyUSD != config.DefaultCloudHourlyUSD || cloud.BoxCap != 2 || cloud.UpMinutes != 60 || cloud.SlowMakeMinutes != 30 || cloud.Snapshot != "snap-1" ||
 		cloud.Command != "/home/m/millwright/contrib/vultr-boost" || cloud.HostCaps["desktop"] != 2 || cloud.HostCaps["laptop"] != 1 {
 		t.Errorf("expected the defaults beside what the table says, got %+v", cloud)
 	}
@@ -2350,6 +2350,11 @@ func TestCloudReadsTheTableWithItsDefaultsAndRefusesABadOne(t *testing.T) {
 	writeConfig(t, "[cloud]\nup_minutes = 90\ncommand = \"/x/vultr-boost\"\n")
 	if got, _, err := config.Cloud(); err != nil || got.UpMinutes != 90 {
 		t.Errorf("expected up_minutes = 90 to be read, got %+v, %v", got, err)
+	}
+
+	writeConfig(t, "[cloud]\nslow_make_minutes = 20\ncommand = \"/x/vultr-boost\"\n")
+	if got, _, err := config.Cloud(); err != nil || got.SlowMakeMinutes != 20 {
+		t.Errorf("expected slow_make_minutes = 20 to be read, got %+v, %v", got, err)
 	}
 
 	writeConfig(t, "host = \"desktop\"\n")

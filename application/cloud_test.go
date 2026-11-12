@@ -12,6 +12,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 var cloudPlan = application.CloudPlan{MaxBoxes: 2, MonthlyCapUSD: 75, HourlyUSD: 0.132, Idle: 30 * time.Minute, BoxCap: 2}
@@ -1238,4 +1239,148 @@ func TestAHostInTheCapsAndNotRetiredCountsItsFreeSessions(t *testing.T) {
 	if got := provider.TakeBegun(); len(got) != 0 {
 		t.Errorf("expected no box begun while desktop has room, got %v", got)
 	}
+}
+
+// A box whose make has not finished has taken no story, and mw status must not
+// call it working (mw-gq6.1113): on 2026-11-12 four boxes 56 minutes into a
+// snapshot restore, Vultr saying "active locked", were each "up 56m, working".
+func TestStatusSaysABoxStillBeingMadeIsMakingAndNeverWorking(t *testing.T) {
+	now := time.Date(2026, 11, 12, 16, 53, 0, 0, time.UTC)
+	tracker := apptest.NewFakeTracker()
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11",
+		Boxes: []application.CloudBox{{Name: "cloud1", Up: now.Add(-56 * time.Minute), Making: true}}}}
+	report, err := application.Status{Tracker: tracker, Notes: tracker, Host: "laptop", Seat: "builder",
+		Cloud: book, CloudPlan: cloudPlan, Now: func() time.Time { return now }}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := report.String()
+	if !strings.Contains(text, "cloud1  making 56m") {
+		t.Errorf("expected %q in:\n%s", "cloud1  making 56m", text)
+	}
+	if strings.Contains(text, "working") || strings.Contains(text, "cloud1  up 56m") {
+		t.Errorf("expected a box still being made not called up or working, got:\n%s", text)
+	}
+}
+
+// aMakingBox is a book with cloud1 asked for 56 minutes ago and its make not
+// done, Vultr holding the instance locked: what the Governor's boxes were on
+// 2026-11-12.
+func aMakingBox(now time.Time) (*apptest.FakeCloud, *apptest.FakeCloudBook) {
+	provider := &apptest.FakeCloud{Orphans: []application.CloudInstance{{ID: "v1", Label: "cloud1", Status: "active", Server: "locked"}}}
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11",
+		Boxes: []application.CloudBox{{Name: "cloud1", Up: now.Add(-56 * time.Minute), Making: true}}}}
+	return provider, book
+}
+
+func TestTheCheckKeepsWhatVultrSaysOfABoxBeingMadeAndStatusShowsIt(t *testing.T) {
+	now := time.Date(2026, 11, 12, 16, 53, 0, 0, time.UTC)
+	tracker := apptest.NewFakeTracker()
+	provider, book := aMakingBox(now)
+	if _, err := (application.CloudCheck{Work: tracker, Provider: provider, Book: book, Host: "laptop",
+		Plan: cloudPlan, Now: func() time.Time { return now }}).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := book.State.Boxes[0].Vultr; got != "active locked" {
+		t.Errorf("expected the book to keep Vultr's word %q, got %q", "active locked", got)
+	}
+	if slices.Contains(provider.Calls(), "down cloud1") || !book.State.Boxes[0].Making {
+		t.Errorf("expected the box still being made, calls %v, book %+v", provider.Calls(), book.State.Boxes)
+	}
+	report, err := application.Status{Tracker: tracker, Notes: tracker, Host: "laptop", Seat: "builder",
+		Cloud: book, CloudPlan: cloudPlan, Now: func() time.Time { return now }}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := report.String()
+	for _, want := range []string{"cloud1  making 56m, Vultr active locked", "1 of 2 boxes"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("expected %q in:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "working") {
+		t.Errorf("expected no box called working:\n%s", text)
+	}
+}
+
+func TestAMakeThatRunsPastTheLimitIsOneCloudEventAndADampersLineNamingTheBoxAndVultrsStatus(t *testing.T) {
+	now := time.Date(2026, 11, 12, 16, 53, 0, 0, time.UTC)
+	tracker := apptest.NewFakeTracker()
+	provider, book := aMakingBox(now)
+	log := &apptest.FakeEventLog{}
+	check := application.CloudCheck{Work: tracker, Provider: provider, Book: book, Host: "laptop", Log: log,
+		Plan: cloudPlan, Now: func() time.Time { return now }}
+	for range 2 {
+		if _, err := check.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	slow := 0
+	for _, e := range cloudEventsOf(log) {
+		if strings.Contains(e.Detail, "cloud1: the make begun at 15:57Z has not finished after 56m") && strings.Contains(e.Detail, "Vultr says active locked") {
+			slow++
+		}
+	}
+	if slow != 1 {
+		t.Errorf("expected one cloud event for the slow make, got %d in %+v", slow, cloudEventsOf(log))
+	}
+	survey := application.DamperSurvey{Tracker: tracker, Notes: tracker, Cloud: book, CloudPlan: cloudPlan}
+	damp, err := survey.Dampers(context.Background(), application.WorkInHand{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for _, a := range damp.Alarms {
+		lines = append(lines, a.Line())
+	}
+	if text := strings.Join(lines, "\n"); !strings.Contains(text, "cloud1") || !strings.Contains(text, "Vultr says active locked") {
+		t.Errorf("expected a DAMPERS line naming cloud1 and Vultr's status, got %q", text)
+	}
+}
+
+func TestAMakeUnderTheLimitIsNeitherACloudEventNorADampersLine(t *testing.T) {
+	now := time.Date(2026, 11, 12, 16, 10, 0, 0, time.UTC)
+	tracker := apptest.NewFakeTracker()
+	provider, book := aMakingBox(now)
+	book.State.Boxes[0].Up = now.Add(-10 * time.Minute)
+	log := &apptest.FakeEventLog{}
+	if _, err := (application.CloudCheck{Work: tracker, Provider: provider, Book: book, Host: "laptop", Log: log,
+		Plan: cloudPlan, Now: func() time.Time { return now }}).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(cloudEventsOf(log)); n != 0 {
+		t.Errorf("expected no cloud event for a make 10 minutes old, got %+v", cloudEventsOf(log))
+	}
+	damp, err := application.DamperSurvey{Tracker: tracker, Notes: tracker, Cloud: book, CloudPlan: cloudPlan}.Dampers(context.Background(), application.WorkInHand{}, now)
+	for _, a := range damp.Alarms {
+		if a.Principle == application.DamperCloudMake {
+			t.Errorf("expected no cloud make alarm, got %+v (%v)", a, err)
+		}
+	}
+}
+
+// A box still being made counts no session free, and yet no second box is made
+// for the story the first already serves.
+func TestABoxStillBeingMadeCountsNoSessionFreeAndNoSecondBoxIsMade(t *testing.T) {
+	now := time.Date(2026, 11, 12, 16, 10, 0, 0, time.UTC)
+	tracker := fullHostsWithAutoWaiting(t, now, map[string]int{"laptop": 2})
+	plan := cloudPlan
+	plan.HostCaps = map[string]int{"laptop": 2}
+	provider, book := aMakingBox(now)
+	report, err := application.CloudCheck{Work: tracker, Stories: tracker, Provider: provider, Book: book, Host: "laptop",
+		Plan: plan, Now: func() time.Time { return now }}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Free != 0 || report.Coming != 2 {
+		t.Errorf("expected no session free and 2 coming, got free %d coming %d: %s", report.Free, report.Coming, report)
+	}
+	if got := provider.TakeBegun(); len(got) != 0 {
+		t.Errorf("expected no second box begun while the first is made, got %v", got)
+	}
+}
+
+func cloudEventsOf(log *apptest.FakeEventLog) []events.Event {
+	got, _ := log.Since(context.Background(), 0)
+	return got
 }

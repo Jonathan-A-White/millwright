@@ -97,6 +97,12 @@ type CloudInstance struct {
 	ID, Label, Status, Server string
 }
 
+// Text is what Vultr says of the instance in two words, "active locked": its
+// status and its server status, the first alone when it says no server status.
+func (i CloudInstance) Text() string {
+	return strings.TrimSpace(i.Status + " " + i.Server)
+}
+
 // Up reports whether the provider says the instance is made and ready: active
 // and its server ok. One that does not say its server status is read by its
 // status alone.
@@ -234,6 +240,13 @@ type CloudBox struct {
 	// Up being when it was asked for: the box is billed from then, and no
 	// check destroys it or counts it idle meanwhile.
 	Making bool `json:"making,omitempty"`
+	// Vultr is what Vultr said of the box's instance at the last cloud check
+	// that read it while the box was being made, "active locked" (its status
+	// and its server status): empty before a check has read it, or when Vultr
+	// holds no instance of the box yet. SlowSaid is that the check has said this
+	// make ran past CloudPlan.MakeSlowLimit, once.
+	Vultr    string `json:"vultr,omitempty"`
+	SlowSaid bool   `json:"slow_said,omitempty"`
 	// Restoring is a box whose make ran past its deadline while Vultr still
 	// held the instance, restoring from a snapshot: InstanceID is Vultr's id
 	// for it and RestoringSince when the make gave up waiting. A check adopts
@@ -378,6 +391,22 @@ type CloudPlan struct {
 	// Up is how long a make may run before it reads the instance back from the
 	// provider ([cloud] up_minutes); zero is DefaultCloudUp.
 	Up time.Duration
+	// MakeSlow is how long a make may run, unfinished, before it is a cloud
+	// event and a line under DAMPERS ([cloud] slow_make_minutes); zero is
+	// DefaultCloudMakeSlow.
+	MakeSlow time.Duration
+}
+
+// DefaultCloudMakeSlow is how long a make may run before it is called slow,
+// when the plan does not say.
+const DefaultCloudMakeSlow = 30 * time.Minute
+
+// MakeSlowLimit is how long a make may run before it is called slow.
+func (p CloudPlan) MakeSlowLimit() time.Duration {
+	if p.MakeSlow <= 0 {
+		return DefaultCloudMakeSlow
+	}
+	return p.MakeSlow
 }
 
 // UpLimit is how long a make may run.
@@ -521,8 +550,12 @@ type CloudReport struct {
 	// Waiting are the stories that wait for any host, Free the sessions free
 	// across the hosts and the boxes.
 	Waiting, Free int
-	Boxes         int
-	SpentUSD      float64
+	// Coming are the sessions the boxes still being made, or restoring, will
+	// run once they are up: not free, and counted only so that a second box is
+	// not made for the stories a box on its way already serves.
+	Coming   int
+	Boxes    int
+	SpentUSD float64
 	// Moves are the cloud events the check wrote.
 	Moves []string
 	// Making are the boxes the check began, still being made.
@@ -534,6 +567,9 @@ type CloudReport struct {
 // String is the report in one line.
 func (r CloudReport) String() string {
 	line := fmt.Sprintf("cloud: %d stories wait for any host, %d sessions free, %d boxes up, $%.2f spent this month", r.Waiting, r.Free, r.Boxes, r.SpentUSD)
+	if r.Coming > 0 {
+		line = fmt.Sprintf("cloud: %d stories wait for any host, %d sessions free (%d more once the boxes being made are up), %d boxes up, $%.2f spent this month", r.Waiting, r.Free, r.Coming, r.Boxes, r.SpentUSD)
+	}
 	for _, m := range r.Moves {
 		line += "\n  " + m
 	}
@@ -571,6 +607,7 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 	p.billed = p.askBilled(ctx)
 	p.reconcile(ctx)
 	p.dropStale(ctx)
+	p.seeSlowMakes(ctx)
 	p.seeDispatch(ctx)
 	p.markIdle(work)
 	p.setCaps(ctx)
@@ -591,8 +628,8 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 		}
 	}
 	p.repathGone(ctx, work)
-	p.report.Waiting, p.report.Free = p.demand(work)
-	if p.report.Waiting > p.report.Free && len(p.state.Boxes) < c.Plan.MaxBoxes {
+	p.report.Waiting, p.report.Free, p.report.Coming = p.demand(work)
+	if p.report.Waiting > p.report.Free+p.report.Coming && len(p.state.Boxes) < c.Plan.MaxBoxes {
 		p.make(ctx)
 	}
 	if p.dirty != "" {
@@ -745,6 +782,7 @@ func (p *cloudPass) reconcile(ctx context.Context) {
 		return
 	}
 	p.settleRestoring(ctx, instances)
+	p.readMakes(instances)
 	held := map[string]bool{}
 	for _, box := range p.state.Boxes {
 		held[box.Name] = true
@@ -772,6 +810,28 @@ func (p *cloudPass) reconcile(ctx context.Context) {
 	if !slices.Equal(kept, p.state.OrphansSaid) {
 		p.state.OrphansSaid = kept
 		p.dirty = "orphans said"
+	}
+}
+
+// readMakes keeps, on each box the book holds as being made, what Vultr says
+// of the instance labelled for it, so that mw status and DAMPERS can say a make
+// that sits at "active locked" (a snapshot restore) is not a box up.
+func (p *cloudPass) readMakes(instances []CloudInstance) {
+	for i := range p.state.Boxes {
+		box := &p.state.Boxes[i]
+		if !box.Making {
+			continue
+		}
+		said := ""
+		for _, inst := range instances {
+			if inst.Label == box.Name {
+				said = inst.Text()
+			}
+		}
+		if box.Vultr != said {
+			box.Vultr = said
+			p.dirty = box.Name + " vultr"
+		}
 	}
 }
 
@@ -919,6 +979,42 @@ func (p *cloudPass) dropStale(ctx context.Context) {
 			p.keep(ctx, "failed "+box.Name)
 		}
 	}
+}
+
+// seeSlowMakes says, once for each, a box whose make has run past the plan's
+// MakeSlowLimit: a cloud event naming the box and what Vultr says of it. DAMPERS
+// names it for as long as the make runs (SlowMakes).
+func (p *cloudPass) seeSlowMakes(ctx context.Context) {
+	for i := range p.state.Boxes {
+		box := &p.state.Boxes[i]
+		if !box.Making || box.SlowSaid || p.now.Sub(box.Up) < p.check.Plan.MakeSlowLimit() {
+			continue
+		}
+		box.SlowSaid = true
+		p.dirty = box.Name + " slow make"
+		p.move(ctx, fmt.Sprintf("%s: the make begun at %s has not finished after %s (the limit is %s); %s",
+			box.Name, box.Up.UTC().Format("15:04Z"), Clock(p.now.Sub(box.Up)), Clock(p.check.Plan.MakeSlowLimit()), box.vultrText()))
+	}
+}
+
+// vultrText is what Vultr said of the box at the last check, in a phrase.
+func (b CloudBox) vultrText() string {
+	if b.Vultr == "" {
+		return "Vultr's status of it is not known"
+	}
+	return "Vultr says " + b.Vultr
+}
+
+// SlowMakes are the boxes the book holds as being made for longer than the
+// plan's MakeSlowLimit, oldest first, for DAMPERS.
+func (s CloudState) SlowMakes(plan CloudPlan, now time.Time) []CloudBox {
+	var slow []CloudBox
+	for _, box := range s.Boxes {
+		if box.Making && now.Sub(box.Up) >= plan.MakeSlowLimit() {
+			slow = append(slow, box)
+		}
+	}
+	return slow
 }
 
 // cloudUpWhen is what a move of a box made says of when it is up.
@@ -1192,7 +1288,11 @@ func (p *cloudPass) setSessionDenies(ctx context.Context) {
 
 // demand counts the stories that wait for any host, and the sessions free
 // across the hosts the plan names and the boxes.
-func (p *cloudPass) demand(work WorkInHand) (waiting, free int) {
+//
+// A box still being made, or restoring, has no session: it counts none free
+// (mw-gq6.1113). Its sessions are coming, so that the check does not make a
+// second box for a story the first already serves.
+func (p *cloudPass) demand(work WorkInHand) (waiting, free, coming int) {
 	for _, d := range work.Ready {
 		if d.Merged().Host == domain.HostAuto && !d.Hitl() {
 			waiting++
@@ -1205,9 +1305,13 @@ func (p *cloudPass) demand(work WorkInHand) (waiting, free int) {
 		free += max(0, limit-sessions(work, host, p.now))
 	}
 	for _, box := range p.state.Boxes {
+		if box.Making || box.Restoring {
+			coming += box.boxCap(p.check.Plan)
+			continue
+		}
 		free += max(0, box.boxCap(p.check.Plan)-sessions(work, box.Name, p.now))
 	}
-	return waiting, free
+	return waiting, free, coming
 }
 
 // sessions counts the stories claimed on host that a session works. A story
@@ -1765,10 +1869,20 @@ func (r CloudReading) write(b *strings.Builder) {
 			clip(b, fmt.Sprintf("  %s  restoring %s (Vultr instance %s), up %s", box.Name, Clock(r.Now.Sub(box.RestoringSince)), box.InstanceID, Clock(r.Now.Sub(box.Up))))
 			continue
 		}
+		if box.Making {
+			// Its make has not finished: it has taken no story, and Vultr's word
+			// is shown once a check has read it (mw-gq6.1113).
+			line := fmt.Sprintf("  %s  making %s", box.Name, Clock(r.Now.Sub(box.Up)))
+			if box.Vultr != "" {
+				line += ", Vultr " + box.Vultr
+			}
+			clip(b, line)
+			continue
+		}
 		line := fmt.Sprintf("  %s  up %s", box.Name, Clock(r.Now.Sub(box.Up)))
 		// A box a book kept no Made of was said up by its make, as before.
 		switch {
-		case box.Making || !box.Dispatched.IsZero():
+		case !box.Dispatched.IsZero():
 		case box.NotDispatching != "":
 			clip(b, line+", not dispatching: "+box.NotDispatching)
 			continue
