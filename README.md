@@ -3951,6 +3951,14 @@ reason stands in the comment. `mw verify match` and the sleep pass drop such a m
 `dropped` counts them) and give each picture the words he sent with it. Neither command calls an agent. The steps are in
 `features/verify_confirm.feature`.
 
+`mw verify reject <bead> --txid <txid> --why "<why>"` takes back a proposal that is wrong. It writes one comment on the
+bead, `REJECTED PROPOSED from <txid>: <why>`, and nothing `VERIFIED`; `mw verify list` and `mw verify confirm` then no
+longer see that proposal, and `mw verify match` and the sleep pass do not propose the same txid for the bead again. A
+`PROPOSED` comment for the txid written after the `REJECTED` one stands. It is refused for an unknown bead, a bead
+already `VERIFIED`, and a txid with no standing proposal. A picture he sent with no words is proposed only at confidence
+0.95 or over (`VerifyWordlessPictureConfidence`), whatever `[verify] confidence` says: the agent's own account of it is
+all there is to go on.
+
 ### A landing his report shows not met (`mw verify notmet`)
 
 `mw verify notmet <bead> --txid <his report> [--fix <bead>]` writes one comment on a closed landing whose first words are

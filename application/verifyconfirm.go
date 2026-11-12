@@ -44,6 +44,44 @@ func VerifiedComment(by, txid, shows, how string) string {
 var verifyProposalLine = regexp.MustCompile(`(?s)^` + VerifyProposedWord + ` ` + VerifiedWord +
 	` by the Governor's use, from (\S+) \(([^)]*)\): (.*) \(confidence ([0-9.]+), ([^,]*), run ([^)]*)\)\s*$`)
 
+// VerifyRejectedWord is the first word of the comment that takes a proposal
+// back (mw verify reject). It is neither PROPOSED nor VERIFIED: no reader of the
+// tracker takes it for either.
+const VerifyRejectedWord = "REJECTED"
+
+// RejectedComment is the standing form of the comment that drops the proposal
+// for txid, and says why; it is the one place the form is written:
+// REJECTED PROPOSED from <txid>: <why>
+func RejectedComment(txid, why string) string {
+	return fmt.Sprintf("%s %s from %s: %s", VerifyRejectedWord, VerifyProposedWord, txid, strings.Join(strings.Fields(why), " "))
+}
+
+// verifyRejectedLine reads a comment RejectedComment wrote.
+var verifyRejectedLine = regexp.MustCompile(`(?s)^` + VerifyRejectedWord + ` ` + VerifyProposedWord + ` from (\S+): (.*)$`)
+
+// rejectedTxid is the txid a comment rejects, or "".
+func rejectedTxid(c Comment) string {
+	if firstWord(c.Text) != VerifyRejectedWord {
+		return ""
+	}
+	if m := verifyRejectedLine.FindStringSubmatch(strings.TrimSpace(c.Text)); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// rejectedWhy is why the newest comment rejecting txid says so, and whether
+// there is one.
+func rejectedWhy(comments []Comment, txid string) (string, bool) {
+	for i := len(comments) - 1; i >= 0; i-- {
+		if rejectedTxid(comments[i]) == txid {
+			m := verifyRejectedLine.FindStringSubmatch(strings.TrimSpace(comments[i].Text))
+			return strings.TrimSpace(m[2]), true
+		}
+	}
+	return "", false
+}
+
 // verifyProposed is one proposal as its comment holds it.
 type verifyProposed struct {
 	Txid, At, Shows, Run string
@@ -51,10 +89,22 @@ type verifyProposed struct {
 }
 
 // proposalsIn is the proposals the comments hold, oldest first. A comment that
-// opens PROPOSED but is not in the form mw verify match writes is left out.
+// opens PROPOSED but is not in the form mw verify match writes is left out, and
+// so is a proposal a later REJECTED comment takes back (mw verify reject); a
+// proposal for the same txid written after the rejection stands.
 func proposalsIn(comments []Comment) []verifyProposed {
 	var out []verifyProposed
 	for _, c := range comments {
+		if txid := rejectedTxid(c); txid != "" {
+			kept := out[:0]
+			for _, p := range out {
+				if p.Txid != txid {
+					kept = append(kept, p)
+				}
+			}
+			out = kept
+			continue
+		}
 		if firstWord(c.Text) != VerifyProposedWord {
 			continue
 		}
@@ -75,6 +125,74 @@ func proposalFor(comments []Comment, txid string) (verifyProposed, bool) {
 		}
 	}
 	return verifyProposed{}, false
+}
+
+// rejectedAfterProposal reports whether the newest comment about txid, a
+// proposal or a rejection, is a rejection.
+func rejectedAfterProposal(comments []Comment, txid string) bool {
+	for i := len(comments) - 1; i >= 0; i-- {
+		if rejectedTxid(comments[i]) == txid {
+			return true
+		}
+		if firstWord(comments[i].Text) == VerifyProposedWord && strings.Contains(comments[i].Text, txid) {
+			return false
+		}
+	}
+	return false
+}
+
+// VerifyRejectRequest is what mw verify reject is asked.
+type VerifyRejectRequest struct {
+	Bead, Txid string
+	// Why is what is wrong with the proposal; the REJECTED comment keeps it.
+	Why string
+}
+
+// VerifyReject is mw verify reject: it takes back a proposal of mw verify match
+// by a comment on its bead, so that mw verify list and mw verify confirm no
+// longer see it. It writes nothing VERIFIED and closes nothing. No agent is
+// called.
+type VerifyReject struct {
+	Beads VerifyConfirmBeads
+	// Out is where the act is said. A nil Out says nothing.
+	Out io.Writer
+}
+
+// Run rejects the proposal. It is refused, writing nothing, when the bead, the
+// txid or the why is missing, the bead is unknown or already carries a VERIFIED
+// comment, or the bead holds no standing proposal for the txid.
+func (r VerifyReject) Run(ctx context.Context, req VerifyRejectRequest) error {
+	req.Bead, req.Txid = strings.TrimSpace(req.Bead), strings.TrimSpace(req.Txid)
+	why := strings.Join(strings.Fields(req.Why), " ")
+	if req.Bead == "" || req.Txid == "" || why == "" {
+		return fmt.Errorf("mw verify reject: say the bead, the proposal's txid and why: mw verify reject <bead> --txid <txid> --why \"<why>\"")
+	}
+	found, err := r.Beads.ShowBeads(ctx, []string{req.Bead})
+	if err != nil {
+		return fmt.Errorf("mw verify reject: reading %s: %w", req.Bead, err)
+	}
+	if len(found) != 1 {
+		return fmt.Errorf("mw verify reject: the tracker has no bead %s", req.Bead)
+	}
+	all, err := r.Beads.StoriesComments(ctx, []string{req.Bead})
+	if err != nil {
+		return fmt.Errorf("mw verify reject: reading %s's comments: %w", req.Bead, err)
+	}
+	comments := all[req.Bead]
+	if verifiedIn(comments) {
+		return fmt.Errorf("mw verify reject: %s already has a comment opening %s, so there is no proposal to reject", req.Bead, VerifiedWord)
+	}
+	if _, ok := proposalFor(comments, req.Txid); !ok {
+		return fmt.Errorf("mw verify reject: %s has no standing %s comment for %s (mw verify list shows what is waiting)", req.Bead, VerifyProposedWord, req.Txid)
+	}
+	text := RejectedComment(req.Txid, why)
+	if err := r.Beads.CommentOnStory(ctx, req.Bead, text); err != nil {
+		return fmt.Errorf("mw verify reject: commenting on %s: %w", req.Bead, err)
+	}
+	if r.Out != nil {
+		fmt.Fprintf(r.Out, "commented on %s: %s\n", req.Bead, text)
+	}
+	return nil
 }
 
 // ownWordPattern finds what only the Governor says yes to: money, keys, secrets
@@ -229,6 +347,9 @@ func (c VerifyConfirm) Run(ctx context.Context, req VerifyConfirmRequest) error 
 		if shows == "" {
 			shows = proposal.Shows
 		}
+	case shows == "" && rejectedAfterProposal(comments, req.Txid):
+		why, _ := rejectedWhy(comments, req.Txid)
+		return fmt.Errorf("mw verify confirm: the proposal for %s on %s was rejected (%s), so say what it shows with --shows \"<text>\" if you have seen it shown", req.Txid, req.Bead, why)
 	case shows == "" && proposedFor(comments, req.Txid):
 		return fmt.Errorf("mw verify confirm: the %s comment on %s for %s is not in the form mw verify match writes, so say what it shows with --shows \"<text>\"", VerifyProposedWord, req.Bead, req.Txid)
 	case shows == "":

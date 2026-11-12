@@ -326,3 +326,100 @@ func TestVerifyListDoesNotMarkADemoWhoseProposalIsHisTapOnItsOwnCard(t *testing.
 		t.Fatalf("expected d-1 listed with a confirm line, got %+v:\n%s", waiting, out.String())
 	}
 }
+
+// --- mw verify reject (mw-gq6.1101) ---
+
+func (r *confirmRig) reject() application.VerifyReject {
+	return application.VerifyReject{Beads: r.beads, Out: &r.out}
+}
+
+func TestVerifyRejectDropsTheProposalWritesNothingVerifiedAndCommentsTheWhy(t *testing.T) {
+	ctx := context.Background()
+	r := newConfirmRig(t)
+	err := r.reject().Run(ctx, application.VerifyRejectRequest{Bead: "d-1", Txid: "direct:aaa", Why: "a WSL start-failure photo, not the Reader screen"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.beads.Written) != 1 || firstWordOf(r.beads.Written[0].Text) != "REJECTED" ||
+		!strings.Contains(r.beads.Written[0].Text, "direct:aaa") || !strings.Contains(r.beads.Written[0].Text, "a WSL start-failure photo, not the Reader screen") {
+		t.Fatalf("expected one REJECTED comment naming the txid and the why, got %+v", r.beads.Written)
+	}
+	for _, w := range r.beads.Written {
+		if firstWordOf(w.Text) == "VERIFIED" {
+			t.Fatalf("a reject writes nothing VERIFIED: %+v", r.beads.Written)
+		}
+	}
+	if len(r.beads.Shut) != 0 || len(r.sender.Sent()) != 0 {
+		t.Fatalf("a reject closes nothing and clears no card: %+v %+v", r.beads.Shut, r.sender.Sent())
+	}
+
+	// Neither list nor confirm sees the proposal now. The fake keeps the comments
+	// a CommentOnStory wrote in Written only, so carry them over as the tracker would.
+	r.beads.Comments["d-1"] = append(r.beads.Comments["d-1"], application.Comment{Text: r.beads.Written[0].Text})
+	var out bytes.Buffer
+	waiting, err := application.VerifyList{Beads: r.beads, Now: func() time.Time { return verifyNow }, Out: &out}.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range waiting {
+		if w.Bead == "d-1" {
+			t.Fatalf("a rejected proposal is still listed: %+v", waiting)
+		}
+	}
+	err = r.confirm().Run(ctx, application.VerifyConfirmRequest{Bead: "d-1", Txid: "direct:aaa"})
+	if err == nil || !strings.Contains(err.Error(), "rejected") {
+		t.Fatalf("expected confirm to refuse a rejected proposal and say so, got %v", err)
+	}
+}
+
+func TestVerifyRejectLeavesALaterProposalForTheSameTxidFromANewRun(t *testing.T) {
+	ctx := context.Background()
+	r := newConfirmRig(t)
+	r.beads.Comments["d-1"] = append(r.beads.Comments["d-1"],
+		application.Comment{Text: application.RejectedComment("direct:aaa", "wrong picture")},
+		application.Comment{Text: "PROPOSED VERIFIED by the Governor's use, from direct:aaa (2026-10-21 17:00Z): the green tick after Save (confidence 0.97, opus, run r-9)"},
+	)
+	waiting, err := application.VerifyList{Beads: r.beads, Now: func() time.Time { return verifyNow }}.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, w := range waiting {
+		if w.Bead == "d-1" {
+			n++
+			if w.Confidence != 0.97 {
+				t.Fatalf("expected the new run's proposal, got %+v", w)
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("expected the later proposal listed once, got %+v", waiting)
+	}
+	if err := r.confirm().Run(ctx, application.VerifyConfirmRequest{Bead: "d-1", Txid: "direct:aaa"}); err != nil {
+		t.Fatalf("a later proposal confirms: %v", err)
+	}
+}
+
+func TestVerifyRejectRefusesWhatItCannotDrop(t *testing.T) {
+	ctx := context.Background()
+	r := newConfirmRig(t)
+	cases := map[string]application.VerifyRejectRequest{
+		"no why":              {Bead: "d-1", Txid: "direct:aaa"},
+		"no txid":             {Bead: "d-1", Why: "wrong"},
+		"no proposal at txid": {Bead: "d-1", Txid: "direct:zzz", Why: "wrong"},
+		"unknown bead":        {Bead: "nope", Txid: "direct:aaa", Why: "wrong"},
+	}
+	for name, req := range cases {
+		if err := r.reject().Run(ctx, req); err == nil {
+			t.Errorf("%s: expected a refusal", name)
+		}
+	}
+	if len(r.beads.Written) != 0 {
+		t.Fatalf("a refusal writes nothing: %+v", r.beads.Written)
+	}
+	// A rejected proposal cannot be rejected twice, and a verified bead has nothing to reject.
+	r.beads.Comments["d-1"] = append(r.beads.Comments["d-1"], application.Comment{Text: application.RejectedComment("direct:aaa", "wrong")})
+	if err := r.reject().Run(ctx, application.VerifyRejectRequest{Bead: "d-1", Txid: "direct:aaa", Why: "again"}); err == nil {
+		t.Errorf("a second reject of the same proposal should be refused")
+	}
+}
