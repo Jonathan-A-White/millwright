@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
@@ -96,6 +97,10 @@ func newRetryCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			pushWaitSeconds, err := config.PushWaitSeconds()
+			if err != nil {
+				return err
+			}
 
 			if cmd.Flags().Changed("repathed") && strings.TrimSpace(repathed) == "" {
 				return fmt.Errorf("retrying %s: --repathed needs a sentence on what changed since the Builder handed the story back", args[0])
@@ -122,6 +127,8 @@ func newRetryCmd() *cobra.Command {
 				Rigs:        rigs,
 				MaxAttempts: maxAttempts,
 				Notes:       gateway,
+				Mailbox:     gateway,
+				PushWait:    time.Duration(pushWaitSeconds) * time.Second,
 				Out:         cmd.OutOrStdout(),
 				RePathed:    repathed,
 				FromMain:    fromMain || !fromBranch,

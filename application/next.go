@@ -3750,6 +3750,20 @@ func TurnCapWhy(turns int) string {
 func (n Next) closeFormula(ctx context.Context, c *closeOut, report *NextReport, what string) {
 	root := c.detail.Molecule.RootID
 	reason := FormulaClosedWhy("mw next", n.Host, c.id, what)
+	closed, tries, err := n.closeFormulaRetrying(ctx, report, root, reason)
+	report.FormulaClosed = closed
+	if err != nil {
+		lost := fmt.Sprintf("the formula %s of %s could not be closed: %v", root, c.id, err)
+		report.Notes = append(report.Notes, lost)
+		n.mailLostWriteAfter(ctx, c, report, "the formula close", lost, tries)
+	}
+}
+
+// closeFormulaRetrying closes what is left open of the formula poured as root,
+// each bead through writeRetrying(closeFormulaBead), and says how many times the
+// close that failed was tried. mw retry closes its formula the same way, through
+// a Next of its own making (mw-gq6.1120).
+func (n Next) closeFormulaRetrying(ctx context.Context, report *NextReport, root, reason string) (FormulaClosed, int, error) {
 	tries := 0
 	closed, err := closeFormulaWith(ctx, n.Tracker, root, reason, func(id string) error {
 		tries = 0
@@ -3758,12 +3772,7 @@ func (n Next) closeFormula(ctx context.Context, c *closeOut, report *NextReport,
 			return n.closeFormulaBead(ctx, root, id, reason)
 		})
 	})
-	report.FormulaClosed = closed
-	if err != nil {
-		lost := fmt.Sprintf("the formula %s of %s could not be closed: %v", root, c.id, err)
-		report.Notes = append(report.Notes, lost)
-		n.mailLostWriteAfter(ctx, c, report, "the formula close", lost, tries)
-	}
+	return closed, tries, err
 }
 
 // closeFormulaBead makes one close of a bead of the formula poured as root: a
@@ -3811,6 +3820,12 @@ func (n Next) mailLostWrite(ctx context.Context, c *closeOut, report *NextReport
 // "tried again" only of a write that was (mw-gq6.990). A mail that cannot be
 // sent is said on stderr and changes nothing else.
 func (n Next) mailLostWriteAfter(ctx context.Context, c *closeOut, report *NextReport, what, said string, tries int) {
+	n.mailLostWriteBy(ctx, "mw next", "closing out", c.id, report, what, said, tries)
+}
+
+// mailLostWriteBy is mailLostWriteAfter for command, which was doing (closing
+// out, retrying) the story when it lost the write.
+func (n Next) mailLostWriteBy(ctx context.Context, command, doing, storyID string, report *NextReport, what, said string, tries int) {
 	if n.Mailbox == nil || ctx.Err() != nil {
 		return
 	}
@@ -3824,16 +3839,16 @@ func (n Next) mailLostWriteAfter(ctx context.Context, c *closeOut, report *NextR
 	mail := NewMessage{
 		From:    SeatIdentity(MwSeat, n.Host),
 		To:      MayorMailbox,
-		Subject: fmt.Sprintf("lost write: %s on %s (%s)", what, c.id, n.Host),
-		Body: fmt.Sprintf("mw next on %s lost a write while closing out %s: %s.\n\n%s\n\n%s; "+
-			"nothing else was changed for it. Make the write by hand, with the command named above.\n", n.Host, c.id, what, said, tried),
+		Subject: fmt.Sprintf("lost write: %s on %s (%s)", what, storyID, n.Host),
+		Body: fmt.Sprintf("%s on %s lost a write while %s %s: %s.\n\n%s\n\n%s; "+
+			"nothing else was changed for it. Make the write by hand, with the command named above.\n", command, n.Host, doing, storyID, what, said, tried),
 	}
 	err := writeRetrying(ctx, n, report, "the mail about a lost write", func() error {
 		_, err := n.Mailbox.Send(ctx, mail)
 		return err
 	})
 	if err != nil && n.Err != nil {
-		fmt.Fprintf(n.Err, "mw next: the mail to %s about a lost write of %s could not be sent: %v\n", MayorMailbox, c.id, err)
+		fmt.Fprintf(n.Err, "%s: the mail to %s about a lost write of %s could not be sent: %v\n", command, MayorMailbox, storyID, err)
 	}
 }
 

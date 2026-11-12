@@ -271,6 +271,16 @@ type Retry struct {
 	// Now is the clock a harness stop's time is read against; nil is time.Now.
 	Now func() time.Time
 
+	// Mailbox is how the Mayor is told of a close of the formula that was lost
+	// for good, after every try (mw-gq6.1120). A nil Mailbox sends none.
+	Mailbox Mailbox
+
+	// PushWait and RetryWait are how a close of a bead of the formula that met a
+	// passing fault is tried again, as mw next tries one: PushWait sets the
+	// pauses (zero waits none) and RetryWait, when not nil, makes them.
+	PushWait  time.Duration
+	RetryWait func(ctx context.Context, d time.Duration) error
+
 	// Out is where the report is printed. A nil Out prints nothing.
 	Out io.Writer
 
@@ -957,10 +967,16 @@ func (r Retry) leaveClosed(ctx context.Context, report RetryReport, kept string)
 // story is closed.
 func (r Retry) closeFormula(ctx context.Context, report *RetryReport) {
 	why := FormulaClosedWhy("mw retry", r.Host, report.StoryID, "was retried, and its next attempt pours its formula afresh")
-	closed, err := closeFormula(ctx, r.Tracker, report.molecule, why)
+	// Each bead is closed as mw next closes one, through writeRetrying and
+	// closeFormulaBead, and one lost every try is mailed once with the count of
+	// the tries (mw-gq6.1120).
+	n := Next{Tracker: r.Tracker, Host: r.Host, Mailbox: r.Mailbox, PushWait: r.PushWait, RetryWait: r.RetryWait, Err: r.Err}
+	closed, tries, err := n.closeFormulaRetrying(ctx, nil, report.molecule, why)
 	report.FormulaClosed = closed
 	if err != nil {
 		report.FormulaLeft = oneLine(err.Error())
+		lost := fmt.Sprintf("the formula %s of %s could not be closed: %v", report.molecule, report.StoryID, err)
+		n.mailLostWriteBy(ctx, "mw retry", "retrying", report.StoryID, nil, "the formula close", lost, tries)
 	}
 }
 
