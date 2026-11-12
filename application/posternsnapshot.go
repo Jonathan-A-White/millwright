@@ -75,9 +75,13 @@ const PosternLandedMemoryLimit = 48 * 1024
 // not verified, so worth showing — the comments a fresh read of it built,
 // so that a memory hit need not read them again to display them.
 type posternSnapshotMemoryEntry struct {
-	Count    int                      `json:"count"`
-	Verified bool                     `json:"verified"`
-	Comments []PosternSnapshotComment `json:"comments,omitempty"`
+	Count    int  `json:"count"`
+	Verified bool `json:"verified"`
+	// NotMet and NotMetFix are the newest verdict when it opens NOT MET
+	// (mw verify notmet): the fix bead it names, or "".
+	NotMet    bool                     `json:"not_met,omitempty"`
+	NotMetFix string                   `json:"not_met_fix,omitempty"`
+	Comments  []PosternSnapshotComment `json:"comments,omitempty"`
 	// Check is the first sentence of the Mayor's landing-check comment, kept
 	// beside Comments because that comment may be older than the newest few
 	// they hold; "" when none was found.
@@ -800,7 +804,8 @@ func landedVerdict(child StoryDetail, comments map[string][]Comment, memory, new
 	}
 
 	result, ok := landedFromComments(child, comments[child.Story.ID])
-	entry := posternSnapshotMemoryEntry{Count: child.CommentCount, Verified: !ok, Closed: closed}
+	verdict := newestVerdict(comments[child.Story.ID])
+	entry := posternSnapshotMemoryEntry{Count: child.CommentCount, Verified: !ok, Closed: closed, NotMet: verdict.NotMet, NotMetFix: verdict.Fix}
 	if ok {
 		result.Comments = clippedMemoryComments(result.Comments)
 		entry.Comments = result.Comments
@@ -816,10 +821,8 @@ func landedVerdict(child StoryDetail, comments map[string][]Comment, memory, new
 // established child closed within PosternSnapshotWindow. ok is false for a
 // verified child.
 func landedFromComments(child StoryDetail, comments []Comment) (PosternSnapshotLanded, bool) {
-	for _, c := range comments {
-		if commentMarksVerified(c.Text) {
-			return PosternSnapshotLanded{}, false
-		}
+	if newestVerdict(comments).Verified {
+		return PosternSnapshotLanded{}, false
 	}
 	return PosternSnapshotLanded{
 		ID:          child.Story.ID,

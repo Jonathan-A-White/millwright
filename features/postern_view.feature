@@ -95,6 +95,38 @@ Feature: mw postern view
     Then the view's needs on "mw-v.6" are "none"
     And the view's needs on "mw-v.7" are "none"
 
+  # mw-27f7myz.3: a landing his own report shows NOT MET leaves his line and
+  # waits on its fix.
+  Scenario: A landing marked NOT MET with its fix open waits on the factory for the fix
+    Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "HOW TO CHECK IT: 1. Open the app."
+    And the view's bead "mw-v.6" has the comment "NOT MET by the Governor's report, txid direct:abc (2026-11-04 21:17Z), fix mw-v.8"
+    And the view's bead "mw-v.8" under "mw-v" is open and titled "Make Open in the app work"
+    When the live view is built
+    Then the view's need "verify" on "mw-v.6" waits for "factory"
+    And the view's verify need on "mw-v.6" is waiting on "Make Open in the app work"
+    And the view's verify need on "mw-v.6" offers nothing
+
+  Scenario: A landing marked NOT MET with its fix landed makes no card
+    Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "HOW TO CHECK IT: 1. Open the app."
+    And the view's bead "mw-v.6" has the comment "NOT MET by the Governor's report, txid direct:abc (2026-11-04 21:17Z), fix mw-v.8"
+    And the view's bead "mw-v.8" under "mw-v" landed an hour ago
+    When the live view is built
+    Then the view has no verify need on "mw-v.6"
+
+  Scenario: A landing marked NOT MET with no fix named waits on the Mayor
+    Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "HOW TO CHECK IT: 1. Open the app."
+    And the view's bead "mw-v.6" has the comment "NOT MET by the Governor's report, txid direct:abc (2026-11-04 21:17Z), no fix named"
+    When the live view is built
+    Then the view's need "verify" on "mw-v.6" waits for "mayor"
+    And the view's verify need on "mw-v.6" is waiting on "the Mayor to name the fix"
+
+  Scenario: A VERIFIED comment after NOT MET removes the card
+    Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "HOW TO CHECK IT: 1. Open the app."
+    And the view's bead "mw-v.6" has the comment "NOT MET by the Governor's report, txid direct:abc (2026-11-04 21:17Z), no fix named"
+    And the view's bead "mw-v.6" has the comment "VERIFIED by the Governor via postern"
+    When the live view is built
+    Then the view has no verify need on "mw-v.6"
+
   Scenario: The memory answers a second run with no comment read
     Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "HOW TO CHECK IT: 1. Open the app and tap Needs you."
     When the live view is built

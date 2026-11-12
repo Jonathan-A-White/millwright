@@ -66,6 +66,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
 - [The sleep pass](#the-sleep-pass)
 - [What his use shows met (`mw verify match`)](#what-his-use-shows-met-mw-verify-match)
   - [Confirming a proposal (`mw verify confirm`, `mw verify list`)](#confirming-a-proposal-mw-verify-confirm-mw-verify-list)
+  - [A landing his report shows not met (`mw verify notmet`)](#a-landing-his-report-shows-not-met-mw-verify-notmet)
   - [Checking the labels of a HOW TO CHECK IT (`mw lint-checkit`)](#checking-the-labels-of-a-how-to-check-it-mw-lint-checkit)
 - [Saved prompts](#saved-prompts)
 - [Making a fresh vault](#making-a-fresh-vault)
@@ -3937,6 +3938,17 @@ open demo's newest epic story's close) cannot show it working and is refused unl
 reason stands in the comment. `mw verify match` and the sleep pass drop such a match the same way (the run log's
 `dropped` counts them) and give each picture the words he sent with it. Neither command calls an agent. The steps are in
 `features/verify_confirm.feature`.
+
+### A landing his report shows not met (`mw verify notmet`)
+
+`mw verify notmet <bead> --txid <his report> [--fix <bead>]` writes one comment on a closed landing whose first words are
+`NOT MET`: `NOT MET by the Governor's report, txid <txid> (<time>), fix <bead>` (`no fix named` without `--fix`; the time
+is the report's, from the inbox, else the moment of writing). It is refused for a bead that is not a closed landing, one
+whose newest verdict opens `VERIFIED`, and a `--fix` that is not a bead. The Needs you view reads the newest comment
+opening `VERIFIED` or `NOT MET`: a landing whose newest verdict is `NOT MET` makes a verify need that is not ready,
+waiting on the factory (the fix's title) while the fix is open, and on the Mayor when no fix is named, the tracker
+lacks it or it closed without landing; once the fix is closed as landed the landing makes no need (the fix's own verify
+card asks him). A later `VERIFIED` comment wins. The steps are in `features/postern_view.feature`.
 
 ### Checking the labels of a HOW TO CHECK IT (`mw lint-checkit`)
 

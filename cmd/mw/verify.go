@@ -44,7 +44,9 @@ func newVerifyCmd() *cobra.Command {
 			"  $150 Amazon gift card\n" +
 			"A bead that names none prints 'no strings named on the bead' and the other two checks still run.\n\n" +
 			"It ends with one line, 'verify <bead>: deploy OK|MISMATCH|UNKNOWN|not tracked, healthz OK|FAIL|none, strings N/M found', and\n" +
-			"exits non-zero when a check failed. The Mayor's VERIFIED comment stays a judgment: this writes none.",
+			"exits non-zero when a check failed. The Mayor's VERIFIED comment stays a judgment: this writes none.\n\n" +
+			"Subcommands: match, confirm, list, and notmet (a landing his own report shows does not work: mw verify notmet <bead>\n" +
+			"--txid <txid> [--fix <bead>] writes a NOT MET comment, and the Needs you card waits on the fix until it lands).",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -82,7 +84,7 @@ func newVerifyCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.AddCommand(newVerifyMatchCmd(), newVerifyConfirmCmd(), newVerifyListCmd())
+	cmd.AddCommand(newVerifyMatchCmd(), newVerifyConfirmCmd(), newVerifyListCmd(), newVerifyNotMetCmd())
 	return cmd
 }
 
@@ -273,4 +275,38 @@ func newVerifyListCmd() *cobra.Command {
 			return err
 		},
 	}
+}
+
+func newVerifyNotMetCmd() *cobra.Command {
+	var txid, fix string
+	cmd := &cobra.Command{
+		Use:   "notmet <bead> --txid <txid> [--fix <bead>]",
+		Short: "Record that a landing his own report shows does not work: the NOT MET comment; its Needs you card waits on the fix",
+		Long: "notmet writes one comment on a closed landing, whose first words are NOT MET, naming the txid of his report,\n" +
+			"its time (the inbox's, else now) and the fix:\n" +
+			"  NOT MET by the Governor's report, txid <txid> (<time>), fix <bead>\n" +
+			"  NOT MET by the Governor's report, txid <txid> (<time>), no fix named\n" +
+			"The Needs you view then takes the landing's verify card off his line: it waits on the factory while the fix is\n" +
+			"open, on the Mayor when no fix is named, and is gone once the fix is closed as landed (the fix's own verify card\n" +
+			"asks him). A later comment opening VERIFIED wins.\n\n" +
+			"It is refused for a bead that is not a closed landing, one whose newest verdict opens VERIFIED, and a --fix that\n" +
+			"is not a bead. No agent is called.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			gateway, _, err := posternGateway()
+			if err != nil {
+				return err
+			}
+			inbox, err := config.PosternInboxDir()
+			if err != nil {
+				return err
+			}
+			return application.VerifyNotMet{Beads: gateway, InboxDir: inbox, Out: cmd.OutOrStdout()}.
+				Run(cmd.Context(), application.VerifyNotMetRequest{Bead: args[0], Txid: txid, Fix: fix})
+		},
+	}
+	cmd.Flags().StringVar(&txid, "txid", "", "the txid of his message or picture that shows it does not work (required)")
+	cmd.Flags().StringVar(&fix, "fix", "", "the bead filed to fix it; the card waits on it until it lands")
+	_ = cmd.MarkFlagRequired("txid")
+	return cmd
 }
