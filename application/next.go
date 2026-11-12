@@ -2785,21 +2785,10 @@ func (n Next) closeStoryOnce(ctx context.Context, id, outcome string, notes *[]s
 		said, err = n.takeOverAndClose(ctx, id, outcome, held)
 		*notes = append(*notes, said...)
 	}
-	if err == nil {
-		return nil
-	}
-	_, passing := Faulted(err)
-	unsure := strings.Contains(strings.ToLower(err.Error()), "indeterminate")
-	if !passing && !unsure {
-		return err
-	}
-	if detail, readErr := n.Tracker.ShowStory(ctx, id); readErr == nil && detail.Closed() {
-		return nil
-	}
-	if !passing {
-		return &TransientFault{Why: "write commit result indeterminate", Err: err}
-	}
-	return err
+	return settleClose(err, func() bool {
+		detail, readErr := n.Tracker.ShowStory(ctx, id)
+		return readErr == nil && detail.Closed()
+	})
 }
 
 // stillWaitsOn is the first story the detail waits on that the tracker does not
@@ -3410,23 +3399,7 @@ func writeRetrying(ctx context.Context, n Next, report *NextReport, what string,
 }
 
 func retrying[T any](ctx context.Context, n Next, report *NextReport, verb, what string, try func() (T, error)) (T, error) {
-	for retry := 0; ; retry++ {
-		got, err := try()
-		if err == nil {
-			return got, nil
-		}
-		fault, passing := Faulted(err)
-		if !passing || retry == ReadRetries {
-			return got, err
-		}
-		wait := n.PushWait / 4 * time.Duration(retry+1)
-		if report != nil {
-			report.Notes = append(report.Notes, fmt.Sprintf("%s of %s failed (%s), retried in %s", verb, what, fault.Why, wait))
-		}
-		if waitErr := n.retryWait(ctx, wait); waitErr != nil {
-			return got, fmt.Errorf("%w (and waiting %s to %s %s again: %v)", err, wait, verb, what, waitErr)
-		}
-	}
+	return retryWrite(ctx, n.PushWait, n.retryWait, report, verb, what, try)
 }
 
 // retryPause is how long to wait before the retry'th try again of a git step
@@ -3791,30 +3764,20 @@ func (n Next) closeFormulaBead(ctx context.Context, root, id, reason string) err
 // mw tidy closes the beads of a closed story's formula through it too
 // (mw-gq6.1132). A nil molecules reads nothing, and a fault is then tried again.
 func closeFormulaBeadChecked(ctx context.Context, molecules TidyMolecules, root, id string, closeIt func() error) error {
-	err := closeIt()
-	if err == nil {
-		return nil
-	}
-	_, passing := Faulted(err)
-	unsure := strings.Contains(strings.ToLower(err.Error()), "indeterminate")
-	if !passing && !unsure {
-		return err
-	}
-	if molecules != nil {
-		if molecule, readErr := molecules.OpenMolecule(ctx, root); readErr == nil {
-			open := molecule.RootID != ""
-			if id != root {
-				open = slices.ContainsFunc(molecule.Steps, func(step FormulaStep) bool { return step.ID == id })
-			}
-			if !open {
-				return nil
-			}
+	return settleClose(closeIt(), func() bool {
+		if molecules == nil {
+			return false
 		}
-	}
-	if !passing {
-		return &TransientFault{Why: "write commit result indeterminate", Err: err}
-	}
-	return err
+		molecule, readErr := molecules.OpenMolecule(ctx, root)
+		if readErr != nil {
+			return false
+		}
+		open := molecule.RootID != ""
+		if id != root {
+			open = slices.ContainsFunc(molecule.Steps, func(step FormulaStep) bool { return step.ID == id })
+		}
+		return !open
+	})
 }
 
 // mailLostWrite tells the Mayor of a write to the tracker that was lost for good
@@ -3845,30 +3808,8 @@ func (n Next) mailLostWriteBy(ctx context.Context, command, doing, storyID strin
 // mailLostWriteVia is mailLostWriteBy through send, the one way to a mailbox
 // that mw tidy has (mw-gq6.1132).
 func (n Next) mailLostWriteVia(ctx context.Context, send func(context.Context, NewMessage) (string, error), command, doing, storyID string, report *NextReport, what, said string, tries int) {
-	if send == nil || ctx.Err() != nil {
-		return
-	}
-	tried := "It failed"
-	switch {
-	case tries == 1:
-		tried = "It was tried once; the fault was not a passing one, so it was not tried again, and it failed"
-	case tries > 1:
-		tried = fmt.Sprintf("It was tried %d times, waiting between the tries, and failed every time", tries)
-	}
-	mail := NewMessage{
-		From:    SeatIdentity(MwSeat, n.Host),
-		To:      MayorMailbox,
-		Subject: fmt.Sprintf("lost write: %s on %s (%s)", what, storyID, n.Host),
-		Body: fmt.Sprintf("%s on %s lost a write while %s %s: %s.\n\n%s\n\n%s; "+
-			"nothing else was changed for it. Make the write by hand, with the command named above.\n", command, n.Host, doing, storyID, what, said, tried),
-	}
-	err := writeRetrying(ctx, n, report, "the mail about a lost write", func() error {
-		_, err := send(ctx, mail)
-		return err
-	})
-	if err != nil && n.Err != nil {
-		fmt.Fprintf(n.Err, "%s: the mail to %s about a lost write of %s could not be sent: %v\n", command, MayorMailbox, storyID, err)
-	}
+	CloseRetry{Host: n.Host, PushWait: n.PushWait, RetryWait: n.RetryWait, Err: n.Err}.
+		mailLostVia(ctx, send, command, doing, storyID, report, what, said, tries)
 }
 
 // mailTheMayor sends the one mail that says what became of the story: from mw

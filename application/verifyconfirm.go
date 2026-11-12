@@ -289,6 +289,14 @@ type VerifyConfirm struct {
 	Now func() time.Time
 	// Out is where each act is said. A nil Out says nothing.
 	Out io.Writer
+
+	// Host, PushWait, RetryWait and Mailbox are what the close of the demo is
+	// retried with (CloseRetry, mw-gq6.1131): a nil Mailbox mails nothing of a
+	// close lost.
+	Host      string
+	PushWait  time.Duration
+	RetryWait func(ctx context.Context, d time.Duration) error
+	Mailbox   Mailbox
 }
 
 func (c VerifyConfirm) printf(format string, args ...any) {
@@ -393,11 +401,25 @@ func (c VerifyConfirm) Run(ctx context.Context, req VerifyConfirmRequest) error 
 		c.printf("left %s as it is (%s, not an open or deferred demo)\n", req.Bead, bead.Status)
 		return nil
 	}
-	if err := c.Beads.CloseStory(ctx, req.Bead, text); err != nil {
+	closer := CloseRetry{Close: c.Beads.CloseStory, Show: c.showBead, Host: c.Host,
+		PushWait: c.PushWait, RetryWait: c.RetryWait, Mailbox: c.Mailbox, Err: c.Out}
+	if err := closer.CloseStory(ctx, "mw verify confirm", "confirming", req.Bead, text); err != nil {
 		return fmt.Errorf("mw verify confirm: %s is commented VERIFIED, but closing it failed: %w", req.Bead, err)
 	}
 	c.printf("closed %s\n", req.Bead)
 	return c.clearCard(ctx, req)
+}
+
+// showBead reads one bead whole, as CloseRetry reads a bead it closed.
+func (c VerifyConfirm) showBead(ctx context.Context, id string) (StoryDetail, error) {
+	details, err := c.Beads.ShowBeads(ctx, []string{id})
+	if err != nil {
+		return StoryDetail{}, err
+	}
+	if len(details) == 0 {
+		return StoryDetail{}, fmt.Errorf("no issue found matching %q", id)
+	}
+	return details[0], nil
 }
 
 // olderThanLanding says, when the evidence txid was written before the bead

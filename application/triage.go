@@ -59,6 +59,8 @@ type TriageSource interface {
 // TriageCloser is the one write the orphan sweep makes.
 type TriageCloser interface {
 	CloseStory(ctx context.Context, id, reason string) error
+	// ShowStory reads a bead, to see whether a close bd was unsure of landed.
+	ShowStory(ctx context.Context, id string) (StoryDetail, error)
 }
 
 // isFormulaBead is whether the id is one of a poured formula's beads (a root or
@@ -385,6 +387,13 @@ type TriageOrphans struct {
 	Closer TriageCloser
 	Apply  bool
 	Out    io.Writer
+
+	// Host, PushWait, RetryWait and Mailbox are what each close is retried with
+	// (CloseRetry, mw-gq6.1131): a nil Mailbox mails nothing of a close lost.
+	Host      string
+	PushWait  time.Duration
+	RetryWait func(ctx context.Context, d time.Duration) error
+	Mailbox   Mailbox
 }
 
 // Run returns the ids of the orphans still open, steps before roots, each in id
@@ -427,7 +436,9 @@ func (o TriageOrphans) Run(ctx context.Context) ([]string, error) {
 	for _, id := range found {
 		reason := fmt.Sprintf("Orphaned formula bead of closed story %s, closed by mw triage dump --sweep-orphans", story[id])
 		if o.Apply {
-			if err := o.Closer.CloseStory(ctx, id, reason); err != nil {
+			closer := CloseRetry{Close: o.Closer.CloseStory, Show: o.Closer.ShowStory, Host: o.Host,
+				PushWait: o.PushWait, RetryWait: o.RetryWait, Mailbox: o.Mailbox, Err: o.Out}
+			if err := closer.CloseStory(ctx, "mw triage", "sweeping orphans", id, reason); err != nil {
 				return found, fmt.Errorf("triage orphans: closing %s: %w", id, err)
 			}
 		}

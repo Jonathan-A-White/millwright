@@ -223,6 +223,13 @@ type BackendStage struct {
 	// Live writes DEPLOYED-CHECKED on the story a swap carried, once the swap has
 	// gone through (mw-t5shinh.27). A zero Live writes none.
 	Live DeployCheck
+
+	// PushWait, RetryWait and Mailbox are what the close of a swap bead is retried
+	// with (CloseRetry, mw-gq6.1131): zero PushWait waits no time, a nil RetryWait
+	// is a real wait, and a nil Mailbox mails nothing of a close lost.
+	PushWait  time.Duration
+	RetryWait func(ctx context.Context, d time.Duration) error
+	Mailbox   Mailbox
 }
 
 // Wants reports whether this host names a backend for rig.

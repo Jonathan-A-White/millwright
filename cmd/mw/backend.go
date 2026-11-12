@@ -47,6 +47,8 @@ func hostBackend(gateway *beads.Gateway, files application.HomeFile, host string
 		Host:     host,
 		Tracker:  gateway,
 		Notes:    gateway,
+		PushWait: closePushWait(),
+		Mailbox:  gateway,
 		Hands: application.HandsAdd{
 			Retired: retired,
 			Tracker: gateway,
