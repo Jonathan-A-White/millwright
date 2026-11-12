@@ -2,8 +2,10 @@ package application_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -79,5 +81,170 @@ func TestALevelFactoryRigBuiltAtHeadHasItsStaleDeployedMarkCaughtUp(t *testing.T
 
 	if built["millwright.deployed"] != checkout.tip || after.runs != 0 {
 		t.Errorf("expected the mark caught up with no build, got %q after %d builds", built["millwright.deployed"], after.runs)
+	}
+}
+
+// mw-gq6.1125: a checkout whose pack is corrupt fails every fetch; the host
+// moves it aside, clones it again and builds.
+
+const corruptPackSaid = "git fetch origin in /rigs/millwright: exit 128: error: unknown object type 0 at offset 25297795 in .git/objects/pack/pack-ef795bcaf95c577366a4ba7d3e2ee0f83b4e2d97.pack"
+
+type fakeHealer struct {
+	checkout   *fakeCheckout
+	unpushed   int
+	unpushErr  error
+	recloneErr error
+	recloned   []string
+}
+
+func (f *fakeHealer) Unpushed(context.Context, string) (int, error) { return f.unpushed, f.unpushErr }
+func (f *fakeHealer) Reclone(_ context.Context, dir, aside, branch string) (string, error) {
+	f.recloned = append(f.recloned, dir+" -> "+aside+" @"+branch)
+	if f.recloneErr != nil {
+		return "", f.recloneErr
+	}
+	f.checkout.head = f.checkout.tip
+	return aside, nil
+}
+
+func aCorruptCheckout(box string) (application.SelfUpdate, *fakeCheckout, *fakeAfter, fakeBuilt, *fakeHealer) {
+	update, checkout, after, built := aFactoryUpdate()
+	checkout.fetchErr = errors.New(corruptPackSaid)
+	healer := &fakeHealer{checkout: checkout}
+	update.Heal = healer
+	update.Box = box
+	update.Host = box
+	now := time.Date(2026, 11, 12, 18, 30, 0, 0, time.UTC)
+	update.Now = func() time.Time { return now }
+	return update, checkout, after, built, healer
+}
+
+func TestASelfUpdateWhoseFetchMeetsACorruptPackClonesTheCheckoutAgainAndBuilds(t *testing.T) {
+	update, checkout, after, built, healer := aCorruptCheckout("cloud1")
+	built["millwright"] = "027f977aaaaaaaa" // built at the old head, as a host that has been running
+
+	notes, failure := update.Update(context.Background())
+
+	if failure != nil {
+		t.Fatalf("expected no failure, got %+v (%v)", failure, notes)
+	}
+	want := "/rigs/millwright -> /rigs/millwright.corrupt-2026-11-12 @main"
+	if len(healer.recloned) != 1 || healer.recloned[0] != want {
+		t.Errorf("expected one re-clone %q, got %v", want, healer.recloned)
+	}
+	if after.runs != 1 {
+		t.Errorf("expected the build to run once in the new clone, got %d", after.runs)
+	}
+	if built["millwright"] != checkout.tip {
+		t.Errorf("expected the build remembered at origin's main, got %q", built["millwright"])
+	}
+	if all := strings.Join(notes, "\n"); !strings.Contains(all, "corrupt-2026-11-12") || !strings.Contains(all, "built") {
+		t.Errorf("expected the notes to say the checkout was moved aside and built, got:\n%s", all)
+	}
+}
+
+func TestASelfUpdateNeverClonesACheckoutWithUncommittedChanges(t *testing.T) {
+	update, checkout, after, _, healer := aCorruptCheckout("cloud1")
+	checkout.dirty = []string{"Makefile"}
+
+	_, failure := update.Update(context.Background())
+
+	if len(healer.recloned) != 0 || after.runs != 0 {
+		t.Errorf("expected no re-clone and no build, got %v, %d builds", healer.recloned, after.runs)
+	}
+	if failure == nil || !strings.Contains(failure.Said, "uncommitted") {
+		t.Errorf("expected the failure to say the changes are the reason, got %+v", failure)
+	}
+}
+
+func TestASelfUpdateNeverClonesACheckoutWithCommitsNotOnOrigin(t *testing.T) {
+	update, _, after, _, healer := aCorruptCheckout("cloud1")
+	healer.unpushed = 2
+
+	_, failure := update.Update(context.Background())
+
+	if len(healer.recloned) != 0 || after.runs != 0 {
+		t.Errorf("expected no re-clone and no build, got %v, %d builds", healer.recloned, after.runs)
+	}
+	if failure == nil || !strings.Contains(failure.Said, "2 commits not on origin") {
+		t.Errorf("expected the failure to say the commits are the reason, got %+v", failure)
+	}
+}
+
+func TestASelfUpdateThatCannotTellWhatIsUnpushedClonesNothing(t *testing.T) {
+	update, _, _, _, healer := aCorruptCheckout("cloud1")
+	healer.unpushErr = errors.New("rev-list: bad object")
+
+	_, failure := update.Update(context.Background())
+
+	if len(healer.recloned) != 0 || failure == nil {
+		t.Errorf("expected no re-clone and a failure, got %v, %+v", healer.recloned, failure)
+	}
+}
+
+func TestAFetchThatFailedForTheNetworkIsNotAReclone(t *testing.T) {
+	update, checkout, _, _, healer := aCorruptCheckout("cloud1")
+	checkout.fetchErr = &application.TransientFault{Why: "early EOF", Err: errors.New("fatal: early EOF\nfatal: index-pack failed")}
+
+	_, failure := update.Update(context.Background())
+
+	if len(healer.recloned) != 0 || failure == nil || failure.Step != "fetch" {
+		t.Errorf("expected a plain fetch failure, got %v, %+v", healer.recloned, failure)
+	}
+}
+
+func TestACloudBoxWhoseCloneFailsTooIsNamedWithTheStepToDestroyIt(t *testing.T) {
+	update, _, _, _, healer := aCorruptCheckout("cloud3")
+	healer.recloneErr = errors.New("git clone: No space left on device")
+
+	_, failure := update.Update(context.Background())
+
+	if failure == nil || !strings.Contains(failure.Said, "mw cloud down cloud3") {
+		t.Errorf("expected the alarm to name mw cloud down cloud3, got %+v", failure)
+	}
+}
+
+func TestAHostThatIsNoCloudBoxIsNotToldToDestroyItself(t *testing.T) {
+	update, _, _, _, healer := aCorruptCheckout("")
+	update.Host = "laptop"
+	healer.recloneErr = errors.New("git clone: No space left on device")
+
+	_, failure := update.Update(context.Background())
+
+	if failure == nil || strings.Contains(failure.Said, "mw cloud down") {
+		t.Errorf("expected a failure that does not name mw cloud down, got %+v", failure)
+	}
+}
+
+func TestACloudBoxThatMeetsASecondCorruptPackWithinAnHourIsNamedAndNotClonedAgain(t *testing.T) {
+	update, checkout, _, _, healer := aCorruptCheckout("cloud3")
+	if _, failure := update.Update(context.Background()); failure != nil {
+		t.Fatalf("expected the first fault healed, got %+v", failure)
+	}
+	checkout.head = "027f977aaaaaaaa"
+	now := time.Date(2026, 11, 12, 19, 10, 0, 0, time.UTC)
+	update.Now = func() time.Time { return now }
+
+	_, failure := update.Update(context.Background())
+
+	if len(healer.recloned) != 1 {
+		t.Errorf("expected the second fault not cloned again, got %v", healer.recloned)
+	}
+	if failure == nil || !strings.Contains(failure.Said, "mw cloud down cloud3") || !strings.Contains(failure.Said, "second") {
+		t.Errorf("expected the alarm to name the second fault and mw cloud down cloud3, got %+v", failure)
+	}
+}
+
+func TestACloudBoxThatMeetsASecondCorruptPackAfterAnHourIsClonedAgain(t *testing.T) {
+	update, checkout, _, _, healer := aCorruptCheckout("cloud3")
+	update.Update(context.Background())
+	checkout.head = "027f977aaaaaaaa"
+	now := time.Date(2026, 11, 12, 19, 31, 0, 0, time.UTC)
+	update.Now = func() time.Time { return now }
+
+	_, failure := update.Update(context.Background())
+
+	if failure != nil || len(healer.recloned) != 2 {
+		t.Errorf("expected a second re-clone, got %v, %+v", healer.recloned, failure)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -108,6 +109,14 @@ type SelfUpdate struct {
 	// a landing's own after-landing makes too. Either nil writes nothing.
 	Landed LandedLog
 	Live   DeployCheck
+
+	// Heal makes a checkout whose fetch fails on a corrupt git object whole
+	// again (mw-gq6.1125). Box is the name of the cloud box this host is, empty
+	// for a host that is none, and Now the clock; a nil Heal heals nothing and
+	// a nil Now is the time of day.
+	Heal CheckoutHealer
+	Box  string
+	Now  func() time.Time
 }
 
 // selfUpdateWords is how every note about an update begins.
@@ -166,9 +175,24 @@ func (s SelfUpdate) runFactory(ctx context.Context) ([]string, *SelfUpdateFailur
 			&SelfUpdateFailure{Step: step, Said: said}
 	}
 
+	var healed []string
 	if err := s.Checkout.Fetch(ctx, dir); err != nil {
-		return failed("fetch", "fetching", err)
+		if !corruptCheckout(err) {
+			return failed("fetch", "fetching", err)
+		}
+		notes, failure, ok := s.heal(ctx, dir, err)
+		if !ok {
+			return notes, failure
+		}
+		healed = notes
 	}
+	notes, failure := s.levelFactory(ctx, dir, failed)
+	return append(healed, notes...), failure
+}
+
+// levelFactory is the rest of runFactory once the checkout has been fetched:
+// fast-forward it onto origin's main and build.
+func (s SelfUpdate) levelFactory(ctx context.Context, dir string, failed func(step, doing string, err error) ([]string, *SelfUpdateFailure)) ([]string, *SelfUpdateFailure) {
 	tip, err := s.Checkout.Tip(ctx, dir, DefaultRemote, FactoryBranch)
 	if err != nil || tip == "" {
 		if err == nil {

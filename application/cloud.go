@@ -424,6 +424,9 @@ func (p CloudPlan) MakeStale() time.Duration { return p.UpLimit() + CloudMakeSta
 // DefaultCloudPrefix is what a box's name begins with.
 const DefaultCloudPrefix = "cloud"
 
+// IsBox says name is a box's name: the prefix and a number.
+func (p CloudPlan) IsBox(name string) bool { return p.isBox(name) }
+
 // isBox says name is a box's name: the prefix and a number.
 func (p CloudPlan) isBox(name string) bool {
 	number, found := strings.CutPrefix(name, p.prefix())
