@@ -46,6 +46,13 @@ func (f FormulaClosed) String() string {
 // first close that fails, so that a root is never closed over a step still
 // open, and says what it closed before it.
 func closeFormula(ctx context.Context, beads WorkTracker, root, reason string) (FormulaClosed, error) {
+	return closeFormulaWith(ctx, beads, root, reason, func(id string) error { return beads.CloseStory(ctx, id, reason) })
+}
+
+// closeFormulaWith is closeFormula with the close of each bead, a step or the
+// root, made by closeOne: mw next closes them through its own retry of a write
+// (mw-gq6.990), mw retry and mw tidy straight.
+func closeFormulaWith(ctx context.Context, beads WorkTracker, root, reason string, closeOne func(id string) error) (FormulaClosed, error) {
 	closed := FormulaClosed{Root: root}
 	if strings.TrimSpace(root) == "" {
 		return closed, nil
@@ -61,13 +68,13 @@ func closeFormula(ctx context.Context, beads WorkTracker, root, reason string) (
 		}
 	}
 	for _, step := range steps {
-		if err := beads.CloseStory(ctx, step.ID, reason); err != nil {
+		if err := closeOne(step.ID); err != nil {
 			return closed, fmt.Errorf("closing the step %s: %w", step.ID, err)
 		}
 		closed.Steps = append(closed.Steps, step.ID)
 	}
 	if rootOpen {
-		if err := beads.CloseStory(ctx, root, reason); err != nil {
+		if err := closeOne(root); err != nil {
 			return closed, fmt.Errorf("closing the root %s: %w", root, err)
 		}
 		closed.RootClosed = true
