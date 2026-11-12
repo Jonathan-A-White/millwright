@@ -7,6 +7,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 
 	"github.com/spf13/cobra"
 )
@@ -46,7 +47,15 @@ func newStuckCmd() *cobra.Command {
 				return err
 			}
 			if dampers {
-				survey, err := damperSurvey(gateway)
+				dir, err := config.Vault()
+				if err != nil {
+					return err
+				}
+				host, err := config.Host()
+				if err != nil {
+					return err
+				}
+				survey, err := damperSurvey(gateway, dir, host)
 				if err != nil {
 					return err
 				}

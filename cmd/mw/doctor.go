@@ -413,7 +413,7 @@ func newDoctorCmd() *cobra.Command {
 			wslTrim.Note = func(ctx context.Context, text string) error {
 				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.WSLTrimName), text)
 			}
-			dampers, err := damperSurvey(mwGateway(vault, host))
+			dampers, err := damperSurvey(mwGateway(vault, host), vault, host)
 			if err != nil {
 				return err
 			}
