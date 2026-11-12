@@ -97,6 +97,7 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the view's hitl bead "([^"]*)" under "([^"]*)" was filed (\d+) days? ago with the labels "([^"]*)" and the body "([^"]*)"$`, c.theViewsHitlBeadWasFiledLabelled)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed an hour ago with the labels "([^"]*)"$`, c.theViewsBeadLandedAnHourAgoLabelled)
 	ctx.Then(`^the view's need "([^"]*)" on "([^"]*)" says "([^"]*)"$`, c.theViewsNeedSays)
+	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" is open and titled "([^"]*)"$`, c.theViewsBeadIsOpenAndTitled)
 	ctx.Given(`^the view's bead "([^"]*)" has the comment "([^"]*)"$`, c.theViewsBeadHasTheComment)
 	ctx.Given(`^the view's bead "([^"]*)" has the comment "([^"]*)" dated (\d+) days? ago$`, c.theViewsBeadHasTheCommentDated)
 	ctx.Given(`^the view's bead "([^"]*)" has a comment of (\d+) letters$`, c.theViewsBeadHasALongComment)
@@ -399,6 +400,11 @@ func (c *posternViewContext) theViewsBeadIsUnderWithLabels(id, parent, labels st
 func (c *posternViewContext) story(id, epic string) {
 	c.tracker.AddStory(epic, domain.Story{ID: id, Title: "Story " + id})
 	_ = c.tracker.CommentOnStory(context.Background(), id, "a word on "+id)
+}
+
+func (c *posternViewContext) theViewsBeadIsOpenAndTitled(id, epic, title string) error {
+	c.tracker.AddStory(epic, domain.Story{ID: id, Title: title})
+	return nil
 }
 
 func (c *posternViewContext) theViewsBeadIsLabelled(id, epic, label string) error {

@@ -982,8 +982,28 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 	}
 
 	newMemory := map[string]posternSnapshotMemoryEntry{}
+	var unverified []*viewEntry
+	var fixes []string
 	for _, e := range verifies {
-		if _, unverified := landedVerdict(e.detail, comments, memory, newMemory); !unverified {
+		if _, open := landedVerdict(e.detail, comments, memory, newMemory); !open {
+			continue
+		}
+		unverified = append(unverified, e)
+		if fix := newMemory[e.detail.Story.ID].NotMetFix; fix != "" {
+			fixes = append(fixes, fix)
+		}
+	}
+	fixBeads, err := v.notMetFixes(ctx, b, fixes)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, e := range unverified {
+		if mark := newMemory[e.detail.Story.ID]; mark.NotMet {
+			// His own report showed it does not work: the card leaves his line
+			// and waits on the fix, until the fix lands and asks him itself.
+			if need, ok := b.notMetNeed(e, mark.NotMetFix, fixBeads); ok {
+				needs = append(needs, need)
+			}
 			continue
 		}
 		howTo := landedHowTo(newMemory[e.detail.Story.ID])
@@ -1071,6 +1091,62 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		}
 	}
 	return needs, newMemory, nil
+}
+
+// viewMayorNamesFix is what a landing marked NOT MET waits on when no fix is
+// named, or the one named is not a bead in the tracker or closed unlanded.
+const viewMayorNamesFix = "the Mayor to name the fix"
+
+// notMetFixes reads the fix beads a NOT MET landing names, by id: those the view
+// already holds, and one read of the rest. An id the tracker lacks is left out.
+func (v PosternView) notMetFixes(ctx context.Context, b *viewBuild, ids []string) (map[string]StoryDetail, error) {
+	out := map[string]StoryDetail{}
+	var ask []string
+	for _, id := range uniqueStrings(ids) {
+		if e, ok := b.entries[id]; ok {
+			out[id] = e.detail
+		} else if d, ok := b.outside[id]; ok {
+			out[id] = d
+		} else {
+			ask = append(ask, id)
+		}
+	}
+	if len(ask) == 0 {
+		return out, nil
+	}
+	found, err := v.Tracker.ShowBeads(ctx, ask)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s, the fix of a landing marked %s: %w", strings.Join(ask, ", "), NotMetWord, err)
+	}
+	for _, d := range found {
+		out[d.Story.ID] = d
+	}
+	return out, nil
+}
+
+// notMetNeed is the verify need of a landing whose newest verdict is NOT MET, and
+// whether it has one: waiting on the factory while its fix is open, on the Mayor
+// when no fix is named, the tracker lacks it or it closed without landing, and
+// none once the fix closed as landed (its own verify card asks him then).
+func (b *viewBuild) notMetNeed(e *viewEntry, fix string, fixes map[string]StoryDetail) (PosternViewNeed, bool) {
+	need := b.need(PosternNeedVerify, e, e.detail.ClosedAt, "")
+	need.NotReady = true
+	switch detail, known := fixes[fix]; {
+	case fix == "" || !known || (detail.Closed() && !hasLanded(detail)):
+		need.WaitsFor = PosternWaitsMayor
+		need.WaitingOn = []string{viewMayorNamesFix}
+	case detail.Closed():
+		return PosternViewNeed{}, false
+	default:
+		title := strings.TrimSpace(detail.Story.Title)
+		if title == "" {
+			title = fix
+		}
+		need.WaitsFor = PosternWaitsFactory
+		need.WaitingOn = []string{title}
+	}
+	need.Text = "Not met: waiting on " + strings.Join(need.WaitingOn, ", ")
+	return need, true
 }
 
 // tellTheMayorOfFolds sends the Mayor one verify_folded event for each verify
