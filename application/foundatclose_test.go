@@ -162,7 +162,7 @@ func TestATrackerThatRefusesTheCreateStillLandsTheStoryAndMailsALostWrite(t *tes
 }
 
 // A finding is the bead already filed when a bead not closed, labelled
-// found-at-close, names the same file; and the files key is the finding's own
+// found-at-close, names the same file:line; and the files key is the finding's own
 // (mw-gq6.1068).
 func TestAFindingNamingTheFileOfAnOpenFoundAtCloseBeadIsNotFiledAgain(t *testing.T) {
 	cases := []struct {
@@ -170,10 +170,10 @@ func TestAFindingNamingTheFileOfAnOpenFoundAtCloseBeadIsNotFiledAgain(t *testing
 		labels                           []string
 		filed                            bool
 	}{
-		{"the file in the title, held", "[bug] gofmt lists cmd/mw/member.go", "", apptest.StatusDeferred, []string{"bug", "found-at-close"}, false},
+		{"the file and line in the title, held", "[bug] gofmt lists cmd/mw/member.go:1", "", apptest.StatusDeferred, []string{"bug", "found-at-close"}, false},
 		{"the file with a line, in the description", "[bug] unformatted", "Reworded: cmd/mw/member.go:1 is not gofmt-clean.", apptest.StatusOpen, []string{"bug", "found-at-close"}, false},
-		{"closed", "[bug] gofmt lists cmd/mw/member.go", "", apptest.StatusClosed, []string{"bug", "found-at-close"}, true},
-		{"not found at close", "[bug] gofmt lists cmd/mw/member.go", "", apptest.StatusOpen, []string{"bug"}, true},
+		{"closed", "[bug] gofmt lists cmd/mw/member.go:1", "", apptest.StatusClosed, []string{"bug", "found-at-close"}, true},
+		{"not found at close", "[bug] gofmt lists cmd/mw/member.go:1", "", apptest.StatusOpen, []string{"bug"}, true},
 		{"another file", "[bug] gofmt lists cmd/mw/other.go", "", apptest.StatusOpen, []string{"bug", "found-at-close"}, true},
 		{"the finder's own title does not count", "[bug] x", "mw-z.9 (fix cmd/mw/member.go) landed, and its closing comment lists this finding under 'Found, not fixed:':\n\n> unrelated\n", apptest.StatusOpen, []string{"bug", "found-at-close"}, true},
 	}
@@ -196,6 +196,71 @@ func TestAFindingNamingTheFileOfAnOpenFoundAtCloseBeadIsNotFiledAgain(t *testing
 			}
 			if c.filed && filed[0].Merged().Files != "cmd/mw/member.go" {
 				t.Errorf("expected the files key of the file the finding names, got %q", filed[0].Merged().Files)
+			}
+		})
+	}
+}
+
+// A finding is the bead already filed only when that bead names the same fault:
+// the same file:line, or the same symbol and the same fault words; a shared file
+// or function alone is a near match, which is filed and named in the mail
+// (mw-gq6.1103).
+func TestAFindingIsTheBeadAlreadyFiledOnlyWhenItNamesTheSameFault(t *testing.T) {
+	cases := []struct {
+		name, title, description, finding string
+		filed                             bool
+	}{
+		{
+			"the import finding against the docs budget bug",
+			"[bug] docs/module-map.md and docs/overview.md are within 22 and 20 bytes of their budgets", "",
+			"src/bulk/cut.ts:5 imports ../capture/captureStill from inside the capture module, which docs/module-map.md says never to do",
+			true,
+		},
+		{
+			"the same file and another line",
+			"[bug] the parser drops a trailing line (application/parse.go:12)", "",
+			"The loader reads the file twice (application/parse.go:40)",
+			true,
+		},
+		{
+			"the same symbol and other fault words",
+			"[bug] `Job` is never reset between runs, so a second run reads the first run's output", "",
+			"`Job` is not exported to the dispatcher package",
+			true,
+		},
+		{
+			"the same file:line, worded differently",
+			"[bug] gofmt lists cmd/mw/member.go (cmd/mw/member.go:1)", "",
+			"A formatting fault: cmd/mw/member.go:1 is not gofmt-clean",
+			false,
+		},
+		{
+			"the same symbol and the same fault words",
+			"[bug] `Job` is never reset between runs, so a second run reads the first run's output", "",
+			"A second run reads the first run's output because `Job` is never reset between runs",
+			false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tracker, rules := aBatchEpicToTest(t)
+			ctx := context.Background()
+			tracker.AddStory("mw-e", domain.Story{ID: "mw-e.9", Title: c.title})
+			mustDo(t, tracker.SetDescription("mw-e.9", c.description))
+			mustDo(t, tracker.SetLabels("mw-e.9", "bug", "found-at-close"))
+			mustDo(t, tracker.SetStatus("mw-e.9", apptest.StatusDeferred))
+			mustDo(t, tracker.CommentOnStory(ctx, "mw-e.1", "Done.\nFound, not fixed:\n"+c.finding+"\nFor the rig memory: nothing"))
+			before := tracker.Stories()
+
+			aBatchLandedWithTesters(t, application.TesterTrial{}, tracker, rules, "mw-e.1", "mw-e.2")
+
+			filed := theTestersFiled(t, tracker, before)
+			if c.filed != (len(filed) == 1) {
+				t.Fatalf("expected filed=%v, got %d filed: %+v", c.filed, len(filed), filed)
+			}
+			if c.filed && (!strings.HasPrefix(filed[0].Story.Title, "[bug] "+c.finding[:min(len(c.finding), 50)]) || !strings.Contains(filed[0].Description, "> "+c.finding) || filed[0].Status != apptest.StatusDeferred ||
+				!slices.Contains(filed[0].Labels, "found-at-close")) {
+				t.Errorf("expected a held found-at-close bug of the finding, got %+v", filed[0])
 			}
 		})
 	}
