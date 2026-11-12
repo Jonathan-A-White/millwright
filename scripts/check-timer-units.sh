@@ -278,6 +278,7 @@ need "$PARENT_TIMER" "OnCalendar=*:05:00"
 need "$PARENT_TIMER" "Persistent=false"
 # The usage read pair: `mw usage read` every 30 minutes, no catch-up.
 need "$USAGE_SERVICE" "Type=oneshot"
+need "$USAGE_SERVICE" "TimeoutStartSec=20min"
 need "$USAGE_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw usage read"
 need "$USAGE_TIMER" "OnCalendar=*:4/30"
 need "$USAGE_TIMER" "Persistent=false"

@@ -746,17 +746,29 @@ func (p Pause) Run(ctx context.Context, req PauseRequest) (PausedSet, error) {
 		fmt.Fprintf(p.Out, "dry run: would pause %s until %s, nothing was changed\n", strings.Join(hosts, ", "), until.UTC().Format(time.RFC3339))
 		return PausedSet{}, nil
 	}
+	priorCaps := map[string]string{}
 	if paused {
 		hosts = set.unreached()
 	} else {
 		set = PausedSet{Date: now.Format("2006-01-02"), Reason: req.Reason, PausedAt: now, Until: until, Bead: req.Bead,
 			NightPasses: slices.Clone(PauseNightPasses)}
-		value, isSet, err := p.Config.MaxBoxes(ctx)
-		if err != nil {
-			return PausedSet{}, fmt.Errorf("cloud.max_boxes could not be read: %w", err)
-		}
-		set.MaxBoxes, set.MaxBoxesSet = value, isSet
 		dir = PauseDir(now)
+		prior, ok := p.unfinishedPause(ctx, now)
+		for _, h := range prior.Hosts {
+			priorCaps[h.Host] = h.Cap
+		}
+		if ok && prior.MaxBoxesSet {
+			// An earlier pause set cloud.max_boxes to 0 and died before it marked
+			// itself in force: 0 is the paused value, and the one to put back is the
+			// one it saved (mw-gq6.1110).
+			set.MaxBoxes, set.MaxBoxesSet = prior.MaxBoxes, true
+		} else {
+			value, isSet, err := p.Config.MaxBoxes(ctx)
+			if err != nil {
+				return PausedSet{}, fmt.Errorf("cloud.max_boxes could not be read: %w", err)
+			}
+			set.MaxBoxes, set.MaxBoxesSet = value, isSet
+		}
 	}
 	set.Unreached, set.NoMw = nil, noMw
 
@@ -785,7 +797,11 @@ func (p Pause) Run(ctx context.Context, req PauseRequest) (PausedSet, error) {
 			continue
 		}
 		r := results[i]
-		set.Hosts = append(set.Hosts, PausedSetHost{Host: host, Cap: r.Cap, Cloud: isBox[host]})
+		capOf := r.Cap
+		if kept := priorCaps[host]; kept != "" {
+			capOf = kept
+		}
+		set.Hosts = append(set.Hosts, PausedSetHost{Host: host, Cap: capOf, Cloud: isBox[host]})
 		set.Stories = append(set.Stories, r.Stories...)
 		set.Notes = append(set.Notes, r.Notes...)
 		if isBox[host] {
@@ -812,6 +828,19 @@ func (p Pause) Run(ctx context.Context, req PauseRequest) (PausedSet, error) {
 	fmt.Fprint(p.Out, set)
 	p.record(ctx, set, "The factory is paused", fmt.Sprintf("The factory is paused (%s).\n\n%s\nmw resume undoes it.", req.Reason, set))
 	return set, nil
+}
+
+// unfinishedPause is the paused set an earlier pause of today or yesterday left
+// in the vault without being resumed or marked in force: it died after it wrote
+// the set. The set is what that pause saved of the factory before it changed it.
+func (p Pause) unfinishedPause(ctx context.Context, now time.Time) (PausedSet, bool) {
+	for _, day := range []time.Time{now, now.AddDate(0, 0, -1)} {
+		set, err := p.Book.Read(ctx, PauseDir(day))
+		if err == nil && set.ResumedAt.IsZero() && !set.PausedAt.IsZero() {
+			return set, true
+		}
+	}
+	return PausedSet{}, false
 }
 
 // bringDown destroys a cloud box once every story it held is pushed.
