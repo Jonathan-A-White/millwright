@@ -770,6 +770,37 @@ func TestDampersOverTheirLimitAreNoFaultOfTheHost(t *testing.T) {
 	}
 }
 
+// A slow cloud make is said under the dampers line of mw doctor, in the words mw
+// status uses, and a review alarm still is not (mw-gq6.1128).
+func TestDoctorSaysTheCloudMakeAlarmBesideTheDamperCounts(t *testing.T) {
+	now := doctorNow
+	var out strings.Builder
+	doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now,
+		&apptest.FakeDoctorCheck{CheckName: "widget", Verdict: application.DoctorOK})
+	doctor.Out = &out
+	tracker := apptest.NewFakeTracker()
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11",
+		Boxes: []application.CloudBox{{Name: "cloud1", Up: now.Add(-56 * time.Minute), Making: true, Vultr: "active locked"}}}}
+	survey := application.DamperSurvey{Tracker: tracker, Notes: tracker, Cloud: book}
+	doctor.Dampers = doctorSurvey{survey: survey, now: now}
+	if _, err := doctor.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("a slow make is no fault of the host, got %v", err)
+	}
+	if !strings.Contains(out.String(), "cloud make: cloud1 has been made for") || !strings.Contains(out.String(), "Vultr says active locked") {
+		t.Errorf("expected the cloud make alarm beside the counts, got:\n%s", out.String())
+	}
+}
+
+// doctorSurvey judges a survey at a fixed time, as DamperCounts does at the real one.
+type doctorSurvey struct {
+	survey application.DamperSurvey
+	now    time.Time
+}
+
+func (d doctorSurvey) DamperCounts(ctx context.Context) (application.DampersReport, error) {
+	return d.survey.Dampers(ctx, application.WorkInHand{}, d.now)
+}
+
 // Every plain ok clears its check's note on every run, and each clear is a bd
 // of its own (several server connections each) on every host every five
 // minutes (mw-gq6.608): the notes are listed once, and only one that is there

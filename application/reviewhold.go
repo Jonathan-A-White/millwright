@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 )
 
 // The comments that mark a card held back by the review-queue limit
@@ -30,6 +31,12 @@ func isCardAskedComment(text string) bool {
 // does, and says the limit it is held to.
 type ReviewQueueReader interface {
 	ReviewQueue(ctx context.Context) (size, limit int, err error)
+}
+
+// CloudMakeReader says the cloud make alarms, a line for each. A ReviewQueueReader
+// that is also one has them said by the hold when it counts the queue.
+type CloudMakeReader interface {
+	CloudMakeLines(ctx context.Context, now time.Time) []string
 }
 
 // ReviewQueue is the size of his review queue (open cards, open demos and unrun
@@ -99,6 +106,7 @@ func (h ReviewHold) Judge(ctx context.Context, req PosternSendRequest) ReviewVer
 	if h.Queue == nil || req.Class != "decision-needed" || !req.asksQuestion() {
 		return ReviewVerdict{}
 	}
+	h.sayCloudMakes(ctx)
 	size, limit, err := h.Queue.ReviewQueue(ctx)
 	if err != nil {
 		if h.Err != nil {
@@ -107,6 +115,19 @@ func (h ReviewHold) Judge(ctx context.Context, req PosternSendRequest) ReviewVer
 		return ReviewVerdict{}
 	}
 	return ReviewVerdict{Over: size > limit, Size: size, Limit: limit}
+}
+
+// sayCloudMakes writes, in Err, the cloud make alarms of the queue's own survey:
+// a card is about to go out, and a box made for too long is a thing he and the
+// Mayor should see with it (mw-gq6.1128).
+func (h ReviewHold) sayCloudMakes(ctx context.Context) {
+	reader, ok := h.Queue.(CloudMakeReader)
+	if !ok || h.Err == nil {
+		return
+	}
+	for _, line := range reader.CloudMakeLines(ctx, time.Now()) {
+		fmt.Fprintf(h.Err, "%s: %s\n", h.sender(), line)
+	}
 }
 
 // Hold writes the question on its bead as a QUESTION for Monday and says so; no
