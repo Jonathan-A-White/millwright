@@ -135,8 +135,10 @@ Feature: mw postern view
     And the view's held story "mw-rel.2" under "mw-rel" was filed 1 day ago
     When the live view is built
     Then the view's needs on "mw-rel" are "approve:mw-rel"
-    And the view's approve need on "mw-rel" says "2 held stories wait for your Release: mw-rel.1 Story mw-rel.1, filed 26 Sep 12:00 UTC; mw-rel.2 Story mw-rel.2, filed 27 Sep 12:00 UTC"
-    And the view's approve need on "mw-rel" offers "Release"
+    And the view's approve need on "mw-rel" says "2 held stories wait for the Mayor's Release: mw-rel.1 Story mw-rel.1, filed 26 Sep 12:00 UTC; mw-rel.2 Story mw-rel.2, filed 27 Sep 12:00 UTC"
+    And the view's approve need on "mw-rel" offers nothing
+    And the view's need "approve" on "mw-rel" waits for "mayor"
+    And the view's approve need on "mw-rel" is not ready, waiting on "the Mayor to release the held stories"
 
   Scenario: a story held behind an open hitl bead makes no Release card
     Given the view's epic "mw-r5s2i" is live
@@ -154,7 +156,7 @@ Feature: mw postern view
     And the view's held story "mw-mix.2" under "mw-mix" waits on "mw-mix.1"
     And the view's held story "mw-mix.3" under "mw-mix" was filed 1 day ago
     When the live view is built
-    Then the view's approve need on "mw-mix" says "1 held story waits for your Release: mw-mix.3 Story mw-mix.3, filed 27 Sep 12:00 UTC"
+    Then the view's approve need on "mw-mix" says "1 held story waits for the Mayor's Release: mw-mix.3 Story mw-mix.3, filed 27 Sep 12:00 UTC"
     And the view's need "approve" on "mw-mix.2" waits for "factory"
 
   Scenario: an epic released before says so
@@ -162,20 +164,31 @@ Feature: mw postern view
     And the view's bead "mw-again" has the comment "RELEASED by the Governor via postern, txid abc123: 2 held stories, ready: mw-again.1" dated 2 days ago
     And the view's held story "mw-again.3" under "mw-again" was filed 1 day ago
     When the live view is built
-    Then the view's approve need on "mw-again" says "1 held story waits for your Release: mw-again.3 Story mw-again.3, filed 27 Sep 12:00 UTC. You released this epic on 26 Sep 12:00 UTC; this story was filed after."
+    Then the view's approve need on "mw-again" says "1 held story waits for the Mayor's Release: mw-again.3 Story mw-again.3, filed 27 Sep 12:00 UTC. You released this epic on 26 Sep 12:00 UTC; this story was filed after."
 
-  # A held story left over a week, or a hands step left over three days, is
-  # no longer a plain approve or hands card: it is one stale card that says
-  # the facts and asks Keep or Close (protocol section 11).
-  Scenario: An epic whose oldest held story is 8 days old gives one stale need and no approve need
+  # A hands step left over three days is no longer a plain hands card but one
+  # stale card that says the facts and asks Keep or Close (protocol section
+  # 11). A Release waits on the Mayor (A41), so it never becomes a stale card:
+  # it stays one approve need that says its age.
+  Scenario: An epic whose oldest held story is 8 days old gives one approve need on the Mayor and no stale need
     Given the view's epic "mw-old" is live
     And the view's held story "mw-old.1" under "mw-old" was filed 8 days ago
     And the view's held story "mw-old.2" under "mw-old" was filed 2 days ago
     And the view's bead "mw-old" has the comment "Waiting on the Governor's word about the new formula, which is a long sentence."
     When the live view is built
-    Then the view's needs on "mw-old" are "stale:mw-old"
-    And the view's stale need on "mw-old" says "approve: Epic mw-old; 2 held stories; waiting 8 days; newest comment: Waiting on the Governor's word about the new formula, which is a long sentence."
-    And the view's stale need on "mw-old" has the options "Keep, Close" and has been stale since "2026-09-27T12:00:00Z"
+    Then the view's needs on "mw-old" are "approve:mw-old"
+    And the view's need "approve" on "mw-old" waits for "mayor"
+    And the view's approve need on "mw-old" is not ready, waiting on "the Mayor to release the held stories"
+    And the view's approve need on "mw-old" offers nothing
+    And the view's approve need on "mw-old" says "2 held stories wait for the Mayor's Release: mw-old.1 Story mw-old.1, filed 20 Sep 12:00 UTC; mw-old.2 Story mw-old.2, filed 26 Sep 12:00 UTC. Waiting 8 days."
+
+  Scenario: An epic with one held story that waits on nothing makes an approve need on the Mayor
+    Given the view's epic "mw-one" is live
+    And the view's held story "mw-one.1" under "mw-one" was filed 2 days ago
+    When the live view is built
+    Then the view's need "approve" on "mw-one" waits for "mayor"
+    And the view's approve need on "mw-one" is not ready, waiting on "the Mayor to release the held stories"
+    And the view's approve need on "mw-one" offers nothing
 
   Scenario: An epic whose oldest held story is 6 days old still gives approve
     Given the view's epic "mw-fresh" is live
@@ -205,7 +218,7 @@ Feature: mw postern view
     When the live view is built
     Then the view's stale need on "mw-hnd.1" quotes 200 letters of its newest comment
 
-  Scenario: A keep note ahead of now hides the stale, approve and hands needs of a bead
+  Scenario: A keep note ahead of now hides the approve and stale hands needs of a bead
     Given the view's epic "mw-kept" is live
     And the view's held story "mw-kept.1" under "mw-kept" was filed 8 days ago
     And the view's hitl bead "mw-kept.2" under "mw-kept" was filed 4 days ago
@@ -229,7 +242,7 @@ Feature: mw postern view
     And the view's bead "mw-kept" is kept until 1 day ago
     And the view's bead "mw-kept.2" is kept until 1 day ago
     When the live view is built
-    Then the view's needs on "mw-kept" are "stale:mw-kept"
+    Then the view's needs on "mw-kept" are "approve:mw-kept"
     And the view's needs on "mw-kept.2" are "stale:mw-kept.2"
 
   # Every need says who it waits on: you, mayor or factory (protocol section 11).
@@ -275,12 +288,12 @@ Feature: mw postern view
 
   Scenario: A question, a landing to verify and a stale card wait on him
     Given the view's epic "mw-old" is live
-    And the view's held story "mw-old.1" under "mw-old" was filed 8 days ago
+    And the view's hitl bead "mw-old.1" under "mw-old" was filed 4 days ago
     And the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "HOW TO CHECK IT: 1. Open the app."
     When the live view is built
     Then the view's need "question" on "mw-v.4" waits for "you"
     And the view's need "verify" on "mw-v.6" waits for "you"
-    And the view's need "stale" on "mw-old" waits for "you"
+    And the view's need "stale" on "mw-old.1" waits for "you"
 
   Scenario: A host alarm waits on the factory
     Given the view's host "laptop" last synced 34 minutes ago with work pathed to it

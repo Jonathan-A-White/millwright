@@ -17,7 +17,7 @@ import (
 // features/postern_inbox_apply.feature to the inbox's world.
 func (c *posternInboxContext) registerPosternCloseSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the postern inbox clock reads "([^"]*)"$`, c.thePosternInboxClockReads)
-	ctx.Given(`^the stale epic "([^"]*)" has a held story filed (\d+) days? ago$`, c.theStaleEpicHasAHeldStory)
+	ctx.Given(`^the stale hands bead "([^"]*)" filed (\d+) days? ago$`, c.theStaleHandsBead)
 	ctx.Given(`^a postern keep action on bead "([^"]*)" for (\d+) days from the Governor with txid "([^"]*)"$`, c.aPosternKeepActionFromTheGovernor)
 	ctx.Given(`^the postern view raises a stale need on "([^"]*)"$`, c.thePosternViewRaisesAStaleNeed)
 	ctx.Then(`^the postern view raises no stale need on "([^"]*)"$`, c.thePosternViewRaisesNoStaleNeed)
@@ -49,18 +49,18 @@ func (c *posternInboxContext) thePosternInboxClockReads(stamp string) error {
 	return nil
 }
 
-// theStaleEpicHasAHeldStory files a live epic id with one held story, id.1,
-// filed days before the inbox's clock: old enough for the view to call it
-// stale.
-func (c *posternInboxContext) theStaleEpicHasAHeldStory(id string, days int) error {
-	c.memory.AddEpic(id, domain.Path{})
-	c.memory.DescribeEpic(id, "Epic "+id, apptest.StatusOpen, 1)
-	story := id + ".1"
-	c.memory.AddStory(id, domain.Story{ID: story, Title: "Story " + story})
-	if err := c.memory.SetStatus(story, apptest.StatusDeferred); err != nil {
+// theStaleHandsBead files a hitl bead id under a live epic, filed days before
+// the inbox's clock: old enough for the view to call its hands need stale. (A
+// held story never goes stale: the Mayor releases it.)
+func (c *posternInboxContext) theStaleHandsBead(id string, days int) error {
+	epic := id + "-epic"
+	c.memory.AddEpic(epic, domain.Path{})
+	c.memory.DescribeEpic(epic, "Epic "+epic, apptest.StatusOpen, 1)
+	c.memory.AddStory(epic, domain.Story{ID: id, Title: "Story " + id})
+	if err := c.memory.SetLabels(id, "hitl"); err != nil {
 		return err
 	}
-	return c.memory.SetCreated(story, c.clock.Add(-time.Duration(days)*24*time.Hour))
+	return c.memory.SetCreated(id, c.clock.Add(-time.Duration(days)*24*time.Hour))
 }
 
 func (c *posternInboxContext) aPosternKeepActionFromTheGovernor(bead string, days int, txid string) error {

@@ -249,7 +249,7 @@ Feature: mw postern inbox --apply
   # as the Governor (section 13).
   Scenario: A keep tap writes the note and the comment, and the bead leaves the view
     Given the postern inbox clock reads "2026-09-28T12:00:00Z"
-    And the stale epic "mw-old" has a held story filed 8 days ago
+    And the stale hands bead "mw-old" filed 4 days ago
     And the postern view raises a stale need on "mw-old"
     And a postern keep action on bead "mw-old" for 14 days from the Governor with txid "tx-keep"
     When mw postern inbox --apply is run

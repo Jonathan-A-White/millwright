@@ -30,9 +30,11 @@ func newPosternViewCmd() *cobra.Command {
 			"progress, every bead under one at any depth (a closed one only if it closed in the last 7\n" +
 			"days; an epic's done_earlier counts the rest), every live bead's parent chain up to its\n" +
 			"root, and the needs waiting on the Governor, most blocking first, then oldest: an open\n" +
-			"postern question, a live epic with held stories (approve), a story closed in the last 24\n" +
+			"postern question, a live epic with held stories (approve: it waits on the Mayor, who\n" +
+			"releases, never on the Governor, and past 7 days its text says its age, but it never becomes\n" +
+			"a stale need), a story closed in the last 24\n" +
 			"hours with no VERIFIED comment (verify), an open bead labelled demo or hitl (demo, hands),\n" +
-			"an approve need over 7 days old or a hands need over 3 days old, which becomes one stale\n" +
+			"a hands need over 3 days old, which becomes one stale\n" +
 			"need (Keep or Close) unless a postern.keep note holds a time still ahead, a\n" +
 			"story out of attempts or a host whose last sync is over 20 minutes old with work pathed\n" +
 			"to it (alarm). It gzips that JSON, encrypts it with BRC-78 to postern_governor_key, and\n" +

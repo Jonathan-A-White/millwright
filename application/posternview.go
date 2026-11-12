@@ -49,7 +49,9 @@ const DefaultPosternVerifyDays = 4
 func PosternVerifyFoldedKey(bead string) string { return "postern.verify_folded." + bead }
 
 // PosternViewStaleApprove is how long a live epic's oldest held story may wait
-// for the Governor's word before its approve need becomes a stale one: §11.
+// for the Mayor's Release before its approve need says its age in days. It
+// never becomes a stale need: the Mayor releases (the Governor's A41), so a
+// Release card waits on the Mayor and is not his to keep or close.
 const PosternViewStaleApprove = 7 * 24 * time.Hour
 
 // PosternViewStaleHands is how long a hands bead may wait for his hands before
@@ -911,7 +913,7 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		d := e.detail
 		if b.live[id] {
 			if need, held, ok := b.approve(e); ok {
-				waiting = append(waiting, waitingNeed{need: need, entry: e, window: PosternViewStaleApprove, fact: heldFact(len(held)), held: held})
+				waiting = append(waiting, waitingNeed{need: need, entry: e, fact: heldFact(len(held)), held: held})
 				if d.CommentCount > 0 {
 					needComments = append(needComments, id)
 				}
@@ -1001,6 +1003,12 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		w := &waiting[i]
 		if w.need.Kind == PosternNeedApprove {
 			w.need.Text = approveText(w.held, releasedAt(comments[w.entry.detail.Story.ID]))
+			if since := w.since(); !since.IsZero() && b.now.Sub(since) > PosternViewStaleApprove {
+				if !strings.HasSuffix(w.need.Text, ".") {
+					w.need.Text += "."
+				}
+				w.need.Text += " Waiting " + viewAge(b.now.Sub(since)) + "."
+			}
 		}
 		if w.need.Kind != PosternNeedApprove && w.need.Kind != PosternNeedHands && !w.stale(b.now) {
 			b.markNotReady(&w.need, w.entry, false)
@@ -1345,7 +1353,11 @@ func (b *viewBuild) approve(e *viewEntry) (PosternViewNeed, []StoryDetail, bool)
 		since = firstKnown(e.detail.Updated, e.detail.Created)
 	}
 	need := b.need(PosternNeedApprove, e, since, approveText(held, time.Time{}))
-	need.Options = []string{"Release"}
+	// The Mayor releases (A41): the card is his to act on, and the Governor's
+	// line only shows it, with no Release to tap.
+	need.NotReady = true
+	need.WaitsFor = PosternWaitsMayor
+	need.WaitingOn = []string{viewMayorReleases}
 	need.Blocks = b.blocks(true, ids...)
 	return need, held, true
 }
@@ -1355,9 +1367,9 @@ func (b *viewBuild) approve(e *viewEntry) (PosternViewNeed, []StoryDetail, bool)
 // it was filed. When he released the epic before (released, not zero) and every
 // one of them was filed after, it says so.
 func approveText(held []StoryDetail, released time.Time) string {
-	text := fmt.Sprintf("%d held stories wait for your Release", len(held))
+	text := fmt.Sprintf("%d held stories wait for the Mayor's Release", len(held))
 	if len(held) == 1 {
-		text = "1 held story waits for your Release"
+		text = "1 held story waits for the Mayor's Release"
 	}
 	named := make([]string, 0, len(held))
 	after := !released.IsZero()
@@ -1382,6 +1394,9 @@ func approveText(held []StoryDetail, released time.Time) string {
 	}
 	return text
 }
+
+// viewMayorReleases is what an approve need waits on.
+const viewMayorReleases = "the Mayor to release the held stories"
 
 // viewReleasedMarker is the words the comment on an epic opens with when the
 // Governor released it by postern (applyPostern's RELEASED comment).
@@ -1449,7 +1464,8 @@ func (b *viewBuild) isList(e *viewEntry) bool {
 }
 
 // waitingNeed is an approve or hands need on entry, with the window it may
-// wait in before it is a stale one and the fact of what it waits on that the
+// wait in before it is a stale one (none for an approve need, which never goes
+// stale) and the fact of what it waits on that the
 // stale need states.
 type waitingNeed struct {
 	need   PosternViewNeed
@@ -1470,7 +1486,7 @@ func (w waitingNeed) since() time.Time {
 // stale reports whether the need has waited past its window at now.
 func (w waitingNeed) stale(now time.Time) bool {
 	since := w.since()
-	return !since.IsZero() && now.Sub(since) > w.window
+	return w.window > 0 && !since.IsZero() && now.Sub(since) > w.window
 }
 
 // staleNeed is the one stale need that stands in for w's approve or hands

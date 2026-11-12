@@ -339,7 +339,7 @@ func TestPosternViewListsEveryKindOfNeed(t *testing.T) {
 		t.Errorf("expected a question whose note says what was asked never to have its comments read, got %d", tracker.CommentReads("mw-a.1"))
 	}
 	approve := viewNeed(t, doc, "approve", "mw-a")
-	if approve.Epic != "mw-a" || !equalStrings(approve.Options, []string{"Release"}) || !strings.Contains(approve.Text, "2") ||
+	if approve.Epic != "mw-a" || len(approve.Options) != 0 || approve.WaitsFor != application.PosternWaitsMayor || !approve.NotReady || !strings.Contains(approve.Text, "2") ||
 		approve.Since != "2026-09-28T07:00:00Z" || approve.Blocks != 2 {
 		t.Errorf("expected an approve need for 2 held stories, blocking both, since the oldest was filed, got %+v", approve)
 	}

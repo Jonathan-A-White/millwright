@@ -91,6 +91,7 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the view's approve need on "([^"]*)" says "([^"]*)"$`, c.theViewsApproveNeedSays)
 	ctx.Then(`^the view's approve need on "([^"]*)" offers "([^"]*)"$`, c.theViewsApproveNeedOffers)
 	ctx.Then(`^the view's approve need on "([^"]*)" offers nothing$`, c.theViewsApproveNeedOffersNothing)
+	ctx.Then(`^the view's approve need on "([^"]*)" is not ready, waiting on "([^"]*)"$`, c.theViewsApproveNeedIsNotReady)
 	ctx.Given(`^the view's hitl bead "([^"]*)" under "([^"]*)" was filed (\d+) days? ago$`, c.theViewsHitlBeadWasFiled)
 	ctx.Given(`^the view's hitl bead "([^"]*)" under "([^"]*)" was filed (\d+) days? ago with the labels "([^"]*)" and the body "([^"]*)"$`, c.theViewsHitlBeadWasFiledLabelled)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed an hour ago with the labels "([^"]*)"$`, c.theViewsBeadLandedAnHourAgoLabelled)
@@ -1013,6 +1014,17 @@ func (c *posternViewContext) theViewsHandsNeedIsNotReady(bead, waitingOn string)
 	}
 	if !n.NotReady || strings.Join(n.WaitingOn, ", ") != waitingOn {
 		return fmt.Errorf("expected the hands need on %s not ready, waiting on %q, got not_ready %v waiting on %q", bead, waitingOn, n.NotReady, n.WaitingOn)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsApproveNeedIsNotReady(bead, waitingOn string) error {
+	n, err := c.needOf(application.PosternNeedApprove, bead)
+	if err != nil {
+		return err
+	}
+	if !n.NotReady || strings.Join(n.WaitingOn, ", ") != waitingOn {
+		return fmt.Errorf("expected the approve need on %s not ready, waiting on %q, got not_ready %v waiting on %q", bead, waitingOn, n.NotReady, n.WaitingOn)
 	}
 	return nil
 }
