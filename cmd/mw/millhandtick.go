@@ -48,7 +48,19 @@ func hostSelfUpdate(gateway *beads.Gateway, rigs, afterLanding map[string]string
 		Slot:     rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 		Landed:   rig.New(),
 		Live:     hostDeployCheck(gateway, files, host),
+		Heal:     rig.New(),
+		Box:      cloudBoxName(host),
 	}
+}
+
+// cloudBoxName is host when its name is a cloud box's (the prefix and a number,
+// as cloudPlan reads the plan), empty on a host that is none. A box has no
+// [cloud] table of its own to ask (mw-gq6.1125).
+func cloudBoxName(host string) string {
+	if (application.CloudPlan{}).IsBox(host) {
+		return host
+	}
+	return ""
 }
 
 // hostDeployCheck is the live check every path that puts a rig live shares
