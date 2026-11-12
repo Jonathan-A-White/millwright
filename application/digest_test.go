@@ -63,6 +63,22 @@ func (f *digestFixture) threeDemos(t *testing.T) {
 	f.demo(t, "mw-e.3", "Demo: Vultr boosts", []string{application.LabelDemo, application.LabelDigest}, "landed, not checked yet")
 }
 
+func TestDigestListsADemoWhoseVerifiedCommentLeadsWithTimeAndSeat(t *testing.T) {
+	f := newDigestFixture()
+	f.demo(t, "mw-e.1", "Demo: typed rig memory", []string{application.LabelDemo, application.LabelDigest},
+		"2026-10-30 19:12Z Mayor 680: VERIFIED (it works)")
+
+	report := f.run(t, false)
+
+	created, err := f.tracker.ShowStory(context.Background(), report.Bead)
+	if err != nil {
+		t.Fatalf("the digest bead %q cannot be read: %v", report.Bead, err)
+	}
+	if !strings.Contains(created.Description, "mw-e.1") || !strings.Contains(created.Description, "Mayor 680: VERIFIED (it works)") {
+		t.Fatalf("the digest bead does not list the demo:\n%s", created.Description)
+	}
+}
+
 func TestDigestSendFilesOneBeadAndOneCardForTheVerifiedDemos(t *testing.T) {
 	f := newDigestFixture()
 	f.threeDemos(t)

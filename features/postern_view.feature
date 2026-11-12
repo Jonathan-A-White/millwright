@@ -95,6 +95,13 @@ Feature: mw postern view
     Then the view's needs on "mw-v.6" are "none"
     And the view's needs on "mw-v.7" are "none"
 
+  # mw-27f7myz.6: a VERIFIED written with the time or the seat first counts.
+  Scenario: A VERIFIED comment led by its time and seat clears the verify card
+    Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "HOW TO CHECK IT: 1. Open the app."
+    And the view's bead "mw-v.6" has the comment "2026-10-30 19:12Z Mayor 680: VERIFIED (landing Clerk, batch 303)"
+    When the live view is built
+    Then the view has no verify need on "mw-v.6"
+
   # mw-27f7myz.3: a landing his own report shows NOT MET leaves his line and
   # waits on its fix.
   Scenario: A landing marked NOT MET with its fix open waits on the factory for the fix

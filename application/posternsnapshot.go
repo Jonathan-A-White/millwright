@@ -37,11 +37,40 @@ const PosternSnapshotCommentLimit = 3
 // running make test", or "NOT VERIFIED", is no mark (mw-gq6.152).
 const PosternSnapshotVerifiedMarker = "VERIFIED"
 
+// verifiedPrefixTime is a date-time a seat writes before its verdict:
+// 2026-10-30 19:12Z, 2026-11-06T22:10Z, or a bare date.
+const verifiedPrefixTime = `\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?Z?)?`
+
+// verifiedPrefixSeat is a seat with its number: "Mayor 680", "Deputy".
+const verifiedPrefixSeat = `[A-Z][a-z]+(?: \d+)?`
+
+var (
+	// verifiedTimePrefix is times alone, which need no punctuation after them.
+	verifiedTimePrefix = regexp.MustCompile(`^(?:` + verifiedPrefixTime + `\s+)+`)
+	// verifiedSeatPrefix is times and seats in either order, ending in a colon
+	// or comma; a seat is only a seat when that punctuation follows, so prose
+	// that happens to begin with a capital word is not one.
+	verifiedSeatPrefix = regexp.MustCompile(`^(?:(?:` + verifiedPrefixTime + `|` + verifiedPrefixSeat + `)\s+)*(?:` + verifiedPrefixTime + `|` + verifiedPrefixSeat + `)\s*[:,]\s*`)
+)
+
 // commentMarksVerified reports whether text marks a landing checked: it
-// begins, after any leading white space, with PosternSnapshotVerifiedMarker.
-// The one test the view, the snapshot and the Governor's Verified tap share.
+// begins, after any leading white space and an optional prefix, with
+// PosternSnapshotVerifiedMarker. The prefix is a date-time and/or a seat with
+// its number and a colon or comma, in either order ("2026-10-30 19:12Z Mayor
+// 680: VERIFIED ...", "Mayor 799 2026-11-06 22:10Z: VERIFIED"); the word after
+// it must still be VERIFIED. The one test the view, the snapshot, the digest
+// and the Governor's Verified tap share.
 func commentMarksVerified(text string) bool {
-	return strings.HasPrefix(strings.TrimSpace(text), PosternSnapshotVerifiedMarker)
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(text, PosternSnapshotVerifiedMarker) {
+		return true
+	}
+	for _, re := range []*regexp.Regexp{verifiedTimePrefix, verifiedSeatPrefix} {
+		if loc := re.FindStringIndex(text); loc != nil && strings.HasPrefix(text[loc[1]:], PosternSnapshotVerifiedMarker) {
+			return true
+		}
+	}
+	return false
 }
 
 // PosternSnapshotMemoryKey is the note Build remembers, between runs, what it
