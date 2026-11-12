@@ -387,3 +387,75 @@ func TestPathSetWithNeitherAfterNorHoldOnARigWithoutTheKeySaysNothing(t *testing
 		t.Errorf("a rig without release_on_path: expected no held line, got %q", errOut.String())
 	}
 }
+
+// aFilesExpectedRig is the vault of aVaultWithTwoFormulas on a rig whose file
+// says files_expected = true.
+func aFilesExpectedRig(expects bool) (*apptest.FakeTracker, *apptest.FakeEpicRules) {
+	tracker := aVaultWithTwoFormulas()
+	rules := apptest.NewFakeEpicRules()
+	rules.Require("millwright", domain.EpicRequirements{FilesExpected: expects})
+	return tracker, rules
+}
+
+func TestPathSetFromOnARigThatExpectsFilesSaysTheFilesWereNotCopied(t *testing.T) {
+	tracker, rules := aFilesExpectedRig(true)
+	var errOut strings.Builder
+
+	if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Err: &errOut}).Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	const line = "files not copied from mw-gq6.1: pass files=\n"
+	if errOut.String() != line {
+		t.Errorf("expected stderr to be the one line %q, got %q", line, errOut.String())
+	}
+}
+
+func TestPathSetFromSaysNothingOfFilesWhenFilesAreGiven(t *testing.T) {
+	tracker, rules := aFilesExpectedRig(true)
+	var errOut strings.Builder
+
+	if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Err: &errOut}).Run(context.Background(), "mw-gq6.2", "mw-gq6.1", []string{"files=a.go"}); err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	if strings.Contains(errOut.String(), "files not copied") {
+		t.Errorf("expected no files line when files= is given, got %q", errOut.String())
+	}
+}
+
+func TestPathSetFromSaysNothingOfFilesOnARigThatDoesNotExpectThem(t *testing.T) {
+	tracker, rules := aFilesExpectedRig(false)
+	var errOut strings.Builder
+
+	if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Err: &errOut}).Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	if strings.Contains(errOut.String(), "files not copied") {
+		t.Errorf("expected no files line on a rig that does not expect files, got %q", errOut.String())
+	}
+}
+
+func TestPathSetWithoutFromSaysNothingOfFiles(t *testing.T) {
+	tracker, rules := aFilesExpectedRig(true)
+	var errOut strings.Builder
+
+	if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Err: &errOut}).Run(context.Background(), "mw-gq6.2", "", []string{"model=sonnet"}); err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	if strings.Contains(errOut.String(), "files not copied") {
+		t.Errorf("expected no files line without --from, got %q", errOut.String())
+	}
+}
+
+func TestPathSetFromStillCopiesNoFiles(t *testing.T) {
+	tracker, rules := aFilesExpectedRig(true)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.4", Title: "with files",
+		Overrides: domain.Path{Rig: "millwright", Files: "a.go", Formula: "tdd-feature"}})
+
+	if _, err := (application.PathSet{Tracker: tracker, Rules: rules}).Run(context.Background(), "mw-gq6.2", "mw-gq6.4", nil); err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	detail, _ := tracker.ShowStory(context.Background(), "mw-gq6.2")
+	if detail.Story.Overrides.Files != "" || detail.Story.Overrides.Formula != "tdd-feature" {
+		t.Errorf("expected the formula copied and the files not, got %+v", detail.Story.Overrides)
+	}
+}

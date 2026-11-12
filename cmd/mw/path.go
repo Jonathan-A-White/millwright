@@ -42,7 +42,8 @@ func newPathSetCmd() *cobra.Command {
 			"  mw path set B files=src/Reader.tsx,src/data/Rows.ts\n\n" +
 			"Only the seven keys are copied from the sibling, never its files nor its other\n" +
 			"metadata. --from does not copy size (nor bump): a size is the story's own, so give it\n" +
-			"as size=S after --from. An unknown key, a sibling with no rig, and a story that is in\n" +
+			"as size=S after --from. On a rig whose file says files_expected = true, --from with no files= prints\n" +
+			"'files not copied from A: pass files=' on stderr. An unknown key, a sibling with no rig, and a story that is in\n" +
 			"progress or closed are refused, and nothing is written: a path is adjusted only before a story starts.\n" +
 			"So is a files key naming a directory of more than " + strconv.Itoa(application.MostFilesInADirectory) + " files in the rig's checkout here, a glob matching more than that, or\n" +
 			"a whole directory (src/, src/**) or a glob ending in a wildcard (tests/e2e/*.ts) where the rig is not\n" +
