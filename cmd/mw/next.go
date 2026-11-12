@@ -286,6 +286,7 @@ func newNextCmd() *cobra.Command {
 				Sync:        sync,
 				Dispatch:    dispatcher,
 				Events:      homeEventLog(),
+				GiveWay:     hostGiveWayGate(host),
 				Boot:        builderBoot(files, host, tests, nice, jobs, turns, turnsSaid),
 				Seat:        BuilderSeat,
 				Host:        host,

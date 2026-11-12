@@ -893,6 +893,33 @@ type GiveWayGate interface {
 
 var _ GiveWayGate = GiveWay{}
 
+// String is the standing as a log line says it: "gives way since <time> (<by>)".
+func (s GiveWayStanding) String() string {
+	return fmt.Sprintf("gives way since %s (%s)", s.Since.UTC().Format(time.RFC3339), s.By)
+}
+
+// GivesWayNow is the one fresh read of a host's give-way marker that every place
+// mw starts a Builder session, or a part of a gate, makes right before it starts
+// (mw-2891blf.19): the person at the host's screen may turn give way on at any
+// moment of a run that began before, and a host that gives way starts nothing
+// new. The caller leaves what it found as it found it and says so, with the
+// standing's String.
+//
+// A nil gate (a host with no state directory, a test that wires none) gives way
+// to nobody, and so does a marker that cannot be read. lift says a marker nobody
+// renewed is lifted on the way (event expired), as the dispatch's own look does;
+// false reads and lifts nothing, as a dry run and a close-out do.
+func GivesWayNow(ctx context.Context, gate GiveWayGate, lift bool) (GiveWayStanding, bool) {
+	if gate == nil {
+		return GiveWayStanding{}, false
+	}
+	standing, giving, err := gate.Standing(ctx, lift)
+	if err != nil || !giving {
+		return GiveWayStanding{}, false
+	}
+	return standing, true
+}
+
 // Standing implements GiveWayGate.
 func (g GiveWay) Standing(ctx context.Context, lift bool) (GiveWayStanding, bool, error) {
 	marker, there, err := g.Marker.Read(ctx)

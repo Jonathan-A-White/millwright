@@ -340,6 +340,50 @@ Feature: mw land lands a batch rig's queue under one gate run
       | mw-gq6.3 |
     And metrics/factory.jsonl holds a line for batch 1 of the rig: 3 stories, 2 gate runs, a fixer, outcome "fixed"
 
+  # mw-2891blf.19: the batch was begun before the host gave way. A host that gives
+  # way starts no fixer and no run of the rig's tests after it, and leaves the
+  # stories queued as they were.
+
+  Scenario: A batch begun before give way turned on starts no fixer once the host gives way, and holds with the stories queued (mw-2891blf.19)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the rig's tests fail on the batch, saying "the batch is red", until "FIXED" is committed
+    And mw land may start a fixer, which commits "FIXED" and says it touched "mw-gq6.2"
+    And the host gives way from the batch's look number 2 at its give-way marker
+    When mw lands the batch of the rig
+    Then no fixer was started
+    And the rig's tests were run once on the batch
+    And the batch is held because the host gives way, and says since when
+    And these stories are still queued for batch landing, none of them closed:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+
+  Scenario: A batch begun before give way turned on runs no tests once the host gives way (mw-2891blf.19)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+    And the host gives way from the batch's look number 1 at its give-way marker
+    When mw lands the batch of the rig
+    Then the rig's tests were not run on the batch
+    And the batch is held because the host gives way, and says since when
+    And "main" at the rig's origin is where it was before the batch
+
+  Scenario: A batch whose fixer has ended runs no second run of the tests once the host gives way (mw-2891blf.19)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the rig's tests fail on the batch, saying "the batch is red", until "FIXED" is committed
+    And mw land may start a fixer, which commits "FIXED" and says it touched "mw-gq6.2"
+    And the host gives way from the batch's look number 3 at its give-way marker
+    When mw lands the batch of the rig
+    Then the fixer was started only once
+    And the rig's tests were run once on the batch
+    And the batch is held because the host gives way, and says since when
+    And "main" at the rig's origin is where it was before the batch
+    And these stories are still queued for batch landing, none of them closed:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+
   Scenario: A check of the rig starts while the batch waits for its fixer or for the host to calm, and not while it runs the tests (mw-4hqh0en)
     Given these stories are queued for batch landing:
       | mw-gq6.1 |

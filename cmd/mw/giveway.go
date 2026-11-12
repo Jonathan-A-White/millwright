@@ -69,6 +69,18 @@ func hostGiveWay(host string) (application.GiveWay, bool) {
 	return way, true
 }
 
+// hostGiveWayGate is this host's give-way marker as the gate every place mw starts a
+// Builder session, or a part of a gate, reads right before it starts
+// (application.GivesWayNow, mw-2891blf.19): mw next's sends and a batch landing's
+// fixer and gate parts. nil, a gate that gives way to nobody, when the host has no
+// state directory to keep a marker in.
+func hostGiveWayGate(host string) application.GiveWayGate {
+	if way, ok := hostGiveWay(host); ok {
+		return way
+	}
+	return nil
+}
+
 // giveWayStanding reads this host's marker, a file of its own: it lifts nothing,
 // and a marker that cannot be read gives way to nobody.
 func giveWayStanding(ctx context.Context) (application.GiveWayStanding, bool) {

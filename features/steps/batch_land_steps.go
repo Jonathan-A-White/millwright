@@ -50,6 +50,10 @@ type batchFixture struct {
 	// load, when set, is the host's load for the batch's gate: a host that
 	// stays busy through the wait for it to calm (mw-gq6.1007).
 	load *apptest.FakeHostLoad
+
+	// giveWay, when set, is the host's give-way marker for the batch: it begins to
+	// stand at a look of the batch's own (mw-2891blf.19).
+	giveWay *givesWayFrom
 }
 
 // registerBatchLandSteps registers the steps of features/batch_land.feature.
@@ -96,6 +100,7 @@ func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^mw land says "([^"]*)"$`, c.mwLandSays)
 	ctx.Then(`^"([^"]*)" on "([^"]*)" at the rig's origin has one "([^"]*)" heading and one date line under it$`, c.theMarkdownHasOneHeading)
 	registerBatchFixSteps(ctx, c)
+	registerBatchLandGiveWaySteps(ctx, c)
 	registerBatchLandSlotSteps(ctx, c)
 	registerBatchLandSmokeSteps(ctx, c)
 }
@@ -277,8 +282,12 @@ func (c *nextContext) land(dryRun bool) error {
 		slotWatch:    c.batch.slotWatch,
 		busyThenCalm: c.batch.busyThenCalm,
 		load:         c.batch.load,
+		giveWay:      c.batch.giveWay,
 	}
 	next := c.nextUseCase()
+	if g := c.batch.giveWay; g != nil {
+		next.GiveWay = g
+	}
 	if c.batch.load != nil {
 		next.Load = c.batch.load
 		next.LoadWait = func(context.Context, time.Duration) error { return nil }

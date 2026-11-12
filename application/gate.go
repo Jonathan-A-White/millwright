@@ -270,6 +270,9 @@ func (n Next) gateWithSpecs(ctx context.Context, c *closeOut, report *NextReport
 	if tests.Err != nil || tests.Checked.NotRun || !tests.Checked.Passed || n.SpecChecks == nil {
 		return tests, log
 	}
+	if err := n.gateGivesWay(ctx, c); err != nil {
+		return gated{Err: err}, log
+	}
 	run, err := n.SpecChecks.RunSpecs(ctx, c.path.Rig, dir, span.Base)
 	if err != nil {
 		return gated{Err: fmt.Errorf("the rig's changed specs could not be run in %s: %w", dir, err)}, log
@@ -293,6 +296,35 @@ func (n Next) gateWithSpecs(ctx context.Context, c *closeOut, report *NextReport
 		verdict.Said = "the changed specs: " + strings.Join(run.Specs, ", ")
 	}
 	return verdict, log
+}
+
+// GivesWayError is why a gate part was not started: the host gave way to the
+// person at its screen after the gate began, and a host that gives way starts no
+// part of a gate (mw-2891blf.19). It is no failure of the tests.
+type GivesWayError struct{ Standing GiveWayStanding }
+
+func (e *GivesWayError) Error() string {
+	return fmt.Sprintf("the host %s, so no part of the gate is started", e.Standing)
+}
+
+// isGivesWay reports whether err is a GivesWayError.
+func isGivesWay(err error) bool {
+	var giving *GivesWayError
+	return errors.As(err, &giving)
+}
+
+// gateGivesWay is the read of the give-way marker (GivesWayNow) right before a part
+// of a batch's gate starts: the rig's tests, their run again, and the changed
+// specs. It is nil for a gate whose close-out does not read the marker
+// (closeOut.readsGiveWay) and for a host that is free.
+func (n Next) gateGivesWay(ctx context.Context, c *closeOut) error {
+	if !c.readsGiveWay {
+		return nil
+	}
+	if standing, giving := GivesWayNow(ctx, n.GiveWay, false); giving {
+		return &GivesWayError{Standing: standing}
+	}
+	return nil
 }
 
 // gateLogOf is one command of a gate as a gate log holds it.
@@ -580,6 +612,9 @@ func (n Next) gateOnACalmHostHolding(ctx context.Context, c *closeOut, report *N
 			return gated{Err: err}
 		}
 	}
+	if err := n.gateGivesWay(ctx, c); err != nil {
+		return gated{Err: err}
+	}
 	n.beginGate(ctx, c, before)
 	checked, err := n.timedChecks(ctx, c, report, dir, span)
 	if err != nil || checked.NotRun || checked.Passed {
@@ -604,6 +639,9 @@ func (n Next) gateOnACalmHostHolding(ctx context.Context, c *closeOut, report *N
 	n.print(fmt.Sprintf("  retry   %s failed while %s was at load %.1f of %d cores: running them once more when it calms\n",
 		what, n.Host, busy.Load, busy.Cores))
 	if _, _, err := n.calmed(ctx, report, c, what+" again", true, true); err != nil {
+		return gated{Err: err}
+	}
+	if err := n.gateGivesWay(ctx, c); err != nil {
 		return gated{Err: err}
 	}
 	again, err := n.timedChecks(ctx, c, report, dir, span)

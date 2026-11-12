@@ -261,6 +261,15 @@ func (b BatchLand) fix(ctx context.Context, dir, rigDir string, rules domain.Epi
 	if err != nil {
 		return notStarted(fmt.Sprintf("could not be assembled: %v", err))
 	}
+	// The last look at the marker, right before the fixer starts: the batch was
+	// begun, and its tests run, before the person at the host's screen turned give
+	// way on. A host that gives way starts no fixer, red batch or set-aside branches
+	// alike: the batch is held, and every story stays queued (mw-2891blf.19).
+	if standing, giving := GivesWayNow(ctx, n.GiveWay, false); giving {
+		f.Trouble = fmt.Sprintf("was not started: the host %s", standing)
+		report.Held = fmt.Sprintf("the host %s, so its fixer %s was not started; the stories stay queued", standing, f.Name)
+		return false
+	}
 	if err := n.Runner.Start(ctx, spec); err != nil {
 		return notStarted(fmt.Sprintf("%s could not be started: %v", spec.Name, err))
 	}

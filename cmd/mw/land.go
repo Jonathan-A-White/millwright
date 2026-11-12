@@ -155,6 +155,7 @@ func newLandCmd() *cobra.Command {
 				Memory:    gateway,
 				Runner:    tmux.New(),
 				Boot:      builderBoot(files, host, tests, nice, jobs, turns, turnsSaid),
+				GiveWay:   hostGiveWayGate(host), // no fixer and no part of the gate starts once the host gives way (mw-2891blf.19)
 				Events:    homeEventLog(),
 				Seat:      BuilderSeat,
 				Host:      host,

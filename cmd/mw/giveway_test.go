@@ -177,3 +177,31 @@ func TestHostGiveWayListsPanesFromEveryTmuxServerTheHostNames(t *testing.T) {
 		t.Fatalf("sockets = %q, want the default server, seats and factory %q", sockets, want)
 	}
 }
+
+// mw-2891blf.19: the Next that mw next and mw land build read the host's marker
+// (application.GivesWayNow) right before a send-back session, a batch fixer or a
+// part of the batch's gate starts.
+func TestTheGateMwNextAndMwLandReadTheHostsMarkerThrough(t *testing.T) {
+	t.Setenv("MW_GIVEWAY_TMUX_SOCKETS", "")
+	aStandingMarker(t)
+	gate := hostGiveWayGate("desktop")
+	if gate == nil {
+		t.Fatal("a host with a state directory has no give-way gate")
+	}
+	if _, giving := application.GivesWayNow(context.Background(), gate, false); !giving {
+		t.Fatal("the gate did not find the standing marker")
+	}
+	t.Setenv("MW_GIVEWAY_DIR", t.TempDir())
+	if _, giving := application.GivesWayNow(context.Background(), hostGiveWayGate("desktop"), false); giving {
+		t.Fatal("the gate gave way with no marker standing")
+	}
+	for _, file := range []string{"next.go", "land.go"} {
+		source, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(source), "GiveWay:") || !strings.Contains(string(source), "hostGiveWayGate(host)") {
+			t.Errorf("%s builds an application.Next with no GiveWay: hostGiveWayGate(host)", file)
+		}
+	}
+}

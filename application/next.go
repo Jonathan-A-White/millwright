@@ -154,7 +154,13 @@ const (
 	// its cores (HostBusyError, mw-gq6.903): the rig's tests were not run, or a
 	// failure was the host's. Handed back as ReasonMergeSlot is, and no attempt
 	// is spent.
-	ReasonHostBusy      Reason = "host-busy"
+	ReasonHostBusy Reason = "host-busy"
+	// ReasonGivesWay is a close-out handed back because its host gives way to the
+	// person at its screen (mw giveway): no Builder session is started on a host
+	// that gives way, so the story is not sent back to rebase or to fix the merged
+	// tests now, and its close-out is run again once the host is free
+	// (mw-2891blf.19). Handed back as ReasonHostBusy is, and no attempt is spent.
+	ReasonGivesWay      Reason = "gives-way"
 	ReasonPushLost      Reason = "push-lost"
 	ReasonLandingFailed Reason = "landing-failed"
 )
@@ -391,6 +397,13 @@ type Next struct {
 	// Dispatch is the baton: what is ready on this host becomes a running
 	// session. A nil Dispatch closes the story out and stops there.
 	Dispatch Dispatcher
+
+	// GiveWay is the host's give-way marker (mw giveway), read afresh right before
+	// a close-out starts a Builder session (the send-back to rebase, the send-back
+	// to fix the merged tests) and before a batch landing starts its fixer or a
+	// run of the rig's tests: a host that gives way starts none of them, and what
+	// was found is left as it was (mw-2891blf.19). Nil gives way to nobody.
+	GiveWay GiveWayGate
 
 	// Boot assembles the fresh session a branch that would not merge is sent
 	// back to, to rebase, through Runner. One with no harness, or a nil Runner,
@@ -742,16 +755,25 @@ type closeOut struct {
 	// ends with it over its cores runs no tests, however far over, and the batch
 	// waits for the next landing (HostStillBusyError, mw-gq6.1007).
 	waitsWhenBusy bool
-	detail        StoryDetail
-	path          domain.Path
-	rigDir        string
-	worktree      string
-	branch        string
+
+	// readsGiveWay is set on a batch's gate: right before each part of it starts
+	// (the tests, their run again, the changed specs) the host's give-way marker is
+	// read, and a host that gives way starts none (gateGivesWay, mw-2891blf.19).
+	readsGiveWay bool
+	detail       StoryDetail
+	path         domain.Path
+	rigDir       string
+	worktree     string
+	branch       string
 	// branchPushed is set when the stop pushed the story's branch to the remote
 	// for the home to finish (unprovedFromAHostWithNoMill).
 	branchPushed bool
-	target       string
-	result       SessionResult
+	// gaveWay is the standing a send-back found when the host gave way right before
+	// it would have started a Builder session (givesWayBeforeASendBack); nil when
+	// it did not.
+	gaveWay *GiveWayStanding
+	target  string
+	result  SessionResult
 
 	// cappedAfterClosing says the harness stopped the session at its turn cap
 	// after it wrote its closing comment, so the close-out judges it as a
@@ -1412,6 +1434,9 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 				kept = line + "\n\n" + kept
 			}
 			whyNot := n.sendBack(ctx, c, report, landErr, kept)
+			if c.gaveWay != nil {
+				return n.handBackForGivingWay(ctx, c, report, "rebase it")
+			}
 			if whyNot == "" {
 				return *report, nil
 			}
@@ -1425,6 +1450,9 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 				}
 			}
 			whyNot := n.sendBackForFailingTests(ctx, c, report, landErr, kept)
+			if c.gaveWay != nil {
+				return n.handBackForGivingWay(ctx, c, report, "fix the merged tests")
+			}
 			if whyNot == "" {
 				return *report, nil
 			}
@@ -1600,6 +1628,29 @@ func paneUnreadable(err error) string {
 	return fmt.Sprintf("The session's pane could not be read (tmux did not answer, or the session is gone): %s", firstLine(err.Error()))
 }
 
+// givesWayBeforeASendBack is the close-out's read of the give-way marker right
+// before it would start a Builder session (the shared read, GivesWayNow): when the
+// host gives way it keeps the standing in c.gaveWay, for the caller to hand the
+// story back with, and reports true. Nothing is lifted, written or started.
+func (n Next) givesWayBeforeASendBack(ctx context.Context, c *closeOut) bool {
+	standing, giving := GivesWayNow(ctx, n.GiveWay, false)
+	if !giving {
+		return false
+	}
+	c.gaveWay = &standing
+	return true
+}
+
+// handBackForGivingWay hands a story back that was to be sent to a fresh Builder
+// session (to do what) on a host that gives way: nothing is started, recorded as
+// sent back or merged, the claim, the worktree and the branch are kept, and the
+// story says why. The next dispatch tick, once the host is free, runs its
+// close-out again, which sends it back then if it is still to be (mw-2891blf.19).
+func (n Next) handBackForGivingWay(ctx context.Context, c *closeOut, report *NextReport, what string) (NextReport, error) {
+	why := fmt.Sprintf("the host %s, so no Builder session is started to %s now; its close-out is run again once the host is free", c.gaveWay, what)
+	return n.handBack(ctx, c, report, ReasonGivesWay, why)
+}
+
 // asideSuffix is added to the name of the session a close-out ran in when a
 // story is sent back, so that the fresh session can take the story's own name.
 const asideSuffix = "-sent-back"
@@ -1642,6 +1693,13 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 	if sends > 0 && head == c.detail.RebaseBase {
 		return fmt.Sprintf("it was sent back %s to rebase already, onto %s at %s, and %s has not moved since, so another rebase would change nothing. The conflict is a person's to resolve now",
 			times(sends), onto, shortSHA(head), c.target)
+	}
+	// The last look at the marker, before anything is recorded: the Builder's
+	// session took its time, and the person at the host's screen may have turned
+	// give way on since. A host that gives way starts no session, and nothing is
+	// recorded as sent back (mw-2891blf.19).
+	if n.givesWayBeforeASendBack(ctx, c) {
+		return c.gaveWay.String() + ", so no Builder session is started to rebase it"
 	}
 	spec, err := n.Boot.Rebase(ctx, c.detail, c.worktree, onto)
 	if err != nil {
@@ -1814,6 +1872,11 @@ func (n Next) sendBackForFailingTests(ctx context.Context, c *closeOut, report *
 	}
 
 	onto := StartPoint(n.remote(), c.target)
+	// The last look at the marker, before the worktree is touched or anything is
+	// recorded (mw-2891blf.19): see sendBack.
+	if n.givesWayBeforeASendBack(ctx, c) {
+		return c.gaveWay.String() + ", so no Builder session is started to fix the merged tests"
+	}
 	if _, err := n.Landing.Merge(ctx, c.worktree, onto); err != nil {
 		return fmt.Sprintf("%s could not be merged into the worktree to send it back: %v%s", onto, err, conflictedSuffix(err))
 	}

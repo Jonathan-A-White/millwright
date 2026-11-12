@@ -2961,17 +2961,13 @@ func (g *gaveWayAfterClaim) Error() string { return g.err.Error() }
 func (g *gaveWayAfterClaim) Unwrap() error { return g.err }
 
 // givesWayNow reads the give-way marker again, for the places that start a session
-// after the pass read it once at its start. A marker that cannot be read gives way
-// to nobody, as at the start of the pass.
+// after the pass read it once at its start: the shared read (GivesWayNow). A dry
+// run starts nothing and reads nothing.
 func (d Dispatch) givesWayNow(ctx context.Context) (GiveWayStanding, bool) {
-	if d.GiveWay == nil || d.DryRun {
+	if d.DryRun {
 		return GiveWayStanding{}, false
 	}
-	standing, giving, err := d.GiveWay.Standing(ctx, true)
-	if err != nil || !giving {
-		return GiveWayStanding{}, false
-	}
-	return standing, true
+	return GivesWayNow(ctx, d.GiveWay, true)
 }
 
 // heldAfterClaim is the refusal start returns for a story held after its claim;

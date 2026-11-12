@@ -594,6 +594,11 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 		after = ", after its fixer " + report.Fixer.Name + " had ended, and no second fixer is started"
 	}
 	switch {
+	case isGivesWay(gate.Err):
+		// The host gave way after the batch began: nothing more of the gate was
+		// started, the stories stay queued for the next landing (mw-2891blf.19).
+		report.Held = gate.Err.Error() + after + "; the stories stay queued"
+		return
 	case isHostStillBusy(gate.Err):
 		// The host's load and not the stories': nothing ran, no fixer was
 		// started, and the stories stay queued for the next landing.
@@ -660,6 +665,7 @@ func (b BatchLand) runGate(ctx context.Context, dir, rigDir string, report *Batc
 	// the time of every run added.
 	bc := b.batchCloseOut(report, rigDir)
 	bc.waitsWhenBusy = true
+	bc.readsGiveWay = true
 	bc.gate = report.gate
 	gate, log := n.gateWithSpecs(ctx, bc, nr, dir, gateOnTheBatch, RelatedSpan{Base: report.Base, Skip: report.versionCommit})
 	report.gate = bc.gate
