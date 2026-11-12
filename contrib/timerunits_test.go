@@ -388,3 +388,81 @@ func TestCheckTimerUnitsPauseTimerCarriesBeadsEnv(t *testing.T) {
 		t.Errorf("the check did not name pause.go and beads.env; it printed:\n%s", out)
 	}
 }
+
+// The nightly pair runs the sweep and then the match, nicely, once a day at
+// 08:30 UTC without catch-up (mw-27f7myz.10); the check holds each directive,
+// and names the pair when one is taken out or changed (mw-27f7myz.13).
+func TestCheckTimerUnitsNeedsNightly(t *testing.T) {
+	edit := func(rel string, f func(line string) string) func(root string) {
+		return func(root string) {
+			path := filepath.Join(root, "contrib", "systemd", rel)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			changed := false
+			for _, l := range strings.Split(string(data), "\n") {
+				n := f(l)
+				if n != l {
+					changed = true
+				}
+				out = append(out, n)
+			}
+			if !changed {
+				t.Fatalf("%s had no line to change", rel)
+			}
+			if err := os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	drop := func(prefix string) func(string) string {
+		return func(l string) string {
+			if strings.HasPrefix(l, prefix) {
+				return "# taken out"
+			}
+			return l
+		}
+	}
+	cases := []struct {
+		name   string
+		rel    string
+		change func(string) string
+	}{
+		{"Nice=10 taken out of the service", "mw-needs-nightly.service", drop("Nice=10")},
+		{"the service's ExecStart running the match first", "mw-needs-nightly.service", func(l string) string {
+			if strings.HasPrefix(l, "ExecStart=") {
+				return strings.Replace(l, "needs sweep --write", "needs sweep", 1)
+			}
+			return l
+		}},
+		{"the service's match window changed", "mw-needs-nightly.service", func(l string) string {
+			return strings.Replace(l, "--since 36h", "--since 12h", 1)
+		}},
+		{"the service not a oneshot", "mw-needs-nightly.service", drop("Type=oneshot")},
+		{"the timer's hour changed", "mw-needs-nightly.timer", func(l string) string {
+			return strings.Replace(l, "08:30:00 UTC", "09:30:00 UTC", 1)
+		}},
+		{"the timer catching up", "mw-needs-nightly.timer", func(l string) string {
+			return strings.Replace(l, "Persistent=false", "Persistent=true", 1)
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, passed := runTimerUnitsOnCopy(t, edit(c.rel, c.change))
+			if passed {
+				t.Fatalf("the check passed a tree with %s:\n%s", c.name, out)
+			}
+			if !strings.Contains(out, c.rel) {
+				t.Errorf("the check did not name %s; it printed:\n%s", c.rel, out)
+			}
+		})
+	}
+	t.Run("the real units pass", func(t *testing.T) {
+		out, passed := runTimerUnitsOnCopy(t, nil)
+		if !passed {
+			t.Errorf("the check failed the real units:\n%s", out)
+		}
+	})
+}
