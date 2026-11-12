@@ -40,6 +40,9 @@ type TriageBead struct {
 	Created     time.Time
 	Updated     time.Time
 	ClosedAt    time.Time
+	// CloseReason is why the bead was closed, as the tracker has it; empty for
+	// a bead that is not closed.
+	CloseReason string
 	// Needs are the beads this one waits on, the link to its parent left out.
 	Needs []string
 	// Molecule is the root of the formula poured for this story, "" for a bead
