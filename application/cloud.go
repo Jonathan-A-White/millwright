@@ -950,7 +950,6 @@ func (p *cloudPass) setBox(name string, change func(b *CloudBox)) {
 }
 
 func (p *cloudPass) dropBox(name string) {
-	p.markDowned(name)
 	p.state.Boxes = slices.DeleteFunc(p.state.Boxes, func(b CloudBox) bool { return b.Name == name })
 }
 
@@ -1495,7 +1494,11 @@ func (p *cloudPass) down(ctx context.Context, name, why string) bool {
 	}
 	p.state.Hours += billedHours(maxTime(p.state.Boxes[at].Up, cloudMonthStart(p.now)), p.now)
 	p.state.Boxes = append(p.state.Boxes[:at], p.state.Boxes[at+1:]...)
-	p.markDowned(name)
+	// A box that never came up wrote no notes under its name: only one that was
+	// up leaves a name to rest.
+	if !box.Making && !box.Restoring && why != "it did not come up" {
+		p.markDowned(name)
+	}
 	if why != "it did not come up" {
 		p.move(ctx, fmt.Sprintf("down %s: %s", name, why))
 	}
