@@ -2374,6 +2374,8 @@ While the marker stands, `mw dispatch` on the host does nothing at all (not even
 
 The Windows side calls these at unlock, at lock and every 5 minutes: `mw host giveway --install-line` prints the one paste that installs it on the desktop (`--uninstall-line` the way back, `--mode-line freeze|shutdown` the switch to the fallback that shuts WSL down at unlock); [docs/give-way.md](docs/give-way.md) has what each event does, the logs and what is not covered.
 
+After its last stop `on` also writes a note for the home (`host.<host>.gives_way`, a short timeout, a failure only logged in `giveway.log`; a renew rewrites it every 10 minutes at most; `off` and the expired lift clear it). While it stands the home's quiet, stuck, stranded and starved alarms pass the host's frozen stories over, and `mw status` says `<host> gives way since <time> (<n> stories frozen)` under the host; a note not rewritten for twice `giveway_stale` is not believed (see "What the home shows" in [docs/give-way.md](docs/give-way.md)).
+
 On the home (the host that serves the Mayor and the beads), `on` without `--session` is refused: the home never gives way. State is in `~/.local/state/mw` (`MW_GIVEWAY_DIR` overrides). The scenarios are in `features/giveway.feature`.
 
 ## Pausing the factory (mw pause, mw resume, mw usage)
