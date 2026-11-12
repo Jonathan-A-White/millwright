@@ -2369,7 +2369,10 @@ func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextRep
 				report.Notes = append(report.Notes, ClosingStepNote(true))
 				return Refusal{}, false
 			}
-			if err := n.Tracker.CloseStory(ctx, open[0].ID, "the closing comment is on the story (closed by mw next)"); err == nil {
+			reason := "the closing comment is on the story (closed by mw next)"
+			if err := writeRetrying(ctx, n, report, "the close of "+open[0].ID, func() error {
+				return n.closeFormulaBead(ctx, root, open[0].ID, reason)
+			}); err == nil {
 				report.Notes = append(report.Notes, ClosingStepNote(false))
 				return Refusal{}, false
 			}
@@ -2704,34 +2707,41 @@ func (n Next) holdDemo(ctx context.Context, c *closeOut, report *NextReport, out
 	return fmt.Errorf("holding the demo failed on each of its %d tries, the last saying: %w", tries, last)
 }
 
-// closeStory closes a landed story, and when the close fails tries it again the
-// way a push is tried: PushTries times in all, PushWait apart (mw-gq6.191). The
-// tracker's server can be out of reach just as a landing ends, and a landed
-// story left in_progress is one a later dispatch could take for work in
-// flight. A close whose answer was lost but whose write went through is read
-// back, and counts as closed.
+// closeStory closes a landed story. Each close goes through writeRetrying, as a
+// landed story's formula does (mw-gq6.990): a close that met a passing fault of
+// the network waits on the retry wait and is tried again, and one bd said was
+// indeterminate, which may have landed, is read first and counts as done when
+// the story reads closed (closeStoryOnce). A close that fails for any other
+// reason is tried again the way a push is: PushTries times in all, PushWait
+// apart (mw-gq6.191), since the tracker's server can be out of reach just as a
+// landing ends and a landed story left in_progress is one a later dispatch could
+// take for work in flight. A close lost for good is mailed to the Mayor with how
+// often it was tried (mw-gq6.1119).
 //
 // A story another host claimed — dispatched there and landed here, as a batch
 // lands them — is refused to this host's name, and mw acts under no other:
 // this host takes the claim over and closes it under its own, and says so on
 // the story (mw-gq6.475). What it says is in the notes returned.
-func (n Next) closeStory(ctx context.Context, id, outcome string) ([]string, error) {
+func (n Next) closeStory(ctx context.Context, c *closeOut, report *NextReport, outcome string) ([]string, error) {
+	id := c.id
 	tries := n.pushTries()
 	var last error
 	var notes []string
+	attempts := 0
+	lost := func(err error) {
+		what := fmt.Sprintf("the close of %s", id)
+		n.mailLostWriteAfter(ctx, c, report, what, fmt.Sprintf("%s could not be closed: %v", id, err), attempts)
+	}
 	for try := 1; try <= tries; try++ {
 		if try > 1 {
 			if err := waitFor(ctx, n.PushWait); err != nil {
 				return notes, fmt.Errorf("%w (and waiting %s to try the close again: %v)", last, n.PushWait, err)
 			}
 		}
-		last = n.Tracker.CloseStory(ctx, id, outcome)
-		var held *CloseHeldError
-		if errors.As(last, &held) {
-			var said []string
-			said, last = n.takeOverAndClose(ctx, id, outcome, held)
-			notes = append(notes, said...)
-		}
+		last = writeRetrying(ctx, n, report, "the close of "+id, func() error {
+			attempts++
+			return n.closeStoryOnce(ctx, id, outcome, &notes)
+		})
 		if last == nil {
 			return notes, nil
 		}
@@ -2746,11 +2756,50 @@ func (n Next) closeStory(ctx context.Context, id, outcome string) ([]string, err
 					id, blocker, status, id, blocker, id, last)
 			}
 		}
+		// writeRetrying has already waited out a passing fault as often as it
+		// tries one again: another round of it would only wait the longer.
+		if _, passing := Faulted(last); passing {
+			break
+		}
 	}
+	lost(last)
 	if tries == 1 {
 		return notes, last
 	}
+	if _, passing := Faulted(last); passing {
+		return notes, fmt.Errorf("the close failed on each of its %d tries, the last saying: %w", attempts, last)
+	}
 	return notes, fmt.Errorf("the close failed on each of its %d tries, the last saying: %w", tries, last)
+}
+
+// closeStoryOnce makes one close of a landed story, taking over a claim another
+// actor holds. A close bd said was indeterminate or that met a passing fault is
+// checked on the story first, as closeFormulaBead does for the formula: a story
+// that now reads closed is closed, and one that reads open is a passing fault for
+// writeRetrying to try again.
+func (n Next) closeStoryOnce(ctx context.Context, id, outcome string, notes *[]string) error {
+	err := n.Tracker.CloseStory(ctx, id, outcome)
+	var held *CloseHeldError
+	if errors.As(err, &held) {
+		var said []string
+		said, err = n.takeOverAndClose(ctx, id, outcome, held)
+		*notes = append(*notes, said...)
+	}
+	if err == nil {
+		return nil
+	}
+	_, passing := Faulted(err)
+	unsure := strings.Contains(strings.ToLower(err.Error()), "indeterminate")
+	if !passing && !unsure {
+		return err
+	}
+	if detail, readErr := n.Tracker.ShowStory(ctx, id); readErr == nil && detail.Closed() {
+		return nil
+	}
+	if !passing {
+		return &TransientFault{Why: "write commit result indeterminate", Err: err}
+	}
+	return err
 }
 
 // stillWaitsOn is the first story the detail waits on that the tracker does not
