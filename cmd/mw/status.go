@@ -374,6 +374,7 @@ func damperSurvey(tracker *beads.Gateway) (application.DamperSurvey, error) {
 			NeedsYou: limits.NeedsYou,
 		},
 		NeedsCounts: needsCountsReader(),
+		Proposals:   tracker,
 	}, nil
 }
 

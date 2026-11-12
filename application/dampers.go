@@ -62,6 +62,53 @@ type DamperFacts struct {
 	// NeedsCounts is the bytes of the counts file the view writes beside itself
 	// (PosternNeedsCountsFile); nil when there is none to read.
 	NeedsCounts []byte
+	// Proposals are the PROPOSED comments of mw verify match that no VERIFIED or
+	// REJECTED comment answers (ProposalsOf); the alarm is judged from their age.
+	Proposals []DamperProposal
+}
+
+// DamperProposal is one bead holding a proposal of mw verify match that nobody
+// has confirmed, with when its oldest standing PROPOSED comment was written.
+type DamperProposal struct {
+	Bead  string
+	Since time.Time
+}
+
+// DamperProposalWaiting is how long a proposal may wait for a confirm before
+// DAMPERS names it.
+const DamperProposalWaiting = 2 * 24 * time.Hour
+
+// ProposalsOf finds, in each bead's comments, the standing proposals of mw verify
+// match: a PROPOSED comment not taken back by a later REJECTED one, on a bead with
+// no VERIFIED comment. A bead is named once, at its oldest standing proposal's
+// comment time; a comment with no time is left out. Beads come in id order.
+func ProposalsOf(comments map[string][]Comment) []DamperProposal {
+	var found []DamperProposal
+	beads := make([]string, 0, len(comments))
+	for bead := range comments {
+		beads = append(beads, bead)
+	}
+	sort.Strings(beads)
+	for _, bead := range beads {
+		list := comments[bead]
+		if verifiedIn(list) {
+			continue
+		}
+		var since time.Time
+		for _, p := range proposalsIn(list) {
+			for _, c := range list {
+				if firstWord(c.Text) == VerifyProposedWord && strings.Contains(c.Text, p.Txid) && !c.Created.IsZero() {
+					if since.IsZero() || c.Created.Before(since) {
+						since = c.Created
+					}
+				}
+			}
+		}
+		if !since.IsZero() {
+			found = append(found, DamperProposal{Bead: bead, Since: since})
+		}
+	}
+	return found
 }
 
 // DamperAlarm is one tripped alarm: the principle in a word (WIP, ageing,
@@ -139,6 +186,9 @@ const (
 	// DamperNeedsYou is the alarm for the needs waiting on him that his badge
 	// counts, read from the counts file the view writes (mw-27f7myz.4).
 	DamperNeedsYou = "needs you"
+	// DamperProposals is the alarm for proposals of mw verify match that nobody
+	// has confirmed in DamperProposalWaiting (mw-27f7myz.10).
+	DamperProposals = "proposals"
 )
 
 // damperNamed is how many beads an alarm's line names before it counts the rest.
@@ -419,11 +469,41 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 	if ring {
 		report.Alarms = append(report.Alarms, alarm)
 	}
+	if alarm, ring := proposalsAlarm(facts.Proposals, facts.Now); ring {
+		report.Alarms = append(report.Alarms, alarm)
+	}
 	if len(queue) > limits.ReviewQueue {
 		add(DamperReview, fmt.Sprintf("his review queue is %d: %d cards, %d demos, %d hands steps (limit %d)",
 			len(queue), len(cards), len(demos), len(hands), limits.ReviewQueue), uniqueStrings(queue))
 	}
 	return report
+}
+
+// proposalsAlarm rings for the beads whose proposal has waited over
+// DamperProposalWaiting; the ids stand in its text, before the command that
+// lists them, so the line reads whole.
+func proposalsAlarm(proposals []DamperProposal, now time.Time) (DamperAlarm, bool) {
+	var old []string
+	for _, p := range proposals {
+		if !p.Since.IsZero() && now.Sub(p.Since) > DamperProposalWaiting {
+			old = append(old, p.Bead)
+		}
+	}
+	if len(old) == 0 {
+		return DamperAlarm{}, false
+	}
+	named := old
+	if len(named) > damperNamed {
+		named = named[:damperNamed]
+	}
+	ids := strings.Join(named, " ")
+	if rest := len(old) - len(named); rest > 0 {
+		ids += fmt.Sprintf(" +%d", rest)
+	}
+	return DamperAlarm{
+		Principle: DamperProposals,
+		Text:      fmt.Sprintf("%d waiting over 2 days: %s (mw verify list)", len(old), ids),
+	}, true
 }
 
 // TesterHold is why a ready Tester story is held: its rig already runs as many
@@ -582,6 +662,9 @@ type DamperSurvey struct {
 	// NeedsCounts, when set, reads the counts file the view writes beside
 	// itself; nil reads none, and the needs-you alarm is silent.
 	NeedsCounts NeedsCountsReader
+	// Proposals, when set, reads the beads mw verify match left a proposal on; nil
+	// reads none, and the proposals alarm is silent.
+	Proposals VerifyBeads
 }
 
 // NeedsCountsReader reads the bytes of the view's counts file, nil with no
@@ -629,7 +712,40 @@ func (s DamperSurvey) Dampers(ctx context.Context, work WorkInHand, now time.Tim
 			facts.NeedsCounts = raw
 		}
 	}
+	if s.Proposals != nil {
+		// Comments that cannot be read are a gauge missing, not a fault in the others.
+		if proposals, err := ReadProposals(ctx, s.Proposals, now); err == nil {
+			facts.Proposals = proposals
+		}
+	}
 	return ReadDampers(facts, s.Limits), nil
+}
+
+// ReadProposals reads the standing proposals of the open demos and of the
+// landings of the last 14 days, the beads mw verify list looks at.
+func ReadProposals(ctx context.Context, beads VerifyBeads, now time.Time) ([]DamperProposal, error) {
+	work, err := beads.WorkInHand(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading the open demos: %w", err)
+	}
+	closed, err := beads.ClosedStories(ctx, now.Add(-verifyListLookback))
+	if err != nil {
+		return nil, fmt.Errorf("reading the landed stories: %w", err)
+	}
+	var ids []string
+	for _, d := range QueuedDemos(work) {
+		ids = append(ids, d.Story.ID)
+	}
+	for _, c := range closed {
+		if c.landed() {
+			ids = append(ids, c.ID)
+		}
+	}
+	comments, err := beads.StoriesComments(ctx, uniqueStrings(ids))
+	if err != nil {
+		return nil, fmt.Errorf("reading the comments of the beads: %w", err)
+	}
+	return ProposalsOf(comments), nil
 }
 
 // DamperCounts reads the work itself and then the alarms, for mw doctor.

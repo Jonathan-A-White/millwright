@@ -385,3 +385,56 @@ func TestDampersNameACountsFileThatCannotBeRead(t *testing.T) {
 		t.Errorf("line = %q (%v), want a count that cannot be trusted said as stale", got, ok)
 	}
 }
+
+// proposalComment is a PROPOSED comment of mw verify match, written at when.
+func proposalComment(txid string, when time.Time) application.Comment {
+	return application.Comment{
+		Created: when,
+		Text:    "PROPOSED VERIFIED by the Governor's use, from " + txid + " (2026-11-06 17:00Z): the green tick after Save (confidence 0.97, opus, run r-9)",
+	}
+}
+
+func proposalDampers(proposals []application.DamperProposal) string {
+	facts := aCleanDamperFixture()
+	facts.Proposals = proposals
+	var b strings.Builder
+	application.ReadDampers(facts, application.DamperLimits{}).Write(&b)
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+func TestDampersNameAProposalNobodyConfirmedInTwoDays(t *testing.T) {
+	comments := map[string][]application.Comment{
+		"mw-old.1":  {proposalComment("direct:aaa", statusNow.Add(-3*24*time.Hour))},
+		"mw-new.1":  {proposalComment("direct:bbb", statusNow.Add(-24*time.Hour))},
+		"mw-done.1": {proposalComment("direct:ccc", statusNow.Add(-3*24*time.Hour)), {Created: statusNow.Add(-24 * time.Hour), Text: "VERIFIED by the Governor's use, inferred by the Mayor from direct:ccc: ok"}},
+		"mw-rej.1":  {proposalComment("direct:ddd", statusNow.Add(-3*24*time.Hour)), {Created: statusNow.Add(-24 * time.Hour), Text: "REJECTED PROPOSED from direct:ddd: wrong picture"}},
+	}
+	got := proposalDampers(application.ProposalsOf(comments))
+	want := "proposals · 1 waiting over 2 days: mw-old.1 (mw verify list)"
+	if !strings.Contains(got, want) {
+		t.Errorf("DAMPERS = %q, want it to hold %q", got, want)
+	}
+	for _, not := range []string{"mw-new.1", "mw-done.1", "mw-rej.1"} {
+		if strings.Contains(got, not) {
+			t.Errorf("DAMPERS names %s: %q", not, got)
+		}
+	}
+}
+
+func TestDampersSayNothingOfAProposalYoungerThanTwoDays(t *testing.T) {
+	got := proposalDampers(application.ProposalsOf(map[string][]application.Comment{
+		"mw-new.1": {proposalComment("direct:bbb", statusNow.Add(-24*time.Hour))},
+	}))
+	if strings.Contains(got, "proposals") {
+		t.Errorf("a proposal a day old rings: %q", got)
+	}
+}
+
+func TestDampersCountEachBeadOnceWhateverItsProposals(t *testing.T) {
+	got := proposalDampers(application.ProposalsOf(map[string][]application.Comment{
+		"mw-two.1": {proposalComment("direct:aaa", statusNow.Add(-4*24*time.Hour)), proposalComment("direct:bbb", statusNow.Add(-3*24*time.Hour))},
+	}))
+	if !strings.Contains(got, "proposals · 1 waiting over 2 days: mw-two.1 (mw verify list)") {
+		t.Errorf("DAMPERS = %q", got)
+	}
+}
