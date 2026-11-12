@@ -1112,3 +1112,32 @@ func TestAStaleHostsNoteDoesNotHideAnotherHostsFreshHold(t *testing.T) {
 		t.Errorf("expected the vps's own hold, held 1h30m, got %+v", alarms)
 	}
 }
+
+// mw-gq6.1127: the starved note of a box the cloud destroyed is the old box's.
+func TestAStarvedNoteOfADestroyedBoxHoldsNoRigBackButOneOfALiveBoxDoes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		boxes []application.CloudBox
+		want  int
+	}{
+		"destroyed": {nil, 0},
+		"making":    {[]application.CloudBox{{Name: "cloud1", Making: true, Up: statusNow.Add(-time.Hour)}}, 0},
+		"up":        {[]application.CloudBox{{Name: "cloud1", Up: statusNow.Add(-5 * time.Hour)}}, 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tracker := aTrackerPathedToVPS(t)
+			storyOn(t, tracker, "mw-gq6.1", "One", "vps")
+			note := application.StarvedRig{Rig: "millwright", Since: statusNow.Add(-4 * time.Hour), Hold: "smoke hold", Reason: "the grist smoke failed"}
+			if err := tracker.SetNote(context.Background(), application.StarvedKey("cloud1"), application.FormatStarved([]application.StarvedRig{note})); err != nil {
+				t.Fatal(err)
+			}
+			book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: tc.boxes}}
+			alarms, err := application.DamperSurvey{Tracker: tracker, Notes: tracker, Cloud: book, CloudPlan: cloudPlan}.Starved(context.Background(), statusNow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(alarms) != tc.want {
+				t.Errorf("expected %d starved alarms, got %+v", tc.want, alarms)
+			}
+		})
+	}
+}

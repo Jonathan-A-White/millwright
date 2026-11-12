@@ -191,6 +191,9 @@ type CloudStories interface {
 	SetStoryMetadata(ctx context.Context, id string, fields map[string]string) error
 	// ReleaseClaimHeldBy gives back a claim a box's dispatch made.
 	ReleaseClaimHeldBy(ctx context.Context, id, holder string) error
+	// ClearRunState takes a story's run state off it, for a claim given back
+	// whose session is gone with its box.
+	ClearRunState(ctx context.Context, id string) error
 }
 
 // CloudNotes is what the cloud check reads of the tracker's notes: a box's
@@ -226,6 +229,10 @@ type CloudState struct {
 	// Moves are the latest ups and downs, oldest first, at most
 	// cloudMovesKept of them, for mw status.
 	Moves []CloudMove `json:"moves,omitempty"`
+	// Downed is when each box was last destroyed, by name, kept CloudNameBar so
+	// that no box is made again under a name whose per-host notes (last sync,
+	// ticks, mw commit) the old box wrote (mw-gq6.1127).
+	Downed map[string]time.Time `json:"downed,omitempty"`
 }
 
 // CloudBox is one box up.
@@ -247,6 +254,12 @@ type CloudBox struct {
 	// make ran past CloudPlan.MakeSlowLimit, once.
 	Vultr    string `json:"vultr,omitempty"`
 	SlowSaid bool   `json:"slow_said,omitempty"`
+	// VultrID is Vultr's id of the box's instance and LockedSince when a check
+	// first found it locked, at any time the box is in the book (a make, or a
+	// teardown Vultr will not take): both empty when Vultr holds no instance of
+	// it, or it is not locked (mw-gq6.1127).
+	VultrID     string    `json:"vultr_id,omitempty"`
+	LockedSince time.Time `json:"locked_since,omitzero"`
 	// Restoring is a box whose make ran past its deadline while Vultr still
 	// held the instance, restoring from a snapshot: InstanceID is Vultr's id
 	// for it and RestoringSince when the make gave up waiting. A check adopts
@@ -399,7 +412,15 @@ type CloudPlan struct {
 
 // DefaultCloudMakeSlow is how long a make may run before it is called slow,
 // when the plan does not say.
-const DefaultCloudMakeSlow = 30 * time.Minute
+const DefaultCloudMakeSlow = 15 * time.Minute
+
+// CloudLockedLimit is how long Vultr may report a box locked, making or down,
+// before the book names it with its instance id: a lock that long is Vultr's to
+// mend, with a ticket (mw-gq6.1127).
+const CloudLockedLimit = 30 * time.Minute
+
+// CloudNameBar is how long after a box is destroyed no box is made under its name.
+const CloudNameBar = 24 * time.Hour
 
 // MakeSlowLimit is how long a make may run before it is called slow.
 func (p CloudPlan) MakeSlowLimit() time.Duration {
@@ -746,6 +767,12 @@ func (p *cloudPass) roll() {
 		p.state.Month, p.state.Hours = month, 0
 		p.dirty = "a new month"
 	}
+	for name, at := range p.state.Downed {
+		if p.now.Sub(at) >= CloudNameBar {
+			delete(p.state.Downed, name)
+			p.dirty = "name free again"
+		}
+	}
 }
 
 // askBilled is what the provider's billing says of the boxes' names this
@@ -755,6 +782,19 @@ func (p *cloudPass) askBilled(ctx context.Context) float64 {
 	for i := 1; i <= max(p.check.Plan.MaxBoxes, len(p.state.Boxes)); i++ {
 		names = append(names, fmt.Sprintf("%s%d", p.check.Plan.prefix(), i))
 	}
+	// A name skipped because its box was downed lately is billed for too, and so
+	// is a box made under a name past the plan's count.
+	for _, box := range p.state.Boxes {
+		if !slices.Contains(names, box.Name) {
+			names = append(names, box.Name)
+		}
+	}
+	for name := range p.state.Downed {
+		if !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
 	usd, known, err := p.check.Provider.Billed(ctx, names)
 	if err != nil || !known {
 		if err != nil {
@@ -816,23 +856,37 @@ func (p *cloudPass) reconcile(ctx context.Context) {
 	}
 }
 
-// readMakes keeps, on each box the book holds as being made, what Vultr says
-// of the instance labelled for it, so that mw status and DAMPERS can say a make
-// that sits at "active locked" (a snapshot restore) is not a box up.
+// readMakes keeps, on each box the book holds, what Vultr says of the instance
+// labelled for it: while it is being made, its word ("active locked", a snapshot
+// restore), so that mw status and DAMPERS can say a make that sits there is not a
+// box up; and for every box its instance id and when it was first found locked,
+// so that a lock past CloudLockedLimit is named with the id to open a ticket for.
 func (p *cloudPass) readMakes(instances []CloudInstance) {
 	for i := range p.state.Boxes {
 		box := &p.state.Boxes[i]
-		if !box.Making {
-			continue
-		}
-		said := ""
+		var found CloudInstance
+		held := false
 		for _, inst := range instances {
 			if inst.Label == box.Name {
-				said = inst.Text()
+				found, held = inst, true
 			}
 		}
-		if box.Vultr != said {
-			box.Vultr = said
+		if box.Making && box.Vultr != found.Text() {
+			box.Vultr = found.Text()
+			p.dirty = box.Name + " vultr"
+		}
+		id, since := "", time.Time{}
+		if held {
+			id = found.ID
+			if found.Server == "locked" {
+				since = box.LockedSince
+				if since.IsZero() {
+					since = p.now
+				}
+			}
+		}
+		if box.VultrID != id || !box.LockedSince.Equal(since) {
+			box.VultrID, box.LockedSince = id, since
 			p.dirty = box.Name + " vultr"
 		}
 	}
@@ -1008,16 +1062,40 @@ func (b CloudBox) vultrText() string {
 	return "Vultr says " + b.Vultr
 }
 
-// SlowMakes are the boxes the book holds as being made for longer than the
-// plan's MakeSlowLimit, oldest first, for DAMPERS.
-func (s CloudState) SlowMakes(plan CloudPlan, now time.Time) []CloudBox {
-	var slow []CloudBox
+// CloudMakeAlarm is one alarm the book holds of a box, for DAMPERS and the quiet
+// alarm: Box names it, Text says it, Identity keeps one alarm one line.
+type CloudMakeAlarm struct {
+	Box, Key, Text, Identity string
+}
+
+func (a CloudMakeAlarm) damper() DamperAlarm {
+	return DamperAlarm{Principle: DamperCloudMake, Text: a.Text, Identity: a.Identity}
+}
+
+// MakeAlarms are the alarms of the boxes the book holds, oldest first: a box being
+// made for longer than the plan's MakeSlowLimit, with Vultr's word and the step
+// that ends it (mw cloud down <box>), and a box Vultr has reported locked for
+// longer than CloudLockedLimit, making or not, with the instance id to open a
+// Vultr ticket for.
+func (s CloudState) MakeAlarms(plan CloudPlan, now time.Time) []CloudMakeAlarm {
+	var alarms []CloudMakeAlarm
 	for _, box := range s.Boxes {
 		if box.Making && now.Sub(box.Up) >= plan.MakeSlowLimit() {
-			slow = append(slow, box)
+			alarms = append(alarms, CloudMakeAlarm{Box: box.Name, Key: "cloud:" + box.Name, Identity: "cloud make " + box.Name,
+				Text: fmt.Sprintf("%s has been made for %s and the make has not finished; %s; to give it up: mw cloud down %s",
+					box.Name, Clock(now.Sub(box.Up)), box.vultrText(), box.Name)})
+		}
+		if !box.LockedSince.IsZero() && now.Sub(box.LockedSince) >= CloudLockedLimit {
+			id := box.VultrID
+			if id == "" {
+				id = "(id not known)"
+			}
+			alarms = append(alarms, CloudMakeAlarm{Box: box.Name, Key: "cloud.locked:" + box.Name, Identity: "cloud locked " + box.Name,
+				Text: fmt.Sprintf("%s has been locked at Vultr for %s (instance %s): open a Vultr ticket for instance %s, then mw cloud down %s",
+					box.Name, Clock(now.Sub(box.LockedSince)), id, id, box.Name)})
 		}
 	}
-	return slow
+	return alarms
 }
 
 // cloudUpWhen is what a move of a box made says of when it is up.
@@ -1343,6 +1421,13 @@ func (p *cloudPass) make(ctx context.Context) {
 		p.check.say("%d stories wait, but no box is made before %s: %v", p.report.Waiting, p.state.FeeLimitAt.Add(CloudFeeLimitPause).Format("15:04Z"), ErrCloudFeeLimit)
 		return
 	}
+	for _, box := range p.state.Boxes {
+		if (box.Making || box.Restoring) && p.now.Sub(box.Up) >= plan.MakeSlowLimit() {
+			p.check.say("%d stories wait, but no box is made: %s has been made for %s and is stuck (%s); mw cloud down %s ends it",
+				p.report.Waiting, box.Name, Clock(p.now.Sub(box.Up)), box.vultrText(), box.Name)
+			return
+		}
+	}
 	name := p.nextName()
 	if p.spent()+plan.HourlyUSD*float64(len(p.state.Boxes)+2) > plan.MonthlyCapUSD {
 		p.capReached(ctx, "no box is made")
@@ -1409,12 +1494,26 @@ func (p *cloudPass) down(ctx context.Context, name, why string) bool {
 	}
 	p.state.Hours += billedHours(maxTime(p.state.Boxes[at].Up, cloudMonthStart(p.now)), p.now)
 	p.state.Boxes = append(p.state.Boxes[:at], p.state.Boxes[at+1:]...)
+	// A box that never came up wrote no notes under its name: only one that was
+	// up leaves a name to rest.
+	if !box.Making && !box.Restoring && why != "it did not come up" {
+		p.markDowned(name)
+	}
 	if why != "it did not come up" {
 		p.move(ctx, fmt.Sprintf("down %s: %s", name, why))
 	}
 	p.keep(ctx, "down "+name)
 	p.repath(ctx, name)
 	return true
+}
+
+// markDowned notes that the box named is destroyed, so that nextName leaves its
+// name alone for CloudNameBar.
+func (p *cloudPass) markDowned(name string) {
+	if p.state.Downed == nil {
+		p.state.Downed = map[string]time.Time{}
+	}
+	p.state.Downed[name] = p.now
 }
 
 // salvage saves what a box's kept worktrees hold before the box is destroyed,
@@ -1627,22 +1726,31 @@ func (p *cloudPass) repath(ctx context.Context, name string) {
 	p.repathFrom(ctx, stories, name)
 }
 
-// handBack gives back every claim on a box that is gone with no session to its
-// name: a story queued for its rig's batch, whose branch is pushed and whose
-// batch lands it, but whose claim, host=<box> and worktree were left on the
-// box. It is released and re-pathed to host=auto, keeping its queued run state,
-// so that mw land takes it and no dispatch works it again. A claim with a
-// session running or ended is left to its claim. It says each story handed
-// back, as a cloud event; one that cannot be handed back fails the check with
-// its id.
+// handBack gives back every claim on a box that is gone, however its session
+// ended (mw-gq6.1127): the box and its sessions are destroyed, and a claim left
+// on it holds the story from every dispatch until the Mayor frees it by hand.
+// Each is released and re-pathed to host=auto, after the box's work was saved
+// into the vault. A story queued for its rig's batch, whose branch is pushed
+// and whose batch lands it, keeps its queued run state, so that mw land takes it
+// and no dispatch works it again; any other loses its run state with the claim,
+// so that the next dispatch reads it as a fresh story. It says each story
+// handed back, as a cloud event; one that cannot be handed back fails the check
+// with its id.
 func (p *cloudPass) handBack(ctx context.Context, stories []StoryDetail, name string) {
-	var back, stuck []string
+	var queued, others, stuck []string
 	for _, story := range stories {
 		status := strings.ToLower(strings.TrimSpace(story.Status))
-		if story.IsEpic || ClaimHost(story.Assignee) != name || !QueuedForBatch(story) || status != StatusInProgress && status != StatusOpen {
+		if story.IsEpic || ClaimHost(story.Assignee) != name || status != StatusInProgress && status != StatusOpen {
 			continue
 		}
 		id := story.Story.ID
+		isQueued := QueuedForBatch(story)
+		if !isQueued {
+			if err := p.check.Stories.ClearRunState(ctx, id); err != nil {
+				stuck = append(stuck, id)
+				continue
+			}
+		}
 		if err := p.check.Stories.ReleaseClaimHeldBy(ctx, id, story.Assignee); err != nil {
 			stuck = append(stuck, id)
 			continue
@@ -1653,10 +1761,17 @@ func (p *cloudPass) handBack(ctx context.Context, stories []StoryDetail, name st
 				continue
 			}
 		}
-		back = append(back, id)
+		if isQueued {
+			queued = append(queued, id)
+		} else {
+			others = append(others, id)
+		}
 	}
-	if len(back) > 0 {
-		p.move(ctx, fmt.Sprintf("handed back %s from %s, queued for its batch with no session on the box, and re-pathed it to host=auto", strings.Join(back, ", "), name))
+	if len(queued) > 0 {
+		p.move(ctx, fmt.Sprintf("handed back %s from %s, queued for its batch with no session on the box, and re-pathed it to host=auto", strings.Join(queued, ", "), name))
+	}
+	if len(others) > 0 {
+		p.move(ctx, fmt.Sprintf("handed back %s from %s: the box is gone, so the claim is released, its run state cleared, and the story re-pathed to host=auto", strings.Join(others, ", "), name))
 	}
 	if len(stuck) > 0 {
 		p.fail(fmt.Errorf("could not hand back %s from %s: release the claim by hand and set host=auto with %sauto", strings.Join(stuck, ", "), name, RepathHint))
@@ -1786,6 +1901,13 @@ func (p *cloudPass) nextName() string {
 	taken := map[string]bool{}
 	for _, box := range p.state.Boxes {
 		taken[box.Name] = true
+	}
+	// A box destroyed lately leaves its name unused for CloudNameBar: the notes
+	// it wrote under the name (last sync, ticks, mw commit) are not the new box's.
+	for name, at := range p.state.Downed {
+		if p.now.Sub(at) < CloudNameBar {
+			taken[name] = true
+		}
 	}
 	for i := 1; ; i++ {
 		if name := fmt.Sprintf("%s%d", p.check.Plan.prefix(), i); !taken[name] {

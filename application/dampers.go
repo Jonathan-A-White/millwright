@@ -65,9 +65,10 @@ type DamperFacts struct {
 	// Proposals are the PROPOSED comments of mw verify match that no VERIFIED or
 	// REJECTED comment answers (ProposalsOf); the alarm is judged from their age.
 	Proposals []DamperProposal
-	// SlowMakes are the cloud boxes whose make has run past the plan's limit
-	// (CloudState.SlowMakes); the alarm is judged from them (mw-gq6.1113).
-	SlowMakes []CloudBox
+	// SlowMakes are the cloud alarms of the book (CloudState.MakeAlarms): a
+	// make past the plan's limit, a box locked at Vultr past CloudLockedLimit
+	// (mw-gq6.1113, mw-gq6.1127).
+	SlowMakes []CloudMakeAlarm
 }
 
 // DamperProposal is one bead holding a proposal of mw verify match that nobody
@@ -479,8 +480,8 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 	if alarm, ring := proposalsAlarm(facts.Proposals, facts.Now); ring {
 		report.Alarms = append(report.Alarms, alarm)
 	}
-	for _, box := range facts.SlowMakes {
-		report.Alarms = append(report.Alarms, cloudMakeAlarm(box, facts.Now))
+	for _, alarm := range facts.SlowMakes {
+		report.Alarms = append(report.Alarms, alarm.damper())
 	}
 	if len(queue) > limits.ReviewQueue {
 		add(DamperReview, fmt.Sprintf("his review queue is %d: %d cards, %d demos, %d hands steps (limit %d)",
@@ -740,7 +741,7 @@ func (s DamperSurvey) Dampers(ctx context.Context, work WorkInHand, now time.Tim
 // slowMakes are the boxes of the cloud's book made for longer than the plan's
 // limit; none when there is no book or it cannot be read, a gauge missing and
 // not a fault in the others.
-func (s DamperSurvey) slowMakes(ctx context.Context, now time.Time) []CloudBox {
+func (s DamperSurvey) slowMakes(ctx context.Context, now time.Time) []CloudMakeAlarm {
 	if s.Cloud == nil {
 		return nil
 	}
@@ -748,17 +749,7 @@ func (s DamperSurvey) slowMakes(ctx context.Context, now time.Time) []CloudBox {
 	if err != nil {
 		return nil
 	}
-	return state.SlowMakes(s.CloudPlan, now)
-}
-
-// cloudMakeAlarm is the alarm for one box whose make has run past the limit,
-// the one text mw status, mw report and the review hold all say.
-func cloudMakeAlarm(box CloudBox, now time.Time) DamperAlarm {
-	return DamperAlarm{
-		Principle: DamperCloudMake,
-		Text:      fmt.Sprintf("%s has been made for %s and the make has not finished; %s", box.Name, Clock(now.Sub(box.Up)), box.vultrText()),
-		Identity:  "cloud make " + box.Name,
-	}
+	return state.MakeAlarms(s.CloudPlan, now)
 }
 
 // CloudMakeLines are the cloud make alarms of the book alone, one line for each
@@ -766,8 +757,8 @@ func cloudMakeAlarm(box CloudBox, now time.Time) DamperAlarm {
 // would otherwise not say them. It reads no bead.
 func (s DamperSurvey) CloudMakeLines(ctx context.Context, now time.Time) []string {
 	var lines []string
-	for _, box := range s.slowMakes(ctx, now) {
-		lines = append(lines, cloudMakeAlarm(box, now).Line())
+	for _, alarm := range s.slowMakes(ctx, now) {
+		lines = append(lines, alarm.damper().Line())
 	}
 	return lines
 }

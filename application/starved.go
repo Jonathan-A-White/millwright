@@ -499,6 +499,11 @@ func (s DamperSurvey) readStarved(ctx context.Context, now time.Time) ([]Starved
 	for _, key := range slices.Sorted(maps.Keys(notes)) {
 		if strings.HasPrefix(key, "host.") && strings.HasSuffix(key, ".starved") {
 			host := strings.TrimSuffix(strings.TrimPrefix(key, "host."), ".starved")
+			// A box the cloud destroyed, or is making again, holds back no rig:
+			// its note is the old box's (mw-gq6.1127).
+			if down, err := (CloudBoxesDown{Book: s.Cloud, Plan: s.CloudPlan}).Down(ctx, host); err == nil && down {
+				continue
+			}
 			dispatch := ParseHostTicks(notes[TicksKey(host)]).Dispatch
 			for _, r := range ParseStarved(notes[key]) {
 				r.Host = host

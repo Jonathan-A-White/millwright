@@ -156,6 +156,12 @@ type Nudge struct {
 	// Down, or one that cannot be read, leaves every host judged by its sync.
 	Down DownHosts
 
+	// CloudBook and CloudPlan are the cloud's book, where a box being made past
+	// MakeAlarmAfter is a clause of its own, keyed "cloud:<box>" (mw-gq6.1127).
+	// A nil CloudBook leaves them out.
+	CloudBook CloudBook
+	CloudPlan CloudPlan
+
 	// GiveWayStale is giveway_stale: a host whose give-way note was not rewritten
 	// for twice this is not believed. Zero reads DefaultGiveWayStale.
 	GiveWayStale time.Duration
@@ -170,6 +176,35 @@ type Nudge struct {
 	// Now is the clock elapsed time is measured against. The zero value reads
 	// the real one.
 	Now func() time.Time
+}
+
+// CloudBoxesDown is DownHosts over the cloud's book: a host is a down box when
+// its name is one the plan gives a box and the book holds no such box, or holds
+// it still being made or restored. A box destroyed has no sync to be quiet
+// about; and a box made again under the name of one destroyed has not synced
+// yet, so the old box's last sync says nothing of it (mw-gq6.1127). A box being
+// made has a clause of its own, from Nudge.CloudBook.
+type CloudBoxesDown struct {
+	Book CloudBook
+	Plan CloudPlan
+}
+
+// Down implements DownHosts. A name that is no box's is never down; a book that
+// cannot be read tells nothing.
+func (d CloudBoxesDown) Down(ctx context.Context, host string) (bool, error) {
+	if d.Book == nil || !d.Plan.isBox(host) {
+		return false, nil
+	}
+	state, err := d.Book.Read(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, box := range state.Boxes {
+		if box.Name == host {
+			return box.Making || box.Restoring, nil
+		}
+	}
+	return true, nil
 }
 
 // DownHosts says whether a host is a cloud box that is down, whether mw cloud
@@ -331,7 +366,26 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 		clauses = append(clauses, NudgeClause{Key: "host:" + w.Host, Text: text})
 	}
 
-	return clauses, nil
+	return append(clauses, n.cloudClauses(ctx, now)...), nil
+}
+
+// cloudClauses are the clauses for the cloud's boxes being made past the
+// plan's MakeSlowLimit, or held locked at Vultr past CloudLockedLimit: the
+// same words DAMPERS says, keyed "cloud:<box>". A book that cannot be read says
+// none.
+func (n Nudge) cloudClauses(ctx context.Context, now time.Time) []NudgeClause {
+	if n.CloudBook == nil {
+		return nil
+	}
+	state, err := n.CloudBook.Read(ctx)
+	if err != nil {
+		return nil
+	}
+	var clauses []NudgeClause
+	for _, a := range state.MakeAlarms(n.CloudPlan, now) {
+		clauses = append(clauses, NudgeClause{Key: a.Key, Text: a.Text})
+	}
+	return clauses
 }
 
 // isDown says host is a box that is down; a host that cannot be told is judged
