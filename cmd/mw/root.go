@@ -50,6 +50,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newErrorsCmd())
 	root.AddCommand(newMillhandCmd())
 	root.AddCommand(newDeputyCmd())
+	root.AddCommand(newNeedsCmd())
 	root.AddCommand(newNextCmd())
 	root.AddCommand(newNoteCmd())
 	root.AddCommand(newTocCmd())

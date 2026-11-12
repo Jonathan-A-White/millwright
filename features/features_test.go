@@ -221,6 +221,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeTodoDueScenario(ctx)
 	steps.InitializeTodoRankScenario(ctx)
 	steps.InitializeTodoNightlyScenario(ctx)
+	steps.InitializeNeedsSweepScenario(ctx)
 	steps.InitializeVerifyMatchScenario(ctx)
 	steps.InitializeVerifyConfirmScenario(ctx)
 	steps.InitializeVerifyRealtimeScenario(ctx)
