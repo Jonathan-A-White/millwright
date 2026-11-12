@@ -265,3 +265,106 @@ func TestAFindingIsTheBeadAlreadyFiledOnlyWhenItNamesTheSameFault(t *testing.T) 
 		})
 	}
 }
+
+// A finding that carries its own AC, Sweep and size is filed with them: the AC and
+// Sweep in the acceptance, the size in the path, the title the finding alone
+// (mw-gq6.1124).
+func TestAFindingWithAnACAndASweepIsFiledWithThemInItsAcceptanceAndItsSizeInItsPath(t *testing.T) {
+	tracker, rules := aBatchEpicToTest(t)
+	ctx := context.Background()
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-e.1", "Done.\nFound, not fixed:\n"+
+		"The parser drops a trailing line (application/parse.go:12). AC: go test ./application -run TestParseKeepsTheLastLine passes. "+
+		"Sweep: every other reader of the lines in application/ is checked for the same drop. Size: S. By design? no\n"+
+		"For the rig memory: nothing"))
+	before := tracker.Stories()
+
+	aBatchLandedWithTesters(t, application.TesterTrial{}, tracker, rules, "mw-e.1", "mw-e.2")
+
+	filed := theTestersFiled(t, tracker, before)
+	if len(filed) != 1 {
+		t.Fatalf("expected 1 bug filed, got %d: %+v", len(filed), filed)
+	}
+	d := filed[0]
+	if d.Story.Title != "[bug] The parser drops a trailing line (application/parse.go:12)" {
+		t.Errorf("expected the title to be the finding alone, got %q", d.Story.Title)
+	}
+	for _, want := range []string{"go test ./application -run TestParseKeepsTheLastLine passes", "Sweep: every other reader of the lines in application/ is checked for the same drop"} {
+		if !strings.Contains(d.Acceptance, want) {
+			t.Errorf("expected the acceptance to hold %q, got %q", want, d.Acceptance)
+		}
+	}
+	if d.Merged().Size != domain.SizeS {
+		t.Errorf("expected the size S from the finding, got %q", d.Merged().Size)
+	}
+	if d.Merged().Files != "application/parse.go" {
+		t.Errorf("expected the files key of the file the finding names, got %q", d.Merged().Files)
+	}
+	if strings.Contains(d.Description, "AC:") {
+		t.Errorf("expected the description to quote the finding, not its AC: %q", d.Description)
+	}
+	comments, err := tracker.StoryComments(ctx, d.Story.ID)
+	mustDo(t, err)
+	for _, c := range comments {
+		if strings.HasPrefix(c.Text, application.HeldCommentPrefix) {
+			t.Errorf("expected no hold reason on a bug with an AC, got %q", c.Text)
+		}
+	}
+}
+
+// A finding the Builder says is by design is filed saying so.
+func TestAFindingSaidToBeByDesignIsFiledSayingSo(t *testing.T) {
+	tracker, rules := aBatchEpicToTest(t)
+	ctx := context.Background()
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-e.1", "Done.\nFound, not fixed:\nThe loader reads the file twice (application/load.go:40). AC: go test ./application -run TestLoadReadsOnce passes. By design? yes\nFor the rig memory: nothing"))
+	before := tracker.Stories()
+
+	aBatchLandedWithTesters(t, application.TesterTrial{}, tracker, rules, "mw-e.1", "mw-e.2")
+
+	filed := theTestersFiled(t, tracker, before)
+	if len(filed) != 1 || !strings.Contains(filed[0].Description, "By design: yes") {
+		t.Fatalf("expected 1 bug saying by design: yes, got %+v", filed)
+	}
+}
+
+// A finding with no AC is still filed, held, with the reason 'no AC from the
+// Builder' written as a HELD comment, so nothing is lost.
+func TestAFindingWithNoACIsFiledHeldWithTheReasonNoACFromTheBuilder(t *testing.T) {
+	tracker, rules := aBatchEpicToTest(t)
+	ctx := context.Background()
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-e.1", "Done.\nFound, not fixed:\nThe parser drops a trailing line (application/parse.go:12)\nFor the rig memory: nothing"))
+	before := tracker.Stories()
+
+	aBatchLandedWithTesters(t, application.TesterTrial{}, tracker, rules, "mw-e.1", "mw-e.2")
+
+	filed := theTestersFiled(t, tracker, before)
+	if len(filed) != 1 || filed[0].Status != apptest.StatusDeferred || filed[0].Acceptance != "" {
+		t.Fatalf("expected 1 held bug with no acceptance, got %+v", filed)
+	}
+	comments, err := tracker.StoryComments(ctx, filed[0].Story.ID)
+	mustDo(t, err)
+	if len(comments) != 1 || comments[0].Text != application.HeldCommentPrefix+" no AC from the Builder" {
+		t.Errorf("expected the hold reason 'HELD: no AC from the Builder', got %+v", comments)
+	}
+}
+
+func TestParseFoundItem(t *testing.T) {
+	cases := []struct {
+		name, line, what, ac, sweep string
+		size                        domain.Size
+		byDesign                    string
+	}{
+		{"bare", "A is wrong (a.go:1)", "A is wrong (a.go:1)", "", "", "", ""},
+		{"all four", "A is wrong (a.go:1). AC: go test ./x passes. Sweep: grep the rest. Size: m. By design? yes", "A is wrong (a.go:1)", "go test ./x passes", "grep the rest", domain.SizeM, "yes"},
+		{"by design with a colon", "A (a.go:1) AC: go vet ./... exits 0; By design?: no", "A (a.go:1)", "go vet ./... exits 0", "", "", "no"},
+		{"an unknown size is none", "A (a.go:1) AC: x. Size: huge", "A (a.go:1)", "x", "", "", ""},
+		{"a word ending in ac is no marker", "The mac: address is wrong (a.go:1)", "The mac: address is wrong (a.go:1)", "", "", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := application.ParseFoundItem(c.line)
+			if got.What != c.what || got.AC != c.ac || got.Sweep != c.sweep || got.Size != c.size || got.ByDesign != c.byDesign {
+				t.Errorf("got %+v", got)
+			}
+		})
+	}
+}

@@ -69,6 +69,15 @@ func TestEachBuildersClosingStepAsksForTheFoundNotFixedSection(t *testing.T) {
 				if step.ID == id && !strings.Contains(step.Description, "a section headed exactly 'Found, not fixed:'") {
 					t.Errorf("%s step %s: expected it to ask for a section headed exactly 'Found, not fixed:'", file, id)
 				}
+				// Each finding carries an AC, a Sweep line, a size and a by-design answer
+				// (mw-gq6.1124).
+				if step.ID == id {
+					for _, ask := range []string{"'AC: <", "'Sweep: <", "'Size: <", "'By design? yes'", "no AC from the Builder"} {
+						if !strings.Contains(step.Description, ask) {
+							t.Errorf("%s step %s: expected it to ask each finding for %s", file, id, ask)
+						}
+					}
+				}
 			}
 		}
 	}

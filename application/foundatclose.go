@@ -132,11 +132,109 @@ func closingFoundNotFixed(comments []Comment) FoundNotFixed {
 	return FoundNotFixed{}
 }
 
+// NoACReason is the reason a bug filed from a finding with no AC is held for
+// (mw-gq6.1124): it is written as a HELD comment on the bug.
+const NoACReason = "no AC from the Builder"
+
+// FoundItem is one finding line read for what the formula asks of it: what is
+// wrong, then an AC checkable by running something, a Sweep line, a size guess
+// and whether the code says it is by design, each marked inside the line as
+// 'AC: ...', 'Sweep: ...', 'Size: S' and 'By design? yes'.
+type FoundItem struct {
+	// What is the finding itself, the text before the first marker (the whole line
+	// when it has none).
+	What string
+	// AC is the one line checkable by running something; empty when the line has none.
+	AC string
+	// Sweep is where else the same fault may be; empty when the line has none.
+	Sweep string
+	// Size is the Builder's guess, empty when it gave none or not one of domain.Sizes.
+	Size domain.Size
+	// ByDesign is 'yes' or 'no' as the line says, else empty.
+	ByDesign string
+}
+
+var foundMarkerPattern = regexp.MustCompile(`(?i)(?:^|[\s.;])(ac:|sweep:|size:|by design\?:?)`)
+
+// foundTrimEnd drops spaces and one closing '.' or ';' from a part of a line; a
+// '...' (go vet ./...) is kept whole.
+func foundTrimEnd(text string) string {
+	text = strings.TrimRight(text, " \t;")
+	if strings.HasSuffix(text, ".") && !strings.HasSuffix(text, "..") {
+		text = strings.TrimRight(text[:len(text)-1], " \t;")
+	}
+	return text
+}
+
+// ParseFoundItem reads the markers of one finding line. A line with none is
+// only What.
+func ParseFoundItem(line string) FoundItem {
+	line = strings.TrimSpace(line)
+	marks := foundMarkerPattern.FindAllStringSubmatchIndex(line, -1)
+	if len(marks) == 0 || marks[0][2] == 0 {
+		return FoundItem{What: line}
+	}
+	item := FoundItem{What: foundTrimEnd(line[:marks[0][2]])}
+	for i, m := range marks {
+		end := len(line)
+		if i+1 < len(marks) {
+			end = marks[i+1][2]
+		}
+		key := strings.ToLower(strings.TrimRight(line[m[2]:m[3]], ":"))
+		value := foundTrimEnd(strings.TrimSpace(line[m[3]:end]))
+		switch {
+		case key == "ac" && item.AC == "":
+			item.AC = value
+		case key == "sweep" && item.Sweep == "":
+			item.Sweep = value
+		case key == "size":
+			if size := domain.Size(strings.ToUpper(strings.Fields(value + " -")[0])); domain.KnownSize(size) {
+				item.Size = size
+			}
+		case strings.HasPrefix(key, "by design"):
+			if word := strings.ToLower(strings.Trim(strings.Fields(value + " -")[0], ".,;")); word == "yes" || word == "no" {
+				item.ByDesign = word
+			}
+		}
+	}
+	return item
+}
+
+var foundNumberedPattern = regexp.MustCompile(`^\d+[.)]\s`)
+
+// Acceptance is the acceptance a bug filed from the item has: the AC, numbered,
+// and its Sweep line; empty when the item has no AC.
+func (i FoundItem) Acceptance() string {
+	if i.AC == "" {
+		return ""
+	}
+	ac := i.AC
+	if !foundNumberedPattern.MatchString(ac) {
+		ac = "1. " + ac
+	}
+	if i.Sweep != "" {
+		ac += "\nSweep: " + i.Sweep
+	}
+	return ac
+}
+
 // foundBug is one bug to file for lines of the section: its title, and the
-// lines it quotes (one, or the ones past the cap).
+// lines it quotes (one, or the ones past the cap). A bug of one line has that
+// line read as item; the bug that lists the lines past the cap has none, and
+// quotes each line whole.
 type foundBug struct {
 	title string
 	lines []string
+	item  *FoundItem
+}
+
+// said is the lines of the bug as the finding words them: the finding alone when
+// it was read as an item.
+func (b foundBug) said() []string {
+	if b.item != nil {
+		return []string{b.item.What}
+	}
+	return b.lines
 }
 
 // foundBugs is the bugs a section files: one for each of the first
@@ -148,13 +246,14 @@ func foundBugs(id string, lines []string) []foundBug {
 	var rest []string
 	titles := map[string]bool{}
 	for _, line := range lines {
-		title := "[bug] " + firstCharacters(line, foundTitleFirst)
+		item := ParseFoundItem(line)
+		title := "[bug] " + firstCharacters(item.What, foundTitleFirst)
 		if titles[title] {
 			continue
 		}
 		titles[title] = true
 		if len(bugs) < foundAtCloseCap {
-			bugs = append(bugs, foundBug{title: title, lines: []string{line}})
+			bugs = append(bugs, foundBug{title: title, lines: []string{line}, item: &item})
 		} else {
 			rest = append(rest, line)
 		}
@@ -375,7 +474,7 @@ func foundBeadText(d StoryDetail) string {
 // neither: a story's own findings may share a file (mw-gq6.1068). A shared file
 // or function alone never makes a match (mw-gq6.1103).
 func foundMatch(bug foundBug, beads []StoryDetail, finder string) (same, near string) {
-	text := strings.Join(bug.lines, "\n")
+	text := strings.Join(bug.said(), "\n")
 	refs, symbols, words := foundRefs(text), foundSymbols(text), foundFaultWords(text)
 	if len(refs) == 0 && len(symbols) == 0 {
 		return "", ""
@@ -410,11 +509,14 @@ func foundMatch(bug foundBug, beads []StoryDetail, finder string) (same, near st
 
 func foundDescription(c *closeOut, bug foundBug, host string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s (%s) landed, and its closing comment lists %s under 'Found, not fixed:':\n\n", c.id, c.detail.Story.Title, thisOrThese(len(bug.lines)))
-	for _, line := range bug.lines {
+	fmt.Fprintf(&b, "%s (%s) landed, and its closing comment lists %s under 'Found, not fixed:':\n\n", c.id, c.detail.Story.Title, thisOrThese(len(bug.said())))
+	for _, line := range bug.said() {
 		fmt.Fprintf(&b, "> %s\n", line)
 	}
-	fmt.Fprintf(&b, "\nSeen by: %s\n\nThe Builder saw it and did not fix it, and nobody has checked it since. Read it, word what is to be done and its acceptance, and release this bug, or close it if it is not one.\n\nSource: mw next on %s (mw-t5shinh.24).\n", c.id, host)
+	if bug.item != nil && bug.item.ByDesign != "" {
+		fmt.Fprintf(&b, "\nBy design: %s (the Builder's answer to whether the code's own comment says it is deliberate).\n", bug.item.ByDesign)
+	}
+	fmt.Fprintf(&b, "\nSeen by: %s\n\nThe Builder saw it and did not fix it, and nobody has checked it since. Read it, word what is to be done and its acceptance (the Builder's, if it gave one, is in the acceptance field), and release this bug, or close it if it is not one.\n\nSource: mw next on %s (mw-t5shinh.24).\n", c.id, host)
 	return b.String()
 }
 
@@ -487,12 +589,20 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 			continue
 		}
 		overrides := c.path
-		overrides.Files = foundFiles(bug.lines, c.path.Files)
+		overrides.Files = foundFiles(bug.said(), c.path.Files)
+		acceptance := ""
+		if bug.item != nil {
+			acceptance = bug.item.Acceptance()
+			if bug.item.Size != "" {
+				overrides.Size = bug.item.Size
+			}
+		}
 		story := NewStory{
 			EpicID:      c.detail.EpicID,
 			Standalone:  c.detail.EpicID == "",
 			Title:       bug.title,
 			Description: foundDescription(c, bug, n.Host),
+			Acceptance:  acceptance,
 			Priority:    2,
 			Overrides:   overrides,
 			Labels:      []string{LabelBug, LabelFoundAtClose},
@@ -507,6 +617,16 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 			break
 		}
 		report.Notes = append(report.Notes, fmt.Sprintf("filed %s, held: %s found it and did not fix it", id, c.id))
+		if acceptance == "" {
+			// A bug with no AC from the Builder is held for that reason, written where
+			// mw stuck and the Mayor read a hold's reason (mw-gq6.1124).
+			reason := HeldCommentPrefix + " " + NoACReason
+			if err := writeRetrying(ctx, n, report, "the hold reason of a bug for a finding not fixed", func() error {
+				return n.Tracker.CommentOnStory(ctx, id, reason)
+			}); err != nil {
+				report.Notes = append(report.Notes, fmt.Sprintf("%s was filed held, but its reason (%s) could not be written: %v", id, NoACReason, err))
+			}
+		}
 		if near != "" {
 			report.Notes = append(report.Notes, fmt.Sprintf("%s may overlap %s, which names the same file or symbol but not the same fault", id, near))
 			block = append(block, fmt.Sprintf("Filed: %s, held (may overlap %s). %s", id, near, strings.Join(bug.lines, " ")))

@@ -4998,9 +4998,14 @@ A Builder files no bead: it lists what it saw and did not fix in a closing-comme
 section headed `Found, not fixed:` (at the start of a line, before `For common
 errors:`), one finding to a line, or the word `nothing`. `mw next` files each line
 as a held `[bug]` under the landed story's epic (standalone when it has none),
-titled with the line, labelled `bug` and `found-at-close`, with the landed story's
-path, the line and `Seen by: <id>` in its description and no acceptance, for the
-Mayor to word and release. The Landed mail says `Filed: <id>, held.` for each.
+titled with the finding, labelled `bug` and `found-at-close`, with the landed story's
+path, the finding and `Seen by: <id>` in its description, for the
+Mayor to word and release. A line may carry, after the finding and on the same
+line, `AC: <one line checkable by running something>`, `Sweep: <where else>`,
+`Size: <XS|S|M|L|XL>` and `By design? yes|no`: the AC and Sweep go into the bug's
+acceptance, the size into its path, and the by-design answer into its description.
+A line with no AC is still filed, held, with a `HELD: no AC from the Builder`
+comment, so nothing is lost. The Landed mail says `Filed: <id>, held.` for each.
 At most five bugs are filed for a close-out; the lines after them go into one more
 bug that lists them. A title already filed, open or closed, files nothing, so a
 close-out run again files nothing; a bug the tracker refuses is a lost-write mail,
