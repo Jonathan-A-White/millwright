@@ -68,6 +68,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
   - [Confirming a proposal (`mw verify confirm`, `mw verify list`)](#confirming-a-proposal-mw-verify-confirm-mw-verify-list)
   - [A landing his report shows not met (`mw verify notmet`)](#a-landing-his-report-shows-not-met-mw-verify-notmet)
   - [Checking the labels of a HOW TO CHECK IT (`mw lint-checkit`)](#checking-the-labels-of-a-how-to-check-it-mw-lint-checkit)
+  - [Verifying the internal landings itself (`mw needs sweep`)](#verifying-the-internal-landings-itself-mw-needs-sweep)
 - [Saved prompts](#saved-prompts)
 - [Making a fresh vault](#making-a-fresh-vault)
 - [Joining an existing vault](#joining-an-existing-vault)
@@ -3970,6 +3971,24 @@ curly, or between backticks) and looks for it as a fixed string under the `src/`
 `not found in src/`, and exits non-zero when there are any; a bead with no HOW TO CHECK IT, or none that quotes a label, passes.
 A rig with no `src/` is an error. The tdd-feature formula's closing step asks the Builder to quote labels from the source
 and run it. The tests are in `application/lintcheckit_test.go`.
+
+### Verifying the internal landings itself (`mw needs sweep`)
+
+The Needs you cleanup of 2026-11-11 checked 872 verify cards by script. `mw needs sweep [--dry-run|--write] [--stale-live]`
+is that check as a command, at no cost in tokens. It reads the landings the view makes a verify need of (closed as landed
+within 30 days, no comment opening `VERIFIED` or `NOT MET`) and prints one line each: the bead, its class and what it would
+write. `--dry-run` (the default) writes nothing. The classes: `internal` (its closing step said `Internal: nothing for the
+Governor to look at`), `reverted`, `follow-up-open` (an open bug names it), `his-words` (a message of his is on the bead
+after it closed), `no-deploy` (his line, and this host keeps no `built-<rig>.deployed`), `not-deployed`, `fresh` (closed
+under `[needs] min_age` ago, default 24h), `his-line`, `stale-live`, `unproven` (its commit is not shown in the rig's main)
+and `no-check`. `--write` comments only an `internal` landing whose commit is an ancestor of the rig's main and, where this
+host keeps the deployed mark, of the deployed commit: `VERIFIED by the factory's own check, not by his use`, the commit,
+where it was seen and the time. A landing whose merge a later commit reverted (`This reverts commit <the merge>`, with no
+later merge of its branch; a close reason names the branch's tip, so the merges of the branch are read too) gets no comment
+and one line, once, in one mail to the Mayor. One tracker write at a time; a failed one stops the run naming the bead; a
+second run writes nothing. Each `--write` run is recorded in `~/.local/state/mw/needs/<run>.json`. `--stale-live`
+(PROVISIONAL, off unless given) also writes on a landing of his line closed 14 days or more whose deployed build the
+rig's `site_url` page states, ending `His own walk stays open to him.` The steps are in `features/needs_sweep.feature`.
 
 ## Saved prompts
 
