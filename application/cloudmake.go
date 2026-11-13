@@ -48,10 +48,25 @@ func (m CloudMake) Run(ctx context.Context, name string) error {
 		}
 		started := m.now()
 		upErr := m.Provider.Up(ctx, name)
+		if upErr == nil {
+			upErr = m.enrolled(ctx, name)
+		}
 		done, err := m.settle(ctx, name, try, started, upErr)
 		if done {
 			return err
 		}
+	}
+	return nil
+}
+
+// enrolled is nil when the box is a peer of the hub, and the make's failure
+// when the provider says it is not (vultr-boost address): a box with no address
+// cannot be asked for its worktrees or take a story, so it would stay up and
+// billed and never dispatch. Any other trouble reading the address leaves the
+// wrapper's word standing, as the instance list does.
+func (m CloudMake) enrolled(ctx context.Context, name string) error {
+	if _, err := m.Provider.Address(ctx, name); noHubAddress(err) {
+		return fmt.Errorf("%s came up but was never enrolled as a hub peer: %w", name, err)
 	}
 	return nil
 }
