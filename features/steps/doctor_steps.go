@@ -15,6 +15,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/infrastructure/configfile"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 
 	"github.com/cucumber/godog"
@@ -1187,6 +1188,7 @@ func (c *doctorContext) posternChannelHost(home, config string) error {
 	os.Setenv("HOME", dir)
 	os.Setenv("MW_POSTERN_CHANNEL", "")
 	c.real = doctor.NewPosternChannel(&apptest.FakeHomeFile{Text: home + " 2026-09-29T00:10:00Z mw@" + home}, seatUpHost)
+	c.real.(*doctor.PosternChannel).Config = configfile.New(filepath.Join(dir, ".config", "mw", "config.toml"))
 	return nil
 }
 

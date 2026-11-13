@@ -307,11 +307,11 @@ Feature: mw doctor
     And mayor-up was not run
     And the doctor log is empty
 
-  Scenario: The real postern-channel check on the home host whose config lacks the key has no cure, and names the key and the file
+  Scenario: The real postern-channel check on the home host whose config lacks the key sets it to direct, and names the key and the file
     Given the home host's config has no postern_channel
     When mw doctor's postern-channel check runs for real
-    Then mw doctor leaves with the status 6
-    And the doctor log holds "postern-channel cure-failed no cure"
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "postern-channel cured"
     And mw doctor printed "postern_channel"
     And mw doctor printed "config.toml"
 

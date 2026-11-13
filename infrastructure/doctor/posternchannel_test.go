@@ -10,6 +10,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/configfile"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 )
 
@@ -118,7 +119,71 @@ func TestThePosternChannelProbeCannotTellWhenTheConfigIsRefused(t *testing.T) {
 	}
 }
 
-func TestThePosternChannelHasNoCure(t *testing.T) {
+// pcCheck is the check on the home, with the config file under HOME as the
+// file its cure edits.
+func pcCheck(t *testing.T) *doctor.PosternChannel {
+	t.Helper()
+	path, err := config.FilePath()
+	if err != nil {
+		t.Fatalf("finding the config file: %v", err)
+	}
+	check := doctor.NewPosternChannel(pcThisHost, "laptop")
+	check.Config = configfile.New(path)
+	check.Out = &strings.Builder{}
+	return check
+}
+
+func TestThePosternChannelCureAddsDirectToAConfigThatLacksTheKey(t *testing.T) {
+	pcHome(t, "cap = 2\n")
+	check := pcCheck(t)
+
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty before the cure, got %s (%s)", verdict, reason)
+	}
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("expected the cure to work, got %v", err)
+	}
+	path, _ := config.FilePath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the config: %v", err)
+	}
+	if !strings.Contains(string(data), `postern_channel = "direct"`) {
+		t.Fatalf("expected the config to hold postern_channel = \"direct\", got %q", data)
+	}
+	if !strings.Contains(string(data), "cap = 2") {
+		t.Fatalf("expected the cure to leave the other lines alone, got %q", data)
+	}
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected ok after the cure, got %s (%s)", verdict, reason)
+	}
+}
+
+func TestThePosternChannelCureMakesTheConfigWhenThereIsNone(t *testing.T) {
+	pcHome(t, "")
+	check := pcCheck(t)
+
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("expected the cure to work, got %v", err)
+	}
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected ok after the cure, got %s (%s)", verdict, reason)
+	}
+}
+
+func TestThePosternChannelCureSetsDirectOverChain(t *testing.T) {
+	pcHome(t, "postern_channel = \"chain\"\n")
+	check := pcCheck(t)
+
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("expected the cure to work, got %v", err)
+	}
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected ok after the cure, got %s (%s)", verdict, reason)
+	}
+}
+
+func TestThePosternChannelWithNoConfigFileToEditHasNoCure(t *testing.T) {
 	check := doctor.NewPosternChannel(pcThisHost, "laptop")
 
 	if check.Name() != "postern-channel" {
@@ -127,8 +192,13 @@ func TestThePosternChannelHasNoCure(t *testing.T) {
 	if err := check.Cure(context.Background()); err == nil || !strings.Contains(err.Error(), "no cure") {
 		t.Fatalf("expected a no-cure error, got %v", err)
 	}
+}
+
+func TestThePosternChannelWayBackAndDamper(t *testing.T) {
+	check := pcCheck(t)
+
 	if !strings.Contains(check.WayBack(), "config.toml") {
-		t.Fatalf("expected the way back to say a person edits the file, got %q", check.WayBack())
+		t.Fatalf("expected the way back to name the config file, got %q", check.WayBack())
 	}
 	if _, cap := check.Damper(); cap != 1 {
 		t.Fatalf("expected a cap of 1, got %d", cap)
