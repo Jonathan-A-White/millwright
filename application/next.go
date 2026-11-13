@@ -863,6 +863,14 @@ type closeOut struct {
 	// none was kept; the close-out commits it.
 	harnessStop string
 
+	// crashFile is the name of the file in the run that keeps a harness crash
+	// the story was given back for (HarnessCrashFileName), empty when none was
+	// kept; the close-out commits it. crashSaid is what a pane that showed the
+	// harness crashing adds to the no-result stop of a story that was not given
+	// back for it (harnessCrashed).
+	crashFile string
+	crashSaid string
+
 	// loginTold is set when the Mayor has been mailed this host's expired login
 	// (holdHostForLogin), so that the refusal of this story does not mail the
 	// same news again (mw-gq6.781).
@@ -1314,13 +1322,20 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 			return n.harnessStopped(ctx, c, report, stop)
 		}
 	}
+	if noResultAt(printed, err) {
+		// The harness itself crashed under the session (mw-gq6.1137): given back
+		// once, not stopped for the Mayor's hand retry.
+		if rep, handled, crashErr := n.harnessCrashed(ctx, c, report); handled {
+			return rep, crashErr
+		}
+	}
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session left no result at %s, so it never started or it died before it could write one",
-			resultPath), "")
+			resultPath), harnessCrashStopSaid(c, ""))
 	case strings.TrimSpace(printed) == "":
 		why, said := n.emptyResult(ctx, c, resultName, resultPath)
-		return n.stop(ctx, c, report, ReasonNoResult, why, said)
+		return n.stop(ctx, c, report, ReasonNoResult, why, harnessCrashStopSaid(c, said))
 	case readErr != nil:
 		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", readErr), "")
 	}
@@ -3488,7 +3503,8 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	var trouble []string
 	// A story whose work is committed and whose formula was left unfinished is
 	// not waiting for a person (mw-gq6.341), nor is one whose session ran to its
-	// turn cap (mw-1ljpo9.6): the claim is given back so that the
+	// turn cap (mw-1ljpo9.6), nor one whose harness crashed under it the first
+	// time (mw-gq6.1137, harnessCrashed): the claim is given back so that the
 	// next dispatch tick takes it as another attempt, keeping this branch under
 	// another name as it keeps any leftover of an earlier attempt. So is a Tester
 	// story's that left no FINDINGS (mw-gq6.594): nothing is left to land, and the
@@ -3508,7 +3524,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 				trouble = append(trouble, fmt.Sprintf("the reason %s is held could not be written on it: %v", c.id, err))
 			}
 		}
-	} else if reason == ReasonOpenSteps || reason == ReasonAcceptanceChanged || reason == ReasonNoClosingComment || reason == ReasonGristExampleUnproved || reason == ReasonTurnCap || (reason == ReasonWorkflowScope && giveBack) || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
+	} else if reason == ReasonOpenSteps || reason == ReasonAcceptanceChanged || reason == ReasonNoClosingComment || reason == ReasonGristExampleUnproved || reason == ReasonTurnCap || reason == ReasonHarnessCrash || (reason == ReasonWorkflowScope && giveBack) || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
 		if err := n.releaseOnStop(ctx, c.id, report); err != nil {
 			trouble = append(trouble, fmt.Sprintf("the claim on %s could not be given back: %v", c.id, err))
 		} else {
@@ -3580,6 +3596,11 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	if reason == ReasonLoginExpired && c.loginTold {
 		// Once per host per expiry, not per story (mw-gq6.781): the Mayor has the
 		// news in the mail holdHostForLogin sent.
+		mail = NewMessage{}
+	} else if reason == ReasonHarnessCrash {
+		// A crash given back needs nobody (mw-gq6.1137): the story's comment and
+		// the ledger line say it, and the story is dispatched again. A second
+		// crash on the story stops as no-result and mails as that does.
 		mail = NewMessage{}
 	} else if err := n.sendMayorMail(ctx, c, report, mail, verdict); err != nil {
 		unwritten = append(unwritten, UnrecordedMail)
@@ -4032,6 +4053,12 @@ func (n Next) commit(ctx context.Context, c *closeOut, report *NextReport) {
 
 	if c.harnessStop != "" {
 		if record := runFilePath(c.id, c.harnessStop); record != "" {
+			paths = append(paths, record)
+		}
+	}
+
+	if c.crashFile != "" {
+		if record := runFilePath(c.id, c.crashFile); record != "" {
 			paths = append(paths, record)
 		}
 	}
