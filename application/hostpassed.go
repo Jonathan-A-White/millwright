@@ -202,13 +202,14 @@ func (s Status) noHostTakes(ctx context.Context, ready []StoryDetail) map[string
 		return nil
 	}
 	byHost := map[string]map[string]HostPassed{}
+	book := readBoxBook(ctx, s.Cloud, s.CloudPlan)
 	for key, value := range kept {
 		host, found := strings.CutPrefix(key, "host.")
 		if !found {
 			continue
 		}
 		host, found = strings.CutSuffix(host, ".passed")
-		if !found || host == "" {
+		if !found || host == "" || book.older(host, lastSyncOf(kept[LastSyncKey(host)])) {
 			continue
 		}
 		byHost[host] = map[string]HostPassed{}

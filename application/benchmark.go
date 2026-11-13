@@ -754,11 +754,7 @@ type BenchmarkReport struct {
 // the plan gives its boxes and no box of that name in the book. A host that is
 // no box's name (the laptop) is never one.
 func DestroyedBox(plan CloudPlan, book CloudState) func(host string) bool {
-	up := map[string]bool{}
-	for _, box := range book.Boxes {
-		up[box.Name] = true
-	}
-	return func(host string) bool { return plan.isBox(host) && !up[host] }
+	return func(host string) bool { return book.BoxGone(plan, host) }
 }
 
 // ReadBenchmarks is the section from the benchmarks of past close-outs; nil

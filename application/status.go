@@ -1577,9 +1577,10 @@ func (s Status) filesHeldSince(ctx context.Context) func(StoryDetail) time.Time 
 	byHost := map[string]filesHeld{}
 	if notes, ok := s.Notes.(DamperNotes); ok {
 		if kept, err := notes.NotesWithPrefix(ctx, "host."); err == nil {
+			book := readBoxBook(ctx, s.Cloud, s.CloudPlan)
 			for key, value := range kept {
 				host, found := strings.CutPrefix(key, "host.")
-				if host, found = strings.CutSuffix(host, ".files_held"); found && host != "" {
+				if host, found = strings.CutSuffix(host, ".files_held"); found && host != "" && !book.older(host, lastSyncOf(kept[LastSyncKey(host)])) {
 					byHost[host] = parseFilesHeld(value)
 				}
 			}
@@ -2060,10 +2061,7 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 	// note in the vault: a sync from before the new box was made is the old
 	// box's, and is read as none (mw-gq6.1145). A book that cannot be read
 	// leaves every sync as it was.
-	var book CloudState
-	if s.Cloud != nil {
-		book, _ = s.Cloud.Read(ctx)
-	}
+	book := readBoxBook(ctx, s.Cloud, s.CloudPlan)
 
 	work := make([]HostWork, 0, len(hosts))
 	for i, host := range hosts {
@@ -2085,9 +2083,14 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 				held.Runs[d.Story.ID] = run
 			}
 		}
+		// Every other note of the host is read against the same sync: the sync
+		// writes the ticks and the mw commit beside it, and the notes the
+		// host's timers leave come after one.
+		syncAt := lastSyncOf(held.Said)
+		older := book.older(host, syncAt)
 		if held.Said != "" {
 			if at, err := time.Parse(LastSyncFormat, held.Said); err == nil {
-				if book.SyncOfAnOlderBox(host, at) {
+				if older {
 					held.Said = ""
 				} else {
 					held.LastSync = at
@@ -2108,7 +2111,7 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 		if err != nil {
 			return nil, fmt.Errorf("reading whether %s's sync is halted: %w", host, err)
 		}
-		if info, ok := ParseSyncHalt(haltSaid); ok {
+		if info, ok := ParseSyncHalt(haltSaid); ok && !older {
 			held.Halt = &info
 		}
 
@@ -2116,18 +2119,25 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 		if err != nil {
 			return nil, fmt.Errorf("reading how the timers of %s are doing: %w", host, err)
 		}
-		held.Ticks = ParseHostTicks(ticks)
+		if !older {
+			held.Ticks = ParseHostTicks(ticks)
+		}
 
 		commit, err := notes[i].mw()
 		if err != nil {
 			return nil, fmt.Errorf("reading which mw %s runs: %w", host, err)
 		}
-		held.MwCommit = strings.TrimSpace(commit)
+		if !older {
+			held.MwCommit = strings.TrimSpace(commit)
+		}
 		held.BehindMain = behindMain(held.MwCommit, s.MainCommit)
 
 		doctor, err := notes[i].doctor()
 		if err != nil {
 			return nil, fmt.Errorf("reading what the doctor of %s found: %w", host, err)
+		}
+		if older {
+			doctor = ""
 		}
 		if held.DoctorSaid = strings.TrimSpace(doctor); held.DoctorSaid != "" {
 			var ok bool
@@ -2141,14 +2151,14 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 		}
 		held.Passed = map[string]HostPassed{}
 		for _, p := range ParseHostPassed(passed) {
-			if hostPassedGates[p.Gate] {
+			if hostPassedGates[p.Gate] && !older {
 				held.Passed[p.Story] = p
 			}
 		}
 		// A host that gives way keeps its claims and its heartbeats while its
 		// sessions are silent: its stories are frozen, not stranded, and the host
 		// is not asleep. A note that cannot be read is no note (mw-2891blf.3).
-		if said, err := notes[i].givesWay(); err == nil {
+		if said, err := notes[i].givesWay(); err == nil && !older {
 			held.GivesWay = readGiveWay(said, now, s.GiveWayStale)
 			if held.GivesWay.Stands {
 				held.Asleep = false
