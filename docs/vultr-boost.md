@@ -180,6 +180,7 @@ hourly_usd      = 0.132     # what one box costs an hour
 box_cap         = 2         # sessions a box runs at once; a change reaches the boxes up (see "A changed box_cap")
 up_minutes      = 60        # how long a make may run before it reads the box back from Vultr
 slow_make_minutes = 30      # how long a make may run, unfinished, before it is a cloud event and a DAMPERS line
+no_dispatch_minutes = 30    # how long after its make a box may go with no dispatch before it is destroyed
 snapshot        = "<id>"    # what contrib/vultr-boost snapshot printed; blank bootstraps in full
 command         = "<full path to contrib/vultr-boost>"   # default: the millwright checkout of [rigs]
 
@@ -225,7 +226,11 @@ Each check:
    (the check counts its sessions as coming, so it does not make a second box for
    the same stories). A make still running `slow_make_minutes` (default 30) after
    it began is one `cloud` event naming the box and Vultr's status, and a `cloud
-   make` line under DAMPERS for as long as it runs. Its output is in `~/.local/state/mw-dispatch/cloud-make.log` (the dispatch
+   make` line under DAMPERS for as long as it runs. A box that has not dispatched
+   `no_dispatch_minutes` (default 30) after its make finished (its first dispatch
+   never reached the beads server; the case seen is a box with no address on the
+   hub, which the home cannot reach) is destroyed by the check, a `cloud` event
+   naming why, and a replacement may be made when stories still wait. Its output is in `~/.local/state/mw-dispatch/cloud-make.log` (the dispatch
    state directory).
 5. **A box that does not come up** (the wrapper fails) is destroyed and tried once
    more, by the same process. When that fails too it is destroyed again and no box
