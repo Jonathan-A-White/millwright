@@ -185,3 +185,40 @@ func TestHowToHeadingQualifierIsCutAt200Bytes(t *testing.T) {
 		t.Errorf("a colon at byte 200 is past the limit and must give no steps, got %q", got)
 	}
 }
+
+// viewHowToParagraphLimit is 800 bytes: the prose between a heading's colon and
+// the blank line before step 1 may take 800 bytes with that blank line, so the
+// steps are read; one byte more and no steps are read.
+func TestHowToParagraphIsCutAt800Bytes(t *testing.T) {
+	if viewHowToParagraphLimit != 800 {
+		t.Fatalf("the limit under test is 800 bytes, viewHowToParagraphLimit is %d", viewHowToParagraphLimit)
+	}
+	steps := "1. Open Postern.\n2. See it."
+	// text is a heading's colon, the prose, a blank line and the steps; the
+	// prose and its blank line take size bytes after the colon.
+	text := func(size int) string {
+		return ":" + strings.Repeat("x", size-2) + "\n\n" + steps
+	}
+	if got, ok := howToAfterHeading(text(800)); !ok || got != steps {
+		t.Errorf("a paragraph and blank line of 800 bytes must leave the steps read, got %q, %v", got, ok)
+	}
+	if got, ok := howToAfterHeading(text(801)); ok {
+		t.Errorf("a paragraph and blank line of 801 bytes is past the limit and must give no steps, got %q", got)
+	}
+}
+
+// PosternViewSummaryLimit is 280 runes: a summary of exactly 280 runes is kept
+// whole, one of 281 is cut to 279 runes and an ellipsis. The runes are
+// multi-byte so a cut by bytes would show.
+func TestPosternViewSummaryIsCutAt280Runes(t *testing.T) {
+	if PosternViewSummaryLimit != 280 {
+		t.Fatalf("the limit under test is 280 runes, PosternViewSummaryLimit is %d", PosternViewSummaryLimit)
+	}
+	exact := strings.Repeat("é", 280)
+	if got := viewSummary(exact); got != exact {
+		t.Errorf("a summary of exactly 280 runes must stay whole, got %d runes", len([]rune(got)))
+	}
+	if got, want := viewSummary(exact+"é"), strings.Repeat("é", 279)+"…"; got != want {
+		t.Errorf("a summary of 281 runes must be cut to 279 and an ellipsis, got %d runes: %q", len([]rune(got)), got)
+	}
+}
