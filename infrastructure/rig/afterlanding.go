@@ -22,6 +22,7 @@ type AfterLanding struct {
 	read     func() (map[string]string, error)
 	now      func() time.Time
 	limit    time.Duration
+	stretch  int
 	limits   map[string]time.Duration
 	deploys  map[string]int
 	shell    string
@@ -122,10 +123,21 @@ func WithAfterLimit(limit time.Duration) AfterLandingOption {
 	}
 }
 
+// WithAfterStretch is how many times its limit a command is waited for before it
+// is stopped, instead of application.AfterLandingStretch (mw-gq6.1268). Less than
+// one changes nothing.
+func WithAfterStretch(times int) AfterLandingOption {
+	return func(a *AfterLanding) {
+		if times >= 1 {
+			a.stretch = times
+		}
+	}
+}
+
 // NewAfterLanding returns an AfterLanding that runs nothing until it is told
 // which rigs have a command.
 func NewAfterLanding(opts ...AfterLandingOption) *AfterLanding {
-	a := &AfterLanding{commands: map[string]string{}, limits: map[string]time.Duration{}, deploys: map[string]int{}, limit: application.AfterLandingLimit, shell: Shell, now: time.Now}
+	a := &AfterLanding{commands: map[string]string{}, limits: map[string]time.Duration{}, deploys: map[string]int{}, limit: application.AfterLandingLimit, stretch: application.AfterLandingStretch, shell: Shell, now: time.Now}
 	for _, opt := range opts {
 		opt(a)
 	}
@@ -188,10 +200,16 @@ func (a *AfterLanding) Run(ctx context.Context, rig, dir string) (application.Ra
 		line = markSteps(steps)
 	}
 	limit := a.Limit(rig)
-	limited, cancel := context.WithTimeout(ctx, limit)
+	// The limit is where a command is called slow; it is stopped only at the limit
+	// stretched, so that a deploy that runs on past it and finishes is not said to
+	// be half-deployed (mw-gq6.1268).
+	stopAt := limit * time.Duration(a.stretch)
+	limited, cancel := context.WithTimeout(ctx, stopAt)
 	defer cancel()
+	began := a.now()
 	output, err := runLine(limited, a.shell, line, dir, 0, freePortEnv())
-	ran := application.Ran{Command: command, Output: output, Steps: steps, Step: stepEndedIn(output, steps), ReadAt: readAt, Changed: changed, ReadFailed: readFailed}
+	ran := application.Ran{Command: command, Output: output, Steps: steps, Step: stepEndedIn(output, steps), ReadAt: readAt, Changed: changed, ReadFailed: readFailed,
+		Limit: limit, Took: a.now().Sub(began)}
 	if err == nil {
 		return ran, nil
 	}
@@ -200,7 +218,7 @@ func (a *AfterLanding) Run(ctx context.Context, rig, dir string) (application.Ra
 	// command stopped because mw itself was told to stop is not one that took
 	// too long.
 	if limited.Err() != nil && ctx.Err() == nil {
-		ran.Status, ran.TimedOut = -1, limit
+		ran.Status, ran.TimedOut = -1, stopAt
 		return ran, nil
 	}
 	var exited *exec.ExitError

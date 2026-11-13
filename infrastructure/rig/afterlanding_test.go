@@ -89,13 +89,13 @@ func TestACommandThatOutlivesItsLimitIsStoppedAndReportedAsAFailure(t *testing.T
 	if err != nil {
 		t.Fatalf("expected a command that took too long to be reported, not to fail the run: %v", err)
 	}
-	if took > 10*time.Second {
+	if took > 12*time.Second {
 		t.Errorf("expected the command to be stopped at its limit, it ran for %s", took)
 	}
-	if ran.Succeeded() || ran.TimedOut != 2*time.Second || !strings.Contains(ran.Output, "started") {
+	if ran.Succeeded() || ran.TimedOut != 4*time.Second || !strings.Contains(ran.Output, "started") {
 		t.Errorf("expected a stopped run that says its limit and keeps what it printed, got %+v", ran)
 	}
-	if line := ran.Line(); !strings.Contains(line, "stopped after 2s, still running") {
+	if line := ran.Line(); !strings.Contains(line, "stopped after 4s, still running") {
 		t.Errorf("expected the line to say it was stopped, got %q", line)
 	}
 	if _, err := os.Stat(marker); err == nil {
@@ -126,8 +126,8 @@ func TestARigsOwnLimitReplacesTheDefaultForThatRigAlone(t *testing.T) {
 		t.Errorf("expected the rig with a 10s limit to run its 0.5s command to the end, got %+v, %v", ran, err)
 	}
 	ran, err = after.Run(context.Background(), "millwright", t.TempDir())
-	if err != nil || ran.TimedOut != 50*time.Millisecond {
-		t.Errorf("expected a rig with no limit of its own to be stopped at the default 50ms, got %+v, %v", ran, err)
+	if err != nil || ran.TimedOut != 100*time.Millisecond {
+		t.Errorf("expected a rig with no limit of its own to be stopped at the default 50ms stretched, 100ms, got %+v, %v", ran, err)
 	}
 }
 
@@ -225,5 +225,91 @@ func TestAConfigThatCannotBeReadAtTheStepRunsTheLineTheBatchBeganWithAndSaysSo(t
 	}
 	if ran.Command != "echo began" || ran.ReadFailed == "" || ran.Changed {
 		t.Errorf("expected the batch's own line and the failure of the read said, got %+v", ran)
+	}
+}
+
+// The limit of a rig is read from the host's config ([after_landing_limit], through
+// WithAfterLimits), not sized from earlier runs: a command that finishes after it
+// is waited for, up to a stretch of it (mw-gq6.1268).
+func TestACommandThatFinishesAfterItsLimitIsWaitedForAndNotSaidToBeStopped(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "finished")
+	// The limit is 0.5s and the stretch twenty times that, so the command's 2s is
+	// four times the limit and a fifth of the point it is stopped at: a busy host
+	// cannot move it across either (mw-gq6.423).
+	after := rig.NewAfterLanding(
+		rig.WithAfterLimits(map[string]time.Duration{"lampas": 500 * time.Millisecond}),
+		rig.WithAfterStretch(20),
+		rig.WithAfterCommands(map[string]string{"lampas": "echo shipping; sleep 2; touch " + marker + "; echo shipped"}),
+	)
+
+	ran, err := after.Run(context.Background(), "lampas", t.TempDir())
+
+	if err != nil {
+		t.Fatalf("expected a late command to be reported, not to fail the run: %v", err)
+	}
+	if !ran.Succeeded() || ran.TimedOut != 0 || !strings.Contains(ran.Output, "shipped") {
+		t.Errorf("expected the command to be waited for to its end, got %+v", ran)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("expected the command to have finished: %v", err)
+	}
+	if ran.Limit != 500*time.Millisecond || ran.Took < 2*time.Second {
+		t.Errorf("expected the run to say its limit and how long it took, got limit %s, took %s", ran.Limit, ran.Took)
+	}
+	line := ran.Line()
+	if strings.Contains(line, "half-deployed") || !strings.Contains(line, "finished by itself") || !strings.Contains(line, "past its limit of 500ms") {
+		t.Errorf("expected the line to say it ran past its limit and finished by itself, got %q", line)
+	}
+}
+
+func TestACommandThatNeverFinishesIsStillStoppedAtTheStretchedLimit(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "finished")
+	after := rig.NewAfterLanding(
+		rig.WithAfterLimits(map[string]time.Duration{"lampas": 500 * time.Millisecond}),
+		rig.WithAfterStretch(4),
+		rig.WithAfterCommands(map[string]string{"lampas": "echo started; sleep 30; touch " + marker}),
+	)
+
+	began := time.Now()
+	ran, err := after.Run(context.Background(), "lampas", t.TempDir())
+	took := time.Since(began)
+
+	if err != nil {
+		t.Fatalf("expected a hung command to be reported, not to fail the run: %v", err)
+	}
+	if took > 15*time.Second {
+		t.Errorf("expected the command to be stopped, it ran for %s", took)
+	}
+	if ran.Succeeded() || ran.TimedOut != 2*time.Second || ran.Limit != 500*time.Millisecond {
+		t.Errorf("expected a stopped run that says where it was stopped (4 x 500ms) and its limit, got %+v", ran)
+	}
+	if line := ran.Line(); !strings.Contains(line, "stopped after 2s, still running") {
+		t.Errorf("expected the line to say it was stopped, got %q", line)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("expected the command to be stopped before it finished")
+	}
+}
+
+func TestACommandThatFailsAfterItsLimitSaysSoAndKeepsItsStatus(t *testing.T) {
+	after := rig.NewAfterLanding(
+		rig.WithAfterLimits(map[string]time.Duration{"lampas": 500 * time.Millisecond}),
+		rig.WithAfterStretch(20),
+		rig.WithAfterCommands(map[string]string{"lampas": "sleep 2; echo rsync broke; exit 3"}),
+	)
+
+	ran, err := after.Run(context.Background(), "lampas", t.TempDir())
+
+	if err != nil || ran.Status != 3 || ran.TimedOut != 0 {
+		t.Fatalf("expected the command's own exit status 3, got %+v, %v", ran, err)
+	}
+	if line := ran.Line(); strings.Contains(line, "half-deployed") || !strings.Contains(line, "exit status 3") || !strings.Contains(line, "past its limit of 500ms") {
+		t.Errorf("expected the line to say its status and that it ran past its limit, got %q", line)
+	}
+}
+
+func TestACommandIsStoppedAtTwiceItsLimitUnlessTheStretchIsChanged(t *testing.T) {
+	if application.AfterLandingStretch != 2 {
+		t.Errorf("expected the stretch to be 2, got %d", application.AfterLandingStretch)
 	}
 }

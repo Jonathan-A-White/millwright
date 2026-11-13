@@ -16,6 +16,14 @@ import (
 // that would hold the baton for good.
 const AfterLandingLimit = 5 * time.Minute
 
+// AfterLandingStretch is how many times its limit a rig's after-landing command
+// is waited for before it is stopped. The limit is where a command is called
+// slow, not where it is cut off: a deploy that took 7 minutes against a limit of
+// 5 finished by itself, and mw had mailed that the site was half-deployed
+// (mw-gq6.1268). A command still running at the limit times this is one that
+// hangs.
+const AfterLandingStretch = 2
+
 // AfterLandingStoppedLine is the first line of the mail to the Mayor when the
 // rig's after-landing command outlived its limit and was stopped. A command that
 // ships a site was cut off between its first file and its last: the report's
@@ -165,6 +173,13 @@ type Ran struct {
 	Step     int
 	Earlier  string
 
+	// Limit is the limit the rig's command was given, and Took how long it ran: a
+	// Took past Limit is a command that outlived its limit and was waited for, to
+	// its own end (Late), or stopped at TimedOut, which is Limit stretched
+	// (mw-gq6.1268). Both are zero for a run whose port did not time it.
+	Limit time.Duration
+	Took  time.Duration
+
 	// DeployStep and DeployedAt say that the host's knob names the step after
 	// which the rig is deployed, that this run passed it and failed a later step,
 	// and that the deployed mark was set at DeployedAt for it: Line then says the
@@ -212,6 +227,16 @@ const afterLandingStepWords = "mw after landing, step "
 // steps.
 func AfterLandingStepMark(step, steps int, text string) string {
 	return fmt.Sprintf("%s%d of %d: %s", afterLandingStepWords, step, steps, text)
+}
+
+// Late says the command ran past its limit and ended of itself, passing or
+// failing, before it was stopped.
+func (r Ran) Late() bool { return r.Limit > 0 && r.Took > r.Limit && r.TimedOut == 0 }
+
+// lateWords say, after how a late command ended, that it outlived its limit and
+// was waited for.
+func (r Ran) lateWords() string {
+	return fmt.Sprintf("it ran %s, past its limit of %s, and finished by itself", r.Took.Round(time.Second), r.Limit)
 }
 
 // Succeeded says the command ran to the end and exited with status zero.
@@ -294,6 +319,9 @@ func shipsTheRig(step string) bool {
 // published.
 func (r Ran) Line() string {
 	if r.Succeeded() {
+		if r.Late() {
+			return afterLandingLine(r.Command, "ok, but "+r.lateWords())
+		}
 		return afterLandingLine(r.Command, "ok")
 	}
 	var how string
@@ -306,6 +334,9 @@ func (r Ran) Line() string {
 		how = "exit status 126, the shell could not run it"
 	default:
 		how = fmt.Sprintf("exit status %d", r.Status)
+	}
+	if r.Late() {
+		how += " (" + r.lateWords() + ")"
 	}
 	output := r.stepOutput()
 	withTail := how
