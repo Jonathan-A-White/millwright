@@ -24,10 +24,16 @@ when `mw next` starts, instead of being read as the default. The limit applies t
 that rig's `[after_landing]` line wherever mw runs it (a landing, the
 self-update of the factory rig).
 
-A command that is stopped at its limit is never quiet. The mail to the Mayor
+The limit is where a command is called slow: it is waited for up to twice the limit
+(`application.AfterLandingStretch`), and one that ends of itself in that time is
+reported with `it ran 7m0s, past its limit of 5m0s, and finished by itself`, not
+stopped. A rig whose deploy is longer than the default 5 minutes names its own limit
+here.
+
+A command that is stopped at twice its limit is never quiet. The mail to the Mayor
 opens with `after landing STOPPED at the limit: the site may be half-deployed`,
 the comment on the story starts with it, and the report's one line says
-`stopped after 20m0s, still running`.
+`stopped after 40m0s, still running` (for a limit of 20m).
 
 ## `contrib/site-deploy <dist> <host> <dir>`
 

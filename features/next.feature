@@ -1591,8 +1591,8 @@ Feature: Closing out a finished story and carrying on
     When mw closes out "mw-gq6.1"
     Then the work of "mw-gq6.1" is on "main" at the rig's origin
     And the story "mw-gq6.1" is closed exactly as it is without an after-landing command
-    And the report says: after landing: <the command>: stopped after 300ms, still running
-    And the story "mw-gq6.1" carries a comment quoting: stopped after 300ms
+    And the report says: after landing: <the command>: stopped after 600ms, still running
+    And the story "mw-gq6.1" carries a comment quoting: stopped after 600ms
     And the close-out returned no error
 
   Scenario: An after-landing command stopped at its limit is said loudly, first, in the mail to the Mayor
@@ -1604,7 +1604,7 @@ Feature: Closing out a finished story and carrying on
     And exactly one mail was sent, to "mayor" from "mw@vps"
     And that mail's subject is "Landed: The story mw-gq6.1"
     And that mail's first line is: after landing STOPPED at the limit: the site may be half-deployed
-    And that mail's body says: after landing: <the command>: stopped after 300ms, still running
+    And that mail's body says: after landing: <the command>: stopped after 600ms, still running
 
   Scenario: An after-landing command that fails once on a passing network fault is run again, and the mail says it was retried
     Given the rig names a command to run after a landing, which fails the first time on a name-resolution fault, exit 255, and then succeeds

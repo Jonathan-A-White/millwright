@@ -1277,8 +1277,11 @@ is not found or outlives its limit is one plain line — `after landing: make
 build: exit status 2: <the tail of its output>` — in the report, the ledger line,
 a comment on the story and the `Landed:` mail to the Mayor, so that they know
 this host's binary is old; success is `after landing: make build: ok` in the
-report and the mail. A command stopped at its limit is also said first in the mail
-to the Mayor, `after landing STOPPED at the limit: the site may be half-deployed`,
+report and the mail. The limit is where a command is called slow, not where it is cut
+off: a command still running at its limit is waited for up to twice the limit, and one
+that ends of itself in that time is reported as it ended, with `it ran 7m0s, past its
+limit of 5m0s, and finished by itself`, and no alarm (mw-gq6.1268). A command stopped
+at twice its limit is also said first in the mail to the Mayor, `after landing STOPPED at the limit: the site may be half-deployed`,
 because a site copied by a command cut off midway is half-deployed; a rig that ships
 a site uses `contrib/site-deploy`, which cannot leave it so (`docs/site-deploy.md`).
 A rig the table does not name runs nothing, except `millwright` on a host whose
