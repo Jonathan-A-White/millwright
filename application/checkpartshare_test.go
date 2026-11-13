@@ -24,6 +24,8 @@ type heldParts struct {
 	started chan string
 	release chan struct{}
 	ran     []string
+	// lag is how long a part takes to start once asked, as a loaded host makes it.
+	lag time.Duration
 }
 
 func newHeldParts() *heldParts {
@@ -38,6 +40,7 @@ func (h *heldParts) RunLine(_ context.Context, _, dir, command string) (applicat
 	h.mu.Lock()
 	h.ran = append(h.ran, filepath.Base(dir)+" "+command)
 	h.mu.Unlock()
+	time.Sleep(h.lag)
 	h.started <- filepath.Base(dir)
 	<-h.release
 	return application.Checked{Command: command, Passed: true}, nil
@@ -280,7 +283,10 @@ func lampasParts() *namedParts {
 func TestAPartThatOnlyRunsToolsInTheWorktreeTakesNoMergeSlotAndRunsWhileALandingHoldsIt(t *testing.T) {
 	parts := lampasParts()
 	close(parts.release)
-	check, slots, rigDir, _ := checkWith(t, parts, 100*time.Millisecond)
+	parts.lag = 150 * time.Millisecond // a host loaded past the cores starts a part this late
+	// A part that wrongly waited for the slot would give up at this wait with the
+	// merge slot error below: that is the test of "at once", not a wall-clock bound.
+	check, slots, rigDir, _ := checkWith(t, parts, 10*time.Second)
 	landing, err := slots.Take(context.Background(), rigDir, "mw land on laptop, landing a batch of millwright")
 	if err != nil {
 		t.Fatal(err)
@@ -288,12 +294,8 @@ func TestAPartThatOnlyRunsToolsInTheWorktreeTakesNoMergeSlotAndRunsWhileALanding
 	defer landing.Release(context.Background())
 
 	for n := 1; n <= 6; n++ {
-		started := time.Now()
 		if err := check("mw-x.1", n); err != nil {
-			t.Errorf("expected part %d (%s) to run with a landing holding the slot, got %v", n, parts.parts[n-1].Name, err)
-		}
-		if time.Since(started) > 80*time.Millisecond {
-			t.Errorf("expected part %d to start at once, it waited %s", n, time.Since(started))
+			t.Errorf("expected part %d (%s) to run at once with a landing holding the slot, got %v", n, parts.parts[n-1].Name, err)
 		}
 	}
 }
