@@ -6222,9 +6222,11 @@ send the Mayor's postern messages directly: `postern_channel` reads chain
 (the default, when `~/.config/mw/config.toml` lacks the key) rather than
 direct, or `MW_POSTERN_CHANNEL` says so. Every send is then a chain
 transaction, and past WhatsOnChain's newest-100 history cap the Mayor is locked
-out. It names the key and the file and has no cure — the doctor never edits the
-config; a person adds `postern_channel = "direct"`. A host the vault's home file
-says is not home reads ok.
+out. Its cure is the one command a person would run, `mw config set postern_channel
+direct`: a dated backup of the config first, then that one key, every other
+byte kept; the way back is the backup. (An `MW_POSTERN_CHANNEL` that says chain
+still wins over the file, and the check stays faulty.) A host the vault's home
+file says is not home reads ok.
 
 **formulas** watches that the vault's `.beads/formulas` match the factory
 checkout's `formulas/`, on the home. A difference seen once is only remembered

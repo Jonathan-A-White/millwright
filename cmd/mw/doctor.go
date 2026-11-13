@@ -188,6 +188,10 @@ func newDoctorCmd() *cobra.Command {
 			}
 
 			posternChannel := doctor.NewPosternChannel(mwVault(vault, host), host)
+			if posternPath, err := config.FilePath(); err == nil {
+				posternChannel.Config = configfile.New(posternPath)
+				posternChannel.Out = cmd.OutOrStdout()
+			}
 
 			// The home's config against the vault's hosts/boost-config.toml: a
 			// config this host cannot find is boost-config's to say.
