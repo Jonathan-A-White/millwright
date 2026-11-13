@@ -226,3 +226,80 @@ func TestFactoryReportShapeSaysWhenTheCheckoutIsNotGit(t *testing.T) {
 		t.Fatalf("a checkout that is not git has %+v, want a SHAPE that says why it was not read\n%s", result.Shape, printed)
 	}
 }
+
+// fakeCommandLog is the host's command log held in memory.
+type fakeCommandLog struct {
+	runs []application.CommandRun
+	err  error
+}
+
+func (f *fakeCommandLog) AppendCommandRun(_ context.Context, run application.CommandRun) error {
+	f.runs = append(f.runs, run)
+	return nil
+}
+
+func (f *fakeCommandLog) CommandRunsSince(_ context.Context, since time.Time) ([]application.CommandRun, error) {
+	var kept []application.CommandRun
+	for _, run := range f.runs {
+		if !run.At.Before(since) {
+			kept = append(kept, run)
+		}
+	}
+	return kept, f.err
+}
+
+func commandUseReport(t *testing.T, rigName string, log application.CommandLog) (application.FactoryReportResult, string) {
+	t.Helper()
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	var out strings.Builder
+	report := application.FactoryReport{
+		Tracker: apptest.NewFakeTracker(), Files: vault.New(t.TempDir()), Seat: "builder", Benchmarks: &apptest.FakeBenchmarks{},
+		Since: now.AddDate(0, 0, -30), Rig: rigName,
+		Shape: rig.Shape{}, RigDirs: map[string]string{"millwright": shapeCheckout(t)},
+		CommandLog: log, CommandNames: []string{"mw check", "mw status", "mw version", "mw verify match"},
+		Now: func() time.Time { return now }, Out: &out,
+	}
+	result, err := report.Run(context.Background())
+	if err != nil {
+		t.Fatalf("mw report failed: %v", err)
+	}
+	return result, out.String()
+}
+
+func TestFactoryReportShapeNamesTheCommandsNotRunIn30Days(t *testing.T) {
+	log := &fakeCommandLog{runs: []application.CommandRun{
+		{At: time.Date(2026, 10, 19, 8, 0, 0, 0, time.UTC), Command: "mw check"},
+		{At: time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC), Command: "mw status"}, // 19 days ago
+		{At: time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC), Command: "mw version"}, // too old
+	}}
+	result, printed := commandUseReport(t, "millwright", log)
+
+	use := result.Shape.Commands
+	if use == nil || strings.Join(use.NotRun, ",") != "mw verify match,mw version" || use.Total != 4 {
+		t.Fatalf("commands not run are %+v, want mw verify match and mw version of 4", use)
+	}
+	for _, want := range []string{"not run in 30 days: 2\n", "mw verify match", "mw version"} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("the printed report lacks %q:\n%s", want, printed)
+		}
+	}
+	for _, line := range strings.Split(printed, "\n") {
+		if utf8.RuneCountInString(line) > application.ReportWidth {
+			t.Errorf("a line is wider than %d columns: %q", application.ReportWidth, line)
+		}
+	}
+}
+
+func TestFactoryReportCommandUseIsOnlyForTheFactoryRig(t *testing.T) {
+	result, printed := commandUseReport(t, "lampas", &fakeCommandLog{})
+	if result.Shape.Commands != nil || strings.Contains(printed, "not run in") {
+		t.Errorf("another rig's SHAPE has the factory's commands:\n%s", printed)
+	}
+}
+
+func TestFactoryReportCommandUseSaysWhenTheLogCannotBeRead(t *testing.T) {
+	result, printed := commandUseReport(t, "millwright", &fakeCommandLog{err: fmt.Errorf("permission denied")})
+	if result.Shape.Commands == nil || result.Shape.Commands.Unread == "" || !strings.Contains(printed, "command log not read: permission denied") {
+		t.Errorf("an unreadable log gave %+v:\n%s", result.Shape.Commands, printed)
+	}
+}

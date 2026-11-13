@@ -36,6 +36,7 @@
 | IdeasOnlyReader, IdeasOnlyFiles | ideasonly.go | {postern/http.go,ideasonly} |
 | Suite*, Timing* | application/suite.go, application/suitenightly.go, application/timingnightly.go | {rig/{worktree,checks,timing}.go,vault/{vault,timing}.go,apartproc} |
 | Scorer, SecretStore, Google*, ContactBook, GhostBlog | application/scorer.go, secrets.go, application/google.go, application/contacts.go | {scorer,sops,google} |
+| CommandLog | application/commandlog.go (run in cmd/mw/commandlog.go, listed in SHAPE) | commandlog |
 
 Fakes: application/apptest/fake*.go.
 

@@ -83,6 +83,9 @@ type ShapeSection struct {
 	Added            int `json:"lines_added"`
 	Removed          int `json:"lines_removed"`
 	CodeFilesDeleted int `json:"code_files_deleted"`
+	// Commands, for the factory rig alone, are the commands of mw this host has
+	// not run lately; nil for any other rig.
+	Commands *CommandUse `json:"commands,omitempty"`
 }
 
 // shapeCodeExtensions are the files SHAPE counts as code.
@@ -209,6 +212,7 @@ func (s *ShapeSection) write(b *strings.Builder) {
 	fmt.Fprintf(b, "\nSHAPE %s\n", s.Rig)
 	if s.Unread != "" {
 		wrapInto(b, "  ", "not read: "+s.Unread)
+		s.Commands.write(b)
 		return
 	}
 	fmt.Fprintf(b, "  hottest files, commits times lines, %d days\n", ShapeHotDays)
@@ -221,4 +225,21 @@ func (s *ShapeSection) write(b *strings.Builder) {
 	}
 	fmt.Fprintf(b, "  hot files over the allowance %d of %d\n", s.OverAllowance, s.HotFiles)
 	fmt.Fprintf(b, "  lines added %d, removed %d, code files deleted %d\n", s.Added, s.Removed, s.CodeFilesDeleted)
+	s.Commands.write(b)
+}
+
+// write prints the commands not run, and their names; nothing when there is no
+// such part.
+func (u *CommandUse) write(b *strings.Builder) {
+	if u == nil {
+		return
+	}
+	if u.Unread != "" {
+		wrapInto(b, "  ", "command log not read: "+u.Unread)
+		return
+	}
+	fmt.Fprintf(b, "  not run in %d days: %d\n", u.Days, len(u.NotRun))
+	if len(u.NotRun) > 0 {
+		wrapInto(b, "    ", strings.Join(u.NotRun, ", "))
+	}
 }

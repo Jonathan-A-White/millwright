@@ -10,6 +10,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
+	"github.com/Jonathan-A-White/millwright/infrastructure/commandlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -115,6 +116,10 @@ func newReportCmd() *cobra.Command {
 			if rigName != "" {
 				shapeDirs, _ = config.Rigs()
 			}
+			var commandLog application.CommandLog
+			if l, err := commandlog.Default(); err == nil {
+				commandLog = l
+			}
 			share, shareMin, shareMax, err := investShareSettings()
 			if err != nil {
 				return err
@@ -147,6 +152,8 @@ func newReportCmd() *cobra.Command {
 				FactoryDir:   factoryDir,
 				Shape:        rig.Shape{},
 				RigDirs:      shapeDirs,
+				CommandLog:   commandLog,
+				CommandNames: commandNames(cmd.Root()),
 				Investments:  files,
 				InvestShare:  share, InvestShareMin: shareMin, InvestShareMax: shareMax,
 				Rig:  rigName,
