@@ -370,6 +370,38 @@ func TestTheBatchLandJobLandsAnEachRigsLeftoversOneAtATime(t *testing.T) {
 	}
 }
 
+// A drain of an each rig's leftovers takes long: the home may move between two
+// of its landings (mw-gq6.1207). The follower that was home then lands no
+// further story; the queue left is the new home's.
+func TestBatchLandAfterTheHomeMoved(t *testing.T) {
+	j := newLandingJob(t)
+	j.rule("lampas", domain.LandingEach)
+	j.queued("lampas", "lp-1", 2)
+	j.queued("lampas", "lp-2", 1)
+	j.queued("lampas", "lp-3", 0)
+
+	moving := &application.BatchLandings{
+		Rigs:    map[string]string{"lampas": "/rigs/lampas"},
+		Rules:   j.rules,
+		Tracker: j.tracker,
+		Home:    func(context.Context) (bool, error) { return j.home, nil },
+		Land: func(ctx context.Context, rig string, one bool) error {
+			err := j.land(ctx, rig, one)
+			j.home = false // the home moved while this landing ran
+			return err
+		},
+		Notes: j.tracker,
+		Host:  "desktop",
+		Now:   func() time.Time { return j.now },
+	}
+	if err := moving.Job().Run(context.Background()); err != nil {
+		t.Fatalf("a drain stopped for the home having moved is not a failure, got %v", err)
+	}
+	if got, want := j.asked, []string{"lampas one=true"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected one story landed and the drain stopped at the home's move, got %v", got)
+	}
+}
+
 func TestTheBatchLandJobDoesNotRunOnTheBoost(t *testing.T) {
 	j := newLandingJob(t)
 	j.rule("lampas", domain.LandingBatch)
