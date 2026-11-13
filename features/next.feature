@@ -1592,7 +1592,7 @@ Feature: Closing out a finished story and carrying on
     Then the work of "mw-gq6.1" is on "main" at the rig's origin
     And the story "mw-gq6.1" is closed exactly as it is without an after-landing command
     And the report says: after landing: <the command>: stopped after 600ms, still running
-    And the story "mw-gq6.1" carries a comment quoting: stopped after 300ms
+    And the story "mw-gq6.1" carries a comment quoting: stopped after 600ms
     And the close-out returned no error
 
   Scenario: An after-landing command stopped at its limit is said loudly, first, in the mail to the Mayor
