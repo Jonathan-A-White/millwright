@@ -351,3 +351,15 @@ func TestWSLFlagWatchScriptMatchesTheCommand(t *testing.T) {
 		t.Errorf("the flag must be deleted before acting (delete at %d, act at %d)", del, act)
 	}
 }
+
+// The wsl-flag task is registered at RunLevel Highest, which a PowerShell that
+// is not elevated cannot do: the line must refuse up front (mw-2891blf.25).
+func TestWSLFlagInstallLinesCheckElevationBeforeWritingAnything(t *testing.T) {
+	wslFlagPinned(t, wslFlagTestCommit)
+	short, err := WSLFlagInstallLine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertElevationFirst(t, "wsl-flag short line", short)
+	assertElevationFirst(t, "wsl-flag inline line", WSLFlagInstallLineInline())
+}

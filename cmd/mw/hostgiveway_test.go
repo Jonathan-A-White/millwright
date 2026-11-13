@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
@@ -403,5 +404,43 @@ func TestWindowsPowerShellParsesTheScriptAndThePastes(t *testing.T) {
 		if got := parseWithWindowsPowerShell(t, text); !strings.HasPrefix(got, "PARSEERRORS=0") {
 			t.Errorf("%s: the real Windows PowerShell reports parse errors:\n%s", name, got)
 		}
+	}
+}
+
+// A non-elevated PowerShell cannot register the lock and unlock tasks (session
+// state triggers: Access is denied) while logoff and tick register, so a paste
+// run there half-installs. The paste must ask whether the session is elevated
+// before it writes anything (mw-2891blf.25).
+func TestGiveWayInstallLineChecksElevationBeforeWritingAnything(t *testing.T) {
+	giveWayPinned(t)
+	for _, inline := range []bool{false, true} {
+		line, err := GiveWayInstallLine("grace", inline)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertElevationFirst(t, fmt.Sprintf("giveway install (inline %v)", inline), line)
+	}
+}
+
+// assertElevationFirst fails unless the paste checks for an elevated session,
+// throws 'run as administrator: nothing installed', and does so before its
+// first New-Item, Register-ScheduledTask or file write.
+func assertElevationFirst(t *testing.T, what, line string) {
+	t.Helper()
+	check := strings.Index(line, "IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)")
+	if check < 0 {
+		t.Errorf("%s: the paste must check for an elevated session", what)
+		return
+	}
+	if !strings.Contains(line, "run as administrator: nothing installed") {
+		t.Errorf("%s: the paste must throw '... run as administrator: nothing installed'", what)
+	}
+	for _, first := range []string{"New-Item", "Register-ScheduledTask", "Set-Content", "WriteAllBytes", "Invoke-WebRequest", "Move-Item"} {
+		if i := strings.Index(line, first); i >= 0 && i < check {
+			t.Errorf("%s: the elevation check (%d) must come before the first %s (%d)", what, check, first, i)
+		}
+	}
+	if i := strings.Index(line, "throw"); i < 0 || i < check {
+		t.Errorf("%s: the first throw (%d) must be the elevation check's (%d)", what, i, check)
 	}
 }

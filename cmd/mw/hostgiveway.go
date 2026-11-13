@@ -44,6 +44,13 @@ var giveWayTaskNames = []string{"millwright give way (unlock)", "millwright give
 // on; this log is on by default.)
 const giveWayLogoffQuery = `<QueryList><Query Id="0" Path="Microsoft-Windows-User Profile Service/Operational"><Select Path="Microsoft-Windows-User Profile Service/Operational">*[System[Provider[@Name="Microsoft-Windows-User Profiles Service"] and EventID=4]]</Select></Query></QueryList>`
 
+// windowsElevationCheck is the first statement of every paste that registers a
+// scheduled task (the lock and unlock tasks' session-state triggers, and a task
+// at RunLevel Highest, are refused 'Access is denied' in a PowerShell that is
+// not elevated, which leaves a half-installed set): it throws before anything is
+// written.
+const windowsElevationCheck = `if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'this PowerShell is not elevated: run as administrator: nothing installed' }`
+
 var giveWayAccountRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // giveWayModes are the two modes of the script's mode file: freeze (the default)
@@ -102,6 +109,7 @@ func GiveWayInstallLine(account string, inline bool) (string, error) {
 	head := "# millwright give way (mw host giveway --install-line): copies giveway.ps1 to " + giveWayDir +
 		", writes its mode file (freeze) and registers the tasks '" + strings.Join(giveWayTaskNames, "', '") +
 		"' under this account. Way back: mw host giveway --uninstall-line.\n" +
+		windowsElevationCheck + "\n" +
 		"if ($env:USERNAME -ne '" + account + "') { throw 'run this as " + account + ", the account that owns WSL: nothing installed' }\n" +
 		fmt.Sprintf("if ([Environment]::OSVersion.Version.Build -lt %d) { throw 'needs Windows 10 build %d or later (a task without a window): nothing installed' }\n", giveWayMinBuild, giveWayMinBuild) +
 		`$d="` + giveWayDir + `"; New-Item -ItemType Directory -Force $d | Out-Null` + "\n"
