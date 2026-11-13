@@ -86,3 +86,18 @@ func TestEveryUnitThatCanWaitOutlastsItsLongestWait(t *testing.T) {
 		t.Errorf("%s is in neither longestWait nor the list of units that do not wait on Builders or the network", strings.TrimPrefix(f, "systemd/"))
 	}
 }
+
+// mw-gq6.1199: the doctor's unit was stopped at 2 minutes on a loaded laptop and
+// mailed 'unit failed twice' for runs whose checks were all ok. Its timer fires
+// every 5 minutes: the limit is above what a slow run takes and under that
+// period, and the --user and the system unit say the same.
+func TestTheDoctorUnitsStopUnderTheTimersPeriodAndSayTheSame(t *testing.T) {
+	user := startTimeout(t, "mw-doctor.service")
+	system := startTimeout(t, "system/mw-doctor.service")
+	if user != system {
+		t.Errorf("the --user doctor unit stops at %v and the system one at %v", user, system)
+	}
+	if user < 4*time.Minute || user >= 5*time.Minute {
+		t.Errorf("the doctor unit stops at %v, want from 4 minutes to under its timer's 5", user)
+	}
+}

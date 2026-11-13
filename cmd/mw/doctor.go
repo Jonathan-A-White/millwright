@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/flushlog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	vaultpkg "github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
@@ -592,7 +594,12 @@ func newDoctorCmd() *cobra.Command {
 				// rest of this host's (mw-gq6.705).
 				Verdicts: mwGateway(vault, host),
 				Host:     host,
-				Out:      cmd.OutOrStdout(),
+				// A probe or the dampers read past this is cannot-tell and the run
+				// goes on, so a loaded host does not run it into the unit's start
+				// limit (mw-gq6.1199).
+				CheckBudget: doctorCheckBudget,
+				Load:        hostLoadNow,
+				Out:         cmd.OutOrStdout(),
 			}, name, dryRun)
 		},
 	}
@@ -601,6 +608,23 @@ func newDoctorCmd() *cobra.Command {
 	cmd.Flags().StringVar(&posternBin, "postern", "postern", "for licences: the postern binary the backend runs, asked for `rights --json`")
 	cmd.AddCommand(newDoctorUnitFailedCmd())
 	return cmd
+}
+
+// doctorCheckBudget is how long one check's probe, or the dampers read, may take
+// before the run calls it cannot-tell and goes on. A check is a few reads and
+// takes seconds; the longest seen on a laptop at load 54 of 20 cores was 38 s.
+// A budget of a minute leaves the unit's 4 minutes (under the timer's 5) room
+// for the checks past it.
+const doctorCheckBudget = time.Minute
+
+// hostLoadNow is this host's 1-minute load average as the kernel writes it, or
+// "" when it cannot be read.
+func hostLoadNow() string {
+	reading, err := hostload.Proc{}.Load(context.Background())
+	if err != nil {
+		return ""
+	}
+	return strconv.FormatFloat(reading.Load, 'f', 1, 64)
 }
 
 // capacityArg is the word that makes mw doctor read a rig's capacity facts
