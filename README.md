@@ -1011,7 +1011,7 @@ cloud check (`mw cloud check`) sets it on a box already up whose kept list is no
 the home's (`contrib/vultr-boost set-session-deny`), once, as a move in the cloud
 report; a box already level gets no ssh. An unset or empty `deny` on the home
 sets no box and empties none. `mw doctor boost-config` names a home whose list
-differs from the file's.
+differs from the file's, and cures it with the same export.
 
 ## Setting a story's path
 
