@@ -747,6 +747,13 @@ type PosternInbox struct {
 	// SeatIdentity(MwSeat, Host).
 	Host string
 
+	// PushWait and RetryWait are how a close of a story that met a passing fault
+	// is tried again (CloseRetry, mw-gq6.1134): PushWait is the base of the wait
+	// between the tries, zero waiting no time, and a nil RetryWait is a real
+	// wait. A close lost every try is mailed to the Mayor through Mailbox.
+	PushWait  time.Duration
+	RetryWait func(ctx context.Context, d time.Duration) error
+
 	// GovernorKey is the Governor's compressed public key, hex — config
 	// postern_governor_key. A verified sender equal to it is printed as "the
 	// Governor" rather than its hex. Empty prints every verified sender as
