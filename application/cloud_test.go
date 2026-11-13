@@ -1710,3 +1710,65 @@ func TestNoNewBoxIsMadeWhileOneIsStuckMaking(t *testing.T) {
 		t.Errorf("expected a second box begun beside one made for 5 minutes (the demand outruns its cap), got %v", got)
 	}
 }
+
+// feeLimitedCheck runs the check on full hosts with stories waiting, the book
+// holding Vultr's fee-limit refusal at feeAt and the given downs, and reports
+// the boxes it began (mw-gq6.1163).
+func feeLimitedCheck(t *testing.T, now, feeAt time.Time, downed map[string]time.Time) (begun []string, report application.CloudReport) {
+	t.Helper()
+	tracker := fullHostsWithAutoWaiting(t, now, map[string]int{"laptop": 2})
+	provider := &apptest.FakeCloud{}
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", FeeLimitAt: feeAt, Downed: downed}}
+	report, err := application.CloudCheck{
+		Work: tracker, Stories: tracker, Provider: provider, Book: book, Host: "laptop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return provider.TakeBegun(), report
+}
+
+func TestNoBoxIsTriedForAnHourAfterVultrsFeeLimitRefusal(t *testing.T) {
+	now := time.Date(2026, 11, 12, 23, 42, 0, 0, time.UTC)
+	for _, ago := range []time.Duration{time.Minute, 11 * time.Minute, 22 * time.Minute, 59 * time.Minute} {
+		if begun, report := feeLimitedCheck(t, now, now.Add(-ago), nil); len(begun) != 0 {
+			t.Errorf("fee limit %s ago: expected no box tried, got %v: %s", ago, begun, report)
+		}
+	}
+}
+
+func TestABoxIsTriedAgainAnHourAfterVultrsFeeLimitRefusal(t *testing.T) {
+	now := time.Date(2026, 11, 12, 23, 42, 0, 0, time.UTC)
+	if begun, report := feeLimitedCheck(t, now, now.Add(-time.Hour), nil); len(begun) != 1 {
+		t.Errorf("expected one box tried an hour after the refusal, got %v: %s", begun, report)
+	}
+}
+
+func TestABoxDownedAfterTheFeeLimitRefusalEndsTheWaitSinceItFreesRoom(t *testing.T) {
+	now := time.Date(2026, 11, 12, 23, 42, 0, 0, time.UTC)
+	feeAt := now.Add(-30 * time.Minute)
+	if begun, report := feeLimitedCheck(t, now, feeAt, map[string]time.Time{"cloud2": now.Add(-5 * time.Minute)}); len(begun) != 1 {
+		t.Errorf("expected one box tried after a box was downed, got %v: %s", begun, report)
+	}
+	// A box downed before the refusal freed nothing that the refusal had not seen.
+	if begun, report := feeLimitedCheck(t, now, feeAt, map[string]time.Time{"cloud2": now.Add(-2 * time.Hour)}); len(begun) != 0 {
+		t.Errorf("expected no box tried for a down before the refusal, got %v: %s", begun, report)
+	}
+}
+
+func TestStatusNamesTheFeeLimitTheWayToRaiseItAndWhenABoxIsTriedAgain(t *testing.T) {
+	now := time.Date(2026, 11, 12, 23, 42, 0, 0, time.UTC)
+	feeAt := time.Date(2026, 11, 12, 23, 20, 0, 0, time.UTC)
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", FeeLimitAt: feeAt}}
+	report, err := application.Status{Tracker: apptest.NewFakeTracker(), Notes: apptest.NewFakeTracker(), Host: "desktop", Seat: "builder",
+		Cloud: book, CloudPlan: cloudPlan, Now: func() time.Time { return now }}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Vultr fee limit reached since 11-12 23:20Z", "my.vultr.com", "no box is tried before 00:20Z"} {
+		if !strings.Contains(report.String(), want) {
+			t.Errorf("expected status to say %q, got:\n%s", want, report.String())
+		}
+	}
+}

@@ -396,9 +396,11 @@ const CloudDispatchWait = 20 * time.Minute
 const CloudFailHold = time.Hour
 
 // CloudFeeLimitPause is how long no box is tried after Vultr refused one for
-// its monthly fee limit: not a failure to come up, so not CloudFailHold, but
-// not a try every minute either; the Governor may raise the limit meanwhile.
-const CloudFeeLimitPause = 10 * time.Minute
+// its monthly fee limit: not a failure to come up, so not HeldUntil, but an
+// hour all the same, as CloudFailHold is: each try is a terraform run and four
+// vault commits (mw-gq6.1163). A box destroyed after the refusal ends it early,
+// since it frees room under the limit.
+const CloudFeeLimitPause = time.Hour
 
 // CloudPlan is the [cloud] table, as the check reads it.
 type CloudPlan struct {
@@ -1064,6 +1066,22 @@ func (p *cloudPass) boxName(label string) bool {
 	return true
 }
 
+// feeLimitUntil is when a box may be tried again after Vultr's fee-limit
+// refusal: CloudFeeLimitPause after it, or zero when the book holds none or a
+// box was destroyed since (markDowned keeps when; a make that did not come up
+// records none, so the refused try's own destroy ends nothing).
+func (s CloudState) feeLimitUntil() time.Time {
+	if s.FeeLimitAt.IsZero() {
+		return time.Time{}
+	}
+	for _, at := range s.Downed {
+		if at.After(s.FeeLimitAt) {
+			return time.Time{}
+		}
+	}
+	return s.FeeLimitAt.Add(CloudFeeLimitPause)
+}
+
 // feeLimit notes that Vultr refused a box for its monthly fee limit. It is a
 // money cap and no fault of a make: the first refusal is a move and one card
 // to the Governor, who alone can raise the limit; the box is tried again after
@@ -1586,8 +1604,8 @@ func (p *cloudPass) make(ctx context.Context) {
 		p.check.say("%d stories wait, but no box is made before %s: one failed to come up twice", p.report.Waiting, p.state.HeldUntil.Format("15:04Z"))
 		return
 	}
-	if !p.state.FeeLimitAt.IsZero() && p.now.Before(p.state.FeeLimitAt.Add(CloudFeeLimitPause)) {
-		p.check.say("%d stories wait, but no box is made before %s: %v", p.report.Waiting, p.state.FeeLimitAt.Add(CloudFeeLimitPause).Format("15:04Z"), ErrCloudFeeLimit)
+	if until := p.state.feeLimitUntil(); p.now.Before(until) {
+		p.check.say("%d stories wait, but no box is made before %s: %v", p.report.Waiting, until.Format("15:04Z"), ErrCloudFeeLimit)
 		return
 	}
 	for _, box := range p.state.Boxes {
@@ -2211,6 +2229,9 @@ type CloudReading struct {
 	// FeeLimitAt is when Vultr last refused a box for its fee limit, zero when
 	// it is not holding one back.
 	FeeLimitAt time.Time
+	// FeeLimitUntil is when a box is tried again after it, zero when a box
+	// destroyed since has freed room.
+	FeeLimitUntil time.Time
 }
 
 // ReadCloud reads the book for mw status: the boxes, the latest moves and the
@@ -2229,7 +2250,8 @@ func ReadCloud(ctx context.Context, book CloudBook, plan CloudPlan, now time.Tim
 		BoxCap:   plan.boxCap(),
 		Now:      now,
 
-		FeeLimitAt: state.FeeLimitAt,
+		FeeLimitAt:    state.FeeLimitAt,
+		FeeLimitUntil: state.feeLimitUntil(),
 	}, nil
 }
 
@@ -2280,6 +2302,10 @@ func (r CloudReading) write(b *strings.Builder) {
 	}
 	if !r.FeeLimitAt.IsZero() {
 		clip(b, "  Vultr fee limit reached since "+r.FeeLimitAt.UTC().Format("01-02 15:04Z"))
+		clip(b, "    raise it at my.vultr.com, or wait for the month")
+		if r.Now.Before(r.FeeLimitUntil) {
+			clip(b, "    no box is tried before "+r.FeeLimitUntil.UTC().Format("15:04Z"))
+		}
 	}
 	for _, m := range r.Moves {
 		clip(b, "  "+m.At.UTC().Format("01-02 15:04Z")+" "+m.What)
