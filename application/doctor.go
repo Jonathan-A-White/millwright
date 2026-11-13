@@ -516,7 +516,8 @@ func (d Doctor) one(ctx context.Context, check DoctorCheck, dryRun bool) (Doctor
 // the log can trust that a check's silence since its last "ok" line means
 // nothing has run since. An ok with a reason — a check explaining why there
 // is nothing to do — is said once: it is logged and its note cleared only the
-// first time, or again if the reason changes, and the reason said is
+// first time, or again if the reason changes (a number that moves on its own
+// is no change, sameReasonOnce), and the reason said is
 // remembered in the check's own episode so a later run with nothing new to
 // say costs neither a log line nor a kv write.
 func (d Doctor) ok(ctx context.Context, name, reason string, dryRun bool) (DoctorResult, error) {
@@ -540,7 +541,7 @@ func (d Doctor) ok(ctx context.Context, name, reason string, dryRun bool) (Docto
 	if err != nil {
 		return DoctorResult{}, fmt.Errorf("reading %s's doctor state: %w", name, err)
 	}
-	if episode.LastOKReason == reason {
+	if sameReasonOnce(episode.LastOKReason, reason) {
 		return result, nil
 	}
 
@@ -559,7 +560,7 @@ func (d Doctor) ok(ctx context.Context, name, reason string, dryRun bool) (Docto
 // reason changes. A repeat of the same reason costs neither a log line nor a
 // kv write, and leaves a note already written for it in place, unrewritten; a
 // reason that differs only by a number standing on its own is a repeat
-// (sameCannotTellReason).
+// (sameReasonOnce).
 func (d Doctor) cannotTell(ctx context.Context, name, reason string, dryRun bool) (DoctorResult, error) {
 	result := DoctorResult{Check: name, Verdict: "cannot-tell", Reason: reason}
 	if dryRun {
@@ -570,7 +571,7 @@ func (d Doctor) cannotTell(ctx context.Context, name, reason string, dryRun bool
 	if err != nil {
 		return DoctorResult{}, fmt.Errorf("reading %s's doctor state: %w", name, err)
 	}
-	if sameCannotTellReason(episode.LastCannotTellReason, reason) {
+	if sameReasonOnce(episode.LastCannotTellReason, reason) {
 		return result, nil
 	}
 
@@ -585,18 +586,20 @@ func (d Doctor) cannotTell(ctx context.Context, name, reason string, dryRun bool
 	return result, nil
 }
 
-// sameCannotTellReason is whether two cannot-tell reasons are one to say once:
-// equal, or equal but for a number that stands on its own ("over 10 minutes",
-// "3 behind"), which a check's reason may carry and which moves with the
-// clock or a count while nothing else does (mw-gq6.1231). A number that is part
-// of a word, an id or a time (cloud1, mw-gq6.50, 00:10:34) is kept, so a reason
-// naming another story or host is still said.
-func sameCannotTellReason(last, now string) bool {
+// sameReasonOnce is whether two reasons of a check, cannot-tell or ok, are one
+// to say once: equal, or equal but for a number that stands on its own ("over
+// 10 minutes", "3 behind", "4096 bytes") or a duration as Clock writes it ("5m",
+// "1h05m", "8s"), which a check's reason may carry and which moves with the
+// clock or a count while nothing else does (mw-gq6.1231, mw-gq6.1239). A number
+// that is part of a word, an id or a time (cloud1, mw-gq6.50, 00:10:34) is
+// kept, so a reason naming another story or host is still said.
+func sameReasonOnce(last, now string) bool {
 	return last == now || (last != "" && withoutMovingNumbers(last) == withoutMovingNumbers(now))
 }
 
 // withoutMovingNumbers is s with each run of digits that touches no letter,
-// '.', '-', '_', ':' or '/' either side replaced by '#'.
+// '.', '-', '_', ':' or '/' either side, and each duration of digits and h, m
+// or s units ("1h05m") that touches none either side, replaced by '#'.
 func withoutMovingNumbers(s string) string {
 	joins := func(b byte) bool {
 		return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' ||
@@ -613,6 +616,10 @@ func withoutMovingNumbers(s string) string {
 		for j < len(s) && s[j] >= '0' && s[j] <= '9' {
 			j++
 		}
+		// A duration: digits then a unit, once or more ("12m", "1h05m").
+		if k := durationEnd(s, i); k > j {
+			j = k
+		}
 		if (i > 0 && joins(s[i-1])) || (j < len(s) && joins(s[j])) {
 			out.WriteString(s[i:j])
 		} else {
@@ -621,6 +628,24 @@ func withoutMovingNumbers(s string) string {
 		i = j
 	}
 	return out.String()
+}
+
+// durationEnd is where a duration as Clock writes it ("12m", "1h05m", "8s")
+// starting at s[i] ends, or i when there is none there.
+func durationEnd(s string, i int) int {
+	end := i
+	for j := i; j < len(s); {
+		k := j
+		for k < len(s) && s[k] >= '0' && s[k] <= '9' {
+			k++
+		}
+		if k == j || k >= len(s) || (s[k] != 'h' && s[k] != 'm' && s[k] != 's') {
+			break
+		}
+		j = k + 1
+		end = j
+	}
+	return end
 }
 
 // faulty is the DoctorFaulty half of one: decide, from the check's damper and
