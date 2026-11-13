@@ -181,6 +181,16 @@ type Path struct {
 	HostWhy string `json:"-"`
 }
 
+// WithoutSourceKeys is the path a story filed from another story's path starts
+// from: the keys that are about the source's own files and change, its size,
+// bump and callers_ok, are left empty, as mw path set --from copies none of
+// them (mw-gq6.672, mw-gq6.1195, mw-gq6.1227). The rig, branch, host, model,
+// effort and formula stay, and the filing sets whatever else is its own.
+func (p Path) WithoutSourceKeys() Path {
+	p.Size, p.Bump, p.CallersOK = "", "", ""
+	return p
+}
+
 // CallersOKField is the metadata key a story's CallersOK is stored under.
 const CallersOKField = "callers_ok"
 
