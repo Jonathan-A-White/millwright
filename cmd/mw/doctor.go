@@ -320,6 +320,9 @@ func newDoctorCmd() *cobra.Command {
 			// with their last sync (mw-gq6.1059); it only reports.
 			harnessLevel := doctor.NewHarnessLevel(mwVault(vault, host), host, mwGateway(vault, host))
 			harnessLevel.Version = ownHarnessVersion
+			// A note a box that is gone left is none of the box now holding its name
+			// (mw-gq6.1209).
+			harnessLevel.Book, harnessLevel.Plan = cloudStatus(vault, host)
 			harnessLevel.Hosts = func(ctx context.Context) ([]doctor.HarnessHost, error) {
 				return harnessHosts(ctx, mwVault(vault, host), host, retired)
 			}

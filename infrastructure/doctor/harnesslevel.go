@@ -54,6 +54,12 @@ type HarnessLevel struct {
 	// it. Hosts are the Builder hosts to look at besides this one.
 	Version func(ctx context.Context) (string, error)
 	Hosts   func(ctx context.Context) ([]HarnessHost, error)
+	// Book and Plan are the cloud's book and plan, which say whether a host's
+	// note is a box that is gone's, or older than the box now holding the name
+	// (application.CloudState.NoteOfAnOlderBox, mw-gq6.1209). A nil Book, or one
+	// that cannot be read, judges nothing: every note is read as it is.
+	Book application.CloudBook
+	Plan application.CloudPlan
 
 	// faulty is what Probe last found, for Cure to carry.
 	faulty string
@@ -99,10 +105,29 @@ func (h *HarnessLevel) Probe(ctx context.Context) (application.Verdict, string) 
 		return application.DoctorCannotTell, fmt.Sprintf("the Builder hosts cannot be listed: %v", err)
 	}
 
+	var state application.CloudState
+	bookRead := false
+	if h.Book != nil {
+		var berr error
+		state, berr = h.Book.Read(ctx)
+		bookRead = berr == nil
+	}
+
 	var behind, unread []string
 	for _, host := range hosts {
 		if host.Name == h.Host {
 			continue
+		}
+		if bookRead {
+			synced, err := h.Notes.Note(ctx, application.LastSyncKey(host.Name))
+			if err != nil {
+				unread = append(unread, fmt.Sprintf("%s unread (%v)", host.Name, err))
+				continue
+			}
+			if state.NoteOfAnOlderBox(h.Plan, host.Name, lastSync(synced)) {
+				unread = append(unread, fmt.Sprintf("%s unread (its notes are an older box's, left before this one was made)", host.Name))
+				continue
+			}
 		}
 		said, err := h.Notes.Note(ctx, application.HarnessKey(host.Name))
 		if err != nil {
@@ -158,4 +183,14 @@ func (h *HarnessLevel) Damper() (time.Duration, int) {
 // WayBack implements application.DoctorCheck: nothing ever changes.
 func (h *HarnessLevel) WayBack() string {
 	return "none: no cure runs; docs/harness-level.md says how each kind of host is brought level by hand, and the way back"
+}
+
+// lastSync is when a host's last-sync note says it was last level: the zero
+// time when the note is missing or not a time, older than any make.
+func lastSync(said string) time.Time {
+	at, err := time.Parse(application.LastSyncFormat, strings.TrimSpace(said))
+	if err != nil {
+		return time.Time{}
+	}
+	return at
 }
