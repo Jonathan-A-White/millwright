@@ -19,6 +19,8 @@ func (c *cloudContext) registerCapSteps(ctx *godog.ScenarioContext) {
 		for _, name := range []string{a, b} {
 			c.book.State.Boxes = append(c.book.State.Boxes, application.CloudBox{
 				Name: name, Up: c.now.Add(-time.Hour), Made: c.now.Add(-time.Hour), Dispatched: c.now.Add(-30 * time.Minute),
+				// A box that dispatches was cleared to: its own check passed (mw-gq6.1172).
+				Checked:   c.now.Add(-31 * time.Minute),
 				IdleSince: c.now, Cap: cap,
 			})
 		}
