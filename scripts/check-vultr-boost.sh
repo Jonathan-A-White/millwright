@@ -543,7 +543,7 @@ echo "$out" | grep -q 'Instance is locked' || fail "down --instance does not say
 # Vultr's 409 is a locked instance (a snapshot restore): said so, the app names it from this
 echo "$out" | grep -q 'Vultr would not delete instance locked-1 (locked, HTTP 409)' || fail "down --instance of a locked instance does not say it is locked, HTTP 409: $out"
 # only a 204 or a 404 says an instance is gone: any other answer is a refusal, not a deletion
-if out=$(run down --yes --name cloud2 --instance odd-1 2>&1); then fail "a DELETE Vultr answered 200 is no deletion and should fail: $out: $out"; fi
+if out=$(run down --yes --name cloud2 --instance odd-1 2>&1); then fail "a DELETE Vultr answered 200 is no deletion and should fail: $out"; fi
 echo "$out" | grep -q 'HTTP 200' || fail "down --instance does not say what Vultr answered: $out"
 echo "$out" | grep -q 'deleted: Vultr instance odd-1' && fail "down --instance said it deleted an instance Vultr answered 200 to"
 if out=$(run down --yes --name cloud2 --instance 'x;y' 2>&1); then fail "a bad instance id should be refused: $out"; fi
