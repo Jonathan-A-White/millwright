@@ -118,7 +118,7 @@ func hostOf(t *testing.T, tracker *apptest.FakeTracker, id string) string {
 	return d.Merged().Host
 }
 
-func TestABoxDestroyedByTheCheckRepathsItsOpenAndDeferredStoriesToAuto(t *testing.T) {
+func TestTheDownPassLeavesAHeldStoryPinnedToTheDestroyedBoxAlone(t *testing.T) {
 	now := time.Date(2026, 10, 17, 22, 0, 0, 0, time.UTC)
 	up := now.Add(-2 * time.Hour)
 	tracker := pathedStories(t)
@@ -130,13 +130,36 @@ func TestABoxDestroyedByTheCheckRepathsItsOpenAndDeferredStoriesToAuto(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	for id, want := range map[string]string{"mw-c.1": domain.HostAuto, "mw-c.2": domain.HostAuto, "mw-c.3": "cloud2", "mw-c.4": "cloud1"} {
+	if got := hostOf(t, tracker, "mw-c.2"); got != "cloud1" {
+		t.Errorf("expected the Mayor's held mw-c.2 left on cloud1 when cloud1 was destroyed, got %s", got)
+	}
+	if got := hostOf(t, tracker, "mw-c.1"); got != domain.HostAuto {
+		t.Errorf("expected the open mw-c.1 moved to host auto, got %s", got)
+	}
+	if strings.Contains(report.String(), "mw-c.2") {
+		t.Errorf("expected the report to leave out the held story:\n%s", report.String())
+	}
+}
+
+func TestABoxDestroyedByTheCheckRepathsItsOpenStoriesToAuto(t *testing.T) {
+	now := time.Date(2026, 10, 17, 22, 0, 0, 0, time.UTC)
+	up := now.Add(-2 * time.Hour)
+	tracker := pathedStories(t)
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-10", Boxes: []application.CloudBox{{Name: "cloud1", Up: up, IdleSince: up}, {Name: "cloud2", Up: now.Add(-time.Hour)}}}}
+	report, err := application.CloudCheck{
+		Work: tracker, Stories: tracker, Provider: &apptest.FakeCloud{}, Book: book, Host: "desktop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{"mw-c.1": domain.HostAuto, "mw-c.2": "cloud1", "mw-c.3": "cloud2", "mw-c.4": "cloud1"} {
 		if got := hostOf(t, tracker, id); got != want {
 			t.Errorf("expected %s on host %s after cloud1 was destroyed, got %s", id, want, got)
 		}
 	}
 	text := report.String()
-	for _, want := range []string{"mw-c.1", "mw-c.2", "host=auto"} {
+	for _, want := range []string{"mw-c.1", "host=auto"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("expected %q in the report:\n%s", want, text)
 		}
@@ -144,7 +167,7 @@ func TestABoxDestroyedByTheCheckRepathsItsOpenAndDeferredStoriesToAuto(t *testin
 	if n := strings.Count(text, "re-pathed mw-c.1"); n != 1 {
 		t.Errorf("expected the move said once, said %d times:\n%s", n, text)
 	}
-	if strings.Contains(text, "mw-c.3") || strings.Contains(text, "mw-c.4") {
+	if strings.Contains(text, "mw-c.2") || strings.Contains(text, "mw-c.3") || strings.Contains(text, "mw-c.4") {
 		t.Errorf("expected the report to leave out the stories not moved:\n%s", text)
 	}
 }
@@ -170,8 +193,8 @@ func TestMwCloudDownDestroysTheBoxAndRepathsItsStories(t *testing.T) {
 	if got := hostOf(t, tracker, "mw-c.3"); got != "cloud2" {
 		t.Errorf("expected mw-c.3 left on cloud2, got %s", got)
 	}
-	if !strings.Contains(report, "mw-c.1") || !strings.Contains(report, "mw-c.2") {
-		t.Errorf("expected the report to name the stories moved:\n%s", report)
+	if !strings.Contains(report, "mw-c.1") || strings.Contains(report, "mw-c.2") {
+		t.Errorf("expected the report to name the open story moved and not the held one:\n%s", report)
 	}
 }
 
