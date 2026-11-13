@@ -347,3 +347,14 @@ func TestTheDocsLineShowsInTheLandedMailAndTheLedgerRow(t *testing.T) {
 		t.Errorf("the ledger row does not carry the docs files and verdict: %q", vault.ledger)
 	}
 }
+
+func TestParseFactProposalsStopsAtABlankLineAfterNothing(t *testing.T) {
+	got := application.ParseFactProposals("Done.\n\nFor the rig memory: nothing\n\nNot used: no subagents.\n")
+	if !got.Found || len(got.Lines) != 1 || got.Lines[0].Malformed != "" || got.Lines[0].Proposal.Verb != application.ProposeNothing {
+		t.Errorf("the paragraph after 'nothing' is not a proposal, got %+v", got)
+	}
+	got = application.ParseFactProposals("For the rig memory:\nnothing\n\nNot used: no subagents.\n")
+	if len(got.Lines) != 1 || got.Lines[0].Malformed != "" {
+		t.Errorf("nothing on its own line: got %+v", got.Lines)
+	}
+}

@@ -496,3 +496,14 @@ func TestDoctorCannotTellWhenTheRegisterOrTheRigsCannotBeRead(t *testing.T) {
 		t.Errorf("an unreadable rigs list is cannot-tell, got %v", verdict)
 	}
 }
+
+func TestParseCommonErrorsStopsAtABlankLineAfterNothing(t *testing.T) {
+	got := application.ParseCommonErrors("Done.\n\nFor common errors: nothing\n\nNot used: no subagents.\n")
+	if !got.Found || len(got.Lines) != 1 || !got.Lines[0].Nothing || got.Lines[0].Malformed != "" {
+		t.Errorf("the paragraph after 'nothing' is not a line, got %+v", got)
+	}
+	got = application.ParseCommonErrors("For common errors:\nnothing\n\nNot used: no subagents.\n")
+	if len(got.Lines) != 1 || !got.Lines[0].Nothing {
+		t.Errorf("nothing on its own line: got %+v", got.Lines)
+	}
+}

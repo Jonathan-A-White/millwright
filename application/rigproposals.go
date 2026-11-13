@@ -82,6 +82,10 @@ func ParseFactProposals(comment string) FactProposals {
 		return FactProposals{}
 	}
 	found := FactProposals{Found: true}
+	// saidNothing is true once the section has said the word nothing; the next
+	// blank line then ends it, so a later paragraph is not a proposal
+	// (mw-gq6.1210).
+	saidNothing := false
 	for _, raw := range append([]string{first}, lines[start+1:]...) {
 		// A bug's 'For common errors:' section, written after this one, is not
 		// a proposal of it (mw-gq6.420).
@@ -90,9 +94,13 @@ func ParseFactProposals(comment string) FactProposals {
 		}
 		text := strings.TrimSpace(domain.TrimListMarker(raw))
 		if text == "" {
+			if saidNothing {
+				break
+			}
 			continue
 		}
 		if proposal, ok := parseFactProposal(text); ok {
+			saidNothing = saidNothing || proposal.Verb == ProposeNothing
 			found.Lines = append(found.Lines, ProposalLine{Proposal: proposal})
 		} else {
 			found.Lines = append(found.Lines, ProposalLine{Malformed: strings.TrimSpace(raw)})
