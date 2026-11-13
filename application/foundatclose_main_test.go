@@ -271,3 +271,52 @@ func TestATesterFindingWhoseCommandPassesOnMainIsNotFiled(t *testing.T) {
 		t.Errorf("expected a finding main could not be read for to be filed, got %+v, %v", filed, err)
 	}
 }
+
+// A finding whose acceptance is a grep is read on main by the grep's exit: a
+// match is a pass for 'prints a line', and no match (exit 1, not a missing file)
+// is the pass for 'prints nothing'. Anything the shell could read more into is
+// not run (mw-gq6.1269).
+func TestFoundCheckCommandReadsAGrepWithItsExitMeaning(t *testing.T) {
+	for name, c := range map[string]struct {
+		ac   string
+		want string
+	}{
+		"a match is a pass":             {`grep -n "ended in error" docs/vultr-boost.md prints a line in the section on the box gate`, `grep -n 'ended in error' docs/vultr-boost.md`},
+		"a single-quoted backtick span": {"grep -n '`thaw`' docs/protocol.md finds a row naming what it does", "grep -n '`thaw`' docs/protocol.md"},
+		"a backticked command":          {"`grep -c TODO a.go b.go` exits 0", "grep -c 'TODO' a.go b.go"},
+		"no match is the pass":          {`grep -n 'time.Now()' application/x.go prints nothing`, `grep -n 'time.Now()' application/x.go; test $? -eq 1`},
+		"no line is the pass":           {`grep -rn FooBar src/ finds no lines`, `grep -rn 'FooBar' src/; test $? -eq 1`},
+		"a numbered line":               {`1. grep -n foo docs/a.md prints a line`, `grep -n 'foo' docs/a.md`},
+		"a pattern and its files":       {`grep -n "a|b" a.go prints a line`, `grep -n 'a|b' a.go`},
+		"a shell variable":              {`grep -n "$HOME" a.go prints a line`, ``},
+		"a command substitution":        {"grep -n \"`id`\" a.go prints a line", ``},
+		"a pipe":                        {`grep -n foo a.go | wc -l prints a line`, ``},
+		"a file above the rig":          {`grep -n foo ../a.go prints a line`, ``},
+		"a file by an absolute path":    {`grep -n foo /etc/passwd prints a line`, ``},
+		"a file in the home":            {`grep -n foo ~/a.go prints a line`, ``},
+		"a pattern that is an option":   {`grep -n -- -x a.go prints a line`, ``},
+		"no file":                       {`grep -n foo prints a line`, ``},
+		"a result that is read":         {`grep -n "78" docs/a.md prints only lines that say 78 is the count`, ``},
+		"a number read from the output": {`grep -c foo a.go prints a number lower than 144`, ``},
+		"a claim read by a person":      {`grep -n "bsv-kit" docs/a.md names no claim that it depends on it`, ``},
+		"a redirect":                    {`grep -n foo a.go > /tmp/x prints a line`, ``},
+	} {
+		t.Run(name, func(t *testing.T) {
+			main := &stubFindingChecks{answer: application.FindingAnswer{Sha: "21bc605c", Ran: true, Passed: true, Tail: ""}}
+			line := "A is wrong (a.go:5). AC: " + c.ac + ". Sweep: none. Size: S. By design? no"
+			filed, _, _ := landedWithFindings(t, "Done.\nFound, not fixed:\n"+line+"\nFor the rig memory: nothing", main)
+			if c.want == "" {
+				if main.command != "" {
+					t.Errorf("expected no run of %q on main", main.command)
+				}
+				return
+			}
+			if main.command != c.want {
+				t.Errorf("expected main asked to run %q, got %q", c.want, main.command)
+			}
+			if len(filed) != 0 {
+				t.Errorf("expected a grep that passes on main to file no bug, got %+v", filed)
+			}
+		})
+	}
+}
