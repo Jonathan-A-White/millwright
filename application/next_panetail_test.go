@@ -133,3 +133,97 @@ func TestAResultOfPlainWordsNotesThatThePaneCouldNotBeReadForAStop(t *testing.T)
 		t.Fatalf("expected the stop in the printed words found, got %q: %s", report.Reason, report.Why)
 	}
 }
+
+// mw-gq6.1153: a Builder session that dies at its start with the shell's
+// "Segmentation fault" left an empty result and a pane ending in those words,
+// and nothing read them, so the box that did it was never named. The close-out
+// records it as an integrity fault of the box, the record a corrupt git object
+// leaves (mw-gq6.1125), and a second within the hour names the box.
+
+const integrityKey = "millwright.integrity"
+
+// aSegfaultCloseOut closes out a story whose session left an empty result and a
+// pane showing paneText, on box cloud2 keeping its integrity marks in marks.
+func aSegfaultCloseOut(t *testing.T, paneText string, marks fakeBuilt, now time.Time) application.NextReport {
+	t.Helper()
+	ctx := context.Background()
+	dispatch, tracker, _, runner, vaultDir := aFactory(t)
+	dispatch.Now = func() time.Time { return now }
+	tracker.Clock = func() time.Time { return now }
+	dispatch.Memory = tracker
+	claimedStory(t, tracker, "mw-gq6.9", 1)
+	name := startOldSession(t, runner, "mw-gq6.9")
+	runner.Write(name, paneText)
+	dir := filepath.Join(vaultDir, application.RunsDir, "mw-gq6.9")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("making the run directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, application.ResultFileName), nil, 0o644); err != nil {
+		t.Fatalf("writing the empty result: %v", err)
+	}
+	lands := &fakeRetryLanding{}
+	report, _ := application.Next{
+		Tracker: tracker, Vault: dispatch.Boot.Vault, Worktrees: lands, Landing: lands,
+		Checks: checkStub{}, Slot: slotStub{}, Runner: runner,
+		Seat: "builder", Host: "cloud2", Box: "cloud2", Integrity: marks,
+		Rigs: dispatch.Rigs,
+		Now:  func() time.Time { return now },
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-gq6.9")
+	return report
+}
+
+func TestASessionThatDiesAtItsStartWithASegmentationFaultIsRecordedAsAnIntegrityFaultOfItsBox(t *testing.T) {
+	now := time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC)
+	marks := fakeBuilt{}
+	report := aSegfaultCloseOut(t, "starting claude\nSegmentation fault (core dumped)\n", marks, now)
+
+	if got := marks[integrityKey]; got != now.Format(time.RFC3339) {
+		t.Fatalf("expected the fault recorded at %s, got %q", now.Format(time.RFC3339), got)
+	}
+	// The story's own stop is as it was: no result, nothing merged.
+	if report.Reason != application.ReasonNoResult || report.Landed {
+		t.Fatalf("expected the %s stop unchanged, got %q landed=%v: %s", application.ReasonNoResult, report.Reason, report.Landed, report.Why)
+	}
+	if strings.Contains(strings.Join(report.Notes, "\n"), "mw cloud down") {
+		t.Fatalf("expected a first fault not to name the box, got %v", report.Notes)
+	}
+}
+
+func TestASessionWhosePaneDoesNotEndInASegmentationFaultLeavesNoIntegrityRecord(t *testing.T) {
+	now := time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC)
+	for name, pane := range map[string]string{
+		"plain words":      "working\n",
+		"an old fault":     "Segmentation fault (core dumped)\nrestarted\nthinking\nwriting\nreading\n",
+		"an unrelated end": "● the test for a Segmentation fault passed\nall done\nbye\nbye\nbye\n",
+	} {
+		marks := fakeBuilt{}
+		report := aSegfaultCloseOut(t, pane, marks, now)
+		if got := marks[integrityKey]; got != "" {
+			t.Errorf("%s: expected no record, got %q", name, got)
+		}
+		if report.Reason != application.ReasonNoResult {
+			t.Errorf("%s: expected %s, got %q", name, application.ReasonNoResult, report.Reason)
+		}
+	}
+}
+
+func TestASecondSegmentationFaultWithinTheHourNamesTheBoxWithMwCloudDown(t *testing.T) {
+	now := time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC)
+	pane := "Segmentation fault (core dumped)\n"
+
+	soon := fakeBuilt{integrityKey: now.Add(-30 * time.Minute).Format(time.RFC3339)}
+	report := aSegfaultCloseOut(t, pane, soon, now)
+	if !strings.Contains(strings.Join(report.Notes, "\n"), "mw cloud down cloud2") {
+		t.Fatalf("expected the second fault within the hour to name the box, got %v", report.Notes)
+	}
+	if soon[integrityKey] != now.Format(time.RFC3339) {
+		t.Fatalf("expected the record moved to now, got %q", soon[integrityKey])
+	}
+
+	late := fakeBuilt{integrityKey: now.Add(-2 * time.Hour).Format(time.RFC3339)}
+	report = aSegfaultCloseOut(t, pane, late, now)
+	if strings.Contains(strings.Join(report.Notes, "\n"), "mw cloud down") {
+		t.Fatalf("expected a fault two hours after the last not to name the box, got %v", report.Notes)
+	}
+}

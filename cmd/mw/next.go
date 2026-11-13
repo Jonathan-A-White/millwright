@@ -302,6 +302,8 @@ func newNextCmd() *cobra.Command {
 				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterCommandsFrom(config.AfterLanding, time.Now), rig.WithAfterLimits(afterLimits), deploySteps),
 				DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 				Deployed:     hostDeployedMarks(),
+				Integrity:    hostDeployedMarks(),
+				Box:          cloudBoxName(host),
 				LiveSite:     verifyWeb{},
 				Home:         files,
 				PushScope:    doctor.GhScopes{},

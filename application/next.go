@@ -369,6 +369,13 @@ type Next struct {
 	// A nil HeartbeatWait waits for real.
 	HeartbeatWait func(ctx context.Context, d time.Duration) error
 
+	// Integrity is where this host remembers when its factory checkout last met
+	// a corrupt object (integrityMark), the record a session that died at its
+	// start with a segmentation fault adds to (mw-gq6.1153). Box is the cloud box
+	// this host is, empty for a host that is none. A nil Integrity records nothing.
+	Integrity BuiltMarks
+	Box       string
+
 	// Memory is where mw sweep remembers what it saw of a story's last session,
 	// cleared when a close-out sends the story back to a fresh session of its
 	// own (mw-gq6.86): that fresh session's pane starts blank too, and a note
@@ -1323,6 +1330,9 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		}
 	}
 	if noResultAt(printed, err) {
+		// A session that died at its start with the shell's "Segmentation fault"
+		// is a fault of its box (mw-gq6.1153): recorded, the stop unchanged.
+		n.recordSegfault(ctx, c, report)
 		// The harness itself crashed under the session (mw-gq6.1137): given back
 		// once, not stopped for the Mayor's hand retry.
 		if rep, handled, crashErr := n.harnessCrashed(ctx, c, report); handled {
