@@ -119,7 +119,7 @@ func WSLFlagInstallLine() (string, error) {
 		return "", fmt.Errorf("this mw was built with no commit to pin the download at (rebuild from the checkout with make build); `--inline` prints the line that carries the script in itself instead")
 	}
 	sum := sha256.Sum256([]byte(millwright.WSLFlagWatch))
-	return `$d="$env:ProgramData\millwright"; New-Item -ItemType Directory -Force $d | Out-Null; ` +
+	return windowsElevationCheck + `; $d="$env:ProgramData\millwright"; New-Item -ItemType Directory -Force $d | Out-Null; ` +
 		`[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $t="$d\wsl-flag-watch.ps1.new"; ` +
 		`Invoke-WebRequest -UseBasicParsing -Uri '` + wslFlagRepoRaw + commit + "/" + wslFlagScriptPath + `' -OutFile $t; ` +
 		`if ((Get-FileHash -Algorithm SHA256 $t).Hash -ne '` + strings.ToUpper(hex.EncodeToString(sum[:])) + `') { Remove-Item $t; throw 'wsl-flag-watch.ps1 does not match its expected SHA-256: nothing installed' }; ` +
@@ -131,7 +131,7 @@ func WSLFlagInstallLine() (string, error) {
 // too long for Postern.
 func WSLFlagInstallLineInline() string {
 	enc := base64.StdEncoding.EncodeToString([]byte(millwright.WSLFlagWatch))
-	return `$d="$env:ProgramData\millwright"; New-Item -ItemType Directory -Force $d | Out-Null; ` +
+	return windowsElevationCheck + `; $d="$env:ProgramData\millwright"; New-Item -ItemType Directory -Force $d | Out-Null; ` +
 		`[IO.File]::WriteAllBytes("$d\wsl-flag-watch.ps1",[Convert]::FromBase64String('` + enc + `')); ` + wslFlagRegister()
 }
 
