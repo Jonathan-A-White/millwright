@@ -474,3 +474,92 @@ func TestAFailedNpmCiFailsAddWithItsErrorAndLeavesNothingBehind(t *testing.T) {
 		t.Errorf("the setup note is %q after a failure, want none", note)
 	}
 }
+
+// A box never lands a story into its rig checkout, so the checkout's local main
+// stays where the clone left it while origin/main moves on: a Builder's
+// acceptance line worded "against main" then reads a base months old
+// (mw-gq6.1183).
+func TestAFetchKeepsTheCheckoutsLocalMainAtOriginMain(t *testing.T) {
+	here, other := aRig(t)
+	ctx := context.Background()
+
+	write(t, other, "later.md", "pushed later\n")
+	run(t, other, "git", "add", "-A")
+	run(t, other, "git", "commit", "-qm", "A later commit")
+	run(t, other, "git", "push", "-q", "origin", "main")
+	want := run(t, other, "git", "rev-parse", "HEAD")
+
+	if err := rig.New().Fetch(ctx, here); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if got := run(t, here, "git", "rev-parse", "origin/main"); got != want {
+		t.Fatalf("origin/main = %s, want %s", got, want)
+	}
+	if got := run(t, here, "git", "rev-parse", "main"); got != want {
+		t.Fatalf("local main = %s after a fetch, want origin/main %s", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(here, "later.md")); err != nil {
+		t.Fatalf("the checkout's files did not follow main: %v", err)
+	}
+}
+
+func TestAFetchKeepsALocalMainThatIsNotCheckedOutAtOriginMain(t *testing.T) {
+	here, other := aRig(t)
+	ctx := context.Background()
+	run(t, here, "git", "checkout", "-q", "-b", "elsewhere")
+
+	write(t, other, "later.md", "pushed later\n")
+	run(t, other, "git", "add", "-A")
+	run(t, other, "git", "commit", "-qm", "A later commit")
+	run(t, other, "git", "push", "-q", "origin", "main")
+	want := run(t, other, "git", "rev-parse", "HEAD")
+
+	if err := rig.New().Fetch(ctx, here); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if got := run(t, here, "git", "rev-parse", "main"); got != want {
+		t.Fatalf("local main = %s after a fetch, want origin/main %s", got, want)
+	}
+	if got := run(t, here, "git", "rev-parse", "--abbrev-ref", "HEAD"); got != "elsewhere" {
+		t.Fatalf("the checkout moved to %s", got)
+	}
+}
+
+func TestAFetchLeavesALocalMainThatIsAheadOfOriginMainAlone(t *testing.T) {
+	here, other := aRig(t)
+	ctx := context.Background()
+	write(t, here, "merged.md", "merged here, not pushed yet\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "A merge not pushed yet")
+	ahead := run(t, here, "git", "rev-parse", "HEAD")
+
+	write(t, other, "later.md", "pushed later\n")
+	run(t, other, "git", "add", "-A")
+	run(t, other, "git", "commit", "-qm", "A later commit")
+	run(t, other, "git", "push", "-q", "origin", "main")
+
+	if err := rig.New().Fetch(ctx, here); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if got := run(t, here, "git", "rev-parse", "main"); got != ahead {
+		t.Fatalf("local main = %s, want it left at %s", got, ahead)
+	}
+}
+
+func TestAFetchLeavesADirtyCheckoutsMainAndItsFilesAlone(t *testing.T) {
+	here, other := aRig(t)
+	ctx := context.Background()
+	write(t, other, "README.md", "# the rig, changed\n")
+	run(t, other, "git", "add", "-A")
+	run(t, other, "git", "commit", "-qm", "README changed")
+	run(t, other, "git", "push", "-q", "origin", "main")
+	write(t, here, "README.md", "# the rig, edited here\n")
+
+	if err := rig.New().Fetch(ctx, here); err != nil {
+		t.Fatalf("Fetch with a dirty checkout: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(here, "README.md"))
+	if err != nil || string(b) != "# the rig, edited here\n" {
+		t.Fatalf("README.md = %q, %v; want the edit kept", b, err)
+	}
+}

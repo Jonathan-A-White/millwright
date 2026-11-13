@@ -133,12 +133,49 @@ func Available() bool {
 func (w *Worktrees) Fetch(ctx context.Context, rigDir string) error {
 	_, err := w.git(ctx, rigDir, "fetch", w.remote)
 	if err == nil {
+		w.followRemoteMain(ctx, rigDir)
 		return nil
 	}
 	if why, passing := fetchFaultWhy(err); passing {
 		return &application.TransientFault{Why: why, Err: err}
 	}
 	return err
+}
+
+// followRemoteMain moves the rig checkout's local main (or master) up to the
+// remote's after a fetch, when that is a fast-forward. Only a fetch moves
+// origin/main; a box never lands a story into its checkout, so its local main
+// stayed where the clone left it and an acceptance line worded "against main"
+// read a base weeks old (cloud3, lampas: 9217b3e7 of 2026-10-15 against
+// origin/main 42551197, mw-gq6.1183). A local main that is ahead of the remote
+// (a merge not yet pushed) or has diverged is left as it is, and so is a
+// checkout whose files the move would overwrite: git refuses a fast-forward
+// there. The move is a convenience to whoever reads main by its short name, so
+// a fault in it never fails the fetch.
+func (w *Worktrees) followRemoteMain(ctx context.Context, rigDir string) {
+	for _, branch := range []string{"main", "master"} {
+		remote := "refs/remotes/" + w.remote + "/" + branch
+		local := "refs/heads/" + branch
+		theirs, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", remote+"^{commit}")
+		if err != nil {
+			continue
+		}
+		ours, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", local+"^{commit}")
+		if err != nil || strings.TrimSpace(ours) == strings.TrimSpace(theirs) {
+			continue
+		}
+		if _, err := w.git(ctx, rigDir, "merge-base", "--is-ancestor", local, remote); err != nil {
+			continue
+		}
+		// A branch checked out in a worktree is moved there, with its files; any
+		// other is moved by its ref alone.
+		where, _ := w.git(ctx, rigDir, "for-each-ref", "--format=%(worktreepath)", local)
+		if dir := strings.TrimSpace(where); dir != "" {
+			_, _ = w.git(ctx, dir, "merge", "--ff-only", "--quiet", remote)
+			continue
+		}
+		_, _ = w.git(ctx, rigDir, "update-ref", local, strings.TrimSpace(theirs), strings.TrimSpace(ours))
+	}
 }
 
 // RaceRetries is how many times a grind refresh tries again a fetch that lost
