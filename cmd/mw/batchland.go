@@ -51,6 +51,9 @@ func batchLandSpringJob(host string, out io.Writer) (application.SpringJob, erro
 		Pending: detached.Pending,
 		Notes:   mwGateway(dir, host),
 		Host:    host,
+		// The batch lines: a batch held red together lands one story at a
+		// time next (mw-gq6.1246).
+		History: mwVault(dir, host),
 	}
 	return landings.Job(), nil
 }
