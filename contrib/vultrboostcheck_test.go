@@ -145,3 +145,20 @@ func TestVultrBoostCheckOfABoxWithNoAddressFailsAndGivesNoVerdict(t *testing.T) 
 		t.Errorf("expected no verdict and an error naming the box, got out %q, err %q", out, errOut)
 	}
 }
+
+// A snapshot can carry a checkout the bootstrap mends: a box whose cloud-init
+// has not finished is not judged, and the cloud check asks it again.
+func TestVultrBoostCheckGivesNoVerdictWhileTheBoxsBootstrapRuns(t *testing.T) {
+	env, home := boostCheckRig(t, "all modules verified", soundKernelLog)
+	shim := "#!/bin/sh\necho 'status: running'\n"
+	if err := os.WriteFile(filepath.Join(home, "check-bin", "cloud-init"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, err := runBoost(t, env, "check", "--name", "cloud1")
+	if err == nil {
+		t.Fatalf("expected no verdict of a box still bootstrapping, got:\n%s", out)
+	}
+	if strings.Contains(out, "check = ") || strings.Contains(out, "fault = ") || !strings.Contains(errOut, "has not finished") {
+		t.Errorf("expected neither a fault nor a check line, and why on standard error, got out %q, err %q", out, errOut)
+	}
+}

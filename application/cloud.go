@@ -919,6 +919,14 @@ func (p *cloudPass) readMakes(instances []CloudInstance) {
 			box.Vultr = found.Text()
 			p.dirty = box.Name + " vultr"
 		}
+		// Vultr's word of a make is not its word of the box once it is made: the
+		// book of cloud4 and cloud5 went on saying "active locked" for hours after
+		// Vultr had said ok, and was read as a box locked while it worked
+		// (mw-gq6.1172). LockedSince is what says a made box is locked.
+		if !box.Making && !box.Restoring && box.Vultr != "" {
+			box.Vultr = ""
+			p.dirty = box.Name + " vultr"
+		}
 		id, since := "", time.Time{}
 		if held {
 			id = found.ID

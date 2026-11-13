@@ -911,15 +911,26 @@ do_set_pace() {
 # cache, dmesg is read with sudo when the box's user may not. A checkout is a directory under
 # the home with a .git directory (a story's worktree has a .git file, and is its rig's). The
 # vault and the millwright checkout must be there: a box without them is not sound. Every
-# fault is one line, and the last line says the check ran to its end.
+# fault is one line, and the last line says the check ran to its end. A box whose bootstrap
+# (cloud-init) has not finished gives no verdict: a snapshot can carry a checkout the bootstrap
+# mends (mw-5gr3k0.8), and the check is asked again. A checkout git cannot walk is walked once
+# more after three seconds, so that a fetch or a repack under way is not read as a fault.
 BOX_CHECK='export PATH=$HOME/.local/bin:$HOME/.local/go/bin:/usr/local/go/bin:$PATH
+if command -v cloud-init >/dev/null 2>&1 && cloud-init status 2>/dev/null | grep -q "^status: \(running\|not\)"; then
+	echo "the bootstrap of this box (cloud-init) has not finished: it is checked once it has" >&2
+	exit 75
+fi
 n=0
 last() { printf "%s\n" "$1" | grep . | tail -n 1 | cut -c1-200; }
+walk() { git --git-dir="$1/.git" --work-tree="$1" fsck --connectivity-only --no-progress 2>&1 >/dev/null; }
 for g in "$HOME"/*/.git; do
 	[ -d "$g" ] || continue
 	d=${g%/.git}; n=$((n + 1))
-	if ! out=$(git --git-dir="$g" --work-tree="$d" fsck --connectivity-only --no-progress 2>&1 >/dev/null); then
-		echo "fault = ~/${d##*/}: git fsck: $(last "$out")"
+	if ! out=$(walk "$d"); then
+		sleep 3
+		if ! out=$(walk "$d"); then
+			echo "fault = ~/${d##*/}: git fsck: $(last "$out")"
+		fi
 	fi
 done
 [ -d "$HOME/millwright-vault/.git" ] || echo "fault = ~/millwright-vault: no vault checkout to check"

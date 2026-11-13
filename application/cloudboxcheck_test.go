@@ -329,3 +329,17 @@ func TestDispatchOnAHostThatIsNoBoxReadsNoGate(t *testing.T) {
 		t.Errorf("the vps read a box gate %d times", reads)
 	}
 }
+
+// The book of cloud4 and cloud5 kept "active locked", Vultr's word of their
+// makes, for hours after Vultr had said ok. Once a box is made the word is
+// dropped: LockedSince alone says a made box is locked.
+func TestTheBookDropsVultrsWordOfTheMakeOnceTheBoxIsMade(t *testing.T) {
+	cloud := &apptest.FakeCloud{Orphans: []application.CloudInstance{{ID: "758a84ee", Label: "cloud4", Status: "active", Server: "ok"}}}
+	box := madeBox("cloud4")
+	box.Vultr = "active locked"
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: []application.CloudBox{box}}}
+	boxCheck(t, cloud, book, apptest.NewFakeTracker(), boxCheckNow)
+	if got := bookBox(t, book, "cloud4"); got.Vultr != "" || !got.LockedSince.IsZero() || !got.MayWork() {
+		t.Errorf("the made box Vultr says is ok is %+v, want no word of its make, not locked, and cleared", got)
+	}
+}
