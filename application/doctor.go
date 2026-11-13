@@ -557,7 +557,9 @@ func (d Doctor) ok(ctx context.Context, name, reason string, dryRun bool) (Docto
 // cannotTell is the DoctorCannotTell half of one, said once the same way an
 // ok-with-reason is: logged and noted only the first time, or again once the
 // reason changes. A repeat of the same reason costs neither a log line nor a
-// kv write, and leaves a note already written for it in place, unrewritten.
+// kv write, and leaves a note already written for it in place, unrewritten; a
+// reason that differs only by a number standing on its own is a repeat
+// (sameCannotTellReason).
 func (d Doctor) cannotTell(ctx context.Context, name, reason string, dryRun bool) (DoctorResult, error) {
 	result := DoctorResult{Check: name, Verdict: "cannot-tell", Reason: reason}
 	if dryRun {
@@ -568,7 +570,7 @@ func (d Doctor) cannotTell(ctx context.Context, name, reason string, dryRun bool
 	if err != nil {
 		return DoctorResult{}, fmt.Errorf("reading %s's doctor state: %w", name, err)
 	}
-	if episode.LastCannotTellReason == reason {
+	if sameCannotTellReason(episode.LastCannotTellReason, reason) {
 		return result, nil
 	}
 
@@ -581,6 +583,44 @@ func (d Doctor) cannotTell(ctx context.Context, name, reason string, dryRun bool
 		return DoctorResult{}, fmt.Errorf("saving %s's doctor state: %w", name, err)
 	}
 	return result, nil
+}
+
+// sameCannotTellReason is whether two cannot-tell reasons are one to say once:
+// equal, or equal but for a number that stands on its own ("over 10 minutes",
+// "3 behind"), which a check's reason may carry and which moves with the
+// clock or a count while nothing else does (mw-gq6.1231). A number that is part
+// of a word, an id or a time (cloud1, mw-gq6.50, 00:10:34) is kept, so a reason
+// naming another story or host is still said.
+func sameCannotTellReason(last, now string) bool {
+	return last == now || (last != "" && withoutMovingNumbers(last) == withoutMovingNumbers(now))
+}
+
+// withoutMovingNumbers is s with each run of digits that touches no letter,
+// '.', '-', '_', ':' or '/' either side replaced by '#'.
+func withoutMovingNumbers(s string) string {
+	joins := func(b byte) bool {
+		return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' ||
+			strings.IndexByte(".-_:/@", b) >= 0
+	}
+	var out strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] < '0' || s[i] > '9' {
+			out.WriteByte(s[i])
+			i++
+			continue
+		}
+		j := i
+		for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+			j++
+		}
+		if (i > 0 && joins(s[i-1])) || (j < len(s) && joins(s[j])) {
+			out.WriteString(s[i:j])
+		} else {
+			out.WriteByte('#')
+		}
+		i = j
+	}
+	return out.String()
 }
 
 // faulty is the DoctorFaulty half of one: decide, from the check's damper and
