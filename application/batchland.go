@@ -455,6 +455,7 @@ func (b BatchLand) queued(ctx context.Context, rig string, report *BatchReport) 
 		queue = append(queue, BatchStory{ID: detail.Story.ID, Title: detail.Story.Title, QueuedAt: detail.QueuedAt, detail: detail, path: path})
 	}
 	SortOldestQueued(queue)
+	queue = b.leaveOutHeldAlone(ctx, rig, queue, report)
 	if len(queue) == 0 {
 		return nil, nil
 	}
@@ -471,6 +472,37 @@ func (b BatchLand) queued(ctx context.Context, rig string, report *BatchReport) 
 		kept = kept[:1]
 	}
 	return kept, nil
+}
+
+// leaveOutHeldAlone takes out of the queue each story whose tests were red when
+// it was landed alone since the rig last landed a batch: it made the batch it
+// was in red, and with it at the head every later batch would be red too, the
+// rest of the queue waiting behind it (mw-gq6.1246). Its hold was mailed; it is
+// taken again once a batch of the rig lands, or when nothing else is queued.
+func (b BatchLand) leaveOutHeldAlone(ctx context.Context, rig string, queue []BatchStory, report *BatchReport) []BatchStory {
+	if b.Metrics == nil {
+		return queue
+	}
+	alone := HeldRedAlone(rigBatches(readBatches(ctx, b.Metrics), rig))
+	if len(alone) == 0 {
+		return queue
+	}
+	var kept, out []BatchStory
+	for _, s := range queue {
+		if _, held := alone[s.ID]; held {
+			out = append(out, s)
+			continue
+		}
+		kept = append(kept, s)
+	}
+	if len(kept) == 0 {
+		return queue
+	}
+	for _, s := range out {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s was held red alone in %s since the rig last landed, so it is left out: the rest land without it, and it is taken again once a batch of %s lands",
+			s.ID, BatchLabel(rig, alone[s.ID]), rig))
+	}
+	return kept
 }
 
 // SortOldestQueued puts a queue in the order a batch merges it: oldest queued
@@ -1352,6 +1384,12 @@ type QueuedStoryReader interface {
 // its fixer's harness stop waits for the stop's time (mw-gq6.472). A rig whose
 // landing ended clean with its queue as it was (mw land took nothing from it)
 // waits BatchEvery the same way, unless its queue changes first (mw-gq6.824).
+//
+// A rig whose last batch was held red with more than one story in it (its
+// History) has those stories landed one at a time, the oldest first, at once
+// the first time, stopping at the first that fails: one story's red held the
+// rest, and the next batch would take them all again (mw-gq6.1246). The story
+// held red alone is left out of the batches after it until one lands.
 type BatchLandings struct {
 	// Rigs are the rigs checked out on this host, by name, as the follower
 	// started; ReadRigs, when set, is asked on every pass for the rigs as they
@@ -1381,11 +1419,19 @@ type BatchLandings struct {
 	// Recheck is how often a pass with a landing still running looks again
 	// for a rig that has fallen due; zero is DefaultBatchRecheck.
 	Recheck time.Duration
+	// History is the batch lines (BatchMetric), read for each rig's last
+	// batch: one held red with more than one story is landed again one story
+	// at a time, at once (mw-gq6.1246). Nil reads none.
+	History BatchHistory
 
 	rigsMu sync.Mutex // guards Rigs once ReadRigs has replaced it
 
 	mu     sync.Mutex
 	failed map[string]time.Time // rig -> when its landing last failed
+	// drained is, for each rig, the number of the batch held red together
+	// whose stories this follower began to land one at a time: it does so at
+	// once only once, and after that as any failed landing waits.
+	drained map[string]int
 	// nothing is, for a rig whose last landing ended clean and left its queue
 	// as it was (mw land found nothing it takes), the queue then and when.
 	nothing map[string]landedNothing
@@ -1443,6 +1489,9 @@ type batchDue struct {
 	each   bool
 	queued int
 	queue  batchQueue
+	// heldRed is the batch held red together whose stories this landing
+	// lands one at a time (mw-gq6.1246); 0 for any other landing.
+	heldRed int
 }
 
 func (d batchDue) String() string {
@@ -1459,6 +1508,17 @@ type batchQueue struct {
 	// ids are the queued stories' ids, in name order: what the queue is,
 	// to tell a queue that changed from one a land left as it was.
 	ids []string
+}
+
+// holding is how many of ids the queue holds.
+func (q batchQueue) holding(ids []string) int {
+	count := 0
+	for _, id := range ids {
+		if slices.Contains(q.ids, id) {
+			count++
+		}
+	}
+	return count
 }
 
 // same says whether q holds the stories of other and no more.
@@ -1541,6 +1601,7 @@ func (b *BatchLandings) due(ctx context.Context) ([]batchDue, error) {
 	sort.Strings(names)
 
 	now := b.now()
+	batches := readBatches(ctx, b.History)
 	hold, held := readHarnessHold(ctx, b.Notes, b.Host)
 	held = held && hold.Until.After(now)
 	b.mu.Lock()
@@ -1554,16 +1615,30 @@ func (b *BatchLandings) due(ctx context.Context) ([]batchDue, error) {
 			continue
 		}
 		settings := rules.LandingSettings()
-		if failed, was := b.failed[name]; was && (held || now.Sub(failed) < settings.BatchEvery) {
+		q := queues[name]
+		// A batch held red with more than one story in it is landed again one
+		// story at a time, oldest first, and at once the first time: one
+		// story's red held the rest, and the next batch would take them all
+		// again with it (batch 524 of lampas, mw-gq6.1246).
+		together, heldTogether := HeldRedTogether(rigBatches(batches, name))
+		alone := 0
+		if heldTogether && settings.Mode == domain.LandingBatch {
+			alone = q.holding(together.IDs)
+		}
+		first := alone > 0 && b.drained[name] != together.Batch
+		if failed, was := b.failed[name]; was && (held || (!first && now.Sub(failed) < settings.BatchEvery)) {
 			continue
 		}
-		q := queues[name]
 		if found, was := b.nothing[name]; was {
 			if !found.queue.same(q) {
 				delete(b.nothing, name) // the queue changed: land it
 			} else if now.Sub(found.at) < settings.BatchEvery {
 				continue
 			}
+		}
+		if alone > 0 {
+			due = append(due, batchDue{rig: name, each: true, queued: alone, queue: q, heldRed: together.Batch})
+			continue
 		}
 		if settings.Mode == domain.LandingEach {
 			due = append(due, batchDue{rig: name, each: true, queued: q.queued, queue: q})
@@ -1726,6 +1801,9 @@ func (b *BatchLandings) landRig(ctx context.Context, d batchDue) error {
 	if !d.each {
 		return b.Land(ctx, d.rig, false)
 	}
+	if d.heldRed > 0 {
+		return b.landAlone(ctx, d)
+	}
 	for left := d.queued; left > 0; {
 		if err := b.Land(ctx, d.rig, true); err != nil {
 			return err
@@ -1742,6 +1820,30 @@ func (b *BatchLandings) landRig(ctx context.Context, d batchDue) error {
 		// A drain takes long: the home may move between two of its landings.
 		// What is left is then the new home's to land (mw-gq6.1207).
 		if left > 0 {
+			if at, err := b.Home(ctx); err != nil || !at {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// landAlone lands the stories of a batch held red together one at a time, the
+// oldest first, as many as it held, and stops at the first landing that fails:
+// that story is left out of the batches after it (BatchLand.leaveOutHeldAlone),
+// so the rest of the queue lands without it (mw-gq6.1246).
+func (b *BatchLandings) landAlone(ctx context.Context, d batchDue) error {
+	b.mu.Lock()
+	if b.drained == nil {
+		b.drained = map[string]int{}
+	}
+	b.drained[d.rig] = d.heldRed
+	b.mu.Unlock()
+	for left := d.queued; left > 0; left-- {
+		if err := b.Land(ctx, d.rig, true); err != nil {
+			return err
+		}
+		if left > 1 {
 			if at, err := b.Home(ctx); err != nil || !at {
 				return err
 			}
