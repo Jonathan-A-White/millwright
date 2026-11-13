@@ -86,11 +86,12 @@ func (c *callersContext) theRigIsACheckout(name string, calling int, word string
 		return os.WriteFile(path, []byte(text), 0o644)
 	}
 	// Half the callers are Gherkin, half unit tests; the other test files are not
-	// callers. The source file declares the word, which is what its callers name.
+	// callers. The source file is a TS one, whose callers import it.
+	imports := "import { " + word + " } from '../src/screens/" + word + "'\n"
 	for i := 0; i < calling; i++ {
-		rel, text := fmt.Sprintf("features/caller%d.feature", i), "open the "+word+" page\n"
+		rel, text := fmt.Sprintf("features/caller%d.feature", i), "open the "+word+" page\n"+imports
 		if i%2 == 1 {
-			rel, text = fmt.Sprintf("src/caller%d_test.go", i), "// "+word+"\n"
+			rel, text = fmt.Sprintf("src/caller%d_test.go", i), "// "+imports
 		}
 		if err := write(rel, text); err != nil {
 			return err

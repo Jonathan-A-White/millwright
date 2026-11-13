@@ -1043,7 +1043,7 @@ size, `mw path set` and `mw file` (and `mw file --check`) count the rig's test
 files (those under `features/` or `tests/`, and any `*_test.go`) that call
 something its files declare, in the rig's checkout on this host (a Go file's
 exported names, said as `pkg.Name` or, in its own directory, bare; a TS or JS
-file's exports or import path; never the file's base name as a word, which a
+file's import path, a test importing it from any relative or aliased path; never the file's base name as a word, which a
 name like `status` would find in prose), and say `<story>: test callers: N for size S
 (allows M)`. The size allows, in all: XS 5, S 10, M 20, L 35, XL 50. Over that,
 `WARN: N test callers for size S; split (a first story moving the callers onto
