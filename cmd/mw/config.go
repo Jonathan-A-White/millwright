@@ -25,9 +25,9 @@ func newConfigExportBoostCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "export-boost",
-		Short: "Rewrite the vault's hosts/boost-config.toml from this home's [tests], [changed_specs], [test_parts] and [session]",
+		Short: "Rewrite the vault's hosts/boost-config.toml from this home's [tests], [changed_specs], [named_tests], [test_parts] and [session]",
 		Long: "export-boost rewrites the vault's " + application.BoostConfigFile + " from the [tests],\n" +
-			"[changed_specs], [test_parts.<rig>] and [session] deny tables of ~/.config/mw/config.toml, and nothing else of it, then commits that\n" +
+			"[changed_specs], [named_tests], [test_parts.<rig>] and [session] deny tables of ~/.config/mw/config.toml, and nothing else of it, then commits that\n" +
 			"one file in the vault; the next mw sync carries it. contrib/boost-bootstrap.sh gives a new\n" +
 			"Boost the lines of the rigs it clones from that file, so a rig's line added or changed here\n" +
 			"and not exported gates that rig wrong on the next Boost. mw doctor's boost-config check says\n" +

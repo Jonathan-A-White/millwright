@@ -28,8 +28,8 @@
 #                 not mend it, cloned again with its .git/config kept, the broken one moved aside. The log
 #                 says which. This script's own checkout is only checked.
 #   9  config     ~/.config/mw/config.toml, if there is none: host, vault, cap, beads_sync = "auto",
-#                 beads_server_host, the [rigs] table, and a [tests] line for each rig (a [changed_specs] line
-#                 and a [test_parts.<rig>] table, which splits its gate into parts for mw check --part,
+#                 beads_server_host, the [rigs] table, and a [tests] line for each rig (a [changed_specs] line,
+#                 a [named_tests] line (the command that runs the failing tests by name) and a [test_parts.<rig>] table, which splits its gate into parts for mw check --part,
 #                 where there is one) copied from the vault's hosts/boost-config.toml, so mw next gates a
 #                 rig with its own tests and not with `make test`. In an existing one only the host line is
 #                 ever edited, set to BOOST_HOST (a snapshot carries the box it was made from's), a
@@ -715,7 +715,7 @@ s_rigs() {
 # What a rig's tests are is not the Boost's to know: the home's config.toml holds
 # a [tests] line per rig, and a Boost without them gates every rig with `make test`
 # (mw-gq6.453). The factory keeps those tables in the vault, in hosts/boost-config.toml
-# (a [tests] and a [changed_specs] table of one-line `rig = "command"` entries, and a
+# (a [tests], a [changed_specs] and a [named_tests] table of one-line `rig = "command"` entries, and a
 # [test_parts.<rig>] table of one-line `"part" = "command"` entries for a rig whose gate
 # is run in parts, written from the home's config.toml by `mw config export-boost`,
 # mw-gq6.456, mw-gq6.592), and this step copies the lines and tables of the rigs it cloned. The
@@ -767,6 +767,22 @@ session_table() { # the vault file's [session] table as written (header, then it
 		on && !/^[[:space:]]*(#.*)?$/ { print }
 	' "$TABLES_FILE"
 }
+# has_table <file> <table>: true when the config has a [table] header.
+has_table() {
+	grep -Eq "^[[:space:]]*\\[$2\\][[:space:]]*(#.*)?\$" "$1"
+}
+# with_named_tests <file>: the config as it is, and the vault file's [named_tests] lines of the
+# rigs this Boost has appended as a table when it has no such table (mw-gq6.1223); every line
+# as it was. A table it has is never edited: `mw sync` appends the lines it lacks.
+with_named_tests() {
+	local table
+	table=$(config_table named_tests)
+	if has_table "$1" named_tests || [ -z "$table" ]; then
+		cat "$1"
+	else
+		printf '%s\n%s\n' "$(cat "$1")" "$table"
+	fi
+}
 config_session() { # the [session] table (the deny rules a story session is given), after a blank line, or nothing
 	local table
 	table=$(session_table)
@@ -785,6 +801,7 @@ config_lines() { # the lines a config for this Boost holds, one per line: [rigs]
 	done
 	config_table tests
 	config_table changed_specs
+	config_table named_tests
 	config_parts
 	config_session
 	printf '\n[after_landing]\nmillwright = "%s"\n' "$MW_AFTER_LANDING"
@@ -830,7 +847,7 @@ s_config() {
 	# vault is not cloned yet (a dry run on a fresh machine).
 	if [ -d "$BOOST_VAULT/.git" ]; then
 		if [ ! -f "$TABLES_FILE" ]; then
-			note "the vault has no hosts/boost-config.toml: no [tests] or [changed_specs] line was written, so mw next gates every rig with make test"
+			note "the vault has no hosts/boost-config.toml: no [tests], [changed_specs] or [named_tests] line was written, so mw next gates every rig with make test"
 		else
 			for rn in $(rig_list); do
 				[ "$rn" = millwright ] || [ -n "$(table_line tests "$rn")" ] || note "no [tests] line for $rn in hosts/boost-config.toml: mw next gates it with make test (on the home, mw config export-boost writes its line there)"
@@ -858,6 +875,11 @@ $table
 			put "$(stat -c %a "$MW_DIR/config.toml")" "$MW_DIR/config.toml" "$(cat "$MW_DIR/config.toml")
 $missing_parts"
 		fi
+		# Likewise a [named_tests] table, which runs a failing test alone on main: a Boost made before
+		# the table was exported gets it after a re-run (mw-gq6.1223).
+		if ! has_table "$MW_DIR/config.toml" named_tests && [ -n "$(config_table named_tests)" ] && act "append the [named_tests] table to $MW_DIR/config.toml, copied from $TABLES_FILE; no line in it is edited"; then
+			put "$(stat -c %a "$MW_DIR/config.toml")" "$MW_DIR/config.toml" "$(with_named_tests "$MW_DIR/config.toml")"
+		fi
 		if ! has_after_landing "$MW_DIR/config.toml" && act "set millwright = \"$MW_AFTER_LANDING\" in the [after_landing] table of $MW_DIR/config.toml, so a landing of a millwright story rebuilds this box's mw; no line in it is edited"; then
 			put "$(stat -c %a "$MW_DIR/config.toml")" "$MW_DIR/config.toml" "$(with_after_landing "$MW_DIR/config.toml")"
 		fi
@@ -867,7 +889,7 @@ $missing_parts"
 		done <<EOF
 $want
 EOF
-	elif act "write $MW_DIR/config.toml (host $BOOST_HOST, cap $BOOST_CAP, beads_sync auto, $(echo "$want" | grep -c ' = "' || true) settings, [tests] and [changed_specs] lines, [test_parts.<rig>] tables and the [session] deny table from $TABLES_FILE, [after_landing] millwright = \"$MW_AFTER_LANDING\")"; then
+	elif act "write $MW_DIR/config.toml (host $BOOST_HOST, cap $BOOST_CAP, beads_sync auto, $(echo "$want" | grep -c ' = "' || true) settings, [tests], [changed_specs] and [named_tests] lines, [test_parts.<rig>] tables and the [session] deny table from $TABLES_FILE, [after_landing] millwright = \"$MW_AFTER_LANDING\")"; then
 		ensure_mw_dir
 		put 644 "$MW_DIR/config.toml" "$want"
 	fi
