@@ -13,7 +13,7 @@ Feature: mw postern send
   a decision-needed question's own --bead is already its channel, so both are
   refused alongside one. --re <txid> answers inside that post's thread, in the
   channel a flag names or, with none, the root's own channel (a root mw has
-  not seen is refused, never sent to Factory). A message in a bead's channel is written to
+  not seen goes to Factory, with a note saying so). A message in a bead's channel is written to
   that bead too, as the Mayor's side of the exchange. --attach sends a file, encrypted to the Governor and uploaded to
   the backend's blob store, announced in the message.
 
@@ -176,11 +176,12 @@ Feature: mw postern send
     Then sending succeeds
     And the broadcast record's plaintext is in channel "roadmap" with text "Noted." answering "root-txid"
 
-  Scenario: --re with no channel flag is refused for a root mw has not seen, never sent to Factory
+  Scenario: --re with no channel flag goes to Factory for a root mw has not seen, and says so
     Given the postern channel is "direct"
     When mw postern send "message" "Lost." answering "direct:unknown-txid" is run
-    Then it is refused, saying --re needs the root's channel and naming --bead-channel and --channel
-    And it is refused, and nothing was uploaded or sent
+    Then sending succeeds
+    And the broadcast record's plaintext answers "direct:unknown-txid" with text "Lost." in no channel
+    And it said the root is unseen, so the reply went to Factory, naming --bead-channel and --channel
 
   Scenario: --re with a channel flag goes where the flag says, whatever channel the root was seen in
     Given the postern channel is "direct"

@@ -189,19 +189,22 @@ func TestPosternSendReWithNoChannelFlagAnswersInTheRootsChannel(t *testing.T) {
 	}
 }
 
-// A root mw has not seen is refused, with the flags that would say where, and
-// nothing is sent; a channel flag with --re still goes where it says.
-func TestPosternSendReWithNoChannelFlagRefusesAnUnseenRoot(t *testing.T) {
+// A root mw has not seen is answered in Factory, with a note naming the flags
+// for another channel (Factory has none); a channel flag with --re still goes
+// where it says.
+func TestPosternSendReWithNoChannelFlagSendsAnUnseenRootsReplyToFactory(t *testing.T) {
 	plaintexts, _, out, err := channelSend(t, "--re", channelRe, "x")
-	if err == nil {
-		t.Fatalf("expected a refusal, sent %v\n%s", plaintexts, out)
+	if err != nil {
+		t.Fatalf("expected the reply to be sent, got %v\n%s", err, out)
 	}
-	want := "--re <root> needs the root's channel: give --bead-channel <id> or --channel <name>"
-	if !strings.Contains(err.Error(), want) {
-		t.Errorf("expected the refusal to say %q, got %v", want, err)
+	want := `{"text":"x","re":"` + channelRe + `"}`
+	if len(plaintexts) != 1 || plaintexts[0] != want {
+		t.Errorf("expected %s sent, got %v", want, plaintexts)
 	}
-	if len(plaintexts) != 0 {
-		t.Errorf("expected nothing sent, got %v", plaintexts)
+	for _, say := range []string{"has not seen " + channelRe, "goes to Factory", "--bead-channel", "--channel"} {
+		if !strings.Contains(out, say) {
+			t.Errorf("expected the note to say %q, got:\n%s", say, out)
+		}
 	}
 }
 

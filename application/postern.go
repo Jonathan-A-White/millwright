@@ -2255,7 +2255,8 @@ func (r PosternSendRequest) thread() PosternThread {
 // inRootsChannel is req with the channel of the post its Re names filled in,
 // when it answers a post (Re) and names no channel of its own: the reply
 // belongs under the root, never silently in Factory. A post mw has not seen
-// is refused, naming the flags that say where the reply goes. A request that
+// goes to Factory with a note saying so and naming the flags for another
+// channel (Factory has none of its own). A request that
 // names a channel, asks a question, or says what its text is (Role: mw's own
 // transcripts), or a send with no Threads, is returned as it is (the command
 // line's CheckAddressing refuses a channel that is not the root's).
@@ -2269,7 +2270,11 @@ func (s PosternSend) inRootsChannel(req PosternSendRequest) (PosternSendRequest,
 		return req, fmt.Errorf("mw postern send: looking up the channel of %s: %w", re, err)
 	}
 	if !found {
-		return req, fmt.Errorf("mw postern send: --re <root> needs the root's channel: give --bead-channel <id> or --channel <name>")
+		// Factory is the one channel with no flag to name, so a refusal
+		// that offered only --bead-channel and --channel left a Factory root
+		// unanswerable (mw-gq6.1161). The reply goes to Factory, said aloud.
+		s.printf("note: mw has not seen %s, so its channel is not known: this reply goes to Factory, where a root in a bead's or a named channel would show it flat; if the root is in one, send again with --bead-channel <id> or --channel <name>\n", re)
+		return req, nil
 	}
 	req.Thread, req.Topic = thread.Bead, thread.Topic
 	return req, nil

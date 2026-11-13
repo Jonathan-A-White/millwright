@@ -600,8 +600,8 @@ func newPosternSendCmd() *cobra.Command {
 			"post's thread. Give the post's own txid, or the re of a message already in its thread\n" +
 			"(mw postern inbox and mw talk wait print it). With no channel flag the reply goes to the ROOT's\n" +
 			"channel, as mw postern send, mw postern inbox or mw talk wait saw it or a reply to it — never\n" +
-			"silently to Factory; a root mw has not seen is refused, saying to give --bead-channel <id>\n" +
-			"or --channel <name>. A channel flag given with --re must be the root's own channel, else it\n" +
+			"silently to Factory; a root mw has not seen goes to Factory too, with a note saying so and\n" +
+			"naming --bead-channel <id> and --channel <name> for a root in another channel. A channel flag given with --re must be the root's own channel, else it\n" +
 			"is refused, naming the root's: a reply under another channel's flag shows flat. It is refused\n" +
 			"with --bead, which asks a question of its own.\n\n" +
 			"A send with no --re and no channel flag is refused while the Governor's newest Factory post\n" +
