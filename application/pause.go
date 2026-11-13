@@ -915,10 +915,7 @@ func (r Resume) Run(ctx context.Context, dryRun bool) error {
 		fmt.Fprintf(r.Out, "dry run: would resume the pause of %s, nothing was changed\n%s", set.PausedAt.UTC().Format(time.RFC3339), set)
 		return nil
 	}
-	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
-	if r.Now != nil {
-		now = r.Now()
-	}
+	now := r.now()
 
 	byHost := map[string][]PausedStory{}
 	for _, ps := range set.Stories {
@@ -1011,4 +1008,11 @@ func (r Resume) Run(ctx context.Context, dryRun bool) error {
 	fmt.Fprint(r.Out, "resumed the pause of "+set.PausedAt.UTC().Format(time.RFC3339)+"\n"+strings.Join(notes, "\n")+"\n")
 	Pause{Mail: r.Mail, Tracker: r.Tracker, Host: r.Host, Out: r.Out}.record(ctx, set, "The factory is resumed", body)
 	return nil
+}
+
+func (r Resume) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

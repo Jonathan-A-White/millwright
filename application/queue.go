@@ -168,10 +168,7 @@ func (q Queue) inRig(detail StoryDetail) bool {
 }
 
 func (q Queue) row(detail StoryDetail) QueueRow {
-	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
-	if q.Now != nil {
-		now = q.Now()
-	}
+	now := q.now()
 	merged := detail.Merged()
 	row := QueueRow{
 		ID: detail.Story.ID, Title: detail.Story.Title, Rig: merged.Rig,
@@ -227,4 +224,11 @@ func (r QueueReport) String() string {
 		fmt.Fprintf(&b, "  %s  %s\n    P%d, waits on %s\n", row.ID, row.Title, row.Priority, strings.Join(row.WaitsOn, ", "))
 	}
 	return b.String()
+}
+
+func (q Queue) now() time.Time {
+	if q.Now != nil {
+		return q.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
