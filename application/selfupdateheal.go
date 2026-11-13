@@ -49,6 +49,26 @@ func corruptCheckout(err error) bool {
 // factory checkout last met a corrupt object (RFC 3339).
 func integrityMark(rig string) string { return rig + ".integrity" }
 
+// secondIntegrityFault says whether the host met an integrity fault within the
+// hour before now (the mark integrityMark holds). When it did, the mark is moved
+// to now, since this is a fault too; when it did not, the mark is left for the
+// caller to write once it has acted on the first one. A nil marks says no.
+func secondIntegrityFault(ctx context.Context, marks BuiltMarks, now time.Time) bool {
+	if marks == nil {
+		return false
+	}
+	last, _ := marks.Built(ctx, integrityMark(FactoryRig))
+	if last == "" {
+		return false
+	}
+	at, err := time.Parse(time.RFC3339, last)
+	if err != nil || now.Sub(at) >= integrityFaultWindow || !now.After(at) {
+		return false
+	}
+	_ = marks.MarkBuilt(ctx, integrityMark(FactoryRig), now.UTC().Format(time.RFC3339))
+	return true
+}
+
 func (s SelfUpdate) now() time.Time {
 	if s.Now != nil {
 		return s.Now()
@@ -83,14 +103,11 @@ func (s SelfUpdate) heal(ctx context.Context, dir string, fetchErr error) (notes
 		return stop("fetching: " + cause)
 	}
 	now := s.now()
-	if last, _ := s.Built.Built(ctx, integrityMark(FactoryRig)); last != "" {
-		if at, err := time.Parse(time.RFC3339, last); err == nil && now.Sub(at) < integrityFaultWindow && now.After(at) {
-			_ = s.Built.MarkBuilt(ctx, integrityMark(FactoryRig), now.UTC().Format(time.RFC3339))
-			if s.Box == "" {
-				return stop("a second corrupt git object within the hour, the checkout is not cloned again: " + cause)
-			}
-			return stop(fmt.Sprintf("%s met a second corrupt git object within the hour, so the box is bad%s: %s", s.Box, s.boxDown(), cause))
+	if secondIntegrityFault(ctx, s.Built, now) {
+		if s.Box == "" {
+			return stop("a second corrupt git object within the hour, the checkout is not cloned again: " + cause)
 		}
+		return stop(fmt.Sprintf("%s met a second corrupt git object within the hour, so the box is bad%s: %s", s.Box, s.boxDown(), cause))
 	}
 
 	if dirty, err := s.Checkout.Uncommitted(ctx, dir); err != nil {
@@ -116,4 +133,53 @@ func (s SelfUpdate) heal(ctx context.Context, dir string, fetchErr error) (notes
 	// The old checkout took its bin/mw with it: whatever was built is to be built again.
 	_ = s.Built.MarkBuilt(ctx, FactoryRig, "")
 	return []string{fmt.Sprintf("%s: a corrupt git object (%s); the checkout was moved to %s and cloned again from origin's %s", selfUpdateWords, cause, aside, FactoryBranch)}, nil, true
+}
+
+// segfaultLinesLooked is how many of a pane's last printed lines are read for a
+// segmentation fault: the shell's own word comes last, and Bun's crash report
+// puts its panic line just before its closing one.
+const segfaultLinesLooked = 3
+
+// endsInSegfault says a pane's last lines name a segmentation fault: the shell's
+// "Segmentation fault (core dumped)" or Bun's "panic(main thread): Segmentation
+// fault". The same words earlier in a pane are a session that went on.
+func endsInSegfault(tail string) bool {
+	var last []string
+	for _, line := range strings.Split(tail, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			last = append(last, line)
+		}
+	}
+	if len(last) > segfaultLinesLooked {
+		last = last[len(last)-segfaultLinesLooked:]
+	}
+	return strings.Contains(strings.ToLower(strings.Join(last, "\n")), "segmentation fault")
+}
+
+// recordSegfault adds a session's segmentation fault to its box's integrity
+// record (mw-gq6.1153), called for a session that left no result: its pane, read
+// as the empty result's record reads it, ends in one. It is the record a corrupt
+// git object leaves (secondIntegrityFault), so a second within the hour says the
+// box is bad and names the step, mw cloud down <box>, in the report's notes. It
+// writes nothing else and changes nothing about how the story stops; a pane that
+// could not be read, or a host with no Integrity marks, records nothing.
+func (n Next) recordSegfault(ctx context.Context, c *closeOut, report *NextReport) {
+	if n.Integrity == nil || ctx.Err() != nil {
+		return
+	}
+	tail, err := n.paneTail(ctx, c)
+	if err != nil || !endsInSegfault(tail) {
+		return
+	}
+	now := n.now()
+	if secondIntegrityFault(ctx, n.Integrity, now) {
+		if n.Box == "" {
+			report.Notes = append(report.Notes, "a second session of this host died with a segmentation fault within the hour")
+		} else {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s met a second segmentation fault within the hour, so the box is bad; the step: mw cloud down %s", n.Box, n.Box))
+		}
+		return
+	}
+	_ = n.Integrity.MarkBuilt(ctx, integrityMark(FactoryRig), now.UTC().Format(time.RFC3339))
+	report.Notes = append(report.Notes, "the session died with a segmentation fault; recorded as an integrity fault of this host")
 }
