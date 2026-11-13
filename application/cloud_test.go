@@ -417,6 +417,105 @@ func TestMwCloudDownLeavesAClaimOnAnotherBoxAlone(t *testing.T) {
 	}
 }
 
+// aClaimedOnCloud1 files mw-b.1, in progress and claimed by holder on cloud1,
+// its run state running, and mw-b.2, claimed by mw@cloud1 the same way.
+func aClaimedOnCloud1(t *testing.T, holder string) *apptest.FakeTracker {
+	t.Helper()
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-b", domain.Path{Rig: "millwright", Branch: "main", Host: domain.HostAuto})
+	for id, who := range map[string]string{"mw-b.1": holder, "mw-b.2": "mw@cloud1"} {
+		tracker.AddStory("mw-b", domain.Story{ID: id, Title: "story " + id})
+		if err := tracker.SetStoryMetadata(ctx, id, map[string]string{"host": "cloud1"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := tracker.ClaimAs(id, who, time.Time{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := tracker.SetStoryState(ctx, id, application.RunState, application.RunRunning, "the test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return tracker
+}
+
+// mw cloud down gives back a claim a Builder session holds as builder@<box>
+// as well as the dispatch's mw@<box>, names the lost attempt tooling (mw
+// cause), and says on the story that the box was destroyed (mw-gq6.1144).
+func TestMwCloudDownHandsBackEveryClaimOnTheBoxNamesTheCauseToolingAndSaysSoOnTheStory(t *testing.T) {
+	now := time.Date(2026, 11, 12, 20, 14, 0, 0, time.UTC)
+	tracker := aClaimedOnCloud1(t, "builder@cloud1")
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: []application.CloudBox{{Name: "cloud1", Up: now.Add(-3 * time.Hour)}}}}
+	text, err := application.CloudCheck{
+		Work: tracker, Stories: tracker, Provider: &apptest.FakeCloud{}, Book: book, Host: "desktop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}.Down(context.Background(), "cloud1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"mw-b.1", "mw-b.2"} {
+		if assignee, status := claimOf(t, tracker, id); assignee != "" || status != apptest.StatusOpen {
+			t.Errorf("expected %s handed back (open, unassigned), got %q %q", id, assignee, status)
+		}
+		if got := hostOf(t, tracker, id); got != domain.HostAuto {
+			t.Errorf("expected %s re-pathed to host auto, got %s", id, got)
+		}
+		if !strings.Contains(text, id) {
+			t.Errorf("expected the output to name %s as handed back:\n%s", id, text)
+		}
+		if got := tracker.Metadata(id)[application.CauseField]; got != application.CauseTooling {
+			t.Errorf("expected the attempt of %s named %s (mw cause), got %q", id, application.CauseTooling, got)
+		}
+		said := strings.Join(tracker.Comments(id), "\n")
+		if !strings.Contains(said, "cloud1") || !strings.Contains(said, "destroyed") || !strings.Contains(said, "mw cloud down") {
+			t.Errorf("expected a comment on %s saying cloud1 was destroyed by mw cloud down, got %q", id, said)
+		}
+	}
+}
+
+// --force looks at nothing on the box, and the comment on the story says its
+// work was not saved.
+func TestMwCloudDownForceSaysOnTheStoryThatItsWorkWasNotSaved(t *testing.T) {
+	now := time.Date(2026, 11, 12, 20, 14, 0, 0, time.UTC)
+	tracker := aClaimedOnCloud1(t, "builder@cloud1")
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: []application.CloudBox{{Name: "cloud1", Up: now.Add(-3 * time.Hour)}}}}
+	if _, err := (application.CloudCheck{
+		Work: tracker, Stories: tracker, Provider: &apptest.FakeCloud{}, Book: book, Host: "desktop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}).DownForce(context.Background(), "cloud1"); err != nil {
+		t.Fatal(err)
+	}
+	said := strings.Join(tracker.Comments("mw-b.1"), "\n")
+	if !strings.Contains(said, "not saved") {
+		t.Errorf("expected the comment to say the work was not saved, got %q", said)
+	}
+	if got := tracker.Metadata("mw-b.1")[application.CauseField]; got != application.CauseTooling {
+		t.Errorf("expected the attempt named %s, got %q", application.CauseTooling, got)
+	}
+}
+
+// The check's own destroy of an idle box saves a kept worktree and the comment
+// on its story says what was saved.
+func TestTheChecksOwnDestroySaysOnTheStoryWhatWasSavedFromTheBox(t *testing.T) {
+	r := aBoxWithWork(aheadTree)
+	tracker := aClaimedOnCloud1(t, "builder@cloud1")
+	tracker.AddStory("mw-b", domain.Story{ID: "mw-5r3p30.754", Title: "the kept one"})
+	if err := tracker.ClaimAs("mw-5r3p30.754", "builder@cloud1", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	r.check.Work, r.check.Stories = tracker, tracker
+	if _, err := r.check.Down(context.Background(), "cloud1"); err != nil {
+		t.Fatal(err)
+	}
+	said := strings.Join(tracker.Comments("mw-5r3p30.754"), "\n")
+	if !strings.Contains(said, application.BundleRecord("mw-5r3p30.754", 1)) {
+		t.Errorf("expected the comment to name the bundle saved, got %q", said)
+	}
+	if other := strings.Join(tracker.Comments("mw-b.1"), "\n"); strings.Contains(other, application.BundleRecord("mw-5r3p30.754", 1)) || !strings.Contains(other, "destroyed") {
+		t.Errorf("expected the other story's comment to say the box was destroyed, got %q", other)
+	}
+}
+
 func TestMwCloudDownHandsBackAClaimQueuedForABatch(t *testing.T) {
 	now := time.Date(2026, 10, 31, 2, 5, 0, 0, time.UTC)
 	tracker := queuedOnBox(t)

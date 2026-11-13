@@ -202,6 +202,8 @@ type CloudStories interface {
 	// ClearRunState takes a story's run state off it, for a claim given back
 	// whose session is gone with its box.
 	ClearRunState(ctx context.Context, id string) error
+	// CommentOnStory says on a story what was done to its claim.
+	CommentOnStory(ctx context.Context, id, text string) error
 }
 
 // CloudNotes is what the cloud check reads of the tracker's notes: a box's
@@ -789,6 +791,11 @@ type cloudPass struct {
 	err    error
 	// force destroys without salvage (mw cloud down --force).
 	force bool
+	// saved are the vault paths each story's work was saved to from a box this
+	// pass destroyed, and unsaved the reason a story's work was left on it
+	// (mw-gq6.1144): the comment on a story handed back says them.
+	saved   map[string][]string
+	unsaved map[string]string
 	// repathed are the boxes whose stories the down pass re-pathed this check.
 	repathed map[string]bool
 	// unread are the boxes whose note of a dispatch could not be read this
@@ -1635,7 +1642,7 @@ func (p *cloudPass) down(ctx context.Context, name, why string) bool {
 		}
 	}
 	if at < 0 {
-		p.repath(ctx, name)
+		p.repath(ctx, name, why)
 		return true
 	}
 	box := p.state.Boxes[at]
@@ -1679,7 +1686,7 @@ func (p *cloudPass) down(ctx context.Context, name, why string) bool {
 		}
 	}
 	p.keep(ctx, "down "+name)
-	p.repath(ctx, name)
+	p.repath(ctx, name, why)
 	return true
 }
 
@@ -1737,6 +1744,10 @@ func (p *cloudPass) salvage(ctx context.Context, box CloudBox, why string) bool 
 				return p.refuse(ctx, box, why, wt.Story, err)
 			}
 			// The month's cap wins: one try, then the box is destroyed.
+			if p.unsaved == nil {
+				p.unsaved = map[string]string{}
+			}
+			p.unsaved[wt.Story] = oneLine(err.Error())
 			lost = append(lost, fmt.Sprintf("story %s, branch %s at %s (%d commits never pushed, %d uncommitted paths): %s",
 				wt.Story, wt.Branch, wt.Head, wt.Ahead, len(wt.Uncommitted), oneLine(err.Error())))
 		}
@@ -1819,6 +1830,10 @@ func (p *cloudPass) saveWorktree(ctx context.Context, box CloudBox, wt CloudKept
 	}
 	p.setBox(box.Name, func(b *CloudBox) { b.Saved = append(b.Saved, key) })
 	p.dirty = "saved " + box.Name
+	if p.saved == nil {
+		p.saved = map[string][]string{}
+	}
+	p.saved[wt.Story] = append(p.saved[wt.Story], paths...)
 	p.move(ctx, fmt.Sprintf("saved %s from %s before it is destroyed: %s", wt.Story, box.Name, strings.Join(paths, ", ")))
 	return nil
 }
@@ -1895,7 +1910,7 @@ func (p *cloudPass) refuse(ctx context.Context, box CloudBox, why, story string,
 // dispatched, so it would wait for ever. A claimed story is left to its
 // claim. It says each story moved, as a cloud event; a story that cannot be
 // moved fails the check with its id, for the Mayor to re-path by hand.
-func (p *cloudPass) repath(ctx context.Context, name string) {
+func (p *cloudPass) repath(ctx context.Context, name, why string) {
 	if p.repathed == nil {
 		p.repathed = map[string]bool{}
 	}
@@ -1904,7 +1919,7 @@ func (p *cloudPass) repath(ctx context.Context, name string) {
 	if !ok {
 		return
 	}
-	p.handBack(ctx, stories, name)
+	p.handBack(ctx, stories, name, why)
 	p.repathFrom(ctx, stories, name)
 }
 
@@ -1918,11 +1933,13 @@ func (p *cloudPass) repath(ctx context.Context, name string) {
 // so that the next dispatch reads it as a fresh story. It says each story
 // handed back, as a cloud event; one that cannot be handed back fails the check
 // with its id.
-func (p *cloudPass) handBack(ctx context.Context, stories []StoryDetail, name string) {
+func (p *cloudPass) handBack(ctx context.Context, stories []StoryDetail, name, why string) {
 	var queued, others, stuck []string
 	for _, story := range stories {
 		status := strings.ToLower(strings.TrimSpace(story.Status))
-		if story.IsEpic || ClaimHost(story.Assignee) != name || status != StatusInProgress && status != StatusOpen {
+		// A claim is the dispatch's, mw@<box>, or a Builder session's,
+		// builder@<box>: both end with the box (mw-gq6.1144).
+		if story.IsEpic || !slices.Contains(boxHolders(name), story.Assignee) || status != StatusInProgress && status != StatusOpen {
 			continue
 		}
 		id := story.Story.ID
@@ -1948,6 +1965,7 @@ func (p *cloudPass) handBack(ctx context.Context, stories []StoryDetail, name st
 		} else {
 			others = append(others, id)
 		}
+		p.commentHandedBack(ctx, story, name, why, isQueued)
 	}
 	if len(queued) > 0 {
 		p.move(ctx, fmt.Sprintf("handed back %s from %s, queued for its batch with no session on the box, and re-pathed it to host=auto", strings.Join(queued, ", "), name))
@@ -1957,6 +1975,54 @@ func (p *cloudPass) handBack(ctx context.Context, stories []StoryDetail, name st
 	}
 	if len(stuck) > 0 {
 		p.fail(fmt.Errorf("could not hand back %s from %s: release the claim by hand and set host=auto with %sauto", strings.Join(stuck, ", "), name, RepathHint))
+	}
+}
+
+// commentHandedBack says on a story handed back that its box was destroyed, by
+// what, and what was saved of its work, as mw retry's comment does for a claim
+// it gives back; a story that was not queued for its batch also has its
+// attempt named tooling (mw cause), the box's loss being no fault of its own,
+// so that it is not counted against its attempts. A part that cannot be
+// written is a line in the log, not a failure: the claim is already given back.
+func (p *cloudPass) commentHandedBack(ctx context.Context, story StoryDetail, box, why string, queued bool) {
+	id := story.Story.ID
+	attempt := max(1, story.Attempts)
+	named := ""
+	if !queued {
+		causes := map[int]string{}
+		for at, class := range story.AttemptCauses {
+			causes[at] = class
+		}
+		causes[attempt] = CauseTooling
+		fields := map[string]string{
+			CauseField:         CauseTooling,
+			CauseWhyField:      fmt.Sprintf("cloud box %s was destroyed (%s) while its session worked the story", box, why),
+			AttemptCausesField: attemptCausesText(causes),
+		}
+		if err := p.check.Stories.SetStoryMetadata(ctx, id, fields); err != nil {
+			p.check.say("%s could not be named %s (mw cause): %v", id, CauseTooling, oneLine(err.Error()))
+			named = fmt.Sprintf(" Attempt %d could not be named %s (mw cause): %v.", attempt, CauseTooling, oneLine(err.Error()))
+		} else {
+			named = fmt.Sprintf(" Attempt %d is named %s (mw cause), not the story's own: it is not counted against its attempts.", attempt, CauseTooling)
+		}
+	}
+	saved := " Nothing further on the box needed saving: what the vault already holds of its work is all there is."
+	switch {
+	case p.force:
+		saved = " The box's work was not saved (mw cloud down --force looks at nothing on it)."
+	case p.unsaved[id] != "":
+		saved = " Its work was not saved: " + p.unsaved[id] + "."
+	case len(p.saved[id]) > 0:
+		saved = " Its work was saved into the vault before the box was destroyed: " + strings.Join(p.saved[id], ", ") + "."
+	}
+	kept := "its run state cleared, and the story re-pathed to host=auto"
+	if queued {
+		kept = "its queued run state kept for the batch to land, and the story re-pathed to host=auto"
+	}
+	text := fmt.Sprintf("mw cloud down: cloud box %s was destroyed (%s), and the session working this story with it. The claim held by %s is released, %s.%s%s",
+		box, why, story.Assignee, kept, named, saved)
+	if err := p.check.Stories.CommentOnStory(ctx, id, text); err != nil {
+		p.check.say("the hand-back of %s could not be commented on: %v", id, oneLine(err.Error()))
 	}
 }
 
