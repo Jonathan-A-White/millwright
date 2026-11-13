@@ -550,10 +550,15 @@ var (
 // foundCheckCommand is the command a finding's AC names that is cheap and
 // deterministic enough to run on main before the bug is filed, or empty: the
 // words before 'passes' (or a backticked span of them), and only make lint, go
-// test with -run and no './...', or a script under scripts/. Anything with a
-// quote, pipe, redirect or the like is not run, nor is a whole suite.
+// test with -run and no './...', or a script under scripts/, or a grep read by
+// its exit (foundGrepCommand). Anything with a pipe, redirect or the like is not
+// run, nor is a whole suite (make test, go test ./...): it takes minutes under
+// the host's gate lock for one finding, so such a finding is filed as before.
 func foundCheckCommand(ac string) string {
 	ac = foundNumberedPattern.ReplaceAllString(strings.TrimSpace(ac), "")
+	if strings.HasPrefix(ac, "grep ") || strings.HasPrefix(ac, "`grep ") {
+		return foundGrepCommand(ac)
+	}
 	at := foundPassWords.FindStringIndex(ac)
 	if at == nil {
 		return ""
@@ -577,6 +582,103 @@ func foundCheckCommand(ac string) string {
 		return ""
 	}
 	return strings.Join(words, " ")
+}
+
+var (
+	foundGrepFlag     = regexp.MustCompile(`^-[nciqEFwxrRlvH]+$`)
+	foundGrepVerb     = regexp.MustCompile(`^(?:prints|shows|finds|lists|names|matches|exits|succeeds|passes|is)$`)
+	foundGrepMatches  = regexp.MustCompile(`(?i)^(?:(?:prints|shows|finds|lists)\s+(?:a|an|at least one|one or more)\s+(?:line|lines|match|matches|row|rows)\b|exits\s+(?:0|zero)\b|succeeds\b|passes\b)`)
+	foundGrepNoMatch  = regexp.MustCompile(`(?i)^(?:(?:prints|finds|shows|lists|matches)\s+(?:nothing|no\s+(?:lines?|matches|match|output))\b|is empty\b|exits\s+1\b)`)
+	foundGrepUnsafeDQ = "$`\\!\"'"
+)
+
+// foundGrepCommand is the command line of an AC that is a grep and says what its
+// exit means, or empty: 'grep -n "text" docs/a.md prints a line' (a match is the
+// pass: exit 0) or '... prints nothing' (no match is the pass, and a grep that
+// could not read its file, exit 2, is not). The pattern is one quoted or plain
+// word with none of the shell's own characters, written back in single quotes,
+// the flags only those that read, and the files plain relative paths; a pipe, a
+// redirect, a variable or a result a person must read ('prints only lines that
+// say') is not run.
+func foundGrepCommand(ac string) string {
+	if strings.HasPrefix(ac, "`") {
+		end := strings.Index(ac[1:], "`")
+		if end < 0 {
+			return ""
+		}
+		ac = ac[1:1+end] + " " + strings.TrimSpace(ac[end+2:])
+	}
+	var words []string
+	rest := strings.TrimSpace(ac)
+	for rest != "" {
+		var word string
+		quoted := false
+		switch rest[0] {
+		case '\'', '"':
+			end := strings.IndexByte(rest[1:], rest[0])
+			if end < 0 {
+				return ""
+			}
+			word, quoted = rest[1:1+end], true
+			if rest[0] == '"' && strings.ContainsAny(word, foundGrepUnsafeDQ) || strings.ContainsAny(word, "'\x00\n\r\t") {
+				return ""
+			}
+			rest = strings.TrimSpace(rest[end+2:])
+		default:
+			word, _, _ = strings.Cut(rest, " ")
+			if len(words) > 0 && foundGrepVerb.MatchString(word) {
+				return foundGrepRead(words, rest)
+			}
+			if !foundSafeWord.MatchString(word) || strings.Contains(word, "$") {
+				return ""
+			}
+			rest = strings.TrimSpace(rest[len(word):])
+		}
+		if quoted {
+			word = "\x00" + word
+		}
+		words = append(words, word)
+	}
+	return ""
+}
+
+// foundGrepRead is foundGrepCommand once its words and the phrase after them are
+// split: a quoted word begins with a NUL here, so that it is never read as a flag.
+func foundGrepRead(words []string, phrase string) string {
+	if words[0] != "grep" {
+		return ""
+	}
+	var flags, files []string
+	pattern, have := "", false
+	for _, word := range words[1:] {
+		quoted := strings.HasPrefix(word, "\x00")
+		word = strings.TrimPrefix(word, "\x00")
+		switch {
+		case !have && !quoted && foundGrepFlag.MatchString(word):
+			flags = append(flags, word)
+		case !have:
+			if strings.HasPrefix(word, "-") || word == "" {
+				return ""
+			}
+			pattern, have = word, true
+		default:
+			if quoted || strings.HasPrefix(word, "/") || strings.HasPrefix(word, "-") || word == ".." || strings.Contains(word, "..") {
+				return ""
+			}
+			files = append(files, word)
+		}
+	}
+	if !have || len(files) == 0 {
+		return ""
+	}
+	line := strings.Join(append(append([]string{"grep"}, flags...), "'"+pattern+"'"), " ") + " " + strings.Join(files, " ")
+	switch {
+	case foundGrepMatches.MatchString(phrase):
+		return line
+	case foundGrepNoMatch.MatchString(phrase):
+		return line + "; test $? -eq 1"
+	}
+	return ""
 }
 
 func foundScriptWord(word string) bool {
