@@ -2400,6 +2400,7 @@ func (f *FakeTracker) now() time.Time {
 	if f.Clock != nil {
 		return f.Clock()
 	}
+	//mw:realclock the default clock, when no Now is injected: the host's time
 	return time.Now()
 }
 

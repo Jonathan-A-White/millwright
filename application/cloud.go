@@ -766,6 +766,7 @@ func (c CloudCheck) down(ctx context.Context, name string, force bool) (string, 
 
 func (c CloudCheck) now() time.Time {
 	if c.Now == nil {
+		//mw:realclock the default clock, when no Now is injected: the host's time
 		return time.Now().UTC()
 	}
 	return c.Now().UTC()

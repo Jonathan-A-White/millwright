@@ -1413,6 +1413,7 @@ func (b *BatchLandings) now() time.Time {
 	if b.Now != nil {
 		return b.Now().UTC()
 	}
+	//mw:realclock the default clock, when no Now is injected: the host's time
 	return time.Now().UTC()
 }
 

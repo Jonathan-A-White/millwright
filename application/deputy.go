@@ -271,6 +271,7 @@ func (d Deputy) openWindow(ctx context.Context, name string) (ReapWindow, bool) 
 
 func (d Deputy) now() time.Time {
 	if d.Now == nil {
+		//mw:realclock the default clock, when no Now is injected: the host's time
 		return time.Now()
 	}
 	return d.Now()

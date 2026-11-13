@@ -907,6 +907,7 @@ func (d Doctor) leaveVerdict(ctx context.Context, report DoctorReport) {
 // now is the clock episodes and log lines are read and dated by.
 func (d Doctor) now() time.Time {
 	if d.Now == nil {
+		//mw:realclock the default clock, when no Now is injected: the host's time
 		return time.Now()
 	}
 	return d.Now()
@@ -1077,6 +1078,7 @@ type staleLanding struct {
 
 // find lists the landing directories older than a day, each judged by Trees.
 func (c *StaleLandingsCheck) find(ctx context.Context) []staleLanding {
+	//mw:realclock the default clock, taken before an injected Now replaces it
 	now := time.Now()
 	if c.Now != nil {
 		now = c.Now()
@@ -1241,6 +1243,7 @@ func (c *NoSessionClaimsCheck) now() time.Time {
 	if c.Now != nil {
 		return c.Now()
 	}
+	//mw:realclock the default clock, when no Now is injected: the host's time
 	return time.Now()
 }
 

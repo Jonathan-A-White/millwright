@@ -540,6 +540,7 @@ func (s *EventSpring) say(j SpringJob, err error) {
 
 func (s *EventSpring) now() time.Time {
 	if s.Now == nil {
+		//mw:realclock the default clock, when no Now is injected: the host's time
 		return time.Now()
 	}
 	return s.Now()

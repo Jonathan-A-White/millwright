@@ -391,6 +391,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	if r.Tracker == nil || r.Files == nil {
 		return FactoryReportResult{}, fmt.Errorf("reporting quality: it needs the tracker and the vault")
 	}
+	//mw:realclock the default clock, taken before an injected Now replaces it
 	now := time.Now()
 	if r.Now != nil {
 		now = r.Now()

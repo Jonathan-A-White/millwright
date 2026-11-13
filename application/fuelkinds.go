@@ -44,6 +44,7 @@ type fuelLog struct {
 
 // Run prints a line for each kind that has a pass in the window.
 func (f FuelByKind) Run(ctx context.Context) error {
+	//mw:realclock the default clock, taken before an injected Now replaces it
 	now := time.Now()
 	if f.Now != nil {
 		now = f.Now()

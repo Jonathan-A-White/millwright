@@ -173,6 +173,7 @@ func (c ChainStamp) say(format string, args ...any) {
 
 func (c ChainStamp) now() time.Time {
 	if c.Now == nil {
+		//mw:realclock the default clock, when no Now is injected: the host's time
 		return time.Now()
 	}
 	return c.Now()

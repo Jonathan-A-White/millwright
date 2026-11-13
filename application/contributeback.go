@@ -82,6 +82,7 @@ func (c *ContributeBack) now() time.Time {
 	if c.Now != nil {
 		return c.Now().UTC()
 	}
+	//mw:realclock the default clock, when no Now is injected: the host's time
 	return time.Now().UTC()
 }
 
