@@ -137,9 +137,9 @@ func TestTestCallersAreTheTrackedTestFilesThatNameWhatAFileDeclares(t *testing.T
 		named []string
 		want  int
 	}{
-		{[]string{"src/screens/Settings.tsx"}, 3},
+		{[]string{"src/screens/Settings.tsx"}, 1},
 		{[]string{"src/reader.go"}, 1},
-		{[]string{"src/screens/Settings.tsx", "src/reader.go"}, 4},
+		{[]string{"src/screens/Settings.tsx", "src/reader.go"}, 2},
 		{[]string{"./src/reader.go", "src/reader.go"}, 1},
 		{[]string{"src/gone.go"}, 0},
 	} {
@@ -150,6 +150,38 @@ func TestTestCallersAreTheTrackedTestFilesThatNameWhatAFileDeclares(t *testing.T
 	}
 	if _, err := files.TestCallers(t.TempDir(), []string{"src/reader.go"}); err == nil {
 		t.Error("a directory that is no checkout was searched without an error")
+	}
+}
+
+func TestATypeScriptFileIsCalledOnlyByTheTestsThatImportIt(t *testing.T) {
+	dir := trackedRepo(t, map[string]string{
+		"src/Reader.tsx":              "export function Reader() {}\nexport const ReaderProps = 1\n",
+		"src/util.js":                 "export function helper() {}\n",
+		"src/lib.mjs":                 "export const lib = 1\n",
+		"tests/words.test.tsx":        "// Reader and ReaderProps\nit('renders the Reader', () => { const s = 'ReaderProps' })\n",
+		"tests/relative.test.tsx":     "import { Reader } from '../src/Reader'\n",
+		"tests/aliased.test.tsx":      "import { Reader } from \"@/Reader\"\n",
+		"tests/ext.test.ts":           "import { Reader } from '../src/Reader.tsx'\n",
+		"tests/lazy.test.ts":          "const m = await import('../src/Reader')\n",
+		"tests/require.test.js":       "const { helper } = require('../src/util')\n",
+		"tests/mjs.test.js":           "import { lib } from '../src/lib.mjs'\n",
+		"tests/other.test.tsx":        "import { Readers } from '../src/Readers'\nimport x from '../src/Reader.css'\n",
+		"tests/helper-words.test.tsx": "helper lib\n",
+	})
+	files := rig.Files{}
+	for _, c := range []struct {
+		named []string
+		want  int
+	}{
+		{[]string{"src/Reader.tsx"}, 4},
+		{[]string{"src/util.js"}, 1},
+		{[]string{"src/lib.mjs"}, 1},
+		{[]string{"src/Reader.tsx", "src/util.js", "src/lib.mjs"}, 6},
+	} {
+		got, err := files.TestCallers(dir, c.named)
+		if err != nil || got != c.want {
+			t.Errorf("TestCallers(%q) = %d, %v; want %d", c.named, got, err, c.want)
+		}
 	}
 }
 

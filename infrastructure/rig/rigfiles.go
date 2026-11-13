@@ -122,13 +122,16 @@ const callerSearchLimit = 20 * time.Second
 //
 // What a file declares is, for a Go file, its top-level exported identifiers
 // (func, type, var and const; a method is reached through its type), and for a
-// TS or JS file its exported names and its import path, the path without
-// extension. A test file counts when it calls one of them:
+// TS or JS file its import path, the path without extension. A test file counts
+// when it calls one of them:
 //   - Go: it says pkg.Name, pkg being the declaring file's package, or it is in
 //     the same directory (the same package) and says Name not after a dot, so
 //     that a field called Status is not a call of a type called Status;
-//   - TS or JS: it says an exported name as a whole word, or imports the path
-//     (from, require or import() of '.../<stem>').
+//   - TS or JS: it imports the path (from, require or import() of
+//     '.../<stem>', by any relative or aliased path). The file's exported names
+//     as words are not looked for: a name like Reader or Settings is said in
+//     strings and comments of hundreds of tests that never import the file
+//     (mw-6ww.175.4).
 //
 // The file's base name as a word is not looked for: a stem like status or
 // doctor is in hundreds of tests that never call the file. A named file that is
@@ -162,8 +165,8 @@ func (Files) TestCallers(rigDir string, named []string) (int, error) {
 
 // callerMatcher says whether a test file calls what a story's files declare.
 type callerMatcher struct {
-	// anywhere matches in any test file: a TS or JS name or import, and a Go
-	// name qualified by its package.
+	// anywhere matches in any test file: a TS or JS import, and a Go name
+	// qualified by its package.
 	anywhere *regexp.Regexp
 	// sameDir matches in the test files of one directory: the bare Go names of
 	// the files declared there.
@@ -191,7 +194,7 @@ func newCallerMatcher(rigDir string, named []string) callerMatcher {
 			anywhere = append(anywhere, `\b(?:`+names+`)\b`)
 		}
 		if d.importStem != "" {
-			anywhere = append(anywhere, `(?:from|require\(|import\()\s*['"](?:[^'"\n]*/)?`+regexp.QuoteMeta(d.importStem)+`(?:\.[A-Za-z]+)?['"]`)
+			anywhere = append(anywhere, `(?:from|require\(|import\()\s*['"](?:[^'"\n]*/)?`+regexp.QuoteMeta(d.importStem)+`(?:\.[cm]?[jt]sx?)?['"]`)
 		}
 	}
 	m := callerMatcher{sameDir: map[string]*regexp.Regexp{}}
@@ -212,16 +215,9 @@ func (m callerMatcher) calls(dir string, text []byte) bool {
 	return same != nil && same.Match(text)
 }
 
-// What a TS or JS file exports: export function, class, const, let, var, type,
-// interface and enum, and the names in export { ... }.
-var (
-	exportedDeclaration = regexp.MustCompile(`(?m)^\s*export\s+(?:declare\s+)?(?:default\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\*?|class|const|let|var|type|interface|enum)\s+([A-Za-z_$][\w$]*)`)
-	exportedList        = regexp.MustCompile(`(?m)^\s*export\s*(?:type\s*)?\{([^}]*)\}`)
-)
-
-// declared is what a file offers its callers: its exported names, the package
-// they are qualified by (a Go file) and the stem it is imported by (a TS or JS
-// file).
+// declared is what a file offers its callers: its exported names and the
+// package they are qualified by (a Go file), or the stem it is imported by (a
+// TS or JS file).
 type declared struct {
 	names      []string
 	pkg        string
@@ -272,23 +268,10 @@ func declaredIn(rigDir, rel string) declared {
 		if strings.HasSuffix(stem, ".test") || strings.HasSuffix(stem, ".spec") {
 			return declared{}
 		}
-		text, err := os.ReadFile(file)
-		if err != nil {
+		if info, err := os.Stat(file); err != nil || info.IsDir() {
 			return declared{}
 		}
-		d := declared{importStem: stem}
-		for _, m := range exportedDeclaration.FindAllSubmatch(text, -1) {
-			d.names = append(d.names, string(m[1]))
-		}
-		for _, m := range exportedList.FindAllSubmatch(text, -1) {
-			for _, item := range strings.Split(string(m[1]), ",") {
-				fields := strings.Fields(strings.TrimPrefix(strings.TrimSpace(item), "type "))
-				if len(fields) > 0 {
-					d.names = append(d.names, fields[len(fields)-1])
-				}
-			}
-		}
-		return d
+		return declared{importStem: stem}
 	}
 	return declared{}
 }

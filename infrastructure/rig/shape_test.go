@@ -34,8 +34,8 @@ func TestShapeCountsEachFilesTestCallersAsFilesDoesForThatFileAlone(t *testing.T
 			t.Errorf("TestCallersOf[%s] = %d; TestCallers = %d, %v", file, got[file], want, err)
 		}
 	}
-	if got["src/reader.go"] != 2 || got["src/screens/Settings.tsx"] != 2 {
-		t.Errorf("counts %v, want reader.go 2 and Settings.tsx 2", got)
+	if got["src/reader.go"] != 2 || got["src/screens/Settings.tsx"] != 1 {
+		t.Errorf("counts %v, want reader.go 2 and Settings.tsx 1", got)
 	}
 	if _, err := (rig.Shape{}).TestCallersOf(t.TempDir(), named); err == nil {
 		t.Error("a directory that is no checkout was searched without an error")

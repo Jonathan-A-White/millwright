@@ -3,7 +3,7 @@ Feature: A story is sized by the tests that call its files
   they name, not by the tests that call those screens. When a story names files,
   `mw file` and `mw path set` count the rig's test files that name something
   the files declare (a Go file's exported functions, types, variables and
-  constants; a TS file's exports and import path), not the base name of the file
+  constants; a TS or JS file's import path), not the base name of the file
   as a word, which a name like status would find in prose, say it as 'test callers: N for size S (allows
   M)', and warn when N is more than the size allows: XS 5, S 10, M 20, L 35,
   XL 50. `mw file --check` then fails, unless the story says why not, as
