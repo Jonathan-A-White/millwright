@@ -28,6 +28,22 @@ const (
 // the VPS is host.vps.last_sync.
 func LastSyncKey(host string) string { return "host." + host + ".last_sync" }
 
+// SyncOfAnOlderBox says whether a last-sync time read under host's name is one
+// a box written before the box now holding the name was made: the cloud's book
+// holds a box of that name asked for after the sync, so the sync is the
+// destroyed box's, whose note stays in the vault under the name a new box
+// takes (mw-gq6.1145). The box's start is its Up, the same bound seeDispatch
+// holds a first dispatch to. A name the book holds no box of, or a sync at or
+// after the box's start, is not one.
+func (s CloudState) SyncOfAnOlderBox(host string, at time.Time) bool {
+	for _, box := range s.Boxes {
+		if box.Name == host {
+			return at.Before(box.Up)
+		}
+	}
+	return false
+}
+
 // MwCommitKey is where a host leaves the short commit its mw was built from, on
 // every sync, beside LastSyncKey: mw status reads it for each other host and says
 // when it is not main's (mw-gq6.521).

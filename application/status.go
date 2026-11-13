@@ -2038,6 +2038,15 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 		notes[i] = noted{read(LastSyncKey(host)), read(SyncHaltKey(host)), read(TicksKey(host)), read(MwCommitKey(host)), read(DoctorVerdictKey(host)), read(HostPassedKey(host)), read(GiveWayKey(host))}
 	}
 
+	// A box made again under a destroyed box's name finds that box's last sync
+	// note in the vault: a sync from before the new box was made is the old
+	// box's, and is read as none (mw-gq6.1145). A book that cannot be read
+	// leaves every sync as it was.
+	var book CloudState
+	if s.Cloud != nil {
+		book, _ = s.Cloud.Read(ctx)
+	}
+
 	work := make([]HostWork, 0, len(hosts))
 	for i, host := range hosts {
 		if IsRetired(s.Retired, host) {
@@ -2060,8 +2069,12 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 		}
 		if held.Said != "" {
 			if at, err := time.Parse(LastSyncFormat, held.Said); err == nil {
-				held.LastSync = at
-				held.Silent = now.Sub(at)
+				if book.SyncOfAnOlderBox(host, at) {
+					held.Said = ""
+				} else {
+					held.LastSync = at
+					held.Silent = now.Sub(at)
+				}
 			}
 		}
 		// A host is asleep on its sync age only when nothing else of it is newer

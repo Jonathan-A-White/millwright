@@ -234,7 +234,7 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 		}
 	}
 
-	s := Status{Tracker: n.Tracker, Notes: n.Notes, Host: n.Host, Now: n.Now, Retired: n.Retired}
+	s := Status{Tracker: n.Tracker, Notes: n.Notes, Host: n.Host, Now: n.Now, Retired: n.Retired, Cloud: n.CloudBook, CloudPlan: n.CloudPlan}
 	work, err := s.Tracker.WorkInHand(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reading what is in hand: %w", err)
