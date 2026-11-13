@@ -26,11 +26,6 @@ const (
 // controlWords are the words, in the order the docs name them.
 var controlWords = []string{ControlCancel, ControlPauseHost, ControlResumeHost, ControlCap, ControlPriority}
 
-// ControlWords lists every word a control event may carry.
-func ControlWords() []string {
-	return append([]string(nil), controlWords...)
-}
-
 // Control is what a control event's detail says: its Word, and the Host and N
 // the word takes.
 type Control struct {

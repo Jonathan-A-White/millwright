@@ -87,9 +87,6 @@ type MillhandTickReport struct {
 	Woke bool
 }
 
-// String is the report as it is printed: the one line.
-func (r MillhandTickReport) String() string { return r.Line + "\n" }
-
 // MillhandTick is what the routine timer runs. It spends no tokens unless
 // something needs the Millhand:
 //

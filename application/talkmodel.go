@@ -96,9 +96,6 @@ type TalkModelReport struct {
 	Respawn string
 }
 
-// String is the report as `mw talk model` prints it: the line for the Mayor.
-func (r TalkModelReport) String() string { return r.Respawn }
-
 // Run speaks the switch, logs it and prints the respawn line. A model it does
 // not switch to is refused before anything is said. If the answer cannot be
 // sent, that is logged and returned, and no respawn line is printed.
