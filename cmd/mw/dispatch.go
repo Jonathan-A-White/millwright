@@ -414,6 +414,7 @@ func newDispatchCmd() *cobra.Command {
 				MaxAttempts:   maxAttempts,
 				TestersPerRig: testers,
 				Mailbox:       gateway,
+				PushWait:      closePushWait(),
 				VaultDir:      dir,
 				Load:          hostload.Proc{},
 				Room:          application.RoomLimits{LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB},

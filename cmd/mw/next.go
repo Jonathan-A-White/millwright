@@ -212,6 +212,7 @@ func newNextCmd() *cobra.Command {
 					MaxAttempts:   maxAttempts,
 					TestersPerRig: testers,
 					Mailbox:       gateway,
+					PushWait:      closePushWait(),
 					Load:          hostload.Proc{},
 					Rigs:          rigs,
 					Changes:       worktrees,

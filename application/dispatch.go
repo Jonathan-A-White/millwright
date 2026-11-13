@@ -191,6 +191,13 @@ type Dispatch struct {
 	// Mailbox tells nobody: the story is still marked and commented on.
 	Mailbox Mailbox
 
+	// PushWait and RetryWait are how a close of a story that met a passing fault
+	// is tried again (CloseRetry, mw-gq6.1133): PushWait is the base of the wait
+	// between the tries, zero waiting no time, and a nil RetryWait is a real
+	// wait. A close lost every try is mailed to the Mayor through Mailbox.
+	PushWait  time.Duration
+	RetryWait func(ctx context.Context, d time.Duration) error
+
 	// VaultDir is the vault's directory, named in the mail that says the vault
 	// holds uncommitted changes, so its fix is a command to paste. Empty names
 	// no directory: the fix is run in the vault.
@@ -1563,7 +1570,7 @@ func (d Dispatch) recheckBug(ctx context.Context, detail StoryDetail, path domai
 		return fmt.Sprintf("re-run on main first: %s (%s) still fails at %s", check, check.Source, short(found.Sha)), false
 	}
 	one := FixedOnMain{StoryID: id, Spec: check.String(), Sha: found.Sha, Tests: found.Tests}
-	if err := d.Tracker.CloseStory(ctx, id, one.reason()); err != nil {
+	if err := d.closeStory(ctx, "closing a bug found fixed on main", id, one.reason()); err != nil {
 		said := fmt.Sprintf("%s passes on main but the story could not be closed: %v", check, oneLine(err.Error()))
 		d.noteRecheckSkip(ctx, report, id, said)
 		return said, false
@@ -1576,6 +1583,17 @@ func (d Dispatch) recheckBug(ctx context.Context, detail StoryDetail, path domai
 	}
 	report.FixedOnMain = append(report.FixedOnMain, one)
 	return "", true
+}
+
+// closeStory closes the story id the way mw next closes one (CloseRetry,
+// mw-gq6.1133): a passing fault is waited out and tried again, a close bd was
+// unsure of is read first, and a close lost every try is mailed to the Mayor
+// once with how many times it was tried. doing names what the dispatch was
+// doing, for that mail. An error is the last try's.
+func (d Dispatch) closeStory(ctx context.Context, doing, id, reason string) error {
+	closer := CloseRetry{Close: d.Tracker.CloseStory, Show: d.Tracker.ShowStory, Host: d.Host,
+		PushWait: d.PushWait, RetryWait: d.RetryWait, Mailbox: d.Mailbox, Err: d.Out}
+	return closer.CloseStory(ctx, "mw dispatch", doing, id, reason)
 }
 
 // gateBusy is why a suite bug was not re-run: the host's gate lock was not to be
@@ -2838,7 +2856,7 @@ func (d Dispatch) closeLanded(ctx context.Context, detail StoryDetail, session s
 				"%s: the demo landed already (%s), but it could not be held: %v", id, found.By, err))
 			return false
 		}
-	} else if err := d.Tracker.CloseStory(ctx, id, outcome); err != nil {
+	} else if err := d.closeStory(ctx, "closing a story found landed already", id, outcome); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
 			"%s: it landed already (%s), but the story could not be closed, so its claim was kept: %v",
 			id, found.By, err))
