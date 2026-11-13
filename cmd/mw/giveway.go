@@ -232,9 +232,9 @@ func newGiveWayCmd() *cobra.Command {
 			"--session <name> (repeatable) on `on` and `off` limits them to those tmux sessions and leaves the marker and the\n" +
 			"gate alone: how to try it on a busy host. On the HOME host (the one that serves the Mayor and the beads) `on`\n" +
 			"without --session is REFUSED with one line: the home never gives way.\n\n" +
-				"Every verb first gives mw the environment of a login shell it may not have been started with (the Windows tasks run\n" +
-				"wsl.exe --exec): ~/.local/bin and the standard directories on PATH, after what PATH names, and the names in\n" +
-				"~/.config/mw/beads.env that the environment does not set.",
+			"Every verb first gives mw the environment of a login shell it may not have been started with (the Windows tasks run\n" +
+			"wsl.exe --exec): ~/.local/bin and the standard directories on PATH, after what PATH names, and the names in\n" +
+			"~/.config/mw/beads.env that the environment does not set.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// The Windows tasks run this with no login environment (wsl.exe --exec):
