@@ -169,7 +169,7 @@ func (p *cloudPass) shutGate(ctx context.Context, name, why string) error {
 // note says when it does not say ok. A host that is no box has no gate, and a
 // dispatch with no notes to read reads none.
 func (d Dispatch) boxHeld(ctx context.Context) string {
-	if d.Memory == nil || !(CloudPlan{}).isBox(d.Host) {
+	if d.Memory == nil || !d.CloudPlan.isBox(d.Host) {
 		return ""
 	}
 	said, err := d.Memory.Note(ctx, BoxGateKey(d.Host))
