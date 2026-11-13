@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 )
 
 // promptClock stamps the facts mw prompt run reads against. A test fixes it.
@@ -148,8 +149,12 @@ func newPromptRunCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			retired, err := config.RetiredHosts()
+			if err != nil {
+				return err
+			}
 			return application.PromptRun{
-				Prompts: backend, Tracker: gateway, Notes: gateway, Signs: posternSigns(), Host: host,
+				Prompts: backend, Tracker: gateway, Notes: gateway, Signs: posternSigns(), Host: host, Retired: retired,
 				Now: promptClock, Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
 			}.Run(cmd.Context(), args[0], args[1:])
 		},

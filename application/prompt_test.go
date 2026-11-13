@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -119,5 +120,28 @@ func TestPromptSaveRefusesTwoFreeTextOptions(t *testing.T) {
 		Name: "x", Summary: "x", Body: "b", Options: []string{"text:text:required"},
 	}); err != nil {
 		t.Fatalf("expected one free-text option saved: %v", err)
+	}
+}
+
+// A host the Governor retired (retired_hosts) is no host the view behind a
+// prompt's facts lists, though its old sync note still names it (mw-gq6.1192).
+func TestThePromptViewLeavesARetiredHostOut(t *testing.T) {
+	tracker := aHostSyncedLongAgoHoldingAClaim(t)
+	syncedAt(t, tracker, "laptop", 0)
+	run := application.PromptRun{
+		Tracker: tracker, Notes: tracker, Host: "laptop", Retired: []string{"cloud2"},
+		Now: func() time.Time { return statusNow },
+	}
+	doc, err := run.View().Build(context.Background())
+	if err != nil {
+		t.Fatalf("building the view: %v", err)
+	}
+	for _, h := range doc.Hosts {
+		if h.Name == "cloud2" {
+			t.Fatalf("expected no retired host in the prompt's view, got %+v", doc.Hosts)
+		}
+	}
+	if len(doc.Hosts) != 1 || doc.Hosts[0].Name != "laptop" {
+		t.Fatalf("expected the live laptop to stay listed, got %+v", doc.Hosts)
 	}
 }
