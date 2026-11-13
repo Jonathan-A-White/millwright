@@ -408,6 +408,23 @@ type CloudPlan struct {
 	// event and a line under DAMPERS ([cloud] slow_make_minutes); zero is
 	// DefaultCloudMakeSlow.
 	MakeSlow time.Duration
+	// NoDispatch is how long after its make a box may go with no dispatch of
+	// its own reaching the beads server before the check destroys it ([cloud]
+	// no_dispatch_minutes); zero is DefaultCloudNoDispatch (mw-gq6.1143).
+	NoDispatch time.Duration
+}
+
+// DefaultCloudNoDispatch is how long a box made may go with no dispatch before
+// the check destroys it, when the plan does not say: past CloudDispatchWait,
+// after which the book has already said the box is up, not dispatching.
+const DefaultCloudNoDispatch = 30 * time.Minute
+
+// NoDispatchLimit is how long after its make a box may go with no dispatch.
+func (p CloudPlan) NoDispatchLimit() time.Duration {
+	if p.NoDispatch <= 0 {
+		return DefaultCloudNoDispatch
+	}
+	return p.NoDispatch
 }
 
 // DefaultCloudMakeSlow is how long a make may run before it is called slow,
@@ -633,6 +650,7 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 	p.dropStale(ctx)
 	p.seeSlowMakes(ctx)
 	p.seeDispatch(ctx)
+	p.dropUndispatched(ctx)
 	p.markIdle(work)
 	p.setCaps(ctx)
 	p.setPaces(ctx)
@@ -752,6 +770,9 @@ type cloudPass struct {
 	force bool
 	// repathed are the boxes whose stories the down pass re-pathed this check.
 	repathed map[string]bool
+	// unread are the boxes whose note of a dispatch could not be read this
+	// check: they are not judged to have none.
+	unread map[string]bool
 }
 
 func (p *cloudPass) fail(err error) {
@@ -1120,6 +1141,10 @@ func (p *cloudPass) seeDispatch(ctx context.Context) {
 		said, err := p.check.Notes.Note(ctx, LastSyncKey(box.Name))
 		if err != nil {
 			p.check.say("whether %s has dispatched could not be read: %v", box.Name, err)
+			if p.unread == nil {
+				p.unread = map[string]bool{}
+			}
+			p.unread[box.Name] = true
 			continue
 		}
 		said = strings.TrimSpace(said)
@@ -1147,6 +1172,65 @@ func (p *cloudPass) seeDispatch(ctx context.Context) {
 		p.move(ctx, box.Name+" up, not dispatching: "+why)
 		p.dirty = box.Name + " not dispatching"
 	}
+}
+
+// dropUndispatched destroys each box made Plan.NoDispatchLimit ago or more
+// whose first dispatch has not reached the beads server, and says why in the
+// cloud event. A box that never dispatches takes no story and is billed all the
+// same: the one seen was made without an address on the hub, so the home could
+// neither set its pace nor ask it anything, and a refused teardown (its
+// worktrees could not be asked) kept it up and billed (mw-gq6.1143). A
+// replacement may be made, the same check, when stories still wait. It needs
+// Notes, as seeDispatch does: without them no box is known to have dispatched.
+func (p *cloudPass) dropUndispatched(ctx context.Context) {
+	if p.check.Notes == nil {
+		return
+	}
+	limit := p.check.Plan.NoDispatchLimit()
+	for _, box := range append([]CloudBox(nil), p.state.Boxes...) {
+		if box.Making || box.Restoring || !box.Dispatched.IsZero() || p.unread[box.Name] || p.now.Sub(box.made()) < limit {
+			continue
+		}
+		why := fmt.Sprintf("no dispatch of %s has reached the beads server in %s since it was made", box.Name, Clock(p.now.Sub(box.made())))
+		if _, err := p.check.Provider.Address(ctx, box.Name); err != nil && noHubAddress(err) {
+			why += ": it is not a peer of the hub, it has no address"
+		}
+		p.down(ctx, box.Name, why)
+	}
+}
+
+// noHubAddress says err is the provider's word that the box is not a peer of the
+// hub and so has no address (vultr-boost address), not a hub it could not reach.
+func noHubAddress(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "is not a peer of the hub")
+}
+
+// nothingToSave says, when box has no address on the hub and no story claimed on
+// it, that nothing on it needs saving: it has run no session, and it cannot be
+// asked for its worktrees. The claims are read off the beads server, an
+// in-progress or open claim held as mw@<box> or builder@<box>; a claim, a
+// tracker that cannot be read, or an address that is there (a box that does not
+// answer is another matter) keeps the teardown refused as before.
+func (p *cloudPass) nothingToSave(ctx context.Context, box CloudBox) (string, bool) {
+	if p.check.Work == nil {
+		return "", false
+	}
+	if _, err := p.check.Provider.Address(ctx, box.Name); !noHubAddress(err) {
+		return "", false
+	}
+	work, err := p.check.Work.WorkInHand(ctx)
+	if err != nil {
+		return "", false
+	}
+	holders := []string{SeatIdentity(MwSeat, box.Name), SeatIdentity("builder", box.Name)}
+	for _, list := range [][]StoryDetail{work.Running, work.OpenClaimed, work.Held} {
+		for _, d := range list {
+			if slices.Contains(holders, d.Assignee) {
+				return "", false
+			}
+		}
+	}
+	return fmt.Sprintf("%s is not a peer of the hub (no address) and no story is claimed on it by %s: nothing on it needed saving", box.Name, strings.Join(holders, " or ")), true
 }
 
 func (p *cloudPass) markIdle(work WorkInHand) {
@@ -1539,6 +1623,12 @@ func (p *cloudPass) salvage(ctx context.Context, box CloudBox, why string) bool 
 	atCap := why == cloudCapWhy
 	var lost []string
 	worktrees, err := p.check.Box.Worktrees(ctx, box.Name)
+	if err != nil {
+		if said, none := p.nothingToSave(ctx, box); none {
+			p.move(ctx, said)
+			worktrees, err = nil, nil
+		}
+	}
 	if err != nil {
 		err = fmt.Errorf("it could not be asked what worktrees it keeps: %w", err)
 		if !atCap {
