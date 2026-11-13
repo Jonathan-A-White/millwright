@@ -69,6 +69,14 @@ type CloudProvider interface {
 	// sessions running are not touched. An error is a box that could not be
 	// reached or written (mw-t5shinh.33).
 	SetSessionDeny(ctx context.Context, name string, rules []string) (changed bool, err error)
+	// CheckBox has the box check its own disk, over WireGuard as SetPace does:
+	// git fsck --connectivity-only on its vault and every rig checkout, go mod
+	// verify in its millwright checkout, no EXT4-fs error in its kernel log, and
+	// no file older than its boot that begins with a block of zeros (a snapshot
+	// restore that did not write the whole disk, as cloud6's did not).
+	// What it finds wrong is CloudBoxChecked.Faults and no error: an error is a
+	// box that could not be reached or asked, which is no verdict (mw-gq6.1172).
+	CheckBox(ctx context.Context, name string) (CloudBoxChecked, error)
 	// Address is where the box is reached from the home: its WireGuard address
 	// read off the hub, and the user it dispatches as. The home resolves no
 	// name for a box. An error is a box with no address to read, with why.
@@ -306,6 +314,14 @@ type CloudBox struct {
 	// a refusal is a move once, not at every check.
 	Saved   []string `json:"saved,omitempty"`
 	Refused string   `json:"refused,omitempty"`
+	// Checked is when the box last passed its own check with Vultr not
+	// reporting it locked, zero while it has not: only then may it take a story
+	// (MayWork). CheckFault is what its check found wrong, "" when nothing, and
+	// Gate what the box's gate note was last written to say, so that it is
+	// written once (mw-gq6.1172).
+	Checked    time.Time `json:"checked,omitzero"`
+	CheckFault string    `json:"check_fault,omitempty"`
+	Gate       string    `json:"gate,omitempty"`
 	// Alerted is that the Governor was told of this spell of refusals, so that
 	// the checks after it do not tell him again; a saved box clears it.
 	Alerted bool `json:"alerted,omitempty"`
@@ -554,6 +570,10 @@ type CloudCheck struct {
 	// Notes is where a box's first dispatch is seen to reach the beads server.
 	// Nil sees none, and no box is said up.
 	Notes CloudNotes
+	// Gate is where each box's gate note is written, which the box's dispatch
+	// reads before it takes a story. Nil writes none: the book alone says which
+	// box may work.
+	Gate CloudGate
 	// Stories is where the stories pathed to a box are found and re-pathed
 	// when the box is destroyed. Nil re-paths none.
 	Stories  CloudStories
@@ -649,6 +669,7 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 	p.reconcile(ctx)
 	p.dropStale(ctx)
 	p.seeSlowMakes(ctx)
+	p.checkBoxes(ctx)
 	p.seeDispatch(ctx)
 	p.dropUndispatched(ctx, work)
 	p.markIdle(work)
@@ -773,6 +794,9 @@ type cloudPass struct {
 	// unread are the boxes whose note of a dispatch could not be read this
 	// check: they are not judged to have none.
 	unread map[string]bool
+	// listed is that Vultr's instances were read this check, so that the book's
+	// word of which box is locked is this check's.
+	listed bool
 }
 
 func (p *cloudPass) fail(err error) {
@@ -847,6 +871,7 @@ func (p *cloudPass) reconcile(ctx context.Context) {
 	}
 	p.settleRestoring(ctx, instances)
 	p.readMakes(instances)
+	p.listed = true
 	held := map[string]bool{}
 	for _, box := range p.state.Boxes {
 		held[box.Name] = true
@@ -894,6 +919,14 @@ func (p *cloudPass) readMakes(instances []CloudInstance) {
 		}
 		if box.Making && box.Vultr != found.Text() {
 			box.Vultr = found.Text()
+			p.dirty = box.Name + " vultr"
+		}
+		// Vultr's word of a make is not its word of the box once it is made: the
+		// book of cloud4 and cloud5 went on saying "active locked" for hours after
+		// Vultr had said ok, and was read as a box locked while it worked
+		// (mw-gq6.1172). LockedSince is what says a made box is locked.
+		if !box.Making && !box.Restoring && box.Vultr != "" {
+			box.Vultr = ""
 			p.dirty = box.Name + " vultr"
 		}
 		id, since := "", time.Time{}
@@ -1097,7 +1130,8 @@ func (a CloudMakeAlarm) damper() DamperAlarm {
 // made for longer than the plan's MakeSlowLimit, with Vultr's word and the step
 // that ends it (mw cloud down <box>), and a box Vultr has reported locked for
 // longer than CloudLockedLimit, making or not, with the instance id to open a
-// Vultr ticket for.
+// Vultr ticket for; and a box that failed its own check (mw-gq6.1172), with
+// what it found and the same step.
 func (s CloudState) MakeAlarms(plan CloudPlan, now time.Time) []CloudMakeAlarm {
 	var alarms []CloudMakeAlarm
 	for _, box := range s.Boxes {
@@ -1114,6 +1148,11 @@ func (s CloudState) MakeAlarms(plan CloudPlan, now time.Time) []CloudMakeAlarm {
 			alarms = append(alarms, CloudMakeAlarm{Box: box.Name, Key: "cloud.locked:" + box.Name, Identity: "cloud locked " + box.Name,
 				Text: fmt.Sprintf("%s has been locked at Vultr for %s (instance %s): open a Vultr ticket for instance %s, then mw cloud down %s",
 					box.Name, Clock(now.Sub(box.LockedSince)), id, id, box.Name)})
+		}
+		if !box.Making && !box.Restoring && box.CheckFault != "" {
+			alarms = append(alarms, CloudMakeAlarm{Box: box.Name, Key: "cloud.check:" + box.Name, Identity: "cloud check " + box.Name,
+				Text: fmt.Sprintf("%s failed its own check and takes no story, billed all the while (%s); to destroy it: mw cloud down %s",
+					box.Name, box.CheckFault, box.Name)})
 		}
 	}
 	return alarms
@@ -1155,7 +1194,8 @@ func (p *cloudPass) seeDispatch(ctx context.Context) {
 			p.dirty = "up " + box.Name
 			continue
 		}
-		if box.NotDispatching != "" || p.now.Sub(box.made()) < CloudDispatchWait {
+		// A box that failed its own check does not dispatch, and the book says why.
+		if box.NotDispatching != "" || box.CheckFault != "" || p.now.Sub(box.made()) < CloudDispatchWait {
 			continue
 		}
 		why := fmt.Sprintf("no dispatch of %s has reached the beads server in %s since it was made", box.Name, Clock(p.now.Sub(box.made())))
@@ -1190,6 +1230,12 @@ func (p *cloudPass) dropUndispatched(ctx context.Context, work WorkInHand) {
 	limit := p.check.Plan.NoDispatchLimit()
 	for _, box := range append([]CloudBox(nil), p.state.Boxes...) {
 		if box.Making || box.Restoring || !box.Dispatched.IsZero() || p.unread[box.Name] || p.now.Sub(box.made()) < limit {
+			continue
+		}
+		// A box that failed its own check is kept from dispatching by its gate:
+		// the alarm names it and mw cloud down ends it, so that a box is not made
+		// in its place from the same snapshot every half hour (mw-gq6.1172).
+		if box.CheckFault != "" {
 			continue
 		}
 		// A story claimed on the box says it has dispatched, whatever the book
@@ -1477,7 +1523,9 @@ func (p *cloudPass) setSessionDenies(ctx context.Context) {
 //
 // A box still being made, or restoring, has no session: it counts none free
 // (mw-gq6.1113). Its sessions are coming, so that the check does not make a
-// second box for a story the first already serves.
+// second box for a story the first already serves. So are those of a box the
+// home has not cleared yet (CloudBox.MayWork); a box that failed its own check
+// counts neither.
 func (p *cloudPass) demand(work WorkInHand) (waiting, free, coming int) {
 	for _, d := range work.Ready {
 		if d.Merged().Host == domain.HostAuto && !d.Hitl() {
@@ -1493,6 +1541,15 @@ func (p *cloudPass) demand(work WorkInHand) (waiting, free, coming int) {
 	for _, box := range p.state.Boxes {
 		if box.Making || box.Restoring {
 			coming += box.boxCap(p.check.Plan)
+			continue
+		}
+		if !box.MayWork() {
+			// A box that failed its own check takes no story until it is destroyed:
+			// it counts nothing. One Vultr holds locked, or whose check has not
+			// run yet, is on its way as a box being made is (mw-gq6.1172).
+			if box.CheckFault == "" {
+				coming += box.boxCap(p.check.Plan)
+			}
 			continue
 		}
 		free += max(0, box.boxCap(p.check.Plan)-sessions(work, box.Name, p.now))
@@ -1541,6 +1598,14 @@ func (p *cloudPass) make(ctx context.Context) {
 	p.state.Boxes = append(p.state.Boxes, CloudBox{Name: name, Up: p.now, Making: true})
 	if !p.keep(ctx, "making "+name) {
 		p.state.Boxes = p.state.Boxes[:len(p.state.Boxes)-1]
+		return
+	}
+	// The gate of the name is shut before the box is asked for: the new box
+	// takes no story on the word a destroyed box of the name was cleared by.
+	if err := p.shutGate(ctx, name, "it is being made"); err != nil {
+		p.state.Boxes = p.state.Boxes[:len(p.state.Boxes)-1]
+		p.keep(ctx, "not making "+name)
+		p.fail(fmt.Errorf("not making %s: its gate note could not be shut, so a box of that name might take stories unchecked: %w", name, err))
 		return
 	}
 	p.move(ctx, fmt.Sprintf("making %s: %d stories wait for any host, %d sessions free", name, p.report.Waiting, p.report.Free))
@@ -1606,6 +1671,12 @@ func (p *cloudPass) down(ctx context.Context, name, why string) bool {
 	}
 	if why != "it did not come up" {
 		p.move(ctx, fmt.Sprintf("down %s: %s", name, why))
+	}
+	if !box.Checked.IsZero() || box.Gate != "" {
+		// Best effort: a make shuts the gate of its name again before it begins.
+		if err := p.shutGate(ctx, name, "it is destroyed"); err != nil {
+			p.check.say("the gate note of %s could not be shut after it was destroyed: %v", name, oneLine(err.Error()))
+		}
 	}
 	p.keep(ctx, "down "+name)
 	p.repath(ctx, name)
@@ -2116,6 +2187,11 @@ func (r CloudReading) write(b *strings.Builder) {
 			continue
 		}
 		line := fmt.Sprintf("  %s  up %s", box.Name, Clock(r.Now.Sub(box.Up)))
+		// A box the home has not cleared takes no story, whatever it has dispatched.
+		if why := box.heldWhy(); why != "" && (box.CheckFault != "" || !box.LockedSince.IsZero() || !box.Dispatched.IsZero()) {
+			clip(b, line+", takes no story: "+why)
+			continue
+		}
 		// A box a book kept no Made of was said up by its make, as before.
 		switch {
 		case !box.Dispatched.IsZero():

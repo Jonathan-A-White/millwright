@@ -1121,7 +1121,7 @@ func TestAStarvedNoteOfADestroyedBoxHoldsNoRigBackButOneOfALiveBoxDoes(t *testin
 	}{
 		"destroyed": {nil, 0},
 		"making":    {[]application.CloudBox{{Name: "cloud1", Making: true, Up: statusNow.Add(-time.Hour)}}, 0},
-		"up":        {[]application.CloudBox{{Name: "cloud1", Up: statusNow.Add(-5 * time.Hour)}}, 1},
+		"up":        {[]application.CloudBox{{Name: "cloud1", Up: statusNow.Add(-5 * time.Hour), Checked: statusNow.Add(-4 * time.Hour)}}, 1},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tracker := aTrackerPathedToVPS(t)

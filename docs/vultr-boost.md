@@ -19,6 +19,7 @@ contrib/vultr-boost snapshot       # a ready-made image of a bootstrapped box
 contrib/vultr-boost spend          # what Vultr's billing says the boxes cost this month
 contrib/vultr-boost set-cap        # --name NAME --cap N: set the sessions a box that is up runs at once
 contrib/vultr-boost set-pace       # --name NAME: make the box's dispatch timer tick every five minutes
+contrib/vultr-boost check          # --name NAME: have the box check its own disk (git fsck, go mod verify, dmesg); changes nothing
 contrib/vultr-boost set-harness    # --name NAME --version V: bring the box's Claude Code up to V (docs/harness-level.md)
 contrib/vultr-boost set-session-deny  # --name NAME --deny '["rule", ...]': set [session] deny in the box's config.toml
 contrib/vultr-boost address        # --name NAME: the box's WireGuard address, then its user, off the hub
@@ -48,6 +49,7 @@ asks. `--dry-run` prints the numbered steps and changes nothing.
 - [Revoking the box's tokens](#revoking-the-boxs-tokens)
 - [Elastic: boxes made and destroyed by demand](#elastic-boxes-made-and-destroyed-by-demand)
   - [A box dispatches every five minutes, not hourly](#a-box-dispatches-every-five-minutes-not-hourly)
+  - [A box takes no story until the home has cleared it](#a-box-takes-no-story-until-the-home-has-cleared-it)
   - [A box is brought to the home's Claude Code before its timer is set](#a-box-is-brought-to-the-homes-claude-code-before-its-timer-is-set)
   - [A changed box_cap reaches the boxes already up](#a-changed-box_cap-reaches-the-boxes-already-up)
   - [Stories pathed to a box that goes down](#stories-pathed-to-a-box-that-goes-down)
@@ -296,6 +298,34 @@ tried at each check, and says so once as a `cloud` event. It does not wait for t
 dispatch, which an hourly box may be an hour in making. `mw cloud check` ends with a line for each
 box, `cloud1: dispatch timer every 5 minutes`, or `hourly, not every 5 minutes` when it is not,
 or `pace not known` with why.
+
+### A box takes no story until the home has cleared it
+
+On 2026-11-12 cloud4 and cloud5 came up from the snapshot and, one to three hours later, held
+corrupt git packs, a corrupt Go module cache and `EXT4-fs error` lines in the kernel log, and had
+taken stories all the while (mw-gq6.1172). So a box has a gate, and the home's cloud check is the
+one that opens it:
+
+- The check clears a box when Vultr does not report its instance `locked` and the box's own check
+  passes: `contrib/vultr-boost check --name cloudN`, which over ssh runs `git fsck
+  --connectivity-only` on every checkout under the box's home (the vault and each rig), `go mod
+  verify` in `~/millwright`, counts the `EXT4-fs error` lines of `dmesg`, and looks under the home
+  for a file older than the box's boot that begins with a block of zeros: cloud6 came up with the
+  last 36 GiB of its 350 GiB disk unwritten by the restore, and passed the first three. It changes
+  nothing on the box and takes one to two minutes.
+- The verdict is in the book (`checked`, `check_fault`) and in the box's gate note,
+  `host.<box>.box-gate`, in the beads server: `ok <time>` or `hold <time>: <why>`. On the box,
+  `mw dispatch` reads the note before anything else, and does nothing, not even a sync, unless it
+  begins `ok`: no note, a note that cannot be read and a hold all stop it. A make shuts the gate
+  of its name before the box is asked for.
+- A cleared box is asked again every hour. A box Vultr reports locked is held and must pass again
+  once it is not. A box that cannot be reached is neither passed nor failed, and is asked at the
+  next check.
+- A box that fails takes no story, counts no free session, and is not asked again. It is one
+  `cloud` event, one line under DAMPERS and one clause of the quiet alarm, each with the step that
+  ends it: `mw cloud down <box>`. `mw status` says `takes no story: it failed its own check: ...`.
+  The idle rule still destroys it after `idle_minutes`; the never-dispatched rule leaves it, so
+  that a box is not made in its place from the same snapshot every half hour.
 
 ### A box is brought to the home's Claude Code before its timer is set
 

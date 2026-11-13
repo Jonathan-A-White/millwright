@@ -205,3 +205,35 @@ func TestAFailedUpNamesWhatVultrRefused(t *testing.T) {
 		}
 	}
 }
+
+// A box's own check (mw-gq6.1172): each "fault = " line of the wrapper is a
+// fault, and its "check = " line is what says the box was asked at all.
+func TestCheckBoxReadsTheWrappersFaultLinesAndNeedsItsCheckLine(t *testing.T) {
+	command, calls := standIn(t, `echo "==> [2/2] box: check the disk of mw@10.88.0.5"
+echo "fault = ~/millwright-vault: git fsck: error: unknown object type 0 at offset 57790430"
+echo "fault = dmesg: 8 lines of EXT4-fs error, the last: EXT4-fs error (device vda2): bad block bitmap checksum"
+echo "check = 12 checkouts (git fsck --connectivity-only), go mod verify in ~/millwright, EXT4-fs errors in dmesg"`)
+	found, err := cloud.Vultr{Command: command}.CheckBox(context.Background(), "cloud4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Faults) != 2 || !strings.Contains(found.Faults[0], "unknown object type 0") || !strings.Contains(found.Faults[1], "EXT4-fs error") {
+		t.Errorf("expected the wrapper's two faults, got %q", found.Faults)
+	}
+	if got := strings.TrimSpace(read(t, calls)); got != "check --name cloud4" {
+		t.Errorf("expected `check --name cloud4`, got %q", got)
+	}
+
+	sound, _ := standIn(t, `echo "check = 12 checkouts"`)
+	if found, err := (cloud.Vultr{Command: sound}).CheckBox(context.Background(), "cloud2"); err != nil || len(found.Faults) != 0 {
+		t.Errorf("a sound box: faults %q, error %v, want neither", found.Faults, err)
+	}
+	cut, _ := standIn(t, `echo "==> [2/2] box: check the disk of mw@10.88.0.5"`)
+	if _, err := (cloud.Vultr{Command: cut}).CheckBox(context.Background(), "cloud4"); err == nil || !strings.Contains(err.Error(), "not known") {
+		t.Errorf("a check with no \"check = \" line is no verdict, got error %v", err)
+	}
+	unreachable, _ := standIn(t, `echo "vultr-boost: could not ask cloud4 to check its disk" >&2; exit 1`)
+	if _, err := (cloud.Vultr{Command: unreachable}).CheckBox(context.Background(), "cloud4"); err == nil {
+		t.Error("a box that could not be asked is an error, got none")
+	}
+}

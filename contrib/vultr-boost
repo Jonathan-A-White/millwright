@@ -13,6 +13,7 @@
 #   contrib/vultr-boost spend    [--name NAME]...
 #   contrib/vultr-boost set-cap  [--dry-run] --name NAME --cap N
 #   contrib/vultr-boost set-pace [--dry-run] --name NAME
+#   contrib/vultr-boost check    [--dry-run] --name NAME
 #   contrib/vultr-boost set-harness [--dry-run] --name NAME --version VERSION
 #   contrib/vultr-boost set-session-deny [--dry-run] --name NAME --deny '["rule", ...]'
 #   contrib/vultr-boost address  [--dry-run] --name NAME
@@ -54,6 +55,16 @@
 #         OnCalendar the timer has, on a "pace = " line. A box made from the snapshot carries the
 #         home's hourly timer, and a box has no event follower to spring its dispatch. mw's cloud
 #         check runs it on each box it does not know to be at the pace (mw-gq6.1004).
+# check   has a box that is up check its own disk, over WireGuard as set-pace does: ssh to the box's
+#         user runs git fsck --connectivity-only on every checkout under its home (the vault and each
+#         rig), go mod verify in ~/millwright, counts the EXT4-fs error lines of the kernel log, and
+#         looks for files older than the box's boot that begin with a block of zeros (a snapshot
+#         restore that did not write the whole disk).
+#         Each thing wrong is a "fault = " line, and the last line, "check = ...", says the check ran
+#         to its end; it exits 0 whatever it found, and not 0 only when the box could not be asked.
+#         It changes nothing on the box. mw's cloud check runs it before a box may take a story and
+#         every hour after: cloud4 and cloud5 came up from the snapshot with corrupt git packs, a
+#         corrupt Go module cache and EXT4-fs errors, and took stories (mw-gq6.1172).
 # set-harness brings the Claude Code of a box that is up to VERSION (the home's, which mw version
 #         prints), over WireGuard as set-pace does: ssh to the box's user reads `claude --version`,
 #         and a box behind VERSION gets one npm install -g --prefix ~/.local
@@ -132,6 +143,7 @@ Usage: vultr-boost up       [--yes] [--dry-run] [--name NAME] [--snapshot ID]
        vultr-boost snapshot [--dry-run] [--name NAME]
        vultr-boost spend    [--name NAME]...
        vultr-boost set-cap  [--dry-run] --name NAME --cap N
+       vultr-boost check    [--dry-run] --name NAME
        vultr-boost set-pace [--dry-run] --name NAME
        vultr-boost set-harness [--dry-run] --name NAME --version VERSION
        vultr-boost set-session-deny [--dry-run] --name NAME --deny '["rule", ...]'
@@ -155,7 +167,7 @@ EOF
 
 while [ $# -gt 0 ]; do
 	case $1 in
-	up | down | list | adopt | status | snapshot | spend | set-cap | set-pace | set-harness | set-session-deny | address)
+	up | down | list | adopt | status | snapshot | spend | set-cap | set-pace | set-harness | set-session-deny | address | check)
 		[ -z "$CMD" ] || die "one command at a time: $CMD and $1"
 		CMD=$1
 		;;
@@ -338,6 +350,12 @@ if [ "$DRY" = 1 ]; then
 		echo "vultr-boost snapshot --dry-run: nothing below is run"
 		step "state: open $STATE_AGE with age (read only) and read $NAME's id from it"
 		step "curl -X POST $API/snapshots with the token on stdin: a snapshot of $NAME, whose id is printed for [cloud] snapshot"
+		;;
+	check)
+		STEPS=2
+		echo "vultr-boost check --dry-run: nothing below is run"
+		step "ssh $HUB_SSH: read $NAME's address off /etc/wireguard/wg0.conf (nothing there changes)"
+		step "ssh $(box_user)@<$NAME's address>: git fsck --connectivity-only on each checkout under its home, go mod verify in ~/millwright, count the EXT4-fs error lines of dmesg; print a \"fault = \" line for each thing wrong and a last \"check = \" line (nothing on the box changes)"
 		;;
 	set-pace)
 		STEPS=2
@@ -890,6 +908,99 @@ do_set_pace() {
 	echo "$out"
 }
 
+# --- check ----------------------------------------------------------------------
+# The run on the box. It only reads: git fsck writes nothing, go mod verify reads the module
+# cache, dmesg is read with sudo when the box's user may not. A checkout is a directory under
+# the home with a .git directory (a story's worktree has a .git file, and is its rig's). The
+# vault and the millwright checkout must be there: a box without them is not sound. Every
+# fault is one line, and the last line says the check ran to its end. A box whose bootstrap
+# (cloud-init) has not finished gives no verdict: a snapshot can carry a checkout the bootstrap
+# mends (mw-5gr3k0.8), and the check is asked again. A checkout git cannot walk is walked once
+# more after three seconds, so that a fetch or a repack under way is not read as a fault.
+# Last, every file under the home of 4096 bytes or more that has not changed since this boot
+# (the snapshot's own) is opened, and one that begins with a whole block of zeros is a fault:
+# cloud6 came up on 2026-11-13 with every file above 314 GiB of its 350 GiB disk reading zero,
+# the restore not having written the end of the disk, and passed the three checks above. Go's
+# and the rigs' testdata directories hold files that are zeros by design, and are left out.
+BOX_CHECK='export PATH=$HOME/.local/bin:$HOME/.local/go/bin:/usr/local/go/bin:$PATH
+if command -v cloud-init >/dev/null 2>&1 && cloud-init status 2>/dev/null | grep -q "^status: \(running\|not\)"; then
+	echo "the bootstrap of this box (cloud-init) has not finished: it is checked once it has" >&2
+	exit 75
+fi
+n=0
+last() { printf "%s\n" "$1" | grep . | tail -n 1 | cut -c1-200; }
+walk() { git --git-dir="$1/.git" --work-tree="$1" fsck --connectivity-only --no-progress 2>&1 >/dev/null; }
+for g in "$HOME"/*/.git; do
+	[ -d "$g" ] || continue
+	d=${g%/.git}; n=$((n + 1))
+	if ! out=$(walk "$d"); then
+		sleep 3
+		if ! out=$(walk "$d"); then
+			echo "fault = ~/${d##*/}: git fsck: $(last "$out")"
+		fi
+	fi
+done
+[ -d "$HOME/millwright-vault/.git" ] || echo "fault = ~/millwright-vault: no vault checkout to check"
+if [ -d "$HOME/millwright/.git" ]; then
+	if ! out=$(cd "$HOME/millwright" && go mod verify 2>&1); then
+		echo "fault = ~/millwright: go mod verify: $(last "$out")"
+	fi
+else
+	echo "fault = ~/millwright: no checkout to run go mod verify in"
+fi
+if log=$(sudo -n dmesg 2>/dev/null) || log=$(dmesg 2>/dev/null); then
+	c=$(printf "%s\n" "$log" | grep -c "EXT4-fs error")
+	[ "$c" = 0 ] || echo "fault = dmesg: $c lines of EXT4-fs error, the last: $(last "$(printf "%s\n" "$log" | grep "EXT4-fs error")")"
+else
+	echo "fault = dmesg: the kernel log could not be read"
+fi
+if scan=$(nice -n 10 python3 - "$HOME" 2>&1 <<"PY"
+import os, sys, time
+home = sys.argv[1]
+boot = time.time() - float(open("/proc/uptime").read().split()[0])
+seen = 0
+zero = []
+for root, dirs, files in os.walk(home):
+    if "/testdata/" in root + "/":
+        continue
+    for name in files:
+        path = os.path.join(root, name)
+        try:
+            st = os.lstat(path)
+            if st.st_size < 4096 or (st.st_mode & 0o170000) != 0o100000 or st.st_mtime >= boot:
+                continue
+            seen += 1
+            with open(path, "rb") as f:
+                if f.read(4096).strip(b"\0"):
+                    continue
+            zero.append(path.replace(home, "~", 1))
+        except OSError:
+            pass
+print(seen)
+print(len(zero))
+print(zero[0] if zero else "")
+PY
+); then
+	z=$(printf "%s\n" "$scan" | sed -n 2p)
+	[ "$z" = 0 ] || echo "fault = $z of the $(printf "%s\n" "$scan" | sed -n 1p) files older than this boot begin with a block of zeros, the first: $(printf "%s\n" "$scan" | sed -n 3p | cut -c1-160): the snapshot restore did not write the whole disk"
+else
+	echo "fault = the scan for zero-filled files could not run: $(last "$scan")"
+fi
+echo "check = $n checkouts (git fsck --connectivity-only), go mod verify in ~/millwright, EXT4-fs errors in dmesg, zero-filled files older than this boot"'
+
+do_check() {
+	need ssh
+	[ -n "$NAME_ARG" ] || die "check needs --name NAME: the box to check the disk of"
+	STEPS=2
+	local out
+	step "hub: read $NAME's address off $HUB_SSH"
+	box_address "$NAME"
+	local addr=$ADDR
+	step "box: check the disk of $(box_user)@$addr (git fsck, go mod verify, dmesg)"
+	out=$(ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new "$(box_user)@$addr" "sh -s" <<<"$BOX_CHECK") || die "could not ask $NAME to check its disk ($(box_user)@$addr)"
+	echo "$out"
+}
+
 # --- set-harness ----------------------------------------------------------------
 # The run on the box: $1 is the version wanted. The harness npm installs under the box's prefix
 # ~/.local (npm's own prefix on a box is the node folder, so a bare -g puts a copy where PATH never
@@ -1000,6 +1111,7 @@ snapshot) do_snapshot ;;
 spend) do_spend ;;
 set-cap) do_set_cap ;;
 set-pace) do_set_pace ;;
+check) do_check ;;
 set-harness) do_set_harness ;;
 set-session-deny) do_set_session_deny ;;
 address) do_address ;;

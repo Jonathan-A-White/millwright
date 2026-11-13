@@ -260,9 +260,12 @@ func cloudCheck(ctx context.Context, out io.Writer) (application.CloudCheck, boo
 		Self:    self, MakeLog: filepath.Join(home, DispatchStateDir, cloudMakeLog),
 	}
 	return application.CloudCheck{
-		Work:     gateway,
-		Stories:  gateway,
-		Notes:    gateway,
+		Work:    gateway,
+		Stories: gateway,
+		Notes:   gateway,
+		// Each box's gate note, which its dispatch reads before it takes a story
+		// (mw-gq6.1172).
+		Gate:     gateway,
 		Provider: provider,
 		// A box's kept worktrees are bundled into the vault over ssh before the
 		// box is destroyed (mw-gq6.1012).

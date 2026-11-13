@@ -489,7 +489,10 @@ type DispatchReport struct {
 	// GivesWay is the give-way this pass found standing, nil when none did.
 	GivesWay *GiveWayStanding
 	// Paused is the pause-host event that stopped this pass, nil when none did.
-	Paused  *HostPause
+	Paused *HostPause
+	// BoxHeld is why this host, a cloud box, did nothing this pass: the home has
+	// not cleared it, "" when it has or the host is no box (mw-gq6.1172).
+	BoxHeld string
 	Started []Started
 	Passed  []Passed
 	Failed  []Failed
@@ -755,6 +758,7 @@ const (
 	DispatchLogOK           = "ok: "
 	DispatchLogNothingReady = DispatchLogOK + "nothing ready"
 	DispatchLogPaused       = DispatchLogOK + "paused"
+	DispatchLogBoxHeld      = DispatchLogOK + "box held"
 	DispatchLogGivesWay     = DispatchLogOK + "gives way"
 	DispatchLogDrained      = DispatchLogOK + "capped at 0"
 	DispatchLogFault        = "local network fault"
@@ -796,6 +800,8 @@ func dispatchLogWords(report DispatchReport, err error) string {
 		return DispatchLogGivesWay + " since " + report.GivesWay.Since.UTC().Format(time.RFC3339)
 	case report.Paused != nil:
 		return DispatchLogPaused + " by " + report.Paused.Actor
+	case report.BoxHeld != "":
+		return DispatchLogBoxHeld + ": " + clippedTo(oneLine(report.BoxHeld), DispatchLogReasonLimit)
 	case report.Drained():
 		return DispatchLogDrained
 	case len(report.Started) == 0 && len(report.Passed) == 0 && len(report.FixedOnMain) == 0:
@@ -886,6 +892,17 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		report.Paused = &pause
 		d.print(fmt.Sprintf("dispatch on %s: paused by %s at %s (control event %d); nothing done until a resume-host event\n",
 			d.Host, pause.Actor, pause.At.UTC().Format(time.RFC3339), pause.Seq))
+		return report, nil
+	}
+
+	// gate: box held
+	// A cloud box does nothing until the home has cleared it: its own check has
+	// passed and Vultr does not report it locked (mw-gq6.1172). It is not even
+	// synced, as a paused host is not: a box whose disk is in doubt pushes
+	// nothing.
+	if why := d.boxHeld(ctx); why != "" {
+		report.BoxHeld = why
+		d.print(fmt.Sprintf("dispatch on %s: this box takes no story: %s; the home's cloud check opens its gate once its own check passes\n", d.Host, why))
 		return report, nil
 	}
 
