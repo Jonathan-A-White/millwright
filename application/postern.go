@@ -1536,19 +1536,6 @@ func (i PosternInbox) isGovernor(m PosternInboxMessage) bool {
 	return i.GovernorKey != "" && m.From == i.GovernorKey
 }
 
-// recordThreadComment appends m's text to the bead its thread names, reading
-// 'The Governor by postern <ts>: <text>', reporting true once done — or
-// already done, for a txid recordThreadComment has already commented, which
-// changes nothing and is still reported done so Run leaves it out of the
-// inbox. A bead the tracker does not know reports false and changes nothing,
-// so Run prints it as text, exactly as an unrecordable reply does. saved, set,
-// are the decrypted attachments: the comment ends with " [image: <path>]" for
-// each, in order.
-func (i PosternInbox) recordThreadComment(ctx context.Context, m PosternInboxMessage, saved []posternSavedFile) (bool, error) {
-	recorded, _, err := i.recordThreadCommentOnce(ctx, m, saved)
-	return recorded, err
-}
-
 // recordThreadCommentOnce is recordThreadComment, saying besides whether the
 // comment was written now (fresh) rather than found written already.
 func (i PosternInbox) recordThreadCommentOnce(ctx context.Context, m PosternInboxMessage, saved []posternSavedFile) (recorded, fresh bool, err error) {

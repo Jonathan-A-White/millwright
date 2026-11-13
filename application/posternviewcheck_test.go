@@ -145,3 +145,43 @@ func TestHowToCheckReadsAHeadingWithAClock(t *testing.T) {
 		t.Errorf("expected the steps from 1., got %q", got)
 	}
 }
+
+// viewCheckLimit is 200 runes: a longer check sentence is cut there and ends in
+// an ellipsis, a sentence of exactly 200 runes is kept whole. The runes are
+// multi-byte so a cut by bytes would show.
+func TestViewCheckSentenceIsCutAt200Runes(t *testing.T) {
+	if viewCheckLimit != 200 {
+		t.Fatalf("the limit under test is 200 runes, viewCheckLimit is %d", viewCheckLimit)
+	}
+	long := strings.Repeat("é", 300)
+	got := landingCheck([]Comment{{Text: "Landing checked: " + long + ". Then more."}})
+	if want := strings.Repeat("é", 200) + "…"; got != want {
+		t.Errorf("expected 200 runes and an ellipsis, got %d runes: %q", len([]rune(got)), got)
+	}
+	exact := strings.Repeat("é", 200)
+	if got := landingCheck([]Comment{{Text: "Landing checked: " + exact + ". Then more."}}); got != exact {
+		t.Errorf("a sentence of exactly 200 runes must stay whole, got %d runes", len([]rune(got)))
+	}
+	over := strings.Repeat("é", 201)
+	if got, want := landingCheck([]Comment{{Text: "Landing checked: " + over}}), exact+"…"; got != want {
+		t.Errorf("a sentence of 201 runes must be cut, got %d runes", len([]rune(got)))
+	}
+}
+
+// viewHowToQualifierLimit is 200 bytes: a heading's colon at byte 199 of the
+// text after HOW TO CHECK IT ends its qualifier, a colon at byte 200 is too far
+// and the steps are not read after it.
+func TestHowToHeadingQualifierIsCutAt200Bytes(t *testing.T) {
+	if viewHowToQualifierLimit != 200 {
+		t.Fatalf("the limit under test is 200 bytes, viewHowToQualifierLimit is %d", viewHowToQualifierLimit)
+	}
+	steps := "1. Open Postern.\n2. See it."
+	near := strings.Repeat("x", 199) + ": " + steps
+	if got, ok := howToAfterHeading(near); !ok || got != steps {
+		t.Errorf("a colon at byte 199 must end the qualifier, got %q, %v", got, ok)
+	}
+	far := strings.Repeat("x", 200) + ": " + steps
+	if got, ok := howToAfterHeading(far); ok {
+		t.Errorf("a colon at byte 200 is past the limit and must give no steps, got %q", got)
+	}
+}

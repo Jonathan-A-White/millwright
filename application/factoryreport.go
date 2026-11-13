@@ -119,6 +119,19 @@ type FactoryReport struct {
 	Seats        []string
 	Home         HomeFile
 	Here         string
+	// Shape and RigDirs, when set, add SHAPE to a report narrowed to a rig:
+	// the rig's hottest files, how many are over the allowance and how much code
+	// the window added and removed, read from the rig's checkout in RigDirs (rig
+	// name to directory on this host). Left unset, or for a report of no one rig
+	// or of a landing, the report has no SHAPE.
+	Shape   ShapeSource
+	RigDirs map[string]string
+	// CommandLog and CommandNames, when both set, add to the factory rig's SHAPE
+	// the commands of mw with no run in CommandUseDays days: CommandNames are
+	// every command mw has, CommandLog the host's record of its runs. Another
+	// rig's SHAPE has no such part.
+	CommandLog   CommandLog
+	CommandNames []string
 	Now          func() time.Time
 	Out          io.Writer
 }
@@ -305,6 +318,9 @@ type FactoryReportResult struct {
 	// ModelCompare is MODELS, the models side by side after FUEL; nil for a
 	// landing.
 	ModelCompare *ModelCompare `json:"model_compare,omitempty"`
+	// Shape is the rig's code shape (ReadShape); nil unless the report was given
+	// a rig and a source for it.
+	Shape *ShapeSection `json:"shape,omitempty"`
 	// Review is his time today, whole-factory; nil when the report counted none.
 	Review *ReviewTime `json:"his_time,omitempty"`
 	// SeatFuel is what the seats' sessions cost, the SEATS block of FUEL; its
@@ -607,6 +623,14 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		section := ReadInvestmentsSection(GroupInvestments(records), result.Window, now)
 		result.Investments = &section
 	}
+	if r.Shape != nil && r.Rig != "" && result.Landing == nil {
+		section := ReadShape(ctx, r.Shape, r.Rig, r.RigDirs[r.Rig], result.Window, now)
+		if r.CommandLog != nil && len(r.CommandNames) > 0 && r.Rig == FactoryRig {
+			use := ReadCommandUse(ctx, r.CommandLog, r.CommandNames, now)
+			section.Commands = &use
+		}
+		result.Shape = &section
+	}
 	result.CheapWins = CheapWins(WinInputs{Rigs: result.Rigs, Gates: gates, Kinds: Calibrate(recent, BenchmarkSettings{}), Heavy: r.heavyStories(entries),
 		Unfixed: unfixed(worse(result.Changes), stories), Share: result.InvestShare})
 
@@ -894,6 +918,7 @@ func (r FactoryReportResult) String() string {
 	writeModels(&b, r.ModelCompare)
 	writeChanges(&b, r.Changes)
 	writeInvestments(&b, r.Investments)
+	r.Shape.write(&b)
 	writeCheapWins(&b, r.CheapWins)
 	return b.String()
 }

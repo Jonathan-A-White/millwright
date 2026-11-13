@@ -100,6 +100,13 @@ type TesterFiler struct {
 	// a class of, in the seat Seat; nil takes any slug.
 	Register ErrorFiles
 	Seat     string
+	// Retired, CloudBook and CloudPlan say which hosts cannot take a story: a
+	// finding that names a retired host, or a cloud box the book no longer
+	// holds, is filed with host=auto and the note says so (mw-gq6.1203). Nil
+	// and empty judge nothing.
+	Retired   []string
+	CloudBook CloudBook
+	CloudPlan CloudPlan
 	// Out is where it says what it did; nil prints nothing.
 	Out io.Writer
 }
@@ -204,6 +211,10 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 	path.Host = domain.HostAuto
 	if host := strings.TrimSpace(finding.Host); host != "" {
 		path.Host = host
+		if why := HostRefusedWhy(ctx, host, f.Retired, f.CloudBook, f.CloudPlan); why != "" {
+			f.say("host=%s was not written: %s; host=auto was written instead\n", host, why)
+			path.Host = domain.HostAuto
+		}
 	}
 	if files := domain.FileList(finding.Files); len(files) > 0 {
 		path.Files = strings.Join(files, ",")

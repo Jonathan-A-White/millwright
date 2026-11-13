@@ -99,10 +99,42 @@ func ownProcesses(t testing.TB, pid int, timeoutOnly bool) []string {
 			if err != nil || strings.TrimSpace(string(comm)) != "timeout" {
 				continue
 			}
+			// A loop is started by the run itself. A `timeout` that has forked its
+			// child, and the child not yet exec'd, is a copy under the loop's own
+			// `timeout`: the same command line, environment and comm, a second
+			// loop to a count that does not ask whose child it is (mw-gq6.1202).
+			if parentOf(e.Name()) != pid {
+				continue
+			}
 		}
 		found = append(found, e.Name())
 	}
 	return found
+}
+
+// parentOf is the parent pid of the process with this pid, or -1 when it has
+// gone or its stat line cannot be read. The command's name in that line is in
+// parentheses and may hold spaces and parentheses itself, so the fields are
+// read after the last closing one: state, then the parent pid.
+func parentOf(pid string) int {
+	raw, err := os.ReadFile("/proc/" + pid + "/stat")
+	if err != nil {
+		return -1
+	}
+	s := string(raw)
+	i := strings.LastIndexByte(s, ')')
+	if i < 0 {
+		return -1
+	}
+	fields := strings.Fields(s[i+1:])
+	if len(fields) < 2 {
+		return -1
+	}
+	ppid, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return -1
+	}
+	return ppid
 }
 
 // markedAs lists the pids of every `timeout` on the host whose command line ends
@@ -341,6 +373,49 @@ func TestUnderLoadCountsOnlyItsOwnLoopsNotOnesCarryingItsMarker(t *testing.T) {
 	}
 	if got := loopsOf(t, pid); len(got) != 2 {
 		t.Fatalf("the stranger carrying the marker should not be counted: wanted this run's 2 loops, got %v", got)
+	}
+}
+
+// A `timeout` that has forked its child but whose child has not yet exec'd is a
+// second process with the very same command line, environment and comm as the
+// loop it belongs to: on a host over its cores that window is long, and the
+// count was one loop too many (mw-gq6.1202). The stand-in here keeps that child
+// as it is for as long as the test looks: the run's loop `timeout` and, under
+// it, a copy of it that has not exec'd. Only the loop, a child of the run, is one.
+func TestUnderLoadDoesNotCountAForkedTimeoutThatHasNotExecdAsAnotherLoop(t *testing.T) {
+	dir := t.TempDir()
+	// A `timeout` for comm, which is the executable's file name: a shell under that name.
+	fake := filepath.Join(dir, "timeout")
+	if err := os.Symlink("/bin/sh", fake); err != nil {
+		t.Fatal(err)
+	}
+	// The loop's `timeout` runs this, which starts its own `timeout`: the forked copy.
+	inner := filepath.Join(dir, "inner.sh")
+	if err := os.WriteFile(inner, []byte("\"$FAKE_TIMEOUT\" -c 'sleep 30' mw-under-load-loop \"$2\" &\nwait\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The stand-in for mw-under-load: its pid is the run's, and it starts one loop.
+	outer := filepath.Join(dir, "outer.sh")
+	if err := os.WriteFile(outer, []byte("\"$FAKE_TIMEOUT\" \"$FAKE_INNER\" mw-under-load-loop $$ &\nwait\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("/bin/sh", outer)
+	cmd.Env = append(os.Environ(), "FAKE_TIMEOUT="+fake, "FAKE_INNER="+inner, runTokenVar+"="+newRunToken())
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	track(cmd)
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+	pid := cmd.Process.Pid
+	if !waitFor(func() bool { return len(ownProcesses(t, pid, false)) >= 2 }) {
+		t.Fatalf("the stand-in never showed the loop and its forked copy: %v", ownProcesses(t, pid, false))
+	}
+	if got := loopsOf(t, pid); len(got) != 1 {
+		t.Fatalf("a timeout whose child has not exec'd is not another loop: wanted 1 loop, got %v", got)
 	}
 }
 

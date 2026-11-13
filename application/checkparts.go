@@ -388,13 +388,6 @@ type slotTry struct {
 	again  string
 }
 
-// takeSlotWithin takes the rig's slot for a worktree check, waiting no longer
-// than partSlotWait: under the 600 seconds (the default cap) a Builder's foreground call is given.
-// It ends a wait that ran out in one line (slotRefusal).
-func (k Check) takeSlotWithin(ctx context.Context, c *closeOut, try slotTry) (Holding, error) {
-	return k.takeSlotFor(ctx, c, try, k.partSlotWait())
-}
-
 // takeSlotFor is takeSlotWithin for a wait of within.
 func (k Check) takeSlotFor(ctx context.Context, c *closeOut, try slotTry, within time.Duration) (Holding, error) {
 	return k.takeSlotFit(ctx, c, nil, within, try)

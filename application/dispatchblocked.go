@@ -87,22 +87,6 @@ func (d Dispatch) tellVaultBlocked(ctx context.Context, err error, report *Dispa
 // Mayor writes by hand; no rig's dispatch, claim or boot reads anything in it.
 const VaultHelperDir = "bin"
 
-// VaultFilesDispatchDoesNotRead says whether every one of files lies under the
-// vault's bin/, so that a dispatch refused only on them may go on and claim
-// (mw-gq6.1018). Anything else (seats/, the beads, plans, a stray file) is read
-// by a boot or a sync and still refuses. No files is not such a case.
-func VaultFilesDispatchDoesNotRead(files []string) bool {
-	if len(files) == 0 {
-		return false
-	}
-	for _, file := range files {
-		if !vaultFileIsHelperScript(file) {
-			return false
-		}
-	}
-	return true
-}
-
 // VaultCloudDir is the vault directory the cloud keeps its files in: the book
 // (cloud.json), each box's sealed state and keys, the cap. The home alone makes
 // and destroys boxes, so the home alone writes them, each in a step with its own
@@ -226,10 +210,17 @@ func vaultBlockedBody(host, dir string, files []string) string {
 func vaultDamagedBody(host, dir string, blocked *VaultBlocked) string {
 	var b strings.Builder
 	damage := blocked.Damage
-	fmt.Fprintf(&b, "mw dispatch on %s claimed nothing: %s. Git lists %d files as changed, "+
-		"but that is the damage and not work anybody wrote, so do not commit or check them out. "+
-		"Every tick refuses the same way until the repository is mended; this is mailed once an hour.\n",
-		host, damage.Sentence(), len(blocked.Files))
+	if len(blocked.Files) == 0 {
+		fmt.Fprintf(&b, "mw dispatch on %s claimed nothing: %s. Git lists no file as changed, "+
+			"which is how a stopped rebase looks. "+
+			"Every tick refuses the same way until the repository is mended; this is mailed once an hour.\n",
+			host, damage.Sentence())
+	} else {
+		fmt.Fprintf(&b, "mw dispatch on %s claimed nothing: %s. Git lists %d files as changed, "+
+			"but that is the damage and not work anybody wrote, so do not commit or check them out. "+
+			"Every tick refuses the same way until the repository is mended; this is mailed once an hour.\n",
+			host, damage.Sentence(), len(blocked.Files))
+	}
 	if damage.Corrupt != "" {
 		git := "git"
 		if dir != "" {

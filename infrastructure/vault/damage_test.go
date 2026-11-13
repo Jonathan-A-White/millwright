@@ -90,6 +90,17 @@ func TestDamageNamesARebaseThatStopped(t *testing.T) {
 	if err != nil || !got.Rebasing || got.Corrupt != "" {
 		t.Fatalf("expected a stopped rebase and no corruption, got %+v (%v)", got, err)
 	}
+	// The cheap look a sync takes every run finds it too (mw-gq6.1206).
+	if stopped, err := vault.New(here).StoppedRebase(context.Background()); err != nil || !stopped {
+		t.Fatalf("expected the stopped rebase to be seen, got %v (%v)", stopped, err)
+	}
+}
+
+func TestStoppedRebaseIsFalseForASoundVault(t *testing.T) {
+	here, _ := twoHosts(t)
+	if stopped, err := vault.New(here).StoppedRebase(context.Background()); err != nil || stopped {
+		t.Fatalf("expected no stopped rebase, got %v (%v)", stopped, err)
+	}
 }
 
 // flipABlobInPack packs every object of the clone and flips the bytes of one

@@ -52,7 +52,9 @@ test:
 	$(GO) test -tags $(TAGS) -timeout $(TEST_TIMEOUT) $(TIMING_FLAGS) $(PKG)
 	contrib/scorer/test.sh --gate-note
 
-# go vet, then that gofmt -l lists no file (scripts/check-gofmt.sh), then the code map check: docs/codemap.md must be under its size
+# go vet, then that gofmt -l lists no file (scripts/check-gofmt.sh), then that
+# deadcode finds no function unreachable from main and every test
+# (scripts/check-deadcode.sh), then the code map check: docs/codemap.md must be under its size
 # limit, name only paths that exist, and leave out no port, use case or
 # cmd/mw command. Then mw toc check: every long document's table of contents
 # must be current (mw toc fix writes them). Then the timer
@@ -92,6 +94,7 @@ test:
 lint:
 	$(GO) vet -tags $(TAGS) $(PKG)
 	scripts/check-gofmt.sh
+	scripts/check-deadcode.sh
 	scripts/check-codemap.sh
 	$(GO) run ./cmd/mw toc check
 	scripts/check-timer-units.sh

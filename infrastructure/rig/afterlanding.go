@@ -122,11 +122,6 @@ func WithAfterLimit(limit time.Duration) AfterLandingOption {
 	}
 }
 
-// WithAfterShell names the shell that reads the command line.
-func WithAfterShell(path string) AfterLandingOption {
-	return func(a *AfterLanding) { a.shell = path }
-}
-
 // NewAfterLanding returns an AfterLanding that runs nothing until it is told
 // which rigs have a command.
 func NewAfterLanding(opts ...AfterLandingOption) *AfterLanding {

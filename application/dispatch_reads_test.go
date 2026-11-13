@@ -189,11 +189,6 @@ func TestADispatchTickReadsTheInProgressListOnce(t *testing.T) {
 // the WorkTracker alone, none of what a tracker may offer besides.
 type onlyTheTracker struct{ application.WorkTracker }
 
-// perStory is how many reads of one story at a time the pass has made.
-func perStory(tracker *apptest.FakeTracker) int {
-	return tracker.Reads("StoryState") + tracker.Reads("StoryComments") + tracker.Reads("OpenMolecule")
-}
-
 // aPassOfDeadPanes puts n claimed stories here, each with a session that has
 // died, and returns the ids.
 func aPassOfDeadPanes(t *testing.T, tracker *apptest.FakeTracker, runner *apptest.FakeRunner, n int) []string {

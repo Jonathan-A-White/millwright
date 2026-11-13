@@ -163,9 +163,17 @@ type PromptRun struct {
 	// Host is this host's own name; Now the clock the facts are measured by.
 	Host string
 	Now  func() time.Time
-	Out  io.Writer
+	// Retired are the hosts the Governor retired (retired_hosts), as
+	// PosternView.Retired: the view the facts are read from leaves them out.
+	Retired []string
+	Out     io.Writer
 	// Err is where a failure to write the landed memory is said.
 	Err io.Writer
+}
+
+// View is the PosternView the facts are read from.
+func (r PromptRun) View() PosternView {
+	return PosternView{Tracker: r.Tracker, Notes: r.Notes, Signs: r.Signs, Host: r.Host, Retired: r.Retired, Now: r.Now, Err: r.Err}
 }
 
 // Run prints the prompt named name, called with args: `--flag value` or
@@ -244,7 +252,7 @@ func (r PromptRun) facts(ctx context.Context) ([]promptSection, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading the notes: %w", err)
 	}
-	doc, err := PosternView{Tracker: r.Tracker, Notes: r.Notes, Signs: r.Signs, Host: r.Host, Now: r.Now, Err: r.Err}.Build(ctx)
+	doc, err := r.View().Build(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -681,14 +681,14 @@ func TestAChangedStarvedAlarmIsMailedAgain(t *testing.T) {
 		t.Fatalf("expected a second mail for another ready story, got %d", len(inbox))
 	}
 
-	// Another hold: a different alarm again.
+	// Another hold of the same rig and stories is the same alarm (mw-gq6.1194).
 	note := application.StarvedRig{Rig: "millwright", Since: statusNow.Add(-4 * time.Hour), Hold: "no room", Reason: "load 23.9 of 20"}
 	if err := tracker.SetNote(ctx, application.StarvedKey("vps"), application.FormatStarved([]application.StarvedRig{note})); err != nil {
 		t.Fatal(err)
 	}
 	runDoctorsOfTwoHosts(t, tracker, mailbox)
-	if inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox); len(inbox) != 3 {
-		t.Fatalf("expected a third mail for another hold, got %d", len(inbox))
+	if inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox); len(inbox) != 2 {
+		t.Fatalf("expected no mail for another hold of the same alarm, got %d", len(inbox))
 	}
 }
 
@@ -915,19 +915,19 @@ func TestAHoldFlippingBetweenTheCapAndNoRoomMailsTheMayorOnce(t *testing.T) {
 	}
 }
 
-func TestACapOfZeroIsAFaultWithItsOwnIdentity(t *testing.T) {
+func TestACapOfZeroIsAFaultButTheSameStarvingAsTheWaitBeforeIt(t *testing.T) {
 	tracker, mailbox, run := aWaitingRigCheck(t)
 	holdRigBy(t, tracker, "millwright", "no room", "laptop has no room: load 24.3 of 20 cores")
 	run()
 	holdRigBy(t, tracker, "millwright", "cap", zeroCapReason)
 	run()
-	if inbox := mailsToTheMayor(t, mailbox); len(inbox) != 2 {
-		t.Fatalf("expected a mail for the wait and another for the cap of 0, got %d", len(inbox))
+	if inbox := mailsToTheMayor(t, mailbox); len(inbox) != 1 {
+		t.Fatalf("expected the one starving mailed once, got %d", len(inbox))
 	}
-	wait := starvedAlarms(t, tracker)
+	zero := starvedAlarms(t, tracker)
 	holdRigBy(t, tracker, "millwright", "cap", plainCapReason)
-	if now := starvedAlarms(t, tracker); len(wait) != 1 || len(now) != 1 || wait[0].Identity == now[0].Identity {
-		t.Errorf("expected a cap of 0 to differ in identity from a cap of Builders, got %+v and %+v", wait, now)
+	if now := starvedAlarms(t, tracker); len(zero) != 1 || len(now) != 1 || zero[0].Wait || !now[0].Wait || zero[0].Identity != now[0].Identity {
+		t.Errorf("expected a cap of 0 to be a fault and a cap of Builders a wait of one identity, got %+v and %+v", zero, now)
 	}
 }
 
@@ -994,7 +994,7 @@ func TestASecondRigStarvingWhileTheFirstWaitsIsMailed(t *testing.T) {
 	}
 }
 
-func TestAFlipFromAWaitToAFaultStillMailsAndTheFaultStaysAFault(t *testing.T) {
+func TestAFlipFromAWaitToAFaultIsNotMailedAgainAndTheFaultStaysAFault(t *testing.T) {
 	ctx := context.Background()
 	tracker, mailbox, run := aWaitingRigCheck(t)
 	holdRigBy(t, tracker, "millwright", "cap", tutorCapReason)
@@ -1008,8 +1008,8 @@ func TestAFlipFromAWaitToAFaultStillMailsAndTheFaultStaysAFault(t *testing.T) {
 	if report, err := doctor.Run(ctx, "", false); err == nil || !report.Faulty() {
 		t.Fatalf("expected the fault to stay faulty after its mail, got %+v %v", report.Results, err)
 	}
-	if inbox := mailsToTheMayor(t, mailbox); len(inbox) != 2 {
-		t.Fatalf("expected a mail for the wait and one for the fault, got %d", len(inbox))
+	if inbox := mailsToTheMayor(t, mailbox); len(inbox) != 1 {
+		t.Fatalf("expected the one mail of the wait, got %d", len(inbox))
 	}
 }
 
@@ -1139,5 +1139,63 @@ func TestAStarvedNoteOfADestroyedBoxHoldsNoRigBackButOneOfALiveBoxDoes(t *testin
 				t.Errorf("expected %d starved alarms, got %+v", tc.want, alarms)
 			}
 		})
+	}
+}
+
+// mw-gq6.1194: trade-tracker's one ready story was mailed three times in 20
+// minutes as its hold flipped between no room (a wait) and no grist key (a
+// fault). A starved rig is one mail an episode, whatever its hold flips to.
+func TestStarvedMailsOncePerEpisodeWhenTheHoldFlips(t *testing.T) {
+	ctx := context.Background()
+	tracker := starvedFixture(t, 4*time.Hour)
+	mailbox := apptest.NewFakeMailbox()
+	now := doctorNow
+	doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now, aStarvedRigCheckOnHost("laptop", statusNow, tracker, mailbox))
+	// A fault stays faulty after its mail, so a tick on one ends in an error that
+	// is not what is tested here.
+	tick := func() {
+		t.Helper()
+		_, _ = doctor.Run(ctx, "", false)
+	}
+	noRoom := func() { holdRigBy(t, tracker, "millwright", "no room", "laptop has no room: load 18.2 of 16 cores") }
+	noKey := func() { holdRigBy(t, tracker, "millwright", "no grist key", "laptop has no grist key") }
+	mails := func() int { return len(mailsToTheMayor(t, mailbox)) }
+	for _, step := range []func(){noRoom, noKey, noRoom} {
+		step()
+		tick()
+	}
+	if got := mails(); got != 1 {
+		t.Fatalf("expected one mail for one starving whose hold flipped, got %d: %+v", got, mailsToTheMayor(t, mailbox))
+	}
+
+	// The same flips the other way round, from a fault.
+	noKey()
+	tick()
+	noRoom()
+	tick()
+	if got := mails(); got != 1 {
+		t.Fatalf("expected the same episode still one mail, got %d", got)
+	}
+
+	// A story of the rig starts, then the rig starves again: a second mail.
+	if err := tracker.ClaimStory(ctx, "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	tick()
+	if err := tracker.ReleaseClaim(ctx, "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	noKey()
+	tick()
+	noRoom()
+	tick()
+	if got := mails(); got != 2 {
+		t.Fatalf("expected a second mail for the next episode, got %d", got)
+	}
+
+	// The newest hold and reason are what the alarm (and so mw status) shows.
+	alarms := starvedAlarms(t, tracker)
+	if len(alarms) != 1 || !strings.Contains(alarms[0].Text, "held by no room — laptop has no room: load 18.2 of 16 cores") {
+		t.Errorf("expected the alarm to show the newest hold and reason, got %+v", alarms)
 	}
 }

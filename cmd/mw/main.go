@@ -7,15 +7,29 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
+
+	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/commandlog"
 )
 
 func main() {
 	ctx, stop := signalContext()
 	defer stop()
-	if err := newRootCmd().ExecuteContext(ctx); err != nil {
+	if err := runRecorded(ctx); err != nil {
 		// cobra has already printed the error.
 		os.Exit(exitStatus(err))
 	}
+}
+
+// runRecorded runs the command line mw was given and keeps a line of it in this
+// host's command log (~/.local/state/mw/commands.jsonl).
+func runRecorded(ctx context.Context) error {
+	var log application.CommandLog
+	if l, err := commandlog.Default(); err == nil {
+		log = l
+	}
+	return executeRecorded(ctx, newRootCmd(), os.Args[1:], log, time.Now)
 }
 
 // signalContext is the context mw's command tree runs under. SIGTERM (a

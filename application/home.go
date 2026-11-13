@@ -52,12 +52,6 @@ func (e *HomeElsewhere) Error() string {
 	return fmt.Sprintf("this host is not home: %s is home and this host is %s", e.Home, e.Host)
 }
 
-// HomeElsewhereIn reports whether err is a check that found this host not home.
-func HomeElsewhereIn(err error) (*HomeElsewhere, bool) {
-	var elsewhere *HomeElsewhere
-	return elsewhere, errors.As(err, &elsewhere)
-}
-
 // WhereIsHome reads the home record from the vault. Every command that needs to
 // know the home asks here. A missing or unreadable-as-a-record file is a
 // *HomeUnknown; the caller decides what to do without an answer.

@@ -126,7 +126,7 @@ func (v *Vault) Damage(ctx context.Context) (application.VaultDamage, error) {
 		}
 		damage.Corrupt = oneLineOf(err.Error())
 	}
-	gitDir, err := v.git(ctx, "rev-parse", "--absolute-git-dir")
+	rebasing, err := v.StoppedRebase(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
 			return damage, err
@@ -136,12 +136,26 @@ func (v *Vault) Damage(ctx context.Context) (application.VaultDamage, error) {
 		}
 		return damage, nil
 	}
+	damage.Rebasing = rebasing
+	return damage, nil
+}
+
+var _ application.VaultRebaseReader = (*Vault)(nil)
+
+// StoppedRebase implements application.VaultRebaseReader: whether a rebase (or
+// an am) stopped in the vault and was never ended, read from the git directory
+// alone, so that a sync can ask it on every run (mw-gq6.1206).
+func (v *Vault) StoppedRebase(ctx context.Context) (bool, error) {
+	gitDir, err := v.git(ctx, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return false, err
+	}
 	for _, stopped := range []string{"rebase-merge", "rebase-apply"} {
 		if _, err := os.Stat(filepath.Join(strings.TrimSpace(gitDir), stopped)); err == nil {
-			damage.Rebasing = true
+			return true, nil
 		}
 	}
-	return damage, nil
+	return false, nil
 }
 
 // oneLineOf is the last non-empty line of what git said, which is where it puts

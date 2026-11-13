@@ -490,6 +490,9 @@ func newDoctorCmd() *cobra.Command {
 			// A rig whose origin is reached another way than the host's other rigs'
 			// (a git@github.com origin among https ones, mw-gq6.746).
 			rigOrigins := &application.RigOriginsCheck{Origins: doctor.RigOrigins{Rigs: rigsAt}.Origins, Rewritten: doctor.RigOrigins{Rigs: rigsAt}.Rewritten}
+			// A rig's pin of a kit (pwa-kit, voice-kit...) behind the kit's head
+			// in the kit's checkout beside the rig (mw-6ww.175.13).
+			kitLag := &doctor.KitLag{Rigs: rigsAt, KitDir: doctor.SiblingKitDir(rigsAt)}
 			// The follower alive and writing nothing: no bead or mail event for
 			// minutes after the beads' last change, or a view older than them
 			// (mw-gq6.893).
@@ -549,6 +552,7 @@ func newDoctorCmd() *cobra.Command {
 				stuckClaims,
 				rigKinds,
 				rigOrigins,
+				kitLag,
 				followerStalled,
 				ageKey,
 				claudeLogin,

@@ -39,16 +39,6 @@ type gateLockReader interface {
 	HeldSince() time.Time
 }
 
-// CheckGateHeldFileName is the name of the record of the waits of a whole
-// check's tests on the host's gate lock, in the story's run directory, one for
-// the attempt (mw-gq6.906).
-func CheckGateHeldFileName(attempt int) string {
-	if attempt < 1 {
-		attempt = 1
-	}
-	return fmt.Sprintf("check-%d-gate.slot", attempt)
-}
-
 func (k Check) gateNoticeEvery() time.Duration {
 	if k.GateNoticeEvery > 0 {
 		return k.GateNoticeEvery

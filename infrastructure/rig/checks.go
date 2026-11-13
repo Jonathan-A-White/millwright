@@ -98,11 +98,6 @@ func WithParts(parts map[string][]application.GatePart) CheckOption {
 	}
 }
 
-// WithCheckShell names the shell that reads the command line.
-func WithCheckShell(path string) CheckOption {
-	return func(c *Checks) { c.shell = path }
-}
-
 // WithNice runs every rig's tests under `nice -n <n>`, so they yield the CPU to
 // the mill's own work on the same host (mw-gq6.312). 0, the default, runs them
 // as they were.
