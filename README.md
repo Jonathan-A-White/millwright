@@ -2593,6 +2593,7 @@ hourly_usd      = 0.132     # what one box costs an hour
 box_cap         = 2         # sessions a box runs at once
 up_minutes      = 60        # how long a make may run before it reads the box back from Vultr
 slow_make_minutes = 30      # how long a make may run, unfinished, before it is a cloud event and a DAMPERS line
+no_dispatch_minutes = 30    # how long after its make a box may go with no dispatch before it is destroyed
 snapshot        = "<id>"    # what contrib/vultr-boost snapshot printed; blank bootstraps in full
 command         = "<full path to contrib/vultr-boost>"   # default: the millwright checkout of [rigs]
 
