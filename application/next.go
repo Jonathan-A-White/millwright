@@ -3213,6 +3213,9 @@ func (n Next) fileCodemapTrim(ctx context.Context, c *closeOut, report *NextRepo
 
 	path := c.path
 	path.Files, path.Size, path.MaxTurns, path.Bump = "docs/codemap.md", domain.SizeXS, "", ""
+	// The landed story's callers_ok is a reason about its files, not the map's
+	// (mw-gq6.1195).
+	path.CallersOK = ""
 	story := NewStory{
 		EpicID:     c.detail.EpicID,
 		Standalone: c.detail.EpicID == "",
