@@ -210,10 +210,17 @@ func vaultBlockedBody(host, dir string, files []string) string {
 func vaultDamagedBody(host, dir string, blocked *VaultBlocked) string {
 	var b strings.Builder
 	damage := blocked.Damage
-	fmt.Fprintf(&b, "mw dispatch on %s claimed nothing: %s. Git lists %d files as changed, "+
-		"but that is the damage and not work anybody wrote, so do not commit or check them out. "+
-		"Every tick refuses the same way until the repository is mended; this is mailed once an hour.\n",
-		host, damage.Sentence(), len(blocked.Files))
+	if len(blocked.Files) == 0 {
+		fmt.Fprintf(&b, "mw dispatch on %s claimed nothing: %s. Git lists no file as changed, "+
+			"which is how a stopped rebase looks. "+
+			"Every tick refuses the same way until the repository is mended; this is mailed once an hour.\n",
+			host, damage.Sentence())
+	} else {
+		fmt.Fprintf(&b, "mw dispatch on %s claimed nothing: %s. Git lists %d files as changed, "+
+			"but that is the damage and not work anybody wrote, so do not commit or check them out. "+
+			"Every tick refuses the same way until the repository is mended; this is mailed once an hour.\n",
+			host, damage.Sentence(), len(blocked.Files))
+	}
 	if damage.Corrupt != "" {
 		git := "git"
 		if dir != "" {
