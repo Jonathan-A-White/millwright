@@ -171,7 +171,13 @@ chmod +x "$STAND/timeout"
 REAL_DATE=$(command -v date)
 cat >"$STAND/date" <<EOF
 #!/bin/sh
-if [ -f "$T/clock" ] && [ "\$*" = "+%s" ]; then cat "$T/clock"; exit 0; fi
+if [ -f "$T/clock" ] && [ "\$*" = "+%s" ]; then
+	now=\$(cat "$T/clock")
+	# with the file $T/tick each read of the clock is that many seconds after the last
+	if [ -f "$T/tick" ]; then echo \$((now + \$(cat "$T/tick"))) >"$T/clock"; fi
+	echo "\$now"
+	exit 0
+fi
 exec "$REAL_DATE" "\$@"
 EOF
 chmod +x "$STAND/date"
@@ -300,18 +306,35 @@ grep -q 'projection' "$OUT/last" || fail "--lines 2 printed no projection of the
 expect_gone "a trial"
 
 # --- 3b. the import's time limit and its passes --------------------------------
+# limit_is WANT GOT: the limit the import was given is the cap less the seconds
+# the drill itself took between its two reads of the clock, so it is WANT or up to
+# 5 s under it, never over: "21599s " is the cap read a second late.
+limit_is() {
+	got=${2%s }
+	case $got in '' | *[!0-9]*) return 1 ;; esac
+	[ "$got" -le "$1" ] && [ "$got" -ge $(($1 - 5)) ]
+}
 timeouts() { grep '^TIMEOUT ' "$CALLS" | awk '{ print $2 }' | tr '\n' ' '; }
 passes() { grep -c '^IMPORT-PASS ' "$CALLS" || true; }
 run "$T/clean" "$T/dump.jsonl.gz"
 t=$(timeouts)
-[ "$t" = "21600s " ] || fail "the default time limit of the import is not 360 minutes (21600s): got '$t'"
+limit_is 21600 "$t" || fail "the default time limit of the import is not 360 minutes (21600s, or up to 5 s under): got '$t'"
+# the limit is what is left of the cap after the clock was read twice, so a second
+# passing between the two reads (a loaded host) must not fail the check: a clock
+# that ticks one second a read gives 21599s
+echo 1000000 >"$T/clock"
+echo 1 >"$T/tick"
+run "$T/clean" "$T/dump.jsonl.gz"
+rm -f "$T/clock" "$T/tick"
+t=$(timeouts)
+limit_is 21600 "$t" || fail "the default time limit of the import is not 360 minutes (21600s, or up to 5 s under), with the clock one second off: got '$t'"
 run "$T/clean" "$T/dump.jsonl.gz" --timeout 7
 [ "$RC" -eq 0 ] || fail "--timeout 7 exited $RC: $(cat "$OUT/last")"
 t=$(timeouts)
-[ "$t" = "420s " ] || fail "--timeout 7 did not reach the import's time limit (420s): got '$t'"
+limit_is 420 "$t" || fail "--timeout 7 did not reach the import's time limit (420s): got '$t'"
 run "$T/clean" "$T/dump.jsonl.gz" --timeout=2
 t=$(timeouts)
-[ "$t" = "120s " ] || fail "--timeout=2 did not reach the import's time limit (120s): got '$t'"
+limit_is 120 "$t" || fail "--timeout=2 did not reach the import's time limit (120s): got '$t'"
 for bad in 0 abc -5 ""; do
 	run "$T/clean" "$T/dump.jsonl.gz" --timeout "$bad"
 	expect_refused "--timeout '$bad'"
