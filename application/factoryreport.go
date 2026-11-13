@@ -428,12 +428,17 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 
 	// The window line is written now, before the tracker is read, which under
 	// load takes minutes: the rest follows when the report is whole. A landing
-	// has its own text and JSON is one document, so neither writes early.
-	early := r.Out != nil && !r.JSON && result.Landing == nil
+	// writes its own first line, the landing, and JSON is one document, so it
+	// writes nothing early.
+	early := r.Out != nil && !r.JSON
 	if early {
-		var head strings.Builder
-		result.writeHeadline(&head)
-		fmt.Fprint(r.Out, head.String())
+		if result.Landing != nil {
+			fmt.Fprint(r.Out, result.Landing.headline())
+		} else {
+			var head strings.Builder
+			result.writeHeadline(&head)
+			fmt.Fprint(r.Out, head.String())
+		}
 	}
 	// Entries are read back as far as a factory change needs them, a landing
 	// of the last ChangeDays days and the ChangeVerdictDays before it, and as
@@ -651,6 +656,8 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			if err := enc.Encode(result); err != nil {
 				return result, err
 			}
+		} else if early && result.Landing != nil {
+			fmt.Fprint(r.Out, result.Landing.rest())
 		} else if early {
 			var rest strings.Builder
 			result.writeRest(&rest)
