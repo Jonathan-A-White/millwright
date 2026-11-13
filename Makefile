@@ -82,7 +82,11 @@ test:
 # stand-in bd (scripts/check-beads-restore-drill.sh). Then that no tracked line
 # holds more of a term of the vault's private list than the baseline beside it
 # allows (scripts/check-private-terms.sh; it reads the list and baseline in the vault and passes, saying "skipped", where the
-# list or the baseline is missing, and the same check runs in make test). Every
+# list or the baseline is missing, and the same check runs in make test). Then
+# that application/ code that is not a test holds no time.Now() or time.Since(
+# beyond the per-file counts in scripts/realclock-baseline.txt: a wait or
+# timeout bound takes the injected clock, and a deliberate real-clock use says
+# why with //mw:realclock <why> (scripts/check-realclock.sh, mw-gq6.1140). Every
 # other check here reads only this repository (and a temporary directory)
 # and starts nothing.
 lint:
@@ -108,6 +112,7 @@ lint:
 	scripts/check-shellcheck-directives.sh
 	scripts/check-tracked-binaries.sh
 	scripts/check-private-terms.sh
+	scripts/check-realclock.sh
 
 clean:
 	rm -rf bin
