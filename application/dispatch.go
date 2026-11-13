@@ -283,6 +283,18 @@ type Dispatch struct {
 	// guard that cannot run is seen (mw-gq6.640). Nil keeps none.
 	RecheckSkips TickLog
 
+	// Retired are the hosts the Governor retired (retired_hosts), CloudBook and
+	// CloudPlan say which cloud boxes exist, and RepathNoRoom is how long a
+	// host may have had no room before its stories are moved: a tick re-paths
+	// an open story pinned to a retired host, to a box the book no longer holds,
+	// or to a host that has been full for over RepathNoRoom (zero is
+	// DefaultRepathNoRoom) to host=auto, unless its pin says why it must stay
+	// (mw-gq6.1165). A nil CloudBook calls no box gone.
+	Retired      []string
+	CloudBook    CloudBook
+	CloudPlan    CloudPlan
+	RepathNoRoom time.Duration
+
 	// DryRun prints what would be started and writes nothing at all: nothing is
 	// synced, nothing claimed, no worktree made, no formula poured, no session
 	// started.
@@ -486,6 +498,9 @@ type DispatchReport struct {
 	// FixedOnMain is every nightly-suite bug closed before dispatch because its
 	// spec passes on main already.
 	FixedOnMain []FixedOnMain
+	// Repathed is every open story this tick moved to host=auto because its
+	// host cannot take it (mw-gq6.1165).
+	Repathed []Repathed
 	// HarnessHold is the harness stop this host claims nothing new for, until
 	// the time it names (mw-gq6.434); nil when none holds it.
 	HarnessHold *HarnessHold
@@ -1100,7 +1115,11 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	}
 	if roomRead && !d.DryRun {
 		d.tellRoom(ctx, noRoom, &report)
+		d.keepNoRoom(ctx, noRoom, &report)
 	}
+	// A story pinned to a host that cannot take it is moved to host=auto before
+	// the ready stories are read, so this tick may take it (mw-gq6.1165).
+	d.repath(ctx, noRoom, network, &report)
 	free := limit - report.Running
 
 	ready, err := d.Tracker.ReadyForHost(ctx, d.Host)
@@ -3295,6 +3314,9 @@ func (r DispatchReport) String() string {
 			times = "time"
 		}
 		fmt.Fprintf(&b, "  retried the rig fetch %d %s: a name could not be resolved until the network came back\n", r.FetchRetries, times)
+	}
+	for _, line := range r.repathedLines() {
+		fmt.Fprintf(&b, "  %s\n", line)
 	}
 	for _, landed := range r.LandedAlready {
 		fmt.Fprintf(&b, "  closed %s · %s · already landed: %s\n", landed.StoryID, landed.Session, landed.By)

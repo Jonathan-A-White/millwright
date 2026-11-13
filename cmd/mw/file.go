@@ -92,7 +92,16 @@ func newFileCmd() *cobra.Command {
 			// A rig table that cannot be read costs the plan only the wrong-rig warning.
 			rigs, _ := config.Rigs()
 			gristApps, _ := config.GristApps()
+			retired, err := config.RetiredHosts()
+			if err != nil {
+				return err
+			}
+			host, _ := config.Host() // only names the vault checkout the book is read from
+			cloudBook, cloudPlan := cloudStatus(dir, host)
 			filing := application.File{
+				Retired:   retired,
+				CloudBook: cloudBook,
+				CloudPlan: cloudPlan,
 				Tracker:   gateway,
 				Rules:     vault.New(dir),
 				Rigs:      rigs,

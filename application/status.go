@@ -579,6 +579,10 @@ func (r RunningStory) CloseBlocked() bool { return r.FormulaOpen() && !r.Queued(
 type HostWork struct {
 	// Host is the host these stories are pathed to.
 	Host string
+	// Pins are the stories here a dispatch tick leaves pathed to this host
+	// though it cannot take them, because the pin says why it must stay: story
+	// id to "held by its pin: <why>" (mw-gq6.1165).
+	Pins map[string]string
 	// LastSync is when that host recorded itself last level, as its own note
 	// says. It is zero when the host has never recorded one, and zero when the
 	// note it left cannot be read as a time.
@@ -707,6 +711,11 @@ type StatusReport struct {
 	// passed for a reason of the host's own (a rig not checked out there, a
 	// metered network), by story id, as the hosts' notes have it (mw-gq6.703).
 	NoHostTakes map[string]NoHostTakes
+	// HeldByPin are the ready stories pinned to a host that cannot take them
+	// (retired, gone, or full for over the re-path limit) which a dispatch tick
+	// leaves there because the pin says why it must stay (PinWhy), by story id:
+	// "held by its pin: <why>" (mw-gq6.1165).
+	HeldByPin map[string]string
 	// Waiting are the beads labelled hitl that are open and not blocked, on any
 	// host or none, and the stories labelled hitl this host has claimed: worked
 	// with the Governor present, so neither a dispatcher's to take nor a session
@@ -1083,6 +1092,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report.UnderHandsStep = s.underHandsStep(ctx, report.Ready)
 	report.NoGristKey = s.noGristKey(report.Ready)
 	report.NoHostTakes = s.noHostTakes(ctx, report.Ready)
+	report.HeldByPin = s.heldByPin(ctx, report.Ready)
 
 	// A bead for the Governor may have no Path at all, so no listing keyed by
 	// host finds it: ask for the label itself. A hitl story ready on this host
@@ -2151,6 +2161,9 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 		}
 		work = append(work, held)
 	}
+	for i := range work {
+		work[i].Pins = s.pinsOf(ctx, work[i])
+	}
 	return work, nil
 }
 
@@ -2456,6 +2469,9 @@ func (r StatusReport) String() string {
 		}
 		if takes, passed := r.NoHostTakes[d.Story.ID]; passed {
 			wrapInto(&b, "    ", takes.String())
+		}
+		if line := r.HeldByPin[d.Story.ID]; line != "" {
+			wrapInto(&b, "    ", line)
 		}
 	}
 	b.WriteString("\n")
@@ -2889,6 +2905,9 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 	}
 	for _, d := range w.Stories {
 		writeStoryIn(b, "    ", d, strings.TrimPrefix(note+" · "+w.readyOrClaimed(d), " · "))
+		if line := w.Pins[d.Story.ID]; line != "" {
+			wrapInto(b, "      ", line)
+		}
 		if QueuedForBatch(d) {
 			wait := BatchWait{Since: d.QueuedAt}
 			if had, ok := w.Waits[d.Story.ID]; ok {
@@ -2916,6 +2935,9 @@ func (w HostWork) writeRetired(b *strings.Builder, here string) {
 	clip(b, "    re-path: "+RepathHint+here)
 	for _, d := range w.Stories {
 		writeStoryIn(b, "    ", d, w.readyOrClaimed(d))
+		if line := w.Pins[d.Story.ID]; line != "" {
+			wrapInto(b, "      ", line)
+		}
 	}
 }
 
