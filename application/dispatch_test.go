@@ -34,6 +34,9 @@ type fakeWorktrees struct {
 
 	FetchErr, AddErr, RemoveErr error
 
+	// SetupNoteVal is what the fake says Add did beyond cutting the worktree.
+	SetupNoteVal string
+
 	// OnAdd, when set, runs before Add returns AddErr — the hook a test uses to
 	// stand in for a second dispatcher winning the race for the same story in
 	// the instant between this one's Add failing and its release running.
@@ -130,6 +133,15 @@ func (f *fakeWorktrees) Add(_ context.Context, _, dir, branch, start string) err
 	}
 	f.added = append(f.added, fmt.Sprintf("%s %s %s", dir, branch, start))
 	return nil
+}
+
+// SetupNote is the fake's word that Add did more than cut the worktree.
+var _ application.WorktreeSetup = (*fakeWorktrees)(nil)
+
+func (f *fakeWorktrees) SetupNote(dir string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.SetupNoteVal
 }
 
 func (f *fakeWorktrees) Remove(_ context.Context, _, dir, branch string) error {
@@ -1465,6 +1477,22 @@ func TestDispatchRecordsWhenTheClaimWasMade(t *testing.T) {
 	}
 	if !detail.ClaimedAt.Equal(at) {
 		t.Fatalf("expected the story to read back claimed at %v, got %v", at, detail.ClaimedAt)
+	}
+}
+
+// mw-gq6.1126: what a worktree's setup did (npm ci in a node rig) is on the run's notes.
+func TestDispatchSaysOnTheRunsNotesWhatTheWorktreesSetupDid(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, worktrees, _, _ := aFactory(t)
+	worktrees.SetupNoteVal = "ran npm ci in the new worktree (61 s), as this host has no checkout of the rig with node_modules to link from"
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+
+	if _, err := dispatch.Run(ctx); err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+
+	if got := tracker.StateReason("mw-gq6.1", application.RunState); !strings.Contains(got, ", ran npm ci in the new worktree (61 s)") {
+		t.Fatalf("expected the run's notes to say npm ci ran, got %q", got)
 	}
 }
 

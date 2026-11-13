@@ -349,3 +349,128 @@ func TestAFileOfTheBranchIsReadAsTheBranchHasIt(t *testing.T) {
 		t.Errorf("expected a missing branch not found without error, got %v, %v", found, err)
 	}
 }
+
+// aNodeRig is aRig with a package-lock.json pushed, and a stand-in npm that
+// records where it ran and what it was asked, and makes node_modules the way
+// npm ci would. fails makes it exit non-zero with a message instead.
+func aNodeRig(t *testing.T, fails bool) (here, npm, log string) {
+	t.Helper()
+	here, other := aRig(t)
+	write(t, other, "package-lock.json", "{}\n")
+	run(t, other, "git", "add", "-A")
+	run(t, other, "git", "commit", "-qm", "The rig is a node rig")
+	run(t, other, "git", "push", "-q", "origin", "main")
+
+	bin := t.TempDir()
+	log = filepath.Join(bin, "npm.log")
+	npm = filepath.Join(bin, "npm")
+	body := "#!/bin/sh\necho \"$PWD: $*\" >> " + log + "\n"
+	if fails {
+		body += "echo 'npm error code E401: no token for the registry' >&2\nexit 1\n"
+	} else {
+		body += "mkdir node_modules\n"
+	}
+	if err := os.WriteFile(npm, []byte(body), 0o755); err != nil {
+		t.Fatalf("writing the stand-in npm: %v", err)
+	}
+	return here, npm, log
+}
+
+func TestAFreshWorktreeOfANodeRigWithNothingToLinkFromIsInstalledWithNpmCi(t *testing.T) {
+	here, npm, log := aNodeRig(t, false)
+	ctx := context.Background()
+	worktrees := rig.New(rig.WithNpm(npm))
+	if err := worktrees.Fetch(ctx, here); err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	dir := application.WorktreeDir(here, "mw-a.1")
+
+	if err := worktrees.Add(ctx, here, dir, application.StoryBranch("mw-a.1"), application.StartPoint(rig.DefaultRemote, "main")); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "node_modules")); err != nil {
+		t.Errorf("the worktree has no node_modules after Add: %v", err)
+	}
+	ran, _ := os.ReadFile(log)
+	if want := dir + ": ci --no-audit --no-fund\n"; string(ran) != want {
+		t.Errorf("npm was run as %q, want %q", ran, want)
+	}
+	note := worktrees.SetupNote(dir)
+	if !strings.Contains(note, "npm ci") || !strings.Contains(note, "link") {
+		t.Errorf("the setup note is %q, want it to say npm ci was run because there was nothing to link from", note)
+	}
+}
+
+func TestAFreshWorktreeIsNotInstalledWhenTheRigsCheckoutHasNodeModules(t *testing.T) {
+	here, npm, log := aNodeRig(t, false)
+	ctx := context.Background()
+	worktrees := rig.New(rig.WithNpm(npm))
+	if err := os.Mkdir(filepath.Join(here, "node_modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := worktrees.Fetch(ctx, here); err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	dir := application.WorktreeDir(here, "mw-a.1")
+
+	if err := worktrees.Add(ctx, here, dir, application.StoryBranch("mw-a.1"), application.StartPoint(rig.DefaultRemote, "main")); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if ran, err := os.ReadFile(log); err == nil {
+		t.Errorf("npm ran although the rig's checkout has node_modules: %s", ran)
+	}
+	if note := worktrees.SetupNote(dir); note != "" {
+		t.Errorf("the setup note is %q, want none", note)
+	}
+}
+
+func TestAFreshWorktreeOfARigWithoutAPackageLockIsNotInstalled(t *testing.T) {
+	here, _ := aRig(t)
+	ctx := context.Background()
+	log := filepath.Join(t.TempDir(), "npm.log")
+	npm := filepath.Join(filepath.Dir(log), "npm")
+	if err := os.WriteFile(npm, []byte("#!/bin/sh\necho ran >> "+log+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	worktrees := rig.New(rig.WithNpm(npm))
+	if err := worktrees.Fetch(ctx, here); err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	dir := application.WorktreeDir(here, "mw-a.1")
+
+	if err := worktrees.Add(ctx, here, dir, application.StoryBranch("mw-a.1"), application.StartPoint(rig.DefaultRemote, "main")); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if _, err := os.Stat(log); err == nil {
+		t.Error("npm ran for a rig with no package-lock.json")
+	}
+}
+
+func TestAFailedNpmCiFailsAddWithItsErrorAndLeavesNothingBehind(t *testing.T) {
+	here, npm, _ := aNodeRig(t, true)
+	ctx := context.Background()
+	worktrees := rig.New(rig.WithNpm(npm))
+	if err := worktrees.Fetch(ctx, here); err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	dir := application.WorktreeDir(here, "mw-a.1")
+	branch := application.StoryBranch("mw-a.1")
+
+	err := worktrees.Add(ctx, here, dir, branch, application.StartPoint(rig.DefaultRemote, "main"))
+	if err == nil {
+		t.Fatal("Add succeeded although npm ci failed")
+	}
+	for _, want := range []string{"npm ci", "E401: no token for the registry"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error %q does not say %q", err, want)
+		}
+	}
+	if there, _ := worktrees.Exists(ctx, here, dir, branch); there {
+		t.Error("the worktree or its branch is still there after the failed install")
+	}
+	if note := worktrees.SetupNote(dir); note != "" {
+		t.Errorf("the setup note is %q after a failure, want none", note)
+	}
+}

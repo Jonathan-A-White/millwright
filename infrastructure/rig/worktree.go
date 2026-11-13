@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -30,6 +31,8 @@ import (
 const (
 	Program       = "git"
 	DefaultRemote = "origin"
+	// Npm is the command a node rig's fresh worktree is installed with.
+	Npm = "npm"
 )
 
 // Worktrees makes and removes the worktrees of the rigs this host has checked
@@ -45,6 +48,12 @@ type Worktrees struct {
 	endProcess func(pid int) error
 	// writersWait is how long endWriters tries (mw-gq6.876).
 	writersWait time.Duration
+	// npm is the command that installs a node rig's packages in a fresh
+	// worktree (mw-gq6.1126), and setupNotes what Add did there, by worktree
+	// directory, for SetupNote to hand on.
+	npm        string
+	setupMu    sync.Mutex
+	setupNotes map[string]string
 }
 
 // Worktrees satisfies the port.
@@ -52,6 +61,7 @@ var _ application.Worktrees = (*Worktrees)(nil)
 var _ application.SuiteTrees = (*Worktrees)(nil)
 var _ application.CommitNotes = (*Worktrees)(nil)
 var _ application.RigHeads = (*Worktrees)(nil)
+var _ application.WorktreeSetup = (*Worktrees)(nil)
 var _ application.FactoryCommits = (*Worktrees)(nil)
 
 // Option is a setting of a Worktrees, given to New.
@@ -82,6 +92,13 @@ func WithRefreshLimit(d time.Duration) Option {
 	return func(w *Worktrees) { w.refreshLimit = d }
 }
 
+// WithNpm names the npm command a node rig's fresh worktree is installed with,
+// for a host that keeps it somewhere unusual and for a test that needs a
+// stand-in.
+func WithNpm(program string) Option {
+	return func(w *Worktrees) { w.npm = program }
+}
+
 // WithMergeScript replaces the trim-safe merge driver mw carries
 // (millwright.TrimMergeScript) on every merge and rebase: for a test that needs
 // a driver that fails.
@@ -91,7 +108,7 @@ func WithMergeScript(script string) Option {
 
 // New returns a Worktrees that runs git as this host has it.
 func New(opts ...Option) *Worktrees {
-	w := &Worktrees{program: Program, remote: DefaultRemote, raceWait: DefaultRaceWait, refreshLimit: GrindRefreshLimit,
+	w := &Worktrees{program: Program, remote: DefaultRemote, npm: Npm, raceWait: DefaultRaceWait, refreshLimit: GrindRefreshLimit,
 		writersWait: writersWait,
 		endProcess:  func(pid int) error { return syscall.Kill(pid, syscall.SIGKILL) }}
 	for _, opt := range opts {
@@ -177,8 +194,74 @@ func (w *Worktrees) Add(ctx context.Context, rigDir, dir, branch, start string) 
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return fmt.Errorf("making the directory the worktree %s belongs in: %w", dir, err)
 	}
-	_, err := w.git(ctx, rigDir, "worktree", "add", "-b", branch, dir, start)
-	return err
+	if _, err := w.git(ctx, rigDir, "worktree", "add", "-b", branch, dir, start); err != nil {
+		return err
+	}
+	return w.setUp(ctx, rigDir, dir, branch)
+}
+
+// SetupNote implements application.WorktreeSetup: what the last Add of dir did
+// beyond cutting it, or nothing.
+func (w *Worktrees) SetupNote(dir string) string {
+	w.setupMu.Lock()
+	defer w.setupMu.Unlock()
+	return w.setupNotes[dir]
+}
+
+func (w *Worktrees) noteSetup(dir, note string) {
+	w.setupMu.Lock()
+	defer w.setupMu.Unlock()
+	if w.setupNotes == nil {
+		w.setupNotes = map[string]string{}
+	}
+	if note == "" {
+		delete(w.setupNotes, dir)
+		return
+	}
+	w.setupNotes[dir] = note
+}
+
+// setUp installs the packages of a node rig in a worktree just cut, so that a
+// session finds node_modules where it starts (mw-gq6.1126). A rig with no
+// package-lock.json is left alone, and so is one whose own checkout holds a
+// node_modules, which is what a session on a host that has the rig links from.
+// A failed install takes the worktree and its branch away again and fails the
+// Add with npm's own words, so the story is not started on a tree that lacks
+// its packages.
+func (w *Worktrees) setUp(ctx context.Context, rigDir, dir, branch string) error {
+	w.noteSetup(dir, "")
+	if _, err := os.Stat(filepath.Join(dir, "package-lock.json")); err != nil {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(dir, "node_modules")); err == nil {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(rigDir, "node_modules")); err == nil {
+		return nil
+	}
+	started := time.Now()
+	cmd := exec.CommandContext(ctx, w.npm, "ci", "--no-audit", "--no-fund")
+	cmd.Dir = dir
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		said := strings.TrimSpace(out.String())
+		if len(said) > 2000 {
+			said = "..." + said[len(said)-2000:]
+		}
+		failure := fmt.Errorf("npm ci in the new worktree %s failed, so the story is not started: %w", dir, err)
+		if said != "" {
+			failure = fmt.Errorf("npm ci in the new worktree %s failed, so the story is not started: %w: %s", dir, err, said)
+		}
+		if gone := w.Remove(ctx, rigDir, dir, branch); gone != nil {
+			failure = fmt.Errorf("%w (and the worktree could not be taken away: %v)", failure, gone)
+		}
+		return failure
+	}
+	w.noteSetup(dir, fmt.Sprintf("ran npm ci in the new worktree (%d s), as this host has no checkout of the rig with node_modules to link from",
+		int(time.Since(started).Round(time.Second)/time.Second)))
+	return nil
 }
 
 // AddDetached implements application.SuiteTrees: a worktree of the rig at dir,

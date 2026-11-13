@@ -541,7 +541,8 @@ func (c *nextContext) claimAndCut(id string) error {
 		return err
 	}
 
-	worktrees := rig.New()
+	// "true" stands in for npm: a fixture rig has a package-lock.json, and npm ci must not run for real (mw-gq6.1126).
+	worktrees := rig.New(rig.WithNpm("true"))
 	if err := worktrees.Fetch(ctx, c.rig); err != nil {
 		return err
 	}
@@ -1077,7 +1078,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 // stand-ins only for the beads database and the terminal. mw land is built on
 // the same (features/batch_land.feature).
 func (c *nextContext) nextUseCase() application.Next {
-	worktrees := rig.New(rig.WithProgram(c.gitProgram))
+	worktrees := rig.New(rig.WithProgram(c.gitProgram), rig.WithNpm("true"))
 	c.worktrees = worktrees
 	rigs := map[string]string{c.rigKey(): c.rig}
 	files := vault.New(c.vault)
