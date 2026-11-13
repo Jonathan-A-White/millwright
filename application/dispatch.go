@@ -922,8 +922,8 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			d.print("  " + note + "\n")
 			return report, nil
 		}
-		if blocked, ok := Blocked(err); ok && VaultFilesDispatchDoesNotRead(blocked.Files) {
-			// Only helper scripts are uncommitted: the beads half ran, the vault
+		if blocked, ok := Blocked(err); ok && d.vaultFilesLeftAlone(ctx, blocked.Files) {
+			// Only helper scripts (or, off the home, the cloud's files) are uncommitted: the beads half ran, the vault
 			// half was left alone, and nothing dispatch reads is stale. The Mayor
 			// is told, and the tick goes on to claim (mw-gq6.1018).
 			note := fmt.Sprintf("the vault holds uncommitted changes to %s, which no dispatch reads, so it was left alone and the claims go on", strings.Join(blocked.Files, ", "))
