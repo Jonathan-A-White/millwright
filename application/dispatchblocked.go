@@ -56,8 +56,8 @@ func (d Dispatch) tellVaultBlocked(ctx context.Context, err error, report *Dispa
 	}
 	subject := fmt.Sprintf("%s: dispatch on %s is refused, the vault holds uncommitted changes", MailBlocked, d.Host)
 	body := vaultBlockedBody(d.Host, d.VaultDir, blocked.Files)
-	if VaultFilesDispatchDoesNotRead(blocked.Files) {
-		subject = fmt.Sprintf("Note: dispatch on %s went on, the vault holds uncommitted helper scripts", d.Host)
+	if d.vaultFilesLeftAlone(ctx, blocked.Files) {
+		subject = fmt.Sprintf("Note: dispatch on %s went on, the vault holds uncommitted files no dispatch reads", d.Host)
 		body = vaultWentOnBody(d.Host, d.VaultDir, blocked.Files)
 	}
 	if _, serr := d.Mailbox.Send(ctx, NewMessage{
@@ -87,7 +87,51 @@ func VaultFilesDispatchDoesNotRead(files []string) bool {
 		return false
 	}
 	for _, file := range files {
-		if !strings.HasPrefix(path.Clean(file), VaultHelperDir+"/") {
+		if !vaultFileIsHelperScript(file) {
+			return false
+		}
+	}
+	return true
+}
+
+// VaultCloudDir is the vault directory the cloud keeps its files in: the book
+// (cloud.json), each box's sealed state and keys, the cap. The home alone makes
+// and destroys boxes, so the home alone writes them, each in a step with its own
+// commit; no rig's dispatch, claim or boot reads anything in it (mw-gq6.1162).
+const VaultCloudDir = "hosts/vultr"
+
+// vaultFileIsHelperScript says whether file lies under the vault's bin/.
+func vaultFileIsHelperScript(file string) bool {
+	return strings.HasPrefix(path.Clean(file), VaultHelperDir+"/")
+}
+
+// vaultFileIsCloudFile says whether file lies under the cloud's directory.
+func vaultFileIsCloudFile(file string) bool {
+	return strings.HasPrefix(path.Clean(file), VaultCloudDir+"/")
+}
+
+// vaultFilesLeftAlone says whether a dispatch refused on files may go on and
+// claim: every one is a helper script under bin/ (any host), or a file of the
+// cloud under hosts/vultr/ on a host this vault's home file says is not home.
+// Such a file there is what a make or check cut short left (the make runs in a
+// session of its own, and outlives a home that has moved on), not work the home
+// is waiting to see, and nothing dispatch reads is stale. On the home itself,
+// or where home cannot be told, a cloud file still refuses: it is the home's
+// own book, and its check commits it as found (mw-gq6.1162).
+func (d Dispatch) vaultFilesLeftAlone(ctx context.Context, files []string) bool {
+	if len(files) == 0 {
+		return false
+	}
+	notHome := false
+	if d.Home != nil {
+		home, err := IsHome(ctx, d.Home, d.Host)
+		notHome = err == nil && !home
+	}
+	for _, file := range files {
+		switch {
+		case vaultFileIsHelperScript(file):
+		case vaultFileIsCloudFile(file) && notHome:
+		default:
 			return false
 		}
 	}
@@ -95,14 +139,49 @@ func VaultFilesDispatchDoesNotRead(files []string) bool {
 }
 
 // vaultWentOnBody is the mail for a dispatch that went on past uncommitted
-// helper scripts: nothing was refused, but the vault half of the sync was left
-// alone, so this host is not level with the others until they are committed.
+// files no dispatch reads: nothing was refused, but the vault half of the sync
+// was left alone, so this host is not level with the others until they are
+// committed (helper scripts) or put back (the cloud's files, which the home
+// alone writes).
 func vaultWentOnBody(host, dir string, files []string) string {
-	return fmt.Sprintf("mw dispatch on %s went on and claimed what was ready: the vault holds uncommitted changes to %s, "+
-		"helper scripts that no dispatch reads. Until they are committed the vault is not pulled or pushed on this host "+
-		"(mw commits nobody's work for them); this is mailed once an hour for the same files.\n"+
-		"\nCommit them as found once their author is done,\n  %s\n",
-		host, strings.Join(files, ", "), VaultBlockedFix(dir, host, files))
+	var b strings.Builder
+	var scripts, cloud []string
+	for _, file := range files {
+		if vaultFileIsCloudFile(file) {
+			cloud = append(cloud, file)
+		} else {
+			scripts = append(scripts, file)
+		}
+	}
+	fmt.Fprintf(&b, "mw dispatch on %s went on and claimed what was ready: the vault holds uncommitted changes to %s, "+
+		"files that no dispatch reads. Until they are committed or put back the vault is not pulled or pushed on this host "+
+		"(mw commits nobody's work for them); this is mailed once an hour for the same files.\n",
+		host, strings.Join(files, ", "))
+	if len(scripts) > 0 {
+		fmt.Fprintf(&b, "\n%s are helper scripts. Commit them as found once their author is done,\n  %s\n",
+			strings.Join(scripts, ", "), VaultBlockedFix(dir, host, scripts))
+	}
+	if len(cloud) > 0 {
+		fmt.Fprintf(&b, "\n%s belong to the cloud, which the home alone writes, and %s is not home: they are what a make or check "+
+			"cut short on this host left. Keep the change if you want it (git -C ... diff -- <file> > aside.patch), then put them back,\n  %s\n"+
+			"and the next sync brings the home's copy in.\n",
+			strings.Join(cloud, ", "), host, VaultRestoreFix(dir, cloud))
+	}
+	return b.String()
+}
+
+// VaultRestoreFix is the one command that puts files back to what the vault last
+// committed, in the vault at dir. An empty dir is the vault the command is run in.
+func VaultRestoreFix(dir string, files []string) string {
+	words := []string{"git"}
+	if dir != "" {
+		words = append(words, "-C", shellWord(dir))
+	}
+	words = append(words, "checkout", "--")
+	for _, file := range files {
+		words = append(words, shellWord(file))
+	}
+	return strings.Join(words, " ")
 }
 
 // vaultFileWriters says, for a vault file mw writes and commits itself, who

@@ -263,3 +263,75 @@ func TestDispatchStillRefusesWhenAFileUnderSeatsIsUncommittedBesideOneUnderBin(t
 		}
 	}
 }
+
+// mw-gq6.1162: a cloud make cut short on a host that is not home leaves the
+// cloud's files (the book, a box's sealed state) uncommitted in its vault. The
+// home alone writes the book, and no dispatch reads any of them, so such a
+// vault does not stop the claim on and every tick after.
+func TestDispatchClaimsAReadyStoryWhenAHalfWrittenCloudBookIsLeftOnAHostThatIsNotHome(t *testing.T) {
+	ctx := context.Background()
+	left := []string{"hosts/vultr/cloud.json", "hosts/vultr/cloud6.tfstate.age"}
+	dispatch, mailbox, now := aBlockedDispatch(t, left...)
+	dispatch.VaultDir = "/home/jwhite/millwright-vault"
+	dispatch.Home = &apptest.FakeHomeFile{Text: "laptop 2026-11-12T23:31:00Z mayor\n"}
+	tracker := dispatch.Tracker.(*apptest.FakeTracker)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("expected a half-written cloud book on a host that is not home not to refuse the tick, got %v", err)
+	}
+	if len(report.Started) != 1 {
+		t.Fatalf("expected the ready story claimed, got %v", startedIDs(report))
+	}
+
+	*now = now.Add(time.Minute)
+	if _, err := dispatch.Run(ctx); err != nil {
+		t.Fatalf("expected the second tick not to be refused, got %v", err)
+	}
+	inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox)
+	if len(inbox) != 1 {
+		t.Fatalf("expected one mail to the mayor, got %d", len(inbox))
+	}
+	if strings.HasPrefix(inbox[0].Subject, application.MailBlocked) {
+		t.Errorf("expected a mail that is no refusal, got %q", inbox[0].Subject)
+	}
+	for _, want := range []string{
+		"hosts/vultr/cloud.json", "hosts/vultr/cloud6.tfstate.age", "home alone",
+		"git -C /home/jwhite/millwright-vault checkout -- hosts/vultr/cloud.json hosts/vultr/cloud6.tfstate.age",
+	} {
+		if !strings.Contains(inbox[0].Body, want) {
+			t.Errorf("expected the mail to say %q, got:\n%s", want, inbox[0].Body)
+		}
+	}
+}
+
+// The home's own book left uncommitted is the home's to commit, as before; and
+// a host that cannot tell where home is takes no chance with it.
+func TestDispatchStillRefusesAHalfWrittenCloudBookOnTheHomeOrWhenHomeIsUnknown(t *testing.T) {
+	ctx := context.Background()
+	for name, home := range map[string]application.HomeFile{
+		"home":    &apptest.FakeHomeFile{Text: "vps 2026-11-12T23:31:00Z mayor\n"},
+		"unknown": &apptest.FakeHomeFile{Missing: true},
+		"none":    nil,
+	} {
+		dispatch, _, _ := aBlockedDispatch(t, "hosts/vultr/cloud.json")
+		dispatch.Home = home
+		tracker := dispatch.Tracker.(*apptest.FakeTracker)
+		tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+
+		report, err := dispatch.Run(ctx)
+		if err == nil || len(report.Started) != 0 {
+			t.Errorf("%s: expected the dispatch refused, got err %v and started %v", name, err, startedIDs(report))
+		}
+	}
+}
+
+// A cloud file beside a file dispatch does read still refuses, off the home.
+func TestDispatchStillRefusesACloudFileBesideASeatFileOnAHostThatIsNotHome(t *testing.T) {
+	dispatch, _, _ := aBlockedDispatch(t, "hosts/vultr/cloud.json", "seats/mayor/ledger.md")
+	dispatch.Home = &apptest.FakeHomeFile{Text: "laptop 2026-11-12T23:31:00Z mayor\n"}
+	if _, err := dispatch.Run(context.Background()); err == nil {
+		t.Fatal("expected the dispatch refused")
+	}
+}
