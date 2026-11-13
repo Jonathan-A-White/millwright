@@ -129,7 +129,7 @@ func newTesterFileCmd() *cobra.Command {
 		Long: "file is what a Tester runs for each finding that still happens on main, in place of the Mayor's triage.\n" +
 			"It reads the landed story from the Tester story's 'Landed story:' line and files, held, under the landed\n" +
 			"story's epic: '[bug] <app>: <title>' (or [taste]), the finding verbatim with its source, shot and the fix\n" +
-			"marked PROVISIONAL, HOW TO CHECK IT, the acceptance, the landed story's path with host auto (or --host)\n" +
+			"marked PROVISIONAL, HOW TO CHECK IT, the acceptance, the landed story's path with host auto (or --host; host=auto for a retired host or a gone cloud box)\n" +
 			"and --files as its files key, priority 2 for a bug and 3 for a taste finding, a wait on every running\n" +
 			"or open story of the rig, and on every earlier held finding of the same landing, that names the same\n" +
 			"file, and the epic's open demo waiting on it. A finding whose title an open bead of the rig already has is not filed: the bead\n" +
@@ -158,11 +158,19 @@ func newTesterFileCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			retired, err := config.RetiredHosts()
+			if err != nil {
+				return err
+			}
+			cloudBook, cloudPlan := cloudStatus(dir, host)
 			_, err = application.TesterFiler{
-				Tracker: mwGateway(dir, host),
-				Rules:   vault.New(dir),
-				Out:     cmd.OutOrStdout(),
-				Seat:    BuilderSeat,
+				Tracker:   mwGateway(dir, host),
+				Rules:     vault.New(dir),
+				Out:       cmd.OutOrStdout(),
+				Seat:      BuilderSeat,
+				Retired:   retired,
+				CloudBook: cloudBook,
+				CloudPlan: cloudPlan,
 
 				Register: vault.New(dir),
 			}.File(cmd.Context(), args[0], finding)
