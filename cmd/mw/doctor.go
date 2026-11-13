@@ -18,6 +18,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/domain/events"
+	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/configfile"
@@ -427,7 +428,7 @@ func newDoctorCmd() *cobra.Command {
 			wslTrim.Note = func(ctx context.Context, text string) error {
 				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.WSLTrimName), text)
 			}
-			dampers, err := damperSurvey(mwGateway(vault, host), vault, host)
+			dampers, err := doctorDamperSurvey(vault, host)
 			if err != nil {
 				return err
 			}
@@ -608,6 +609,16 @@ func newDoctorCmd() *cobra.Command {
 	cmd.Flags().StringVar(&posternBin, "postern", "postern", "for licences: the postern binary the backend runs, asked for `rights --json`")
 	cmd.AddCommand(newDoctorUnitFailedCmd())
 	return cmd
+}
+
+// doctorDamperSurvey is the damper survey the doctor's starved-rig check and its
+// dampers line read: the Starved, Refused and DamperCounts reads each want the
+// list of every bead, so the survey's tracker keeps it for the run and bd is
+// asked once (mw-6ww.175.41). Only this tracker keeps; the doctor's notes, mail
+// and verdicts go through gateways that ask bd afresh, so a note written in the
+// run is read as written.
+func doctorDamperSurvey(vault, host string) (application.DamperSurvey, error) {
+	return damperSurvey(mwGateway(vault, host, beads.WithRunCache()), vault, host)
 }
 
 // doctorCheckBudget is how long one check's probe, or the dampers read, may take
