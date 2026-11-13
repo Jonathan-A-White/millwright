@@ -208,13 +208,15 @@ Feature: The cloud grows and shrinks by demand
     And the Governor's card says "Vultr fee limit reached: raise it at my.vultr.com or wait for the month"
     And mw status says "Vultr fee limit reached since"
 
-  Scenario: The fee limit is not tried every minute, and the Governor has one card
+  Scenario: The fee limit is not tried again for an hour, and the Governor has one card
     Given Vultr refuses to make a box: "Your account has reached its maximum monthly fee limit"
     And every host is full
     And 5 stories wait for any host
     When the cloud check runs 3 times, a minute apart
     Then the provider was asked to make "cloud1", destroy "cloud1"
     When 11 minutes pass and the cloud check runs
+    Then the provider was asked to make "cloud1", destroy "cloud1"
+    When 50 minutes pass and the cloud check runs
     Then the provider was asked to make "cloud1", destroy "cloud1", make "cloud1", destroy "cloud1"
     And the Governor was sent 1 card
     And 1 cloud event says "Vultr fee limit reached"
@@ -225,7 +227,7 @@ Feature: The cloud grows and shrinks by demand
     And 5 stories wait for any host
     And the cloud check runs
     And the provider fails to make a box 0 times
-    When 11 minutes pass and the cloud check runs
+    When 61 minutes pass and the cloud check runs
     Then 1 cloud box is up
     And a cloud event says "made cloud1"
 
