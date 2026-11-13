@@ -49,6 +49,7 @@ asks. `--dry-run` prints the numbered steps and changes nothing.
 - [Revoking the box's tokens](#revoking-the-boxs-tokens)
 - [Elastic: boxes made and destroyed by demand](#elastic-boxes-made-and-destroyed-by-demand)
   - [A box dispatches every five minutes, not hourly](#a-box-dispatches-every-five-minutes-not-hourly)
+  - [A box takes no story until the home has cleared it](#a-box-takes-no-story-until-the-home-has-cleared-it)
   - [A box is brought to the home's Claude Code before its timer is set](#a-box-is-brought-to-the-homes-claude-code-before-its-timer-is-set)
   - [A changed box_cap reaches the boxes already up](#a-changed-box_cap-reaches-the-boxes-already-up)
   - [Stories pathed to a box that goes down](#stories-pathed-to-a-box-that-goes-down)
