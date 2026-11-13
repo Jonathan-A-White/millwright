@@ -275,8 +275,9 @@ func foundBugs(id string, lines []string) []foundBug {
 }
 
 // foundPathPattern finds a repo path in a finding: segments joined by '/', a
-// last one with an extension, then an optional ':line' or ':line-line'.
-var foundPathPattern = regexp.MustCompile(`(?:[A-Za-z0-9_.\-]+/)*[A-Za-z0-9_\-]+\.[a-z][a-z0-9]{0,5}\b(?::\d+(?:-\d+)?)?`)
+// last one with an extension (its name may hold dots: attachment-viewer.spec.ts),
+// then an optional ':line' or ':line-line'.
+var foundPathPattern = regexp.MustCompile(`(?:[A-Za-z0-9_.\-]+/)*[A-Za-z0-9_\-]+(?:\.[A-Za-z0-9_\-]+)*\.[a-z][a-z0-9]{0,5}\b(?::\d+(?:-\d+)?)?`)
 
 // foundBareExtensions are the extensions a name with no directory must have to
 // be read as a file: 'e.g.' and 'application.Next' name none.
@@ -746,6 +747,9 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 		// (mw-gq6.672, mw-gq6.1195); the Builder's size for the finding is set below.
 		overrides := c.path.WithoutSourceKeys()
 		overrides.Files = foundFiles(bug.said(), c.path.Files)
+		// The finder's host is about the finder's work, so the bug goes to any host
+		// (mw-gq6.1255).
+		overrides.Host = domain.HostAuto
 		acceptance := ""
 		if bug.item != nil {
 			acceptance = bug.item.Acceptance()

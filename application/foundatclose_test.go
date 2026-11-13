@@ -364,6 +364,46 @@ func TestAFoundStoryFiledAtCloseOutCarriesNoCallersOK(t *testing.T) {
 	}
 }
 
+// A bug filed from a finding keeps whole a file name with several dots, and is
+// not pinned to the finder's host: the host is about the finder's work
+// (mw-gq6.1255, seen on mw-6ww.175.35 and mw-gq6.1248).
+func TestAFoundStoryKeepsADottedFileNameWholeAndIsNotPinnedToTheFindersHost(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A landed story", Overrides: domain.Path{
+		Host:  "desktop",
+		Files: "application/next.go",
+	}})
+	mustDo(t, tracker.ClaimStory(ctx, "mw-x.1"))
+	mustDo(t, tracker.SetStoryState(ctx, "mw-x.1", application.RunState, application.RunLanded, "landed on main"))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", "Done.\nFound, not fixed:\n"+
+		"The viewer spec misses a case (tests/e2e/attachment-viewer.spec.ts:12) and the helper test (src/a.test.tsx). AC: go test ./application passes. By design? no\n"+
+		"For the rig memory: nothing"))
+	before := tracker.Stories()
+	lands := &fakeRetryLanding{}
+	_, err := application.Next{
+		Tracker: tracker, Vault: newFakeVault(), Worktrees: lands, Landing: lands,
+		Checks: checkStub{}, Slot: slotStub{}, Mailbox: apptest.NewFakeMailbox(),
+		Seat: "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	mustDo(t, err)
+
+	filed := theTestersFiled(t, tracker, before)
+	if len(filed) != 1 {
+		t.Fatalf("expected 1 bug filed, got %d: %+v", len(filed), filed)
+	}
+	path := filed[0].Merged()
+	if path.Files != "tests/e2e/attachment-viewer.spec.ts,src/a.test.tsx" {
+		t.Errorf("expected both dotted file names whole in the files key, got %q", path.Files)
+	}
+	if path.Host != domain.HostAuto {
+		t.Errorf("expected the host auto, not the finder's, got %q", path.Host)
+	}
+}
+
 // A finding the Builder says is by design is filed saying so.
 func TestAFindingSaidToBeByDesignIsFiledSayingSo(t *testing.T) {
 	tracker, rules := aBatchEpicToTest(t)
