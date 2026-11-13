@@ -69,6 +69,12 @@ type EpicRequirements struct {
 	// story is held on purpose. Off by default. It is no requirement of an epic
 	// either, so Any does not count it.
 	ReleaseOnPath bool
+	// NeedsLaptop says the rig's work can only be done on the Laptop (a
+	// --morpheus run, the phone): a story of the rig pinned to host=laptop is a
+	// pin that must stay, and is never re-pathed to another host when the Laptop
+	// is full (mw-gq6.1165). Off by default. It is no requirement of an epic
+	// either, so Any does not count it.
+	NeedsLaptop bool
 	// NightlySuite says the rig's whole test suite is run on its main each night
 	// (mw suite), and SuiteEpic is the epic the beads that run files are filed
 	// under. Neither is a requirement of an epic, so Any does not count them.

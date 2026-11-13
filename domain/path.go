@@ -174,10 +174,18 @@ type Path struct {
 	// key outside Fields, so a path's eleven keys are as they were, and a story's
 	// own like Files; a plan writes it as the story's "callers_ok" instead.
 	CallersOK string `json:"-"`
+	// HostWhy is why the story's host key must stay as it is (mw-gq6.1165): a
+	// reason, not a flag. A story carrying one is never re-pathed to host=auto
+	// when its host is retired, gone or full. It is a story metadata key outside
+	// Fields, and a story's own like Files.
+	HostWhy string `json:"-"`
 }
 
 // CallersOKField is the metadata key a story's CallersOK is stored under.
 const CallersOKField = "callers_ok"
+
+// HostWhyField is the metadata key a story's HostWhy is stored under.
+const HostWhyField = "host_why"
 
 // BumpMinor is the one value a path's bump may hold.
 const BumpMinor = "minor"
@@ -264,6 +272,8 @@ func (p *Path) Set(field, value string) error {
 		p.Bump = value
 	case CallersOKField:
 		p.CallersOK = value
+	case HostWhyField:
+		p.HostWhy = value
 	default:
 		return UnknownFieldError{Field: field}
 	}
@@ -297,6 +307,8 @@ func (p Path) Field(field string) (string, error) {
 		return p.Bump, nil
 	case CallersOKField:
 		return p.CallersOK, nil
+	case HostWhyField:
+		return p.HostWhy, nil
 	default:
 		return "", UnknownFieldError{Field: field}
 	}
@@ -315,6 +327,9 @@ func (p Path) Metadata() map[string]string {
 	}
 	if p.CallersOK != "" {
 		m[CallersOKField] = p.CallersOK
+	}
+	if p.HostWhy != "" {
+		m[HostWhyField] = p.HostWhy
 	}
 	return m
 }
@@ -401,6 +416,9 @@ func (p Path) Overlay(override Path) Path {
 	}
 	if override.CallersOK != "" {
 		p.CallersOK = override.CallersOK
+	}
+	if override.HostWhy != "" {
+		p.HostWhy = override.HostWhy
 	}
 	return p
 }
