@@ -5,17 +5,22 @@ import (
 	"strings"
 )
 
-// SummaryLines is the most lines the phone summary of mw report send has, not
-// counting the cloud make alarm lines (up to two for each slow make) it says
-// under HIS TIME (mw-gq6.1128).
-const SummaryLines = 19
+// SummaryLines is the most lines the phone summary of mw report send has when
+// everything it can say is on, with the default of two boxes (box_cap) making
+// slowly: 25 lines of the report itself (QUALITY with the share, its parts and
+// its two-line bound, SPEED, FUEL, HIS TIME, CHANGES, MODELS with its four
+// columns, and CHEAP WINS with its two wrapped wins) and the two lines of each
+// cloud make alarm (mw-gq6.1128). It was 19 and held by no test; the fullest
+// summary now is built in factoryreport_summary_test.go and held to it. Each
+// box beyond two adds up to two lines.
+const SummaryLines = 29
 
 // Summary is the report as a phone reads it: the window, then QUALITY (escaped
 // bugs and the investment share against its target among it), SPEED, FUEL and
 // CHEAP WINS for the whole factory, each number with its arrow against the
 // window before, a CHANGES line when a factory change went WORSE, and before
-// CHEAP WINS a MODELS line a model, in at most SummaryLines lines of
-// ReportWidth columns.
+// CHEAP WINS a MODELS line a model, in at most SummaryLines lines (with no more
+// than two slow-making boxes) of ReportWidth columns.
 func (r FactoryReportResult) Summary() string {
 	days := int(reportDay(r.Window.Until).Sub(r.Window.Since).Hours() / 24)
 	var b strings.Builder
