@@ -1381,3 +1381,34 @@ func TestTheViewListsNoUpNextForARetiredHost(t *testing.T) {
 		t.Fatalf("expected no Up next group for the retired desktop, got %d stories (hosts %+v)", n, doc.Hosts)
 	}
 }
+
+// A host the Governor retired (retired_hosts) is no host the Map lists, though
+// its old sync note still names it and a story is still pathed to it: it
+// raises no "has not synced" alarm either (mw-gq6.1178).
+func TestTheViewLeavesARetiredHostOut(t *testing.T) {
+	tracker := aHostSyncedLongAgoHoldingAClaim(t)
+	syncedAt(t, tracker, "laptop", 0)
+	doc, err := application.PosternView{
+		Tracker: tracker,
+		Notes:   tracker,
+		Host:    "laptop",
+		Retired: []string{"cloud2"},
+		Now:     func() time.Time { return statusNow },
+	}.Build(context.Background())
+	if err != nil {
+		t.Fatalf("building the view: %v", err)
+	}
+	for _, h := range doc.Hosts {
+		if h.Name == "cloud2" {
+			t.Fatalf("expected no retired host in the Map's hosts, got %+v", doc.Hosts)
+		}
+	}
+	if len(doc.Hosts) != 1 || doc.Hosts[0].Name != "laptop" {
+		t.Fatalf("expected the live laptop to stay listed, got %+v", doc.Hosts)
+	}
+	for _, need := range doc.Needs {
+		if need.Kind == application.PosternNeedAlarm {
+			t.Fatalf("expected no not-synced alarm for a retired host, got %+v", need)
+		}
+	}
+}
