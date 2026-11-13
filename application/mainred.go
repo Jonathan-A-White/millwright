@@ -618,7 +618,7 @@ func (n Next) carriedBy(ctx context.Context, c *closeOut, report *NextReport, re
 		}
 	}
 	path := c.path.WithoutSourceKeys()
-	path.Files, path.MaxTurns = "", ""
+	path.Files = ""
 	title := "[bug] main is red: " + red.tests()
 	story := NewStory{
 		EpicID:     c.detail.EpicID,

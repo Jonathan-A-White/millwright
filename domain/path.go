@@ -182,12 +182,13 @@ type Path struct {
 }
 
 // WithoutSourceKeys is the path a story filed from another story's path starts
-// from: the keys that are about the source's own files and change, its size,
-// bump and callers_ok, are left empty, as mw path set --from copies none of
-// them (mw-gq6.672, mw-gq6.1195, mw-gq6.1227). The rig, branch, host, model,
-// effort and formula stay, and the filing sets whatever else is its own.
+// from: the keys that are about the source's own files, change and host, its
+// size, bump, callers_ok, host_why and max_turns, are left empty, as mw path
+// set --from copies none of them (mw-gq6.672, mw-gq6.1195, mw-gq6.1227,
+// mw-gq6.1240). The rig, branch, host, model, effort and formula stay, and the
+// filing sets whatever else is its own.
 func (p Path) WithoutSourceKeys() Path {
-	p.Size, p.Bump, p.CallersOK = "", "", ""
+	p.Size, p.Bump, p.CallersOK, p.HostWhy, p.MaxTurns = "", "", "", "", ""
 	return p
 }
 

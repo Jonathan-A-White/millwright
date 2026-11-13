@@ -19,12 +19,16 @@ import (
 
 const theSourcesCallersOK = "adds one new branch; the 44 callers are unchanged"
 
+const theSourcesHostWhy = "needs the laptop's display"
+
 func theSourceStory() domain.Story {
 	return domain.Story{ID: "mw-x.1", Title: "A landed story", Overrides: domain.Path{
 		CallersOK: theSourcesCallersOK,
 		Size:      domain.SizeM,
 		Bump:      "minor",
 		Files:     "application/next.go",
+		HostWhy:   theSourcesHostWhy,
+		MaxTurns:  "150",
 	}}
 }
 
@@ -39,6 +43,16 @@ func noneOfTheSourcesKeys(t *testing.T, path domain.Path) {
 	if path.Bump != "" {
 		t.Errorf("expected no bump copied from the source, got %q", path.Bump)
 	}
+	if path.HostWhy != "" {
+		t.Errorf("expected no host_why copied from the source, got %q", path.HostWhy)
+	}
+	if path.MaxTurns != "" {
+		t.Errorf("expected no max_turns copied from the source, got %q", path.MaxTurns)
+	}
+}
+
+func TestAnUnmetACBugCarriesNoHostWhyOrMaxTurns(t *testing.T) {
+	TestAnUnmetACBugCarriesNoCallersOK(t)
 }
 
 func TestAnUnmetACBugCarriesNoCallersOK(t *testing.T) {
