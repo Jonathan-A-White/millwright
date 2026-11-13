@@ -96,6 +96,13 @@ func (r TesterReport) Run(ctx context.Context) (TesterReportResult, error) {
 		return TesterReportResult{}, fmt.Errorf("reporting the Tester trial: it needs the tracker and the vault")
 	}
 	result := TesterReportResult{Since: r.since(), Until: r.Trial.Until}
+	// The first line is written now, before the tracker is read, which under
+	// load takes minutes: the rest follows when the report is whole.
+	if r.Out != nil {
+		var head strings.Builder
+		result.writeHeadline(&head)
+		fmt.Fprint(r.Out, head.String())
+	}
 	stories, err := r.Tracker.StoriesSince(ctx, result.Since)
 	if err != nil {
 		return result, fmt.Errorf("reporting the Tester trial: %w", err)
@@ -167,7 +174,9 @@ func (r TesterReport) Run(ctx context.Context) (TesterReportResult, error) {
 		result.Rigs = append(result.Rigs, *rigs[name])
 	}
 	if r.Out != nil {
-		fmt.Fprint(r.Out, result.String())
+		var rest strings.Builder
+		result.writeRest(&rest)
+		fmt.Fprint(r.Out, rest.String())
 	}
 	return result, nil
 }
@@ -222,29 +231,41 @@ func (r TesterReport) since() time.Time {
 // String is the report as mw tester report prints it, for the demo to paste.
 func (r TesterReportResult) String() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Tester trial since %s", r.Since.UTC().Format("2006-01-02 15:04 UTC"))
+	r.writeHeadline(&b)
+	r.writeRest(&b)
+	return b.String()
+}
+
+// writeHeadline prints the report's first line, the trial's window, which Run
+// writes before it reads the tracker.
+func (r TesterReportResult) writeHeadline(b *strings.Builder) {
+	fmt.Fprintf(b, "Tester trial since %s", r.Since.UTC().Format("2006-01-02 15:04 UTC"))
 	if !r.Until.IsZero() {
-		fmt.Fprintf(&b, ", until %s", r.Until.UTC().Format("2006-01-02 15:04 UTC"))
+		fmt.Fprintf(b, ", until %s", r.Until.UTC().Format("2006-01-02 15:04 UTC"))
 	}
 	b.WriteString("\n")
+}
+
+// writeRest prints everything after the first line.
+func (r TesterReportResult) writeRest(b *strings.Builder) {
 	if len(r.Rigs) == 0 {
 		b.WriteString("\nno rig is in the trial, and no Tester ran\n")
 	}
 	for _, rig := range r.Rigs {
-		fmt.Fprintf(&b, "\n%s\n", rig.Rig)
-		fmt.Fprintf(&b, "  %-22s %d\n", "landings in the trial", len(rig.Landings))
-		fmt.Fprintf(&b, "  %-22s %d\n", "Tester runs", len(rig.Runs))
+		fmt.Fprintf(b, "\n%s\n", rig.Rig)
+		fmt.Fprintf(b, "  %-22s %d\n", "landings in the trial", len(rig.Landings))
+		fmt.Fprintf(b, "  %-22s %d\n", "Tester runs", len(rig.Runs))
 		found := rig.Findings()
 		split := fmt.Sprintf("%d bug, %d taste", found.Bug, found.Taste)
 		if found.Untagged > 0 {
 			split += fmt.Sprintf(", %d not tagged", found.Untagged)
 		}
-		fmt.Fprintf(&b, "  %-22s %d (%s)\n", "findings", found.Count(), split)
+		fmt.Fprintf(b, "  %-22s %d (%s)\n", "findings", found.Count(), split)
 		bugs := fmt.Sprintf("%d", len(rig.Bugs))
 		if len(rig.Bugs) > 0 {
 			bugs += ": " + strings.Join(rig.Bugs, ", ")
 		}
-		fmt.Fprintf(&b, "  %-22s %s\n", "[bug] from a finding", bugs)
+		fmt.Fprintf(b, "  %-22s %s\n", "[bug] from a finding", bugs)
 		if len(rig.Runs) == 0 {
 			continue
 		}
@@ -260,11 +281,10 @@ func (r TesterReportResult) String() string {
 				fuel = fuelSpent(run.Tokens, run.CostUSD)
 				total, cost = total+run.Tokens, cost+run.CostUSD
 			}
-			fmt.Fprintf(&b, "    %s  tested %s  %s  %s\n", run.ID, orNone(run.Landed), found, fuel)
+			fmt.Fprintf(b, "    %s  tested %s  %s  %s\n", run.ID, orNone(run.Landed), found, fuel)
 		}
-		fmt.Fprintf(&b, "  %-22s %s\n", "Tester fuel in all", fuelSpent(total, cost))
+		fmt.Fprintf(b, "  %-22s %s\n", "Tester fuel in all", fuelSpent(total, cost))
 	}
-	return b.String()
 }
 
 // orNone is text, or "(none named)" when it is empty.
