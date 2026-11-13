@@ -1328,7 +1328,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	resultPath := n.Vault.RunFile(c.id, resultName)
 	printed, err := n.Vault.ReadRunFile(ctx, c.id, resultName)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", err), "")
+		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", err), n.paneTailSaid(ctx, c))
 	}
 	result, readErr := ReadSessionResult(printed)
 	if readErr != nil {
@@ -1358,7 +1358,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		why, said := n.emptyResult(ctx, c, resultName, resultPath)
 		return n.stop(ctx, c, report, ReasonNoResult, why, harnessCrashStopSaid(c, said))
 	case readErr != nil:
-		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", readErr), "")
+		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", readErr), n.paneTailSaid(ctx, c))
 	}
 	c.result, report.Result = result, result
 	fetched := false

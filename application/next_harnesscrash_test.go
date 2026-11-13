@@ -60,6 +60,19 @@ func aCrashedCloseOut(t *testing.T, attempts int, pane string, kept []string, la
 // writeResult is true and never written at all when it is false.
 func aCloseOutWithAResult(t *testing.T, attempts int, pane string, kept []string, lands *fakeRetryLanding, writeResult bool) *crashedRun {
 	t.Helper()
+	return aCloseOutWithAResultFile(t, attempts, pane, kept, lands, func(path string) {
+		if writeResult {
+			if err := os.WriteFile(path, nil, 0o644); err != nil {
+				t.Fatalf("writing the empty result: %v", err)
+			}
+		}
+	})
+}
+
+// aCloseOutWithAResultFile is aCloseOutWithAResult, the result file made by
+// makeResult, which is given its path (and may leave it unmade).
+func aCloseOutWithAResultFile(t *testing.T, attempts int, pane string, kept []string, lands *fakeRetryLanding, makeResult func(path string)) *crashedRun {
+	t.Helper()
 	ctx := context.Background()
 	dispatch, tracker, _, runner, vaultDir := aFactory(t)
 	now := time.Date(2026, 11, 12, 19, 46, 34, 0, time.UTC)
@@ -73,11 +86,7 @@ func aCloseOutWithAResult(t *testing.T, attempts int, pane string, kept []string
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("making the run directory: %v", err)
 	}
-	if writeResult {
-		if err := os.WriteFile(filepath.Join(dir, application.ResultFileNameForAttempt(attempts)), nil, 0o644); err != nil {
-			t.Fatalf("writing the empty result: %v", err)
-		}
-	}
+	makeResult(filepath.Join(dir, application.ResultFileNameForAttempt(attempts)))
 	for _, file := range kept {
 		if err := os.WriteFile(filepath.Join(dir, file), []byte("kept\n"), 0o644); err != nil {
 			t.Fatalf("writing %s: %v", file, err)
@@ -210,6 +219,43 @@ func TestAMissingResultStopCarriesThePaneTail(t *testing.T) {
 	}
 	if !strings.Contains(run.comments(), "the last thing the session printed") {
 		t.Errorf("expected the stop's comment to carry the pane's tail, got:\n%s", run.comments())
+	}
+}
+
+// mw-gq6.1225: the two stops for a result that is there but cannot be read
+// (the file does not open; it opens and is not a result) carry the pane's tail
+// too.
+func TestAReadErrorStopCarriesThePaneTail(t *testing.T) {
+	cases := map[string]func(t *testing.T) func(path string){
+		"the file cannot be read": func(t *testing.T) func(string) {
+			return func(path string) {
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatalf("making a directory where the result is: %v", err)
+				}
+			}
+		},
+		"the file is not a result": func(t *testing.T) func(string) {
+			return func(path string) {
+				if err := os.WriteFile(path, []byte("this is not json\n"), 0o644); err != nil {
+					t.Fatalf("writing the result: %v", err)
+				}
+			}
+		},
+	}
+	for name, makeResult := range cases {
+		t.Run(name, func(t *testing.T) {
+			run := aCloseOutWithAResultFile(t, 1, "working\nthe last thing the session printed\n", nil, nil, makeResult(t))
+
+			if run.report.Reason != application.ReasonNoResult {
+				t.Fatalf("expected %s, got %q: %s (%v)", application.ReasonNoResult, run.report.Reason, run.report.Why, run.err)
+			}
+			if !strings.Contains(run.report.Why, "could not be read") {
+				t.Fatalf("expected the stop for a result that could not be read, got: %s", run.report.Why)
+			}
+			if !strings.Contains(run.comments(), "the last thing the session printed") {
+				t.Errorf("expected the stop's comment to carry the pane's tail, got:\n%s", run.comments())
+			}
+		})
 	}
 }
 
