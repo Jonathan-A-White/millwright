@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -116,5 +117,43 @@ func TestTheHarnessLevelCureOnlyReports(t *testing.T) {
 	check.Probe(context.Background())
 	if err := check.Cure(context.Background()); err == nil || !strings.Contains(err.Error(), "cloud1") {
 		t.Errorf("expected the cure to fail saying what is behind, got %v", err)
+	}
+}
+
+// mw-gq6.1209: a harness note a box that is gone left, or one written before the
+// box now holding the name was made, is none of that box's: the check reads it
+// as no version, never as the old box's Claude Code.
+func TestHarnessLevelLeavesOutTheNoteOfAnOlderBox(t *testing.T) {
+	ctx := context.Background()
+	made := time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)
+	plan := application.CloudPlan{Prefix: "cloud"}
+	for _, c := range []struct {
+		name     string
+		synced   time.Time // when cloud1 last synced; zero leaves no last-sync note
+		boxes    []application.CloudBox
+		wantWord string
+		verdict  application.Verdict
+	}{
+		{"a note from before the box was made", made.Add(-time.Hour), []application.CloudBox{{Name: "cloud1", Up: made}}, "unread", application.DoctorCannotTell},
+		{"a note with no last sync beside it", time.Time{}, []application.CloudBox{{Name: "cloud1", Up: made}}, "unread", application.DoctorCannotTell},
+		{"a note of a box the book no longer holds", made.Add(-time.Hour), nil, "unread", application.DoctorCannotTell},
+		{"a note from after the box was made", made.Add(time.Hour), []application.CloudBox{{Name: "cloud1", Up: made}}, "behind", application.DoctorFaulty},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			check := hlCheck(t, "2.1.322", map[string]string{"desktop": "2.1.322", "cloud1": "2.1.300"})
+			notes := check.Notes.(*apptest.FakeDoctorNotes)
+			if !c.synced.IsZero() {
+				_ = notes.SetNote(ctx, application.LastSyncKey("cloud1"), c.synced.Format(application.LastSyncFormat))
+			}
+			check.Book = &apptest.FakeCloudBook{State: application.CloudState{Boxes: c.boxes}}
+			check.Plan = plan
+			verdict, reason := check.Probe(ctx)
+			if verdict != c.verdict {
+				t.Fatalf("expected %s, got %s (%s)", c.verdict, verdict, reason)
+			}
+			if !strings.Contains(reason, "cloud1") || !strings.Contains(reason, c.wantWord) {
+				t.Errorf("expected the reason to name cloud1 and %q, got %q", c.wantWord, reason)
+			}
+		})
 	}
 }
