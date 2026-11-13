@@ -389,6 +389,12 @@ type Next struct {
 	// attempt is cut from it, rebased onto the target. Off, nothing is written.
 	RetryFromBranch bool
 
+	// RescopedByMayor is the why of mw next --rescoped-by-mayor (mw-gq6.1147):
+	// the Mayor re-scoped the story after its claim and wrote a closing comment
+	// of his own. The close-out records it on the bead, and the acceptance-changed
+	// refusal then lets the story through. Empty is no such word.
+	RescopedByMayor string
+
 	// HasGristTestKey says whether this host holds the factory's grist test key,
 	// and so can reach the live mill a grind example is proved on. A host that
 	// holds none and stops a branch grist-example-unproved pushes the branch to
@@ -1280,6 +1286,9 @@ func (n Next) closeOut(ctx context.Context, storyID string, began time.Time) (Ne
 			return n.closeATested(ctx, c, &report)
 		}
 	}
+	if err := n.recordRescope(ctx, c, &report); err != nil {
+		return report, err
+	}
 	return n.land(ctx, c, &report)
 }
 
@@ -2070,7 +2079,9 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 
 	// What the story's acceptance reads now, against what the claim recorded: a
 	// criterion added since never reached the session (mw-gq6.509).
-	if refusal, changed := acceptanceChangedRefusal(c); changed && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+	// The Mayor can answer the change: a re-scope recorded on the bead and a
+	// closing comment of his own after it (mw-gq6.1147).
+	if refusal, changed := acceptanceChangedRefusal(c); changed && !n.acceptanceRescoped(ctx, c, base) && refuse(refusal.Reason, refusal.Why, refusal.Said) {
 		return found
 	}
 
