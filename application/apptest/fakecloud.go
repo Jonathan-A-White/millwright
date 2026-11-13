@@ -67,10 +67,15 @@ type FakeCloud struct {
 	// SetSessionDenys asked, as "<box> <list>" (mw-t5shinh.33).
 	SessionDenies map[string]string
 	denyCalls     []string
-	BilledUSD     float64
-	BilledKnown   bool
-	begun         []string
-	made          []application.CloudInstance
+	// CheckFaults is what each box's own check finds wrong, by name: a box not
+	// named passes. CheckCalls are the CheckBoxes asked, by box name; a box that
+	// is Unreachable cannot be asked (mw-gq6.1172).
+	CheckFaults map[string][]string
+	checkCalls  []string
+	BilledUSD   float64
+	BilledKnown bool
+	begun       []string
+	made        []application.CloudInstance
 }
 
 var _ application.CloudProvider = (*FakeCloud)(nil)
@@ -266,6 +271,25 @@ func (f *FakeCloud) SetSessionDeny(_ context.Context, name string, rules []strin
 	changed := f.SessionDenies[name] != literal
 	f.SessionDenies[name] = literal
 	return changed, nil
+}
+
+// CheckBox implements application.CloudProvider: the box passes unless
+// CheckFaults names it, and cannot be asked when it is Unreachable.
+func (f *FakeCloud) CheckBox(_ context.Context, name string) (application.CloudBoxChecked, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.checkCalls = append(f.checkCalls, name)
+	if f.Unreachable[name] {
+		return application.CloudBoxChecked{}, fmt.Errorf("ssh %s: no route to the box", name)
+	}
+	return application.CloudBoxChecked{Faults: append([]string(nil), f.CheckFaults[name]...)}, nil
+}
+
+// CheckCalls are the boxes asked to check themselves, in order.
+func (f *FakeCloud) CheckCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.checkCalls...)
 }
 
 // SessionDenyCalls are the SetSessionDenys asked for, in order, each "<box> <list>".

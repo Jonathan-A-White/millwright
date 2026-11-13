@@ -34,6 +34,10 @@ const downLimit = 20 * time.Minute
 // and the box's, each with a connect timeout of 15 seconds.
 const setCapLimit = 2 * time.Minute
 
+// checkBoxLimit is how long a box's own check may take: git fsck of a dozen
+// checkouts and go mod verify, on a box that may be working (mw-gq6.1172).
+const checkBoxLimit = 5 * time.Minute
+
 // errRanPast is a run stopped at its limit.
 var errRanPast = errors.New("ran past its limit")
 
@@ -236,6 +240,33 @@ func (v Vultr) SetPace(ctx context.Context, name string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%s set-pace printed no pace: the box's timer pace is not known", v.Command)
+}
+
+// CheckBox implements application.CloudProvider: `check --name <box>`, which
+// reads the box's WireGuard address off the hub and has the box check its own
+// disk over ssh. Each thing wrong is a "fault = " line of the wrapper's, and
+// its last "check = " line says the check ran to its end: without one the box
+// was not asked, which is an error and no verdict (mw-gq6.1172).
+func (v Vultr) CheckBox(ctx context.Context, name string) (application.CloudBoxChecked, error) {
+	out, err := v.run(ctx, checkBoxLimit, "check", "--name", name)
+	if err != nil {
+		return application.CloudBoxChecked{}, err
+	}
+	var found application.CloudBoxChecked
+	ran := false
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if fault, is := strings.CutPrefix(line, "fault = "); is && fault != "" {
+			found.Faults = append(found.Faults, fault)
+		}
+		if _, is := strings.CutPrefix(line, "check = "); is {
+			ran = true
+		}
+	}
+	if !ran {
+		return application.CloudBoxChecked{}, fmt.Errorf("%s check printed no \"check = \" line: whether %s is sound is not known", v.Command, name)
+	}
+	return found, nil
 }
 
 // SetHarness implements application.CloudProvider: `set-harness --name <box>

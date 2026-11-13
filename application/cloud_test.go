@@ -43,7 +43,7 @@ func (*stuckCloud) Down(context.Context, string) error { return errors.New("terr
 func TestABoxThatCannotBeDestroyedStaysInTheBookAndFailsTheCheck(t *testing.T) {
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	up := now.Add(-2 * time.Hour)
-	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-10", Boxes: []application.CloudBox{{Name: "cloud1", Up: up, IdleSince: up}}}}
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-10", Boxes: []application.CloudBox{{Name: "cloud1", Up: up, IdleSince: up, Checked: up}}}}
 	log := &apptest.FakeEventLog{}
 	_, err := application.CloudCheck{
 		Work: apptest.NewFakeTracker(), Provider: &stuckCloud{}, Book: book, Log: log, Host: "desktop",
@@ -1448,7 +1448,7 @@ func TestTheQuietAlarmIsNotRaisedForABoxTheCloudBookDoesNotHold(t *testing.T) {
 
 func TestTheQuietAlarmIsStillRaisedForABoxUpAndSilent(t *testing.T) {
 	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11",
-		Boxes: []application.CloudBox{{Name: "cloud2", Up: statusNow.Add(-5 * time.Hour)}}}}
+		Boxes: []application.CloudBox{{Name: "cloud2", Up: statusNow.Add(-5 * time.Hour), Checked: statusNow.Add(-4 * time.Hour)}}}}
 	found := false
 	for _, c := range quietAlarmOf(t, book) {
 		found = found || c.Key == "host:cloud2"

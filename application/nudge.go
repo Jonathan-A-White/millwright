@@ -180,7 +180,8 @@ type Nudge struct {
 
 // CloudBoxesDown is DownHosts over the cloud's book: a host is a down box when
 // its name is one the plan gives a box and the book holds no such box, or holds
-// it still being made or restored. A box destroyed has no sync to be quiet
+// it still being made or restored, or not cleared to work (CloudBox.MayWork: its
+// own check has not passed, or Vultr reports it locked). A box destroyed has no sync to be quiet
 // about; and a box made again under the name of one destroyed has not synced
 // yet, so the old box's last sync says nothing of it (mw-gq6.1127). A box being
 // made has a clause of its own, from Nudge.CloudBook.
@@ -201,7 +202,9 @@ func (d CloudBoxesDown) Down(ctx context.Context, host string) (bool, error) {
 	}
 	for _, box := range state.Boxes {
 		if box.Name == host {
-			return box.Making || box.Restoring, nil
+			// A box the home has not cleared runs no dispatch of its own, as one
+			// being made does not (mw-gq6.1172).
+			return !box.MayWork(), nil
 		}
 	}
 	return true, nil
