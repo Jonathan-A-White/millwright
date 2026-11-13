@@ -181,6 +181,15 @@ func newCloudMakeCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("no [cloud] table in the config, or this host is not home: no box is made")
 			}
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			host, err := config.Host()
+			if err != nil {
+				return err
+			}
+			files := mwVault(dir, host)
 			return application.CloudMake{
 				Provider: check.Provider,
 				Book:     check.Book,
@@ -190,6 +199,9 @@ func newCloudMakeCmd() *cobra.Command {
 				Plan:     check.Plan,
 				Out:      check.Out,
 				Lock:     waitForCloudLock,
+				Home: func(ctx context.Context) (bool, error) {
+					return application.IsHome(ctx, files, host)
+				},
 			}.Run(cmd.Context(), args[0])
 		},
 	}

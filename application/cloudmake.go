@@ -35,6 +35,10 @@ type CloudMake struct {
 	// Lock takes the lock a cloud check holds while it runs, waiting for it,
 	// and returns the release. Nil takes none.
 	Lock func(ctx context.Context) (release func(), err error)
+	// Home says whether this host is still home, asked each time the lock is
+	// taken: a make runs for minutes, and the home may move meanwhile. Nil
+	// takes the host for home.
+	Home func(ctx context.Context) (bool, error)
 }
 
 // Run makes the box name, and returns once the book says how it ended.
@@ -78,6 +82,16 @@ func (m CloudMake) now() time.Time {
 	return m.Now().UTC()
 }
 
+// errCloudMakeNotHome is why a make wrote nothing: the home moved while it
+// worked, and the book is now the new home's to write.
+var errCloudMakeNotHome = errors.New("this host is no longer home")
+
+// notHome says that the make of name stopped for the home having moved. The
+// box, if the provider made one, stays for the new home's check to find.
+func (m CloudMake) notHome(name string) {
+	m.say("%s: %v, so the book is not written and the make of %s stops; a box the provider made is left for the home's own check to find", name, errCloudMakeNotHome, name)
+}
+
 // locked reads the book under the lock, lets change work on it and keeps what
 // it did.
 func (m CloudMake) locked(ctx context.Context, change func(p *cloudPass)) error {
@@ -87,6 +101,17 @@ func (m CloudMake) locked(ctx context.Context, change func(p *cloudPass)) error 
 			return fmt.Errorf("taking the cloud lock: %w", err)
 		}
 		defer release()
+	}
+	// The home is asked with the lock held, so a check that moves it cannot
+	// do so between this and the write.
+	if m.Home != nil {
+		home, err := m.Home(ctx)
+		if err != nil {
+			return fmt.Errorf("telling whether this host is home: %w", err)
+		}
+		if !home {
+			return errCloudMakeNotHome
+		}
 	}
 	state, err := m.Book.Read(ctx)
 	if err != nil {
@@ -139,6 +164,10 @@ func (m CloudMake) begin(ctx context.Context, name string, try int) (goOn bool) 
 		p.dirty = "making " + name
 		goOn = true
 	})
+	if errors.Is(err, errCloudMakeNotHome) {
+		m.notHome(name)
+		return false
+	}
 	if err != nil {
 		m.say("%v", err)
 		return false
@@ -231,6 +260,10 @@ func (m CloudMake) settle(ctx context.Context, name string, try int, started tim
 		}
 		p.dirty = failed
 	})
+	if errors.Is(err, errCloudMakeNotHome) {
+		m.notHome(name)
+		return true, nil
+	}
 	if err != nil {
 		m.say("%v", err)
 		return true, err
