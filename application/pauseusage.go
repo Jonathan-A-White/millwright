@@ -139,10 +139,7 @@ func (u UsageFloorSet) Run(ctx context.Context, percent float64, until time.Time
 	if percent <= 0 || percent >= 100 {
 		return fmt.Errorf("a floor of %v%% is not between 0 and 100", percent)
 	}
-	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
-	if u.Now != nil {
-		now = u.Now()
-	}
+	now := u.now()
 	if !until.After(now) {
 		return fmt.Errorf("the end of the floor, %s, is not in the future", until.UTC().Format(time.RFC3339))
 	}
@@ -271,10 +268,7 @@ func (u UsageSet) Run(ctx context.Context, percent float64, resets time.Time) er
 	if percent < 0 || percent > 100 {
 		return fmt.Errorf("a usage of %v%% is not between 0 and 100", percent)
 	}
-	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
-	if u.Now != nil {
-		now = u.Now()
-	}
+	now := u.now()
 	now = now.UTC()
 	if resets.IsZero() {
 		if all, err := u.Readings.All(ctx); err == nil && len(all) > 0 && all[len(all)-1].Resets.After(now) {
@@ -354,10 +348,7 @@ type UsageShow struct {
 
 // Run prints the floor, the last reading and where it stands.
 func (u UsageShow) Run(ctx context.Context) error {
-	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
-	if u.Now != nil {
-		now = u.Now()
-	}
+	now := u.now()
 	now = now.UTC()
 	floor, err := u.Floors.Get(ctx)
 	if err != nil {
@@ -440,10 +431,7 @@ type ResumePlanner struct {
 // missing, when it cannot measure the rate or when the newest reading is stale
 // (UsageReading.Stale); the caller then has no time.
 func (p ResumePlanner) Plan(ctx context.Context) (ResumePlan, error) {
-	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
-	if p.Now != nil {
-		now = p.Now()
-	}
+	now := p.now()
 	now = now.UTC()
 	all, err := p.Readings.All(ctx)
 	if err != nil {
@@ -539,4 +527,32 @@ func (p ResumePlanner) rate(ctx context.Context, all []UsageReading) (float64, s
 	}
 	return rate, fmt.Sprintf("%.3f%%/h at full throttle (%.0f tokens an hour, the busiest %d of %d days; %.2e%% a token from %.1f%% in %d tokens)",
 		rate, perHour, n, usageLookbackDays, perToken, last.Percent-first.Percent, spent), nil
+}
+
+func (u UsageFloorSet) now() time.Time {
+	if u.Now != nil {
+		return u.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
+}
+
+func (u UsageSet) now() time.Time {
+	if u.Now != nil {
+		return u.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
+}
+
+func (u UsageShow) now() time.Time {
+	if u.Now != nil {
+		return u.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
+}
+
+func (p ResumePlanner) now() time.Time {
+	if p.Now != nil {
+		return p.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

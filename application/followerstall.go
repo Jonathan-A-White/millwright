@@ -57,10 +57,7 @@ func (c *FollowerStallCheck) limit() time.Duration {
 
 // Probe implements DoctorCheck.
 func (c *FollowerStallCheck) Probe(ctx context.Context) (Verdict, string) {
-	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
-	if c.Now != nil {
-		now = c.Now()
-	}
+	now := c.now()
 	if c.Up != nil {
 		up, err := c.Up(ctx)
 		if err != nil {
@@ -148,3 +145,10 @@ func (c *FollowerStallCheck) Damper() (time.Duration, int) { return time.Hour, 1
 
 // WayBack implements DoctorCheck.
 func (c *FollowerStallCheck) WayBack() string { return "nothing was changed" }
+
+func (c *FollowerStallCheck) now() time.Time {
+	if c.Now != nil {
+		return c.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
+}
