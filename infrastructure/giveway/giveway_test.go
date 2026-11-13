@@ -150,3 +150,44 @@ func TestPanesOfARealTmuxOnASocketOfItsOwn(t *testing.T) {
 		t.Fatalf("panes = %+v, want the session mw-x_1 of the -L server", got)
 	}
 }
+
+// noProcesses is a host with nothing running, so an On has only the panes to go by.
+type noProcesses struct{}
+
+func (noProcesses) List(context.Context) ([]application.GiveWayProcess, error) { return nil, nil }
+func (noProcesses) Stop(context.Context, int, string) (bool, error)            { return false, nil }
+func (noProcesses) Continue(context.Context, int, string) (bool, error)        { return false, nil }
+func (noProcesses) Lower(context.Context, int, string) (bool, error)           { return false, nil }
+
+// mw-2891blf.27: a host whose PATH lacks tmux (wsl.exe --exec runs mw with no
+// login environment) has no panes to freeze; giveway.log says so, so that a
+// give-way that froze nothing is not a silent one.
+func TestPanesSaysWhenTmuxIsNotFound(t *testing.T) {
+	ctx := context.Background()
+	store := Store{Dir: t.TempDir()}
+	missing := filepath.Join(t.TempDir(), "no-such-tmux")
+	servers := ServersFor([]string{"mw-seat"}).WithLog(store)
+	for i := range servers {
+		servers[i].Program = missing
+	}
+	way := application.GiveWay{
+		Processes: noProcesses{}, Panes: servers, Marker: store, Log: store, Host: "desktop",
+		Now: func() time.Time { return time.Date(2026, 11, 13, 17, 0, 0, 0, time.UTC) },
+	}
+	if err := way.On(ctx, application.GiveWayRequest{}); err != nil {
+		t.Fatalf("a host with no tmux is no panes, not an error: %v", err)
+	}
+	lines, err := store.Tail(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noted := 0
+	for _, line := range lines {
+		if strings.Contains(line, "tmux") && strings.Contains(line, "not found") && strings.Contains(line, "PATH") {
+			noted++
+		}
+	}
+	if noted != 1 {
+		t.Fatalf("giveway.log = %q, want one note that tmux was not found on the PATH", lines)
+	}
+}

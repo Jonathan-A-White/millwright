@@ -70,7 +70,7 @@ func hostGiveWay(host string) (application.GiveWay, bool) {
 	// the sockets the environment names, and the default server.
 	sockets, _ := config.GiveWayTmuxSockets()
 	way := application.GiveWay{
-		Processes: procs.Freezer{}, Panes: giveway.ServersFor(sockets), Marker: store, Log: store,
+		Processes: procs.Freezer{}, Panes: giveway.ServersFor(sockets).WithLog(store), Marker: store, Log: store,
 		Load: hostload.Proc{}, Host: host, Stale: stale, Self: os.Getpid(), By: "mw@" + host,
 	}
 	// The note the home reads is kept in the tracker's notes, after the freeze and

@@ -121,17 +121,24 @@ type Panes struct {
 	Socket  string
 	// Deadline bounds the call; zero is three seconds.
 	Deadline time.Duration
+	// Log, when set, is told that tmux was not found: a host whose PATH lacks tmux
+	// (wsl.exe --exec runs mw with no login environment) has no panes to freeze, and
+	// the log is the only place that is said. Now stamps the line; nil is the clock.
+	Log application.GiveWayLog
+	Now func() time.Time
 }
 
 var _ application.GiveWayPanes = Panes{}
 
-// Panes implements application.GiveWayPanes. No server, or no tmux, is no panes.
+// Panes implements application.GiveWayPanes. No server, or no tmux, is no panes;
+// no tmux is also a line in giveway.log when Log is set.
 func (p Panes) Panes(ctx context.Context) ([]application.GiveWayPane, error) {
 	program := p.Program
 	if program == "" {
 		program = "tmux"
 	}
 	if _, err := exec.LookPath(program); err != nil {
+		p.sayNotFound(ctx, program, err)
 		return nil, nil
 	}
 	deadline := p.Deadline
@@ -157,6 +164,25 @@ func (p Panes) Panes(ctx context.Context) ([]application.GiveWayPane, error) {
 	return ParsePanes(out.String()), nil
 }
 
+// sayNotFound appends the note that tmux was not found. A log that cannot be
+// written to changes nothing: the host still gives way to the processes it can see.
+func (p Panes) sayNotFound(ctx context.Context, program string, lookErr error) {
+	if p.Log == nil {
+		return
+	}
+	now := time.Now //mw:realclock the default of the injected Now, used where none is set
+	if p.Now != nil {
+		now = p.Now
+	}
+	entry := application.GiveWayEntry{
+		Event: "panes", At: now().UTC(),
+		Note: fmt.Sprintf("%s not found on the PATH, so no tmux session is stopped (%v)", program, lookErr),
+	}
+	if line, err := json.Marshal(entry); err == nil {
+		_ = p.Log.Append(ctx, string(line))
+	}
+}
+
 // Servers is the tmux servers of a host, one Panes each: the panes of all, in
 // the order of the servers. A server that is not running is no panes.
 type Servers []Panes
@@ -177,6 +203,17 @@ func ServersFor(sockets []string) Servers {
 		servers = append(servers, Panes{Socket: socket})
 	}
 	return servers
+}
+
+// WithLog is the servers with log told when tmux is not found. Only the first
+// server, the default one, is given it: tmux is missing for all of them or for none,
+// and the log needs the word once, not once to a server.
+func (s Servers) WithLog(log application.GiveWayLog) Servers {
+	with := append(Servers(nil), s...)
+	if len(with) > 0 {
+		with[0].Log = log
+	}
+	return with
 }
 
 // Panes implements application.GiveWayPanes.
