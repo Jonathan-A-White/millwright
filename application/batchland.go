@@ -1738,6 +1738,13 @@ func (b *BatchLandings) landRig(ctx context.Context, d batchDue) error {
 			return fmt.Errorf("a story was landed by itself and %d are still queued", remaining)
 		}
 		left = remaining
+		// A drain takes long: the home may move between two of its landings.
+		// What is left is then the new home's to land (mw-gq6.1207).
+		if left > 0 {
+			if at, err := b.Home(ctx); err != nil || !at {
+				return err
+			}
+		}
 	}
 	return nil
 }
