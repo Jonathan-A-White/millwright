@@ -39,9 +39,23 @@ DOC=$REPO_ROOT/docs/vultr-boost.md
 
 cd "$REPO_ROOT"
 
+# fail <message>: say what was wrong and exit non-zero. Once the throwaway machine
+# is up it also prints what the stand-ins recorded, so a failure at a gate that
+# cannot be rerun is read from its own log (mw-gq6.1256): the ssh stand-in's
+# stdout and stderr (a captured step's stdout is otherwise lost), the SSHLOG it
+# keeps, and the last of the calls log.
 fail() {
 	echo "check-vultr-boost: $*" >&2
+	dump_logs >&2
 	exit 1
+}
+
+dump_logs() {
+	for f in "${SSHOUT:-}" "${SSHERR:-}" "${SSHLOG:-}" "${CALLS:-}"; do
+		[ -n "$f" ] && [ -s "$f" ] || continue
+		echo "check-vultr-boost: --- $(basename "$f")$([ "$f" = "${CALLS:-}" ] && echo ' (last 20 lines)') ---"
+		tail -n 20 "$f" | sed 's/^/    /'
+	done
 }
 
 # --- the files are there -----------------------------------------------------
@@ -126,6 +140,8 @@ RUN=$T/run
 CALLS=$T/calls.log
 ENVLOG=$T/tf-env.log
 SSHLOG=$T/ssh.log
+SSHOUT=$T/ssh.stdout
+SSHERR=$T/ssh.stderr
 CURLLOG=$T/curl.log
 SECRETS=$T/secrets
 BIN=$T/bin
@@ -135,6 +151,8 @@ chmod 700 "$RUN"
 : >"$CALLS"
 : >"$ENVLOG"
 : >"$SSHLOG"
+: >"$SSHOUT"
+: >"$SSHERR"
 : >"$CURLLOG"
 echo "AGE-SECRET-KEY-FAKE" >"$HOME_DIR/.config/mw/age.key"
 chmod 600 "$HOME_DIR/.config/mw/age.key"
@@ -255,10 +273,16 @@ EOF
 for box in cloud1 cloud2; do PATH=$BIN:$PATH wg-enrol "$box" "$WG_PUB" >/dev/null; done
 grep -q '^AllowedIPs = 10.88.0.4/32' "$HUB/wg0.conf" || fail "the stand-in hub did not put cloud1 at 10.88.0.4: $(cat "$HUB/wg0.conf")"
 
+# CHECK_VULTR_BOOST_FORCE_FAIL=hub-enrol makes the ssh stand-in fail the hub's enrol (scripts/check-vultr-boost_test.sh).
+FORCE_FAIL=${CHECK_VULTR_BOOST_FORCE_FAIL:-}
 stub ssh <<EOF
+ssh_body() {
 echo "ssh \$*" >>"$CALLS"
 for last; do :; done
 printf '%s\n' "\$last" >>"$SSHLOG"
+case "$FORCE_FAIL:\$last" in
+hub-enrol:*"wg-enrol "*) echo FORCED-STDOUT; echo FORCED-STDERR >&2; return 2 ;;
+esac
 case \$last in
 *"wg-enrol --remove"*) sh -c "\$(printf '%s' "\$last" | sed 's#/etc/wireguard/wg0.conf#$HUB/wg0.conf#g')" ;;
 *"wg-enrol "*)
@@ -277,6 +301,14 @@ PersistentKeepalive = 25
 CONF
 	;;
 esac
+}
+ssh_body "\$@" >"$T/ssh.out.now" 2>"$T/ssh.err.now"
+rc=\$?
+cat "$T/ssh.out.now" >>"$SSHOUT"
+cat "$T/ssh.err.now" >>"$SSHERR"
+cat "$T/ssh.out.now"
+cat "$T/ssh.err.now" >&2
+exit \$rc
 EOF
 
 stub curl <<EOF
@@ -332,17 +364,17 @@ done
 [ ! -s "$CALLS" ] || fail "a dry run called a command: $(cat "$CALLS")"
 [ -z "$(ls -A "$RUN")" ] || fail "a dry run made files under the tmpfs"
 [ -z "$(git -C "$VAULT" status --porcelain)" ] || fail "a dry run changed the vault"
-out=$(run_bare up --dry-run 2>&1)
+out=$(run_bare up --dry-run 2>&1) || fail "up --dry-run failed: $out"
 echo "$out" | grep -q 'wg-enrol' || fail "up --dry-run does not name the hub change (wg-enrol): $out"
 echo "$out" | grep -q 'apply' || fail "up --dry-run does not name terraform apply: $out"
 echo "$out" | grep -q 'destroy' && fail "up --dry-run mentions destroy: $out"
-out=$(run_bare down --dry-run 2>&1)
+out=$(run_bare down --dry-run 2>&1) || fail "down --dry-run failed: $out"
 echo "$out" | grep -q 'destroy' || fail "down --dry-run does not name terraform destroy: $out"
 echo "$out" | grep -q 'wg-enrol --remove' || fail "down --dry-run does not name the peer removal: $out"
 
 # --- e. refusals, before anything is touched ---------------------------------
 mv "$SECRETS/vultr_api_token" "$T/token.away"
-if out=$(run up --yes 2>&1); then fail "up without the Vultr token should be refused"; fi
+if out=$(run up --yes 2>&1); then fail "up without the Vultr token should be refused: $out"; fi
 echo "$out" | grep -q 'vultr_api_token' || fail "the refusal does not name the missing token: $out"
 [ "$(echo "$out" | wc -l)" -le 3 ] || fail "the refusal is not short: $out"
 grep -q '^terraform\|^ssh' "$CALLS" && fail "a refused up still called terraform or ssh"
@@ -350,12 +382,12 @@ mv "$T/token.away" "$SECRETS/vultr_api_token"
 
 cp "$VAULT/hosts/vultr/vultr-boost.tfvars" "$T/tfvars.keep"
 grep -v '^region' "$T/tfvars.keep" >"$VAULT/hosts/vultr/vultr-boost.tfvars"
-if out=$(run up --yes 2>&1); then fail "up without a region should be refused"; fi
+if out=$(run up --yes 2>&1); then fail "up without a region should be refused: $out"; fi
 echo "$out" | grep -q 'region' || fail "the refusal does not name the missing setting: $out"
 grep -q '^terraform\|^ssh' "$CALLS" && fail "a refused up still called terraform or ssh"
 cp "$T/tfvars.keep" "$VAULT/hosts/vultr/vultr-boost.tfvars"
 
-if out=$(run sideways 2>&1); then fail "an unknown command should be refused"; fi
+if out=$(run sideways 2>&1); then fail "an unknown command should be refused: $out"; fi
 grep -q '^terraform\|^ssh' "$CALLS" && fail "an unknown command called terraform or ssh"
 
 # --- d. a real run -----------------------------------------------------------
@@ -453,7 +485,7 @@ echo "$out" | grep -q -i 'no box' || fail "status after down does not say there 
 [ -z "$(git -C "$VAULT" status --porcelain)" ] || fail "the vault is left with uncommitted files after down"
 
 # --- g. the elastic cloud's wrapper --------------------------------------------
-if out=$(run up --yes --name Cloud_2 2>&1); then fail "a box name wg-enrol would not take should be refused"; fi
+if out=$(run up --yes --name Cloud_2 2>&1); then fail "a box name wg-enrol would not take should be refused: $out"; fi
 echo "$out" | grep -q 'a-z0-9' || fail "the refusal of a bad name does not say what a name is: $out"
 
 cp "$VAULT/hosts/vultr/terraform.tfstate.age" "$T/cloud1.state.keep"
@@ -506,15 +538,15 @@ echo "$out" | grep -q 'deleted: Vultr instance orphan-1' || fail "down --instanc
 grep -q 'wg-enrol --remove cloud2' "$SSHLOG" || fail "down --instance did not take the peer off the hub: $(cat "$SSHLOG")"
 out=$(run down --yes --name cloud2 --instance gone-1 2>&1) || fail "down --instance of an instance already gone failed: $out"
 echo "$out" | grep -q 'Vultr holds no instance gone-1' || fail "down --instance of a gone instance does not say so: $out"
-if out=$(run down --yes --name cloud2 --instance locked-1 2>&1); then fail "down --instance of a locked instance should fail"; fi
+if out=$(run down --yes --name cloud2 --instance locked-1 2>&1); then fail "down --instance of a locked instance should fail: $out"; fi
 echo "$out" | grep -q 'Instance is locked' || fail "down --instance does not say what Vultr said: $out"
 # Vultr's 409 is a locked instance (a snapshot restore): said so, the app names it from this
 echo "$out" | grep -q 'Vultr would not delete instance locked-1 (locked, HTTP 409)' || fail "down --instance of a locked instance does not say it is locked, HTTP 409: $out"
 # only a 204 or a 404 says an instance is gone: any other answer is a refusal, not a deletion
-if out=$(run down --yes --name cloud2 --instance odd-1 2>&1); then fail "a DELETE Vultr answered 200 is no deletion and should fail: $out"; fi
+if out=$(run down --yes --name cloud2 --instance odd-1 2>&1); then fail "a DELETE Vultr answered 200 is no deletion and should fail: $out: $out"; fi
 echo "$out" | grep -q 'HTTP 200' || fail "down --instance does not say what Vultr answered: $out"
 echo "$out" | grep -q 'deleted: Vultr instance odd-1' && fail "down --instance said it deleted an instance Vultr answered 200 to"
-if out=$(run down --yes --name cloud2 --instance 'x;y' 2>&1); then fail "a bad instance id should be refused"; fi
+if out=$(run down --yes --name cloud2 --instance 'x;y' 2>&1); then fail "a bad instance id should be refused: $out"; fi
 [ -z "$(ls -A "$RUN")" ] || fail "list or down --instance left a tmpfs directory behind"
 out=$(run_bare list --dry-run 2>&1) || fail "list --dry-run failed: $out"
 echo "$out" | grep -q 'curl' || fail "list --dry-run does not print the call to Vultr: $out"
@@ -526,7 +558,7 @@ grep -q '^terraform .*import.* -var name=cloud2 .*vultr_instance.boost inst-77' 
 tail -n +2 "$VAULT/hosts/vultr/cloud2.tfstate.age" | base64 -d | grep -q 'inst-77' || fail "adopt did not keep the imported instance in the sealed state"
 [ -z "$(git -C "$VAULT" status --porcelain)" ] || fail "adopt left the vault uncommitted"
 [ -z "$(ls -A "$RUN")" ] || fail "adopt left a tmpfs directory behind"
-if out=$(run adopt --yes --name cloud2 2>&1); then fail "adopt with no --instance should be refused"; fi
+if out=$(run adopt --yes --name cloud2 2>&1); then fail "adopt with no --instance should be refused: $out"; fi
 out=$(run_bare adopt --dry-run --name cloud2 --instance inst-77 2>&1) || fail "adopt --dry-run failed: $out"
 echo "$out" | grep -q 'import' || fail "adopt --dry-run does not name terraform import: $out"
 
