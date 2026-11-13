@@ -210,6 +210,9 @@ func newNextCmd() *cobra.Command {
 			recheckSuite := hostRecheckSuite(cmd.Context(), worktrees, files, rigs, tests, changedSpecs, nice, jobs, host)
 			var dispatcher application.Dispatcher
 			if !noDispatch {
+				// Only the plan, not the book the timer's repath reads: its prefix
+				// says which host is a box whose gate is read (mw-gq6.1190).
+				_, boxPlan := cloudStatus(dir, host)
 				dispatcher = withHostDispatchLocks(withHostRechecks(application.Dispatch{
 					Tracker:       gateway,
 					Worktrees:     worktrees,
@@ -217,6 +220,7 @@ func newNextCmd() *cobra.Command {
 					Runner:        runner,
 					Boot:          builderBoot(files, host, tests, nice, jobs, turns, turnsSaid),
 					Memory:        gateway,
+					CloudPlan:     boxPlan,
 					Host:          host,
 					Cap:           atOnce,
 					MaxAttempts:   maxAttempts,

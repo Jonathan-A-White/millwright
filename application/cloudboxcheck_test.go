@@ -343,3 +343,37 @@ func TestTheBookDropsVultrsWordOfTheMakeOnceTheBoxIsMade(t *testing.T) {
 		t.Errorf("the made box Vultr says is ok is %+v, want no word of its make, not locked, and cleared", got)
 	}
 }
+
+// A box of a [cloud] prefix other than cloud is gated as the cloud boxes are:
+// the plan the dispatch carries names the prefix, so farm3 takes no story
+// until the home opens its gate (mw-gq6.1190).
+func TestDispatchOnABoxOfAnotherPrefixReadsItsGate(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	dispatch.Host, dispatch.Memory = "farm3", tracker
+	dispatch.CloudPlan = application.CloudPlan{Prefix: "farm"}
+	dispatch.Boot.Host = "farm3"
+	tracker.AddEpic("mw-box", domain.Path{
+		Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude,
+		Model: domain.ModelOpus, Effort: domain.EffortHigh, Formula: "tdd-feature", Host: "farm3",
+	})
+	tracker.AddStory("mw-box", domain.Story{ID: "mw-box.1", Title: "A story"})
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.BoxHeld == "" || len(report.Started) != 0 || len(runner.Names()) != 0 {
+		t.Fatalf("farm3 with no gate note started %+v (held %q), want it held", report.Started, report.BoxHeld)
+	}
+	if err := tracker.SetNote(ctx, application.BoxGateKey("farm3"), application.BoxGateOK+" 2026-11-13T00:21:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	report, err = dispatch.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.BoxHeld != "" || len(report.Started) != 1 {
+		t.Fatalf("farm3 with the gate open: held %q, started %d, want one story started", report.BoxHeld, len(report.Started))
+	}
+}
