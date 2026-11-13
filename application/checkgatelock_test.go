@@ -678,6 +678,41 @@ func TestACheckRunAgainWithinItsKeepTimeHasItsPlaceAheadOfATicketTakenInBetween(
 	}
 }
 
+// A check that keeps no place of its own (a background one, which waits as long
+// as it is allowed) still takes up the place an earlier foreground check of the
+// same story kept, and does not queue behind it, so that it does not wait for
+// itself (mw-gq6.1196).
+func TestACheckThatKeepsNoPlaceTakesUpThePlaceAForegroundCheckOfTheSameStoryKept(t *testing.T) {
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	w.keep = 10 * time.Minute
+	closeOut, err := w.gate.Take(context.Background(), "mw-5r3p30.1028", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report, err := w.check(100 * time.Millisecond); err != nil || report.Waiting == "" {
+		t.Fatalf("expected the first call to keep its place, got %v and %q", err, report.Waiting)
+	}
+	closeOut.Holding.Release(context.Background())
+	if got := w.queuedGate(); got != 1 {
+		t.Fatalf("expected the kept place to be in the queue, got %d", got)
+	}
+
+	// The same story's check, asked to keep no place, with the lock free: it takes
+	// the kept place, which is at the head, and runs.
+	w.keep = 0
+	report, err := w.check(2 * time.Second)
+	if err != nil {
+		t.Fatalf("expected the check to take the story's own kept place and run, got %v\n%s", err, report)
+	}
+	if checks.runs != 1 {
+		t.Errorf("expected the tests to run once, they ran %d time(s)", checks.runs)
+	}
+	if got := w.queuedGate(); got != 0 {
+		t.Errorf("expected no ticket left, got %d", got)
+	}
+}
+
 // A place that is not run again is given up when its keep time has passed.
 func TestAKeptPlaceIsGivenUpWhenItsKeepTimeHasPassed(t *testing.T) {
 	checks := &scriptedChecks{passes: []bool{true}}

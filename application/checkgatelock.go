@@ -339,9 +339,15 @@ func (w *waitingLine) get() string {
 // of the check of this story, so that the check run again takes the same place
 // up. It returns the context to wait under and the ask, nil when places are not
 // kept.
+//
+// A check that keeps no place of its own (a background one, or one given --wait)
+// still waits under the story's key, with a keep time of none: the queue then
+// takes up the place a foreground check of the same story kept, rather than
+// queueing behind it, which would be waiting for itself (mw-gq6.1196). What it
+// leaves at the end of its wait expires at once.
 func (k Check) askToKeep(ctx context.Context, c *closeOut) (context.Context, *QueuePlace) {
 	if k.KeepPlace <= 0 {
-		return ctx, nil
+		return WithQueuePlace(ctx, &QueuePlace{Key: "check " + c.id}), nil
 	}
 	ask := &QueuePlace{Key: "check " + c.id, For: k.KeepPlace}
 	return WithQueuePlace(ctx, ask), ask
