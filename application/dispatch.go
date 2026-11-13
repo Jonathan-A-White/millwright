@@ -1333,10 +1333,29 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				"whether its Builder handed it back could not be read, so it is not claimed: %v", oneLine(err.Error()))})
 			continue
 		} else if handedBack {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "handed-back", Why: fmt.Sprintf(
-				"its Builder handed it back on %s and nothing says what changed since: %s",
-				handedBackDay(at), repathedWith(id))})
-			continue
+			// The acceptance no longer reads as the claim recorded it: a Builder
+			// edits no acceptance, so someone else changed it, and that is the
+			// 'what changed' the hand-back waits for (mw-gq6.1166).
+			said, changed := rePathedByAcceptance(detail)
+			if !changed {
+				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "handed-back", Why: fmt.Sprintf(
+					"its Builder handed it back on %s and nothing says what changed since: %s",
+					handedBackDay(at), repathedWith(id))})
+				continue
+			}
+			if d.DryRun {
+				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "handed-back", Why: fmt.Sprintf(
+					"its Builder handed it back on %s but its acceptance changed since the claim: a tick that is not a dry run writes a %s comment and takes it",
+					handedBackDay(at), RePathedMark)})
+				continue
+			}
+			if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {
+				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "handed-back", Why: fmt.Sprintf(
+					"its Builder handed it back on %s and its acceptance changed since, but the %s comment could not be written, so it is not claimed: %v",
+					handedBackDay(at), RePathedMark, oneLine(err.Error()))})
+				continue
+			}
+			report.Notes = append(report.Notes, fmt.Sprintf("%s: handed back, and its acceptance changed since the claim: a %s comment was written and the story goes on", id, RePathedMark))
 		}
 
 		// gate: needs-files-key

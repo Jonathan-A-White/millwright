@@ -85,7 +85,11 @@ A story the Builder handed back (its newest hand-back comment opens
 opening `RE-PATHED:` follows: the same Builder given the same story hands it back
 the same way. `mw retry <id> --repathed "<what changed>"` writes that comment and
 retries. `mw status` lists such stories under HANDED BACK with the date of the
-hand-back.
+hand-back. When the story's acceptance no longer reads as its claim recorded it,
+the change is the word the gate waits for (a Builder edits no acceptance): the
+dispatch tick writes the `RE-PATHED:` comment itself, quoting the lines added or
+changed, and takes the story in the same tick (mw-gq6.1166). A dry run says it
+would.
 
 ## The held-for gate
 
@@ -153,6 +157,15 @@ Mayor once per episode, and `mw status` prints the same line first under DAMPERS
 It clears when a story of the rig starts. The hold is named from the gate that
 passed most of the rig's stories over, by `application.StarvedHolds`; a new gate
 is mapped there too, and a test says so.
+
+The same check also mails the Mayor, in the same mail (subject `Starved:`), of
+each story a run state keeps from dispatch for over 30 minutes
+(`application.OpenRefusedAge`): an open story with `run:blocked`, `run:stopped`,
+`run:stuck` or `run:landed`, or a claim a refused close-out kept (in progress,
+`run:blocked`). Each story is named once, with its age and the one command that
+moves it on (`mw retry <id>`, or `mw next <id>` for a landed one); a story that
+moves on and is refused again is named again. `mw status` prints the same lines
+under DAMPERS. These never make the check faulty (mw-gq6.1166).
 
 | Gate | Hold name |
 |-|-|

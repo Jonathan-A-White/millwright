@@ -70,3 +70,25 @@ func handedBackDay(at time.Time) string {
 func repathedWith(id string) string {
 	return fmt.Sprintf("mw retry %s --repathed %q", id, "<what changed>")
 }
+
+// rePathedByAcceptance is the RE-PATHED: comment a dispatch writes for a
+// handed-back story whose acceptance no longer reads as its claim recorded it
+// (mw-gq6.1166). A Builder reads its story once and edits no acceptance, so the
+// change is someone else's, and it is the 'what changed' that lets the story
+// run: the comment quotes the lines that are new and counts those taken out. A
+// story claimed before the record was kept, or whose acceptance only had its
+// spacing changed, is not changed.
+func rePathedByAcceptance(detail StoryDetail) (string, bool) {
+	change, changed := AcceptanceChangedSince(detail.AcceptanceAtClaim, detail.Acceptance)
+	if !changed {
+		return "", false
+	}
+	said := RePathedMark + " the acceptance of " + detail.Story.ID + " changed after the claim its Builder worked from (mw dispatch wrote this: a Builder edits no acceptance)."
+	if len(change.Added) > 0 {
+		said += "\nLines added or changed:\n" + bulletList(change.Added)
+	}
+	if change.Dropped > 0 {
+		said += fmt.Sprintf("\n%d line(s) the claim had were taken out or changed.", change.Dropped)
+	}
+	return said, true
+}

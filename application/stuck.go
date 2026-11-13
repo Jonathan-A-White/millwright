@@ -241,15 +241,16 @@ func liveBehind(byID map[string]domain.GraphBead, dependents map[string][]string
 }
 
 // OpenRefusedAge is how long an open story may carry a run state that keeps mw
-// dispatch from taking it before it is named: a hold that nothing else says
-// (mw-gq6.1026).
-const OpenRefusedAge = 2 * time.Hour
+// dispatch from taking it before it is named, in DAMPERS and in the one mail to
+// the Mayor: a hold that nothing else says (mw-gq6.1026, mw-gq6.1166).
+const OpenRefusedAge = 30 * time.Minute
 
 // OpenRefused is an open story a run state keeps from being dispatched, left so
 // for longer than OpenRefusedAge: run:blocked after a refused close-out or an
 // exhausted attempt count, run:stopped or run:stuck after a session was lost,
-// run:landed when only its close was lost. It holds no claim a dispatch tick
-// gives back, so it waits for the one command that goes on.
+// run:landed when only its close was lost; also a claim a refused close-out
+// kept (in progress, run:blocked). It holds no claim a dispatch tick gives
+// back, so it waits for the one command that goes on.
 type OpenRefused struct {
 	Story StoryDetail
 	// Run is the run state it carries: blocked, stopped, stuck or landed.
@@ -279,15 +280,24 @@ func (o OpenRefused) Alarm() DamperAlarm {
 }
 
 // OpenRefusedStories are the stories ready or open and claimed (neither is
-// running) that carry a run state mw dispatch passes over, last changed more
-// than OpenRefusedAge before now, oldest first. A parent (an epic, or a bead with children), a story of his own
-// (hitl) and a story whose age the tracker did not say are left out.
+// running), and the claims a refused close-out kept (in progress, run:blocked),
+// that carry a run state mw dispatch passes over, last changed more than
+// OpenRefusedAge before now, oldest first. A parent (an epic, or a bead with
+// children), a story of his own (hitl) and a story whose age the tracker did not
+// say are left out.
 func OpenRefusedStories(work WorkInHand, now time.Time) []OpenRefused {
 	var found []OpenRefused
 	seen := map[string]bool{}
-	for _, list := range [][]StoryDetail{work.Ready, work.OpenClaimed} {
+	for _, list := range [][]StoryDetail{work.Ready, work.OpenClaimed, work.Running} {
 		for _, d := range list {
-			if seen[d.Story.ID] || d.IsParent() || d.Hitl() || !strings.EqualFold(d.Status, StatusOpen) {
+			if seen[d.Story.ID] || d.IsParent() || d.Hitl() {
+				continue
+			}
+			// A claim a refused close-out kept is in progress (run:blocked): no
+			// session works it, and only a retry frees it (mw-gq6.1166). Any other
+			// run state on a story in progress is a session still working.
+			inProgress := strings.EqualFold(d.Status, StatusInProgress)
+			if !inProgress && !strings.EqualFold(d.Status, StatusOpen) {
 				continue
 			}
 			seen[d.Story.ID] = true
@@ -297,6 +307,9 @@ func OpenRefusedStories(work WorkInHand, now time.Time) []OpenRefused {
 					run = state
 					break
 				}
+			}
+			if inProgress && run != RunBlocked {
+				run = ""
 			}
 			touched := firstKnown(d.Updated, d.Created)
 			if run == "" || touched.IsZero() || now.Sub(touched) <= OpenRefusedAge {
