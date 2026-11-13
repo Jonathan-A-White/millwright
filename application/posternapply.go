@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -106,16 +107,19 @@ func decodePosternAction(text string) (PosternAction, bool) {
 	return action, true
 }
 
+// PosternActions are the action words this host knows how to apply, in the
+// order of postern's docs/fixtures/contract.json action_words;
+// TestPosternContractActionWords holds the two equal.
+var PosternActions = []string{
+	PosternActionRelease, PosternActionHold, PosternActionThaw, PosternActionPriority, PosternActionVerified, PosternActionRun,
+	PosternActionKeep, PosternActionClose, PosternActionChase, PosternActionAskDone, PosternActionKeepWaiting,
+	PosternActionTodoAdd, PosternActionTodoEdit, PosternActionTodoMove,
+}
+
 // knownPosternAction reports whether this host knows how to apply action. One
 // it does not is left for the Mayor to read as text.
 func knownPosternAction(action string) bool {
-	switch action {
-	case PosternActionRelease, PosternActionHold, PosternActionPriority, PosternActionThaw, PosternActionVerified, PosternActionRun,
-		PosternActionKeep, PosternActionClose, PosternActionChase, PosternActionAskDone, PosternActionKeepWaiting,
-		PosternActionTodoAdd, PosternActionTodoEdit, PosternActionTodoMove:
-		return true
-	}
-	return false
+	return slices.Contains(PosternActions, action)
 }
 
 // posternApplied is what applying one message did: its kind (answer, comment,
