@@ -426,6 +426,15 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		result.PreviousWindow = ReportWindow{Since: since.AddDate(0, 0, -days), Until: since}
 	}
 
+	// The window line is written now, before the tracker is read, which under
+	// load takes minutes: the rest follows when the report is whole. A landing
+	// has its own text and JSON is one document, so neither writes early.
+	early := r.Out != nil && !r.JSON && result.Landing == nil
+	if early {
+		var head strings.Builder
+		result.writeHeadline(&head)
+		fmt.Fprint(r.Out, head.String())
+	}
 	// Entries are read back as far as a factory change needs them, a landing
 	// of the last ChangeDays days and the ChangeVerdictDays before it, and as
 	// far as a bug of the window before may have escaped from.
@@ -642,6 +651,10 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			if err := enc.Encode(result); err != nil {
 				return result, err
 			}
+		} else if early {
+			var rest strings.Builder
+			result.writeRest(&rest)
+			fmt.Fprint(r.Out, rest.String())
 		} else {
 			fmt.Fprint(r.Out, result.String())
 		}
@@ -914,14 +927,28 @@ func (r FactoryReportResult) String() string {
 		return r.Landing.String()
 	}
 	var b strings.Builder
-	r.writeParts(&b)
-	r.Review.write(&b)
-	writeModels(&b, r.ModelCompare)
-	writeChanges(&b, r.Changes)
-	writeInvestments(&b, r.Investments)
-	r.Shape.write(&b)
-	writeCheapWins(&b, r.CheapWins)
+	r.writeHeadline(&b)
+	r.writeRest(&b)
 	return b.String()
+}
+
+// writeHeadline prints the report's first line, the window, which Run writes
+// before it reads the tracker.
+func (r FactoryReportResult) writeHeadline(b *strings.Builder) {
+	days := int(reportDay(r.Window.Until).Sub(r.Window.Since).Hours() / 24)
+	fmt.Fprintf(b, "QUALITY %s to %s (%d days)\n",
+		r.Window.Since.UTC().Format(LedgerDate), r.Window.Until.UTC().Format(LedgerDate), days)
+}
+
+// writeRest prints everything after the window line.
+func (r FactoryReportResult) writeRest(b *strings.Builder) {
+	r.writeParts(b)
+	r.Review.write(b)
+	writeModels(b, r.ModelCompare)
+	writeChanges(b, r.Changes)
+	writeInvestments(b, r.Investments)
+	r.Shape.write(b)
+	writeCheapWins(b, r.CheapWins)
 }
 
 // write prints HIS TIME, the counts of what waits for him; nothing when there
@@ -938,11 +965,8 @@ func (t *ReviewTime) write(b *strings.Builder) {
 	}
 }
 
-// writeParts prints the window and the QUALITY, SPEED and FUEL parts.
+// writeParts prints the QUALITY, SPEED and FUEL parts, after the window line.
 func (r FactoryReportResult) writeParts(b *strings.Builder) {
-	days := int(reportDay(r.Window.Until).Sub(r.Window.Since).Hours() / 24)
-	fmt.Fprintf(b, "QUALITY %s to %s (%d days)\n",
-		r.Window.Since.UTC().Format(LedgerDate), r.Window.Until.UTC().Format(LedgerDate), days)
 	if len(r.Rigs) == 0 {
 		b.WriteString("\nnothing landed, was refused or was filed in it\n")
 		return
