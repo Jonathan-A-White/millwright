@@ -51,9 +51,26 @@ build:
 # reads only the tree and takes a moment: the rig's gate is make test, not make
 # lint, so two landings that each passed it (one grew a file past the ceiling,
 # one put the ceiling into make lint) left main's lint red (mw-gq6.1237).
+# The same goes for the other fast parts of make lint (mw-gq6.1260): the checks
+# that read only the tree and take under 2 s each (gofmt, realclock, chain stamps
+# doc, shellcheck directives, gate jobs, tracked binaries, private terms,
+# template) run first, and go vet runs after go test, which has by then built
+# what vet reads (about 2 s, where vet alone on a cold cache took 60 s). They
+# stay in make lint too, so make lint alone still holds every rule. The slow
+# parts (deadcode, toc, the installer and bootstrap checks, tmux and the rest)
+# stay in make lint only: running all of it was 3m45s on a gate of 8m25s.
 test:
 	scripts/check-file-length.sh
+	scripts/check-gofmt.sh
+	scripts/check-realclock.sh
+	scripts/check-chain-stamps-doc.sh
+	scripts/check-shellcheck-directives.sh
+	scripts/check-gate-jobs.sh
+	scripts/check-tracked-binaries.sh
+	scripts/check-private-terms.sh
+	scripts/check-template.sh
 	$(GO) test -tags $(TAGS) -timeout $(TEST_TIMEOUT) $(TIMING_FLAGS) $(PKG)
+	$(GO) vet -tags $(TAGS) $(PKG)
 	contrib/scorer/test.sh --gate-note
 
 # go vet, then that gofmt -l lists no file (scripts/check-gofmt.sh), then that
