@@ -433,3 +433,21 @@ func TestNeedsSweepStaleLiveWritesNothingWithAHisWordsMessageOrWithoutADeployMar
 		t.Errorf("wrote %+v, classes %q %q", r.beads.Written, r.classOf(res, "old"), r.classOf(res, "young"))
 	}
 }
+
+func TestNeedsSweepClassesALandingWithItsHowToInACommentNotNoCheck(t *testing.T) {
+	mention := "Built it.\n\nNOT checked on a phone: see HOW TO CHECK IT.\n\n" + strings.Repeat("It reads the index and keeps the last row. ", 8) + "\n\nHOW TO CHECK IT, for the Governor:\n1. Open the app.\n2. Tap \"Go\".\n\nFor the rig memory: nothing"
+	paragraph := "Built it.\n\nHOW TO CHECK IT, for the Governor:\n\nThis shows only once the index is updated.\n\n1. Open the app.\n\nFor the rig memory: nothing"
+	r := newSweepRig(t)
+	r.landed("x-mention", 48*time.Hour, "1111111", mention)
+	r.landed("x-paragraph", 48*time.Hour, "2222222", paragraph)
+	for _, id := range []string{"x-mention", "x-paragraph"} {
+		// The closing step is a later comment that holds no HOW TO CHECK IT.
+		r.beads.Comments[id] = append(r.beads.Comments[id], application.Comment{Author: "mw", Created: sweepNow.Add(-47 * time.Hour), Text: "Landed on main."})
+	}
+	res := r.run(t, application.NeedsSweepOptions{})
+	for _, id := range []string{"x-mention", "x-paragraph"} {
+		if got := r.classOf(res, id); got != "no-deploy" {
+			t.Errorf("%s is class %q, want no-deploy (his line, no deploy seen), not no-check", id, got)
+		}
+	}
+}
