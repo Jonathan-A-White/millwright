@@ -981,6 +981,12 @@ func (p *cloudPass) settleRestoring(ctx context.Context, instances []CloudInstan
 			p.dropBox(box.Name)
 			p.move(ctx, fmt.Sprintf("%s is gone from Vultr: the instance %s it was restoring is no longer held; the book drops it", box.Name, box.InstanceID))
 			p.dirty = "gone " + box.Name
+		case inst.Up() && p.noPeer(ctx, box):
+			// Vultr finished a restore the hub has no peer for: the box would
+			// sit waiting for a first dispatch it can never make, and bill
+			// idle (cloud7, 2026-11-13). It is destroyed, and no made move is
+			// written.
+			p.down(ctx, box.Name, fmt.Sprintf("Vultr finished restoring it, but %s is not a peer of the hub: it has no address, so it can take no story", box.Name))
 		case inst.Up() && p.adopt(ctx, box, inst):
 			p.setBox(box.Name, func(b *CloudBox) {
 				b.Restoring, b.InstanceID, b.RestoringSince, b.IdleSince, b.Made = false, "", time.Time{}, p.now, p.now
@@ -994,6 +1000,15 @@ func (p *cloudPass) settleRestoring(ctx context.Context, instances []CloudInstan
 			}
 		}
 	}
+}
+
+// noPeer reports whether the hub has no peer for the box, by the address the
+// provider reads off it: the make asks the same of a box that came up in time
+// (CloudMake.enrolled). Any other trouble reading the address leaves the box
+// adopted as before.
+func (p *cloudPass) noPeer(ctx context.Context, box CloudBox) bool {
+	_, err := p.check.Provider.Address(ctx, box.Name)
+	return noHubAddress(err)
 }
 
 // adopt has the provider take the instance of a restoring box into its state,
