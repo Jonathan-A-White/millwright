@@ -474,3 +474,95 @@ func TestAFailedNpmCiFailsAddWithItsErrorAndLeavesNothingBehind(t *testing.T) {
 		t.Errorf("the setup note is %q after a failure, want none", note)
 	}
 }
+
+// cutAStoryWorktree fetches the rig's origin and cuts a story's worktree from
+// origin/main the way a dispatch does.
+func cutAStoryWorktree(t *testing.T, here string) {
+	t.Helper()
+	w := rig.New()
+	ctx := context.Background()
+	if err := w.Fetch(ctx, here); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	dir := filepath.Join(filepath.Dir(here), "worktrees", "story")
+	if err := w.Add(ctx, here, dir, "mw/story", "origin/main"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+}
+
+// A box never lands a story into its rig checkout, so the checkout's local main
+// stays where the clone left it while origin/main moves on: a Builder's
+// acceptance line worded "against main" then reads a base months old
+// (mw-gq6.1183).
+func TestACutWorktreeFollowsAFetchWithTheCheckoutsLocalMainAtOriginMain(t *testing.T) {
+	here, other := aRig(t)
+
+	write(t, other, "later.md", "pushed later\n")
+	run(t, other, "git", "add", "-A")
+	run(t, other, "git", "commit", "-qm", "A later commit")
+	run(t, other, "git", "push", "-q", "origin", "main")
+	want := run(t, other, "git", "rev-parse", "HEAD")
+
+	cutAStoryWorktree(t, here)
+	if got := run(t, here, "git", "rev-parse", "origin/main"); got != want {
+		t.Fatalf("origin/main = %s, want %s", got, want)
+	}
+	if got := run(t, here, "git", "rev-parse", "main"); got != want {
+		t.Fatalf("local main = %s after a fetch, want origin/main %s", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(here, "later.md")); err != nil {
+		t.Fatalf("the checkout's files did not follow main: %v", err)
+	}
+}
+
+func TestACutWorktreeMovesALocalMainThatIsNotCheckedOutToOriginMain(t *testing.T) {
+	here, other := aRig(t)
+	run(t, here, "git", "checkout", "-q", "-b", "elsewhere")
+
+	write(t, other, "later.md", "pushed later\n")
+	run(t, other, "git", "add", "-A")
+	run(t, other, "git", "commit", "-qm", "A later commit")
+	run(t, other, "git", "push", "-q", "origin", "main")
+	want := run(t, other, "git", "rev-parse", "HEAD")
+
+	cutAStoryWorktree(t, here)
+	if got := run(t, here, "git", "rev-parse", "main"); got != want {
+		t.Fatalf("local main = %s after a fetch, want origin/main %s", got, want)
+	}
+	if got := run(t, here, "git", "rev-parse", "--abbrev-ref", "HEAD"); got != "elsewhere" {
+		t.Fatalf("the checkout moved to %s", got)
+	}
+}
+
+func TestACutWorktreeLeavesALocalMainThatIsAheadOfOriginMainAlone(t *testing.T) {
+	here, other := aRig(t)
+	write(t, here, "merged.md", "merged here, not pushed yet\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "A merge not pushed yet")
+	ahead := run(t, here, "git", "rev-parse", "HEAD")
+
+	write(t, other, "later.md", "pushed later\n")
+	run(t, other, "git", "add", "-A")
+	run(t, other, "git", "commit", "-qm", "A later commit")
+	run(t, other, "git", "push", "-q", "origin", "main")
+
+	cutAStoryWorktree(t, here)
+	if got := run(t, here, "git", "rev-parse", "main"); got != ahead {
+		t.Fatalf("local main = %s, want it left at %s", got, ahead)
+	}
+}
+
+func TestACutWorktreeLeavesADirtyCheckoutsMainAndItsFilesAlone(t *testing.T) {
+	here, other := aRig(t)
+	write(t, other, "README.md", "# the rig, changed\n")
+	run(t, other, "git", "add", "-A")
+	run(t, other, "git", "commit", "-qm", "README changed")
+	run(t, other, "git", "push", "-q", "origin", "main")
+	write(t, here, "README.md", "# the rig, edited here\n")
+
+	cutAStoryWorktree(t, here)
+	b, err := os.ReadFile(filepath.Join(here, "README.md"))
+	if err != nil || string(b) != "# the rig, edited here\n" {
+		t.Fatalf("README.md = %q, %v; want the edit kept", b, err)
+	}
+}
