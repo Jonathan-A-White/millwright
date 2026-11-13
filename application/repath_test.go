@@ -455,3 +455,41 @@ func TestADispatchRePathsAnUnHeldStoryPinnedToAGoneBox(t *testing.T) {
 		t.Errorf("want one RE-PATHED: comment naming cloud1, got %q", c)
 	}
 }
+
+// mw-gq6.1208: a no-room note under a box's name that the box now holding the
+// name did not write is the old box's, and says nothing of this one.
+func TestRepathLeavesOutTheNoRoomNoteOfADestroyedBox(t *testing.T) {
+	t.Run("a box not in the book gives no no-room reason", func(t *testing.T) {
+		dispatch, tracker := aRePathFactory(t)
+		dispatch.Retired = nil
+		dispatch.Memory = tracker
+		dispatch.CloudBook = &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud2", Up: repathNow.Add(-time.Hour)}}}}
+		pinnedTo(tracker, "mw-gq6.1", "cloud1")
+		key, value := noRoomFor("cloud1", repathNow.Add(-3*time.Hour))
+		_ = tracker.SetNote(context.Background(), key, value)
+
+		if _, err := dispatch.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		comments := rePathedComments(tracker, "mw-gq6.1")
+		if len(comments) != 1 || !strings.Contains(comments[0], "cloud book") || strings.Contains(comments[0], "no room") {
+			t.Errorf("want one RE-PATHED: comment for the gone box naming the book, not its old no-room note, got %q", comments)
+		}
+	})
+	t.Run("a box made again since the note moves no story", func(t *testing.T) {
+		dispatch, tracker := aRePathFactory(t)
+		dispatch.Retired = nil
+		dispatch.Memory = tracker
+		dispatch.CloudBook = &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud1", Up: repathNow.Add(-10 * time.Minute)}}}}
+		pinnedTo(tracker, "mw-gq6.1", "cloud1")
+		key, value := noRoomFor("cloud1", repathNow.Add(-3*time.Hour))
+		_ = tracker.SetNote(context.Background(), key, value)
+
+		if _, err := dispatch.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if got := storyHost(t, tracker, "mw-gq6.1"); got != "cloud1" {
+			t.Errorf("host = %q, want cloud1 left alone: the note is the old box's", got)
+		}
+	})
+}

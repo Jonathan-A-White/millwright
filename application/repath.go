@@ -224,7 +224,7 @@ func (d Dispatch) hostsWithNoRoom(ctx context.Context, report *DispatchReport) m
 	if !ok {
 		return nil
 	}
-	full, err := noRoomNotes(ctx, notes)
+	full, err := noRoomNotes(ctx, notes, readBoxBook(ctx, d.CloudBook, d.CloudPlan))
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("which hosts have no room could not be read, so no story was re-pathed for it: %v", err))
 		return nil
@@ -232,8 +232,10 @@ func (d Dispatch) hostsWithNoRoom(ctx context.Context, report *DispatchReport) m
 	return full
 }
 
-// noRoomNotes is the hosts whose no-room note says they have none, by host.
-func noRoomNotes(ctx context.Context, notes DamperNotes) (map[string]HostNoRoom, error) {
+// noRoomNotes is the hosts whose no-room note says they have none, by host. A
+// note of a box the cloud destroyed, or made again since the host's last sync,
+// is the old box's and is left out (boxBook.older, mw-gq6.1208).
+func noRoomNotes(ctx context.Context, notes DamperNotes, book boxBook) (map[string]HostNoRoom, error) {
 	kept, err := notes.NotesWithPrefix(ctx, "host.")
 	if err != nil {
 		return nil, err
@@ -244,7 +246,7 @@ func noRoomNotes(ctx context.Context, notes DamperNotes) (map[string]HostNoRoom,
 		if !found {
 			continue
 		}
-		if host, found = strings.CutSuffix(host, ".noroom"); !found || host == "" {
+		if host, found = strings.CutSuffix(host, ".noroom"); !found || host == "" || book.older(host, lastSyncOf(kept[LastSyncKey(host)])) {
 			continue
 		}
 		if n := ParseHostNoRoom(value); !n.Since.IsZero() {
@@ -328,7 +330,7 @@ func (s Status) heldByPin(ctx context.Context, ready []StoryDetail) map[string]s
 	where, _ := readPlaces(ctx, s.Retired, s.Cloud, s.CloudPlan)
 	var full map[string]HostNoRoom
 	if notes, ok := s.Notes.(DamperNotes); ok {
-		full, _ = noRoomNotes(ctx, notes)
+		full, _ = noRoomNotes(ctx, notes, readBoxBook(ctx, s.Cloud, s.CloudPlan))
 	}
 	var lines map[string]string
 	rules := map[string]domain.EpicRequirements{}
