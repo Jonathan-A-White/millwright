@@ -38,7 +38,7 @@ func (r MayorReader) MayorNeeds(ctx context.Context, hitl []StoryDetail) ([]Post
 	if r.Tracker == nil || r.Notes == nil {
 		return nil, fmt.Errorf("reading what waits on the Mayor: there is no tracker or notes to read it from")
 	}
-	now := time.Now()
+	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
 	if r.Now != nil {
 		now = r.Now()
 	}

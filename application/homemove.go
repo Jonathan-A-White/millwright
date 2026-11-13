@@ -282,7 +282,7 @@ func (m HomeMove) now() time.Time {
 	if m.Now != nil {
 		return m.Now().UTC()
 	}
-	return time.Now().UTC()
+	return time.Now().UTC() //mw:realclock the default of the injected Now, used where none is set
 }
 
 func (m HomeMove) out() io.Writer {

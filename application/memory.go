@@ -141,7 +141,7 @@ func (m Memory) clock() time.Time {
 	if m.Now != nil {
 		return m.Now()
 	}
-	return time.Now()
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
 func (m Memory) today() string {

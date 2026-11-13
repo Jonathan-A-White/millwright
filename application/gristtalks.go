@@ -705,7 +705,7 @@ func (l GristTalksList) Run(ctx context.Context, app string, asJSON bool) ([]Gri
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now()
+	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
 	if l.Now != nil {
 		now = l.Now()
 	}
@@ -765,7 +765,7 @@ func (e GristTalksEnd) Run(ctx context.Context, app, talk string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	now := time.Now()
+	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
 	if e.Now != nil {
 		now = e.Now()
 	}
@@ -820,7 +820,7 @@ func (s GristTalkSweep) End(ctx context.Context, app, talk string) (int, error) 
 // killed midway leaves its record): a talk named eval: or smoke: that was last
 // used GristTalkQuiet or more ago. A younger one may be a run still going.
 func (s GristTalkSweep) Tidy(ctx context.Context, app string) (int, error) {
-	now := time.Now()
+	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
 	if s.Now != nil {
 		now = s.Now()
 	}

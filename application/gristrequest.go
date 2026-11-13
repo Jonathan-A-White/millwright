@@ -233,7 +233,7 @@ func (g GristRequest) moveTo(ctx context.Context, old GristRequestRecord, to str
 
 func (g GristRequest) now() time.Time {
 	if g.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return g.Now()
 }

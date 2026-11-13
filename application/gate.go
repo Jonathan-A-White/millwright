@@ -180,7 +180,7 @@ func (n Next) calmedThen(ctx context.Context, report *NextReport, c *closeOut, w
 	if n.SlotYield != nil {
 		defer n.SlotYield(ctx)()
 	}
-	since := time.Now()
+	since := n.now()
 	var waited, said time.Duration
 	for reading.Busy() {
 		if waited >= bound {

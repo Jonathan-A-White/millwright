@@ -51,7 +51,7 @@ func wholeCheckOnAStalledBusyHost(t *testing.T, readings []application.LoadReadi
 	checks = &scriptedChecks{passes: []bool{true}}
 	records := &mapRecords{}
 	said, waited = &strings.Builder{}, new(time.Duration)
-	now := time.Now()
+	now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
 	check = func() (application.CheckReport, error) {
 		return application.Check{
 			Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: checks,
@@ -105,6 +105,19 @@ func TestACheckWithNoPartOnAHostThatStaysBusyWaitsNoLongerThanTheSlotWaitAndEnds
 	}
 	if !strings.Contains(said.String(), "load 39.0 of 20 cores") {
 		t.Errorf("expected the notices to say the load, got %q", said.String())
+	}
+}
+
+// The wait says since when the host has been busy by the check's clock, not the
+// host's: a check whose clock a test holds at noon says noon (mw-gq6.1221).
+func TestACheckWithNoPartOnAHostThatStaysBusySaysSinceWhenByTheChecksClock(t *testing.T) {
+	check, _, said, _ := wholeCheckOnABusyHost(t, []application.LoadReading{busy()}, 3*time.Minute)
+
+	if _, err := check(); err == nil {
+		t.Fatal("expected the check not to pass while the host stayed busy")
+	}
+	if n := strings.Count(said.String(), "at load 39.0 of 20 cores since 12:00:00Z"); n != 3 {
+		t.Errorf("expected 3 notices that say since 12:00:00Z, the check's clock at the start of the wait, got %d in %q", n, said.String())
 	}
 }
 

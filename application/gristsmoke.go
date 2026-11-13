@@ -630,7 +630,7 @@ func (s GristSmoke) now() time.Time {
 	if s.Now != nil {
 		return s.Now()
 	}
-	return time.Now()
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
 // changedAfter is the commit of the app's main, short, when it holds the
@@ -1516,7 +1516,7 @@ func (b GristSmokeBook) now() time.Time {
 	if b.Now != nil {
 		return b.Now()
 	}
-	return time.Now()
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
 // Record keeps what a smoke found as the app's last, and for a failure posts

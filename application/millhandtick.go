@@ -1257,7 +1257,7 @@ func oneLine(text string) string {
 
 func (t MillhandTick) now() time.Time {
 	if t.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return t.Now()
 }

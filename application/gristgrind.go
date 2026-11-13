@@ -1758,7 +1758,7 @@ func (g GristGrind) refresh(ctx context.Context, checkout string) error {
 
 func (g GristGrind) now() time.Time {
 	if g.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return g.Now()
 }

@@ -384,7 +384,7 @@ func (l LoopBriefRun) Gather(ctx context.Context) (LoopInputs, error) {
 	if err != nil {
 		return LoopInputs{}, err
 	}
-	now := time.Now()
+	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
 	if report.Now != nil {
 		now = report.Now()
 	}

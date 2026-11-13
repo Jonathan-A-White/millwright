@@ -210,7 +210,7 @@ func (c *GristCredits) Succeeded(ctx context.Context) error {
 
 func (c *GristCredits) now() time.Time {
 	if c.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return c.Now()
 }
@@ -281,7 +281,7 @@ type GristCreditsReport struct {
 
 func (a GristCreditsAdmin) now() time.Time {
 	if a.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return a.Now()
 }
