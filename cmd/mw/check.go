@@ -26,7 +26,7 @@ import (
 // it writes nothing to the tracker, the ledger, the vault or git — and it exits
 // non-zero when any check fails.
 func newCheckCmd() *cobra.Command {
-	var noSlot, background, logIsStdout, partWorker, specsWorker bool
+	var noSlot, background, logIsStdout, partWorker, specsWorker, gateWorker bool
 	var part int
 	cmd := &cobra.Command{
 		Use:   "check <story-id>",
@@ -99,7 +99,12 @@ func newCheckCmd() *cobra.Command {
 			"The changed specs of a whole check kept to a call are run the same way (mw-gq6.988): by a process of\n" +
 			"its own, which takes the merge slot and gate lock itself and keeps what the specs said in\n" +
 			"check-<attempt>-specs.result. A call that ends before the specs do says where that verdict will be, and\n" +
-			"`mw check <story>`, run again, reads it without running the rig's tests or the specs again.\n\n" +
+			"`mw check <story>`, run again, reads it without running the rig's tests or the specs again.\n" +
+			"A whole check kept to a call whose rig's gate usually takes at least the whole call on this host is\n" +
+			"run the same way (mw-gq6.1273): the whole check, as a process of its own that takes the merge slot\n" +
+			"and gate lock itself and keeps its verdict in check-<attempt>-gate.result (what it prints is in\n" +
+			"check-<attempt>-gate.out). A call that ends before it does says so in one line, and `mw check <story>`,\n" +
+			"run again, waits for it and reads the verdict without running the rig's gate again.\n\n" +
 			"A rig whose file says builder_call = \"55m\" (10m to 55m) gives its Builders' sessions one Bash call of that\n" +
 			"length (BASH_MAX_TIMEOUT_MS in their environment, mw-t5shinh.14). A check that finds that variable\n" +
 			"larger than the default 600 seconds spends the call less 50 seconds: every wait above (the slot, the\n" +
@@ -139,6 +144,9 @@ func newCheckCmd() *cobra.Command {
 			}
 			if specsWorker && (part > 0 || partWorker) {
 				return fmt.Errorf("--specs-worker runs the changed specs of a whole check, so it takes no --part")
+			}
+			if gateWorker && (part > 0 || partWorker || specsWorker || !cmd.Flags().Changed("wait")) {
+				return fmt.Errorf("--gate-worker runs a whole check as the process a check kept to a call started for it, so it takes no --part and needs --wait")
 			}
 
 			var slot application.MergeSlot
@@ -231,6 +239,13 @@ func newCheckCmd() *cobra.Command {
 			if part == 0 && !specsWorker && callBudget > 0 {
 				k.SpecsStarter = specsProcess{noSlot: noSlot}
 			}
+			// A whole check whose rig's gate usually takes longer than this whole call
+			// is run by a process of its own, so that the gate is not cut off with the
+			// call and the gate lock held (mw-gq6.1273).
+			k.GateWorker = gateWorker
+			if part == 0 && !specsWorker && !gateWorker && callBudget > 0 {
+				k.GateStarter = gateProcess{noSlot: noSlot}
+			}
 			_, err = k.Run(cmd.Context(), args[0])
 			return err
 		},
@@ -242,6 +257,8 @@ func newCheckCmd() *cobra.Command {
 	_ = cmd.Flags().MarkHidden("part-worker")
 	cmd.Flags().BoolVar(&specsWorker, "specs-worker", false, "run the rig's changed specs alone as the process a whole check started for them: waits for the merge slot and gate lock itself, and keeps what the specs said (set by mw check)")
 	_ = cmd.Flags().MarkHidden("specs-worker")
+	cmd.Flags().BoolVar(&gateWorker, "gate-worker", false, "run the whole check as the process a check kept to a call started for it, its rig's gate being longer than the call: keeps its verdict for that check to read and writes no check log of its own (set by mw check)")
+	_ = cmd.Flags().MarkHidden("gate-worker")
 	cmd.Flags().IntVar(&part, "part", 0, "run part N of the rig's gate alone, for a rig whose host names its gate as parts, and keep what it said; a check with no --part then reports the whole gate from the parts' records")
 	cmd.Flags().Duration("wait", CheckWait, "the most a check queues for the rig's merge slot, this host's gate lock and a calm host together: nine minutes in the foreground (the call's budget in a rig's longer call), ending with the place kept and a line to run it again; a whole check given this (or --background, 40m) ends with the wait limit reached and a line to hand back")
 	cmd.Flags().BoolVar(&noSlot, "no-slot", false, "run the rig's tests without taking the rig's merge slot, so without waiting for a close-out's gate")
@@ -367,6 +384,41 @@ func (s specsProcess) Start(_ context.Context, storyID, logPath string) (int, er
 // Alive says whether the process Start returned is still running: not ended, and
 // not a pid some other process has since been given.
 func (specsProcess) Alive(pid int) bool { return processAlive(pid, "--specs-worker") }
+
+// gateProcess implements application.GateStarter: it runs this same mw as
+// `mw check <story> --gate-worker --wait 40m` in a session of its own, so that it
+// outlives the tool call that asked, with its output appended to the file named.
+type gateProcess struct{ noSlot bool }
+
+func (s gateProcess) Start(_ context.Context, storyID, logPath string) (int, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return 0, fmt.Errorf("finding mw to run the check with: %w", err)
+	}
+	log, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		return 0, fmt.Errorf("opening %s: %w", logPath, err)
+	}
+	defer log.Close()
+	args := []string{"check", storyID, "--gate-worker", "--wait", CheckWait.String()}
+	if s.noSlot {
+		args = append(args, "--no-slot")
+	}
+	// Not exec.CommandContext: the check is meant to outlive the context it was
+	// started in.
+	cmd := exec.Command(self, args...)
+	cmd.Stdout, cmd.Stderr = log, log
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return 0, fmt.Errorf("starting the check: %w", err)
+	}
+	go func() { _ = cmd.Wait() }()
+	return cmd.Process.Pid, nil
+}
+
+// Alive says whether the process Start returned is still running: not ended, and
+// not a pid some other process has since been given.
+func (gateProcess) Alive(pid int) bool { return processAlive(pid, "--gate-worker") }
 
 // partProcess implements application.PartStarter: it runs this same mw as
 // `mw check <story> --part N --part-worker` in a session of its own, so that it

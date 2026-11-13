@@ -417,9 +417,20 @@ ten times the part's usual run on this host (`Check.PartExpected`, the median of
 last passing runs) when mw has one, else the fixed `CheckPartHungCeiling` of 20
 minutes (`Check.PartHungAfter` in a test). Not under the ceiling: a part run in the
 call itself (a part that takes the merge slot, which the tool call's own limit ends),
-the changed specs' process (`SpecsStarter`) and a `--background` check, which queue
+the changed specs' process (`SpecsStarter`), the whole check's process (`GateStarter`) and a `--background` check, which queue
 for the slot and gate lock for up to 40 minutes and write nothing while they wait, so
 silence is not a hang there.
+
+A foreground whole check of an unsplit rig whose gate usually takes at least the whole
+call on this host (`Check.GateExpected` at or past `CheckCallBudget`) is not started in
+the call, which the tool would cut off at 600 seconds with nothing said and the gate
+lock held (mw-gq6.1273, cloud8's 12m47s gate). The whole check is run by a process of
+its own (`GateStarter`, `mw check <story> --gate-worker --wait 40m`), which takes the
+merge slot and gate lock itself under the story's key, and keeps its verdict in
+`check-<attempt>-gate.result` and what it printed in `check-<attempt>-gate.out`. The call
+waits for it for what is left of the call and ends in one line naming both files;
+`mw check <story>`, run again, waits for the same process, and once it has ended reads
+that the tests passed at the tip (as a pass an earlier call kept) or else its verdict.
 
 A part does wait for a calm host, as a whole check does (`Check.calmForPart`,
 mw-gq6.987): before it starts, and before its slot, up to the same nine minutes (what

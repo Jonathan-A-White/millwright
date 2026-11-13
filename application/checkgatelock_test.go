@@ -1076,8 +1076,10 @@ func TestAForegroundWholeCheckWhoseCalmWaitLeavesTheFitStartsTheGate(t *testing.
 }
 
 // A gate that cannot end inside even a whole call is started whatever time is
-// left: refusing it would refuse it for ever (a rig with no figure, or a figure
-// past the call, is run as before).
+// left by a check that cannot start a process of its own (no GateStarter):
+// refusing it would refuse it for ever (a rig with no figure, or a figure past
+// the call, is run as before). One that can runs it there (mw-gq6.1273,
+// TestAForegroundCheckOnAGateLongerThanTheCall).
 func TestAForegroundWholeCheckWhoseGateIsLongerThanAWholeCallStartsItAsBefore(t *testing.T) {
 	for name, expected := range map[string]time.Duration{"no figure": 0, "figure past the call": time.Hour} {
 		t.Run(name, func(t *testing.T) {
@@ -1571,5 +1573,222 @@ func TestAForegroundCheckEndsItsCalmWaitWhenTheCallsClockSaysTheDeadlinePassed(t
 	}
 	if !strings.Contains(report.Waiting, "run the same command again to go on waiting") || checks.runs != 0 {
 		t.Errorf("expected the check to end in the run-again line with nothing run, got %q and %d run(s)", report.Waiting, checks.runs)
+	}
+}
+
+// gateTakingTheCall is the rig's gate on a host where it usually takes longer
+// than a whole call (cloud8's 12m47s against the call's 540 s, mw-gq6.1273): a run
+// moves the call's clock on by took, as the tool's own clock would move. It is the
+// gate as the call would run it; the process the call starts runs heldGate.
+type gateTakingTheCall struct {
+	clock *callClock
+	took  time.Duration
+	mu    sync.Mutex
+	runs  int
+}
+
+func (g *gateTakingTheCall) Run(context.Context, string, string) (application.Checked, error) {
+	g.mu.Lock()
+	g.runs++
+	g.mu.Unlock()
+	g.clock.Pass(g.took)
+	return application.Checked{Command: "make test", Passed: true, Output: "ok\n"}, nil
+}
+
+func (g *gateTakingTheCall) ranCount() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.runs
+}
+
+// heldGate is the rig's gate as the process of a whole check runs it, which the
+// test holds: a run says it has started and stays until the test lets it go,
+// passing or failing as the test says.
+type heldGate struct {
+	mu      sync.Mutex
+	runs    int
+	passed  bool
+	started chan struct{}
+	release chan struct{}
+}
+
+func newHeldGate(passed bool) *heldGate {
+	return &heldGate{passed: passed, started: make(chan struct{}, 8), release: make(chan struct{})}
+}
+
+func (h *heldGate) Run(context.Context, string, string) (application.Checked, error) {
+	h.mu.Lock()
+	h.runs++
+	h.mu.Unlock()
+	h.started <- struct{}{}
+	<-h.release
+	out := "ok\n"
+	if !h.passed {
+		out = "--- FAIL: TestSomething\n"
+	}
+	return application.Checked{Command: "make test", Passed: h.passed, Output: out}, nil
+}
+
+func (h *heldGate) ranCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.runs
+}
+
+// gateStarter stands in for the process mw starts a whole check in: it runs the
+// same Check as a gate worker in a goroutine, which outlives the call that asked.
+type gateStarter struct{ workerStarter }
+
+func (s *gateStarter) Start(ctx context.Context, story, logPath string) (int, error) {
+	return s.workerStarter.Start(ctx, story, 0, logPath)
+}
+
+func (s *gateStarter) wait() {
+	s.mu.Lock()
+	done := s.done
+	s.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+}
+
+// aForegroundCheckOnAGateLongerThanTheCall is mw check with no --part, in a
+// Builder's call of the default 540 s, of a rig whose gate usually takes 12m47s on
+// this host: the call is the front, the process it starts is the same Check with
+// GateWorker set, and the call's clock is moved by hand (mw-gq6.1273).
+type aForegroundCheckOnAGateLongerThanTheCall struct {
+	w       *aWholeCheckBesideTheHostsGateLock
+	inCall  *gateTakingTheCall
+	gate    *heldGate
+	starter *gateStarter
+	records *logRecords
+	check   func() (application.CheckReport, error)
+}
+
+const cloud8sUsualGate = 12*time.Minute + 47*time.Second
+
+func newForegroundCheckOnAGateLongerThanTheCall(t *testing.T, passed bool) *aForegroundCheckOnAGateLongerThanTheCall {
+	t.Helper()
+	w := newWholeCheckBesideTheGateLock(t, nil)
+	f := &aForegroundCheckOnAGateLongerThanTheCall{
+		w:       w,
+		inCall:  &gateTakingTheCall{clock: w.clock, took: cloud8sUsualGate},
+		gate:    newHeldGate(passed),
+		starter: &gateStarter{},
+		records: &logRecords{dir: t.TempDir()},
+	}
+	landing := aLandingAtATip{&fakeRetryLanding{AheadCount: 1}, "abc1234"}
+	build := func(worker bool, out io.Writer) application.Check {
+		k := application.Check{
+			Tracker: aStoryOnTheLaptop(), Landing: landing,
+			Slot: w.slots, GateLock: w.gate, Records: f.records, Logs: f.records,
+			SpecsPoll: 5 * time.Millisecond, GateNoticeEvery: 10 * time.Millisecond,
+			Host: "laptop", Remote: "origin",
+			Rigs: map[string]string{"millwright": w.rigDir}, Out: out,
+		}
+		if worker {
+			// mw check <story> --gate-worker --wait 40m: not kept to a call.
+			k.Checks, k.GateWorker = f.gate, true
+			k.PartSlotWait, k.HandBackAtOnce = 40*time.Minute, true
+		} else {
+			k.Checks, k.GateStarter = f.inCall, f.starter
+			k.PartSlotWait, k.KeepPlace = application.CheckPartSlotWait, application.CheckKeepPlace
+			k.CallBudget, k.CallNow = application.CheckCallBudget, w.clock.Now
+			k.GateExpected = func(context.Context, string) time.Duration { return cloud8sUsualGate }
+		}
+		return k
+	}
+	f.starter.run = func() {
+		said := &lockedBuffer{}
+		_, _ = build(true, writerOf(said)).Run(context.Background(), "mw-x.1")
+		_, _ = f.records.PutRunFile(context.Background(), "mw-x.1", application.CheckGateOutFileName(1), said.String())
+	}
+	f.check = func() (application.CheckReport, error) {
+		return build(false, writerOf(w.told)).Run(context.Background(), "mw-x.1")
+	}
+	return f
+}
+
+// A foreground whole check on a host whose usual gate is longer than the call's
+// whole budget does not run the gate inside the call, which the tool cuts off at
+// 600 s with no words, no log and the gate lock held (mw-gq6.1273, seen by
+// mw-gq6.1251 on cloud8: "gate expected about 12m47s, 8m50s left in this call"). It
+// runs the check as a process of its own that outlives the call, ends the call
+// inside its budget in one line naming where the verdict and the output will be,
+// and the same command, run again, reads the verdict without running the gate
+// again; the log it keeps then is the passed check mw next trusts.
+func TestAForegroundCheckOnAGateLongerThanTheCall(t *testing.T) {
+	f := newForegroundCheckOnAGateLongerThanTheCall(t, true)
+	began := f.w.clock.Now()
+	// The whole of the call's budget passes while the gate runs.
+	go func() {
+		<-f.gate.started
+		f.w.clock.Pass(application.CheckCallBudget)
+	}()
+	report, err := f.check()
+	if spent := f.w.clock.Now().Sub(began); spent >= 590*time.Second {
+		t.Fatalf("expected the call to end before 590 s, it ran %s with the gate run in it %d time(s) (%v)\n%s", spent, f.inCall.ranCount(), err, report)
+	}
+	if err != nil || len(report.Refusals) != 0 {
+		t.Fatalf("expected a call that ended on a running gate to end without an error or a refusal, got %v %+v\n%s", err, report.Refusals, report)
+	}
+	if f.inCall.ranCount() != 0 || f.starter.startedCount() != 1 {
+		t.Fatalf("expected the gate run by one process of its own and not in the call, ran %d in the call, %d process(es)", f.inCall.ranCount(), f.starter.startedCount())
+	}
+	for _, want := range []string{
+		"still running on laptop as a process of its own", "usually about 12m47s",
+		f.records.RunFile("mw-x.1", application.CheckGateResultFileName(1)),
+		f.records.RunFile("mw-x.1", application.CheckGateOutFileName(1)),
+		"`mw check mw-x.1`, run again, waits for it and reads the verdict without running the rig's gate again",
+	} {
+		if !strings.Contains(report.Waiting, want) {
+			t.Errorf("expected the line to say %q, got %q", want, report.Waiting)
+		}
+	}
+	if strings.Contains(report.Waiting, "\n") {
+		t.Errorf("expected one line, got %q", report.Waiting)
+	}
+	if log, _ := f.records.ReadRunFile(context.Background(), "mw-x.1", application.CheckLogFileName(1)); !strings.Contains(log, report.Waiting) {
+		t.Errorf("expected the check's log to hold the line, got %q", log)
+	}
+
+	// The gate ends after the call; the same command, run again, reads it.
+	close(f.gate.release)
+	f.starter.wait()
+	report, err = f.check()
+	if err != nil || !report.Passed() || report.Tip != "abc1234" {
+		t.Fatalf("expected the check run again to pass at abc1234 on what the process kept, got %v (tip %q)\n%s", err, report.Tip, report)
+	}
+	if f.inCall.ranCount() != 0 || f.gate.ranCount() != 1 || f.starter.startedCount() != 1 {
+		t.Errorf("expected the gate run once, by the one process, got %d in the call, %d by %d process(es)", f.inCall.ranCount(), f.gate.ranCount(), f.starter.startedCount())
+	}
+	log, _ := f.records.ReadRunFile(context.Background(), "mw-x.1", application.CheckLogFileName(1))
+	if got := application.CheckedTip(log); got != "abc1234" {
+		t.Errorf("expected the check's log to be the passed check at abc1234 that mw next trusts, got tip %q of %q", got, log)
+	}
+}
+
+// A process that ran the gate and failed it gives the call run again its verdict:
+// the tests' refusal, with nothing started or run again.
+func TestAForegroundCheckOnAGateLongerThanTheCallReadsAFailedVerdict(t *testing.T) {
+	f := newForegroundCheckOnAGateLongerThanTheCall(t, false)
+	go func() {
+		<-f.gate.started
+		f.w.clock.Pass(application.CheckCallBudget)
+	}()
+	if report, err := f.check(); err != nil || report.Waiting == "" {
+		t.Fatalf("expected the call to end on the running gate, got %v\n%s", err, report)
+	}
+	close(f.gate.release)
+	f.starter.wait()
+	report, err := f.check()
+	if err == nil || len(report.Refusals) == 0 {
+		t.Fatalf("expected the failed gate to be the call's refusal, got %v\n%s", err, report)
+	}
+	if !strings.Contains(report.String(), "--- FAIL: TestSomething") {
+		t.Errorf("expected the refusal to say what the tests printed, got %s", report)
+	}
+	if f.inCall.ranCount() != 0 || f.gate.ranCount() != 1 || f.starter.startedCount() != 1 {
+		t.Errorf("expected nothing run or started again, got %d in the call, %d by %d process(es)", f.inCall.ranCount(), f.gate.ranCount(), f.starter.startedCount())
 	}
 }
