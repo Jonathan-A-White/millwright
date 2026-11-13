@@ -51,6 +51,15 @@ later, or Windows 11; the install paste refuses to register anything on an older
 **A failure of `wsl.exe`** (WSL down, the distro missing) is written to the log and the script exits 0: no
 error box.
 
+**No login environment.** `wsl.exe --exec mw ...` runs mw with none of a login shell's environment: a PATH
+without `~/.local/bin` (so no `bd`, and no `tmux` if it is not in the bare PATH) and none of `beads.env`. On
+2026-11-13 the unlock task froze nothing (`sessions 0, stopped 0`, note `failed: exec: "bd": executable file not
+found`). `mw giveway` (every verb, so also the uninstall line's `giveway off`) now puts `~/.local/bin` and the
+standard directories on PATH, after what PATH names, and reads the names in `~/.config/mw/beads.env` that the
+environment does not set, before it lists a pane or stops a process; so `giveway.ps1` needs no change. The
+freeze never waits on the note: the sessions are stopped first, the note is written after and a failed write is
+only the log's word. cmd/mw/loginenv_test.go runs the real binary with `PATH=/nonexistent` and proves it.
+
 **WSL down.** `wsl.exe -d <distro> --exec` starts a distro that is down, and nothing runs the factory while
 WSL is down. So before it calls `wsl.exe` for an unlock, a lock (freeze mode), a logoff or a tick, the
 script looks for the WSL 2 virtual machine's process (`vmmemWSL`, or `vmmem` on an older WSL): none, and it
