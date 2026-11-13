@@ -210,7 +210,7 @@ func (h FleetHostPause) now() time.Time {
 	if h.Now != nil {
 		return h.Now()
 	}
-	return time.Now()
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
 func (h FleetHostPause) remote() string {
@@ -670,7 +670,7 @@ func (p Pause) now() time.Time {
 	if p.Now != nil {
 		return p.Now()
 	}
-	return time.Now()
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
 // Run pauses the factory, or says it already is.
@@ -915,7 +915,7 @@ func (r Resume) Run(ctx context.Context, dryRun bool) error {
 		fmt.Fprintf(r.Out, "dry run: would resume the pause of %s, nothing was changed\n%s", set.PausedAt.UTC().Format(time.RFC3339), set)
 		return nil
 	}
-	now := time.Now()
+	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
 	if r.Now != nil {
 		now = r.Now()
 	}

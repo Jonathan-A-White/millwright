@@ -320,7 +320,7 @@ func lastLine(text string) string {
 // now is the clock the rule is read by.
 func (w Watch) now() time.Time {
 	if w.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return w.Now()
 }

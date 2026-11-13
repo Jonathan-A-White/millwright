@@ -885,7 +885,7 @@ func lostClaimsOnly(said string) (holders []string, lost bool) {
 // now is the clock the log is dated by.
 func (d Dispatch) now() time.Time {
 	if d.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return d.Now()
 }

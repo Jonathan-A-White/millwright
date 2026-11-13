@@ -1333,7 +1333,7 @@ func (w TalkWait) now() time.Time {
 	if w.Now != nil {
 		return w.Now()
 	}
-	return time.Now()
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
 func (w TalkWait) printf(out io.Writer, format string, args ...any) {

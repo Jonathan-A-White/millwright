@@ -168,7 +168,7 @@ func (q Queue) inRig(detail StoryDetail) bool {
 }
 
 func (q Queue) row(detail StoryDetail) QueueRow {
-	now := time.Now()
+	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
 	if q.Now != nil {
 		now = q.Now()
 	}
