@@ -688,8 +688,10 @@ func TestDigestLooksGoodTapLeavesTheDigestOpenWhenACloseFails(t *testing.T) {
 		t.Fatalf("expected the digest left open, it was closed: %s", reason)
 	}
 	subjects := f.subjects(t)
-	if len(subjects) != 2 || subjects[1] != "Not applied: the weekly digest mw-d.1" {
-		t.Fatalf("expected the answer's mail and a not-applied mail, got %v", subjects)
+	// The close that failed is also mailed once as a lost write (mw-gq6.1134),
+	// before the not-applied mail.
+	if len(subjects) != 3 || !strings.HasPrefix(subjects[1], "lost write: the close of mw-e.6") || subjects[2] != "Not applied: the weekly digest mw-d.1" {
+		t.Fatalf("expected the answer's mail, a lost-write mail and a not-applied mail, got %v", subjects)
 	}
 }
 
@@ -1217,5 +1219,128 @@ func TestTypedDoneAmongOtherWordsTakesTheOrdinaryPath(t *testing.T) {
 	}
 	if len(f.subjects(t)) != 4 {
 		t.Errorf("expected four ordinary mails, got %v", f.subjects(t))
+	}
+}
+
+// mw-gq6.1134: the five closes the Governor's taps make (his Looks good on a
+// demo, a close tap, the Let go card's Drop, the weekly digest's demos and the
+// digest itself) go through CloseRetry, as Next's closes do: a passing fault is
+// waited out and tried again, and a close lost every try is mailed once with
+// the try count.
+
+// tapCloseFaults is a tracker whose closes of the bead target fault as faulter
+// says; every other close goes through.
+type tapCloseFaults struct {
+	*apptest.FakeTracker
+	target  string
+	faulter *closeFaulter
+}
+
+func (f *tapCloseFaults) CloseStory(ctx context.Context, id, reason string) error {
+	if id != f.target {
+		return f.FakeTracker.CloseStory(ctx, id, reason)
+	}
+	return f.faulter.close(func() error { return f.FakeTracker.CloseStory(ctx, id, reason) })
+}
+
+// aTapCloseSite is one of the five closes: set up the fixture, send the tap,
+// and name the bead whose close is faulted.
+type aTapCloseSite struct {
+	name string
+	set  func(t *testing.T) (f *applyFixture, target string)
+}
+
+func theTapCloseSites() []aTapCloseSite {
+	return []aTapCloseSite{
+		{"Looks good on a demo", func(t *testing.T) (*applyFixture, string) {
+			f := newApplyFixture(t)
+			f.tracker.AddStory("mw-e", domain.Story{ID: "mw-e.5", Title: "Demo: mw-e.5"})
+			mustDo(t, f.tracker.SetLabels("mw-e.5", application.LabelDemo))
+			threaded, _ := json.Marshal(application.PosternThreadedMessage{Thread: application.PosternThread{Bead: "mw-e.5"}, Text: "Looks good"})
+			f.message(t, releaseTapGovernorKey, "tx-lg", string(threaded))
+			return f, "mw-e.5"
+		}},
+		{"close tap", func(t *testing.T) (*applyFixture, string) {
+			f := newApplyFixture(t)
+			f.action(t, "tx-close", map[string]any{"action": "close", "bead": "mw-e.3"})
+			return f, "mw-e.3"
+		}},
+		{"Let go Drop", func(t *testing.T) (*applyFixture, string) {
+			f := letGoFixture(t, []string{"A: Keep them all", "B: Drop them all"})
+			f.answer(t, "tx-drop", "mw-e", "B: Drop them all")
+			return f, "mw-e.1"
+		}},
+		{"digest demo", func(t *testing.T) (*applyFixture, string) {
+			f := digestTapFixture(t)
+			f.answer(t, "tx-tap", "mw-d.1", application.DigestLooksGoodOption(2))
+			return f, "mw-e.5"
+		}},
+		{"digest itself", func(t *testing.T) (*applyFixture, string) {
+			f := digestTapFixture(t)
+			f.answer(t, "tx-tap", "mw-d.1", application.DigestLooksGoodOption(2))
+			return f, "mw-d.1"
+		}},
+	}
+}
+
+// runTapClose applies the site's tap with the target's close faulting as
+// faulter says, and reads the target after.
+func runTapClose(t *testing.T, site aTapCloseSite, faulter *closeFaulter) (detail application.StoryDetail, mail *apptest.FakeMailbox, waits []time.Duration) {
+	t.Helper()
+	f, target := site.set(t)
+	inbox := f.inbox()
+	inbox.Tracker = &tapCloseFaults{FakeTracker: f.tracker, target: target, faulter: faulter}
+	inbox.PushWait = 400 * time.Millisecond
+	inbox.RetryWait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	if _, err := inbox.Apply(context.Background()); err != nil {
+		t.Fatalf("applying: %v", err)
+	}
+	detail, err := f.tracker.ShowStory(context.Background(), target)
+	if err != nil {
+		t.Fatalf("showing %s: %v", target, err)
+	}
+	return detail, f.mailbox, waits
+}
+
+func TestATapCloseThatMeetsAPassingFaultWaitsIsTriedAgainAndMailsNothing(t *testing.T) {
+	for _, site := range theTapCloseSites() {
+		t.Run(site.name, func(t *testing.T) {
+			faulter := &closeFaulter{fails: 1, err: formulaTimeout()}
+			detail, mail, waits := runTapClose(t, site, faulter)
+			if !detail.Closed() {
+				t.Errorf("expected %s closed, got %q", detail.Story.ID, detail.Status)
+			}
+			if faulter.asked != 2 {
+				t.Errorf("expected the close asked twice, got %d", faulter.asked)
+			}
+			if len(waits) != 1 {
+				t.Errorf("expected one wait before the second try, got %v", waits)
+			}
+			if mails := lostWrites(t, mail); len(mails) != 0 {
+				t.Errorf("expected no lost-write mail, got %+v", mails)
+			}
+		})
+	}
+}
+
+func TestATapCloseThatFailsEveryTryMailsOnceWithTheTryCount(t *testing.T) {
+	for _, site := range theTapCloseSites() {
+		t.Run(site.name, func(t *testing.T) {
+			faulter := &closeFaulter{fails: 1000, err: formulaTimeout()}
+			detail, mail, _ := runTapClose(t, site, faulter)
+			if detail.Closed() {
+				t.Errorf("expected %s still open", detail.Story.ID)
+			}
+			if faulter.asked != application.ReadRetries+1 {
+				t.Errorf("expected the close asked %d times, got %d", application.ReadRetries+1, faulter.asked)
+			}
+			mails := lostWrites(t, mail)
+			if len(mails) != 1 {
+				t.Fatalf("expected one lost-write mail, got %+v", mails)
+			}
+			if want := "tried 5 times"; !strings.Contains(mails[0].Body, want) || !strings.Contains(mails[0].Body, detail.Story.ID) {
+				t.Errorf("expected the mail to name %s and say %q, got:\n%s", detail.Story.ID, want, mails[0].Body)
+			}
+		})
 	}
 }

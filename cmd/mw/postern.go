@@ -394,6 +394,7 @@ func newPosternInbox(out io.Writer) (application.PosternInbox, posternWiring, er
 		View:          newHandsView(gateway, host),
 		ViewLock:      newHandsViewLock(),
 		Host:          host,
+		PushWait:      closePushWait(),
 		GovernorKey:   governorKey,
 		AttachmentDir: attachmentDir,
 		Lock:          posternInboxLock(attachmentDir),

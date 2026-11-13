@@ -599,7 +599,7 @@ func (i PosternInbox) applyLooksGood(ctx context.Context, m PosternInboxMessage)
 		return posternApplied{}, false, fmt.Errorf("recording the Governor's Looks good on %s: %w", bead.Story.ID, err)
 	}
 	result := posternApplied{Kind: PosternActionClose, Bead: bead.Story.ID, Txid: m.Txid}
-	if err := i.Tracker.CloseStory(ctx, bead.Story.ID, reason); err != nil {
+	if err := i.closeStory(ctx, "applying the Governor's Looks good", bead.Story.ID, reason); err != nil {
 		result.Refused, result.Detail = true, fmt.Sprintf("closing %s failed: %v", bead.Story.ID, err)
 		return result, true, i.mail(ctx, fmt.Sprintf("Not applied: Looks good on %s", bead.Story.ID),
 			fmt.Sprintf("The Governor said Looks good by postern (txid %s) to %s; not applied: %s.", m.Txid, bead.Story.ID, result.Detail))
@@ -849,7 +849,7 @@ func (i PosternInbox) applyClose(ctx context.Context, m PosternInboxMessage, bea
 		return posternApplied{}, err
 	}
 	for _, id := range closes {
-		if err := i.Tracker.CloseStory(ctx, id, reason); err != nil {
+		if err := i.closeStory(ctx, "applying the Governor's close tap", id, reason); err != nil {
 			return refuse(fmt.Sprintf("closing %s failed: %v", id, err))
 		}
 	}
@@ -928,6 +928,17 @@ func claimedBy(assignee string) string {
 		return ""
 	}
 	return ", claimed by " + assignee
+}
+
+// closeStory closes the story id the way mw next closes one (CloseRetry,
+// mw-gq6.1134): a passing fault is waited out and tried again, a close bd was
+// unsure of is read first, and a close lost every try is mailed to the Mayor
+// once with how many times it was tried. doing names what the pass was doing,
+// for that mail. An error is the last try's.
+func (i PosternInbox) closeStory(ctx context.Context, doing, id, reason string) error {
+	closer := CloseRetry{Close: i.Tracker.CloseStory, Show: i.Tracker.ShowStory, Host: i.Host,
+		PushWait: i.PushWait, RetryWait: i.RetryWait, Mailbox: i.Mailbox, Err: i.Out}
+	return closer.CloseStory(ctx, "mw postern", doing, id, reason)
 }
 
 // mail sends the Mayor one message from mw on this host. A nil Mailbox sends
@@ -1064,7 +1075,7 @@ func (i PosternInbox) letGoOnTap(ctx context.Context, m PosternInboxMessage, epi
 				TodoRowField: TodoRowLater, TodoRowWhyField: "Kept on the weekly Let go card",
 			})
 		} else {
-			err = i.Tracker.CloseStory(ctx, id, TodoLetGoReason)
+			err = i.closeStory(ctx, "applying the Governor's tap on the Let go card", id, TodoLetGoReason)
 		}
 		if err != nil {
 			return notApplied(fmt.Sprintf("%s failed: %v", id, err))
@@ -1150,13 +1161,13 @@ func (i PosternInbox) digestOnTap(ctx context.Context, m PosternInboxMessage, be
 		if err := i.Tracker.CommentOnStory(ctx, id, comment); err != nil {
 			return notApplied(fmt.Sprintf("commenting on %s failed: %v (closed: %s)", id, err, joinOrNone(closed)))
 		}
-		if err := i.Tracker.CloseStory(ctx, id, reason); err != nil {
+		if err := i.closeStory(ctx, "applying the Governor's tap on the weekly digest", id, reason); err != nil {
 			return notApplied(fmt.Sprintf("closing %s failed: %v (closed: %s)", id, err, joinOrNone(closed)))
 		}
 		closed = append(closed, id)
 	}
 	reason := fmt.Sprintf("Weekly digest taken on the Governor's Looks good (txid %s)", m.Txid)
-	if err := i.Tracker.CloseStory(ctx, bead, reason); err != nil {
+	if err := i.closeStory(ctx, "applying the Governor's tap on the weekly digest", bead, reason); err != nil {
 		return notApplied(fmt.Sprintf("closed %s, then closing the digest failed: %v", joinOrNone(closed), err))
 	}
 	return i.mail(ctx, fmt.Sprintf("Closed: the weekly digest %s on his Looks good", bead),
