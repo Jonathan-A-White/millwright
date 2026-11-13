@@ -264,17 +264,27 @@ func landingChange(before, after float64, lowerIsBetter bool) string {
 // the two stretches of days, then QUALITY, SPEED and FUEL with the days
 // before beside the days after, in at most ReportWidth columns.
 func (l ReportLanding) String() string {
-	var b strings.Builder
+	return l.headline() + l.rest()
+}
+
+// headline is the first line of mw report --since <landing>: what landed and
+// when, which Run writes before it reads the tracker.
+func (l ReportLanding) headline() string {
 	switch {
 	case l.LandedBy == "commit" && l.Story != "":
-		fmt.Fprintf(&b, "%s\n", fitLine(fmt.Sprintf("commit %s (%s) made %s", l.Commit, l.Story, l.Landed), ReportWidth))
+		return fitLine(fmt.Sprintf("commit %s (%s) made %s", l.Commit, l.Story, l.Landed), ReportWidth) + "\n"
 	case l.Story != "" && l.Commit != "":
-		fmt.Fprintf(&b, "%s\n", fitLine(fmt.Sprintf("%s landed %s (commit %s)", l.Story, l.Landed, l.Commit), ReportWidth))
+		return fitLine(fmt.Sprintf("%s landed %s (commit %s)", l.Story, l.Landed, l.Commit), ReportWidth) + "\n"
 	case l.Story != "":
-		fmt.Fprintf(&b, "%s\n", fitLine(fmt.Sprintf("%s landed %s", l.Story, l.Landed), ReportWidth))
-	default:
-		fmt.Fprintf(&b, "commit %s made %s\n", l.Commit, l.Landed)
+		return fitLine(fmt.Sprintf("%s landed %s", l.Story, l.Landed), ReportWidth) + "\n"
 	}
+	return fmt.Sprintf("commit %s made %s\n", l.Commit, l.Landed)
+}
+
+// rest is everything after the first line: the title, which the tracker
+// supplies, the two stretches of days, then the side by side.
+func (l ReportLanding) rest() string {
+	var b strings.Builder
 	if title := strings.Join(strings.Fields(l.Title), " "); title != "" {
 		fmt.Fprintf(&b, "%s\n", fitLine(title, ReportWidth))
 	}

@@ -67,3 +67,34 @@ func TestAJSONReportWritesNothingBeforeItIsWhole(t *testing.T) {
 		t.Errorf("a JSON report wrote %q before its first read", tracker.reads)
 	}
 }
+
+// mw report --since <story> writes its first line, the landing, before it
+// reads the tracker, which under load takes minutes (mw-6ww.175.40).
+func TestALandingReportWritesItsFirstLineBeforeItReadsTheTracker(t *testing.T) {
+	out := &bytes.Buffer{}
+	tracker := &outAtRead{FakeTracker: apptest.NewFakeTracker(), out: out}
+	files := vault.New(t.TempDir())
+	line := application.LedgerLine{When: time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC), StoryID: "mw-x.1", Title: "Mend it",
+		Outcome: "landed on main"}.String()
+	if err := files.AppendToLedger(context.Background(), "builder", line); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
+	result, err := application.FactoryReport{
+		Tracker: tracker, Files: files, Seat: "builder", Around: "mw-x.1",
+		Benchmarks: &apptest.FakeBenchmarks{}, Out: out, Now: func() time.Time { return now },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tracker.reads) == 0 {
+		t.Fatal("the report never read the tracker")
+	}
+	if first := tracker.reads[0]; first != "mw-x.1 landed 2026-11-01\n" {
+		t.Errorf("at its first tracker read the report had written %q, want the landing's first line", first)
+	}
+	// Written once, and the whole text is the result's own.
+	if out.String() != result.String() {
+		t.Errorf("the printed text differs from the result's:\n%s\n---\n%s", out.String(), result.String())
+	}
+}
