@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 )
 
 // channelInbox reads one message from the Governor, of class message, with
@@ -154,5 +155,31 @@ func TestPosternInboxReplyAnswerNamesNoChannelFlag(t *testing.T) {
 				t.Fatalf("expected no channel flag in the answer line, got:\n%s", out)
 			}
 		})
+	}
+}
+
+// A root mw has not seen, answered with --re and no channel flag, is posted
+// to Factory — the one channel that has no flag to name — with the note that
+// says so and how to send it elsewhere; the refusal that named only
+// --bead-channel and --channel left a Factory root unanswerable
+// (mw-gq6.1161).
+func TestPosternSendReOfAnUnseenRootPostsToFactoryAndSaysSo(t *testing.T) {
+	f := newSendFixture()
+	send := f.send("direct")
+	send.Threads = apptest.NewFakePosternThreadIndex()
+
+	_, err := send.Run(context.Background(), application.PosternSendRequest{Class: "message", Text: "Yes.", Re: "direct:unseen"})
+	if err != nil {
+		t.Fatalf("expected the reply to be sent, got %v", err)
+	}
+	_, plaintext := f.delivered(t, 0)
+	want := `{"text":"Yes.","re":"direct:unseen"}`
+	if plaintext != want {
+		t.Fatalf("expected the plaintext %s, got %s", want, plaintext)
+	}
+	for _, say := range []string{"direct:unseen", "Factory", "--bead-channel", "--channel"} {
+		if !strings.Contains(f.out.String(), say) {
+			t.Errorf("expected the note to say %q, got:\n%s", say, f.out.String())
+		}
 	}
 }
