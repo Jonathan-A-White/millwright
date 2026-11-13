@@ -384,7 +384,9 @@ func (c *cloudContext) boxTakes(box string, n int) error {
 	if n > 0 {
 		return fmt.Errorf("too few stories wait for %s to take", box)
 	}
-	return nil
+	// A box that has taken a story has dispatched: its sync wrote the note of
+	// when it was last level (the check destroys a box that never did, mw-gq6.1143).
+	return c.tracker.SetNote(context.Background(), application.LastSyncKey(box), c.now.UTC().Format(application.LastSyncFormat))
 }
 
 func (c *cloudContext) finished(box string) error {
