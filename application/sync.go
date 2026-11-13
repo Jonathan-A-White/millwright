@@ -28,20 +28,81 @@ const (
 // the VPS is host.vps.last_sync.
 func LastSyncKey(host string) string { return "host." + host + ".last_sync" }
 
-// SyncOfAnOlderBox says whether a last-sync time read under host's name is one
-// a box written before the box now holding the name was made: the cloud's book
-// holds a box of that name asked for after the sync, so the sync is the
-// destroyed box's, whose note stays in the vault under the name a new box
-// takes (mw-gq6.1145). The box's start is its Up, the same bound seeDispatch
-// holds a first dispatch to. A name the book holds no box of, or a sync at or
-// after the box's start, is not one.
-func (s CloudState) SyncOfAnOlderBox(host string, at time.Time) bool {
+// NoteOfAnOlderBox says whether a note read under host's name, written at at,
+// is one a box that is gone left, and so is none of the box now holding the
+// name (mw-gq6.1145, mw-gq6.1171). It is, in two cases: host is a box the plan
+// gives and the book holds no box of that name (destroyed, so every note under
+// it is the old box's); or the book holds a box of that name asked for after
+// at, whose notes stay in the vault under the name a new box takes. The box's
+// start is its Up, the same bound seeDispatch holds a first dispatch to. A
+// name the plan gives no box (the laptop), or a note at or after the box's
+// start, is not one.
+//
+// at is the host's last sync (lastSyncOf) for a note of any kind: the sync
+// writes the ticks and the mw commit beside it, and the notes the host's
+// timers leave come after one. A host that has left none is at the zero time,
+// older than any make. A caller whose book
+// could not be read does not ask: it reads the notes as they are. This is the
+// one test: a reader does not keep its own copy.
+func (s CloudState) NoteOfAnOlderBox(plan CloudPlan, host string, at time.Time) bool {
 	for _, box := range s.Boxes {
 		if box.Name == host {
 			return at.Before(box.Up)
 		}
 	}
-	return false
+	return s.BoxGone(plan, host)
+}
+
+// BoxGone says host is a box the plan gives and the book holds no box of: one
+// the cloud destroyed. A host that is no box's name (the laptop) is never one.
+// It is the first case of NoteOfAnOlderBox, for a reader that has no note to
+// date, such as a row of benchmarks (DestroyedBox).
+func (s CloudState) BoxGone(plan CloudPlan, host string) bool {
+	if !plan.isBox(host) {
+		return false
+	}
+	for _, box := range s.Boxes {
+		if box.Name == host {
+			return false
+		}
+	}
+	return true
+}
+
+// boxBook is the cloud's book read once by a reader of per-name notes, asking
+// CloudState.NoteOfAnOlderBox. The zero value, a nil book and a book that
+// cannot be read judge nothing: every note is read as it was.
+type boxBook struct {
+	state CloudState
+	plan  CloudPlan
+	read  bool
+}
+
+// readBoxBook reads the book for a reader of per-name notes.
+func readBoxBook(ctx context.Context, book CloudBook, plan CloudPlan) boxBook {
+	if book == nil {
+		return boxBook{}
+	}
+	state, err := book.Read(ctx)
+	return boxBook{state: state, plan: plan, read: err == nil}
+}
+
+// older says a note under host's name, written at at, is a gone box's.
+func (b boxBook) older(host string, at time.Time) bool {
+	return b.read && b.state.NoteOfAnOlderBox(b.plan, host, at)
+}
+
+// gone says host is a box the cloud destroyed.
+func (b boxBook) gone(host string) bool { return b.read && b.state.BoxGone(b.plan, host) }
+
+// lastSyncOf is when a host's last-sync note says it was last level: the zero
+// time when the note is missing or not a time, older than any make.
+func lastSyncOf(said string) time.Time {
+	at, err := time.Parse(LastSyncFormat, strings.TrimSpace(said))
+	if err != nil {
+		return time.Time{}
+	}
+	return at
 }
 
 // MwCommitKey is where a host leaves the short commit its mw was built from, on

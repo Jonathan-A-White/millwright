@@ -1216,7 +1216,7 @@ func (p *cloudPass) seeDispatch(ctx context.Context) {
 		}
 		said = strings.TrimSpace(said)
 		at, perr := time.Parse(LastSyncFormat, said)
-		if said != "" && perr == nil && !at.Before(box.Up) {
+		if said != "" && perr == nil && !p.state.NoteOfAnOlderBox(p.check.Plan, box.Name, at) {
 			box.Dispatched, box.NotDispatching = at, ""
 			p.move(ctx, fmt.Sprintf("up %s: its first dispatch reached the beads server at %s, %s after it was made", box.Name, at.UTC().Format("15:04Z"), Clock(max(0, at.Sub(box.made())))))
 			p.dirty = "up " + box.Name

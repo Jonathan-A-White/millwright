@@ -491,6 +491,7 @@ func (s DamperSurvey) readStarved(ctx context.Context, now time.Time) ([]Starved
 		return nil, fmt.Errorf("reading the hosts' notes of the rigs held back: %w", err)
 	}
 	var rigs []StarvedRig
+	book := readBoxBook(ctx, s.Cloud, s.CloudPlan)
 	type closedRead struct {
 		closed []ClosedStory
 		ok     bool
@@ -504,11 +505,17 @@ func (s DamperSurvey) readStarved(ctx context.Context, now time.Time) ([]Starved
 			if down, err := (CloudBoxesDown{Book: s.Cloud, Plan: s.CloudPlan}).Down(ctx, host); err == nil && down {
 				continue
 			}
-			dispatch := ParseHostTicks(notes[TicksKey(host)]).Dispatch
+			// Its ticks and give-way notes are the old box's when it has not synced
+			// since it was made (mw-gq6.1171).
+			older := book.older(host, lastSyncOf(notes[LastSyncKey(host)]))
+			var dispatch TickCount
+			if !older {
+				dispatch = ParseHostTicks(notes[TicksKey(host)]).Dispatch
+			}
 			for _, r := range ParseStarved(notes[key]) {
 				r.Host = host
 				r.PassKnown, r.PassAt = dispatch.Known, dispatch.LastGood
-				r.GivesWay = readGiveWay(notes[GiveWayKey(host)], now, s.GiveWayStale).Stands
+				r.GivesWay = !older && readGiveWay(notes[GiveWayKey(host)], now, s.GiveWayStale).Stands
 				// The closed stories are read for a note old enough to be an alarm
 				// (the landing that clears it) and for a harness stop (the hosts
 				// that ran the rig), once a rig.

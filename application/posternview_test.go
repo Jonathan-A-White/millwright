@@ -1099,24 +1099,29 @@ func TestPosternViewHostsLeaveOutADestroyedCloudBox(t *testing.T) {
 	ctx := context.Background()
 	stale := viewNow.Add(-4 * time.Hour).Format(time.RFC3339)
 	fresh := viewNow.Add(-time.Minute).Format(time.RFC3339)
+	// A box is made before the notes it is read by: its Up is hours back.
+	madeBefore := viewNow.Add(-5 * time.Hour)
 	cases := []struct {
 		name  string
 		book  *apptest.FakeCloudBook
 		notes map[string]string
 		want  []string
 	}{
-		{"destroyed box is left out", &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud2", Up: viewNow}}}},
+		{"destroyed box is left out", &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud2", Up: madeBefore}}}},
 			map[string]string{"cloud1": stale, "cloud2": stale, "laptop": stale},
 			[]string{"cloud2@2026-09-28T08:00:00Z", "desktop@", "laptop@2026-09-28T08:00:00Z"}},
-		{"box up but silent still shows", &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud1", Up: viewNow}}}},
+		{"box up but silent still shows", &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud1", Up: madeBefore}}}},
 			map[string]string{"cloud1": stale},
 			[]string{"cloud1@2026-09-28T08:00:00Z", "desktop@"}},
-		{"box made again under the same name shows", &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud1", Up: viewNow, Making: true}}}},
+		{"box made again under the same name shows", &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud1", Up: madeBefore, Making: true}}}},
 			map[string]string{"cloud1": fresh},
 			[]string{"cloud1@2026-09-28T11:59:00Z", "desktop@"}},
-		{"a live box shows", &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud3", Up: viewNow}}}},
+		{"a live box shows", &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud3", Up: madeBefore}}}},
 			map[string]string{"cloud3": fresh},
 			[]string{"cloud3@2026-09-28T11:59:00Z", "desktop@"}},
+		{"box made after its last sync note shows no sync", &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud1", Up: viewNow.Add(-time.Hour)}}}},
+			map[string]string{"cloud1": stale},
+			[]string{"cloud1@", "desktop@"}},
 		{"a host that is no cloud box is never left out", &apptest.FakeCloudBook{},
 			map[string]string{"cloudy": stale, "vps": stale},
 			[]string{"cloudy@2026-09-28T08:00:00Z", "desktop@", "vps@2026-09-28T08:00:00Z"}},
@@ -1143,6 +1148,33 @@ func TestPosternViewHostsLeaveOutADestroyedCloudBox(t *testing.T) {
 			}
 		})
 	}
+
+	// A box made after its last sync note raises no "last synced" need, though
+	// work is pathed to it: the note is the destroyed box's.
+	t.Run("box made after its last sync note raises no need", func(t *testing.T) {
+		tracker := apptest.NewFakeTracker()
+		liveEpic(tracker, "mw-a", domain.Path{Rig: "millwright", Branch: "main"})
+		tracker.AddStory("mw-a", domain.Story{ID: "mw-a.1", Title: "On the box", Overrides: domain.Path{Host: "cloud1"}})
+		mustDo(t, tracker.SetNote(ctx, application.LastSyncKey("cloud1"), stale))
+		book := &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud1", Up: viewNow.Add(-time.Hour)}}}}
+		doc, err := application.PosternView{
+			Tracker: tracker, Notes: tracker, Host: "desktop", Cloud: book,
+			Now: func() time.Time { return viewNow },
+		}.Build(ctx)
+		if err != nil {
+			t.Fatalf("building the view: %v", err)
+		}
+		for _, n := range doc.Needs {
+			if n.Kind == "alarm" {
+				t.Fatalf("expected no alarm for a box made after its last sync note, got %+v", n)
+			}
+		}
+		for _, h := range doc.Hosts {
+			if h.Name == "cloud1" && h.LastSync != "" {
+				t.Fatalf("expected no last sync for cloud1, got %q", h.LastSync)
+			}
+		}
+	})
 }
 
 // A hands need with a step for a host the factory has no [hands_hosts] route to

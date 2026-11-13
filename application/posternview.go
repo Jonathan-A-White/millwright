@@ -1858,10 +1858,10 @@ func (v PosternView) hosts(ctx context.Context, b *viewBuild, notes map[string]s
 			lastSync[name] = strings.TrimSpace(value)
 		}
 	}
-	destroyed := v.destroyedBoxes(ctx)
+	book := readBoxBook(ctx, v.Cloud, v.CloudPlan)
 	names := make([]string, 0, len(lastSync))
 	for name := range lastSync {
-		if destroyed(name) || IsRetired(v.Retired, name) {
+		if book.gone(name) || IsRetired(v.Retired, name) {
 			continue
 		}
 		names = append(names, name)
@@ -1888,7 +1888,9 @@ func (v PosternView) hosts(ctx context.Context, b *viewBuild, notes map[string]s
 	var alarms []PosternViewNeed
 	for _, name := range names {
 		at, err := time.Parse(LastSyncFormat, lastSync[name])
-		if err != nil {
+		// A sync from before the box now holding the name was made is the
+		// destroyed box's, and is none (mw-gq6.1171).
+		if err != nil || book.older(name, at) {
 			hosts = append(hosts, PosternViewHost{Name: name, LastSync: ""})
 			continue
 		}
@@ -1914,33 +1916,6 @@ func (v PosternView) hosts(ctx context.Context, b *viewBuild, notes map[string]s
 		})
 	}
 	return hosts, alarms
-}
-
-// destroyedBoxes says whether a host is a cloud box the factory destroyed: its
-// name is the plan's prefix and a number, and the cloud's book holds no such
-// box. A box up (even one still being made or silent) is in the book, and one
-// made again under the same name is in it too, so it is listed. With no book,
-// or one that cannot be read, nothing is called destroyed.
-func (v PosternView) destroyedBoxes(ctx context.Context) func(name string) bool {
-	if v.Cloud == nil {
-		return func(string) bool { return false }
-	}
-	state, err := v.Cloud.Read(ctx)
-	if err != nil {
-		return func(string) bool { return false }
-	}
-	up := map[string]bool{}
-	for _, box := range state.Boxes {
-		up[box.Name] = true
-	}
-	prefix := v.CloudPlan.prefix()
-	return func(name string) bool {
-		number, ok := strings.CutPrefix(name, prefix)
-		if !ok || number == "" || strings.Trim(number, "0123456789") != "" {
-			return false
-		}
-		return !up[name]
-	}
 }
 
 // upNext fills in each host's up_next from the beads the view already holds,
