@@ -309,6 +309,9 @@ type CloudBox struct {
 	// before it was kept, or a box never brought level), so that a pass reaches a
 	// box again only when the home's list has moved (mw-t5shinh.33).
 	SessionDeny string `json:"session_deny,omitempty"`
+	// SessionDenyFault is why the last try to set it did not reach the box, said
+	// as a move once, and shown by mw status (mw-gq6.1174).
+	SessionDenyFault string `json:"session_deny_fault,omitempty"`
 	// Saved are the worktrees of the box whose work the vault already holds,
 	// each as "<story> <head> <hash of the uncommitted patch>", so that a
 	// teardown refused later does not bundle the same work again at every
@@ -1462,7 +1465,17 @@ func (p *cloudPass) setPaces(ctx context.Context) {
 func (p *cloudPass) setHarness(ctx context.Context, box *CloudBox, version string) {
 	got, err := p.check.Provider.SetHarness(ctx, box.Name, version)
 	if err != nil {
-		p.check.say("could not read the Claude Code of %s: %v", box.Name, oneLine(err.Error()))
+		// A box that cannot be reached is a fault in the book, a move the first
+		// time for that fault, shown by mw status, and tried at the next pass
+		// (mw-gq6.1174).
+		text := fmt.Sprintf("could not read the Claude Code of %s: %v", box.Name, oneLine(err.Error()))
+		if box.HarnessFault != text {
+			box.HarnessFault = text
+			p.move(ctx, text)
+			p.dirty = box.Name + " harness"
+		} else {
+			p.check.say("%s", text)
+		}
 		return
 	}
 	var what string
@@ -1527,10 +1540,17 @@ func (p *cloudPass) setSessionDenies(ctx context.Context) {
 		}
 		changed, err := p.check.Provider.SetSessionDeny(ctx, box.Name, rules)
 		if err != nil {
-			p.check.say("could not set session.deny on %s: %v", box.Name, oneLine(err.Error()))
+			text := fmt.Sprintf("could not set session.deny on %s: %v", box.Name, oneLine(err.Error()))
+			if box.SessionDenyFault != text {
+				box.SessionDenyFault = text
+				p.move(ctx, text)
+				p.dirty = box.Name + " session deny"
+			} else {
+				p.check.say("%s", text)
+			}
 			continue
 		}
-		box.SessionDeny = home
+		box.SessionDeny, box.SessionDenyFault = home, ""
 		p.dirty = box.Name + " session deny"
 		if !changed {
 			p.check.say("%s: session.deny is level with the home's", box.Name)
@@ -2275,9 +2295,19 @@ func (r CloudReading) write(b *strings.Builder) {
 			continue
 		}
 		line := fmt.Sprintf("  %s  up %s", box.Name, Clock(r.Now.Sub(box.Up)))
+		// What the check could not set on the box is shown under whichever line
+		// the box gets (mw-gq6.1174).
+		faults := func() {
+			for _, fault := range []string{box.HarnessFault, box.SessionDenyFault} {
+				if fault != "" {
+					clip(b, "    "+fault)
+				}
+			}
+		}
 		// A box the home has not cleared takes no story, whatever it has dispatched.
 		if why := box.heldWhy(); why != "" && (box.CheckFault != "" || !box.LockedSince.IsZero() || !box.Dispatched.IsZero()) {
 			clip(b, line+", takes no story: "+why)
+			faults()
 			continue
 		}
 		// A box a book kept no Made of was said up by its make, as before.
@@ -2285,9 +2315,11 @@ func (r CloudReading) write(b *strings.Builder) {
 		case !box.Dispatched.IsZero():
 		case box.NotDispatching != "":
 			clip(b, line+", not dispatching: "+box.NotDispatching)
+			faults()
 			continue
 		case !box.Made.IsZero():
 			clip(b, line+", waiting for its first dispatch")
+			faults()
 			continue
 		}
 		if !box.IdleSince.IsZero() {
@@ -2299,6 +2331,7 @@ func (r CloudReading) write(b *strings.Builder) {
 		if box.CapFault != "" {
 			clip(b, fmt.Sprintf("    cap %d, not the %d box_cap says: %s", box.boxCap(CloudPlan{BoxCap: r.BoxCap}), r.BoxCap, box.CapFault))
 		}
+		faults()
 	}
 	if !r.FeeLimitAt.IsZero() {
 		clip(b, "  Vultr fee limit reached since "+r.FeeLimitAt.UTC().Format("01-02 15:04Z"))
