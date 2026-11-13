@@ -1010,6 +1010,9 @@ func ParseCommonErrors(comment string) CommonErrorProposals {
 		return CommonErrorProposals{}
 	}
 	found := CommonErrorProposals{Found: true}
+	// saidNothing is true once the section has said the word nothing; the next
+	// blank line then ends it (mw-gq6.1210).
+	saidNothing := false
 	for _, raw := range append([]string{first}, lines[start+1:]...) {
 		if strings.Contains(strings.ToLower(raw), strings.ToLower(RigMemoryMarker)) || isFoundNotFixedHeading(raw) || isDocsHeading(raw) {
 			break
@@ -1017,7 +1020,11 @@ func ParseCommonErrors(comment string) CommonErrorProposals {
 		text := strings.TrimSpace(domain.TrimListMarker(raw))
 		switch m := commonErrorForm.FindStringSubmatch(text); {
 		case text == "":
+			if saidNothing {
+				return found
+			}
 		case strings.EqualFold(strings.Trim(text, " .*_`"), "nothing"):
+			saidNothing = true
 			found.Lines = append(found.Lines, CommonErrorLine{Nothing: true})
 		case m != nil:
 			found.Lines = append(found.Lines, CommonErrorLine{Slug: m[1], Line: strings.Join(strings.Fields(m[2]), " ")})
