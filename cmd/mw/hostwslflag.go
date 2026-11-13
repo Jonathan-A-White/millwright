@@ -35,6 +35,10 @@ const wslFlagTask = "millwright-wsl-flag-watch"
 // the task polls every 2 minutes and a compaction takes a good while.
 const wslFlagLimit = 45 * time.Minute
 
+// wslFlagWriteLimit bounds the write of the flag, apart from --limit, which
+// bounds the wait for the result.
+const wslFlagWriteLimit = 2 * time.Minute
+
 // wslFlagPoll is how often the result file is looked for. A test shortens it.
 var wslFlagPoll = 10 * time.Second
 
@@ -223,12 +227,18 @@ func newHostWSLFlagCmd() *cobra.Command {
 
 // askWSLFlag writes the flag for action on host and waits for the result.
 func askWSLFlag(cmd *cobra.Command, host, ssh, action string, limit time.Duration) error {
-	ctx, cancel := context.WithTimeout(cmd.Context(), limit)
-	defer cancel()
 	out := cmd.OutOrStdout()
-	if _, err := hostWSLFlagRun(ctx, host, ssh, wslFlagWriteScript(action)); err != nil {
+	// --limit bounds the wait for the result, not the write of the flag: the
+	// write has its own bound, and the wait's clock starts when it is done, so
+	// a host slow to take the write is not told the flag was not written.
+	wctx, wcancel := context.WithTimeout(cmd.Context(), wslFlagWriteLimit)
+	_, err := hostWSLFlagRun(wctx, host, ssh, wslFlagWriteScript(action))
+	wcancel()
+	if err != nil {
 		return fmt.Errorf("the flag was not written: %w", err)
 	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), limit)
+	defer cancel()
 	fmt.Fprintf(out, "%s: asked for %s; waiting up to %s for the Windows task (it looks every 2 minutes)\n", host, action, limit)
 	var lastErr error
 	for {
