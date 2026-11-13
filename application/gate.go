@@ -180,7 +180,7 @@ func (n Next) calmedThen(ctx context.Context, report *NextReport, c *closeOut, w
 	if n.SlotYield != nil {
 		defer n.SlotYield(ctx)()
 	}
-	since := time.Now()
+	since := n.now()
 	var waited, said time.Duration
 	for reading.Busy() {
 		// The steps waited are a count, not the clock: the reads of a host at load 43

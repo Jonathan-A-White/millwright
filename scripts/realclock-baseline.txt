@@ -2,26 +2,6 @@
 # scripts/check-realclock.sh lets pass, by file: "<path> <count>".
 # Written by scripts/check-realclock.sh --print. Lower a count when a use
 # moves onto an injected clock; never raise one (use //mw:realclock <why>).
-application/gate.go 1
-application/gristcredits.go 2
-application/gristeval.go 1
-application/gristgrind.go 1
-application/gristrequest.go 1
-application/gristsend.go 1
-application/gristsmoke.go 2
-application/griststatus.go 1
-application/gristtalks.go 3
-application/gristtidy.go 1
-application/hands.go 2
-application/homemove.go 1
-application/ice.go 1
-application/ideasonly.go 1
-application/invest.go 1
-application/loop.go 1
-application/loopsitting.go 1
-application/mayorneeds.go 1
-application/memory.go 1
-application/millhandtick.go 1
 application/needssweep.go 1
 application/network.go 1
 application/next.go 1

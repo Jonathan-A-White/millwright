@@ -586,7 +586,7 @@ func evalAnswered(answer json.RawMessage) (names []string, unsure int, ok bool) 
 
 func (e GristEval) now() time.Time {
 	if e.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return e.Now()
 }

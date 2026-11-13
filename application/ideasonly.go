@@ -140,7 +140,7 @@ func (m IdeasOnlyMode) now() time.Time {
 	if m.Now != nil {
 		return m.Now()
 	}
-	return time.Now()
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
 // Refresh asks the backend for the mode and keeps the state file level with

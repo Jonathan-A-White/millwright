@@ -73,7 +73,7 @@ type LoopDone struct {
 // Run records the sitting. A day earlier than the one already recorded changes
 // nothing, so that a late entry of an old sitting cannot make the last look older.
 func (l LoopDone) Run(ctx context.Context) error {
-	now := time.Now()
+	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
 	if l.Now != nil {
 		now = l.Now()
 	}

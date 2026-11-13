@@ -122,7 +122,7 @@ func (v Invest) now() time.Time {
 	if v.Now != nil {
 		return v.Now().UTC()
 	}
-	return time.Now().UTC()
+	return time.Now().UTC() //mw:realclock the default of the injected Now, used where none is set
 }
 
 // record commits the ledger, which a line was just appended to, and pushes it.

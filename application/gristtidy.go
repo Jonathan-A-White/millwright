@@ -210,7 +210,7 @@ func (g GristTidy) Run(ctx context.Context) (GristTidyReport, error) {
 	if g.Idle() {
 		return report, fmt.Errorf("grist tidy: there is nothing wired to tidy")
 	}
-	now := time.Now()
+	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
 	if g.Now != nil {
 		now = g.Now()
 	}

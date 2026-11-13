@@ -571,6 +571,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		LoadBoundLeft: left,
 		LoadWait:      k.LoadWait,
 		Host:          k.Host,
+		Now:           k.CallNow,
 		Out:           k.Out,
 	}.refusals(ctx, c, &read, true)
 	report.Commits, report.Notes = read.Commits, read.Notes
