@@ -6034,6 +6034,14 @@ that mends it, or every scheme when none holds a majority. A rig with no origin 
 out. There is no cure: a person sets the origin. `contrib/boost-bootstrap.sh` clones a
 rig named by an ssh url from its https url, so a box it makes starts right.
 
+**kit-lag** warns (cannot-tell, never faulty) when a rig of `[rigs]` pins a kit (a
+`github:<owner>/<name>-kit#<sha>` dependency in its `package.json`) at a commit behind the
+head of the kit's checkout, which it looks for as a directory of the kit's name beside the
+rig's. It says one `<rig>: <kit> <n> behind` for each, as `postern: voice-kit 78 behind`
+(mw-6ww.175.13). A kit with no checkout on the host, or a pin the checkout does not hold,
+is left out. There is no cure: a person moves the pin. The tests are `TestKitLag*` in
+`infrastructure/doctor/kitlag_test.go`.
+
 **stale-landings** looks in the home directory and beside each rig for every
 `.mw-landing-<id>` directory older than 24 hours: a landing is made and taken away
 inside one close-out, so one that old was left behind. One that is clean, whose HEAD
