@@ -89,12 +89,17 @@ func loginExpiredNext(t *testing.T, now time.Time) (application.Next, *apptest.F
 
 func sessionEndedWithExpiredLogin(t *testing.T, tracker *apptest.FakeTracker, runner *apptest.FakeRunner, vaultDir, id string, claimed time.Time) string {
 	t.Helper()
+	return sessionEndedSaying(t, tracker, runner, vaultDir, id, claimed, expiredLogin)
+}
+
+func sessionEndedSaying(t *testing.T, tracker *apptest.FakeTracker, runner *apptest.FakeRunner, vaultDir, id string, claimed time.Time, said string) string {
+	t.Helper()
 	claimedStory(t, tracker, id, 1)
 	if err := tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.ClaimedAtField: claimed.Format(time.RFC3339)}); err != nil {
 		t.Fatal(err)
 	}
 	name := startOldSession(t, runner, id)
-	result := fmt.Sprintf(`{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","num_turns":4,"duration_ms":7198,"result":%q}`, expiredLogin)
+	result := fmt.Sprintf(`{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","num_turns":4,"duration_ms":7198,"result":%q}`, said)
 	dir := filepath.Join(vaultDir, application.RunsDir, id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -191,6 +196,50 @@ func TestStatusNamesTheHostHeldForALoginAndTheCommandThatClearsIt(t *testing.T) 
 	for _, want := range []string{"HELD · Claude login expired on vps", `bd kv set host.vps.harness_hold ""`} {
 		if !strings.Contains(printed, want) {
 			t.Errorf("expected status to say %q, got:\n%s", want, printed)
+		}
+	}
+}
+
+// mw-gq6.1213: on 2026-11-13 a Cloudflare edge block answered four hosts with
+// "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare", and
+// each was held twelve hours as an expired login. It is the API out of reach for
+// a while, not a login.
+const cloudflareBlock = "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare"
+
+func TestACloudflareAttentionRequiredIsNotAnExpiredLogin(t *testing.T) {
+	ended := time.Date(2026, 11, 13, 9, 47, 0, 0, time.UTC)
+	result := application.SessionResult{IsError: true, Subtype: "success", TerminalReason: "api_error", Said: cloudflareBlock}
+	stop, ok := application.HarnessStopOf(result, ended)
+	if !ok || stop.Reason != application.ReasonAPIBlocked {
+		t.Fatalf("expected %q read as %s, got %+v (%v)", cloudflareBlock, application.ReasonAPIBlocked, stop, ok)
+	}
+	if want := ended.Add(application.HarnessStopWait); !stop.Until.Equal(want) {
+		t.Fatalf("expected the stop to last until %s, got %s", want, stop.Until)
+	}
+	words, ok := application.HarnessStopOfWords("claude\n"+cloudflareBlock+"\n", ended)
+	if !ok || words.Reason != application.ReasonAPIBlocked || words.Said != cloudflareBlock {
+		t.Fatalf("expected the same words read from a pane, got %+v (%v)", words, ok)
+	}
+	// The login hold and its mail are the login's alone: a blocked API keeps
+	// no hold at the close-out (dispatch holds it a quarter hour) and asks the Governor for nothing.
+	now := time.Date(2026, 11, 13, 9, 47, 0, 0, time.UTC)
+	next, tracker, mailbox, _, runner, vaultDir := loginExpiredNext(t, now)
+	sessionEndedSaying(t, tracker, runner, vaultDir, "mw-gq6.9", now.Add(-time.Minute), cloudflareBlock)
+	closed, _ := next.Run(context.Background(), "mw-gq6.9")
+	if closed.Reason != application.ReasonAPIBlocked {
+		t.Fatalf("expected the story stopped for %s, got %q: %s", application.ReasonAPIBlocked, closed.Reason, closed.Why)
+	}
+	note, _ := tracker.Note(context.Background(), application.HarnessHoldKey("vps"))
+	if note != "" {
+		t.Fatalf("expected no login hold at the close-out, got %q", note)
+	}
+	mails, err := mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range mails {
+		if strings.Contains(strings.ToLower(m.Subject+m.Body), "log in") {
+			t.Fatalf("expected no mail asking the Governor to log in, got %+v", m)
 		}
 	}
 }

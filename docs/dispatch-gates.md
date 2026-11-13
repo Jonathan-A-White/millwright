@@ -105,7 +105,7 @@ The starved-rig alarm does not count these stories.
 
 A session the harness stopped for something that is not the work's is held by
 its close-out under its own reason (`usage-limit`, `rate-limit`, `overloaded`,
-`server-error`, `api-unreachable`, `login-expired`), the claim kept. Until the time the stop names (the reset a usage
+`server-error`, `api-unreachable`, `api-blocked`, `login-expired`), the claim kept. Until the time the stop names (the reset a usage
 limit names, or a quarter hour after the session ended for the rest) the host
 claims nothing new; once it has come, a dispatch gives the stopped story back
 itself, its stopped attempt not counted, and it is started again. `mw retry` of

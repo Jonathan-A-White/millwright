@@ -1402,6 +1402,8 @@ func GristReasonLimited(stop HarnessStop) string {
 		what = "its harness's login has expired"
 	case ReasonUnreachable:
 		what = "its model's service cannot be reached"
+	case ReasonAPIBlocked:
+		what = "its model's service has refused its host"
 	default:
 		what = "its model's service is failing"
 	}
