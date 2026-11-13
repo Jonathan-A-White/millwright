@@ -1962,8 +1962,9 @@ func (p *cloudPass) refuse(ctx context.Context, box CloudBox, why, story string,
 // that is gone: a story pathed to a host that is not there is never
 // dispatched, so it would wait for ever. A deferred story is the Mayor's and is
 // left alone (mw-gq6.1234); once he releases it, a dispatch tick re-paths it.
-// A claimed story is left to its claim. It says each story moved, as a cloud event; a story that cannot be
-// moved fails the check with its id, for the Mayor to re-path by hand.
+// A claimed story is left to its claim. It says each story moved, as a cloud
+// event; a story that cannot be moved fails the check with its id, for the
+// Mayor to re-path by hand.
 func (p *cloudPass) repath(ctx context.Context, name, why string) {
 	if p.repathed == nil {
 		p.repathed = map[string]bool{}
