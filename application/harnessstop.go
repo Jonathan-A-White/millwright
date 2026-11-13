@@ -29,6 +29,10 @@ const (
 	// ReasonUnreachable is the API not reachable from the host at all: no DNS,
 	// a refused or dropped connection.
 	ReasonUnreachable Reason = "api-unreachable"
+	// ReasonAPIBlocked is the API's edge refusing the host for a while
+	// (mw-gq6.1213): "Failed to authenticate. API Error: 403 Attention Required! |
+	// Cloudflare". It is no login's fault, and a block on one address passes.
+	ReasonAPIBlocked Reason = "api-blocked"
 )
 
 // LoginExpiredWait is how long a host holds its new claims on an expired login
@@ -82,6 +86,11 @@ var (
 	// older "OAuth token has expired". It must open its line, so that a comment
 	// or a test that names the words is not read as saying them (mw-gq6.781).
 	loginExpiredNotice = regexp.MustCompile(`(?i)^(?:api error:?\s*(?:\d{3}\s*)?)?(?:failed to authenticate\b|oauth (?:session|token) (?:has )?expired\b)`)
+	// apiBlockedWords are the words of an edge's refusal that the harness
+	// reports under "Failed to authenticate": Cloudflare's "403 Attention
+	// Required! | Cloudflare" page. A line that has them is the host's address
+	// refused, not its login gone (mw-gq6.1213).
+	apiBlockedWords = regexp.MustCompile(`(?i)\bcloudflare\b|\battention required\b`)
 	// apiUnreachable is what the harness says when it cannot reach the API at
 	// all, after "API Error:": no DNS, a refused or dropped connection.
 	apiUnreachable = regexp.MustCompile(`(?i)can(?:'|’)?t reach the api server|connection (?:refused|dropped|reset|timed out)|\b(?:econnreset|econnrefused|etimedout|eai_again|enotfound)\b`)
@@ -115,11 +124,30 @@ func usageLimitLine(text string) string {
 // that its login has expired, and empty when none does.
 func loginExpiredLine(text string) string {
 	for _, line := range strings.Split(text, "\n") {
-		if line = strings.TrimSpace(line); loginExpiredNotice.MatchString(line) {
+		if line = strings.TrimSpace(line); loginExpiredNotice.MatchString(line) && !apiBlockedWords.MatchString(line) {
 			return line
 		}
 	}
 	return ""
+}
+
+// apiBlockedLine is the line of text that opens with the harness's failure to
+// authenticate and holds an edge's refusal (Cloudflare's page) for its reason,
+// and empty when none does. Such a line is read before an expired login's: it
+// opens the same words.
+func apiBlockedLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if line = strings.TrimSpace(line); loginExpiredNotice.MatchString(line) && apiBlockedWords.MatchString(line) {
+			return line
+		}
+	}
+	return ""
+}
+
+// apiBlockedStop is the stop an edge's refusal names: it waits HarnessStopWait,
+// as any API failing does, and asks nobody to log in.
+func apiBlockedStop(line string, ended time.Time) HarnessStop {
+	return HarnessStop{Reason: ReasonAPIBlocked, Said: line, Until: ended.Add(HarnessStopWait)}
 }
 
 // loginExpiredStop is the stop an expired login's line names: nothing but a
@@ -146,6 +174,9 @@ func HarnessStopOf(result SessionResult, ended time.Time) (HarnessStop, bool) {
 	}
 	if line := usageLimitLine(result.Said); line != "" {
 		return usageLimitStop(line, ended), true
+	}
+	if line := apiBlockedLine(result.Said); line != "" {
+		return apiBlockedStop(line, ended), true
 	}
 	if line := loginExpiredLine(result.Said); line != "" {
 		return loginExpiredStop(line, ended), true
@@ -183,12 +214,16 @@ func HarnessStopOf(result SessionResult, ended time.Time) (HarnessStop, bool) {
 // HarnessStopOfWords reads whether words the harness printed that are not a
 // result — what it wrote where its JSON belonged, the tail of its pane, an
 // error that carries its last words — say it stopped at the usage limit
-// (mw-gq6.471) or at an expired login (mw-gq6.781). Only those two lines are
+// (mw-gq6.471), at an expired login (mw-gq6.781) or at an edge's refusal
+// (mw-gq6.1213). Only those lines are
 // read in them: the rest of such words may be mw's or the work's, and an API's
 // error among them may be one the harness went on past.
 func HarnessStopOfWords(words string, ended time.Time) (HarnessStop, bool) {
 	if line := usageLimitLine(words); line != "" {
 		return usageLimitStop(line, ended), true
+	}
+	if line := apiBlockedLine(words); line != "" {
+		return apiBlockedStop(line, ended), true
 	}
 	if line := loginExpiredLine(words); line != "" {
 		return loginExpiredStop(line, ended), true
