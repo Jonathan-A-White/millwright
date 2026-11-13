@@ -140,11 +140,11 @@ func (k Check) partRunOf(ctx context.Context, storyID, name string) (partRun, bo
 // the outstanding process of the part if there is one, else waits for a calm host
 // and starts one, and then waits for it for what is left of the call.
 func (k Check) checkPartDetached(ctx context.Context, report CheckReport, c *closeOut, label string, part GatePart, tip string) (CheckReport, error) {
-	began := k.callNow()
+	began := k.began
 	runName := CheckPartRunFileName(report.Attempt, k.Part)
 	run, outstanding := k.partRunOf(ctx, c.id, runName)
 	if !outstanding {
-		wait := k.callNow()
+		wait := began
 		left := func() time.Duration {
 			return max((k.partSlotWait() - k.callNow().Sub(wait)).Round(time.Millisecond), 0)
 		}

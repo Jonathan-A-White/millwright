@@ -109,6 +109,10 @@ func newCheckCmd() *cobra.Command {
 			"after committing and closes that step once nothing else is refused.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// The Builder's call began when this command did: the configuration, the
+			// vault's reads and every tracker call of a loaded host come out of its
+			// budget (mw-gq6.1251).
+			callBegan := time.Now() //mw:realclock the real start of the command, which the call's waits are measured from
 			dir, err := config.Vault()
 			if err != nil {
 				return err
@@ -202,6 +206,7 @@ func newCheckCmd() *cobra.Command {
 				HandBackAtOnce: handBackAtOnce,
 				KeepPlace:      keepPlace,
 				CallBudget:     callBudget,
+				CallBegan:      callBegan,
 				GateExpected:   gateExpected,
 				PartExpected:   partExpected,
 				Load:           hostload.Proc{},

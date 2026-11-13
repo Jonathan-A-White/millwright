@@ -257,6 +257,15 @@ call, which is cut off at 600 seconds with no words (mw-gq6.939); that is the ha
   back in the queue (`PlaceKeeper`, `Next.AfterCalm`) and the same line is said. The
   changed specs' run after the gate and the rerun after a failure on a far-over host
   are not under this test: neither has a figure of its own to compare.
+  The 9 minutes and the 540 seconds both start with the call, not with the check's
+  first wait: `mw check` reads the clock when the command starts (`Check.CallBegan`),
+  before the configuration, the story and the vault, so a host at load 43, where every
+  tracker call waits for the host to be quiet, spends that slow start out of the
+  deadline instead of ahead of it (mw-gq6.1251; before it a start of two minutes made
+  the check end two minutes after the tool's 600 seconds, in its silence). The check's
+  log, runs/<story>/check-<attempt>.log, is written as the check prints, from the
+  moment the story's attempt is known, so a check the tool kills still leaves what it
+  said.
 - **`--wait` or `--background`**: the deadline is `mw check --wait` (40 minutes by
   default; mw-gq6.938: nine minutes handed a Builder back three times in 45 minutes
   behind two long gates). A wait that outlasts it ends in one line saying the wait
