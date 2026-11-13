@@ -88,7 +88,11 @@ test:
 # that application/ code that is not a test holds no time.Now() or time.Since(
 # beyond the per-file counts in scripts/realclock-baseline.txt: a wait or
 # timeout bound takes the injected clock, and a deliberate real-clock use says
-# why with //mw:realclock <why> (scripts/check-realclock.sh, mw-gq6.1140). Every
+# why with //mw:realclock <why> (scripts/check-realclock.sh, mw-gq6.1140). Then
+# that no non-test Go file is over 2,500 lines unless it is on the list of long
+# files in scripts/check-file-length.sh, and that no listed file has grown past
+# its ceiling (scripts/check-file-length.sh, with its test
+# scripts/check-file-length_test.sh, mw-6ww.175.16). Every
 # other check here reads only this repository (and a temporary directory)
 # and starts nothing.
 lint:
@@ -116,6 +120,8 @@ lint:
 	scripts/check-tracked-binaries.sh
 	scripts/check-private-terms.sh
 	scripts/check-realclock.sh
+	scripts/check-file-length_test.sh
+	scripts/check-file-length.sh
 
 clean:
 	rm -rf bin
