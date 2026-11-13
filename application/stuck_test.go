@@ -236,17 +236,19 @@ func TestTheDampersNameAnOpenStoryLeftRefusedForOverTwoHoursWithItsAgeAndTheComm
 	}
 }
 
-func TestTheDampersLeaveAnOpenRefusedStoryAloneUntilItIsOverTwoHoursOld(t *testing.T) {
-	young := application.WorkInHand{Ready: []application.StoryDetail{refusedOpen("mw-q.3", application.RunBlocked, 90*time.Minute)}}
+func TestTheDampersLeaveAnOpenRefusedStoryAloneUntilItIsOverHalfAnHourOld(t *testing.T) {
+	young := application.WorkInHand{Ready: []application.StoryDetail{refusedOpen("mw-q.3", application.RunBlocked, 20*time.Minute)}}
 	if got := openRefusedAlarms(young); len(got) != 0 {
-		t.Errorf("a story refused 90 minutes ago raised %+v", got)
+		t.Errorf("a story refused 20 minutes ago raised %+v", got)
 	}
 }
 
 func TestTheDampersLeaveAlone(t *testing.T) {
 	epic := refusedOpen("mw-q.1", application.RunBlocked, 5*time.Hour)
 	epic.IsEpic = true
-	running := refusedOpen("mw-q.2", application.RunBlocked, 5*time.Hour)
+	// A story in progress whose session was lost is the dispatch tick's to give
+	// back; only a kept refused claim (run:blocked) is named (mw-gq6.1166).
+	running := refusedOpen("mw-q.2", application.RunStopped, 5*time.Hour)
 	running.Status = "in_progress"
 	hitl := refusedOpen("mw-q.4", application.RunBlocked, 5*time.Hour, application.LabelHitl)
 	queued := refusedOpen("mw-q.5", application.RunQueued, 5*time.Hour)
@@ -254,7 +256,7 @@ func TestTheDampersLeaveAlone(t *testing.T) {
 	unknownAge := refusedOpen("mw-q.7", application.RunBlocked, 5*time.Hour)
 	unknownAge.Updated, unknownAge.Created = time.Time{}, time.Time{}
 	for name, d := range map[string]application.StoryDetail{
-		"an epic": epic, "a story in progress": running, "a hands-on story for him": hitl,
+		"an epic": epic, "a story in progress whose session was lost": running, "a hands-on story for him": hitl,
 		"a story queued for its batch": queued, "a story that is running": ran, "a story whose age is unknown": unknownAge,
 	} {
 		if got := openRefusedAlarms(application.WorkInHand{Ready: []application.StoryDetail{d}}); len(got) != 0 {

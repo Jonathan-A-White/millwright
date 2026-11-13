@@ -588,6 +588,10 @@ type StarvedRigCheck struct {
 	Host string
 	// Alarms reads the starved rigs, one alarm each (DamperSurvey.Starved).
 	Alarms func(ctx context.Context) ([]DamperAlarm, error)
+	// Refused, when set, reads the open stories a run state keeps from dispatch
+	// (DamperSurvey.Refused); the Mayor is mailed of each once, in this mail
+	// (mw-gq6.1166). Nil mails none.
+	Refused func(ctx context.Context) ([]DamperAlarm, error)
 	// Mail sends the Mayor the message.
 	Mail func(ctx context.Context, message NewMessage) error
 	// Mailed, shared by every host, keeps what the Mayor was last mailed so that
@@ -629,6 +633,9 @@ func (c *StarvedRigCheck) Probe(ctx context.Context) (Verdict, string) {
 		}
 	}
 	waitErr := c.tellOfWaits(ctx, waits)
+	if refusedErr := c.tellOfRefused(ctx); waitErr == nil {
+		waitErr = refusedErr
+	}
 	if len(faults) == 0 {
 		// The alarm has cleared: the next one is news again, to whichever host sees
 		// it first. A dry run changes nothing.

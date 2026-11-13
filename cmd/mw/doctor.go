@@ -427,6 +427,10 @@ func newDoctorCmd() *cobra.Command {
 				Host:   host,
 				Mailed: mwGateway(vault, host),
 				Alarms: func(ctx context.Context) ([]application.DamperAlarm, error) { return dampers.Starved(ctx, time.Now()) },
+				// An open story a run state keeps from dispatch for over half an hour
+				// joins this mail, each once, with the command that moves it on
+				// (mw-gq6.1166).
+				Refused: func(ctx context.Context) ([]application.DamperAlarm, error) { return dampers.Refused(ctx, time.Now()) },
 				Mail: func(ctx context.Context, message application.NewMessage) error {
 					_, err := mwGateway(vault, host).Send(ctx, message)
 					return err
