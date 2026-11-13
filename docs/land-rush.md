@@ -36,7 +36,7 @@ and never stops a landing.
 | `landing` | `"each"` | `"batch"` turns the mode on; `"each"` is the way back |
 | `batch_every` | `"30m"` | how long the oldest queued story must have waited |
 | `batch_min` | `2` | stories that must be queued before a batch is due |
-| `batch_max` | `6` | queued stories at which a batch is due at once, however recent |
+| `batch_max` | `6` | queued stories at which a batch is due at once, however recent; also the most a batch takes (the oldest queued; the rest wait for the next batch) |
 | `batch_fixer_model` | `"sonnet"` | the model of a batch's one fixer |
 | `batch_fixer_effort` | `"high"` | the fixer's effort |
 | `batch_fixer_turns` | `60` | the fixer's turn cap |

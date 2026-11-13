@@ -308,7 +308,7 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 		nr.Notes = nil
 	}
 	noted := len(report.Notes)
-	if err := b.readQueue(ctx, rig, rigDir, &report, &nr); err != nil {
+	if err := b.readQueue(ctx, rig, rigDir, &report, &nr, rules.LandingSettings().BatchMax); err != nil {
 		gather()
 		return report, err
 	}
@@ -345,7 +345,7 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 	// moved: landing those stories again wrote their What's new lines a second
 	// time, under the version the batch before had raised (mw-gq6.514).
 	report.Notes = report.Notes[:noted]
-	if err := b.readQueue(ctx, rig, rigDir, &report, &nr); err != nil {
+	if err := b.readQueue(ctx, rig, rigDir, &report, &nr, rules.LandingSettings().BatchMax); err != nil {
 		release()
 		gather()
 		return report, err
@@ -404,9 +404,9 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 // readQueue reads the batch as it stands: the stories queued for it, then, when
 // there are any, the rig brought up to date with the remote, the target's head
 // as Base and each story's branch at the remote.
-func (b BatchLand) readQueue(ctx context.Context, rig, rigDir string, report *BatchReport, nr *NextReport) error {
+func (b BatchLand) readQueue(ctx context.Context, rig, rigDir string, report *BatchReport, nr *NextReport, batchMax int) error {
 	n := b.Next
-	queue, err := b.queued(ctx, rig, report)
+	queue, err := b.queued(ctx, rig, report, batchMax)
 	if err != nil {
 		return err
 	}
@@ -431,7 +431,12 @@ func (b BatchLand) readQueue(ctx context.Context, rig, rigDir string, report *Ba
 
 // queued are the stories queued for batch landing on rig, on any host,
 // oldest queued first, all targeting the branch the oldest targets.
-func (b BatchLand) queued(ctx context.Context, rig string, report *BatchReport) ([]BatchStory, error) {
+//
+// A batch takes at most the rig's batch_max of them (the oldest): batch_max is
+// not only when a batch is due but how many it takes, since a bigger batch has
+// a bigger related-tests gate and more ways to go red (mw-gq6.1262). The rest
+// stay queued for the next batch.
+func (b BatchLand) queued(ctx context.Context, rig string, report *BatchReport, batchMax int) ([]BatchStory, error) {
 	n := b.Next
 	work, err := readRetrying(ctx, n, nil, "the claimed stories", func() (WorkInHand, error) { return n.Tracker.WorkInHand(ctx) })
 	if err != nil {
@@ -470,6 +475,12 @@ func (b BatchLand) queued(ctx context.Context, rig string, report *BatchReport) 
 	}
 	if b.One && len(kept) > 1 {
 		kept = kept[:1]
+	}
+	if batchMax > 0 && len(kept) > batchMax {
+		for _, s := range kept[batchMax:] {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s is queued, but this batch takes only %d (batch_max), so it waits for the next batch", s.ID, batchMax))
+		}
+		kept = kept[:batchMax]
 	}
 	return kept, nil
 }
@@ -1306,7 +1317,9 @@ const BatchLandJobName = "batch-land"
 
 // BatchDue says whether a queue of queued stories, the oldest queued at oldest,
 // is to be landed at now: BatchMax queued is due at once, and BatchMin queued
-// is due once the oldest has waited BatchEvery. An oldest with no time was
+// is due once the oldest has waited BatchEvery. A batch then takes the BatchMax
+// oldest of the queue, no more (BatchLand.queued); the rest wait for the next.
+// An oldest with no time was
 // queued by an mw that recorded none, before any that has one, so it has waited
 // long enough. An empty queue is never due.
 func BatchDue(s domain.LandingSettings, queued int, oldest, now time.Time) bool {
