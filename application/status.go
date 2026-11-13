@@ -1246,7 +1246,15 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		if past, err := s.Benchmarks.Recent(ctx); err != nil {
 			s.print(fmt.Sprintf("mw status: the benchmarks could not be read: %v\n", err))
 		} else {
-			report.Benchmarks = ReadBenchmarks(past, s.Bench)
+			// A box the book no longer holds has its rows left out; a book that
+			// cannot be read leaves every host's (mw-gq6.1160).
+			var gone func(string) bool
+			if s.Cloud != nil {
+				if book, err := s.Cloud.Read(ctx); err == nil {
+					gone = DestroyedBox(s.CloudPlan, book)
+				}
+			}
+			report.Benchmarks = ReadBenchmarks(past, s.Bench, gone)
 		}
 	}
 	if causesRead != nil {

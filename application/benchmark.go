@@ -750,11 +750,28 @@ type BenchmarkReport struct {
 	Calibration []KindCalibration
 }
 
+// DestroyedBox says a host is a box the cloud's book no longer holds up: a name
+// the plan gives its boxes and no box of that name in the book. A host that is
+// no box's name (the laptop) is never one.
+func DestroyedBox(plan CloudPlan, book CloudState) func(host string) bool {
+	up := map[string]bool{}
+	for _, box := range book.Boxes {
+		up[box.Name] = true
+	}
+	return func(host string) bool { return plan.isBox(host) && !up[host] }
+}
+
 // ReadBenchmarks is the section from the benchmarks of past close-outs; nil
-// when there are none to show.
-func ReadBenchmarks(past []Benchmark, s BenchmarkSettings) *BenchmarkReport {
+// when there are none to show. gone, when not nil, names the hosts whose rows
+// are left out (a destroyed box's); the history it counts is not changed, so
+// the calibration reads every record.
+func ReadBenchmarks(past []Benchmark, s BenchmarkSettings, gone func(host string) bool) *BenchmarkReport {
 	report := &BenchmarkReport{
 		Gates: GateLines(past, s), Throughput: ThroughputByRunning(past), Calibration: Calibrate(past, s),
+	}
+	if gone != nil {
+		report.Gates = slices.DeleteFunc(report.Gates, func(g GateLine) bool { return gone(g.Host) })
+		report.Throughput = slices.DeleteFunc(report.Throughput, func(t Throughput) bool { return gone(t.Host) })
 	}
 	if len(report.Gates) == 0 && len(report.Throughput) == 0 && len(report.Calibration) == 0 {
 		return nil
