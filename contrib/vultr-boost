@@ -27,6 +27,8 @@
 #         backed up first). The keys stay in the vault for the next up.
 #         --instance ID also deletes that Vultr instance by its id, for an orphan no
 #         state holds (a make that was killed): terraform destroy finds nothing then.
+#         With no state and no --instance, a box Vultr still holds keeps its peer on
+#         the hub (down says so and exits well; --instance ID then deletes it).
 # list    every instance Vultr holds on the account, one line each: id, label, status
 #         and server status separated by tabs. mw's cloud check reads it to find
 #         orphans, and to read back what Vultr says of a box before the book does.
@@ -320,6 +322,7 @@ plan_down() {
 	step "read: settings $TFVARS, token vultr_api_token with mw secrets get"
 	step "state: open $STATE_AGE with age into a private directory under $RUNBASE (a tmpfs); removed on exit"
 	step "terraform -chdir=$TFDIR destroy -state=<private dir>/terraform.tfstate -var-file=$TFVARS (-auto-approve with --yes)"
+	[ -n "$INSTANCE" ] || would "with no state in the vault: curl $API/instances with the token on stdin; if Vultr holds an instance labelled $NAME, its peer is left on the hub"
 	[ -z "$INSTANCE" ] || would "curl -X DELETE $API/instances/$INSTANCE with the token on stdin: the orphan no state holds"
 	step "ssh $HUB_SSH: copy /etc/wireguard/wg0.conf to a dated backup, then $ENROL --remove $NAME"
 	would "ssh-keygen -R <the peer's address, read off the hub> -f ~/.ssh/known_hosts: a box remade on it has a new host key"
@@ -593,7 +596,7 @@ forget_host() {
 
 do_down() {
 	STEPS=4
-	need mw terraform ssh age age-keygen git
+	need mw terraform ssh age age-keygen git jq curl
 	load_settings
 	load_token
 
@@ -601,13 +604,22 @@ do_down() {
 	open_state
 
 	step "terraform: destroy"
-	local rc=0 why
+	local rc=0 why held=""
 	if [ -s "$PRIV/terraform.tfstate" ]; then
 		tf init -input=false >/dev/null || die "terraform init failed"
 		# shellcheck disable=SC2046
 		tf destroy -state="$PRIV/terraform.tfstate" -var-file="$TFVARS" -var "name=$NAME" $(confirm_args) || rc=$?
 	else
 		echo "    skip: no state in the vault, so terraform destroyed nothing (a box Vultr holds is deleted by --instance ID)"
+		if [ -z "$INSTANCE" ]; then
+			# Vultr may still hold the box (its make was killed, or its state lost, or
+			# it is restoring from a snapshot): its peer stays on the hub until the
+			# instance is deleted by its id, which takes the peer off (mw-gq6.1226).
+			vultr_api GET "/instances?per_page=500" ||
+				die "no state in the vault for $NAME, and Vultr's list of instances could not be read (HTTP $API_CODE), so whether Vultr still holds it is not known. The peer was left on the hub. Run down again"
+			held=$(printf '%s' "$API_BODY" | jq -r --arg n "$NAME" '[.instances[]? | select(.label == $n) | .id][0] // empty') ||
+				die "Vultr's list of instances could not be read, so whether Vultr still holds $NAME is not known. The peer was left on the hub. Run down again"
+		fi
 	fi
 	if [ "$rc" != 0 ]; then
 		seal_state
@@ -631,6 +643,12 @@ do_down() {
 	fi
 
 	step "hub: remove $NAME from $HUB_SSH"
+	if [ -n "$held" ]; then
+		echo "    skip: Vultr still holds instance $held labelled $NAME, so its peer stays on the hub; down --name $NAME --instance $held deletes it and takes the peer off"
+		seal_state
+		echo "    not down: Vultr instance $held is still held, and billed."
+		return 0
+	fi
 	local remote out backup addr
 	# The peer's address is read before it goes: the next box given it has a new host key.
 	remote="set -e; f=/etc/wireguard/wg0.conf; if grep -q '^# peer $NAME (enrolled' \"\$f\"; then echo addr:\$(sed -n '/^# peer $NAME (enrolled/,/^AllowedIPs/ s#^AllowedIPs = \([0-9.]*\)/32.*#\1#p' \"\$f\" | head -n 1); b=\$f.bak-\$(date +%Y%m%d%H%M%S); cp -p \"\$f\" \"\$b\"; echo backup:\$b; $ENROL --remove $NAME; else echo backup:none; fi"

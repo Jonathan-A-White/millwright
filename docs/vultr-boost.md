@@ -36,6 +36,12 @@ find (a 404 is done). Only a 204 or a 404 is a deletion; anything else (a 409 fo
 locked, a 200) is a refusal and the command fails. `list` prints each instance of the
 account, `id<TAB>label<TAB>status<TAB>server status`.
 
+`down` with no state in the vault and no `--instance` asks Vultr whether it holds an
+instance labelled with the box's name. If it does, the peer is left on the hub (the
+box may be restoring and about to be adopted), the command says so and exits well,
+and mw's check reads Vultr back and deletes it by its id (`down --instance`), which
+takes the peer off. If Vultr's list cannot be read, `down` fails with the peer left.
+
 `--yes` on `up` or `down` passes `-auto-approve` to terraform, which otherwise
 asks. `--dry-run` prints the numbered steps and changes nothing.
 
