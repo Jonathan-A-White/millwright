@@ -633,3 +633,47 @@ func TestAClassNotInTheRegisterIsRefused(t *testing.T) {
 		t.Error("expected a class that is no slug to be refused")
 	}
 }
+
+// A finding's own host is mended like a filed plan's (mw-gq6.1203): a retired
+// host, or a cloud box the book no longer holds, is filed as host=auto, with a
+// note saying why; a host that can take the story is written as given.
+func TestTesterFileWritesAutoForARetiredHost(t *testing.T) {
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11",
+		Boxes: []application.CloudBox{{Name: "cloud2"}}}}
+	cases := []struct {
+		name string
+		host string
+		want string
+		said bool
+	}{
+		{"a retired host", "desktop", domain.HostAuto, true},
+		{"a destroyed cloud box", "cloud9", domain.HostAuto, true},
+		{"a box the book holds", "cloud2", "cloud2", false},
+		{"a host that is no box and not retired", "laptop", "laptop", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tracker, rules := testerFileEpic(t)
+			var out bytes.Buffer
+			finding := testerFinding()
+			finding.Host = c.host
+			filed, err := application.TesterFiler{
+				Tracker: tracker, Rules: rules, Out: &out,
+				Retired: []string{"desktop"}, CloudBook: book, CloudPlan: cloudPlan,
+			}.File(context.Background(), "mw-e.2", finding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			story, err := tracker.ShowStory(context.Background(), filed.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := story.Merged().Host; got != c.want {
+				t.Errorf("expected host=%s, got %q", c.want, got)
+			}
+			if said := strings.Contains(out.String(), "host="+c.host+" was not written"); said != c.said {
+				t.Errorf("expected the host named as mended: %v, output was %q", c.said, out.String())
+			}
+		})
+	}
+}
