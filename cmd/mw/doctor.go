@@ -182,6 +182,10 @@ func newDoctorCmd() *cobra.Command {
 			rigTestsRead, testsErr := config.Tests()
 			rigTests := doctor.NewRigTests(rigsAt, rigTestsRead, errors.Join(rigsErr, testsErr))
 			rigTests.Home, rigTests.Host = mwVault(vault, host), host
+			if rigTestsConfigPath, pathErr := config.FilePath(); pathErr == nil {
+				rigTests.Config = configfile.New(rigTestsConfigPath)
+				rigTests.Target = configfile.New(filepath.Join(vault, application.BoostConfigFile))
+			}
 
 			posternChannel := doctor.NewPosternChannel(mwVault(vault, host), host)
 

@@ -6018,9 +6018,11 @@ not set" on the line it prints and in the bead comment. `mw doctor postern-trans
 what each rig's tests are: it is faulty naming every rig of `[rigs]` (but
 millwright, whose tests are `make test`) with no `[tests]` line, because `mw next`
 gates such a rig with `make test`, which a rig with no Makefile refuses (cloud1
-refused a lampas story that way, mw-gq6.453). There is no cure: a person adds the
-home's line for the rig, and `contrib/boost-bootstrap.sh` does it when it makes the
-config, from the vault's `hosts/boost-config.toml`.
+refused a lampas story that way, mw-gq6.453). Its cure is the person's command:
+for each such rig the vault's `hosts/boost-config.toml` has a `[tests]` line for, it
+runs `mw config set tests.<rig> '<that line>'` (with `mw config set`'s backup of the
+config); a rig that file does not name has no cure, and the error names it
+(mw-gq6.1254). `contrib/boost-bootstrap.sh` does the same when it makes the config.
 
 **rig-kinds** warns (cannot-tell, never faulty) naming every rig of the vault's
 `rigs/` list that has no kinds in the common-errors register's `kinds.toml`: a class
