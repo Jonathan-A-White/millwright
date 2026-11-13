@@ -489,7 +489,7 @@ func (r Retry) maxAttempts() int {
 // now is the clock a harness stop's time is read against.
 func (r Retry) now() time.Time {
 	if r.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return r.Now()
 }

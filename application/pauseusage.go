@@ -139,7 +139,7 @@ func (u UsageFloorSet) Run(ctx context.Context, percent float64, until time.Time
 	if percent <= 0 || percent >= 100 {
 		return fmt.Errorf("a floor of %v%% is not between 0 and 100", percent)
 	}
-	now := time.Now()
+	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
 	if u.Now != nil {
 		now = u.Now()
 	}
@@ -271,7 +271,7 @@ func (u UsageSet) Run(ctx context.Context, percent float64, resets time.Time) er
 	if percent < 0 || percent > 100 {
 		return fmt.Errorf("a usage of %v%% is not between 0 and 100", percent)
 	}
-	now := time.Now()
+	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
 	if u.Now != nil {
 		now = u.Now()
 	}
@@ -354,7 +354,7 @@ type UsageShow struct {
 
 // Run prints the floor, the last reading and where it stands.
 func (u UsageShow) Run(ctx context.Context) error {
-	now := time.Now()
+	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
 	if u.Now != nil {
 		now = u.Now()
 	}
@@ -440,7 +440,7 @@ type ResumePlanner struct {
 // missing, when it cannot measure the rate or when the newest reading is stale
 // (UsageReading.Stale); the caller then has no time.
 func (p ResumePlanner) Plan(ctx context.Context) (ResumePlan, error) {
-	now := time.Now()
+	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
 	if p.Now != nil {
 		now = p.Now()
 	}

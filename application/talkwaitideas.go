@@ -211,10 +211,10 @@ func (r *talkWaitRun) watchIdeasEnd(ctx context.Context, stop context.CancelCaus
 		case <-time.After(ideaWatchEvery):
 		}
 		state := r.ideaStateNow()
-		if !state.On || state.Until == 0 || state.OnAt(r.Ideas.now()) || time.Now().Before(retryAt) {
+		if !state.On || state.Until == 0 || state.OnAt(r.Ideas.now()) || r.Ideas.now().Before(retryAt) {
 			continue
 		}
-		retryAt = time.Now().Add(ideaRetryAfter)
+		retryAt = r.Ideas.now().Add(ideaRetryAfter)
 		if r.giveBackIdeas(true) {
 			stop(errIdeasEnded)
 			return

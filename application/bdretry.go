@@ -300,7 +300,7 @@ func (r BdRetry) now() time.Time {
 	if r.Now != nil {
 		return r.Now()
 	}
-	return time.Now()
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
 // finish prints the last run as bd printed it, and, when it was tried again, how

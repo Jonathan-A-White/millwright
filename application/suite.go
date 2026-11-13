@@ -278,7 +278,7 @@ func (s Suite) now() time.Time {
 	if s.Now != nil {
 		return s.Now()
 	}
-	return time.Now()
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
 func (s Suite) say(format string, args ...any) {
@@ -342,7 +342,7 @@ func (s Suite) takeGateLock(ctx context.Context, rig, before string, ran []strin
 	if every <= 0 {
 		every = CheckGateNoticeEvery
 	}
-	began := time.Now()
+	began := s.now()
 	var by string
 	quit, done := make(chan struct{}), make(chan struct{})
 	noticing := false
@@ -375,7 +375,7 @@ func (s Suite) takeGateLock(ctx context.Context, rig, before string, ran []strin
 							holder = now
 						}
 					}
-					s.say("  wait    still waiting for %s's gate lock, held by %s (waited %s so far)\n", s.Host, holder, gateWaited(time.Since(began)))
+					s.say("  wait    still waiting for %s's gate lock, held by %s (waited %s so far)\n", s.Host, holder, gateWaited(s.now().Sub(began)))
 				}
 			}
 		}()
@@ -384,10 +384,10 @@ func (s Suite) takeGateLock(ctx context.Context, rig, before string, ran []strin
 	if err != nil {
 		var why, ended string
 		if len(ran) == 0 {
-			why = fmt.Sprintf("the suite of %s did not start: %s's gate lock could not be taken after %s", rig, s.Host, gateWaited(time.Since(began)))
+			why = fmt.Sprintf("the suite of %s did not start: %s's gate lock could not be taken after %s", rig, s.Host, gateWaited(s.now().Sub(began)))
 			ended = ", and nothing was run"
 		} else {
-			why = fmt.Sprintf("the suite of %s stopped before %s: %s's gate lock, given back after each command line so that a gate need not wait for the whole suite, could not be taken again after %s", rig, before, s.Host, gateWaited(time.Since(began)))
+			why = fmt.Sprintf("the suite of %s stopped before %s: %s's gate lock, given back after each command line so that a gate need not wait for the whole suite, could not be taken again after %s", rig, before, s.Host, gateWaited(s.now().Sub(began)))
 			ended = fmt.Sprintf(", and only `%s` had been run, so no result was kept", strings.Join(ran, "`, `"))
 		}
 		if by != "" {
@@ -523,9 +523,9 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 	giveBack, held := func() {}, false
 	defer func() { giveBack() }()
 	take := func(before string) error {
-		asked := time.Now()
+		asked := s.now()
 		given, err := s.takeGateLock(ctx, rig, before, ran)
-		gateWaited += time.Since(asked)
+		gateWaited += s.now().Sub(asked)
 		if err != nil {
 			return err
 		}

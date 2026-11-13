@@ -362,7 +362,7 @@ func (p SleepPass) now() time.Time {
 	if p.Now != nil {
 		return p.Now().UTC()
 	}
-	return time.Now().UTC()
+	return time.Now().UTC() //mw:realclock the default of the injected Now, used where none is set
 }
 
 func (p SleepPass) say(format string, args ...any) {
@@ -377,8 +377,8 @@ func (p SleepPass) say(format string, args ...any) {
 // answer that holds all four and a recommendations.json that is JSON; a refused
 // answer writes no plan, and its fuel is logged all the same.
 func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, error) {
-	started := time.Now()
-	now := p.now()
+	started := p.now()
+	now := started
 	model, effort, deep := p.Settings.For(now)
 	if opts.Model != "" {
 		model = opts.Model
@@ -437,7 +437,7 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 
 	log := SleepRunLog{
 		At: now.Format(time.RFC3339), Date: window.Date, Model: model, Effort: effort, Deep: deep,
-		Elapsed: time.Since(started).Round(time.Millisecond).String(),
+		Elapsed: p.now().Sub(started).Round(time.Millisecond).String(),
 		Tokens: SleepTokens{
 			Input: grind.Fuel.Input, Output: grind.Fuel.Output,
 			CacheRead: grind.Fuel.CacheRead, CacheWrite: grind.Fuel.CacheWrite, Total: grind.Fuel.Total(),
@@ -982,7 +982,7 @@ func (n *SleepNightly) now() time.Time {
 	if n.Now != nil {
 		return n.Now().UTC()
 	}
-	return time.Now().UTC()
+	return time.Now().UTC() //mw:realclock the default of the injected Now, used where none is set
 }
 
 // Job is the follower's job: no event springs it; every pass of the follower

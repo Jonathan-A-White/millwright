@@ -712,7 +712,7 @@ func (s SeatReap) nudge(waiting []Message) string {
 
 func (s SeatReap) now() time.Time {
 	if s.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return s.Now()
 }

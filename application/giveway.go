@@ -196,7 +196,7 @@ func (g GiveWay) now() time.Time {
 	if g.Now != nil {
 		return g.Now()
 	}
-	return time.Now()
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
 func (g GiveWay) stale() time.Duration {

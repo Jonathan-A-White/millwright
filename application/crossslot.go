@@ -449,14 +449,14 @@ func addOnce(names []string, name string) []string {
 func newSlotToken() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%x", time.Now().UnixNano())
+		return fmt.Sprintf("%x", time.Now().UnixNano()) //mw:realclock a name for the slot token when no random bytes can be read, not a wait bound
 	}
 	return hex.EncodeToString(b)
 }
 
 func (s CrossSlot) now() time.Time {
 	if s.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return s.Now()
 }

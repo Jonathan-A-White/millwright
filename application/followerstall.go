@@ -57,7 +57,7 @@ func (c *FollowerStallCheck) limit() time.Duration {
 
 // Probe implements DoctorCheck.
 func (c *FollowerStallCheck) Probe(ctx context.Context) (Verdict, string) {
-	now := time.Now()
+	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
 	if c.Now != nil {
 		now = c.Now()
 	}
