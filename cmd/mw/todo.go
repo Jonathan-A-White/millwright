@@ -234,6 +234,9 @@ func todoRankSpringJob(host string, out io.Writer) (application.SpringJob, error
 			return err
 		},
 		Tracker: gateway, Notes: gateway, Sender: handsPush{gateway: gateway}, Err: out,
+		// The hold reads bd list --all once for each card it judges, on purpose: a
+		// card sent changes the queue, so the next count is read afresh
+		// (TestReviewHoldReadsListAllOncePerCardJudged, mw-6ww.175.42).
 		Hold:   application.ReviewHold{Queue: reviewQueueReader(gateway), Tracker: gateway, Err: out, Sender: "mw todo nightly"},
 		Paused: application.FactoryPausedByNote(gateway),
 		Home: func(ctx context.Context) (bool, error) {

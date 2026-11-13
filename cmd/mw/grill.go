@@ -77,6 +77,8 @@ func newGrillCmd() *cobra.Command {
 					Now: posternClock, Out: out,
 				},
 				Cards: cards, Tracker: gateway, Notes: gateway,
+				// One card is judged per run, so the hold reads bd list --all once
+				// (TestReviewHoldReadsListAllOncePerCardJudged, mw-6ww.175.42).
 				Hold: application.ReviewHold{Queue: reviewQueueReader(gateway), Tracker: gateway, Out: out, Sender: "mw grill --ask", Err: cmd.ErrOrStderr()},
 			}
 			_, err = grill.Ask(cmd.Context(), application.GrillAsk{Bead: args[0], Question: ask, Recommend: recommend, Options: options, WhyNow: whyNow})
