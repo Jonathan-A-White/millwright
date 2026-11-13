@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -163,7 +165,11 @@ func newTesterFileCmd() *cobra.Command {
 				return err
 			}
 			cloudBook, cloudPlan := cloudStatus(dir, host)
+			main, gate := testerFindingChecks(cmd.Context(), dir, host)
 			_, err = application.TesterFiler{
+				Main:      main,
+				GateLock:  gate,
+				Host:      host,
 				Tracker:   mwGateway(dir, host),
 				Rules:     vault.New(dir),
 				Out:       cmd.OutOrStdout(),
@@ -190,4 +196,25 @@ func newTesterFileCmd() *cobra.Command {
 	flags.StringVar(&finding.Class, "class", "", "the common-errors class (a slug from mw errors list) the finding is an instance of; the story is labelled class:<slug>, and an open or held story of the same app with that class is joined instead of a new one filed")
 	flags.StringVar(&finding.Host, "host", "", "the host the fix must run on; auto (any host) by default, not the landed story's host")
 	return cmd
+}
+
+// testerFindingChecks is what mw tester file reads a bug finding's acceptance on
+// the rig's main with before it files it (mw-gq6.1245), and the gate lock it does
+// it under. A config that cannot be read gives none: the finding is filed.
+func testerFindingChecks(ctx context.Context, dir, host string) (application.FindingRechecker, application.GateLock) {
+	rigs, err := config.Rigs()
+	if err != nil {
+		return nil, nil
+	}
+	tests, err := config.Tests()
+	if err != nil {
+		return nil, nil
+	}
+	changedSpecs, err := config.ChangedSpecs()
+	if err != nil {
+		return nil, nil
+	}
+	nice, _ := config.BuilderNice()
+	jobs, _ := config.BuilderJobs()
+	return hostRecheckSuite(ctx, rig.New(), mwVault(dir, host), rigs, tests, changedSpecs, nice, jobs, host), hostGateLock()
 }

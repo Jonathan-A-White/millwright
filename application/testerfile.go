@@ -71,6 +71,9 @@ type TesterFiled struct {
 	// case nothing was filed.
 	Duplicate      string
 	DuplicateTitle string
+	// FixedOnMain is how the finding's acceptance passes on main already, when it
+	// does; nothing was filed.
+	FixedOnMain string
 	// Joined is the open or held story of the same class and app the finding was
 	// added to as a comment, when there is one; nothing was filed.
 	Joined string
@@ -107,6 +110,14 @@ type TesterFiler struct {
 	Retired   []string
 	CloudBook CloudBook
 	CloudPlan CloudPlan
+	// Main, when it is set, reads a bug finding's acceptance on the rig's origin
+	// as merged before the finding is filed: a command it names that is cheap and
+	// deterministic and passes there is a finding fixed already, and nothing is
+	// filed (mw-gq6.1245). GateLock is the lock that run is made under, and Host
+	// the host it is made on. Nil Main files every finding.
+	Main     FindingRechecker
+	GateLock GateLock
+	Host     string
 	// Out is where it says what it did; nil prints nothing.
 	Out io.Writer
 }
@@ -195,6 +206,13 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 		return filed, nil
 	}
 
+	if how := f.fixedOnMain(ctx, testerID, path.Rig, finding); how != "" {
+		filed.FixedOnMain = how
+		f.say("not filed: already fixed on main: %s (%s)\n", finding.Title, how)
+		f.say("  put 'already fixed on main' under the finding in FINDINGS\n")
+		return filed, nil
+	}
+
 	if finding.Class != "" {
 		if mate, ok := classMate(stories, path.Rig, app, finding.Class); ok {
 			if err := f.Tracker.CommentOnStory(ctx, mate.Story.ID, testerJoinComment(finding)); err != nil {
@@ -262,6 +280,39 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 	}
 	f.say("  put 'held: %s' under the finding in FINDINGS\n", id)
 	return filed, nil
+}
+
+// fixedOnMain is how the acceptance of a bug finding passes on main as merged
+// now, or empty: for a taste finding, an acceptance that names no cheap command,
+// or a read of main that could not be made, which is said and files the finding.
+func (f TesterFiler) fixedOnMain(ctx context.Context, testerID, rig string, finding TesterFinding) string {
+	if f.Main == nil || finding.Kind != TesterKindBug {
+		return ""
+	}
+	command := ""
+	for _, line := range strings.Split(finding.Acceptance, "\n") {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), "sweep:") {
+			continue
+		}
+		if command = foundCheckCommand(line); command != "" {
+			break
+		}
+	}
+	if command == "" {
+		return ""
+	}
+	ask := &foundSpecAsk{checks: f.Main, command: command}
+	askCtx, cancel := context.WithTimeout(ctx, foundCheckBound)
+	defer cancel()
+	_, err := rerunUnderGate(askCtx, ask, f.GateLock, DispatchGateWait, f.Host, testerID, rig, "", func(note string) { f.say("  note: %s\n", note) })
+	if err != nil {
+		f.say("  note: the finding was not read against main, so it is filed: %s\n", firstLine(err.Error()))
+		return ""
+	}
+	if fixed, how := foundFixedOnMain(command, nil, ask.answer); fixed {
+		return how
+	}
+	return ""
 }
 
 func (f TesterFiler) say(format string, args ...any) {
