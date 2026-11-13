@@ -100,3 +100,42 @@ func TestCloudPlanCarriesTheRetiredHostsOfTheConfig(t *testing.T) {
 		t.Errorf("expected desktop's line kept in the plan, got %v", plan.HostCaps)
 	}
 }
+
+// The plan the check reads carries the [cloud] prefix, so the boxes a home
+// names and gates are the ones its config says; with no prefix key they are
+// still cloud1, cloud2 (mw-gq6.1250).
+func TestCloudPlanCarriesThePrefixOfTheConfig(t *testing.T) {
+	mwConfig(t, "host = \"laptop\"\n\n[cloud]\ncommand = \"/opt/millwright/contrib/vultr-boost\"\nprefix = \"mill\"\n")
+	settings, ok, err := config.Cloud()
+	if err != nil || !ok {
+		t.Fatalf("expected a [cloud] table, got %v, %v", ok, err)
+	}
+	plan, err := cloudPlan(settings, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Prefix != "mill" || !plan.IsBox("mill3") || plan.IsBox("cloud3") {
+		t.Errorf("expected the plan to name boxes mill1, mill2, ..., got prefix %q", plan.Prefix)
+	}
+
+	mwConfig(t, "host = \"laptop\"\n\n[cloud]\ncommand = \"/opt/millwright/contrib/vultr-boost\"\n")
+	settings, _, err = config.Cloud()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err = cloudPlan(settings, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.IsBox("cloud3") || plan.IsBox("mill3") {
+		t.Errorf("expected a [cloud] with no prefix to name boxes cloud1, cloud2, ..., got prefix %q", plan.Prefix)
+	}
+}
+
+// A prefix a box's number cannot follow is refused, saying which key.
+func TestACloudPrefixThatIsNotLettersIsRefused(t *testing.T) {
+	mwConfig(t, "host = \"laptop\"\n\n[cloud]\ncommand = \"/opt/millwright/contrib/vultr-boost\"\nprefix = \"Mill 2\"\n")
+	if _, _, err := config.Cloud(); err == nil || !strings.Contains(err.Error(), "prefix") {
+		t.Fatalf("expected a refusal naming prefix, got %v", err)
+	}
+}
