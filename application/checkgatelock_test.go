@@ -207,6 +207,20 @@ func TestACloseOutsGateHoldingTheHostsGateLockMakesAWholeCheckWaitAndEndInOneLin
 	}
 }
 
+// releaseOnceTold gives the held gate lock back once the check has said in its
+// output that it is waiting (the text want), and not after a stretch of real time:
+// a host so loaded that the check starts after such a stretch finds the lock free,
+// never waits and never says so, and the test fails though nothing is wrong
+// (mw-gq6.1257). The bound is long and only a check that never waits meets it; the
+// lock is then given back so that the check ends, and the test fails on the notice.
+func (w *aWholeCheckBesideTheHostsGateLock) releaseOnceTold(holding application.Holding, want string) {
+	go func() {
+		for deadline := time.Now().Add(30 * time.Second); !strings.Contains(w.told.String(), want) && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		}
+		holding.Release(context.Background())
+	}()
+}
+
 func TestACheckWaitingForTheHostsGateLockRunsOnceItIsGivenBack(t *testing.T) {
 	checks := &scriptedChecks{passes: []bool{true}}
 	w := newWholeCheckBesideTheGateLock(t, checks)
@@ -214,10 +228,7 @@ func TestACheckWaitingForTheHostsGateLockRunsOnceItIsGivenBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		closeOut.Holding.Release(context.Background())
-	}()
+	w.releaseOnceTold(closeOut.Holding, "gate lock is held by mw-gq6.894")
 	report, err := w.check(5 * time.Second)
 	if err != nil {
 		t.Fatalf("expected the check to pass once the gate lock was free, got %v\n%s", err, report)
@@ -461,10 +472,7 @@ func TestAWholeCheckQueuedBehindALongGateRunsOnceItFreesAndSaysHowLongItWaitedAn
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() {
-		time.Sleep(300 * time.Millisecond)
-		closeOut.Holding.Release(context.Background())
-	}()
+	w.releaseOnceTold(closeOut.Holding, "gate lock is held by mw-5r3p30.1028")
 	report, err := w.check(10 * time.Second)
 	if err != nil {
 		t.Fatalf("expected the check to wait for the gate lock and pass, got %v\n%s", err, report)
