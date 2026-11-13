@@ -419,6 +419,8 @@ func TestABatchHoldsTheMergeSlotThroughTheCheckoutTheAfterLandingCommandAndTheMa
 	}
 	want := []string{
 		"advance the rig to batch0123456789",
+		// Looked at again once the after-landing lock is held (mw-6ww.175.51).
+		"advance the rig to batch0123456789",
 		"after-landing ran, slot held true",
 		"mail " + application.MailLanded + ": The story mw-x.1",
 		"mail " + application.MailLanded + ": The story mw-x.2",
