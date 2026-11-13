@@ -425,3 +425,33 @@ func TestFilingAPlanPinnedToARetiredHostOrAGoneBoxWritesAuto(t *testing.T) {
 		t.Errorf("the plan given was changed: %+v", plan)
 	}
 }
+
+// A deferred story pinned to a box the book lacks keeps its pin while held;
+// once the Mayor releases it, a dispatch tick re-paths it with a RE-PATHED:
+// comment, so nothing waits for ever.
+func TestADispatchRePathsAnUnHeldStoryPinnedToAGoneBox(t *testing.T) {
+	dispatch, tracker := aRePathFactory(t)
+	dispatch.CloudBook = &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud2", Up: repathNow.Add(-time.Hour)}}}}
+	pinnedTo(tracker, "mw-gq6.1", "cloud1")
+	if err := tracker.HoldStory(context.Background(), "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dispatch.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := storyHost(t, tracker, "mw-gq6.1"); got != "cloud1" {
+		t.Fatalf("held: host = %q, want cloud1 kept", got)
+	}
+	if err := tracker.ReleaseStory(context.Background(), "mw-gq6.1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dispatch.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := storyHost(t, tracker, "mw-gq6.1"); got != domain.HostAuto {
+		t.Errorf("released: host = %q, want auto", got)
+	}
+	if c := rePathedComments(tracker, "mw-gq6.1"); len(c) != 1 || !strings.Contains(c[0], "cloud1") {
+		t.Errorf("want one RE-PATHED: comment naming cloud1, got %q", c)
+	}
+}

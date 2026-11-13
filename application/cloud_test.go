@@ -238,7 +238,7 @@ func TestAStoryPathedToAGoneBoxIsRepathedByALaterCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	for id, want := range map[string]string{
-		"mw-g.1": domain.HostAuto, "mw-g.2": domain.HostAuto, "mw-g.3": "cloud1", "mw-g.4": "laptop",
+		"mw-g.1": domain.HostAuto, "mw-g.2": "cloud1", "mw-g.3": "cloud1", "mw-g.4": "laptop",
 		"mw-g.5": "desktop", "mw-g.6": "boost-tower", "mw-g.7": domain.HostAuto,
 	} {
 		if got := hostOf(t, tracker, id); got != want {
@@ -246,7 +246,7 @@ func TestAStoryPathedToAGoneBoxIsRepathedByALaterCheck(t *testing.T) {
 		}
 	}
 	text := report.String()
-	if !strings.Contains(text, "re-pathed mw-g.1, mw-g.2 from cloud1 to host=auto") {
+	if !strings.Contains(text, "re-pathed mw-g.1 from cloud1 to host=auto") {
 		t.Errorf("expected the move for cloud1 in the report:\n%s", text)
 	}
 	if !strings.Contains(text, "re-pathed mw-g.7 from cloud2 to host=auto") {
@@ -1837,5 +1837,30 @@ func TestABoxWhoseHarnessCannotBeReachedIsSaidInTheBook(t *testing.T) {
 	_, book = check(book.State.Boxes[0])
 	if box := book.State.Boxes[0]; box.HarnessFault != "" || box.SessionDenyFault != "" {
 		t.Errorf("expected the faults cleared once the box is reached, got %q / %q", box.HarnessFault, box.SessionDenyFault)
+	}
+}
+
+// A story the Mayor holds (deferred) is never touched by the cloud check
+// (mw-gq6.1165, AC 4): one pinned to a box the book lacks keeps its pin, and an
+// open one on the same box is still moved.
+func TestTheCloudCheckLeavesAHeldStoryPinnedToAGoneBoxAlone(t *testing.T) {
+	now := time.Date(2026, 10, 26, 3, 12, 0, 0, time.UTC)
+	tracker := goneBoxStories(t)
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-10"}}
+	report, err := application.CloudCheck{
+		Work: tracker, Stories: tracker, Provider: &apptest.FakeCloud{}, Book: book, Host: "laptop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hostOf(t, tracker, "mw-g.2"); got != "cloud1" {
+		t.Errorf("the held mw-g.2: host = %q, want cloud1 left alone", got)
+	}
+	if got := hostOf(t, tracker, "mw-g.1"); got != domain.HostAuto {
+		t.Errorf("the open mw-g.1: host = %q, want auto", got)
+	}
+	if text := report.String(); strings.Contains(text, "mw-g.2") {
+		t.Errorf("the report names the held story:\n%s", text)
 	}
 }
