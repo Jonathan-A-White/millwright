@@ -306,6 +306,7 @@ func newStatusCmd() *cobra.Command {
 				Cloud:            cloudBook,
 				CloudPlan:        plan,
 				BoxPanes:         cloudBoxPanes(cloudBook),
+				BoxIntegrity:     cloudBoxIntegrity(cloudBook),
 				Benchmarks:       vault.Benchmarks{Vault: files},
 				Bench:            benchmarkLimits(bench),
 				Causes:           tracker,
@@ -473,6 +474,42 @@ func cloudBoxPanes(book application.CloudBook) application.BoxPanes {
 		return nil
 	}
 	return sshBoxPanes{address: cloud.Vultr{Command: settings.Command}.Address}
+}
+
+// cloudBoxIntegrity is the reader of the cloud boxes' integrity marks, nil when
+// cloudBoxPanes is.
+func cloudBoxIntegrity(book application.CloudBook) application.BoxIntegrity {
+	if panes, ok := cloudBoxPanes(book).(sshBoxPanes); ok {
+		return panes
+	}
+	return nil
+}
+
+// boxIntegrityScript prints the integrity mark a box keeps (the file
+// rig.BuiltMarks writes for application.IntegrityMark); nothing when it has none.
+const boxIntegrityScript = `cat "$HOME/` + "%s" + `" 2>/dev/null; true`
+
+// IntegrityMark implements application.BoxIntegrity.
+func (s sshBoxPanes) IntegrityMark(ctx context.Context, box string) (string, error) {
+	addr, err := s.address(ctx, box)
+	if err != nil {
+		return "", fmt.Errorf("reading %s's address: %w", box, err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, boxPanesLimit)
+	defer cancel()
+	var out, stderr bytes.Buffer
+	file := filepath.Join(SyncHaltStateDir, "built-"+application.IntegrityMarkKey(application.FactoryRig))
+	remote := "sh -c '" + strings.ReplaceAll(fmt.Sprintf(boxIntegrityScript, file), "'", `'\''`) + "'"
+	cmd := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new", addr.String(), remote)
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	cmd.WaitDelay = 5 * time.Second
+	if err := cmd.Run(); err != nil {
+		if last := strings.TrimSpace(stderr.String()); last != "" {
+			return "", fmt.Errorf("ssh %s: %v: %s", addr, err, last[strings.LastIndex(last, "\n")+1:])
+		}
+		return "", fmt.Errorf("ssh %s: %w", addr, err)
+	}
+	return strings.TrimSpace(out.String()), nil
 }
 
 // Panes implements application.BoxPanes.

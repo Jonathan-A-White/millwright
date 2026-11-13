@@ -49,6 +49,10 @@ func corruptCheckout(err error) bool {
 // factory checkout last met a corrupt object (RFC 3339).
 func integrityMark(rig string) string { return rig + ".integrity" }
 
+// IntegrityMarkKey is integrityMark for the command line, which reads a box's
+// mark off its disk for mw status (mw-gq6.1200).
+func IntegrityMarkKey(rig string) string { return integrityMark(rig) }
+
 // secondIntegrityFault says whether the host met an integrity fault within the
 // hour before now (the mark integrityMark holds). When it did, the mark is moved
 // to now, since this is a fault too; when it did not, the mark is left for the
