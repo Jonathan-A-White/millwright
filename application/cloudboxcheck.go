@@ -124,7 +124,7 @@ func (p *cloudPass) checkBoxes(ctx context.Context) {
 		p.dirty = box.Name + " checked"
 		p.setGate(ctx, box, BoxGateOK, "")
 		if !again {
-			what := fmt.Sprintf("%s passed its own check (git fsck of the vault and each rig checkout, go mod verify, no EXT4-fs error) and Vultr does not report it locked: it may take stories", box.Name)
+			what := fmt.Sprintf("%s passed its own check (git fsck of the vault and each rig checkout, go mod verify, no EXT4-fs error, no zero-filled file older than its boot) and Vultr does not report it locked: it may take stories", box.Name)
 			p.check.say("%s", what)
 			p.emit(ctx, what)
 		}

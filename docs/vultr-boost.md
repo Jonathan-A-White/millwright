@@ -309,8 +309,10 @@ one that opens it:
 - The check clears a box when Vultr does not report its instance `locked` and the box's own check
   passes: `contrib/vultr-boost check --name cloudN`, which over ssh runs `git fsck
   --connectivity-only` on every checkout under the box's home (the vault and each rig), `go mod
-  verify` in `~/millwright`, and counts the `EXT4-fs error` lines of `dmesg`. It changes nothing on
-  the box and takes about ten seconds.
+  verify` in `~/millwright`, counts the `EXT4-fs error` lines of `dmesg`, and looks under the home
+  for a file older than the box's boot that begins with a block of zeros: cloud6 came up with the
+  last 36 GiB of its 350 GiB disk unwritten by the restore, and passed the first three. It changes
+  nothing on the box and takes one to two minutes.
 - The verdict is in the book (`checked`, `check_fault`) and in the box's gate note,
   `host.<box>.box-gate`, in the beads server: `ok <time>` or `hold <time>: <why>`. On the box,
   `mw dispatch` reads the note before anything else, and does nothing, not even a sync, unless it

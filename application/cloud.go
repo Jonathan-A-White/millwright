@@ -71,7 +71,9 @@ type CloudProvider interface {
 	SetSessionDeny(ctx context.Context, name string, rules []string) (changed bool, err error)
 	// CheckBox has the box check its own disk, over WireGuard as SetPace does:
 	// git fsck --connectivity-only on its vault and every rig checkout, go mod
-	// verify in its millwright checkout, and no EXT4-fs error in its kernel log.
+	// verify in its millwright checkout, no EXT4-fs error in its kernel log, and
+	// no file older than its boot that begins with a block of zeros (a snapshot
+	// restore that did not write the whole disk, as cloud6's did not).
 	// What it finds wrong is CloudBoxChecked.Faults and no error: an error is a
 	// box that could not be reached or asked, which is no verdict (mw-gq6.1172).
 	CheckBox(ctx context.Context, name string) (CloudBoxChecked, error)

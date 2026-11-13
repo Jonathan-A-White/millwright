@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // boostCheckRig is boostAddressRig with a box's home under it (the ssh stand-in
@@ -160,5 +161,48 @@ func TestVultrBoostCheckGivesNoVerdictWhileTheBoxsBootstrapRuns(t *testing.T) {
 	}
 	if strings.Contains(out, "check = ") || strings.Contains(out, "fault = ") || !strings.Contains(errOut, "has not finished") {
 		t.Errorf("expected neither a fault nor a check line, and why on standard error, got out %q, err %q", out, errOut)
+	}
+}
+
+// cloud6 came up on 2026-11-13 with the end of its disk unwritten by the
+// snapshot restore: files of the snapshot's own read as zeros, and git fsck, go
+// mod verify and dmesg found nothing. A file older than the boot that begins
+// with a block of zeros is a fault; one written since, or in a testdata
+// directory, is not.
+func TestVultrBoostCheckNamesASnapshotFileThatReadsAsZeros(t *testing.T) {
+	env, home := boostCheckRig(t, "all modules verified", soundKernelLog)
+	// Older than any boot of the host this test runs on, as the snapshot's files
+	// are older than the boot of a box made from it.
+	snapshotDay := time.Date(2001, 10, 15, 14, 29, 27, 0, time.UTC)
+	for path, old := range map[string]bool{
+		"postern/node_modules/playwright/lib/matchers/expect.js":    true,
+		"postern/node_modules/zeros-written-by-a-session.bin":       false,
+		".local/go/src/compress/flate/testdata/huffman-null-max.in": true,
+	} {
+		full := filepath.Join(home, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, make([]byte, 8192), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if old {
+			if err := os.Chtimes(full, snapshotDay, snapshotDay); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	out, errOut, err := runBoost(t, env, "check", "--name", "cloud1")
+	if err != nil {
+		t.Fatalf("check: %v: %s", err, errOut)
+	}
+	var faults []string
+	for _, line := range strings.Split(out, "\n") {
+		if fault, ok := strings.CutPrefix(line, "fault = "); ok {
+			faults = append(faults, fault)
+		}
+	}
+	if len(faults) != 1 || !strings.HasPrefix(faults[0], "1 of the ") || !strings.Contains(faults[0], "~/postern/node_modules/playwright/lib/matchers/expect.js") || !strings.Contains(faults[0], "did not write the whole disk") {
+		t.Fatalf("expected one fault naming the snapshot's zero-filled file, got %q in:\n%s", faults, out)
 	}
 }

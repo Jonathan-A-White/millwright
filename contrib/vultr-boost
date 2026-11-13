@@ -57,7 +57,9 @@
 #         check runs it on each box it does not know to be at the pace (mw-gq6.1004).
 # check   has a box that is up check its own disk, over WireGuard as set-pace does: ssh to the box's
 #         user runs git fsck --connectivity-only on every checkout under its home (the vault and each
-#         rig), go mod verify in ~/millwright, and counts the EXT4-fs error lines of the kernel log.
+#         rig), go mod verify in ~/millwright, counts the EXT4-fs error lines of the kernel log, and
+#         looks for files older than the box's boot that begin with a block of zeros (a snapshot
+#         restore that did not write the whole disk).
 #         Each thing wrong is a "fault = " line, and the last line, "check = ...", says the check ran
 #         to its end; it exits 0 whatever it found, and not 0 only when the box could not be asked.
 #         It changes nothing on the box. mw's cloud check runs it before a box may take a story and
@@ -915,6 +917,11 @@ do_set_pace() {
 # (cloud-init) has not finished gives no verdict: a snapshot can carry a checkout the bootstrap
 # mends (mw-5gr3k0.8), and the check is asked again. A checkout git cannot walk is walked once
 # more after three seconds, so that a fetch or a repack under way is not read as a fault.
+# Last, every file under the home of 4096 bytes or more that has not changed since this boot
+# (the snapshot's own) is opened, and one that begins with a whole block of zeros is a fault:
+# cloud6 came up on 2026-11-13 with every file above 314 GiB of its 350 GiB disk reading zero,
+# the restore not having written the end of the disk, and passed the three checks above. Go's
+# and the rigs' testdata directories hold files that are zeros by design, and are left out.
 BOX_CHECK='export PATH=$HOME/.local/bin:$HOME/.local/go/bin:/usr/local/go/bin:$PATH
 if command -v cloud-init >/dev/null 2>&1 && cloud-init status 2>/dev/null | grep -q "^status: \(running\|not\)"; then
 	echo "the bootstrap of this box (cloud-init) has not finished: it is checked once it has" >&2
@@ -947,7 +954,39 @@ if log=$(sudo -n dmesg 2>/dev/null) || log=$(dmesg 2>/dev/null); then
 else
 	echo "fault = dmesg: the kernel log could not be read"
 fi
-echo "check = $n checkouts (git fsck --connectivity-only), go mod verify in ~/millwright, EXT4-fs errors in dmesg"'
+if scan=$(nice -n 10 python3 - "$HOME" 2>&1 <<"PY"
+import os, sys, time
+home = sys.argv[1]
+boot = time.time() - float(open("/proc/uptime").read().split()[0])
+seen = 0
+zero = []
+for root, dirs, files in os.walk(home):
+    if "/testdata/" in root + "/":
+        continue
+    for name in files:
+        path = os.path.join(root, name)
+        try:
+            st = os.lstat(path)
+            if st.st_size < 4096 or (st.st_mode & 0o170000) != 0o100000 or st.st_mtime >= boot:
+                continue
+            seen += 1
+            with open(path, "rb") as f:
+                if f.read(4096).strip(b"\0"):
+                    continue
+            zero.append(path.replace(home, "~", 1))
+        except OSError:
+            pass
+print(seen)
+print(len(zero))
+print(zero[0] if zero else "")
+PY
+); then
+	z=$(printf "%s\n" "$scan" | sed -n 2p)
+	[ "$z" = 0 ] || echo "fault = $z of the $(printf "%s\n" "$scan" | sed -n 1p) files older than this boot begin with a block of zeros, the first: $(printf "%s\n" "$scan" | sed -n 3p | cut -c1-160): the snapshot restore did not write the whole disk"
+else
+	echo "fault = the scan for zero-filled files could not run: $(last "$scan")"
+fi
+echo "check = $n checkouts (git fsck --connectivity-only), go mod verify in ~/millwright, EXT4-fs errors in dmesg, zero-filled files older than this boot"'
 
 do_check() {
 	need ssh
