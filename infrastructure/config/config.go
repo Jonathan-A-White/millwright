@@ -143,6 +143,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -3300,6 +3301,9 @@ const (
 	DefaultCloudNoDispatchMinutes = 30
 )
 
+// cloudPrefix is what a [cloud] prefix may be: a box is the prefix and a number.
+var cloudPrefix = regexp.MustCompile(`^[a-z][a-z-]*$`)
+
 // CloudSettings is what the `[cloud]` table says.
 type CloudSettings struct {
 	Provider      string
@@ -3319,6 +3323,9 @@ type CloudSettings struct {
 	// dispatch of its own reaching the beads server before the check destroys
 	// it, as a box that will never take a story.
 	NoDispatchMinutes int
+	// Prefix begins the name of each box, Prefix1, Prefix2, ...; empty is
+	// "cloud" (application.DefaultCloudPrefix) (mw-gq6.1250).
+	Prefix string
 	// Snapshot is the Vultr snapshot a box is made from; empty makes it from
 	// Ubuntu and bootstraps it in full.
 	Snapshot string
@@ -3356,11 +3363,15 @@ func Cloud() (CloudSettings, bool, error) {
 		UpMinutes:         DefaultCloudUpMinutes,
 		SlowMakeMinutes:   DefaultCloudSlowMakeMinutes,
 		NoDispatchMinutes: DefaultCloudNoDispatchMinutes,
+		Prefix:            strings.TrimSpace(table["prefix"]),
 		Snapshot:          strings.TrimSpace(table["snapshot"]),
 		Command:           strings.TrimSpace(table["command"]),
 	}
 	if said := strings.TrimSpace(table["provider"]); said != "" && said != DefaultCloudProvider {
 		return CloudSettings{}, false, fmt.Errorf("the [%s] table of %s says provider = %q: the one provider is %q", CloudTable, path, said, DefaultCloudProvider)
+	}
+	if cloud.Prefix != "" && !cloudPrefix.MatchString(cloud.Prefix) {
+		return CloudSettings{}, false, fmt.Errorf("the [%s] table of %s says prefix = %q: it is lower-case letters and hyphens, starting with a letter, and a box's number follows it", CloudTable, path, cloud.Prefix)
 	}
 	for key, into := range map[string]*int{"max_boxes": &cloud.MaxBoxes, "idle_minutes": &cloud.IdleMinutes, "box_cap": &cloud.BoxCap, "up_minutes": &cloud.UpMinutes, "slow_make_minutes": &cloud.SlowMakeMinutes, "no_dispatch_minutes": &cloud.NoDispatchMinutes} {
 		said := strings.TrimSpace(table[key])
