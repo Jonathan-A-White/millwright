@@ -189,6 +189,17 @@ type Check struct {
 	SpecsWorker  bool
 	SpecsPoll    time.Duration
 
+	// GateStarter, when it is set, runs a whole check kept to a Builder's call
+	// (CallBudget) whose rig's gate usually takes at least the whole call
+	// (GateExpected) as a process of its own that outlives the call
+	// (mw-gq6.1273): the call waits for it for what is left of the call, and a
+	// check still running then is read by the same command run again. GateWorker is
+	// that process: the whole check, not kept to a call, which keeps its verdict
+	// for the call to read and writes no check-<attempt>.log of its own. The call
+	// looks at the process every SpecsPoll.
+	GateStarter GateStarter
+	GateWorker  bool
+
 	// Modes is the harness's record of the permission mode the story's session
 	// ran in (mw-gq6.545); Next's own. Nil reads none.
 	Modes TranscriptModes
@@ -306,7 +317,7 @@ func (k Check) Run(ctx context.Context, storyID string) (CheckReport, error) {
 	shown := k.Out
 	if k.Logs != nil {
 		k.Out = teeTo(shown, kept)
-		if k.Part == 0 && !k.SpecsWorker {
+		if k.Part == 0 && !k.SpecsWorker && !k.GateWorker {
 			logs, story := k.Logs, storyID
 			kept.put = func(attempt int, text string) error {
 				_, err := logs.PutRunFile(ctx, story, CheckLogFileName(attempt), text)
@@ -324,8 +335,9 @@ func (k Check) Run(ctx context.Context, storyID string) (CheckReport, error) {
 		// Nothing was printed, so the log would end with no verdict at all.
 		kept.addQuietly(fmt.Sprintf("mw check: %v\n", err))
 	}
-	// A part has its own record; the log is the whole check's verdict.
-	if k.Logs != nil && report.Attempt > 0 && k.Part == 0 && !k.SpecsWorker {
+	// A part has its own record; the log is the whole check's verdict, which the
+	// call that started a gate worker writes, not the worker.
+	if k.Logs != nil && report.Attempt > 0 && k.Part == 0 && !k.SpecsWorker && !k.GateWorker {
 		name := CheckLogFileName(report.Attempt)
 		if _, werr := k.Logs.PutRunFile(ctx, storyID, name, kept.String()); werr != nil && shown != nil {
 			fmt.Fprintf(shown, "  note    the log of this check could not be kept in the run of %s: %v\n", storyID, werr)
@@ -488,6 +500,19 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		loadBound = k.partSlotWait()
 		kept = k.keptTests(ctx, storyID, report.Attempt, tip)
 	}
+	var fit *callFit
+	if !split && kept == "" {
+		fit = k.callFitOf(ctx, path.Rig, began)
+		if k.detachesGate() {
+			// A gate no call can fit is run by a process of its own (mw-gq6.1273).
+			detached, done, err := k.detachedGate(ctx, report, c, tip, fit)
+			if done || err != nil {
+				return wholeCheckVerdict(detached, err)
+			}
+			// The process passed the tests at this commit: they are not run again.
+			kept = k.keptTests(ctx, storyID, report.Attempt, tip)
+		}
+	}
 	var gateLock GateLock
 	var afterCalm func(held Holding) error
 	switch {
@@ -501,7 +526,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	case !split && k.Slot != nil && k.GateLock != nil:
 		// Slot, then gate lock, taken before the wait for a calm host so that the
 		// load waited on is not another gate's: a close-out does the same.
-		held := checkGateLock{k: k, c: c, attempt: report.Attempt, left: left, fit: k.callFitOf(ctx, path.Rig, began)}
+		held := checkGateLock{k: k, c: c, attempt: report.Attempt, left: left, fit: fit}
 		gateLock, afterCalm = held, held.afterCalm
 	case !split && k.Slot != nil:
 		checks = slottedChecks{
@@ -513,8 +538,13 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	}
 
 	var specs SpecChecks
+	var specsRan *lastSpecs
 	if k.SpecChecks != nil {
 		specs = k.SpecChecks
+		if k.GateWorker {
+			specsRan = &lastSpecs{inner: specs}
+			specs = specsRan
+		}
 		if k.detachesSpecs() {
 			// The specs may outrun the call: a process of its own runs them, taking
 			// the slot and gate lock itself, and the call reads what it kept
@@ -526,7 +556,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 			}}
 		} else if k.Slot != nil {
 			specs = slottedSpecs{
-				specs: k.SpecChecks,
+				specs: specs,
 				take: func(ctx context.Context) (Holding, error) {
 					try := wholeTry(c, "the rig's changed specs", CheckSpecsHeldFileName(report.Attempt))
 					var holding Holding
@@ -599,11 +629,25 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		}
 	}
 
-	if report.Waiting != "" && len(report.Refusals) == 0 {
-		return report, nil
+	if k.GateWorker {
+		if err := k.keepGateVerdict(ctx, c, report, tests.last(), specsRan); err != nil {
+			return report, err
+		}
 	}
-	if !report.Passed() {
-		return report, fmt.Errorf("checking %s: %d check(s) failed, so mw next would not land it", storyID, len(report.Refusals))
+	return wholeCheckVerdict(report, nil)
+}
+
+// wholeCheckVerdict is the error a whole check ends with: err when the checking itself
+// stopped, none when nothing was run and the one line says to run it again, and
+// the count of the checks that failed when any did.
+func wholeCheckVerdict(report CheckReport, err error) (CheckReport, error) {
+	switch {
+	case err != nil:
+		return report, err
+	case report.Waiting != "" && len(report.Refusals) == 0:
+		return report, nil
+	case !report.Passed():
+		return report, fmt.Errorf("checking %s: %d check(s) failed, so mw next would not land it", report.StoryID, len(report.Refusals))
 	}
 	return report, nil
 }

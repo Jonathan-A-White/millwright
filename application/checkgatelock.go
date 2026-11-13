@@ -170,8 +170,10 @@ func (f *callFit) left() time.Duration {
 }
 
 // late is whether the gate would not end inside what is left of the call. A gate
-// longer than a whole call is never late: no fresh call would fit it either, and
-// it is started as it always was.
+// longer than a whole call is never late: no fresh call would fit it either. A
+// foreground check that can start a process of its own runs such a gate there
+// (Check.GateStarter, checkgatedetached.go, mw-gq6.1273) and never gets here with
+// it; one that cannot starts it as it always was.
 func (f *callFit) late() bool { return f.expected < f.budget && f.expected > f.left() }
 
 // tooLateLine is the one line a foreground check ends with when it won the gate
