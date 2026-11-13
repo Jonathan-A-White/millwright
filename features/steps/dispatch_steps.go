@@ -464,7 +464,7 @@ func (c *dispatchContext) aStoryLeftAWorktreeWithCommits(id string, n int) error
 		return err
 	}
 	dir, branch := c.worktreeOf(id), application.StoryBranch(id)
-	if err := rig.New().Add(context.Background(), c.rig, dir, branch, application.StartPoint(application.DefaultRemote, "main")); err != nil {
+	if err := rig.New(rig.WithNpm("true")).Add(context.Background(), c.rig, dir, branch, application.StartPoint(application.DefaultRemote, "main")); err != nil {
 		return fmt.Errorf("cutting the worktree of %s: %w", id, err)
 	}
 	for i := 0; i < n; i++ {
@@ -931,7 +931,7 @@ func (c *dispatchContext) anEarlierSessionLiesDead(id string) error {
 // is there, on its branch, and a session that has not exited is running in it.
 func (c *dispatchContext) aSessionIsRunningInItsWorktree(id string) error {
 	dir, branch := c.worktreeOf(id), application.StoryBranch(id)
-	if err := rig.New().Add(context.Background(), c.rig, dir, branch, application.StartPoint(application.DefaultRemote, "main")); err != nil {
+	if err := rig.New(rig.WithNpm("true")).Add(context.Background(), c.rig, dir, branch, application.StartPoint(application.DefaultRemote, "main")); err != nil {
 		return fmt.Errorf("cutting the worktree of %s: %w", id, err)
 	}
 	return c.runner.Start(context.Background(), application.SessionSpec{
@@ -1214,7 +1214,7 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 	if c.configured != nil {
 		knobs = *c.configured
 	}
-	worktrees := rig.New()
+	worktrees := rig.New(rig.WithNpm("true"))
 	var rigFetching application.Worktrees = worktrees
 	if c.fetch != nil {
 		c.fetch.Worktrees = worktrees
