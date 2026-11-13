@@ -1140,6 +1140,13 @@ func writeBoxHarness(b *strings.Builder, boxes []BoxHarness) {
 		if box.ReadFail != "" {
 			wrapInto(b, "    ", "its panes could not be read for crashes: "+box.ReadFail)
 		}
+		if box.IntegrityFail != "" {
+			wrapInto(b, "    ", "its integrity mark could not be read: "+box.IntegrityFail)
+		}
+		if !box.Integrity.IsZero() {
+			wrapInto(b, "    ", fmt.Sprintf("%s met a corrupt git object or a segmentation fault at %s, under an hour ago; a second within the hour says the box is bad: mw cloud down %s",
+				box.Box, box.Integrity.UTC().Format("01-02 15:04Z"), box.Box))
+		}
 		if len(box.Crashes) < BoxHarnessCrashesNamed {
 			continue
 		}

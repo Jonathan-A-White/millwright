@@ -367,6 +367,12 @@ type Status struct {
 	// same, from the cloud's book.
 	BoxPanes BoxPanes
 
+	// BoxIntegrity, when set with Cloud, is asked for each cloud box's integrity
+	// mark (integrityMark), so that a box that met a corrupt git object or a
+	// segmentation fault in the last hour is named under HARNESS (mw-gq6.1200).
+	// Nil leaves it out.
+	BoxIntegrity BoxIntegrity
+
 	// Benchmarks, when set, is the book of past close-outs' benchmarks, read for
 	// the BENCHMARKS section: each host's usual gate time against its latest,
 	// what each host landed at each running count, and how well the par of each
@@ -2429,6 +2435,14 @@ type BoxPanes interface {
 	Panes(ctx context.Context, box string, since time.Time) ([]BoxPane, error)
 }
 
+// BoxIntegrity is what mw status asks of a cloud box for the integrity mark it
+// keeps (integrityMark): when, in RFC 3339, its factory checkout last met a
+// corrupt object or a session of it died with a segmentation fault. An empty
+// string is a box with none; an error is a box that could not be read.
+type BoxIntegrity interface {
+	IntegrityMark(ctx context.Context, box string) (string, error)
+}
+
 // isHarnessCrash reports whether a pane shows the harness crashing: the Bun
 // runtime's banner ("Bun v1.4.4 (...) Linux x64") together with its crash
 // words. A segfault alone is not it (any program can), nor is a pane that only
@@ -2450,6 +2464,12 @@ type BoxHarness struct {
 	Version  string
 	Crashes  []BoxPane
 	ReadFail string
+
+	// Integrity is when the box's integrity mark was written, when that was
+	// under integrityFaultWindow before now; zero otherwise. IntegrityFail is why
+	// the mark could not be read.
+	Integrity     time.Time
+	IntegrityFail string
 }
 
 // boxHarness reads HARNESS for the boxes of the cloud's reading. A box still
@@ -2473,7 +2493,24 @@ func (s Status) boxHarness(ctx context.Context, reading *CloudReading) []BoxHarn
 				}
 			}
 		}
+		if s.BoxIntegrity != nil {
+			line.Integrity, line.IntegrityFail = s.boxIntegrity(ctx, box.Name, reading.Now)
+		}
 		out = append(out, line)
 	}
 	return out
+}
+
+// boxIntegrity reads a box's integrity mark: the time of a fault under an hour
+// old, or why the mark could not be read (mw-gq6.1200).
+func (s Status) boxIntegrity(ctx context.Context, box string, now time.Time) (time.Time, string) {
+	held, err := s.BoxIntegrity.IntegrityMark(ctx, box)
+	if err != nil {
+		return time.Time{}, oneLine(err.Error())
+	}
+	at, err := time.Parse(time.RFC3339, strings.TrimSpace(held))
+	if err != nil || now.Sub(at) >= integrityFaultWindow {
+		return time.Time{}, ""
+	}
+	return at, ""
 }
