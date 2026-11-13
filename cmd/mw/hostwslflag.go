@@ -136,9 +136,11 @@ func WSLFlagInstallLineInline() string {
 }
 
 // WSLFlagWayBack is the one line that takes the task and its script away. It
-// changes nothing inside WSL.
+// changes nothing inside WSL. It checks for an elevated session first, as the
+// install lines do: the task is at RunLevel Highest and its script is under
+// ProgramData.
 func WSLFlagWayBack() string {
-	return `Unregister-ScheduledTask -TaskName ` + wslFlagTask + ` -Confirm:$false; Remove-Item "$env:ProgramData\millwright\wsl-flag-watch.ps1"`
+	return windowsElevationCheck + `; Unregister-ScheduledTask -TaskName ` + wslFlagTask + ` -Confirm:$false; Remove-Item "$env:ProgramData\millwright\wsl-flag-watch.ps1"`
 }
 
 // newHostWSLFlagCmd builds `mw host wsl-flag`.

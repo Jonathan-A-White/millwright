@@ -135,7 +135,9 @@ func GiveWayInstallLine(account string, inline bool) (string, error) {
 // GiveWayUninstallLine is the way back: the four tasks and the folder removed,
 // and the host told to go on again first, so that a host left giving way (or, in
 // the shutdown mode, with WSL down) is not left so. The wsl-flag script's own
-// folder above is untouched.
+// folder above is untouched. It checks for an elevated session first: its
+// removals are silent about errors, so in a PowerShell that is not elevated they
+// would leave the tasks and the folder and still tell the host to go on.
 func GiveWayUninstallLine() string {
 	var names []string
 	for _, n := range giveWayTaskNames {
@@ -143,6 +145,7 @@ func GiveWayUninstallLine() string {
 	}
 	return "# millwright give way, taken away (mw host giveway --uninstall-line): removes the four tasks and the folder " + giveWayDir +
 		", then tells the host to go on (mw giveway off). Way back: mw host giveway --install-line.\n" +
+		windowsElevationCheck + "\n" +
 		strings.Join(names, ",") + " | ForEach-Object { Unregister-ScheduledTask -TaskName $_ -Confirm:$false -ErrorAction SilentlyContinue }\n" +
 		`Remove-Item -Recurse -Force "` + giveWayDir + `" -ErrorAction SilentlyContinue` + "\n" +
 		"$env:WSL_UTF8='1'; wsl.exe -d " + giveWayDistro + " -u " + giveWayWSLUser + " --exec " + giveWayMw + " giveway off --by windows-uninstall\n"
