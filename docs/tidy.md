@@ -33,7 +33,9 @@ It never:
 Row 4 closes each bead as `mw next` closes its story's formula (mw-gq6.1132): a
 close that met a passing fault is tried again, one bd called indeterminate is
 read first (closed is done), and a bead lost every try is mailed to the Mayor
-once with the count of the tries.
+once with the count of the tries; the once is kept by a comment on the closed story
+(`TidyFormulaLostMarker` and the bead's id), so a later tick does not mail it again
+(mw-gq6.1159).
 
 Row 2 is the row to know about: `mw mail read` closes a message, so a message
 the beads mailbox holds read is already closed and row 2 finds nothing to act

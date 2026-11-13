@@ -371,3 +371,149 @@ func timesAsked(ids []string, id string) int {
 	}
 	return n
 }
+
+// mw-gq6.1159: a bead that fails every try was mailed on every tick. The once is
+// kept on the closed story, as the unanswered card's is, not in the process.
+
+// twoStuckFormulas pours a formula for each of two closed stories and makes the
+// step of each fail every try. tidy runs one Tidy over them; beads is what it
+// reads and comments through.
+type twoStuckFormulas struct {
+	tracker *tidyFormulaTracker
+	beads   application.TidyBeads
+	mail    *apptest.FakeMailbox
+	steps   map[string]string
+}
+
+func twoClosedStoriesWhoseFormulaClosesAlwaysFail(t *testing.T, wrap func(*apptest.FakeTracker) application.TidyBeads) *twoStuckFormulas {
+	t.Helper()
+	ctx := context.Background()
+	fake := apptest.NewFakeTracker()
+	fake.AddFormula("tdd-feature", application.FormulaStep{Title: "Understand {{story}}: {{title}}"})
+	fake.AddEpic("mw-x", domain.Path{})
+	failing := map[string]int{}
+	steps := map[string]string{}
+	for _, id := range []string{"mw-x.1", "mw-x.2"} {
+		fake.AddStory("mw-x", domain.Story{ID: id, Title: "A closed story"})
+		poured, err := fake.PourFormula(ctx, "tdd-feature", id, "A closed story", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := fake.SetStatus(id, apptest.StatusClosed); err != nil {
+			t.Fatal(err)
+		}
+		failing[poured.Steps[0].ID] = 1000
+		steps[id] = poured.Steps[0].ID
+	}
+	run := &twoStuckFormulas{mail: apptest.NewFakeMailbox(), steps: steps}
+	run.tracker = &tidyFormulaTracker{FakeTracker: fake, failing: failing, err: formulaTimeout()}
+	run.beads = fake
+	if wrap != nil {
+		run.beads = wrap(fake)
+	}
+	return run
+}
+
+func (r *twoStuckFormulas) tidy() (application.TidyReport, error) {
+	return application.Tidy{
+		Mail: r.mail, Notes: r.tracker.FakeTracker, Beads: r.beads, Formulas: r.tracker, Molecules: r.tracker.FakeTracker,
+		Host: "laptop", PushWait: 20 * time.Second,
+		RetryWait: func(context.Context, time.Duration) error { return nil },
+	}.Run(context.Background())
+}
+
+func (r *twoStuckFormulas) lostSubjects(t *testing.T) []string {
+	t.Helper()
+	inbox, _ := r.mail.Inbox(context.Background(), application.MayorMailbox)
+	var subjects []string
+	for _, m := range inbox {
+		if strings.HasPrefix(m.Subject, "lost write") {
+			subjects = append(subjects, m.Subject)
+		}
+	}
+	return subjects
+}
+
+// A bead that fails every try across two passes is mailed once, and a different
+// bead failing in the same pass is mailed for itself.
+func TestTidyMailsAFormulaCloseLostEveryTryOnceAcrossTwoRuns(t *testing.T) {
+	run := twoClosedStoriesWhoseFormulaClosesAlwaysFail(t, nil)
+	for pass := 1; pass <= 2; pass++ {
+		if _, err := run.tidy(); err == nil {
+			t.Fatalf("pass %d: expected the lost closes to be a fault of the pass", pass)
+		}
+		subjects := run.lostSubjects(t)
+		if len(subjects) != 2 {
+			t.Fatalf("after pass %d expected two lost-write mails (one per bead), got %q", pass, subjects)
+		}
+	}
+	subjects := strings.Join(run.lostSubjects(t), "\n")
+	for _, id := range []string{"mw-x.1", "mw-x.2"} {
+		if !strings.Contains(subjects, " on "+id+" ") {
+			t.Errorf("expected a lost-write mail for %s, got %q", id, subjects)
+		}
+	}
+	comments, err := run.tracker.StoryComments(context.Background(), "mw-x.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked := 0
+	for _, c := range comments {
+		if strings.HasPrefix(c.Text, application.TidyFormulaLostMarker) {
+			marked++
+		}
+	}
+	if marked != 1 {
+		t.Errorf("expected one marker comment on mw-x.1, got %d in %+v", marked, comments)
+	}
+}
+
+// A bead mailed in one pass is mailed again once the mail is not the Mayor's to
+// have: a mail that could not be sent leaves no marker.
+func TestTidyMailsAFormulaCloseLostAgainWhenTheMailWasNotSent(t *testing.T) {
+	run := twoClosedStoriesWhoseFormulaClosesAlwaysFail(t, nil)
+	run.mail.Err = errors.New("the mail store is not answering")
+	if _, err := run.tidy(); err == nil {
+		t.Fatal("expected a fault")
+	}
+	run.mail.Err = nil
+	if _, err := run.tidy(); err == nil {
+		t.Fatal("expected a fault")
+	}
+	if subjects := run.lostSubjects(t); len(subjects) != 2 {
+		t.Errorf("expected the two beads mailed once the mailbox answered, got %q", subjects)
+	}
+}
+
+type tidyBeadsThatCannotComment struct{ *apptest.FakeTracker }
+
+func (tidyBeadsThatCannotComment) CommentOnStory(context.Context, string, string) error {
+	return errors.New("the tracker would not take a comment")
+}
+
+// A marker that cannot be written leaves a note; the mail is sent all the same
+// and the failed comment is no fault of the pass.
+func TestTidyNotesAFormulaCloseMarkerThatCannotBeWritten(t *testing.T) {
+	run := twoClosedStoriesWhoseFormulaClosesAlwaysFail(t, func(f *apptest.FakeTracker) application.TidyBeads {
+		return tidyBeadsThatCannotComment{f}
+	})
+	report, err := run.tidy()
+	if err == nil {
+		t.Fatal("expected the lost closes to be a fault of the pass")
+	}
+	if strings.Contains(err.Error(), "comment") {
+		t.Errorf("expected the failed marker to be no fault of the pass, got %v", err)
+	}
+	if subjects := run.lostSubjects(t); len(subjects) != 2 {
+		t.Errorf("expected both beads mailed, got %q", subjects)
+	}
+	noted := false
+	for _, n := range report.Notes {
+		if strings.Contains(n, "would not take a comment") {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Errorf("expected a note on the marker, got %q", report.Notes)
+	}
+}

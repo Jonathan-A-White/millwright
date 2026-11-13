@@ -43,6 +43,12 @@ const (
 	// again.
 	TidyUnansweredMarker = TidyWhy + "its decision card has no answer, so it is left in place and the Mayor is mailed"
 
+	// TidyFormulaLostMarker starts the comment mw tidy leaves on a closed story
+	// when it has mailed the Mayor that a bead of the story's formula would not
+	// close; the bead's id follows. Its presence is how a later pass knows not
+	// to mail that bead again.
+	TidyFormulaLostMarker = TidyWhy + "the Mayor is mailed that a bead of its formula could not be closed: "
+
 	// TidyUnansweredSubject starts the subject of that mail.
 	TidyUnansweredSubject = "Unanswered card on closed "
 )
@@ -463,7 +469,7 @@ func (t Tidy) formulas(ctx context.Context, report *TidyReport) error {
 				if tries, err := t.closeFormulaBead(ctx, formula.Root, act, report); err != nil {
 					faults = append(faults, fmt.Errorf("closing the %s %s: %w", act.Kind, act.ID, err))
 					lost := fmt.Sprintf("the %s %s of the formula %s of %s could not be closed: %v", act.Kind, act.ID, formula.Root, formula.Story, err)
-					t.nextForWrites().mailLostWriteVia(ctx, t.mailSend(), "mw tidy", "tidying", formula.Story, nil, "the formula close", lost, tries)
+					t.mailFormulaCloseLost(ctx, formula.Story, act.ID, lost, tries, report)
 					break
 				}
 				t.log(ctx, act, report)
@@ -472,6 +478,43 @@ func (t Tidy) formulas(ctx context.Context, report *TidyReport) error {
 		}
 	}
 	return errors.Join(faults...)
+}
+
+// mailFormulaCloseLost mails the Mayor that bead of the formula of story would
+// not close, once: the first pass that mails leaves TidyFormulaLostMarker and
+// the bead's id as a comment on the story, and a later pass that finds it mails
+// no one again (mw-gq6.1159). A mail that was not sent leaves no marker, so the
+// next pass tries it again; a marker that cannot be read or written is a note,
+// not a fault, and the Mayor may be mailed again.
+func (t Tidy) mailFormulaCloseLost(ctx context.Context, story, bead, lost string, tries int, report *TidyReport) {
+	marker := TidyFormulaLostMarker + bead
+	comments, err := t.Beads.StoryComments(ctx, story)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the comments of %s could not be read to see whether the Mayor was mailed about %s, so it may be mailed again: %s", story, bead, oneLine(err.Error())))
+	}
+	for _, c := range comments {
+		if c.Text == marker {
+			return
+		}
+	}
+	send := t.mailSend()
+	if send == nil {
+		return
+	}
+	sent := false
+	t.nextForWrites().mailLostWriteVia(ctx, func(ctx context.Context, m NewMessage) (string, error) {
+		id, err := send(ctx, m)
+		if err == nil {
+			sent = true
+		}
+		return id, err
+	}, "mw tidy", "tidying", story, nil, "the formula close", lost, tries)
+	if !sent {
+		return
+	}
+	if err := t.Beads.CommentOnStory(ctx, story, marker); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be commented on, so the Mayor may be mailed again about %s: %s", story, bead, oneLine(err.Error())))
+	}
 }
 
 // closeFormulaBead closes one bead of the formula poured as root as mw next
