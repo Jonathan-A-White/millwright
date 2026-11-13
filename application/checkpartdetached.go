@@ -181,7 +181,7 @@ func (k Check) startPart(ctx context.Context, report CheckReport, c *closeOut, l
 	if err != nil {
 		return partRun{}, fmt.Errorf("%s could not be started: %w", label, err)
 	}
-	run := partRun{pid: pid, started: time.Now()}
+	run := partRun{pid: pid, started: k.callNow()}
 	record := fmt.Sprintf("%s %d\n%s %s\n", partRunPid, run.pid, partRunStarted, run.started.UTC().Format(time.RFC3339))
 	if _, err := k.Records.PutRunFile(ctx, c.id, CheckPartRunFileName(report.Attempt, k.Part), record); err != nil {
 		return partRun{}, fmt.Errorf("%s was started, but its process could not be kept in the run, so no later call can wait for it: %w", label, err)
@@ -219,7 +219,7 @@ func (k Check) waitForPart(ctx context.Context, report CheckReport, c *closeOut,
 		case <-tick.C:
 			if k.Out != nil {
 				fmt.Fprintf(k.Out, "  note    %s is running on %s, since %s (%s ago); %s left in this call\n",
-					label, k.Host, run.started.UTC().Format("15:04:05Z"), time.Since(run.started).Round(time.Second), gateWaited(fit.left()))
+					label, k.Host, run.started.UTC().Format("15:04:05Z"), k.callNow().Sub(run.started).Round(time.Second), gateWaited(fit.left()))
 			}
 		case <-time.After(k.partPoll()):
 		}
@@ -242,7 +242,7 @@ func (k Check) partSilence(ctx context.Context, report CheckReport, c *closeOut,
 			last = info.ModTime()
 		}
 	}
-	return time.Since(last), ceiling
+	return k.callNow().Sub(last), ceiling
 }
 
 // killHungPart stops the process of a part that has written nothing past its
@@ -273,7 +273,7 @@ func (k Check) partStillRunningLine(ctx context.Context, c *closeOut, label stri
 		}
 	}
 	return fmt.Sprintf("%s is still running on %s (started %s ago%s) and goes on without this call: wait for it with `mw check %s --part %d`, which does not start it again",
-		label, k.Host, time.Since(run.started).Round(time.Second), usually, c.id, k.Part)
+		label, k.Host, k.callNow().Sub(run.started).Round(time.Second), usually, c.id, k.Part)
 }
 
 // partEnded tells how the part's process ended, from what it kept: what it said,

@@ -180,7 +180,7 @@ func (k Check) runPartAgain(ctx context.Context, c *closeOut, attempt, n int, la
 		return partAgain{}, fmt.Errorf("%s failed once while %s was busy, and the run again that a failure on a busy host gets did not start: it needs about %s and only %s is left in this call; the first failure is not counted and nothing has been run since, and that is the host's load and not a failure of the part: run the same part again with `mw check %s --part %d`",
 			label, k.Host, gateWaited(fit.expected), gateWaited(fit.left()), c.id, n)
 	}
-	from := time.Now()
+	from := k.callNow()
 	second, err := k.Parts.RunLine(ctx, c.path.Rig, c.worktree, part.Command)
 	if err != nil {
 		return partAgain{}, fmt.Errorf("checking %s: %s could not be run again: %w", c.id, label, err)

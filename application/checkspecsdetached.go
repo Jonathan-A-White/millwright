@@ -250,7 +250,7 @@ func (d detachedSpecs) start(ctx context.Context) (partRun, error) {
 	if err != nil {
 		return partRun{}, fmt.Errorf("the changed specs could not be started: %w", err)
 	}
-	run := partRun{pid: pid, started: time.Now()}
+	run := partRun{pid: pid, started: k.callNow()}
 	record := fmt.Sprintf("%s %d\n%s %s\n", partRunPid, run.pid, partRunStarted, run.started.UTC().Format(time.RFC3339))
 	if _, err := k.Records.PutRunFile(ctx, c.id, CheckSpecsRunFileName(d.attempt), record); err != nil {
 		return partRun{}, fmt.Errorf("the changed specs were started, but their process could not be kept in the run, so no later call can wait for it: %w", err)
@@ -276,7 +276,7 @@ func (d detachedSpecs) wait(ctx context.Context, run partRun) string {
 		}
 		if fit.left() <= 0 {
 			return fmt.Sprintf("the rig's changed specs are still running on %s (started %s ago) and go on without this call: their verdict will be kept in %s (what they print is in %s), and `mw check %s`, run again, reads it without running the rig's tests or the specs again",
-				k.Host, time.Since(run.started).Round(time.Second), k.Logs.RunFile(c.id, CheckSpecsResultFileName(d.attempt)), k.Logs.RunFile(c.id, CheckSpecsOutFileName(d.attempt)), c.id)
+				k.Host, k.callNow().Sub(run.started).Round(time.Second), k.Logs.RunFile(c.id, CheckSpecsResultFileName(d.attempt)), k.Logs.RunFile(c.id, CheckSpecsOutFileName(d.attempt)), c.id)
 		}
 		select {
 		case <-ctx.Done():
@@ -284,7 +284,7 @@ func (d detachedSpecs) wait(ctx context.Context, run partRun) string {
 		case <-tick.C:
 			if k.Out != nil {
 				fmt.Fprintf(k.Out, "  note    the rig's changed specs are running on %s, since %s (%s ago); %s left in this call\n",
-					k.Host, run.started.UTC().Format("15:04:05Z"), time.Since(run.started).Round(time.Second), gateWaited(fit.left()))
+					k.Host, run.started.UTC().Format("15:04:05Z"), k.callNow().Sub(run.started).Round(time.Second), gateWaited(fit.left()))
 			}
 		case <-time.After(k.specsPoll()):
 		}
