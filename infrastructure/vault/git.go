@@ -103,6 +103,52 @@ func (v *Vault) Uncommitted(ctx context.Context) ([]string, error) {
 	return changedPaths(out), nil
 }
 
+var _ application.VaultDamageReader = (*Vault)(nil)
+
+// Damage implements application.VaultDamageReader: it tells a repository that is
+// broken from one that merely holds edits (mw-gq6.1167). It asks two cheap
+// things only, since it is asked of a vault that is already refusing every tick:
+// whether HEAD's tree can be read (a corrupt pack leaves it unreadable, and
+// then every tracked file reads as a staged addition), and whether a rebase
+// stopped and was never ended (rebase-merge or rebase-apply in the git dir).
+func (v *Vault) Damage(ctx context.Context) (application.VaultDamage, error) {
+	var damage application.VaultDamage
+	if _, err := v.git(ctx, "cat-file", "-p", "HEAD^{tree}"); err != nil {
+		if ctx.Err() != nil {
+			return damage, err
+		}
+		damage.Corrupt = oneLineOf(err.Error())
+	}
+	gitDir, err := v.git(ctx, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		if ctx.Err() != nil {
+			return damage, err
+		}
+		if damage.Corrupt == "" {
+			damage.Corrupt = oneLineOf(err.Error())
+		}
+		return damage, nil
+	}
+	for _, stopped := range []string{"rebase-merge", "rebase-apply"} {
+		if _, err := os.Stat(filepath.Join(strings.TrimSpace(gitDir), stopped)); err == nil {
+			damage.Rebasing = true
+		}
+	}
+	return damage, nil
+}
+
+// oneLineOf is the last non-empty line of what git said, which is where it puts
+// the reason; the lines before it are the command and the directory.
+func oneLineOf(said string) string {
+	lines := strings.Split(strings.TrimSpace(said), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
 // changedPaths reads the paths out of git status --porcelain.
 func changedPaths(out string) []string {
 	var changed []string
