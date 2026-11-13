@@ -139,20 +139,7 @@ func (n Next) workflowScopeGuard(ctx context.Context, c *closeOut, report *NextR
 // given back, else the next tick would hand it to a host that lacks the scope
 // again.
 func (n Next) workflowScopeHandOver(ctx context.Context, c *closeOut, report *NextReport, why string) (said string, repathed bool) {
-	causes := map[int]string{}
-	for at, class := range c.detail.AttemptCauses {
-		causes[at] = class
-	}
-	causes[c.attempt()] = CauseTooling
-	fields := map[string]string{
-		CauseField:         CauseTooling,
-		CauseWhyField:      firstLine(why),
-		AttemptCausesField: attemptCausesText(causes),
-	}
-	named := fmt.Sprintf("Attempt %d is named %s (mw cause), not the story's own: it is not counted against its attempts.", c.attempt(), CauseTooling)
-	if err := writeRetrying(ctx, n, report, "the cause of "+c.id, func() error { return n.Tracker.SetStoryMetadata(ctx, c.id, fields) }); err != nil {
-		named = fmt.Sprintf("Attempt %d could not be named %s (mw cause): %v.", c.attempt(), CauseTooling, err)
-	}
+	named := n.nameToolingCause(ctx, c, report, why)
 
 	home := ""
 	if n.Home != nil {
@@ -173,4 +160,25 @@ func (n Next) workflowScopeHandOver(ctx context.Context, c *closeOut, report *Ne
 		return fmt.Sprintf("%s It could not be re-pathed to host=%s: %v; run mw path set %s host=%s.", named, home, err, c.id, home), false
 	}
 	return fmt.Sprintf("%s The story is re-pathed to host=%s, the home, whose credential has the workflow scope, and is given back for it to take.", named, home), true
+}
+
+// nameToolingCause names the close-out's attempt tooling (mw cause), so that it
+// is not the story's own and is not counted against its attempts, and returns
+// the sentence that says so, or says it could not be done. The stop that follows
+// stands either way.
+func (n Next) nameToolingCause(ctx context.Context, c *closeOut, report *NextReport, why string) string {
+	causes := map[int]string{}
+	for at, class := range c.detail.AttemptCauses {
+		causes[at] = class
+	}
+	causes[c.attempt()] = CauseTooling
+	fields := map[string]string{
+		CauseField:         CauseTooling,
+		CauseWhyField:      firstLine(why),
+		AttemptCausesField: attemptCausesText(causes),
+	}
+	if err := writeRetrying(ctx, n, report, "the cause of "+c.id, func() error { return n.Tracker.SetStoryMetadata(ctx, c.id, fields) }); err != nil {
+		return fmt.Sprintf("Attempt %d could not be named %s (mw cause): %v.", c.attempt(), CauseTooling, err)
+	}
+	return fmt.Sprintf("Attempt %d is named %s (mw cause), not the story's own: it is not counted against its attempts.", c.attempt(), CauseTooling)
 }
