@@ -329,17 +329,13 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 		if way := harnessWayOut(r, work); way != "" {
 			text += ". " + way
 		}
-		// The rig, its hold and the stories ready are the alarm; how long it has
-		// lasted, and the reason's words, differ from one host's reading to the next.
-		// A wait is one fact whichever of the waiting holds it is held by, so its
-		// identity leaves the hold out: the hold flipping from no room to the cap and
-		// back is not news (mw-gq6.984).
+		// The rig and the stories ready are the alarm; how long it has lasted, the
+		// hold and the reason's words differ from one host's reading to the next. A
+		// starved rig is one fact whatever it is held by, so its identity leaves the
+		// hold out: the hold flipping from no room to no grist key and back is not
+		// news (mw-gq6.984, mw-gq6.1194). Whether it is a wait or a fault is Wait.
 		wait := holdIsAWait(r)
-		parts := []string{rig, r.Hold}
-		if wait {
-			parts = []string{rig}
-		}
-		identity := strings.Join(append(parts, slices.Sorted(slices.Values(ready))...), "\t")
+		identity := strings.Join(append([]string{rig}, slices.Sorted(slices.Values(ready))...), "\t")
 		alarms = append(alarms, DamperAlarm{Principle: StarvedPrinciple, Text: text, Beads: ready, Identity: identity, Wait: wait})
 	}
 	return alarms
@@ -639,18 +635,12 @@ func (c *StarvedRigCheck) Probe(ctx context.Context) (Verdict, string) {
 			faults = append(faults, a)
 		}
 	}
+	c.pruneMailed(ctx, alarms)
 	waitErr := c.tellOfWaits(ctx, waits)
 	if refusedErr := c.tellOfRefused(ctx); waitErr == nil {
 		waitErr = refusedErr
 	}
 	if len(faults) == 0 {
-		// The alarm has cleared: the next one is news again, to whichever host sees
-		// it first. A dry run changes nothing.
-		if c.Mailed != nil && !DoctorDryRun(ctx) {
-			if kept, _ := c.Mailed.Note(ctx, StarvedMailedKey); kept != "" {
-				_ = c.Mailed.ClearNote(ctx, StarvedMailedKey)
-			}
-		}
 		switch {
 		case waitErr != nil:
 			return DoctorCannotTell, waitErr.Error()
@@ -676,32 +666,105 @@ func rigNames(alarms []DamperAlarm) []string {
 	return rigs
 }
 
-// tellOfWaits mails the Mayor of the rigs waiting for room, once for these
-// alarms whichever host sees them first, and clears what it kept when none
-// waits, so a wait raised again is news again. A dry run, or no Mailed, mails
-// nothing and changes nothing.
-func (c *StarvedRigCheck) tellOfWaits(ctx context.Context, waits []DamperAlarm) error {
-	if c.Mailed == nil || DoctorDryRun(ctx) {
+// mailedLines are the identities a note holds, one a line.
+func mailedLines(note string) []string {
+	if note == "" {
 		return nil
 	}
-	if len(waits) == 0 {
-		if kept, _ := c.Mailed.Note(ctx, StarvedWaitMailedKey); kept != "" {
-			_ = c.Mailed.ClearNote(ctx, StarvedWaitMailedKey)
+	return strings.Split(note, "\n")
+}
+
+// mailedSoFar is every identity either mailed-note holds: a starved rig is
+// mailed once whether it was a wait or a fault when the Mayor was told, so a hold
+// flipping between the two is not news (mw-gq6.1194).
+func (c *StarvedRigCheck) mailedSoFar(ctx context.Context) map[string]bool {
+	told := map[string]bool{}
+	for _, key := range []string{StarvedMailedKey, StarvedWaitMailedKey} {
+		kept, _ := c.Mailed.Note(ctx, key)
+		for _, line := range mailedLines(kept) {
+			told[line] = true
 		}
+	}
+	return told
+}
+
+// pruneMailed drops from both mailed-notes the identities of rigs no longer
+// starved, so a rig that starves again after its alarm cleared is news again,
+// whichever host sees it first. An identity still starved stays, whichever note
+// holds it. A dry run, or no Mailed, changes nothing.
+func (c *StarvedRigCheck) pruneMailed(ctx context.Context, alarms []DamperAlarm) {
+	if c.Mailed == nil || DoctorDryRun(ctx) {
+		return
+	}
+	current := map[string]bool{}
+	for _, a := range alarms {
+		current[a.Identity] = true
+	}
+	for _, key := range []string{StarvedMailedKey, StarvedWaitMailedKey} {
+		kept, _ := c.Mailed.Note(ctx, key)
+		if kept == "" {
+			continue
+		}
+		var still []string
+		for _, line := range mailedLines(kept) {
+			if current[line] {
+				still = append(still, line)
+			}
+		}
+		if len(still) == len(mailedLines(kept)) {
+			continue
+		}
+		if len(still) == 0 {
+			_ = c.Mailed.ClearNote(ctx, key)
+		} else {
+			_ = c.Mailed.SetNote(ctx, key, strings.Join(still, "\n"))
+		}
+	}
+}
+
+// tellOfNew mails the Mayor of those of these alarms he was not told of yet, in
+// either note, and keeps their identities in the note under key first (a host a
+// few seconds behind sees the claim); the claim is dropped again if the mail
+// fails. lead starts the mail. Nothing is sent when every alarm was told of.
+func (c *StarvedRigCheck) tellOfNew(ctx context.Context, key string, alarms []DamperAlarm, lead string) error {
+	if c.Mailed == nil {
+		return c.mailMayor(ctx, alarms, lead)
+	}
+	told := c.mailedSoFar(ctx)
+	var fresh []DamperAlarm
+	for _, a := range alarms {
+		if !told[a.Identity] {
+			fresh = append(fresh, a)
+		}
+	}
+	if len(fresh) == 0 {
 		return nil
 	}
-	mailed := starvedMailed(waits)
-	if kept, err := c.Mailed.Note(ctx, StarvedWaitMailedKey); err == nil && kept == mailed {
-		return nil
+	before, _ := c.Mailed.Note(ctx, key)
+	claimed := append(mailedLines(before), mailedLines(starvedMailed(fresh))...)
+	slices.Sort(claimed)
+	if err := c.Mailed.SetNote(ctx, key, strings.Join(claimed, "\n")); err != nil {
+		return fmt.Errorf("what the Mayor is mailed of the starved rigs could not be kept: %w", err)
 	}
-	if err := c.Mailed.SetNote(ctx, StarvedWaitMailedKey, mailed); err != nil {
-		return fmt.Errorf("what the Mayor is mailed of the rigs waiting for room could not be kept: %w", err)
-	}
-	err := c.mailMayor(ctx, waits, "Waiting for room on the host, not a fault: the host has no room for a Builder (its load is over its cores, or its sessions are all taken by running Builders or cut while a tutor is in use), and a story starts when that eases.")
+	err := c.mailMayor(ctx, fresh, lead)
 	if err != nil {
-		_ = c.Mailed.ClearNote(ctx, StarvedWaitMailedKey)
+		if before == "" {
+			_ = c.Mailed.ClearNote(ctx, key)
+		} else {
+			_ = c.Mailed.SetNote(ctx, key, before)
+		}
 	}
 	return err
+}
+
+// tellOfWaits mails the Mayor of the rigs waiting for room, once a starving
+// whichever host sees them first. A dry run, or no Mailed, mails nothing and
+// changes nothing.
+func (c *StarvedRigCheck) tellOfWaits(ctx context.Context, waits []DamperAlarm) error {
+	if c.Mailed == nil || DoctorDryRun(ctx) || len(waits) == 0 {
+		return nil
+	}
+	return c.tellOfNew(ctx, StarvedWaitMailedKey, waits, "Waiting for room on the host, not a fault: the host has no room for a Builder (its load is over its cores, or its sessions are all taken by running Builders or cut while a tutor is in use), and a story starts when that eases.")
 }
 
 // mailMayor sends the Mayor one mail of these alarms, one line each, after lead.
@@ -729,20 +792,7 @@ func (c *StarvedRigCheck) Cure(ctx context.Context) error {
 	}
 	// Another host that raised this very alarm may have mailed it already; the
 	// claim is written before the mail so that one a few seconds behind sees it.
-	mailed := starvedMailed(c.found)
-	if c.Mailed != nil {
-		if kept, err := c.Mailed.Note(ctx, StarvedMailedKey); err == nil && kept == mailed {
-			return nil
-		}
-		if err := c.Mailed.SetNote(ctx, StarvedMailedKey, mailed); err != nil {
-			return fmt.Errorf("what the Mayor is mailed of the starved rigs could not be kept: %w", err)
-		}
-	}
-	err := c.mailMayor(ctx, c.found, "")
-	if err != nil && c.Mailed != nil {
-		_ = c.Mailed.ClearNote(ctx, StarvedMailedKey)
-	}
-	return err
+	return c.tellOfNew(ctx, StarvedMailedKey, c.found, "")
 }
 
 // Damper implements DoctorCheck: one mail an episode.
