@@ -110,3 +110,38 @@ func TestLandedHowToFindsTheSectionInTheMemoryOfAnOlderRun(t *testing.T) {
 		t.Errorf("expected the kept section, got %q", got)
 	}
 }
+
+// mw-jpxyd3's Builder comment: the first mention of the words is a prose
+// mention, the heading comes further down.
+func TestHowToCheckReadsTheHeadingNotAnEarlierMention(t *testing.T) {
+	text := "Built it.\n\nNOT checked on a real Android phone (only the Governor has one): see HOW TO CHECK IT.\n\nWhat's new: Fixed: the card. " + strings.Repeat("It reads the index and keeps the last row. ", 8) + "\n\nHOW TO CHECK IT, for the Governor:\n1. Open Legend.\n2. See the card.\n\nFor the rig memory: nothing"
+	if got, want := howToCheck([]Comment{{Text: text}}), "1. Open Legend.\n2. See the card."; got != want {
+		t.Errorf("expected the steps of the heading, got %q", got)
+	}
+}
+
+// mw-qtu3zvz.59.2's Builder comment: a paragraph stands between the heading and
+// step 1.
+func TestHowToCheckReadsStepsAfterAParagraph(t *testing.T) {
+	text := "Built it.\n\nHOW TO CHECK IT, for the Governor:\n\nThis shows only once the live sermon index has been updated.\n\n1. With the phone online, open Lampas.\n2. See the sermon.\n\nFor the rig memory: nothing"
+	if got, want := howToCheck([]Comment{{Text: text}}), "1. With the phone online, open Lampas.\n2. See the sermon."; got != want {
+		t.Errorf("expected the steps after the paragraph, got %q", got)
+	}
+	for _, only := range []string{
+		"see HOW TO CHECK IT.\n\nLater: HOW TO CHECK IT is in the closing comment).",
+		"HOW TO CHECK IT, for the Governor:\n\nA paragraph and no steps at all.",
+	} {
+		if got := howToCheck([]Comment{{Text: only}}); got != "" {
+			t.Errorf("mentions with no numbered step must give nothing, got %q for %q", got, only)
+		}
+	}
+}
+
+// The heading the Mayor's mail asks for carries a clock whose colon is not the
+// heading's.
+func TestHowToCheckReadsAHeadingWithAClock(t *testing.T) {
+	text := "HOW TO CHECK IT (for the Governor), added by the Deputy for the Mayor 2026-11-13 03:10Z: 1. Open Legend.\n2. See the card."
+	if got, want := howToCheck([]Comment{{Text: text}}), "1. Open Legend.\n2. See the card."; got != want {
+		t.Errorf("expected the steps from 1., got %q", got)
+	}
+}

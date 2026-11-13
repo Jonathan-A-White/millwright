@@ -1332,9 +1332,66 @@ func howToAfterHeading(text string) (string, bool) {
 			return after, true
 		}
 	}
-	if at := strings.Index(head, ":"); at >= 0 {
+	if at := headingColon(head); at >= 0 {
 		after := trim(text[at+1:])
-		return after, viewHowToSteps.MatchString(after)
+		if viewHowToSteps.MatchString(after) {
+			return after, true
+		}
+		// A heading line, then a paragraph, a blank line and the steps.
+		if !strings.Contains(text[:at], "\n") {
+			if after, ok := stepsAfterParagraph(text[at+1:]); ok {
+				return after, true
+			}
+		}
+		return after, false
+	}
+	return "", false
+}
+
+// headingColon is the index in head of the colon that ends a heading's
+// qualifier: the first one that is not inside a clock ("03:10Z"), where a digit
+// stands on both sides; -1 when there is none.
+func headingColon(head string) int {
+	for at := 0; at < len(head); at++ {
+		if head[at] != ':' {
+			continue
+		}
+		if at > 0 && at+1 < len(head) && isDigitByte(head[at-1]) && isDigitByte(head[at+1]) {
+			continue
+		}
+		return at
+	}
+	return -1
+}
+
+func isDigitByte(b byte) bool { return b >= '0' && b <= '9' }
+
+// viewHowToParagraphLimit is how many bytes of prose may stand between a
+// heading and its first numbered step.
+const viewHowToParagraphLimit = 800
+
+// viewBlankLine is the gap between two paragraphs of a comment.
+var viewBlankLine = regexp.MustCompile(`\r?\n[ \t]*\r?\n`)
+
+// stepsAfterParagraph is rest, which follows a heading's colon, without the
+// prose that opens it, when that prose (within viewHowToParagraphLimit bytes,
+// with no heading line in it) ends in a blank line and numbered steps follow.
+func stepsAfterParagraph(rest string) (string, bool) {
+	limit := rest
+	if len(limit) > viewHowToParagraphLimit {
+		limit = limit[:viewHowToParagraphLimit]
+	}
+	for _, loc := range viewBlankLine.FindAllStringIndex(limit, -1) {
+		before := rest[:loc[0]]
+		for i, line := range strings.Split(before, "\n") {
+			if i > 0 && isHeadingLine(line) {
+				return "", false
+			}
+		}
+		after := strings.TrimLeft(rest[loc[1]:], " \t\r\n")
+		if viewHowToSteps.MatchString(after) {
+			return after, true
+		}
 	}
 	return "", false
 }
@@ -1350,6 +1407,22 @@ func howToIsInternal(howTo string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(howTo)), "internal")
 }
 
+// howToAfterMarker is what follows the first mention of HOW TO CHECK IT in
+// text whose heading goes on with steps (howToAfterHeading): a mention before
+// the heading ("see HOW TO CHECK IT.") is passed over for a later one.
+func howToAfterMarker(text string) (string, bool) {
+	for rest := text; ; {
+		_, after, found := strings.Cut(rest, viewHowToMarker)
+		if !found {
+			return "", false
+		}
+		if section, ok := howToAfterHeading(after); ok {
+			return section, true
+		}
+		rest = after
+	}
+}
+
 // howToCheck is the section after HOW TO CHECK IT in the newest of comments
 // (oldest first) whose heading goes on with numbered steps or the Internal
 // line, up to the next heading or viewHowToLimit runes; "" when no comment
@@ -1358,11 +1431,7 @@ func howToIsInternal(howTo string) bool {
 // Markdown image links stay in it, so a published screenshot shows on the card.
 func howToCheck(comments []Comment) string {
 	for i := len(comments) - 1; i >= 0; i-- {
-		_, after, found := strings.Cut(comments[i].Text, viewHowToMarker)
-		if !found {
-			continue
-		}
-		after, steps := howToAfterHeading(after)
+		after, steps := howToAfterMarker(comments[i].Text)
 		if !steps {
 			continue
 		}
