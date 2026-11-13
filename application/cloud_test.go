@@ -1772,3 +1772,70 @@ func TestStatusNamesTheFeeLimitTheWayToRaiseItAndWhenABoxIsTriedAgain(t *testing
 		}
 	}
 }
+
+// A box that cannot be reached for its Claude Code or its [session] deny is a
+// fault in the book, a move the first time, said without a move after, and
+// shown by mw status (mw-gq6.1174).
+func TestABoxWhoseHarnessCannotBeReachedIsSaidInTheBook(t *testing.T) {
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	cloud := &apptest.FakeCloud{Unreachable: map[string]bool{"cloud1": true}}
+	check := func(box application.CloudBox) (application.CloudReport, *apptest.FakeCloudBook) {
+		box.Up, box.Made, box.Dispatched = now.Add(-30*time.Minute), now.Add(-30*time.Minute), now.Add(-20*time.Minute)
+		box.Cap = 2
+		book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: []application.CloudBox{box}}}
+		report, err := application.CloudCheck{
+			Work: apptest.NewFakeTracker(), Provider: cloud, Book: book, Host: "desktop",
+			Plan: cloudPlan, Now: func() time.Time { return now },
+			HarnessVersion: func(context.Context) (string, error) { return "2.1.322", nil },
+			SessionDeny:    func(context.Context) ([]string, error) { return homeDeny, nil },
+		}.Run(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return report, book
+	}
+	count := func(report application.CloudReport, part string) int {
+		n := 0
+		for _, m := range report.Moves {
+			if strings.Contains(m, part) {
+				n++
+			}
+		}
+		return n
+	}
+	report, book := check(application.CloudBox{Name: "cloud1"})
+	box := book.State.Boxes[0]
+	if !strings.Contains(box.HarnessFault, "Claude Code") || !strings.Contains(box.HarnessFault, "no route") {
+		t.Errorf("expected the book to keep why the Claude Code could not be set, got %q", box.HarnessFault)
+	}
+	if !strings.Contains(box.SessionDenyFault, "session.deny") || !strings.Contains(box.SessionDenyFault, "no route") {
+		t.Errorf("expected the book to keep why session.deny could not be set, got %q", box.SessionDenyFault)
+	}
+	if count(report, "Claude Code") != 1 || count(report, "session.deny") != 1 {
+		t.Errorf("expected each failure a move the first time, got %v", report.Moves)
+	}
+	// The next check says it again, and is no new move.
+	report, book = check(book.State.Boxes[0])
+	if count(report, "Claude Code") != 0 || count(report, "session.deny") != 0 {
+		t.Errorf("expected the same failures no move twice, got %v", report.Moves)
+	}
+	// mw status shows both.
+	tracker := apptest.NewFakeTracker()
+	status, err := application.Status{Tracker: tracker, Notes: tracker, Host: "laptop", Seat: "builder",
+		Cloud: book, CloudPlan: cloudPlan, Now: func() time.Time { return now }}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := status.String()
+	for _, want := range []string{"could not read the Claude Code of cloud1", "could not set session.deny on cloud1"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("expected %q in mw status:\n%s", want, text)
+		}
+	}
+	// A box reached again has both faults cleared.
+	cloud.Unreachable = nil
+	_, book = check(book.State.Boxes[0])
+	if box := book.State.Boxes[0]; box.HarnessFault != "" || box.SessionDenyFault != "" {
+		t.Errorf("expected the faults cleared once the box is reached, got %q / %q", box.HarnessFault, box.SessionDenyFault)
+	}
+}
