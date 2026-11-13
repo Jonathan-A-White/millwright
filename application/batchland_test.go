@@ -1026,9 +1026,16 @@ const aBatchTesterSteps = "HOW TO CHECK IT, for the Governor:\n1. Open the page.
 // batch merged, and returns what it said.
 func aBatchLandedWithTesters(t *testing.T, trial application.TesterTrial, tracker application.WorkTracker, rules application.EpicRules, landed ...string) *application.NextReport {
 	t.Helper()
+	path := domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelOpus, Effort: domain.EffortHigh}
+	return aBatchLandedOnPathWithTesters(t, trial, tracker, rules, path, landed...)
+}
+
+// aBatchLandedOnPathWithTesters is aBatchLandedWithTesters for stories whose
+// merged path is the one given.
+func aBatchLandedOnPathWithTesters(t *testing.T, trial application.TesterTrial, tracker application.WorkTracker, rules application.EpicRules, path domain.Path, landed ...string) *application.NextReport {
+	t.Helper()
 	ctx := context.Background()
 	at := time.Date(2026, 11, 4, 16, 0, 0, 0, time.UTC)
-	path := domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelOpus, Effort: domain.EffortHigh}
 	report := &application.BatchReport{Rig: "lampas", Number: 379, Target: "main", Base: "origin/main", Commit: "abc1234def5678"}
 	for _, id := range landed {
 		mustDo(t, tracker.ClaimStory(ctx, id))

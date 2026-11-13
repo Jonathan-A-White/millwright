@@ -365,7 +365,10 @@ func (n Next) springTester(ctx context.Context, c *closeOut, report *NextReport,
 	}
 
 	title := strings.Join(strings.Fields(c.detail.Story.Title), " ")
-	path := c.path
+	// The landed story's size, bump, callers_ok and files are its own, not the
+	// Tester's (mw-gq6.1227).
+	path := c.path.WithoutSourceKeys()
+	path.Files = ""
 	path.Model, path.Effort, path.Formula = n.Tester.Model, n.Tester.Effort, TesterFormula
 	id, err := n.Tracker.CreateStory(ctx, NewStory{
 		EpicID:     c.detail.EpicID,

@@ -204,7 +204,7 @@ func (n Next) landedWithoutACs(ctx context.Context, c *closeOut, report *NextRep
 		Acceptance: fmt.Sprintf("1. The criterion %s of %s is met, shown by running what it names.\n"+
 			"Sweep: none, because this bug is the one unmet criterion of one landing and mw next files it from the closing comment.", found.Words(), c.id),
 		Priority:  2,
-		Overrides: c.path,
+		Overrides: c.path.WithoutSourceKeys(),
 		Labels:    []string{LabelBug, LabelFriction},
 	}
 	var id string
