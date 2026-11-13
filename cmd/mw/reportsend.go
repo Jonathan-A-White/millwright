@@ -86,7 +86,8 @@ func newReportSendCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			gateway := mwGateway(dir, here)
+			gateway, stop := reportTracker(dir, here, cmd.ErrOrStderr())
+			defer stop()
 			review, err := damperSurvey(gateway, dir, here)
 			if err != nil {
 				return err

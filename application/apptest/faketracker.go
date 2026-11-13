@@ -1199,6 +1199,7 @@ func (f *FakeTracker) LoneStories(_ context.Context) ([]application.StoryDetail,
 func (f *FakeTracker) StoriesSince(_ context.Context, since time.Time) ([]application.StoryDetail, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.count("StoriesSince")
 	if f.Err != nil {
 		return nil, f.Err
 	}

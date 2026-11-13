@@ -3,12 +3,14 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/commandlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -125,7 +127,8 @@ func newReportCmd() *cobra.Command {
 				return err
 			}
 			files := mwVault(dir, here)
-			gateway := mwGateway(dir, here)
+			gateway, stop := reportTracker(dir, here, cmd.ErrOrStderr())
+			defer stop()
 			review, err := damperSurvey(gateway, dir, here)
 			if err != nil {
 				return err
@@ -203,4 +206,14 @@ func investShareSettings() (share, shareMin, shareMax float64, err error) {
 		return 0, 0, 0, err
 	}
 	return share, shareMin, shareMax, nil
+}
+
+// reportTracker is the tracker mw report and mw report send read from: the
+// status tracker, which keeps what the run reads of bd. The list of every bead
+// is 120 MB on the live vault and 40 s or more of bd under load, and the report
+// read it afresh for its stories since and for each read of the damper counts,
+// over 5 minutes at load 15 with nothing printed (mw-6ww.175.24); now it is
+// read once, over the kept connection where there is a server to reach.
+func reportTracker(dir, host string, said io.Writer) (*beads.Gateway, func()) {
+	return keptStatusTracker(dir, host, said)
 }
