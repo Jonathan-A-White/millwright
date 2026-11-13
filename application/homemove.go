@@ -685,6 +685,12 @@ func (r *homeMoveRun) asideText() string {
 
 func (r *homeMoveRun) vault(ctx context.Context) error {
 	m := r.m
+	// A stopped rebase leaves the checkout half-way, and a pull --rebase onto it
+	// makes it worse: the move says so and leaves the vault alone (mw-gq6.1233).
+	if damage, found := stoppedRebaseOf(ctx, m.Vault); found {
+		return fmt.Errorf("%s on this host, so the vault was not pulled and the home file not written: %s",
+			damage.Sentence(), damage.Cure(m.VaultDir, m.Host))
+	}
 	pulled, err := retryPastASiblingsWrite(ctx, sleepFor, m.Vault.Pull)
 	if err != nil {
 		return fmt.Errorf("bringing the vault level (git pull --rebase): %w", err)

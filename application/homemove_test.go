@@ -900,3 +900,22 @@ func TestAFailingUserStepStopsBeforeBootstrapNamingTheUserAndTheWayBack(t *testi
 	}
 	mustContain(t, "ways back", out.String(), "Ways back", "systemctl --user stop dolt-beads")
 }
+
+// A rebase stopped in the vault on the target host leaves the checkout half-way:
+// the move refuses naming the rebase before it pulls onto it (mw-gq6.1233).
+func TestAHomeMoveOnAStoppedRebase(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.Damaged = application.VaultDamage{Rebasing: true}
+
+	err := move(w, out).Run(context.Background())
+
+	if err == nil || !strings.Contains(err.Error(), "rebase") {
+		t.Fatalf("expected the move to refuse naming the stopped rebase, got %v", err)
+	}
+	for _, call := range w.calls {
+		if call == "git pull" || call == "write home" || call == "git push" {
+			t.Errorf("expected nothing of the vault step to run on a stopped rebase, but %q did", call)
+		}
+	}
+	mustContain(t, "refusal", err.Error(), "git -C "+vaultDir+" rebase --abort")
+}

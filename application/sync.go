@@ -1213,13 +1213,28 @@ func (s Sync) readDamage(ctx context.Context, report *SyncReport) {
 // every sync: it asks only whether a rebase stopped when the vault can say that
 // without checking the object store, and the whole damage when it cannot.
 func (s Sync) readStoppedRebase(ctx context.Context, report *SyncReport) {
-	if reader, ok := s.Vault.(VaultRebaseReader); ok {
-		if rebasing, err := reader.StoppedRebase(ctx); err == nil && rebasing {
-			report.Damage = VaultDamage{Rebasing: true}
-		}
-		return
+	if damage, ok := stoppedRebaseOf(ctx, s.Vault); ok {
+		report.Damage = damage
 	}
-	s.readDamage(ctx, report)
+}
+
+// stoppedRebaseOf is the damage a vault with a clean status is found to have
+// before it is pulled: a rebase that stopped, read the cheap way when the vault
+// can say it so, else through its whole damage read. A vault that cannot say is
+// judged sound (ok false), as a sync always judged it.
+func stoppedRebaseOf(ctx context.Context, vault VaultFiles) (VaultDamage, bool) {
+	if reader, ok := vault.(VaultRebaseReader); ok {
+		if rebasing, err := reader.StoppedRebase(ctx); err == nil && rebasing {
+			return VaultDamage{Rebasing: true}, true
+		}
+		return VaultDamage{}, false
+	}
+	if reader, ok := vault.(VaultDamageReader); ok {
+		if damage, err := reader.Damage(ctx); err == nil && damage.Any() {
+			return damage, true
+		}
+	}
+	return VaultDamage{}, false
 }
 
 // siblingWriteWaits are the pauses before each retry of a pull or push that git
