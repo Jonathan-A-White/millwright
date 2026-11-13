@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -63,17 +64,16 @@ func (c *callClock) Now() time.Time {
 	return now
 }
 
-// PassOnceRead moves the clock on by d once a call has read it, which is to say
-// once the call has begun, and the call's own waiting is under way: a wait that
-// the clock is moved by must not be over before the call began.
-func (c *callClock) PassOnceRead(d time.Duration) {
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
-		c.mu.Lock()
-		read := c.reads > 0
-		c.mu.Unlock()
-		if read {
-			break
-		}
+// PassOnceQueued moves the clock on by d once the call is queued (queued, the
+// count of tickets in the queue it waits in, is at least one), which is to say once
+// the call has read the clock for the start of its call and is waiting in line: a
+// wait that the clock is moved by must not be over before the call is waiting, and
+// a call read after the move would count the move as time before it began. The
+// reads of the clock alone do not say so (the first is the start of the check's
+// deadline, ahead of the start of its call), nor does a sleep; the ticket does
+// (mw-gq6.1184).
+func (c *callClock) PassOnceQueued(d time.Duration, queued func() int) {
+	for deadline := time.Now().Add(10 * time.Second); queued() < 1 && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
 	}
 	c.Pass(d)
 }
@@ -83,6 +83,35 @@ func (c *callClock) Pass(d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.at = c.at.Add(d)
+}
+
+// The clock is not moved by the queued-wait helper until a ticket is in place, so
+// a call cannot be handed a move it counts as time before it began (mw-gq6.1184).
+func TestTheCallClockIsMovedOnlyOnceATicketIsQueued(t *testing.T) {
+	clock := newCallClock()
+	var tickets atomic.Int32
+	moved := make(chan struct{})
+	go func() {
+		clock.PassOnceQueued(time.Hour, func() int { return int(tickets.Load()) })
+		close(moved)
+	}()
+	select {
+	case <-moved:
+		t.Fatal("expected the clock to stand still while nothing was queued")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if got := clock.Now(); !got.Equal(newCallClock().at) {
+		t.Fatalf("expected the clock not to have moved, it reads %s", got)
+	}
+	tickets.Store(1)
+	select {
+	case <-moved:
+	case <-time.After(10 * time.Second):
+		t.Fatal("expected the clock to be moved once a ticket was queued")
+	}
+	if got := clock.Now(); got.Sub(newCallClock().at) != time.Hour {
+		t.Errorf("expected the clock an hour on, it reads %s", got)
+	}
 }
 
 func newWholeCheckBesideTheGateLock(t *testing.T, checks application.Checks) *aWholeCheckBesideTheHostsGateLock {
@@ -389,7 +418,10 @@ func TestAWholeChecksWaitForTheGateLockAndForACalmHostAreOneDeadlineAndTheSecond
 	if !lock.bounded {
 		t.Fatalf("expected the lock wait to have the check's deadline, its context had none")
 	}
-	if left := lock.deadline.Sub(lock.asked); left > deadline || left < deadline-lock.asked.Sub(started) {
+	// The budget the check hands the wait is rounded to the millisecond, so it may
+	// be up to half a millisecond under: a millisecond is allowed for it, as the
+	// calm wait's is (mw-gq6.1184).
+	if left := lock.deadline.Sub(lock.asked); left > deadline || left < deadline-lock.asked.Sub(started)-time.Millisecond {
 		t.Errorf("expected the lock wait to end at the check's one deadline %s, it was given %s (asked %s into the check)",
 			deadline, left, lock.asked.Sub(started))
 	}
@@ -771,7 +803,7 @@ func TestAForegroundWholeCheckThatGetsTheLockTooLateForTheGateKeepsItsPlaceAndSa
 		t.Fatal(err)
 	}
 	go func() {
-		w.clock.PassOnceRead(1500 * time.Millisecond)
+		w.clock.PassOnceQueued(1500*time.Millisecond, w.queuedGate)
 		closeOut.Holding.Release(context.Background())
 	}()
 
@@ -1121,7 +1153,7 @@ func TestAForegroundPartThatGetsTheMergeSlotTooLateForItKeepsItsPlaceAndSaysToRu
 		t.Fatal(err)
 	}
 	go func() {
-		p.clock.PassOnceRead(3 * time.Second)
+		p.clock.PassOnceQueued(3*time.Second, p.queued)
 		landing.Release(context.Background())
 	}()
 
