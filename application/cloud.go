@@ -1958,11 +1958,13 @@ func (p *cloudPass) refuse(ctx context.Context, box CloudBox, why, story string,
 	return false
 }
 
-// repath sets host=auto on every open and deferred story whose path names the
-// box, a box that is gone: a story pathed to a host that is not there is never
-// dispatched, so it would wait for ever. A claimed story is left to its
-// claim. It says each story moved, as a cloud event; a story that cannot be
-// moved fails the check with its id, for the Mayor to re-path by hand.
+// repath sets host=auto on every open story whose path names the box, a box
+// that is gone: a story pathed to a host that is not there is never
+// dispatched, so it would wait for ever. A deferred story is the Mayor's and is
+// left alone (mw-gq6.1234); once he releases it, a dispatch tick re-paths it.
+// A claimed story is left to its claim. It says each story moved, as a cloud
+// event; a story that cannot be moved fails the check with its id, for the
+// Mayor to re-path by hand.
 func (p *cloudPass) repath(ctx context.Context, name, why string) {
 	if p.repathed == nil {
 		p.repathed = map[string]bool{}
@@ -1973,7 +1975,7 @@ func (p *cloudPass) repath(ctx context.Context, name, why string) {
 		return
 	}
 	p.handBack(ctx, stories, name, why)
-	p.repathFrom(ctx, stories, name, false)
+	p.repathFrom(ctx, stories, name)
 }
 
 // handBack gives back every claim on a box that is gone, however its session
@@ -2094,15 +2096,14 @@ func (p *cloudPass) pathedStories(ctx context.Context, name string) (stories []S
 	return stories, true
 }
 
-// repathFrom is repath over stories already read. A box that was destroyed now
-// re-paths the Mayor's held stories with the rest; keepHeld leaves them as
-// they are, for a box that was gone long ago: a dispatch tick re-paths such a
-// story once it is released (mw-gq6.1205).
-func (p *cloudPass) repathFrom(ctx context.Context, stories []StoryDetail, name string, keepHeld bool) {
+// repathFrom is repath over stories already read. The Mayor's held stories are
+// left as they are, whether the box was destroyed now or long ago: a dispatch
+// tick re-paths such a story once it is released (mw-gq6.1205, mw-gq6.1234).
+func (p *cloudPass) repathFrom(ctx context.Context, stories []StoryDetail, name string) {
 	var moved, stuck []string
 	for _, story := range stories {
 		status := strings.ToLower(strings.TrimSpace(story.Status))
-		if story.IsEpic || story.Merged().Host != name || (status != StatusOpen && (status != StatusHeld || keepHeld)) {
+		if story.IsEpic || story.Merged().Host != name || status != StatusOpen {
 			continue
 		}
 		if err := p.check.Stories.SetStoryMetadata(ctx, story.Story.ID, map[string]string{"host": domain.HostAuto}); err != nil {
@@ -2143,7 +2144,7 @@ func (p *cloudPass) repathGone(ctx context.Context, work WorkInHand) {
 	}
 	slices.Sort(gone)
 	for _, name := range gone {
-		p.repathFrom(ctx, stories, name, true)
+		p.repathFrom(ctx, stories, name)
 	}
 }
 
