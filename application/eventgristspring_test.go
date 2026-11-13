@@ -461,3 +461,31 @@ func TestGristWatchTimesTheReadThatFoundAGristAndNoOther(t *testing.T) {
 		}
 	}
 }
+
+// The loop's pace is the time since the read began, taken from the watch's own
+// clock (mw-gq6.1219): a clock that runs two hours in each read leaves nothing
+// of an hour's pace to wait, so the loop reads again at once, with no sleep.
+func TestGristWatchLoopKeepsItsPaceByTheInjectedClock(t *testing.T) {
+	postern := apptest.NewFakePostern()
+	var ticks atomic.Int64
+	base := time.Date(2026, 11, 12, 16, 0, 0, 0, time.UTC)
+	watch := &application.GristWatch{Postern: postern, Keys: watchKey{}, Every: time.Hour,
+		Now: func() time.Time { return base.Add(time.Duration(ticks.Add(1)) * 2 * time.Hour) }}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		watch.Watch(ctx, func(string) {})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	deadline := time.Now().Add(10 * time.Second)
+	for postern.Reads() < 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("the loop read %d times: its pace waited on the host's clock, not the injected one", postern.Reads())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}

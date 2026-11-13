@@ -407,6 +407,7 @@ func (d Digest) now() time.Time {
 	if d.Now != nil {
 		return d.Now()
 	}
+	//mw:realclock the default clock, when no Now is injected: the host's time
 	return time.Now()
 }
 
@@ -517,6 +518,7 @@ func (w *DigestWeekly) now() time.Time {
 	if w.Now != nil {
 		return w.Now().UTC()
 	}
+	//mw:realclock the default clock, when no Now is injected: the host's time
 	return time.Now().UTC()
 }
 

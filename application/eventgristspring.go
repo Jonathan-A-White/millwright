@@ -119,7 +119,8 @@ func (w *GristWatch) Waiting(ctx context.Context) (string, bool) {
 func (w *GristWatch) Watch(ctx context.Context, wake func(reason string)) {
 	w.openStream(ctx)
 	for ctx.Err() == nil {
-		began := time.Now()
+		now := w.clock()
+		began := now()
 		pace, failed := w.every(), false
 		var reason string
 		var ok bool
@@ -132,7 +133,7 @@ func (w *GristWatch) Watch(ctx context.Context, wake func(reason string)) {
 		if failed {
 			pace = max(pace, gristWatchAfterFailure)
 		}
-		timer := time.NewTimer(max(pace-time.Since(began), 0))
+		timer := time.NewTimer(max(pace-now().Sub(began), 0))
 		select {
 		case <-ctx.Done():
 		case <-w.nudged():
@@ -140,6 +141,15 @@ func (w *GristWatch) Watch(ctx context.Context, wake func(reason string)) {
 		}
 		timer.Stop()
 	}
+}
+
+// clock is the watch's Now, or the host's clock when none is injected.
+func (w *GristWatch) clock() func() time.Time {
+	if w.Now != nil {
+		return w.Now
+	}
+	//mw:realclock the watch's default clock, when no Now is injected
+	return time.Now
 }
 
 func (w *GristWatch) every() time.Duration {
@@ -172,10 +182,7 @@ func (w *GristWatch) poll(ctx context.Context, force bool) (found string, ok, fa
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.openStream(ctx)
-	now := time.Now
-	if w.Now != nil {
-		now = w.Now
-	}
+	now := w.clock()
 	every := w.every()
 	if w.live.Load() {
 		every = w.backstop()

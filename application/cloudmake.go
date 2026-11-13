@@ -77,6 +77,7 @@ func (m CloudMake) enrolled(ctx context.Context, name string) error {
 
 func (m CloudMake) now() time.Time {
 	if m.Now == nil {
+		//mw:realclock the default clock, when no Now is injected: the host's time
 		return time.Now().UTC()
 	}
 	return m.Now().UTC()

@@ -681,6 +681,8 @@ type DamperSurvey struct {
 	// silent.
 	Cloud     CloudBook
 	CloudPlan CloudPlan
+	// Now is the clock DamperCounts judges the alarms at; nil reads the host's.
+	Now func() time.Time
 }
 
 // NeedsCountsReader reads the bytes of the view's counts file, nil with no
@@ -807,7 +809,15 @@ func (s DamperSurvey) DamperCounts(ctx context.Context) (DampersReport, error) {
 	if err != nil {
 		return DampersReport{}, fmt.Errorf("reading what is in hand: %w", err)
 	}
-	return s.Dampers(ctx, work, time.Now())
+	return s.Dampers(ctx, work, s.now())
+}
+
+func (s DamperSurvey) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	//mw:realclock the survey's default clock, when no Now is injected: the alarms are judged at the host's time
+	return time.Now()
 }
 
 // Inversion is a bead waited on by a bead of higher priority: it goes later in
