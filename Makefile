@@ -118,6 +118,7 @@ lint:
 	scripts/check-install-sops-age.sh
 	scripts/check-boost-bootstrap.sh
 	scripts/check-vultr-boost.sh
+	scripts/check-vultr-boost_test.sh
 	scripts/check-gate-jobs.sh
 	scripts/check-chain-stamps-doc.sh
 	scripts/check-shellcheck-directives.sh
