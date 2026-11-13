@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 
 	"github.com/cucumber/godog"
 )
@@ -231,9 +232,11 @@ func (c *nextContext) theBugsHaveThePathAndNoAcceptance(epic, id string) error {
 	}
 	for _, bug := range bugs {
 		// The files key is the finding's own when it names a file
-		// (mw-gq6.1068); everything else is the finder's.
+		// (mw-gq6.1068) and the host is auto (mw-gq6.1255); everything else is the
+		// finder's.
 		got, want := bug.Merged(), landed.Merged()
 		got.Files, want.Files = "", ""
+		want.Host = domain.HostAuto
 		if got != want {
 			return fmt.Errorf("the path of %s is %+v, expected %+v", bug.Story.ID, got, want)
 		}
