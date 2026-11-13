@@ -337,3 +337,35 @@ func TestGateExpectedForIsTheRigsUsualGateOnTheHostAndNothingWithoutOne(t *testi
 		t.Errorf("expected no figure for a rig with no gate recorded, got %s", got)
 	}
 }
+
+// A box destroyed leaves its gate history in the vault; BENCHMARKS shows the
+// hosts that are up, not the box that is gone (mw-gq6.1160).
+func TestBenchmarksLeaveOutADestroyedBox(t *testing.T) {
+	var history []application.Benchmark
+	for i, host := range []string{"laptop", "cloud1", "cloud2"} {
+		b := landing(host, "lampas", "k", i, 1, 100, 50)
+		b.GateSeconds = 120
+		history = append(history, b)
+	}
+	plan := application.CloudPlan{}
+	book := application.CloudState{Boxes: []application.CloudBox{{Name: "cloud2"}}}
+	settings := application.BenchmarkSettings{UsualGates: 10, CalibrationWindow: 50, ParWindow: 20}
+
+	whole := application.ReadBenchmarks(history, settings, nil)
+	report := application.ReadBenchmarks(history, settings, application.DestroyedBox(plan, book))
+
+	var hosts []string
+	for _, g := range report.Gates {
+		hosts = append(hosts, g.Host)
+	}
+	for _, tp := range report.Throughput {
+		hosts = append(hosts, "t:"+tp.Host)
+	}
+	if got, want := strings.Join(hosts, ","), "cloud2,laptop,t:cloud2,t:laptop"; got != want {
+		t.Errorf("expected the rows of cloud2 and laptop only, got %s", got)
+	}
+	// The history is not changed: the calibration reads every record as before.
+	if len(report.Calibration) != len(whole.Calibration) || report.Calibration[0].String() != whole.Calibration[0].String() {
+		t.Errorf("expected the calibration unchanged, got %+v against %+v", report.Calibration, whole.Calibration)
+	}
+}
