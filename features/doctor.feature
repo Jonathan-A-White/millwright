@@ -704,7 +704,7 @@ Feature: mw doctor
     Then mw doctor leaves with the status 0
     And the doctor log holds "boost-config ok"
 
-  Scenario: The real boost-config check on a host that is not home is faulty when its [tests] line differs from the vault's, naming both values and the fix
+  Scenario: The real boost-config check on a host that is not home cures a [tests] line that differs from the vault's with mw config set
     Given the home host's config.toml for boost-config holding:
       """
       [tests]
@@ -716,12 +716,26 @@ Feature: mw doctor
       millwright = "make test && scripts/check-codemap.sh"
       """
     When mw doctor's boost-config check runs on a host that is not home
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "boost-config cured"
+    And mw doctor printed "tests.millwright: here"
+    And the home host's config.toml for boost-config holds "make test && scripts/check-codemap.sh"
+
+  Scenario: The real boost-config check on a host that is not home leaves a differing [test_parts.<rig>] table to a person
+    Given the home host's config.toml for boost-config holding:
+      """
+      [test_parts.lampas]
+      "install" = "npm ci"
+      """
+    And the vault's hosts/boost-config.toml for boost-config holding:
+      """
+      [test_parts.lampas]
+      "install" = "npm install"
+      """
+    When mw doctor's boost-config check runs on a host that is not home
     Then mw doctor leaves with the status 6
     And the doctor log holds "boost-config cure-failed no cure"
-    And mw doctor printed "tests.millwright"
-    And mw doctor printed "tests.millwright: here"
-    And mw doctor printed "make test && scripts/check-codemap.sh"
-    And mw doctor printed "mw config set tests.millwright"
+    And mw doctor printed "test_parts.lampas"
 
   Scenario: The real boost-config check on a host that is not home is ok when every line it holds is level with the vault's
     Given the home host's config.toml for boost-config holding:

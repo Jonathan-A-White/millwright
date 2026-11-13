@@ -255,15 +255,57 @@ func TestBoostConfigCureThatCannotCommitFailsAndSaysWhy(t *testing.T) {
 	}
 }
 
-func TestBoostConfigOnABoostStillHasNoCure(t *testing.T) {
-	check := boostConfigOnABoost(t, "[tests]\nmillwright = \"a\"\n", "[tests]\nmillwright = \"b\"\n")
-	vault := &apptest.FakeVaultFiles{}
-	check.Vault = vault
+// a Boost's cure is what the finding says: mw config set of each line held
+// differently (mw-gq6.1274).
+func TestBoostConfigOnABoostCuresADifferingLineWithConfigSet(t *testing.T) {
+	cases := map[string]struct{ here, vault string }{
+		"tests":         {"[tests]\nmillwright = \"make test\"\n", "[tests]\nmillwright = \"make test && scripts/check-codemap.sh\"\n"},
+		"changed_specs": {"[changed_specs]\nargus = \"npx playwright test\"\n", "[changed_specs]\nargus = \"npx playwright test {specs}\"\n"},
+		"named_tests":   {"[named_tests]\npostern = \"npm test -- -t {tests}\"\n", "[named_tests]\npostern = \"npm test -- --grep {tests}\"\n"},
+		"session deny":  {"[session]\ndeny = [\"Bash(scp *)\"]\n", "[session]\ndeny = [\"Bash(scp *)\", \"Read(~/.ssh/**)\"]\n"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			check := boostConfigOnABoost(t, c.here, c.vault)
+			vault := &apptest.FakeVaultFiles{}
+			check.Vault = vault
+			if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorFaulty {
+				t.Fatalf("expected faulty before the cure, got %s (%s)", verdict, reason)
+			}
+			if err := check.Cure(context.Background()); err != nil {
+				t.Fatalf("expected the cure to set the line, got %v", err)
+			}
+			if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+				t.Fatalf("expected ok after the cure, got %s (%s)", verdict, reason)
+			}
+			if len(vault.Commits()) != 0 {
+				t.Fatalf("expected nothing committed on a Boost, got %+v", vault.Commits())
+			}
+		})
+	}
+}
+
+// [test_parts.<rig>] cannot be set with mw config set, so it stays a person's,
+// and the line beside it that can be set is still cured.
+func TestBoostConfigOnABoostLeavesATestPartsTableToAPerson(t *testing.T) {
+	check := boostConfigOnABoost(t,
+		"[tests]\nmillwright = \"a\"\n\n[test_parts.argus]\n\"unit\" = \"npm test\"\n",
+		"[tests]\nmillwright = \"b\"\n\n[test_parts.argus]\n\"unit\" = \"npm run unit\"\n")
+	check.Probe(context.Background())
+	err := check.Cure(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no cure") || !strings.Contains(err.Error(), "test_parts.argus") {
+		t.Fatalf("expected no cure naming the parts table, got %v", err)
+	}
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorFaulty || strings.Contains(reason, "tests.millwright") || !strings.Contains(reason, "test_parts.argus") {
+		t.Fatalf("expected only the parts table left, got %s (%s)", verdict, reason)
+	}
+}
+
+func TestBoostConfigOnABoostWithNothingFaultyHasNoCure(t *testing.T) {
+	check := boostConfigOnABoost(t, "[tests]\nmillwright = \"a\"\n", "[tests]\nmillwright = \"a\"\n")
 	check.Probe(context.Background())
 	if err := check.Cure(context.Background()); err == nil || !strings.Contains(err.Error(), "no cure") {
-		t.Fatalf("expected no cure on a host that is not home, got %v", err)
-	}
-	if len(vault.Commits()) != 0 {
-		t.Fatalf("expected nothing committed on a Boost, got %+v", vault.Commits())
+		t.Fatalf("expected no cure with nothing to cure, got %v", err)
 	}
 }

@@ -46,6 +46,16 @@ func (c *doctorContext) registerBoostConfigSteps(ctx *godog.ScenarioContext) {
 		}
 		return nil
 	})
+	ctx.Then(`^the home host's config\.toml for boost-config holds "([^"]*)"$`, func(want string) error {
+		data, err := os.ReadFile(filepath.Join(c.boostConfigDir, "config.toml"))
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(string(data), want) {
+			return fmt.Errorf("the config file does not hold %q:\n%s", want, data)
+		}
+		return nil
+	})
 	ctx.When(`^mw doctor's boost-config check runs on the home$`, func() error {
 		return c.boostConfigRun(seatUpHost)
 	})
