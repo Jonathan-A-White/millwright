@@ -1838,9 +1838,10 @@ func (b *viewBuild) markNotReady(need *PosternViewNeed, e *viewEntry, noSteps bo
 }
 
 // hosts lists every host that has recorded a last sync, and this host, in
-// name order, and the alarm need of each whose last sync is older than
-// PosternViewHostStale while work is pathed to it — in progress, or open
-// and waiting on nothing. A host with nothing pathed to it strands nothing,
+// name order, less a destroyed box and a host the Governor retired (its old
+// sync note still names it), and the alarm need of each whose last sync is
+// older than PosternViewHostStale while work is pathed to it — in progress,
+// or open and waiting on nothing. A host with nothing pathed to it strands nothing,
 // and a host asleep with no work is not an alarm; the same rule the quiet
 // alarm keeps (Nudge).
 func (v PosternView) hosts(ctx context.Context, b *viewBuild, notes map[string]string) ([]PosternViewHost, []PosternViewNeed) {
@@ -1860,7 +1861,7 @@ func (v PosternView) hosts(ctx context.Context, b *viewBuild, notes map[string]s
 	destroyed := v.destroyedBoxes(ctx)
 	names := make([]string, 0, len(lastSync))
 	for name := range lastSync {
-		if destroyed(name) {
+		if destroyed(name) || IsRetired(v.Retired, name) {
 			continue
 		}
 		names = append(names, name)
