@@ -27,5 +27,8 @@ func TestMain(m *testing.M) {
 			os.Unsetenv(name)
 		}
 	}
+	// A command that gives itself the login environment would read the host's real
+	// beads.env into every later test's environment.
+	loginEnvironment = func() {}
 	os.Exit(m.Run())
 }

@@ -74,6 +74,9 @@ func TestLoginEnvironmentWithNoBeadsEnvOnlyFixesPath(t *testing.T) {
 
 func TestEveryGiveWayVerbRunsWithTheLoginEnvironment(t *testing.T) {
 	aBareEnvironmentWithABeadsEnv(t)
+	was := loginEnvironment
+	loginEnvironment = ensureLoginEnvironment
+	t.Cleanup(func() { loginEnvironment = was })
 	t.Setenv("MW_GIVEWAY_DIR", t.TempDir())
 	t.Setenv("MW_HOST", "desktop")
 	if out, err := runGiveWay("giveway", "mark", "--by", "windows-unlock"); err != nil {

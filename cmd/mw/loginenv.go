@@ -11,6 +11,13 @@ import (
 // started with no login environment lacks.
 var standardPathDirs = []string{"/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin", "/snap/bin"}
 
+// loginEnvironment is what a command that runs with no login environment calls first.
+// It is a variable so that the tests of this package, which run in one process with
+// the real host's files, are not left with the host's beads.env in their environment
+// (TestMain makes it do nothing; the tests of the environment itself call
+// ensureLoginEnvironment, and the one of the wiring puts it back).
+var loginEnvironment = ensureLoginEnvironment
+
 // ensureLoginEnvironment gives mw, started with no login environment, what the
 // commands it runs need: bd, tmux and git on PATH (~/.local/bin and the standard
 // directories, added after what PATH already names) and the host's beads connection

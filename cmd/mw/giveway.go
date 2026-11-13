@@ -239,7 +239,7 @@ func newGiveWayCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// The Windows tasks run this with no login environment (wsl.exe --exec):
 			// bd, tmux and beads.env first, before anything is read or stopped.
-			ensureLoginEnvironment()
+			loginEnvironment()
 			verb := args[0]
 			if verb != "on" && verb != "off" && verb != "status" && verb != "mark" {
 				return fmt.Errorf("giveway %q is not a verb: on, off, status or mark", verb)
