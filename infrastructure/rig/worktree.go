@@ -133,7 +133,6 @@ func Available() bool {
 func (w *Worktrees) Fetch(ctx context.Context, rigDir string) error {
 	_, err := w.git(ctx, rigDir, "fetch", w.remote)
 	if err == nil {
-		w.followRemoteMain(ctx, rigDir)
 		return nil
 	}
 	if why, passing := fetchFaultWhy(err); passing {
@@ -143,15 +142,17 @@ func (w *Worktrees) Fetch(ctx context.Context, rigDir string) error {
 }
 
 // followRemoteMain moves the rig checkout's local main (or master) up to the
-// remote's after a fetch, when that is a fast-forward. Only a fetch moves
-// origin/main; a box never lands a story into its checkout, so its local main
-// stayed where the clone left it and an acceptance line worded "against main"
-// read a base weeks old (cloud3, lampas: 9217b3e7 of 2026-10-15 against
-// origin/main 42551197, mw-gq6.1183). A local main that is ahead of the remote
-// (a merge not yet pushed) or has diverged is left as it is, and so is a
-// checkout whose files the move would overwrite: git refuses a fast-forward
-// there. The move is a convenience to whoever reads main by its short name, so
-// a fault in it never fails the fetch.
+// remote's, when that is a fast-forward, as a story's worktree is cut. Only a
+// fetch moves origin/main; a box never lands a story into its checkout, so its
+// local main stayed where the clone left it and an acceptance line worded
+// "against main" read a base weeks old (cloud3, lampas: 9217b3e7 of 2026-10-15
+// against origin/main 42551197, mw-gq6.1183). It is done here and not in Fetch
+// because the self-update and the grist level fetch, then advance the checkout
+// themselves and build after it: a fetch that moved main would leave them
+// nothing to advance. A local main that is ahead of the remote (a merge not yet
+// pushed) or has diverged is left as it is, and so is a checkout with
+// uncommitted files. The move is a convenience to whoever reads main by its
+// short name, so a fault in it never fails the Add.
 func (w *Worktrees) followRemoteMain(ctx context.Context, rigDir string) {
 	for _, branch := range []string{"main", "master"} {
 		remote := "refs/remotes/" + w.remote + "/" + branch
@@ -167,10 +168,13 @@ func (w *Worktrees) followRemoteMain(ctx context.Context, rigDir string) {
 		if _, err := w.git(ctx, rigDir, "merge-base", "--is-ancestor", local, remote); err != nil {
 			continue
 		}
-		// A branch checked out in a worktree is moved there, with its files; any
-		// other is moved by its ref alone.
+		// A branch checked out in a worktree is moved there, with its files, if
+		// that worktree is clean; any other is moved by its ref alone.
 		where, _ := w.git(ctx, rigDir, "for-each-ref", "--format=%(worktreepath)", local)
 		if dir := strings.TrimSpace(where); dir != "" {
+			if dirty, err := w.git(ctx, dir, "status", "--porcelain"); err != nil || strings.TrimSpace(dirty) != "" {
+				continue
+			}
 			_, _ = w.git(ctx, dir, "merge", "--ff-only", "--quiet", remote)
 			continue
 		}
@@ -231,6 +235,7 @@ func (w *Worktrees) Add(ctx context.Context, rigDir, dir, branch, start string) 
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return fmt.Errorf("making the directory the worktree %s belongs in: %w", dir, err)
 	}
+	w.followRemoteMain(ctx, rigDir)
 	if _, err := w.git(ctx, rigDir, "worktree", "add", "-b", branch, dir, start); err != nil {
 		return err
 	}

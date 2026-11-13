@@ -475,13 +475,27 @@ func TestAFailedNpmCiFailsAddWithItsErrorAndLeavesNothingBehind(t *testing.T) {
 	}
 }
 
+// cutAStoryWorktree fetches the rig's origin and cuts a story's worktree from
+// origin/main the way a dispatch does.
+func cutAStoryWorktree(t *testing.T, here string) {
+	t.Helper()
+	w := rig.New()
+	ctx := context.Background()
+	if err := w.Fetch(ctx, here); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	dir := filepath.Join(filepath.Dir(here), "worktrees", "story")
+	if err := w.Add(ctx, here, dir, "mw/story", "origin/main"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+}
+
 // A box never lands a story into its rig checkout, so the checkout's local main
 // stays where the clone left it while origin/main moves on: a Builder's
 // acceptance line worded "against main" then reads a base months old
 // (mw-gq6.1183).
-func TestAFetchKeepsTheCheckoutsLocalMainAtOriginMain(t *testing.T) {
+func TestACutWorktreeFollowsAFetchWithTheCheckoutsLocalMainAtOriginMain(t *testing.T) {
 	here, other := aRig(t)
-	ctx := context.Background()
 
 	write(t, other, "later.md", "pushed later\n")
 	run(t, other, "git", "add", "-A")
@@ -489,9 +503,7 @@ func TestAFetchKeepsTheCheckoutsLocalMainAtOriginMain(t *testing.T) {
 	run(t, other, "git", "push", "-q", "origin", "main")
 	want := run(t, other, "git", "rev-parse", "HEAD")
 
-	if err := rig.New().Fetch(ctx, here); err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
+	cutAStoryWorktree(t, here)
 	if got := run(t, here, "git", "rev-parse", "origin/main"); got != want {
 		t.Fatalf("origin/main = %s, want %s", got, want)
 	}
@@ -503,9 +515,8 @@ func TestAFetchKeepsTheCheckoutsLocalMainAtOriginMain(t *testing.T) {
 	}
 }
 
-func TestAFetchKeepsALocalMainThatIsNotCheckedOutAtOriginMain(t *testing.T) {
+func TestACutWorktreeMovesALocalMainThatIsNotCheckedOutToOriginMain(t *testing.T) {
 	here, other := aRig(t)
-	ctx := context.Background()
 	run(t, here, "git", "checkout", "-q", "-b", "elsewhere")
 
 	write(t, other, "later.md", "pushed later\n")
@@ -514,9 +525,7 @@ func TestAFetchKeepsALocalMainThatIsNotCheckedOutAtOriginMain(t *testing.T) {
 	run(t, other, "git", "push", "-q", "origin", "main")
 	want := run(t, other, "git", "rev-parse", "HEAD")
 
-	if err := rig.New().Fetch(ctx, here); err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
+	cutAStoryWorktree(t, here)
 	if got := run(t, here, "git", "rev-parse", "main"); got != want {
 		t.Fatalf("local main = %s after a fetch, want origin/main %s", got, want)
 	}
@@ -525,9 +534,8 @@ func TestAFetchKeepsALocalMainThatIsNotCheckedOutAtOriginMain(t *testing.T) {
 	}
 }
 
-func TestAFetchLeavesALocalMainThatIsAheadOfOriginMainAlone(t *testing.T) {
+func TestACutWorktreeLeavesALocalMainThatIsAheadOfOriginMainAlone(t *testing.T) {
 	here, other := aRig(t)
-	ctx := context.Background()
 	write(t, here, "merged.md", "merged here, not pushed yet\n")
 	run(t, here, "git", "add", "-A")
 	run(t, here, "git", "commit", "-qm", "A merge not pushed yet")
@@ -538,26 +546,21 @@ func TestAFetchLeavesALocalMainThatIsAheadOfOriginMainAlone(t *testing.T) {
 	run(t, other, "git", "commit", "-qm", "A later commit")
 	run(t, other, "git", "push", "-q", "origin", "main")
 
-	if err := rig.New().Fetch(ctx, here); err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
+	cutAStoryWorktree(t, here)
 	if got := run(t, here, "git", "rev-parse", "main"); got != ahead {
 		t.Fatalf("local main = %s, want it left at %s", got, ahead)
 	}
 }
 
-func TestAFetchLeavesADirtyCheckoutsMainAndItsFilesAlone(t *testing.T) {
+func TestACutWorktreeLeavesADirtyCheckoutsMainAndItsFilesAlone(t *testing.T) {
 	here, other := aRig(t)
-	ctx := context.Background()
 	write(t, other, "README.md", "# the rig, changed\n")
 	run(t, other, "git", "add", "-A")
 	run(t, other, "git", "commit", "-qm", "README changed")
 	run(t, other, "git", "push", "-q", "origin", "main")
 	write(t, here, "README.md", "# the rig, edited here\n")
 
-	if err := rig.New().Fetch(ctx, here); err != nil {
-		t.Fatalf("Fetch with a dirty checkout: %v", err)
-	}
+	cutAStoryWorktree(t, here)
 	b, err := os.ReadFile(filepath.Join(here, "README.md"))
 	if err != nil || string(b) != "# the rig, edited here\n" {
 		t.Fatalf("README.md = %q, %v; want the edit kept", b, err)
