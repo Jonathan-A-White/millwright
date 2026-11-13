@@ -55,6 +55,12 @@ type RigFact struct {
 	Since    string // YYYY-MM-DD
 	Sentence string
 
+	// Placed is the moment the fact was added, as RFC 3339 in UTC, which Since
+	// (a day) cannot say: make-room breaks a tie of one day by it, so a fact
+	// just added is not the first of its day to go. Empty for a fact placed
+	// before it was recorded.
+	Placed string
+
 	// The rest is optional.
 	Supersedes   string
 	SupersededBy string
@@ -71,6 +77,7 @@ const (
 	factStatus       = "status"
 	factSource       = "source"
 	factSince        = "since"
+	factPlaced       = "placed"
 	factSupersedes   = "supersedes"
 	factSupersededBy = "superseded-by"
 	factRetired      = "retired"
@@ -130,6 +137,8 @@ func ParseRigFact(slug, text string) (RigFact, error) {
 			fact.Source = value
 		case factSince:
 			fact.Since = value
+		case factPlaced:
+			fact.Placed = value
 		case factSupersedes:
 			fact.Supersedes = value
 		case factSupersededBy:
@@ -197,6 +206,11 @@ func (f RigFact) validate() error {
 	if _, err := time.Parse(FactDateLayout, f.Since); err != nil {
 		return fmt.Errorf("since %q is not a YYYY-MM-DD date", f.Since)
 	}
+	if f.Placed != "" {
+		if _, err := time.Parse(time.RFC3339, f.Placed); err != nil {
+			return fmt.Errorf("placed %q is not an RFC 3339 time", f.Placed)
+		}
+	}
 	if f.Retired != "" {
 		if _, err := time.Parse(FactDateLayout, f.Retired); err != nil {
 			return fmt.Errorf("retired %q is not a YYYY-MM-DD date", f.Retired)
@@ -234,7 +248,7 @@ func (f RigFact) String() string {
 	b.WriteString(frontMatterFence + "\n")
 	for _, pair := range [][2]string{
 		{factSubject, f.Subject}, {factKind, string(f.Kind)}, {factStatus, string(f.Status)},
-		{factSource, f.Source}, {factSince, f.Since}, {factSupersedes, f.Supersedes},
+		{factSource, f.Source}, {factSince, f.Since}, {factPlaced, f.Placed}, {factSupersedes, f.Supersedes},
 		{factSupersededBy, f.SupersededBy}, {factRetired, f.Retired}, {factReason, f.Reason},
 	} {
 		if pair[1] != "" {

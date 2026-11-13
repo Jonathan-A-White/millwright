@@ -1639,3 +1639,117 @@ func TestAStoryLandedIsClosedAndNotSupersededOrNeverReleased(t *testing.T) {
 		}
 	}
 }
+
+// aDayOldRig adds, through Add, one landed gotcha for each name at the clock's
+// time, a minute after the one before, then sets the budget to what the render
+// is: a rig whose boot facts all have the same since. Every sentence is of one
+// length, so any one demotion frees what another would.
+func aDayOldRig(t *testing.T, names ...string) (*editableFiles, application.Memory, *bytes.Buffer) {
+	t.Helper()
+	files := &editableFiles{files: map[string]string{}}
+	var out bytes.Buffer
+	m := anEditableMemory(files, &recordingVault{}, &out)
+	at := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+	m.Now = func() time.Time { return at }
+	m.Landed = func(_ context.Context, ids []string) (map[string]bool, error) {
+		landed := map[string]bool{}
+		for _, id := range ids {
+			landed[id] = true
+		}
+		return landed, nil
+	}
+	for _, name := range names {
+		err := m.Add(context.Background(), application.MemoryAdd{
+			Rig: "kiln", Slug: name + "-probe-port", Subject: name, Source: "mw-5", Kind: application.FactGotcha,
+			Sentence: "The " + name + " probe answers only on its own port.",
+		})
+		if err != nil {
+			t.Fatalf("%v\n%s", err, &out)
+		}
+		at = at.Add(time.Minute)
+	}
+	m.Budget = renderSize(files)
+	out.Reset()
+	return files, m, &out
+}
+
+func TestMakeRoomDoesNotDemoteTheFactJustAdded(t *testing.T) {
+	// alfa, added last, sorts first by slug and has no queries: the old tie-break took it.
+	files, m, out := aDayOldRig(t, "zulu", "yank", "xray", "alfa")
+	want := roomLine("zulu", "The zulu probe answers only on its own port.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if demoted(files, "alfa-probe-port") || !demoted(files, "zulu-probe-port") {
+		t.Errorf("want zulu, the first placed of one day, demoted and alfa, the last, kept:\n%s", out)
+	}
+	if demoted(files, "yank-probe-port") || demoted(files, "xray-probe-port") {
+		t.Errorf("one demotion frees enough, but more went:\n%s", out)
+	}
+}
+
+func TestMakeRoomDemotesTheFactJustAddedWhenItIsTheOnlyOneOfItsRank(t *testing.T) {
+	files, m, out := aDayOldRig(t, "zulu")
+	// The older fact's story is not landed, so the new one is the only one make-room may take.
+	files.files["old-open.md"] = roomFact("old", "gotcha", "2026-10-18", "The old probe answers only on its own port.")
+	m.Landed = func(_ context.Context, ids []string) (map[string]bool, error) {
+		return map[string]bool{"mw-5": true}, nil
+	}
+	m.Budget = renderSize(files)
+	want := roomLine("zulu", "The zulu probe answers only on its own port.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !demoted(files, "zulu-probe-port") {
+		t.Errorf("the only fact make-room may take should go:\n%s", out)
+	}
+}
+
+func TestMakeRoomOfFactsOfDifferentDaysStillTakesTheOldestFirst(t *testing.T) {
+	files := &editableFiles{files: map[string]string{}}
+	var out bytes.Buffer
+	m := anEditableMemory(files, &recordingVault{}, &out)
+	m.Landed = func(_ context.Context, ids []string) (map[string]bool, error) {
+		return map[string]bool{"mw-5": true}, nil
+	}
+	for i, name := range []string{"zulu", "yank", "alfa"} { // the oldest day has the last slug
+		at := time.Date(2026, 10, 14+i, 9, 0, 0, 0, time.UTC)
+		m.Now = func() time.Time { return at }
+		err := m.Add(context.Background(), application.MemoryAdd{
+			Rig: "kiln", Slug: name + "-probe-port", Subject: name, Source: "mw-5", Kind: application.FactGotcha,
+			Sentence: "The " + name + " probe answers only on its own port.",
+		})
+		if err != nil {
+			t.Fatalf("%v\n%s", err, &out)
+		}
+	}
+	m.Now = func() time.Time { return time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC) }
+	m.Budget = renderSize(files)
+	want := roomLine("zulu", "The zulu probe answers only on its own port.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+		t.Fatalf("%v\n%s", err, &out)
+	}
+	if !demoted(files, "zulu-probe-port") || demoted(files, "alfa-probe-port") || demoted(files, "yank-probe-port") {
+		t.Errorf("want only zulu, of the oldest day, demoted:\n%s", &out)
+	}
+}
+
+func TestAddWithMakeRoomOnADayOldRigDemotesAnOlderFactNotTheOneItAdds(t *testing.T) {
+	files, m, out := aDayOldRig(t, "zulu", "yank", "xray")
+	err := m.Add(context.Background(), application.MemoryAdd{
+		Rig: "kiln", Slug: "alfa-probe-port", Subject: "alfa", Source: "mw-5", Kind: application.FactGotcha, MakeRoom: true,
+		Sentence: "The alfa probe answers only on its own port.",
+	})
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if demoted(files, "alfa-probe-port") || files.files["alfa-probe-port.md"] == "" {
+		t.Errorf("the fact just added is missing or demoted:\n%s", out)
+	}
+	if !demoted(files, "zulu-probe-port") {
+		t.Errorf("the first placed fact should have made the room:\n%s", out)
+	}
+	if size := renderSize(files); size > m.Budget {
+		t.Errorf("the render is %d/%d after the add", size, m.Budget)
+	}
+}
