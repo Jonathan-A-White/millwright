@@ -43,8 +43,13 @@ ExecStart=/usr/bin/env %h/.local/bin/mw doctor
 SuccessExitStatus=6
 
 # Type=oneshot has no start timeout by default, and a hung systemctl would
-# then block every later run.
-TimeoutStartSec=2min
+# then block every later run. The timer fires every 5 minutes, so a run is
+# stopped under that and not at 2: on a laptop at load 54 of 20 cores, 7 of ~288
+# runs in a day ran past 2 minutes with every check ok and were mailed as 'unit
+# failed twice' (mw-gq6.1199). Each check's probe is also bounded by mw doctor
+# itself (a minute, then cannot-tell and the run goes on). The same line is in
+# the --user unit and the system unit.
+TimeoutStartSec=4min
 
 # A run starts no tmux server (its cures never start one), so a memory squeeze
 # may kill it first, before the seat or anything else on the host: make the

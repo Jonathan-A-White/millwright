@@ -258,6 +258,7 @@ need "$REVIEW_TIMER" "Persistent=true"
 # The doctor pair.
 need "$DOCTOR_SERVICE" "Type=oneshot"
 need "$DOCTOR_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw doctor"
+need "$DOCTOR_SERVICE" "TimeoutStartSec=4min"
 need "$DOCTOR_TIMER" "OnCalendar=*:2/5"
 need "$DOCTOR_TIMER" "Persistent=false"
 # The postern mirror pair.
@@ -322,6 +323,7 @@ need "$SEAT_TMUX_SERVICE" "WantedBy=multi-user.target"
 need "$SYS_DOCTOR_SERVICE" "Type=oneshot"
 need "$SYS_DOCTOR_SERVICE" "User=root"
 need "$SYS_DOCTOR_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw doctor"
+need "$SYS_DOCTOR_SERVICE" "TimeoutStartSec=4min"
 need "$SYS_DOCTOR_TIMER" "OnCalendar=*:2/5"
 need "$SYS_DOCTOR_TIMER" "Persistent=false"
 

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -372,6 +373,18 @@ type Doctor struct {
 	// is said on that line and changes nothing else. Nil leaves the line out.
 	Dampers DamperCounter
 
+	// CheckBudget is how long one check's probe, and the dampers read, may take.
+	// A probe past it is said cannot-tell ("took over 60s at load 41.2"), is
+	// neither logged nor noted, and the run goes on: a loaded host that makes one
+	// bd read slow must not run the whole run into its unit's start limit and
+	// mail 'unit failed twice' for a fault nobody found (mw-gq6.1199). Zero sets
+	// no budget.
+	CheckBudget time.Duration
+
+	// Load says the host's load for a reason that names it, as "41.2"; nil, or
+	// an empty answer, leaves the load out.
+	Load func() string
+
 	// Host is this host, part of the key a check's own note is written and
 	// cleared under: two hosts share one config table, so without it one
 	// host's doctor would clear another's still-faulty note of the same
@@ -448,7 +461,7 @@ func (d Doctor) Run(ctx context.Context, name string, dryRun bool) (DoctorReport
 	if d.Out != nil {
 		fmt.Fprint(d.Out, report.String())
 		if d.Dampers != nil && name == "" {
-			if dampers, err := d.Dampers.DamperCounts(ctx); err != nil {
+			if dampers, err := d.dampers(ctx); err != nil {
 				fmt.Fprintf(d.Out, "dampers: could not be read (%v)\n", err)
 			} else {
 				fmt.Fprintln(d.Out, dampers.CountsLine())
@@ -494,7 +507,10 @@ func (d Doctor) names() []string {
 // and reports what happened.
 func (d Doctor) one(ctx context.Context, check DoctorCheck, dryRun bool) (DoctorResult, error) {
 	name := check.Name()
-	verdict, reason := check.Probe(ctx)
+	verdict, reason, late := d.probe(ctx, check)
+	if late {
+		return DoctorResult{Check: name, Verdict: "cannot-tell", Reason: reason}, nil
+	}
 
 	switch verdict {
 	case DoctorOK:
@@ -509,6 +525,76 @@ func (d Doctor) one(ctx context.Context, check DoctorCheck, dryRun bool) (Doctor
 		result.Found = reason
 	}
 	return result, err
+}
+
+// probe runs check's Probe within CheckBudget. A probe still running at the
+// budget is left behind (late), with the reason to say; it is a read, and the
+// run is a process that ends, so what it holds is let go with it.
+func (d Doctor) probe(ctx context.Context, check DoctorCheck) (verdict Verdict, reason string, late bool) {
+	if d.CheckBudget <= 0 {
+		verdict, reason = check.Probe(ctx)
+		return verdict, reason, false
+	}
+	budget, cancel := context.WithTimeout(ctx, d.CheckBudget)
+	defer cancel()
+	type answer struct {
+		verdict Verdict
+		reason  string
+	}
+	done := make(chan answer, 1)
+	go func() {
+		v, r := check.Probe(budget)
+		done <- answer{v, r}
+	}()
+	select {
+	case a := <-done:
+		return a.verdict, a.reason, false
+	case <-budget.Done():
+		if ctx.Err() != nil {
+			a := <-done
+			return a.verdict, a.reason, false
+		}
+		return DoctorCannotTell, d.overBudget(), true
+	}
+}
+
+// overBudget is the reason of a read that took longer than CheckBudget.
+func (d Doctor) overBudget() string {
+	reason := "took over " + strconv.FormatFloat(d.CheckBudget.Seconds(), 'f', -1, 64) + "s"
+	if d.Load != nil {
+		if load := d.Load(); load != "" {
+			reason += " at load " + load
+		}
+	}
+	return reason
+}
+
+// dampers reads the DAMPERS counts within CheckBudget, as probe does a check.
+func (d Doctor) dampers(ctx context.Context) (DampersReport, error) {
+	if d.CheckBudget <= 0 {
+		return d.Dampers.DamperCounts(ctx)
+	}
+	budget, cancel := context.WithTimeout(ctx, d.CheckBudget)
+	defer cancel()
+	type answer struct {
+		report DampersReport
+		err    error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		r, err := d.Dampers.DamperCounts(budget)
+		done <- answer{r, err}
+	}()
+	select {
+	case a := <-done:
+		return a.report, a.err
+	case <-budget.Done():
+		if ctx.Err() != nil {
+			a := <-done
+			return a.report, a.err
+		}
+		return DampersReport{}, errors.New(d.overBudget())
+	}
 }
 
 // ok is the DoctorOK half of one. A plain ok, with no reason, is logged and
