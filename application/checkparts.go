@@ -211,13 +211,14 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	case k.detachesPart(part):
 		return k.checkPartDetached(ctx, report, c, label, part, tip)
 	}
-	fit := k.partFitOf(ctx, c.path.Rig, k.Part, k.callNow())
+	fit := k.partFitOf(ctx, c.path.Rig, k.Part, k.began)
 
 	// The part waits for a calm host, as a whole check does, before anything else
 	// of it, and what the wait leaves is what the merge slot is waited for in
 	// (mw-gq6.987).
 	// It is read by the check's clock (CallNow), as a whole check's is (mw-gq6.1135).
-	began := k.callNow()
+	// Both start with the call, as a whole check's do (mw-gq6.1251).
+	began := k.began
 	left := func() time.Duration {
 		return max((k.partSlotWait() - k.callNow().Sub(began)).Round(time.Millisecond), 0)
 	}

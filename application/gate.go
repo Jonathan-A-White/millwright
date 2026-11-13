@@ -183,6 +183,12 @@ func (n Next) calmedThen(ctx context.Context, report *NextReport, c *closeOut, w
 	since := time.Now()
 	var waited, said time.Duration
 	for reading.Busy() {
+		// The steps waited are a count, not the clock: the reads of a host at load 43
+		// and the sleeps that overshoot are not in it. A call's deadline that has
+		// passed ends the wait however few steps were counted (mw-gq6.1251).
+		if handBack && n.LoadBoundLeft != nil && n.LoadBoundLeft() <= 0 {
+			waited = max(waited, bound)
+		}
 		if waited >= bound {
 			if handBack {
 				return reading, true, n.CalmHandBack(ctx, reading, since, waited, again)

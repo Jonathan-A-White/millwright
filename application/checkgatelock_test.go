@@ -1381,3 +1381,195 @@ func TestAWholeChecksWaitForTheMergeSlotEndsWhenTheChecksClockPassesItsBound(t *
 		t.Errorf("expected the tests not to have run, they ran %d time(s)", checks.runs)
 	}
 }
+
+// slowStartTracker is the work tracker of a host at load 43: reading the story is
+// the first thing a check does and each tracker call waits for the host to be
+// quiet (mw-gq6.1251), so the call's clock has moved by the time the check knows
+// which story it is checking.
+type slowStartTracker struct {
+	*apptest.FakeTracker
+	clock *callClock
+	took  time.Duration
+}
+
+func (s slowStartTracker) ShowStory(ctx context.Context, id string) (application.StoryDetail, error) {
+	s.clock.Pass(s.took)
+	return s.FakeTracker.ShowStory(ctx, id)
+}
+
+// checkAfterASlowStart is a foreground whole check whose first read of the story
+// takes slow of the call's clock, with the call's budget and the wait limit both
+// the default 540 seconds, as mw check gives a Builder's call.
+func (w *aWholeCheckBesideTheHostsGateLock) checkAfterASlowStart(slow, expected time.Duration) (application.CheckReport, error) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	var gateExpected func(context.Context, string) time.Duration
+	if expected > 0 {
+		gateExpected = func(context.Context, string) time.Duration { return expected }
+	}
+	return application.Check{
+		Tracker: slowStartTracker{FakeTracker: tracker, clock: w.clock, took: slow}, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: w.checks,
+		Slot: w.slots, GateLock: w.gate, Records: w.records, PartSlotWait: application.CheckPartSlotWait,
+		GateNoticeEvery: 40 * time.Millisecond, KeepPlace: application.CheckKeepPlace,
+		CallBudget: application.CheckCallBudget, CallNow: w.clock.Now, GateExpected: gateExpected,
+		Host: "laptop", Remote: "origin",
+		Rigs: map[string]string{"millwright": w.rigDir},
+		Out:  writerOf(w.told),
+	}.Run(context.Background(), "mw-x.1")
+}
+
+// A foreground check on a host so loaded that reading the story took two minutes
+// of the call spends its wait out of what the call has left, not out of a nine
+// minutes that began when the story was read: the wait is one deadline from the
+// start of the call, so it ends in the place-kept line inside the tool's 600
+// seconds and not in the tool's silence (mw-gq6.1251, which mw-gq6.939's fix did
+// not hold for).
+func TestAForegroundCheckEndsItsWaitInsideTheCallsBudgetOnASlowStart(t *testing.T) {
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	closeOut, err := w.gate.Take(context.Background(), "mw-gq6.894", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	released := make(chan struct{})
+	go func() {
+		defer close(released)
+		// The clock is 120 s on when the check has read the story: 430 s more is
+		// 550 s into a call whose budget is 540 s.
+		w.clock.PassOnceQueued(430*time.Second, w.queuedGate)
+		// A wait that is not bounded by the call's start goes on; the lock is
+		// given back only so that such a check ends and the test can say so.
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+		}
+		closeOut.Holding.Release(context.Background())
+	}()
+
+	report, err := w.checkAfterASlowStart(120*time.Second, 0)
+	close(done)
+	<-released
+	if err != nil {
+		t.Fatalf("expected a check that kept its place to end without an error, got %v\n%s", err, report)
+	}
+	if checks.runs != 0 {
+		t.Fatalf("expected the wait to end at the call's budget with nothing run, the tests ran %d time(s)\n%s", checks.runs, report)
+	}
+	for _, want := range []string{"gate lock is still held by", "mw-gq6.894", "your place 1 of 1 in the queue is kept for 10 minutes", "run the same command again to go on waiting"} {
+		if !strings.Contains(report.Waiting, want) {
+			t.Errorf("expected the line to say %q, got %q", want, report.Waiting)
+		}
+	}
+}
+
+// The gate's fit to the call is judged from the start of the call too: a gate
+// expected to take 450 s does not fit what is left of a 540 s call after a start
+// that took 120 s, and is not started (mw-gq6.1251).
+func TestAForegroundCheckDoesNotStartAGateThatDoesNotFitWhatASlowStartLeftOfTheCall(t *testing.T) {
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	report, err := w.checkAfterASlowStart(120*time.Second, 450*time.Second)
+	if err != nil {
+		t.Fatalf("expected a check that kept its place to end without an error, got %v\n%s", err, report)
+	}
+	if checks.runs != 0 {
+		t.Fatalf("expected the gate not to start with 7m0s of the call left for a gate of 7m30s, the tests ran %d time(s)\n%s", checks.runs, report)
+	}
+	for _, want := range []string{"the gate needs about 7m30s and only ", " left in this call", "run the same command again"} {
+		if !strings.Contains(report.Waiting, want) {
+			t.Errorf("expected the line to say %q, got %q", want, report.Waiting)
+		}
+	}
+}
+
+// loggedRecords is a place for the check's log: the records, with a path for the
+// log file.
+type loggedRecords struct{ *mapRecords }
+
+func (l loggedRecords) RunFile(story, name string) string { return story + "/" + name }
+
+// A check the tool kills while it waits leaves its log: the line that says it
+// began and each line the wait said are in runs/<story>/check-<attempt>.log as
+// they are printed, not only when the check ends (mw-gq6.1251).
+func TestAForegroundCheckWritesItsLogWhileItWaitsAndNotOnlyWhenItEnds(t *testing.T) {
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	closeOut, err := w.gate.Take(context.Background(), "mw-gq6.894", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := loggedRecords{&mapRecords{}}
+	var midWait string
+	go func() {
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			if text, err := logs.ReadRunFile(context.Background(), "mw-x.1", application.CheckLogFileName(1)); err == nil && strings.Contains(text, "still waiting for laptop's gate lock") {
+				midWait = text
+				break
+			}
+		}
+		w.clock.Pass(time.Hour)
+	}()
+
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	report, err := application.Check{
+		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: checks,
+		Slot: w.slots, GateLock: w.gate, Records: w.records, Logs: logs, PartSlotWait: application.CheckPartSlotWait,
+		GateNoticeEvery: 40 * time.Millisecond, KeepPlace: application.CheckKeepPlace,
+		CallBudget: application.CheckCallBudget, CallNow: w.clock.Now,
+		Host: "laptop", Remote: "origin",
+		Rigs: map[string]string{"millwright": w.rigDir}, Out: writerOf(w.told),
+	}.Run(context.Background(), "mw-x.1")
+	closeOut.Holding.Release(context.Background())
+	if err != nil {
+		t.Fatalf("expected a check that kept its place to end without an error, got %v\n%s", err, report)
+	}
+	if midWait == "" {
+		t.Fatal("expected the log to say, while the check still waited, that it was waiting")
+	}
+	for _, want := range []string{"check of mw-x.1 (attempt 1) began on laptop at ", "held by mw-gq6.894"} {
+		if !strings.Contains(midWait, want) {
+			t.Errorf("expected the log, read while the check waited, to say %q, got %q", want, midWait)
+		}
+	}
+	final, _ := logs.ReadRunFile(context.Background(), "mw-x.1", application.CheckLogFileName(1))
+	if !strings.HasPrefix(final, "check of mw-x.1 (attempt 1) began on laptop") || !strings.Contains(final, report.Waiting) {
+		t.Errorf("expected the log at the end to hold the whole check, got %q", final)
+	}
+}
+
+// The wait for a calm host counts the steps it slept, and the reads and the late
+// wakes of a host at load 43 are not among them: a call whose deadline has passed
+// by its clock ends the wait after the step that passed it, not after the steps
+// the count still owes (mw-gq6.1251).
+func TestAForegroundCheckEndsItsCalmWaitWhenTheCallsClockSaysTheDeadlinePassed(t *testing.T) {
+	checks := &scriptedChecks{passes: []bool{true}}
+	w := newWholeCheckBesideTheGateLock(t, checks)
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	var slept int
+	report, err := application.Check{
+		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: checks,
+		Slot: w.slots, GateLock: w.gate, Records: w.records, PartSlotWait: 3 * time.Minute,
+		KeepPlace: application.CheckKeepPlace, CallBudget: 3 * time.Minute, CallNow: w.clock.Now,
+		Load:     &apptest.FakeHostLoad{Readings: []application.LoadReading{busy()}},
+		LoadPoll: 30 * time.Second,
+		// Each sleep takes the whole call, though the count says 30 seconds.
+		LoadWait: func(context.Context, time.Duration) error { slept++; w.clock.Pass(5 * time.Minute); return nil },
+		Host:     "laptop", Remote: "origin",
+		Rigs: map[string]string{"millwright": w.rigDir}, Out: writerOf(w.told),
+	}.Run(context.Background(), "mw-x.1")
+	if err != nil || len(report.Refusals) != 0 {
+		t.Fatalf("expected the check to end without a refusal or an error, got %v and %+v", err, report.Refusals)
+	}
+	if slept != 1 {
+		t.Errorf("expected one sleep, which passed the call's deadline, got %d", slept)
+	}
+	if !strings.Contains(report.Waiting, "run the same command again to go on waiting") || checks.runs != 0 {
+		t.Errorf("expected the check to end in the run-again line with nothing run, got %q and %d run(s)", report.Waiting, checks.runs)
+	}
+}

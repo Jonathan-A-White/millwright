@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -37,6 +38,14 @@ type Check struct {
 	// out and its place was kept; shared by every copy of the Check one check()
 	// makes.
 	waiting *waitingLine
+
+	// kept is the log of the check, written as the check goes (mw-gq6.1251); shared
+	// by every copy of the Check one Run makes.
+	kept *keptLog
+
+	// began is when the call began (CallBegan, or when Run was called), the one
+	// start every bound of the check is measured from (mw-gq6.1251).
+	began time.Time
 
 	Tracker WorkTracker
 	Landing Landing
@@ -106,6 +115,14 @@ type Check struct {
 	// and hoping the host does not take longer than its margin (mw-gq6.983,
 	// mw-gq6.991).
 	CallNow func() time.Time
+
+	// CallBegan, when it is set, is when the Builder's call began: the command's own
+	// start, before it read its configuration, the story or the host's load. Every
+	// wait of the check and the fit of the gate to the call are measured from it,
+	// so a slow start (each tracker call of a host at load 43 waits for the host to
+	// be quiet) is spent out of the call and not out of a nine minutes that began
+	// after it (mw-gq6.1251). Zero is the moment Run is called.
+	CallBegan time.Time
 
 	// PartExpected is the same for part n of a split gate: how long it usually
 	// takes on this host, 0 when no figure is known. A foreground --part that wins
@@ -276,13 +293,28 @@ func (r CheckReport) Passed() bool { return len(r.Refusals) == 0 && r.Waiting ==
 // returns is what makes mw check exit non-zero: any check that failed, and
 // anything that stopped the checking at all.
 func (k Check) Run(ctx context.Context, storyID string) (CheckReport, error) {
+	// The call began before anything else the check does; every wait is read from
+	// here (mw-gq6.1251).
+	k.began = k.CallBegan
+	if k.began.IsZero() {
+		k.began = k.callNow()
+	}
 	// Everything printed is also kept, to be written to the story's log when the
-	// check is done.
-	var kept bytes.Buffer
+	// check is done, and, once the attempt is known, as it is printed: a check cut
+	// off by the tool's own timeout leaves what it did (mw-gq6.1251).
+	kept := &keptLog{}
 	shown := k.Out
 	if k.Logs != nil {
-		k.Out = teeTo(shown, &kept)
+		k.Out = teeTo(shown, kept)
+		if k.Part == 0 && !k.SpecsWorker {
+			logs, story := k.Logs, storyID
+			kept.put = func(attempt int, text string) error {
+				_, err := logs.PutRunFile(ctx, story, CheckLogFileName(attempt), text)
+				return err
+			}
+		}
 	}
+	k.kept = kept
 	report, err := k.check(ctx, storyID)
 	// A check that could not be made has nothing to report, and the error says
 	// why; only a branch that was actually read has a verdict to print.
@@ -290,7 +322,7 @@ func (k Check) Run(ctx context.Context, storyID string) (CheckReport, error) {
 		fmt.Fprint(k.Out, report.String())
 	} else if err != nil {
 		// Nothing was printed, so the log would end with no verdict at all.
-		fmt.Fprintf(&kept, "mw check: %v\n", err)
+		kept.addQuietly(fmt.Sprintf("mw check: %v\n", err))
 	}
 	// A part has its own record; the log is the whole check's verdict.
 	if k.Logs != nil && report.Attempt > 0 && k.Part == 0 && !k.SpecsWorker {
@@ -302,8 +334,61 @@ func (k Check) Run(ctx context.Context, storyID string) (CheckReport, error) {
 	return report, err
 }
 
+// keptLog is what a check printed, kept to be written to the story's log. Once
+// begin has said which attempt it is, every write is also put in the log at once,
+// so that a check the tool kills still leaves what it said (mw-gq6.1251). Writes
+// come from the check and from the goroutines that say it is still waiting.
+type keptLog struct {
+	mu      sync.Mutex
+	buf     bytes.Buffer
+	attempt int
+	// put writes the whole text kept so far to the attempt's log; nil writes none
+	// as the check goes.
+	put func(attempt int, text string) error
+}
+
+// Write implements io.Writer.
+func (l *keptLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.buf.Write(p)
+	l.flush()
+	return len(p), nil
+}
+
+// addQuietly keeps text without writing it to the log: the check's end writes it.
+func (l *keptLog) addQuietly(text string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.buf.WriteString(text)
+}
+
+// begin names the attempt the check is of and writes the log, so that what was
+// printed before it is not lost and what follows is written as it is printed.
+func (l *keptLog) begin(attempt int) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.attempt = attempt
+	l.flush()
+}
+
+func (l *keptLog) flush() {
+	if l.put != nil && l.attempt > 0 {
+		_ = l.put(l.attempt, l.buf.String())
+	}
+}
+
+func (l *keptLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
+}
+
 // teeTo writes to both, or to one when the other is nil.
-func teeTo(out io.Writer, kept *bytes.Buffer) io.Writer {
+func teeTo(out io.Writer, kept io.Writer) io.Writer {
 	if out == nil {
 		return kept
 	}
@@ -325,6 +410,12 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	}
 	report.Title = detail.Story.Title
 	report.Attempt = max(detail.Attempts, 1)
+	// Said to the Builder too, so that the log holds what the check printed.
+	if k.Out != nil {
+		fmt.Fprintf(k.Out, "check of %s (attempt %d) began on %s at %s; its log is written as the check goes\n",
+			storyID, report.Attempt, k.Host, k.began.UTC().Format("15:04:05Z"))
+	}
+	k.kept.begin(report.Attempt)
 	if detail.Closed() {
 		return report, fmt.Errorf("checking %s: it is closed already, so there is nothing left to land", storyID)
 	}
@@ -360,10 +451,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	}
 	report.Branch, report.Target = c.branch, c.target
 	k.waiting = &waitingLine{}
-	var callBegan time.Time
-	if k.detachesSpecs() {
-		callBegan = k.callNow()
-	}
+	callBegan := k.began
 
 	// The rig's tests are run holding the rig's merge slot, shared with the
 	// other checks of the rig and apart from a landing's. Every wait of the check
@@ -372,7 +460,9 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	// specs and the wait for a calm host before a run again (mw-gq6.918).
 	// It is read by the check's clock (CallNow), so that a test that moves the clock
 	// by hand is not at the mercy of the real time the host takes (mw-gq6.991).
-	began := k.callNow()
+	// It starts with the call, not here: the story was read, and each tracker call
+	// of a loaded host waited for it to be quiet (mw-gq6.1251).
+	began := k.began
 	left := func() time.Duration {
 		return max((k.partSlotWait() - k.callNow().Sub(began)).Round(time.Millisecond), 0)
 	}
@@ -411,7 +501,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	case !split && k.Slot != nil && k.GateLock != nil:
 		// Slot, then gate lock, taken before the wait for a calm host so that the
 		// load waited on is not another gate's: a close-out does the same.
-		held := checkGateLock{k: k, c: c, attempt: report.Attempt, left: left, fit: k.callFitOf(ctx, path.Rig, k.callNow())}
+		held := checkGateLock{k: k, c: c, attempt: report.Attempt, left: left, fit: k.callFitOf(ctx, path.Rig, began)}
 		gateLock, afterCalm = held, held.afterCalm
 	case !split && k.Slot != nil:
 		checks = slottedChecks{
