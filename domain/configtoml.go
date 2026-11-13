@@ -285,7 +285,7 @@ var KnownRootConfigKeys = []string{
 	"millhand_review_model", "millhand_routine_model", "nudge_after_minutes", "nudge_sync_stale_minutes",
 	"postern_backend", "postern_channel", "postern_data", "postern_float_sats", "postern_governor_key",
 	"postern_key_file", "postern_local_url", "postern_snapshot_path", "postern_transcribe_cmd",
-	"postern_view_path", "postern_watchdog_target", "push_tries", "push_wait_seconds", "retired_hosts", "rig_memory_bytes",
+	"postern_view_path", "postern_watchdog_target", "push_tries", "push_wait_seconds", "repath_no_room_minutes", "retired_hosts", "rig_memory_bytes",
 	"stamps_dir", "tick_recheck_seconds", "vault",
 }
 
