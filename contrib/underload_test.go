@@ -10,9 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -35,12 +37,77 @@ func underLoad(t *testing.T, load string, cores int, extra []string, args ...str
 		"MW_UNDER_LOAD_SECONDS=",
 	)
 	cmd.Env = append(cmd.Env, extra...)
+	cmd.Env = append(cmd.Env, runTokenVar+"="+newRunToken())
 	return cmd
 }
 
-// loopsOf lists the pids of the busy loops (the timeout around each) that the
-// mw-under-load with this pid started and that are still alive.
-func loopsOf(t *testing.T, pid int) []string {
+// runTokens maps the pid of each mw-under-load a test started to the token in
+// its environment. The loops inherit it, so a loop is this run's when it carries
+// both the run's loop marker and its token: the marker alone is only a pid, and
+// a stranger can carry it (a dead run's loop after the pid came round again,
+// another suite's loop on the same host: mw-gq6.1154).
+var runTokens sync.Map
+
+var runCount atomic.Int64
+
+const runTokenVar = "MW_UNDER_LOAD_TEST_RUN"
+
+// newRunToken is unique to one started mw-under-load, across suites on a host.
+func newRunToken() string {
+	return fmt.Sprintf("%d-%d-%d", os.Getpid(), time.Now().UnixNano(), runCount.Add(1))
+}
+
+// track remembers the token the started cmd was given, under its pid.
+func track(cmd *exec.Cmd) {
+	for _, kv := range cmd.Env {
+		if v, ok := strings.CutPrefix(kv, runTokenVar+"="); ok {
+			runTokens.Store(cmd.Process.Pid, v)
+		}
+	}
+}
+
+// ownProcesses lists the pids of the processes alive now whose command line ends
+// in this pid's loop marker and whose environment carries this run's token. With
+// timeoutOnly it keeps only the `timeout` around each loop, not the shell in it.
+func ownProcesses(t testing.TB, pid int, timeoutOnly bool) []string {
+	t.Helper()
+	token, ok := runTokens.Load(pid)
+	if !ok {
+		t.Fatalf("pid %d was not started by a test that tracks its loops", pid)
+	}
+	marker := "mw-under-load-loop\x00" + strconv.Itoa(pid)
+	want := runTokenVar + "=" + token.(string)
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []string
+	for _, e := range entries {
+		if _, err := strconv.Atoi(e.Name()); err != nil {
+			continue
+		}
+		line, err := os.ReadFile("/proc/" + e.Name() + "/cmdline")
+		if err != nil || !strings.HasSuffix(strings.TrimRight(string(line), "\x00"), marker) {
+			continue
+		}
+		env, err := os.ReadFile("/proc/" + e.Name() + "/environ")
+		if err != nil || !slices.Contains(strings.Split(string(env), "\x00"), want) {
+			continue
+		}
+		if timeoutOnly {
+			comm, err := os.ReadFile("/proc/" + e.Name() + "/comm")
+			if err != nil || strings.TrimSpace(string(comm)) != "timeout" {
+				continue
+			}
+		}
+		found = append(found, e.Name())
+	}
+	return found
+}
+
+// markedAs lists the pids of every `timeout` on the host whose command line ends
+// in this pid's loop marker, whoever started it.
+func markedAs(t *testing.T, pid int) []string {
 	t.Helper()
 	out, _ := command(t, "pgrep", "-f", "mw-under-load-loop "+strconv.Itoa(pid)+"$").Output()
 	var loops []string
@@ -53,10 +120,17 @@ func loopsOf(t *testing.T, pid int) []string {
 	return loops
 }
 
-// anyLeft reports every process still carrying this run's loop marker.
+// loopsOf lists the pids of the busy loops (the timeout around each) that the
+// mw-under-load with this pid started and that are still alive.
+func loopsOf(t *testing.T, pid int) []string {
+	t.Helper()
+	return ownProcesses(t, pid, true)
+}
+
+// anyLeft reports every process of this run still carrying its loop marker.
 func anyLeft(t *testing.T, pid int) string {
-	out, _ := command(t, "pgrep", "-f", "mw-under-load-loop "+strconv.Itoa(pid)+"$").Output()
-	return strings.TrimSpace(string(out))
+	t.Helper()
+	return strings.Join(ownProcesses(t, pid, false), " ")
 }
 
 // waitFor polls for cond until settleBudget has passed, by the clock: a poll
@@ -97,8 +171,7 @@ func waitLoops(t *testing.T, pid, n int) []string {
 // found loops outliving a KILL does not leave them running to their deadline.
 func killLoops(t *testing.T, pid int) {
 	t.Helper()
-	out, _ := command(t, "pgrep", "-f", "mw-under-load-loop "+strconv.Itoa(pid)+"$").Output()
-	for _, p := range strings.Fields(string(out)) {
+	for _, p := range ownProcesses(t, pid, false) {
 		if n, err := strconv.Atoi(p); err == nil {
 			_ = syscall.Kill(n, syscall.SIGKILL)
 		}
@@ -117,6 +190,7 @@ func startHolding(t *testing.T, load string, cores int, extra ...string) (*exec.
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	track(cmd)
 	t.Cleanup(func() {
 		_ = os.WriteFile(release, nil, 0o644)
 		_ = cmd.Process.Kill()
@@ -240,6 +314,51 @@ func TestUnderLoadLoopsEndOnTheirOwnWhenItIsKilledOutright(t *testing.T) {
 	t.Logf("the loops saw their parent gone and ended %v after the KILL", time.Since(start).Round(time.Millisecond))
 }
 
+// A process that carries this run's loop marker without being this run's loop
+// (a loop of a dead mw-under-load whose pid came round again, another suite's
+// loop on the same host) must not be counted among this run's loops: seen as
+// "wanted 2 loops before the kill, got [3 pids]" (mw-gq6.1154).
+func TestUnderLoadCountsOnlyItsOwnLoopsNotOnesCarryingItsMarker(t *testing.T) {
+	cmd, _ := startHolding(t, "1.00", 8, "MW_UNDER_LOAD_MAX=2")
+	pid := cmd.Process.Pid
+	if got := waitLoops(t, pid, 2); len(got) != 2 {
+		t.Fatalf("wanted 2 loops, got %v", got)
+	}
+	// A stranger: a `timeout` whose command line ends in this run's marker, started
+	// by the test, not by mw-under-load, and without the run's environment.
+	stranger := exec.Command("timeout", "30", "sh", "-c", "exec sleep 30", "mw-under-load-loop", strconv.Itoa(pid))
+	stranger.Env = []string{"PATH=" + os.Getenv("PATH")}
+	stranger.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := stranger.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(-stranger.Process.Pid, syscall.SIGKILL)
+		_ = stranger.Wait()
+	})
+	if !waitFor(func() bool { return len(markedAs(t, pid)) >= 3 }) {
+		t.Fatalf("the stranger never showed under the marker: %v", markedAs(t, pid))
+	}
+	if got := loopsOf(t, pid); len(got) != 2 {
+		t.Fatalf("the stranger carrying the marker should not be counted: wanted this run's 2 loops, got %v", got)
+	}
+}
+
+// Two mw-under-load at once: each counts its own loops and no others.
+func TestUnderLoadTwoRunsAtOnceEachSeeOnlyItsOwnLoops(t *testing.T) {
+	first, _ := startHolding(t, "1.00", 8, "MW_UNDER_LOAD_MAX=2")
+	second, _ := startHolding(t, "1.00", 8, "MW_UNDER_LOAD_MAX=3")
+	if got := waitLoops(t, first.Process.Pid, 2); len(got) != 2 {
+		t.Fatalf("the first run wanted 2 loops, got %v", got)
+	}
+	if got := waitLoops(t, second.Process.Pid, 3); len(got) != 3 {
+		t.Fatalf("the second run wanted 3 loops, got %v", got)
+	}
+	if got := loopsOf(t, first.Process.Pid); len(got) != 2 {
+		t.Fatalf("the first run should still see only its 2 loops, got %v", got)
+	}
+}
+
 func TestUnderLoadEachLoopCarriesItsOwnDeadline(t *testing.T) {
 	cmd, _ := startHolding(t, "1.00", 8, "MW_UNDER_LOAD_MAX=1", "MW_UNDER_LOAD_SECONDS=99999")
 	loops := waitLoops(t, cmd.Process.Pid, 1)
@@ -312,6 +431,7 @@ func endsWithItsCommand(t *testing.T) string {
 	if err := cmd.Start(); err != nil {
 		return err.Error()
 	}
+	track(cmd)
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	// The loops' deadline is 600 s, well past this wait: a mw-under-load that
