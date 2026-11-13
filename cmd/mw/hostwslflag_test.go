@@ -352,6 +352,19 @@ func TestWSLFlagWatchScriptMatchesTheCommand(t *testing.T) {
 	}
 }
 
+// The way back unregisters the task and removes a file under ProgramData, which
+// a PowerShell that is not elevated cannot do: it must refuse up front too
+// (mw-2891blf.28).
+func TestWSLFlagWayBackChecksElevationBeforeRemovingAnything(t *testing.T) {
+	assertElevationFirst(t, "wsl-flag way back", WSLFlagWayBack())
+	if !strings.Contains(WSLFlagWayBack(), windowsElevationCheck) {
+		t.Errorf("the wsl-flag way back must use windowsElevationCheck")
+	}
+	if strings.Contains(WSLFlagWayBack(), "\n") {
+		t.Errorf("the wsl-flag way back is one line")
+	}
+}
+
 // The wsl-flag task is registered at RunLevel Highest, which a PowerShell that
 // is not elevated cannot do: the line must refuse up front (mw-2891blf.25).
 func TestWSLFlagInstallLinesCheckElevationBeforeWritingAnything(t *testing.T) {

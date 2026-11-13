@@ -422,6 +422,16 @@ func TestGiveWayInstallLineChecksElevationBeforeWritingAnything(t *testing.T) {
 	}
 }
 
+// The way back unregisters its tasks with -ErrorAction SilentlyContinue, so in a
+// PowerShell that is not elevated it left tasks and the folder behind and still
+// told the host to go on. It must refuse up front (mw-2891blf.28).
+func TestGiveWayUninstallLineChecksElevationBeforeRemovingAnything(t *testing.T) {
+	assertElevationFirst(t, "giveway uninstall", GiveWayUninstallLine())
+	if !strings.Contains(GiveWayUninstallLine(), windowsElevationCheck) {
+		t.Errorf("the giveway uninstall paste must use windowsElevationCheck")
+	}
+}
+
 // assertElevationFirst fails unless the paste checks for an elevated session,
 // throws 'run as administrator: nothing installed', and does so before its
 // first New-Item, Register-ScheduledTask or file write.
@@ -435,7 +445,7 @@ func assertElevationFirst(t *testing.T, what, line string) {
 	if !strings.Contains(line, "run as administrator: nothing installed") {
 		t.Errorf("%s: the paste must throw '... run as administrator: nothing installed'", what)
 	}
-	for _, first := range []string{"New-Item", "Register-ScheduledTask", "Set-Content", "WriteAllBytes", "Invoke-WebRequest", "Move-Item"} {
+	for _, first := range []string{"New-Item", "Register-ScheduledTask", "Unregister-ScheduledTask", "Remove-Item", "Set-Content", "WriteAllBytes", "Invoke-WebRequest", "Move-Item"} {
 		if i := strings.Index(line, first); i >= 0 && i < check {
 			t.Errorf("%s: the elevation check (%d) must come before the first %s (%d)", what, check, first, i)
 		}
