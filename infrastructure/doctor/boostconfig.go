@@ -41,7 +41,7 @@ const boostConfigNoCureOnABoost = "no cure: a person runs the mw config set the 
 // file, and is faulty when one differs (mw-gq6.704). On the home its cure runs
 // `mw config export-boost` (ConfigExportBoost: it writes the file and commits
 // it by path, mw-gq6.1241); a cure that cannot commit fails, saying why, and
-// the damper holds it. On a Boost it cannot cure: the fix is `mw config set`.
+// the damper holds it. On a Boost its cure is `mw config set` of each line held differently.
 type BoostConfig struct {
 	// Home and Host are the vault's home file and this host's name. A nil
 	// Home judges as the home; a home that cannot be told is cannot-tell.
@@ -66,6 +66,11 @@ type BoostConfig struct {
 	// onHome is whether the last probe judged this host the home, which is
 	// where export-boost may run.
 	onHome bool
+	// settable and parts are the lines the last probe on a Boost found held
+	// differently: those mw config set can write, and the [test_parts.<rig>]
+	// tables it cannot, which stay a person's.
+	settable []domain.BoostHeld
+	parts    []string
 }
 
 // NewBoostConfig is the check for the host named host, against the given home
@@ -85,6 +90,7 @@ func (b *BoostConfig) Name() string { return BoostConfigName }
 func (b *BoostConfig) Probe(ctx context.Context) (application.Verdict, string) {
 	b.faulty = ""
 	b.onHome = false
+	b.settable, b.parts = nil, nil
 	verdict, reason := b.probe(ctx)
 	if verdict == application.DoctorFaulty {
 		b.faulty = reason
@@ -162,10 +168,12 @@ func (b *BoostConfig) probeBoost() (application.Verdict, string) {
 	var held []string
 	for _, h := range domain.BoostTablesHeldDifferently(here, vault) {
 		if strings.HasPrefix(h.Key, domain.BoostPartsPrefix) {
+			b.parts = append(b.parts, h.Key)
 			held = append(held, fmt.Sprintf("%s: here %s, vault %s (replace that table in %s with the vault's lines; mw config set cannot write a part name)",
 				h.Key, h.Here, h.Vault, b.Config.Path()))
 			continue
 		}
+		b.settable = append(b.settable, h)
 		if h.Key == domain.SessionTable+"."+domain.SessionDenyKey {
 			// Here and Vault are TOML arrays already; the shell gets the vault's whole.
 			held = append(held, fmt.Sprintf("%s: here %s, vault %s (fix: mw config set %s '%s')", h.Key, h.Here, h.Vault, h.Key, h.Vault))
@@ -200,9 +208,16 @@ func readBoostTables(file application.ConfigFile) (domain.BoostTables, error) {
 // Cure implements application.DoctorCheck: on the home it runs the export
 // `mw config export-boost` runs, which rewrites hosts/boost-config.toml and
 // commits that one path. A write or commit that fails is the error, saying why.
-// Elsewhere, or with no Vault, there is no cure, and the error carries the
-// probe's finding.
+// On a Boost it is what the finding says: for each [tests], [changed_specs],
+// [named_tests] or [session] deny line held differently, `mw config set <key>
+// '<vault line>'` (ConfigSet, with a backup of the config; mw-gq6.1274). A
+// [test_parts.<rig>] table cannot be set that way and stays a person's, named in
+// the error. With no Vault on the home, or nothing to set, there is no cure, and
+// the error carries the probe's finding.
 func (b *BoostConfig) Cure(ctx context.Context) error {
+	if !b.onHome && b.faulty != "" && len(b.settable) > 0 {
+		return b.cureBoost(ctx)
+	}
 	if b.onHome && b.Vault != nil && b.faulty != "" {
 		out := b.Out
 		if out == nil {
@@ -227,6 +242,26 @@ func (b *BoostConfig) Cure(ctx context.Context) error {
 	return fmt.Errorf("%s: %s", noCure, b.faulty)
 }
 
+// cureBoost sets each line the last probe found held differently to the
+// vault's, as mw config set does. A line that fails to set stops the cure,
+// saying which; a parts table left is named once the rest is set.
+func (b *BoostConfig) cureBoost(ctx context.Context) error {
+	out := b.Out
+	if out == nil {
+		out = io.Discard
+	}
+	for _, h := range b.settable {
+		if err := (application.ConfigSet{File: b.Config, Out: out}).Run(ctx, h.Key, h.Vault, false); err != nil {
+			return fmt.Errorf("mw config set %s failed: %w", h.Key, err)
+		}
+	}
+	if len(b.parts) > 0 {
+		return fmt.Errorf("%s: %s are held differently, and mw config set cannot write a part name, so a person replaces them in %s with the vault's lines",
+			boostConfigNoCureOnABoost, strings.Join(b.parts, ", "), b.Config.Path())
+	}
+	return nil
+}
+
 // Damper implements application.DoctorCheck.
 func (b *BoostConfig) Damper() (time.Duration, int) {
 	return BoostConfigDamperWait, BoostConfigDamperCap
@@ -236,5 +271,5 @@ func (b *BoostConfig) Damper() (time.Duration, int) {
 // hosts/boost-config.toml and commits it, so the commit before it is the way
 // back.
 func (b *BoostConfig) WayBack() string {
-	return "git revert the vault's commit of hosts/boost-config.toml made by mw config export-boost; nothing else changes (on a host that is not home no cure runs)"
+	return "on the home: git revert the vault's commit of hosts/boost-config.toml made by mw config export-boost; on a Boost: mw config set backs the config up first, cp the newest ~/.config/mw/config.toml.bak-<stamp> over ~/.config/mw/config.toml"
 }
