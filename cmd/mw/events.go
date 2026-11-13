@@ -123,6 +123,10 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 	if err != nil {
 		return err
 	}
+	retired, err := config.RetiredHosts()
+	if err != nil {
+		return err
+	}
 	cloudBook, cloudPlan := posternCloud()
 	view := application.PosternView{
 		Tracker:    gateway,
@@ -132,6 +136,7 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		CloudPlan:  cloudPlan,
 		Host:       host,
 		Reaches:    handsReaches(host),
+		Retired:    retired,
 		Now:        posternViewClock,
 		Err:        cmd.ErrOrStderr(),
 		VerifyDays: verifyDays,

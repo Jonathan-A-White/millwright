@@ -1341,3 +1341,43 @@ func TestNeedsCountsPathIsBesideTheView(t *testing.T) {
 		t.Errorf("path = %q", got)
 	}
 }
+
+// A host the Governor retired (retired_hosts) is no place a dispatch starts a
+// story, so the Map's Up next lists no group for it, though its old sync note
+// still names it (mw-gq6.1164). A host=auto story is listed under each live
+// host, since a dispatch on any of them would start it.
+func TestTheViewListsNoUpNextForARetiredHost(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-r", domain.Path{
+		Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude,
+		Model: domain.ModelOpus, Effort: domain.EffortHigh, Formula: "tdd-feature", Host: domain.HostAuto,
+	})
+	for _, id := range []string{"mw-r.1", "mw-r.2"} {
+		tracker.AddStory("mw-r", domain.Story{ID: id, Title: "Story " + id})
+	}
+	for _, host := range []string{"laptop", "cloud4", "desktop"} {
+		if err := tracker.SetNote(context.Background(), "host."+host+".last_sync", viewNow.Format(application.LastSyncFormat)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	doc, err := application.PosternView{
+		Tracker: tracker,
+		Notes:   tracker,
+		Host:    "laptop",
+		Retired: []string{"desktop", "vps"},
+		Now:     func() time.Time { return viewNow },
+	}.Build(context.Background())
+	if err != nil {
+		t.Fatalf("building the view: %v", err)
+	}
+	upNext := map[string]int{}
+	for _, h := range doc.Hosts {
+		upNext[h.Name] = len(h.UpNext)
+	}
+	if upNext["laptop"] != 2 || upNext["cloud4"] != 2 {
+		t.Fatalf("expected the live hosts to list the two stories, got %v", upNext)
+	}
+	if n := upNext["desktop"]; n != 0 {
+		t.Fatalf("expected no Up next group for the retired desktop, got %d stories (hosts %+v)", n, doc.Hosts)
+	}
+}

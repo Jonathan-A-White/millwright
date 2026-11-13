@@ -67,6 +67,10 @@ func newPosternViewCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			retired, err := config.RetiredHosts()
+			if err != nil {
+				return err
+			}
 			cloudBook, cloudPlan := posternCloud()
 			view := application.PosternView{
 				Tracker:    gateway,
@@ -76,6 +80,7 @@ func newPosternViewCmd() *cobra.Command {
 				CloudPlan:  cloudPlan,
 				Host:       host,
 				Reaches:    handsReaches(host),
+				Retired:    retired,
 				Now:        posternViewClock,
 				Err:        cmd.ErrOrStderr(),
 				Events:     homeEventLog(),

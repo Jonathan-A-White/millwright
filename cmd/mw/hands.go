@@ -126,6 +126,10 @@ func (v handsView) Run(ctx context.Context) (application.PosternViewDoc, error) 
 	if err != nil {
 		return application.PosternViewDoc{}, err
 	}
+	retired, err := config.RetiredHosts()
+	if err != nil {
+		return application.PosternViewDoc{}, err
+	}
 	cloudBook, cloudPlan := posternCloud()
 	view, err := sealedPosternView(application.PosternView{
 		Tracker:    v.gateway,
@@ -135,6 +139,7 @@ func (v handsView) Run(ctx context.Context) (application.PosternViewDoc, error) 
 		CloudPlan:  cloudPlan,
 		Host:       v.host,
 		Reaches:    handsReaches(v.host),
+		Retired:    retired,
 		Now:        posternViewClock,
 		VerifyDays: verifyDays,
 	})

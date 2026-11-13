@@ -340,6 +340,10 @@ type PosternView struct {
 	// Approve and says why. Nil judges no host.
 	Reaches func(host string) bool
 
+	// Retired are the hosts the Governor retired (retired_hosts): a retired
+	// host is no place a dispatch starts a story, so its up_next is left out.
+	Retired []string
+
 	// Now is the clock written_at is stamped with and every window is
 	// measured against. The zero value reads the real one.
 	Now func() time.Time
@@ -1873,9 +1877,14 @@ func (v PosternView) destroyedBoxes(ctx context.Context) func(name string) bool 
 // so it costs the tracker no read: the open, unclaimed stories waiting on
 // nothing unfinished whose path names the host, or auto, ordered by inStartOrder
 // as a dispatch orders what it starts. A story that needs the Governor present
-// is no session's to start, so it is left out.
+// is no session's to start, so it is left out. A retired host lists none. A
+// host=auto story is listed under every live host, since a dispatch on any of
+// them would start it.
 func (v PosternView) upNext(b *viewBuild, hosts []PosternViewHost) {
 	for i := range hosts {
+		if IsRetired(v.Retired, hosts[i].Name) {
+			continue
+		}
 		var startable []StoryDetail
 		for _, id := range b.order {
 			e := b.entries[id]
