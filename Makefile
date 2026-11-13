@@ -47,8 +47,12 @@ build:
 
 # The gate ends by saying, in its own output, when the scorer's full tests could
 # not run on this host (no venv, no espeak-ng): the Go test for them skips there
-# without a word (mw-gq6.644).
+# without a word (mw-gq6.644). It starts with scripts/check-file-length.sh, which
+# reads only the tree and takes a moment: the rig's gate is make test, not make
+# lint, so two landings that each passed it (one grew a file past the ceiling,
+# one put the ceiling into make lint) left main's lint red (mw-gq6.1237).
 test:
+	scripts/check-file-length.sh
 	$(GO) test -tags $(TAGS) -timeout $(TEST_TIMEOUT) $(TIMING_FLAGS) $(PKG)
 	contrib/scorer/test.sh --gate-note
 

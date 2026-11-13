@@ -4,7 +4,8 @@
 # file over 2,500 lines that is not on the list, fail for a list that grew
 # (more entries than the script allows, or a listed file longer than its
 # recorded ceiling, or a listed file that is short again and still listed), and
-# pass on this repository. Writes only under a temporary directory.
+# pass on this repository; and make test must fail on a tree with a file over the
+# limit, since the gate runs make test. Writes only under a temporary directory.
 
 set -eu
 
@@ -87,6 +88,25 @@ expect "listed file missing" refuse "$CHECK" "$T1" "$TMP/gone.list"
 
 # This repository passes.
 expect "this repository" ok "$CHECK"
+
+# The gate runs it (mw-gq6.1237): the millwright rig's gate is make test, not
+# make lint, so a branch that pushes a file over the ceiling must fail make test
+# itself. A throwaway tree holds this Makefile and script, a stand-in scorer
+# script, and one Go file over the limit; GO=true stands in for the go command,
+# so only the checks the test target itself makes can fail it.
+GATE="$TMP/gate"
+mkdir -p "$GATE/scripts" "$GATE/contrib/scorer"
+cp "$HERE/../Makefile" "$GATE/Makefile"
+# The copy's list of long files is emptied: the throwaway tree has none of them.
+sed '/^[a-z/]*\.go [0-9]*$/d' "$CHECK" >"$GATE/scripts/check-file-length.sh"
+chmod +x "$GATE/scripts/check-file-length.sh"
+printf '#!/bin/sh\nexit 0\n' >"$GATE/contrib/scorer/test.sh"
+chmod +x "$GATE/contrib/scorer/test.sh"
+lines "$GATE/application/short.go" 2500
+expect "gate on a short tree" ok make -C "$GATE" test GO=true
+lines "$GATE/application/big.go" 2501
+expect "gate on a file over the ceiling" refuse make -C "$GATE" test GO=true
+if ! grep -q "application/big.go" "$TMP/out"; then fail "the gate's refusal does not name the file: $(cat "$TMP/out")"; fi
 
 if [ "$fails" -gt 0 ]; then
 	echo "check-file-length_test: $fails failed" >&2
