@@ -117,7 +117,7 @@ func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, withi
 			slot.Release(context.Background())
 		}
 		if errors.Is(err, ErrPlaceKeptLate) {
-			return GateTurn{}, GateLockHandBack{Why: k.tooLateLine(fit, ask)}
+			return GateTurn{}, GateLockHandBack{Why: k.tooLateLine(c.id, fit, ask)}
 		}
 		return GateTurn{}, k.gateLockRefusal(ctx, waitCtx, c, try, notices.by, k.callNow().Sub(began), err, ask)
 	}
@@ -176,14 +176,22 @@ func (f *callFit) late() bool { return f.expected < f.budget && f.expected > f.l
 
 // tooLateLine is the one line a foreground check ends with when it won the gate
 // lock too late for the gate to end inside its call and kept its place instead.
-func (k Check) tooLateLine(f *callFit, ask *QueuePlace) string {
+func (k Check) tooLateLine(story string, f *callFit, ask *QueuePlace) string {
 	_, place, of := ask.Result()
-	return k.tooLateAt(f, place, of)
+	return k.tooLateAt(story, f, place, of)
 }
 
-func (k Check) tooLateAt(f *callFit, place, of int) string {
-	line := fmt.Sprintf("%s's gate lock is free, but the gate needs about %s and only %s is left in this call; your place %d of %d in the queue is kept for %s: run the same command again to start it",
-		k.Host, gateWaited(f.expected), gateWaited(f.left()), place, of, keptFor(k.KeepPlace))
+// backgroundWay is what a too-late line says besides running the same command
+// again: a gate whose usual time is just over what a call has left may never fit
+// a call, and a check started with --background is not kept to one. It waits
+// under the story's key, so it takes up the place kept (mw-gq6.1196, mw-gq6.1197).
+func backgroundWay(story string) string {
+	return fmt.Sprintf("if it keeps saying so, run `mw check %s --background` instead, which is not kept to a call", story)
+}
+
+func (k Check) tooLateAt(story string, f *callFit, place, of int) string {
+	line := fmt.Sprintf("%s's gate lock is free, but the gate needs about %s and only %s is left in this call; your place %d of %d in the queue is kept for %s: run the same command again to start it; %s",
+		k.Host, gateWaited(f.expected), gateWaited(f.left()), place, of, keptFor(k.KeepPlace), backgroundWay(story))
 	k.waiting.set(line)
 	return line
 }
@@ -200,11 +208,11 @@ func (g checkGateLock) afterCalm(held Holding) error {
 	}
 	if keeper, ok := held.(PlaceKeeper); ok && g.k.KeepPlace > 0 {
 		if place, of, kept := keeper.KeepPlace(g.k.KeepPlace); kept {
-			return GateLockHandBack{Why: g.k.tooLateAt(g.fit, place, of)}
+			return GateLockHandBack{Why: g.k.tooLateAt(g.c.id, g.fit, place, of)}
 		}
 	}
-	line := fmt.Sprintf("the gate needs about %s and only %s is left in this call, after waiting for %s to calm; the gate lock is given back and nothing was run: run the same command again",
-		gateWaited(g.fit.expected), gateWaited(g.fit.left()), g.k.Host)
+	line := fmt.Sprintf("the gate needs about %s and only %s is left in this call, after waiting for %s to calm; the gate lock is given back and nothing was run: run the same command again; %s",
+		gateWaited(g.fit.expected), gateWaited(g.fit.left()), g.k.Host, backgroundWay(g.c.id))
 	g.k.waiting.set(line)
 	return GateLockHandBack{Why: line}
 }

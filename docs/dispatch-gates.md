@@ -247,8 +247,8 @@ call, which is cut off at 600 seconds with no words (mw-gq6.939); that is the ha
   what is left of `CheckCallBudget`, 540 seconds from the check's start, the check
   gives the lock back, keeps its place and ends in one line, exit 0: *the gate needs
   about G and only R is left in this call; your place N of M in the queue is kept for
-  10 minutes: run the same command again to start it* (`Check.CallBudget`,
-  `QueuePlace.Late`); run at once it takes the place up and starts the gate, saying
+  10 minutes: run the same command again to start it; if it keeps saying so, run `mw check <story> --background` instead, which is not kept to a call* (`Check.CallBudget`,
+  `QueuePlace.Late`; a gate whose usual time is just over what a call has left may never fit one, mw-gq6.1197); run at once it takes the place up and starts the gate, saying
   *gate expected about G, R left in this call*. A rig with no figure, or a gate longer
   than a whole call, is started as it always was. The same test is made again once the
   wait for a calm host that follows the lock is over (mw-gq6.945), with the time left

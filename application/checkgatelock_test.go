@@ -849,7 +849,7 @@ func TestAForegroundWholeCheckThatGetsTheLockTooLateForTheGateKeepsItsPlaceAndSa
 	if len(report.Refusals) != 0 {
 		t.Errorf("expected no refusal, got %+v", report.Refusals)
 	}
-	for _, want := range []string{"the gate needs about 9s and only ", " left in this call", "your place 1 of 1 in the queue is kept for 10 minutes", "run the same command again"} {
+	for _, want := range []string{"the gate needs about 9s and only ", " left in this call", "your place 1 of 1 in the queue is kept for 10 minutes", "run the same command again", "`mw check mw-x.1 --background`"} {
 		if !strings.Contains(report.Waiting, want) {
 			t.Errorf("expected the line to say %q, got %q", want, report.Waiting)
 		}
@@ -957,7 +957,7 @@ func TestAForegroundWholeCheckWhoseCalmWaitEatsTheFitKeepsItsPlaceAndSaysToRunIt
 	if len(report.Refusals) != 0 {
 		t.Errorf("expected no refusal, got %+v", report.Refusals)
 	}
-	for _, want := range []string{"the gate needs about 9s and only ", " left in this call", "your place 1 of 1 in the queue is kept for 10 minutes", "run the same command again"} {
+	for _, want := range []string{"the gate needs about 9s and only ", " left in this call", "your place 1 of 1 in the queue is kept for 10 minutes", "run the same command again", "`mw check mw-x.1 --background`"} {
 		if !strings.Contains(report.Waiting, want) {
 			t.Errorf("expected the line to say %q, got %q", want, report.Waiting)
 		}
