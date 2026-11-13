@@ -472,6 +472,14 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	}
 
+	if len(r.BatchesNoOutcome) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", BatchNoOutcomeHeading, len(r.BatchesNoOutcome)))
+		for _, batch := range r.BatchesNoOutcome {
+			wrapInto(&b, "  ", batch.Line())
+		}
+		b.WriteString("\n")
+	}
+
 	if len(r.WrongRig) > 0 {
 		clip(&b, fmt.Sprintf("%s (%d)", WrongRigHeading, len(r.WrongRig)))
 		for _, w := range r.WrongRig {

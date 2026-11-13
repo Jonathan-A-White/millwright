@@ -118,6 +118,14 @@ type LandingsInFlight interface {
 	Pending(ctx context.Context) ([]string, error)
 }
 
+// BatchRefs is where mw status finds the batches of the vault's records that
+// have no outcome.txt.
+type BatchRefs interface {
+	// WithoutOutcome is, for each rig, its newest batch directory when it holds
+	// no outcome.txt; an older one is left to the batch that came after it.
+	WithoutOutcome(ctx context.Context) ([]BatchRef, error)
+}
+
 // Status reads, for one host, what is running there, what is ready to be
 // taken, what waits for the Governor, what is blocked, today's fuel from a
 // seat's ledger, and what every other host has in hand and when it last synced. It is the read-only,
@@ -205,6 +213,11 @@ type Status struct {
 	// have a line is told by Rigs and Rules (landing = "batch"). Nil leaves the
 	// last batch out of the line.
 	Batches BatchHistory
+
+	// BatchDirs, when set, is where the batches of runs/batch/<rig>/<n>/ with
+	// no outcome.txt are found, for BATCH WITH NO OUTCOME (mw-gq6.1264). Nil
+	// leaves the section out.
+	BatchDirs BatchRefs
 
 	// Dampers, when set, is where the DAMPERS alarms are judged. Nil leaves the
 	// section out, as does a report with no alarm tripped.
@@ -697,6 +710,9 @@ type StatusReport struct {
 	// NoFilesKey are the open or held stories of rigs that expect a files key
 	// (files_expected = true) whose path has none, in the order found.
 	NoFilesKey []NoFilesKey
+	// BatchesNoOutcome are the batch directories of the vault's records with no
+	// outcome.txt whose rig's mw land is not running (mw-gq6.1264).
+	BatchesNoOutcome []BatchRef
 	// WrongRig are the open, held or running stories none of whose files exist
 	// in their rig's checkout on this host (mw-gq6.428).
 	WrongRig []WrongRig
@@ -1123,6 +1139,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	for _, running := range report.Running {
 		inRigs = append(inRigs, running.Detail)
 	}
+	report.BatchesNoOutcome = s.batchesWithoutOutcome(ctx)
 	report.WrongRig = wrongRigStories(s.Rigs, s.RigFiles, append(inRigs, held...)...)
 
 	report.NoSweep = bugsWithoutASweep(known)

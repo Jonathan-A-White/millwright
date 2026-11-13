@@ -175,3 +175,57 @@ func batchJobsRunning(ctx context.Context, log EventLog) map[string]time.Time {
 	}
 	return out
 }
+
+// BatchNoOutcomeHeading heads the section naming a batch's records directory
+// that holds no outcome.txt while no mw land of its rig is running: the land
+// died, and nothing else said so (mw-gq6.1264).
+const BatchNoOutcomeHeading = "BATCH WITH NO OUTCOME"
+
+// BatchRef names one batch of a rig: runs/batch/<rig>/<n>/.
+type BatchRef struct {
+	Rig    string
+	Number int
+}
+
+// Path is the batch's directory from the vault's root.
+func (b BatchRef) Path() string {
+	return fmt.Sprintf("%s/%s/%d/", BatchDir, b.Rig, b.Number)
+}
+
+// Line is what mw status says of a batch with no outcome.
+func (b BatchRef) Line() string {
+	return fmt.Sprintf("%s holds no %s and no mw land of %s is running: the land died before it wrote one; its stories stay queued",
+		b.Path(), BatchOutcomeFile, b.Rig)
+}
+
+// batchesWithoutOutcome are the batches BatchDirs finds with no outcome.txt whose
+// rig has no mw land running or waiting to be collected (Landings): one still
+// running has no outcome yet. Whether a land runs that cannot be read, or a
+// vault that cannot be read, names none.
+func (s Status) batchesWithoutOutcome(ctx context.Context) []BatchRef {
+	if s.BatchDirs == nil {
+		return nil
+	}
+	var alive map[string]bool
+	if s.Landings != nil {
+		names, err := s.Landings.Pending(ctx)
+		if err != nil {
+			return nil
+		}
+		alive = make(map[string]bool, len(names))
+		for _, name := range names {
+			alive[name] = true
+		}
+	}
+	bare, err := s.BatchDirs.WithoutOutcome(ctx)
+	if err != nil {
+		return nil
+	}
+	var out []BatchRef
+	for _, b := range bare {
+		if !alive[b.Rig] {
+			out = append(out, b)
+		}
+	}
+	return out
+}
