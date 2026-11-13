@@ -14,10 +14,13 @@ import (
 )
 
 // blockedSync is a HostSync that refuses on a vault holding uncommitted files.
-type blockedSync struct{ files []string }
+type blockedSync struct {
+	files  []string
+	damage application.VaultDamage
+}
 
 func (s *blockedSync) Run(context.Context) (application.SyncReport, error) {
-	return application.SyncReport{Host: "vps"}, &application.VaultBlocked{Host: "vps", Files: s.files}
+	return application.SyncReport{Host: "vps"}, &application.VaultBlocked{Host: "vps", Files: s.files, Damage: s.damage}
 }
 
 // cleanSync is a HostSync that finds the vault clean and the hosts level.

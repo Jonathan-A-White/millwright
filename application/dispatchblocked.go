@@ -42,6 +42,12 @@ func (d Dispatch) tellVaultBlocked(ctx context.Context, err error, report *Dispa
 		return
 	}
 	reason := strings.Join(blocked.Files, ", ")
+	if blocked.Damage.Any() {
+		// The repository's damage is the reason, and the files are its symptom: a
+		// different set of them is the same fault, so one sighting and one hourly
+		// mail cover it (mw-gq6.1167).
+		reason = "damaged:" + blocked.Damage.Sentence()
+	}
 	key := vaultBlockedKey(d.Host)
 	last, _ := d.Memory.Note(ctx, key)
 	stamp, files, _ := strings.Cut(last, "|")
@@ -56,7 +62,10 @@ func (d Dispatch) tellVaultBlocked(ctx context.Context, err error, report *Dispa
 	}
 	subject := fmt.Sprintf("%s: dispatch on %s is refused, the vault holds uncommitted changes", MailBlocked, d.Host)
 	body := vaultBlockedBody(d.Host, d.VaultDir, blocked.Files)
-	if d.vaultFilesLeftAlone(ctx, blocked.Files) {
+	if blocked.Damage.Any() {
+		subject = fmt.Sprintf("%s: dispatch on %s is refused, %s", MailBlocked, d.Host, blocked.Damage.Sentence())
+		body = vaultDamagedBody(d.Host, d.VaultDir, blocked)
+	} else if d.vaultFilesLeftAlone(ctx, blocked.Files) {
 		subject = fmt.Sprintf("Note: dispatch on %s went on, the vault holds uncommitted files no dispatch reads", d.Host)
 		body = vaultWentOnBody(d.Host, d.VaultDir, blocked.Files)
 	}
@@ -208,6 +217,44 @@ func vaultBlockedBody(host, dir string, files []string) string {
 	fmt.Fprintf(&b, "\nThe fix, once you have read the change: commit them as found,\n  %s\n"+
 		"or, for a change nobody wants, put them back with git checkout -- <file> in the vault. "+
 		"The next tick dispatches.\n", VaultBlockedFix(dir, host, files))
+	return b.String()
+}
+
+// vaultDamagedBody is the mail for a refusal whose files are the symptom of a
+// damaged repository: it says so, and names the cure instead of the commit that
+// would be wrong (mw-gq6.1167).
+func vaultDamagedBody(host, dir string, blocked *VaultBlocked) string {
+	var b strings.Builder
+	damage := blocked.Damage
+	fmt.Fprintf(&b, "mw dispatch on %s claimed nothing: %s. Git lists %d files as changed, "+
+		"but that is the damage and not work anybody wrote, so do not commit or check them out. "+
+		"Every tick refuses the same way until the repository is mended; this is mailed once an hour.\n",
+		host, damage.Sentence(), len(blocked.Files))
+	if damage.Corrupt != "" {
+		git := "git"
+		if dir != "" {
+			git = "git -C " + shellWord(dir)
+		}
+		fmt.Fprintf(&b, "\nThe repair, as the Mayor has done it: keep the index and any .git/rebase-merge aside, then refetch every object,\n"+
+			"  %s fetch --refetch origin\n"+
+			"move the corrupt pack out of .git/objects/pack, check what is left with\n"+
+			"  %s fsck --connectivity-only\n"+
+			"and, once %s log origin/main..HEAD shows nothing of this host's own, end any stopped rebase and level the checkout:\n"+
+			"  %s reset -q --hard origin/main\n"+
+			"Untracked files (runs/) are kept.\n", git, git, git, git)
+	}
+	if damage.Rebasing {
+		git := "git"
+		if dir != "" {
+			git = "git -C " + shellWord(dir)
+		}
+		if damage.Corrupt == "" {
+			fmt.Fprintf(&b, "\nA rebase stopped here and nobody ended it. End it with\n  %s rebase --abort\n"+
+				"and the next tick dispatches.\n", git)
+		} else {
+			fmt.Fprintf(&b, "\nThe stopped rebase is ended by %s rebase --abort once the repository reads again, or by the reset above.\n", git)
+		}
+	}
 	return b.String()
 }
 

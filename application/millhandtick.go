@@ -952,6 +952,10 @@ func (t MillhandTick) health(ctx context.Context) tickHealth {
 
 // syncNote says what a sync that stopped did not do, in a phrase.
 func syncNote(err error) string {
+	if blocked, ok := Blocked(err); ok && blocked.Damage.Any() {
+		return "sync did only its beads half: " + blocked.Damage.Sentence() + ", so its " + fmt.Sprint(len(blocked.Files)) +
+			" changed files are not work to commit: " + blocked.Damage.Cure("", blocked.Host)
+	}
 	if blocked, ok := Blocked(err); ok {
 		return "sync did only its beads half: the vault holds uncommitted changes to " + strings.Join(blocked.Files, ", ")
 	}

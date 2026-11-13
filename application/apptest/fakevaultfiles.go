@@ -17,6 +17,10 @@ type FakeVaultFiles struct {
 
 	// Dirty is what Uncommitted reports.
 	Dirty []string
+	// Damaged is what Damage reports of the repository, the zero value being a
+	// sound one; DamageErr, when set, is what it reports instead.
+	Damaged   application.VaultDamage
+	DamageErr error
 	// Marked is whether the vault still had to be told that ledgers merge by
 	// union; MarkLedgers reports it and then leaves it false, as a second call
 	// on a marked vault would.
@@ -47,6 +51,13 @@ type FakeVaultFiles struct {
 	marks, pulls, pushes int
 	pullTries            int
 	commits              []VaultCommit
+}
+
+// Damage implements application.VaultDamageReader.
+func (f *FakeVaultFiles) Damage(context.Context) (application.VaultDamage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.Damaged, f.DamageErr
 }
 
 // VaultCommit is one commit the fake was asked to make: what it was asked to

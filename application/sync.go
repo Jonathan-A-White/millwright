@@ -486,11 +486,75 @@ type VaultBlocked struct {
 	// Files are the tracked files changed but not committed, as the vault
 	// reported them.
 	Files []string
+	// Damage is what is wrong with the vault's git repository itself, when
+	// something is: files that "differ" because the repository cannot be read, or
+	// because a rebase stopped, are not work anybody has to commit (mw-gq6.1167).
+	// The zero value is a sound repository, and Files are somebody's edits.
+	Damage VaultDamage
+}
+
+// VaultDamage is what a vault's git repository is found to be wrong with when a
+// sync is blocked on its files. A corrupt object store makes every tracked file
+// look changed, and a rebase that stopped leaves the checkout half-way, so the
+// files a status lists then are the symptom and not the work: committing them is
+// the wrong cure.
+type VaultDamage struct {
+	// Corrupt is what git said of the repository it cannot read, one line; empty
+	// when it reads.
+	Corrupt string
+	// Rebasing says a rebase (or an am) stopped in the vault and was never ended.
+	Rebasing bool
+}
+
+// Any says whether the repository is found damaged at all.
+func (d VaultDamage) Any() bool { return d.Corrupt != "" || d.Rebasing }
+
+// Sentence says what is wrong, in a clause that stands after "the vault ...".
+func (d VaultDamage) Sentence() string {
+	switch {
+	case d.Corrupt != "" && d.Rebasing:
+		return "the vault's git repository is corrupt (git said: " + d.Corrupt + ") and a rebase stopped in it and was never ended"
+	case d.Corrupt != "":
+		return "the vault's git repository is corrupt (git said: " + d.Corrupt + ")"
+	default:
+		return "a rebase stopped in the vault's git repository and was never ended"
+	}
+}
+
+// Cure is the command, or the few of them, that mend the repository, run in the
+// vault at dir (empty is the vault the command is run in). A corrupt repository
+// is fetched again whole; a rebase that only stopped is ended with its abort.
+func (d VaultDamage) Cure(dir, host string) string {
+	git := "git"
+	if dir != "" {
+		git = "git -C " + shellWord(dir)
+	}
+	if d.Corrupt == "" {
+		return git + " rebase --abort"
+	}
+	cure := git + " fetch --refetch origin, then move the corrupt pack out of .git/objects/pack, " +
+		"check it with " + git + " fsck --connectivity-only"
+	if d.Rebasing {
+		cure += ", and end the stopped rebase (" + git + " rebase --abort, or rm -rf .git/rebase-merge then " + git + " reset --hard origin/main once " +
+			git + " log origin/main..HEAD shows nothing of this host's)"
+	}
+	return cure
+}
+
+// VaultDamageReader is the optional half of the VaultFiles adapter that can tell
+// a damaged repository from uncommitted work. A sync that blocks asks it, once.
+type VaultDamageReader interface {
+	Damage(ctx context.Context) (VaultDamage, error)
 }
 
 // Error is the one line a person, or a timer's log, reads: which host, which
 // files, and what mw did and did not do about them.
 func (b *VaultBlocked) Error() string {
+	if b.Damage.Any() {
+		return fmt.Sprintf("%s: %s, so the vault was left alone: nothing was pulled, nothing was pushed; "+
+			"beads were synced all the same. Do not commit the %d files git lists: %s",
+			b.Host, b.Damage.Sentence(), len(b.Files), b.Damage.Cure("", b.Host))
+	}
 	return fmt.Sprintf("%s: the vault holds uncommitted changes to %s, so the vault was left alone: "+
 		"nothing was pulled, nothing was pushed, and mw commits nobody's work for them; "+
 		"beads were synced all the same, so commit them when you can",
@@ -572,6 +636,9 @@ type SyncReport struct {
 	// Blocked names the uncommitted tracked files that kept the vault half from
 	// running at all. It is empty for every sync that got to touch the vault.
 	Blocked []string
+	// Damage is what is wrong with the vault's repository when Blocked is set
+	// and the files it names are the symptom of that (mw-gq6.1167).
+	Damage VaultDamage
 
 	// RunRecordNote is why the run record of a story in progress here, which
 	// the sync commits as found, was not: the tracker could not say what is
@@ -649,7 +716,12 @@ func (r SyncReport) String() string {
 	fmt.Fprintf(&b, "%s: ", r.Host)
 	switch {
 	case len(r.Blocked) > 0:
-		fmt.Fprintf(&b, "the vault was left alone, it holds uncommitted changes to %s", strings.Join(r.Blocked, ", "))
+		if r.Damage.Any() {
+			fmt.Fprintf(&b, "the vault was left alone, %s (git lists %d files as changed, and they are not work to commit): %s",
+				r.Damage.Sentence(), len(r.Blocked), r.Damage.Cure("", r.Host))
+		} else {
+			fmt.Fprintf(&b, "the vault was left alone, it holds uncommitted changes to %s", strings.Join(r.Blocked, ", "))
+		}
 	case r.Quiet():
 		b.WriteString("the vault was already level")
 	default:
@@ -957,6 +1029,7 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 	// On the host that holds the one database the beads half is its backup,
 	// run if it is due; on a host whose database is another's, there is none.
 	if len(report.Blocked) > 0 {
+		s.readDamage(ctx, &report)
 		switch mode {
 		case BeadsSyncBackup:
 			s.backupIfDue(ctx, &report)
@@ -972,7 +1045,7 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 			}
 			report.Retried = retried
 		}
-		return report, &VaultBlocked{Host: s.Host, Files: report.Blocked}
+		return report, &VaultBlocked{Host: s.Host, Files: report.Blocked, Damage: report.Damage}
 	}
 
 	// The vault half is level, so this is the moment the host is. The note goes
@@ -983,6 +1056,20 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 		return s.recordLevelInTheOneDatabase(ctx, report)
 	}
 	return s.syncBeadsRecordingLevel(ctx, report)
+}
+
+// readDamage asks the vault, once a sync is blocked on its files, whether the
+// repository is damaged: a corrupt pack or a rebase that stopped makes files read
+// as changed that nobody touched, and the refusal must not say they are work to
+// commit (mw-gq6.1167). A vault that cannot say leaves the refusal as it was.
+func (s Sync) readDamage(ctx context.Context, report *SyncReport) {
+	reader, ok := s.Vault.(VaultDamageReader)
+	if !ok {
+		return
+	}
+	if damage, err := reader.Damage(ctx); err == nil {
+		report.Damage = damage
+	}
 }
 
 // siblingWriteWaits are the pauses before each retry of a pull or push that git
