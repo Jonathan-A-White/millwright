@@ -78,9 +78,15 @@ type PathSet struct {
 	// allows goes (mw-gq6.661). A nil Err prints none.
 	Err io.Writer
 
-	// Retired are the hosts the Governor retired (retired_hosts): a path
-	// naming one, written or copied from a sibling, is refused (mw-6ww.163.1).
-	Retired []string
+	// Retired are the hosts the Governor retired (retired_hosts), and CloudBook
+	// and CloudPlan say which cloud boxes exist: a path naming a retired host
+	// or a box the book does not hold, written or copied from a sibling, is
+	// written as host=auto instead, and what was done is printed (mw-gq6.1165;
+	// before it the path was refused, mw-6ww.163.1). A nil CloudBook calls no
+	// box gone.
+	Retired   []string
+	CloudBook CloudBook
+	CloudPlan CloudPlan
 }
 
 // Run sets the path of story id. from names the sibling to copy the seven
@@ -153,8 +159,12 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		}
 	}
 	path = path.Overlay(named)
-	if IsRetired(s.Retired, path.Host) {
-		return domain.Path{}, refusedRetired(path.Host, s.Retired)
+	// A host that cannot take a story is never written: host=auto is, and the
+	// output says so (mw-gq6.1165).
+	hostNote := ""
+	if why := HostRefusedWhy(ctx, path.Host, s.Retired, s.CloudBook, s.CloudPlan); why != "" {
+		hostNote = fmt.Sprintf("host=%s was not written: %s; host=auto was written instead, so a host that passes its gates takes the story", path.Host, why)
+		path.Host, path.HostWhy = domain.HostAuto, ""
 	}
 	// A formula the vault has not installed would park the story: dispatch
 	// leaves it unclaimed with one comment nobody reads (mw-gq6.497).
@@ -211,6 +221,9 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		// set (mw-gq6.371).
 		now := story.Merged().Overlay(path)
 		fmt.Fprintf(s.Out, "Set the path of %s:\n%s", id, pathLines(now))
+		if hostNote != "" {
+			fmt.Fprintln(s.Out, hostNote)
+		}
 		if governorsDemo(story.Labels, story.Story.Overrides.Overlay(path).Files) && !hasHitlLabel(story.Labels) {
 			fmt.Fprintln(s.Out, demoNoHitlLine(id))
 		}

@@ -113,7 +113,14 @@ func newPathSetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = application.PathSet{Tracker: gateway, Retired: retired, Readings: readings, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
+			var cloudBook application.CloudBook
+			var cloudPlan application.CloudPlan
+			if dir, vaultErr := config.Vault(); vaultErr == nil {
+				if host, hostErr := config.Host(); hostErr == nil {
+					cloudBook, cloudPlan = cloudStatus(dir, host)
+				}
+			}
+			_, err = application.PathSet{Tracker: gateway, Retired: retired, CloudBook: cloudBook, CloudPlan: cloudPlan, Readings: readings, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
 				After: afterIDs, Hold: hold, OverClaim: overClaim}.
 				Run(cmd.Context(), args[0], from, args[1:])
 			return err

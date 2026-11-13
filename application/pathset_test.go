@@ -308,28 +308,9 @@ func TestPathSetAfterStaysHeldWhenTheEpicHoldsItOnTheGovernorsWord(t *testing.T)
 	}
 }
 
-// mw-6ww.163.1: a path naming a host the Governor retired is refused, naming
-// the config key, and nothing is written.
-func TestPathSetRefusesARetiredHostNamingTheKeyAndWritesNothing(t *testing.T) {
-	for _, host := range []string{"desktop", "vps"} {
-		tracker := aVaultWithTwoFormulas()
-		writes := tracker.Writes()
-
-		_, err := application.PathSet{Tracker: tracker, Retired: []string{"desktop", "vps"}}.
-			Run(context.Background(), "mw-gq6.2", "", []string{"host=" + host})
-		if err == nil {
-			t.Fatalf("expected host=%s to be refused", host)
-		}
-		for _, said := range []string{host, "retired_hosts", "nothing was written"} {
-			if !strings.Contains(err.Error(), said) {
-				t.Errorf("host=%s: expected the refusal to say %q, got %q", host, said, err)
-			}
-		}
-		if tracker.Writes() != writes {
-			t.Errorf("host=%s: expected nothing written, got %d writes", host, tracker.Writes()-writes)
-		}
-	}
-}
+// mw-gq6.1165: a path naming a host the Governor retired is written as
+// host=auto, and the output says so (it was refused, mw-6ww.163.1). The cases
+// are in repath_test.go.
 
 func TestPathSetStillTakesAHostThatIsNotRetired(t *testing.T) {
 	tracker := aVaultWithTwoFormulas()
@@ -337,18 +318,6 @@ func TestPathSetStillTakesAHostThatIsNotRetired(t *testing.T) {
 		Run(context.Background(), "mw-gq6.2", "", []string{"host=laptop"})
 	if err != nil {
 		t.Fatalf("host=laptop: %v", err)
-	}
-}
-
-// A sibling's retired host, copied by --from, is refused too.
-func TestPathSetRefusesARetiredHostCopiedFromASibling(t *testing.T) {
-	tracker := aVaultWithTwoFormulas()
-	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.3", Title: "on the desktop",
-		Overrides: domain.Path{Rig: "millwright", Host: "desktop"}})
-	_, err := application.PathSet{Tracker: tracker, Retired: []string{"desktop"}}.
-		Run(context.Background(), "mw-gq6.2", "mw-gq6.3", nil)
-	if err == nil || !strings.Contains(err.Error(), "retired_hosts") {
-		t.Fatalf("expected the copied host to be refused naming retired_hosts, got %v", err)
 	}
 }
 

@@ -67,6 +67,14 @@ type File struct {
 	// allows (mw-gq6.661). A nil Err prints none.
 	Err io.Writer
 
+	// Retired, CloudBook and CloudPlan say which hosts cannot take a story: a
+	// plan whose epic defaults or story names a retired host or a cloud box the
+	// book does not hold is filed with host=auto in its place, and what was done
+	// is printed on Err (mw-gq6.1165). A nil CloudBook calls no box gone.
+	Retired   []string
+	CloudBook CloudBook
+	CloudPlan CloudPlan
+
 	// Approve is asked, once the tree has been printed, whether the stories may
 	// be released. A nil Approve leaves them held — which is what an unattended
 	// run does, since nobody is there to say yes.
@@ -220,6 +228,7 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	if f.Tracker == nil {
 		return FiledPlan{}, fmt.Errorf("filing a plan: there is no work tracker to file it in")
 	}
+	plan = f.withUsableHosts(ctx, plan)
 	reasons, guests, rules, err := f.refusals(ctx, plan)
 	if len(reasons) > 0 {
 		return FiledPlan{}, &domain.PlanRefused{Reasons: reasons}
@@ -836,4 +845,24 @@ func (p FiledPlan) releases() string {
 	}
 	return fmt.Sprintf("\nReleased all %d stories of %s. Ready now: %s.\n",
 		len(p.Stories), p.EpicID, strings.Join(ready, ", "))
+}
+
+// withUsableHosts is the plan with host=auto in place of a host that cannot take
+// a story (a retired host, a box the cloud book does not hold), in the epic's
+// defaults and in each story, said on Err. The plan given is not changed.
+func (f File) withUsableHosts(ctx context.Context, plan domain.Plan) domain.Plan {
+	mend := func(where string, path *domain.Path) {
+		if why := HostRefusedWhy(ctx, path.Host, f.Retired, f.CloudBook, f.CloudPlan); why != "" {
+			if f.Err != nil {
+				fmt.Fprintf(f.Err, "host=%s of %s was not written: %s; host=auto was written instead\n", path.Host, where, why)
+			}
+			path.Host, path.HostWhy = domain.HostAuto, ""
+		}
+	}
+	mend("the epic's defaults", &plan.Epic.Defaults)
+	plan.Stories = slices.Clone(plan.Stories)
+	for i := range plan.Stories {
+		mend("story "+plan.Stories[i].Key, &plan.Stories[i].Overrides)
+	}
+	return plan
 }
