@@ -1177,3 +1177,58 @@ func TestSyncCommitsTheMarkItWroteBeforeItPulls(t *testing.T) {
 		t.Fatalf("expected a marked vault to be committed nothing, got %d commits", got)
 	}
 }
+
+// A make that outlived a home move leaves the cloud's files uncommitted in the
+// vault of a host that is not home: the sync commits them as found, so that
+// the vault is clean, the home's commits come in and nothing keeps refusing
+// (mw-gq6.1180).
+func TestSyncPutsBackTheCloudFilesOfAHostThatIsNotHome(t *testing.T) {
+	sync, files, _ := syncing(t)
+	sync.Home = &apptest.FakeHomeFile{Text: "laptop 2026-11-12T23:31:00Z mayor\n"}
+	files.Incoming = 1
+	files.Dirty = []string{"hosts/vultr/cloud.json", "hosts/vultr/cloud6.tfstate.age"}
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected the cloud files of a host that is not home not to block the sync, got %v", err)
+	}
+	if report.Pulled != 1 {
+		t.Fatalf("expected the home's commit to be pulled, got %+v", report)
+	}
+	if len(report.Blocked) != 0 || len(files.Dirty) != 0 {
+		t.Fatalf("expected the vault left clean, got blocked %v and dirty %v", report.Blocked, files.Dirty)
+	}
+	commits := files.Commits()
+	if len(commits) != 1 || len(commits[0].Paths) != 2 {
+		t.Fatalf("expected one commit of both cloud files, got %+v", commits)
+	}
+}
+
+func TestSyncLeavesTheCloudFilesOfTheHomeAlone(t *testing.T) {
+	sync, files, _ := syncing(t)
+	sync.Home = &apptest.FakeHomeFile{Text: "vps 2026-11-12T23:31:00Z mayor\n"}
+	files.Dirty = []string{"hosts/vultr/cloud.json"}
+
+	_, err := sync.Run(context.Background())
+	if _, blocked := application.Blocked(err); !blocked {
+		t.Fatalf("expected the home's own cloud file to block the vault half, got %v", err)
+	}
+	if len(files.Commits()) != 0 {
+		t.Fatalf("expected nothing committed, got %+v", files.Commits())
+	}
+}
+
+func TestSyncLeavesACloudFileBesideOtherDirtyFilesAlone(t *testing.T) {
+	sync, files, _ := syncing(t)
+	sync.Home = &apptest.FakeHomeFile{Text: "laptop 2026-11-12T23:31:00Z mayor\n"}
+	files.Dirty = []string{"hosts/vultr/cloud.json", "seats/mayor/ledger.md"}
+
+	_, err := sync.Run(context.Background())
+	blocked, ok := application.Blocked(err)
+	if !ok || len(blocked.Files) != 1 || blocked.Files[0] != "seats/mayor/ledger.md" {
+		t.Fatalf("expected only the ledger to block, got %v", err)
+	}
+	if commits := files.Commits(); len(commits) != 1 || commits[0].Paths[0] != "hosts/vultr/cloud.json" {
+		t.Fatalf("expected the cloud file alone committed, got %+v", commits)
+	}
+}

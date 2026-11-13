@@ -646,6 +646,11 @@ type SyncReport struct {
 	// it was committed (mw-vwveeq.1).
 	RunRecordNote string
 
+	// CloudFilesNote is why the cloud's files a make left in the vault of a host
+	// that is not home, which the sync commits as found, were not. Empty when
+	// there was nothing to commit or it was committed (mw-gq6.1180).
+	CloudFilesNote string
+
 	// Retried is the notice that a merge conflict on the first beads cycle
 	// cleared on the one retry, naming what bd said on that first try. Empty
 	// when no retry happened.
@@ -733,6 +738,9 @@ func (r SyncReport) String() string {
 	b.WriteString(r.beadsPhrase())
 	if r.RunRecordNote != "" {
 		fmt.Fprintf(&b, "; run record: %s", r.RunRecordNote)
+	}
+	if r.CloudFilesNote != "" {
+		fmt.Fprintf(&b, "; cloud files: %s", r.CloudFilesNote)
 	}
 	if r.Retried != "" {
 		fmt.Fprintf(&b, "; %s", r.Retried)
@@ -992,6 +1000,7 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 		return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
 	}
 	report.Blocked = s.commitRunRecords(ctx, dirty, &report)
+	report.Blocked = s.commitCloudFilesOffHome(ctx, report.Blocked, &report)
 
 	if len(report.Blocked) == 0 {
 		if report.Marked, err = s.Vault.MarkLedgers(ctx); err != nil {
@@ -1056,6 +1065,45 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 		return s.recordLevelInTheOneDatabase(ctx, report)
 	}
 	return s.syncBeadsRecordingLevel(ctx, report)
+}
+
+// commitCloudFilesOffHome commits, as they were found, the cloud's files
+// (hosts/vultr/) that show among dirty on a host the vault's home file says is
+// not home, and returns what the vault still holds uncommitted. The home alone
+// makes and destroys boxes, so a cloud file dirty anywhere else is what a make
+// that outlived a home move left, not work anyone is editing; with nothing
+// putting it away, the vault was never pulled or pushed again and the went-on
+// mail repeated hourly (mw-gq6.1180). It is the home's book that wins: the
+// commit goes out with the next push for the home to reconcile, and nothing is
+// thrown away, since a box's sealed state may be the only copy.
+//
+// The home itself, or a home that cannot be told, commits nothing here: a cloud
+// file there is the home's own book, which its check commits. Best effort: a
+// commit that fails leaves dirty as it was and is noted on the report.
+func (s Sync) commitCloudFilesOffHome(ctx context.Context, dirty []string, report *SyncReport) []string {
+	var cloud []string
+	for _, file := range dirty {
+		if vaultFileIsCloudFile(file) {
+			cloud = append(cloud, file)
+		}
+	}
+	if len(cloud) == 0 || s.Home == nil {
+		return dirty
+	}
+	if home, err := IsHome(ctx, s.Home, s.Host); err != nil || home {
+		return dirty
+	}
+	message := fmt.Sprintf("mw sync: commit as found the cloud files a make left on %s, which is not home", s.Host)
+	if _, err := commitWritten(ctx, s.Vault, message, cloud); err != nil {
+		report.CloudFilesNote = fmt.Sprintf("the cloud files left here were not committed: %s", firstLine(err.Error()))
+		return dirty
+	}
+	still, err := s.Vault.Uncommitted(ctx)
+	if err != nil {
+		report.CloudFilesNote = fmt.Sprintf("the cloud files were committed but the vault could not be read again: %s", firstLine(err.Error()))
+		return dirty
+	}
+	return still
 }
 
 // readDamage asks the vault, once a sync is blocked on its files, whether the
