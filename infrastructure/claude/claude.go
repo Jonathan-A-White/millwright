@@ -309,11 +309,6 @@ func WithProgram(name string) Option {
 	return func(h *Harness) { h.program = name }
 }
 
-// WithShell names the shell that reads the session's command line.
-func WithShell(path string) Option {
-	return func(h *Harness) { h.shell = path }
-}
-
 // WithPermissionMode sets how much the session may do without being asked.
 // See DefaultPermissionMode for why the default is what it is.
 func WithPermissionMode(mode string) Option {

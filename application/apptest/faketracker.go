@@ -2761,13 +2761,6 @@ func IDs(details []application.StoryDetail) []string {
 	return ids
 }
 
-// SortedIDs is IDs, sorted.
-func SortedIDs(details []application.StoryDetail) []string {
-	ids := IDs(details)
-	sort.Strings(ids)
-	return ids
-}
-
 // FakeTracker satisfies the ports the beads gateway stands behind.
 var (
 	_ application.WorkTracker    = (*FakeTracker)(nil)

@@ -73,11 +73,6 @@ func WithProgram(program string) Option {
 	return func(w *Worktrees) { w.program = program }
 }
 
-// WithRemote names the remote a rig's target branch is read from.
-func WithRemote(remote string) Option {
-	return func(w *Worktrees) { w.remote = remote }
-}
-
 // WithRaceWait sets how long a grind refresh waits before its first try again
 // of a fetch that lost a ref's lock, the wait growing by as much each time; a
 // test gives zero so as never to sleep.

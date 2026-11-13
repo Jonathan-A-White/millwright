@@ -59,11 +59,6 @@ func WithProgram(name string) Option {
 	return func(h *Harness) { h.program = name }
 }
 
-// WithShell names the shell that reads the session's command line.
-func WithShell(path string) Option {
-	return func(h *Harness) { h.shell = path }
-}
-
 // WithTimeLimit sets how long a session may run, rounded up to whole minutes.
 // A limit of nothing or less leaves DefaultTimeLimit.
 func WithTimeLimit(d time.Duration) Option {
