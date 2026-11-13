@@ -475,6 +475,11 @@ type Next struct {
 	// re-runs nothing, and the story is refused as no-commits.
 	Rechecks SpecRechecker
 
+	// FindingChecks reads a 'Found, not fixed' finding against the rig's origin
+	// as merged before its bug is filed: one that main already fixes is not filed
+	// (mw-gq6.1245). A nil FindingChecks files every finding.
+	FindingChecks FindingRechecker
+
 	// Benchmarks is where the benchmarks of past close-outs are read from, for a
 	// landed story's par and the calibration printed with the report, and Bench
 	// the thresholds of both (mw-t0z3fu.2). Every close-out that ran the rig's

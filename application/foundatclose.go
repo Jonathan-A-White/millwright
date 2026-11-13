@@ -514,6 +514,146 @@ func foundMatch(bug foundBug, beads []StoryDetail, finder string) (same, near st
 	return "", near
 }
 
+// FindingLine is a file a finding names on main, with the line it names there
+// (0 for none).
+type FindingLine struct {
+	Path string
+	Line int
+}
+
+// FindingAnswer is what main showed of a finding: the commit it was read at,
+// the run of the finding's command when one was asked for, and how many lines
+// each named file has there (a file that is not on main has no entry).
+type FindingAnswer struct {
+	Sha    string
+	Ran    bool
+	Passed bool
+	Tail   string
+	Lines  map[string]int
+}
+
+// FindingRechecker reads a finding against the head of a rig's origin as it is
+// merged now (Suite.RecheckFinding): it runs command there when it is not empty
+// and counts the lines of each named file. An error is a read that could not be
+// made, and the finding is filed as it would have been.
+type FindingRechecker interface {
+	RecheckFinding(ctx context.Context, rig, command string, files []FindingLine) (FindingAnswer, error)
+}
+
+var (
+	foundPassWords    = regexp.MustCompile(`(?i)\s+(?:passes|pass|exits 0|exits zero|succeeds|is green|reports ok|says ok)\b`)
+	foundSafeWord     = regexp.MustCompile(`^[A-Za-z0-9_./=,:^$-]+$`)
+	foundNoTestsToRun = regexp.MustCompile(`no tests to run|no test files`)
+)
+
+// foundCheckCommand is the command a finding's AC names that is cheap and
+// deterministic enough to run on main before the bug is filed, or empty: the
+// words before 'passes' (or a backticked span of them), and only make lint, go
+// test with -run and no './...', or a script under scripts/. Anything with a
+// quote, pipe, redirect or the like is not run, nor is a whole suite.
+func foundCheckCommand(ac string) string {
+	ac = foundNumberedPattern.ReplaceAllString(strings.TrimSpace(ac), "")
+	at := foundPassWords.FindStringIndex(ac)
+	if at == nil {
+		return ""
+	}
+	command := strings.TrimSpace(ac[:at[0]])
+	if span := foundBacktickPattern.FindStringSubmatch(command); span != nil {
+		command = strings.TrimSpace(span[1])
+	}
+	words := strings.Fields(command)
+	for _, word := range words {
+		if !foundSafeWord.MatchString(word) || strings.Contains(word, "..") && word != "./..." {
+			return ""
+		}
+	}
+	switch {
+	case len(words) == 2 && words[0] == "make" && words[1] == "lint":
+	case len(words) >= 3 && words[0] == "go" && words[1] == "test" && slices.Contains(words, "-run") && !slices.Contains(words, "./..."):
+	case len(words) >= 1 && foundScriptWord(words[0]):
+	case len(words) >= 2 && (words[0] == "sh" || words[0] == "bash") && foundScriptWord(words[1]):
+	default:
+		return ""
+	}
+	return strings.Join(words, " ")
+}
+
+func foundScriptWord(word string) bool {
+	return strings.HasPrefix(strings.TrimPrefix(word, "./"), "scripts/")
+}
+
+// foundSpecAsk is a SpecRechecker for one finding, so that the read of main is
+// made under the host's gate lock as a bug's own re-run is (rerunUnderGate).
+type foundSpecAsk struct {
+	checks  FindingRechecker
+	command string
+	files   []FindingLine
+	answer  FindingAnswer
+}
+
+func (a *foundSpecAsk) Recheck(ctx context.Context, rig, _ string) (SpecRecheck, error) {
+	var err error
+	a.answer, err = a.checks.RecheckFinding(ctx, rig, a.command, a.files)
+	return SpecRecheck{Sha: a.answer.Sha}, err
+}
+
+// foundFixedOnMain is the verdict on a finding read against main: fixed when
+// the finding's command ran there and passed (a test that main does not have is
+// no pass), else, when it named no command, when every line it names is past the
+// end of a file main has. A file main does not have is not fixed: it may have
+// moved. how says what was seen.
+func foundFixedOnMain(command string, lines []FindingLine, a FindingAnswer) (fixed bool, how string) {
+	if command != "" {
+		if !a.Ran {
+			return false, ""
+		}
+		ran := !foundNoTestsToRun.MatchString(a.Tail) || !strings.HasPrefix(command, "go test")
+		return a.Passed && ran, fmt.Sprintf("%s passes at %s", command, short(a.Sha))
+	}
+	if len(lines) == 0 {
+		return false, ""
+	}
+	for _, l := range lines {
+		if n, there := a.Lines[l.Path]; !there || l.Line <= n {
+			return false, ""
+		}
+	}
+	return true, fmt.Sprintf("%s has fewer lines at %s than the finding names", lines[0].Path, short(a.Sha))
+}
+
+// findingOnMain reads one finding against the rig's origin as merged before its
+// bug is filed (mw-gq6.1245): its AC command when that is cheap and
+// deterministic, else the file and line it names. fixed says main passes, and
+// the bug is not filed; a finding that cannot be checked, or whose read could
+// not be made (a note says why), is filed as it was.
+func (n Next) findingOnMain(ctx context.Context, c *closeOut, report *NextReport, bug foundBug) (fixed bool, how string) {
+	if n.FindingChecks == nil || bug.item == nil || ctx.Err() != nil {
+		return false, ""
+	}
+	ask := &foundSpecAsk{checks: n.FindingChecks, command: foundCheckCommand(bug.item.AC)}
+	for _, ref := range foundRefs(bug.item.What) {
+		if ref.from > 0 {
+			ask.files = append(ask.files, FindingLine{Path: ref.path, Line: ref.from})
+		}
+	}
+	if ask.command == "" && len(ask.files) == 0 {
+		return false, ""
+	}
+	askCtx, cancel := context.WithTimeout(ctx, foundCheckBound)
+	defer cancel()
+	_, err := rerunUnderGate(askCtx, ask, n.GateLock, DispatchGateWait, n.Host, c.id, c.path.Rig, "", func(note string) {
+		report.Notes = append(report.Notes, note)
+	})
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the finding of %s was not read against main, so its bug is filed: %s: %s", c.id, bug.item.What, firstLine(err.Error())))
+		return false, ""
+	}
+	return foundFixedOnMain(ask.command, ask.files, ask.answer)
+}
+
+// foundCheckBound is the longest a read of main for one finding may take.
+const foundCheckBound = 5 * time.Minute
+
 func foundDescription(c *closeOut, bug foundBug, host string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s (%s) landed, and its closing comment lists %s under 'Found, not fixed:':\n\n", c.id, c.detail.Story.Title, thisOrThese(len(bug.said())))
@@ -593,6 +733,12 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 		if there {
 			report.Notes = append(report.Notes, fmt.Sprintf("%s already files the finding of %s: %s", id, c.id, bug.title))
 			block = append(block, fmt.Sprintf("Already filed: %s. %s", id, strings.Join(bug.lines, " ")))
+			continue
+		}
+		if fixed, how := n.findingOnMain(ctx, c, report, bug); fixed {
+			said := strings.Join(bug.said(), " ")
+			report.Notes = append(report.Notes, fmt.Sprintf("already fixed on main: %s (%s; %s's finding, so no bug is filed)", said, how, c.id))
+			block = append(block, "already fixed on main: "+said)
 			continue
 		}
 		// The finder's size, bump and callers_ok are about the finder's own files
