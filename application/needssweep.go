@@ -130,7 +130,7 @@ func (s NeedsSweep) now() time.Time {
 	if s.Now != nil {
 		return s.Now().UTC()
 	}
-	return time.Now().UTC()
+	return time.Now().UTC() //mw:realclock the default of the injected Now, used where none is set
 }
 
 func (s NeedsSweep) say(format string, args ...any) {

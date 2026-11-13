@@ -77,7 +77,7 @@ func (s SelfUpdate) now() time.Time {
 	if s.Now != nil {
 		return s.Now()
 	}
-	return time.Now()
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
 // boxDown is the step a cloud box that is bad is named with; empty on a host

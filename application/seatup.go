@@ -407,7 +407,7 @@ func (s SeatUp) windowName(handoffs []Handoff, open []Window) string {
 
 func (s SeatUp) now() time.Time {
 	if s.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return s.Now()
 }

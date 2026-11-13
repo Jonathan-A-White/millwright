@@ -2620,7 +2620,7 @@ func (s PosternSend) wired(needsRecording, needsTracker bool) error {
 
 func (s PosternSend) now() time.Time {
 	if s.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return s.Now()
 }

@@ -126,7 +126,7 @@ type SleepGather struct {
 
 // Gather implements SleepGatherer.
 func (g SleepGather) Gather(ctx context.Context, window SleepWindow) (SleepBundle, error) {
-	now := time.Now()
+	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
 	if g.Now != nil {
 		now = g.Now()
 	}

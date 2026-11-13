@@ -43,7 +43,7 @@ type ParentNoteSend struct {
 // Run posts the note when it is due, and reports the txid; empty when nothing
 // was posted.
 func (s ParentNoteSend) Run(ctx context.Context) (string, error) {
-	now := time.Now()
+	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
 	if s.Now != nil {
 		now = s.Now()
 	}

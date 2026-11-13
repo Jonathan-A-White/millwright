@@ -2177,7 +2177,7 @@ func viewSummary(description string) string {
 // now is the clock Build and Run use.
 func (v PosternView) now() time.Time {
 	if v.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return v.Now()
 }

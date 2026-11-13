@@ -306,7 +306,7 @@ func (o SleepOutcome) Run(ctx context.Context, date string) (SleepScore, error) 
 	if err != nil {
 		return score, fmt.Errorf("mw sleep outcome: %q is not a date: %w", date, err)
 	}
-	now := time.Now().UTC()
+	now := time.Now().UTC() //mw:realclock the default clock, taken before an injected Now replaces it
 	if o.Now != nil {
 		now = o.Now().UTC()
 	}

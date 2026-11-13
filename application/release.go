@@ -472,7 +472,7 @@ func (r ReleasePaced) Run(ctx context.Context, ids []string) ([]string, error) {
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("releasing a list: the list has no story ids")
 	}
-	now := time.Now()
+	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
 	if r.Now != nil {
 		now = r.Now()
 	}

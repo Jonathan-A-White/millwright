@@ -174,7 +174,7 @@ func (s PathSet) whyOverThePace(ctx context.Context, id string, story StoryDetai
 			}
 		}
 	}
-	now := time.Now()
+	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
 	if s.Now != nil {
 		now = s.Now()
 	}

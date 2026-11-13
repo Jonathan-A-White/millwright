@@ -884,7 +884,7 @@ func (s PosternSnapshot) waits(child StoryDetail, lookup map[string]StoryDetail)
 // now is the clock Build and Run use: s.Now when set, time.Now otherwise.
 func (s PosternSnapshot) now() time.Time {
 	if s.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return s.Now()
 }
