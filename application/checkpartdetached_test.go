@@ -385,6 +385,77 @@ func TestADetachedPartThatWritesNothingPastTheCeilingIsKilledAndToldAsHung(t *te
 	}
 }
 
+// skewedClock is the real time plus an offset the test moves by hand: a bound
+// that reads it is passed by a jump of the offset, whatever the host took.
+type skewedClock struct {
+	mu     sync.Mutex
+	offset time.Duration
+}
+
+func (c *skewedClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return time.Now().Add(c.offset)
+}
+
+func (c *skewedClock) jump(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.offset += d
+}
+
+// The silence of a detached part, and the call it waits in, are read off the
+// check's clock (CallNow), not the host's (mw-gq6.1217): a part with a long ceiling
+// that has written nothing is hung when the clock passes the ceiling, with no wait.
+func TestADetachedPartIsHungWhenTheCallsClockPassesItsCeilingWithoutAWait(t *testing.T) {
+	d := aDetachedPartRig(t, true)
+	aSilentProcess(d)
+	clock := &skewedClock{}
+	d.tune = func(k *application.Check) {
+		k.PartHungAfter = time.Hour
+		k.CallNow = clock.Now
+	}
+	go func() {
+		for d.starter.startedCount() == 0 {
+			time.Sleep(time.Millisecond)
+		}
+		clock.jump(2 * time.Hour)
+	}()
+
+	err := d.check(30 * time.Second)
+	if err == nil || !strings.Contains(err.Error(), "hung") || !strings.Contains(err.Error(), "no output for 2h") {
+		t.Fatalf("expected the part to be hung by the clock's jump of two hours, got %v", err)
+	}
+	if d.starter.killedCount() != 1 {
+		t.Errorf("expected the process to be killed once, it was killed %d time(s)", d.starter.killedCount())
+	}
+}
+
+// How long a detached part has been running, told when the call's time runs out,
+// is the check's clock's: a jump past the call's budget ends the call with the
+// jump as the part's age (mw-gq6.1217).
+func TestAStillRunningPartIsToldHowOldByTheCallsClock(t *testing.T) {
+	d := aDetachedPartRig(t, true)
+	aSilentProcess(d)
+	t.Cleanup(func() { _ = d.starter.Kill(0) })
+	clock := &skewedClock{}
+	d.tune = func(k *application.Check) {
+		k.PartHungAfter = 100 * time.Hour
+		k.CallNow = clock.Now
+	}
+	go func() {
+		for d.starter.startedCount() == 0 {
+			time.Sleep(time.Millisecond)
+		}
+		clock.jump(5 * time.Minute)
+	}()
+
+	err := d.check(30 * time.Second)
+	if err == nil || !strings.Contains(err.Error(), "is still running") || !strings.Contains(err.Error(), "started 5m") {
+		t.Fatalf("expected the part to be said to be still running, started about five minutes ago by the clock, got %v", err)
+	}
+}
+
 // After a part was killed as hung the next call starts it again, with a new
 // process, and does not say it will not start it.
 func TestAfterAHungPartTheNextCallStartsItAgain(t *testing.T) {

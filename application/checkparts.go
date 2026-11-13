@@ -284,7 +284,7 @@ func (k Check) runPartKeeping(ctx context.Context, report CheckReport, c *closeO
 	if fit != nil && k.Out != nil {
 		fmt.Fprintf(k.Out, "  part    expected about %s, %s left in this call\n", gateWaited(fit.expected), gateWaited(fit.left()))
 	}
-	ranFrom := time.Now()
+	ranFrom := k.callNow()
 	if k.PartWorker && k.Logs != nil {
 		// What the part prints is copied to a file as it prints it, which is how a
 		// call waiting for this process tells work from a hang.
@@ -332,7 +332,8 @@ func (k Check) runPartKeeping(ctx context.Context, report CheckReport, c *closeO
 	// How long a part that passed took is kept, by part number and host, for the
 	// fit test of the next foreground call (mw-gq6.944).
 	if checked.Passed && !checked.NotRun {
-		taken := PartTime{Story: c.id, Rig: c.path.Rig, Host: k.Host, Part: k.Part, At: time.Now(), Seconds: time.Since(ranFrom).Seconds()}
+		//mw:realclock At is the date the part's time was kept at, written to the part-time note; the seconds it took read callNow
+		taken := PartTime{Story: c.id, Rig: c.path.Rig, Host: k.Host, Part: k.Part, At: time.Now(), Seconds: k.callNow().Sub(ranFrom).Seconds()}
 		_, _ = k.Records.PutRunFile(ctx, c.id, CheckPartTimeFileName(report.Attempt, k.Part), taken.String())
 	}
 
@@ -441,7 +442,7 @@ func (k Check) slotRefusal(ctx context.Context, c *closeOut, try slotTry, err er
 	}
 	since := "a moment ago"
 	if !waited.Since.IsZero() {
-		since = fmt.Sprintf("%s (%s ago)", waited.Since.UTC().Format("15:04:05Z"), time.Since(waited.Since).Round(time.Second))
+		since = fmt.Sprintf("%s (%s ago)", waited.Since.UTC().Format("15:04:05Z"), k.callNow().Sub(waited.Since).Round(time.Second))
 	}
 	if line, ok := k.placeKept(try, fmt.Sprintf("the merge slot of %s", c.path.Rig), waited.Holder, since, ask); ok {
 		return errors.New(line)
@@ -481,6 +482,7 @@ func (k Check) noteWait(ctx context.Context, storyID, name, holder string, since
 	if !since.IsZero() {
 		sinceAt = since.UTC().Format("15:04:05Z")
 	}
+	//mw:realclock the time of day a wait began, written to the wait note for the line a later call tells
 	record := fmt.Sprintf("%s %s\nholder %s\nsince %s\n", slotWaitWord, time.Now().UTC().Format("15:04:05Z"), holder, sinceAt)
 	_, _ = k.Records.PutRunFile(ctx, storyID, name, record)
 	return ""

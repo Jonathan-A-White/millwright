@@ -8,11 +8,6 @@ application/backendauto.go 1
 application/batchland.go 1
 application/bdretry.go 1
 application/chainstamp.go 1
-application/checkcalm.go 1
-application/checkgatelock.go 5
-application/checkpartdetached.go 4
-application/checkparts.go 5
-application/checkspecsdetached.go 3
 application/cloud.go 1
 application/cloudmake.go 1
 application/contributeback.go 1

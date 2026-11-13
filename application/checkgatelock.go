@@ -143,7 +143,7 @@ func (k Check) callNow() time.Time {
 	if k.CallNow != nil {
 		return k.CallNow()
 	}
-	return time.Now()
+	return time.Now() //mw:realclock the real clock a Check with no CallNow reads; every bound reads callNow
 }
 
 // callFitOf is the fit of the rig's gate to the call this check began, nil when
@@ -234,7 +234,7 @@ func (g *gateNotices) start(by string) {
 		return
 	}
 	g.quit, g.done = make(chan struct{}), make(chan struct{})
-	waiting := time.Now()
+	waiting := g.k.callNow()
 	go func() {
 		defer close(g.done)
 		tick := time.NewTicker(g.k.gateNoticeEvery())
@@ -248,7 +248,7 @@ func (g *gateNotices) start(by string) {
 			case <-tick.C:
 				holder, since := g.k.gateHolderNow(g.by, waiting)
 				fmt.Fprintf(g.k.Out, "  wait    still waiting for %s's gate lock, held by %s since %s (waited %s so far)\n",
-					g.k.Host, holder, since.UTC().Format("15:04:05Z"), gateWaited(time.Since(waiting)))
+					g.k.Host, holder, since.UTC().Format("15:04:05Z"), gateWaited(g.k.callNow().Sub(waiting)))
 			}
 		}
 	}()
@@ -289,8 +289,8 @@ func (k Check) gateLockRefusal(ctx, waitCtx context.Context, c *closeOut, try sl
 	if ctx.Err() != nil || waitCtx.Err() == nil || !errors.Is(err, context.DeadlineExceeded) {
 		return GateLockHandBack{Why: fmt.Sprintf("%s's gate lock could not be taken: %v", k.Host, err)}
 	}
-	holder, since := k.gateHolderNow(by, time.Now().Add(-waited))
-	sinceAt := fmt.Sprintf("%s (%s ago)", since.UTC().Format("15:04:05Z"), time.Since(since).Round(time.Second))
+	holder, since := k.gateHolderNow(by, k.callNow().Add(-waited))
+	sinceAt := fmt.Sprintf("%s (%s ago)", since.UTC().Format("15:04:05Z"), k.callNow().Sub(since).Round(time.Second))
 	if line, ok := k.placeKept(try, fmt.Sprintf("%s's gate lock", k.Host), holder, sinceAt, ask); ok {
 		return GateLockHandBack{Why: line}
 	}

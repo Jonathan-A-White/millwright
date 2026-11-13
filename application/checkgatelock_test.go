@@ -1255,6 +1255,9 @@ func TestAForegroundPartThatFitsOrHasNoFigureIsStarted(t *testing.T) {
 // (mw-gq6.944): not for a part that failed, whose time says nothing of a good run.
 func TestAPartThatPassedKeepsItsTimeByPartNumberAndHost(t *testing.T) {
 	p := newPartBesideTheMergeSlot(t)
+	// Every read of the call's clock moves it a second, so the part's seconds are
+	// the clock's and not the host's (mw-gq6.1217).
+	p.clock.step = time.Second
 	if _, err := p.checkPart(2, time.Minute, 0, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -1268,6 +1271,9 @@ func TestAPartThatPassedKeepsItsTimeByPartNumberAndHost(t *testing.T) {
 	}
 	if got.Part != 2 || got.Host != "laptop" || got.Rig != "millwright" || got.Story != "mw-x.1" || got.At.IsZero() {
 		t.Errorf("expected part 2 of millwright on laptop with a time, got %+v", got)
+	}
+	if got.Seconds < 1 || got.Seconds != float64(int(got.Seconds)) {
+		t.Errorf("expected the seconds the part took to be read off the call's clock, whole seconds from its steps, got %v", got.Seconds)
 	}
 }
 
