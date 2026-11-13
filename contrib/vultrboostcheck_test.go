@@ -164,6 +164,58 @@ func TestVultrBoostCheckGivesNoVerdictWhileTheBoxsBootstrapRuns(t *testing.T) {
 	}
 }
 
+// cloud6's bootstrap died at step 10 of 13 on 2026-11-13 and its cloud-init
+// said "status: error" (mw-gq6.1189): a box like it is not whole, whatever its
+// disk reads. The check says so in a fault line and fails, so that the cloud
+// check does not clear the box; it does not go on to judge the disk.
+func TestVultrBoostCheckNamesABootstrapThatEndedInError(t *testing.T) {
+	env, home := boostCheckRig(t, "all modules verified", soundKernelLog)
+	// As cloud-init does when a stage failed: the word, and exit 1.
+	shim := "#!/bin/sh\necho 'status: error'\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(home, "check-bin", "cloud-init"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, err := runBoost(t, env, "check", "--name", "cloud1")
+	if err == nil {
+		t.Fatalf("expected the check of a box whose bootstrap ended in error to fail, got:\n%s", out)
+	}
+	var faults []string
+	for _, line := range strings.Split(out, "\n") {
+		if fault, ok := strings.CutPrefix(line, "fault = "); ok {
+			faults = append(faults, fault)
+		}
+	}
+	if len(faults) != 1 || !strings.Contains(faults[0], "bootstrap ended in error") {
+		t.Errorf("expected one fault line saying the bootstrap ended in error, got %q in:\n%s", faults, out)
+	}
+	if strings.Contains(out, "check = ") {
+		t.Errorf("expected no line saying the check ran to its end, got:\n%s", out)
+	}
+	// The cloud check says the last line of standard error when the command
+	// fails: it names the box and why, not that the box could not be asked.
+	lines := strings.Split(strings.TrimSpace(errOut), "\n")
+	if last := lines[len(lines)-1]; !strings.Contains(last, "cloud1") || !strings.Contains(last, "bootstrap ended in error") || strings.Contains(last, "could not ask") {
+		t.Errorf("expected the last line of standard error to name cloud1 and its bootstrap's error, got %q", last)
+	}
+}
+
+// A cloud-init that says "status: done" is a bootstrap that finished: the box
+// is judged by its disk, and a sound one passes.
+func TestVultrBoostCheckOfASoundBoxWhoseBootstrapIsDonePasses(t *testing.T) {
+	env, home := boostCheckRig(t, "all modules verified", soundKernelLog)
+	shim := "#!/bin/sh\necho 'status: done'\n"
+	if err := os.WriteFile(filepath.Join(home, "check-bin", "cloud-init"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, err := runBoost(t, env, "check", "--name", "cloud1")
+	if err != nil {
+		t.Fatalf("check: %v: %s", err, errOut)
+	}
+	if strings.Contains(out, "fault = ") || !strings.Contains(out, "\ncheck = 2 checkouts") {
+		t.Errorf("expected no fault and a line saying the check ran, got:\n%s", out)
+	}
+}
+
 // cloud6 came up on 2026-11-13 with the end of its disk unwritten by the
 // snapshot restore: files of the snapshot's own read as zeros, and git fsck, go
 // mod verify and dmesg found nothing. A file older than the boot that begins
