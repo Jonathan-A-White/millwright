@@ -1,5 +1,5 @@
 Feature: mw config export-boost writes the vault's hosts/boost-config.toml from the home's config
-  contrib/boost-bootstrap.sh gives a new Boost the [tests] and [changed_specs] lines and the
+  contrib/boost-bootstrap.sh gives a new Boost the [tests], [changed_specs] and [named_tests] lines and the
   [test_parts.<rig>] tables (a rig's gate in parts, mw-gq6.592) of the rigs it clones from the
   vault's hosts/boost-config.toml (mw-gq6.453). That file was
   kept in step with the home's ~/.config/mw/config.toml by hand, and a line added on the
@@ -38,7 +38,7 @@ Feature: mw config export-boost writes the vault's hosts/boost-config.toml from 
       deny = ["Bash(mw config set *)", "Bash(scp *)", "Read(~/.ssh/**)"]
       """
 
-  Scenario: on the home it writes only [tests], [changed_specs], [test_parts.<rig>] and [session], and commits that file alone
+  Scenario: on the home it writes only [tests], [changed_specs], [named_tests], [test_parts.<rig>] and [session], and commits that file alone
     Given the export runs on the home
     When mw config export-boost runs
     Then mw config export-boost succeeded
