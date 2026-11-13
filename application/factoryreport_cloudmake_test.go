@@ -79,3 +79,26 @@ func TestTheReviewHoldSaysTheCloudMakeAlarmWhenItCountsTheQueue(t *testing.T) {
 		t.Errorf("the hold does not say the cloud make alarm:\n%s", errs.String())
 	}
 }
+
+// The review hold reads the age of a make off its own injected clock, not the
+// host's (mw-gq6.1220): a box made 56 minutes before the hold's Now is slow
+// whatever the host's time is.
+func TestTheReviewHoldReadsTheAgeOfAMakeOffItsInjectedClock(t *testing.T) {
+	base := time.Date(2031, 3, 4, 10, 0, 0, 0, time.UTC)
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2031-03",
+		Boxes: []application.CloudBox{{Name: "cloud1", Up: base, Making: true, Vultr: "active locked"}}}}
+	survey := application.DamperSurvey{Tracker: apptest.NewFakeTracker(), Notes: apptest.NewFakeTracker(), Cloud: book}
+	req := application.PosternSendRequest{Class: "decision-needed", Bead: "mw-a", Text: "Which?", Options: []string{"A", "B"}}
+
+	var slow bytes.Buffer
+	application.ReviewHold{Queue: survey, Err: &slow, Now: func() time.Time { return base.Add(56 * time.Minute) }}.Judge(context.Background(), req)
+	if !strings.Contains(slow.String(), "cloud make: cloud1 has been made for") {
+		t.Errorf("a make 56 minutes old by the hold's clock is not said:\n%s", slow.String())
+	}
+
+	var fresh bytes.Buffer
+	application.ReviewHold{Queue: survey, Err: &fresh, Now: func() time.Time { return base.Add(5 * time.Minute) }}.Judge(context.Background(), req)
+	if strings.Contains(fresh.String(), "cloud make") {
+		t.Errorf("a make 5 minutes old by the hold's clock is said:\n%s", fresh.String())
+	}
+}
